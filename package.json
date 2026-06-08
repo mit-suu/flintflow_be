@@ -6,6 +6,10 @@
   "author": "tuan hiep",
   "type": "module",
   "main": "dist/server.js",
+   "engines": {
+    "node": "22.x"
+  },
+  
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
