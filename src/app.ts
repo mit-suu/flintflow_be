@@ -38,6 +38,12 @@ app.get("/", (req, res) => {
   })
 })
 
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok"
+  })
+})
+
 // Swagger Documentation
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs, {
   swaggerOptions: {

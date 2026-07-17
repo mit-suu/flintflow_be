@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.env
+coverage
+.vscode
+README.md
+README_BACKEND.md
+SETUP.md
+SWAGGER.md
