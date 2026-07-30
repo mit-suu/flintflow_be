@@ -70,11 +70,13 @@ app.use(cookieParser())
 app.use(morgan("dev"))
 
 // Base routes
-app.get("/", (_req, res) => {
+app.get("/", (req, res) => {
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https"
+  const host = req.get("host")
   return sendSuccess(res, 200, {
     message: "FlintFlow API running",
     version: "1.0.0",
-    docs: `http://localhost:${env.PORT}/api-docs`
+    docs: `${protocol}://${host}/api-docs`
   })
 })
 

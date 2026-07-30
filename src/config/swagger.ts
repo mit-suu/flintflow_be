@@ -13,12 +13,16 @@ const options = {
     },
     servers: [
       {
-        url: "http://localhost:5000",
-        description: "Development server"
+        url: "/",
+        description: "Current Server (Auto-detected)"
       },
       {
-        url: "https://api.flintflow.com",
-        description: "Production server"
+        url: "https://flintflow-be-a5huepbqe7apa0ft.southeastasia-01.azurewebsites.net",
+        description: "Azure Production Server"
+      },
+      {
+        url: "http://localhost:5000",
+        description: "Local Development Server"
       }
     ],
     components: {
@@ -138,7 +142,12 @@ const options = {
     },
     security: []
   },
-  apis: ["./src/modules/**/*.ts"]
+  apis: [
+    "./src/modules/**/*.ts",
+    "./dist/modules/**/*.js",
+    "./src/modules/**/*.route.ts",
+    "./dist/modules/**/*.route.js"
+  ]
 }
 
 export const specs = swaggerJsdoc(options)
