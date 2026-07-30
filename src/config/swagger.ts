@@ -92,14 +92,6 @@ const options = {
         AuthResponse: {
           type: "object",
           properties: {
-            success: {
-              type: "boolean",
-              example: true
-            },
-            message: {
-              type: "string",
-              example: "Login successful"
-            },
             data: {
               type: "object",
               properties: {
@@ -111,19 +103,34 @@ const options = {
                   $ref: "#/components/schemas/User"
                 }
               }
+            },
+            error: {
+              type: "object",
+              nullable: true,
+              example: null
             }
           }
         },
         ErrorResponse: {
           type: "object",
           properties: {
-            success: {
-              type: "boolean",
-              example: false
+            data: {
+              type: "object",
+              nullable: true,
+              example: null
             },
-            message: {
-              type: "string",
-              example: "Invalid credentials"
+            error: {
+              type: "object",
+              properties: {
+                code: {
+                  type: "string",
+                  example: "INVALID_CREDENTIALS"
+                },
+                message: {
+                  type: "string",
+                  example: "Invalid credentials"
+                }
+              }
             }
           }
         }
@@ -131,7 +138,7 @@ const options = {
     },
     security: []
   },
-  apis: ["./src/routes/*.ts"]
+  apis: ["./src/modules/**/*.ts"]
 }
 
 export const specs = swaggerJsdoc(options)
