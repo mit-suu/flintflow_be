@@ -1,7 +1,11 @@
-import { User } from "../user/user.model.js"
+import crypto from "crypto"
+import { OAuth2Client } from "google-auth-library"
+import { User, IUser } from "../user/user.model.js"
+import { AuthToken, TokenType } from "./auth-token.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { signAccessToken, signRefreshToken, TokenPayload } from "../../shared/auth/jwt.util.js"
+import { signAccessToken, signRefreshToken, hashToken, TokenPayload } from "../../shared/auth/jwt.util.js"
 import * as sessionService from "../../shared/auth/session.service.js"
+import { sendVerificationEmail, sendPasswordResetEmail } from "../../shared/email/email.service.js"
 import { env } from "../../config/env.js"
 
 export interface AuthResult {
@@ -10,6 +14,17 @@ export interface AuthResult {
   user: {
     id: string
     email: string
+    emailVerified: boolean
+    name?: string
+    role?: string
+  }
+}
+
+export interface RegisterResult {
+  user: {
+    id: string
+    email: string
+    emailVerified: boolean
   }
 }
 
@@ -18,7 +33,6 @@ export interface RefreshResult {
   refreshToken: string
 }
 
-// Helper to compute expiration Date from config string (e.g. "3d", "7d", "15m")
 const getRefreshTokenExpiresAt = (): Date => {
   const expiresStr = env.REFRESH_TOKEN_EXPIRES
   let durationMs = 3 * 24 * 60 * 60 * 1000 // 3 days default
@@ -34,43 +48,45 @@ const getRefreshTokenExpiresAt = (): Date => {
   return new Date(Date.now() + durationMs)
 }
 
+const generateAuthToken = async (userId: string, type: TokenType, durationMs: number): Promise<string> => {
+  // Revoke previous unused tokens of same type for this user
+  await AuthToken.deleteMany({ userId, type, usedAt: null })
+
+  const rawToken = crypto.randomBytes(32).toString("hex")
+  const tokenHash = hashToken(rawToken)
+  const expiresAt = new Date(Date.now() + durationMs)
+
+  await AuthToken.create({
+    userId,
+    type,
+    tokenHash,
+    expiresAt
+  })
+
+  return rawToken
+}
+
 export const register = async (
   email: string,
-  password: string,
-  userAgent?: string,
-  ip?: string
-): Promise<AuthResult> => {
-  const existingUser = await User.findOne({ email })
+  password: string
+): Promise<RegisterResult> => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const existingUser = await User.findOne({ email: normalizedEmail })
   if (existingUser) {
     throw new ApiError(409, "Email already registered", "EMAIL_EXISTS")
   }
 
-  const user = await User.create({ email, password })
+  const user = await User.create({ email: normalizedEmail, password, emailVerified: false })
 
-  const tokenPayload: TokenPayload = {
-    userId: user._id.toString(),
-    email: user.email
-  }
-
-  const accessToken = signAccessToken(tokenPayload)
-  const refreshToken = signRefreshToken(tokenPayload)
-  const expiresAt = getRefreshTokenExpiresAt()
-
-  // Save session in DB
-  await sessionService.createSession(
-    user._id.toString(),
-    refreshToken,
-    expiresAt,
-    userAgent,
-    ip
-  )
+  // Generate 24h verification token & send email
+  const verifyToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
+  await sendVerificationEmail(user.email, verifyToken, user.name)
 
   return {
-    accessToken,
-    refreshToken,
     user: {
       id: user._id.toString(),
-      email: user.email
+      email: user.email,
+      emailVerified: user.emailVerified
     }
   }
 }
@@ -81,8 +97,9 @@ export const login = async (
   userAgent?: string,
   ip?: string
 ): Promise<AuthResult> => {
-  const user = await User.findOne({ email }).select("+passwordHash")
-  if (!user) {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash")
+  if (!user || !user.passwordHash) {
     throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
   }
 
@@ -91,9 +108,14 @@ export const login = async (
     throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
   }
 
+  if (!user.emailVerified) {
+    throw new ApiError(403, "Email chưa được xác thực. Vui lòng kiểm tra email của bạn.", "EMAIL_NOT_VERIFIED")
+  }
+
   const tokenPayload: TokenPayload = {
     userId: user._id.toString(),
-    email: user.email
+    email: user.email,
+    role: user.role
   }
 
   const accessToken = signAccessToken(tokenPayload)
@@ -113,7 +135,222 @@ export const login = async (
     refreshToken,
     user: {
       id: user._id.toString(),
-      email: user.email
+      email: user.email,
+      emailVerified: user.emailVerified,
+      name: user.name,
+      role: user.role
+    }
+  }
+}
+
+export const confirmEmailVerification = async (
+  rawToken: string,
+  userAgent?: string,
+  ip?: string
+): Promise<AuthResult> => {
+  const tokenHash = hashToken(rawToken)
+  const authToken = await AuthToken.findOne({ tokenHash, type: "verify_email" })
+
+  if (!authToken) {
+    throw new ApiError(400, "Link xác thực không hợp lệ hoặc đã dùng", "INVALID_TOKEN")
+  }
+
+  if (authToken.usedAt) {
+    throw new ApiError(400, "Link xác thực đã được sử dụng trước đó", "TOKEN_ALREADY_USED")
+  }
+
+  if (authToken.expiresAt < new Date()) {
+    throw new ApiError(400, "Link xác thực đã hết hạn (24h). Vui lòng yêu cầu gửi lại email mới.", "TOKEN_EXPIRED")
+  }
+
+  authToken.usedAt = new Date()
+  await authToken.save()
+
+  const user = await User.findById(authToken.userId)
+  if (!user) {
+    throw new ApiError(404, "User không tồn tại", "USER_NOT_FOUND")
+  }
+
+  user.emailVerified = true
+  user.emailVerifiedAt = new Date()
+  await user.save()
+
+  // Issue session & auto-login after email verification
+  const tokenPayload: TokenPayload = {
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role
+  }
+
+  const accessToken = signAccessToken(tokenPayload)
+  const refreshToken = signRefreshToken(tokenPayload)
+  const expiresAt = getRefreshTokenExpiresAt()
+
+  await sessionService.createSession(
+    user._id.toString(),
+    refreshToken,
+    expiresAt,
+    userAgent,
+    ip
+  )
+
+  return {
+    accessToken,
+    refreshToken,
+    user: {
+      id: user._id.toString(),
+      email: user.email,
+      emailVerified: user.emailVerified,
+      name: user.name,
+      role: user.role
+    }
+  }
+}
+
+export const resendVerificationEmail = async (email: string): Promise<void> => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await User.findOne({ email: normalizedEmail })
+  // Silent return if user not found or already verified to prevent enumeration
+  if (!user || user.emailVerified || user.authProvider !== "local") {
+    return
+  }
+
+  const rawToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
+  await sendVerificationEmail(user.email, rawToken, user.name)
+}
+
+export const forgotPassword = async (email: string): Promise<void> => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await User.findOne({ email: normalizedEmail })
+  if (!user || user.authProvider !== "local") {
+    return
+  }
+
+  // Generate 15-minute password reset token
+  const rawToken = await generateAuthToken(user._id.toString(), "reset_password", 15 * 60 * 1000)
+  await sendPasswordResetEmail(user.email, rawToken, user.name)
+}
+
+export const resetPassword = async (rawToken: string, newPassword: string): Promise<void> => {
+  const tokenHash = hashToken(rawToken)
+  const authToken = await AuthToken.findOne({ tokenHash, type: "reset_password" })
+
+  if (!authToken) {
+    throw new ApiError(400, "Link đặt lại mật khẩu không hợp lệ hoặc đã dùng", "INVALID_TOKEN")
+  }
+
+  if (authToken.usedAt) {
+    throw new ApiError(400, "Link đặt lại mật khẩu đã được sử dụng trước đó", "TOKEN_ALREADY_USED")
+  }
+
+  if (authToken.expiresAt < new Date()) {
+    throw new ApiError(400, "Link đặt lại mật khẩu đã hết hạn (15 phút). Vui lòng yêu cầu lại.", "TOKEN_EXPIRED")
+  }
+
+  const user = await User.findById(authToken.userId)
+  if (!user) {
+    throw new ApiError(404, "User không tồn tại", "USER_NOT_FOUND")
+  }
+
+  // Update password & save (triggers bcrypt pre-save hook)
+  user.password = newPassword
+  await user.save()
+
+  authToken.usedAt = new Date()
+  await authToken.save()
+
+  // Security best practice: Revoke ALL active sessions across devices on password change
+  await sessionService.revokeAllUserSessions(user._id.toString())
+}
+
+export const googleAuth = async (
+  idToken: string,
+  userAgent?: string,
+  ip?: string
+): Promise<AuthResult> => {
+  const client = new OAuth2Client(env.GOOGLE_CLIENT_ID || undefined)
+
+  let payload
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: env.GOOGLE_CLIENT_ID || undefined
+    })
+    payload = ticket.getPayload()
+  } catch (error) {
+    throw new ApiError(401, "Google Token không hợp lệ", "INVALID_GOOGLE_TOKEN")
+  }
+
+  if (!payload || !payload.email) {
+    throw new ApiError(400, "Google Profile không chứa địa chỉ email", "GOOGLE_EMAIL_MISSING")
+  }
+
+  const { sub: googleId, name } = payload
+  const normalizedEmail = payload.email.toLowerCase().trim()
+
+  // Find user by normalized email OR googleId
+  let user = await User.findOne({
+    $or: [{ email: normalizedEmail }, { googleId }]
+  })
+
+  if (user) {
+    // Auto-link Google Account if user already exists
+    let updated = false
+    if (!user.googleId) {
+      user.googleId = googleId
+      updated = true
+    }
+    if (!user.emailVerified) {
+      user.emailVerified = true
+      user.emailVerifiedAt = new Date()
+      updated = true
+    }
+    if (!user.name && name) {
+      user.name = name
+      updated = true
+    }
+    if (updated) {
+      await user.save()
+    }
+  } else {
+    // Create new Google user
+    user = await User.create({
+      email: normalizedEmail,
+      name,
+      googleId,
+      authProvider: "google",
+      emailVerified: true,
+      emailVerifiedAt: new Date()
+    })
+  }
+
+  const tokenPayload: TokenPayload = {
+    userId: user._id.toString(),
+    email: user.email,
+    role: user.role
+  }
+
+  const accessToken = signAccessToken(tokenPayload)
+  const refreshToken = signRefreshToken(tokenPayload)
+  const expiresAt = getRefreshTokenExpiresAt()
+
+  await sessionService.createSession(
+    user._id.toString(),
+    refreshToken,
+    expiresAt,
+    userAgent,
+    ip
+  )
+
+  return {
+    accessToken,
+    refreshToken,
+    user: {
+      id: user._id.toString(),
+      email: user.email,
+      emailVerified: user.emailVerified,
+      name: user.name,
+      role: user.role
     }
   }
 }
@@ -125,10 +362,6 @@ export const refresh = async (
 ): Promise<RefreshResult> => {
   const expiresAt = getRefreshTokenExpiresAt()
 
-  // Create preliminary payload for rotation
-  // First verify & compute new token payload
-  const tempDecoded = sessionService.rotateSession
-  // We sign new tokens first
   let decoded: { userId: string; email: string }
   try {
     const { verifyRefreshToken } = await import("../../shared/auth/jwt.util.js")
@@ -145,7 +378,6 @@ export const refresh = async (
   const newAccessToken = signAccessToken(newPayload)
   const newRefreshToken = signRefreshToken(newPayload)
 
-  // Rotate in session DB (validates old token, revokes it, and creates new session)
   await sessionService.rotateSession(
     oldRefreshToken,
     newRefreshToken,
