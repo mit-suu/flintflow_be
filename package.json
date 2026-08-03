@@ -6,14 +6,15 @@
   "author": "tuan hiep",
   "type": "module",
   "main": "dist/server.js",
-   "engines": {
+  "engines": {
     "node": "22.x"
   },
-  
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "seed:md": "tsx src/scripts/seed-from-md.ts",
+    "seed:md:dry": "tsx src/scripts/seed-from-md.ts --dry-run"
   },
   "dependencies": {
     "axios": "^1.17.0",
@@ -22,9 +23,12 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "google-auth-library": "^11.0.0",
+    "gray-matter": "^4.0.3",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.6.3",
     "morgan": "^1.11.0",
+    "nodemailer": "^9.0.3",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "zod": "^4.4.3"
@@ -37,6 +41,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
     "@types/node": "^24.6.0",
+    "@types/nodemailer": "^8.0.1",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "ts-node": "^10.9.2",

@@ -9,6 +9,8 @@ import { specs } from "./config/swagger.js"
 import { errorHandler } from "./shared/middlewares/error-handler.js"
 import authRoutes from "./modules/auth/auth.route.js"
 import userRoutes from "./modules/user/user.route.js"
+import aiActionRoutes from "./shared/ai/ai-action.route.js"
+import adminPromptTemplateRoutes from "./modules/admin/prompt-template.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
 const app = express()
@@ -98,6 +100,10 @@ app.use(
 // API Routes
 app.use("/api/v1/auth", authRoutes)
 app.use("/api/v1/users", userRoutes)
+app.use("/api/v1/ai-actions", aiActionRoutes)
+app.use("/api/v1/admin/prompt-templates", adminPromptTemplateRoutes)
+
+
 
 // Global Error Handler Middleware
 app.use(errorHandler)

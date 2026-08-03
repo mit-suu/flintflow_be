@@ -10,5 +10,17 @@ export const env = {
   JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || "access-secret",
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || "refresh-secret",
   ACCESS_TOKEN_EXPIRES: process.env.ACCESS_TOKEN_EXPIRES || "15m",
-  REFRESH_TOKEN_EXPIRES: process.env.REFRESH_TOKEN_EXPIRES || "3d"
+  REFRESH_TOKEN_EXPIRES: process.env.REFRESH_TOKEN_EXPIRES || "3d",
+  APP_URL: process.env.APP_URL || "http://localhost:3000",
+  SMTP_HOST: process.env.SMTP_HOST || "smtp.gmail.com",
+  SMTP_PORT: process.env.SMTP_PORT || "465",
+  SMTP_USER: process.env.SMTP_USER || "",
+  SMTP_PASS: process.env.SMTP_PASS || "",
+  EMAIL_FROM: process.env.EMAIL_FROM || "FlintFlow <no-reply@flintflow.io.vn>",
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || "",
+  ADMIN_EMAIL: process.env.ADMIN_EMAIL,
+  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || ""
 }

@@ -5,7 +5,10 @@ import { verifyAccessToken } from "./jwt.util.js"
 export const authMiddleware = (req: Request, _res: Response, next: NextFunction): void => {
   try {
     const authHeader = req.headers.authorization
-    const token = authHeader?.split(" ")[1]
+    const token =
+      authHeader?.split(" ")[1] ||
+      req.cookies?.accessToken ||
+      req.cookies?.token
 
     if (!token) {
       throw new ApiError(401, "Access token is missing", "MISSING_ACCESS_TOKEN")
