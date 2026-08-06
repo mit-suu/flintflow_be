@@ -4,6 +4,7 @@ import { getActionCost } from "./credit-reservation.service.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { ApiError } from "../utils/api-error.js"
 import { sendSuccess } from "../types/api-response.js"
+import { executeDiagramPipeline } from "./diagram-pipeline.service.js"
 
 export const estimateCostHandler = async (
   req: Request,
@@ -42,6 +43,23 @@ export const executeAiActionHandler = async (
 
     if (!input) {
       throw new ApiError(400, "input là bắt buộc", "MISSING_INPUT")
+    }
+
+    // Route generate_diagram through the multi-step diagram pipeline
+    if (actionType === "generate_diagram") {
+      const userPrompt = input.input_text || input.rawPrompt || ""
+      if (!userPrompt) {
+        throw new ApiError(400, "input_text là bắt buộc cho generate_diagram", "MISSING_INPUT_TEXT")
+      }
+
+      const pipelineResult = await executeDiagramPipeline(
+        userPrompt,
+        projectId,
+        userId,
+        { provider, model }
+      )
+
+      return sendSuccess(res, 200, pipelineResult)
     }
 
     const result = await executeAiAction(
