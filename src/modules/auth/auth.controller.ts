@@ -17,21 +17,23 @@ import {
 const getCookieOptions = () => ({
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: "strict" as const,
+  sameSite: "lax" as const,
+  path: "/",
   maxAge: 3 * 24 * 60 * 60 * 1000 // 3 days
 })
 
 const getAccessTokenCookieOptions = () => ({
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: "strict" as const,
+  sameSite: "lax" as const,
+  path: "/",
   maxAge: 15 * 60 * 1000 // 15 minutes
 })
 
 export const register = catchAsync(async (req: Request, res: Response) => {
-  const { email, password } = req.body as RegisterDTO
+  const { email, password, name } = req.body as RegisterDTO & { name?: string }
 
-  const result = await authService.register(email, password)
+  const result = await authService.register(email, password, name)
 
   return sendSuccess(res, 201, {
     user: result.user,

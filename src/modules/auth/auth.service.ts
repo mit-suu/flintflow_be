@@ -1,4 +1,5 @@
 import crypto from "crypto"
+import axios from "axios"
 import { OAuth2Client } from "google-auth-library"
 import { User, IUser } from "../user/user.model.js"
 import { AuthToken, TokenType } from "./auth-token.model.js"
@@ -68,7 +69,8 @@ const generateAuthToken = async (userId: string, type: TokenType, durationMs: nu
 
 export const register = async (
   email: string,
-  password: string
+  password: string,
+  name?: string
 ): Promise<RegisterResult> => {
   const normalizedEmail = email.toLowerCase().trim()
   const existingUser = await User.findOne({ email: normalizedEmail })
@@ -76,7 +78,12 @@ export const register = async (
     throw new ApiError(409, "Email already registered", "EMAIL_EXISTS")
   }
 
-  const user = await User.create({ email: normalizedEmail, password, emailVerified: false })
+  const user = await User.create({
+    email: normalizedEmail,
+    password,
+    name: name?.trim() || undefined,
+    emailVerified: false
+  })
 
   // Generate 24h verification token & send email
   const verifyToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
@@ -264,21 +271,41 @@ export const resetPassword = async (rawToken: string, newPassword: string): Prom
 }
 
 export const googleAuth = async (
-  idToken: string,
+  token: string,
   userAgent?: string,
   ip?: string
 ): Promise<AuthResult> => {
   const client = new OAuth2Client(env.GOOGLE_CLIENT_ID || undefined)
 
-  let payload
+  let payload: { sub: string; email: string; name?: string } | null = null
+
+  // 1. Try verifyIdToken (JWT ID Token)
   try {
     const ticket = await client.verifyIdToken({
-      idToken,
+      idToken: token,
       audience: env.GOOGLE_CLIENT_ID || undefined
     })
-    payload = ticket.getPayload()
-  } catch (error) {
-    throw new ApiError(401, "Google Token không hợp lệ", "INVALID_GOOGLE_TOKEN")
+    const p = ticket.getPayload()
+    if (p && p.email && p.sub) {
+      payload = { sub: p.sub, email: p.email, name: p.name }
+    }
+  } catch (_) {
+    // 2. Fallback: Try fetching Google UserInfo using Access Token
+    try {
+      const userInfoRes = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 10000
+      })
+      if (userInfoRes.data && userInfoRes.data.email && userInfoRes.data.sub) {
+        payload = {
+          sub: userInfoRes.data.sub,
+          email: userInfoRes.data.email,
+          name: userInfoRes.data.name
+        }
+      }
+    } catch (_) {
+      throw new ApiError(401, "Google Token không hợp lệ", "INVALID_GOOGLE_TOKEN")
+    }
   }
 
   if (!payload || !payload.email) {
