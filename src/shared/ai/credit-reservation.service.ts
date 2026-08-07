@@ -13,7 +13,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.VERIFICATION]: 4,
   [ActionType.REWRITE]: 2,
   [ActionType.DIAGRAM_CLASSIFY]: 1,
-  [ActionType.DIAGRAM_GENERATE]: 4
+  [ActionType.DIAGRAM_GENERATE]: 4,
+  [ActionType.PRIORITY_RANKING]: 5,
+  [ActionType.SCOPE_OUT_OF_SCOPE]: 5
 }
 
 export const getActionCost = async (actionType: string): Promise<number> => {
