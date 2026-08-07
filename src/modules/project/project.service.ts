@@ -1,5 +1,8 @@
 import { Project, IProject } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { ChatSession } from "./chat-session.model.js"
+import { ProjectDocument } from "./project-document.model.js"
+import { Section } from "../specification/section.model.js"
 
 export const createProject = async (
   userId: string,
@@ -17,8 +20,12 @@ export const createProject = async (
   return project
 }
 
-export const getProjects = async (userId: string): Promise<IProject[]> => {
-  return await Project.find({ userId }).sort({ createdAt: -1 })
+export const getProjects = async (userId: string, status?: string): Promise<IProject[]> => {
+  const filter: any = { userId }
+  if (status) {
+    filter.status = status
+  }
+  return await Project.find(filter).sort({ createdAt: -1 })
 }
 
 export const getProjectById = async (
@@ -26,6 +33,50 @@ export const getProjectById = async (
   userId: string
 ): Promise<IProject> => {
   const project = await Project.findOne({ _id: projectId, userId })
+  if (!project) {
+    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  }
+  return project
+}
+
+export const deleteProject = async (
+  projectId: string,
+  userId: string,
+  hard: boolean = false
+): Promise<any> => {
+  if (hard) {
+    const project = await Project.findOneAndDelete({ _id: projectId, userId })
+    if (!project) {
+      throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    }
+    // Clean up all related models to prevent orphaned records in MongoDB
+    await ChatSession.deleteMany({ projectId })
+    await ProjectDocument.deleteMany({ projectId })
+    await Section.deleteMany({ projectId })
+    return { _id: projectId, status: "deleted" }
+  } else {
+    const project = await Project.findOneAndUpdate(
+      { _id: projectId, userId },
+      { status: "archived" },
+      { new: true }
+    )
+    if (!project) {
+      throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    }
+    return project
+  }
+}
+
+export const updateProjectName = async (
+  projectId: string,
+  userId: string,
+  name: string
+): Promise<IProject> => {
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId, userId },
+    { name },
+    { new: true }
+  )
   if (!project) {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
