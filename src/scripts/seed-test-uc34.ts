@@ -18,7 +18,7 @@ const seedTestData = async () => {
         email: "test_uc34_35@flintflow.io",
         password: "hashedpassword123",
         name: "Test User",
-        isEmailVerified: true
+        emailVerified: true
       })
     }
     console.log(`✅ Test User ID: ${user._id}`)
@@ -82,7 +82,7 @@ const seedTestData = async () => {
 
     // 5. Sinh JWT Token để test
     const token = signAccessToken({ userId: user._id.toString(), email: user.email })
-    
+
     console.log("\n=======================================================")
     console.log("🎉 SEED THÀNH CÔNG! HÃY SỬ DỤNG THÔNG TIN SAU ĐỂ TEST:")
     console.log("=======================================================")
