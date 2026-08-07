@@ -25,7 +25,8 @@ export const getProjects = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
   }
 
-  const projects = await projectService.getProjects(userId)
+  const status = req.query.status as string | undefined
+  const projects = await projectService.getProjects(userId, status)
   return sendSuccess(res, 200, projects)
 })
 
@@ -37,5 +38,33 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
 
   const projectId = req.params.projectId as string
   const project = await projectService.getProjectById(projectId, userId)
+  return sendSuccess(res, 200, project)
+})
+
+export const deleteProject = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  }
+
+  const projectId = req.params.projectId as string
+  const hard = req.query.hard === "true"
+  const result = await projectService.deleteProject(projectId, userId, hard)
+  return sendSuccess(res, 200, result)
+})
+
+export const updateProjectName = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  }
+
+  const projectId = req.params.projectId as string
+  const { name } = req.body
+  if (!name) {
+    throw new ApiError(400, "Project name is required", "NAME_REQUIRED")
+  }
+
+  const project = await projectService.updateProjectName(projectId, userId, name)
   return sendSuccess(res, 200, project)
 })

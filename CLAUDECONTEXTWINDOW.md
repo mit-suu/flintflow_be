@@ -25,7 +25,7 @@ src/
 │   └── swagger.ts               # Swagger OpenAPI scanner (scans ./src/modules/**/*.ts)
 ├── shared/
 │   ├── ai/                      # AI Action Framework (Single entrypoint executeAiAction)
-│   │   ├── ai-action.types.ts   # ActionType enum (7 types), AiActionResult, AiActionError
+│   │   ├── ai-action.types.ts   # ActionType enum (8 types), AiActionResult, AiActionError
 │   │   ├── ai-action.service.ts # executeAiAction() — core orchestrator
 │   │   ├── ai-action.controller.ts # HTTP handlers (/estimate-cost, /execute, /retry/:logId)
 │   │   ├── ai-action.route.ts   # Express router & Swagger OpenAPI specs
@@ -61,7 +61,7 @@ src/
 ├── modules/
 │   ├── auth/                    # Auth HTTP handlers (register, login, refresh, logout, logout-all, verify-email, forgot/reset-password, google) + auth-token.model.ts
 │   ├── user/                    # User profile queries (/me, /:id) & User model
-│   ├── project/                 # Projects & chat sessions (Project, ChatSession)
+│   ├── project/                 # Projects, chat sessions & documents (Project, ChatSession, ProjectDocument)
 │   ├── specification/           # Specification sections & version history (Section, SectionVersion)
 │   ├── verification/            # Aggregated project verification context (VerificationContext)
 │   ├── credits/                 # Credit wallet, transactions & subscriptions (CreditWallet, CreditTransaction, Subscription)
@@ -93,7 +93,8 @@ src/
 | **AuthToken** | `modules/auth/auth-token.model.ts` | `userId` (ref User), `type` (`verify_email`\|`reset_password`), `tokenHash` (unique, SHA-256), `expiresAt` (TTL index), `usedAt`. One-time use. TTL: verify=24h, reset=15m. |
 | **Session** | `shared/auth/session.model.ts` | `userId` (ref User), `tokenHash` (unique, SHA-256), `expiresAt`, `isRevoked`, `userAgent`, `ip`. |
 | **Project** | `modules/project/project.model.ts` | `userId` (ref User), `name`, `domain`, `status` (`active`\|`archived`), `currentStep`, `progressPercent`. Compound Index: `{ userId: 1, status: 1 }`. |
-| **ChatSession** | `modules/project/chat-session.model.ts` | `projectId` (ref Project), `messages` array (`role`, `content`, `createdAt`), `isActive`. Compound Index: `{ projectId: 1, isActive: 1 }`. |
+| **ChatSession** | `modules/project/chat-session.model.ts` | `projectId` (ref Project), `messages` array (`role`, `content`, `step` (optional), `createdAt`), `isActive`. Compound Index: `{ projectId: 1, isActive: 1 }`. |
+| **ProjectDocument** | `modules/project/project-document.model.ts` | `projectId` (ref Project), `uploadedBy` (ref User), `fileName`, `originalName`, `mimeType`, `size`, `cloudinaryPublicId`, `url`, `extension`. Index: `{ projectId: 1, createdAt: -1 }`. |
 | **Section** | `modules/specification/section.model.ts` | `projectId` (ref Project), `type` (15 section types), `content` (`Schema.Types.Mixed`), `status`, `sourceType`, `order`. Unique Index: `{ projectId: 1, type: 1 }`. |
 | **SectionVersion** | `modules/specification/section-version.model.ts` | `sectionId` (ref Section), `versionNumber`, `content`, `diffSummary`, `changedFields`, `factVsAssumption`, `createdBy`. Unique Index: `{ sectionId: 1, versionNumber: 1 }`. |
 | **VerificationContext** | `modules/verification/verification-context.model.ts` | `projectId` (ref Project, unique), `hiddenAssumptions`, `missingInfo`, `conflicts`, `ambiguities`, `readinessScore`, `readinessStatus`, `lastComputedAt`. |
@@ -139,7 +140,7 @@ type ApiResponse<T> = {
 ## 6. AI Action Framework & Credit Reservation Flow
 
 1. **Single Entrypoint**: All AI interactions must pass through `executeAiAction(actionType, input, projectId, userId, options)`. Direct LLM API calls outside `shared/ai/` are prohibited.
-2. **7 ActionTypes**: `summarize`, `extract`, `analysis`, `clarification`, `generate_section`, `verification`, `rewrite`.
+2. **8 ActionTypes**: `summarize`, `extract`, `analysis`, `clarification`, `generate_section`, `verification`, `rewrite`, `chat`.
 3. **Execution Pipeline**:
    - **Credit Reserve**: Checks available balance (`balance - reserved >= cost`). If insufficient, throws `402 INSUFFICIENT_CREDIT` (no LLM call). Temporarily reserves credit (`reserved += cost`).
    - **Prompt Interpolation**: Fetches active `PromptTemplate` (with in-memory TTL caching) and replaces `{{variable_name}}` placeholders.
@@ -219,6 +220,7 @@ description: Mô tả ngắn       # Tùy chọn
 | `{{specification}}` | verification |
 | `{{content}}` | rewrite |
 | `{{context}}` + `{{section_name}}` | generate_section |
+| `{{chat_history}}` + `{{step_name}}` | chat |
 
 ### Zod schema mỗi action (response-parser.ts)
 
@@ -231,6 +233,7 @@ description: Mô tả ngắn       # Tùy chọn
 | `generate_section` | `{ sectionName?, content: string, subSections? }` |
 | `verification` | `{ score?, issues: [{ severity?, description, suggestion? }], overallStatus? }` |
 | `rewrite` | `{ rewrittenContent: string, changesSummary? }` |
+| `chat` | `{ reply: string, suggestedQuestions?: string[] }` |
 
 ### Thêm actionType mới
 

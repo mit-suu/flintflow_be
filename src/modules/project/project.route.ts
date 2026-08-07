@@ -182,8 +182,66 @@ router.delete(
  *         description: Chưa xác thực
  *       404:
  *         description: Không tìm thấy dự án
+ *   delete:
+ *     summary: Xóa (lưu trữ hoặc xóa vĩnh viễn) một dự án
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của dự án cần xóa
+ *       - in: query
+ *         name: hard
+ *         schema:
+ *           type: boolean
+ *         description: Nếu truyền true, dự án và tất cả cuộc trò chuyện, tài liệu đính kèm sẽ bị xoá vĩnh viễn khỏi DB.
+ *     responses:
+ *       200:
+ *         description: Xóa hoặc lưu trữ dự án thành công
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: Không tìm thấy dự án
+ *   patch:
+ *     summary: Đổi tên một dự án
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID của dự án cần đổi tên
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [name]
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Tên mới của dự án
+ *     responses:
+ *       200:
+ *         description: Đổi tên thành công
+ *       400:
+ *         description: Thiếu tên mới hoặc tên trống
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: Không tìm thấy dự án
  */
 router.get("/:projectId", authMiddleware, projectController.getProject)
+router.delete("/:projectId", authMiddleware, projectController.deleteProject)
+router.patch("/:projectId/name", authMiddleware, projectController.updateProjectName)
 
 /**
  * @swagger
