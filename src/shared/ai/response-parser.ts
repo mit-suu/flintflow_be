@@ -55,6 +55,29 @@ export const rewriteSchema = z.object({
   changesSummary: z.string().optional()
 })
 
+export const generateDiagramSchema = z.object({
+  explanation: z.string().optional(),
+  mermaidCode: z.string()
+})
+
+export const diagramClassifySchema = z.object({
+  diagramType: z.enum(["flowchart", "architecture", "sequence-timeline", "hierarchy"]),
+  depth: z.enum(["simple", "comprehensive"]),
+  layoutDirection: z.enum(["TD", "LR", "radial"]),
+  planSummary: z.string(),
+  elements: z.array(z.string()).optional(),
+  colorMapping: z.record(z.string(), z.string()).optional()
+})
+
+export const diagramGenerateSchema = z.object({
+  explanation: z.string().optional(),
+  excalidrawElements: z.array(z.any()),
+  appState: z.object({
+    viewBackgroundColor: z.string().optional(),
+    gridSize: z.number().optional()
+  }).optional()
+})
+
 const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.SUMMARIZE]: summarizeSchema,
   [ActionType.EXTRACT]: extractSchema,
@@ -62,17 +85,45 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CLARIFICATION]: clarificationSchema,
   [ActionType.GENERATE_SECTION]: generateSectionSchema,
   [ActionType.VERIFICATION]: verificationSchema,
-  [ActionType.REWRITE]: rewriteSchema
+  [ActionType.REWRITE]: rewriteSchema,
+  [ActionType.GENERATE_DIAGRAM]: generateDiagramSchema,
+  [ActionType.DIAGRAM_CLASSIFY]: diagramClassifySchema,
+  [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema
 }
 
 export const extractJsonFromText = (text: string): string => {
   let cleaned = text.trim()
 
-  // Remove markdown code fences ```json ... ```
-  if (cleaned.includes("```")) {
-    const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
-    if (match && match[1]) {
-      cleaned = match[1].trim()
+  // 1. Try to clean standard or unclosed code fences
+  if (cleaned.startsWith("```")) {
+    const firstNewline = cleaned.indexOf("\n")
+    if (firstNewline !== -1) {
+      const lastFence = cleaned.lastIndexOf("```")
+      if (lastFence > firstNewline) {
+        // Closed code fence
+        cleaned = cleaned.substring(firstNewline + 1, lastFence).trim()
+      } else {
+        // Unclosed code fence (truncated or model output issue)
+        cleaned = cleaned.substring(firstNewline + 1).trim()
+      }
+    }
+  }
+
+  // 2. If it still doesn't parse, try brace-matching to extract the JSON object
+  try {
+    JSON.parse(cleaned)
+    return cleaned
+  } catch (err) {
+    const firstBrace = cleaned.indexOf("{")
+    const lastBrace = cleaned.lastIndexOf("}")
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const candidate = cleaned.substring(firstBrace, lastBrace + 1).trim()
+      try {
+        JSON.parse(candidate)
+        return candidate
+      } catch (_) {
+        // Fall back to the cleaned string if parsing the candidate also fails
+      }
     }
   }
 

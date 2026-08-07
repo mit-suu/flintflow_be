@@ -5,7 +5,10 @@ export enum ActionType {
   CLARIFICATION = "clarification",
   GENERATE_SECTION = "generate_section",
   VERIFICATION = "verification",
-  REWRITE = "rewrite"
+  REWRITE = "rewrite",
+  GENERATE_DIAGRAM = "generate_diagram",
+  DIAGRAM_CLASSIFY = "diagram_classify",
+  DIAGRAM_GENERATE = "diagram_generate"
 }
 
 export interface AiActionInput {

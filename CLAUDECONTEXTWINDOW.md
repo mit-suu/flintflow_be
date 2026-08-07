@@ -25,7 +25,7 @@ src/
 │   └── swagger.ts               # Swagger OpenAPI scanner (scans ./src/modules/**/*.ts)
 ├── shared/
 │   ├── ai/                      # AI Action Framework (Single entrypoint executeAiAction)
-│   │   ├── ai-action.types.ts   # ActionType enum (7 types), AiActionResult, AiActionError
+│   │   ├── ai-action.types.ts   # ActionType enum (9 types), AiActionResult, AiActionError
 │   │   ├── ai-action.service.ts # executeAiAction() — core orchestrator
 │   │   ├── ai-action.controller.ts # HTTP handlers (/estimate-cost, /execute, /retry/:logId)
 │   │   ├── ai-action.route.ts   # Express router & Swagger OpenAPI specs
@@ -33,6 +33,8 @@ src/
 │   │   ├── response-parser.ts   # Zod schema validation & markdown JSON extraction per ActionType
 │   │   ├── credit-reservation.service.ts # Reserve → Deduct / Release transactions & wallet auto-creation
 │   │   ├── retry.service.ts     # Transient error detection & in-request automatic backoff retry
+│   │   ├── diagram-pipeline.service.ts # ⭐ Multi-step diagram orchestrator
+│   │   ├── diagram-references.ts # ⭐ Dynamic diagram playbook & reference loader
 │   │   └── providers/           # Multi-provider LLM adapters
 │   │       ├── provider.types.ts# Unified LLMResponse interface
 │   │       ├── llm.router.ts    # Provider router (openai | anthropic | gemini)
@@ -75,7 +77,11 @@ src/
 │   │   ├── clarification.md
 │   │   ├── generate_section.md
 │   │   ├── verification.md
-│   │   └── rewrite.md
+│   │   ├── rewrite.md
+│   │   ├── generate_diagram.md  # (Deprecated/Fallback) Sơ đồ dạng Mermaid
+│   │   ├── diagram_classify.md  # [NEW] Step 1: Phân loại loại sơ đồ & lên layout
+│   │   ├── diagram_generate.md  # [NEW] Step 2: Sinh Excalidraw JSON elements
+│   │   └── diagram-skill/       # ⭐ Thư mục skill Excalidraw chứa playbooks, references & examples
 │   ├── seed-from-md.ts          # ⭐ Script chính: đọc .md → upsert MongoDB (xem mục 7)
 │   ├── seed-prompt-templates.ts # Script cũ (legacy, không dùng nữa — dùng seed-from-md.ts)
 │   └── cleanup-duplicate-users.ts
@@ -138,10 +144,11 @@ type ApiResponse<T> = {
 
 ## 6. AI Action Framework & Credit Reservation Flow
 
-1. **Single Entrypoint**: All AI interactions must pass through `executeAiAction(actionType, input, projectId, userId, options)`. Direct LLM API calls outside `shared/ai/` are prohibited.
-2. **7 ActionTypes**: `summarize`, `extract`, `analysis`, `clarification`, `generate_section`, `verification`, `rewrite`.
-3. **Execution Pipeline**:
-   - **Credit Reserve**: Checks available balance (`balance - reserved >= cost`). If insufficient, throws `402 INSUFFICIENT_CREDIT` (no LLM call). Temporarily reserves credit (`reserved += cost`).
+1. **Single Entrypoint**: All AI interactions must pass through `executeAiAction(actionType, input, projectId, userId, options)` hoặc `executeDiagramPipeline()` nếu dùng `generate_diagram`. Direct LLM API calls outside `shared/ai/` are prohibited.
+2. **9 ActionTypes**: `summarize`, `extract`, `analysis`, `clarification`, `generate_section`, `verification`, `rewrite`, `generate_diagram`, `diagram_classify`, `diagram_generate`.
+3. **Execution Pipeline & Diagram Pipeline**:
+   - **Diagram Pipeline**: Khi gọi `generate_diagram`, router sẽ chuyển qua `executeDiagramPipeline` để chạy 2 bước: Phân loại sơ đồ & Lên layout (`diagram_classify`), sau đó nạp Playbook tương ứng từ `diagram-skill/` để sinh Excalidraw JSON trực tiếp (`diagram_generate`).
+   - **Credit Reserve**: Checks available balance (`balance - reserved >= cost`). If insufficient, throws `402 INSUFFICIENT_CREDIT` (no LLM call). Temporarily reserves credit (`reserved += cost`). `generate_diagram` qua pipeline chạy 2 bước sẽ tốn tổng cộng 5 credit (1 + 4).
    - **Prompt Interpolation**: Fetches active `PromptTemplate` (with in-memory TTL caching) and replaces `{{variable_name}}` placeholders.
    - **Multi-Provider LLM Call**: Routes request to `openai`, `anthropic`, or `gemini` adapters via `llm.router.ts`.
    - **Zod Response Parsing**: Extracts JSON from Markdown code blocks and validates response against action-specific Zod schema.
@@ -231,6 +238,9 @@ description: Mô tả ngắn       # Tùy chọn
 | `generate_section` | `{ sectionName?, content: string, subSections? }` |
 | `verification` | `{ score?, issues: [{ severity?, description, suggestion? }], overallStatus? }` |
 | `rewrite` | `{ rewrittenContent: string, changesSummary? }` |
+| `generate_diagram` | `{ explanation?, mermaidCode }` |
+| `diagram_classify` | `{ diagramType, depth, layoutDirection, planSummary, elements?, colorMapping? }` |
+| `diagram_generate` | `{ explanation?, excalidrawElements: Array<any>, appState? }` |
 
 ### Thêm actionType mới
 
