@@ -8,7 +8,9 @@ export enum ActionType {
   REWRITE = "rewrite",
   GENERATE_DIAGRAM = "generate_diagram",
   DIAGRAM_CLASSIFY = "diagram_classify",
-  DIAGRAM_GENERATE = "diagram_generate"
+  DIAGRAM_GENERATE = "diagram_generate",
+  PRIORITY_RANKING = "priority_ranking",
+  SCOPE_OUT_OF_SCOPE = "scope_out_of_scope"
 }
 
 export interface AiActionInput {
