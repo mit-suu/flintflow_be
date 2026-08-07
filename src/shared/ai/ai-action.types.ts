@@ -5,7 +5,8 @@ export enum ActionType {
   CLARIFICATION = "clarification",
   GENERATE_SECTION = "generate_section",
   VERIFICATION = "verification",
-  REWRITE = "rewrite"
+  REWRITE = "rewrite",
+  CHAT = "chat"
 }
 
 export interface AiActionInput {

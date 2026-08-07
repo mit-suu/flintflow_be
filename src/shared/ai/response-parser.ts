@@ -55,6 +55,11 @@ export const rewriteSchema = z.object({
   changesSummary: z.string().optional()
 })
 
+export const chatSchema = z.object({
+  reply: z.string(),
+  suggestedQuestions: z.array(z.string()).optional()
+})
+
 const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.SUMMARIZE]: summarizeSchema,
   [ActionType.EXTRACT]: extractSchema,
@@ -62,7 +67,8 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CLARIFICATION]: clarificationSchema,
   [ActionType.GENERATE_SECTION]: generateSectionSchema,
   [ActionType.VERIFICATION]: verificationSchema,
-  [ActionType.REWRITE]: rewriteSchema
+  [ActionType.REWRITE]: rewriteSchema,
+  [ActionType.CHAT]: chatSchema
 }
 
 export const extractJsonFromText = (text: string): string => {
