@@ -78,6 +78,23 @@ export const diagramGenerateSchema = z.object({
   }).optional()
 })
 
+export const priorityRankingSchema = z.array(
+  z.object({
+    id: z.string(),
+    module: z.string(),
+    featureName: z.string(),
+    description: z.string(),
+    verificationCondition: z.string().optional(),
+    priority: z.enum(["Must-have", "Should-have", "Could-have", "Won't-have"]),
+    priorityReason: z.string(),
+    source: z.string().optional()
+  })
+)
+
+export const scopeOutOfScopeSchema = z.object({
+  content: z.string()
+})
+
 const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.SUMMARIZE]: summarizeSchema,
   [ActionType.EXTRACT]: extractSchema,
@@ -88,7 +105,9 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.REWRITE]: rewriteSchema,
   [ActionType.GENERATE_DIAGRAM]: generateDiagramSchema,
   [ActionType.DIAGRAM_CLASSIFY]: diagramClassifySchema,
-  [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema
+  [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema,
+  [ActionType.PRIORITY_RANKING]: priorityRankingSchema,
+  [ActionType.SCOPE_OUT_OF_SCOPE]: scopeOutOfScopeSchema
 }
 
 export const extractJsonFromText = (text: string): string => {
@@ -125,6 +144,16 @@ export const extractJsonFromText = (text: string): string => {
         // Fall back to the cleaned string if parsing the candidate also fails
       }
     }
+
+    const firstBracket = cleaned.indexOf("[")
+    const lastBracket = cleaned.lastIndexOf("]")
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+      const candidate = cleaned.substring(firstBracket, lastBracket + 1).trim()
+      try {
+        JSON.parse(candidate)
+        return candidate
+      } catch (_) {}
+    }
   }
 
   return cleaned
@@ -144,6 +173,16 @@ export const parseResponse = <T = any>(
     if (actionType === ActionType.REWRITE || actionType === ActionType.GENERATE_SECTION) {
       return { content: rawText, rewrittenContent: rawText } as unknown as T
     }
+    
+    if (actionType === ActionType.PRIORITY_RANKING) {
+      throw new AiActionError(
+        422,
+        `AI response is not a valid JSON array for action '${actionType}': ${err.message}`,
+        "PARSE_FAILED",
+        { rawText }
+      )
+    }
+
     throw new AiActionError(
       422,
       `AI response is not valid JSON for action '${actionType}': ${err.message}`,
