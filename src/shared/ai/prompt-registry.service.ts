@@ -50,6 +50,16 @@ const DEFAULT_TEMPLATES: Record<string, LoadedPromptTemplate> = {
     actionType: ActionType.REWRITE,
     template: `Viết lại nội dung sau cho mạch lạc, chuẩn mực đặc tả phần mềm hơn:\n\n{{content}}`,
     providerConfig: { provider: "openai", model: "gpt-4o-mini", maxTokens: 2048, temperature: 0.5 }
+  },
+  [ActionType.PRIORITY_RANKING]: {
+    actionType: ActionType.PRIORITY_RANKING,
+    template: `You are an Expert Product Manager. Evaluate the provided list of software functional requirements. Categorize them using the MoSCoW prioritization method (Must-have, Should-have, Could-have, Won't-have) strictly based on the provided project context. You must return ONLY a valid JSON array of objects matching the exact structure of the input, but with 'priority' and 'priorityReason' fields filled in. No markdown wrapping, no extra text.\n\nProject Context:\n{{project_context}}\n\nRequirements to prioritize:\n{{functional_requirements}}`,
+    providerConfig: { provider: "anthropic", model: "claude-haiku-4-5-20251001", maxTokens: 4096, temperature: 0.3 }
+  },
+  [ActionType.SCOPE_OUT_OF_SCOPE]: {
+    actionType: ActionType.SCOPE_OUT_OF_SCOPE,
+    template: `You are a Senior Business Analyst writing a Software Requirement Specification (SRS) document. Based on the categorized MoSCoW feature lists, write the 'Scope' and 'Out-of-Scope' sections in professional Markdown format. Do not use JSON. Return your response as a JSON object with a single key "content" containing the Markdown text.\n\nProject Context:\n{{project_context}}\n\nIn-Scope Features (Must-have, Should-have, Could-have):\n{{in_scope_features}}\n\nExcluded Features (Won't have):\n{{out_scope_features}}\n\nTask:\n1. Write a brief introductory paragraph defining the boundary of the MVP.\n2. List the In-Scope functional modules logically.\n3. List the Out-of-Scope items logically (must include all 'Won't have' features and deduce 2-3 logical technical boundaries like 'No mobile app', 'No 3D rendering' based on context to prevent scope creep).`,
+    providerConfig: { provider: "anthropic", model: "claude-haiku-4-5-20251001", maxTokens: 3000, temperature: 0.7 }
   }
 }
 
