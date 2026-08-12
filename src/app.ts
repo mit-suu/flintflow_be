@@ -11,8 +11,8 @@ import authRoutes from "./modules/auth/auth.route.js"
 import userRoutes from "./modules/user/user.route.js"
 import aiActionRoutes from "./shared/ai/ai-action.route.js"
 import adminPromptTemplateRoutes from "./modules/admin/prompt-template.route.js"
-import specificationRoutes from "./modules/specification/specification.route.js"
 import projectRoutes from "./modules/project/project.route.js"
+import specificationRoutes from "./modules/specification/specification.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
 const app = express()
@@ -104,10 +104,8 @@ app.use("/api/v1/auth", authRoutes)
 app.use("/api/v1/users", userRoutes)
 app.use("/api/v1/ai-actions", aiActionRoutes)
 app.use("/api/v1/admin/prompt-templates", adminPromptTemplateRoutes)
-app.use("/api/v1/specifications", specificationRoutes)
 app.use("/api/v1/projects", projectRoutes)
-
-  
+app.use("/api/v1/specifications", specificationRoutes)
 
 // Global Error Handler Middleware
 app.use(errorHandler)
