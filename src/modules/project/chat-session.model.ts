@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from "mongoose"
 export interface IChatMessage {
   role: "user" | "ai"
   content: string
+  step?: string
   createdAt: Date
 }
 
@@ -24,6 +25,10 @@ const chatMessageSchema = new Schema<IChatMessage>(
     content: {
       type: String,
       required: true
+    },
+    step: {
+      type: String,
+      default: "vision_problem"
     },
     createdAt: {
       type: Date,
