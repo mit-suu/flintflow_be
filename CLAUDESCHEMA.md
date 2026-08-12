@@ -23,6 +23,9 @@ erDiagram
     Project ||--|| VerificationContext : "has one verification context"
     Project ||--o{ CreditTransaction : "incurs transactions"
     Project ||--o{ AiActionLog : "logs AI actions"
+    Project ||--o{ ProjectDocument : "has attached documents"
+
+    User ||--o{ ProjectDocument : "uploads documents"
 
     Section ||--o{ SectionVersion : "has version history"
 
@@ -67,6 +70,20 @@ erDiagram
         ObjectId projectId FK
         Array messages
         boolean isActive
+        Date createdAt
+    }
+
+    ProjectDocument {
+        ObjectId _id PK
+        ObjectId projectId FK
+        ObjectId uploadedBy FK
+        string fileName
+        string originalName
+        string mimeType
+        number size
+        string cloudinaryPublicId
+        string url
+        string extension
         Date createdAt
     }
 
@@ -198,7 +215,7 @@ erDiagram
 - Compound Index: `{ userId: 1, status: 1 }`.
 
 ### 2.4 `modules/project/chat-session.model.ts`
-- Fields: `projectId` (ref Project), `messages` array (`role`, `content`, `createdAt`), `isActive`.
+- Fields: `projectId` (ref Project), `messages` array (`role`, `content`, `step` (optional), `createdAt`), `isActive`.
 - Compound Index: `{ projectId: 1, isActive: 1 }`.
 
 ### 2.5 `modules/specification/section.model.ts`
@@ -232,3 +249,7 @@ erDiagram
 
 ### 2.13 `modules/admin/pricing-config.model.ts`
 - Fields: `actionCosts`, `planLimits`, `isActive`, `updatedBy` (ref User).
+
+### 2.14 `modules/project/project-document.model.ts`
+- Fields: `projectId` (ref Project), `uploadedBy` (ref User), `fileName`, `originalName`, `mimeType`, `size`, `cloudinaryPublicId`, `url`, `extension` (optional).
+- Index: `{ projectId: 1, createdAt: -1 }`.

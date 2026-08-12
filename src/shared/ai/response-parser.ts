@@ -95,6 +95,11 @@ export const scopeOutOfScopeSchema = z.object({
   content: z.string()
 })
 
+export const chatSchema = z.object({
+  reply: z.string(),
+  suggestedQuestions: z.array(z.string()).optional()
+})
+
 const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.SUMMARIZE]: summarizeSchema,
   [ActionType.EXTRACT]: extractSchema,
@@ -107,7 +112,8 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.DIAGRAM_CLASSIFY]: diagramClassifySchema,
   [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema,
   [ActionType.PRIORITY_RANKING]: priorityRankingSchema,
-  [ActionType.SCOPE_OUT_OF_SCOPE]: scopeOutOfScopeSchema
+  [ActionType.SCOPE_OUT_OF_SCOPE]: scopeOutOfScopeSchema,
+  [ActionType.CHAT]: chatSchema
 }
 
 export const extractJsonFromText = (text: string): string => {
