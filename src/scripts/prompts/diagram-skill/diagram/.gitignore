@@ -1,0 +1,6 @@
+.venv/
+*.png
+!examples/*.png
+uv.lock
+__pycache__/
+issue.md
