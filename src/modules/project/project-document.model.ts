@@ -10,6 +10,14 @@ export interface IProjectDocument extends Document {
   cloudinaryPublicId: string
   url: string
   extension?: string | null
+  // Document parsing fields (Task 2a)
+  extractedText?: string | null
+  parseStatus: "pending" | "success" | "failed"
+  parseError?: string | null
+  tokenCount?: number | null
+  // AI summary fields (Task 2b)
+  summary?: string | null
+  summaryStatus: "pending" | "success" | "failed"
   createdAt: Date
   updatedAt: Date
 }
@@ -62,6 +70,34 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
       type: String,
       default: null,
       trim: true
+    },
+    // Document parsing fields (Task 2a)
+    extractedText: {
+      type: String,
+      default: null
+    },
+    parseStatus: {
+      type: String,
+      enum: ["pending", "success", "failed"],
+      default: "pending"
+    },
+    parseError: {
+      type: String,
+      default: null
+    },
+    tokenCount: {
+      type: Number,
+      default: null
+    },
+    // AI summary fields (Task 2b)
+    summary: {
+      type: String,
+      default: null
+    },
+    summaryStatus: {
+      type: String,
+      enum: ["pending", "success", "failed"],
+      default: "pending"
     }
   },
   { timestamps: true }

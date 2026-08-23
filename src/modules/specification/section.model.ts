@@ -1,20 +1,33 @@
 import mongoose, { Schema, Document } from "mongoose"
 
 export type SectionType =
-  | "business_goals"
-  | "stakeholders"
+  // Phase 2
   | "vision_problem"
+  | "business_goals"
   | "value_proposition"
+  | "high_level_business_rules"
+  | "stakeholders"
   | "user_journey"
-  | "functional_requirements"
-  | "non_functional_requirements"
+  | "use_case_spec"
+  // Phase 3
+  | "screen_flow"
+  | "screen_description"
   | "rbac"
+  | "non_screen_functions"
+  | "erd"
+  | "functional_requirements"
+  | "user_story"
+  | "acceptance_criteria"
   | "priority_ranking"
   | "scope_out_of_scope"
+  // Phase 4
+  | "external_interfaces"
+  | "non_functional_requirements"
+  | "common_business_rules"
+  | "common_requirements"
+  | "application_messages"
   | "assumptions_risks"
-  | "acceptance_criteria"
-  | "user_story"
-  | "use_case_spec"
+  | "glossary"
   | "success_metrics"
 
 export type SectionStatus = "draft" | "accepted" | "edited_manually" | "regenerated"
@@ -42,20 +55,33 @@ const sectionSchema = new Schema<ISection>(
     type: {
       type: String,
       enum: [
-        "business_goals",
-        "stakeholders",
+        // Phase 2
         "vision_problem",
+        "business_goals",
         "value_proposition",
+        "high_level_business_rules",
+        "stakeholders",
         "user_journey",
-        "functional_requirements",
-        "non_functional_requirements",
+        "use_case_spec",
+        // Phase 3
+        "screen_flow",
+        "screen_description",
         "rbac",
+        "non_screen_functions",
+        "erd",
+        "functional_requirements",
+        "user_story",
+        "acceptance_criteria",
         "priority_ranking",
         "scope_out_of_scope",
+        // Phase 4
+        "external_interfaces",
+        "non_functional_requirements",
+        "common_business_rules",
+        "common_requirements",
+        "application_messages",
         "assumptions_risks",
-        "acceptance_criteria",
-        "user_story",
-        "use_case_spec",
+        "glossary",
         "success_metrics"
       ],
       required: true

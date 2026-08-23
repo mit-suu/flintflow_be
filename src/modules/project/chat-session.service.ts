@@ -3,6 +3,8 @@ import { ChatSession, IChatSession, IChatMessage } from "./chat-session.model.js
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
   // Deactivate other chat sessions for this project first
@@ -27,12 +29,8 @@ export const getChatSessionById = async (chatSessionId: string): Promise<IChatSe
   return session
 }
 
-const STEP_NAMES: Record<string, string> = {
-  vision_problem: "Vision & Problem (Tầm nhìn & Vấn đề)",
-  target_users: "Target Users (Đối tượng người dùng mục tiêu)",
-  value_proposition: "Value Proposition (Giá trị cốt lõi)",
-  mvp_scope: "MVP Scope (Phạm vi sản phẩm MVP)"
-}
+import { SECTION_METADATA } from "../../shared/constants/section-types.js"
+
 
 export const sendMessageAndGetResponse = async (
   projectId: string,
@@ -73,9 +71,22 @@ export const sendMessageAndGetResponse = async (
     })
     .join("\n")
 
-  // 3. Execute AI Action
-  const stepName = STEP_NAMES[step] || step
-  
+  // 3. Execute AI Action with Document Context
+  const stepName = (SECTION_METADATA as any)[step]?.label || step
+
+  // Task 2c: Build document context cho CHAT action
+  // Tính chatHistoryTokens từ history hiện tại trước khi gọi AI
+  const historyTokens = Math.ceil(historyText.length / 4)
+  const chatTemplate = await getPromptTemplate(ActionType.CHAT)
+  const docContext = await buildDocumentContext(
+    projectId,
+    ActionType.CHAT,
+    undefined,       // CHAT không phải GENERATE_SECTION nên không cần sectionType
+    historyTokens,
+    chatTemplate.providerConfig.model,
+    chatTemplate.providerConfig.maxTokens
+  )
+
   let aiResult
   try {
     aiResult = await executeAiAction(
@@ -84,7 +95,8 @@ export const sendMessageAndGetResponse = async (
         promptVariables: {
           step_name: stepName,
           chat_history: historyText || "Không có lịch sử trước đó.",
-          input_text: content
+          input_text: content,
+          documentContext: docContext.contextText  // rỗng nếu không cần
         }
       },
       projectId,

@@ -8,6 +8,9 @@ export interface IProject extends Document {
   domain?: string | null
   status: ProjectStatus
   currentStep: string
+  currentPhase: 2 | 3 | 4
+  workspacePhase: "discovery" | "product_overview" | "functional_spec" | "nfr_appendix" | "export"
+  baselineVersion?: string | null
   progressPercent: number
   createdAt: Date
   updatedAt: Date
@@ -38,7 +41,21 @@ const projectSchema = new Schema<IProject>(
     },
     currentStep: {
       type: String,
-      default: "step_1"
+      default: "phase_2"
+    },
+    currentPhase: {
+      type: Number,
+      enum: [2, 3, 4],
+      default: 2
+    },
+    workspacePhase: {
+      type: String,
+      enum: ["discovery", "product_overview", "functional_spec", "nfr_appendix", "export"],
+      default: "discovery"
+    },
+    baselineVersion: {
+      type: String,
+      default: null
     },
     progressPercent: {
       type: Number,

@@ -173,15 +173,15 @@ function postProcessElements(elements: any[]): any[] {
     el.locked = el.locked ?? false
     el.angle = el.angle ?? 0
     el.seed = el.seed ?? ++seedCounter
-    el.roughness = el.roughness ?? 2
+    el.roughness = el.roughness ?? 0
     el.opacity = el.opacity ?? 100
-    el.strokeWidth = el.strokeWidth ?? 2
+    el.strokeWidth = el.strokeWidth ?? 1.5
     el.strokeStyle = el.strokeStyle ?? "solid"
-    el.fillStyle = el.fillStyle ?? "hachure"
+    el.fillStyle = el.fillStyle ?? "solid"
 
     // Text-specific defaults
     if (el.type === "text") {
-      el.fontFamily = el.fontFamily ?? 1
+      el.fontFamily = el.fontFamily ?? 2
       el.fontSize = el.fontSize ?? 16
       el.textAlign = el.textAlign ?? "center"
       el.verticalAlign = el.verticalAlign ?? "middle"

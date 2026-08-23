@@ -11,7 +11,8 @@ export enum ActionType {
   DIAGRAM_GENERATE = "diagram_generate",
   PRIORITY_RANKING = "priority_ranking",
   SCOPE_OUT_OF_SCOPE = "scope_out_of_scope",
-  CHAT = "chat"
+  CHAT = "chat",
+  SUMMARIZE_DOCUMENT = "summarize_document"
 }
 
 export interface AiActionInput {
