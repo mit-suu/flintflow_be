@@ -1,7 +1,7 @@
 ---
 actionType: generate_diagram
-provider: gemini
-aiModel: gemini-3.1-flash-lite
+provider: anthropic
+aiModel: claude-haiku-4-5-20251001
 maxTokens: 4096
 temperature: 0.2
 isActive: true

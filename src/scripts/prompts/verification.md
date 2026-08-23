@@ -1,7 +1,7 @@
 ---
 actionType: verification
-provider: gemini
-aiModel: gemini-3.1-flash-lite
+provider: anthropic
+aiModel: claude-haiku-4-5-20251001
 maxTokens: 2048
 temperature: 0.3
 isActive: true
