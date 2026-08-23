@@ -15,7 +15,8 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.DIAGRAM_CLASSIFY]: 1,
   [ActionType.DIAGRAM_GENERATE]: 4,
   [ActionType.PRIORITY_RANKING]: 5,
-  [ActionType.SCOPE_OUT_OF_SCOPE]: 5
+  [ActionType.SCOPE_OUT_OF_SCOPE]: 5,
+  [ActionType.SUMMARIZE_DOCUMENT]: 2  // Task 2b: tính phí như EXTRACT, 1 lần/document
 }
 
 export const getActionCost = async (actionType: string): Promise<number> => {

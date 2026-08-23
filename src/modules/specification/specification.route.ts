@@ -33,6 +33,7 @@ const router = Router()
  *         description: Chưa xác thực
  */
 router.get("/projects/:projectId", authMiddleware, specificationController.getSections)
+router.get("/projects/:projectId/progress", authMiddleware, specificationController.getProgress)
 
 /**
  * @swagger
@@ -74,6 +75,7 @@ router.get("/projects/:projectId", authMiddleware, specificationController.getSe
  *         description: Chưa xác thực
  */
 router.post("/projects/:projectId/generate", authMiddleware, specificationController.generateSection)
+router.post("/projects/:projectId/generate-phase", authMiddleware, specificationController.generatePhase)
 
 /**
  * @swagger
@@ -119,6 +121,9 @@ router.post("/projects/:projectId/generate", authMiddleware, specificationContro
  *         description: Chưa xác thực
  */
 router.put("/projects/:projectId/:type", authMiddleware, specificationController.updateSection)
+router.put("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
+router.post("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
+router.post("/projects/:projectId/approve-baseline", authMiddleware, specificationController.approveSRSForHandoff)
 
 /**
  * @swagger
