@@ -13,6 +13,7 @@ import aiActionRoutes from "./shared/ai/ai-action.route.js"
 import adminPromptTemplateRoutes from "./modules/admin/prompt-template.route.js"
 import projectRoutes from "./modules/project/project.route.js"
 import specificationRoutes from "./modules/specification/specification.route.js"
+import verificationRoutes from "./modules/verification/verification-context.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
 const app = express()
@@ -58,8 +59,13 @@ app.use(
       if (isAllowed) {
         return callback(null, true)
       } else {
-        console.warn(`[CORS Notice] Origin '${origin}' allowed for production compatibility`)
-        return callback(null, true) // Flexible fallback to prevent CORS blocking on production domains
+        if (env.NODE_ENV !== "production") {
+          // Dev / staging: cảnh báo nhưng vẫn cho qua để không cản trở Postman, curl, etc.
+          console.warn(`[CORS] Non-production: allowing unlisted origin '${origin}'`)
+          return callback(null, true)
+        }
+        // Production: reject nghiêm ngặt — không cho phép origin không có trong whitelist
+        return callback(new Error(`CORS: Origin '${origin}' is not allowed`))
       }
     },
     credentials: true,
@@ -106,6 +112,7 @@ app.use("/api/v1/ai-actions", aiActionRoutes)
 app.use("/api/v1/admin/prompt-templates", adminPromptTemplateRoutes)
 app.use("/api/v1/projects", projectRoutes)
 app.use("/api/v1/specifications", specificationRoutes)
+app.use("/api/v1/verification", verificationRoutes)
 
 // Global Error Handler Middleware
 app.use(errorHandler)

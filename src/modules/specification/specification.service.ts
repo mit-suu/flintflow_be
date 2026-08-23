@@ -6,6 +6,22 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { Project } from "../project/project.model.js"
 import { ChatSession } from "../project/chat-session.model.js"
+import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
+import {
+  saveSourceLinks,
+  extractSourceLinksFromAiResponse
+} from "./traceability.service.js"
+import {
+  canAccessPhase,
+  canModifySection,
+  checkAndAdvancePhase
+} from "./phase-gate.service.js"
+import {
+  WorkspacePhase,
+  WORKSPACE_PHASE_MAP,
+  getAllMappedSections
+} from "../../shared/constants/section-types.js"
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -74,46 +90,14 @@ const createSectionVersion = async (
   })
 }
 
+import { SECTION_METADATA } from "../../shared/constants/section-types.js"
+
 const getSectionOrder = (type: SectionType): number => {
-  const orders: Record<SectionType, number> = {
-    business_goals: 1,
-    stakeholders: 2,
-    vision_problem: 3,
-    value_proposition: 4,
-    user_journey: 5,
-    functional_requirements: 6,
-    non_functional_requirements: 7,
-    rbac: 8,
-    priority_ranking: 9,
-    scope_out_of_scope: 10,
-    assumptions_risks: 11,
-    acceptance_criteria: 12,
-    user_story: 13,
-    use_case_spec: 14,
-    success_metrics: 15
-  }
-  return orders[type] || 99
+  return SECTION_METADATA[type]?.order || 99
 }
 
 const getSectionName = (type: SectionType): string => {
-  const names: Record<SectionType, string> = {
-    business_goals: "Business Goals (Mục tiêu kinh doanh)",
-    stakeholders: "Stakeholders / Target Users (Đối tượng người dùng mục tiêu)",
-    vision_problem: "Vision & Problem (Tầm nhìn & Vấn đề)",
-    value_proposition: "Value Proposition (Giá trị cốt lõi)",
-    user_journey: "User Journey (Hành trình người dùng)",
-    functional_requirements: "Functional Requirements (Yêu cầu chức năng)",
-    non_functional_requirements: "Non-functional Requirements (Yêu cầu phi chức năng)",
-    rbac: "RBAC (Phân quyền người dùng)",
-    priority_ranking: "Priority Ranking (Thứ tự ưu tiên)",
-    scope_out_of_scope: "Scope & Out of Scope (Phạm vi & Ngoài phạm vi)",
-    assumptions_risks: "Assumptions & Risks (Giả định & Rủi ro)",
-    acceptance_criteria: "Acceptance Criteria (Tiêu chí nghiệm thu)",
-    user_story: "User Stories (Câu chuyện người dùng)",
-    use_case_spec: "Use Case Specifications (Đặc tả ca sử dụng)",
-    success_metrics: "Success Metrics (Chỉ số đo lường thành công)"
-  }
-  return names[type] || type
+  return SECTION_METADATA[type]?.label || type
 }
 
 // ─── Basic CRUD ──────────────────────────────────────────────────────────────
@@ -130,6 +114,21 @@ export const saveSection = async (
   sourceType: "ai_generated" | "user_edited",
   status: "draft" | "accepted" | "edited_manually" | "regenerated"
 ): Promise<ISection> => {
+  // Phase Gate Check: Kiểm tra quyền chỉnh sửa section (khóa baseline nếu phase trước đã accepted)
+  const modCheck = await canModifySection(projectId, type)
+  if (!modCheck.allowed) {
+    throw new ApiError(403, modCheck.reason || "Section is locked", "SECTION_LOCKED")
+  }
+
+  // Phase Gate Check: Nếu tạo mới section, phải được quyền truy cập phase của section đó
+  const meta = SECTION_METADATA[type]
+  if (meta) {
+    const accessCheck = await canAccessPhase(projectId, meta.phase)
+    if (!accessCheck.allowed) {
+      throw new ApiError(403, accessCheck.reason || "Phase is locked", "PHASE_LOCKED")
+    }
+  }
+
   let section = await Section.findOne({ projectId, type })
 
   if (!section) {
@@ -161,11 +160,58 @@ export const saveSection = async (
     versionNumber: nextVerNum,
     content,
     createdBy,
-    diffSummary: nextVerNum === 1 ? "Bản phác thảo đầu tiên" : "Cập nhật tài liệu"
+    diffSummary: nextVerNum === 1 ? "Bản phác thảo đầu tiên" : (status === "accepted" ? "Nghiệm thu tài liệu (Accepted)" : "Cập nhật tài liệu")
   })
+
+  // Phase Gate: Khi section chuyển sang "accepted", kiểm tra và tự động mở khóa phase tiếp theo nếu đủ điều kiện
+  if (status === "accepted") {
+    await checkAndAdvancePhase(projectId)
+  }
 
   return section
 }
+
+/**
+ * Nghiệm thu (Accept) một Section đặc tả.
+ * Tự động kích hoạt kiểm tra và nâng phase nếu toàn bộ section bắt buộc của phase đã accepted.
+ */
+export const acceptSection = async (
+  projectId: string,
+  type: SectionType,
+  userId: string
+): Promise<{ section: ISection; phaseProgression: any }> => {
+  const section = await Section.findOne({ projectId, type })
+  if (!section) {
+    throw new ApiError(404, "Section not found. Please generate or create it before accepting.", "SECTION_NOT_FOUND")
+  }
+
+  const projectBefore = await Project.findById(projectId).select("currentPhase").lean()
+  const oldPhase = (projectBefore?.currentPhase || 2) as 2 | 3 | 4
+
+  const updatedSection = await saveSection(
+    projectId,
+    type,
+    section.content,
+    "user",
+    section.sourceType,
+    "accepted"
+  )
+
+  const projectAfter = await Project.findById(projectId).select("currentPhase progressPercent").lean()
+  const newPhase = (projectAfter?.currentPhase || 2) as 2 | 3 | 4
+
+  return {
+    section: updatedSection,
+    phaseProgression: {
+      advanced: newPhase > oldPhase,
+      oldPhase,
+      newPhase,
+      progressPercent: projectAfter?.progressPercent || 0
+    }
+  }
+}
+
+
 
 // ─── Chat-based Section Generation (feat/flf-74-input-modules) ───────────────
 
@@ -175,6 +221,20 @@ export const generateSection = async (
   chatSessionId: string,
   userId: string
 ): Promise<ISection> => {
+  // Phase Gate Check: Kiểm tra quyền truy cập Phase
+  const meta = SECTION_METADATA[type]
+  if (meta) {
+    const accessCheck = await canAccessPhase(projectId, meta.phase)
+    if (!accessCheck.allowed) {
+      throw new ApiError(403, accessCheck.reason || `Phase ${meta.phase} is locked`, "PHASE_LOCKED")
+    }
+
+    const modCheck = await canModifySection(projectId, type)
+    if (!modCheck.allowed) {
+      throw new ApiError(403, modCheck.reason || "Section is locked", "SECTION_LOCKED")
+    }
+  }
+
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
@@ -196,12 +256,30 @@ export const generateSection = async (
 
   const sectionName = getSectionName(type)
 
+  // Task 2c: Build document context theo SectionType
+  const template = await getPromptTemplate(ActionType.GENERATE_SECTION)
+  const docContext = await buildDocumentContext(
+    projectId,
+    ActionType.GENERATE_SECTION,
+    type,            // sectionType — dùng SECTION_NEEDS_SOURCE_DOCUMENTS map
+    0,               // chat không có history token ở đây (context đã trong `context`)
+    template.providerConfig.model,
+    template.providerConfig.maxTokens
+  )
+
+  if (docContext.documentsUsed > 0) {
+    console.log(
+      `[SpecService] Injecting ${docContext.documentsUsed} document(s) into GENERATE_SECTION prompt for type='${type}' (usedSummary=${docContext.usedSummary})`
+    )
+  }
+
   const aiResult = await executeAiAction(
     ActionType.GENERATE_SECTION,
     {
       promptVariables: {
         section_name: sectionName,
-        context: context || "Không có ngữ cảnh bổ sung từ chat."
+        context: context || "Không có ngữ cảnh bổ sung từ chat.",
+        documentContext: docContext.contextText  // rỗng nếu không cần
       }
     },
     projectId,
@@ -211,7 +289,7 @@ export const generateSection = async (
   // aiResult.data conforms to generateSectionSchema: { sectionName, content, subSections }
   const generatedContent = aiResult.data.content || aiResult.rawText
 
-  return await saveSection(
+  const savedSection = await saveSection(
     projectId,
     type,
     generatedContent,
@@ -219,6 +297,28 @@ export const generateSection = async (
     "ai_generated",
     "draft"
   )
+
+  // Task 2d: Lưu traceability links sau khi Section đã lưu thành công
+  // Non-blocking: mọi lỗi traceability chỉ log, không chặn response
+  if (docContext.documentsUsed > 0) {
+    try {
+      const rawLinks = extractSourceLinksFromAiResponse(aiResult.data)
+      if (rawLinks && rawLinks.length > 0) {
+        const traceStats = await saveSourceLinks(
+          savedSection._id as any,
+          projectId,
+          rawLinks
+        )
+        console.log(
+          `[Traceability] Section '${type}': saved=${traceStats.saved}, rejected=${traceStats.rejected}, skipped=${traceStats.skipped}`
+        )
+      }
+    } catch (traceErr: any) {
+      console.warn(`[Traceability] Non-blocking error for section '${type}': ${traceErr?.message}`)
+    }
+  }
+
+  return savedSection
 }
 
 // ─── UC34: Generate Priority Ranking (MoSCoW) ──────────────────────────────
@@ -238,6 +338,12 @@ export const generatePriorityRanking = async (
   projectId: string,
   userId: string
 ) => {
+  // Phase Gate Check: Priority Ranking thuộc Phase 3 -> yêu cầu Phase 2 hoàn thành
+  const accessCheck = await canAccessPhase(projectId, 3)
+  if (!accessCheck.allowed) {
+    throw new ApiError(403, accessCheck.reason || "Phase 3 is locked", "PHASE_LOCKED")
+  }
+
   // 1. Fetch functional_requirements section
   const frSection = await getSectionByType(projectId, "functional_requirements")
 
@@ -312,6 +418,12 @@ export const generateScopeOutOfScope = async (
   projectId: string,
   userId: string
 ) => {
+  // Phase Gate Check: Scope & Out-of-Scope thuộc Phase 3 -> yêu cầu Phase 2 hoàn thành
+  const accessCheck = await canAccessPhase(projectId, 3)
+  if (!accessCheck.allowed) {
+    throw new ApiError(403, accessCheck.reason || "Phase 3 is locked", "PHASE_LOCKED")
+  }
+
   // 1. Fetch functional_requirements section
   const frSection = await getSectionByType(projectId, "functional_requirements")
 
@@ -409,3 +521,106 @@ export const generateScopeOutOfScope = async (
     }
   }
 }
+
+// ─── Batch Phase Generation (Milestone 2) ───────────────────────────────────
+
+export interface GeneratePhaseResult {
+  generated: ISection[]
+  errors: Array<{ type: string; error: string }>
+}
+
+/**
+ * Sinh hàng loạt (batch generate) tất cả các section thuộc một WorkspacePhase.
+ * Tiếp tục sinh các section còn lại nếu có 1 section bị lỗi.
+ */
+export const generatePhase = async (
+  projectId: string,
+  workspacePhase: WorkspacePhase,
+  chatSessionId: string,
+  userId: string
+): Promise<GeneratePhaseResult> => {
+  const phaseConfig = WORKSPACE_PHASE_MAP[workspacePhase]
+  if (!phaseConfig || !phaseConfig.sectionTypes || phaseConfig.sectionTypes.length === 0) {
+    throw new ApiError(
+      400,
+      `Phase "${workspacePhase}" does not support batch generation or has no section types.`,
+      "INVALID_WORKSPACE_PHASE"
+    )
+  }
+
+  const generated: ISection[] = []
+  const errors: Array<{ type: string; error: string }> = []
+
+  for (const sectionType of phaseConfig.sectionTypes) {
+    try {
+      const section = await generateSection(projectId, sectionType, chatSessionId, userId)
+      generated.push(section)
+    } catch (err: any) {
+      console.warn(`[SpecService] Batch generate error for section "${sectionType}": ${err?.message}`)
+      errors.push({
+        type: sectionType,
+        error: err?.message || "Unknown generation error"
+      })
+    }
+  }
+
+  return { generated, errors }
+}
+
+// ─── UC 6.14: Approve SRS for Handoff (Milestone 4 Baseline) ────────────────
+
+export interface ApproveSRSResult {
+  project: any
+  baselineVersion: string
+  approvedAt: Date
+  exportEnabled: boolean
+}
+
+/**
+ * UC 6.14 - Approve SRS for Handoff
+ * Tạo bản SRS Baseline v1.0, khóa các section và mở khóa Export.
+ */
+export const approveSRSForHandoff = async (
+  projectId: string,
+  userId: string
+): Promise<ApproveSRSResult> => {
+  const project = await Project.findById(projectId)
+  if (!project) {
+    throw new ApiError(404, "Project not found", "PROJECT_NOT_FOUND")
+  }
+
+  // Kiểm tra điều kiện: Tất cả 22 section bắt buộc đã được accepted
+  const allMapped = getAllMappedSections()
+  const acceptedSections = await Section.find({
+    projectId: new mongoose.Types.ObjectId(projectId),
+    type: { $in: allMapped },
+    status: "accepted"
+  }).select("type").lean()
+
+  const acceptedSet = new Set(acceptedSections.map((s) => s.type))
+  const unaccepted = allMapped.filter((t) => !acceptedSet.has(t))
+
+  if (unaccepted.length > 0) {
+    throw new ApiError(
+      400,
+      `Chưa thể phê duyệt SRS Baseline v1.0. Còn ${unaccepted.length} section chưa được nghiệm thu: ${unaccepted.join(", ")}`,
+      "SECTIONS_NOT_ALL_ACCEPTED"
+    )
+  }
+
+  const baselineVersion = project.baselineVersion || "v1.0"
+  project.baselineVersion = baselineVersion
+  project.workspacePhase = "export"
+  project.progressPercent = 100
+  await project.save()
+
+  console.log(`[SpecService] 🏆 Project "${project.name}" (${projectId}) approved for handoff as Baseline ${baselineVersion}!`)
+
+  return {
+    project,
+    baselineVersion,
+    approvedAt: new Date(),
+    exportEnabled: true
+  }
+}
+

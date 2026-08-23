@@ -63,8 +63,13 @@ src/
 ├── modules/
 │   ├── auth/                    # Auth HTTP handlers (register, login, refresh, logout, logout-all, verify-email, forgot/reset-password, google) + auth-token.model.ts
 │   ├── user/                    # User profile queries (/me, /:id) & User model
-│   ├── project/                 # Projects, chat sessions & documents (Project, ChatSession, ProjectDocument)
-│   ├── specification/           # Specification sections & version history (Section, SectionVersion)
+│   ├── project/                 # Projects, chat sessions & documents
+│   │   ├── project.controller.ts / service.ts / route.ts / validation.ts / model.ts # Project CRUD
+│   │   ├── chat-session.controller.ts / service.ts / model.ts                        # Chat sessions & AI message exchange
+│   │   └── project-document.controller.ts / service.ts / model.ts                    # Document upload (Multer/Cloudinary) & management
+│   ├── specification/           # Specification sections, MoSCoW priority (UC34) & scope generation (UC35)
+│   │   ├── specification.controller.ts / service.ts / route.ts / validation.ts
+│   │   └── section.model.ts / section-version.model.ts
 │   ├── verification/            # Aggregated project verification context (VerificationContext)
 │   ├── credits/                 # Credit wallet, transactions & subscriptions (CreditWallet, CreditTransaction, Subscription)
 │   └── admin/                   # Prompt templates, AI action logs & pricing configs (PromptTemplate, AiActionLog, PricingConfig)
@@ -79,11 +84,13 @@ src/
 │   │   ├── verification.md
 │   │   ├── rewrite.md
 │   │   ├── generate_diagram.md  # (Deprecated/Fallback) Sơ đồ dạng Mermaid
-│   │   ├── diagram_classify.md  # [NEW] Step 1: Phân loại loại sơ đồ & lên layout
-│   │   ├── diagram_generate.md  # [NEW] Step 2: Sinh Excalidraw JSON elements
+│   │   ├── diagram_classify.md  # Step 1: Phân loại loại sơ đồ & lên layout
+│   │   ├── diagram_generate.md  # Step 2: Sinh Excalidraw JSON elements
+│   │   ├── chat.md              # Prompt template cho phiên chat làm rõ yêu cầu với AI BA
 │   │   └── diagram-skill/       # ⭐ Thư mục skill Excalidraw chứa playbooks, references & examples
 │   ├── seed-from-md.ts          # ⭐ Script chính: đọc .md → upsert MongoDB (xem mục 7)
 │   ├── seed-prompt-templates.ts # Script cũ (legacy, không dùng nữa — dùng seed-from-md.ts)
+│   ├── seed-test-uc34.ts        # Script seed dữ liệu giả lập test cho UC34 & UC35
 │   └── cleanup-duplicate-users.ts
 ├── app.ts                       # Express app setup, middleware, base routes & error handler
 └── server.ts                    # HTTP server listener
@@ -146,10 +153,17 @@ type ApiResponse<T> = {
 ## 6. AI Action Framework & Credit Reservation Flow
 
 1. **Single Entrypoint**: All AI interactions must pass through `executeAiAction(actionType, input, projectId, userId, options)` hoặc `executeDiagramPipeline()` nếu dùng `generate_diagram`. Direct LLM API calls outside `shared/ai/` are prohibited.
-2. **13 ActionTypes**: `summarize`, `extract`, `analysis`, `clarification`, `generate_section`, `verification`, `rewrite`, `generate_diagram`, `diagram_classify`, `diagram_generate`, `priority_ranking`, `scope_out_of_scope`, `chat`.
-3. **Execution Pipeline & Diagram Pipeline**:
-   - **Diagram Pipeline**: Khi gọi `generate_diagram`, router sẽ chuyển qua `executeDiagramPipeline` để chạy 2 bước: Phân loại sơ đồ & Lên layout (`diagram_classify`), sau đó nạp Playbook tương ứng từ `diagram-skill/` để sinh Excalidraw JSON trực tiếp (`diagram_generate`).
-   - **Credit Reserve**: Checks available balance (`balance - reserved >= cost`). If insufficient, throws `402 INSUFFICIENT_CREDIT` (no LLM call). Temporarily reserves credit (`reserved += cost`). `generate_diagram` qua pipeline chạy 2 bước sẽ tốn tổng cộng 5 credit (1 + 4).
+2. **13 ActionTypes**: `summarize`, `extract`, `analysis`, `clarification`, `generate_section`, `verification`, `rewrite`, `generate_diagram`, `diagram_classify`, `diagram_generate`, `priority_ranking` (UC34), `scope_out_of_scope` (UC35), `chat`.
+3. **Execution Pipeline & Special Feature Pipelines**:
+   - **Diagram Pipeline**: Khi gọi `generate_diagram`, router chuyển qua `executeDiagramPipeline` để chạy 2 bước: Phân loại sơ đồ & Lên layout (`diagram_classify`), sau đó nạp Playbook tương ứng từ `diagram-skill/` để sinh Excalidraw JSON trực tiếp (`diagram_generate`).
+   - **MoSCoW Priority Ranking (UC34)**: Endpoint `POST /api/v1/specifications/:projectId/generate-priority` đọc Functional Requirements từ DB, gọi action `priority_ranking` phân loại tính năng (Must-have, Should-have, Could-have, Won't-have), lưu kết quả vào Section `functional_requirements` và lưu `SectionVersion`.
+   - **Scope & Out-of-Scope (UC35)**: Endpoint `POST /api/v1/specifications/:projectId/generate-scope` lọc các FR đã có xếp hạng MoSCoW (In-Scope vs Out-of-Scope), gọi action `scope_out_of_scope` để tạo Markdown nội dung Scope cho dự án.
+   - **Interactive BA Chat**: Endpoint `POST /api/v1/projects/:projectId/chats/:chatId/messages` gửi lịch sử hội thoại qua action `chat`, AI trả về câu trả lời `reply` kèm `suggestedQuestions` giúp người dùng làm rõ ý tưởng theo từng bước (`vision_problem`, `target_users`, `value_proposition`, `mvp_scope`).
+   - **Credit Reserve**: Checks available balance (`balance - reserved >= cost`). If insufficient, throws `402 INSUFFICIENT_CREDIT` (no LLM call). Temporarily reserves credit (`reserved += cost`).
+     - `priority_ranking`: 2 credits
+     - `scope_out_of_scope`: 2 credits
+     - `chat`: 1 credit
+     - `generate_diagram` (2-step pipeline): 5 credits (1 + 4)
    - **Prompt Interpolation**: Fetches active `PromptTemplate` (with in-memory TTL caching) and replaces `{{variable_name}}` placeholders.
    - **Multi-Provider LLM Call**: Routes request to `openai`, `anthropic`, or `gemini` adapters via `llm.router.ts`.
    - **Zod Response Parsing**: Extracts JSON from Markdown code blocks and validates response against action-specific Zod schema.
@@ -228,6 +242,7 @@ description: Mô tả ngắn       # Tùy chọn
 | `{{content}}` | rewrite |
 | `{{context}}` + `{{section_name}}` | generate_section |
 | `{{chat_history}}` + `{{step_name}}` | chat |
+| `{{requirements}}` | priority_ranking, scope_out_of_scope |
 
 ### Zod schema mỗi action (response-parser.ts)
 

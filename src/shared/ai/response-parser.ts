@@ -35,7 +35,14 @@ export const clarificationSchema = z.object({
 export const generateSectionSchema = z.object({
   sectionName: z.string().optional(),
   content: z.string(),
-  subSections: z.array(z.any()).optional()
+  subSections: z.array(z.any()).optional(),
+  // Task 2e: sourceLinks optional — AI returns this for traceability (Task 2d)
+  sourceLinks: z.array(
+    z.object({
+      documentId: z.string(),
+      excerpt: z.string()
+    })
+  ).optional()
 })
 
 export const verificationSchema = z.object({
@@ -100,6 +107,12 @@ export const chatSchema = z.object({
   suggestedQuestions: z.array(z.string()).optional()
 })
 
+// Task 2b: schema cho action SUMMARIZE_DOCUMENT
+export const summarizeDocumentSchema = z.object({
+  summary: z.string(),
+  keyThemes: z.array(z.string()).optional()
+})
+
 const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.SUMMARIZE]: summarizeSchema,
   [ActionType.EXTRACT]: extractSchema,
@@ -113,7 +126,8 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema,
   [ActionType.PRIORITY_RANKING]: priorityRankingSchema,
   [ActionType.SCOPE_OUT_OF_SCOPE]: scopeOutOfScopeSchema,
-  [ActionType.CHAT]: chatSchema
+  [ActionType.CHAT]: chatSchema,
+  [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema
 }
 
 export const extractJsonFromText = (text: string): string => {
