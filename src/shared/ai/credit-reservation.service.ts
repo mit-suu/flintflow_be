@@ -16,6 +16,8 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.DIAGRAM_GENERATE]: 4,
   [ActionType.PRIORITY_RANKING]: 5,
   [ActionType.SCOPE_OUT_OF_SCOPE]: 5,
+  [ActionType.CHAT]: 2,
+  [ActionType.CHAT_DISCOVERY]: 2,
   [ActionType.SUMMARIZE_DOCUMENT]: 2  // Task 2b: tính phí như EXTRACT, 1 lần/document
 }
 
