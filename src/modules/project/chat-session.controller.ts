@@ -42,7 +42,7 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
 
   const projectId = req.params.projectId as string
   const chatId = req.params.chatId as string
-  const { content, step } = req.body
+  const { content, step, discoveryStep } = req.body
 
   if (!content) {
     throw new ApiError(400, "Message content is required", "CONTENT_REQUIRED")
@@ -56,7 +56,8 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
     chatId,
     content,
     step,
-    userId
+    userId,
+    discoveryStep ? Number(discoveryStep) : undefined
   )
   return sendSuccess(res, 200, updatedSession)
 })
