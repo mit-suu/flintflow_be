@@ -244,3 +244,118 @@ export const buildDocumentContext = async (
     usedSummary
   }
 }
+
+// ─── Context Chaining: Gom Sections đã Accept từ Phase trước ─────────────────
+
+import { Section } from "../../modules/specification/section.model.js"
+import { SECTION_METADATA, WORKSPACE_PHASE_MAP, type SectionType as SectionTypeKey } from "../constants/section-types.js"
+
+/**
+ * Map từ phase number → WorkspacePhase key trước đó.
+ * Phase 3 cần đọc Phase 2, Phase 4 cần đọc Phase 2 + 3.
+ */
+const PRIOR_PHASES_FOR: Record<number, string[]> = {
+  2: [],                                    // Phase 2 không cần phase trước (đọc từ documents)
+  3: ["product_overview"],                  // Phase 3 cần Phase 2
+  4: ["product_overview", "functional_spec"] // Phase 4 cần Phase 2 + 3
+}
+
+export interface PriorPhaseContextResult {
+  contextText: string       // đoạn text chèn vào prompt
+  tokenCount: number        // ước lượng token
+  sectionsUsed: number      // số section đưa vào context
+}
+
+/**
+ * Build context text từ các Section đã accepted ở Phase trước.
+ * Được gọi khi generateSection cho Section thuộc Phase 3 hoặc 4.
+ *
+ * Cơ chế token budget:
+ * - Ước lượng ~4 ký tự = 1 token.
+ * - Giới hạn tối đa maxTokenBudget (mặc định 8000 tokens ≈ 32KB text).
+ * - Nếu vượt budget → cắt ngắn từng section thay vì bỏ qua.
+ *
+ * @param projectId     - ID của project
+ * @param sectionType   - SectionType đang được sinh (dùng để xác định phase hiện tại)
+ * @param maxTokenBudget - Token budget tối đa cho phần context này (mặc định 8000)
+ */
+export const buildPriorPhaseSectionsContext = async (
+  projectId: string,
+  sectionType: string,
+  maxTokenBudget: number = 8000
+): Promise<PriorPhaseContextResult> => {
+  const empty: PriorPhaseContextResult = { contextText: "", tokenCount: 0, sectionsUsed: 0 }
+
+  // Xác định phase của section đang được sinh
+  const meta = SECTION_METADATA[sectionType as SectionTypeKey]
+  if (!meta) return empty
+
+  const currentPhase = meta.phase
+  const priorPhaseKeys = PRIOR_PHASES_FOR[currentPhase]
+  if (!priorPhaseKeys || priorPhaseKeys.length === 0) return empty
+
+  // Gom danh sách section types từ các phase trước
+  const priorSectionTypes: string[] = []
+  for (const phaseKey of priorPhaseKeys) {
+    const phaseConfig = WORKSPACE_PHASE_MAP[phaseKey as keyof typeof WORKSPACE_PHASE_MAP]
+    if (phaseConfig?.sectionTypes) {
+      priorSectionTypes.push(...phaseConfig.sectionTypes)
+    }
+  }
+
+  if (priorSectionTypes.length === 0) return empty
+
+  // Query các section đã accepted hoặc đã có content
+  const sections = await Section.find({
+    projectId,
+    type: { $in: priorSectionTypes as SectionTypeKey[] },
+    status: { $in: ["accepted", "draft", "edited_manually"] },
+    content: { $exists: true, $ne: "" }
+  }).sort({ order: 1 }).lean()
+
+  if (sections.length === 0) return empty
+
+  // Build context string với token budget
+  const parts: string[] = []
+  let totalTokens = 0
+  let sectionsUsed = 0
+
+  for (const section of sections) {
+    const sectionMeta = SECTION_METADATA[section.type as SectionTypeKey]
+    const label = sectionMeta?.label || section.type
+    const statusTag = section.status === "accepted" ? "✅ Accepted" : "📝 Draft"
+
+    let content = typeof section.content === "string"
+      ? section.content
+      : JSON.stringify(section.content, null, 2)
+
+    // Ước lượng token cho snippet header + content
+    const headerText = `[${statusTag}] ${label}`
+    const snippetTokens = Math.ceil((headerText.length + content.length + 10) / 4)
+
+    // Nếu vượt budget → cắt ngắn content
+    if (totalTokens + snippetTokens > maxTokenBudget) {
+      const remainingTokenBudget = maxTokenBudget - totalTokens - Math.ceil(headerText.length / 4) - 20
+      if (remainingTokenBudget <= 100) break // Không còn đủ chỗ
+
+      const maxChars = remainingTokenBudget * 4
+      content = content.substring(0, maxChars) + "\n...(truncated for token budget)"
+    }
+
+    parts.push(`### ${headerText}\n${content}`)
+    totalTokens += Math.ceil((headerText.length + content.length + 10) / 4)
+    sectionsUsed++
+
+    if (totalTokens >= maxTokenBudget) break
+  }
+
+  if (parts.length === 0) return empty
+
+  const contextText = `\n\n--- NỘI DUNG ĐẶC TẢ ĐÃ CÓ TỪ CÁC PHASE TRƯỚC (Prior Sections Context) ---\n${parts.join("\n\n")}\n--- HẾT NỘI DUNG PHASE TRƯỚC ---\n`
+
+  return {
+    contextText,
+    tokenCount: totalTokens,
+    sectionsUsed
+  }
+}
