@@ -107,6 +107,28 @@ export const chatSchema = z.object({
   suggestedQuestions: z.array(z.string()).optional()
 })
 
+// ─── Discovery Chat Evaluation Schema ───
+export const chatDiscoveryEvaluationSchema = z.object({
+  currentStep: z.number().min(1).max(6),
+  stepCompleteness: z.number().min(0).max(100),
+  isStepComplete: z.boolean(),
+  isDiscoveryComplete: z.boolean(),
+  recommendedAction: z.enum([
+    "ask_clarification",
+    "propose_next_step",
+    "show_summary",
+    "continue_discussion"
+  ]),
+  stepSummary: z.string().optional(),
+  missingInfo: z.array(z.string()).optional()
+})
+
+export const chatDiscoverySchema = z.object({
+  reply: z.string(),
+  suggestedQuestions: z.array(z.string()).optional(),
+  evaluation: chatDiscoveryEvaluationSchema
+})
+
 // Task 2b: schema cho action SUMMARIZE_DOCUMENT
 export const summarizeDocumentSchema = z.object({
   summary: z.string(),
@@ -127,6 +149,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.PRIORITY_RANKING]: priorityRankingSchema,
   [ActionType.SCOPE_OUT_OF_SCOPE]: scopeOutOfScopeSchema,
   [ActionType.CHAT]: chatSchema,
+  [ActionType.CHAT_DISCOVERY]: chatDiscoverySchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema
 }
 

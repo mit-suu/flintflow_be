@@ -4,6 +4,7 @@ export interface IChatMessage {
   role: "user" | "ai"
   content: string
   step?: string
+  discoveryStep?: number
   createdAt: Date
 }
 
@@ -29,6 +30,11 @@ const chatMessageSchema = new Schema<IChatMessage>(
     step: {
       type: String,
       default: "vision_problem"
+    },
+    discoveryStep: {
+      type: Number,
+      min: 1,
+      max: 6
     },
     createdAt: {
       type: Date,
