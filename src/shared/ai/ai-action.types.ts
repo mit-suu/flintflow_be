@@ -12,7 +12,8 @@ export enum ActionType {
   PRIORITY_RANKING = "priority_ranking",
   SCOPE_OUT_OF_SCOPE = "scope_out_of_scope",
   CHAT = "chat",
-  SUMMARIZE_DOCUMENT = "summarize_document"
+  SUMMARIZE_DOCUMENT = "summarize_document",
+  CHAT_DISCOVERY = "chat_discovery"
 }
 
 export interface AiActionInput {

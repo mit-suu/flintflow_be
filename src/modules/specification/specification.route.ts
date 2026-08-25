@@ -124,6 +124,7 @@ router.put("/projects/:projectId/:type", authMiddleware, specificationController
 router.put("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 router.post("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 router.post("/projects/:projectId/approve-baseline", authMiddleware, specificationController.approveSRSForHandoff)
+router.post("/projects/:projectId/advance-to-generation", authMiddleware, specificationController.advanceToGeneration)
 
 /**
  * @swagger
