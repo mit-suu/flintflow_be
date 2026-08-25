@@ -6,7 +6,7 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { Project } from "../project/project.model.js"
 import { ChatSession } from "../project/chat-session.model.js"
-import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
+import { buildDocumentContext, buildPriorPhaseSectionsContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import {
   saveSourceLinks,
@@ -273,13 +273,24 @@ export const generateSection = async (
     )
   }
 
+  // Context Chaining: Gom nội dung Section đã accepted từ Phase trước
+  const priorContext = await buildPriorPhaseSectionsContext(projectId, type)
+  if (priorContext.sectionsUsed > 0) {
+    console.log(
+      `[SpecService] Context chaining: injecting ${priorContext.sectionsUsed} prior phase section(s) for type='${type}' (~${priorContext.tokenCount} tokens)`
+    )
+  }
+
+  // Ghép document context + prior phase context
+  const combinedDocContext = docContext.contextText + priorContext.contextText
+
   const aiResult = await executeAiAction(
     ActionType.GENERATE_SECTION,
     {
       promptVariables: {
         section_name: sectionName,
         context: context || "Không có ngữ cảnh bổ sung từ chat.",
-        documentContext: docContext.contextText  // rỗng nếu không cần
+        documentContext: combinedDocContext  // document context + prior sections context
       }
     },
     projectId,
