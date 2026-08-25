@@ -187,3 +187,14 @@ export const approveSRSForHandoff = catchAsync(async (req: Request, res: Respons
   return sendSuccess(res, 200, result)
 })
 
+// ─── Discovery → Generation Phase Transition ────────────────────────────────
+
+/**
+ * POST /api/v1/specifications/projects/:projectId/advance-to-generation
+ * Chuyển project từ Discovery sang product_overview và persist vào DB.
+ */
+export const advanceToGeneration = catchAsync(async (req: Request, res: Response) => {
+  const projectId = req.params.projectId as string
+  const result = await specificationService.advanceToGenerationPhase(projectId)
+  return sendSuccess(res, 200, result)
+})
