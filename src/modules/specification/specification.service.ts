@@ -624,3 +624,22 @@ export const approveSRSForHandoff = async (
   }
 }
 
+// ─── Discovery → Generation Phase Transition ────────────────────────────────
+
+/**
+ * Chuyển project từ Discovery sang Generation phase đầu tiên (product_overview).
+ * Gọi khi user approve Product Brief Summary trong Discovery chat.
+ */
+export const advanceToGenerationPhase = async (projectId: string) => {
+  const project = await Project.findById(projectId)
+  if (!project) throw new ApiError(404, "Project not found", "NOT_FOUND")
+
+  if (project.workspacePhase !== "discovery") {
+    throw new ApiError(400, "Project is not in discovery phase", "INVALID_PHASE")
+  }
+
+  project.workspacePhase = "product_overview"
+  await project.save()
+
+  return { workspacePhase: project.workspacePhase }
+}
