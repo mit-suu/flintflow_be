@@ -1,4 +1,4 @@
-import { Project, IProject } from "./project.model.js"
+import { Project, IProject, ProjectStatus } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
@@ -42,7 +42,8 @@ export const getProjectById = async (
 export const deleteProject = async (
   projectId: string,
   userId: string,
-  hard: boolean = false
+  hard: boolean = false,
+  status: ProjectStatus = "inactive"
 ): Promise<any> => {
   if (hard) {
     const project = await Project.findOneAndDelete({ _id: projectId, userId })
@@ -55,9 +56,10 @@ export const deleteProject = async (
     await Section.deleteMany({ projectId })
     return { _id: projectId, status: "deleted" }
   } else {
+    const targetStatus: ProjectStatus = status === "archived" ? "archived" : "inactive"
     const project = await Project.findOneAndUpdate(
       { _id: projectId, userId },
-      { status: "archived" },
+      { status: targetStatus },
       { new: true }
     )
     if (!project) {

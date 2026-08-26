@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
 
-export type ProjectStatus = "active" | "archived"
+export type ProjectStatus = "active" | "inactive" | "archived"
 
 export interface IProject extends Document {
   userId: mongoose.Types.ObjectId
@@ -33,7 +33,7 @@ const projectSchema = new Schema<IProject>(
     },
     status: {
       type: String,
-      enum: ["active", "archived"],
+      enum: ["active", "inactive", "archived"],
       default: "active"
     },
     currentStep: {

@@ -49,7 +49,9 @@ export const deleteProject = catchAsync(async (req: Request, res: Response) => {
 
   const projectId = req.params.projectId as string
   const hard = req.query.hard === "true"
-  const result = await projectService.deleteProject(projectId, userId, hard)
+  const statusParam = req.query.status
+  const status = statusParam === "archived" ? "archived" : "inactive"
+  const result = await projectService.deleteProject(projectId, userId, hard, status)
   return sendSuccess(res, 200, result)
 })
 
