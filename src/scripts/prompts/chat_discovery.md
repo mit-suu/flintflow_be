@@ -1,8 +1,8 @@
 ---
 actionType: chat_discovery
-provider: anthropic
-aiModel: claude-haiku-4-5-20251001
-maxTokens: 1536
+provider: gemini
+aiModel: gemini-3.5-flash
+maxTokens: 4096
 temperature: 0.7
 isActive: true
 description: Discovery phase chat — BA Mary dẫn dắt 6 bước, kèm evaluation metadata để FE nhận biết completeness

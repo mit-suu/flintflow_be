@@ -389,7 +389,7 @@ export const refresh = async (
 ): Promise<RefreshResult> => {
   const expiresAt = getRefreshTokenExpiresAt()
 
-  let decoded: { userId: string; email: string }
+  let decoded: { userId: string; email: string; role?: string }
   try {
     const { verifyRefreshToken } = await import("../../shared/auth/jwt.util.js")
     decoded = verifyRefreshToken(oldRefreshToken)
@@ -397,9 +397,16 @@ export const refresh = async (
     throw new ApiError(401, "Invalid or expired refresh token", "INVALID_REFRESH_TOKEN")
   }
 
+  let role = decoded.role
+  if (!role) {
+    const user = await User.findById(decoded.userId).select("role")
+    role = user?.role
+  }
+
   const newPayload: TokenPayload = {
     userId: decoded.userId,
-    email: decoded.email
+    email: decoded.email,
+    role
   }
 
   const newAccessToken = signAccessToken(newPayload)
