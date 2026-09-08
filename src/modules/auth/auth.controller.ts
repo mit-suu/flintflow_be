@@ -118,7 +118,7 @@ export const googleAuth = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const refresh = catchAsync(async (req: Request, res: Response) => {
-  const refreshToken = req.cookies?.refreshToken
+  const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
   if (!refreshToken) {
     throw new ApiError(401, "Refresh token is missing", "MISSING_REFRESH_TOKEN")
   }
@@ -136,7 +136,7 @@ export const refresh = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const logout = catchAsync(async (req: Request, res: Response) => {
-  const refreshToken = req.cookies?.refreshToken
+  const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
   await authService.logout(refreshToken)
 
   res.clearCookie("refreshToken")

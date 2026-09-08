@@ -92,6 +92,8 @@ const CONTEXT_WINDOW_BY_MODEL: Record<string, number> = {
   "claude-3-5-sonnet": 200000,
   "claude-haiku-4-5-20251001": 200000,
   "claude-haiku-4-5": 200000,
+  "gemini-3.5-flash": 1000000,
+  "gemini-3.5": 1000000,
   "gemini-2.0-flash": 1000000,
   "gemini-1.5-pro": 1000000
 }
