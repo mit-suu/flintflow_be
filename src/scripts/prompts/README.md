@@ -22,7 +22,7 @@ Chạy lại nhiều lần an toàn — script tự phát hiện thay đổi và
 ---
 actionType: <tên action>      # BẮT BUỘC — khớp với ActionType enum trong BE
 provider: gemini              # BẮT BUỘC — openai | anthropic | gemini
-aiModel: gemini-2.5-flash     # BẮT BUỘC — tên model cụ thể
+aiModel: gemini-3.5-flash     # BẮT BUỘC — tên model cụ thể
 maxTokens: 1024               # BẮT BUỘC — số token tối đa
 temperature: 0.3              # BẮT BUỘC — 0.0 (deterministic) → 1.0 (creative)
 isActive: true                # tùy chọn, mặc định true
