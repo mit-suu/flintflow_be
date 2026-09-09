@@ -1,7 +1,7 @@
 ---
 actionType: clarification
-provider: gemini
-aiModel: gemini-3.5-flash
+provider: glm
+aiModel: zai-org/GLM-5.3-Flash
 maxTokens: 2048
 temperature: 0.7
 isActive: true

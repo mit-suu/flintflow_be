@@ -3,7 +3,7 @@ import mongoose, { Schema, Document } from "mongoose"
 export interface IPromptTemplate extends Document {
   actionType: string
   template: string
-  provider: "openai" | "anthropic" | "gemini" | string
+  provider: "openai" | "anthropic" | "gemini" | "glm" | "modal" | string
   aiModel: string
   maxTokens: number
   temperature: number
@@ -27,8 +27,8 @@ const promptTemplateSchema = new Schema<IPromptTemplate>(
     },
     provider: {
       type: String,
-      enum: ["openai", "anthropic", "gemini", "mock"],
-      default: "openai"
+      enum: ["openai", "anthropic", "gemini", "mock", "glm", "modal"],
+      default: "glm"
     },
     aiModel: {
       type: String,

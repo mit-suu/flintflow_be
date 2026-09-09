@@ -28,5 +28,11 @@ export const env = {
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY || ""
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
+  MODAL_BASE_URL:
+    process.env.MODAL_BASE_URL ||
+    "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1",
+  MODAL_PROXY_TOKEN_ID: process.env.MODAL_PROXY_TOKEN_ID || "",
+  MODAL_PROXY_TOKEN_SECRET: process.env.MODAL_PROXY_TOKEN_SECRET || "",
+  MODAL_API_KEY: process.env.MODAL_API_KEY || ""
 }

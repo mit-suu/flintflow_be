@@ -1,7 +1,7 @@
 ---
 actionType: diagram_generate
-provider: gemini
-aiModel: gemini-3.5-flash
+provider: glm
+aiModel: zai-org/GLM-5.3-Flash
 maxTokens: 8192
 temperature: 0.2
 isActive: true
