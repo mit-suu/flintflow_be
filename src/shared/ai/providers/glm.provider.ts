@@ -1,0 +1,93 @@
+import OpenAI from "openai"
+import { env } from "../../../config/env.js"
+import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
+import { LLMResponse } from "./provider.types.js"
+
+export const callGLM = async (
+  prompt: string,
+  providerConfig: AiProviderConfig
+): Promise<LLMResponse> => {
+  const tokenId = (env.MODAL_PROXY_TOKEN_ID || process.env.MODAL_PROXY_TOKEN_ID)?.trim()
+  const tokenSecret = (env.MODAL_PROXY_TOKEN_SECRET || process.env.MODAL_PROXY_TOKEN_SECRET)?.trim()
+  const rawApiKey = (env.MODAL_API_KEY || process.env.MODAL_API_KEY)?.trim()?.replace(/\.+$/, "")
+
+  let apiKey = ""
+  if (tokenId && tokenSecret) {
+    apiKey = `${tokenId}.${tokenSecret}`
+  } else if (rawApiKey) {
+    apiKey = rawApiKey
+  }
+
+  if (!apiKey) {
+    throw new AiActionError(
+      500,
+      "Modal / GLM credentials are missing. Set MODAL_PROXY_TOKEN_ID and MODAL_PROXY_TOKEN_SECRET (or MODAL_API_KEY) in environment.",
+      "MODAL_CREDENTIALS_MISSING"
+    )
+  }
+
+  const baseURL =
+    env.MODAL_BASE_URL ||
+    "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
+
+  const client = new OpenAI({
+    baseURL,
+    apiKey
+  })
+
+  const model = providerConfig.model || "zai-org/GLM-5.3-Flash"
+  const maxTokens = providerConfig.maxTokens || 2048
+  const temperature = providerConfig.temperature ?? 0.3
+
+  try {
+    const stream = (await client.chat.completions.create({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature,
+      max_tokens: maxTokens,
+      top_p: 0.9,
+      stream: true,
+      reasoning_effort: "none"
+    } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
+
+    let text = ""
+    let promptTokens = 0
+    let completionTokens = 0
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta?.content
+      if (delta) {
+        text += delta
+      }
+      if ((chunk as any).usage) {
+        promptTokens = (chunk as any).usage.prompt_tokens || promptTokens
+        completionTokens = (chunk as any).usage.completion_tokens || completionTokens
+      }
+    }
+
+    if (!promptTokens) {
+      promptTokens = Math.ceil(prompt.length / 4)
+    }
+    if (!completionTokens) {
+      completionTokens = Math.ceil(text.length / 4)
+    }
+
+    return {
+      text,
+      promptTokens,
+      completionTokens
+    }
+  } catch (error: any) {
+    if (error instanceof AiActionError) throw error
+
+    const status = error.status || error.response?.status || 500
+    const message = error.message || error.response?.data?.error?.message || "GLM API call failed"
+    const code = status === 429 ? "RATE_LIMIT_EXCEEDED" : "GLM_ERROR"
+    throw new AiActionError(status, message, code, error.response?.data || error)
+  }
+}

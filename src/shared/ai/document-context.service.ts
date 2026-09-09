@@ -95,7 +95,10 @@ const CONTEXT_WINDOW_BY_MODEL: Record<string, number> = {
   "gemini-3.5-flash": 1000000,
   "gemini-3.5": 1000000,
   "gemini-2.0-flash": 1000000,
-  "gemini-1.5-pro": 1000000
+  "gemini-1.5-pro": 1000000,
+  "zai-org/GLM-5.3-Flash": 128000,
+  "GLM-5.3-Flash": 128000,
+  "glm": 128000
 }
 
 const DEFAULT_CONTEXT_WINDOW = 32000  // an toàn cho mọi model không xác định

@@ -41,7 +41,7 @@ export interface AiActionResult<T = any> {
 }
 
 export interface AiProviderConfig {
-  provider: "openai" | "anthropic" | "gemini" | string
+  provider: "openai" | "anthropic" | "gemini" | "glm" | "modal" | string
   model: string
   maxTokens?: number
   temperature?: number
