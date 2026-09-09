@@ -102,8 +102,20 @@ export const scopeOutOfScopeSchema = z.object({
   content: z.string()
 })
 
+export const chatQuestionSchema = z.object({
+  question: z.string(),
+  suggestedAnswers: z.array(z.string()).default([]),
+  multiple: z.boolean().optional().default(false),
+})
+
+export const chatQuestionItemSchema = z.union([
+  chatQuestionSchema,
+  z.string().transform((q) => ({ question: q, suggestedAnswers: [], multiple: false }))
+])
+
 export const chatSchema = z.object({
   reply: z.string(),
+  questions: z.array(chatQuestionItemSchema).optional().default([]),
   suggestedQuestions: z.array(z.string()).optional()
 })
 
@@ -125,6 +137,7 @@ export const chatDiscoveryEvaluationSchema = z.object({
 
 export const chatDiscoverySchema = z.object({
   reply: z.string(),
+  questions: z.array(chatQuestionItemSchema).optional().default([]),
   suggestedQuestions: z.array(z.string()).optional(),
   evaluation: chatDiscoveryEvaluationSchema
 })
