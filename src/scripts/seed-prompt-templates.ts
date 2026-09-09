@@ -138,11 +138,22 @@ Nội dung gốc:
 2. Focus on gathering information for the current step (Step {{discovery_step}}).
 3. If the user provides enough information for the current step, summarize what you've gathered and suggest moving to the next step.
 4. Evaluate the completeness of the current step and the overall discovery process.
+5. If you need to ask clarifying questions to gather information for the current step:
+   - Formulate 1-3 focused questions in the "questions" array.
+   - For EACH question, provide 2-4 realistic, concise suggested answers in "suggestedAnswers" that the user can select from.
+   - In "reply", provide conversational context, encouragement, or summary. Do not duplicate the full text of the questions inside "reply".
+6. If you do NOT need to ask questions (e.g. you are just summarizing, explaining, confirming, or showing completion):
+   - Set "questions": []. Absolutely DO NOT generate questions or suggestions when none are asked.
 
 ## RESPONSE FORMAT — Return ONLY a valid JSON object (no markdown wrapper):
 {
   "reply": "<your response in Vietnamese, can use markdown formatting>",
-  "suggestedQuestions": ["<follow-up question 1>", "<follow-up question 2>", "<follow-up question 3>"],
+  "questions": [
+    {
+      "question": "<câu hỏi 1>",
+      "suggestedAnswers": ["<gợi ý trả lời 1a>", "<gợi ý trả lời 1b>", "<gợi ý trả lời 1c>"]
+    }
+  ],
   "evaluation": {
     "currentStep": {{discovery_step}},
     "stepCompleteness": <0-100, estimate how complete the current step information gathering is>,

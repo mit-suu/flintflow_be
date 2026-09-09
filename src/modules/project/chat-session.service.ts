@@ -119,7 +119,7 @@ export const sendMessageAndGetResponse = async (
     // Fallback response on error
     const errorReply: any = {
       reply: "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau.",
-      suggestedQuestions: ["Thử lại", "Bỏ qua"]
+      questions: []
     }
     // Add minimal evaluation for discovery mode so FE doesn't break
     if (isDiscoveryMode) {
