@@ -2,7 +2,7 @@
 actionType: chat
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
-maxTokens: 2048
+maxTokens: 4096
 temperature: 0.7
 isActive: true
 description: Trò chuyện làm rõ ý tưởng sản phẩm với người dùng theo từng bước
@@ -22,22 +22,22 @@ Hiện tại, cuộc trò chuyện đang ở bước: **{{step_name}}**
 {{input_text}}
 
 **Yêu cầu:**
-1. Hãy trả lời tin nhắn của người dùng một cách thân thiện, tự nhiên và chuyên nghiệp.
+1. Trả lời tin nhắn của người dùng một cách thân thiện, tự nhiên, chuyên nghiệp và súc tích bằng tiếng Việt trong trường "reply".
 2. Tập trung làm rõ các thông tin liên quan đến bước hiện tại: **{{step_name}}**, tham chiếu tài liệu nguồn nếu có.
-3. Nếu người dùng đưa ra câu trả lời hợp lý, hãy tóm tắt ngắn gọn và khéo léo gợi ý họ chuyển sang bước tiếp theo hoặc tiếp tục làm rõ.
-4. Nếu cần hỏi làm rõ, đề xuất 1-3 câu hỏi vào mảng "questions". Mỗi câu hỏi gồm:
-   - "question": Nội dung câu hỏi.
-   - "suggestedAnswers": 2-4 câu trả lời gợi ý thực tế.
-   - "multiple": true nếu cho phép chọn nhiều phương án (checkbox), false nếu chỉ chọn 1 phương án duy nhất (radio).
-5. Nếu không cần hỏi người dùng (ví dụ chỉ giải thích, xác nhận, chuyển bước), BẮT BUỘC để mảng "questions": [].
+3. Nếu cần hỏi làm rõ hoặc thu thập thông tin, đề xuất 1-3 câu hỏi vào mảng "questions". Mỗi câu hỏi gồm:
+   - "question": Nội dung câu hỏi ngắn gọn, rõ ràng.
+   - "suggestedAnswers": 2-4 câu trả lời gợi ý thực tế để người dùng có thể bấm chọn nhanh (ví dụ: các lựa chọn phương án, tính năng phổ biến, mô hình...).
+   - "multiple": true nếu cho phép chọn nhiều phương án (checkbox), false nếu chỉ chọn 1 phương án (radio).
+4. Nếu không cần hỏi người dùng (ví dụ chỉ giải thích, xác nhận hoặc đã đủ thông tin), để "questions": [].
 
-**Định dạng trả về — BẮT BUỘC CHỈ trả về JSON thuần túy, không chứa ký tự thừa hay markdown bên ngoài JSON:**
+**Định dạng trả về — BẮT BUỘC trả về JSON với "reply" luôn là trường ĐẦU TIÊN:**
+CRITICAL: Bắt đầu ngay lập tức với `{` và trường `"reply"`. Không viết suy nghĩ hay văn bản bên ngoài JSON.
 {
-  "reply": "<nội dung câu trả lời của bạn, có thể dùng markdown để định dạng văn bản đẹp>",
+  "reply": "<nội dung câu trả lời đối thoại của bạn bằng tiếng Việt, có thể dùng markdown>",
   "questions": [
     {
       "question": "<nội dung câu hỏi>",
-      "suggestedAnswers": ["<gợi ý trả lời 1>", "<gợi ý trả lời 2>"],
+      "suggestedAnswers": ["<gợi ý trả lời 1>", "<gợi ý trả lời 2>", "<gợi ý trả lời 3>"],
       "multiple": true
     }
   ]

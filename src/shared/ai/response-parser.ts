@@ -166,7 +166,10 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema
 }
 
-export const extractJsonFromText = (text: string): string => {
+export const extractJsonFromText = (
+  text: string,
+  expectedType: "object" | "array" | "any" = "any"
+): string => {
   let cleaned = text.trim()
 
   // 1. Try to clean standard or unclosed code fences
@@ -184,30 +187,48 @@ export const extractJsonFromText = (text: string): string => {
     }
   }
 
-  // 2. If it still doesn't parse, try brace-matching to extract the JSON object
+  // 2. If it still doesn't parse, try brace-matching to extract the JSON object/array
   try {
-    JSON.parse(cleaned)
-    return cleaned
+    const parsed = JSON.parse(cleaned)
+    if (expectedType === "object" && Array.isArray(parsed)) {
+      // Intentionally fall through to look for an outer object if an array was parsed
+    } else if (expectedType === "array" && !Array.isArray(parsed)) {
+      // Intentionally fall through to look for an array if an object was parsed
+    } else {
+      return cleaned
+    }
   } catch (err) {
+    // continue below
+  }
+
+  // If we expect an object or any (not explicitly array):
+  if (expectedType !== "array") {
     const firstBrace = cleaned.indexOf("{")
     const lastBrace = cleaned.lastIndexOf("}")
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
       const candidate = cleaned.substring(firstBrace, lastBrace + 1).trim()
       try {
-        JSON.parse(candidate)
-        return candidate
+        const parsed = JSON.parse(candidate)
+        if (!Array.isArray(parsed)) {
+          return candidate
+        }
       } catch (_) {
         // Fall back to the cleaned string if parsing the candidate also fails
       }
     }
+  }
 
+  // If we expect an array or text explicitly starts with [:
+  if (expectedType === "array" || (expectedType === "any" && cleaned.startsWith("["))) {
     const firstBracket = cleaned.indexOf("[")
     const lastBracket = cleaned.lastIndexOf("]")
     if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
       const candidate = cleaned.substring(firstBracket, lastBracket + 1).trim()
       try {
-        JSON.parse(candidate)
-        return candidate
+        const parsed = JSON.parse(candidate)
+        if (Array.isArray(parsed)) {
+          return candidate
+        }
       } catch (_) {}
     }
   }
@@ -215,19 +236,179 @@ export const extractJsonFromText = (text: string): string => {
   return cleaned
 }
 
+/**
+ * Safely extract clean conversational reply string from text that may be
+ * a raw JSON or truncated JSON string, ensuring raw JSON structure is NEVER returned as the reply.
+ */
+export function extractCleanReplyFromRawText(rawText: string): string {
+  const trimmed = rawText.trim()
+  if (!trimmed) return ""
+
+  // If it's a code block ```json ... ```, strip it
+  let candidate = trimmed
+  if (candidate.startsWith("```")) {
+    candidate = candidate.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()
+  }
+
+  // 1. If it parses as a JSON object, get .reply
+  try {
+    const obj = JSON.parse(candidate)
+    if (obj && typeof obj.reply === "string") {
+      // Check if obj.reply is itself JSON-stringified
+      return extractCleanReplyFromRawText(obj.reply)
+    }
+  } catch (_) {}
+
+  // 2. Non-greedy regex to match "reply": "..."
+  const replyMatch = candidate.match(/(?:'|")reply(?:'|")\s*:\s*(['"])([\s\S]*?)(?<!\\)\1(?:\s*[,}]\s*|$)/)
+  if (replyMatch && replyMatch[2] !== undefined) {
+    try {
+      return JSON.parse(`"${replyMatch[2]}"`)
+    } catch (_) {
+      return replyMatch[2]
+        .replace(/\\n/g, "\n")
+        .replace(/\\"/g, '"')
+        .replace(/\\t/g, "\t")
+        .replace(/\\\\/g, "\\")
+    }
+  }
+
+  // 3. What if it was truncated IN THE MIDDLE of "reply"?
+  const openReplyMatch = candidate.match(/(?:'|")reply(?:'|")\s*:\s*(['"])([\s\S]*)$/)
+  if (openReplyMatch && openReplyMatch[2] !== undefined) {
+    let unclosed = openReplyMatch[2]
+    if (unclosed.endsWith(openReplyMatch[1])) {
+      unclosed = unclosed.slice(0, -1)
+    }
+    return unclosed
+      .replace(/\\n/g, "\n")
+      .replace(/\\"/g, '"')
+      .replace(/\\t/g, "\t")
+      .replace(/\\\\/g, "\\")
+      .trim()
+  }
+
+  // 4. If candidate does NOT start with { or [ and has no "reply":, it's already a plain text response
+  if (!candidate.startsWith("{") && !candidate.startsWith("[") && !candidate.includes('"reply"')) {
+    return candidate
+  }
+
+  // 5. Fallback: strip leading JSON wrapper
+  const stripped = candidate
+    .replace(/^\{[\s\S]*?"reply"\s*:\s*"/i, "")
+    .replace(/"\s*,[\s\S]*$/, "")
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"')
+    .replace(/\\t/g, "\t")
+    .replace(/\\\\/g, "\\")
+
+  return stripped.trim() || candidate
+}
+
+/**
+ * Salvage any completed question objects from text that contains "questions": [...]
+ */
+export function extractQuestionsFallback(text: string): Array<{
+  question: string
+  suggestedAnswers: string[]
+  multiple?: boolean
+}> {
+  const questions: Array<{ question: string; suggestedAnswers: string[]; multiple?: boolean }> = []
+
+  // Try to find individual question blocks: { "question": "...", "suggestedAnswers": [...] }
+  const blockRegex = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*?)"[\s\S]*?\}/g
+  let match: RegExpExecArray | null
+
+  while ((match = blockRegex.exec(text)) !== null) {
+    const blockStr = match[0]
+    try {
+      const parsed = JSON.parse(blockStr)
+      if (parsed.question) {
+        questions.push({
+          question: parsed.question,
+          suggestedAnswers: Array.isArray(parsed.suggestedAnswers) ? parsed.suggestedAnswers : [],
+          multiple: Boolean(parsed.multiple)
+        })
+        continue
+      }
+    } catch (_) {}
+
+    // Regex extraction for question & answers inside block
+    const qMatch = blockStr.match(/"question"\s*:\s*"((?:[^"\\]|\\.)*?)"/)
+    if (qMatch && qMatch[1]) {
+      const qText = qMatch[1].replace(/\\"/g, '"').replace(/\\n/g, "\n")
+      const answers: string[] = []
+      const answersMatch = blockStr.match(/"suggestedAnswers"\s*:\s*\[([\s\S]*?)\]/)
+      if (answersMatch && answersMatch[1]) {
+        const itemRegex = /"((?:[^"\\]|\\.)*?)"/g
+        let aMatch: RegExpExecArray | null
+        while ((aMatch = itemRegex.exec(answersMatch[1])) !== null) {
+          answers.push(aMatch[1].replace(/\\"/g, '"'))
+        }
+      }
+      const multipleMatch = blockStr.match(/"multiple"\s*:\s*(true|false)/i)
+      questions.push({
+        question: qText,
+        suggestedAnswers: answers,
+        multiple: multipleMatch ? multipleMatch[1].toLowerCase() === "true" : false
+      })
+    }
+  }
+
+  return questions
+}
+
 export const parseResponse = <T = any>(
   rawText: string,
   actionType: ActionType | string
 ): T => {
-  const jsonText = extractJsonFromText(rawText)
+  const expectedType = actionType === ActionType.PRIORITY_RANKING ? "array" : "object"
+  const jsonText = extractJsonFromText(rawText, expectedType)
 
   let parsedJson: any
   try {
     parsedJson = JSON.parse(jsonText)
+    // If the schema expects an object but parsedJson is an array, force fallback to raw text parsing
+    if (expectedType === "object" && Array.isArray(parsedJson)) {
+      throw new Error("Expected JSON object but extracted an array")
+    }
   } catch (err: any) {
     // If text is not JSON and actionType allows plain string or fallback
     if (actionType === ActionType.REWRITE || actionType === ActionType.GENERATE_SECTION) {
       return { content: rawText, rewrittenContent: rawText } as unknown as T
+    }
+
+    if (actionType === ActionType.CHAT) {
+      const cleanReply = extractCleanReplyFromRawText(rawText)
+      const salvagedQuestions = extractQuestionsFallback(rawText)
+      return { reply: cleanReply, questions: salvagedQuestions } as unknown as T
+    }
+
+    if (actionType === ActionType.CHAT_DISCOVERY) {
+      const cleanReply = extractCleanReplyFromRawText(rawText)
+      const salvagedQuestions = extractQuestionsFallback(rawText)
+
+      // Try to extract evaluation if partially present
+      let evaluation: any = {
+        currentStep: 1,
+        stepCompleteness: 50,
+        isStepComplete: false,
+        isDiscoveryComplete: false,
+        recommendedAction: "continue_discussion"
+      }
+      const evalMatch = rawText.match(/"evaluation"\s*:\s*(\{[\s\S]*?\})/)
+      if (evalMatch && evalMatch[1]) {
+        try {
+          const parsedEval = JSON.parse(evalMatch[1])
+          evaluation = { ...evaluation, ...parsedEval }
+        } catch (_) {}
+      }
+
+      return {
+        reply: cleanReply,
+        questions: salvagedQuestions,
+        evaluation
+      } as unknown as T
     }
     
     if (actionType === ActionType.PRIORITY_RANKING) {
@@ -254,12 +435,68 @@ export const parseResponse = <T = any>(
 
   const validation = schema.safeParse(parsedJson)
   if (!validation.success) {
+    // Unconditional graceful recovery for CHAT and CHAT_DISCOVERY if schema validation fails
+    if (actionType === ActionType.CHAT) {
+      const cleanReply = extractCleanReplyFromRawText(
+        typeof parsedJson?.reply === "string" ? parsedJson.reply : rawText
+      )
+      const salvagedQuestions = Array.isArray(parsedJson?.questions)
+        ? parsedJson.questions
+        : extractQuestionsFallback(rawText)
+      return {
+        reply: cleanReply,
+        questions: salvagedQuestions
+      } as unknown as T
+    }
+
+    if (actionType === ActionType.CHAT_DISCOVERY) {
+      const cleanReply = extractCleanReplyFromRawText(
+        typeof parsedJson?.reply === "string" ? parsedJson.reply : rawText
+      )
+      const salvagedQuestions = Array.isArray(parsedJson?.questions)
+        ? parsedJson.questions
+        : extractQuestionsFallback(rawText)
+
+      let evaluation: any = {
+        currentStep: 1,
+        stepCompleteness: 50,
+        isStepComplete: false,
+        isDiscoveryComplete: false,
+        recommendedAction: "continue_discussion"
+      }
+      if (parsedJson && typeof parsedJson === "object" && !Array.isArray(parsedJson) && parsedJson.evaluation) {
+        evaluation = { ...evaluation, ...parsedJson.evaluation }
+      } else {
+        const evalMatch = rawText.match(/"evaluation"\s*:\s*(\{[\s\S]*?\})/)
+        if (evalMatch && evalMatch[1]) {
+          try {
+            evaluation = { ...evaluation, ...JSON.parse(evalMatch[1]) }
+          } catch (_) {}
+        }
+      }
+
+      return {
+        reply: cleanReply,
+        questions: salvagedQuestions,
+        evaluation
+      } as unknown as T
+    }
+
     throw new AiActionError(
       422,
       `AI response failed Zod schema validation for action '${actionType}': ${validation.error.message}`,
       "SCHEMA_MISMATCH",
       { rawText, validationErrors: validation.error.format() }
     )
+  }
+
+  // Ensure reply is clean even on successful schema parse (guard against double-stringified reply)
+  if (
+    (actionType === ActionType.CHAT || actionType === ActionType.CHAT_DISCOVERY) &&
+    validation.data &&
+    typeof (validation.data as any).reply === "string"
+  ) {
+    (validation.data as any).reply = extractCleanReplyFromRawText((validation.data as any).reply)
   }
 
   return validation.data as T

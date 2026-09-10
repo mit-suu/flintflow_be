@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
+import { Response } from "express"
 import { ChatSession, IChatSession, IChatMessage } from "./chat-session.model.js"
-import { executeAiAction } from "../../shared/ai/ai-action.service.js"
+import { executeAiAction, executeAiActionStream } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
@@ -154,9 +155,13 @@ export const sendMessageAndGetResponse = async (
   }
 
   // 7. Add AI response to history
+  const contentToStore = typeof aiResult.data === "string"
+    ? aiResult.data
+    : JSON.stringify(aiResult.data)
+
   const aiMsg: IChatMessage = {
     role: "ai",
-    content: JSON.stringify(aiResult.data),
+    content: contentToStore,
     step,
     discoveryStep,
     workspacePhase: currentWorkspacePhase,
@@ -166,6 +171,143 @@ export const sendMessageAndGetResponse = async (
   await session.save()
 
   return session
+}
+
+export const sendMessageStream = async (
+  projectId: string,
+  chatSessionId: string,
+  content: string,
+  step: string,
+  userId: string,
+  res: Response,
+  discoveryStep?: number
+): Promise<void> => {
+  const session = await ChatSession.findById(chatSessionId)
+  if (!session) {
+    res.write(`data: ${JSON.stringify({ type: "error", error: "Chat session not found" })}\n\n`)
+    res.end()
+    return
+  }
+
+  // 1. Add user message to session & save
+  const userMsg: IChatMessage = {
+    role: "user",
+    content,
+    step,
+    discoveryStep,
+    createdAt: new Date()
+  }
+  session.messages.push(userMsg)
+  await session.save()
+
+  // 2. Format history for AI context (last 12 messages)
+  const historyText = session.messages
+    .slice(-12)
+    .map((msg) => {
+      const roleLabel = msg.role === "user" ? "User" : "AI"
+      let text = msg.content
+      if (msg.role === "ai" && text.startsWith("{") && text.endsWith("}")) {
+        try {
+          const parsed = JSON.parse(text)
+          text = parsed.reply || text
+        } catch (_) {}
+      }
+      return `${roleLabel}: ${text}`
+    })
+    .join("\n")
+
+  // 3. Determine ActionType: Discovery chat vs regular chat
+  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
+  const actionType = isDiscoveryMode ? ActionType.CHAT_DISCOVERY : ActionType.CHAT
+
+  // 4. Build step name and doc context
+  const stepName = (SECTION_METADATA as any)[step]?.label || step
+  const historyTokens = Math.ceil(historyText.length / 4)
+  const chatTemplate = await getPromptTemplate(actionType)
+  const docContext = await buildDocumentContext(
+    projectId,
+    ActionType.CHAT,
+    undefined,
+    historyTokens,
+    chatTemplate.providerConfig.model,
+    chatTemplate.providerConfig.maxTokens
+  )
+
+  // 5. Build prompt variables
+  const promptVariables: Record<string, any> = {
+    step_name: stepName,
+    chat_history: historyText || "Không có lịch sử trước đó.",
+    input_text: content,
+    documentContext: docContext.contextText
+  }
+
+  if (isDiscoveryMode) {
+    promptVariables.discovery_step = String(discoveryStep)
+    promptVariables.completed_steps_summary = buildCompletedStepsSummary(session.messages)
+  }
+
+  // 6. Execute stream with Vercel AI SDK
+  try {
+    const aiResult = await executeAiActionStream(
+      actionType,
+      { promptVariables },
+      projectId,
+      userId,
+      {
+        onTextDelta: (delta: string) => {
+          try {
+            if (!res.destroyed && !res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ type: "text-delta", delta })}\n\n`)
+            }
+          } catch (_) {}
+        }
+      }
+    )
+
+    // 7. Add AI response to MongoDB history
+    const contentToStore = typeof aiResult.data === "string"
+      ? aiResult.data
+      : JSON.stringify(aiResult.data)
+
+    const aiMsg: IChatMessage = {
+      role: "ai",
+      content: contentToStore,
+      step,
+      discoveryStep,
+      createdAt: new Date()
+    }
+    session.messages.push(aiMsg)
+    await session.save()
+
+    // 8. Send finish event with updated session and parsed data
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "finish",
+            session,
+            data: aiResult.data,
+            tokensUsed: aiResult.tokensUsed,
+            cost: aiResult.cost
+          })}\n\n`
+        )
+        res.end()
+      }
+    } catch (_) {}
+  } catch (error: any) {
+    console.error("AI stream failed in chat session service:", error)
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            error: error.message || "AI generation failed"
+          })}\n\n`
+        )
+        res.end()
+      }
+    } catch (_) {}
+  }
 }
 
 /**

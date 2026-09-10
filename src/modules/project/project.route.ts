@@ -394,5 +394,6 @@ router.delete("/:projectId/chats/:chatId", authMiddleware, chatSessionController
  */
 router.post("/:projectId/chats/:chatId/messages", authMiddleware, chatSessionController.sendMessage)
 router.post("/:projectId/chats/:chatId/rollback", authMiddleware, chatSessionController.rollbackChatSession)
+router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, chatSessionController.sendMessageStream)
 
 export default router
