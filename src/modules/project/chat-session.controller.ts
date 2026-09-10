@@ -62,6 +62,41 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
   return sendSuccess(res, 200, updatedSession)
 })
 
+export const sendMessageStream = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  }
+
+  const projectId = req.params.projectId as string
+  const chatId = req.params.chatId as string
+  const { content, step, discoveryStep } = req.body
+
+  if (!content) {
+    throw new ApiError(400, "Message content is required", "CONTENT_REQUIRED")
+  }
+  if (!step) {
+    throw new ApiError(400, "Step is required", "STEP_REQUIRED")
+  }
+
+  // Set SSE streaming headers
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
+  res.setHeader("Cache-Control", "no-cache, no-transform")
+  res.setHeader("Connection", "keep-alive")
+  res.setHeader("X-Accel-Buffering", "no")
+  res.flushHeaders?.()
+
+  await chatSessionService.sendMessageStream(
+    projectId,
+    chatId,
+    content,
+    step,
+    userId,
+    res,
+    discoveryStep ? Number(discoveryStep) : undefined
+  )
+})
+
 export const deleteChatSession = catchAsync(async (req: Request, res: Response) => {
   const chatId = req.params.chatId as string
   if (!chatId) {

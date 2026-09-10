@@ -97,20 +97,11 @@ User's latest message:
 {{input_text}}
 
 Instructions:
-- Respond as a friendly but precise BA. If clarification is needed, ask 1-3 questions in the "questions" array, each with 2-4 suggested answers in "suggestedAnswers".
-- If no questions are needed, set "questions": [].
-- If source documents were provided, reference them when relevant to ground your questions in real requirements.
-- Keep your reply concise (2-4 sentences max) unless the user asks for detail.
-- Return ONLY a valid JSON object (no markdown wrapper):
-{
-  "reply": "<your response here>",
-  "questions": [
-    {
-      "question": "<clarifying question>",
-      "suggestedAnswers": ["<suggested answer 1>", "<suggested answer 2>"]
-    }
-  ]
-}`,
+- Trả lời tin nhắn của người dùng một cách thân thiện, tự nhiên, chuyên nghiệp và súc tích bằng tiếng Việt.
+- Đặt câu hỏi làm rõ hoặc tư vấn trực tiếp trong nội dung câu trả lời (dưới dạng văn bản Markdown thông thường).
+- TUYỆT ĐỐI KHÔNG trả về JSON.
+- TUYỆT ĐỐI KHÔNG tạo danh sách câu hỏi trắc nghiệm hoặc gợi ý câu trả lời dạng JSON hay cấu trúc mảng (như questions, suggestedAnswers).
+- Trả lời trực tiếp dạng văn bản thuần túy, có thể dùng định dạng Markdown (in đậm, danh sách gạch đầu dòng) để trình bày rõ ràng, mạch lạc.`,
     providerConfig: { provider: "openai", model: "gpt-4o-mini", maxTokens: 1024, temperature: 0.7 }
   },
   // Task 2b: Summarize uploaded document — chạy 1 lần sau parse, lưu vào ProjectDocument.summary
@@ -160,55 +151,13 @@ Document content:
 ## USER'S LATEST MESSAGE
 {{input_text}}
 
-## YOUR TASK
-1. Respond to the user's message naturally and professionally in Vietnamese.
-2. Focus on gathering information for the current step (Step {{discovery_step}}).
-3. If the user provides enough information for the current step:
-   - Summarize what you've gathered for this step in "reply" and "stepSummary".
-   - Suggest the user confirm to move to the next step.
-   - Set "isStepComplete": true, "recommendedAction": "propose_next_step".
-   - BẮT BUỘC đặt "questions": []. TUYỆT ĐỐI KHÔNG đưa ra câu hỏi của bước tiếp theo trong tin nhắn này. Câu hỏi của bước tiếp theo chỉ được đưa ra sau khi người dùng xác nhận chuyển bước (qua tin nhắn 'Bắt đầu Step...').
-4. Evaluate the completeness of the current step and the overall discovery process.
-5. If you need to ask clarifying questions to gather information for the current step:
-   - Formulate 1-3 focused questions in the "questions" array.
-   - For EACH question:
-     + "question": Nội dung câu hỏi ngắn gọn, đi thẳng vào vấn đề.
-     + "suggestedAnswers": 2-4 câu trả lời gợi ý thực tế, súc tích.
-     + "multiple": Đặt 'true' nếu câu hỏi cho phép chọn nhiều phương án (checkbox) (ví dụ: các tính năng cần có, danh sách người dùng mục tiêu, các rủi ro, các kênh tiếp cận...). Đặt 'false' nếu câu hỏi chỉ chọn 1 phương án duy nhất (radio) (ví dụ: mô hình kinh doanh chính, nhóm đối tượng ưu tiên số 1, giải pháp cốt lõi...).
-   - In "reply", provide conversational context, encouragement, or summary. Do not duplicate the full text of the questions inside "reply".
-6. If you do NOT need to ask questions (e.g. you are just summarizing, explaining, confirming, or showing completion):
-   - Set "questions": []. Absolutely DO NOT generate questions or suggestions when none are asked.
-
-## RESPONSE FORMAT — Return ONLY a valid JSON object (no markdown wrapper):
-{
-  "reply": "<your response in Vietnamese, can use markdown formatting>",
-  "questions": [
-    {
-      "question": "<câu hỏi 1>",
-      "suggestedAnswers": ["<gợi ý trả lời 1a>", "<gợi ý trả lời 1b>", "<gợi ý trả lời 1c>"],
-      "multiple": <true nếu chọn nhiều đáp án, false nếu chỉ chọn 1 đáp án>
-    }
-  ],
-  "evaluation": {
-    "currentStep": {{discovery_step}},
-    "stepCompleteness": <0-100, estimate how complete the current step information gathering is>,
-    "isStepComplete": <true if the current step has enough information to move on, false otherwise>,
-    "isDiscoveryComplete": <true ONLY if ALL 6 steps have sufficient information to generate a Product Brief>,
-    "recommendedAction": "<one of: ask_clarification | propose_next_step | show_summary | continue_discussion>",
-    "stepSummary": "<1-2 sentence summary of what has been gathered for the current step so far>",
-    "missingInfo": ["<specific information still needed for the current step>"]
-  }
-}
-
-RULES for evaluation:
-- "isStepComplete" = true means user has provided the core information for this step (not necessarily exhaustive, but enough to proceed).
-- QUY TẮC BẮT BUỘC VỀ CHUYỂN BƯỚC: Khi một bước hoàn thành (isStepComplete = true), AI CHỈ xác nhận và tóm tắt bước hiện tại, TUYỆT ĐỐI KHÔNG sinh câu hỏi cho bước tiếp theo. Đặt "questions": []. Bộ câu hỏi của bước tiếp theo CHỈ được sinh ra khi nhận được tin nhắn bắt đầu bước mới từ người dùng (ví dụ: 'Bắt đầu Step 2...').
-- Khi người dùng gửi thông tin "Bổ sung thêm" cho một bước đã hoàn thành hoặc cơ bản đầy đủ, hãy tổng hợp thông tin mới vào "stepSummary", nâng cao "stepCompleteness" (90-100%), và BẮT BUỘC đặt "isStepComplete": true, "recommendedAction": "propose_next_step", "questions": [] để người dùng có thể chuyển tiếp sang bước sau mà không bị kẹt.
-- "isDiscoveryComplete" = true ONLY when you are confident that steps 1-6 all have adequate coverage. This should be rare before step 6.
-- "recommendedAction" = "propose_next_step" when isStepComplete is true and there are remaining steps.
-- "recommendedAction" = "show_summary" when isDiscoveryComplete is true.
-- "stepCompleteness" is a rough estimate: 0 = nothing gathered, 50 = partial, 80+ = mostly complete, 100 = fully covered.
-- Be conservative with isDiscoveryComplete — only set true when genuinely sufficient for Brief generation.`,
+## NHIỆM VỤ CỦA BẠN:
+1. Trả lời tin nhắn của người dùng một cách thân thiện, tự nhiên và chuyên nghiệp bằng tiếng Việt.
+2. Tập trung làm rõ các thông tin cần thiết cho bước hiện tại (Step {{discovery_step}} — {{step_name}}).
+3. Khi người dùng cung cấp thông tin, hãy tóm tắt, đưa ra nhận xét chuyên môn và hỏi các câu hỏi làm rõ tiếp theo trực tiếp trong nội dung văn bản.
+4. Trình bày nội dung đẹp mắt, dễ đọc bằng định dạng Markdown (tiêu đề nhỏ, in đậm ý quan trọng, danh sách gạch đầu dòng).
+5. TUYỆT ĐỐI KHÔNG trả về định dạng JSON.
+6. TUYỆT ĐỐI KHÔNG xuất các mảng dữ liệu hoặc câu hỏi recommend trắc nghiệm (như questions, suggestedAnswers, evaluation). Trả lời trực tiếp dạng văn bản đối thoại thông thường.`,
     providerConfig: { provider: "gemini", model: "gemini-2.5-flash", maxTokens: 1536, temperature: 0.7 }
   }
 }
