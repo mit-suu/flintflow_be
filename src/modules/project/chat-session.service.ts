@@ -30,7 +30,10 @@ export const getChatSessionById = async (chatSessionId: string): Promise<IChatSe
 }
 
 import { SECTION_METADATA } from "../../shared/constants/section-types.js"
-
+import { Project } from "./project.model.js"
+import { Section, SectionType } from "../specification/section.model.js"
+import { SectionVersion } from "../specification/section-version.model.js"
+import { calculateProgress } from "../specification/phase-gate.service.js"
 
 export const sendMessageAndGetResponse = async (
   projectId: string,
@@ -38,12 +41,16 @@ export const sendMessageAndGetResponse = async (
   content: string,
   step: string,
   userId: string,
-  discoveryStep?: number
+  discoveryStep?: number,
+  workspacePhase?: string
 ): Promise<IChatSession> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
   }
+
+  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
+  const currentWorkspacePhase = isDiscoveryMode ? "discovery" : (workspacePhase || "product_overview")
 
   // 1. Add user message
   const userMsg: IChatMessage = {
@@ -51,6 +58,7 @@ export const sendMessageAndGetResponse = async (
     content,
     step,
     discoveryStep,
+    workspacePhase: currentWorkspacePhase,
     createdAt: new Date()
   }
   session.messages.push(userMsg)
@@ -74,7 +82,6 @@ export const sendMessageAndGetResponse = async (
     .join("\n")
 
   // 3. Determine ActionType: Discovery chat (with evaluation) vs regular chat
-  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
   const actionType = isDiscoveryMode ? ActionType.CHAT_DISCOVERY : ActionType.CHAT
 
   // 4. Build step name and document context
@@ -138,6 +145,7 @@ export const sendMessageAndGetResponse = async (
       content: JSON.stringify(errorReply),
       step,
       discoveryStep,
+      workspacePhase: currentWorkspacePhase,
       createdAt: new Date()
     }
     session.messages.push(aiErrorMsg)
@@ -151,6 +159,7 @@ export const sendMessageAndGetResponse = async (
     content: JSON.stringify(aiResult.data),
     step,
     discoveryStep,
+    workspacePhase: currentWorkspacePhase,
     createdAt: new Date()
   }
   session.messages.push(aiMsg)
@@ -196,6 +205,161 @@ export const deleteChatSession = async (chatSessionId: string): Promise<void> =>
   const result = await ChatSession.deleteOne({ _id: chatSessionId })
   if (result.deletedCount === 0) {
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+}
+
+export interface RollbackResult {
+  session: IChatSession
+  project: any
+  sections: any[]
+  workspacePhase: string
+}
+
+export const rollbackMessages = async (
+  chatSessionId: string,
+  messageIndex: number
+): Promise<RollbackResult> => {
+  const session = await ChatSession.findById(chatSessionId)
+  if (!session) {
+    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+
+  if (
+    typeof messageIndex !== "number" ||
+    messageIndex < 0 ||
+    messageIndex >= session.messages.length
+  ) {
+    throw new ApiError(400, "Invalid message index for rollback", "INVALID_MESSAGE_INDEX")
+  }
+
+  const project = await Project.findById(session.projectId)
+  if (!project) {
+    throw new ApiError(404, "Project not found", "PROJECT_NOT_FOUND")
+  }
+
+  // 1. Cắt bỏ tin nhắn được chọn và toàn bộ các tin nhắn sau nó
+  const remainingMsgs = session.messages.slice(0, messageIndex)
+  session.messages = remainingMsgs
+  await session.save()
+
+  // 2. Xác định workspacePhase mục tiêu sau khi rollback
+  let targetPhase: "discovery" | "product_overview" | "functional_spec" | "nfr_appendix" | "export" = "discovery"
+
+  if (remainingMsgs.length === 0) {
+    targetPhase = "discovery"
+  } else {
+    // Quét từ tin nhắn cuối cùng còn lại ngược về trước
+    for (let i = remainingMsgs.length - 1; i >= 0; i--) {
+      const msg = remainingMsgs[i]
+      if (msg.workspacePhase) {
+        targetPhase = msg.workspacePhase as any
+        break
+      }
+      if (msg.discoveryStep) {
+        targetPhase = "discovery"
+        break
+      }
+      if (msg.role === "ai") {
+        try {
+          const parsed = JSON.parse(msg.content)
+          if (parsed.evaluation?.currentStep) {
+            targetPhase = "discovery"
+            break
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // 3. Xử lý xóa các Section đã sinh ra tương ứng và cập nhật Project
+  if (targetPhase === "discovery") {
+    // Khi hoàn tác về Discovery: Xóa TOÀN BỘ các Section đã sinh ra
+    const sectionsToDelete = await Section.find({ projectId: project._id })
+    const sectionIds = sectionsToDelete.map((s) => s._id)
+    if (sectionIds.length > 0) {
+      await SectionVersion.deleteMany({ sectionId: { $in: sectionIds } })
+      await Section.deleteMany({ projectId: project._id })
+    }
+
+    project.workspacePhase = "discovery"
+    project.currentPhase = 2
+    project.currentStep = "phase_2"
+    project.progressPercent = 0
+    project.baselineVersion = null
+    await project.save()
+  } else if (targetPhase === "product_overview") {
+    // Khi hoàn tác về Product Overview: Xóa toàn bộ Section đã sinh ra của Product Overview và các phase sau
+    const sectionsToDelete = await Section.find({ projectId: project._id })
+    const sectionIds = sectionsToDelete.map((s) => s._id)
+    if (sectionIds.length > 0) {
+      await SectionVersion.deleteMany({ sectionId: { $in: sectionIds } })
+      await Section.deleteMany({ projectId: project._id })
+    }
+
+    project.workspacePhase = "product_overview"
+    project.currentPhase = 2
+    project.currentStep = "phase_2"
+    project.progressPercent = 0
+    project.baselineVersion = null
+    await project.save()
+  } else if (targetPhase === "functional_spec") {
+    // Khi hoàn tác về Functional Spec: Xóa các Section thuộc Phase 3 và Phase 4
+    const phase3And4Types = Object.entries(SECTION_METADATA)
+      .filter(([_, meta]) => meta.phase >= 3)
+      .map(([type]) => type) as unknown as SectionType[]
+    const sectionsToDelete = await Section.find({
+      projectId: project._id,
+      type: { $in: phase3And4Types }
+    })
+    const sectionIds = sectionsToDelete.map((s) => s._id)
+    if (sectionIds.length > 0) {
+      await SectionVersion.deleteMany({ sectionId: { $in: sectionIds } })
+      await Section.deleteMany({
+        projectId: project._id,
+        type: { $in: phase3And4Types }
+      })
+    }
+
+    project.workspacePhase = "functional_spec"
+    project.currentPhase = 3
+    project.currentStep = "phase_3"
+    project.progressPercent = await calculateProgress(project._id.toString())
+    project.baselineVersion = null
+    await project.save()
+  } else if (targetPhase === "nfr_appendix") {
+    // Khi hoàn tác về NFR & Appendix: Xóa các Section thuộc Phase 4
+    const phase4Types = Object.entries(SECTION_METADATA)
+      .filter(([_, meta]) => meta.phase >= 4)
+      .map(([type]) => type) as unknown as SectionType[]
+    const sectionsToDelete = await Section.find({
+      projectId: project._id,
+      type: { $in: phase4Types }
+    })
+    const sectionIds = sectionsToDelete.map((s) => s._id)
+    if (sectionIds.length > 0) {
+      await SectionVersion.deleteMany({ sectionId: { $in: sectionIds } })
+      await Section.deleteMany({
+        projectId: project._id,
+        type: { $in: phase4Types }
+      })
+    }
+
+    project.workspacePhase = "nfr_appendix"
+    project.currentPhase = 4
+    project.currentStep = "phase_4"
+    project.progressPercent = await calculateProgress(project._id.toString())
+    project.baselineVersion = null
+    await project.save()
+  }
+
+  // 4. Lấy danh sách section còn lại của project
+  const remainingSections = await Section.find({ projectId: project._id }).sort({ order: 1 })
+
+  return {
+    session,
+    project,
+    sections: remainingSections,
+    workspacePhase: project.workspacePhase
   }
 }
 
