@@ -12,7 +12,7 @@ export const callGemini = async (
     throw new AiActionError(500, "Gemini API key is missing. Set GEMINI_API_KEY in environment.", "GEMINI_KEY_MISSING")
   }
 
-  const model = providerConfig.model || "gemini-2.5-flash"
+  const model = providerConfig.model || "gemini-3.5-flash"
   const maxTokens = providerConfig.maxTokens || 2048
   const temperature = providerConfig.temperature ?? 0.7
 

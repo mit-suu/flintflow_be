@@ -393,5 +393,6 @@ router.delete("/:projectId/chats/:chatId", authMiddleware, chatSessionController
  *         description: Chưa xác thực
  */
 router.post("/:projectId/chats/:chatId/messages", authMiddleware, chatSessionController.sendMessage)
+router.post("/:projectId/chats/:chatId/rollback", authMiddleware, chatSessionController.rollbackChatSession)
 
 export default router
