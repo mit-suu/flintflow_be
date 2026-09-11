@@ -18,99 +18,38 @@
  *   actionType, provider, aiModel, maxTokens, temperature, isActive
  */
 
-import fs from "node:fs"
-import path from "node:path"
-import { fileURLToPath } from "node:url"
 import mongoose from "mongoose"
 import dotenv from "dotenv"
-import matter from "gray-matter"
 import { env } from "../config/env.js"
+import { getPromptsDir } from "../config/paths.js"
+import {
+  listPromptAssets,
+  getPromptAssetIndex,
+  type PromptAsset
+} from "../shared/ai/prompt-assets.js"
 import { User } from "../modules/user/user.model.js"
 import { PromptTemplate } from "../modules/admin/prompt-template.model.js"
 
 dotenv.config()
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PROMPTS_DIR = path.join(__dirname, "prompts")
+const PROMPTS_DIR = getPromptsDir()
 const isDryRun = process.argv.includes("--dry-run")
 
-// ─── Types ───────────────────────────────────────────────────────
+// ─── Đọc asset qua loader dùng chung ─────────────────────────────
+//
+// Việc parse frontmatter + đệ quy thư mục nằm ở src/shared/ai/prompt-assets.ts,
+// dùng chung với prompt-registry.service.ts lúc chạy. Giữ hai bản parse riêng là
+// cách file .md trên đĩa và template lúc chạy trôi khỏi nhau mà không ai biết.
 
-type ParsedPrompt = {
-  file: string
-  actionType: string
-  provider: string
-  aiModel: string
-  maxTokens: number
-  temperature: number
-  isActive: boolean
-  description?: string
-  template: string
+type ParsedPrompt = PromptAsset
+
+const loadPromptFiles = (): ParsedPrompt[] => listPromptAssets()
+
+/** getPromptAssetIndex() tự nổ nếu có actionType trùng nhau. */
+const validateNoDuplicates = (_prompts: ParsedPrompt[]) => {
+  getPromptAssetIndex()
 }
 
-// ─── Bắt buộc các field frontmatter phải có ──────────────────────
-
-const REQUIRED_FIELDS = ["actionType", "provider", "aiModel", "maxTokens", "temperature"]
-
-// ─── Đọc & parse tất cả file .md trong prompts/ ──────────────────
-
-function loadPromptFiles(): ParsedPrompt[] {
-  if (!fs.existsSync(PROMPTS_DIR)) {
-    throw new Error(`Không tìm thấy thư mục prompts/: ${PROMPTS_DIR}`)
-  }
-
-  const files = fs.readdirSync(PROMPTS_DIR).filter((f) => f.endsWith(".md") && f !== "README.md")
-  if (files.length === 0) {
-    throw new Error(`Không có file .md nào trong ${PROMPTS_DIR}`)
-  }
-
-  const results: ParsedPrompt[] = []
-
-  for (const file of files) {
-    const fullPath = path.join(PROMPTS_DIR, file)
-    const raw = fs.readFileSync(fullPath, "utf-8")
-    const { data, content } = matter(raw)
-
-    // Validate required fields
-    const missing = REQUIRED_FIELDS.filter((f) => data[f] === undefined || data[f] === null)
-    if (missing.length > 0) {
-      throw new Error(`[${file}] Thiếu field frontmatter bắt buộc: ${missing.join(", ")}`)
-    }
-
-    const template = content.trim()
-    if (!template) {
-      throw new Error(`[${file}] Nội dung prompt (template) không được để trống.`)
-    }
-
-    results.push({
-      file,
-      actionType: String(data.actionType),
-      provider: String(data.provider),
-      aiModel: String(data.aiModel),
-      maxTokens: Number(data.maxTokens),
-      temperature: Number(data.temperature),
-      isActive: data.isActive !== false,
-      description: data.description ? String(data.description) : undefined,
-      template,
-    })
-  }
-
-  return results
-}
-
-// ─── Kiểm tra không có actionType trùng nhau ─────────────────────
-
-function validateNoDuplicates(prompts: ParsedPrompt[]) {
-  const seen = new Map<string, string>()
-  for (const p of prompts) {
-    if (seen.has(p.actionType)) {
-      throw new Error(
-        `actionType trùng lặp: "${p.actionType}" xuất hiện ở cả "${seen.get(p.actionType)}" và "${p.file}"`
-      )
-    }
-    seen.set(p.actionType, p.file)
-  }
-}
 
 // ─── Main ─────────────────────────────────────────────────────────
 

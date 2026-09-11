@@ -4,7 +4,7 @@ import { getActionCost } from "./credit-reservation.service.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { ApiError } from "../utils/api-error.js"
 import { sendSuccess } from "../types/api-response.js"
-import { executeDiagramPipeline } from "./diagram-pipeline.service.js"
+import { executeDiagramPipeline } from "../../modules/drawtest/diagram-pipeline.service.js"
 
 export const estimateCostHandler = async (
   req: Request,
