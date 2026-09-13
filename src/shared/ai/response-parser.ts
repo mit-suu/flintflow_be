@@ -2,36 +2,6 @@ import { z } from "zod"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 // Schemas per ActionType
-export const summarizeSchema = z.object({
-  summary: z.string(),
-  keyPoints: z.array(z.string()).optional()
-})
-
-export const extractSchema = z.object({
-  title: z.string().optional(),
-  entities: z.array(z.any()).optional(),
-  attributes: z.record(z.string(), z.any()).optional(),
-  requirements: z.array(z.string()).optional()
-})
-
-export const analysisSchema = z.object({
-  businessGoals: z.array(z.string()).optional(),
-  targetUsers: z.array(z.string()).optional(),
-  risks: z.array(z.string()).optional(),
-  constraints: z.array(z.string()).optional(),
-  summary: z.string().optional()
-})
-
-export const clarificationSchema = z.object({
-  questions: z.array(
-    z.object({
-      id: z.string().optional(),
-      question: z.string(),
-      reason: z.string().optional()
-    })
-  )
-})
-
 export const generateSectionSchema = z.object({
   sectionName: z.string().optional(),
   content: z.string(),
@@ -43,28 +13,6 @@ export const generateSectionSchema = z.object({
       excerpt: z.string()
     })
   ).optional()
-})
-
-export const verificationSchema = z.object({
-  score: z.number().optional(),
-  issues: z.array(
-    z.object({
-      severity: z.string().optional(),
-      description: z.string(),
-      suggestion: z.string().optional()
-    })
-  ),
-  overallStatus: z.string().optional()
-})
-
-export const rewriteSchema = z.object({
-  rewrittenContent: z.string(),
-  changesSummary: z.string().optional()
-})
-
-export const generateDiagramSchema = z.object({
-  explanation: z.string().optional(),
-  mermaidCode: z.string()
 })
 
 export const diagramClassifySchema = z.object({
@@ -149,14 +97,7 @@ export const summarizeDocumentSchema = z.object({
 })
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
-  [ActionType.SUMMARIZE]: summarizeSchema,
-  [ActionType.EXTRACT]: extractSchema,
-  [ActionType.ANALYSIS]: analysisSchema,
-  [ActionType.CLARIFICATION]: clarificationSchema,
   [ActionType.GENERATE_SECTION]: generateSectionSchema,
-  [ActionType.VERIFICATION]: verificationSchema,
-  [ActionType.REWRITE]: rewriteSchema,
-  [ActionType.GENERATE_DIAGRAM]: generateDiagramSchema,
   [ActionType.DIAGRAM_CLASSIFY]: diagramClassifySchema,
   [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema,
   [ActionType.PRIORITY_RANKING]: priorityRankingSchema,
@@ -374,7 +315,7 @@ export const parseResponse = <T = any>(
     }
   } catch (err: any) {
     // If text is not JSON and actionType allows plain string or fallback
-    if (actionType === ActionType.REWRITE || actionType === ActionType.GENERATE_SECTION) {
+    if (actionType === ActionType.GENERATE_SECTION) {
       return { content: rawText, rewrittenContent: rawText } as unknown as T
     }
 

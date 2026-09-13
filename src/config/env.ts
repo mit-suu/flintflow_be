@@ -1,38 +1,108 @@
+/**
+ * env.ts
+ * ─────────────────────────────────────────────────────────────────
+ * Đọc + VALIDATE biến môi trường một lần, fail-fast lúc khởi động.
+ *
+ * Vì sao validate: bản trước là một object hand-rolled với default hardcode,
+ * nghĩa là thiếu secret cũng chạy — JWT_ACCESS_SECRET âm thầm thành
+ * "access-secret". Một service ký token bằng secret ai cũng đoán được thì
+ * không phải là service có auth.
+ *
+ * Nguyên tắc:
+ *   - Mọi field giữ ĐÚNG kiểu như trước (chủ yếu string) để không phải sửa
+ *     28 chỗ đang đọc `env.*`.
+ *   - Ở production, những secret có default không an toàn trở thành BẮT BUỘC.
+ *   - Ở development, default vẫn còn để `npm run dev` chạy được ngay.
+ */
+
 import dotenv from "dotenv"
 import { fileURLToPath } from "url"
 import path from "path"
+import { z } from "zod"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: path.resolve(__dirname, "../../.env") })
 
-export const env = {
-  PORT: process.env.PORT || "5000",
-  NODE_ENV: process.env.NODE_ENV || "development",
-  MONGO_URI: process.env.MONGO_URI || "mongodb://localhost:27017/flintflow",
-  CLIENT_URL: process.env.CLIENT_URL || "http://localhost:3000",
-  JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET || "access-secret",
-  JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || "refresh-secret",
-  ACCESS_TOKEN_EXPIRES: process.env.ACCESS_TOKEN_EXPIRES || "15m",
-  REFRESH_TOKEN_EXPIRES: process.env.REFRESH_TOKEN_EXPIRES || "3d",
-  APP_URL: process.env.APP_URL || "http://localhost:3000",
-  SMTP_HOST: process.env.SMTP_HOST || "smtp.gmail.com",
-  SMTP_PORT: process.env.SMTP_PORT || "465",
-  SMTP_USER: process.env.SMTP_USER || "",
-  SMTP_PASS: process.env.SMTP_PASS || "",
-  EMAIL_FROM: process.env.EMAIL_FROM || "FlintFlow <no-reply@flintflow.io.vn>",
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || "",
-  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || "",
-  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || "",
-  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || "",
-  ADMIN_EMAIL: process.env.ADMIN_EMAIL,
-  ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY || "",
-  MODAL_BASE_URL:
-    process.env.MODAL_BASE_URL ||
-    "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1",
-  MODAL_PROXY_TOKEN_ID: process.env.MODAL_PROXY_TOKEN_ID || "",
-  MODAL_PROXY_TOKEN_SECRET: process.env.MODAL_PROXY_TOKEN_SECRET || "",
-  MODAL_API_KEY: process.env.MODAL_API_KEY || ""
+const isProd = process.env.NODE_ENV === "production"
+
+/** Secret không được dùng giá trị placeholder ở production. */
+const INSECURE_DEFAULTS = new Set([
+  "access-secret",
+  "refresh-secret",
+  "your_access_secret_here",
+  "your_refresh_secret_here"
+])
+
+const secret = (devDefault: string) =>
+  z
+    .string()
+    .default(devDefault)
+    .refine((v) => !isProd || (v.length >= 32 && !INSECURE_DEFAULTS.has(v)), {
+      message: "ở production phải được set tường minh và dài ≥ 32 ký tự"
+    })
+
+const envSchema = z.object({
+  PORT: z.string().default("5000"),
+  NODE_ENV: z.string().default("development"),
+
+  MONGO_URI: z
+    .string()
+    .default("mongodb://localhost:27017/flintflow")
+    .refine((v) => !isProd || !v.includes("localhost"), {
+      message: "ở production không được trỏ localhost"
+    }),
+
+  CLIENT_URL: z.string().default("http://localhost:3000"),
+  APP_URL: z.string().default("http://localhost:3000"),
+
+  JWT_ACCESS_SECRET: secret("access-secret"),
+  JWT_REFRESH_SECRET: secret("refresh-secret"),
+  ACCESS_TOKEN_EXPIRES: z.string().default("15m"),
+  REFRESH_TOKEN_EXPIRES: z.string().default("3d"),
+
+  SMTP_HOST: z.string().default("smtp.gmail.com"),
+  SMTP_PORT: z.string().default("465"),
+  SMTP_USER: z.string().default(""),
+  SMTP_PASS: z.string().default(""),
+  EMAIL_FROM: z.string().default("FlintFlow <no-reply@flintflow.io.vn>"),
+
+  GOOGLE_CLIENT_ID: z.string().default(""),
+
+  CLOUDINARY_CLOUD_NAME: z.string().default(""),
+  CLOUDINARY_API_KEY: z.string().default(""),
+  CLOUDINARY_API_SECRET: z.string().default(""),
+
+  ADMIN_EMAIL: z.string().optional(),
+  ADMIN_PASSWORD: z.string().optional(),
+
+  OPENAI_API_KEY: z.string().default(""),
+  ANTHROPIC_API_KEY: z.string().default(""),
+  GEMINI_API_KEY: z.string().default(""),
+
+  MODAL_BASE_URL: z
+    .string()
+    .default(
+      "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
+    ),
+  MODAL_PROXY_TOKEN_ID: z.string().default(""),
+  MODAL_PROXY_TOKEN_SECRET: z.string().default(""),
+  MODAL_API_KEY: z.string().default(""),
+
+  // ─── PlantUML (render diagram phía server, Phases §7.1) ───────────
+  // Self-host: `docker compose up -d plantuml`. Ở production PlantUML là một
+  // service RIÊNG, không phải sidecar trong image này.
+  PLANTUML_BASE_URL: z.string().default("http://localhost:8080"),
+  PLANTUML_TIMEOUT_MS: z.coerce.number().int().positive().default(15000)
+})
+
+const parsed = envSchema.safeParse(process.env)
+
+if (!parsed.success) {
+  const issues = parsed.error.issues
+    .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+    .join("\n")
+  console.error(`\n❌ Cấu hình môi trường không hợp lệ (NODE_ENV=${process.env.NODE_ENV}):\n${issues}\n`)
+  process.exit(1)
 }
+
+export const env = parsed.data

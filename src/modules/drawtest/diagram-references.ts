@@ -4,15 +4,17 @@
  * Helper module that reads diagram-skill reference files from disk
  * and formats them for injection into LLM prompts.
  *
- * Files are read from: src/scripts/prompts/diagram-skill/diagram/
+ * Files are read from: assets/diagram-skill/diagram/
  */
 
 import fs from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { getDiagramSkillDir } from "../../config/paths.js"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DIAGRAM_SKILL_DIR = path.join(__dirname, "../../scripts/prompts/diagram-skill/diagram")
+// Resolve qua getAssetsRoot() thay vì __dirname: `tsc` không emit file .md/.png,
+// nên đường dẫn theo __dirname trỏ vào dist/ — một thư mục chưa bao giờ tồn tại.
+// Đây là cùng một lớp bug với prompt asset (xem src/config/paths.ts).
+const DIAGRAM_SKILL_DIR = getDiagramSkillDir()
 
 // ─── Diagram type → playbook file mapping ────────────────────────
 

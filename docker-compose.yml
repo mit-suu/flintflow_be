@@ -1,0 +1,37 @@
+# Hạ tầng dev cho FlintFlow BE.
+#
+#   docker compose up -d plantuml mongo
+#
+# PlantUML render phía server vì hai lý do (Phases §7.1): web preview và export
+# dùng CHUNG một pipeline nên hình trong file .docx giống hệt hình trên màn hình;
+# và dữ liệu khách hàng không đi qua server công cộng.
+#
+# ⚠️ PRODUCTION: image của BE chỉ chứa Node. PlantUML phải là một service RIÊNG
+# (Azure Container App / App Service riêng) và set PLANTUML_BASE_URL trỏ tới nó.
+# Đây là việc infra chưa ai nhận, nhưng không chặn dev.
+
+services:
+  plantuml:
+    # TODO(pin): ghim tag cụ thể sau khi probe test xác nhận cách phát hiện lỗi
+    # (xem src/shared/diagram/plantuml.test.ts). Dùng tag nổi `jetty` lúc này vì
+    # ghim một version chưa kiểm chứng sẽ làm `docker compose up` fail ngay.
+    image: plantuml/plantuml-server:jetty
+    container_name: flintflow-plantuml
+    ports:
+      - "8080:8080"
+    environment:
+      # Cho phép diagram lớn (use-case diagram 70 UC vượt giới hạn mặc định)
+      PLANTUML_LIMIT_SIZE: "8192"
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    container_name: flintflow-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

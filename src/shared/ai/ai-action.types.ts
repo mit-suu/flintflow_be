@@ -1,12 +1,5 @@
 export enum ActionType {
-  SUMMARIZE = "summarize",
-  EXTRACT = "extract",
-  ANALYSIS = "analysis",
-  CLARIFICATION = "clarification",
   GENERATE_SECTION = "generate_section",
-  VERIFICATION = "verification",
-  REWRITE = "rewrite",
-  GENERATE_DIAGRAM = "generate_diagram",
   DIAGRAM_CLASSIFY = "diagram_classify",
   DIAGRAM_GENERATE = "diagram_generate",
   PRIORITY_RANKING = "priority_ranking",
