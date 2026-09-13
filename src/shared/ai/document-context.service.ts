@@ -63,20 +63,13 @@ export const SECTION_NEEDS_SOURCE_DOCUMENTS: Record<string, boolean> = {
  * false = không cần documents
  */
 const ACTION_NEEDS_SOURCE_DOCUMENTS: Record<string, boolean> = {
-  [ActionType.SUMMARIZE]: true,
-  [ActionType.EXTRACT]: true,
-  [ActionType.ANALYSIS]: true,
-  [ActionType.CLARIFICATION]: true,
   [ActionType.CHAT]: true,
   [ActionType.SUMMARIZE_DOCUMENT]: true,
   // Actions dưới đây không cần document gốc:
-  [ActionType.VERIFICATION]: false,
-  [ActionType.REWRITE]: false,
   [ActionType.DIAGRAM_CLASSIFY]: false,
   [ActionType.DIAGRAM_GENERATE]: false,
   [ActionType.PRIORITY_RANKING]: false,
   [ActionType.SCOPE_OUT_OF_SCOPE]: false,
-  [ActionType.GENERATE_DIAGRAM]: false
 }
 
 // ─── Context window estimates per model ──────────────────────────────────────

@@ -5,13 +5,7 @@ import { PricingConfig } from "../../modules/admin/pricing-config.model.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 const DEFAULT_ACTION_COSTS: Record<string, number> = {
-  [ActionType.SUMMARIZE]: 1,
-  [ActionType.EXTRACT]: 2,
-  [ActionType.ANALYSIS]: 3,
-  [ActionType.CLARIFICATION]: 2,
   [ActionType.GENERATE_SECTION]: 5,
-  [ActionType.VERIFICATION]: 4,
-  [ActionType.REWRITE]: 2,
   [ActionType.DIAGRAM_CLASSIFY]: 1,
   [ActionType.DIAGRAM_GENERATE]: 4,
   [ActionType.PRIORITY_RANKING]: 5,

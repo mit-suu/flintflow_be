@@ -10,8 +10,8 @@
  * a richer pipeline that leverages diagram-skill knowledge.
  */
 
-import { executeAiAction, ExecuteAiActionOptions } from "./ai-action.service.js"
-import { ActionType, AiActionError } from "./ai-action.types.js"
+import { executeAiAction, ExecuteAiActionOptions } from "../../shared/ai/ai-action.service.js"
+import { ActionType, AiActionError } from "../../shared/ai/ai-action.types.js"
 import { buildSystemReference, isDiagramSkillAvailable } from "./diagram-references.js"
 
 // ─── Types ───────────────────────────────────────────────────────
