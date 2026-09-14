@@ -50,7 +50,7 @@ export const planConfig = {
   /** Kỳ subscription (ngày). */
   periodDays: 30,
   packages: [
-    { id: "pack_100", label: "Gói 100 credit", credits: 100, amount: 49_000, currency: "VND" },
+    { id: "pack_100", label: "Gói 100 credit", credits: 100, amount: 4_000, currency: "VND" },
     { id: "pack_500", label: "Gói 500 credit", credits: 500, amount: 199_000, currency: "VND" },
     { id: "pack_1500", label: "Gói 1500 credit", credits: 1500, amount: 499_000, currency: "VND" }
   ] satisfies CreditPackage[]
