@@ -6,7 +6,10 @@ import { ApiError } from "../utils/api-error.js"
 import { sendSuccess } from "../types/api-response.js"
 import { ActionType } from "./ai-action.types.js"
 
-const VALID_ACTION_TYPES = new Set<string>(Object.values(ActionType))
+/** Pipeline Excalidraw đã archive, prompt không còn — gọi tới chỉ nổ 500 khi nạp template. */
+const REMOVED_ACTION_TYPES = new Set<string>([ActionType.DIAGRAM_CLASSIFY, ActionType.DIAGRAM_GENERATE])
+
+const VALID_ACTION_TYPES = new Set<string>(Object.values(ActionType).filter((t) => !REMOVED_ACTION_TYPES.has(t)))
 
 export const estimateCostHandler = async (
   req: Request,

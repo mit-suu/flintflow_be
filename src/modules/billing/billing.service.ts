@@ -7,7 +7,7 @@ import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
-import { planConfig, findPackage, getPlan, PlanId } from "./plan.config.js"
+import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
   buildCallbackUrl,
   createPaymentOrder,
@@ -202,7 +202,7 @@ const settleIntent = async (
       { ...options, returnDocument: "after" }
     )
     if (!intent) return null
-    if (outcome === "failed") return { intent, balance: undefined }
+    if (outcome === "failed") return { intent, balance: undefined, planChange: null }
 
     const userId = intent.userId.toString()
     await getOrCreateWallet(userId, session)
@@ -229,13 +229,19 @@ const settleIntent = async (
       options
     )
 
-    return { intent, balance: wallet.balance }
+    // Checkout `plan:<id>`: tiền về thì kích hoạt gói trong cùng transaction với cộng credit
+    const plan = planFromPackageId(intent.packageId)
+    const planChange = plan ? await activatePlan(userId, plan, session) : null
+
+    return { intent, balance: wallet.balance, planChange }
   })
 
   if (!processed) return null
 
-  const { intent, balance } = processed
+  const { intent, balance, planChange } = processed
   const userId = intent.userId.toString()
+
+  if (planChange?.changed) await notifyPlanChanged(userId, planChange)
 
   if (outcome === "succeeded") {
     await notify(userId, {
@@ -380,15 +386,32 @@ export const handlePaymentCallback = async (
 
 // ─── Nâng cấp gói ────────────────────────────────────────────────────
 
-export const upgradePlan = async (userId: string, plan: PlanId) => {
-  const current = await Subscription.findOne({ userId })
-  if (current && current.plan === plan && current.status === "active") {
-    return current
+interface PlanChange {
+  subscription: unknown
+  periodEnd: Date | null
+  plan: PlanId
+  previousPlan: PlanId | null
+  changed: boolean
+}
+
+/**
+ * Ghi Subscription. Gói trả phí mua lại khi còn hạn thì gia hạn từ cuối kỳ hiện tại;
+ * về lại gói miễn phí đang dùng là no-op. Không có side effect ngoài DB (notify gọi sau).
+ */
+const activatePlan = async (userId: string, plan: PlanId, session?: ClientSession): Promise<PlanChange> => {
+  const options = sessionOptions(session)
+  const definition = getPlan(plan)
+  const current = await Subscription.findOne({ userId }, null, options)
+  const previousPlan = (current?.plan as PlanId | undefined) ?? null
+  const now = new Date()
+  const active = current?.status === "active" && current.plan === plan
+
+  if (active && definition.priceVnd === 0) {
+    return { subscription: current, periodEnd: current.currentPeriodEnd ?? null, plan, previousPlan, changed: false }
   }
 
-  const definition = getPlan(plan)
-  const now = new Date()
-  const periodEnd = new Date(now.getTime() + planConfig.periodDays * 24 * 60 * 60 * 1000)
+  const start = active && current.currentPeriodEnd > now ? current.currentPeriodEnd : now
+  const periodEnd = new Date(start.getTime() + planConfig.periodDays * 24 * 60 * 60 * 1000)
 
   const subscription = await Subscription.findOneAndUpdate(
     { userId },
@@ -397,21 +420,46 @@ export const upgradePlan = async (userId: string, plan: PlanId) => {
         plan,
         status: "active",
         monthlyCreditsAllotment: definition.monthlyCredits,
-        currentPeriodStart: now,
+        currentPeriodStart: active ? current.currentPeriodStart : now,
         currentPeriodEnd: periodEnd
       },
       $setOnInsert: { userId: new mongoose.Types.ObjectId(userId) }
     },
-    { upsert: true, returnDocument: "after" }
+    { ...options, upsert: true, returnDocument: "after" }
   )
 
+  return { subscription, periodEnd, plan, previousPlan, changed: true }
+}
+
+const notifyPlanChanged = async (userId: string, change: PlanChange) => {
+  const definition = getPlan(change.plan)
+  const periodEnd = change.periodEnd
   await notify(userId, {
     type: "plan_changed",
     title: `Đã chuyển sang gói ${definition.label}`,
-    body: `Gói ${definition.label} có hiệu lực đến ${periodEnd.toLocaleDateString("vi-VN")}.`,
+    body: periodEnd
+      ? `Gói ${definition.label} có hiệu lực đến ${new Date(periodEnd).toLocaleDateString("vi-VN")}.`
+      : `Gói ${definition.label} đã được kích hoạt.`,
     link: "/home/billing",
-    meta: { plan, previousPlan: current?.plan ?? null }
+    meta: { plan: change.plan, previousPlan: change.previousPlan }
   })
+}
 
-  return subscription
+/**
+ * Đổi gói không qua thanh toán — chỉ cho gói miễn phí. Gói trả phí phải mua qua
+ * `POST /billing/checkout { packageId: "plan:<id>" }` (payment_service thật, review T04).
+ */
+export const upgradePlan = async (userId: string, plan: PlanId) => {
+  const definition = getPlan(plan)
+  if (definition.priceVnd > 0) {
+    throw new ApiError(
+      402,
+      `Gói ${definition.label} cần thanh toán. Tạo checkout với packageId "${planPackageId(plan)}".`,
+      "PAYMENT_REQUIRED"
+    )
+  }
+
+  const change = await activatePlan(userId, plan)
+  if (change.changed) await notifyPlanChanged(userId, change)
+  return change.subscription
 }

@@ -17,6 +17,9 @@ import verificationRoutes from "./modules/verification/verification-context.rout
 import notificationRoutes from "./modules/notification/notification.route.js"
 import billingRoutes from "./modules/billing/billing.route.js"
 import spineRoutes from "./modules/spine/spine.route.js"
+import changesRoutes from "./modules/spine/changes.route.js"
+import flagsRoutes from "./modules/spine/flags.route.js"
+import diagramRoutes from "./modules/diagram/diagram.route.js"
 import exportRoutes from "./modules/render/export.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
@@ -78,6 +81,9 @@ app.use(
   })
 )
 
+// Preview export nhận RenderedDocument có ảnh base64 — vượt giới hạn 100KB mặc định.
+// Parser riêng chạy trước; parser chung bỏ qua body đã parse.
+app.use("/api/v1/export", express.json({ limit: "15mb" }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
@@ -116,6 +122,9 @@ app.use("/api/v1/ai-actions", aiActionRoutes)
 app.use("/api/v1/admin", adminRoutes)
 app.use("/api/v1/projects", projectRoutes)
 app.use("/api/v1/projects", spineRoutes)
+app.use("/api/v1/projects", changesRoutes)
+app.use("/api/v1/projects", flagsRoutes)
+app.use("/api/v1/projects", diagramRoutes)
 app.use("/api/v1/specifications", specificationRoutes)
 app.use("/api/v1/verification", verificationRoutes)
 app.use("/api/v1/notifications", notificationRoutes)

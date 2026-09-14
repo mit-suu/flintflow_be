@@ -11,6 +11,8 @@
 
 import { ActionType } from "./ai-action.types.js"
 import { ProjectDocument } from "../../modules/project/project-document.model.js"
+import { DOCUMENTS_READ, getStep } from "../../modules/pipeline/step-registry.js"
+import { ApiError } from "../utils/api-error.js"
 
 // ─── SectionType needs-source map ────────────────────────────────────────────
 
@@ -70,6 +72,28 @@ const ACTION_NEEDS_SOURCE_DOCUMENTS: Record<string, boolean> = {
   [ActionType.DIAGRAM_GENERATE]: false,
   [ActionType.PRIORITY_RANKING]: false,
   [ActionType.SCOPE_OUT_OF_SCOPE]: false,
+}
+
+// ─── Step-level: Draft của pipeline (T11) ────────────────────────────────────
+
+/** Action pipeline dựng context theo step (tham số `sectionType` mang step id). */
+const PIPELINE_DRAFT_ACTIONS: ReadonlySet<string> = new Set([
+  ActionType.DRAFT,
+  ActionType.REGENERATE,
+  ActionType.REVISION
+])
+
+/**
+ * Step nào đọc tài liệu upload: step registry (T12) ghi token `documents` trong `reads`. Step suy dẫn
+ * từ Spine đã có (S-3.4, S-4.2, S-7.1…) không có token này. Id không phải step ⇒ không nạp.
+ */
+export const stepNeedsSourceDocuments = (stepId: string): boolean => {
+  try {
+    return getStep(stepId).reads.includes(DOCUMENTS_READ)
+  } catch (err) {
+    if (err instanceof ApiError) return false
+    throw err
+  }
 }
 
 // ─── Context window estimates per model ──────────────────────────────────────
@@ -154,6 +178,8 @@ export const buildDocumentContext = async (
       return empty
     }
     needsDocs = SECTION_NEEDS_SOURCE_DOCUMENTS[sectionType] ?? false
+  } else if (PIPELINE_DRAFT_ACTIONS.has(actionType)) {
+    needsDocs = sectionType ? stepNeedsSourceDocuments(sectionType) : false
   } else {
     needsDocs = ACTION_NEEDS_SOURCE_DOCUMENTS[actionType] ?? false
   }
