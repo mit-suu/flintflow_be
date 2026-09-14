@@ -14,11 +14,17 @@ vi.mock("./admin.service.js", async (importOriginal) => {
     listFeedback: vi.fn(async () => [])
   }
 })
-// adminMiddleware chỉ tra DB khi token không mang role
+// adminMiddleware luôn tra role/isActive trong DB (không tin role của JWT)
 vi.mock("../user/user.model.js", () => ({
-  User: { findById: vi.fn(async () => ({ role: "user" })) }
+  User: {
+    findById: vi.fn(async (id: string) => ({
+      role: id === "64b000000000000000000001" ? "admin" : "user",
+      isActive: true
+    }))
+  }
 }))
 
+import { User } from "../user/user.model.js"
 import { errorHandler } from "../../shared/middlewares/error-handler.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
 import adminRoutes from "./admin.route.js"
@@ -66,6 +72,14 @@ describe("admin routes (HTTP)", () => {
     for (const path of PATHS) {
       expect((await fetch(`${baseUrl}${path}`)).status, path).toBe(401)
     }
+  })
+
+  it("token còn role admin nhưng DB đã hạ quyền hoặc khoá tài khoản ⇒ 403", async () => {
+    vi.mocked(User.findById).mockResolvedValueOnce({ role: "user", isActive: true } as never)
+    expect((await fetch(`${baseUrl}/metrics`, { headers: adminAuth })).status).toBe(403)
+
+    vi.mocked(User.findById).mockResolvedValueOnce({ role: "admin", isActive: false } as never)
+    expect((await fetch(`${baseUrl}/metrics`, { headers: adminAuth })).status).toBe(403)
   })
 
   it("user thường nhận 403 (cả token có role và token cũ tra DB)", async () => {
