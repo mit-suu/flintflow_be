@@ -1,0 +1,11 @@
+{
+  "name": "renumber features",
+  "step_id": "S-4.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The user wants the SRS Workspace feature (F3, order 2) presented after Billing & Notifications. Moving one feature forces renumbering the features in between; all set ops must land in one transaction because order uniqueness and continuity are only checked at the end of the batch (invariant 5).",
+  "expected_ops": [
+    { "op": "set", "path": "features[id=F3].order", "value": 4, "reason": "User moved SRS Workspace after Billing & Notifications." },
+    { "op": "set", "path": "features[id=F4].order", "value": 2, "reason": "Renumber: shift up after the move." },
+    { "op": "set", "path": "features[id=F5].order", "value": 3, "reason": "Renumber: shift up after the move." }
+  ]
+}

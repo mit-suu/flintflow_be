@@ -1,0 +1,4462 @@
+{
+  "project": {
+    "name": "FlintFlow",
+    "vision": "Enable a solo founder or business analyst to turn a raw product idea into a complete, internally consistent SRS document through a guided AI conversation, without hiring a requirements engineer.",
+    "goals": [
+      "Produce a baseline-quality SRS following the FPT template within one working day",
+      "Keep every generated statement traceable to a structured field in the SRS Spine",
+      "Block no export: a watermarked working draft is always available after assembly",
+      "Keep AI spend predictable through per-step credit reservation and metering"
+    ],
+    "type": "web_application",
+    "domain": "Requirements engineering / AI-assisted documentation",
+    "complexity": "high",
+    "form_factor": "responsive_web",
+    "stakes": "production",
+    "working_mode": "coaching",
+    "release_scope": {
+      "in": [
+        "Guided Brief-to-SRS pipeline (B-0 through S-9) with per-step gates",
+        "SRS Spine with op-based writes, invariants and deterministic checks",
+        "Five server-rendered PlantUML diagram kinds",
+        "Word export with DRAFT watermark and baseline clean export",
+        "In-app notifications, credit ledger with mock payment gateway",
+        "Read-only admin views for users, metrics and AI cost"
+      ],
+      "out": [
+        "Import of existing SRS documents (.docx) and change requests on them",
+        "PDF export and handoff summary",
+        "Project sharing, cloning and role-based collaboration",
+        "Email notification channel",
+        "Admin write operations (user editing, prompt override)"
+      ]
+    }
+  },
+  "progress": {
+    "current_phase": "S-9",
+    "current_step": "S-9.5",
+    "screen_cursor": "S10",
+    "screen_queue": [],
+    "elicit_turns_this_phase": 0
+  },
+  "steps": [
+    {
+      "id": "S-1.1",
+      "status": "accepted",
+      "first_seq": 1,
+      "last_seq": 3,
+      "accepted_at": "2026-09-01T09:14:00.000Z"
+    },
+    {
+      "id": "S-1.2",
+      "status": "accepted",
+      "first_seq": 4,
+      "last_seq": 6,
+      "accepted_at": "2026-09-01T09:15:00.000Z"
+    },
+    {
+      "id": "S-1.3",
+      "status": "accepted",
+      "first_seq": 7,
+      "last_seq": 9,
+      "accepted_at": "2026-09-01T09:16:00.000Z"
+    },
+    {
+      "id": "S-1.4",
+      "status": "accepted",
+      "first_seq": 10,
+      "last_seq": 12,
+      "accepted_at": "2026-09-01T09:17:00.000Z"
+    },
+    {
+      "id": "S-2.1",
+      "status": "accepted",
+      "first_seq": 13,
+      "last_seq": 15,
+      "accepted_at": "2026-09-01T09:18:00.000Z"
+    },
+    {
+      "id": "S-2.2",
+      "status": "accepted",
+      "first_seq": 16,
+      "last_seq": 18,
+      "accepted_at": "2026-09-01T09:19:00.000Z"
+    },
+    {
+      "id": "S-2.3",
+      "status": "accepted",
+      "first_seq": 19,
+      "last_seq": 21,
+      "accepted_at": "2026-09-01T09:20:00.000Z"
+    },
+    {
+      "id": "S-2.4",
+      "status": "accepted",
+      "first_seq": 22,
+      "last_seq": 24,
+      "accepted_at": "2026-09-01T09:21:00.000Z"
+    },
+    {
+      "id": "S-2.5",
+      "status": "accepted",
+      "first_seq": 25,
+      "last_seq": 27,
+      "accepted_at": "2026-09-01T09:22:00.000Z"
+    },
+    {
+      "id": "S-3.1",
+      "status": "accepted",
+      "first_seq": 28,
+      "last_seq": 30,
+      "accepted_at": "2026-09-01T09:23:00.000Z"
+    },
+    {
+      "id": "S-3.2",
+      "status": "accepted",
+      "first_seq": 31,
+      "last_seq": 33,
+      "accepted_at": "2026-09-01T09:24:00.000Z"
+    },
+    {
+      "id": "S-3.3",
+      "status": "accepted",
+      "first_seq": 34,
+      "last_seq": 36,
+      "accepted_at": "2026-09-01T09:25:00.000Z"
+    },
+    {
+      "id": "S-3.4",
+      "status": "accepted",
+      "first_seq": 37,
+      "last_seq": 39,
+      "accepted_at": "2026-09-01T09:26:00.000Z"
+    },
+    {
+      "id": "S-3.5",
+      "status": "accepted",
+      "first_seq": 40,
+      "last_seq": 42,
+      "accepted_at": "2026-09-01T09:27:00.000Z"
+    },
+    {
+      "id": "S-3.6",
+      "status": "accepted",
+      "first_seq": 43,
+      "last_seq": 45,
+      "accepted_at": "2026-09-01T09:28:00.000Z"
+    },
+    {
+      "id": "S-4.1",
+      "status": "accepted",
+      "first_seq": 46,
+      "last_seq": 48,
+      "accepted_at": "2026-09-01T09:29:00.000Z"
+    },
+    {
+      "id": "S-4.2",
+      "status": "accepted",
+      "first_seq": 49,
+      "last_seq": 51,
+      "accepted_at": "2026-09-01T09:30:00.000Z"
+    },
+    {
+      "id": "S-4.3",
+      "status": "accepted",
+      "first_seq": 52,
+      "last_seq": 54,
+      "accepted_at": "2026-09-01T09:31:00.000Z"
+    },
+    {
+      "id": "S-4.4",
+      "status": "accepted",
+      "first_seq": 55,
+      "last_seq": 57,
+      "accepted_at": "2026-09-01T09:32:00.000Z"
+    },
+    {
+      "id": "S-4.5",
+      "status": "accepted",
+      "first_seq": 58,
+      "last_seq": 60,
+      "accepted_at": "2026-09-01T09:33:00.000Z"
+    },
+    {
+      "id": "S-5.1@S01",
+      "status": "accepted",
+      "first_seq": 61,
+      "last_seq": 63,
+      "accepted_at": "2026-09-01T09:34:00.000Z"
+    },
+    {
+      "id": "S-5.2@S01",
+      "status": "accepted",
+      "first_seq": 64,
+      "last_seq": 66,
+      "accepted_at": "2026-09-01T09:35:00.000Z"
+    },
+    {
+      "id": "S-5.3@S01",
+      "status": "accepted",
+      "first_seq": 67,
+      "last_seq": 69,
+      "accepted_at": "2026-09-01T09:36:00.000Z"
+    },
+    {
+      "id": "S-5.4@S01",
+      "status": "accepted",
+      "first_seq": 70,
+      "last_seq": 72,
+      "accepted_at": "2026-09-01T09:37:00.000Z"
+    },
+    {
+      "id": "S-5.5@S01",
+      "status": "accepted",
+      "first_seq": 73,
+      "last_seq": 75,
+      "accepted_at": "2026-09-01T09:38:00.000Z"
+    },
+    {
+      "id": "S-5.1@S05",
+      "status": "accepted",
+      "first_seq": 76,
+      "last_seq": 78,
+      "accepted_at": "2026-09-01T09:39:00.000Z"
+    },
+    {
+      "id": "S-5.2@S05",
+      "status": "accepted",
+      "first_seq": 79,
+      "last_seq": 81,
+      "accepted_at": "2026-09-01T09:40:00.000Z"
+    },
+    {
+      "id": "S-5.3@S05",
+      "status": "accepted",
+      "first_seq": 82,
+      "last_seq": 84,
+      "accepted_at": "2026-09-01T09:41:00.000Z"
+    },
+    {
+      "id": "S-5.4@S05",
+      "status": "accepted",
+      "first_seq": 85,
+      "last_seq": 87,
+      "accepted_at": "2026-09-01T09:42:00.000Z"
+    },
+    {
+      "id": "S-5.5@S05",
+      "status": "accepted",
+      "first_seq": 88,
+      "last_seq": 90,
+      "accepted_at": "2026-09-01T09:43:00.000Z"
+    },
+    {
+      "id": "S-5.1@S07",
+      "status": "accepted",
+      "first_seq": 91,
+      "last_seq": 93,
+      "accepted_at": "2026-09-01T09:44:00.000Z"
+    },
+    {
+      "id": "S-5.2@S07",
+      "status": "accepted",
+      "first_seq": 94,
+      "last_seq": 96,
+      "accepted_at": "2026-09-01T09:45:00.000Z"
+    },
+    {
+      "id": "S-5.3@S07",
+      "status": "accepted",
+      "first_seq": 97,
+      "last_seq": 99,
+      "accepted_at": "2026-09-01T09:46:00.000Z"
+    },
+    {
+      "id": "S-5.4@S07",
+      "status": "accepted",
+      "first_seq": 100,
+      "last_seq": 102,
+      "accepted_at": "2026-09-01T09:47:00.000Z"
+    },
+    {
+      "id": "S-5.5@S07",
+      "status": "accepted",
+      "first_seq": 103,
+      "last_seq": 105,
+      "accepted_at": "2026-09-01T09:48:00.000Z"
+    },
+    {
+      "id": "S-5.1@S09",
+      "status": "accepted",
+      "first_seq": 106,
+      "last_seq": 108,
+      "accepted_at": "2026-09-01T09:49:00.000Z"
+    },
+    {
+      "id": "S-5.2@S09",
+      "status": "accepted",
+      "first_seq": 109,
+      "last_seq": 111,
+      "accepted_at": "2026-09-01T09:50:00.000Z"
+    },
+    {
+      "id": "S-5.3@S09",
+      "status": "accepted",
+      "first_seq": 112,
+      "last_seq": 114,
+      "accepted_at": "2026-09-01T09:51:00.000Z"
+    },
+    {
+      "id": "S-5.4@S09",
+      "status": "accepted",
+      "first_seq": 115,
+      "last_seq": 117,
+      "accepted_at": "2026-09-01T09:52:00.000Z"
+    },
+    {
+      "id": "S-5.5@S09",
+      "status": "accepted",
+      "first_seq": 118,
+      "last_seq": 120,
+      "accepted_at": "2026-09-01T09:53:00.000Z"
+    },
+    {
+      "id": "S-5.1@S10",
+      "status": "accepted",
+      "first_seq": 121,
+      "last_seq": 123,
+      "accepted_at": "2026-09-01T09:54:00.000Z"
+    },
+    {
+      "id": "S-5.2@S10",
+      "status": "accepted",
+      "first_seq": 124,
+      "last_seq": 126,
+      "accepted_at": "2026-09-01T09:55:00.000Z"
+    },
+    {
+      "id": "S-5.3@S10",
+      "status": "accepted",
+      "first_seq": 127,
+      "last_seq": 129,
+      "accepted_at": "2026-09-01T09:56:00.000Z"
+    },
+    {
+      "id": "S-5.4@S10",
+      "status": "accepted",
+      "first_seq": 130,
+      "last_seq": 132,
+      "accepted_at": "2026-09-01T09:57:00.000Z"
+    },
+    {
+      "id": "S-5.5@S10",
+      "status": "accepted",
+      "first_seq": 133,
+      "last_seq": 135,
+      "accepted_at": "2026-09-01T09:58:00.000Z"
+    },
+    {
+      "id": "S-5.1@nonscreen",
+      "status": "accepted",
+      "first_seq": 136,
+      "last_seq": 138,
+      "accepted_at": "2026-09-01T09:59:00.000Z"
+    },
+    {
+      "id": "S-5.2@nonscreen",
+      "status": "accepted",
+      "first_seq": 139,
+      "last_seq": 141,
+      "accepted_at": "2026-09-01T10:00:00.000Z"
+    },
+    {
+      "id": "S-5.3@nonscreen",
+      "status": "accepted",
+      "first_seq": 142,
+      "last_seq": 144,
+      "accepted_at": "2026-09-01T10:01:00.000Z"
+    },
+    {
+      "id": "S-5.4@nonscreen",
+      "status": "accepted",
+      "first_seq": 145,
+      "last_seq": 147,
+      "accepted_at": "2026-09-01T10:02:00.000Z"
+    },
+    {
+      "id": "S-5.5@nonscreen",
+      "status": "accepted",
+      "first_seq": 148,
+      "last_seq": 150,
+      "accepted_at": "2026-09-01T10:03:00.000Z"
+    },
+    {
+      "id": "S-6.1",
+      "status": "accepted",
+      "first_seq": 151,
+      "last_seq": 153,
+      "accepted_at": "2026-09-01T10:04:00.000Z"
+    },
+    {
+      "id": "S-6.2",
+      "status": "accepted",
+      "first_seq": 154,
+      "last_seq": 156,
+      "accepted_at": "2026-09-01T10:05:00.000Z"
+    },
+    {
+      "id": "S-6.3",
+      "status": "accepted",
+      "first_seq": 157,
+      "last_seq": 159,
+      "accepted_at": "2026-09-01T10:06:00.000Z"
+    },
+    {
+      "id": "S-6.4",
+      "status": "accepted",
+      "first_seq": 160,
+      "last_seq": 162,
+      "accepted_at": "2026-09-01T10:07:00.000Z"
+    },
+    {
+      "id": "S-6.5",
+      "status": "accepted",
+      "first_seq": 163,
+      "last_seq": 165,
+      "accepted_at": "2026-09-01T10:08:00.000Z"
+    },
+    {
+      "id": "S-7.1",
+      "status": "accepted",
+      "first_seq": 166,
+      "last_seq": 168,
+      "accepted_at": "2026-09-01T10:09:00.000Z"
+    },
+    {
+      "id": "S-7.2",
+      "status": "accepted",
+      "first_seq": 169,
+      "last_seq": 171,
+      "accepted_at": "2026-09-01T10:10:00.000Z"
+    },
+    {
+      "id": "S-7.3",
+      "status": "accepted",
+      "first_seq": 172,
+      "last_seq": 174,
+      "accepted_at": "2026-09-01T10:11:00.000Z"
+    },
+    {
+      "id": "S-7.4",
+      "status": "accepted",
+      "first_seq": 175,
+      "last_seq": 177,
+      "accepted_at": "2026-09-01T10:12:00.000Z"
+    },
+    {
+      "id": "S-8.1",
+      "status": "accepted",
+      "first_seq": 178,
+      "last_seq": 180,
+      "accepted_at": "2026-09-01T10:13:00.000Z"
+    },
+    {
+      "id": "S-8.2",
+      "status": "accepted",
+      "first_seq": 181,
+      "last_seq": 183,
+      "accepted_at": "2026-09-01T10:14:00.000Z"
+    },
+    {
+      "id": "S-8.3",
+      "status": "accepted",
+      "first_seq": 184,
+      "last_seq": 186,
+      "accepted_at": "2026-09-01T10:15:00.000Z"
+    },
+    {
+      "id": "S-8.4",
+      "status": "accepted",
+      "first_seq": 187,
+      "last_seq": 189,
+      "accepted_at": "2026-09-01T10:16:00.000Z"
+    },
+    {
+      "id": "S-9.1",
+      "status": "accepted",
+      "first_seq": 190,
+      "last_seq": 192,
+      "accepted_at": "2026-09-01T10:17:00.000Z"
+    },
+    {
+      "id": "S-9.2",
+      "status": "accepted",
+      "first_seq": 193,
+      "last_seq": 195,
+      "accepted_at": "2026-09-01T10:18:00.000Z"
+    },
+    {
+      "id": "S-9.3",
+      "status": "accepted",
+      "first_seq": 196,
+      "last_seq": 198,
+      "accepted_at": "2026-09-01T10:19:00.000Z"
+    },
+    {
+      "id": "S-9.4",
+      "status": "accepted",
+      "first_seq": 199,
+      "last_seq": 201,
+      "accepted_at": "2026-09-01T10:20:00.000Z"
+    },
+    {
+      "id": "S-9.5",
+      "status": "accepted",
+      "first_seq": 202,
+      "last_seq": 204,
+      "accepted_at": "2026-09-01T10:21:00.000Z"
+    }
+  ],
+  "features": [
+    {
+      "id": "F1",
+      "name": "Authentication & Onboarding",
+      "order": 0
+    },
+    {
+      "id": "F2",
+      "name": "Project Dashboard",
+      "order": 1
+    },
+    {
+      "id": "F3",
+      "name": "SRS Workspace",
+      "order": 2
+    },
+    {
+      "id": "F4",
+      "name": "Verification & Export",
+      "order": 3
+    },
+    {
+      "id": "F5",
+      "name": "Billing & Notifications",
+      "order": 4
+    },
+    {
+      "id": "F6",
+      "name": "Administration",
+      "order": 5
+    }
+  ],
+  "actors": [
+    {
+      "id": "A01",
+      "name": "Founder",
+      "kind": "human",
+      "description": "Startup founder or product owner who authors the SRS through the guided pipeline."
+    },
+    {
+      "id": "A02",
+      "name": "Business Analyst",
+      "kind": "human",
+      "description": "Analyst who refines requirements, resolves flags and signs the baseline."
+    },
+    {
+      "id": "A03",
+      "name": "Administrator",
+      "kind": "human",
+      "description": "Internal operator with read-only access to users, metrics and AI cost."
+    },
+    {
+      "id": "A04",
+      "name": "Guest",
+      "kind": "human",
+      "description": "Unauthenticated visitor who can register or log in."
+    },
+    {
+      "id": "A05",
+      "name": "Payment Gateway",
+      "kind": "system",
+      "description": "External payment provider (sandbox) that processes credit purchases and sends webhooks."
+    },
+    {
+      "id": "A06",
+      "name": "LLM Provider",
+      "kind": "system",
+      "description": "External large language model API that generates draft content as structured ops."
+    },
+    {
+      "id": "A07",
+      "name": "PlantUML Server",
+      "kind": "system",
+      "description": "Self-hosted diagram renderer that compiles .puml sources into images."
+    },
+    {
+      "id": "A08",
+      "name": "Email Service",
+      "kind": "system",
+      "description": "SMTP provider used for account verification and password reset mail."
+    },
+    {
+      "id": "A09",
+      "name": "Scheduler",
+      "kind": "time",
+      "description": "Cron trigger that fires quota resets, expiry checks and housekeeping jobs."
+    }
+  ],
+  "roles": [
+    {
+      "id": "R1",
+      "name": "Registered User",
+      "actor_id": "A01"
+    },
+    {
+      "id": "R2",
+      "name": "Analyst",
+      "actor_id": "A02"
+    },
+    {
+      "id": "R3",
+      "name": "Admin",
+      "actor_id": "A03"
+    },
+    {
+      "id": "R4",
+      "name": "Guest",
+      "actor_id": "A04"
+    }
+  ],
+  "use_cases": [
+    {
+      "id": "UC01",
+      "name": "Register Account",
+      "actor_ids": [
+        "A04",
+        "A08"
+      ],
+      "function_ids": [
+        "FN006",
+        "FN007",
+        "FN008"
+      ],
+      "description": "A visitor creates an account and verifies the email address.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC02",
+      "name": "Log In",
+      "actor_ids": [
+        "A01",
+        "A02",
+        "A03",
+        "A04"
+      ],
+      "function_ids": [
+        "FN001",
+        "FN002"
+      ],
+      "description": "A user authenticates with email/password or Google and receives a session.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC03",
+      "name": "Reset Password",
+      "actor_ids": [
+        "A01",
+        "A08"
+      ],
+      "function_ids": [
+        "FN010",
+        "FN011",
+        "FN012"
+      ],
+      "description": "A user who forgot the password requests a reset link and sets a new password.",
+      "includes": [],
+      "extends": [
+        "UC02"
+      ]
+    },
+    {
+      "id": "UC04",
+      "name": "Complete Onboarding",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN014",
+        "FN015",
+        "FN016",
+        "FN017"
+      ],
+      "description": "A first-time user walks through or skips the pipeline introduction.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC05",
+      "name": "Manage Projects",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN018",
+        "FN019",
+        "FN020",
+        "FN022"
+      ],
+      "description": "A user browses, searches, filters and archives their projects.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC06",
+      "name": "Create Project",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN023",
+        "FN024",
+        "FN025"
+      ],
+      "description": "A user creates a project with a working mode and an empty Spine.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC07",
+      "name": "Resume Project",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN021"
+      ],
+      "description": "A user reopens a project and resumes at the stored pipeline position.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC08",
+      "name": "Refine Product Brief",
+      "actor_ids": [
+        "A01",
+        "A06"
+      ],
+      "function_ids": [
+        "FN028",
+        "FN029"
+      ],
+      "description": "The user answers guided questions and the model drafts the product brief.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC09",
+      "name": "Generate SRS Content",
+      "actor_ids": [
+        "A01",
+        "A06"
+      ],
+      "function_ids": [
+        "FN028",
+        "FN029",
+        "FN031"
+      ],
+      "description": "Pipeline steps draft SRS fields as op batches presented at gates.",
+      "includes": [
+        "UC10",
+        "UC12"
+      ],
+      "extends": []
+    },
+    {
+      "id": "UC10",
+      "name": "Review and Accept Step",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN032",
+        "FN033"
+      ],
+      "description": "The user accepts a step's output or requests a revision within the turn ceiling.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC11",
+      "name": "Request Change",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN040",
+        "FN042"
+      ],
+      "description": "The user asks for a modification of accepted content in natural language.",
+      "includes": [
+        "UC23"
+      ],
+      "extends": []
+    },
+    {
+      "id": "UC12",
+      "name": "Render Diagrams",
+      "actor_ids": [
+        "A07"
+      ],
+      "function_ids": [
+        "FN034",
+        "FN035"
+      ],
+      "description": "The system compiles .puml sources into images on the PlantUML server.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC23",
+      "name": "Preview Change Impact",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN041"
+      ],
+      "description": "The system shows the impact scope and a field-level diff before applying a change.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC13",
+      "name": "Verify Document",
+      "actor_ids": [
+        "A01",
+        "A02"
+      ],
+      "function_ids": [
+        "FN038"
+      ],
+      "description": "The deterministic check reports red and yellow flags with remediation steps.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC14",
+      "name": "Waive Red Flag",
+      "actor_ids": [
+        "A02"
+      ],
+      "function_ids": [
+        "FN039"
+      ],
+      "description": "An analyst waives an eligible red flag with a typed reason.",
+      "includes": [],
+      "extends": [
+        "UC15"
+      ]
+    },
+    {
+      "id": "UC15",
+      "name": "Sign Baseline",
+      "actor_ids": [
+        "A02"
+      ],
+      "function_ids": [
+        "FN038",
+        "FN045"
+      ],
+      "description": "The analyst signs the baseline after a full re-check with zero open red flags.",
+      "includes": [
+        "UC13"
+      ],
+      "extends": []
+    },
+    {
+      "id": "UC16",
+      "name": "Export Word Document",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN043",
+        "FN044",
+        "FN047",
+        "FN046"
+      ],
+      "description": "The user exports a watermarked working draft or a clean baseline to Word.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC17",
+      "name": "Purchase Credits",
+      "actor_ids": [
+        "A01",
+        "A05"
+      ],
+      "function_ids": [
+        "FN048",
+        "FN049",
+        "FN050",
+        "FN086"
+      ],
+      "description": "The user buys credits through the mock payment gateway.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC18",
+      "name": "View Billing History",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN052",
+        "FN055",
+        "FN054"
+      ],
+      "description": "The user reviews credit transactions and the current balance.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC19",
+      "name": "Receive Notifications",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
+        "FN056",
+        "FN057",
+        "FN058"
+      ],
+      "description": "The user reads in-app notifications about pipeline, billing and system events.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC20",
+      "name": "Inspect Platform Accounts",
+      "actor_ids": [
+        "A03"
+      ],
+      "function_ids": [
+        "FN060",
+        "FN061",
+        "FN064",
+        "FN066"
+      ],
+      "description": "An administrator inspects accounts read-only.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC21",
+      "name": "Monitor Platform Metrics",
+      "actor_ids": [
+        "A03"
+      ],
+      "function_ids": [
+        "FN068",
+        "FN072",
+        "FN073"
+      ],
+      "description": "An administrator monitors usage metrics and AI spend read-only.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC22",
+      "name": "Run Scheduled Housekeeping",
+      "actor_ids": [
+        "A09"
+      ],
+      "function_ids": [
+        "FN084",
+        "FN085",
+        "FN089",
+        "FN088"
+      ],
+      "description": "Time-triggered jobs keep quotas, subscriptions, aggregates and health data current.",
+      "includes": [],
+      "extends": []
+    }
+  ],
+  "screens": [
+    {
+      "id": "S01",
+      "feature_id": "F1",
+      "name": "Login",
+      "description": "Entry screen where a user authenticates with email/password or Google.",
+      "flow_to": [
+        "S02",
+        "S03",
+        "S05"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN001",
+      "queue_order": 1,
+      "detail_status": "signed_off"
+    },
+    {
+      "id": "S02",
+      "feature_id": "F1",
+      "name": "Register",
+      "description": "Account creation with email verification.",
+      "flow_to": [
+        "S01"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN006",
+      "queue_order": 2,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S03",
+      "feature_id": "F1",
+      "name": "Forgot Password",
+      "description": "Popup to request a password reset link.",
+      "flow_to": [],
+      "is_popup": true,
+      "tabs": [],
+      "primary_function_id": "FN010",
+      "queue_order": 3,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S04",
+      "feature_id": "F1",
+      "name": "Onboarding",
+      "description": "First-run guided tour introducing the Brief-to-SRS pipeline.",
+      "flow_to": [
+        "S05"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN014",
+      "queue_order": 4,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S05",
+      "feature_id": "F2",
+      "name": "Project Dashboard",
+      "description": "Lists the user's projects with status, readiness and quick actions.",
+      "flow_to": [
+        "S06",
+        "S07",
+        "S11",
+        "S13"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN018",
+      "queue_order": 5,
+      "detail_status": "signed_off"
+    },
+    {
+      "id": "S06",
+      "feature_id": "F2",
+      "name": "Create Project",
+      "description": "Popup to create a new project and choose the working mode.",
+      "flow_to": [
+        "S07"
+      ],
+      "is_popup": true,
+      "tabs": [],
+      "primary_function_id": "FN024",
+      "queue_order": 6,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S07",
+      "feature_id": "F3",
+      "name": "Project Workspace",
+      "description": "Main working screen: chat pane drives the pipeline while the document pane renders the SRS read-only.",
+      "flow_to": [
+        "S08",
+        "S09",
+        "S10"
+      ],
+      "is_popup": false,
+      "tabs": [
+        "Chat",
+        "Document",
+        "History"
+      ],
+      "primary_function_id": "FN028",
+      "queue_order": 7,
+      "detail_status": "signed_off"
+    },
+    {
+      "id": "S08",
+      "feature_id": "F3",
+      "name": "Diagram Preview",
+      "description": "Full-size preview of a rendered PlantUML diagram.",
+      "flow_to": [
+        "S07"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN034",
+      "queue_order": 8,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S09",
+      "feature_id": "F4",
+      "name": "Verification & Change Panel",
+      "description": "Shows open flags, readiness score and lets the user request and apply changes with impact preview.",
+      "flow_to": [
+        "S07",
+        "S10"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN038",
+      "queue_order": 9,
+      "detail_status": "signed_off"
+    },
+    {
+      "id": "S10",
+      "feature_id": "F4",
+      "name": "Export",
+      "description": "Configure and download the Word export: watermarked working draft or clean baseline.",
+      "flow_to": [
+        "S07"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN043",
+      "queue_order": 10,
+      "detail_status": "signed_off"
+    },
+    {
+      "id": "S11",
+      "feature_id": "F5",
+      "name": "Plan & Pricing",
+      "description": "Displays subscription plans and starts a credit purchase.",
+      "flow_to": [
+        "S12"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN048",
+      "queue_order": 11,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S12",
+      "feature_id": "F5",
+      "name": "Billing History",
+      "description": "Chronological list of credit transactions and balance.",
+      "flow_to": [],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN052",
+      "queue_order": 12,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S13",
+      "feature_id": "F5",
+      "name": "Notification Center",
+      "description": "In-app notification inbox with read state management.",
+      "flow_to": [],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN056",
+      "queue_order": 13,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S14",
+      "feature_id": "F6",
+      "name": "Admin User List",
+      "description": "Read-only paginated list of all user accounts.",
+      "flow_to": [
+        "S15"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN060",
+      "queue_order": 14,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S15",
+      "feature_id": "F6",
+      "name": "Admin User Detail",
+      "description": "Read-only profile of one user with projects and credit balance.",
+      "flow_to": [
+        "S14"
+      ],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN064",
+      "queue_order": 15,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S16",
+      "feature_id": "F6",
+      "name": "Admin Metrics Dashboard",
+      "description": "Read-only platform usage metrics over a selectable time range.",
+      "flow_to": [],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN068",
+      "queue_order": 16,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S17",
+      "feature_id": "F6",
+      "name": "Admin AI Cost Report",
+      "description": "Read-only AI spend grouped by provider and by project.",
+      "flow_to": [],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN072",
+      "queue_order": 17,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S18",
+      "feature_id": "F6",
+      "name": "Admin Prompt Templates",
+      "description": "Read-only browser of the on-disk skill assets and their versions.",
+      "flow_to": [],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN076",
+      "queue_order": 18,
+      "detail_status": "placeholder"
+    },
+    {
+      "id": "S19",
+      "feature_id": "F6",
+      "name": "Admin Audit Log",
+      "description": "Read-only list of security-relevant events.",
+      "flow_to": [],
+      "is_popup": false,
+      "tabs": [],
+      "primary_function_id": "FN080",
+      "queue_order": 19,
+      "detail_status": "placeholder"
+    }
+  ],
+  "permissions": [
+    {
+      "id": "P001",
+      "screen_id": "S01",
+      "role_id": "R4",
+      "action": "view"
+    },
+    {
+      "id": "P002",
+      "screen_id": "S01",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P003",
+      "screen_id": "S01",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P004",
+      "screen_id": "S01",
+      "role_id": "R3",
+      "action": "view"
+    },
+    {
+      "id": "P005",
+      "screen_id": "S02",
+      "role_id": "R4",
+      "action": "view"
+    },
+    {
+      "id": "P006",
+      "screen_id": "S02",
+      "role_id": "R4",
+      "action": "create"
+    },
+    {
+      "id": "P007",
+      "screen_id": "S03",
+      "role_id": "R4",
+      "action": "view"
+    },
+    {
+      "id": "P008",
+      "screen_id": "S03",
+      "role_id": "R4",
+      "action": "create"
+    },
+    {
+      "id": "P009",
+      "screen_id": "S03",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P010",
+      "screen_id": "S03",
+      "role_id": "R1",
+      "action": "create"
+    },
+    {
+      "id": "P011",
+      "screen_id": "S04",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P012",
+      "screen_id": "S04",
+      "role_id": "R1",
+      "action": "update"
+    },
+    {
+      "id": "P013",
+      "screen_id": "S04",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P014",
+      "screen_id": "S04",
+      "role_id": "R2",
+      "action": "update"
+    },
+    {
+      "id": "P015",
+      "screen_id": "S05",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P016",
+      "screen_id": "S05",
+      "role_id": "R1",
+      "action": "update"
+    },
+    {
+      "id": "P017",
+      "screen_id": "S05",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P018",
+      "screen_id": "S06",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P019",
+      "screen_id": "S06",
+      "role_id": "R1",
+      "action": "create"
+    },
+    {
+      "id": "P020",
+      "screen_id": "S07",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P021",
+      "screen_id": "S07",
+      "role_id": "R1",
+      "action": "create"
+    },
+    {
+      "id": "P022",
+      "screen_id": "S07",
+      "role_id": "R1",
+      "action": "update"
+    },
+    {
+      "id": "P023",
+      "screen_id": "S07",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P024",
+      "screen_id": "S07",
+      "role_id": "R2",
+      "action": "create"
+    },
+    {
+      "id": "P025",
+      "screen_id": "S07",
+      "role_id": "R2",
+      "action": "update"
+    },
+    {
+      "id": "P026",
+      "screen_id": "S08",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P027",
+      "screen_id": "S08",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P028",
+      "screen_id": "S08",
+      "role_id": "R2",
+      "action": "update"
+    },
+    {
+      "id": "P029",
+      "screen_id": "S09",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P030",
+      "screen_id": "S09",
+      "role_id": "R1",
+      "action": "create"
+    },
+    {
+      "id": "P031",
+      "screen_id": "S09",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P032",
+      "screen_id": "S09",
+      "role_id": "R2",
+      "action": "create"
+    },
+    {
+      "id": "P033",
+      "screen_id": "S09",
+      "role_id": "R2",
+      "action": "update"
+    },
+    {
+      "id": "P034",
+      "screen_id": "S10",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P035",
+      "screen_id": "S10",
+      "role_id": "R1",
+      "action": "create"
+    },
+    {
+      "id": "P036",
+      "screen_id": "S10",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P037",
+      "screen_id": "S10",
+      "role_id": "R2",
+      "action": "create"
+    },
+    {
+      "id": "P038",
+      "screen_id": "S11",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P039",
+      "screen_id": "S11",
+      "role_id": "R1",
+      "action": "create"
+    },
+    {
+      "id": "P040",
+      "screen_id": "S12",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P041",
+      "screen_id": "S13",
+      "role_id": "R1",
+      "action": "view"
+    },
+    {
+      "id": "P042",
+      "screen_id": "S13",
+      "role_id": "R1",
+      "action": "update"
+    },
+    {
+      "id": "P043",
+      "screen_id": "S13",
+      "role_id": "R1",
+      "action": "delete"
+    },
+    {
+      "id": "P044",
+      "screen_id": "S13",
+      "role_id": "R2",
+      "action": "view"
+    },
+    {
+      "id": "P045",
+      "screen_id": "S13",
+      "role_id": "R2",
+      "action": "update"
+    },
+    {
+      "id": "P046",
+      "screen_id": "S14",
+      "role_id": "R3",
+      "action": "view"
+    },
+    {
+      "id": "P047",
+      "screen_id": "S15",
+      "role_id": "R3",
+      "action": "view"
+    },
+    {
+      "id": "P048",
+      "screen_id": "S16",
+      "role_id": "R3",
+      "action": "view"
+    },
+    {
+      "id": "P049",
+      "screen_id": "S17",
+      "role_id": "R3",
+      "action": "view"
+    },
+    {
+      "id": "P050",
+      "screen_id": "S18",
+      "role_id": "R3",
+      "action": "view"
+    },
+    {
+      "id": "P051",
+      "screen_id": "S19",
+      "role_id": "R3",
+      "action": "view"
+    }
+  ],
+  "entities": [
+    {
+      "id": "E01",
+      "name": "User",
+      "description": "An account that owns projects, credits and notifications.",
+      "relations": [
+        "E02",
+        "E05",
+        "E07"
+      ]
+    },
+    {
+      "id": "E02",
+      "name": "Project",
+      "description": "A container for one SRS effort with exactly one Spine.",
+      "relations": [
+        "E03",
+        "E04"
+      ]
+    },
+    {
+      "id": "E03",
+      "name": "Spine",
+      "description": "The structured requirement store all sections render from.",
+      "relations": [
+        "E08",
+        "E09",
+        "E11",
+        "E12"
+      ]
+    },
+    {
+      "id": "E04",
+      "name": "ChatSession",
+      "description": "A conversation thread; exactly one per project is the pipeline session.",
+      "relations": []
+    },
+    {
+      "id": "E05",
+      "name": "CreditLedger",
+      "description": "Append-only credit transactions with running balance.",
+      "relations": [
+        "E10"
+      ]
+    },
+    {
+      "id": "E06",
+      "name": "Subscription",
+      "description": "The plan attached to an account with its renewal window.",
+      "relations": [
+        "E01"
+      ]
+    },
+    {
+      "id": "E07",
+      "name": "Notification",
+      "description": "An in-app message with read state.",
+      "relations": []
+    },
+    {
+      "id": "E08",
+      "name": "Baseline",
+      "description": "A signed snapshot of the Spine with version and waiver count.",
+      "relations": []
+    },
+    {
+      "id": "E09",
+      "name": "ChangeRecord",
+      "description": "One applied op with before-value, transaction id and sequence.",
+      "relations": []
+    },
+    {
+      "id": "E10",
+      "name": "UsageRecord",
+      "description": "One model call with tokens, cost and reservation state.",
+      "relations": []
+    },
+    {
+      "id": "E11",
+      "name": "Flag",
+      "description": "A deterministic-check finding with level, rule and waiver state.",
+      "relations": []
+    },
+    {
+      "id": "E12",
+      "name": "Diagram",
+      "description": "A rendered PlantUML artifact with source hash and status.",
+      "relations": []
+    }
+  ],
+  "functions": [
+    {
+      "id": "FN001",
+      "screen_id": "S01",
+      "feature_id": "F1",
+      "order": 0,
+      "name": "Submit Credentials",
+      "trigger": "User clicks the Log in button.",
+      "description": "Authenticates the user with email and password and issues an access token.",
+      "normal": [
+        "User enters email and password.",
+        "System verifies the credentials against the stored hash.",
+        "System issues an access token and redirects to the Project Dashboard."
+      ],
+      "abnormal": [
+        "Credentials do not match: system shows an authentication error and keeps the form values except the password."
+      ],
+      "validations": [
+        {
+          "id": "FN001-V1",
+          "kind": "format",
+          "statement": "Email must be a syntactically valid address."
+        },
+        {
+          "id": "FN001-V2",
+          "kind": "required",
+          "statement": "Password must not be empty."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN002",
+      "screen_id": "S01",
+      "feature_id": "F1",
+      "order": 1,
+      "name": "Log In with Google",
+      "trigger": "User clicks the Google button.",
+      "description": "Authenticates via Google OAuth and links or creates the local account.",
+      "normal": [
+        "User completes the Google consent screen.",
+        "System verifies the ID token and finds or creates the account.",
+        "System issues an access token and redirects to the Project Dashboard."
+      ],
+      "abnormal": [
+        "Google token verification fails: system shows a provider error and returns to the login form."
+      ],
+      "validations": [
+        {
+          "id": "FN002-V1",
+          "kind": "business",
+          "statement": "A Google-linked account must reuse the existing local account when the verified email matches."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN003",
+      "screen_id": "S01",
+      "feature_id": "F1",
+      "order": 2,
+      "name": "Toggle Password Visibility",
+      "trigger": "User clicks the eye icon in the password field.",
+      "description": "Switches the password input between masked and plain text.",
+      "normal": [
+        "User clicks the eye icon.",
+        "System toggles the input type and the icon state."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN004",
+      "screen_id": "S01",
+      "feature_id": "F1",
+      "order": 3,
+      "name": "Navigate to Register",
+      "trigger": "User clicks the Sign up link.",
+      "description": "Navigates to the registration screen.",
+      "normal": [
+        "User clicks the Sign up link.",
+        "System navigates to the Register screen."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN005",
+      "screen_id": "S01",
+      "feature_id": "F1",
+      "order": 4,
+      "name": "Open Forgot Password",
+      "trigger": "User clicks the Forgot password link.",
+      "description": "Opens the Forgot Password popup over the login form.",
+      "normal": [
+        "User clicks the Forgot password link.",
+        "System opens the Forgot Password popup."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN006",
+      "screen_id": "S02",
+      "feature_id": "F1",
+      "order": 5,
+      "name": "Submit Registration",
+      "trigger": "User clicks the Create account button.",
+      "description": "Creates a new local account and sends a verification email.",
+      "normal": [
+        "User enters name, email and password.",
+        "System creates the account with an unverified email state.",
+        "System sends a verification email and shows a confirmation notice."
+      ],
+      "abnormal": [
+        "Email is already registered: system shows a duplicate-account error and offers the login link."
+      ],
+      "validations": [
+        {
+          "id": "FN006-V1",
+          "kind": "format",
+          "statement": "Email must be a syntactically valid address."
+        },
+        {
+          "id": "FN006-V2",
+          "kind": "format",
+          "statement": "Password must be at least 8 characters long."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN007",
+      "screen_id": "S02",
+      "feature_id": "F1",
+      "order": 6,
+      "name": "Verify Email Token",
+      "trigger": "User opens the verification link from the email.",
+      "description": "Marks the account email as verified and activates login.",
+      "normal": [
+        "User opens the verification link.",
+        "System validates the token and marks the email as verified.",
+        "System redirects to the Login screen with a success notice."
+      ],
+      "abnormal": [
+        "Token is expired or invalid: system shows an error and offers to resend the verification email."
+      ],
+      "validations": [
+        {
+          "id": "FN007-V1",
+          "kind": "business",
+          "statement": "A verification token expires 24 hours after issue."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN008",
+      "screen_id": "S02",
+      "feature_id": "F1",
+      "order": 7,
+      "name": "Accept Terms",
+      "trigger": "User checks the terms-of-service checkbox.",
+      "description": "Records acceptance of the terms of service before account creation.",
+      "normal": [
+        "User checks the terms checkbox.",
+        "System enables the Create account button."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN008-V1",
+          "kind": "required",
+          "statement": "The terms-of-service checkbox must be checked before submission."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN009",
+      "screen_id": "S02",
+      "feature_id": "F1",
+      "order": 8,
+      "name": "Navigate to Login",
+      "trigger": "User clicks the Log in link.",
+      "description": "Navigates back to the Login screen.",
+      "normal": [
+        "User clicks the Log in link.",
+        "System navigates to the Login screen."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN010",
+      "screen_id": "S03",
+      "feature_id": "F1",
+      "order": 9,
+      "name": "Submit Reset Request",
+      "trigger": "User clicks the Send reset link button.",
+      "description": "Sends a password reset link to the given address if an account exists.",
+      "normal": [
+        "User enters the account email.",
+        "System sends a reset link when the account exists.",
+        "System always shows the same neutral confirmation notice."
+      ],
+      "abnormal": [
+        "Mail delivery fails: system logs the failure and shows a retry notice."
+      ],
+      "validations": [
+        {
+          "id": "FN010-V1",
+          "kind": "format",
+          "statement": "Email must be a syntactically valid address."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN011",
+      "screen_id": "S03",
+      "feature_id": "F1",
+      "order": 10,
+      "name": "Complete Password Reset",
+      "trigger": "User opens the reset link and submits a new password.",
+      "description": "Sets a new password after token validation.",
+      "normal": [
+        "User opens the reset link.",
+        "System validates the token.",
+        "User submits a new password and the system stores its hash."
+      ],
+      "abnormal": [
+        "Token is expired: system rejects the reset and offers to request a new link."
+      ],
+      "validations": [
+        {
+          "id": "FN011-V1",
+          "kind": "format",
+          "statement": "New password must be at least 8 characters long."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN012",
+      "screen_id": "S03",
+      "feature_id": "F1",
+      "order": 11,
+      "name": "Resend Reset Email",
+      "trigger": "User clicks the Resend link.",
+      "description": "Sends the reset email again with a fresh token.",
+      "normal": [
+        "User clicks Resend.",
+        "System invalidates the previous token and sends a new one."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN012-V1",
+          "kind": "business",
+          "statement": "At most 3 reset emails may be sent per address per hour."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN013",
+      "screen_id": "S03",
+      "feature_id": "F1",
+      "order": 12,
+      "name": "Close Popup",
+      "trigger": "User clicks the close icon or presses Escape.",
+      "description": "Closes the popup and returns focus to the login form.",
+      "normal": [
+        "User closes the popup.",
+        "System returns focus to the Login screen."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN014",
+      "screen_id": "S04",
+      "feature_id": "F1",
+      "order": 13,
+      "name": "Display Guided Tour",
+      "trigger": "First login of a new account.",
+      "description": "Shows the multi-step introduction to the Brief-to-SRS pipeline.",
+      "normal": [
+        "System detects the first login.",
+        "System shows the first tour step."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN015",
+      "screen_id": "S04",
+      "feature_id": "F1",
+      "order": 14,
+      "name": "Advance Tour Step",
+      "trigger": "User clicks Next.",
+      "description": "Moves to the next tour step and updates the progress dots.",
+      "normal": [
+        "User clicks Next.",
+        "System renders the next step and updates progress."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN016",
+      "screen_id": "S04",
+      "feature_id": "F1",
+      "order": 15,
+      "name": "Skip Tour",
+      "trigger": "User clicks Skip.",
+      "description": "Ends the tour immediately and opens the Project Dashboard.",
+      "normal": [
+        "User clicks Skip.",
+        "System records completion and navigates to the Project Dashboard."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN017",
+      "screen_id": "S04",
+      "feature_id": "F1",
+      "order": 16,
+      "name": "Persist Onboarding Completion",
+      "trigger": "Tour finishes or is skipped.",
+      "description": "Stores the completion flag so the tour is not shown again.",
+      "normal": [
+        "Tour ends.",
+        "System stores the onboarding-complete flag on the account."
+      ],
+      "abnormal": [
+        "Persist fails: system retries once and continues without blocking navigation."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN018",
+      "screen_id": "S05",
+      "feature_id": "F2",
+      "order": 0,
+      "name": "List Projects",
+      "trigger": "User opens the Project Dashboard.",
+      "description": "Shows the user's projects with name, status, readiness score and last activity.",
+      "normal": [
+        "User opens the dashboard.",
+        "System loads the project list sorted by last activity.",
+        "System renders a card per project with readiness feedback."
+      ],
+      "abnormal": [
+        "Load fails: system shows an inline error with a retry action."
+      ],
+      "validations": [
+        {
+          "id": "FN018-V1",
+          "kind": "business",
+          "statement": "Only projects owned by the authenticated user are listed."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN019",
+      "screen_id": "S05",
+      "feature_id": "F2",
+      "order": 1,
+      "name": "Search Projects",
+      "trigger": "User types in the search box.",
+      "description": "Filters the project cards by name substring.",
+      "normal": [
+        "User types a query.",
+        "System filters the visible cards without a page reload."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN020",
+      "screen_id": "S05",
+      "feature_id": "F2",
+      "order": 2,
+      "name": "Filter by Status",
+      "trigger": "User selects a status filter.",
+      "description": "Restricts the list to active or archived projects.",
+      "normal": [
+        "User selects a status.",
+        "System re-queries the list with the filter applied."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN021",
+      "screen_id": "S05",
+      "feature_id": "F2",
+      "order": 3,
+      "name": "Open Project",
+      "trigger": "User clicks a project card.",
+      "description": "Opens the Project Workspace and resumes at the stored pipeline position.",
+      "normal": [
+        "User clicks a card.",
+        "System loads the project and its pipeline session.",
+        "System navigates to the Project Workspace at the resume position."
+      ],
+      "abnormal": [
+        "Project no longer exists: system shows a not-found notice and refreshes the list."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN022",
+      "screen_id": "S05",
+      "feature_id": "F2",
+      "order": 4,
+      "name": "Archive Project",
+      "trigger": "User chooses Archive from the card menu.",
+      "description": "Archives the project after confirmation; archived projects stay readable.",
+      "normal": [
+        "User confirms the archive dialog.",
+        "System sets the project status to archived.",
+        "System moves the card under the archived filter."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN022-V1",
+          "kind": "business",
+          "statement": "Archiving must not delete any project data."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN023",
+      "screen_id": "S05",
+      "feature_id": "F2",
+      "order": 5,
+      "name": "Open Create Project",
+      "trigger": "User clicks the New project button.",
+      "description": "Opens the Create Project popup.",
+      "normal": [
+        "User clicks New project.",
+        "System opens the Create Project popup."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN024",
+      "screen_id": "S06",
+      "feature_id": "F2",
+      "order": 6,
+      "name": "Submit New Project",
+      "trigger": "User clicks the Create button.",
+      "description": "Creates the project, its Spine and its pipeline chat session, then opens the workspace.",
+      "normal": [
+        "User enters the project name and optional domain.",
+        "System creates the project with an empty Spine at version 1.",
+        "System creates the pipeline chat session and opens the workspace at B-0.1."
+      ],
+      "abnormal": [
+        "Creation fails: system keeps the popup open and shows the error."
+      ],
+      "validations": [
+        {
+          "id": "FN024-V1",
+          "kind": "required",
+          "statement": "Project name must not be empty."
+        },
+        {
+          "id": "FN024-V2",
+          "kind": "format",
+          "statement": "Project name must be at most 120 characters."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN025",
+      "screen_id": "S06",
+      "feature_id": "F2",
+      "order": 7,
+      "name": "Select Working Mode",
+      "trigger": "User picks Fast or Coaching.",
+      "description": "Stores the working mode that controls gate frequency for the pipeline.",
+      "normal": [
+        "User picks a mode.",
+        "System stores the mode on the project."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN025-V1",
+          "kind": "business",
+          "statement": "Working mode must be one of fast or coaching."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN026",
+      "screen_id": "S06",
+      "feature_id": "F2",
+      "order": 8,
+      "name": "Validate Project Name",
+      "trigger": "User leaves the name field.",
+      "description": "Checks name presence and length before enabling Create.",
+      "normal": [
+        "User leaves the field.",
+        "System validates and toggles the Create button."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN027",
+      "screen_id": "S06",
+      "feature_id": "F2",
+      "order": 9,
+      "name": "Cancel Creation",
+      "trigger": "User clicks Cancel or presses Escape.",
+      "description": "Closes the popup without creating anything.",
+      "normal": [
+        "User cancels.",
+        "System closes the popup and discards the input."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN028",
+      "screen_id": "S07",
+      "feature_id": "F3",
+      "order": 0,
+      "name": "Send Chat Message",
+      "trigger": "User submits a message in the chat pane.",
+      "description": "Sends the user turn to the pipeline orchestrator for the current step.",
+      "normal": [
+        "User types a message and submits.",
+        "System appends the turn to the pipeline session.",
+        "System routes the turn to the current step's skill."
+      ],
+      "abnormal": [
+        "The user has insufficient credits: system blocks the call and links to Plan & Pricing."
+      ],
+      "validations": [
+        {
+          "id": "FN028-V1",
+          "kind": "required",
+          "statement": "Message must not be empty."
+        },
+        {
+          "id": "FN028-V2",
+          "kind": "business",
+          "statement": "A message is routed only to the single pipeline session of the project."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN029",
+      "screen_id": "S07",
+      "feature_id": "F3",
+      "order": 1,
+      "name": "Stream AI Response",
+      "trigger": "The orchestrator starts a model call.",
+      "description": "Streams the model response into the chat pane over SSE with a cancel control.",
+      "normal": [
+        "System reserves credits for the call.",
+        "System streams tokens into the chat bubble.",
+        "System settles the reservation when the stream completes."
+      ],
+      "abnormal": [
+        "Stream is interrupted: system refunds the unused reservation and offers a retry.",
+        "Model output fails schema parse twice: system discards the raw text and shows a structured-parse error."
+      ],
+      "validations": [
+        {
+          "id": "FN029-V1",
+          "kind": "business",
+          "statement": "Raw model text must never be written into the Spine when parsing fails."
+        }
+      ],
+      "business_rule_ids": [
+        "BR05"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN030",
+      "screen_id": "S07",
+      "feature_id": "F3",
+      "order": 2,
+      "name": "Switch Tab",
+      "trigger": "User clicks a workspace tab.",
+      "description": "Switches between Chat, Document and History without losing pane state.",
+      "normal": [
+        "User clicks a tab.",
+        "System shows the pane and preserves scroll position."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN031",
+      "screen_id": "S07",
+      "feature_id": "F3",
+      "order": 3,
+      "name": "Render Document Pane",
+      "trigger": "A step is accepted or the user opens the Document tab.",
+      "description": "Renders the assembled SRS read-only with status badges per section.",
+      "normal": [
+        "System assembles the sections from Spine fields.",
+        "System renders section status: draft, accepted, stale or awaiting re-accept.",
+        "System renders diagrams from their stored images."
+      ],
+      "abnormal": [
+        "A diagram has render_status error: system shows the error placeholder with a link to the owning step."
+      ],
+      "validations": [
+        {
+          "id": "FN031-V1",
+          "kind": "business",
+          "statement": "The document pane is read-only; all edits go through chat-driven ops."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN032",
+      "screen_id": "S07",
+      "feature_id": "F3",
+      "order": 4,
+      "name": "Accept Step at Gate",
+      "trigger": "User clicks Accept on a gate card.",
+      "description": "Accepts the current step's output, commits its transaction and advances the pipeline.",
+      "normal": [
+        "User clicks Accept.",
+        "System applies the step's op transaction to the Spine.",
+        "System marks the step accepted and advances to the next step."
+      ],
+      "abnormal": [
+        "The transaction violates an invariant: system rejects the whole batch and shows the referencing elements."
+      ],
+      "validations": [
+        {
+          "id": "FN032-V1",
+          "kind": "business",
+          "statement": "spine_version must increase exactly once per accepted transaction."
+        }
+      ],
+      "business_rule_ids": [
+        "BR06"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN033",
+      "screen_id": "S07",
+      "feature_id": "F3",
+      "order": 5,
+      "name": "Request Revision at Gate",
+      "trigger": "User clicks Revise on a gate card.",
+      "description": "Sends the user's revision notes back to the step within the turn ceiling.",
+      "normal": [
+        "User enters revision notes.",
+        "System re-runs the step with the notes as context.",
+        "System presents the revised output at the gate again."
+      ],
+      "abnormal": [
+        "The per-phase turn ceiling of 8 is reached: system offers Accept as-is or a scope note instead of another turn."
+      ],
+      "validations": [
+        {
+          "id": "FN033-V1",
+          "kind": "business",
+          "statement": "At most 8 elicitation turns and 3 regenerates are allowed per phase."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN034",
+      "screen_id": "S08",
+      "feature_id": "F3",
+      "order": 6,
+      "name": "Display Diagram",
+      "trigger": "User opens a diagram from the document pane.",
+      "description": "Shows the rendered diagram image at full size with its metadata.",
+      "normal": [
+        "User opens the preview.",
+        "System loads the stored image and shows kind, owner and rendered time."
+      ],
+      "abnormal": [
+        "Image is missing: system offers a re-render action."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN035",
+      "screen_id": "S08",
+      "feature_id": "F3",
+      "order": 7,
+      "name": "Re-render Diagram",
+      "trigger": "User clicks Re-render.",
+      "description": "Recompiles the stored .puml source and refreshes the image and source hash.",
+      "normal": [
+        "User clicks Re-render.",
+        "System compiles the .puml on the PlantUML server.",
+        "System stores the new image and source hash."
+      ],
+      "abnormal": [
+        "Compilation fails: system keeps the previous image and records render_status error."
+      ],
+      "validations": [
+        {
+          "id": "FN035-V1",
+          "kind": "business",
+          "statement": "A re-render must recompute source_hash from the current source fields."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN036",
+      "screen_id": "S08",
+      "feature_id": "F3",
+      "order": 8,
+      "name": "Zoom Diagram",
+      "trigger": "User scrolls or uses the zoom buttons.",
+      "description": "Zooms and pans the diagram preview.",
+      "normal": [
+        "User zooms.",
+        "System scales the image around the cursor."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN037",
+      "screen_id": "S08",
+      "feature_id": "F3",
+      "order": 9,
+      "name": "Download Diagram Image",
+      "trigger": "User clicks Download.",
+      "description": "Downloads the rendered image as PNG.",
+      "normal": [
+        "User clicks Download.",
+        "System streams the stored PNG."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN038",
+      "screen_id": "S09",
+      "feature_id": "F4",
+      "order": 0,
+      "name": "List Open Flags",
+      "trigger": "User opens the Verification panel.",
+      "description": "Shows open red and yellow flags with rule, target and remediation step.",
+      "normal": [
+        "System runs the deterministic check on the current spine_version.",
+        "System lists open flags grouped by level.",
+        "Each flag links to its remediation step."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN038-V1",
+          "kind": "business",
+          "statement": "Every red flag must carry an executable remediation step."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN039",
+      "screen_id": "S09",
+      "feature_id": "F4",
+      "order": 1,
+      "name": "Waive Flag",
+      "trigger": "User clicks Waive on a waivable red flag.",
+      "description": "Waives an eligible red flag with a mandatory typed reason.",
+      "normal": [
+        "User types the waive reason.",
+        "System records the waiver with the current spine_version.",
+        "System recounts the open red flags."
+      ],
+      "abnormal": [
+        "The rule is dead_reference, array_empty or render_error: system refuses the waive."
+      ],
+      "validations": [
+        {
+          "id": "FN039-V1",
+          "kind": "required",
+          "statement": "Waive reason must be typed by the user and be at least 20 characters."
+        },
+        {
+          "id": "FN039-V2",
+          "kind": "business",
+          "statement": "Waivers expire when spine_version changes and the condition still holds."
+        }
+      ],
+      "business_rule_ids": [
+        "BR07"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN040",
+      "screen_id": "S09",
+      "feature_id": "F4",
+      "order": 2,
+      "name": "Submit Change Request",
+      "trigger": "User describes a change in the panel.",
+      "description": "Turns a natural-language change request into a previewable op batch.",
+      "normal": [
+        "User describes the change.",
+        "System runs the impact query over the reference fields.",
+        "System proposes an op batch with the impact scope."
+      ],
+      "abnormal": [
+        "The request is ambiguous: system asks a clarifying question before proposing ops."
+      ],
+      "validations": [
+        {
+          "id": "FN040-V1",
+          "kind": "business",
+          "statement": "A change touching referenced fields must present impact scope before apply."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN041",
+      "screen_id": "S09",
+      "feature_id": "F4",
+      "order": 3,
+      "name": "Preview Impact Diff",
+      "trigger": "System proposes an op batch.",
+      "description": "Shows a field-level before/after diff and the dependent sections that become stale.",
+      "normal": [
+        "System renders the diff per op.",
+        "System lists dependent sections across owner, reader and derived columns.",
+        "User confirms or rejects the batch."
+      ],
+      "abnormal": [
+        "User rejects: the section stays stale, which is a valid outcome."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN042",
+      "screen_id": "S09",
+      "feature_id": "F4",
+      "order": 4,
+      "name": "Apply Change Transaction",
+      "trigger": "User confirms the previewed batch.",
+      "description": "Applies the whole op batch atomically and records the change history.",
+      "normal": [
+        "System applies all ops in one transaction.",
+        "System checks invariants at the end of the batch.",
+        "System records changes[] rows and bumps spine_version once."
+      ],
+      "abnormal": [
+        "An invariant fails: system rejects the whole batch and lists the referencing elements."
+      ],
+      "validations": [
+        {
+          "id": "FN042-V1",
+          "kind": "business",
+          "statement": "Invariants are checked at the end of the batch, not per op."
+        }
+      ],
+      "business_rule_ids": [
+        "BR06"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN043",
+      "screen_id": "S10",
+      "feature_id": "F4",
+      "order": 5,
+      "name": "Configure Export Options",
+      "trigger": "User opens the Export screen.",
+      "description": "Chooses between working draft and baseline export and shows blockers.",
+      "normal": [
+        "System shows the available export sources.",
+        "User picks working draft or a signed baseline."
+      ],
+      "abnormal": [
+        "No assembly has run yet: system explains why and links to the assembly step."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN044",
+      "screen_id": "S10",
+      "feature_id": "F4",
+      "order": 6,
+      "name": "Export Working Draft",
+      "trigger": "User clicks Export draft.",
+      "description": "Renders the current document to Word with a DRAFT watermark on every page.",
+      "normal": [
+        "System renders the document from the current Spine.",
+        "System stamps the DRAFT watermark on every page.",
+        "System prints open red flags, stale counts and waivers into section I."
+      ],
+      "abnormal": [
+        "Rendering fails: system reports the failing section and keeps the previous file available."
+      ],
+      "validations": [
+        {
+          "id": "FN044-V1",
+          "kind": "business",
+          "statement": "The draft export must be available regardless of document quality once assembly has run."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN045",
+      "screen_id": "S10",
+      "feature_id": "F4",
+      "order": 7,
+      "name": "Export Baseline Document",
+      "trigger": "User clicks Export baseline.",
+      "description": "Renders the clean document from the baseline snapshot, not from the current Spine.",
+      "normal": [
+        "System loads the baseline snapshot.",
+        "System renders the clean document stamped with the version.",
+        "System lists waived flags in section I when waived_count is positive."
+      ],
+      "abnormal": [
+        "No baseline exists: system disables the action and explains the precondition."
+      ],
+      "validations": [
+        {
+          "id": "FN045-V1",
+          "kind": "business",
+          "statement": "A baseline export must render from the snapshot, never from the live Spine."
+        }
+      ],
+      "business_rule_ids": [
+        "BR09"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN046",
+      "screen_id": "S10",
+      "feature_id": "F4",
+      "order": 8,
+      "name": "Show Export Blockers",
+      "trigger": "Export preconditions are not met.",
+      "description": "Explains which precondition fails and links the shortcut to fix it.",
+      "normal": [
+        "System evaluates the preconditions.",
+        "System lists each unmet one with a shortcut."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN047",
+      "screen_id": "S10",
+      "feature_id": "F4",
+      "order": 9,
+      "name": "Download Exported File",
+      "trigger": "Rendering completes.",
+      "description": "Streams the generated .docx to the browser with a versioned file name.",
+      "normal": [
+        "System finishes rendering.",
+        "System streams the file named with the project and version, with a -draft suffix for drafts."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN048",
+      "screen_id": "S11",
+      "feature_id": "F5",
+      "order": 0,
+      "name": "Display Plans",
+      "trigger": "User opens Plan & Pricing.",
+      "description": "Shows the available plans with credit allowances and prices.",
+      "normal": [
+        "System loads the plan catalog.",
+        "System highlights the user's current plan."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN049",
+      "screen_id": "S11",
+      "feature_id": "F5",
+      "order": 1,
+      "name": "Select Plan",
+      "trigger": "User clicks a plan card.",
+      "description": "Marks the plan for checkout and shows the order summary.",
+      "normal": [
+        "User selects a plan.",
+        "System shows the order summary with tax."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN050",
+      "screen_id": "S11",
+      "feature_id": "F5",
+      "order": 2,
+      "name": "Initiate Checkout",
+      "trigger": "User clicks Proceed to payment.",
+      "description": "Starts a mock gateway checkout session and redirects to it.",
+      "normal": [
+        "System creates a checkout session at the payment gateway.",
+        "System redirects the user to the gateway page.",
+        "System credits the ledger when the success webhook arrives."
+      ],
+      "abnormal": [
+        "The gateway declines: system shows the decline reason and keeps the cart."
+      ],
+      "validations": [
+        {
+          "id": "FN050-V1",
+          "kind": "business",
+          "statement": "Credits are granted only on a verified gateway webhook, never on the client redirect."
+        }
+      ],
+      "business_rule_ids": [
+        "BR08"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN051",
+      "screen_id": "S11",
+      "feature_id": "F5",
+      "order": 3,
+      "name": "Apply Promo Code",
+      "trigger": "User enters a promo code.",
+      "description": "Validates the code and applies the discount to the order summary.",
+      "normal": [
+        "User enters a code.",
+        "System validates it and updates the total."
+      ],
+      "abnormal": [
+        "Code is invalid or expired: system shows the reason and keeps the original total."
+      ],
+      "validations": [
+        {
+          "id": "FN051-V1",
+          "kind": "format",
+          "statement": "Promo code must match the issued code pattern."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN052",
+      "screen_id": "S12",
+      "feature_id": "F5",
+      "order": 4,
+      "name": "List Transactions",
+      "trigger": "User opens Billing History.",
+      "description": "Shows credit transactions newest first with type, amount and balance after.",
+      "normal": [
+        "System loads the ledger rows for the user.",
+        "System renders them paginated, newest first."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN052-V1",
+          "kind": "business",
+          "statement": "The running balance must equal the sum of all ledger rows."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN053",
+      "screen_id": "S12",
+      "feature_id": "F5",
+      "order": 5,
+      "name": "Filter by Date Range",
+      "trigger": "User picks a date range.",
+      "description": "Restricts the transaction list to the selected period.",
+      "normal": [
+        "User picks a range.",
+        "System re-queries the rows in the range."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN054",
+      "screen_id": "S12",
+      "feature_id": "F5",
+      "order": 6,
+      "name": "View Transaction Detail",
+      "trigger": "User clicks a transaction row.",
+      "description": "Shows the full detail including the related step and reservation state.",
+      "normal": [
+        "User clicks a row.",
+        "System shows amount, kind, related step and reservation state."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN055",
+      "screen_id": "S12",
+      "feature_id": "F5",
+      "order": 7,
+      "name": "View Credit Balance",
+      "trigger": "User opens Billing History.",
+      "description": "Shows the current available balance and any active reservations.",
+      "normal": [
+        "System computes available balance minus active reservations.",
+        "System shows both figures."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN056",
+      "screen_id": "S13",
+      "feature_id": "F5",
+      "order": 8,
+      "name": "List Notifications",
+      "trigger": "User opens the Notification Center.",
+      "description": "Shows in-app notifications newest first with unread highlighting.",
+      "normal": [
+        "System loads the notifications.",
+        "System highlights unread items and shows the unread count."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN057",
+      "screen_id": "S13",
+      "feature_id": "F5",
+      "order": 9,
+      "name": "Mark as Read",
+      "trigger": "User clicks a notification.",
+      "description": "Marks one notification read and updates the badge count.",
+      "normal": [
+        "User clicks an item.",
+        "System marks it read and decrements the badge."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN058",
+      "screen_id": "S13",
+      "feature_id": "F5",
+      "order": 10,
+      "name": "Mark All as Read",
+      "trigger": "User clicks Mark all as read.",
+      "description": "Marks every unread notification read in one action.",
+      "normal": [
+        "User clicks the action.",
+        "System marks all unread items read and clears the badge."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN059",
+      "screen_id": "S13",
+      "feature_id": "F5",
+      "order": 11,
+      "name": "Delete Notification",
+      "trigger": "User clicks the delete icon on an item.",
+      "description": "Removes the notification from the inbox.",
+      "normal": [
+        "User deletes an item.",
+        "System removes it from the list."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN060",
+      "screen_id": "S14",
+      "feature_id": "F6",
+      "order": 0,
+      "name": "List Users",
+      "trigger": "Admin opens the user list.",
+      "description": "Shows all accounts paginated with email, role, status and created date.",
+      "normal": [
+        "System loads a user page.",
+        "System renders the table read-only."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN060-V1",
+          "kind": "business",
+          "statement": "Admin views must not expose password hashes or tokens."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN061",
+      "screen_id": "S14",
+      "feature_id": "F6",
+      "order": 1,
+      "name": "Search Users",
+      "trigger": "Admin types in the search box.",
+      "description": "Filters accounts by email or name substring.",
+      "normal": [
+        "Admin types a query.",
+        "System filters the table server-side."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN062",
+      "screen_id": "S14",
+      "feature_id": "F6",
+      "order": 2,
+      "name": "Filter by Role",
+      "trigger": "Admin selects a role filter.",
+      "description": "Restricts the list to users or admins.",
+      "normal": [
+        "Admin picks a role.",
+        "System re-queries with the filter."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN063",
+      "screen_id": "S14",
+      "feature_id": "F6",
+      "order": 3,
+      "name": "Open User Detail",
+      "trigger": "Admin clicks a user row.",
+      "description": "Navigates to the read-only user detail screen.",
+      "normal": [
+        "Admin clicks a row.",
+        "System opens the Admin User Detail screen."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN064",
+      "screen_id": "S15",
+      "feature_id": "F6",
+      "order": 4,
+      "name": "Display User Profile",
+      "trigger": "Admin opens a user detail.",
+      "description": "Shows account fields, auth provider and verification state read-only.",
+      "normal": [
+        "System loads the account.",
+        "System renders the profile fields."
+      ],
+      "abnormal": [
+        "Account not found: system shows a not-found notice."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN065",
+      "screen_id": "S15",
+      "feature_id": "F6",
+      "order": 5,
+      "name": "Display User Projects",
+      "trigger": "Admin opens a user detail.",
+      "description": "Lists the user's projects with status and readiness.",
+      "normal": [
+        "System loads the projects of the user.",
+        "System renders them read-only."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN066",
+      "screen_id": "S15",
+      "feature_id": "F6",
+      "order": 6,
+      "name": "Display Credit Balance",
+      "trigger": "Admin opens a user detail.",
+      "description": "Shows the user's current credit balance and recent ledger rows.",
+      "normal": [
+        "System computes the balance.",
+        "System shows the last ledger rows."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN067",
+      "screen_id": "S15",
+      "feature_id": "F6",
+      "order": 7,
+      "name": "Display Activity Log",
+      "trigger": "Admin opens the activity tab.",
+      "description": "Shows recent logins and pipeline activity for the account.",
+      "normal": [
+        "System loads recent events.",
+        "System renders them newest first."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN068",
+      "screen_id": "S16",
+      "feature_id": "F6",
+      "order": 8,
+      "name": "Display Usage Metrics",
+      "trigger": "Admin opens the metrics dashboard.",
+      "description": "Shows projects created, steps run and exports over the selected range.",
+      "normal": [
+        "System aggregates the metrics.",
+        "System renders the summary cards."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN069",
+      "screen_id": "S16",
+      "feature_id": "F6",
+      "order": 9,
+      "name": "Select Time Range",
+      "trigger": "Admin picks a range preset.",
+      "description": "Re-aggregates all charts for the selected period.",
+      "normal": [
+        "Admin picks 7, 30 or 90 days.",
+        "System re-queries the aggregates."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN070",
+      "screen_id": "S16",
+      "feature_id": "F6",
+      "order": 10,
+      "name": "Display Active Users Chart",
+      "trigger": "Admin opens the metrics dashboard.",
+      "description": "Shows daily active users as a line chart.",
+      "normal": [
+        "System loads daily counts.",
+        "System renders the chart."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN071",
+      "screen_id": "S16",
+      "feature_id": "F6",
+      "order": 11,
+      "name": "Refresh Metrics",
+      "trigger": "Admin clicks Refresh.",
+      "description": "Recomputes the aggregates on demand.",
+      "normal": [
+        "Admin clicks Refresh.",
+        "System recomputes and re-renders."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN072",
+      "screen_id": "S17",
+      "feature_id": "F6",
+      "order": 12,
+      "name": "Display Cost Summary",
+      "trigger": "Admin opens the AI cost report.",
+      "description": "Shows total tokens and cost for the selected period.",
+      "normal": [
+        "System sums usage rows in the range.",
+        "System shows tokens in, tokens out and cost."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN072-V1",
+          "kind": "business",
+          "statement": "Cost figures must be derived from recorded usage rows, not re-estimated."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN073",
+      "screen_id": "S17",
+      "feature_id": "F6",
+      "order": 13,
+      "name": "Group Costs by Provider",
+      "trigger": "Admin selects the provider grouping.",
+      "description": "Breaks the spend down per model provider.",
+      "normal": [
+        "System groups usage rows by provider.",
+        "System renders the breakdown table."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN074",
+      "screen_id": "S17",
+      "feature_id": "F6",
+      "order": 14,
+      "name": "Group Costs by Project",
+      "trigger": "Admin selects the project grouping.",
+      "description": "Breaks the spend down per project.",
+      "normal": [
+        "System groups usage rows by project.",
+        "System renders the breakdown table."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN075",
+      "screen_id": "S17",
+      "feature_id": "F6",
+      "order": 15,
+      "name": "Display Cost Trend",
+      "trigger": "Admin opens the AI cost report.",
+      "description": "Shows daily spend as a bar chart for the selected period.",
+      "normal": [
+        "System loads daily sums.",
+        "System renders the chart."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN076",
+      "screen_id": "S18",
+      "feature_id": "F6",
+      "order": 16,
+      "name": "List Prompt Skills",
+      "trigger": "Admin opens the prompt templates screen.",
+      "description": "Lists the on-disk skill assets grouped by category, read-only.",
+      "normal": [
+        "System reads the skill registry.",
+        "System lists skills with id, category and version."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN076-V1",
+          "kind": "business",
+          "statement": "Skill content is read from disk only; no database override exists in round one."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN077",
+      "screen_id": "S18",
+      "feature_id": "F6",
+      "order": 17,
+      "name": "View Skill Content",
+      "trigger": "Admin clicks a skill row.",
+      "description": "Shows the SKILL.md content and its references read-only.",
+      "normal": [
+        "Admin clicks a row.",
+        "System renders the markdown read-only."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN078",
+      "screen_id": "S18",
+      "feature_id": "F6",
+      "order": 18,
+      "name": "Filter by Category",
+      "trigger": "Admin selects a category.",
+      "description": "Restricts the list to action, content, renderer or output skills.",
+      "normal": [
+        "Admin picks a category.",
+        "System filters the list."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN079",
+      "screen_id": "S18",
+      "feature_id": "F6",
+      "order": 19,
+      "name": "Display Asset Version",
+      "trigger": "Admin opens a skill.",
+      "description": "Shows the asset version recorded for reproducibility.",
+      "normal": [
+        "System reads the version.",
+        "System shows it next to the skill id."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN080",
+      "screen_id": "S19",
+      "feature_id": "F6",
+      "order": 20,
+      "name": "List Audit Events",
+      "trigger": "Admin opens the audit log.",
+      "description": "Shows security-relevant events newest first, read-only.",
+      "normal": [
+        "System loads the events paginated.",
+        "System renders actor, type and time."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN081",
+      "screen_id": "S19",
+      "feature_id": "F6",
+      "order": 21,
+      "name": "Filter by Actor",
+      "trigger": "Admin enters an actor email.",
+      "description": "Restricts the events to one account.",
+      "normal": [
+        "Admin enters an email.",
+        "System filters the events."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN082",
+      "screen_id": "S19",
+      "feature_id": "F6",
+      "order": 22,
+      "name": "Filter by Event Type",
+      "trigger": "Admin selects an event type.",
+      "description": "Restricts the events to one type such as login or export.",
+      "normal": [
+        "Admin picks a type.",
+        "System filters the events."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN083",
+      "screen_id": "S19",
+      "feature_id": "F6",
+      "order": 23,
+      "name": "View Event Detail",
+      "trigger": "Admin clicks an event row.",
+      "description": "Shows the full event payload read-only.",
+      "normal": [
+        "Admin clicks a row.",
+        "System shows the payload."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "could"
+    },
+    {
+      "id": "FN084",
+      "screen_id": null,
+      "feature_id": "F5",
+      "order": 0,
+      "name": "Reset Monthly Quota",
+      "trigger": "Scheduler fires at 00:00 UTC on the first day of each month.",
+      "description": "Resets the monthly free-tier credit quota for every active account.",
+      "normal": [
+        "Scheduler fires the job.",
+        "System resets the free quota for each active account.",
+        "System writes a ledger row per reset."
+      ],
+      "abnormal": [
+        "A batch fails midway: system resumes from the last processed account on the next run."
+      ],
+      "validations": [
+        {
+          "id": "FN084-V1",
+          "kind": "business",
+          "statement": "A quota reset must be idempotent within the same month."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN085",
+      "screen_id": null,
+      "feature_id": "F5",
+      "order": 1,
+      "name": "Check Subscription Expiry",
+      "trigger": "Scheduler fires daily at 01:00 UTC.",
+      "description": "Downgrades accounts whose subscription lapsed and notifies them in-app.",
+      "normal": [
+        "Scheduler fires the job.",
+        "System finds subscriptions past their end date.",
+        "System downgrades the plan and creates a notification."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN085-V1",
+          "kind": "business",
+          "statement": "A downgrade must not remove credits already purchased."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "must"
+    },
+    {
+      "id": "FN086",
+      "screen_id": null,
+      "feature_id": "F5",
+      "order": 2,
+      "name": "Handle Payment Webhook",
+      "trigger": "The payment gateway posts a webhook event.",
+      "description": "Verifies the webhook signature and credits the ledger on successful payment.",
+      "normal": [
+        "Gateway posts the event.",
+        "System verifies the signature and event uniqueness.",
+        "System credits the ledger and notifies the user."
+      ],
+      "abnormal": [
+        "Signature verification fails: system rejects the event and logs an audit entry.",
+        "Duplicate event id: system acknowledges without crediting twice."
+      ],
+      "validations": [
+        {
+          "id": "FN086-V1",
+          "kind": "business",
+          "statement": "Each gateway event id must be processed at most once."
+        }
+      ],
+      "business_rule_ids": [
+        "BR08"
+      ],
+      "priority": "must"
+    },
+    {
+      "id": "FN087",
+      "screen_id": null,
+      "feature_id": "F3",
+      "order": 0,
+      "name": "Evaluate Completeness Proactively",
+      "trigger": "Scheduler fires hourly for projects active in the last day.",
+      "description": "Runs the deterministic check in the background and refreshes the readiness feedback.",
+      "normal": [
+        "Scheduler fires the job.",
+        "System runs the deterministic check per active project.",
+        "System stores the flag deltas for the verification panel."
+      ],
+      "abnormal": [],
+      "validations": [
+        {
+          "id": "FN087-V1",
+          "kind": "business",
+          "statement": "The background check must never call a language model."
+        }
+      ],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN088",
+      "screen_id": null,
+      "feature_id": "F6",
+      "order": 0,
+      "name": "Aggregate AI Costs",
+      "trigger": "Scheduler fires daily at 02:00 UTC.",
+      "description": "Rolls up usage rows into daily cost aggregates for the admin report.",
+      "normal": [
+        "Scheduler fires the job.",
+        "System sums usage rows per day, provider and project.",
+        "System upserts the daily aggregate rows."
+      ],
+      "abnormal": [],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    },
+    {
+      "id": "FN089",
+      "screen_id": null,
+      "feature_id": "F6",
+      "order": 1,
+      "name": "Monitor Service Health",
+      "trigger": "Scheduler fires every 5 minutes.",
+      "description": "Probes the database, the PlantUML server and the LLM provider and records the results.",
+      "normal": [
+        "Scheduler fires the probe.",
+        "System checks each dependency with a timeout.",
+        "System records the health snapshot."
+      ],
+      "abnormal": [
+        "A probe times out: system records the dependency as degraded and notifies admins in-app."
+      ],
+      "validations": [],
+      "business_rule_ids": [],
+      "priority": "should"
+    }
+  ],
+  "nfrs": [
+    {
+      "id": "N01",
+      "category": "interface",
+      "statement": "The web client communicates with the backend exclusively over HTTPS REST and SSE endpoints.",
+      "kind": "descriptive",
+      "priority": "must"
+    },
+    {
+      "id": "N02",
+      "category": "interface",
+      "statement": "Diagram rendering integrates with a self-hosted PlantUML server so customer data never leaves the deployment.",
+      "kind": "descriptive",
+      "priority": "must"
+    },
+    {
+      "id": "N03",
+      "category": "usability",
+      "statement": "A first-time user reaches their first accepted pipeline step within 15 minutes without external help.",
+      "kind": "descriptive",
+      "priority": "should"
+    },
+    {
+      "id": "N04",
+      "category": "usability",
+      "statement": "Every gate decision is reachable with at most two clicks from the workspace.",
+      "kind": "descriptive",
+      "priority": "should"
+    },
+    {
+      "id": "N05",
+      "category": "reliability",
+      "statement": "The service is available 99.5% of the time measured monthly.",
+      "kind": "quantitative",
+      "metric": "availability",
+      "threshold": ">= 99.5% monthly",
+      "priority": "must"
+    },
+    {
+      "id": "N06",
+      "category": "reliability",
+      "statement": "After an unexpected interruption, a pipeline session resumes without data loss within one step boundary.",
+      "kind": "quantitative",
+      "metric": "recovery point",
+      "threshold": "<= 1 step of work lost",
+      "priority": "must"
+    },
+    {
+      "id": "N07",
+      "category": "performance",
+      "statement": "Chat responses start streaming quickly after submission.",
+      "kind": "quantitative",
+      "metric": "time to first token, p95",
+      "threshold": "<= 3 s",
+      "priority": "must"
+    },
+    {
+      "id": "N08",
+      "category": "performance",
+      "statement": "A full Word export of a 19-screen project completes promptly.",
+      "kind": "quantitative",
+      "metric": "export duration, p95",
+      "threshold": "<= 30 s",
+      "priority": "should"
+    },
+    {
+      "id": "N09",
+      "category": "performance",
+      "statement": "A single diagram render round-trip completes promptly.",
+      "kind": "quantitative",
+      "metric": "render duration, p95",
+      "threshold": "<= 5 s",
+      "priority": "should"
+    },
+    {
+      "id": "N10",
+      "category": "other",
+      "statement": "Passwords are stored as salted bcrypt hashes; tokens and secrets never appear in logs or admin views.",
+      "kind": "descriptive",
+      "priority": "must"
+    },
+    {
+      "id": "N11",
+      "category": "other",
+      "statement": "Only extracted text of uploaded documents is sent to the model provider; original files stay in object storage.",
+      "kind": "descriptive",
+      "priority": "must"
+    }
+  ],
+  "business_rules": [
+    {
+      "id": "BR01",
+      "tier": "high",
+      "statement": "Every statement rendered into the SRS must be traceable to a structured Spine field written by an accepted step.",
+      "source_validation_ids": []
+    },
+    {
+      "id": "BR02",
+      "tier": "high",
+      "statement": "Credits are reserved before any model call and settled or refunded when the call ends.",
+      "source_validation_ids": []
+    },
+    {
+      "id": "BR03",
+      "tier": "high",
+      "statement": "A baseline may only be signed when zero unresolved, unwaived red flags remain.",
+      "source_validation_ids": []
+    },
+    {
+      "id": "BR04",
+      "tier": "high",
+      "statement": "All content rendered into the SRS document is written in English.",
+      "source_validation_ids": []
+    },
+    {
+      "id": "BR05",
+      "tier": "detail",
+      "statement": "Raw model output that fails schema parsing is never persisted into the Spine.",
+      "source_validation_ids": [
+        "FN029-V1"
+      ]
+    },
+    {
+      "id": "BR06",
+      "tier": "detail",
+      "statement": "An applied change transaction bumps spine_version exactly once and checks invariants at the end of the batch.",
+      "source_validation_ids": [
+        "FN032-V1",
+        "FN042-V1"
+      ]
+    },
+    {
+      "id": "BR07",
+      "tier": "detail",
+      "statement": "A red-flag waiver requires a user-typed reason of at least 20 characters and expires when spine_version changes.",
+      "source_validation_ids": [
+        "FN039-V1",
+        "FN039-V2"
+      ]
+    },
+    {
+      "id": "BR08",
+      "tier": "detail",
+      "statement": "Credits are granted only on a verified payment-gateway webhook processed at most once per event id.",
+      "source_validation_ids": [
+        "FN050-V1",
+        "FN086-V1"
+      ]
+    },
+    {
+      "id": "BR09",
+      "tier": "detail",
+      "statement": "Baseline exports render from the baseline snapshot, never from the live Spine.",
+      "source_validation_ids": [
+        "FN045-V1"
+      ]
+    }
+  ],
+  "common_requirements": [
+    {
+      "id": "CR01",
+      "category": "pagination",
+      "statement": "All list screens paginate server-side with a default page size of 20."
+    },
+    {
+      "id": "CR02",
+      "category": "date_format",
+      "statement": "All dates are displayed in the user's locale and stored in UTC ISO 8601."
+    },
+    {
+      "id": "CR03",
+      "category": "error_handling",
+      "statement": "Every failed action shows a human-readable message with a stable error code."
+    },
+    {
+      "id": "CR04",
+      "category": "audit",
+      "statement": "Authentication events, exports and baseline signings are written to the audit log."
+    },
+    {
+      "id": "CR05",
+      "category": "session",
+      "statement": "Access tokens expire after 24 hours; expired sessions redirect to Login preserving the return path."
+    }
+  ],
+  "messages": [
+    {
+      "id": "MSG01",
+      "code": "E-AUTH-001",
+      "text": "Invalid email or password.",
+      "function_ids": [
+        "FN001"
+      ]
+    },
+    {
+      "id": "MSG02",
+      "code": "E-AUTH-002",
+      "text": "This email address is already registered.",
+      "function_ids": [
+        "FN006"
+      ]
+    },
+    {
+      "id": "MSG03",
+      "code": "E-AUTH-003",
+      "text": "The verification link is invalid or has expired.",
+      "function_ids": [
+        "FN007",
+        "FN011"
+      ]
+    },
+    {
+      "id": "MSG04",
+      "code": "E-CRED-001",
+      "text": "You do not have enough credits for this action.",
+      "function_ids": [
+        "FN028"
+      ]
+    },
+    {
+      "id": "MSG05",
+      "code": "E-PIPE-001",
+      "text": "The model response could not be parsed. No content was saved.",
+      "function_ids": [
+        "FN029"
+      ]
+    },
+    {
+      "id": "MSG06",
+      "code": "E-SPINE-001",
+      "text": "This change was rejected because it would break document consistency.",
+      "function_ids": [
+        "FN032",
+        "FN042"
+      ]
+    },
+    {
+      "id": "MSG07",
+      "code": "E-EXPORT-001",
+      "text": "The document has not been assembled yet. Run Document Assembly first.",
+      "function_ids": [
+        "FN043",
+        "FN046"
+      ]
+    },
+    {
+      "id": "MSG08",
+      "code": "E-PAY-001",
+      "text": "The payment could not be completed. You have not been charged.",
+      "function_ids": [
+        "FN050"
+      ]
+    }
+  ],
+  "other_requirements": [
+    {
+      "id": "OR01",
+      "kind": "risk",
+      "statement": "Model providers may change pricing or deprecate models mid-project, invalidating the cost model."
+    },
+    {
+      "id": "OR02",
+      "kind": "assumption",
+      "statement": "Users accept that generated content requires human review before contractual use."
+    },
+    {
+      "id": "OR03",
+      "kind": "open_question",
+      "statement": "Retention period for addendum content and uploaded source documents is not yet decided."
+    },
+    {
+      "id": "OR04",
+      "kind": "technical_risk",
+      "statement": "Token cost grows super-linearly with screen count if step context is not projected; mitigation is the context projection rule."
+    },
+    {
+      "id": "OR05",
+      "kind": "technical_risk",
+      "statement": "MongoDB transactions require a replica set; single-node deployments must run with a one-member replica set."
+    }
+  ],
+  "glossary": [
+    {
+      "id": "G01",
+      "term": "SRS",
+      "definition": "Software Requirements Specification — the output document assembled from the Spine."
+    },
+    {
+      "id": "G02",
+      "term": "Spine",
+      "term_native": "Xương sống SRS",
+      "definition": "The structured store of requirement fields that every SRS section renders from."
+    },
+    {
+      "id": "G03",
+      "term": "Op",
+      "definition": "A single atomic write (add, set, remove) addressed by a key-based path into the Spine."
+    },
+    {
+      "id": "G04",
+      "term": "Transaction",
+      "definition": "A batch of ops applied atomically; invariants are checked at the end of the batch."
+    },
+    {
+      "id": "G05",
+      "term": "Baseline",
+      "definition": "A signed, versioned snapshot of the Spine that clean exports render from."
+    },
+    {
+      "id": "G06",
+      "term": "Deterministic Check",
+      "definition": "A model-free rule set that produces red and yellow flags from the Spine graph."
+    },
+    {
+      "id": "G07",
+      "term": "Red Flag",
+      "term_native": "Cờ đỏ",
+      "definition": "A blocking finding that prevents baseline signing until resolved or waived."
+    },
+    {
+      "id": "G08",
+      "term": "Yellow Flag",
+      "term_native": "Cờ vàng",
+      "definition": "A non-blocking finding surfaced for awareness."
+    },
+    {
+      "id": "G09",
+      "term": "Waiver",
+      "definition": "A user-authorized exception to a red flag, with a typed reason, that expires on version change."
+    },
+    {
+      "id": "G10",
+      "term": "Gate",
+      "definition": "The checkpoint where the user accepts, revises or regenerates a step's output."
+    },
+    {
+      "id": "G11",
+      "term": "Working Draft",
+      "definition": "The always-available watermarked export of the current document state."
+    },
+    {
+      "id": "G12",
+      "term": "Brief",
+      "definition": "The product brief produced in phases B-0 to B-2 that seeds SRS generation."
+    },
+    {
+      "id": "G13",
+      "term": "Addendum",
+      "definition": "Captured side-notes with a target section, triaged into the document later."
+    },
+    {
+      "id": "G14",
+      "term": "Credit",
+      "definition": "The prepaid unit that meters model usage; reserved before calls and settled after."
+    },
+    {
+      "id": "G15",
+      "term": "Stale",
+      "definition": "A section whose source fields changed after its owning step was accepted."
+    },
+    {
+      "id": "G16",
+      "term": "PlantUML",
+      "definition": "The text-based diagram language used for all five rendered diagram kinds."
+    }
+  ],
+  "addendum": [
+    {
+      "id": "AD01",
+      "topic": "Availability target",
+      "content": "Khách hàng doanh nghiệp yêu cầu cam kết uptime tối thiểu 99.5% theo tháng.",
+      "content_en": "Enterprise customers require a minimum monthly uptime commitment of 99.5%.",
+      "target_section": "fixed:4.2.2",
+      "captured_at": "2026-09-01T09:01:00.000Z"
+    },
+    {
+      "id": "AD02",
+      "topic": "Workspace keyboard shortcuts",
+      "content": "Người dùng power muốn phím tắt cho Accept/Revise tại gate.",
+      "content_en": "Power users want keyboard shortcuts for Accept and Revise at gates.",
+      "target_section": "feature:F3",
+      "captured_at": "2026-09-01T09:02:00.000Z"
+    },
+    {
+      "id": "AD03",
+      "topic": "Waiver policy",
+      "content": "Chính sách nội bộ: mọi waiver phải nêu người chịu trách nhiệm nghiệp vụ.",
+      "content_en": "Internal policy: every waiver must name the accountable business owner.",
+      "target_section": "fixed:5.1",
+      "captured_at": "2026-09-01T09:03:00.000Z"
+    },
+    {
+      "id": "AD04",
+      "topic": "Data model note",
+      "content": "Ledger phải append-only để phục vụ đối soát.",
+      "content_en": "The credit ledger must be append-only to support reconciliation.",
+      "target_section": "fixed:3.1.5",
+      "captured_at": "2026-09-01T09:04:00.000Z"
+    },
+    {
+      "id": "AD05",
+      "topic": "Positioning",
+      "content": "Nhấn mạnh khác biệt: mọi câu trong SRS truy vết được về field có cấu trúc.",
+      "content_en": "Emphasize the differentiator: every SRS sentence is traceable to a structured field.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:05:00.000Z"
+    }
+  ],
+  "diagrams": [
+    {
+      "id": "D01",
+      "kind": "context",
+      "section": "fixed:1",
+      "owner_kind": null,
+      "owner_id": null,
+      "puml": "@startuml\nskinparam componentStyle rectangle\nrectangle \"FlintFlow\" as sys\ncomponent \"Payment Gateway\" as pay\ncomponent \"LLM Provider\" as llm\ncomponent \"PlantUML Server\" as puml_srv\ncomponent \"Email Service\" as mail\npay --> sys : payment webhooks\nsys --> pay : checkout sessions\nsys --> llm : structured drafting calls\nsys --> puml_srv : .puml compile requests\nsys --> mail : verification and reset mail\n@enduml",
+      "render_status": "ok",
+      "source_hash": "TBD",
+      "rendered_at": "2026-09-01T09:09:00.000Z"
+    },
+    {
+      "id": "D02",
+      "kind": "usecase",
+      "section": "fixed:2.2.1",
+      "owner_kind": null,
+      "owner_id": null,
+      "puml": "@startuml\nleft to right direction\nactor \"Founder\" as A01\nactor \"Business Analyst\" as A02\nactor \"Administrator\" as A03\nactor \"Guest\" as A04\nactor \"Payment Gateway\" as A05 <<system>>\nactor \"LLM Provider\" as A06 <<system>>\nactor \"PlantUML Server\" as A07 <<system>>\nactor \"Scheduler\" as A09 <<time>>\nrectangle FlintFlow {\n  usecase \"Register Account\" as UC01\n  usecase \"Log In\" as UC02\n  usecase \"Reset Password\" as UC03\n  usecase \"Create Project\" as UC06\n  usecase \"Generate SRS Content\" as UC09\n  usecase \"Review and Accept Step\" as UC10\n  usecase \"Request Change\" as UC11\n  usecase \"Preview Change Impact\" as UC23\n  usecase \"Render Diagrams\" as UC12\n  usecase \"Verify Document\" as UC13\n  usecase \"Sign Baseline\" as UC15\n  usecase \"Waive Red Flag\" as UC14\n  usecase \"Export Word Document\" as UC16\n  usecase \"Purchase Credits\" as UC17\n  usecase \"Run Scheduled Housekeeping\" as UC22\n}\nA04 --> UC01\nA04 --> UC02\nA01 --> UC02\nA01 --> UC03\nA01 --> UC06\nA01 --> UC09\nA06 --> UC09\nA01 --> UC10\nA01 --> UC11\nA02 --> UC13\nA02 --> UC15\nA02 --> UC14\nA01 --> UC16\nA01 --> UC17\nA05 --> UC17\nA07 --> UC12\nA09 --> UC22\nUC09 ..> UC10 : <<include>>\nUC09 ..> UC12 : <<include>>\nUC15 ..> UC13 : <<include>>\nUC11 ..> UC23 : <<include>>\nUC03 ..> UC02 : <<extend>>\nUC14 ..> UC15 : <<extend>>\n@enduml",
+      "render_status": "ok",
+      "source_hash": "TBD",
+      "rendered_at": "2026-09-01T09:10:00.000Z"
+    },
+    {
+      "id": "D03",
+      "kind": "screen_flow",
+      "section": "fixed:3.1.1",
+      "owner_kind": null,
+      "owner_id": null,
+      "puml": "@startuml\nhide empty description\n[*] --> Login\nstate \"Login\" as Login\nstate \"Register\" as Register\nstate \"Onboarding\" as Onboarding\nstate \"Project Dashboard\" as Dashboard\nstate \"Project Workspace\" as Workspace {\n  state \"Chat\" as TabChat\n  state \"Document\" as TabDoc\n  state \"History\" as TabHist\n  TabChat -right-> TabDoc\n  TabDoc -right-> TabHist\n}\nstate \"Diagram Preview\" as DiagramPreview\nstate \"Verification & Change Panel\" as Verification\nstate \"Export\" as Export\nstate \"Plan & Pricing\" as Pricing\nstate \"Billing History\" as Billing\nstate \"Notification Center\" as Notifications\nstate \"Admin User List\" as AdminUsers\nstate \"Admin User Detail\" as AdminUserDetail\nstate \"Admin Metrics Dashboard\" as AdminMetrics\nstate \"Admin AI Cost Report\" as AdminCost\nstate \"Admin Prompt Templates\" as AdminPrompts\nstate \"Admin Audit Log\" as AdminAudit\nLogin --> Register\nLogin --> Dashboard : authenticated\nnote right of Login : opens popup:\\nForgot Password\nRegister --> Login\nOnboarding --> Dashboard\nDashboard --> Workspace : open project\nnote right of Dashboard : opens popup:\\nCreate Project\nDashboard --> Pricing\nDashboard --> Notifications\nWorkspace --> DiagramPreview\nDiagramPreview --> Workspace\nWorkspace --> Verification\nVerification --> Workspace\nVerification --> Export\nWorkspace --> Export\nExport --> Workspace\nPricing --> Billing\nAdminUsers --> AdminUserDetail\nAdminUserDetail --> AdminUsers\n@enduml",
+      "render_status": "ok",
+      "source_hash": "TBD",
+      "rendered_at": "2026-09-01T09:11:00.000Z"
+    },
+    {
+      "id": "D04",
+      "kind": "erd",
+      "section": "fixed:3.1.5",
+      "owner_kind": null,
+      "owner_id": null,
+      "puml": "@startuml\nhide circle\nskinparam linetype ortho\nentity \"User\" as E01\nentity \"Project\" as E02\nentity \"Spine\" as E03\nentity \"ChatSession\" as E04\nentity \"CreditLedger\" as E05\nentity \"Subscription\" as E06\nentity \"Notification\" as E07\nentity \"Baseline\" as E08\nentity \"ChangeRecord\" as E09\nentity \"UsageRecord\" as E10\nentity \"Flag\" as E11\nentity \"Diagram\" as E12\nE01 ||--o{ E02 : owns\nE01 ||--o{ E05 : accrues\nE01 ||--o{ E07 : receives\nE01 ||--o| E06 : subscribes\nE02 ||--|| E03 : has\nE02 ||--o{ E04 : has\nE03 ||--o{ E08 : snapshots\nE03 ||--o{ E09 : records\nE03 ||--o{ E11 : raises\nE03 ||--o{ E12 : renders\nE05 ||--o{ E10 : settles\n@enduml",
+      "render_status": "ok",
+      "source_hash": "TBD",
+      "rendered_at": "2026-09-01T09:12:00.000Z"
+    },
+    {
+      "id": "D05",
+      "kind": "screen_layout",
+      "section": "function:FN028",
+      "owner_kind": "screen",
+      "owner_id": "S07",
+      "puml": "@startuml\nsalt\n{+\n  {* FlintFlow | Project: FlintFlow | <&person> }\n  {/ <b>Chat | Document | History }\n  {\n    {SI\n      \"AI: Which external systems does the product talk to?\"\n      \"You: Payment gateway, LLM provider, PlantUML server.\"\n      \"AI: Draft updated - review at the gate below.\"\n    }\n    {+ Gate: S-2.3 External Systems | [ Accept ] | [ Revise ] | [ Regenerate ] }\n    { \"Type a message...\" | [ Send ] }\n  }\n}\n@enduml",
+      "render_status": "ok",
+      "source_hash": "TBD",
+      "rendered_at": "2026-09-01T09:13:00.000Z"
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "AS01",
+      "path": "nfrs[id=N05].threshold",
+      "statement": "99.5% monthly availability is sufficient for the target segment.",
+      "rationale": "Derived from the enterprise addendum; no customer asked for more.",
+      "origin_step_id": "S-6.3",
+      "status": "confirmed",
+      "confirmed_at": "2026-09-01T09:06:00.000Z"
+    },
+    {
+      "id": "AS02",
+      "path": "actors[id=A05].name",
+      "statement": "A single payment gateway (sandbox) is enough for release 1.0.",
+      "rationale": "Multi-gateway support is out of scope per the release scope.",
+      "origin_step_id": "S-2.3",
+      "status": "confirmed",
+      "confirmed_at": "2026-09-01T09:07:00.000Z"
+    },
+    {
+      "id": "AS03",
+      "path": "screens[id=S07].tabs",
+      "statement": "Three workspace tabs (Chat, Document, History) cover the working modes without a separate review screen.",
+      "rationale": "The verification panel is a separate screen; history fits as a tab.",
+      "origin_step_id": "S-4.2",
+      "status": "confirmed",
+      "confirmed_at": "2026-09-01T09:08:00.000Z"
+    }
+  ],
+  "flags": [],
+  "sections": [
+    {
+      "id": "fixed:I",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:2.1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:2.2.1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:2.2.2",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:3.1.1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:3.1.2",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:3.1.3",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:3.1.4",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:3.1.5",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:4.1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:4.2.1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:4.2.2",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:4.2.3",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:4.2.4",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:5.1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:5.2",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:5.3",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:5.4",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "fixed:5.5",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "feature:F1",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "feature:F2",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "feature:F3",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "feature:F4",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "feature:F5",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "feature:F6",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN001",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN002",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN003",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN004",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN005",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN006",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN007",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN008",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN009",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN010",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN011",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN012",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN013",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN014",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN015",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN016",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN017",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN018",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN019",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN020",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN021",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN022",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN023",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN024",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN025",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN026",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN027",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN028",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN029",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN030",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN031",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN032",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN033",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN034",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN035",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN036",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN037",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN038",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN039",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN040",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN041",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN042",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN043",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN044",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN045",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN046",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN047",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN048",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN049",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN050",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN051",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN052",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN053",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN054",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN055",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN056",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN057",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN058",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN059",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN060",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN061",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN062",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN063",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN064",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN065",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN066",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN067",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN068",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN069",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN070",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN071",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN072",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN073",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN074",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN075",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN076",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN077",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN078",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN079",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN080",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN081",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN082",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN083",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN084",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN085",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN086",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN087",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN088",
+      "asset_version": "1.0.0"
+    },
+    {
+      "id": "function:FN089",
+      "asset_version": "1.0.0"
+    }
+  ],
+  "baselines": [],
+  "spine_version": 1
+}

@@ -1,0 +1,11 @@
+{
+  "name": "removing the last reliability nfrs must be rejected",
+  "step_id": "S-6.3",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The batch removes both reliability NFRs (N05, N06), leaving nfrs[category=reliability] empty. Invariant 2 forbids deleting the last element of that array, so the whole transaction must be rejected even though each op is individually well-formed.",
+  "expected_ops": [
+    { "op": "remove", "path": "nfrs[id=N05]", "reason": "Invalid batch: would empty nfrs[category=reliability]." },
+    { "op": "remove", "path": "nfrs[id=N06]", "reason": "Invalid batch: would empty nfrs[category=reliability]." }
+  ],
+  "must_reject": "invariant_2_last_element"
+}
