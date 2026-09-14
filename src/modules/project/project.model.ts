@@ -7,10 +7,17 @@ export interface IProject extends Document {
   name: string
   domain?: string | null
   status: ProjectStatus
+  // Các field dưới là legacy: nguồn sự thật mới là Spine (modules/spine) — xoá ở T21.
+  // Metadata project (vision, goals, type, form_factor…) nằm ở Spine.project.
+  /** @deprecated dùng Spine.progress.current_step */
   currentStep: string
+  /** @deprecated dùng Spine.progress.current_phase */
   currentPhase: 2 | 3 | 4
+  /** @deprecated dùng Spine.progress.current_phase */
   workspacePhase: "discovery" | "product_overview" | "functional_spec" | "nfr_appendix" | "export"
+  /** @deprecated dùng Spine.baselines[] */
   baselineVersion?: string | null
+  /** @deprecated % tiến độ là hàm tính (T09), không lưu */
   progressPercent: number
   createdAt: Date
   updatedAt: Date
