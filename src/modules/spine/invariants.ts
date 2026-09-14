@@ -14,6 +14,7 @@
 import type { Spine } from "./spine.types.js"
 import type { RejectRule, Violation } from "./op.types.js"
 import { findDeadReferences } from "./reference-fields.js"
+import { REQUIRED_FIXED_SECTION_IDS } from "./section-registry.js"
 
 export interface Invariant {
   id: number
@@ -21,27 +22,8 @@ export interface Invariant {
   check(after: Spine, before: Spine): Violation[]
 }
 
-/** Bất biến 1 — section bắt buộc theo khoá logic. `fixed:4.2.4` tuỳ chọn, `fixed:I` dẫn xuất. T09 thay bằng registry. */
-export const REQUIRED_FIXED_SECTIONS: readonly string[] = Object.freeze([
-  "fixed:1",
-  "fixed:2.1",
-  "fixed:2.2.1",
-  "fixed:2.2.2",
-  "fixed:3.1.1",
-  "fixed:3.1.2",
-  "fixed:3.1.3",
-  "fixed:3.1.4",
-  "fixed:3.1.5",
-  "fixed:4.1",
-  "fixed:4.2.1",
-  "fixed:4.2.2",
-  "fixed:4.2.3",
-  "fixed:5.1",
-  "fixed:5.2",
-  "fixed:5.3",
-  "fixed:5.4",
-  "fixed:5.5"
-])
+/** Bất biến 1 — section bắt buộc theo khoá logic, lấy từ section registry (T09). `fixed:4.2.4` tuỳ chọn, `fixed:I` dẫn xuất. */
+export const REQUIRED_FIXED_SECTIONS: readonly string[] = REQUIRED_FIXED_SECTION_IDS
 
 const violation = (rule: RejectRule, path: string, message: string): Violation => ({ rule, path, message })
 

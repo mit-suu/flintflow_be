@@ -101,7 +101,7 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | # | Method + path | Task | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `GET /projects/:id/spine` | T01 ✔ | — | `SpineRecord` | — |
-| 2 | `GET /projects/:id/progress` | T09 | — | `progressResponseSchema` | — |
+| 2 | `GET /projects/:id/progress` | T09 ✔ | — | `progressResponseSchema` | — |
 | 3 | `GET /projects/:id/steps` | T12/T13 | — | `stepsResponseSchema` | — |
 | 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
 | 5 | `POST /projects/:id/steps/:stepId/answer` | T13 | `stepAnswerRequestSchema` | `{ accepted: true }`, luồng SSE của `/run` tiếp tục | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE` |
@@ -111,9 +111,9 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 9 | `POST /projects/:id/reconcile` | T17 | `reconcileRequestSchema` | chưa có `preview_id`: `changesPreviewResponseSchema`; có: `applyResultResponseSchema` | `SPINE_VERSION_CONFLICT`, `INVARIANT_VIOLATION`, `INSUFFICIENT_CREDIT` |
 | 10 | `POST /projects/:id/undo` | T17 | `undoRequestSchema` | `applyResultResponseSchema` (op `revert`) | `SPINE_VERSION_CONFLICT`, `NOTHING_TO_UNDO`, `INVARIANT_VIOLATION` |
 | 11 | `GET /projects/:id/changes?from&to` | T17 | `changesQuerySchema` | `Change[]` theo seq tăng dần | — |
-| 12 | `GET /projects/:id/flags?level&open` | T09 | `flagsQuerySchema` | `Flag[]` | — |
-| 13 | `POST /projects/:id/flags/:flagId/waive` | T09 | `waiveRequestSchema` (≥ 20 ký tự) | `Flag` | `FLAG_NOT_FOUND`, `FLAG_NOT_WAIVABLE`, `VALIDATION_ERROR` |
-| 14 | `POST /projects/:id/flags/recompute` | T09 | `recomputeFlagsRequestSchema` | `Flag[]` | — |
+| 12 | `GET /projects/:id/flags?level&open` | T09 ✔ | `flagsQuerySchema` | `Flag[]` | — |
+| 13 | `POST /projects/:id/flags/:flagId/waive` | T09 ✔ | `waiveRequestSchema` (≥ 20 ký tự) | `Flag` | `FLAG_NOT_FOUND`, `FLAG_NOT_WAIVABLE`, `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
+| 14 | `POST /projects/:id/flags/recompute` | T09 ✔ | `recomputeFlagsRequestSchema` | `Flag[]`; `meta = { checked_at_version, opened[], resolved[], reopened[] }` | `SPINE_VERSION_CONFLICT` |
 | 15 | `GET /projects/:id/traceability?entity&id` | T17 | `traceabilityQuerySchema` | `traceabilityResponseSchema` | `VALIDATION_ERROR` |
 | 16 | `GET /projects/:id/document?source=draft\|baseline&baseline_id` | T15 | `documentQuerySchema` | `RenderedDocument` (`render/rendered-document.schema.ts`) | `BASELINE_NOT_FOUND` |
 | 17 | `POST /projects/:id/assemble` | T15 | `assembleRequestSchema` | `assembleResponseSchema` | `SPINE_VERSION_CONFLICT` |
