@@ -194,6 +194,50 @@ export const appendChanges = async (projectId: string, changes: NewChange[]): Pr
   }
 }
 
+export interface ApplyAndSaveInput {
+  spine: SpineRecord
+  baseVersion: number
+  /** Change của MỘT txn, seq liên tục bắt đầu từ `nextSeq`. */
+  changes: NewChange[]
+}
+
+/**
+ * Ghi kết quả một transaction của op engine (T08). Thứ tự:
+ *   1. `appendChanges` — giành dải seq bằng unique `(projectId, seq)`. Trùng ⇒ writer khác
+ *      vừa ghi ⇒ 409 SPINE_VERSION_CONFLICT (không lộ CHANGE_SEQ_CONFLICT ra ngoài).
+ *   2. `saveWithVersion` — khoá lạc quan trên `spine_version`.
+ *   3. Bước 2 lỗi ⇒ xoá change của txn vừa ghi (bù trừ), ném lại lỗi.
+ * Giới hạn đã biết: process chết giữa 1 và 2 để lại change mồ côi của txn không có version;
+ * cần Mongo transaction (replica set, T24) để đóng hẳn.
+ */
+export const applyAndSave = async (
+  projectId: string,
+  { spine, baseVersion, changes }: ApplyAndSaveInput
+): Promise<{ spine: SpineRecord; changes: Change[] }> => {
+  let written: Change[] = []
+  try {
+    written = await appendChanges(projectId, changes)
+  } catch (err) {
+    if (err instanceof ApiError && err.code === CHANGE_SEQ_CONFLICT) {
+      throw new ApiError(
+        409,
+        "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.",
+        SPINE_VERSION_CONFLICT
+      )
+    }
+    throw err
+  }
+
+  try {
+    const saved = await saveWithVersion({ ...spine, projectId }, baseVersion)
+    return { spine: saved, changes: written }
+  } catch (err) {
+    const txns = [...new Set(written.map((c) => c.txn))]
+    if (txns.length > 0) await ChangeModel.deleteMany({ projectId, txn: { $in: txns } })
+    throw err
+  }
+}
+
 export interface ChangeRange {
   fromSeq?: number
   toSeq?: number
