@@ -2,6 +2,9 @@ import mongoose, { ClientSession } from "mongoose"
 import { CreditWallet } from "../../modules/credits/credit-wallet.model.js"
 import { CreditTransaction } from "../../modules/credits/credit-transaction.model.js"
 import { PricingConfig } from "../../modules/admin/pricing-config.model.js"
+import { planConfig } from "../../modules/billing/plan.config.js"
+import { notify, notifyAdmins } from "../../modules/notification/notification.service.js"
+import { env } from "../../config/env.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 const DEFAULT_ACTION_COSTS: Record<string, number> = {
@@ -14,6 +17,28 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CHAT_DISCOVERY]: 2,
   [ActionType.SUMMARIZE_DOCUMENT]: 2  // Task 2b: tính phí như EXTRACT, 1 lần/document
 }
+
+/** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */
+export interface CreditReservation {
+  reservationId: string
+  userId: string
+  actionType: string
+  cost: number
+  projectId?: string
+  expiresAt: Date
+}
+
+export interface ExpireStaleReservationsResult {
+  expiredCount: number
+  releasedCredits: number
+}
+
+const sessionOptions = (session?: ClientSession) => (session ? { session } : {})
+
+const toObjectIdOrNull = (id?: string) => (id ? new mongoose.Types.ObjectId(id) : null)
+
+const ledgerInconsistent = (message: string, details: Record<string, unknown>) =>
+  new AiActionError(500, message, "CREDIT_LEDGER_INCONSISTENT", details)
 
 export const getActionCost = async (actionType: string): Promise<number> => {
   try {
@@ -32,24 +57,47 @@ export const getOrCreateWallet = async (
   userId: string,
   session?: ClientSession
 ) => {
-  const options = session ? { session } : {}
-  let wallet = await CreditWallet.findOne({ userId }, null, options)
+  const options = sessionOptions(session)
+  const wallet = await CreditWallet.findOne({ userId }, null, options)
+  if (wallet) return wallet
 
-  if (!wallet) {
+  const initialCredits = planConfig.free.initialCredits
+  try {
     const created = await CreditWallet.create(
       [
         {
           userId: new mongoose.Types.ObjectId(userId),
-          balance: 100, // Initial free tier credits
+          balance: initialCredits,
           reserved: 0
         }
       ],
       options
     )
-    wallet = created[0]
-  }
 
-  return wallet
+    // Ví được tạo lần đầu = tài khoản bắt đầu dùng dịch vụ.
+    // Không await: notification không được chặn request.
+    void notify(userId, {
+      type: "welcome",
+      title: "Chào mừng bạn đến với FlintFlow",
+      body: `Tài khoản của bạn đã sẵn sàng với ${initialCredits} credit miễn phí.`,
+      link: "/home/billing"
+    })
+    void notifyAdmins({
+      type: "admin_new_user",
+      title: "Người dùng mới",
+      body: `Một người dùng mới vừa bắt đầu sử dụng FlintFlow (${userId}).`,
+      meta: { userId }
+    })
+
+    return created[0]
+  } catch (error: any) {
+    // Hai request song song cùng tạo ví: unique index userId chặn bản thứ hai
+    if (error?.code === 11000) {
+      const existing = await CreditWallet.findOne({ userId }, null, options)
+      if (existing) return existing
+    }
+    throw error
+  }
 }
 
 export const reserveCredit = async (
@@ -57,99 +105,248 @@ export const reserveCredit = async (
   actionType: string,
   projectId?: string,
   session?: ClientSession
-): Promise<number> => {
+): Promise<CreditReservation> => {
   const cost = await getActionCost(actionType)
-  const wallet = await getOrCreateWallet(userId, session)
+  const options = sessionOptions(session)
+  await getOrCreateWallet(userId, session)
 
-  const available = wallet.balance - wallet.reserved
-  if (available < cost) {
+  // Kiểm tra khả dụng và giữ credit trong MỘT lệnh atomic — tránh hai request
+  // song song cùng đọc thấy đủ credit rồi cùng reserve.
+  const wallet = await CreditWallet.findOneAndUpdate(
+    {
+      userId,
+      $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, cost] }
+    },
+    { $inc: { reserved: cost } },
+    { ...options, returnDocument: "after" }
+  )
+
+  if (!wallet) {
+    const current = await CreditWallet.findOne({ userId }, null, options)
+    const balance = current?.balance ?? 0
+    const reserved = current?.reserved ?? 0
+    const available = balance - reserved
     throw new AiActionError(
       402,
       `Không đủ credit. Yêu cầu: ${cost} credit, Khả dụng: ${available} credit.`,
       "INSUFFICIENT_CREDIT",
-      { cost, available, balance: wallet.balance, reserved: wallet.reserved }
+      { cost, available, balance, reserved }
     )
   }
 
-  const options = session ? { session } : {}
+  const expiresAt = new Date(Date.now() + env.CREDIT_RESERVE_TTL_MS)
 
-  wallet.reserved += cost
-  await wallet.save(options)
-
-  await CreditTransaction.create(
+  const [reservation] = await CreditTransaction.create(
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
+        projectId: toObjectIdOrNull(projectId),
         actionType,
         amount: cost,
         type: "reserve",
+        state: "reserved",
+        expires_at: expiresAt,
         balanceAfter: wallet.balance - wallet.reserved
       }
     ],
     options
   )
 
-  return cost
+  return {
+    reservationId: reservation._id.toString(),
+    userId,
+    actionType,
+    cost,
+    projectId,
+    expiresAt
+  }
 }
 
+const maybeNotifyLowCredit = (userId: string, balanceBefore: number, balanceAfter: number) => {
+  const threshold = planConfig.lowCreditThreshold
+  // Chỉ báo khi VỪA vượt ngưỡng, không báo lại mỗi lần trừ tiếp
+  if (balanceBefore >= threshold && balanceAfter < threshold) {
+    void notify(userId, {
+      type: "low_credit",
+      title: "Credit sắp hết",
+      body: `Số dư của bạn còn ${balanceAfter} credit. Nạp thêm để tiếp tục sử dụng AI.`,
+      link: "/home/billing",
+      meta: { balance: balanceAfter, threshold }
+    })
+  }
+}
+
+/**
+ * Trừ credit cho một reservation sau khi AI chạy VÀ parse thành công.
+ * Idempotent: gọi lại trên reservation đã deducted là no-op.
+ */
 export const deductCredit = async (
-  userId: string,
-  actionType: string,
-  cost: number,
-  projectId?: string,
+  reservation: CreditReservation,
   session?: ClientSession
 ): Promise<void> => {
-  const options = session ? { session } : {}
-  const wallet = await CreditWallet.findOne({ userId }, null, options)
+  const { reservationId, userId, actionType, cost, projectId } = reservation
+  const options = sessionOptions(session)
 
-  if (!wallet) return
+  const claimed = await CreditTransaction.findOneAndUpdate(
+    { _id: reservationId, type: "reserve", state: "reserved" },
+    { $set: { state: "deducted" } },
+    { ...options, returnDocument: "after" }
+  )
 
-  wallet.balance = Math.max(0, wallet.balance - cost)
-  wallet.reserved = Math.max(0, wallet.reserved - cost)
-  await wallet.save(options)
+  let walletFilter: Record<string, unknown>
+  let walletUpdate: Record<string, unknown>
+
+  if (claimed) {
+    walletFilter = { userId, balance: { $gte: cost }, reserved: { $gte: cost } }
+    walletUpdate = { $inc: { balance: -cost, reserved: -cost } }
+  } else {
+    const current = await CreditTransaction.findOne({ _id: reservationId }, null, options)
+    if (current?.state === "deducted") return
+
+    if (current?.state !== "expired") {
+      throw ledgerInconsistent("Không thể trừ credit cho reservation không hợp lệ", {
+        reservationId,
+        state: current?.state ?? null
+      })
+    }
+
+    // Cron đã trả phần reserved về ví trước khi AI kịp trả lời: vẫn tính phí,
+    // nhưng chỉ trừ balance (reserved đã được giải phóng).
+    walletFilter = { userId, balance: { $gte: cost } }
+    walletUpdate = { $inc: { balance: -cost } }
+  }
+
+  const wallet = await CreditWallet.findOneAndUpdate(walletFilter, walletUpdate, {
+    ...options,
+    returnDocument: "after"
+  })
+
+  if (!wallet) {
+    throw ledgerInconsistent("Ví credit không khớp với reservation khi trừ credit", {
+      reservationId,
+      cost
+    })
+  }
 
   await CreditTransaction.create(
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
+        projectId: toObjectIdOrNull(projectId),
         actionType,
         amount: cost,
         type: "deduct",
+        reservationId: new mongoose.Types.ObjectId(reservationId),
         balanceAfter: wallet.balance
       }
     ],
     options
   )
+
+  maybeNotifyLowCredit(userId, wallet.balance + cost, wallet.balance)
 }
 
+/**
+ * Trả credit đang giữ về ví khi action thất bại.
+ * Trả về false nếu reservation không còn ở trạng thái `reserved`
+ * (đã deducted / đã expired) — khi đó KHÔNG đụng vào ví.
+ */
 export const releaseCredit = async (
-  userId: string,
-  actionType: string,
-  cost: number,
-  projectId?: string,
+  reservation: CreditReservation,
   session?: ClientSession
-): Promise<void> => {
-  const options = session ? { session } : {}
-  const wallet = await CreditWallet.findOne({ userId }, null, options)
+): Promise<boolean> => {
+  const { reservationId, userId, actionType, cost, projectId } = reservation
+  const options = sessionOptions(session)
 
-  if (!wallet) return
+  const claimed = await CreditTransaction.findOneAndUpdate(
+    { _id: reservationId, type: "reserve", state: "reserved" },
+    { $set: { state: "refunded" } },
+    { ...options, returnDocument: "after" }
+  )
+  if (!claimed) return false
 
-  wallet.reserved = Math.max(0, wallet.reserved - cost)
-  await wallet.save(options)
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { userId, reserved: { $gte: cost } },
+    { $inc: { reserved: -cost } },
+    { ...options, returnDocument: "after" }
+  )
+
+  if (!wallet) {
+    throw ledgerInconsistent("Ví credit không khớp với reservation khi hoàn credit", {
+      reservationId,
+      cost
+    })
+  }
 
   await CreditTransaction.create(
     [
       {
         userId: new mongoose.Types.ObjectId(userId),
-        projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
+        projectId: toObjectIdOrNull(projectId),
         actionType,
         amount: cost,
         type: "release",
+        reservationId: new mongoose.Types.ObjectId(reservationId),
         balanceAfter: wallet.balance - wallet.reserved
       }
     ],
     options
   )
+
+  return true
+}
+
+/**
+ * Dọn reservation treo quá `expires_at` (process chết giữa chừng, client ngắt
+ * stream…). Gọi định kỳ từ server.ts.
+ */
+export const expireStaleReservations = async (
+  now: Date = new Date(),
+  batchSize = 500
+): Promise<ExpireStaleReservationsResult> => {
+  const stale = await CreditTransaction.find(
+    { type: "reserve", state: "reserved", expires_at: { $lte: now } },
+    null,
+    { limit: batchSize, sort: { expires_at: 1 } }
+  )
+
+  const result: ExpireStaleReservationsResult = { expiredCount: 0, releasedCredits: 0 }
+
+  for (const reservation of stale) {
+    // Claim có điều kiện: deduct/release có thể vừa chạy xong giữa find và đây
+    const claimed = await CreditTransaction.findOneAndUpdate(
+      { _id: reservation._id, state: "reserved" },
+      { $set: { state: "expired" } },
+      { returnDocument: "after" }
+    )
+    if (!claimed) continue
+
+    const wallet = await CreditWallet.findOneAndUpdate(
+      { userId: reservation.userId, reserved: { $gte: reservation.amount } },
+      { $inc: { reserved: -reservation.amount } },
+      { returnDocument: "after" }
+    )
+
+    if (!wallet) {
+      console.error(
+        `[CreditReservation] Wallet reserved < reservation amount khi expire ${reservation._id} (user ${reservation.userId})`
+      )
+      continue
+    }
+
+    await CreditTransaction.create({
+      userId: reservation.userId,
+      projectId: reservation.projectId ?? null,
+      actionType: reservation.actionType,
+      amount: reservation.amount,
+      type: "release",
+      reservationId: reservation._id,
+      balanceAfter: wallet.balance - wallet.reserved
+    })
+
+    result.expiredCount += 1
+    result.releasedCredits += reservation.amount
+  }
+
+  return result
 }
