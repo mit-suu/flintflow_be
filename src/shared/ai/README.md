@@ -32,12 +32,13 @@ console.log(result.logId) // Log ID lưu trên DB
 1. Check & Reserve Credit (Mongoose Transaction: Wallet.reserved += cost)
    ↳ Nếu thiếu credit: Ném lỗi 402 INSUFFICIENT_CREDIT (Không gọi LLM)
 
-2. Build Prompt
-   ↳ Lấy PromptTemplate từ DB (hoặc fallback mặc định)
+2. Build Prompt — CHỈ đọc đĩa (không DB override, T03)
+   ↳ assets/prompts/<actionType>.md, hoặc skill hành động theo SKILL_BY_ACTION_TYPE
+     (assets/skills/action/<skill_id>/SKILL.md)
    ↳ Interpolate các biến {{variable_name}}
 
 3. Call LLM (Multi-provider Router)
-   ↳ Tự động chuyển qua OpenAI / Anthropic / Gemini tùy config của PromptTemplate
+   ↳ Provider/model/maxTokens/temperature lấy từ frontmatter của asset
 
 4. Parse & Validate Response (Zod Schema)
    ↳ Bóc tách JSON block từ Markdown
@@ -57,7 +58,23 @@ console.log(result.logId) // Log ID lưu trên DB
 
 Nếu bạn phát triển tính năng mới cần dùng AI:
 
-1. **Khai báo Enum**: Thêm giá trị mới vào `ActionType` trong [ai-action.types.ts](file:///d:/Learning/Capstone/FlintFlow/flintflow_be/src/shared/ai/ai-action.types.ts).
-2. **Viết Zod Schema**: Thêm Schema validate output tương ứng vào [response-parser.ts](file:///d:/Learning/Capstone/FlintFlow/flintflow_be/src/shared/ai/response-parser.ts).
-3. **Khai báo Fallback Prompt**: Bổ sung template mặc định vào `DEFAULT_TEMPLATES` trong [prompt-registry.service.ts](file:///d:/Learning/Capstone/FlintFlow/flintflow_be/src/shared/ai/prompt-registry.service.ts).
-4. **Gọi trong Service**: Gọi `executeAiAction(ActionType.MY_NEW_ACTION, input, projectId, userId)` ở module của bạn.
+1. **Khai báo Enum**: Thêm giá trị mới vào `ActionType` trong `ai-action.types.ts`.
+2. **Viết Zod Schema**: Thêm schema vào `SCHEMAS` trong `response-parser.ts`; thêm giá vào `credit-reservation.service.ts`.
+3. **Asset trên đĩa** (không có fallback trong code):
+   - Action pipeline → skill ở `assets/skills/action/` + dòng trong `SKILL_BY_ACTION_TYPE` và `OUTPUT_SCHEMA_BY_ACTION_TYPE`.
+   - Action ngoài pipeline → `assets/prompts/<actionType>.md`.
+4. **Gọi trong Service**: `executeAiAction(ActionType.MY_NEW_ACTION, input, projectId, userId)`.
+
+## 🧩 Skill (T03)
+
+```typescript
+import { getSkill } from "./prompt-registry.service.js"
+
+const skill = getSkill("draft-to-ops", { references: ["op-grammar"] })
+skill.template          // thân SKILL.md
+skill.references        // { "op-grammar": "..." } — chỉ reference đã yêu cầu
+skill.providerConfig    // từ frontmatter
+skill.asset_version     // sha256 SKILL.md + references → sections[].asset_version
+```
+
+Quy ước frontmatter: `assets/skills/README.md`.

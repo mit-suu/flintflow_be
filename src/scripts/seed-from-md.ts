@@ -1,8 +1,11 @@
 /**
  * seed-from-md.ts
  * ─────────────────────────────────────────────────────────────────
- * Đọc toàn bộ file .md trong ./prompts/ (frontmatter YAML + nội dung prompt),
+ * Đọc toàn bộ file .md trong assets/prompts/ (frontmatter YAML + nội dung prompt),
  * upsert vào MongoDB collection PromptTemplate của BE.
+ *
+ * LEGACY (T03): runtime KHÔNG còn đọc PromptTemplate — registry chỉ đọc đĩa.
+ * Script chỉ phục vụ assets/prompts (không seed assets/skills), giữ tới T21.
  *
  * Cách chạy:
  *   npx tsx src/scripts/seed-from-md.ts             # seed thật vào DB
