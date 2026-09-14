@@ -39,8 +39,12 @@ Quy tắc path, theo `srs-spine.md` §1:
 
 ```ts
 Transaction = { txn?, base_version, ops: Op[], reason?, by, step_id? }
-ApplyResult = { spine, changes: Change[], txn, spine_version }
+ApplyResult = { spine, changes: Change[], txn: string | null, spine_version }
 ```
+
+- Id lô (`txn`) do server sinh; không nhận `txn` từ output model.
+- **Lô không đổi gì** (mọi op trùng giá trị hiện tại): không ghi change, `spine_version` giữ nguyên, `txn = null`.
+- Ghi Spine và `changes[]` trong một Mongo transaction khi deployment hỗ trợ (replica set). Mongo standalone: lưu Spine (khoá version) trước rồi ghi change; trùng `seq` thì cấp lại dải seq — không có lỗ seq, không xoá change của lô khác.
 
 Engine áp op tuần tự lên bản sao, rồi làm tiếp theo thứ tự:
 1. Mở rộng **cascade** tới khi không sinh thêm op.
@@ -69,6 +73,12 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 - `value = {"_absent": true}` nghĩa là op xoá key tuỳ chọn.
 - `path` luôn được chuẩn hoá về `[id=...]`.
 
+**Revert** (resume/regenerate T13, undo T17) áp nghịch đảo dải `changes[]` theo seq giảm dần, trong một txn mới `op: "revert"`:
+- Mỗi change chỉ revert được khi giá trị hiện tại **đúng là** giá trị change đó ghi. Khác (có thay đổi sau dải đụng cùng chỗ, hoặc phần tử cùng khoá đã được thêm lại) ⇒ `revert_conflict`, không ghi đè im lặng.
+- Màn được revert khôi phục không bị bất biến 8 coi là "màn mới thêm trong S-5".
+
+**Path user được ghi qua `POST /changes`**: mọi gốc trừ `flags`, `steps`, `progress`, `baselines`, `sections`, `diagrams` (hệ thống quản lý, đi qua `/flags`, gate, `/baseline`, render). Vi phạm ⇒ `path_not_writable` kèm `op_index`. Selector vô hướng `[=v]` khớp nhiều bản trùng thì lấy bản đầu.
+
 ### 0.3 Lỗi
 
 | HTTP | `code` | Khi | `meta` |
@@ -85,7 +95,7 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 409 | `REGENERATE_LIMIT` | Regenerate lần 4 trong một step | `{ regenerate_used: 3 }` |
 | 409 | `CALL_LIMIT` | Lượt gọi model thứ 9 trong một step; chỉ còn `accept` / `accept_as_is` | `{ calls_used: 8 }` |
 | 409 | `STEP_NOT_RUNNABLE` | Chạy step chưa tới lượt, hoặc gate step không ở `gate_ready` | — |
-| 422 | `OP_INVALID` | Op sai: `path_invalid`, `path_not_resolved`, `path_ambiguous`, `index_selector_forbidden`, `key_change_forbidden`, `duplicate_id`, `op_value_missing`, `op_not_allowed`, `schema_invalid` | `{ violations[], referrers[] }` |
+| 422 | `OP_INVALID` | Op sai: `path_invalid`, `path_not_resolved`, `path_ambiguous`, `index_selector_forbidden`, `key_change_forbidden`, `duplicate_id`, `op_value_missing`, `op_not_allowed`, `schema_invalid`, `path_not_writable`, `revert_conflict` | `{ violations[], referrers[] }` |
 | 422 | `INVARIANT_VIOLATION` | Vi phạm bất biến ở cuối lô: `invariant_1_required_section`, `invariant_2_last_element`, `invariant_3_dead_reference`, `invariant_4_screen_missing`, `invariant_5_feature_order`, `invariant_5_function_order`, `invariant_6_feature_mismatch`, `invariant_8_cursor_screen`, `invariant_8_screen_not_pending`, `invariant_8_screen_not_queued` | `{ violations[], referrers[] }` |
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
 | 422 | `NOTHING_TO_UNDO` | Không còn txn có thể undo | — |
@@ -122,7 +132,7 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 20 | `GET /projects/:id/baselines` | T19 | — | `Baseline[]` | — |
 | 21 | `GET /projects/:id/diagrams/:diagramId.svg` (hoặc `.png`) | T10 ✔ | — | `image/svg+xml` / `image/png`, không bọc envelope | `DIAGRAM_NOT_FOUND` |
 | 22 | `GET /projects/:id/diagrams` | T10 ✔ | — | `(Diagram & { stale: boolean, files: { svg, png } \| null })[]` | — |
-| 23 | `POST /projects/:id/diagrams/:kind/render` (dev/thủ công; `kind` = `all` \| 5 kind) | T10 ✔ | `{ owner_id? }` (bắt buộc với `screen_layout`) | `{ spine_version, diagrams[], rendered[], removed[] }`; `.puml` lỗi ⇒ `render_status = error`, vẫn 200 | `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
+| 23 | `POST /projects/:id/diagrams/:kind/render` (dev/thủ công; `kind` = `all` \| 5 kind) | T10 ✔ | `{ owner_id?, force? }` (`owner_id` bắt buộc với `screen_layout`; `force` compile lại cả hình có `source_hash` không đổi) | `{ spine_version, diagrams[], rendered[], removed[] }`; `.puml` lỗi ⇒ `render_status = error`, vẫn 200 | `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
 
 Mọi endpoint còn có thể trả `401 UNAUTHORIZED`, `404 PROJECT_NOT_FOUND`, `400 VALIDATION_ERROR`.
 
@@ -187,3 +197,4 @@ Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
 | 2026-09-14 | T08 | Bản nháp đầu tiên |
+| 2026-09-14 | review T08–T11 | `txn` nullable (lô không đổi gì), `path_not_writable`, `revert_conflict`, ghi Spine + changes trong transaction, `force` cho render, preview không tạo Spine |

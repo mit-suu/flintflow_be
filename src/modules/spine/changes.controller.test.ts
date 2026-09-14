@@ -104,14 +104,42 @@ describe("POST /projects/:projectId/changes", () => {
     expect((await invoke(applyChanges, undefined, PROJECT, { base_version: 1, ops: [OP] })).error).toMatchObject({ statusCode: 401 })
     expect(applyTransaction).not.toHaveBeenCalled()
   })
+
+  it("kiểm quyền sở hữu trước body: người ngoài gửi body sai vẫn nhận 404", async () => {
+    const outcome = await invoke(applyChanges, "650000000000000000000099", PROJECT, { nonsense: true })
+    expect(outcome.error).toMatchObject({ statusCode: 404 })
+  })
+
+  it("422 path_not_writable khi sửa gốc hệ thống quản lý; không tạo Spine, không gọi engine", async () => {
+    const outcome = await invoke(applyChanges, OWNER, PROJECT, {
+      base_version: 1,
+      ops: [OP, { op: "set", path: "flags[id=FL001].resolved_at", value: null }, { op: "set", path: "progress.current_step", value: "S-9.5" }]
+    })
+    expect(outcome.status).toBe(422)
+    expect(outcome.body).toMatchObject({
+      error: { code: "OP_INVALID" },
+      meta: { violations: [{ rule: "path_not_writable", op_index: 1 }, { rule: "path_not_writable", op_index: 2 }] }
+    })
+    expect(getOrCreate).not.toHaveBeenCalled()
+    expect(applyTransaction).not.toHaveBeenCalled()
+  })
 })
 
 describe("POST /projects/:projectId/changes/preview", () => {
-  it("200 trả kết quả preview", async () => {
+  it("200 trả kết quả preview, không tạo Spine", async () => {
     vi.mocked(previewTransaction).mockResolvedValue({ ok: false, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [] })
     const outcome = await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, ops: [OP] })
     expect(outcome.status).toBe(200)
     expect(outcome.body).toMatchObject({ data: { ok: false } })
+    expect(previewTransaction).toHaveBeenCalledWith(PROJECT, { base_version: 1, ops: [OP], by: OWNER, step_id: null }, { name: "Lumen", domain: null })
+    expect(getOrCreate).not.toHaveBeenCalled()
+  })
+
+  it("gốc hệ thống quản lý ⇒ ok=false với path_not_writable", async () => {
+    const outcome = await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, ops: [{ op: "remove", path: "sections[id=feature:F1]" }] })
+    expect(outcome.status).toBe(200)
+    expect(outcome.body).toMatchObject({ data: { ok: false, violations: [{ rule: "path_not_writable", op_index: 0 }] } })
+    expect(previewTransaction).not.toHaveBeenCalled()
   })
 })
 

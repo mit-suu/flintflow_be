@@ -141,7 +141,8 @@ export const changesPreviewResponseSchema = z.object({
 
 /** POST /projects/:id/changes, /undo, /reconcile — kết quả một transaction đã ghi. */
 export const applyResultResponseSchema = z.object({
-  txn: z.string().min(1),
+  /** null ⇒ lô không đổi gì: không ghi change, `spine_version` giữ nguyên. */
+  txn: z.string().min(1).nullable(),
   spine_version: baseVersion,
   changes: z.array(changeSchema),
   spine: spineRecordSchema

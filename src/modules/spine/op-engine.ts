@@ -37,7 +37,7 @@ import {
   type Transaction,
   type Violation
 } from "./op.types.js"
-import { PathError, isRecord, parentArrayPath, parsePath, resolve, selectorFor, formatPath } from "./path-resolver.js"
+import { PathError, isRecord, parentArrayPath, parsePath, resolve, selectorFor, formatPath, tryResolve } from "./path-resolver.js"
 import { checkInvariants } from "./invariants.js"
 import { RemovedIds, planCascade, planFeatureRenumber, planScreenQueueAppend } from "./cascade.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -322,6 +322,13 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
 
 // ─── revert (thuần) ──────────────────────────────────────────────
 
+/**
+ * Revert chỉ hợp lệ khi giá trị hiện tại đúng là giá trị change đó đã ghi. Khác ⇒ có thay đổi sau dải
+ * revert đụng cùng chỗ; đặt lại `before` sẽ ghi đè im lặng thay đổi đó.
+ */
+const revertConflict = (change: Change, detail: string): PathError =>
+  opError("revert_conflict", change.path, `"${change.path}" đã bị thay đổi sau đó (${detail}) — cần revert các thay đổi sau trước`)
+
 /** Áp nghịch đảo một change lên `state`, ghi draft `op: "revert"`. */
 const invertChange = (state: WorkState, change: Change): void => {
   const reason = `Revert seq ${change.seq}`
@@ -330,6 +337,7 @@ const invertChange = (state: WorkState, change: Change): void => {
     const parsed = spineSchema.omit({ spine_version: true }).safeParse(change.before)
     if (!parsed.success) throw opError("schema_invalid", ROOT_PATH, `before của seq ${change.seq} không phải Spine hợp lệ`)
     const { spine_version: currentVersion, ...current } = state.spine
+    if (!isDeepStrictEqual(current, change.value)) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
     state.spine = { ...clone(parsed.data), spine_version: currentVersion }
     state.baseline = clone(state.spine)
     state.drafts.push({ op: "revert", path: ROOT_PATH, before: current, value: clone(parsed.data), reason })
@@ -340,6 +348,8 @@ const invertChange = (state: WorkState, change: Change): void => {
   if (isAbsent(change.value)) {
     const arrayPath = change.value.index === undefined ? null : parentArrayPath(change.path)
     if (arrayPath !== null) {
+      // Phần tử cùng khoá đã được thêm lại sau đó: chèn nữa sẽ trùng id
+      if (tryResolve(state.spine, change.path)?.kind === "element") throw revertConflict(change, "phần tử cùng khoá đã tồn tại")
       const target = resolve(state.spine, arrayPath)
       if (target.kind !== "append") throw opError("path_not_resolved", change.path, `Không khôi phục được "${change.path}"`)
       const index = Math.min(change.value.index ?? target.parent.length, target.parent.length)
@@ -349,6 +359,7 @@ const invertChange = (state: WorkState, change: Change): void => {
     }
     const target = resolve(state.spine, change.path)
     if (target.kind !== "field") throw opError("path_not_resolved", change.path, `Không khôi phục được "${change.path}"`)
+    if (target.exists) throw revertConflict(change, "field đã có giá trị")
     target.parent[target.key] = clone(change.before)
     state.drafts.push({ op: "revert", path: change.path, before: ABSENT, value: clone(change.before), reason })
     return
@@ -359,11 +370,13 @@ const invertChange = (state: WorkState, change: Change): void => {
   // change đã tạo mới ⇒ xoá đi
   if (isAbsent(change.before)) {
     if (target.kind === "element") {
+      if (!isDeepStrictEqual(target.value, change.value)) throw revertConflict(change, "phần tử đã bị sửa")
       const [element] = target.parent.splice(target.key, 1)
       state.drafts.push({ op: "revert", path: target.canonical, before: element, value: { ...ABSENT, index: target.key }, reason })
       return
     }
     if (target.kind === "field" && target.exists) {
+      if (!isDeepStrictEqual(target.value, change.value)) throw revertConflict(change, "giá trị đã bị sửa")
       const before = clone(target.value)
       delete target.parent[target.key]
       state.drafts.push({ op: "revert", path: target.canonical, before, value: ABSENT, reason })
@@ -375,6 +388,7 @@ const invertChange = (state: WorkState, change: Change): void => {
   // change đã thay giá trị ⇒ đặt lại before
   if (target.kind === "append") throw opError("path_not_resolved", change.path, `Không revert được "${change.path}"`)
   const current = target.exists ? clone(target.value) : ABSENT
+  if (!isDeepStrictEqual(current, change.value)) throw revertConflict(change, "giá trị đã bị sửa")
   if (target.kind === "field") target.parent[target.key] = clone(change.before)
   else target.parent[target.key] = clone(change.before)
   state.drafts.push({ op: "revert", path: target.canonical, before: current, value: clone(change.before), reason })
@@ -403,7 +417,17 @@ export const planRevert = (spine: Spine, changes: Change[], options: RevertOptio
     }
   }
 
-  const violations = [...checkInvariants(state.spine, state.baseline ?? before), ...schemaViolations(state.spine)]
+  // Màn khôi phục lại (undo xoá màn trong S-5) không phải "màn mới thêm" của bất biến 8
+  const restoredScreenIds = new Set<string>()
+  for (const draft of state.drafts) {
+    const id = /^screens\[id=([^\]]+)\]$/.exec(draft.path)?.[1]
+    if (id !== undefined && isAbsent(draft.before) && !isAbsent(draft.value)) restoredScreenIds.add(id)
+  }
+
+  const violations = [
+    ...checkInvariants(state.spine, state.baseline ?? before, { restoredScreenIds }),
+    ...schemaViolations(state.spine)
+  ]
   if (violations.length > 0) {
     const code = violations.every((v) => v.rule === "schema_invalid" || !v.rule.startsWith("invariant_")) ? OP_INVALID : INVARIANT_VIOLATION
     throw new TransactionRejectedError(code, violations)
@@ -424,9 +448,7 @@ export const planRevert = (spine: Spine, changes: Change[], options: RevertOptio
 
 // ─── API có DB ───────────────────────────────────────────────────
 
-const loadForWrite = async (projectId: string, baseVersion?: number): Promise<SpineRecord> => {
-  const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+const assertVersion = (record: SpineRecord, baseVersion?: number): void => {
   if (baseVersion !== undefined && record.spine_version !== baseVersion) {
     throw new ApiError(
       409,
@@ -434,6 +456,12 @@ const loadForWrite = async (projectId: string, baseVersion?: number): Promise<Sp
       repository.SPINE_VERSION_CONFLICT
     )
   }
+}
+
+const loadForWrite = async (projectId: string, baseVersion?: number): Promise<SpineRecord> => {
+  const record = await repository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  assertVersion(record, baseVersion)
   return record
 }
 
@@ -452,6 +480,9 @@ export const applyTransaction = async (projectId: string, txn: Transaction): Pro
   const startSeq = await repository.nextSeq(projectId)
   const plan = planTransaction(stripRecord(record), input, { startSeq })
 
+  // Mọi op trùng giá trị hiện tại: không ghi, không tăng version (tránh làm waiver hết hạn / section stale giả)
+  if (plan.changes.length === 0) return { spine: record, changes: [], txn: null, spine_version: record.spine_version }
+
   const saved = await repository.applyAndSave(projectId, {
     spine: { ...plan.spine, projectId },
     baseVersion: input.base_version,
@@ -460,10 +491,18 @@ export const applyTransaction = async (projectId: string, txn: Transaction): Pro
   return { spine: saved.spine, changes: saved.changes, txn: plan.txn, spine_version: saved.spine.spine_version }
 }
 
-/** Như `applyTransaction` nhưng không ghi. Vi phạm trả trong kết quả (`ok=false`), không ném. */
-export const previewTransaction = async (projectId: string, txn: Transaction): Promise<PreviewResult> => {
+/**
+ * Như `applyTransaction` nhưng không ghi. Vi phạm trả trong kết quả (`ok=false`), không ném.
+ * Project cũ chưa có Spine: preview trên Spine rỗng (`init`) — preview không được tạo Spine.
+ */
+export const previewTransaction = async (
+  projectId: string,
+  txn: Transaction,
+  init: repository.SpineInit = {}
+): Promise<PreviewResult> => {
   const input = parseTransaction(txn)
-  const record = await loadForWrite(projectId, input.base_version)
+  const record: SpineRecord = (await repository.get(projectId)) ?? { projectId, ...repository.createEmptySpine(init) }
+  assertVersion(record, input.base_version)
   const txnId = input.txn ?? randomUUID()
 
   try {

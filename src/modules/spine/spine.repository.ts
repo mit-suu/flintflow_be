@@ -13,11 +13,13 @@
  */
 
 import { z } from "zod"
+import type { ClientSession } from "mongoose"
 import { Spine as SpineModel } from "./spine.model.js"
 import { Change as ChangeModel } from "./change.model.js"
 import { changeSchema, spineRecordSchema } from "./spine.schema.js"
 import type { Change, Spine, SpineProject, SpineRecord } from "./spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { TRANSACTION_UNAVAILABLE, runInTransaction, sessionOptions } from "../../shared/db/transaction.js"
 
 export const SPINE_VERSION_CONFLICT = "SPINE_VERSION_CONFLICT"
 export const SPINE_NOT_FOUND = "SPINE_NOT_FOUND"
@@ -127,7 +129,11 @@ export const getOrCreate = async (projectId: string, init: SpineInit = {}): Prom
  * Ghi toàn bộ nội dung Spine nếu DB còn ở `baseVersion`; `spine_version` thành
  * `baseVersion + 1`. Nội dung được validate bằng `spineSchema` trước khi ghi.
  */
-export const saveWithVersion = async (spine: SpineRecord, baseVersion: number): Promise<SpineRecord> => {
+export const saveWithVersion = async (
+  spine: SpineRecord,
+  baseVersion: number,
+  session?: ClientSession
+): Promise<SpineRecord> => {
   const parsed = spineRecordSchema.safeParse({ ...spine, spine_version: baseVersion + 1 })
   if (!parsed.success) {
     throw new ApiError(422, `Spine không hợp lệ: ${z.prettifyError(parsed.error)}`, SPINE_SCHEMA_INVALID)
@@ -137,11 +143,11 @@ export const saveWithVersion = async (spine: SpineRecord, baseVersion: number): 
   const updated = await SpineModel.findOneAndUpdate(
     { projectId, spine_version: baseVersion },
     { $set: content },
-    { returnDocument: "after", runValidators: true, lean: true }
+    { returnDocument: "after", runValidators: true, lean: true, ...sessionOptions(session) }
   )
 
   if (!updated) {
-    const exists = await SpineModel.exists({ projectId })
+    const exists = await SpineModel.findOne({ projectId }, { _id: 1 }, { lean: true, ...sessionOptions(session) })
     if (!exists) {
       throw new ApiError(404, "Không tìm thấy Spine của dự án", SPINE_NOT_FOUND)
     }
@@ -169,7 +175,11 @@ export type NewChange = Omit<Change, "projectId">
  * Ghi một lô change. `seq` trong lô phải liên tục tăng dần; trùng `seq` với
  * bản đã có (hai writer cùng lúc) ⇒ 409 CHANGE_SEQ_CONFLICT nhờ unique index.
  */
-export const appendChanges = async (projectId: string, changes: NewChange[]): Promise<Change[]> => {
+export const appendChanges = async (
+  projectId: string,
+  changes: NewChange[],
+  session?: ClientSession
+): Promise<Change[]> => {
   if (changes.length === 0) return []
 
   const docs: Change[] = []
@@ -186,7 +196,7 @@ export const appendChanges = async (projectId: string, changes: NewChange[]): Pr
 
   try {
     // Không dùng lean: cần Mongoose cast projectId → ObjectId, at → Date và validate
-    const inserted = await ChangeModel.insertMany(docs, { ordered: true })
+    const inserted = await ChangeModel.insertMany(docs, { ordered: true, ...sessionOptions(session) })
     return inserted.map(parseChange)
   } catch (err) {
     if (!isDuplicateKeyError(err)) throw err
@@ -201,40 +211,50 @@ export interface ApplyAndSaveInput {
   changes: NewChange[]
 }
 
+/** Số lần cấp lại dải seq khi ghi change không có transaction. */
+const MAX_SEQ_RETRIES = 5
+
+const versionConflict = () =>
+  new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", SPINE_VERSION_CONFLICT)
+
+const isSeqConflict = (err: unknown): boolean => err instanceof ApiError && err.code === CHANGE_SEQ_CONFLICT
+
 /**
- * Ghi kết quả một transaction của op engine (T08). Thứ tự:
- *   1. `appendChanges` — giành dải seq bằng unique `(projectId, seq)`. Trùng ⇒ writer khác
- *      vừa ghi ⇒ 409 SPINE_VERSION_CONFLICT (không lộ CHANGE_SEQ_CONFLICT ra ngoài).
- *   2. `saveWithVersion` — khoá lạc quan trên `spine_version`.
- *   3. Bước 2 lỗi ⇒ xoá change của txn vừa ghi (bù trừ), ném lại lỗi.
- * Giới hạn đã biết: process chết giữa 1 và 2 để lại change mồ côi của txn không có version;
- * cần Mongo transaction (replica set, T24) để đóng hẳn.
+ * Ghi kết quả một transaction của op engine (T08): Spine (khoá lạc quan) + `changes[]` của txn.
+ *
+ * - Có Mongo transaction (replica set): ghi change rồi Spine trong cùng transaction — lỗi ở đâu cũng
+ *   không để lại gì. Trùng seq ⇒ writer khác vừa ghi ⇒ 409 SPINE_VERSION_CONFLICT.
+ * - Không có (Mongo standalone): `saveWithVersion` TRƯỚC — khoá version quyết người thắng, nên chỉ
+ *   writer đã thắng mới ghi change. Trùng seq (hai writer nối tiếp cùng đọc `nextSeq`) ⇒ cấp lại dải
+ *   seq rồi thử lại. Không còn bù trừ xoá theo txn, nên không có lỗ seq và không xoá nhầm change của
+ *   txn khác. Giới hạn: process chết giữa hai bước làm mất change của lô đã ghi (Spine vẫn đúng).
  */
 export const applyAndSave = async (
   projectId: string,
   { spine, baseVersion, changes }: ApplyAndSaveInput
 ): Promise<{ spine: SpineRecord; changes: Change[] }> => {
-  let written: Change[] = []
-  try {
-    written = await appendChanges(projectId, changes)
-  } catch (err) {
-    if (err instanceof ApiError && err.code === CHANGE_SEQ_CONFLICT) {
-      throw new ApiError(
-        409,
-        "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.",
-        SPINE_VERSION_CONFLICT
-      )
+  const transactional = await runInTransaction(async (session) => {
+    try {
+      const written = await appendChanges(projectId, changes, session)
+      const saved = await saveWithVersion({ ...spine, projectId }, baseVersion, session)
+      return { spine: saved, changes: written }
+    } catch (err) {
+      if (isSeqConflict(err)) throw versionConflict()
+      throw err
     }
-    throw err
-  }
+  })
+  if (transactional !== TRANSACTION_UNAVAILABLE) return transactional
 
-  try {
-    const saved = await saveWithVersion({ ...spine, projectId }, baseVersion)
-    return { spine: saved, changes: written }
-  } catch (err) {
-    const txns = [...new Set(written.map((c) => c.txn))]
-    if (txns.length > 0) await ChangeModel.deleteMany({ projectId, txn: { $in: txns } })
-    throw err
+  const saved = await saveWithVersion({ ...spine, projectId }, baseVersion)
+  let batch = changes
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return { spine: saved, changes: await appendChanges(projectId, batch) }
+    } catch (err) {
+      if (!isSeqConflict(err) || attempt >= MAX_SEQ_RETRIES) throw err
+      const start = await nextSeq(projectId)
+      batch = batch.map((change, i) => ({ ...change, seq: start + i }))
+    }
   }
 }
 

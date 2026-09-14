@@ -234,7 +234,10 @@ export const resolve = (root: unknown, path: string): Resolved => {
 
     const hits = findIndices(arr, seg.selector)
     if (hits.length === 0) throw new PathError("path_not_resolved", path, `Không tìm thấy phần tử cho "${path}"`)
-    if (hits.length > 1) throw new PathError("path_ambiguous", path, `Selector khớp ${hits.length} phần tử: "${path}"`)
+    // Phần tử vô hướng trùng (dữ liệu legacy, vd `flow_to` lặp) giống hệt nhau ⇒ lấy bản đầu; remove gỡ từng bản
+    if (hits.length > 1 && seg.selector.kind === "match") {
+      throw new PathError("path_ambiguous", path, `Selector khớp ${hits.length} phần tử: "${path}"`)
+    }
 
     const element = arr[hits[0]]
     canonical.push({ key: seg.key, selector: selectorFor(element) ?? seg.selector })

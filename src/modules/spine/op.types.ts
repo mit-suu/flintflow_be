@@ -89,7 +89,7 @@ export const isAbsent = (value: unknown): value is AbsentMarker =>
  * `rule` là mã máy đọc được; test ca op T02 so khớp `must_reject` với nó.
  * Lỗi op (422 OP_INVALID): path_invalid, path_not_resolved, path_ambiguous,
  * index_selector_forbidden, key_change_forbidden, duplicate_id, op_value_missing,
- * op_not_allowed, schema_invalid.
+ * op_not_allowed, schema_invalid, path_not_writable, revert_conflict.
  * Vi phạm bất biến (422 INVARIANT_VIOLATION): invariant_<n>_<tên>.
  */
 export type RejectRule =
@@ -102,6 +102,10 @@ export type RejectRule =
   | "op_value_missing"
   | "op_not_allowed"
   | "schema_invalid"
+  /** `POST /changes` nhắm gốc do hệ thống quản lý (flags, steps, progress, baselines, sections, diagrams). */
+  | "path_not_writable"
+  /** Revert: giá trị hiện tại không còn là giá trị change đó ghi (đã bị sửa sau) — không ghi đè im lặng. */
+  | "revert_conflict"
   | "invariant_1_required_section"
   | "invariant_2_last_element"
   | "invariant_3_dead_reference"
@@ -141,7 +145,8 @@ export type PlannedChange = Omit<Change, "projectId">
 export interface ApplyResult {
   spine: SpineRecord
   changes: Change[]
-  txn: string
+  /** null ⇒ lô không đổi gì (mọi op trùng giá trị hiện tại): không ghi, `spine_version` giữ nguyên. */
+  txn: string | null
   spine_version: number
 }
 

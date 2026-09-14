@@ -16,10 +16,15 @@ import type { RejectRule, Violation } from "./op.types.js"
 import { findDeadReferences } from "./reference-fields.js"
 import { REQUIRED_FIXED_SECTION_IDS } from "./section-registry.js"
 
+export interface InvariantContext {
+  /** Màn được revert khôi phục lại — không phải "thêm màn mới" nên bất biến 8 không đòi pending/queued. */
+  restoredScreenIds?: ReadonlySet<string>
+}
+
 export interface Invariant {
   id: number
   name: string
-  check(after: Spine, before: Spine): Violation[]
+  check(after: Spine, before: Spine, context: InvariantContext): Violation[]
 }
 
 /** Bất biến 1 — section bắt buộc theo khoá logic, lấy từ section registry (T09). `fixed:4.2.4` tuỳ chọn, `fixed:I` dẫn xuất. */
@@ -27,11 +32,14 @@ export const REQUIRED_FIXED_SECTIONS: readonly string[] = REQUIRED_FIXED_SECTION
 
 const violation = (rule: RejectRule, path: string, message: string): Violation => ({ rule, path, message })
 
-/** Chỉ giữ vi phạm chưa có ở `before` (khoá: rule + path + message). */
+/**
+ * Chỉ giữ vi phạm chưa có ở `before` (khoá: rule + path). Không khoá theo message: message chứa dữ liệu
+ * (vd danh sách order) nên đổi theo lô, làm vi phạm cũ bị coi là mới.
+ */
 const onlyNew =
   (check: (spine: Spine) => Violation[]) =>
   (after: Spine, before: Spine): Violation[] => {
-    const key = (v: Violation) => `${v.rule}|${v.path ?? ""}|${v.message}`
+    const key = (v: Violation) => `${v.rule}|${v.path ?? ""}`
     const existing = new Set(check(before).map(key))
     return check(after).filter((v) => !existing.has(key(v)))
   }
@@ -200,7 +208,7 @@ export const SCREEN_LOOP_PHASE = "S-5"
 const invariant8: Invariant = {
   id: 8,
   name: "screen_cursor_queue",
-  check(after, before) {
+  check(after, before, context) {
     const out: Violation[] = []
     const afterScreens = new Map(after.screens.map((s) => [s.id, s]))
     const beforeScreens = new Set(before.screens.map((s) => s.id))
@@ -213,7 +221,7 @@ const invariant8: Invariant = {
     if (after.progress.current_phase === SCREEN_LOOP_PHASE) {
       const queue = new Set(after.progress.screen_queue)
       for (const [id, screen] of afterScreens) {
-        if (beforeScreens.has(id)) continue
+        if (beforeScreens.has(id) || context.restoredScreenIds?.has(id)) continue
         if (screen.detail_status !== "pending") {
           out.push(
             violation("invariant_8_screen_not_pending", `screens[id=${id}].detail_status`, `Màn thêm trong S-5 phải có detail_status = pending`)
@@ -239,5 +247,5 @@ export const INVARIANTS: readonly Invariant[] = Object.freeze([
   invariant8
 ])
 
-export const checkInvariants = (after: Spine, before: Spine): Violation[] =>
-  INVARIANTS.flatMap((inv) => inv.check(after, before))
+export const checkInvariants = (after: Spine, before: Spine, context: InvariantContext = {}): Violation[] =>
+  INVARIANTS.flatMap((inv) => inv.check(after, before, context))
