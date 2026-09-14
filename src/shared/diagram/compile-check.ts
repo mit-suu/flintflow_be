@@ -65,15 +65,17 @@ export const checkPlantUml = async (source: string): Promise<CompileCheckResult>
     }
   }
 
-  // Cách 2: quét SVG
+  // Cách 2: quét SVG. Probe T10 (1.2026.8): đường POST trả 400 + SVG lỗi, KHÔNG có header ⇒ rơi vào đây.
   const svg = render.data.toString("utf-8")
   const marker = scanSvgForError(svg)
+  const line = /\[From string \(line (\d+)\)/.exec(svg)?.[1]
 
-  if (marker) {
+  if (marker || render.status >= 400) {
     return {
       ok: false,
       method: "svg-scan",
-      error: `SVG chứa marker lỗi của PlantUML: "${marker}"`,
+      error: marker ? `SVG chứa marker lỗi của PlantUML: "${marker}"` : `PlantUML trả HTTP ${render.status}`,
+      ...(line ? { line } : {}),
       render
     }
   }
