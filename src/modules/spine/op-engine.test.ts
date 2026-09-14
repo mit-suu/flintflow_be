@@ -308,6 +308,39 @@ describe("các loại op", () => {
     expect(reverted.spine).toEqual(empty)
   })
 
+  it("revert gặp giá trị đã bị sửa sau ⇒ revert_conflict, không ghi đè im lặng", () => {
+    const first = planTransaction(FIXTURE, txn([{ op: "set", path: "actors[id=A01].name", value: "One" }]), { startSeq: 1 })
+    const second = planTransaction(first.spine, txn([{ op: "set", path: "actors[id=A01].name", value: "Two" }]), { startSeq: 2 })
+    const err = rejection(() => planRevert(second.spine, first.changes.map((c) => ({ ...c, projectId: "p" })), { by: "u", startSeq: 3 }))
+    expect(err.violations[0]).toMatchObject({ rule: "revert_conflict", path: "actors[id=A01].name" })
+  })
+
+  it("revert xoá phần tử khi phần tử cùng id đã được thêm lại ⇒ revert_conflict, không chèn trùng", () => {
+    const removed = planTransaction(FIXTURE, txn([{ op: "remove", path: "actors[id=A04]" }]), { startSeq: 1 })
+    const actor = FIXTURE.actors.find((a) => a.id === "A04")
+    const readded = planTransaction(removed.spine, txn([{ op: "add", path: "actors[]", value: actor }]), { startSeq: 10 })
+    const err = rejection(() => planRevert(readded.spine, removed.changes.map((c) => ({ ...c, projectId: "p" })), { by: "u", startSeq: 11 }))
+    expect(err.violations.map((v) => v.rule)).toContain("revert_conflict")
+  })
+
+  it("undo xoá màn trong S-5 khôi phục được (bất biến 8 không coi là màn mới)", () => {
+    const base = structuredClone(FIXTURE)
+    base.progress.current_phase = "S-5"
+    const screen = base.screens.find((s) => s.id !== base.progress.screen_cursor && s.detail_status !== "pending")
+    expect(screen, "fixture cần một màn đã mô tả, không phải cursor").toBeDefined()
+    const plan = planTransaction(base, txn([{ op: "remove", path: `screens[id=${screen!.id}]` }]), { startSeq: 1 })
+    const reverted = planRevert(plan.spine, plan.changes.map((c) => ({ ...c, projectId: "p" })), { by: "u", startSeq: 100 })
+    expect(reverted.spine).toEqual(base)
+  })
+
+  it("selector vô hướng khớp nhiều bản trùng (dữ liệu legacy) ⇒ lấy bản đầu, không path_ambiguous", () => {
+    const base = structuredClone(FIXTURE)
+    const screen = base.screens.find((s) => s.flow_to.length > 0)!
+    screen.flow_to = [screen.flow_to[0], ...screen.flow_to]
+    const plan = planTransaction(base, txn([{ op: "remove", path: `screens[id=${screen.id}].flow_to[=${screen.flow_to[0]}]` }]), { startSeq: 1 })
+    expect(plan.spine.screens.find((s) => s.id === screen.id)?.flow_to).toEqual(screen.flow_to.slice(1))
+  })
+
   it("Spine rỗng nhận lô đầu tiên (bất biến 1/2 chỉ chặn việc xoá)", () => {
     const empty = repo.createEmptySpine()
     const plan = planTransaction(empty, txn([{ op: "add", path: "actors[]", value: { id: "A01", name: "User", kind: "human", description: "" } }]), { startSeq: 1 })
@@ -367,14 +400,43 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     expect(new Set(changes.map((c) => c.txn)).size).toBe(1)
   })
 
-  it("saveWithVersion thua sau khi đã ghi change ⇒ xoá change của txn (bù trừ)", async () => {
+  it("không có transaction: saveWithVersion thua ⇒ 409 và không ghi change nào", async () => {
     await seed()
-    // Writer khác đẩy version lên đúng lúc giữa appendChanges và saveWithVersion
+    // Writer khác đẩy version lên đúng lúc giữa lúc đọc và lúc ghi
     const original = db.Spine.findOneAndUpdate
     db.Spine.findOneAndUpdate = async () => null
     await expect(applyTransaction(PROJECT, txn(CASES[1].opCase.expected_ops))).rejects.toMatchObject({ statusCode: 409 })
     db.Spine.findOneAndUpdate = original
     expect(db.changes).toHaveLength(0)
+  })
+
+  it("không có transaction: seq bị writer khác chiếm sau khi đã lưu Spine ⇒ cấp lại dải seq, không mất change", async () => {
+    await seed()
+    const original = db.Spine.findOneAndUpdate
+    db.Spine.findOneAndUpdate = async (...args: Parameters<typeof original>) => {
+      db.Spine.findOneAndUpdate = original
+      db.changes.push({ projectId: PROJECT, seq: 1, txn: "other-writer" })
+      return original(...args)
+    }
+    const result = await applyTransaction(PROJECT, txn(CASES[1].opCase.expected_ops))
+    expect(result.spine_version).toBe(2)
+    expect(result.changes[0].seq).toBe(2)
+    expect(db.changes.filter((c) => c.txn === result.txn).map((c) => c.seq)).toEqual(result.changes.map((c) => c.seq))
+    expect(db.changes.some((c) => c.txn === "other-writer")).toBe(true)
+  })
+
+  it("lô không đổi gì ⇒ không ghi, không tăng version, txn null", async () => {
+    await seed()
+    const name = FIXTURE.actors.find((a) => a.id === "A01")!.name
+    const result = await applyTransaction(PROJECT, txn([{ op: "set", path: "actors[id=A01].name", value: name }]))
+    expect(result).toMatchObject({ txn: null, spine_version: 1, changes: [] })
+    expect(db.changes).toHaveLength(0)
+  })
+
+  it("preview trên project chưa có Spine dùng Spine rỗng, không tạo Spine", async () => {
+    const preview = await previewTransaction(PROJECT, txn([{ op: "set", path: "project.vision", value: "V" }]), { name: "X" })
+    expect(preview.ok).toBe(true)
+    expect(db.spines).toHaveLength(0)
   })
 
   it("lô vi phạm bất biến ⇒ 422, DB không đổi", async () => {
