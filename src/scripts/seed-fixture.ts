@@ -4,18 +4,20 @@
  * Cách dùng:
  *   npm run seed:fixture -- --user <email> [--fixture full|minimal]
  *
- * Ghi chú: T01 (spine model/repository) chưa merge nên script ghi JSON thẳng
- * qua `mongoose.connection.collection("spines")`. Tại M1 đổi sang model của T01
- * và chạy `spineSchema.parse(fixture)` trước khi ghi.
+ * Spine được validate bằng `spineSchema` (T01) rồi ghi qua model `Spine` với khoá
+ * `projectId` — cùng khoá repository/API đọc. Chạy lại là idempotent: Spine và lịch sử
+ * `changes` của project bị thay bằng bản fixture (spine_version của fixture).
  */
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import mongoose from "mongoose"
 import { connectDB } from "../config/database.js"
 import { User } from "../modules/user/user.model.js"
 import { Project } from "../modules/project/project.model.js"
 import { ChatSession } from "../modules/project/chat-session.model.js"
+import { Spine as SpineModel } from "../modules/spine/spine.model.js"
+import { Change as ChangeModel } from "../modules/spine/change.model.js"
+import { spineSchema } from "../modules/spine/spine.schema.js"
 import { signAccessToken } from "../shared/auth/jwt.util.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -49,7 +51,8 @@ const parseArgs = (): { userEmail: string; fixture: FixtureKind } => {
 const seedFixture = async (): Promise<void> => {
   const { userEmail, fixture } = parseArgs()
   const fixturePath = path.join(FIXTURES_DIR, FIXTURE_FILES[fixture])
-  const spineData = JSON.parse(fs.readFileSync(fixturePath, "utf8"))
+  // Sai hình thì dừng trước khi đụng DB
+  const spine = spineSchema.parse(JSON.parse(fs.readFileSync(fixturePath, "utf8")))
 
   try {
     await connectDB()
@@ -78,36 +81,30 @@ const seedFixture = async (): Promise<void> => {
       project = await Project.create({
         userId: user._id,
         name: projectName,
-        domain: spineData.project.domain
+        domain: spine.project.domain
       })
       console.log(`✅ Created project: ${projectName}`)
     } else {
       console.log(`✅ Reusing project: ${projectName}`)
     }
 
-    // 3. Ghi Spine thẳng vào collection "spines" (thay bằng model T01 tại M1)
-    const spines = mongoose.connection.collection("spines")
-    await spines.deleteOne({ project_id: project._id })
-    await spines.insertOne({
-      project_id: project._id,
-      ...spineData,
-      seeded_at: new Date(),
-      fixture_source: FIXTURE_FILES[fixture]
-    })
-    console.log(`✅ Spine seeded (spine_version=${spineData.spine_version}, fixture=${fixture})`)
+    // 3. Ghi Spine qua model T01 (khoá projectId) và bỏ lịch sử change cũ không còn khớp
+    await SpineModel.deleteOne({ projectId: project._id })
+    await ChangeModel.deleteMany({ projectId: project._id })
+    await SpineModel.create({ projectId: project._id, ...spine })
+    console.log(`✅ Spine seeded (spine_version=${spine.spine_version}, fixture=${fixture})`)
 
-    // 4. Tạo chat session pipeline. Model chưa có field is_pipeline (T01) nên
-    //    set cờ qua collection để không bị strict schema lược bỏ.
-    let session = await ChatSession.findOne({ projectId: project._id, isActive: true })
+    // 4. Đúng một chat session pipeline (bất biến 7): ưu tiên session đã giữ cờ
+    let session =
+      (await ChatSession.findOne({ projectId: project._id, is_pipeline: true })) ??
+      (await ChatSession.findOne({ projectId: project._id, isActive: true }))
     if (!session) {
       session = await ChatSession.create({ projectId: project._id, messages: [] })
       console.log("✅ Created pipeline chat session")
     }
-    await mongoose.connection
-      .collection("chatsessions")
-      .updateOne({ _id: session._id as mongoose.Types.ObjectId }, { $set: { is_pipeline: true } })
+    await ChatSession.updateOne({ _id: session._id }, { $set: { is_pipeline: true } })
 
-    // 5. In access token để test API (giống seed-test-uc34.ts)
+    // 5. In access token để test API
     const token = signAccessToken({ userId: String(user._id), email: user.email })
 
     console.log("\n=======================================================")

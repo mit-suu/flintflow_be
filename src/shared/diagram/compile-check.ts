@@ -31,11 +31,12 @@ export type CompileCheckResult =
 
 /**
  * Marker lỗi trong SVG do PlantUML sinh. Giữ danh sách hẹp và có chủ ý: marker
- * quá rộng sẽ báo lỗi cho diagram hợp lệ mà tình cờ chứa chữ "error".
+ * quá rộng sẽ báo lỗi cho diagram hợp lệ mà tình cờ chứa chữ "error" — chữ
+ * "syntax error" chung chung (vd tên message `Syntax error in email`) đã bị bỏ,
+ * chỉ giữ đúng câu PlantUML in ra kèm dấu "?".
  */
 const SVG_ERROR_MARKERS = [
-  "syntax error",
-  "Syntax Error",
+  "Syntax Error?",
   "[From string (line",
   "Assumed diagram type"
 ] as const
@@ -65,15 +66,17 @@ export const checkPlantUml = async (source: string): Promise<CompileCheckResult>
     }
   }
 
-  // Cách 2: quét SVG
+  // Cách 2: quét SVG. Probe T10 (1.2026.8): đường POST trả 400 + SVG lỗi, KHÔNG có header ⇒ rơi vào đây.
   const svg = render.data.toString("utf-8")
   const marker = scanSvgForError(svg)
+  const line = /\[From string \(line (\d+)\)/.exec(svg)?.[1]
 
-  if (marker) {
+  if (marker || render.status >= 400) {
     return {
       ok: false,
       method: "svg-scan",
-      error: `SVG chứa marker lỗi của PlantUML: "${marker}"`,
+      error: marker ? `SVG chứa marker lỗi của PlantUML: "${marker}"` : `PlantUML trả HTTP ${render.status}`,
+      ...(line ? { line } : {}),
       render
     }
   }

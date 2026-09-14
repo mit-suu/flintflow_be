@@ -146,7 +146,7 @@ router.post("/payment-callback", validateBody(paymentCallbackSchema), billingCon
  * @swagger
  * /api/v1/billing/upgrade:
  *   post:
- *     summary: Đổi gói subscription (chưa thu tiền) — ghi Subscription
+ *     summary: Về gói miễn phí — gói trả phí trả 402 PAYMENT_REQUIRED, mua qua POST /billing/checkout với packageId "plan:<id>"
  *     tags: [Billing]
  *     security:
  *       - BearerAuth: []

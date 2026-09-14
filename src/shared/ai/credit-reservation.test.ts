@@ -204,5 +204,37 @@ describe("credit-reservation.service", () => {
         .mock.calls.filter(([, payload]) => payload.type === "low_credit")
       expect(lowCreditCalls).toHaveLength(1)
     })
+
+    it("ví không khớp khi deduct: báo lỗi, reservation trở lại reserved và release vẫn trả được credit", async () => {
+      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      // vd admin trừ credit giữa lúc AI đang chạy
+      walletOf().balance = 0
+
+      await expect(deductCredit(reservation)).rejects.toMatchObject({ code: "CREDIT_LEDGER_INCONSISTENT" })
+      const row = ledger().docs.find((d) => String(d._id) === reservation.reservationId)!
+      expect(row.state).toBe("reserved")
+      expect(ledger().docs.filter((d) => d.type === "deduct")).toHaveLength(0)
+
+      expect(await releaseCredit(reservation)).toBe(true)
+      expect(walletOf().reserved).toBe(0)
+    })
+
+    it("deduct sau expire chỉ trừ trên số khả dụng và không trừ hai lần", async () => {
+      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      await expireStaleReservations(afterTtl())
+      // reservation khác đang giữ hết số khả dụng
+      walletOf().reserved = walletOf().balance
+
+      await expect(deductCredit(reservation)).rejects.toMatchObject({ code: "CREDIT_LEDGER_INCONSISTENT" })
+      expect(ledger().docs.find((d) => String(d._id) === reservation.reservationId)!.state).toBe("expired")
+
+      walletOf().reserved = 0
+      const balanceBefore = walletOf().balance
+      await deductCredit(reservation)
+      await deductCredit(reservation)
+
+      expect(walletOf().balance).toBe(balanceBefore - CHAT_COST)
+      expect(ledger().docs.filter((d) => d.type === "deduct")).toHaveLength(1)
+    })
   })
 })
