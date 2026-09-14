@@ -5,6 +5,19 @@ import { PricingConfig } from "../../modules/admin/pricing-config.model.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 const DEFAULT_ACTION_COSTS: Record<string, number> = {
+  // Giá theo lượt gọi model (Phases §4.2), T03
+  [ActionType.ELICIT]: 1,
+  [ActionType.DRAFT]: 4,
+  [ActionType.REVIEW]: 2,
+  [ActionType.REGENERATE]: 4,
+  [ActionType.REVISION]: 3,
+  [ActionType.RENDER_FIX]: 1,
+  [ActionType.DISCOVERY_STEP]: 2,
+  [ActionType.CONSISTENCY_PASS]: 3,
+  [ActionType.GLOSSARY_SCAN]: 2,
+  [ActionType.RECONCILE]: 4,
+  [ActionType.CHANGE_INSTRUCTION]: 3,
+  // Legacy
   [ActionType.GENERATE_SECTION]: 5,
   [ActionType.DIAGRAM_CLASSIFY]: 1,
   [ActionType.DIAGRAM_GENERATE]: 4,

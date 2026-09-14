@@ -1,12 +1,67 @@
+/**
+ * ActionType = `call_kind` của một lượt gọi model (srs-spine.md §2 `usage[].call_kind`).
+ * Bảng giá ở credit-reservation.service.ts, schema đầu ra ở response-parser.ts.
+ * Tên giá trị là hợp đồng với T11/T13 — đổi phải qua PR contract-change.
+ */
 export enum ActionType {
-  GENERATE_SECTION = "generate_section",
-  DIAGRAM_CLASSIFY = "diagram_classify",
-  DIAGRAM_GENERATE = "diagram_generate",
-  PRIORITY_RANKING = "priority_ranking",
-  SCOPE_OUT_OF_SCOPE = "scope_out_of_scope",
+  // ─── Khung hành động pipeline (Phases §3) ───
+  ELICIT = "elicit",
+  DRAFT = "draft",
+  RENDER_FIX = "render_fix",
+  REVIEW = "review",
+  REGENERATE = "regenerate",
+  REVISION = "revision",
+  DISCOVERY_STEP = "discovery_step",
+  CONSISTENCY_PASS = "consistency_pass",
+  GLOSSARY_SCAN = "glossary_scan",
+  RECONCILE = "reconcile",
+  CHANGE_INSTRUCTION = "change_instruction",
+
+  // ─── Ngoài pipeline, còn dùng ───
   CHAT = "chat",
   SUMMARIZE_DOCUMENT = "summarize_document",
-  CHAT_DISCOVERY = "chat_discovery"
+
+  // ─── Legacy: giữ để luồng cũ chạy tới khi T21 gỡ ───
+  /** @deprecated Thay bằng DRAFT + skill nội dung của step (T14/T18). */
+  GENERATE_SECTION = "generate_section",
+  /** @deprecated Thay bằng S-9.4 (T19). */
+  PRIORITY_RANKING = "priority_ranking",
+  /** @deprecated Thay bằng S-2.2 ghi `project.release_scope` (T14). */
+  SCOPE_OUT_OF_SCOPE = "scope_out_of_scope",
+  /** @deprecated Thay bằng DISCOVERY_STEP (T20). */
+  CHAT_DISCOVERY = "chat_discovery",
+  /** @deprecated Pipeline Excalidraw đã archive; diagram đi đường PlantUML (T10). */
+  DIAGRAM_CLASSIFY = "diagram_classify",
+  /** @deprecated Pipeline Excalidraw đã archive; diagram đi đường PlantUML (T10). */
+  DIAGRAM_GENERATE = "diagram_generate"
+}
+
+export const DEPRECATED_ACTION_TYPES: ReadonlySet<ActionType> = new Set([
+  ActionType.GENERATE_SECTION,
+  ActionType.PRIORITY_RANKING,
+  ActionType.SCOPE_OUT_OF_SCOPE,
+  ActionType.CHAT_DISCOVERY,
+  ActionType.DIAGRAM_CLASSIFY,
+  ActionType.DIAGRAM_GENERATE
+])
+
+/**
+ * Skill hành động (assets/skills/action/) khung một lượt gọi theo ActionType.
+ * Skill nội dung/renderer của step do step runner (T13) chọn và ghép thêm.
+ * ActionType không có ở đây thì đọc prompt phẳng assets/prompts/<actionType>.md.
+ */
+export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>> = {
+  [ActionType.ELICIT]: "elicit-loop",
+  [ActionType.DISCOVERY_STEP]: "elicit-loop",
+  [ActionType.DRAFT]: "draft-to-ops",
+  [ActionType.REGENERATE]: "draft-to-ops",
+  [ActionType.REVISION]: "draft-to-ops",
+  [ActionType.GLOSSARY_SCAN]: "draft-to-ops",
+  [ActionType.RENDER_FIX]: "plantuml-conventions",
+  [ActionType.REVIEW]: "review-section",
+  [ActionType.CONSISTENCY_PASS]: "review-section",
+  [ActionType.RECONCILE]: "apply-change-op",
+  [ActionType.CHANGE_INSTRUCTION]: "apply-change-op"
 }
 
 export interface AiActionInput {

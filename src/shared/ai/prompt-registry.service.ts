@@ -1,90 +1,137 @@
-import { PromptTemplate } from "../../modules/admin/prompt-template.model.js"
-import { ActionType, AiProviderConfig } from "./ai-action.types.js"
-import { getPromptAssetIndex } from "./prompt-assets.js"
+import { ActionType, AiProviderConfig, SKILL_BY_ACTION_TYPE } from "./ai-action.types.js"
+import {
+  getPromptAssetIndex,
+  getSkillIndex,
+  invalidatePromptAssetCache,
+  invalidateSkillCache,
+  loadSkillReference,
+  type OutputSchemaName,
+  type SkillKind,
+  type SkillLanguage
+} from "./prompt-assets.js"
+
+/**
+ * Registry CHỈ đọc đĩa (Phases §8, T03). Nhánh override `PromptTemplate` trong
+ * DB đã bỏ: DB rỗng hay DB cũ đều không còn đổi được prompt/provider lúc chạy.
+ * Model `PromptTemplate` vẫn giữ để không phá seed cũ — xoá ở T21.
+ */
 
 export interface LoadedPromptTemplate {
   actionType: string
   template: string
   providerConfig: AiProviderConfig
+  /** Có khi template đến từ skill (ActionType pipeline). */
+  skillId?: string
+  asset_version?: string
 }
 
-interface CacheEntry {
-  data: LoadedPromptTemplate
-  cachedAt: number
+export interface LoadedSkill {
+  skillId: string
+  kind: SkillKind
+  version: string
+  template: string
+  providerConfig: AiProviderConfig
+  /** Nội dung references đã yêu cầu, theo tên file (không đuôi .md). */
+  references: Record<string, string>
+  /** Mọi reference có sẵn — để caller chọn nạp. */
+  referenceNames: string[]
+  asset_version: string
+  outputSchema: OutputSchemaName[]
+  language: SkillLanguage
+  reads: string[]
+  writes: string[]
+  stub: boolean
 }
 
-const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-const templateCache = new Map<string, CacheEntry>()
+export interface GetSkillOptions {
+  /** Tên reference cần nạp, hoặc `"all"`. Mặc định không nạp cái nào. */
+  references?: string[] | "all"
+}
 
+export const getSkill = (skillId: string, options: GetSkillOptions = {}): LoadedSkill => {
+  const skill = getSkillIndex().get(skillId)
 
-export const getPromptTemplate = async (
-  actionType: ActionType | string
-): Promise<LoadedPromptTemplate> => {
-  const cached = templateCache.get(actionType)
-  const now = Date.now()
-
-  if (cached && now - cached.cachedAt < CACHE_TTL_MS) {
-    return cached.data
-  }
-
-  try {
-    const dbTemplate = await PromptTemplate.findOne({ actionType, isActive: true })
-
-    if (dbTemplate) {
-      const loaded: LoadedPromptTemplate = {
-        actionType: dbTemplate.actionType,
-        template: dbTemplate.template,
-        providerConfig: {
-          provider: dbTemplate.provider || "openai",
-          model: dbTemplate.aiModel || "gpt-4o-mini",
-          maxTokens: dbTemplate.maxTokens || 2048,
-          temperature: dbTemplate.temperature ?? 0.7
-        }
-      }
-
-      templateCache.set(actionType, { data: loaded, cachedAt: now })
-      return loaded
-    }
-  } catch (error) {
-    console.warn(`[PromptRegistry] Query DB that bai cho '${actionType}', doc asset tren dia.`, error)
-  }
-
-  // Không có override trong DB ⇒ đọc asset trên ĐĨA (nguồn sự thật theo §8).
-  //
-  // Không có fallback generic ở đây là CÓ CHỦ Ý: một prompt asset thiếu phải là
-  // lỗi ồn ào, không phải một template vô nghĩa gửi thẳng tới model rồi thất bại
-  // ở tầng parse với thông báo không liên quan.
-  const asset = getPromptAssetIndex().get(actionType)
-
-  if (!asset) {
+  if (!skill) {
     throw new Error(
-      `Không tìm thấy prompt asset cho actionType '${actionType}'. ` +
-        `Tạo file assets/prompts/${actionType}.md (xem assets/prompts/README.md), ` +
-        `hoặc seed override vào DB bằng "npm run seed:md".`
+      `Không tìm thấy skill '${skillId}'. ` +
+        `Tạo assets/skills/<kind>/${skillId}/SKILL.md (xem assets/skills/README.md).`
     )
   }
 
-  const loaded: LoadedPromptTemplate = {
-    actionType: asset.actionType,
-    template: asset.template,
+  const wanted = options.references === "all" ? skill.referenceNames : options.references ?? []
+  const references: Record<string, string> = {}
+  for (const name of wanted) {
+    references[name] = loadSkillReference(skillId, name)
+  }
+
+  return {
+    skillId: skill.skillId,
+    kind: skill.kind,
+    version: skill.version,
+    template: skill.template,
     providerConfig: {
-      provider: asset.provider,
-      model: asset.aiModel,
-      maxTokens: asset.maxTokens,
-      temperature: asset.temperature
+      provider: skill.provider,
+      model: skill.aiModel,
+      maxTokens: skill.maxTokens,
+      temperature: skill.temperature
+    },
+    references,
+    referenceNames: skill.referenceNames,
+    asset_version: skill.assetVersion,
+    outputSchema: skill.outputSchema,
+    language: skill.language,
+    reads: skill.reads,
+    writes: skill.writes,
+    stub: skill.stub
+  }
+}
+
+/**
+ * Template cho `executeAiAction`. Thứ tự: prompt phẳng `assets/prompts/<actionType>.md`
+ * → skill hành động theo `SKILL_BY_ACTION_TYPE`. Không có fallback generic là CÓ CHỦ Ý:
+ * asset thiếu phải là lỗi ồn ào, không phải template vô nghĩa gửi thẳng tới model.
+ */
+export const getPromptTemplate = async (
+  actionType: ActionType | string
+): Promise<LoadedPromptTemplate> => {
+  const asset = getPromptAssetIndex().get(actionType)
+
+  if (asset) {
+    return {
+      actionType: asset.actionType,
+      template: asset.template,
+      providerConfig: {
+        provider: asset.provider,
+        model: asset.aiModel,
+        maxTokens: asset.maxTokens,
+        temperature: asset.temperature
+      }
     }
   }
 
-  templateCache.set(actionType, { data: loaded, cachedAt: now })
-  return loaded
+  const skillId = SKILL_BY_ACTION_TYPE[actionType as ActionType]
+  if (skillId) {
+    const skill = getSkill(skillId)
+    return {
+      actionType,
+      template: skill.template,
+      providerConfig: skill.providerConfig,
+      skillId,
+      asset_version: skill.asset_version
+    }
+  }
+
+  throw new Error(
+    `Không tìm thấy prompt asset cho actionType '${actionType}'. ` +
+      `Tạo assets/prompts/${actionType}.md (xem assets/prompts/README.md) ` +
+      `hoặc khai skill trong SKILL_BY_ACTION_TYPE.`
+  )
 }
 
-export const invalidatePromptCache = (actionType?: string): void => {
-  if (actionType) {
-    templateCache.delete(actionType)
-  } else {
-    templateCache.clear()
-  }
+/** Xoá cache index trên đĩa. Tham số giữ cho tương thích chữ ký cũ. */
+export const invalidatePromptCache = (_actionType?: string): void => {
+  invalidatePromptAssetCache()
+  invalidateSkillCache()
 }
 
 export const interpolatePrompt = (

@@ -1,70 +1,46 @@
-# Prompt Templates — Hướng dẫn chỉnh sửa
+# Prompt phẳng — chỉ cho action ngoài pipeline
 
-Thư mục này chứa các file `.md` — mỗi file là một **prompt template** cho một AI action.
+> Pipeline B-0 → S-9 dùng **skill** ở `assets/skills/` (xem `assets/skills/README.md`). Thư mục này chỉ còn prompt cho action **ngoài pipeline** và action **legacy** chờ T21 gỡ.
 
-## Cách sử dụng
-
-```bash
-# Xem trước kết quả parse (KHÔNG ghi DB):
-npx tsx src/scripts/seed-from-md.ts --dry-run
-
-# Seed thật vào MongoDB:
-npx tsx src/scripts/seed-from-md.ts
-```
-
-Chạy lại nhiều lần an toàn — script tự phát hiện thay đổi và chỉ cập nhật khi cần.
-
----
+**Nguồn sự thật là đĩa.** Runtime đọc thẳng file ở đây qua `src/shared/ai/prompt-assets.ts`; không còn override qua DB hay trang admin (trang admin prompt chỉ đọc, POST/PUT/PATCH trả 410). Sửa prompt = sửa file + commit + deploy.
 
 ## Cấu trúc 1 file `.md`
 
 ```
 ---
-actionType: <tên action>      # BẮT BUỘC — khớp với ActionType enum trong BE
-provider: glm                 # BẮT BUỘC — glm | openai | anthropic | gemini
-aiModel: zai-org/GLM-5.3-Flash # BẮT BUỘC — tên model cụ thể
-maxTokens: 1024               # BẮT BUỘC — số token tối đa
-temperature: 0.3              # BẮT BUỘC — 0.0 (deterministic) → 1.0 (creative)
-isActive: true                # tùy chọn, mặc định true
-description: Mô tả ngắn      # tùy chọn
+actionType: <tên action>       # BẮT BUỘC — khớp ActionType enum
+provider: glm                  # BẮT BUỘC — glm | openai | anthropic | gemini
+aiModel: zai-org/GLM-5.3-Flash # BẮT BUỘC
+maxTokens: 1024                # BẮT BUỘC
+temperature: 0.3               # BẮT BUỘC
+isActive: true                 # tùy chọn, mặc định true
+description: Mô tả ngắn        # tùy chọn
 ---
 
-Nội dung prompt gửi cho LLM...
-Dùng {{variable_name}} cho các biến sẽ được thay thế lúc runtime.
+Nội dung prompt... {{variable_name}} được thay lúc chạy.
 ```
-
----
 
 ## Các file hiện có
 
-| File | actionType | Mô tả |
-|------|-----------|-------|
-| `summarize.md` | `summarize` | Tóm tắt văn bản đầu vào |
-| `extract.md` | `extract` | Trích xuất thông tin có cấu trúc |
-| `analysis.md` | `analysis` | Phân tích rủi ro, mục tiêu, ràng buộc |
-| `clarification.md` | `clarification` | Soạn câu hỏi làm rõ |
-| `generate_section.md` | `generate_section` | Viết tài liệu đặc tả cho một phần |
-| `verification.md` | `verification` | Kiểm tra chất lượng tài liệu |
-| `rewrite.md` | `rewrite` | Viết lại nội dung theo chuẩn kỹ thuật |
+| File | actionType | Trạng thái |
+|------|-----------|-----------|
+| `chat.md` | `chat` | Dùng |
+| `summarize_document.md` | `summarize_document` | Dùng |
+| `generate_section.md` | `generate_section` | Deprecated → `draft` + skill nội dung (T14/T18) |
+| `priority_ranking.md` | `priority_ranking` | Deprecated → S-9.4 (T19) |
+| `scope_out_of_scope.md` | `scope_out_of_scope` | Deprecated → S-2.2 (T14) |
+| `chat_discovery.md` | `chat_discovery` | Deprecated → `discovery_step` (T20) |
 
----
+`_archive/` — không nạp: action đã ngừng (`drawtest/diagram_*` của pipeline Excalidraw, và các prompt cũ).
 
-## Thêm actionType mới
+## Thêm action ngoài pipeline
 
-1. Cập nhật `ActionType` enum trong `src/shared/ai/ai-action.types.ts`.
-2. Cập nhật `SCHEMAS` trong `src/shared/ai/response-parser.ts` với Zod schema tương ứng.
-3. Tạo file `.md` mới trong thư mục này theo format trên.
-4. Chạy `--dry-run` kiểm tra, rồi seed thật.
+1. Thêm giá trị vào `ActionType` (`src/shared/ai/ai-action.types.ts`).
+2. Thêm Zod schema vào `SCHEMAS` (`src/shared/ai/response-parser.ts`) và giá vào `credit-reservation.service.ts`.
+3. Tạo file `.md` ở đây. `npm test -- prompt-assets` bắt thiếu/trùng/mồ côi.
 
-> **Không cần sửa `seed-from-md.ts`** — script tự đọc tất cả file `.md` trong thư mục.
+Action thuộc pipeline thì **không** tạo prompt phẳng — khai skill và thêm vào `SKILL_BY_ACTION_TYPE`.
 
----
+## Seed (legacy)
 
-## Các biến placeholder thường dùng
-
-| Biến | Dùng trong action |
-|------|------------------|
-| `{{input_text}}` | summarize, extract, analysis, clarification |
-| `{{specification}}` | verification |
-| `{{content}}` | rewrite |
-| `{{context}}` + `{{section_name}}` | generate_section |
+`npm run seed:md` vẫn ghi các file ở đây vào collection `PromptTemplate`, nhưng runtime **không đọc** collection đó nữa. Giữ script cho tới T21.
