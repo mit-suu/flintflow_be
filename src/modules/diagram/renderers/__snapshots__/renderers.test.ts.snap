@@ -1,0 +1,273 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
+"@startuml
+skinparam monochrome true
+left to right direction
+rectangle "FlintFlow" as SYSTEM_
+rectangle "Payment Gateway" as A05 <<system>>
+rectangle "LLM Provider" as A06 <<system>>
+rectangle "PlantUML Server" as A07 <<system>>
+rectangle "Email Service" as A08 <<system>>
+rectangle "Scheduler" as A09 <<time>>
+SYSTEM_ -- A05
+SYSTEM_ -- A06
+SYSTEM_ -- A07
+SYSTEM_ -- A08
+SYSTEM_ -- A09
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > erd 1`] = `
+"@startuml
+skinparam monochrome true
+hide circle
+hide empty members
+entity "User" as E01
+entity "Project" as E02
+entity "Spine" as E03
+entity "ChatSession" as E04
+entity "CreditLedger" as E05
+entity "Subscription" as E06
+entity "Notification" as E07
+entity "Baseline" as E08
+entity "ChangeRecord" as E09
+entity "UsageRecord" as E10
+entity "Flag" as E11
+entity "Diagram" as E12
+E01 ||--o{ E02
+E01 ||--o{ E05
+E01 ||--o{ E07
+E02 ||--o{ E03
+E02 ||--o{ E04
+E03 ||--o{ E08
+E03 ||--o{ E09
+E03 ||--o{ E11
+E03 ||--o{ E12
+E05 ||--o{ E10
+E06 ||--o{ E01
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow 1`] = `
+"@startuml
+skinparam monochrome true
+hide empty description
+[*] --> S01
+state "Login" as S01
+state "Register" as S02
+state "Forgot Password" as S03
+state "Onboarding" as S04
+state "Project Dashboard" as S05
+state "Create Project" as S06
+state "Project Workspace" as S07 {
+  state "Chat" as S07_T1
+  state "Document" as S07_T2
+  state "History" as S07_T3
+}
+state "Diagram Preview" as S08
+state "Verification & Change Panel" as S09
+state "Export" as S10
+state "Plan & Pricing" as S11
+state "Billing History" as S12
+state "Notification Center" as S13
+state "Admin User List" as S14
+state "Admin User Detail" as S15
+state "Admin Metrics Dashboard" as S16
+state "Admin AI Cost Report" as S17
+state "Admin Prompt Templates" as S18
+state "Admin Audit Log" as S19
+note right of S03 : pop-up
+note right of S06 : pop-up
+S01 --> S02
+S01 --> S03
+S01 --> S05
+S02 --> S01
+S04 --> S05
+S05 --> S06
+S05 --> S07
+S05 --> S11
+S05 --> S13
+S06 --> S07
+S07 --> S08
+S07 --> S09
+S07 --> S10
+S08 --> S07
+S09 --> S07
+S09 --> S10
+S10 --> S07
+S11 --> S12
+S14 --> S15
+S15 --> S14
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_layout@S01 1`] = `
+"@startsalt
+{+
+  <b>Login
+  {#
+    <b>Function | <b>Description
+    Submit Credentials | Authenticates the user with email and password and issues an access token.
+    Log In with Google | Authenticates via Google OAuth and links or creates the local account.
+    Toggle Password Visibility | Switches the password input between masked and plain text.
+    Navigate to Register | Navigates to the registration screen.
+    Open Forgot Password | Opens the Forgot Password popup over the login form.
+  }
+}
+@endsalt
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_layout@S05 1`] = `
+"@startsalt
+{+
+  <b>Project Dashboard
+  {#
+    <b>Function | <b>Description
+    List Projects | Shows the user's projects with name, status, readiness score and last activity.
+    Search Projects | Filters the project cards by name substring.
+    Filter by Status | Restricts the list to active or archived projects.
+    Open Project | Opens the Project Workspace and resumes at the stored pipeline position.
+    Archive Project | Archives the project after confirmation; archived projects stay readable.
+    Open Create Project | Opens the Create Project popup.
+  }
+}
+@endsalt
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_layout@S07 1`] = `
+"@startsalt
+{+
+  <b>Project Workspace
+  {#
+    <b>Function | <b>Description
+    Send Chat Message | Sends the user turn to the pipeline orchestrator for the current step.
+    Stream AI Response | Streams the model response into the chat pane over SSE with a cancel control.
+    Switch Tab | Switches between Chat, Document and History without losing pane state.
+    Render Document Pane | Renders the assembled SRS read-only with status badges per section.
+    Accept Step at Gate | Accepts the current step's output, commits its transaction and advances the pipeline.
+    Request Revision at Gate | Sends the user's revision notes back to the step within the turn ceiling.
+  }
+}
+@endsalt
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_layout@S09 1`] = `
+"@startsalt
+{+
+  <b>Verification & Change Panel
+  {#
+    <b>Function | <b>Description
+    List Open Flags | Shows open red and yellow flags with rule, target and remediation step.
+    Waive Flag | Waives an eligible red flag with a mandatory typed reason.
+    Submit Change Request | Turns a natural-language change request into a previewable op batch.
+    Preview Impact Diff | Shows a field-level before/after diff and the dependent sections that become stale.
+    Apply Change Transaction | Applies the whole op batch atomically and records the change history.
+  }
+}
+@endsalt
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_layout@S10 1`] = `
+"@startsalt
+{+
+  <b>Export
+  {#
+    <b>Function | <b>Description
+    Configure Export Options | Chooses between working draft and baseline export and shows blockers.
+    Export Working Draft | Renders the current document to Word with a DRAFT watermark on every page.
+    Export Baseline Document | Renders the clean document from the baseline snapshot, not from the current Spine.
+    Show Export Blockers | Explains which precondition fails and links the shortcut to fix it.
+    Download Exported File | Streams the generated .docx to the browser with a versioned file name.
+  }
+}
+@endsalt
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase 1`] = `
+"@startuml
+skinparam monochrome true
+left to right direction
+actor "Founder" as A01
+actor "Business Analyst" as A02
+actor "Administrator" as A03
+actor "Guest" as A04
+actor "Payment Gateway" as A05 <<system>>
+actor "LLM Provider" as A06 <<system>>
+actor "PlantUML Server" as A07 <<system>>
+actor "Email Service" as A08 <<system>>
+actor "Scheduler" as A09 <<time>>
+rectangle "FlintFlow" {
+  usecase "Register Account" as UC01
+  usecase "Log In" as UC02
+  usecase "Reset Password" as UC03
+  usecase "Complete Onboarding" as UC04
+  usecase "Manage Projects" as UC05
+  usecase "Create Project" as UC06
+  usecase "Resume Project" as UC07
+  usecase "Refine Product Brief" as UC08
+  usecase "Generate SRS Content" as UC09
+  usecase "Review and Accept Step" as UC10
+  usecase "Request Change" as UC11
+  usecase "Render Diagrams" as UC12
+  usecase "Verify Document" as UC13
+  usecase "Waive Red Flag" as UC14
+  usecase "Sign Baseline" as UC15
+  usecase "Export Word Document" as UC16
+  usecase "Purchase Credits" as UC17
+  usecase "View Billing History" as UC18
+  usecase "Receive Notifications" as UC19
+  usecase "Inspect Platform Accounts" as UC20
+  usecase "Monitor Platform Metrics" as UC21
+  usecase "Run Scheduled Housekeeping" as UC22
+  usecase "Preview Change Impact" as UC23
+}
+A04 --> UC01
+A08 --> UC01
+A01 --> UC02
+A02 --> UC02
+A03 --> UC02
+A04 --> UC02
+A01 --> UC03
+A08 --> UC03
+A01 --> UC04
+A01 --> UC05
+A01 --> UC06
+A01 --> UC07
+A01 --> UC08
+A06 --> UC08
+A01 --> UC09
+A06 --> UC09
+A01 --> UC10
+A01 --> UC11
+A07 --> UC12
+A01 --> UC13
+A02 --> UC13
+A02 --> UC14
+A02 --> UC15
+A01 --> UC16
+A01 --> UC17
+A05 --> UC17
+A01 --> UC18
+A01 --> UC19
+A03 --> UC20
+A03 --> UC21
+A09 --> UC22
+A01 --> UC23
+UC03 ..> UC02 : <<extend>>
+UC09 ..> UC10 : <<include>>
+UC09 ..> UC12 : <<include>>
+UC11 ..> UC23 : <<include>>
+UC14 ..> UC15 : <<extend>>
+UC15 ..> UC13 : <<include>>
+@enduml
+"
+`;
