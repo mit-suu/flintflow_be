@@ -31,11 +31,12 @@ export type CompileCheckResult =
 
 /**
  * Marker lỗi trong SVG do PlantUML sinh. Giữ danh sách hẹp và có chủ ý: marker
- * quá rộng sẽ báo lỗi cho diagram hợp lệ mà tình cờ chứa chữ "error".
+ * quá rộng sẽ báo lỗi cho diagram hợp lệ mà tình cờ chứa chữ "error" — chữ
+ * "syntax error" chung chung (vd tên message `Syntax error in email`) đã bị bỏ,
+ * chỉ giữ đúng câu PlantUML in ra kèm dấu "?".
  */
 const SVG_ERROR_MARKERS = [
-  "syntax error",
-  "Syntax Error",
+  "Syntax Error?",
   "[From string (line",
   "Assumed diagram type"
 ] as const

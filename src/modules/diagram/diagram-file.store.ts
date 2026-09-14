@@ -15,7 +15,11 @@ export interface StoredDiagramFile {
 export interface DiagramFileStore {
   save(projectId: string, diagramId: string, format: DiagramFileFormat, file: StoredDiagramFile): Promise<void>
   load(projectId: string, diagramId: string, format: DiagramFileFormat): Promise<StoredDiagramFile | null>
+  /** Xoá mọi file (svg, png) của một diagram; không có file thì thôi. */
+  remove(projectId: string, diagramId: string): Promise<void>
 }
+
+export const DIAGRAM_FILE_FORMATS: readonly DiagramFileFormat[] = ["svg", "png"]
 
 export const DIAGRAM_BUCKET = "diagram-files"
 
@@ -30,6 +34,17 @@ const bucket = (): InstanceType<typeof mongoose.mongo.GridFSBucket> => {
   return new mongoose.mongo.GridFSBucket(db, { bucketName: DIAGRAM_BUCKET })
 }
 
+type Bucket = ReturnType<typeof bucket>
+
+/** Hai lượt render ghi đè cùng lúc có thể cùng xoá một bản cũ — file đã mất là kết quả mong muốn. */
+const deleteQuietly = async (b: Bucket, id: Parameters<Bucket["delete"]>[0]): Promise<void> => {
+  try {
+    await b.delete(id)
+  } catch (err) {
+    if (!(err instanceof Error && /not found/i.test(err.message))) throw err
+  }
+}
+
 export const gridFsDiagramStore: DiagramFileStore = {
   async save(projectId, diagramId, format, file) {
     const b = bucket()
@@ -42,7 +57,13 @@ export const gridFsDiagramStore: DiagramFileStore = {
       upload.once("error", reject)
       upload.end(file.data)
     })
-    for (const old of previous) await b.delete(old._id)
+    for (const old of previous) await deleteQuietly(b, old._id)
+  },
+
+  async remove(projectId, diagramId) {
+    const b = bucket()
+    const filenames = DIAGRAM_FILE_FORMATS.map((format) => diagramFileName(projectId, diagramId, format))
+    for (const file of await b.find({ filename: { $in: filenames } }).toArray()) await deleteQuietly(b, file._id)
   },
 
   async load(projectId, diagramId, format) {
@@ -76,6 +97,9 @@ export const createMemoryDiagramStore = (): DiagramFileStore & { files: Map<stri
     },
     async load(projectId, diagramId, format) {
       return files.get(diagramFileName(projectId, diagramId, format)) ?? null
+    },
+    async remove(projectId, diagramId) {
+      for (const format of DIAGRAM_FILE_FORMATS) files.delete(diagramFileName(projectId, diagramId, format))
     }
   }
 }

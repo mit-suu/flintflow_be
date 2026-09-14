@@ -57,7 +57,11 @@ export const getDiagramFile = catchAsync(async (req: Request, res: Response) => 
   return res.status(200).send(file.data)
 })
 
-const renderBodySchema = z.object({ owner_id: z.string().min(1).nullable().optional() })
+const renderBodySchema = z.object({
+  owner_id: z.string().min(1).nullable().optional(),
+  /** Compile lại cả hình có dữ liệu nguồn không đổi. */
+  force: z.boolean().optional()
+})
 
 export const renderDiagramRoute = catchAsync(async (req: Request, res: Response) => {
   const kind = String(req.params.kind)
@@ -72,8 +76,9 @@ export const renderDiagramRoute = catchAsync(async (req: Request, res: Response)
   if (known === "screen_layout" && ownerId === null) throw new ApiError(400, "screen_layout cần owner_id (id màn)", "VALIDATION_ERROR")
 
   const { projectId, userId } = await context(req)
+  const options = { by: userId, force: body.data.force ?? false }
   const result = known
-    ? await diagramService.renderDiagram(projectId, known, known === "screen_layout" ? ownerId : null, { by: userId })
-    : await diagramService.renderAll(projectId, { by: userId })
+    ? await diagramService.renderDiagram(projectId, known, known === "screen_layout" ? ownerId : null, options)
+    : await diagramService.renderAll(projectId, options)
   return sendSuccess(res, 200, result)
 })
