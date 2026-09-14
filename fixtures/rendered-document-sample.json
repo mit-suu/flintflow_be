@@ -1,0 +1,124 @@
+{
+  "projectId": "650000000000000000000001",
+  "projectName": "Lumen Học Trực Tuyến",
+  "version": "v0.3",
+  "source": "draft",
+  "watermark": "DRAFT",
+  "generatedAt": "2026-09-14T09:30:00.000Z",
+  "recordOfChanges": [
+    { "date": "2026-09-01", "version": "v0.1", "change_type": "A", "in_charge": "Tran Tuan Hiep", "description": "Initial Product Overview and User Requirements" },
+    { "date": "2026-09-08", "version": "v0.2", "change_type": "A", "in_charge": "Tran Tuan Hiep", "description": "Added Functional and Non-Functional Requirements" },
+    { "date": "2026-09-14", "version": "v0.3", "change_type": "M", "in_charge": "Tran Tuan Hiep", "description": "Renamed actor Learner to Student" }
+  ],
+  "flagsAppendix": {
+    "redOpen": [
+      { "id": "FLG-001", "rule_id": "missing_threshold", "section": "4.2.3 Performance", "message": "NFR-P02 has no numeric threshold" },
+      { "id": "FLG-002", "rule_id": "orphan_use_case", "section": "2.2.2 Use Case Descriptions", "message": "UC-07 is not linked to any function" }
+    ],
+    "staleCount": 1,
+    "waived": [
+      { "id": "FLG-003", "rule_id": "array_min", "section": "5.4 Other Requirements", "message": "Other requirements list is empty", "waive_reason": "No other requirements apply to Release 1.0 scope" }
+    ]
+  },
+  "sections": [
+    {
+      "id": "fixed:1",
+      "number": "1",
+      "heading": "Product Overview",
+      "level": 1,
+      "status": "accepted",
+      "blocks": [
+        { "type": "paragraph", "runs": [{ "text": "Lumen is an online learning platform that lets " }, { "text": "instructors", "bold": true }, { "text": " publish courses and " }, { "text": "students", "italic": true }, { "text": " learn at their own pace." }] },
+        { "type": "bullet_list", "items": [[{ "text": "BR-01: A course must have at least one lesson before publishing." }], [{ "text": "BR-02: Payments are processed through " }, { "text": "VNPay", "code": true }, { "text": "." }]] },
+        { "type": "image", "png": "iVBORw0KGgoAAAANSUhEUgAAAPAAAAB4CAAAAADp3SD7AAAAqUlEQVR4nO3dQRGAABDEMKThXw0S8MADhm4qYOei4I5zrOPrA95uEnzNBFwPuB5wPeB6wPWA6wHXA64HXA+4HnA94HrA9YDrAdcDrgdcD7ge8IOBLwIGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYG3gX/LeB6wPWA6wHXA64HXA+4HnA94HrA9YDrAdcDrgdcD7gecD3gesD1Vl+ITTUHvgG2XlIq/vZXxgAAAABJRU5ErkJggg==", "caption": "Figure 1. System Context Diagram" }
+      ]
+    },
+    {
+      "id": "group:2",
+      "number": "2",
+      "heading": "User Requirements",
+      "level": 1,
+      "blocks": []
+    },
+    {
+      "id": "fixed:2.1",
+      "number": "2.1",
+      "heading": "Actors",
+      "level": 2,
+      "status": "accepted",
+      "blocks": [
+        {
+          "type": "table",
+          "header": [[{ "text": "#" }], [{ "text": "Actor" }], [{ "text": "Description" }]],
+          "rows": [
+            [[{ "text": "1" }], [{ "text": "Student" }], [{ "text": "Enrolls in courses and completes lessons" }]],
+            [[{ "text": "2" }], [{ "text": "Instructor" }], [{ "text": "Creates and publishes courses" }]],
+            [[{ "text": "3" }], [{ "text": "VNPay" }], [{ "text": "External payment gateway" }]]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fixed:2.2.2",
+      "number": "2.2.2",
+      "heading": "Use Case Descriptions",
+      "level": 3,
+      "status": "stale",
+      "blocks": [
+        { "type": "numbered_list", "items": [[{ "text": "UC-01 Enroll in Course — Student" }], [{ "text": "UC-02 Publish Course — Instructor" }]] }
+      ]
+    },
+    {
+      "id": "group:3",
+      "number": "3",
+      "heading": "Functional Requirements",
+      "level": 1,
+      "blocks": []
+    },
+    {
+      "id": "fixed:3.1.2",
+      "number": "3.1.2",
+      "heading": "Screen Inventory",
+      "level": 3,
+      "status": "draft",
+      "awaiting_reaccept": true,
+      "blocks": [
+        { "type": "paragraph", "runs": [{ "text": "The system has 3 screens: Course Catalog, Course Detail and Checkout." }] }
+      ]
+    },
+    {
+      "id": "group:4",
+      "number": "4",
+      "heading": "Non-Functional Requirements",
+      "level": 1,
+      "blocks": []
+    },
+    {
+      "id": "fixed:4.2.3",
+      "number": "4.2.3",
+      "heading": "Performance",
+      "level": 3,
+      "status": "accepted",
+      "blocks": [
+        { "type": "bullet_list", "items": [[{ "text": "NFR-P01: Course catalog loads within " }, { "text": "2 seconds", "bold": true }, { "text": " for 95% of requests." }], [{ "text": "NFR-P02: The system responds quickly under load." }]] }
+      ]
+    },
+    {
+      "id": "group:5",
+      "number": "5",
+      "heading": "Requirement Appendix",
+      "level": 1,
+      "blocks": []
+    },
+    {
+      "id": "fixed:5.5",
+      "number": "5.5",
+      "heading": "Glossary",
+      "level": 2,
+      "status": "derived",
+      "blocks": [
+        { "type": "bullet_list", "items": [[{ "text": "SRS", "bold": true }, { "text": " — Software Requirement Specification" }], [{ "text": "NFR", "bold": true }, { "text": " — Non-Functional Requirement" }]] }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ import verificationRoutes from "./modules/verification/verification-context.rout
 import notificationRoutes from "./modules/notification/notification.route.js"
 import billingRoutes from "./modules/billing/billing.route.js"
 import spineRoutes from "./modules/spine/spine.route.js"
+import exportRoutes from "./modules/render/export.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
 const app = express()
@@ -119,6 +120,7 @@ app.use("/api/v1/specifications", specificationRoutes)
 app.use("/api/v1/verification", verificationRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
+app.use("/api/v1/export", exportRoutes)
 
 // Global Error Handler Middleware
 app.use(errorHandler)
