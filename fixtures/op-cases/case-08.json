@@ -1,0 +1,10 @@
+{
+  "name": "unresolvable path must be rejected",
+  "step_id": "S-3.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "A model output references an actor id that does not exist in the Spine. The path resolver must reject the op instead of creating or ignoring the target.",
+  "expected_ops": [
+    { "op": "set", "path": "actors[id=A99].name", "value": "Ghost Actor", "reason": "Invalid: A99 does not exist." }
+  ],
+  "must_reject": "path_not_resolved"
+}

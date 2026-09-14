@@ -1,0 +1,10 @@
+{
+  "name": "function feature_id diverging from its screen must be rejected",
+  "step_id": "S-4.4",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The op sets functions[id=FN001].feature_id to F2 while its screen S01 belongs to F1. Invariant 6 requires a screen function to inherit the feature of its screen, so the transaction must be rejected.",
+  "expected_ops": [
+    { "op": "set", "path": "functions[id=FN001].feature_id", "value": "F2", "reason": "Invalid: diverges from the feature of screen S01." }
+  ],
+  "must_reject": "invariant_6_feature_mismatch"
+}

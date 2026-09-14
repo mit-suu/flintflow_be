@@ -1,0 +1,10 @@
+{
+  "name": "op changing a key must be rejected",
+  "step_id": "S-8.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "A malformed model output tries to change the id of a glossary entry. Ops must never change the key that addresses an element (srs-spine.md section 1); renaming a term is a set on the term field, never on id.",
+  "expected_ops": [
+    { "op": "set", "path": "glossary[id=G07].id", "value": "G99", "reason": "Invalid: attempts to rewrite the addressing key." }
+  ],
+  "must_reject": "key_change_forbidden"
+}
