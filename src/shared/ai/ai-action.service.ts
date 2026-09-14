@@ -16,7 +16,7 @@ import {
   reserveCredit,
   deductCredit,
   releaseCredit,
-  getActionCost
+  CreditReservation
 } from "./credit-reservation.service.js"
 import { executeWithInRequestRetry } from "./retry.service.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
@@ -34,22 +34,18 @@ export interface ExecuteAiActionStreamCallbacks<T = any> {
   onError?: (error: any) => void | Promise<void>
 }
 
-export const executeAiAction = async <T = any>(
-  actionType: ActionType | string,
-  input: AiActionInput,
-  projectId: string | undefined,
+const reserveCreditWithTransaction = async (
   userId: string,
-  options: ExecuteAiActionOptions = {}
-): Promise<AiActionResult<T>> => {
-  // Step 1: Calculate cost & Reserve Credit
-  const cost = await getActionCost(actionType)
-
+  actionType: string,
+  projectId: string | undefined
+): Promise<CreditReservation> => {
   let session: mongoose.ClientSession | undefined
   try {
     session = await mongoose.startSession()
     session.startTransaction()
-    await reserveCredit(userId, actionType, projectId, session)
+    const reservation = await reserveCredit(userId, actionType, projectId, session)
     await session.commitTransaction()
+    return reservation
   } catch (err: any) {
     if (session) {
       try {
@@ -61,41 +57,78 @@ export const executeAiAction = async <T = any>(
     if (
       err?.message?.includes("replica set member") ||
       err?.message?.includes("Transaction numbers") ||
+      err?.message?.includes("retryable writes") ||
       err?.code === 20
     ) {
-      await reserveCredit(userId, actionType, projectId)
-    } else {
-      throw err
+      return reserveCredit(userId, actionType, projectId)
     }
+    throw err
   } finally {
     if (session) {
       session.endSession()
     }
   }
+}
 
-  // Step 2: Build Prompt
-  let finalPrompt = ""
-  let providerConfig: AiProviderConfig
+/** Release không được che lỗi gốc của action: lỗi release chỉ log. */
+const releaseQuietly = async (reservation: CreditReservation): Promise<void> => {
+  try {
+    await releaseCredit(reservation)
+  } catch (releaseError) {
+    console.error(
+      `[executeAiAction] Release credit failed for reservation ${reservation.reservationId}:`,
+      releaseError
+    )
+  }
+}
 
-  if (options.rawPromptOverride || input.rawPrompt) {
-    finalPrompt = options.rawPromptOverride || input.rawPrompt || ""
-    const loadedTemplate = await getPromptTemplate(actionType)
-    providerConfig = {
-      ...loadedTemplate.providerConfig,
-      ...(options.provider ? { provider: options.provider } : {}),
-      ...(options.model ? { model: options.model } : {})
-    }
-  } else {
-    const loadedTemplate = await getPromptTemplate(actionType)
-    finalPrompt = interpolatePrompt(loadedTemplate.template, input.promptVariables || input)
-    providerConfig = {
+const buildPrompt = async (
+  actionType: string,
+  input: AiActionInput,
+  options: ExecuteAiActionOptions,
+  fallbackVariables: Record<string, any>
+): Promise<{ finalPrompt: string; providerConfig: AiProviderConfig }> => {
+  const loadedTemplate = await getPromptTemplate(actionType)
+  const finalPrompt =
+    options.rawPromptOverride || input.rawPrompt
+      ? options.rawPromptOverride || input.rawPrompt || ""
+      : interpolatePrompt(loadedTemplate.template, input.promptVariables || fallbackVariables)
+
+  return {
+    finalPrompt,
+    providerConfig: {
       ...loadedTemplate.providerConfig,
       ...(options.provider ? { provider: options.provider } : {}),
       ...(options.model ? { model: options.model } : {})
     }
   }
+}
 
-  // Step 3: Call LLM & Parse Response with In-Request Retry
+export const executeAiAction = async <T = any>(
+  actionType: ActionType | string,
+  input: AiActionInput,
+  projectId: string | undefined,
+  userId: string,
+  options: ExecuteAiActionOptions = {}
+): Promise<AiActionResult<T>> => {
+  // Step 1: Reserve Credit
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId)
+  const cost = reservation.cost
+
+  // Step 2: Build Prompt
+  let finalPrompt: string
+  let providerConfig: AiProviderConfig
+  try {
+    ;({ finalPrompt, providerConfig } = await buildPrompt(actionType, input, options, input))
+  } catch (buildError) {
+    await releaseQuietly(reservation)
+    throw buildError
+  }
+
+  // Step 3: Call LLM & Parse Response with In-Request Retry.
+  // Thứ tự bắt buộc: parse → deduct. `deducted` chặn trừ hai lần khi retry và
+  // chặn release sau khi đã trừ (lỗi ghi log phía sau không được hoàn tiền).
+  let deducted = false
   let currentLogId: string = ""
 
   try {
@@ -108,8 +141,11 @@ export const executeAiAction = async <T = any>(
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)
 
-        // Success: Deduct Credit
-        await deductCredit(userId, actionType, cost, projectId)
+        // Success: Deduct Credit (chỉ sau khi parse thành công)
+        if (!deducted) {
+          await deductCredit(reservation)
+          deducted = true
+        }
 
         // Create success log
         const logDoc = await AiActionLog.create({
@@ -144,7 +180,6 @@ export const executeAiAction = async <T = any>(
           cost
         }
       } catch (error: any) {
-        const latencyMs = Date.now() - startTime
         console.error(`[executeAiAction] Attempt ${attempt + 1} failed for action '${actionType}':`, error.message)
         throw error
       }
@@ -152,8 +187,10 @@ export const executeAiAction = async <T = any>(
 
     return result
   } catch (finalError: any) {
-    // Step 4: On Error -> Release Credit & Record Failed Log
-    await releaseCredit(userId, actionType, cost, projectId)
+    // Step 4: On Error -> Release Credit (chỉ khi chưa trừ) & Record Failed Log
+    if (!deducted) {
+      await releaseQuietly(reservation)
+    }
 
     const failedLog = await AiActionLog.create({
       projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
@@ -188,58 +225,20 @@ export const executeAiActionStream = async <T = any>(
   callbacks: ExecuteAiActionStreamCallbacks<T> = {},
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
-  const cost = await getActionCost(actionType)
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId)
+  const cost = reservation.cost
 
-  let session: mongoose.ClientSession | undefined
-  try {
-    session = await mongoose.startSession()
-    session.startTransaction()
-    await reserveCredit(userId, actionType, projectId, session)
-    await session.commitTransaction()
-  } catch (err: any) {
-    if (session) {
-      try {
-        await session.abortTransaction()
-      } catch (_) {}
-    }
-
-    if (
-      err?.message?.includes("replica set member") ||
-      err?.message?.includes("Transaction numbers") ||
-      err?.code === 20
-    ) {
-      await reserveCredit(userId, actionType, projectId)
-    } else {
-      throw err
-    }
-  } finally {
-    if (session) {
-      session.endSession()
-    }
-  }
-
-  let finalPrompt = ""
+  let finalPrompt: string
   let providerConfig: AiProviderConfig
-
-  if (options.rawPromptOverride || input.rawPrompt) {
-    finalPrompt = options.rawPromptOverride || input.rawPrompt || ""
-    const loadedTemplate = await getPromptTemplate(actionType)
-    providerConfig = {
-      ...loadedTemplate.providerConfig,
-      ...(options.provider ? { provider: options.provider } : {}),
-      ...(options.model ? { model: options.model } : {})
-    }
-  } else {
-    const loadedTemplate = await getPromptTemplate(actionType)
-    finalPrompt = interpolatePrompt(loadedTemplate.template, input.promptVariables || {})
-    providerConfig = {
-      ...loadedTemplate.providerConfig,
-      ...(options.provider ? { provider: options.provider } : {}),
-      ...(options.model ? { model: options.model } : {})
-    }
+  try {
+    ;({ finalPrompt, providerConfig } = await buildPrompt(actionType, input, options, {}))
+  } catch (buildError) {
+    await releaseQuietly(reservation)
+    throw buildError
   }
 
   const startTime = Date.now()
+  let deducted = false
 
   try {
     const model = getAiSdkModel(providerConfig)
@@ -272,7 +271,11 @@ export const executeAiActionStream = async <T = any>(
       else if ((usage as any)?.completionTokens) completionTokens = (usage as any).completionTokens
     } catch (_) {}
 
-    await deductCredit(userId, actionType, cost, projectId)
+    // Parse TRƯỚC, deduct SAU: output hỏng thì không tính phí (audit E2)
+    const parsedData = parseResponse<T>(fullRaw, actionType)
+
+    await deductCredit(reservation)
+    deducted = true
 
     const logDoc = await AiActionLog.create({
       projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
@@ -286,8 +289,6 @@ export const executeAiActionStream = async <T = any>(
       latencyMs,
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
     })
-
-    const parsedData = parseResponse<T>(fullRaw, actionType)
 
     // For chat actions, ensure parsedData.reply matches the clean streamed reply
     if (
@@ -324,7 +325,9 @@ export const executeAiActionStream = async <T = any>(
 
     return result
   } catch (finalError: any) {
-    await releaseCredit(userId, actionType, cost, projectId)
+    if (!deducted) {
+      await releaseQuietly(reservation)
+    }
 
     const failedLog = await AiActionLog.create({
       projectId: projectId ? new mongoose.Types.ObjectId(projectId) : null,
@@ -354,4 +357,3 @@ export const executeAiActionStream = async <T = any>(
     )
   }
 }
-
