@@ -18,22 +18,29 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { STEP_SPECS, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { STEP_SKILLS, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
+import { loadStepRegistry, orderedSteps } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const load = (file: string): Spine =>
   spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures", file), "utf8")))
 const FIXTURE = load("spine-fixture-19-screens.json")
 
-describe("STEP_SPECS (bảng tạm trước T12)", () => {
-  it("đủ 13 step Brief + 38 step SRS cố định (S-5 tính 5 template)", () => {
-    const ids = Object.keys(STEP_SPECS)
-    expect(ids.filter((id) => id.startsWith("B-"))).toHaveLength(13)
-    // 38 step SRS cố định + 5 template vòng S-5 (Phases §6.4)
-    expect(ids.filter((id) => id.startsWith("S-") && !id.startsWith("S-5."))).toHaveLength(38)
-    expect(ids.filter((id) => id.startsWith("S-5."))).toHaveLength(5)
-    for (const s of Object.values(STEP_SPECS)) if (s.writes.length > 1) expect(s.writes).toContain("assumptions")
+describe("getStepSpec (step registry T12 + STEP_SKILLS)", () => {
+  it("khoá STEP_SKILLS đều là step trong registry; step có skill đều ghi được assumptions", () => {
+    const registry = new Map(loadStepRegistry().map((s) => [s.id, s]))
+    for (const id of Object.keys(STEP_SKILLS)) {
+      expect(registry.has(id), id).toBe(true)
+      expect(registry.get(id)?.writes, id).toContain("assumptions")
+    }
+  })
+
+  it("mọi step của fixture 19 màn đều projection được; reads không lẫn token documents", () => {
+    for (const step of orderedSteps(FIXTURE)) {
+      expect(getStepSpec(step.id).reads, step.id).not.toContain("documents")
+      expect(() => projectStep(FIXTURE, step.id), step.id).not.toThrow()
+    }
   })
 
   it("parseStepId / getStepSpec", () => {
@@ -112,8 +119,9 @@ describe("buildStepContext", () => {
     expect(buildDocumentContext).toHaveBeenCalledWith("p", "draft", "S-3.1", expect.any(Number), undefined, undefined)
   })
 
-  it("STEP_NEEDS_SOURCE_DOCUMENTS theo step (bỏ @)", () => {
+  it("stepNeedsSourceDocuments theo token documents của registry", () => {
     expect(stepNeedsSourceDocuments("S-5.4@S01")).toBe(true)
     expect(stepNeedsSourceDocuments("S-3.4")).toBe(false)
+    expect(stepNeedsSourceDocuments("not-a-step")).toBe(false)
   })
 })

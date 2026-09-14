@@ -21,6 +21,9 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const STEP_NOT_FOUND = "STEP_NOT_FOUND"
 
+/** Token trong `reads`: step được nạp tài liệu upload — không phải selector projection. */
+export const DOCUMENTS_READ = "documents"
+
 export const PHASES = Object.freeze(["B-0", "B-1", "B-2", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const)
 export type PhaseId = (typeof PHASES)[number]
 
