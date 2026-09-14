@@ -16,6 +16,7 @@ import specificationRoutes from "./modules/specification/specification.route.js"
 import verificationRoutes from "./modules/verification/verification-context.route.js"
 import notificationRoutes from "./modules/notification/notification.route.js"
 import billingRoutes from "./modules/billing/billing.route.js"
+import spineRoutes from "./modules/spine/spine.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
 const app = express()
@@ -113,6 +114,7 @@ app.use("/api/v1/users", userRoutes)
 app.use("/api/v1/ai-actions", aiActionRoutes)
 app.use("/api/v1/admin/prompt-templates", adminPromptTemplateRoutes)
 app.use("/api/v1/projects", projectRoutes)
+app.use("/api/v1/projects", spineRoutes)
 app.use("/api/v1/specifications", specificationRoutes)
 app.use("/api/v1/verification", verificationRoutes)
 app.use("/api/v1/notifications", notificationRoutes)

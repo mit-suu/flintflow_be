@@ -10,12 +10,27 @@ import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
   // Deactivate other chat sessions for this project first
   await ChatSession.updateMany({ projectId }, { isActive: false })
-  
-  return await ChatSession.create({
+
+  const base = {
     projectId: new mongoose.Types.ObjectId(projectId),
     messages: [],
     isActive: true
-  })
+  }
+
+  // Session đầu tiên của project giữ cờ pipeline (srs-spine.md §6 bất biến 7)
+  const hasPipeline = await ChatSession.exists({ projectId, is_pipeline: true })
+  if (hasPipeline) {
+    return await ChatSession.create({ ...base, is_pipeline: false })
+  }
+
+  try {
+    return await ChatSession.create({ ...base, is_pipeline: true })
+  } catch (err) {
+    // Hai request tạo session đầu cùng lúc: bên thua dính unique index → session thường
+    const isDuplicateKey = typeof err === "object" && err !== null && "code" in err && err.code === 11000
+    if (!isDuplicateKey) throw err
+    return await ChatSession.create({ ...base, is_pipeline: false })
+  }
 }
 
 export const getChatSessions = async (projectId: string): Promise<IChatSession[]> => {
