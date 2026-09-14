@@ -3,18 +3,15 @@ import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { PLAN_IDS } from "./plan.config.js"
 
-const objectId = z.string().regex(/^[a-f\d]{24}$/i, "ID không hợp lệ")
-
 export const checkoutSchema = z.object({
   packageId: z.string().min(1, "packageId là bắt buộc").trim()
 })
 
-export const mockWebhookSchema = z.object({
-  intentId: objectId,
-  status: z.enum(["success", "failed"]),
-  // Trình duyệt không gửi được header tuỳ biến qua CORS hiện tại,
-  // nên chấp nhận chữ ký trong body như một phương án thay header.
-  signature: z.string().optional()
+/** Body payment_service POST về callback_url (guide: order_id, status, client_id). */
+export const paymentCallbackSchema = z.object({
+  order_id: z.string().min(1, "order_id là bắt buộc"),
+  status: z.string().min(1, "status là bắt buộc"),
+  client_id: z.string().min(1, "client_id là bắt buộc")
 })
 
 export const upgradeSchema = z.object({
@@ -27,7 +24,7 @@ export const transactionsQuerySchema = z.object({
 })
 
 export type CheckoutDTO = z.infer<typeof checkoutSchema>
-export type MockWebhookDTO = z.infer<typeof mockWebhookSchema>
+export type PaymentCallbackDTO = z.infer<typeof paymentCallbackSchema>
 export type UpgradeDTO = z.infer<typeof upgradeSchema>
 
 export const validateBody = (schema: z.ZodType) => {
