@@ -306,7 +306,7 @@ describe("op-cases", () => {
       expect(Array.isArray(opCase.expected_ops)).toBe(true)
       expect(opCase.expected_ops.length).toBeGreaterThan(0)
       for (const op of opCase.expected_ops) {
-        expect(["add", "set", "remove"], `${file}: ${op.path}`).toContain(op.op)
+        expect(["add", "set", "remove", "renumber"], `${file}: ${op.path}`).toContain(op.op)
         expect(typeof op.path).toBe("string")
         if (op.op !== "remove") expect(op).toHaveProperty("value")
       }
