@@ -65,7 +65,7 @@ import * as repo from "../spine/spine.repository.js"
 import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
-import { compileWithFix, dropErrorLine, loadDiagramFile, renderAll, renderDiagram, staleDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderDiagram, staleDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -100,9 +100,10 @@ const seed = async (spine: Spine = FIXTURE) => {
 }
 
 describe("compileWithFix", () => {
-  it("lỗi có số dòng ⇒ bỏ dòng đó rồi compile lại", async () => {
+  it("fix trả bản sửa ⇒ compile lại bản đó", async () => {
     const check = vi.fn(async (source: string) => (source.includes("BAD") ? render(false, { line: "2" } as Partial<CompileCheckResult>) : render(true)))
-    const result = await compileWithFix("erd", "@startuml\nBAD LINE\nentity A\n@enduml\n", { ...makeDeps(check).deps, check, fix: dropErrorLine } as DiagramServiceDeps)
+    const fix = vi.fn(async ({ puml }: { puml: string }) => puml.replace("BAD LINE\n", ""))
+    const result = await compileWithFix("erd", "@startuml\nBAD LINE\nentity A\n@enduml\n", { ...makeDeps(check).deps, check, fix } as DiagramServiceDeps)
     expect(result).toMatchObject({ ok: true, puml: "@startuml\nentity A\n@enduml\n" })
     expect(check).toHaveBeenCalledTimes(2)
   })
@@ -195,8 +196,38 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect((await repo.get(PROJECT))!.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02-1", "D02-2"])
   })
 
-  it("dropErrorLine không bỏ dòng mở/đóng hoặc số dòng không hợp lệ", async () => {
-    expect(await dropErrorLine({ kind: "erd", puml: "@startuml\n@enduml", error: "x", line: "1", attempt: 1 })).toBeNull()
-    expect(await dropErrorLine({ kind: "erd", puml: "@startuml\nx\n@enduml", error: "x", attempt: 1 })).toBeNull()
+  it("mặc định không tự sửa: bỏ dòng lỗi làm mất phần tử hình mà vẫn báo ok", async () => {
+    expect(defaultDeps().fix).toBe(noAutoFix)
+    expect(await noAutoFix({ kind: "erd", puml: "@startuml\nBAD\n@enduml", error: "x", line: "2", attempt: 1 })).toBeNull()
+  })
+
+  it("force compile lại hình không đổi; nội dung trùng ⇒ không tăng version", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    await renderAll(PROJECT, { by: USER, deps })
+    const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
+    expect(forced.rendered).toHaveLength(9)
+    expect(forced.spine_version).toBe(2)
+  })
+
+  it("hình chuyển sang lỗi ⇒ xoá file cũ; 409 khi ghi ⇒ không lưu file của lô thua", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    await renderDiagram(PROJECT, "erd", null, { by: USER, deps })
+    expect(store.files.size).toBe(2)
+
+    const spine = (await repo.get(PROJECT))!
+    const failing = { ...deps, check: vi.fn(async () => render(false)) }
+    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: failing, force: true })
+    expect(store.files.size).toBe(0)
+
+    // lô thua khoá lạc quan: dữ liệu nguồn đổi giữa lúc đọc và lúc ghi
+    const loser = makeDeps(async () => {
+      const current = db.spines[0] as { spine_version: number }
+      current.spine_version = spine.spine_version + 10
+      return render(true)
+    })
+    await expect(renderDiagram(PROJECT, "context", null, { by: USER, deps: loser.deps })).rejects.toMatchObject({ statusCode: 409 })
+    expect(loser.store.files.size).toBe(0)
   })
 })
