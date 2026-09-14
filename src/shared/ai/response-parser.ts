@@ -96,7 +96,98 @@ export const summarizeDocumentSchema = z.object({
   keyThemes: z.array(z.string()).optional()
 })
 
+// ─── Pipeline (T03): hợp đồng đầu ra cho T08/T11 ───────────────────
+// Model chỉ phát op; code áp op (Phases §2.1). Parse/validate thất bại thì
+// throw — không bao giờ ghi raw text vào Spine.
+
+export const opSchema = z.object({
+  op: z.enum(["set", "add", "remove", "renumber"]),
+  /** Path phân giải qua khoá, không qua chỉ số: `actors[id=A03].name` (srs-spine §1). */
+  path: z.string().min(1),
+  value: z.unknown().optional(),
+  reason: z.string().optional()
+})
+
+export const opTransactionSchema = z.object({
+  txn: z.string().optional(),
+  ops: z.array(opSchema),
+  notes: z.string().optional()
+})
+
+export const elicitSchema = z.object({
+  reply: z.string(),
+  questions: z.array(chatQuestionItemSchema).default([])
+})
+
+/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. */
+export const discoveryStepSchema = elicitSchema.extend({
+  ops: z.array(opSchema).optional()
+})
+
+export const reviewFlagSchema = z.object({
+  level: z.enum(["red", "yellow"]),
+  rule_id: z.string().optional(),
+  /** Khoá logic section: `fixed:3.1.3`, `feature:F2`, `function:FN07`. */
+  section_id: z.string().min(1),
+  message: z.string().min(1)
+})
+
+export const reviewSchema = z.object({
+  flags: z.array(reviewFlagSchema)
+})
+
+export const changeInstructionSchema = z
+  .object({
+    clarification_needed: z.string().optional(),
+    txn: z.string().optional(),
+    ops: z.array(opSchema).optional(),
+    notes: z.string().optional()
+  })
+  .refine((v) => Boolean(v.clarification_needed) || (v.ops?.length ?? 0) > 0, {
+    message: "Cần clarification_needed hoặc ít nhất một op"
+  })
+
+export const renderFixSchema = z.object({
+  puml: z.string().min(1),
+  notes: z.string().optional()
+})
+
+export type SpineOp = z.infer<typeof opSchema>
+export type OpTransaction = z.infer<typeof opTransactionSchema>
+export type ElicitOutput = z.infer<typeof elicitSchema>
+export type DiscoveryStepOutput = z.infer<typeof discoveryStepSchema>
+export type ReviewFlag = z.infer<typeof reviewFlagSchema>
+export type ReviewOutput = z.infer<typeof reviewSchema>
+export type ChangeInstructionOutput = z.infer<typeof changeInstructionSchema>
+export type RenderFixOutput = z.infer<typeof renderFixSchema>
+
+/** Tên schema dùng trong frontmatter `output_schema` của skill (assets/skills/README.md). */
+export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>> = {
+  [ActionType.ELICIT]: "elicit",
+  [ActionType.DISCOVERY_STEP]: "discoveryStep",
+  [ActionType.DRAFT]: "opTransaction",
+  [ActionType.REGENERATE]: "opTransaction",
+  [ActionType.REVISION]: "opTransaction",
+  [ActionType.GLOSSARY_SCAN]: "opTransaction",
+  [ActionType.RECONCILE]: "opTransaction",
+  [ActionType.REVIEW]: "review",
+  [ActionType.CONSISTENCY_PASS]: "review",
+  [ActionType.CHANGE_INSTRUCTION]: "changeInstruction",
+  [ActionType.RENDER_FIX]: "renderFix"
+}
+
 const SCHEMAS: Record<string, z.ZodSchema> = {
+  [ActionType.ELICIT]: elicitSchema,
+  [ActionType.DISCOVERY_STEP]: discoveryStepSchema,
+  [ActionType.DRAFT]: opTransactionSchema,
+  [ActionType.REGENERATE]: opTransactionSchema,
+  [ActionType.REVISION]: opTransactionSchema,
+  [ActionType.GLOSSARY_SCAN]: opTransactionSchema,
+  [ActionType.RECONCILE]: opTransactionSchema,
+  [ActionType.REVIEW]: reviewSchema,
+  [ActionType.CONSISTENCY_PASS]: reviewSchema,
+  [ActionType.CHANGE_INSTRUCTION]: changeInstructionSchema,
+  [ActionType.RENDER_FIX]: renderFixSchema,
   [ActionType.GENERATE_SECTION]: generateSectionSchema,
   [ActionType.DIAGRAM_CLASSIFY]: diagramClassifySchema,
   [ActionType.DIAGRAM_GENERATE]: diagramGenerateSchema,

@@ -1,12 +1,49 @@
 import { Request, Response, NextFunction } from "express"
-import mongoose from "mongoose"
-import { PromptTemplate } from "./prompt-template.model.js"
-import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { invalidatePromptCache } from "../../shared/ai/prompt-registry.service.js"
+import { getPromptTemplate, getSkill } from "../../shared/ai/prompt-registry.service.js"
+import { listPromptAssets, listSkillAssets } from "../../shared/ai/prompt-assets.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 
-const VALID_ACTION_TYPES = Object.values(ActionType) as string[]
+/**
+ * Trang admin prompt: READ-ONLY (T03, Phases §8 — vòng một không có DB override).
+ * GET trả bản trên đĩa đọc từ registry; POST/PUT/PATCH trả 410.
+ */
+
+const paramOf = (value: string | string[] | undefined): string =>
+  Array.isArray(value) ? value[0] : value ?? ""
+
+const listDiskTemplates = () => [
+  ...listPromptAssets().map((a) => ({
+    source: "prompt" as const,
+    actionType: a.actionType,
+    file: `prompts/${a.file.replace(/\\/g, "/")}`,
+    description: a.description,
+    provider: a.provider,
+    aiModel: a.aiModel,
+    maxTokens: a.maxTokens,
+    temperature: a.temperature,
+    isActive: a.isActive,
+    readOnly: true,
+    template: a.template
+  })),
+  ...listSkillAssets().map((s) => ({
+    source: "skill" as const,
+    skillId: s.skillId,
+    kind: s.kind,
+    file: `skills/${s.dir}/SKILL.md`,
+    description: s.description,
+    version: s.version,
+    asset_version: s.assetVersion,
+    stub: s.stub,
+    provider: s.provider,
+    aiModel: s.aiModel,
+    maxTokens: s.maxTokens,
+    temperature: s.temperature,
+    isActive: true,
+    readOnly: true,
+    template: s.template
+  }))
+]
 
 export const listPromptTemplates = async (
   req: Request,
@@ -14,19 +51,30 @@ export const listPromptTemplates = async (
   next: NextFunction
 ) => {
   try {
-    const { actionType, isActive } = req.query
+    const { actionType } = req.query
+    const all = listDiskTemplates()
+    const filtered = actionType
+      ? all.filter((t) => ("actionType" in t ? t.actionType : t.skillId) === String(actionType))
+      : all
 
-    const filter: any = {}
-    if (actionType) filter.actionType = String(actionType)
-    if (isActive !== undefined) filter.isActive = isActive === "true"
-
-    const templates = await PromptTemplate.find(filter)
-      .populate("updatedBy", "name email")
-      .sort({ actionType: 1, version: -1 })
-
-    return sendSuccess(res, 200, templates)
+    return sendSuccess(res, 200, filtered)
   } catch (error) {
     next(error)
+  }
+}
+
+/** `:actionType` nhận cả ActionType lẫn skill_id. */
+const loadFromDisk = async (key: string) => {
+  try {
+    const loaded = await getPromptTemplate(key)
+    return { source: "disk", readOnly: true, isActive: true, ...loaded }
+  } catch {
+    try {
+      const skill = getSkill(key)
+      return { source: "disk", readOnly: true, isActive: true, actionType: null, ...skill }
+    } catch {
+      throw new ApiError(404, `Không tìm thấy template trên đĩa cho '${key}'`, "TEMPLATE_NOT_FOUND")
+    }
   }
 }
 
@@ -36,163 +84,35 @@ export const getActivePromptTemplate = async (
   next: NextFunction
 ) => {
   try {
-    const actionType = Array.isArray(req.params.actionType)
-      ? req.params.actionType[0]
-      : req.params.actionType
-
-    const template = await PromptTemplate.findOne({ actionType, isActive: true })
-      .populate("updatedBy", "name email")
-
-    if (!template) {
-      throw new ApiError(404, `Không tìm thấy template active cho action '${actionType}'`, "TEMPLATE_NOT_FOUND")
-    }
-
-    return sendSuccess(res, 200, template)
+    return sendSuccess(res, 200, await loadFromDisk(paramOf(req.params.actionType)))
   } catch (error) {
     next(error)
   }
 }
 
+/** Không còn lịch sử version trong DB — lịch sử nằm ở git. Trả bản hiện hành. */
 export const getPromptTemplateHistory = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const actionType = Array.isArray(req.params.actionType)
-      ? req.params.actionType[0]
-      : req.params.actionType
-
-    const history = await PromptTemplate.find({ actionType })
-      .populate("updatedBy", "name email")
-      .sort({ version: -1 })
-
-    return sendSuccess(res, 200, history)
+    return sendSuccess(res, 200, [await loadFromDisk(paramOf(req.params.actionType))])
   } catch (error) {
     next(error)
   }
 }
 
-export const createPromptTemplate = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const userId = (req as any).user?.id || (req as any).user?.userId
-    const { actionType, template, provider, model, aiModel, maxTokens, temperature } = req.body
-
-    if (!actionType || !template) {
-      throw new ApiError(400, "actionType và template là bắt buộc", "MISSING_REQUIRED_FIELDS")
-    }
-
-    if (!VALID_ACTION_TYPES.includes(actionType)) {
-      throw new ApiError(400, `actionType không hợp lệ. Phải thuộc: ${VALID_ACTION_TYPES.join(", ")}`, "INVALID_ACTION_TYPE")
-    }
-
-    const existingActive = await PromptTemplate.findOne({ actionType, isActive: true })
-    if (existingActive) {
-      throw new ApiError(400, `Action '${actionType}' đã có template. Hãy dùng PUT để cập nhật version mới.`, "TEMPLATE_EXISTS")
-    }
-
-    const newTemplate = await PromptTemplate.create({
-      actionType,
-      template,
-      provider: provider || "openai",
-      aiModel: model || aiModel || "gpt-4o-mini",
-      maxTokens: maxTokens || 2048,
-      temperature: temperature ?? 0.7,
-      version: 1,
-      isActive: true,
-      updatedBy: new mongoose.Types.ObjectId(userId)
-    })
-
-    invalidatePromptCache(actionType)
-
-    return sendSuccess(res, 201, newTemplate)
-  } catch (error) {
-    next(error)
-  }
-}
-
-export const updatePromptTemplate = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const userId = (req as any).user?.id || (req as any).user?.userId
-    const actionType = Array.isArray(req.params.actionType)
-      ? req.params.actionType[0]
-      : req.params.actionType
-    const { template, provider, model, aiModel, maxTokens, temperature } = req.body
-
-    if (!template) {
-      throw new ApiError(400, "Nội dung template là bắt buộc", "MISSING_TEMPLATE")
-    }
-
-    // Find latest version number
-    const latestDoc = await PromptTemplate.findOne({ actionType }).sort({ version: -1 })
-    const nextVersion = latestDoc ? latestDoc.version + 1 : 1
-
-    // Deactivate all previous versions
-    await PromptTemplate.updateMany({ actionType }, { isActive: false })
-
-    // Create new version
-    const newVersionDoc = await PromptTemplate.create({
-      actionType,
-      template,
-      provider: provider || latestDoc?.provider || "openai",
-      aiModel: model || aiModel || latestDoc?.aiModel || "gpt-4o-mini",
-      maxTokens: maxTokens || latestDoc?.maxTokens || 2048,
-      temperature: temperature ?? latestDoc?.temperature ?? 0.7,
-      version: nextVersion,
-      isActive: true,
-      updatedBy: new mongoose.Types.ObjectId(userId)
-    })
-
-    invalidatePromptCache(actionType)
-
-    return sendSuccess(res, 200, newVersionDoc)
-  } catch (error) {
-    next(error)
-  }
-}
-
-export const activatePromptTemplateVersion = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const actionType = Array.isArray(req.params.actionType)
-      ? req.params.actionType[0]
-      : req.params.actionType
-    const versionNum = parseInt(
-      Array.isArray(req.params.version) ? req.params.version[0] : req.params.version,
-      10
+const rejectOverride = (_req: Request, _res: Response, next: NextFunction) => {
+  next(
+    new ApiError(
+      410,
+      "Đã bỏ override prompt qua admin. Prompt/skill chỉ sửa trong repo (assets/skills, assets/prompts).",
+      "PROMPT_OVERRIDE_DISABLED"
     )
-
-    if (isNaN(versionNum)) {
-      throw new ApiError(400, "Version không hợp lệ", "INVALID_VERSION")
-    }
-
-    const targetDoc = await PromptTemplate.findOne({ actionType, version: versionNum })
-    if (!targetDoc) {
-      throw new ApiError(404, `Không tìm thấy version ${versionNum} của action '${actionType}'`, "VERSION_NOT_FOUND")
-    }
-
-    // Deactivate all other versions
-    await PromptTemplate.updateMany({ actionType }, { isActive: false })
-
-    // Activate target version
-    targetDoc.isActive = true
-    await targetDoc.save()
-
-    invalidatePromptCache(actionType)
-
-    return sendSuccess(res, 200, targetDoc)
-  } catch (error) {
-    next(error)
-  }
+  )
 }
+
+export const createPromptTemplate = rejectOverride
+export const updatePromptTemplate = rejectOverride
+export const activatePromptTemplateVersion = rejectOverride
