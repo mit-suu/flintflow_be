@@ -4,6 +4,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
 import { Section } from "../specification/section.model.js"
+import * as spineRepository from "../spine/spine.repository.js"
 
 export const createProject = async (
   userId: string,
@@ -18,6 +19,7 @@ export const createProject = async (
     currentStep: "vision_problem",
     progressPercent: 0
   })
+  await spineRepository.getOrCreate(project.id, { name, domain: domain || null })
   return project
 }
 
