@@ -200,34 +200,41 @@ export const deductCredit = async (
   const { reservationId, userId, actionType, cost, projectId } = reservation
   const options = sessionOptions(session)
 
-  const claimed = await CreditTransaction.findOneAndUpdate(
+  // Claim reservation trước (chặn trừ hai lần). Cron có thể đã expire trước khi AI kịp
+  // trả lời: vẫn tính phí, claim expired → deducted.
+  let previousState: "reserved" | "expired" = "reserved"
+  let claimed = await CreditTransaction.findOneAndUpdate(
     { _id: reservationId, type: "reserve", state: "reserved" },
     { $set: { state: "deducted" } },
     { ...options, returnDocument: "after" }
   )
+  if (!claimed) {
+    previousState = "expired"
+    claimed = await CreditTransaction.findOneAndUpdate(
+      { _id: reservationId, type: "reserve", state: "expired" },
+      { $set: { state: "deducted" } },
+      { ...options, returnDocument: "after" }
+    )
+  }
 
-  let walletFilter: Record<string, unknown>
-  let walletUpdate: Record<string, unknown>
-
-  if (claimed) {
-    walletFilter = { userId, balance: { $gte: cost }, reserved: { $gte: cost } }
-    walletUpdate = { $inc: { balance: -cost, reserved: -cost } }
-  } else {
+  if (!claimed) {
     const current = await CreditTransaction.findOne({ _id: reservationId }, null, options)
     if (current?.state === "deducted") return
-
-    if (current?.state !== "expired") {
-      throw ledgerInconsistent("Không thể trừ credit cho reservation không hợp lệ", {
-        reservationId,
-        state: current?.state ?? null
-      })
-    }
-
-    // Cron đã trả phần reserved về ví trước khi AI kịp trả lời: vẫn tính phí,
-    // nhưng chỉ trừ balance (reserved đã được giải phóng).
-    walletFilter = { userId, balance: { $gte: cost } }
-    walletUpdate = { $inc: { balance: -cost } }
+    throw ledgerInconsistent("Không thể trừ credit cho reservation không hợp lệ", {
+      reservationId,
+      state: current?.state ?? null
+    })
   }
+
+  // reserved: trừ cả balance lẫn phần đang giữ.
+  // expired: phần giữ đã trả về ví ⇒ chỉ trừ trên số KHẢ DỤNG (balance - reserved),
+  // không được đẩy khả dụng xuống âm khi reservation khác đang giữ credit.
+  const walletFilter =
+    previousState === "reserved"
+      ? { userId, balance: { $gte: cost }, reserved: { $gte: cost } }
+      : { userId, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, cost] } }
+  const walletUpdate =
+    previousState === "reserved" ? { $inc: { balance: -cost, reserved: -cost } } : { $inc: { balance: -cost } }
 
   const wallet = await CreditWallet.findOneAndUpdate(walletFilter, walletUpdate, {
     ...options,
@@ -235,9 +242,16 @@ export const deductCredit = async (
   })
 
   if (!wallet) {
+    // Hoàn claim để release/cron còn xử lý reservation — không để `reserved` treo vĩnh viễn
+    await CreditTransaction.findOneAndUpdate(
+      { _id: reservationId, type: "reserve", state: "deducted" },
+      { $set: { state: previousState } },
+      options
+    )
     throw ledgerInconsistent("Ví credit không khớp với reservation khi trừ credit", {
       reservationId,
-      cost
+      cost,
+      previousState
     })
   }
 
@@ -250,7 +264,8 @@ export const deductCredit = async (
         amount: cost,
         type: "deduct",
         reservationId: new mongoose.Types.ObjectId(reservationId),
-        balanceAfter: wallet.balance
+        // Cùng quy ước "khả dụng sau" với reserve/release/purchase
+        balanceAfter: wallet.balance - wallet.reserved
       }
     ],
     options

@@ -269,24 +269,36 @@ describe("billing.service", () => {
   })
 
   describe("upgrade / balance / transactions", () => {
-    it("upgrade ghi Subscription và balance trả plan mới", async () => {
-      const subscription = await billingService.upgradePlan(USER, "pro")
-
-      expect(subscription).toMatchObject({
-        plan: "pro",
-        status: "active",
-        monthlyCreditsAllotment: planConfig.pro.monthlyCredits
+    it("upgrade thẳng lên gói trả phí trả 402 PAYMENT_REQUIRED, không ghi Subscription", async () => {
+      await expect(billingService.upgradePlan(USER, "pro")).rejects.toMatchObject({
+        statusCode: 402,
+        code: "PAYMENT_REQUIRED"
       })
+      expect(fakeDb.model("Subscription").docs).toHaveLength(0)
+    })
+
+    it("mua Pro qua checkout plan:pro: tiền về ⇒ Subscription pro + credit kỳ đầu, callback lặp không cộng lần hai", async () => {
+      const checkout = await billingService.createCheckout(USER, "plan:pro")
+      expect(checkout).toMatchObject({ amount: planConfig.pro.priceVnd, credits: planConfig.pro.monthlyCredits })
+
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { amount: planConfig.pro.priceVnd }))
+      const body = { order_id: "order-1", status: "paid", client_id: CLIENT_ID }
+      await billingService.handlePaymentCallback(body)
+      await billingService.handlePaymentCallback(body)
 
       const balance = await billingService.getBalance(USER)
       expect(balance).toMatchObject({ plan: "pro", planLabel: "Pro", reserved: 0 })
+      expect(balance.balance).toBe(planConfig.free.initialCredits + planConfig.pro.monthlyCredits)
+      expect(fakeDb.model("Subscription").docs).toHaveLength(1)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed" }))
     })
 
-    it("upgrade lại cùng gói là idempotent (không notify lần hai)", async () => {
-      await billingService.upgradePlan(USER, "pro")
+    it("không có checkout cho gói miễn phí; về Free là idempotent", async () => {
+      await expect(billingService.createCheckout(USER, "plan:free")).rejects.toMatchObject({ statusCode: 404 })
+
+      await billingService.upgradePlan(USER, "free")
       vi.mocked(notify).mockClear()
-      await billingService.upgradePlan(USER, "pro")
+      await billingService.upgradePlan(USER, "free")
 
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
       expect(notify).not.toHaveBeenCalled()
