@@ -105,11 +105,11 @@ describe("diagram.controller", () => {
 
     vi.mocked(renderAll).mockResolvedValue({ spine_version: 3, diagrams: [], rendered: [], removed: [] })
     expect((await invoke(renderDiagramRoute, { kind: "all" })).status).toBe(200)
-    expect(renderAll).toHaveBeenCalledWith(PROJECT, { by: OWNER })
+    expect(renderAll).toHaveBeenCalledWith(PROJECT, { by: OWNER, force: false })
 
     vi.mocked(renderDiagram).mockResolvedValue({ spine_version: 4, diagrams: [], rendered: [], removed: [] })
-    await invoke(renderDiagramRoute, { kind: "screen_layout" }, { owner_id: "S07" })
-    expect(renderDiagram).toHaveBeenCalledWith(PROJECT, "screen_layout", "S07", { by: OWNER })
+    await invoke(renderDiagramRoute, { kind: "screen_layout" }, { owner_id: "S07", force: true })
+    expect(renderDiagram).toHaveBeenCalledWith(PROJECT, "screen_layout", "S07", { by: OWNER, force: true })
   })
 
   it("route: 3 endpoint kèm authMiddleware", () => {

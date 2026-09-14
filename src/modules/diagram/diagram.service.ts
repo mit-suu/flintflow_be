@@ -5,8 +5,11 @@
  *
  * - `.puml` lỗi sau 2 lần sửa ⇒ lưu text, `render_status = error` + `error` ⇒ cờ đỏ `render_error` (T09).
  *   KHÔNG ném ra API: lỗi render là dữ liệu, không phải ngoại lệ.
- * - Ghi `diagrams[]` qua op engine (T08), một transaction cho cả lô, `reason: "render"`.
- * - Hình không đổi (`puml`, `source_hash` giống, đang `ok`) thì không compile lại, không ghi.
+ * - Ghi `diagrams[]` qua op engine (T08), một transaction cho cả lô, `reason: "render"`. File SVG/PNG
+ *   chỉ lưu SAU khi transaction ghi xong (409 thì không để lại file của lô thua); hình bị gỡ hoặc
+ *   chuyển sang lỗi thì xoá file cũ.
+ * - Hình không đổi (`source_hash` giống, đang `ok`) thì không compile lại, không ghi — trừ khi `force`
+ *   (vd renderer đổi template mà dữ liệu nguồn không đổi).
  */
 
 import * as repository from "../spine/spine.repository.js"
@@ -44,25 +47,16 @@ export interface DiagramServiceDeps {
 }
 
 /**
- * Sửa tự động tất định: bỏ dòng PlantUML báo lỗi (header `x-plantuml-diagram-error-line`).
- * Không bỏ dòng mở/đóng. Gọi skill `render_fix` (model) chưa bật ở vòng này — T13 cắm qua `deps.fix`.
+ * Mặc định KHÔNG tự sửa. Bỏ dòng báo lỗi (bản trước) làm hình mất actor/entity mà vẫn `ok` — sai lặng lẽ
+ * tệ hơn cờ đỏ `render_error`. Sửa thật đi qua skill `render_fix` (model), T13 cắm qua `deps.fix`.
  */
-export const dropErrorLine: FixPuml = async ({ puml, line }) => {
-  const n = Number(line)
-  if (!Number.isInteger(n)) return null
-  const lines = puml.split("\n")
-  // PlantUML đánh số dòng từ 0 hoặc 1 tuỳ build; chỉ bỏ khi dòng đó không phải @start/@end
-  const index = n >= 1 && n <= lines.length ? n - 1 : n
-  const target = lines[index]
-  if (target === undefined || /^@(start|end)/.test(target.trim()) || target.trim() === "") return null
-  return [...lines.slice(0, index), ...lines.slice(index + 1)].join("\n")
-}
+export const noAutoFix: FixPuml = async () => null
 
 export const defaultDeps = (): DiagramServiceDeps => ({
   check: checkPlantUml,
   renderPng: async (source) => (await renderPlantUml(source, "png")).data,
   store: gridFsDiagramStore,
-  fix: dropErrorLine,
+  fix: noAutoFix,
   now: () => new Date()
 })
 
@@ -120,6 +114,8 @@ const assignIds = (existing: Diagram[], count: number, nextId: () => string): st
 export interface RenderOptions {
   by: string
   step_id?: string | null
+  /** Compile lại cả hình có `source_hash` không đổi. */
+  force?: boolean
   deps?: Partial<DiagramServiceDeps>
 }
 
@@ -139,16 +135,41 @@ const loadSpine = async (projectId: string): Promise<SpineRecord> => {
   return record
 }
 
-const unchanged = (previous: Diagram | undefined, part: RenderedDiagramPart): previous is Diagram =>
-  previous !== undefined && previous.render_status === "ok" && previous.puml === part.puml && previous.source_hash === part.source_hash
+/**
+ * So theo `source_hash`, không theo `puml`: `puml` lưu có thể là bản đã qua `deps.fix`, khác text renderer
+ * sinh ra, nên so `puml` làm hình sửa được bị render lại (và tăng version) ở mọi lần gọi.
+ */
+const unchanged = (previous: Diagram | undefined, part: RenderedDiagramPart, force: boolean): previous is Diagram =>
+  !force && previous !== undefined && previous.render_status === "ok" && previous.source_hash === part.source_hash
 
-const storeFiles = async (projectId: string, id: string, compiled: Extract<Compiled, { ok: true }>, deps: DiagramServiceDeps) => {
+type OkCompiled = Extract<Compiled, { ok: true }>
+
+const storeFiles = async (projectId: string, id: string, compiled: OkCompiled, deps: DiagramServiceDeps) => {
   await deps.store.save(projectId, id, "svg", { data: compiled.svg, contentType: CONTENT_TYPES.svg })
   try {
     await deps.store.save(projectId, id, "png", { data: await deps.renderPng(compiled.puml), contentType: CONTENT_TYPES.png })
   } catch (err) {
     // PNG chỉ phục vụ export; SVG đã có thì hình vẫn hợp lệ
     console.warn(`[diagram] Không render được PNG cho ${id}: ${message(err)}`)
+  }
+}
+
+/** Sau khi `diagrams[]` đã ghi: lỗi lưu file không làm hỏng dữ liệu đã commit, chỉ báo log. */
+const syncFiles = async (
+  projectId: string,
+  stored: { id: string; compiled: OkCompiled }[],
+  removedIds: string[],
+  deps: DiagramServiceDeps
+) => {
+  for (const { id, compiled } of stored) {
+    await storeFiles(projectId, id, compiled, deps).catch((err: unknown) =>
+      console.error(`[diagram] Không lưu được file cho ${id}: ${message(err)}`)
+    )
+  }
+  for (const id of removedIds) {
+    await deps.store.remove(projectId, id).catch((err: unknown) =>
+      console.warn(`[diagram] Không xoá được file cũ của ${id}: ${message(err)}`)
+    )
   }
 }
 
@@ -164,6 +185,9 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const produced: Diagram[] = []
   const rendered: string[] = []
   const removed: string[] = []
+  const toStore: { id: string; compiled: OkCompiled }[] = []
+  /** Hình vừa chuyển sang lỗi: file cũ không còn đúng. */
+  const errored: string[] = []
 
   for (const target of targets) {
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
@@ -173,7 +197,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
     for (const [i, part] of parts.entries()) {
       const id = ids[i]
       const previous = byExistingId.get(id)
-      if (unchanged(previous, part)) {
+      if (unchanged(previous, part, options.force ?? false)) {
         produced.push(previous)
         continue
       }
@@ -191,7 +215,8 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
         source_hash: part.source_hash,
         rendered_at: deps.now().toISOString()
       }
-      if (compiled.ok) await storeFiles(projectId, id, compiled, deps)
+      if (compiled.ok) toStore.push({ id, compiled })
+      else if (previous) errored.push(id)
 
       ops.push(previous ? { op: "set", path: `diagrams[id=${id}]`, value: diagram, reason: "render" } : { op: "add", path: "diagrams[]", value: diagram, reason: "render" })
       produced.push(diagram)
@@ -214,6 +239,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
     reason: "render",
     step_id: options.step_id ?? null
   })
+  await syncFiles(projectId, toStore, [...removed, ...errored], deps)
   return { spine_version: result.spine_version, diagrams: produced, rendered, removed }
 }
 
