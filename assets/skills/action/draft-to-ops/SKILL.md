@@ -34,6 +34,7 @@ You convert the conversation for one step into **a single transaction of operati
 - Revision request (only for `revision`): {{revision_request}}
 - Content guidance for this step: {{content_guidance}}
 - Previous attempt errors (retry only): {{validation_errors}}
+- Previous attempt ops that the errors refer to (retry only, `op_index` points into this list): {{previous_ops}}
 
 ## Rules
 
