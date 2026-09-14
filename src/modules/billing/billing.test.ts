@@ -27,121 +27,244 @@ vi.mock("../notification/notification.service.js", () => ({
   notify: vi.fn(async () => null),
   notifyAdmins: vi.fn(async () => 0)
 }))
+vi.mock("./payment-service.client.js", () => ({
+  createPaymentOrder: vi.fn(),
+  getPaymentOrder: vi.fn(),
+  isPaymentServiceConfigured: vi.fn(() => true),
+  buildCallbackUrl: vi.fn(() => "https://api.flintflow.test/api/v1/billing/payment-callback")
+}))
 
 import { fakeDb, TRANSACTION_UNSUPPORTED } from "./__tests__/fake-mongo.js"
 import { notify } from "../notification/notification.service.js"
 import { errorHandler } from "../../shared/middlewares/error-handler.js"
 import { signAccessToken } from "../../shared/auth/jwt.util.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { env } from "../../config/env.js"
 import billingRoutes from "./billing.route.js"
 import * as billingService from "./billing.service.js"
+import {
+  createPaymentOrder,
+  getPaymentOrder,
+  isPaymentServiceConfigured,
+  PaymentServiceOrder
+} from "./payment-service.client.js"
 import { planConfig } from "./plan.config.js"
 
 const USER = "64b000000000000000000002"
 const OTHER_USER = "64b000000000000000000003"
+const CLIENT_ID = "client_flintflow_test"
+// Lấy giá từ config để test không vỡ mỗi khi đổi giá gói
+const PACK_100_AMOUNT = planConfig.packages.find((p) => p.id === "pack_100")!.amount
 
 const walletOf = (userId = USER) =>
   fakeDb.model("CreditWallet").docs.find((w) => String(w.userId) === userId)
 const purchases = () => fakeDb.model("CreditTransaction").docs.filter((d) => d.type === "purchase")
+const intentDoc = (intentId: string) =>
+  fakeDb.model("PaymentIntent").docs.find((d) => String(d._id) === intentId)!
+
+let orderSeq = 0
+const mockCreateOrder = () =>
+  vi.mocked(createPaymentOrder).mockImplementation(async () => {
+    orderSeq += 1
+    const ref = `REF${String(orderSeq).padStart(7, "0")}`
+    return {
+      order_id: `order-${orderSeq}`,
+      status: "pending",
+      reference_code: ref,
+      payment_description: `PS${ref}`,
+      qr_code_url: `https://vietqr.app/img?des=PS${ref}`
+    }
+  })
+
+const remoteOrder = (orderId: string, overrides: Partial<PaymentServiceOrder> = {}): PaymentServiceOrder => ({
+  order_id: orderId,
+  client_id: CLIENT_ID,
+  amount: PACK_100_AMOUNT,
+  description: "x",
+  reference_code: "REF",
+  callback_url: "https://api.flintflow.test/api/v1/billing/payment-callback",
+  status: "paid",
+  sepay_transaction_id: 1,
+  created_at: new Date().toISOString(),
+  paid_at: new Date().toISOString(),
+  ...overrides
+})
+
+const setup = () => {
+  orderSeq = 0
+  fakeDb.reset()
+  vi.clearAllMocks()
+  env.PAYMENT_CLIENT_ID = CLIENT_ID
+  vi.mocked(isPaymentServiceConfigured).mockReturnValue(true)
+  mockCreateOrder()
+  vi.spyOn(mongoose, "startSession").mockRejectedValue(TRANSACTION_UNSUPPORTED)
+  vi.spyOn(console, "error").mockImplementation(() => {})
+  vi.spyOn(console, "warn").mockImplementation(() => {})
+}
 
 describe("billing.service", () => {
-  beforeEach(() => {
-    fakeDb.reset()
-    vi.clearAllMocks()
-    vi.spyOn(mongoose, "startSession").mockRejectedValue(TRANSACTION_UNSUPPORTED)
-  })
+  beforeEach(setup)
 
-  describe("checkout", () => {
-    it("tạo PaymentIntent pending với số tiền/credit của gói và redirectUrl mock", async () => {
+  describe("createCheckout", () => {
+    it("tạo order trên payment_service (amount là number, có callback_url) và lưu QR", async () => {
       const checkout = await billingService.createCheckout(USER, "pack_100")
 
-      expect(checkout).toMatchObject({ status: "pending", credits: 100, amount: 49_000 })
-      expect(checkout.redirectUrl).toContain(`intentId=${checkout.intentId}`)
+      expect(createPaymentOrder).toHaveBeenCalledWith({
+        amount: PACK_100_AMOUNT,
+        description: expect.stringContaining(checkout.intentId),
+        callbackUrl: "https://api.flintflow.test/api/v1/billing/payment-callback"
+      })
+      expect(checkout).toMatchObject({
+        status: "pending",
+        credits: 100,
+        amount: PACK_100_AMOUNT,
+        qrCodeUrl: expect.stringContaining("vietqr"),
+        paymentDescription: expect.stringMatching(/^PS/)
+      })
+      expect(intentDoc(checkout.intentId).paymentOrderId).toBe("order-1")
     })
 
-    it("gói không tồn tại thì 404", async () => {
-      await expect(billingService.createCheckout(USER, "pack_nope")).rejects.toMatchObject({
-        statusCode: 404
-      })
+    it("gói không tồn tại thì 404, không gọi payment_service", async () => {
+      await expect(billingService.createCheckout(USER, "pack_nope")).rejects.toMatchObject({ statusCode: 404 })
+      expect(createPaymentOrder).not.toHaveBeenCalled()
     })
 
-    it("getCheckout chỉ trả intent của chính chủ, kèm chữ ký hợp lệ khi pending", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+    it("chưa cấu hình payment_service thì 503 và không tạo intent", async () => {
+      vi.mocked(isPaymentServiceConfigured).mockReturnValue(false)
 
-      const detail = await billingService.getCheckout(USER, intentId)
-      expect(
-        billingService.verifyMockWebhookSignature(intentId, "success", detail.mockSignatures!.success)
-      ).toBe(true)
+      await expect(billingService.createCheckout(USER, "pack_100")).rejects.toMatchObject({ statusCode: 503 })
+      expect(fakeDb.model("PaymentIntent").docs).toHaveLength(0)
+    })
 
-      await expect(billingService.getCheckout(OTHER_USER, intentId)).rejects.toMatchObject({
-        statusCode: 404
-      })
+    it("payment_service lỗi thì intent chuyển failed và lỗi được trả ra", async () => {
+      vi.mocked(createPaymentOrder).mockRejectedValue(
+        new ApiError(502, "Cổng thanh toán từ chối yêu cầu", "PAYMENT_SERVICE_ERROR")
+      )
+
+      await expect(billingService.createCheckout(USER, "pack_100")).rejects.toMatchObject({ statusCode: 502 })
+      expect(fakeDb.model("PaymentIntent").docs[0].status).toBe("failed")
     })
   })
 
-  describe("handleMockWebhook", () => {
-    it("chữ ký đúng + success: cộng credit, ghi purchase, notify", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_500")
-      const signature = billingService.signMockWebhook(intentId, "success")
+  describe("handlePaymentCallback", () => {
+    it("paid + xác minh remote paid: cộng credit, ghi purchase, notify", async () => {
+      await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
 
-      const result = await billingService.handleMockWebhook(intentId, "success", signature)
+      const result = await billingService.handlePaymentCallback({
+        order_id: "order-1",
+        status: "paid",
+        client_id: CLIENT_ID
+      })
 
-      expect(result).toMatchObject({ status: "succeeded", alreadyProcessed: false, creditsAdded: 500 })
-      expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 500)
+      expect(getPaymentOrder).toHaveBeenCalledWith("order-1")
+      expect(result).toEqual({ success: true, status: "succeeded", alreadyProcessed: false, creditsAdded: 100 })
+      expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
       expect(purchases()).toHaveLength(1)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_success" }))
     })
 
-    it("chữ ký sai hoặc thiếu: 401, không cộng credit", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+    it("callback gọi lại cùng order_id không cộng lần hai", async () => {
+      await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
+      const body = { order_id: "order-1", status: "paid", client_id: CLIENT_ID }
 
-      await expect(
-        billingService.handleMockWebhook(intentId, "success", "deadbeef")
-      ).rejects.toMatchObject({ statusCode: 401, code: "INVALID_WEBHOOK_SIGNATURE" })
-      await expect(
-        billingService.handleMockWebhook(intentId, "success", undefined)
-      ).rejects.toMatchObject({ statusCode: 401 })
+      await billingService.handlePaymentCallback(body)
+      const replay = await billingService.handlePaymentCallback(body)
+
+      expect(replay).toMatchObject({ alreadyProcessed: true, creditsAdded: 0 })
+      expect(purchases()).toHaveLength(1)
+      expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
+    })
+
+    it("callback báo paid nhưng remote vẫn pending: KHÔNG cộng (callback chưa được ký)", async () => {
+      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { status: "pending", paid_at: null }))
+
+      const result = await billingService.handlePaymentCallback({
+        order_id: "order-1",
+        status: "paid",
+        client_id: CLIENT_ID
+      })
+
+      expect(result).toMatchObject({ status: "pending", creditsAdded: 0 })
+      expect(intentDoc(intentId).status).toBe("pending")
+      expect(purchases()).toHaveLength(0)
+    })
+
+    it("remote paid nhưng lệch số tiền: không cộng", async () => {
+      await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { amount: 2_000 }))
+
+      await billingService.handlePaymentCallback({ order_id: "order-1", status: "paid", client_id: CLIENT_ID })
 
       expect(purchases()).toHaveLength(0)
     })
 
-    it("chữ ký của 'failed' không dùng được cho 'success'", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
-      const failedSig = billingService.signMockWebhook(intentId, "failed")
+    it("sai client_id → 403; order không có → 404", async () => {
+      await billingService.createCheckout(USER, "pack_100")
 
       await expect(
-        billingService.handleMockWebhook(intentId, "success", failedSig)
-      ).rejects.toMatchObject({ statusCode: 401 })
+        billingService.handlePaymentCallback({ order_id: "order-1", status: "paid", client_id: "other" })
+      ).rejects.toMatchObject({ statusCode: 403 })
+      await expect(
+        billingService.handlePaymentCallback({ order_id: "order-x", status: "paid", client_id: CLIENT_ID })
+      ).rejects.toMatchObject({ statusCode: 404 })
+      expect(getPaymentOrder).not.toHaveBeenCalled()
     })
 
-    it("gửi lại cùng intentId không cộng lần hai", async () => {
+    it("remote failed: intent failed, notify payment_failed, không cộng", async () => {
       const { intentId } = await billingService.createCheckout(USER, "pack_100")
-      const signature = billingService.signMockWebhook(intentId, "success")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { status: "failed", paid_at: null }))
 
-      await billingService.handleMockWebhook(intentId, "success", signature)
-      const replay = await billingService.handleMockWebhook(intentId, "success", signature)
+      await billingService.handlePaymentCallback({ order_id: "order-1", status: "failed", client_id: CLIENT_ID })
 
-      expect(replay).toMatchObject({ alreadyProcessed: true, creditsAdded: 0, status: "succeeded" })
-      expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
-      expect(purchases()).toHaveLength(1)
-    })
-
-    it("failed: không cộng credit, notify payment_failed, success sau đó bị bỏ qua", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
-
-      await billingService.handleMockWebhook(
-        intentId,
-        "failed",
-        billingService.signMockWebhook(intentId, "failed")
-      )
-      const late = await billingService.handleMockWebhook(
-        intentId,
-        "success",
-        billingService.signMockWebhook(intentId, "success")
-      )
-
-      expect(late.alreadyProcessed).toBe(true)
+      expect(intentDoc(intentId).status).toBe("failed")
       expect(purchases()).toHaveLength(0)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "payment_failed" }))
+    })
+  })
+
+  describe("getCheckout (polling)", () => {
+    it("remote đã paid thì chốt luôn — fallback khi callback không tới", async () => {
+      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
+
+      const detail = await billingService.getCheckout(USER, intentId)
+
+      expect(detail.status).toBe("succeeded")
+      expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
+    })
+
+    it("payment_service lỗi tạm thời: vẫn trả pending, không ném lỗi", async () => {
+      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockRejectedValue(new ApiError(502, "down", "PAYMENT_SERVICE_UNAVAILABLE"))
+
+      await expect(billingService.getCheckout(USER, intentId)).resolves.toMatchObject({ status: "pending" })
+    })
+
+    it("đã chốt thì không hỏi lại payment_service; intent người khác 404", async () => {
+      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
+      await billingService.getCheckout(USER, intentId)
+      vi.mocked(getPaymentOrder).mockClear()
+
+      await billingService.getCheckout(USER, intentId)
+
+      expect(getPaymentOrder).not.toHaveBeenCalled()
+      await expect(billingService.getCheckout(OTHER_USER, intentId)).rejects.toMatchObject({ statusCode: 404 })
+    })
+
+    it("callback và polling cùng chốt một order chỉ cộng một lần", async () => {
+      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
+
+      await Promise.all([
+        billingService.getCheckout(USER, intentId),
+        billingService.handlePaymentCallback({ order_id: "order-1", status: "paid", client_id: CLIENT_ID })
+      ])
+
+      expect(purchases()).toHaveLength(1)
     })
   })
 
@@ -162,7 +285,7 @@ describe("billing.service", () => {
 
     it("upgrade lại cùng gói là idempotent (không notify lần hai)", async () => {
       await billingService.upgradePlan(USER, "pro")
-      vi.clearAllMocks()
+      vi.mocked(notify).mockClear()
       await billingService.upgradePlan(USER, "pro")
 
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
@@ -212,23 +335,16 @@ describe("billing routes (HTTP)", () => {
     server.close()
   })
 
-  beforeEach(() => {
-    fakeDb.reset()
-    vi.spyOn(mongoose, "startSession").mockRejectedValue(TRANSACTION_UNSUPPORTED)
-    vi.spyOn(console, "error").mockImplementation(() => {})
-  })
+  beforeEach(setup)
 
-  const postWebhook = (body: object, signature?: string) =>
-    fetch(`${baseUrl}/webhook/mock`, {
+  const postCallback = (body: object) =>
+    fetch(`${baseUrl}/payment-callback`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(signature ? { "x-mock-signature": signature } : {})
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     })
 
-  it("webhook: chữ ký đúng cộng credit, sai chữ ký 401, replay không cộng lần hai", async () => {
+  it("checkout → callback (không JWT) cộng credit một lần, trả { success: true }", async () => {
     const checkoutRes = await fetch(`${baseUrl}/checkout`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -236,41 +352,36 @@ describe("billing routes (HTTP)", () => {
     })
     expect(checkoutRes.status).toBe(201)
     const { data: checkout } = await checkoutRes.json()
+    expect(checkout.qrCodeUrl).toContain("vietqr")
 
-    const body = { intentId: checkout.intentId, status: "success" }
-    const signature = billingService.signMockWebhook(checkout.intentId, "success")
+    vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
+    const body = { order_id: "order-1", status: "paid", client_id: CLIENT_ID }
 
-    const bad = await postWebhook(body, "00".repeat(32))
-    expect(bad.status).toBe(401)
-    expect(walletOf()?.balance ?? 0).toBe(0)
+    const first = await postCallback(body)
+    expect(first.status).toBe(200)
+    expect(await first.json()).toMatchObject({ success: true, creditsAdded: 100 })
 
-    const ok = await postWebhook(body, signature)
-    expect(ok.status).toBe(200)
-    expect((await ok.json()).data).toMatchObject({ creditsAdded: 100, alreadyProcessed: false })
-
-    const replay = await postWebhook(body, signature)
+    const replay = await postCallback(body)
     expect(replay.status).toBe(200)
-    expect((await replay.json()).data).toMatchObject({ creditsAdded: 0, alreadyProcessed: true })
+    expect(await replay.json()).toMatchObject({ success: true, alreadyProcessed: true, creditsAdded: 0 })
 
     expect(walletOf()!.balance).toBe(planConfig.free.initialCredits + 100)
-  })
 
-  it("webhook: chữ ký trong body cũng được chấp nhận; payload sai trả 400", async () => {
-    const { intentId } = await billingService.createCheckout(USER, "pack_100")
-
-    const ok = await postWebhook({
-      intentId,
-      status: "failed",
-      signature: billingService.signMockWebhook(intentId, "failed")
+    const poll = await fetch(`${baseUrl}/checkout/${checkout.intentId}`, {
+      headers: { Authorization: `Bearer ${token}` }
     })
-    expect(ok.status).toBe(200)
-
-    const invalid = await postWebhook({ intentId: "not-an-id", status: "success" })
-    expect(invalid.status).toBe(400)
+    expect((await poll.json()).data.status).toBe("succeeded")
   })
 
-  it("các route còn lại yêu cầu auth", async () => {
-    for (const path of ["/balance", "/packages", "/transactions"]) {
+  it("callback sai client_id 403, thiếu field 400", async () => {
+    await billingService.createCheckout(USER, "pack_100")
+
+    expect((await postCallback({ order_id: "order-1", status: "paid", client_id: "nope" })).status).toBe(403)
+    expect((await postCallback({ order_id: "order-1" })).status).toBe(400)
+  })
+
+  it("các route người dùng yêu cầu auth", async () => {
+    for (const path of ["/balance", "/packages", "/transactions", "/checkout/64b000000000000000000099"]) {
       const res = await fetch(`${baseUrl}${path}`)
       expect(res.status, path).toBe(401)
     }

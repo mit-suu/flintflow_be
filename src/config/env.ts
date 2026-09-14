@@ -94,13 +94,22 @@ const envSchema = z.object({
   PLANTUML_BASE_URL: z.string().default("http://localhost:8080"),
   PLANTUML_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
 
-  // ─── Billing (mock gateway, Phases §9.2) ──────────────────────────
-  // Webhook mock ký HMAC-SHA256 bằng secret này; ở production phải set tường minh.
-  PAYMENT_WEBHOOK_SECRET: secret("dev-payment-webhook-secret"),
+  // ─── Billing: payment_service dùng chung (VietQR/SePay) ───────────
+  // Để trống ⇒ checkout trả 503 PAYMENT_SERVICE_NOT_CONFIGURED.
+  PAYMENT_SERVICE_URL: z.string().default(""),
+  PAYMENT_CLIENT_ID: z.string().default(""),
+  PAYMENT_API_KEY: z.string().default(""),
+  PAYMENT_SERVICE_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+  // Domain public của BE này: payment service POST về
+  // <APP_PUBLIC_URL>/api/v1/billing/payment-callback. Production không được là localhost.
+  APP_PUBLIC_URL: z
+    .string()
+    .default("http://localhost:5000")
+    .refine((v) => !isProd || !v.includes("localhost"), {
+      message: "ở production phải là domain public, không được trỏ localhost"
+    }),
   // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
-  CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
-  // Trang FE giả lập cổng thanh toán, nhận ?intentId=
-  MOCK_PAYMENT_URL: z.string().default("http://localhost:3000/home/billing/mock-checkout")
+  CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000)
 })
 
 const parsed = envSchema.safeParse(process.env)
