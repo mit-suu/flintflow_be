@@ -79,6 +79,8 @@ describe("renderers trên fixture 19 màn", () => {
     expect(renderKind(mutate((s) => (s.screens.find((x) => x.id === "S07")!.primary_function_id = null)), "screen_layout", "S07")).toEqual([])
     expect(renderKind(FIXTURE, "screen_layout", "S99")).toEqual([])
     expect(saltCell('a | b {c} "d" [e]')).toBe("a b c d e")
+    // `^` mở ô tiêu đề, `()` mở widget radio/checkbox trong Salt
+    expect(saltCell("Login (OAuth)^")).toBe("Login OAuth")
   })
 
   it("Spine rỗng vẫn sinh hình hợp lệ về cú pháp", () => {

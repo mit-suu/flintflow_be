@@ -9,7 +9,7 @@ import type { Renderer } from "./common.js"
 import { compareIds, puml } from "./common.js"
 
 /** Ô salt: bỏ ký tự điều khiển cú pháp salt (`| { } # [ ] < > "`). */
-export const saltCell = (text: string): string => text.replace(/[|{}#[\]<>"]/g, " ").replace(/\s+/g, " ").trim()
+export const saltCell = (text: string): string => text.replace(/[|{}#[\]<>"^()]/g, " ").replace(/\s+/g, " ").trim()
 
 export const MAX_DESCRIPTION_CHARS = 100
 
