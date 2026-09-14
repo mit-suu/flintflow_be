@@ -17,7 +17,7 @@ import type { Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
-import { NON_WAIVABLE_RULES, flagKey, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
+import { NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
 import { WAIVE_REASON_MIN_LENGTH } from "./spine.schema.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
@@ -32,6 +32,14 @@ export interface FlagPlan {
 }
 
 const FLAG_ID_RE = /^FL(\d+)$/
+
+/** Luật chỉ chạy ở S-9 (`atBaseline`). */
+const AT_BASELINE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) => r.at_baseline).map((r) => r.rule_id))
+
+export interface FlagPlanOptions {
+  /** Lần check có chạy luật S-9 không. Không chạy thì cờ S-9 đang mở không được coi là đã hết lỗi. */
+  atBaseline?: boolean
+}
 
 const flagIdGenerator = (flags: Flag[]): (() => string) => {
   let n = Math.max(0, ...flags.map((f) => Number(FLAG_ID_RE.exec(f.id)?.[1] ?? 0)))
@@ -52,7 +60,12 @@ const refreshWaiverOps = (spine: Spine, skip: ReadonlySet<string>): Op[] =>
     }))
 
 /** Kế hoạch thuần: ops đưa `flags[]` về khớp `candidates`. */
-export const planFlagOps = (spine: Spine, candidates: FlagCandidate[], now: Date = new Date()): FlagPlan => {
+export const planFlagOps = (
+  spine: Spine,
+  candidates: FlagCandidate[],
+  now: Date = new Date(),
+  options: FlagPlanOptions = {}
+): FlagPlan => {
   const at = now.toISOString()
   const open = new Map(spine.flags.filter((f) => f.resolved_at === null).map((f) => [flagKey(f), f]))
   const nextId = flagIdGenerator(spine.flags)
@@ -105,6 +118,8 @@ export const planFlagOps = (spine: Spine, candidates: FlagCandidate[], now: Date
 
   for (const [key, flag] of open) {
     if (seen.has(key)) continue
+    // Check thường không chạy luật S-9 nên không có ứng viên của chúng — không có nghĩa lỗi đã hết
+    if (!options.atBaseline && AT_BASELINE_RULES.has(flag.rule_id)) continue
     plan.ops.push({ op: "set", path: flagPath(flag.id, "resolved_at"), value: at, reason: `Đóng cờ ${flag.rule_id}: điều kiện không còn` })
     plan.resolved.push(flag.id)
     touched.add(flag.id)
@@ -140,8 +155,9 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const record = await load(projectId)
   const changes = await repository.listChanges(projectId)
   const spine = stripRecord(record)
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline: options.atBaseline ?? false })
-  const plan = planFlagOps(spine, candidates)
+  const atBaseline = options.atBaseline ?? false
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline })
+  const plan = planFlagOps(spine, candidates, new Date(), { atBaseline })
 
   if (plan.ops.length === 0) {
     return { checked_at_version: record.spine_version, flags: record.flags, opened: [], resolved: [], reopened: [] }

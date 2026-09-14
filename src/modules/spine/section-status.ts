@@ -35,7 +35,10 @@ const feedingChanges = (spine: Spine, changes: ChangeLike[]): Map<string, Change
   for (const change of changes) {
     const impact = sectionsOfPath(spine, change.path, change)
     for (const id of new Set([...impact.owner, ...impact.reads, ...impact.derived])) {
-      bySection.set(id, [...(bySection.get(id) ?? []), change])
+      // push tại chỗ: spread mỗi lần là O(n²) theo số change của section
+      const list = bySection.get(id)
+      if (list) list.push(change)
+      else bySection.set(id, [change])
     }
   }
   return bySection

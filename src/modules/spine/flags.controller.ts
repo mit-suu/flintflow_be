@@ -46,9 +46,10 @@ const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
   return parsed.data
 }
 
+// Quyền sở hữu kiểm trước khi validate query/body: người ngoài không dò được DTO qua lỗi 400
 export const getFlags = catchAsync(async (req: Request, res: Response) => {
-  const query = parse(flagsQuerySchema, req.query)
   const { spine } = await context(req)
+  const query = parse(flagsQuerySchema, req.query)
   const flags = flagsService.filterFlags(spine.flags, {
     ...(query.level ? { level: query.level } : {}),
     ...(query.open ? { open: query.open === "true" } : {})
@@ -57,8 +58,8 @@ export const getFlags = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const recomputeFlags = catchAsync(async (req: Request, res: Response) => {
-  const body = parse(recomputeFlagsRequestSchema, req.body ?? {})
   const { projectId, userId } = await context(req)
+  const body = parse(recomputeFlagsRequestSchema, req.body ?? {})
   const result = await flagsService.recompute(projectId, { atBaseline: body.at_baseline ?? false, by: userId })
   return sendSuccess(res, 200, result.flags, {
     checked_at_version: result.checked_at_version,
@@ -69,8 +70,8 @@ export const recomputeFlags = catchAsync(async (req: Request, res: Response) => 
 })
 
 export const waiveFlag = catchAsync(async (req: Request, res: Response) => {
-  const body = parse(waiveRequestSchema, req.body)
   const { projectId, userId } = await context(req)
+  const body = parse(waiveRequestSchema, req.body)
   const flag = await flagsService.waive(projectId, req.params.flagId as string, body.reason, userId)
   return sendSuccess(res, 200, flag)
 })
