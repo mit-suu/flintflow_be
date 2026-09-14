@@ -19,5 +19,7 @@ const baselineSchema = new Schema(
 )
 
 baselineSchema.index({ projectId: 1, at: -1 })
+// Một version baseline chỉ tồn tại một lần trong project (v1.0, v1.0-conditional, v1.1…)
+baselineSchema.index({ projectId: 1, version: 1 }, { unique: true })
 
 export const Baseline = mongoose.model("Baseline", baselineSchema)
