@@ -1,0 +1,14 @@
+{
+  "name": "set use case name",
+  "step_id": "S-3.5",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The user wants use case UC05 renamed to make clear it covers the whole portfolio view, not a single project.",
+  "expected_ops": [
+    {
+      "op": "set",
+      "path": "use_cases[id=UC05].name",
+      "value": "Manage Project Portfolio",
+      "reason": "User requested a clearer use case name."
+    }
+  ]
+}

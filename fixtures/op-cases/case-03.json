@@ -1,0 +1,23 @@
+{
+  "name": "remove screen with cascade",
+  "step_id": "S-4.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The user decides the Diagram Preview screen (S08) is unnecessary because diagrams open inline in the document pane. Remove the screen. The engine must generate the cascade ops in the same transaction: its functions, its permissions, incoming flow_to edges, use case function references and its function sections.",
+  "expected_ops": [
+    { "op": "remove", "path": "screens[id=S08]", "reason": "User removed the Diagram Preview screen." },
+    { "op": "remove", "path": "functions[id=FN034]", "reason": "Cascade: function of removed screen S08." },
+    { "op": "remove", "path": "functions[id=FN035]", "reason": "Cascade: function of removed screen S08." },
+    { "op": "remove", "path": "functions[id=FN036]", "reason": "Cascade: function of removed screen S08." },
+    { "op": "remove", "path": "functions[id=FN037]", "reason": "Cascade: function of removed screen S08." },
+    { "op": "remove", "path": "permissions[screen_id=S08,role_id=R1,action=view]", "reason": "Cascade: permission of removed screen S08." },
+    { "op": "remove", "path": "permissions[screen_id=S08,role_id=R2,action=view]", "reason": "Cascade: permission of removed screen S08." },
+    { "op": "remove", "path": "permissions[screen_id=S08,role_id=R2,action=update]", "reason": "Cascade: permission of removed screen S08." },
+    { "op": "remove", "path": "screens[id=S07].flow_to[=S08]", "reason": "Cascade: S07 no longer navigates to the removed screen." },
+    { "op": "remove", "path": "use_cases[id=UC12].function_ids[=FN034]", "reason": "Cascade: UC12 referenced a function of removed screen S08." },
+    { "op": "remove", "path": "use_cases[id=UC12].function_ids[=FN035]", "reason": "Cascade: UC12 referenced a function of removed screen S08." },
+    { "op": "remove", "path": "sections[id=function:FN034]", "reason": "Cascade: section of removed function." },
+    { "op": "remove", "path": "sections[id=function:FN035]", "reason": "Cascade: section of removed function." },
+    { "op": "remove", "path": "sections[id=function:FN036]", "reason": "Cascade: section of removed function." },
+    { "op": "remove", "path": "sections[id=function:FN037]", "reason": "Cascade: section of removed function." }
+  ]
+}
