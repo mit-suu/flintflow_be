@@ -18,7 +18,7 @@ export interface PlanDefinition {
   initialCredits: number
   /** Hạn mức mỗi kỳ — ghi vào Subscription.monthlyCreditsAllotment. */
   monthlyCredits: number
-  /** Giá mỗi kỳ (VND). Mock: nâng cấp chưa thu tiền. */
+  /** Giá mỗi kỳ (VND). Gói > 0đ chỉ kích hoạt qua checkout `plan:<id>` (thanh toán thật). */
   priceVnd: number
 }
 
@@ -60,5 +60,33 @@ export const PLAN_IDS: PlanId[] = ["free", "pro"]
 
 export const getPlan = (plan: PlanId): PlanDefinition => planConfig[plan]
 
-export const findPackage = (packageId: string): CreditPackage | undefined =>
-  planConfig.packages.find((p) => p.id === packageId)
+/** Checkout mua gói trả phí dùng packageId `plan:<id>` (vd `plan:pro`). */
+export const PLAN_PACKAGE_PREFIX = "plan:"
+
+export const planPackageId = (plan: PlanId): string => `${PLAN_PACKAGE_PREFIX}${plan}`
+
+export const planFromPackageId = (packageId: string): PlanId | null => {
+  if (!packageId.startsWith(PLAN_PACKAGE_PREFIX)) return null
+  const plan = packageId.slice(PLAN_PACKAGE_PREFIX.length)
+  return PLAN_IDS.find((id) => id === plan) ?? null
+}
+
+/**
+ * Gói credit, hoặc gói subscription trả phí dạng package: thanh toán `priceVnd`,
+ * nhận ngay `monthlyCredits` của kỳ đầu và kích hoạt Subscription khi tiền về.
+ */
+export const findPackage = (packageId: string): CreditPackage | undefined => {
+  const plan = planFromPackageId(packageId)
+  if (plan) {
+    const definition = getPlan(plan)
+    if (definition.priceVnd <= 0) return undefined
+    return {
+      id: packageId,
+      label: `Gói ${definition.label} (${planConfig.periodDays} ngày)`,
+      credits: definition.monthlyCredits,
+      amount: definition.priceVnd,
+      currency: "VND"
+    }
+  }
+  return planConfig.packages.find((p) => p.id === packageId)
+}
