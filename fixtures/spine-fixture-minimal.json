@@ -32,12 +32,6 @@
       ]
     }
   },
-  "sessions": [
-    {
-      "id": "SES1",
-      "is_pipeline": true
-    }
-  ],
   "progress": {
     "current_phase": "S-1",
     "current_step": "S-1.1",
@@ -107,7 +101,5 @@
   "flags": [],
   "sections": [],
   "baselines": [],
-  "changes": [],
-  "usage": [],
   "spine_version": 1
 }

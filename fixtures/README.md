@@ -14,9 +14,11 @@ Dữ liệu chuẩn cho op engine (T08), deterministic check (T09), renderer (T1
 
 - **5 màn `signed_off`** (S01, S05, S07, S09, S10 — các màn cốt lõi theo Phases §7.2), 14 màn còn lại `placeholder` (cắt theo độ sâu, Phases §9.1). Không màn nào `pending` vì progress đã qua S-5.
 - **Steps** chỉ gồm 38 step SRS cố định + 5×N với N=6 (5 màn signed_off + 1 vòng `@nonscreen`), đúng câu chữ task 02. 13 step Brief không nằm trong fixture.
-- `first_seq`/`last_seq` của step là dải **tượng trưng** (mỗi step 3 seq); `changes[]`, `usage[]`, `baselines[]` để rỗng — T01 tách chúng thành collection riêng, seed script hiện ghi cả document một chỗ.
-- `diagrams[].source_hash = "TBD"`: T09/T10 tính lại theo `source_fields` (srs-spine.md §7.1).
-- `entities[].relations[]` dùng dạng `{target_id, kind, description}` — chốt lại với `spineSchema` của T01 tại M1.
+- `first_seq`/`last_seq` của step là dải **tượng trưng** (mỗi step 3 seq); `baselines[]` rỗng.
+- **Không có** `sessions`, `changes`, `usage` trong fixture: `spineSchema` (T01) là strict và tách chúng ra collection riêng — `changes`/`usage` là collection, `sessions[]` thành cờ `ChatSession.is_pipeline` (seed script tạo).
+- `diagrams[].source_hash = "TBD"`: T09/T10 tính lại theo `source_fields` (srs-spine.md §7.1). `diagrams[].error` bỏ hẳn key khi `render_status=ok` (schema là `optional`, không nhận `null`).
+- `entities[].relations[]` là mảng id entity đích (`["E02", "E05"]`) theo `spineSchema`; bản số quan hệ (1–n, n–1) chỉ thể hiện trong ERD `.puml` (D04).
+- Mọi `fixtures/**/spine*.json` phải parse qua `spineSchema` — test `src/modules/spine/spine.schema.test.ts` (T01) chạy trong CI.
 - Nội dung render vào SRS là tiếng Anh (Phases §1.3); `addendum[].content` cố ý để tiếng Việt kèm `content_en` — để test cờ vàng `non_english_content` có ý nghĩa.
 - `baselines[]` rỗng dù S-9.5 `accepted`: fixture dùng cho kiểm thử **trước** khi ký baseline; T19 sẽ có fixture snapshot riêng nếu cần.
 
