@@ -8,19 +8,22 @@
  * vào một bảng hardcode trong code và im lặng đổi provider — kiểu lỗi tệ nhất
  * vì nó không dừng gì cả, chỉ làm kết quả sai đi.
  *
- * Sẽ bổ sung ở các stage sau: validate srs-spine.schema.json, registry cờ đỏ
- * (10 red + 6 yellow), và đối chiếu step-registry ↔ prompt asset.
+ * Nạp: prompt phẳng (legacy), 30 skill BMAD (frontmatter sai hợp đồng ⇒ ném ngay) và
+ * step registry (T12).
  */
 
-import { getPromptAssetIndex } from "../shared/ai/prompt-assets.js"
+import { getPromptAssetIndex, getSkillIndex } from "../shared/ai/prompt-assets.js"
+import { loadStepRegistry } from "../modules/pipeline/step-registry.js"
 import { getAssetsRoot } from "./paths.js"
 
 export const validateStartupAssets = (): void => {
   const assetsRoot = getAssetsRoot()
   const index = getPromptAssetIndex()
+  const skills = getSkillIndex()
+  const steps = loadStepRegistry()
 
   console.log(
     `[startup] assets: ${assetsRoot} — nạp ${index.size} prompt asset ` +
-      `(${[...index.keys()].sort().join(", ")})`
+      `(${[...index.keys()].sort().join(", ")}), ${skills.size} skill, ${steps.length} step`
   )
 }
