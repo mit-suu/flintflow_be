@@ -1,0 +1,11 @@
+{
+  "name": "remove referenced actor expects cascade",
+  "step_id": "S-3.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The user decides email is out of scope entirely, so the Email Service actor (A08) must go. A08 is referenced by use_cases UC01 and UC03 through actor_ids; the engine must generate the cascade ops removing those references in the same transaction.",
+  "expected_ops": [
+    { "op": "remove", "path": "actors[id=A08]", "reason": "User removed the Email Service external system." },
+    { "op": "remove", "path": "use_cases[id=UC01].actor_ids[=A08]", "reason": "Cascade: UC01 referenced the removed actor." },
+    { "op": "remove", "path": "use_cases[id=UC03].actor_ids[=A08]", "reason": "Cascade: UC03 referenced the removed actor." }
+  ]
+}

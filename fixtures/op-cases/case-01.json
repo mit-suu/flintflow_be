@@ -1,0 +1,19 @@
+{
+  "name": "add actor",
+  "step_id": "S-3.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "prompt_context": "The user says a support team also handles escalated tickets inside the product. Add a new human actor for the support agent.",
+  "expected_ops": [
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A10",
+        "name": "Support Agent",
+        "kind": "human",
+        "description": "Internal support staff who handles escalated user tickets."
+      },
+      "reason": "User introduced a new human actor during actor elicitation."
+    }
+  ]
+}

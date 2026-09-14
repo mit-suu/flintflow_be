@@ -16,6 +16,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "seed:fixture": "tsx src/scripts/seed-fixture.ts",
     "seed:md": "tsx src/scripts/seed-from-md.ts",
     "seed:md:dry": "tsx src/scripts/seed-from-md.ts --dry-run"
   },
