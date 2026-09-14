@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest"
+import { describe, it, expect } from "vitest"
 import { encodePlantUml, isPlantUmlReachable } from "./plantuml.client.js"
 import { checkPlantUml } from "./compile-check.js"
 
@@ -24,36 +24,26 @@ describe("encodePlantUml (thuần, không cần server)", () => {
   })
 })
 
-describe("PlantUML probe (cần server)", () => {
-  let reachable = false
+// Kiểm server lúc thu thập test: không có server thì test hiện "skipped" trong báo cáo,
+// không pass im lặng như `if (!reachable) return`.
+const reachable = await isPlantUmlReachable()
+if (!reachable) {
+  console.warn(
+    "\n[probe] PlantUML không reachable — probe test bị SKIP.\n" +
+      "        Chạy `docker compose up -d plantuml` rồi `npm test` lại để\n" +
+      "        trả lời câu hỏi thực nghiệm: header hay svg-scan phát hiện lỗi?\n"
+  )
+}
 
-  beforeAll(async () => {
-    reachable = await isPlantUmlReachable()
-
-    if (!reachable) {
-      console.warn(
-        "\n[probe] PlantUML không reachable — bỏ qua probe test.\n" +
-          "        Chạy `docker compose up -d plantuml` rồi `npm test` lại để\n" +
-          "        trả lời câu hỏi thực nghiệm: header hay svg-scan phát hiện lỗi?\n"
-      )
-    }
-  })
-
+describe.skipIf(!reachable)("PlantUML probe (cần server)", () => {
   it("diagram HỢP LỆ phải compile được", async () => {
-    if (!reachable) return
-
     const result = await checkPlantUml(VALID)
 
-    console.log(
-      `[probe] valid  → ok=${result.ok} transport=${result.render.transport} ` +
-        `method=${result.method}`
-    )
+    console.log(`[probe] valid  → ok=${result.ok} transport=${result.render.transport} method=${result.method}`)
     expect(result.ok).toBe(true)
   })
 
   it("diagram SAI phải bị phát hiện, dù server trả HTTP 200", async () => {
-    if (!reachable) return
-
     const result = await checkPlantUml(BROKEN)
 
     console.log(

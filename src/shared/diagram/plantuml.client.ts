@@ -27,6 +27,8 @@ export interface PlantUmlRenderResult {
   contentType: string
   /** Đường gọi thực tế đã dùng — probe test đọc field này. */
   transport: "post" | "get"
+  /** HTTP status. Image `jetty` (PlantUML 1.2026.8) trả 400 kèm ảnh lỗi khi syntax sai. */
+  status: number
   /**
    * Header chẩn đoán của PlantUML. Server đặt `x-plantuml-diagram-error` khi
    * syntax sai NHƯNG vẫn trả HTTP 200 kèm ảnh lỗi — nên header này là cách
@@ -78,6 +80,14 @@ const readDiagnostics = (res: Response) => ({
 
 const baseUrl = (): string => env.PLANTUML_BASE_URL.replace(/\/+$/, "")
 
+/**
+ * Probe thực nghiệm (T10, PlantUML 1.2026.8 image `jetty`): syntax sai ⇒ HTTP 400 + body vẫn là ẢNH LỖI.
+ * POST không có header chẩn đoán; GET có `x-plantuml-diagram-error(-line)`. Đây là kết quả compile,
+ * không phải lỗi transport — trả về cho compile-check thay vì ném.
+ */
+const isDiagramErrorImage = (res: Response): boolean =>
+  res.status === 400 && (res.headers.get("content-type") ?? "").startsWith("image/")
+
 const withTimeout = async (
   url: string,
   init: RequestInit,
@@ -113,12 +123,13 @@ export const renderPlantUml = async (
       body: source
     })
 
-    if (res.ok) {
+    if (res.ok || isDiagramErrorImage(res)) {
       return {
         format,
         data: Buffer.from(await res.arrayBuffer()),
         contentType: res.headers.get("content-type") ?? contentType,
         transport: "post",
+        status: res.status,
         diagnostics: readDiagnostics(res)
       }
     }
@@ -132,7 +143,7 @@ export const renderPlantUml = async (
     { method: "GET" }
   )
 
-  if (!res.ok) {
+  if (!res.ok && !isDiagramErrorImage(res)) {
     throw new Error(
       `PlantUML trả HTTP ${res.status} ${res.statusText} (${baseUrl()}/${format})`
     )
@@ -143,6 +154,7 @@ export const renderPlantUml = async (
     data: Buffer.from(await res.arrayBuffer()),
     contentType: res.headers.get("content-type") ?? contentType,
     transport: "get",
+    status: res.status,
     diagnostics: readDiagnostics(res)
   }
 }
