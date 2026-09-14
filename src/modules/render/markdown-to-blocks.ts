@@ -15,7 +15,8 @@ type RunStyle = Omit<InlineRun, "text">
 
 const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/
 const BULLET = /^\s*[-*+]\s+(.*)$/
-const NUMBERED = /^\s*\d+[.)]\s+(.*)$/
+// ≤ 3 chữ số: "2026. Kế hoạch" là đoạn văn bắt đầu bằng năm, không phải mục danh sách
+const NUMBERED = /^\s*\d{1,3}[.)]\s+(.*)$/
 const TABLE_SEPARATOR = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/
 const HORIZONTAL_RULE = /^\s*([-*_])(\s*\1){2,}\s*$/
 
@@ -54,7 +55,8 @@ export function markdownToBlocks(markdown: string, options: MarkdownToBlocksOpti
       continue
     }
 
-    if (line.includes("|") && i + 1 < lines.length && TABLE_SEPARATOR.test(lines[i + 1])) {
+    // Dòng phân cách bảng phải có `|`: một dòng `---` đứng riêng là đường kẻ ngang
+    if (line.includes("|") && i + 1 < lines.length && lines[i + 1].includes("|") && TABLE_SEPARATOR.test(lines[i + 1])) {
       flushParagraph()
       const header = splitTableRow(line)
       const rows: TableCell[][] = []
