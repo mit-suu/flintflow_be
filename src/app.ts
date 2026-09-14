@@ -10,7 +10,7 @@ import { errorHandler } from "./shared/middlewares/error-handler.js"
 import authRoutes from "./modules/auth/auth.route.js"
 import userRoutes from "./modules/user/user.route.js"
 import aiActionRoutes from "./shared/ai/ai-action.route.js"
-import adminPromptTemplateRoutes from "./modules/admin/prompt-template.route.js"
+import adminRoutes from "./modules/admin/admin.route.js"
 import projectRoutes from "./modules/project/project.route.js"
 import specificationRoutes from "./modules/specification/specification.route.js"
 import verificationRoutes from "./modules/verification/verification-context.route.js"
@@ -113,7 +113,7 @@ app.use(
 app.use("/api/v1/auth", authRoutes)
 app.use("/api/v1/users", userRoutes)
 app.use("/api/v1/ai-actions", aiActionRoutes)
-app.use("/api/v1/admin/prompt-templates", adminPromptTemplateRoutes)
+app.use("/api/v1/admin", adminRoutes)
 app.use("/api/v1/projects", projectRoutes)
 app.use("/api/v1/projects", spineRoutes)
 app.use("/api/v1/specifications", specificationRoutes)
