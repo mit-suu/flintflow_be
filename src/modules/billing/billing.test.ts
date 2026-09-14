@@ -53,6 +53,8 @@ import { planConfig } from "./plan.config.js"
 const USER = "64b000000000000000000002"
 const OTHER_USER = "64b000000000000000000003"
 const CLIENT_ID = "client_flintflow_test"
+// Lấy giá từ config để test không vỡ mỗi khi đổi giá gói
+const PACK_100_AMOUNT = planConfig.packages.find((p) => p.id === "pack_100")!.amount
 
 const walletOf = (userId = USER) =>
   fakeDb.model("CreditWallet").docs.find((w) => String(w.userId) === userId)
@@ -77,7 +79,7 @@ const mockCreateOrder = () =>
 const remoteOrder = (orderId: string, overrides: Partial<PaymentServiceOrder> = {}): PaymentServiceOrder => ({
   order_id: orderId,
   client_id: CLIENT_ID,
-  amount: 49_000,
+  amount: PACK_100_AMOUNT,
   description: "x",
   reference_code: "REF",
   callback_url: "https://api.flintflow.test/api/v1/billing/payment-callback",
@@ -108,14 +110,14 @@ describe("billing.service", () => {
       const checkout = await billingService.createCheckout(USER, "pack_100")
 
       expect(createPaymentOrder).toHaveBeenCalledWith({
-        amount: 49_000,
+        amount: PACK_100_AMOUNT,
         description: expect.stringContaining(checkout.intentId),
         callbackUrl: "https://api.flintflow.test/api/v1/billing/payment-callback"
       })
       expect(checkout).toMatchObject({
         status: "pending",
         credits: 100,
-        amount: 49_000,
+        amount: PACK_100_AMOUNT,
         qrCodeUrl: expect.stringContaining("vietqr"),
         paymentDescription: expect.stringMatching(/^PS/)
       })
