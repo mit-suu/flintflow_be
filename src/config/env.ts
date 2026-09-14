@@ -92,7 +92,15 @@ const envSchema = z.object({
   // Self-host: `docker compose up -d plantuml`. Ở production PlantUML là một
   // service RIÊNG, không phải sidecar trong image này.
   PLANTUML_BASE_URL: z.string().default("http://localhost:8080"),
-  PLANTUML_TIMEOUT_MS: z.coerce.number().int().positive().default(15000)
+  PLANTUML_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+
+  // ─── Billing (mock gateway, Phases §9.2) ──────────────────────────
+  // Webhook mock ký HMAC-SHA256 bằng secret này; ở production phải set tường minh.
+  PAYMENT_WEBHOOK_SECRET: secret("dev-payment-webhook-secret"),
+  // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
+  CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
+  // Trang FE giả lập cổng thanh toán, nhận ?intentId=
+  MOCK_PAYMENT_URL: z.string().default("http://localhost:3000/home/billing/mock-checkout")
 })
 
 const parsed = envSchema.safeParse(process.env)
