@@ -5,6 +5,10 @@ import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
 import { Section } from "../specification/section.model.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { Spine } from "../spine/spine.model.js"
+import { Change } from "../spine/change.model.js"
+import { Baseline } from "../spine/baseline.model.js"
+import { Usage } from "../spine/usage.model.js"
 
 export const createProject = async (
   userId: string,
@@ -59,10 +63,17 @@ export const deleteProject = async (
     if (!project) {
       throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     }
-    // Clean up all related models to prevent orphaned records in MongoDB
-    await ChatSession.deleteMany({ projectId })
-    await ProjectDocument.deleteMany({ projectId })
-    await Section.deleteMany({ projectId })
+    // Dọn mọi dữ liệu thuộc project, gồm Spine và các collection tách riêng của nó
+    // (changes, baselines chứa snapshot lớn, usages) để không để lại document mồ côi
+    await Promise.all([
+      ChatSession.deleteMany({ projectId }),
+      ProjectDocument.deleteMany({ projectId }),
+      Section.deleteMany({ projectId }),
+      Spine.deleteMany({ projectId }),
+      Change.deleteMany({ projectId }),
+      Baseline.deleteMany({ projectId }),
+      Usage.deleteMany({ projectId })
+    ])
     return { _id: projectId, status: "deleted" }
   } else {
     const project = await Project.findOneAndUpdate(
