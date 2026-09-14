@@ -151,6 +151,14 @@ const seed = async (spine: Spine) => {
 const nfrFlag = (flags: Flag[]) => flags.filter((f) => f.rule_id === "nfr_missing_number")
 const current = async () => (await repo.get(PROJECT))!
 
+describe("planFlagOps — luật chỉ chạy ở S-9", () => {
+  it("check thường không đóng cờ S-9 đang mở (không chạy luật ≠ hết lỗi); check at_baseline thì đóng", () => {
+    const spine = withFlags([flag({ rule_id: "unconfirmed_assumption" })])
+    expect(planFlagOps(spine, []).resolved).toEqual([])
+    expect(planFlagOps(spine, [], new Date(), { atBaseline: true }).resolved).toEqual(["FL001"])
+  })
+})
+
 describe("recompute / waive qua op engine", () => {
   beforeEach(() => db.reset())
 
