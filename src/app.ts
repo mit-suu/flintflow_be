@@ -81,6 +81,9 @@ app.use(
   })
 )
 
+// Preview export nhận RenderedDocument có ảnh base64 — vượt giới hạn 100KB mặc định.
+// Parser riêng chạy trước; parser chung bỏ qua body đã parse.
+app.use("/api/v1/export", express.json({ limit: "15mb" }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
