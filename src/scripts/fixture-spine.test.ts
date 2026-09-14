@@ -171,7 +171,7 @@ describe("spine-fixture-19-screens: 8 bất biến srs-spine.md §6", () => {
       for (const b of f.business_rule_ids)
         expect(spine.business_rules.some((br: any) => br.id === b), `${f.id}→${b}`).toBe(true)
     for (const e of spine.entities)
-      for (const rel of e.relations) expect(entitiesById[rel.target_id], e.id).toBeTruthy()
+      for (const rel of e.relations) expect(entitiesById[rel], `${e.id}→${rel}`).toBeTruthy()
     for (const br of spine.business_rules)
       for (const vid of br.source_validation_ids) expect(validationIds.has(vid), `${br.id}→${vid}`).toBe(true)
     for (const m of spine.messages)
@@ -220,9 +220,9 @@ describe("spine-fixture-19-screens: 8 bất biến srs-spine.md §6", () => {
         expect(f.feature_id, f.id).toBe(screensById[f.screen_id].feature_id)
   })
 
-  it("7 — đúng một session is_pipeline=true (cả fixture minimal)", () => {
-    expect(spine.sessions.filter((s: any) => s.is_pipeline)).toHaveLength(1)
-    expect(minimal.sessions.filter((s: any) => s.is_pipeline)).toHaveLength(1)
+  it("7 — sessions/changes/usage không nằm trong Spine document (T01 tách collection; is_pipeline ở ChatSession)", () => {
+    for (const doc of [spine, minimal])
+      for (const key of ["sessions", "changes", "usage"]) expect(doc, key).not.toHaveProperty(key)
   })
 
   it("8 — screen_cursor và screen_queue trỏ tới màn tồn tại", () => {

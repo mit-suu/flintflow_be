@@ -32,12 +32,6 @@
       ]
     }
   },
-  "sessions": [
-    {
-      "id": "SES1",
-      "is_pipeline": true
-    }
-  ],
   "progress": {
     "current_phase": "S-9",
     "current_step": "S-9.5",
@@ -1572,21 +1566,9 @@
       "name": "User",
       "description": "An account that owns projects, credits and notifications.",
       "relations": [
-        {
-          "target_id": "E02",
-          "kind": "one_to_many",
-          "description": "owns"
-        },
-        {
-          "target_id": "E05",
-          "kind": "one_to_many",
-          "description": "accrues"
-        },
-        {
-          "target_id": "E07",
-          "kind": "one_to_many",
-          "description": "receives"
-        }
+        "E02",
+        "E05",
+        "E07"
       ]
     },
     {
@@ -1594,16 +1576,8 @@
       "name": "Project",
       "description": "A container for one SRS effort with exactly one Spine.",
       "relations": [
-        {
-          "target_id": "E03",
-          "kind": "one_to_one",
-          "description": "has"
-        },
-        {
-          "target_id": "E04",
-          "kind": "one_to_many",
-          "description": "has"
-        }
+        "E03",
+        "E04"
       ]
     },
     {
@@ -1611,26 +1585,10 @@
       "name": "Spine",
       "description": "The structured requirement store all sections render from.",
       "relations": [
-        {
-          "target_id": "E08",
-          "kind": "one_to_many",
-          "description": "snapshots into"
-        },
-        {
-          "target_id": "E09",
-          "kind": "one_to_many",
-          "description": "records"
-        },
-        {
-          "target_id": "E11",
-          "kind": "one_to_many",
-          "description": "raises"
-        },
-        {
-          "target_id": "E12",
-          "kind": "one_to_many",
-          "description": "renders"
-        }
+        "E08",
+        "E09",
+        "E11",
+        "E12"
       ]
     },
     {
@@ -1644,11 +1602,7 @@
       "name": "CreditLedger",
       "description": "Append-only credit transactions with running balance.",
       "relations": [
-        {
-          "target_id": "E10",
-          "kind": "one_to_many",
-          "description": "settles"
-        }
+        "E10"
       ]
     },
     {
@@ -1656,11 +1610,7 @@
       "name": "Subscription",
       "description": "The plan attached to an account with its renewal window.",
       "relations": [
-        {
-          "target_id": "E01",
-          "kind": "many_to_one",
-          "description": "belongs to"
-        }
+        "E01"
       ]
     },
     {
@@ -3967,7 +3917,6 @@
       "owner_id": null,
       "puml": "@startuml\nskinparam componentStyle rectangle\nrectangle \"FlintFlow\" as sys\ncomponent \"Payment Gateway\" as pay\ncomponent \"LLM Provider\" as llm\ncomponent \"PlantUML Server\" as puml_srv\ncomponent \"Email Service\" as mail\npay --> sys : payment webhooks\nsys --> pay : checkout sessions\nsys --> llm : structured drafting calls\nsys --> puml_srv : .puml compile requests\nsys --> mail : verification and reset mail\n@enduml",
       "render_status": "ok",
-      "error": null,
       "source_hash": "TBD",
       "rendered_at": "2026-09-01T09:09:00.000Z"
     },
@@ -3979,7 +3928,6 @@
       "owner_id": null,
       "puml": "@startuml\nleft to right direction\nactor \"Founder\" as A01\nactor \"Business Analyst\" as A02\nactor \"Administrator\" as A03\nactor \"Guest\" as A04\nactor \"Payment Gateway\" as A05 <<system>>\nactor \"LLM Provider\" as A06 <<system>>\nactor \"PlantUML Server\" as A07 <<system>>\nactor \"Scheduler\" as A09 <<time>>\nrectangle FlintFlow {\n  usecase \"Register Account\" as UC01\n  usecase \"Log In\" as UC02\n  usecase \"Reset Password\" as UC03\n  usecase \"Create Project\" as UC06\n  usecase \"Generate SRS Content\" as UC09\n  usecase \"Review and Accept Step\" as UC10\n  usecase \"Request Change\" as UC11\n  usecase \"Preview Change Impact\" as UC23\n  usecase \"Render Diagrams\" as UC12\n  usecase \"Verify Document\" as UC13\n  usecase \"Sign Baseline\" as UC15\n  usecase \"Waive Red Flag\" as UC14\n  usecase \"Export Word Document\" as UC16\n  usecase \"Purchase Credits\" as UC17\n  usecase \"Run Scheduled Housekeeping\" as UC22\n}\nA04 --> UC01\nA04 --> UC02\nA01 --> UC02\nA01 --> UC03\nA01 --> UC06\nA01 --> UC09\nA06 --> UC09\nA01 --> UC10\nA01 --> UC11\nA02 --> UC13\nA02 --> UC15\nA02 --> UC14\nA01 --> UC16\nA01 --> UC17\nA05 --> UC17\nA07 --> UC12\nA09 --> UC22\nUC09 ..> UC10 : <<include>>\nUC09 ..> UC12 : <<include>>\nUC15 ..> UC13 : <<include>>\nUC11 ..> UC23 : <<include>>\nUC03 ..> UC02 : <<extend>>\nUC14 ..> UC15 : <<extend>>\n@enduml",
       "render_status": "ok",
-      "error": null,
       "source_hash": "TBD",
       "rendered_at": "2026-09-01T09:10:00.000Z"
     },
@@ -3991,7 +3939,6 @@
       "owner_id": null,
       "puml": "@startuml\nhide empty description\n[*] --> Login\nstate \"Login\" as Login\nstate \"Register\" as Register\nstate \"Onboarding\" as Onboarding\nstate \"Project Dashboard\" as Dashboard\nstate \"Project Workspace\" as Workspace {\n  state \"Chat\" as TabChat\n  state \"Document\" as TabDoc\n  state \"History\" as TabHist\n  TabChat -right-> TabDoc\n  TabDoc -right-> TabHist\n}\nstate \"Diagram Preview\" as DiagramPreview\nstate \"Verification & Change Panel\" as Verification\nstate \"Export\" as Export\nstate \"Plan & Pricing\" as Pricing\nstate \"Billing History\" as Billing\nstate \"Notification Center\" as Notifications\nstate \"Admin User List\" as AdminUsers\nstate \"Admin User Detail\" as AdminUserDetail\nstate \"Admin Metrics Dashboard\" as AdminMetrics\nstate \"Admin AI Cost Report\" as AdminCost\nstate \"Admin Prompt Templates\" as AdminPrompts\nstate \"Admin Audit Log\" as AdminAudit\nLogin --> Register\nLogin --> Dashboard : authenticated\nnote right of Login : opens popup:\\nForgot Password\nRegister --> Login\nOnboarding --> Dashboard\nDashboard --> Workspace : open project\nnote right of Dashboard : opens popup:\\nCreate Project\nDashboard --> Pricing\nDashboard --> Notifications\nWorkspace --> DiagramPreview\nDiagramPreview --> Workspace\nWorkspace --> Verification\nVerification --> Workspace\nVerification --> Export\nWorkspace --> Export\nExport --> Workspace\nPricing --> Billing\nAdminUsers --> AdminUserDetail\nAdminUserDetail --> AdminUsers\n@enduml",
       "render_status": "ok",
-      "error": null,
       "source_hash": "TBD",
       "rendered_at": "2026-09-01T09:11:00.000Z"
     },
@@ -4003,7 +3950,6 @@
       "owner_id": null,
       "puml": "@startuml\nhide circle\nskinparam linetype ortho\nentity \"User\" as E01\nentity \"Project\" as E02\nentity \"Spine\" as E03\nentity \"ChatSession\" as E04\nentity \"CreditLedger\" as E05\nentity \"Subscription\" as E06\nentity \"Notification\" as E07\nentity \"Baseline\" as E08\nentity \"ChangeRecord\" as E09\nentity \"UsageRecord\" as E10\nentity \"Flag\" as E11\nentity \"Diagram\" as E12\nE01 ||--o{ E02 : owns\nE01 ||--o{ E05 : accrues\nE01 ||--o{ E07 : receives\nE01 ||--o| E06 : subscribes\nE02 ||--|| E03 : has\nE02 ||--o{ E04 : has\nE03 ||--o{ E08 : snapshots\nE03 ||--o{ E09 : records\nE03 ||--o{ E11 : raises\nE03 ||--o{ E12 : renders\nE05 ||--o{ E10 : settles\n@enduml",
       "render_status": "ok",
-      "error": null,
       "source_hash": "TBD",
       "rendered_at": "2026-09-01T09:12:00.000Z"
     },
@@ -4015,7 +3961,6 @@
       "owner_id": "S07",
       "puml": "@startuml\nsalt\n{+\n  {* FlintFlow | Project: FlintFlow | <&person> }\n  {/ <b>Chat | Document | History }\n  {\n    {SI\n      \"AI: Which external systems does the product talk to?\"\n      \"You: Payment gateway, LLM provider, PlantUML server.\"\n      \"AI: Draft updated - review at the gate below.\"\n    }\n    {+ Gate: S-2.3 External Systems | [ Accept ] | [ Revise ] | [ Regenerate ] }\n    { \"Type a message...\" | [ Send ] }\n  }\n}\n@enduml",
       "render_status": "ok",
-      "error": null,
       "source_hash": "TBD",
       "rendered_at": "2026-09-01T09:13:00.000Z"
     }
@@ -4513,7 +4458,5 @@
     }
   ],
   "baselines": [],
-  "changes": [],
-  "usage": [],
   "spine_version": 1
 }
