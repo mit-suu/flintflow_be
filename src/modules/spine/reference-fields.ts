@@ -18,6 +18,7 @@
 
 import type { Spine } from "./spine.types.js"
 import { tryResolve } from "./path-resolver.js"
+import { FIXED_SECTION_ID_LIST } from "./section-registry.js"
 
 export type TargetCollection =
   | "actors"
@@ -67,29 +68,8 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "steps[].id", targetCollection: "screens", cardinality: "one" }
 ] as const satisfies readonly ReferenceField[])
 
-/** Section cố định của template FPT (srs-spine.md §4, §6 bất biến 1). T09 thay bằng registry. */
-export const FIXED_SECTION_IDS: readonly string[] = Object.freeze([
-  "fixed:I",
-  "fixed:1",
-  "fixed:2.1",
-  "fixed:2.2.1",
-  "fixed:2.2.2",
-  "fixed:3.1.1",
-  "fixed:3.1.2",
-  "fixed:3.1.3",
-  "fixed:3.1.4",
-  "fixed:3.1.5",
-  "fixed:4.1",
-  "fixed:4.2.1",
-  "fixed:4.2.2",
-  "fixed:4.2.3",
-  "fixed:4.2.4",
-  "fixed:5.1",
-  "fixed:5.2",
-  "fixed:5.3",
-  "fixed:5.4",
-  "fixed:5.5"
-])
+/** Section cố định của template FPT — từ section registry (T09). */
+export const FIXED_SECTION_IDS: readonly string[] = FIXED_SECTION_ID_LIST
 
 const FIXED_SECTION_SET = new Set(FIXED_SECTION_IDS)
 
