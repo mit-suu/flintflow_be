@@ -11,6 +11,8 @@
 
 import { ActionType } from "./ai-action.types.js"
 import { ProjectDocument } from "../../modules/project/project-document.model.js"
+import { DOCUMENTS_READ, getStep } from "../../modules/pipeline/step-registry.js"
+import { ApiError } from "../utils/api-error.js"
 
 // ─── SectionType needs-source map ────────────────────────────────────────────
 
@@ -82,41 +84,17 @@ const PIPELINE_DRAFT_ACTIONS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Step nào đọc tài liệu upload (Phases §6.1 cột "Input từ Brief" + §5.4 addendum). Khoá là id step
- * không có `@`. Step suy dẫn từ Spine đã có (S-3.4, S-4.2, S-7.1…) không cần tài liệu gốc.
- * Bản tạm tới khi step registry T12 có `reads: documents`.
+ * Step nào đọc tài liệu upload: step registry (T12) ghi token `documents` trong `reads`. Step suy dẫn
+ * từ Spine đã có (S-3.4, S-4.2, S-7.1…) không có token này. Id không phải step ⇒ không nạp.
  */
-export const STEP_NEEDS_SOURCE_DOCUMENTS: Readonly<Record<string, boolean>> = {
-  "B-0.1": true,
-  "B-1.1": true,
-  "B-1.2": true,
-  "B-1.3": true,
-  "B-1.4": true,
-  "B-1.5": true,
-  "B-1.6": true,
-  "S-1.1": true,
-  "S-2.1": true,
-  "S-2.3": true,
-  "S-2.4": true,
-  "S-3.1": true,
-  "S-3.2": true,
-  "S-3.3": true,
-  "S-4.1": true,
-  "S-4.4": true,
-  "S-5.2": true,
-  "S-5.4": true,
-  "S-6.1": true,
-  "S-6.2": true,
-  "S-6.3": true,
-  "S-6.4": true,
-  "S-6.5": true,
-  "S-7.2": true,
-  "S-7.4": true,
-  "S-8.1": true
+export const stepNeedsSourceDocuments = (stepId: string): boolean => {
+  try {
+    return getStep(stepId).reads.includes(DOCUMENTS_READ)
+  } catch (err) {
+    if (err instanceof ApiError) return false
+    throw err
+  }
 }
-
-export const stepNeedsSourceDocuments = (stepId: string): boolean =>
-  STEP_NEEDS_SOURCE_DOCUMENTS[stepId.split("@")[0]] ?? false
 
 // ─── Context window estimates per model ──────────────────────────────────────
 

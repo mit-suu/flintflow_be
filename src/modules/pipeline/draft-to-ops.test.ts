@@ -70,8 +70,10 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
 
     it(`${file} — ${opCase.name}`, async () => {
       const spine = baseOf(opCase)
+      // Fixture T02 ghi id template (`S-5.1`); step registry đòi id vòng đầy đủ `S-5.1@<màn>`
+      const stepId = opCase.step_id.startsWith("S-5.") && !opCase.step_id.includes("@") ? `${opCase.step_id}@${spine.progress.screen_cursor ?? "nonscreen"}` : opCase.step_id
       const executor = vi.fn<DraftExecutor>(async () => reply(opCase.expected_ops))
-      const run = draftOps("p", opCase.step_id, ctxFor(spine, opCase.step_id), { userId: "u", spine, executor })
+      const run = draftOps("p", stepId, ctxFor(spine, stepId), { userId: "u", spine, executor })
 
       if (opCase.must_reject) {
         const err = await run.then(
@@ -88,8 +90,8 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
 
       const result = await run
       expect(result.attempts).toHaveLength(1)
-      expect(result.txn).toMatchObject({ base_version: spine.spine_version, step_id: opCase.step_id, by: "u" })
-      expect(() => planTransaction(spine, result.txn, { startSeq: 1 })).not.toThrow()
+      expect(result.txn).toMatchObject({ base_version: spine.spine_version, step_id: stepId, by: "u" })
+      expect(() => planTransaction(spine, result.txn!, { startSeq: 1 })).not.toThrow()
       expect(result.usage).toEqual([{ attempt: 1, call_kind: "draft", tokens_in: 1000, tokens_out: 200, cost: 2, logId: "log-1" }])
     })
   }
@@ -112,9 +114,22 @@ describe("draftOps retry", () => {
 
     const secondVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
     expect(secondVars.validation_errors).toMatchObject([{ rule: "path_not_resolved" }])
+    expect(secondVars.previous_ops).toEqual([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }])
     const firstVars = executor.mock.calls[0][1].promptVariables as Record<string, unknown>
-    expect(firstVars).toMatchObject({ step_id: "S-3.1", call_kind: "draft", validation_errors: "(none)", answers: "User: answer" })
+    expect(firstVars).toMatchObject({ step_id: "S-3.1", call_kind: "draft", validation_errors: "(none)", previous_ops: "(none)", answers: "User: answer" })
     expect(executor.mock.calls[0][0]).toBe("draft")
+  })
+
+  it("txn id luôn do server sinh (bỏ txn model trả); ops rỗng ⇒ txn null kèm notes", async () => {
+    const withTxn = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }], { txn: "model-txn" }))
+    const a = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: withTxn })
+    const b = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: withTxn })
+    expect(a.txn?.txn).not.toBe("model-txn")
+    expect(a.txn?.txn).not.toBe(b.txn?.txn)
+
+    const empty = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { notes: "Nothing to change" }))
+    const none = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: empty })
+    expect(none).toMatchObject({ txn: null, notes: "Nothing to change" })
   })
 
   it("ghi ngoài quyền của step bị từ chối; parse lỗi được retry; hết 3 lượt ⇒ 422, không ghi Spine", async () => {

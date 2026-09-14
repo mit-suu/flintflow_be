@@ -57,7 +57,8 @@ export interface DraftAttempt {
 }
 
 export interface DraftResult {
-  txn: Transaction
+  /** null ⇒ model trả `ops: []` hợp lệ: step không cần đổi Spine (lý do trong `notes`). Không có gì để áp. */
+  txn: Transaction | null
   attempts: DraftAttempt[]
   usage: DraftUsage[]
   notes: string | null
@@ -122,6 +123,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
   let errors: ValidationError[] = []
+  // Lượt retry cần thấy chính lô op đã sai, không chỉ danh sách lỗi (op_index trỏ vào lô này)
+  let previousOps: unknown[] | null = null
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     const promptVariables = {
@@ -135,7 +138,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       answers: options.answers ?? (ctx.transcriptTail || "(none)"),
       revision_request: options.revisionRequest ?? "(none)",
       content_guidance: ctx.documents ? `${guidance}\n\n${ctx.documents}` : guidance,
-      validation_errors: errors.length > 0 ? errors : "(none)"
+      validation_errors: errors.length > 0 ? errors : "(none)",
+      previous_ops: previousOps ?? "(none)"
     }
 
     let ops: unknown[] = []
@@ -156,8 +160,10 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
+        if (ops.length === 0) return { txn: null, attempts, usage, notes, contextTokens: ctx.contextTokens }
         const txn: Transaction = {
-          txn: result.data.txn ?? randomUUID(),
+          // Id lô luôn do server sinh — không tin `txn` model trả (có thể trùng lô khác)
+          txn: randomUUID(),
           base_version: spine.spine_version,
           ops: ops as Op[],
           by: options.userId,
@@ -170,6 +176,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       errors = [{ rule: "schema_invalid", message: `Output không đúng opTransaction: ${err.message}` }]
     }
     attempts.push({ attempt, ops, errors })
+    previousOps = ops
   }
 
   throw new DraftRejectedError(attempts)
