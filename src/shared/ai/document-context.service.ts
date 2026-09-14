@@ -72,6 +72,52 @@ const ACTION_NEEDS_SOURCE_DOCUMENTS: Record<string, boolean> = {
   [ActionType.SCOPE_OUT_OF_SCOPE]: false,
 }
 
+// ─── Step-level: Draft của pipeline (T11) ────────────────────────────────────
+
+/** Action pipeline dựng context theo step (tham số `sectionType` mang step id). */
+const PIPELINE_DRAFT_ACTIONS: ReadonlySet<string> = new Set([
+  ActionType.DRAFT,
+  ActionType.REGENERATE,
+  ActionType.REVISION
+])
+
+/**
+ * Step nào đọc tài liệu upload (Phases §6.1 cột "Input từ Brief" + §5.4 addendum). Khoá là id step
+ * không có `@`. Step suy dẫn từ Spine đã có (S-3.4, S-4.2, S-7.1…) không cần tài liệu gốc.
+ * Bản tạm tới khi step registry T12 có `reads: documents`.
+ */
+export const STEP_NEEDS_SOURCE_DOCUMENTS: Readonly<Record<string, boolean>> = {
+  "B-0.1": true,
+  "B-1.1": true,
+  "B-1.2": true,
+  "B-1.3": true,
+  "B-1.4": true,
+  "B-1.5": true,
+  "B-1.6": true,
+  "S-1.1": true,
+  "S-2.1": true,
+  "S-2.3": true,
+  "S-2.4": true,
+  "S-3.1": true,
+  "S-3.2": true,
+  "S-3.3": true,
+  "S-4.1": true,
+  "S-4.4": true,
+  "S-5.2": true,
+  "S-5.4": true,
+  "S-6.1": true,
+  "S-6.2": true,
+  "S-6.3": true,
+  "S-6.4": true,
+  "S-6.5": true,
+  "S-7.2": true,
+  "S-7.4": true,
+  "S-8.1": true
+}
+
+export const stepNeedsSourceDocuments = (stepId: string): boolean =>
+  STEP_NEEDS_SOURCE_DOCUMENTS[stepId.split("@")[0]] ?? false
+
 // ─── Context window estimates per model ──────────────────────────────────────
 
 /**
@@ -154,6 +200,8 @@ export const buildDocumentContext = async (
       return empty
     }
     needsDocs = SECTION_NEEDS_SOURCE_DOCUMENTS[sectionType] ?? false
+  } else if (PIPELINE_DRAFT_ACTIONS.has(actionType)) {
+    needsDocs = sectionType ? stepNeedsSourceDocuments(sectionType) : false
   } else {
     needsDocs = ACTION_NEEDS_SOURCE_DOCUMENTS[actionType] ?? false
   }

@@ -120,7 +120,9 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 18 | `GET /projects/:id/export/word?source=` | T15 | `exportWordQuerySchema` | file `.docx` (`Content-Disposition: attachment`), không bọc envelope | `BASELINE_NOT_FOUND` |
 | 19 | `POST /projects/:id/baseline` | T19 | `baselineRequestSchema` | `Baseline` | `BASELINE_BLOCKED`, `SPINE_VERSION_CONFLICT` |
 | 20 | `GET /projects/:id/baselines` | T19 | — | `Baseline[]` | — |
-| 21 | `GET /projects/:id/diagrams/:diagramId.svg` | T10 | — | `image/svg+xml`, không bọc envelope | `DIAGRAM_NOT_FOUND` |
+| 21 | `GET /projects/:id/diagrams/:diagramId.svg` (hoặc `.png`) | T10 ✔ | — | `image/svg+xml` / `image/png`, không bọc envelope | `DIAGRAM_NOT_FOUND` |
+| 22 | `GET /projects/:id/diagrams` | T10 ✔ | — | `(Diagram & { stale: boolean, files: { svg, png } \| null })[]` | — |
+| 23 | `POST /projects/:id/diagrams/:kind/render` (dev/thủ công; `kind` = `all` \| 5 kind) | T10 ✔ | `{ owner_id? }` (bắt buộc với `screen_layout`) | `{ spine_version, diagrams[], rendered[], removed[] }`; `.puml` lỗi ⇒ `render_status = error`, vẫn 200 | `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
 
 Mọi endpoint còn có thể trả `401 UNAUTHORIZED`, `404 PROJECT_NOT_FOUND`, `400 VALIDATION_ERROR`.
 
