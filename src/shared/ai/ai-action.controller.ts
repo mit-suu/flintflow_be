@@ -4,7 +4,9 @@ import { getActionCost } from "./credit-reservation.service.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { ApiError } from "../utils/api-error.js"
 import { sendSuccess } from "../types/api-response.js"
-import { executeDiagramPipeline } from "../../modules/drawtest/diagram-pipeline.service.js"
+import { ActionType } from "./ai-action.types.js"
+
+const VALID_ACTION_TYPES = new Set<string>(Object.values(ActionType))
 
 export const estimateCostHandler = async (
   req: Request,
@@ -45,21 +47,10 @@ export const executeAiActionHandler = async (
       throw new ApiError(400, "input là bắt buộc", "MISSING_INPUT")
     }
 
-    // Route generate_diagram through the multi-step diagram pipeline
-    if (actionType === "generate_diagram") {
-      const userPrompt = input.input_text || input.rawPrompt || ""
-      if (!userPrompt) {
-        throw new ApiError(400, "input_text là bắt buộc cho generate_diagram", "MISSING_INPUT_TEXT")
-      }
-
-      const pipelineResult = await executeDiagramPipeline(
-        userPrompt,
-        projectId,
-        userId,
-        { provider, model }
-      )
-
-      return sendSuccess(res, 200, pipelineResult)
+    // Chặn trước khi reserve credit: actionType lạ (vd generate_diagram đã gỡ)
+    // sẽ reserve rồi mới nổ ở bước nạp template.
+    if (!VALID_ACTION_TYPES.has(actionType)) {
+      throw new ApiError(400, `actionType không hợp lệ: '${actionType}'`, "INVALID_ACTION_TYPE")
     }
 
     const result = await executeAiAction(

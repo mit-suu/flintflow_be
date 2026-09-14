@@ -1,28 +1,39 @@
-import { describe, it, expect, beforeEach } from "vitest"
-import { ActionType } from "./ai-action.types.js"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { ActionType, DEPRECATED_ACTION_TYPES, SKILL_BY_ACTION_TYPE } from "./ai-action.types.js"
 import {
   listPromptAssets,
   getPromptAssetIndex,
-  invalidatePromptAssetCache
+  invalidatePromptAssetCache,
+  listSkillAssets,
+  getSkillIndex,
+  getSkillsDir,
+  computeSkillAssetVersion,
+  invalidateSkillCache
 } from "./prompt-assets.js"
+import { getSkill, getPromptTemplate } from "./prompt-registry.service.js"
+import { OUTPUT_SCHEMA_BY_ACTION_TYPE } from "./response-parser.js"
 
-describe("prompt assets trên đĩa", () => {
-  beforeEach(() => invalidatePromptAssetCache())
+const ACTIVE_ACTION_TYPES = Object.values(ActionType).filter((t) => !DEPRECATED_ACTION_TYPES.has(t))
 
-  it("MỌI ActionType trong enum đều có asset trên đĩa", () => {
-    // Đây là bất biến mà DEFAULT_TEMPLATES từng che đi: priority_ranking,
-    // scope_out_of_scope và summarize_document chỉ tồn tại trong code, không
-    // có file .md nào. Xoá bảng hardcode mà không trích chúng ra đĩa trước là
-    // làm hỏng 3 luồng đang chạy.
-    const index = getPromptAssetIndex()
-    const missing = Object.values(ActionType).filter((t) => !index.has(t))
+beforeEach(() => {
+  invalidatePromptAssetCache()
+  invalidateSkillCache()
+})
+
+describe("prompt phẳng trên đĩa (assets/prompts)", () => {
+  it("mọi ActionType KHÔNG deprecated có prompt hoặc skill", async () => {
+    const missing: string[] = []
+    for (const t of ACTIVE_ACTION_TYPES) {
+      await getPromptTemplate(t).catch(() => missing.push(t))
+    }
 
     expect(missing, `Thiếu asset cho: ${missing.join(", ")}`).toEqual([])
   })
 
-  it("không có asset MỒ CÔI (asset không ứng với ActionType nào)", () => {
-    // Chiều ngược lại của test trên. Khi xoá một ActionType chết mà quên xoá
-    // file .md, asset mồ côi sẽ vẫn được seed vào DB và không ai biết.
+  it("không có prompt MỒ CÔI (không ứng với ActionType nào)", () => {
     const known = new Set<string>(Object.values(ActionType))
     const orphans = listPromptAssets()
       .filter((a) => !known.has(a.actionType))
@@ -32,29 +43,143 @@ describe("prompt assets trên đĩa", () => {
   })
 
   it("không có actionType nào trùng nhau", () => {
-    // getPromptAssetIndex() tự throw khi trùng — nếu file nào thắng phụ thuộc
-    // thứ tự đọc thư mục thì đó là hành vi không xác định.
     expect(() => getPromptAssetIndex()).not.toThrow()
   })
 
-  it("mọi asset có frontmatter hợp lệ và template không rỗng", () => {
+  it("mọi prompt có frontmatter hợp lệ và template không rỗng", () => {
     for (const asset of listPromptAssets()) {
-      expect(asset.actionType, `${asset.file}: actionType rỗng`).toBeTruthy()
       expect(asset.provider, `${asset.file}: provider rỗng`).toBeTruthy()
       expect(asset.aiModel, `${asset.file}: aiModel rỗng`).toBeTruthy()
       expect(asset.maxTokens, `${asset.file}: maxTokens không hợp lệ`).toBeGreaterThan(0)
-      expect(
-        Number.isFinite(asset.temperature),
-        `${asset.file}: temperature không phải số`
-      ).toBe(true)
+      expect(Number.isFinite(asset.temperature), `${asset.file}: temperature`).toBe(true)
       expect(asset.template.length, `${asset.file}: template rỗng`).toBeGreaterThan(0)
     }
   })
 
-  it("bỏ qua README.md và thư mục diagram-skill", () => {
-    const files = listPromptAssets().map((a) => a.file)
+  it("bỏ qua README.md và _archive (pipeline Excalidraw đã archive)", () => {
+    const assets = listPromptAssets()
 
-    expect(files.some((f) => f.endsWith("README.md"))).toBe(false)
-    expect(files.some((f) => f.includes("diagram-skill"))).toBe(false)
+    expect(assets.some((a) => a.file.endsWith("README.md"))).toBe(false)
+    expect(assets.some((a) => a.file.includes("_archive"))).toBe(false)
+    expect(assets.some((a) => a.actionType.startsWith("diagram_"))).toBe(false)
+  })
+})
+
+describe("skill trên đĩa (assets/skills)", () => {
+  // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
+  // ⇒ 30. Ghi ở docs/spec-gaps.md.
+  it("đủ 30 skill: 10 action · 13 content · 5 renderer · 2 output", () => {
+    const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
+
+    expect(listSkillAssets()).toHaveLength(30)
+    expect(byKind("action")).toBe(10)
+    expect(byKind("content")).toBe(13)
+    expect(byKind("renderer")).toBe(5)
+    expect(byKind("output")).toBe(2)
+  })
+
+  it("không trùng skill_id", () => {
+    expect(() => getSkillIndex()).not.toThrow()
+    expect(getSkillIndex().size).toBe(listSkillAssets().length)
+  })
+
+  it("frontmatter đủ và hợp lệ", () => {
+    for (const s of listSkillAssets()) {
+      expect(s.version, `${s.dir}: version`).toBeTruthy()
+      expect(s.provider, `${s.dir}: provider`).toBeTruthy()
+      expect(s.aiModel, `${s.dir}: aiModel`).toBeTruthy()
+      expect(s.outputSchema.length, `${s.dir}: output_schema`).toBeGreaterThan(0)
+      expect(s.template.length, `${s.dir}: thân rỗng`).toBeGreaterThan(0)
+      expect(s.assetVersion, `${s.dir}: asset_version`).toMatch(/^[0-9a-f]{64}$/)
+    }
+  })
+
+  it("10 skill action có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
+    for (const s of listSkillAssets()) {
+      if (s.kind === "action") {
+        expect(s.stub, `${s.dir} không được là stub`).toBe(false)
+        const lines = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").split("\n")
+        expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(150)
+      } else {
+        expect(s.stub, `${s.dir} phải đánh dấu stub`).toBe(true)
+      }
+    }
+  })
+
+  it("SKILL_BY_ACTION_TYPE trỏ tới skill action có output_schema khớp parser", () => {
+    for (const [actionType, skillId] of Object.entries(SKILL_BY_ACTION_TYPE)) {
+      const skill = getSkillIndex().get(skillId!)
+      expect(skill, `${actionType} → ${skillId} không tồn tại`).toBeDefined()
+      expect(skill!.kind).toBe("action")
+
+      const expected = OUTPUT_SCHEMA_BY_ACTION_TYPE[actionType as ActionType]
+      expect(skill!.outputSchema, `${actionType} → ${skillId}`).toContain(expected)
+    }
+  })
+
+  it("getPromptTemplate của ActionType pipeline trả template từ skill kèm asset_version", async () => {
+    const loaded = await getPromptTemplate(ActionType.DRAFT)
+
+    expect(loaded.skillId).toBe("draft-to-ops")
+    expect(loaded.asset_version).toMatch(/^[0-9a-f]{64}$/)
+    expect(loaded.providerConfig.model).toBeTruthy()
+  })
+})
+
+describe("getSkill", () => {
+  it('getSkill("draft-to-ops") trả asset_version ổn định', () => {
+    const first = getSkill("draft-to-ops").asset_version
+    invalidateSkillCache()
+    const second = getSkill("draft-to-ops").asset_version
+
+    expect(first).toMatch(/^[0-9a-f]{64}$/)
+    expect(second).toBe(first)
+  })
+
+  it("nạp references theo yêu cầu, mặc định không nạp", () => {
+    const bare = getSkill("draft-to-ops")
+    expect(bare.references).toEqual({})
+    expect(bare.referenceNames).toEqual(["invariants", "op-grammar"])
+
+    const withRef = getSkill("draft-to-ops", { references: ["op-grammar"] })
+    expect(Object.keys(withRef.references)).toEqual(["op-grammar"])
+    expect(withRef.references["op-grammar"]).toContain("renumber")
+
+    expect(Object.keys(getSkill("draft-to-ops", { references: "all" }).references)).toHaveLength(2)
+  })
+
+  it("throw khi skill hoặc reference không tồn tại", () => {
+    expect(() => getSkill("khong-co")).toThrow(/Không tìm thấy skill/)
+    expect(() => getSkill("draft-to-ops", { references: ["khong-co"] })).toThrow(/không có reference/)
+  })
+})
+
+describe("computeSkillAssetVersion", () => {
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skill-"))
+    fs.cpSync(path.join(getSkillsDir(), "action", "draft-to-ops"), tmp, { recursive: true })
+  })
+
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }))
+
+  it("không đổi khi xuống dòng CRLF (checkout Windows)", () => {
+    const refs = ["invariants", "op-grammar"]
+    const before = computeSkillAssetVersion(tmp, refs)
+
+    const file = path.join(tmp, "SKILL.md")
+    fs.writeFileSync(file, fs.readFileSync(file, "utf-8").replace(/\r?\n/g, "\r\n"))
+
+    expect(computeSkillAssetVersion(tmp, refs)).toBe(before)
+  })
+
+  it("đổi khi sửa một reference", () => {
+    const refs = ["invariants", "op-grammar"]
+    const before = computeSkillAssetVersion(tmp, refs)
+
+    fs.appendFileSync(path.join(tmp, "references", "invariants.md"), "\nextra line\n")
+
+    expect(computeSkillAssetVersion(tmp, refs)).not.toBe(before)
   })
 })
