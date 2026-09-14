@@ -1,7 +1,7 @@
 import { Router } from "express"
 import * as billingController from "./billing.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
-import { checkoutSchema, mockWebhookSchema, upgradeSchema, validateBody } from "./billing.validation.js"
+import { checkoutSchema, paymentCallbackSchema, upgradeSchema, validateBody } from "./billing.validation.js"
 
 const router = Router()
 
@@ -9,7 +9,7 @@ const router = Router()
  * @swagger
  * tags:
  *   name: Billing
- *   description: Số dư credit, gói nạp, thanh toán qua cổng mock (Phases §9.2)
+ *   description: Số dư credit, gói nạp, thanh toán VietQR qua payment_service dùng chung
  */
 
 /**
@@ -48,7 +48,7 @@ router.get("/packages", authMiddleware, billingController.getPackages)
  * @swagger
  * /api/v1/billing/checkout:
  *   post:
- *     summary: Tạo PaymentIntent (pending) và trả về redirectUrl tới trang mock checkout
+ *     summary: Tạo PaymentIntent và order trên payment_service, trả về mã VietQR
  *     tags: [Billing]
  *     security:
  *       - BearerAuth: []
@@ -65,13 +65,17 @@ router.get("/packages", authMiddleware, billingController.getPackages)
  *                 example: pack_100
  *     responses:
  *       201:
- *         description: "{ intentId, packageId, credits, amount, currency, status, redirectUrl }"
+ *         description: "{ intentId, packageId, credits, amount, currency, status, referenceCode, paymentDescription, qrCodeUrl }"
  *       400:
  *         description: Thiếu packageId
  *       401:
  *         description: Chưa xác thực
  *       404:
  *         description: Gói không tồn tại
+ *       502:
+ *         description: payment_service lỗi hoặc không kết nối được
+ *       503:
+ *         description: Chưa cấu hình PAYMENT_SERVICE_URL / PAYMENT_CLIENT_ID / PAYMENT_API_KEY
  */
 router.post("/checkout", authMiddleware, validateBody(checkoutSchema), billingController.createCheckout)
 
@@ -79,7 +83,7 @@ router.post("/checkout", authMiddleware, validateBody(checkoutSchema), billingCo
  * @swagger
  * /api/v1/billing/checkout/{intentId}:
  *   get:
- *     summary: Chi tiết PaymentIntent cho trang mock checkout (kèm chữ ký giả lập khi còn pending)
+ *     summary: Trạng thái giao dịch (FE polling); còn pending thì đối chiếu với payment_service
  *     tags: [Billing]
  *     security:
  *       - BearerAuth: []
@@ -91,7 +95,7 @@ router.post("/checkout", authMiddleware, validateBody(checkoutSchema), billingCo
  *           type: string
  *     responses:
  *       200:
- *         description: "{ intentId, credits, amount, status, mockSignatures: { success, failed } | null }"
+ *         description: PaymentIntent (status pending | succeeded | failed)
  *       401:
  *         description: Chưa xác thực
  *       404:
@@ -101,51 +105,48 @@ router.get("/checkout/:intentId", authMiddleware, billingController.getCheckout)
 
 /**
  * @swagger
- * /api/v1/billing/webhook/mock:
+ * /api/v1/billing/payment-callback:
  *   post:
- *     summary: Webhook của cổng thanh toán mock (ký HMAC-SHA256, idempotent theo intentId)
+ *     summary: Callback từ payment_service khi order đổi trạng thái
  *     description: |
- *       Chữ ký = HMAC-SHA256(PAYMENT_WEBHOOK_SECRET, "<intentId>.<status>") dạng hex,
- *       gửi qua header `x-mock-signature` (hoặc field `signature` trong body).
- *       Gửi lại cùng intentId không cộng credit lần hai (`alreadyProcessed: true`).
+ *       Không dùng JWT (payment_service gọi server-to-server). Callback chưa được ký,
+ *       nên BE kiểm `client_id` rồi xác minh lại bằng `GET /api/orders/{order_id}`
+ *       trước khi cộng credit. Idempotent theo order_id.
  *     tags: [Billing]
- *     parameters:
- *       - in: header
- *         name: x-mock-signature
- *         schema:
- *           type: string
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [intentId, status]
+ *             required: [order_id, status, client_id]
  *             properties:
- *               intentId:
+ *               order_id:
  *                 type: string
  *               status:
  *                 type: string
- *                 enum: [success, failed]
- *               signature:
+ *                 example: paid
+ *               client_id:
  *                 type: string
  *     responses:
  *       200:
- *         description: "{ intentId, status, alreadyProcessed, creditsAdded, balance? }"
+ *         description: "{ success: true, status, alreadyProcessed, creditsAdded }"
  *       400:
  *         description: Payload không hợp lệ
- *       401:
- *         description: Chữ ký sai hoặc thiếu
+ *       403:
+ *         description: client_id không khớp
  *       404:
  *         description: Không tìm thấy giao dịch
+ *       502:
+ *         description: Không xác minh được với payment_service (có thể gọi lại)
  */
-router.post("/webhook/mock", validateBody(mockWebhookSchema), billingController.mockWebhook)
+router.post("/payment-callback", validateBody(paymentCallbackSchema), billingController.paymentCallback)
 
 /**
  * @swagger
  * /api/v1/billing/upgrade:
  *   post:
- *     summary: Đổi gói subscription (mock, chưa thu tiền) — ghi Subscription
+ *     summary: Đổi gói subscription (chưa thu tiền) — ghi Subscription
  *     tags: [Billing]
  *     security:
  *       - BearerAuth: []

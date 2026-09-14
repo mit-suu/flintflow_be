@@ -3,7 +3,13 @@ import * as billingService from "./billing.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { parseQuery, transactionsQuerySchema, CheckoutDTO, MockWebhookDTO, UpgradeDTO } from "./billing.validation.js"
+import {
+  parseQuery,
+  transactionsQuerySchema,
+  CheckoutDTO,
+  PaymentCallbackDTO,
+  UpgradeDTO
+} from "./billing.validation.js"
 import { PlanId } from "./plan.config.js"
 
 const requireUserId = (req: Request): string => {
@@ -37,15 +43,10 @@ export const getCheckout = catchAsync(async (req: Request, res: Response) => {
   return sendSuccess(res, 200, checkout)
 })
 
-export const mockWebhook = catchAsync(async (req: Request, res: Response) => {
-  const { intentId, status, signature } = req.body as MockWebhookDTO
-  const headerSignature = req.get("x-mock-signature")
-  const result = await billingService.handleMockWebhook(
-    intentId,
-    status,
-    headerSignature ?? signature
-  )
-  return sendSuccess(res, 200, result)
+export const paymentCallback = catchAsync(async (req: Request, res: Response) => {
+  const result = await billingService.handlePaymentCallback(req.body as PaymentCallbackDTO)
+  // Payment service chỉ cần 200 + { success: true } — trả nhanh, không bọc envelope
+  return res.status(200).json(result)
 })
 
 export const upgradePlan = catchAsync(async (req: Request, res: Response) => {

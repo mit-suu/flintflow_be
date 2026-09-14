@@ -1,4 +1,3 @@
-import crypto from "crypto"
 import mongoose, { ClientSession } from "mongoose"
 import { env } from "../../config/env.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -9,8 +8,13 @@ import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { planConfig, findPackage, getPlan, PlanId } from "./plan.config.js"
-
-export type MockWebhookStatus = "success" | "failed"
+import {
+  buildCallbackUrl,
+  createPaymentOrder,
+  getPaymentOrder,
+  isPaymentServiceConfigured,
+  PaymentServiceOrder
+} from "./payment-service.client.js"
 
 const sessionOptions = (session?: ClientSession) => (session ? { session } : {})
 
@@ -47,26 +51,6 @@ const withOptionalTransaction = async <T>(
   } finally {
     if (session) await session.endSession()
   }
-}
-
-// ─── Chữ ký webhook mock ─────────────────────────────────────────────
-
-/** Chuỗi được ký: `<intentId>.<status>` — tránh phụ thuộc thứ tự key JSON. */
-export const signMockWebhook = (intentId: string, status: MockWebhookStatus): string =>
-  crypto
-    .createHmac("sha256", env.PAYMENT_WEBHOOK_SECRET)
-    .update(`${intentId}.${status}`)
-    .digest("hex")
-
-export const verifyMockWebhookSignature = (
-  intentId: string,
-  status: MockWebhookStatus,
-  signature: string | undefined
-): boolean => {
-  if (!signature) return false
-  const expected = Buffer.from(signMockWebhook(intentId, status), "hex")
-  const provided = Buffer.from(signature, "hex")
-  return expected.length === provided.length && crypto.timingSafeEqual(expected, provided)
 }
 
 // ─── Số dư / gói ─────────────────────────────────────────────────────
@@ -130,98 +114,95 @@ const toIntentDTO = (intent: IPaymentIntent) => ({
   amount: intent.amount,
   currency: intent.currency,
   status: intent.status,
+  referenceCode: intent.referenceCode ?? null,
+  paymentDescription: intent.paymentDescription ?? null,
+  qrCodeUrl: intent.qrCodeUrl ?? null,
   processedAt: intent.processedAt ?? null,
   createdAt: intent.createdAt
 })
 
-const buildRedirectUrl = (intentId: string): string => {
-  const url = new URL(env.MOCK_PAYMENT_URL)
-  url.searchParams.set("intentId", intentId)
-  return url.toString()
-}
+export type PaymentIntentDTO = ReturnType<typeof toIntentDTO>
 
-export const createCheckout = async (userId: string, packageId: string) => {
+export const createCheckout = async (userId: string, packageId: string): Promise<PaymentIntentDTO> => {
   const pkg = findPackage(packageId)
   if (!pkg) {
     throw new ApiError(404, "Không tìm thấy gói credit", "PACKAGE_NOT_FOUND")
   }
+  if (!isPaymentServiceConfigured()) {
+    throw new ApiError(503, "Cổng thanh toán chưa được cấu hình", "PAYMENT_SERVICE_NOT_CONFIGURED")
+  }
 
+  // Tạo intent local trước để có ID đối chiếu trong description của order
   const intent = await PaymentIntent.create({
     userId: new mongoose.Types.ObjectId(userId),
     packageId: pkg.id,
     credits: pkg.credits,
     amount: pkg.amount,
     currency: pkg.currency,
-    provider: "mock",
+    provider: "payment_service",
     status: "pending"
   })
-
   const intentId = intent._id.toString()
-  return { ...toIntentDTO(intent), redirectUrl: buildRedirectUrl(intentId) }
+
+  let order
+  try {
+    order = await createPaymentOrder({
+      amount: pkg.amount,
+      description: `FlintFlow ${pkg.id} intent ${intentId}`,
+      callbackUrl: buildCallbackUrl()
+    })
+  } catch (error) {
+    await PaymentIntent.findOneAndUpdate(
+      { _id: intentId, status: "pending" },
+      { $set: { status: "failed", processedAt: new Date() } }
+    )
+    throw error
+  }
+
+  const updated = await PaymentIntent.findOneAndUpdate(
+    { _id: intentId },
+    {
+      $set: {
+        paymentOrderId: order.order_id,
+        referenceCode: order.reference_code,
+        paymentDescription: order.payment_description,
+        qrCodeUrl: order.qr_code_url
+      }
+    },
+    { returnDocument: "after" }
+  )
+
+  return toIntentDTO(updated ?? intent)
 }
 
-/**
- * Trang mock checkout đóng vai cổng thanh toán: cổng thật giữ secret phía nó,
- * còn cổng giả chạy trong trình duyệt nên BE ký sẵn hai kết quả cho intent
- * đang pending của chính chủ.
- */
-export const getCheckout = async (userId: string, intentId: string) => {
-  if (!mongoose.isValidObjectId(intentId)) {
-    throw new ApiError(400, "ID giao dịch không hợp lệ", "INVALID_INTENT_ID")
-  }
+// ─── Chốt kết quả thanh toán ─────────────────────────────────────────
 
-  const intent = await PaymentIntent.findOne({ _id: intentId, userId })
-  if (!intent) {
-    throw new ApiError(404, "Không tìm thấy giao dịch", "INTENT_NOT_FOUND")
-  }
-
-  const dto = toIntentDTO(intent)
-  if (intent.status !== "pending") return { ...dto, mockSignatures: null }
-
-  return {
-    ...dto,
-    mockSignatures: {
-      success: signMockWebhook(dto.intentId, "success"),
-      failed: signMockWebhook(dto.intentId, "failed")
-    }
-  }
-}
-
-// ─── Webhook ─────────────────────────────────────────────────────────
-
-export interface MockWebhookResult {
-  intentId: string
-  status: IPaymentIntent["status"]
-  alreadyProcessed: boolean
+export interface SettleResult {
+  intent: IPaymentIntent
+  settled: boolean
   creditsAdded: number
   balance?: number
 }
 
-export const handleMockWebhook = async (
+/**
+ * Chuyển intent pending → succeeded/failed (idempotent) và cộng credit khi
+ * succeeded. Chỉ intent còn `pending` mới được chuyển, nên callback gọi lại
+ * hoặc polling chạy song song với callback không cộng hai lần.
+ */
+const settleIntent = async (
   intentId: string,
-  status: MockWebhookStatus,
-  signature: string | undefined
-): Promise<MockWebhookResult> => {
-  if (!verifyMockWebhookSignature(intentId, status, signature)) {
-    throw new ApiError(401, "Chữ ký webhook không hợp lệ", "INVALID_WEBHOOK_SIGNATURE")
-  }
-
-  const nextStatus = status === "success" ? "succeeded" : "failed"
-
+  outcome: "succeeded" | "failed"
+): Promise<SettleResult | null> => {
   const processed = await withOptionalTransaction(async (session) => {
     const options = sessionOptions(session)
 
-    // Idempotent theo intentId: chỉ intent còn pending mới được chuyển trạng thái.
     const intent = await PaymentIntent.findOneAndUpdate(
       { _id: intentId, status: "pending" },
-      { $set: { status: nextStatus, processedAt: new Date() } },
+      { $set: { status: outcome, processedAt: new Date() } },
       { ...options, returnDocument: "after" }
     )
     if (!intent) return null
-
-    if (nextStatus === "failed") {
-      return { intent, balance: undefined }
-    }
+    if (outcome === "failed") return { intent, balance: undefined }
 
     const userId = intent.userId.toString()
     await getOrCreateWallet(userId, session)
@@ -251,23 +232,12 @@ export const handleMockWebhook = async (
     return { intent, balance: wallet.balance }
   })
 
-  if (!processed) {
-    const existing = await PaymentIntent.findOne({ _id: intentId })
-    if (!existing) {
-      throw new ApiError(404, "Không tìm thấy giao dịch", "INTENT_NOT_FOUND")
-    }
-    return {
-      intentId,
-      status: existing.status,
-      alreadyProcessed: true,
-      creditsAdded: 0
-    }
-  }
+  if (!processed) return null
 
   const { intent, balance } = processed
   const userId = intent.userId.toString()
 
-  if (intent.status === "succeeded") {
+  if (outcome === "succeeded") {
     await notify(userId, {
       type: "payment_success",
       title: "Thanh toán thành công",
@@ -279,18 +249,132 @@ export const handleMockWebhook = async (
     await notify(userId, {
       type: "payment_failed",
       title: "Thanh toán thất bại",
-      body: "Giao dịch nạp credit không thành công. Bạn chưa bị trừ tiền.",
+      body: "Giao dịch nạp credit không thành công.",
       link: "/home/billing",
       meta: { intentId, amount: intent.amount }
     })
   }
 
   return {
-    intentId,
-    status: intent.status,
-    alreadyProcessed: false,
-    creditsAdded: intent.status === "succeeded" ? intent.credits : 0,
+    intent,
+    settled: true,
+    creditsAdded: outcome === "succeeded" ? intent.credits : 0,
     balance
+  }
+}
+
+/**
+ * Đối chiếu intent local với order trên payment_service — nguồn sự thật duy
+ * nhất. Không cộng credit nếu số tiền hay client_id lệch.
+ */
+const reconcileWithRemote = async (
+  intent: IPaymentIntent,
+  remote: PaymentServiceOrder
+): Promise<SettleResult | null> => {
+  const intentId = intent._id.toString()
+
+  if (remote.client_id && remote.client_id !== env.PAYMENT_CLIENT_ID) {
+    console.error(`[Billing] Order ${remote.order_id} thuộc client khác (${remote.client_id})`)
+    return null
+  }
+
+  if (remote.status === "paid") {
+    if (Number(remote.amount) !== intent.amount) {
+      console.error(
+        `[Billing] Lệch số tiền order ${remote.order_id}: remote=${remote.amount}, intent=${intent.amount}`
+      )
+      return null
+    }
+    return settleIntent(intentId, "succeeded")
+  }
+
+  if (remote.status === "failed") {
+    return settleIntent(intentId, "failed")
+  }
+
+  return null
+}
+
+/**
+ * Trang QR polling endpoint này. Khi còn pending thì hỏi payment_service —
+ * fallback cho trường hợp callback không tới được BE (vd. dev chạy localhost).
+ */
+export const getCheckout = async (userId: string, intentId: string): Promise<PaymentIntentDTO> => {
+  if (!mongoose.isValidObjectId(intentId)) {
+    throw new ApiError(400, "ID giao dịch không hợp lệ", "INVALID_INTENT_ID")
+  }
+
+  const intent = await PaymentIntent.findOne({ _id: intentId, userId })
+  if (!intent) {
+    throw new ApiError(404, "Không tìm thấy giao dịch", "INTENT_NOT_FOUND")
+  }
+
+  if (intent.status !== "pending" || !intent.paymentOrderId) {
+    return toIntentDTO(intent)
+  }
+
+  try {
+    const remote = await getPaymentOrder(intent.paymentOrderId)
+    const result = await reconcileWithRemote(intent, remote)
+    if (result) return toIntentDTO(result.intent)
+  } catch (error) {
+    // Cổng lỗi tạm thời: vẫn trả trạng thái local, lần poll sau thử lại
+    console.warn(`[Billing] Poll order ${intent.paymentOrderId} failed:`, (error as Error).message)
+  }
+
+  const latest = await PaymentIntent.findOne({ _id: intentId })
+  return toIntentDTO(latest ?? intent)
+}
+
+// ─── Callback từ payment_service ─────────────────────────────────────
+
+export interface PaymentCallbackInput {
+  order_id: string
+  status: string
+  client_id: string
+}
+
+export interface PaymentCallbackResult {
+  success: true
+  status: IPaymentIntent["status"]
+  alreadyProcessed: boolean
+  creditsAdded: number
+}
+
+/**
+ * Callback hiện CHƯA được payment_service ký, nên body chỉ là "gợi ý":
+ * trạng thái được xác minh lại bằng GET /api/orders/:order_id trước khi cộng credit.
+ */
+export const handlePaymentCallback = async (
+  input: PaymentCallbackInput
+): Promise<PaymentCallbackResult> => {
+  if (input.client_id !== env.PAYMENT_CLIENT_ID) {
+    throw new ApiError(403, "client_id không hợp lệ", "INVALID_CLIENT_ID")
+  }
+
+  const intent = await PaymentIntent.findOne({ paymentOrderId: input.order_id })
+  if (!intent) {
+    throw new ApiError(404, "Không tìm thấy giao dịch", "INTENT_NOT_FOUND")
+  }
+
+  if (intent.status !== "pending") {
+    return { success: true, status: intent.status, alreadyProcessed: true, creditsAdded: 0 }
+  }
+
+  const remote = await getPaymentOrder(input.order_id)
+  const result = await reconcileWithRemote(intent, remote)
+
+  if (!result) {
+    const latest = await PaymentIntent.findOne({ _id: intent._id })
+    const status = latest?.status ?? intent.status
+    return { success: true, status, alreadyProcessed: status !== "pending", creditsAdded: 0 }
+  }
+
+  return {
+    success: true,
+    status: result.intent.status,
+    alreadyProcessed: false,
+    creditsAdded: result.creditsAdded
   }
 }
 
