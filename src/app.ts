@@ -18,6 +18,7 @@ import notificationRoutes from "./modules/notification/notification.route.js"
 import billingRoutes from "./modules/billing/billing.route.js"
 import spineRoutes from "./modules/spine/spine.route.js"
 import changesRoutes from "./modules/spine/changes.route.js"
+import flagsRoutes from "./modules/spine/flags.route.js"
 import exportRoutes from "./modules/render/export.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 
@@ -118,6 +119,7 @@ app.use("/api/v1/admin", adminRoutes)
 app.use("/api/v1/projects", projectRoutes)
 app.use("/api/v1/projects", spineRoutes)
 app.use("/api/v1/projects", changesRoutes)
+app.use("/api/v1/projects", flagsRoutes)
 app.use("/api/v1/specifications", specificationRoutes)
 app.use("/api/v1/verification", verificationRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
