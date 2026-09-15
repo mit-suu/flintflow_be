@@ -1,0 +1,105 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`renderSection — fixed sections > fixed:1 — vision, goals, release scope, high business rules, external systems, context diagram 1`] = `
+{
+  "blocks": [
+    {
+      "runs": [
+        {
+          "text": "Turn a raw idea into an SRS.",
+        },
+      ],
+      "type": "paragraph",
+    },
+    {
+      "level": 2,
+      "text": "Goals",
+      "type": "heading",
+    },
+    {
+      "items": [
+        [
+          {
+            "text": "Ship a baseline-quality SRS in one day",
+          },
+        ],
+      ],
+      "type": "bullet_list",
+    },
+    {
+      "level": 2,
+      "text": "Release 1.0 Scope",
+      "type": "heading",
+    },
+    {
+      "level": 3,
+      "text": "In Scope",
+      "type": "heading",
+    },
+    {
+      "items": [
+        [
+          {
+            "text": "Guided pipeline",
+          },
+        ],
+      ],
+      "type": "bullet_list",
+    },
+    {
+      "level": 3,
+      "text": "Out of Scope",
+      "type": "heading",
+    },
+    {
+      "items": [
+        [
+          {
+            "text": "PDF export",
+          },
+        ],
+      ],
+      "type": "bullet_list",
+    },
+    {
+      "level": 2,
+      "text": "High-Level Business Rules",
+      "type": "heading",
+    },
+    {
+      "items": [
+        [
+          {
+            "text": "Every statement must be traceable.",
+          },
+        ],
+      ],
+      "type": "bullet_list",
+    },
+    {
+      "level": 2,
+      "text": "External Systems",
+      "type": "heading",
+    },
+    {
+      "items": [
+        [
+          {
+            "text": "Payment Gateway (system) — Processes payments.",
+          },
+        ],
+      ],
+      "type": "bullet_list",
+    },
+    {
+      "caption": "Figure — System Context Diagram",
+      "png": "png-d01",
+      "type": "image",
+    },
+  ],
+  "heading": "Product Overview",
+  "id": "fixed:1",
+  "level": 1,
+  "number": "1",
+}
+`;
