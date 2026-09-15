@@ -4,14 +4,14 @@ import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { buildDocxFileName, writeDocx } from "./docx-writer.js"
 import { authorize } from "./render.controller.js"
 import { exportWordQuerySchema } from "../pipeline/pipeline.dto.js"
-import { getDocument, NoWorkingDraftError } from "./assemble.service.js"
+import { getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { sendError } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-/** Preview writer từ `RenderedDocument` gửi thẳng. Route thật `GET /projects/:id/export/word` do T15 thêm. */
+/** Preview writer từ `RenderedDocument` gửi thẳng. Route thật `GET /projects/:id/export/word` ở render.route.ts (review C1). */
 export const previewWord = catchAsync(async (req: Request, res: Response) => {
   if (!req.user?.userId) {
     throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
@@ -37,9 +37,10 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
 })
 
 /**
- * `GET /projects/:projectId/export/word?source=draft|baseline&baseline_id=` (T15) — route thật của
- * contract endpoint 18. Không bọc envelope, giống `previewWord`, nhưng đọc Spine/Baseline qua
- * `assemble.service.ts` thay vì nhận `RenderedDocument` trong body.
+ * `GET /projects/:projectId/export/word?source=draft|baseline&baseline_id=` — route thật của
+ * contract endpoint 18 (mount ở `render.route.ts`, review C1). Không bọc envelope, giống
+ * `previewWord`, nhưng đọc Spine/Baseline qua `assemble.service.ts` thay vì nhận `RenderedDocument`
+ * trong body.
  */
 export const exportWord = catchAsync(async (req: Request, res: Response) => {
   const { projectId, projectName } = await authorize(req)
@@ -70,5 +71,13 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
   res.setHeader("Content-Type", DOCX_MIME)
   res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
   res.setHeader("Content-Length", String(buffer.length))
+  // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
+  if (parsedQuery.data.source === "draft") {
+    const meta = await getDraftMeta(projectId)
+    if (meta) {
+      res.setHeader("X-Assembled-At-Version", String(meta.assembled_at_version))
+      res.setHeader("X-Spine-Version", String(meta.spine_version))
+    }
+  }
   return res.send(buffer)
 })
