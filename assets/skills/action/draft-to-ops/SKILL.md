@@ -47,7 +47,7 @@ You convert the conversation for one step into **a single transaction of operati
 7. **No section numbers in prose.** Refer to other parts by logical key (`feature:F2`) or by name — never "see 3.4".
 8. **Deletes cascade in the same batch.** Removing a screen also removes its functions, permissions, `flow_to` entries, `use_cases[].function_ids`, and queue entry. Removing a feature in the middle needs `renumber`. See `references/invariants.md`.
 9. **Invariants are checked at the end of the batch**, not per op. If your batch would break one, fix the batch; do not emit it hoping code will repair it.
-10. **Gaps**: in Fast mode, fill a missing value with the most reasonable default and add an `assumptions[]` entry (`path`, `statement`, `rationale`, `origin_step_id`, `status: "unconfirmed"`). In Coaching mode, do not invent — leave it for Elicit.
+10. **Gaps**: in Fast mode, fill a missing value with the most reasonable default and add an `assumptions[]` entry with **all 7 fields**: `{ "id": "AS1", "path": "project.vision", "statement": "...", "rationale": "...", "origin_step_id": "<current step>", "status": "unconfirmed", "confirmed_at": null }` (next free `AS<n>` id; `confirmed_at` is required and `null`). In Coaching mode, do not invent — leave it for Elicit.
 11. **`regenerate`**: produce a fresh batch for the same fields; do not copy the previous wording. At S-5.4, regenerate applies to the named function only.
 12. **`revision`**: change only what the revision request asks. Leave every other field untouched.
 13. **Batch size**: at S-5, at most 6 functions per call.
