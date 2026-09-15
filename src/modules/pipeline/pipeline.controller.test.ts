@@ -29,6 +29,7 @@ import { ANSWER_MAX_CHARS } from "./pipeline.dto.js"
 import { get as getSpine, getOrCreate } from "../spine/spine.repository.js"
 import { roundCountsForSteps } from "./meter.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
@@ -168,6 +169,18 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     const outcome = await invokeSse(runStepController, OWNER, PROJECT, "S-3.1", { session_id: "s1", base_version: 1 })
 
     expect(outcome.written.some((w) => w.includes("VALIDATION_ERROR"))).toBe(true)
+  })
+
+  it("AiActionError INSUFFICIENT_CREDIT giữa chừng ⇒ SSE error đúng mã, retryable (không quy về NOT_IMPLEMENTED)", async () => {
+    vi.mocked(runStep).mockImplementation(async (_p, stepId, _s, _u, emit) => {
+      emit({ type: "intake", step_id: stepId, phase: "S-2", empty_fields: [] })
+      throw new AiActionError(402, "Không đủ credit", "INSUFFICIENT_CREDIT")
+    })
+
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "S-2.3", { session_id: "s1", base_version: 1 })
+
+    expect(outcome.written.some((w) => w.includes("\"code\":\"INSUFFICIENT_CREDIT\""))).toBe(true)
+    expect(outcome.written.some((w) => w.includes("retryable\":true"))).toBe(true)
   })
 
   it("F8: client đóng kết nối giữa chừng ⇒ AbortSignal truyền vào runStep bị abort, không ghi/end sau khi đóng", async () => {

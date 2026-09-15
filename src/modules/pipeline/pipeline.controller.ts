@@ -34,6 +34,7 @@ import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, type 
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -106,7 +107,9 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
  *  đóng) — quy về `VALIDATION_ERROR` nếu là lỗi 400 (đầu vào), còn lại quy về `NOT_IMPLEMENTED` (501, đúng
  *  ngữ nghĩa "nhánh chưa hiện thực"/lỗi không rõ trong bảng contract §0.3). */
 const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
-  if (err instanceof ApiError) {
+  // AiActionError (reserve credit, provider) không kế thừa ApiError nhưng cùng dạng {statusCode, code} — vd
+  // INSUFFICIENT_CREDIT giữa chừng trước đây bị quy thành NOT_IMPLEMENTED (M3 2026-09-15).
+  if (err instanceof ApiError || err instanceof AiActionError) {
     if (isPipelineErrorCode(err.code)) return err.code
     if (err.statusCode === 400) return "VALIDATION_ERROR"
   }
