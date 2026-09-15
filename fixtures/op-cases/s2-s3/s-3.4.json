@@ -1,0 +1,31 @@
+{
+  "step_id": "S-3.4",
+  "skill_id": "actors-and-usecases",
+  "notes": "Run Guided Pipeline Step always shows readiness flags (include); accept, revision and error handling are optional continuations of it (extend).",
+  "ops": [
+    {
+      "op": "set",
+      "path": "use_cases[id=UC02].includes",
+      "value": ["UC06"],
+      "reason": "S-3.4: every pipeline step run ends by showing readiness flags"
+    },
+    {
+      "op": "set",
+      "path": "use_cases[id=UC03].extends",
+      "value": ["UC02"],
+      "reason": "S-3.4: accepting is an optional outcome of running a step"
+    },
+    {
+      "op": "set",
+      "path": "use_cases[id=UC04].extends",
+      "value": ["UC02"],
+      "reason": "S-3.4: requesting revision is an optional outcome of running a step"
+    },
+    {
+      "op": "set",
+      "path": "use_cases[id=UC15].extends",
+      "value": ["UC02"],
+      "reason": "S-3.4: a validation error is an optional branch of running a step"
+    }
+  ]
+}
