@@ -37,6 +37,7 @@ describe("callGLM", () => {
     const res = await callGLM("prompt", { provider: "glm", model: "zai-org/GLM-5.3-Flash", maxTokens: 100, temperature: 0.2 } as never)
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ thinking: { type: "disabled" }, stream: true }))
+    expect(create.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
     expect(JSON.parse(res.text)).toEqual({ reply: "hi", questions: [] })
     expect(res).toMatchObject({ promptTokens: 10, completionTokens: 20 })
   })
