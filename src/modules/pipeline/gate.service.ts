@@ -72,14 +72,7 @@ const load = async (projectId: string): Promise<SpineRecord> => {
   return record
 }
 
-const usageCounts = async (projectId: string, stepId: string, step: StepState | undefined) => {
-  const since = await meter.roundStartedAt(projectId, step)
-  const [calls_used, regenerate_used] = await Promise.all([
-    meter.countCalls(projectId, stepId, { since }),
-    meter.countCalls(projectId, stepId, { since, callKind: "regenerate" })
-  ])
-  return { calls_used, regenerate_used }
-}
+const usageCounts = meter.roundCounts
 
 const buildSummary = (spine: Spine, stepId: string, counts: { calls_used: number; regenerate_used: number }): StepSummary => {
   const def = getStep(stepId)
