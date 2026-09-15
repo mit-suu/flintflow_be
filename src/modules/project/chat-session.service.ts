@@ -8,9 +8,8 @@ import { buildDocumentContext } from "../../shared/ai/document-context.service.j
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
-  // Deactivate other chat sessions for this project first
-  await ChatSession.updateMany({ projectId }, { isActive: false })
-
+  // T13: không tắt (isActive) session khác của project — nhiều session chat (không pipeline) có thể
+  // tồn tại song song, chỉ đúng một session giữ is_pipeline (bất biến 7, srs-spine.md §6).
   const base = {
     projectId: new mongoose.Types.ObjectId(projectId),
     messages: [],
@@ -45,6 +44,21 @@ export const getChatSessionById = async (chatSessionId: string): Promise<IChatSe
   return session
 }
 
+/**
+ * F5 (review T13, IDOR): mọi route `/projects/:projectId/chats/:chatId*` phải xác nhận `chatId` THẬT SỰ
+ * thuộc `projectId` trên đường dẫn — trước đây `getChatSessionById`/`deleteChatSession`/`sendMessage*` chỉ
+ * tra theo `chatId`, không đối chiếu `projectId`, nên một user sở hữu project A đoán được `chatId` của
+ * project B (không phải của mình) vẫn đọc/xoá/gửi tin được. 404 `CHAT_SESSION_NOT_FOUND` (không phải 403)
+ * để không lộ việc chatId đó có tồn tại hay không, cùng pattern các module khác trong repo.
+ */
+export const assertChatSessionOwnership = async (projectId: string, chatSessionId: string): Promise<IChatSession> => {
+  const session = await ChatSession.findById(chatSessionId)
+  if (!session || String(session.projectId) !== String(projectId)) {
+    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+  return session
+}
+
 import { SECTION_METADATA } from "../../shared/constants/section-types.js"
 import { Project } from "./project.model.js"
 import { Section, SectionType } from "../specification/section.model.js"
@@ -65,7 +79,9 @@ export const sendMessageAndGetResponse = async (
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
   }
 
-  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
+  // T13: session không pipeline chỉ dùng để hỏi đáp (CHAT) — không cho chạy Discovery qua chat cũ,
+  // pipeline B-0…B-2 đi qua step-runner (session is_pipeline). Xem coding-rules mục "Sửa chat-session".
+  const isDiscoveryMode = session.is_pipeline && discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
   const currentWorkspacePhase = isDiscoveryMode ? "discovery" : (workspacePhase || "product_overview")
 
   // 1. Add user message
@@ -231,8 +247,8 @@ export const sendMessageStream = async (
     })
     .join("\n")
 
-  // 3. Determine ActionType: Discovery chat vs regular chat
-  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
+  // 3. Determine ActionType: Discovery chat vs regular chat — T13: session không pipeline chỉ CHAT.
+  const isDiscoveryMode = session.is_pipeline && discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
   const actionType = isDiscoveryMode ? ActionType.CHAT_DISCOVERY : ActionType.CHAT
 
   // 4. Build step name and doc context
@@ -358,10 +374,24 @@ function buildCompletedStepsSummary(messages: IChatMessage[]): string {
     .join("\n")
 }
 
+/**
+ * Xoá session. Nếu session xoá đang giữ `is_pipeline` (bất biến 7): promote session gần nhất còn lại
+ * (theo `createdAt`) thành pipeline, để project luôn có đúng một session pipeline khi còn session nào đó.
+ */
 export const deleteChatSession = async (chatSessionId: string): Promise<void> => {
+  const target = await ChatSession.findById(chatSessionId, { projectId: 1, is_pipeline: 1 })
+  if (!target) {
+    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+
   const result = await ChatSession.deleteOne({ _id: chatSessionId })
   if (result.deletedCount === 0) {
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+
+  if (target.is_pipeline) {
+    const next = await ChatSession.findOne({ projectId: target.projectId }).sort({ createdAt: -1 })
+    if (next) await ChatSession.updateOne({ _id: next._id }, { is_pipeline: true })
   }
 }
 
