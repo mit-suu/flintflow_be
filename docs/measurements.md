@@ -120,3 +120,33 @@ Stopped at **S-3.2 draft**: GLM-5.3-Flash kept reasoning (hidden `reasoning_cont
   `fixed:2.2.2`); `non_english_content` = 0.
 - DoD `E2E_AI` (3/3 runs, ≥ 5 actors, ≥ 12 use cases) is **not met**: blocked on the model choice for
   `actors-and-usecases` (S-3.2…S-3.5), not on pipeline code.
+
+## S-2/S-3 real provider — GLM-5.3-Flash with `reasoning_effort: "low"` (runs 12–17, 2026-09-15)
+
+Decision: keep GLM-5.3-Flash (the only model on the Modal endpoint), send `reasoning_effort: "low"` +
+`response_format: json_object` (`7618fe7`). Runs 15–17 also use the tuned `actors-and-usecases` /
+`product-overview` skills and `reads` with `project.goals/release_scope` (`be189e2`). Same harness as above,
+each run ends with `POST /assemble` + `GET /export/word`.
+
+| Run | Skills | Steps | Calls | Tokens in | Tokens out | Credit | Actors (kinds) | Use cases | Red in §1/§2 | non-English | Diagrams | Docx |
+| --- | --- | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | --- | ---: |
+| 12 | before tuning | 12/12 | 15 | 35 352 | 6 727 | 45 | 2 (human) | 7 | 0 | 0 | context ok, usecase ok | 63 KB |
+| 13 | before tuning | 12/12 | 16 | 37 765 | 6 827 | 49 | 2 (system, human) | 7 | 0 | 0 | ok, ok | 55 KB |
+| 14 | before tuning | 12/12 | 17 | 45 736 | 9 459 | 53 | 4 (system, human, time) | 9 | 0 | 0 | ok, ok | 83 KB |
+| 15 | tuned | 12/12 | 16 | 45 805 | 9 214 | 49 | 4 (system, human, time) | **15** | 0 | 0 | ok, ok | 156 KB |
+| 16 | tuned | 12/12 | 17 | 43 967 | 8 935 | 53 | 3 (system, human) | 11 | 0 | 0 | ok, ok | 98 KB |
+| 17 | tuned | 12/12 | 16 | 46 530 | 10 151 | 49 | 3 (human) | 10 | 0 | 0 | ok, ok | 114 KB |
+
+Per-step shape (run 15): elicit 1.1k–2.8k in / 0.1k–0.6k out; draft 2.1k–5.0k in (S-3.x largest, projection
+grows with `use_cases[]`) / 0.1k–3.0k out (S-3.1 heaviest); S-2.1 needed one schema retry.
+
+### Observations
+
+- Reliability: **6/6 runs complete S-1.2 → S-3.6 → assemble → Word** through the API; 0 red flags in scope,
+  `non_english_content` = 0, context + usecase diagrams `ok` every time. Step wall time 1–28 s.
+- Cost: `effort=low` cut tokens-out ~7× versus runs 1–8 (9–10k vs 65k for fewer steps); credit per full
+  S-1.2→S-3.6 run is 45–53 (≈ 2–4 credit per step), in line with the Phases §4.2 pricing — no projection
+  change needed before Wave 4.
+- Completeness varies run to run (actors 3–4, use cases 10–15). Tuning raised use cases (7 → 10–15) but the
+  model still rarely derives a payment-gateway actor from "credit reservation and metering" and sometimes
+  skips the `time` actor. DoD thresholds ≥ 5 actors / ≥ 12 use cases: **met 0/3** (run 15 meets use cases only).
