@@ -74,9 +74,11 @@ vi.mock("../../shared/ai/prompt-registry.service.js", () => ({
 }))
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { createChatSession, deleteChatSession, sendMessageAndGetResponse } from "./chat-session.service.js"
+import { createChatSession, deleteChatSession, sendMessageAndGetResponse, assertChatSessionOwnership } from "./chat-session.service.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 
 const PROJECT = "650000000000000000000001"
+const OTHER_PROJECT = "650000000000000000000002"
 
 beforeEach(() => {
   db.reset()
@@ -147,5 +149,28 @@ describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
 
     expect(aiMocks.executeAiAction).toHaveBeenCalledTimes(1)
     expect(aiMocks.executeAiAction.mock.calls[0][0]).toBe(ActionType.CHAT)
+  })
+})
+
+describe("assertChatSessionOwnership (F5 — chặn IDOR: chatId phải thuộc đúng projectId)", () => {
+  it("chatId thuộc project khác ⇒ 404 CHAT_SESSION_NOT_FOUND (không lộ chatId có tồn tại hay không)", async () => {
+    const session = await createChatSession(PROJECT)
+
+    const err = await assertChatSessionOwnership(OTHER_PROJECT, String(session._id)).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(404)
+    expect((err as ApiError).code).toBe("CHAT_SESSION_NOT_FOUND")
+  })
+
+  it("chatId không tồn tại ⇒ 404 CHAT_SESSION_NOT_FOUND", async () => {
+    const err = await assertChatSessionOwnership(PROJECT, "000000000000000000000000").catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).code).toBe("CHAT_SESSION_NOT_FOUND")
+  })
+
+  it("chatId thuộc đúng project ⇒ trả về session", async () => {
+    const session = await createChatSession(PROJECT)
+    const found = await assertChatSessionOwnership(PROJECT, String(session._id))
+    expect(String(found._id)).toBe(String(session._id))
   })
 })
