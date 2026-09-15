@@ -1,6 +1,10 @@
 {
   "step_id": "S-1.2",
   "skill_id": "project-classifier",
-  "notes": "project.type/domain/complexity already carry the correct classification from Brief extraction (B-1.1-B-1.6); no change needed.",
-  "ops": []
+  "notes": "Classification derived from the Brief: a guided, AI-assisted SRS authoring tool for a solo founder/business analyst, browser-only, with a 12-phase pipeline, five diagram kinds and a credit ledger.",
+  "ops": [
+    { "op": "set", "path": "project.type", "value": "web_application", "reason": "Brief describes a browser-only guided workflow" },
+    { "op": "set", "path": "project.domain", "value": "Requirements engineering / AI-assisted documentation", "reason": "B-1.1 problem statement" },
+    { "op": "set", "path": "project.complexity", "value": "high", "reason": "12-phase pipeline, 5 diagram kinds, credit ledger, multi-role admin" }
+  ]
 }
