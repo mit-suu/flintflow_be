@@ -1,0 +1,25 @@
+{
+  "step_id": "S-3.5",
+  "skill_id": "actors-and-usecases",
+  "notes": "Final wording pass on the three descriptions with the least context from S-3.2/S-3.3; the remaining 13 use case descriptions were already complete at creation.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "use_cases[id=UC09].description",
+      "value": "The payment gateway calls back after authorizing a purchase, and the credit ledger records the settled amount against the founder's wallet.",
+      "reason": "S-3.5: tighten actor + trigger + outcome wording"
+    },
+    {
+      "op": "set",
+      "path": "use_cases[id=UC10].description",
+      "value": "The render service compiles a diagram's stored PlantUML source into SVG for the app and PNG for export, on request from the diagram pipeline.",
+      "reason": "S-3.5: tighten actor + trigger + outcome wording"
+    },
+    {
+      "op": "set",
+      "path": "use_cases[id=UC11].description",
+      "value": "Once a day, the scheduler finds credit reservations past their expiry window and releases the held credits back to the wallet.",
+      "reason": "S-3.5: tighten actor + trigger + outcome wording"
+    }
+  ]
+}
