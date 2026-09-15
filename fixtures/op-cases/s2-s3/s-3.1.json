@@ -1,13 +1,13 @@
 {
   "step_id": "S-3.1",
   "skill_id": "actors-and-usecases",
-  "notes": "Primary human actor and an admin actor added; system and time actors already present from S-2.3.",
+  "notes": "Primary human actor, an admin actor, and the time actor implied by the credit reservation lifecycle — system actors already present from S-2.3. The time actor is added here (not at S-2.3): S-2.3 is scoped to kind=system external integrations only, and a kind!=human actor added after S-2.5 renders the context diagram staling it is an accepted, expected outcome (closed by re-running S-2.5 later), not a reason to smuggle a non-system actor into S-2.3's scope.",
   "ops": [
     {
       "op": "add",
       "path": "actors[]",
       "value": {
-        "id": "A04",
+        "id": "A03",
         "name": "Founder / Business Analyst",
         "kind": "human",
         "description": "Drives the guided Brief-to-SRS pipeline for their own project, answering elicitation questions and accepting gates."
@@ -18,7 +18,7 @@
       "op": "add",
       "path": "actors[]",
       "value": {
-        "id": "A05",
+        "id": "A04",
         "name": "Admin",
         "kind": "human",
         "description": "Reviews read-only admin views for users, AI cost metrics and audit activity across projects."
@@ -27,14 +27,25 @@
     },
     {
       "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A05",
+        "name": "Credit Expiry Scheduler",
+        "kind": "time",
+        "description": "Nightly scheduled job that expires stale reserved credit holds that were never finalized."
+      },
+      "reason": "S-3.1 time actor implied by credit reservation lifecycle"
+    },
+    {
+      "op": "add",
       "path": "roles[]",
-      "value": { "id": "R01", "name": "Founder", "actor_id": "A04" },
+      "value": { "id": "R01", "name": "Founder", "actor_id": "A03" },
       "reason": "S-3.1 role for primary actor"
     },
     {
       "op": "add",
       "path": "roles[]",
-      "value": { "id": "R02", "name": "Admin", "actor_id": "A05" },
+      "value": { "id": "R02", "name": "Admin", "actor_id": "A04" },
       "reason": "S-3.1 role for admin actor"
     }
   ]
