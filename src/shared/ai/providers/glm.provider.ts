@@ -12,6 +12,8 @@ export const stripReasoning = (text: string): string => {
   return end === -1 ? text : text.slice(end + "</think>".length).trimStart()
 }
 
+export const GLM_REASONING_HEADROOM_TOKENS = 6144
+
 export const callGLM = async (
   prompt: string,
   providerConfig: AiProviderConfig
@@ -45,7 +47,9 @@ export const callGLM = async (
   })
 
   const model = providerConfig.model || "zai-org/GLM-5.3-Flash"
-  const maxTokens = providerConfig.maxTokens || 2048
+  // GLM-5.3 vẫn suy nghĩ ngầm (`reasoning_content`) và phần đó tính vào `max_tokens`: với prompt step thật, 2048
+  // token hết trước khi có `content` (M3 2026-09-15). `maxTokens` của skill là ngân sách cho câu trả lời.
+  const maxTokens = (providerConfig.maxTokens || 2048) + GLM_REASONING_HEADROOM_TOKENS
   const temperature = providerConfig.temperature ?? 0.3
 
   try {
@@ -67,14 +71,19 @@ export const callGLM = async (
     } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
 
     let text = ""
+    let reasoningLength = 0
+    let finishReason: string | null = null
     let promptTokens = 0
     let completionTokens = 0
 
     for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta?.content
+      const choice = chunk.choices?.[0]
+      const delta = choice?.delta?.content
       if (delta) {
         text += delta
       }
+      reasoningLength += ((choice?.delta as { reasoning_content?: string } | undefined)?.reasoning_content ?? "").length
+      if (choice?.finish_reason) finishReason = choice.finish_reason
       if ((chunk as any).usage) {
         promptTokens = (chunk as any).usage.prompt_tokens || promptTokens
         completionTokens = (chunk as any).usage.completion_tokens || completionTokens
@@ -88,8 +97,17 @@ export const callGLM = async (
       completionTokens = Math.ceil(text.length / 4)
     }
 
+    const answer = stripReasoning(text)
+    if (!answer.trim()) {
+      throw new AiActionError(
+        502,
+        `GLM không trả nội dung (finish_reason=${finishReason ?? "?"}, suy nghĩ ${reasoningLength} ký tự, max_tokens=${maxTokens})`,
+        "GLM_EMPTY_OUTPUT"
+      )
+    }
+
     return {
-      text: stripReasoning(text),
+      text: answer,
       promptTokens,
       completionTokens
     }
