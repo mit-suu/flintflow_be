@@ -120,19 +120,8 @@ const pushTranscript = async (sessionId: string, stepId: string, role: "user" | 
   await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: msg } })
 }
 
-/** `calls_used`/`regenerate_used` của vòng hiện tại của step — xem `meter.roundStartedAt`. */
-const usageCounts = async (
-  projectId: string,
-  stepId: string,
-  step: StepState | undefined
-): Promise<{ calls_used: number; regenerate_used: number }> => {
-  const since = await meter.roundStartedAt(projectId, step)
-  const [calls_used, regenerate_used] = await Promise.all([
-    meter.countCalls(projectId, stepId, { since }),
-    meter.countCalls(projectId, stepId, { since, callKind: "regenerate" })
-  ])
-  return { calls_used, regenerate_used }
-}
+/** `calls_used`/`regenerate_used` của vòng hiện tại của step. */
+const usageCounts = meter.roundCounts
 
 // ─── Draft + ghi Spine (dùng chung cho /run và gate regenerate/revision) ──
 
