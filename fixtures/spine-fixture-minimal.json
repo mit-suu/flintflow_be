@@ -94,6 +94,46 @@
       "content_en": "Emphasize the differentiator: every SRS sentence is traceable to a structured field.",
       "target_section": "fixed:1",
       "captured_at": "2026-09-01T09:05:00.000Z"
+    },
+    {
+      "id": "AD06",
+      "topic": "Payment integration",
+      "content": "User mua gói credit bằng VietQR qua dịch vụ thanh toán bên ngoài; webhook của cổng thanh toán xác nhận giao dịch rồi mới cộng credit.",
+      "content_en": "Users buy credit packs with VietQR through an external payment service; the payment gateway webhook confirms each transaction before credits are added.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:06:00.000Z"
+    },
+    {
+      "id": "AD07",
+      "topic": "AI generation",
+      "content": "Mọi lượt hỏi và soạn nháp SRS gọi mô hình ngôn ngữ của nhà cung cấp AI bên ngoài; chi phí mỗi lượt được trừ vào ví credit.",
+      "content_en": "Every elicitation and SRS drafting call goes to an external AI model provider; each call's cost is charged to the credit wallet.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:07:00.000Z"
+    },
+    {
+      "id": "AD08",
+      "topic": "Email delivery",
+      "content": "Email xác thực tài khoản, đặt lại mật khẩu và cảnh báo sắp hết credit được gửi qua dịch vụ email bên ngoài.",
+      "content_en": "Account verification, password reset and low-credit alert emails are sent through an external email service.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:08:00.000Z"
+    },
+    {
+      "id": "AD09",
+      "topic": "Scheduled jobs",
+      "content": "Tác vụ định kỳ: reset credit miễn phí đầu tháng, giải phóng reservation credit quá hạn, và hạ gói khi subscription hết hạn.",
+      "content_en": "Scheduled jobs reset the free monthly credits, release expired credit reservations, and downgrade plans when a subscription expires.",
+      "target_section": "fixed:2.1",
+      "captured_at": "2026-09-01T09:09:00.000Z"
+    },
+    {
+      "id": "AD10",
+      "topic": "Operations team",
+      "content": "Quản trị viên xem danh sách user, số liệu sử dụng và báo cáo chi phí AI; khoá tài khoản vi phạm; nhận thông báo khi có user mới.",
+      "content_en": "Administrators view the user list, usage metrics and AI cost reports, suspend abusive accounts, and are notified when a new user signs up.",
+      "target_section": "fixed:2.2.2",
+      "captured_at": "2026-09-01T09:10:00.000Z"
     }
   ],
   "diagrams": [],
