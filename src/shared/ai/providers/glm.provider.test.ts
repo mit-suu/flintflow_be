@@ -31,13 +31,15 @@ describe("callGLM", () => {
     create.mockReset()
   })
 
-  it("gửi thinking.type=disabled và trả text đã bỏ phần suy nghĩ", async () => {
+  it("gửi reasoning_effort=low + json_object và trả text đã bỏ phần suy nghĩ", async () => {
     create.mockResolvedValue(streamOf("thinking {x}...", "</think>", '{"reply":"hi","questions":[]}'))
 
     const res = await callGLM("prompt", { provider: "glm", model: "zai-org/GLM-5.3-Flash", maxTokens: 100, temperature: 0.2 } as never)
 
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({ thinking: { type: "disabled" }, stream: true }))
-    expect(create.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ reasoning_effort: "low", response_format: { type: "json_object" }, stream: true })
+    )
+    expect(create.mock.calls[0][0]).not.toHaveProperty("thinking")
     expect(create.mock.calls[0][0]).toMatchObject({ max_tokens: 100 + GLM_REASONING_HEADROOM_TOKENS })
     expect(JSON.parse(res.text)).toEqual({ reply: "hi", questions: [] })
     expect(res).toMatchObject({ promptTokens: 10, completionTokens: 20 })

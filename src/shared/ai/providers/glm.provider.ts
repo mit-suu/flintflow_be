@@ -14,6 +14,17 @@ export const stripReasoning = (text: string): string => {
 
 export const GLM_REASONING_HEADROOM_TOKENS = 6144
 
+/**
+ * Tham số GLM-5.3-Flash (Modal `/v1/models`: `reasoning_options.effort = low|high|max`, có `json_mode`).
+ * Probe prompt S-3.2 thật 2026-09-15: `thinking.type=disabled` vẫn suy nghĩ 10K token tới `finish_reason=length`;
+ * `reasoning_effort: "low"` + `json_object` ⇒ ~250 token suy nghĩ, 13 s, lô op hợp lệ. `"none"` không hợp lệ và
+ * làm suy nghĩ trộn vào `content`.
+ */
+export const GLM_REQUEST_OPTIONS = {
+  reasoning_effort: "low",
+  response_format: { type: "json_object" }
+} as const
+
 export const callGLM = async (
   prompt: string,
   providerConfig: AiProviderConfig
@@ -65,9 +76,7 @@ export const callGLM = async (
       max_tokens: maxTokens,
       top_p: 0.9,
       stream: true,
-      // Probe 2026-09-15: `thinking.type=disabled` đẩy suy nghĩ sang `reasoning_content`, `content` là JSON sạch.
-      // KHÔNG gửi `reasoning_effort: "none"` — kèm tham số đó GLM-5.3 lại trộn suy nghĩ vào `content`.
-      thinking: { type: "disabled" }
+      ...GLM_REQUEST_OPTIONS
     } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
 
     let text = ""
