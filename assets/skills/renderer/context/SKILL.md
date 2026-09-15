@@ -14,11 +14,11 @@ writes:
   - "diagrams[kind=context]"
 output_schema: puml
 language: en
-stub: true
+stub: false
 ---
 # Context
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/context.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call. `stub: true` stays until the T03 asset test stops requiring it (XREQ T10→T03).
+> The renderer is deterministic code: `src/modules/diagram/renderers/context.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
 
 - Step: S-2.5 System Context Diagram · Section: `fixed:1` · Output: `puml`
 
