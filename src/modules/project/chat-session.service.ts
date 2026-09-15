@@ -8,9 +8,8 @@ import { buildDocumentContext } from "../../shared/ai/document-context.service.j
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
-  // Deactivate other chat sessions for this project first
-  await ChatSession.updateMany({ projectId }, { isActive: false })
-
+  // T13: không tắt (isActive) session khác của project — nhiều session chat (không pipeline) có thể
+  // tồn tại song song, chỉ đúng một session giữ is_pipeline (bất biến 7, srs-spine.md §6).
   const base = {
     projectId: new mongoose.Types.ObjectId(projectId),
     messages: [],
@@ -65,7 +64,9 @@ export const sendMessageAndGetResponse = async (
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
   }
 
-  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
+  // T13: session không pipeline chỉ dùng để hỏi đáp (CHAT) — không cho chạy Discovery qua chat cũ,
+  // pipeline B-0…B-2 đi qua step-runner (session is_pipeline). Xem coding-rules mục "Sửa chat-session".
+  const isDiscoveryMode = session.is_pipeline && discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
   const currentWorkspacePhase = isDiscoveryMode ? "discovery" : (workspacePhase || "product_overview")
 
   // 1. Add user message
@@ -231,8 +232,8 @@ export const sendMessageStream = async (
     })
     .join("\n")
 
-  // 3. Determine ActionType: Discovery chat vs regular chat
-  const isDiscoveryMode = discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
+  // 3. Determine ActionType: Discovery chat vs regular chat — T13: session không pipeline chỉ CHAT.
+  const isDiscoveryMode = session.is_pipeline && discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
   const actionType = isDiscoveryMode ? ActionType.CHAT_DISCOVERY : ActionType.CHAT
 
   // 4. Build step name and doc context
@@ -358,10 +359,24 @@ function buildCompletedStepsSummary(messages: IChatMessage[]): string {
     .join("\n")
 }
 
+/**
+ * Xoá session. Nếu session xoá đang giữ `is_pipeline` (bất biến 7): promote session gần nhất còn lại
+ * (theo `createdAt`) thành pipeline, để project luôn có đúng một session pipeline khi còn session nào đó.
+ */
 export const deleteChatSession = async (chatSessionId: string): Promise<void> => {
+  const target = await ChatSession.findById(chatSessionId, { projectId: 1, is_pipeline: 1 })
+  if (!target) {
+    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+
   const result = await ChatSession.deleteOne({ _id: chatSessionId })
   if (result.deletedCount === 0) {
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+
+  if (target.is_pipeline) {
+    const next = await ChatSession.findOne({ projectId: target.projectId }).sort({ createdAt: -1 })
+    if (next) await ChatSession.updateOne({ _id: next._id }, { is_pipeline: true })
   }
 }
 
