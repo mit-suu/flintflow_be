@@ -7,7 +7,7 @@ vi.mock("openai", () => ({
   }
 }))
 
-import { callGLM, stripReasoning } from "./glm.provider.js"
+import { callGLM, stripReasoning, GLM_REASONING_HEADROOM_TOKENS } from "./glm.provider.js"
 
 const streamOf = (...parts: string[]) =>
   (async function* () {
@@ -38,7 +38,22 @@ describe("callGLM", () => {
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ thinking: { type: "disabled" }, stream: true }))
     expect(create.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+    expect(create.mock.calls[0][0]).toMatchObject({ max_tokens: 100 + GLM_REASONING_HEADROOM_TOKENS })
     expect(JSON.parse(res.text)).toEqual({ reply: "hi", questions: [] })
     expect(res).toMatchObject({ promptTokens: 10, completionTokens: 20 })
+  })
+
+  it("content rỗng (hết token cho phần suy nghĩ) ⇒ GLM_EMPTY_OUTPUT kèm finish_reason", async () => {
+    create.mockResolvedValue(
+      (async function* () {
+        yield { choices: [{ delta: { reasoning_content: "thinking..." } }] }
+        yield { choices: [{ delta: {}, finish_reason: "length" }] }
+      })()
+    )
+
+    await expect(callGLM("prompt", { provider: "glm", maxTokens: 100 } as never)).rejects.toMatchObject({
+      code: "GLM_EMPTY_OUTPUT",
+      message: expect.stringContaining("finish_reason=length")
+    })
   })
 })
