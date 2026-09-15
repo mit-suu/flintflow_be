@@ -15,6 +15,8 @@ export interface IUser extends Document {
   isActive: boolean
   emailVerified: boolean
   emailVerifiedAt?: Date | null
+  /** UC 1.12: thời điểm hoàn tất onboarding; null = chưa onboarding. */
+  onboardedAt?: Date | null
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -63,6 +65,10 @@ const userSchema = new Schema<IUser>(
       default: false
     },
     emailVerifiedAt: {
+      type: Date,
+      default: null
+    },
+    onboardedAt: {
       type: Date,
       default: null
     }
