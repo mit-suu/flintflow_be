@@ -1,6 +1,6 @@
 # Pipeline API contract
 
-> **Trạng thái:** bản nháp T08, **đóng băng tại M2**. Sau M2 mọi thay đổi phải qua PR nhãn `contract-change` được cả 4 người duyệt, và sửa `src/modules/pipeline/pipeline.dto.ts` trong cùng PR.
+> **Trạng thái:** T08 — **đã approve 2026-09-15**, đóng băng tại M2. Sau M2 mọi thay đổi phải qua PR nhãn `contract-change` được cả 4 người duyệt, và sửa `src/modules/pipeline/pipeline.dto.ts` trong cùng PR.
 > **Nguồn:** `context/srs-spine.md` §3, §6, §7, §9 và `context/Product-Brief-to-SRS-Phases.md` §2–§4.
 > **Schema zod:** `src/modules/pipeline/pipeline.dto.ts` (request/response), `src/modules/spine/op.types.ts` (op, transaction), `src/modules/spine/spine.schema.ts` (Spine, change, flag, baseline).
 
