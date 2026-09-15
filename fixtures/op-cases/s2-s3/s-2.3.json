@@ -1,7 +1,7 @@
 {
   "step_id": "S-2.3",
   "skill_id": "product-overview",
-  "notes": "Non-human actors (external systems + the credit expiry scheduler) are all settled here, before S-2.5 draws the context diagram — adding a kind!=human actor after that render would make the diagram stale with no step left to re-render it before S-3.6.",
+  "notes": "External systems only (kind=system) — a kind=time actor does not belong here per S-2.3's own scope; it is added at S-3.1 alongside the other non-system actors, per the actors-and-usecases skill.",
   "ops": [
     {
       "op": "add",
@@ -24,17 +24,6 @@
         "description": "External self-hosted PlantUML server that compiles diagram source into SVG/PNG for the five diagram kinds."
       },
       "reason": "S-2.3 external system from release scope: server-rendered PlantUML diagrams"
-    },
-    {
-      "op": "add",
-      "path": "actors[]",
-      "value": {
-        "id": "A03",
-        "name": "Credit Expiry Scheduler",
-        "kind": "time",
-        "description": "Nightly scheduled job that expires stale reserved credit holds that were never finalized."
-      },
-      "reason": "S-2.3 time actor implied by credit reservation lifecycle; settled alongside external systems so the S-2.5 context diagram is not stale by S-3.1"
     }
   ]
 }

@@ -6,31 +6,31 @@
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC12", "name": "Reset Password", "actor_ids": ["A04"], "function_ids": [], "description": "The founder requests a password reset link and sets a new password to regain access.", "includes": [], "extends": [] },
+      "value": { "id": "UC12", "name": "Reset Password", "actor_ids": ["A03"], "function_ids": [], "description": "The founder requests a password reset link and sets a new password to regain access.", "includes": [], "extends": [] },
       "reason": "S-3.3 sweep: forgotten password"
     },
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC13", "name": "Receive In-App Notification", "actor_ids": ["A04"], "function_ids": [], "description": "The founder sees an in-app notification when a phase completes or a credit purchase settles.", "includes": [], "extends": [] },
+      "value": { "id": "UC13", "name": "Receive In-App Notification", "actor_ids": ["A03"], "function_ids": [], "description": "The founder sees an in-app notification when a phase completes or a credit purchase settles.", "includes": [], "extends": [] },
       "reason": "S-3.3 sweep: notifications"
     },
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC14", "name": "View Audit Log", "actor_ids": ["A05"], "function_ids": [], "description": "The admin reviews the log of destructive or high-trust actions such as waived flags and manual reverts.", "includes": [], "extends": [] },
+      "value": { "id": "UC14", "name": "View Audit Log", "actor_ids": ["A04"], "function_ids": [], "description": "The admin reviews the log of destructive or high-trust actions such as waived flags and manual reverts.", "includes": [], "extends": [] },
       "reason": "S-3.3 sweep: audit log"
     },
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC15", "name": "Handle Step Validation Error", "actor_ids": ["A04"], "function_ids": [], "description": "The founder is shown the specific validation error when a step's draft is rejected and chooses to retry or provide more detail.", "includes": [], "extends": [] },
+      "value": { "id": "UC15", "name": "Handle Step Validation Error", "actor_ids": ["A03"], "function_ids": [], "description": "The founder is shown the specific validation error when a step's draft is rejected and chooses to retry or provide more detail.", "includes": [], "extends": [] },
       "reason": "S-3.3 sweep: error handling"
     },
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC16", "name": "Contact Support", "actor_ids": ["A04"], "function_ids": [], "description": "The founder reaches a support channel when the guided pipeline cannot resolve a problem on its own.", "includes": [], "extends": [] },
+      "value": { "id": "UC16", "name": "Contact Support", "actor_ids": ["A03"], "function_ids": [], "description": "The founder reaches a support channel when the guided pipeline cannot resolve a problem on its own.", "includes": [], "extends": [] },
       "reason": "S-3.3 sweep: support"
     }
   ]
