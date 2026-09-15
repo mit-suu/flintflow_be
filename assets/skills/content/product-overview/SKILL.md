@@ -51,7 +51,10 @@ Write `project.release_scope.in` and `.out` as flat string lists — each entry 
 Add one `actors[]` entry per external system the product integrates with (payment gateway, render
 server, third-party auth…) with `kind: "system"`. Do **not** add human actors here — those belong to
 S-3.1. Every system actor needs a `description` stating what it does for this product, not a generic
-one-liner.
+one-liner. Derive integrations from vision/goals/scope even when the Brief does not name a vendor: AI
+generation ⇒ "AI Model Provider"; credits/payments/plans ⇒ "Payment Gateway"; export/email/notification ⇒
+the matching service. Fast mode: add them with an `assumptions[]` entry; an empty S-2.3 batch needs a reason
+in `notes`.
 
 ## Rules
 
