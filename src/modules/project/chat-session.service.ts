@@ -44,6 +44,21 @@ export const getChatSessionById = async (chatSessionId: string): Promise<IChatSe
   return session
 }
 
+/**
+ * F5 (review T13, IDOR): mọi route `/projects/:projectId/chats/:chatId*` phải xác nhận `chatId` THẬT SỰ
+ * thuộc `projectId` trên đường dẫn — trước đây `getChatSessionById`/`deleteChatSession`/`sendMessage*` chỉ
+ * tra theo `chatId`, không đối chiếu `projectId`, nên một user sở hữu project A đoán được `chatId` của
+ * project B (không phải của mình) vẫn đọc/xoá/gửi tin được. 404 `CHAT_SESSION_NOT_FOUND` (không phải 403)
+ * để không lộ việc chatId đó có tồn tại hay không, cùng pattern các module khác trong repo.
+ */
+export const assertChatSessionOwnership = async (projectId: string, chatSessionId: string): Promise<IChatSession> => {
+  const session = await ChatSession.findById(chatSessionId)
+  if (!session || String(session.projectId) !== String(projectId)) {
+    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+  }
+  return session
+}
+
 import { SECTION_METADATA } from "../../shared/constants/section-types.js"
 import { Project } from "./project.model.js"
 import { Section, SectionType } from "../specification/section.model.js"
