@@ -3,6 +3,15 @@ import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { LLMResponse } from "./provider.types.js"
 
+/**
+ * GLM-5.x (Modal) có thể trả phần suy nghĩ ngay trong `content`, kết thúc bằng `</think>`, trước câu trả lời thật —
+ * parser JSON nhặt nhầm dấu `{` trong phần suy nghĩ ⇒ PARSE_FAILED. Giữ phần sau `</think>` cuối cùng.
+ */
+export const stripReasoning = (text: string): string => {
+  const end = text.lastIndexOf("</think>")
+  return end === -1 ? text : text.slice(end + "</think>".length).trimStart()
+}
+
 export const callGLM = async (
   prompt: string,
   providerConfig: AiProviderConfig
@@ -52,7 +61,9 @@ export const callGLM = async (
       max_tokens: maxTokens,
       top_p: 0.9,
       stream: true,
-      reasoning_effort: "none"
+      reasoning_effort: "none",
+      // `reasoning_effort` không tắt được thinking của GLM-5.3 trên Modal; `thinking.type=disabled` thì tắt (probe 2026-09-15).
+      thinking: { type: "disabled" }
     } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
 
     let text = ""
@@ -78,7 +89,7 @@ export const callGLM = async (
     }
 
     return {
-      text,
+      text: stripReasoning(text),
       promptTokens,
       completionTokens
     }
