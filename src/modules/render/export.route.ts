@@ -41,42 +41,9 @@ const router = Router()
  */
 router.post("/word/preview", authMiddleware, exportController.previewWord)
 
-/**
- * @swagger
- * /api/v1/projects/{projectId}/export/word:
- *   get:
- *     summary: Xuất file Word thật (T15) — đọc Spine/Baseline qua assemble.service, không nhận body
- *     tags: [Export]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *       - in: query
- *         name: source
- *         schema:
- *           type: string
- *           enum: [draft, baseline]
- *           default: draft
- *       - in: query
- *         name: baseline_id
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: File .docx, tên `<project>-<version>[-draft].docx`
- *       401:
- *         description: Chưa xác thực
- *       404:
- *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
- *       409:
- *         description: NO_WORKING_DRAFT (chưa assemble — meta.hint = "S-8.2")
- *       422:
- *         description: RENDER_IMAGE_INVALID
- */
-router.get("/:projectId/export/word", authMiddleware, exportController.exportWord)
+// review C1: GET /:projectId/export/word (endpoint 18, contract) chuyển sang render.route.ts — route
+// đó đã mount ở app.ts dưới /api/v1/projects, mount thêm ở đây (cũng /api/v1/projects, T15 cũ) làm
+// lộ trùng cả /projects/word/preview lẫn /projects/:projectId/export/word/export/word. File này giờ
+// chỉ còn /word/preview (T05, dev-only — xem README.md).
 
 export default router
