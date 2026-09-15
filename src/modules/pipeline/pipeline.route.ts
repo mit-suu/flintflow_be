@@ -177,29 +177,8 @@ router.post("/:projectId/steps/:stepId/answer", authMiddleware, pipelineControll
  */
 router.post("/:projectId/steps/:stepId/gate", authMiddleware, pipelineController.gateStep)
 
-/**
- * @swagger
- * /api/v1/projects/{projectId}/resume:
- *   post:
- *     summary: Mở lại project — step đang in_progress dang dở (đóng tab giữa Draft) được revert về pending
- *     description: >
- *       Chưa có trong bảng endpoint đóng băng của docs/api/pipeline-contract.md — đề xuất contract-change
- *       bổ sung (xem báo cáo T13). Response không phụ thuộc schema nào của pipeline.dto.ts.
- *     tags: [Pipeline]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: "{ reverted_step, spine_version, progress }"
- *       404:
- *         description: SPINE_NOT_FOUND
- */
-router.post("/:projectId/resume", authMiddleware, pipelineController.resume)
+// F4 (review T13): KHÔNG mount POST /:projectId/resume — endpoint chưa có trong bảng đóng băng của
+// docs/api/pipeline-contract.md (coding-rules §3.8 cấm thêm endpoint ngoài contract). `resumeProject`
+// (`resume.service.ts`) vẫn tồn tại, dùng ở mức service (T14) cho tới khi có PR contract-change.
 
 export default router
