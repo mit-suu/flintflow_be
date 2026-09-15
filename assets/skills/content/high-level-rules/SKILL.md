@@ -15,13 +15,9 @@ writes:
   - "business_rules[tier=high]"
 output_schema: opTransaction
 language: en
-stub: true
+stub: false
 ---
 # High Level Rules
-
-> `stub: true` is kept only so `prompt-assets.test.ts` (T03, owned file) keeps passing — it asserts every
-> non-`action` skill is a stub. Content below is real, written in T14. XREQ T14→T03: split that assertion
-> once T03 revisits it.
 
 Covers **S-2.4 High-Level Business Rules** — feeds SRS section `fixed:1`. This is the *tier=high* half of
 `business_rules[]`; the *tier=detail* half is a different skill (`appendix-content`, S-7.1), derived later
