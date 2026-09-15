@@ -41,4 +41,42 @@ const router = Router()
  */
 router.post("/word/preview", authMiddleware, exportController.previewWord)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/export/word:
+ *   get:
+ *     summary: Xuất file Word thật (T15) — đọc Spine/Baseline qua assemble.service, không nhận body
+ *     tags: [Export]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [draft, baseline]
+ *           default: draft
+ *       - in: query
+ *         name: baseline_id
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: File .docx, tên `<project>-<version>[-draft].docx`
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
+ *       409:
+ *         description: NO_WORKING_DRAFT (chưa assemble — meta.hint = "S-8.2")
+ *       422:
+ *         description: RENDER_IMAGE_INVALID
+ */
+router.get("/:projectId/export/word", authMiddleware, exportController.exportWord)
+
 export default router
