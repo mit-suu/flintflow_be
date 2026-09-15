@@ -373,8 +373,8 @@ describe("T14: S-1.2 -> S-3.6 content skills end to end on spine-fixture-minimal
 
       // C4: S-3.1 adds a kind=time actor (the credit expiry scheduler) — the context diagram S-2.5
       // rendered earlier only reads `actors[kind!=human]`, so this MUST stale it (source_hash mismatch).
-      // No later step in this phase re-renders "context" (only S-2.5 does) — the flag stays open until
-      // S-2.5 is explicitly reopened below, which is the point of this scenario (audit gap C4).
+      // Contract-change 2026-09-15: S-3.6 now also renders "context", closing the flag at the end of S-3;
+      // the S-2.5 reopen below still has to work (B7) and leave the flag closed.
       if (stepId === "S-3.1") {
         const s = (await repo.get(PROJECT))!
         const staleFlag = s.flags.find((f) => f.rule_id === "diagram_stale" && f.section_id === "fixed:1" && f.resolved_at === null)
