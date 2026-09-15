@@ -5,6 +5,10 @@
  * `in_progress` (đóng tab/mất mạng giữa Draft) ⇒ revert dải `changes[first_seq..last_seq]` bằng
  * `revertRange` (T08), đặt lại `status = pending`, `first_seq/last_seq = null`, rồi trả `progress` (T09)
  * để FE tiếp tục đúng chỗ.
+ *
+ * F4 (review T13): `POST /projects/:id/resume` chờ PR contract-change (chưa có trong bảng endpoint đóng
+ * băng của `docs/api/pipeline-contract.md`, coding-rules §3.8) — hiện chỉ dùng ở mức service (T14 gọi
+ * trực tiếp, không qua HTTP). KHÔNG mount route cho tới khi contract được cập nhật.
  */
 
 import { applyTransaction, revertRange } from "../spine/op-engine.js"
@@ -12,6 +16,7 @@ import * as spineRepository from "../spine/spine.repository.js"
 import { buildProgressReport } from "../spine/section-status.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { isStepLocked, assertRangeOwnedByStep, STEP_NOT_RUNNABLE } from "./step-runner.service.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -34,7 +39,14 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
   let revertedStep: string | null = null
 
   if (inProgress) {
+    // F2/F4: step đang thật sự chạy dở ở một request khác (cùng tiến trình, khoá in-process của
+    // step-runner) — không phải "đóng tab bỏ dở", KHÔNG được revert nội dung đang được ghi.
+    if (isStepLocked(projectId, inProgress.id)) {
+      throw new ApiError(409, `Step ${inProgress.id} đang chạy ở một request khác — không thể resume lúc này`, STEP_NOT_RUNNABLE)
+    }
     if (inProgress.first_seq !== null && inProgress.last_seq !== null) {
+      // F13: không revert âm thầm nếu dải seq của step bị lẫn change không thuộc step (user sửa tay).
+      await assertRangeOwnedByStep(projectId, inProgress.id, inProgress.first_seq, inProgress.last_seq)
       const reverted = await revertRange(projectId, inProgress.first_seq, inProgress.last_seq, {
         by: userId,
         step_id: inProgress.id

@@ -67,6 +67,8 @@ import type { Spine as SpineT } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { resumeProject } from "./resume.service.js"
+import { acquireStepLock, releaseStepLock } from "./step-runner.service.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MINIMAL: SpineT = spineSchema.parse(
@@ -163,5 +165,59 @@ describe("resume.service", () => {
     expect(result.reverted_step).toBeNull()
     const after = await repo.get(PROJECT)
     expect(after!.steps.find((s) => s.id === "S-2.1")).toMatchObject({ status: "accepted" })
+  })
+
+  it("F4: step in_progress nhưng đang bị khoá bởi request khác (cùng tiến trình) ⇒ 409 STEP_NOT_RUNNABLE, KHÔNG revert", async () => {
+    seedSpine()
+    await seedInProgressMidDraft("S-3.1", "A99")
+    const before = await repo.get(PROJECT)
+
+    acquireStepLock(PROJECT, "S-3.1")
+    try {
+      const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(ApiError)
+      expect((err as ApiError).statusCode).toBe(409)
+      expect((err as ApiError).code).toBe("STEP_NOT_RUNNABLE")
+    } finally {
+      releaseStepLock(PROJECT, "S-3.1")
+    }
+
+    const after = await repo.get(PROJECT)
+    expect(after!.spine_version).toBe(before!.spine_version)
+    expect(after!.actors.map((a) => a.id)).toContain("A99") // không bị revert
+  })
+
+  it("F13: dải seq của step bị lẫn change không thuộc step (user sửa tay /changes) ⇒ 422 CHANGE_RANGE_INVALID, KHÔNG revert", async () => {
+    seedSpine()
+    await seedInProgressMidDraft("S-3.1", "A99")
+    const midway = await repo.get(PROJECT)
+
+    // User sửa tay một field khác (không thuộc step) — chen giữa dải first_seq/last_seq của S-3.1.
+    const foreignChange = await applyTransaction(PROJECT, {
+      base_version: midway!.spine_version,
+      ops: [{ op: "add", path: "actors[]", value: { id: "A77", name: "User sửa tay", kind: "human", description: "ngoài step" } }],
+      by: USER,
+      step_id: null,
+      reason: "user /changes"
+    })
+    const newLast = foreignChange.changes[0].seq
+    await applyTransaction(PROJECT, {
+      base_version: foreignChange.spine_version,
+      ops: [{ op: "set", path: `steps[id=S-3.1].last_seq`, value: newLast }],
+      by: USER,
+      step_id: "S-3.1",
+      reason: "seed: mở rộng dải để chứa change ngoài step"
+    })
+
+    const before = await repo.get(PROJECT)
+    const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(422)
+    expect((err as ApiError).code).toBe("CHANGE_RANGE_INVALID")
+
+    const after = await repo.get(PROJECT)
+    expect(after!.spine_version).toBe(before!.spine_version)
+    expect(after!.actors.map((a) => a.id)).toContain("A99")
+    expect(after!.actors.map((a) => a.id)).toContain("A77")
   })
 })
