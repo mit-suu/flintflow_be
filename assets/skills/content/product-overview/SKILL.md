@@ -17,6 +17,7 @@ writes:
   - "project.goals[]"
   - "project.release_scope"
   - "actors[kind≠human]"
+  - "assumptions[]"
 output_schema: opTransaction
 language: en
 stub: true
@@ -32,11 +33,10 @@ Covers **S-2.1 Product Overview, S-2.2 Release 1.0 Scope, S-2.3 External Systems
 S-2.2 may write `project` + `assumptions`; S-2.3 may write `actors` + `assumptions`. The engine enforces
 the registry list, not this file — this file documents intent per sub-step.
 
-## Context (per step)
-
-- Step: **{{step_id}}** — {{step_name}} · Fields this step may write: {{writable_paths}}
-- Projection: {{projection}} — current `project.vision/goals/release_scope`, `actors[kind!=human]`
-- Addendum for this step: {{addendum}}
+Projection carries current `project.vision/goals/release_scope`, `actors[kind!=human]` — the surrounding
+`draft-to-ops` prompt already substitutes the actual step id, writable paths, projection and addendum
+around this content; do not restate `{{...}}` placeholders here, they are not interpolated inside skill
+content (only in the outer action prompt).
 
 ## S-2.1 — Product Overview
 
@@ -64,13 +64,16 @@ one-liner.
 2. English (`draft-to-ops` rule 6); no section numbers in prose (rule 7).
 3. New `actors[]` ids continue the sequence (`draft-to-ops` rule 5) — check the projection's existing
    actors before picking an id.
+4. Fast mode: fill a missing vision/goal/scope detail with the most reasonable default and add an
+   `assumptions[]` entry (`status: "unconfirmed"`) instead of leaving it blank; Coaching mode leaves it for
+   Elicit instead of inventing (`draft-to-ops` rule 10).
 
 ## Example (S-2.3, one system actor)
 
 ```json
 {
   "ops": [
-    { "op": "add", "path": "actors[]", "value": { "id": "A06", "name": "Payment Gateway", "kind": "system", "description": "Mock external gateway that authorizes and settles credit purchases for the wallet." }, "reason": "S-2.3 external system from release scope" }
+    { "op": "add", "path": "actors[]", "value": { "id": "A01", "name": "Payment Gateway", "kind": "system", "description": "Mock external gateway that authorizes and settles credit purchases for the wallet." }, "reason": "S-2.3 external system from release scope" }
   ],
   "notes": "One external system identified from release scope: the mock payment gateway."
 }
