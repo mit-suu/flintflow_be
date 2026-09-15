@@ -182,6 +182,9 @@ export interface StepProjection {
   addendum: AddendumForModel[]
 }
 
+const ASSUMPTIONS_WRITE = "assumptions"
+export const ASSUMPTION_KEYS_READ = "assumptions:id,path,status"
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -194,6 +197,12 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     const value = selectValue(spine, selector, loop)
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
+  }
+
+  // Step Draft nào cũng được ghi `assumptions[]` nhưng registry không khai `reads` cho nó: không thấy id đã có thì model
+  // đặt trùng (`AS3` đã tồn tại — M3 2026-09-15). Chỉ đưa khoá tối thiểu, không tính vào emptyFields.
+  if (stepSpec.writes.includes(ASSUMPTIONS_WRITE) && !stepSpec.reads.some((r) => r.startsWith(ASSUMPTIONS_WRITE))) {
+    projection[ASSUMPTION_KEYS_READ] = selectValue(spine, parseSelector(ASSUMPTION_KEYS_READ), loop)
   }
 
   return {
