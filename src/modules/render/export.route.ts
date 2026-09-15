@@ -41,4 +41,9 @@ const router = Router()
  */
 router.post("/word/preview", authMiddleware, exportController.previewWord)
 
+// review C1: GET /:projectId/export/word (endpoint 18, contract) chuyển sang render.route.ts — route
+// đó đã mount ở app.ts dưới /api/v1/projects, mount thêm ở đây (cũng /api/v1/projects, T15 cũ) làm
+// lộ trùng cả /projects/word/preview lẫn /projects/:projectId/export/word/export/word. File này giờ
+// chỉ còn /word/preview (T05, dev-only — xem README.md).
+
 export default router
