@@ -1,6 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
 
-export type CreditTransactionType = "reserve" | "deduct" | "release" | "monthly_reset" | "purchase"
+export type CreditTransactionType = "reserve" | "deduct" | "release" | "refund" | "monthly_reset" | "purchase"
 
 /**
  * Vòng đời của một dòng `reserve`. Chỉ dòng `reserve` mang state; dòng
@@ -48,7 +48,7 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
     },
     type: {
       type: String,
-      enum: ["reserve", "deduct", "release", "monthly_reset", "purchase"],
+      enum: ["reserve", "deduct", "release", "refund", "monthly_reset", "purchase"],
       required: true
     },
     balanceAfter: {

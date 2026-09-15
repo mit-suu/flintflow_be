@@ -72,6 +72,13 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
+    findOneAndUpdate: async (filter: Filter, update: { $set: Doc }) => {
+      const row = usages.find((r) => matches(r, filter))
+      if (!row) return null
+      const before = copy(row)
+      Object.assign(row, copy(update.$set))
+      return before
+    },
     countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
   }
   const withMethods = (doc: Doc | null) =>
@@ -123,7 +130,9 @@ vi.mock("../../shared/ai/document-context.service.js", async (importOriginal) =>
   return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false })) }
 })
 vi.mock("../notification/notification.service.js", () => ({ notify: vi.fn(async () => null), notifyAdmins: vi.fn(async () => 0) }))
+vi.mock("../../shared/ai/credit-reservation.service.js", () => ({ refundDeductedCredit: vi.fn(async () => undefined) }))
 
+import { refundDeductedCredit } from "../../shared/ai/credit-reservation.service.js"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine as SpineT } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
@@ -328,6 +337,9 @@ describe("step-runner: 2 tab — SPINE_VERSION_CONFLICT hoàn usage, không tiê
     expect(draftUsage[0].state).toBe("refunded")
     const elicitUsage = db.usages.filter((u) => u.step_id === "S-3.1" && u.call_kind === "elicit")
     expect(elicitUsage[0]?.state).toBe("deducted")
+    // Credit của lượt Draft được hoàn về ví (XREQ-local-1), lượt Elicit thì không.
+    expect(refundDeductedCredit).toHaveBeenCalledTimes(1)
+    expect(refundDeductedCredit).toHaveBeenCalledWith(expect.objectContaining({ userId: USER, actionType: "draft", amount: draftUsage[0].cost }))
   })
 })
 
