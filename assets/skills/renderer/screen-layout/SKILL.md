@@ -15,11 +15,11 @@ writes:
   - "diagrams[kind=screen_layout]"
 output_schema: puml
 language: en
-stub: true
+stub: false
 ---
 # Screen Layout
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/screen-layout.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call. `stub: true` stays until the T03 asset test stops requiring it (XREQ T10→T03).
+> The renderer is deterministic code: `src/modules/diagram/renderers/screen-layout.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
 
 - Step: S-5.3 Screen Layout · Section: `function:<primary_function_id>` · Output: `puml` (`@startsalt … @endsalt`)
 

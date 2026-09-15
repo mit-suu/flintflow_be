@@ -19,14 +19,9 @@ writes:
   - "assumptions[]"
 output_schema: opTransaction
 language: en
-stub: true
+stub: false
 ---
 # Project Classifier
-
-> `stub: true` is kept only so `prompt-assets.test.ts` (T03, owned file, not ours to edit) keeps passing —
-> it asserts every non-`action` skill is a stub. Content below is real, written in T14.
-> Cross-request: XREQ T14→T03 — split the test into "action skills + T14's 4 content skills are not
-> stub" once T03 revisits that assertion.
 
 Covers **S-1.1 Brief Extraction, S-1.2 Project Classification, S-1.3 Conflict & Assumption Review,
 S-1.4 Gap List**. This skill never touches SRS sections — its output feeds the classifier fields that

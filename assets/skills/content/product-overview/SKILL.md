@@ -20,13 +20,9 @@ writes:
   - "assumptions[]"
 output_schema: opTransaction
 language: en
-stub: true
+stub: false
 ---
 # Product Overview
-
-> `stub: true` is kept only so `prompt-assets.test.ts` (T03, owned file) keeps passing — it asserts every
-> non-`action` skill is a stub. Content below is real, written in T14. XREQ T14→T03: split that assertion
-> once T03 revisits it.
 
 Covers **S-2.1 Product Overview, S-2.2 Release 1.0 Scope, S-2.3 External Systems** — feeds SRS section
 `fixed:1` (Product Overview). The step registry's `writes` is coarser than the frontmatter above: S-2.1/
