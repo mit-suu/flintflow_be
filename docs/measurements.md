@@ -150,3 +150,21 @@ grows with `use_cases[]`) / 0.1k–3.0k out (S-3.1 heaviest); S-2.1 needed one s
 - Completeness varies run to run (actors 3–4, use cases 10–15). Tuning raised use cases (7 → 10–15) but the
   model still rarely derives a payment-gateway actor from "credit reservation and metering" and sometimes
   skips the `time` actor. DoD thresholds ≥ 5 actors / ≥ 12 use cases: **met 0/3** (run 15 meets use cases only).
+
+## S-2/S-3 real provider — enriched fixture brief (runs 18–20, 2026-09-15)
+
+Decision (user): keep the DoD thresholds; add the missing facts to the Brief instead of padding the model output.
+`spine-fixture-minimal.json` gains AD06–AD10 (`52f4772`): VietQR payment service + webhook, external AI model
+provider, email service (`fixed:1`), scheduled credit/subscription jobs (`fixed:2.1`), administrator operations
+(`fixed:2.2.2`) — all already-decided FlintFlow facts (T04, T06, Phases §9.1). Same skills/params as runs 15–17.
+
+| Run | Steps | Calls | Tokens in | Tokens out | Credit | Actors (kinds) | Use cases | includes / extends | Red in §1/§2 | non-English | Diagrams | Docx |
+| --- | --- | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | --- | ---: |
+| 18 | 12/12 | 16 | 48 895 | 11 279 | 49 | **6** (3 system, 2 human, 1 time) | **21** | 6 / 4 | 0 | 0 | context ok, usecase ok | 226 KB |
+| 19 | 12/12 | 16 | 53 119 | 11 957 | 49 | **7** (3 system, 3 human, 1 time) | **21** | 8 / 2 | 0 | 0 | ok, ok | 217 KB |
+| 20 | 12/12 | 16 | 50 154 | 10 711 | 49 | **6** (3 system, 2 human, 1 time) | **20** | 5 / 4 | 0 | 0 | ok, ok | 200 KB |
+
+**DoD `E2E_AI`: met 3/3** (≥ 5 actors, ≥ 12 use cases, 0 red in §1/§2, usecase `render_status=ok`).
+Every run derived Payment Gateway, AI Model Provider, Email Service, Credit Scheduler and Administrator from the
+Brief. Cost stays flat at 49 credit / full S-1.2→S-3.6 run (~50k tokens in, ~11k out); more addendum raises input
+~10% versus runs 15–17.
