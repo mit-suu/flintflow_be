@@ -1,0 +1,329 @@
+import { describe, expect, it } from "vitest"
+import type { Spine } from "../spine/spine.types.js"
+import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+
+const emptySpine = (): Spine => ({
+  project: {
+    name: "Demo",
+    vision: null,
+    goals: [],
+    type: null,
+    domain: null,
+    complexity: null,
+    form_factor: null,
+    stakes: null,
+    working_mode: null,
+    release_scope: { in: [], out: [] }
+  },
+  progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
+  steps: [],
+  features: [],
+  actors: [],
+  roles: [],
+  use_cases: [],
+  screens: [],
+  permissions: [],
+  entities: [],
+  functions: [],
+  nfrs: [],
+  business_rules: [],
+  common_requirements: [],
+  messages: [],
+  other_requirements: [],
+  glossary: [],
+  addendum: [],
+  diagrams: [],
+  assumptions: [],
+  flags: [],
+  sections: [],
+  baselines: [],
+  spine_version: 1
+})
+
+const spine = (): Spine => ({
+  ...emptySpine(),
+  project: {
+    ...emptySpine().project,
+    vision: "Turn a raw idea into an SRS.",
+    goals: ["Ship a baseline-quality SRS in one day"],
+    release_scope: { in: ["Guided pipeline"], out: ["PDF export"] }
+  },
+  features: [
+    { id: "F1", name: "Authentication", order: 0 },
+    { id: "F2", name: "Dashboard", order: 1 }
+  ],
+  actors: [
+    { id: "A01", name: "Founder", kind: "human", description: "Owns the SRS." },
+    { id: "A05", name: "Payment Gateway", kind: "system", description: "Processes payments." }
+  ],
+  roles: [{ id: "R1", name: "Registered User", actor_id: "A01" }],
+  use_cases: [
+    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] }
+  ],
+  screens: [
+    {
+      id: "S01",
+      feature_id: "F1",
+      name: "Login",
+      description: "Entry screen.",
+      flow_to: ["S02"],
+      is_popup: false,
+      tabs: [],
+      primary_function_id: "FN01",
+      queue_order: 1,
+      detail_status: "signed_off"
+    },
+    {
+      id: "S02",
+      feature_id: "F2",
+      name: "Dashboard",
+      description: "Project list.",
+      flow_to: [],
+      is_popup: false,
+      tabs: [],
+      primary_function_id: null,
+      queue_order: 2,
+      detail_status: "signed_off"
+    }
+  ],
+  permissions: [{ id: "P1", screen_id: "S01", role_id: "R1", action: "view" }],
+  entities: [{ id: "E01", name: "User", description: "An account.", relations: ["E02"] }, { id: "E02", name: "Project", description: "A project.", relations: [] }],
+  functions: [
+    {
+      id: "FN01",
+      screen_id: "S01",
+      feature_id: "F1",
+      order: 0,
+      name: "Submit Credentials",
+      trigger: "User clicks Log in.",
+      description: "Authenticates the user.",
+      normal: ["Enter credentials.", "System verifies."],
+      abnormal: ["Wrong password: show an error."],
+      validations: [{ id: "FN01-V1", kind: "required", statement: "Password must not be empty." }],
+      business_rule_ids: ["BR02"],
+      priority: "must"
+    },
+    {
+      id: "FN02",
+      screen_id: null,
+      feature_id: "F2",
+      order: 0,
+      name: "Nightly Aggregate",
+      trigger: "Cron 00:00 UTC.",
+      description: "Aggregates usage metrics.",
+      normal: ["Scheduler fires.", "System writes aggregates."],
+      abnormal: [],
+      validations: [],
+      business_rule_ids: [],
+      priority: "should"
+    }
+  ],
+  nfrs: [
+    { id: "N01", category: "interface", statement: "HTTPS only.", kind: "descriptive", priority: "must" },
+    { id: "N02", category: "usability", statement: "Onboarding under 15 min.", kind: "descriptive", priority: "should" },
+    { id: "N03", category: "reliability", statement: "Uptime.", kind: "quantitative", metric: "availability", threshold: ">= 99.5%", priority: "must" }
+  ],
+  business_rules: [
+    { id: "BR01", tier: "high", statement: "Every statement must be traceable.", source_validation_ids: [] },
+    { id: "BR02", tier: "detail", statement: "Password must be hashed.", source_validation_ids: ["FN01-V1"] }
+  ],
+  common_requirements: [{ id: "CR01", category: "pagination", statement: "Lists paginate at 20." }],
+  messages: [{ id: "MSG01", code: "E-AUTH-001", text: "Invalid credentials.", function_ids: ["FN01"] }],
+  other_requirements: [{ id: "OR01", kind: "risk", statement: "Provider pricing may change." }],
+  glossary: [{ id: "G01", term: "SRS", definition: "Software Requirement Specification." }],
+  diagrams: [
+    { id: "D01", kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D02", kind: "usecase", section: "fixed:2.2.1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h2", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D03", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h3", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D04", kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h4", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D05", kind: "screen_layout", section: "function:FN01", owner_kind: "screen", owner_id: "S01", puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h5", rendered_at: "2026-09-01T00:00:00.000Z" }
+  ]
+})
+
+const PNG_BY_ID: Record<string, string> = { D01: "png-d01", D02: "png-d02", D03: "png-d03", D04: "png-d04", D05: "png-d05" }
+
+const ctx = (overrides: Partial<SectionRenderContext> = {}): SectionRenderContext => ({
+  number: "0",
+  diagramPng: (id) => PNG_BY_ID[id],
+  numberOf: (id) => (id === "feature:F1" ? "3.2" : id === "feature:F2" ? "3.3" : undefined),
+  ...overrides
+})
+
+describe("renderSection — fixed sections", () => {
+  it("fixed:1 — vision, goals, release scope, high business rules, external systems, context diagram", () => {
+    const section = renderSection(spine(), "fixed:1", ctx({ number: "1" }))
+    expect(section).toMatchSnapshot()
+    expect(section.heading).toBe("Product Overview")
+    expect(section.level).toBe(1)
+    expect(section.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Turn a raw idea into an SRS." }] })
+    expect(section.blocks.some((b) => b.type === "image" && b.png === "png-d01")).toBe(true)
+    // BR01 (tier high) rendered here, BR02 (tier detail) must NOT be
+    const text = JSON.stringify(section.blocks)
+    expect(text).toContain("Every statement must be traceable")
+    expect(text).not.toContain("Password must be hashed")
+    expect(text).toContain("Payment Gateway")
+  })
+
+  it("fixed:2.1 — actors table (mọi actor, mọi kind)", () => {
+    const section = renderSection(spine(), "fixed:2.1", ctx({ number: "2.1" }))
+    const table = section.blocks[0]
+    expect(table).toMatchObject({ type: "table", header: [[{ text: "ID" }], [{ text: "Name" }], [{ text: "Kind" }], [{ text: "Description" }]] })
+    expect(table.type === "table" && table.rows).toHaveLength(2)
+  })
+
+  it("fixed:2.2.1 — use case diagram image only", () => {
+    const section = renderSection(spine(), "fixed:2.2.1", ctx({ number: "2.2.1" }))
+    expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
+  })
+
+  it("fixed:2.2.2 — use case table với actor tên và include/extend", () => {
+    const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
+    const table = section.blocks[0]
+    expect(table).toMatchObject({ type: "table" })
+    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }]])
+  })
+
+  it("fixed:3.1.2 — bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
+    const section = renderSection(spine(), "fixed:3.1.2", ctx({ number: "3.1.2" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "3.2 Authentication" }])
+    expect(table.type === "table" && table.rows[1][0]).toEqual([{ text: "3.3 Dashboard" }])
+  })
+
+  it("fixed:3.1.3 — ma trận màn × vai trò (T15 review T9: cột = role, hàng = screen, ô = action gộp)", () => {
+    const section = renderSection(spine(), "fixed:3.1.3", ctx({ number: "3.1.3" }))
+    expect(section.blocks).toEqual([
+      {
+        type: "table",
+        header: [[{ text: "Screen" }], [{ text: "Registered User" }]],
+        rows: [
+          [[{ text: "Login" }], [{ text: "view" }]],
+          [[{ text: "Dashboard" }], [{ text: "—" }]]
+        ]
+      }
+    ])
+  })
+
+  it("fixed:3.1.4 — chỉ function non-screen", () => {
+    const section = renderSection(spine(), "fixed:3.1.4", ctx({ number: "3.1.4" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.rows).toHaveLength(1)
+    expect(table.type === "table" && table.rows[0][0]).toEqual([{ text: "Nightly Aggregate" }])
+  })
+
+  it("fixed:3.1.5 — erd image + bảng entity", () => {
+    const section = renderSection(spine(), "fixed:3.1.5", ctx({ number: "3.1.5" }))
+    expect(section.blocks[0]).toEqual({ type: "image", png: "png-d04", caption: "Entity Relationship Diagram" })
+    expect(section.blocks[1]).toMatchObject({ type: "table" })
+  })
+
+  it("fixed:4.2.2 — bảng nfr có metric/threshold", () => {
+    const section = renderSection(spine(), "fixed:4.2.2", ctx({ number: "4.2.2" }))
+    expect(section.blocks).toEqual([
+      {
+        type: "table",
+        header: [[{ text: "Statement" }], [{ text: "Metric" }], [{ text: "Threshold" }], [{ text: "Priority" }]],
+        rows: [[[{ text: "Uptime." }], [{ text: "availability" }], [{ text: ">= 99.5%" }], [{ text: "must" }]]]
+      }
+    ])
+  })
+
+  it("fixed:5.1 — chỉ business_rules tier=detail", () => {
+    const section = renderSection(spine(), "fixed:5.1", ctx({ number: "5.1" }))
+    expect(section.blocks).toEqual([{ type: "bullet_list", items: [[{ text: "Password must be hashed." }]] }])
+  })
+
+  it("fixed:5.5 — glossary luôn render (derived)", () => {
+    const section = renderSection(spine(), "fixed:5.5", ctx({ number: "5.5", status: "derived" }))
+    expect(section.status).toBe("derived")
+    expect(section.blocks[0]).toMatchObject({ type: "table" })
+  })
+
+  it("section rỗng trả blocks: [] (partial ở assemble.service dựa vào đây)", () => {
+    const empty = renderSection(emptySpine(), "fixed:5.4", ctx({ number: "5.4" }))
+    expect(empty.blocks).toEqual([])
+  })
+})
+
+describe("renderSection — feature/function", () => {
+  it("feature:<id> — liệt kê screens của feature, heading = tên feature", () => {
+    const section = renderSection(spine(), "feature:F1", ctx({ number: "3.2" }))
+    expect(section.heading).toBe("Authentication")
+    expect(section.level).toBe(2)
+    expect(section.blocks).toEqual([{ type: "paragraph", runs: [{ text: "Screens: Login" }] }])
+  })
+
+  it("function:<id> — trigger/description/normal/abnormal/validations/business rules + ảnh screen_layout khi là primary_function_id", () => {
+    const section = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" }))
+    expect(section.heading).toBe("Submit Credentials")
+    expect(section.level).toBe(3)
+    const text = JSON.stringify(section.blocks)
+    expect(text).toContain("User clicks Log in.")
+    expect(text).toContain("Wrong password")
+    expect(text).toContain("Password must not be empty")
+    expect(text).toContain("Password must be hashed.") // business rule BR02 referenced by FN01
+    expect(section.blocks.some((b) => b.type === "image" && b.png === "png-d05")).toBe(true)
+  })
+
+  it("function:<id> không phải primary_function_id của màn — không nhúng ảnh screen_layout", () => {
+    const withSecondFn: Spine = { ...spine(), functions: [...spine().functions, { id: "FN03", screen_id: "S01", feature_id: "F1", order: 1, name: "Toggle", trigger: "t", description: "d", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }] }
+    const section = renderSection(withSecondFn, "function:FN03", ctx({ number: "3.2.2" }))
+    expect(section.blocks.some((b) => b.type === "image")).toBe(false)
+  })
+})
+
+describe("sectionHeadingOf", () => {
+  it("trả tiêu đề fixed/feature/function", () => {
+    expect(sectionHeadingOf(spine(), "fixed:5.1")).toBe("Business Rules")
+    expect(sectionHeadingOf(spine(), "feature:F1")).toBe("Authentication")
+    expect(sectionHeadingOf(spine(), "function:FN01")).toBe("Submit Credentials")
+  })
+})
+
+describe("buildRecordOfChanges", () => {
+  const change = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
+    txn: "t1",
+    op: "set",
+    reason: null,
+    at: "2026-09-01T09:00:00.000Z",
+    by: "u1",
+    step_id: "S-2.1",
+    ...over
+  })
+
+  it("gộp theo txn, suy change_type từ tập op, gộp reason không trùng", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", reason: "seed actor" }),
+      change({ txn: "t1", op: "add", reason: "seed actor" }),
+      change({ txn: "t2", op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
+    ])
+    // T15 review T7: version = v0.<i+2> (i 0-based) — Spine bắt đầu spine_version=1, mỗi txn +1.
+    expect(rows).toEqual([
+      { date: "2026-09-01", version: "v0.2", change_type: "A", in_charge: "u1", description: "seed actor" },
+      { date: "2026-09-02", version: "v0.3", change_type: "M", in_charge: "u2", description: "typo fix" }
+    ])
+  })
+
+  it("không có reason nào ⇒ mô tả rơi về step_id", () => {
+    const rows = buildRecordOfChanges([change({ reason: null, step_id: "S-3.1" })])
+    expect(rows[0].description).toBe("Step S-3.1")
+  })
+
+  it("changes rỗng ⇒ mảng rỗng", () => {
+    expect(buildRecordOfChanges([])).toEqual([])
+  })
+
+  it("không truyền resolveInCharge ⇒ giữ nguyên by thô (mặc định identity)", () => {
+    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010" })])
+    expect(rows[0].in_charge).toBe("650000000000000000000010")
+  })
+
+  it("review T7: resolveInCharge được gọi với by của change đầu lô để tra tên hiển thị", () => {
+    const rows = buildRecordOfChanges(
+      [change({ txn: "t1", by: "650000000000000000000010" }), change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z" })],
+      (by) => (by === "system" ? "System" : `Resolved:${by}`)
+    )
+    expect(rows[0].in_charge).toBe("Resolved:650000000000000000000010")
+    expect(rows[1].in_charge).toBe("System")
+  })
+})

@@ -71,7 +71,11 @@ export type Block =
   | PageBreakBlock
 
 export interface RenderedSection {
-  /** Khoá logic (`fixed:2.1`, `feature:F2`, `function:FN3`). */
+  /**
+   * Khoá logic (`fixed:2.1`, `feature:F2`, `function:FN3`), hoặc `group:<number>` cho heading chương/mục cha
+   * Assemble chèn thêm (contract-change 2026-09-15). `group:*` không phải section logic: không có status,
+   * không tính vào `assembleResponseSchema.sections`, FE bỏ qua khi map flags/steps.
+   */
   id: string
   /** Số hiệu hiển thị do Assemble sinh (`2.2.1`). */
   number: string

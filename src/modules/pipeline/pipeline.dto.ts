@@ -42,6 +42,7 @@ export const PIPELINE_ERROR_STATUS = {
   REGENERATE_LIMIT: 409,
   CALL_LIMIT: 409,
   STEP_NOT_RUNNABLE: 409,
+  NO_WORKING_DRAFT: 409,
   INVARIANT_VIOLATION: 422,
   OP_INVALID: 422,
   CHANGE_RANGE_INVALID: 422,
@@ -250,17 +251,29 @@ export const stepEventSchema = z.discriminatedUnion("type", [
 
 export type StepEvent = z.infer<typeof stepEventSchema>
 
+/** Trần độ dài input người dùng ghi vào transcript (contract-change 2026-09-15). */
+export const ANSWER_MAX_CHARS = 4000
+export const ANSWERS_MAX_ITEMS = 20
+export const GATE_NOTE_MAX_CHARS = 2000
+
+const answerText = z.string().max(ANSWER_MAX_CHARS)
+
 /** POST /projects/:id/steps/:stepId/answer */
 export const stepAnswerRequestSchema = z.strictObject({
   session_id: z.string().min(1),
-  answers: z.array(z.object({ question_id: z.string().min(1), answer: z.union([z.string(), z.array(z.string())]) })).min(1)
+  answers: z
+    .array(z.object({ question_id: z.string().min(1), answer: z.union([answerText, z.array(answerText).max(ANSWERS_MAX_ITEMS)]) }))
+    .min(1)
+    .max(ANSWERS_MAX_ITEMS)
 })
 
 /** POST /projects/:id/steps/:stepId/gate — revision/accept_as_is bắt buộc note (lý do). */
 export const gateRequestSchema = z
   .strictObject({
+    /** Session pipeline của project — cùng kiểm `NOT_PIPELINE_SESSION` như `/run`, `/answer`. */
+    session_id: z.string().min(1),
     action: gateActionSchema,
-    note: z.string().trim().min(1).optional(),
+    note: z.string().trim().min(1).max(GATE_NOTE_MAX_CHARS).optional(),
     base_version: baseVersion,
     /** S-5.4: Regenerate ở mức function. */
     function_id: z.string().min(1).optional()
@@ -304,6 +317,13 @@ export const progressResponseSchema = z.object({
       derived: z.boolean()
     })
   )
+})
+
+/** POST /projects/:id/resume — revert step `in_progress` dang dở (nếu có) rồi trả tiến độ. */
+export const resumeResponseSchema = z.object({
+  reverted_step: z.string().nullable(),
+  spine_version: baseVersion,
+  progress: progressResponseSchema
 })
 
 /** GET /projects/:id/flags?level=&open= */

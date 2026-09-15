@@ -1,6 +1,6 @@
 # Pipeline API contract
 
-> **Trạng thái:** bản nháp T08, **đóng băng tại M2**. Sau M2 mọi thay đổi phải qua PR nhãn `contract-change` được cả 4 người duyệt, và sửa `src/modules/pipeline/pipeline.dto.ts` trong cùng PR.
+> **Trạng thái:** T08 — **đã approve 2026-09-15**, đóng băng tại M2. Sau M2 mọi thay đổi phải qua PR nhãn `contract-change` được cả 4 người duyệt, và sửa `src/modules/pipeline/pipeline.dto.ts` trong cùng PR.
 > **Nguồn:** `context/srs-spine.md` §3, §6, §7, §9 và `context/Product-Brief-to-SRS-Phases.md` §2–§4.
 > **Schema zod:** `src/modules/pipeline/pipeline.dto.ts` (request/response), `src/modules/spine/op.types.ts` (op, transaction), `src/modules/spine/spine.schema.ts` (Spine, change, flag, baseline).
 
@@ -95,6 +95,7 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 409 | `REGENERATE_LIMIT` | Regenerate lần 4 trong một step | `{ regenerate_used: 3 }` |
 | 409 | `CALL_LIMIT` | Lượt gọi model thứ 9 trong một step; chỉ còn `accept` / `accept_as_is` | `{ calls_used: 8 }` |
 | 409 | `STEP_NOT_RUNNABLE` | Chạy step chưa tới lượt, hoặc gate step không ở `gate_ready` | — |
+| 409 | `NO_WORKING_DRAFT` | `GET /document` hoặc `GET /export/word` với `source=draft` khi chưa `POST /assemble` lần nào | `{ hint: "S-8.2" }` |
 | 422 | `OP_INVALID` | Op sai: `path_invalid`, `path_not_resolved`, `path_ambiguous`, `index_selector_forbidden`, `key_change_forbidden`, `duplicate_id`, `op_value_missing`, `op_not_allowed`, `schema_invalid`, `path_not_writable`, `revert_conflict` | `{ violations[], referrers[] }` |
 | 422 | `INVARIANT_VIOLATION` | Vi phạm bất biến ở cuối lô: `invariant_1_required_section`, `invariant_2_last_element`, `invariant_3_dead_reference`, `invariant_4_screen_missing`, `invariant_5_feature_order`, `invariant_5_function_order`, `invariant_6_feature_mismatch`, `invariant_8_cursor_screen`, `invariant_8_screen_not_pending`, `invariant_8_screen_not_queued` | `{ violations[], referrers[] }` |
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
@@ -114,8 +115,8 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 2 | `GET /projects/:id/progress` | T09 ✔ | — | `progressResponseSchema` | — |
 | 3 | `GET /projects/:id/steps` | T12/T13 | — | `stepsResponseSchema` | — |
 | 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
-| 5 | `POST /projects/:id/steps/:stepId/answer` | T13 | `stepAnswerRequestSchema` | `{ accepted: true }`, luồng SSE của `/run` tiếp tục | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE` |
-| 6 | `POST /projects/:id/steps/:stepId/gate` | T13 | `gateRequestSchema` | `gateResponseSchema` | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE`, `REGENERATE_LIMIT`, `CALL_LIMIT`, `NEEDS_USER_INPUT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
+| 5 | `POST /projects/:id/steps/:stepId/answer` | T13 | `stepAnswerRequestSchema` (≤ 20 answer, mỗi chuỗi ≤ 4000 ký tự) | `{ accepted: true }`, luồng SSE của `/run` tiếp tục | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE` |
+| 6 | `POST /projects/:id/steps/:stepId/gate` | T13 | `gateRequestSchema` (`session_id` bắt buộc; `note` ≤ 2000 ký tự) | `gateResponseSchema` | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE`, `REGENERATE_LIMIT`, `CALL_LIMIT`, `NEEDS_USER_INPUT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
 | 7 | `POST /projects/:id/changes` | T08 ✔ (`ops`) · T17 (`instruction`) | `changesRequestSchema` | `applyResultResponseSchema` | `SPINE_VERSION_CONFLICT`, `OP_INVALID`, `INVARIANT_VIOLATION`, `NEEDS_CLARIFICATION`, `INSUFFICIENT_CREDIT`, `NOT_IMPLEMENTED` |
 | 8 | `POST /projects/:id/changes/preview` | T08 ✔ (`ops`) · T17 | `changesRequestSchema` | `changesPreviewResponseSchema` (200 cả khi `ok=false`) | `SPINE_VERSION_CONFLICT`, `INSUFFICIENT_CREDIT` |
 | 9 | `POST /projects/:id/reconcile` | T17 | `reconcileRequestSchema` | chưa có `preview_id`: `changesPreviewResponseSchema`; có: `applyResultResponseSchema` | `SPINE_VERSION_CONFLICT`, `INVARIANT_VIOLATION`, `INSUFFICIENT_CREDIT` |
@@ -125,14 +126,15 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 13 | `POST /projects/:id/flags/:flagId/waive` | T09 ✔ | `waiveRequestSchema` (≥ 20 ký tự) | `Flag` | `FLAG_NOT_FOUND`, `FLAG_NOT_WAIVABLE`, `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
 | 14 | `POST /projects/:id/flags/recompute` | T09 ✔ | `recomputeFlagsRequestSchema` | `Flag[]`; `meta = { checked_at_version, opened[], resolved[], reopened[] }` | `SPINE_VERSION_CONFLICT` |
 | 15 | `GET /projects/:id/traceability?entity&id` | T17 | `traceabilityQuerySchema` | `traceabilityResponseSchema` | `VALIDATION_ERROR` |
-| 16 | `GET /projects/:id/document?source=draft\|baseline&baseline_id` | T15 | `documentQuerySchema` | `RenderedDocument` (`render/rendered-document.schema.ts`) | `BASELINE_NOT_FOUND` |
-| 17 | `POST /projects/:id/assemble` | T15 | `assembleRequestSchema` | `assembleResponseSchema` | `SPINE_VERSION_CONFLICT` |
-| 18 | `GET /projects/:id/export/word?source=` | T15 | `exportWordQuerySchema` | file `.docx` (`Content-Disposition: attachment`), không bọc envelope | `BASELINE_NOT_FOUND` |
+| 16 | `GET /projects/:id/document?source=draft\|baseline&baseline_id` | T15 | `documentQuerySchema` | `RenderedDocument` (`render/rendered-document.schema.ts`); `sections[].id` có thể là `group:<number>` (heading nhóm do Assemble chèn, không có status) | `BASELINE_NOT_FOUND`, `NO_WORKING_DRAFT` |
+| 17 | `POST /projects/:id/assemble` | T15 | `assembleRequestSchema` | `assembleResponseSchema` (`sections` không đếm `group:*`) | `SPINE_VERSION_CONFLICT` |
+| 18 | `GET /projects/:id/export/word?source=` | T15 | `exportWordQuerySchema` | file `.docx` (`Content-Disposition: attachment`), không bọc envelope | `BASELINE_NOT_FOUND`, `NO_WORKING_DRAFT` |
 | 19 | `POST /projects/:id/baseline` | T19 | `baselineRequestSchema` | `Baseline` | `BASELINE_BLOCKED`, `SPINE_VERSION_CONFLICT` |
 | 20 | `GET /projects/:id/baselines` | T19 | — | `Baseline[]` | — |
 | 21 | `GET /projects/:id/diagrams/:diagramId.svg` (hoặc `.png`) | T10 ✔ | — | `image/svg+xml` / `image/png`, không bọc envelope | `DIAGRAM_NOT_FOUND` |
 | 22 | `GET /projects/:id/diagrams` | T10 ✔ | — | `(Diagram & { stale: boolean, files: { svg, png } \| null })[]` | — |
 | 23 | `POST /projects/:id/diagrams/:kind/render` (dev/thủ công; `kind` = `all` \| 5 kind) | T10 ✔ | `{ owner_id?, force? }` (`owner_id` bắt buộc với `screen_layout`; `force` compile lại cả hình có `source_hash` không đổi) | `{ spine_version, diagrams[], rendered[], removed[] }`; `.puml` lỗi ⇒ `render_status = error`, vẫn 200 | `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
+| 24 | `POST /projects/:id/resume` | T13 | — | `resumeResponseSchema` `{ reverted_step, spine_version, progress }` — step `in_progress` dang dở bị revert về `pending` | `SPINE_NOT_FOUND`, `STEP_NOT_RUNNABLE` (step đang chạy ở request khác), `CHANGE_RANGE_INVALID`, `OP_INVALID` (`revert_conflict`), `SPINE_VERSION_CONFLICT` |
 
 Mọi endpoint còn có thể trả `401 UNAUTHORIZED`, `404 PROJECT_NOT_FOUND`, `400 VALIDATION_ERROR`.
 
@@ -198,3 +200,5 @@ Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
 | --- | --- | --- |
 | 2026-09-14 | T08 | Bản nháp đầu tiên |
 | 2026-09-14 | review T08–T11 | `txn` nullable (lô không đổi gì), `path_not_writable`, `revert_conflict`, ghi Spine + changes trong transaction, `force` cho render, preview không tạo Spine |
+| 2026-09-15 | contract-change Wave 3 | Endpoint 24 `POST /resume` (T13); `session_id` bắt buộc cho `/gate` + giới hạn độ dài `answers`/`note` (T13); mã `409 NO_WORKING_DRAFT` `{hint}` cho `/document`, `/export/word` (T15); `RenderedSection.id` `group:*` (T15); `step-registry.json` S-3.6 `renders: ["usecase", "context"]` (T14) |
+| 2026-09-15 | contract-change M3 (chạy thật GLM) | `step-registry.json` `reads` S-2.3, S-3.1, S-3.2, S-3.3 thêm `project:name,vision,goals,release_scope` — model cần goals/scope để suy ra actor system/time và đủ use case (run12–13 chỉ ra 2 actor, 7 use case) |
