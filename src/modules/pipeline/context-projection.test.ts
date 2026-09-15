@@ -18,7 +18,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { STEP_SKILLS, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { loadStepRegistry, orderedSteps } from "./step-registry.js"
 
@@ -53,7 +53,12 @@ describe("getStepSpec (step registry T12 + STEP_SKILLS)", () => {
 describe("projectStep", () => {
   it("S-3.5 chỉ nạp actors/roles/use_cases + khung function, addendum §2.1/§2.2.2", () => {
     const p = projectStep(FIXTURE, "S-3.5")
-    expect(Object.keys(p.projection)).toEqual(["actors", "roles", "use_cases", "functions:id,name,screen_id"])
+    expect(Object.keys(p.projection)).toEqual(["actors", "roles", "use_cases", "functions:id,name,screen_id", ASSUMPTION_KEYS_READ])
+    // Step ghi assumptions[] thấy id đã dùng (tránh "AS3 đã tồn tại"), chỉ khoá tối thiểu, không vào emptyFields.
+    const assumptionKeys = p.projection[ASSUMPTION_KEYS_READ] as Record<string, unknown>[]
+    expect(assumptionKeys).toHaveLength(FIXTURE.assumptions.length)
+    for (const a of assumptionKeys) expect(Object.keys(a).sort()).toEqual(["id", "path", "status"])
+    expect(p.emptyFields.some((f) => f.startsWith("assumptions"))).toBe(false)
     const fn = (p.projection["functions:id,name,screen_id"] as Record<string, unknown>[])[0]
     expect(Object.keys(fn).sort()).toEqual(["id", "name", "screen_id"])
     expect(p.writable).toEqual(["actors", "roles", "use_cases", "assumptions"])

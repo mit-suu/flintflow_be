@@ -23,6 +23,38 @@ router.get("/me", authMiddleware, userController.getMe)
 
 /**
  * @swagger
+ * /api/v1/users/me:
+ *   patch:
+ *     summary: Cập nhật tên hiển thị / mốc onboarding của user hiện tại (UC 1.12)
+ *     tags:
+ *       - Users
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *               onboardedAt:
+ *                 type: string
+ *                 format: date-time
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: User profile sau khi cập nhật
+ *       400:
+ *         description: VALIDATION_ERROR
+ *       401:
+ *         description: Unauthorized
+ */
+router.patch("/me", authMiddleware, userController.updateMe)
+
+/**
+ * @swagger
  * /api/v1/users/{id}:
  *   get:
  *     summary: Get user profile by ID

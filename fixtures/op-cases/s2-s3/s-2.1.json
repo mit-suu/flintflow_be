@@ -1,0 +1,24 @@
+{
+  "step_id": "S-2.1",
+  "skill_id": "product-overview",
+  "notes": "Vision and goals drafted from the Brief (B-1.1, B-1.3): one paragraph on problem/target user/why now, plus four outcome-level goals.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.vision",
+      "value": "Enable a solo founder or business analyst to turn a raw product idea into a complete, internally consistent SRS document through a guided AI conversation, without hiring a requirements engineer.",
+      "reason": "B-1.1 problem statement and target user"
+    },
+    {
+      "op": "set",
+      "path": "project.goals",
+      "value": [
+        "Produce a baseline-quality SRS following the FPT template within one working day",
+        "Keep every generated statement traceable to a structured field in the SRS Spine",
+        "Block no export: a watermarked working draft is always available after assembly",
+        "Keep AI spend predictable through per-step credit reservation and metering"
+      ],
+      "reason": "B-1.3 desired outcomes"
+    }
+  ]
+}
