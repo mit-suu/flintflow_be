@@ -28,6 +28,13 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
+    findOneAndUpdate: async (filter: Record<string, unknown>, update: { $set: Doc }) => {
+      const row = rows.find((r) => matches(r, filter))
+      if (!row) return null
+      const before = copy(row)
+      Object.assign(row, copy(update.$set))
+      return before
+    },
     countDocuments: async (filter: Record<string, unknown>) => rows.filter((r) => matches(r, filter)).length,
     /** Simule tối thiểu cho `roundCountsForSteps` (F10): $match rồi $project step_id/call_kind/createdAt. */
     aggregate: async (pipeline: Record<string, unknown>[]) => {
@@ -49,8 +56,10 @@ vi.mock("../spine/spine.repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/spine.repository.js")>()
   return { ...actual, listChanges: vi.fn() }
 })
+vi.mock("../../shared/ai/credit-reservation.service.js", () => ({ refundDeductedCredit: vi.fn(async () => undefined) }))
 
 import { listChanges } from "../spine/spine.repository.js"
+import { refundDeductedCredit } from "../../shared/ai/credit-reservation.service.js"
 import { countCalls, recordUsage, refundUsage, roundStartedAt, roundCounts, roundCountsForSteps, reserveCall, finalizeCall, releaseCall } from "./meter.service.js"
 
 const PROJECT = "650000000000000000000001"
@@ -79,6 +88,17 @@ describe("meter.service", () => {
     await refundUsage(ids)
     expect(await countCalls(PROJECT, STEP)).toBe(0)
     expect(db.rows[0].state).toBe("refunded")
+  })
+
+  it("refundUsage hoàn cost của dòng deducted về ví đúng một lần (gọi lại không hoàn thêm)", async () => {
+    vi.mocked(refundDeductedCredit).mockClear()
+    const ids = await recordUsage(PROJECT, USER, STEP, [entry("draft")])
+    const reservedId = await reserveCall(PROJECT, USER, STEP, "draft")
+    await refundUsage([...ids, reservedId])
+    await refundUsage(ids)
+    expect(refundDeductedCredit).toHaveBeenCalledTimes(1)
+    expect(refundDeductedCredit).toHaveBeenCalledWith({ userId: USER, actionType: "draft", amount: 4, projectId: PROJECT })
+    expect(db.rows.every((r) => r.state === "refunded")).toBe(true)
   })
 
   it("countCalls không đếm step khác hay project khác", async () => {
