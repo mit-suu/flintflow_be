@@ -39,23 +39,40 @@ export class NoWorkingDraftError extends ApiError {
 
 // ─── số hiệu section (§6.3) ─────────────────────────────────────
 
-/** `§3.(2 + features[].order)` / `§3.(2 + order).(functions[].order + 1)` — cấm số cứng ở nơi khác. */
-const numberOf = (spine: Spine, sectionId: string): string => {
-  if (sectionId.startsWith("fixed:")) return sectionId.slice("fixed:".length)
-  if (sectionId.startsWith("feature:")) {
-    const feature = spine.features.find((f) => f.id === sectionId.slice("feature:".length))
-    return `3.${2 + (feature?.order ?? 0)}`
-  }
-  const fn = spine.functions.find((f) => f.id === sectionId.slice("function:".length))
-  const feature = fn ? spine.features.find((f) => f.id === fn.feature_id) : undefined
-  return `3.${2 + (feature?.order ?? 0)}.${(fn?.order ?? 0) + 1}`
+/** `§3.(2 + features[].order)` — feature thứ `order` (từ 0), `order` bất biến 5 giữ duy nhất/liên tục. */
+const featureNumber = (spine: Spine, featureId: string): string => {
+  const feature = spine.features.find((f) => f.id === featureId)
+  return `3.${2 + (feature?.order ?? 0)}`
 }
 
+/**
+ * `§3.(2 + order).(functions[].order + 1)` — CHÚ Ý: `functions[].order` được đánh RIÊNG cho
+ * `screen_id ≠ null` và `screen_id = null` (Phases §6.3), nên cùng một feature có thể có hai
+ * function với `order` trùng nhau (một screen-bound, một non-screen). Đọc `fn.order` trực tiếp
+ * làm `.y` sẽ sinh số trùng. Số `.y` đúng là VỊ TRÍ (1-based) của function trong danh sách đã gộp
+ * của chính feature đó — đúng thứ tự `section-registry.listSections` đã tính (screen-bound trước,
+ * theo `order`, rồi non-screen theo `order`) — nên duyệt `listSections` một lần và đếm theo feature.
+ */
 const buildNumberMap = (spine: Spine): Map<string, string> => {
   const numbers = new Map<string, string>()
+  const functionOrdinalByFeature = new Map<string, number>()
+
   for (const def of listSections(spine)) {
     if (def.id === "fixed:I") continue
-    numbers.set(def.id, numberOf(spine, def.id))
+
+    if (def.id.startsWith("fixed:")) {
+      numbers.set(def.id, def.id.slice("fixed:".length))
+      continue
+    }
+    if (def.id.startsWith("feature:")) {
+      numbers.set(def.id, featureNumber(spine, def.id.slice("feature:".length)))
+      continue
+    }
+    // function:<id> — def.parent = "feature:<id>" (section-registry.listSections)
+    const featureId = def.parent ?? ""
+    const ordinal = (functionOrdinalByFeature.get(featureId) ?? 0) + 1
+    functionOrdinalByFeature.set(featureId, ordinal)
+    numbers.set(def.id, `${numbers.get(featureId) ?? featureNumber(spine, featureId.slice("feature:".length))}.${ordinal}`)
   }
   return numbers
 }
