@@ -362,11 +362,14 @@ export const runStep = async (
     }
   }
 
-  const startSeq = await spineRepository.nextSeq(projectId)
   if (initOps.length > 0) {
     const applied = await applyTransaction(projectId, { base_version: spineVersion, ops: initOps, by: userId, step_id: stepId, reason: "step-runner: init step" })
     spineVersion = applied.spine_version
   }
+  // startSeq CHỈ tính từ sau init ops: seq đánh dấu status=in_progress không phải nội dung của step, không
+  // thuộc dải first_seq/last_seq — nếu không, resume revert dải sẽ xoá luôn phần tử `steps[]` (revert của
+  // "add") rồi việc set lại status=pending bên dưới sẽ path_not_resolved.
+  const startSeq = await spineRepository.nextSeq(projectId)
   ;({ spine, spineVersion } = await refresh(projectId))
   const stepStateForRound: Pick<StepState, "first_seq" | "last_seq"> | undefined = reopenedAfterAccept ? { first_seq: null, last_seq: null } : existingStep
 
