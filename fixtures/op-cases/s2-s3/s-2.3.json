@@ -1,0 +1,29 @@
+{
+  "step_id": "S-2.3",
+  "skill_id": "product-overview",
+  "notes": "Two external systems identified from the release scope: the mock payment gateway and the PlantUML render service.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A01",
+        "name": "Payment Gateway",
+        "kind": "system",
+        "description": "Mock external gateway that authorizes and settles credit purchases for the wallet."
+      },
+      "reason": "S-2.3 external system from release scope: mock payment gateway"
+    },
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A02",
+        "name": "PlantUML Render Service",
+        "kind": "system",
+        "description": "External self-hosted PlantUML server that compiles diagram source into SVG/PNG for the five diagram kinds."
+      },
+      "reason": "S-2.3 external system from release scope: server-rendered PlantUML diagrams"
+    }
+  ]
+}
