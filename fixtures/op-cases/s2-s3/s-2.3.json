@@ -1,0 +1,29 @@
+{
+  "step_id": "S-2.3",
+  "skill_id": "product-overview",
+  "notes": "External systems only (kind=system) — a kind=time actor does not belong here per S-2.3's own scope; it is added at S-3.1 alongside the other non-system actors, per the actors-and-usecases skill.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A01",
+        "name": "Payment Gateway",
+        "kind": "system",
+        "description": "Mock external gateway that authorizes and settles credit purchases for the wallet."
+      },
+      "reason": "S-2.3 external system from release scope: mock payment gateway"
+    },
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A02",
+        "name": "PlantUML Render Service",
+        "kind": "system",
+        "description": "External self-hosted PlantUML server that compiles diagram source into SVG/PNG for the five diagram kinds."
+      },
+      "reason": "S-2.3 external system from release scope: server-rendered PlantUML diagrams"
+    }
+  ]
+}
