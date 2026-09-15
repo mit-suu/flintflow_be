@@ -3,16 +3,17 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
+import { GLM_REQUEST_OPTIONS } from "./glm.provider.js"
 
 /**
- * GLM-5.x trên Modal bỏ qua `reasoning_effort` và trả phần suy nghĩ + `</think>` trong `content` ⇒ JSON parse
- * hỏng. AI SDK không có option cho field lạ `thinking`, nên chèn vào body request (probe 2026-09-15).
+ * GLM-5.3-Flash trên Modal cần `reasoning_effort: "low"` + `json_object` (xem `GLM_REQUEST_OPTIONS`), nếu không
+ * suy nghĩ lan man tới hết token. Chèn thẳng vào body request để không phụ thuộc option của AI SDK.
  */
 export const glmFetch: typeof fetch = (input, init) => {
   if (typeof init?.body === "string") {
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>
-      return fetch(input, { ...init, body: JSON.stringify({ ...body, thinking: { type: "disabled" } }) })
+      return fetch(input, { ...init, body: JSON.stringify({ ...body, ...GLM_REQUEST_OPTIONS }) })
     } catch {
       // body không phải JSON — gửi nguyên
     }
