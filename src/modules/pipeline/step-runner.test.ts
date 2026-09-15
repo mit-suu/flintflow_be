@@ -134,8 +134,9 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, submitAnswer, CALL_LIMIT, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, submitAnswer, CALL_LIMIT, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { gate } from "./gate.service.js"
+import { stepEventSchema, type StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -200,9 +201,12 @@ const renderStub = (): Partial<DiagramServiceDeps> => {
   return { check, renderPng: async () => Buffer.from("png"), store, now: () => new Date("2026-09-14T09:00:00.000Z") }
 }
 
+/** F20: mọi sự kiện `emit` phải khớp đúng `stepEventSchema` (hợp đồng SSE, pipeline-contract.md §2). */
 const collectEvents = () => {
-  const events: { type: string; [k: string]: unknown }[] = []
-  const emit = (e: { type: string; [k: string]: unknown }) => events.push(e)
+  const events: StepEvent[] = []
+  const emit = (e: StepEvent) => {
+    events.push(stepEventSchema.parse(e))
+  }
   return { events, emit }
 }
 
@@ -276,9 +280,10 @@ describe("step-runner: CALL_LIMIT", () => {
   it("calls_used ≥ 8 ⇒ 409 CALL_LIMIT trước khi gọi model, không tiêu thêm lượt", async () => {
     seedSpine()
     seedSession(true)
-    // Step đã in_progress với first_seq=1 (vòng hiện tại) + 8 usage đã deducted cho vòng đó
-    db.spines[0].steps = [...(db.spines[0].steps as unknown[]), { id: "S-3.1", status: "in_progress", first_seq: 1, last_seq: 1, accepted_at: null }]
-    db.changes.push({ projectId: PROJECT, seq: 1, txn: "t0", op: "set", path: "progress.current_step", before: null, value: "S-3.1", reason: null, at: "2026-01-01T00:00:00.000Z", by: "system", step_id: "S-3.1" })
+    // Step đã in_progress với first_seq=2 (vòng hiện tại: mốc vòng = change TRƯỚC first_seq đặt
+    // steps[id=S-3.1].status=in_progress — F1) + 8 usage đã deducted cho vòng đó, ghi SAU mốc vòng.
+    db.spines[0].steps = [...(db.spines[0].steps as unknown[]), { id: "S-3.1", status: "in_progress", first_seq: 2, last_seq: 2, accepted_at: null }]
+    db.changes.push({ projectId: PROJECT, seq: 1, txn: "t0", op: "set", path: "steps[id=S-3.1].status", before: "pending", value: "in_progress", reason: null, at: "2026-01-01T00:00:00.000Z", by: "system", step_id: "S-3.1" })
     for (let i = 1; i <= 8; i++) {
       db.usages.push({ _id: `pre${i}`, projectId: PROJECT, userId: USER, step_id: "S-3.1", call_kind: "draft", attempt: 1, tokens_in: 1, tokens_out: 1, cost: 1, state: "deducted", expires_at: "2099-01-01T00:00:00.000Z", logId: null, createdAt: "2026-01-01T00:01:00.000Z" })
     }
@@ -329,5 +334,97 @@ describe("step-runner: 2 tab — SPINE_VERSION_CONFLICT hoàn usage, không tiê
 describe("step-runner: POST /answer", () => {
   it("submitAnswer resolves lượt chờ answer_needed đang treo; không có lượt chờ ⇒ false", () => {
     expect(submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).toBe(false)
+  })
+
+  it("F18: waitForAnswer/submitAnswer — elicit trả questions ⇒ answer_needed, submitAnswer từ ngoài đưa luồng tới gate_ready", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply("Bạn muốn actor nào?", [{ question: "Actor chính là ai?", suggestedAnswers: [], multiple: false }]),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub()
+    }
+    const { events, emit } = collectEvents()
+
+    const runPromise = runStep(PROJECT, "S-3.1", SESSION, USER, emit, deps)
+
+    // Chờ tới khi answer_needed thực sự được emit (không đoán độ trễ bằng setTimeout cố định).
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) {
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    const answerNeeded = events.find((e) => e.type === "answer_needed")
+    expect(answerNeeded).toBeTruthy()
+    const questionId = (answerNeeded as Extract<StepEvent, { type: "answer_needed" }>).questions[0]!.id
+
+    const accepted = submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: questionId, answer: "Người quản trị" }])
+    expect(accepted).toBe(true)
+
+    await runPromise
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+
+    const session = db.sessions.find((s) => s._id === SESSION)!
+    const userMsgs = (session.messages as { role: string; content: string }[]).filter((m) => m.role === "user")
+    expect(userMsgs.some((m) => m.content === "Người quản trị")).toBe(true)
+  })
+})
+
+describe("step-runner: F1 — usage Elicit ghi TRƯỚC change nội dung đầu tiên vẫn được tính vào calls_used", () => {
+  it("gate_ready.calls_used đếm cả elicit lẫn draft (bug cũ: mốc vòng = change first_seq, loại mất elicit)", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A09", name: "X", kind: "human", description: "d" } }]),
+      renderDeps: renderStub()
+    }
+    const { events, emit } = collectEvents()
+
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, deps)
+
+    const gateReady = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
+    expect(gateReady.calls_used).toBe(2) // elicit + draft — cả hai đều phải tính, không riêng draft
+  })
+})
+
+describe("step-runner: khoá in-process theo step (F2)", () => {
+  it("hai runStep đồng thời cùng step ⇒ request thứ hai 409 STEP_NOT_RUNNABLE, không đụng model; request đầu chạy trọn vẹn", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub()
+    }
+    const { events: events1, emit: emit1 } = collectEvents()
+    const { emit: emit2 } = collectEvents()
+
+    const p1 = runStep(PROJECT, "S-3.1", SESSION, USER, emit1, deps)
+    const err2 = await runStep(PROJECT, "S-3.1", SESSION, USER, emit2, deps).catch((e: unknown) => e)
+
+    expect(err2).toBeInstanceOf(ApiError)
+    expect((err2 as ApiError).statusCode).toBe(409)
+    expect((err2 as ApiError).code).toBe(STEP_NOT_RUNNABLE)
+
+    await p1 // không ném — request đầu (giữ khoá) chạy trọn vẹn
+    expect(events1.some((e) => e.type === "gate_ready")).toBe(true)
+  })
+})
+
+describe("step-runner: F8 — client đóng kết nối (AbortSignal)", () => {
+  it("signal đã abort TRƯỚC khi gọi model ⇒ dừng ngay, không gọi elicit/draft", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    controller.abort()
+    const elicitExecutor = vi.fn()
+    const draftExecutor = vi.fn()
+    const { emit } = collectEvents()
+
+    const err = await runStep(PROJECT, "S-3.1", SESSION, USER, emit, { elicitExecutor, draftExecutor, signal: controller.signal }).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).code).toBe(STEP_NOT_RUNNABLE)
+    expect(elicitExecutor).not.toHaveBeenCalled()
+    expect(draftExecutor).not.toHaveBeenCalled()
   })
 })
