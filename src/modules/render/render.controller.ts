@@ -14,7 +14,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import { getProjectById } from "../project/project.service.js"
 import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema } from "../pipeline/pipeline.dto.js"
-import { assemble, getDocument, NoWorkingDraftError } from "./assemble.service.js"
+import { assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -47,7 +47,9 @@ export const assembleController = catchAsync(async (req: Request, res: Response)
   const { projectId, projectName } = await authorize(req)
   const body = parse(assembleRequestSchema, req.body)
   const result = await assemble(projectId, projectName, body.base_version)
-  return sendSuccess(res, 200, assembleResponseSchema.parse(result))
+  // review Th2: findings S-8.4 đi qua meta thay vì console.warn toàn bộ — data vẫn đúng khuôn
+  // assembleResponseSchema (field `findings` không thuộc contract, bị parse() lọc bỏ khỏi data).
+  return sendSuccess(res, 200, assembleResponseSchema.parse(result), { consistency: result.findings })
 })
 
 // ─── GET /document ───────────────────────────────────────────────
@@ -58,7 +60,17 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
 
   try {
     const doc = await getDocument(projectId, projectName, query)
-    return sendSuccess(res, 200, doc)
+    // review C2: source=draft trước đây trả im lặng bản cache mới nhất dù Spine đã đổi tiếp — đính
+    // kèm độ mới để caller (FE) tự quyết định có báo "tài liệu đang xem đã cũ" hay không.
+    const draftMeta = query.source === "draft" ? await getDraftMeta(projectId) : null
+    return sendSuccess(
+      res,
+      200,
+      doc,
+      draftMeta
+        ? { assembled_at_version: draftMeta.assembled_at_version, spine_version: draftMeta.spine_version, stale: draftMeta.stale }
+        : undefined
+    )
   } catch (err) {
     if (err instanceof NoWorkingDraftError) return sendError(res, err.statusCode, err.code, err.message, { hint: "S-8.2" })
     throw err
