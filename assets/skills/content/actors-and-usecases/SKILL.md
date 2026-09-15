@@ -45,7 +45,11 @@ added at S-2.3 (do not duplicate). Kinds: `human` (operates via UI, gets a role 
 role). An actor is a type of party, not a job-title synonym — two names sharing every capability are one
 actor with two `roles[]` rows, not two actors. A guided-pipeline product usually needs at least: the
 primary human actor, one back-office human actor, one external system actor, and one `time` actor if
-anything runs on a schedule — missing one without a stated reason is a signal to recheck the Brief. One
+anything runs on a schedule — missing one without a stated reason is a signal to recheck the Brief.
+**Derive, do not wait to be told**: a goal/vision mentioning AI generation ⇒ `system` "AI Model Provider";
+credits, payments, plans ⇒ `system` "Payment Gateway"; export/email/notifications ⇒ the matching `system`
+service; anything that expires, resets, is reserved or scheduled ⇒ a `time` actor (e.g. "Credit Reservation
+Expiry Scheduler"). Fast mode: add them with an `assumptions[]` entry rather than skipping. One
 `roles[]` row per (human actor, distinct permission set); `actor_id` must be a `human` actor's id, never
 `null` at creation; add the actor before its role in the same batch.
 
@@ -57,11 +61,16 @@ actor that can *initiate* it — `system` actors qualify too], function_ids: [],
 trigger, outcome — one full sentence, written now, not deferred to S-3.5>", includes: [], extends: []}`.
 One use case = one goal reachable in one sitting, independent of UI screens — "Manage Project" is too
 coarse (split create/edit/delete/export); "Click Accept Button" is too fine (implementation detail).
+**Coverage floor**: the primary human actor gets one use case per goal in `project.goals[]` and per
+`release_scope.in` bullet (typically 6–10); every other human actor ≥ 2; every `system`/`time` actor ≥ 1
+use case it initiates (e.g. "Expire Stale Credit Reservations"). Add every use case not already in the
+projection — a S-3.2 batch with no new `use_cases[]` is almost always wrong.
 
 ## S-3.3 — Missing Use Case Sweep
 
-Check each theme against the current list; add the missing use case or note in `notes` why it does not
-apply — never silently skip: **(1) Administration** — an admin actor has view/list + suspend for every
+Check each theme against the current list; for every theme without a matching use case, **add one** (Fast
+mode: with an `assumptions[]` entry), or name the theme in `notes` with the reason it does not apply — never
+silently skip: **(1) Administration** — an admin actor has view/list + suspend for every
 entity type end users create. **(2) Support** — a human actor can reach a "something is wrong, help me"
 path unless support is explicitly out of scope. **(3) Notifications** — a human actor has a use case for
 consuming each async event a `system`/`time` actor produces. **(4) Forgotten password** — required for any
