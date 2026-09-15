@@ -4,11 +4,7 @@
  * Mở lại project (Phases §3, `assets/skills/action/srs-orchestrator/SKILL.md` §Resume): step đang
  * `in_progress` (đóng tab/mất mạng giữa Draft) ⇒ revert dải `changes[first_seq..last_seq]` bằng
  * `revertRange` (T08), đặt lại `status = pending`, `first_seq/last_seq = null`, rồi trả `progress` (T09)
- * để FE tiếp tục đúng chỗ.
- *
- * F4 (review T13): `POST /projects/:id/resume` chờ PR contract-change (chưa có trong bảng endpoint đóng
- * băng của `docs/api/pipeline-contract.md`, coding-rules §3.8) — hiện chỉ dùng ở mức service (T14 gọi
- * trực tiếp, không qua HTTP). KHÔNG mount route cho tới khi contract được cập nhật.
+ * để FE tiếp tục đúng chỗ. HTTP: `POST /projects/:id/resume` (contract endpoint 24).
  */
 
 import { applyTransaction, revertRange } from "../spine/op-engine.js"

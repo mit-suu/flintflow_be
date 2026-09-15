@@ -60,7 +60,7 @@ describe("assets/step-registry.json", () => {
     expect(steps.filter((s) => s.deterministic).map((s) => s.id)).toEqual(["S-8.2", "S-8.3", "S-9.1", "S-9.5"])
     expect(Object.fromEntries(steps.filter((s) => s.renders.length > 0).map((s) => [s.id, s.renders]))).toEqual({
       "S-2.5": ["context"],
-      "S-3.6": ["usecase"],
+      "S-3.6": ["usecase", "context"],
       "S-4.2": ["screen_flow"],
       "S-4.5": ["erd"],
       "S-5.3": ["screen_layout"]

@@ -5,14 +5,10 @@
  * POST /projects/:projectId/steps/:stepId/run         chạy step (SSE) — step-runner.service
  * POST /projects/:projectId/steps/:stepId/answer      trả lời Elicit đang chờ (answer_needed)
  * POST /projects/:projectId/steps/:stepId/gate        accept/revision/regenerate/accept_as_is
+ * POST /projects/:projectId/resume                    revert step `in_progress` dang dở, trả progress
  *
  * `GET /progress` đã có ở T09 (`flags.route.ts`) — không mount lại ở đây.
- * Hợp đồng: docs/api/pipeline-contract.md.
- *
- * F4 (review T13): `resume.service.ts` (revert step `in_progress` dang dở khi mở lại project) VẪN tồn tại
- * nhưng KHÔNG mount route ở đây — `POST /projects/:id/resume` không có trong bảng endpoint đóng băng của
- * contract (coding-rules §3.8 cấm thêm endpoint ngoài contract). Dùng `resumeProject` ở mức service (T14
- * gọi trực tiếp) cho tới khi có PR `contract-change` bổ sung endpoint.
+ * Hợp đồng: docs/api/pipeline-contract.md (endpoint 24 `/resume`, `session_id` của `/gate`: contract-change 2026-09-15).
  */
 
 import { Request, Response } from "express"
@@ -25,12 +21,14 @@ import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import {
   runStep,
   submitAnswer,
+  requirePipelineSession,
   isPipelineErrorCode,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   type Emit
 } from "./step-runner.service.js"
 import { gate, GateLimitError, type GateInput } from "./gate.service.js"
+import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
@@ -194,6 +192,7 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
   const { projectId, userId } = await authorize(req)
   const stepId = req.params.stepId as string
   const body = parse(gateRequestSchema, req.body)
+  await requirePipelineSession(projectId, body.session_id)
 
   const input: GateInput = {
     action: body.action,
@@ -209,4 +208,12 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
     if (err instanceof GateLimitError) return sendError(res, err.statusCode, err.code, err.message, err.details)
     throw err
   }
+})
+
+// ─── POST /resume ───────────────────────────────────────────────────
+
+export const resumeProjectController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const result = await resumeProject(projectId, userId)
+  return sendSuccess(res, 200, result)
 })

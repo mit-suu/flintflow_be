@@ -385,7 +385,7 @@ export const trackSeqRange = async (
 
 /** F15: session không tồn tại/không thuộc project là cùng một lớp lỗi với "không phải session pipeline"
  *  (client không được suy ra Spine có tồn tại hay không từ mã lỗi) — cả hai đều 403 NOT_PIPELINE_SESSION. */
-const requirePipelineSession = async (projectId: string, sessionId: string): Promise<void> => {
+export const requirePipelineSession = async (projectId: string, sessionId: string): Promise<void> => {
   const session = await ChatSession.findById(sessionId)
   if (!session || String(session.projectId) !== String(projectId) || !session.is_pipeline) {
     throw new ApiError(403, "Session này không phải session pipeline của dự án — chỉ dùng để hỏi đáp (CHAT)", NOT_PIPELINE_SESSION)
