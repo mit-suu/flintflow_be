@@ -201,3 +201,4 @@ Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
 | 2026-09-14 | T08 | Bản nháp đầu tiên |
 | 2026-09-14 | review T08–T11 | `txn` nullable (lô không đổi gì), `path_not_writable`, `revert_conflict`, ghi Spine + changes trong transaction, `force` cho render, preview không tạo Spine |
 | 2026-09-15 | contract-change Wave 3 | Endpoint 24 `POST /resume` (T13); `session_id` bắt buộc cho `/gate` + giới hạn độ dài `answers`/`note` (T13); mã `409 NO_WORKING_DRAFT` `{hint}` cho `/document`, `/export/word` (T15); `RenderedSection.id` `group:*` (T15); `step-registry.json` S-3.6 `renders: ["usecase", "context"]` (T14) |
+| 2026-09-15 | contract-change M3 (chạy thật GLM) | `step-registry.json` `reads` S-2.3, S-3.1, S-3.2, S-3.3 thêm `project:name,vision,goals,release_scope` — model cần goals/scope để suy ra actor system/time và đủ use case (run12–13 chỉ ra 2 actor, 7 use case) |
