@@ -101,6 +101,9 @@ import type { StepRunnerDeps } from "./step-runner.service.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { gate, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
+import { resumeProject } from "./resume.service.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { notify } from "../notification/notification.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MINIMAL: SpineT = spineSchema.parse(
@@ -194,6 +197,7 @@ const draftReply = (ops: OpTransaction["ops"]): AiActionResult<OpTransaction> =>
 
 beforeEach(() => {
   db.reset()
+  vi.mocked(notify).mockClear()
 })
 
 describe("gate.service: regenerate — trần 3/step", () => {
@@ -225,6 +229,153 @@ describe("gate.service: regenerate — trần 3/step", () => {
     const spine = await repo.get(PROJECT)
     expect(spine!.actors.map((a) => a.id)).not.toContain("A90") // bị revert
     expect(spine!.actors.map((a) => a.id)).toContain("A91") // ops mới
+  })
+
+  it("F3: regenerate 2 lần liên tiếp ⇒ lần 2 revert đúng nội dung lần 1 (không trùng phần tử)", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+
+    const first = await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: version }, {
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A91", name: "R1", kind: "human", description: "x" } }])
+    })
+    const afterFirst = await repo.get(PROJECT)
+    expect(afterFirst!.actors.map((a) => a.id)).toContain("A91")
+    // Bug cũ: first_seq/last_seq không cập nhật sau redraft ⇒ vẫn null ⇒ lần 2 không revert được A91.
+    expect(afterFirst!.steps.find((s) => s.id === STEP)!.first_seq).not.toBeNull()
+
+    const second = await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: first.spine_version }, {
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A92", name: "R2", kind: "human", description: "y" } }])
+    })
+    const afterSecond = await repo.get(PROJECT)
+    expect(afterSecond!.actors.map((a) => a.id)).not.toContain("A91") // A91 (lần 1) bị revert đúng, không trùng
+    expect(afterSecond!.actors.map((a) => a.id)).toContain("A92")
+    expect(afterSecond!.actors.map((a) => a.id)).toContain("A00") // actor gốc không đụng
+    expect(second.step.regenerate_used).toBe(2)
+  })
+
+  it("resume sau regenerate vẫn revert đúng (F3: resume dùng first_seq/last_seq đã được cập nhật)", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: version }, {
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A91", name: "R1", kind: "human", description: "x" } }])
+    })
+
+    const result = await resumeProject(PROJECT, USER)
+    expect(result.reverted_step).toBe(STEP)
+    const after = await repo.get(PROJECT)
+    expect(after!.actors.map((a) => a.id)).not.toContain("A91")
+    expect(after!.actors.map((a) => a.id)).toContain("A00")
+    expect(after!.steps.find((s) => s.id === STEP)).toMatchObject({ status: "pending", first_seq: null, last_seq: null })
+  })
+
+  it("F13: dải seq bị lẫn change không thuộc step (user sửa tay /changes) ⇒ 422 CHANGE_RANGE_INVALID, không revert âm thầm", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const midway = await repo.get(PROJECT)
+
+    const foreignChange = await applyTransaction(PROJECT, {
+      base_version: midway!.spine_version,
+      ops: [{ op: "add", path: "actors[]", value: { id: "A77", name: "User sửa tay", kind: "human", description: "ngoài step" } }],
+      by: USER,
+      step_id: null,
+      reason: "user /changes"
+    })
+    await applyTransaction(PROJECT, {
+      base_version: foreignChange.spine_version,
+      ops: [{ op: "set", path: `steps[id=${STEP}].last_seq`, value: foreignChange.changes[0].seq }],
+      by: USER,
+      step_id: STEP,
+      reason: "seed: mở rộng dải để chứa change ngoài step"
+    })
+
+    const before = await repo.get(PROJECT)
+    const draftExecutor = vi.fn()
+    const err = await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: before!.spine_version }, { draftExecutor }).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(422)
+    expect((err as ApiError).code).toBe("CHANGE_RANGE_INVALID")
+    expect(draftExecutor).not.toHaveBeenCalled()
+
+    const after = await repo.get(PROJECT)
+    expect(after!.spine_version).toBe(before!.spine_version)
+    expect(after!.actors.map((a) => a.id)).toContain("A90") // không bị revert âm thầm
+    expect(after!.actors.map((a) => a.id)).toContain("A77")
+  })
+})
+
+describe("gate.service: B7 reopen — revision/regenerate trên step đã accepted (F6)", () => {
+  it("accept rồi revision ⇒ reopen (revision_requested, reset accepted_at) rồi redraft, calls_used vòng MỚI không cộng dồn vòng cũ (F1)", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const accepted = await gate(PROJECT, STEP, USER, { action: "accept", base_version: version })
+    expect(accepted.step.status).toBe("accepted")
+
+    // Usage của vòng CŨ (trước accept) — không được cộng vào calls_used của vòng mới sau reopen.
+    seedUsage(STEP, "draft", 5, "2020-01-01T00:00:00.000Z")
+
+    const result = await gate(
+      PROJECT,
+      STEP,
+      USER,
+      { action: "revision", note: "cần sửa mô tả actor cho rõ hơn", base_version: accepted.spine_version },
+      { draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A93", name: "Reopened", kind: "human", description: "z" } }]) }
+    )
+
+    expect(result.step.status).toBe("in_progress") // redraft xong quay lại in_progress như revision thường
+    expect(result.step.accepted_at).toBeNull() // B7: reset accepted_at
+    expect(result.step.calls_used).toBe(1) // vòng MỚI: chỉ đếm lượt revision vừa gọi, không cộng dồn 5 usage vòng cũ
+
+    const changes = await repo.listChanges(PROJECT)
+    const reopenChange = changes.find((c) => c.path === `steps[id=${STEP}].status` && c.value === "revision_requested" && c.before === "accepted")
+    expect(reopenChange).toBeTruthy() // xác nhận transition reopen thật đã xảy ra (B7 không còn chết)
+
+    const spine = await repo.get(PROJECT)
+    expect(spine!.actors.map((a) => a.id)).toContain("A93")
+  })
+
+  it("accept rồi regenerate ⇒ reopen tương tự, vòng regenerate_used tính lại từ 0", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const accepted = await gate(PROJECT, STEP, USER, { action: "accept", base_version: version })
+
+    const result = await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: accepted.spine_version }, {
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A94", name: "Regen reopen", kind: "human", description: "w" } }])
+    })
+
+    expect(result.step.regenerate_used).toBe(1)
+    expect(result.step.accepted_at).toBeNull()
+    const spine = await repo.get(PROJECT)
+    expect(spine!.actors.map((a) => a.id)).toContain("A94")
+  })
+
+  it("accept rồi accept lại (action=accept) ⇒ vẫn STEP_NOT_RUNNABLE — chỉ revision/regenerate được reopen", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const accepted = await gate(PROJECT, STEP, USER, { action: "accept", base_version: version })
+
+    const err = await gate(PROJECT, STEP, USER, { action: "accept", base_version: accepted.spine_version }).catch((e: unknown) => e)
+    expect(err).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+  })
+})
+
+describe("gate.service: accept_as_is — id cờ mới (F14)", () => {
+  it("hậu tố số LỚN NHẤT hiện có + 1 — tránh trùng id khi mảng có khoảng trống (cờ giữa đã bị cascade xoá)", async () => {
+    seedSpine()
+    const flagBase = { level: "yellow" as const, rule_id: "x", section_id: "fixed:I", target_id: null, remediation_step: "S-3.1", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null }
+    db.spines[0].flags = [
+      { ...flagBase, id: "FL001", message: "a" },
+      { ...flagBase, id: "FL003", message: "b" } // FL002 coi như đã bị cascade xoá — còn khoảng trống
+    ]
+    const version = await seedInProgressWithContent(STEP, "A90")
+
+    const result = await gate(PROJECT, STEP, USER, { action: "accept_as_is", note: "chấp nhận hiện trạng do thời gian dự án", base_version: version })
+    expect(result.step.status).toBe("accepted")
+
+    const spine = await repo.get(PROJECT)
+    const newFlag = spine!.flags.find((f) => f.rule_id === "accepted_as_is")
+    // `flags.length + 1` (cách cũ) = 3 ⇒ trùng FL003 đã có. Đúng phải là FL004 (hậu tố lớn nhất + 1).
+    expect(newFlag?.id).toBe("FL004")
   })
 })
 
@@ -278,7 +429,7 @@ describe("gate.service: accept", () => {
     expect(err).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
   })
 
-  it("accept step cuối cùng của phase S-2 ⇒ notify phase_accepted (không ném lỗi)", async () => {
+  it("F19: accept step cuối cùng của phase S-2 ⇒ notify phase_accepted với đúng userId + meta.phase", async () => {
     // Mọi step trước S-3 accepted, TRỪ S-2.5 (đặt in_progress ở dưới) — accept S-2.5 xong ⇒ cả phase S-2 accepted.
     const spine = structuredClone(MINIMAL)
     spine.progress.current_phase = "S-2"
@@ -289,5 +440,7 @@ describe("gate.service: accept", () => {
     const version = await seedInProgressWithContent("S-2.5", "A90")
     const result = await gate(PROJECT, "S-2.5", USER, { action: "accept", base_version: version })
     expect(result.step.status).toBe("accepted")
+
+    expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "phase_accepted", meta: { phase: "S-2" } }))
   })
 })
