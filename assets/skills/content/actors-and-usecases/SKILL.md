@@ -20,13 +20,9 @@ writes:
   - "assumptions[]"
 output_schema: opTransaction
 language: en
-stub: true
+stub: false
 ---
 # Actors And Usecases
-
-> `stub: true` is kept only so `prompt-assets.test.ts` (T03, owned file) keeps passing — it asserts every
-> non-`action` skill is a stub. Content below is real, written in T14. XREQ T14→T03: split that assertion
-> once T03 revisits it.
 
 Covers **S-3.1 Actors, S-3.2 Actor–Goal List, S-3.3 Missing Use Case Sweep, S-3.4 Use Case Relationships,
 S-3.5 Use Case Descriptions** — feeds `fixed:2.1` (Actors) and `fixed:2.2.2` (Use Case Descriptions).

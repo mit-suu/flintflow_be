@@ -94,9 +94,23 @@ describe("skill trên đĩa (assets/skills)", () => {
     }
   })
 
-  it("10 skill action có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
+  // XREQ T14→T03, T10→T03 (chốt 2026-09-15): skill đã viết thật ở T10/T14 bỏ `stub`; skill chưa viết vẫn là stub.
+  const WRITTEN_NON_ACTION = new Set([
+    "content/project-classifier",
+    "content/product-overview",
+    "content/high-level-rules",
+    "content/actors-and-usecases",
+    "renderer/context",
+    "renderer/erd",
+    "renderer/screen-flow",
+    "renderer/screen-layout",
+    "renderer/usecase"
+  ])
+
+  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
-      if (s.kind === "action") {
+      const dir = s.dir.replace(/\\/g, "/")
+      if (s.kind === "action" || WRITTEN_NON_ACTION.has(dir)) {
         expect(s.stub, `${s.dir} không được là stub`).toBe(false)
         const lines = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").split("\n")
         expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(150)
@@ -104,6 +118,8 @@ describe("skill trên đĩa (assets/skills)", () => {
         expect(s.stub, `${s.dir} phải đánh dấu stub`).toBe(true)
       }
     }
+    const dirs = new Set(listSkillAssets().map((s) => s.dir.replace(/\\/g, "/")))
+    for (const dir of WRITTEN_NON_ACTION) expect(dirs.has(dir), `${dir} không tồn tại`).toBe(true)
   })
 
   it("SKILL_BY_ACTION_TYPE trỏ tới skill action có output_schema khớp parser", () => {
