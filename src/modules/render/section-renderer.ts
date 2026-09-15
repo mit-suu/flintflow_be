@@ -16,6 +16,13 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
+
+/**
+ * T15 review T5: `fixed:I` không cần `before`/`value` (chỉ mô tả A/M/D + ngày/người/lý do) — caller
+ * (`assemble.service.ts`) đọc `Change` model trực tiếp với projection nhẹ này thay vì
+ * `spine.repository.listChanges` (tải cả `before`/`value`, nặng không cần thiết cho §I).
+ */
+export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id">
 import type {
   Block,
   BulletListBlock,
@@ -195,12 +202,24 @@ const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   ]
 }
 
+/**
+ * T15 review T9: ma trận màn × vai trò — cột = mỗi role, hàng = mỗi screen, ô = action của
+ * (screen, role) gộp lại ("—" khi không có quyền nào). Trước đây mỗi permission một dòng
+ * (Screen | Role | Action) — không phải "ma trận" như Phases §6.3 yêu cầu.
+ */
 const screenAuthorization = (spine: Spine): Block[] => {
   if (spine.permissions.length === 0) return []
-  const screenName = (id: string) => spine.screens.find((s) => s.id === id)?.name ?? id
-  const roleName = (id: string) => spine.roles.find((r) => r.id === id)?.name ?? id
-  const sorted = [...spine.permissions].sort((a, b) => (a.screen_id + a.role_id + a.action).localeCompare(b.screen_id + b.role_id + b.action))
-  return [tableBlock(["Screen", "Role", "Action"], sorted.map((perm) => [screenName(perm.screen_id), roleName(perm.role_id), perm.action]))]
+  const actionsOf = (screenId: string, roleId: string): string =>
+    spine.permissions
+      .filter((p) => p.screen_id === screenId && p.role_id === roleId)
+      .map((p) => p.action)
+      .join(", ") || "—"
+  return [
+    tableBlock(
+      ["Screen", ...spine.roles.map((r) => r.name)],
+      spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))])
+    )
+  ]
 }
 
 const nonScreenFunctions = (spine: Spine): Block[] => {
@@ -357,12 +376,22 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
 
 /**
  * §I: gộp `changes[]` theo `txn` — một dòng mỗi transaction (ngày, người ghi, lý do).
- * `version` là số thứ tự draft tất định (`v0.<n>`, `n` = thứ tự txn xuất hiện) — Spine không lưu
- * lịch sử "văn bản version" trước baseline nên đây là quy ước hiển thị, không phải `spine_version`.
+ *
+ * `version` (T15 review T7): mỗi txn của op-engine tăng `spine_version` đúng 1 (`saveWithVersion`:
+ * `newVersion = baseVersion + 1`), và Spine mới bắt đầu ở `spine_version = 1` (`createEmptySpine`).
+ * Nên sau txn thứ `k` (1-based theo thứ tự xuất hiện/`seq`), `spine_version = k + 1`. `changes` ở
+ * đây có `i` 0-based (thứ tự xuất hiện trong mảng, đã sort theo `seq` từ nguồn) ⇒ `k = i + 1` ⇒
+ * `spine_version = i + 2` ⇒ `version: "v0.<i+2>"`. Dòng cuối vì vậy khớp đúng `v0.<spine_version>`
+ * của chính `RenderedDocument` được ghép ngay sau txn cuối — kiểm bằng `assemble.service.ts`
+ * `version: v0.${record.spine_version}`.
+ *
+ * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
+ * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
+ * không cần DB).
  */
-export function buildRecordOfChanges(changes: Change[]): RocRow[] {
+export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge: (by: string) => string = (by) => by): RocRow[] {
   const order: string[] = []
-  const groups = new Map<string, Change[]>()
+  const groups = new Map<string, ChangeRecordRow[]>()
   for (const change of changes) {
     const list = groups.get(change.txn)
     if (list) list.push(change)
@@ -372,14 +401,14 @@ export function buildRecordOfChanges(changes: Change[]): RocRow[] {
     }
   }
   return order.map((txn, i) => {
-    const group = groups.get(txn) as Change[]
+    const group = groups.get(txn) as ChangeRecordRow[]
     const first = group[0]
     const reasons = [...new Set(group.map((c) => c.reason).filter((r): r is string => !!r))]
     return {
       date: first.at.slice(0, 10),
-      version: `v0.${i + 1}`,
+      version: `v0.${i + 2}`,
       change_type: changeTypeOf(new Set(group.map((c) => c.op))),
-      in_charge: first.by,
+      in_charge: resolveInCharge(first.by),
       description: reasons.length > 0 ? reasons.join("; ") : first.step_id ? `Step ${first.step_id}` : "Spine updated"
     }
   })

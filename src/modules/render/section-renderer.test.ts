@@ -190,10 +190,17 @@ describe("renderSection — fixed sections", () => {
     expect(table.type === "table" && table.rows[1][0]).toEqual([{ text: "3.3 Dashboard" }])
   })
 
-  it("fixed:3.1.3 — ma trận màn × vai trò, mỗi permission một dòng", () => {
+  it("fixed:3.1.3 — ma trận màn × vai trò (T15 review T9: cột = role, hàng = screen, ô = action gộp)", () => {
     const section = renderSection(spine(), "fixed:3.1.3", ctx({ number: "3.1.3" }))
     expect(section.blocks).toEqual([
-      { type: "table", header: [[{ text: "Screen" }], [{ text: "Role" }], [{ text: "Action" }]], rows: [[[{ text: "Login" }], [{ text: "Registered User" }], [{ text: "view" }]]] }
+      {
+        type: "table",
+        header: [[{ text: "Screen" }], [{ text: "Registered User" }]],
+        rows: [
+          [[{ text: "Login" }], [{ text: "view" }]],
+          [[{ text: "Dashboard" }], [{ text: "—" }]]
+        ]
+      }
     ])
   })
 
@@ -275,13 +282,8 @@ describe("sectionHeadingOf", () => {
 
 describe("buildRecordOfChanges", () => {
   const change = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
-    projectId: "p1",
-    seq: 1,
     txn: "t1",
     op: "set",
-    path: "actors[id=A01].name",
-    before: "x",
-    value: "y",
     reason: null,
     at: "2026-09-01T09:00:00.000Z",
     by: "u1",
@@ -292,12 +294,13 @@ describe("buildRecordOfChanges", () => {
   it("gộp theo txn, suy change_type từ tập op, gộp reason không trùng", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", op: "add", reason: "seed actor" }),
-      change({ txn: "t1", seq: 2, op: "add", reason: "seed actor" }),
-      change({ txn: "t2", seq: 3, op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
+      change({ txn: "t1", op: "add", reason: "seed actor" }),
+      change({ txn: "t2", op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
     ])
+    // T15 review T7: version = v0.<i+2> (i 0-based) — Spine bắt đầu spine_version=1, mỗi txn +1.
     expect(rows).toEqual([
-      { date: "2026-09-01", version: "v0.1", change_type: "A", in_charge: "u1", description: "seed actor" },
-      { date: "2026-09-02", version: "v0.2", change_type: "M", in_charge: "u2", description: "typo fix" }
+      { date: "2026-09-01", version: "v0.2", change_type: "A", in_charge: "u1", description: "seed actor" },
+      { date: "2026-09-02", version: "v0.3", change_type: "M", in_charge: "u2", description: "typo fix" }
     ])
   })
 
@@ -308,5 +311,19 @@ describe("buildRecordOfChanges", () => {
 
   it("changes rỗng ⇒ mảng rỗng", () => {
     expect(buildRecordOfChanges([])).toEqual([])
+  })
+
+  it("không truyền resolveInCharge ⇒ giữ nguyên by thô (mặc định identity)", () => {
+    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010" })])
+    expect(rows[0].in_charge).toBe("650000000000000000000010")
+  })
+
+  it("review T7: resolveInCharge được gọi với by của change đầu lô để tra tên hiển thị", () => {
+    const rows = buildRecordOfChanges(
+      [change({ txn: "t1", by: "650000000000000000000010" }), change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z" })],
+      (by) => (by === "system" ? "System" : `Resolved:${by}`)
+    )
+    expect(rows[0].in_charge).toBe("Resolved:650000000000000000000010")
+    expect(rows[1].in_charge).toBe("System")
   })
 })

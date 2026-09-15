@@ -5,14 +5,14 @@ vi.mock("../project/project.service.js", () => ({ getProjectById: vi.fn() }))
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
 vi.mock("./assemble.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./assemble.service.js")>()
-  return { ...actual, assemble: vi.fn(), getDocument: vi.fn() }
+  return { ...actual, assemble: vi.fn(), getDocument: vi.fn(), getDraftMeta: vi.fn() }
 })
 vi.mock("./docx-writer.js", () => ({ writeDocx: vi.fn(), buildDocxFileName: vi.fn(() => "demo-v0.1-draft.docx") }))
 
 import { assembleController, getDocumentController } from "./render.controller.js"
 import { exportWord } from "./export.controller.js"
 import { getProjectById } from "../project/project.service.js"
-import { assemble, getDocument, NoWorkingDraftError } from "./assemble.service.js"
+import { assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { writeDocx } from "./docx-writer.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
@@ -63,6 +63,8 @@ beforeEach(() => {
   vi.mocked(getProjectById).mockReset()
   vi.mocked(assemble).mockReset()
   vi.mocked(getDocument).mockReset()
+  vi.mocked(getDraftMeta).mockReset()
+  vi.mocked(getDraftMeta).mockResolvedValue(null)
   vi.mocked(writeDocx).mockReset()
 
   vi.mocked(getProjectById).mockImplementation(async (projectId, userId) => {
@@ -73,7 +75,7 @@ beforeEach(() => {
 
 describe("POST /projects/:projectId/assemble", () => {
   it("200: gọi assemble(projectId, projectName, base_version)", async () => {
-    vi.mocked(assemble).mockResolvedValue({ spine_version: 3, sections: 10, generated_at: "2026-09-15T00:00:00.000Z" })
+    vi.mocked(assemble).mockResolvedValue({ spine_version: 3, sections: 10, generated_at: "2026-09-15T00:00:00.000Z", findings: [] })
     const outcome = await invoke(assembleController, OWNER, PROJECT, {}, { base_version: 3 })
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(200)
@@ -118,6 +120,23 @@ describe("GET /projects/:projectId/document", () => {
     const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "baseline" })
     expect(outcome.error).toMatchObject({ statusCode: 404, code: "BASELINE_NOT_FOUND" })
   })
+
+  it("review C2: source=draft đính kèm meta.assembled_at_version/spine_version/stale", async () => {
+    const doc = { projectId: PROJECT, projectName: "Demo" } as unknown as RenderedDocument
+    vi.mocked(getDocument).mockResolvedValue(doc)
+    vi.mocked(getDraftMeta).mockResolvedValue({ assembled_at_version: 3, spine_version: 5, stale: true })
+    const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "draft" })
+    expect(outcome.body).toMatchObject({ meta: { assembled_at_version: 3, spine_version: 5, stale: true } })
+  })
+
+  it("review C2: source=baseline không gọi getDraftMeta, không có meta", async () => {
+    const doc = { projectId: PROJECT, projectName: "Demo" } as unknown as RenderedDocument
+    vi.mocked(getDocument).mockResolvedValue(doc)
+    const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "baseline" })
+    expect(getDraftMeta).not.toHaveBeenCalled()
+    expect(outcome.body).toMatchObject({ data: { projectId: PROJECT } })
+    expect((outcome.body as { meta?: unknown }).meta).toBeUndefined()
+  })
 })
 
 describe("GET /projects/:projectId/export/word", () => {
@@ -130,6 +149,27 @@ describe("GET /projects/:projectId/export/word", () => {
     expect(outcome.status).toBe(200)
     expect(outcome.headers?.["content-disposition"]).toContain("attachment")
     expect(outcome.sent?.toString()).toBe("PK-fake-docx")
+  })
+
+  it("review C2: source=draft thêm header X-Assembled-At-Version / X-Spine-Version", async () => {
+    const doc = { projectName: "Demo", version: "v0.1", source: "draft", watermark: "DRAFT", sections: [], recordOfChanges: [], generatedAt: "2026-09-15T00:00:00.000Z", projectId: PROJECT } as unknown as RenderedDocument
+    vi.mocked(getDocument).mockResolvedValue(doc)
+    vi.mocked(writeDocx).mockResolvedValue(Buffer.from("PK-fake-docx"))
+    vi.mocked(getDraftMeta).mockResolvedValue({ assembled_at_version: 4, spine_version: 6, stale: true })
+
+    const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft" })
+    expect(outcome.headers?.["x-assembled-at-version"]).toBe("4")
+    expect(outcome.headers?.["x-spine-version"]).toBe("6")
+  })
+
+  it("review C2: source=baseline không gọi getDraftMeta, không có header phiên bản", async () => {
+    const doc = { projectName: "Demo", version: "v1.0", source: "baseline", sections: [], recordOfChanges: [], generatedAt: "2026-09-15T00:00:00.000Z", projectId: PROJECT } as unknown as RenderedDocument
+    vi.mocked(getDocument).mockResolvedValue(doc)
+    vi.mocked(writeDocx).mockResolvedValue(Buffer.from("PK-fake-docx"))
+
+    const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline" })
+    expect(getDraftMeta).not.toHaveBeenCalled()
+    expect(outcome.headers?.["x-assembled-at-version"]).toBeUndefined()
   })
 
   it("409 NO_WORKING_DRAFT kèm meta.hint = S-8.2 khi chưa assemble", async () => {
