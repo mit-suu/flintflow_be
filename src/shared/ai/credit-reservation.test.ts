@@ -25,6 +25,7 @@ import {
   reserveCredit,
   deductCredit,
   releaseCredit,
+  refundDeductedCredit,
   expireStaleReservations
 } from "./credit-reservation.service.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
@@ -235,6 +236,29 @@ describe("credit-reservation.service", () => {
 
       expect(walletOf().balance).toBe(balanceBefore - CHAT_COST)
       expect(ledger().docs.filter((d) => d.type === "deduct")).toHaveLength(1)
+    })
+  })
+
+  describe("refundDeductedCredit", () => {
+    it("cộng lại số dư đã trừ và ghi dòng type=refund", async () => {
+      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      await deductCredit(reservation)
+      const balanceAfterDeduct = walletOf().balance
+
+      await refundDeductedCredit({ userId: USER, actionType: ActionType.DRAFT, amount: CHAT_COST })
+
+      expect(walletOf().balance).toBe(balanceAfterDeduct + CHAT_COST)
+      const row = ledger().docs.find((d) => d.type === "refund")!
+      expect(row.amount).toBe(CHAT_COST)
+      expect(row.balanceAfter).toBe(walletOf().balance - walletOf().reserved)
+    })
+
+    it("amount = 0 thì không đụng ví", async () => {
+      await getOrCreateWallet(USER)
+      const before = walletOf().balance
+      await refundDeductedCredit({ userId: USER, actionType: ActionType.DRAFT, amount: 0 })
+      expect(walletOf().balance).toBe(before)
+      expect(ledger().docs.some((d) => d.type === "refund")).toBe(false)
     })
   })
 })

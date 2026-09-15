@@ -272,8 +272,8 @@ export const runDraftPhase = async (
     return { spineVersion: applied.spine_version, applied: true }
   } catch (err) {
     if (err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT) {
-      // 409 hai tab: model đã trả lời (credit đã deduct ở ví) nhưng Spine không ghi được — hoàn usage[],
-      // không tính vào trần. Số dư VÍ thật: xem TODO(XREQ-local-1) trong meter.service.ts.
+      // 409 hai tab: model đã trả lời (credit đã deduct ở ví) nhưng Spine không ghi được — hoàn usage[]
+      // (không tính vào trần) và hoàn credit về ví.
       await meter.refundUsage(usageIds)
     }
     throw err
