@@ -79,3 +79,44 @@ still `ops: []` — the call proves the reopen path, not a Spine write).
   cases (≥ 12), 3 `business_rules[tier=high]`, context + usecase diagrams both `render_status: "ok"` (the
   context diagram's `diagram_stale` flag from S-3.1 is closed by the C4 reopen round before the final
   assertion).
+
+## S-2/S-3 real provider through the HTTP API (M3 run, 2026-09-15)
+
+Setup: local MongoDB (standalone), BE `wave3/decisions`, PlantUML via `plantuml.jar -picoweb` + a GET shim,
+project prepared like `seedSpine({ fast: true })` (steps before S-1.2 accepted, §1 empty, `working_mode=fast`),
+driven by script: `POST /resume` → per step `POST /run` (SSE, auto-answer `answer_needed`) → `POST /gate accept`.
+Provider: `glm` / `zai-org/GLM-5.3-Flash` (Modal), after the GLM fixes `db0defe`, `1494a91`, `47e2b4a`, `c07b03f`
+and skill/projection fixes `d2c258a`, `6259f25`. Numbers from `usages` (tokens as reported by the provider).
+
+| Step | Call | State | Calls | Tokens in | Tokens out | Credit |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| S-1.2 | elicit | deducted | 1 | 1316 | 4492 | 1 |
+| S-1.2 | draft | deducted | 1 | 2395 | 5142 | 4 |
+| S-2.1 | elicit | deducted | 1 | 1126 | 3685 | 1 |
+| S-2.1 | draft | deducted | 1 | 2175 | 8836 | 4 |
+| S-2.2 | elicit | deducted | 1 | 1320 | 5159 | 1 |
+| S-2.2 | draft | deducted | 1 | 2358 | 6091 | 4 |
+| S-2.3 | draft | deducted | 1 | 2204 | 3117 | 4 |
+| S-2.4 | draft | deducted | 1 | 2159 | 11105 | 4 |
+| S-3.1 | elicit | deducted | 1 | 1110 | 3955 | 1 |
+| S-3.1 | draft | deducted | 1 | 3023 | 9273 | 4 |
+| S-3.2 | elicit | deducted | 1 | 1334 | 4050 | 1 |
+| S-3.2 | draft | refunded | 1 | 0 | 0 | 0 |
+| **Total (not refunded)** | | | 11 | 20520 | 64905 | 29 |
+
+Result: **7/12 steps accepted** (S-1.2 … S-3.1, S-2.5 context diagram `ok`), wall time 20–86 s per step.
+Stopped at **S-3.2 draft**: GLM-5.3-Flash kept reasoning (hidden `reasoning_content` > 50 000 chars) until
+`finish_reason=length` at `max_tokens=12288`, 3/3 attempts ⇒ `GLM_EMPTY_OUTPUT`, draft usage refunded.
+
+### Observations
+
+- Input side matches the mock estimate shape (1.1k–3.0k tokens per call — projection works), but **tokens-out
+  is 3–5× tokens-in**: almost all of it is hidden reasoning, not the op batch. Credit per call is flat
+  (elicit 1, draft 4), so credit cost matches plan while provider cost is driven by reasoning.
+- Earlier attempts (runs 1–7) failed on: reasoning mixed into `content` (`reasoning_effort: "none"` makes it
+  worse), empty `content` at `max_tokens=2048`, `assumptions[]` entries missing `confirmed_at`, reused
+  assumption id `AS3`. All fixed and covered by unit tests.
+- Open red flags after S-3.1 are the expected empty S-3/S-4+ sections (`section_empty@fixed:2.2.1`,
+  `fixed:2.2.2`); `non_english_content` = 0.
+- DoD `E2E_AI` (3/3 runs, ≥ 5 actors, ≥ 12 use cases) is **not met**: blocked on the model choice for
+  `actors-and-usecases` (S-3.2…S-3.5), not on pipeline code.
