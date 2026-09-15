@@ -32,14 +32,11 @@ Covers **S-1.1 Brief Extraction, S-1.2 Project Classification, S-1.3 Conflict & 
 S-1.4 Gap List**. This skill never touches SRS sections — its output feeds the classifier fields that
 later steps (S-2 NFR thresholds, S-6 non-functional tiers) read from `project`.
 
-## Context (per step)
-
-- Step: **{{step_id}}** — {{step_name}}
-- Fields this step may write: {{writable_paths}} (registry: `project`, `assumptions`)
-- Projection: {{projection}} — `project` (name, vision, goals, existing type/domain/complexity),
-  `addendum[]`, `assumptions[]`, `other_requirements[]`
-- Addendum for this step: {{addendum}}
-- User answers: {{answers}}
+Fields this step may write (registry): `project`, `assumptions`. Projection carries `project` (name,
+vision, goals, existing type/domain/complexity), `addendum[]`, `assumptions[]`, `other_requirements[]` —
+the surrounding `draft-to-ops` prompt already substitutes the actual step id, projection, addendum and
+answers around this content; do not restate `{{...}}` placeholders here, they are not interpolated inside
+skill content (only in the outer action prompt).
 
 ## S-1.2 — Project Classification
 

@@ -27,11 +27,10 @@ Covers **S-2.4 High-Level Business Rules** — feeds SRS section `fixed:1`. This
 `business_rules[]`; the *tier=detail* half is a different skill (`appendix-content`, S-7.1), derived later
 from `functions[].validations[]`. Never touch `tier=detail` rows here.
 
-## Context
-
-- Step: **S-2.4** — High-Level Business Rules
-- Projection: {{projection}} — `project.vision`, `project.release_scope`, current `business_rules[]`
-- Addendum for this step: {{addendum}}
+Projection carries `project.vision`, `project.release_scope`, current `business_rules[]` — the surrounding
+`draft-to-ops` prompt already substitutes the actual step id, projection and addendum around this content;
+do not restate `{{...}}` placeholders here, they are not interpolated inside skill content (only in the
+outer action prompt).
 
 ## What a high-level rule is
 
