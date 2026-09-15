@@ -324,6 +324,45 @@ export const releaseCredit = async (
   return true
 }
 
+export interface DeductedRefund {
+  userId: string
+  actionType: string
+  amount: number
+  projectId?: string
+}
+
+/**
+ * Hoàn một khoản ĐÃ deduct về ví (XREQ T13→T04): model đã trả lời và bị trừ credit nhưng kết quả không
+ * dùng được vì lỗi phía hệ thống — vd `409 SPINE_VERSION_CONFLICT` khi ghi Spine (hai tab).
+ * Không idempotent: bên gọi phải tự chặn hoàn hai lần (meter claim dòng `usage` `deducted → refunded` trước).
+ */
+export const refundDeductedCredit = async (refund: DeductedRefund, session?: ClientSession): Promise<void> => {
+  const { userId, actionType, amount, projectId } = refund
+  if (amount <= 0) return
+  const options = sessionOptions(session)
+
+  const wallet = await CreditWallet.findOneAndUpdate(
+    { userId },
+    { $inc: { balance: amount } },
+    { ...options, returnDocument: "after" }
+  )
+  if (!wallet) throw ledgerInconsistent("Không tìm thấy ví credit khi hoàn khoản đã trừ", { userId, amount })
+
+  await CreditTransaction.create(
+    [
+      {
+        userId: new mongoose.Types.ObjectId(userId),
+        projectId: toObjectIdOrNull(projectId),
+        actionType,
+        amount,
+        type: "refund",
+        balanceAfter: wallet.balance - wallet.reserved
+      }
+    ],
+    options
+  )
+}
+
 /**
  * Dọn reservation treo quá `expires_at` (process chết giữa chừng, client ngắt
  * stream…). Gọi định kỳ từ server.ts.

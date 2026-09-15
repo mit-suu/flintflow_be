@@ -3,6 +3,23 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createAnthropic } from "@ai-sdk/anthropic"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
+import { GLM_REQUEST_OPTIONS } from "./glm.provider.js"
+
+/**
+ * GLM-5.3-Flash trên Modal cần `reasoning_effort: "low"` + `json_object` (xem `GLM_REQUEST_OPTIONS`), nếu không
+ * suy nghĩ lan man tới hết token. Chèn thẳng vào body request để không phụ thuộc option của AI SDK.
+ */
+export const glmFetch: typeof fetch = (input, init) => {
+  if (typeof init?.body === "string") {
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>
+      return fetch(input, { ...init, body: JSON.stringify({ ...body, ...GLM_REQUEST_OPTIONS }) })
+    } catch {
+      // body không phải JSON — gửi nguyên
+    }
+  }
+  return fetch(input, init)
+}
 
 export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
   const provider = (providerConfig.provider || "openai").toLowerCase()
@@ -36,7 +53,8 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
 
       const modalOpenAi = createOpenAI({
         baseURL,
-        apiKey
+        apiKey,
+        fetch: glmFetch
       })
 
       return modalOpenAi.chat(modelName || "zai-org/GLM-5.3-Flash")
@@ -90,7 +108,7 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
           env.MODAL_BASE_URL ||
           "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
         const apiKey = env.MODAL_API_KEY || process.env.MODAL_API_KEY || ""
-        const modalOpenAi = createOpenAI({ baseURL, apiKey })
+        const modalOpenAi = createOpenAI({ baseURL, apiKey, fetch: glmFetch })
         return modalOpenAi.chat(modelName)
       }
 
