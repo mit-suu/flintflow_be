@@ -128,10 +128,10 @@ app.use("/api/v1/projects", changesRoutes)
 app.use("/api/v1/projects", flagsRoutes)
 app.use("/api/v1/projects", diagramRoutes)
 app.use("/api/v1/projects", pipelineRoutes)
+// GET /:projectId/export/word (endpoint 18, contract) đã có trong renderRoutes (render.route.ts,
+// review C1) — không mount exportRoutes ở /api/v1/projects nữa (trùng mount từng lộ thêm
+// POST /projects/word/preview và GET /projects/:projectId/export/word/export/word).
 app.use("/api/v1/projects", renderRoutes)
-// T15: export.route.ts thêm route thật GET /:projectId/export/word (endpoint 18, contract) — mount thêm
-// ở đây bên cạnh mount /api/v1/export hiện có (POST /word/preview, T05, dev-only).
-app.use("/api/v1/projects", exportRoutes)
 app.use("/api/v1/specifications", specificationRoutes)
 app.use("/api/v1/verification", verificationRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
