@@ -1,0 +1,52 @@
+{
+  "step_id": "S-3.1",
+  "skill_id": "actors-and-usecases",
+  "notes": "Primary human actor, admin actor and the credit expiry scheduler added; system actors already present from S-2.3.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A03",
+        "name": "Founder / Business Analyst",
+        "kind": "human",
+        "description": "Drives the guided Brief-to-SRS pipeline for their own project, answering elicitation questions and accepting gates."
+      },
+      "reason": "S-3.1 primary human actor from Brief"
+    },
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A04",
+        "name": "Admin",
+        "kind": "human",
+        "description": "Reviews read-only admin views for users, AI cost metrics and audit activity across projects."
+      },
+      "reason": "S-3.1 back-office human actor implied by admin views in release scope"
+    },
+    {
+      "op": "add",
+      "path": "actors[]",
+      "value": {
+        "id": "A05",
+        "name": "Credit Expiry Scheduler",
+        "kind": "time",
+        "description": "Nightly scheduled job that expires stale reserved credit holds that were never finalized."
+      },
+      "reason": "S-3.1 time actor implied by credit reservation lifecycle"
+    },
+    {
+      "op": "add",
+      "path": "roles[]",
+      "value": { "id": "R01", "name": "Founder", "actor_id": "A03" },
+      "reason": "S-3.1 role for primary actor"
+    },
+    {
+      "op": "add",
+      "path": "roles[]",
+      "value": { "id": "R02", "name": "Admin", "actor_id": "A04" },
+      "reason": "S-3.1 role for admin actor"
+    }
+  ]
+}

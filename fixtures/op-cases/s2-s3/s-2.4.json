@@ -1,0 +1,40 @@
+{
+  "step_id": "S-2.4",
+  "skill_id": "high-level-rules",
+  "notes": "Three cross-cutting rules derived from the architecture vision, gate policy and credit metering.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "business_rules[]",
+      "value": {
+        "id": "BR01",
+        "tier": "high",
+        "statement": "Every write to the SRS Spine goes through an op-based transaction validated against invariants; no field is ever replaced wholesale.",
+        "source_validation_ids": []
+      },
+      "reason": "S-2.4 from architecture vision"
+    },
+    {
+      "op": "add",
+      "path": "business_rules[]",
+      "value": {
+        "id": "BR02",
+        "tier": "high",
+        "statement": "A pipeline step cannot be accepted while a red flag it opened remains unresolved.",
+        "source_validation_ids": []
+      },
+      "reason": "S-2.4 from release scope: deterministic checks"
+    },
+    {
+      "op": "add",
+      "path": "business_rules[]",
+      "value": {
+        "id": "BR03",
+        "tier": "high",
+        "statement": "AI spend is bounded per step by a fixed call limit and per-phase regenerate limit, enforced before any model call is made.",
+        "source_validation_ids": []
+      },
+      "reason": "S-2.4 from release scope: predictable AI spend"
+    }
+  ]
+}
