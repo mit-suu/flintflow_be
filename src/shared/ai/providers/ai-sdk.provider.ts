@@ -4,6 +4,22 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 
+/**
+ * GLM-5.x trên Modal bỏ qua `reasoning_effort` và trả phần suy nghĩ + `</think>` trong `content` ⇒ JSON parse
+ * hỏng. AI SDK không có option cho field lạ `thinking`, nên chèn vào body request (probe 2026-09-15).
+ */
+export const glmFetch: typeof fetch = (input, init) => {
+  if (typeof init?.body === "string") {
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>
+      return fetch(input, { ...init, body: JSON.stringify({ ...body, thinking: { type: "disabled" } }) })
+    } catch {
+      // body không phải JSON — gửi nguyên
+    }
+  }
+  return fetch(input, init)
+}
+
 export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
   const provider = (providerConfig.provider || "openai").toLowerCase()
   const modelName = providerConfig.model
@@ -36,7 +52,8 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
 
       const modalOpenAi = createOpenAI({
         baseURL,
-        apiKey
+        apiKey,
+        fetch: glmFetch
       })
 
       return modalOpenAi.chat(modelName || "zai-org/GLM-5.3-Flash")
@@ -90,7 +107,7 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
           env.MODAL_BASE_URL ||
           "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
         const apiKey = env.MODAL_API_KEY || process.env.MODAL_API_KEY || ""
-        const modalOpenAi = createOpenAI({ baseURL, apiKey })
+        const modalOpenAi = createOpenAI({ baseURL, apiKey, fetch: glmFetch })
         return modalOpenAi.chat(modelName)
       }
 
