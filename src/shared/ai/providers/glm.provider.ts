@@ -61,8 +61,8 @@ export const callGLM = async (
       max_tokens: maxTokens,
       top_p: 0.9,
       stream: true,
-      reasoning_effort: "none",
-      // `reasoning_effort` không tắt được thinking của GLM-5.3 trên Modal; `thinking.type=disabled` thì tắt (probe 2026-09-15).
+      // Probe 2026-09-15: `thinking.type=disabled` đẩy suy nghĩ sang `reasoning_content`, `content` là JSON sạch.
+      // KHÔNG gửi `reasoning_effort: "none"` — kèm tham số đó GLM-5.3 lại trộn suy nghĩ vào `content`.
       thinking: { type: "disabled" }
     } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
 
