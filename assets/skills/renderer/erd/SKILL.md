@@ -14,11 +14,11 @@ writes:
   - "diagrams[kind=erd]"
 output_schema: puml
 language: en
-stub: true
+stub: false
 ---
 # Erd
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/erd.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call. `stub: true` stays until the T03 asset test stops requiring it (XREQ T10→T03).
+> The renderer is deterministic code: `src/modules/diagram/renderers/erd.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
 
 - Step: S-4.5 Entity Relationship Diagram · Section: `fixed:3.1.5` · Output: `puml`
 

@@ -1,0 +1,29 @@
+{
+  "step_id": "S-2.2",
+  "skill_id": "product-overview",
+  "notes": "Release 1.0 scope from the Brief (B-1.4): each `in` entry traces to a S-2.1 goal; `out` records deliberate exclusions the Brief names.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.release_scope",
+      "value": {
+        "in": [
+          "Guided Brief-to-SRS pipeline (B-0 through S-9) with per-step gates",
+          "SRS Spine with op-based writes, invariants and deterministic checks",
+          "Five server-rendered PlantUML diagram kinds",
+          "Word export with DRAFT watermark and baseline clean export",
+          "In-app notifications, credit ledger with mock payment gateway",
+          "Read-only admin views for users, metrics and AI cost"
+        ],
+        "out": [
+          "Import of existing SRS documents (.docx) and change requests on them",
+          "PDF export and handoff summary",
+          "Project sharing, cloning and role-based collaboration",
+          "Email notification channel",
+          "Admin write operations (user editing, prompt override)"
+        ]
+      },
+      "reason": "B-1.4 explicit in/out scope for Release 1.0"
+    }
+  ]
+}

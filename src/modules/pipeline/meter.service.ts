@@ -21,16 +21,13 @@
  * một step.
  *
  * 409 SPINE_VERSION_CONFLICT xảy ra SAU khi model đã trả lời và credit đã deduct (draftOps chỉ trả
- * Transaction, `applyTransaction` mới chạm DB). Ở đây không có API "hoàn credit đã deduct" tại ví — xem
- * `refundUsage`. TODO(XREQ-local-1): `credit-reservation.service.ts` (T04) chưa có hàm hoàn một khoản đã
- * `deducted` (chỉ `releaseCredit` cho khoản còn `reserved`). Vùng T13 không được sửa file đó (X). Quyết
- * định tạm: đánh dấu usage[] tương ứng `refunded` (loại khỏi trần — đúng yêu cầu DoD "không tiêu trần"),
- * NHƯNG số dư ví thật KHÔNG được hoàn cho tới khi T04 bổ sung API. Đề xuất contract-change: thêm
- * `refundDeductedCredit(reservationId | {userId, actionType, cost, projectId})` vào credit-reservation.service.ts.
+ * Transaction, `applyTransaction` mới chạm DB). `refundUsage` claim từng dòng `deducted → refunded` (loại
+ * khỏi trần) rồi hoàn đúng `cost` về ví qua `refundDeductedCredit` (T04, XREQ-local-1 đã chốt 2026-09-15).
  */
 
 import mongoose from "mongoose"
 import { Usage } from "../spine/usage.model.js"
+import { refundDeductedCredit } from "../../shared/ai/credit-reservation.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { env } from "../../config/env.js"
 
@@ -129,12 +126,23 @@ export const releaseCall = async (usageId: string): Promise<void> => {
 }
 
 /**
- * Đánh dấu các dòng usage `refunded` — loại khỏi `calls_used`/`regenerate_used` (không tiêu trần).
- * Không hoàn số dư ví thật: xem TODO(XREQ-local-1) ở đầu file.
+ * Đánh dấu các dòng usage `refunded` — loại khỏi `calls_used`/`regenerate_used` (không tiêu trần) — và hoàn
+ * `cost` của dòng đang `deducted` về ví. Claim từng dòng trước khi hoàn nên gọi lại không hoàn hai lần.
  */
 export const refundUsage = async (usageIds: readonly string[]): Promise<void> => {
-  if (usageIds.length === 0) return
-  await Usage.updateMany({ _id: { $in: usageIds } }, { $set: { state: "refunded" } })
+  for (const usageId of usageIds) {
+    const claimed = await Usage.findOneAndUpdate({ _id: usageId, state: "deducted" }, { $set: { state: "refunded" } })
+    if (claimed) {
+      await refundDeductedCredit({
+        userId: String(claimed.userId),
+        actionType: claimed.call_kind,
+        amount: claimed.cost,
+        projectId: String(claimed.projectId)
+      })
+      continue
+    }
+    await Usage.updateMany({ _id: usageId, state: { $ne: "refunded" } }, { $set: { state: "refunded" } })
+  }
 }
 
 /**

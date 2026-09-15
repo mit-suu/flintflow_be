@@ -26,9 +26,13 @@ describe("pipeline.dto", () => {
   })
 
   it("gate: revision/accept_as_is bắt buộc note", () => {
-    expect(gateRequestSchema.safeParse({ action: "accept", base_version: 3 }).success).toBe(true)
-    expect(gateRequestSchema.safeParse({ action: "accept_as_is", base_version: 3 }).success).toBe(false)
-    expect(gateRequestSchema.safeParse({ action: "revision", note: "Thiếu actor", base_version: 3 }).success).toBe(true)
+    expect(gateRequestSchema.safeParse({ session_id: "s1", action: "accept", base_version: 3 }).success).toBe(true)
+    expect(gateRequestSchema.safeParse({ session_id: "s1", action: "accept_as_is", base_version: 3 }).success).toBe(false)
+    expect(gateRequestSchema.safeParse({ session_id: "s1", action: "revision", note: "Thiếu actor", base_version: 3 }).success).toBe(true)
+  })
+
+  it("gate: session_id bắt buộc (contract-change 2026-09-15)", () => {
+    expect(gateRequestSchema.safeParse({ action: "accept", base_version: 3 }).success).toBe(false)
   })
 
   it("waive: lý do ≥ 20 ký tự", () => {

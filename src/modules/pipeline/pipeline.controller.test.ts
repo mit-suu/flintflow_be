@@ -4,8 +4,13 @@ import type { NextFunction, Request, RequestHandler, Response } from "express"
 vi.mock("../project/project.service.js", () => ({ getProjectById: vi.fn() }))
 vi.mock("./step-runner.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./step-runner.service.js")>()
-  return { ...actual, runStep: vi.fn() }
+  return { ...actual, runStep: vi.fn(), requirePipelineSession: vi.fn() }
 })
+vi.mock("./gate.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./gate.service.js")>()
+  return { ...actual, gate: vi.fn() }
+})
+vi.mock("./resume.service.js", () => ({ resumeProject: vi.fn() }))
 vi.mock("../spine/spine.repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/spine.repository.js")>()
   return { ...actual, get: vi.fn(), getOrCreate: vi.fn() }
@@ -15,12 +20,16 @@ vi.mock("./meter.service.js", async (importOriginal) => {
   return { ...actual, roundCountsForSteps: vi.fn(async () => new Map()) }
 })
 
-import { runStepController, getSteps } from "./pipeline.controller.js"
+import { runStepController, getSteps, gateStep, answerStep, resumeProjectController } from "./pipeline.controller.js"
 import { getProjectById } from "../project/project.service.js"
-import { runStep, NOT_PIPELINE_SESSION } from "./step-runner.service.js"
+import { runStep, requirePipelineSession, NOT_PIPELINE_SESSION } from "./step-runner.service.js"
+import { gate } from "./gate.service.js"
+import { resumeProject } from "./resume.service.js"
+import { ANSWER_MAX_CHARS } from "./pipeline.dto.js"
 import { get as getSpine, getOrCreate } from "../spine/spine.repository.js"
 import { roundCountsForSteps } from "./meter.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
@@ -162,6 +171,18 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     expect(outcome.written.some((w) => w.includes("VALIDATION_ERROR"))).toBe(true)
   })
 
+  it("AiActionError INSUFFICIENT_CREDIT giữa chừng ⇒ SSE error đúng mã, retryable (không quy về NOT_IMPLEMENTED)", async () => {
+    vi.mocked(runStep).mockImplementation(async (_p, stepId, _s, _u, emit) => {
+      emit({ type: "intake", step_id: stepId, phase: "S-2", empty_fields: [] })
+      throw new AiActionError(402, "Không đủ credit", "INSUFFICIENT_CREDIT")
+    })
+
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "S-2.3", { session_id: "s1", base_version: 1 })
+
+    expect(outcome.written.some((w) => w.includes("\"code\":\"INSUFFICIENT_CREDIT\""))).toBe(true)
+    expect(outcome.written.some((w) => w.includes("retryable\":true"))).toBe(true)
+  })
+
   it("F8: client đóng kết nối giữa chừng ⇒ AbortSignal truyền vào runStep bị abort, không ghi/end sau khi đóng", async () => {
     const written: string[] = []
     let endCalled = false
@@ -257,5 +278,77 @@ describe("GET /projects/:projectId/steps", () => {
     expect(roundCountsForSteps).toHaveBeenCalledTimes(1)
     expect(outcome.error).toBeUndefined()
     expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: null } })
+  })
+})
+
+/** Handler JSON thường (không SSE): resolve khi `res.json` hoặc `next(err)`. */
+const invokeJsonHandler = (handler: RequestHandler, userId: string, params: Record<string, string>, body: unknown = {}) =>
+  new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
+    const req = { user: { userId }, params, body } as unknown as Request
+    const res = {
+      status(code: number) {
+        ;(res as unknown as { _status: number })._status = code
+        return res
+      },
+      json(payload: unknown) {
+        resolve({ status: (res as unknown as { _status: number })._status ?? 200, body: payload })
+        return res
+      }
+    } as unknown as Response
+    handler(req, res, (err?: unknown) => resolve({ status: 0, body: null, error: err }))
+  })
+
+describe("POST /projects/:projectId/steps/:stepId/gate — session_id (contract-change 2026-09-15)", () => {
+  beforeEach(() => {
+    vi.mocked(requirePipelineSession).mockReset()
+    vi.mocked(gate).mockReset()
+  })
+
+  it("thiếu session_id ⇒ 400 VALIDATION_ERROR, không gọi gate", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, { action: "accept", base_version: 1 })
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    expect(gate).not.toHaveBeenCalled()
+  })
+
+  it("session không pipeline ⇒ 403 NOT_PIPELINE_SESSION, không gọi gate", async () => {
+    vi.mocked(requirePipelineSession).mockRejectedValue(new ApiError(403, "not pipeline", NOT_PIPELINE_SESSION))
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, { session_id: "s1", action: "accept", base_version: 1 })
+    expect(outcome.error).toMatchObject({ statusCode: 403, code: NOT_PIPELINE_SESSION })
+    expect(gate).not.toHaveBeenCalled()
+  })
+
+  it("session pipeline hợp lệ ⇒ gọi gate và trả 200", async () => {
+    vi.mocked(requirePipelineSession).mockResolvedValue(undefined)
+    vi.mocked(gate).mockResolvedValue({ step: { id: "S-3.1" }, next_step: "S-3.2", spine_version: 2 } as never)
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, { session_id: "s1", action: "accept", base_version: 1 })
+    expect(requirePipelineSession).toHaveBeenCalledWith(PROJECT, "s1")
+    expect(outcome.status).toBe(200)
+    expect(outcome.body).toMatchObject({ data: { next_step: "S-3.2", spine_version: 2 } })
+  })
+})
+
+describe("POST /projects/:projectId/steps/:stepId/answer — giới hạn độ dài", () => {
+  it(`answer dài hơn ${ANSWER_MAX_CHARS} ký tự ⇒ 400 VALIDATION_ERROR`, async () => {
+    const body = { session_id: "s1", answers: [{ question_id: "Q1", answer: "x".repeat(ANSWER_MAX_CHARS + 1) }] }
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+  })
+})
+
+describe("POST /projects/:projectId/resume (contract endpoint 24)", () => {
+  beforeEach(() => vi.mocked(resumeProject).mockReset())
+
+  it("trả kết quả resumeProject trong envelope", async () => {
+    vi.mocked(resumeProject).mockResolvedValue({ reverted_step: "S-3.2", spine_version: 7, progress: {} } as never)
+    const outcome = await invokeJsonHandler(resumeProjectController, OWNER, { projectId: PROJECT })
+    expect(resumeProject).toHaveBeenCalledWith(PROJECT, OWNER)
+    expect(outcome.status).toBe(200)
+    expect(outcome.body).toMatchObject({ data: { reverted_step: "S-3.2", spine_version: 7 } })
+  })
+
+  it("project không thuộc user ⇒ 404, không revert", async () => {
+    const outcome = await invokeJsonHandler(resumeProjectController, "650000000000000000000099", { projectId: PROJECT })
+    expect(outcome.error).toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
+    expect(resumeProject).not.toHaveBeenCalled()
   })
 })

@@ -177,8 +177,30 @@ router.post("/:projectId/steps/:stepId/answer", authMiddleware, pipelineControll
  */
 router.post("/:projectId/steps/:stepId/gate", authMiddleware, pipelineController.gateStep)
 
-// F4 (review T13): KHÔNG mount POST /:projectId/resume — endpoint chưa có trong bảng đóng băng của
-// docs/api/pipeline-contract.md (coding-rules §3.8 cấm thêm endpoint ngoài contract). `resumeProject`
-// (`resume.service.ts`) vẫn tồn tại, dùng ở mức service (T14) cho tới khi có PR contract-change.
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/resume:
+ *   post:
+ *     summary: Mở lại project — revert step in_progress dang dở về pending, trả progress
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "{ reverted_step, spine_version, progress }"
+ *       404:
+ *         description: PROJECT_NOT_FOUND, SPINE_NOT_FOUND
+ *       409:
+ *         description: STEP_NOT_RUNNABLE (step đang chạy ở request khác), SPINE_VERSION_CONFLICT
+ *       422:
+ *         description: CHANGE_RANGE_INVALID, OP_INVALID (revert_conflict)
+ */
+router.post("/:projectId/resume", authMiddleware, pipelineController.resumeProjectController)
 
 export default router

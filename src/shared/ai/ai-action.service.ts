@@ -10,6 +10,7 @@ import {
 import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.js"
 import { callLLM } from "./providers/llm.router.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
+import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
 import { parseResponse } from "./response-parser.js"
 import {
@@ -272,7 +273,7 @@ export const executeAiActionStream = async <T = any>(
     } catch (_) {}
 
     // Parse TRƯỚC, deduct SAU: output hỏng thì không tính phí (audit E2)
-    const parsedData = parseResponse<T>(fullRaw, actionType)
+    const parsedData = parseResponse<T>(stripReasoning(fullRaw), actionType)
 
     await deductCredit(reservation)
     deducted = true
