@@ -98,3 +98,18 @@ export const countCalls = async (projectId: string, stepId: string, options: Cou
   if (options.since) filter.createdAt = { $gte: options.since }
   return Usage.countDocuments(filter)
 }
+
+export interface RoundCounts {
+  calls_used: number
+  regenerate_used: number
+}
+
+/** `calls_used` + `regenerate_used` của vòng hiện tại — dùng chung bởi step-runner/gate/controller (DRY). */
+export const roundCounts = async (projectId: string, stepId: string, step: Pick<StepState, "first_seq"> | undefined): Promise<RoundCounts> => {
+  const since = await roundStartedAt(projectId, step)
+  const [calls_used, regenerate_used] = await Promise.all([
+    countCalls(projectId, stepId, { since }),
+    countCalls(projectId, stepId, { since, callKind: "regenerate" })
+  ])
+  return { calls_used, regenerate_used }
+}
