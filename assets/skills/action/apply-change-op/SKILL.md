@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.0.0
+version: 1.1.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -31,7 +31,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 - Baseline exists: {{has_baseline}}
 - Projection around the target (keyed): {{projection}}
 - Glossary / proper names: {{glossary}}
-- For `reconcile` — stale sections and the changed fields feeding them: {{stale_sections}}
+- For `reconcile` — the owning step `{{step_id}}` ({{step_name}}), the paths it may write `{{writable_paths}}`, and the stale section with the exact changes that made it stale: {{stale_sections}}
 
 ## Change instruction (`change_instruction`)
 
@@ -47,10 +47,13 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 
 User clicked **Reconcile** once for all `stale` sections (UC 6.10). For each stale section:
 
-- Read **only** the dependent fields that changed (`stale_sections`).
+- One call per stale section: `{{projection}}` is the owning step's own projection (its `reads`), nothing else.
+- Read **only** the dependent fields that changed (`stale_sections[0].changes`).
 - Propose ops that bring the owned fields back in line with those changes, e.g. a renamed actor that still appears in `use_cases[].description`.
 - Do not touch sections that are not stale. Diagrams with a mismatched `source_hash` are re-rendered by code, not by you.
-- Output `opTransaction`. The user sees a preview diff; a rejected diff leaves the section `stale` — that is valid.
+- Stay inside `{{writable_paths}}`; ops on other roots are rejected by the op validator before the user ever sees them.
+- Nothing to bring back in line ⇒ return `{"ops": []}`. An empty batch is a valid answer, not a failure.
+- Output `opTransaction`. The user sees ONE merged preview diff for all sections; a rejected diff leaves every section `stale` — that is valid, and nothing is retried automatically.
 
 ## Branches (code applies — for your awareness)
 
