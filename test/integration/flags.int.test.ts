@@ -18,7 +18,7 @@ const api = (seeded: SeededFixture) => {
 }
 
 describe("deterministic check qua HTTP", () => {
-  it("fixture 19 màn ⇒ 0 cờ (điều kiện M2); progress ở S-9.5, không cờ đỏ", async () => {
+  it("fixture 19 màn ⇒ 0 cờ (điều kiện M2); progress.current_step là step tới lượt theo nextStep(), không cờ đỏ", async () => {
     const seeded = await seedFixture("full")
     const client = api(seeded)
 
@@ -31,7 +31,9 @@ describe("deterministic check qua HTTP", () => {
     expect(progress.status).toBe(200)
     const parsed = progressResponseSchema.parse(progress.body.data)
     expect(parsed.readiness.red_open).toBe(0)
-    expect(parsed.progress.current_step).toBe("S-9.5")
+    // Con trỏ Spine của fixture ghi S-9.5 (đã accepted) nhưng fixture không có bản ghi 13 step Brief,
+    // nên step tới lượt theo nextStep() là B-0.1 — `current_step` không còn trỏ vào step đã accepted.
+    expect(parsed.progress.current_step).toBe("B-0.1")
   })
 
   it("fixture minimal ⇒ cờ đỏ mở; GET /flags lọc level/open khớp; recompute lần hai không mở trùng", async () => {

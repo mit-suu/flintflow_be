@@ -360,10 +360,10 @@ const balance = async (): Promise<number> => {
  * vòng S-5 của màn `placeholder` (Phases §6.2 — placeholder đã được quyết định để lại, `pending`
  * mãi mãi).
  *
- * Cần hàm này vì `POST /resume` và `GET /progress` trả `progress.current_step` = step **mở gần nhất**,
- * mà con trỏ đó chỉ được ghi lúc `/run` bắt đầu chứ không phải lúc gate accept. Chạy tiếp một project
- * dở (`--project`) mà tin vào nó thì `/run` trả `STEP_NOT_RUNNABLE` ("đã accepted") — M4 2026-09-16,
- * đã ghi `docs/spec-gaps.md`.
+ * `POST /resume` và `GET /progress` nay đã trả `progress.current_step` theo cùng luật này
+ * (`pipeline-progress.ts`); trước đó chúng trả con trỏ ghi lúc `/run` bắt đầu nên chạy tiếp một project
+ * dở (`--project`) bị `STEP_NOT_RUNNABLE` — M4 2026-09-16, `docs/spec-gaps.md`. Giữ hàm này như chốt chặn
+ * phía client khi script chạy với một BE chưa có sửa đó.
  */
 const nextRunnableStep = async (projectId: string): Promise<string | null> => {
   const [steps, spine] = await Promise.all([
