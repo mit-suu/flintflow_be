@@ -1,0 +1,49 @@
+{
+  "step_id": "S-6.3",
+  "skill_id": "nfr-quality-attributes",
+  "notes": "Reliability rows carry a metric and a threshold.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N08",
+        "category": "reliability",
+        "statement": "The service stays available during business hours.",
+        "kind": "quantitative",
+        "metric": "Monthly uptime",
+        "threshold": ">= 99.5 %",
+        "priority": null
+      },
+      "reason": "S-6 reliability"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N09",
+        "category": "reliability",
+        "statement": "The service recovers from a total outage within the stated window.",
+        "kind": "quantitative",
+        "metric": "Recovery time (RTO)",
+        "threshold": "<= 4 h",
+        "priority": null
+      },
+      "reason": "S-6 reliability"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N10",
+        "category": "reliability",
+        "statement": "Accepted content is never lost beyond the stated window.",
+        "kind": "quantitative",
+        "metric": "Data loss window (RPO)",
+        "threshold": "<= 15 min",
+        "priority": null
+      },
+      "reason": "S-6 reliability"
+    }
+  ]
+}
