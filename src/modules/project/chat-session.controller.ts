@@ -57,7 +57,7 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
   const chatId = requireChatId(req)
   await chatSessionService.assertChatSessionOwnership(projectId, chatId)
 
-  const { content, step, discoveryStep, workspacePhase } = req.body
+  const { content, step, discoveryStep } = req.body
 
   if (!content) {
     throw new ApiError(400, "Message content is required", "CONTENT_REQUIRED")
@@ -72,8 +72,7 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
     content,
     step,
     userId,
-    discoveryStep ? Number(discoveryStep) : undefined,
-    workspacePhase
+    discoveryStep ? Number(discoveryStep) : undefined
   )
   return sendSuccess(res, 200, updatedSession)
 })
@@ -117,21 +116,4 @@ export const deleteChatSession = catchAsync(async (req: Request, res: Response) 
 
   await chatSessionService.deleteChatSession(chatId)
   return sendSuccess(res, 200, { message: "Chat session deleted successfully" })
-})
-
-export const rollbackChatSession = catchAsync(async (req: Request, res: Response) => {
-  const { projectId } = await authorizeProject(req)
-  const chatId = requireChatId(req)
-  await chatSessionService.assertChatSessionOwnership(projectId, chatId)
-
-  const { messageIndex } = req.body
-  if (messageIndex === undefined || messageIndex === null) {
-    throw new ApiError(400, "messageIndex is required", "MESSAGE_INDEX_REQUIRED")
-  }
-
-  const updatedSession = await chatSessionService.rollbackMessages(
-    chatId,
-    Number(messageIndex)
-  )
-  return sendSuccess(res, 200, updatedSession)
 })

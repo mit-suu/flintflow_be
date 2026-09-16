@@ -1,7 +1,7 @@
 # 🤖 FlintFlow AI Action Framework (`src/shared/ai/`)
 
 > **Entrypoint duy nhất** bọc toàn bộ các tương tác với LLM trong toàn hệ thống FlintFlow.
-> Mọi module (Specification, Clarification, Verification, etc.) đều bắt buộc gọi AI qua `executeAiAction()`. KHÔNG tự gọi API của OpenAI / Anthropic / Gemini trực tiếp.
+> Mọi module (pipeline step runner, draft-to-ops, change/reconcile, chat, tài liệu upload…) đều bắt buộc gọi AI qua `executeAiAction()`. KHÔNG tự gọi API của OpenAI / Anthropic / Gemini trực tiếp.
 
 ---
 
@@ -11,9 +11,9 @@
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 
-// Ví dụ 1: Tóm tắt văn bản
+// Ví dụ: tóm tắt tài liệu upload (action ngoài pipeline)
 const result = await executeAiAction(
-  ActionType.SUMMARIZE,
+  ActionType.SUMMARIZE_DOCUMENT,
   { promptVariables: { input_text: "Yêu cầu phần mềm..." } },
   projectId,
   userId
@@ -51,6 +51,19 @@ console.log(result.logId) // Log ID lưu trên DB
 6. In-Request Auto Retry (Tầng 1)
    ↳ Tự động thử lại tối đa 2 lần với các lỗi transient (Rate limit 429, Network timeout, Parse fail)
 ```
+
+---
+
+## 🏷️ `ActionType` hiện có
+
+| Nhóm | Giá trị | Prompt |
+|---|---|---|
+| Khung pipeline | `elicit`, `discovery_step`, `draft`, `regenerate`, `revision`, `glossary_scan`, `render_fix`, `review`, `consistency_pass`, `reconcile`, `change_instruction` | skill hành động theo `SKILL_BY_ACTION_TYPE` |
+| Ngoài pipeline | `chat`, `summarize_document` | `assets/prompts/<actionType>.md` |
+
+Các action section-based cũ (`generate_section`, `priority_ranking`, `scope_out_of_scope`, `chat_discovery`, `diagram_*`) đã gỡ ở T21. `AiActionLog` cũ vẫn có thể mang các tên này — trang chi phí AI của admin chỉ nhóm theo chuỗi.
+
+Context tài liệu upload (`document-context.service.ts`): step pipeline nạp `extractedText`/`summary` khi `reads` của step có token `documents`; action ngoài pipeline theo bảng `ACTION_NEEDS_SOURCE_DOCUMENTS`.
 
 ---
 

@@ -13,7 +13,7 @@ import {
 /**
  * Registry CHỈ đọc đĩa (Phases §8, T03). Nhánh override `PromptTemplate` trong
  * DB đã bỏ: DB rỗng hay DB cũ đều không còn đổi được prompt/provider lúc chạy.
- * Model `PromptTemplate` vẫn giữ để không phá seed cũ — xoá ở T21.
+ * Model `PromptTemplate` và `seed-from-md.ts` đã xoá ở T21.
  */
 
 export interface LoadedPromptTemplate {
