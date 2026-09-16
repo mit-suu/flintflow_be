@@ -1,0 +1,508 @@
+{
+  "step_id": "S-4.1",
+  "skill_id": "screens-and-flow",
+  "notes": "Two features, four screens (two core pending, two placeholder), 19 function frames; N fixed at 4 screens plus the nonscreen round.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "features[]",
+      "value": {
+        "id": "F1",
+        "name": "Authentication",
+        "order": 0
+      },
+      "reason": "S-4.1 feature from release scope"
+    },
+    {
+      "op": "add",
+      "path": "features[]",
+      "value": {
+        "id": "F2",
+        "name": "Project Workspace",
+        "order": 1
+      },
+      "reason": "S-4.1 feature from release scope"
+    },
+    {
+      "op": "add",
+      "path": "screens[]",
+      "value": {
+        "id": "S91",
+        "feature_id": "F2",
+        "name": "Project Workspace",
+        "description": "Where the author drives the guided pipeline and reviews the generated document.",
+        "flow_to": [],
+        "is_popup": false,
+        "tabs": [
+          "Document",
+          "Verification"
+        ],
+        "primary_function_id": null,
+        "queue_order": 1,
+        "detail_status": "pending"
+      },
+      "reason": "S-4.1 core screen"
+    },
+    {
+      "op": "add",
+      "path": "screens[]",
+      "value": {
+        "id": "S92",
+        "feature_id": "F1",
+        "name": "Login",
+        "description": "Entry screen where a returning author authenticates.",
+        "flow_to": [],
+        "is_popup": false,
+        "tabs": [],
+        "primary_function_id": null,
+        "queue_order": 2,
+        "detail_status": "pending"
+      },
+      "reason": "S-4.1 core screen"
+    },
+    {
+      "op": "add",
+      "path": "screens[]",
+      "value": {
+        "id": "S93",
+        "feature_id": "F1",
+        "name": "Sign Up",
+        "description": "Where a new visitor creates an account.",
+        "flow_to": [],
+        "is_popup": false,
+        "tabs": [],
+        "primary_function_id": null,
+        "queue_order": 3,
+        "detail_status": "placeholder"
+      },
+      "reason": "S-4.1 left for a later release cut"
+    },
+    {
+      "op": "add",
+      "path": "screens[]",
+      "value": {
+        "id": "S94",
+        "feature_id": "F2",
+        "name": "Notifications",
+        "description": "Where the author reads in-app notification history.",
+        "flow_to": [],
+        "is_popup": false,
+        "tabs": [],
+        "primary_function_id": null,
+        "queue_order": 4,
+        "detail_status": "placeholder"
+      },
+      "reason": "S-4.1 left for a later release cut"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN101",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 0,
+        "name": "Run Pipeline Step",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN102",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 1,
+        "name": "Answer Elicit Question",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN103",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 2,
+        "name": "Accept Step At Gate",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN104",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 3,
+        "name": "Request Step Revision",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN105",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 4,
+        "name": "Regenerate Step Draft",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN106",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 5,
+        "name": "Preview Change Diff",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN107",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 6,
+        "name": "Apply Change",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN108",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 7,
+        "name": "Undo Last Change",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN109",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 8,
+        "name": "Reconcile Stale Section",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN110",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 9,
+        "name": "Waive Flag",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN111",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 10,
+        "name": "Assemble Document",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN112",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 11,
+        "name": "Export Word Document",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN113",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 12,
+        "name": "Open Traceability Map",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN114",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 13,
+        "name": "Switch Working Mode",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN115",
+        "screen_id": "S91",
+        "feature_id": "F2",
+        "order": 14,
+        "name": "Resume Interrupted Step",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN116",
+        "screen_id": "S94",
+        "feature_id": "F2",
+        "order": 15,
+        "name": "List Notification History",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN201",
+        "screen_id": "S92",
+        "feature_id": "F1",
+        "order": 0,
+        "name": "Submit Credentials",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN202",
+        "screen_id": "S92",
+        "feature_id": "F1",
+        "order": 1,
+        "name": "Request Password Reset",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN203",
+        "screen_id": "S93",
+        "feature_id": "F1",
+        "order": 2,
+        "name": "Create Account",
+        "trigger": "",
+        "description": "",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.1 function frame"
+    },
+    {
+      "op": "set",
+      "path": "screens[id=S91].primary_function_id",
+      "value": "FN101",
+      "reason": "S-4.1 primary function for the wireframe"
+    },
+    {
+      "op": "set",
+      "path": "screens[id=S92].primary_function_id",
+      "value": "FN201",
+      "reason": "S-4.1 primary function for the wireframe"
+    },
+    {
+      "op": "set",
+      "path": "screens[id=S93].primary_function_id",
+      "value": "FN203",
+      "reason": "S-4.1 primary function for the wireframe"
+    },
+    {
+      "op": "set",
+      "path": "screens[id=S94].primary_function_id",
+      "value": "FN116",
+      "reason": "S-4.1 primary function for the wireframe"
+    },
+    {
+      "op": "set",
+      "path": "progress.screen_queue",
+      "value": [
+        "S91",
+        "S92",
+        "S93",
+        "S94"
+      ],
+      "reason": "S-4.1 fix N and the S-5 queue"
+    },
+    {
+      "op": "add",
+      "path": "assumptions[]",
+      "value": {
+        "id": "AS31",
+        "path": "screens[id=S93].detail_status",
+        "statement": "Sign Up and Notifications stay placeholders in this release; only the two core screens are detailed.",
+        "rationale": "Phases 9.1 limits full detail to 3-5 core screens.",
+        "origin_step_id": "S-4.1",
+        "status": "unconfirmed",
+        "confirmed_at": null
+      },
+      "reason": "S-4.1 placeholder decision"
+    }
+  ]
+}

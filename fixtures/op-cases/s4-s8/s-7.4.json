@@ -1,0 +1,27 @@
+{
+  "step_id": "S-7.4",
+  "skill_id": "appendix-content",
+  "notes": "Technical risk visible from sections 3 and 4.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR01",
+        "kind": "technical_risk",
+        "statement": "The product depends on a single AI model provider with no fallback; an outage stops every generation step."
+      },
+      "reason": "S-7.4 technical risk"
+    },
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR02",
+        "kind": "open_question",
+        "statement": "Whether exported documents must carry the customer branding is not decided."
+      },
+      "reason": "S-7.4 open question"
+    }
+  ]
+}
