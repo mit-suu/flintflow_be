@@ -1,0 +1,37 @@
+{
+  "step_id": "B-1.1",
+  "skill_id": "product-brief",
+  "notes": "Vision + 3 goal dạng kết quả.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.vision",
+      "value": "Let a founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.",
+      "reason": "B-1.1 vision"
+    },
+    {
+      "op": "set",
+      "path": "project.goals",
+      "value": [
+        "Cut time to a baseline-quality SRS from weeks to one working day",
+        "Keep every section traceable to a stated business goal",
+        "Make the cost of producing one document predictable"
+      ],
+      "reason": "B-1.1 goals"
+    },
+    {
+      "op": "add",
+      "path": "assumptions[]",
+      "value": {
+        "id": "AS02",
+        "path": "project.goals",
+        "statement": "One working day means one person for eight hours.",
+        "rationale": "The user said fast but gave no figure.",
+        "origin_step_id": "B-1.1",
+        "status": "unconfirmed",
+        "confirmed_at": null
+      },
+      "reason": "B-1.1: điền mặc định, chờ xác nhận"
+    }
+  ]
+}
