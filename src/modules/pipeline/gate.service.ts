@@ -109,11 +109,22 @@ const buildSummary = (spine: Spine, stepId: string, counts: { calls_used: number
   }
 }
 
-/** `S-5.5` accept ⇒ `screens[id=<loop>].detail_status = signed_off` (task 13, Phases §4.3). */
-const signOffOps = (stepId: string): Op[] => {
+/**
+ * Trạng thái chi tiết của màn do hai cổng của vòng S-5 quyết (T13 §4.3, T18 Phases §6.2, §9.1):
+ * - `S-5.5` accept / accept_as_is ⇒ `signed_off` (màn đã mô tả xong).
+ * - `S-5.1` **accept_as_is** ⇒ `placeholder` — hành động "để lại màn này": bỏ qua S-5.2…S-5.5 của màn
+ *   (`step-registry.nextStep` không tính vòng của màn placeholder) nhưng GIỮ nguyên khung `functions[]`
+ *   do S-4.1 sinh, nên `screen_pending_at_baseline` không bắn mà nội dung vẫn còn chỗ để quay lại.
+ *   `accept_as_is` bắt buộc `note`, và mở cờ vàng `accepted_as_is` — đúng là lời giải thích "vì sao để lại".
+ *
+ * Vòng `@nonscreen` không có màn nào để đánh dấu.
+ */
+const loopScreenStatusOps = (stepId: string, asIs: boolean): Op[] => {
   const step = getStep(stepId)
-  if (step.template_id !== "S-5.5" || step.loop === null || step.loop === "nonscreen") return []
-  return [{ op: "set", path: `screens[id=${step.loop}].detail_status`, value: "signed_off" }]
+  if (step.loop === null || step.loop === "nonscreen") return []
+  if (step.template_id === "S-5.5") return [{ op: "set", path: `screens[id=${step.loop}].detail_status`, value: "signed_off" }]
+  if (step.template_id === "S-5.1" && asIs) return [{ op: "set", path: `screens[id=${step.loop}].detail_status`, value: "placeholder" }]
+  return []
 }
 
 const phaseFullyAccepted = (spine: Spine, phase: string): boolean =>
@@ -164,7 +175,7 @@ const doAccept = async (projectId: string, stepId: string, userId: string, recor
   const ops: Op[] = [
     { op: "set", path: `steps[id=${stepId}].status`, value: "accepted" },
     { op: "set", path: `steps[id=${stepId}].accepted_at`, value: new Date().toISOString() },
-    ...signOffOps(stepId)
+    ...loopScreenStatusOps(stepId, yellowFlagNote !== null)
   ]
 
   if (yellowFlagNote !== null) {
