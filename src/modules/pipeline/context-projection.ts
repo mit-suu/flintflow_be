@@ -188,6 +188,13 @@ export interface StepProjection {
 const ASSUMPTIONS_WRITE = "assumptions"
 export const ASSUMPTION_KEYS_READ = "assumptions:id,path,status"
 
+/**
+ * `reads` nào cho model thấy **mọi** id của `assumptions[]`: `assumptions` hoặc `assumptions:<khoá>`.
+ * `assumptions[<lọc>]` thì không — nó chỉ là một phần mảng, dùng nó để suy ra id kế tiếp là đặt trùng.
+ */
+const readsWholeAssumptions = (raw: string): boolean =>
+  raw === ASSUMPTIONS_WRITE || raw.startsWith(`${ASSUMPTIONS_WRITE}:`)
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -204,7 +211,11 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
 
   // Step Draft nào cũng được ghi `assumptions[]` nhưng registry không khai `reads` cho nó: không thấy id đã có thì model
   // đặt trùng (`AS3` đã tồn tại — M3 2026-09-15). Chỉ đưa khoá tối thiểu, không tính vào emptyFields.
-  if (stepSpec.writes.includes(ASSUMPTIONS_WRITE) && !stepSpec.reads.some((r) => r.startsWith(ASSUMPTIONS_WRITE))) {
+  //
+  // `reads` CÓ `assumptions` vẫn chưa chắc đủ: B-2.3 đọc `assumptions[status=unconfirmed]`, nên mọi
+  // assumption vừa được B-2.1 xác nhận biến mất khỏi projection và model lại đặt trùng id
+  // (`AS10` đã tồn tại — M4 2026-09-16). Chỉ bỏ qua khi step đọc **trọn** mảng.
+  if (stepSpec.writes.includes(ASSUMPTIONS_WRITE) && !stepSpec.reads.some(readsWholeAssumptions)) {
     projection[ASSUMPTION_KEYS_READ] = selectValue(spine, parseSelector(ASSUMPTION_KEYS_READ), loop)
   }
 

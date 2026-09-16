@@ -79,14 +79,23 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(""),
   GEMINI_API_KEY: z.string().default(""),
 
-  MODAL_BASE_URL: z
-    .string()
-    .default(
-      "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
-    ),
+  // Không có default: một URL endpoint cá nhân nằm trong code nghĩa là quên cấu hình cũng không báo
+  // lỗi, chỉ lặng lẽ gọi sang máy của người khác (T24). Thiếu ⇒ `AI_PROVIDER_NOT_CONFIGURED` ngay ở
+  // lượt gọi đầu (`shared/ai/providers/modal.config.ts`).
+  MODAL_BASE_URL: z.string().default(""),
   MODAL_PROXY_TOKEN_ID: z.string().default(""),
   MODAL_PROXY_TOKEN_SECRET: z.string().default(""),
   MODAL_API_KEY: z.string().default(""),
+
+  // Ghi đè provider cho MỌI lượt gọi, bỏ qua frontmatter của skill. Chỉ dùng cho CI / smoke test —
+  // để trống ở mọi môi trường thật. `mock` không gọi mạng và trả output hợp schema theo ActionType.
+  AI_PROVIDER_OVERRIDE: z.string().default(""),
+
+  // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
+  REVIEW_LLM_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
 
   // ─── PlantUML (render diagram phía server, Phases §7.1) ───────────
   // Self-host: `docker compose up -d plantuml`. Ở production PlantUML là một

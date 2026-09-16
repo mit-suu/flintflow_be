@@ -92,6 +92,28 @@ describe("projectStep", () => {
     expect(projectStep(FIXTURE, "B-1.1").addendum).toHaveLength(FIXTURE.addendum.length)
   })
 
+  it("B-2.3 đọc assumptions LỌC vẫn nhận thêm danh sách id đầy đủ (M4: 'AS10 đã tồn tại')", () => {
+    // Đúng hình sau B-2.1: phần lớn assumption đã confirmed, chỉ còn một cái unconfirmed.
+    const spine = structuredClone(FIXTURE)
+    expect(spine.assumptions.length).toBeGreaterThan(1)
+    for (const a of spine.assumptions) a.status = "confirmed"
+    spine.assumptions[spine.assumptions.length - 1]!.status = "unconfirmed"
+
+    const p = projectStep(spine, "B-2.3")
+    // `reads` đã có assumptions[status=unconfirmed] — chỉ MỘT PHẦN mảng, không đủ để suy ra id kế tiếp
+    const filtered = p.projection["assumptions[status=unconfirmed]"] as { status: string }[]
+    expect(filtered).toHaveLength(1)
+
+    const allKeys = p.projection[ASSUMPTION_KEYS_READ] as Record<string, unknown>[]
+    expect(allKeys).toHaveLength(spine.assumptions.length)
+    for (const a of allKeys) expect(Object.keys(a).sort()).toEqual(["id", "path", "status"])
+  })
+
+  it("step đọc trọn assumptions thì không thêm khoá thứ hai (B-2.1)", () => {
+    const p = projectStep(FIXTURE, "B-2.1")
+    expect(Object.keys(p.projection)).toEqual(["assumptions"])
+  })
+
   it("emptyFields liệt kê phần còn thiếu (fixture minimal ở S-3.1)", () => {
     const p = projectStep(load("spine-fixture-minimal.json"), "S-3.1")
     expect(p.emptyFields).toEqual(expect.arrayContaining(["actors", "roles", "use_cases"]))
