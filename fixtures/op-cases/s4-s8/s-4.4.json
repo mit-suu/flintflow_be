@@ -1,0 +1,34 @@
+{
+  "step_id": "S-4.4",
+  "skill_id": "non-screen-functions",
+  "notes": "One scheduled job for the time actor, wired to its use case.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "functions[]",
+      "value": {
+        "id": "FN301",
+        "screen_id": null,
+        "feature_id": "F2",
+        "order": 0,
+        "name": "Expire Stale Credit Reservations",
+        "trigger": "Every 5 minutes, for reservations older than their expires_at.",
+        "description": "Releases credits held by AI calls that never completed so the wallet balance stays accurate.",
+        "normal": [],
+        "abnormal": [],
+        "validations": [],
+        "business_rule_ids": [],
+        "priority": null
+      },
+      "reason": "S-4.4 scheduled job for the time actor"
+    },
+    {
+      "op": "set",
+      "path": "use_cases[id=UC16].function_ids",
+      "value": [
+        "FN301"
+      ],
+      "reason": "S-4.4 wire the job to its use case"
+    }
+  ]
+}

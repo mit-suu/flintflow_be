@@ -1,0 +1,43 @@
+{
+  "step_id": "S-6.2",
+  "skill_id": "nfr-quality-attributes",
+  "notes": "Checkable usability statements, no adjectives.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N05",
+        "category": "usability",
+        "statement": "Every screen meets WCAG 2.1 AA for contrast and keyboard navigation.",
+        "kind": "descriptive",
+        "priority": null
+      },
+      "reason": "S-6 usability"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N06",
+        "category": "usability",
+        "statement": "The interface is available in English and Vietnamese, with the document content always in English.",
+        "kind": "descriptive",
+        "priority": null
+      },
+      "reason": "S-6 usability"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N07",
+        "category": "usability",
+        "statement": "Every long-running action shows progress and can be abandoned without losing accepted work.",
+        "kind": "descriptive",
+        "priority": null
+      },
+      "reason": "S-6 usability"
+    }
+  ]
+}
