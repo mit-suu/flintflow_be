@@ -14,8 +14,11 @@
  * the projection the runner hands the executor — which is what proves the <= 6 function batching:
  * a 15-function screen produces three calls whose op sets are disjoint.
  *
- * `E2E_AI=1` (real provider only; Spine/Change/Usage/ChatSession stay this in-memory mock) is skipped
- * unless the env var is set — same shape as `s2-s3.e2e.test.ts`.
+ * `E2E_AI=1` block (kept from T18, skipped with `it.skipIf`): same shape as `s2-s3.e2e.test.ts` — only the
+ * executors become real, but this file runs in the vitest `unit` project (no Mongo) while `executeAiAction`
+ * reserves credit through Mongo, so the block cannot run here and is NOT the supported real-provider path.
+ * Real-provider runs: `npm run test:e2e-ai` (`test/e2e-ai/**`, in-memory Mongo via `test/setup.ts`) or
+ * `npm run measure:tokens -- --mode real-draft|real`. See `docs/spec-gaps.md` (T18, T22, FLF-167).
  */
 
 import fs from "node:fs"
@@ -524,6 +527,8 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
 describe("T18: real provider (E2E_AI=1)", () => {
   // Same in-memory Spine/Change/Usage/ChatSession as above; only the executors are real. Fast mode +
   // two elicit turns already spent avoids blocking on `answer_needed` (no `submitAnswer` caller here).
+  // Not runnable in the `unit` project (no Mongo for credit reserve) — use `npm run test:e2e-ai` or
+  // `npm run measure:tokens -- --mode real-draft` for real-provider runs (see file header).
   it.skipIf(process.env.E2E_AI !== "1")(
     "S-4.1 -> S-8.1 via real provider: 0 unwaivable red flags, nfr_missing_number = 0, placeholders untouched",
     async () => {
