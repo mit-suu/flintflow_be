@@ -23,6 +23,7 @@
  */
 
 import { randomUUID } from "node:crypto"
+import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
@@ -62,7 +63,7 @@ export interface StepRunnerDeps {
   /** Draft/Regenerate/Revision — mặc định gọi `executeAiAction` (T04 reserve/deduct/release credit thật ở ví). */
   draftExecutor: DraftExecutor
   elicitExecutor: ElicitExecutor
-  /** Chỉ dùng khi `process.env.REVIEW_LLM_ENABLED === "true"` (mặc định tắt). */
+  /** Chỉ dùng khi `REVIEW_LLM_ENABLED=true` (mặc định tắt). */
   reviewExecutor: ReviewExecutor
   renderDeps?: Partial<DiagramServiceDeps>
   /** F8: đóng tab/mất mạng giữa chừng — controller abort khi `req` đóng. Runner kiểm trước mỗi lượt gọi
@@ -406,7 +407,7 @@ export const runRenderReviewPhase = async (
 
   // Lớp phủ LLM review — tắt mặc định (đọc process.env trực tiếp, không qua src/config theo yêu cầu task).
   // F2/F11: kiểm trần + reserve trước khi gọi, như elicit/draft. Lớp phủ không chặn step: lỗi/hết trần chỉ log.
-  if (process.env.REVIEW_LLM_ENABLED === "true" && !deps.signal?.aborted) {
+  if (env.REVIEW_LLM_ENABLED && !deps.signal?.aborted) {
     const { spine: spineForReview } = await refresh(projectId)
     const currentFirstSeq = spineForReview.steps.find((s) => s.id === stepId)?.first_seq ?? null
     const { calls_used } = await meter.roundCounts(projectId, stepId, currentFirstSeq)
