@@ -18,6 +18,7 @@ npm test             # vitest run — test colocate cạnh code (src/**/*.test.t
 npm test -- src/modules/spine/          # chạy một thư mục
 npm run build        # tsc -p tsconfig.build.json
 npm run seed:fixture # nạp fixtures/spine-fixture-19-screens.json vào Mongo
+npm run migrate:sections -- --dry-run   # chuyển project cũ (collection `sections`) sang Spine, ghi docs/migration-report.md
 ```
 
 Node 22, ESM (`"type": "module"`) — **mọi import nội bộ phải có đuôi `.js`** kể cả khi file nguồn là `.ts`.
@@ -88,10 +89,16 @@ lường trước trong `pipeline.dto.ts`.
 | `modules/pipeline/` | Step registry, projection, draft-to-ops, step runner, gate, meter, resume |
 | `modules/diagram/` | 5 renderer PlantUML + compile-check + lưu file |
 | `modules/render/` | Assemble section → `RenderedDocument` → `.docx` |
-| `modules/{notification,billing,credits,admin,project,user,auth}/` | Nền tảng |
-| `modules/{specification,verification}/` | **Legacy**, T21 xoá — chỉ đọc, đừng xây thêm lên |
-| `shared/ai/` | `ActionType`, prompt registry, response parser, provider |
-| `assets/skills/` | 30 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
+| `modules/pipeline/s9/` | Quét cuối, đối chiếu mục tiêu, MoSCoW, ký baseline + snapshot |
+| `modules/{notification,billing,credits,admin,project,user,auth}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`) |
+| `shared/ai/` | `ActionType`, prompt registry, response parser, provider, context tài liệu upload |
+| `assets/skills/` | 32 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
+| `assets/prompts/` | Prompt phẳng chỉ cho `chat`, `summarize_document` |
+| `src/scripts/migrate-sections-to-spine.ts` | Migration dữ liệu section cũ → Spine (op `migrate`) |
+
+Mô hình section markdown cũ (module `specification`/`verification`, rollback chat, các field tiến độ trên
+`Project`, prompt `generate_section`…) **đã xoá ở T21**. Sơ đồ module, luồng step và luồng change:
+`docs/architecture.md`.
 | `fixtures/` | Spine mẫu 19 màn + minimal, các lô op mẫu để test |
 
 ## Skill (prompt)
