@@ -48,6 +48,17 @@ export const RULES: readonly RuleDef[] = Object.freeze([
 /** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
 export const NON_WAIVABLE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) => !r.waivable).map((r) => r.rule_id))
 
+/**
+ * Cờ KHÔNG do deterministic check sinh ra, mà do người hoặc model đặt ở một cổng cụ thể:
+ * `accepted_as_is` (gate `accept_as_is`, T13) và `goal_not_covered` (S-9.3 Business Goal Validation, T19).
+ *
+ * `runDeterministicCheck` không bao giờ trả chúng làm ứng viên, nên nếu không liệt kê ở đây thì lượt
+ * recompute kế tiếp sẽ coi là "điều kiện không còn" và tự đóng — nghĩa là cờ biến mất ngay sau bước tiếp
+ * theo, không ai kịp đọc. `planFlagOps` bỏ qua chúng khi dọn cờ; muốn đóng thì đóng có chủ đích
+ * (user xử lý xong, hoặc bước sở hữu chạy lại và ghi đè).
+ */
+export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set(["accepted_as_is", "goal_not_covered"])
+
 export interface FlagCandidate {
   level: FlagLevel
   rule_id: string
