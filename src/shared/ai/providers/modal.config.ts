@@ -16,7 +16,9 @@ import { AiActionError } from "../ai-action.types.js"
 export const MODAL_BASE_URL_MISSING = "AI_PROVIDER_NOT_CONFIGURED"
 
 export const modalBaseUrl = (): string => {
-  const url = env.MODAL_BASE_URL?.trim()
+  // `env` đóng băng lúc import nên đọc thêm `process.env` — cùng cách `glm.provider.ts` lấy
+  // MODAL_PROXY_TOKEN_ID / MODAL_API_KEY, để test và script đặt được biến sau khi module đã nạp.
+  const url = (env.MODAL_BASE_URL || process.env.MODAL_BASE_URL)?.trim()
   if (!url) {
     throw new AiActionError(
       500,
