@@ -10,11 +10,20 @@ import { errorHandler } from "./shared/middlewares/error-handler.js"
 import authRoutes from "./modules/auth/auth.route.js"
 import userRoutes from "./modules/user/user.route.js"
 import aiActionRoutes from "./shared/ai/ai-action.route.js"
-import adminPromptTemplateRoutes from "./modules/admin/prompt-template.route.js"
+import adminRoutes from "./modules/admin/admin.route.js"
 import projectRoutes from "./modules/project/project.route.js"
-import specificationRoutes from "./modules/specification/specification.route.js"
-import verificationRoutes from "./modules/verification/verification-context.route.js"
+import notificationRoutes from "./modules/notification/notification.route.js"
+import billingRoutes from "./modules/billing/billing.route.js"
+import spineRoutes from "./modules/spine/spine.route.js"
+import changesRoutes from "./modules/spine/changes.route.js"
+import flagsRoutes from "./modules/spine/flags.route.js"
+import diagramRoutes from "./modules/diagram/diagram.route.js"
+import pipelineRoutes from "./modules/pipeline/pipeline.route.js"
+import baselineRoutes from "./modules/pipeline/s9/baseline.route.js"
+import renderRoutes from "./modules/render/render.route.js"
+import exportRoutes from "./modules/render/export.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
+import { buildHealthReport } from "./config/health.js"
 
 const app = express()
 
@@ -74,6 +83,9 @@ app.use(
   })
 )
 
+// Preview export nhận RenderedDocument có ảnh base64 — vượt giới hạn 100KB mặc định.
+// Parser riêng chạy trước; parser chung bỏ qua body đã parse.
+app.use("/api/v1/export", express.json({ limit: "15mb" }))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
@@ -90,8 +102,13 @@ app.get("/", (req, res) => {
   })
 })
 
-app.get("/health", (_req, res) => {
-  return sendSuccess(res, 200, { status: "ok" })
+/**
+ * `mongo: "error"` ⇒ 503 để load balancer rút instance ra khỏi vòng phục vụ.
+ * `plantuml: "error"` chỉ là `degraded` ⇒ vẫn 200: diagram hỏng nhưng phần còn lại phục vụ được.
+ */
+app.get("/health", async (_req, res) => {
+  const report = await buildHealthReport()
+  return sendSuccess(res, report.status === "error" ? 503 : 200, report)
 })
 
 // Swagger Documentation
@@ -109,10 +126,21 @@ app.use(
 app.use("/api/v1/auth", authRoutes)
 app.use("/api/v1/users", userRoutes)
 app.use("/api/v1/ai-actions", aiActionRoutes)
-app.use("/api/v1/admin/prompt-templates", adminPromptTemplateRoutes)
+app.use("/api/v1/admin", adminRoutes)
 app.use("/api/v1/projects", projectRoutes)
-app.use("/api/v1/specifications", specificationRoutes)
-app.use("/api/v1/verification", verificationRoutes)
+app.use("/api/v1/projects", spineRoutes)
+app.use("/api/v1/projects", changesRoutes)
+app.use("/api/v1/projects", flagsRoutes)
+app.use("/api/v1/projects", diagramRoutes)
+app.use("/api/v1/projects", pipelineRoutes)
+app.use("/api/v1/projects", baselineRoutes)
+// GET /:projectId/export/word (endpoint 18, contract) đã có trong renderRoutes (render.route.ts,
+// review C1) — không mount exportRoutes ở /api/v1/projects nữa (trùng mount từng lộ thêm
+// POST /projects/word/preview và GET /projects/:projectId/export/word/export/word).
+app.use("/api/v1/projects", renderRoutes)
+app.use("/api/v1/notifications", notificationRoutes)
+app.use("/api/v1/billing", billingRoutes)
+app.use("/api/v1/export", exportRoutes)
 
 // Global Error Handler Middleware
 app.use(errorHandler)

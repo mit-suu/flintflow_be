@@ -1,0 +1,19 @@
+{
+  "step_id": "B-2.2",
+  "skill_id": "product-brief",
+  "notes": "Addendum triage: AD08 (chưa làm bản này) chuyển target_section sang fixed:5.4 để S-7.4 nhặt; không xoá thông tin.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "addendum[id=AD08].target_section",
+      "value": "fixed:5.4",
+      "reason": "B-2.2 để dành: chuyển sang phụ lục Other Requirements"
+    },
+    {
+      "op": "set",
+      "path": "addendum[id=AD08].topic",
+      "value": "Deferred: multi-user collaboration",
+      "reason": "B-2.2 đánh dấu để dành"
+    }
+  ]
+}

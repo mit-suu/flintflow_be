@@ -1,0 +1,73 @@
+{
+  "step_id": "S-3.2",
+  "skill_id": "actors-and-usecases",
+  "notes": "Actor-goal list: 11 candidate use cases across the five actors, one per goal.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC01", "name": "Draft Product Brief", "actor_ids": ["A03"], "function_ids": [], "description": "The founder answers guided Brief questions so the pipeline can build a Product Brief before SRS work starts.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: capture the Brief"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC02", "name": "Run Guided Pipeline Step", "actor_ids": ["A03"], "function_ids": [], "description": "The founder walks through intake, elicit and draft for the current pipeline step until it reaches its gate.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: progress the pipeline"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC03", "name": "Accept Step At Gate", "actor_ids": ["A03"], "function_ids": [], "description": "The founder reviews a step's draft output at the gate and accepts it, moving the pipeline to the next step.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: accept a step"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC04", "name": "Request Step Revision", "actor_ids": ["A03"], "function_ids": [], "description": "The founder asks the pipeline to redraft the current step's output with a specific correction.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: fix a step's draft"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC05", "name": "Export SRS Document", "actor_ids": ["A03"], "function_ids": [], "description": "The founder downloads the assembled SRS as a Word document, watermarked until baseline.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: get the SRS out of the tool"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC06", "name": "View Readiness Flags", "actor_ids": ["A03"], "function_ids": [], "description": "The founder reviews open red and yellow flags to know what still blocks baseline.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: know what is unresolved"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC07", "name": "View User List", "actor_ids": ["A04"], "function_ids": [], "description": "The admin reviews the read-only list of registered users and their plan status.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: admin oversight of users"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC08", "name": "View AI Cost Metrics", "actor_ids": ["A04"], "function_ids": [], "description": "The admin reviews aggregated AI token and credit spend across projects.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: admin oversight of AI cost"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC09", "name": "Process Credit Purchase", "actor_ids": ["A01"], "function_ids": [], "description": "The payment gateway confirms a credit purchase and the ledger records the settled amount.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: settle a payment"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC10", "name": "Render Diagram", "actor_ids": ["A02"], "function_ids": [], "description": "The render service compiles a diagram's PlantUML source into SVG/PNG and returns the result.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: produce a diagram image"
+    },
+    {
+      "op": "add",
+      "path": "use_cases[]",
+      "value": { "id": "UC11", "name": "Expire Stale Credit Reservations", "actor_ids": ["A05"], "function_ids": [], "description": "The scheduler releases credit reservations that were never finalized after their expiry window.", "includes": [], "extends": [] },
+      "reason": "S-3.2 goal: reclaim unused reservations"
+    }
+  ]
+}
