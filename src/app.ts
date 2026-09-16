@@ -79,7 +79,10 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"]
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    // Trình duyệt chỉ cho JS đọc header ngoài danh sách safelist khi có Access-Control-Expose-Headers:
+    // FE tải .docx qua fetch cần đọc tên file BE đặt trong Content-Disposition (GET /export/word).
+    exposedHeaders: ["Content-Disposition"]
   })
 )
 
