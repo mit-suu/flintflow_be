@@ -34,6 +34,7 @@ import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { buildStepContext, getStepSpec, parseStepId, type StepContext } from "./context-projection.js"
 import { draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
+import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
@@ -564,6 +565,17 @@ export const runStep = async (
     if (phaseChanged) emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
 
     let answersText = ctx.transcriptTail
+
+    // T19 — pha S-9: việc của từng step nằm ở `s9/run-s9-step.ts`, không đi qua STEP_SKILLS.
+    // S-9.1/S-9.5 không gọi model và không Meter (hết credit vẫn quét và vẫn ký baseline được).
+    if (stepDef.phase === S9_PHASE) {
+      if (!S9_FREE_STEPS.has(parseStepId(stepId).base)) {
+        assertNotAborted(d.signal, stepId)
+        emit({ type: "draft", step_id: stepId, attempt: 1 })
+      }
+      await runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId })
+      ;({ spine, spineVersion } = await refresh(projectId))
+    }
 
     if (needsDraft) {
       const workingMode = spine.project.working_mode ?? "coaching"
