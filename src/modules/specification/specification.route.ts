@@ -124,7 +124,9 @@ router.put("/projects/:projectId/:type", authMiddleware, specificationController
 router.put("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 router.post("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 router.post("/projects/:projectId/approve-baseline", authMiddleware, specificationController.approveSRSForHandoff)
-router.post("/projects/:projectId/advance-to-generation", authMiddleware, specificationController.advanceToGeneration)
+// T20: gỡ `POST /projects/:projectId/advance-to-generation` — mở sang pha sinh SRS giờ là gate Approve
+// của B-2.3 (UC 2.5): accept step đó thì `nextStep` trỏ sang S-1.1 và runner tự đặt `progress`.
+// Controller cũ xoá cùng module `specification` ở T21.
 
 /**
  * @swagger

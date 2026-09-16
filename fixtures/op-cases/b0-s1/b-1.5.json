@@ -1,0 +1,34 @@
+{
+  "step_id": "B-1.5",
+  "skill_id": "product-brief",
+  "notes": "Chỉ số thành công; con số là mặc định nên kèm giả định.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD09",
+        "topic": "Success metric",
+        "content": "Một người ra được bản nháp dùng được trong một ngày làm việc.",
+        "content_en": "One person produces a usable draft within one working day.",
+        "target_section": "fixed:4.2.3",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    },
+    {
+      "op": "add",
+      "path": "assumptions[]",
+      "value": {
+        "id": "AS03",
+        "path": "project.vision",
+        "statement": "Usable draft means every required section has content and no red flag is open.",
+        "rationale": "The user said usable without defining it.",
+        "origin_step_id": "B-1.5",
+        "status": "unconfirmed",
+        "confirmed_at": null
+      },
+      "reason": "B-1.5: điền mặc định, chờ xác nhận"
+    }
+  ]
+}

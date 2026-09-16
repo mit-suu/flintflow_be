@@ -95,7 +95,8 @@ beforeEach(() => {
   aiMocks.executeAiActionStream.mockReset()
   changeMocks.preview.mockReset()
   spineRepoMocks.get.mockReset()
-  spineRepoMocks.get.mockResolvedValue({ projectId: PROJECT, spine_version: 7 })
+  // T20: `tryAnswerRunningStep` đọc `progress.current_step` ⇒ stub phải có `progress` như bản ghi thật
+  spineRepoMocks.get.mockResolvedValue({ projectId: PROJECT, spine_version: 7, progress: { current_step: null } })
 })
 
 describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
