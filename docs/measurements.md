@@ -216,3 +216,152 @@ Two op-grammar constraints the engine caught while writing the fixtures, now inl
 `E2E_AI=1`: **not run** — no provider key in this session. The test is present and skipped by
 `it.skipIf(process.env.E2E_AI !== "1")`; DoD line "0 unwaivable red flags, `nfr_missing_number` = 0 on a real
 run" is therefore still open.
+
+## Threshold
+
+Ngưỡng chi phí một project do **nhóm đặt** (T22 không tự đặt). `npm run measure:tokens` đọc bảng này và so
+kết quả; ô trống hoặc `—` nghĩa là chưa đặt. Điền số (không đơn vị) vào cột Giá trị.
+
+| Chỉ số | Giá trị | Ý nghĩa |
+| --- | --- | --- |
+| `credit_per_project` | — | Tổng credit một project đi trọn B-0.1 → S-9.5 |
+| `usd_per_project` | — | Tổng chi phí provider (USD) một project |
+| `tokens_in_per_call` | — | Tokens in tối đa của một lượt gọi model |
+
+<!-- T22:measure-tokens:start -->
+## End-to-end token measurement — `spine-fixture-19-screens.json`, mode `estimate` (T22, 2026-09-16)
+
+Sinh bởi `npm run measure:tokens` (`src/scripts/measure-tokens.ts`), 32 s.
+Hình fixture: 19 màn, 89 function, 20 vòng S-5 ⇒ `51 + 5 × 20 = 151` step; đo 81 step (bỏ vòng của màn placeholder).
+Mỗi step chạy `runStep` thật trên Spine fixture ở trạng thái cuối, mọi step trước đó accepted ⇒ input là **trần** của step.
+**Số ước lượng**: tokens_in = ký tự/4 của prompt thật (`getPromptTemplate` + `interpolatePrompt`); tokens_out = ký tự/4 của op-case fixture (không gồm reasoning ẩn — lượt chạy thật M3 đo tokens_out gấp 3–5× tokens_in với GLM-5.3-Flash). Credit theo `getActionCost`.
+
+| Phase | Step | Lượt gọi (elicit + draft) | Tokens in | Tokens out | Credit | USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| B-0 | 4 | 8 (4 + 4) | 21 188 | 495 | 20 | n/a |
+| B-1 | 6 | 12 (6 + 6) | 33 396 | 992 | 30 | n/a |
+| B-2 | 3 | 6 (3 + 3) | 15 562 | 419 | 15 | n/a |
+| S-1 | 4 | 8 (4 + 4) | 19 224 | 466 | 20 | n/a |
+| S-2 | 5 | 8 (4 + 4) | 15 977 | 906 | 20 | n/a |
+| S-3 | 6 | 10 (5 + 5) | 67 473 | 2 136 | 25 | n/a |
+| S-4 | 5 | 10 (5 + 5) | 42 340 | 3 050 | 25 | n/a |
+| S-5 | 30 | 24 (12 + 12) | 93 210 | 12 471 | 60 | n/a |
+| S-6 | 5 | 10 (5 + 5) | 26 779 | 1 065 | 25 | n/a |
+| S-7 | 4 | 8 (4 + 4) | 30 488 | 617 | 20 | n/a |
+| S-8 | 4 | 2 (1 + 1) | 6 030 | 331 | 5 | n/a |
+| S-9 | 5 | 2 (0 + 1) | 10 099 | 7 | 6 | n/a |
+| **Tổng** | **81** | **108 (53 + 54)** | **381 766** | **22 955** | **271** | **n/a** |
+
+USD: n/a — chưa truyền `--usd-in`/`--usd-out` (USD / 1M token); provider GLM trên Modal không có bảng giá trong repo.
+Step không có op-case fixture (S-9.3, S-9.4) có tokens_out ≈ 0 trong chế độ estimate — chỉ tokens_in của chúng là số dùng được.
+
+### Ngoại suy: mọi vòng S-5 đều chi tiết
+
+Fixture chỉ có 6/20 vòng S-5 chi tiết (màn placeholder bỏ vòng). Nhân trung bình một vòng đã đo lên 20 vòng:
+
+| Kịch bản | Lượt gọi | Tokens in | Tokens out | Credit | USD |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Đo được (6 vòng) | 108 | 381 766 | 22 955 | 271 | n/a |
+| Ngoại suy (20 vòng) | 164 | 599 256 | 52 054 | 411 | n/a |
+
+### So với ngưỡng (`## Threshold`)
+
+| Chỉ số | Đo được | Ngưỡng | Kết quả |
+| --- | ---: | ---: | --- |
+| credit_per_project | 271 | chưa đặt | — |
+| usd_per_project | n/a | chưa đặt | — |
+| tokens_in_per_call (max) | 8 386 | chưa đặt | — |
+
+### Input tăng theo tiến độ?
+
+Tokens in trung bình mỗi step có draft: 1/3 đầu **3 480**, 1/3 cuối **4 393** ⇒ tỉ lệ **1.26×**. < 2× ⇒ projection giữ input phẳng, chưa thấy dấu hiệu bậc hai.
+
+
+<details><summary>Chi tiết từng step</summary>
+
+| Step | Lượt | Tokens in | Tokens out | Credit | Lỗi |
+| --- | ---: | ---: | ---: | ---: | --- |
+| B-0.1 | 2 | 5 554 | 286 | 5 | |
+| B-0.2 | 2 | 5 212 | 38 | 5 | |
+| B-0.3 | 2 | 5 210 | 132 | 5 | |
+| B-0.4 | 2 | 5 212 | 39 | 5 | |
+| B-1.1 | 2 | 5 568 | 206 | 5 | |
+| B-1.2 | 2 | 5 564 | 190 | 5 | |
+| B-1.3 | 2 | 5 567 | 102 | 5 | |
+| B-1.4 | 2 | 5 564 | 182 | 5 | |
+| B-1.5 | 2 | 5 566 | 196 | 5 | |
+| B-1.6 | 2 | 5 567 | 116 | 5 | |
+| B-2.1 | 2 | 4 790 | 132 | 5 | |
+| B-2.2 | 2 | 5 214 | 108 | 5 | |
+| B-2.3 | 2 | 5 558 | 179 | 5 | |
+| S-1.1 | 2 | 5 025 | 116 | 5 | |
+| S-1.2 | 2 | 4 149 | 84 | 5 | |
+| S-1.3 | 2 | 5 031 | 92 | 5 | |
+| S-1.4 | 2 | 5 019 | 174 | 5 | |
+| S-2.1 | 2 | 4 049 | 221 | 5 | |
+| S-2.2 | 2 | 3 814 | 231 | 5 | |
+| S-2.3 | 2 | 4 543 | 206 | 5 | |
+| S-2.4 | 2 | 3 571 | 248 | 5 | |
+| S-2.5 | 0 | 0 | 0 | 0 | |
+| S-3.1 | 2 | 13 779 | 397 | 5 | |
+| S-3.2 | 2 | 13 783 | 873 | 5 | |
+| S-3.3 | 2 | 13 787 | 428 | 5 | |
+| S-3.4 | 2 | 13 061 | 190 | 5 | |
+| S-3.5 | 2 | 13 063 | 248 | 5 | |
+| S-3.6 | 0 | 0 | 0 | 0 | |
+| S-4.1 | 2 | 15 124 | 1 994 | 5 | |
+| S-4.2 | 2 | 7 313 | 117 | 5 | |
+| S-4.3 | 2 | 7 495 | 484 | 5 | |
+| S-4.4 | 2 | 7 664 | 173 | 5 | |
+| S-4.5 | 2 | 4 744 | 282 | 5 | |
+| S-5.1@S01 | 0 | 0 | 0 | 0 | |
+| S-5.2@S01 | 2 | 7 452 | 513 | 5 | |
+| S-5.3@S01 | 0 | 0 | 0 | 0 | |
+| S-5.4@S01 | 2 | 7 450 | 1 378 | 5 | |
+| S-5.5@S01 | 0 | 0 | 0 | 0 | |
+| S-5.1@S05 | 0 | 0 | 0 | 0 | |
+| S-5.2@S05 | 2 | 7 524 | 614 | 5 | |
+| S-5.3@S05 | 0 | 0 | 0 | 0 | |
+| S-5.4@S05 | 2 | 7 522 | 1 652 | 5 | |
+| S-5.5@S05 | 0 | 0 | 0 | 0 | |
+| S-5.1@S07 | 0 | 0 | 0 | 0 | |
+| S-5.2@S07 | 2 | 8 620 | 614 | 5 | |
+| S-5.3@S07 | 0 | 0 | 0 | 0 | |
+| S-5.4@S07 | 2 | 8 616 | 1 652 | 5 | |
+| S-5.5@S07 | 0 | 0 | 0 | 0 | |
+| S-5.1@S09 | 0 | 0 | 0 | 0 | |
+| S-5.2@S09 | 2 | 7 922 | 513 | 5 | |
+| S-5.3@S09 | 0 | 0 | 0 | 0 | |
+| S-5.4@S09 | 2 | 7 920 | 1 378 | 5 | |
+| S-5.5@S09 | 0 | 0 | 0 | 0 | |
+| S-5.1@S10 | 0 | 0 | 0 | 0 | |
+| S-5.2@S10 | 2 | 7 488 | 513 | 5 | |
+| S-5.3@S10 | 0 | 0 | 0 | 0 | |
+| S-5.4@S10 | 2 | 7 486 | 1 378 | 5 | |
+| S-5.5@S10 | 0 | 0 | 0 | 0 | |
+| S-5.1@nonscreen | 0 | 0 | 0 | 0 | |
+| S-5.2@nonscreen | 2 | 7 606 | 614 | 5 | |
+| S-5.3@nonscreen | 0 | 0 | 0 | 0 | |
+| S-5.4@nonscreen | 2 | 7 604 | 1 652 | 5 | |
+| S-5.5@nonscreen | 0 | 0 | 0 | 0 | |
+| S-6.1 | 2 | 5 338 | 279 | 5 | |
+| S-6.2 | 2 | 5 333 | 202 | 5 | |
+| S-6.3 | 2 | 5 432 | 225 | 5 | |
+| S-6.4 | 2 | 5 334 | 229 | 5 | |
+| S-6.5 | 2 | 5 342 | 130 | 5 | |
+| S-7.1 | 2 | 12 226 | 120 | 5 | |
+| S-7.2 | 2 | 4 091 | 229 | 5 | |
+| S-7.3 | 2 | 10 044 | 131 | 5 | |
+| S-7.4 | 2 | 4 127 | 137 | 5 | |
+| S-8.1 | 2 | 6 030 | 331 | 5 | |
+| S-8.2 | 0 | 0 | 0 | 0 | |
+| S-8.3 | 0 | 0 | 0 | 0 | |
+| S-8.4 | 0 | 0 | 0 | 0 | |
+| S-9.1 | 0 | 0 | 0 | 0 | |
+| S-9.2 | 0 | 0 | 0 | 0 | |
+| S-9.3 | 1 | 4 500 | 4 | 2 | |
+| S-9.4 | 1 | 5 599 | 3 | 4 | |
+| S-9.5 | 0 | 0 | 0 | 0 | |
+
+</details>
+<!-- T22:measure-tokens:end -->
