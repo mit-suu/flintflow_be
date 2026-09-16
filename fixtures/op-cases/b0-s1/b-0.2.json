@@ -1,0 +1,13 @@
+{
+  "step_id": "B-0.2",
+  "skill_id": "product-brief",
+  "notes": "Form factor: web app.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.form_factor",
+      "value": "web_app",
+      "reason": "B-0.2"
+    }
+  ]
+}

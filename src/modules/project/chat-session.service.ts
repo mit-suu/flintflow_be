@@ -7,6 +7,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
+import { submitAnswer } from "../pipeline/step-runner.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
@@ -115,6 +116,23 @@ const tryChangeFlow = async (
   return aiMsg
 }
 
+/**
+ * T20 (audit B2, E4): session PIPELINE đang chờ `answer_needed` của một step thì tin nhắn của user là
+ * **câu trả lời cho step đó**, không phải một lượt CHAT mới. Chuyển thẳng vào hàng chờ của step runner
+ * (`submitAnswer`) — luồng SSE của `/run` đang mở sẽ tiếp tục và ghi op.
+ *
+ * `submitAnswer` trả `false` khi không có lượt chờ nào khớp; khi đó tin nhắn đi tiếp đường CHAT như cũ.
+ * Trước T20, Discovery đi qua `CHAT_DISCOVERY` và để LLM tự đánh giá đã đủ thông tin chưa, còn Brief chỉ
+ * nằm trong JSON của tin nhắn — không có gì vào Spine.
+ */
+const tryAnswerRunningStep = async (session: IChatSession, projectId: string, content: string): Promise<boolean> => {
+  if (!session.is_pipeline) return false
+  const record = await spineRepository.get(projectId)
+  const stepId = record?.progress.current_step
+  if (!stepId) return false
+  return submitAnswer(projectId, stepId, String(session._id), [{ question_id: "Q1", answer: content }])
+}
+
 export const sendMessageAndGetResponse = async (
   projectId: string,
   chatSessionId: string,
@@ -129,10 +147,9 @@ export const sendMessageAndGetResponse = async (
     throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
   }
 
-  // T13: session không pipeline chỉ dùng để hỏi đáp (CHAT) — không cho chạy Discovery qua chat cũ,
-  // pipeline B-0…B-2 đi qua step-runner (session is_pipeline). Xem coding-rules mục "Sửa chat-session".
-  const isDiscoveryMode = session.is_pipeline && discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
-  const currentWorkspacePhase = isDiscoveryMode ? "discovery" : (workspacePhase || "product_overview")
+  // T20: Discovery KHÔNG còn là một chế độ chat. B-0…B-2 là 13 step chạy qua step runner và ghi Spine
+  // bằng op; `discoveryStep` chỉ còn là nhãn lưu vào transcript cho tương thích ngược.
+  const currentWorkspacePhase = workspacePhase || "product_overview"
 
   // 1. Add user message
   const userMsg: IChatMessage = {
@@ -146,7 +163,10 @@ export const sendMessageAndGetResponse = async (
   session.messages.push(userMsg)
   await session.save()
 
-  // 1b. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
+  // 1b. T20: session pipeline đang chờ câu trả lời của step ⇒ tin nhắn là câu trả lời, không phải CHAT
+  if (await tryAnswerRunningStep(session, projectId, content)) return session
+
+  // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
   if (await tryChangeFlow(session, projectId, content, step, userId)) return session
 
   // 2. Format history for AI context (last 12 messages)
@@ -166,8 +186,8 @@ export const sendMessageAndGetResponse = async (
     })
     .join("\n")
 
-  // 3. Determine ActionType: Discovery chat (with evaluation) vs regular chat
-  const actionType = isDiscoveryMode ? ActionType.CHAT_DISCOVERY : ActionType.CHAT
+  // 3. Chỉ còn một loại chat
+  const actionType = ActionType.CHAT
 
   // 4. Build step name and document context
   const stepName = (SECTION_METADATA as any)[step]?.label || step
@@ -191,12 +211,6 @@ export const sendMessageAndGetResponse = async (
     documentContext: docContext.contextText
   }
 
-  // Add discovery-specific variables
-  if (isDiscoveryMode) {
-    promptVariables.discovery_step = String(discoveryStep)
-    promptVariables.completed_steps_summary = buildCompletedStepsSummary(session.messages)
-  }
-
   // 6. Execute AI Action
   let aiResult
   try {
@@ -212,18 +226,6 @@ export const sendMessageAndGetResponse = async (
     const errorReply: any = {
       reply: "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau.",
       questions: []
-    }
-    // Add minimal evaluation for discovery mode so FE doesn't break
-    if (isDiscoveryMode) {
-      errorReply.evaluation = {
-        currentStep: discoveryStep,
-        stepCompleteness: 0,
-        isStepComplete: false,
-        isDiscoveryComplete: false,
-        recommendedAction: "continue_discussion",
-        stepSummary: "",
-        missingInfo: []
-      }
     }
     const aiErrorMsg: IChatMessage = {
       role: "ai",
@@ -284,7 +286,18 @@ export const sendMessageStream = async (
   session.messages.push(userMsg)
   await session.save()
 
-  // 1b. T17: lệnh sửa từ session không pipeline đi vào change flow — trả một sự kiện rồi đóng luồng
+  // 1b. T20: session pipeline đang chờ câu trả lời của step ⇒ đưa vào hàng chờ rồi đóng luồng này
+  if (await tryAnswerRunningStep(session, projectId, content)) {
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: "finish", session, data: { reply: "" }, tokensUsed: null, cost: 0 })}\n\n`)
+        res.end()
+      }
+    } catch (_) {}
+    return
+  }
+
+  // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow — trả một sự kiện rồi đóng luồng
   const changeMsg = await tryChangeFlow(session, projectId, content, step, userId)
   if (changeMsg) {
     // Dùng đúng sự kiện `finish` như luồng CHAT (không stream chữ) để FE không phải biết thêm loại event
@@ -316,9 +329,8 @@ export const sendMessageStream = async (
     })
     .join("\n")
 
-  // 3. Determine ActionType: Discovery chat vs regular chat — T13: session không pipeline chỉ CHAT.
-  const isDiscoveryMode = session.is_pipeline && discoveryStep && discoveryStep >= 1 && discoveryStep <= 6
-  const actionType = isDiscoveryMode ? ActionType.CHAT_DISCOVERY : ActionType.CHAT
+  // 3. T20: chỉ còn một loại chat — Discovery đi qua step runner
+  const actionType = ActionType.CHAT
 
   // 4. Build step name and doc context
   const stepName = (SECTION_METADATA as any)[step]?.label || step
@@ -339,11 +351,6 @@ export const sendMessageStream = async (
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
     documentContext: docContext.contextText
-  }
-
-  if (isDiscoveryMode) {
-    promptVariables.discovery_step = String(discoveryStep)
-    promptVariables.completed_steps_summary = buildCompletedStepsSummary(session.messages)
   }
 
   // 6. Execute stream with Vercel AI SDK
@@ -408,39 +415,6 @@ export const sendMessageStream = async (
       }
     } catch (_) {}
   }
-}
-
-/**
- * Quét lịch sử chat để xây dựng tóm tắt các step đã covered.
- * Tìm các AI message có evaluation.stepSummary và gom lại.
- */
-function buildCompletedStepsSummary(messages: IChatMessage[]): string {
-  const stepSummaries: Record<number, string> = {}
-
-  for (const msg of messages) {
-    if (msg.role === "ai") {
-      try {
-        const parsed = JSON.parse(msg.content)
-        if (parsed.evaluation?.stepSummary && parsed.evaluation?.currentStep) {
-          stepSummaries[parsed.evaluation.currentStep] = parsed.evaluation.stepSummary
-        }
-      } catch (_) {}
-    }
-  }
-
-  if (Object.keys(stepSummaries).length === 0) {
-    return "Chưa có thông tin nào được thu thập."
-  }
-
-  const STEP_LABELS = [
-    "", "Vision & Problem", "Users & JTBD", "Value Prop",
-    "MVP Scope", "Metrics", "Risks & Questions"
-  ]
-
-  return Object.entries(stepSummaries)
-    .sort(([a], [b]) => Number(a) - Number(b))
-    .map(([stepNum, summary]) => `Step ${stepNum} (${STEP_LABELS[Number(stepNum)]}): ${summary}`)
-    .join("\n")
 }
 
 /**

@@ -1,0 +1,13 @@
+{
+  "step_id": "B-0.4",
+  "skill_id": "product-brief",
+  "notes": "Working mode: coaching.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.working_mode",
+      "value": "coaching",
+      "reason": "B-0.4"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "step_id": "S-1.4",
+  "skill_id": "brief-analysis",
+  "notes": "Gap list: actor thứ hai, tích hợp, việc chạy theo lịch.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR08",
+        "kind": "open_question",
+        "statement": "Who administers accounts once the product is live, and what can that role see?"
+      },
+      "reason": "S-1.4 gap"
+    },
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR09",
+        "kind": "open_question",
+        "statement": "Which payment provider handles the credit purchases, and does it call back?"
+      },
+      "reason": "S-1.4 gap"
+    },
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR10",
+        "kind": "open_question",
+        "statement": "What runs on a schedule — expiry, retry, digest — and how often?"
+      },
+      "reason": "S-1.4 gap"
+    }
+  ]
+}
