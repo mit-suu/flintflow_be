@@ -123,85 +123,13 @@ router.post("/projects/:projectId/generate-phase", authMiddleware, specification
 router.put("/projects/:projectId/:type", authMiddleware, specificationController.updateSection)
 router.put("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 router.post("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
-router.post("/projects/:projectId/approve-baseline", authMiddleware, specificationController.approveSRSForHandoff)
+// T19: gỡ `POST /projects/:projectId/approve-baseline` — baseline ký qua `POST /projects/:id/baseline`
+// (S-9.5: quét lại tất định, điều kiện cờ đỏ = 0, snapshot). Controller cũ xoá cùng module ở T21.
 router.post("/projects/:projectId/advance-to-generation", authMiddleware, specificationController.advanceToGeneration)
 
-/**
- * @swagger
- * /api/v1/specifications/{projectId}/generate-priority:
- *   post:
- *     summary: "UC34 - Xếp hạng tính năng theo mức ưu tiên (MoSCoW)"
- *     description: >
- *       Đọc danh sách Functional Requirements từ DB, gọi AI để phân loại
- *       theo MoSCoW (Must-have, Should-have, Could-have, Won't-have),
- *       cập nhật lại dữ liệu vào Section và tạo SectionVersion mới.
- *       Yêu cầu UC31 đã được chạy trước.
- *     tags:
- *       - Specifications
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *         description: ID của project
- *     responses:
- *       200:
- *         description: Danh sách tính năng đã được xếp hạng ưu tiên thành công
- *       400:
- *         description: Chưa có danh sách yêu cầu chức năng (UC31 chưa chạy)
- *       401:
- *         description: Unauthorized
- *       402:
- *         description: Không đủ credit
- *       500:
- *         description: Lỗi AI hoặc lỗi hệ thống
- */
-router.post(
-  "/:projectId/generate-priority",
-  authMiddleware,
-  specificationController.generatePriorityRanking
-)
-
-/**
- * @swagger
- * /api/v1/specifications/{projectId}/generate-scope:
- *   post:
- *     summary: "UC35 - Sinh scope và out-of-scope"
- *     description: >
- *       Đọc danh sách Functional Requirements đã được xếp hạng MoSCoW,
- *       tách thành In-Scope (Must/Should/Could) và Out-of-Scope (Won't-have),
- *       gọi AI sinh Markdown cho Scope section, lưu vào DB.
- *       Yêu cầu UC34 đã được chạy trước (tất cả FR phải có priority).
- *     tags:
- *       - Specifications
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: projectId
- *         required: true
- *         schema:
- *           type: string
- *         description: ID của project
- *     responses:
- *       200:
- *         description: Scope & Out-of-Scope Markdown đã được sinh thành công
- *       400:
- *         description: Chưa xếp hạng tính năng (UC34 chưa chạy) hoặc chưa có FR
- *       401:
- *         description: Unauthorized
- *       402:
- *         description: Không đủ credit
- *       500:
- *         description: Lỗi AI hoặc lỗi hệ thống
- */
-router.post(
-  "/:projectId/generate-scope",
-  authMiddleware,
-  specificationController.generateScopeOutOfScope
-)
+// T19: gỡ `POST /:projectId/generate-priority` (UC34) và `POST /:projectId/generate-scope` (UC35).
+// MoSCoW giờ là S-9.4 — ghi thẳng `functions[].priority` / `nfrs[].priority` bằng op
+// (`modules/pipeline/s9/prioritization.ts`), và Won't-have KHÔNG tự đổi `project.release_scope`.
+// Controller + service cũ xoá cùng module `specification` ở T21.
 
 export default router
