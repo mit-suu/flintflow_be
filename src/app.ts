@@ -23,6 +23,7 @@ import baselineRoutes from "./modules/pipeline/s9/baseline.route.js"
 import renderRoutes from "./modules/render/render.route.js"
 import exportRoutes from "./modules/render/export.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
+import { buildHealthReport } from "./config/health.js"
 
 const app = express()
 
@@ -101,8 +102,13 @@ app.get("/", (req, res) => {
   })
 })
 
-app.get("/health", (_req, res) => {
-  return sendSuccess(res, 200, { status: "ok" })
+/**
+ * `mongo: "error"` ⇒ 503 để load balancer rút instance ra khỏi vòng phục vụ.
+ * `plantuml: "error"` chỉ là `degraded` ⇒ vẫn 200: diagram hỏng nhưng phần còn lại phục vụ được.
+ */
+app.get("/health", async (_req, res) => {
+  const report = await buildHealthReport()
+  return sendSuccess(res, report.status === "error" ? 503 : 200, report)
 })
 
 // Swagger Documentation

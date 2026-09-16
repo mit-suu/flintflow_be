@@ -5,17 +5,18 @@ dotenv.config()
 // Validate asset TRƯỚC khi dựng app: prompt asset thiếu hoặc frontmatter sai
 // phải là lỗi khởi động, không phải lỗi phát sinh giữa pipeline.
 // Dùng dynamic import cho app.js vì `import` tĩnh bị hoist lên trước mọi câu lệnh.
-const { validateStartupAssets } = await import("./config/startup-checks.js")
+const { validateStartupAssets, warnStartupConfig } = await import("./config/startup-checks.js")
 validateStartupAssets()
 
 const { default: app } = await import("./app.js")
-
-console.log("Loaded Cloudinary cloud name:", process.env.CLOUDINARY_CLOUD_NAME)
 
 const PORT = process.env.PORT || 5000
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
+  // Cảnh báo cấu hình chạy SAU khi đã nghe cổng: probe PlantUML đi qua mạng, không được làm chậm
+  // khởi động (container orchestrator tính thời gian tới lúc cổng mở).
+  void warnStartupConfig()
 })
 
 // Dọn reservation credit treo quá expires_at (task-04). Không dùng queue lib.

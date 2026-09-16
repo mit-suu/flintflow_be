@@ -24,7 +24,9 @@
     "seed:fixture": "tsx src/scripts/seed-fixture.ts",
     "migrate:sections": "tsx src/scripts/migrate-sections-to-spine.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
-    "measure:tokens": "tsx src/scripts/measure-tokens.ts"
+    "measure:tokens": "tsx src/scripts/measure-tokens.ts",
+    "run:pipeline": "tsx src/scripts/run-full-pipeline.ts",
+    "seed:e2e-user": "tsx src/scripts/seed-e2e-user.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.117",
