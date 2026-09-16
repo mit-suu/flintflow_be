@@ -100,7 +100,9 @@ const buildPrompt = async (
     providerConfig: {
       ...loadedTemplate.providerConfig,
       ...(options.provider ? { provider: options.provider } : {}),
-      ...(options.model ? { model: options.model } : {})
+      ...(options.model ? { model: options.model } : {}),
+      // Provider mock cần biết đang được hỏi gì để trả output đúng schema của ActionType đó (T24).
+      actionType: String(actionType)
     }
   }
 }

@@ -4,6 +4,7 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { GLM_REQUEST_OPTIONS } from "./glm.provider.js"
+import { modalBaseUrl } from "./modal.config.js"
 
 /**
  * GLM-5.3-Flash trên Modal cần `reasoning_effort: "low"` + `json_object` (xem `GLM_REQUEST_OPTIONS`), nếu không
@@ -47,9 +48,7 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
         )
       }
 
-      const baseURL =
-        env.MODAL_BASE_URL ||
-        "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
+      const baseURL = modalBaseUrl()
 
       const modalOpenAi = createOpenAI({
         baseURL,
@@ -104,9 +103,7 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
 
     default: {
       if (modelName?.toLowerCase().includes("glm")) {
-        const baseURL =
-          env.MODAL_BASE_URL ||
-          "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
+        const baseURL = modalBaseUrl()
         const apiKey = env.MODAL_API_KEY || process.env.MODAL_API_KEY || ""
         const modalOpenAi = createOpenAI({ baseURL, apiKey, fetch: glmFetch })
         return modalOpenAi.chat(modelName)
