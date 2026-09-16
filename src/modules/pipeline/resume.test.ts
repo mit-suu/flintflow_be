@@ -67,6 +67,7 @@ import type { Spine as SpineT } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { resumeProject } from "./resume.service.js"
+import { orderedSteps } from "./step-registry.js"
 import { acquireStepLock, releaseStepLock } from "./step-runner.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
@@ -148,6 +149,33 @@ describe("resume.service", () => {
     expect(result.reverted_step).toBeNull()
     const after = await repo.get(PROJECT)
     expect(after!.spine_version).toBe(before!.spine_version)
+  })
+
+  it("progress.current_step là step tới lượt: accept hai step đầu tuần tự ⇒ trả step thứ ba, không phải step vừa accept", async () => {
+    seedSpine()
+    const [first, second, third] = orderedSteps(MINIMAL).map((s) => s.id)
+    let version = (await repo.get(PROJECT))!.spine_version
+    for (const stepId of [first, second]) {
+      // Đúng dấu vết gate accept để lại: step accepted, con trỏ Spine vẫn trỏ vào step đó
+      const applied = await applyTransaction(PROJECT, {
+        base_version: version,
+        ops: [
+          { op: "add", path: "steps[]", value: { id: stepId, status: "accepted", first_seq: null, last_seq: null, accepted_at: "2026-09-16T00:00:00.000Z" } },
+          { op: "set", path: "progress.current_step", value: stepId }
+        ],
+        by: USER,
+        step_id: stepId,
+        reason: "seed accepted"
+      })
+      version = applied.spine_version
+    }
+
+    const result = await resumeProject(PROJECT, USER)
+
+    expect(result.reverted_step).toBeNull()
+    expect((await repo.get(PROJECT))!.progress.current_step).toBe(second) // con trỏ Spine không bị ghi lại
+    expect(result.progress.progress.current_step).toBe(third)
+    expect(result.progress.progress.done).toBe(2)
   })
 
   it("step accepted không bị đụng tới (chỉ revert step in_progress)", async () => {
