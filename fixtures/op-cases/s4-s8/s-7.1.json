@@ -1,0 +1,21 @@
+{
+  "step_id": "S-7.1",
+  "skill_id": "appendix-content",
+  "notes": "Ownership policy merged from the business validations of the detailed screens; the link back to section 3 is source_validation_ids (S-7.1 may not write functions[]).",
+  "ops": [
+    {
+      "op": "add",
+      "path": "business_rules[]",
+      "value": {
+        "id": "BR10",
+        "tier": "detail",
+        "statement": "An action on a project is allowed only for the author who owns it.",
+        "source_validation_ids": [
+          "FN101-V2",
+          "FN201-V2"
+        ]
+      },
+      "reason": "S-7.1 merged from two function validations"
+    }
+  ]
+}

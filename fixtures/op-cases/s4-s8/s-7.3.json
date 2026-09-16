@@ -1,0 +1,34 @@
+{
+  "step_id": "S-7.3",
+  "skill_id": "appendix-content",
+  "notes": "Messages merged by sentence, not by function.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "messages[]",
+      "value": {
+        "id": "M01",
+        "code": "PROJ-001",
+        "text": "Check the highlighted field and try again.",
+        "function_ids": [
+          "FN101",
+          "FN201"
+        ]
+      },
+      "reason": "S-7.3 from the invalid-input flows"
+    },
+    {
+      "op": "add",
+      "path": "messages[]",
+      "value": {
+        "id": "M02",
+        "code": "BILL-001",
+        "text": "Your credit balance is too low to run this step. Add credits to continue.",
+        "function_ids": [
+          "FN101"
+        ]
+      },
+      "reason": "S-7.3 from the dependency flows"
+    }
+  ]
+}

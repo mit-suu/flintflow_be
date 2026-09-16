@@ -1,0 +1,32 @@
+{
+  "step_id": "S-4.2",
+  "skill_id": "screens-and-flow",
+  "notes": "Flow wired from the login entry point; popups and tabs unchanged.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "screens[id=S92].flow_to",
+      "value": [
+        "S91",
+        "S93"
+      ],
+      "reason": "S-4.2 login leads to the workspace or sign-up"
+    },
+    {
+      "op": "set",
+      "path": "screens[id=S93].flow_to",
+      "value": [
+        "S91"
+      ],
+      "reason": "S-4.2 sign-up lands in the workspace"
+    },
+    {
+      "op": "set",
+      "path": "screens[id=S91].flow_to",
+      "value": [
+        "S94"
+      ],
+      "reason": "S-4.2 workspace opens notification history"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "step_id": "S-8.1",
+  "skill_id": "glossary",
+  "notes": "Abbreviations plus the domain terms a newcomer would guess wrong.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "glossary[]",
+      "value": {
+        "id": "G01",
+        "term": "SRS",
+        "definition": "Software Requirements Specification, the document this product produces."
+      },
+      "reason": "S-8.1 glossary sweep"
+    },
+    {
+      "op": "add",
+      "path": "glossary[]",
+      "value": {
+        "id": "G02",
+        "term": "Spine",
+        "definition": "The structured data behind the document; every section is rendered from it."
+      },
+      "reason": "S-8.1 glossary sweep"
+    },
+    {
+      "op": "add",
+      "path": "glossary[]",
+      "value": {
+        "id": "G03",
+        "term": "Baseline",
+        "definition": "Frozen, numbered snapshot of the document that later changes are measured against."
+      },
+      "reason": "S-8.1 glossary sweep"
+    },
+    {
+      "op": "add",
+      "path": "glossary[]",
+      "value": {
+        "id": "G04",
+        "term": "Gate",
+        "definition": "The checkpoint at the end of a step where the author accepts, revises or regenerates the draft."
+      },
+      "reason": "S-8.1 glossary sweep"
+    },
+    {
+      "op": "add",
+      "path": "glossary[]",
+      "value": {
+        "id": "G05",
+        "term": "Credit Reservation",
+        "term_native": "Tam giu credit",
+        "definition": "Credits held while an AI action runs, released or charged when it finishes."
+      },
+      "reason": "S-8.1 glossary sweep"
+    },
+    {
+      "op": "add",
+      "path": "glossary[]",
+      "value": {
+        "id": "G06",
+        "term": "ERD",
+        "definition": "Entity Relationship Diagram, the picture in the data section."
+      },
+      "reason": "S-8.1 glossary sweep"
+    }
+  ]
+}
