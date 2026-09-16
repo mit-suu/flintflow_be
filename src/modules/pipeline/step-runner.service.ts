@@ -31,7 +31,7 @@ import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
 import { renderDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
-import { getStep, nextStep as nextStepOf } from "./step-registry.js"
+import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { buildStepContext, getStepSpec, parseStepId, type StepContext } from "./context-projection.js"
 import { draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import * as meter from "./meter.service.js"
@@ -198,6 +198,91 @@ const pushTranscript = async (sessionId: string, stepId: string, role: "user" | 
 
 /** `calls_used`/`regenerate_used` của vòng hiện tại của step. */
 const usageCounts = meter.roundCounts
+
+// ─── vòng S-5 theo màn (T18) ───────────────────────────────────────
+
+/**
+ * Hai step "sổ sách" của vòng S-5 KHÔNG gọi model dù registry để `deterministic: false`:
+ * `S-5.1` chỉ dời con trỏ sang màn kế tiếp, `S-5.5` chỉ là cổng ký duyệt màn (gate đặt `signed_off`).
+ * Trả tiền cho model để chọn phần tử đầu hàng đợi là lãng phí; đổi `deterministic` trong
+ * `assets/step-registry.json` lại cần PR `contract-change` (đóng băng ở M2) — ghi ở `docs/spec-gaps.md`.
+ */
+export const LOOP_BOOKKEEPING_TEMPLATES: ReadonlySet<string> = new Set(["S-5.1", "S-5.5"])
+
+/** Phases §6.2: một lượt Draft chỉ ôm tối đa 6 function — nhiều hơn thì model bỏ sót hoặc cắt giữa chừng. */
+export const FUNCTION_BATCH_SIZE = 6
+
+/** Step S-5.2 / S-5.4 viết chi tiết từng function ⇒ chia lô; S-5.1/S-5.3/S-5.5 thì không. */
+const BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-5.2", "S-5.4"])
+
+const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
+
+/**
+ * `S-5.1`: đặt `progress.screen_cursor` sang màn của vòng này và chuyển màn từ `pending` sang
+ * `in_progress`. Vòng `@nonscreen` (function không thuộc màn nào) đặt cursor về `null`.
+ * Màn đã `signed_off`/`placeholder` giữ nguyên `detail_status` — quay lại vòng cũ không hạ cấp nó.
+ */
+export const loopCursorOps = (spine: Spine, stepId: string): Op[] => {
+  const step = getStep(stepId)
+  if (step.template_id !== "S-5.1" || step.loop === null) return []
+
+  if (step.loop === NONSCREEN_LOOP) {
+    return spine.progress.screen_cursor === null ? [] : [{ op: "set", path: "progress.screen_cursor", value: null }]
+  }
+
+  const screen = spine.screens.find((s) => s.id === step.loop)
+  if (!screen) return []
+  const ops: Op[] = []
+  if (spine.progress.screen_cursor !== screen.id) ops.push({ op: "set", path: "progress.screen_cursor", value: screen.id })
+  if (screen.detail_status === "pending") ops.push({ op: "set", path: `screens[id=${screen.id}].detail_status`, value: "in_progress" })
+  return ops
+}
+
+/** Màn `pending` đầu tiên của hàng đợi; hết ⇒ null (runner chuyển sang vòng `@nonscreen`). */
+export const nextPendingScreen = (spine: Spine): string | null => {
+  const byId = new Map(spine.screens.map((s) => [s.id, s]))
+  return spine.progress.screen_queue.find((id) => byId.get(id)?.detail_status === "pending") ?? null
+}
+
+/** Function thuộc vòng hiện tại: theo màn, hoặc `screen_id === null` với vòng `@nonscreen`. */
+const functionsOfLoop = (spine: Spine, loop: string): string[] =>
+  spine.functions
+    .filter((f) => (loop === NONSCREEN_LOOP ? f.screen_id === null : f.screen_id === loop))
+    .sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : 1))
+    .map((f) => f.id)
+
+/**
+ * Chia function của vòng thành các lô ≤ `FUNCTION_BATCH_SIZE`. Step không chia lô (hoặc ít function)
+ * trả một lô duy nhất `[]` — nghĩa là "dùng nguyên projection của step, không lọc".
+ */
+export const functionBatches = (spine: Spine, stepId: string): string[][] => {
+  const step = getStep(stepId)
+  if (!BATCHED_TEMPLATES.has(step.template_id) || step.loop === null) return [[]]
+  const ids = functionsOfLoop(spine, step.loop)
+  if (ids.length <= FUNCTION_BATCH_SIZE) return [[]]
+
+  const batches: string[][] = []
+  for (let i = 0; i < ids.length; i += FUNCTION_BATCH_SIZE) batches.push(ids.slice(i, i + FUNCTION_BATCH_SIZE))
+  return batches
+}
+
+/**
+ * Context của một lô: giữ nguyên mọi thứ, chỉ thu hẹp phần `functions*` của projection về đúng lô.
+ * Model chỉ thấy function trong lô nên chỉ phát op cho chúng — không cần thêm biến prompt mới
+ * (`draft-to-ops.ts` là vùng của T11).
+ */
+export const batchContext = (ctx: StepContext, functionIds: readonly string[]): StepContext => {
+  if (functionIds.length === 0) return ctx
+  const keep = new Set(functionIds)
+  const projection: Record<string, unknown> = {}
+  for (const [selector, value] of Object.entries(ctx.projection)) {
+    projection[selector] =
+      selector.startsWith("functions") && Array.isArray(value)
+        ? value.filter((el) => typeof el === "object" && el !== null && keep.has((el as { id?: string }).id ?? ""))
+        : value
+  }
+  return { ...ctx, projection }
+}
 
 // ─── Draft + ghi Spine (dùng chung cho /run và gate regenerate/revision) ──
 
@@ -416,7 +501,7 @@ export const runStep = async (
     await requirePipelineSession(projectId, sessionId)
     const stepDef = getStep(stepId) // 404 STEP_NOT_FOUND nếu id sai
     const spec = getStepSpec(stepId)
-    const needsDraft = spec.skill !== null && !stepDef.deterministic
+    const needsDraft = spec.skill !== null && !stepDef.deterministic && !isLoopBookkeeping(stepId)
 
     let { spine, spineVersion } = await refresh(projectId)
     const existingStep = spine.steps.find((s) => s.id === stepId)
@@ -457,6 +542,15 @@ export const runStep = async (
 
     if (initOps.length > 0) {
       const applied = await applyTransaction(projectId, { base_version: spineVersion, ops: initOps, by: userId, step_id: stepId, reason: "step-runner: init step" })
+      spineVersion = applied.spine_version
+      ;({ spine, spineVersion } = await refresh(projectId))
+    }
+
+    // T18 — S-5.1: dời con trỏ vòng lặp sang màn của vòng này. Ghi TRƯỚC `startSeq` như init ops: đây là
+    // sổ sách của vòng, không phải nội dung do step sinh ra (resume revert dải nội dung không được xoá nó).
+    const cursorOps = loopCursorOps(spine, stepId)
+    if (cursorOps.length > 0) {
+      const applied = await applyTransaction(projectId, { base_version: spineVersion, ops: cursorOps, by: userId, step_id: stepId, reason: "step-runner: con trỏ vòng S-5" })
       spineVersion = applied.spine_version
     }
     // startSeq CHỈ tính từ sau init ops: seq đánh dấu status=in_progress không phải nội dung của step, không
@@ -541,8 +635,16 @@ export const runStep = async (
         ;({ spine, spineVersion } = await refresh(projectId))
       }
 
-      const draftPhase = await runDraftPhase(projectId, stepId, ctx, spine, userId, "draft", emit, d, { answers: answersText })
-      spineVersion = draftPhase.spineVersion
+      // T18 — S-5.2/S-5.4: màn nhiều function chia thành nhiều lượt Draft ≤ 6 function. Mỗi lượt vẫn
+      // tự kiểm trần 8 lượt gọi/step trong `runDraftPhase`; màn quá lớn sẽ dừng ở CALL_LIMIT và user
+      // chốt phần đã có ở gate (không có ngoại lệ trần cho vòng lặp).
+      for (const batch of functionBatches(spine, stepId)) {
+        const current = await refresh(projectId)
+        spine = current.spine
+        spineVersion = current.spineVersion
+        const draftPhase = await runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, "draft", emit, d, { answers: answersText })
+        spineVersion = draftPhase.spineVersion
+      }
     }
 
     spineVersion = await runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d)
