@@ -17,7 +17,7 @@ import type { Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
-import { NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
+import { MODEL_OWNED_RULES, NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
 import { WAIVE_REASON_MIN_LENGTH } from "./spine.schema.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
@@ -120,6 +120,8 @@ export const planFlagOps = (
     if (seen.has(key)) continue
     // Check thường không chạy luật S-9 nên không có ứng viên của chúng — không có nghĩa lỗi đã hết
     if (!options.atBaseline && AT_BASELINE_RULES.has(flag.rule_id)) continue
+    // Cờ do gate/model đặt (accepted_as_is, goal_not_covered) không bao giờ là ứng viên của check tất định
+    if (MODEL_OWNED_RULES.has(flag.rule_id)) continue
     plan.ops.push({ op: "set", path: flagPath(flag.id, "resolved_at"), value: at, reason: `Đóng cờ ${flag.rule_id}: điều kiện không còn` })
     plan.resolved.push(flag.id)
     touched.add(flag.id)
