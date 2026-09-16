@@ -1,0 +1,46 @@
+{
+  "step_id": "B-0.1",
+  "skill_id": "product-brief",
+  "notes": "Brain dump: ba chủ đề tách bạch, ghi addendum ngay.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD01",
+        "topic": "Problem",
+        "content": "Đội nhỏ không thuê được BA, tài liệu viết tay lệch nhau giữa các phần.",
+        "content_en": "Small teams cannot hire a requirements engineer, and hand-written documents drift between sections.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    },
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD02",
+        "topic": "Primary user",
+        "content": "Founder tự viết tài liệu cho đội phát triển thuê ngoài.",
+        "content_en": "A founder writing the specification for an outsourced development team.",
+        "target_section": "fixed:2.1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    },
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD03",
+        "topic": "Why now",
+        "content": "Khách hàng hỏi tài liệu ngay trong buổi chào giá đầu tiên.",
+        "content_en": "Clients now ask for a specification during the first sales conversation.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    }
+  ]
+}
