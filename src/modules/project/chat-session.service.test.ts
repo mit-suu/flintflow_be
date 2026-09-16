@@ -73,6 +73,15 @@ vi.mock("../../shared/ai/prompt-registry.service.js", () => ({
   getPromptTemplate: vi.fn(async () => ({ actionType: "chat", template: "x", providerConfig: { provider: "mock", model: "mock", maxTokens: 100 } }))
 }))
 
+/** T17: change flow gọi từ session không pipeline — giữ `isChangeInstruction` thật, chỉ giả `preview`. */
+const changeMocks = vi.hoisted(() => ({ preview: vi.fn() }))
+vi.mock("../spine/change.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../spine/change.service.js")>()
+  return { ...actual, preview: changeMocks.preview }
+})
+const spineRepoMocks = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock("../spine/spine.repository.js", () => spineRepoMocks)
+
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { createChatSession, deleteChatSession, sendMessageAndGetResponse, assertChatSessionOwnership } from "./chat-session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -84,6 +93,9 @@ beforeEach(() => {
   db.reset()
   aiMocks.executeAiAction.mockReset()
   aiMocks.executeAiActionStream.mockReset()
+  changeMocks.preview.mockReset()
+  spineRepoMocks.get.mockReset()
+  spineRepoMocks.get.mockResolvedValue({ projectId: PROJECT, spine_version: 7 })
 })
 
 describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
@@ -172,5 +184,86 @@ describe("assertChatSessionOwnership (F5 — chặn IDOR: chatId phải thuộc 
     const session = await createChatSession(PROJECT)
     const found = await assertChatSessionOwnership(PROJECT, String(session._id))
     expect(String(found._id)).toBe(String(session._id))
+  })
+})
+
+describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow", () => {
+  const USER = "650000000000000000000010"
+
+  it("lệnh sửa: gọi change.service.preview, ghi thẻ preview vào transcript, KHÔNG gọi CHAT", async () => {
+    const pipeline = await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    expect(plain.is_pipeline).toBe(false)
+    void pipeline
+
+    changeMocks.preview.mockResolvedValue({
+      ok: true,
+      txn: "t",
+      base_version: 7,
+      ops: [],
+      changes: [{ op: "set", path: "actors[id=A01].name", before: "Founder", value: "Product Owner", reason: null }],
+      violations: [],
+      referrers: [],
+      branch: "dependent",
+      impact: { fields: ["actors[id=A01].name"], sections: [{ id: "fixed:2.1", relation: "owner" }], diagrams: ["usecase"], referrers: [] },
+      preview_id: "pv-1"
+    })
+
+    const session = await sendMessageAndGetResponse(PROJECT, String(plain._id), "Đổi tên actor A01 thành Product Owner", "overview", USER)
+
+    expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, {
+      instruction: "Đổi tên actor A01 thành Product Owner",
+      base_version: 7
+    })
+    expect(aiMocks.executeAiAction).not.toHaveBeenCalled()
+
+    const last = session.messages[session.messages.length - 1] as { role: string; content: string }
+    expect(last.role).toBe("ai")
+    const payload = JSON.parse(last.content) as { kind: string; preview_id: string; branch: string }
+    expect(payload).toMatchObject({ kind: "change_preview", preview_id: "pv-1", branch: "dependent" })
+  })
+
+  it("câu hỏi thường vẫn đi CHAT, không đụng change flow", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 })
+
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Tài liệu này đang thiếu gì?", "overview", USER)
+
+    expect(changeMocks.preview).not.toHaveBeenCalled()
+    expect(aiMocks.executeAiAction).toHaveBeenCalledWith(ActionType.CHAT, expect.anything(), PROJECT, USER)
+  })
+
+  it("session pipeline không bị chặn: lệnh sửa vẫn đi CHAT (pipeline sửa qua gate/step runner)", async () => {
+    const pipeline = await createChatSession(PROJECT)
+    aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 })
+
+    await sendMessageAndGetResponse(PROJECT, String(pipeline._id), "Đổi tên actor A01", "overview", USER)
+
+    expect(changeMocks.preview).not.toHaveBeenCalled()
+    expect(aiMocks.executeAiAction).toHaveBeenCalled()
+  })
+
+  it("project chưa có Spine ⇒ không chuyển hướng, vẫn CHAT", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    spineRepoMocks.get.mockResolvedValue(null)
+    aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 })
+
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Thêm actor Guest", "overview", USER)
+
+    expect(changeMocks.preview).not.toHaveBeenCalled()
+    expect(aiMocks.executeAiAction).toHaveBeenCalled()
+  })
+
+  it("preview lỗi ⇒ ghi thẻ change_error, không làm hỏng phiên chat", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    changeMocks.preview.mockRejectedValue(new ApiError(402, "Không đủ credit", "INSUFFICIENT_CREDIT"))
+
+    const session = await sendMessageAndGetResponse(PROJECT, String(plain._id), "Xoá actor A08", "overview", USER)
+
+    const last = session.messages[session.messages.length - 1] as { content: string }
+    expect(JSON.parse(last.content)).toMatchObject({ kind: "change_error", reply: "Không đủ credit" })
   })
 })
