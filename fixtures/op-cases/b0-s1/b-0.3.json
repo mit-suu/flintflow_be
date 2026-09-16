@@ -1,0 +1,27 @@
+{
+  "step_id": "B-0.3",
+  "skill_id": "product-brief",
+  "notes": "Stakes: production, kèm giả định vì user chưa nói rõ mức tuân thủ.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.stakes",
+      "value": "production",
+      "reason": "B-0.3"
+    },
+    {
+      "op": "add",
+      "path": "assumptions[]",
+      "value": {
+        "id": "AS01",
+        "path": "project.stakes",
+        "statement": "Production stakes, not a regulated domain.",
+        "rationale": "The user said real customers but mentioned no compliance regime.",
+        "origin_step_id": "B-0.3",
+        "status": "unconfirmed",
+        "confirmed_at": null
+      },
+      "reason": "B-0.3: điền mặc định, chờ xác nhận"
+    }
+  ]
+}

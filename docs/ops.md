@@ -1,0 +1,258 @@
+# Vận hành FlintFlow
+
+Chạy hệ thống trên máy, chạy bằng docker compose, biến môi trường, seed dữ liệu, sao lưu, xoay secret.
+Kiến trúc code ở `docs/architecture.md` và `flintflow_fe/docs/fe-architecture.md`.
+
+Hệ thống có **bốn** tiến trình: Mongo · PlantUML · backend (:5000) · frontend (:3000). Ba cái đầu là
+phụ thuộc bắt buộc của backend — thiếu PlantUML thì diagram trả `render_status: "error"` chứ không làm
+sập app, thiếu Mongo thì không làm gì được.
+
+---
+
+## 1. Chạy trên máy (dev)
+
+```bash
+# 1. hạ tầng
+cd flintflow_be
+cp .env.example .env            # điền secret thật
+docker compose up -d mongo mongo-init plantuml
+
+# 2. backend
+npm ci
+npm run seed:e2e-user           # tài khoản đăng nhập được ngay (đã verified + có credit)
+npm run dev                     # :5000
+
+# 3. frontend
+cd ../flintflow_fe
+cp .env.example .env.local
+npm ci
+npm run dev                     # :3000
+```
+
+Kiểm nhanh: `curl http://localhost:5000/health` phải trả `mongo: "ok"`, `plantuml: "ok"`.
+
+Mongo của compose chạy **replica set `rs0`**, nên từ máy phải nối bằng `directConnection=true`:
+
+```
+MONGO_URI=mongodb://localhost:27017/flintflow?directConnection=true
+```
+
+Không có `directConnection`, driver sẽ đọc cấu hình replica set và cố nối tới `mongo:27017` — tên
+service chỉ phân giải được bên trong mạng docker.
+
+---
+
+## 2. Chạy tất cả bằng docker compose
+
+```bash
+cd flintflow_be
+cp .env.example .env
+docker compose up -d            # mongo + mongo-init + plantuml + backend + frontend
+docker compose ps
+curl http://localhost:5000/health
+open http://localhost:3000
+```
+
+| Service | Ảnh | Cổng | Ghi chú |
+| --- | --- | --- | --- |
+| `mongo` | `mongo:7` | 27017 | `--replSet rs0`; dữ liệu ở volume `mongo-data` |
+| `mongo-init` | `mongo:7` | — | chạy `scripts/mongo-init-rs.sh` rồi thoát; chạy lại được |
+| `plantuml` | `plantuml/plantuml-server:jetty-v1.2025.4` | 8080 | tag **được ghim** |
+| `backend` | build từ `./Dockerfile` | 5000 | đợi `mongo-init` xong mới khởi động |
+| `frontend` | build từ `../flintflow_fe/Dockerfile` | 3000 | đợi `backend` healthy |
+
+Biến điều chỉnh: `BACKEND_PORT` · `FRONTEND_PORT` · `MONGO_PORT` · `PLANTUML_PORT` · `PLANTUML_TAG` ·
+`MONGO_DB` · `PUBLIC_API_URL` · `GOOGLE_CLIENT_ID` · `AI_PROVIDER_OVERRIDE` · `FRONTEND_CONTEXT`.
+Đặt cổng khác là cách chạy compose song song với stack dev đang mở trên máy.
+
+`/health` trả:
+
+```json
+{"status":"ok","mongo":"ok","plantuml":"ok","version":"1.0.0","assets":{"prompts":2,"skills":32,"steps":56}}
+```
+
+`mongo: "error"` ⇒ `status: "error"` + HTTP 503 (load balancer rút instance ra). `plantuml: "error"` chỉ
+là `degraded` + HTTP 200 — diagram hỏng nhưng phần còn lại phục vụ được, chặn deploy vì nó là phản ứng
+thái quá.
+
+**Vì sao replica set dù chỉ một node.** Mongo chỉ cho phép transaction đa document trên replica set.
+`src/shared/db/transaction.ts` có đường dự phòng khi không có transaction, nhưng đường đó ghi theo thứ
+tự khác và không nguyên tử. Dev nên chạy đúng cấu hình production; nếu replica set làm máy chậm, bỏ
+`--replSet` khỏi `command` của service `mongo` — code vẫn chạy, chỉ là kém an toàn hơn khi ghi.
+
+**Vì sao tag PlantUML được ghim.** Tag nổi `jetty` từng đổi hành vi báo lỗi giữa hai lượt
+`docker compose pull`, làm `src/shared/diagram/plantuml.test.ts` đỏ mà không có commit nào đổi code.
+
+**`NEXT_PUBLIC_API_URL` là địa chỉ của trình duyệt, không phải của docker.** Next nhúng mọi biến
+`NEXT_PUBLIC_*` vào bundle lúc **build**, và bundle đó chạy trong trình duyệt của người dùng —
+`http://backend:5000` chỉ phân giải được bên trong mạng compose. Đổi giá trị này phải **build lại**
+image FE, không phải restart container.
+
+Lệnh hay dùng:
+
+```bash
+docker compose logs -f backend
+docker compose up -d --build backend     # build lại sau khi sửa code
+docker compose down                      # giữ dữ liệu
+docker compose down -v                   # XOÁ luôn volume Mongo
+```
+
+---
+
+## 3. Biến môi trường
+
+`src/config/env.ts` validate bằng zod và **thoát ngay** nếu sai — thiếu secret không được phép chạy
+tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới đây chỉ là những chỗ dễ sai.
+
+| Biến | Bắt buộc | Ghi chú |
+| --- | --- | --- |
+| `MONGO_URI` | có | production **không được** chứa `localhost` |
+| `JWT_ACCESS_SECRET` `JWT_REFRESH_SECRET` | có | production: ≥ 32 ký tự, không phải placeholder. `openssl rand -base64 48` |
+| `MODAL_BASE_URL` | khi dùng skill `provider: glm` | **không còn default trong code**; để trống ⇒ `AI_PROVIDER_NOT_CONFIGURED` |
+| `APP_PUBLIC_URL` | khi bật billing | domain public để payment service gọi callback; production không được là localhost |
+| `PLANTUML_BASE_URL` | không | thiếu ⇒ diagram `render_status: "error"`, app vẫn chạy |
+| `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
+| `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
+| `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
+| `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (FE) | không | thiếu ⇒ **không có nút đăng nhập Google**, phần còn lại chạy bình thường (`lib/google-auth.ts`). Nhúng lúc build ⇒ đổi phải build lại image FE |
+
+Vài quyết định hay bị hỏi lại:
+
+- **Không có `PAYMENT_WEBHOOK_SECRET`.** `handlePaymentCallback` kiểm `client_id` rồi **đọc lại đơn
+  hàng từ payment service** (`getPaymentOrder`) thay vì tin payload gửi tới. Chữ ký webhook sẽ là một
+  secret nữa phải xoay mà không thêm được gì so với việc không tin payload.
+- **Không có `DIAGRAM_STORAGE`.** Ảnh diagram đã render luôn nằm trong GridFS (bucket `diagram-files`),
+  không có lựa chọn thứ hai để cấu hình.
+- **Không có biến chọn provider cho từng skill.** Provider nằm ở frontmatter `SKILL.md` — nó là một
+  phần của prompt, không phải một phần của môi trường. `AI_PROVIDER_OVERRIDE` là cửa thoát hiểm cho CI,
+  không phải cách cấu hình thường ngày.
+
+### Secret không bao giờ được commit
+
+`.env`, `.env.local` nằm trong `.gitignore` của cả hai repo và **chưa từng** có trong lịch sử git
+(kiểm bằng `git log --all -- .env.local` và `git log --all -S "<client id>"`). Chỉ `.env.example` được
+theo dõi, và nó chỉ chứa placeholder.
+
+```bash
+git ls-files | grep -E '^\.env' | grep -v example    # phải rỗng ở cả hai repo
+grep -rn "modal.direct" src/                          # phải rỗng
+```
+
+---
+
+## 4. Seed dữ liệu
+
+```bash
+npm run seed:e2e-user -- --email fixture@flintflow.io --password fixture-password-123 --credits 1000
+npm run seed:e2e-user -- --email admin@flintflow.io --role admin --credits 5000
+npm run seed:fixture -- --user fixture@flintflow.io --fixture full   # Spine 19 màn
+npm run migrate:sections -- --dry-run                                # project mô hình cũ → Spine
+```
+
+Trong docker compose, image production không có `tsx` nhưng có bản đã biên dịch:
+
+```bash
+docker compose exec backend node dist/scripts/seed-e2e-user.js --email fixture@flintflow.io --credits 1000
+```
+
+`seed:e2e-user` đặt `emailVerified: true` và nạp ví. **Không** dùng `POST /auth/register` cho môi
+trường tự động: `login` từ chối tài khoản chưa xác thực email (`403 EMAIL_NOT_VERIFIED`) và trong CI
+không có hộp thư nào để bấm link.
+
+Tài khoản admin đầu tiên cũng được tạo tự động từ `ADMIN_EMAIL` / `ADMIN_PASSWORD` lúc khởi động.
+
+---
+
+### Chạy step pipeline mà không gọi model
+
+`AI_PROVIDER_OVERRIDE=mock` ghi đè provider của **mọi** skill; `mock.provider.ts` trả output hợp schema
+theo `ActionType` (lô op **rỗng**). Đủ để một step đi trọn `Intake → Elicit → Draft → Render → Review →
+gate_ready` trong ~0,3 s mà không ra mạng và không tốn credit thật:
+
+```bash
+AI_PROVIDER_OVERRIDE=mock docker compose up -d --wait backend
+npm run run:pipeline -- --api http://localhost:5000/api/v1 --until B-0.2 --name "Smoke mock"
+```
+
+Nó chứng minh **đường đi**, không chứng minh nội dung — mock không đọc được Spine nên không sinh op nào.
+Kiểm nội dung thì dùng fixture op-case (`fixtures/op-cases/`) hoặc provider thật (`E2E_AI=1`).
+
+## 5. Smoke test sau khi deploy
+
+```bash
+curl -sf https://<api>/health | jq            # mongo ok, plantuml ok, đủ assets
+
+# đi vài step đầu của pipeline bằng provider thật, không đụng dữ liệu người dùng
+npm run run:pipeline -- --api https://<api>/api/v1 --until S-1.4 --name "Smoke $(date -I)"
+```
+
+`src/scripts/run-full-pipeline.ts` tự đăng nhập, tạo project, chạy `run` → trả lời Elicit → `gate accept`
+cho từng step, rồi ghi báo cáo markdown. Bỏ `--until` thì nó đi trọn `B-0.1 → S-9.5 → assemble → Word →
+baseline` — đó là lượt chạy của mốc **M4** (số liệu ở `docs/measurements.md`). Một lượt trọn tốn vài
+trăm credit và 30–60 phút, nên smoke test thường ngày hãy dùng `--until`.
+
+---
+
+## 6. Sao lưu và phục hồi Mongo
+
+```bash
+# sao lưu (từ máy, Mongo của compose)
+docker compose exec -T mongo mongodump --archive --gzip --db flintflow > backup-$(date +%F).gz
+
+# phục hồi
+docker compose exec -T mongo mongorestore --archive --gzip --drop < backup-2026-09-16.gz
+```
+
+Ảnh diagram nằm trong GridFS **cùng database**, nên `mongodump` đã bao gồm chúng; không có thư mục file
+nào phải sao lưu riêng. Tài liệu người dùng upload nằm ở Cloudinary — sao lưu theo chính sách của
+Cloudinary, không nằm trong `mongodump`.
+
+Trước khi phục hồi lên môi trường đang chạy: dừng backend (`docker compose stop backend`) để không có
+lượt ghi nào xen vào giữa, phục hồi xong mới bật lại.
+
+---
+
+## 7. Xoay secret
+
+Thứ tự đúng để không làm rơi request nào:
+
+1. **JWT.** Đổi `JWT_ACCESS_SECRET` làm mọi access token đang lưu hành hết hiệu lực ngay — người dùng
+   phải đăng nhập lại. Làm vào giờ thấp điểm; refresh token cũng phải đổi (`JWT_REFRESH_SECRET`) nếu
+   nghi ngờ lộ, và khi đó xoá luôn collection refresh token.
+2. **Khoá provider AI** (`MODAL_*`, `OPENAI_API_KEY`…): tạo khoá mới ở nhà cung cấp → cập nhật biến →
+   restart backend → thu hồi khoá cũ. Không thu hồi trước khi restart: mọi step đang chạy sẽ hỏng giữa
+   chừng và credit đã reserve phải đợi TTL mới hoàn.
+3. **`PAYMENT_API_KEY`**: phối hợp với payment service; `client_id` đổi thì callback cũ bị từ chối
+   (`INVALID_CLIENT_ID`), nên đổi cả hai phía trong cùng một cửa sổ.
+4. **Google client id**: giá trị public theo thiết kế, nhưng vẫn phải đổi ở cả `GOOGLE_CLIENT_ID` (BE)
+   và `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (FE, cần **build lại** image FE).
+
+Sau mỗi lần xoay: `curl /health` và một lượt đăng nhập thật.
+
+---
+
+## 8. CI/CD
+
+| Workflow | Repo | Chạy khi | Làm gì |
+| --- | --- | --- | --- |
+| `backend-ci` | be | push/PR main·master·develop | typecheck (cả test) · unit + integration + coverage · build |
+| `docker` | be | push/PR main·master·develop | build image BE và FE · `docker compose up` thật rồi kiểm `/health` và transaction |
+| `deploy` | be | push `main` | build → ACR → Azure Web App |
+| `frontend-ci` | fe | push/PR main·master·develop | typecheck · lint · unit · build · **e2e Playwright** trên BE thật |
+| `docker` | fe | push/PR main·master·develop | build image FE, chạy thử container |
+
+Ba lỗi đã sửa vì sẽ hỏng ngay lượt chạy đầu (T24):
+
+1. **`npm ci` hỏng trên Linux ở cả hai repo.** Lockfile sinh trên Windows thiếu optional dependency chỉ
+   có ở nền tảng khác (`@emnapi/runtime`, `@emnapi/core` ở FE; `yaml` ở BE) ⇒
+   `EUSAGE ... lock file is not in sync`. Nghĩa là **mọi** workflow và mọi image Docker đều chết ở bước
+   cài. Sinh lại bằng `npm install --package-lock-only` trong container Linux (chỉ thêm entry thiếu,
+   không đổi version). Lần sau chạm dependency nên làm y vậy.
+2. job `e2e` của `frontend-ci` đặt `MONGODB_URI` và `JWT_SECRET` — **tên biến không tồn tại** trong
+   `env.ts` (phải là `MONGO_URI`, `JWT_ACCESS_SECRET`), nên BE nối vào nhầm database;
+3. job đó seed tài khoản bằng `POST /auth/register`, tạo ra tài khoản `emailVerified: false` mà kịch bản
+   e2e **không đăng nhập được**. Giờ dùng `npm run seed:e2e-user`.
+
+Mongo trong job `e2e` là **standalone** — `services:` của GitHub Actions không đổi được `command` của
+container nên không bật được replica set. Đường có transaction được kiểm ở job `compose-health` của
+workflow `docker`.

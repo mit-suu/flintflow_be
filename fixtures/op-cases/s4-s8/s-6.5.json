@@ -1,0 +1,31 @@
+{
+  "step_id": "S-6.5",
+  "skill_id": "nfr-quality-attributes",
+  "notes": "Only what the domain forces.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N14",
+        "category": "other",
+        "statement": "Personal data is deleted within thirty days of a deletion request.",
+        "kind": "descriptive",
+        "priority": null
+      },
+      "reason": "S-6 other"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N15",
+        "category": "other",
+        "statement": "Every destructive administrative action is written to an audit log kept for twelve months.",
+        "kind": "descriptive",
+        "priority": null
+      },
+      "reason": "S-6 other"
+    }
+  ]
+}

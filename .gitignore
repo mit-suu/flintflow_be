@@ -16,3 +16,8 @@ node_modules/
 /build/
 coverage/
 .next/
+
+# Kết quả lượt chạy provider thật (T22/T24) — số liệu tổng hợp nằm ở docs/measurements.md.
+# Giữ lại báo cáo mốc M4 làm bằng chứng, bỏ .docx và các lượt chạy lẻ.
+/test/e2e-ai/results/*
+!/test/e2e-ai/results/m4-full-run.md

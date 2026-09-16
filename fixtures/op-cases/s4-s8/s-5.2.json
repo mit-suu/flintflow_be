@@ -1,0 +1,19 @@
+{
+  "step_id": "S-5.2",
+  "skill_id": "function-detail",
+  "notes": "Template applied per function of the batch: trigger + description only.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "functions[id=${fn}].trigger",
+      "value": "The author triggers this action from the current screen.",
+      "reason": "S-5.2 trigger"
+    },
+    {
+      "op": "set",
+      "path": "functions[id=${fn}].description",
+      "value": "Carries out the action and leaves the workspace in its next consistent state.",
+      "reason": "S-5.2 description"
+    }
+  ]
+}

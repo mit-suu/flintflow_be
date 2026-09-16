@@ -1,0 +1,46 @@
+{
+  "step_id": "S-5.4",
+  "skill_id": "function-detail",
+  "notes": "Template applied per function of the batch: normal, abnormal and one add per validation.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "functions[id=${fn}].normal",
+      "value": [
+        "The author starts the action from the current screen.",
+        "The system validates the request and performs the work.",
+        "The system shows the result and the next available actions."
+      ],
+      "reason": "S-5.4 success path"
+    },
+    {
+      "op": "set",
+      "path": "functions[id=${fn}].abnormal",
+      "value": [
+        "A validation fails: the system highlights the field and keeps every entered value except secrets.",
+        "The model provider times out: the system releases the reserved credits, keeps the previous content and offers a retry."
+      ],
+      "reason": "S-5.4 abnormal flows"
+    },
+    {
+      "op": "add",
+      "path": "functions[id=${fn}].validations[]",
+      "value": {
+        "id": "${fn}-V1",
+        "kind": "required",
+        "statement": "The target of the action must be selected before it can run."
+      },
+      "reason": "S-5.4 validation"
+    },
+    {
+      "op": "add",
+      "path": "functions[id=${fn}].validations[]",
+      "value": {
+        "id": "${fn}-V2",
+        "kind": "business",
+        "statement": "The action is allowed only for the author who owns the project."
+      },
+      "reason": "S-5.4 validation"
+    }
+  ]
+}

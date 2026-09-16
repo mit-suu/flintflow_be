@@ -205,7 +205,7 @@ router.delete(
  *         name: hard
  *         schema:
  *           type: boolean
- *         description: Nếu truyền true, dự án và tất cả cuộc trò chuyện, tài liệu đính kèm sẽ bị xoá vĩnh viễn khỏi DB.
+ *         description: Nếu truyền true, xoá vĩnh viễn dự án cùng Spine, lịch sử thay đổi, baseline, usage, bản render, file sơ đồ, cuộc trò chuyện và tài liệu đính kèm (kể cả file trên Cloudinary). Mặc định chỉ lưu trữ (archived).
  *     responses:
  *       200:
  *         description: Xóa hoặc lưu trữ dự án thành công
@@ -213,6 +213,11 @@ router.delete(
  *         description: Chưa xác thực
  *       404:
  *         description: Không tìm thấy dự án
+ */
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/name:
  *   patch:
  *     summary: Đổi tên một dự án
  *     tags: [Projects]
@@ -382,8 +387,8 @@ router.delete("/:projectId/chats/:chatId", authMiddleware, chatSessionController
  *                 example: Tôi muốn làm SaaS bán khóa học
  *               step:
  *                 type: string
- *                 enum: [vision_problem, target_users, value_proposition, mvp_scope]
- *                 example: vision_problem
+ *                 description: Step id theo step registry (vd B-1.1, S-3.2) — chỉ là nhãn lưu vào transcript
+ *                 example: B-1.1
  *     responses:
  *       200:
  *         description: Trả về cuộc trò chuyện được cập nhật tin nhắn và phản hồi từ AI
@@ -393,5 +398,6 @@ router.delete("/:projectId/chats/:chatId", authMiddleware, chatSessionController
  *         description: Chưa xác thực
  */
 router.post("/:projectId/chats/:chatId/messages", authMiddleware, chatSessionController.sendMessage)
+router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, chatSessionController.sendMessageStream)
 
 export default router

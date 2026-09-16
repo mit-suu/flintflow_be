@@ -1,0 +1,32 @@
+{
+  "name": "add screen during S-5 must append queue",
+  "step_id": "S-5.1",
+  "spine_before_ref": "spine-fixture-19-screens.json",
+  "spine_before_overrides": {
+    "progress.current_phase": "S-5",
+    "progress.current_step": "S-5.1",
+    "progress.screen_cursor": "S07",
+    "progress.screen_queue": ["S09", "S10"]
+  },
+  "prompt_context": "Mid-way through the S-5 screen loop the user realizes a promo-code management screen is missing. Invariant 8: an op adding a screen while current_phase is S-5 must append it to progress.screen_queue with detail_status pending, in the same transaction.",
+  "expected_ops": [
+    {
+      "op": "add",
+      "path": "screens[]",
+      "value": {
+        "id": "S20",
+        "feature_id": "F5",
+        "name": "Promo Code Management",
+        "description": "Admin screen to create and disable promotional codes.",
+        "flow_to": [],
+        "is_popup": false,
+        "tabs": [],
+        "primary_function_id": null,
+        "queue_order": 20,
+        "detail_status": "pending"
+      },
+      "reason": "User added a missing screen during the S-5 loop."
+    },
+    { "op": "add", "path": "progress.screen_queue[]", "value": "S20", "reason": "Invariant 8: screens added during S-5 append to the queue." }
+  ]
+}

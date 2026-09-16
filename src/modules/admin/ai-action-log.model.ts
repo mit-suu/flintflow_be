@@ -75,5 +75,7 @@ const aiActionLogSchema = new Schema<IAiActionLog>(
 
 aiActionLogSchema.index({ projectId: 1, createdAt: -1 })
 aiActionLogSchema.index({ userId: 1, createdAt: -1 })
+// Admin metrics / ai-cost lọc theo khoảng thời gian toàn hệ thống (T06)
+aiActionLogSchema.index({ createdAt: 1 })
 
 export const AiActionLog = mongoose.model<IAiActionLog>("AiActionLog", aiActionLogSchema)

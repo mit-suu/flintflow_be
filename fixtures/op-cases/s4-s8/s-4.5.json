@@ -1,0 +1,67 @@
+{
+  "step_id": "S-4.5",
+  "skill_id": "entities-erd",
+  "notes": "Five entities; relation ids sit on the parent side.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "entities[]",
+      "value": {
+        "id": "E01",
+        "name": "Project",
+        "description": "A requirements effort owned by one author, holding the whole generated document.",
+        "relations": [
+          "E02",
+          "E03"
+        ]
+      },
+      "reason": "S-4.5 domain entity"
+    },
+    {
+      "op": "add",
+      "path": "entities[]",
+      "value": {
+        "id": "E02",
+        "name": "Document Version",
+        "description": "An assembled snapshot of a project SRS at a point in time.",
+        "relations": []
+      },
+      "reason": "S-4.5 domain entity"
+    },
+    {
+      "op": "add",
+      "path": "entities[]",
+      "value": {
+        "id": "E03",
+        "name": "Chat Session",
+        "description": "One conversation thread attached to a project.",
+        "relations": []
+      },
+      "reason": "S-4.5 domain entity"
+    },
+    {
+      "op": "add",
+      "path": "entities[]",
+      "value": {
+        "id": "E04",
+        "name": "Credit Wallet",
+        "description": "The balance of AI credits an account can spend.",
+        "relations": [
+          "E05"
+        ]
+      },
+      "reason": "S-4.5 domain entity"
+    },
+    {
+      "op": "add",
+      "path": "entities[]",
+      "value": {
+        "id": "E05",
+        "name": "Credit Reservation",
+        "description": "Credits held while an AI action runs, released or charged when it finishes.",
+        "relations": []
+      },
+      "reason": "S-4.5 domain entity"
+    }
+  ]
+}

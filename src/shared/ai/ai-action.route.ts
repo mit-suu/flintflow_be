@@ -14,6 +14,8 @@ const router = Router()
  *   post:
  *     summary: Ước tính chi phí Credit cho một AI Action
  *     tags: [AI Actions]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -27,8 +29,10 @@ const router = Router()
  *     responses:
  *       200:
  *         description: Trả về số credit yêu cầu
+ *       401:
+ *         description: Chưa xác thực
  */
-router.post("/estimate-cost", estimateCostHandler)
+router.post("/estimate-cost", authMiddleware, estimateCostHandler)
 
 /**
  * @swagger

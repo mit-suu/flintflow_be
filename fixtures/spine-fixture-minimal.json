@@ -1,0 +1,145 @@
+{
+  "project": {
+    "name": "FlintFlow",
+    "vision": "Enable a solo founder or business analyst to turn a raw product idea into a complete, internally consistent SRS document through a guided AI conversation, without hiring a requirements engineer.",
+    "goals": [
+      "Produce a baseline-quality SRS following the FPT template within one working day",
+      "Keep every generated statement traceable to a structured field in the SRS Spine",
+      "Block no export: a watermarked working draft is always available after assembly",
+      "Keep AI spend predictable through per-step credit reservation and metering"
+    ],
+    "type": "web_application",
+    "domain": "Requirements engineering / AI-assisted documentation",
+    "complexity": "high",
+    "form_factor": "responsive_web",
+    "stakes": "production",
+    "working_mode": "coaching",
+    "release_scope": {
+      "in": [
+        "Guided Brief-to-SRS pipeline (B-0 through S-9) with per-step gates",
+        "SRS Spine with op-based writes, invariants and deterministic checks",
+        "Five server-rendered PlantUML diagram kinds",
+        "Word export with DRAFT watermark and baseline clean export",
+        "In-app notifications, credit ledger with mock payment gateway",
+        "Read-only admin views for users, metrics and AI cost"
+      ],
+      "out": [
+        "Import of existing SRS documents (.docx) and change requests on them",
+        "PDF export and handoff summary",
+        "Project sharing, cloning and role-based collaboration",
+        "Email notification channel",
+        "Admin write operations (user editing, prompt override)"
+      ]
+    }
+  },
+  "progress": {
+    "current_phase": "S-1",
+    "current_step": "S-1.1",
+    "screen_cursor": null,
+    "screen_queue": [],
+    "elicit_turns_this_phase": 0
+  },
+  "steps": [],
+  "features": [],
+  "actors": [],
+  "roles": [],
+  "use_cases": [],
+  "screens": [],
+  "permissions": [],
+  "entities": [],
+  "functions": [],
+  "nfrs": [],
+  "business_rules": [],
+  "common_requirements": [],
+  "messages": [],
+  "other_requirements": [],
+  "glossary": [],
+  "addendum": [
+    {
+      "id": "AD01",
+      "topic": "Availability target",
+      "content": "Khách hàng doanh nghiệp yêu cầu cam kết uptime tối thiểu 99.5% theo tháng.",
+      "content_en": "Enterprise customers require a minimum monthly uptime commitment of 99.5%.",
+      "target_section": "fixed:4.2.2",
+      "captured_at": "2026-09-01T09:01:00.000Z"
+    },
+    {
+      "id": "AD02",
+      "topic": "Workspace keyboard shortcuts",
+      "content": "Người dùng power muốn phím tắt cho Accept/Revise tại gate.",
+      "content_en": "Power users want keyboard shortcuts for Accept and Revise at gates.",
+      "target_section": "feature:F3",
+      "captured_at": "2026-09-01T09:02:00.000Z"
+    },
+    {
+      "id": "AD03",
+      "topic": "Waiver policy",
+      "content": "Chính sách nội bộ: mọi waiver phải nêu người chịu trách nhiệm nghiệp vụ.",
+      "content_en": "Internal policy: every waiver must name the accountable business owner.",
+      "target_section": "fixed:5.1",
+      "captured_at": "2026-09-01T09:03:00.000Z"
+    },
+    {
+      "id": "AD04",
+      "topic": "Data model note",
+      "content": "Ledger phải append-only để phục vụ đối soát.",
+      "content_en": "The credit ledger must be append-only to support reconciliation.",
+      "target_section": "fixed:3.1.5",
+      "captured_at": "2026-09-01T09:04:00.000Z"
+    },
+    {
+      "id": "AD05",
+      "topic": "Positioning",
+      "content": "Nhấn mạnh khác biệt: mọi câu trong SRS truy vết được về field có cấu trúc.",
+      "content_en": "Emphasize the differentiator: every SRS sentence is traceable to a structured field.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:05:00.000Z"
+    },
+    {
+      "id": "AD06",
+      "topic": "Payment integration",
+      "content": "User mua gói credit bằng VietQR qua dịch vụ thanh toán bên ngoài; webhook của cổng thanh toán xác nhận giao dịch rồi mới cộng credit.",
+      "content_en": "Users buy credit packs with VietQR through an external payment service; the payment gateway webhook confirms each transaction before credits are added.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:06:00.000Z"
+    },
+    {
+      "id": "AD07",
+      "topic": "AI generation",
+      "content": "Mọi lượt hỏi và soạn nháp SRS gọi mô hình ngôn ngữ của nhà cung cấp AI bên ngoài; chi phí mỗi lượt được trừ vào ví credit.",
+      "content_en": "Every elicitation and SRS drafting call goes to an external AI model provider; each call's cost is charged to the credit wallet.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:07:00.000Z"
+    },
+    {
+      "id": "AD08",
+      "topic": "Email delivery",
+      "content": "Email xác thực tài khoản, đặt lại mật khẩu và cảnh báo sắp hết credit được gửi qua dịch vụ email bên ngoài.",
+      "content_en": "Account verification, password reset and low-credit alert emails are sent through an external email service.",
+      "target_section": "fixed:1",
+      "captured_at": "2026-09-01T09:08:00.000Z"
+    },
+    {
+      "id": "AD09",
+      "topic": "Scheduled jobs",
+      "content": "Tác vụ định kỳ: reset credit miễn phí đầu tháng, giải phóng reservation credit quá hạn, và hạ gói khi subscription hết hạn.",
+      "content_en": "Scheduled jobs reset the free monthly credits, release expired credit reservations, and downgrade plans when a subscription expires.",
+      "target_section": "fixed:2.1",
+      "captured_at": "2026-09-01T09:09:00.000Z"
+    },
+    {
+      "id": "AD10",
+      "topic": "Operations team",
+      "content": "Quản trị viên xem danh sách user, số liệu sử dụng và báo cáo chi phí AI; khoá tài khoản vi phạm; nhận thông báo khi có user mới.",
+      "content_en": "Administrators view the user list, usage metrics and AI cost reports, suspend abusive accounts, and are notified when a new user signs up.",
+      "target_section": "fixed:2.2.2",
+      "captured_at": "2026-09-01T09:10:00.000Z"
+    }
+  ],
+  "diagrams": [],
+  "assumptions": [],
+  "flags": [],
+  "sections": [],
+  "baselines": [],
+  "spine_version": 1
+}
