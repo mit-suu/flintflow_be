@@ -1,0 +1,25 @@
+{
+  "step_id": "S-1.2",
+  "skill_id": "project-classifier",
+  "notes": "Phân loại dự án.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "project.type",
+      "value": "web_application",
+      "reason": "S-1.2"
+    },
+    {
+      "op": "set",
+      "path": "project.domain",
+      "value": "Requirements engineering / AI-assisted documentation",
+      "reason": "S-1.2"
+    },
+    {
+      "op": "set",
+      "path": "project.complexity",
+      "value": "high",
+      "reason": "S-1.2"
+    }
+  ]
+}

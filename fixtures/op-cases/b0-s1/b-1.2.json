@@ -1,0 +1,33 @@
+{
+  "step_id": "B-1.2",
+  "skill_id": "product-brief",
+  "notes": "Hai persona, mỗi persona một addendum.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD04",
+        "topic": "Persona: outsourced developer",
+        "content": "Đội thuê ngoài đọc tài liệu để báo giá và làm.",
+        "content_en": "The outsourced team reads the document to quote and to build.",
+        "target_section": "fixed:2.1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    },
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD05",
+        "topic": "Persona: reviewer",
+        "content": "Người duyệt cần thấy mục tiêu kinh doanh đằng sau từng phần.",
+        "content_en": "A reviewer needs to see the business goal behind each section.",
+        "target_section": "fixed:2.1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    }
+  ]
+}

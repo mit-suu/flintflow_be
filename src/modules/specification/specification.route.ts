@@ -124,8 +124,10 @@ router.put("/projects/:projectId/:type", authMiddleware, specificationController
 router.put("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 router.post("/projects/:projectId/:type/accept", authMiddleware, specificationController.acceptSection)
 // T19: gỡ `POST /projects/:projectId/approve-baseline` — baseline ký qua `POST /projects/:id/baseline`
-// (S-9.5: quét lại tất định, điều kiện cờ đỏ = 0, snapshot). Controller cũ xoá cùng module ở T21.
-router.post("/projects/:projectId/advance-to-generation", authMiddleware, specificationController.advanceToGeneration)
+// (S-9.5: quét lại tất định, điều kiện cờ đỏ = 0, snapshot).
+// T20: gỡ `POST /projects/:projectId/advance-to-generation` — mở sang pha sinh SRS giờ là gate Approve
+// của B-2.3 (UC 2.5): accept step đó thì `nextStep` trỏ sang S-1.1 và runner tự đặt `progress`.
+// Controller cũ của cả hai xoá cùng module `specification` ở T21.
 
 // T19: gỡ `POST /:projectId/generate-priority` (UC34) và `POST /:projectId/generate-scope` (UC35).
 // MoSCoW giờ là S-9.4 — ghi thẳng `functions[].priority` / `nfrs[].priority` bằng op
