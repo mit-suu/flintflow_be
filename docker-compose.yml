@@ -1,37 +1,145 @@
-# Hạ tầng dev cho FlintFlow BE.
+# Toàn bộ FlintFlow bằng một lệnh (T24).
 #
-#   docker compose up -d plantuml mongo
+#   cp .env.example .env            # điền secret thật vào .env
+#   docker compose up -d            # mongo (rs0) + plantuml + backend + frontend
+#   curl http://localhost:5000/health
 #
-# PlantUML render phía server vì hai lý do (Phases §7.1): web preview và export
-# dùng CHUNG một pipeline nên hình trong file .docx giống hệt hình trên màn hình;
-# và dữ liệu khách hàng không đi qua server công cộng.
+# Chỉ hạ tầng, code chạy trên máy:  docker compose up -d mongo mongo-init plantuml
+# Xem thêm docs/ops.md.
 #
-# ⚠️ PRODUCTION: image của BE chỉ chứa Node. PlantUML phải là một service RIÊNG
-# (Azure Container App / App Service riêng) và set PLANTUML_BASE_URL trỏ tới nó.
-# Đây là việc infra chưa ai nhận, nhưng không chặn dev.
+# Frontend build từ repo anh em `../flintflow_fe`. Chỉ clone repo này thì đặt
+# `FRONTEND_CONTEXT` sang đường dẫn khác, hoặc chạy `docker compose up -d mongo mongo-init plantuml backend`.
+
+name: flintflow
 
 services:
-  plantuml:
-    # TODO(pin): ghim tag cụ thể sau khi probe test xác nhận cách phát hiện lỗi
-    # (xem src/shared/diagram/plantuml.test.ts). Dùng tag nổi `jetty` lúc này vì
-    # ghim một version chưa kiểm chứng sẽ làm `docker compose up` fail ngay.
-    image: plantuml/plantuml-server:jetty
-    container_name: flintflow-plantuml
-    ports:
-      - "8080:8080"
-    environment:
-      # Cho phép diagram lớn (use-case diagram 70 UC vượt giới hạn mặc định)
-      PLANTUML_LIMIT_SIZE: "8192"
-    restart: unless-stopped
-
+  # ─── Mongo: replica set 1 node ─────────────────────────────────────
+  # `--replSet` vì transaction đa document (op engine, billing) chỉ chạy trên replica set.
+  # `shared/db/transaction.ts` có đường dự phòng cho standalone, nhưng dev nên chạy đúng cấu hình
+  # production để lỗi transaction không xuất hiện lần đầu ở môi trường thật.
   mongo:
     image: mongo:7
-    container_name: flintflow-mongo
+    command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
+    networks: [flintflow]
+
+  # Chạy một lần rồi thoát: rs.initiate + chờ PRIMARY. Idempotent.
+  mongo-init:
+    image: mongo:7
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./scripts/mongo-init-rs.sh:/init/mongo-init-rs.sh:ro
+    entrypoint: ["bash", "/init/mongo-init-rs.sh"]
+    restart: "no"
+    networks: [flintflow]
+
+  # ─── PlantUML ──────────────────────────────────────────────────────
+  # Render phía server vì web preview và export .docx dùng CHUNG một pipeline (Phases §7.1), và vì
+  # dữ liệu khách hàng không đi qua server công cộng.
+  # Tag được GHIM: tag nổi `jetty` từng đổi hành vi báo lỗi giữa hai lượt `docker compose pull`,
+  # làm `plantuml.test.ts` (cách phát hiện lỗi render) đỏ mà không có commit nào đổi code.
+  plantuml:
+    image: plantuml/plantuml-server:${PLANTUML_TAG:-jetty-v1.2025.4}
+    ports:
+      - "${PLANTUML_PORT:-8080}:8080"
+    environment:
+      # Use-case diagram ~70 UC vượt giới hạn mặc định
+      PLANTUML_LIMIT_SIZE: "8192"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/ > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    networks: [flintflow]
+
+  # ─── Backend ───────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      plantuml:
+        condition: service_started
+    # Secret và khoá provider lấy từ .env (không commit). Các giá trị dưới ghi đè phần "địa chỉ"
+    # cho đúng mạng nội bộ của compose — đó là thứ khác nhau giữa chạy trên máy và chạy trong compose.
+    env_file:
+      # `required: false` để `docker compose up` trong CI (không có secret thật) không chết ngay ở đây.
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: "5000"
+      MONGO_URI: mongodb://mongo:27017/${MONGO_DB:-flintflow}?replicaSet=rs0
+      PLANTUML_BASE_URL: http://plantuml:8080
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      AI_PROVIDER_OVERRIDE: ${AI_PROVIDER_OVERRIDE:-}
+    ports:
+      - "${BACKEND_PORT:-5000}:5000"
+    healthcheck:
+      # node:22-alpine không có curl/wget; Node 22 có sẵn fetch.
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5000/health').then(r=>r.json()).then(j=>process.exit(j.data?.status==='error'?1:0)).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    networks: [flintflow]
+
+  # ─── Frontend ──────────────────────────────────────────────────────
+  # NEXT_PUBLIC_* được nhúng lúc BUILD, nên URL API phải là địa chỉ **trình duyệt** gọi được
+  # (localhost:5000), không phải tên service nội bộ `backend`.
+  frontend:
+    build:
+      context: ${FRONTEND_CONTEXT:-../flintflow_fe}
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:5000/api/v1}
+        # Tuỳ chọn. Bỏ trống thì không có nút đăng nhập Google, phần còn lại chạy bình thường.
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:5000/api/v1}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    networks: [flintflow]
 
 volumes:
   mongo-data:
+
+networks:
+  flintflow:
+    driver: bridge
