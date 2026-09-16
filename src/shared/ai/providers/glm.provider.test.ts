@@ -28,6 +28,9 @@ describe("stripReasoning", () => {
 describe("callGLM", () => {
   beforeEach(() => {
     process.env.MODAL_API_KEY = "test-key"
+    // Từ T24 `MODAL_BASE_URL` không còn default trong code, nên test phải tự cấu hình y như khoá API.
+    // Không đặt ở đây thì test chỉ xanh trên máy có `.env` và đỏ ở CI — đúng lỗi đã xảy ra.
+    process.env.MODAL_BASE_URL = "https://modal.test/v1"
     create.mockReset()
   })
 
