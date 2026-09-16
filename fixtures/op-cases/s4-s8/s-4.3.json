@@ -1,0 +1,130 @@
+{
+  "step_id": "S-4.3",
+  "skill_id": "authorization-matrix",
+  "notes": "Guest reaches only the public screens; the author owns the workspace; the admin reads notifications.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "roles[]",
+      "value": {
+        "id": "R03",
+        "name": "Guest",
+        "actor_id": null
+      },
+      "reason": "S-4.3 unauthenticated role"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P01",
+        "screen_id": "S92",
+        "role_id": "R03",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P02",
+        "screen_id": "S93",
+        "role_id": "R03",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P03",
+        "screen_id": "S91",
+        "role_id": "R01",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P04",
+        "screen_id": "S91",
+        "role_id": "R01",
+        "action": "update"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P05",
+        "screen_id": "S91",
+        "role_id": "R01",
+        "action": "export"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P06",
+        "screen_id": "S94",
+        "role_id": "R01",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P07",
+        "screen_id": "S94",
+        "role_id": "R02",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P08",
+        "screen_id": "S92",
+        "role_id": "R01",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "permissions[]",
+      "value": {
+        "id": "P09",
+        "screen_id": "S93",
+        "role_id": "R01",
+        "action": "view"
+      },
+      "reason": "S-4.3 screen by role matrix"
+    },
+    {
+      "op": "add",
+      "path": "assumptions[]",
+      "value": {
+        "id": "AS32",
+        "path": "permissions[screen_id=S91,role_id=R01,action=update]",
+        "statement": "Update is limited to projects the author owns.",
+        "rationale": "Ownership scoping was not stated in the Brief.",
+        "origin_step_id": "S-4.3",
+        "status": "unconfirmed",
+        "confirmed_at": null
+      },
+      "reason": "S-4.3 ownership scope"
+    }
+  ]
+}
