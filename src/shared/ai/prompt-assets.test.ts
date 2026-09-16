@@ -68,12 +68,13 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 30 skill: 10 action · 13 content · 5 renderer · 2 output", () => {
+  it("đủ 31 skill: 10 action · 14 content · 5 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
-    expect(listSkillAssets()).toHaveLength(30)
+    // +1 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ.
+    expect(listSkillAssets()).toHaveLength(31)
     expect(byKind("action")).toBe(10)
-    expect(byKind("content")).toBe(13)
+    expect(byKind("content")).toBe(14)
     expect(byKind("renderer")).toBe(5)
     expect(byKind("output")).toBe(2)
   })
@@ -109,6 +110,8 @@ describe("skill trên đĩa (assets/skills)", () => {
     "content/nfr-quality-attributes",
     "content/appendix-content",
     "content/glossary",
+    "content/prioritization",
+    "output/srs-completeness-score",
     "renderer/context",
     "renderer/erd",
     "renderer/screen-flow",
