@@ -37,7 +37,7 @@ const USER = "64b000000000000000000020"
 const reservation = {
   reservationId: "64b0000000000000000000ff",
   userId: USER,
-  actionType: ActionType.GENERATE_SECTION,
+  actionType: ActionType.DRAFT,
   cost: 5,
   expiresAt: new Date()
 }
@@ -71,7 +71,7 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
       throw parseFailure()
     })
 
-    await expect(executeAiAction(ActionType.GENERATE_SECTION, {}, undefined, USER)).rejects.toMatchObject({
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toMatchObject({
       code: "PARSE_FAILED"
     })
 
@@ -83,7 +83,7 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
   it("parse ok: deduct một lần, không release", async () => {
     vi.mocked(parseResponse).mockReturnValue({ ok: true })
 
-    const result = await executeAiAction(ActionType.GENERATE_SECTION, {}, undefined, USER)
+    const result = await executeAiAction(ActionType.DRAFT, {}, undefined, USER)
 
     expect(result.data).toEqual({ ok: true })
     expect(result.cost).toBe(5)
@@ -98,7 +98,7 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
       .mockRejectedValueOnce(new Error("log write failed"))
       .mockResolvedValue({ _id: "log-2" } as any)
 
-    await expect(executeAiAction(ActionType.GENERATE_SECTION, {}, undefined, USER)).rejects.toThrow()
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toThrow()
 
     expect(deductCredit).toHaveBeenCalledTimes(1)
     expect(releaseCredit).not.toHaveBeenCalled()
@@ -107,7 +107,7 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
   it("LLM lỗi: không deduct, có release", async () => {
     vi.mocked(callLLM).mockRejectedValue(new Error("provider down"))
 
-    await expect(executeAiAction(ActionType.GENERATE_SECTION, {}, undefined, USER)).rejects.toThrow()
+    await expect(executeAiAction(ActionType.DRAFT, {}, undefined, USER)).rejects.toThrow()
 
     expect(deductCredit).not.toHaveBeenCalled()
     expect(releaseCredit).toHaveBeenCalledTimes(1)

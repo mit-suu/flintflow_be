@@ -293,7 +293,7 @@ export const executeAiActionStream = async <T = any>(
 
     // For chat actions, ensure parsedData.reply matches the clean streamed reply
     if (
-      (actionType === ActionType.CHAT || actionType === ActionType.CHAT_DISCOVERY) &&
+      actionType === ActionType.CHAT &&
       parsedData &&
       typeof (parsedData as any) === "object" &&
       streamedReply

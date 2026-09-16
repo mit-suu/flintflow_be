@@ -30,18 +30,6 @@ export const getProjects = catchAsync(async (req: Request, res: Response) => {
   return sendSuccess(res, 200, projects)
 })
 
-/**
- * listProjects — legacy alias for getProjects, kept for backwards compatibility.
- */
-export const listProjects = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "Unauthorized", "UNAUTHORIZED")
-
-  const status = req.query.status as string | undefined
-  const projects = await projectService.getProjects(userId, status)
-  return sendSuccess(res, 200, projects)
-})
-
 export const getProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
@@ -79,29 +67,4 @@ export const updateProjectName = catchAsync(async (req: Request, res: Response) 
 
   const project = await projectService.updateProjectName(projectId, userId, name)
   return sendSuccess(res, 200, project)
-})
-
-/**
- * renameProject — legacy handler (/:id/name route), delegates to updateProjectName logic.
- */
-export const renameProject = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "Unauthorized", "UNAUTHORIZED")
-
-  const id = req.params.id as string
-  const { name } = req.body
-  const project = await projectService.renameProject(userId, id, name)
-  return sendSuccess(res, 200, project)
-})
-
-/**
- * archiveProject — legacy handler (DELETE /:id), sets status to archived.
- */
-export const archiveProject = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "Unauthorized", "UNAUTHORIZED")
-
-  const id = req.params.id as string
-  await projectService.archiveProject(userId, id)
-  return sendSuccess(res, 200, null)
 })

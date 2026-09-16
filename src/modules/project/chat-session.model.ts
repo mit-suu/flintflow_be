@@ -5,7 +5,6 @@ export interface IChatMessage {
   content: string
   step?: string
   discoveryStep?: number
-  workspacePhase?: string
   createdAt: Date
 }
 
@@ -38,9 +37,6 @@ const chatMessageSchema = new Schema<IChatMessage>(
       type: Number,
       min: 1,
       max: 6
-    },
-    workspacePhase: {
-      type: String
     },
     createdAt: {
       type: Date,
