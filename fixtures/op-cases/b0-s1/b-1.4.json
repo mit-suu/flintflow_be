@@ -1,0 +1,33 @@
+{
+  "step_id": "B-1.4",
+  "skill_id": "product-brief",
+  "notes": "Phạm vi bản đầu và thứ dứt khoát chưa làm.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD07",
+        "topic": "MVP scope",
+        "content": "Bản đầu: hội thoại có hướng dẫn, sinh tài liệu, xuất Word.",
+        "content_en": "First release: guided conversation, document generation, Word export.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    },
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD08",
+        "topic": "Not now",
+        "content": "Chưa làm cộng tác nhiều người trong bản đầu.",
+        "content_en": "Multi-user collaboration is not in the first release.",
+        "target_section": "fixed:3.1.2",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B: ghi ngay khi nghe"
+    }
+  ]
+}

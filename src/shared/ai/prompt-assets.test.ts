@@ -68,13 +68,14 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 31 skill: 10 action · 14 content · 5 renderer · 2 output", () => {
+  it("đủ 32 skill: 10 action · 15 content · 5 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
-    // +1 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ.
-    expect(listSkillAssets()).toHaveLength(31)
+    // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
+    // và content/brief-analysis (S-1.1/1.3/1.4, T20) tách khỏi project-classifier.
+    expect(listSkillAssets()).toHaveLength(32)
     expect(byKind("action")).toBe(10)
-    expect(byKind("content")).toBe(14)
+    expect(byKind("content")).toBe(15)
     expect(byKind("renderer")).toBe(5)
     expect(byKind("output")).toBe(2)
   })
@@ -95,8 +96,8 @@ describe("skill trên đĩa (assets/skills)", () => {
     }
   })
 
-  // XREQ T14→T03, T10→T03 (chốt 2026-09-15), T18→T03 (cùng tiền lệ): skill đã viết thật bỏ `stub`;
-  // skill chưa viết (product-brief — T20) vẫn là stub.
+  // XREQ T14→T03, T10→T03 (chốt 2026-09-15), T18/T19/T20→T03 (cùng tiền lệ): skill đã viết thật bỏ
+  // `stub`. Sau T20 không còn skill nào là stub.
   const WRITTEN_NON_ACTION = new Set([
     "content/project-classifier",
     "content/product-overview",
@@ -111,6 +112,8 @@ describe("skill trên đĩa (assets/skills)", () => {
     "content/appendix-content",
     "content/glossary",
     "content/prioritization",
+    "content/product-brief",
+    "content/brief-analysis",
     "output/srs-completeness-score",
     "renderer/context",
     "renderer/erd",

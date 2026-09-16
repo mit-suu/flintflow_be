@@ -1,0 +1,27 @@
+{
+  "step_id": "B-1.6",
+  "skill_id": "product-brief",
+  "notes": "Rủi ro, giả định, câu hỏi mở.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR01",
+        "kind": "risk",
+        "statement": "The product depends on a single AI model provider; an outage stops every generation step."
+      },
+      "reason": "B-1.6"
+    },
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR02",
+        "kind": "open_question",
+        "statement": "Who pays when a generated document is rejected by the client?"
+      },
+      "reason": "B-1.6"
+    }
+  ]
+}
