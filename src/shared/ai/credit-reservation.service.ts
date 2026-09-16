@@ -20,14 +20,8 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.GLOSSARY_SCAN]: 2,
   [ActionType.RECONCILE]: 4,
   [ActionType.CHANGE_INSTRUCTION]: 3,
-  // Legacy
-  [ActionType.GENERATE_SECTION]: 5,
-  [ActionType.DIAGRAM_CLASSIFY]: 1,
-  [ActionType.DIAGRAM_GENERATE]: 4,
-  [ActionType.PRIORITY_RANKING]: 5,
-  [ActionType.SCOPE_OUT_OF_SCOPE]: 5,
+  // Ngoài pipeline
   [ActionType.CHAT]: 2,
-  [ActionType.CHAT_DISCOVERY]: 2,
   [ActionType.SUMMARIZE_DOCUMENT]: 2  // Task 2b: tính phí như EXTRACT, 1 lần/document
 }
 

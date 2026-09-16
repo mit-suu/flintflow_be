@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
-import { ActionType, DEPRECATED_ACTION_TYPES, SKILL_BY_ACTION_TYPE } from "./ai-action.types.js"
+import { ActionType, SKILL_BY_ACTION_TYPE } from "./ai-action.types.js"
 import {
   listPromptAssets,
   getPromptAssetIndex,
@@ -16,17 +16,15 @@ import {
 import { getSkill, getPromptTemplate } from "./prompt-registry.service.js"
 import { OUTPUT_SCHEMA_BY_ACTION_TYPE } from "./response-parser.js"
 
-const ACTIVE_ACTION_TYPES = Object.values(ActionType).filter((t) => !DEPRECATED_ACTION_TYPES.has(t))
-
 beforeEach(() => {
   invalidatePromptAssetCache()
   invalidateSkillCache()
 })
 
 describe("prompt phẳng trên đĩa (assets/prompts)", () => {
-  it("mọi ActionType KHÔNG deprecated có prompt hoặc skill", async () => {
+  it("mọi ActionType có prompt hoặc skill", async () => {
     const missing: string[] = []
-    for (const t of ACTIVE_ACTION_TYPES) {
+    for (const t of Object.values(ActionType)) {
       await getPromptTemplate(t).catch(() => missing.push(t))
     }
 
@@ -56,12 +54,16 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
     }
   })
 
-  it("bỏ qua README.md và _archive (pipeline Excalidraw đã archive)", () => {
+  it("bỏ qua README.md và _archive", () => {
     const assets = listPromptAssets()
 
     expect(assets.some((a) => a.file.endsWith("README.md"))).toBe(false)
     expect(assets.some((a) => a.file.includes("_archive"))).toBe(false)
-    expect(assets.some((a) => a.actionType.startsWith("diagram_"))).toBe(false)
+  })
+
+  // T21: prompt phẳng chỉ còn cho action ngoài pipeline — prompt section-based cũ đã xoá
+  it("chỉ còn prompt của CHAT và SUMMARIZE_DOCUMENT", () => {
+    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT])
   })
 })
 

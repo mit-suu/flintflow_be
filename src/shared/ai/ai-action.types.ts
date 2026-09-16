@@ -19,36 +19,13 @@ export enum ActionType {
 
   // ─── Ngoài pipeline, còn dùng ───
   CHAT = "chat",
-  SUMMARIZE_DOCUMENT = "summarize_document",
-
-  // ─── Legacy: giữ để luồng cũ chạy tới khi T21 gỡ ───
-  /** @deprecated Thay bằng DRAFT + skill nội dung của step (T14/T18). */
-  GENERATE_SECTION = "generate_section",
-  /** @deprecated Thay bằng S-9.4 (T19). */
-  PRIORITY_RANKING = "priority_ranking",
-  /** @deprecated Thay bằng S-2.2 ghi `project.release_scope` (T14). */
-  SCOPE_OUT_OF_SCOPE = "scope_out_of_scope",
-  /** @deprecated Thay bằng DISCOVERY_STEP (T20). */
-  CHAT_DISCOVERY = "chat_discovery",
-  /** @deprecated Pipeline Excalidraw đã archive; diagram đi đường PlantUML (T10). */
-  DIAGRAM_CLASSIFY = "diagram_classify",
-  /** @deprecated Pipeline Excalidraw đã archive; diagram đi đường PlantUML (T10). */
-  DIAGRAM_GENERATE = "diagram_generate"
+  SUMMARIZE_DOCUMENT = "summarize_document"
 }
-
-export const DEPRECATED_ACTION_TYPES: ReadonlySet<ActionType> = new Set([
-  ActionType.GENERATE_SECTION,
-  ActionType.PRIORITY_RANKING,
-  ActionType.SCOPE_OUT_OF_SCOPE,
-  ActionType.CHAT_DISCOVERY,
-  ActionType.DIAGRAM_CLASSIFY,
-  ActionType.DIAGRAM_GENERATE
-])
 
 /**
  * Skill hành động (assets/skills/action/) khung một lượt gọi theo ActionType.
  * Skill nội dung/renderer của step do step runner (T13) chọn và ghép thêm.
- * ActionType không có ở đây thì đọc prompt phẳng assets/prompts/<actionType>.md.
+ * ActionType không có ở đây (CHAT, SUMMARIZE_DOCUMENT) đọc prompt phẳng assets/prompts/<actionType>.md.
  */
 export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>> = {
   [ActionType.ELICIT]: "elicit-loop",
