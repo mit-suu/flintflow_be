@@ -82,13 +82,38 @@ describe("chưa assemble / còn cờ đỏ", () => {
     expect(baselinesResponseSchema.parse(list.body.data)).toEqual([])
   })
 
-  it("assemble khi PNG sơ đồ chưa có ⇒ 200 nhưng không cache (review C3) ⇒ document vẫn 409", async () => {
+  it("assemble khi PNG sơ đồ chưa có ⇒ 200, meta.consistency nêu diagram_png_missing, document/Word dùng placeholder; nạp PNG rồi đọc lại ⇒ ảnh thật", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
+    const imageCaptions = (data: unknown) =>
+      renderedDocumentSchema
+        .parse(data)
+        .sections.flatMap((s) => s.blocks)
+        .filter((b) => b.type === "image")
+        .map((b) => ("caption" in b ? (b.caption ?? "") : ""))
 
     const assemble = await api.post("/assemble", { base_version: seeded.spineVersion })
-    expect(assemble.status).toBe(200)
-    expect((await api.get("/document?source=draft")).body.error.code).toBe("NO_WORKING_DRAFT")
+    expect(assemble.status, JSON.stringify(assemble.body.error)).toBe(200)
+    const missing = (assemble.body.meta.consistency as Array<{ rule: string; path?: string }>).filter((f) => f.rule === "diagram_png_missing")
+    expect(missing.length).toBeGreaterThan(0)
+    expect(missing.every((f) => f.path?.startsWith("diagrams[id="))).toBe(true)
+
+    // Gọi lại cùng version: trúng cache, lý do vẫn được trả
+    const again = await api.post("/assemble", { base_version: seeded.spineVersion })
+    expect((again.body.meta.consistency as Array<{ rule: string }>).filter((f) => f.rule === "diagram_png_missing")).toHaveLength(missing.length)
+
+    const doc = await api.get("/document?source=draft")
+    expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
+    const pending = imageCaptions(doc.body.data)
+    expect(pending.length).toBeGreaterThan(0)
+    expect(pending.every((c) => c.includes("has not been rendered yet"))).toBe(true)
+    expectDocx(await api.download("/export/word?source=draft"))
+
+    // PNG xuất hiện sau khi đã cache ⇒ lần đọc kế có ảnh thật, không cần assemble lại
+    await seedDiagramPngs(seeded)
+    const after = imageCaptions((await api.get("/document?source=draft")).body.data)
+    expect(after).toHaveLength(pending.length)
+    expect(after.some((c) => c.includes("has not been rendered yet"))).toBe(false)
   })
 })
 
