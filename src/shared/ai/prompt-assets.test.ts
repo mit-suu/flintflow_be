@@ -94,12 +94,21 @@ describe("skill trên đĩa (assets/skills)", () => {
     }
   })
 
-  // XREQ T14→T03, T10→T03 (chốt 2026-09-15): skill đã viết thật ở T10/T14 bỏ `stub`; skill chưa viết vẫn là stub.
+  // XREQ T14→T03, T10→T03 (chốt 2026-09-15), T18→T03 (cùng tiền lệ): skill đã viết thật bỏ `stub`;
+  // skill chưa viết (product-brief — T20) vẫn là stub.
   const WRITTEN_NON_ACTION = new Set([
     "content/project-classifier",
     "content/product-overview",
     "content/high-level-rules",
     "content/actors-and-usecases",
+    "content/screens-and-flow",
+    "content/authorization-matrix",
+    "content/non-screen-functions",
+    "content/entities-erd",
+    "content/function-detail",
+    "content/nfr-quality-attributes",
+    "content/appendix-content",
+    "content/glossary",
     "renderer/context",
     "renderer/erd",
     "renderer/screen-flow",

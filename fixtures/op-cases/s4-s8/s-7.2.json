@@ -1,0 +1,47 @@
+{
+  "step_id": "S-7.2",
+  "skill_id": "appendix-content",
+  "notes": "Cross-screen behaviour, one rule per row.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "common_requirements[]",
+      "value": {
+        "id": "CR01",
+        "category": "feedback",
+        "statement": "Every screen shows a loading, empty and error state for the data it owns."
+      },
+      "reason": "S-7.2"
+    },
+    {
+      "op": "add",
+      "path": "common_requirements[]",
+      "value": {
+        "id": "CR02",
+        "category": "forms",
+        "statement": "A failed submit keeps every entered value except secrets and reports the first failing field."
+      },
+      "reason": "S-7.2"
+    },
+    {
+      "op": "add",
+      "path": "common_requirements[]",
+      "value": {
+        "id": "CR03",
+        "category": "session",
+        "statement": "An idle session ends after thirty minutes and unsaved chat input is restored on the next visit."
+      },
+      "reason": "S-7.2"
+    },
+    {
+      "op": "add",
+      "path": "common_requirements[]",
+      "value": {
+        "id": "CR04",
+        "category": "data display",
+        "statement": "Dates are shown in the viewer timezone using an unambiguous day-month-year format."
+      },
+      "reason": "S-7.2"
+    }
+  ]
+}
