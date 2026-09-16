@@ -53,6 +53,11 @@ const cacheDb = vi.hoisted(() => {
     }
     return { deletedCount: before - docs.length }
   })
+  const updateOne = vi.fn(async (filter: D, update: { $set: D }) => {
+    const existing = docs.find((d) => matches(d, filter))
+    if (existing) Object.assign(existing, update.$set)
+    return { matchedCount: existing ? 1 : 0 }
+  })
   const reset = () => {
     docs.length = 0
     nextId = 1
@@ -60,8 +65,9 @@ const cacheDb = vi.hoisted(() => {
     findOneAndUpdate.mockClear()
     find.mockClear()
     deleteMany.mockClear()
+    updateOne.mockClear()
   }
-  return { docs, findOne, findOneAndUpdate, find, deleteMany, reset }
+  return { docs, findOne, findOneAndUpdate, find, deleteMany, updateOne, reset }
 })
 
 const baselineDb = vi.hoisted(() => {
@@ -109,7 +115,8 @@ vi.mock("./rendered-document.model.js", () => ({
     findOne: cacheDb.findOne,
     findOneAndUpdate: cacheDb.findOneAndUpdate,
     find: cacheDb.find,
-    deleteMany: cacheDb.deleteMany
+    deleteMany: cacheDb.deleteMany,
+    updateOne: cacheDb.updateOne
   }
 }))
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
@@ -124,6 +131,7 @@ vi.mock("../spine/spine.repository.js", () => ({
 
 import * as spineRepository from "../spine/spine.repository.js"
 import { _internal, assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { DIAGRAM_PLACEHOLDER_PNG } from "./diagram-placeholder.js"
 
 const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
@@ -217,14 +225,64 @@ describe("assemble()", () => {
     expect(cacheDb.findOneAndUpdate).toHaveBeenCalledTimes(1)
   })
 
-  describe("review C3 — ảnh render_status=ok nhưng PNG tải lỗi", () => {
+  describe("ảnh render_status=ok nhưng PNG tải lỗi — không còn '200 nhưng không cache' im lặng", () => {
     const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const imagesOf = (doc: { sections: { blocks: { type: string; png?: unknown; caption?: string }[] }[] }) =>
+      doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
 
-    it("vẫn trả document nhưng KHÔNG ghi cache — lần sau thử lại", async () => {
+    it("vẫn ghi cache (ảnh là tham chiếu) kèm missing_diagram_ids; findings có diagram_png_missing — cả khi trúng cache", async () => {
       vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 13, diagrams: [diagram] }))
+
       const result = await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => null })
       expect(result.sections).toBeGreaterThan(0)
-      expect(cacheDb.docs).toHaveLength(0)
+      expect(result.findings).toEqual([expect.objectContaining({ rule: "diagram_png_missing", path: "diagrams[id=D01]" })])
+      expect(cacheDb.docs).toHaveLength(1)
+      expect(cacheDb.docs[0].missing_diagram_ids).toEqual(["D01"])
+      expect(imagesOf(cacheDb.docs[0].doc as Parameters<typeof imagesOf>[0]).map((b) => b.png)).toEqual(["diagram-ref:D01"])
+
+      const again = await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => null })
+      expect(again.findings.map((f) => f.rule)).toEqual(["diagram_png_missing"])
+      expect(cacheDb.docs[0].missing_diagram_ids).toEqual(["D01"])
+    })
+
+    it("PNG được khôi phục sau đó (không đổi spine_version) ⇒ lần assemble trúng cache hết báo thiếu, cache thu hẹp missing_diagram_ids", async () => {
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 13, diagrams: [diagram] }))
+      await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => null })
+
+      const healed = await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => "BASE64PNG" })
+      expect(healed.findings).toEqual([])
+      expect(cacheDb.docs).toHaveLength(1)
+      expect(cacheDb.docs[0].missing_diagram_ids).toEqual([])
+      expect(cacheDb.updateOne).toHaveBeenCalledTimes(1)
+    })
+
+    it("PNG rỗng tính là thiếu (writer không nhúng được) ⇒ placeholder + finding", async () => {
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 13, diagrams: [diagram] }))
+      const result = await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => "" })
+      expect(result.findings.map((f) => f.rule)).toEqual(["diagram_png_missing"])
+      const pending = imagesOf(await getDocument(PROJECT, "Demo", { source: "draft" }, { loadDiagramPng: async () => "" }))
+      expect(pending[0].png).toBe(DIAGRAM_PLACEHOLDER_PNG)
+    })
+
+    it("đọc lại: chưa có PNG ⇒ placeholder + caption nêu rõ sơ đồ chưa render; PNG có sau ⇒ ảnh thật, cùng bản cache", async () => {
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 13, diagrams: [diagram] }))
+      await assemble(PROJECT, "Demo", 13, { loadDiagramPng: async () => null })
+
+      const pending = imagesOf(await getDocument(PROJECT, "Demo", { source: "draft" }, { loadDiagramPng: async () => null }))
+      expect(pending).toHaveLength(1)
+      expect(pending[0].png).toBe(DIAGRAM_PLACEHOLDER_PNG)
+      expect(pending[0].caption).toBe("Figure — System Context Diagram — image pending: diagram D01 has not been rendered yet")
+
+      const rendered = imagesOf(await getDocument(PROJECT, "Demo", { source: "draft" }, { loadDiagramPng: async () => "BASE64PNG" }))
+      expect(rendered).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure — System Context Diagram" }])
+      expect(cacheDb.docs).toHaveLength(1)
+    })
+
+    it("đủ PNG ⇒ findings không có diagram_png_missing, missing_diagram_ids rỗng", async () => {
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 14, diagrams: [diagram] }))
+      const result = await assemble(PROJECT, "Demo", 14, { loadDiagramPng: async () => "BASE64PNG" })
+      expect(result.findings.some((f) => f.rule === "diagram_png_missing")).toBe(false)
+      expect(cacheDb.docs[0].missing_diagram_ids).toEqual([])
     })
   })
 
@@ -353,6 +411,23 @@ describe("getDocument() — source=baseline", () => {
 
     const baselineCacheDocs = cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)
     expect(baselineCacheDocs).toHaveLength(1)
+  })
+
+  it("baseline thiếu PNG ⇒ vẫn cache dạng tham chiếu; trả placeholder; PNG có sau ⇒ đọc lại từ cùng cache ra ảnh thật (không placeholder vĩnh viễn)", async () => {
+    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+    baselineDb.findOne.mockResolvedValue({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 0, snapshot: { ...baseSpine(), diagrams: [diagram] } })
+    const images = (doc: { sections: { blocks: { type: string; png?: unknown; caption?: string }[] }[] }) => doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
+
+    const first = images(await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID }, { loadDiagramPng: async () => null }))
+    expect(first).toEqual([{ type: "image", png: DIAGRAM_PLACEHOLDER_PNG, caption: "Figure — System Context Diagram — image pending: diagram D01 has not been rendered yet" }])
+    const cached = cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)
+    expect(cached).toHaveLength(1)
+    expect(cached[0].missing_diagram_ids).toEqual(["D01"])
+
+    const second = images(await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID }, { loadDiagramPng: async () => "BASE64PNG" }))
+    expect(second).toEqual([{ type: "image", png: "BASE64PNG", caption: "Figure — System Context Diagram" }])
+    expect(baselineDb.findOne).toHaveBeenCalledTimes(2) // lần hai vẫn tra Baseline để lấy _id, nhưng không dựng lại (cache 1 bản)
+    expect(cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)).toHaveLength(1)
   })
 
   it("review T2: Baseline.snapshot hỏng ⇒ 422 BASELINE_SNAPSHOT_INVALID", async () => {

@@ -9,6 +9,13 @@
  * `source = baseline`: dựng từ `Baseline.snapshot` (T19) — không đọc Spine hiện tại (srs-spine.md §2.1),
  *                       cache theo `Baseline._id` (bất biến — T15 review T5).
  *
+ * Ảnh sơ đồ: section luôn sinh **tham chiếu** `diagram-ref:<id>` (không base64 — tránh phình cache tới trần
+ * 16MB), cache giữ nguyên dạng đó; lúc trả về mới phân giải (`materializeImages`): PNG tải được ⇒ ảnh thật,
+ * không ⇒ ảnh placeholder + caption nêu rõ sơ đồ chưa render. Nhờ vậy thiếu PNG **không chặn cache** (trước đây
+ * `POST /assemble` 200 nhưng không ghi cache ⇒ `GET /document` 409 mà client không biết vì sao — spec-gaps
+ * FLF-166, thay quyết định T15 review C3/Th4), và PNG xuất hiện sau thì lần đọc kế có ảnh thật mà không cần
+ * `spine_version` mới hay dựng lại baseline.
+ *
  * KHÔNG ghi Spine ở đây — chỉ đọc (`spine.repository`, `Baseline`, `Change`, `User`) và ghi cache riêng
  * (`RenderedDocumentCache`, không phải collection `spines`).
  */
@@ -33,7 +40,8 @@ import {
   type ChangeRecordRow,
   type SectionRenderContext
 } from "./section-renderer.js"
-import { runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
+import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
+import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
 import type {
   Block,
@@ -179,82 +187,91 @@ const defaultDiagramPngLoader: DiagramPngLoader = async (projectId, diagramId) =
 
 export interface ImageLoadResult {
   loaded: Map<string, string>
-  /** Id diagram `render_status="ok"` nhưng tải PNG lỗi/null (review C3) — khác rỗng ⇒ caller không ghi cache. */
+  /**
+   * Id diagram `render_status="ok"` nhưng tải PNG lỗi/null. Không chặn cache: tài liệu trả về dùng placeholder,
+   * `POST /assemble` báo qua finding `diagram_png_missing`, danh sách này lưu kèm cache (`missing_diagram_ids`).
+   */
   missing: string[]
 }
 
 /** T15 review Th4: giới hạn 4 tải song song một lô — tránh fan-out không giới hạn khi có nhiều ảnh. */
 const IMAGE_LOAD_BATCH_SIZE = 4
 
-const preloadDiagramPngs = async (projectId: string, spine: Spine, load: DiagramPngLoader): Promise<ImageLoadResult> => {
-  const ok = spine.diagrams.filter((d) => d.render_status === "ok")
+/** Tải PNG theo lô cho một danh sách diagram id — dùng chung cho lúc build, lúc đọc cache và lúc kiểm lại ảnh thiếu. */
+const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[], load: DiagramPngLoader): Promise<ImageLoadResult> => {
   const loaded = new Map<string, string>()
   const missing: string[] = []
-  for (let i = 0; i < ok.length; i += IMAGE_LOAD_BATCH_SIZE) {
-    const batch = ok.slice(i, i + IMAGE_LOAD_BATCH_SIZE)
-    const results = await Promise.all(batch.map(async (d) => [d.id, await load(projectId, d.id)] as const))
+  for (let i = 0; i < diagramIds.length; i += IMAGE_LOAD_BATCH_SIZE) {
+    const batch = diagramIds.slice(i, i + IMAGE_LOAD_BATCH_SIZE)
+    const results = await Promise.all(batch.map(async (id) => [id, await load(projectId, id)] as const))
     for (const [id, png] of results) {
-      if (png === null) missing.push(id)
+      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do
+      if (png === null || png.length === 0) missing.push(id)
       else loaded.set(id, png)
     }
   }
   return { loaded, missing }
 }
 
-// ─── cache: gọn ảnh, không lưu base64 (review T6) ──────────────────
+const preloadDiagramPngs = (projectId: string, spine: Spine, load: DiagramPngLoader): Promise<ImageLoadResult> =>
+  loadDiagramPngs(
+    projectId,
+    spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+    load
+  )
 
-/** Đánh dấu ô `png` trong cache là tham chiếu diagram id, chưa phải PNG thật. */
+// ─── ảnh dạng tham chiếu trong section/cache; phân giải lúc trả về (review T6, FLF-166) ──────
+
+/** Ô `png` là tham chiếu diagram id (`diagram-ref:<id>`), chưa phải PNG thật. */
 const IMAGE_REF_PREFIX = "diagram-ref:"
 
 const isImageBlock = (b: Block): b is ImageBlock => b.type === "image"
 
-/**
- * Trước khi ghi cache: thay `ImageBlock.png` (base64, có thể vài trăm KB/ảnh) bằng tham chiếu
- * `diagram-ref:<id>` — tránh phình collection `rendered_documents` và trần 16MB/document của Mongo.
- * `diagramPngs` (id → base64 vừa tải lúc build) cho biết base64 nào ứng với diagram nào.
- */
-const stripImagesForCache = (doc: RenderedDocument, diagramPngs: Map<string, string>): RenderedDocument => {
-  const pngToId = new Map(Array.from(diagramPngs, ([id, png]) => [png, id]))
-  const stripBlock = (b: Block): Block => {
-    if (!isImageBlock(b)) return b
-    const png = typeof b.png === "string" ? b.png : b.png.toString("base64")
-    const id = pngToId.get(png)
-    return id ? { ...b, png: `${IMAGE_REF_PREFIX}${id}` } : b
-  }
-  return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(stripBlock) })) }
-}
+const imageRef = (diagramId: string): string => `${IMAGE_REF_PREFIX}${diagramId}`
+
+const refDiagramId = (b: Block): string | null =>
+  isImageBlock(b) && typeof b.png === "string" && b.png.startsWith(IMAGE_REF_PREFIX) ? b.png.slice(IMAGE_REF_PREFIX.length) : null
 
 /**
- * Sau khi đọc cache: tải lại PNG thật cho mọi ảnh còn ở dạng tham chiếu. Ảnh không tải lại được
- * (diagram bị xoá sau lúc cache) bị bỏ khỏi section thay vì làm hỏng cả tài liệu.
+ * Thay mọi tham chiếu ảnh bằng PNG thật (`resolve` trả base64) — không có ⇒ ảnh placeholder + caption nêu rõ
+ * sơ đồ chưa render. Trước đây ảnh không tải lại được bị bỏ khỏi section; giữ block để người đọc thấy lý do
+ * thay vì thiếu hình lặng lẽ (kể cả bản draft đã `stale` hay sơ đồ bị xoá sau khi cache).
  */
+const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) => string | null): RenderedDocument => {
+  const materialize = (b: Block): Block => {
+    const id = refDiagramId(b)
+    if (id === null || !isImageBlock(b)) return b
+    const png = resolve(id)
+    return png ? { ...b, png } : { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
+  }
+  return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
+}
+
+const resolveLoaded =
+  (images: ImageLoadResult) =>
+  (diagramId: string): string | null =>
+    images.loaded.get(diagramId) ?? null
+
+const warnMissingImages = (images: ImageLoadResult, target: string): void => {
+  if (images.missing.length > 0) {
+    console.warn(`[assemble] ${images.missing.length} diagram PNG chưa tải được cho ${target} (${images.missing.join(", ")}) — tài liệu dùng placeholder tới khi có ảnh`)
+  }
+}
+
+/** Sau khi đọc cache: tải lại PNG (theo lô) cho mọi tham chiếu rồi phân giải — PNG có sau lúc cache vẫn hiện ảnh thật. */
 const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: DiagramPngLoader): Promise<RenderedDocument> => {
   const refs = new Set<string>()
   for (const section of doc.sections) {
     for (const block of section.blocks) {
-      if (isImageBlock(block) && typeof block.png === "string" && block.png.startsWith(IMAGE_REF_PREFIX)) {
-        refs.add(block.png.slice(IMAGE_REF_PREFIX.length))
-      }
+      const id = refDiagramId(block)
+      if (id !== null) refs.add(id)
     }
   }
   if (refs.size === 0) return doc
 
-  const resolved = new Map<string, string>()
-  for (const id of refs) {
-    const png = await load(projectId, id)
-    if (png !== null) resolved.set(id, png)
-    else console.warn(`[assemble] Không tải lại được PNG diagram ${id} từ cache — bỏ ảnh này khỏi tài liệu`)
-  }
-
-  const hydrateBlock = (b: Block): Block | null => {
-    if (!isImageBlock(b) || typeof b.png !== "string" || !b.png.startsWith(IMAGE_REF_PREFIX)) return b
-    const png = resolved.get(b.png.slice(IMAGE_REF_PREFIX.length))
-    return png ? { ...b, png } : null
-  }
-  return {
-    ...doc,
-    sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(hydrateBlock).filter((b): b is Block => b !== null) }))
-  }
+  const images = await loadDiagramPngs(projectId, [...refs], load)
+  warnMissingImages(images, `project ${projectId} (đọc cache)`)
+  return materializeImages(doc, resolveLoaded(images))
 }
 
 // ─── cache: ghi an toàn (review T10) + dọn bản cũ (review T6) ─────
@@ -383,16 +400,11 @@ interface BuildSectionsOptions {
   hasUnassigned: boolean
 }
 
-const buildSections = (
-  spine: Spine,
-  diagramPngs: Map<string, string>,
-  numbers: Map<string, string>,
-  states: SectionStateView[],
-  opts: BuildSectionsOptions
-): RenderedSection[] => {
+const buildSections = (spine: Spine, numbers: Map<string, string>, states: SectionStateView[], opts: BuildSectionsOptions): RenderedSection[] => {
   const stateById = new Map(states.map((s) => [s.id, s]))
   const numberOfCtx = (id: string): string | undefined => numbers.get(id)
-  const diagramPng = (id: string): string | undefined => diagramPngs.get(id)
+  // Mọi sơ đồ render_status=ok đều vào section dưới dạng tham chiếu; PNG thật/placeholder gắn lúc trả về
+  const diagramPng = (id: string): string | undefined => imageRef(id)
 
   const out: RenderedSection[] = []
   const seenGroups = new Set<string>()
@@ -443,7 +455,7 @@ export interface AssembleDeps {
   now: () => Date
   /** T15 review T7: tra tên hiển thị cho `changes[].by` trong §I — mặc định giữ nguyên id (đủ cho test thuần, không cần DB). */
   resolveInCharge?: (by: string) => string
-  /** T15 review C3/Th4: gọi khi tải xong ảnh — `missing` khác rỗng ⇒ caller không ghi cache. */
+  /** Gọi khi tải xong ảnh (quan sát/log). `missing` không còn chặn cache — xem chú thích đầu file. */
   onImagesLoaded?: (result: ImageLoadResult) => void
   /** T15 review Th2: gọi khi S-8.4 chạy xong — caller quyết log/trả `meta`, không tự `console.warn` ở đây. */
   onConsistencyFindings?: (findings: ConsistencyFinding[]) => void
@@ -464,15 +476,21 @@ interface BuildDocumentInput {
   partial?: boolean
 }
 
-/** Dựng `RenderedDocument` — hàm thuần theo nghĩa I/O (chỉ tải ảnh), dùng chung cho draft/baseline. */
-async function buildDocument(input: BuildDocumentInput, deps: AssembleDeps): Promise<RenderedDocument> {
+interface BuiltDocument {
+  /** Tài liệu với ảnh ở dạng tham chiếu — đúng dạng ghi cache. */
+  refDoc: RenderedDocument
+  images: ImageLoadResult
+}
+
+/** Dựng tài liệu dạng tham chiếu + kết quả tải ảnh — hàm thuần theo nghĩa I/O (chỉ tải ảnh), dùng chung cho draft/baseline. */
+async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps): Promise<BuiltDocument> {
   const { projectId, projectName, spine, source, version } = input
-  const imageResult = await preloadDiagramPngs(projectId, spine, deps.loadDiagramPng)
-  deps.onImagesLoaded?.(imageResult)
+  const images = await preloadDiagramPngs(projectId, spine, deps.loadDiagramPng)
+  deps.onImagesLoaded?.(images)
 
   const { numbers, unassignedNumber, hasUnassigned } = buildNumberMap(spine)
   const states = computeSectionStates(spine, input.statusChanges)
-  const sections = buildSections(spine, imageResult.loaded, numbers, states, {
+  const sections = buildSections(spine, numbers, states, {
     partial: input.partial ?? false,
     unassignedNumber,
     hasUnassigned
@@ -481,7 +499,7 @@ async function buildDocument(input: BuildDocumentInput, deps: AssembleDeps): Pro
   const findings = await runConsistencyPass(spine, sections)
   deps.onConsistencyFindings?.(findings)
 
-  const doc: RenderedDocument = {
+  const refDoc: RenderedDocument = {
     projectId,
     projectName,
     version,
@@ -491,8 +509,32 @@ async function buildDocument(input: BuildDocumentInput, deps: AssembleDeps): Pro
     recordOfChanges: buildRecordOfChanges(input.recordChanges, deps.resolveInCharge),
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states)
   }
-  if (source === "draft") doc.watermark = "DRAFT"
-  return doc
+  if (source === "draft") refDoc.watermark = "DRAFT"
+  return { refDoc, images }
+}
+
+/** Dựng `RenderedDocument` sẵn ảnh (PNG thật hoặc placeholder) — cho writer/test gọi trực tiếp, không qua cache. */
+async function buildDocument(input: BuildDocumentInput, deps: AssembleDeps): Promise<RenderedDocument> {
+  const { refDoc, images } = await buildDocumentParts(input, deps)
+  return materializeImages(refDoc, resolveLoaded(images))
+}
+
+/**
+ * Trúng cache: kiểm lại **chỉ** các id đã ghi là thiếu (danh sách nhỏ) — PNG được khôi phục sau đó (không đổi
+ * `spine_version`) thì finding tự hết thay vì báo thiếu mãi; danh sách thu hẹp được ghi lại vào cache.
+ */
+const recheckMissingImages = async (
+  projectId: string,
+  cacheId: unknown,
+  recorded: readonly string[],
+  load: DiagramPngLoader
+): Promise<string[]> => {
+  if (recorded.length === 0) return []
+  const { missing } = await loadDiagramPngs(projectId, recorded, load)
+  if (missing.length !== recorded.length) {
+    await RenderedDocumentCache.updateOne({ _id: cacheId }, { $set: { missing_diagram_ids: missing } })
+  }
+  return missing
 }
 
 // ─── POST /projects/:id/assemble ────────────────────────────────
@@ -530,7 +572,14 @@ export async function assemble(
     // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài.
     const parsed = renderedDocumentSchema.safeParse(cached.doc)
     if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
-    return { spine_version: record.spine_version, sections: countRealSections(parsed.data.sections), generated_at: parsed.data.generatedAt, findings: [] }
+    // Trúng cache vẫn báo ảnh thiếu — client gọi lại cùng version không bị mất lý do; ảnh đã có lại thì hết báo
+    const stillMissing = await recheckMissingImages(projectId, cached._id, cached.missing_diagram_ids ?? [], merged.loadDiagramPng)
+    return {
+      spine_version: record.spine_version,
+      sections: countRealSections(parsed.data.sections),
+      generated_at: parsed.data.generatedAt,
+      findings: missingImageFindings(stillMissing)
+    }
   }
 
   const { projectId: _projectId, ...spine } = record
@@ -538,9 +587,8 @@ export async function assemble(
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges)
 
-  let imageResult: ImageLoadResult | undefined
   let findings: ConsistencyFinding[] = []
-  const doc = await buildDocument(
+  const { refDoc, images } = await buildDocumentParts(
     {
       projectId,
       projectName,
@@ -553,31 +601,30 @@ export async function assemble(
     {
       ...merged,
       resolveInCharge,
-      onImagesLoaded: (r) => {
-        imageResult = r
-      },
       onConsistencyFindings: (f) => {
         findings = f
       }
     }
   )
 
-  if (imageResult && imageResult.missing.length > 0) {
-    // T15 review C3: ảnh thiếu không chặn assemble, nhưng KHÔNG cache bản thiếu ảnh — lần sau thử lại.
-    console.warn(`[assemble] ${imageResult.missing.length} diagram PNG chưa tải được cho project ${projectId} — không ghi cache`)
-  } else {
-    await upsertCache(
-      { projectId, spine_version: record.spine_version },
-      {
-        assembled_at_version: record.spine_version,
-        generated_at: new Date(doc.generatedAt),
-        doc: stripImagesForCache(doc, imageResult?.loaded ?? new Map())
-      }
-    )
-    await pruneOldDraftCache(projectId)
-  }
+  warnMissingImages(images, `project ${projectId}`)
+  await upsertCache(
+    { projectId, spine_version: record.spine_version },
+    {
+      assembled_at_version: record.spine_version,
+      generated_at: new Date(refDoc.generatedAt),
+      doc: refDoc,
+      missing_diagram_ids: images.missing
+    }
+  )
+  await pruneOldDraftCache(projectId)
 
-  return { spine_version: record.spine_version, sections: countRealSections(doc.sections), generated_at: doc.generatedAt, findings }
+  return {
+    spine_version: record.spine_version,
+    sections: countRealSections(refDoc.sections),
+    generated_at: refDoc.generatedAt,
+    findings: [...findings, ...missingImageFindings(images.missing)]
+  }
 }
 
 // ─── GET /projects/:id/document, GET /projects/:id/export/word ──
@@ -632,8 +679,7 @@ const getBaselineDocument = async (
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges)
 
-  let imageResult: ImageLoadResult | undefined
-  const doc = await buildDocument(
+  const { refDoc, images } = await buildDocumentParts(
     {
       projectId,
       projectName,
@@ -643,25 +689,15 @@ const getBaselineDocument = async (
       source: "baseline",
       version: String(baseline.version)
     },
-    {
-      ...deps,
-      resolveInCharge,
-      onImagesLoaded: (r) => {
-        imageResult = r
-      }
-    }
+    { ...deps, resolveInCharge }
   )
 
-  if (imageResult && imageResult.missing.length > 0) {
-    console.warn(`[assemble] ${imageResult.missing.length} diagram PNG chưa tải được cho baseline ${baselineIdStr} — không ghi cache`)
-  } else {
-    await upsertCache(cacheFilter, {
-      generated_at: new Date(doc.generatedAt),
-      doc: stripImagesForCache(doc, imageResult?.loaded ?? new Map())
-    })
-  }
+  // Cache dạng tham chiếu kể cả khi thiếu PNG: baseline đã ký không bị "placeholder vĩnh viễn" vì mỗi lần đọc
+  // đều thử tải lại ảnh (rehydrateImages) — PNG có sau ⇒ ảnh thật mà không cần dựng lại.
+  warnMissingImages(images, `baseline ${baselineIdStr}`)
+  await upsertCache(cacheFilter, { generated_at: new Date(refDoc.generatedAt), doc: refDoc, missing_diagram_ids: images.missing })
 
-  return doc
+  return materializeImages(refDoc, resolveLoaded(images))
 }
 
 export async function getDocument(

@@ -66,7 +66,10 @@ export interface SectionRenderContext {
   number: string
   status?: RenderedSectionStatus
   awaiting_reaccept?: boolean
-  /** Ảnh PNG base64 theo diagram id — đã tải sẵn (test tiêm `Map.get` giả, không cần GridFS). */
+  /**
+   * Ô `png` cho diagram id — assemble thật tiêm tham chiếu `diagram-ref:<id>` (phân giải thành PNG thật hoặc
+   * placeholder lúc trả về, xem `assemble.service.ts`); test có thể tiêm thẳng base64. `undefined` ⇒ bỏ ảnh.
+   */
   diagramPng: (diagramId: string) => string | undefined
   /** Số hiệu của section khác (khoá logic → số hiển thị) — dùng khi cần trỏ chéo, cấm số cứng. */
   numberOf: (logicalSectionId: string) => string | undefined
