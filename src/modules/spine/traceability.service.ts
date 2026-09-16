@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────────
  * Traceability map READ-ONLY (UC 6.7, srs-spine.md §9): "thực thể này liên quan tới những gì".
  * Đồ thị dựng từ chính `reference_fields[]` (§4.1) — KHÔNG có bảng quan hệ chép tay thứ hai, và
- * KHÔNG phải "source link về tài liệu upload" như `modules/specification/traceability.service.ts`
+ * KHÔNG phải "source link về tài liệu upload" như module specification cũ
  * (khái niệm cũ, C4 trong audit; file cũ xoá ở T21).
  *
  * Chỉ 8 loại thực thể có mặt trong `traceabilityEntitySchema` (pipeline.dto.ts) thành node. `roles[]`
