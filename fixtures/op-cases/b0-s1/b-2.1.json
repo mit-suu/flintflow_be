@@ -1,0 +1,31 @@
+{
+  "step_id": "B-2.1",
+  "skill_id": "product-brief",
+  "notes": "Assumption sweep: user xác nhận AS01 và AS02, để AS03 lại.",
+  "ops": [
+    {
+      "op": "set",
+      "path": "assumptions[id=AS01].status",
+      "value": "confirmed",
+      "reason": "B-2.1 user xác nhận"
+    },
+    {
+      "op": "set",
+      "path": "assumptions[id=AS01].confirmed_at",
+      "value": "2026-09-16T00:00:00.000Z",
+      "reason": "B-2.1"
+    },
+    {
+      "op": "set",
+      "path": "assumptions[id=AS02].status",
+      "value": "confirmed",
+      "reason": "B-2.1 user xác nhận"
+    },
+    {
+      "op": "set",
+      "path": "assumptions[id=AS02].confirmed_at",
+      "value": "2026-09-16T00:00:00.000Z",
+      "reason": "B-2.1"
+    }
+  ]
+}

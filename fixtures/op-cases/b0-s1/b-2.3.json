@@ -1,0 +1,37 @@
+{
+  "step_id": "B-2.3",
+  "skill_id": "product-brief",
+  "notes": "Three-lens: mỗi lăng kính ra một op, không chỉ ba đoạn văn.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR04",
+        "kind": "risk",
+        "statement": "The brief assumes clients accept an AI-assisted document without a human sign-off step."
+      },
+      "reason": "B-2.3 skeptic"
+    },
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR05",
+        "kind": "open_question",
+        "statement": "Could the structured data behind the document be sold as an API?"
+      },
+      "reason": "B-2.3 opportunity"
+    },
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR06",
+        "kind": "risk",
+        "statement": "Production stakes imply personal data handling that the brief has not addressed."
+      },
+      "reason": "B-2.3 contextual"
+    }
+  ]
+}

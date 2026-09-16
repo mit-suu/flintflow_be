@@ -1,0 +1,17 @@
+{
+  "step_id": "S-1.3",
+  "skill_id": "brief-analysis",
+  "notes": "Xung đột: bản đầu không cộng tác nhưng persona reviewer hàm ý nhiều người.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "other_requirements[]",
+      "value": {
+        "id": "OR07",
+        "kind": "open_question",
+        "statement": "The first release excludes collaboration, yet a reviewer persona is named — does the reviewer need an account?"
+      },
+      "reason": "S-1.3 conflict"
+    }
+  ]
+}
