@@ -1,14 +1,15 @@
-import mongoose from "mongoose"
-import { Project, IProject, ProjectStatus } from "./project.model.js"
+import { Project, IProject } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
-import { Section } from "../specification/section.model.js"
+import { destroyDocumentAsset } from "./project-document.storage.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Spine } from "../spine/spine.model.js"
 import { Change } from "../spine/change.model.js"
 import { Baseline } from "../spine/baseline.model.js"
 import { Usage } from "../spine/usage.model.js"
+import { RenderedDocumentCache } from "../render/rendered-document.model.js"
+import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
 
 export const createProject = async (
   userId: string,
@@ -19,19 +20,10 @@ export const createProject = async (
     userId,
     name,
     domain: domain || null,
-    status: "active",
-    currentStep: "vision_problem",
-    progressPercent: 0
+    status: "active"
   })
   await spineRepository.getOrCreate(project.id, { name, domain: domain || null })
   return project
-}
-
-/**
- * List projects by status (legacy helper — wraps getProjects).
- */
-export const listProjects = async (userId: string, status: ProjectStatus = "active"): Promise<IProject[]> => {
-  return Project.find({ userId: new mongoose.Types.ObjectId(userId), status }).sort({ updatedAt: -1 })
 }
 
 export const getProjects = async (userId: string, status?: string): Promise<IProject[]> => {
@@ -53,39 +45,62 @@ export const getProjectById = async (
   return project
 }
 
+/**
+ * Dọn mọi dữ liệu thuộc project khi xoá cứng: Spine và các collection tách riêng của nó (changes,
+ * baselines chứa snapshot lớn, usages), bản render đã cache, file sơ đồ trong GridFS, tài liệu upload
+ * cùng file gốc trên Cloudinary.
+ *
+ * Notification và PaymentIntent KHÔNG xoá: chúng thuộc user (không có `projectId`) — lịch sử thanh toán
+ * và credit không được mất theo project.
+ */
+const purgeProjectData = async (projectId: string): Promise<void> => {
+  const [spine, documents] = await Promise.all([
+    spineRepository.get(projectId),
+    ProjectDocument.find({ projectId }).select("cloudinaryPublicId").lean()
+  ])
+
+  await Promise.all([
+    ChatSession.deleteMany({ projectId }),
+    ProjectDocument.deleteMany({ projectId }),
+    Spine.deleteMany({ projectId }),
+    Change.deleteMany({ projectId }),
+    Baseline.deleteMany({ projectId }),
+    Usage.deleteMany({ projectId }),
+    RenderedDocumentCache.deleteMany({ projectId })
+  ])
+
+  // File ngoài collection: lỗi ở đây không được làm hỏng việc xoá đã xong ở trên
+  for (const diagram of spine?.diagrams ?? []) {
+    await gridFsDiagramStore.remove(projectId, diagram.id).catch((err: unknown) => {
+      console.warn(`[Project] Không xoá được file sơ đồ ${diagram.id} của project ${projectId}:`, err)
+    })
+  }
+  for (const doc of documents) await destroyDocumentAsset(doc.cloudinaryPublicId)
+}
+
 export const deleteProject = async (
   projectId: string,
   userId: string,
   hard: boolean = false
-): Promise<any> => {
+): Promise<IProject | { _id: string; status: "deleted" }> => {
   if (hard) {
     const project = await Project.findOneAndDelete({ _id: projectId, userId })
     if (!project) {
       throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     }
-    // Dọn mọi dữ liệu thuộc project, gồm Spine và các collection tách riêng của nó
-    // (changes, baselines chứa snapshot lớn, usages) để không để lại document mồ côi
-    await Promise.all([
-      ChatSession.deleteMany({ projectId }),
-      ProjectDocument.deleteMany({ projectId }),
-      Section.deleteMany({ projectId }),
-      Spine.deleteMany({ projectId }),
-      Change.deleteMany({ projectId }),
-      Baseline.deleteMany({ projectId }),
-      Usage.deleteMany({ projectId })
-    ])
+    await purgeProjectData(projectId)
     return { _id: projectId, status: "deleted" }
-  } else {
-    const project = await Project.findOneAndUpdate(
-      { _id: projectId, userId },
-      { status: "archived" },
-      { new: true }
-    )
-    if (!project) {
-      throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
-    }
-    return project
   }
+
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId, userId },
+    { status: "archived" },
+    { new: true }
+  )
+  if (!project) {
+    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  }
+  return project
 }
 
 export const updateProjectName = async (
@@ -102,18 +117,4 @@ export const updateProjectName = async (
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
   return project
-}
-
-/**
- * Rename a project (legacy — delegates to updateProjectName).
- */
-export const renameProject = async (userId: string, id: string, name: string): Promise<IProject> => {
-  return updateProjectName(id, userId, name)
-}
-
-/**
- * Archive a project (legacy — delegates to deleteProject with hard=false).
- */
-export const archiveProject = async (userId: string, id: string): Promise<void> => {
-  await deleteProject(id, userId, false)
 }

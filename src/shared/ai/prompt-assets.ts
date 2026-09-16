@@ -12,7 +12,7 @@
  *   - Prompt phẳng (`assets/prompts/*.md`): chỉ còn cho action ngoài pipeline
  *     (`chat`, `summarize_document`) và action legacy chờ T21 gỡ.
  *
- * Module này là nơi DUY NHẤT parse frontmatter của asset. `seed-from-md.ts`,
+ * Module này là nơi DUY NHẤT parse frontmatter của asset.
  * `prompt-registry.service.ts` và admin controller đều gọi vào đây.
  */
 

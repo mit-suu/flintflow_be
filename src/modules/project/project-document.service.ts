@@ -3,6 +3,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ProjectDocument } from "./project-document.model.js"
 import { getProjectById } from "./project.service.js"
 import { uploadFileToCloudinary } from "../../shared/utils/cloudinary.js"
+import { destroyDocumentAsset } from "./project-document.storage.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 
@@ -197,4 +198,5 @@ export const deleteProjectDocument = async (
   }
 
   await ProjectDocument.deleteOne({ _id: documentId, projectId })
+  await destroyDocumentAsset(document.cloudinaryPublicId)
 }
