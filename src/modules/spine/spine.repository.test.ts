@@ -132,6 +132,20 @@ describe("getOrCreate / get", () => {
     expect(again.project.name).toBe("Lumen")
   })
 
+  it("listBaselineRefs: chỉ id + snapshot_ref của baselines[]; chưa có Spine ⇒ []", async () => {
+    expect(await repo.listBaselineRefs(PROJECT)).toEqual([])
+
+    const created = await repo.getOrCreate(PROJECT)
+    await repo.saveWithVersion(
+      {
+        ...created,
+        baselines: [{ id: "BL001", version: "v1.0", at: "2026-09-16T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }]
+      },
+      1
+    )
+    expect(await repo.listBaselineRefs(PROJECT)).toEqual([{ id: "BL001", snapshot_ref: "650000000000000000000099" }])
+  })
+
   it("upsert đồng thời dính unique index thì đọc lại bản đã tạo", async () => {
     await repo.getOrCreate(PROJECT)
     vi.spyOn(db.Spine, "findOneAndUpdate").mockRejectedValueOnce(db.duplicateKey())
