@@ -117,6 +117,7 @@ vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
 vi.mock("../spine/spine.repository.js", () => ({
   get: vi.fn(),
+  listBaselineRefs: vi.fn(),
   listChanges: vi.fn(),
   SPINE_VERSION_CONFLICT: "SPINE_VERSION_CONFLICT",
   SPINE_NOT_FOUND: "SPINE_NOT_FOUND"
@@ -166,6 +167,8 @@ beforeEach(() => {
   changeDb.reset()
   userDb.reset()
   vi.mocked(spineRepository.get).mockReset()
+  vi.mocked(spineRepository.listBaselineRefs).mockReset()
+  vi.mocked(spineRepository.listBaselineRefs).mockResolvedValue([])
   vi.mocked(spineRepository.listChanges).mockReset()
   vi.mocked(spineRepository.listChanges).mockResolvedValue([])
 })
@@ -353,6 +356,27 @@ describe("getDocument() — source=baseline", () => {
 
     const baselineCacheDocs = cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)
     expect(baselineCacheDocs).toHaveLength(1)
+  })
+
+  it("baseline_id dạng BLnnn (mã của /baseline, /baselines) phân giải qua Spine.baselines[].snapshot_ref ⇒ cùng Baseline._id", async () => {
+    vi.mocked(spineRepository.listBaselineRefs).mockResolvedValue([{ id: "BL001", snapshot_ref: BASELINE_ID }])
+    baselineDb.findOne.mockResolvedValue({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 0, snapshot: baseSpine() })
+
+    const doc = await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: "BL001" })
+    expect(doc.version).toBe("v1.0")
+    expect(baselineDb.findOne).toHaveBeenCalledWith({ projectId: PROJECT, _id: BASELINE_ID }, null, expect.objectContaining({ lean: true }))
+    // _id Mongo vẫn nhận như cũ, không cần đọc Spine; hai dạng id dùng chung một bản cache theo Baseline._id
+    vi.mocked(spineRepository.listBaselineRefs).mockClear()
+    await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID })
+    expect(spineRepository.listBaselineRefs).not.toHaveBeenCalled()
+    expect(cacheDb.docs.filter((d) => d.baseline_id === BASELINE_ID)).toHaveLength(1)
+  })
+
+  it("BLnnn không có trong Spine.baselines[], hoặc snapshot_ref không phải ObjectId ⇒ 404 BASELINE_NOT_FOUND, không tra Baseline", async () => {
+    vi.mocked(spineRepository.listBaselineRefs).mockResolvedValue([{ id: "BL001", snapshot_ref: "x" }])
+    await expect(getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: "BL999" })).rejects.toMatchObject({ statusCode: 404, code: "BASELINE_NOT_FOUND" })
+    await expect(getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: "BL001" })).rejects.toMatchObject({ statusCode: 404, code: "BASELINE_NOT_FOUND" })
+    expect(baselineDb.findOne).not.toHaveBeenCalled()
   })
 
   it("review T2: Baseline.snapshot hỏng ⇒ 422 BASELINE_SNAPSHOT_INVALID", async () => {

@@ -104,6 +104,21 @@ export const get = async (projectId: string): Promise<SpineRecord | null> => {
   return doc ? parseRecord(doc) : null
 }
 
+const baselineRefsSchema = z.array(z.object({ id: z.string().min(1), snapshot_ref: z.string().min(1) }))
+
+export type BaselineRef = z.infer<typeof baselineRefsSchema>[number]
+
+/**
+ * Chỉ `baselines[].{id, snapshot_ref}` — đủ để đổi mã `BLnnn` sang `Baseline._id` (render) mà không nạp
+ * và validate cả Spine cho một lượt đọc baseline. Chưa có Spine, hoặc phần này sai schema ⇒ `[]`
+ * (người gọi trả 404), không để ZodError lọt ra HTTP.
+ */
+export const listBaselineRefs = async (projectId: string): Promise<BaselineRef[]> => {
+  const doc = await SpineModel.findOne({ projectId }, { "baselines.id": 1, "baselines.snapshot_ref": 1 }, { lean: true })
+  const parsed = baselineRefsSchema.safeParse(doc?.baselines ?? [])
+  return parsed.success ? parsed.data : []
+}
+
 /**
  * Trả Spine của project, tạo Spine rỗng nếu chưa có. Idempotent:
  * upsert với `$setOnInsert` nên gọi lại không ghi đè dữ liệu đã có.
