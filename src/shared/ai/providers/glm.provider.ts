@@ -2,6 +2,7 @@ import OpenAI from "openai"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { LLMResponse } from "./provider.types.js"
+import { modalBaseUrl } from "./modal.config.js"
 
 /**
  * GLM-5.x (Modal) có thể trả phần suy nghĩ ngay trong `content`, kết thúc bằng `</think>`, trước câu trả lời thật —
@@ -48,9 +49,7 @@ export const callGLM = async (
     )
   }
 
-  const baseURL =
-    env.MODAL_BASE_URL ||
-    "https://trantuanhiep28122003--ep-mary-flintflow-analysis-server.us-west.modal.direct/v1"
+  const baseURL = modalBaseUrl()
 
   const client = new OpenAI({
     baseURL,

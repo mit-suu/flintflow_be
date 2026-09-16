@@ -365,3 +365,95 @@ Tokens in trung bình mỗi step có draft: 1/3 đầu **3 480**, 1/3 cuối **4
 
 </details>
 <!-- T22:measure-tokens:end -->
+
+## M4 — một project mới đi trọn B-0.1 → S-9.5 với provider thật (2026-09-16)
+
+Mốc **M4** của `claude_plan/plan-overview.md` §5, hoãn từ Wave 4, chạy sau khi T22 xong.
+
+Cách chạy: `npm run run:pipeline -- --waive-blocking` (`src/scripts/run-full-pipeline.ts`, T24) trên BE dev
+(`:5000`) + Mongo thật + PlantUML thật, provider **thật** (`glm` / GLM-5.3-Flash trên Modal, `reasoning_effort:
+"low"`). Script tự đăng nhập → tạo project → mỗi step `POST /run` (SSE) → trả lời `answer_needed` → `POST /gate
+accept` → `POST /assemble` → `GET /export/word` → `POST /baseline`. **Không** dùng fixture op-case, **không**
+mock, **không** ghi thẳng vào Spine.
+
+Sản phẩm dùng để chạy: **MediQueue** — đặt lịch khám và quản lý hàng chờ cho chuỗi phòng khám đa khoa
+(Brief nằm trong chính script, cố ý không phải FlintFlow để model không chép lại ví dụ có sẵn trong skill).
+Mọi câu hỏi Elicit được trả lời tự động: lượt đầu nhận trọn Brief, các lượt sau nhận một câu hướng dẫn
+"dùng Brief + tài liệu đã có, thiếu thì tự chọn rồi ghi thành assumption".
+
+### Kết quả
+
+| | |
+| --- | --- |
+| Step accepted | **66 / 81** (15 step còn lại là vòng S-5 của 3 màn `placeholder`, `nextStep` bỏ qua) |
+| Lượt gọi model | **72** (48 step có gọi; 2 lượt bị refund) |
+| Tokens in / out | **292 572 / 46 629** |
+| Credit | **225** |
+| Retry schema | **3 / 74** lượt gọi (`attempt > 1`) |
+| Tokens in lớn nhất một lượt | **7 220** |
+| Thời gian mỗi step | 1–75 s (step không gọi model 1–6 s) |
+| Assemble | 33 section |
+| Word | 93 KB |
+| Baseline | **`v1.0-conditional`**, 59 cờ được waive |
+
+| Phase | Step có gọi model | Lượt gọi | Tokens in | Tokens out | Credit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| B-0 | 4 | 6 | 16 566 | 2 918 | 18 |
+| B-1 | 6 | 9 | 37 846 | 7 415 | 30 |
+| B-2 | 3 | 6 | 30 853 | 2 610 | 18 |
+| S-1 | 4 | 6 | 31 071 | 2 526 | 18 |
+| S-2 | 4 | 6 | 17 125 | 1 227 | 18 |
+| S-3 | 5 | 7 | 26 868 | 5 244 | 22 |
+| S-4 | 5 | 7 | 23 599 | 7 109 | 22 |
+| S-5 | 6 | 9 | 41 771 | 6 242 | 30 |
+| S-6 | 5 | 7 | 27 771 | 4 381 | 22 |
+| S-7 | 4 | 6 | 26 062 | 3 977 | 18 |
+| S-8 | 1 | 2 | 7 361 | 1 218 | 5 |
+| S-9 | 1 | 1 | 5 679 | 1 762 | 4 |
+| **Tổng** | **48** | **72** | **292 572** | **46 629** | **225** |
+
+### Nội dung sinh ra
+
+5 màn (2 chi tiết, 3 `placeholder`) · 11 function · 3 actor · 11 use case · 6 entity · 19 NFR ·
+9 business rule · 4 mục glossary · 57 assumption. **6/6 diagram `render_status: "ok"`**
+(context, use case, ERD, screen flow, authorization, sequence).
+
+### Cờ lúc ký baseline
+
+`POST /baseline` **bị chặn đúng như thiết kế** (`422 BASELINE_BLOCKED`) rồi mới ký được sau khi waive:
+
+| Số | Mức | Luật |
+| ---: | --- | --- |
+| 55 | đỏ | `unconfirmed_assumption` |
+| 17 | đỏ | `section_empty` |
+| 11 | đỏ | `array_empty` |
+| 4 | đỏ | `section_stale_at_baseline` |
+| 2 | đỏ | `nfr_missing_number` |
+| 11 | vàng | `usecase_no_function` |
+| 2 | vàng | `goal_not_covered` |
+| 1 | vàng | `role_no_actor` |
+
+**55 cờ `unconfirmed_assumption` là hệ quả của cách trả lời tự động, không phải lỗi sản phẩm**: script
+luôn bảo model "thiếu thì tự chọn rồi ghi thành assumption", và B-2.1 (Assumption Sweep) được accept mà
+không xác nhận cái nào. Người dùng thật trả lời B-2.1 sẽ đóng phần lớn số này. `section_empty` /
+`array_empty` rơi vào các section của màn `placeholder` và phụ lục chưa có nội dung — đúng hình của một
+project đi nhanh.
+
+### Điều học được
+
+- **Một project đi trọn tốn ~225 credit / ~293k token in / ~47k token out.** So với ngoại suy của
+  `measure:tokens` (411 credit cho fixture 19 màn, 20 vòng S-5) thì con số này hợp lý: project M4 chỉ có
+  5 màn và 2 vòng S-5 chi tiết.
+- **Projection giữ input phẳng.** Lượt gọi nặng nhất 7 220 token in, và phase cuối (S-7, S-9) không cao
+  hơn phase đầu — không có dấu hiệu tăng bậc hai theo tiến độ, đúng như `measure:tokens` đo trên fixture.
+- **Độ tin cậy schema tốt**: 3/74 lượt gọi phải retry, không lượt nào chạm trần `MAX_SCHEMA_RETRIES`.
+- **Hai lỗi thật lộ ra trong lượt chạy này**, cả hai đã sửa trong T24:
+  1. `B-2.3` đọc `assumptions[status=unconfirmed]` (mảng đã **lọc**), nên các assumption vừa được B-2.1
+     xác nhận biến mất khỏi projection và model đặt trùng id (`AS10 đã tồn tại`, hỏng 3/3 lượt →
+     `NEEDS_USER_INPUT`). Sửa ở `context-projection.ts`: chỉ bỏ qua việc thêm danh sách id khi step đọc
+     **trọn** `assumptions`.
+  2. `progress.current_step` chỉ được ghi lúc `/run` bắt đầu, không phải lúc gate accept — chạy tiếp một
+     project dở theo con trỏ đó sẽ gặp `STEP_NOT_RUNNABLE`. Script tự tính step tới lượt theo đúng luật
+     `nextStep()`; xem `docs/spec-gaps.md`.
+- Model dùng **hai kiểu id function trong cùng một project** (`FN01` rồi `FN002`). Không vi phạm bất biến
+  nào (id chỉ cần duy nhất) nhưng nhìn lệch trong tài liệu — ghi vào `docs/spec-gaps.md`.
