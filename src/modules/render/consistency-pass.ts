@@ -17,7 +17,7 @@ import { findDeadReferences } from "../spine/reference-fields.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { Block, RenderedSection } from "./rendered-document.types.js"
 
-export type ConsistencyRule = "dead_reference" | "duplicate_section_number" | "undefined_term"
+export type ConsistencyRule = "dead_reference" | "duplicate_section_number" | "undefined_term" | "diagram_png_missing"
 
 export interface ConsistencyFinding {
   rule: ConsistencyRule
@@ -25,6 +25,18 @@ export interface ConsistencyFinding {
   path?: string
   section_id?: string
 }
+
+/**
+ * Sơ đồ `render_status = "ok"` nhưng PNG không tải được lúc assemble: tài liệu dùng ảnh placeholder cho tới
+ * khi PNG có (render lại với `force`, hoặc khôi phục file store). Trả qua `meta.consistency` của
+ * `POST /assemble` để client biết vì sao thay vì 200 im lặng (assemble.service.ts).
+ */
+export const missingImageFindings = (diagramIds: readonly string[]): ConsistencyFinding[] =>
+  diagramIds.map((id) => ({
+    rule: "diagram_png_missing" as const,
+    path: `diagrams[id=${id}]`,
+    message: `Diagram ${id} has no PNG yet — a placeholder image is used until it is rendered`
+  }))
 
 /** `true` chỉ khi biến môi trường được đặt đúng chuỗi — mặc định tắt (S-8.4 nhánh LLM là stub). */
 export const CONSISTENCY_LLM_ENABLED = process.env.CONSISTENCY_LLM_ENABLED === "true"
