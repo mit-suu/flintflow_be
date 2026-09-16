@@ -12,8 +12,6 @@ import userRoutes from "./modules/user/user.route.js"
 import aiActionRoutes from "./shared/ai/ai-action.route.js"
 import adminRoutes from "./modules/admin/admin.route.js"
 import projectRoutes from "./modules/project/project.route.js"
-import specificationRoutes from "./modules/specification/specification.route.js"
-import verificationRoutes from "./modules/verification/verification-context.route.js"
 import notificationRoutes from "./modules/notification/notification.route.js"
 import billingRoutes from "./modules/billing/billing.route.js"
 import spineRoutes from "./modules/spine/spine.route.js"
@@ -134,8 +132,6 @@ app.use("/api/v1/projects", baselineRoutes)
 // review C1) — không mount exportRoutes ở /api/v1/projects nữa (trùng mount từng lộ thêm
 // POST /projects/word/preview và GET /projects/:projectId/export/word/export/word).
 app.use("/api/v1/projects", renderRoutes)
-app.use("/api/v1/specifications", specificationRoutes)
-app.use("/api/v1/verification", verificationRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/export", exportRoutes)

@@ -17,8 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed:fixture": "tsx src/scripts/seed-fixture.ts",
-    "seed:md": "tsx src/scripts/seed-from-md.ts",
-    "seed:md:dry": "tsx src/scripts/seed-from-md.ts --dry-run",
+    "migrate:sections": "tsx src/scripts/migrate-sections-to-spine.ts",
     "schema:export": "tsx src/scripts/export-schema.ts"
   },
   "dependencies": {
