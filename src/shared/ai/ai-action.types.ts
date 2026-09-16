@@ -66,10 +66,12 @@ export interface AiActionResult<T = any> {
 }
 
 export interface AiProviderConfig {
-  provider: "openai" | "anthropic" | "gemini" | "glm" | "modal" | string
+  provider: "openai" | "anthropic" | "gemini" | "glm" | "modal" | "mock" | string
   model: string
   maxTokens?: number
   temperature?: number
+  /** `call_kind` của lượt gọi. Provider thật bỏ qua; `mock` dùng nó để trả đúng schema đầu ra (T24). */
+  actionType?: string
 }
 
 export class AiActionError extends Error {

@@ -1,3 +1,4 @@
+import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { LLMResponse } from "./provider.types.js"
 import { callOpenAI } from "./openai.provider.js"
@@ -10,7 +11,9 @@ export const callLLM = async (
   prompt: string,
   providerConfig: AiProviderConfig
 ): Promise<LLMResponse> => {
-  const provider = (providerConfig.provider || "openai").toLowerCase()
+  // `AI_PROVIDER_OVERRIDE` đè frontmatter của skill cho MỌI lượt gọi. Chỉ để CI / smoke test chạy hết
+  // một step mà không gọi mạng (`mock`); mọi môi trường thật để trống (T24, `docs/ops.md`).
+  const provider = (env.AI_PROVIDER_OVERRIDE || providerConfig.provider || "openai").toLowerCase()
 
   switch (provider) {
     case "openai":
