@@ -1,54 +1,51 @@
 /**
  * changes.controller.ts
  * ─────────────────────────────────────────────────────────────────
- * POST /projects/:projectId/changes          áp lô op thuần (T08); nhánh `instruction` là T17
- * POST /projects/:projectId/changes/preview  diff đầy đủ cascade, không ghi
- * Hợp đồng: docs/api/pipeline-contract.md, DTO: modules/pipeline/pipeline.dto.ts.
+ * Sáu endpoint của luồng sửa (hợp đồng `docs/api/pipeline-contract.md` §1, endpoint 7–11 và 15):
+ *   POST /projects/:id/changes          áp lô — `ops` thuần (T08) hoặc `instruction` qua skill (T17)
+ *   POST /projects/:id/changes/preview  diff đầy đủ cascade + phạm vi ảnh hưởng, không ghi
+ *   POST /projects/:id/reconcile        hoà giải một lượt: lượt 1 preview gộp, lượt 2 áp
+ *   POST /projects/:id/undo             hoàn tác lô gần nhất
+ *   GET  /projects/:id/changes          lịch sử theo seq
+ *   GET  /projects/:id/traceability     bản đồ liên kết read-only
+ *
+ * Controller chỉ: xác thực quyền sở hữu → parse DTO → gọi service → map lỗi sang envelope.
+ * Nghiệp vụ nằm ở `change.service.ts`, `reconcile.service.ts`, `undo.service.ts`, `traceability.service.ts`.
  */
 
-import { randomUUID } from "node:crypto"
 import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
+import * as changeService from "./change.service.js"
+import * as reconcileService from "./reconcile.service.js"
+import * as undoService from "./undo.service.js"
 import * as spineRepository from "./spine.repository.js"
-import { TransactionRejectedError, applyTransaction, previewTransaction } from "./op-engine.js"
-import { OP_INVALID, type Op, type PreviewResult, type Transaction, type Violation } from "./op.types.js"
-import { PathError, parsePath } from "./path-resolver.js"
-import { changesRequestSchema, type ChangesRequest } from "../pipeline/pipeline.dto.js"
+import { trace, type TraceEntity } from "./traceability.service.js"
+import { TransactionRejectedError } from "./op-engine.js"
+import {
+  changesQuerySchema,
+  changesRequestSchema,
+  reconcileRequestSchema,
+  traceabilityQuerySchema,
+  undoRequestSchema
+} from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
-/**
- * Gốc path do hệ thống quản lý — user không sửa trực tiếp qua `/changes`:
- * cờ đi qua `/flags` (waive/recompute), step/progress qua step runner và gate, baseline qua `/baseline`,
- * section và diagram do engine/render ghi.
- */
-export const SYSTEM_MANAGED_ROOTS: ReadonlySet<string> = new Set(["flags", "steps", "progress", "baselines", "sections", "diagrams"])
-
-export const notWritableViolations = (ops: readonly Op[]): Violation[] =>
-  ops.flatMap((op, index): Violation[] => {
-    let root: string
-    try {
-      root = parsePath(op.path)[0].key
-    } catch (err) {
-      // Path sai cú pháp: để engine báo path_invalid kèm op_index
-      if (err instanceof PathError) return []
-      throw err
-    }
-    if (!SYSTEM_MANAGED_ROOTS.has(root)) return []
-    return [{ rule: "path_not_writable", path: op.path, op_index: index, message: `"${root}" do hệ thống quản lý, không sửa trực tiếp qua /changes` }]
-  })
+export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
 
 interface Authorized {
   projectId: string
   userId: string
   init: spineRepository.SpineInit
-  body: ChangesRequest & { ops: NonNullable<ChangesRequest["ops"]> }
-  violations: Violation[]
 }
 
+/**
+ * Kiểm quyền sở hữu TRƯỚC khi đọc body: người ngoài không dò được DTO qua lỗi 400.
+ * Project không thuộc user trả 404 (không 403) — hợp đồng §0.
+ */
 const authorize = async (req: Request): Promise<Authorized> => {
   const userId = req.user?.userId
   if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
@@ -57,44 +54,75 @@ const authorize = async (req: Request): Promise<Authorized> => {
   if (!mongoose.isValidObjectId(projectId)) {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
-  // Kiểm quyền sở hữu trước khi đọc body: người ngoài không dò được DTO qua lỗi 400
   const project = await getProjectById(projectId, userId)
-
-  const parsed = changesRequestSchema.safeParse(req.body)
-  if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
-  const { ops } = parsed.data
-  if (ops === undefined) {
-    // TODO(T17): nhánh instruction đi qua skill apply-change-op
-    throw new ApiError(501, "Sửa bằng câu lệnh (instruction) chưa được hỗ trợ", "NOT_IMPLEMENTED")
-  }
-
-  return {
-    projectId,
-    userId,
-    init: { name: project.name, domain: project.domain ?? null },
-    body: { ...parsed.data, ops },
-    violations: notWritableViolations(ops)
-  }
+  return { projectId, userId, init: { name: project.name, domain: project.domain ?? null } }
 }
 
-const toTransaction = ({ userId, body }: Authorized): Transaction => ({
-  base_version: body.base_version,
-  ops: body.ops,
-  by: userId,
-  step_id: null,
-  ...(body.reason === undefined ? {} : { reason: body.reason })
-})
+const parse = <T extends z.ZodType>(schema: T, value: unknown): z.infer<T> => {
+  const parsed = schema.safeParse(value)
+  if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
+  return parsed.data
+}
 
-const sendRejected = (res: Response, err: TransactionRejectedError): Response =>
-  sendError(res, err.statusCode, err.code, err.message, { violations: err.violations, referrers: err.referrers })
+/** Lỗi có `meta` riêng theo hợp đồng §0.3 trả envelope tại chỗ; lỗi khác ném tiếp cho error handler chung. */
+const sendDomainError = (res: Response, err: unknown): Response => {
+  if (err instanceof TransactionRejectedError) {
+    return sendError(res, err.statusCode, err.code, err.message, { violations: err.violations, referrers: err.referrers })
+  }
+  if (err instanceof changeService.NeedsClarificationError) {
+    return sendError(res, err.statusCode, err.code, err.message, { clarification: err.clarification })
+  }
+  throw err
+}
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
+  const body = parse(changesRequestSchema, req.body)
   try {
-    if (auth.violations.length > 0) throw new TransactionRejectedError(OP_INVALID, auth.violations)
-    // Project cũ chưa có Spine: tạo rỗng như GET /spine để lô đầu tiên có chỗ ghi
-    await spineRepository.getOrCreate(auth.projectId, auth.init)
-    const result = await applyTransaction(auth.projectId, toTransaction(auth))
+    const result = await changeService.apply(auth.projectId, auth.userId, body, auth.init)
+    return sendSuccess(
+      res,
+      200,
+      { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
+      { branch: result.branch, impact: result.impact }
+    )
+  } catch (err) {
+    return sendDomainError(res, err)
+  }
+})
+
+export const previewChanges = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const body = parse(changesRequestSchema, req.body)
+  try {
+    return sendSuccess(res, 200, await changeService.preview(auth.projectId, auth.userId, body, auth.init))
+  } catch (err) {
+    return sendDomainError(res, err)
+  }
+})
+
+export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const body = parse(reconcileRequestSchema, req.body)
+  try {
+    const result = await reconcileService.reconcile(auth.projectId, auth.userId, body, auth.init)
+    if (!reconcileService.isReconcileApplied(result)) return sendSuccess(res, 200, result)
+    return sendSuccess(
+      res,
+      200,
+      { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
+      { branch: result.branch, impact: result.impact }
+    )
+  } catch (err) {
+    return sendDomainError(res, err)
+  }
+})
+
+export const undoLastChange = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const body = parse(undoRequestSchema, req.body)
+  try {
+    const result = await undoService.undoLast(auth.projectId, auth.userId, { base_version: body.base_version })
     return sendSuccess(res, 200, {
       txn: result.txn,
       spine_version: result.spine_version,
@@ -102,26 +130,25 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
       spine: result.spine
     })
   } catch (err) {
-    if (err instanceof TransactionRejectedError) return sendRejected(res, err)
-    throw err
+    return sendDomainError(res, err)
   }
 })
 
-export const previewChanges = catchAsync(async (req: Request, res: Response) => {
+export const listChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  const txn = toTransaction(auth)
-  if (auth.violations.length > 0) {
-    const rejected: PreviewResult = {
-      ok: false,
-      txn: randomUUID(),
-      base_version: txn.base_version,
-      ops: [],
-      changes: [],
-      violations: auth.violations,
-      referrers: []
-    }
-    return sendSuccess(res, 200, rejected)
-  }
-  const preview = await previewTransaction(auth.projectId, txn, auth.init)
-  return sendSuccess(res, 200, preview)
+  const query = parse(changesQuerySchema, req.query)
+  const changes = await spineRepository.listChanges(auth.projectId, {
+    ...(query.from === undefined ? {} : { fromSeq: query.from }),
+    ...(query.to === undefined ? {} : { toSeq: query.to })
+  })
+  return sendSuccess(res, 200, changes)
+})
+
+export const getTraceability = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  const query = parse(traceabilityQuerySchema, req.query)
+  const record = await spineRepository.get(auth.projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  const { projectId: _projectId, ...spine } = record
+  return sendSuccess(res, 200, trace(spine, { entity: query.entity as TraceEntity, id: query.id }))
 })

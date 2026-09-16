@@ -6,6 +6,8 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
+import * as changeService from "../spine/change.service.js"
+import * as spineRepository from "../spine/spine.repository.js"
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
   // T13: không tắt (isActive) session khác của project — nhiều session chat (không pipeline) có thể
@@ -65,6 +67,54 @@ import { Section, SectionType } from "../specification/section.model.js"
 import { SectionVersion } from "../specification/section-version.model.js"
 import { calculateProgress } from "../specification/phase-gate.service.js"
 
+/**
+ * T17 (E4): session KHÔNG pipeline vẫn được sửa SRS — nhưng phải đi qua change flow, không qua CHAT.
+ * Tin nhắn dạng lệnh sửa được dịch thành preview diff + phạm vi ảnh hưởng; user xác nhận ở Change panel
+ * (`POST /changes` kèm `preview_id`). Ở đây KHÔNG ghi Spine và KHÔNG đụng `progress` — session không
+ * pipeline không đẩy tiến độ (bất biến 7, srs-spine §6).
+ *
+ * Trả về tin nhắn AI đã ghi vào transcript, hoặc `null` khi tin nhắn không phải lệnh sửa (đi tiếp CHAT).
+ */
+const tryChangeFlow = async (
+  session: IChatSession,
+  projectId: string,
+  content: string,
+  step: string,
+  userId: string
+): Promise<IChatMessage | null> => {
+  if (session.is_pipeline || !changeService.isChangeInstruction(content)) return null
+
+  const record = await spineRepository.get(projectId)
+  if (!record) return null
+
+  let payload: Record<string, unknown>
+  try {
+    const preview = await changeService.preview(projectId, userId, { instruction: content, base_version: record.spine_version })
+    payload = preview.clarification
+      ? { kind: "change_clarification", reply: preview.clarification }
+      : {
+          kind: "change_preview",
+          reply: preview.ok
+            ? `Đã dựng bản xem trước ${preview.changes.length} thay đổi. Mở Change panel để xem diff rồi xác nhận.`
+            : "Không áp được thay đổi này — xem chi tiết vi phạm trong Change panel.",
+          preview_id: preview.preview_id ?? null,
+          branch: preview.branch ?? null,
+          changes: preview.changes,
+          impact: preview.impact ?? null,
+          violations: preview.violations
+        }
+  } catch (err) {
+    // Lệnh sửa lỗi (hết credit, xung đột version…) không được làm hỏng phiên chat
+    const message = err instanceof ApiError ? err.message : "Không xử lý được yêu cầu sửa lúc này."
+    payload = { kind: "change_error", reply: message }
+  }
+
+  const aiMsg: IChatMessage = { role: "ai", content: JSON.stringify(payload), step, createdAt: new Date() }
+  session.messages.push(aiMsg)
+  await session.save()
+  return aiMsg
+}
+
 export const sendMessageAndGetResponse = async (
   projectId: string,
   chatSessionId: string,
@@ -95,6 +145,9 @@ export const sendMessageAndGetResponse = async (
   }
   session.messages.push(userMsg)
   await session.save()
+
+  // 1b. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
+  if (await tryChangeFlow(session, projectId, content, step, userId)) return session
 
   // 2. Format history for AI context (last 12 messages)
   const historyText = session.messages
@@ -230,6 +283,22 @@ export const sendMessageStream = async (
   }
   session.messages.push(userMsg)
   await session.save()
+
+  // 1b. T17: lệnh sửa từ session không pipeline đi vào change flow — trả một sự kiện rồi đóng luồng
+  const changeMsg = await tryChangeFlow(session, projectId, content, step, userId)
+  if (changeMsg) {
+    // Dùng đúng sự kiện `finish` như luồng CHAT (không stream chữ) để FE không phải biết thêm loại event
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        const payload: unknown = JSON.parse(changeMsg.content)
+        res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: null, cost: 0 })}
+
+`)
+        res.end()
+      }
+    } catch (_) {}
+    return
+  }
 
   // 2. Format history for AI context (last 12 messages)
   const historyText = session.messages
