@@ -207,6 +207,12 @@ const matchRows = (t: Target): FieldSectionRow[] => {
       const base = el !== null && el.screen_id === null ? "functions_nonscreen" : "functions_screen"
       if (t.sub === null) return rowsOf([base, "functions_validations", "functions_abnormal"])
       if (t.sub === "order") return []
+      // `priority` (MoSCoW, S-9.4) cùng loại với `order`: siêu dữ liệu render thành một cột, không đổi
+      // nội dung section nào. Nếu ánh xạ nó vào dòng chung `functions_*` thì S-9.4 — bước gần cuối,
+      // ghi priority cho MỌI function — lập tức làm mọi section đọc `functions[]` thành `stale`, và
+      // `section_stale_at_baseline` chặn chính cái baseline ngay sau đó (đo được: 62 cờ đỏ trên fixture
+      // 19 màn). Xem docs/spec-gaps.md, dòng T19.
+      if (t.sub === "priority") return []
       if (t.sub === "validations") return rowsOf(["functions_validations"])
       if (t.sub === "abnormal") return rowsOf(["functions_abnormal"])
       return rowsOf([base])
@@ -214,6 +220,7 @@ const matchRows = (t: Target): FieldSectionRow[] => {
     case "entities":
       return rowsOf(["entities"])
     case "nfrs": {
+      if (t.sub === "priority") return [] // như functions[].priority — cột MoSCoW, không đổi nội dung
       const key = typeof el?.category === "string" ? NFR_ROW[el.category] : undefined
       return key ? rowsOf([key]) : rowsOf(Object.values(NFR_ROW))
     }
