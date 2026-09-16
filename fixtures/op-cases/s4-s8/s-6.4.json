@@ -1,0 +1,49 @@
+{
+  "step_id": "S-6.4",
+  "skill_id": "nfr-quality-attributes",
+  "notes": "Interactive and long-running budgets are separate rows.",
+  "ops": [
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N11",
+        "category": "performance",
+        "statement": "Interactive screens respond within the stated budget under normal load.",
+        "kind": "quantitative",
+        "metric": "p95 response time",
+        "threshold": "<= 2 s",
+        "priority": null
+      },
+      "reason": "S-6 performance"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N12",
+        "category": "performance",
+        "statement": "A guided generation step completes within the stated budget.",
+        "kind": "quantitative",
+        "metric": "p95 step completion time",
+        "threshold": "<= 60 s",
+        "priority": null
+      },
+      "reason": "S-6 performance"
+    },
+    {
+      "op": "add",
+      "path": "nfrs[]",
+      "value": {
+        "id": "N13",
+        "category": "performance",
+        "statement": "The service supports the stated concurrent editing load.",
+        "kind": "quantitative",
+        "metric": "Concurrent users",
+        "threshold": ">= 500",
+        "priority": null
+      },
+      "reason": "S-6 performance"
+    }
+  ]
+}

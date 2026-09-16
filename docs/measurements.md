@@ -168,3 +168,51 @@ provider, email service (`fixed:1`), scheduled credit/subscription jobs (`fixed:
 Every run derived Payment Gateway, AI Model Provider, Email Service, Credit Scheduler and Administrator from the
 Brief. Cost stays flat at 49 credit / full S-1.2→S-3.6 run (~50k tokens in, ~11k out); more addendum raises input
 ~10% versus runs 15–17.
+
+## S-4 → S-8.1 (T18) — mock provider, `s4-s8.e2e.test.ts` (2026-09-16)
+
+Harness: `spine-fixture-minimal.json` + the T14 op cases (S-1.2…S-3.5) applied through the real op engine,
+then `nextStep` walked from S-4.1 to S-8.1 with `runStep` + `gate accept`. Provider mocked; op batches come
+from `fixtures/op-cases/s4-s8/*.json`. Token figures are the char/4 estimate of the actual prompt variables
+and the actual response JSON — **not** provider-reported numbers, so they are comparable across runs of this
+harness but not directly with the real-provider tables above.
+
+Shape of the run: 2 features, 4 screens (S91 core with **15 functions**, S92 core with 2, S93/S94
+placeholders), 1 non-screen function ⇒ **N = 5** (4 screens + the `@nonscreen` round) and
+`totalSteps = 51 + 5 × 5 = 76`. The loop executed 15 steps — S91, S92 and `@nonscreen` only; both
+placeholder screens were skipped by `nextStep` and kept their `functions[]` frame.
+
+| Step | Calls (elicit+draft) | Tokens in | Tokens out |
+| --- | ---: | ---: | ---: |
+| S-4.1 | 2 | 2 437 | 1 987 |
+| S-4.2 | 2 | 2 344 | 110 |
+| S-4.3 | 2 | 1 886 | 477 |
+| S-4.4 | 2 | 2 209 | 166 |
+| S-4.5 | 2 | 1 742 | 275 |
+| S-5.2@S91 | **4** (1 + 3 batches) | 8 437 | 1 245 |
+| S-5.4@S91 | **4** (1 + 3 batches) | 9 430 | 3 787 |
+| S-5.2@S92 | 2 | 2 677 | 181 |
+| S-5.4@S92 | 2 | 2 808 | 522 |
+| S-5.2@nonscreen | 2 | 2 476 | 102 |
+| S-5.4@nonscreen | 2 | 2 463 | 275 |
+| S-6.1 … S-6.5 | 2 each | 13 387 | 1 030 |
+| S-7.1 … S-7.4 | 2 each | 13 123 | 589 |
+| S-8.1 | 2 | 1 821 | 324 |
+| **Total** | **46** | **67 240** | **11 070** |
+
+Batching (`FUNCTION_BATCH_SIZE = 6`): the 15-function screen split **6 + 6 + 3** for both S-5.2 and S-5.4,
+batches disjoint and covering every function exactly once; the 2-function screen and the `@nonscreen` round
+stayed one call each. Batching does **not** add steps — `51 + 5 × N` is unchanged; it spends extra calls
+against the 8-per-step ceiling, so a screen beyond ~42 functions would stop at `CALL_LIMIT`.
+
+Retry rate: **0/46 calls** needed a schema retry (`draftOps` `MAX_SCHEMA_RETRIES = 2`) — expected with a
+fixture provider; the number to watch is the `E2E_AI=1` run.
+
+Two op-grammar constraints the engine caught while writing the fixtures, now inlined in the skills:
+`functions[].validations` is an array of id-bearing elements so it takes one `add` per element (never a
+`set` on the array), and S-7.1 may write only `business_rules`/`assumptions` — the function→rule link is
+`business_rules[].source_validation_ids`, not `functions[].business_rule_ids`.
+
+`E2E_AI=1`: **not run** — no provider key in this session. The test is present and skipped by
+`it.skipIf(process.env.E2E_AI !== "1")`; DoD line "0 unwaivable red flags, `nfr_missing_number` = 0 on a real
+run" is therefore still open.
