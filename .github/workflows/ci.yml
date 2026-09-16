@@ -36,8 +36,28 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
+      - name: Typecheck test code
+        run: npm run typecheck:test
+
+      # mongodb-memory-server tải binary mongod lần đầu (~70 MB) — cache giữa các lượt chạy
+      - name: Cache MongoDB binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Unit (src/**) + integration (test/integration/**, Mongo in-memory + supertest).
+      # e2e-ai (provider thật) không chạy ở CI; ngưỡng coverage lõi nằm trong vitest.config.ts.
+      - name: Test (unit + integration, coverage)
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: coverage/
+          if-no-files-found: ignore
 
       - name: Build project
         run: npm run build
