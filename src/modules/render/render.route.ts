@@ -68,6 +68,7 @@ router.post("/:projectId/assemble", authMiddleware, renderController.assembleCon
  *           default: draft
  *       - in: query
  *         name: baseline_id
+ *         description: "`_id` Mongo (= `snapshot_ref`) hoặc mã `BLnnn` mà GET /baselines trả; bỏ trống ⇒ baseline mới nhất"
  *         schema:
  *           type: string
  *     responses:
@@ -102,6 +103,7 @@ router.get("/:projectId/document", authMiddleware, renderController.getDocumentC
  *           default: draft
  *       - in: query
  *         name: baseline_id
+ *         description: "`_id` Mongo (= `snapshot_ref`) hoặc mã `BLnnn` mà GET /baselines trả; bỏ trống ⇒ baseline mới nhất"
  *         schema:
  *           type: string
  *     responses:
