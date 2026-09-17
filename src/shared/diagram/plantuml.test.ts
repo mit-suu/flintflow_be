@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { encodePlantUml, isPlantUmlReachable, renderPlantUml } from "./plantuml.client.js"
+import { encodePlantUml, isPlantUmlReachable, probePlantUml, renderPlantUml } from "./plantuml.client.js"
 import { checkPlantUml } from "./compile-check.js"
 import { env } from "../../config/env.js"
 
@@ -129,5 +129,26 @@ describe("renderPlantUml chỉ nhận phản hồi ảnh (fetch mock)", () => {
     fetchMock.mockImplementation(() => response(200, "image/svg+xml", "<svg/>"))
 
     await expect(isPlantUmlReachable()).resolves.toBe(true)
+  })
+
+  // Cảnh báo [startup] cần biết hỏng kiểu gì: "dựng PlantUML lên" là lời khuyên
+  // sai khi cổng đang bị một tiến trình khác chiếm.
+  it("probePlantUml phân biệt cổng bị chiếm với không ai nghe", async () => {
+    fetchMock.mockImplementation(() => response(200, "application/json", "{}"))
+    await expect(probePlantUml()).resolves.toMatchObject({
+      ok: false,
+      reason: "not_plantuml",
+      detail: expect.stringContaining("application/json")
+    })
+
+    fetchMock.mockImplementation(() => Promise.reject(new Error("fetch failed: ECONNREFUSED")))
+    await expect(probePlantUml()).resolves.toMatchObject({
+      ok: false,
+      reason: "unreachable",
+      detail: expect.stringContaining("ECONNREFUSED")
+    })
+
+    fetchMock.mockImplementation(() => response(200, "image/svg+xml", "<svg/>"))
+    await expect(probePlantUml()).resolves.toEqual({ ok: true })
   })
 })
