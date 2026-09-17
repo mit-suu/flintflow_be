@@ -9,9 +9,12 @@
  * `fixtures/op-cases/s2-s3/<step_id>.json` instead of calling a model — same in-memory Mongo mock
  * pattern as `step-runner.test.ts` (T13), reused here rather than duplicated logic.
  *
- * `E2E_AI=1` (real AI provider only — Spine/Change/Usage/ChatSession stay the SAME in-memory mock as the
- * default run above, this harness has no live Mongo/wallet): not run tonight, no API key available.
- * Skipped with `it.skipIf`, reason in the test name itself.
+ * `E2E_AI=1` block (kept from T14, skipped with `it.skipIf`): it only swaps the executors for the real
+ * `executeAiAction`, but this file belongs to the vitest `unit` project (`src/**`, no `setupFiles`, no
+ * Mongo) while `executeAiAction` reserves credit through Mongo transactions — so the block cannot run
+ * here and is NOT the supported real-provider path. Real-provider runs go through
+ * `npm run test:e2e-ai` (`test/e2e-ai/**`, in-memory Mongo via `test/setup.ts`) or
+ * `npm run measure:tokens -- --mode real-draft|real`. See `docs/spec-gaps.md` (T18, T22, FLF-167).
  */
 
 import fs from "node:fs"
@@ -479,7 +482,9 @@ describe("T14: S-1.2 -> S-3.6 content skills end to end on spine-fixture-minimal
 describe("T14: real provider (E2E_AI=1)", () => {
   // T6: Spine/Change/Usage/ChatSession stay the SAME in-memory mock as the default describe block above —
   // only `draftExecutor`/`elicitExecutor`/`reviewExecutor` are real (`defaultStepRunnerDeps()` routes them
-  // through `executeAiAction`, a real provider HTTP call). Not run tonight: no API key in this harness.
+  // through `executeAiAction`, a real provider HTTP call). Not runnable in the `unit` project: `executeAiAction`
+  // needs Mongo to reserve credit. Use `npm run test:e2e-ai` or `npm run measure:tokens -- --mode real-draft`
+  // for real-provider runs (see file header).
   // `seedSpine({ fast: true })`: Coaching mode elicits unconditionally every step (`shouldElicit =
   // working_mode === "coaching" || elicit_turns_this_phase < 2`, step-runner.service.ts) — a real model's
   // elicit reply can carry `questions.length > 0`, which blocks on `answer_needed`/`waitForAnswer` with no
