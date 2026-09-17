@@ -8,9 +8,10 @@
  * - baseline : `baseline_id` có mặt (T15 review T5 — trước đây bản baseline không cache, dựng lại
  *   mỗi lần xem dù snapshot bất biến), `spine_version`/`assembled_at_version` vắng mặt.
  *
- * `doc.sections[].blocks[].png` (khi là ảnh) không lưu base64 thật — thay bằng tham chiếu
- * `diagram-ref:<diagramId>`, tải lại PNG lúc đọc (T15 review T6, xem `assemble.service.ts`
- * `stripImagesForCache`/`rehydrateImages`) để tránh phình document tới trần 16MB của Mongo.
+ * `doc.sections[].blocks[].png` (khi là ảnh) không lưu base64 thật — section sinh sẵn tham chiếu
+ * `diagram-ref:<diagramId>`, PNG tải lại lúc đọc (T15 review T6, xem `assemble.service.ts`
+ * `rehydrateImages`/`materializeImages`) để tránh phình document tới trần 16MB của Mongo. Ảnh chưa
+ * tải được lúc assemble ghi ở `missing_diagram_ids`; lúc đọc ảnh đó là placeholder cho tới khi PNG có.
  */
 
 import mongoose, { Schema } from "mongoose"
@@ -26,7 +27,12 @@ const renderedDocumentCacheSchema = new Schema(
     assembled_at_version: { type: Number, min: 1 },
     generated_at: { type: Date, required: true },
     /** `RenderedDocument` (rendered-document.schema.ts) — ảnh là tham chiếu `diagram-ref:<id>`, không phải base64 thật. */
-    doc: { type: Schema.Types.Mixed, required: true }
+    doc: { type: Schema.Types.Mixed, required: true },
+    /**
+     * Id sơ đồ `render_status = "ok"` mà PNG không tải được lúc assemble — để lần `POST /assemble` trúng cache
+     * vẫn trả lại finding `diagram_png_missing`. Lúc đọc, tham chiếu vẫn được thử tải lại: PNG có sau ⇒ ảnh thật.
+     */
+    missing_diagram_ids: { type: [String], default: [] }
   },
   { timestamps: true, strict: true, minimize: false }
 )
