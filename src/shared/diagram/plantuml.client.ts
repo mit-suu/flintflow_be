@@ -191,13 +191,23 @@ export const renderPlantUml = async (
 const HEALTH_PROBE_SOURCE = "@startuml\nA -> B\n@enduml"
 
 /**
- * Server có sống không — dùng để probe test skip thay vì fail, và nuôi `/health`.
+ * Hai cách hỏng khác hẳn nhau nên phải nói khác nhau:
+ * `unreachable` = không ai nghe ở cổng đó ⇒ dựng PlantUML lên.
+ * `not_plantuml` = có người nghe nhưng không trả ảnh ⇒ cổng đang bị chiếm,
+ * dựng thêm một PlantUML nữa cũng không giải quyết được gì.
+ */
+export type PlantUmlProbe =
+  | { ok: true }
+  | { ok: false; reason: "unreachable" | "not_plantuml"; detail: string }
+
+/**
+ * Probe sức khoẻ: render thật một sơ đồ tí hon.
  *
- * Phải render thật chứ không `GET /`: một web server lạ chiếm cổng cũng trả 200
- * cho đường gốc, khiến `/health` báo `ok` trong khi PlantUML chưa hề chạy.
+ * Phải render chứ không `GET /`: một web server lạ chiếm cổng cũng trả 200 cho
+ * đường gốc, khiến `/health` báo `ok` trong khi PlantUML chưa hề chạy.
  * Không gọi `renderPlantUml` vì hàm đó dùng `PLANTUML_TIMEOUT_MS` của render.
  */
-export const isPlantUmlReachable = async (): Promise<boolean> => {
+export const probePlantUml = async (): Promise<PlantUmlProbe> => {
   try {
     // Timeout ngan: day la health check, khong phai render.
     const res = await withTimeout(
@@ -205,8 +215,25 @@ export const isPlantUmlReachable = async (): Promise<boolean> => {
       { method: "GET" },
       HEALTH_TIMEOUT_MS
     )
-    return res.ok && isImageResponse(res)
-  } catch {
-    return false
+
+    // Probe chỉ đọc header ⇒ huỷ body để nhả socket ngay.
+    void res.body?.cancel().catch(() => {})
+
+    if (res.ok && isImageResponse(res)) return { ok: true }
+
+    return {
+      ok: false,
+      reason: "not_plantuml",
+      detail: `HTTP ${res.status}, content-type "${res.headers.get("content-type") ?? "(trống)"}"`
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "unreachable",
+      detail: err instanceof Error ? err.message : String(err)
+    }
   }
 }
+
+/** Server có sống không — cổng `describe.skipIf` của test và nguồn của `/health`. */
+export const isPlantUmlReachable = async (): Promise<boolean> => (await probePlantUml()).ok
