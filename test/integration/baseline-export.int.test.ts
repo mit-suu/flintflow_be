@@ -133,16 +133,20 @@ describe("fixture 19 màn đủ ảnh sơ đồ", () => {
     const list = baselinesResponseSchema.parse((await api.get("/baselines")).body.data)
     expect(list.map((b) => b.id)).toEqual([baseline.id])
 
-    // `baseline_id` của /document, /export/word hiện là `_id` Mongo (= `snapshot_ref`), KHÔNG phải `id` "BL001"
-    // mà /baseline(s) trả — lệch hợp đồng T15↔T19, ghi docs/spec-gaps.md (T22). Test theo hành vi hiện tại.
-    const doc = await api.get(`/document?source=baseline&baseline_id=${baseline.snapshot_ref}`)
-    expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
-    renderedDocumentSchema.parse(doc.body.data)
-    expectDocx(await api.download(`/export/word?source=baseline&baseline_id=${baseline.snapshot_ref}`))
+    // `baseline_id` của /document, /export/word nhận cả mã `id` "BL001" mà /baseline(s) trả lẫn `_id` Mongo (= `snapshot_ref`)
+    expect(baseline.id).toBe("BL001")
+    for (const baselineId of [baseline.id, baseline.snapshot_ref]) {
+      const doc = await api.get(`/document?source=baseline&baseline_id=${baselineId}`)
+      expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
+      expect(renderedDocumentSchema.parse(doc.body.data).version).toBe("v1.0")
+      expectDocx(await api.download(`/export/word?source=baseline&baseline_id=${baselineId}`))
+    }
 
-    const missing = await api.get("/document?source=baseline&baseline_id=650000000000000000000999")
-    expect(missing.status).toBe(404)
-    expect(missing.body.error.code).toBe("BASELINE_NOT_FOUND")
+    for (const unknownId of ["650000000000000000000999", "BL999", "not-a-baseline"]) {
+      const missing = await api.get(`/document?source=baseline&baseline_id=${unknownId}`)
+      expect(missing.status, unknownId).toBe(404)
+      expect(missing.body.error.code).toBe("BASELINE_NOT_FOUND")
+    }
 
     expect(await Notification.countDocuments({ userId: seeded.userId, type: "baseline_created" })).toBe(1)
   })

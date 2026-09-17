@@ -7,7 +7,9 @@
  *
  * `source = draft`  : dựng từ Spine sống, cache theo `spine_version` (collection `rendered_documents`).
  * `source = baseline`: dựng từ `Baseline.snapshot` (T19) — không đọc Spine hiện tại (srs-spine.md §2.1),
- *                       cache theo `Baseline._id` (bất biến — T15 review T5).
+ *                       cache theo `Baseline._id` (bất biến — T15 review T5). `baseline_id` nhận cả `_id` Mongo
+ *                       lẫn mã `BLnnn` của `Spine.baselines[]`; Spine chỉ được đọc để đổi mã thành `_id`
+ *                       (`resolveBaselineObjectId`), không để lấy nội dung.
  *
  * KHÔNG ghi Spine ở đây — chỉ đọc (`spine.repository`, `Baseline`, `Change`, `User`) và ghi cache riêng
  * (`RenderedDocumentCache`, không phải collection `spines`).
@@ -599,18 +601,38 @@ const getDraftDocument = async (projectId: string, loadDiagramPng: DiagramPngLoa
   return rehydrateImages(parsed.data, projectId, loadDiagramPng)
 }
 
+/** Mã baseline hiển thị `BLnnn` — `Spine.baselines[].id` do `baseline.service.nextBaselineId` sinh. */
+const BASELINE_DISPLAY_ID = /^BL\d+$/
+
+const baselineNotFound = (): ApiError => new ApiError(404, "Baseline không tồn tại", "BASELINE_NOT_FOUND")
+
+/**
+ * `baseline_id` của `GET /document` và `GET /export/word` nhận cả `_id` Mongo (= `snapshot_ref`) lẫn mã `BLnnn`
+ * mà `POST /baseline` / `GET /baselines` trả — cùng một hợp đồng, không cần client biết `snapshot_ref`.
+ * Mã `BLnnn` đổi sang `_id` qua `Spine.baselines[].snapshot_ref`; mọi trường hợp không phân giải được đều 404
+ * (kể cả `snapshot_ref` không phải ObjectId — schema chỉ ràng buộc chuỗi — để Mongoose không ném `CastError` thành 500).
+ * `undefined` ⇒ baseline mới nhất.
+ */
+const resolveBaselineObjectId = async (projectId: string, baselineId: string | undefined): Promise<string | undefined> => {
+  if (baselineId === undefined) return undefined
+  if (mongoose.isValidObjectId(baselineId)) return baselineId
+  if (!BASELINE_DISPLAY_ID.test(baselineId)) throw baselineNotFound()
+  // Đọc projection nhỏ, không nạp/validate cả Spine cho một lượt xem baseline
+  const ref = (await spineRepository.listBaselineRefs(projectId)).find((b) => b.id === baselineId)?.snapshot_ref
+  if (ref === undefined || !mongoose.isValidObjectId(ref)) throw baselineNotFound()
+  return ref
+}
+
 const getBaselineDocument = async (
   projectId: string,
   projectName: string,
   baselineId: string | undefined,
   deps: AssembleDeps
 ): Promise<RenderedDocument> => {
-  if (baselineId !== undefined && !mongoose.isValidObjectId(baselineId)) {
-    throw new ApiError(404, "Baseline không tồn tại", "BASELINE_NOT_FOUND")
-  }
-  const filter = baselineId ? { projectId, _id: baselineId } : { projectId }
+  const objectId = await resolveBaselineObjectId(projectId, baselineId)
+  const filter = objectId ? { projectId, _id: objectId } : { projectId }
   const baseline = await Baseline.findOne(filter, null, { lean: true, sort: { at: -1 } })
-  if (!baseline) throw new ApiError(404, "Baseline không tồn tại", "BASELINE_NOT_FOUND")
+  if (!baseline) throw baselineNotFound()
   const baselineIdStr = String(baseline._id)
 
   // T15 review T5: baseline bất biến — cache theo baseline._id, không dựng lại mỗi lần xem.
