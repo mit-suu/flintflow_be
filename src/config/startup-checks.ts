@@ -16,7 +16,7 @@ import { getPromptAssetIndex, getSkillIndex } from "../shared/ai/prompt-assets.j
 import { loadStepRegistry } from "../modules/pipeline/step-registry.js"
 import { getAssetsRoot } from "./paths.js"
 import { env } from "./env.js"
-import { isPlantUmlReachable } from "../shared/diagram/plantuml.client.js"
+import { probePlantUml } from "../shared/diagram/plantuml.client.js"
 
 export const validateStartupAssets = (): void => {
   const assetsRoot = getAssetsRoot()
@@ -50,10 +50,17 @@ export const warnStartupConfig = async (): Promise<void> => {
         "Chỉ dùng cho CI / smoke test."
     )
   }
-  if (!(await isPlantUmlReachable())) {
+  const plantuml = await probePlantUml()
+  if (!plantuml.ok) {
+    // Nói đúng nguyên nhân: bảo "dựng PlantUML lên" khi cổng đang bị một dự án
+    // khác chiếm là chỉ sai đường, dựng thêm cũng không chiếm lại được cổng.
     console.warn(
-      `[startup] ⚠ PlantUML không phản hồi ở ${env.PLANTUML_BASE_URL} — diagram sẽ có render_status "error". ` +
-        "Dựng bằng: docker compose up -d plantuml"
+      plantuml.reason === "not_plantuml"
+        ? `[startup] ⚠ ${env.PLANTUML_BASE_URL} có server trả lời nhưng không phải ảnh (${plantuml.detail}) — ` +
+            'một tiến trình khác đang chiếm cổng này. Diagram sẽ có render_status "error". ' +
+            "Đổi PLANTUML_BASE_URL sang cổng khác, hoặc tắt tiến trình đang chiếm."
+        : `[startup] ⚠ PlantUML không phản hồi ở ${env.PLANTUML_BASE_URL} (${plantuml.detail}) — ` +
+            'diagram sẽ có render_status "error". Dựng bằng: docker compose up -d plantuml'
     )
   }
 }
