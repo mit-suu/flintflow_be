@@ -127,8 +127,6 @@ describe("skill trên đĩa (assets/skills)", () => {
 
   // FLF-171: skill action mode 1 là khung ở P1 (plan mode 1 §5.7); P2 viết nội dung thì bỏ `stub` và xoá khỏi đây.
   const MODE1_SKELETON_ACTION = new Set([
-    "action/import-extract",
-    "action/import-semantic-check",
     "action/cr-clarify",
     "action/cr-propose",
     "action/cr-consistency"

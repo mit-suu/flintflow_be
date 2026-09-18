@@ -258,7 +258,7 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
 
 // ─── UC-19 xem trạng thái ────────────────────────────────────────
 
-export const extractionSummary = async (importId: mongoose.Types.ObjectId): Promise<GetImportResponse["extraction"]> => {
+export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
   const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
   const review_fields: ReviewField[] = []
   const sections = drafts.map((d) => {

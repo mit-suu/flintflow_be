@@ -12,15 +12,7 @@ import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { getImportResponseSchema, importStateResponseSchema, importRejectedMetaSchema } from "../../src/modules/import/import.dto.js"
 import { DocBlock } from "../../src/modules/import/doc-block.model.js"
 import { Project } from "../../src/modules/project/project.model.js"
-
-export const createMode1Project = async (seeded: SeededFixture): Promise<string> => {
-  const res = await request(app)
-    .post("/api/v1/projects")
-    .set("Authorization", `Bearer ${seeded.token}`)
-    .send({ name: "Lumen import", mode: "import" })
-  expect(res.status, JSON.stringify(res.body.error)).toBe(201)
-  return String(res.body.data._id)
-}
+import { createMode1Project } from "../helpers/mode1.js"
 
 const api = (seeded: SeededFixture, projectId: string) => {
   const auth = { Authorization: `Bearer ${seeded.token}` }

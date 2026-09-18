@@ -195,4 +195,127 @@ router.patch("/:projectId/import/mapping", authMiddleware, importController.patc
  */
 router.post("/:projectId/reupload", authMiddleware, importController.receiveDocx, importController.reupload)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/import/extract:
+ *   post:
+ *     summary: Trích field Spine từ tài liệu (I-4, nút 1.8) — chạy hoặc chạy tiếp từ extract_cursor
+ *     description: |
+ *       Bảng khớp đủ cột trích tất định (không tốn credit); phần chữ còn lại gọi AI theo section (step_id `I-4:<section>`).
+ *       Hết credit ⇒ `paused: { reason: credits }`; AI lỗi sau 2 lần retry ⇒ `paused: { reason: resume_later }`. Vẫn trả 200.
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — import ở fields_review, baselining hoặc extracting + paused" }
+ *       409: { description: IMPORT_INVALID_STATE }
+ */
+router.post("/:projectId/import/extract", authMiddleware, importController.extract)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/import/fields:
+ *   patch:
+ *     summary: Xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id]
+ *             properties:
+ *               import_id: { type: string }
+ *               fields:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     section_id: { type: string }
+ *                     path: { type: string, example: "actors[id=A01].kind" }
+ *                     confirmed: { type: boolean, description: "false ⇒ bỏ field" }
+ *                     edited_value: {}
+ *               confirm_all: { type: boolean }
+ *     responses:
+ *       200: { description: "`{ import }` — baselining khi không còn field chưa xác nhận" }
+ *       409: { description: IMPORT_INVALID_STATE }
+ */
+router.patch("/:projectId/import/fields", authMiddleware, importController.patchFields)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/import/finalize:
+ *   post:
+ *     summary: Ghi Spine + tạo version 0.0 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [import_id, base_version]
+ *             properties:
+ *               import_id: { type: string }
+ *               base_version: { type: integer }
+ *     responses:
+ *       200: { description: "`{ import, doc_version: \"0.0\", baseline, spine_version, flags: { red, yellow } }` — import ở gap_review, hoặc checking + paused" }
+ *       409: { description: IMPORT_INVALID_STATE, SPINE_VERSION_CONFLICT }
+ */
+router.post("/:projectId/import/finalize", authMiddleware, importController.finalize)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/import/resume:
+ *   post:
+ *     summary: Tiếp tục bước AI đang dừng vì hết credit / lỗi AI (UC-61, UC-75)
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *     responses:
+ *       200: { description: "`{ import, sections }`" }
+ *       409: { description: IMPORT_INVALID_STATE }
+ */
+router.post("/:projectId/import/resume", authMiddleware, importController.resume)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/gap-report:
+ *   get:
+ *     summary: Gap report (UC-23, nút 1.13) — JSON hoặc file .docx
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: query, name: format, schema: { type: string, enum: [json, docx], default: json } }
+ *     responses:
+ *       200: { description: "JSON: `{ project_id, doc_version, generated_at, totals, sections, missing_sections, unmapped_headings, low_confidence_fields }`; docx: file (tải lần đầu khi đang gap_review ⇒ delivered)" }
+ *       409: { description: IMPORT_INVALID_STATE (chưa tới gap_review) }
+ */
+router.get("/:projectId/gap-report", authMiddleware, importController.gapReport)
+
 export default router
