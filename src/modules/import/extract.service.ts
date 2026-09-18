@@ -100,6 +100,29 @@ export const deterministicTableItems = (table: BlockLite, grid: string[][], prof
 
 // ─── AI ──────────────────────────────────────────────────────────
 
+/** Ngân sách chữ mỗi lượt I-4 (~6k token, P0 báo cáo §4.8) và trần một block (bảng khổng lồ, ảnh nhúng dạng chữ…). */
+export const AI_BATCH_CHARS = 24_000
+export const AI_BLOCK_CHARS = 6_000
+
+/** Chia block của section thành lô không vượt ngân sách; block quá dài bị cắt (ghi chú "…truncated"). */
+export const chunkBlocks = <T extends { text: string }>(blocks: T[], budget = AI_BATCH_CHARS, maxBlock = AI_BLOCK_CHARS): T[][] => {
+  const out: T[][] = []
+  let cur: T[] = []
+  let size = 0
+  for (const raw of blocks) {
+    const b = raw.text.length > maxBlock ? { ...raw, text: `${raw.text.slice(0, maxBlock)} …(truncated)` } : raw
+    if (cur.length && size + b.text.length > budget) {
+      out.push(cur)
+      cur = []
+      size = 0
+    }
+    cur.push(b)
+    size += b.text.length
+  }
+  if (cur.length) out.push(cur)
+  return out
+}
+
 const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text.split("\n").map((r) => `| ${r} |`).join("\n")}` : b.text}`).join("\n")
 
 const knownKeysText = (items: EntityItem[]): string => {
@@ -252,15 +275,16 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     )
     const targets = targetsOf(section_id)
     let usageId: string | null = null
-    if (aiBlocks.length && targets.length) {
-      const heading = profile.heading_map.find((h) => h.section_id === section_id)
+    const heading = profile.heading_map.find((h) => h.section_id === section_id)
+    const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
+    for (const batch of targets.length ? chunkBlocks(aiBlocks) : []) {
       const result = await withMeteredAi<ImportExtractOutput>({ projectId, userId, stepId: `I-4:${section_id}` }, ActionType.IMPORT_EXTRACT_FIELDS, {
         section_id,
         heading_text: heading?.heading_text ?? section_id,
         target_entities: targets.join(", "),
         schema_excerpt: schemaExcerptFor(targets),
         known_keys: knownKeysText([...known, ...items]),
-        blocks: blockLines(aiBlocks)
+        blocks: blockLines(batch)
       })
       if (!result.ok) {
         doc.paused = { reason: result.reason, at: new Date() }
@@ -271,14 +295,13 @@ export const runExtraction = async (projectId: string, userId: string, importId:
         return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
       }
       usageId = result.usageId
-      const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
       items.push(
         ...itemsFromAi(result.data, {
           sectionId: section_id,
           alloc,
           known: [...known, ...items],
           sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
-          validBlocks: new Set(aiBlocks.map((b) => b.block_id))
+          validBlocks: new Set(batch.map((b) => b.block_id))
         })
       )
     }

@@ -95,3 +95,14 @@ describe("hồ sơ luật mode 1 + cờ AI", () => {
     expect(ops.map((o) => (o.value as { id: string }).id)).toEqual(["FL001", "FL002"])
   })
 })
+
+describe("chunkBlocks (trần input mỗi lượt I-4)", () => {
+  it("chia lô theo ngân sách, cắt block quá dài", async () => {
+    const { chunkBlocks } = await import("./extract.service.js")
+    const blocks = [{ text: "a".repeat(10) }, { text: "b".repeat(10) }, { text: "c".repeat(50) }, { text: "d" }]
+    const batches = chunkBlocks(blocks, 25, 20)
+    expect(batches.map((b) => b.map((x) => x.text.length))).toEqual([[10, 10], [33], [1]])
+    expect(batches[1][0].text.endsWith("…(truncated)")).toBe(true)
+    expect(chunkBlocks([], 25)).toEqual([])
+  })
+})
