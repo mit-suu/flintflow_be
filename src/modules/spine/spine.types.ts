@@ -271,10 +271,21 @@ export interface SectionState {
   asset_version: string
 }
 
+/**
+ * Nguồn gốc baseline (FLF-171, mode 1):
+ * - `generated` — ký ở S-9.5 của quy trình sinh SRS (mode 2); dữ liệu cũ không có field này đọc ra `generated`.
+ * - `imported` — baseline v0 tạo khi import SRS có sẵn (mode 1, nút 1.10).
+ * - `release` — Lead release bản major ở mode 1 (Flow 6).
+ */
+export type BaselineType = "generated" | "imported" | "release"
+
 export interface Baseline {
   id: string
-  /** `v1.0` hoặc `v1.0-conditional` khi `waived_count > 0`. */
+  /** Mode 2: `v1.0` hoặc `v1.0-conditional` khi `waived_count > 0`. Mode 1: `0.0`, `1.0`, `2.0`… */
   version: string
+  type: BaselineType
+  /** Mode 1: version tài liệu (`DocVersion.version`) mà baseline chụp; mode 2 luôn `null`. */
+  doc_version: string | null
   at: IsoDateTime
   /** `_id` của document trong collection `baselines` (snapshot). */
   snapshot_ref: string
@@ -370,6 +381,8 @@ export interface Usage {
 export interface BaselineSnapshot {
   projectId: string
   version: string
+  type: BaselineType
+  doc_version: string | null
   at: IsoDateTime
   checked_at_version: number
   waived_count: number
