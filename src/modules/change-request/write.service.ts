@@ -58,8 +58,8 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     if (!b || b.text_hash !== textHash(loc.proposal!.old_text)) throw mismatch(loc)
   }
 
-  // 1. File: Track Changes + comment trên bản sao
-  const pkg = await DocxPackage.load(await docFileStore().load(version.file_ref))
+  // 1. File: Track Changes + comment trên bản sao (sau release: bản sạch — CR đã release không hiện lại)
+  const pkg = await DocxPackage.load(await docFileStore().load(version.clean_file_ref ?? version.file_ref))
   const ooxml = await readBlocks(pkg)
   const who = { author: cr.cr_id, date: new Date(), ids: new RevisionIds(await pkg.requireXml("word/document.xml")) }
   for (const loc of changes) {

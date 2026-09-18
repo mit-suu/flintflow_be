@@ -23,5 +23,5 @@ export { COMMENTS_PART, addComment, listComments, removeComments, type CommentIn
 export { CUSTOM_PROPS_PART, readCustomProperties, readStamp, writeStamp, type Stamp } from "./properties.js"
 export { acceptAll, type AcceptAllResult } from "./accept-all.js"
 export { addDraftWatermark, type WatermarkResult } from "./watermark.js"
-export { commentParagraph, enclosingParagraph, listRevisions, type RevisionInfo } from "./revisions.js"
+export { commentParagraph, enclosingParagraph, listRevisions, paragraphRevisions, type RevisionInfo } from "./revisions.js"
 export { OoxmlError } from "./xml.js"
