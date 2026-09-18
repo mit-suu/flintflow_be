@@ -57,7 +57,7 @@ export const NON_WAIVABLE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) 
  * theo, không ai kịp đọc. `planFlagOps` bỏ qua chúng khi dọn cờ; muốn đóng thì đóng có chủ đích
  * (user xử lý xong, hoặc bước sở hữu chạy lại và ghi đè).
  */
-export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set(["accepted_as_is", "goal_not_covered"])
+export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set(["accepted_as_is", "goal_not_covered", "import_semantic", "cr_consistency"])
 
 export interface FlagCandidate {
   level: FlagLevel
@@ -72,9 +72,27 @@ export interface FlagCandidate {
 export const flagKey = (f: Pick<Flag, "level" | "rule_id" | "section_id"> & { target_id?: string | null }): string =>
   `${f.level}|${f.rule_id}|${f.section_id}|${f.target_id ?? ""}`
 
+/**
+ * Hồ sơ luật theo cách làm SRS (FLF-171): mode 1 (import) loại các luật vô nghĩa với Spine trích từ tài liệu có sẵn
+ * và hạ mức vài luật đỏ xuống vàng (P0 báo cáo §3.1). Không truyền ⇒ chạy đủ luật như mode 2.
+ */
+export interface RuleProfile {
+  exclude: ReadonlySet<string>
+  downgrade: ReadonlySet<string>
+}
+
 export interface CheckOptions {
   atBaseline?: boolean
+  ruleProfile?: RuleProfile
 }
+
+/** Áp hồ sơ luật lên ứng viên cờ (loại trừ trước, rồi hạ đỏ ⇒ vàng). */
+export const applyRuleProfile = (candidates: FlagCandidate[], profile: RuleProfile | undefined): FlagCandidate[] =>
+  profile
+    ? candidates
+        .filter((c) => !profile.exclude.has(c.rule_id))
+        .map((c) => (profile.downgrade.has(c.rule_id) && c.level === "red" ? { ...c, level: "yellow" as const } : c))
+    : candidates
 
 const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5" }
 
@@ -456,7 +474,7 @@ export const runDeterministicCheck = (
   changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[] = [],
   options: CheckOptions = {}
 ): FlagCandidate[] => {
-  const candidates: FlagCandidate[] = [
+  const candidates: FlagCandidate[] = applyRuleProfile([
     ...sectionEmpty(spine),
     ...arrayEmpty(spine),
     ...deadReference(spine),
@@ -466,7 +484,7 @@ export const runDeterministicCheck = (
     ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine)] : []),
     ...cardinality(spine),
     ...nonEnglishContent(spine)
-  ]
+  ], options.ruleProfile)
 
   const index = buildIdIndex(spine)
   const seen = new Set<string>()
