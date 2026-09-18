@@ -66,11 +66,18 @@ const upload = multer({
  *               domain:
  *                 type: string
  *                 example: E-learning
+ *               mode:
+ *                 type: string
+ *                 enum: [import, fpt, customer_template]
+ *                 default: fpt
+ *                 description: "Cách làm SRS: import = upload SRS có sẵn rồi sửa (mode 1), fpt = sinh theo template FPT (mode 2), customer_template = chưa hỗ trợ"
  *     responses:
  *       201:
- *         description: Dự án đã được tạo thành công
+ *         description: Dự án đã được tạo thành công (kèm mode, import_state)
  *       400:
- *         description: Tên dự án trống
+ *         description: Tên dự án trống hoặc mode không hợp lệ
+ *       501:
+ *         description: mode customer_template chưa hỗ trợ (NOT_IMPLEMENTED)
  *       401:
  *         description: Chưa xác thực
  */

@@ -1,4 +1,4 @@
-import { Project, IProject } from "./project.model.js"
+import { Project, IProject, type ProjectMode } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
@@ -14,13 +14,19 @@ import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
 export const createProject = async (
   userId: string,
   name: string,
-  domain?: string
+  domain?: string,
+  mode: ProjectMode = "fpt"
 ): Promise<IProject> => {
+  if (mode === "customer_template") {
+    throw new ApiError(501, "Mode template khách hàng chưa hỗ trợ", "NOT_IMPLEMENTED")
+  }
+  // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     userId,
     name,
     domain: domain || null,
-    status: "active"
+    status: "active",
+    mode
   })
   await spineRepository.getOrCreate(project.id, { name, domain: domain || null })
   return project
