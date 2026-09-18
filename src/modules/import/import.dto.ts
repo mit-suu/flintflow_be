@@ -228,25 +228,28 @@ export const gapReportSchema = z.object({
 /** `GET /projects/:id/gap-report` (format=json). `format=docx` trả file, không bọc envelope. */
 export const gapReportResponseSchema = gapReportSchema
 
+/** Một dòng diff theo block — dùng chung cho re-upload (UC-24) và `versions/compare` (UC-55). */
+export const blockDiffEntrySchema = z.object({
+  block_id: blockId.nullable(),
+  change: z.enum(REUPLOAD_CHANGES),
+  before: z.string().optional(),
+  after: z.string().optional()
+})
+
+export const blockDiffSummarySchema = z.object({
+  added: z.number().int().min(0),
+  removed: z.number().int().min(0),
+  modified: z.number().int().min(0),
+  moved: z.number().int().min(0)
+})
+
 export const reuploadDiffDtoSchema = z.object({
   id,
   original_name: z.string(),
   against_version: z.string().min(1),
   created_at: isoDateTime,
-  summary: z.object({
-    added: z.number().int().min(0),
-    removed: z.number().int().min(0),
-    modified: z.number().int().min(0),
-    moved: z.number().int().min(0)
-  }),
-  blocks: z.array(
-    z.object({
-      block_id: blockId.nullable(),
-      change: z.enum(REUPLOAD_CHANGES),
-      before: z.string().optional(),
-      after: z.string().optional()
-    })
-  )
+  summary: blockDiffSummarySchema,
+  blocks: z.array(blockDiffEntrySchema)
 })
 
 /** `POST /projects/:id/reupload` (UC-24, nút 1.4) — multipart như `/import`. */
