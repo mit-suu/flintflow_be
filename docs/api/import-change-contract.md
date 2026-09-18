@@ -3,7 +3,7 @@
 > **Trạng thái:** FLF-171 (plan mode 1, P1 §5.6). **Đã đóng băng 2026-09-18** (nhóm chốt). Từ nay mọi thay đổi phải qua PR nhãn `contract-change` được 4/4 duyệt, và sửa các file zod bên dưới trong cùng PR.
 > **Nguồn:** `claude_plan/plan-mode1-import-edit-srs.md` §1–§5, `doc/flintflow-business-flow (1).bpmn` (Flow 1, 3, 4, 5, 6), `doc/actors-and-use-cases.md`.
 > **Schema zod:** `src/modules/import/import.dto.ts`, `src/modules/doc-version/doc-version.dto.ts`, `src/modules/change-request/change-request.dto.ts`, `src/modules/project/project.validation.ts`; mã lỗi `src/modules/import/mode1.errors.ts`; đầu ra AI `src/shared/ai/response-parser.ts` (`importExtract`, `findings`, `crClarify`, `crPropose`).
-> **Hiện thực:** P2 (BE), P3 (FE). Trước khi P2 merge, FE mock bằng msw theo đúng hình ở đây (`flintflow_fe/mocks/handlers/mode1.ts`).
+> **Hiện thực:** P2 (BE), P3 (FE). Trước khi P2 merge, FE mock bằng msw theo đúng hình ở đây (`flintflow_fe/mocks/mode1/handlers.ts`).
 
 ## 0. Quy ước chung
 
