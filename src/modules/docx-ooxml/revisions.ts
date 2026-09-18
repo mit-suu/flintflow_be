@@ -34,3 +34,19 @@ export const commentParagraph = async (pkg: DocxPackage, id: string): Promise<El
     wAll(doc, "commentRangeStart").find((s) => wAttr(s, "id") === id) ?? wAll(doc, "commentReference").find((s) => wAttr(s, "id") === id)
   return enclosingParagraph(start ?? null)
 }
+
+/** Đoạn chèn/xoá dạng Track Changes trong một đoạn (UC-54: FE tô màu bản draft). Bỏ dấu đổi định dạng. */
+export const paragraphRevisions = (p: Element): { kind: "ins" | "del"; text: string; author: string }[] => {
+  const out: { kind: "ins" | "del"; text: string; author: string }[] = []
+  for (const kind of ["ins", "del"] as const) {
+    for (const el of wAll(p, kind)) {
+      if (isW(el.parentNode, "rPr") || isW(el.parentNode, "trPr")) continue
+      const text =
+        kind === "del"
+          ? wAll(el, "delText").map((t) => t.textContent ?? "").join("")
+          : wAll(el, "t").map((t) => t.textContent ?? "").join("")
+      if (text) out.push({ kind, text, author: wAttr(el, "author") ?? "" })
+    }
+  }
+  return out
+}
