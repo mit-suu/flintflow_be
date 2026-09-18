@@ -255,6 +255,12 @@ export const reuploadDiffDtoSchema = z.object({
 /** `POST /projects/:id/reupload` (UC-24, nút 1.4) — multipart như `/import`. */
 export const reuploadResponseSchema = reuploadDiffDtoSchema
 
+/** `meta` của 422 IMPORT_FILE_REJECTED — bản ghi import vẫn được tạo (`preflight_rejected`) để FE hiện lỗi. */
+export const importRejectedMetaSchema = z.object({ import_id: id, issues: z.array(preflightIssueSchema).min(1) })
+
+/** `meta` của 422 IMPORT_STAMP_FOREIGN_PROJECT. */
+export const foreignStampMetaSchema = z.object({ stamp: docStampSchema })
+
 export type ImportedDocumentDto = z.infer<typeof importedDocumentDtoSchema>
 export type DocBlockDto = z.infer<typeof docBlockDtoSchema>
 export type TemplateProfileDto = z.infer<typeof templateProfileDtoSchema>
