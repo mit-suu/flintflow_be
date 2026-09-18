@@ -62,3 +62,49 @@ export const fakeSemanticCheck = (prompt: string): string | undefined => {
 }
 
 export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeSemanticCheck(prompt)
+
+// ─── change request ─────────────────────────────────────────────
+
+/** C-2: CR có chữ "AMBIGUOUS-CR" trong mô tả ⇒ hỏi lại ở vòng đầu; còn lại trả đích theo `targets`. */
+export const fakeCrClarify =
+  (targets: { entity_paths: string[]; keywords: string[] }) =>
+  (prompt: string): string | undefined => {
+    if (!prompt.includes("# CR Clarify")) return undefined
+    const round = Number(/Round (\d+) of at most 3/.exec(prompt)?.[1] ?? 1)
+    if (prompt.includes("AMBIGUOUS-CR") && round === 1) return JSON.stringify({ ambiguous: true, questions: ["Which screen?"], targets: { entity_paths: [], keywords: [] } })
+    return JSON.stringify({ ambiguous: false, questions: [], targets })
+  }
+
+/** Vị trí trong prompt C-4: `[L001][B0005] (...)\n  text`. */
+export const promptLocations = (prompt: string): { location_id: string; block_id: string; text: string }[] => {
+  const out: { location_id: string; block_id: string; text: string }[] = []
+  const re = /\[(L\d{3,})\]\[(B\d{4,})\][^\n]*\n {2}([^\n]*)/g
+  for (const m of prompt.matchAll(re)) out.push({ location_id: m[1], block_id: m[2], text: m[3] })
+  return out
+}
+
+/** C-4: câu có "2 seconds" ⇒ sửa thành "1 second" + op Spine; heading ⇒ comment; còn lại not_related. */
+export const fakeCrPropose = (prompt: string): string | undefined => {
+  if (!prompt.includes("# CR Propose")) return undefined
+  const locations = promptLocations(prompt).map((l) => {
+    if (l.text.includes("2 seconds"))
+      return {
+        location_id: l.location_id,
+        conclusion: "edit",
+        reason: "Threshold changes",
+        new_text: l.text.replace("2 seconds", "1 second"),
+        spine_ops: [{ op: "set", path: "nfrs[id=NFR-01].threshold", value: "1 s" }]
+      }
+    if (/^\d+(\.\d+)* /.test(l.text)) return { location_id: l.location_id, conclusion: "comment", reason: "Heading", comment_text: `Check "${l.text}"`, spine_ops: [] }
+    return { location_id: l.location_id, conclusion: "not_related", reason: "Different meaning", spine_ops: [] }
+  })
+  return JSON.stringify({ locations })
+}
+
+/** C-4 luôn đề xuất sửa mà không đổi gì ⇒ C-5 trượt. */
+export const fakeCrProposeNoChange = (prompt: string): string | undefined => {
+  if (!prompt.includes("# CR Propose")) return undefined
+  return JSON.stringify({
+    locations: promptLocations(prompt).map((l) => ({ location_id: l.location_id, conclusion: "edit", reason: "noop", new_text: l.text, spine_ops: [] }))
+  })
+}
