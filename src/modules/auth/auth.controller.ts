@@ -13,22 +13,23 @@ import {
   ResetPasswordDTO,
   GoogleAuthDTO
 } from "./auth.validation.js"
+import {
+  ACCESS_COOKIE_MAX_AGE_MS,
+  REFRESH_COOKIE_MAX_AGE_MS,
+  authCookieOptions
+} from "../../shared/auth/auth-cookie.js"
 
-const getCookieOptions = () => ({
-  httpOnly: true,
-  secure: env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  path: "/",
-  maxAge: 3 * 24 * 60 * 60 * 1000 // 3 days
-})
+const getBaseCookieOptions = () =>
+  authCookieOptions({ nodeEnv: env.NODE_ENV, sameSite: env.COOKIE_SAME_SITE, domain: env.COOKIE_DOMAIN })
 
-const getAccessTokenCookieOptions = () => ({
-  httpOnly: true,
-  secure: env.NODE_ENV === "production",
-  sameSite: "lax" as const,
-  path: "/",
-  maxAge: 15 * 60 * 1000 // 15 minutes
-})
+const getCookieOptions = () => ({ ...getBaseCookieOptions(), maxAge: REFRESH_COOKIE_MAX_AGE_MS })
+
+const getAccessTokenCookieOptions = () => ({ ...getBaseCookieOptions(), maxAge: ACCESS_COOKIE_MAX_AGE_MS })
+
+const clearAuthCookies = (res: Response) => {
+  res.clearCookie("refreshToken", getBaseCookieOptions())
+  res.clearCookie("accessToken", getBaseCookieOptions())
+}
 
 export const register = catchAsync(async (req: Request, res: Response) => {
   const { email, password, name } = req.body as RegisterDTO & { name?: string }
@@ -139,8 +140,7 @@ export const logout = catchAsync(async (req: Request, res: Response) => {
   const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
   await authService.logout(refreshToken)
 
-  res.clearCookie("refreshToken")
-  res.clearCookie("accessToken")
+  clearAuthCookies(res)
   return sendSuccess(res, 200, null)
 })
 
@@ -152,7 +152,6 @@ export const logoutAll = catchAsync(async (req: Request, res: Response) => {
 
   await authService.logoutAll(userId)
 
-  res.clearCookie("refreshToken")
-  res.clearCookie("accessToken")
+  clearAuthCookies(res)
   return sendSuccess(res, 200, null)
 })

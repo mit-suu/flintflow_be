@@ -59,6 +59,10 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: secret("refresh-secret"),
   ACCESS_TOKEN_EXPIRES: z.string().default("15m"),
   REFRESH_TOKEN_EXPIRES: z.string().default("3d"),
+  // Cookie auth (FLF-137, `shared/auth/auth-cookie.ts`). FE và BE khác site ⇒ `none`;
+  // cùng site (BE ở subdomain) ⇒ giữ `lax` và đặt COOKIE_DOMAIN=.flintflow.io.vn
+  COOKIE_SAME_SITE: z.enum(["lax", "strict", "none"]).default("lax"),
+  COOKIE_DOMAIN: z.string().default(""),
 
   SMTP_HOST: z.string().default("smtp.gmail.com"),
   SMTP_PORT: z.string().default("465"),
