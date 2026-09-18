@@ -440,3 +440,64 @@ describe("step-runner: F8 — client đóng kết nối (AbortSignal)", () => {
     expect(draftExecutor).not.toHaveBeenCalled()
   })
 })
+
+describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
+  /** Mọi step đứng trước `stepId` accepted, để `nextStep()` trả đúng `stepId`. */
+  const seedUpTo = (stepId: string) => {
+    seedSpine()
+    const spine = db.spines[0] as unknown as SpineT
+    const all = orderedSteps(spine)
+    spine.steps = all
+      .slice(0, all.findIndex((s) => s.id === stepId))
+      .map((s) => ({ id: s.id, status: "accepted" as const, first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+    spine.progress.current_phase = "S-8"
+  }
+
+  it("S-8.2 gọi assembleDocument ở spine_version hiện tại rồi mới phát gate_ready; không gọi model", async () => {
+    seedUpTo("S-8.2")
+    seedSession(true)
+    const order: string[] = []
+    const assembleDocument = vi.fn(async () => {
+      order.push("assemble")
+    })
+    const draftExecutor = vi.fn()
+    const elicitExecutor = vi.fn()
+    const { events, emit } = collectEvents()
+
+    await runStep(PROJECT, "S-8.2", SESSION, USER, (e) => {
+      if (e.type === "gate_ready") order.push("gate_ready")
+      emit(e)
+    }, { assembleDocument, draftExecutor, elicitExecutor, renderDeps: renderStub() })
+
+    const record = await repo.get(PROJECT)
+    expect(assembleDocument).toHaveBeenCalledTimes(1)
+    expect(assembleDocument).toHaveBeenCalledWith(PROJECT, record!.spine_version)
+    expect(order).toEqual(["assemble", "gate_ready"])
+    expect(events[events.length - 1]?.type).toBe("gate_ready")
+    expect(draftExecutor).not.toHaveBeenCalled()
+    expect(elicitExecutor).not.toHaveBeenCalled()
+  })
+
+  it("assemble lỗi ⇒ runStep ném lỗi, không phát gate_ready", async () => {
+    seedUpTo("S-8.2")
+    seedSession(true)
+    const { events, emit } = collectEvents()
+    const assembleDocument = vi.fn(async () => {
+      throw new ApiError(404, "Không tìm thấy Spine của dự án", "SPINE_NOT_FOUND")
+    })
+
+    const err = await runStep(PROJECT, "S-8.2", SESSION, USER, emit, { assembleDocument, renderDeps: renderStub() }).catch((e: unknown) => e)
+    expect((err as ApiError).code).toBe("SPINE_NOT_FOUND")
+    expect(events.some((e) => e.type === "gate_ready")).toBe(false)
+  })
+
+  it("step tất định khác (S-8.3) không ghép", async () => {
+    seedUpTo("S-8.3")
+    seedSession(true)
+    const assembleDocument = vi.fn(async () => undefined)
+    const { emit } = collectEvents()
+
+    await runStep(PROJECT, "S-8.3", SESSION, USER, emit, { assembleDocument, renderDeps: renderStub() })
+    expect(assembleDocument).not.toHaveBeenCalled()
+  })
+})
