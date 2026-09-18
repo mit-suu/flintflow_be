@@ -234,9 +234,17 @@ export const sectionStateSchema = z.strictObject({
   asset_version: z.string()
 })
 
+export const BASELINE_TYPES = ["generated", "imported", "release"] as const satisfies readonly T.BaselineType[]
+
+/** Dữ liệu trước FLF-171 không có `type`/`doc_version` ⇒ đọc ra `generated` / `null`. */
+const baselineTypeSchema = z.enum(BASELINE_TYPES).default("generated")
+const docVersionSchema = z.string().min(1).nullable().default(null)
+
 export const baselineSchema = z.strictObject({
   id,
   version: z.string().min(1),
+  type: baselineTypeSchema,
+  doc_version: docVersionSchema,
   at: isoDateTime,
   snapshot_ref: id,
   checked_at_version: z.number().int().min(1),
@@ -312,6 +320,8 @@ export const usageSchema = z.strictObject({
 export const baselineSnapshotSchema = z.strictObject({
   projectId: id,
   version: z.string().min(1),
+  type: baselineTypeSchema,
+  doc_version: docVersionSchema,
   at: isoDateTime,
   checked_at_version: z.number().int().min(1),
   waived_count: nonNegativeInt,

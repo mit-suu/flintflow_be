@@ -1188,6 +1188,27 @@
             "type": "string",
             "minLength": 1
           },
+          "type": {
+            "default": "generated",
+            "type": "string",
+            "enum": [
+              "generated",
+              "imported",
+              "release"
+            ]
+          },
+          "doc_version": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "at": {
             "type": "string",
             "format": "date-time",
@@ -1211,6 +1232,8 @@
         "required": [
           "id",
           "version",
+          "type",
+          "doc_version",
           "at",
           "snapshot_ref",
           "checked_at_version",
