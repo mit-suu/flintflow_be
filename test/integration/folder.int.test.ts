@@ -77,6 +77,28 @@ describe("folders", () => {
     expect(foreign.body.error.code).toBe("PROJECT_NOT_FOUND")
   })
 
+  it("thêm nhiều dự án có sẵn: chỉ dự án của mình được chuyển, id lạ bị bỏ qua", async () => {
+    const owner = await seedFixture("minimal")
+    const other = await seedFixture("minimal")
+    const folderId = (await request(app).post("/api/v1/folders").set(as(owner)).send({ name: "A" })).body.data._id as string
+    const second = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "P2", sourceMode: "fpt_template" })
+
+    const res = await request(app)
+      .post(`/api/v1/folders/${folderId}/projects`)
+      .set(as(owner))
+      .send({ projectIds: [owner.projectId, second.body.data._id, other.projectId, "khong-phai-id"] })
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual({ moved: 2 })
+
+    const list = await request(app).get("/api/v1/folders").set(as(owner))
+    expect(list.body.data[0].projectCount).toBe(2)
+    const foreign = await request(app).get(`/api/v1/projects/${other.projectId}`).set(as(other))
+    expect(foreign.body.data.folderId).toBeNull()
+
+    expect((await request(app).post(`/api/v1/folders/${folderId}/projects`).set(as(other)).send({ projectIds: [other.projectId] })).status).toBe(404)
+    expect((await request(app).post(`/api/v1/folders/${folderId}/projects`).set(as(owner)).send({ projectIds: [] })).status).toBe(400)
+  })
+
   it("tạo dự án thẳng trong thư mục (một request); thư mục của user khác ⇒ 404, không tạo", async () => {
     const owner = await seedFixture("minimal")
     const other = await seedFixture("minimal")

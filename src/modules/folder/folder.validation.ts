@@ -12,5 +12,11 @@ export const UpdateFolderSchema = z
   .object({ name: name.optional(), color: z.enum(FOLDER_COLORS).optional() })
   .refine((v) => v.name !== undefined || v.color !== undefined, { message: "Cần name hoặc color" })
 
+/** Thêm nhiều dự án có sẵn vào thư mục trong một request. */
+export const AddProjectsSchema = z.object({
+  projectIds: z.array(z.string().min(1)).min(1).max(100)
+})
+
+export type AddProjectsDTO = z.infer<typeof AddProjectsSchema>
 export type CreateFolderDTO = z.infer<typeof CreateFolderSchema>
 export type UpdateFolderDTO = z.infer<typeof UpdateFolderSchema>
