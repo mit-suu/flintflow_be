@@ -19,7 +19,19 @@ export enum ActionType {
 
   // ─── Ngoài pipeline, còn dùng ───
   CHAT = "chat",
-  SUMMARIZE_DOCUMENT = "summarize_document"
+  SUMMARIZE_DOCUMENT = "summarize_document",
+
+  // ─── Mode 1: import SRS có sẵn + change request (FLF-171, plan mode 1 §5.7) ───
+  /** I-4 (nút 1.8): trích field Spine từ text block của một section (hoặc lô section nhỏ). */
+  IMPORT_EXTRACT_FIELDS = "import_extract_fields",
+  /** Nút 1.11: kiểm ngữ nghĩa tài liệu vừa import — chỉ ra cờ vàng. */
+  IMPORT_SEMANTIC_CHECK = "import_semantic_check",
+  /** C-2 (nút 3.2): làm rõ CR, trả câu hỏi hoặc đích (entity path, từ khoá) cho C-3. */
+  CR_CLARIFY = "cr_clarify",
+  /** C-4 (nút 3.6): kết luận edit | comment | not_related cho từng vị trí + đề xuất text/op. */
+  CR_PROPOSE = "cr_propose",
+  /** C-5 (nút 3.8): kiểm nhất quán trên phạm vi thay đổi — chỉ ra cờ vàng. */
+  CR_CONSISTENCY = "cr_consistency"
 }
 
 /**
@@ -38,7 +50,12 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.REVIEW]: "review-section",
   [ActionType.CONSISTENCY_PASS]: "review-section",
   [ActionType.RECONCILE]: "apply-change-op",
-  [ActionType.CHANGE_INSTRUCTION]: "apply-change-op"
+  [ActionType.CHANGE_INSTRUCTION]: "apply-change-op",
+  [ActionType.IMPORT_EXTRACT_FIELDS]: "import-extract",
+  [ActionType.IMPORT_SEMANTIC_CHECK]: "import-semantic-check",
+  [ActionType.CR_CLARIFY]: "cr-clarify",
+  [ActionType.CR_PROPOSE]: "cr-propose",
+  [ActionType.CR_CONSISTENCY]: "cr-consistency"
 }
 
 export interface AiActionInput {
