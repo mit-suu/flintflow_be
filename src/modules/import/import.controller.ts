@@ -16,7 +16,8 @@ import {
   finalizeRequestSchema,
   gapReportQuerySchema,
   importResumeRequestSchema,
-  mappingPatchRequestSchema
+  mappingPatchRequestSchema,
+  stepPlanPatchRequestSchema
 } from "./import.dto.js"
 import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
@@ -25,6 +26,7 @@ import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import * as importService from "./import.service.js"
 import * as reuploadService from "./reupload.service.js"
+import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
 
 /**
@@ -146,4 +148,17 @@ export const gapReport = mode1Handler(async (req, res) => {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8${encodeURIComponent(filename)}`)
   return res.status(200).send(buffer)
+})
+
+// ─── kế hoạch step theo template (#32–#33, FLF-183) ───────────────────
+
+export const getStepPlan = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  return sendSuccess(res, 200, await stepPlanService.getStepPlan(auth.projectId))
+})
+
+export const patchStepPlan = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(stepPlanPatchRequestSchema, req.body)
+  return sendSuccess(res, 200, await stepPlanService.patchStepPlan(auth.projectId, auth.userId, body))
 })
