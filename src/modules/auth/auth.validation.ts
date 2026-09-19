@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { USER_LOCALES } from "../user/user.model.js"
 
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -11,6 +12,8 @@ export type LoginDTO = z.infer<typeof loginSchema>
 
 export const registerSchema = z.object({
   name: z.string().optional(),
+  /** Ngôn ngữ đang dùng lúc đăng ký (T25) — thành ngôn ngữ mặc định của tài khoản và của email xác thực. */
+  locale: z.enum(USER_LOCALES).optional(),
   email: z.string().email("Invalid email address"),
   password: z.string().min(6, "Password must be at least 6 characters")
 })
@@ -43,7 +46,9 @@ export const resetPasswordSchema = z.object({
 export type ResetPasswordDTO = z.infer<typeof resetPasswordSchema>
 
 export const googleAuthSchema = z.object({
-  idToken: z.string().min(1, "Google ID token is required")
+  idToken: z.string().min(1, "Google ID token is required"),
+  /** Chỉ dùng khi tài khoản được tạo mới qua Google (T25); tài khoản có sẵn giữ ngôn ngữ đã lưu. */
+  locale: z.enum(USER_LOCALES).optional()
 })
 
 export type GoogleAuthDTO = z.infer<typeof googleAuthSchema>

@@ -1,4 +1,4 @@
-import { User, IUser } from "./user.model.js"
+import { DEFAULT_USER_LOCALE, User, IUser, type UserLocale } from "./user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { getOrCreateWallet } from "../../shared/ai/credit-reservation.service.js"
 
@@ -7,6 +7,7 @@ export interface UserDTO {
   email: string
   name?: string
   onboardedAt: Date | null
+  locale: UserLocale
   balance?: number
   createdAt?: Date
   updatedAt?: Date
@@ -15,6 +16,7 @@ export interface UserDTO {
 export interface UpdateMeInput {
   name?: string
   onboardedAt?: Date | null
+  locale?: UserLocale
 }
 
 export const getUserById = async (id: string): Promise<UserDTO> => {
@@ -36,13 +38,15 @@ export const getUserById = async (id: string): Promise<UserDTO> => {
     email: user.email,
     ...(user.name ? { name: user.name } : {}),
     onboardedAt: user.onboardedAt ?? null,
+    // User tạo trước T25 chưa có field ⇒ mặc định tiếng Việt
+    locale: user.locale ?? DEFAULT_USER_LOCALE,
     balance,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   }
 }
 
-/** UC 1.12 onboarding: cập nhật tên hiển thị và/hoặc mốc onboarding của chính user. */
+/** UC 1.12 onboarding + T25: cập nhật tên hiển thị, mốc onboarding và/hoặc ngôn ngữ của chính user. */
 export const updateMe = async (id: string, input: UpdateMeInput): Promise<UserDTO> => {
   const user = await User.findByIdAndUpdate(id, { $set: input }, { new: true })
   if (!user) {

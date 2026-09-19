@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer"
 import { env } from "../../config/env.js"
-import { getVerificationEmailHtml, getResetPasswordEmailHtml } from "./templates.js"
+import { getVerificationEmail, getResetPasswordEmail } from "./templates.js"
+import type { UserLocale } from "../../modules/user/user.model.js"
 
 let transporter: nodemailer.Transporter | null = null
 
@@ -27,10 +28,11 @@ const getTransporter = (): nodemailer.Transporter | null => {
 export const sendVerificationEmail = async (
   toEmail: string,
   rawToken: string,
-  name?: string
+  name?: string,
+  locale?: UserLocale
 ): Promise<void> => {
   const verifyUrl = `${env.APP_URL}/verify-email?token=${rawToken}`
-  const html = getVerificationEmailHtml({ name, url: verifyUrl })
+  const { subject, html } = getVerificationEmail({ name, url: verifyUrl, locale })
   const activeTransporter = getTransporter()
 
   if (activeTransporter) {
@@ -38,7 +40,7 @@ export const sendVerificationEmail = async (
       await activeTransporter.sendMail({
         from: env.EMAIL_FROM,
         to: toEmail,
-        subject: "FlintFlow — Xác thực địa chỉ email của bạn",
+        subject,
         html
       })
       console.log(`[EMAIL SERVICE] Verification email sent to ${toEmail}`)
@@ -59,10 +61,11 @@ export const sendVerificationEmail = async (
 export const sendPasswordResetEmail = async (
   toEmail: string,
   rawToken: string,
-  name?: string
+  name?: string,
+  locale?: UserLocale
 ): Promise<void> => {
   const resetUrl = `${env.APP_URL}/reset-password?token=${rawToken}`
-  const html = getResetPasswordEmailHtml({ name, url: resetUrl })
+  const { subject, html } = getResetPasswordEmail({ name, url: resetUrl, locale })
   const activeTransporter = getTransporter()
 
   if (activeTransporter) {
@@ -70,7 +73,7 @@ export const sendPasswordResetEmail = async (
       await activeTransporter.sendMail({
         from: env.EMAIL_FROM,
         to: toEmail,
-        subject: "FlintFlow — Đặt lại mật khẩu tài khoản",
+        subject,
         html
       })
       console.log(`[EMAIL SERVICE] Password reset email sent to ${toEmail}`)

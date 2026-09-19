@@ -55,3 +55,17 @@ describe("PATCH /users/me", () => {
     expect(outcome.error).toMatchObject({ statusCode: 401, code: "UNAUTHORIZED" })
   })
 })
+
+describe("PATCH /users/me — locale (T25)", () => {
+  it("chỉ gửi locale là đủ", async () => {
+    const outcome = await invoke(updateMe, USER, { locale: "en" })
+    expect(outcome.status).toBe(200)
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { locale: "en" })
+  })
+
+  it("locale ngoài vi/en ⇒ VALIDATION_ERROR, không ghi", async () => {
+    const outcome = await invoke(updateMe, USER, { locale: "fr" })
+    expect((outcome.error as { code?: string })?.code).toBe("VALIDATION_ERROR")
+    expect(userService.updateMe).not.toHaveBeenCalled()
+  })
+})

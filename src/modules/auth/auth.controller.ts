@@ -32,9 +32,9 @@ const clearAuthCookies = (res: Response) => {
 }
 
 export const register = catchAsync(async (req: Request, res: Response) => {
-  const { email, password, name } = req.body as RegisterDTO & { name?: string }
+  const { email, password, name, locale } = req.body as RegisterDTO
 
-  const result = await authService.register(email, password, name)
+  const result = await authService.register(email, password, name, locale)
 
   return sendSuccess(res, 201, {
     user: result.user,
@@ -104,11 +104,11 @@ export const resetPassword = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const googleAuth = catchAsync(async (req: Request, res: Response) => {
-  const { idToken } = req.body as GoogleAuthDTO
+  const { idToken, locale } = req.body as GoogleAuthDTO
   const userAgent = req.headers["user-agent"]
   const ip = req.ip
 
-  const result = await authService.googleAuth(idToken, userAgent, ip)
+  const result = await authService.googleAuth(idToken, userAgent, ip, locale)
 
   res.cookie("refreshToken", result.refreshToken, getCookieOptions())
   res.cookie("accessToken", result.accessToken, getAccessTokenCookieOptions())

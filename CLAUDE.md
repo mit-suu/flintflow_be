@@ -163,4 +163,11 @@ Ba project vitest (`vitest.config.ts`), `npm test` chạy cả ba:
 ## Quy ước ngôn ngữ
 
 Tiếng Anh cho: tên field Spine (snake_case đúng như tài liệu), nội dung render vào SRS, nhãn `.puml`.
-Tiếng Việt cho: nhãn UI, thông báo lỗi cho user, comment nội bộ.
+Tiếng Việt cho: comment nội bộ.
+
+Ngôn ngữ người dùng (T25): `User.locale` (`vi` | `en`, mặc định `vi`) — đặt lúc đăng ký (`/auth/register`,
+`/auth/google` với tài khoản mới), đổi qua `PATCH /users/me`, trả về ở `GET /users/me` và `user` của các endpoint đăng
+nhập. **Email** gửi theo `user.locale` (`shared/email/templates.ts`, cả hai bản). **Thông báo lỗi**: FE dịch theo
+`error.code` (`flintflow_fe/messages/*.json → errors`), nên mỗi lỗi user có thể gặp phải có **mã riêng, một nghĩa**;
+`message` chỉ là dự phòng. Mã mơ hồ nhiều nghĩa (vd `FORBIDDEN`) hoặc mang chi tiết động (`VALIDATION_ERROR`) thì FE
+hiện nguyên `message`.
