@@ -5,6 +5,7 @@ import type { IChangeLocation } from "./change-location.model.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { elementPathOf, findLocations } from "./cr-impact.service.js"
 import { checkLocation, checkSpineOps } from "./verify.service.js"
+import { matchProposals } from "./propose.service.js"
 
 const block = (block_id: string, text: string, section_id: string | null = null, mentions: { entity: string; id: string }[] = []) => ({
   block_id,
@@ -67,5 +68,35 @@ describe("C-5 kiểm tất định", () => {
     ])
     expect([...res.keys()].sort()).toEqual(["L001", "L002"])
     expect(res.get("L002")?.[0].rule).toBe("op_invalid")
+  })
+})
+
+describe("matchProposals — ghép output C-4 với vị trí của lô", () => {
+  const batch = [
+    { location_id: "L005", block_id: "B0053" },
+    { location_id: "L006", block_id: "B0054" }
+  ]
+  const out = (location_id: string) => ({ location_id, conclusion: "edit" as const, reason: "r", new_text: "x", spine_ops: [] })
+
+  it("khớp đúng location_id", () => {
+    const m = matchProposals(batch, [out("L006"), out("L005")])
+    expect(m.get(batch[0])?.location_id).toBe("L005")
+    expect(m.get(batch[1])?.location_id).toBe("L006")
+  })
+
+  it("model trả block_id thay location_id vẫn khớp", () => {
+    expect(matchProposals(batch, [out("B0054")]).get(batch[1])).toBeDefined()
+  })
+
+  it("model đánh số lại (L001, L002 cho lô L005, L006) ⇒ ghép theo thứ tự khi số lượng bằng nhau (lỗi thấy khi e2e P3)", () => {
+    const m = matchProposals(batch, [out("L001"), out("L002")])
+    expect(m.size).toBe(2)
+    expect(m.get(batch[0])?.location_id).toBe("L001")
+  })
+
+  it("số output lạ khác số vị trí thiếu ⇒ không đoán, để thiếu", () => {
+    const m = matchProposals(batch, [out("L005"), out("L009"), out("L010")])
+    expect(m.size).toBe(1)
+    expect(m.has(batch[1])).toBe(false)
   })
 })
