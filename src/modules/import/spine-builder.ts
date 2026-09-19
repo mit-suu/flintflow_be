@@ -44,7 +44,9 @@ const priority = (v: unknown): (typeof PRIORITIES)[number] | null => {
 export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   const of = (entity: string) => entities.filter((e) => e.entity === entity && e.id !== null)
   const existing = (arr: { id: string }[]) => new Set(arr.map((x) => x.id))
-  const alloc = new IdAllocator({ features: existing(spine.features), functions: existing(spine.functions) })
+  // Giữ chỗ cả id trích được trong lô — không thì feature "General" có thể nhận trùng F-01 của tài liệu (FLF-179)
+  const ids = (entity: "features" | "functions") => [...existing(spine[entity]), ...of(entity).map((e) => e.id!)]
+  const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions") })
 
   // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC)
   const resolver = (entity: string, pool: { id: string; name?: string }[]) => {
