@@ -4,7 +4,7 @@ import * as projectController from "./project.controller.js"
 import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
-import { CreateProjectSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, MoveProjectSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -71,6 +71,9 @@ const upload = multer({
  *               domain:
  *                 type: string
  *                 example: E-learning
+ *               folderId:
+ *                 type: string
+ *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
  *     responses:
  *       201:
  *         description: Dự án đã được tạo thành công
@@ -259,6 +262,39 @@ router.delete(
 router.get("/:projectId", authMiddleware, projectController.getProject)
 router.delete("/:projectId", authMiddleware, projectController.deleteProject)
 router.patch("/:projectId/name", authMiddleware, projectController.updateProjectName)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/folder:
+ *   patch:
+ *     summary: Chuyển dự án vào thư mục (folderId null ⇒ ra ngoài thư mục)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [folderId]
+ *             properties:
+ *               folderId:
+ *                 type: string
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi chuyển
+ *       404:
+ *         description: PROJECT_NOT_FOUND hoặc FOLDER_NOT_FOUND (không thuộc user)
+ */
+router.patch("/:projectId/folder", authMiddleware, validateRequest(MoveProjectSchema), projectController.moveProjectToFolder)
 
 /**
  * @swagger
