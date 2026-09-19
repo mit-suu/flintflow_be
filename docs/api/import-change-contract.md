@@ -5,6 +5,8 @@
 > **Schema zod:** `src/modules/import/import.dto.ts`, `src/modules/doc-version/doc-version.dto.ts`, `src/modules/change-request/change-request.dto.ts`, `src/modules/project/project.validation.ts`; mã lỗi `src/modules/import/mode1.errors.ts`; đầu ra AI `src/shared/ai/response-parser.ts` (`importExtract`, `findings`, `crClarify`, `crPropose`).
 > **Hiện thực:** P2 (BE), P3 (FE). Trước khi P2 merge, FE mock bằng msw theo đúng hình ở đây (`flintflow_fe/mocks/mode1/handlers.ts`).
 
+> **⚠ Mode 1 v2 (FLF-181/182, 2026-09-19):** hướng mode 1 đổi — Spine là nguồn sự thật, workspace như mode 2, step theo template người dùng, CR sau baseline v1. Phần thay đổi hợp đồng ở **§4** (contract-change, chờ 4/4). Các quy ước G2/G3/BR-03 bên dưới được thay theo §4 khi V1–V4 hiện thực xong.
+
 ## 0. Quy ước chung
 
 - Giống `pipeline-contract.md` §0: base URL `/api/v1`, Bearer token, envelope `{ data, meta?, error }`. Project không thuộc user trả `404 PROJECT_NOT_FOUND`.
@@ -207,9 +209,34 @@ Nếu CR-002 cần block `B0005` mà CR-001 đang giữ:
 { "data": null, "meta": { "prefill": { "title": "Đổi tên actor Learner thành Student", "description": "Rename actor Learner to Student in every section" } }, "error": { "code": "CHANGE_REQUIRES_CR", "message": "Tài liệu đã có baseline — mọi sửa phải qua change request" } }
 ```
 
+## 4. Mode 1 v2 — contract-change (FLF-182)
+
+Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-change`, cần 4/4 duyệt. V0 chỉ đổi **hình**; hành vi hiện thực ở V1–V4.
+
+### 4.1 Spine (`spine.schema.ts`)
+- `steps[].status` thêm `skipped` — step không áp dụng cho template của project (ẩn, không tính tiến độ).
+- Thêm `custom_sections[]` `{ id, heading, level, blocks: [{ kind: paragraph|list_item|table|image, text, rows, image_ref }], source: import|manual }` — mục ngoài mẫu FPT và văn xuôi không trích được, render nguyên văn ở section `custom:<id>`, sửa qua `/changes`. Spine cũ đọc ra `[]`.
+- Khoá section `custom:<id>` hợp lệ ở `flags[].section_id`, `addendum[].target_section`, `sections[].id`; `sectionsOfPath("custom_sections[id=X]…")` ⇒ `custom:X`.
+
+### 4.2 RenderedDocument
+- `RenderedSection.id` có thể là `custom:<id>` (mục riêng render nguyên văn). Hình không đổi.
+
+### 4.3 Endpoint mới
+| # | Method + path | Request | Response `data` | Lỗi riêng |
+| --- | --- | --- | --- | --- |
+| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu" + cờ đỏ `core_section_missing`), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
+| 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt step của đầu mục FPT hoặc step đã có dữ liệu) |
+
+### 4.4 Thay đổi khác
+- `templateProfileDtoSchema` thêm `layout[]` `{ order, heading_text, level, section_id }` — thứ tự + tiêu đề mục của file upload (`section_id` = section FPT hoặc `custom:<id>`). Import cũ ⇒ `[]`.
+- CR `source.kind` thêm `chat` — CR tạo từ lệnh sửa trong chat sau baseline v1.
+- `CHANGE_REQUIRES_CR`: **chỉ** trả khi project đã có baseline v1 (sign-off) hoặc release — trước đó `/changes`, `/undo`, chat sửa chạy như mode 2 (D3). Hiện thực ở V1.
+- **Chưa đổi ở V0** (contract-change riêng ở V4): vị trí CR theo path Spine thay `block_id`, `BLOCK_LOCKED` theo path, `CR_OLD_TEXT_MISMATCH` ⇒ so giá trị tại path, #13 blocks ⇒ trả `RenderedDocument` của version.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |

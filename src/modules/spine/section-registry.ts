@@ -304,6 +304,11 @@ export const sectionsOfPath = (spine: Spine, path: string, hint: ChangeHint = {}
   }
   const [head, next] = segments
   const id = head.selector?.kind === "match" ? (head.selector.pairs.find(([k]) => k === "id")?.[1] ?? null) : null
+  // Mục riêng của template người dùng (FLF-182): mỗi phần tử là một section `custom:<id>`, không ảnh hưởng section khác
+  if (head.key === "custom_sections") {
+    const own = id ?? pickObject(hint.value)?.id ?? pickObject(hint.before)?.id
+    return { owner: typeof own === "string" ? [`custom:${own}`] : [], reads: [], derived: [] }
+  }
   const element = findElement(spine, head.key, id) ?? pickObject(hint.value) ?? pickObject(hint.before)
   const target: Target = { root: head.key, id, sub: next?.key ?? null, element }
 
