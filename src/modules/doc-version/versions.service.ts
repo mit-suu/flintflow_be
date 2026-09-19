@@ -1,19 +1,20 @@
 /**
  * Đọc version tài liệu mode 1 qua API (UC-54 xem theo block, UC-55 so sánh, UC-57 tải về). FLF-171, plan §6 2F.
+ * Mode 1 v2 (FLF-186): version là bản render từ Spine — block (#13) và so sánh (#15) đọc từ file của version, khớp theo
+ * text (file render không mang bookmark neo); không còn Track Changes theo block.
  * Tải bản draft ⇒ file có Track Changes + watermark DRAFT (G8, chỉ bản tải về, không sửa file lưu),
  * tên `…_v0.2_DRAFT.docx`; bản release ⇒ bản sạch (accept-all) trừ khi xin `variant=tracked`.
  */
 
-import { DocxPackage, addDraftWatermark, blockIdOfBookmark, paragraphRevisions, readBlocks } from "../docx-ooxml/index.js"
+import { DocxPackage, addDraftWatermark, type OoxmlBlock } from "../docx-ooxml/index.js"
 import type { DocBlockDto } from "../import/import.dto.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { diffBlockLists } from "./block-diff.js"
-import { toDocBlockDto } from "./block-dto.js"
 import { docFileStore } from "./doc-file.store.js"
 import type { CompareResponse, DocVersionDto } from "./doc-version.dto.js"
 import type { IDocVersion } from "./doc-version.model.js"
-import { blocksOfVersion, listDocVersions, requireDocVersion } from "./doc-version.service.js"
+import { fileBlocksOfVersion, listDocVersions, requireDocVersion } from "./doc-version.service.js"
 import { downloadFileName, isReleaseVersion } from "./versioning.js"
 
 export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
@@ -30,21 +31,23 @@ export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
 
 export const listVersions = async (projectId: string): Promise<DocVersionDto[]> => (await listDocVersions(projectId)).map(toVersionDto)
 
-/** Block theo thứ tự tài liệu; bản có Track Changes kèm `revisions[]` từng block. */
+const blockId = (i: number): string => `B${String(i + 1).padStart(4, "0")}`
+
+/** Block của file version theo thứ tự tài liệu (id theo thứ tự đọc — chỉ để hiển thị, không phải neo). */
 export const versionBlocks = async (projectId: string, version: string): Promise<DocBlockDto[]> => {
   const v = await requireDocVersion(projectId, version)
-  const blocks = await blocksOfVersion(projectId, version)
-  const revisionsOf = new Map<string, DocBlockDto["revisions"]>()
-  if (v.kind === "cr_revision") {
-    const ooxml = await readBlocks(await DocxPackage.load(await docFileStore().load(v.file_ref)))
-    for (const b of ooxml) {
-      const id = blockIdOfBookmark(b.bookmark)
-      if (!id) continue
-      const revs = paragraphRevisions(b.element)
-      if (revs.length) revisionsOf.set(id, revs)
-    }
-  }
-  return blocks.map((b) => toDocBlockDto(b, revisionsOf.get(b.block_id)))
+  return (await fileBlocksOfVersion(v)).map((b, i) => ({
+    block_id: blockId(i),
+    doc_version: v.version,
+    kind: b.kind,
+    level: b.level ?? null,
+    heading_path: [...b.heading_path],
+    text: b.text,
+    section_id: null,
+    mentions: [],
+    editable: false,
+    locked_by_cr: null
+  }))
 }
 
 export interface DownloadFile {
@@ -71,9 +74,9 @@ export const downloadVersion = async (projectId: string, projectName: string, ve
 }
 
 export const compareVersions = async (projectId: string, from: string, to: string): Promise<CompareResponse> => {
-  await Promise.all([requireDocVersion(projectId, from), requireDocVersion(projectId, to)])
-  const [a, b] = await Promise.all([blocksOfVersion(projectId, from), blocksOfVersion(projectId, to)])
-  const lite = (x: typeof a) => x.map((blk) => ({ block_id: blk.block_id, para_id: blk.anchor.para_id, text: blk.text, text_hash: blk.text_hash }))
+  const [va, vb] = await Promise.all([requireDocVersion(projectId, from), requireDocVersion(projectId, to)])
+  const [a, b] = await Promise.all([fileBlocksOfVersion(va), fileBlocksOfVersion(vb)])
+  const lite = (x: OoxmlBlock[]) => x.map((blk) => ({ block_id: null, para_id: blk.para_id, text: blk.text, text_hash: blk.text_hash }))
   const { blocks, summary } = diffBlockLists(lite(a), lite(b))
   return { from, to, summary, blocks }
 }
