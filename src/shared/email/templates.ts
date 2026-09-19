@@ -1,152 +1,92 @@
-export interface EmailTemplateParams {
+export type OtpPurpose = "verify_email" | "reset_password"
+
+export interface OtpEmailParams {
   name?: string
-  url: string
+  otp: string
+  expiresInMinutes: number
+  purpose: OtpPurpose
 }
 
-const baseLayout = (title: string, content: string) => `
-<!DOCTYPE html>
+const OTP_COPY: Record<OtpPurpose, { title: string; heading: string; intro: string; ignore: string }> = {
+  verify_email: {
+    title: "Mã xác thực FlintFlow",
+    heading: "Xác thực tài khoản",
+    intro: "Cảm ơn bạn đã đăng ký FlintFlow. Nhập mã dưới đây để hoàn tất xác thực tài khoản:",
+    ignore: "Nếu bạn không đăng ký tài khoản FlintFlow, hãy bỏ qua email này."
+  },
+  reset_password: {
+    title: "Mã đặt lại mật khẩu FlintFlow",
+    heading: "Đặt lại mật khẩu",
+    intro: "Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản FlintFlow của bạn. Nhập mã dưới đây để tiếp tục:",
+    ignore: "Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này — mật khẩu của bạn không thay đổi."
+  }
+}
+
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string)
+
+// Màu lấy từ giao diện app (tím chủ đạo #4F46E5, nền nhạt #F4F3FE).
+const BRAND = "#4F46E5"
+const BRAND_SOFT = "#F4F3FE"
+const TEXT = "#191817"
+const MUTED = "#6B6862"
+const BORDER = "#E4E1DC"
+const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+/**
+ * Email OTP: gọn, có nhận diện thương hiệu nhẹ, nhưng giữ các điều kiện để vào Hộp thư chính —
+ * không ảnh, không link, không nút, chữ là chính, có bản text thuần đi kèm (`getOtpEmailText`).
+ * Style inline (Gmail bỏ `<style>` trong một số trường hợp); bảng chỉ dùng để căn giữa, đúng chuẩn email.
+ */
+export const getOtpEmailHtml = ({ name, otp, expiresInMinutes, purpose }: OtpEmailParams): string => {
+  const copy = OTP_COPY[purpose]
+  const greeting = name ? `Xin chào ${escapeHtml(name)},` : "Xin chào,"
+  return `<!DOCTYPE html>
 <html lang="vi">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title}</title>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background-color: #090d16;
-      color: #e2e8f0;
-    }
-    .container {
-      max-width: 560px;
-      margin: 40px auto;
-      background-color: #0f172a;
-      border: 1px solid #1e293b;
-      border-radius: 16px;
-      padding: 32px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-    }
-    .logo-container {
-      text-align: center;
-      margin-bottom: 28px;
-    }
-    .logo {
-      display: inline-block;
-      width: 48px;
-      height: 48px;
-      line-height: 48px;
-      background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
-      border-radius: 12px;
-      font-weight: 900;
-      font-size: 20px;
-      color: #ffffff;
-      text-align: center;
-      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
-    }
-    .brand-name {
-      margin-top: 10px;
-      font-size: 18px;
-      font-weight: 800;
-      color: #f8fafc;
-      letter-spacing: -0.5px;
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 700;
-      color: #ffffff;
-      margin-top: 0;
-      margin-bottom: 16px;
-      text-align: center;
-    }
-    p {
-      font-size: 15px;
-      line-height: 1.6;
-      color: #94a3b8;
-      margin-bottom: 24px;
-    }
-    .button-container {
-      text-align: center;
-      margin: 32px 0;
-    }
-    .btn {
-      display: inline-block;
-      padding: 14px 32px;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      color: #ffffff !important;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 15px;
-      border-radius: 12px;
-      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
-      transition: all 0.2s ease;
-    }
-    .link-box {
-      background-color: #020617;
-      border: 1px solid #1e293b;
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 12px;
-      color: #6366f1;
-      word-break: break-all;
-      margin-top: 24px;
-    }
-    .footer {
-      margin-top: 36px;
-      padding-top: 20px;
-      border-top: 1px solid #1e293b;
-      text-align: center;
-      font-size: 12px;
-      color: #64748b;
-    }
-  </style>
+  <title>${copy.title}</title>
 </head>
-<body>
-  <div class="container">
-    <div class="logo-container">
-      <div class="logo">FF</div>
-      <div class="brand-name">FlintFlow AI Platform</div>
-    </div>
-    ${content}
-    <div class="footer">
-      <p style="margin: 0; font-size: 12px; color: #64748b;">
-        Email này được gửi tự động từ hệ thống FlintFlow Specification Engine.<br>
-        Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email này.
-      </p>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background-color:#ffffff;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td align="center" style="padding:24px 16px;">
+        <div style="max-width:480px;margin:0 auto;text-align:left;font-family:${FONT};color:${TEXT};border:1px solid ${BORDER};border-radius:14px;padding:32px 28px;">
+          <div style="font-size:18px;font-weight:800;color:${BRAND};letter-spacing:-0.3px;">FlintFlow</div>
+
+          <h1 style="margin:24px 0 8px;font-size:20px;font-weight:700;color:${TEXT};">${copy.heading}</h1>
+          <p style="margin:0 0 6px;font-size:14px;line-height:1.6;color:${TEXT};">${greeting}</p>
+          <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${TEXT};">${copy.intro}</p>
+
+          <div style="background-color:${BRAND_SOFT};border-radius:12px;padding:18px 12px;text-align:center;">
+            <span style="font-family:'SFMono-Regular',Consolas,'Courier New',monospace;font-size:32px;font-weight:700;letter-spacing:10px;color:${BRAND};">${otp}</span>
+          </div>
+
+          <p style="margin:16px 0 0;font-size:13px;line-height:1.6;color:${MUTED};">
+            Mã có hiệu lực trong <strong style="color:${TEXT};">${expiresInMinutes} phút</strong>.
+            Vui lòng không chia sẻ mã này với bất kỳ ai, kể cả nhân viên FlintFlow.
+          </p>
+          <p style="margin:12px 0 0;font-size:13px;line-height:1.6;color:${MUTED};">${copy.ignore}</p>
+        </div>
+      </td>
+    </tr>
+  </table>
 </body>
-</html>
-`
-
-export const getVerificationEmailHtml = ({ name, url }: EmailTemplateParams): string => {
-  const greeting = name ? `Xin chào <strong>${name}</strong>,` : "Xin chào,"
-  const content = `
-    <h1>Xác thực tài khoản FlintFlow</h1>
-    <p>${greeting}</p>
-    <p>Cảm ơn bạn đã đăng ký tài khoản tại <strong>FlintFlow Platform</strong>. Vui lòng nhấn vào nút bên dưới để xác thực địa chỉ email của bạn và hoàn tất đăng ký:</p>
-    <div class="button-container">
-      <a href="${url}" class="btn">Xác thực tài khoản ngay</a>
-    </div>
-    <p>Link xác thực này sẽ hết hạn trong <strong>24 giờ</strong>.</p>
-    <p>Nếu nút trên không hoạt động, bạn có thể sao chép và dán liên kết sau vào trình duyệt:</p>
-    <div class="link-box">${url}</div>
-  `
-  return baseLayout("Xác thực tài khoản FlintFlow", content)
+</html>`
 }
 
-export const getResetPasswordEmailHtml = ({ name, url }: EmailTemplateParams): string => {
-  const greeting = name ? `Xin chào <strong>${name}</strong>,` : "Xin chào,"
-  const content = `
-    <h1>Đặt lại mật khẩu FlintFlow</h1>
-    <p>${greeting}</p>
-    <p>Hệ thống nhận được yêu cầu đặt lại mật khẩu cho tài khoản FlintFlow của bạn. Vui lòng nhấn vào nút bên dưới để tạo mật khẩu mới:</p>
-    <div class="button-container">
-      <a href="${url}" class="btn">Đặt lại mật khẩu</a>
-    </div>
-    <p>Link này sẽ hết hạn trong <strong>15 phút</strong> để bảo mật tài khoản của bạn.</p>
-    <p>Nếu bạn không gửi yêu cầu đặt lại mật khẩu, tài khoản của bạn vẫn an toàn và không có sự thay đổi nào.</p>
-    <div class="link-box">${url}</div>
-  `
-  return baseLayout("Đặt lại mật khẩu FlintFlow", content)
-}
+export const getOtpEmailText = ({ name, otp, expiresInMinutes, purpose }: OtpEmailParams): string =>
+  [
+    "FlintFlow",
+    "",
+    name ? `Xin chào ${name},` : "Xin chào,",
+    "",
+    OTP_COPY[purpose].intro,
+    "",
+    `    ${otp}`,
+    "",
+    `Mã có hiệu lực trong ${expiresInMinutes} phút. Vui lòng không chia sẻ mã này với bất kỳ ai, kể cả nhân viên FlintFlow.`,
+    OTP_COPY[purpose].ignore,
+    "",
+  ].join("\n")
