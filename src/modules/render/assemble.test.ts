@@ -122,6 +122,8 @@ vi.mock("./rendered-document.model.js", () => ({
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
 vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
+// Project mode 2: chưa có layout file upload ⇒ thứ tự mẫu FPT (FLF-184)
+vi.mock("../import/template-profile.model.js", () => ({ TemplateProfile: { findOne: async () => null } }))
 vi.mock("../spine/spine.repository.js", () => ({
   get: vi.fn(),
   listBaselineRefs: vi.fn(),
