@@ -44,6 +44,11 @@ export type DocBlockKind = (typeof DOC_BLOCK_KINDS)[number]
 
 /** Tiền tố bookmark ẩn làm neo chính của block (G3 chốt sau P0): `_ff_B0001`. */
 export const BLOCK_BOOKMARK_PREFIX = "_ff_"
+/**
+ * Neo của block bảng cấp 1 (FLF-178): `_fft_B0005`, đặt ở đầu đoạn đầu tiên của ô đầu tiên — bảng không có chỗ riêng
+ * cho bookmark, còn bookmark trong đoạn thì Word giữ. Tiền tố khác `_ff_` để ô đầu vẫn giữ neo riêng của nó.
+ */
+export const TABLE_BOOKMARK_PREFIX = "_fft_"
 export const BLOCK_ID_PATTERN = /^B\d{4,}$/
 
 /** Thực thể có mã nhận diện được trong text (quét mention, I-2). */
