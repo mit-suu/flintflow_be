@@ -10,7 +10,10 @@ import {
   getImportResponseSchema,
   importedDocumentDtoSchema,
   mappingPatchRequestSchema,
-  reuploadDiffDtoSchema
+  reuploadDiffDtoSchema,
+  stepPlanPatchRequestSchema,
+  stepPlanResponseSchema,
+  templateProfileDtoSchema
 } from "./import.dto.js"
 import { MODE1_ERROR_STATUS, Mode1Error, mode1ErrorCodeSchema } from "./mode1.errors.js"
 
@@ -158,6 +161,36 @@ describe("import.dto — response", () => {
       blocks: [{ block_id: null, change: "added", after: "New paragraph" }, { block_id: "B0007", change: "modified", before: "a", after: "b" }]
     }
     expect(reuploadDiffDtoSchema.safeParse(diff).success).toBe(true)
+  })
+})
+
+describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
+  const profile = { doc_version: "0.0", heading_map: [], table_map: [], required_sections: [], language: "en" }
+
+  it("profile cũ không có layout ⇒ []; layout mang section FPT hoặc custom:<id>", () => {
+    expect(templateProfileDtoSchema.parse(profile).layout).toEqual([])
+    const layout = [
+      { order: 0, heading_text: "1 Introduction", level: 1, section_id: "fixed:1" },
+      { order: 1, heading_text: "1.4 References", level: 2, section_id: "custom:CS01" }
+    ]
+    expect(templateProfileDtoSchema.parse({ ...profile, layout }).layout).toEqual(layout)
+    expect(templateProfileDtoSchema.safeParse({ ...profile, layout: [{ ...layout[0], level: 0 }] }).success).toBe(false)
+  })
+
+  it("step-plan: state applied | hidden | enabled, missing đánh dấu đầu mục FPT bị thiếu", () => {
+    const steps = [
+      { step_id: "S-7.1", state: "applied", missing: true, section_ids: ["fixed:5.1"], reason: "Đầu mục mẫu FPT — file không có" },
+      { step_id: "B-0.1", state: "hidden", missing: false, section_ids: [], reason: "Không sinh đầu mục" }
+    ]
+    expect(stepPlanResponseSchema.parse({ steps }).steps).toHaveLength(2)
+    expect(stepPlanResponseSchema.safeParse({ steps: [{ ...steps[0], state: "suggested" }] }).success).toBe(false)
+    expect(stepPlanPatchRequestSchema.parse({ step_id: "B-0.1", enabled: true })).toEqual({ step_id: "B-0.1", enabled: true })
+    expect(stepPlanPatchRequestSchema.safeParse({ step_id: "", enabled: true }).success).toBe(false)
+  })
+
+  it("mã lỗi mới: CORE_STEP_REQUIRED 409, STEP_NOT_IN_PLAN 404", () => {
+    expect(MODE1_ERROR_STATUS.CORE_STEP_REQUIRED).toBe(409)
+    expect(MODE1_ERROR_STATUS.STEP_NOT_IN_PLAN).toBe(404)
   })
 })
 

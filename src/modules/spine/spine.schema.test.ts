@@ -236,6 +236,51 @@ describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1
   })
 })
 
+describe("mode 1 v2 — steps skipped + custom_sections (FLF-182, contract-change)", () => {
+  const custom = {
+    id: "CS01",
+    heading: "Phụ lục A — Biên bản họp",
+    level: 1,
+    source: "import" as const,
+    blocks: [
+      { kind: "paragraph" as const, text: "Họp ngày 12/09", rows: null, image_ref: null },
+      { kind: "table" as const, text: "", rows: [["Ngày", "Nội dung"], ["12/09", "Chốt phạm vi"]], image_ref: null },
+      { kind: "image" as const, text: "Sequence diagram", rows: null, image_ref: "media/image3.png" }
+    ]
+  }
+
+  it("Spine cũ không có custom_sections ⇒ đọc ra []", () => {
+    const s = createEmptySpine({ name: "Old" }) as unknown as Record<string, unknown>
+    delete s.custom_sections
+    expect(spineSchema.parse(s).custom_sections).toEqual([])
+  })
+
+  it("nhận step skipped và mục riêng đủ loại khối", () => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.steps = [{ id: "B-0.1", status: "skipped", first_seq: null, last_seq: null, accepted_at: null }]
+    s.custom_sections = [custom]
+    const result = spineSchema.safeParse(s)
+    expect(result.success, result.error?.message).toBe(true)
+  })
+
+  it.each<[string, Record<string, unknown>]>([
+    ["kind khối lạ", { blocks: [{ kind: "chart", text: "", rows: null, image_ref: null }] }],
+    ["level ngoài 1–9", { level: 0 }],
+    ["source lạ", { source: "ai" }],
+    ["khối thiếu image_ref (strict)", { blocks: [{ kind: "paragraph", text: "x", rows: null }] }]
+  ])("từ chối mục riêng: %s", (_label, patch) => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.custom_sections = [{ ...custom, ...patch } as never]
+    expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+
+  it("từ chối step status lạ", () => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.steps = [{ id: "B-0.1", status: "hidden" as never, first_seq: null, last_seq: null, accepted_at: null }]
+    expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+})
+
 describe("changeSchema / usageSchema", () => {
   const change: Change = {
     projectId: "650000000000000000000001",
