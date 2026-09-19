@@ -233,10 +233,18 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - `CHANGE_REQUIRES_CR`: **chỉ** trả khi project đã có baseline v1 (sign-off) hoặc release — trước đó `/changes`, `/undo`, chat sửa chạy như mode 2 (D3). Hiện thực ở V1.
 - **Chưa đổi ở V0** (contract-change riêng ở V4): vị trí CR theo path Spine thay `block_id`, `BLOCK_LOCKED` theo path, `CR_OLD_TEXT_MISMATCH` ⇒ so giá trị tại path, #13 blocks ⇒ trả `RenderedDocument` của version.
 
+### 4.5 V2 — render theo template người dùng (FLF-184, chỉ thêm field)
+- `RenderedDocument` của project có layout (mode 1 sau finalize): `sections[]` theo **thứ tự + tiêu đề file upload** (bỏ số gõ tay, `number` đánh lại theo cấp; heading không gõ số trong file gõ số tay ⇒ `number: ""`). Section FPT file không có ⇒ chèn cạnh mục cùng nhóm, tiêu đề mẫu FPT theo `TemplateProfile.language`. `group:<id>` lấy theo `section_id` của layout (vd `group:4`), không còn là số hiệu. Văn xuôi không trích được nằm ở đầu `blocks` của section chủ. Hình `RenderedSection` không đổi. Project mode 2 không đổi.
+- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.0`; version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.0_original.docx`. Bản `0.0` mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
+- `DocVersionDto` thêm `has_original_file: boolean`.
+- `gapReportSchema` thêm `totals.missing_fpt_sections`, `missing_fpt_sections[]` `{ section_id, title, step_id, in_layout }` (đầu mục FPT thiếu — D6, đứng đầu báo cáo; `feature:*` = chức năng chương 3), `layout[]` `{ order, section_id, heading, level, kind: fpt|group|custom, red, yellow }`; `sections[]` xếp theo layout.
+- **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của `0.0`.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-19 | FLF-184 (mode 1 v2, V2) | §4.5: `RenderedDocument` theo layout file upload, #14 `variant=original`, `has_original_file`, gap report `missing_fpt_sections` + `layout[]` — chỉ thêm field, kèm lô contract-change V0 |
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |
