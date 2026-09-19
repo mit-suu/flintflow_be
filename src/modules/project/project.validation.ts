@@ -6,13 +6,21 @@ import { SOURCE_MODES } from "./project.model.js"
 export const CreateProjectSchema = z.object({
   name: z.string().trim().min(1).max(100),
   sourceMode: z.enum(SOURCE_MODES),
-  domain: z.string().trim().max(100).optional()
+  domain: z.string().trim().max(100).optional(),
+  /** Tạo thẳng trong thư mục của user. */
+  folderId: z.string().min(1).optional()
 })
 
 export const RenameProjectSchema = z.object({
   name: z.string().min(1).max(100).trim()
 })
 
+/** `folderId: null` ⇒ đưa dự án ra khỏi thư mục. */
+export const MoveProjectSchema = z.object({
+  folderId: z.string().min(1).nullable()
+})
+
+export type MoveProjectDTO = z.infer<typeof MoveProjectSchema>
 export type CreateProjectDTO = z.infer<typeof CreateProjectSchema>
 export type RenameProjectDTO = z.infer<typeof RenameProjectSchema>
 
