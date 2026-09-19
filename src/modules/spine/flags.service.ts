@@ -154,13 +154,25 @@ export interface RecomputeOptions {
   ruleProfile?: RuleProfile
 }
 
+/**
+ * Hồ sơ luật mặc định theo project khi caller không truyền `ruleProfile` (FLF-183): module import đăng ký resolver
+ * trả hồ sơ mode 1 cho project `mode = import` — step runner, `/changes`, sign-off… dùng đúng luật mà không phải biết mode.
+ * Không đăng ký (unit test, mode 2) ⇒ `undefined` = đủ luật.
+ */
+export type RuleProfileResolver = (projectId: string) => Promise<RuleProfile | undefined>
+let ruleProfileResolver: RuleProfileResolver = async () => undefined
+export const setRuleProfileResolver = (resolver: RuleProfileResolver): void => {
+  ruleProfileResolver = resolver
+}
+
 /** Chạy lại deterministic check trên `spine_version` hiện tại và ghi `flags[]` (không ghi nếu không đổi). */
 export const recompute = async (projectId: string, options: RecomputeOptions): Promise<RecomputeResult> => {
   const record = await load(projectId)
   const changes = await repository.listChanges(projectId)
   const spine = stripRecord(record)
   const atBaseline = options.atBaseline ?? false
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile: options.ruleProfile })
+  const ruleProfile = options.ruleProfile ?? (await ruleProfileResolver(projectId))
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile })
   const plan = planFlagOps(spine, candidates, new Date(), { atBaseline })
 
   if (plan.ops.length === 0) {

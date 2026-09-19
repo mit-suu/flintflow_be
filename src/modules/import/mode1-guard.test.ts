@@ -6,6 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const projects = new Map<string, { mode?: string }>()
+const baselines = new Map<string, { type: string }[]>()
 
 vi.mock("../project/project.model.js", () => ({
   Project: {
@@ -15,12 +16,17 @@ vi.mock("../project/project.model.js", () => ({
   }
 }))
 
+vi.mock("../spine/spine.repository.js", () => ({
+  get: async (id: string) => (baselines.has(id) ? { baselines: baselines.get(id) } : null)
+}))
+
 import { isChangeInstruction } from "../spine/change.service.js"
-import { assertChangesAllowed, changeRequiresCr, isMode1Project, prefillFrom } from "./mode1-guard.js"
+import { assertChangesAllowed, changeRequiresCr, changesRequireCr, isMode1Project, prefillFrom } from "./mode1-guard.js"
 import { Mode1Error } from "./mode1.errors.js"
 
 beforeEach(() => {
   projects.clear()
+  baselines.clear()
 })
 
 describe("prefillFrom", () => {
@@ -57,8 +63,9 @@ describe("changeRequiresCr", () => {
 })
 
 describe("isMode1Project / assertChangesAllowed", () => {
-  it("mode import ⇒ true và chặn; fpt / không có mode / không tồn tại ⇒ cho qua", async () => {
+  it("mode import đã có baseline v1 ⇒ chặn; fpt / không có mode / không tồn tại ⇒ cho qua", async () => {
     projects.set("m1", { mode: "import" })
+    baselines.set("m1", [{ type: "imported" }, { type: "generated" }])
     projects.set("m2", { mode: "fpt" })
     projects.set("old", {})
     expect(await isMode1Project("m1")).toBe(true)
@@ -72,6 +79,18 @@ describe("isMode1Project / assertChangesAllowed", () => {
     })
     await expect(assertChangesAllowed("m2", prefillFrom("Xoá UC-02"))).resolves.toBeUndefined()
     await expect(assertChangesAllowed("missing", prefillFrom("Xoá UC-02"))).resolves.toBeUndefined()
+  })
+
+  it("mode 1 v2 (D3, FLF-183): chỉ baseline imported (v0) hoặc chưa có Spine ⇒ sửa tự do; release cũng khoá", async () => {
+    projects.set("v0", { mode: "import" })
+    baselines.set("v0", [{ type: "imported" }])
+    projects.set("fresh", { mode: "import" })
+    projects.set("rel", { mode: "import" })
+    baselines.set("rel", [{ type: "imported" }, { type: "release" }])
+    expect(await changesRequireCr("v0")).toBe(false)
+    expect(await changesRequireCr("fresh")).toBe(false)
+    expect(await changesRequireCr("rel")).toBe(true)
+    await expect(assertChangesAllowed("v0", prefillFrom("Xoá UC-02"))).resolves.toBeUndefined()
   })
 })
 

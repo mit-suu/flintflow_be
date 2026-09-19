@@ -224,7 +224,7 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 ### 4.3 Endpoint mới
 | # | Method + path | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- |
-| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu" + cờ đỏ `core_section_missing`), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
+| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu" + cờ đỏ `section_empty` (hồ sơ luật mode 1 giữ đỏ — FLF-183)), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
 | 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt step của đầu mục FPT hoặc step đã có dữ liệu) |
 
 ### 4.4 Thay đổi khác
