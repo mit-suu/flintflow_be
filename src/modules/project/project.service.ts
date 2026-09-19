@@ -10,6 +10,8 @@ import { Baseline } from "../spine/baseline.model.js"
 import { Usage } from "../spine/usage.model.js"
 import { RenderedDocumentCache } from "../render/rendered-document.model.js"
 import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
+import mongoose from "mongoose"
+import { assertFolderOwned, folderStillExists } from "../folder/folder.service.js"
 import { ImportedDocument } from "../import/imported-document.model.js"
 import { DocBlock } from "../import/doc-block.model.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
@@ -26,18 +28,22 @@ export const createProject = async (
   userId: string,
   name: string,
   domain?: string,
-  mode: ProjectMode = "fpt"
+  mode: ProjectMode = "fpt",
+  folderId?: string
 ): Promise<IProject> => {
   if (mode === "customer_template") {
     throw new ApiError(501, "Mode template khách hàng chưa hỗ trợ", "NOT_IMPLEMENTED")
   }
+  // Tạo thẳng trong thư mục (một request) — thư mục phải của chính user
+  if (folderId) await assertFolderOwned(userId, folderId)
   // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     userId,
     name,
     domain: domain || null,
     status: "active",
-    mode
+    mode,
+    ...(folderId ? { folderId } : {})
   })
   await spineRepository.getOrCreate(project.id, { name, domain: domain || null })
   return project
@@ -59,6 +65,22 @@ export const getProjectById = async (
   if (!project) {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
+  return project
+}
+
+/**
+ * Mở dự án (`GET /projects/:id` — workspace, bản đọc): ghi `lastOpenedAt`. `timestamps: false` ⇒ không đẩy
+ * `updatedAt` (mở không phải là sửa). Chỉ route này ghi; các nơi nội bộ vẫn dùng `getProjectById`.
+ */
+export const openProject = async (projectId: string, userId: string): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId, userId },
+    { $set: { lastOpenedAt: new Date() } },
+    { new: true, timestamps: false }
+  )
+  if (!project) throw notFound()
   return project
 }
 
@@ -147,6 +169,26 @@ export const updateProjectName = async (
   )
   if (!project) {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  }
+  return project
+}
+
+/** Chuyển dự án vào thư mục của chính user (`folderId: null` ⇒ ra ngoài thư mục). */
+export const moveProjectToFolder = async (
+  projectId: string,
+  userId: string,
+  folderId: string | null
+): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  // id sai định dạng ⇒ 404 như dự án của user khác (không để CastError thành 500)
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  if (folderId) await assertFolderOwned(userId, folderId)
+  const project = await Project.findOneAndUpdate({ _id: projectId, userId }, { folderId }, { new: true })
+  if (!project) throw notFound()
+  // Thư mục bị xoá chen giữa lúc kiểm tra và lúc ghi ⇒ gỡ về ngoài thư mục, báo thư mục không còn
+  if (folderId && !(await folderStillExists(userId, folderId))) {
+    await Project.updateOne({ _id: projectId, userId, folderId }, { folderId: null })
+    throw new ApiError(404, "Folder not found or unauthorized", "FOLDER_NOT_FOUND")
   }
   return project
 }

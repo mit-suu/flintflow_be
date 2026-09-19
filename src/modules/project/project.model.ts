@@ -21,6 +21,10 @@ export interface IProject extends Document {
   mode: ProjectMode
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
+  /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
+  folderId: mongoose.Types.ObjectId | null
+  /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
+  lastOpenedAt: Date | null
   // Nội dung, tiến độ, baseline đều nằm ở Spine (modules/spine) — Project chỉ giữ metadata danh sách.
   createdAt: Date
   updatedAt: Date
@@ -57,6 +61,15 @@ const projectSchema = new Schema<IProject>(
     import_state: {
       type: String,
       enum: [...IMPORT_STATUSES, null],
+      default: null
+    },
+    folderId: {
+      type: Schema.Types.ObjectId,
+      ref: "Folder",
+      default: null
+    },
+    lastOpenedAt: {
+      type: Date,
       default: null
     }
   },

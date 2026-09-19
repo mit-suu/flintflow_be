@@ -22,6 +22,8 @@ import pipelineRoutes from "./modules/pipeline/pipeline.route.js"
 import baselineRoutes from "./modules/pipeline/s9/baseline.route.js"
 import renderRoutes from "./modules/render/render.route.js"
 import exportRoutes from "./modules/render/export.route.js"
+import feedbackRoutes from "./modules/feedback/feedback.route.js"
+import folderRoutes from "./modules/folder/folder.route.js"
 import importRoutes from "./modules/import/import.route.js"
 import changeRequestRoutes from "./modules/change-request/change-request.route.js"
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
@@ -149,6 +151,8 @@ app.use("/api/v1/projects", changeRequestRoutes)
 app.use("/api/v1/projects", docVersionRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
+app.use("/api/v1/feedback", feedbackRoutes)
+app.use("/api/v1/folders", folderRoutes)
 app.use("/api/v1/export", exportRoutes)
 
 // Global Error Handler Middleware
