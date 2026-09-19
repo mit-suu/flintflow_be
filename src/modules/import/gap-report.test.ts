@@ -28,7 +28,16 @@ const REPORT: GapReport = gapReportSchema.parse({
   project_id: "66f000000000000000000001",
   doc_version: "0.0",
   generated_at: "2026-09-19T00:00:00.000Z",
-  totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1 },
+  totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1, missing_fpt_sections: 2 },
+  missing_fpt_sections: [
+    { section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false },
+    { section_id: "fixed:4.2.4", title: "Domain-Specific Attributes", step_id: "S-6.5", in_layout: true }
+  ],
+  layout: [
+    { order: 0, section_id: "fixed:1", heading: "1 Giới thiệu", level: 1, kind: "fpt", red: 0, yellow: 0 },
+    { order: 1, section_id: "fixed:4.2.3", heading: "5.2 Hiệu năng", level: 2, kind: "fpt", red: 1, yellow: 1 },
+    { order: 2, section_id: "custom:CS01", heading: "Phụ lục A Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }
+  ],
   sections: [
     { section_id: "fixed:4.2.3", title: "Performance", flags: [flag("FL001", "red", "dead_reference", "fixed:4.2.3", "NFR trỏ UC-99"), flag("FL002", "yellow", "import_semantic", "fixed:4.2.3", "[ambiguity] 95% cần tải")] },
     { section_id: "feature:F-3.2", title: "Authentication", flags: [flag("FL003", "yellow", "empty_feature", "feature:F-3.2", "Feature rỗng")] }
@@ -55,23 +64,30 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     const tables = blocks.filter((b) => b.kind === "table").map((b) => b.text)
     expect(tables[0]).toContain("Cờ đỏ | 1")
     expect(tables[0]).toContain("Cờ vàng | 2")
-    expect(tables[1].split("\n")).toEqual(["Mức | Luật | Nội dung", "Đỏ | dead_reference | NFR trỏ UC-99", "Vàng | import_semantic | [ambiguity] 95% cần tải"])
+    expect(tables.find((t) => t.startsWith("Mức | Luật"))?.split("\n")).toEqual(["Mức | Luật | Nội dung", "Đỏ | dead_reference | NFR trỏ UC-99", "Vàng | import_semantic | [ambiguity] 95% cần tải"])
     expect(tables.some((t) => t.includes("fixed:3.1.1 | Screen Flow"))).toBe(true)
     expect(tables.some((t) => t.includes("B0045 | 5.9 Team Notes"))).toBe(true)
+    // FLF-184: "Thiếu mục FPT" đứng trước cờ theo section; mục theo thứ tự file upload, mục riêng ghi loại riêng
+    expect(all.indexOf("Thiếu mục FPT")).toBeLessThan(all.indexOf("Cờ theo section"))
+    expect(tables.some((t) => t.includes("Business Rules | File không có | S-7.1"))).toBe(true)
+    expect(tables.some((t) => t.includes("Domain-Specific Attributes | Có heading, chưa có nội dung | S-6.5"))).toBe(true)
+    expect(tables.some((t) => t.includes("Phụ lục A Biên bản họp | Mục riêng (ngoài FPT) | 0 | 0"))).toBe(true)
     expect(tables.some((t) => t.includes("functions[id=FR-3.2.1].trigger | Learner submits | 0.50"))).toBe(true)
   })
 
   it("báo cáo rỗng ⇒ câu 'không có' thay cho bảng, file vẫn hợp lệ", async () => {
     const empty = gapReportSchema.parse({
       ...REPORT,
-      totals: { red: 0, yellow: 0, missing_sections: 0, unmapped_headings: 0, low_confidence_fields: 0 },
+      totals: { red: 0, yellow: 0, missing_sections: 0, unmapped_headings: 0, low_confidence_fields: 0, missing_fpt_sections: 0 },
+      missing_fpt_sections: [],
+      layout: [],
       sections: [],
       missing_sections: [],
       unmapped_headings: [],
       low_confidence_fields: []
     })
     const all = (await texts(await renderGapReportDocx(empty, "Rỗng"))).map((b) => b.text)
-    expect(all).toEqual(expect.arrayContaining(["Không có cờ nào đang mở.", "Không thiếu section bắt buộc nào.", "Mọi heading đều khớp.", "Không có."]))
+    expect(all).toEqual(expect.arrayContaining(["Không có cờ nào đang mở.", "Không thiếu section bắt buộc nào.", "Mọi heading đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT."]))
   })
 
   it("giá trị đã sửa (edited_value) thắng value; giá trị không phải chuỗi được JSON hoá", async () => {
@@ -98,5 +114,6 @@ describe("titleOfSection", () => {
     expect(titleOfSection(spine, "function:FR-3.2.1")).toBe("Register account")
     expect(titleOfSection(spine, "function:FR-9")).toBe("function:FR-9")
     expect(titleOfSection(spine, "fixed:9.9")).toBe("fixed:9.9")
+    expect(titleOfSection({ ...(spine as object), custom_sections: [{ id: "CS01", heading: "Phụ lục A" }] } as never, "custom:CS01")).toBe("Phụ lục A")
   })
 })

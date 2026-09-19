@@ -5,8 +5,10 @@
  *      quét lại mention theo tên (actor, entity, feature, screen).
  *   3. Mode 1 v2 (FLF-183): layout + mục riêng (`custom_sections`) theo file upload, kế hoạch step theo template (D6),
  *      seed `steps[]` + `progress` ⇒ workspace như mode 2 chạy tiếp từ step còn thiếu. Một txn thứ hai `by: import`.
- *   4. Bản lưu `0.0` = file gốc + bookmark neo + stamp ⇒ GridFS; `DocVersion 0.0`; baseline `type: imported`.
- *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp).
+ *   4. Mode 1 v2 (FLF-184): vẽ diagram từ Spine (PlantUML có mặt), baseline `type: imported`; `DocVersion 0.0` = bản
+ *      **render** từ Spine theo layout file upload + stamp, file gốc (bookmark neo + stamp) giữ ở `original_ref`.
+ *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp); ghép sẵn
+ *      bản làm việc (`POST /assemble`) để workspace mở được ngay.
  * Không dùng `signOff` (mode 2): baseline v0 không bị cờ đỏ chặn — cờ đi vào gap report (P0 báo cáo §3 dòng 6).
  */
 
@@ -15,6 +17,11 @@ import { writeStamp } from "../docx-ooxml/index.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { renderVersionFile } from "../doc-version/render-version.js"
+import { renderAll } from "../diagram/diagram.service.js"
+import { Project } from "../project/project.model.js"
+import { assemble } from "../render/assemble.service.js"
+import { isPlantUmlReachable } from "../../shared/diagram/plantuml.client.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -67,7 +74,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const entities = [...collectEntities(accepted).values()]
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })))
 
-  // 2. Bản lưu 0.0 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
+  // 2. File gốc của bản 0.0 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
   await writeStamp(parsed.pkg, { project_id: projectId, version: IMPORTED_DOC_VERSION, source: "import" })
   const fileRef = await docFileStore().save(await parsed.pkg.toBuffer(), { projectId, kind: "version", name: IMPORTED_DOC_VERSION })
@@ -128,7 +135,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     // DocBlock không lưu ô bảng — dựng lại từ text `ô | ô` theo dòng
     rows: b.kind === "table" ? b.text.split("\n").map((line) => line.split(" | ")) : null
   }))
-  const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+  // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
+  const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
+  const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks))
   const seeded = await loadSpine(projectId)
   const planOps = [
@@ -140,22 +149,38 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   profile.step_plan = plan
   await profile.save()
 
-  // 4. Baseline imported + DocVersion 0.0 — chụp Spine sau lô kế hoạch step
+  // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2
+  await renderDiagramsIfAvailable(projectId)
+
+  // Baseline imported + DocVersion 0.0 — chụp Spine sau lô kế hoạch step; file 0.0 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
-  const { baseline, spine_version } = await snapshotBaseline(projectId, stripRecord(planned), {
-    base_version: planned.spine_version,
-    version: IMPORTED_DOC_VERSION,
-    type: "imported",
-    doc_version: IMPORTED_DOC_VERSION,
-    by: "import",
-    step_id: null
-  })
-  spineVersion = spine_version
+  const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? doc.original_name
+  const renderedRef = await docFileStore().save(
+    await renderVersionFile(projectId, projectName, stripRecord(planned), { version: IMPORTED_DOC_VERSION, stampSource: "import" }),
+    { projectId, kind: "version", name: IMPORTED_DOC_VERSION }
+  )
+  let baseline: BaselineEntry
+  try {
+    const snap = await snapshotBaseline(projectId, stripRecord(planned), {
+      base_version: planned.spine_version,
+      version: IMPORTED_DOC_VERSION,
+      type: "imported",
+      doc_version: IMPORTED_DOC_VERSION,
+      by: "import",
+      step_id: null
+    })
+    baseline = snap.baseline
+    spineVersion = snap.spine_version
+  } catch (err) {
+    await docFileStore().remove(renderedRef)
+    throw err
+  }
   await DocVersion.create({
     projectId,
     version: IMPORTED_DOC_VERSION,
     kind: "imported",
-    file_ref: fileRef,
+    file_ref: renderedRef,
+    original_ref: fileRef,
     based_on: null,
     cr_ids: [],
     baseline_ref: baseline.id,
@@ -165,7 +190,30 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await transitionImport(doc, "checking")
   await runImportCheck(doc, userId)
   const after = await loadSpine(projectId)
+  await assembleWorkingDraft(projectId, projectName, after.spine_version)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
+}
+
+/**
+ * Vẽ lại mọi diagram từ Spine vừa import. PlantUML không có mặt (dev/test, sự cố) ⇒ bỏ qua thay vì ghi hàng loạt
+ * `render_error`: người dùng vẽ lại sau ở workspace. Lỗi vẽ không chặn import.
+ */
+const renderDiagramsIfAvailable = async (projectId: string): Promise<void> => {
+  try {
+    if (!(await isPlantUmlReachable())) return
+    await renderAll(projectId, { by: "import", step_id: null })
+  } catch (err) {
+    console.warn(`[finalize] vẽ diagram sau import lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/** Ghép sẵn bản làm việc (S-8.2) — lỗi chỉ ghi log: workspace tự `POST /assemble` lại được. */
+const assembleWorkingDraft = async (projectId: string, projectName: string, spineVersion: number): Promise<void> => {
+  try {
+    await assemble(projectId, projectName, spineVersion)
+  } catch (err) {
+    console.warn(`[finalize] ghép bản làm việc sau import lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 /** UC-61/UC-75 cho bước check: chạy lại phần còn thiếu của 1.11–1.12. */

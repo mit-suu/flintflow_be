@@ -256,9 +256,28 @@ export const gapReportSchema = z.object({
     yellow: z.number().int().min(0),
     missing_sections: z.number().int().min(0),
     unmapped_headings: z.number().int().min(0),
-    low_confidence_fields: z.number().int().min(0)
+    low_confidence_fields: z.number().int().min(0),
+    /** Mode 1 v2 (FLF-184): số đầu mục mẫu FPT còn thiếu. */
+    missing_fpt_sections: z.number().int().min(0)
   }),
-  /** Cờ đỏ/vàng gộp theo section (chỉ section có cờ). */
+  /**
+   * Mode 1 v2 (FLF-184, D6): đầu mục mẫu FPT file không có hoặc chỉ có heading — cờ đỏ `section_empty`, chặn sign-off
+   * v1 tới khi chạy `step_id` (AI soạn) hoặc viết tay. Đứng đầu báo cáo. `feature:*` = chức năng chương 3.
+   */
+  missing_fpt_sections: z.array(z.object({ section_id: z.string(), title: z.string(), step_id: z.string(), in_layout: z.boolean() })),
+  /** Mode 1 v2 (FLF-184): mục theo thứ tự file upload — `fpt` khớp mẫu FPT, `group` heading nhóm, `custom` mục riêng ngoài FPT (không cờ thiếu). */
+  layout: z.array(
+    z.object({
+      order: z.number().int().min(0),
+      section_id: z.string(),
+      heading: z.string(),
+      level: z.number().int().min(1),
+      kind: z.enum(["fpt", "group", "custom"]),
+      red: z.number().int().min(0),
+      yellow: z.number().int().min(0)
+    })
+  ),
+  /** Cờ đỏ/vàng gộp theo section (chỉ section có cờ) — theo thứ tự layout của file upload, section ngoài layout sau cùng. */
   sections: z.array(z.object({ section_id: z.string(), title: z.string(), flags: z.array(flagSchema) })),
   missing_sections: z.array(z.object({ section_id: z.string(), title: z.string() })),
   unmapped_headings: z.array(z.object({ block_id: blockId, text: z.string() })),
