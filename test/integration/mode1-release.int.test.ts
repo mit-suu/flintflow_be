@@ -45,7 +45,7 @@ const projectWithRevision = async () => {
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
   await c.post("/import/confirm-latest", { import_id: id })
-  await c.post("/import/extract", { import_id: id })
+  await c.extractAndWait(id)
   await c.patch("/import/fields", { import_id: id, confirm_all: true })
   expect((await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })).status).toBe(200)
 
