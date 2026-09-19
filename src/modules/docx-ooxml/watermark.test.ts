@@ -46,4 +46,52 @@ describe("addDraftWatermark", () => {
     const reread = await DocxPackage.load(await pkg.toBuffer())
     expect(shapes(await reread.requireXml("word/header3.xml"))).toBe(1)
   })
+
+  it("header dùng chung cho nhiều section chỉ chèn một lần; đủ header default ⇒ không tạo mới", async () => {
+    const sect1 = `<w:p><w:pPr><w:sectPr><w:headerReference w:type="default" r:id="rIdH1"/></w:sectPr></w:pPr></w:p>`
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body: p("S1") + sect1 + p("S2"),
+        sectPr: `<w:sectPr><w:headerReference w:type="default" r:id="rIdH1"/></w:sectPr>`,
+        extraParts: { "word/header1.xml": HDR("H1") },
+        extraDocRels: HDR_REL(1),
+        extraContentTypes: HDR_CT(1)
+      })
+    )
+    expect(await addDraftWatermark(pkg)).toEqual({ headerParts: ["word/header1.xml"], created: 0 })
+    expect(shapes(await pkg.requireXml("word/header1.xml"))).toBe(1)
+  })
+
+  it("evenAndOddHeaders bật ⇒ tạo cả header default và even; text watermark được escape", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body: p("x"),
+        extraParts: { "word/settings.xml": `<?xml version="1.0"?><w:settings xmlns:w="${NS.w}"><w:evenAndOddHeaders/></w:settings>` }
+      })
+    )
+    const res = await addDraftWatermark(pkg, `A&B "nháp"`)
+    expect(res.created).toBe(2)
+    expect(res.headerParts.sort()).toEqual(["word/header1.xml", "word/header2.xml"])
+    const doc = await pkg.requireXml("word/document.xml")
+    expect(wAll(doc, "headerReference").map((h) => h.getAttributeNS(NS.w, "type")).sort()).toEqual(["default", "even"])
+    const out = await JSZip.loadAsync(await pkg.toBuffer())
+    expect(await out.file("word/header1.xml")!.async("string")).toContain('string="A&amp;B &quot;nháp&quot;"')
+  })
+
+  it("document không có sectPr ⇒ không tạo header, không lỗi", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("x"), sectPr: "" }))
+    expect(await addDraftWatermark(pkg)).toEqual({ headerParts: [], created: 0 })
+  })
+
+  it("sectPr nằm trong rPr/sectPrChange không bị coi là section", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body: p("x"),
+        sectPr: `<w:sectPr><w:sectPrChange w:id="1" w:author="Lan"><w:sectPr><w:titlePg/></w:sectPr></w:sectPrChange></w:sectPr>`
+      })
+    )
+    const res = await addDraftWatermark(pkg)
+    // chỉ section thật (không titlePg) ⇒ một header default
+    expect(res.created).toBe(1)
+  })
 })
