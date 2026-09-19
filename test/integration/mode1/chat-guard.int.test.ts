@@ -107,14 +107,22 @@ describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /un
 })
 
 describe("chặn sửa ngoài CR — chat (mode 1)", () => {
-  it("chat JSON ra lệnh sửa ⇒ 409 + prefill, không gọi AI; tin nhắn không được lưu", async () => {
+  it("chat JSON ra lệnh sửa (sau v1) ⇒ tạo CR nguồn chat + 409 kèm change_request + prefill, không gọi AI; tin nhắn không được lưu (FLF-186)", async () => {
     const { seeded, projectId } = await importedProject()
     const c = client(seeded, projectId)
     const chatId = await c.newChat()
     const calls = mockCalls.length
     const res = await c.post(`/chats/${chatId}/messages`, { content: "Rename actor Learner to Student", step: "B-1.1" })
     expect(expectBlocked(res, "chat")).toEqual({ title: "Rename actor Learner to Student", description: "Rename actor Learner to Student" })
+    expect(changeRequiresCrMetaSchema.parse(res.body.meta).change_request).toEqual({ cr_id: "CR-001", status: "draft" })
     expect(mockCalls.length).toBe(calls)
+    const cr = await request(app).get(`/api/v1/projects/${projectId}/change-requests/CR-001`).set("Authorization", `Bearer ${seeded.token}`)
+    expect(cr.body.data.change_request).toMatchObject({
+      title: "Rename actor Learner to Student",
+      description: "Rename actor Learner to Student",
+      source: { kind: "chat", ref: `chat:${chatId}` },
+      status: "draft"
+    })
     const history = await request(app).get(`/api/v1/projects/${projectId}/chats/${chatId}`).set("Authorization", `Bearer ${seeded.token}`)
     expect(history.status).toBe(200)
     expect(history.body.data.messages).toEqual([])

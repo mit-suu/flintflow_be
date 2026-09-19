@@ -90,36 +90,57 @@ export const fakeCrClarify =
     return JSON.stringify({ ambiguous: false, questions: [], targets })
   }
 
-/** Vị trí trong prompt C-4: `[L001][B0005] (...)\n  text`. */
-export const promptLocations = (prompt: string): { location_id: string; block_id: string; text: string }[] => {
-  const out: { location_id: string; block_id: string; text: string }[] = []
-  const re = /\[(L\d{3,})\]\[(B\d{4,})\][^\n]*\n {2}([^\n]*)/g
-  for (const m of prompt.matchAll(re)) out.push({ location_id: m[1], block_id: m[2], text: m[3] })
+/** Vị trí trong prompt C-4 (FLF-186): `[L001] path (section: …)` rồi giá trị phần tử (JSON, thụt 2 dấu cách). */
+export const promptLocations = (prompt: string): { location_id: string; path: string; text: string }[] => {
+  const out: { location_id: string; path: string; text: string }[] = []
+  const lines = prompt.split("\n")
+  lines.forEach((line, i) => {
+    const m = /^\[(L\d{3,})\] (\S+) \(section: /.exec(line)
+    if (!m) return
+    const body: string[] = []
+    for (let j = i + 1; j < lines.length && lines[j].startsWith("  "); j++) body.push(lines[j].slice(2))
+    out.push({ location_id: m[1], path: m[2], text: body.join("\n") })
+  })
   return out
 }
 
-/** C-4: câu có "2 seconds" ⇒ sửa thành "1 second" + op Spine; heading ⇒ comment; còn lại not_related. */
+/** Giá trị JSON của vị trí (bỏ dòng "Previous proposal failed checks" nếu có). */
+const locationValue = (text: string): Record<string, unknown> => {
+  try {
+    return JSON.parse(text.split("\nPrevious proposal failed checks")[0]) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+/** C-4 (FLF-186): NFR nói "2 seconds" ⇒ edit ngưỡng 1 s (op trên chính phần tử); business rule ⇒ comment; còn lại not_related. */
 export const fakeCrPropose = (prompt: string): string | undefined => {
   if (!prompt.includes("# CR Propose")) return undefined
   const locations = promptLocations(prompt).map((l) => {
-    if (l.text.includes("2 seconds"))
+    if (l.path.startsWith("nfrs[") && l.text.includes("2 seconds"))
       return {
         location_id: l.location_id,
         conclusion: "edit",
         reason: "Threshold changes",
-        new_text: l.text.replace("2 seconds", "1 second"),
-        spine_ops: [{ op: "set", path: "nfrs[id=NFR-01].threshold", value: "1 s" }]
+        spine_ops: [
+          { op: "set", path: `${l.path}.threshold`, value: "1 s" },
+          { op: "set", path: `${l.path}.statement`, value: "The system shall respond within 1 second for 95% of requests." }
+        ]
       }
-    if (/^\d+(\.\d+)* /.test(l.text)) return { location_id: l.location_id, conclusion: "comment", reason: "Heading", comment_text: `Check "${l.text}"`, spine_ops: [] }
+    if (l.path.startsWith("business_rules[")) return { location_id: l.location_id, conclusion: "comment", reason: "Rule may depend on timing", comment_text: `Check ${l.path}`, spine_ops: [] }
     return { location_id: l.location_id, conclusion: "not_related", reason: "Different meaning", spine_ops: [] }
   })
   return JSON.stringify({ locations })
 }
 
-/** C-4 luôn đề xuất sửa mà không đổi gì ⇒ C-5 trượt. */
+/** C-4 luôn đề xuất "sửa" bằng op đặt lại đúng giá trị cũ ⇒ C-5 trượt (edit_no_change). */
 export const fakeCrProposeNoChange = (prompt: string): string | undefined => {
   if (!prompt.includes("# CR Propose")) return undefined
   return JSON.stringify({
-    locations: promptLocations(prompt).map((l) => ({ location_id: l.location_id, conclusion: "edit", reason: "noop", new_text: l.text, spine_ops: [] }))
+    locations: promptLocations(prompt).map((l) => {
+      const value = locationValue(l.text)
+      const field = Object.keys(value).find((k) => k !== "id" && typeof value[k] === "string") ?? "name"
+      return { location_id: l.location_id, conclusion: "edit", reason: "noop", spine_ops: [{ op: "set", path: `${l.path}.${field}`, value: value[field] ?? "" }] }
+    })
   })
 }

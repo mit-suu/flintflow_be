@@ -11,7 +11,7 @@ import { seedFixture } from "../setup.js"
 import { mockCalls, mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1, mode1Api } from "../helpers/mode1.js"
 import { DocxPackage, applyEdit, readBlocks, readStamp, RevisionIds } from "../../src/modules/docx-ooxml/index.js"
-import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
+import { SRS_FIXTURE_TEXT, makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { extractResponseSchema, finalizeResponseSchema, gapReportSchema, getImportResponseSchema, reuploadDiffDtoSchema } from "../../src/modules/import/import.dto.js"
 import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { DocVersion } from "../../src/modules/doc-version/doc-version.model.js"
@@ -225,12 +225,14 @@ describe("mode 1 — re-upload (UC-24)", () => {
   it("file sửa ngoài FlintFlow ⇒ diff theo block, không tạo version; /import sau baseline bị chặn", async () => {
     const { c, projectId } = await importToGapReview()
     const version = await DocVersion.findOne({ projectId, version: "0.0" }).lean()
-    const pkg = await DocxPackage.load(await docFileStore().load(version!.original_ref ?? version!.file_ref))
+    // FLF-186: người ngoài sửa trên bản tải về (bản render từ Spine)
+    const pkg = await DocxPackage.load(await docFileStore().load(version!.file_ref))
     const blocks = await readBlocks(pkg)
-    const target = blocks.find((b) => b.text.startsWith("The system shall respond"))!
+    const target = blocks.find((b) => b.text === SRS_FIXTURE_TEXT.purpose)!
+    const EDITED = "Lumen is an online learning platform for large training centers."
     // người dùng sửa trong Word (không Track Changes): thay text trực tiếp
     const doc = await pkg.requireXml("word/document.xml")
-    applyEdit(target.element, target.text, "The system shall respond within 1 second.", { author: "CR-999", date: new Date(), ids: new RevisionIds(doc) })
+    applyEdit(target.element, target.text, EDITED, { author: "CR-999", date: new Date(), ids: new RevisionIds(doc) })
     const { acceptAll } = await import("../../src/modules/docx-ooxml/index.js")
     await acceptAll(pkg)
 
@@ -239,7 +241,7 @@ describe("mode 1 — re-upload (UC-24)", () => {
     const diff = reuploadDiffDtoSchema.parse(res.body.data)
     expect(diff.against_version).toBe("0.0")
     expect(diff.summary).toEqual({ added: 0, removed: 0, modified: 1, moved: 0 })
-    expect(diff.blocks[0]).toMatchObject({ block_id: target.bookmark!.slice(4), change: "modified", after: "The system shall respond within 1 second." })
+    expect(diff.blocks[0]).toMatchObject({ block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED })
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
 
     const blocked = await c.upload(await makeSrsDocx())

@@ -5,7 +5,7 @@
 export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat"] as const
 export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
 
-/** Cách C-3 tìm ra vị trí (nút 3.4): liên kết Spine ↔ block, mã thực thể nhắc trong text, từ khoá. */
+/** Cách C-3 tìm ra vị trí (nút 3.4): đích + phần tử tham chiếu tới đích (Spine), phần tử nhắc mã/tên của đích, từ khoá. */
 export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword"] as const
 export type LocationFoundBy = (typeof LOCATION_FOUND_BY)[number]
 
