@@ -4,6 +4,11 @@ import bcrypt from "bcrypt"
 export type AuthProvider = "local" | "google"
 export type UserRole = "user" | "admin"
 
+/** Ngôn ngữ giao diện + email của user (T25). Nội dung SRS luôn tiếng Anh, không phụ thuộc field này. */
+export const USER_LOCALES = ["vi", "en"] as const
+export type UserLocale = (typeof USER_LOCALES)[number]
+export const DEFAULT_USER_LOCALE: UserLocale = "vi"
+
 export interface IUser extends Document {
   email: string
   password?: string
@@ -17,6 +22,7 @@ export interface IUser extends Document {
   emailVerifiedAt?: Date | null
   /** UC 1.12: thời điểm hoàn tất onboarding; null = chưa onboarding. */
   onboardedAt?: Date | null
+  locale: UserLocale
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -71,6 +77,11 @@ const userSchema = new Schema<IUser>(
     onboardedAt: {
       type: Date,
       default: null
+    },
+    locale: {
+      type: String,
+      enum: USER_LOCALES,
+      default: DEFAULT_USER_LOCALE
     }
   },
   { timestamps: true }

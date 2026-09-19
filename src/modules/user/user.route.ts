@@ -25,7 +25,7 @@ router.get("/me", authMiddleware, userController.getMe)
  * @swagger
  * /api/v1/users/me:
  *   patch:
- *     summary: Cập nhật tên hiển thị / mốc onboarding của user hiện tại (UC 1.12)
+ *     summary: Cập nhật tên hiển thị / mốc onboarding / ngôn ngữ của user hiện tại (UC 1.12, T25)
  *     tags:
  *       - Users
  *     security:
@@ -43,6 +43,10 @@ router.get("/me", authMiddleware, userController.getMe)
  *                 type: string
  *                 format: date-time
  *                 nullable: true
+ *               locale:
+ *                 type: string
+ *                 enum: [vi, en]
+ *                 description: Ngôn ngữ giao diện + email (T25). `GET /users/me` trả về field này, mặc định `vi`.
  *     responses:
  *       200:
  *         description: User profile sau khi cập nhật

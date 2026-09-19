@@ -7,6 +7,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { signAccessToken, signRefreshToken, hashToken, TokenPayload } from "../../shared/auth/jwt.util.js"
 import * as sessionService from "../../shared/auth/session.service.js"
 import { sendVerificationEmail, sendPasswordResetEmail } from "../../shared/email/email.service.js"
+import { DEFAULT_USER_LOCALE, type UserLocale } from "../user/user.model.js"
 import { env } from "../../config/env.js"
 
 export interface AuthResult {
@@ -18,6 +19,8 @@ export interface AuthResult {
     emailVerified: boolean
     name?: string
     role?: string
+    /** T25: FE ghi cookie ngôn ngữ theo field này ngay khi đăng nhập. */
+    locale: UserLocale
   }
 }
 
@@ -70,7 +73,8 @@ const generateAuthToken = async (userId: string, type: TokenType, durationMs: nu
 export const register = async (
   email: string,
   password: string,
-  name?: string
+  name?: string,
+  locale?: UserLocale
 ): Promise<RegisterResult> => {
   const normalizedEmail = email.toLowerCase().trim()
   const existingUser = await User.findOne({ email: normalizedEmail })
@@ -82,12 +86,13 @@ export const register = async (
     email: normalizedEmail,
     password,
     name: name?.trim() || undefined,
-    emailVerified: false
+    emailVerified: false,
+    ...(locale ? { locale } : {})
   })
 
   // Generate 24h verification token & send email
   const verifyToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
-  await sendVerificationEmail(user.email, verifyToken, user.name)
+  await sendVerificationEmail(user.email, verifyToken, user.name, user.locale)
 
   return {
     user: {
@@ -145,7 +150,8 @@ export const login = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
+      role: user.role,
+      locale: user.locale ?? DEFAULT_USER_LOCALE
     }
   }
 }
@@ -209,7 +215,8 @@ export const confirmEmailVerification = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
+      role: user.role,
+      locale: user.locale ?? DEFAULT_USER_LOCALE
     }
   }
 }
@@ -223,7 +230,7 @@ export const resendVerificationEmail = async (email: string): Promise<void> => {
   }
 
   const rawToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
-  await sendVerificationEmail(user.email, rawToken, user.name)
+  await sendVerificationEmail(user.email, rawToken, user.name, user.locale)
 }
 
 export const forgotPassword = async (email: string): Promise<void> => {
@@ -235,7 +242,7 @@ export const forgotPassword = async (email: string): Promise<void> => {
 
   // Generate 15-minute password reset token
   const rawToken = await generateAuthToken(user._id.toString(), "reset_password", 15 * 60 * 1000)
-  await sendPasswordResetEmail(user.email, rawToken, user.name)
+  await sendPasswordResetEmail(user.email, rawToken, user.name, user.locale)
 }
 
 export const resetPassword = async (rawToken: string, newPassword: string): Promise<void> => {
@@ -273,7 +280,9 @@ export const resetPassword = async (rawToken: string, newPassword: string): Prom
 export const googleAuth = async (
   token: string,
   userAgent?: string,
-  ip?: string
+  ip?: string,
+  /** Chỉ áp cho tài khoản tạo mới; tài khoản có sẵn giữ ngôn ngữ đã lưu. */
+  locale?: UserLocale
 ): Promise<AuthResult> => {
   const client = new OAuth2Client(env.GOOGLE_CLIENT_ID || undefined)
 
@@ -347,7 +356,8 @@ export const googleAuth = async (
       googleId,
       authProvider: "google",
       emailVerified: true,
-      emailVerifiedAt: new Date()
+      emailVerifiedAt: new Date(),
+      ...(locale ? { locale } : {})
     })
   }
 
@@ -377,7 +387,8 @@ export const googleAuth = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
+      role: user.role,
+      locale: user.locale ?? DEFAULT_USER_LOCALE
     }
   }
 }
