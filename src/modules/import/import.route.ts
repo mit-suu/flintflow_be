@@ -61,7 +61,7 @@ const router = Router()
  *         created_at: { type: string, format: date-time }
  *         updated_at: { type: string, format: date-time }
  *
- * /api/v1/projects/{projectId}/import:
+ * /api/v1/projects/{id}/import:
  *   post:
  *     summary: Upload SRS .docx và chạy preflight (UC-20, nút 1.1–1.2)
  *     description: |
@@ -71,7 +71,7 @@ const router = Router()
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -93,24 +93,24 @@ const router = Router()
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     responses:
  *       200: { description: "`{ import, profile, extraction: { sections, review_fields }, blocks_count }`" }
  *       409: { description: PROJECT_MODE_MISMATCH }
  */
-router.post("/:projectId/import", authMiddleware, importController.receiveDocx, importController.uploadImport)
-router.get("/:projectId/import", authMiddleware, importController.getImport)
+router.post("/:id/import", authMiddleware, importController.receiveDocx, importController.uploadImport)
+router.get("/:id/import", authMiddleware, importController.getImport)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/import/confirm-latest:
+ * /api/v1/projects/{id}/import/confirm-latest:
  *   post:
  *     summary: Xác nhận file không có stamp là bản mới nhất (nút 1.3) rồi tách block + khớp profile
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -125,18 +125,18 @@ router.get("/:projectId/import", authMiddleware, importController.getImport)
  *       404: { description: IMPORT_NOT_FOUND }
  *       409: { description: IMPORT_INVALID_STATE }
  */
-router.post("/:projectId/import/confirm-latest", authMiddleware, importController.confirmLatest)
+router.post("/:id/import/confirm-latest", authMiddleware, importController.confirmLatest)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/import/mapping:
+ * /api/v1/projects/{id}/import/mapping:
  *   patch:
  *     summary: Xác nhận/sửa mapping heading → section và cột bảng → field (UC-21, nút 1.7)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -166,18 +166,18 @@ router.post("/:projectId/import/confirm-latest", authMiddleware, importControlle
  *       200: { description: "`{ import }` — `extracting` khi không còn mục độ tin thấp chưa xác nhận" }
  *       409: { description: IMPORT_INVALID_STATE, IMPORT_NEEDS_LATEST_CONFIRM }
  */
-router.patch("/:projectId/import/mapping", authMiddleware, importController.patchMapping)
+router.patch("/:id/import/mapping", authMiddleware, importController.patchMapping)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/reupload:
+ * /api/v1/projects/{id}/reupload:
  *   post:
  *     summary: Upload lại file sau baseline, so theo block với version mới nhất (UC-24, nút 1.4) — không tạo version
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -193,11 +193,11 @@ router.patch("/:projectId/import/mapping", authMiddleware, importController.patc
  *       409: { description: IMPORT_INVALID_STATE (chưa có baseline) }
  *       422: { description: IMPORT_FILE_REJECTED, IMPORT_STAMP_FOREIGN_PROJECT }
  */
-router.post("/:projectId/reupload", authMiddleware, importController.receiveDocx, importController.reupload)
+router.post("/:id/reupload", authMiddleware, importController.receiveDocx, importController.reupload)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/import/extract:
+ * /api/v1/projects/{id}/import/extract:
  *   post:
  *     summary: Trích field Spine từ tài liệu (I-4, nút 1.8) — chạy hoặc chạy tiếp từ extract_cursor
  *     description: |
@@ -208,7 +208,7 @@ router.post("/:projectId/reupload", authMiddleware, importController.receiveDocx
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -218,18 +218,18 @@ router.post("/:projectId/reupload", authMiddleware, importController.receiveDocx
  *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — trả ngay, import ở extracting" }
  *       409: { description: IMPORT_INVALID_STATE }
  */
-router.post("/:projectId/import/extract", authMiddleware, importController.extract)
+router.post("/:id/import/extract", authMiddleware, importController.extract)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/import/fields:
+ * /api/v1/projects/{id}/import/fields:
  *   patch:
  *     summary: Xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -253,18 +253,18 @@ router.post("/:projectId/import/extract", authMiddleware, importController.extra
  *       200: { description: "`{ import }` — baselining khi không còn field chưa xác nhận" }
  *       409: { description: IMPORT_INVALID_STATE }
  */
-router.patch("/:projectId/import/fields", authMiddleware, importController.patchFields)
+router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/import/finalize:
+ * /api/v1/projects/{id}/import/finalize:
  *   post:
  *     summary: Ghi Spine + tạo version 0.0 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -279,18 +279,18 @@ router.patch("/:projectId/import/fields", authMiddleware, importController.patch
  *       200: { description: "`{ import, doc_version: \"0.0\", baseline, spine_version, flags: { red, yellow } }` — import ở gap_review, hoặc checking + paused" }
  *       409: { description: IMPORT_INVALID_STATE, SPINE_VERSION_CONFLICT }
  */
-router.post("/:projectId/import/finalize", authMiddleware, importController.finalize)
+router.post("/:id/import/finalize", authMiddleware, importController.finalize)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/import/resume:
+ * /api/v1/projects/{id}/import/resume:
  *   post:
  *     summary: Tiếp tục bước AI đang dừng vì hết credit / lỗi AI (UC-61, UC-75)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *     requestBody:
  *       required: true
  *       content:
@@ -300,23 +300,23 @@ router.post("/:projectId/import/finalize", authMiddleware, importController.fina
  *       200: { description: "`{ import, sections }`" }
  *       409: { description: IMPORT_INVALID_STATE }
  */
-router.post("/:projectId/import/resume", authMiddleware, importController.resume)
+router.post("/:id/import/resume", authMiddleware, importController.resume)
 
 /**
  * @swagger
- * /api/v1/projects/{projectId}/gap-report:
+ * /api/v1/projects/{id}/gap-report:
  *   get:
  *     summary: Gap report (UC-23, nút 1.13) — JSON hoặc file .docx
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
  *     parameters:
- *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *       - { in: path, name: id, required: true, schema: { type: string } }
  *       - { in: query, name: format, schema: { type: string, enum: [json, docx], default: json } }
  *     responses:
  *       200: { description: "JSON: `{ project_id, doc_version, generated_at, totals, sections, missing_sections, unmapped_headings, low_confidence_fields }`; docx: file (tải lần đầu khi đang gap_review ⇒ delivered)" }
  *       409: { description: IMPORT_INVALID_STATE (chưa tới gap_review) }
  */
-router.get("/:projectId/gap-report", authMiddleware, importController.gapReport)
+router.get("/:id/gap-report", authMiddleware, importController.gapReport)
 
 export default router
