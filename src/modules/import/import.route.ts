@@ -201,8 +201,9 @@ router.post("/:projectId/reupload", authMiddleware, importController.receiveDocx
  *   post:
  *     summary: Trích field Spine từ tài liệu (I-4, nút 1.8) — chạy hoặc chạy tiếp từ extract_cursor
  *     description: |
+ *       Chạy nền: trả ngay `{ import (extracting, paused null), sections }`; FE poll `GET /import` tới khi rời `extracting` hoặc có `paused`.
  *       Bảng khớp đủ cột trích tất định (không tốn credit); phần chữ còn lại gọi AI theo section (step_id `I-4:<section>`).
- *       Hết credit ⇒ `paused: { reason: credits }`; AI lỗi sau 2 lần retry ⇒ `paused: { reason: resume_later }`. Vẫn trả 200.
+ *       Hết credit ⇒ `paused: { reason: credits }`; AI lỗi sau 2 lần retry ⇒ `paused: { reason: resume_later }`.
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -214,7 +215,7 @@ router.post("/:projectId/reupload", authMiddleware, importController.receiveDocx
  *         application/json:
  *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
  *     responses:
- *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — import ở fields_review, baselining hoặc extracting + paused" }
+ *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — trả ngay, import ở extracting" }
  *       409: { description: IMPORT_INVALID_STATE }
  */
 router.post("/:projectId/import/extract", authMiddleware, importController.extract)

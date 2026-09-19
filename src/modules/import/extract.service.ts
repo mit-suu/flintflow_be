@@ -323,8 +323,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
 }
 
-/** UC-61/UC-75: bỏ `paused` rồi chạy tiếp từ `extract_cursor` (section `done` giữ nguyên). */
-export const resumeExtraction = runExtraction
+
+
 
 // ─── 1.9 xác nhận field ─────────────────────────────────────────
 
