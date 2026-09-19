@@ -77,6 +77,15 @@ describe("model import — mặc định và ràng buộc", () => {
     expect(new TemplateProfile({ projectId: oid(), doc_version: "0.0", heading_map: [{ ...entry, detected_by: "guess" }] }).validateSync()).toBeDefined()
   })
 
+  it("TemplateProfile: cột bảng có ô tiêu đề trống (header = \"\") vẫn lưu được (FLF-179)", () => {
+    const col = { block_id: "B0005", column_index: 2, header: "", field_path: null, confidence: 0.3 }
+    const profile = new TemplateProfile({ projectId: oid(), doc_version: "0.0", table_map: [col] })
+    expect(profile.validateSync()).toBeUndefined()
+    expect(profile.table_map[0].header).toBe("")
+    const { header: _omit, ...noHeader } = col
+    expect(new TemplateProfile({ projectId: oid(), doc_version: "0.0", table_map: [noHeader] }).table_map[0].header).toBe("")
+  })
+
   it("ExtractionDraft: field phải ghi origin (deterministic | ai)", () => {
     const field = { path: "actors[id=A01].name", value: "Student", confidence: 0.95, source_block_ids: ["B0010"] }
     expect(new ExtractionDraft({ projectId: oid(), import_id: oid(), section_id: "fixed:2.1", fields: [{ ...field, origin: "ai" }] }).validateSync()).toBeUndefined()

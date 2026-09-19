@@ -71,6 +71,22 @@ describe("buildImportOps", () => {
     expect(plan.spine.nfrs[0]).toMatchObject({ category: "performance", kind: "quantitative" })
     expect(plan.spine.permissions).toEqual([])
   })
+
+  it("feature General không trùng id với feature trích được trong cùng lô (FLF-179)", () => {
+    const spine = createEmptySpine({ name: "Lumen" })
+    const ops = buildImportOps(spine, [
+      { entity: "features", id: "F-01", value: { name: "Authentication" } },
+      { entity: "features", id: "F-02", value: { name: "Courses" } },
+      { entity: "screens", id: "SCR-01", value: { name: "Home" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.features.map((f) => [f.id, f.name])).toEqual([
+      ["F-01", "Authentication"],
+      ["F-02", "Courses"],
+      ["F-03", "General"]
+    ])
+    expect(plan.spine.screens[0].feature_id).toBe("F-03")
+  })
 })
 
 describe("hồ sơ luật mode 1 + cờ AI", () => {
