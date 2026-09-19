@@ -83,12 +83,28 @@ describe("deleteProject", () => {
 })
 
 describe("createProject", () => {
+  beforeEach(() => vi.clearAllMocks())
+
   it("chỉ lưu metadata, tạo Spine rỗng kèm tên/domain", async () => {
     mocks.Project.create.mockResolvedValue({ id: PROJECT })
 
-    await projectService.createProject(USER, "FlintFlow", "")
+    await projectService.createProject(USER, "FlintFlow", "fpt_template", "")
 
-    expect(mocks.Project.create).toHaveBeenCalledWith({ userId: USER, name: "FlintFlow", domain: null, status: "active" })
+    expect(mocks.Project.create).toHaveBeenCalledWith({
+      userId: USER,
+      name: "FlintFlow",
+      domain: null,
+      status: "active",
+      sourceMode: "fpt_template"
+    })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "FlintFlow", domain: null })
+  })
+
+  it.each(["edit_srs", "fpt_template", "customer_template"] as const)("lưu đúng sourceMode %s", async (mode) => {
+    mocks.Project.create.mockResolvedValue({ id: PROJECT })
+
+    await projectService.createProject(USER, "FlintFlow", mode)
+
+    expect(mocks.Project.create).toHaveBeenCalledWith(expect.objectContaining({ sourceMode: mode }))
   })
 })
