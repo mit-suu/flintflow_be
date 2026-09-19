@@ -35,7 +35,7 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   }
 
   const projectId = req.params.projectId as string
-  const project = await projectService.getProjectById(projectId, userId)
+  const project = await projectService.openProject(projectId, userId)
   return sendSuccess(res, 200, project)
 })
 
