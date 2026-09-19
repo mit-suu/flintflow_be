@@ -23,7 +23,8 @@ export interface Mode1Auth {
 export const authorizeMode1 = async (req: Request): Promise<Mode1Auth> => {
   const userId = req.user?.userId
   if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
-  const projectId = req.params.projectId as string
+  // Route import dùng `/:id/…`; change request và version vẫn `/:projectId/…`
+  const projectId = (req.params.id ?? req.params.projectId) as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, userId)
   const mode = project.mode ?? "fpt"
