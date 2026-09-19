@@ -54,6 +54,22 @@ export const getProjectById = async (
 }
 
 /**
+ * Mở dự án (`GET /projects/:id` — workspace, bản đọc): ghi `lastOpenedAt`. `timestamps: false` ⇒ không đẩy
+ * `updatedAt` (mở không phải là sửa). Chỉ route này ghi; các nơi nội bộ vẫn dùng `getProjectById`.
+ */
+export const openProject = async (projectId: string, userId: string): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId, userId },
+    { $set: { lastOpenedAt: new Date() } },
+    { new: true, timestamps: false }
+  )
+  if (!project) throw notFound()
+  return project
+}
+
+/**
  * Dọn mọi dữ liệu thuộc project khi xoá cứng: Spine và các collection tách riêng của nó (changes,
  * baselines chứa snapshot lớn, usages), bản render đã cache, file sơ đồ trong GridFS, tài liệu upload
  * cùng file gốc trên Cloudinary.

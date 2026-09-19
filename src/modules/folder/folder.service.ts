@@ -74,5 +74,22 @@ export const assertFolderOwned = async (userId: string, folderId: string): Promi
   if (!(await Folder.exists({ _id: folderId, userId }))) throw notFound()
 }
 
+/**
+ * Chuyển nhiều dự án (của chính user) vào thư mục. Id lạ / sai định dạng / của user khác bị bỏ qua — chỉ đếm
+ * dự án thực sự được chuyển.
+ */
+export const addProjectsToFolder = async (userId: string, folderId: string, projectIds: string[]): Promise<{ moved: number }> => {
+  await assertFolderOwned(userId, folderId)
+  const ids = [...new Set(projectIds)].filter((id) => mongoose.isValidObjectId(id))
+  if (ids.length === 0) return { moved: 0 }
+  const result = await Project.updateMany({ _id: { $in: ids }, userId }, { $set: { folderId } })
+  // Thư mục bị xoá chen giữa ⇒ gỡ các dự án vừa chuyển về ngoài thư mục (giống moveProjectToFolder)
+  if (!(await folderStillExists(userId, folderId))) {
+    await Project.updateMany({ _id: { $in: ids }, userId, folderId }, { $set: { folderId: null } })
+    throw notFound()
+  }
+  return { moved: result.modifiedCount }
+}
+
 export const folderStillExists = async (userId: string, folderId: string): Promise<boolean> =>
   Boolean(await Folder.exists({ _id: folderId, userId }))

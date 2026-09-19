@@ -42,6 +42,23 @@ describe("project sourceMode", () => {
   })
 })
 
+describe("mở dự án", () => {
+  it("GET /projects/:id ghi lastOpenedAt, không đổi updatedAt; id sai định dạng ⇒ 404", async () => {
+    const seeded = await seedFixture("minimal")
+    const before = await request(app).get("/api/v1/projects").set(as(seeded))
+    const listed = before.body.data[0]
+    expect(listed.lastOpenedAt ?? null).toBeNull()
+
+    const opened = await request(app).get(`/api/v1/projects/${seeded.projectId}`).set(as(seeded))
+    expect(opened.status).toBe(200)
+    expect(opened.body.data.lastOpenedAt).toEqual(expect.any(String))
+    expect(opened.body.data.updatedAt).toBe(listed.updatedAt)
+
+    const bad = await request(app).get("/api/v1/projects/khong-phai-id").set(as(seeded))
+    expect(bad.status).toBe(404)
+  })
+})
+
 describe("feedback", () => {
   it("member gửi góp ý ⇒ admin đọc được, mới nhất trước, kèm người gửi", async () => {
     const seeded = await seedFixture("minimal")

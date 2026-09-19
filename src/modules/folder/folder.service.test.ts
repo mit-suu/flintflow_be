@@ -73,3 +73,16 @@ describe("folder validation", () => {
     expect(UpdateFolderSchema.parse({ color: "green" })).toEqual({ color: "green" })
   })
 })
+
+describe("addProjectsToFolder", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it("thư mục bị xoá chen giữa ⇒ gỡ dự án vừa chuyển, báo 404", async () => {
+    mocks.Folder.exists.mockResolvedValueOnce({ _id: F1 }).mockResolvedValueOnce(null)
+    mocks.Project.updateMany.mockResolvedValue({ modifiedCount: 1 })
+    const P1 = "64b0000000000000000000a1"
+
+    await expect(folderService.addProjectsToFolder(USER, F1, [P1])).rejects.toMatchObject({ statusCode: 404, code: "FOLDER_NOT_FOUND" })
+    expect(mocks.Project.updateMany).toHaveBeenLastCalledWith({ _id: { $in: [P1] }, userId: USER, folderId: F1 }, { $set: { folderId: null } })
+  })
+})

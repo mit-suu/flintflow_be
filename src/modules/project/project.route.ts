@@ -179,7 +179,7 @@ router.delete(
  * @swagger
  * /api/v1/projects/{projectId}:
  *   get:
- *     summary: Lấy thông tin chi tiết một dự án
+ *     summary: Lấy thông tin chi tiết một dự án (ghi lastOpenedAt — dùng cho sắp xếp "Mới mở")
  *     tags: [Projects]
  *     security:
  *       - BearerAuth: []

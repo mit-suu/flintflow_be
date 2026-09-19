@@ -2,7 +2,7 @@ import { Router } from "express"
 import * as folderController from "./folder.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { validateRequest } from "../project/project.validation.js"
-import { CreateFolderSchema, UpdateFolderSchema } from "./folder.validation.js"
+import { AddProjectsSchema, CreateFolderSchema, UpdateFolderSchema } from "./folder.validation.js"
 
 const router = Router()
 
@@ -104,5 +104,41 @@ router.post("/", authMiddleware, validateRequest(CreateFolderSchema), folderCont
  */
 router.patch("/:folderId", authMiddleware, validateRequest(UpdateFolderSchema), folderController.updateFolder)
 router.delete("/:folderId", authMiddleware, folderController.deleteFolder)
+
+/**
+ * @swagger
+ * /api/v1/folders/{folderId}/projects:
+ *   post:
+ *     summary: Thêm nhiều dự án có sẵn vào thư mục (chỉ dự án của chính user; id lạ bị bỏ qua)
+ *     tags: [Folders]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: folderId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [projectIds]
+ *             properties:
+ *               projectIds:
+ *                 type: array
+ *                 minItems: 1
+ *                 maxItems: 100
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: "{ moved } — số dự án đã chuyển"
+ *       404:
+ *         description: FOLDER_NOT_FOUND
+ */
+router.post("/:folderId/projects", authMiddleware, validateRequest(AddProjectsSchema), folderController.addProjectsToFolder)
 
 export default router
