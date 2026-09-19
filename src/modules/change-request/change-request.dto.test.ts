@@ -46,8 +46,11 @@ describe("change-request DTO — request", () => {
 
   it("sửa vị trí: kết luận nào cần field đó", () => {
     expect(patchLocationRequestSchema.safeParse({}).success).toBe(false)
-    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", new_text: "3.2.4 Sign out of all devices" }).success).toBe(true)
+    // FLF-186: edit bằng giá trị mới của phần tử hoặc op Spine; new_text (bản theo block) không còn
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", new_value: { id: "UC-2.4", name: "Sign out of all devices" } }).success).toBe(true)
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out" }] }).success).toBe(true)
     expect(patchLocationRequestSchema.safeParse({ conclusion: "edit" }).success).toBe(false)
+    expect(patchLocationRequestSchema.safeParse({ conclusion: "edit", new_text: "3.2.4 Sign out of all devices" }).success).toBe(false)
     expect(patchLocationRequestSchema.safeParse({ conclusion: "comment" }).success).toBe(false)
     expect(patchLocationRequestSchema.safeParse({ conclusion: "not_related" }).success).toBe(false)
     expect(patchLocationRequestSchema.safeParse({ conclusion: "not_related", reason: "Chỉ nói về đăng nhập" }).success).toBe(true)
@@ -92,14 +95,16 @@ describe("change-request DTO — response", () => {
       locations: [
         {
           location_id: "L001",
-          block_id: "B0005",
-          block: null,
+          path: "use_cases[id=UC-2.4]",
+          section_id: "fixed:2.2.2",
+          section_title: "Use Case Descriptions",
+          current_text: JSON.stringify({ id: "UC-2.4", name: "Log out of system" }, null, 2),
           found_by: ["spine_link", "keyword"],
           entity_paths: ["use_cases[id=UC-2.4]"],
           owner_step: "S-3.2",
           conclusion: "edit",
           reason: "UC đăng xuất phải nói rõ mọi thiết bị",
-          proposal: { old_text: "3.2.4  Log out of system", new_text: "3.2.4  Sign out of all devices", comment_text: null, spine_ops: [] },
+          proposal: { old_text: "{…Log out…}", new_text: "{…Sign out…}", comment_text: null, spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out of all devices" }] },
           manual: false,
           redo_count: 0,
           verify: { code_ok: true, violations: [], ai_flags: [], at: AT },
@@ -137,9 +142,10 @@ describe("change-request model", () => {
     expect(new ChangeRequest({ ...base, source: { kind: "rumor" } }).validateSync()).toBeDefined()
   })
 
-  it("vị trí: một block một lần mỗi CR; redo_count ≤ 2; kết luận thuộc edit | comment | not_related", () => {
-    expect(ChangeLocation.schema.indexes()).toContainEqual([{ projectId: 1, cr_id: 1, block_id: 1 }, { unique: true }])
-    const base = { projectId: oid(), cr_id: "CR-001", location_id: "L001", block_id: "B0005", found_by: ["mention"] }
+  it("vị trí: một phần tử Spine một lần mỗi CR; redo_count ≤ 2; kết luận thuộc edit | comment | not_related", () => {
+    expect(ChangeLocation.schema.indexes()).toContainEqual([{ projectId: 1, cr_id: 1, path: 1 }, { unique: true }])
+    const base = { projectId: oid(), cr_id: "CR-001", location_id: "L001", path: "use_cases[id=UC-2.4]", section_id: "fixed:2.2.2", found_by: ["mention"] }
+    expect(new ChangeLocation({ ...base, path: undefined }).validateSync()?.errors.path).toBeDefined()
     expect(new ChangeLocation(base).validateSync()).toBeUndefined()
     expect(new ChangeLocation({ ...base, redo_count: 3 }).validateSync()?.errors.redo_count).toBeDefined()
     expect(new ChangeLocation({ ...base, conclusion: "delete" }).validateSync()?.errors.conclusion).toBeDefined()

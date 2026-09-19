@@ -121,8 +121,8 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       409: { description: CR_INVALID_TRANSITION }
  * /api/v1/projects/{projectId}/change-requests/{crId}/impact:
  *   post:
- *     summary: Tìm vị trí ảnh hưởng + khoá block (C-3, nút 3.4–3.5) — tất định
- *     description: Nguồn — liên kết Spine ↔ block, mention trong text, từ khoá của C-2.
+ *     summary: Tìm vị trí ảnh hưởng + khoá phần tử Spine (C-3, nút 3.4–3.5) — tất định
+ *     description: "Mode 1 v2 — vị trí là phần tử Spine: đích C-2 + phần tử tham chiếu tới nó, phần tử nhắc mã/tên của đích, từ khoá."
  *     tags: [Change requests (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -131,7 +131,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       - $ref: '#/components/parameters/CrId'
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
- *       409: { description: "BLOCK_LOCKED (`meta.locked[{ block_id, cr_id }]`), CR_INVALID_TRANSITION" }
+ *       409: { description: "PATH_LOCKED (`meta.locked[{ path, cr_id }]`), CR_INVALID_TRANSITION" }
  * /api/v1/projects/{projectId}/change-requests/{crId}/propose:
  *   post:
  *     summary: AI đề xuất edit / comment / not_related cho từng vị trí (C-4, nút 3.6), gom change group
@@ -156,7 +156,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       - $ref: '#/components/parameters/CrId'
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
- *       409: { description: CR_INVALID_TRANSITION, CR_OLD_TEXT_MISMATCH }
+ *       409: { description: CR_INVALID_TRANSITION, CR_VALUE_CHANGED }
  * /api/v1/projects/{projectId}/change-requests/{crId}/submit:
  *   post:
  *     summary: Nộp CR để duyệt (UC-51, nút 3.11)
@@ -171,7 +171,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       409: { description: "CR_LOCATION_UNCONCLUDED (`meta.location_ids`), CR_INVALID_TRANSITION" }
  * /api/v1/projects/{projectId}/change-requests/{crId}/revise:
  *   post:
- *     summary: Sửa lại CR khi mọi group bị từ chối — khoá lại block, về proposing (UC-52)
+ *     summary: Sửa lại CR khi mọi group bị từ chối — khoá lại phần tử, về proposing (UC-52)
  *     tags: [Change requests (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -180,7 +180,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       - $ref: '#/components/parameters/CrId'
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
- *       409: { description: BLOCK_LOCKED, CR_INVALID_TRANSITION }
+ *       409: { description: PATH_LOCKED, CR_INVALID_TRANSITION }
  * /api/v1/projects/{projectId}/change-requests/{crId}/resume:
  *   post:
  *     summary: Tiếp tục bước AI đang dừng — clarifying / proposing / verifying (UC-75)
@@ -224,12 +224,13 @@ router.post("/:projectId/change-requests/:crId/resume", authMiddleware, crContro
  *             properties:
  *               conclusion: { type: string, enum: [edit, comment, not_related] }
  *               reason: { type: string }
- *               new_text: { type: string }
+ *               new_value: { description: "Giá trị mới của cả phần tử (JSON) ⇒ op set tại path của vị trí" }
+ *               spine_ops: { type: array, items: { type: object } }
  *               comment_text: { type: string }
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
  *       404: { description: CR_LOCATION_NOT_FOUND }
- *       409: { description: CR_INVALID_TRANSITION, BLOCK_LOCKED }
+ *       409: { description: CR_INVALID_TRANSITION, PATH_LOCKED }
  */
 router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddleware, crController.updateLocation)
 
@@ -262,7 +263,7 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
  *       404: { description: CR_GROUP_NOT_FOUND }
- *       409: { description: CR_INVALID_TRANSITION, CR_OLD_TEXT_MISMATCH, SPINE_VERSION_CONFLICT }
+ *       409: { description: CR_INVALID_TRANSITION, CR_VALUE_CHANGED, SPINE_VERSION_CONFLICT }
  */
 router.post("/:projectId/change-requests/:crId/groups/:gid/decision", authMiddleware, crController.decision)
 
@@ -287,7 +288,7 @@ router.post("/:projectId/change-requests/:crId/groups/:gid/decision", authMiddle
  *       409: { description: CR_INVALID_TRANSITION }
  * /api/v1/projects/{projectId}/change-requests/{crId}/cancel:
  *   post:
- *     summary: Huỷ CR (UC-53, nút 3.10) ⇒ cancelled, mở khoá block — được cả khi đang paused
+ *     summary: Huỷ CR (UC-53, nút 3.10) ⇒ cancelled, mở khoá phần tử — được cả khi đang paused
  *     tags: [Change requests (mode 1)]
  *     security:
  *       - BearerAuth: []

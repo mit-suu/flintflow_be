@@ -1,41 +1,55 @@
 /**
- * Khoá block cho CR (nút 3.5). FLF-171, plan §6 2E.
- * Khoá = `DocBlock.locked_by_cr` trên version tài liệu mới nhất. Khoá nguyên tử theo kiểu "giành rồi trả":
- * `updateMany({locked_by_cr: null})` rồi đếm; thiếu block nào (CR khác đang giữ) ⇒ trả lại phần vừa giành và
- * báo `409 BLOCK_LOCKED` kèm CR đang giữ. Hai CR giành chồng nhau cùng lúc ⇒ cả hai trả lại, không kẹt khoá.
- * Khoá giữ nguyên khi CR `paused`; mở khi ghi xong / group bị từ chối / đóng / huỷ.
+ * Khoá phần tử Spine cho CR (nút 3.5). Mode 1 v2 (FLF-186): khoá theo **path phần tử** (`SpineLock`) thay block docx.
+ * Giành rồi trả: chèn từng path (unique `(projectId, path)`); path nào CR khác đang giữ ⇒ trả lại phần vừa giành và
+ * báo `409 PATH_LOCKED` kèm CR đang giữ. Khoá giữ nguyên khi CR `paused`; mở khi ghi xong / group bị từ chối / đóng / huỷ.
  */
 
 import mongoose from "mongoose"
-import { DocBlock } from "../import/doc-block.model.js"
 import { Mode1Error } from "../import/mode1.errors.js"
+import { SpineLock } from "./spine-lock.model.js"
 
-export const lockBlocks = async (projectId: string | mongoose.Types.ObjectId, docVersion: string, crId: string, blockIds: string[]): Promise<void> => {
-  const ids = [...new Set(blockIds)]
-  if (!ids.length) return
-  const already = await DocBlock.find({ projectId, doc_version: docVersion, block_id: { $in: ids }, locked_by_cr: crId }).distinct("block_id")
-  const wanted = ids.filter((id) => !already.includes(id))
-  if (!wanted.length) return
-  const res = await DocBlock.updateMany({ projectId, doc_version: docVersion, block_id: { $in: wanted }, locked_by_cr: null }, { $set: { locked_by_cr: crId } })
-  if (res.modifiedCount === wanted.length) return
+const isDuplicateKey = (err: unknown): boolean => typeof err === "object" && err !== null && (err as { code?: unknown }).code === 11000
 
-  const mine = await DocBlock.find({ projectId, doc_version: docVersion, block_id: { $in: wanted }, locked_by_cr: crId }).distinct("block_id")
-  const conflicts = await DocBlock.find({ projectId, doc_version: docVersion, block_id: { $in: wanted }, locked_by_cr: { $nin: [null, crId] } })
-    .select("block_id locked_by_cr")
-    .lean()
-  await DocBlock.updateMany({ projectId, doc_version: docVersion, block_id: { $in: mine }, locked_by_cr: crId }, { $set: { locked_by_cr: null } })
-  const locked = conflicts.map((b) => ({ block_id: b.block_id, cr_id: b.locked_by_cr! }))
-  const first = locked[0]
-  throw new Mode1Error(
-    "BLOCK_LOCKED",
-    first ? `Block ${first.block_id} đang được ${first.cr_id} sửa` : "Block đang được change request khác sửa",
-    { locked }
-  )
+export interface PathLock {
+  path: string
+  cr_id: string
 }
 
-/** Mở khoá block của CR (mọi version); `blockIds` rỗng/không truyền ⇒ mở hết. */
-export const unlockBlocks = async (projectId: string | mongoose.Types.ObjectId, crId: string, blockIds?: string[]): Promise<void> => {
-  const filter: Record<string, unknown> = { projectId, locked_by_cr: crId }
-  if (blockIds) filter.block_id = { $in: blockIds }
-  await DocBlock.updateMany(filter, { $set: { locked_by_cr: null } })
+export const pathLocked = (locked: PathLock[]): Mode1Error => {
+  const first = locked[0]
+  return new Mode1Error("PATH_LOCKED", first ? `${first.path} đang được ${first.cr_id} sửa` : "Phần tử đang được change request khác sửa", { locked })
+}
+
+export const lockPaths = async (projectId: string | mongoose.Types.ObjectId, crId: string, paths: string[]): Promise<void> => {
+  const wanted = [...new Set(paths)]
+  if (!wanted.length) return
+  const mine = new Set<string>(await SpineLock.find({ projectId, cr_id: crId, path: { $in: wanted } }).distinct("path"))
+  const acquired: string[] = []
+  const conflicts: string[] = []
+  for (const path of wanted.filter((p) => !mine.has(p))) {
+    try {
+      await SpineLock.create({ projectId, path, cr_id: crId })
+      acquired.push(path)
+    } catch (err) {
+      if (!isDuplicateKey(err)) throw err
+      conflicts.push(path)
+    }
+  }
+  if (!conflicts.length) return
+  await SpineLock.deleteMany({ projectId, cr_id: crId, path: { $in: acquired } })
+  const holders = await SpineLock.find({ projectId, path: { $in: conflicts } }).select("path cr_id").lean()
+  throw pathLocked(holders.map((h) => ({ path: h.path, cr_id: h.cr_id })))
+}
+
+/** Mở khoá path của CR; không truyền `paths` ⇒ mở hết. */
+export const unlockPaths = async (projectId: string | mongoose.Types.ObjectId, crId: string, paths?: string[]): Promise<void> => {
+  const filter: Record<string, unknown> = { projectId, cr_id: crId }
+  if (paths) filter.path = { $in: paths }
+  await SpineLock.deleteMany(filter)
+}
+
+/** path ⇒ CR đang giữ khoá. */
+export const locksOf = async (projectId: string | mongoose.Types.ObjectId, paths: string[]): Promise<Map<string, string>> => {
+  const rows = await SpineLock.find({ projectId, path: { $in: [...new Set(paths)] } }).select("path cr_id").lean()
+  return new Map(rows.map((r) => [r.path, r.cr_id]))
 }
