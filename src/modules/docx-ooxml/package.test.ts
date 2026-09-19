@@ -63,4 +63,42 @@ describe("DocxPackage", () => {
   it("không phải zip ⇒ lỗi", async () => {
     await expect(DocxPackage.load(Buffer.from("hello"))).rejects.toThrow()
   })
+
+  it("partNames/has/freePartName: part mới thêm được tính ngay, tên header tiếp theo không trùng", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("a"), extraParts: { "word/header1.xml": "<x/>" } }))
+    expect(pkg.partNames()).toEqual(expect.arrayContaining(["word/document.xml", "word/styles.xml", "word/header1.xml", "[Content_Types].xml"]))
+    expect(pkg.partNames().some((n) => n.endsWith("/"))).toBe(false)
+    expect(pkg.has("word/header2.xml")).toBe(false)
+    expect(pkg.freePartName("header")).toBe("word/header2.xml")
+    await pkg.addXmlPart("word/header2.xml", `<x xmlns="urn:x"/>`, "t")
+    expect(pkg.has("word/header2.xml")).toBe(true)
+    expect(pkg.freePartName("header")).toBe("word/header3.xml")
+    expect(await pkg.xml("word/khong-co.xml")).toBeNull()
+  })
+
+  it("rels: part không có rels ⇒ []; target tuyệt đối / ./ ; id không có ⇒ null; bỏ qua id đã dùng", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body: p("a"),
+        extraDocRels: `<Relationship Id="rIdFF1" Type="urn:t" Target="/customXml/item1.xml"/><Relationship Id="rIdX" Type="urn:t" Target="./media/../media/b.png"/>`
+      })
+    )
+    expect(await pkg.relationships("word/footer9.xml")).toEqual([])
+    expect(await pkg.resolveRelationship("word/document.xml", "rIdFF1")).toBe("customXml/item1.xml")
+    expect(await pkg.resolveRelationship("word/document.xml", "rIdX")).toBe("word/media/b.png")
+    expect(await pkg.resolveRelationship("word/document.xml", "rId404")).toBeNull()
+    expect(await pkg.addRelationship("word/document.xml", "urn:t", "x.xml")).toBe("rIdFF2")
+    expect((await pkg.relationships("word/document.xml")).map((r) => r.id)).toEqual(["rId1", "rIdFF1", "rIdX", "rIdFF2"])
+  })
+
+  it("mở/lưu nhiều lần: part XML đã sửa được ghi lại, part không đụng giữ nguyên byte", async () => {
+    const raw = `<?xml version="1.0"?><!-- giữ nguyên --><x   a="1"/>`
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("a"), extraParts: { "word/raw.xml": raw } }))
+    const doc = await pkg.requireXml("word/document.xml")
+    doc.documentElement.setAttribute("data-test", "1")
+    const once = await DocxPackage.load(await pkg.toBuffer())
+    const twice = await JSZip.loadAsync(await once.toBuffer())
+    expect(await twice.file("word/raw.xml")!.async("string")).toBe(raw)
+    expect(await twice.file("word/document.xml")!.async("string")).toContain('data-test="1"')
+  })
 })
