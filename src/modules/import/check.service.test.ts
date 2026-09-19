@@ -19,12 +19,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FULL: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 
 const EXCLUDED = ["array_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "non_english_content", "usecase_no_function"]
-const DOWNGRADED = ["section_empty", "nfr_missing_number"]
+// Mode 1 v2 (D6, FLF-183): section_empty giữ đỏ — mọi đầu mục mẫu FPT là cốt lõi
+const DOWNGRADED = ["nfr_missing_number"]
 
 const rulesOf = (c: FlagCandidate[]) => new Set(c.map((f) => f.rule_id))
 
 describe("hồ sơ luật mode 1", () => {
-  it("cấu hình một chỗ: 6 luật loại trừ, 2 luật hạ mức, đều là luật có thật", () => {
+  it("cấu hình một chỗ: 6 luật loại trừ, 1 luật hạ mức, đều là luật có thật", () => {
     expect([...MODE1_RULE_PROFILE.exclude].sort()).toEqual([...EXCLUDED].sort())
     expect([...MODE1_RULE_PROFILE.downgrade].sort()).toEqual([...DOWNGRADED].sort())
     const known = new Set(RULES.map((r) => r.rule_id))
@@ -48,19 +49,19 @@ describe("hồ sơ luật mode 1", () => {
       else if (DOWNGRADED.includes(r.rule_id)) expect(hit?.level, r.rule_id).toBe("yellow")
       else expect(hit?.level, r.rule_id).toBe(r.level)
     }
-    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption
-    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "unconfirmed_assumption"])
+    // giữ đỏ: dead_reference, render_error, diagram_stale, unconfirmed_assumption, section_empty (D6)
+    expect(out.filter((c) => c.level === "red").map((c) => c.rule_id).sort()).toEqual(["dead_reference", "diagram_stale", "render_error", "section_empty", "unconfirmed_assumption"])
   })
 
-  it("Spine rỗng (import chưa trích được gì): mode 2 đầy cờ đỏ, mode 1 không còn cờ đỏ nào", () => {
+  it("Spine rỗng (import chưa trích được gì): mode 1 chỉ còn cờ đỏ section_empty (đầu mục FPT thiếu — D6)", () => {
     const empty = createEmptySpine({ name: "Lumen" })
     const mode2 = runDeterministicCheck(empty, [], { atBaseline: true })
     expect(mode2.some((f) => f.rule_id === "array_empty" && f.level === "red")).toBe(true)
     const mode1 = runDeterministicCheck(empty, [], { atBaseline: true, ruleProfile: MODE1_RULE_PROFILE })
-    expect(mode1.filter((f) => f.level === "red")).toEqual([])
+    expect(new Set(mode1.filter((f) => f.level === "red").map((f) => f.rule_id))).toEqual(new Set(["section_empty"]))
     expect(rulesOf(mode1).has("array_empty")).toBe(false)
-    // thiếu section/NFR vẫn báo (vàng) để vào gap report
-    expect(mode1.some((f) => f.rule_id === "section_empty" && f.level === "yellow")).toBe(true)
+    // thiếu số đo NFR vẫn chỉ báo vàng để vào gap report
+    expect(mode1.some((f) => f.rule_id === "section_empty" && f.level === "red")).toBe(true)
     expect(mode1.some((f) => f.rule_id === "nfr_missing_number" && f.level === "yellow")).toBe(true)
   })
 

@@ -207,6 +207,13 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   for (const g of of("glossary").filter(skip(spine.glossary))) {
     add("glossary", { id: g.id, term: str(g.value.term ?? g.value.name) || g.id, definition: str(g.value.definition ?? g.value.description) })
   }
+  // Màn chưa có function nào ⇒ placeholder: workspace không mở vòng S-5 rỗng cho nó (FLF-183, mode 1 v2)
+  const screensWithFunction = new Set(ops.filter((o) => o.path === "functions[]").map((o) => (o.value as { screen_id: string | null }).screen_id))
+  for (const o of ops) {
+    if (o.path !== "screens[]") continue
+    const screen = o.value as { id: string; detail_status: string }
+    if (!screensWithFunction.has(screen.id)) screen.detail_status = "placeholder"
+  }
   return ops
 }
 
