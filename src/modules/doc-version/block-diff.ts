@@ -1,6 +1,8 @@
 /**
  * So hai danh sách block theo thứ tự tài liệu (re-upload UC-24 nút 1.4, so sánh version UC-55). FLF-171, plan §6 2D.
- * Khớp block: bookmark neo (`block_id`) → `para_id` → LCS trên `text_hash` của phần còn lại.
+ * Khớp block: bookmark neo (`block_id`) → `para_id` → LCS trên `text_hash` của phần còn lại → (FLF-186, file render không
+ * có neo) block trùng text ngoài dãy LCS ⇒ `moved`; block còn lẻ giữa cùng hai block đã khớp ghép theo độ giống từ
+ * (≥ `MODIFIED_SIMILARITY`) ⇒ `modified`.
  * Cặp khớp khác text ⇒ `modified`; cặp khớp đổi thứ tự (ngoài dãy con tăng dài nhất) ⇒ `moved`;
  * block cũ không khớp ⇒ `removed`; block mới không khớp ⇒ `added` (`block_id = null` nếu chưa có id).
  */
@@ -62,6 +64,20 @@ const longestIncreasing = (seq: number[]): Set<number> => {
   return keep
 }
 
+/** Ngưỡng giống từ (Jaccard trên tập từ) để coi hai block không neo là một block bị sửa. */
+export const MODIFIED_SIMILARITY = 0.5
+
+const wordSet = (s: string): Set<string> => new Set(s.toLowerCase().split(/\s+/).filter(Boolean))
+
+const similarity = (a: string, b: string): number => {
+  const A = wordSet(a)
+  const B = wordSet(b)
+  if (!A.size || !B.size) return 0
+  let inter = 0
+  for (const t of A) if (B.has(t)) inter++
+  return inter / (A.size + B.size - inter)
+}
+
 export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { blocks: BlockDiffEntry[]; summary: BlockDiffSummary } => {
   const matchOfAfter = new Map<number, number>()
   const usedBefore = new Set<number>()
@@ -86,6 +102,41 @@ export const diffBlockLists = (before: DiffBlock[], after: DiffBlock[]): { block
     matchOfAfter.set(restAfter[y], restBefore[x])
     usedBefore.add(restBefore[x])
   }
+
+  // Block trùng text nằm ngoài dãy LCS (bị di chuyển, file không có neo) ⇒ khớp chính xác, sẽ thành `moved`
+  after.forEach((a, j) => {
+    if (matchOfAfter.has(j)) return
+    const i = before.findIndex((x, k) => !usedBefore.has(k) && x.text_hash === a.text_hash)
+    if (i >= 0) {
+      matchOfAfter.set(j, i)
+      usedBefore.add(i)
+    }
+  })
+
+  // Block lẻ giữa cùng hai block đã khớp ⇒ ghép theo độ giống từ (sửa chữ trong file không có neo)
+  after.forEach((a, j) => {
+    if (matchOfAfter.has(j)) return
+    let lo = -1
+    let hi = before.length
+    for (const [jj, ii] of matchOfAfter) {
+      if (jj < j && ii > lo) lo = ii
+      if (jj > j && ii < hi) hi = ii
+    }
+    let best = -1
+    let bestScore = MODIFIED_SIMILARITY
+    for (let i = lo + 1; i < hi; i++) {
+      if (usedBefore.has(i)) continue
+      const score = similarity(before[i].text, a.text)
+      if (score >= bestScore) {
+        best = i
+        bestScore = score
+      }
+    }
+    if (best >= 0) {
+      matchOfAfter.set(j, best)
+      usedBefore.add(best)
+    }
+  })
 
   const matchedAfter = [...matchOfAfter.keys()].sort((x, y) => x - y)
   const inOrder = longestIncreasing(matchedAfter.map((j) => matchOfAfter.get(j)!))

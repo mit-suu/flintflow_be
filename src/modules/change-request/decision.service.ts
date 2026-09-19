@@ -1,6 +1,6 @@
 /**
  * C-6 duyệt / từ chối từng change group (nút 3.12, UC-52). FLF-171, plan §6 2E.
- * G1: chưa có role ⇒ người tạo tự duyệt. Group bị từ chối mở khoá block ngay. Group cuối được quyết mà có ít nhất
+ * G1: chưa có role ⇒ người tạo tự duyệt. Group bị từ chối mở khoá phần tử ngay. Group cuối được quyết mà có ít nhất
  * một group duyệt ⇒ ghi (C-7) rồi mới lưu quyết định — ghi lỗi thì không lưu gì, gọi lại được.
  * Mọi group bị từ chối ⇒ CR vẫn `in_review`, người dùng chọn sửa lại (revise) hoặc đóng (close).
  */
@@ -13,7 +13,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation } from "./change-location.model.js"
-import { unlockBlocks } from "./lock.service.js"
+import { unlockPaths } from "./lock.service.js"
 import { writeApproved } from "./write.service.js"
 
 export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: string, body: GroupDecisionRequest): Promise<void> => {
@@ -40,8 +40,8 @@ export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: s
   group.decided_at = new Date()
   await group.save()
   if (body.decision === "rejected") {
-    const blockIds = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: { $in: group.location_ids } }).distinct("block_id")
-    await unlockBlocks(cr.projectId, cr.cr_id, blockIds)
+    const paths: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: { $in: group.location_ids } }).distinct("path")
+    await unlockPaths(cr.projectId, cr.cr_id, paths)
   }
   if (written) {
     cr.result_doc_version = written
@@ -53,7 +53,7 @@ export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: s
     type: "change_request_decided",
     title: written ? `${cr.cr_id} đã được ghi vào bản ${written}` : `${cr.cr_id}: group ${groupId} ${body.decision === "approved" ? "được duyệt" : "bị từ chối"}`,
     body: written
-      ? `Thay đổi "${cr.title}" đã ghi dạng Track Changes vào bản ${written}.`
+      ? `Thay đổi "${cr.title}" đã ghi vào Spine và bản tài liệu ${written}.`
       : `Group "${group.title}" của "${cr.title}" ${body.decision === "approved" ? "được duyệt" : `bị từ chối: ${body.reason ?? ""}`}.`,
     meta: { cr_id: cr.cr_id, group_id: groupId, decision: body.decision, result_doc_version: written }
   })

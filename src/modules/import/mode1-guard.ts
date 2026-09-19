@@ -37,8 +37,13 @@ export const prefillFrom = (instruction: string | undefined, fallback = "Sửa t
   return { title: firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine, description: text }
 }
 
-export const changeRequiresCr = (prefill: CrPrefill): Mode1Error =>
-  new Mode1Error("CHANGE_REQUIRES_CR", "Tài liệu đã có baseline — mọi sửa phải qua change request", { prefill })
+/** `changeRequest`: CR đã tạo sẵn từ lệnh sửa trong chat (FLF-186) — FE mở thẳng CR đó thay cho form điền sẵn. */
+export const changeRequiresCr = (prefill: CrPrefill, changeRequest?: { cr_id: string; status: string }): Mode1Error =>
+  new Mode1Error(
+    "CHANGE_REQUIRES_CR",
+    changeRequest ? `Tài liệu đã có baseline v1 — đã tạo ${changeRequest.cr_id} từ lệnh sửa` : "Tài liệu đã có baseline — mọi sửa phải qua change request",
+    { prefill, ...(changeRequest ? { change_request: changeRequest } : {}) }
+  )
 
 export const assertChangesAllowed = async (projectId: string, prefill: CrPrefill): Promise<void> => {
   if (await changesRequireCr(projectId)) throw changeRequiresCr(prefill)

@@ -784,11 +784,16 @@ export async function renderSpineDocument(
   projectId: string,
   projectName: string,
   spine: Spine,
-  opts: { version: string; source: RenderSource },
+  opts: {
+    version: string
+    source: RenderSource
+    /** Change chưa ghi DB nhưng thuộc snapshot (C-7 render trước khi ghi Spine — FLF-186) — nối vào §I. */
+    pendingRecord?: ChangeRecordRow[]
+  },
   deps: Partial<AssembleDeps> = {}
 ): Promise<RenderedDocument> {
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
-  const recordChanges = await listChangesForRecord(projectId)
+  const recordChanges = [...(await listChangesForRecord(projectId)), ...(opts.pendingRecord ?? [])]
   const resolveInCharge = await buildInChargeResolver(recordChanges)
   return buildDocument(
     {

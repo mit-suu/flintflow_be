@@ -32,4 +32,13 @@ describe("diffBlockLists", () => {
     const after = [b(null, "Alpha changed", "AAAA0001"), b(null, "Beta"), b(null, "Gamma")]
     expect(diffBlockLists(before, after).blocks).toEqual([{ block_id: "B0001", change: "modified", before: "Alpha", after: "Alpha changed" }])
   })
+
+  it("FLF-186 — không neo (file render): block lẻ giữa cùng hai block đã khớp, giống từ ≥ 50% ⇒ modified; khác hẳn ⇒ xoá + thêm", () => {
+    const n = (text: string) => b(null, text)
+    const before = [n("Intro"), n("The system shall respond within 2 seconds."), n("Glossary")]
+    const edited = diffBlockLists(before, [n("Intro"), n("The system shall respond within 1 second."), n("Glossary")])
+    expect(edited.blocks).toEqual([{ block_id: null, change: "modified", before: "The system shall respond within 2 seconds.", after: "The system shall respond within 1 second." }])
+    const replaced = diffBlockLists(before, [n("Intro"), n("Completely different words here"), n("Glossary")])
+    expect(replaced.summary).toEqual({ added: 1, removed: 1, modified: 0, moved: 0 })
+  })
 })

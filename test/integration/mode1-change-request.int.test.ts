@@ -12,14 +12,14 @@ import { mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
 import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeCrProposeNoChange, fakeMode1, mode1Api } from "../helpers/mode1.js"
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema, listChangeRequestsResponseSchema } from "../../src/modules/change-request/change-request.dto.js"
-import { DocxPackage, listComments, listRevisions, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
-import { DocBlock } from "../../src/modules/import/doc-block.model.js"
+import { DocxPackage, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
+import { lockedPaths } from "../helpers/mode1-cr-p4.js"
 import { DocVersion } from "../../src/modules/doc-version/doc-version.model.js"
 import { docFileStore } from "../../src/modules/doc-version/doc-file.store.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
-const PERF_TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds", "Performance", "Business Rules"] }
+const PERF_TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds", "Passwords"] }
 
 let routeCr: (prompt: string) => string | undefined = () => undefined
 
@@ -77,7 +77,7 @@ describe("mode 1 — change request", () => {
     expect(noSource.body.error.code).toBe("CR_SOURCE_REQUIRED")
   })
 
-  it("trọn luồng: làm rõ → impact + khoá → đề xuất → verify → nộp → duyệt một phần ⇒ 0.1 có Track Changes + comment CR-001", async () => {
+  it("trọn luồng: làm rõ → impact + khoá → đề xuất → verify → nộp → duyệt một phần ⇒ Spine đổi + 0.1 render lại (FLF-186)", async () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, impact, proposed, verified } = await crToReady(c)
     expect(crId).toBe("CR-001")
@@ -85,11 +85,11 @@ describe("mode 1 — change request", () => {
     expect(list.map((x) => x.cr_id)).toEqual(["CR-001"])
     expect((await c.get("/import")).body.data.import.status).toBe("change_requested")
 
-    // impact: câu perf (spine_link + keyword), heading 4.2.3 + 5.1 (keyword); tất cả bị khoá bởi CR-001
-    const byText = (t: string) => impact.locations.find((l) => l.block?.text.startsWith(t))!
-    expect(byText("The system shall respond").found_by.sort()).toEqual(["keyword", "spine_link"])
-    expect(byText("4.2.3 Performance").found_by).toEqual(["keyword"])
-    expect(impact.locations.every((l) => l.block?.locked_by_cr === "CR-001")).toBe(true)
+    // impact: NFR-01 (spine_link + keyword), BR-01 (keyword "Passwords"); tất cả bị khoá bởi CR-001
+    const byPath = (p: string) => impact.locations.find((l) => l.path === p)!
+    expect(byPath("nfrs[id=NFR-01]").found_by.sort()).toEqual(["keyword", "spine_link"])
+    expect(byPath("business_rules[id=BR-01]").found_by).toEqual(["keyword"])
+    expect(await lockedPaths(projectId, "CR-001")).toEqual(impact.locations.map((l) => l.path).sort())
 
     expect(proposed.change_request.status).toBe("proposing")
     expect(proposed.groups.map((g) => g.title).sort()).toEqual(["Business Rules", "Performance"])
@@ -107,28 +107,20 @@ describe("mode 1 — change request", () => {
     const rejected = detail(await c.post(`${cr}/groups/${brGroup.group_id}/decision`, { decision: "rejected", reason: "Ngoài phạm vi bản 1.0", base_version: await c.spineVersion() }))
     expect(rejected.change_request.status).toBe("in_review")
     // group bị từ chối mở khoá ngay
-    const brBlock = rejected.locations.find((l) => l.group_id === brGroup.group_id)!
-    expect(brBlock.block?.locked_by_cr).toBeNull()
+    const brLoc = rejected.locations.find((l) => l.group_id === brGroup.group_id)!
+    expect(await lockedPaths(projectId, "CR-001")).not.toContain(brLoc.path)
 
     const written = detail(await c.post(`${cr}/groups/${perfGroup.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
     expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
 
-    // version 0.1: Track Changes + comment author CR-001, stamp 0.1, text mới
+    // version 0.1 = bản render từ Spine mới: stamp 0.1, text mới; mọi khoá đã mở
     const v01 = await DocVersion.findOne({ projectId, version: "0.1" }).lean()
     expect(v01).toMatchObject({ kind: "cr_revision", based_on: "0.0", cr_ids: ["CR-001"] })
     const pkg = await DocxPackage.load(await docFileStore().load(v01!.file_ref))
     expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.1", source: "cr_revision" })
-    const revs = await listRevisions(pkg)
-    expect(revs.length).toBeGreaterThan(0)
-    expect(new Set(revs.map((r) => r.author))).toEqual(new Set(["CR-001"]))
-    expect((await listComments(pkg)).map((x) => x.author)).toEqual(["CR-001"])
     const blocks = await readBlocks(pkg)
-    expect(blocks.find((b) => b.text.startsWith("The system shall respond"))?.text).toBe("The system shall respond within 1 second for 95% of requests.")
-
-    // block của 0.1: text mới, mọi khoá đã mở; Spine có op của CR
-    const newBlocks = await DocBlock.find({ projectId, doc_version: "0.1" }).lean()
-    expect(newBlocks.find((b) => b.text.includes("1 second"))).toBeDefined()
-    expect(await DocBlock.countDocuments({ projectId, locked_by_cr: "CR-001" })).toBe(0)
+    expect(blocks.some((b) => b.text === "The system shall respond within 1 second for 95% of requests.")).toBe(true)
+    expect(await lockedPaths(projectId, "CR-001")).toEqual([])
     const spine = (await spineRepository.get(projectId))!
     expect(spine.nfrs.find((n) => n.id === "NFR-01")?.threshold).toBe("1 s")
     const changes = await spineRepository.listChanges(projectId)
@@ -136,8 +128,8 @@ describe("mode 1 — change request", () => {
     expect(await Notification.countDocuments({ userId: seeded.userId, type: "change_request_decided" })).toBe(2)
   })
 
-  it("hai CR cùng chạm một block ⇒ CR thứ hai nhận 409 BLOCK_LOCKED; huỷ CR-001 ⇒ mở khoá, CR-002 khoá được", async () => {
-    const { c } = await importedProject()
+  it("hai CR cùng chạm một phần tử ⇒ CR thứ hai nhận 409 PATH_LOCKED; huỷ CR-001 ⇒ mở khoá, CR-002 khoá được", async () => {
+    const { c, projectId } = await importedProject()
     const first = await newCr(c)
     detail(await c.post(`/change-requests/${first}/clarify`))
     detail(await c.post(`/change-requests/${first}/impact`))
@@ -145,16 +137,16 @@ describe("mode 1 — change request", () => {
     detail(await c.post(`/change-requests/${second}/clarify`))
     const locked = await c.post(`/change-requests/${second}/impact`)
     expect(locked.status).toBe(409)
-    expect(locked.body.error.code).toBe("BLOCK_LOCKED")
+    expect(locked.body.error.code).toBe("PATH_LOCKED")
     expect(locked.body.meta.locked[0].cr_id).toBe("CR-001")
     // CR-002 không giữ khoá nào sau khi thất bại
     expect(detail(await c.get(`/change-requests/${second}`)).locations).toEqual([])
 
     const cancelled = detail(await c.post(`/change-requests/${first}/cancel`, { reason: "Trùng với CR khác" }))
     expect(cancelled.change_request.status).toBe("cancelled")
-    expect(cancelled.locations.every((l) => l.block?.locked_by_cr === null)).toBe(true)
+    expect(await lockedPaths(projectId, first)).toEqual([])
     const retry = detail(await c.post(`/change-requests/${second}/impact`))
-    expect(retry.locations.every((l) => l.block?.locked_by_cr === "CR-002")).toBe(true)
+    expect(await lockedPaths(projectId, second)).toEqual(retry.locations.map((l) => l.path).sort())
   })
 
   it("verify trượt 3 lần ⇒ manual_fix; sửa tay ⇒ verify đạt", async () => {
@@ -171,14 +163,14 @@ describe("mode 1 — change request", () => {
     }
     expect(statuses).toEqual(["proposing", "proposing", "manual_fix"])
     const d = detail(await c.get(cr))
-    const perf = d.locations.find((l) => l.block?.text.startsWith("The system shall respond"))!
+    const perf = d.locations.find((l) => l.path === "nfrs[id=NFR-01]")!
     expect(perf.redo_count).toBe(2)
     expect(perf.verify?.violations[0].rule).toBe("edit_no_change")
 
     for (const l of d.locations) {
       const body =
         l.location_id === perf.location_id
-          ? { conclusion: "edit", new_text: "The system shall respond within 1 second for 95% of requests." }
+          ? { conclusion: "edit", new_value: { ...JSON.parse(perf.current_text), threshold: "1 s" } }
           : { conclusion: "not_related", reason: "Không liên quan tới thời gian phản hồi" }
       detail(await c.patch(`${cr}/locations/${l.location_id}`, body))
     }

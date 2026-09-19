@@ -3,13 +3,14 @@
  * version. Người dùng xem diff rồi (tuỳ) tạo CR nguồn `reupload`. FLF-171, plan §6 2D.
  * - Stamp của project khác ⇒ `IMPORT_STAMP_FOREIGN_PROJECT`.
  * - File không stamp vẫn so được (khớp theo paraId + text) — người dùng tự chịu việc file có phải bản gốc hay không.
+ * Mode 1 v2 (FLF-186): so với **file render** của version mới nhất (người ngoài sửa trên bản tải về), khớp theo text.
  */
 
 import { createHash } from "node:crypto"
-import { DocxPackage, blockIdOfBookmark, readBlocks } from "../docx-ooxml/index.js"
+import type { OoxmlBlock } from "../docx-ooxml/index.js"
 import { diffBlockLists } from "../doc-version/block-diff.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
-import { blocksOfVersion, latestDocVersion } from "../doc-version/doc-version.service.js"
+import { fileBlocks, fileBlocksOfVersion, latestDocVersion } from "../doc-version/doc-version.service.js"
 import type { ReuploadDiffDto } from "./import.dto.js"
 import { hasBaseline } from "./import.state.js"
 import { latestImport, type UploadedFile } from "./import.service.js"
@@ -53,12 +54,8 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
     throw new Mode1Error("IMPORT_FILE_REJECTED", "File chưa so được, xem danh sách lỗi", { import_id: String(current._id), issues: pre.issues })
   }
 
-  const newBlocks = await readBlocks(await DocxPackage.load(file.buffer))
-  const oldBlocks = await blocksOfVersion(projectId, version.version)
-  const { blocks } = diffBlockLists(
-    oldBlocks.map((b) => ({ block_id: b.block_id, para_id: b.anchor.para_id, text: b.text, text_hash: b.text_hash })),
-    newBlocks.map((b) => ({ block_id: blockIdOfBookmark(b.bookmark), para_id: b.para_id, text: b.text, text_hash: b.text_hash }))
-  )
+  const lite = (x: OoxmlBlock[]) => x.map((b) => ({ block_id: null, para_id: b.para_id, text: b.text, text_hash: b.text_hash }))
+  const { blocks } = diffBlockLists(lite(await fileBlocksOfVersion(version)), lite(await fileBlocks(file.buffer)))
   const fileRef = await docFileStore().save(file.buffer, { projectId, kind: "reupload", name: file.originalname })
   return ReuploadDiff.create({
     projectId,
