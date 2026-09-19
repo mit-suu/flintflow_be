@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
-import { assignBlockSections, matchHeadings, matchProfile, needsMappingReview, type ProfileBlock } from "./profile-match.service.js"
+import { assignBlockSections, matchHeadings, matchProfile, missingRequiredSections, needsMappingReview, type ProfileBlock } from "./profile-match.service.js"
 import { MAPPING_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -157,5 +157,33 @@ describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
     expect(needsMappingReview({ heading_map: [entry(0.3, true)], table_map: [] })).toBe(false)
     const column = { block_id: "B0002", column_index: 0, header: "Use Case ID", field_path: "use_cases[].id", confidence: 0.7, confirmed: false }
     expect(needsMappingReview({ heading_map: [], table_map: [column] })).toBe(true)
+  })
+})
+
+describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
+  it("heading IEEE khớp section FPT qua alias; số mục khác FPT ⇒ độ tin thấp để người dùng xác nhận", () => {
+    const map = mapOf([
+      heading(1, 1, "1. Introduction"),
+      heading(2, 2, "1.3 Definitions, acronyms & abbreviations"),
+      heading(3, 1, "2. Overall description"),
+      heading(4, 2, "2.3 User characteristics"),
+      heading(5, 1, "3. Specific Requirements"),
+      heading(6, 2, "3.3 Performance requirements"),
+      heading(7, 2, "3.1 External interface requirements")
+    ])
+    expect(map["1.3 Definitions, acronyms & abbreviations"].section_id).toBe("fixed:5.5")
+    expect(map["2.3 User characteristics"].section_id).toBe("fixed:2.1")
+    expect(map["3. Specific Requirements"].section_id).toBe("group:3")
+    expect(map["3.3 Performance requirements"].section_id).toBe("fixed:4.2.3")
+    expect(map["3.3 Performance requirements"].confidence).toBeLessThan(MAPPING_CONFIDENCE_THRESHOLD)
+    expect(map["3.1 External interface requirements"].section_id).toBe("fixed:4.1")
+  })
+
+  it("mọi đầu mục FPT (trừ Record of Changes tự sinh) là bắt buộc", () => {
+    const missing = missingRequiredSections([])
+    expect(missing).toContain("fixed:4.2.4")
+    expect(missing).toContain("fixed:5.5")
+    expect(missing).not.toContain("fixed:I")
+    expect(missing).toHaveLength(19)
   })
 })
