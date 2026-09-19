@@ -17,7 +17,7 @@ import type { Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
-import { MODEL_OWNED_RULES, NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
+import { MODEL_OWNED_RULES, NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate, type RuleProfile } from "./deterministic-check.js"
 import { WAIVE_REASON_MIN_LENGTH } from "./spine.schema.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
@@ -150,6 +150,8 @@ export interface RecomputeResult {
 export interface RecomputeOptions {
   atBaseline?: boolean
   by: string
+  /** Mode 1 (FLF-171): luật loại trừ / hạ mức — xem `deterministic-check.ts#RuleProfile`. */
+  ruleProfile?: RuleProfile
 }
 
 /** Chạy lại deterministic check trên `spine_version` hiện tại và ghi `flags[]` (không ghi nếu không đổi). */
@@ -158,7 +160,7 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const changes = await repository.listChanges(projectId)
   const spine = stripRecord(record)
   const atBaseline = options.atBaseline ?? false
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline })
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile: options.ruleProfile })
   const plan = planFlagOps(spine, candidates, new Date(), { atBaseline })
 
   if (plan.ops.length === 0) {
