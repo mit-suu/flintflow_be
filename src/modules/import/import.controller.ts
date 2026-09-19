@@ -19,6 +19,7 @@ import {
   mappingPatchRequestSchema
 } from "./import.dto.js"
 import * as extractService from "./extract.service.js"
+import * as extractJobs from "./extract-jobs.js"
 import * as finalizeService from "./finalize.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -63,6 +64,8 @@ export const confirmLatest = mode1Handler(async (req, res) => {
 
 export const getImport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
+  const current = await importService.latestImport(auth.projectId)
+  if (current) await extractJobs.markOrphanedExtraction(current)
   return sendSuccess(res, 200, await importService.getImportView(auth.projectId))
 })
 
@@ -82,9 +85,15 @@ export const reupload = mode1Handler(async (req, res) => {
 export const extract = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(extractRequestSchema, req.body)
-  const run = await extractService.runExtraction(auth.projectId, auth.userId, body.import_id)
-  return sendSuccess(res, 200, { import: importService.toImportDto(run.doc), sections: run.sections })
+  return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id))
 })
+
+/** I-4 chạy nền: trả ngay trạng thái hiện tại (`extracting`), FE poll `GET /import` (xem `extract-jobs.ts`). */
+const startExtractionResponse = async (projectId: string, userId: string, importId: string) => {
+  const doc = await extractJobs.startExtraction(projectId, userId, importId)
+  const summary = await importService.extractionSummary(String(doc._id))
+  return { import: importService.toImportDto(doc), sections: summary.sections }
+}
 
 export const patchFields = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
@@ -112,8 +121,7 @@ export const resume = mode1Handler(async (req, res) => {
   const body = parseInput(importResumeRequestSchema, req.body)
   const doc = await importService.requireImport(auth.projectId, body.import_id)
   if (doc.status === "extracting") {
-    const run = await extractService.resumeExtraction(auth.projectId, auth.userId, body.import_id)
-    return sendSuccess(res, 200, { import: importService.toImportDto(run.doc), sections: run.sections })
+    return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id))
   }
   if (doc.status === "checking") {
     await finalizeService.resumeCheck(doc, auth.userId)

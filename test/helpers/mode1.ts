@@ -22,7 +22,22 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     get: (suffix: string) => request(app).get(`${base}${suffix}`).set(auth),
     post: (suffix: string, body: object = {}) => request(app).post(`${base}${suffix}`).set(auth).send(body),
     patch: (suffix: string, body: object) => request(app).patch(`${base}${suffix}`).set(auth).send(body),
-    spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number
+    spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
+    /**
+     * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi poll `GET /import` tới khi hết `extracting`
+     * hoặc bị `paused`. `run` có hình `extractResponseSchema` (import + sections) ở thời điểm dừng poll.
+     */
+    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 25_000) => {
+      const res = await request(app).post(`${base}${path}`).set(auth).send({ import_id: importId })
+      if (res.status !== 200) return { res, run: null }
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        const view = (await request(app).get(`${base}/import`).set(auth)).body.data
+        if (view.import.status !== "extracting" || view.import.paused) return { res, run: { import: view.import, sections: view.extraction.sections } }
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      throw new Error("I-4 chạy nền quá lâu")
+    }
   }
 }
 

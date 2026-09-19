@@ -73,11 +73,11 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` | — |
 | 5 | `PATCH /projects/:id/import/mapping` | UC-21, 1.7 | `mappingPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
-| 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` | `extractResponseSchema` (kể cả khi pause) | `IMPORT_INVALID_STATE`, `INSUFFICIENT_CREDIT` |
+| 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), I-4 chạy nền; FE poll #4 tới khi rời `extracting` hoặc có `paused` | `IMPORT_INVALID_STATE` |
 | 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` | `finalizeResponseSchema` | `IMPORT_INVALID_STATE`, `SPINE_VERSION_CONFLICT`, `INSUFFICIENT_CREDIT` |
 | 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema`; `docx` trả file, không bọc envelope | `IMPORT_INVALID_STATE` (chưa tới `gap_review`) |
-| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` | `IMPORT_INVALID_STATE`, `INSUFFICIENT_CREDIT` |
+| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — ở `extracting`: trả ngay, chạy nền như #6; ở `checking`: chạy xong mới trả | `IMPORT_INVALID_STATE` |
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
@@ -159,7 +159,7 @@ Content-Type: multipart/form-data; boundary=…   (file = SRS_Lumen.docx)
 }
 ```
 
-Nạp credit rồi gọi #10 để chạy tiếp từ `fixed:3.1.2`; section đã `done` không bị trích lại.
+Trạng thái trên là kết quả **poll #4** sau khi job nền dừng vì hết credit (#6 trả ngay `extracting` + `paused: null`). Nạp credit rồi gọi #10 để chạy tiếp từ `fixed:3.1.2`; section đã `done` không bị trích lại. Máy chủ khởi động lại giữa chừng ⇒ lần gọi #4 kế tiếp thấy import `extracting` không có job và đặt `paused: { reason: "resume_later" }` để FE hiện nút tiếp tục.
 
 ### 2.4 Finalize (#8)
 
@@ -211,4 +211,5 @@ Nếu CR-002 cần block `B0005` mà CR-001 đang giữ:
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |
