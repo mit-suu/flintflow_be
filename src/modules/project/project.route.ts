@@ -4,6 +4,7 @@ import * as projectController from "./project.controller.js"
 import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+import { CreateProjectSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -58,11 +59,15 @@ const upload = multer({
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name]
+ *             required: [name, sourceMode]
  *             properties:
  *               name:
  *                 type: string
  *                 example: Lumen — SaaS quản lý khoá học
+ *               sourceMode:
+ *                 type: string
+ *                 enum: [edit_srs, fpt_template, customer_template]
+ *                 description: Nguồn khởi đầu (upload SRS có sẵn / mẫu FPT / template của khách). Không đổi được sau khi tạo.
  *               domain:
  *                 type: string
  *                 example: E-learning
@@ -70,12 +75,12 @@ const upload = multer({
  *       201:
  *         description: Dự án đã được tạo thành công
  *       400:
- *         description: Tên dự án trống
+ *         description: VALIDATION_ERROR — tên trống/quá dài hoặc sourceMode thiếu/sai
  *       401:
  *         description: Chưa xác thực
  */
 router.get("/", authMiddleware, projectController.getProjects)
-router.post("/", authMiddleware, projectController.createProject)
+router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectController.createProject)
 
 /**
  * @swagger
