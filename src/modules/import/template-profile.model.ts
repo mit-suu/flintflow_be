@@ -28,6 +28,24 @@ export interface TableMapEntry {
   confirmed: boolean
 }
 
+/** Mục của layout tài liệu người dùng (FLF-182) — xem `layoutEntrySchema`. */
+export interface LayoutEntry {
+  order: number
+  heading_text: string
+  level: number
+  /** Section FPT khớp được, hoặc `custom:<id>` (mục ngoài mẫu FPT). */
+  section_id: string
+}
+
+/** Kế hoạch step theo template (FLF-182) — xem `stepPlanEntrySchema`. */
+export interface StepPlanItem {
+  step_id: string
+  state: "applied" | "hidden" | "enabled"
+  missing: boolean
+  section_ids: string[]
+  reason: string
+}
+
 export interface ITemplateProfile extends Document {
   projectId: mongoose.Types.ObjectId
   source: "imported"
@@ -38,6 +56,10 @@ export interface ITemplateProfile extends Document {
   required_sections: string[]
   /** Ngôn ngữ chính của tài liệu (`en`, `vi`…). */
   language: string
+  /** FLF-182: thứ tự + tiêu đề mục của file upload, render lại từ Spine theo đây. */
+  layout: LayoutEntry[]
+  /** FLF-182: step nào chạy / ẩn / thiếu theo template. */
+  step_plan: StepPlanItem[]
   createdAt: Date
   updatedAt: Date
 }
@@ -84,6 +106,35 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       default: []
     },
     required_sections: { type: [String], default: [] },
+    layout: {
+      type: [
+        new Schema(
+          {
+            order: { type: Number, required: true, min: 0 },
+            heading_text: { type: String, default: "" },
+            level: { type: Number, required: true, min: 1, max: 9 },
+            section_id: { type: String, required: true }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
+    step_plan: {
+      type: [
+        new Schema(
+          {
+            step_id: { type: String, required: true },
+            state: { type: String, enum: ["applied", "hidden", "enabled"], required: true },
+            missing: { type: Boolean, default: false },
+            section_ids: { type: [String], default: [] },
+            reason: { type: String, default: "" }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
     language: { type: String, default: "en" }
   },
   { timestamps: true }

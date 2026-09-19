@@ -72,7 +72,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confirmed: t.confirmed
   })),
   required_sections: [...p.required_sections],
-  language: p.language
+  language: p.language,
+  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id }))
 })
 
 // ─── trạng thái ──────────────────────────────────────────────────
