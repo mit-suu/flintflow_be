@@ -3,8 +3,9 @@ import { acceptAll } from "./accept-all.js"
 import { readBlocks } from "./blocks.js"
 import { addComment, listComments } from "./comments.js"
 import { DocxPackage } from "./package.js"
-import { makeDocx, p } from "./testing/make-docx.js"
-import { wAll } from "./xml.js"
+import { makeDocx, p, table } from "./testing/make-docx.js"
+import { RevisionIds, applyEdit } from "./track-changes.js"
+import { wAll, wAttr } from "./xml.js"
 
 const DATE = new Date("2026-09-18T10:00:00Z")
 
@@ -60,5 +61,65 @@ describe("acceptAll", () => {
     const res = await acceptAll(pkg)
     expect(res.parts).toContain("word/header1.xml")
     expect(wAll(await pkg.requireXml("word/header1.xml"), "ins")).toHaveLength(0)
+  })
+
+  it("bản ghi của CR (applyEdit + addComment) ⇒ bản sạch không còn w:ins/w:del/comment FlintFlow, text = text mới, đọc lại được", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("The system shall respond within 2 seconds.") + table([["UC-01", "Register"]]) + p("Ghi chú") }))
+    const blocks = await readBlocks(pkg)
+    const doc = await pkg.requireXml("word/document.xml")
+    const who = { author: "CR-001", date: DATE, ids: new RevisionIds(doc) }
+    applyEdit(blocks[0].element, "The system shall respond within 2 seconds.", "The system shall respond within 1 second.", who)
+    applyEdit(blocks.find((b) => b.text === "Register" && b.kind === "table_cell")!.element, "Register", "Register account", who)
+    await addComment(pkg, blocks[blocks.length - 1].element, "Kiểm lại", { author: "CR-001", date: DATE })
+    await addComment(pkg, blocks[0].element, "Của người đọc", { author: "Reviewer", date: DATE })
+
+    const res = await acceptAll(pkg)
+    expect(res.comments).toBe(1)
+    const clean = await DocxPackage.load(await pkg.toBuffer())
+    const cdoc = await clean.requireXml("word/document.xml")
+    for (const local of ["ins", "del", "delText"]) expect(wAll(cdoc, local)).toHaveLength(0)
+    expect((await listComments(clean)).map((c) => c.author)).toEqual(["Reviewer"])
+    // chỉ còn range + reference của comment Reviewer
+    expect(wAll(cdoc, "commentReference").map((c) => wAttr(c, "id"))).toEqual(["1"])
+    expect((await readBlocks(clean)).map((b) => b.text)).toEqual([
+      "The system shall respond within 1 second.",
+      "UC-01 | Register account",
+      "UC-01",
+      "Register account",
+      "Ghi chú"
+    ])
+  })
+
+  it("dấu ins/del định dạng trong rPr + hàng bảng được chèn (trPr/ins) + pPrChange/numberingChange ⇒ bỏ dấu, giữ nội dung", async () => {
+    const body =
+      `<w:p><w:pPr><w:rPr><w:ins w:id="1" w:author="CR-001"/></w:rPr><w:pPrChange w:id="2" w:author="CR-001"><w:pPr/></w:pPrChange></w:pPr><w:r><w:t>Giữ</w:t></w:r></w:p>` +
+      `<w:tbl><w:tr><w:trPr><w:ins w:id="3" w:author="CR-001"/></w:trPr><w:tc>${p("Hàng mới")}</w:tc></w:tr></w:tbl>` +
+      `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/><w:numberingChange w:id="4" w:author="CR-001"/></w:numPr></w:pPr><w:r><w:t>Mục</w:t></w:r></w:p>`
+    const pkg = await DocxPackage.load(await makeDocx({ body }))
+    const res = await acceptAll(pkg)
+    expect(res.revisions).toBe(4)
+    const doc = await pkg.requireXml("word/document.xml")
+    for (const local of ["ins", "pPrChange", "numberingChange"]) expect(wAll(doc, local)).toHaveLength(0)
+    expect((await readBlocks(pkg)).map((b) => b.text)).toEqual(["Giữ", "Hàng mới", "Hàng mới", "Mục"])
+  })
+
+  it("file không có revision/comment ⇒ 0; mẫu author tuỳ chọn", async () => {
+    const plain = await DocxPackage.load(await makeDocx({ body: p("x") }))
+    expect(await acceptAll(plain)).toEqual({ parts: ["word/document.xml"], revisions: 0, comments: 0 })
+
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("A") + p("B") }))
+    const blocks = await readBlocks(pkg)
+    await addComment(pkg, blocks[0].element, "x", { author: "CR-001", date: DATE })
+    await addComment(pkg, blocks[1].element, "y", { author: "Bot", date: DATE })
+    expect((await acceptAll(pkg, { dropCommentAuthors: /^Bot$/ })).comments).toBe(1)
+    expect((await listComments(pkg)).map((c) => c.author)).toEqual(["CR-001"])
+  })
+
+  it("dấu đoạn bị xoá ở đoạn cuối (không có đoạn kế) ⇒ chỉ bỏ dấu, giữ đoạn", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({ body: `<w:p><w:pPr><w:rPr><w:del w:id="1" w:author="CR-001"/></w:rPr></w:pPr><w:r><w:t>Cuối</w:t></w:r></w:p>` })
+    )
+    await acceptAll(pkg)
+    expect((await readBlocks(pkg)).map((b) => b.text)).toEqual(["Cuối"])
   })
 })

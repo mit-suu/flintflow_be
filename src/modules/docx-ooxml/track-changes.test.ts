@@ -139,6 +139,75 @@ describe("applyEdit", () => {
     expect(wAll(blocks[0].element, "br")).toHaveLength(1)
   })
 
+  it("thay từ đầu đoạn và từ cuối đoạn: w:ins mang rPr của run bị thay, w:del có author/date", async () => {
+    const { doc, blocks, who } = await setup(
+      `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Admin </w:t></w:r><w:r><w:t xml:space="preserve">approves the </w:t></w:r><w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>request</w:t></w:r></w:p>`
+    )
+    const para = blocks[0].element
+    const hunks = applyEdit(para, "Admin approves the request", "Manager approves the order", who)
+    expect(hunks).toEqual([
+      { start: 0, end: 5, deleted: "Admin", inserted: "Manager" },
+      { start: 19, end: 26, deleted: "request", inserted: "order" }
+    ])
+    expect(paragraphText(para)).toBe("Manager approves the order")
+    expect(rejectedText(para)).toBe("Admin approves the request")
+    const [insFirst, insLast] = wAll(doc, "ins")
+    expect(wAll(insFirst, "b")).toHaveLength(1)
+    expect(wAll(insLast, "u")).toHaveLength(1)
+    expect(wAll(insLast, "b")).toHaveLength(0)
+    for (const del of wAll(doc, "del")) expect([wAttr(del, "author"), wAttr(del, "date")]).toEqual(["CR-001", "2026-09-18T10:00:00Z"])
+  })
+
+  it("chèn đầu đoạn lấy rPr của run đứng sau; rPrChange không bị chép sang run mới", async () => {
+    const { doc, blocks, who } = await setup(
+      `<w:p><w:r><w:rPr><w:i/><w:rPrChange w:id="3" w:author="Lan"><w:rPr/></w:rPrChange></w:rPr><w:t>world</w:t></w:r></w:p>`
+    )
+    applyEdit(blocks[0].element, "world", "Hello world", who)
+    const [ins] = wAll(doc, "ins")
+    expect(wAll(ins, "i")).toHaveLength(1)
+    expect(wAll(ins, "rPrChange")).toHaveLength(0)
+    expect(wAll(doc, "rPrChange")).toHaveLength(1)
+    // id mới lớn hơn id revision có sẵn (3)
+    expect(Number(wAttr(ins, "id"))).toBeGreaterThan(3)
+  })
+
+  it("xoá qua nhiều run liền kề ⇒ gom một w:del; chèn vào đoạn rỗng có bookmark ⇒ w:ins đứng sau bookmark", async () => {
+    const { doc, blocks, who } = await setup(
+      `<w:p><w:r><w:t xml:space="preserve">one </w:t></w:r><w:r><w:t xml:space="preserve">two </w:t></w:r><w:r><w:t>three</w:t></w:r></w:p>` +
+        `<w:p><w:pPr><w:jc w:val="left"/></w:pPr><w:bookmarkStart w:id="0" w:name="_ff_B0002"/><w:bookmarkEnd w:id="0"/><w:r><w:drawing/></w:r></w:p>`
+    )
+    applyEdit(blocks[0].element, "one two three", "one", who)
+    expect(paragraphText(blocks[0].element)).toBe("one")
+    expect(wAll(blocks[0].element, "del")).toHaveLength(1)
+    expect(rejectedText(blocks[0].element)).toBe("one two three")
+
+    applyEdit(blocks[1].element, "", "Chú thích", who)
+    const names = Array.from(blocks[1].element.childNodes).map((n) => (n as Element).localName)
+    expect(names).toEqual(["pPr", "bookmarkStart", "bookmarkEnd", "ins", "r"])
+    expect(wAll(doc, "ins").map((i) => i.textContent)).toContain("Chú thích")
+  })
+
+  it("không phải w:p ⇒ UNSUPPORTED_CONTENT", async () => {
+    const { blocks, who } = await setup(table([["x"]]))
+    expect(() => applyEdit(blocks[0].element, "x", "y", who)).toThrow(expect.objectContaining({ code: "UNSUPPORTED_CONTENT" }))
+  })
+
+  it("diff quá lớn (vượt trần LCS) ⇒ một hunk giữa tiền tố/hậu tố chung", () => {
+    const words = (prefix: string) => Array.from({ length: 1100 }, (_, i) => `${prefix}${i}`).join(" ")
+    const hunks = diffWords(`Start ${words("a")} End`, `Start ${words("b")} End`)
+    expect(hunks).toHaveLength(1)
+    expect(hunks[0].deleted.startsWith("a0")).toBe(true)
+    expect(hunks[0].inserted.startsWith("b0")).toBe(true)
+    expect(hunks[0].inserted.endsWith("b1099")).toBe(true)
+  })
+
+  it("diff theo từ tối thiểu: chỉ đổi dấu câu / thêm một từ giữa câu", () => {
+    expect(diffWords("Log in, then pay.", "Log in; then pay.")).toEqual([{ start: 6, end: 7, deleted: ",", inserted: ";" }])
+    expect(diffWords("The admin user", "The admin power user")).toEqual([{ start: 10, end: 10, deleted: "", inserted: "power " }])
+    expect(diffWords("", "")).toEqual([])
+    expect(diffWords("", "Mới")).toEqual([{ start: 0, end: 0, deleted: "", inserted: "Mới" }])
+  })
+
   it("accept-all sau applyEdit cho đúng text mới, không còn revision", async () => {
     const { pkg, blocks, who } = await setup(p("The quick brown fox") + table([["cell one"]]))
     applyEdit(blocks[0].element, "The quick brown fox", "The slow brown dog", who)
