@@ -6,12 +6,15 @@ import { AuthToken, TokenType } from "./auth-token.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { signAccessToken, signRefreshToken, hashToken, TokenPayload } from "../../shared/auth/jwt.util.js"
 import * as sessionService from "../../shared/auth/session.service.js"
-import { sendVerificationEmail, sendPasswordResetEmail } from "../../shared/email/email.service.js"
+import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../shared/email/email.service.js"
 import { env } from "../../config/env.js"
+import { REMEMBER_ME_MAX_AGE_MS, REMEMBER_ME_TTL } from "../../shared/auth/auth-cookie.js"
 
 export interface AuthResult {
   accessToken: string
   refreshToken: string
+  /** Chế độ "Ghi nhớ tài khoản" của phiên — controller dựa vào đây để chọn kiểu cookie. */
+  rememberMe: boolean | null
   user: {
     id: string
     email: string
@@ -32,7 +35,17 @@ export interface RegisterResult {
 export interface RefreshResult {
   accessToken: string
   refreshToken: string
+  rememberMe: boolean | null
 }
+
+/** Refresh token + hạn phiên theo chế độ ghi nhớ: tick ⇒ 30 ngày, còn lại ⇒ `REFRESH_TOKEN_EXPIRES`. */
+const issueRefreshToken = (payload: TokenPayload, rememberMe: boolean | null) =>
+  rememberMe
+    ? {
+        refreshToken: signRefreshToken(payload, REMEMBER_ME_TTL),
+        expiresAt: new Date(Date.now() + REMEMBER_ME_MAX_AGE_MS)
+      }
+    : { refreshToken: signRefreshToken(payload), expiresAt: getRefreshTokenExpiresAt() }
 
 const getRefreshTokenExpiresAt = (): Date => {
   const expiresStr = env.REFRESH_TOKEN_EXPIRES
@@ -49,22 +62,71 @@ const getRefreshTokenExpiresAt = (): Date => {
   return new Date(Date.now() + durationMs)
 }
 
-const generateAuthToken = async (userId: string, type: TokenType, durationMs: number): Promise<string> => {
-  // Revoke previous unused tokens of same type for this user
-  await AuthToken.deleteMany({ userId, type, usedAt: null })
+export const EMAIL_OTP_TTL_MS = 2 * 60 * 1000
+export const EMAIL_OTP_MAX_ATTEMPTS = 5
 
-  const rawToken = crypto.randomBytes(32).toString("hex")
-  const tokenHash = hashToken(rawToken)
-  const expiresAt = new Date(Date.now() + durationMs)
+// Salt bằng userId: 6 chữ số dễ trùng giữa các user, mà tokenHash là unique.
+const hashEmailOtp = (userId: string, otp: string): string => hashToken(`${userId}:${otp}`)
 
+/** Tạo OTP mới cho `type` (mã cũ cùng loại mất hiệu lực), trả mã gốc để gửi email. */
+const createEmailOtp = async (user: IUser, type: TokenType): Promise<string> => {
+  const userId = user._id.toString()
+  await AuthToken.deleteMany({ userId, type })
+
+  const otp = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0")
   await AuthToken.create({
     userId,
     type,
-    tokenHash,
-    expiresAt
+    tokenHash: hashEmailOtp(userId, otp),
+    expiresAt: new Date(Date.now() + EMAIL_OTP_TTL_MS)
   })
+  return otp
+}
 
-  return rawToken
+/**
+ * Kiểm tra và tiêu thụ OTP: hết hạn, quá số lần sai, sai mã (tăng đếm) đều ném ApiError.
+ * Thành công thì đánh dấu đã dùng — có điều kiện để hai request song song không cùng qua được.
+ */
+const consumeEmailOtp = async (user: IUser, type: TokenType, otp: string): Promise<void> => {
+  const userId = user._id.toString()
+  const authToken = await AuthToken.findOne({ userId, type, usedAt: null })
+
+  // TTL index của Mongo có thể đã xoá bản ghi hết hạn, nên "không tìm thấy" cũng là hết hạn.
+  if (!authToken || authToken.expiresAt < new Date()) {
+    throw new ApiError(400, "Mã OTP đã hết hạn. Vui lòng gửi lại mã mới.", "OTP_EXPIRED")
+  }
+
+  if (authToken.attempts >= EMAIL_OTP_MAX_ATTEMPTS) {
+    throw new ApiError(400, "Bạn đã nhập sai quá nhiều lần. Vui lòng gửi lại mã mới.", "OTP_TOO_MANY_ATTEMPTS")
+  }
+
+  const expected = Buffer.from(authToken.tokenHash, "hex")
+  const actual = Buffer.from(hashEmailOtp(userId, otp), "hex")
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    const updated = await AuthToken.findOneAndUpdate(
+      { _id: authToken._id },
+      { $inc: { attempts: 1 } },
+      { returnDocument: "after" }
+    )
+    const remaining = Math.max(0, EMAIL_OTP_MAX_ATTEMPTS - (updated?.attempts ?? EMAIL_OTP_MAX_ATTEMPTS))
+    if (remaining === 0) {
+      throw new ApiError(400, "Bạn đã nhập sai quá nhiều lần. Vui lòng gửi lại mã mới.", "OTP_TOO_MANY_ATTEMPTS")
+    }
+    throw new ApiError(400, `Mã OTP không đúng. Bạn còn ${remaining} lần thử.`, "INVALID_OTP")
+  }
+
+  const consumed = await AuthToken.findOneAndUpdate(
+    { _id: authToken._id, usedAt: null },
+    { usedAt: new Date() }
+  )
+  if (!consumed) {
+    throw new ApiError(400, "Mã OTP đã được sử dụng", "OTP_ALREADY_USED")
+  }
+}
+
+const issueEmailOtp = async (user: IUser): Promise<void> => {
+  const otp = await createEmailOtp(user, "verify_email")
+  await sendVerificationOtpEmail(user.email, otp, user.name)
 }
 
 export const register = async (
@@ -85,9 +147,7 @@ export const register = async (
     emailVerified: false
   })
 
-  // Generate 24h verification token & send email
-  const verifyToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
-  await sendVerificationEmail(user.email, verifyToken, user.name)
+  await issueEmailOtp(user)
 
   return {
     user: {
@@ -102,7 +162,8 @@ export const login = async (
   email: string,
   password: string,
   userAgent?: string,
-  ip?: string
+  ip?: string,
+  rememberMe: boolean | null = null
 ): Promise<AuthResult> => {
   const normalizedEmail = email.toLowerCase().trim()
   const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash")
@@ -126,20 +187,21 @@ export const login = async (
   }
 
   const accessToken = signAccessToken(tokenPayload)
-  const refreshToken = signRefreshToken(tokenPayload)
-  const expiresAt = getRefreshTokenExpiresAt()
+  const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
   await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
-    ip
+    ip,
+    rememberMe
   )
 
   return {
     accessToken,
     refreshToken,
+    rememberMe: rememberMe,
     user: {
       id: user._id.toString(),
       email: user.email,
@@ -151,32 +213,22 @@ export const login = async (
 }
 
 export const confirmEmailVerification = async (
-  rawToken: string,
+  email: string,
+  otp: string,
   userAgent?: string,
   ip?: string
 ): Promise<AuthResult> => {
-  const tokenHash = hashToken(rawToken)
-  const authToken = await AuthToken.findOne({ tokenHash, type: "verify_email" })
-
-  if (!authToken) {
-    throw new ApiError(400, "Link xác thực không hợp lệ hoặc đã dùng", "INVALID_TOKEN")
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await User.findOne({ email: normalizedEmail })
+  if (!user || user.authProvider !== "local") {
+    throw new ApiError(400, "Mã OTP không hợp lệ", "INVALID_OTP")
   }
 
-  if (authToken.usedAt) {
-    throw new ApiError(400, "Link xác thực đã được sử dụng trước đó", "TOKEN_ALREADY_USED")
+  if (user.emailVerified) {
+    throw new ApiError(400, "Email đã được xác thực. Vui lòng đăng nhập.", "EMAIL_ALREADY_VERIFIED")
   }
 
-  if (authToken.expiresAt < new Date()) {
-    throw new ApiError(400, "Link xác thực đã hết hạn (24h). Vui lòng yêu cầu gửi lại email mới.", "TOKEN_EXPIRED")
-  }
-
-  authToken.usedAt = new Date()
-  await authToken.save()
-
-  const user = await User.findById(authToken.userId)
-  if (!user) {
-    throw new ApiError(404, "User không tồn tại", "USER_NOT_FOUND")
-  }
+  await consumeEmailOtp(user, "verify_email", otp)
 
   user.emailVerified = true
   user.emailVerifiedAt = new Date()
@@ -190,20 +242,21 @@ export const confirmEmailVerification = async (
   }
 
   const accessToken = signAccessToken(tokenPayload)
-  const refreshToken = signRefreshToken(tokenPayload)
-  const expiresAt = getRefreshTokenExpiresAt()
+  const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, null)
 
   await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
-    ip
+    ip,
+    null
   )
 
   return {
     accessToken,
     refreshToken,
+    rememberMe: null,
     user: {
       id: user._id.toString(),
       email: user.email,
@@ -222,49 +275,82 @@ export const resendVerificationEmail = async (email: string): Promise<void> => {
     return
   }
 
-  const rawToken = await generateAuthToken(user._id.toString(), "verify_email", 24 * 60 * 60 * 1000)
-  await sendVerificationEmail(user.email, rawToken, user.name)
+  await issueEmailOtp(user)
 }
 
 export const forgotPassword = async (email: string): Promise<void> => {
   const normalizedEmail = email.toLowerCase().trim()
   const user = await User.findOne({ email: normalizedEmail })
-  if (!user || user.authProvider !== "local") {
+  // Im lặng khi không có tài khoản để chống dò email. Tài khoản Google (chưa có mật khẩu) vẫn nhận OTP:
+  // nhập đúng mã là đã chứng minh sở hữu email ⇒ được tạo mật khẩu để đăng nhập bằng email.
+  if (!user) {
     return
   }
 
-  // Generate 15-minute password reset token
-  const rawToken = await generateAuthToken(user._id.toString(), "reset_password", 15 * 60 * 1000)
-  await sendPasswordResetEmail(user.email, rawToken, user.name)
+  const otp = await createEmailOtp(user, "reset_password")
+  await sendPasswordResetOtpEmail(user.email, otp, user.name)
 }
 
-export const resetPassword = async (rawToken: string, newPassword: string): Promise<void> => {
-  const tokenHash = hashToken(rawToken)
-  const authToken = await AuthToken.findOne({ tokenHash, type: "reset_password" })
+export const RESET_PASSWORD_GRANT_TTL_MS = 10 * 60 * 1000
 
-  if (!authToken) {
-    throw new ApiError(400, "Link đặt lại mật khẩu không hợp lệ hoặc đã dùng", "INVALID_TOKEN")
+/**
+ * Bước 1 đặt lại mật khẩu: nhập đúng OTP ⇒ cấp vé dùng một lần (10 phút) cho bước đặt mật khẩu mới.
+ * Tách hai bước vì OTP chỉ sống 2 phút, không đủ cho user nghĩ và gõ mật khẩu mới.
+ */
+export const verifyResetPasswordOtp = async (email: string, otp: string): Promise<string> => {
+  const normalizedEmail = email.toLowerCase().trim()
+  const user = await User.findOne({ email: normalizedEmail })
+  if (!user) {
+    throw new ApiError(400, "Mã OTP đã hết hạn. Vui lòng gửi lại mã mới.", "OTP_EXPIRED")
   }
 
-  if (authToken.usedAt) {
-    throw new ApiError(400, "Link đặt lại mật khẩu đã được sử dụng trước đó", "TOKEN_ALREADY_USED")
+  await consumeEmailOtp(user, "reset_password", otp)
+
+  const userId = user._id.toString()
+  await AuthToken.deleteMany({ userId, type: "reset_password_grant" })
+  const resetToken = crypto.randomBytes(32).toString("hex")
+  await AuthToken.create({
+    userId,
+    type: "reset_password_grant",
+    tokenHash: hashToken(resetToken),
+    expiresAt: new Date(Date.now() + RESET_PASSWORD_GRANT_TTL_MS)
+  })
+  return resetToken
+}
+
+/** Bước 2: đặt mật khẩu mới bằng vé từ bước 1. */
+export const resetPassword = async (resetToken: string, newPassword: string): Promise<void> => {
+  // Tiêu thụ có điều kiện: hai request song song với cùng vé chỉ một cái qua được.
+  const grant = await AuthToken.findOneAndUpdate(
+    {
+      tokenHash: hashToken(resetToken),
+      type: "reset_password_grant",
+      usedAt: null,
+      expiresAt: { $gt: new Date() }
+    },
+    { usedAt: new Date() }
+  )
+  if (!grant) {
+    throw new ApiError(
+      400,
+      "Phiên đặt lại mật khẩu đã hết hạn. Vui lòng yêu cầu mã OTP mới.",
+      "RESET_SESSION_EXPIRED"
+    )
   }
 
-  if (authToken.expiresAt < new Date()) {
-    throw new ApiError(400, "Link đặt lại mật khẩu đã hết hạn (15 phút). Vui lòng yêu cầu lại.", "TOKEN_EXPIRED")
-  }
-
-  const user = await User.findById(authToken.userId)
+  const user = await User.findById(grant.userId)
   if (!user) {
     throw new ApiError(404, "User không tồn tại", "USER_NOT_FOUND")
   }
 
   // Update password & save (triggers bcrypt pre-save hook)
   user.password = newPassword
+  // Đã nhập đúng OTP gửi qua email ⇒ đã chứng minh sở hữu email
+  if (!user.emailVerified) {
+    user.emailVerified = true
+    user.emailVerifiedAt = new Date()
+  }
   await user.save()
-
-  authToken.usedAt = new Date()
-  await authToken.save()
 
   // Security best practice: Revoke ALL active sessions across devices on password change
   await sessionService.revokeAllUserSessions(user._id.toString())
@@ -273,7 +359,8 @@ export const resetPassword = async (rawToken: string, newPassword: string): Prom
 export const googleAuth = async (
   token: string,
   userAgent?: string,
-  ip?: string
+  ip?: string,
+  rememberMe: boolean | null = null
 ): Promise<AuthResult> => {
   const client = new OAuth2Client(env.GOOGLE_CLIENT_ID || undefined)
 
@@ -358,20 +445,21 @@ export const googleAuth = async (
   }
 
   const accessToken = signAccessToken(tokenPayload)
-  const refreshToken = signRefreshToken(tokenPayload)
-  const expiresAt = getRefreshTokenExpiresAt()
+  const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
   await sessionService.createSession(
     user._id.toString(),
     refreshToken,
     expiresAt,
     userAgent,
-    ip
+    ip,
+    rememberMe
   )
 
   return {
     accessToken,
     refreshToken,
+    rememberMe: rememberMe,
     user: {
       id: user._id.toString(),
       email: user.email,
@@ -387,8 +475,6 @@ export const refresh = async (
   userAgent?: string,
   ip?: string
 ): Promise<RefreshResult> => {
-  const expiresAt = getRefreshTokenExpiresAt()
-
   let decoded: { userId: string; email: string; role?: string }
   try {
     const { verifyRefreshToken } = await import("../../shared/auth/jwt.util.js")
@@ -409,20 +495,24 @@ export const refresh = async (
     role
   }
 
+  // Giữ nguyên chế độ "ghi nhớ" của phiên cũ qua mỗi lần xoay vòng
+  const rememberMe = await sessionService.findSessionRememberMe(oldRefreshToken)
   const newAccessToken = signAccessToken(newPayload)
-  const newRefreshToken = signRefreshToken(newPayload)
+  const { refreshToken: newRefreshToken, expiresAt } = issueRefreshToken(newPayload, rememberMe)
 
   await sessionService.rotateSession(
     oldRefreshToken,
     newRefreshToken,
     expiresAt,
     userAgent,
-    ip
+    ip,
+    rememberMe
   )
 
   return {
     accessToken: newAccessToken,
-    refreshToken: newRefreshToken
+    refreshToken: newRefreshToken,
+    rememberMe
   }
 }
 

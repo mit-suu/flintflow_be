@@ -137,8 +137,7 @@ export const seedFixture = async (kind: FixtureKind = "full", options: SeedOptio
   const project = await Project.create({
     userId: user._id,
     name: kind === "full" ? "FlintFlow (Fixture 19 Screens)" : "FlintFlow (Fixture Minimal)",
-    domain: spine.project.domain,
-    sourceMode: "fpt_template"
+    domain: spine.project.domain
   })
   if (!options.withoutSpine) {
     await Spine.create({ projectId: project._id, ...spine })

@@ -524,6 +524,9 @@ export const runStep = async (
     let { spine, spineVersion } = await refresh(projectId)
     const existingStep = spine.steps.find((s) => s.id === stepId)
 
+    if (existingStep?.status === "skipped") {
+      throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
+    }
     if (existingStep?.status === "accepted") {
       throw new ApiError(409, `Step ${stepId} đã accepted — cần gate revision/regenerate để mở lại (B7)`, STEP_NOT_RUNNABLE)
     }

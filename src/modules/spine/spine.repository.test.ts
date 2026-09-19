@@ -139,7 +139,7 @@ describe("getOrCreate / get", () => {
     await repo.saveWithVersion(
       {
         ...created,
-        baselines: [{ id: "BL001", version: "v1.0", at: "2026-09-16T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }]
+        baselines: [{ id: "BL001", version: "v1.0", type: "generated", doc_version: null, at: "2026-09-16T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }]
       },
       1
     )
