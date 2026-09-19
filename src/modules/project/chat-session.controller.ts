@@ -5,7 +5,8 @@ import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { isChangeInstruction } from "../spine/change.service.js"
-import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
+import { changesRequireCr } from "../import/mode1-guard.js"
+import { crFromChat } from "../change-request/chat-cr.service.js"
 
 /**
  * F5 (review T13, IDOR): xác nhận user đã đăng nhập SỞ HỮU `projectId` trên đường dẫn trước khi chạm tới
@@ -68,8 +69,8 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(400, "Step is required", "STEP_REQUIRED")
   }
 
-  // FLF-171 (G9, BR-03): project mode 1 chỉ hỏi đáp trong chat; lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR + nội dung điền sẵn
-  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw changeRequiresCr(prefillFrom(content))
+  // Mode 1 sau baseline v1 (D3, FLF-186): lệnh sửa trong chat ⇒ tạo CR nguồn chat, trả 409 CHANGE_REQUIRES_CR trỏ tới CR
+  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw await crFromChat(projectId, userId, chatId, content)
 
   const updatedSession = await chatSessionService.sendMessageAndGetResponse(
     projectId,
@@ -96,8 +97,8 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
     throw new ApiError(400, "Step is required", "STEP_REQUIRED")
   }
 
-  // FLF-171 (G9, BR-03): project mode 1 chỉ hỏi đáp trong chat; lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR + nội dung điền sẵn
-  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw changeRequiresCr(prefillFrom(content))
+  // Mode 1 sau baseline v1 (D3, FLF-186): lệnh sửa trong chat ⇒ tạo CR nguồn chat, trả 409 CHANGE_REQUIRES_CR trỏ tới CR
+  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw await crFromChat(projectId, userId, chatId, content)
 
   // Set SSE streaming headers
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
