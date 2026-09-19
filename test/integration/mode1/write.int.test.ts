@@ -17,6 +17,7 @@ import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.j
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { ChangeGroup } from "../../../src/modules/change-request/change-group.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { Spine } from "../../../src/modules/spine/spine.model.js"
 
 /** C-2: CR có "Rename registration" trong tiêu đề ⇒ đích UC-01 / FR-3.2.2 (không chồng block với CR perf). */
 const UC_TARGETS = { entity_paths: ["use_cases[id=UC-01]", "functions[id=FR-3.2.2]"], keywords: ["Register"] }
@@ -46,6 +47,18 @@ const loadVersion = async (projectId: string, version: string) => {
 }
 
 describe("C-7 ghi Track Changes + comment", () => {
+  it("FLF-178: block bảng ở 0.1 giữ block_id + section_id của 0.0 (neo _fft_)", async () => {
+    const { c, projectId } = await importedProject()
+    const { cr, submitted } = await crToReview(c)
+    await approveAll(c, cr, submitted.groups)
+    const tables = async (v: string) =>
+      (await DocBlock.find({ projectId, doc_version: v, kind: "table" }).sort({ "anchor.ordinal": 1 }).lean()).map((b) => [b.block_id, b.section_id, b.anchor.bookmark])
+    const before = await tables("0.0")
+    expect(before.length).toBeGreaterThan(0)
+    expect(before.every(([id, , bookmark]) => bookmark === `_fft_${id}`)).toBe(true)
+    expect(await tables("0.1")).toEqual(before)
+  })
+
   it("0.0 → 0.1: edit thành w:ins/w:del, comment Word, author = CR id, stamp 0.1; block mới giữ block_id + section", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr, submitted } = await crToReview(c)
@@ -207,13 +220,8 @@ describe("C-7 lỗi giữa chừng", () => {
     expect(await lockedBlocks(projectId, crId)).toEqual([])
   })
 
-  /**
-   * LỖI ĐÃ BIẾT (báo cáo P4): plan §6 2E yêu cầu op Spine + version + block trong **một transaction**, nhưng
-   * `writeApproved` áp `applyTransaction` ngoài transaction và `catch` chỉ dọn block + file ⇒ lỗi sau bước Spine để
-   * lại op của CR trên Spine (spine_version tăng, threshold = "1 s") trong khi CR vẫn in_review, tài liệu chưa đổi.
-   * `it.fails`: đỏ khi lỗi được sửa — lúc đó đổi thành `it`.
-   */
-  it.fails("lỗi sau bước Spine ⇒ Spine giữ nguyên như trước khi ghi (chưa đạt — xem báo cáo)", async () => {
+  /** FLF-178: Spine là bước ghi cuối — lỗi trước đó không để lại op của CR trên Spine. */
+  it("lỗi trước bước Spine ⇒ Spine giữ nguyên như trước khi ghi; chạy lại cùng base_version ⇒ ghi được", async () => {
     const { c, projectId } = await importedProject()
     const { cr, submitted } = await crToReview(c)
     const last = await approveAllButLast(c, cr, submitted.groups)
@@ -222,6 +230,35 @@ describe("C-7 lỗi giữa chừng", () => {
     expect((await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base })).status).toBe(500)
     expect(await c.spineVersion()).toBe(base)
     expect((await spineRepository.get(projectId))!.nfrs.find((n) => n.id === "NFR-01")?.threshold).toBe("2 s")
+
+    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base }))
+    expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
+    expect((await spineRepository.get(projectId))!.nfrs.find((n) => n.id === "NFR-01")?.threshold).toBe("1 s")
+  })
+
+  it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ 409, xoá version + block + file vừa tạo, CR giữ nguyên; tải lại rồi ghi được", async () => {
+    const { c, projectId } = await importedProject()
+    const { crId, cr, submitted } = await crToReview(c)
+    const held = await lockedBlocks(projectId, crId)
+    const last = await approveAllButLast(c, cr, submitted.groups)
+    const files = await gridFsFiles(projectId)
+    const base = await c.spineVersion()
+    const create = DocVersion.create.bind(DocVersion)
+    // "phiên khác" ghi Spine ngay sau khi version 0.1 được tạo, trước bước op Spine của CR
+    vi.spyOn(DocVersion, "create").mockImplementationOnce((async (doc: unknown) => {
+      const created = await create(doc as never)
+      await Spine.updateOne({ projectId }, { $inc: { spine_version: 1 } })
+      return created
+    }) as never)
+    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe(spineRepository.SPINE_VERSION_CONFLICT)
+    await expectNothingWritten(c, projectId, crId, cr, files, held)
+    expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])
+
+    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+    expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
+    expect(await DocVersion.countDocuments({ projectId, version: "0.1" })).toBe(1)
   })
 })
 

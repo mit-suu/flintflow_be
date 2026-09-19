@@ -18,7 +18,7 @@ import { ImportedDocument } from "../../../src/modules/import/imported-document.
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { createMemoryDocFileStore, docFileStore, setDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
-import { DocxPackage, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, blockIdOfBookmark, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
 import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
@@ -126,7 +126,7 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     const fileBlocks = await readBlocks(pkg)
     const stored = await DocBlock.find({ projectId, doc_version: "0.0" }).sort({ "anchor.ordinal": 1 }).lean()
     expect(fileBlocks.map((b) => b.text)).toEqual(stored.map((b) => b.text))
-    for (const b of fileBlocks.filter((x) => x.bookmark)) expect(stored.some((s) => `_ff_${s.block_id}` === b.bookmark)).toBe(true)
+    for (const b of fileBlocks.filter((x) => x.bookmark)) expect(stored.some((s) => s.block_id === blockIdOfBookmark(b.bookmark))).toBe(true)
   })
 
   it("baseline type imported, doc_version 0.0, có snapshot Spine; import sang gap_review", async () => {
