@@ -3,7 +3,7 @@ import * as projectService from "./project.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { projectModeSchema } from "./project.validation.js"
+import type { CreateProjectDTO, MoveProjectDTO } from "./project.validation.js"
 
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -11,17 +11,9 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
   }
 
-  const { name, domain } = req.body
-  if (!name) {
-    throw new ApiError(400, "Project name is required", "NAME_REQUIRED")
-  }
-
-  const mode = projectModeSchema.safeParse(req.body.mode)
-  if (!mode.success) {
-    throw new ApiError(400, "mode phải là import, fpt hoặc customer_template", "VALIDATION_ERROR")
-  }
-
-  const project = await projectService.createProject(userId, name, domain, mode.data)
+  // Body đã qua CreateProjectSchema ở route: name không rỗng, mode thuộc PROJECT_MODES (thiếu ⇒ fpt)
+  const { name, mode, domain, folderId } = req.body as CreateProjectDTO
+  const project = await projectService.createProject(userId, name, domain, mode, folderId)
   return sendSuccess(res, 201, project)
 })
 
@@ -43,7 +35,7 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   }
 
   const projectId = req.params.projectId as string
-  const project = await projectService.getProjectById(projectId, userId)
+  const project = await projectService.openProject(projectId, userId)
   return sendSuccess(res, 200, project)
 })
 
@@ -72,5 +64,16 @@ export const updateProjectName = catchAsync(async (req: Request, res: Response) 
   }
 
   const project = await projectService.updateProjectName(projectId, userId, name)
+  return sendSuccess(res, 200, project)
+})
+
+export const moveProjectToFolder = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  }
+
+  const { folderId } = req.body as MoveProjectDTO
+  const project = await projectService.moveProjectToFolder(req.params.projectId as string, userId, folderId)
   return sendSuccess(res, 200, project)
 })
