@@ -151,18 +151,33 @@ describe("readBlocks", () => {
 })
 
 describe("neo bookmark", () => {
-  it("ghi bookmark ẩn cho đoạn, bỏ bảng; đọc lại ra đúng block id; parse lại ổn định", async () => {
+  it("ghi bookmark ẩn cho đoạn, bảng neo _fft_ trong ô đầu; đọc lại ra đúng block id; parse lại ổn định", async () => {
     const pkg = await load(styled("u1", "Giới thiệu") + p("Nội dung") + table([["X"]]))
     const blocks = await readBlocks(pkg)
     let n = 0
     const added = ensureBlockBookmarks(blocks, () => `B${String(++n).padStart(4, "0")}`)
-    expect(added).toBe(3)
-    expect(blocks.map((b) => b.bookmark)).toEqual(["_ff_B0001", "_ff_B0002", null, "_ff_B0003"])
+    expect(added).toBe(4)
+    expect(blocks.map((b) => b.bookmark)).toEqual(["_ff_B0001", "_ff_B0002", "_fft_B0003", "_ff_B0004"])
 
     const again = await readBlocks(await DocxPackage.load(await pkg.toBuffer()))
-    expect(again.map((b) => blockIdOfBookmark(b.bookmark))).toEqual(["B0001", "B0002", null, "B0003"])
+    expect(again.map((b) => blockIdOfBookmark(b.bookmark))).toEqual(["B0001", "B0002", "B0003", "B0004"])
     expect(again.map((b) => b.text)).toEqual(blocks.map((b) => b.text))
     expect(ensureBlockBookmarks(again, () => "B9999")).toBe(0)
+  })
+
+  it("neo bảng _fft_ (FLF-178): nằm ngay trước bảng vẫn nhận; không lẫn với neo _ff_ của ô đầu; bảng lồng không được neo", async () => {
+    const bm = (id: number, name: string) => `<w:bookmarkStart w:id="${id}" w:name="${name}"/><w:bookmarkEnd w:id="${id}"/>`
+    const inner = `<w:tbl><w:tr><w:tc>${p("Lồng")}</w:tc></w:tr></w:tbl>`
+    const blocks = await readBlocks(
+      await load(bm(0, "_fft_B0003") + `<w:tbl><w:tr><w:tc><w:p>${bm(1, "_ff_B0004")}<w:r><w:t>Ô đầu</w:t></w:r></w:p>${inner}</w:tc></w:tr></w:tbl>`)
+    )
+    expect(blocks.map((b) => [b.kind, b.bookmark])).toEqual([
+      ["table", "_fft_B0003"],
+      ["table_cell", "_ff_B0004"],
+      ["unsupported", null]
+    ])
+    expect(ensureBlockBookmarks(blocks, () => "B9999")).toBe(0)
+    expect(blockIdOfBookmark("_fft_B0003")).toBe("B0003")
   })
 
   it("bookmark bị Word dời ra ngoài w:p gắn cho đoạn kế tiếp; bookmark trùng tên chỉ nhận lần đầu", async () => {

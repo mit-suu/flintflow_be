@@ -10,7 +10,7 @@ describe("parseDocument", () => {
     expect(blocks[0]).toMatchObject({ block_id: "B0001", kind: "heading", bookmark: "_ff_B0001" })
     expect(blocks.map((b) => b.block_id)).toEqual(blocks.map((_, i) => formatBlockId(i + 1)))
     const table = blocks.find((b) => b.kind === "table")!
-    expect(table.bookmark).toBeNull()
+    expect(table.bookmark).toBe(`_fft_${table.block_id}`)
     expect(blocks.find((b) => b.text.includes("(UC-01)"))!.mentions).toEqual([{ entity: "use_case", id: "UC-01" }])
     // Bản lưu đọc lại ra đúng id theo bookmark
     const reread = await readBlocks(await DocxPackage.load(await pkg.toBuffer()))
@@ -34,7 +34,7 @@ describe("parseDocument", () => {
     expect(blocks.map((b) => [b.block_id, b.bookmark])).toEqual([
       ["B0005", "_ff_B0005"],
       ["B0006", "_ff_B0006"],
-      ["B0007", null],
+      ["B0007", "_fft_B0007"],
       ["B0008", "_ff_B0008"]
     ])
   })
@@ -73,7 +73,7 @@ describe("parseDocument", () => {
   // C-7 `write.service.ts:96`) nhận id mới sau id lớn nhất (B0049…) thay vì giữ B0005. Hệ quả: DocBlock bảng của
   // version mới mất `section_id` (tra `oldOf` theo block_id trượt) và FieldAnchor của thực thể trích từ bảng
   // (actors/UC/BR — `source_block_ids = [table.block_id]`) trỏ vào id không còn ở version mới.
-  it.fails("parse lại bản đã lưu ⇒ block bảng (không bookmark) cũng giữ block_id", async () => {
+  it("parse lại bản đã lưu ⇒ block bảng cũng giữ block_id (neo _fft_, FLF-178)", async () => {
     const first = await parseDocument(await makeSrsDocx())
     const second = await parseDocument(await first.pkg.toBuffer())
     expect(second.blocks.map((b) => [b.block_id, b.text])).toEqual(first.blocks.map((b) => [b.block_id, b.text]))
