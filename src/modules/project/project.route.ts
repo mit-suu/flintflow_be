@@ -59,26 +59,29 @@ const upload = multer({
  *         application/json:
  *           schema:
  *             type: object
- *             required: [name, sourceMode]
+ *             required: [name]
  *             properties:
  *               name:
  *                 type: string
  *                 example: Lumen — SaaS quản lý khoá học
- *               sourceMode:
- *                 type: string
- *                 enum: [edit_srs, fpt_template, customer_template]
- *                 description: Nguồn khởi đầu (upload SRS có sẵn / mẫu FPT / template của khách). Không đổi được sau khi tạo.
  *               domain:
  *                 type: string
  *                 example: E-learning
  *               folderId:
  *                 type: string
  *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
+ *               mode:
+ *                 type: string
+ *                 enum: [import, fpt, customer_template]
+ *                 default: fpt
+ *                 description: "Cách làm SRS: import = upload SRS có sẵn rồi sửa (mode 1), fpt = sinh theo template FPT (mode 2), customer_template = chưa hỗ trợ"
  *     responses:
  *       201:
- *         description: Dự án đã được tạo thành công
+ *         description: Dự án đã được tạo thành công (kèm mode, import_state)
  *       400:
- *         description: VALIDATION_ERROR — tên trống/quá dài hoặc sourceMode thiếu/sai
+ *         description: VALIDATION_ERROR — tên trống/quá dài hoặc mode không hợp lệ
+ *       501:
+ *         description: mode customer_template chưa hỗ trợ (NOT_IMPLEMENTED)
  *       401:
  *         description: Chưa xác thực
  */

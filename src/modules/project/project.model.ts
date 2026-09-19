@@ -1,23 +1,26 @@
 import mongoose, { Schema, Document } from "mongoose"
+import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 
 export type ProjectStatus = "active" | "archived"
 
 /**
- * Nguồn khởi đầu của dự án — quyết định nhánh BPMN (gateway "Working mode?"):
- *   edit_srs          Flow 1: upload SRS có sẵn để kiểm tra và sửa
- *   fpt_template      Flow 2.1: viết SRS mới trên mẫu FPT (luồng cũ — dự án trước migration đều là loại này)
- *   customer_template Flow 2.2: viết SRS mới theo template khách upload
- * Chọn một lần khi tạo, không đổi được sau đó. Khác `working_mode` (fast/coaching) trong Spine.
+ * Cách làm SRS của project (FLF-171) — KHÁC `spine.project.working_mode` (fast/coaching là nhịp hỏi đáp
+ * trong quy trình sinh SRS):
+ * - `import` — mode 1: upload SRS có sẵn rồi sửa qua change request.
+ * - `fpt` — mode 2: sinh SRS theo template FPT qua 12 phase (luồng hiện có). Project cũ không có field ⇒ `fpt`.
+ * - `customer_template` — mode 3: template khách hàng, chưa làm (tạo mới trả 501).
  */
-export const SOURCE_MODES = ["edit_srs", "fpt_template", "customer_template"] as const
-export type ProjectSourceMode = (typeof SOURCE_MODES)[number]
+export const PROJECT_MODES = ["import", "fpt", "customer_template"] as const
+export type ProjectMode = (typeof PROJECT_MODES)[number]
 
 export interface IProject extends Document {
   userId: mongoose.Types.ObjectId
   name: string
   domain?: string | null
   status: ProjectStatus
-  sourceMode: ProjectSourceMode
+  mode: ProjectMode
+  /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
+  import_state: ImportStatus | null
   /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
@@ -50,10 +53,15 @@ const projectSchema = new Schema<IProject>(
       enum: ["active", "archived"],
       default: "active"
     },
-    sourceMode: {
+    mode: {
       type: String,
-      enum: SOURCE_MODES,
-      required: true
+      enum: PROJECT_MODES,
+      default: "fpt"
+    },
+    import_state: {
+      type: String,
+      enum: [...IMPORT_STATUSES, null],
+      default: null
     },
     folderId: {
       type: Schema.Types.ObjectId,

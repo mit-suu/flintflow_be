@@ -1,11 +1,14 @@
 import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { SOURCE_MODES } from "./project.model.js"
+import { PROJECT_MODES } from "./project.model.js"
+
+/** Không gửi `mode` ⇒ `fpt` (mode 2, hành vi cũ). */
+export const projectModeSchema = z.enum(PROJECT_MODES).default("fpt")
 
 export const CreateProjectSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  sourceMode: z.enum(SOURCE_MODES),
+  mode: projectModeSchema,
   domain: z.string().trim().max(100).optional(),
   /** Tạo thẳng trong thư mục của user. */
   folderId: z.string().min(1).optional()

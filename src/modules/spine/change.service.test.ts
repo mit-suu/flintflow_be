@@ -166,7 +166,7 @@ describe("branchOf — ba nhánh", () => {
   })
 
   it("đã có baseline ⇒ post_baseline, kể cả khi không ai phụ thuộc", () => {
-    const baseline = [{ id: "B1", version: "v1.0", at: "2026-09-01T00:00:00.000Z", snapshot_ref: "x", checked_at_version: 1, waived_count: 0 }]
+    const baseline = [{ id: "B1", version: "v1.0", type: "generated" as const, doc_version: null, at: "2026-09-01T00:00:00.000Z", snapshot_ref: "x", checked_at_version: 1, waived_count: 0 }]
     expect(branchOf({ baselines: baseline }, empty)).toBe("post_baseline")
   })
 })
@@ -352,7 +352,7 @@ describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
   const withBaseline = (): Spine => {
     const spine = structuredClone(FIXTURE)
     spine.baselines = [
-      { id: "B1", version: "v1.0", at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
+      { id: "B1", version: "v1.0", type: "generated", doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
     ]
     return spine
   }

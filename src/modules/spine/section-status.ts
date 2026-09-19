@@ -118,12 +118,12 @@ export interface StepProgress {
   show_percent: boolean
 }
 
-/** Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn + 1 nếu có non-screen function. */
+/** Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn + 1 nếu có non-screen function; trừ step `skipped` (FLF-183). */
 export const progressByStep = (spine: Spine): StepProgress => {
   const n = spine.screens.length + (spine.functions.some((f) => f.screen_id === null) ? 1 : 0)
   return {
     done: spine.steps.filter((s) => s.status === "accepted").length,
-    total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n,
+    total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n - spine.steps.filter((s) => s.status === "skipped").length,
     current_phase: spine.progress.current_phase,
     current_step: spine.progress.current_step,
     show_percent: spine.steps.some((s) => s.id === N_LOCKED_AT_STEP && s.status === "accepted")

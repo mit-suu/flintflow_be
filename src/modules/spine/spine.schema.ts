@@ -49,7 +49,7 @@ export const progressSchema = z.strictObject({
 
 export const stepStateSchema = z.strictObject({
   id,
-  status: z.enum(["pending", "in_progress", "accepted", "revision_requested"]),
+  status: z.enum(["pending", "in_progress", "accepted", "revision_requested", "skipped"]),
   first_seq: z.number().int().min(1).nullable(),
   last_seq: z.number().int().min(1).nullable(),
   accepted_at: isoDateTime.nullable()
@@ -186,6 +186,21 @@ export const addendumSchema = z.strictObject({
   captured_at: isoDateTime
 })
 
+export const customBlockSchema = z.strictObject({
+  kind: z.enum(["paragraph", "list_item", "table", "image"]),
+  text: z.string(),
+  rows: z.array(z.array(z.string())).nullable(),
+  image_ref: z.string().min(1).nullable()
+})
+
+export const customSectionSchema = z.strictObject({
+  id,
+  heading: z.string(),
+  level: z.number().int().min(1).max(9),
+  blocks: z.array(customBlockSchema),
+  source: z.enum(["import", "manual"])
+})
+
 // ─── state nội bộ ────────────────────────────────────────────────
 
 export const diagramSchema = z.strictObject({
@@ -234,9 +249,17 @@ export const sectionStateSchema = z.strictObject({
   asset_version: z.string()
 })
 
+export const BASELINE_TYPES = ["generated", "imported", "release"] as const satisfies readonly T.BaselineType[]
+
+/** Dữ liệu trước FLF-171 không có `type`/`doc_version` ⇒ đọc ra `generated` / `null`. */
+const baselineTypeSchema = z.enum(BASELINE_TYPES).default("generated")
+const docVersionSchema = z.string().min(1).nullable().default(null)
+
 export const baselineSchema = z.strictObject({
   id,
   version: z.string().min(1),
+  type: baselineTypeSchema,
+  doc_version: docVersionSchema,
   at: isoDateTime,
   snapshot_ref: id,
   checked_at_version: z.number().int().min(1),
@@ -265,6 +288,8 @@ export const spineSchema = z.strictObject({
   other_requirements: z.array(otherRequirementSchema),
   glossary: z.array(glossaryTermSchema),
   addendum: z.array(addendumSchema),
+  /** FLF-182 — Spine trước mode 1 v2 không có ⇒ `[]`. */
+  custom_sections: z.array(customSectionSchema).default([]),
 
   diagrams: z.array(diagramSchema),
   assumptions: z.array(assumptionSchema),
@@ -312,6 +337,8 @@ export const usageSchema = z.strictObject({
 export const baselineSnapshotSchema = z.strictObject({
   projectId: id,
   version: z.string().min(1),
+  type: baselineTypeSchema,
+  doc_version: docVersionSchema,
   at: isoDateTime,
   checked_at_version: z.number().int().min(1),
   waived_count: nonNegativeInt,
