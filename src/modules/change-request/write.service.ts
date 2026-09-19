@@ -1,9 +1,11 @@
 /**
  * C-7 ghi thay đổi đã duyệt (nút 3.14). FLF-171, plan §6 2E.
  * Trên bản sao file của version mới nhất: `edit` ⇒ Track Changes theo từ, `comment` ⇒ comment Word, author = mã CR.
- * Lưu file (GridFS) **trước**, rồi: op Spine (`by = cr_id`, reason = mã CR + tiêu đề) → recompute cờ (hồ sơ mode 1)
- * → `DocVersion` minor mới + block của version mới (giữ `block_id` theo bookmark, giữ khoá của CR khác) → mở khoá.
- * Lỗi giữa chừng ⇒ xoá file mồ côi, CR giữ nguyên trạng thái (chạy lại an toàn).
+ * Thứ tự (FLF-178 — op engine không nhận Mongo session, nên Spine là bước ghi **cuối** và duy nhất không hoàn tác được):
+ * chạy khô op Spine → lưu file (GridFS) → block + `DocVersion` minor mới (giữ `block_id` theo bookmark, giữ khoá của
+ * CR khác) → op Spine (`by = cr_id`, reason = mã CR + tiêu đề, khoá lạc quan `base_version`) → recompute cờ → mở khoá.
+ * Lỗi trước/tại bước Spine ⇒ xoá version, block, file vừa tạo; Spine và CR giữ nguyên (chạy lại an toàn).
+ * Recompute cờ lỗi sau khi Spine đã ghi ⇒ không huỷ bản ghi (cờ là giá trị suy diễn, lần recompute sau tính lại).
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -30,7 +32,7 @@ import { Mode1Error } from "../import/mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 import { assignBlockIds } from "../import/parse.service.js"
 import * as flagsService from "../spine/flags.service.js"
-import { applyTransaction } from "../spine/op-engine.js"
+import { applyTransaction, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -58,6 +60,12 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     if (!b || b.text_hash !== textHash(loc.proposal!.old_text)) throw mismatch(loc)
   }
 
+  // 0. Chạy khô op Spine: op sai / phá bất biến bị chặn trước khi ghi gì; Spine dự kiến dùng cho mention theo tên
+  const ops: Op[] = changes.flatMap((l) => (l.proposal!.spine_ops ?? []).map((raw) => userOpSchema.parse(raw)))
+  const current = stripRecord(record)
+  const txn = { base_version: baseVersion, ops, by: cr.cr_id, reason: `${cr.cr_id}: ${cr.title}`, step_id: null }
+  const planned = ops.length ? planTransaction(current, txn, { startSeq: 1 }).spine : current
+
   // 1. File: Track Changes + comment trên bản sao (sau release: bản sạch — CR đã release không hiện lại)
   const pkg = await DocxPackage.load(await docFileStore().load(version.clean_file_ref ?? version.file_ref))
   const ooxml = await readBlocks(pkg)
@@ -82,17 +90,10 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   const buffer = await pkg.toBuffer()
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
 
+  let versionCreated = false
   try {
-    // 2. Spine
-    const ops: Op[] = changes.flatMap((l) => (l.proposal!.spine_ops ?? []).map((raw) => userOpSchema.parse(raw)))
-    if (ops.length) {
-      await applyTransaction(projectId, { base_version: baseVersion, ops, by: cr.cr_id, reason: `${cr.cr_id}: ${cr.title}`, step_id: null })
-    }
-    await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: MODE1_RULE_PROFILE })
-
-    // 3. Version + block của version mới
-    const spine = stripRecord((await spineRepository.get(projectId))!)
-    const names = namedEntities(spine)
+    // 2. Version + block của version mới
+    const names = namedEntities(planned)
     const fresh = assignBlockIds(await readBlocks(await DocxPackage.load(buffer)))
     await DocBlock.insertMany(
       fresh.map((b) => {
@@ -115,10 +116,21 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
       })
     )
     await DocVersion.create({ projectId, version: next, kind: "cr_revision", file_ref: fileRef, based_on: version.version, cr_ids: [cr.cr_id], baseline_ref: null, created_by: userId })
+    versionCreated = true
+
+    // 3. Spine — bước cuối; `base_version` chặn ghi đè nếu Spine đổi từ lúc chạy khô
+    if (ops.length) await applyTransaction(projectId, txn)
   } catch (err) {
+    if (versionCreated) await DocVersion.deleteOne({ projectId, version: next })
     await DocBlock.deleteMany({ projectId, doc_version: next })
     await docFileStore().remove(fileRef)
     throw err
+  }
+
+  try {
+    await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: MODE1_RULE_PROFILE })
+  } catch (err) {
+    console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
   }
   await unlockBlocks(projectId, cr.cr_id)
   return next
