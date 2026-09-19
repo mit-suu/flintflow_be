@@ -13,6 +13,7 @@ import { seedFixture } from "../setup.js"
 import { mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
 import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeMode1, mode1Api } from "../helpers/mode1.js"
 import { fillCoreSections, markBaselineV1 } from "../helpers/mode1-v2.js"
+import { routeReplaceCr } from "../helpers/mode1-release-p4.js"
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema } from "../../src/modules/change-request/change-request.dto.js"
 import { compareResponseSchema, releaseResponseSchema, versionBlocksResponseSchema, versionsResponseSchema } from "../../src/modules/doc-version/doc-version.dto.js"
@@ -66,7 +67,7 @@ const projectWithRevision = async () => {
 const releaseNow = async (c: Api) => c.post("/release", { base_version: await c.spineVersion() })
 
 describe("mode 1 — version + tải về", () => {
-  it("danh sách version, block có revisions, so sánh 0.0 → 0.1, tải bản draft có watermark DRAFT", async () => {
+  it("danh sách version, block đọc từ file render, so sánh 0.0 → 0.1, tải bản draft có watermark DRAFT", async () => {
     const { c } = await projectWithRevision()
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions.map((v) => [v.version, v.kind])).toEqual([
@@ -75,19 +76,17 @@ describe("mode 1 — version + tải về", () => {
     ])
 
     const blocks = versionBlocksResponseSchema.parse((await c.get("/versions/0.1/blocks")).body.data)
-    const perf = blocks.find((b) => b.text.startsWith("The system shall respond"))!
-    expect(perf.text).toContain("1 second")
-    expect(perf.revisions).toEqual(
-      expect.arrayContaining([
-        { kind: "del", text: expect.stringContaining("2"), author: "CR-001" },
-        { kind: "ins", text: expect.stringContaining("1"), author: "CR-001" }
-      ])
-    )
+    // FLF-186: 0.1 là bản render từ Spine sau CR — NFR hiện trong bảng Performance, không còn Track Changes theo block
+    const perf = blocks.find((b) => b.text.includes("The system shall respond"))!
+    expect(perf.text).toContain("1 s")
+    expect(perf.revisions).toBeUndefined()
     expect((await c.get("/versions/9.9/blocks")).body.error.code).toBe("DOC_VERSION_NOT_FOUND")
 
     const diff = compareResponseSchema.parse((await c.get("/versions/compare?from=0.0&to=0.1")).body.data)
-    expect(diff.summary).toEqual({ added: 0, removed: 0, modified: 1, moved: 0 })
-    expect(diff.blocks[0]).toMatchObject({ change: "modified", after: perf.text })
+    // bảng Performance: khớp theo text (file render không có neo) ⇒ modified 2 s → 1 s
+    expect(diff.blocks).toContainEqual(
+      expect.objectContaining({ block_id: null, change: "modified", before: expect.stringContaining("| 2 s |"), after: expect.stringContaining("| 1 s |") })
+    )
     expect((await c.get("/versions/compare?from=0.1&to=0.1")).status).toBe(400)
 
     const draft = await binary(c.get("/versions/0.1/download"))
@@ -97,7 +96,8 @@ describe("mode 1 — version + tải về", () => {
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
     expect(await zip.file(headers[0])!.async("string")).toContain('string="DRAFT"')
-    expect(await documentXml(draft.body as Buffer)).toContain('w:author="CR-001"')
+    // §I Record of Changes của bản render có dòng của CR
+    expect(await documentXml(draft.body as Buffer)).toContain("CR-001: Faster")
   })
 })
 
@@ -136,34 +136,24 @@ describe("mode 1 — release (Flow 6)", () => {
     const xml = await documentXml(clean.body as Buffer)
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))
-    expect(cleanBlocks.find((b) => b.text.startsWith("The system shall respond"))?.text).toContain("1 second")
+    expect(cleanBlocks.find((b) => b.text.includes("The system shall respond"))?.text).toContain("1 second")
+    // FLF-186: bản release = render snapshot — bản "tracked" cũng là bản render (bản đánh dấu theo section: để sau)
     const tracked = await documentXml((await binary(c.get("/versions/1.0/download?variant=tracked"))).body as Buffer)
-    expect(tracked).toMatch(/<w:ins\b/)
+    expect(tracked).not.toMatch(/<w:ins\b/)
 
-    // CR sau release: ghi lên bản sạch ⇒ 1.1 chỉ có revision của CR-002
-    mockOverrides.next = (p) =>
-      fakeMode1(p) ??
-      fakeCrClarify({ entity_paths: [], keywords: ["1 second"] })(p) ??
-      (p.includes("# CR Propose")
-        ? JSON.stringify({
-            locations: [...p.matchAll(/\[(L\d{3,})\]\[B\d{4,}\][^\n]*\n {2}([^\n]*)/g)].map((m) => ({
-              location_id: m[1],
-              conclusion: "edit",
-              reason: "x",
-              new_text: m[2].replace("1 second", "500 ms"),
-              spine_ops: []
-            }))
-          })
-        : undefined)
+    // CR sau release ⇒ 1.1 render từ Spine mới
+    routeReplaceCr("1 second", "500 ms")
     const created = await c.post("/change-requests", { title: "Even faster", description: "500 ms", source: { kind: "verbal" }, requester: "PM" })
     const cr = `/change-requests/${created.body.data.change_request.cr_id}`
     for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
-    const [g] = changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups
-    const done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
-    expect(done.body.data.change_request.result_doc_version).toBe("1.1")
+    let done = null as Awaited<ReturnType<typeof c.post>> | null
+    for (const g of changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups) {
+      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
+    }
+    expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)
-    expect(v11).toContain('w:author="CR-002"')
-    expect(v11).not.toContain('w:author="CR-001"')
+    expect(v11).toContain("500 ms")
+    expect(v11).toContain("CR-002: Even faster")
   })
 })
 
