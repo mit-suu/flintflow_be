@@ -3,6 +3,7 @@ import * as projectService from "./project.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { projectModeSchema } from "./project.validation.js"
 
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -15,7 +16,12 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(400, "Project name is required", "NAME_REQUIRED")
   }
 
-  const project = await projectService.createProject(userId, name, domain)
+  const mode = projectModeSchema.safeParse(req.body.mode)
+  if (!mode.success) {
+    throw new ApiError(400, "mode phải là import, fpt hoặc customer_template", "VALIDATION_ERROR")
+  }
+
+  const project = await projectService.createProject(userId, name, domain, mode.data)
   return sendSuccess(res, 201, project)
 })
 

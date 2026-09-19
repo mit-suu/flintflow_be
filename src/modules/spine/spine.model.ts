@@ -320,6 +320,8 @@ const baselineEntrySchema = new Schema(
   {
     id: { type: String, required: true },
     version: { type: String, required: true },
+    type: { type: String, enum: ["generated", "imported", "release"], default: "generated" },
+    doc_version: { type: String, default: null },
     at: { type: Date, required: true },
     snapshot_ref: { type: String, required: true },
     checked_at_version: { type: Number, required: true, min: 1 },
