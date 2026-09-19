@@ -31,6 +31,8 @@ export interface IChangeRequest extends Document {
   status: CrStatus
   paused: { reason: CrPauseReason; at: Date } | null
   clarifications: CrClarification[]
+  /** Đích C-2 trả về khi CR đã rõ — C-3 tìm vị trí theo đó. Nội bộ, không có trong DTO. */
+  targets: { entity_paths: string[]; keywords: string[] }
   /** Version tài liệu lúc tạo CR; ghi Track Changes lên version mới nhất lúc write. */
   base_doc_version: string
   result_doc_version: string | null
@@ -71,6 +73,10 @@ const changeRequestSchema = new Schema<IChangeRequest>(
     clarifications: {
       type: [new Schema({ round: { type: Number, required: true, min: 1 }, questions: [String], answers: [String] }, opts)],
       default: []
+    },
+    targets: {
+      type: new Schema({ entity_paths: { type: [String], default: [] }, keywords: { type: [String], default: [] } }, opts),
+      default: () => ({ entity_paths: [], keywords: [] })
     },
     base_doc_version: { type: String, required: true },
     result_doc_version: { type: String, default: null },

@@ -17,6 +17,19 @@ const mocks = vi.hoisted(() => {
     getSpine: vi.fn(),
     getOrCreate: vi.fn(),
     removeDiagram: vi.fn(async () => {}),
+    removeDocFiles: vi.fn(async () => {}),
+    // Mode 1 (FLF-171)
+    ImportedDocument: { deleteMany: deleteMany() },
+    DocBlock: { deleteMany: deleteMany() },
+    TemplateProfile: { deleteMany: deleteMany() },
+    ExtractionDraft: { deleteMany: deleteMany() },
+    FieldAnchor: { deleteMany: deleteMany() },
+    ReuploadDiff: { deleteMany: deleteMany() },
+    DocVersion: { deleteMany: deleteMany() },
+    ChangeRequest: { deleteMany: deleteMany() },
+    CrCounter: { deleteMany: deleteMany() },
+    ChangeLocation: { deleteMany: deleteMany() },
+    ChangeGroup: { deleteMany: deleteMany() },
     destroyDocumentAsset: vi.fn(async () => true)
   }
 })
@@ -32,6 +45,17 @@ vi.mock("../spine/usage.model.js", () => ({ Usage: mocks.Usage }))
 vi.mock("../render/rendered-document.model.js", () => ({ RenderedDocumentCache: mocks.RenderedDocumentCache }))
 vi.mock("../spine/spine.repository.js", () => ({ get: mocks.getSpine, getOrCreate: mocks.getOrCreate }))
 vi.mock("../diagram/diagram-file.store.js", () => ({ gridFsDiagramStore: { remove: mocks.removeDiagram } }))
+vi.mock("../import/imported-document.model.js", () => ({ ImportedDocument: mocks.ImportedDocument }))
+vi.mock("../import/doc-block.model.js", () => ({ DocBlock: mocks.DocBlock }))
+vi.mock("../import/template-profile.model.js", () => ({ TemplateProfile: mocks.TemplateProfile }))
+vi.mock("../import/extraction-draft.model.js", () => ({ ExtractionDraft: mocks.ExtractionDraft }))
+vi.mock("../import/field-anchor.model.js", () => ({ FieldAnchor: mocks.FieldAnchor }))
+vi.mock("../import/reupload-diff.model.js", () => ({ ReuploadDiff: mocks.ReuploadDiff }))
+vi.mock("../doc-version/doc-version.model.js", () => ({ DocVersion: mocks.DocVersion }))
+vi.mock("../doc-version/doc-file.store.js", () => ({ docFileStore: () => ({ removeProject: mocks.removeDocFiles }) }))
+vi.mock("../change-request/change-request.model.js", () => ({ ChangeRequest: mocks.ChangeRequest, CrCounter: mocks.CrCounter }))
+vi.mock("../change-request/change-location.model.js", () => ({ ChangeLocation: mocks.ChangeLocation }))
+vi.mock("../change-request/change-group.model.js", () => ({ ChangeGroup: mocks.ChangeGroup }))
 
 import * as projectService from "./project.service.js"
 
@@ -52,6 +76,11 @@ describe("deleteProject", () => {
     for (const model of [mocks.ChatSession, mocks.ProjectDocument, mocks.Spine, mocks.Change, mocks.Baseline, mocks.Usage, mocks.RenderedDocumentCache]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
     }
+    // Mode 1: mọi collection + file .docx trong GridFS
+    for (const model of [mocks.ImportedDocument, mocks.DocBlock, mocks.TemplateProfile, mocks.ExtractionDraft, mocks.FieldAnchor, mocks.ReuploadDiff, mocks.DocVersion, mocks.ChangeRequest, mocks.CrCounter, mocks.ChangeLocation, mocks.ChangeGroup]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
+    }
+    expect(mocks.removeDocFiles).toHaveBeenCalledWith(PROJECT)
     expect(mocks.removeDiagram.mock.calls).toEqual([[PROJECT, "D01"], [PROJECT, "D02"]])
     expect(mocks.destroyDocumentAsset.mock.calls).toEqual([["flintflow/brief"], ["flintflow/notes"]])
   })

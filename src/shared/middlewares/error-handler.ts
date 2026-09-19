@@ -11,7 +11,9 @@ export const errorHandler = (
   console.error("[ERROR]", err)
 
   if (err instanceof ApiError) {
-    return sendError(res, err.statusCode, err.code, err.message)
+    // Lỗi mang `meta` (vd mode 1: CHANGE_REQUIRES_CR { prefill }) giữ nguyên trong envelope — FLF-171
+    const meta = "meta" in err && err.meta && typeof err.meta === "object" ? (err.meta as Record<string, unknown>) : undefined
+    return sendError(res, err.statusCode, err.code, err.message, meta)
   }
 
   // Handle Mongoose or JSON parse errors
