@@ -93,13 +93,52 @@ export const tableMapEntrySchema = z.object({
   confirmed: z.boolean()
 })
 
+/**
+ * Một mục của layout tài liệu người dùng (mode 1 v2, FLF-182): thứ tự + tiêu đề mục của file upload, dùng để render
+ * lại từ Spine. `section_id` = section FPT khớp được, hoặc `custom:<id>` cho mục ngoài mẫu FPT.
+ */
+export const layoutEntrySchema = z.object({
+  order: z.number().int().min(0),
+  heading_text: z.string(),
+  level: z.number().int().min(1).max(9),
+  section_id: z.string().min(1)
+})
+
 export const templateProfileDtoSchema = z.object({
   doc_version: z.string().min(1),
   heading_map: z.array(headingMapEntrySchema),
   table_map: z.array(tableMapEntrySchema),
   required_sections: z.array(z.string()),
-  language: z.string()
+  language: z.string(),
+  /** FLF-182 — rỗng với import trước mode 1 v2. */
+  layout: z.array(layoutEntrySchema).default([])
 })
+
+// ─── kế hoạch step theo template (mode 1 v2, FLF-182) ─────────────────
+
+/**
+ * `applied` — step chạy trong workspace (đầu mục có trong template, đầu mục FPT bị thiếu, hoặc step phải chạy);
+ * `hidden` — ẩn (không sinh đầu mục, vd Brief), bật được; `enabled` — người dùng đã bật step từng ẩn.
+ */
+export const STEP_PLAN_STATES = ["applied", "hidden", "enabled"] as const
+
+export const stepPlanEntrySchema = z.object({
+  step_id: z.string().min(1),
+  state: z.enum(STEP_PLAN_STATES),
+  /** Đầu mục mẫu FPT mà file không có (hoặc chỉ có heading) ⇒ "Thiếu" + cờ đỏ `core_section_missing`. */
+  missing: z.boolean(),
+  /** Section do step sở hữu (FPT). */
+  section_ids: z.array(z.string()),
+  /** Lý do chọn/ẩn, hiển thị cho người dùng. */
+  reason: z.string()
+})
+export type StepPlanEntry = z.infer<typeof stepPlanEntrySchema>
+
+/** `GET /projects/:id/step-plan`. */
+export const stepPlanResponseSchema = z.object({ steps: z.array(stepPlanEntrySchema) })
+
+/** `PATCH /projects/:id/step-plan` — bật step ẩn (`enabled: true`) hoặc tắt step đã bật chưa có dữ liệu. */
+export const stepPlanPatchRequestSchema = z.object({ step_id: z.string().min(1), enabled: z.boolean() })
 
 export const reviewFieldSchema = z.object({
   section_id: z.string().min(1),

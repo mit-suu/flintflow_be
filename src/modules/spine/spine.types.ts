@@ -50,7 +50,8 @@ export interface Progress {
   elicit_turns_this_phase: number
 }
 
-export type StepStatus = "pending" | "in_progress" | "accepted" | "revision_requested"
+/** `skipped` (FLF-182): step không áp dụng cho template của project mode 1 — bị ẩn, không tính tiến độ. */
+export type StepStatus = "pending" | "in_progress" | "accepted" | "revision_requested" | "skipped"
 
 export interface StepState {
   /** Step id theo registry, có thể kèm `@<screen_id>` cho vòng S-5. */
@@ -205,6 +206,28 @@ export interface GlossaryTerm {
   definition: string
 }
 
+/** Khối nội dung nguyên văn của một mục riêng (FLF-182). Chỉ field hợp với `kind` mang giá trị, còn lại `null`. */
+export interface CustomBlock {
+  kind: "paragraph" | "list_item" | "table" | "image"
+  text: string
+  /** Chỉ với `table`: text từng ô theo hàng. */
+  rows: string[][] | null
+  /** Chỉ với `image`: tham chiếu file ảnh đã lưu. */
+  image_ref: string | null
+}
+
+/**
+ * Mục riêng của template người dùng (mode 1 v2, FLF-182): heading không khớp section FPT nào, hoặc phần văn xuôi
+ * không trích được vào field — giữ nguyên văn để render lại đúng vị trí (section `custom:<id>`) và sửa qua chat.
+ */
+export interface CustomSection {
+  id: string
+  heading: string
+  level: number
+  blocks: CustomBlock[]
+  source: "import" | "manual"
+}
+
 export interface Addendum {
   id: string
   topic: string
@@ -324,6 +347,7 @@ export interface Spine {
   other_requirements: OtherRequirement[]
   glossary: GlossaryTerm[]
   addendum: Addendum[]
+  custom_sections: CustomSection[]
 
   diagrams: Diagram[]
   assumptions: Assumption[]
