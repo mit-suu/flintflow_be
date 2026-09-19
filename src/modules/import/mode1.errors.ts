@@ -21,9 +21,11 @@ export const MODE1_ERROR_STATUS = {
   IMPORT_INVALID_STATE: 409,
   CR_REQUIRES_BASELINE: 409,
   CR_INVALID_TRANSITION: 409,
-  BLOCK_LOCKED: 409,
+  /** FLF-186: phần tử Spine đang được CR khác giữ khoá (thay `BLOCK_LOCKED` theo block docx). */
+  PATH_LOCKED: 409,
   CR_LOCATION_UNCONCLUDED: 409,
-  CR_OLD_TEXT_MISMATCH: 409,
+  /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
+  CR_VALUE_CHANGED: 409,
   CHANGE_REQUIRES_CR: 409,
   /** FLF-182: tắt step của đầu mục mẫu FPT (cốt lõi) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
@@ -38,7 +40,7 @@ export const mode1ErrorCodeSchema = z.enum(
   Object.keys(MODE1_ERROR_STATUS) as [Mode1ErrorCode, ...Mode1ErrorCode[]]
 )
 
-/** Lỗi mode 1 kèm `meta` (vd `BLOCK_LOCKED` ⇒ `{ locked: [{ block_id, cr_id }] }`). Controller đưa `meta` vào envelope. */
+/** Lỗi mode 1 kèm `meta` (vd `PATH_LOCKED` ⇒ `{ locked: [{ path, cr_id }] }`). Controller đưa `meta` vào envelope. */
 export class Mode1Error extends ApiError {
   readonly meta: Record<string, unknown> | undefined
 
