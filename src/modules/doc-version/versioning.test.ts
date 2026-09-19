@@ -56,4 +56,45 @@ describe("versioning — G4", () => {
     expect(downloadFileName("A/B:C", "0.0")).toBe("A_B_C_v0.0_DRAFT.docx")
     expect(downloadFileName("   ", "1.0")).toBe("SRS_v1.0.docx")
   })
+
+  it.each([
+    ["0.99", "0.100"],
+    ["99.99", "99.100"],
+    ["10.0", "10.1"],
+    ["0.9007199254740990", "0.9007199254740991"]
+  ])("mốc biên nextMinor(%s) = %s (tăng số, không cộng chuỗi, không tràn sang major)", (current, expected) => {
+    expect(nextMinor(current)).toBe(expected)
+    expect(compareDocVersions(nextMinor(current), current)).toBeGreaterThan(0)
+  })
+
+  it.each([
+    ["0.100", "1.0"],
+    ["9.0", "10.0"],
+    ["99.99", "100.0"]
+  ])("mốc biên nextMajor(%s) = %s (luôn về minor 0, là bản release)", (current, expected) => {
+    expect(nextMajor(current)).toBe(expected)
+    expect(isReleaseVersion(nextMajor(current))).toBe(true)
+  })
+
+  it("chuỗi minor sau release: 0.0 → 0.1 → 1.0 → 1.1 → 2.0 sắp đúng thứ tự", () => {
+    const chain = ["0.0"]
+    const last = () => chain[chain.length - 1]
+    chain.push(nextMinor(last()))
+    chain.push(nextMajor(last()))
+    chain.push(nextMinor(last()))
+    chain.push(nextMajor(last()))
+    expect(chain).toEqual(["0.0", "0.1", "1.0", "1.1", "2.0"])
+    expect([...chain].reverse().sort(compareDocVersions)).toEqual(chain)
+    expect(compareDocVersions("1.1", "1.1")).toBe(0)
+  })
+
+  it("đầu vào sai ⇒ nextMinor/nextMajor/compare/isRelease đều ném lỗi (không đoán)", () => {
+    for (const bad of [" 1.0", "1.0 ", "-1.0", "1.-1", "1,0", "1..0", "a.b", "0.00"]) {
+      expect(() => nextMinor(bad), bad).toThrow(/Version tài liệu không hợp lệ/)
+      expect(() => nextMajor(bad), bad).toThrow(/Version tài liệu không hợp lệ/)
+      expect(() => isReleaseVersion(bad), bad).toThrow()
+    }
+    expect(() => compareDocVersions("1.0", "x")).toThrow()
+    expect(parseDocVersion("12.34")).toEqual({ major: 12, minor: 34 })
+  })
 })
