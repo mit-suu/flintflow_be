@@ -72,7 +72,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
           {
             block_id: { type: String, required: true },
             column_index: { type: Number, required: true, min: 0 },
-            header: { type: String, required: true },
+            // Ô tiêu đề cột có thể trống trong SRS thật ⇒ không `required` (Mongoose coi "" là thiếu) — FLF-179
+            header: { type: String, default: "" },
             field_path: { type: String, default: null },
             confidence,
             confirmed: { type: Boolean, default: false }
