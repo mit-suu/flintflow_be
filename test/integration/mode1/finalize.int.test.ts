@@ -23,6 +23,9 @@ import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { getDocument } from "../../../src/modules/render/assemble.service.js"
+import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
+import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -123,20 +126,81 @@ describe("finalize — FieldAnchor, block, profile", () => {
 })
 
 describe("finalize — DocVersion 0.0 + baseline imported", () => {
-  it("DocVersion 0.0 kind imported: file = bản gốc + stamp + bookmark, trỏ baseline imported", async () => {
+  it("DocVersion 0.0 kind imported: original_ref = bản gốc + stamp + bookmark; file_ref = bản render từ Spine + stamp (FLF-184); trỏ baseline imported", async () => {
     const { projectId, result, userId } = await importFinalized()
     const versions = await DocVersion.find({ projectId }).lean()
     expect(versions).toHaveLength(1)
     const v = versions[0]
     expect(v).toMatchObject({ version: "0.0", kind: "imported", based_on: null, cr_ids: [], baseline_ref: result.baseline.id })
     expect(String(v.created_by)).toBe(userId)
+    expect(v.original_ref).toBeTruthy()
+    expect(v.original_ref).not.toBe(v.file_ref)
 
-    const pkg = await DocxPackage.load(await docFileStore().load(v.file_ref))
-    expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
-    const fileBlocks = await readBlocks(pkg)
+    const original = await DocxPackage.load(await docFileStore().load(v.original_ref!))
+    expect(await readStamp(original)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
+    const fileBlocks = await readBlocks(original)
     const stored = await DocBlock.find({ projectId, doc_version: "0.0" }).sort({ "anchor.ordinal": 1 }).lean()
     expect(fileBlocks.map((b) => b.text)).toEqual(stored.map((b) => b.text))
     for (const b of fileBlocks.filter((x) => x.bookmark)) expect(stored.some((s) => s.block_id === blockIdOfBookmark(b.bookmark))).toBe(true)
+
+    const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
+    expect(await readStamp(rendered)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
+    const texts = (await readBlocks(rendered)).map((b) => b.text)
+    // Bản render mang nội dung Spine (không phải bản sao file gốc), tiêu đề theo file người dùng
+    expect(texts).toContain("1 Product Overview")
+    expect(texts).toContain(SRS_FIXTURE_TEXT.purpose)
+    expect(texts.some((t) => t.endsWith("Team Notes"))).toBe(true)
+  })
+
+  it("tải 0.0: mặc định bản render + DRAFT; variant=original ⇒ file gốc (tên _original); version không có file gốc ⇒ 404", async () => {
+    const { projectId } = await importFinalized()
+    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
+    expect(rendered.filename).toBe("Lumen_v0.0_DRAFT.docx")
+    expect((await readBlocks(await DocxPackage.load(rendered.data))).some((b) => b.text === "1 Product Overview")).toBe(true)
+    const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
+    expect(original.filename).toBe("Lumen_v0.0_original.docx")
+    expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
+    expect(toVersionDto(v as never)).toMatchObject({ version: "0.0", has_original_file: true })
+    await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
+    await expect(downloadVersion(projectId, "Lumen", "0.0", "original")).rejects.toMatchObject({ code: "DOC_VERSION_NOT_FOUND" })
+  })
+
+  it("DoD V2: bản làm việc ghép sẵn theo layout — thứ tự + tiêu đề như file gốc, mục FPT thiếu chèn cạnh nhóm, mục ngoài FPT giữ nguyên văn", async () => {
+    const { projectId } = await importFinalized()
+    const doc = await getDocument(projectId, "Lumen", { source: "draft" })
+    const layout = (await TemplateProfile.findOne({ projectId }).lean())!.layout.filter((l) => l.heading_text)
+    const strip = (t: string) => t.replace(/^[\d.]+\s+/, "")
+    const layoutIds = new Set(layout.map((l) => l.section_id))
+    // Mục của file: đúng thứ tự, đúng tiêu đề gốc (bỏ số gõ tay), số đánh lại theo cấp
+    expect(doc.sections.filter((s) => layoutIds.has(s.id)).map((s) => s.heading)).toEqual(layout.map((l) => strip(l.heading_text)))
+    const byId = new Map(doc.sections.map((s) => [s.id, s]))
+    expect(byId.get("fixed:1")).toMatchObject({ number: "1", heading: "Product Overview", level: 1 })
+    expect(byId.get("fixed:4.2.3")).toMatchObject({ number: "4.2.3", heading: "Performance" })
+    // External Interfaces (thiếu, nhóm "4" chưa có mục FPT nào) ⇒ mục con đầu tiên của heading nhóm "4 Non-Functional Requirements"
+    expect(byId.get("fixed:4.1")).toMatchObject({ number: "4.1", level: 2 })
+    // Screens Flow (thiếu) đứng ngay trước Screen Descriptions, cùng cấp
+    const ids = doc.sections.map((s) => s.id)
+    expect(ids.indexOf("fixed:3.1.1")).toBe(ids.indexOf("fixed:3.1.2") - 1)
+    expect(byId.get("fixed:3.1.1")).toMatchObject({ number: "3.1.1", heading: "Screens Flow", level: 3 })
+    // Mục riêng "5.9 Team Notes" ⇒ custom, nội dung nguyên văn
+    const notes = doc.sections.find((s) => s.heading === "Team Notes")!
+    expect(notes.id).toMatch(/^custom:/)
+    expect(notes.blocks).toEqual([{ type: "paragraph", runs: [{ text: "Internal notes that do not belong to the template." }] }])
+    expect(doc.watermark).toBe("DRAFT")
+  })
+
+  it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
+    mockOverrides.next = (prompt: string) => {
+      const out = fakeMode1(prompt)
+      if (out === undefined || !prompt.includes("# Import Extract") || !prompt.includes("Section (registry id): fixed:2.2.1")) return out
+      const id = /\[(B\d{4,})\] The diagram shows/.exec(prompt)?.[1]
+      return JSON.stringify({ ...(JSON.parse(out) as object), unmapped_block_ids: id ? [id] : [] })
+    }
+    const { projectId } = await importFinalized()
+    const doc = await getDocument(projectId, "Lumen", { source: "draft" })
+    const diagram = doc.sections.find((s) => s.id === "fixed:2.2.1")!
+    expect(diagram.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "The diagram shows UC-01 and UC-02." }] })
   })
 
   it("baseline type imported, doc_version 0.0, có snapshot Spine; import sang gap_review", async () => {

@@ -275,6 +275,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     )
     const targets = targetsOf(section_id)
     let usageId: string | null = null
+    const unmapped: string[] = []
     const heading = profile.heading_map.find((h) => h.section_id === section_id)
     const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
     for (const batch of targets.length ? chunkBlocks(aiBlocks) : []) {
@@ -295,6 +296,9 @@ export const runExtraction = async (projectId: string, userId: string, importId:
         return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
       }
       usageId = result.usageId
+      // Văn xuôi không trích được ⇒ finalize giữ nguyên văn làm phần nối của section (mode 1 v2 — FLF-184)
+      const inBatch = new Set(batch.map((b) => b.block_id))
+      unmapped.push(...result.data.unmapped_block_ids.filter((id) => inBatch.has(id) && !unmapped.includes(id)))
       items.push(
         ...itemsFromAi(result.data, {
           sectionId: section_id,
@@ -312,6 +316,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     draft.status = "done"
     draft.error = null
     draft.usage_id = usageId
+    draft.unmapped_block_ids = unmapped
     draft.markModified("fields")
     await draft.save()
   }

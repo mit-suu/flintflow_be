@@ -134,7 +134,7 @@ describe("mode 1 — I-4 chạy nền", () => {
 })
 
 describe("mode 1 — finalize, check, gap report", () => {
-  it("finalize: Spine một txn by import, version 0.0 có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
+  it("finalize: Spine một txn by import, version 0.0 (bản gốc) có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
     const { c, id, projectId } = await startImport()
     await c.extractAndWait(id)
     await c.patch("/import/fields", { import_id: id, confirm_all: true })
@@ -175,10 +175,10 @@ describe("mode 1 — finalize, check, gap report", () => {
     expect(fnBlock?.mentions).toEqual(expect.arrayContaining([{ entity: "use_case", id: "UC-01" }, { entity: "actor", id: "A01" }]))
     expect((await FieldAnchor.findOne({ projectId, entity_path: "use_cases[id=UC-01]" }).lean())?.block_ids.length).toBeGreaterThan(0)
 
-    // version 0.0: file có stamp + bookmark neo
+    // version 0.0: file gốc (original_ref) có stamp + bookmark neo; file_ref là bản render (FLF-184)
     const version = await DocVersion.findOne({ projectId, version: "0.0" }).lean()
     expect(version).toMatchObject({ kind: "imported", baseline_ref: fin.baseline.id })
-    const pkg = await DocxPackage.load(await docFileStore().load(version!.file_ref))
+    const pkg = await DocxPackage.load(await docFileStore().load(version!.original_ref ?? version!.file_ref))
     expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
     expect((await readBlocks(pkg))[0].bookmark).toBe("_ff_B0001")
 
@@ -225,7 +225,7 @@ describe("mode 1 — re-upload (UC-24)", () => {
   it("file sửa ngoài FlintFlow ⇒ diff theo block, không tạo version; /import sau baseline bị chặn", async () => {
     const { c, projectId } = await importToGapReview()
     const version = await DocVersion.findOne({ projectId, version: "0.0" }).lean()
-    const pkg = await DocxPackage.load(await docFileStore().load(version!.file_ref))
+    const pkg = await DocxPackage.load(await docFileStore().load(version!.original_ref ?? version!.file_ref))
     const blocks = await readBlocks(pkg)
     const target = blocks.find((b) => b.text.startsWith("The system shall respond"))!
     // người dùng sửa trong Word (không Track Changes): thay text trực tiếp
