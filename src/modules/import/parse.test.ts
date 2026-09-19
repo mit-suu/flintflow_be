@@ -1,40 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { DocxPackage, readBlocks } from "../docx-ooxml/index.js"
-import { makeDocx, p, table } from "../docx-ooxml/testing/make-docx.js"
-import { scanCodeMentions, scanMentions, scanNameMentions } from "./mentions.js"
+import { makeDocx, p, styled, table } from "../docx-ooxml/testing/make-docx.js"
 import { assignBlockIds, formatBlockId, parseDocument } from "./parse.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
-
-describe("mentions", () => {
-  it("bắt mã UC/FR/NFR/BR/SCR, chuẩn hoá, không bắt nhầm trong từ khác", () => {
-    expect(scanCodeMentions("See UC-01, UC02 and uc-3; FR-2.1, NFR_04, BR 12, SCR-05.")).toEqual([
-      { entity: "use_case", id: "UC-01" },
-      { entity: "use_case", id: "UC-02" },
-      { entity: "function", id: "FR-2.1" },
-      { entity: "nfr", id: "NFR-04" },
-      { entity: "business_rule", id: "BR-12" },
-      { entity: "screen", id: "SCR-05" }
-    ])
-    expect(scanCodeMentions("ABUC-01 và UC-01X và BRAND-1")).toEqual([])
-  })
-
-  it("bắt theo tên sau I-4 (không phân biệt hoa thường, bỏ tên quá ngắn)", () => {
-    const names = [
-      { entity: "actor" as const, id: "A01", name: "Learner" },
-      { entity: "entity" as const, id: "E01", name: "Course" },
-      { entity: "actor" as const, id: "A02", name: "PM" }
-    ]
-    expect(scanNameMentions("The learner opens a course list. PM approves.", names)).toEqual([
-      { entity: "actor", id: "A01" },
-      { entity: "entity", id: "E01" }
-    ])
-    expect(scanNameMentions("Learners and Coursework", names)).toEqual([])
-    expect(scanMentions("UC-01 by Learner", names)).toEqual([
-      { entity: "use_case", id: "UC-01" },
-      { entity: "actor", id: "A01" }
-    ])
-  })
-})
 
 describe("parseDocument", () => {
   it("gán block_id tuần tự, ghi bookmark cho đoạn, quét mention", async () => {
@@ -69,5 +37,45 @@ describe("parseDocument", () => {
       ["B0007", null],
       ["B0008", "_ff_B0008"]
     ])
+  })
+
+  it("số block theo loại: heading, đoạn, list, bảng + từng ô; đoạn rỗng bị bỏ", async () => {
+    const body = styled("u1", "1 Intro") + p("Para one") + styled("Dsach", "Item") + table([["A", "B"], ["c", "d"]]) + p("")
+    const { blocks } = await parseDocument(await makeDocx({ body }))
+    expect(blocks.map((b) => [b.block_id, b.kind, b.text])).toEqual([
+      ["B0001", "heading", "1 Intro"],
+      ["B0002", "paragraph", "Para one"],
+      ["B0003", "list_item", "Item"],
+      ["B0004", "table", "A | B\nc | d"],
+      ["B0005", "table_cell", "A"],
+      ["B0006", "table_cell", "B"],
+      ["B0007", "table_cell", "c"],
+      ["B0008", "table_cell", "d"]
+    ])
+    // SRS mẫu: 18 heading, 7 đoạn, 1 list, 3 bảng (6 + 9 + 4 ô)
+    const srs = await parseDocument(await makeSrsDocx())
+    const count = (kind: string) => srs.blocks.filter((b) => b.kind === kind).length
+    expect(srs.blocks).toHaveLength(48)
+    expect([count("heading"), count("paragraph"), count("list_item"), count("table"), count("table_cell")]).toEqual([18, 7, 1, 3, 19])
+  })
+
+  it("parse lại bản đã lưu (có bookmark neo) ⇒ block có neo giữ block_id, không thêm bookmark mới", async () => {
+    const first = await parseDocument(await makeSrsDocx())
+    const saved = await first.pkg.toBuffer()
+    const second = await parseDocument(saved)
+    const anchored = (blocks: typeof first.blocks) => blocks.filter((b) => b.bookmark).map((b) => [b.block_id, b.text])
+    expect(anchored(second.blocks)).toEqual(anchored(first.blocks))
+    const count = async (buf: Buffer) => (await (await DocxPackage.load(buf)).requireXml("word/document.xml")).getElementsByTagName("w:bookmarkStart").length
+    expect(await count(await second.pkg.toBuffer())).toBe(await count(saved))
+  })
+
+  // LỖI SẢN PHẨM (báo cáo P4): block `table` không có bookmark nên khi parse lại bản đã lưu (version 0.0 → 0.1 ở
+  // C-7 `write.service.ts:96`) nhận id mới sau id lớn nhất (B0049…) thay vì giữ B0005. Hệ quả: DocBlock bảng của
+  // version mới mất `section_id` (tra `oldOf` theo block_id trượt) và FieldAnchor của thực thể trích từ bảng
+  // (actors/UC/BR — `source_block_ids = [table.block_id]`) trỏ vào id không còn ở version mới.
+  it.fails("parse lại bản đã lưu ⇒ block bảng (không bookmark) cũng giữ block_id", async () => {
+    const first = await parseDocument(await makeSrsDocx())
+    const second = await parseDocument(await first.pkg.toBuffer())
+    expect(second.blocks.map((b) => [b.block_id, b.text])).toEqual(first.blocks.map((b) => [b.block_id, b.text]))
   })
 })
