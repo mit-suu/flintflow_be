@@ -145,7 +145,7 @@ const options = {
     },
     tags: [
       { name: "Auth", description: "Đăng ký, đăng nhập, refresh token, Google OAuth" },
-      { name: "Projects", description: "Metadata dự án (tên, domain, trạng thái) và tài liệu upload" },
+      { name: "Projects", description: "Metadata dự án (tên, domain, trạng thái, sourceMode) và tài liệu upload" },
       { name: "Chat Sessions", description: "Phiên chat: một session pipeline mỗi project, các session khác hỏi đáp / sửa qua change flow" },
       { name: "Spine", description: "Đọc Spine, áp lô op, impact, preview, undo, reconcile, traceability" },
       { name: "Pipeline", description: "Step registry, chạy step (SSE), gate, resume, tiến độ" },
@@ -154,8 +154,9 @@ const options = {
       { name: "Export", description: "Xem trước RenderedDocument thành .docx" },
       { name: "Notifications", description: "Thông báo in-app" },
       { name: "Billing", description: "Gói, mua credit qua payment_service" },
+      { name: "Feedback", description: "Góp ý của người dùng gửi từ app" },
       { name: "AI Actions", description: "Gọi action ngoài pipeline (chat, summarize_document) và ước tính giá" },
-      { name: "Admin", description: "Chỉ đọc: người dùng, số liệu, chi phí AI" }
+      { name: "Admin", description: "Chỉ đọc: người dùng, số liệu, chi phí AI, góp ý" }
     ],
     security: []
   },

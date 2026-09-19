@@ -126,13 +126,13 @@ router.get("/ai-cost", adminController.getAiCost)
  * @swagger
  * /api/v1/admin/feedback:
  *   get:
- *     summary: Phản hồi người dùng (stub — model feedback làm ở wave sau)
+ *     summary: Góp ý người dùng (mới nhất trước, kèm email/tên người gửi)
  *     tags: [Admin]
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Luôn là mảng rỗng ở vòng một
+ *         description: Danh sách góp ý, meta.total là tổng số
  *       403:
  *         description: Không phải admin
  */
