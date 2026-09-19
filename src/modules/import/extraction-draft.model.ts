@@ -27,6 +27,8 @@ export interface IExtractionDraft extends Document {
   status: ExtractionStatus
   fields: ExtractedField[]
   ops: unknown[]
+  /** Block AI báo không trích được (văn xuôi giới thiệu, ghi chú) — finalize giữ nguyên văn trong `custom_sections` (FLF-184). */
+  unmapped_block_ids: string[]
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
   error: string | null
@@ -60,6 +62,7 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
       default: []
     },
     ops: { type: [Schema.Types.Mixed], default: [] },
+    unmapped_block_ids: { type: [String], default: [] },
     usage_id: { type: String, default: null },
     error: { type: String, default: null }
   },

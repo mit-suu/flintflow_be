@@ -66,6 +66,44 @@ describe("buildLayout", () => {
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
     expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [] })
   })
+
+  it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {
+    const { layout, customSections } = buildLayout(BLOCKS, HEADINGS, new Set(["B0002", "B0004"]))
+    expect(layout.slice(0, 3).map((l) => [l.heading_text, l.level, l.section_id])).toEqual([
+      ["1 Introduction", 1, "fixed:1"],
+      ["", 2, "custom:CS01"],
+      ["1.4 References", 2, "custom:CS02"]
+    ])
+    expect(customSections[0]).toMatchObject({ heading: "", level: 2, blocks: [{ text: "Lumen is a learning platform." }, { text: "Purpose text." }] })
+  })
+
+  it("FLF-184: khối dưới heading nhóm luôn giữ (nhóm không trích); nội dung sau heading con cùng section về section đó, không dồn vào mục riêng đứng trước", () => {
+    const blocks: LayoutBlock[] = [
+      h("B0001", "2 User Requirements", 1, "group:2"),
+      p("B0002", "This chapter lists who uses Lumen.", null),
+      h("B0003", "2.1 Actors", 2, "fixed:2.1"),
+      h("B0004", "2.1.9 Notes", 3),
+      p("B0005", "Draft note", null),
+      h("B0006", "2.1.10 More actors", 3, "fixed:2.1"),
+      p("B0007", "Guests are read-only.", "fixed:2.1"),
+      p("B0008", "Extracted row", "fixed:2.1")
+    ]
+    const headings = new Map([
+      ["B0001", "group:2"],
+      ["B0003", "fixed:2.1"],
+      ["B0004", "unmapped"],
+      ["B0006", "fixed:2.1"]
+    ])
+    const { layout, customSections } = buildLayout(blocks, headings, new Set(["B0007"]))
+    expect(layout.map((l) => [l.heading_text, l.level, l.section_id])).toEqual([
+      ["2 User Requirements", 1, "group:2"],
+      ["", 2, "custom:CS01"],
+      ["2.1 Actors", 2, "fixed:2.1"],
+      ["2.1.9 Notes", 3, "custom:CS02"],
+      ["", 3, "custom:CS03"]
+    ])
+    expect(customSections.map((c) => c.blocks.map((b) => b.text))).toEqual([["This chapter lists who uses Lumen."], ["Draft note"], ["Guests are read-only."]])
+  })
 })
 
 describe("sectionsWithContent", () => {

@@ -82,11 +82,35 @@ describe("gap report — gộp nhóm", () => {
       yellow: open.filter((f) => f.level === "yellow").length,
       missing_sections: report.missing_sections.length,
       unmapped_headings: report.unmapped_headings.length,
-      low_confidence_fields: report.low_confidence_fields.length
+      low_confidence_fields: report.low_confidence_fields.length,
+      missing_fpt_sections: report.missing_fpt_sections.length
     })
     // FL902 (test đặt) + section_empty của đầu mục FPT file không có (D6, FLF-183)
     expect(report.totals.red).toBe(1 + open.filter((f) => f.level === "red" && f.rule_id === "section_empty").length)
     expect(report.doc_version).toBe("0.0")
+  })
+
+  it("FLF-184: thiếu mục FPT theo kế hoạch step (D6); cờ + mục xếp theo layout file upload; mục riêng loại custom, phần nối không liệt kê", async () => {
+    const { projectId } = await importFinalized()
+    await seedFlags(projectId)
+    const report = gapReportSchema.parse(await buildGapReport(projectId))
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    // Mỗi section FPT thiếu một dòng, step đầu tiên sở hữu nó; Screens Flow + Business Rules… file không có
+    const missing = new Map(report.missing_fpt_sections.map((m) => [m.section_id, m]))
+    expect(missing.get("fixed:3.1.1")).toMatchObject({ title: "Screens Flow", step_id: "S-4.2", in_layout: false })
+    expect(missing.has("fixed:2.1")).toBe(false)
+    expect(new Set(report.missing_fpt_sections.map((m) => m.section_id)).size).toBe(report.missing_fpt_sections.length)
+    const planMissing = new Set(profile.step_plan.filter((p) => p.missing && p.state !== "hidden").flatMap((p) => p.section_ids))
+    expect(new Set(missing.keys())).toEqual(planMissing)
+    // Layout: đúng thứ tự file, bỏ phần nối (tiêu đề rỗng)
+    expect(report.layout.map((l) => l.heading)).toEqual(profile.layout.filter((l) => l.heading_text).map((l) => l.heading_text))
+    expect(report.layout.find((l) => l.heading === "5.9 Team Notes")?.kind).toBe("custom")
+    expect(report.layout.find((l) => l.heading === "2 User Requirements")?.kind).toBe("group")
+    expect(report.layout.find((l) => l.section_id === "fixed:4.2.3")).toMatchObject({ kind: "fpt", red: 1 })
+    // Cờ theo section: section trong layout theo thứ tự file, section ngoài layout sau cùng
+    const order = new Map(report.layout.map((l) => [l.section_id, l.order]))
+    const ranks = report.sections.map((s) => order.get(s.section_id) ?? Infinity)
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b))
   })
 
   it("section bắt buộc thiếu = required_sections của profile; heading unmapped giữ nguyên văn", async () => {
@@ -128,6 +152,7 @@ describe("gap report — .docx", () => {
     const summary = blocks.find((b) => b.kind === "table")!.rows!
     expect(summary).toEqual([
       ["Hạng mục", "Số lượng"],
+      ["Thiếu mục FPT (đỏ)", String(report.totals.missing_fpt_sections)],
       ["Cờ đỏ", String(report.totals.red)],
       ["Cờ vàng", String(report.totals.yellow)],
       ["Section bắt buộc thiếu", String(report.totals.missing_sections)],

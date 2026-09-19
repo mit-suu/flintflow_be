@@ -6,6 +6,7 @@
 
 import { DocxPackage, addDraftWatermark, blockIdOfBookmark, paragraphRevisions, readBlocks } from "../docx-ooxml/index.js"
 import type { DocBlockDto } from "../import/import.dto.js"
+import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { diffBlockLists } from "./block-diff.js"
 import { toDocBlockDto } from "./block-dto.js"
@@ -22,6 +23,7 @@ export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
   cr_ids: [...v.cr_ids],
   baseline_id: v.baseline_ref ?? null,
   has_clean_file: !!v.clean_file_ref,
+  has_original_file: !!v.original_ref,
   created_by: String(v.created_by),
   created_at: toIso(v.createdAt)!
 })
@@ -50,8 +52,13 @@ export interface DownloadFile {
   data: Buffer
 }
 
-export const downloadVersion = async (projectId: string, projectName: string, version: string, variant: "auto" | "tracked"): Promise<DownloadFile> => {
+export const downloadVersion = async (projectId: string, projectName: string, version: string, variant: "auto" | "tracked" | "original"): Promise<DownloadFile> => {
   const v = await requireDocVersion(projectId, version)
+  if (variant === "original") {
+    // Bản gốc người dùng upload (có stamp) — không watermark, tên theo version + hậu tố _original
+    if (!v.original_ref) throw new Mode1Error("DOC_VERSION_NOT_FOUND", `Version ${v.version} không có file gốc (chỉ bản import 0.0)`)
+    return { filename: downloadFileName(projectName, v.version).replace(/(_DRAFT)?.docx$/, "_original.docx"), data: await docFileStore().load(v.original_ref) }
+  }
   const release = isReleaseVersion(v.version)
   if (release && variant === "auto" && v.clean_file_ref) {
     return { filename: downloadFileName(projectName, v.version), data: await docFileStore().load(v.clean_file_ref) }
