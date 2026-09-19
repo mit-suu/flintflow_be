@@ -7,9 +7,10 @@
  *   độ tin thấp ở I-3).
  * - Mục lục (TOC) bị loại vì trùng text với heading.
  * - Bookmark `_ff_<blockId>` có thể bị Word dời ra ngoài `w:p` (đoạn rỗng, ô bảng) ⇒ gắn cho đoạn kế tiếp.
+ * - Bảng cấp 1 neo bằng `_fft_<blockId>` trong đoạn đầu của ô đầu (FLF-178) — nằm ngay trước bảng cũng nhận.
  */
 
-import { BLOCK_BOOKMARK_PREFIX, type DocBlockKind, type HeadingDetector } from "../import/import.constants.js"
+import { BLOCK_BOOKMARK_PREFIX, TABLE_BOOKMARK_PREFIX, type DocBlockKind, type HeadingDetector } from "../import/import.constants.js"
 import type { DocxPackage } from "./package.js"
 import { paragraphText, textHash } from "./text.js"
 import { NS, isW, maxWId, wAll, wAttr, wEl, wKid, wKids } from "./xml.js"
@@ -126,6 +127,21 @@ const ffBookmarkOf = (node: Element): string | null => {
   return null
 }
 
+/** Neo `_fft_` của bảng: bookmark đầu tiên mang tiền tố bảng bên trong `w:tbl`. */
+const tableBookmarkOf = (tbl: Element): string | null => {
+  for (const b of wAll(tbl, "bookmarkStart")) {
+    const name = wAttr(b, "name")
+    if (name?.startsWith(TABLE_BOOKMARK_PREFIX)) return name
+  }
+  return null
+}
+
+/** Đoạn đầu tiên của ô đầu tiên — nơi ghi neo của bảng. */
+const firstCellParagraph = (tbl: Element): Element | null => {
+  const tc = wKids(tbl, "tr").flatMap((tr) => wKids(tr, "tc"))[0]
+  return (tc && wKids(tc, "p")[0]) ?? null
+}
+
 /** Tách block từ DOM (hàm thuần trên DOM, không đọc zip). */
 export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): OoxmlBlock[] => {
   const styles = readStyles(stylesDoc)
@@ -135,6 +151,7 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
   const headingStack: { level: number; text: string }[] = []
   const seenBookmarks = new Set<string>()
   let pendingBookmark: string | null = null
+  let pendingTableBookmark: string | null = null
   let tableCount = 0
 
   const push = (b: Omit<OoxmlBlock, "ordinal" | "heading_path" | "text_hash">): OoxmlBlock => {
@@ -222,7 +239,11 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
       return
     }
     const index = tableCount++
-    push({ kind: "table", level: null, heading_detector: null, style_name: null, bookmark: null, para_id: null, xml_path: path, text, editable: false, cell: null, rows, element: tbl })
+    const own = tableBookmarkOf(tbl) ?? pendingTableBookmark
+    pendingTableBookmark = null
+    const bookmark = own && !seenBookmarks.has(own) ? own : null
+    if (bookmark) seenBookmarks.add(bookmark)
+    push({ kind: "table", level: null, heading_detector: null, style_name: null, bookmark, para_id: null, xml_path: path, text, editable: false, cell: null, rows, element: tbl })
     rowsEl.forEach((tr, ri) =>
       wKids(tr, "tc").forEach((tc, ci) => walk(tc, `${path}/tr[${ri}]/tc[${ci}]`, { table: index, row: ri, col: ci }))
     )
@@ -253,6 +274,7 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
         case "bookmarkStart": {
           const name = wAttr(c, "name")
           if (name?.startsWith(BLOCK_BOOKMARK_PREFIX)) pendingBookmark = name
+          else if (name?.startsWith(TABLE_BOOKMARK_PREFIX) && !cell) pendingTableBookmark = name
           break
         }
       }
@@ -268,11 +290,17 @@ export const readBlocks = async (pkg: DocxPackage): Promise<OoxmlBlock[]> =>
 
 export const bookmarkName = (blockId: string): string => `${BLOCK_BOOKMARK_PREFIX}${blockId}`
 
-export const blockIdOfBookmark = (name: string | null): string | null =>
-  name?.startsWith(BLOCK_BOOKMARK_PREFIX) ? name.slice(BLOCK_BOOKMARK_PREFIX.length) : null
+export const tableBookmarkName = (blockId: string): string => `${TABLE_BOOKMARK_PREFIX}${blockId}`
 
-/** Block neo được bằng bookmark: mọi đoạn (không gồm bảng — bảng neo qua vị trí). */
-export const isAnchorable = (b: OoxmlBlock): boolean => isW(b.element, "p")
+export const blockIdOfBookmark = (name: string | null): string | null =>
+  name?.startsWith(TABLE_BOOKMARK_PREFIX)
+    ? name.slice(TABLE_BOOKMARK_PREFIX.length)
+    : name?.startsWith(BLOCK_BOOKMARK_PREFIX)
+      ? name.slice(BLOCK_BOOKMARK_PREFIX.length)
+      : null
+
+/** Block neo được bằng bookmark: mọi đoạn + bảng cấp 1 (neo `_fft_` trong ô đầu). Bảng lồng (`unsupported`) thì không. */
+export const isAnchorable = (b: OoxmlBlock): boolean => isW(b.element, "p") || (b.kind === "table" && !!firstCellParagraph(b.element))
 
 /**
  * Ghi bookmark ẩn `_ff_<blockId>` vào đầu mỗi đoạn chưa có neo (G3). `assign` trả block id cho block;
@@ -288,13 +316,15 @@ export const ensureBlockBookmarks = (blocks: OoxmlBlock[], assign: (b: OoxmlBloc
     const doc = b.element.ownerDocument
     nextId ??= maxWId(doc, ["bookmarkStart", "bookmarkEnd"]) + 1
     const id = String(nextId++)
-    const name = bookmarkName(blockId)
+    const isTable = !isW(b.element, "p")
+    const p = isTable ? firstCellParagraph(b.element)! : b.element
+    const name = isTable ? tableBookmarkName(blockId) : bookmarkName(blockId)
     const start = wEl(doc, "bookmarkStart", { id, name })
     const end = wEl(doc, "bookmarkEnd", { id })
-    const pPr = wKid(b.element, "pPr")
-    const ref = pPr ? pPr.nextSibling : b.element.firstChild
-    b.element.insertBefore(end, ref)
-    b.element.insertBefore(start, end)
+    const pPr = wKid(p, "pPr")
+    const ref = pPr ? pPr.nextSibling : p.firstChild
+    p.insertBefore(end, ref)
+    p.insertBefore(start, end)
     b.bookmark = name
     added++
   }
