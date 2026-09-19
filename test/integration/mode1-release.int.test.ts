@@ -12,6 +12,7 @@ import app from "../../src/app.js"
 import { seedFixture } from "../setup.js"
 import { mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
 import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeMode1, mode1Api } from "../helpers/mode1.js"
+import { fillCoreSections, markBaselineV1 } from "../helpers/mode1-v2.js"
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema } from "../../src/modules/change-request/change-request.dto.js"
 import { compareResponseSchema, releaseResponseSchema, versionBlocksResponseSchema, versionsResponseSchema } from "../../src/modules/doc-version/doc-version.dto.js"
@@ -48,6 +49,8 @@ const projectWithRevision = async () => {
   await c.extractAndWait(id)
   await c.patch("/import/fields", { import_id: id, confirm_all: true })
   expect((await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })).status).toBe(200)
+  // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step, để release chỉ còn chặn bởi cờ test đặt
+  await fillCoreSections(projectId)
 
   const created = await c.post("/change-requests", { title: "Faster", description: "1 second instead of 2 seconds", source: { kind: "verbal" }, requester: "PM" })
   const cr = `/change-requests/${created.body.data.change_request.cr_id}`
@@ -168,6 +171,8 @@ describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
   it("/changes, /changes/preview, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; chat hỏi đáp vẫn đi", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
+    // D3 (FLF-183): chặn chỉ áp sau baseline v1
+    await markBaselineV1(projectId)
     const auth = { Authorization: `Bearer ${seeded.token}` }
     const base = `/api/v1/projects/${projectId}`
     const version = (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number

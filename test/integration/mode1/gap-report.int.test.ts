@@ -84,7 +84,8 @@ describe("gap report — gộp nhóm", () => {
       unmapped_headings: report.unmapped_headings.length,
       low_confidence_fields: report.low_confidence_fields.length
     })
-    expect(report.totals.red).toBe(1)
+    // FL902 (test đặt) + section_empty của đầu mục FPT file không có (D6, FLF-183)
+    expect(report.totals.red).toBe(1 + open.filter((f) => f.level === "red" && f.rule_id === "section_empty").length)
     expect(report.doc_version).toBe("0.0")
   })
 
