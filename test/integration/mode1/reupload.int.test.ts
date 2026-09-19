@@ -50,13 +50,18 @@ const newPara = (doc: Document, text: string) => {
   return el
 }
 
-/** Tải file version 0.0 (có stamp + bookmark), sửa như người dùng sửa trong Word. */
+/** Tải file version 0.0 (bản render từ Spine + stamp — FLF-186), sửa như người dùng sửa trong Word. */
 const editVersion = async (projectId: string, fn: (doc: Document) => void) => {
   const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
-  // Bản 0.0 lưu bản render (FLF-184); re-upload vẫn so theo block của file gốc tới V4
-  const pkg = await DocxPackage.load(await docFileStore().load(v.original_ref ?? v.file_ref))
+  const pkg = await DocxPackage.load(await docFileStore().load(v.file_ref))
   fn(await pkg.requireXml("word/document.xml"))
   return { pkg, buffer: await pkg.toBuffer() }
+}
+
+const paraEndingWith = (doc: Document, suffix: string): Element => {
+  const hit = Array.from(doc.getElementsByTagNameNS(W, "p")).find((x) => paraText(x).endsWith(suffix))
+  if (!hit) throw new Error(`Không thấy đoạn kết thúc bằng "${suffix}"`)
+  return hit
 }
 
 const snapshotCounts = async (projectId: string) => ({
@@ -66,30 +71,32 @@ const snapshotCounts = async (projectId: string) => ({
 })
 
 describe("re-upload — diff theo block", () => {
-  it("thêm + xoá + sửa + di chuyển ⇒ đúng từng loại, block_id theo neo; không tạo version, không đổi Spine/block", async () => {
+  it("so với bản render 0.0 (FLF-186): thêm + xoá + sửa + di chuyển ⇒ đúng từng loại (khớp theo text); không tạo version, không đổi Spine/block", async () => {
     const { projectId, userId, importId } = await importFinalized()
-    const blockOf = async (text: string) => (await DocBlock.findOne({ projectId, text }).lean())!.block_id
-    const [perfId, diagramId, purposeId] = [await blockOf(SRS_FIXTURE_TEXT.perf), await blockOf("The diagram shows UC-01 and UC-02."), await blockOf(SRS_FIXTURE_TEXT.purpose)]
     const before = await snapshotCounts(projectId)
+    const EDITED = "Lumen is an online learning platform for large training centers."
+    const NOTES = "Internal notes that do not belong to the template."
+    let moved = ""
 
     const { buffer } = await editVersion(projectId, (doc) => {
-      setText(para(doc, SRS_FIXTURE_TEXT.perf), "The system shall respond within 1 second.")
-      const del = para(doc, "The diagram shows UC-01 and UC-02.")
+      const purpose = para(doc, SRS_FIXTURE_TEXT.purpose)
+      setText(purpose, EDITED)
+      const del = para(doc, NOTES)
       del.parentNode!.removeChild(del)
-      const mv = para(doc, SRS_FIXTURE_TEXT.purpose)
-      mv.parentNode!.removeChild(mv)
-      const notes = para(doc, "Internal notes that do not belong to the template.")
-      notes.parentNode!.insertBefore(mv, notes)
-      notes.parentNode!.insertBefore(newPara(doc, "Added after baseline."), notes.nextSibling)
+      const heading = paraEndingWith(doc, "Team Notes")
+      moved = paraText(heading)
+      heading.parentNode!.removeChild(heading)
+      purpose.parentNode!.insertBefore(heading, purpose.nextSibling)
+      heading.parentNode!.insertBefore(newPara(doc, "Added after baseline."), heading.nextSibling)
     })
     const diff = await reupload(projectId, userId, fileOf(buffer, "SRS_Lumen_v2.docx"))
     const dto = toReuploadDto(diff)
     expect(dto).toMatchObject({ original_name: "SRS_Lumen_v2.docx", against_version: "0.0", summary: { added: 1, removed: 1, modified: 1, moved: 1 } })
     expect(dto.blocks).toEqual(
       expect.arrayContaining([
-        { block_id: perfId, change: "modified", before: SRS_FIXTURE_TEXT.perf, after: "The system shall respond within 1 second." },
-        { block_id: diagramId, change: "removed", before: "The diagram shows UC-01 and UC-02." },
-        { block_id: purposeId, change: "moved", before: SRS_FIXTURE_TEXT.purpose, after: SRS_FIXTURE_TEXT.purpose },
+        { block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED },
+        { block_id: null, change: "removed", before: NOTES },
+        { block_id: null, change: "moved", before: moved, after: moved },
         { block_id: null, change: "added", after: "Added after baseline." }
       ])
     )
@@ -111,7 +118,7 @@ describe("re-upload — diff theo block", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
   })
 
-  it("file không stamp (bản gốc sửa ngoài) vẫn so được theo text", async () => {
+  it("file không stamp (bản gốc sửa ngoài) vẫn so được theo text với bản render", async () => {
     const { projectId, userId } = await importFinalized()
     const original = await makeSrsDocx()
     const pkg = await DocxPackage.load(original)
@@ -119,7 +126,10 @@ describe("re-upload — diff theo block", () => {
     const extra = para(doc, SRS_FIXTURE_TEXT.purpose)
     extra.parentNode!.insertBefore(newPara(doc, "Brand new paragraph."), extra.nextSibling)
     const dto = toReuploadDto(await reupload(projectId, userId, fileOf(await pkg.toBuffer())))
-    expect(dto.summary).toEqual({ added: 1, removed: 0, modified: 0, moved: 0 })
+    expect(dto.against_version).toBe("0.0")
+    expect(dto.blocks).toContainEqual({ block_id: null, change: "added", after: "Brand new paragraph." })
+    // đoạn chung giữa bản gốc và bản render (mô tả sản phẩm) khớp được
+    expect(dto.blocks.some((b) => b.before === SRS_FIXTURE_TEXT.purpose || b.after === SRS_FIXTURE_TEXT.purpose)).toBe(false)
   })
 })
 
