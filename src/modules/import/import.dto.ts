@@ -125,7 +125,7 @@ export const STEP_PLAN_STATES = ["applied", "hidden", "enabled"] as const
 export const stepPlanEntrySchema = z.object({
   step_id: z.string().min(1),
   state: z.enum(STEP_PLAN_STATES),
-  /** Đầu mục mẫu FPT mà file không có (hoặc chỉ có heading) ⇒ "Thiếu" + cờ đỏ `core_section_missing`. */
+  /** Đầu mục mẫu FPT mà file không có (hoặc chỉ có heading) ⇒ "Thiếu" + cờ đỏ `section_empty` (hồ sơ luật mode 1 giữ đỏ — FLF-183). */
   missing: z.boolean(),
   /** Section do step sở hữu (FPT). */
   section_ids: z.array(z.string()),
@@ -139,6 +139,7 @@ export const stepPlanResponseSchema = z.object({ steps: z.array(stepPlanEntrySch
 
 /** `PATCH /projects/:id/step-plan` — bật step ẩn (`enabled: true`) hoặc tắt step đã bật chưa có dữ liệu. */
 export const stepPlanPatchRequestSchema = z.object({ step_id: z.string().min(1), enabled: z.boolean() })
+export type StepPlanPatchRequest = z.infer<typeof stepPlanPatchRequestSchema>
 
 export const reviewFieldSchema = z.object({
   section_id: z.string().min(1),

@@ -46,12 +46,22 @@ describe("finalize — Spine", () => {
     expect(result.spine_version).toBeGreaterThan(baseVersionBefore)
   })
 
-  it("luật 'step chưa accept' không bắn cờ vô nghĩa ở Spine import (không có step nào)", async () => {
+  it("kế hoạch step (FLF-183): steps[] seed theo template; không cờ stale/awaiting — step accepted có last_seq của lô import", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
-    // Plan §6 2C mô tả "đánh steps[] sở hữu = accepted"; bản P2 chọn hướng P0 §3.1: loại các luật dựa trên step
-    // bằng hồ sơ luật mode 1 và để `steps[]` rỗng. Kiểm mục đích: không có cờ nào về step/section chưa duyệt.
-    expect(spine.steps).toEqual([])
+    // Mode 1 v2: step sở hữu section có nội dung ⇒ accepted; đầu mục FPT thiếu ⇒ pending; Brief ⇒ skipped
+    const status = (id: string) => spine.steps.find((s) => s.id === id)?.status
+    expect(status("B-0.1")).toBe("skipped")
+    expect(status("S-1.1")).toBe("skipped")
+    expect(status("S-3.1")).toBe("accepted")
+    const plan = (await TemplateProfile.findOne({ projectId }).lean())!.step_plan
+    const missing = plan.filter((p) => p.state === "applied" && p.missing)
+    expect(missing.length).toBeGreaterThan(0)
+    for (const p of missing) expect(status(p.step_id), p.step_id).toBe("pending")
+    for (const p of plan.filter((x) => x.state === "applied" && !x.missing && x.section_ids.length)) expect(status(p.step_id), p.step_id).toBe("accepted")
+    for (const p of plan.filter((x) => x.state === "hidden")) expect(status(p.step_id), p.step_id).toBe("skipped")
+    expect(spine.progress.current_step).not.toBeNull()
+    expect(status(spine.progress.current_step!)).toBe("pending")
     const stepRules = ["section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline"]
     expect(spine.flags.filter((f) => stepRules.includes(f.rule_id))).toEqual([])
     // màn trích từ tài liệu không ở trạng thái chờ mô tả chi tiết của mode 2

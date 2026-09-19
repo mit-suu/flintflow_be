@@ -90,13 +90,15 @@ describe("buildImportOps", () => {
 })
 
 describe("hồ sơ luật mode 1 + cờ AI", () => {
-  it("loại array_empty / non_english_content, hạ section_empty xuống vàng", () => {
+  it("loại array_empty / non_english_content; section_empty giữ đỏ (D6, FLF-183)", () => {
     const spine = createEmptySpine({ name: "Lumen" })
     const all = runDeterministicCheck(spine)
     expect(all.some((c) => c.rule_id === "array_empty")).toBe(true)
     const mode1 = runDeterministicCheck(spine, [], { ruleProfile: MODE1_RULE_PROFILE })
     expect(mode1.some((c) => c.rule_id === "array_empty")).toBe(false)
-    expect(mode1.filter((c) => c.rule_id === "section_empty").every((c) => c.level === "yellow")).toBe(true)
+    const empty = mode1.filter((c) => c.rule_id === "section_empty")
+    expect(empty.length).toBeGreaterThan(0)
+    expect(empty.every((c) => c.level === "red")).toBe(true)
     expect(applyRuleProfile(all, undefined)).toBe(all)
   })
 

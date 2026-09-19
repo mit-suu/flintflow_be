@@ -33,7 +33,7 @@ import { getProjectById } from "../project/project.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { changeRequiresCr, prefillFrom } from "../import/mode1-guard.js"
+import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
 
@@ -64,9 +64,12 @@ const authorize = async (req: Request): Promise<Authorized> => {
 const rawInstruction = (req: Request): string | undefined =>
   typeof req.body?.instruction === "string" ? req.body.instruction : undefined
 
-/** Mode 1: mọi sửa phải qua change request ⇒ 409 CHANGE_REQUIRES_CR kèm nội dung điền sẵn (FLF-171, G9). */
-const guardMode1 = (auth: Authorized, instruction?: string): void => {
-  if (auth.mode === "import") throw changeRequiresCr(prefillFrom(instruction))
+/**
+ * Mode 1: sau baseline v1 (sign-off) / release mọi sửa phải qua change request ⇒ 409 CHANGE_REQUIRES_CR kèm nội dung
+ * điền sẵn (FLF-171, G9). Trước đó sửa tự do như mode 2 (mode 1 v2, D3 — FLF-183).
+ */
+const guardMode1 = async (auth: Authorized, instruction?: string): Promise<void> => {
+  if (auth.mode === "import" && (await changesRequireCr(auth.projectId))) throw changeRequiresCr(prefillFrom(instruction))
 }
 
 const parse = <T extends z.ZodType>(schema: T, value: unknown): z.infer<T> => {
@@ -88,7 +91,7 @@ const sendDomainError = (res: Response, err: unknown): Response => {
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req))
   const body = parse(changesRequestSchema, req.body)
   try {
     const result = await changeService.apply(auth.projectId, auth.userId, body, auth.init)
@@ -105,7 +108,7 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
 
 export const previewChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req))
   const body = parse(changesRequestSchema, req.body)
   try {
     return sendSuccess(res, 200, await changeService.preview(auth.projectId, auth.userId, body, auth.init))
@@ -116,7 +119,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req))
   const body = parse(reconcileRequestSchema, req.body)
   try {
     const result = await reconcileService.reconcile(auth.projectId, auth.userId, body, auth.init)
@@ -134,7 +137,7 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
 
 export const undoLastChange = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req))
   const body = parse(undoRequestSchema, req.body)
   try {
     const result = await undoService.undoLast(auth.projectId, auth.userId, { base_version: body.base_version })
