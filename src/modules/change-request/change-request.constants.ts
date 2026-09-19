@@ -1,7 +1,8 @@
 /** Hằng số change request mode 1 — không phụ thuộc mongoose (DTO, FE types dùng chung). FLF-171, plan §5.4. */
 
 /** Nguồn của CR (UC-48): bắt buộc, để truy vết yêu cầu sửa đến từ đâu. */
-export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal"] as const
+/** `chat` (FLF-182): CR tự tạo từ lệnh sửa trong chat sau baseline v1 (mode 1 v2, D3). */
+export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat"] as const
 export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
 
 /** Cách C-3 tìm ra vị trí (nút 3.4): liên kết Spine ↔ block, mã thực thể nhắc trong text, từ khoá. */

@@ -76,6 +76,12 @@ describe("sectionsOfPath", () => {
     expect(sectionsOfPath(FIXTURE, "functions[id=FN001].order")).toEqual({ owner: [], reads: [], derived: [] })
   })
 
+  it("mục riêng custom_sections ⇒ chỉ section custom:<id> của chính nó (FLF-182)", () => {
+    expect(sectionsOfPath(FIXTURE, "custom_sections[id=CS01].blocks")).toEqual({ owner: ["custom:CS01"], reads: [], derived: [] })
+    expect(sectionsOfPath(FIXTURE, "custom_sections[]", { value: { id: "CS02" } }).owner).toEqual(["custom:CS02"])
+    expect(sectionsOfPath(FIXTURE, "custom_sections[]").owner).toEqual([])
+  })
+
   it("màn: tên đọc ra function của màn; primary_function_id suy dẫn wireframe của đúng màn", () => {
     const impact = sectionsOfPath(FIXTURE, "screens[id=S07].name")
     expect(impact.owner).toEqual(["fixed:3.1.2"])

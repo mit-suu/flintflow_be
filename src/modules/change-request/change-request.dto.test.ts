@@ -34,6 +34,10 @@ describe("change-request DTO — request", () => {
     expect(createChangeRequestSchema.safeParse({ ...create, source: { kind: "rumor" } }).success).toBe(false)
   })
 
+  it("nguồn chat (FLF-182): CR tạo từ lệnh sửa trong chat sau baseline v1", () => {
+    expect(createChangeRequestSchema.parse({ ...create, source: { kind: "chat", ref: "chat-session 66f0…" } }).source.kind).toBe("chat")
+  })
+
   it("trả lời làm rõ: 1–20 câu, không rỗng", () => {
     expect(answersRequestSchema.safeParse({ answers: ["Mọi phiên, kể cả mobile"] }).success).toBe(true)
     expect(answersRequestSchema.safeParse({ answers: [] }).success).toBe(false)

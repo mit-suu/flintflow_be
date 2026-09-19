@@ -197,7 +197,8 @@
               "pending",
               "in_progress",
               "accepted",
-              "revision_requested"
+              "revision_requested",
+              "skipped"
             ]
           },
           "first_seq": {
@@ -910,6 +911,96 @@
         "additionalProperties": false
       }
     },
+    "custom_sections": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "heading": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "paragraph",
+                    "list_item",
+                    "table",
+                    "image"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                },
+                "rows": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "image_ref": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "text",
+                "rows",
+                "image_ref"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "import",
+              "manual"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "heading",
+          "level",
+          "blocks",
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    },
     "diagrams": {
       "type": "array",
       "items": {
@@ -1267,6 +1358,7 @@
     "other_requirements",
     "glossary",
     "addendum",
+    "custom_sections",
     "diagrams",
     "assumptions",
     "flags",
