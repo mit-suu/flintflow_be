@@ -38,9 +38,9 @@ import {
 import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modules/doc-version/doc-version.dto.js"
 import { release } from "../../../src/modules/doc-version/release.service.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
-import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { DocFileNotFoundError, docFileStore, gridFsDocFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
-import { DocxPackage, listComments, listRevisions, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, readBlocks, readStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { lockedPaths } from "../../helpers/mode1-cr-p4.js"
 import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
@@ -49,10 +49,10 @@ const PERF = "The system shall respond"
 beforeEach(() => {
   resetMockLlm()
   failSnapshot.on = false
-  routeReplaceCr("2 seconds", "1 second", { extraKeywords: ["Performance"], commentOn: /^\d+(\.\d+)* / })
+  routeReplaceCr("2 seconds", "1 second", { extraKeywords: ["Passwords"], commentOn: /^business_rules\[/ })
 })
 
-/** Import ⇒ CR-001 (sửa câu perf + comment heading) ⇒ 0.1. */
+/** Import ⇒ CR-001 (sửa NFR perf + ghi chú luật mật khẩu) ⇒ 0.1. */
 const projectWithRevision = async () => {
   const ctx = await importedProject()
   const first = await writeCr(ctx.c, "Faster", "1 second instead of 2 seconds")
@@ -120,7 +120,7 @@ describe("release — chặn", () => {
 })
 
 describe("release — bản sạch + baseline", () => {
-  it("1.0: bản sạch không còn w:ins/w:del/comment CR, stamp release; bản tracked giữ revision + comment; baseline type release snapshot Spine", async () => {
+  it("1.0 = render snapshot Spine (FLF-186): stamp release, nội dung sau CR, không Track Changes; baseline type release snapshot Spine", async () => {
     const { c, projectId } = await projectWithRevision()
     const spineBefore = (await spineRepository.get(projectId))!
     const rel = await released(c)
@@ -135,28 +135,17 @@ describe("release — bản sạch + baseline", () => {
     const v10 = await DocVersion.findOne({ projectId, version: "1.0" }).lean()
     expect(v10).toMatchObject({ kind: "release", baseline_ref: rel.baseline.id, cr_ids: ["CR-001"] })
 
-    // bản sạch
+    // bản sạch = bản render (file_ref và clean_file_ref cùng một file)
+    expect(v10!.clean_file_ref).toBe(v10!.file_ref)
     const clean = await DocxPackage.load(await docFileStore().load(v10!.clean_file_ref!))
     expect(await readStamp(clean)).toEqual({ project_id: projectId, version: "1.0", source: "release" })
-    expect(await listRevisions(clean)).toEqual([])
-    expect((await listComments(clean)).filter((x) => /^CR-\d+$/.test(x.author))).toEqual([])
     const cleanXml = await documentXml(await docFileStore().load(v10!.clean_file_ref!))
     expect(cleanXml).not.toMatch(/<w:ins\b|<w:del\b|<w:delText\b|commentReference|commentRangeStart/)
     const cleanBlocks = await readBlocks(clean)
     expect(cleanBlocks.find((b) => b.text.startsWith(PERF))?.text).toContain("1 second")
     expect(cleanBlocks.find((b) => b.text.startsWith(PERF))?.text).not.toContain("2 seconds")
 
-    // bản tracked: revision + comment CR-001 còn, stamp cũng là release
-    const tracked = await DocxPackage.load(await docFileStore().load(v10!.file_ref))
-    expect(await readStamp(tracked)).toEqual({ project_id: projectId, version: "1.0", source: "release" })
-    expect((await listRevisions(tracked)).every((r) => r.author === "CR-001")).toBe(true)
-    expect((await listRevisions(tracked)).length).toBeGreaterThan(0)
-    expect((await listComments(tracked)).map((x) => x.author)).toContain("CR-001")
-
-    // block của 1.0 = block của 0.1 (cùng text), tải về 1.0 ⇒ bản sạch không _DRAFT
-    const b01 = await DocBlock.find({ projectId, doc_version: "0.1" }).sort({ ordinal: 1 }).lean()
-    const b10 = await DocBlock.find({ projectId, doc_version: "1.0" }).sort({ ordinal: 1 }).lean()
-    expect(b10.map((b) => [b.block_id, b.text_hash])).toEqual(b01.map((b) => [b.block_id, b.text_hash]))
+    // tải về 1.0 ⇒ bản sạch không _DRAFT
     const dl = await binary(c.get("/versions/1.0/download"))
     expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
     expect(await documentXml(dl.body as Buffer)).not.toMatch(/<w:ins\b|<w:del\b/)
@@ -190,32 +179,29 @@ describe("release — gom CR", () => {
     const v20 = await DocVersion.findOne({ projectId, version: "2.0" }).lean()
     const clean = await DocxPackage.load(await docFileStore().load(v20!.clean_file_ref!))
     expect((await readBlocks(clean)).find((b) => b.text.startsWith(PERF))?.text).toContain("200 ms")
-    expect(await listRevisions(clean)).toEqual([])
-    // bản tracked của 2.0 chỉ có revision của CR sau 1.0
-    const authors = new Set((await listRevisions(await DocxPackage.load(await docFileStore().load(v20!.file_ref)))).map((r) => r.author))
-    expect([...authors].sort()).toEqual(["CR-002", "CR-004"])
+    expect(await documentXml(await docFileStore().load(v20!.clean_file_ref!))).not.toMatch(/<w:ins\b|<w:del\b/)
   })
 
-  it("CR đang dở không chặn release: khoá của nó chuyển sang block của 1.0, CR không bị gom", async () => {
+  it("CR đang dở không chặn release: khoá phần tử (theo path) giữ nguyên qua release, CR không bị gom", async () => {
     const { c, projectId } = await projectWithRevision()
     routeReplaceCr("1 second", "500 ms")
     const pending = await createCr(c, "Đang dở", "500 ms")
     crDetail(await c.post(`/change-requests/${pending}/clarify`))
     const impact = crDetail(await c.post(`/change-requests/${pending}/impact`))
     expect(impact.locations.length).toBeGreaterThan(0)
-    const lockedIn01 = await DocBlock.countDocuments({ projectId, doc_version: "0.1", locked_by_cr: pending })
-    expect(lockedIn01).toBeGreaterThan(0)
+    const held = await lockedPaths(projectId, pending)
+    expect(held.length).toBeGreaterThan(0)
 
     const rel = await released(c)
     expect(rel.cr_ids).toEqual(["CR-001"])
-    expect(await DocBlock.countDocuments({ projectId, doc_version: "1.0", locked_by_cr: pending })).toBe(lockedIn01)
+    expect(await lockedPaths(projectId, pending)).toEqual(held)
     const detail = crDetail(await c.get(`/change-requests/${pending}`))
     expect(detail.change_request.status).toBe("impact_review")
   })
 })
 
 describe("release — lỗi giữa chừng", () => {
-  it("snapshot baseline lỗi ⇒ xoá 2 file vừa lưu (không mồ côi), không tạo version; chạy lại được", async () => {
+  it("snapshot baseline lỗi ⇒ xoá file vừa lưu (không mồ côi), không tạo version; chạy lại được", async () => {
     const { c, projectId } = await projectWithRevision()
     const filesBefore = await gridFsFileCount(projectId)
     failSnapshot.on = true
@@ -223,12 +209,11 @@ describe("release — lỗi giữa chừng", () => {
     expect(res.status).toBe(500)
     expect(await gridFsFileCount(projectId)).toBe(filesBefore)
     expect(await DocVersion.countDocuments({ projectId, version: "1.0" })).toBe(0)
-    expect(await DocBlock.countDocuments({ projectId, doc_version: "1.0" })).toBe(0)
 
     failSnapshot.on = false
     const again = await released(c)
     expect(again.version.version).toBe("1.0")
-    expect(await gridFsFileCount(projectId)).toBe(filesBefore + 2)
+    expect(await gridFsFileCount(projectId)).toBe(filesBefore + 1)
   })
 })
 

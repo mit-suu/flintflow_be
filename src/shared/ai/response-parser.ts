@@ -157,7 +157,10 @@ export const crClarifySchema = z
     message: "ambiguous = false cần ít nhất một entity_path hoặc keyword"
   })
 
-/** C-4: mọi vị trí được giao phải có kết luận + lý do; edit cần new_text, comment cần comment_text. */
+/**
+ * C-4: mọi vị trí được giao phải có kết luận + lý do; edit cần `spine_ops` (mode 1 v2 — FLF-186: vị trí là phần tử
+ * Spine, tài liệu render lại từ Spine), comment cần comment_text. `new_text` cũ còn nhận nhưng bỏ qua.
+ */
 export const crProposeSchema = z.object({
   locations: z.array(
     z
@@ -169,7 +172,7 @@ export const crProposeSchema = z.object({
         comment_text: z.string().min(1).optional(),
         spine_ops: z.array(opSchema).default([])
       })
-      .refine((l) => l.conclusion !== "edit" || l.new_text !== undefined, { message: "edit cần new_text" })
+      .refine((l) => l.conclusion !== "edit" || l.spine_ops.length > 0, { message: "edit cần spine_ops" })
       .refine((l) => l.conclusion !== "comment" || l.comment_text !== undefined, { message: "comment cần comment_text" })
       .refine((l) => l.conclusion !== "not_related" || l.spine_ops.length === 0, { message: "not_related không được kèm op" })
   )

@@ -4,7 +4,6 @@
  */
 
 import { z } from "zod"
-import { docBlockDtoSchema } from "../import/import.dto.js"
 import { CR_PAUSE_REASONS, CR_STATUSES } from "./change-request.state.js"
 import {
   CR_ID_PATTERN,
@@ -58,11 +57,16 @@ export const changeRequestDtoSchema = z.object({
   updated_at: isoDateTime
 })
 
+/**
+ * Vị trí CR — mode 1 v2 (FLF-186): phần tử Spine (`path`) + section hiển thị nó, thay `block_id`/`block` của file docx.
+ * `current_text`: giá trị hiện tại của phần tử (JSON ổn định) để FE hiện mà không cần gọi thêm; `""` nếu đã bị xoá.
+ */
 export const changeLocationDtoSchema = z.object({
   location_id: locationIdSchema,
-  block_id: z.string().min(1),
-  /** Block hiện tại (text, kind, heading_path) để FE hiện mà không cần gọi thêm. */
-  block: docBlockDtoSchema.nullable(),
+  path: z.string().min(1),
+  section_id: z.string().min(1),
+  section_title: z.string(),
+  current_text: z.string(),
   found_by: z.array(z.enum(LOCATION_FOUND_BY)),
   entity_paths: z.array(z.string()),
   owner_step: z.string().nullable(),
@@ -122,11 +126,17 @@ export const patchLocationRequestSchema = z
   .strictObject({
     conclusion: z.enum(LOCATION_CONCLUSIONS).optional(),
     reason: text(2000).optional(),
-    new_text: z.string().max(20000).optional(),
+    /** FLF-186: giá trị mới của cả phần tử ⇒ op `set` tại `path` của vị trí. */
+    new_value: z.unknown().optional(),
+    /** FLF-186: op Spine tự viết (định dạng `op.types.ts`), thay cho `new_value`. */
+    spine_ops: z.array(z.record(z.string(), z.unknown())).min(1).max(50).optional(),
     comment_text: text(2000).optional()
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Cần ít nhất một field để sửa" })
-  .refine((v) => v.conclusion !== "edit" || v.new_text !== undefined, { message: "Kết luận edit cần new_text", path: ["new_text"] })
+  .refine((v) => v.conclusion !== "edit" || v.new_value !== undefined || v.spine_ops !== undefined, {
+    message: "Kết luận edit cần new_value hoặc spine_ops",
+    path: ["new_value"]
+  })
   .refine((v) => v.conclusion !== "comment" || v.comment_text !== undefined, { message: "Kết luận comment cần comment_text", path: ["comment_text"] })
   .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận not_related cần lý do", path: ["reason"] })
 
@@ -165,14 +175,18 @@ export const changeRequestDetailSchema = z.object({
   pending_questions: z.array(z.string())
 })
 
-/** `meta` của 409 BLOCK_LOCKED — block nào đang bị CR nào giữ. */
-export const blockLockedMetaSchema = z.object({
-  locked: z.array(z.object({ block_id: z.string(), cr_id: crIdSchema }))
+/** `meta` của 409 PATH_LOCKED (FLF-186) — phần tử Spine nào đang bị CR nào giữ. */
+export const pathLockedMetaSchema = z.object({
+  locked: z.array(z.object({ path: z.string(), cr_id: crIdSchema }))
 })
 
-/** `meta` của 409 CHANGE_REQUIRES_CR (chat / `/changes` / `/undo` ở project mode 1, G9) — FE mở form CR điền sẵn. */
+/**
+ * `meta` của 409 CHANGE_REQUIRES_CR (sau baseline v1 ở project mode 1). `/changes`, `/undo` ⇒ chỉ `prefill` (FE mở form
+ * CR điền sẵn). Lệnh sửa trong chat (FLF-186) ⇒ BE **đã tạo** CR nguồn `chat` — `change_request` trỏ tới nó.
+ */
 export const changeRequiresCrMetaSchema = z.object({
-  prefill: z.object({ title: z.string(), description: z.string() })
+  prefill: z.object({ title: z.string(), description: z.string() }),
+  change_request: z.object({ cr_id: crIdSchema, status: crStatusSchema }).optional()
 })
 
 /** `meta` của 409 CR_LOCATION_UNCONCLUDED. */

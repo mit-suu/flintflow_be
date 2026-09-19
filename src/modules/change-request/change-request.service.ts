@@ -5,9 +5,9 @@
  */
 
 import mongoose from "mongoose"
-import { toDocBlockDto } from "../doc-version/block-dto.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
-import { DocBlock } from "../import/doc-block.model.js"
+import { stripRecord } from "../import/check.service.js"
+import { titleOfSection } from "../import/gap-report.service.js"
 import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
@@ -19,7 +19,9 @@ import { assertTransition, isTerminal, type CrStatus } from "./change-request.st
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
-import { lockBlocks, unlockBlocks } from "./lock.service.js"
+import { lockPaths, unlockPaths } from "./lock.service.js"
+import * as spineRepository from "../spine/spine.repository.js"
+import { elementValue, valueText } from "./spine-location.js"
 
 // ─── đọc ─────────────────────────────────────────────────────────
 
@@ -69,23 +71,21 @@ export const pendingQuestions = (cr: IChangeRequest): string[] => {
 }
 
 export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail> => {
-  const [locations, groups, version] = await Promise.all([
+  const [locations, groups, record] = await Promise.all([
     ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 }).lean(),
     ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ group_id: 1 }).lean(),
-    latestDocVersion(cr.projectId)
+    spineRepository.get(String(cr.projectId))
   ])
-  const blocks = version
-    ? await DocBlock.find({ projectId: cr.projectId, doc_version: version.version, block_id: { $in: locations.map((l) => l.block_id) } }).lean()
-    : []
-  const blockOf = new Map(blocks.map((b) => [b.block_id, b]))
+  const spine = record ? stripRecord(record) : null
   return {
     change_request: toCrDto(cr),
     locations: locations.map((l) => {
-      const block = blockOf.get(l.block_id)
       return {
         location_id: l.location_id,
-        block_id: l.block_id,
-        block: block ? toDocBlockDto(block) : null,
+        path: l.path,
+        section_id: l.section_id,
+        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id) : "",
+        current_text: spine ? valueText(elementValue(spine, l.path)) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
         owner_step: l.owner_step ?? null,
@@ -164,16 +164,15 @@ export const submitCr = async (cr: IChangeRequest): Promise<void> => {
   await transitionCr(cr, "in_review")
 }
 
-/** Mọi group bị từ chối ⇒ khoá lại block, bỏ đề xuất cũ, về đề xuất (3.6). */
+/** Mọi group bị từ chối ⇒ khoá lại phần tử, bỏ đề xuất cũ, về đề xuất (3.6). */
 export const reviseCr = async (cr: IChangeRequest): Promise<void> => {
   assertCrStatus(cr, ["in_review"], "proposing")
   const groups = await ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id })
   if (groups.some((g) => g.decision !== "rejected")) {
     throw new Mode1Error("CR_INVALID_TRANSITION", "Chỉ sửa lại được khi mọi group đã bị từ chối", { status: cr.status, to: "proposing", allowed: [] })
   }
-  const version = await latestDocVersion(cr.projectId)
-  const blockIds = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).distinct("block_id")
-  await lockBlocks(cr.projectId, version!.version, cr.cr_id, blockIds)
+  const paths: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).distinct("path")
+  await lockPaths(cr.projectId, cr.cr_id, paths)
   await ChangeGroup.deleteMany({ projectId: cr.projectId, cr_id: cr.cr_id })
   await ChangeLocation.updateMany(
     { projectId: cr.projectId, cr_id: cr.cr_id },
@@ -188,7 +187,7 @@ export const closeCr = async (cr: IChangeRequest, userId: string, reason: string
   cr.closed_reason = reason
   cr.decided_by = new mongoose.Types.ObjectId(userId)
   await transitionCr(cr, "rejected")
-  await unlockBlocks(cr.projectId, cr.cr_id)
+  await unlockPaths(cr.projectId, cr.cr_id)
 }
 
 export const cancelCr = async (cr: IChangeRequest, reason: string): Promise<void> => {
@@ -196,5 +195,5 @@ export const cancelCr = async (cr: IChangeRequest, reason: string): Promise<void
   cr.closed_reason = reason
   cr.paused = null
   await transitionCr(cr, "cancelled")
-  await unlockBlocks(cr.projectId, cr.cr_id)
+  await unlockPaths(cr.projectId, cr.cr_id)
 }
