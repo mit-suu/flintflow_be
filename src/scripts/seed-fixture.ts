@@ -81,7 +81,8 @@ const seedFixture = async (): Promise<void> => {
       project = await Project.create({
         userId: user._id,
         name: projectName,
-        domain: spine.project.domain
+        domain: spine.project.domain,
+        sourceMode: "fpt_template"
       })
       console.log(`✅ Created project: ${projectName}`)
     } else {

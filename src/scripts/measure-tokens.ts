@@ -392,7 +392,7 @@ export const measure = async (options: MeasureOptions, log: (line: string) => vo
 
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const user = await User.create({ email: `measure-${suffix}@flintflow.test`, password: "measure-password-123", name: "Measure", emailVerified: true })
-  const project = await Project.create({ userId: user._id, name: `Measure ${fixtureFile}`, domain: fixture.project.domain })
+  const project = await Project.create({ userId: user._id, name: `Measure ${fixtureFile}`, domain: fixture.project.domain, sourceMode: "fpt_template" })
   const session = await ChatSession.create({ projectId: project._id, messages: [], is_pipeline: true })
   await CreditWallet.create({ userId: user._id, balance: 1_000_000, reserved: 0 })
   const projectId = String(project._id)
