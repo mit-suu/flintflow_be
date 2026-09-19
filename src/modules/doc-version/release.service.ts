@@ -1,24 +1,26 @@
 /**
  * Release (Flow 6 nút 6.1–6.2): Lead chủ động, không gắn với một CR. FLF-171, plan §6 2F.
  * - Quét lại cờ (hồ sơ luật mode 1); còn cờ đỏ mở ⇒ `422 RELEASE_RED_FLAGS_OPEN` (BR-04, mode 1 không waive).
- * - Gom CR `written` từ lần release trước; bản có Track Changes = version mới nhất (đổi stamp), bản sạch = accept-all
- *   (bỏ comment của CR); version major tiếp theo; baseline `type: release` (snapshot Spine).
- * - CR đang dở không chặn release: khoá của nó được chuyển sang block của version mới (text không đổi).
+ * - Gom CR `written` từ lần release trước; version major tiếp theo; baseline `type: release` (snapshot Spine).
+ * - Mode 1 v2 (FLF-186): bản sạch = **render snapshot Spine** lúc release (layout file upload, stamp `release`) — không
+ *   còn accept-all trên file Track Changes. `file_ref` và `clean_file_ref` cùng trỏ bản render này.
+ * - CR đang dở không chặn release: khoá phần tử (theo path) giữ nguyên, không phụ thuộc version.
+ * Thứ tự: render + lưu file → baseline (Spine) → DocVersion; baseline lỗi ⇒ xoá file vừa lưu.
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
-import { DocxPackage, acceptAll, writeStamp } from "../docx-ooxml/index.js"
 import { stripRecord } from "../import/check.service.js"
-import { DocBlock } from "../import/doc-block.model.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
+import { Project } from "../project/project.model.js"
 import * as flagsService from "../spine/flags.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Baseline as BaselineEntry } from "../spine/spine.types.js"
 import { docFileStore } from "./doc-file.store.js"
 import { DocVersion, type IDocVersion } from "./doc-version.model.js"
-import { blocksOfVersion, listDocVersions } from "./doc-version.service.js"
+import { listDocVersions } from "./doc-version.service.js"
+import { renderVersionFile } from "./render-version.js"
 import { nextMajor } from "./versioning.js"
 
 export interface ReleaseResult {
@@ -52,21 +54,15 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     )
   ]
   const next = nextMajor(latest.version)
-  const stamp = { project_id: projectId, version: next, source: "release" }
 
-  const tracked = await DocxPackage.load(await docFileStore().load(latest.file_ref))
-  await writeStamp(tracked, stamp)
-  const trackedBuffer = await tracked.toBuffer()
-  const clean = await DocxPackage.load(trackedBuffer)
-  await acceptAll(clean)
-  const cleanBuffer = await clean.toBuffer()
-  const fileRef = await docFileStore().save(trackedBuffer, { projectId, kind: "version", name: next })
-  const cleanRef = await docFileStore().save(cleanBuffer, { projectId, kind: "clean", name: next })
+  const record = (await spineRepository.get(projectId))!
+  const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? "SRS"
+  const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release" })
+  const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
 
   let baseline: BaselineEntry
   let spineVersion: number
   try {
-    const record = (await spineRepository.get(projectId))!
     const snap = await snapshotBaseline(projectId, stripRecord(record), {
       base_version: record.spine_version,
       version: next,
@@ -79,25 +75,15 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
     spineVersion = snap.spine_version
   } catch (err) {
     await docFileStore().remove(fileRef)
-    await docFileStore().remove(cleanRef)
     throw err
   }
 
-  // Block của version release: cùng text với bản mới nhất (accept-all không đổi text hiện hành)
-  const blocks = await blocksOfVersion(projectId, latest.version)
-  await DocBlock.insertMany(
-    blocks.map((b) => {
-      const { _id, ...rest } = b.toObject()
-      void _id
-      return { ...rest, doc_version: next }
-    })
-  )
   const version = await DocVersion.create({
     projectId,
     version: next,
     kind: "release",
     file_ref: fileRef,
-    clean_file_ref: cleanRef,
+    clean_file_ref: fileRef,
     based_on: latest.version,
     cr_ids: crIds,
     baseline_ref: baseline.id,

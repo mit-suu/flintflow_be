@@ -198,10 +198,10 @@ describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
 
 describe("mode1.errors", () => {
   it("mỗi mã có HTTP status; Mode1Error mang status + code + meta", () => {
-    const e = new Mode1Error("BLOCK_LOCKED", "Block đang bị CR-001 khoá", { locked: [{ block_id: "B0003", cr_id: "CR-001" }] })
+    const e = new Mode1Error("PATH_LOCKED", "actors[id=A01] đang bị CR-001 khoá", { locked: [{ path: "actors[id=A01]", cr_id: "CR-001" }] })
     expect(e.statusCode).toBe(409)
-    expect(e.code).toBe("BLOCK_LOCKED")
-    expect(e.meta).toEqual({ locked: [{ block_id: "B0003", cr_id: "CR-001" }] })
+    expect(e.code).toBe("PATH_LOCKED")
+    expect(e.meta).toEqual({ locked: [{ path: "actors[id=A01]", cr_id: "CR-001" }] })
     expect(MODE1_ERROR_STATUS.CR_SOURCE_REQUIRED).toBe(400)
     expect(MODE1_ERROR_STATUS.RELEASE_RED_FLAGS_OPEN).toBe(422)
     expect(mode1ErrorCodeSchema.options).toHaveLength(Object.keys(MODE1_ERROR_STATUS).length)

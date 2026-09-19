@@ -9,7 +9,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 
 import { seedFixture } from "../../setup.js"
 import { createMode1Project, mode1Api } from "../../helpers/mode1.js"
-import { CR_BODY, crDoc, crToImpact, detail, importedProject, lockedBlocks, newCr, resetCrMock } from "../../helpers/mode1-cr-p4.js"
+import { CR_BODY, crDoc, crToImpact, detail, importedProject, lockedPaths, newCr, resetCrMock } from "../../helpers/mode1-cr-p4.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema, listChangeRequestsResponseSchema } from "../../../src/modules/change-request/change-request.dto.js"
 import * as crService from "../../../src/modules/change-request/change-request.service.js"
@@ -148,10 +148,10 @@ describe("đọc, lọc, chuyển trạng thái, huỷ", () => {
   it("huỷ CR đang giữ khoá ⇒ cancelled + lý do, mở khoá; huỷ lần hai (trạng thái cuối) ⇒ 409", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToImpact(c)
-    expect((await lockedBlocks(projectId, crId)).length).toBeGreaterThan(0)
+    expect((await lockedPaths(projectId, crId)).length).toBeGreaterThan(0)
     const cancelled = detail(await c.post(`${cr}/cancel`, { reason: "Khách hàng rút yêu cầu" }))
     expect(cancelled.change_request).toMatchObject({ status: "cancelled", closed_reason: "Khách hàng rút yêu cầu", paused: null })
-    expect(await lockedBlocks(projectId, crId)).toEqual([])
+    expect(await lockedPaths(projectId, crId)).toEqual([])
     const again = await c.post(`${cr}/cancel`, { reason: "Khách hàng rút yêu cầu" })
     expect(again.status).toBe(409)
     expect(again.body.error.code).toBe("CR_INVALID_TRANSITION")

@@ -110,11 +110,11 @@ describe("parseResponse — mode 1 (FLF-171)", () => {
     expectAiError(() => parseResponse(json({ ambiguous: false, targets: {} }), ActionType.CR_CLARIFY), "SCHEMA_MISMATCH")
   })
 
-  it("CR_PROPOSE: edit cần new_text, comment cần comment_text, not_related không kèm op", () => {
+  it("CR_PROPOSE: edit cần spine_ops (FLF-186), comment cần comment_text, not_related không kèm op", () => {
     const ok = parseResponse(
       json({
         locations: [
-          { location_id: "L001", conclusion: "edit", reason: "r", new_text: "3.2.4 Sign out of all devices" },
+          { location_id: "L001", conclusion: "edit", reason: "r", spine_ops: [{ op: "set", path: "functions[id=FN04].name", value: "Sign out of all devices" }] },
           { location_id: "L002", conclusion: "not_related", reason: "chỉ nói về đăng nhập" }
         ]
       }),
@@ -123,6 +123,7 @@ describe("parseResponse — mode 1 (FLF-171)", () => {
     expect(ok.locations[1].spine_ops).toEqual([])
     const bad = (loc: Record<string, unknown>) => expectAiError(() => parseResponse(json({ locations: [loc] }), ActionType.CR_PROPOSE), "SCHEMA_MISMATCH")
     bad({ location_id: "L001", conclusion: "edit", reason: "r" })
+    bad({ location_id: "L001", conclusion: "edit", reason: "r", new_text: "chỉ có text, không op" })
     bad({ location_id: "L001", conclusion: "comment", reason: "r" })
     bad({ location_id: "L001", conclusion: "not_related", reason: "r", spine_ops: [{ op: "set", path: "actors[id=A1].name", value: "x" }] })
     bad({ location_id: "1", conclusion: "comment", reason: "r", comment_text: "c" })

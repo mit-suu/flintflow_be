@@ -32,9 +32,22 @@ export const importedProject = async (name = "Lumen LMS") => {
   return { seeded, projectId, c }
 }
 
+/** Op `set` thay `from` bằng `to` ở mọi field chuỗi (cấp đầu) của phần tử — FLF-186: đề xuất là op Spine. */
+const replaceOps = (path: string, text: string, from: string, to: string): { op: "set"; path: string; value: string }[] => {
+  let value: Record<string, unknown> = {}
+  try {
+    value = JSON.parse(text.split("\nPrevious proposal failed checks")[0]) as Record<string, unknown>
+  } catch {
+    return []
+  }
+  return Object.entries(value)
+    .filter(([k, v]) => k !== "id" && typeof v === "string" && v.includes(from))
+    .map(([k, v]) => ({ op: "set", path: `${path}.${k}`, value: (v as string).split(from).join(to) }))
+}
+
 /**
- * Provider giả cho một CR "thay `from` bằng `to`": C-2 trả keyword `from` (+ keyword phụ), C-4 sửa mọi vị trí có `from`,
- * vị trí là heading có trong `commentOn` ⇒ comment, còn lại not_related.
+ * Provider giả cho một CR "thay `from` bằng `to`": C-2 trả keyword `from` (+ keyword phụ), C-4 sửa mọi phần tử có `from`
+ * (op set trên field chứa nó), phần tử có path khớp `commentOn` ⇒ comment, còn lại not_related.
  */
 export const routeReplaceCr = (from: string, to: string, opts: { extraKeywords?: string[]; commentOn?: RegExp } = {}) => {
   mockOverrides.next = (p) =>
@@ -42,13 +55,12 @@ export const routeReplaceCr = (from: string, to: string, opts: { extraKeywords?:
     fakeCrClarify({ entity_paths: [], keywords: [from, ...(opts.extraKeywords ?? [])] })(p) ??
     (p.includes("# CR Propose")
       ? JSON.stringify({
-          locations: promptLocations(p).map((l) =>
-            l.text.includes(from)
-              ? { location_id: l.location_id, conclusion: "edit", reason: "CR", new_text: l.text.replace(from, to), spine_ops: [] }
-              : opts.commentOn?.test(l.text)
-                ? { location_id: l.location_id, conclusion: "comment", reason: "Heading", comment_text: `Xem lại "${l.text}"`, spine_ops: [] }
-                : { location_id: l.location_id, conclusion: "not_related", reason: "Khác nghĩa", spine_ops: [] }
-          )
+          locations: promptLocations(p).map((l) => {
+            const ops = replaceOps(l.path, l.text, from, to)
+            if (ops.length) return { location_id: l.location_id, conclusion: "edit", reason: "CR", spine_ops: ops }
+            if (opts.commentOn?.test(l.path)) return { location_id: l.location_id, conclusion: "comment", reason: "Xem lại", comment_text: `Xem lại ${l.path}`, spine_ops: [] }
+            return { location_id: l.location_id, conclusion: "not_related", reason: "Khác nghĩa", spine_ops: [] }
+          })
         })
       : undefined)
 }

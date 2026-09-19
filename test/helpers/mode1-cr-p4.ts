@@ -11,13 +11,13 @@ import { createMode1Project, fakeCrClarify, fakeCrPropose, fakeMode1, mode1Api }
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema, type ChangeRequestDetail } from "../../src/modules/change-request/change-request.dto.js"
 import { ChangeRequest, type IChangeRequest } from "../../src/modules/change-request/change-request.model.js"
-import { DocBlock } from "../../src/modules/import/doc-block.model.js"
+import { SpineLock } from "../../src/modules/change-request/spine-lock.model.js"
 import { DOC_FILE_BUCKET } from "../../src/modules/doc-version/doc-file.store.js"
 
 export type Mode1Client = ReturnType<typeof mode1Api>
 
-/** Đích C-2 mặc định: NFR-01 + từ khoá chạm câu perf, heading 4.2.3 và 5.1. */
-export const PERF_TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds", "Performance", "Business Rules"] }
+/** Đích C-2 mặc định (FLF-186 — vị trí là phần tử Spine): NFR-01 + từ khoá chạm luật mật khẩu (BR-01). */
+export const PERF_TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds", "Passwords"] }
 
 /** Mọi prompt đi qua provider giả trong test hiện tại. */
 export const prompts: string[] = []
@@ -69,7 +69,7 @@ export const detail = (res: { status: number; body: { data: unknown; error: unkn
   return changeRequestDetailSchema.parse(res.body.data)
 }
 
-/** Tạo CR rồi đi tới `impact_review` (đã khoá block). */
+/** Tạo CR rồi đi tới `impact_review` (đã khoá phần tử). */
 export const crToImpact = async (c: Mode1Client, title?: string, description?: string) => {
   const crId = await newCr(c, title, description)
   const cr = `/change-requests/${crId}`
@@ -102,9 +102,9 @@ export const crDoc = async (projectId: string, crId: string): Promise<IChangeReq
   return cr!
 }
 
-/** block_id đang do `crId` giữ khoá (mọi version). */
-export const lockedBlocks = async (projectId: string, crId: string): Promise<string[]> =>
-  ((await DocBlock.find({ projectId, locked_by_cr: crId }).distinct("block_id")) as string[]).sort()
+/** Path phần tử Spine đang do `crId` giữ khoá. */
+export const lockedPaths = async (projectId: string, crId: string): Promise<string[]> =>
+  ((await SpineLock.find({ projectId, cr_id: crId }).distinct("path")) as string[]).sort()
 
 /** Số file GridFS của project theo loại (`version`, `upload`…). */
 export const gridFsFiles = async (projectId: string, kind?: string): Promise<number> =>
