@@ -3,7 +3,7 @@ import * as projectService from "./project.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import type { CreateProjectDTO } from "./project.validation.js"
+import type { CreateProjectDTO, MoveProjectDTO } from "./project.validation.js"
 
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -12,8 +12,8 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
   }
 
   // Body đã qua CreateProjectSchema ở route: name không rỗng, sourceMode thuộc SOURCE_MODES
-  const { name, sourceMode, domain } = req.body as CreateProjectDTO
-  const project = await projectService.createProject(userId, name, sourceMode, domain)
+  const { name, sourceMode, domain, folderId } = req.body as CreateProjectDTO
+  const project = await projectService.createProject(userId, name, sourceMode, domain, folderId)
   return sendSuccess(res, 201, project)
 })
 
@@ -64,5 +64,16 @@ export const updateProjectName = catchAsync(async (req: Request, res: Response) 
   }
 
   const project = await projectService.updateProjectName(projectId, userId, name)
+  return sendSuccess(res, 200, project)
+})
+
+export const moveProjectToFolder = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  }
+
+  const { folderId } = req.body as MoveProjectDTO
+  const project = await projectService.moveProjectToFolder(req.params.projectId as string, userId, folderId)
   return sendSuccess(res, 200, project)
 })

@@ -23,6 +23,7 @@ import baselineRoutes from "./modules/pipeline/s9/baseline.route.js"
 import renderRoutes from "./modules/render/render.route.js"
 import exportRoutes from "./modules/render/export.route.js"
 import feedbackRoutes from "./modules/feedback/feedback.route.js"
+import folderRoutes from "./modules/folder/folder.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
 
@@ -145,6 +146,7 @@ app.use("/api/v1/projects", renderRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/feedback", feedbackRoutes)
+app.use("/api/v1/folders", folderRoutes)
 app.use("/api/v1/export", exportRoutes)
 
 // Global Error Handler Middleware

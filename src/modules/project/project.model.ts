@@ -18,6 +18,8 @@ export interface IProject extends Document {
   domain?: string | null
   status: ProjectStatus
   sourceMode: ProjectSourceMode
+  /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
+  folderId: mongoose.Types.ObjectId | null
   // Nội dung, tiến độ, baseline đều nằm ở Spine (modules/spine) — Project chỉ giữ metadata danh sách.
   createdAt: Date
   updatedAt: Date
@@ -50,6 +52,11 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: SOURCE_MODES,
       required: true
+    },
+    folderId: {
+      type: Schema.Types.ObjectId,
+      ref: "Folder",
+      default: null
     }
   },
   { timestamps: true }

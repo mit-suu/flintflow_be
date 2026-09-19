@@ -154,6 +154,7 @@ const options = {
       { name: "Export", description: "Xem trước RenderedDocument thành .docx" },
       { name: "Notifications", description: "Thông báo in-app" },
       { name: "Billing", description: "Gói, mua credit qua payment_service" },
+      { name: "Folders", description: "Thư mục nhóm dự án" },
       { name: "Feedback", description: "Góp ý của người dùng gửi từ app" },
       { name: "AI Actions", description: "Gọi action ngoài pipeline (chat, summarize_document) và ước tính giá" },
       { name: "Admin", description: "Chỉ đọc: người dùng, số liệu, chi phí AI, góp ý" }
