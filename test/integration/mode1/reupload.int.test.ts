@@ -53,7 +53,8 @@ const newPara = (doc: Document, text: string) => {
 /** Tải file version 0.0 (có stamp + bookmark), sửa như người dùng sửa trong Word. */
 const editVersion = async (projectId: string, fn: (doc: Document) => void) => {
   const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
-  const pkg = await DocxPackage.load(await docFileStore().load(v.file_ref))
+  // Bản 0.0 lưu bản render (FLF-184); re-upload vẫn so theo block của file gốc tới V4
+  const pkg = await DocxPackage.load(await docFileStore().load(v.original_ref ?? v.file_ref))
   fn(await pkg.requireXml("word/document.xml"))
   return { pkg, buffer: await pkg.toBuffer() }
 }

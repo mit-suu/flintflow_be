@@ -67,7 +67,9 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   const planned = ops.length ? planTransaction(current, txn, { startSeq: 1 }).spine : current
 
   // 1. File: Track Changes + comment trên bản sao (sau release: bản sạch — CR đã release không hiện lại)
-  const pkg = await DocxPackage.load(await docFileStore().load(version.clean_file_ref ?? version.file_ref))
+  // Tạm tới V4 (CR theo path Spine): CR P2 ghi Track Changes theo bookmark của file gốc — bản 0.0 giờ là bản render
+  // (FLF-184) nên dùng `original_ref` của nó
+  const pkg = await DocxPackage.load(await docFileStore().load(version.clean_file_ref ?? version.original_ref ?? version.file_ref))
   const ooxml = await readBlocks(pkg)
   const who = { author: cr.cr_id, date: new Date(), ids: new RevisionIds(await pkg.requireXml("word/document.xml")) }
   for (const loc of changes) {

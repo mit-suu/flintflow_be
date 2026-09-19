@@ -1,6 +1,7 @@
 /**
  * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, section bắt buộc thiếu, heading không map,
- * field độ tin thấp. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
+ * field độ tin thấp. Mode 1 v2 (FLF-184): "Thiếu mục FPT" (đỏ, D6) đứng đầu; cờ và mục xếp theo layout file upload;
+ * mục riêng ngoài FPT liệt kê riêng, không cờ. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
  * FLF-171, plan §6 2C. Tải bản `.docx` khi đang `gap_review` ⇒ `delivered` (giao báo cáo, nhánh "không cần sửa").
  */
 
@@ -16,12 +17,15 @@ import type { ImportStatus } from "./import.state.js"
 import { latestImport, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
-import { TemplateProfile } from "./template-profile.model.js"
+import { FEATURE_SECTIONS } from "./step-plan.js"
+import { TemplateProfile, type LayoutEntry, type StepPlanItem } from "./template-profile.model.js"
 
 const REPORT_STATUSES: readonly ImportStatus[] = ["gap_review", "delivered", "change_requested"]
 
-export const titleOfSection = (spine: Pick<Spine, "features" | "functions">, id: string): string => {
+export const titleOfSection = (spine: Pick<Spine, "features" | "functions"> & Partial<Pick<Spine, "custom_sections">>, id: string): string => {
   const [kind, key] = id.split(":")
+  if (id === FEATURE_SECTIONS) return "Functional requirements (features)"
+  if (kind === "custom") return spine.custom_sections?.find((c) => c.id === key)?.heading || id
   if (kind === "feature") return spine.features.find((f) => f.id === key)?.name ?? id
   if (kind === "function") return spine.functions.find((f) => f.id === key)?.name ?? id
   return sectionTitle(id)
@@ -47,11 +51,16 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const open = spine.flags.filter((f) => f.resolved_at === null)
   const bySection = new Map<string, typeof open>()
   for (const f of open) bySection.set(f.section_id, [...(bySection.get(f.section_id) ?? []), f])
-  const sections = [...bySection].map(([section_id, flags]) => ({
-    section_id,
-    title: titleOfSection(spine, section_id),
-    flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
-  }))
+  const layout = layoutRows(profile?.layout ?? [], spine, bySection)
+  const orderOf = new Map(layout.map((l) => [l.section_id, l.order]))
+  const sections = [...bySection]
+    .map(([section_id, flags]) => ({
+      section_id,
+      title: titleOfSection(spine, section_id),
+      flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
+    }))
+    .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))
+  const missingFpt = missingFptSections(profile?.step_plan ?? [], new Set(layout.map((l) => l.section_id)), spine)
 
   const missing = (profile?.required_sections ?? []).map((section_id) => ({ section_id, title: sectionTitle(section_id) }))
   const unmapped = (profile?.heading_map ?? []).filter((h) => h.section_id === UNMAPPED_SECTION).map((h) => ({ block_id: h.block_id, text: h.heading_text }))
@@ -79,13 +88,51 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
       yellow: open.filter((f) => f.level === "yellow").length,
       missing_sections: missing.length,
       unmapped_headings: unmapped.length,
-      low_confidence_fields: low.length
+      low_confidence_fields: low.length,
+      missing_fpt_sections: missingFpt.length
     },
+    missing_fpt_sections: missingFpt,
+    layout,
     sections,
     missing_sections: missing,
     unmapped_headings: unmapped,
     low_confidence_fields: low
   }
+}
+
+type FlagsBySection = Map<string, Spine["flags"]>
+
+/** Mục theo thứ tự file upload + số cờ mở; bỏ phần nối (mục riêng tiêu đề rỗng — văn xuôi của section trước). */
+const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: FlagsBySection): GapReport["layout"] =>
+  layout
+    .filter((l) => l.heading_text.trim())
+    .map((l) => {
+      const flags = bySection.get(l.section_id) ?? []
+      const kind = l.section_id.startsWith("custom:") ? "custom" : l.section_id.startsWith("group:") ? "group" : "fpt"
+      return {
+        order: l.order,
+        section_id: l.section_id,
+        heading: l.heading_text,
+        level: l.level,
+        kind,
+        red: flags.filter((f) => f.level === "red").length,
+        yellow: flags.filter((f) => f.level === "yellow").length
+      } as const
+    })
+
+/** Đầu mục FPT thiếu theo kế hoạch step (D6) — mỗi section một dòng, step đầu tiên sở hữu nó. */
+const missingFptSections = (plan: readonly StepPlanItem[], inLayout: ReadonlySet<string>, spine: Spine): GapReport["missing_fpt_sections"] => {
+  const out: GapReport["missing_fpt_sections"] = []
+  const seen = new Set<string>()
+  for (const item of plan) {
+    if (!item.missing || item.state === "hidden") continue
+    for (const section_id of item.section_ids) {
+      if (seen.has(section_id)) continue
+      seen.add(section_id)
+      out.push({ section_id, title: titleOfSection(spine, section_id), step_id: item.step_id, in_layout: inLayout.has(section_id) })
+    }
+  }
+  return out
 }
 
 // ─── docx ────────────────────────────────────────────────────────
@@ -110,6 +157,7 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     table(
       ["Hạng mục", "Số lượng"],
       [
+        ["Thiếu mục FPT (đỏ)", String(t.missing_fpt_sections)],
         ["Cờ đỏ", String(t.red)],
         ["Cờ vàng", String(t.yellow)],
         ["Section bắt buộc thiếu", String(t.missing_sections)],
@@ -117,6 +165,25 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
         ["Field độ tin thấp", String(t.low_confidence_fields)]
       ]
     ),
+    new Paragraph({ text: "Thiếu mục FPT", heading: HeadingLevel.HEADING_1 }),
+    report.missing_fpt_sections.length
+      ? table(
+          ["Mục", "Tình trạng", "Step chạy để soạn"],
+          report.missing_fpt_sections.map((m) => [m.title, m.in_layout ? "Có heading, chưa có nội dung" : "File không có", m.step_id])
+        )
+      : new Paragraph("Đủ mọi đầu mục mẫu FPT."),
+    new Paragraph({ text: "Mục theo tài liệu", heading: HeadingLevel.HEADING_1 }),
+    report.layout.length
+      ? table(
+          ["Mục", "Loại", "Cờ đỏ", "Cờ vàng"],
+          report.layout.map((l) => [
+            `${"  ".repeat(Math.max(0, l.level - 1))}${l.heading}`,
+            l.kind === "custom" ? "Mục riêng (ngoài FPT)" : l.kind === "group" ? "Nhóm" : "Mẫu FPT",
+            String(l.red),
+            String(l.yellow)
+          ])
+        )
+      : new Paragraph("Không có layout (import trước mode 1 v2)."),
     new Paragraph({ text: "Cờ theo section", heading: HeadingLevel.HEADING_1 })
   ]
   if (!report.sections.length) children.push(new Paragraph("Không có cờ nào đang mở."))
