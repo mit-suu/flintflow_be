@@ -1,4 +1,4 @@
-import { Project, IProject, type ProjectSourceMode } from "./project.model.js"
+import { Project, IProject, type ProjectMode } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
@@ -12,22 +12,37 @@ import { RenderedDocumentCache } from "../render/rendered-document.model.js"
 import { gridFsDiagramStore } from "../diagram/diagram-file.store.js"
 import mongoose from "mongoose"
 import { assertFolderOwned, folderStillExists } from "../folder/folder.service.js"
+import { ImportedDocument } from "../import/imported-document.model.js"
+import { DocBlock } from "../import/doc-block.model.js"
+import { TemplateProfile } from "../import/template-profile.model.js"
+import { ExtractionDraft } from "../import/extraction-draft.model.js"
+import { FieldAnchor } from "../import/field-anchor.model.js"
+import { ReuploadDiff } from "../import/reupload-diff.model.js"
+import { DocVersion } from "../doc-version/doc-version.model.js"
+import { docFileStore } from "../doc-version/doc-file.store.js"
+import { ChangeRequest, CrCounter } from "../change-request/change-request.model.js"
+import { ChangeLocation } from "../change-request/change-location.model.js"
+import { ChangeGroup } from "../change-request/change-group.model.js"
 
 export const createProject = async (
   userId: string,
   name: string,
-  sourceMode: ProjectSourceMode,
   domain?: string,
+  mode: ProjectMode = "fpt",
   folderId?: string
 ): Promise<IProject> => {
+  if (mode === "customer_template") {
+    throw new ApiError(501, "Mode template khách hàng chưa hỗ trợ", "NOT_IMPLEMENTED")
+  }
   // Tạo thẳng trong thư mục (một request) — thư mục phải của chính user
   if (folderId) await assertFolderOwned(userId, folderId)
+  // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     userId,
     name,
     domain: domain || null,
     status: "active",
-    sourceMode,
+    mode,
     ...(folderId ? { folderId } : {})
   })
   await spineRepository.getOrCreate(project.id, { name, domain: domain || null })
@@ -90,7 +105,19 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
     Change.deleteMany({ projectId }),
     Baseline.deleteMany({ projectId }),
     Usage.deleteMany({ projectId }),
-    RenderedDocumentCache.deleteMany({ projectId })
+    RenderedDocumentCache.deleteMany({ projectId }),
+    // Mode 1 (FLF-171): import, block, version, change request
+    ImportedDocument.deleteMany({ projectId }),
+    DocBlock.deleteMany({ projectId }),
+    TemplateProfile.deleteMany({ projectId }),
+    ExtractionDraft.deleteMany({ projectId }),
+    FieldAnchor.deleteMany({ projectId }),
+    ReuploadDiff.deleteMany({ projectId }),
+    DocVersion.deleteMany({ projectId }),
+    ChangeRequest.deleteMany({ projectId }),
+    CrCounter.deleteMany({ projectId }),
+    ChangeLocation.deleteMany({ projectId }),
+    ChangeGroup.deleteMany({ projectId })
   ])
 
   // File ngoài collection: lỗi ở đây không được làm hỏng việc xoá đã xong ở trên
@@ -100,6 +127,9 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
     })
   }
   for (const doc of documents) await destroyDocumentAsset(doc.cloudinaryPublicId)
+  await docFileStore()
+    .removeProject(projectId)
+    .catch((err: unknown) => console.warn(`[Project] Không xoá được file .docx mode 1 của project ${projectId}:`, err))
 }
 
 export const deleteProject = async (

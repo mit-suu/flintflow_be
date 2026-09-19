@@ -81,7 +81,7 @@ describe("folders", () => {
     const owner = await seedFixture("minimal")
     const other = await seedFixture("minimal")
     const folderId = (await request(app).post("/api/v1/folders").set(as(owner)).send({ name: "A" })).body.data._id as string
-    const second = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "P2", sourceMode: "fpt_template" })
+    const second = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "P2" })
 
     const res = await request(app)
       .post(`/api/v1/folders/${folderId}/projects`)
@@ -104,11 +104,11 @@ describe("folders", () => {
     const other = await seedFixture("minimal")
     const folderId = (await request(app).post("/api/v1/folders").set(as(owner)).send({ name: "A" })).body.data._id as string
 
-    const created = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "Trong A", sourceMode: "fpt_template", folderId })
+    const created = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "Trong A", folderId })
     expect(created.status).toBe(201)
     expect(created.body.data.folderId).toBe(folderId)
 
-    const rejected = await request(app).post("/api/v1/projects").set(as(other)).send({ name: "X", sourceMode: "fpt_template", folderId })
+    const rejected = await request(app).post("/api/v1/projects").set(as(other)).send({ name: "X", folderId })
     expect(rejected.status).toBe(404)
     expect(rejected.body.error.code).toBe("FOLDER_NOT_FOUND")
     expect((await request(app).get("/api/v1/projects").set(as(other))).body.data).toHaveLength(1)

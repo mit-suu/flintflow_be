@@ -90,7 +90,7 @@ lường trước trong `pipeline.dto.ts`.
 | `modules/diagram/` | 5 renderer PlantUML + compile-check + lưu file |
 | `modules/render/` | Assemble section → `RenderedDocument` → `.docx` |
 | `modules/pipeline/s9/` | Quét cuối, đối chiếu mục tiêu, MoSCoW, ký baseline + snapshot |
-| `modules/{notification,billing,credits,admin,project,user,auth,feedback,folder}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`, `sourceMode` — nguồn khởi đầu, bắt buộc, không đổi sau khi tạo; `folderId` — thư mục, `PATCH /projects/:id/folder`). `folder`: CRUD `/folders`, `POST /folders/:id/projects` thêm nhiều dự án, xoá thư mục giữ dự án. `lastOpenedAt` ghi khi `GET /projects/:id`. `feedback`: `POST /feedback` (UC-12), admin đọc qua `GET /admin/feedback` |
+| `modules/{notification,billing,credits,admin,project,user,auth,feedback,folder}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`, `mode` — `import` | `fpt` | `customer_template`, mặc định `fpt`, xem `project.model.ts`; `folderId` — thư mục, `PATCH /projects/:id/folder`). `folder`: CRUD `/folders`, `POST /folders/:id/projects` thêm nhiều dự án, xoá thư mục giữ dự án. `lastOpenedAt` ghi khi `GET /projects/:id`. `feedback`: `POST /feedback` (UC-12), admin đọc qua `GET /admin/feedback` |
 | `shared/ai/` | `ActionType`, prompt registry, response parser, provider, context tài liệu upload |
 | `assets/skills/` | 32 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
 | `assets/prompts/` | Prompt phẳng chỉ cho `chat`, `summarize_document` |

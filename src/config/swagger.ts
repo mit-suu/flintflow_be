@@ -145,7 +145,7 @@ const options = {
     },
     tags: [
       { name: "Auth", description: "Đăng ký, đăng nhập, refresh token, Google OAuth" },
-      { name: "Projects", description: "Metadata dự án (tên, domain, trạng thái, sourceMode) và tài liệu upload" },
+      { name: "Projects", description: "Metadata dự án (tên, domain, trạng thái, mode, thư mục) và tài liệu upload" },
       { name: "Chat Sessions", description: "Phiên chat: một session pipeline mỗi project, các session khác hỏi đáp / sửa qua change flow" },
       { name: "Spine", description: "Đọc Spine, áp lô op, impact, preview, undo, reconcile, traceability" },
       { name: "Pipeline", description: "Step registry, chạy step (SSE), gate, resume, tiến độ" },

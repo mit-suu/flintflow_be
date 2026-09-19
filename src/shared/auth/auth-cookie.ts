@@ -10,6 +10,9 @@ export interface AuthCookieConfig {
 }
 
 export const REFRESH_COOKIE_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000 // 3 days
+/** Tick "Ghi nhớ tài khoản" lúc đăng nhập. */
+export const REMEMBER_ME_TTL = "30d"
+export const REMEMBER_ME_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 export const ACCESS_COOKIE_MAX_AGE_MS = 15 * 60 * 1000 // 15 minutes
 
 /**

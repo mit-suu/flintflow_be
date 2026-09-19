@@ -1,5 +1,5 @@
 /**
- * `POST /projects` bắt buộc `sourceMode` và trả lại nó ở `GET /projects`; góp ý member gửi qua
+ * `POST /projects` nhận `mode` (mặc định fpt, customer_template ⇒ 501), mở dự án ghi `lastOpenedAt`; góp ý member gửi qua
  * `POST /feedback` hiện ở `GET /admin/feedback` — qua HTTP trên Mongo thật.
  */
 import { describe, it, expect } from "vitest"
@@ -10,35 +10,33 @@ import { User } from "../../src/modules/user/user.model.js"
 
 const as = (seeded: SeededFixture) => ({ Authorization: `Bearer ${seeded.token}` })
 
-describe("project sourceMode", () => {
-  it("thiếu hoặc sai sourceMode ⇒ 400 VALIDATION_ERROR, không tạo dự án", async () => {
+describe("project mode qua HTTP", () => {
+  it("mode lạ ⇒ 400 VALIDATION_ERROR, customer_template ⇒ 501 NOT_IMPLEMENTED, không tạo dự án", async () => {
     const seeded = await seedFixture("minimal")
 
-    for (const body of [{ name: "Lumen" }, { name: "Lumen", sourceMode: "coaching" }]) {
-      const res = await request(app).post("/api/v1/projects").set(as(seeded)).send(body)
-      expect(res.status).toBe(400)
-      expect(res.body.error.code).toBe("VALIDATION_ERROR")
-    }
+    const invalid = await request(app).post("/api/v1/projects").set(as(seeded)).send({ name: "Lumen", mode: "coaching" })
+    expect(invalid.status).toBe(400)
+    expect(invalid.body.error.code).toBe("VALIDATION_ERROR")
+
+    const unsupported = await request(app).post("/api/v1/projects").set(as(seeded)).send({ name: "Lumen", mode: "customer_template" })
+    expect(unsupported.status).toBe(501)
+    expect(unsupported.body.error.code).toBe("NOT_IMPLEMENTED")
+
     const list = await request(app).get("/api/v1/projects").set(as(seeded))
     expect(list.body.data).toHaveLength(1) // chỉ dự án của fixture
   })
 
-  it("tạo với từng mode ⇒ 201, GET /projects và GET /projects/:id trả đúng sourceMode", async () => {
+  it("tạo fpt (mặc định) và import ⇒ 201, GET /projects/:id trả đúng mode", async () => {
     const seeded = await seedFixture("minimal")
 
-    for (const sourceMode of ["edit_srs", "fpt_template", "customer_template"]) {
-      const created = await request(app).post("/api/v1/projects").set(as(seeded)).send({ name: `P ${sourceMode}`, sourceMode })
+    for (const [body, mode] of [[{ name: "P fpt" }, "fpt"], [{ name: "P import", mode: "import" }, "import"]] as const) {
+      const created = await request(app).post("/api/v1/projects").set(as(seeded)).send(body)
       expect(created.status).toBe(201)
-      expect(created.body.data.sourceMode).toBe(sourceMode)
+      expect(created.body.data.mode).toBe(mode)
 
       const one = await request(app).get(`/api/v1/projects/${created.body.data._id}`).set(as(seeded))
-      expect(one.body.data.sourceMode).toBe(sourceMode)
+      expect(one.body.data.mode).toBe(mode)
     }
-
-    const list = await request(app).get("/api/v1/projects").set(as(seeded))
-    expect((list.body.data as Array<{ sourceMode: string }>).map((p) => p.sourceMode).sort()).toEqual(
-      ["customer_template", "edit_srs", "fpt_template", "fpt_template"]
-    )
   })
 })
 

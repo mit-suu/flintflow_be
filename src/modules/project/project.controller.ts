@@ -11,9 +11,9 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
   }
 
-  // Body đã qua CreateProjectSchema ở route: name không rỗng, sourceMode thuộc SOURCE_MODES
-  const { name, sourceMode, domain, folderId } = req.body as CreateProjectDTO
-  const project = await projectService.createProject(userId, name, sourceMode, domain, folderId)
+  // Body đã qua CreateProjectSchema ở route: name không rỗng, mode thuộc PROJECT_MODES (thiếu ⇒ fpt)
+  const { name, mode, domain, folderId } = req.body as CreateProjectDTO
+  const project = await projectService.createProject(userId, name, domain, mode, folderId)
   return sendSuccess(res, 201, project)
 })
 
