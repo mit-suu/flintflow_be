@@ -171,3 +171,5 @@ nhập. **Email** gửi theo `user.locale` (`shared/email/templates.ts`, cả ha
 `error.code` (`flintflow_fe/messages/*.json → errors`), nên mỗi lỗi user có thể gặp phải có **mã riêng, một nghĩa**;
 `message` chỉ là dự phòng. Mã mơ hồ nhiều nghĩa (vd `FORBIDDEN`) hoặc mang chi tiết động (`VALIDATION_ERROR`) thì FE
 hiện nguyên `message`.
+**Thông báo** (`notify`): luôn kèm `type` + đủ tham số trong `meta` để FE dựng lại câu theo ngôn ngữ
+(`flintflow_fe/lib/notification-text.ts`); `title`/`body` tiếng Việt chỉ là bản dự phòng.
