@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
-import { assignBlockSections, matchProfile, needsMappingReview } from "./profile-match.service.js"
+import { assignBlockSections, matchHeadings, matchProfile, needsMappingReview, type ProfileBlock } from "./profile-match.service.js"
+import { MAPPING_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 import { matchTableHeader } from "./table-header-dictionary.js"
@@ -89,5 +90,72 @@ describe("matchProfile", () => {
     expect(of("Show an error when the password is wrong.")).toMatch(/^function:@/)
     expect(of("Internal notes that do not belong to the template.")).toBeNull()
     expect(of("2 User Requirements")).toBeNull()
+  })
+})
+
+const heading = (n: number, level: number, text: string, detector: ProfileBlock["heading_detector"] = "style"): ProfileBlock => ({
+  block_id: `B${String(n).padStart(4, "0")}`,
+  kind: "heading",
+  level,
+  text,
+  heading_detector: detector
+})
+const mapOf = (blocks: ProfileBlock[]) => Object.fromEntries(matchHeadings(blocks).map((h) => [h.heading_text, h]))
+
+describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
+  it("heading tiếng Việt khớp alias của section cố định", () => {
+    const map = mapOf([heading(1, 1, "2 Yêu cầu người dùng"), heading(2, 2, "2.1 Tác nhân"), heading(3, 1, "5 Phụ lục"), heading(4, 2, "5.5 Thuật ngữ")])
+    expect(map["2 Yêu cầu người dùng"].section_id).toBe("group:2")
+    expect(map["2.1 Tác nhân"]).toMatchObject({ section_id: "fixed:2.1", confidence: 1 })
+    expect(map["5.5 Thuật ngữ"]).toMatchObject({ section_id: "fixed:5.5", confidence: 1 })
+  })
+
+  it("sai chính tả ⇒ vẫn khớp đúng section nhưng độ tin < 0.8 (cần xác nhận)", () => {
+    const blocks = [heading(1, 1, "2 User Requirements"), heading(2, 2, "2.2 Use Cases"), heading(3, 3, "2.2.2 Use Case Descripton")]
+    const h = mapOf(blocks)["2.2.2 Use Case Descripton"]
+    expect(h.section_id).toBe("fixed:2.2.2")
+    expect(h.confidence).toBeLessThan(MAPPING_CONFIDENCE_THRESHOLD)
+    expect(h.confidence).toBeGreaterThanOrEqual(0.5)
+    expect(needsMappingReview({ heading_map: matchHeadings(blocks), table_map: [] })).toBe(true)
+  })
+
+  it("khác số mục (đúng tiêu đề) ⇒ khớp theo tiêu đề, độ tin 0.7; không số mục ⇒ độ tin 1", () => {
+    const map = mapOf([heading(1, 1, "4 Non-Functional Requirements"), heading(2, 2, "4.7 Quality Attributes"), heading(3, 3, "4.7.9 Performance")])
+    expect(map["4.7.9 Performance"]).toMatchObject({ section_id: "fixed:4.2.3", confidence: 0.7 })
+    expect(map["4.7 Quality Attributes"]).toMatchObject({ section_id: "group:4.2", confidence: 0.7 })
+    expect(mapOf([heading(1, 1, "Performance")]).Performance).toMatchObject({ section_id: "fixed:4.2.3", confidence: 1 })
+  })
+
+  it("heading lạ ⇒ unmapped: không giống gì ⇒ độ tin 0.9 (không hỏi lại); giống yếu ⇒ 0.5 (hỏi lại)", () => {
+    const map = mapOf([heading(1, 1, "9 Team Notes"), heading(2, 1, "Business Notes Draft")])
+    expect(map["9 Team Notes"]).toMatchObject({ section_id: "unmapped", confidence: 0.9 })
+    expect(map["Business Notes Draft"]).toMatchObject({ section_id: "unmapped", confidence: 0.5 })
+  })
+
+  it("mỗi section cố định nhận tối đa một heading: heading trùng thứ hai rơi về section cha/unmapped", () => {
+    const hm = matchHeadings([heading(1, 1, "5.5 Glossary"), heading(2, 1, "Glossary")])
+    expect(hm.filter((h) => h.section_id === "fixed:5.5")).toHaveLength(1)
+    expect(hm.find((h) => h.heading_text === "5.5 Glossary")?.section_id).toBe("fixed:5.5")
+  })
+
+  it("con của section có nội dung ⇒ thuộc section cha, độ tin 0.8 (không cần xác nhận)", () => {
+    const map = mapOf([heading(1, 1, "5 Requirement Appendix"), heading(2, 2, "5.1 Business Rules"), heading(3, 3, "5.1.1 Payment rules")])
+    expect(map["5.1.1 Payment rules"]).toMatchObject({ section_id: "fixed:5.1", confidence: 0.8 })
+  })
+
+  it("ngưỡng 0.8: đúng 0.8 không cần xác nhận, dưới 0.8 cần, mục đã xác nhận thì bỏ qua", () => {
+    const entry = (confidence: number, confirmed = false) => ({
+      block_id: "B0001",
+      heading_text: "x",
+      section_id: "fixed:1",
+      confidence,
+      detected_by: "style" as const,
+      confirmed
+    })
+    expect(needsMappingReview({ heading_map: [entry(0.8)], table_map: [] })).toBe(false)
+    expect(needsMappingReview({ heading_map: [entry(0.79)], table_map: [] })).toBe(true)
+    expect(needsMappingReview({ heading_map: [entry(0.3, true)], table_map: [] })).toBe(false)
+    const column = { block_id: "B0002", column_index: 0, header: "Use Case ID", field_path: "use_cases[].id", confidence: 0.7, confirmed: false }
+    expect(needsMappingReview({ heading_map: [], table_map: [column] })).toBe(true)
   })
 })
