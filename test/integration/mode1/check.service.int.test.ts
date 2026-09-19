@@ -56,8 +56,10 @@ describe("check — hồ sơ luật mode 1", () => {
     const downgraded = open.filter((f) => MODE1_RULE_PROFILE.downgrade.has(f.rule_id))
     expect(downgraded.length).toBeGreaterThan(0)
     expect(downgraded.every((f) => f.level === "yellow")).toBe(true)
-    // SRS mẫu không có tham chiếu chết ⇒ 0 đỏ sau import
-    expect(open.filter((f) => f.level === "red")).toEqual([])
+    // SRS mẫu không có tham chiếu chết ⇒ đỏ chỉ còn section_empty: đầu mục FPT file không có (D6, FLF-183)
+    const red = open.filter((f) => f.level === "red")
+    expect(red.length).toBeGreaterThan(0)
+    expect(new Set(red.map((f) => f.rule_id))).toEqual(new Set(["section_empty"]))
   })
 })
 
@@ -70,7 +72,8 @@ describe("check — AI semantic (1.11)", () => {
     expect(ai).toHaveLength(2)
     expect(ai.every((f) => f.level === "yellow" && f.resolved_at === null && f.remediation_step === "C-1")).toBe(true)
     expect(ai.map((f) => f.section_id).sort()).toEqual(["fixed:4.2.3", "fixed:I"])
-    expect(result.flags.red).toBe(0)
+    // đỏ chỉ đến từ đầu mục FPT còn thiếu (section_empty, D6), không từ AI
+    expect(result.flags.red).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "red" && f.rule_id === "section_empty").length)
     expect(result.flags.yellow).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "yellow").length)
     const usage = await Usage.find({ projectId, step_id: SEMANTIC_CHECK_STEP }).lean()
     expect(usage.map((u) => u.state)).toEqual(["deducted"])

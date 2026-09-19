@@ -11,6 +11,7 @@ import { mockOverrides } from "./mock-llm.js"
 import { createMode1Project, fakeCrClarify, fakeMode1, mode1Api, promptLocations } from "./mode1.js"
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { changeRequestDetailSchema } from "../../src/modules/change-request/change-request.dto.js"
+import { fillCoreSections } from "./mode1-v2.js"
 import { DOC_FILE_BUCKET } from "../../src/modules/doc-version/doc-file.store.js"
 
 export type Mode1Api = ReturnType<typeof mode1Api>
@@ -26,6 +27,8 @@ export const importedProject = async (name = "Lumen LMS") => {
   await c.patch("/import/fields", { import_id: id, confirm_all: true })
   const fin = await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })
   expect(fin.status, JSON.stringify(fin.body.error)).toBe(200)
+  // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step (release cần hết cờ đỏ)
+  await fillCoreSections(projectId)
   return { seeded, projectId, c }
 }
 
