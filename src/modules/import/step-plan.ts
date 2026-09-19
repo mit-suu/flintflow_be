@@ -60,23 +60,53 @@ const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
   }
 }
 
-/** Layout + mục riêng từ block đã lưu và bảng heading → section (id thật sau finalize). */
-export const buildLayout = (blocks: LayoutBlock[], headingSections: ReadonlyMap<string, string>): LayoutResult => {
+/**
+ * Layout + mục riêng từ block đã lưu và bảng heading → section (id thật sau finalize).
+ * `unmappedBlockIds` (I-4 báo không trích được) và mọi khối dưới heading nhóm (`group:*`, không trích) ⇒ **phần nối**
+ * của section: mục riêng tiêu đề rỗng, cấp = cấp section + 1, đứng sau section trong layout — assemble gộp khối của nó
+ * vào đầu section đó (FLF-184), để render từ Spine không mất văn xuôi của file gốc.
+ */
+export const buildLayout = (
+  blocks: LayoutBlock[],
+  headingSections: ReadonlyMap<string, string>,
+  unmappedBlockIds: ReadonlySet<string> = new Set()
+): LayoutResult => {
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const seen = new Set<string>()
-  const stack: { level: number; section: string }[] = []
+  const stack: { level: number; section: string; entry: LayoutEntry }[] = []
+  /** Mục riêng đang nhận nguyên văn mọi khối. */
   let current: CustomSection | null = null
+  /** Section FPT / nhóm đang mở — khối không trích được thành phần nối của nó. */
+  let owner: LayoutEntry | null = null
+  const continuations = new Map<LayoutEntry, CustomSection>()
+
+  const newCustom = (heading: string, level: number): CustomSection => {
+    const section: CustomSection = { id: customId(customSections.length + 1), heading, level, blocks: [], source: "import" }
+    customSections.push(section)
+    return section
+  }
+  const continuationOf = (entry: LayoutEntry): CustomSection => {
+    let section = continuations.get(entry)
+    if (!section) {
+      section = newCustom("", clampLevel(entry.level + 1))
+      continuations.set(entry, section)
+      layout.push({ order: layout.length, heading_text: "", level: section.level, section_id: customSectionKey(section.id) })
+    }
+    return section
+  }
 
   for (const b of blocks) {
     if (b.kind === "heading" && b.level !== null) {
       while (stack.length && stack[stack.length - 1].level >= b.level) stack.pop()
-      const enclosing = stack[stack.length - 1]?.section ?? null
+      const enclosing = stack[stack.length - 1] ?? null
       const mapped = headingSections.get(b.block_id) ?? UNMAPPED_SECTION
       const heading = b.text.trim()
-      if (mapped !== UNMAPPED_SECTION && mapped === enclosing) {
-        // heading con của chính section đó — nội dung đã trích vào section FPT
-        stack.push({ level: b.level, section: mapped })
+      if (mapped !== UNMAPPED_SECTION && mapped === enclosing?.section) {
+        // heading con của chính section đó — nội dung đã trích vào section FPT; khối sau nó lại thuộc section đó
+        stack.push({ level: b.level, section: mapped, entry: enclosing.entry })
+        current = null
+        owner = enclosing.entry
         continue
       }
       let section: string
@@ -85,17 +115,19 @@ export const buildLayout = (blocks: LayoutBlock[], headingSections: ReadonlyMap<
         seen.add(mapped)
         current = null
       } else {
-        current = { id: customId(customSections.length + 1), heading, level: clampLevel(b.level), blocks: [], source: "import" }
-        customSections.push(current)
+        current = newCustom(heading, clampLevel(b.level))
         section = customSectionKey(current.id)
       }
-      stack.push({ level: b.level, section })
-      layout.push({ order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section })
+      const entry: LayoutEntry = { order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section }
+      layout.push(entry)
+      stack.push({ level: b.level, section, entry })
+      owner = current ? null : entry
       continue
     }
-    if (!current) continue
     const block = toCustomBlock(b)
-    if (block) current.blocks.push(block)
+    if (!block) continue
+    if (current) current.blocks.push(block)
+    else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
   return { layout, customSections }
 }
