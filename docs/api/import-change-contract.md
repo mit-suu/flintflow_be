@@ -54,10 +54,10 @@ mọi trạng thái chưa kết thúc ─► cancelled
 | 409 | `IMPORT_INVALID_STATE` | Hành động không hợp lệ với trạng thái import hiện tại | `{ status, to, allowed[] }` |
 | 409 | `CR_REQUIRES_BASELINE` | Tạo CR khi chưa có baseline v0 | — |
 | 409 | `CR_INVALID_TRANSITION` | Hành động không hợp lệ với trạng thái CR | `{ status, to, allowed[] }` |
-| 409 | `BLOCK_LOCKED` | CR cần khoá block đang bị CR khác giữ (3.5), hoặc sửa tay block không thuộc CR | `{ locked: [{ block_id, cr_id }] }` |
+| 409 | `PATH_LOCKED` (FLF-186, thay `BLOCK_LOCKED`) | CR cần khoá phần tử Spine đang bị CR khác giữ (3.5), hoặc sửa tay vị trí không thuộc CR | `{ locked: [{ path, cr_id }] }` |
 | 409 | `CR_LOCATION_UNCONCLUDED` | Nộp CR khi còn vị trí chưa có kết luận | `{ location_ids[] }` |
-| 409 | `CR_OLD_TEXT_MISMATCH` | Text block đã đổi so với `proposal.old_text` (verify hoặc ghi) | `{ location_id, block_id }` |
-| 409 | `CHANGE_REQUIRES_CR` | Chat sửa / `POST /changes` / `POST /undo` ở project mode 1 | `{ prefill: { title, description } }` |
+| 409 | `CR_VALUE_CHANGED` (FLF-186, thay `CR_OLD_TEXT_MISMATCH`) | Giá trị phần tử tại `path` đã đổi so với `proposal.old_text` (verify hoặc ghi) | `{ location_id, path }` |
+| 409 | `CHANGE_REQUIRES_CR` | Chat sửa / `POST /changes` / `POST /undo` ở project mode 1 (sau baseline v1 — D3) | `{ prefill: { title, description }, change_request?: { cr_id, status } }` — `change_request` khi chat đã tạo CR (FLF-186) |
 | 422 | `IMPORT_FILE_REJECTED` | Preflight từ chối file (1.2); bản ghi import vẫn được tạo với `status = preflight_rejected` | `{ import_id, issues[] }` |
 | 422 | `IMPORT_STAMP_FOREIGN_PROJECT` | File mang stamp của project khác | `{ stamp }` |
 | 422 | `RELEASE_RED_FLAGS_OPEN` | Release khi còn cờ đỏ (BR-04, mode 1 không waive) | `{ flags[] }` |
@@ -90,13 +90,13 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 18 | `GET /projects/:id/change-requests/:crId` | UC-48 | — | `changeRequestDetailSchema` | `CR_NOT_FOUND` |
 | 19 | `POST …/:crId/clarify` | UC-49, 3.2 | `{}` | `changeRequestDetailSchema` (`awaiting_answers` kèm `pending_questions`, hoặc `impact_review`) | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
 | 20 | `POST …/:crId/answers` | UC-49, 3.3 | `answersRequestSchema` | `changeRequestDetailSchema` (chạy lại C-2) | `CR_INVALID_TRANSITION`, `VALIDATION_ERROR` (số câu trả lời ≠ số câu hỏi) |
-| 21 | `POST …/:crId/impact` | UC-50, 3.4–3.5 | `{}` | `changeRequestDetailSchema` (`locations[]`, block đã khoá) | `BLOCK_LOCKED`, `CR_INVALID_TRANSITION` |
+| 21 | `POST …/:crId/impact` | UC-50, 3.4–3.5 | `{}` | `changeRequestDetailSchema` (`locations[]`, phần tử đã khoá) | `PATH_LOCKED`, `CR_INVALID_TRANSITION` |
 | 22 | `POST …/:crId/propose` | UC-81, 3.6 | `{}` | `changeRequestDetailSchema` (`groups[]`) | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
 | 23 | `PATCH …/:crId/locations/:locId` | UC-81, 3.9 | `patchLocationRequestSchema` | `changeRequestDetailSchema` (vị trí `manual = true`) | `CR_LOCATION_NOT_FOUND`, `CR_INVALID_TRANSITION` |
-| 24 | `POST …/:crId/verify` | UC-82, 3.7–3.8 | `{}` | `changeRequestDetailSchema` (`ready_to_submit`, `proposing` hoặc `manual_fix`) | `CR_INVALID_TRANSITION`, `CR_OLD_TEXT_MISMATCH`, `INSUFFICIENT_CREDIT` |
+| 24 | `POST …/:crId/verify` | UC-82, 3.7–3.8 | `{}` | `changeRequestDetailSchema` (`ready_to_submit`, `proposing` hoặc `manual_fix`) | `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `INSUFFICIENT_CREDIT` |
 | 25 | `POST …/:crId/submit` | UC-51, 3.11 | `{}` | `changeRequestDetailSchema` (`in_review`) | `CR_LOCATION_UNCONCLUDED`, `CR_INVALID_TRANSITION` |
-| 26 | `POST …/:crId/groups/:gid/decision` | UC-52, 3.12–3.14 | `groupDecisionRequestSchema` | `changeRequestDetailSchema`; khi group cuối được quyết mà có group duyệt ⇒ `written` kèm `result_doc_version` | `CR_GROUP_NOT_FOUND`, `CR_INVALID_TRANSITION`, `CR_OLD_TEXT_MISMATCH`, `SPINE_VERSION_CONFLICT` |
-| 27 | `POST …/:crId/revise` | UC-52 | `{}` | `changeRequestDetailSchema` (khoá lại block, về `proposing`) | `BLOCK_LOCKED`, `CR_INVALID_TRANSITION` |
+| 26 | `POST …/:crId/groups/:gid/decision` | UC-52, 3.12–3.14 | `groupDecisionRequestSchema` | `changeRequestDetailSchema`; khi group cuối được quyết mà có group duyệt ⇒ `written` kèm `result_doc_version` | `CR_GROUP_NOT_FOUND`, `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `SPINE_VERSION_CONFLICT` |
+| 27 | `POST …/:crId/revise` | UC-52 | `{}` | `changeRequestDetailSchema` (khoá lại phần tử, về `proposing`) | `PATH_LOCKED`, `CR_INVALID_TRANSITION` |
 | 28 | `POST …/:crId/close` | 3.13 | `closeRequestSchema` | `changeRequestDetailSchema` (`rejected`) | `CR_INVALID_TRANSITION` |
 | 29 | `POST …/:crId/cancel` | UC-53, 3.10 | `closeRequestSchema` | `changeRequestDetailSchema` (`cancelled`, mở khoá) | `CR_INVALID_TRANSITION` |
 | 30 | `POST …/:crId/resume` | UC-75 | `{}` | `changeRequestDetailSchema` | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
@@ -196,7 +196,7 @@ Request `{ "import_id": "66f0…01", "base_version": 3 }` →
 Nếu CR-002 cần block `B0005` mà CR-001 đang giữ:
 
 ```json
-{ "data": null, "meta": { "locked": [{ "block_id": "B0005", "cr_id": "CR-001" }] }, "error": { "code": "BLOCK_LOCKED", "message": "Block B0005 đang được CR-001 sửa" } }
+{ "data": null, "meta": { "locked": [{ "path": "nfrs[id=NFR-01]", "cr_id": "CR-001" }] }, "error": { "code": "PATH_LOCKED", "message": "nfrs[id=NFR-01] đang được CR-001 sửa" } }
 ```
 
 ### 2.6 Quyết định group (#26)
@@ -231,7 +231,7 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - `templateProfileDtoSchema` thêm `layout[]` `{ order, heading_text, level, section_id }` — thứ tự + tiêu đề mục của file upload (`section_id` = section FPT hoặc `custom:<id>`). Import cũ ⇒ `[]`.
 - CR `source.kind` thêm `chat` — CR tạo từ lệnh sửa trong chat sau baseline v1.
 - `CHANGE_REQUIRES_CR`: **chỉ** trả khi project đã có baseline v1 (sign-off) hoặc release — trước đó `/changes`, `/undo`, chat sửa chạy như mode 2 (D3). Hiện thực ở V1.
-- **Chưa đổi ở V0** (contract-change riêng ở V4): vị trí CR theo path Spine thay `block_id`, `BLOCK_LOCKED` theo path, `CR_OLD_TEXT_MISMATCH` ⇒ so giá trị tại path, #13 blocks ⇒ trả `RenderedDocument` của version.
+- **Chưa đổi ở V0** — đã làm ở V4 (§4.6): vị trí CR theo path Spine thay `block_id`, khoá theo path (`PATH_LOCKED`), so giá trị tại path (`CR_VALUE_CHANGED`), #13 blocks đọc từ file render của version.
 
 ### 4.5 V2 — render theo template người dùng (FLF-184, chỉ thêm field)
 - `RenderedDocument` của project có layout (mode 1 sau finalize): `sections[]` theo **thứ tự + tiêu đề file upload** (bỏ số gõ tay, `number` đánh lại theo cấp; heading không gõ số trong file gõ số tay ⇒ `number: ""`). Section FPT file không có ⇒ chèn cạnh mục cùng nhóm, tiêu đề mẫu FPT theo `TemplateProfile.language`. `group:<id>` lấy theo `section_id` của layout (vd `group:4`), không còn là số hiệu. Văn xuôi không trích được nằm ở đầu `blocks` của section chủ. Hình `RenderedSection` không đổi. Project mode 2 không đổi.
@@ -240,10 +240,21 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - `gapReportSchema` thêm `totals.missing_fpt_sections`, `missing_fpt_sections[]` `{ section_id, title, step_id, in_layout }` (đầu mục FPT thiếu — D6, đứng đầu báo cáo; `feature:*` = chức năng chương 3), `layout[]` `{ order, section_id, heading, level, kind: fpt|group|custom, red, yellow }`; `sections[]` xếp theo layout.
 - **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của `0.0`.
 
+### 4.6 V4 — CR trên Spine, điều khiển bằng chat (FLF-186, contract-change — chờ 4/4)
+- **Vị trí CR = phần tử Spine** (`project`, `actors[id=A01]`, `custom_sections[id=CS02]`…) thay block docx. `changeLocationDtoSchema`: bỏ `block_id`, `block`; thêm `path`, `section_id`, `section_title`, `current_text` (giá trị hiện tại — JSON khoá sắp xếp). `proposal.old_text` / `new_text` = giá trị phần tử trước / sau khi chạy khô op của vị trí; `edit` ⇒ `spine_ops` bắt buộc (output C-4 `crProposeSchema`).
+- **Khoá theo path** (collection `SpineLock`, unique `(projectId, path)`): `BLOCK_LOCKED` ⇒ `PATH_LOCKED` `{ locked: [{ path, cr_id }] }`; op của vị trí chỉ được chạm phần tử CR đang khoá (thêm phần tử mới `arr[]` thì được).
+- **C-5**: `CR_OLD_TEXT_MISMATCH` ⇒ `CR_VALUE_CHANGED` `{ location_id, path }` — giá trị tại path đổi kể từ lúc đề xuất. Nhận xét AI gắn theo `section_id`.
+- **#28 PATCH vị trí**: bỏ `new_text`; `edit` cần `new_value` (giá trị mới của cả phần tử ⇒ op `set` tại `path`) hoặc `spine_ops`.
+- **C-7 (D4)**: duyệt group cuối ⇒ op của CR vào Spine (`by = cr_id`) + version minor = **bản render** từ Spine (stamp `cr_revision`, §I có dòng CR), ghép lại bản làm việc. Vị trí `comment` không đổi Spine (ghi chú nằm ở CR). Bản tải "có đánh dấu" theo section: **để sau** (plan v2 §11 cắt giảm) — `variant=tracked` trả bản render.
+- **Release**: bản sạch = render snapshot Spine (`file_ref` = `clean_file_ref`).
+- **#13 blocks, #15 compare, re-upload (#11)**: đọc block từ **file render** của version (id theo thứ tự đọc, không neo; `revisions` không còn); diff khớp theo text (trùng text ngoài thứ tự ⇒ `moved`, giống từ ≥ 50% giữa cùng hai khối đã khớp ⇒ `modified`), `block_id = null`.
+- **3.1 từ chat**: sau baseline v1, lệnh sửa trong chat ⇒ BE tạo CR nguồn `chat` (requester = người gửi) rồi trả `409 CHANGE_REQUIRES_CR` kèm `meta.change_request { cr_id, status }` (+ `prefill` như cũ). `/changes`, `/undo` giữ 409 chỉ `prefill`.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-19 | FLF-186 (mode 1 v2, V4) | §4.6: vị trí CR theo path Spine (DTO location), `PATH_LOCKED`, `CR_VALUE_CHANGED`, PATCH vị trí `new_value`/`spine_ops`, version/release = render Spine, blocks/compare/re-upload từ file render, chat sau v1 tạo CR (`meta.change_request`) — contract-change, chờ 4/4 |
 | 2026-09-19 | FLF-184 (mode 1 v2, V2) | §4.5: `RenderedDocument` theo layout file upload, #14 `variant=original`, `has_original_file`, gap report `missing_fpt_sections` + `layout[]` — chỉ thêm field, kèm lô contract-change V0 |
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
