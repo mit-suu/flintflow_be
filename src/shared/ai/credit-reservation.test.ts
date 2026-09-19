@@ -51,6 +51,11 @@ describe("credit-reservation.service", () => {
       expect(wallet.balance).toBe(planConfig.free.initialCredits)
       expect(wallet.reserved).toBe(0)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "welcome" }))
+      // T25: số credit tặng nằm trong meta để FE dịch câu chào mừng
+      expect(notify).toHaveBeenCalledWith(
+        USER,
+        expect.objectContaining({ type: "welcome", meta: { credits: planConfig.free.initialCredits } })
+      )
       expect(notifyAdmins).toHaveBeenCalledWith(expect.objectContaining({ type: "admin_new_user" }))
     })
 

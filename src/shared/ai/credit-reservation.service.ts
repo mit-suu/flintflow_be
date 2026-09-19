@@ -87,7 +87,9 @@ export const getOrCreateWallet = async (
       type: "welcome",
       title: "Chào mừng bạn đến với FlintFlow",
       body: `Tài khoản của bạn đã sẵn sàng với ${initialCredits} credit miễn phí.`,
-      link: "/home/billing"
+      link: "/home/billing",
+      // FE dựng lại câu theo ngôn ngữ của user từ tham số này (T25)
+      meta: { credits: initialCredits }
     })
     void notifyAdmins({
       type: "admin_new_user",

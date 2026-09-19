@@ -291,6 +291,14 @@ describe("billing.service", () => {
       expect(balance.balance).toBe(planConfig.free.initialCredits + planConfig.pro.monthlyCredits)
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed" }))
+      // T25: FE dựng lại câu theo ngôn ngữ từ meta — phải có tên gói + ngày hết hạn (ISO)
+      expect(notify).toHaveBeenCalledWith(
+        USER,
+        expect.objectContaining({
+          type: "plan_changed",
+          meta: expect.objectContaining({ plan: "pro", label: "Pro", periodEnd: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) })
+        })
+      )
     })
 
     it("không có checkout cho gói miễn phí; về Free là idempotent", async () => {

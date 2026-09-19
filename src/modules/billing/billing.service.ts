@@ -441,7 +441,13 @@ const notifyPlanChanged = async (userId: string, change: PlanChange) => {
       ? `Gói ${definition.label} có hiệu lực đến ${new Date(periodEnd).toLocaleDateString("vi-VN")}.`
       : `Gói ${definition.label} đã được kích hoạt.`,
     link: "/home/billing",
-    meta: { plan: change.plan, previousPlan: change.previousPlan }
+    // label + periodEnd để FE dựng lại câu theo ngôn ngữ của user (T25); title/body trên là bản vi dự phòng.
+    meta: {
+      plan: change.plan,
+      previousPlan: change.previousPlan,
+      label: definition.label,
+      periodEnd: periodEnd ? new Date(periodEnd).toISOString() : null
+    }
   })
 }
 
