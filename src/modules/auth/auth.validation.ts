@@ -4,7 +4,8 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters")
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  rememberMe: z.boolean().optional()
 })
 
 export type LoginDTO = z.infer<typeof loginSchema>
@@ -23,8 +24,11 @@ export const resendVerificationSchema = z.object({
 
 export type ResendVerificationDTO = z.infer<typeof resendVerificationSchema>
 
+const otpField = z.string().trim().regex(/^\d{6}$/, "Mã OTP phải gồm 6 chữ số")
+
 export const verifyEmailConfirmSchema = z.object({
-  token: z.string().min(1, "Token is required")
+  email: z.string().email("Invalid email address"),
+  otp: otpField
 })
 
 export type VerifyEmailConfirmDTO = z.infer<typeof verifyEmailConfirmSchema>
@@ -35,15 +39,23 @@ export const forgotPasswordSchema = z.object({
 
 export type ForgotPasswordDTO = z.infer<typeof forgotPasswordSchema>
 
+export const verifyResetOtpSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  otp: otpField
+})
+
+export type VerifyResetOtpDTO = z.infer<typeof verifyResetOtpSchema>
+
 export const resetPasswordSchema = z.object({
-  token: z.string().min(1, "Token is required"),
+  resetToken: z.string().min(1, "Reset token is required"),
   password: z.string().min(6, "Password must be at least 6 characters")
 })
 
 export type ResetPasswordDTO = z.infer<typeof resetPasswordSchema>
 
 export const googleAuthSchema = z.object({
-  idToken: z.string().min(1, "Google ID token is required")
+  idToken: z.string().min(1, "Google ID token is required"),
+  rememberMe: z.boolean().optional()
 })
 
 export type GoogleAuthDTO = z.infer<typeof googleAuthSchema>
