@@ -30,6 +30,7 @@ export type TargetCollection =
   | "business_rules"
   | "entities"
   | "validations"
+  | "custom_sections"
   | "section_key"
   | "path"
   | "diagram_owner"
@@ -100,7 +101,8 @@ export const buildIdIndex = (spine: Spine): IdIndex => ({
   roles: ids(spine.roles),
   business_rules: ids(spine.business_rules),
   entities: ids(spine.entities),
-  validations: new Set(spine.functions.flatMap((f) => f.validations.map((v) => v.id)))
+  validations: new Set(spine.functions.flatMap((f) => f.validations.map((v) => v.id))),
+  custom_sections: ids(spine.custom_sections)
 })
 
 /** `fixed:3.1.1` → hợp lệ nếu thuộc template; `feature:F1` / `function:FN01` → phần tử tồn tại. */
@@ -108,6 +110,7 @@ export const sectionKeyExists = (index: IdIndex, sectionId: string): boolean => 
   if (FIXED_SECTION_SET.has(sectionId)) return true
   if (sectionId.startsWith("feature:")) return index.features.has(sectionId.slice("feature:".length))
   if (sectionId.startsWith("function:")) return index.functions.has(sectionId.slice("function:".length))
+  if (sectionId.startsWith("custom:")) return index.custom_sections.has(sectionId.slice("custom:".length))
   return false
 }
 
@@ -219,9 +222,9 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
   }
 }
 
-/** Khoá section đúng dạng: `fixed:*` của template, hoặc `feature:<id>` / `function:<id>` bất kỳ. */
+/** Khoá section đúng dạng: `fixed:*` của template, hoặc `feature:<id>` / `function:<id>` / `custom:<id>` (FLF-182) bất kỳ. */
 export const sectionKeyWellFormed = (sectionId: string): boolean =>
-  FIXED_SECTION_SET.has(sectionId) || /^(feature|function):\S+$/.test(sectionId)
+  FIXED_SECTION_SET.has(sectionId) || /^(feature|function|custom):\S+$/.test(sectionId)
 
 /** Khoá của `hit` còn trỏ tới phần tử tồn tại không. */
 export const referenceAlive = (spine: Spine, index: IdIndex, hit: ReferenceHit): boolean => {

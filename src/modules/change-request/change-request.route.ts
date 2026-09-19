@@ -43,7 +43,7 @@ const router = Router()
  *                 type: object
  *                 required: [kind]
  *                 properties:
- *                   kind: { type: string, enum: [stakeholder_email, meeting_minutes, gap_report, reupload, viewer_comment, verbal] }
+ *                   kind: { type: string, enum: [stakeholder_email, meeting_minutes, gap_report, reupload, viewer_comment, verbal, chat] }
  *                   ref: { type: string, nullable: true }
  *                   note: { type: string, nullable: true }
  *               requester: { type: string }
