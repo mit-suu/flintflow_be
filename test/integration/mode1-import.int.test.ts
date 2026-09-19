@@ -7,7 +7,7 @@ import request from "supertest"
 import app from "../../src/app.js"
 import { seedFixture, type SeededFixture } from "../setup.js"
 import { DocxPackage, writeStamp } from "../../src/modules/docx-ooxml/index.js"
-import { makeDocx, p } from "../../src/modules/docx-ooxml/testing/make-docx.js"
+import { makeDocx, p, table } from "../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { getImportResponseSchema, importStateResponseSchema, importRejectedMetaSchema } from "../../src/modules/import/import.dto.js"
 import { DocBlock } from "../../src/modules/import/doc-block.model.js"
@@ -139,5 +139,19 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     const projectId = await createMode1Project(seeded)
     const res = await request(app).post(`/api/v1/projects/${projectId}/import`).set("Authorization", `Bearer ${seeded.token}`)
     expect(res.status).toBe(400)
+  })
+
+  it("bảng có ô tiêu đề cột trống ⇒ upload + tách block vẫn chạy, cột đó có header rỗng (FLF-179)", async () => {
+    const seeded = await seedFixture("minimal")
+    const projectId = await createMode1Project(seeded)
+    const c = api(seeded, projectId)
+    const body = p("2.2 Use Cases") + table([["Use Case ID", "", "Actor"], ["UC-01", "Register", "Learner"]])
+    const up = await c.upload(await makeDocx({ body }))
+    expect(up.status, JSON.stringify(up.body.error)).toBe(201)
+    const importId = importStateResponseSchema.parse(up.body.data).import.id
+    const confirmed = await c.post("/import/confirm-latest", { import_id: importId })
+    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
+    const profile = getImportResponseSchema.parse((await c.get()).body.data).profile!
+    expect(profile.table_map.map((t) => t.header)).toEqual(["Use Case ID", "", "Actor"])
   })
 })
