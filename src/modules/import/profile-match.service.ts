@@ -142,10 +142,13 @@ export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, s
       }))
     )
 
-/** Section bắt buộc (registry `required`, không suy dẫn) không có heading nào khớp. */
+/**
+ * Đầu mục mẫu FPT không có heading nào khớp. Mode 1 v2 (D6, FLF-183): **mọi** đầu mục FPT là cốt lõi — chỉ trừ
+ * Record of Changes (`fixed:I`) vì hệ thống tự sinh từ lịch sử thay đổi.
+ */
 export const missingRequiredSections = (headingMap: HeadingMapEntry[]): string[] => {
   const mapped = new Set(headingMap.map((h) => h.section_id))
-  return SECTION_CANDIDATES.filter((c) => c.kind === "fixed" && c.required && !mapped.has(c.id) && c.id !== "fixed:5.5").map((c) => c.id)
+  return SECTION_CANDIDATES.filter((c) => c.kind === "fixed" && !mapped.has(c.id) && c.id !== "fixed:I").map((c) => c.id)
 }
 
 export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {

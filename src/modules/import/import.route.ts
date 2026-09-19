@@ -319,4 +319,37 @@ router.post("/:id/import/resume", authMiddleware, importController.resume)
  */
 router.get("/:id/gap-report", authMiddleware, importController.gapReport)
 
+/**
+ * @swagger
+ * /api/v1/projects/{id}/step-plan:
+ *   get:
+ *     summary: Kế hoạch step theo template của file upload (#32, mode 1 v2)
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: "`{ steps: [{ step_id, state: applied|hidden|enabled, missing, section_ids, reason }] }`" }
+ *       409: { description: IMPORT_INVALID_STATE (chưa finalize) }
+ *   patch:
+ *     summary: Bật step ẩn / tắt step đã bật chưa có dữ liệu (#33)
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [step_id, enabled], properties: { step_id: { type: string }, enabled: { type: boolean } } }
+ *     responses:
+ *       200: { description: "`{ steps }` sau khi đổi" }
+ *       404: { description: STEP_NOT_IN_PLAN }
+ *       409: { description: "CORE_STEP_REQUIRED (tắt đầu mục FPT / bước luôn chạy / step đã có dữ liệu), IMPORT_INVALID_STATE" }
+ */
+router.get("/:id/step-plan", authMiddleware, importController.getStepPlan)
+router.patch("/:id/step-plan", authMiddleware, importController.patchStepPlan)
+
 export default router

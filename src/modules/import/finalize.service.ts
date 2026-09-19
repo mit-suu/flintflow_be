@@ -3,8 +3,10 @@
  *   1. Field đã xác nhận (hoặc độ tin ≥ 0.7) ⇒ thực thể ⇒ op; áp trong **một** transaction `by: "import"`.
  *   2. Đổi section tạm `feature:@B…`/`function:@B…` sang id thật ở template profile + block; ghi `FieldAnchor`;
  *      quét lại mention theo tên (actor, entity, feature, screen).
- *   3. Bản lưu `0.0` = file gốc + bookmark neo + stamp ⇒ GridFS; `DocVersion 0.0`; baseline `type: imported`.
- *   4. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp).
+ *   3. Mode 1 v2 (FLF-183): layout + mục riêng (`custom_sections`) theo file upload, kế hoạch step theo template (D6),
+ *      seed `steps[]` + `progress` ⇒ workspace như mode 2 chạy tiếp từ step còn thiếu. Một txn thứ hai `by: import`.
+ *   4. Bản lưu `0.0` = file gốc + bookmark neo + stamp ⇒ GridFS; `DocVersion 0.0`; baseline `type: imported`.
+ *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp).
  * Không dùng `signOff` (mode 2): baseline v0 không bị cờ đỏ chặn — cờ đi vào gap report (P0 báo cáo §3 dòng 6).
  */
 
@@ -30,6 +32,7 @@ import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps } from "./spine-builder.js"
+import { buildLayout, buildStepPlan, customSectionOps, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { TemplateProfile } from "./template-profile.model.js"
 
 export interface FinalizeResult {
@@ -70,10 +73,13 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const fileRef = await docFileStore().save(await parsed.pkg.toBuffer(), { projectId, kind: "version", name: IMPORTED_DOC_VERSION })
 
   let spineVersion = before.spine_version
+  let seqRange: { first: number | null; last: number | null } = { first: null, last: null }
   try {
     if (ops.length) {
       const applied = await applyTransaction(projectId, { base_version: before.spine_version, ops, by: "import", reason: `Import SRS ${doc.original_name}`, step_id: null })
       spineVersion = applied.spine_version
+      const seqs = applied.changes.map((c) => c.seq)
+      if (seqs.length) seqRange = { first: Math.min(...seqs), last: Math.max(...seqs) }
     }
   } catch (err) {
     await docFileStore().remove(fileRef)
@@ -111,9 +117,33 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   }))
   if (updates.length) await DocBlock.bulkWrite(updates)
 
-  // 4. Baseline imported + DocVersion 0.0
-  const { baseline, spine_version } = await snapshotBaseline(projectId, stripRecord(spineNow), {
-    base_version: spineNow.spine_version,
+  // 3b. Layout + mục riêng + kế hoạch step theo template người dùng (mode 1 v2, D2/D6)
+  const ordered = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean()
+  const layoutBlocks: LayoutBlock[] = ordered.map((b) => ({
+    block_id: b.block_id,
+    kind: b.kind,
+    level: b.level ?? null,
+    text: b.text,
+    section_id: b.section_id ?? null,
+    // DocBlock không lưu ô bảng — dựng lại từ text `ô | ô` theo dòng
+    rows: b.kind === "table" ? b.text.split("\n").map((line) => line.split(" | ")) : null
+  }))
+  const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks))
+  const seeded = await loadSpine(projectId)
+  const planOps = [
+    ...customSectionOps(customSections),
+    ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
+  ]
+  await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
+  profile.layout = layout
+  profile.step_plan = plan
+  await profile.save()
+
+  // 4. Baseline imported + DocVersion 0.0 — chụp Spine sau lô kế hoạch step
+  const planned = await loadSpine(projectId)
+  const { baseline, spine_version } = await snapshotBaseline(projectId, stripRecord(planned), {
+    base_version: planned.spine_version,
     version: IMPORTED_DOC_VERSION,
     type: "imported",
     doc_version: IMPORTED_DOC_VERSION,
