@@ -115,6 +115,8 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
   const snapshot = await Baseline.create({
     projectId,
     version,
+    type: "generated",
+    doc_version: null,
     at,
     checked_at_version: checkedAtVersion,
     waived_count: waived.length,
@@ -124,6 +126,8 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
   const entry: BaselineEntry = {
     id: nextBaselineId(spine.baselines),
     version,
+    type: "generated",
+    doc_version: null,
     at: at.toISOString(),
     snapshot_ref: String(snapshot._id),
     checked_at_version: checkedAtVersion,
