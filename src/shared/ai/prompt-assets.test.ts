@@ -125,14 +125,8 @@ describe("skill trên đĩa (assets/skills)", () => {
     "renderer/usecase"
   ])
 
-  // FLF-171: skill action mode 1 là khung ở P1 (plan mode 1 §5.7); P2 viết nội dung thì bỏ `stub` và xoá khỏi đây.
-  const MODE1_SKELETON_ACTION = new Set([
-    "action/import-extract",
-    "action/import-semantic-check",
-    "action/cr-clarify",
-    "action/cr-propose",
-    "action/cr-consistency"
-  ])
+  // FLF-171: skill action mode 1 là khung ở P1 (plan mode 1 §5.7); P2 đã viết nội dung cả 5 skill nên tập này rỗng.
+  const MODE1_SKELETON_ACTION = new Set<string>([])
 
   it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
