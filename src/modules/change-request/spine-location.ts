@@ -51,6 +51,41 @@ export const elementPathOf = (path: string): string | null => {
   return ELEMENT.exec(path)?.[0] ?? null
 }
 
+/**
+ * Vị trí **"mục đang trống"** (phương án B, chốt 2026-09-20): path là cả mảng (`business_rules[]`) thay vì một
+ * phần tử. Mục chưa có phần tử nào thì không có gì để sửa — nhưng CR vẫn làm được việc thật: **thêm mới**.
+ * Giá trị của vị trí là chính mảng đó, nên C-5 so được "mảng có bị ai khác thêm/bớt kể từ lúc đề xuất không".
+ */
+const ARRAY_PATH = /^(\w+)\[\]$/
+export const isArrayPath = (path: string): boolean => ARRAY_PATH.test(path)
+
+/**
+ * Mảng nuôi nội dung của từng đầu mục FPT — soi ngược bảng `SECTION_HAS_DATA` của `deterministic-check.ts`.
+ * Section không có mảng nào (vd `fixed:1` là phần tử `project`, `fixed:3.1.1` là field `flow_to` của màn có sẵn)
+ * ⇒ không dựng vị trí "mục trống", C-3 sẽ báo rõ thay vì đoán bừa.
+ */
+export const SECTION_FILL_ARRAYS: Readonly<Record<string, readonly string[]>> = {
+  "fixed:2.1": ["actors"],
+  "fixed:2.2.2": ["use_cases"],
+  "fixed:3.1.2": ["screens"],
+  "fixed:3.1.3": ["roles", "permissions"],
+  "fixed:3.1.4": ["functions"],
+  "fixed:3.1.5": ["entities"],
+  "fixed:4.1": ["nfrs"],
+  "fixed:4.2.1": ["nfrs"],
+  "fixed:4.2.2": ["nfrs"],
+  "fixed:4.2.3": ["nfrs"],
+  "fixed:4.2.4": ["nfrs"],
+  "fixed:5.1": ["business_rules"],
+  "fixed:5.2": ["common_requirements"],
+  "fixed:5.3": ["messages"],
+  "fixed:5.4": ["other_requirements"],
+  "fixed:5.5": ["glossary"]
+}
+
+/** Path thêm mới cho một section đang trống (`fixed:5.1` ⇒ `business_rules[]`); section không đổ được ⇒ []. */
+export const fillPathsOfSection = (sectionId: string): string[] => (SECTION_FILL_ARRAYS[sectionId] ?? []).map((arr) => `${arr}[]`)
+
 type Row = Record<string, unknown>
 
 const arrayOf = (spine: Spine, key: string): Row[] => {
@@ -58,9 +93,11 @@ const arrayOf = (spine: Spine, key: string): Row[] => {
   return Array.isArray(value) ? (value as Row[]) : []
 }
 
-/** Giá trị hiện tại của phần tử — `undefined` nếu không còn. */
+/** Giá trị hiện tại của phần tử — `undefined` nếu không còn. Path dạng `arr[]` (vị trí "mục trống") ⇒ cả mảng. */
 export const elementValue = (spine: Spine, path: string): unknown => {
   if (path === PROJECT_PATH) return spine.project
+  const array = ARRAY_PATH.exec(path)
+  if (array) return arrayOf(spine, array[1])
   const m = ELEMENT.exec(path)
   if (!m || m[0] !== path) return undefined
   return arrayOf(spine, m[1]).find((el) => String(el.id) === m[2])
@@ -176,9 +213,8 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
     .map(wordPattern)
   for (const e of elements) if (patterns.some((re) => re.test(textOf(e.value)))) hit(e.path, "keyword")
 
-  return elements
+  const found: FoundLocation[] = elements
     .filter((e) => hits.has(e.path))
-    .slice(0, MAX_LOCATIONS)
     .map((e) => {
       const h = hits.get(e.path)!
       const section_id = sectionOfElement(spine, e.path)
@@ -190,15 +226,37 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
         owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
       }
     })
+
+  // Đích là section còn trống: không có phần tử nào để sửa, nhưng CR vẫn làm được việc — **thêm mới** vào mảng
+  // nuôi mục đó (phương án B). Section không đổ được bằng mảng thì bỏ qua ở đây, `emptySectionTargets` báo tiếp.
+  for (const section of emptySections(spine, targets)) {
+    for (const path of fillPathsOfSection(section)) {
+      found.push({
+        path,
+        section_id: section,
+        found_by: ["spine_link"],
+        entity_paths: [section],
+        owner_step: ownerStepOf(section, spine)
+      })
+    }
+  }
+  return found.slice(0, MAX_LOCATIONS)
 }
 
-/** Đích dạng mã section mà Spine chưa có phần tử nào thuộc về — CR không sửa được gì ở đó, phải chạy step để soạn. */
-export const emptySectionTargets = (spine: Spine, targets: readonly string[]): string[] => {
+/** Đích dạng mã section mà Spine chưa có phần tử nào thuộc về. */
+const emptySections = (spine: Spine, targets: readonly string[]): string[] => {
   const sections = [...new Set(targets.filter(isSectionTarget))]
   if (!sections.length) return []
   const filled = new Set(listElements(spine).map((e) => sectionOfElement(spine, e.path)))
   return sections.filter((s) => !filled.has(s))
 }
+
+/**
+ * Đích section trống mà **cũng không thêm mới được** (không có mảng nào nuôi mục đó — vd `fixed:1` là phần tử
+ * `project`, `fixed:3.1.1` là field của màn có sẵn). Đây mới là ca phải chạy step soạn nội dung thay vì mở CR.
+ */
+export const emptySectionTargets = (spine: Spine, targets: readonly string[]): string[] =>
+  emptySections(spine, targets).filter((s) => fillPathsOfSection(s).length === 0)
 
 /** Phần tử mà op chạm tới (để đòi khoá): `actors[id=A01].name` ⇒ `actors[id=A01]`; `actors[]` (thêm mới) ⇒ null. */
 export const opElement = (opPath: string): string | null => elementPathOf(opPath)

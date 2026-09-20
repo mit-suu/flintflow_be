@@ -23,7 +23,7 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
-import { elementValue, valueText } from "./spine-location.js"
+import { elementValue, isArrayPath, valueText } from "./spine-location.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -68,7 +68,9 @@ export const locationPromptText = (spine: Spine, l: PromptLocation): string => {
   const failed = l.verify && !l.verify.code_ok ? `\n  Previous proposal failed checks: ${l.verify.violations.map((v) => v.message).join("; ")}` : ""
   const section = l.section_id === "misc" ? "-" : titleOfSection(spine, l.section_id)
   const value = truncate(valueText(elementValue(spine, l.path)), 2500).split("\n").join("\n  ")
-  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${failed}`
+  // Vị trí "mục trống": path là cả mảng, không có phần tử nào để sửa ⇒ việc hợp lệ duy nhất là thêm phần tử mới
+  const how = isArrayPath(l.path) ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)." : ""
+  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${failed}`
 }
 
 const needsProposal = (l: IChangeLocation): boolean => !l.manual && (l.conclusion === null || (l.verify !== null && !l.verify.code_ok))

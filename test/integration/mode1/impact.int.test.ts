@@ -79,6 +79,23 @@ describe("C-3 trên Spine", () => {
     // lượt trước đã khoá use case — lượt hỏng không được ghi/đổi gì
     expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
   })
+
+  it("mục FPT còn trống mà đổ được bằng mảng ⇒ vị trí thêm mới `arr[]`, khoá cả mảng (phương án B)", async () => {
+    const { c, cr, projectId, crId } = await toImpactReview()
+    // 5.4 Other Requirements: file không có ⇒ mảng other_requirements rỗng
+    await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["fixed:5.4"], keywords: [] } } })
+    const d = detail(await c.post(`${cr}/impact`))
+    expect(d.locations).toHaveLength(1)
+    expect(d.locations[0]).toMatchObject({
+      path: "other_requirements[]",
+      section_id: "fixed:5.4",
+      found_by: ["spine_link"],
+      entity_paths: ["fixed:5.4"],
+      current_text: "[]", // giá trị của vị trí là cả mảng ⇒ C-5 biết mảng có bị ai khác thêm/bớt không
+      conclusion: null
+    })
+    expect(await lockedPaths(projectId, crId)).toEqual(["other_requirements[]"])
+  })
 })
 
 describe("C-3 tìm lại", () => {
