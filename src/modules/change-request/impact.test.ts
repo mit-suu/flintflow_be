@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { formatLocationId } from "./cr-impact.service.js"
-import { MAX_LOCATIONS, elementPathOf, elementValue, findSpineLocations, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
+import { MAX_LOCATIONS, elementPathOf, elementValue, emptySectionTargets, findSpineLocations, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
 
 const spine = (): Spine => {
   const s = createEmptySpine({ name: "Lumen" })
@@ -44,6 +44,19 @@ describe("C-3 findSpineLocations", () => {
       found_by: ["spine_link", "mention"],
       entity_paths: ["actors[id=A01]", "actors[id=A02]"]
     })
+  })
+
+  it("đích là mã section ⇒ mọi phần tử section đó sở hữu là vị trí spine_link; section trống ⇒ emptySectionTargets", () => {
+    const s = spine()
+    const found = findSpineLocations(s, ["fixed:2.1", "custom:CS02", "fixed:5.1"], [])
+    expect(found.map((f) => [f.path, f.found_by, f.entity_paths])).toEqual([
+      ["actors[id=A01]", ["spine_link"], ["fixed:2.1"]],
+      ["actors[id=A02]", ["spine_link"], ["fixed:2.1"]],
+      ["custom_sections[id=CS02]", ["spine_link"], ["custom:CS02"]]
+    ])
+    // fixed:5.1 (Business Rules) chưa có phần tử nào ⇒ không có gì để sửa — C-3 phải nói ra thay vì im lặng
+    expect(emptySectionTargets(s, ["fixed:2.1", "fixed:5.1", "actors[id=A01]"])).toEqual(["fixed:5.1"])
+    expect(emptySectionTargets(s, ["actors[id=A01]"])).toEqual([])
   })
 
   it("đích không còn trong Spine / path không phải phần tử bị bỏ; từ khoá < 3 ký tự bỏ; theo ranh giới từ", () => {
