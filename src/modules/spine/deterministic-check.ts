@@ -301,6 +301,14 @@ const nfrMissingNumber = (spine: Spine): FlagCandidate[] =>
       }))
   })
 
+/**
+ * Giả định chưa xác nhận. `remediation_step` phải là step **xử lý được** cờ, không phải step đã sinh ra nó:
+ * chỉ S-9.2 (Assumption Sweep) mới đổi được `status` sang `confirmed`. Trước đây trỏ `origin_step_id` nên UI
+ * mời "mở lại <step sinh ra giả định>" — chạy lại bao nhiêu lần cũng không đóng được cờ, mà mỗi vòng đốt một
+ * phần trần 8 lượt gọi/step cho tới khi CALL_LIMIT (gặp thật 2026-09-20, L11c). Nguồn giữ trong `message`.
+ */
+const ASSUMPTION_SWEEP_STEP = "S-9.2"
+
 const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
   spine.assumptions
     .filter((a) => a.status === "unconfirmed")
@@ -309,8 +317,8 @@ const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
       rule_id: "unconfirmed_assumption",
       section_id: sectionsOfPath(spine, a.path).owner[0] ?? "fixed:5.4",
       target_id: a.id,
-      message: `Giả định ${a.id} chưa được xác nhận: ${a.statement}`,
-      remediation_step: a.origin_step_id || "S-9.1"
+      message: `Giả định ${a.id} chưa được xác nhận${a.origin_step_id ? ` (sinh ở ${a.origin_step_id})` : ""}: ${a.statement}`,
+      remediation_step: ASSUMPTION_SWEEP_STEP
     }))
 
 const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {

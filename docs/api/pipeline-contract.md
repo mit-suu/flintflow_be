@@ -188,7 +188,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `ops_applied` | Transaction của step đã ghi | `{ step_id, txn, spine_version, changes[] }` |
 | `render` | Mỗi diagram render xong | `{ step_id, diagram_id, render_status, error? }` |
 | `flags` | Deterministic check chạy lại | `{ step_id, red_open, yellow_open }` |
-| `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used }` |
+| `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used, spine_version, wrote_ops, empty_sections[] }` — `spine_version` là version CUỐI của lượt chạy, cao hơn `ops_applied` vì render + recompute cờ chạy sau (L11); `wrote_ops=false` nghĩa là model trả lô op rỗng; `empty_sections[{section_id,title}]` là mục step nuôi mà chạy xong vẫn trống, accept cũng không đóng được cờ `section_empty` (L11b) |
 | `error` | Dừng step | `{ step_id, code, message, retryable }` — `code` thuộc bảng 0.3 |
 
 Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
