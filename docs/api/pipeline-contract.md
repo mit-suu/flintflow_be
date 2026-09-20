@@ -116,7 +116,7 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 1 | `GET /projects/:id/spine` | T01 ✔ | — | `SpineRecord` | — |
 | 2 | `GET /projects/:id/progress` | T09 ✔ | — | `progressResponseSchema` | — |
 | 3 | `GET /projects/:id/steps` | T12/T13 | — | `stepsResponseSchema` | — |
-| 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
+| 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` (thêm `reopen?: boolean` — chạy lại step đã `accepted`: BE đặt `revision_requested`, reset `first_seq/last_seq/accepted_at` như gate revision, B7) | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
 | 5 | `POST /projects/:id/steps/:stepId/answer` | T13 | `stepAnswerRequestSchema` (≤ 20 answer, mỗi chuỗi ≤ 4000 ký tự) | `{ accepted: true }`, luồng SSE của `/run` tiếp tục | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE` |
 | 6 | `POST /projects/:id/steps/:stepId/gate` | T13 | `gateRequestSchema` (`session_id` bắt buộc; `note` ≤ 2000 ký tự) | `gateResponseSchema` | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE`, `REGENERATE_LIMIT`, `CALL_LIMIT`, `NEEDS_USER_INPUT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
 | 7 | `POST /projects/:id/changes` | T08 ✔ (`ops`) · T17 (`instruction`) | `changesRequestSchema` | `applyResultResponseSchema` | `SPINE_VERSION_CONFLICT`, `OP_INVALID`, `INVARIANT_VIOLATION`, `NEEDS_CLARIFICATION`, `INSUFFICIENT_CREDIT`, `NOT_IMPLEMENTED` |

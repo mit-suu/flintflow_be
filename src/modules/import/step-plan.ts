@@ -10,6 +10,7 @@
  */
 
 import { loadStepRegistry, loopKeys, orderedSteps, type PhaseId } from "../pipeline/step-registry.js"
+import { sectionHasData } from "../spine/deterministic-check.js"
 import { FEATURE_OWNER_STEPS, FIXED_OWNER_STEPS } from "../spine/section-registry.js"
 import type { Op } from "../spine/op.types.js"
 import type { CustomBlock, CustomSection, Spine, StepState } from "../spine/spine.types.js"
@@ -171,8 +172,15 @@ const matches = (section: string, pool: Iterable<string>): boolean => {
   return [...pool].some((s) => s.startsWith("feature:"))
 }
 
-/** Kế hoạch step (không gồm vòng S-5 — xem `seedStepOps`). */
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>): StepPlanItem[] =>
+/**
+ * Kế hoạch step (không gồm vòng S-5 — xem `seedStepOps`).
+ * `spine`: Spine **sau khi đã nạp dữ liệu trích được**. Mục nào luật cờ soi được thì "đã có nội dung" tính theo
+ * **dữ liệu Spine**, không theo chữ trong file: file có đầu mục "Screen Authorization" nhưng I-4 không trích ra
+ * role/permission nào ⇒ Spine trống ⇒ cờ đỏ `section_empty`. Trước đây chỗ này chỉ nhìn block của file nên step
+ * được đánh `accepted` ngay từ import, người dùng thấy "đã chốt" mà cờ đỏ vẫn treo (gặp thật 2026-09-20).
+ * Mục ngoài bảng luật (mục riêng, feature…) vẫn theo file như cũ.
+ */
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine): StepPlanItem[] =>
   loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
@@ -184,9 +192,19 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
         return { step_id: s.id, state: "applied", missing: false, section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
       }
-      const hasContent = owned.some((sec) => matches(sec, content))
+      const hasContent = owned.some((sec) => {
+        const inSpine = spine ? sectionHasData(spine, sec) : null
+        return inSpine === null ? matches(sec, content) : inSpine
+      })
       const inLayout = owned.some((sec) => matches(sec, layout.map((l) => l.section_id)))
-      const reason = hasContent ? "Có trong file, đã có nội dung" : inLayout ? "Đầu mục mẫu FPT có trong file nhưng trống" : "Đầu mục mẫu FPT — file không có"
+      const inFile = owned.some((sec) => matches(sec, content))
+      const reason = hasContent
+        ? "Có trong file, đã có nội dung"
+        : inFile
+          ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào — chạy step để AI soạn"
+          : inLayout
+            ? "Đầu mục mẫu FPT có trong file nhưng trống"
+            : "Đầu mục mẫu FPT — file không có"
       return { step_id: s.id, state: "applied", missing: !hasContent, section_ids: owned, reason }
     })
 

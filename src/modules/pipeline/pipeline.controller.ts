@@ -171,7 +171,7 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   }
 
   try {
-    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: abortController.signal })
+    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: abortController.signal, ...(body.reopen ? { reopen: true } : {}) })
   } catch (err) {
     if (!headersSent) throw err
     if (!closed) {

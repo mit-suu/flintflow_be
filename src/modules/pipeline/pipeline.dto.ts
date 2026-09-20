@@ -202,7 +202,13 @@ export const stepsResponseSchema = z.object({
 /** POST /projects/:id/steps/:stepId/run (SSE) */
 export const runStepRequestSchema = z.strictObject({
   session_id: z.string().min(1),
-  base_version: baseVersion
+  base_version: baseVersion,
+  /**
+   * Chạy lại một step đã `accepted` (B7 reopen): đặt `revision_requested`, reset `first_seq/last_seq/accepted_at`
+   * rồi chạy như thường. Cần khi mục của step vẫn còn cờ đỏ dù step đã chốt — vd file có đầu mục nhưng I-4 không
+   * trích được gì nên Spine trống (gặp thật 2026-09-20).
+   */
+  reopen: z.boolean().optional()
 })
 
 export const STEP_EVENT_TYPES = [

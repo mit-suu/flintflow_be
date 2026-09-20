@@ -138,8 +138,9 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
-  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks))
   const seeded = await loadSpine(projectId)
+  // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
+  const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
   const planOps = [
     ...customSectionOps(customSections),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
