@@ -255,6 +255,8 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - **`gapReportSchema`** thêm `totals.unrendered_diagrams` và `unrendered_diagrams[]` `{ diagram_id, kind, section_id, title, reason: not_rendered|error }` — hình dựng được từ Spine nhưng chưa có bản vẽ (lúc import PlantUML vắng mặt) hoặc vẽ lỗi. Chỉ để báo: không sinh cờ, không chặn ký v1.
 - **`section_title` của vị trí CR và tiêu đề change group**: phần nối (mục riêng tiêu đề rỗng) hiện `Phần nối của "<mục chủ>"` thay cho mã `custom:<id>`. Hình DTO không đổi.
 - **`found_by` của vị trí CR**: phần tử đã tham chiếu đích bằng field chỉ còn `spine_link`, không kèm `mention` cho cùng đích đó (nhắc một đích khác thì vẫn có `mention`).
+- **C-3 nhận đích là mã section** (`targets.entity_paths` chứa `fixed:5.1`, `feature:F-01`, `custom:CS02`…): mọi phần tử section đó sở hữu thành vị trí `spine_link` (`entity_paths` của vị trí ghi mã section). Trước đây loại đích này bị bỏ im lặng.
+- **Mã lỗi mới `409 CR_NO_LOCATIONS`** (#19 `/impact`): C-3 ra 0 vị trí — thay vì đứng im ở `impact_review`. `meta { targets: { entity_paths, keywords }, empty_sections: [{ section_id, title, step_id | null }] }` — `empty_sections` là đích dạng section chưa có phần tử nào (mục còn trống ⇒ chạy `step_id` để soạn, không đi CR). CR giữ `impact_review`; sửa mô tả rồi `/clarify` lại được.
 
 ## 3. Lịch sử thay đổi contract
 

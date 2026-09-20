@@ -49,12 +49,35 @@ describe("C-3 trên Spine", () => {
     for (const l of d.locations.filter((x) => x.found_by.includes("mention"))) expect(l.current_text).toMatch(/UC-01|FR-3\.2\.2|Register account|Log in to system/)
   })
 
-  it("đích không phải phần tử / không còn, từ khoá < 3 ký tự ⇒ 0 vị trí, không khoá gì", async () => {
+  it("đích không phải phần tử / không còn, từ khoá < 3 ký tự ⇒ 409 CR_NO_LOCATIONS nói rõ đích, không khoá gì, CR giữ impact_review", async () => {
     const { c, cr, projectId, crId } = await toImpactReview()
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["flags", "actors[id=A99]"], keywords: ["xy"] } } })
-    const d = detail(await c.post(`${cr}/impact`))
-    expect(d.locations).toEqual([])
+    const res = await c.post(`${cr}/impact`)
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("CR_NO_LOCATIONS")
+    expect(res.body.meta).toEqual({ targets: { entity_paths: ["flags", "actors[id=A99]"], keywords: ["xy"] }, empty_sections: [] })
     expect(await lockedPaths(projectId, crId)).toEqual([])
+    expect((await crDoc(projectId, crId)).status).toBe("impact_review")
+  })
+
+  it("đích là mã section (CR từ gap report) ⇒ mọi phần tử của section đó; section còn trống ⇒ CR_NO_LOCATIONS kèm step để soạn", async () => {
+    const { c, cr, projectId, crId } = await toImpactReview()
+    // 2.2.2 Use Case Descriptions có phần tử ⇒ mọi use case là vị trí
+    await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["fixed:2.2.2"], keywords: [] } } })
+    const d = detail(await c.post(`${cr}/impact`))
+    expect(d.locations.length).toBeGreaterThan(0)
+    for (const l of d.locations) expect(l).toMatchObject({ section_id: "fixed:2.2.2", found_by: ["spine_link"], entity_paths: ["fixed:2.2.2"] })
+    expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
+
+    // 3.1.1 Screens Flow: file không có ⇒ trống ⇒ không có gì để sửa, chỉ đường sang step S-4.2
+    await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["fixed:3.1.1"], keywords: ["Screens Flow"] } } })
+    const res = await c.post(`${cr}/impact`)
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("CR_NO_LOCATIONS")
+    expect(res.body.error.message).toContain("đang trống")
+    expect(res.body.meta.empty_sections).toEqual([{ section_id: "fixed:3.1.1", title: "Screens Flow", step_id: "S-4.2" }])
+    // lượt trước đã khoá use case — lượt hỏng không được ghi/đổi gì
+    expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
   })
 })
 

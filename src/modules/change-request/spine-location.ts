@@ -38,6 +38,13 @@ export const LOCATION_ARRAYS = [
 
 const ELEMENT = /^(\w+)\[id=([^\]]+)\]/
 
+/**
+ * C-2 có thể trả đích là **mã section** (`fixed:5.1`, `feature:F-01`, `custom:CS02`) — nhất là CR sinh từ gap report
+ * ("xử lý các mục còn thiếu"). Trước đây loại target này bị bỏ im lặng ⇒ C-3 ra 0 vị trí mà không ai biết vì sao.
+ */
+const SECTION_TARGET = /^(fixed|feature|function|custom|group):/
+export const isSectionTarget = (target: string): boolean => SECTION_TARGET.test(target)
+
 /** `use_cases[id=UC-01].name` ⇒ `use_cases[id=UC-01]`; `project.vision` ⇒ `project`; còn lại ⇒ null. */
 export const elementPathOf = (path: string): string | null => {
   if (path === PROJECT_PATH || path.startsWith(`${PROJECT_PATH}.`)) return PROJECT_PATH
@@ -129,6 +136,15 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
 
   const targetElements = [...new Set(targets.map(elementPathOf).filter((p): p is string => !!p && exists.has(p)))]
   for (const t of targetElements) hit(t, "spine_link", t)
+
+  // Đích là mã section ⇒ mọi phần tử section đó sở hữu là vị trí (liên kết cấu trúc, không phải nhắc tên)
+  const sectionTargets = [...new Set(targets.filter(isSectionTarget))]
+  if (sectionTargets.length) {
+    for (const e of elements) {
+      const section = sectionOfElement(spine, e.path)
+      if (sectionTargets.includes(section)) hit(e.path, "spine_link", section)
+    }
+  }
   const idTargets = targetElements.filter((t) => t !== PROJECT_PATH)
   for (const r of impactOf(spine, idTargets).referrers) {
     const el = elementPathOf(r.path)
@@ -174,6 +190,14 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
         owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
       }
     })
+}
+
+/** Đích dạng mã section mà Spine chưa có phần tử nào thuộc về — CR không sửa được gì ở đó, phải chạy step để soạn. */
+export const emptySectionTargets = (spine: Spine, targets: readonly string[]): string[] => {
+  const sections = [...new Set(targets.filter(isSectionTarget))]
+  if (!sections.length) return []
+  const filled = new Set(listElements(spine).map((e) => sectionOfElement(spine, e.path)))
+  return sections.filter((s) => !filled.has(s))
 }
 
 /** Phần tử mà op chạm tới (để đòi khoá): `actors[id=A01].name` ⇒ `actors[id=A01]`; `actors[]` (thêm mới) ⇒ null. */

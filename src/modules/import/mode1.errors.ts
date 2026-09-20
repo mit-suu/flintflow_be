@@ -24,6 +24,8 @@ export const MODE1_ERROR_STATUS = {
   /** FLF-186: phần tử Spine đang được CR khác giữ khoá (thay `BLOCK_LOCKED` theo block docx). */
   PATH_LOCKED: 409,
   CR_LOCATION_UNCONCLUDED: 409,
+  /** C-3 không tìm được phần tử Spine nào — thường vì CR nhắm vào mục còn trống (phải chạy step, không phải CR). */
+  CR_NO_LOCATIONS: 409,
   /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
   CR_VALUE_CHANGED: 409,
   CHANGE_REQUIRES_CR: 409,
