@@ -248,12 +248,19 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - **C-7 (D4)**: duyệt group cuối ⇒ op của CR vào Spine (`by = cr_id`) + version minor = **bản render** từ Spine (stamp `cr_revision`, §I có dòng CR), ghép lại bản làm việc. Vị trí `comment` không đổi Spine (ghi chú nằm ở CR). Bản tải "có đánh dấu" theo section: **để sau** (plan v2 §11 cắt giảm) — `variant=tracked` trả bản render.
 - **Release**: bản sạch = render snapshot Spine (`file_ref` = `clean_file_ref`).
 - **#13 blocks, #15 compare, re-upload (#11)**: đọc block từ **file render** của version (id theo thứ tự đọc, không neo; `revisions` không còn); diff khớp theo text (trùng text ngoài thứ tự ⇒ `moved`, giống từ ≥ 50% giữa cùng hai khối đã khớp ⇒ `modified`), `block_id = null`.
-- **3.1 từ chat**: sau baseline v1, lệnh sửa trong chat ⇒ BE tạo CR nguồn `chat` (requester = người gửi) rồi trả `409 CHANGE_REQUIRES_CR` kèm `meta.change_request { cr_id, status }` (+ `prefill` như cũ). `/changes`, `/undo` giữ 409 chỉ `prefill`.
+- **3.1 từ chat**: sau baseline v1, lệnh sửa trong chat ⇒ BE tạo CR nguồn `chat` (requester = người gửi) rồi trả `409 CHANGE_REQUIRES_CR` kèm `meta.change_request { cr_id, status }` (+ `prefill` như cũ). `/changes`, `/undo` giữ 409 chỉ `prefill` — **đổi ở §4.7**.
+
+### 4.7 Dọn nợ kỹ thuật sau V4 (chỉ thêm field / nới rộng, không phá tương thích)
+- **`/changes`, `/reconcile`, `/undo` sau baseline v1** cũng tạo CR như lệnh sửa trong chat — nguồn `verbal`, `ref: null`, mô tả = `instruction` (không có ⇒ "Sửa tài liệu"; `/undo` ⇒ "Hoàn tác thay đổi gần nhất") — rồi trả `409 CHANGE_REQUIRES_CR` kèm `meta.change_request`. `/changes/preview` (chỉ xem trước) giữ nguyên: chỉ `prefill`. Dự án chưa có baseline v0 (dữ liệu cũ) ⇒ vẫn chỉ `prefill`.
+- **`gapReportSchema`** thêm `totals.unrendered_diagrams` và `unrendered_diagrams[]` `{ diagram_id, kind, section_id, title, reason: not_rendered|error }` — hình dựng được từ Spine nhưng chưa có bản vẽ (lúc import PlantUML vắng mặt) hoặc vẽ lỗi. Chỉ để báo: không sinh cờ, không chặn ký v1.
+- **`section_title` của vị trí CR và tiêu đề change group**: phần nối (mục riêng tiêu đề rỗng) hiện `Phần nối của "<mục chủ>"` thay cho mã `custom:<id>`. Hình DTO không đổi.
+- **`found_by` của vị trí CR**: phần tử đã tham chiếu đích bằng field chỉ còn `spine_link`, không kèm `mention` cho cùng đích đó (nhắc một đích khác thì vẫn có `mention`).
 
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-20 | Dọn nợ sau V4 | §4.7: `/changes`, `/reconcile`, `/undo` sau v1 tạo CR nguồn `verbal` kèm `meta.change_request`; gap report `unrendered_diagrams`; `section_title` của phần nối; `found_by` bỏ `mention` trùng `spine_link` — chỉ thêm field / nới rộng |
 | 2026-09-19 | FLF-186 (mode 1 v2, V4) | §4.6: vị trí CR theo path Spine (DTO location), `PATH_LOCKED`, `CR_VALUE_CHANGED`, PATCH vị trí `new_value`/`spine_ops`, version/release = render Spine, blocks/compare/re-upload từ file render, chat sau v1 tạo CR (`meta.change_request`) — contract-change, chờ 4/4 |
 | 2026-09-19 | FLF-184 (mode 1 v2, V2) | §4.5: `RenderedDocument` theo layout file upload, #14 `variant=original`, `has_original_file`, gap report `missing_fpt_sections` + `layout[]` — chỉ thêm field, kèm lô contract-change V0 |
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |

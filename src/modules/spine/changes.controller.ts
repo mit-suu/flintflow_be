@@ -33,6 +33,7 @@ import { getProjectById } from "../project/project.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { crFromInstruction } from "../change-request/chat-cr.service.js"
 import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
@@ -65,11 +66,16 @@ const rawInstruction = (req: Request): string | undefined =>
   typeof req.body?.instruction === "string" ? req.body.instruction : undefined
 
 /**
- * Mode 1: sau baseline v1 (sign-off) / release mọi sửa phải qua change request ⇒ 409 CHANGE_REQUIRES_CR kèm nội dung
- * điền sẵn (FLF-171, G9). Trước đó sửa tự do như mode 2 (mode 1 v2, D3 — FLF-183).
+ * Mode 1: sau baseline v1 (sign-off) / release mọi sửa phải qua change request ⇒ 409 CHANGE_REQUIRES_CR (FLF-171, G9).
+ * Trước đó sửa tự do như mode 2 (mode 1 v2, D3 — FLF-183).
+ * Lời gọi **có ghi** (`/changes`, `/reconcile`, `/undo`) tạo luôn CR nguồn `verbal` từ câu lệnh và trả kèm
+ * `meta.change_request` như lệnh sửa trong chat (nợ T8) — người dùng mở thẳng CR thay vì điền lại form.
+ * Lời gọi **chỉ xem** (`/changes/preview`) giữ nguyên nội dung điền sẵn: xem trước không nên đẻ ra CR.
  */
-const guardMode1 = async (auth: Authorized, instruction?: string): Promise<void> => {
-  if (auth.mode === "import" && (await changesRequireCr(auth.projectId))) throw changeRequiresCr(prefillFrom(instruction))
+const guardMode1 = async (auth: Authorized, instruction?: string, createCr?: { fallback: string }): Promise<void> => {
+  if (auth.mode !== "import" || !(await changesRequireCr(auth.projectId))) return
+  if (!createCr) throw changeRequiresCr(prefillFrom(instruction))
+  throw await crFromInstruction(auth.projectId, auth.userId, instruction, { kind: "verbal", fallback: createCr.fallback })
 }
 
 const parse = <T extends z.ZodType>(schema: T, value: unknown): z.infer<T> => {
@@ -91,7 +97,7 @@ const sendDomainError = (res: Response, err: unknown): Response => {
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req), { fallback: "Sửa tài liệu" })
   const body = parse(changesRequestSchema, req.body)
   try {
     const result = await changeService.apply(auth.projectId, auth.userId, body, auth.init)
@@ -119,7 +125,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req), { fallback: "Sửa tài liệu" })
   const body = parse(reconcileRequestSchema, req.body)
   try {
     const result = await reconcileService.reconcile(auth.projectId, auth.userId, body, auth.init)
@@ -137,7 +143,7 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
 
 export const undoLastChange = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req), { fallback: "Hoàn tác thay đổi gần nhất" })
   const body = parse(undoRequestSchema, req.body)
   try {
     const result = await undoService.undoLast(auth.projectId, auth.userId, { base_version: body.base_version })
