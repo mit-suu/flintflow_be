@@ -2,17 +2,24 @@
 
 ## `context` — §1 System Context
 
-Source fields: `project.name` · `actors[kind≠human].name`. Human actor groups may appear as one `actor` for readability only if already present in `actors[]`.
+Source fields: `project.name` · `actors[].name/.kind` · `use_cases[].name/.actor_ids`. Level-0 data flow: system circle in the centre, every actor a rectangle, edge label = the actor's use case names (max 3, then `+ N more`).
 
 ```plantuml
 @startuml
 skinparam monochrome true
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 30
+skinparam ranksep 120
+skinparam usecaseFontSize 16
 left to right direction
-rectangle "FlintFlow" as SYS
+usecase "\n\n   FlintFlow   \n\n" as SYSTEM_
+rectangle "Founder" as A01
 rectangle "Payment Gateway" as A05
-rectangle "Email Service" as A06
-SYS --> A05 : payment request
-A06 <-- SYS : notification
+rectangle "Scheduler" as A09
+A01 --> SYSTEM_ : Log In\nCreate Project\nExport Word Document\n+ 2 more
+SYSTEM_ --> A05 : Purchase Credits
+A09 --> SYSTEM_ : Run Scheduled Housekeeping
 @enduml
 ```
 

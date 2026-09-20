@@ -44,10 +44,25 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: chỉ actor không phải human, alias theo id", () => {
+  it("context: hệ thống là vòng tròn, mọi actor là hình chữ nhật, cạnh có hướng mang tên use case", () => {
     const { puml, section } = only(FIXTURE, "context")
     expect(section).toBe("fixed:1")
-    for (const a of FIXTURE.actors) expect(puml.includes(` as ${a.id}`), a.id).toBe(a.kind !== "human")
+    expect(puml).toContain('usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_')
+    expect(puml).toContain("skinparam linetype polyline")
+    for (const a of FIXTURE.actors) {
+      expect(puml, a.id).toContain(`rectangle "${a.name}" as ${a.id}\n`)
+      expect(puml, a.id).toContain(a.kind === "system" ? `SYSTEM_ --> ${a.id}` : `${a.id} --> SYSTEM_`)
+    }
+    expect(puml).toContain("SYSTEM_ --> A05 : Purchase Credits\n")
+    // A01 có hơn 3 use case ⇒ phần còn lại gộp thành "+ N more"
+    const founderUseCases = FIXTURE.use_cases.filter((uc) => uc.actor_ids.includes("A01")).length
+    expect(puml).toMatch(new RegExp(`A01 --> SYSTEM_ : [^\\n]*\\\\n\\+ ${founderUseCases - 3} more\\n`))
+  })
+
+  it("context: actor chưa có use case ⇒ cạnh không nhãn", () => {
+    const { puml } = only(mutate((s) => (s.use_cases = [])), "context")
+    expect(puml).toContain("A01 --> SYSTEM_\n")
+    expect(puml).toContain("SYSTEM_ --> A05\n")
   })
 
   it("usecase: mọi use case và cạnh include/extend", () => {
@@ -87,7 +102,7 @@ describe("renderers trên fixture 19 màn", () => {
     const empty = createEmptySpine({ name: "Empty" })
     expect(only(empty, "screen_flow").puml).toContain("NO_SCREENS")
     expect(only(empty, "erd").puml).toContain("NO_ENTITIES")
-    expect(only(empty, "context").puml).toContain('rectangle "Empty" as SYSTEM_')
+    expect(only(empty, "context").puml).toContain('usecase "\\n\\n   Empty   \\n\\n" as SYSTEM_')
   })
 })
 

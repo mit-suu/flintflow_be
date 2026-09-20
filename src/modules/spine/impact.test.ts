@@ -62,10 +62,10 @@ describe("referrersOf — khoá đang trỏ tới phần tử bị đụng", () 
 })
 
 describe("diagramsToRerender — so source_hash trước/sau", () => {
-  it("đổi tên actor human: chỉ usecase vẽ lại, context giữ nguyên", () => {
+  it("đổi tên actor human: context và usecase cùng vẽ lại", () => {
     const after = structuredClone(FIXTURE)
     after.actors[0].name = "Product Owner"
-    expect(diagramsToRerender(FIXTURE, after)).toEqual(["usecase"])
+    expect([...diagramsToRerender(FIXTURE, after)].sort()).toEqual(["context", "usecase"])
   })
 
   it("đổi mô tả actor: không hình nào vẽ lại (mô tả không lên hình)", () => {

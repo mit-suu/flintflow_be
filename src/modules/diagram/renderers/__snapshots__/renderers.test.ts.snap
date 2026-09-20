@@ -3,18 +3,31 @@
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
 "@startuml
 skinparam monochrome true
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 30
+skinparam ranksep 120
+skinparam usecaseFontSize 16
 left to right direction
-rectangle "FlintFlow" as SYSTEM_
-rectangle "Payment Gateway" as A05 <<system>>
-rectangle "LLM Provider" as A06 <<system>>
-rectangle "PlantUML Server" as A07 <<system>>
-rectangle "Email Service" as A08 <<system>>
-rectangle "Scheduler" as A09 <<time>>
-SYSTEM_ -- A05
-SYSTEM_ -- A06
-SYSTEM_ -- A07
-SYSTEM_ -- A08
-SYSTEM_ -- A09
+usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_
+rectangle "Founder" as A01
+rectangle "Business Analyst" as A02
+rectangle "Administrator" as A03
+rectangle "Guest" as A04
+rectangle "Payment Gateway" as A05
+rectangle "LLM Provider" as A06
+rectangle "PlantUML Server" as A07
+rectangle "Email Service" as A08
+rectangle "Scheduler" as A09
+A01 --> SYSTEM_ : Log In\\nReset Password\\nComplete Onboarding\\n+ 13 more
+A02 --> SYSTEM_ : Log In\\nVerify Document\\nWaive Red Flag\\n+ 1 more
+A03 --> SYSTEM_ : Log In\\nInspect Platform Accounts\\nMonitor Platform Metrics
+A04 --> SYSTEM_ : Register Account\\nLog In
+SYSTEM_ --> A05 : Purchase Credits
+SYSTEM_ --> A06 : Refine Product Brief\\nGenerate SRS Content
+SYSTEM_ --> A07 : Render Diagrams
+SYSTEM_ --> A08 : Register Account\\nReset Password
+A09 --> SYSTEM_ : Run Scheduled Housekeeping
 @enduml
 "
 `;
