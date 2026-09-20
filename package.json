@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "seed:fixture": "tsx src/scripts/seed-fixture.ts",
     "migrate:sections": "tsx src/scripts/migrate-sections-to-spine.ts",
+    "migrate:mode1-v2": "tsx src/scripts/migrate-mode1-v2-indexes.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
     "measure:tokens": "tsx src/scripts/measure-tokens.ts",
     "run:pipeline": "tsx src/scripts/run-full-pipeline.ts",
