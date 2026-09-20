@@ -1,11 +1,12 @@
 import axios from "axios"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
-import { LLMResponse } from "./provider.types.js"
+import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 
 export const callGemini = async (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  options: LlmCallOptions = {}
 ): Promise<LLMResponse> => {
   const apiKey = env.GEMINI_API_KEY
   if (!apiKey) {
@@ -33,7 +34,8 @@ export const callGemini = async (
       headers: {
         "Content-Type": "application/json"
       },
-      timeout: 60000
+      timeout: 60000,
+      ...(options.signal ? { signal: options.signal } : {})
     })
 
     const candidate = response.data?.candidates?.[0]

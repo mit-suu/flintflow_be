@@ -1,11 +1,12 @@
 import axios from "axios"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
-import { LLMResponse } from "./provider.types.js"
+import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 
 export const callAnthropic = async (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  options: LlmCallOptions = {}
 ): Promise<LLMResponse> => {
   const apiKey = env.ANTHROPIC_API_KEY
   if (!apiKey) {
@@ -31,7 +32,8 @@ export const callAnthropic = async (
           "x-api-key": apiKey,
           "anthropic-version": "2023-06-01"
         },
-        timeout: 60000
+        timeout: 60000,
+        ...(options.signal ? { signal: options.signal } : {})
       }
     )
 

@@ -75,10 +75,15 @@ export interface StepRunnerDeps {
   signal?: AbortSignal
 }
 
-export const defaultStepRunnerDeps = (): StepRunnerDeps => ({
-  draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId),
-  elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId),
-  reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId),
+/**
+ * `signal` được gắn vào từng lượt gọi model: client đóng SSE (reload trang) ⇒ lượt gọi đang bay bị huỷ ngay,
+ * `runStep` thoát và **nhả khoá step**. Không có nó thì lượt gọi chạy hết (có thể vài phút) và lần chạy sau
+ * nhận `STEP_NOT_RUNNABLE`.
+ */
+export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => ({
+  draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, signal ? { signal } : {}),
+  elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId, signal ? { signal } : {}),
+  reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, signal ? { signal } : {}),
   assembleDocument: async (projectId, spineVersion) => {
     const project = await Project.findById(projectId, { name: 1 }).lean()
     if (!project) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
@@ -514,7 +519,7 @@ export const runStep = async (
 ): Promise<void> => {
   acquireStepLock(projectId, stepId)
   try {
-    const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
+    const d: StepRunnerDeps = { ...defaultStepRunnerDeps(deps.signal), ...deps }
 
     await requirePipelineSession(projectId, sessionId)
     const stepDef = getStep(stepId) // 404 STEP_NOT_FOUND nếu id sai

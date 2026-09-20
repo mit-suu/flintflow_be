@@ -27,6 +27,11 @@ export interface ExecuteAiActionOptions {
   model?: string
   parentLogId?: string
   rawPromptOverride?: string
+  /**
+   * Huỷ lượt gọi model khi người gọi đã bỏ đi (client đóng SSE của `/run` vì reload trang). Không có nó thì lượt
+   * gọi vẫn chạy hết — có thể vài phút — và **khoá step chưa nhả** ⇒ bấm chạy lại nhận `STEP_NOT_RUNNABLE`.
+   */
+  signal?: AbortSignal
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -139,7 +144,7 @@ export const executeAiAction = async <T = any>(
       const startTime = Date.now()
 
       try {
-        const llmRes = await callLLM(finalPrompt, providerConfig)
+        const llmRes = await callLLM(finalPrompt, providerConfig, options.signal ? { signal: options.signal } : {})
         const latencyMs = Date.now() - startTime
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)

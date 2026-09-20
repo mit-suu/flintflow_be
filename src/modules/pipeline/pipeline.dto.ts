@@ -183,7 +183,9 @@ export const stepSummarySchema = z.object({
   calls_limit: z.literal(8),
   regenerate_used: z.number().int().min(0),
   regenerate_limit: z.literal(3),
-  accepted_at: isoDateTime.nullable()
+  accepted_at: isoDateTime.nullable(),
+  /** Step đang chạy dở ở một request khác (cùng tiến trình BE) — FE khoá nút chạy thay vì để người dùng bấm rồi nhận 409. */
+  running: z.boolean()
 })
 
 /** GET /projects/:id/steps */
