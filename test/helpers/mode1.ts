@@ -24,19 +24,23 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     patch: (suffix: string, body: object) => request(app).patch(`${base}${suffix}`).set(auth).send(body),
     spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
     /**
-     * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi poll `GET /import` tới khi hết `extracting`
-     * hoặc bị `paused`. `run` có hình `extractResponseSchema` (import + sections) ở thời điểm dừng poll.
+     * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi **chờ đúng job** của import đó
+     * (`waitForExtraction`) thay vì chờ theo đồng hồ — máy tải nặng (chạy cả suite song song) không còn làm test
+     * trượt vì hết hạn poll. Job chạy xong / dừng mới đọc `GET /import`; poll chỉ còn là lưới an toàn cho trường
+     * hợp job không nằm trong tiến trình này. `run` có hình `extractResponseSchema` (import + sections).
      */
-    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 25_000) => {
+    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 60_000) => {
       const res = await request(app).post(`${base}${path}`).set(auth).send({ import_id: importId })
       if (res.status !== 200) return { res, run: null }
+      const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
+      await waitForExtraction(importId)
       const deadline = Date.now() + timeoutMs
-      while (Date.now() < deadline) {
+      for (;;) {
         const view = (await request(app).get(`${base}/import`).set(auth)).body.data
         if (view.import.status !== "extracting" || view.import.paused) return { res, run: { import: view.import, sections: view.extraction.sections } }
+        if (Date.now() >= deadline) throw new Error("I-4 chạy nền quá lâu")
         await new Promise((r) => setTimeout(r, 25))
       }
-      throw new Error("I-4 chạy nền quá lâu")
     }
   }
 }
