@@ -6,7 +6,19 @@ import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { formatLocationId } from "./cr-impact.service.js"
-import { MAX_LOCATIONS, elementPathOf, elementValue, emptySectionTargets, findSpineLocations, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
+import {
+  MAX_LOCATIONS,
+  elementPathOf,
+  elementValue,
+  emptySectionTargets,
+  fillPathsOfSection,
+  findSpineLocations,
+  isArrayPath,
+  listElements,
+  opElement,
+  sectionOfElement,
+  valueText
+} from "./spine-location.js"
 
 const spine = (): Spine => {
   const s = createEmptySpine({ name: "Lumen" })
@@ -46,16 +58,28 @@ describe("C-3 findSpineLocations", () => {
     })
   })
 
-  it("đích là mã section ⇒ mọi phần tử section đó sở hữu là vị trí spine_link; section trống ⇒ emptySectionTargets", () => {
+  it("đích là mã section ⇒ mọi phần tử section đó sở hữu là vị trí spine_link; mục còn trống ⇒ vị trí thêm mới `arr[]`", () => {
     const s = spine()
     const found = findSpineLocations(s, ["fixed:2.1", "custom:CS02", "fixed:5.1"], [])
     expect(found.map((f) => [f.path, f.found_by, f.entity_paths])).toEqual([
       ["actors[id=A01]", ["spine_link"], ["fixed:2.1"]],
       ["actors[id=A02]", ["spine_link"], ["fixed:2.1"]],
-      ["custom_sections[id=CS02]", ["spine_link"], ["custom:CS02"]]
+      ["custom_sections[id=CS02]", ["spine_link"], ["custom:CS02"]],
+      // fixed:5.1 (Business Rules) chưa có phần tử nào ⇒ phương án B: vị trí là cả mảng, C-4 đề xuất thêm mới
+      ["business_rules[]", ["spine_link"], ["fixed:5.1"]]
     ])
-    // fixed:5.1 (Business Rules) chưa có phần tử nào ⇒ không có gì để sửa — C-3 phải nói ra thay vì im lặng
-    expect(emptySectionTargets(s, ["fixed:2.1", "fixed:5.1", "actors[id=A01]"])).toEqual(["fixed:5.1"])
+    expect(found.find((f) => f.path === "business_rules[]")).toMatchObject({ section_id: "fixed:5.1", owner_step: "S-7.1" })
+    expect(elementValue(s, "business_rules[]")).toEqual([]) // giá trị = cả mảng ⇒ C-5 so được mảng có bị đổi không
+    expect(isArrayPath("business_rules[]")).toBe(true)
+    expect(isArrayPath("business_rules[id=BR-01]")).toBe(false)
+  })
+
+  it("mục trống mà không mảng nào nuôi (project, luồng màn) ⇒ không bịa vị trí, để C-3 chỉ sang step", () => {
+    const s = spine()
+    expect(fillPathsOfSection("fixed:3.1.3")).toEqual(["roles[]", "permissions[]"])
+    expect(fillPathsOfSection("fixed:1")).toEqual([])
+    // chỉ section không đổ được bằng mảng mới vào danh sách "phải chạy step"
+    expect(emptySectionTargets(s, ["fixed:5.1", "fixed:3.1.1", "actors[id=A01]"])).toEqual(["fixed:3.1.1"])
     expect(emptySectionTargets(s, ["actors[id=A01]"])).toEqual([])
   })
 

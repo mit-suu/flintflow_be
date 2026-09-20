@@ -71,6 +71,35 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(await nfrThreshold(projectId)).toBe("1 s")
   })
 
+  it("phương án B: CR nhắm mục còn trống ⇒ duyệt xong Spine có phần tử mới, bản render có nội dung đó", async () => {
+    const { c, projectId } = await importedProject()
+    // C-2 trả đích là mã section còn trống; C-4 đề xuất thêm mới vào mảng nuôi mục đó
+    const addOther = (p: string) =>
+      JSON.stringify({
+        locations: promptLocations(p).map((l) => ({
+          location_id: l.location_id,
+          conclusion: "edit",
+          reason: "Mục còn trống — bổ sung yêu cầu khác",
+          spine_ops: [{ op: "add", path: "other_requirements[]", value: { id: "OR-01", kind: "assumption", statement: "The system runs on Chrome 120 or newer." } }]
+        }))
+      })
+    resetCrMock((p) => (p.includes("# CR Clarify") ? fakeCrClarify({ entity_paths: ["fixed:5.4"], keywords: [] })(p) : p.includes("# CR Propose") ? addOther(p) : undefined))
+
+    const { crId, cr, impact } = await crToImpact(c)
+    expect(impact.locations.map((l) => l.path)).toEqual(["other_requirements[]"])
+    expect(detail(await c.post(`${cr}/propose`)).locations[0]).toMatchObject({ conclusion: "edit", proposal: { old_text: "[]" } })
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+    const submitted = detail(await c.post(`${cr}/submit`))
+    const written = await approveAll(c, cr, submitted.groups)
+
+    expect(written.change_request.status).toBe("written")
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.other_requirements).toMatchObject([{ id: "OR-01", kind: "assumption" }])
+    const { texts } = await loadVersion(projectId, written.change_request.result_doc_version!)
+    expect(texts.some((t) => t.includes("Chrome 120"))).toBe(true)
+    expect(await lockedPaths(projectId, crId)).toEqual([])
+  })
+
   it("txn Spine: by = CR id, reason = 'CR id: tiêu đề'; mở hết khoá; bản làm việc ghép lại theo Spine mới", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr, submitted } = await crToReview(c)
