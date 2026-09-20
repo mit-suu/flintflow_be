@@ -106,12 +106,14 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 
 | Biến | Bắt buộc | Ghi chú |
 | --- | --- | --- |
+| `NODE_ENV` | production | phải là `production`. Để `development` trên môi trường thật thì `app.ts:76` **cho qua mọi origin** dù `credentials: true`, và toàn bộ refine `isProd` của `env.ts` (secret ≥ 32, `MONGO_URI`/`APP_PUBLIC_URL` không localhost) đều tắt — hỏng im lặng, không có log nào báo |
 | `MONGO_URI` | có | production **không được** chứa `localhost` |
 | `JWT_ACCESS_SECRET` `JWT_REFRESH_SECRET` | có | production: ≥ 32 ký tự, không phải placeholder. `openssl rand -base64 48` |
-| `COOKIE_SAME_SITE` `COOKIE_DOMAIN` | production | FE và BE **khác site** (FE `flintflow.io.vn`, BE `*.azurewebsites.net`) ⇒ `COOKIE_SAME_SITE=none`, nếu để `lax` trình duyệt không gửi cookie `refreshToken` ⇒ `/auth/refresh` trả `MISSING_REFRESH_TOKEN`, user bị đăng xuất sau khi access token hết hạn (FLF-137). BE ở subdomain cùng site (`api.flintflow.io.vn`) ⇒ giữ `lax`, `COOKIE_DOMAIN=.flintflow.io.vn`. Local không lộ lỗi vì `localhost:3000`/`:5000` cùng site |
+| `COOKIE_SAME_SITE` `COOKIE_DOMAIN` | production | FE và BE **khác site** (FE `flintflow.io.vn`, BE `*.azurewebsites.net`) ⇒ `COOKIE_SAME_SITE=none`, nếu để `lax` trình duyệt không gửi cookie `refreshToken` ⇒ `/auth/refresh` trả `MISSING_REFRESH_TOKEN`, user bị đăng xuất sau khi access token hết hạn (FLF-137). BE ở subdomain cùng site (`api.flintflow.io.vn`) ⇒ giữ `lax`, `COOKIE_DOMAIN=.flintflow.io.vn`. Local không lộ lỗi vì `localhost:3000`/`:5000` cùng site. App setting production đã đặt `none` + `COOKIE_DOMAIN` trống, nhưng **chưa có tác dụng**: image đang chạy dựng từ `origin/main`, ở đó `auth.controller.ts` hardcode `sameSite: "lax"` và chưa có `auth-cookie.ts` — biến này chỉ được đọc từ bản `develop` trở đi, nên FLF-137 còn sống cho tới khi merge develop → main |
 | `MODAL_BASE_URL` | khi dùng skill `provider: glm` | **không còn default trong code**; để trống ⇒ `AI_PROVIDER_NOT_CONFIGURED` |
-| `APP_PUBLIC_URL` | khi bật billing | domain public để payment service gọi callback; production không được là localhost |
-| `PLANTUML_BASE_URL` | không | thiếu ⇒ diagram `render_status: "error"`, app vẫn chạy |
+| `APP_PUBLIC_URL` | khi bật billing | domain public của **BE này** để payment service POST callback (`payment-service.client.ts:48`); production không được là localhost |
+| `PLANTUML_BASE_URL` | production | thiếu ⇒ default `localhost:8080` ⇒ **mọi** diagram `render_status: "error"` trong khi `/health` vẫn trả HTTP 200. Production: `https://flintflow-plantuml.azurewebsites.net` (§5) |
+| `PLANTUML_TIMEOUT_MS` | không | default 15000. Production đặt **30000**: use-case ~70 UC mất 13 s ở lượt đầu sau khi PlantUML restart (JVM chưa JIT-warm), warm còn ~4 s |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
@@ -178,10 +180,51 @@ npm run run:pipeline -- --api http://localhost:5000/api/v1 --until B-0.2 --name 
 Nó chứng minh **đường đi**, không chứng minh nội dung — mock không đọc được Spine nên không sinh op nào.
 Kiểm nội dung thì dùng fixture op-case (`fixtures/op-cases/`) hoặc provider thật (`E2E_AI=1`).
 
-## 5. Smoke test sau khi deploy
+## 5. Production trên Azure
+
+Subscription `Azure for Students`, region Southeast Asia.
+
+| Thành phần | Tài nguyên | App Service Plan |
+| --- | --- | --- |
+| Backend | Web App `flintflow-be` (RG `flintflow-be_group`), image từ ACR `flintflowacr` | `ASP-mitsu-b404` (B1) — dùng chung với `payment-service` và 2 app khác |
+| PlantUML | Web App `flintflow-plantuml` (RG `flintflow-be_group`), image `plantuml/plantuml-server:jetty-v1.2025.4` kéo thẳng từ Docker Hub, **không qua ACR** | `asp-flintflow-plantuml` (B1) — **của riêng nó** |
+| Frontend | không nằm trên Azure | — |
+
+**Vì sao PlantUML có plan riêng.** Nó là JVM và phải bật Always On, tức giữ RAM thường trú. Nhét chung
+vào plan B1 đang gánh 4 app (trong đó có `payment-service`) thì khi thiếu RAM App Service không giết
+riêng app gây áp lực mà restart cả plan — một sự cố render sẽ kéo theo cả thanh toán.
+
+**Vì sao Always On.** ~10-20 lượt generate/ngày nên container idle gần như cả ngày. Không bật thì App
+Service unload sau ~20 phút, và lượt render kế tiếp lãnh cold start JVM 10-30 s — vượt
+`PLANTUML_TIMEOUT_MS`. Đây là lý do phải trả tiền cho plan B1 thay vì dùng Free.
+
+App setting của `flintflow-plantuml`: `WEBSITES_PORT=8080` · `PLANTUML_LIMIT_SIZE=8192` · Always On ·
+HTTPS only. Thiếu `WEBSITES_PORT` thì app trả 503 vĩnh viễn và log chỉ nói "container didn't respond to
+HTTP pings", không nói gì về cổng.
+
+**Mạng.** `.puml` chứa dữ liệu khách hàng, nên `flintflow-plantuml` chỉ nhận request từ outbound IP của
+`flintflow-be` (26 rule Allow + Deny all mặc định). Hệ quả: curl thẳng từ máy vào PlantUML trả **403** —
+đó là đúng, đường kiểm còn lại là `/health` của BE. Đổi plan của BE làm đổi outbound IP ⇒ phải thêm rule
+cho dải mới:
 
 ```bash
-curl -sf https://<api>/health | jq            # mongo ok, plantuml ok, đủ assets
+az webapp show -g flintflow-be_group -n flintflow-be --query possibleOutboundIpAddresses -o tsv
+az webapp config access-restriction add -g flintflow-be_group -n flintflow-plantuml --rule-name allow-be-<n> --action Allow --ip-address <ip>/32 --priority <n>
+```
+
+`deploy.yml` **không phải đổi**: PlantUML là app độc lập, không nằm trong pipeline.
+
+### Smoke test sau khi deploy
+
+`/health` trả **HTTP 200 cả khi PlantUML hỏng** (`degraded`, `health.ts:10-11`), nên `curl -sf` một mình
+không phát hiện được — phải kiểm từng thành phần, nếu không PlantUML chết sẽ âm thầm làm mọi diagram
+`render_status: "error"` mà không ai biết:
+
+```bash
+body=$(curl -sf https://<api>/health) || { echo "BE không trả lời"; exit 1; }
+echo "$body" | jq
+echo "$body" | grep -q '"mongo":"ok"'    || { echo "Mongo hỏng"; exit 1; }
+echo "$body" | grep -q '"plantuml":"ok"' || { echo "PlantUML hỏng ⇒ diagram sẽ render_status: error"; exit 1; }
 
 # đi vài step đầu của pipeline bằng provider thật, không đụng dữ liệu người dùng
 npm run run:pipeline -- --api https://<api>/api/v1 --until S-1.4 --name "Smoke $(date -I)"
