@@ -41,6 +41,8 @@ describe("computeSourceHash", () => {
     expect(computeSourceHash(mutate((s) => (s.project.name = "X")), context)).not.toBe(base)
     expect(computeSourceHash(mutate((s) => (s.use_cases[0].name = "X")), context)).not.toBe(base)
     expect(computeSourceHash(mutate((s) => (s.use_cases[0].actor_ids = [])), context)).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.actors[0].flows_in = ["X"])), context)).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.actors[0].flows_out = ["X"])), context)).not.toBe(base)
     expect(computeSourceHash(mutate((s) => (s.use_cases[0].description = "X")), context)).toBe(base)
     expect(computeSourceHash(mutate((s) => (s.actors[human].description = "X")), context)).toBe(base)
   })
