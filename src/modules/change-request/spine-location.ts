@@ -136,13 +136,22 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
     if (el) hit(el, "spine_link", about)
   }
 
-  // Mã + tên của đích nhắc trong phần tử khác (văn xuôi, mô tả, mục riêng)
+  // Mã + tên của đích nhắc trong phần tử khác (văn xuôi, mô tả, mục riêng).
+  // Phần tử đã tham chiếu đích bằng field (`spine_link`) thì hầu như luôn chứa mã đích trong text ⇒ không gắn thêm
+  // `mention` cho cùng đích đó (nợ T10): `found_by` chỉ kể cách tìm ra thật sự khác nhau.
+  const linkedTo = (path: string, target: string): boolean => {
+    const h = hits.get(path)
+    return !!h && h.found_by.has("spine_link") && h.entity_paths.has(target)
+  }
   for (const t of idTargets) {
     const value = elementValue(spine, t) as Row | undefined
     const names = [ELEMENT.exec(t)?.[2], typeof value?.name === "string" ? value.name : undefined, typeof value?.term === "string" ? value.term : undefined]
       .filter((s): s is string => !!s && s.trim().length >= 2)
       .map(wordPattern)
-    for (const e of elements) if (e.path !== t && names.some((re) => re.test(textOf(e.value)))) hit(e.path, "mention", t)
+    for (const e of elements) {
+      if (e.path === t || linkedTo(e.path, t)) continue
+      if (names.some((re) => re.test(textOf(e.value)))) hit(e.path, "mention", t)
+    }
   }
 
   const patterns = keywords
