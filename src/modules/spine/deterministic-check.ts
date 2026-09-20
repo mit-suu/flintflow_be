@@ -118,7 +118,7 @@ const hasKind = (s: Spine, kind: Diagram["kind"]) => s.diagrams.some((d) => d.ki
 const nfrCount = (s: Spine, category: string) => s.nfrs.filter((n) => n.category === category).length
 
 /** "Không field nào có dữ liệu" theo cột Sở hữu bảng §4. */
-const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> = {
+export const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> = {
   "fixed:1": (s) =>
     Boolean(s.project.vision) ||
     s.project.goals.length > 0 ||
@@ -144,6 +144,9 @@ const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> = {
   "fixed:5.3": (s) => s.messages.length > 0,
   "fixed:5.4": (s) => s.other_requirements.length > 0
 }
+
+/** Mục đã có dữ liệu trong Spine chưa — luật `section_empty` soi đúng chỗ này; mục ngoài bảng ⇒ `null` (không soi được). */
+export const sectionHasData = (spine: Spine, sectionId: string): boolean | null => SECTION_HAS_DATA[sectionId]?.(spine) ?? null
 
 const sectionEmpty = (spine: Spine): FlagCandidate[] =>
   REQUIRED_FIXED_SECTION_IDS.filter((id) => !DERIVED_SECTION_IDS.has(id))
