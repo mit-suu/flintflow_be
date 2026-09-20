@@ -174,6 +174,22 @@ describe("C-4 kết luận mọi vị trí", () => {
     expect(after.submitted_at).toBeNull()
     await expect(submitCr(after)).rejects.toMatchObject({ code: "CR_LOCATION_UNCONCLUDED" })
   })
+
+  it("mọi vị trí not_related ⇒ 409 CR_NOTHING_TO_APPROVE, không nộp (nếu cho qua thì CR kẹt ở in_review, 0 group để duyệt)", async () => {
+    const { c, projectId } = await importedProject()
+    const { crId, cr } = await crToReady(c)
+    await ChangeLocation.updateMany({ projectId, cr_id: crId }, { $set: { conclusion: "not_related", reason: "Không liên quan" } })
+    const res = await c.post(`${cr}/submit`)
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("CR_NOTHING_TO_APPROVE")
+    const after = await crDoc(projectId, crId)
+    expect(after.status).toBe("ready_to_submit")
+    expect(after.submitted_at).toBeNull()
+
+    // còn ít nhất một vị trí có sửa ⇒ nộp được như thường
+    await ChangeLocation.updateOne({ projectId, cr_id: crId, location_id: "L001" }, { $set: { conclusion: "comment" } })
+    expect(detail(await c.post(`${cr}/submit`)).change_request.status).toBe("in_review")
+  })
 })
 
 describe("gom change group", () => {

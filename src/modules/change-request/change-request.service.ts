@@ -160,6 +160,16 @@ export const submitCr = async (cr: IChangeRequest): Promise<void> => {
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
   }
+  // `regroup` chỉ gom vị trí `edit`/`comment`. Mọi vị trí `not_related` ⇒ 0 group ⇒ vào `in_review` mà không có gì
+  // để duyệt: CR kẹt, màn duyệt trống không nút (gặp thật 2026-09-20). Chặn ngay ở đây, chỉ hai lối đi thật sự.
+  const decidable = await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } })
+  if (!decidable) {
+    throw new Mode1Error(
+      "CR_NOTHING_TO_APPROVE",
+      "Mọi vị trí đều kết luận \"không liên quan\" — không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
+      { location_count: await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id }) }
+    )
+  }
   await regroup(cr)
   cr.submitted_at = new Date()
   await transitionCr(cr, "in_review")
