@@ -48,6 +48,10 @@ export const PIPELINE_ERROR_STATUS = {
   CHANGE_RANGE_INVALID: 422,
   NOTHING_TO_UNDO: 422,
   BASELINE_BLOCKED: 422,
+  /** Nhà cung cấp AI từ chối: hết hạn mức, chưa có phương thức thanh toán, hoặc gọi quá nhanh. */
+  RATE_LIMIT_EXCEEDED: 429,
+  /** Nhà cung cấp AI lỗi / trả rỗng (GLM_EMPTY_OUTPUT, 5xx…) — không phải lỗi logic của pipeline. */
+  AI_PROVIDER_ERROR: 502,
   NOT_IMPLEMENTED: 501
 } as const
 
