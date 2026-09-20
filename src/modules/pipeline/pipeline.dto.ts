@@ -256,7 +256,13 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     step_id: z.string(),
     actions: z.array(gateActionSchema),
     regenerate_used: z.number().int().min(0),
-    calls_used: z.number().int().min(0)
+    calls_used: z.number().int().min(0),
+    /** Version cuối cùng của lượt chạy — CAO HƠN `ops_applied` vì render + recompute cờ chạy sau (L11). */
+    spine_version: z.number().int().min(1),
+    /** Lượt chạy này có ghi được op nào vào Spine không (L11b) — `false` = model trả lô rỗng. */
+    wrote_ops: z.boolean(),
+    /** Mục step này nuôi mà chạy xong vẫn trống — accept cũng không đóng được cờ `section_empty` (L11b). */
+    empty_sections: z.array(z.object({ section_id: z.string(), title: z.string() }))
   }),
   z.object({ type: z.literal("error"), step_id: z.string(), code: pipelineErrorCodeSchema, message: z.string(), retryable: z.boolean() })
 ])

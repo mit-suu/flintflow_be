@@ -32,10 +32,12 @@ import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
+import { sectionHasData } from "../spine/deterministic-check.js"
+import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { renderDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { buildStepContext, getStepSpec, parseStepId, type StepContext } from "./context-projection.js"
+import { buildStepContext, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
@@ -390,6 +392,16 @@ export const runDraftPhase = async (
   }
 }
 
+/**
+ * Mục step này nuôi mà CHẠY XONG VẪN TRỐNG — tính bằng đúng hàm mà luật `section_empty` soi (`sectionHasData`),
+ * nên cái gate nói ra luôn khớp với cờ đỏ hiện trên cột kế hoạch. Mục ngoài bảng ⇒ `sectionHasData` trả `null`
+ * (không soi được) và không vào danh sách.
+ */
+export const emptyFedSections = (spine: Spine, stepId: string): { section_id: string; title: string }[] =>
+  sectionsFedBy(spine, stepId)
+    .filter((id) => sectionHasData(spine, id) === false)
+    .map((id) => ({ section_id: id, title: FIXED_SECTIONS.find((s) => s.id === id)?.title_en ?? id }))
+
 /** Render mọi diagram của step (nếu có) + Review (deterministic check; LLM review tuỳ `REVIEW_LLM_ENABLED`). */
 export const runRenderReviewPhase = async (
   projectId: string,
@@ -610,6 +622,8 @@ export const runStep = async (
     if (phaseChanged) emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
 
     let answersText = ctx.transcriptTail
+    /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */
+    let wroteOps = false
 
     // T19 — pha S-9: việc của từng step nằm ở `s9/run-s9-step.ts`, không đi qua STEP_SKILLS.
     // S-9.1/S-9.5 không gọi model và không Meter (hết credit vẫn quét và vẫn ký baseline được).
@@ -701,6 +715,7 @@ export const runStep = async (
         spineVersion = current.spineVersion
         const draftPhase = await runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, "draft", emit, d, { answers: answersText })
         spineVersion = draftPhase.spineVersion
+        if (draftPhase.applied) wroteOps = true
       }
     }
 
@@ -713,12 +728,28 @@ export const runStep = async (
       await d.assembleDocument(projectId, (await refresh(projectId)).spineVersion)
     }
 
-    const { spine: finalSpine } = await refresh(projectId)
+    const { spine: finalSpine, spineVersion: finalVersion } = await refresh(projectId)
     const finalFirstSeq = finalSpine.steps.find((s) => s.id === stepId)?.first_seq ?? null
     const { calls_used, regenerate_used } = await usageCounts(projectId, stepId, finalFirstSeq)
     const actions: GateAction[] = regenerate_used >= REGENERATE_LIMIT_COUNT ? ["accept", "revision", "accept_as_is"] : ["accept", "revision", "regenerate"]
 
-    emit({ type: "gate_ready", step_id: stepId, actions, regenerate_used, calls_used })
+    // `spine_version` đi kèm gate_ready (L11): sau `ops_applied` còn render diagram + recompute cờ, mỗi lượt một
+    // transaction ⇒ version cuối cao hơn cái FE đang giữ. Không nói ra thì lượt `/run` kế tiếp gửi base_version cũ
+    // và ăn 409 SPINE_VERSION_CONFLICT trong lúc FE còn đang chờ `GET /spine` về.
+    //
+    // `empty_sections` (L11b): mục mà step này nuôi nhưng CHẠY XONG VẪN TRỐNG theo đúng hàm mà luật `section_empty`
+    // soi. Trước đây lô op rỗng vẫn đi thẳng tới gate như một lượt chạy thành công, user accept rồi cờ đỏ vẫn treo,
+    // bấm "Mở lại" lại rơi vào đúng vòng đó. Nói thẳng ở gate để user chọn lối khác (viết tay qua chat / waive).
+    emit({
+      type: "gate_ready",
+      step_id: stepId,
+      actions,
+      regenerate_used,
+      calls_used,
+      spine_version: finalVersion,
+      wrote_ops: wroteOps,
+      empty_sections: emptyFedSections(finalSpine, stepId)
+    })
   } finally {
     releaseStepLock(projectId, stepId)
   }

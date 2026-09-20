@@ -42,7 +42,16 @@ describe("pipeline.dto", () => {
 
   it("SSE: đủ 9 loại sự kiện, parse theo discriminator", () => {
     expect(STEP_EVENT_TYPES).toHaveLength(9)
-    expect(stepEventSchema.safeParse({ type: "gate_ready", step_id: "S-3.1", actions: ["accept"], regenerate_used: 0, calls_used: 2 }).success).toBe(true)
+    const gateReady = { type: "gate_ready", step_id: "S-3.1", actions: ["accept"], regenerate_used: 0, calls_used: 2, spine_version: 7, wrote_ops: true, empty_sections: [] }
+    expect(stepEventSchema.safeParse(gateReady).success).toBe(true)
+    expect(
+      stepEventSchema.safeParse({ ...gateReady, wrote_ops: false, empty_sections: [{ section_id: "fixed:5.2", title: "Common Requirements" }] }).success
+    ).toBe(true)
+    // L11/L11b: ba field này bắt buộc — thiếu là FE mất đường biết version cuối và lô op rỗng
+    for (const missing of ["spine_version", "wrote_ops", "empty_sections"] as const) {
+      const { [missing]: _omitted, ...without } = gateReady
+      expect(stepEventSchema.safeParse(without).success, missing).toBe(false)
+    }
     expect(stepEventSchema.safeParse({ type: "error", step_id: "S-3.1", code: "CALL_LIMIT", message: "x", retryable: false }).success).toBe(true)
     expect(stepEventSchema.safeParse({ type: "unknown", step_id: "S-3.1" }).success).toBe(false)
   })
