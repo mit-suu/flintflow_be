@@ -91,5 +91,17 @@ export const addProjectsToFolder = async (userId: string, folderId: string, proj
   return { moved: result.modifiedCount }
 }
 
+/**
+ * Đưa nhiều dự án (của chính user) đang ở trong thư mục ra ngoài thư mục. Id lạ, dự án của user khác hoặc
+ * dự án đã ở ngoài đều bị bỏ qua — chỉ đếm dự án thực sự được gỡ.
+ */
+export const removeProjectsFromFolder = async (userId: string, folderId: string, projectIds: string[]): Promise<{ moved: number }> => {
+  await assertFolderOwned(userId, folderId)
+  const ids = [...new Set(projectIds)].filter((id) => mongoose.isValidObjectId(id))
+  if (ids.length === 0) return { moved: 0 }
+  const result = await Project.updateMany({ _id: { $in: ids }, userId, folderId }, { $set: { folderId: null } })
+  return { moved: result.modifiedCount }
+}
+
 export const folderStillExists = async (userId: string, folderId: string): Promise<boolean> =>
   Boolean(await Folder.exists({ _id: folderId, userId }))
