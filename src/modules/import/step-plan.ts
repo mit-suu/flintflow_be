@@ -19,6 +19,17 @@ import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
 export const customSectionKey = (id: string): string => `${CUSTOM_SECTION_PREFIX}${id}`
+
+/**
+ * Section chủ của một **phần nối** (mục riêng tiêu đề rỗng): mục gần nhất phía trước có cấp nhỏ hơn — đúng mục mà
+ * assemble gộp khối của phần nối vào (xem `render/layout-sections.ts`). Không tìm được ⇒ null.
+ */
+export const continuationOwnerSection = (layout: readonly LayoutEntry[], sectionId: string): string | null => {
+  const at = layout.findIndex((e) => e.section_id === sectionId)
+  if (at < 0) return null
+  for (let i = at - 1; i >= 0; i--) if (layout[i].level < layout[at].level) return layout[i].section_id
+  return null
+}
 const customId = (n: number): string => `CS${String(n).padStart(2, "0")}`
 const clampLevel = (level: number | null): number => Math.min(9, Math.max(1, level ?? 1))
 
