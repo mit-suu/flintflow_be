@@ -24,13 +24,26 @@ describe("C-3 findSpineLocations", () => {
     expect(found.map((f) => [f.path, f.found_by])).toEqual([
       ["project", ["mention"]],
       ["actors[id=A01]", ["spine_link"]],
-      ["use_cases[id=UC-01]", ["spine_link", "mention"]], // tham chiếu A01 + nhắc mã A01
+      ["use_cases[id=UC-01]", ["spine_link"]], // tham chiếu A01 bằng field ⇒ không gắn thêm "mention" cho cùng đích (T10)
       ["custom_sections[id=CS02]", ["mention", "keyword"]]
     ])
     expect(found.find((f) => f.path === "use_cases[id=UC-01]")).toMatchObject({ entity_paths: ["actors[id=A01]"], section_id: "fixed:2.2.2" })
     expect(found.find((f) => f.path === "actors[id=A01]")).toMatchObject({ section_id: "fixed:2.1", owner_step: "S-3.1" })
     // mục riêng: section custom, không step sở hữu
     expect(found.find((f) => f.path === "custom_sections[id=CS02]")).toMatchObject({ section_id: "custom:CS02", owner_step: null })
+  })
+
+  it("đã spine_link tới đích thì thôi mention cùng đích, nhưng nhắc đích KHÁC vẫn là mention (T10)", () => {
+    const s = spine()
+    s.use_cases.push({ id: "UC-02", name: "Manage courses", actor_ids: ["A01"], function_ids: [], description: "Admin reviews what the Learner submits.", includes: [], extends: [] } as never)
+    const found = findSpineLocations(s, ["actors[id=A01]", "actors[id=A02]"], [])
+    // UC-01 chỉ tham chiếu A01 bằng actor_ids ⇒ một cách tìm
+    expect(found.find((f) => f.path === "use_cases[id=UC-01]")).toMatchObject({ found_by: ["spine_link"], entity_paths: ["actors[id=A01]"] })
+    // UC-02 tham chiếu A01 (field) và nhắc tên A02 (văn xuôi) ⇒ hai cách tìm, hai đích
+    expect(found.find((f) => f.path === "use_cases[id=UC-02]")).toMatchObject({
+      found_by: ["spine_link", "mention"],
+      entity_paths: ["actors[id=A01]", "actors[id=A02]"]
+    })
   })
 
   it("đích không còn trong Spine / path không phải phần tử bị bỏ; từ khoá < 3 ký tự bỏ; theo ranh giới từ", () => {
