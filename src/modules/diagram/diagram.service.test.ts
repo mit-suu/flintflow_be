@@ -160,7 +160,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D04", remediation_step: "S-4.5" }])
   })
 
-  it("đổi tên actor ⇒ hình usecase stale ⇒ render lại chỉ hình đó", async () => {
+  it("đổi tên actor ⇒ hình context + usecase stale ⇒ render lại chỉ hai hình đó", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
@@ -171,9 +171,9 @@ describe("renderAll / renderDiagram qua op engine", () => {
     await applyTransaction(PROJECT, { base_version: spine.spine_version, ops: [{ op: "set", path: `actors[id=${actor.id}].name`, value: "Renamed" }], by: USER })
 
     const stale = staleDiagrams((await repo.get(PROJECT))!).map((d) => d.kind)
-    expect(stale).toEqual(["usecase"])
+    expect([...stale].sort()).toEqual(["context", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
-    expect(result.rendered).toEqual(["D02"])
+    expect([...result.rendered].sort()).toEqual(["D01", "D02"])
   })
 
   it("usecase vượt 25 ⇒ tách D02-1, D02-2…, gỡ D02 cũ", async () => {

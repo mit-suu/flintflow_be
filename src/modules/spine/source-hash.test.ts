@@ -33,11 +33,16 @@ describe("computeSourceHash", () => {
     expect(computeSourceHash(mutate((s) => (s.actors[0].description = "X")), { kind: "usecase", owner_id: null })).toBe(base)
   })
 
-  it("context chỉ xét actor không phải human", () => {
+  it("context xét mọi actor và tên/actor_ids của use case (nhãn cạnh), không xét mô tả", () => {
+    const context = { kind: "context" as const, owner_id: null }
     const human = FIXTURE.actors.findIndex((a) => a.kind === "human")
-    const base = computeSourceHash(FIXTURE, { kind: "context", owner_id: null })
-    expect(computeSourceHash(mutate((s) => (s.actors[human].name = "X")), { kind: "context", owner_id: null })).toBe(base)
-    expect(computeSourceHash(mutate((s) => (s.project.name = "X")), { kind: "context", owner_id: null })).not.toBe(base)
+    const base = computeSourceHash(FIXTURE, context)
+    expect(computeSourceHash(mutate((s) => (s.actors[human].name = "X")), context)).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.project.name = "X")), context)).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.use_cases[0].name = "X")), context)).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.use_cases[0].actor_ids = [])), context)).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.use_cases[0].description = "X")), context)).toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.actors[human].description = "X")), context)).toBe(base)
   })
 
   it("screen_layout theo màn sở hữu; screen_flow, erd theo field vẽ", () => {
