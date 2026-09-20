@@ -17,18 +17,38 @@ import type { ImportStatus } from "./import.state.js"
 import { latestImport, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
-import { FEATURE_SECTIONS } from "./step-plan.js"
+import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry, type StepPlanItem } from "./template-profile.model.js"
 
 const REPORT_STATUSES: readonly ImportStatus[] = ["gap_review", "delivered", "change_requested"]
 
-export const titleOfSection = (spine: Pick<Spine, "features" | "functions"> & Partial<Pick<Spine, "custom_sections">>, id: string): string => {
+/**
+ * Tiêu đề hiển thị của section. Truyền `layout` (template của project) thì **phần nối** — mục riêng tiêu đề rỗng, văn
+ * xuôi mà assemble gộp vào mục trước — hiện theo mục chủ, thay vì trơ mã `custom:CS07` (nợ T5).
+ */
+export const titleOfSection = (
+  spine: Pick<Spine, "features" | "functions"> & Partial<Pick<Spine, "custom_sections">>,
+  id: string,
+  layout?: readonly LayoutEntry[]
+): string => {
   const [kind, key] = id.split(":")
   if (id === FEATURE_SECTIONS) return "Functional requirements (features)"
-  if (kind === "custom") return spine.custom_sections?.find((c) => c.id === key)?.heading || id
+  if (kind === "custom") {
+    const custom = spine.custom_sections?.find((c) => c.id === key)
+    if (custom?.heading) return custom.heading
+    if (!custom) return id
+    const owner = layout ? continuationOwnerSection(layout, id) : null
+    return owner ? `Phần nối của "${titleOfSection(spine, owner, layout)}"` : "Phần nối (văn xuôi của mục trước)"
+  }
   if (kind === "feature") return spine.features.find((f) => f.id === key)?.name ?? id
   if (kind === "function") return spine.functions.find((f) => f.id === key)?.name ?? id
   return sectionTitle(id)
+}
+
+/** Layout template của project (mode 1) — để `titleOfSection` biết mục chủ của phần nối. */
+export const loadLayout = async (projectId: string): Promise<LayoutEntry[] | undefined> => {
+  const profile = await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()
+  return profile?.layout?.length ? (profile.layout as LayoutEntry[]) : undefined
 }
 
 export const buildGapReport = async (projectId: string): Promise<GapReport> => {
@@ -56,10 +76,11 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const sections = [...bySection]
     .map(([section_id, flags]) => ({
       section_id,
-      title: titleOfSection(spine, section_id),
+      title: titleOfSection(spine, section_id, profile?.layout),
       flags: [...flags].sort((a, b) => (a.level === b.level ? 0 : a.level === "red" ? -1 : 1))
     }))
     .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))
+  const unrenderedDiagrams = unrendered(spine)
   const missingFpt = missingFptSections(profile?.step_plan ?? [], new Set(layout.map((l) => l.section_id)), spine)
 
   const missing = (profile?.required_sections ?? []).map((section_id) => ({ section_id, title: sectionTitle(section_id) }))
@@ -89,16 +110,40 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
       missing_sections: missing.length,
       unmapped_headings: unmapped.length,
       low_confidence_fields: low.length,
-      missing_fpt_sections: missingFpt.length
+      missing_fpt_sections: missingFpt.length,
+      unrendered_diagrams: unrenderedDiagrams.length
     },
     missing_fpt_sections: missingFpt,
     layout,
     sections,
+    unrendered_diagrams: unrenderedDiagrams,
     missing_sections: missing,
     unmapped_headings: unmapped,
     low_confidence_fields: low
   }
 }
+
+/** Hình dựng được từ Spine mode 1 — chỉ liệt kê loại có dữ liệu (không có entity thì không đòi ERD). */
+const DIAGRAM_TARGETS = [
+  { kind: "context", title: "Sơ đồ ngữ cảnh", has: (s: Spine) => s.actors.length > 0 },
+  { kind: "usecase", title: "Sơ đồ use case", has: (s: Spine) => s.use_cases.length > 0 },
+  { kind: "screen_flow", title: "Luồng màn hình", has: (s: Spine) => s.screens.length > 0 },
+  { kind: "erd", title: "Sơ đồ thực thể (ERD)", has: (s: Spine) => s.entities.length > 0 }
+] as const
+
+/**
+ * Nợ T4: hình đáng lẽ có mà **chưa có bản vẽ**. `render_status` chỉ có `ok`/`error`, nên "chưa vẽ" = chưa có bản ghi
+ * hình nào cho loại đó — đúng trường hợp lúc import PlantUML không sẵn sàng (finalize bỏ qua bước vẽ, không cờ).
+ * Không chặn baseline: người dùng bấm vẽ lại ở workspace khi có PlantUML.
+ */
+const unrendered = (spine: Spine): GapReport["unrendered_diagrams"] =>
+  DIAGRAM_TARGETS.filter((t) => t.has(spine)).flatMap((t): GapReport["unrendered_diagrams"] => {
+    const drawn = spine.diagrams.filter((d) => d.kind === t.kind)
+    if (!drawn.length) return [{ diagram_id: "", kind: t.kind, section_id: "", title: t.title, reason: "not_rendered" }]
+    return drawn
+      .filter((d) => d.render_status === "error")
+      .map((d) => ({ diagram_id: d.id, kind: t.kind, section_id: d.section, title: t.title, reason: "error" }))
+  })
 
 type FlagsBySection = Map<string, Spine["flags"]>
 
@@ -162,7 +207,8 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
         ["Cờ vàng", String(t.yellow)],
         ["Section bắt buộc thiếu", String(t.missing_sections)],
         ["Heading không khớp template", String(t.unmapped_headings)],
-        ["Field độ tin thấp", String(t.low_confidence_fields)]
+        ["Field độ tin thấp", String(t.low_confidence_fields)],
+        ["Hình chưa vẽ được", String(t.unrendered_diagrams)]
       ]
     ),
     new Paragraph({ text: "Thiếu mục FPT", heading: HeadingLevel.HEADING_1 }),
@@ -191,6 +237,15 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     children.push(new Paragraph({ text: `${s.title} (${s.section_id})`, heading: HeadingLevel.HEADING_2 }))
     children.push(table(["Mức", "Luật", "Nội dung"], s.flags.map((f) => [f.level === "red" ? "Đỏ" : "Vàng", f.rule_id, f.message])))
   }
+  children.push(new Paragraph({ text: "Hình chưa vẽ được", heading: HeadingLevel.HEADING_1 }))
+  children.push(
+    report.unrendered_diagrams.length
+      ? table(
+          ["Hình", "Loại", "Mục", "Lý do"],
+          report.unrendered_diagrams.map((d) => [d.diagram_id, d.kind, d.title, d.reason === "error" ? "Vẽ lỗi" : "Chưa vẽ (PlantUML không sẵn sàng lúc import)"])
+        )
+      : new Paragraph("Mọi hình đã có bản vẽ.")
+  )
   children.push(new Paragraph({ text: "Section bắt buộc thiếu", heading: HeadingLevel.HEADING_1 }))
   children.push(report.missing_sections.length ? table(["Section", "Tiêu đề"], report.missing_sections.map((m) => [m.section_id, m.title])) : new Paragraph("Không thiếu section bắt buộc nào."))
   children.push(new Paragraph({ text: "Heading không khớp template", heading: HeadingLevel.HEADING_1 }))
