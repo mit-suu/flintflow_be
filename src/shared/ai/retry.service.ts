@@ -1,6 +1,10 @@
 import { AiActionError } from "./ai-action.types.js"
 
 export const isTransientError = (error: any): boolean => {
+  // Người gọi đã bỏ đi (client đóng kết nối) ⇒ gọi lại chỉ tốn tiền và giữ khoá step lâu thêm
+  if (error?.name === "AbortError" || error?.name === "APIUserAbortError" || error?.code === "AI_CALL_ABORTED" || error?.code === "ERR_CANCELED") {
+    return false
+  }
   const errMsg = (error?.message || error?.details?.error?.message || "").toLowerCase()
   if (errMsg.includes("insufficient_quota") || errMsg.includes("exceeded your current quota")) {
     return false

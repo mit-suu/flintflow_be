@@ -23,6 +23,7 @@ import {
   submitAnswer,
   requirePipelineSession,
   isPipelineErrorCode,
+  isStepLocked,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   type Emit
@@ -96,7 +97,8 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       calls_limit: CALLS_LIMIT,
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
-      accepted_at: state?.accepted_at ?? null
+      accepted_at: state?.accepted_at ?? null,
+      running: isStepLocked(projectId, def.id)
     }
   })
 

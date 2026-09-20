@@ -46,9 +46,8 @@ describe("callGLM", () => {
 
     const res = await callGLM("prompt", { provider: "glm", model: "zai-org/GLM-5.3-Flash", maxTokens: 100, temperature: 0.2 } as never)
 
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ reasoning_effort: "low", response_format: { type: "json_object" }, stream: true })
-    )
+    // tham số thứ hai là tuỳ chọn request của SDK (signal) ⇒ kiểm thẳng đối số đầu
+    expect(create.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low", response_format: { type: "json_object" }, stream: true })
     expect(create.mock.calls[0][0]).not.toHaveProperty("thinking")
     expect(create.mock.calls[0][0]).toMatchObject({ max_tokens: 100 + GLM_REASONING_HEADROOM_TOKENS })
     expect(JSON.parse(res.text)).toEqual({ reply: "hi", questions: [] })
@@ -74,6 +73,15 @@ describe("callGLM", () => {
       message: expect.stringContaining(`đã thử ${100 + GLM_REASONING_HEADROOM_TOKENS} trước đó`)
     })
     expect(create).toHaveBeenCalledTimes(2)
+  })
+
+  it("có signal ⇒ chuyển xuống SDK để huỷ lượt gọi khi client đóng kết nối (khoá step nhả ngay)", async () => {
+    create.mockResolvedValue(streamOf('{"reply":"hi"}'))
+    const controller = new AbortController()
+
+    await callGLM("prompt", { provider: "glm", maxTokens: 100 } as never, { signal: controller.signal })
+
+    expect(create.mock.calls[0][1]).toEqual({ signal: controller.signal })
   })
 
   it("đã kịch trần, hoặc dừng vì lý do khác length ⇒ không gọi lại", async () => {

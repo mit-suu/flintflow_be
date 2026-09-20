@@ -1,7 +1,7 @@
 import OpenAI from "openai"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
-import { LLMResponse } from "./provider.types.js"
+import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 import { modalBaseUrl } from "./modal.config.js"
 
 /**
@@ -28,7 +28,8 @@ export const GLM_REQUEST_OPTIONS = {
 
 export const callGLM = async (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  options: LlmCallOptions = {}
 ): Promise<LLMResponse> => {
   const tokenId = (env.MODAL_PROXY_TOKEN_ID || process.env.MODAL_PROXY_TOKEN_ID)?.trim()
   const tokenSecret = (env.MODAL_PROXY_TOKEN_SECRET || process.env.MODAL_PROXY_TOKEN_SECRET)?.trim()
@@ -63,7 +64,7 @@ export const callGLM = async (
   const temperature = providerConfig.temperature ?? 0.3
 
   try {
-    const first = await streamOnce(client, model, prompt, temperature, maxTokens)
+    const first = await streamOnce(client, model, prompt, temperature, maxTokens, options.signal)
     if (first.answer) return first.response
 
     // Prompt khó (C-4 nhiều vị trí) ⇒ model suy nghĩ hết sạch ngân sách, chưa kịp trả `content`. Gọi lại y hệt chỉ
@@ -71,7 +72,7 @@ export const callGLM = async (
     if (first.finishReason === "length" && maxTokens < GLM_MAX_TOKENS_CEILING) {
       const retryTokens = Math.min(maxTokens * 2, GLM_MAX_TOKENS_CEILING)
       console.warn(`[GLM] hết ngân sách khi suy nghĩ (max_tokens=${maxTokens}); gọi lại với max_tokens=${retryTokens}`)
-      const second = await streamOnce(client, model, prompt, temperature, retryTokens)
+      const second = await streamOnce(client, model, prompt, temperature, retryTokens, options.signal)
       if (second.answer) return second.response
       throw emptyOutput(second.finishReason, second.reasoningLength, retryTokens, maxTokens)
     }
@@ -106,7 +107,14 @@ interface StreamResult {
   response: LLMResponse
 }
 
-const streamOnce = async (client: OpenAI, model: string, prompt: string, temperature: number, maxTokens: number): Promise<StreamResult> => {
+const streamOnce = async (
+  client: OpenAI,
+  model: string,
+  prompt: string,
+  temperature: number,
+  maxTokens: number,
+  signal?: AbortSignal
+): Promise<StreamResult> => {
   const stream = (await client.chat.completions.create({
     model,
     messages: [
@@ -120,7 +128,9 @@ const streamOnce = async (client: OpenAI, model: string, prompt: string, tempera
     top_p: 0.9,
     stream: true,
     ...GLM_REQUEST_OPTIONS
-  } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
+  } as OpenAI.ChatCompletionCreateParamsStreaming,
+  // Client đóng kết nối (reload trang) ⇒ bỏ luôn lượt gọi, không chờ model trả hết rồi mới nhả khoá step
+  signal ? { signal } : undefined)) as AsyncIterable<OpenAI.ChatCompletionChunk>
 
   let text = ""
   let reasoningLength = 0
