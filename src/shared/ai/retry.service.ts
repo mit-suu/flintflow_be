@@ -6,7 +6,9 @@ export const isTransientError = (error: any): boolean => {
     return false
   }
   const errMsg = (error?.message || error?.details?.error?.message || "").toLowerCase()
-  if (errMsg.includes("insufficient_quota") || errMsg.includes("exceeded your current quota")) {
+  // Hết tiền / chưa gắn thanh toán / vượt hạn mức chi: gọi lại chỉ tốn thời gian, trạng thái không tự đổi
+  const BILLING = ["insufficient_quota", "exceeded your current quota", "payment method", "spend limit", "credits cannot be applied", "billing"]
+  if (BILLING.some((phrase) => errMsg.includes(phrase))) {
     return false
   }
 

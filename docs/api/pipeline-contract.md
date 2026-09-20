@@ -101,6 +101,8 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
 | 422 | `NOTHING_TO_UNDO` | Không còn txn có thể undo | — |
 | 422 | `BASELINE_BLOCKED` | Còn cờ đỏ chưa waive khi ghi baseline | `{ flags[] }` |
+| 429 | `RATE_LIMIT_EXCEEDED` | Nhà cung cấp AI từ chối: hết hạn mức, chưa gắn thanh toán, hoặc gọi quá nhanh | — |
+| 502 | `AI_PROVIDER_ERROR` | Nhà cung cấp AI lỗi / trả rỗng (`GLM_EMPTY_OUTPUT`, 5xx…) | — |
 | 501 | `NOT_IMPLEMENTED` | Nhánh chưa hiện thực (vd `instruction` trước T17) | — |
 
 `violations[]` = `{ rule, message, path?, op_index? }`. `referrers[]` = `{ path, id }`: các khoá đang trỏ tới phần tử bị xoá, để user tự quyết.

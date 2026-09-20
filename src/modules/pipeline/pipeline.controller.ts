@@ -116,6 +116,11 @@ const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
   if (err instanceof ApiError || err instanceof AiActionError) {
     if (isPipelineErrorCode(err.code)) return err.code
     if (err.statusCode === 400) return "VALIDATION_ERROR"
+    // Lỗi của nhà cung cấp AI có mã riêng (GLM_ERROR, GEMINI_ERROR, GLM_EMPTY_OUTPUT…) không nằm trong bảng
+    // pipeline. Trước đây quy hết về NOT_IMPLEMENTED (501) nên người dùng đọc "chưa hiện thực" trong khi thật ra
+    // endpoint AI hết hạn mức / chưa gắn thanh toán (gặp thật 2026-09-20).
+    if (err.statusCode === 429) return "RATE_LIMIT_EXCEEDED"
+    if (err instanceof AiActionError && err.statusCode >= 500) return "AI_PROVIDER_ERROR"
   }
   return "NOT_IMPLEMENTED"
 }
