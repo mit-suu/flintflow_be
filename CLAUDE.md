@@ -90,7 +90,7 @@ lường trước trong `pipeline.dto.ts`.
 | `modules/diagram/` | 5 renderer PlantUML + compile-check + lưu file |
 | `modules/render/` | Assemble section → `RenderedDocument` → `.docx` |
 | `modules/pipeline/s9/` | Quét cuối, đối chiếu mục tiêu, MoSCoW, ký baseline + snapshot |
-| `modules/{notification,billing,credits,admin,project,user,auth}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`) |
+| `modules/{notification,billing,credits,admin,project,user,auth,feedback,folder}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`, `mode` — `import` | `fpt` | `customer_template`, mặc định `fpt`, xem `project.model.ts`; `folderId` — thư mục, `PATCH /projects/:id/folder`). `folder`: CRUD `/folders`, `POST /folders/:id/projects` thêm nhiều dự án, xoá thư mục giữ dự án. `lastOpenedAt` ghi khi `GET /projects/:id`. `feedback`: `POST /feedback` (UC-12), admin đọc qua `GET /admin/feedback` |
 | `shared/ai/` | `ActionType`, prompt registry, response parser, provider, context tài liệu upload |
 | `assets/skills/` | 32 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
 | `assets/prompts/` | Prompt phẳng chỉ cho `chat`, `summarize_document` |
@@ -116,12 +116,26 @@ registry chỉ đọc đĩa.
 
 ## Test
 
-- Colocate `src/**/*.test.ts`; không có `setupFiles`, **không có kết nối Mongo** trong tiến trình test.
-- Test cần DB thì mock model Mongoose bằng store trong bộ nhớ — mẫu ở `src/modules/spine/op-engine.test.ts`
-  (`vi.hoisted` + `vi.mock("./spine.model.js")`). Chưa có `mongodb-memory-server` (T22 sẽ thêm).
-- Provider AI **mặc định là mock**; gọi thật chỉ sau `E2E_AI=1`. Lưu ý: nhánh `E2E_AI=1` trong
-  `modules/pipeline/skills/*.e2e.test.ts` hiện **chưa chạy được** vì `executeAiAction` cần Mongo thật để
-  reserve credit — muốn đo thật thì chạy qua API trên BE thật (xem `docs/spec-gaps.md`).
+Ba project vitest (`vitest.config.ts`), `npm test` chạy cả ba:
+
+- **`unit`** — colocate `src/**/*.test.ts`; không `setupFiles`, **không nối Mongo**. Test cần DB thì mock model
+  Mongoose bằng store trong bộ nhớ — mẫu `src/modules/spine/op-engine.test.ts` (`vi.hoisted` +
+  `vi.mock("./spine.model.js")`). `npm run test:unit`.
+- **`integration`** — `test/integration/**`; Mongo in-memory replica set (`mongodb-memory-server`, dựng một lần ở
+  `test/global-setup.ts`, mỗi worker một database) + supertest qua `app` thật. `test/setup.ts` trỏ `MONGO_URI`
+  trước khi import `app`, xoá dữ liệu trước mỗi test, có helper `seedFixture(kind)`, `authAs(user)`, `resetDb()`.
+  `npm run test:integration`.
+- **`e2e-ai`** — `test/e2e-ai/**`, cùng khung Mongo in-memory, gọi **provider thật**; chỉ chạy khi `E2E_AI=1`
+  (`npm run test:e2e-ai`), kết quả ghi `test/e2e-ai/results/`. Đo token trọn pipeline:
+  `npm run measure:tokens -- --mode real-draft|real`.
+
+- Provider AI **mặc định là mock** trong test; `AI_PROVIDER_OVERRIDE=mock` (env) ép mọi skill dùng mock cho lượt
+  chạy không ra mạng (CI, smoke). Nhánh `E2E_AI=1` còn lại trong `modules/pipeline/skills/*.e2e.test.ts`
+  (T14/T18) thuộc project `unit` nên **không chạy được** (`executeAiAction` cần Mongo để reserve credit) —
+  đo thật thì dùng hai lệnh trên, không dùng nhánh đó.
+- Test cần PlantUML (`src/shared/diagram/plantuml.test.ts`, `diagram.plantuml.test.ts`) tự skip khi không có server;
+  có server ở cổng khác thì đặt `PLANTUML_BASE_URL`.
+- `npm run typecheck:test` kiểm kiểu cho `test/**`. CI chạy `typecheck`, `typecheck:test`, `test:coverage`.
 - File mới phải có ít nhất một test đi kèm. Không xoá test đang xanh của người khác để PR mình pass.
 - Snapshot bị vitest ghi lại chỉ vì CRLF trên Windows: `git checkout -- <snapshot>` trước khi commit.
 

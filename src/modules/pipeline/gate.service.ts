@@ -130,7 +130,10 @@ const loopScreenStatusOps = (stepId: string, asIs: boolean): Op[] => {
 const phaseFullyAccepted = (spine: Spine, phase: string): boolean =>
   orderedSteps(spine)
     .filter((s) => s.phase === phase)
-    .every((s) => spine.steps.find((st) => st.id === s.id)?.status === "accepted")
+    .every((s) => {
+      const status = spine.steps.find((st) => st.id === s.id)?.status
+      return status === "accepted" || status === "skipped"
+    })
 
 const notifyPhaseAccepted = (userId: string, phase: string): void => {
   void notify(userId, {

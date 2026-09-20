@@ -57,12 +57,72 @@ export class BaselineBlockedError extends ApiError {
 export const nextBaselineVersion = (existing: readonly BaselineEntry[], waivedCount: number): string =>
   `v1.${existing.length}${waivedCount > 0 ? "-conditional" : ""}`
 
-const nextBaselineId = (existing: readonly BaselineEntry[]): string => {
+export const nextBaselineId = (existing: readonly BaselineEntry[]): string => {
   const max = existing.reduce((acc, b) => {
     const m = /^BL(\d+)$/.exec(b.id)
     return m ? Math.max(acc, Number(m[1])) : acc
   }, 0)
   return `BL${String(max + 1).padStart(3, "0")}`
+}
+
+export interface SnapshotBaselineOptions {
+  /** `spine_version` của `spine` truyền vào — khoá lạc quan của lô ghi entry. */
+  base_version: number
+  version: string
+  type: BaselineEntry["type"]
+  doc_version: string | null
+  at?: Date
+  by: string
+  step_id?: string | null
+  /** Op ghi kèm trong cùng lô (vd đánh dấu step S-9.5). */
+  extraOps?: Op[]
+}
+
+/**
+ * Chụp snapshot Spine + ghi entry `baselines[]` — không kiểm cờ, không quét lại (caller tự làm). Tách khỏi
+ * `signOff` để mode 1 dùng cho baseline `imported` (0.0) và `release` (1.0…) — FLF-171, P0 báo cáo §3 dòng 6.
+ * Lô bị từ chối (409, bất biến) ⇒ xoá snapshot, không để mồ côi.
+ */
+export const snapshotBaseline = async (
+  projectId: string,
+  spine: Spine,
+  options: SnapshotBaselineOptions
+): Promise<{ baseline: BaselineEntry; spine_version: number }> => {
+  const at = options.at ?? new Date()
+  const waivedCount = waivedFlags(spine).length
+  const snapshot = await Baseline.create({
+    projectId,
+    version: options.version,
+    type: options.type,
+    doc_version: options.doc_version,
+    at,
+    checked_at_version: options.base_version,
+    waived_count: waivedCount,
+    snapshot: structuredClone(spine)
+  })
+  const entry: BaselineEntry = {
+    id: nextBaselineId(spine.baselines),
+    version: options.version,
+    type: options.type,
+    doc_version: options.doc_version,
+    at: at.toISOString(),
+    snapshot_ref: String(snapshot._id),
+    checked_at_version: options.base_version,
+    waived_count: waivedCount
+  }
+  try {
+    const applied = await applyTransaction(projectId, {
+      base_version: options.base_version,
+      ops: [{ op: "add", path: "baselines[]", value: entry, reason: `Baseline ${options.version}` }, ...(options.extraOps ?? [])],
+      by: options.by,
+      step_id: options.step_id ?? null,
+      reason: `Ký baseline ${options.version}`
+    })
+    return { baseline: entry, spine_version: applied.spine_version }
+  } catch (err) {
+    await Baseline.deleteOne({ _id: snapshot._id })
+    throw err
+  }
 }
 
 export interface SignOffOptions {
@@ -111,55 +171,33 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
   const version = nextBaselineVersion(spine.baselines, waived.length)
   const at = new Date()
 
-  // 3. Snapshot: bản sao sâu của Spine tại version vừa quét
-  const snapshot = await Baseline.create({
-    projectId,
-    version,
-    at,
-    checked_at_version: checkedAtVersion,
-    waived_count: waived.length,
-    snapshot: structuredClone(spine)
-  })
-
-  const entry: BaselineEntry = {
-    id: nextBaselineId(spine.baselines),
-    version,
-    at: at.toISOString(),
-    snapshot_ref: String(snapshot._id),
-    checked_at_version: checkedAtVersion,
-    waived_count: waived.length
-  }
-
-  // 4. Ghi vào Spine + đánh dấu step S-9.5 accepted trong CÙNG một transaction
-  const ops: Op[] = [{ op: "add", path: "baselines[]", value: entry, reason: `Baseline ${version}` }]
+  // Ghi vào Spine + đánh dấu step S-9.5 accepted trong CÙNG một transaction
+  const stepOps: Op[] = []
   const step = spine.steps.find((s) => s.id === SIGN_OFF_STEP)
   if (!step) {
-    ops.push({
+    stepOps.push({
       op: "add",
       path: "steps[]",
       value: { id: SIGN_OFF_STEP, status: "accepted", first_seq: null, last_seq: null, accepted_at: at.toISOString() }
     })
   } else if (step.status !== "accepted") {
-    ops.push(
+    stepOps.push(
       { op: "set", path: `steps[id=${SIGN_OFF_STEP}].status`, value: "accepted" },
       { op: "set", path: `steps[id=${SIGN_OFF_STEP}].accepted_at`, value: at.toISOString() }
     )
   }
 
-  let applied
-  try {
-    applied = await applyTransaction(projectId, {
-      base_version: checkedAtVersion,
-      ops,
-      by: userId,
-      step_id: SIGN_OFF_STEP,
-      reason: `Ký baseline ${version}`
-    })
-  } catch (err) {
-    // Không để lại snapshot mồ côi khi lô bị từ chối (409 hai tab, bất biến…)
-    await Baseline.deleteOne({ _id: snapshot._id })
-    throw err
-  }
+  const { baseline: entry, spine_version } = await snapshotBaseline(projectId, spine, {
+    base_version: checkedAtVersion,
+    version,
+    type: "generated",
+    doc_version: null,
+    at,
+    by: userId,
+    step_id: SIGN_OFF_STEP,
+    extraOps: stepOps
+  })
+  const applied = { spine_version }
 
   void notify(userId, {
     type: "baseline_created",

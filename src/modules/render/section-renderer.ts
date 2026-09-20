@@ -27,6 +27,7 @@ import type {
   Block,
   BulletListBlock,
   HeadingBlock,
+  InlineRun,
   ImageBlock,
   NumberedListBlock,
   ParagraphBlock,
@@ -59,6 +60,122 @@ const tableBlock = (header: string[], rows: string[][]): TableBlock => ({
 })
 const image = (png: string, caption: string): ImageBlock => ({ type: "image", png, caption })
 
+// ─── nhãn cố định theo ngôn ngữ tài liệu (mode 1 v2 — FLF-184) ───
+
+/**
+ * Tiêu đề cột bảng, heading con, chú thích hình mà renderer tự sinh. Mặc định tiếng Anh (mode 2); tài liệu import
+ * tiếng Việt (`TemplateProfile.language = "vi"`) dùng bản dịch dưới — nội dung Spine giữ nguyên, chỉ đổi nhãn.
+ */
+const VI_LABELS: Readonly<Record<string, string>> = {
+  ID: "Mã",
+  Name: "Tên",
+  Kind: "Loại",
+  Description: "Mô tả",
+  Actors: "Tác nhân",
+  Screen: "Màn hình",
+  Type: "Kiểu",
+  "Flows To": "Chuyển tới",
+  "Full page": "Toàn trang",
+  Tabbed: "Nhiều tab",
+  Feature: "Chức năng",
+  Trigger: "Kích hoạt",
+  Entity: "Thực thể",
+  Relations: "Quan hệ",
+  Statement: "Yêu cầu",
+  Metric: "Chỉ số",
+  Threshold: "Ngưỡng",
+  Priority: "Ưu tiên",
+  Category: "Nhóm",
+  Code: "Mã",
+  Text: "Nội dung",
+  Functions: "Chức năng",
+  Term: "Thuật ngữ",
+  Native: "Tiếng Việt",
+  Definition: "Định nghĩa",
+  Goals: "Mục tiêu",
+  "Release 1.0 Scope": "Phạm vi phát hành 1.0",
+  "In Scope": "Trong phạm vi",
+  "Out of Scope": "Ngoài phạm vi",
+  "High-Level Business Rules": "Quy tắc nghiệp vụ tổng quát",
+  "External Systems": "Hệ thống bên ngoài",
+  "Normal Flow": "Luồng chính",
+  "Abnormal Flow": "Luồng ngoại lệ",
+  Validations: "Kiểm tra dữ liệu",
+  "Business Rules": "Quy tắc nghiệp vụ",
+  Screens: "Màn hình",
+  "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
+  "Use Case Diagram": "Sơ đồ use case",
+  "Screens Flow Diagram": "Sơ đồ luồng màn hình",
+  "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
+  "Screen Layout": "Bố cục màn hình"
+}
+
+/** Tiêu đề section FPT tiếng Việt — dùng khi assemble chèn mục FPT mà file người dùng không có. */
+const VI_SECTION_TITLES: Readonly<Record<string, string>> = {
+  "fixed:1": "Tổng quan sản phẩm",
+  "fixed:2.1": "Tác nhân",
+  "fixed:2.2.1": "Sơ đồ use case",
+  "fixed:2.2.2": "Đặc tả use case",
+  "fixed:3.1.1": "Luồng màn hình",
+  "fixed:3.1.2": "Mô tả màn hình",
+  "fixed:3.1.3": "Phân quyền màn hình",
+  "fixed:3.1.4": "Chức năng không có màn hình",
+  "fixed:3.1.5": "Sơ đồ quan hệ thực thể",
+  "fixed:4.1": "Giao tiếp hệ thống ngoài",
+  "fixed:4.2.1": "Tính khả dụng",
+  "fixed:4.2.2": "Độ tin cậy",
+  "fixed:4.2.3": "Hiệu năng",
+  "fixed:4.2.4": "Thuộc tính đặc thù",
+  "fixed:5.1": "Quy tắc nghiệp vụ",
+  "fixed:5.2": "Yêu cầu chung",
+  "fixed:5.3": "Danh sách thông báo",
+  "fixed:5.4": "Yêu cầu khác",
+  "fixed:5.5": "Thuật ngữ"
+}
+
+const isVietnamese = (language: string | undefined): boolean => !!language && language.toLowerCase().startsWith("vi")
+
+/** Nhãn cố định theo ngôn ngữ — thiếu bản dịch ⇒ giữ tiếng Anh. */
+export const labelFor = (language: string | undefined, text: string): string => (isVietnamese(language) ? (VI_LABELS[text] ?? text) : text)
+
+/** Tiêu đề mặc định của section FPT theo ngôn ngữ (feature/function: tên phần tử). */
+export const defaultSectionTitle = (spine: Spine, sectionId: string, language?: string): string =>
+  (isVietnamese(language) ? VI_SECTION_TITLES[sectionId] : undefined) ?? headingAndLevel(spine, sectionId).heading
+
+/** Chú thích hình: dịch phần đầu (`Use Case Diagram (1/2)`, `Screen Layout — Login`), giữ phần sau. */
+const localizeCaption = (language: string | undefined, caption: string): string => {
+  const prefix = Object.keys(VI_LABELS).find((k) => caption === k || caption.startsWith(`${k} `))
+  return prefix ? `${labelFor(language, prefix)}${caption.slice(prefix.length)}` : caption
+}
+
+/**
+ * Dịch nhãn do renderer tự sinh trong khối đã dựng: tiêu đề cột, heading con, nhãn in đậm `Trigger: `, chú thích hình.
+ * Làm sau khi dựng để các hàm dựng nội dung giữ nguyên (mode 2 không đổi) — ô dữ liệu Spine không bị đụng.
+ */
+const localizeBlocks = (blocks: Block[], language: string | undefined): Block[] => {
+  if (!isVietnamese(language)) return blocks
+  const run = (r: InlineRun): InlineRun => ({ ...r, text: labelFor(language, r.text) })
+  return blocks.map((b): Block => {
+    switch (b.type) {
+      case "heading":
+        return { ...b, text: labelFor(language, b.text) }
+      case "table":
+        return { ...b, header: b.header.map((c) => c.map(run)) }
+      case "image":
+        return b.caption === undefined ? b : { ...b, caption: localizeCaption(language, b.caption) }
+      case "paragraph": {
+        const [first, ...rest] = b.runs
+        const label = first?.bold ? /^(.+): $/.exec(first.text) : null
+        if (label) return { ...b, runs: [{ ...first, text: `${labelFor(language, label[1])}: ` }, ...rest] }
+        const screens = !first?.bold && first ? /^Screens: /.exec(first.text) : null
+        return screens ? { ...b, runs: [{ ...first, text: `${labelFor(language, "Screens")}: ${first.text.slice(screens[0].length)}` }, ...rest] } : b
+      }
+      default:
+        return b
+    }
+  })
+}
+
 // ─── context tiêm từ assemble.service ────────────────────────────
 
 export interface SectionRenderContext {
@@ -66,10 +183,15 @@ export interface SectionRenderContext {
   number: string
   status?: RenderedSectionStatus
   awaiting_reaccept?: boolean
-  /** Ảnh PNG base64 theo diagram id — đã tải sẵn (test tiêm `Map.get` giả, không cần GridFS). */
+  /**
+   * Ô `png` cho diagram id — assemble thật tiêm tham chiếu `diagram-ref:<id>` (phân giải thành PNG thật hoặc
+   * placeholder lúc trả về, xem `assemble.service.ts`); test có thể tiêm thẳng base64. `undefined` ⇒ bỏ ảnh.
+   */
   diagramPng: (diagramId: string) => string | undefined
   /** Số hiệu của section khác (khoá logic → số hiển thị) — dùng khi cần trỏ chéo, cấm số cứng. */
   numberOf: (logicalSectionId: string) => string | undefined
+  /** Ngôn ngữ nhãn cố định (`TemplateProfile.language` của tài liệu import); không có ⇒ tiếng Anh. */
+  language?: string
 }
 
 // ─── heading/level của section ────────────────────────────────────
@@ -359,7 +481,7 @@ export function renderSection(spine: Spine, sectionId: string, ctx: SectionRende
     number: ctx.number,
     heading: title,
     level,
-    blocks: blocksFor(spine, sectionId, ctx)
+    blocks: localizeBlocks(blocksFor(spine, sectionId, ctx), ctx.language)
   }
   if (ctx.status !== undefined) section.status = ctx.status
   if (ctx.awaiting_reaccept !== undefined) section.awaiting_reaccept = ctx.awaiting_reaccept

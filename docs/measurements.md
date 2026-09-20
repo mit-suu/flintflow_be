@@ -457,3 +457,24 @@ project đi nhanh.
      `nextStep()`; xem `docs/spec-gaps.md`.
 - Model dùng **hai kiểu id function trong cùng một project** (`FN01` rồi `FN002`). Không vi phạm bất biến
   nào (id chỉ cần duy nhất) nhưng nhìn lệch trong tài liệu — ghi vào `docs/spec-gaps.md`.
+
+## FLF-171 P2 — Mode 1 import + change request, provider thật (2026-09-18)
+
+- Tài liệu: SRS Report3 của nhóm (`doc/Report3_Software Requirement Specification.docx.md` chuyển sang .docx bằng thư viện `docx`, bỏ ảnh nhúng): 1 903 block ở mức md ⇒ 3 450 block sau tách, 201 heading, 9 bảng khớp cột tất định.
+- Provider: `glm` / `zai-org/GLM-5.3-Flash` (Modal), Mongo in-memory replica set, luồng HTTP thật (`/import` → `/confirm-latest` → `/mapping confirm_all` → `/extract` → `/fields confirm_all` → `/finalize` → `/gap-report`, rồi 1 CR `clarify → impact → propose → verify`).
+- Kết quả: 98 section trích xong, 0 section lỗi; Spine: 4 actor, 81 UC, 13 feature, 70 function, 150 màn, 15 entity, 41 NFR, 36 BR, 100 message. Cờ: 0 đỏ, 169 vàng; gap report: 1 section thiếu, 5 heading không khớp, 50 field độ tin thấp. Tổng 397 s.
+
+| Bước | Lượt gọi | tokens_in | tokens_out | Credit |
+|---|---:|---:|---:|---:|
+| I-4 trích field | 77 | 363 077 | 41 988 | 154 |
+| 1.11 AI semantic check | 1 | 10 426 | 1 249 | 3 |
+| C-2 làm rõ CR | 1 | 3 789 | 117 | 1 |
+| C-4 đề xuất (80 vị trí, 10 lô) | 10 | 22 521 | 5 744 | 30 |
+| C-5 consistency | 1 | 1 493 | 992 | 2 |
+
+Nhận xét:
+- Output theo thực thể (P0 §4.8) giữ tokens_out ≈ 12% tokens_in (P0 ước tính output phình 0,4–3× nếu theo path).
+- Import một SRS đầy đủ tốn **157 credit** — vẫn vượt 100 credit gói free. Hướng giảm: gộp section nhỏ vào cùng một lượt (hiện một lượt/section, 77 lượt cho 98 section), trích tất định thêm bảng dọc (đặc tả UC/function dạng "nhãn | giá trị").
+- Lượt chạy đầu phát hiện một section gửi ~2,9 triệu token (ảnh base64 nằm trong text) ⇒ đã thêm trần 24k ký tự/lượt và 6k ký tự/block (`extract.service.ts#chunkBlocks`).
+- C-3 chạm trần 80 vị trí với CR "session timeout" (từ khoá rộng) ⇒ C-4 tốn 30 credit, phần lớn kết luận `not_related`.
+- `/import/extract` chạy đồng bộ ~5,6 phút trong một request trên SRS đầy đủ.

@@ -81,6 +81,108 @@ export const renderFixSchema = z.object({
   notes: z.string().optional()
 })
 
+// ─── Mode 1 (FLF-171, plan mode 1 §5.7) ──────────────────────────
+// Model chỉ trả JSON theo các schema dưới; code dựng op / ghi Track Changes. Parse lỗi ⇒ retry, không ghi raw.
+
+/** Tập Spine trích được từ tài liệu import (không gồm mảng hệ thống: steps, flags, diagrams, baselines…). */
+export const IMPORT_EXTRACT_ENTITIES = [
+  "project",
+  "actors",
+  "roles",
+  "use_cases",
+  "features",
+  "screens",
+  "permissions",
+  "entities",
+  "functions",
+  "nfrs",
+  "business_rules",
+  "common_requirements",
+  "messages",
+  "other_requirements",
+  "glossary"
+] as const
+
+const blockIdRef = z.string().regex(/^B\d{4,}$/)
+const confidence = z.number().min(0).max(1)
+
+/**
+ * I-4 — trích theo THỰC THỂ, không theo từng path: spike P0 đo output dạng path/value phình 0,4–3× input
+ * (report §4.8). Mỗi item là một phần tử (hoặc phần `project`) kèm độ tin tổng và độ tin từng field nếu thấp.
+ */
+export const importExtractSchema = z.object({
+  section_id: z.string().min(1),
+  items: z.array(
+    z.object({
+      entity: z.enum(IMPORT_EXTRACT_ENTITIES),
+      /** Khoá phần tử như trong tài liệu (`UC-01`, `FR-3.2`); `null` với `project` hoặc khi tài liệu không đặt mã. */
+      key: z.string().min(1).nullable(),
+      value: z.record(z.string(), z.unknown()),
+      confidence,
+      /** Chỉ liệt kê field có độ tin khác `confidence` của item (thường là field đoán). */
+      field_confidence: z.record(z.string(), confidence).default({}),
+      source_block_ids: z.array(blockIdRef).min(1)
+    })
+  ),
+  /** Block trong section không trích được gì (văn xuôi giới thiệu, ghi chú) — đưa vào gap report nếu cần. */
+  unmapped_block_ids: z.array(blockIdRef).default([])
+})
+
+/** Nút 1.11 (IMPORT_SEMANTIC_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
+export const findingsSchema = z.object({
+  findings: z
+    .array(
+      z.object({
+        rule: z.string().min(1),
+        section_id: z.string().min(1),
+        message: z.string().min(1),
+        block_ids: z.array(blockIdRef).default([])
+      })
+    )
+    .max(30)
+})
+
+/** C-2: mơ hồ ⇒ có câu hỏi (≤ 5); rõ ⇒ có đích để C-3 tìm vị trí. */
+export const crClarifySchema = z
+  .object({
+    ambiguous: z.boolean(),
+    questions: z.array(z.string().min(1)).max(5).default([]),
+    targets: z.object({
+      entity_paths: z.array(z.string().min(1)).default([]),
+      keywords: z.array(z.string().min(1)).default([])
+    })
+  })
+  .refine((v) => !v.ambiguous || v.questions.length > 0, { message: "ambiguous = true cần ít nhất một câu hỏi" })
+  .refine((v) => v.ambiguous || v.targets.entity_paths.length + v.targets.keywords.length > 0, {
+    message: "ambiguous = false cần ít nhất một entity_path hoặc keyword"
+  })
+
+/**
+ * C-4: mọi vị trí được giao phải có kết luận + lý do; edit cần `spine_ops` (mode 1 v2 — FLF-186: vị trí là phần tử
+ * Spine, tài liệu render lại từ Spine), comment cần comment_text. `new_text` cũ còn nhận nhưng bỏ qua.
+ */
+export const crProposeSchema = z.object({
+  locations: z.array(
+    z
+      .object({
+        location_id: z.string().regex(/^L\d{3,}$/),
+        conclusion: z.enum(["edit", "comment", "not_related"]),
+        reason: z.string().min(1),
+        new_text: z.string().optional(),
+        comment_text: z.string().min(1).optional(),
+        spine_ops: z.array(opSchema).default([])
+      })
+      .refine((l) => l.conclusion !== "edit" || l.spine_ops.length > 0, { message: "edit cần spine_ops" })
+      .refine((l) => l.conclusion !== "comment" || l.comment_text !== undefined, { message: "comment cần comment_text" })
+      .refine((l) => l.conclusion !== "not_related" || l.spine_ops.length === 0, { message: "not_related không được kèm op" })
+  )
+})
+
+export type ImportExtractOutput = z.infer<typeof importExtractSchema>
+export type FindingsOutput = z.infer<typeof findingsSchema>
+export type CrClarifyOutput = z.infer<typeof crClarifySchema>
+export type CrProposeOutput = z.infer<typeof crProposeSchema>
+
 export type SpineOp = z.infer<typeof opSchema>
 export type OpTransaction = z.infer<typeof opTransactionSchema>
 export type ElicitOutput = z.infer<typeof elicitSchema>
@@ -102,7 +204,12 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.REVIEW]: "review",
   [ActionType.CONSISTENCY_PASS]: "review",
   [ActionType.CHANGE_INSTRUCTION]: "changeInstruction",
-  [ActionType.RENDER_FIX]: "renderFix"
+  [ActionType.RENDER_FIX]: "renderFix",
+  [ActionType.IMPORT_EXTRACT_FIELDS]: "importExtract",
+  [ActionType.IMPORT_SEMANTIC_CHECK]: "findings",
+  [ActionType.CR_CLARIFY]: "crClarify",
+  [ActionType.CR_PROPOSE]: "crPropose",
+  [ActionType.CR_CONSISTENCY]: "findings"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -118,7 +225,12 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CHANGE_INSTRUCTION]: changeInstructionSchema,
   [ActionType.RENDER_FIX]: renderFixSchema,
   [ActionType.CHAT]: chatSchema,
-  [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema
+  [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
+  [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
+  [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
+  [ActionType.CR_CLARIFY]: crClarifySchema,
+  [ActionType.CR_PROPOSE]: crProposeSchema,
+  [ActionType.CR_CONSISTENCY]: findingsSchema
 }
 
 export const extractJsonFromText = (

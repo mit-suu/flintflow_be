@@ -80,13 +80,25 @@ const readDiagnostics = (res: Response) => ({
 
 const baseUrl = (): string => env.PLANTUML_BASE_URL.replace(/\/+$/, "")
 
+/** Media type không phân biệt hoa thường (RFC 9110) — chuẩn hoá trước khi so. */
+const contentTypeOf = (res: Response): string =>
+  (res.headers.get("content-type") ?? "").toLowerCase()
+
+/**
+ * Chỉ phản hồi `content-type: image/*` mới là sơ đồ. Bất kỳ web server nào cũng có
+ * thể chiếm cổng PlantUML và trả 200 kèm HTML/JSON; nhận buffer đó rồi đẩy xuống
+ * compile-check là đường sơ đồ hỏng lọt vào tài liệu đã ký baseline.
+ */
+const isImageResponse = (res: Response): boolean =>
+  contentTypeOf(res).startsWith("image/")
+
 /**
  * Probe thực nghiệm (T10, PlantUML 1.2026.8 image `jetty`): syntax sai ⇒ HTTP 400 + body vẫn là ẢNH LỖI.
  * POST không có header chẩn đoán; GET có `x-plantuml-diagram-error(-line)`. Đây là kết quả compile,
  * không phải lỗi transport — trả về cho compile-check thay vì ném.
  */
 const isDiagramErrorImage = (res: Response): boolean =>
-  res.status === 400 && (res.headers.get("content-type") ?? "").startsWith("image/")
+  res.status === 400 && isImageResponse(res)
 
 const withTimeout = async (
   url: string,
@@ -123,7 +135,8 @@ export const renderPlantUml = async (
       body: source
     })
 
-    if (res.ok || isDiagramErrorImage(res)) {
+    // 200 không phải ảnh ⇒ rơi xuống đường GET thay vì trả buffer rác.
+    if ((res.ok && isImageResponse(res)) || isDiagramErrorImage(res)) {
       return {
         format,
         data: Buffer.from(await res.arrayBuffer()),
@@ -133,6 +146,10 @@ export const renderPlantUml = async (
         diagnostics: readDiagnostics(res)
       }
     }
+
+    // Không dùng body này nữa ⇒ huỷ để undici nhả socket ngay thay vì đợi GC.
+    // Một server lạ chiếm cổng làm mọi lô render đi qua đây.
+    void res.body?.cancel().catch(() => {})
   } catch {
     // POST không được hỗ trợ hoặc lỗi mạng ⇒ thử đường GET
   }
@@ -142,6 +159,17 @@ export const renderPlantUml = async (
     `${baseUrl()}/${format}/${encodePlantUml(source)}`,
     { method: "GET" }
   )
+
+  // Kiểm content-type TRƯỚC status: server lạ chiếm cổng thường không có route
+  // `/svg/<enc>` nên trả 404 HTML — báo "HTTP 404" thì người đọc log tưởng PlantUML
+  // hỏng, trong khi vấn đề là cổng đang bị chiếm.
+  if (!isImageResponse(res)) {
+    throw new Error(
+      `${baseUrl()}/${format} trả HTTP ${res.status} kèm content-type ` +
+        `"${res.headers.get("content-type") ?? "(trống)"}" thay vì image/* — ` +
+        "server đang nghe ở cổng này không phải PlantUML"
+    )
+  }
 
   if (!res.ok && !isDiagramErrorImage(res)) {
     throw new Error(
@@ -159,13 +187,53 @@ export const renderPlantUml = async (
   }
 }
 
-/** Server có sống không — dùng để probe test skip thay vì fail. */
-export const isPlantUmlReachable = async (): Promise<boolean> => {
+/** Sơ đồ tí hon cho probe: render thật nhưng gần như không tốn gì. */
+const HEALTH_PROBE_SOURCE = "@startuml\nA -> B\n@enduml"
+
+/**
+ * Hai cách hỏng khác hẳn nhau nên phải nói khác nhau:
+ * `unreachable` = không ai nghe ở cổng đó ⇒ dựng PlantUML lên.
+ * `not_plantuml` = có người nghe nhưng không trả ảnh ⇒ cổng đang bị chiếm,
+ * dựng thêm một PlantUML nữa cũng không giải quyết được gì.
+ */
+export type PlantUmlProbe =
+  | { ok: true }
+  | { ok: false; reason: "unreachable" | "not_plantuml"; detail: string }
+
+/**
+ * Probe sức khoẻ: render thật một sơ đồ tí hon.
+ *
+ * Phải render chứ không `GET /`: một web server lạ chiếm cổng cũng trả 200 cho
+ * đường gốc, khiến `/health` báo `ok` trong khi PlantUML chưa hề chạy.
+ * Không gọi `renderPlantUml` vì hàm đó dùng `PLANTUML_TIMEOUT_MS` của render.
+ */
+export const probePlantUml = async (): Promise<PlantUmlProbe> => {
   try {
     // Timeout ngan: day la health check, khong phai render.
-    const res = await withTimeout(baseUrl(), { method: "GET" }, HEALTH_TIMEOUT_MS)
-    return res.ok
-  } catch {
-    return false
+    const res = await withTimeout(
+      `${baseUrl()}/svg/${encodePlantUml(HEALTH_PROBE_SOURCE)}`,
+      { method: "GET" },
+      HEALTH_TIMEOUT_MS
+    )
+
+    // Probe chỉ đọc header ⇒ huỷ body để nhả socket ngay.
+    void res.body?.cancel().catch(() => {})
+
+    if (res.ok && isImageResponse(res)) return { ok: true }
+
+    return {
+      ok: false,
+      reason: "not_plantuml",
+      detail: `HTTP ${res.status}, content-type "${res.headers.get("content-type") ?? "(trống)"}"`
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "unreachable",
+      detail: err instanceof Error ? err.message : String(err)
+    }
   }
 }
+
+/** Server có sống không — cổng `describe.skipIf` của test và nguồn của `/health`. */
+export const isPlantUmlReachable = async (): Promise<boolean> => (await probePlantUml()).ok
