@@ -25,6 +25,8 @@
 import { randomUUID } from "node:crypto"
 import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
+import { Project } from "../project/project.model.js"
+import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
@@ -66,6 +68,8 @@ export interface StepRunnerDeps {
   /** Chỉ dùng khi `REVIEW_LLM_ENABLED=true` (mặc định tắt). */
   reviewExecutor: ReviewExecutor
   renderDeps?: Partial<DiagramServiceDeps>
+  /** S-8.2: ghép RenderedDocument ở `spineVersion` và lưu cache — mặc định gọi `assemble()` (T15). */
+  assembleDocument: (projectId: string, spineVersion: number) => Promise<void>
   /** F8: đóng tab/mất mạng giữa chừng — controller abort khi `req` đóng. Runner kiểm trước mỗi lượt gọi
    *  model và khi đang chờ answer; không áp dụng cho `/gate` (không SSE, không có kết nối để huỷ). */
   signal?: AbortSignal
@@ -74,8 +78,20 @@ export interface StepRunnerDeps {
 export const defaultStepRunnerDeps = (): StepRunnerDeps => ({
   draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId),
   elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId),
-  reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId)
+  reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId),
+  assembleDocument: async (projectId, spineVersion) => {
+    const project = await Project.findById(projectId, { name: 1 }).lean()
+    if (!project) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    await assemble(projectId, project.name, spineVersion)
+  }
 })
+
+/**
+ * S-8.2 là step tất định, không skill ⇒ không Elicit/Draft. Việc thật của nó là ghép tài liệu: trước đây
+ * runner chỉ tính cờ rồi phát `gate_ready`, `POST /assemble` không được gọi ở đâu ⇒ `/document` và
+ * `/export/word` luôn 409 NO_WORKING_DRAFT dù S-8.2 đã accepted.
+ */
+export const ASSEMBLE_STEP = "S-8.2"
 
 // ─── khoá in-process theo step (F2) ─────────────────────────────────
 
@@ -508,6 +524,9 @@ export const runStep = async (
     let { spine, spineVersion } = await refresh(projectId)
     const existingStep = spine.steps.find((s) => s.id === stepId)
 
+    if (existingStep?.status === "skipped") {
+      throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
+    }
     if (existingStep?.status === "accepted") {
       throw new ApiError(409, `Step ${stepId} đã accepted — cần gate revision/regenerate để mở lại (B7)`, STEP_NOT_RUNNABLE)
     }
@@ -662,6 +681,12 @@ export const runStep = async (
 
     spineVersion = await runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d)
     await trackSeqRange(projectId, spineVersion, stepId, userId, startSeq, stepStateForRound)
+
+    // Ghép SAU khi cờ đã tính lại và dải seq đã ghi — cache khớp đúng spine_version user nhìn ở gate.
+    if (stepDef.template_id === ASSEMBLE_STEP) {
+      assertNotAborted(d.signal, stepId)
+      await d.assembleDocument(projectId, (await refresh(projectId)).spineVersion)
+    }
 
     const { spine: finalSpine } = await refresh(projectId)
     const finalFirstSeq = finalSpine.steps.find((s) => s.id === stepId)?.first_seq ?? null

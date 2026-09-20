@@ -22,7 +22,14 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CHANGE_INSTRUCTION]: 3,
   // Ngoài pipeline
   [ActionType.CHAT]: 2,
-  [ActionType.SUMMARIZE_DOCUMENT]: 2  // Task 2b: tính phí như EXTRACT, 1 lần/document
+  [ActionType.SUMMARIZE_DOCUMENT]: 2, // Task 2b: tính phí như EXTRACT, 1 lần/document
+  // Mode 1 (FLF-171). Trích field tính theo LÔ section (gộp section nhỏ ~6k token in) để import một SRS
+  // đầy đủ ≤ 100 credit gói free — đo ở spike P0 (claude_plan/reports/mode1-p0-report.md §4.8).
+  [ActionType.IMPORT_EXTRACT_FIELDS]: 2,
+  [ActionType.IMPORT_SEMANTIC_CHECK]: 3,
+  [ActionType.CR_CLARIFY]: 1,
+  [ActionType.CR_PROPOSE]: 3,
+  [ActionType.CR_CONSISTENCY]: 2
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */

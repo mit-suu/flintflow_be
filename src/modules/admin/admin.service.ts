@@ -6,6 +6,7 @@ import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionLog } from "./ai-action-log.model.js"
+import * as feedbackService from "../feedback/feedback.service.js"
 import { AiCostGroupBy, parseDateInput, REPORT_TIMEZONE, UsersQuery } from "./admin.validation.js"
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -338,6 +339,7 @@ export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCost
   }
 }
 
-// ─── Feedback (stub tới wave sau) ────────────────────────────────
+// ─── Feedback ─────────────────────────────────────────────────────
 
-export const listFeedback = async () => [] as never[]
+// Dữ liệu và shape nằm ở module feedback; admin chỉ mở route đọc
+export const listFeedback = () => feedbackService.listFeedback()
