@@ -2,24 +2,22 @@
 
 ## `context` — §1 System Context
 
-Source fields: `project.name` · `actors[].name/.kind` · `use_cases[].name/.actor_ids`. Level-0 data flow: system circle in the centre, every actor a rectangle, edge label = the actor's use case names (max 3, then `+ N more`).
+Source fields: `project.name` · `actors[].name/.kind/.flows_in/.flows_out` · `use_cases[].name/.actor_ids`. Level-0 data flow: system circle in the centre, actors ringed around it, one labelled arrow per direction (`flows_in` into the system, `flows_out` out of it), falling back to the actor's use case names (max 3, then `+ N more`).
 
 ```plantuml
 @startuml
 skinparam monochrome true
 skinparam shadowing false
-skinparam linetype polyline
-skinparam nodesep 30
-skinparam ranksep 120
+skinparam nodesep 45
+skinparam ranksep 110
 skinparam usecaseFontSize 16
-left to right direction
 usecase "\n\n   FlintFlow   \n\n" as SYSTEM_
 rectangle "Founder" as A01
 rectangle "Payment Gateway" as A05
 rectangle "Scheduler" as A09
-A01 --> SYSTEM_ : Log In\nCreate Project\nExport Word Document\n+ 2 more
-SYSTEM_ --> A05 : Purchase Credits
-A09 --> SYSTEM_ : Run Scheduled Housekeeping
+A01 <-right-> SYSTEM_ : → brief answers, accepted step\n← draft section
+A05 <-left-> SYSTEM_ : ← payment result\n→ payment request
+A09 -down-> SYSTEM_ : housekeeping tick
 @enduml
 ```
 

@@ -44,25 +44,72 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: hệ thống là vòng tròn, mọi actor là hình chữ nhật, cạnh có hướng mang tên use case", () => {
+  it("context: hệ thống là vòng tròn, actor xếp vòng quanh, mỗi actor đúng MỘT cạnh", () => {
     const { puml, section } = only(FIXTURE, "context")
     expect(section).toBe("fixed:1")
     expect(puml).toContain('usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_')
-    expect(puml).toContain("skinparam linetype polyline")
-    for (const a of FIXTURE.actors) {
+    expect(puml).not.toContain("skinparam linetype")
+    expect(puml).not.toContain("[hidden]")
+    const lines = puml.split(String.fromCharCode(10))
+    // Vòng quanh theo thứ tự id: actor đầu bên trái, actor thứ hai bên phải, còn lại xen kẽ trên/dưới
+    const SIDES = ["left", "right", "top", "bottom"] as const
+    const sideOf = (i: number) => (i === 0 ? SIDES[0] : i === 1 ? SIDES[1] : i % 2 === 0 ? SIDES[2] : SIDES[3])
+    const INTO = { left: "right", right: "left", top: "down", bottom: "up" } as const
+    const sorted = [...FIXTURE.actors].sort((a, b) => (a.id < b.id ? -1 : 1))
+    sorted.forEach((a, i) => {
       expect(puml, a.id).toContain(`rectangle "${a.name}" as ${a.id}\n`)
-      expect(puml, a.id).toContain(a.kind === "system" ? `SYSTEM_ --> ${a.id}` : `${a.id} --> SYSTEM_`)
-    }
-    expect(puml).toContain("SYSTEM_ --> A05 : Purchase Credits\n")
-    // A01 có hơn 3 use case ⇒ phần còn lại gộp thành "+ N more"
-    const founderUseCases = FIXTURE.use_cases.filter((uc) => uc.actor_ids.includes("A01")).length
-    expect(puml).toMatch(new RegExp(`A01 --> SYSTEM_ : [^\\n]*\\\\n\\+ ${founderUseCases - 3} more\\n`))
+      // Một cạnh duy nhất: hai cạnh riêng làm nhãn dồn về một phía, hình bị lệch
+      expect(lines.filter((l) => l.includes(a.id) && l.includes("->")).length, a.id).toBe(1)
+      if (a.flows_in?.length && a.flows_out?.length) expect(puml, a.id).toContain(`${a.id} <-${INTO[sideOf(i)]}-> SYSTEM_ : `)
+    })
   })
 
-  it("context: actor chưa có use case ⇒ cạnh không nhãn", () => {
-    const { puml } = only(mutate((s) => (s.use_cases = [])), "context")
-    expect(puml).toContain("A01 --> SYSTEM_\n")
-    expect(puml).toContain("SYSTEM_ --> A05\n")
+  it("context: cặp hai chiều ⇒ mũi tên hai đầu, nhãn hai dòng có ký hiệu chiều khớp vị trí", () => {
+    const { puml } = only(FIXTURE, "context")
+    // A01 bên trái: actor → hệ thống là "→", chiều ngược là "←"
+    expect(puml).toContain("A01 <-right-> SYSTEM_ : → brief answers, accepted step\\n← draft section, srs document\n")
+    // A03 hàng trên: actor → hệ thống là "↓"
+    expect(puml).toContain("A03 <-down-> SYSTEM_ : ↓ account action\\n↑ platform metrics\n")
+    // Một chiều ⇒ mũi tên thường, không có ký hiệu chiều trong nhãn
+    expect(puml).toContain("A04 -up-> SYSTEM_ : registration request\n")
+    expect(puml).toContain("SYSTEM_ -down-> A08 : email request\n")
+  })
+
+  it("context: quá 3 nhãn một chiều ⇒ gộp '+ N more'", () => {
+    const many = ["a", "b", "c", "d", "e"]
+    const { puml } = only(mutate((s) => (s.actors.find((a) => a.id === "A01")!.flows_in = many)), "context")
+    expect(puml).toContain("A01 <-right-> SYSTEM_ : → a, b, c, + 2 more\\n←")
+  })
+
+  it("context: không có flows ⇒ cạnh một chiều mang tên use case, chiều suy từ kind", () => {
+    const { puml } = only(
+      mutate((s) =>
+        s.actors.forEach((a) => {
+          delete a.flows_in
+          delete a.flows_out
+        })
+      ),
+      "context"
+    )
+    expect(puml).not.toContain("<-")
+    expect(puml).toMatch(/SYSTEM_ -\w+-> A05 : Purchase Credits\n/)
+    const founderUseCases = FIXTURE.use_cases.filter((uc) => uc.actor_ids.includes("A01")).length
+    expect(puml).toMatch(new RegExp(`A01 -\\w+-> SYSTEM_ : [^\\n]*\\\\n\\+ ${founderUseCases - 3} more\\n`))
+  })
+
+  it("context: không flows, không use case ⇒ cạnh không nhãn", () => {
+    const { puml } = only(
+      mutate((s) => {
+        s.use_cases = []
+        s.actors.forEach((a) => {
+          delete a.flows_in
+          delete a.flows_out
+        })
+      }),
+      "context"
+    )
+    expect(puml).toMatch(/A01 -\w+-> SYSTEM_\n/)
+    expect(puml).toMatch(/SYSTEM_ -\w+-> A05\n/)
   })
 
   it("usecase: mọi use case và cạnh include/extend", () => {
@@ -103,6 +150,7 @@ describe("renderers trên fixture 19 màn", () => {
     expect(only(empty, "screen_flow").puml).toContain("NO_SCREENS")
     expect(only(empty, "erd").puml).toContain("NO_ENTITIES")
     expect(only(empty, "context").puml).toContain('usecase "\\n\\n   Empty   \\n\\n" as SYSTEM_')
+    expect(only(empty, "context").puml).not.toContain("-> SYSTEM_")
   })
 })
 
