@@ -94,6 +94,27 @@ describe("C-4 kết luận mọi vị trí", () => {
     warn.mockRestore()
   })
 
+  it("lô nhiều vị trí lỗi (model đốt hết ngân sách) ⇒ chia đôi gọi lại từng nửa, CR không bị dừng", async () => {
+    const { c } = await importedProject()
+    const { cr } = await crToImpact(c)
+    // Dựng một lô 2 vị trí: kéo vị trí BR sang cùng owner step với NFR (chỉ để test cách chia lô)
+    await ChangeLocation.updateOne({ path: BR }, { $set: { owner_step: "S-6.4" } })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    routeCr((p) => {
+      if (!p.includes("# CR Propose")) return clarifyPerf(p)
+      return promptLocations(p).length > 1 ? new Error("GLM không trả nội dung (finish_reason=length, max_tokens=10240)") : fakeCrPropose(p)
+    })
+
+    const d = detail(await c.post(`${cr}/propose`))
+
+    expect(d.change_request.paused).toBeNull()
+    expect(d.locations.every((l) => l.conclusion !== null)).toBe(true)
+    const sizes = promptsOf("# CR Propose").map((p) => promptLocations(p).length)
+    expect(sizes).toEqual([2, 1, 1]) // lô đầy đủ hỏng ⇒ hai nửa, mỗi nửa một vị trí
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("chia đôi và thử lại"))
+    warn.mockRestore()
+  })
+
   it("lượt bù trả đủ ⇒ mọi vị trí có kết luận", async () => {
     let first = true
     routeCr((p) => {

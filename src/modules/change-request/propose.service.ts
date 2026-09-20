@@ -25,7 +25,13 @@ import { ChangeLocation, type IChangeLocation } from "./change-location.model.js
 import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
 import { elementValue, valueText } from "./spine-location.js"
 
-export const PROPOSE_BATCH = 12
+/**
+ * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
+ * trả lời phải có đề xuất + op cho mọi vị trí ⇒ GLM suy nghĩ hết sạch `max_tokens` trước khi kịp trả `content`
+ * (`GLM_EMPTY_OUTPUT`, 2026-09-20). Lô nhỏ giữ cả prompt lẫn câu trả lời trong ngân sách; lô nào vẫn lỗi thì
+ * `runPropose` tự chia đôi.
+ */
+export const PROPOSE_BATCH = 4
 
 const ownerSkillText = (ownerStep: string | null): string => {
   if (!ownerStep) return "(none — free-form section kept verbatim from the uploaded file)"
@@ -104,9 +110,11 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const byOwner = new Map<string, IChangeLocation[]>()
   for (const l of todo) byOwner.set(l.owner_step ?? "", [...(byOwner.get(l.owner_step ?? "") ?? []), l])
   for (const [owner, group] of byOwner) {
-    for (let i = 0; i < group.length; i += PROPOSE_BATCH) {
+    const queue: IChangeLocation[][] = []
+    for (let i = 0; i < group.length; i += PROPOSE_BATCH) queue.push(group.slice(i, i + PROPOSE_BATCH))
+    while (queue.length) {
       // Model bỏ sót vị trí ⇒ gọi lại một lần cho riêng phần thiếu; vẫn thiếu thì để `conclusion = null` (sửa tay)
-      let batch = group.slice(i, i + PROPOSE_BATCH)
+      let batch = queue.shift()!
       for (let attempt = 0; attempt < PROPOSE_ATTEMPTS && batch.length > 0; attempt++) {
         const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
           ...crHeader(cr),
@@ -116,6 +124,15 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           glossary: glossaryText(spine)
         })
         if (!result.ok) {
+          if (result.reason !== "credits" && batch.length > 1) {
+            // Lô quá nặng cho một lượt gọi (prompt dài ⇒ model suy nghĩ hết ngân sách) ⇒ chia đôi, thử lại từng nửa
+            // thay vì dừng cả CR. Hết credit thì vẫn dừng để người dùng nạp rồi resume.
+            const half = Math.ceil(batch.length / 2)
+            console.warn(`[C-4] ${cr.cr_id}: lô ${batch.length} vị trí lỗi (${result.message}) — chia đôi và thử lại`)
+            queue.unshift(batch.slice(0, half), batch.slice(half))
+            batch = []
+            break
+          }
           cr.paused = { reason: result.reason, at: new Date() }
           await cr.save()
           return

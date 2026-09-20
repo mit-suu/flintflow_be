@@ -7,12 +7,19 @@ vi.mock("openai", () => ({
   }
 }))
 
-import { callGLM, stripReasoning, GLM_REASONING_HEADROOM_TOKENS } from "./glm.provider.js"
+import { callGLM, stripReasoning, GLM_MAX_TOKENS_CEILING, GLM_REASONING_HEADROOM_TOKENS } from "./glm.provider.js"
 
 const streamOf = (...parts: string[]) =>
   (async function* () {
     for (const content of parts) yield { choices: [{ delta: { content } }] }
     yield { choices: [], usage: { prompt_tokens: 10, completion_tokens: 20 } }
+  })()
+
+/** Lượt gọi đốt hết ngân sách cho phần suy nghĩ, không kịp trả content. */
+const outOfBudget = () =>
+  (async function* () {
+    yield { choices: [{ delta: { reasoning_content: "thinking..." } }] }
+    yield { choices: [{ delta: {}, finish_reason: "length" }] }
   })()
 
 describe("stripReasoning", () => {
@@ -48,17 +55,39 @@ describe("callGLM", () => {
     expect(res).toMatchObject({ promptTokens: 10, completionTokens: 20 })
   })
 
-  it("content rỗng (hết token cho phần suy nghĩ) ⇒ GLM_EMPTY_OUTPUT kèm finish_reason", async () => {
-    create.mockResolvedValue(
-      (async function* () {
-        yield { choices: [{ delta: { reasoning_content: "thinking..." } }] }
-        yield { choices: [{ delta: {}, finish_reason: "length" }] }
-      })()
-    )
+  it("hết ngân sách cho phần suy nghĩ (finish_reason=length) ⇒ gọi lại một lần với max_tokens gấp đôi", async () => {
+    create.mockResolvedValueOnce(outOfBudget()).mockResolvedValueOnce(streamOf('{"reply":"hi"}'))
+
+    const res = await callGLM("prompt", { provider: "glm", maxTokens: 100 } as never)
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(create.mock.calls[0][0].max_tokens).toBe(100 + GLM_REASONING_HEADROOM_TOKENS)
+    expect(create.mock.calls[1][0].max_tokens).toBe(2 * (100 + GLM_REASONING_HEADROOM_TOKENS))
+    expect(JSON.parse(res.text)).toEqual({ reply: "hi" })
+  })
+
+  it("nới ngân sách vẫn rỗng ⇒ GLM_EMPTY_OUTPUT nói rõ cả hai mức đã thử, không gọi lần ba", async () => {
+    create.mockResolvedValue(outOfBudget())
 
     await expect(callGLM("prompt", { provider: "glm", maxTokens: 100 } as never)).rejects.toMatchObject({
       code: "GLM_EMPTY_OUTPUT",
-      message: expect.stringContaining("finish_reason=length")
+      message: expect.stringContaining(`đã thử ${100 + GLM_REASONING_HEADROOM_TOKENS} trước đó`)
     })
+    expect(create).toHaveBeenCalledTimes(2)
+  })
+
+  it("đã kịch trần, hoặc dừng vì lý do khác length ⇒ không gọi lại", async () => {
+    create.mockResolvedValue(outOfBudget())
+    await expect(callGLM("prompt", { provider: "glm", maxTokens: GLM_MAX_TOKENS_CEILING } as never)).rejects.toMatchObject({ code: "GLM_EMPTY_OUTPUT" })
+    expect(create).toHaveBeenCalledTimes(1)
+
+    create.mockReset()
+    create.mockResolvedValue(
+      (async function* () {
+        yield { choices: [{ delta: {}, finish_reason: "stop" }] }
+      })()
+    )
+    await expect(callGLM("prompt", { provider: "glm", maxTokens: 100 } as never)).rejects.toMatchObject({ code: "GLM_EMPTY_OUTPUT" })
+    expect(create).toHaveBeenCalledTimes(1)
   })
 })
