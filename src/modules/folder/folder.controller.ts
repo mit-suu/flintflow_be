@@ -3,7 +3,7 @@ import * as folderService from "./folder.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import type { AddProjectsDTO, CreateFolderDTO, UpdateFolderDTO } from "./folder.validation.js"
+import type { ProjectIdsDTO, CreateFolderDTO, UpdateFolderDTO } from "./folder.validation.js"
 
 const requireUserId = (req: Request): string => {
   const userId = req.user?.userId
@@ -34,7 +34,13 @@ export const deleteFolder = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const addProjectsToFolder = catchAsync(async (req: Request, res: Response) => {
-  const { projectIds } = req.body as AddProjectsDTO
+  const { projectIds } = req.body as ProjectIdsDTO
   const result = await folderService.addProjectsToFolder(requireUserId(req), req.params.folderId as string, projectIds)
+  return sendSuccess(res, 200, result)
+})
+
+export const removeProjectsFromFolder = catchAsync(async (req: Request, res: Response) => {
+  const { projectIds } = req.body as ProjectIdsDTO
+  const result = await folderService.removeProjectsFromFolder(requireUserId(req), req.params.folderId as string, projectIds)
   return sendSuccess(res, 200, result)
 })
