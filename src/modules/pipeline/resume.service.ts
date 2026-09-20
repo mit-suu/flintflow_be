@@ -9,9 +9,9 @@
 
 import { applyTransaction, revertRange } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
-import { buildProgressReport } from "../spine/section-status.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { buildPipelineProgressReport, type PipelineProgressReport } from "./pipeline-progress.js"
 import { isStepLocked, assertRangeOwnedByStep, STEP_NOT_RUNNABLE } from "./step-runner.service.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -20,7 +20,8 @@ export interface ResumeResult {
   /** Id step vừa bị đóng giữa chừng và revert — null nếu không có step nào `in_progress`. */
   reverted_step: string | null
   spine_version: number
-  progress: ReturnType<typeof buildProgressReport>
+  /** `progress.current_step` là step tới lượt (pipeline-progress.ts), không phải con trỏ Spine. */
+  progress: PipelineProgressReport
 }
 
 /** Mở project: revert step `in_progress` dang dở (nếu có) rồi trả tiến độ hiện tại. */
@@ -69,5 +70,5 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
   const finalSpine = stripRecord(finalRecord)
   const changes = await spineRepository.listChanges(projectId)
 
-  return { reverted_step: revertedStep, spine_version: finalSpine.spine_version, progress: buildProgressReport(finalSpine, changes) }
+  return { reverted_step: revertedStep, spine_version: finalSpine.spine_version, progress: buildPipelineProgressReport(finalSpine, changes) }
 }

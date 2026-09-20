@@ -108,6 +108,7 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | --- | --- | --- |
 | `MONGO_URI` | có | production **không được** chứa `localhost` |
 | `JWT_ACCESS_SECRET` `JWT_REFRESH_SECRET` | có | production: ≥ 32 ký tự, không phải placeholder. `openssl rand -base64 48` |
+| `COOKIE_SAME_SITE` `COOKIE_DOMAIN` | production | FE và BE **khác site** (FE `flintflow.io.vn`, BE `*.azurewebsites.net`) ⇒ `COOKIE_SAME_SITE=none`, nếu để `lax` trình duyệt không gửi cookie `refreshToken` ⇒ `/auth/refresh` trả `MISSING_REFRESH_TOKEN`, user bị đăng xuất sau khi access token hết hạn (FLF-137). BE ở subdomain cùng site (`api.flintflow.io.vn`) ⇒ giữ `lax`, `COOKIE_DOMAIN=.flintflow.io.vn`. Local không lộ lỗi vì `localhost:3000`/`:5000` cùng site |
 | `MODAL_BASE_URL` | khi dùng skill `provider: glm` | **không còn default trong code**; để trống ⇒ `AI_PROVIDER_NOT_CONFIGURED` |
 | `APP_PUBLIC_URL` | khi bật billing | domain public để payment service gọi callback; production không được là localhost |
 | `PLANTUML_BASE_URL` | không | thiếu ⇒ diagram `render_status: "error"`, app vẫn chạy |

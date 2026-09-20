@@ -8,7 +8,8 @@ export const createSession = async (
   refreshToken: string,
   expiresAt: Date,
   userAgent?: string,
-  ip?: string
+  ip?: string,
+  rememberMe: boolean | null = null
 ): Promise<ISession> => {
   const tokenHash = hashToken(refreshToken)
   return await Session.create({
@@ -16,9 +17,16 @@ export const createSession = async (
     tokenHash,
     expiresAt,
     isRevoked: false,
+    rememberMe,
     userAgent,
     ip
   })
+}
+
+/** Chế độ "ghi nhớ" của phiên ứng với refresh token (không kiểm tra hợp lệ — `rotateSession` lo việc đó). */
+export const findSessionRememberMe = async (refreshToken: string): Promise<boolean | null> => {
+  const session = await Session.findOne({ tokenHash: hashToken(refreshToken) }).select("rememberMe")
+  return session?.rememberMe ?? null
 }
 
 export const rotateSession = async (
@@ -26,7 +34,8 @@ export const rotateSession = async (
   newRefreshToken: string,
   newExpiresAt: Date,
   userAgent?: string,
-  ip?: string
+  ip?: string,
+  rememberMe: boolean | null = null
 ): Promise<{ userId: string; email: string }> => {
   // 1. Verify old token signature & expiration
   let decoded: { userId: string; email: string }
@@ -70,7 +79,7 @@ export const rotateSession = async (
   }
 
   // 4. Create new session for rotated token
-  await createSession(decoded.userId, newRefreshToken, newExpiresAt, userAgent, ip)
+  await createSession(decoded.userId, newRefreshToken, newExpiresAt, userAgent, ip, rememberMe)
 
   return {
     userId: decoded.userId,
@@ -81,6 +90,18 @@ export const rotateSession = async (
 export const revokeSession = async (refreshToken: string): Promise<void> => {
   const tokenHash = hashToken(refreshToken)
   await Session.findOneAndUpdate({ tokenHash }, { isRevoked: true })
+}
+
+/** Thu hồi mọi phiên của user trừ phiên đang dùng (`keepRefreshToken`), vd. sau khi đổi mật khẩu. */
+export const revokeOtherUserSessions = async (userId: string, keepRefreshToken?: string): Promise<void> => {
+  await Session.updateMany(
+    {
+      userId: new mongoose.Types.ObjectId(userId),
+      isRevoked: false,
+      ...(keepRefreshToken ? { tokenHash: { $ne: hashToken(keepRefreshToken) } } : {})
+    },
+    { isRevoked: true }
+  )
 }
 
 export const revokeAllUserSessions = async (userId: string): Promise<void> => {

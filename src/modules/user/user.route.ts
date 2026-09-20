@@ -1,6 +1,7 @@
 import { Router } from "express"
 import * as userController from "./user.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+import { changePasswordRateLimiter } from "../../shared/middlewares/rate-limit.js"
 
 const router = Router()
 
@@ -52,6 +53,41 @@ router.get("/me", authMiddleware, userController.getMe)
  *         description: Unauthorized
  */
 router.patch("/me", authMiddleware, userController.updateMe)
+
+/**
+ * @swagger
+ * /api/v1/users/me/password:
+ *   post:
+ *     summary: Đổi mật khẩu của user hiện tại (cần mật khẩu hiện tại); thu hồi mọi phiên khác
+ *     tags:
+ *       - Users
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               newPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Đổi mật khẩu thành công
+ *       400:
+ *         description: VALIDATION_ERROR, INVALID_CURRENT_PASSWORD, SAME_PASSWORD hoặc PASSWORD_NOT_SET
+ *       401:
+ *         description: Unauthorized
+ *       429:
+ *         description: Rate limit exceeded
+ */
+router.post("/me/password", authMiddleware, changePasswordRateLimiter, userController.changePassword)
 
 /**
  * @swagger

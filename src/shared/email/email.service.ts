@@ -1,6 +1,7 @@
+import crypto from "crypto"
 import nodemailer from "nodemailer"
 import { env } from "../../config/env.js"
-import { getVerificationEmailHtml, getResetPasswordEmailHtml } from "./templates.js"
+import { getOtpEmailHtml, getOtpEmailText, type OtpPurpose } from "./templates.js"
 
 let transporter: nodemailer.Transporter | null = null
 
@@ -13,6 +14,9 @@ const getTransporter = (): nodemailer.Transporter | null => {
       host: env.SMTP_HOST || "smtp.gmail.com",
       port,
       secure: port === 465, // true for 465, false for other ports
+      // Tên chào (EHLO) mặc định là tên máy (vd. `DESKTOP-AB12`) — lệch domain người gửi, bộ lọc Spam
+      // coi là dấu hiệu gửi từ máy lạ. Dùng domain của địa chỉ gửi.
+      name: senderDomain(getSender().address),
       auth: {
         user: env.SMTP_USER,
         pass: env.SMTP_PASS
@@ -24,24 +28,61 @@ const getTransporter = (): nodemailer.Transporter | null => {
   return null
 }
 
-export const sendVerificationEmail = async (
+const senderDomain = (address: string): string => address.split("@")[1]?.toLowerCase() || "localhost"
+
+const isGmailSmtp = (): boolean => /(^|\.)gmail\.com$/i.test(env.SMTP_HOST || "smtp.gmail.com")
+
+/**
+ * Người gửi. EMAIL_FROM có dạng `Tên <địa-chỉ>`. Với Gmail SMTP, địa chỉ gửi phải trùng tài khoản
+ * đăng nhập (SMTP_USER): khác đi thì SPF/DKIM không khớp domain From và thư dễ rơi vào Spam.
+ */
+export const getSender = (): { name: string; address: string } => {
+  const raw = env.EMAIL_FROM.trim()
+  const bracket = raw.match(/^"?([^"<]*?)"?\s*<([^>]+)>$/)
+  const bareAddress = raw.match(/[^\s<>"]+@[^\s<>"]+/)?.[0]
+  const name = (bracket ? bracket[1] : raw.replace(bareAddress ?? "", "")).trim() || "FlintFlow"
+  const configured = bracket?.[2].trim() ?? bareAddress ?? env.SMTP_USER
+  const address = isGmailSmtp() && env.SMTP_USER.includes("@") ? env.SMTP_USER : configured
+  return { name, address }
+}
+
+/**
+ * Header để thư trông như thư người gửi (Hộp thư chính) thay vì thư hàng loạt (Cập nhật/Quảng cáo/Spam):
+ * - `Message-ID` mang domain người gửi — mặc định nodemailer lấy tên máy;
+ * - `Reply-To` về chính người gửi — thư "không trả lời được" là dấu hiệu thư tự động.
+ * Cố ý KHÔNG thêm `Precedence: bulk`, `Auto-Submitted`, `List-Unsubscribe` (dấu hiệu thư hàng loạt).
+ */
+export const buildPersonalHeaders = (sender: { name: string; address: string }) => ({
+  messageId: `<${crypto.randomUUID()}@${senderDomain(sender.address)}>`,
+  replyTo: sender
+})
+
+const OTP_SUBJECT: Record<OtpPurpose, (otp: string) => string> = {
+  verify_email: (otp) => `${otp} là mã xác thực FlintFlow của bạn`,
+  reset_password: (otp) => `${otp} là mã đặt lại mật khẩu FlintFlow của bạn`
+}
+
+const sendOtpEmail = async (
+  purpose: OtpPurpose,
   toEmail: string,
-  rawToken: string,
+  otp: string,
   name?: string
 ): Promise<void> => {
-  const verifyUrl = `${env.APP_URL}/verify-email?token=${rawToken}`
-  const html = getVerificationEmailHtml({ name, url: verifyUrl })
+  const params = { name, otp, expiresInMinutes: 2, purpose }
   const activeTransporter = getTransporter()
 
   if (activeTransporter) {
     try {
+      const sender = getSender()
       await activeTransporter.sendMail({
-        from: env.EMAIL_FROM,
+        from: sender,
         to: toEmail,
-        subject: "FlintFlow — Xác thực địa chỉ email của bạn",
-        html
+        subject: OTP_SUBJECT[purpose](otp),
+        text: getOtpEmailText(params),
+        html: getOtpEmailHtml(params),
+        ...buildPersonalHeaders(sender)
       })
-      console.log(`[EMAIL SERVICE] Verification email sent to ${toEmail}`)
+      console.log(`[EMAIL SERVICE] ${purpose} OTP sent to ${toEmail}`)
       return
     } catch (error) {
       console.error(`[EMAIL SERVICE ERROR] Failed to send email via SMTP to ${toEmail}:`, error)
@@ -51,38 +92,13 @@ export const sendVerificationEmail = async (
 
   // Console Fallback if SMTP not configured or failed
   console.log("\n=======================================================")
-  console.log(`[DEV EMAIL SIMULATION] Verification Email for ${toEmail}`)
-  console.log(`VERIFY LINK: ${verifyUrl}`)
+  console.log(`[DEV EMAIL SIMULATION] ${purpose} OTP for ${toEmail}`)
+  console.log(`OTP: ${otp}`)
   console.log("=======================================================\n")
 }
 
-export const sendPasswordResetEmail = async (
-  toEmail: string,
-  rawToken: string,
-  name?: string
-): Promise<void> => {
-  const resetUrl = `${env.APP_URL}/reset-password?token=${rawToken}`
-  const html = getResetPasswordEmailHtml({ name, url: resetUrl })
-  const activeTransporter = getTransporter()
+export const sendVerificationOtpEmail = (toEmail: string, otp: string, name?: string): Promise<void> =>
+  sendOtpEmail("verify_email", toEmail, otp, name)
 
-  if (activeTransporter) {
-    try {
-      await activeTransporter.sendMail({
-        from: env.EMAIL_FROM,
-        to: toEmail,
-        subject: "FlintFlow — Đặt lại mật khẩu tài khoản",
-        html
-      })
-      console.log(`[EMAIL SERVICE] Password reset email sent to ${toEmail}`)
-      return
-    } catch (error) {
-      console.error(`[EMAIL SERVICE ERROR] Failed to send email via SMTP to ${toEmail}:`, error)
-    }
-  }
-
-  // Console Fallback
-  console.log("\n=======================================================")
-  console.log(`[DEV EMAIL SIMULATION] Password Reset Email for ${toEmail}`)
-  console.log(`RESET LINK: ${resetUrl}`)
-  console.log("=======================================================\n")
-}
+export const sendPasswordResetOtpEmail = (toEmail: string, otp: string, name?: string): Promise<void> =>
+  sendOtpEmail("reset_password", toEmail, otp, name)

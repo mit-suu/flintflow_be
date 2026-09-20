@@ -82,13 +82,38 @@ describe("chưa assemble / còn cờ đỏ", () => {
     expect(baselinesResponseSchema.parse(list.body.data)).toEqual([])
   })
 
-  it("assemble khi PNG sơ đồ chưa có ⇒ 200 nhưng không cache (review C3) ⇒ document vẫn 409", async () => {
+  it("assemble khi PNG sơ đồ chưa có ⇒ 200, meta.consistency nêu diagram_png_missing, document/Word dùng placeholder; nạp PNG rồi đọc lại ⇒ ảnh thật", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
+    const imageCaptions = (data: unknown) =>
+      renderedDocumentSchema
+        .parse(data)
+        .sections.flatMap((s) => s.blocks)
+        .filter((b) => b.type === "image")
+        .map((b) => ("caption" in b ? (b.caption ?? "") : ""))
 
     const assemble = await api.post("/assemble", { base_version: seeded.spineVersion })
-    expect(assemble.status).toBe(200)
-    expect((await api.get("/document?source=draft")).body.error.code).toBe("NO_WORKING_DRAFT")
+    expect(assemble.status, JSON.stringify(assemble.body.error)).toBe(200)
+    const missing = (assemble.body.meta.consistency as Array<{ rule: string; path?: string }>).filter((f) => f.rule === "diagram_png_missing")
+    expect(missing.length).toBeGreaterThan(0)
+    expect(missing.every((f) => f.path?.startsWith("diagrams[id="))).toBe(true)
+
+    // Gọi lại cùng version: trúng cache, lý do vẫn được trả
+    const again = await api.post("/assemble", { base_version: seeded.spineVersion })
+    expect((again.body.meta.consistency as Array<{ rule: string }>).filter((f) => f.rule === "diagram_png_missing")).toHaveLength(missing.length)
+
+    const doc = await api.get("/document?source=draft")
+    expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
+    const pending = imageCaptions(doc.body.data)
+    expect(pending.length).toBeGreaterThan(0)
+    expect(pending.every((c) => c.includes("has not been rendered yet"))).toBe(true)
+    expectDocx(await api.download("/export/word?source=draft"))
+
+    // PNG xuất hiện sau khi đã cache ⇒ lần đọc kế có ảnh thật, không cần assemble lại
+    await seedDiagramPngs(seeded)
+    const after = imageCaptions((await api.get("/document?source=draft")).body.data)
+    expect(after).toHaveLength(pending.length)
+    expect(after.some((c) => c.includes("has not been rendered yet"))).toBe(false)
   })
 })
 
@@ -133,16 +158,20 @@ describe("fixture 19 màn đủ ảnh sơ đồ", () => {
     const list = baselinesResponseSchema.parse((await api.get("/baselines")).body.data)
     expect(list.map((b) => b.id)).toEqual([baseline.id])
 
-    // `baseline_id` của /document, /export/word hiện là `_id` Mongo (= `snapshot_ref`), KHÔNG phải `id` "BL001"
-    // mà /baseline(s) trả — lệch hợp đồng T15↔T19, ghi docs/spec-gaps.md (T22). Test theo hành vi hiện tại.
-    const doc = await api.get(`/document?source=baseline&baseline_id=${baseline.snapshot_ref}`)
-    expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
-    renderedDocumentSchema.parse(doc.body.data)
-    expectDocx(await api.download(`/export/word?source=baseline&baseline_id=${baseline.snapshot_ref}`))
+    // `baseline_id` của /document, /export/word nhận cả mã `id` "BL001" mà /baseline(s) trả lẫn `_id` Mongo (= `snapshot_ref`)
+    expect(baseline.id).toBe("BL001")
+    for (const baselineId of [baseline.id, baseline.snapshot_ref]) {
+      const doc = await api.get(`/document?source=baseline&baseline_id=${baselineId}`)
+      expect(doc.status, JSON.stringify(doc.body.error)).toBe(200)
+      expect(renderedDocumentSchema.parse(doc.body.data).version).toBe("v1.0")
+      expectDocx(await api.download(`/export/word?source=baseline&baseline_id=${baselineId}`))
+    }
 
-    const missing = await api.get("/document?source=baseline&baseline_id=650000000000000000000999")
-    expect(missing.status).toBe(404)
-    expect(missing.body.error.code).toBe("BASELINE_NOT_FOUND")
+    for (const unknownId of ["650000000000000000000999", "BL999", "not-a-baseline"]) {
+      const missing = await api.get(`/document?source=baseline&baseline_id=${unknownId}`)
+      expect(missing.status, unknownId).toBe(404)
+      expect(missing.body.error.code).toBe("BASELINE_NOT_FOUND")
+    }
 
     expect(await Notification.countDocuments({ userId: seeded.userId, type: "baseline_created" })).toBe(1)
   })

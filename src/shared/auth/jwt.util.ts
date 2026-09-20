@@ -15,9 +15,12 @@ export const signAccessToken = (payload: TokenPayload): string => {
   return jwt.sign(payload, env.JWT_ACCESS_SECRET, options)
 }
 
-export const signRefreshToken = (payload: TokenPayload): string => {
+export const signRefreshToken = (payload: TokenPayload, expiresIn: string = env.REFRESH_TOKEN_EXPIRES): string => {
   const options: SignOptions = {
-    expiresIn: env.REFRESH_TOKEN_EXPIRES as any
+    expiresIn: expiresIn as any,
+    // `iat` chỉ chính xác tới giây: thiếu `jti` thì hai lần đăng nhập/refresh trong cùng giây sinh token
+    // giống hệt nhau ⇒ trùng `tokenHash` (unique) của Session ⇒ 500.
+    jwtid: crypto.randomUUID()
   }
   return jwt.sign(payload, env.JWT_REFRESH_SECRET, options)
 }

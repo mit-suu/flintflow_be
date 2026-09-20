@@ -7,11 +7,12 @@ import {
   resendVerificationSchema,
   verifyEmailConfirmSchema,
   forgotPasswordSchema,
+  verifyResetOtpSchema,
   resetPasswordSchema,
   googleAuthSchema
 } from "./auth.validation.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
-import { authEmailRateLimiter } from "../../shared/middlewares/rate-limit.js"
+import { otpResendRateLimiter, otpVerifyRateLimiter, passwordResetOtpRateLimiter } from "../../shared/middlewares/rate-limit.js"
 
 const router = Router()
 
@@ -38,7 +39,7 @@ const router = Router()
  *                 type: string
  *     responses:
  *       201:
- *         description: User registered successfully. Verification email sent.
+ *         description: User registered successfully. Verification OTP sent by email.
  *       400:
  *         description: Validation error
  *       409:
@@ -67,6 +68,9 @@ router.post("/register", validateRequest(registerSchema), authController.registe
  *                 type: string
  *               password:
  *                 type: string
+ *               rememberMe:
+ *                 type: boolean
+ *                 description: true ⇒ giữ đăng nhập 30 ngày; false ⇒ cookie phiên (đóng trình duyệt là hết); bỏ trống ⇒ 3 ngày
  *     responses:
  *       200:
  *         description: Login successful
@@ -81,7 +85,7 @@ router.post("/login", validateRequest(loginSchema), authController.login)
  * @swagger
  * /api/v1/auth/verify-email/confirm:
  *   post:
- *     summary: Confirm email verification using magic link token
+ *     summary: Confirm email verification using the 6-digit OTP (expires after 2 minutes)
  *     tags:
  *       - Auth
  *     requestBody:
@@ -91,23 +95,27 @@ router.post("/login", validateRequest(loginSchema), authController.login)
  *           schema:
  *             type: object
  *             required:
- *               - token
+ *               - email
+ *               - otp
  *             properties:
- *               token:
+ *               email:
  *                 type: string
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
  *     responses:
  *       200:
  *         description: Email verified successfully & session created
  *       400:
- *         description: Invalid or expired token
+ *         description: INVALID_OTP, OTP_EXPIRED, OTP_TOO_MANY_ATTEMPTS or EMAIL_ALREADY_VERIFIED
  */
-router.post("/verify-email/confirm", validateRequest(verifyEmailConfirmSchema), authController.confirmEmailVerification)
+router.post("/verify-email/confirm", otpVerifyRateLimiter, validateRequest(verifyEmailConfirmSchema), authController.confirmEmailVerification)
 
 /**
  * @swagger
  * /api/v1/auth/verify-email/resend:
  *   post:
- *     summary: Resend verification email
+ *     summary: Resend verification OTP (invalidates the previous one)
  *     tags:
  *       - Auth
  *     requestBody:
@@ -127,13 +135,13 @@ router.post("/verify-email/confirm", validateRequest(verifyEmailConfirmSchema), 
  *       429:
  *         description: Rate limit exceeded
  */
-router.post("/verify-email/resend", authEmailRateLimiter, validateRequest(resendVerificationSchema), authController.resendVerificationEmail)
+router.post("/verify-email/resend", otpResendRateLimiter, validateRequest(resendVerificationSchema), authController.resendVerificationEmail)
 
 /**
  * @swagger
  * /api/v1/auth/forgot-password:
  *   post:
- *     summary: Request password reset link
+ *     summary: Request a 6-digit password reset OTP by email (expires after 2 minutes; also used to resend)
  *     tags:
  *       - Auth
  *     requestBody:
@@ -153,13 +161,13 @@ router.post("/verify-email/resend", authEmailRateLimiter, validateRequest(resend
  *       429:
  *         description: Rate limit exceeded
  */
-router.post("/forgot-password", authEmailRateLimiter, validateRequest(forgotPasswordSchema), authController.forgotPassword)
+router.post("/forgot-password", passwordResetOtpRateLimiter, validateRequest(forgotPasswordSchema), authController.forgotPassword)
 
 /**
  * @swagger
- * /api/v1/auth/reset-password:
+ * /api/v1/auth/reset-password/verify-otp:
  *   post:
- *     summary: Reset password with token
+ *     summary: Verify the password reset OTP; returns a one-time resetToken (valid 10 minutes)
  *     tags:
  *       - Auth
  *     requestBody:
@@ -169,10 +177,40 @@ router.post("/forgot-password", authEmailRateLimiter, validateRequest(forgotPass
  *           schema:
  *             type: object
  *             required:
- *               - token
+ *               - email
+ *               - otp
+ *             properties:
+ *               email:
+ *                 type: string
+ *               otp:
+ *                 type: string
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: OTP correct. Returns resetToken and resetTokenExpiresIn (seconds)
+ *       400:
+ *         description: INVALID_OTP, OTP_EXPIRED or OTP_TOO_MANY_ATTEMPTS
+ */
+router.post("/reset-password/verify-otp", otpVerifyRateLimiter, validateRequest(verifyResetOtpSchema), authController.verifyResetPasswordOtp)
+
+/**
+ * @swagger
+ * /api/v1/auth/reset-password:
+ *   post:
+ *     summary: Set a new password using the resetToken from /reset-password/verify-otp
+ *     tags:
+ *       - Auth
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - resetToken
  *               - password
  *             properties:
- *               token:
+ *               resetToken:
  *                 type: string
  *               password:
  *                 type: string
@@ -180,9 +218,9 @@ router.post("/forgot-password", authEmailRateLimiter, validateRequest(forgotPass
  *       200:
  *         description: Password reset successful. All active sessions revoked.
  *       400:
- *         description: Invalid or expired token
+ *         description: RESET_SESSION_EXPIRED (token invalid, used or older than 10 minutes)
  */
-router.post("/reset-password", authEmailRateLimiter, validateRequest(resetPasswordSchema), authController.resetPassword)
+router.post("/reset-password", otpVerifyRateLimiter, validateRequest(resetPasswordSchema), authController.resetPassword)
 
 /**
  * @swagger

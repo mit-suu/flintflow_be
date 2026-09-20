@@ -22,6 +22,11 @@ import pipelineRoutes from "./modules/pipeline/pipeline.route.js"
 import baselineRoutes from "./modules/pipeline/s9/baseline.route.js"
 import renderRoutes from "./modules/render/render.route.js"
 import exportRoutes from "./modules/render/export.route.js"
+import feedbackRoutes from "./modules/feedback/feedback.route.js"
+import folderRoutes from "./modules/folder/folder.route.js"
+import importRoutes from "./modules/import/import.route.js"
+import changeRequestRoutes from "./modules/change-request/change-request.route.js"
+import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
 
@@ -79,7 +84,10 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"]
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+    // Trình duyệt chỉ cho JS đọc header ngoài danh sách safelist khi có Access-Control-Expose-Headers:
+    // FE tải .docx qua fetch cần đọc tên file BE đặt trong Content-Disposition (GET /export/word).
+    exposedHeaders: ["Content-Disposition"]
   })
 )
 
@@ -138,8 +146,13 @@ app.use("/api/v1/projects", baselineRoutes)
 // review C1) — không mount exportRoutes ở /api/v1/projects nữa (trùng mount từng lộ thêm
 // POST /projects/word/preview và GET /projects/:projectId/export/word/export/word).
 app.use("/api/v1/projects", renderRoutes)
+app.use("/api/v1/projects", importRoutes)
+app.use("/api/v1/projects", changeRequestRoutes)
+app.use("/api/v1/projects", docVersionRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
+app.use("/api/v1/feedback", feedbackRoutes)
+app.use("/api/v1/folders", folderRoutes)
 app.use("/api/v1/export", exportRoutes)
 
 // Global Error Handler Middleware
