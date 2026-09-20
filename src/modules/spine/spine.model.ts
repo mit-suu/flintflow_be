@@ -54,7 +54,7 @@ const stepSchema = new Schema(
     id: { type: String, required: true },
     status: {
       type: String,
-      enum: ["pending", "in_progress", "accepted", "revision_requested"],
+      enum: ["pending", "in_progress", "accepted", "revision_requested", "skipped"],
       required: true
     },
     first_seq: nullableNumber,
@@ -253,6 +253,27 @@ const addendumSchema = new Schema(
   opts
 )
 
+const customBlockSchema = new Schema(
+  {
+    kind: { type: String, enum: ["paragraph", "list_item", "table", "image"], required: true },
+    text: { type: String, default: "" },
+    rows: { type: [[String]], default: null },
+    image_ref: { type: String, default: null }
+  },
+  opts
+)
+
+const customSectionSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    heading: { type: String, default: "" },
+    level: { type: Number, required: true, min: 1, max: 9 },
+    blocks: { type: [customBlockSchema], default: [] },
+    source: { type: String, enum: ["import", "manual"], required: true }
+  },
+  opts
+)
+
 const diagramSchema = new Schema(
   {
     id: { type: String, required: true },
@@ -320,6 +341,8 @@ const baselineEntrySchema = new Schema(
   {
     id: { type: String, required: true },
     version: { type: String, required: true },
+    type: { type: String, enum: ["generated", "imported", "release"], default: "generated" },
+    doc_version: { type: String, default: null },
     at: { type: Date, required: true },
     snapshot_ref: { type: String, required: true },
     checked_at_version: { type: Number, required: true, min: 1 },
@@ -351,6 +374,7 @@ const spineSchema = new Schema(
     other_requirements: { type: [otherRequirementSchema], default: [] },
     glossary: { type: [glossaryTermSchema], default: [] },
     addendum: { type: [addendumSchema], default: [] },
+    custom_sections: { type: [customSectionSchema], default: [] },
 
     diagrams: { type: [diagramSchema], default: [] },
     assumptions: { type: [assumptionSchema], default: [] },

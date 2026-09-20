@@ -4,6 +4,7 @@ import * as projectController from "./project.controller.js"
 import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+import { CreateProjectSchema, MoveProjectSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -66,16 +67,26 @@ const upload = multer({
  *               domain:
  *                 type: string
  *                 example: E-learning
+ *               folderId:
+ *                 type: string
+ *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
+ *               mode:
+ *                 type: string
+ *                 enum: [import, fpt, customer_template]
+ *                 default: fpt
+ *                 description: "Cách làm SRS: import = upload SRS có sẵn rồi sửa (mode 1), fpt = sinh theo template FPT (mode 2), customer_template = chưa hỗ trợ"
  *     responses:
  *       201:
- *         description: Dự án đã được tạo thành công
+ *         description: Dự án đã được tạo thành công (kèm mode, import_state)
  *       400:
- *         description: Tên dự án trống
+ *         description: VALIDATION_ERROR — tên trống/quá dài hoặc mode không hợp lệ
+ *       501:
+ *         description: mode customer_template chưa hỗ trợ (NOT_IMPLEMENTED)
  *       401:
  *         description: Chưa xác thực
  */
 router.get("/", authMiddleware, projectController.getProjects)
-router.post("/", authMiddleware, projectController.createProject)
+router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectController.createProject)
 
 /**
  * @swagger
@@ -171,7 +182,7 @@ router.delete(
  * @swagger
  * /api/v1/projects/{projectId}:
  *   get:
- *     summary: Lấy thông tin chi tiết một dự án
+ *     summary: Lấy thông tin chi tiết một dự án (ghi lastOpenedAt — dùng cho sắp xếp "Mới mở")
  *     tags: [Projects]
  *     security:
  *       - BearerAuth: []
@@ -254,6 +265,39 @@ router.delete(
 router.get("/:projectId", authMiddleware, projectController.getProject)
 router.delete("/:projectId", authMiddleware, projectController.deleteProject)
 router.patch("/:projectId/name", authMiddleware, projectController.updateProjectName)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/folder:
+ *   patch:
+ *     summary: Chuyển dự án vào thư mục (folderId null ⇒ ra ngoài thư mục)
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [folderId]
+ *             properties:
+ *               folderId:
+ *                 type: string
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi chuyển
+ *       404:
+ *         description: PROJECT_NOT_FOUND hoặc FOLDER_NOT_FOUND (không thuộc user)
+ */
+router.patch("/:projectId/folder", authMiddleware, validateRequest(MoveProjectSchema), projectController.moveProjectToFolder)
 
 /**
  * @swagger

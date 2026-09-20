@@ -69,7 +69,9 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
   const record = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain })
   const spine = stripRecord(record)
 
-  const defs = orderedSteps(spine)
+  // Step `skipped` (không áp dụng cho template của project mode 1 — FLF-183) không hiện ở thanh step
+  const skipped = new Set(spine.steps.filter((s) => s.status === "skipped").map((s) => s.id))
+  const defs = orderedSteps(spine).filter((def) => !skipped.has(def.id))
   // F10: một lần roundCountsForSteps thay vì roundCounts cho từng step (N+1, ~2-3×N truy vấn trước đây).
   const counts = await meter.roundCountsForSteps(
     projectId,

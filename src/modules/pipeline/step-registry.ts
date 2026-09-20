@@ -150,11 +150,16 @@ const statusOf = (spine: Pick<Spine, "steps">, id: string): StepStatus =>
 
 /**
  * Step kế tiếp cần làm: step đầu tiên chưa `accepted`. Vòng của màn `placeholder` bị bỏ qua
- * (Phases §6.2: placeholder đã được quyết định để lại, không tính là pending). Hết ⇒ null.
+ * (Phases §6.2: placeholder đã được quyết định để lại, không tính là pending). Step `skipped` (không áp dụng cho
+ * template của project mode 1 — FLF-183) cũng bị bỏ qua. Hết ⇒ null.
  */
 export const nextStep = (spine: Pick<Spine, "screens" | "functions" | "steps">): ExpandedStep | null => {
   const placeholders = new Set(spine.screens.filter((s) => s.detail_status === "placeholder").map((s) => s.id))
   return (
-    orderedSteps(spine).find((step) => !(step.loop !== null && placeholders.has(step.loop)) && statusOf(spine, step.id) !== "accepted") ?? null
+    orderedSteps(spine).find((step) => {
+      if (step.loop !== null && placeholders.has(step.loop)) return false
+      const status = statusOf(spine, step.id)
+      return status !== "accepted" && status !== "skipped"
+    }) ?? null
   )
 }

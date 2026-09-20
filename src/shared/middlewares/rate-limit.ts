@@ -55,9 +55,27 @@ export const rateLimit = createRateLimiter({
   max: 100
 })
 
-// Specific rate limiter for auth email requests (3 attempts per 15 mins)
-export const authEmailRateLimiter = createRateLimiter({
+// Gửi/gửi lại OTP. Mã hết hạn sau 2 phút nên hạn mức cao hơn link cũ; mỗi luồng một bộ đếm riêng.
+const createOtpSendRateLimiter = () =>
+  createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    message: "Bạn đã yêu cầu gửi lại mã quá nhiều lần. Vui lòng thử lại sau 15 phút."
+  })
+
+export const otpResendRateLimiter = createOtpSendRateLimiter()
+export const passwordResetOtpRateLimiter = createOtpSendRateLimiter()
+
+// Chặn dò mật khẩu hiện tại qua form đổi mật khẩu
+export const changePasswordRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 3,
-  message: "Quá nhiều yêu cầu gửi email. Vui lòng thử lại sau 15 phút."
+  max: 10,
+  message: "Quá nhiều lần đổi mật khẩu. Vui lòng thử lại sau 15 phút."
+})
+
+// Chặn dò OTP theo IP (mỗi mã còn giới hạn 5 lần nhập sai ở tầng service).
+export const otpVerifyRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: "Quá nhiều lần nhập mã. Vui lòng thử lại sau 15 phút."
 })

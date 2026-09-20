@@ -13,8 +13,9 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import * as spineRepository from "./spine.repository.js"
 import * as flagsService from "./flags.service.js"
-import { buildProgressReport } from "./section-status.js"
 import type { SpineRecord } from "./spine.types.js"
+// `current_step` trong `progress` là step tới lượt theo step-registry (tính ở tầng pipeline, không phải con trỏ Spine)
+import { buildPipelineProgressReport } from "../pipeline/pipeline-progress.js"
 import { flagsQuerySchema, recomputeFlagsRequestSchema, waiveRequestSchema } from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
@@ -79,5 +80,5 @@ export const waiveFlag = catchAsync(async (req: Request, res: Response) => {
 export const getProgress = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
   const changes = await spineRepository.listChanges(projectId)
-  return sendSuccess(res, 200, buildProgressReport(spine, changes))
+  return sendSuccess(res, 200, buildPipelineProgressReport(spine, changes))
 })
