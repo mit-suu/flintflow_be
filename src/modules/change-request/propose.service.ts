@@ -8,6 +8,9 @@
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { Mode1Error } from "../import/mode1.errors.js"
+import { locksOf, pathLocked } from "./lock.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { CrProposeOutput } from "../../shared/ai/response-parser.js"
 import { stripRecord } from "../import/check.service.js"
@@ -169,4 +172,53 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
     }
   }
   await regroup(cr)
+}
+
+/**
+ * BPMN 3.9 "sửa đề xuất trong step sở hữu field" (mode 1 v3): CR ở `manual_fix` (AI đã làm lại 2 lần vẫn trượt 3.7) ⇒
+ * BA ghi hướng sửa, BE chạy **skill của step sở hữu** vị trí đó (như C-4 nhưng một vị trí, kèm hướng của BA). Kết quả chỉ
+ * ghi vào **đề xuất** của vị trí (`manual = true`), không ghi Spine; BA chạy lại kiểm (3.7) bằng `/verify`.
+ * Mode 1 không chạy step, và phần tử đang bị chính CR này khoá — nên "sửa trong step" là dùng skill của step đó ngay trong CR.
+ */
+export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locationId: string, instruction: string): Promise<void> => {
+  assertCrStatus(cr, ["manual_fix"], "verifying")
+  const loc = await ChangeLocation.findOne({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: locationId })
+  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", `Không có vị trí ${locationId}`)
+  if (!loc.owner_step) {
+    throw new Mode1Error("CR_NO_OWNER_STEP", `Vị trí ${locationId} không thuộc step nào (mục riêng) — sửa trực tiếp đề xuất`, { location_id: locationId })
+  }
+  const holder = (await locksOf(cr.projectId, [loc.path])).get(loc.path)
+  if (holder !== cr.cr_id) throw pathLocked(holder ? [{ path: loc.path, cr_id: holder }] : [])
+
+  const record = await spineRepository.get(String(cr.projectId))
+  if (!record) throw new Error("Không tìm thấy Spine của project")
+  const spine = stripRecord(record)
+  const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
+    ...crHeader(cr),
+    answers: `${answersText(cr)}
+
+Analyst's instruction for ${loc.location_id} (3.9 — fix in owner step ${loc.owner_step}): ${instruction}`,
+    owner_skill: ownerSkillText(loc.owner_step),
+    locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
+    glossary: glossaryText(spine)
+  })
+  if (!result.ok) {
+    // `manual_fix` không phải bước pause được (Flow 4/5 của CR chỉ ở clarifying/proposing/verifying) ⇒ báo lỗi, giữ nguyên
+    if (result.reason === "credits") throw new ApiError(402, result.message, "INSUFFICIENT_CREDIT")
+    throw new ApiError(502, result.message, "AI_PROVIDER_ERROR")
+  }
+  const out = matchProposals([loc], result.data.locations).get(loc)
+  if (!out) throw new ApiError(502, "Model không trả đề xuất cho vị trí này — thử lại hoặc sửa trực tiếp", "AI_PROVIDER_ERROR")
+  const ops = out.conclusion === "not_related" ? [] : out.spine_ops
+  loc.conclusion = out.conclusion
+  loc.reason = out.reason
+  loc.proposal = {
+    old_text: valueText(elementValue(spine, loc.path)),
+    new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
+    comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
+    spine_ops: ops
+  }
+  loc.manual = true
+  loc.verify = null
+  await loc.save()
 }

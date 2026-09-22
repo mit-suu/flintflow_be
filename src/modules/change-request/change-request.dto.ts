@@ -148,19 +148,17 @@ export const patchLocationRequestSchema = z
   .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận not_related cần lý do", path: ["reason"] })
 
 /**
- * `POST …/:crId/groups/:gid/decision` (UC-52). Từ chối bắt buộc có lý do. Group cuối cùng được quyết mà có
- * group duyệt ⇒ ghi Track Changes + áp op Spine (C-7) ⇒ mang `base_version`.
+ * `POST …/:crId/groups/:gid/decision` (UC-52, BPMN 3.12 "quyết định từng group, kèm lý do"). Mode 1 v3: **cả duyệt
+ * lẫn từ chối** đều bắt buộc lý do. Group cuối cùng được quyết mà có group duyệt ⇒ ghi (C-7) ⇒ mang `base_version`.
  */
-export const groupDecisionRequestSchema = z
-  .strictObject({
-    decision: z.enum(["approved", "rejected"]),
-    reason: z.string().trim().max(2000).optional(),
-    base_version: baseVersion
-  })
-  .refine((v) => v.decision === "approved" || (v.reason?.length ?? 0) >= DECISION_REASON_MIN_LENGTH, {
-    message: `Từ chối cần lý do ≥ ${DECISION_REASON_MIN_LENGTH} ký tự`,
-    path: ["reason"]
-  })
+export const groupDecisionRequestSchema = z.strictObject({
+  decision: z.enum(["approved", "rejected"]),
+  reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH, `Quyết định cần lý do ≥ ${DECISION_REASON_MIN_LENGTH} ký tự`).max(2000),
+  base_version: baseVersion
+})
+
+/** `POST …/:crId/locations/:locId/owner-step-draft` (BPMN 3.9, mode 1 v3) — hướng sửa của BA cho skill step sở hữu. */
+export const ownerStepDraftRequestSchema = z.strictObject({ instruction: text(4000) })
 
 /** `POST …/:crId/close` (3.13) và `POST …/:crId/cancel` (3.10, UC-53). */
 export const closeRequestSchema = z.strictObject({ reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH).max(2000) })
