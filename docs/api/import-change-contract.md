@@ -61,6 +61,7 @@ mọi trạng thái chưa kết thúc ─► cancelled
 | 409 | `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE` | Project mode 1: chạy step / trả lời step / gate / resume pipeline / `PATCH step-plan` · `POST /baseline` · waive cờ (§4.8) | — |
 | 422 | `IMPORT_FILE_REJECTED` | Preflight từ chối file (1.2); bản ghi import vẫn được tạo với `status = preflight_rejected` | `{ import_id, issues[] }` |
 | 422 | `IMPORT_STAMP_FOREIGN_PROJECT` | File mang stamp của project khác | `{ stamp }` |
+| 422 | `IMPORT_REUPLOAD_NO_STAMP` | Re-upload (#11) file không mang stamp của project (§4.8) | — |
 | 422 | `RELEASE_RED_FLAGS_OPEN` | Release khi còn cờ đỏ (BR-04, mode 1 không waive) | `{ flags[] }` |
 
 Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`, `402 INSUFFICIENT_CREDIT` (`{ required, balance }`), `404 PROJECT_NOT_FOUND`, `409 SPINE_VERSION_CONFLICT`, `501 NOT_IMPLEMENTED`.
@@ -278,13 +279,14 @@ Plan: `claude_plan/mode1-v3/` (`00-quyet-dinh.md` F1–F4, `phase-1-be-flow1.md`
   - `assumptions[id=…]` làm được vị trí (xác nhận giả định ⇒ đóng `unconfirmed_assumption`).
   - `CR_NO_LOCATIONS` giữ hình `meta`; `empty_sections[].step_id` chỉ còn để tham khảo (mode 1 không chạy step).
 - **Tính cờ ở mode 1 bật luật S-9** (`atBaseline`) tại 1.12 (import check), 3.14 (ghi CR), 6.1 (release): `unconfirmed_assumption` hiện từ lúc import và đóng ngay khi CR xác nhận giả định.
+- **Re-upload (#11) đòi stamp của project** (BPMN: "Has version stamp? Yes" mới đi 1.4): file không stamp ⇒ `422 IMPORT_REUPLOAD_NO_STAMP`, không lưu diff/file. Kiểm sau preflight (file bị từ chối vẫn ra `IMPORT_FILE_REJECTED` trước). Bỏ hành vi "bản gốc sửa ngoài vẫn so theo text".
 - **3.14 vẽ lại hình**: ghi CR xong vẽ lại hình lệch dữ liệu (PlantUML có mặt); có hình đổi thì file của version minor được in lại để nhúng hình mới.
 
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
-| 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |
+| 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, `IMPORT_REUPLOAD_NO_STAMP`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |
 | 2026-09-20 | Dọn nợ sau V4 | §4.7: `/changes`, `/reconcile`, `/undo` sau v1 tạo CR nguồn `verbal` kèm `meta.change_request`; gap report `unrendered_diagrams`; `section_title` của phần nối; `found_by` bỏ `mention` trùng `spine_link` — chỉ thêm field / nới rộng |
 | 2026-09-19 | FLF-186 (mode 1 v2, V4) | §4.6: vị trí CR theo path Spine (DTO location), `PATH_LOCKED`, `CR_VALUE_CHANGED`, PATCH vị trí `new_value`/`spine_ops`, version/release = render Spine, blocks/compare/re-upload từ file render, chat sau v1 tạo CR (`meta.change_request`) — contract-change, chờ 4/4 |
 | 2026-09-19 | FLF-184 (mode 1 v2, V2) | §4.5: `RenderedDocument` theo layout file upload, #14 `variant=original`, `has_original_file`, gap report `missing_fpt_sections` + `layout[]` — chỉ thêm field, kèm lô contract-change V0 |
