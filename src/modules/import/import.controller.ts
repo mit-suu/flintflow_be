@@ -24,6 +24,7 @@ import * as extractJobs from "./extract-jobs.js"
 import * as finalizeService from "./finalize.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
+import { assertNotMode1 } from "./mode1-guard.js"
 import * as importService from "./import.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
@@ -159,6 +160,7 @@ export const getStepPlan = mode1Handler(async (req, res) => {
 
 export const patchStepPlan = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
+  assertNotMode1(auth.project.mode, "steps") // mode 1 v3: không bật/tắt step (BPMN Flow 1 không có step)
   const body = parseInput(stepPlanPatchRequestSchema, req.body)
   return sendSuccess(res, 200, await stepPlanService.patchStepPlan(auth.projectId, auth.userId, body))
 })

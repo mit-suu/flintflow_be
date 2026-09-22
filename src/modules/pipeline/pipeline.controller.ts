@@ -35,6 +35,7 @@ import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, type 
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertNotMode1 } from "../import/mode1-guard.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -49,6 +50,7 @@ interface Context {
   projectId: string
   userId: string
   project: { name: string; domain: string | null }
+  mode: string
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body — người ngoài không dò được DTO qua lỗi 400. */
@@ -59,7 +61,7 @@ const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, userId)
-  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null } }
+  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
 }
 
 // ─── GET /steps ──────────────────────────────────────────────────
@@ -139,7 +141,8 @@ const errorMessageOf = (err: unknown): string => (err instanceof Error ? err.mes
  * nữa (dù `runStep` còn đang dọn dẹp).
  */
 export const runStepController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(runStepRequestSchema, req.body)
 
@@ -187,7 +190,8 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
 // ─── POST /steps/:stepId/answer ────────────────────────────────────
 
 export const answerStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId } = await authorize(req)
+  const { projectId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(stepAnswerRequestSchema, req.body)
 
@@ -201,7 +205,8 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 // ─── POST /steps/:stepId/gate ───────────────────────────────────────
 
 export const gateStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(gateRequestSchema, req.body)
   await requirePipelineSession(projectId, body.session_id)
@@ -225,7 +230,8 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
 // ─── POST /resume ───────────────────────────────────────────────────
 
 export const resumeProjectController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const result = await resumeProject(projectId, userId)
   return sendSuccess(res, 200, result)
 })
