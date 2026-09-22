@@ -24,7 +24,7 @@ export const MODE1_ERROR_STATUS = {
   /** FLF-186: phần tử Spine đang được CR khác giữ khoá (thay `BLOCK_LOCKED` theo block docx). */
   PATH_LOCKED: 409,
   CR_LOCATION_UNCONCLUDED: 409,
-  /** C-3 không tìm được phần tử Spine nào — thường vì CR nhắm vào mục còn trống (phải chạy step, không phải CR). */
+  /** C-3 không tìm được phần tử Spine nào (mô tả CR không trỏ vào phần tử / mục nào điền được). */
   CR_NO_LOCATIONS: 409,
   /** Nộp mà mọi vị trí đều `not_related` ⇒ không có group nào để duyệt; cho qua thì CR kẹt ở `in_review`. */
   CR_NOTHING_TO_APPROVE: 409,

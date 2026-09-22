@@ -18,10 +18,9 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
-import { renderAll } from "../diagram/diagram.service.js"
+import { renderAllIfAvailable } from "../diagram/diagram.service.js"
 import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
-import { isPlantUmlReachable } from "../../shared/diagram/plantuml.client.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -200,12 +199,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
  * `render_error`: người dùng vẽ lại sau ở workspace. Lỗi vẽ không chặn import.
  */
 const renderDiagramsIfAvailable = async (projectId: string): Promise<void> => {
-  try {
-    if (!(await isPlantUmlReachable())) return
-    await renderAll(projectId, { by: "import", step_id: null })
-  } catch (err) {
-    console.warn(`[finalize] vẽ diagram sau import lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
-  }
+  await renderAllIfAvailable(projectId, { by: "import", step_id: null })
 }
 
 /** Ghép sẵn bản làm việc (S-8.2) — lỗi chỉ ghi log: workspace tự `POST /assemble` lại được. */

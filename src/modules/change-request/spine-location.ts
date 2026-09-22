@@ -7,6 +7,7 @@
  *   sửa ở chỗ khác kể từ lúc đề xuất (thay "old text khớp block" của bản theo block).
  */
 
+import { sectionHasData } from "../spine/deterministic-check.js"
 import { impactOf } from "../spine/impact.service.js"
 import { ownerStepOf, sectionsOfPath } from "../spine/section-registry.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -33,6 +34,8 @@ export const LOCATION_ARRAYS = [
   "messages",
   "other_requirements",
   "glossary",
+  /** Mode 1 v3: cờ đỏ `unconfirmed_assumption` chỉ đóng được bằng CR (không còn S-9.2) ⇒ giả định phải làm được vị trí. */
+  "assumptions",
   "custom_sections"
 ] as const
 
@@ -61,12 +64,14 @@ export const isArrayPath = (path: string): boolean => ARRAY_PATH.test(path)
 
 /**
  * Mảng nuôi nội dung của từng đầu mục FPT — soi ngược bảng `SECTION_HAS_DATA` của `deterministic-check.ts`.
- * Section không có mảng nào (vd `fixed:1` là phần tử `project`, `fixed:3.1.1` là field `flow_to` của màn có sẵn)
- * ⇒ không dựng vị trí "mục trống", C-3 sẽ báo rõ thay vì đoán bừa.
+ * Mode 1 v3: mục FPT trống chỉ điền được bằng CR (không còn step) ⇒ **mọi** mục mà luật `section_empty` soi phải có
+ * đường vào: mảng ở đây, phần tử `project` (`fixed:1`), hoặc field trên phần tử có sẵn (`SECTION_FIELD_ARRAYS`).
  */
 export const SECTION_FILL_ARRAYS: Readonly<Record<string, readonly string[]>> = {
   "fixed:2.1": ["actors"],
+  "fixed:2.2.1": ["use_cases"],
   "fixed:2.2.2": ["use_cases"],
+  "fixed:3.1.1": ["screens"],
   "fixed:3.1.2": ["screens"],
   "fixed:3.1.3": ["roles", "permissions"],
   "fixed:3.1.4": ["functions"],
@@ -81,6 +86,15 @@ export const SECTION_FILL_ARRAYS: Readonly<Record<string, readonly string[]>> = 
   "fixed:5.3": ["messages"],
   "fixed:5.4": ["other_requirements"],
   "fixed:5.5": ["glossary"]
+}
+
+/**
+ * Mục có dữ liệu nằm ở **field của phần tử thuộc mục khác**: Screens Flow = `screens[].flow_to`, Use Case Diagram vẽ từ
+ * `use_cases`. Nhắm mục này ⇒ mọi phần tử của mảng là vị trí (sửa field), mảng rỗng thì thêm mới.
+ */
+export const SECTION_FIELD_ARRAYS: Readonly<Record<string, string>> = {
+  "fixed:2.2.1": "use_cases",
+  "fixed:3.1.1": "screens"
 }
 
 /** Path thêm mới cho một section đang trống (`fixed:5.1` ⇒ `business_rules[]`); section không đổ được ⇒ []. */
@@ -227,10 +241,28 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
       }
     })
 
+  // Mục có dữ liệu ở field của phần tử mục khác ⇒ phần tử đó là vị trí, gắn với mục được nhắm (step sở hữu = step
+  // của mục đó, vd S-4.2 cho Screens Flow)
+  const seen = new Set(found.map((f) => f.path))
+  for (const section of new Set(targets.filter((t) => t in SECTION_FIELD_ARRAYS))) {
+    const arr = SECTION_FIELD_ARRAYS[section]!
+    for (const el of arrayOf(spine, arr)) {
+      const path = `${arr}[id=${String(el.id)}]`
+      if (seen.has(path)) continue
+      seen.add(path)
+      found.push({ path, section_id: section, found_by: ["spine_link"], entity_paths: [section], owner_step: ownerStepOf(section, spine) })
+    }
+  }
+
   // Đích là section còn trống: không có phần tử nào để sửa, nhưng CR vẫn làm được việc — **thêm mới** vào mảng
   // nuôi mục đó (phương án B). Section không đổ được bằng mảng thì bỏ qua ở đây, `emptySectionTargets` báo tiếp.
   for (const section of emptySections(spine, targets)) {
+    const fieldArray = SECTION_FIELD_ARRAYS[section]
+    // Mục "field" đã có phần tử để sửa ⇒ không mời thêm phần tử mới
+    if (fieldArray && arrayOf(spine, fieldArray).length) continue
     for (const path of fillPathsOfSection(section)) {
+      if (seen.has(path)) continue
+      seen.add(path)
       found.push({
         path,
         section_id: section,
@@ -243,12 +275,15 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
   return found.slice(0, MAX_LOCATIONS)
 }
 
-/** Đích dạng mã section mà Spine chưa có phần tử nào thuộc về. */
+/**
+ * Đích dạng mã section còn trống: chưa có phần tử nào thuộc về, **hoặc** luật cờ `section_empty` coi là chưa có dữ liệu
+ * (`SECTION_HAS_DATA` — vd 5.1 chỉ có rule `tier=high`). Dùng chung tiêu chí với cờ để CR luôn có lối đóng cờ (L10).
+ */
 const emptySections = (spine: Spine, targets: readonly string[]): string[] => {
   const sections = [...new Set(targets.filter(isSectionTarget))]
   if (!sections.length) return []
   const filled = new Set(listElements(spine).map((e) => sectionOfElement(spine, e.path)))
-  return sections.filter((s) => !filled.has(s))
+  return sections.filter((s) => !filled.has(s) || sectionHasData(spine, s) === false)
 }
 
 /**

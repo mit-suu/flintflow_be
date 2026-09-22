@@ -29,7 +29,7 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords)
   if (!found.length) {
     // Đứng im ở impact_review với 0 vị trí làm nút "Tìm vị trí" trông như hỏng. Nói rõ: đích nào là mục còn trống
-    // (không có phần tử để sửa — phải chạy step soạn nội dung, D6) và CR đã nhắm vào gì.
+    // mà cũng không thêm mới được và CR đã nhắm vào gì. Mode 1 v3 không còn step ⇒ lối ra duy nhất là sửa mô tả CR.
     const layout = await loadLayout(String(cr.projectId))
     const empty = emptySectionTargets(spine, cr.targets.entity_paths).map((section_id) => ({
       section_id,
@@ -40,7 +40,7 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
     throw new Mode1Error(
       "CR_NO_LOCATIONS",
       empty.length
-        ? `Không có phần tử nào để sửa: ${emptyTitles} đang trống — chạy step để soạn nội dung trước, hoặc sửa mô tả CR cho trỏ vào phần tử cụ thể`
+        ? `Không có phần tử nào để sửa: ${emptyTitles} đang trống — sửa mô tả CR cho trỏ vào phần tử cụ thể rồi làm rõ lại`
         : "Không tìm được phần tử Spine nào khớp với change request — sửa mô tả (nêu mã hoặc tên phần tử) rồi làm rõ lại",
       { targets: { entity_paths: [...cr.targets.entity_paths], keywords: [...cr.targets.keywords] }, empty_sections: empty }
     )
