@@ -68,8 +68,10 @@ import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { resumeProject } from "./resume.service.js"
 import { orderedSteps } from "./step-registry.js"
-import { acquireStepLock, releaseStepLock } from "./step-runner.service.js"
+import { isStepRunning } from "./run-state.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+
+vi.mock("./run-state.service.js", () => ({ isStepRunning: vi.fn(async () => false) }))
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MINIMAL: SpineT = spineSchema.parse(
@@ -195,20 +197,17 @@ describe("resume.service", () => {
     expect(after!.steps.find((s) => s.id === "S-2.1")).toMatchObject({ status: "accepted" })
   })
 
-  it("F4: step in_progress nhưng đang bị khoá bởi request khác (cùng tiến trình) ⇒ 409 STEP_NOT_RUNNABLE, KHÔNG revert", async () => {
+  it("F4: step in_progress nhưng lượt chạy của nó còn sống ⇒ 409 STEP_NOT_RUNNABLE, KHÔNG revert", async () => {
     seedSpine()
     await seedInProgressMidDraft("S-3.1", "A99")
     const before = await repo.get(PROJECT)
 
-    acquireStepLock(PROJECT, "S-3.1")
-    try {
-      const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
-      expect(err).toBeInstanceOf(ApiError)
-      expect((err as ApiError).statusCode).toBe(409)
-      expect((err as ApiError).code).toBe("STEP_NOT_RUNNABLE")
-    } finally {
-      releaseStepLock(PROJECT, "S-3.1")
-    }
+    // WP-4: khoá step nằm ở collection `step_runs` (TTL + heartbeat), không còn là Set in-process
+    vi.mocked(isStepRunning).mockResolvedValueOnce(true)
+    const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(409)
+    expect((err as ApiError).code).toBe("STEP_NOT_RUNNABLE")
 
     const after = await repo.get(PROJECT)
     expect(after!.spine_version).toBe(before!.spine_version)

@@ -80,6 +80,76 @@ router.post("/:projectId/steps/:stepId/run", authMiddleware, pipelineController.
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/steps/{stepId}/run-state:
+ *   get:
+ *     summary: Trạng thái lượt chạy step (khôi phục gate/câu hỏi sau khi reload)
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: stepId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "runStateResponseSchema hoặc null nếu step chưa chạy lần nào"
+ */
+router.get("/:projectId/steps/:stepId/run-state", authMiddleware, pipelineController.getStepRunState)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/steps/{stepId}/cancel:
+ *   post:
+ *     summary: Huỷ lượt đang chạy của step (nhả khoá, huỷ request tới model)
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: stepId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "{ cancelled, run_id }"
+ */
+router.post("/:projectId/steps/:stepId/cancel", authMiddleware, pipelineController.cancelStepRun)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/run-state/active:
+ *   get:
+ *     summary: Lượt chạy còn sống của dự án (pill "đang chạy nền")
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "runStateResponseSchema hoặc null"
+ */
+router.get("/:projectId/run-state/active", authMiddleware, pipelineController.getActiveRunState)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/steps/{stepId}/answer:
  *   post:
  *     summary: Trả lời câu hỏi Elicit đang chờ (answer_needed) — luồng SSE của /run tiếp tục

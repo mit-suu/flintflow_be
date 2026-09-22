@@ -156,8 +156,9 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     stepId
   ] = REFERENCE_FIELDS
 
-  const many = function* (field: ReferenceField, ownerPath: string, key: string, values: string[]) {
-    for (const v of values) yield { field, ownerPath, refPath: `${ownerPath}.${key}[=${v}]`, targetId: v, target: field.targetCollection }
+  // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
+  const many = function* (field: ReferenceField, ownerPath: string, key: string, values: string[] | undefined) {
+    for (const v of values ?? []) yield { field, ownerPath, refPath: `${ownerPath}.${key}[=${v}]`, targetId: v, target: field.targetCollection }
   }
   const one = (field: ReferenceField, ownerPath: string, key: string, value: string, target = field.targetCollection): ReferenceHit => ({
     field,

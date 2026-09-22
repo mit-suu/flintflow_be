@@ -5,6 +5,9 @@
  * POST /projects/:projectId/steps/:stepId/run         chạy step (SSE) — step-runner.service
  * POST /projects/:projectId/steps/:stepId/answer      trả lời Elicit đang chờ (answer_needed)
  * POST /projects/:projectId/steps/:stepId/gate        accept/revision/regenerate/accept_as_is
+ * GET  /projects/:projectId/steps/:stepId/run-state   trạng thái lượt chạy (khôi phục sau reload)
+ * POST /projects/:projectId/steps/:stepId/cancel      huỷ lượt đang chạy (nhả khoá, abort model)
+ * GET  /projects/:projectId/run-state/active          lượt còn sống của dự án (pill "đang chạy nền")
  * POST /projects/:projectId/resume                    revert step `in_progress` dang dở, trả progress
  *
  * `GET /progress` đã có ở T09 (`flags.route.ts`) — không mount lại ở đây.
@@ -28,9 +31,11 @@ import {
   type Emit
 } from "./step-runner.service.js"
 import { gate, GateLimitError, type GateInput } from "./gate.service.js"
+import { BaselineBlockedError } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
-import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -164,7 +169,7 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   }
 
   try {
-    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: abortController.signal })
+    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: abortController.signal, abort: abortController })
   } catch (err) {
     if (!headersSent) throw err
     if (!closed) {
@@ -211,8 +216,59 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
     return sendSuccess(res, 200, result)
   } catch (err) {
     if (err instanceof GateLimitError) return sendError(res, err.statusCode, err.code, err.message, err.details)
+    // BUG-01: Accept ở S-9.5 ký baseline — còn cờ đỏ thì trả đúng danh sách cờ đang chặn để gate hiện ra
+    if (err instanceof BaselineBlockedError) {
+      return sendError(res, err.statusCode, err.code, err.message, {
+        flags: err.flags.map(({ id, rule_id, section_id, target_id, message, remediation_step }) => ({
+          id,
+          rule_id,
+          section_id,
+          target_id,
+          message,
+          remediation_step
+        }))
+      })
+    }
     throw err
   }
+})
+
+// ─── run-state (WP-4: khôi phục sau reload, huỷ lượt) ───────────────
+
+/** `alive` = khoá còn hiệu lực. Lượt `running` mà khoá hết hạn nghĩa là lượt đã chết giữa chừng. */
+const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
+  step_id: doc.step_id,
+  run_id: doc.run_id,
+  status: doc.status,
+  stage: doc.stage,
+  detail_vi: doc.detail_vi,
+  batch: doc.batch,
+  started_at: doc.started_at,
+  last_event_at: doc.last_event_at,
+  alive: doc.status === "running" || doc.status === "waiting_answer" ? new Date(doc.locked_until).getTime() > Date.now() : true,
+  questions: doc.questions,
+  gate_payload: doc.gate_payload,
+  events: doc.events,
+  error: doc.error
+})
+
+export const getStepRunState = catchAsync(async (req: Request, res: Response) => {
+  const { projectId } = await authorize(req)
+  const doc = await getRunState(projectId, req.params.stepId as string)
+  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+})
+
+export const getActiveRunState = catchAsync(async (req: Request, res: Response) => {
+  const { projectId } = await authorize(req)
+  const doc = await getActiveRun(projectId)
+  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+})
+
+export const cancelStepRun = catchAsync(async (req: Request, res: Response) => {
+  const { projectId } = await authorize(req)
+  const body = parse(cancelRunRequestSchema, req.body ?? {})
+  const result = await cancelRun(projectId, req.params.stepId as string, body.run_id)
+  return sendSuccess(res, 200, result)
 })
 
 // ─── POST /resume ───────────────────────────────────────────────────

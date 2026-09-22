@@ -27,6 +27,11 @@ export interface ExecuteAiActionOptions {
   model?: string
   parentLogId?: string
   rawPromptOverride?: string
+  /**
+   * FLF-177 WP-4 (BUG-05): huỷ lượt chạy step phải huỷ luôn request HTTP đang mở tới provider. Không có
+   * nó thì khoá step vẫn bị giữ cho tới khi model soạn xong (có lúc tới 20 phút).
+   */
+  signal?: AbortSignal
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -139,7 +144,8 @@ export const executeAiAction = async <T = any>(
       const startTime = Date.now()
 
       try {
-        const llmRes = await callLLM(finalPrompt, providerConfig)
+        if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
+        const llmRes = await callLLM(finalPrompt, providerConfig, options.signal)
         const latencyMs = Date.now() - startTime
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)
