@@ -26,6 +26,19 @@ const change = (seq: number, p: string, step_id: string | null = null): Change =
   step_id
 })
 
+describe("FLF-204 (BUG-26) — feature chỉ accepted khi function con cũng xong", () => {
+  it("một function con còn draft ⇒ feature xuống draft", () => {
+    const spine = structuredClone(FIXTURE)
+    // Mở lại vòng của màn S01 (đang signed_off) ⇒ function của nó chưa chốt lại
+    spine.steps = spine.steps.filter((s) => !s.id.endsWith("@S01"))
+    expect(computeStatus(spine, [], "feature:F1")).toBe("draft")
+  })
+
+  it("function của màn đã chủ động để lại (placeholder) không kéo feature xuống", () => {
+    expect(computeStatus(FIXTURE, [], "feature:F1"), "S02–S04 là placeholder, S01 đã signed_off").toBe("accepted")
+  })
+})
+
 describe("computeSectionStates", () => {
   it("fixture không có change: derived / accepted / draft đúng", () => {
     const status = (id: string) => computeStatus(FIXTURE, [], id)
