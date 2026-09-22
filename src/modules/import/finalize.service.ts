@@ -133,10 +133,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     text: b.text,
     section_id: b.section_id ?? null,
     // DocBlock không lưu ô bảng — dựng lại từ text `ô | ô` theo dòng
-    rows: b.kind === "table" ? b.text.split("\n").map((line) => line.split(" | ")) : null
+    rows: b.kind === "table" ? b.text.split("\n").map((line) => line.split(" | ")) : null,
+    image_ref: b.image_ref ?? null
   }))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
+  // Phase 5 (T3): ảnh dưới mục FPT không trích được thành field ⇒ giữ nguyên văn như văn xuôi không trích được (phần nối
+  // của mục) để bản render nhúng lại ảnh gốc. Trước đây bản render 0.0 mất 35/39 ảnh (T1).
+  for (const b of layoutBlocks) if (b.kind === "image" && b.image_ref && b.section_id) unmappedIds.add(b.block_id)
   const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong

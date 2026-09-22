@@ -2,7 +2,7 @@ import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow }
 import { describe, expect, it } from "vitest"
 import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, readBlocks } from "./blocks.js"
 import { DocxPackage } from "./package.js"
-import { makeDocx, p, styled, table } from "./testing/make-docx.js"
+import { imageRel, makeDocx, p, picture, styled, table } from "./testing/make-docx.js"
 import { normalizeText, textHash } from "./text.js"
 import { wAll, wAttr } from "./xml.js"
 
@@ -311,6 +311,24 @@ describe("readBlocks — bổ sung P4", () => {
     expect(blocks[1].heading_path).toEqual(["Kiến trúc"])
     expect(blocks[2].heading_path).toEqual(["Kiến trúc"])
     expect(blocks[1].xml_path).toBe("body/p[1]")
+  })
+
+  it("phase 5 (T3): ảnh nhúng ⇒ image_ref = part ảnh theo rels; rel không phải ảnh / liên kết ngoài / không phải hình ⇒ null", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body: picture("rIdImg1") + picture("rIdMissing") + p("Chữ"),
+        extraDocRels: imageRel("rIdImg1", "image1.png"),
+        extraParts: { "word/media/image1.png": Buffer.from([0x89, 0x50, 0x4e, 0x47]) }
+      })
+    )
+    const blocks = await readBlocks(pkg)
+    expect(blocks.map((b) => [b.kind, b.image_ref])).toEqual([
+      ["image", "word/media/image1.png"],
+      ["image", null],
+      ["paragraph", null]
+    ])
+    expect(await pkg.binary("word/media/image1.png")).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    expect(await pkg.binary("word/media/none.png")).toBeNull()
   })
 
   it("ảnh nhận bookmark neo nằm ngoài w:p ngay trước nó", async () => {

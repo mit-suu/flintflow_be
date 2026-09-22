@@ -26,6 +26,8 @@ import * as spineRepository from "../../../src/modules/spine/spine.repository.js
 import { getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
+import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
+import { clearImportMediaCache } from "../../../src/modules/render/import-media.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -264,5 +266,40 @@ describe("finalize — lỗi", () => {
     const v2 = (await spineRepository.get(projectId))!.spine_version
     const again = await finalizeImport(projectId, userId, { import_id: importId, base_version: v2 })
     expect(again.baseline.type).toBe("imported")
+  })
+})
+
+describe("finalize — ảnh gốc (mode 1 v3 phase 5, T3)", () => {
+  const PNG = buildPlaceholderPng(12, 7, 0x40)
+  const EMF = Buffer.from([0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00, 0, 0, 0, 0])
+  const srs = { images: [{ name: "image1.png", data: PNG }, { name: "image2.emf", data: EMF }] }
+
+  beforeEach(() => clearImportMediaCache())
+
+  it("ảnh dưới mục FPT ⇒ block image_ref ⇒ phần nối nguyên văn của mục; bản render 0.0 nhúng lại đúng bytes PNG, EMF ⇒ chỗ giữ ảnh có lý do", async () => {
+    const { projectId } = await importFinalized({ srs })
+    const blocks = await DocBlock.find({ projectId, doc_version: "0.0", kind: "image" }).lean()
+    expect(blocks.map((b) => b.image_ref).sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
+
+    const spine = (await spineRepository.get(projectId))!
+    const refs = spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image").map((b) => b.image_ref))
+    expect(refs.sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
+
+    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
+    const media = await Promise.all(
+      rendered.partNames().filter((n) => n.startsWith("word/media/")).map(async (n) => (await rendered.binary(n))!)
+    )
+    expect(media.some((m) => m.equals(PNG))).toBe(true)
+    const texts = (await readBlocks(rendered)).map((b) => b.text)
+    expect(texts.some((t) => t.includes("original image could not be embedded (word/media/image2.emf)"))).toBe(true)
+  })
+
+  it("file gốc không còn ⇒ render vẫn chạy, ảnh thành chỗ giữ ảnh", async () => {
+    const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG }] } })
+    await ImportedDocument.updateMany({ projectId }, { $set: { file_ref: null } })
+    clearImportMediaCache()
+    const doc = await getDocument(projectId, "Lumen", { source: "draft" })
+    expect(JSON.stringify(doc)).toContain("original image could not be embedded (word/media/image1.png)")
   })
 })

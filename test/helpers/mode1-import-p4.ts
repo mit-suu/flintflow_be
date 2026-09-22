@@ -32,7 +32,7 @@ export const importAtExtracting = async (opts: { balance?: number; srs?: SrsFixt
 }
 
 /** Chạy I-4 + xác nhận mọi field ⇒ `baselining`. */
-export const importAtBaselining = async (opts: { balance?: number } = {}): Promise<Mode1Ctx> => {
+export const importAtBaselining = async (opts: { balance?: number; srs?: SrsFixtureOptions } = {}): Promise<Mode1Ctx> => {
   const ctx = await importAtExtracting(opts)
   const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
   if (run.doc.status === "fields_review") await patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], confirm_all: true })
@@ -40,7 +40,7 @@ export const importAtBaselining = async (opts: { balance?: number } = {}): Promi
 }
 
 /** Chạy tới hết finalize + check (thường là `gap_review`). */
-export const importFinalized = async (opts: { balance?: number } = {}) => {
+export const importFinalized = async (opts: { balance?: number; srs?: SrsFixtureOptions } = {}) => {
   const ctx = await importAtBaselining(opts)
   const before = (await spineRepository.get(ctx.projectId))!
   const result = await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })

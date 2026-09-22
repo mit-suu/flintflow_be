@@ -265,4 +265,22 @@ describe("customBlocks", () => {
       ])
     ).toEqual([{ type: "paragraph", runs: [{ text: "[Image: Sơ đồ use case]", italic: true }] }])
   })
+
+  it("phase 5 (T3): ảnh có image_ref + ảnh tải được ⇒ khối ảnh thật (kèm chú thích); tải không được ⇒ dòng chú thích", () => {
+    const png = (ref: string) => (ref === "word/media/a.png" ? "QUJD" : undefined)
+    expect(
+      customBlocks(
+        [
+          { kind: "image", text: "Hình 1", rows: null, image_ref: "word/media/a.png" },
+          { kind: "image", text: "", rows: null, image_ref: "word/media/b.png" },
+          { kind: "image", text: "", rows: null, image_ref: "word/media/a.png" }
+        ],
+        png
+      )
+    ).toEqual([
+      { type: "image", png: "QUJD", caption: "Hình 1" },
+      { type: "paragraph", runs: [{ text: "[Image]", italic: true }] },
+      { type: "image", png: "QUJD" }
+    ])
+  })
 })
