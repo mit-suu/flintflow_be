@@ -38,6 +38,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("section_stale_at_baseline", "red", true, true),
   rule("section_awaiting_reaccept", "red", true, true),
   rule("screen_pending_at_baseline", "red", true, true),
+
   rule("orphan_actor", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
@@ -49,7 +50,9 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_name_semantic", "yellow", true),
   rule("usecase_name_style", "yellow", true),
   rule("actor_name_shape", "yellow", true),
-  rule("system_name_missing", "yellow", true)
+  rule("system_name_missing", "yellow", true),
+  rule("screen_placeholder", "yellow", true),
+  rule("function_without_uc", "yellow", true)
 ])
 
 /** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
@@ -341,6 +344,56 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         remediation_step: ownerStepOf(s.id, spine)
       }))
   ]
+}
+
+/** Thứ tự phase để biết vòng S-5 đã đi qua chưa (không import step-registry: module này thuần trên Spine). */
+const PHASE_ORDER = ["B-0", "B-1", "B-2", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const
+
+const pastLoopPhase = (spine: Spine): boolean => {
+  const index = PHASE_ORDER.indexOf((spine.progress.current_phase ?? "") as (typeof PHASE_ORDER)[number])
+  return index > PHASE_ORDER.indexOf("S-5")
+}
+
+/**
+ * BUG-03: màn bị để trống (`placeholder`) mà KHÔNG đi qua cổng S-5.1 của chính nó ⇒ không ai chủ động
+ * quyết để lại màn đó. Trước đây màn như vậy lặng lẽ rơi khỏi hàng đợi: §3.2.1 chỉ còn tiêu đề, không cờ
+ * nào bắt, và panel Tiến độ khoá luôn 5 step của nó. Cờ vàng (không chặn ký) kèm `remediation_step` mở lại
+ * được vòng S-5 của màn.
+ */
+const screenPlaceholder = (spine: Spine, atBaseline: boolean): FlagCandidate[] => {
+  if (!atBaseline && !pastLoopPhase(spine)) return []
+  const decided = new Set(
+    spine.steps.filter((st) => st.status === "accepted" && st.id.startsWith("S-5.1@")).map((st) => st.id.slice("S-5.1@".length))
+  )
+  return spine.screens
+        .filter((s) => s.detail_status === "placeholder" && !decided.has(s.id))
+        .map((s) => ({
+          level: "yellow" as const,
+          rule_id: "screen_placeholder",
+          section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
+          target_id: s.id,
+          message: `Màn ${s.id} "${s.name}" bị để trống mà chưa qua cổng S-5.1 — mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
+          remediation_step: `S-5.1@${s.id}`
+        }))
+}
+
+/**
+ * BUG-12: function NỀN (không thuộc màn nào, do S-4.4 sinh: nhắc lịch, nhả giữ chỗ, no-show, webhook) mà
+ * không use case nào tham chiếu — thường là thiếu hẳn use case cho một cơ chế chạy theo lịch, nên §2.2
+ * không hề nhắc tới nó. Function của màn không tính: chúng đã hiện trong mô tả màn.
+ */
+const functionWithoutUseCase = (spine: Spine): FlagCandidate[] => {
+  const used = new Set(spine.use_cases.flatMap((u) => u.function_ids))
+  return spine.functions
+    .filter((f) => f.screen_id === null && !used.has(f.id))
+    .map((f) => ({
+      level: "yellow" as const,
+      rule_id: "function_without_uc",
+      section_id: `function:${f.id}`,
+      target_id: f.id,
+      message: `Chức năng nền "${f.name}" không thuộc use case nào — thiếu use case (vd cơ chế chạy theo lịch) hay thiếu liên kết?`,
+      remediation_step: "S-3.2"
+    }))
 }
 
 const screenPendingAtBaseline = (spine: Spine): FlagCandidate[] =>
@@ -698,7 +751,21 @@ interface ScanItem {
 const ownedTexts = (spine: Spine): ScanItem[] => {
   const p = spine.project
   return [
-    { path: "project", target_id: null, section: "fixed:1", step: "S-2.1", fields: { name: p.name, system_name: p.system_name, vision: p.vision, goals: p.goals, release_scope: p.release_scope } },
+    // BUG-11: `project.name` là tên user đặt cho dự án (tiếng Việt là bình thường). Nó chỉ lọt vào tài liệu
+    // khi CHƯA có `system_name`; đã chốt tên hệ thống tiếng Anh rồi thì đừng bắt user đổi tên dự án nữa.
+    {
+      path: "project",
+      target_id: null,
+      section: "fixed:1",
+      step: p.system_name?.trim() ? "B-0.1" : "S-2.1",
+      fields: {
+        ...(p.system_name?.trim() ? {} : { name: p.name }),
+        system_name: p.system_name,
+        vision: p.vision,
+        goals: p.goals,
+        release_scope: p.release_scope
+      }
+    },
     ...spine.actors.map((a) => ({
       path: `actors[id=${a.id}]`,
       target_id: a.id,
@@ -778,6 +845,8 @@ export const runDeterministicCheck = (
     ...nfrMissingNumber(spine),
     ...useCaseRelations(spine),
     ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine)] : []),
+    ...screenPlaceholder(spine, options.atBaseline ?? false),
+    ...functionWithoutUseCase(spine),
     ...cardinality(spine),
     ...useCaseFloating(spine),
     ...useCaseAccountAccessRelation(spine),

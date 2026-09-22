@@ -95,7 +95,9 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
-    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
+    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length,
+    // `meter.roundCost` (gate hiện "x credit") đọc thô các dòng usage của vòng
+    find: (filter: Filter) => ({ lean: async () => usages.filter((r) => matches(r, filter)).map((r) => ({ cost: r.cost })) })
   }
   const withMethods = (doc: Doc | null) =>
     doc
@@ -352,7 +354,7 @@ const walkToLastStep = async (deps: Partial<StepRunnerDeps>): Promise<string[]> 
 }
 
 describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => {
-  it("walks every step, fixes N at S-4.1, batches a 15-function screen, signs off core screens and leaves placeholders alone", async () => {
+  it("walks every step, fixes N at S-4.1, batches a 15-function screen, and details EVERY screen (model cannot leave one as placeholder)", async () => {
     seedSpine()
     seedSession()
     const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor, renderDeps: renderStub() }
@@ -366,24 +368,22 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(final.functions.some((f) => f.screen_id === null), "S-4.4 must add a nonscreen function").toBe(true)
     expect(totalSteps(final), "N = 4 screens + 1 nonscreen round").toBe(51 + 5 * 5)
 
-    // ── the loop ran only for the two core screens plus @nonscreen ────────────────────────────────
+    // ── FLF-177 BUG-03: the mock model still asks for placeholders at S-4.1, but only the user may leave a
+    // screen out ⇒ every screen gets its S-5 round (4 screens + @nonscreen) ───────────────────────────
     const loopKeysRun = [...new Set(visited.filter((id) => id.includes("@")).map((id) => id.split("@")[1]))]
-    expect(loopKeysRun).toEqual(["S91", "S92", "nonscreen"])
-    expect(visited.filter((id) => id.startsWith("S-5.")).length, "5 loop steps per key").toBe(15)
+    expect(loopKeysRun).toEqual(["S91", "S92", "S93", "S94", "nonscreen"])
+    expect(visited.filter((id) => id.startsWith("S-5.")).length, "5 loop steps per key").toBe(25)
     expect(visited).toContain("S-4.1")
     expect(visited).toContain("S-8.1")
 
     // ── S-5.1 moved the cursor; the @nonscreen round cleared it ───────────────────────────────────
     expect(final.progress.screen_cursor, "the last loop was @nonscreen").toBeNull()
 
-    // ── S-5.5 accept signed the core screens off; placeholders untouched ──────────────────────────
+    // ── S-5.5 accept signed every screen off ─────────────────────────────────────────────────────
     const byId = new Map(final.screens.map((s) => [s.id, s]))
-    expect(byId.get("S91")!.detail_status).toBe("signed_off")
-    expect(byId.get("S92")!.detail_status).toBe("signed_off")
-    expect(byId.get("S93")!.detail_status).toBe("placeholder")
-    expect(byId.get("S94")!.detail_status).toBe("placeholder")
+    for (const id of ["S91", "S92", "S93", "S94"]) expect(byId.get(id)!.detail_status).toBe("signed_off")
 
-    // Placeholder screens keep their functions[] frame and therefore raise no screen_pending_at_baseline
+    // No screen left pending ⇒ no screen_pending_at_baseline
     expect(final.functions.filter((f) => f.screen_id === "S93")).toHaveLength(1)
     expect(final.functions.filter((f) => f.screen_id === "S94")).toHaveLength(1)
     expect(final.screens.some((s) => s.detail_status === "pending")).toBe(false)
@@ -480,6 +480,13 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     // The rest of S91's loop is skipped — nextStep jumps to the next screen
     const next = nextStep({ screens: afterGate.screens, functions: afterGate.functions, steps: afterGate.steps })
     expect(next?.id).toBe("S-5.1@S92")
+
+    // FLF-177 BUG-03: the user can come back — re-running S-5.1 of a placeholder screen reopens its loop
+    const { emit: emitReopen } = collectEvents()
+    await runStep(PROJECT, "S-5.1@S91", SESSION, USER, emitReopen, deps)
+    const reopened = (await repo.get(PROJECT))!
+    expect(reopened.screens.find((s) => s.id === "S91")!.detail_status).toBe("in_progress")
+    expect(nextStep({ screens: reopened.screens, functions: reopened.functions, steps: reopened.steps })?.id).toBe("S-5.1@S91")
   })
 
   it("every content SKILL.md of this task is <= 150 lines and its writes[] stay inside the registry writes of its steps", () => {

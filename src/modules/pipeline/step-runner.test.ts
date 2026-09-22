@@ -79,7 +79,9 @@ const db = vi.hoisted(() => {
       Object.assign(row, copy(update.$set))
       return before
     },
-    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
+    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length,
+    // `meter.roundCost` (gate hiện "x credit") đọc thô các dòng usage của vòng
+    find: (filter: Filter) => ({ lean: async () => usages.filter((r) => matches(r, filter)).map((r) => ({ cost: r.cost })) })
   }
   const withMethods = (doc: Doc | null) =>
     doc
@@ -144,6 +146,7 @@ import { orderedSteps } from "./step-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
 import { runStep, submitAnswer, CALL_LIMIT, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { stepEventSchema, type StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -222,6 +225,7 @@ const collectEvents = () => {
 let actualApplyTransaction: typeof applyTransaction
 
 beforeEach(async () => {
+  resetMemoryRuns()
   db.reset()
   const actual = await vi.importActual<typeof import("../spine/op-engine.js")>("../spine/op-engine.js")
   actualApplyTransaction = actual.applyTransaction
@@ -398,7 +402,7 @@ describe("step-runner: F1 — usage Elicit ghi TRƯỚC change nội dung đầu
   })
 })
 
-describe("step-runner: khoá in-process theo step (F2)", () => {
+describe("step-runner: khoá step theo lượt chạy (F2 + FLF-177 WP-4)", () => {
   it("hai runStep đồng thời cùng step ⇒ request thứ hai 409 STEP_NOT_RUNNABLE, không đụng model; request đầu chạy trọn vẹn", async () => {
     seedSpine()
     seedSession(true)
@@ -419,6 +423,72 @@ describe("step-runner: khoá in-process theo step (F2)", () => {
 
     await p1 // không ném — request đầu (giữ khoá) chạy trọn vẹn
     expect(events1.some((e) => e.type === "gate_ready")).toBe(true)
+  })
+})
+
+describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG-32)", () => {
+  it("phát stage theo từng giai đoạn và answer_received ngay khi nhận trả lời", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Actor chính là ai?", suggestedAnswers: [], multiple: false }]),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub()
+    }
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, deps)
+
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    // Đang chờ trả lời: run-state giữ câu hỏi để reload dựng lại đúng form (BUG-07)
+    const waiting = await getRunState(PROJECT, "S-3.1")
+    expect(waiting).toMatchObject({ status: "waiting_answer", stage: "ask" })
+    expect(waiting?.questions).toHaveLength(1)
+
+    submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "Quản trị viên" }])
+    await run
+
+    const stages = events.filter((e) => e.type === "stage").map((e) => (e as Extract<StepEvent, { type: "stage" }>).stage)
+    expect(stages).toContain("intake")
+    expect(stages).toContain("ask")
+    expect(stages).toContain("draft")
+    expect(stages).toContain("gate")
+    // BUG-32: trạng thái đổi ngay khi nhận trả lời, không đợi tới lượt draft
+    const answerReceived = events.findIndex((e) => e.type === "answer_received")
+    const firstDraft = events.findIndex((e) => e.type === "draft")
+    expect(answerReceived).toBeGreaterThan(-1)
+    expect(answerReceived).toBeLessThan(firstDraft)
+
+    // Tới gate: khoá đã nhả, gate payload giữ lại để reload dựng lại thẻ duyệt
+    const atGate = await getRunState(PROJECT, "S-3.1")
+    expect(atGate).toMatchObject({ status: "gate", stage: "gate" })
+    expect(atGate?.gate_payload).toMatchObject({ type: "gate_ready" })
+    expect((atGate?.gate_payload as { no_change_reason?: string }).no_change_reason).toBeTruthy()
+  })
+
+  it("huỷ lượt đang chờ trả lời ⇒ nhả khoá, chạy lại được ngay (BUG-05)", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Actor chính là ai?", suggestedAnswers: [], multiple: false }]),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub(),
+      signal: controller.signal,
+      abort: controller
+    }
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, deps).catch((e: unknown) => e)
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+
+    const cancelled = await cancelRun(PROJECT, "S-3.1")
+    expect(cancelled.cancelled).toBe(true)
+    expect(controller.signal.aborted).toBe(true)
+    expect(await run).toBeInstanceOf(ApiError)
+
+    // Chạy lại ngay, không phải chờ hết thời gian chờ trả lời
+    const { events: events2, emit: emit2 } = collectEvents()
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit2, { ...deps, signal: undefined, abort: undefined, elicitExecutor: async () => elicitReply() })
+    expect(events2.some((e) => e.type === "gate_ready")).toBe(true)
   })
 })
 

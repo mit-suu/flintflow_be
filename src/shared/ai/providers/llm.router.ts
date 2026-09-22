@@ -9,7 +9,8 @@ import { callMockLLM } from "./mock.provider.js"
 
 export const callLLM = async (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  signal?: AbortSignal
 ): Promise<LLMResponse> => {
   // `AI_PROVIDER_OVERRIDE` đè frontmatter của skill cho MỌI lượt gọi. Chỉ để CI / smoke test chạy hết
   // một step mà không gọi mạng (`mock`); mọi môi trường thật để trống (T24, `docs/ops.md`).
@@ -24,12 +25,12 @@ export const callLLM = async (
       return await callGemini(prompt, providerConfig)
     case "glm":
     case "modal":
-      return await callGLM(prompt, providerConfig)
+      return await callGLM(prompt, providerConfig, signal)
     case "mock":
       return await callMockLLM(prompt, providerConfig)
     default:
       if (providerConfig.model?.toLowerCase().includes("glm")) {
-        return await callGLM(prompt, providerConfig)
+        return await callGLM(prompt, providerConfig, signal)
       }
       throw new AiActionError(
         500,

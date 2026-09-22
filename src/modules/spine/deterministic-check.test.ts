@@ -23,19 +23,61 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("11 luật đỏ + 11 luật vàng; 3 luật không waive được", () => {
+  it("11 luật đỏ + 14 luật vàng; 3 luật không waive được", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(11)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(12)
+    // FLF-177: thêm screen_placeholder (BUG-03) và function_without_uc (BUG-12)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(14)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
 
 describe("runDeterministicCheck", () => {
-  it("fixture đầy đủ: 0 cờ đỏ (kể cả atBaseline), cờ vàng chỉ có thể là screen_no_function", () => {
+  it("fixture đầy đủ: 0 cờ đỏ (kể cả atBaseline); cờ vàng chỉ là screen_no_function, screen_placeholder, function_without_uc", () => {
     expect(red(runDeterministicCheck(FIXTURE))).toEqual([])
     expect(red(runDeterministicCheck(FIXTURE, [], { atBaseline: true }))).toEqual([])
     const yellowRules = new Set(runDeterministicCheck(FIXTURE).filter((f) => f.level === "yellow").map((f) => f.rule_id))
-    for (const r of yellowRules) expect(["screen_no_function"]).toContain(r)
+    for (const r of yellowRules) expect(["screen_no_function", "screen_placeholder", "function_without_uc"]).toContain(r)
+  })
+
+  it("BUG-03: màn placeholder chưa qua cổng S-5.1 của nó ⇒ cờ vàng mở lại được; qua cổng rồi thì thôi", () => {
+    const placeholders = FIXTURE.screens.filter((s) => s.detail_status === "placeholder").map((s) => s.id)
+    expect(placeholders.length).toBeGreaterThan(0)
+    const flags = byRule(runDeterministicCheck(FIXTURE), "screen_placeholder")
+    expect(flags.map((f) => f.target_id).sort()).toEqual([...placeholders].sort())
+    expect(flags[0]).toMatchObject({ level: "yellow", remediation_step: `S-5.1@${flags[0].target_id}` })
+
+    // user đã chốt "để sau" ở cổng S-5.1 của màn ⇒ không còn cờ
+    const decided = variant((s) =>
+      s.steps.push({ id: `S-5.1@${placeholders[0]}`, status: "accepted", first_seq: null, last_seq: null, accepted_at: new Date().toISOString() })
+    )
+    expect(byRule(runDeterministicCheck(decided), "screen_placeholder").map((f) => f.target_id)).not.toContain(placeholders[0])
+  })
+
+  it("BUG-03: chưa qua S-5 thì chưa cảnh báo màn placeholder", () => {
+    const early = variant((s) => (s.progress.current_phase = "S-4"))
+    expect(byRule(runDeterministicCheck(early), "screen_placeholder")).toEqual([])
+  })
+
+  it("BUG-12: function nền không use case nào tham chiếu ⇒ cờ vàng về S-3.2", () => {
+    const withBackground = variant((s) => {
+      s.functions.push({
+        id: "FN900",
+        screen_id: null,
+        feature_id: s.features[0].id,
+        order: 99,
+        name: "Send Appointment Reminder",
+        trigger: "24h before the appointment",
+        description: "",
+        normal: [],
+        abnormal: [],
+        validations: [],
+        business_rule_ids: [],
+        priority: null
+      })
+    })
+    expect(byRule(runDeterministicCheck(withBackground), "function_without_uc")).toContainEqual(
+      expect.objectContaining({ target_id: "FN900", level: "yellow", remediation_step: "S-3.2" })
+    )
   })
 
   it("xoá actor thẳng tay ⇒ dead_reference ở §2.2.2, remediation S-3.2", () => {
@@ -111,6 +153,23 @@ describe("runDeterministicCheck", () => {
     expect(flags.every((f) => f.level === "yellow" || f.rule_id === "dead_reference")).toBe(true)
   })
 
+
+  it("BUG-11: đã có system_name tiếng Anh ⇒ không quét project.name nữa", () => {
+    const viName = (s: Spine) => (s.project.name = "Phòng khám Minh An")
+    const withoutSystemName = variant((s) => {
+      viName(s)
+      s.project.system_name = null
+    })
+    expect(byRule(runDeterministicCheck(withoutSystemName), "non_english_content")).toMatchObject([
+      { section_id: "fixed:1", remediation_step: "S-2.1" }
+    ])
+
+    const withSystemName = variant((s) => {
+      viName(s)
+      s.project.system_name = "Minh An Booking"
+    })
+    expect(byRule(runDeterministicCheck(withSystemName), "non_english_content").filter((f) => f.section_id === "fixed:1")).toEqual([])
+  })
 
   it("quan hệ use case hỏng: tự tham chiếu, vòng, cùng cặp hai quan hệ ⇒ cờ đỏ", () => {
     const relation = (s: Spine) => byRule(runDeterministicCheck(s), "usecase_relation_invalid")

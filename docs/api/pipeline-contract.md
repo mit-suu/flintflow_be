@@ -115,6 +115,9 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 2 | `GET /projects/:id/progress` | T09 ✔ | — | `progressResponseSchema` | — |
 | 3 | `GET /projects/:id/steps` | T12/T13 | — | `stepsResponseSchema` | — |
 | 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
+| 4b | `GET /projects/:id/steps/:stepId/run-state` | FLF-177 | — | `runStateResponseSchema` (null nếu step chưa chạy lần nào) | `PROJECT_NOT_FOUND` |
+| 4c | `POST /projects/:id/steps/:stepId/cancel` | FLF-177 | `cancelRunRequestSchema` | `cancelRunResponseSchema` | `PROJECT_NOT_FOUND` |
+| 4d | `GET /projects/:id/run-state/active` | FLF-177 | — | `runStateResponseSchema` hoặc `null` | `PROJECT_NOT_FOUND` |
 | 5 | `POST /projects/:id/steps/:stepId/answer` | T13 | `stepAnswerRequestSchema` (≤ 20 answer, mỗi chuỗi ≤ 4000 ký tự) | `{ accepted: true }`, luồng SSE của `/run` tiếp tục | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE` |
 | 6 | `POST /projects/:id/steps/:stepId/gate` | T13 | `gateRequestSchema` (`session_id` bắt buộc; `note` ≤ 2000 ký tự) | `gateResponseSchema` | `NOT_PIPELINE_SESSION`, `STEP_NOT_RUNNABLE`, `REGENERATE_LIMIT`, `CALL_LIMIT`, `NEEDS_USER_INPUT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
 | 7 | `POST /projects/:id/changes` | T08 ✔ (`ops`) · T17 (`instruction`) | `changesRequestSchema` | `applyResultResponseSchema` | `SPINE_VERSION_CONFLICT`, `OP_INVALID`, `INVARIANT_VIOLATION`, `NEEDS_CLARIFICATION`, `INSUFFICIENT_CREDIT`, `NOT_IMPLEMENTED` |
@@ -180,13 +183,19 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `type` | Khi | `data` |
 | --- | --- | --- |
 | `intake` | Lần đầu vào phase: liệt kê field còn trống | `{ step_id, phase, empty_fields[] }` |
+| `stage` | Runner chuyển giai đoạn (đọc → hỏi → soạn → kiểm → vẽ → duyệt) hoặc sang lô function kế | `{ step_id, stage, label_vi, detail_vi?, batch?, est_ms? }` |
+| `heartbeat` | Mỗi 10 giây trong lúc chờ model/render — để FE biết lượt còn sống | `{ step_id, stage, elapsed_ms }` |
 | `elicit` | Model đang hỏi/giải thích (stream chữ) | `{ step_id, delta }` |
 | `answer_needed` | Cần user trả lời trước khi Draft | `{ step_id, questions[] }` |
+| `answer_received` | Ngay khi `/answer` tới — trạng thái đổi luôn, không chờ lượt Draft | `{ step_id, count }` |
 | `draft` | Bắt đầu một lượt Draft (kể cả retry schema) | `{ step_id, attempt }` |
-| `ops_applied` | Transaction của step đã ghi | `{ step_id, txn, spine_version, changes[] }` |
+| `draft_retry` | Model trả kết quả không hợp lệ, đang thử lại | `{ step_id, attempt, max, reason_vi }` — lời thường, không mã lỗi |
+| `ops_applied` | Transaction của step đã ghi | `{ step_id, txn, spine_version, changes[], summary[]? }` |
 | `render` | Mỗi diagram render xong | `{ step_id, diagram_id, render_status, error? }` |
-| `flags` | Deterministic check chạy lại | `{ step_id, red_open, yellow_open }` |
-| `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used }` |
+| `flags` | Deterministic check chạy lại | `{ step_id, red_open, yellow_open, red_delta?, yellow_delta?, new_assumptions[]? }` |
+| `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used, summary[]?, new_assumptions[]?, flags?, duration_ms?, credits_used?, doc_progress?, no_change_reason? }` |
+| `auto_accepted` | Step "yên lặng" được tự Accept (chế độ duyệt Cân bằng/Nhanh) | `{ step_id, reason_vi }` |
+| `phase_progress` | Chạy liền cả phase: đang ở step thứ mấy | `{ step_id, phase, step_index, step_total, needs_user }` |
 | `error` | Dừng step | `{ step_id, code, message, retryable }` — `code` thuộc bảng 0.3 |
 
 Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):

@@ -28,7 +28,9 @@ export const GLM_REQUEST_OPTIONS = {
 
 export const callGLM = async (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  /** Huỷ lượt chạy step ⇒ huỷ luôn request đang mở (FLF-177 BUG-05). */
+  signal?: AbortSignal
 ): Promise<LLMResponse> => {
   const tokenId = (env.MODAL_PROXY_TOKEN_ID || process.env.MODAL_PROXY_TOKEN_ID)?.trim()
   const tokenSecret = (env.MODAL_PROXY_TOKEN_SECRET || process.env.MODAL_PROXY_TOKEN_SECRET)?.trim()
@@ -76,7 +78,7 @@ export const callGLM = async (
       top_p: 0.9,
       stream: true,
       ...GLM_REQUEST_OPTIONS
-    } as OpenAI.ChatCompletionCreateParamsStreaming)) as AsyncIterable<OpenAI.ChatCompletionChunk>
+    } as OpenAI.ChatCompletionCreateParamsStreaming, signal ? { signal } : undefined)) as AsyncIterable<OpenAI.ChatCompletionChunk>
 
     let text = ""
     let reasoningLength = 0
@@ -85,6 +87,7 @@ export const callGLM = async (
     let completionTokens = 0
 
     for await (const chunk of stream) {
+      if (signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
       const choice = chunk.choices?.[0]
       const delta = choice?.delta?.content
       if (delta) {
