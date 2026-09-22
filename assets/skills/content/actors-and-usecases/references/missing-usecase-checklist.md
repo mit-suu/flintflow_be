@@ -22,14 +22,26 @@ adding a use case that contradicts scope.
 
 ## 3. Notifications
 
-If any `system`/`time` actor produces an async event (job finishes, payment settles, gate opens), is
-there a use case for the human actor receiving/consuming that notification?
+Receiving a notification is **not** a use case. The notification actor (email, SMS, push gateway) is a
+participant of the use case whose flow changes a state and emits the event — "Assign Order to Driver" sends
+the assignment SMS — never of a use case that only reads or displays a state ("Track Order", "View Order
+Status"). Add a use case only when the recipient must then make a decision, and name it after that decision
+("Respond to Failed Delivery"). Never add a passive "Receive …" or "View Notifications" use case.
 
-## 4. Forgotten password / account recovery
+## 4. Account access
 
-Any product with authenticated human actors needs this unless auth is explicitly out of scope or deferred
-to an external identity provider (in which case the external provider is a `system` actor and this use
-case does not apply here).
+Every human actor's access is decided at S-3.1 (`self-registers` · `invited` · `identity provider` · `no
+sign-in`). Check the account use cases match it, with `actor_ids` = exactly the actors concerned:
+
+| Access | Account use cases |
+| --- | --- |
+| `self-registers` | Register Account, Log In, Reset Password |
+| `invited` | Log In, Reset Password; "Create <Actor> Account" (or "Invite …") for the actor that manages them |
+| `identity provider` | Log In, with the provider `system` actor as participant; no Register/Reset |
+| `no sign-in` | none |
+
+An actor with no decided access is a S-3.1 gap: write the one combined `assumptions[]` entry, do not guess
+silently.
 
 ## 5. Audit log
 

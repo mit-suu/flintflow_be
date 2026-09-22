@@ -1,7 +1,7 @@
 {
   "step_id": "S-3.3",
   "skill_id": "actors-and-usecases",
-  "notes": "Sweep themes: admin already covered (UC07/UC08); added support, notifications, forgotten password, audit log and error handling.",
+  "notes": "Sweep themes: admin already covered (UC07/UC08); added support, a notification that needs a decision, forgotten password, audit log and error handling.",
   "ops": [
     {
       "op": "add",
@@ -12,8 +12,8 @@
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC13", "name": "Receive In-App Notification", "actor_ids": ["A03"], "function_ids": [], "description": "The founder sees an in-app notification when a phase completes or a credit purchase settles.", "includes": [], "extends": [] },
-      "reason": "S-3.3 sweep: notifications"
+      "value": { "id": "UC13", "name": "Respond to Failed Credit Purchase", "actor_ids": ["A03"], "function_ids": [], "description": "When the payment gateway reports a failed credit purchase, the founder decides whether to retry the payment or choose another package.", "includes": [], "extends": [] },
+      "reason": "S-3.3 sweep: notifications — the recipient must decide, so this is a use case, not a passive receive"
     },
     {
       "op": "add",
