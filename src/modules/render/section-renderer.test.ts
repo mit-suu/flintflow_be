@@ -297,6 +297,7 @@ describe("buildRecordOfChanges", () => {
     at: "2026-09-01T09:00:00.000Z",
     by: "u1",
     step_id: "S-2.1",
+    path: "actors[id=A01].name",
     ...over
   })
 
@@ -313,9 +314,23 @@ describe("buildRecordOfChanges", () => {
     ])
   })
 
-  it("không có reason nào ⇒ mô tả rơi về step_id", () => {
-    const rows = buildRecordOfChanges([change({ reason: null, step_id: "S-3.1" })])
-    expect(rows[0].description).toBe("Step S-3.1")
+  it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", reason: "step-runner: elicit turn" }),
+      change({ txn: "t2", reason: "gate: accept", at: "2026-09-02T09:00:00.000Z" }),
+      change({ txn: "t3", reason: null, at: "2026-09-03T09:00:00.000Z" }),
+      change({ txn: "t4", reason: "Đổi tên actor theo yêu cầu của khách", at: "2026-09-04T09:00:00.000Z" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["Đổi tên actor theo yêu cầu của khách"])
+  })
+
+  it("FLF-204: mốc baseline luôn có một dòng, mô tả bằng tiếng Anh", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[id=BL001]", reason: "Ký baseline v1.0" }),
+      change({ txn: "t1", op: "set", path: "steps[id=S-9.5].status", reason: "step-runner: init step" })
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].description).toBe("Baseline v1.0 signed")
   })
 
   it("changes rỗng ⇒ mảng rỗng", () => {
@@ -323,13 +338,16 @@ describe("buildRecordOfChanges", () => {
   })
 
   it("không truyền resolveInCharge ⇒ giữ nguyên by thô (mặc định identity)", () => {
-    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010" })])
+    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010", reason: "khách yêu cầu" })])
     expect(rows[0].in_charge).toBe("650000000000000000000010")
   })
 
   it("review T7: resolveInCharge được gọi với by của change đầu lô để tra tên hiển thị", () => {
     const rows = buildRecordOfChanges(
-      [change({ txn: "t1", by: "650000000000000000000010" }), change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z" })],
+      [
+        change({ txn: "t1", by: "650000000000000000000010", reason: "khách yêu cầu" }),
+        change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z", reason: "waive vì ngoài phạm vi bản này" })
+      ],
       (by) => (by === "system" ? "System" : `Resolved:${by}`)
     )
     expect(rows[0].in_charge).toBe("Resolved:650000000000000000000010")

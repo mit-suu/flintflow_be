@@ -56,6 +56,17 @@ Two habits decide whether this phase is useful:
   question turns per phase, fill gaps with assumptions). Explain the trade-off in one sentence and let
   the user choose; do not choose silently.
 
+### Write the rule the user actually stated (B-0.1, B-1.x)
+
+A policy sentence has three parts: **the trigger, the window, and the consequence**. Keep them apart, and
+never merge two policies into one rule. Lượt test: "huỷ hoặc đổi lịch sau hạn 2 giờ thì mất cọc" was
+written down as a *no-show* rule — two different triggers (the customer cancelled late vs the customer
+never showed up) collapsed into one, so the document stated a policy nobody agreed to.
+
+When the user gives a number (2 hours, 15 minutes, 50.000đ), it belongs in the rule verbatim. When they
+give a policy you are not sure how to classify, write it with the user's own trigger wording and ask at
+the next turn — do not pick the neighbouring concept because it sounds close.
+
 ## B-1 — The brief (6 steps)
 
 Each step: ask what is missing, then write. `project.vision` and `project.goals[]` are the only

@@ -23,10 +23,11 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("11 luật đỏ + 14 luật vàng; 3 luật không waive được", () => {
+  it("11 luật đỏ + 15 luật vàng; 3 luật không waive được", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(11)
-    // FLF-177: thêm screen_placeholder (BUG-03) và function_without_uc (BUG-12)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(14)
+    // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
+    // derived_from_changed_assumption (BUG-14)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(15)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -56,6 +57,34 @@ describe("runDeterministicCheck", () => {
   it("BUG-03: chưa qua S-5 thì chưa cảnh báo màn placeholder", () => {
     const early = variant((s) => (s.progress.current_phase = "S-4"))
     expect(byRule(runDeterministicCheck(early), "screen_placeholder")).toEqual([])
+  })
+
+  it("BUG-14: sửa giả định mà phần tử sinh ra từ nó không đổi theo ⇒ cờ vàng", () => {
+    const nfr = FIXTURE.nfrs[0]
+    const withAssumption = variant((s) => {
+      s.assumptions.push({
+        id: "AS28",
+        path: `nfrs[id=${nfr.id}].statement`,
+        statement: "Uptime is 99% during business hours",
+        rationale: "User chốt 99%",
+        origin_step_id: "S-6.3",
+        status: "confirmed",
+        confirmed_at: "2026-09-22T10:00:00.000Z"
+      })
+    })
+    // Giả định được sửa ở seq 20; NFR lần cuối được ghi ở seq 10 ⇒ NFR đang lạc hậu
+    const changes = [
+      { seq: 10, path: `nfrs[id=${nfr.id}].statement`, before: null, value: "x", step_id: "S-6.3" },
+      { seq: 20, path: "assumptions[id=AS28].statement", before: "cũ", value: "mới", step_id: null }
+    ]
+    const flags = byRule(runDeterministicCheck(withAssumption, changes), "derived_from_changed_assumption")
+    expect(flags).toHaveLength(1)
+    expect(flags[0]).toMatchObject({ level: "yellow", target_id: "AS28" })
+    expect(flags[0].message).toContain(nfr.id)
+
+    // NFR được cập nhật sau đó ⇒ cờ biến mất
+    const after = [...changes, { seq: 30, path: `nfrs[id=${nfr.id}].statement`, before: "x", value: "y", step_id: "S-6.3" }]
+    expect(byRule(runDeterministicCheck(withAssumption, after), "derived_from_changed_assumption")).toEqual([])
   })
 
   it("BUG-12: function nền không use case nào tham chiếu ⇒ cờ vàng về S-3.2", () => {

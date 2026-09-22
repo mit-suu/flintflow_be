@@ -11,6 +11,7 @@
 
 import type { Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
+import { tryResolve } from "./path-resolver.js"
 import { loopKeyOfFunction, ownerStepOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
@@ -52,6 +53,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("actor_name_shape", "yellow", true),
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
+  rule("derived_from_changed_assumption", "yellow", true),
   rule("function_without_uc", "yellow", true)
 ])
 
@@ -319,6 +321,40 @@ const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
       message: `Giả định ${a.id} chưa được xác nhận: ${a.statement}`,
       remediation_step: a.origin_step_id || "S-9.1"
     }))
+
+/**
+ * BUG-14: user sửa hoặc bác bỏ một giả định, nhưng thứ ĐƯỢC SINH RA TỪ nó không đổi theo — lượt test có
+ * AS28 sửa thành uptime 99% trong khi NFR N08 vẫn ghi ≥ 99.5%, và bản ký xuất ra mang số sai.
+ *
+ * Liên kết đã có sẵn: `assumptions[].path` trỏ đúng field mà giả định đang đỡ. Nếu giả định được sửa
+ * (statement/status) SAU lần cuối field đó được ghi, thì field đang lạc hậu so với quyết định mới.
+ */
+const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {
+  const lastSeqByPrefix = (prefix: string): number => {
+    let last = 0
+    for (const c of changes) if (c.path === prefix || c.path.startsWith(`${prefix}.`) || c.path.startsWith(`${prefix}[`)) last = Math.max(last, c.seq)
+    return last
+  }
+
+  return spine.assumptions.flatMap((assumption): FlagCandidate[] => {
+    if (tryResolve(spine, assumption.path) === null) return []
+    const decidedAt = Math.max(lastSeqByPrefix(`assumptions[id=${assumption.id}].statement`), lastSeqByPrefix(`assumptions[id=${assumption.id}].status`))
+    if (decidedAt === 0) return []
+    const targetAt = lastSeqByPrefix(assumption.path)
+    if (targetAt >= decidedAt) return []
+    const verb = assumption.status === "rejected" ? "bị bác bỏ" : "được sửa"
+    return [
+      {
+        level: "yellow",
+        rule_id: "derived_from_changed_assumption",
+        section_id: sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4",
+        target_id: assumption.id,
+        message: `Giả định ${assumption.id} ${verb} ("${assumption.statement}") nhưng "${assumption.path}" chưa cập nhật theo`,
+        remediation_step: ownerStepOf(sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4", spine)
+      }
+    ]
+  })
+}
 
 const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {
   const states = computeSectionStates(spine, changes).filter((s) => s.required && !s.derived)
@@ -846,6 +882,7 @@ export const runDeterministicCheck = (
     ...useCaseRelations(spine),
     ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine)] : []),
     ...screenPlaceholder(spine, options.atBaseline ?? false),
+    ...derivedFromChangedAssumption(spine, changes),
     ...functionWithoutUseCase(spine),
     ...cardinality(spine),
     ...useCaseFloating(spine),

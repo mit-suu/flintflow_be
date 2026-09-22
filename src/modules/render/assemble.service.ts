@@ -326,6 +326,7 @@ interface ChangeRecordDoc {
   by: string
   reason: string | null
   op: string
+  path: string
   step_id: string | null
 }
 
@@ -342,6 +343,7 @@ const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[
     by: d.by,
     reason: d.reason,
     op: d.op,
+    path: d.path,
     step_id: d.step_id
   }))
 }
