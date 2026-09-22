@@ -179,6 +179,9 @@ export const itemsFromAi = (
 
 // ─── ảnh diagram (mode 1 v3 phase 5) ─────────────────────────────
 
+/** Mã lỗi cho biết môi trường không đọc được ảnh (không phải lỗi tạm thời) ⇒ bỏ qua ảnh thay vì dừng I-4. */
+const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
+
 /** Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. */
 export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<BlockLite, "block_id" | "kind" | "text">[]): string => {
   const i = sectionBlocks.findIndex((b) => b.block_id === img.block_id)
@@ -339,6 +342,12 @@ export const runExtraction = async (projectId: string, userId: string, importId:
         },
         { images: [image] }
       )
+      // Môi trường không có vision (thiếu GEMINI_API_KEY / provider không nhận ảnh) ⇒ không dừng import vì ảnh: giữ ảnh
+      // gốc như EMF (cờ vàng lúc finalize) — lỗi cấu hình, chạy lại cũng không khá hơn
+      if (!result.ok && result.code && VISION_UNAVAILABLE.has(result.code)) {
+        diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
+        continue
+      }
       if (!result.ok) return pause(result)
       usageId = result.usageId
       const read =

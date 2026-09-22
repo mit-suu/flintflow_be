@@ -301,6 +301,7 @@ Plan: `claude_plan/mode1-v3/phase-5-vision.md`.
 
 - **Ảnh gốc (T3)**: block ảnh của file upload giữ `image_ref` (part `word/media/*`). Ảnh dưới mục FPT không được thay bằng diagram ⇒ phần nối nguyên văn của mục (`custom_sections[].blocks[].image_ref`); bản render (0.0, bản làm việc, version CR) nhúng lại **đúng ảnh gốc** (PNG/JPEG). EMF/WMF / file gốc không còn ⇒ chỗ giữ ảnh + chú thích `original image could not be embedded (<part>)`.
 - **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit / lỗi ⇒ `paused` như lô chữ.
+  Môi trường không có vision (`GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
 - **Field từ ảnh**: `ReviewField.origin` thêm **`vision`**. Độ tin ≤ 0.7 và **luôn** vào `review_fields` (1.9) kể cả bằng ngưỡng — chưa xác nhận thì finalize bỏ. Danh sách tham chiếu (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) từ nhiều nguồn gộp hợp. `screens.flow_to` được trích.
 - **Finalize (1.10)**: ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
 
