@@ -1,7 +1,12 @@
 # Missing use case sweep — S-3.3
 
-Run every theme below against the current actor/use-case list. For each theme, either add the missing use
-case or note (in `notes`, not in the Spine) why it does not apply to this product — do not silently skip.
+Run every theme below against the current actor/use-case list. For each theme with no match, decide which
+of the two it is before writing anything: a **branch of a use case that already exists** (name it in
+`notes` so S-3.4 wires it as `extends`) or a **goal of its own** (add a use case). Note in `notes` — not
+in the Spine — why a theme does not apply. Never silently skip.
+
+The test for "goal of its own": would an actor deliberately open the product to do this? Yes ⇒ standalone
+use case. No, it only happens part-way through another flow ⇒ a branch, and `extends` is where it belongs.
 
 ## 1. Administration
 
@@ -44,3 +49,7 @@ every toast notification.
 Every added use case still follows `usecase-naming.md` (verb + object, full description, `function_ids:
 []`). Do not batch multiple sweep themes into one vague use case — one use case per concrete goal, same
 granularity rule as S-3.2.
+
+Forgotten password is the standing example of a **goal of its own**, not a branch: the user opens the
+product precisely to recover the account, so "Reset Password" stays standalone and does not extend
+"Log In".

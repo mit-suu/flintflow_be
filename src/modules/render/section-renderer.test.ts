@@ -59,7 +59,8 @@ const spine = (): Spine => ({
   ],
   roles: [{ id: "R1", name: "Registered User", actor_id: "A01" }],
   use_cases: [
-    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] }
+    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] },
+    { id: "UC02", name: "Open Dashboard", actor_ids: ["A01"], function_ids: [], description: "Land on the dashboard.", includes: ["UC01"], extends: [] }
   ],
   screens: [
     {
@@ -177,11 +178,15 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
-  it("fixed:2.2.2 — use case table với actor tên và include/extend", () => {
+  it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
     const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table" })
-    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }]])
+    expect(table.type === "table" && table.header.flat().map((r) => r.text)).toEqual(["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"])
+    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }], [{ text: "" }]])
+    // Cột quan hệ in TÊN use case, không phải id thô
+    expect(table.type === "table" && table.rows[1][4]).toEqual([{ text: "Log In" }])
+    expect(table.type === "table" && table.rows[1][5]).toEqual([{ text: "" }])
   })
 
   it("fixed:3.1.2 — bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {

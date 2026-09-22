@@ -12,8 +12,9 @@
 | `section_stale_at_baseline` | `status(s) = stale` for a mandatory `s` | reconcile, or re-Accept at owner step | ✔ |
 | `section_awaiting_reaccept` | `awaiting_reaccept = true` for a mandatory `s` | owner step's gate | ✔ |
 | `screen_pending_at_baseline` | `screens[].detail_status = pending` | S-5 for that screen | ✔ |
+| `usecase_relation_invalid` | A use case includes/extends itself, sits in an include or extend cycle, or the same pair carries both an include and an extend | S-3.4 | ✔ |
 
-That is 10 rules. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
+That is 11 rules. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
 
 ## Mandatory sections (invariant 1)
 

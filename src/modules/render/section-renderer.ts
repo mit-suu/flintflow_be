@@ -270,21 +270,22 @@ const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
 
 const useCaseTable = (spine: Spine): Block[] => {
   if (spine.use_cases.length === 0) return []
-  const actorName = (id: string) => spine.actors.find((a) => a.id === id)?.name ?? id
+  // Id không phân giải được thì in id: bảng không ném lỗi khi Spine có id chết, đó là việc của
+  // cờ đỏ `dead_reference`.
+  const nameOf = (list: readonly { id: string; name: string }[]) => (id: string) => list.find((x) => x.id === id)?.name ?? id
+  const actorName = nameOf(spine.actors)
+  const useCaseName = nameOf(spine.use_cases)
+  // Bốn cột đầu lấy nguyên văn mẫu FPT §2.2.2; Includes/Extends là phần mở rộng.
   return [
     tableBlock(
-      ["ID", "Name", "Actors", "Description", "Include / Extend"],
+      ["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"],
       spine.use_cases.map((uc) => [
         uc.id,
         uc.name,
         uc.actor_ids.map(actorName).join(", "),
         uc.description,
-        [
-          uc.includes.length > 0 ? `include: ${uc.includes.join(", ")}` : "",
-          uc.extends.length > 0 ? `extend: ${uc.extends.join(", ")}` : ""
-        ]
-          .filter(Boolean)
-          .join("; ")
+        uc.includes.map(useCaseName).join(", "),
+        uc.extends.map(useCaseName).join(", ")
       ])
     )
   ]

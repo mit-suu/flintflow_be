@@ -24,7 +24,7 @@
     {
       "op": "add",
       "path": "use_cases[]",
-      "value": { "id": "UC15", "name": "Handle Step Validation Error", "actor_ids": ["A03"], "function_ids": [], "description": "The founder is shown the specific validation error when a step's draft is rejected and chooses to retry or provide more detail.", "includes": [], "extends": [] },
+      "value": { "id": "UC15", "name": "Recover From Validation Error", "actor_ids": ["A03"], "function_ids": [], "description": "The founder is shown the specific validation error when a step's draft is rejected and chooses to retry or provide more detail.", "includes": [], "extends": [] },
       "reason": "S-3.3 sweep: error handling"
     },
     {
