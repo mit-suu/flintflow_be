@@ -72,7 +72,7 @@ Branch rules and examples: `references/fast-vs-coaching.md`.
 When the call kind is `discovery_step`, you may also emit `ops` for facts the user stated outright, so nothing said is lost:
 
 - `add addendum[]` for material outside the Brief but needed by the SRS (personas, technical constraints, scale numbers, regulations, rejected options). Always set `topic`, `content` (verbatim, user's language), `content_en` (English translation), `target_section` (logical key, e.g. `fixed:4.2.3`).
-- `set project.form_factor | project.stakes | project.working_mode | project.vision` when stated explicitly.
+- `set project.system_name | project.form_factor | project.stakes | project.working_mode | project.vision` when stated explicitly (`system_name` is the English product name the user picked — never a name you suggested but they have not chosen).
 - Never invent values in discovery ops. Uncertain ⇒ ask, do not write.
 
 Op grammar: `draft-to-ops/references/op-grammar.md`.

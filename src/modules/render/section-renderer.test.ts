@@ -5,6 +5,7 @@ import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRend
 const emptySpine = (): Spine => ({
   project: {
     name: "Demo",
+    system_name: null,
     vision: null,
     goals: [],
     type: null,

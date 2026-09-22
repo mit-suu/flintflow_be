@@ -31,6 +31,11 @@ export interface ReleaseScope {
 
 export interface SpineProject {
   name: string
+  /**
+   * FLF-177 — tên hệ thống (tiếng Anh) in trên sơ đồ và tài liệu, tách khỏi tên project làm việc.
+   * `null` ⇒ dùng tên project (Spine trước FLF-177 không có field này).
+   */
+  system_name: string | null
   vision: string | null
   goals: string[]
   type: string | null

@@ -253,3 +253,26 @@ describe("source_hash (DoD T10)", () => {
     expect(usecaseHash(mutate((s) => (s.actors[0].name = "Changed")))).not.toBe(base)
   })
 })
+
+describe("tên hệ thống (FLF-177)", () => {
+  it("boundary use case + sơ đồ ngữ cảnh in `project.system_name`, chưa có ⇒ `project.name`", () => {
+    const named = mutate((s) => (s.project.system_name = "ShipFast Delivery"))
+    for (const part of usecaseParts(named)) expect(part).toContain('rectangle "ShipFast Delivery" {')
+    expect(only(named, "context").puml).toContain('rectangle "ShipFast Delivery" as SYSTEM_')
+
+    const unnamed = mutate((s) => {
+      s.project.system_name = null
+      s.project.name = "Du an giao hang"
+    })
+    expect(usecasePuml(unnamed)).toContain('rectangle "Du an giao hang" {')
+    expect(only(unnamed, "context").puml).toContain('rectangle "Du an giao hang" as SYSTEM_')
+  })
+
+  it("system_name rỗng/khoảng trắng coi như chưa đặt", () => {
+    const blank = mutate((s) => {
+      s.project.system_name = "   "
+      s.project.name = "Du an giao hang"
+    })
+    expect(only(blank, "context").puml).toContain('rectangle "Du an giao hang" as SYSTEM_')
+  })
+})

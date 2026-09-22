@@ -31,6 +31,7 @@ import { listSections } from "../spine/section-registry.js"
 import { computeSectionStates, readiness, type SectionStateView } from "../spine/section-status.js"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
+import { systemName } from "../spine/system-name.js"
 import { Baseline } from "../spine/baseline.model.js"
 // T15 review T5: đọc Change model trực tiếp (chỉ đọc) — projection nhẹ cho §I, không qua
 // spine.repository.listChanges (tải cả before/value, không cần cho Record of Changes).
@@ -541,7 +542,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
 
   const refDoc: RenderedDocument = {
     projectId,
-    projectName,
+    // FLF-177: bìa, tiêu đề và tên file in tên hệ thống; chưa đặt ⇒ tên project như trước
+    projectName: systemName(spine.project, projectName),
     version,
     source,
     generatedAt: deps.now().toISOString(),

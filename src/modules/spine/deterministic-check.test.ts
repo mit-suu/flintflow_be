@@ -25,7 +25,7 @@ const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id =
 describe("RULES", () => {
   it("11 luật đỏ + 11 luật vàng; 3 luật không waive được", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(11)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(11)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(12)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -266,5 +266,26 @@ describe("runDeterministicCheck", () => {
         expect(sectionKeyExists(index, f.section_id), `${f.rule_id} ${f.section_id}`).toBe(true)
       }
     }
+  })
+})
+
+describe("system_name_missing (FLF-177)", () => {
+  const withSystemName = (name: string | null) => variant((s) => (s.project.system_name = name))
+
+  it("đã vẽ sơ đồ ngữ cảnh/use case mà chưa có system_name ⇒ một cờ vàng, sửa ở B-0.1", () => {
+    expect(byRule(runDeterministicCheck(withSystemName(null)), "system_name_missing")).toMatchObject([
+      { level: "yellow", section_id: "fixed:1", target_id: null, remediation_step: "B-0.1" }
+    ])
+    expect(byRule(runDeterministicCheck(withSystemName("  ")), "system_name_missing")).toHaveLength(1)
+  })
+
+  it("đã có system_name, hoặc chưa tới bước vẽ sơ đồ ⇒ không cờ", () => {
+    expect(byRule(runDeterministicCheck(withSystemName("FlintFlow Studio")), "system_name_missing")).toHaveLength(0)
+    expect(byRule(runDeterministicCheck(createEmptySpine({ name: "Demo" })), "system_name_missing")).toHaveLength(0)
+  })
+
+  it("system_name tiếng Việt ⇒ non_english_content", () => {
+    const flags = byRule(runDeterministicCheck(withSystemName("Giao hàng nhanh")), "non_english_content")
+    expect(flags.some((f) => f.message.includes("project.system_name"))).toBe(true)
   })
 })

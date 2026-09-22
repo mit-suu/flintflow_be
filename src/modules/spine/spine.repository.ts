@@ -36,6 +36,7 @@ export type SpineInit = Partial<Pick<SpineProject, "name" | "domain">>
 export const createEmptySpine = (init: SpineInit = {}): Spine => ({
   project: {
     name: init.name ?? "",
+    system_name: null,
     vision: null,
     goals: [],
     type: null,

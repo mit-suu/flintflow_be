@@ -10,6 +10,17 @@
         "name": {
           "type": "string"
         },
+        "system_name": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "vision": {
           "anyOf": [
             {
@@ -115,6 +126,7 @@
       },
       "required": [
         "name",
+        "system_name",
         "vision",
         "goals",
         "type",

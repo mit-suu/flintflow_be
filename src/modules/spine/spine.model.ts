@@ -24,6 +24,7 @@ const releaseScopeSchema = new Schema(
 const projectSchema = new Schema(
   {
     name: { type: String, default: "" },
+    system_name: nullableString,
     vision: nullableString,
     goals: { type: [String], default: [] },
     // `type` là tên field thật, không phải khai báo kiểu của Mongoose

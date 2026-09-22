@@ -135,12 +135,13 @@ vi.mock("../spine/spine.repository.js", () => ({
 import * as spineRepository from "../spine/spine.repository.js"
 import { _internal, assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { DIAGRAM_PLACEHOLDER_PNG } from "./diagram-placeholder.js"
+import { buildDocxFileName } from "./docx-writer.js"
 
 const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
 
 const baseSpine = (): Spine => ({
-  project: { name: "Demo", vision: "V", goals: ["G1"], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, release_scope: { in: [], out: [] } },
+  project: { name: "Demo", system_name: null, vision: "V", goals: ["G1"], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, release_scope: { in: [], out: [] } },
   progress: { current_phase: "S-9", current_step: "S-9.5", screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
   steps: [],
   features: [{ id: "F1", name: "Auth", order: 0 }],
@@ -526,6 +527,24 @@ describe("_internal.buildDocument — review C4/Th1 heading nhóm", () => {
     expect(ids.indexOf("group:4.2")).toBeLessThan(ids.indexOf("fixed:4.2.1"))
     expect(ids).toContain("group:unassigned-functions")
     expect(ids.indexOf("group:unassigned-functions")).toBeLessThan(ids.indexOf("function:FN9"))
+  })
+})
+
+describe("_internal.buildDocument — tên hệ thống (FLF-177)", () => {
+  const build = (spine: Spine) =>
+    _internal.buildDocument(
+      { projectId: PROJECT, projectName: "Du an giao hang", spine, statusChanges: [], recordChanges: [], source: "draft", version: "v0.1" },
+      { loadDiagramPng: async () => null, now: () => new Date("2026-09-15T00:00:00.000Z") }
+    )
+
+  it("bìa/tiêu đề/tên file lấy project.system_name", async () => {
+    const doc = await build({ ...baseSpine(), project: { ...baseSpine().project, system_name: "ShipFast Delivery" } })
+    expect(doc.projectName).toBe("ShipFast Delivery")
+    expect(buildDocxFileName(doc)).toBe("shipfast-delivery-v0.1-draft.docx")
+  })
+
+  it("chưa đặt system_name ⇒ tên project truyền vào như trước", async () => {
+    expect((await build(baseSpine())).projectName).toBe("Du an giao hang")
   })
 })
 

@@ -1,7 +1,7 @@
 ---
 skill_id: product-brief
 kind: content
-version: 0.2.0
+version: 0.3.0
 description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize — adapted from BMAD bmad-product-brief"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -44,6 +44,10 @@ Two habits decide whether this phase is useful:
   guidance. Extract, then read back a short summary for confirmation. Write **one `addendum[]` entry per
   distinct topic** right now — `{id, topic, content (user's own words/language), content_en (English,
   for rendering), target_section, captured_at}`. Do not wait for a tidy answer before writing.
+  Also settle **`project.system_name`** — the English product name printed on the diagrams and the
+  document cover, kept apart from the working project name (never change `project.name`). The user gave an
+  English name ⇒ set it. No name, or only a Vietnamese one ⇒ suggest 2–3 short English names (2–4 words,
+  Title Case, no "System"/"App" filler) and set it only once the user picks one.
 - **B-0.2 `project.form_factor`** — where the product lives: `web_app`, `mobile_app`, `desktop_app`,
   `api_service`, `cli`, `embedded`. Ask once; infer from the brain dump when it is obvious.
 - **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. This drives NFR defaults at S-6,
@@ -117,7 +121,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## Self-check
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
-- [ ] `project.form_factor`, `stakes`, `working_mode` all set by the end of B-0.
+- [ ] `project.system_name` (English, user-picked), `form_factor`, `stakes`, `working_mode` set by the end of B-0.
 - [ ] `project.vision` + 3–6 outcome-shaped `goals[]` by the end of B-1.1.
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.
