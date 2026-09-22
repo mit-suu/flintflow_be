@@ -15,6 +15,7 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `usecase_name_semantic` | Use case name breaks U2 (two goals joined), U3 (vague verb such as Manage/Handle), or U8 (duplicate name) | S-3.2 |
 | `usecase_name_style` | Use case name breaks U1 (Title Case, no trailing period), U4 (repeats an actor name), U5 (UI or technical term), or U6 (more than 5 words) | S-3.2 |
 | `actor_name_shape` | Actor name breaks A2 (bare `User`/`System`/`Actor`/`Person`) or A7 (duplicate name) | S-3.1 |
+| `system_name_missing` | A context or use case diagram exists but `project.system_name` is empty, so the diagrams and cover print the working project name (excluded in mode 1) | B-0.1 |
 
 Cardinality is **yellow, not red**: as red, every `placeholder` screen of round one would hit `screen_no_function` and need mass waivers.
 

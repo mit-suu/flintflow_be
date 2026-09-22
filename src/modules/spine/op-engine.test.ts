@@ -433,6 +433,13 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     expect(db.changes).toHaveLength(0)
   })
 
+  it("FLF-177: set project.system_name qua op", async () => {
+    await seed()
+    const result = await applyTransaction(PROJECT, txn([{ op: "set", path: "project.system_name", value: "ShipFast Delivery" }]))
+    expect(result.spine_version).toBe(2)
+    expect((await repo.get(PROJECT))?.project.system_name).toBe("ShipFast Delivery")
+  })
+
   it("preview trên project chưa có Spine dùng Spine rỗng, không tạo Spine", async () => {
     const preview = await previewTransaction(PROJECT, txn([{ op: "set", path: "project.vision", value: "V" }]), { name: "X" })
     expect(preview.ok).toBe(true)

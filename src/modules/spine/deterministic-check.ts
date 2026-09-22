@@ -1,7 +1,7 @@
 /**
  * deterministic-check.ts
  * ─────────────────────────────────────────────────────────────────
- * 11 luật cờ đỏ (srs-spine.md §7) + 11 luật vàng (cardinality §8.1, quan hệ và đặt tên use case).
+ * 11 luật cờ đỏ (srs-spine.md §7) + 12 luật vàng (cardinality §8.1, quan hệ và đặt tên use case, tên hệ thống).
  * Hàm thuần trên đồ thị khoá, KHÔNG gọi model. Chỉ cờ đỏ chặn `baselines[]`.
  *
  * Mọi cờ đỏ có `remediation_step` thi hành được. Mọi `section_id` là khoá section phân giải
@@ -48,7 +48,8 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_auth_relation", "yellow", true),
   rule("usecase_name_semantic", "yellow", true),
   rule("usecase_name_style", "yellow", true),
-  rule("actor_name_shape", "yellow", true)
+  rule("actor_name_shape", "yellow", true),
+  rule("system_name_missing", "yellow", true)
 ])
 
 /** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
@@ -655,6 +656,26 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
   return out
 }
 
+// ─── tên hệ thống (FLF-177) ─────────────────────────────────
+
+/**
+ * Sơ đồ ngữ cảnh (S-2.5) hay use case đã vẽ mà chưa có `project.system_name` ⇒ boundary đang in tên project làm
+ * việc. Chủ sở hữu field là B-0.1; user sửa qua chat (`set project.system_name`).
+ */
+const systemNameMissing = (spine: Spine): FlagCandidate[] =>
+  !spine.project.system_name?.trim() && (hasKind(spine, "context") || hasKind(spine, "usecase"))
+    ? [
+        {
+          level: "yellow",
+          rule_id: "system_name_missing",
+          section_id: "fixed:1",
+          target_id: null,
+          message: `Chưa chốt tên hệ thống (tiếng Anh) — sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
+          remediation_step: "B-0.1"
+        }
+      ]
+    : []
+
 /** Dấu tiếng Việt (yellow-rules.md). */
 export const VIETNAMESE_DIACRITICS = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i
 
@@ -677,7 +698,7 @@ interface ScanItem {
 const ownedTexts = (spine: Spine): ScanItem[] => {
   const p = spine.project
   return [
-    { path: "project", target_id: null, section: "fixed:1", step: "S-2.1", fields: { name: p.name, vision: p.vision, goals: p.goals, release_scope: p.release_scope } },
+    { path: "project", target_id: null, section: "fixed:1", step: "S-2.1", fields: { name: p.name, system_name: p.system_name, vision: p.vision, goals: p.goals, release_scope: p.release_scope } },
     ...spine.actors.map((a) => ({
       path: `actors[id=${a.id}]`,
       target_id: a.id,
@@ -761,6 +782,7 @@ export const runDeterministicCheck = (
     ...useCaseFloating(spine),
     ...useCaseAccountAccessRelation(spine),
     ...namingShape(spine),
+    ...systemNameMissing(spine),
     ...nonEnglishContent(spine)
   ], options.ruleProfile)
 

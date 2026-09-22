@@ -28,6 +28,8 @@ export const releaseScopeSchema = z.strictObject({
 
 export const spineProjectSchema = z.strictObject({
   name: z.string(),
+  /** FLF-177 — Spine trước đó không có ⇒ `null` (dùng tên project). */
+  system_name: z.string().nullable().default(null),
   vision: z.string().nullable(),
   goals: z.array(z.string()),
   type: z.string().nullable(),

@@ -22,6 +22,7 @@
  * ca đó. Tiêu đề phần nêu actor chính của các nhóm trong phần.
  */
 
+import { systemName } from "../../spine/system-name.js"
 import type { ActorKind, UseCase } from "../../spine/spine.types.js"
 import type { Renderer } from "./common.js"
 import { alias, byId, compareIds, label, puml } from "./common.js"
@@ -190,7 +191,7 @@ export const renderUseCase: Renderer = (spine) => {
   const actors = new Map(spine.actors.map((a) => [a.id, a]))
   const kinds: ActorKinds = new Map(spine.actors.map((a) => [a.id, a.kind]))
   const parts = partitionUseCases(byId(spine.use_cases), kinds)
-  const system = label(spine.project.name) || "System"
+  const system = label(systemName(spine.project)) || "System"
   const kept = associationEdges(spine.use_cases, kinds)
   // Tên actor không bị ràng buộc ở schema ⇒ phải qua `label()`, `"` hay xuống dòng làm vỡ `.puml`.
   const groupLabel = (key: string): string => label(actors.get(key)?.name ?? (key === "~" ? "Other" : key))

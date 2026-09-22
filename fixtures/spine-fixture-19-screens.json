@@ -1,6 +1,7 @@
 {
   "project": {
     "name": "FlintFlow",
+    "system_name": "FlintFlow",
     "vision": "Enable a solo founder or business analyst to turn a raw product idea into a complete, internally consistent SRS document through a guided AI conversation, without hiring a requirements engineer.",
     "goals": [
       "Produce a baseline-quality SRS following the FPT template within one working day",

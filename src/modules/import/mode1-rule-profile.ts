@@ -24,7 +24,9 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
     "usecase_no_function",
     // U1/U4/U5/U6 gắn chính tả tiếng Anh ⇒ bắn gần như mọi use case của một SRS tiếng Việt,
     // vốn hợp lệ ở mode 1. Luật ngữ nghĩa (usecase_name_semantic) vẫn chạy.
-    "usecase_name_style"
+    "usecase_name_style",
+    // tên hệ thống lấy từ bìa tài liệu khách — không đòi chốt tên tiếng Anh riêng
+    "system_name_missing"
   ]),
   // `release.service.ts` lọc cờ đỏ KHÔNG trừ `waived_by_user`, nên để nguyên đỏ thì một SRS nhập
   // có vòng include/extend sẽ không bao giờ release được và waive cũng vô ích.
