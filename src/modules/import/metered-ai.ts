@@ -11,6 +11,7 @@
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { AiActionError, type ActionType } from "../../shared/ai/ai-action.types.js"
 import { finalizeCall, releaseCall, reserveCall } from "../pipeline/meter.service.js"
+import { notifyTopUpNeeded } from "./credit-flow.service.js"
 
 export type MeteredPauseReason = "credits" | "resume_later"
 
@@ -47,6 +48,9 @@ export const withMeteredAi = async <T>(
   } catch (err) {
     await releaseCall(usageId)
     const message = err instanceof Error ? err.message : String(err)
-    return { ok: false, reason: isInsufficientCredit(err) ? "credits" : "resume_later", message, usageId }
+    const credits = isInsufficientCredit(err)
+    // BPMN 4.2 (mode 1 v3): hết credit ⇒ báo chủ project nạp; nạp xong bước tự chạy tiếp (credit-flow.service)
+    if (credits) void notifyTopUpNeeded(ctx.projectId, ctx.stepId)
+    return { ok: false, reason: credits ? "credits" : "resume_later", message, usageId }
   }
 }
