@@ -27,7 +27,7 @@
 import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
 import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
-import type { Block, InlineRun, RenderedSection, TableCell } from "./rendered-document.types.js"
+import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { defaultSectionTitle, renderSection, type SectionRenderContext } from "./section-renderer.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
@@ -41,6 +41,8 @@ export interface TemplateLayoutEntry {
 export interface TemplateLayout {
   layout: readonly TemplateLayoutEntry[]
   language: string
+  /** T15: dòng Record of Changes của file gốc — in trước lịch sử FlintFlow. */
+  legacyRecord?: readonly RocRow[]
 }
 
 const CUSTOM_PREFIX = "custom:"
