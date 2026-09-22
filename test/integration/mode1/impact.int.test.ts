@@ -60,7 +60,7 @@ describe("C-3 trên Spine", () => {
     expect((await crDoc(projectId, crId)).status).toBe("impact_review")
   })
 
-  it("đích là mã section (CR từ gap report) ⇒ mọi phần tử của section đó; section còn trống ⇒ CR_NO_LOCATIONS kèm step để soạn", async () => {
+  it("đích là mã section (CR từ gap report) ⇒ mọi phần tử của section đó; đích không trỏ vào gì ⇒ CR_NO_LOCATIONS", async () => {
     const { c, cr, projectId, crId } = await toImpactReview()
     // 2.2.2 Use Case Descriptions có phần tử ⇒ mọi use case là vị trí
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["fixed:2.2.2"], keywords: [] } } })
@@ -69,13 +69,13 @@ describe("C-3 trên Spine", () => {
     for (const l of d.locations) expect(l).toMatchObject({ section_id: "fixed:2.2.2", found_by: ["spine_link"], entity_paths: ["fixed:2.2.2"] })
     expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
 
-    // 3.1.1 Screens Flow: file không có ⇒ trống ⇒ không có gì để sửa, chỉ đường sang step S-4.2
-    await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["fixed:3.1.1"], keywords: ["Screens Flow"] } } })
+    // Đích không còn phần tử nào + từ khoá không khớp ⇒ 0 vị trí ⇒ 409 CR_NO_LOCATIONS (mode 1 v3: không còn "chạy step")
+    await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { targets: { entity_paths: ["actors[id=A99]"], keywords: ["zzzqqq"] } } })
     const res = await c.post(`${cr}/impact`)
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_NO_LOCATIONS")
-    expect(res.body.error.message).toContain("đang trống")
-    expect(res.body.meta.empty_sections).toEqual([{ section_id: "fixed:3.1.1", title: "Screens Flow", step_id: "S-4.2" }])
+    expect(res.body.error.message).not.toContain("step")
+    expect(res.body.meta.empty_sections).toEqual([])
     // lượt trước đã khoá use case — lượt hỏng không được ghi/đổi gì
     expect(await lockedPaths(projectId, crId)).toEqual(d.locations.map((l) => l.path).sort())
   })

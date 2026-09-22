@@ -93,7 +93,7 @@ describe("mode 1 v3 — import ⇒ gap report ⇒ CR ⇒ release", () => {
     expect(await c.spineVersion(), "không lượt nào ở trên được ghi Spine").toBe(version0)
     expect((await c.get("/change-requests")).body.data, "không tự tạo CR — 3.1 là việc của BA").toEqual([])
 
-    // ── 4. Mục trống: tạm điền thẳng DB (phase 1.4 thay bằng CR nguồn gap_report) ───────────────────────
+    // ── 4. Mục trống: điền thẳng DB cho gọn — đường thật là CR nguồn gap_report, test ở write.int (cờ đóng bằng CR) ──
     await fillCoreSections(projectId)
     expect(await redOpen(c)).toEqual([])
 

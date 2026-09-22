@@ -74,13 +74,45 @@ describe("C-3 findSpineLocations", () => {
     expect(isArrayPath("business_rules[id=BR-01]")).toBe(false)
   })
 
-  it("mục trống mà không mảng nào nuôi (project, luồng màn) ⇒ không bịa vị trí, để C-3 chỉ sang step", () => {
+  it("mode 1 v3: mọi mục FPT mà cờ section_empty soi đều có đường vào CR (không còn step để chỉ sang)", () => {
     const s = spine()
     expect(fillPathsOfSection("fixed:3.1.3")).toEqual(["roles[]", "permissions[]"])
-    expect(fillPathsOfSection("fixed:1")).toEqual([])
-    // chỉ section không đổ được bằng mảng mới vào danh sách "phải chạy step"
-    expect(emptySectionTargets(s, ["fixed:5.1", "fixed:3.1.1", "actors[id=A01]"])).toEqual(["fixed:3.1.1"])
+    expect(fillPathsOfSection("fixed:3.1.1")).toEqual(["screens[]"])
+    expect(fillPathsOfSection("fixed:2.2.1")).toEqual(["use_cases[]"])
+    expect(fillPathsOfSection("fixed:1")).toEqual([]) // sửa phần tử `project` có sẵn
+    expect(emptySectionTargets(s, ["fixed:5.1", "fixed:3.1.1", "actors[id=A01]"])).toEqual([])
     expect(emptySectionTargets(s, ["actors[id=A01]"])).toEqual([])
+    // project trống vẫn có vị trí: chính phần tử project
+    const blank = createEmptySpine({ name: "Blank" })
+    expect(findSpineLocations(blank, ["fixed:1"], []).map((f) => f.path)).toEqual(["project"])
+  })
+
+  it("Screens Flow / Use Case Diagram: dữ liệu ở field phần tử mục khác ⇒ phần tử đó là vị trí của mục được nhắm; mảng rỗng ⇒ thêm mới", () => {
+    const s = spine()
+    s.screens.push({ id: "SCR-01", name: "Login", flow_to: [], is_popup: false, tabs: [] } as never, { id: "SCR-02", name: "Home", flow_to: [], is_popup: false, tabs: [] } as never)
+    const flow = findSpineLocations(s, ["fixed:3.1.1"], [])
+    expect(flow.map((f) => [f.path, f.section_id, f.owner_step])).toEqual([
+      ["screens[id=SCR-01]", "fixed:3.1.1", "S-4.2"],
+      ["screens[id=SCR-02]", "fixed:3.1.1", "S-4.2"]
+    ])
+    // chưa có màn nào ⇒ thêm mới vào screens[]
+    expect(findSpineLocations(spine(), ["fixed:3.1.1"], []).map((f) => f.path)).toEqual(["screens[]"])
+    // Use Case Diagram vẽ từ use case có sẵn ⇒ sửa use case, không mời thêm mới
+    expect(findSpineLocations(spine(), ["fixed:2.2.1"], []).map((f) => [f.path, f.section_id])).toEqual([["use_cases[id=UC-01]", "fixed:2.2.1"]])
+  })
+
+  it("mục có phần tử nhưng cờ vẫn coi là chưa có dữ liệu (5.1 chỉ có rule tier=high) ⇒ thêm vị trí thêm mới — cùng tiêu chí với cờ", () => {
+    const s = spine()
+    s.business_rules.push({ id: "BR-01", tier: "high", statement: "Only paid learners can study." } as never)
+    const paths = findSpineLocations(s, ["fixed:5.1"], []).map((f) => f.path)
+    expect(paths).toContain("business_rules[]")
+  })
+
+  it("giả định là phần tử làm được vị trí (cờ unconfirmed_assumption chỉ đóng được bằng CR)", () => {
+    const s = spine()
+    s.assumptions.push({ id: "AS-01", statement: "Learners use email to sign in.", status: "unconfirmed", path: "actors[id=A01]", origin_step_id: "S-7.2" } as never)
+    expect(listElements(s).map((e) => e.path)).toContain("assumptions[id=AS-01]")
+    expect(findSpineLocations(s, ["assumptions[id=AS-01].status"], []).map((f) => f.path)).toContain("assumptions[id=AS-01]")
   })
 
   it("đích không còn trong Spine / path không phải phần tử bị bỏ; từ khoá < 3 ký tự bỏ; theo ranh giới từ", () => {

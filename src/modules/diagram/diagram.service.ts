@@ -18,7 +18,7 @@ import type { Op } from "../spine/op.types.js"
 import type { Diagram, Spine, SpineRecord } from "../spine/spine.types.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import { checkPlantUml, type CompileCheckResult } from "../../shared/diagram/compile-check.js"
-import { renderPlantUml } from "../../shared/diagram/plantuml.client.js"
+import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantuml.client.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
 import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
@@ -250,6 +250,20 @@ export const renderDiagram = (projectId: string, kind: DiagramKind, ownerId: str
 export const renderAll = async (projectId: string, options: RenderOptions): Promise<RenderResult> => {
   const record = await loadSpine(projectId)
   return renderDiagrams(projectId, allTargets(stripRecord(record)), options)
+}
+
+/**
+ * Vẽ lại mọi diagram khi PlantUML có mặt; không có (dev/test, sự cố) ⇒ `null` thay vì ghi hàng loạt `render_error`.
+ * Lỗi vẽ chỉ ghi log — không chặn việc gọi (finalize import, ghi CR). Hình vẫn lệch thì cờ `diagram_stale` báo.
+ */
+export const renderAllIfAvailable = async (projectId: string, options: RenderOptions): Promise<RenderResult | null> => {
+  try {
+    if (!(await isPlantUmlReachable())) return null
+    return await renderAll(projectId, options)
+  } catch (err) {
+    console.warn(`[diagram] vẽ lại diagram lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
 }
 
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */

@@ -40,7 +40,8 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
   const latest = versions[0]
   if (!latest) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Chưa có version tài liệu nào để release")
 
-  const checked = await flagsService.recompute(projectId, { by: userId, ruleProfile: MODE1_RULE_PROFILE })
+  // 6.1 "cờ đỏ = 0" gồm cả luật S-9 (giả định chưa xác nhận) — như ký baseline của mode 2
+  const checked = await flagsService.recompute(projectId, { by: userId, ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
   const red = checked.flags.filter((f) => f.level === "red" && f.resolved_at === null)
   if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ — xử lý qua change request rồi release`, { flags: red })
 

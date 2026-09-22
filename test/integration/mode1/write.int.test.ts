@@ -17,6 +17,10 @@ import { ChangeGroup } from "../../../src/modules/change-request/change-group.mo
 import { getDocument } from "../../../src/modules/render/assemble.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
+import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
+import * as flagsService from "../../../src/modules/spine/flags.service.js"
+import { MODE1_RULE_PROFILE } from "../../../src/modules/import/mode1-rule-profile.js"
+import type { Flag } from "../../../src/modules/spine/spine.types.js"
 
 /** C-2: CR "Rename registration" ⇒ đích UC-01 / FR-3.2.2 (không chồng phần tử với CR perf); C-4 ghi chú mọi vị trí. */
 const UC_TARGETS = { entity_paths: ["use_cases[id=UC-01]", "functions[id=FR-3.2.2]"], keywords: [] }
@@ -98,6 +102,46 @@ describe("C-7 ghi Spine + render version mới", () => {
     const { texts } = await loadVersion(projectId, written.change_request.result_doc_version!)
     expect(texts.some((t) => t.includes("Chrome 120"))).toBe(true)
     expect(await lockedPaths(projectId, crId)).toEqual([])
+  })
+
+  it("mode 1 v3: cờ đỏ đóng được bằng CR — section_empty (thêm vào mục trống) và unconfirmed_assumption (xác nhận giả định)", async () => {
+    const { c, projectId } = await importedProject()
+    // Giả định chưa xác nhận do import để lại — mode 1 không còn S-9.2 ⇒ chỉ CR đóng được cờ này
+    await applyTransaction(projectId, {
+      base_version: await c.spineVersion(),
+      by: "test",
+      reason: "seed giả định",
+      step_id: null,
+      ops: [{ op: "add", path: "assumptions[]", value: { id: "AS-01", path: "project.vision", statement: "Learners sign in with email.", rationale: "Not stated", origin_step_id: "S-7.2", status: "unconfirmed", confirmed_at: null } }]
+    })
+    await flagsService.recompute(projectId, { by: "test", ruleProfile: MODE1_RULE_PROFILE, atBaseline: true }) // như 1.12
+    const redOpen = async () => (await c.get("/flags?level=red&open=true")).body.data as Flag[]
+    const before = await redOpen()
+    expect(before.some((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.4")).toBe(true)
+    expect(before.some((f) => f.rule_id === "unconfirmed_assumption" && f.target_id === "AS-01")).toBe(true)
+
+    const propose = (p: string) =>
+      JSON.stringify({
+        locations: promptLocations(p).map((l) =>
+          l.path === "other_requirements[]"
+            ? { location_id: l.location_id, conclusion: "edit", reason: "Mục còn trống", spine_ops: [{ op: "add", path: "other_requirements[]", value: { id: "OR-01", kind: "assumption", statement: "The system runs on Chrome 120 or newer." } }] }
+            : l.path === "assumptions[id=AS-01]"
+              ? { location_id: l.location_id, conclusion: "edit", reason: "Khách xác nhận", spine_ops: [{ op: "set", path: "assumptions[id=AS-01].status", value: "confirmed" }] }
+              : { location_id: l.location_id, conclusion: "not_related", reason: "Khác", spine_ops: [] }
+        )
+      })
+    resetCrMock((p) => (p.includes("# CR Clarify") ? fakeCrClarify({ entity_paths: ["fixed:5.4", "assumptions[id=AS-01]"], keywords: [] })(p) : p.includes("# CR Propose") ? propose(p) : undefined))
+
+    const { cr, impact } = await crToImpact(c)
+    expect(impact.locations.map((l) => l.path)).toEqual(expect.arrayContaining(["other_requirements[]", "assumptions[id=AS-01]"]))
+    detail(await c.post(`${cr}/propose`))
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+    const written = await approveAll(c, cr, detail(await c.post(`${cr}/submit`)).groups)
+    expect(written.change_request.status).toBe("written")
+
+    const after = await redOpen()
+    expect(after.some((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.4"), "mục đã có dữ liệu ⇒ cờ đóng").toBe(false)
+    expect(after.some((f) => f.rule_id === "unconfirmed_assumption"), "giả định đã xác nhận ⇒ cờ đóng").toBe(false)
   })
 
   it("txn Spine: by = CR id, reason = 'CR id: tiêu đề'; mở hết khoá; bản làm việc ghép lại theo Spine mới", async () => {
