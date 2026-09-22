@@ -147,7 +147,7 @@ vi.mock("../../notification/notification.service.js", () => ({ notify: vi.fn(asy
 import { spineSchema } from "../../spine/spine.schema.js"
 import type { Spine as SpineT } from "../../spine/spine.types.js"
 import * as repo from "../../spine/spine.repository.js"
-import { planTransaction } from "../../spine/op-engine.js"
+import { applyTransaction, planTransaction } from "../../spine/op-engine.js"
 import type { Op } from "../../spine/op.types.js"
 import { createMemoryDiagramStore } from "../../diagram/diagram-file.store.js"
 import type { DiagramServiceDeps } from "../../diagram/diagram.service.js"
@@ -156,8 +156,9 @@ import { getStep, loadStepRegistry, nextStep, orderedSteps, totalSteps } from ".
 import { STEP_SKILLS } from "../context-projection.js"
 import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type OpTransaction, type ElicitOutput } from "../../../shared/ai/response-parser.js"
-import { FUNCTION_BATCH_SIZE, runStep, type StepRunnerDeps, defaultStepRunnerDeps } from "../step-runner.service.js"
+import { FUNCTION_BATCH_SIZE, runStep, submitAnswer, type StepRunnerDeps, defaultStepRunnerDeps } from "../step-runner.service.js"
 import { gate } from "../gate.service.js"
+import { runPhase } from "../phase-runner.service.js"
 import { getSkill } from "../../../shared/ai/prompt-registry.service.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
 
@@ -446,6 +447,124 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
 
     console.log("[T18 measured usage — mock, char/4 estimate]", JSON.stringify(measuredUsage))
     console.log("[T18 draft calls per step]", JSON.stringify(draftCalls.map((c) => ({ step: c.step_id, n: c.function_ids.length }))))
+  })
+
+  it("FLF-208 R2: chạy liền cả phase — bước yên lặng tự Accept, dừng ở bước luôn cần người và ở cổng chốt cuối", async () => {
+    seedSpine()
+    seedSession()
+    const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor, renderDeps: renderStub() }
+    const { events, emit } = collectEvents()
+
+    // S-4.1 chốt N (số màn) ⇒ luôn dừng để user quyết, dù không hỏi câu nào
+    const first = await runPhase(PROJECT, "S-4", SESSION, USER, emit, deps)
+    expect(first.stopped_at).toBe("S-4.1")
+    expect(first.steps, "chưa bước nào được tự Accept").toEqual([])
+    expect(events.some((e) => e.type === "auto_accepted")).toBe(false)
+    expect(events.filter((e) => e.type === "phase_progress").length).toBeGreaterThan(0)
+
+    await gate(PROJECT, "S-4.1", USER, { action: "accept", base_version: (await repo.get(PROJECT))!.spine_version })
+
+    const { events: rest, emit: emit2 } = collectEvents()
+    const second = await runPhase(PROJECT, "S-4", SESSION, USER, emit2, deps)
+
+    // Chuỗi chạy tiếp và tự Accept bước yên lặng; dừng lại ngay khi có thứ user cần nhìn, kèm lý do
+    expect(second.steps.map((s) => s.step_id)).toContain("S-4.2")
+    expect(second.stopped_at, "dừng ở bước đầu tiên cần người").toBeTruthy()
+    expect(second.reason_vi).not.toBe("")
+    expect(rest.filter((e) => e.type === "auto_accepted").map((e) => e.step_id)).toEqual(second.steps.map((s) => s.step_id))
+
+    const phaseGate = rest.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }> | undefined
+    expect(phaseGate, "chỗ dừng phải mang tóm tắt của cả giai đoạn tới lúc đó").toBeTruthy()
+    expect(phaseGate!.summary.length, "gộp tóm tắt của mọi bước đã chạy").toBeGreaterThan(0)
+    expect(phaseGate!.steps.map((s) => s.step_id)).toEqual(second.steps.map((s) => s.step_id))
+
+    const after = (await repo.get(PROJECT))!
+    for (const outcome of second.steps) {
+      expect(after.steps.find((s) => s.id === outcome.step_id)?.status, outcome.step_id).toBe("accepted")
+    }
+    expect(after.steps.find((s) => s.id === second.stopped_at)?.status, "bước đang chờ user chưa accepted").not.toBe("accepted")
+  })
+
+  it("FLF-208 R3: hỏi gộp đầu giai đoạn — user trả lời một lần, các bước bên trong không hỏi lại", async () => {
+    seedSpine()
+    seedSession()
+    const elicitCalls: string[] = []
+    const interviewElicit: StepRunnerDeps["elicitExecutor"] = async (input, projectId, userId) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      elicitCalls.push(stepId)
+      const result = await elicitExecutor(input, projectId, userId)
+      // Chỉ lượt hỏi gộp (step_id = đơn vị giai đoạn) mới có câu hỏi
+      if (stepId !== "S-4") return result
+      return {
+        ...result,
+        data: {
+          reply: "Vài câu cho cả giai đoạn màn hình",
+          questions: [{ question: "Màn nào là màn cốt lõi?", suggestedAnswers: ["Đặt lịch"], multiple: false, topic_key: "screen_scope" } as never]
+        }
+      }
+    }
+    const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor: interviewElicit, renderDeps: renderStub() }
+
+    const { events, emit } = collectEvents()
+    const run = runPhase(PROJECT, "S-4", SESSION, USER, emit, deps)
+    for (let i = 0; i < 80 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+
+    const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    expect(asked.step_id, "câu hỏi của cả giai đoạn, không của một bước").toBe("S-4")
+    expect(submitAnswer(PROJECT, "S-4", SESSION, [{ question_id: "Q1", answer: "Màn Đặt lịch" }])).toBe(true)
+    await run
+
+    // Câu trả lời vào sổ quyết định, và không bước nào trong giai đoạn hỏi lại
+    const spine = (await repo.get(PROJECT))!
+    expect(spine.decisions.map((d) => d.topic_key)).toContain("screen_scope")
+    expect(elicitCalls.filter((id) => id.startsWith("S-4.")), "bước bên trong không gọi vòng hỏi riêng").toEqual([])
+    expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(1)
+  })
+
+  it("FLF-208 R2: chế độ Nhanh đi hết giai đoạn và dừng đúng ở cổng chốt cuối", async () => {
+    seedSpine()
+    seedSession()
+    const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor, renderDeps: renderStub() }
+    await applyTransaction(PROJECT, {
+      base_version: (await repo.get(PROJECT))!.spine_version,
+      ops: [{ op: "set", path: "project.review_mode", value: "fast" }],
+      by: USER,
+      reason: "test"
+    })
+
+    const { emit } = collectEvents()
+    await runPhase(PROJECT, "S-4", SESSION, USER, emit, deps)
+    await gate(PROJECT, "S-4.1", USER, { action: "accept", base_version: (await repo.get(PROJECT))!.spine_version })
+
+    const { events, emit: emit2 } = collectEvents()
+    const result = await runPhase(PROJECT, "S-4", SESSION, USER, emit2, deps)
+
+    expect(result.steps.map((s) => s.step_id)).toEqual(["S-4.2", "S-4.3", "S-4.4"])
+    expect(result.stopped_at, "cổng chốt cuối giai đoạn không bao giờ tự Accept").toBe("S-4.5")
+    const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
+    expect(phaseGate.steps.map((s) => s.step_id)).toEqual(["S-4.2", "S-4.3", "S-4.4"])
+    expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-4.5")?.status).not.toBe("accepted")
+  })
+
+  it("chế độ duyệt Chặt: không bước nào tự Accept", async () => {
+    seedSpine()
+    seedSession()
+    await applyTransaction(PROJECT, {
+      base_version: (await repo.get(PROJECT))!.spine_version,
+      ops: [{ op: "set", path: "project.review_mode", value: "strict" }],
+      by: USER,
+      reason: "test"
+    })
+    const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor, renderDeps: renderStub() }
+    const { emit } = collectEvents()
+    await runPhase(PROJECT, "S-4", SESSION, USER, emit, deps)
+    await gate(PROJECT, "S-4.1", USER, { action: "accept", base_version: (await repo.get(PROJECT))!.spine_version })
+
+    const { events, emit: emit2 } = collectEvents()
+    const result = await runPhase(PROJECT, "S-4", SESSION, USER, emit2, deps)
+    expect(result.steps).toEqual([])
+    expect(result.stopped_at).toBe("S-4.2")
+    expect(events.some((e) => e.type === "auto_accepted")).toBe(false)
   })
 
   it("S-5.1 accept_as_is leaves the screen as a placeholder and skips the rest of its loop", async () => {

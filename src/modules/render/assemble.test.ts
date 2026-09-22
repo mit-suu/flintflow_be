@@ -141,7 +141,7 @@ const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
 
 const baseSpine = (): Spine => ({
-  project: { name: "Demo", system_name: null, vision: "V", goals: ["G1"], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, release_scope: { in: [], out: [] } },
+  project: { name: "Demo", system_name: null, vision: "V", goals: ["G1"], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, review_mode: "balanced" as const, release_scope: { in: [], out: [] } },
   progress: { current_phase: "S-9", current_step: "S-9.5", screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
   steps: [],
   features: [{ id: "F1", name: "Auth", order: 0 }],

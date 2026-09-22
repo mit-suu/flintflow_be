@@ -223,6 +223,7 @@ export const STEP_EVENT_TYPES = [
   "gate_ready",
   "auto_accepted",
   "phase_progress",
+  "phase_gate",
   "error"
 ] as const
 
@@ -286,6 +287,17 @@ export const stepEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("heartbeat"), step_id: z.string(), stage: runStageSchema, elapsed_ms: z.number().int().min(0) }),
   z.object({ type: z.literal("auto_accepted"), step_id: z.string(), reason_vi: z.string() }),
   z.object({
+    type: z.literal("phase_gate"),
+    step_id: z.string(),
+    phase: z.string(),
+    reason_vi: z.string(),
+    /** Tóm tắt của CẢ giai đoạn, gồm cả các bước đã tự Accept. */
+    summary: z.array(changeSummarySchema),
+    new_assumptions: z.array(assumptionBriefSchema),
+    steps: z.array(z.object({ step_id: z.string(), label_vi: z.string(), auto_accepted: z.boolean() })),
+    flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0), red_delta: z.number().int(), yellow_delta: z.number().int() }).optional()
+  }),
+  z.object({
     type: z.literal("phase_progress"),
     step_id: z.string(),
     phase: z.string(),
@@ -346,6 +358,9 @@ export const ANSWERS_MAX_ITEMS = 20
 export const GATE_NOTE_MAX_CHARS = 2000
 
 const answerText = z.string().max(ANSWER_MAX_CHARS)
+
+/** POST /projects/:id/phases/:phase/run (SSE) — chạy liền các bước của giai đoạn (R2). */
+export const runPhaseRequestSchema = runStepRequestSchema
 
 /** POST /projects/:id/steps/:stepId/answer */
 export const stepAnswerRequestSchema = z.strictObject({

@@ -40,9 +40,10 @@ describe("pipeline.dto", () => {
     expect(waiveRequestSchema.safeParse({ reason: "Khách hàng chấp nhận rủi ro này" }).success).toBe(true)
   })
 
-  it("SSE: đủ 15 loại sự kiện, parse theo discriminator", () => {
-    // 9 sự kiện gốc + 6 sự kiện FLF-177 (stage, heartbeat, answer_received, draft_retry, auto_accepted, phase_progress)
-    expect(STEP_EVENT_TYPES).toHaveLength(15)
+  it("SSE: đủ 16 loại sự kiện, parse theo discriminator", () => {
+    // 9 sự kiện gốc + 7 sự kiện FLF-198 (stage, heartbeat, answer_received, draft_retry, auto_accepted,
+    // phase_progress, phase_gate)
+    expect(STEP_EVENT_TYPES).toHaveLength(16)
     expect(stepEventSchema.safeParse({ type: "stage", step_id: "S-5.4@S03", stage: "draft", label_vi: "AI đang soạn nội dung", batch: { i: 1, n: 2 } }).success).toBe(true)
     expect(stepEventSchema.safeParse({ type: "heartbeat", step_id: "S-5.4@S03", stage: "draft", elapsed_ms: 12000 }).success).toBe(true)
     expect(stepEventSchema.safeParse({ type: "answer_received", step_id: "S-3.1", count: 3 }).success).toBe(true)

@@ -84,6 +84,14 @@ Branch rules and examples: `references/fast-vs-coaching.md`.
 - **Push back when an answer is thin** (UC 2.6): vague actor ("users"), no number for reliability/performance, a feature with no clear actor or outcome. Ask one sharper follow-up instead of accepting it.
 - Stop once every missing field has a usable answer.
 
+### Phase interview (`phase_interview: true`)
+
+One turn asked **once at the start of a whole phase**, before any step of it runs: `{{missing}}` is the
+union of every field the phase needs, and there is no per-step turn afterwards. Ask up to
+`{{max_questions}}` questions, ordered by impact, and group them so the user answers once and can walk
+away. Mark each question **Bắt buộc** (nothing sensible without it) or give it a default in the first
+`suggestedAnswers` entry — anything left to a default becomes an assumption the gate will show.
+
 ### The system name (B-0.1)
 
 `project.system_name` is the English product name printed on every diagram and on the document cover.

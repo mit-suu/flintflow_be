@@ -115,6 +115,7 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 2 | `GET /projects/:id/progress` | T09 ✔ | — | `progressResponseSchema` | — |
 | 3 | `GET /projects/:id/steps` | T12/T13 | — | `stepsResponseSchema` | — |
 | 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
+| 4a | `POST /projects/:id/phases/:phase/run` | FLF-198 | `runPhaseRequestSchema` | **SSE** (mục 2) — chạy liền cả giai đoạn | như endpoint 4 |
 | 4b | `GET /projects/:id/steps/:stepId/run-state` | FLF-177 | — | `runStateResponseSchema` (null nếu step chưa chạy lần nào) | `PROJECT_NOT_FOUND` |
 | 4c | `POST /projects/:id/steps/:stepId/cancel` | FLF-177 | `cancelRunRequestSchema` | `cancelRunResponseSchema` | `PROJECT_NOT_FOUND` |
 | 4d | `GET /projects/:id/run-state/active` | FLF-177 | — | `runStateResponseSchema` hoặc `null` | `PROJECT_NOT_FOUND` |
@@ -195,6 +196,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `flags` | Deterministic check chạy lại | `{ step_id, red_open, yellow_open, red_delta?, yellow_delta?, new_assumptions[]? }` |
 | `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used, summary[]?, new_assumptions[]?, flags?, duration_ms?, credits_used?, doc_progress?, no_change_reason? }` |
 | `auto_accepted` | Step "yên lặng" được tự Accept (chế độ duyệt Cân bằng/Nhanh) | `{ step_id, reason_vi }` |
+| `phase_gate` | Cổng chốt cuối giai đoạn: tóm tắt cả giai đoạn, gồm cả bước đã tự Accept | `{ step_id, phase, reason_vi, summary[], new_assumptions[], steps[], flags? }` |
 | `phase_progress` | Chạy liền cả phase: đang ở step thứ mấy | `{ step_id, phase, step_index, step_total, needs_user }` |
 | `error` | Dừng step | `{ step_id, code, message, retryable }` — `code` thuộc bảng 0.3 |
 

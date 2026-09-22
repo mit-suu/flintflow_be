@@ -105,6 +105,48 @@ router.get("/:projectId/steps/:stepId/run-state", authMiddleware, pipelineContro
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/phases/{phase}/run:
+ *   post:
+ *     summary: Chạy liền các bước của một giai đoạn (SSE) — bước yên lặng tự Accept, dừng khi cần người
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: phase
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: "Id phase (S-6) hoặc đơn vị vòng S-5 (S-5@S03)"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [session_id, base_version]
+ *             properties:
+ *               session_id:
+ *                 type: string
+ *               base_version:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: >
+ *           text/event-stream — như `/steps/:id/run`, thêm `phase_progress`, `auto_accepted` và
+ *           `phase_gate` (tóm tắt cả giai đoạn ở cổng chốt cuối)
+ *       409:
+ *         description: STEP_NOT_RUNNABLE, SPINE_VERSION_CONFLICT
+ */
+router.post("/:projectId/phases/:phase/run", authMiddleware, pipelineController.runPhaseController)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/steps/{stepId}/cancel:
  *   post:
  *     summary: Huỷ lượt đang chạy của step (nhả khoá, huỷ request tới model)

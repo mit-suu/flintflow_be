@@ -88,6 +88,11 @@ export interface StepRunnerDeps {
   signal?: AbortSignal
   /** WP-4: cùng controller với `signal`, để `POST /cancel` huỷ được lượt này từ một request khác. */
   abort?: AbortController
+  /**
+   * R3: câu hỏi của cả giai đoạn đã được hỏi gộp ở đầu phase (`phase-runner`), nên bước này không hỏi
+   * nữa — vừa đỡ một lượt gọi model mỗi bước, vừa giữ lời hứa "trả lời một lần rồi rời máy".
+   */
+  skipElicit?: boolean
 }
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
@@ -260,6 +265,12 @@ const waitForAnswer = (projectId: string, stepId: string, sessionId: string, sig
     })
   })
 }
+
+/**
+ * Chờ user trả lời một lượt hỏi ngoài khung một bước — dùng cho lượt hỏi gộp đầu giai đoạn (R3), nơi
+ * `stepId` là đơn vị giai đoạn (`S-4`, `S-5@S03`) chứ không phải một bước trong registry.
+ */
+export const submitAnswerWait = waitForAnswer
 
 /** F8: kiểm huỷ TRƯỚC mỗi lượt gọi model — không gọi model nữa nếu client đã đóng kết nối. */
 const assertNotAborted = (signal: AbortSignal | undefined, stepId: string): void => {
@@ -827,7 +838,7 @@ export const runStep = async (
 
     if (needsDraft) {
       const workingMode = spine.project.working_mode ?? "coaching"
-      const shouldElicit = workingMode === "coaching" || spine.progress.elicit_turns_this_phase < 2
+      const shouldElicit = !d.skipElicit && (workingMode === "coaching" || spine.progress.elicit_turns_this_phase < 2)
 
       if (shouldElicit) {
         assertNotAborted(d.signal, stepId)
