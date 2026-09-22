@@ -58,7 +58,7 @@ const projectWithRevision = async () => {
   for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
   const groups = changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups
   for (const g of groups) {
-    const res = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
+    const res = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
   }
   return { seeded, projectId, c }
@@ -148,7 +148,7 @@ describe("mode 1 — release (Flow 6)", () => {
     for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
     let done = null as Awaited<ReturnType<typeof c.post>> | null
     for (const g of changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups) {
-      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
+      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
     }
     expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)

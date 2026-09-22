@@ -17,6 +17,7 @@ import {
   groupIdSchema,
   listChangeRequestsQuerySchema,
   locationIdSchema,
+  ownerStepDraftRequestSchema,
   patchLocationRequestSchema
 } from "./change-request.dto.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -25,7 +26,7 @@ import { answerClarification, runClarify } from "./clarify.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
-import { runPropose } from "./propose.service.js"
+import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
 
 const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
@@ -89,6 +90,15 @@ export const updateLocation = mode1Handler(async (req, res) => {
   const locId = parseInput(locationIdSchema, req.params.locId)
   const body = parseInput(patchLocationRequestSchema, req.body)
   await patchLocation(cr, locId, body)
+  return detail(res, cr)
+})
+
+/** BPMN 3.9 (mode 1 v3): sửa đề xuất một vị trí bằng skill của step sở hữu, theo hướng của BA — chỉ ghi đề xuất. */
+export const ownerStepDraft = mode1Handler(async (req, res) => {
+  const { auth, cr } = await loadCr(req)
+  const locId = parseInput(locationIdSchema, req.params.locId)
+  const body = parseInput(ownerStepDraftRequestSchema, req.body)
+  await draftInOwnerStep(cr, auth.userId, locId, body.instruction)
   return detail(res, cr)
 })
 

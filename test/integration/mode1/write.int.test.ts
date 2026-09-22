@@ -40,13 +40,13 @@ const NEW_PERF = "The system shall respond within 1 second for 95% of requests."
 
 const approveAll = async (c: Mode1Client, cr: string, groups: { group_id: string }[]) => {
   let last = null as ReturnType<typeof detail> | null
-  for (const g of groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+  for (const g of groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
   return last!
 }
 
 /** Duyệt mọi group trừ group cuối (để lần quyết cuối mới kích hoạt ghi). */
 const approveAllButLast = async (c: Mode1Client, cr: string, groups: { group_id: string }[]) => {
-  for (const g of groups.slice(0, -1)) detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+  for (const g of groups.slice(0, -1)) detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
   return groups[groups.length - 1].group_id
 }
 
@@ -190,7 +190,7 @@ describe("C-7 chặn trước khi ghi", () => {
     const { crId, cr, submitted } = await crToReview(c)
     const last = await approveAllButLast(c, cr, submitted.groups)
     const files = await gridFsFiles(projectId)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: (await c.spineVersion()) - 1 })
+    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: (await c.spineVersion()) - 1 })
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("SPINE_VERSION_CONFLICT")
     expect(await gridFsFiles(projectId)).toBe(files)
@@ -205,7 +205,7 @@ describe("C-7 chặn trước khi ghi", () => {
     const last = await approveAllButLast(c, cr, submitted.groups)
     await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "5 s" } })
     const files = await gridFsFiles(projectId)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: await c.spineVersion() })
+    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_VALUE_CHANGED")
     expect(res.body.meta).toMatchObject({ path: "nfrs[id=NFR-01]" })
@@ -234,12 +234,12 @@ describe("C-7 lỗi giữa chừng", () => {
     const files = await gridFsFiles(projectId)
     const base = await c.spineVersion()
     vi.spyOn(gridFsDocFileStore, "save").mockRejectedValueOnce(new Error("GridFS down"))
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base })
+    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base })
     expect(res.status).toBe(500)
     await expectNothingWritten(c, projectId, crId, cr, files, held)
     expect(await c.spineVersion()).toBe(base)
 
-    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base }))
+    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base }))
     expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
     expect(await gridFsFiles(projectId)).toBe(files + 1)
   })
@@ -255,14 +255,14 @@ describe("C-7 lỗi giữa chừng", () => {
     const saved = vi.spyOn(gridFsDocFileStore, "save")
     const removed = vi.spyOn(gridFsDocFileStore, "remove")
     vi.spyOn(DocVersion, "create").mockRejectedValueOnce(new Error("create failed") as never)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base })
+    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base })
     expect(res.status).toBe(500)
     expect(saved).toHaveBeenCalledTimes(1)
     expect(removed).toHaveBeenCalledWith(await saved.mock.results[0].value)
     await expectNothingWritten(c, projectId, crId, cr, files, held)
     expect(await c.spineVersion()).toBe(base)
 
-    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base }))
+    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base }))
     expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
     expect(await gridFsFiles(projectId)).toBe(files + 1)
     expect(await DocVersion.countDocuments({ projectId, version: "0.1" })).toBe(1)
@@ -284,13 +284,13 @@ describe("C-7 lỗi giữa chừng", () => {
       await Spine.updateOne({ projectId }, { $inc: { spine_version: 1 } })
       return created
     }) as never)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: base })
+    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base })
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe(spineRepository.SPINE_VERSION_CONFLICT)
     await expectNothingWritten(c, projectId, crId, cr, files, held)
     expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])
 
-    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
     expect(await DocVersion.countDocuments({ projectId, version: "0.1" })).toBe(1)
   })
@@ -305,7 +305,7 @@ describe("C-7 duyệt một phần", () => {
     const perf = submitted.groups.find((g) => g.title === "Performance")!
     const br = submitted.groups.find((g) => g.title === "Business Rules")!
     detail(await c.post(`${cr}/groups/${perf.group_id}/decision`, { decision: "rejected", reason: "Giữ nguyên 2 giây", base_version: await c.spineVersion() }))
-    const written = detail(await c.post(`${cr}/groups/${br.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+    const written = detail(await c.post(`${cr}/groups/${br.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(written.change_request.result_doc_version).toBe("0.1")
     expect(await nfrThreshold(projectId)).toBe("2 s")
     expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])

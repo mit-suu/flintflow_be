@@ -28,6 +28,8 @@ export const MODE1_ERROR_STATUS = {
   CR_NO_LOCATIONS: 409,
   /** Nộp mà mọi vị trí đều `not_related` ⇒ không có group nào để duyệt; cho qua thì CR kẹt ở `in_review`. */
   CR_NOTHING_TO_APPROVE: 409,
+  /** 3.9 sửa trong step sở hữu: vị trí thuộc mục riêng (`custom:*`), không có step sở hữu. */
+  CR_NO_OWNER_STEP: 409,
   /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
   CR_VALUE_CHANGED: 409,
   CHANGE_REQUIRES_CR: 409,

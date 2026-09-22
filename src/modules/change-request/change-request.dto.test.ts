@@ -59,12 +59,14 @@ describe("change-request DTO — request", () => {
     expect(patchLocationRequestSchema.safeParse({ conclusion: "not_related", reason: "Chỉ nói về đăng nhập" }).success).toBe(true)
   })
 
-  it("duyệt group: từ chối cần lý do ≥ 10 ký tự; luôn mang base_version", () => {
-    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", base_version: 7 }).success).toBe(true)
+  it("duyệt group: duyệt lẫn từ chối đều cần lý do ≥ 10 ký tự (BPMN 3.12); luôn mang base_version", () => {
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", base_version: 7 }).success).toBe(false)
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", reason: "ok", base_version: 7 }).success).toBe(false)
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", reason: "Đúng yêu cầu của khách", base_version: 7 }).success).toBe(true)
     expect(groupDecisionRequestSchema.safeParse({ decision: "rejected", base_version: 7 }).success).toBe(false)
     expect(groupDecisionRequestSchema.safeParse({ decision: "rejected", reason: "không", base_version: 7 }).success).toBe(false)
     expect(groupDecisionRequestSchema.safeParse({ decision: "rejected", reason: "Ngoài phạm vi bản 1.0", base_version: 7 }).success).toBe(true)
-    expect(groupDecisionRequestSchema.safeParse({ decision: "approved" }).success).toBe(false)
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", reason: "Đúng yêu cầu của khách" }).success).toBe(false)
   })
 
   it("đóng / huỷ cần lý do", () => {
