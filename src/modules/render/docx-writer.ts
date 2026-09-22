@@ -35,6 +35,8 @@ import type {
 const PAGE_CONTENT_WIDTH_PX = 602
 /** Cùng vùng chữ tính bằng twip: 11906 − 2 × 1440. */
 const PAGE_CONTENT_WIDTH_TWIP = 9026
+/** Đệm quanh bảng và ảnh, tách chúng khỏi tiêu đề/đoạn ngay trước (twip; 20 twip = 1pt). */
+const BLOCK_SPACE_BEFORE = 120
 const STALE_FILL = "FFF2CC"
 const HEADER_FILL = "D9D9D9"
 const NUMBERING_REF = "ff-numbered"
@@ -235,6 +237,7 @@ function recordOfChanges(doc: RenderedDocument): BodyChild[] {
     new Paragraph({
       children: [new TextRun({ text: "*A - Added, M - Modified, D - Deleted", italics: true, size: 20 })]
     }),
+    tableGap(undefined),
     table(
       ["Date", "Version", "A*, M, D", "In charge", "Change Description"].map(plain),
       doc.recordOfChanges.map((row) =>
@@ -277,12 +280,12 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean): BodyChild[] {
       })
     )
     if (appendix.redOpen.length > 0) {
-      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3 }), flagTable(appendix.redOpen, false))
+      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3 }), tableGap(undefined), flagTable(appendix.redOpen, false))
     }
   }
   // srs-spine §6: mọi export, kể cả bản sạch, in danh sách waive
   if (appendix.waived.length > 0) {
-    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3 }), flagTable(appendix.waived, true))
+    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3 }), tableGap(undefined), flagTable(appendix.waived, true))
   }
   return out
 }
@@ -330,7 +333,7 @@ function renderBlock(block: Block, shading: Shading, ctx: WriteContext): BodyChi
       )
     }
     case "table":
-      return [table(block.header, block.rows, shading), new Paragraph({ shading })]
+      return [tableGap(shading), table(block.header, block.rows, shading), new Paragraph({ shading })]
     case "image":
       return image(block.png, block.caption, shading)
     case "page_break":
@@ -348,6 +351,18 @@ function runs(items: InlineRun[]): TextRun[] {
         ...(run.code ? { font: CODE_FONT, shading: { type: ShadingType.CLEAR, color: "auto", fill: "F2F2F2" } } : {})
       })
   )
+}
+
+/**
+ * OOXML không có "space before" cho `w:tbl`, nên đệm trên bảng là một đoạn rỗng cỡ chữ 1pt mang
+ * `spacing.before` — gần như không chiếm chiều cao, chỉ tạo khoảng hở với tiêu đề phía trên.
+ */
+function tableGap(shading: Shading): Paragraph {
+  return new Paragraph({
+    shading,
+    spacing: { before: BLOCK_SPACE_BEFORE, after: 0 },
+    children: [new TextRun({ text: "", size: 2 })]
+  })
 }
 
 function table(header: CellRuns[], rows: CellRuns[][], shading: Shading): Table {
@@ -395,6 +410,7 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
     new Paragraph({
       shading,
       alignment: AlignmentType.CENTER,
+      spacing: { before: BLOCK_SPACE_BEFORE, after: caption ? 0 : BLOCK_SPACE_BEFORE },
       children: [
         new ImageRun({
           type: "png",
@@ -412,6 +428,7 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
       new Paragraph({
         shading,
         alignment: AlignmentType.CENTER,
+        spacing: { after: BLOCK_SPACE_BEFORE },
         children: [new TextRun({ text: caption, italics: true, size: 20 })]
       })
     )
