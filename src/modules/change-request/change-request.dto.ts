@@ -12,7 +12,8 @@ import {
   GROUP_ID_PATTERN,
   LOCATION_CONCLUSIONS,
   LOCATION_FOUND_BY,
-  LOCATION_ID_PATTERN
+  LOCATION_ID_PATTERN,
+  NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
 
 const id = z.string().min(1)
@@ -53,6 +54,8 @@ export const changeRequestDtoSchema = z.object({
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
+  /** Mode 1 v3: bản xem trước đính kèm lúc tạo (gợi ý cho C-2/C-3/C-4), không có ⇒ `null`. */
+  seed: z.object({ instruction: z.string().nullable(), ops: z.array(z.record(z.string(), z.unknown())), targets: z.array(z.string()) }).nullable(),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
@@ -105,12 +108,16 @@ export const changeGroupDtoSchema = z.object({
 
 // ─── request ─────────────────────────────────────────────────────
 
-/** `POST /projects/:id/change-requests` (C-1, UC-48). Thiếu `source` ⇒ 400 CR_SOURCE_REQUIRED. */
+/**
+ * `POST /projects/:id/change-requests` (C-1, UC-48, BPMN 3.1). Thiếu `source` / `requester` ⇒ 400 CR_SOURCE_REQUIRED.
+ * Mode 1 v3: nguồn chỉ nhận 6 nguồn của BPMN (không `chat`); `preview_id` đính kèm bản xem trước làm gợi ý.
+ */
 export const createChangeRequestSchema = z.strictObject({
   title: text(200),
   description: text(5000),
-  source: crSourceSchema,
-  requester: text(200)
+  source: crSourceSchema.extend({ kind: z.enum(NEW_CR_SOURCE_KINDS) }),
+  requester: text(200),
+  preview_id: z.string().trim().min(1).max(100).optional()
 })
 
 /** `GET /projects/:id/change-requests?status=` */
@@ -180,10 +187,6 @@ export const pathLockedMetaSchema = z.object({
   locked: z.array(z.object({ path: z.string(), cr_id: crIdSchema }))
 })
 
-/**
- * `meta` của 409 CHANGE_REQUIRES_CR (sau baseline v1 ở project mode 1). `/changes`, `/undo` ⇒ chỉ `prefill` (FE mở form
- * CR điền sẵn). Lệnh sửa trong chat (FLF-186) ⇒ BE **đã tạo** CR nguồn `chat` — `change_request` trỏ tới nó.
- */
 /**
  * `meta` của 409 CHANGE_REQUIRES_CR — nội dung điền sẵn cho form 3.1 (mode 1 v3: BE không tự tạo CR; nguồn là gợi ý,
  * BA vẫn chọn lại). Bỏ `change_request` của V4/T8.

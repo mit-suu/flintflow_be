@@ -23,7 +23,7 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
-import { elementValue, isArrayPath, valueText } from "./spine-location.js"
+import { elementValue, isArrayPath, opElement, valueText } from "./spine-location.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -62,15 +62,25 @@ export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknow
 
 type PromptLocation = Pick<IChangeLocation, "location_id" | "path" | "section_id" | "found_by" | "entity_paths" | "verify">
 
+/** Op của bản xem trước đính kèm CR chạm vào vị trí này (phần tử, hoặc thêm vào đúng mảng của vị trí "mục trống"). */
+export const seedOpsFor = (seedOps: readonly Record<string, unknown>[], path: string): Record<string, unknown>[] =>
+  seedOps.filter((op) => {
+    const p = typeof op.path === "string" ? op.path : ""
+    return isArrayPath(path) ? p === path : opElement(p) === path
+  })
+
 /** Mô tả vị trí trong prompt C-4: `[L001] path (section; tìm thấy vì…)` rồi giá trị hiện tại (JSON, thụt lề). */
-export const locationPromptText = (spine: Spine, l: PromptLocation): string => {
+export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: readonly Record<string, unknown>[] = []): string => {
   const why = `found by ${l.found_by.join(", ")}${l.entity_paths.length ? `; about ${l.entity_paths.join(", ")}` : ""}`
   const failed = l.verify && !l.verify.code_ok ? `\n  Previous proposal failed checks: ${l.verify.violations.map((v) => v.message).join("; ")}` : ""
   const section = l.section_id === "misc" ? "-" : titleOfSection(spine, l.section_id)
   const value = truncate(valueText(elementValue(spine, l.path)), 2500).split("\n").join("\n  ")
   // Vị trí "mục trống": path là cả mảng, không có phần tử nào để sửa ⇒ việc hợp lệ duy nhất là thêm phần tử mới
   const how = isArrayPath(l.path) ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)." : ""
-  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${failed}`
+  // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
+  const mine = seedOpsFor(seedOps, l.path)
+  const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
+  return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${suggested}${failed}`
 }
 
 const needsProposal = (l: IChangeLocation): boolean => !l.manual && (l.conclusion === null || (l.verify !== null && !l.verify.code_ok))
@@ -122,7 +132,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           ...crHeader(cr),
           answers: answersText(cr),
           owner_skill: ownerSkillText(owner || null),
-          locations: batch.map((l) => locationPromptText(spine, l)).join("\n"),
+          locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
           glossary: glossaryText(spine)
         })
         if (!result.ok) {

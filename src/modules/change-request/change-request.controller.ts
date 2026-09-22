@@ -53,6 +53,8 @@ export const createCr = mode1Handler(async (req, res) => {
   }
   const body = parseInput(createChangeRequestSchema, req.body)
   const cr = await crService.createCr(auth.projectId, auth.userId, body)
+  // Bản xem trước hết hạn / không phải của mình ⇒ CR vẫn tạo (3.1 không phụ thuộc bản xem trước), báo để FE nói rõ
+  if (body.preview_id && !cr.seed) return sendSuccess(res, 201, await crService.toDetail(cr), { seed_dropped: true })
   return detail(res, cr, 201)
 })
 

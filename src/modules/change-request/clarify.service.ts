@@ -58,7 +58,8 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     return
   }
   const keywords = out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
-  cr.targets = { entity_paths: out.targets.entity_paths, keywords }
+  // Phần tử bản xem trước đã chạm (mode 1 v3) luôn là đích — 3.4 vẫn tìm thêm vị trí liên quan như thường
+  cr.targets = { entity_paths: [...new Set([...out.targets.entity_paths, ...(cr.seed?.targets ?? [])])], keywords }
   cr.markModified("targets")
   await transitionCr(cr, "impact_review")
 }

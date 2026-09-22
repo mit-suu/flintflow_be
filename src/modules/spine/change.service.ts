@@ -88,6 +88,10 @@ export const branchOf = (spine: Pick<Spine, "baselines">, impact: Impact): Chang
 
 interface StoredPreview {
   projectId: string
+  /** Người xem trước — chỉ chính họ đính kèm được bản xem trước vào CR (mode 1 v3, 3.1). */
+  userId: string
+  /** Câu lệnh người dùng gõ; gửi lô op sẵn thì `null`. */
+  instruction: string | null
   base_version: number
   ops: Op[]
   reason: string | null
@@ -113,6 +117,17 @@ const prunePreviews = (now: number): void => {
 
 /** Test dùng để cô lập giữa các ca. */
 export const clearPreviewStore = (): void => previewStore.clear()
+
+/**
+ * Mode 1 v3 (BPMN 3.1): bản xem trước đính kèm vào CR làm **gợi ý** cho 3.2/3.4/3.6 — chỉ đọc, không xoá (mode 1 không
+ * áp bản xem trước). Hết hạn / của người khác / project khác ⇒ `null` (CR vẫn tạo, không kèm gợi ý).
+ */
+export const peekPreview = (projectId: string, previewId: string, userId: string): { instruction: string | null; ops: Op[] } | null => {
+  prunePreviews(Date.now())
+  const stored = previewStore.get(previewId)
+  if (!stored || stored.projectId !== projectId || stored.userId !== userId) return null
+  return { instruction: stored.instruction, ops: stored.ops }
+}
 
 const takePreview = (projectId: string, previewId: string): StoredPreview => {
   prunePreviews(Date.now())
@@ -396,6 +411,8 @@ export const preview = async (
   prunePreviews(Date.now())
   previewStore.set(previewId, {
     projectId,
+    userId,
+    instruction: body.instruction?.trim() || null,
     base_version: body.base_version,
     ops: resolved.ops,
     reason: body.reason ?? null,
