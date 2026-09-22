@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine } from "./spine.types.js"
-import { NON_WAIVABLE_RULES, RULES, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
+import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
 import { computeSourceHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
@@ -23,9 +23,9 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("10 luật đỏ + 6 luật vàng; 3 luật không waive được", () => {
-    expect(RULES.filter((r) => r.level === "red")).toHaveLength(10)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(6)
+  it("11 luật đỏ + 11 luật vàng; 3 luật không waive được", () => {
+    expect(RULES.filter((r) => r.level === "red")).toHaveLength(11)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(11)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -91,7 +91,7 @@ describe("runDeterministicCheck", () => {
     expect(byRule(atBaseline, "section_awaiting_reaccept")).toMatchObject([{ section_id: "fixed:5.2", remediation_step: "S-7.2" }])
   })
 
-  it("6 luật vàng cardinality + non_english_content (bỏ qua addendum)", () => {
+  it("luật vàng cardinality + non_english_content (bỏ qua addendum)", () => {
     const flags = runDeterministicCheck(
       variant((s) => {
         s.roles[0].actor_id = null
@@ -109,6 +109,151 @@ describe("runDeterministicCheck", () => {
     expect(byRule(flags, "screen_no_function")).toMatchObject([{ target_id: "S99" }])
     expect(byRule(flags, "non_english_content")).toMatchObject([{ target_id: FIXTURE.actors[1].id }])
     expect(flags.every((f) => f.level === "yellow" || f.rule_id === "dead_reference")).toBe(true)
+  })
+
+
+  it("quan hệ use case hỏng: tự tham chiếu, vòng, cùng cặp hai quan hệ ⇒ cờ đỏ", () => {
+    const relation = (s: Spine) => byRule(runDeterministicCheck(s), "usecase_relation_invalid")
+    const uc = (s: Spine, id: string) => s.use_cases.find((u) => u.id === id)!
+
+    const self = relation(variant((s) => (uc(s, "UC01").includes = ["UC01"])))
+    expect(self).toMatchObject([{ target_id: "UC01", level: "red", section_id: "fixed:2.2.2", remediation_step: "S-3.4" }])
+    expect(self[0].message).toContain("tự tham chiếu")
+
+    const cycle = relation(variant((s) => {
+      uc(s, "UC01").includes = ["UC02"]
+      uc(s, "UC02").includes = ["UC01"]
+    }))
+    // Mọi use case trên vòng đều bị cờ, không riêng use case đóng vòng
+    expect(cycle.map((f) => f.target_id).sort()).toEqual(["UC01", "UC02"])
+    expect(cycle.every((f) => f.message.includes("vòng"))).toBe(true)
+
+    const cycle3 = relation(variant((s) => {
+      uc(s, "UC04").extends = ["UC05"]
+      uc(s, "UC05").extends = ["UC06"]
+      uc(s, "UC06").extends = ["UC04"]
+    }))
+    expect(cycle3.map((f) => f.target_id).sort()).toEqual(["UC04", "UC05", "UC06"])
+
+    // Vòng khép qua node đã duyệt xong (UC01→UC05→UC02→UC01 trong khi UC02 được thăm trước qua UC01→UC02)
+    const crossEdge = relation(variant((s) => {
+      uc(s, "UC01").includes = ["UC02", "UC05"]
+      uc(s, "UC02").includes = ["UC01"]
+      uc(s, "UC05").includes = ["UC02"]
+    }))
+    expect(crossEdge.map((f) => f.target_id).sort()).toEqual(["UC01", "UC02", "UC05"])
+
+    const both = relation(variant((s) => {
+      uc(s, "UC01").includes = ["UC02"]
+      uc(s, "UC02").extends = ["UC01"]
+    }))
+    expect(both.map((f) => f.target_id).sort()).toEqual(["UC01", "UC02"])
+    expect(both.every((f) => f.message.includes("vừa include vừa extend"))).toBe(true)
+    expect(both.every((f) => f.message.includes("vòng"))).toBe(false)
+  })
+
+  it("use case không actor, không quan hệ ⇒ usecase_floating", () => {
+    const flags = byRule(runDeterministicCheck(variant((s) => (s.use_cases.find((u) => u.id === "UC16")!.actor_ids = []))), "usecase_floating")
+    expect(flags).toMatchObject([{ target_id: "UC16", level: "yellow", section_id: "fixed:2.2.2", remediation_step: "S-3.2" }])
+    // UC14 extends UC15 và UC13 bị include ⇒ không lơ lửng dù gỡ hết actor
+    for (const id of ["UC14", "UC13"]) {
+      expect(byRule(runDeterministicCheck(variant((s) => (s.use_cases.find((u) => u.id === id)!.actor_ids = []))), "usecase_floating")).toEqual([])
+    }
+  })
+
+  it("đặt tên: ngữ nghĩa và chính tả là hai rule_id khác nhau, cùng target vẫn ra hai cờ", () => {
+    const named = (name: string, rule: string) =>
+      byRule(runDeterministicCheck(variant((s) => (s.use_cases.find((u) => u.id === "UC05")!.name = name))), rule)
+
+    expect(named("Manage Projects", "usecase_name_semantic")).toMatchObject([{ target_id: "UC05", remediation_step: "S-3.2" }])
+    expect(named("Manage Projects", "usecase_name_style")).toEqual([])
+    expect(named("manage projects", "usecase_name_semantic")).toHaveLength(1)
+    expect(named("manage projects", "usecase_name_style")).toHaveLength(1)
+
+    const actorFlags = byRule(runDeterministicCheck(variant((s) => (s.actors[0].name = "User"))), "actor_name_shape")
+    expect(actorFlags).toMatchObject([{ target_id: FIXTURE.actors[0].id, level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+  })
+
+  it("U1 xét CHỮ CÁI đầu tiên, U3 bỏ dấu câu quanh từ đầu", () => {
+    const codes = (name: string) => checkUseCaseName(name, ["Founder", "Scheduler"], [name])
+
+    // Số hay dấu mở đầu từ không phải lỗi hoa thường — trước đây `/^[A-Z]/` bắn cả bốn tên này
+    for (const name of ["Export 2FA Backup Codes", "Top 10 Projects", "Pay Invoice (Optional)", "e-Sign Document"]) {
+      expect(codes(name).style, name).not.toContain("U1")
+    }
+    expect(codes("accept step at gate").style).toContain("U1")
+    expect(codes("Accept Step.").style).toContain("U1")
+
+    // Động từ thô còn bị bắt khi dính dấu câu
+    for (const name of ["Manage Projects", "Manage: Projects", "Manage-Projects"]) {
+      expect(codes(name).semantic, name).toContain("U3")
+    }
+    // `Scheduler` là actor nhưng `Scheduled` không phải ⇒ U4 khớp nguyên từ, không khớp tiền tố
+    expect(codes("Run Scheduled Housekeeping").style).not.toContain("U4")
+    expect(codes("Notify Founder").style).toContain("U4")
+  })
+
+  it("tên đúng chuẩn không sinh cờ: từ phụ viết hoa giữa tên, actor có định ngữ", () => {
+    const naming = (s: Spine) => runDeterministicCheck(s).filter((f) => ["usecase_name_semantic", "usecase_name_style", "actor_name_shape"].includes(f.rule_id))
+    expect(naming(variant((s) => (s.use_cases.find((u) => u.id === "UC10")!.name = "Accept Step At Gate")))).toEqual([])
+    expect(naming(variant((s) => (s.actors[0].name = "Registered User")))).toEqual([])
+  })
+
+  it("U1 chấp nhận giới từ via/into/onto/per/vs viết thường giữa tên", () => {
+    for (const name of ["Create SRS via Guided Interview", "Copy Item into Folder", "Report Usage per Branch", "Compare Plan vs Actual"]) {
+      expect(checkUseCaseName(name, [], [name]).style, name).not.toContain("U1")
+    }
+  })
+
+  it("use case truy cập tài khoản: nhận theo nguyên cụm từ, không theo chuỗi con", () => {
+    for (const name of ["Log In", "Login", "Sign In with Google", "Sign Up", "Register", "Register Account", "Create an Account",
+      "Reset Password", "Forgot Password", "Recover Account", "Authenticate", "Đăng nhập", "Đăng ký", "Quên mật khẩu"]) {
+      expect(isAccountAccessUseCase(name), name).toBe(true)
+    }
+    // Chuẩn hoá NFC: tiếng Việt dạng tổ hợp (NFD) từ tài liệu nhập vẫn nhận ra
+    expect(isAccountAccessUseCase("Đăng nhập".normalize("NFD"))).toBe(true)
+    expect(isAccountAccessUseCase("Log In to Staff Portal")).toBe(true)
+    expect(isAccountAccessUseCase("Đăng nhập bằng Google")).toBe(true)
+    // Cụm phải đứng đầu tên, phần sau chỉ là bổ ngữ cách thức
+    for (const name of ["Registered Book Loan", "Register Book Loan", "Change Delivery Address", "Place Order", "Blogin Feed",
+      "View Login History", "Sign Up for Newsletter", "Export Login Report", "Xem lịch sử đăng nhập"]) {
+      expect(isAccountAccessUseCase(name), name).toBe(false)
+    }
+  })
+
+  it("use case truy cập tài khoản làm luồng con ⇒ usecase_auth_relation (vàng, S-3.4)", () => {
+    const auth = (s: Spine) => byRule(runDeterministicCheck(s), "usecase_auth_relation")
+    const uc = (s: Spine, id: string) => s.use_cases.find((u) => u.id === id)!
+
+    // Log In (UC02) bị include
+    const included = auth(variant((s) => (uc(s, "UC06").includes = ["UC02"])))
+    expect(included).toMatchObject([{ target_id: "UC02", level: "yellow", section_id: "fixed:2.2.2", remediation_step: "S-3.4" }])
+    expect(included[0].message).toContain("bị include bởi")
+
+    // Reset Password (UC03) extend Log In
+    const extending = auth(variant((s) => (uc(s, "UC03").extends = ["UC02"])))
+    expect(extending).toMatchObject([{ target_id: "UC03" }])
+
+    // Log In làm BASE của một extend là hợp lệ; include một use case thường không bắn
+    expect(auth(variant((s) => (uc(s, "UC04").extends = ["UC02"])))).toEqual([])
+    expect(auth(variant((s) => (uc(s, "UC06").includes = ["UC04"])))).toEqual([])
+    expect(auth(FIXTURE)).toEqual([])
+  })
+
+  it("actor system/time không tham gia use case nào ⇒ orphan_actor (trước đây chỉ xét human)", () => {
+    const systemActor = FIXTURE.actors.find((a) => a.kind === "system")!
+    const orphan = byRule(
+      runDeterministicCheck(variant((s) => s.use_cases.forEach((u) => (u.actor_ids = u.actor_ids.filter((id) => id !== systemActor.id))))),
+      "orphan_actor"
+    )
+    expect(orphan).toMatchObject([{ target_id: systemActor.id, level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.2" }])
+
+    const timeActor = FIXTURE.actors.find((a) => a.kind === "time")!
+    const orphanTime = byRule(
+      runDeterministicCheck(variant((s) => s.use_cases.forEach((u) => (u.actor_ids = u.actor_ids.filter((id) => id !== timeActor.id))))),
+      "orphan_actor"
+    )
+    expect(orphanTime.map((f) => f.target_id)).toEqual([timeActor.id])
   })
 
   it("Spine rỗng: mọi cờ đỏ có remediation_step và section_id phân giải được", () => {

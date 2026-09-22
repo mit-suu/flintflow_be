@@ -675,9 +675,7 @@
       ],
       "description": "A user who forgot the password requests a reset link and sets a new password.",
       "includes": [],
-      "extends": [
-        "UC02"
-      ]
+      "extends": []
     },
     {
       "id": "UC04",
@@ -691,23 +689,37 @@
         "FN016",
         "FN017"
       ],
-      "description": "A first-time user walks through or skips the pipeline introduction.",
+      "description": "When a first-time user creates their first project, they walk through or skip the pipeline introduction.",
       "includes": [],
-      "extends": []
+      "extends": [
+        "UC06"
+      ]
     },
     {
       "id": "UC05",
-      "name": "Manage Projects",
+      "name": "Browse Projects",
       "actor_ids": [
         "A01"
       ],
       "function_ids": [
         "FN018",
         "FN019",
-        "FN020",
+        "FN020"
+      ],
+      "description": "A user browses, searches and filters their projects.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC24",
+      "name": "Archive Project",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
         "FN022"
       ],
-      "description": "A user browses, searches, filters and archives their projects.",
+      "description": "A user archives a project they no longer work on.",
       "includes": [],
       "extends": []
     },
@@ -775,7 +787,7 @@
     },
     {
       "id": "UC10",
-      "name": "Review and Accept Step",
+      "name": "Accept Step At Gate",
       "actor_ids": [
         "A01"
       ],

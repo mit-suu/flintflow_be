@@ -370,7 +370,7 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     const all = await repo.listChanges(PROJECT)
     expect(all.map((c) => c.seq)).toEqual(Array.from({ length: all.length }, (_, i) => i + 1))
     expect(new Set(all.map((c) => c.txn))).toEqual(new Set([r1.txn, r2.txn]))
-    expect((await repo.get(PROJECT))?.use_cases.find((u) => u.id === "UC05")?.name).toBe("Manage Project Portfolio")
+    expect((await repo.get(PROJECT))?.use_cases.find((u) => u.id === "UC05")?.name).toBe("Browse Project Portfolio")
   })
 
   it("base_version cũ ⇒ 409 SPINE_VERSION_CONFLICT, không ghi change", async () => {

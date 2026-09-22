@@ -101,12 +101,22 @@ const nextIdFactory = (diagrams: Diagram[]): (() => string) => {
 
 const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (d.owner_id ?? null) === (t.owner_id ?? null)
 
-/** Id cho các phần của một target: giữ id cũ; nhiều phần ⇒ hậu tố `-1, -2`. */
+/**
+ * Id cho các phần của một target. Phần đầu **giữ nguyên id đang có**, dù id đó có hậu tố hay không;
+ * các phần sau là `-2, -3`.
+ *
+ * Giữ id phần đầu là bắt buộc: baseline đã ký lưu tham chiếu `diagram-ref:<id>` trong snapshot và nạp
+ * ảnh từ store **theo id, lúc đọc** (`assemble.service.rehydrateImages` — không tra `diagrams[]`). Id nào
+ * biến mất thì `syncFiles` xoá file của nó và mọi baseline trỏ vào đó mất hình vĩnh viễn. Vì thế hình
+ * một phần thành nhiều phần (`[D02]` ⇒ `[D02, D02-2]`) và hình đã tách sẵn theo lối cũ
+ * (`[D02-1, D02-2]` ⇒ giữ nguyên) đều không gỡ id nào.
+ */
 const assignIds = (existing: Diagram[], count: number, nextId: () => string): string[] => {
   if (count === 0) return []
-  const base = existing.find((d) => !PART_SUFFIX.test(d.id))?.id ?? existing[0]?.id.replace(PART_SUFFIX, "") ?? nextId()
-  if (count === 1) return [existing.find((d) => !PART_SUFFIX.test(d.id))?.id ?? base]
-  return Array.from({ length: count }, (_, i) => `${base}-${i + 1}`)
+  const first = existing.find((d) => !PART_SUFFIX.test(d.id))?.id ?? existing[0]?.id ?? nextId()
+  if (count === 1) return [first]
+  const stem = first.replace(PART_SUFFIX, "")
+  return [first, ...Array.from({ length: count - 1 }, (_, i) => `${stem}-${i + 2}`)]
 }
 
 // ─── render ──────────────────────────────────────────────────────
