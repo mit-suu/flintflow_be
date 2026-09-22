@@ -266,6 +266,14 @@ export const renderAll = async (projectId: string, options: RenderOptions): Prom
 export const staleDiagrams = (spine: Spine): Diagram[] =>
   spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== computeSourceHash(spine, d))
 
+/**
+ * Hình ĐÃ vẽ thành công nhưng dữ liệu nguồn đã đổi sau đó — đúng tập hợp mà luật cờ `diagram_stale` bắt.
+ * Khác `staleDiagrams` ở chỗ bỏ qua hình chưa từng vẽ (hash rỗng/legacy): vẽ lại chúng tự động là đi làm
+ * việc của step render, không phải sửa hậu quả của step vừa chạy (FLF-177 BUG-17).
+ */
+export const staleRenderedDiagrams = (spine: Spine): Diagram[] =>
+  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d))
+
 export const loadDiagramFile = async (
   projectId: string,
   diagramId: string,

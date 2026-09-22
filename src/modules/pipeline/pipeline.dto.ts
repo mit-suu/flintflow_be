@@ -137,7 +137,10 @@ export const changesPreviewResponseSchema = z.object({
   impact: impactSchema.optional(),
   /** T17: lệnh mơ hồ (UC 6.11) — không có ops. */
   clarification: z.string().optional(),
-  preview_id: z.string().optional()
+  preview_id: z.string().optional(),
+  notes: z.string().optional(),
+  /** Hoà giải (BUG-16): không có gì cần đổi — gửi lại `preview_id` để xác nhận section nguyên trạng. */
+  no_change: z.boolean().optional()
 })
 
 /** POST /projects/:id/changes, /undo, /reconcile — kết quả một transaction đã ghi. */
@@ -241,6 +244,14 @@ export type ChangeSummary = z.infer<typeof changeSummarySchema>
 
 export const assumptionBriefSchema = z.object({ id: z.string(), text: z.string(), conflict: z.string().nullable().optional() })
 
+/** Bảng thu gọn hiện ngay ở gate cho step mà kết quả LÀ một bảng (MoSCoW, ma trận quyền) — BUG-20. */
+export const gateTableSchema = z.object({
+  title_vi: z.string(),
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.string())),
+  truncated: z.number().int().min(0)
+})
+
 export const questionSchema = z.object({
   id: z.string().min(1),
   text: z.string().min(1),
@@ -320,6 +331,7 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     duration_ms: z.number().int().min(0).optional(),
     credits_used: z.number().min(0).optional(),
     doc_progress: z.object({ before: z.number().min(0).max(100), after: z.number().min(0).max(100) }).optional(),
+    table: gateTableSchema.optional(),
     /** Step không đổi gì thì phải nói vì sao (Lớp 4). */
     no_change_reason: z.string().optional()
   }),

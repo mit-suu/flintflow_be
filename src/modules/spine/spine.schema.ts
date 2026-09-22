@@ -228,6 +228,20 @@ export const assumptionSchema = z.strictObject({
   confirmed_at: isoDateTime.nullable()
 })
 
+/**
+ * Sổ quyết định (FLF-208 · 02-reduce-stops-plan R4). `topic_key` là khoá chống hỏi lặp; `superseded_by`
+ * giữ vết khi user đổi ý thay vì xoá dòng cũ. Spine trước FLF-198 không có ⇒ `[]`.
+ */
+export const decisionSchema = z.strictObject({
+  id,
+  topic_key: z.string().min(1),
+  question: z.string(),
+  answer: z.string(),
+  step_id: z.string().min(1),
+  at: isoDateTime,
+  superseded_by: id.nullable().default(null)
+})
+
 /** Tối thiểu cho lý do waive — srs-spine.md §7. */
 export const WAIVE_REASON_MIN_LENGTH = 20
 
@@ -295,6 +309,7 @@ export const spineSchema = z.strictObject({
 
   diagrams: z.array(diagramSchema),
   assumptions: z.array(assumptionSchema),
+  decisions: z.array(decisionSchema).default([]),
   flags: z.array(flagSchema),
   sections: z.array(sectionStateSchema),
   baselines: z.array(baselineSchema),
