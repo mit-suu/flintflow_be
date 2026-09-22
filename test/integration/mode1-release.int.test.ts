@@ -158,10 +158,10 @@ describe("mode 1 — release (Flow 6)", () => {
 })
 
 describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
-  it("/changes, /changes/preview, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; chat hỏi đáp vẫn đi", async () => {
+  it("/changes, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; preview chỉ đọc vẫn chạy", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
-    // D3 (FLF-183): chặn chỉ áp sau baseline v1
+    // mode 1 v3: có baseline bất kỳ là chặn
     await markBaselineV1(projectId)
     const auth = { Authorization: `Bearer ${seeded.token}` }
     const base = `/api/v1/projects/${projectId}`
@@ -172,9 +172,12 @@ describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
     expect(change.body.error.code).toBe("CHANGE_REQUIRES_CR")
     expect(changeRequiresCrMetaSchema.parse(change.body.meta).prefill).toEqual({
       title: "Rename actor Learner to Student",
-      description: "Rename actor Learner to Student"
+      description: "Rename actor Learner to Student",
+      source: { kind: "verbal", ref: null }
     })
-    for (const path of ["/changes/preview", "/undo", "/reconcile"]) {
+    const preview = await request(app).post(`${base}/changes/preview`).set(auth).send({ base_version: version, ops: [{ op: "set", path: "project.vision", value: "x" }] })
+    expect(preview.body.error?.code).not.toBe("CHANGE_REQUIRES_CR")
+    for (const path of ["/undo", "/reconcile"]) {
       const res = await request(app).post(`${base}${path}`).set(auth).send({ base_version: version, instruction: "Rename actor" })
       expect(res.body.error?.code, path).toBe("CHANGE_REQUIRES_CR")
     }

@@ -33,6 +33,10 @@ export const MODE1_ERROR_STATUS = {
   CHANGE_REQUIRES_CR: 409,
   /** FLF-182: tắt step của đầu mục mẫu FPT (cốt lõi) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
+  /** Mode 1 v3 (BPMN Flow 1): không chạy step / gate / bật-tắt step, không ký baseline v1, không waive cờ. */
+  MODE1_NO_STEPS: 409,
+  MODE1_NO_SIGNOFF: 409,
+  MODE1_NO_WAIVE: 409,
   IMPORT_FILE_REJECTED: 422,
   IMPORT_STAMP_FOREIGN_PROJECT: 422,
   RELEASE_RED_FLAGS_OPEN: 422
