@@ -348,6 +348,18 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(media.some((m) => m.equals(PNG))).toBe(false)
   })
 
+  it("môi trường không có vision (thiếu GEMINI_API_KEY) ⇒ I-4 không dừng: ảnh unsupported, giữ ảnh gốc + cờ vàng", async () => {
+    mockOverrides.next = (prompt) =>
+      prompt.includes("# Read Diagram Image") ? new AiActionError(500, "Gemini API key is missing.", "GEMINI_KEY_MISSING") : fakeMode1(prompt)
+    const { projectId, importId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
+    const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
+    expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unsupported"])
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.actors.some((a) => a.name === "Guest")).toBe(false)
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toHaveLength(1)
+    expect(spine.custom_sections.flatMap((c) => c.blocks).some((b) => b.kind === "image" && b.image_ref === "word/media/image1.png")).toBe(true)
+  })
+
   it("hết credit giữa lượt đọc ảnh ⇒ I-4 dừng (paused credits) ở section có ảnh, chạy tiếp được", async () => {
     const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
     let fail = true
