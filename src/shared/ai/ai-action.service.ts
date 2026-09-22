@@ -9,6 +9,7 @@ import {
 } from "./ai-action.types.js"
 import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.js"
 import { callLLM } from "./providers/llm.router.js"
+import type { LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
@@ -32,6 +33,8 @@ export interface ExecuteAiActionOptions {
    * gọi vẫn chạy hết — có thể vài phút — và **khoá step chưa nhả** ⇒ bấm chạy lại nhận `STEP_NOT_RUNNABLE`.
    */
   signal?: AbortSignal
+  /** Ảnh gửi kèm prompt (mode 1 v3 phase 5, `IMPORT_EXTRACT_DIAGRAM`) — provider phải có vision (Gemini). */
+  images?: LlmImage[]
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -144,7 +147,10 @@ export const executeAiAction = async <T = any>(
       const startTime = Date.now()
 
       try {
-        const llmRes = await callLLM(finalPrompt, providerConfig, options.signal ? { signal: options.signal } : {})
+        const llmRes = await callLLM(finalPrompt, providerConfig, {
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.images?.length ? { images: options.images } : {})
+        })
         const latencyMs = Date.now() - startTime
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)

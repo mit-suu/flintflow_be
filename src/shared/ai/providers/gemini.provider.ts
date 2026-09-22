@@ -21,7 +21,8 @@ export const callGemini = async (
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
 
     const requestBody = {
-      contents: [{ parts: [{ text: prompt }] }],
+      // Ảnh (phase 5) đi sau chữ, dạng inline_data base64 — prompt nhắc tới "ảnh đính kèm"
+      contents: [{ parts: [{ text: prompt }, ...(options.images ?? []).map((img) => ({ inline_data: { mime_type: img.mime, data: img.data } }))] }],
       generationConfig: {
         temperature,
         maxOutputTokens: maxTokens,
