@@ -274,6 +274,25 @@ export interface Assumption {
   confirmed_at: IsoDateTime | null
 }
 
+/**
+ * Một quyết định của user đã chốt trong lúc hỏi đáp (FLF-208 · `02-reduce-stops-plan.md` R4).
+ *
+ * Lượt test bị hỏi lại uptime ba lần và "giữ chỗ 15 phút" ba lần, rồi AI còn gợi ý ngược với điều user đã
+ * chốt. Sổ này là bộ nhớ chung của mọi step: hỏi xong ghi vào đây, và mọi lượt hỏi sau đều đọc nó.
+ * `topic_key` là khoá chủ đề (`uptime`, `slot_hold_minutes`…) — trùng khoá nghĩa là đã hỏi rồi.
+ */
+export interface Decision {
+  id: string
+  topic_key: string
+  question: string
+  answer: string
+  /** Step đã hỏi ra quyết định này. */
+  step_id: string
+  at: IsoDateTime
+  /** Quyết định mới thay thế nó (user đổi ý) — giữ lại vết thay vì xoá. */
+  superseded_by: string | null
+}
+
 export type FlagLevel = "red" | "yellow"
 
 export interface Flag {
@@ -356,6 +375,8 @@ export interface Spine {
 
   diagrams: Diagram[]
   assumptions: Assumption[]
+  /** Sổ quyết định đã chốt (R4) — Spine cũ không có ⇒ `[]`. */
+  decisions: Decision[]
   flags: Flag[]
   sections: SectionState[]
   baselines: Baseline[]

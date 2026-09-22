@@ -63,10 +63,15 @@ export const assertChatSessionOwnership = async (projectId: string, chatSessionI
 }
 
 /**
- * T17 (E4): session KHÔNG pipeline vẫn được sửa SRS — nhưng phải đi qua change flow, không qua CHAT.
- * Tin nhắn dạng lệnh sửa được dịch thành preview diff + phạm vi ảnh hưởng; user xác nhận ở Change panel
- * (`POST /changes` kèm `preview_id`). Ở đây KHÔNG ghi Spine và KHÔNG đụng `progress` — session không
- * pipeline không đẩy tiến độ (bất biến 7, srs-spine §6).
+ * T17 (E4): tin nhắn dạng **lệnh sửa** đi qua change flow, không qua CHAT. Nó được dịch thành preview
+ * diff + phạm vi ảnh hưởng; user xác nhận ở Change panel (`POST /changes` kèm `preview_id`). Ở đây KHÔNG
+ * ghi Spine và KHÔNG đụng `progress` — chat không đẩy tiến độ (bất biến 7, srs-spine §6).
+ *
+ * FLF-201 (BUG-09): trước đây luật này chỉ áp cho session KHÔNG pipeline, nên trong session pipeline một
+ * câu "thêm UC nhắc lịch đi" rơi vào CHAT thường: model trả lời "Tôi sẽ bổ sung UC18, UC19" mà không có
+ * op nào, còn Spine vẫn 17 UC. Nay mọi session đều đi qua đây — câu trả lời là một bản xem trước thật,
+ * hoặc một câu hỏi làm rõ, chứ không phải lời hứa. Lượt chờ `answer_needed` của step vẫn được ưu tiên
+ * trước (kiểm ở `tryAnswerRunningStep`, chạy trước hàm này).
  *
  * Trả về tin nhắn AI đã ghi vào transcript, hoặc `null` khi tin nhắn không phải lệnh sửa (đi tiếp CHAT).
  */
@@ -77,7 +82,7 @@ const tryChangeFlow = async (
   step: string,
   userId: string
 ): Promise<IChatMessage | null> => {
-  if (session.is_pipeline || !changeService.isChangeInstruction(content)) return null
+  if (!changeService.isChangeInstruction(content)) return null
 
   const record = await spineRepository.get(projectId)
   if (!record) return null

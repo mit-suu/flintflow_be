@@ -25,6 +25,7 @@ const emptySpine = (): Spine => ({
   custom_sections: [],
   diagrams: [],
   assumptions: [],
+  decisions: [],
   flags: [],
   sections: [],
   baselines: [],

@@ -173,6 +173,13 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   return spine.addendum.filter((a) => sections.has(a.target_section))
 }
 
+/**
+ * BUG-19: elicit gợi ý ngược với điều đã chốt (cọc 30% trong khi đã chốt 50.000₫; "tối đa 3 lịch/ngày"
+ * trong khi đã chốt 1 lịch đang chờ). Nguyên nhân: context của elicit không có `business_rules` và `nfrs`.
+ * Những gốc này luôn được đưa vào vòng hỏi, bất kể `reads` của step, ở dạng rút gọn.
+ */
+export const ELICIT_EXTRA_READS = ["business_rules:id,statement", "nfrs:id,statement,metric,threshold"] as const
+
 export interface StepProjection {
   step_id: string
   label_en: string
@@ -233,6 +240,18 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
 }
 
 // ─── có DB ───────────────────────────────────────────────────────
+
+/** Projection dành riêng cho vòng hỏi: projection của step + các gốc đã chốt (BUG-19). */
+export const elicitProjection = (spine: Spine, stepId: string): Record<string, unknown> => {
+  const { loop } = parseStepId(stepId)
+  const base = projectStep(spine, stepId).projection
+  const extra: Record<string, unknown> = {}
+  for (const raw of ELICIT_EXTRA_READS) {
+    if (raw in base) continue
+    extra[raw] = selectValue(spine, parseSelector(raw), loop)
+  }
+  return { ...base, ...extra }
+}
 
 export interface StepContext extends StepProjection {
   documents: string

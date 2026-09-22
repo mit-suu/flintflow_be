@@ -492,6 +492,41 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
   })
 })
 
+describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
+  const askUptime = (topic = "uptime") =>
+    elicitReply("Hỏi", [{ question: "Mức uptime mong muốn?", suggestedAnswers: [], multiple: false, topic_key: topic } as never])
+
+  const runAndAnswer = async (stepId: string, answer: string, elicit: () => ReturnType<typeof elicitReply>) => {
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, stepId, SESSION, USER, emit, {
+      elicitExecutor: async () => elicit(),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub()
+    })
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    if (events.some((e) => e.type === "answer_needed")) submitAnswer(PROJECT, stepId, SESSION, [{ question_id: "Q1", answer }])
+    await run
+    return events
+  }
+
+  it("câu trả lời được ghi vào sổ; step sau hỏi lại cùng chủ đề thì câu hỏi bị bỏ", async () => {
+    seedSpine()
+    seedSession(true)
+
+    await runAndAnswer("S-3.1", "99%", () => askUptime())
+    const afterFirst = (await repo.get(PROJECT))!
+    expect(afterFirst.decisions).toHaveLength(1)
+    expect(afterFirst.decisions[0]).toMatchObject({ topic_key: "uptime", answer: "99%", step_id: "S-3.1" })
+
+    // Step sau hỏi lại đúng chủ đề đó (kể cả dưới tên khác) ⇒ user không bị hỏi lần hai
+    await gate(PROJECT, "S-3.1", USER, { action: "accept", base_version: afterFirst.spine_version })
+    const events = await runAndAnswer("S-3.2", "99%", () => askUptime("availability"))
+    expect(events.some((e) => e.type === "answer_needed")).toBe(false)
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect((await repo.get(PROJECT))!.decisions).toHaveLength(1)
+  })
+})
+
 describe("step-runner: F8 — client đóng kết nối (AbortSignal)", () => {
   it("signal đã abort TRƯỚC khi gọi model ⇒ dừng ngay, không gọi elicit/draft", async () => {
     seedSpine()

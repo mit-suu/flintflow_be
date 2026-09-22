@@ -341,6 +341,8 @@ export interface ChangePreviewResult extends PreviewResult {
   clarification?: string
   preview_id?: string
   notes?: string
+  /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
+  no_change?: boolean
 }
 
 const rejectedPreview = (baseVersion: number, violations: Violation[], referrers: PreviewResult["referrers"] = []): ChangePreviewResult => ({
