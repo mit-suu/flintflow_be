@@ -3,7 +3,7 @@
  * (`u1`, `u2`…) như Word tiếng Việt. Tuỳ chọn `numberedOnly` sinh heading không style (như SRS thật của nhóm, P0 §4.2).
  */
 
-import { makeDocx, p, styled, table } from "../../docx-ooxml/testing/make-docx.js"
+import { imageRel, makeDocx, p, picture, styled, table } from "../../docx-ooxml/testing/make-docx.js"
 
 const STYLES =
   `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
@@ -15,6 +15,8 @@ export interface SrsFixtureOptions {
   numberedOnly?: boolean
   /** Chèn thêm XML vào cuối body. */
   extraBody?: string
+  /** Mode 1 v3 phase 5 (T3): ảnh nhúng dưới 2.2.1 (`word/media/<name>`) — PNG / JPEG / EMF tuỳ bytes truyền vào. */
+  images?: { name: string; data: Buffer }[]
 }
 
 export const SRS_FIXTURE_TEXT = {
@@ -39,6 +41,7 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
     h(2, "2.2", "Use Cases"),
     h(3, "2.2.1", "Use Case Diagram"),
     p("The diagram shows UC-01 and UC-02."),
+    ...(opts.images ?? []).map((_, i) => picture(`rIdImg${i + 1}`)),
     h(3, "2.2.2", "Use Case Descriptions"),
     table([["Use Case ID", "Use Case Name", "Actor"], T.ucRow, ["UC-02", "Log in", "Learner"]]),
     h(1, "3", "Functional Requirements"),
@@ -62,5 +65,14 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
     p("Internal notes that do not belong to the template."),
     opts.extraBody ?? ""
   ].join("")
-  return makeDocx({ body, styles: STYLES })
+  const images = opts.images ?? []
+  return makeDocx({
+    body,
+    styles: STYLES,
+    extraDocRels: images.map((img, i) => imageRel(`rIdImg${i + 1}`, img.name)).join(""),
+    extraParts: Object.fromEntries(images.map((img) => [`word/media/${img.name}`, img.data])),
+    extraContentTypes: images.length
+      ? `<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/><Default Extension="emf" ContentType="image/x-emf"/>`
+      : ""
+  })
 }

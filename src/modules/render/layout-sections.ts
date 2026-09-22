@@ -28,6 +28,7 @@ import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
 import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
+import { mediaId } from "./import-media.js"
 import { defaultSectionTitle, renderSection, type SectionRenderContext } from "./section-renderer.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
@@ -98,8 +99,11 @@ const customTable = (rows: string[][]): Block | null => {
   return { type: "table", header: pad(header), rows: body.map(pad) }
 }
 
-/** Khối nguyên văn: đoạn · danh sách (gộp dòng liền nhau) · bảng · ảnh (chưa đọc nhị phân ảnh — V5 ⇒ dòng chú thích). */
-export const customBlocks = (blocks: readonly CustomBlock[]): Block[] => {
+/**
+ * Khối nguyên văn: đoạn · danh sách (gộp dòng liền nhau) · bảng · ảnh. Ảnh có `image_ref` + `imagePng` ⇒ khối ảnh thật
+ * (tham chiếu ảnh gốc của file upload — phase 5, T3); không có ⇒ dòng chú thích như trước.
+ */
+export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRef: string) => string | undefined): Block[] => {
   const out: Block[] = []
   for (const b of blocks) {
     switch (b.kind) {
@@ -118,9 +122,12 @@ export const customBlocks = (blocks: readonly CustomBlock[]): Block[] => {
         if (table) out.push(table)
         break
       }
-      case "image":
-        out.push({ type: "paragraph", runs: [{ text: b.text.trim() ? `[Image: ${b.text.trim()}]` : "[Image]", italic: true }] })
+      case "image": {
+        const png = b.image_ref ? imagePng?.(b.image_ref) : undefined
+        if (png) out.push({ type: "image", png, ...(b.text.trim() ? { caption: b.text.trim() } : {}) })
+        else out.push({ type: "paragraph", runs: [{ text: b.text.trim() ? `[Image: ${b.text.trim()}]` : "[Image]", italic: true }] })
         break
+      }
     }
   }
   return out
@@ -315,7 +322,7 @@ export const buildLayoutSections = (
       continue
     }
     if (n.kind === "custom" || n.kind === "continuation") {
-      const blocks = customBlocks(customById.get(n.section_id)?.blocks ?? [])
+      const blocks = customBlocks(customById.get(n.section_id)?.blocks ?? [], (ref) => opts.diagramPng(mediaId(ref)))
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
