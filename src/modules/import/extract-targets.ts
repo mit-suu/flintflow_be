@@ -27,6 +27,15 @@ export const SECTION_TARGETS: Readonly<Record<string, readonly string[]>> = {
   "fixed:5.5": ["glossary"]
 }
 
+/**
+ * Mode 1 v3 phase 5: section mà ảnh thường là diagram đọc được (ngữ cảnh, use case, luồng màn, ERD) ⇒ I-4 gửi ảnh
+ * cho Gemini. Ảnh ở section khác (ảnh chụp màn hình dưới mô tả màn / chức năng…) không gửi — giữ ảnh gốc, khỏi tốn credit.
+ */
+export const DIAGRAM_SECTIONS: ReadonlySet<string> = new Set(["fixed:1", "fixed:2.1", "fixed:2.2.1", "fixed:2.2.2", "fixed:3.1.1", "fixed:3.1.5"])
+
+/** Thực thể một diagram có thể cho (theo loại model phân ra — skill `import-extract-diagram`). */
+export const DIAGRAM_TARGETS = ["actors", "use_cases", "screens", "entities"] as const
+
 /** Category NFR theo section (model không phải đoán). */
 export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
   "fixed:4.1": "interface",
@@ -51,7 +60,7 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
   roles: "roles[]: { name, actor_id: <actor id or null> }",
   use_cases: "use_cases[]: { name, actor_ids: <actor ids from known_keys>, description, includes: <use case ids>, extends: <use case ids> }",
   features: "features[]: { name }",
-  screens: "screens[]: { name, description, is_popup: boolean, tabs: string[] }",
+  screens: "screens[]: { name, description, is_popup: boolean, tabs: string[], flow_to: <screen ids this screen navigates to> }",
   permissions: 'permissions[]: { screen_id, role_id, action: "view" | "create" | "update" | "delete" | <verb> }',
   entities: "entities[]: { name, description, relations: <entity ids> }",
   functions:

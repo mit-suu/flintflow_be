@@ -24,19 +24,21 @@ import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
-import type { Baseline as BaselineEntry } from "../spine/spine.types.js"
-import { countOpenFlags, runImportCheck, stripRecord } from "./check.service.js"
+import type { Op } from "../spine/op.types.js"
+import type { Baseline as BaselineEntry, Spine } from "../spine/spine.types.js"
+import { countOpenFlags, findingOps, runImportCheck, stripRecord } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
-import { ExtractionDraft } from "./extraction-draft.model.js"
+import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import { needsConfirm } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import { assertImportStatus, loadImportFile, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
+import { IMPORT_IMAGE_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps } from "./spine-builder.js"
 import { buildLayout, buildStepPlan, customSectionOps, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
@@ -69,7 +71,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // 1. Thực thể ⇒ op
   const drafts = await ExtractionDraft.find({ import_id: doc._id }).lean()
   const accepted = drafts.flatMap((d) =>
-    d.fields.filter((f) => f.confirmed || f.confidence >= FIELD_CONFIDENCE_THRESHOLD).map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) }))
+    d.fields.filter((f) => f.confirmed || !needsConfirm(f)).map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) }))
   )
   const entities = [...collectEntities(accepted).values()]
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })))
@@ -139,14 +141,17 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT không trích được thành field ⇒ giữ nguyên văn như văn xuôi không trích được (phần nối
-  // của mục) để bản render nhúng lại ảnh gốc. Trước đây bản render 0.0 mất 35/39 ảnh (T1).
-  for (const b of layoutBlocks) if (b.kind === "image" && b.image_ref && b.section_id) unmappedIds.add(b.block_id)
+  // của mục) để bản render nhúng lại ảnh gốc. Trước đây bản render 0.0 mất 35/39 ảnh (T1). Ảnh diagram I-4 đã đọc được
+  // (use case / ERD / luồng màn / ngữ cảnh) thì bỏ: diagram PlantUML vẽ từ Spine thay cho nó.
+  const imageRead = new Set(drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => READ_DIAGRAM_KINDS.has(i.kind)).map((i) => i.block_id)))
+  for (const b of layoutBlocks) if (b.kind === "image" && b.image_ref && b.section_id && !imageRead.has(b.block_id)) unmappedIds.add(b.block_id)
   const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
   const planOps = [
     ...customSectionOps(customSections),
+    ...unreadImageFlagOps(stripRecord(seeded), drafts, layoutBlocks, provisional),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
@@ -199,6 +204,29 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
+}
+
+const READ_DIAGRAM_KINDS: ReadonlySet<string> = new Set(["usecase", "erd", "screen_flow", "context"])
+
+/** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
+const unreadImageFlagOps = (
+  spine: Spine,
+  drafts: Pick<IExtractionDraft, "section_id" | "diagram_images">[],
+  layoutBlocks: LayoutBlock[],
+  provisional: ReturnType<typeof resolveProvisional>
+): Op[] => {
+  const refOf = new Map(layoutBlocks.map((b) => [b.block_id, b.image_ref ?? ""]))
+  const findings = drafts.flatMap((d) =>
+    (d.diagram_images ?? [])
+      .filter((i) => !READ_DIAGRAM_KINDS.has(i.kind))
+      .map((i) => ({
+        rule: "image",
+        section_id: realSectionId(d.section_id, provisional),
+        message: `Ảnh ${refOf.get(i.block_id) || i.block_id} không đọc được thành dữ liệu (${i.kind === "unsupported" ? "định dạng không hỗ trợ" : "không phải diagram đọc được"}) — giữ ảnh gốc; cần thì cập nhật qua CR`,
+        block_ids: [i.block_id]
+      }))
+  )
+  return findingOps(spine, findings, IMPORT_IMAGE_RULE)
 }
 
 /**

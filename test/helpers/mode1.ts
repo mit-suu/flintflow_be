@@ -80,7 +80,25 @@ export const fakeSemanticCheck = (prompt: string): string | undefined => {
   return JSON.stringify({ findings: [{ rule: "ambiguity", section_id: "fixed:4.2.3", message: "\"95% of requests\" needs a load profile.", block_ids: [b] }] })
 }
 
-export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeSemanticCheck(prompt)
+/**
+ * I-4 phần ảnh (phase 5): mặc định ảnh không phải diagram đọc được (`other`). Ảnh có chú thích chứa "USECASE-IMG" ⇒
+ * use case diagram: actor "Guest" mới + UC-02 (đã có từ chữ) thêm actor Guest.
+ */
+export const fakeDiagram = (prompt: string): string | undefined => {
+  if (!prompt.includes("# Read Diagram Image")) return undefined
+  const section = /Section \(registry id\): (\S+)/.exec(prompt)?.[1] ?? "fixed:1"
+  const b = /Image block: \[(B\d{4,})\]/.exec(prompt)?.[1] ?? "B0001"
+  if (!prompt.includes("USECASE-IMG")) return JSON.stringify({ section_id: section, diagram_kind: "other", items: [], unmapped_block_ids: [] })
+  const item = (entity: string, key: string | null, value: object, confidence: number) => ({ entity, key, value, confidence, field_confidence: {}, source_block_ids: [b] })
+  return JSON.stringify({
+    section_id: section,
+    diagram_kind: "usecase",
+    items: [item("actors", null, { name: "Guest", kind: "human" }, 0.95), item("use_cases", "UC-02", { name: "Log in", actor_ids: ["Learner", "Guest"] }, 0.6)],
+    unmapped_block_ids: []
+  })
+}
+
+export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeDiagram(prompt) ?? fakeSemanticCheck(prompt)
 
 // ─── change request ─────────────────────────────────────────────
 

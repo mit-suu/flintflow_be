@@ -295,10 +295,20 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 - **3.5 khi Revise (#25)**: giữ nguyên — revise đã khoá lại đúng các phần tử (3.5) rồi về `proposing` (3.6); giá trị gốc chụp lại khi đề xuất mới. Không đổi máy trạng thái.
 - **3.14 bản có đánh dấu (T6/T7)**: CR ghi xong, version minor có thêm file **Track Changes** so với version trước (so theo đoạn; `w:ins`/`w:del` tác giả = CR id) + comment Word của vị trí `comment` ở tiêu đề mục. `DocVersionDto` thêm `has_tracked_file`. #14 `download?variant=tracked` trả file đó (bản nháp vẫn kèm DRAFT); version không có (`0.0`, release, dựng lỗi) ⇒ bản render như cũ. Accept-all bản có đánh dấu ra đúng bản sạch. Release (6.2) vẫn chỉ bản sạch.
 
+### 4.10 Mode 1 v3 — đọc ảnh diagram + giữ ảnh gốc (phase 5, FLF-187 — contract-change, chờ 4/4)
+
+Plan: `claude_plan/mode1-v3/phase-5-vision.md`.
+
+- **Ảnh gốc (T3)**: block ảnh của file upload giữ `image_ref` (part `word/media/*`). Ảnh dưới mục FPT không được thay bằng diagram ⇒ phần nối nguyên văn của mục (`custom_sections[].blocks[].image_ref`); bản render (0.0, bản làm việc, version CR) nhúng lại **đúng ảnh gốc** (PNG/JPEG). EMF/WMF / file gốc không còn ⇒ chỗ giữ ảnh + chú thích `original image could not be embedded (<part>)`.
+- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit / lỗi ⇒ `paused` như lô chữ.
+- **Field từ ảnh**: `ReviewField.origin` thêm **`vision`**. Độ tin ≤ 0.7 và **luôn** vào `review_fields` (1.9) kể cả bằng ngưỡng — chưa xác nhận thì finalize bỏ. Danh sách tham chiếu (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) từ nhiều nguồn gộp hợp. `screens.flow_to` được trích.
+- **Finalize (1.10)**: ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-22 | mode 1 v3 — phase 5 (FLF-187) | §4.10: `call_kind` `import_extract_diagram`, `ReviewField.origin` thêm `vision`, cờ `import_image_unread`, ảnh gốc giữ trong bản render (`image_ref`) — contract-change, chờ 4/4 |
 | 2026-09-22 | mode 1 v3 — phase 2 | §4.9: tạo CR bỏ nguồn `chat`, `preview_id` + `seed`, `found_by: preview`, endpoint `owner-step-draft` (3.9), `CR_NO_OWNER_STEP`, lý do bắt buộc khi duyệt, bản có đánh dấu `variant=tracked` + `has_tracked_file` — contract-change, chờ 4/4 (gom với §4.8) |
 | 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, `IMPORT_REUPLOAD_NO_STAMP`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |
 | 2026-09-20 | Dọn nợ sau V4 | §4.7: `/changes`, `/reconcile`, `/undo` sau v1 tạo CR nguồn `verbal` kèm `meta.change_request`; gap report `unrendered_diagrams`; `section_title` của phần nối; `found_by` bỏ `mention` trùng `spine_link` — chỉ thêm field / nới rộng |
