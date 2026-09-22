@@ -101,6 +101,15 @@
             }
           ]
         },
+        "review_mode": {
+          "default": "balanced",
+          "type": "string",
+          "enum": [
+            "strict",
+            "balanced",
+            "fast"
+          ]
+        },
         "release_scope": {
           "type": "object",
           "properties": {
@@ -135,6 +144,7 @@
         "form_factor",
         "stakes",
         "working_mode",
+        "review_mode",
         "release_scope"
       ],
       "additionalProperties": false

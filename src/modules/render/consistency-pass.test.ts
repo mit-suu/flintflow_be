@@ -4,7 +4,7 @@ import type { RenderedSection } from "./rendered-document.types.js"
 import { CONSISTENCY_LLM_ENABLED, runConsistencyPass } from "./consistency-pass.js"
 
 const emptySpine = (): Spine => ({
-  project: { name: "Demo", system_name: null, vision: null, goals: [], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, release_scope: { in: [], out: [] } },
+  project: { name: "Demo", system_name: null, vision: null, goals: [], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, review_mode: "balanced" as const, release_scope: { in: [], out: [] } },
   progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
   steps: [],
   features: [],

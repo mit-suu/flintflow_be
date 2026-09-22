@@ -34,7 +34,8 @@ import { gate, GateLimitError, type GateInput } from "./gate.service.js"
 import { BaselineBlockedError } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
-import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runPhase } from "./phase-runner.service.js"
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
@@ -136,17 +137,25 @@ const errorMessageOf = (err: unknown): string => (err instanceof Error ? err.mes
  * `runStep`; runner kiểm cờ trước mỗi lượt gọi model và khi đang chờ answer. Sau khi đóng, không `res.write`
  * nữa (dù `runStep` còn đang dọn dẹp).
  */
-export const runStepController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
-  const stepId = req.params.stepId as string
-  const body = parse(runStepRequestSchema, req.body)
+/**
+ * Luồng SSE dùng chung cho `/steps/:id/run` và `/phases/:phase/run`: header chỉ mở ở sự kiện đầu tiên;
+ * client đóng kết nối thì ngừng ghi và abort lượt chạy (F8).
+ */
+interface SseStream {
+  emit: Emit
+  controller: AbortController
+  headersSent: () => boolean
+  closed: () => boolean
+  end: () => void
+}
 
+const sseStream = (res: Response, req: Request): SseStream => {
   let headersSent = false
   let closed = false
-  const abortController = new AbortController()
+  const controller = new AbortController()
   req.on("close", () => {
     closed = true
-    abortController.abort()
+    controller.abort()
   })
 
   const emit: Emit = (event) => {
@@ -159,8 +168,31 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
       res.flushHeaders?.()
       headersSent = true
     }
-    if (!res.writableEnded) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    if (!res.writableEnded) res.write(`event: ${event.type}
+data: ${JSON.stringify(event)}
+
+`)
   }
+
+  return {
+    emit,
+    controller,
+    headersSent: () => headersSent,
+    closed: () => closed,
+    end: () => {
+      if (headersSent && !closed && !res.writableEnded) res.end()
+    }
+  }
+}
+
+
+export const runStepController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const stepId = req.params.stepId as string
+  const body = parse(runStepRequestSchema, req.body)
+
+  const stream = sseStream(res, req)
+  const emit = stream.emit
 
   // base_version lệch ngay từ đầu ⇒ SPINE_VERSION_CONFLICT trước khi mở SSE (guard-clause).
   const record = await spineRepository.get(projectId)
@@ -169,16 +201,48 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   }
 
   try {
-    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: abortController.signal, abort: abortController })
+    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: stream.controller.signal, abort: stream.controller })
   } catch (err) {
-    if (!headersSent) throw err
-    if (!closed) {
+    if (!stream.headersSent()) throw err
+    if (!stream.closed()) {
       const code = toPipelineErrorCode(err)
       emit({ type: "error", step_id: stepId, code, message: errorMessageOf(err), retryable: code === "SPINE_VERSION_CONFLICT" || code === "INSUFFICIENT_CREDIT" })
     }
     console.error(`[pipeline] /run lỗi giữa chừng cho step ${stepId}:`, err)
   } finally {
-    if (headersSent && !closed && !res.writableEnded) res.end()
+    stream.end()
+  }
+})
+
+// ─── POST /phases/:phase/run (SSE) ─────────────────────────────────
+
+/**
+ * R2: chạy liền các bước của một giai đoạn trên cùng một luồng. Bước yên lặng tự Accept, chuỗi dừng sớm
+ * khi cần người — mọi sự kiện của từng bước vẫn phát nguyên vẹn nên FE hiển thị như khi chạy lẻ.
+ */
+export const runPhaseController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const phase = req.params.phase as string
+  const body = parse(runPhaseRequestSchema, req.body)
+
+  const stream = sseStream(res, req)
+
+  const record = await spineRepository.get(projectId)
+  if (record && record.spine_version !== body.base_version) {
+    throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
+  }
+
+  try {
+    await runPhase(projectId, phase, body.session_id, userId, stream.emit, { signal: stream.controller.signal, abort: stream.controller })
+  } catch (err) {
+    if (!stream.headersSent()) throw err
+    if (!stream.closed()) {
+      const code = toPipelineErrorCode(err)
+      stream.emit({ type: "error", step_id: phase, code, message: errorMessageOf(err), retryable: code === "SPINE_VERSION_CONFLICT" || code === "INSUFFICIENT_CREDIT" })
+    }
+    console.error(`[pipeline] /phases/${phase}/run lỗi giữa chừng:`, err)
+  } finally {
+    stream.end()
   }
 })
 

@@ -24,6 +24,9 @@ export type IsoDateTime = string
 
 export type WorkingMode = "fast" | "coaching"
 
+/** Mức độ dừng lại hỏi ý user (02-reduce-stops-plan R5). */
+export type ReviewMode = "strict" | "balanced" | "fast"
+
 export interface ReleaseScope {
   in: string[]
   out: string[]
@@ -44,6 +47,8 @@ export interface SpineProject {
   form_factor: string | null
   stakes: string | null
   working_mode: WorkingMode | null
+  /** Cách duyệt (R5): `strict` | `balanced` | `fast`. */
+  review_mode: ReviewMode
   release_scope: ReleaseScope
 }
 

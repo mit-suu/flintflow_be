@@ -38,6 +38,12 @@ export const spineProjectSchema = z.strictObject({
   form_factor: z.string().nullable(),
   stakes: z.string().nullable(),
   working_mode: z.enum(["fast", "coaching"]).nullable(),
+  /**
+   * Cách duyệt (FLF-208 · R5): `strict` dừng ở mọi bước (như trước), `balanced` chỉ dừng ở cuối phase,
+   * cuối mỗi màn và các bước bắt buộc, `fast` chỉ dừng khi có câu bắt buộc/cờ đỏ mới/lỗi.
+   * Spine cũ không có ⇒ `balanced`.
+   */
+  review_mode: z.enum(["strict", "balanced", "fast"]).default("balanced"),
   release_scope: releaseScopeSchema
 })
 

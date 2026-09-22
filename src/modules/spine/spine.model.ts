@@ -34,6 +34,7 @@ const projectSchema = new Schema(
     form_factor: nullableString,
     stakes: nullableString,
     working_mode: { type: String, enum: ["fast", "coaching", null], default: null },
+    review_mode: { type: String, enum: ["strict", "balanced", "fast"], default: "balanced" },
     release_scope: { type: releaseScopeSchema, default: () => ({}) }
   },
   opts
