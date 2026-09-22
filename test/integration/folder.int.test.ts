@@ -99,6 +99,32 @@ describe("folders", () => {
     expect((await request(app).post(`/api/v1/folders/${folderId}/projects`).set(as(owner)).send({ projectIds: [] })).status).toBe(400)
   })
 
+  it("đưa nhiều dự án ra ngoài thư mục: dự án đã ở ngoài hoặc của user khác không tính", async () => {
+    const owner = await seedFixture("minimal")
+    const other = await seedFixture("minimal")
+    const folderId = (await request(app).post("/api/v1/folders").set(as(owner)).send({ name: "A" })).body.data._id as string
+    const second = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "P2" })
+    const outside = await request(app).post("/api/v1/projects").set(as(owner)).send({ name: "P3" })
+    await request(app)
+      .post(`/api/v1/folders/${folderId}/projects`)
+      .set(as(owner))
+      .send({ projectIds: [owner.projectId, second.body.data._id] })
+
+    const res = await request(app)
+      .delete(`/api/v1/folders/${folderId}/projects`)
+      .set(as(owner))
+      .send({ projectIds: [owner.projectId, second.body.data._id, outside.body.data._id, other.projectId] })
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual({ moved: 2 })
+
+    const list = await request(app).get("/api/v1/folders").set(as(owner))
+    expect(list.body.data[0].projectCount).toBe(0)
+    expect((await request(app).get(`/api/v1/projects/${owner.projectId}`).set(as(owner))).body.data.folderId).toBeNull()
+
+    expect((await request(app).delete(`/api/v1/folders/${folderId}/projects`).set(as(other)).send({ projectIds: [other.projectId] })).status).toBe(404)
+    expect((await request(app).delete(`/api/v1/folders/${folderId}/projects`).set(as(owner)).send({ projectIds: [] })).status).toBe(400)
+  })
+
   it("tạo dự án thẳng trong thư mục (một request); thư mục của user khác ⇒ 404, không tạo", async () => {
     const owner = await seedFixture("minimal")
     const other = await seedFixture("minimal")
