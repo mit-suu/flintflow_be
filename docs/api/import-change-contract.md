@@ -299,7 +299,7 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
-| 2026-09-22 | mode 1 v3 — phase 2 | §4.9: tạo CR bỏ nguồn `chat`, `preview_id` + `seed`, `found_by: preview`, #34 `owner-step-draft` (3.9), `CR_NO_OWNER_STEP`, lý do bắt buộc khi duyệt, bản có đánh dấu `variant=tracked` + `has_tracked_file` — contract-change, chờ 4/4 (gom với §4.8) |
+| 2026-09-22 | mode 1 v3 — phase 2 | §4.9: tạo CR bỏ nguồn `chat`, `preview_id` + `seed`, `found_by: preview`, endpoint `owner-step-draft` (3.9), `CR_NO_OWNER_STEP`, lý do bắt buộc khi duyệt, bản có đánh dấu `variant=tracked` + `has_tracked_file` — contract-change, chờ 4/4 (gom với §4.8) |
 | 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, `IMPORT_REUPLOAD_NO_STAMP`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |
 | 2026-09-20 | Dọn nợ sau V4 | §4.7: `/changes`, `/reconcile`, `/undo` sau v1 tạo CR nguồn `verbal` kèm `meta.change_request`; gap report `unrendered_diagrams`; `section_title` của phần nối; `found_by` bỏ `mention` trùng `spine_link` — chỉ thêm field / nới rộng |
 | 2026-09-19 | FLF-186 (mode 1 v2, V4) | §4.6: vị trí CR theo path Spine (DTO location), `PATH_LOCKED`, `CR_VALUE_CHANGED`, PATCH vị trí `new_value`/`spine_ops`, version/release = render Spine, blocks/compare/re-upload từ file render, chat sau v1 tạo CR (`meta.change_request`) — contract-change, chờ 4/4 |
