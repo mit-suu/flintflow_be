@@ -55,6 +55,7 @@ mọi trạng thái chưa kết thúc ─► cancelled
 | 409 | `CR_REQUIRES_BASELINE` | Tạo CR khi chưa có baseline v0 | — |
 | 409 | `CR_INVALID_TRANSITION` | Hành động không hợp lệ với trạng thái CR | `{ status, to, allowed[] }` |
 | 409 | `PATH_LOCKED` (FLF-186, thay `BLOCK_LOCKED`) | CR cần khoá phần tử Spine đang bị CR khác giữ (3.5), hoặc sửa tay vị trí không thuộc CR | `{ locked: [{ path, cr_id }] }` |
+| 409 | `CR_NO_OWNER_STEP` | 3.9 sửa trong step sở hữu (§4.9) cho vị trí thuộc mục riêng (`custom:*`) | `{ location_id }` |
 | 409 | `CR_LOCATION_UNCONCLUDED` | Nộp CR khi còn vị trí chưa có kết luận | `{ location_ids[] }` |
 | 409 | `CR_VALUE_CHANGED` (FLF-186, thay `CR_OLD_TEXT_MISMATCH`) | Giá trị phần tử tại `path` đã đổi so với `proposal.old_text` (verify hoặc ghi) | `{ location_id, path }` |
 | 409 | `CHANGE_REQUIRES_CR` | Chat sửa / `POST /changes` / `POST /reconcile` / `POST /undo` ở project mode 1 đã có baseline v0 (§4.8) | `{ prefill: { title, description, source?: { kind, ref } } }` — nội dung điền sẵn cho form 3.1; BE không tạo CR |
@@ -247,7 +248,7 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - **Khoá theo path** (collection `SpineLock`, unique `(projectId, path)`): `BLOCK_LOCKED` ⇒ `PATH_LOCKED` `{ locked: [{ path, cr_id }] }`; op của vị trí chỉ được chạm phần tử CR đang khoá (thêm phần tử mới `arr[]` thì được).
 - **C-5**: `CR_OLD_TEXT_MISMATCH` ⇒ `CR_VALUE_CHANGED` `{ location_id, path }` — giá trị tại path đổi kể từ lúc đề xuất. Nhận xét AI gắn theo `section_id`.
 - **#28 PATCH vị trí**: bỏ `new_text`; `edit` cần `new_value` (giá trị mới của cả phần tử ⇒ op `set` tại `path`) hoặc `spine_ops`.
-- **C-7 (D4)**: duyệt group cuối ⇒ op của CR vào Spine (`by = cr_id`) + version minor = **bản render** từ Spine (stamp `cr_revision`, §I có dòng CR), ghép lại bản làm việc. Vị trí `comment` không đổi Spine (ghi chú nằm ở CR). Bản tải "có đánh dấu" theo section: **để sau** (plan v2 §11 cắt giảm) — `variant=tracked` trả bản render.
+- **C-7 (D4)**: duyệt group cuối ⇒ op của CR vào Spine (`by = cr_id`) + version minor = **bản render** từ Spine (stamp `cr_revision`, §I có dòng CR), ghép lại bản làm việc. Vị trí `comment` không đổi Spine (ghi chú nằm ở CR). Bản tải "có đánh dấu" theo section: **để sau** (plan v2 §11 cắt giảm) — `variant=tracked` trả bản render — **đã làm ở §4.9**.
 - **Release**: bản sạch = render snapshot Spine (`file_ref` = `clean_file_ref`).
 - **#13 blocks, #15 compare, re-upload (#11)**: đọc block từ **file render** của version (id theo thứ tự đọc, không neo; `revisions` không còn); diff khớp theo text (trùng text ngoài thứ tự ⇒ `moved`, giống từ ≥ 50% giữa cùng hai khối đã khớp ⇒ `modified`), `block_id = null`.
 - **3.1 từ chat**: sau baseline v1, lệnh sửa trong chat ⇒ BE tạo CR nguồn `chat` (requester = người gửi) rồi trả `409 CHANGE_REQUIRES_CR` kèm `meta.change_request { cr_id, status }` (+ `prefill` như cũ). `/changes`, `/undo` giữ 409 chỉ `prefill` — **đổi ở §4.7**.
@@ -282,10 +283,23 @@ Plan: `claude_plan/mode1-v3/` (`00-quyet-dinh.md` F1–F4, `phase-1-be-flow1.md`
 - **Re-upload (#11) đòi stamp của project** (BPMN: "Has version stamp? Yes" mới đi 1.4): file không stamp ⇒ `422 IMPORT_REUPLOAD_NO_STAMP`, không lưu diff/file. Kiểm sau preflight (file bị từ chối vẫn ra `IMPORT_FILE_REJECTED` trước). Bỏ hành vi "bản gốc sửa ngoài vẫn so theo text".
 - **3.14 vẽ lại hình**: ghi CR xong vẽ lại hình lệch dữ liệu (PlantUML có mặt); có hình đổi thì file của version minor được in lại để nhúng hình mới.
 
+### 4.9 Mode 1 v3 — Flow 3 đủ từng nút (phase 2, contract-change — chờ 4/4, gom với §4.8)
+
+Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
+
+- **3.1 tạo CR (#16)**: `source.kind` chỉ nhận 6 nguồn BPMN — `stakeholder_email`, `meeting_minutes`, `gap_report`, `reupload`, `viewer_comment`, `verbal`. **`chat` ⇒ 400** (lệnh sửa trong chat là yêu cầu miệng, `ref: "chat:<id>"`); CR nguồn `chat` cũ vẫn đọc được. `requester` bắt buộc như cũ.
+- **Đính kèm bản xem trước**: body #16 thêm `preview_id?` (từ `POST /changes/preview` — chỉ của chính người tạo, còn hạn 15 phút). CR lưu `seed { instruction | null, ops[], targets[] }` (`targets` = phần tử bị op chạm). Hết hạn / của người khác ⇒ CR vẫn tạo, `seed: null`, `meta.seed_dropped: true`. `changeRequestDtoSchema` thêm `seed`.
+- **Seed chỉ là gợi ý, không bỏ nút nào**: C-2 (3.2) và C-4/C-5 thấy bản xem trước trong mô tả CR; C-3 (3.4) thêm `seed.targets` vào đích — vị trí đến từ đó có `found_by` chứa **`preview`** (giá trị mới của `LOCATION_FOUND_BY`); C-4 (3.6) thấy op gợi ý của đúng vị trí.
+- **3.9 endpoint mới**: `POST /projects/:id/change-requests/:crId/locations/:locId/owner-step-draft` `{ instruction }` — chỉ khi CR `manual_fix`. Chạy skill của **step sở hữu** vị trí (như C-4, một vị trí, kèm hướng của BA); kết quả chỉ ghi vào đề xuất (`manual: true`, `verify: null`), không ghi Spine; CR giữ `manual_fix`, kiểm lại bằng #22 `/verify`. Lỗi: `CR_INVALID_TRANSITION` (không ở `manual_fix`), `CR_NO_OWNER_STEP` (409, mục riêng — dùng #28 PATCH), `CR_LOCATION_NOT_FOUND`, `PATH_LOCKED`, `402 INSUFFICIENT_CREDIT`, `502 AI_PROVIDER_ERROR` (`manual_fix` không pause được).
+- **3.12 (#26)**: `reason` **bắt buộc cả khi duyệt** (≥ 10 ký tự) — BPMN "quyết định từng group, kèm lý do".
+- **3.5 khi Revise (#25)**: giữ nguyên — revise đã khoá lại đúng các phần tử (3.5) rồi về `proposing` (3.6); giá trị gốc chụp lại khi đề xuất mới. Không đổi máy trạng thái.
+- **3.14 bản có đánh dấu (T6/T7)**: CR ghi xong, version minor có thêm file **Track Changes** so với version trước (so theo đoạn; `w:ins`/`w:del` tác giả = CR id) + comment Word của vị trí `comment` ở tiêu đề mục. `DocVersionDto` thêm `has_tracked_file`. #14 `download?variant=tracked` trả file đó (bản nháp vẫn kèm DRAFT); version không có (`0.0`, release, dựng lỗi) ⇒ bản render như cũ. Accept-all bản có đánh dấu ra đúng bản sạch. Release (6.2) vẫn chỉ bản sạch.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-22 | mode 1 v3 — phase 2 | §4.9: tạo CR bỏ nguồn `chat`, `preview_id` + `seed`, `found_by: preview`, #34 `owner-step-draft` (3.9), `CR_NO_OWNER_STEP`, lý do bắt buộc khi duyệt, bản có đánh dấu `variant=tracked` + `has_tracked_file` — contract-change, chờ 4/4 (gom với §4.8) |
 | 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, `IMPORT_REUPLOAD_NO_STAMP`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |
 | 2026-09-20 | Dọn nợ sau V4 | §4.7: `/changes`, `/reconcile`, `/undo` sau v1 tạo CR nguồn `verbal` kèm `meta.change_request`; gap report `unrendered_diagrams`; `section_title` của phần nối; `found_by` bỏ `mention` trùng `spine_link` — chỉ thêm field / nới rộng |
 | 2026-09-19 | FLF-186 (mode 1 v2, V4) | §4.6: vị trí CR theo path Spine (DTO location), `PATH_LOCKED`, `CR_VALUE_CHANGED`, PATCH vị trí `new_value`/`spine_ops`, version/release = render Spine, blocks/compare/re-upload từ file render, chat sau v1 tạo CR (`meta.change_request`) — contract-change, chờ 4/4 |
