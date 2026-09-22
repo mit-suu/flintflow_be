@@ -14,14 +14,15 @@ import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { formatCrId } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.dto.js"
-import { ChangeRequest, CrCounter, type IChangeRequest } from "./change-request.model.js"
+import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
 import { lockPaths, unlockPaths } from "./lock.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
-import { elementValue, valueText } from "./spine-location.js"
+import { elementValue, opElement, valueText } from "./spine-location.js"
+import { peekPreview } from "../spine/change.service.js"
 
 // ─── đọc ─────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
   submitted_at: toIso(cr.submitted_at),
   decided_by: cr.decided_by ? String(cr.decided_by) : null,
   closed_reason: cr.closed_reason ?? null,
+  seed: cr.seed ? { instruction: cr.seed.instruction ?? null, ops: [...cr.seed.ops], targets: [...cr.seed.targets] } : null,
   created_at: toIso(cr.createdAt)!,
   updated_at: toIso(cr.updatedAt)!
 })
@@ -130,6 +132,14 @@ export const listCrs = async (projectId: string, status?: CrStatus): Promise<Cha
 
 // ─── C-1 tạo ─────────────────────────────────────────────────────
 
+/** Bản xem trước ⇒ gợi ý của CR: lệnh, op, phần tử bị op chạm. Hết hạn / của người khác ⇒ `null`. */
+export const seedFromPreview = (projectId: string, userId: string, previewId: string): CrSeed | null => {
+  const preview = peekPreview(projectId, previewId, userId)
+  if (!preview) return null
+  const targets = [...new Set(preview.ops.map((op) => opElement(op.path)).filter((p): p is string => !!p))]
+  return { instruction: preview.instruction, ops: preview.ops.map((op) => ({ ...op }) as Record<string, unknown>), targets }
+}
+
 export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest): Promise<IChangeRequest> => {
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
@@ -144,6 +154,7 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     description: body.description,
     source: body.source,
     requester: body.requester,
+    seed: body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null,
     status: "draft",
     base_doc_version: version.version,
     created_by: userId

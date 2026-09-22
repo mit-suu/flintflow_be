@@ -46,10 +46,24 @@ export const crProjection = (spine: Spine, text: string): string => {
   return truncate(`${index}\n\nMentioned in the CR:\n${mentioned.filter(Boolean).join("\n") || "(none)"}`)
 }
 
+/**
+ * Bản xem trước đính kèm CR (mode 1 v3, BPMN 3.1) — nối vào mô tả để C-2/C-4/C-5 thấy người yêu cầu đã xem thay đổi gì.
+ * Chỉ là gợi ý: model vẫn tự làm rõ, tự kết luận từng vị trí.
+ */
+export const seedText = (cr: Pick<IChangeRequest, "seed">): string => {
+  if (!cr.seed) return ""
+  const instruction = cr.seed.instruction ? `Instruction: ${cr.seed.instruction}
+` : ""
+  return truncate(`
+
+The requester previewed this change before logging the CR (a suggestion — check it, do not copy blindly):
+${instruction}Ops: ${JSON.stringify(cr.seed.ops)}`, 3000)
+}
+
 export const crHeader = (cr: IChangeRequest) => ({
   cr_id: cr.cr_id,
   title: cr.title,
-  description: cr.description,
+  description: `${cr.description}${seedText(cr)}`,
   source: `${cr.source.kind}${cr.source.ref ? ` — ${cr.source.ref}` : ""}`
 })
 
