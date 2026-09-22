@@ -68,7 +68,7 @@ const releaseNow = async (c: Api) => c.post("/release", { base_version: await c.
 
 describe("mode 1 — version + tải về", () => {
   it("danh sách version, block đọc từ file render, so sánh 0.0 → 0.1, tải bản draft có watermark DRAFT", async () => {
-    const { c } = await projectWithRevision()
+    const { c, projectId } = await projectWithRevision()
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions.map((v) => [v.version, v.kind])).toEqual([
       ["0.1", "cr_revision"],
@@ -91,7 +91,7 @@ describe("mode 1 — version + tải về", () => {
 
     const draft = await binary(c.get("/versions/0.1/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.1_DRAFT.docx")
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v0.1_DRAFT.docx`)
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
@@ -132,7 +132,7 @@ describe("mode 1 — release (Flow 6)", () => {
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
 
     const clean = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
+    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
     const xml = await documentXml(clean.body as Buffer)
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))

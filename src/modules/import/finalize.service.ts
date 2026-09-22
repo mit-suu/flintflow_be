@@ -26,6 +26,7 @@ import { applyTransaction } from "../spine/op-engine.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Baseline as BaselineEntry } from "../spine/spine.types.js"
 import { countOpenFlags, runImportCheck, stripRecord } from "./check.service.js"
+import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
@@ -147,6 +148,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
   profile.step_plan = plan
+  // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I
+  profile.legacy_record_of_changes = legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await profile.save()
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2

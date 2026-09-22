@@ -6,6 +6,7 @@
  */
 
 import mongoose, { Schema, Document } from "mongoose"
+import type { RocRow } from "../render/rendered-document.types.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
 
 export interface HeadingMapEntry {
@@ -60,6 +61,8 @@ export interface ITemplateProfile extends Document {
   layout: LayoutEntry[]
   /** FLF-182: step nào chạy / ẩn / thiếu theo template. */
   step_plan: StepPlanItem[]
+  /** Mode 1 v3 (T15): dòng Record of Changes của file gốc — render in lên đầu bảng, lịch sử FlintFlow nối tiếp. */
+  legacy_record_of_changes: RocRow[]
   createdAt: Date
   updatedAt: Date
 }
@@ -106,6 +109,21 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       default: []
     },
     required_sections: { type: [String], default: [] },
+    legacy_record_of_changes: {
+      type: [
+        new Schema(
+          {
+            date: { type: String, default: "" },
+            version: { type: String, default: "" },
+            change_type: { type: String, enum: ["A", "M", "D"], default: "M" },
+            in_charge: { type: String, default: "" },
+            description: { type: String, default: "" }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
     layout: {
       type: [
         new Schema(
