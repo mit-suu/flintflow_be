@@ -39,6 +39,8 @@ export const MODE1_ERROR_STATUS = {
   MODE1_NO_WAIVE: 409,
   IMPORT_FILE_REJECTED: 422,
   IMPORT_STAMP_FOREIGN_PROJECT: 422,
+  /** Mode 1 v3 (BPMN 1.4 chỉ cho file có stamp của project): re-upload file không stamp. */
+  IMPORT_REUPLOAD_NO_STAMP: 422,
   RELEASE_RED_FLAGS_OPEN: 422
 } as const
 
