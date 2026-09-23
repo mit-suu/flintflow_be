@@ -40,8 +40,15 @@ describe("pipeline.dto", () => {
     expect(waiveRequestSchema.safeParse({ reason: "Khách hàng chấp nhận rủi ro này" }).success).toBe(true)
   })
 
-  it("SSE: đủ 9 loại sự kiện, parse theo discriminator", () => {
-    expect(STEP_EVENT_TYPES).toHaveLength(9)
+  it("SSE: đủ 16 loại sự kiện, parse theo discriminator", () => {
+    // 9 sự kiện gốc + 7 sự kiện FLF-198 (stage, heartbeat, answer_received, draft_retry, auto_accepted,
+    // phase_progress, phase_gate)
+    expect(STEP_EVENT_TYPES).toHaveLength(16)
+    expect(stepEventSchema.safeParse({ type: "stage", step_id: "S-5.4@S03", stage: "draft", label_vi: "AI đang soạn nội dung", batch: { i: 1, n: 2 } }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "heartbeat", step_id: "S-5.4@S03", stage: "draft", elapsed_ms: 12000 }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "answer_received", step_id: "S-3.1", count: 3 }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "draft_retry", step_id: "S-3.1", attempt: 2, max: 3, reason_vi: "kết quả thiếu trường" }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "stage", step_id: "S-3.1", stage: "unknown", label_vi: "x" }).success).toBe(false)
     const gateReady = { type: "gate_ready", step_id: "S-3.1", actions: ["accept"], regenerate_used: 0, calls_used: 2, spine_version: 7, wrote_ops: true, empty_sections: [] }
     expect(stepEventSchema.safeParse(gateReady).success).toBe(true)
     expect(

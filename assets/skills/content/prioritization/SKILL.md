@@ -64,6 +64,14 @@ effect of ranking. So:
   entry (`path` = that requirement, `status: "unconfirmed"`) saying the scope line is missing. Code also
   reports this mismatch; your entry is what gives the reason.
 
+## Say when you are guessing
+
+MoSCoW is a business decision. You have evidence only when `project.goals[]`, `release_scope` or a business
+rule points at the answer. For every item you had to **guess** — especially anything the Brief calls a goal
+(a reminder mechanism that exists to cut no-shows is not a Could) — add an `assumptions[]` entry naming the
+item and the level you chose, so the gate shows it with Đúng / Sửa / Bỏ instead of burying it in the
+document.
+
 ## Rules
 
 1. Cover **every** function and NFR in the projection — a row left `null` is an unfinished step.
