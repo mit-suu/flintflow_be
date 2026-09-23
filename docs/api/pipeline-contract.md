@@ -196,7 +196,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `ops_applied` | Transaction của step đã ghi | `{ step_id, txn, spine_version, changes[], summary[]? }` |
 | `render` | Mỗi diagram render xong | `{ step_id, diagram_id, render_status, error? }` |
 | `flags` | Deterministic check chạy lại | `{ step_id, red_open, yellow_open, red_delta?, yellow_delta?, new_assumptions[]? }` |
-| `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used, summary[]?, new_assumptions[]?, flags?, duration_ms?, credits_used?, doc_progress?, no_change_reason? }` |
+| `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used, spine_version, wrote_ops, empty_sections[], summary[]?, new_assumptions[]?, flags?, duration_ms?, credits_used?, doc_progress?, no_change_reason? }` — `spine_version` là version CUỐI của lượt chạy, cao hơn `ops_applied` vì render + recompute cờ chạy sau (L11); `wrote_ops=false` nghĩa là model trả lô op rỗng; `empty_sections[{section_id,title}]` là mục step nuôi mà chạy xong vẫn trống, accept cũng không đóng được cờ `section_empty` (L11b) |
 | `auto_accepted` | Step "yên lặng" được tự Accept (chế độ duyệt Cân bằng/Nhanh) | `{ step_id, reason_vi }` |
 | `phase_gate` | Cổng chốt cuối giai đoạn: tóm tắt cả giai đoạn, gồm cả bước đã tự Accept | `{ step_id, phase, reason_vi, summary[], new_assumptions[], steps[], flags? }` |
 | `phase_progress` | Chạy liền cả phase: đang ở step thứ mấy | `{ step_id, phase, step_index, step_total, needs_user }` |
