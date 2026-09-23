@@ -83,7 +83,7 @@ export const writeCr = async (c: Mode1Api, title: string, description: string) =
   for (const step of ["clarify", "impact", "propose", "verify", "submit"]) crDetail(await c.post(`${cr}/${step}`))
   const { groups } = crDetail(await c.get(cr))
   let last: ReturnType<typeof crDetail> | null = null
-  for (const g of groups) last = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+  for (const g of groups) last = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
   expect(last?.change_request.status).toBe("written")
   return { crId, version: last!.change_request.result_doc_version as string }
 }

@@ -7,11 +7,14 @@
  * → mở khoá → ghép lại bản làm việc.
  * Lỗi trước/tại bước Spine ⇒ xoá version + file vừa tạo; Spine và CR giữ nguyên (chạy lại an toàn).
  * Recompute cờ / ghép bản làm việc lỗi sau khi Spine đã ghi ⇒ không huỷ bản ghi (giá trị suy diễn, lần sau tính lại).
- * Vị trí `comment` không đổi Spine — ghi chú nằm ở CR (bản tải "có đánh dấu" theo section: để sau — plan v2 §11).
+ * Vị trí `comment` không đổi Spine. Mode 1 v3 (BPMN 3.14, T6/T7): kèm bản **có đánh dấu** — Track Changes so với version
+ * trước + comment của vị trí `comment`, tác giả = CR id — lưu `tracked_file_ref`; dựng lỗi thì bỏ qua, không chặn ghi.
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
 import { renderAllIfAvailable } from "../diagram/diagram.service.js"
+import { buildTrackedDocx, type TrackedComment } from "../doc-version/tracked-version.js"
+import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
@@ -58,12 +61,29 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     pendingRecord: (plan?.changes ?? []).map((c) => ({ txn: c.txn, at: c.at, by: c.by, reason: c.reason ?? null, op: c.op, step_id: c.step_id ?? null }))
   })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
+  const layout = await loadLayout(projectId)
+  const comments: TrackedComment[] = approved
+    .filter((l) => l.conclusion === "comment" && l.proposal?.comment_text)
+    .map((l) => ({ section_title: titleOfSection(current, l.section_id, layout), text: l.proposal!.comment_text! }))
+  const decidedAt = new Date()
+  const tracked = (file: Buffer) => saveTracked(projectId, cr.cr_id, version.file_ref, file, next, comments, decidedAt)
+  const trackedRef = await tracked(buffer)
 
   let versionCreated = false
   let spineVersion = record.spine_version
   try {
     // 2. Version mới
-    await DocVersion.create({ projectId, version: next, kind: "cr_revision", file_ref: fileRef, based_on: version.version, cr_ids: [cr.cr_id], baseline_ref: null, created_by: userId })
+    await DocVersion.create({
+      projectId,
+      version: next,
+      kind: "cr_revision",
+      file_ref: fileRef,
+      tracked_file_ref: trackedRef,
+      based_on: version.version,
+      cr_ids: [cr.cr_id],
+      baseline_ref: null,
+      created_by: userId
+    })
     versionCreated = true
 
     // 3. Spine — bước cuối; `base_version` chặn ghi đè nếu Spine đổi từ lúc chạy khô
@@ -71,10 +91,11 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   } catch (err) {
     if (versionCreated) await DocVersion.deleteOne({ projectId, version: next })
     await docFileStore().remove(fileRef)
+    if (trackedRef) await docFileStore().remove(trackedRef)
     throw err
   }
 
-  await redrawDiagrams(projectId, cr.cr_id, projectName, next, fileRef)
+  await redrawDiagrams(projectId, cr.cr_id, projectName, next, { file: fileRef, tracked: trackedRef }, tracked)
 
   try {
     // Mode 1 luôn ở sau baseline v0 ⇒ tính cả luật S-9: CR xác nhận giả định thì cờ `unconfirmed_assumption` đóng ngay
@@ -97,16 +118,44 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
  * Spine đã ghi: vẽ lại hình lệch (PlantUML không có mặt ⇒ bỏ qua, cờ `diagram_stale` báo), có hình đổi thì in lại file
  * version từ Spine mới nhất để nhúng hình mới. Lỗi chỉ ghi log — Spine đã ghi, không huỷ bản ghi.
  */
-const redrawDiagrams = async (projectId: string, crId: string, projectName: string, version: string, fileRef: string): Promise<void> => {
+const redrawDiagrams = async (
+  projectId: string,
+  crId: string,
+  projectName: string,
+  version: string,
+  refs: { file: string; tracked: string | null },
+  tracked: (file: Buffer) => Promise<string | null>
+): Promise<void> => {
   const drawn = await renderAllIfAvailable(projectId, { by: crId, step_id: null })
   if (!drawn || (!drawn.rendered.length && !drawn.removed.length)) return
   try {
     const latest = stripRecord((await spineRepository.get(projectId))!)
     const buffer = await renderVersionFile(projectId, projectName, latest, { version, stampSource: "cr_revision" })
     const redone = await docFileStore().save(buffer, { projectId, kind: "version", name: version })
-    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone } })
-    await docFileStore().remove(fileRef)
+    const redoneTracked = await tracked(buffer)
+    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone, tracked_file_ref: redoneTracked } })
+    await docFileStore().remove(refs.file)
+    if (refs.tracked) await docFileStore().remove(refs.tracked)
   } catch (err) {
     console.warn(`[C-7] ${crId}: đã vẽ lại hình nhưng in lại ${version} lỗi — file version giữ hình cũ`, err)
+  }
+}
+
+/** BPMN 3.14 (T6/T7): bản có đánh dấu so với version trước, lưu riêng. Lỗi ⇒ `null` — ghi CR không phụ thuộc bản này. */
+const saveTracked = async (
+  projectId: string,
+  crId: string,
+  prevRef: string,
+  file: Buffer,
+  version: string,
+  comments: readonly TrackedComment[],
+  date: Date
+): Promise<string | null> => {
+  try {
+    const out = await buildTrackedDocx(await docFileStore().load(prevRef), file, { author: crId, date }, comments)
+    return await docFileStore().save(out.data, { projectId, kind: "version", name: `${version}_tracked` })
+  } catch (err) {
+    console.warn(`[C-7] ${crId}: dựng bản có đánh dấu của ${version} lỗi — chỉ còn bản sạch`, err)
+    return null
   }
 }

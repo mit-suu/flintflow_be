@@ -33,6 +33,7 @@ describe("doc-version DTO", () => {
     cr_ids: ["CR-001", "CR-002", "CR-004"],
     baseline_id: "BL002",
     has_clean_file: true,
+    has_tracked_file: false,
     has_original_file: false,
     created_by: "66f000000000000000000001",
     created_at: AT

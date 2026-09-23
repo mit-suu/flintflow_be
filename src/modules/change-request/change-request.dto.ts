@@ -12,7 +12,8 @@ import {
   GROUP_ID_PATTERN,
   LOCATION_CONCLUSIONS,
   LOCATION_FOUND_BY,
-  LOCATION_ID_PATTERN
+  LOCATION_ID_PATTERN,
+  NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
 
 const id = z.string().min(1)
@@ -53,6 +54,8 @@ export const changeRequestDtoSchema = z.object({
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
+  /** Mode 1 v3: bản xem trước đính kèm lúc tạo (gợi ý cho C-2/C-3/C-4), không có ⇒ `null`. */
+  seed: z.object({ instruction: z.string().nullable(), ops: z.array(z.record(z.string(), z.unknown())), targets: z.array(z.string()) }).nullable(),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
@@ -105,12 +108,16 @@ export const changeGroupDtoSchema = z.object({
 
 // ─── request ─────────────────────────────────────────────────────
 
-/** `POST /projects/:id/change-requests` (C-1, UC-48). Thiếu `source` ⇒ 400 CR_SOURCE_REQUIRED. */
+/**
+ * `POST /projects/:id/change-requests` (C-1, UC-48, BPMN 3.1). Thiếu `source` / `requester` ⇒ 400 CR_SOURCE_REQUIRED.
+ * Mode 1 v3: nguồn chỉ nhận 6 nguồn của BPMN (không `chat`); `preview_id` đính kèm bản xem trước làm gợi ý.
+ */
 export const createChangeRequestSchema = z.strictObject({
   title: text(200),
   description: text(5000),
-  source: crSourceSchema,
-  requester: text(200)
+  source: crSourceSchema.extend({ kind: z.enum(NEW_CR_SOURCE_KINDS) }),
+  requester: text(200),
+  preview_id: z.string().trim().min(1).max(100).optional()
 })
 
 /** `GET /projects/:id/change-requests?status=` */
@@ -141,19 +148,17 @@ export const patchLocationRequestSchema = z
   .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận not_related cần lý do", path: ["reason"] })
 
 /**
- * `POST …/:crId/groups/:gid/decision` (UC-52). Từ chối bắt buộc có lý do. Group cuối cùng được quyết mà có
- * group duyệt ⇒ ghi Track Changes + áp op Spine (C-7) ⇒ mang `base_version`.
+ * `POST …/:crId/groups/:gid/decision` (UC-52, BPMN 3.12 "quyết định từng group, kèm lý do"). Mode 1 v3: **cả duyệt
+ * lẫn từ chối** đều bắt buộc lý do. Group cuối cùng được quyết mà có group duyệt ⇒ ghi (C-7) ⇒ mang `base_version`.
  */
-export const groupDecisionRequestSchema = z
-  .strictObject({
-    decision: z.enum(["approved", "rejected"]),
-    reason: z.string().trim().max(2000).optional(),
-    base_version: baseVersion
-  })
-  .refine((v) => v.decision === "approved" || (v.reason?.length ?? 0) >= DECISION_REASON_MIN_LENGTH, {
-    message: `Từ chối cần lý do ≥ ${DECISION_REASON_MIN_LENGTH} ký tự`,
-    path: ["reason"]
-  })
+export const groupDecisionRequestSchema = z.strictObject({
+  decision: z.enum(["approved", "rejected"]),
+  reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH, `Quyết định cần lý do ≥ ${DECISION_REASON_MIN_LENGTH} ký tự`).max(2000),
+  base_version: baseVersion
+})
+
+/** `POST …/:crId/locations/:locId/owner-step-draft` (BPMN 3.9, mode 1 v3) — hướng sửa của BA cho skill step sở hữu. */
+export const ownerStepDraftRequestSchema = z.strictObject({ instruction: text(4000) })
 
 /** `POST …/:crId/close` (3.13) và `POST …/:crId/cancel` (3.10, UC-53). */
 export const closeRequestSchema = z.strictObject({ reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH).max(2000) })
@@ -180,10 +185,6 @@ export const pathLockedMetaSchema = z.object({
   locked: z.array(z.object({ path: z.string(), cr_id: crIdSchema }))
 })
 
-/**
- * `meta` của 409 CHANGE_REQUIRES_CR (sau baseline v1 ở project mode 1). `/changes`, `/undo` ⇒ chỉ `prefill` (FE mở form
- * CR điền sẵn). Lệnh sửa trong chat (FLF-186) ⇒ BE **đã tạo** CR nguồn `chat` — `change_request` trỏ tới nó.
- */
 /**
  * `meta` của 409 CHANGE_REQUIRES_CR — nội dung điền sẵn cho form 3.1 (mode 1 v3: BE không tự tạo CR; nguồn là gợi ý,
  * BA vẫn chọn lại). Bỏ `change_request` của V4/T8.

@@ -110,7 +110,7 @@ describe("mode 1 v3 — import ⇒ gap report ⇒ CR ⇒ release", () => {
     const { groups } = crDetail(await c.get(cr))
     expect(groups.length, "phải có nhóm thay đổi để duyệt").toBeGreaterThan(0)
     let written: ReturnType<typeof crDetail> | null = null
-    for (const g of groups) written = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+    for (const g of groups) written = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(written?.change_request.status).toBe("written")
     expect(written?.change_request.result_doc_version, "CR duyệt xong ⇒ version minor").toBe("0.1")
 

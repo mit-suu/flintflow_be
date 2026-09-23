@@ -33,6 +33,11 @@ export interface IChangeRequest extends Document {
   clarifications: CrClarification[]
   /** Đích C-2 trả về khi CR đã rõ — C-3 tìm vị trí theo đó. Nội bộ, không có trong DTO. */
   targets: { entity_paths: string[]; keywords: string[] }
+  /**
+   * Mode 1 v3 (BPMN 3.1): bản xem trước người yêu cầu đính kèm khi tạo CR từ panel "Sửa tài liệu có xem trước".
+   * Chỉ là **gợi ý**: C-2 đọc lệnh, C-3 thêm `targets` vào đích, C-4 thấy op đề xuất của vị trí — mọi nút vẫn chạy.
+   */
+  seed: CrSeed | null
   /** Version tài liệu lúc tạo CR; ghi Track Changes lên version mới nhất lúc write. */
   base_doc_version: string
   result_doc_version: string | null
@@ -43,6 +48,13 @@ export interface IChangeRequest extends Document {
   closed_reason: string | null
   createdAt: Date
   updatedAt: Date
+}
+
+export interface CrSeed {
+  instruction: string | null
+  ops: Record<string, unknown>[]
+  /** Phần tử Spine bị op chạm (`actors[id=A01]`, `project`). */
+  targets: string[]
 }
 
 const opts = { _id: false }
@@ -77,6 +89,10 @@ const changeRequestSchema = new Schema<IChangeRequest>(
     targets: {
       type: new Schema({ entity_paths: { type: [String], default: [] }, keywords: { type: [String], default: [] } }, opts),
       default: () => ({ entity_paths: [], keywords: [] })
+    },
+    seed: {
+      type: new Schema({ instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] } }, opts),
+      default: null
     },
     base_doc_version: { type: String, required: true },
     result_doc_version: { type: String, default: null },
