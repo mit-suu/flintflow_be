@@ -6,7 +6,7 @@
  * hệ không suy ra được bằng code.
  */
 import type { Spine } from "../modules/spine/spine.types.js"
-import { runDeterministicCheck } from "../modules/spine/deterministic-check.js"
+import { runDeterministicCheck, type RuleProfile } from "../modules/spine/deterministic-check.js"
 
 /** Một persona brief nêu tên; khớp khi tên một actor human chứa một trong các từ khoá (không phân biệt hoa thường). */
 export interface PersonaExpectation {
@@ -40,6 +40,13 @@ export interface S3Metrics {
   relations: RelationRow[]
 }
 
+/**
+ * Lượt đo chấm CHẤT LƯỢNG mô hình hoá của những gì S-3 vừa sinh ra, không chấm tiến độ: Spine đo luôn
+ * đứng giữa chừng (chưa qua S-4), nên cổng "bước sở hữu đã chốt chưa" (FLF-213) phải mở, nếu không
+ * `orphan_actor`/`usecase_floating` im lặng và mọi lượt đo đều ra 0.
+ */
+const EVAL_PROFILE: RuleProfile = { exclude: new Set(), downgrade: new Set(), skipOwnerStepGate: true }
+
 const RULE_KEYS = {
   usecase_auth_relation: "auth_relation",
   orphan_actor: "orphan_actor",
@@ -62,7 +69,7 @@ export const scoreS3 = (
   for (const a of spine.actors) kinds[a.kind] += 1
 
   const flags = { auth_relation: 0, orphan_actor: 0, relation_invalid: 0, floating: 0, name_semantic: 0, name_style: 0 }
-  for (const f of runDeterministicCheck(spine)) {
+  for (const f of runDeterministicCheck(spine, [], { ruleProfile: EVAL_PROFILE })) {
     const key = RULE_KEYS[f.rule_id as keyof typeof RULE_KEYS]
     if (key) flags[key] += 1
   }

@@ -43,7 +43,11 @@ describe("deterministic check qua HTTP", () => {
     const seeded = await seedFixture("minimal")
     const client = api(seeded)
 
-    const first = await client.post("/flags/recompute")
+    // FLF-213: fixture minimal đứng ở S-1.1, chưa bước nào chốt ⇒ lượt thường không cờ nào; mọi mục
+    // trống là "chưa tới lượt". Lượt ký bản mở hết cổng và soi đủ như trước.
+    expect(flagsResponseSchema.parse((await client.post("/flags/recompute")).body.data)).toHaveLength(0)
+
+    const first = await client.post("/flags/recompute", { at_baseline: true })
     const opened = flagsResponseSchema.parse(first.body.data)
     expect(opened.length).toBeGreaterThan(0)
     expect(opened.every((f) => f.level === "red")).toBe(true)
@@ -54,7 +58,7 @@ describe("deterministic check qua HTTP", () => {
     const yellow = await client.get("/flags?level=yellow")
     expect(flagsResponseSchema.parse(yellow.body.data)).toHaveLength(0)
 
-    const second = await client.post("/flags/recompute")
+    const second = await client.post("/flags/recompute", { at_baseline: true })
     expect(second.body.meta.opened).toEqual([])
     expect(flagsResponseSchema.parse(second.body.data)).toHaveLength(opened.length)
 
@@ -65,7 +69,7 @@ describe("deterministic check qua HTTP", () => {
   it("cờ không được waive (array_empty) ⇒ 400 FLAG_NOT_WAIVABLE; id lạ ⇒ 404 FLAG_NOT_FOUND", async () => {
     const seeded = await seedFixture("minimal")
     const client = api(seeded)
-    const flags = flagsResponseSchema.parse((await client.post("/flags/recompute")).body.data)
+    const flags = flagsResponseSchema.parse((await client.post("/flags/recompute", { at_baseline: true })).body.data)
     const blocked = flags.find((f) => NON_WAIVABLE_RULES.has(f.rule_id))
     expect(blocked, "fixture minimal phải có cờ array_empty").toBeDefined()
 

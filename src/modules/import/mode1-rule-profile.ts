@@ -32,7 +32,11 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
   ]),
   // `release.service.ts` lọc cờ đỏ KHÔNG trừ `waived_by_user`, nên để nguyên đỏ thì một SRS nhập
   // có vòng include/extend sẽ không bao giờ release được và waive cũng vô ích.
-  downgrade: new Set(["nfr_missing_number", "usecase_relation_invalid"])
+  downgrade: new Set(["nfr_missing_number", "usecase_relation_invalid"]),
+  // FLF-213: mode 2 chỉ soi mục trống khi bước sở hữu đã chốt (đang ở S-3 thì §4.x trống là đúng kế
+  // hoạch). Mode 1 không có "chưa tới lượt": cả tài liệu vào một lượt, `steps[]` suy ra từ chính file
+  // (đầu mục thiếu ⇒ `pending`), nên gác theo step sẽ giấu đúng những mục D6 cần báo là gap.
+  skipOwnerStepGate: true
 })
 
 /** Rule id của cờ vàng do AI đặt ở mode 1 (không bị recompute tất định đóng — `MODEL_OWNED_RULES`). */
