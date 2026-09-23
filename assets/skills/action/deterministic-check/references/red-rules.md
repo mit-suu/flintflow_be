@@ -17,6 +17,17 @@
 
 That is 12 rules. Mode 1 (import) excludes `orphan_screen_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
 
+## The "not there yet" gate (FLF-213)
+
+`section_empty`, `array_empty` and the "no NFR in this category at all" branch of `nfr_missing_number` say *X is missing*. Missing is only a defect once the step that produces X has been **accepted**; before that the slot is empty on plan. So each of them fires only when its owner step is accepted — all of them, for a section fed by several steps (`fixed:1` needs S-2.1 … S-2.5). A project sitting at S-3.6 therefore raises nothing for §3.1.x (S-4) or §4.x (S-6), and `readiness.red_open` counts real problems only.
+
+Two runs open the gate and check every slot regardless:
+
+- `at_baseline` (S-9) — by then every step must be done, so nothing may slip through under "not there yet".
+- Mode 1 (`skipOwnerStepGate` in the rule profile) — the whole document arrives in one go and `steps[]` is *derived from the file* (a heading the file lacks becomes `pending`), so an empty slot is a gap to report, not a step not yet reached. This is what keeps D6 (FLF-183) working.
+
+An NFR that **exists** but lacks `metric`/`threshold` is not gated: the data is already there, so a missing number is a defect whatever step is running.
+
 ## Mandatory sections (invariant 1)
 
 `fixed:1` · `fixed:2.1` · `fixed:2.2.1` · `fixed:2.2.2` · `fixed:3.1.1` … `fixed:3.1.5` · `feature:*` (≥ 1) · `function:*` (≥ 1) · `fixed:4.1` · `fixed:4.2.1` · `fixed:4.2.2` · `fixed:4.2.3` · `fixed:5.1` … `fixed:5.5`. `fixed:4.2.4` optional. `fixed:I`, `fixed:5.5` derived.
