@@ -126,6 +126,19 @@ const scopeErrors = (
  */
 export const ASSUMPTION_SWEEP_STEPS: ReadonlySet<string> = new Set(["B-2.1", "B-2.3", "S-1.3"])
 
+/**
+ * Selector thiếu tên khoá: `addendum[AD8]`, `functions[FN010]`. Model hay viết kiểu này trong GIÁ TRỊ
+ * `assumptions[].path` (không phải path của op), và lô chết vì `dead_reference` sau 3 lượt thử — đúng lỗi
+ * làm B-1.2 dừng ở lượt chạy thật 2026-09-23. Chuẩn hoá thành `addendum[id=AD8]` thay vì bắt model đoán lại.
+ */
+const SHORTHAND_SELECTOR = /^([a-z_]+)\[([^\]=,]+)\]((?:\.[A-Za-z_][A-Za-z0-9_]*)*)$/
+
+export const normalizeSelectorPath = (path: unknown): unknown => {
+  if (typeof path !== "string") return path
+  const match = SHORTHAND_SELECTOR.exec(path.trim())
+  return match ? `${match[1]}[id=${match[2]}]${match[3]}` : path
+}
+
 const SCREEN_STATUS_PATH = /^screens\[[^\]]+\]\.detail_status$/
 const ASSUMPTION_FIELD_PATH = /^assumptions\[id=([^\]]+)\]\.(confirmed_at|status)$/
 const ASSUMPTION_PATH = /^assumptions\[id=([^\]]+)\]$/
@@ -203,7 +216,10 @@ export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | nu
       return { ...op, value: { ...op.value, detail_status: "pending" } }
     }
     if (op.op === "add" && op.path === "assumptions[]" && isRecord(op.value)) {
-      return { ...op, value: { ...op.value, status: "unconfirmed", confirmed_at: null } }
+      return { ...op, value: { ...op.value, path: normalizeSelectorPath(op.value.path), status: "unconfirmed", confirmed_at: null } }
+    }
+    if (op.op === "set" && /^assumptions\[id=[^\]]+\]\.path$/.test(op.path)) {
+      return { ...op, value: normalizeSelectorPath(op.value) }
     }
     if (op.op === "set" && isRecord(op.value)) {
       const screenId = /^screens\[id=([^\]]+)\]$/.exec(op.path)?.[1]
