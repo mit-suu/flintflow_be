@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { readFileSync } from "node:fs"
 import mammoth from "mammoth"
-import { buildDocxFileName, writeDocx } from "./docx-writer.js"
+import { HEADING_TABLE_SPACING, buildDocxFileName, writeDocx } from "./docx-writer.js"
 import { makePng, readZipEntries, readZipText } from "./zip.test-helper.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 
@@ -162,6 +162,23 @@ describe("writeDocx — biến thể", () => {
     const doc = structuredClone(sample)
     doc.sections = [{ id: "fixed:1", number: "1", heading: "Bad", level: 1, blocks: [{ type: "image", png: "bm90IGEgcG5n" }] }]
     await expect(writeDocx(doc)).rejects.toMatchObject({ statusCode: 422, code: "RENDER_IMAGE_INVALID" })
+  })
+
+  it("tiêu đề ngay trước bảng có khoảng trống phía dưới; tiêu đề trước đoạn văn thì không", async () => {
+    const doc = structuredClone(sample)
+    const tableBlock = { type: "table" as const, header: [[{ text: "H" }]], rows: [[[{ text: "v" }]]] }
+    doc.sections = [
+      { id: "fixed:2.1", number: "2.1", heading: "TableFirst", level: 2, blocks: [tableBlock] },
+      { id: "fixed:2.2", number: "2.2", heading: "TextFirst", level: 2, blocks: [{ type: "paragraph", runs: [{ text: "p" }] }] },
+      { id: "fixed:5.1", number: "5.1", heading: "Mixed", level: 2, blocks: [{ type: "heading", level: 3, text: "SubBeforeTable" }, tableBlock] }
+    ]
+    const xml = readZipText(await writeDocx(doc), "word/document.xml")
+    const paragraphOf = (text: string) => [...xml.matchAll(/<w:p>(?:(?!<\/w:p>).)*<\/w:p>/gs)].map((m) => m[0]).find((p) => p.includes(`>${text}<`))!
+    const spaced = `<w:spacing w:after="${HEADING_TABLE_SPACING}"/>`
+    expect(paragraphOf("2.1 TableFirst")).toContain(spaced)
+    expect(paragraphOf("SubBeforeTable")).toContain(spaced)
+    expect(paragraphOf("2.2 TextFirst")).not.toContain(spaced)
+    expect(paragraphOf("5.1 Mixed")).not.toContain(spaced)
   })
 
   it("mỗi numbered list đánh số lại từ đầu (instance riêng)", async () => {

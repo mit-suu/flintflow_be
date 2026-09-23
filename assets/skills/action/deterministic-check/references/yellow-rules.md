@@ -7,6 +7,7 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `orphan_actor` | `actors[kind=human]` not in any `use_cases[].actor_ids[]` | S-3.2 |
 | `usecase_no_function` | `use_cases[].function_ids[]` empty | S-3.2 |
 | `screen_no_function` | A screen has no function | S-4.1 |
+| `orphan_screen` | A screen no human actor uses (once any screen ↔ actor link exists), or, once any `flow_to` edge exists, a screen with no incoming and no outgoing edge, or a pop-up nothing opens | S-4.2 |
 | `empty_feature` | A feature has neither screen nor function | S-4.1 |
 | `role_no_actor` | `roles[].actor_id` is null | S-3.1 |
 | `non_english_content` | A field in the **Owns** column contains Vietnamese diacritics | owner step of the field |

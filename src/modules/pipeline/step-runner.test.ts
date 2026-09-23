@@ -491,6 +491,42 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     expect(events.some((e) => e.type === "gate_ready")).toBe(false)
   })
 
+  it("Screens Flow đã có mà cũ (vd quyền S-4.3 đổi actor của màn) ⇒ step đang chạy tự vẽ lại; không cũ ⇒ không vẽ", async () => {
+    seedUpTo("S-8.3")
+    seedSession(true)
+    const spine = db.spines[0] as unknown as SpineT
+    spine.diagrams = spine.diagrams.filter((d) => d.kind !== "screen_flow")
+    spine.diagrams.push({
+      id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
+      puml: "@startuml\n@enduml\n", render_status: "ok", source_hash: "hash-truoc-khi-doi-quyen", rendered_at: "2026-01-01T00:00:00.000Z"
+    })
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-8.3", SESSION, USER, emit, { assembleDocument: vi.fn(async () => undefined), renderDeps: renderStub() })
+
+    const renders = events.filter((e) => e.type === "render")
+    expect(renders.length).toBeGreaterThan(0)
+    const after = (await repo.get(PROJECT))!
+    const { staleDiagrams } = await import("../diagram/diagram.service.js")
+    expect(staleDiagrams(after).filter((d) => d.kind === "screen_flow")).toEqual([])
+    expect(after.diagrams.some((d) => d.id === "D90" || d.id.startsWith("D90-"))).toBe(true)
+
+    // Hình không cũ ⇒ không vẽ lại
+    db.reset()
+    seedUpTo("S-8.3")
+    seedSession(true)
+    const fresh = db.spines[0] as unknown as SpineT
+    const { computeSourceHash } = await import("../spine/source-hash.js")
+    fresh.diagrams = fresh.diagrams.filter((d) => d.kind !== "screen_flow")
+    fresh.diagrams.push({
+      id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
+      puml: "@startuml\n@enduml\n", render_status: "ok", source_hash: computeSourceHash(fresh, { kind: "screen_flow", owner_id: null }), rendered_at: "2026-01-01T00:00:00.000Z"
+    })
+    const again = collectEvents()
+    await runStep(PROJECT, "S-8.3", SESSION, USER, again.emit, { assembleDocument: vi.fn(async () => undefined), renderDeps: renderStub() })
+    expect(again.events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect(again.events.filter((e) => e.type === "render")).toEqual([])
+  })
+
   it("step tất định khác (S-8.3) không ghép", async () => {
     seedUpTo("S-8.3")
     seedSession(true)

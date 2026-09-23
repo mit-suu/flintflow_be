@@ -177,6 +177,23 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
+  it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
+    const s = spine()
+    const base = s.diagrams.find((d) => d.id === "D03")!
+    s.diagrams = [
+      ...s.diagrams.filter((d) => d.id !== "D03"),
+      { ...base, id: "D03-1", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
+      { ...base, id: "D03-2", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+    ]
+    const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
+    expect(section.blocks).toEqual([
+      { type: "image", png: "png-D03-1", caption: "Screens flow for Founder" },
+      { type: "image", png: "png-D03-2", caption: "Screens flow for Guest" }
+    ])
+    // Hình không có title (sơ đồ chung trước khi tách actor) giữ chú thích cũ
+    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks).toEqual([{ type: "image", png: "png-d03", caption: "Screens Flow Diagram" }])
+  })
+
   it("fixed:2.2.2 — use case table với actor tên và include/extend", () => {
     const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
     const table = section.blocks[0]
