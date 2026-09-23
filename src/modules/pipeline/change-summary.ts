@@ -152,8 +152,9 @@ export const summarizeChanges = (changes: readonly ChangeLike[], spineAfter?: Sp
   }
 
   return [...byKey.values()].map(({ fields, ...row }) => {
-    // Sửa một phần tử: nói rõ đã đổi field nào ("Admin · tên, mô tả")
-    const detail = row.kind === "update" && fields.size > 0 && fields.size <= 3 ? ` · ${[...fields].join(", ")}` : ""
+    // Sửa một phần tử CÓ ID: nói rõ đã đổi field nào ("Admin · tên, mô tả"). Field lẻ của `project` thì
+    // tiêu đề đã là "<field>: <giá trị>" — thêm tên field lần nữa chỉ lặp lại chính nó.
+    const detail = row.id !== null && row.kind === "update" && fields.size > 0 && fields.size <= 3 ? ` · ${[...fields].join(", ")}` : ""
     return { ...row, title_vi: `${row.title_vi}${detail}` }
   })
 }
