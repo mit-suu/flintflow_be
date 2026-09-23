@@ -318,6 +318,18 @@
           },
           "description": {
             "type": "string"
+          },
+          "flows_in": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "flows_out": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [

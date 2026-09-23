@@ -21,7 +21,14 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
     case "context":
       return {
         project: { name: systemName(spine.project) },
-        actors: byId(spine.actors.filter((a) => a.kind !== "human")).map(({ id, name }) => ({ id, name }))
+        actors: byId(spine.actors).map(({ id, name, kind, flows_in, flows_out }) => ({
+          id,
+          name,
+          kind,
+          flows_in: flows_in ?? [],
+          flows_out: flows_out ?? []
+        })),
+        use_cases: byId(spine.use_cases).map(({ id, name, actor_ids }) => ({ id, name, actor_ids }))
       }
     case "usecase":
       return {

@@ -555,55 +555,102 @@
       "id": "A01",
       "name": "Founder",
       "kind": "human",
-      "description": "Startup founder or product owner who authors the SRS through the guided pipeline."
+      "description": "Startup founder or product owner who authors the SRS through the guided pipeline.",
+      "flows_in": [
+        "brief answers",
+        "accepted step"
+      ],
+      "flows_out": [
+        "draft section",
+        "srs document"
+      ]
     },
     {
       "id": "A02",
       "name": "Business Analyst",
       "kind": "human",
-      "description": "Analyst who refines requirements, resolves flags and signs the baseline."
+      "description": "Analyst who refines requirements, resolves flags and signs the baseline.",
+      "flows_in": [
+        "verification result"
+      ],
+      "flows_out": [
+        "red flag list"
+      ]
     },
     {
       "id": "A03",
       "name": "Administrator",
       "kind": "human",
-      "description": "Internal operator with read-only access to users, metrics and AI cost."
+      "description": "Internal operator with read-only access to users, metrics and AI cost.",
+      "flows_in": [
+        "account action"
+      ],
+      "flows_out": [
+        "platform metrics"
+      ]
     },
     {
       "id": "A04",
       "name": "Guest",
       "kind": "human",
-      "description": "Unauthenticated visitor who can register or log in."
+      "description": "Unauthenticated visitor who can register or log in.",
+      "flows_in": [
+        "registration request"
+      ]
     },
     {
       "id": "A05",
       "name": "Payment Gateway",
       "kind": "system",
-      "description": "External payment provider (sandbox) that processes credit purchases and sends webhooks."
+      "description": "External payment provider (sandbox) that processes credit purchases and sends webhooks.",
+      "flows_in": [
+        "payment result"
+      ],
+      "flows_out": [
+        "payment request"
+      ]
     },
     {
       "id": "A06",
       "name": "LLM Provider",
       "kind": "system",
-      "description": "External large language model API that generates draft content as structured ops."
+      "description": "External large language model API that generates draft content as structured ops.",
+      "flows_in": [
+        "generated draft"
+      ],
+      "flows_out": [
+        "draft request"
+      ]
     },
     {
       "id": "A07",
       "name": "PlantUML Server",
       "kind": "system",
-      "description": "Self-hosted diagram renderer that compiles .puml sources into images."
+      "description": "Self-hosted diagram renderer that compiles .puml sources into images.",
+      "flows_in": [
+        "diagram png"
+      ],
+      "flows_out": [
+        "puml source"
+      ]
     },
     {
       "id": "A08",
       "name": "Email Service",
       "kind": "system",
-      "description": "SMTP provider used for account verification and password reset mail."
+      "description": "SMTP provider used for account verification and password reset mail.",
+      "flows_out": [
+        "email request"
+      ]
     },
     {
       "id": "A09",
       "name": "Scheduler",
       "kind": "time",
-      "description": "Cron trigger that fires quota resets, expiry checks and housekeeping jobs."
+      "description": "Cron trigger that fires quota resets, expiry checks and housekeeping jobs.",
+      "flows_in": [
+        "housekeeping tick"
+      ]
     }
   ],
   "roles": [

@@ -167,7 +167,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D04", remediation_step: "S-4.5" }])
   })
 
-  it("đổi tên actor ⇒ hình usecase + luồng màn (tiêu đề theo actor) stale ⇒ render lại chỉ các hình đó", async () => {
+  it("đổi tên actor ⇒ hình context, usecase + luồng màn (tiêu đề theo actor) stale ⇒ render lại chỉ các hình đó", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
@@ -178,9 +178,9 @@ describe("renderAll / renderDiagram qua op engine", () => {
     await applyTransaction(PROJECT, { base_version: spine.spine_version, ops: [{ op: "set", path: `actors[id=${actor.id}].name`, value: "Renamed" }], by: USER })
 
     const stale = staleDiagrams((await repo.get(PROJECT))!).map((d) => d.kind)
-    expect([...new Set(stale)].sort()).toEqual(["screen_flow", "usecase"])
+    expect([...new Set(stale)].sort()).toEqual(["context", "screen_flow", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
-    expect([...result.rendered].sort()).toEqual(["D02", "D02-2", "D03", "D03-2", "D03-3", "D03-4"])
+    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D03", "D03-2", "D03-3", "D03-4"])
   })
 
   it("usecase vượt 20 ⇒ tách D02, D02-2…, phần đầu giữ id cũ", async () => {

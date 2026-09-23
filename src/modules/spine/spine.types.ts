@@ -87,6 +87,10 @@ export interface Actor {
   name: string
   kind: ActorKind
   description: string
+  /** Nhãn luồng dữ liệu actor gửi VÀO hệ thống, vẽ lên cạnh §1 context diagram (tiếng Anh). */
+  flows_in?: string[]
+  /** Nhãn luồng dữ liệu hệ thống gửi RA actor (tiếng Anh). */
+  flows_out?: string[]
 }
 
 export interface Role {

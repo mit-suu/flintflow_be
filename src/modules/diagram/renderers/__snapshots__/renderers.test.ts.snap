@@ -3,18 +3,29 @@
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
 "@startuml
 skinparam monochrome true
-left to right direction
-rectangle "FlintFlow" as SYSTEM_
-rectangle "Payment Gateway" as A05 <<system>>
-rectangle "LLM Provider" as A06 <<system>>
-rectangle "PlantUML Server" as A07 <<system>>
-rectangle "Email Service" as A08 <<system>>
-rectangle "Scheduler" as A09 <<time>>
-SYSTEM_ -- A05
-SYSTEM_ -- A06
-SYSTEM_ -- A07
-SYSTEM_ -- A08
-SYSTEM_ -- A09
+skinparam shadowing false
+skinparam nodesep 45
+skinparam ranksep 110
+skinparam usecaseFontSize 16
+usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_
+rectangle "Founder" as A01
+rectangle "Business Analyst" as A02
+rectangle "Administrator" as A03
+rectangle "Guest" as A04
+rectangle "Payment Gateway" as A05
+rectangle "LLM Provider" as A06
+rectangle "PlantUML Server" as A07
+rectangle "Email Service" as A08
+rectangle "Scheduler" as A09
+A01 <-right-> SYSTEM_ : → brief answers, accepted step\\n← draft section, srs document
+A02 <-left-> SYSTEM_ : ← verification result\\n→ red flag list
+A03 <-down-> SYSTEM_ : ↓ account action\\n↑ platform metrics
+A04 -up-> SYSTEM_ : registration request
+A05 <-down-> SYSTEM_ : ↓ payment result\\n↑ payment request
+A06 <-up-> SYSTEM_ : ↑ generated draft\\n↓ draft request
+A07 <-down-> SYSTEM_ : ↓ diagram png\\n↑ puml source
+SYSTEM_ -down-> A08 : email request
+A09 -down-> SYSTEM_ : housekeeping tick
 @enduml
 "
 `;
