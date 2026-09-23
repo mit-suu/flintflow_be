@@ -4,6 +4,7 @@ import * as userService from "./user.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { newPasswordField } from "../../shared/utils/password-field.js"
 
 /** `PATCH /users/me` — chỉ hai field onboarding (UC 1.12), không cho đổi email/role/isActive. */
 export const updateMeSchema = z
@@ -15,7 +16,7 @@ export const updateMeSchema = z
 
 export const changePasswordSchema = z.strictObject({
   currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
-  newPassword: z.string().min(6, "Mật khẩu mới phải có ít nhất 6 ký tự")
+  newPassword: newPasswordField
 })
 
 export const getMe = catchAsync(async (req: Request, res: Response) => {
