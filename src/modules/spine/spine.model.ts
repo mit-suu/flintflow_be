@@ -24,6 +24,7 @@ const releaseScopeSchema = new Schema(
 const projectSchema = new Schema(
   {
     name: { type: String, default: "" },
+    system_name: nullableString,
     vision: nullableString,
     goals: { type: [String], default: [] },
     // `type` là tên field thật, không phải khai báo kiểu của Mongoose
@@ -33,6 +34,7 @@ const projectSchema = new Schema(
     form_factor: nullableString,
     stakes: nullableString,
     working_mode: { type: String, enum: ["fast", "coaching", null], default: null },
+    review_mode: { type: String, enum: ["strict", "balanced", "fast"], default: "balanced" },
     release_scope: { type: releaseScopeSchema, default: () => ({}) }
   },
   opts
@@ -337,6 +339,20 @@ const sectionStateSchema = new Schema(
   opts
 )
 
+/** Sổ quyết định đã chốt (FLF-208 · R4) — xem `Decision` ở spine.types.ts. */
+const decisionSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    topic_key: { type: String, required: true },
+    question: { type: String, default: "" },
+    answer: { type: String, default: "" },
+    step_id: { type: String, required: true },
+    at: { type: String, required: true },
+    superseded_by: { type: String, default: null }
+  },
+  opts
+)
+
 const baselineEntrySchema = new Schema(
   {
     id: { type: String, required: true },
@@ -378,6 +394,7 @@ const spineSchema = new Schema(
 
     diagrams: { type: [diagramSchema], default: [] },
     assumptions: { type: [assumptionSchema], default: [] },
+    decisions: { type: [decisionSchema], default: [] },
     flags: { type: [flagSchema], default: [] },
     sections: { type: [sectionStateSchema], default: [] },
     baselines: { type: [baselineEntrySchema], default: [] },
