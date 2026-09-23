@@ -72,7 +72,13 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
         : undefined
     )
   } catch (err) {
-    if (err instanceof NoWorkingDraftError) return sendError(res, err.statusCode, err.code, err.message, { hint: "S-8.2" })
+    if (err instanceof NoWorkingDraftError) {
+      // FLF-177 BUG-31: "tài liệu chưa ghép" là trạng thái bình thường của một dự án đang làm dở, không
+      // phải lỗi. Trả 200 kèm `state` để FE hiện chỗ trống có ý nghĩa, thay vì 78 dòng đỏ 409 ở console.
+      // `?source=baseline` vẫn là lỗi thật (client đòi một baseline không có).
+      if (query.source === "draft") return sendSuccess(res, 200, null, { state: "not_assembled", hint: "S-8.2" })
+      return sendError(res, err.statusCode, err.code, err.message, { hint: "S-8.2" })
+    }
     throw err
   }
 })

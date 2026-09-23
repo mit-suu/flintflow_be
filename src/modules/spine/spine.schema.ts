@@ -28,6 +28,8 @@ export const releaseScopeSchema = z.strictObject({
 
 export const spineProjectSchema = z.strictObject({
   name: z.string(),
+  /** FLF-177 — Spine trước đó không có ⇒ `null` (dùng tên project). */
+  system_name: z.string().nullable().default(null),
   vision: z.string().nullable(),
   goals: z.array(z.string()),
   type: z.string().nullable(),
@@ -36,6 +38,12 @@ export const spineProjectSchema = z.strictObject({
   form_factor: z.string().nullable(),
   stakes: z.string().nullable(),
   working_mode: z.enum(["fast", "coaching"]).nullable(),
+  /**
+   * Cách duyệt (FLF-208 · R5): `strict` dừng ở mọi bước (như trước), `balanced` chỉ dừng ở cuối phase,
+   * cuối mỗi màn và các bước bắt buộc, `fast` chỉ dừng khi có câu bắt buộc/cờ đỏ mới/lỗi.
+   * Spine cũ không có ⇒ `balanced`.
+   */
+  review_mode: z.enum(["strict", "balanced", "fast"]).default("balanced"),
   release_scope: releaseScopeSchema
 })
 
@@ -226,6 +234,20 @@ export const assumptionSchema = z.strictObject({
   confirmed_at: isoDateTime.nullable()
 })
 
+/**
+ * Sổ quyết định (FLF-208 · 02-reduce-stops-plan R4). `topic_key` là khoá chống hỏi lặp; `superseded_by`
+ * giữ vết khi user đổi ý thay vì xoá dòng cũ. Spine trước FLF-198 không có ⇒ `[]`.
+ */
+export const decisionSchema = z.strictObject({
+  id,
+  topic_key: z.string().min(1),
+  question: z.string(),
+  answer: z.string(),
+  step_id: z.string().min(1),
+  at: isoDateTime,
+  superseded_by: id.nullable().default(null)
+})
+
 /** Tối thiểu cho lý do waive — srs-spine.md §7. */
 export const WAIVE_REASON_MIN_LENGTH = 20
 
@@ -293,6 +315,7 @@ export const spineSchema = z.strictObject({
 
   diagrams: z.array(diagramSchema),
   assumptions: z.array(assumptionSchema),
+  decisions: z.array(decisionSchema).default([]),
   flags: z.array(flagSchema),
   sections: z.array(sectionStateSchema),
   baselines: z.array(baselineSchema),

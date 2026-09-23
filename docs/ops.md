@@ -166,6 +166,34 @@ Tài khoản admin đầu tiên cũng được tạo tự động từ `ADMIN_EM
 
 ---
 
+### Render lại sơ đồ use case của dự án cũ
+
+```bash
+npm run rerender:usecase -- --dry-run   # liệt kê project và số hình, không ghi
+npm run rerender:usecase                # render lại thật
+```
+
+Chạy **một lần** cho **mọi** dự án sau khi deploy bản sửa ký pháp sơ đồ use case — không bỏ qua nhóm
+nào. `source_hash` chỉ hash `actors[]` + `use_cases[]`, không hash code vẽ, nên không dự án nào tự vẽ
+lại và `diagram_stale` cũng không bắn; `.puml` đang lưu giữ nguyên bản sai chuẩn cũ (mũi tên trên cạnh
+actor, actor nối thẳng vào use case mở rộng) mà không có tín hiệu nào báo.
+
+Điều đó đúng với **cả** dự án một hình (`D02`) lẫn dự án đã tách sẵn (`D02-1`, `D02-2`): id phần đầu
+luôn được giữ nguyên nên mọi phần đều trùng id cũ và trùng `source_hash` ⇒ `unchanged()` short-circuit.
+`force: true` của script là đường duy nhất làm mới.
+
+Script **không gỡ id nào** khi số phần không đổi, nên baseline đã ký trỏ `diagram-ref:D02` hay
+`diagram-ref:D02-1` vẫn nạp được ảnh §2.2.1 từ store. Số phần giảm (dự án rút bớt use case) thì phần
+dư mới bị gỡ — đó là hành vi có sẵn, không phải do bản sửa này.
+
+**Sao lưu Mongo trước** (mục 6): script ghi hàng loạt vào `diagrams[]` và file store.
+
+Không dùng `POST /:projectId/diagrams/usecase/render {"force": true}` thay cho script: route đó không
+truyền `step_id`, nên change ghi `step_id: null` và `fixed:2.2.1` bị đánh `stale` ⇒ cờ đỏ ở S-9.5.
+Script truyền `step_id: "S-3.6"` đúng bước sở hữu section.
+
+---
+
 ### Chạy step pipeline mà không gọi model
 
 `AI_PROVIDER_OVERRIDE=mock` ghi đè provider của **mọi** skill; `mock.provider.ts` trả output hợp schema

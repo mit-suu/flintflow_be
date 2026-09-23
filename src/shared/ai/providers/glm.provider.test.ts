@@ -39,13 +39,22 @@ describe("callGLM", () => {
 
     const res = await callGLM("prompt", { provider: "glm", model: "zai-org/GLM-5.3-Flash", maxTokens: 100, temperature: 0.2 } as never)
 
+    // Tham số thứ hai là request options của SDK (chỗ truyền `signal` khi huỷ lượt — FLF-177 WP-4)
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ reasoning_effort: "low", response_format: { type: "json_object" }, stream: true })
+      expect.objectContaining({ reasoning_effort: "low", response_format: { type: "json_object" }, stream: true }),
+      undefined
     )
     expect(create.mock.calls[0][0]).not.toHaveProperty("thinking")
     expect(create.mock.calls[0][0]).toMatchObject({ max_tokens: 100 + GLM_REASONING_HEADROOM_TOKENS })
     expect(JSON.parse(res.text)).toEqual({ reply: "hi", questions: [] })
     expect(res).toMatchObject({ promptTokens: 10, completionTokens: 20 })
+  })
+
+  it("truyền AbortSignal xuống SDK để huỷ lượt là huỷ luôn request tới model", async () => {
+    const controller = new AbortController()
+    create.mockResolvedValue(streamOf('{"reply":"hi","questions":[]}'))
+    await callGLM("prompt", { provider: "glm", model: "zai-org/GLM-5.3-Flash", maxTokens: 100 } as never, controller.signal)
+    expect(create).toHaveBeenCalledWith(expect.anything(), { signal: controller.signal })
   })
 
   it("content rỗng (hết token cho phần suy nghĩ) ⇒ GLM_EMPTY_OUTPUT kèm finish_reason", async () => {
