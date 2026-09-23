@@ -14,7 +14,7 @@
 - **Nguồn sự thật là file .docx + bảng block** (G2). Spine chỉ là chỉ mục: request nào ghi Spine (finalize, quyết định group cuối, release) thì mang `base_version` như pipeline.
 - **Neo block** (G3): mỗi block có `block_id` ổn định (`B0001`…), neo bằng bookmark ẩn `_ff_<block_id>` trong file lưu, neo phụ `w14:paraId`, dự phòng `text_hash` + `heading_path`.
 - **Version tài liệu** (G4): import `0.0`; mỗi CR ghi xong lên minor (`0.1`, `0.2`…); release lên major (`1.0`, `2.0`…). Khác `v1.N` của mode 2.
-- **BR-03:** khi đã có baseline v0 thì mọi sửa phải qua CR. Ở project mode 1, chat ra lệnh sửa, `POST /changes` và `POST /undo` đều trả `409 CHANGE_REQUIRES_CR` (G9).
+- **BR-03:** khi đã có baseline v0 thì mọi sửa phải qua CR. Ở project mode 1, chat ra lệnh sửa, `POST /changes`, `POST /reconcile` và `POST /undo` đều trả `409 CHANGE_REQUIRES_CR` (G9). Mode 1 v3 (§4.8): không tự tạo CR, không chạy step, không ký baseline v1, không waive cờ.
 - **Gọi AI** (Flow 4/5): giữ credit trước, quyết toán sau. Lỗi AI thì tự retry 2 lần; vẫn lỗi thì hoàn credit và đặt `paused: { reason: "resume_later" }`. Hết credit thì đặt `paused: { reason: "credits" }`. Resume qua endpoint `…/resume`. `step_id` trong usage (UC-79): `I-4:<section_id>`, `I-1.11`, `C-2:<cr_id>`, `C-4:<cr_id>`, `C-5:<cr_id>`.
 
 ### 0.1 Máy trạng thái import (`import.state.ts`)
@@ -57,9 +57,11 @@ mọi trạng thái chưa kết thúc ─► cancelled
 | 409 | `PATH_LOCKED` (FLF-186, thay `BLOCK_LOCKED`) | CR cần khoá phần tử Spine đang bị CR khác giữ (3.5), hoặc sửa tay vị trí không thuộc CR | `{ locked: [{ path, cr_id }] }` |
 | 409 | `CR_LOCATION_UNCONCLUDED` | Nộp CR khi còn vị trí chưa có kết luận | `{ location_ids[] }` |
 | 409 | `CR_VALUE_CHANGED` (FLF-186, thay `CR_OLD_TEXT_MISMATCH`) | Giá trị phần tử tại `path` đã đổi so với `proposal.old_text` (verify hoặc ghi) | `{ location_id, path }` |
-| 409 | `CHANGE_REQUIRES_CR` | Chat sửa / `POST /changes` / `POST /undo` ở project mode 1 (sau baseline v1 — D3) | `{ prefill: { title, description }, change_request?: { cr_id, status } }` — `change_request` khi chat đã tạo CR (FLF-186) |
+| 409 | `CHANGE_REQUIRES_CR` | Chat sửa / `POST /changes` / `POST /reconcile` / `POST /undo` ở project mode 1 đã có baseline v0 (§4.8) | `{ prefill: { title, description, source?: { kind, ref } } }` — nội dung điền sẵn cho form 3.1; BE không tạo CR |
+| 409 | `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE` | Project mode 1: chạy step / trả lời step / gate / resume pipeline / `PATCH step-plan` · `POST /baseline` · waive cờ (§4.8) | — |
 | 422 | `IMPORT_FILE_REJECTED` | Preflight từ chối file (1.2); bản ghi import vẫn được tạo với `status = preflight_rejected` | `{ import_id, issues[] }` |
 | 422 | `IMPORT_STAMP_FOREIGN_PROJECT` | File mang stamp của project khác | `{ stamp }` |
+| 422 | `IMPORT_REUPLOAD_NO_STAMP` | Re-upload (#11) file không mang stamp của project (§4.8) | — |
 | 422 | `RELEASE_RED_FLAGS_OPEN` | Release khi còn cờ đỏ (BR-04, mode 1 không waive) | `{ flags[] }` |
 
 Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`, `402 INSUFFICIENT_CREDIT` (`{ required, balance }`), `404 PROJECT_NOT_FOUND`, `409 SPINE_VERSION_CONFLICT`, `501 NOT_IMPLEMENTED`.
@@ -206,7 +208,7 @@ Nếu CR-002 cần block `B0005` mà CR-001 đang giữ:
 ### 2.7 Chat ở project mode 1
 
 ```json
-{ "data": null, "meta": { "prefill": { "title": "Đổi tên actor Learner thành Student", "description": "Rename actor Learner to Student in every section" } }, "error": { "code": "CHANGE_REQUIRES_CR", "message": "Tài liệu đã có baseline — mọi sửa phải qua change request" } }
+{ "data": null, "meta": { "prefill": { "title": "Đổi tên actor Learner thành Student", "description": "Rename actor Learner to Student in every section", "source": { "kind": "verbal", "ref": "chat:66f0c1…" } } }, "error": { "code": "CHANGE_REQUIRES_CR", "message": "Tài liệu đã import — mọi sửa phải qua change request" } }
 ```
 
 ## 4. Mode 1 v2 — contract-change (FLF-182)
@@ -256,14 +258,35 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 - **`section_title` của vị trí CR và tiêu đề change group**: phần nối (mục riêng tiêu đề rỗng) hiện `Phần nối của "<mục chủ>"` thay cho mã `custom:<id>`. Hình DTO không đổi.
 - **`found_by` của vị trí CR**: phần tử đã tham chiếu đích bằng field chỉ còn `spine_link`, không kèm `mention` cho cùng đích đó (nhắc một đích khác thì vẫn có `mention`).
 - **C-3 nhận đích là mã section** (`targets.entity_paths` chứa `fixed:5.1`, `feature:F-01`, `custom:CS02`…): mọi phần tử section đó sở hữu thành vị trí `spine_link` (`entity_paths` của vị trí ghi mã section). Trước đây loại đích này bị bỏ im lặng.
-- **Vị trí CR kiểu "mục trống"** (phương án B): đích là mã section mà Spine chưa có phần tử nào ⇒ `path` là **cả mảng** nuôi mục đó (`other_requirements[]`, `business_rules[]`… theo bảng `SECTION_FILL_ARRAYS`), `current_text` = JSON của mảng (thường `[]`). C-4 chỉ được kết luận `edit` bằng op `add` vào đúng mảng đó (vi phạm ⇒ `op_outside_section`), hoặc `not_related`. Khoá theo path mảng. Section không có mảng nào nuôi (vd `fixed:1`, `fixed:3.1.1`) vẫn ra `CR_NO_LOCATIONS`.
+- **Vị trí CR kiểu "mục trống"** (phương án B): đích là mã section mà Spine chưa có phần tử nào ⇒ `path` là **cả mảng** nuôi mục đó (`other_requirements[]`, `business_rules[]`… theo bảng `SECTION_FILL_ARRAYS`), `current_text` = JSON của mảng (thường `[]`). C-4 chỉ được kết luận `edit` bằng op `add` vào đúng mảng đó (vi phạm ⇒ `op_outside_section`), hoặc `not_related`. Khoá theo path mảng. Section không có mảng nào nuôi (vd `fixed:1`, `fixed:3.1.1`) vẫn ra `CR_NO_LOCATIONS` — **đổi ở §4.8** (`fixed:1` là phần tử `project`, `fixed:3.1.1` có vị trí).
 - **Mã lỗi mới `409 CR_NOTHING_TO_APPROVE`** (#24 `/submit`): mọi vị trí kết luận `not_related` ⇒ `regroup` ra 0 group, nộp vào `in_review` thì không có gì để duyệt và CR kẹt vĩnh viễn. `meta { location_count }`. CR giữ `ready_to_submit`; đổi kết luận hoặc huỷ CR.
 - **Mã lỗi mới `409 CR_NO_LOCATIONS`** (#19 `/impact`): C-3 ra 0 vị trí — thay vì đứng im ở `impact_review`. `meta { targets: { entity_paths, keywords }, empty_sections: [{ section_id, title, step_id | null }] }` — `empty_sections` là đích dạng section chưa có phần tử nào (mục còn trống ⇒ chạy `step_id` để soạn, không đi CR). CR giữ `impact_review`; sửa mô tả rồi `/clarify` lại được.
+
+### 4.8 Mode 1 v3 — bám BPMN 2026-09-22 (contract-change — chờ 4/4)
+
+Plan: `claude_plan/mode1-v3/` (`00-quyet-dinh.md` F1–F4, `phase-1-be-flow1.md`). BPMN Flow 1 kết thúc ở gap report (1.13) hoặc đi sang 3.1 — không có workspace sửa tự do, không có baseline v1.
+
+- **Mốc CR đổi từ baseline v1 sang v0**: project mode 1 có baseline bất kỳ (kể cả `imported`) ⇒ `/changes`, `/reconcile`, `/undo`, chat lệnh sửa trả `409 CHANGE_REQUIRES_CR`.
+- **Không tự tạo CR** (bỏ hành vi §4.6 "3.1 từ chat" và §4.7 "tạo CR nguồn verbal"): 3.1 là việc của BA (nguồn + người yêu cầu bắt buộc). `meta` chỉ còn `prefill { title, description, source? }` — **bỏ `change_request`**. `source` là gợi ý cho form: lệnh sửa trong chat ⇒ `{ kind: "verbal", ref: "chat:<chat_id>" }`; `/changes` · `/reconcile` · `/undo` ⇒ `{ kind: "verbal", ref: null }`. CR mới không dùng nguồn `chat` nữa (giữ trong enum để đọc CR cũ).
+- **`POST /changes/preview` luôn chạy** (chỉ đọc) — mode 1 đã import thêm `meta.requires_cr: true` (bản xem trước dùng để soạn CR, không áp).
+- **Mã lỗi mới** (409, không `meta`), áp cho mọi project mode 1 (đã import hay chưa):
+  - `MODE1_NO_STEPS`: `POST /steps/:id/run`, `POST /steps/:id/answer`, `POST /steps/:id/gate`, `POST /resume`, `PATCH /step-plan` (#33). `GET /steps`, `GET /step-plan` vẫn đọc được (kế hoạch step còn dùng để biết step sở hữu field — C-4).
+  - `MODE1_NO_SIGNOFF`: `POST /baseline`. Khoá duy nhất sau v0 là release (Flow 6).
+  - `MODE1_NO_WAIVE`: `POST /flags/:id/waive` (G5). Cờ chỉ đóng bằng CR.
+- **Mọi cờ đỏ mode 1 đóng được bằng CR** (chỉ nới rộng C-3):
+  - "Mục trống" của C-3 dùng cùng tiêu chí với luật `section_empty` (`SECTION_HAS_DATA`): mục có phần tử mà cờ vẫn coi là chưa có dữ liệu (vd 5.1 chỉ có rule `tier=high`) cũng có vị trí thêm mới `arr[]`.
+  - `fixed:3.1.1` (Screens Flow) và `fixed:2.2.1` (Use Case Diagram): mọi `screens[id=…]` / `use_cases[id=…]` là vị trí của mục đó (`section_id` = mục được nhắm, step sở hữu S-4.2 / S-3.6); mảng rỗng ⇒ `screens[]` / `use_cases[]`. Không còn `CR_NO_LOCATIONS` cho hai mục này.
+  - `assumptions[id=…]` làm được vị trí (xác nhận giả định ⇒ đóng `unconfirmed_assumption`).
+  - `CR_NO_LOCATIONS` giữ hình `meta`; `empty_sections[].step_id` chỉ còn để tham khảo (mode 1 không chạy step).
+- **Tính cờ ở mode 1 bật luật S-9** (`atBaseline`) tại 1.12 (import check), 3.14 (ghi CR), 6.1 (release): `unconfirmed_assumption` hiện từ lúc import và đóng ngay khi CR xác nhận giả định.
+- **Re-upload (#11) đòi stamp của project** (BPMN: "Has version stamp? Yes" mới đi 1.4): file không stamp ⇒ `422 IMPORT_REUPLOAD_NO_STAMP`, không lưu diff/file. Kiểm sau preflight (file bị từ chối vẫn ra `IMPORT_FILE_REJECTED` trước). Bỏ hành vi "bản gốc sửa ngoài vẫn so theo text".
+- **3.14 vẽ lại hình**: ghi CR xong vẽ lại hình lệch dữ liệu (PlantUML có mặt); có hình đổi thì file của version minor được in lại để nhúng hình mới.
 
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, `IMPORT_REUPLOAD_NO_STAMP`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |
 | 2026-09-20 | Dọn nợ sau V4 | §4.7: `/changes`, `/reconcile`, `/undo` sau v1 tạo CR nguồn `verbal` kèm `meta.change_request`; gap report `unrendered_diagrams`; `section_title` của phần nối; `found_by` bỏ `mention` trùng `spine_link` — chỉ thêm field / nới rộng |
 | 2026-09-19 | FLF-186 (mode 1 v2, V4) | §4.6: vị trí CR theo path Spine (DTO location), `PATH_LOCKED`, `CR_VALUE_CHANGED`, PATCH vị trí `new_value`/`spine_ops`, version/release = render Spine, blocks/compare/re-upload từ file render, chat sau v1 tạo CR (`meta.change_request`) — contract-change, chờ 4/4 |
 | 2026-09-19 | FLF-184 (mode 1 v2, V2) | §4.5: `RenderedDocument` theo layout file upload, #14 `variant=original`, `has_original_file`, gap report `missing_fpt_sections` + `layout[]` — chỉ thêm field, kèm lô contract-change V0 |

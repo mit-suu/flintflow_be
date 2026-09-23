@@ -1,7 +1,8 @@
 /**
- * Guard G9 / BR-03 qua HTTP (FLF-172, P4 §8.3 `chat-guard.test.ts`; plan §6 2G): project mode 1 — chat ra lệnh sửa
- * (JSON + stream), `/changes`, `/changes/preview`, `/reconcile`, `/undo` ⇒ `409 CHANGE_REQUIRES_CR` kèm `meta.prefill`;
- * Spine không đổi; project mode 2 không bị chặn.
+ * Guard G9 / BR-03 qua HTTP (FLF-172, P4 §8.3 `chat-guard.test.ts`; plan §6 2G) — mode 1 v3 (BPMN Flow 1 ⇒ 3.1):
+ * project mode 1 đã import (baseline v0) — chat ra lệnh sửa (JSON + stream), `/changes`, `/reconcile`, `/undo` ⇒
+ * `409 CHANGE_REQUIRES_CR` kèm `meta.prefill` cho form 3.1, **không tự tạo CR**; Spine không đổi. `/changes/preview`
+ * chỉ đọc ⇒ chạy, kèm `meta.requires_cr`. Project mode 2 không bị chặn.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import request from "supertest"
@@ -12,24 +13,17 @@ import app from "../../../src/app.js"
 import { seedFixture, type SeededFixture } from "../../setup.js"
 import { mockCalls, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
-import { importedProject as importedProjectV0 } from "../../helpers/mode1-release-p4.js"
+import { importedProject } from "../../helpers/mode1-release-p4.js"
 import { markBaselineV1 } from "../../helpers/mode1-v2.js"
+import { changeRequiresCrMetaSchema } from "../../../src/modules/change-request/change-request.dto.js"
+import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
-/** Project mode 1 chưa import nhưng đã sign-off v1 — đủ điều kiện chặn (D3). */
+/** Project mode 1 chưa import nhưng đã có baseline — đủ điều kiện chặn (mode 1 v3: có baseline bất kỳ là chặn). */
 const createBlocked = async (seeded: SeededFixture): Promise<string> => {
   const id = await createMode1Project(seeded)
   await markBaselineV1(id)
   return id
 }
-
-/** Mode 1 v2 (D3, FLF-183): chặn chỉ áp sau baseline v1 ⇒ các ca chặn dựng project đã import + sign-off v1. */
-const importedProject = async () => {
-  const p = await importedProjectV0()
-  await markBaselineV1(p.projectId)
-  return p
-}
-import { changeRequiresCrMetaSchema } from "../../../src/modules/change-request/change-request.dto.js"
-import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -43,6 +37,7 @@ const client = (seeded: SeededFixture, projectId: string) => {
   return {
     post: (suffix: string, body: object = {}) => request(app).post(`${base}${suffix}`).set(auth).send(body),
     spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
+    listCrs: async () => (await request(app).get(`${base}/change-requests`).set(auth)).body.data as unknown[],
     newChat: async () => {
       const res = await request(app).post(`${base}/chats`).set(auth).send({})
       expect(res.status, JSON.stringify(res.body.error)).toBe(201)
@@ -57,10 +52,12 @@ const expectBlocked = (res: request.Response, label: string) => {
   return changeRequiresCrMetaSchema.parse(res.body.meta).prefill
 }
 
-const SPINE_ROUTES = ["/changes", "/changes/preview", "/reconcile", "/undo"] as const
+/** Route có ghi — preview chỉ đọc nên không nằm đây. */
+const SPINE_ROUTES = ["/changes", "/reconcile", "/undo"] as const
+const VERBAL = { kind: "verbal", ref: null } as const
 
-describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /undo (mode 1)", () => {
-  it("project mode 1 đã import: mọi route sửa Spine ⇒ 409 kèm prefill từ instruction; Spine không đổi", async () => {
+describe("chặn sửa ngoài CR — /changes, /reconcile, /undo (mode 1)", () => {
+  it("project mode 1 vừa import (v0): mọi route ghi Spine ⇒ 409 kèm prefill (gợi ý nguồn yêu cầu miệng); Spine không đổi, không gọi AI", async () => {
     const { seeded, projectId } = await importedProject()
     const c = client(seeded, projectId)
     const version = await c.spineVersion()
@@ -68,7 +65,7 @@ describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /un
     const calls = mockCalls.length
     for (const path of SPINE_ROUTES) {
       const prefill = expectBlocked(await c.post(path, { base_version: version, instruction: "Rename actor Learner to Student" }), path)
-      expect(prefill, path).toEqual({ title: "Rename actor Learner to Student", description: "Rename actor Learner to Student" })
+      expect(prefill, path).toEqual({ title: "Rename actor Learner to Student", description: "Rename actor Learner to Student", source: VERBAL })
     }
     const after = (await spineRepository.get(projectId))!
     expect(after.spine_version).toBe(before.spine_version)
@@ -76,33 +73,21 @@ describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /un
     expect(mockCalls.length).toBe(calls)
   })
 
-  it("sau v1: /changes và /undo tạo luôn CR nguồn verbal kèm meta.change_request; /changes/preview chỉ điền sẵn (nợ T8)", async () => {
+  it("không tự tạo CR (3.1 là việc của BA); /changes/preview chạy được kèm meta.requires_cr, không ghi", async () => {
     const { seeded, projectId } = await importedProject()
     const c = client(seeded, projectId)
-    const auth = { Authorization: `Bearer ${seeded.token}` }
     const version = await c.spineVersion()
-    const listCrs = async () => (await request(app).get(`/api/v1/projects/${projectId}/change-requests`).set(auth)).body.data
 
-    // xem trước không đẻ ra CR
-    const preview = await c.post("/changes/preview", { base_version: version, instruction: "Rename actor Learner to Student" })
-    expectBlocked(preview, "preview")
-    expect(changeRequiresCrMetaSchema.parse(preview.body.meta).change_request).toBeUndefined()
-    expect(await listCrs()).toEqual([])
+    const preview = await c.post("/changes/preview", { base_version: version, ops: [{ op: "set", path: "project.vision", value: "Vision mới" }] })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    expect(preview.body.meta).toMatchObject({ requires_cr: true })
+    expect(preview.body.data.ok).toBe(true)
+    expect(await c.spineVersion()).toBe(version)
 
-    const change = await c.post("/changes", { base_version: version, instruction: "Rename actor Learner to Student" })
-    expectBlocked(change, "/changes")
-    expect(changeRequiresCrMetaSchema.parse(change.body.meta).change_request).toEqual({ cr_id: "CR-001", status: "draft" })
-
-    // /undo không có câu lệnh ⇒ tiêu đề mặc định
-    const undo = await c.post("/undo", { base_version: version })
-    expectBlocked(undo, "/undo")
-    expect(changeRequiresCrMetaSchema.parse(undo.body.meta).change_request).toEqual({ cr_id: "CR-002", status: "draft" })
-
-    const crs = (await listCrs()) as { cr_id: string; title: string; source: { kind: string } }[]
-    expect(crs.map((x) => [x.cr_id, x.title, x.source.kind])).toEqual([
-      ["CR-002", "Hoàn tác thay đổi gần nhất", "verbal"],
-      ["CR-001", "Rename actor Learner to Student", "verbal"]
-    ])
+    expectBlocked(await c.post("/changes", { base_version: version, instruction: "Rename actor Learner to Student" }), "/changes")
+    const undo = expectBlocked(await c.post("/undo", { base_version: version }), "/undo")
+    expect(undo).toEqual({ title: "Hoàn tác thay đổi gần nhất", description: "Hoàn tác thay đổi gần nhất", source: VERBAL })
+    expect(await c.listCrs()).toEqual([])
   })
 
   it("không có instruction (gửi ops / body rỗng) ⇒ vẫn 409 trước cả kiểm body, prefill mặc định", async () => {
@@ -110,10 +95,10 @@ describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /un
     const c = client(seeded, await createBlocked(seeded))
     const version = await c.spineVersion()
     const withOps = expectBlocked(await c.post("/changes", { base_version: version, ops: [{ op: "set", path: "project.vision", value: "x" }] }), "ops")
-    expect(withOps).toEqual({ title: "Sửa tài liệu", description: "Sửa tài liệu" })
+    expect(withOps).toEqual({ title: "Sửa tài liệu", description: "Sửa tài liệu", source: VERBAL })
     for (const path of SPINE_ROUTES) expectBlocked(await c.post(path, {}), `${path} rỗng`)
     // instruction không phải chuỗi ⇒ bỏ qua, dùng mặc định
-    expect(expectBlocked(await c.post("/changes/preview", { instruction: 42 }), "số")).toEqual({ title: "Sửa tài liệu", description: "Sửa tài liệu" })
+    expect(expectBlocked(await c.post("/changes", { instruction: 42 }), "số")).toEqual({ title: "Sửa tài liệu", description: "Sửa tài liệu", source: VERBAL })
   })
 
   it("instruction nhiều dòng / dài ⇒ title = dòng đầu cắt 80 ký tự, description nguyên văn", async () => {
@@ -136,22 +121,19 @@ describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /un
 })
 
 describe("chặn sửa ngoài CR — chat (mode 1)", () => {
-  it("chat JSON ra lệnh sửa (sau v1) ⇒ tạo CR nguồn chat + 409 kèm change_request + prefill, không gọi AI; tin nhắn không được lưu (FLF-186)", async () => {
+  it("chat JSON ra lệnh sửa (v0) ⇒ 409 kèm prefill nguồn yêu cầu miệng ref chat, không tạo CR, không gọi AI; tin nhắn không được lưu", async () => {
     const { seeded, projectId } = await importedProject()
     const c = client(seeded, projectId)
     const chatId = await c.newChat()
     const calls = mockCalls.length
     const res = await c.post(`/chats/${chatId}/messages`, { content: "Rename actor Learner to Student", step: "B-1.1" })
-    expect(expectBlocked(res, "chat")).toEqual({ title: "Rename actor Learner to Student", description: "Rename actor Learner to Student" })
-    expect(changeRequiresCrMetaSchema.parse(res.body.meta).change_request).toEqual({ cr_id: "CR-001", status: "draft" })
-    expect(mockCalls.length).toBe(calls)
-    const cr = await request(app).get(`/api/v1/projects/${projectId}/change-requests/CR-001`).set("Authorization", `Bearer ${seeded.token}`)
-    expect(cr.body.data.change_request).toMatchObject({
+    expect(expectBlocked(res, "chat")).toEqual({
       title: "Rename actor Learner to Student",
       description: "Rename actor Learner to Student",
-      source: { kind: "chat", ref: `chat:${chatId}` },
-      status: "draft"
+      source: { kind: "verbal", ref: `chat:${chatId}` }
     })
+    expect(mockCalls.length).toBe(calls)
+    expect(await c.listCrs()).toEqual([])
     const history = await request(app).get(`/api/v1/projects/${projectId}/chats/${chatId}`).set("Authorization", `Bearer ${seeded.token}`)
     expect(history.status).toBe(200)
     expect(history.body.data.messages).toEqual([])
@@ -164,7 +146,11 @@ describe("chặn sửa ngoài CR — chat (mode 1)", () => {
     const chatId = await c.newChat()
     const res = await c.post(`/chats/${chatId}/messages/stream`, { content: "Delete use case UC-01\nvì trùng UC-02", step: "B-1.1" })
     expect(String(res.headers["content-type"])).toContain("application/json")
-    expect(expectBlocked(res, "stream")).toEqual({ title: "Delete use case UC-01", description: "Delete use case UC-01\nvì trùng UC-02" })
+    expect(expectBlocked(res, "stream")).toEqual({
+      title: "Delete use case UC-01",
+      description: "Delete use case UC-01\nvì trùng UC-02",
+      source: { kind: "verbal", ref: `chat:${chatId}` }
+    })
   })
 
   it("câu hỏi (không phải lệnh sửa) ở project mode 1 ⇒ không bị chặn", async () => {
@@ -179,25 +165,13 @@ describe("chặn sửa ngoài CR — chat (mode 1)", () => {
   })
 })
 
-describe("mode 1 v2 — trước baseline v1 sửa tự do như mode 2 (D3, FLF-183)", () => {
-  it("vừa import (chỉ có baseline imported) ⇒ /changes/preview và chat lệnh sửa không bị CHANGE_REQUIRES_CR", async () => {
-    const { seeded, projectId } = await importedProjectV0()
-    const auth = { Authorization: `Bearer ${seeded.token}` }
-    const base = `/api/v1/projects/${projectId}`
-    const version = (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number
-    const preview = await request(app).post(`${base}/changes/preview`).set(auth).send({ base_version: version, instruction: "Rename actor Learner to Student" })
-    expect(preview.body.error?.code).not.toBe("CHANGE_REQUIRES_CR")
-    const undo = await request(app).post(`${base}/undo`).set(auth).send({})
-    expect(undo.body.error?.code).not.toBe("CHANGE_REQUIRES_CR")
-  })
-})
-
 describe("project mode 2 (fpt) không bị chặn", () => {
   it("/changes/preview, /undo, /reconcile, chat lệnh sửa (JSON + stream) ⇒ không có CHANGE_REQUIRES_CR", async () => {
     const seeded = await seedFixture("minimal")
     const c = client(seeded, seeded.projectId)
     const preview = await c.post("/changes/preview", { base_version: seeded.spineVersion, ops: [{ op: "set", path: "project.vision", value: "x" }] })
     expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    expect(preview.body.meta?.requires_cr).toBeUndefined()
     for (const path of ["/undo", "/reconcile"]) {
       const res = await c.post(path, { base_version: seeded.spineVersion })
       expect(res.body.error?.code, path).not.toBe("CHANGE_REQUIRES_CR")
