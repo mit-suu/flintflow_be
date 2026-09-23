@@ -40,7 +40,7 @@ router.get("/:projectId/flags", authMiddleware, flagsController.getFlags)
  * @swagger
  * /api/v1/projects/{projectId}/flags/recompute:
  *   post:
- *     summary: Chạy lại deterministic check (11 luật đỏ + 11 luật vàng) và cập nhật flags[]
+ *     summary: Chạy lại deterministic check (12 luật đỏ + 11 luật vàng) và cập nhật flags[]
  *     tags: [Spine]
  *     security:
  *       - BearerAuth: []

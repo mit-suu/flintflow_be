@@ -1008,7 +1008,8 @@
       "flow_to": [
         "S02",
         "S03",
-        "S05"
+        "S05",
+        "S14"
       ],
       "is_popup": false,
       "tabs": [],
@@ -1194,7 +1195,11 @@
       "name": "Admin User List",
       "description": "Read-only paginated list of all user accounts.",
       "flow_to": [
-        "S15"
+        "S15",
+        "S16",
+        "S17",
+        "S18",
+        "S19"
       ],
       "is_popup": false,
       "tabs": [],

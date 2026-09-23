@@ -18,6 +18,8 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
     "section_stale_at_baseline",
     "section_awaiting_reaccept",
     "screen_pending_at_baseline",
+    // luồng màn trích từ tài liệu có sẵn thường không đủ cạnh/liên kết actor — chỉ giữ cờ vàng `orphan_screen`
+    "orphan_screen_at_baseline",
     // SRS tiếng Việt là hợp lệ ở mode 1
     "non_english_content",
     // tài liệu hiếm liên kết UC ↔ function

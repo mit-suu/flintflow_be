@@ -71,6 +71,16 @@ export const checkPlantUml = async (source: string): Promise<CompileCheckResult>
   const marker = scanSvgForError(svg)
   const line = /\[From string \(line (\d+)\)/.exec(svg)?.[1]
 
+  // Cách 3: `@startdot` hỏng (dot báo lỗi) ⇒ PlantUML trả 200 + text `Error: <stdin>: syntax error…`, không phải SVG
+  if (!svg.includes("<svg")) {
+    return {
+      ok: false,
+      method: "svg-scan",
+      error: `PlantUML không trả SVG: ${svg.trim().split("\n")[0]?.slice(0, 200) ?? ""}`,
+      render
+    }
+  }
+
   if (marker || render.status >= 400) {
     return {
       ok: false,

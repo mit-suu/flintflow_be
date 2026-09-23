@@ -35,6 +35,7 @@ import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { buildStepContext, elicitProjection, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
@@ -572,8 +573,19 @@ export const runRenderReviewPhase = async (
 ): Promise<RenderReviewResult> => {
   let spineVersion = (await refresh(projectId)).spineVersion
 
-  if (renders.length > 0) {
-    const targets: RenderTarget[] = renders.map((kind) => ({ kind, owner_id: kind === "screen_layout" ? loop : null }))
+  // Screens Flow tách theo actor dựa vào quyền (S-4.3) và use case ↔ function (S-4.4/S-5), có SAU lúc S-4.2 vẽ:
+  // hình đã có mà cũ thì vẽ lại ngay ở step làm nó cũ, không chờ người dùng bấm render tay.
+  // Cùng điều kiện cờ `diagram_stale`: hash chưa từng tính ("TBD", fixture) không tính là cũ.
+  const flowStale = (spine: Spine): boolean =>
+    spine.diagrams.some(
+      (d) => d.kind === "screen_flow" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d)
+    )
+  const followUps: RenderTarget["kind"][] =
+    !renders.includes("screen_flow") && flowStale((await refresh(projectId)).spine) ? ["screen_flow"] : []
+  const allRenders = [...renders, ...followUps]
+
+  if (allRenders.length > 0) {
+    const targets: RenderTarget[] = allRenders.map((kind) => ({ kind, owner_id: kind === "screen_layout" ? loop : null }))
     const result = await renderDiagrams(projectId, targets, {
       by: userId,
       step_id: stepId,
