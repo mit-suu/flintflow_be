@@ -48,7 +48,8 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type StepEvent } from "./pipeline.dto.js"
 import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
-import { buildProgressReport } from "../spine/section-status.js"
+import { buildProgressReport, computeSectionStates } from "../spine/section-status.js"
+import { ownerStepOf } from "../spine/section-registry.js"
 import { CALL_LIMIT, NOT_PIPELINE_SESSION, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
 import {
   HEARTBEAT_MS,
@@ -350,6 +351,18 @@ export const isReopenableLoopStep = (spine: Spine, stepId: string): boolean => {
   return spine.screens.some((s) => s.id === step.loop && s.detail_status === "placeholder")
 }
 
+/**
+ * Step đã accepted nhưng section nó sở hữu đã **cũ** (`stale`/`awaiting_reaccept`): cho chạy lại.
+ *
+ * Cờ `section_stale_at_baseline` chặn ký baseline và chỉ đường về đúng step này, nhưng step đã accepted
+ * thì `/run` trả STEP_NOT_RUNNABLE và cổng chốt đã đóng — user đi tới nơi rồi không làm được gì, chỉ còn
+ * nước Waive một cờ đỏ. Làm mới lại nội dung mới là việc đúng, nên nó phải chạy được.
+ */
+export const isReopenableStaleStep = (spine: Spine, stepId: string, changes: Parameters<typeof computeSectionStates>[1]): boolean =>
+  computeSectionStates(spine, changes).some(
+    (state) => (state.status === "stale" || state.awaiting_reaccept) && ownerStepOf(state.id, spine) === stepId
+  )
+
 /** Màn `pending` đầu tiên của hàng đợi; hết ⇒ null (runner chuyển sang vòng `@nonscreen`). */
 export const nextPendingScreen = (spine: Spine): string | null => {
   const byId = new Map(spine.screens.map((s) => [s.id, s]))
@@ -610,7 +623,10 @@ export const runRenderReviewPhase = async (
     }
   }
 
-  const flagsResult = await flagsService.recompute(projectId, { by: userId })
+  // Đang ở S-9 thì phải quét cả luật baseline: chạy lại một bước để làm mới section cũ mà cờ
+  // `section_stale_at_baseline` không được đánh giá lại thì nó nằm đó mãi, dù nội dung đã mới.
+  const { spine: spineBeforeCheck } = await refresh(projectId)
+  const flagsResult = await flagsService.recompute(projectId, { by: userId, atBaseline: nextStepOf(spineBeforeCheck)?.phase === S9_PHASE })
   spineVersion = flagsResult.checked_at_version
   const redOpen = flagsResult.flags.filter((f) => f.level === "red" && f.resolved_at === null).length
   const yellowOpen = flagsResult.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
@@ -749,7 +765,9 @@ export const runStep = async (
     }
     // BUG-03: S-5.1 của màn placeholder chạy lại được ngay (kể cả đã accepted bằng accept_as_is "để sau") —
     // đó chính là cách user mở lại một màn đã bị bỏ qua.
-    const reopenLoop = isReopenableLoopStep(spine, stepId)
+    const reopenLoop =
+      isReopenableLoopStep(spine, stepId) ||
+      (existingStep?.status === "accepted" && isReopenableStaleStep(spine, stepId, await spineRepository.listChanges(projectId)))
     if (existingStep?.status === "accepted" && !reopenLoop) {
       throw new ApiError(409, `Step ${stepId} đã accepted — cần gate revision/regenerate để mở lại (B7)`, STEP_NOT_RUNNABLE)
     }
@@ -818,7 +836,14 @@ export const runStep = async (
     const progressBefore = buildProgressReport(spine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
     const stepSummary: ChangeSummary[] = []
 
-    let answersText = ctx.transcriptTail
+    /**
+     * Câu trả lời đưa vào lượt soạn. Ngoài transcript của chính bước, LUÔN kèm sổ quyết định: khi câu hỏi
+     * được hỏi gộp ở đầu giai đoạn (R3), transcript của bước này rỗng — không kèm sổ thì model soạn mà
+     * không biết user đã trả lời gì, và bước ghi ra 0 op.
+     */
+    const ledger = ledgerForPrompt(spine)
+    const ledgerText = ledger.length === 0 ? "" : ["Đã chốt với user:", ...ledger.map((d) => `- ${d.topic_key}: ${d.answer}`)].join("\n")
+    let answersText = [ledgerText, ctx.transcriptTail].filter((part) => part.trim() !== "").join("\n")
 
     // T19 — pha S-9: việc của từng step nằm ở `s9/run-s9-step.ts`, không đi qua STEP_SKILLS.
     // S-9.1/S-9.5 không gọi model và không Meter (hết credit vẫn quét và vẫn ký baseline được).

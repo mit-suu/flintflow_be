@@ -87,6 +87,37 @@ describe("runDeterministicCheck", () => {
     expect(byRule(runDeterministicCheck(withAssumption, after), "derived_from_changed_assumption")).toEqual([])
   })
 
+  it("FLF-198: xac nhan gia dinh (khong sua noi dung) thi KHONG sinh co vang", () => {
+    const nfr = FIXTURE.nfrs[0]
+    const withAssumption = variant((s) => {
+      s.assumptions.push({
+        id: "AS29",
+        path: `nfrs[id=${nfr.id}].statement`,
+        statement: "Uptime is 99% during business hours",
+        rationale: "User xac nhan",
+        origin_step_id: "S-6.3",
+        status: "confirmed",
+        confirmed_at: "2026-09-22T10:00:00.000Z"
+      })
+    })
+    // Chi co lượt ghi `status` (unconfirmed -> confirmed) sau khi NFR duoc ghi: noi dung khong doi.
+    const changes = [
+      { seq: 10, path: `nfrs[id=${nfr.id}].statement`, before: null, value: "x", step_id: "S-6.3" },
+      { seq: 20, path: "assumptions[id=AS29].status", before: "unconfirmed", value: "confirmed", step_id: null }
+    ]
+    expect(byRule(runDeterministicCheck(withAssumption, changes), "derived_from_changed_assumption")).toEqual([])
+
+    // Bac bo thi van canh bao: field dan xuat dang dua tren mot gia dinh da bi bo
+    const rejected = variant((s) => {
+      s.assumptions.push({ ...withAssumption.assumptions[withAssumption.assumptions.length - 1], id: "AS30", status: "rejected" })
+    })
+    const rejectChanges = [
+      { seq: 10, path: `nfrs[id=${nfr.id}].statement`, before: null, value: "x", step_id: "S-6.3" },
+      { seq: 20, path: "assumptions[id=AS30].status", before: "unconfirmed", value: "rejected", step_id: null }
+    ]
+    expect(byRule(runDeterministicCheck(rejected, rejectChanges), "derived_from_changed_assumption")).toHaveLength(1)
+  })
+
   it("BUG-12: function nền không use case nào tham chiếu ⇒ cờ vàng về S-3.2", () => {
     const withBackground = variant((s) => {
       s.functions.push({
