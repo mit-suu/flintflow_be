@@ -76,6 +76,18 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     await expect(acquireRun(seeded.projectId, "S-3.1", { by: seeded.userId })).resolves.toMatchObject({ status: "running" })
   })
 
+  it("giai đoạn không còn bước nào ⇒ luồng SSE đóng ngay, không treo client", async () => {
+    const seeded = await seedFixture("minimal")
+    // `S-9` không phải giai đoạn đang tới lượt ⇒ runner trả về ngay, không phát sự kiện nào. Trước đây
+    // response chỉ được đóng khi đã phát ít nhất một sự kiện, nên client chờ mãi ở trạng thái "đang chạy".
+    const spine = await request(app).get(`/api/v1/projects/${seeded.projectId}/spine`).set({ Authorization: `Bearer ${seeded.token}` })
+    const res = await api(seeded)
+      .post("/phases/S-9/run", { session_id: seeded.sessionId, base_version: spine.body.data.spine_version })
+      .timeout(10_000)
+    expect(res.status).toBe(200)
+    expect(res.text).toBe("")
+  })
+
   it("BUG-31: tài liệu chưa ghép ⇒ 200 not_assembled, không phải 409", async () => {
     const seeded = await seedFixture("minimal")
     const doc = await api(seeded).get("/document?source=draft")

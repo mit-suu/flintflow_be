@@ -16,6 +16,7 @@
  */
 
 import { runStep, defaultStepRunnerDeps, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
+import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { projectStep } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
 import { submitAnswerWait } from "./step-runner.service.js"
@@ -66,6 +67,9 @@ const runPhaseInterview = async (
   deps: StepRunnerDeps
 ): Promise<boolean> => {
   const { spine } = await load(projectId)
+  // Chuỗi dừng giữa chừng rồi chạy tiếp là chuyện thường (user duyệt một cổng chốt). Không nhớ đã phỏng
+  // vấn giai đoạn này thì lần chạy tiếp lại hỏi lại từ đầu — mất credit và hỏi đúng thứ user vừa trả lời.
+  if (spine.decisions.some((d) => d.step_id === unit && d.superseded_by === null)) return false
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
   const missing = [...new Set(steps.flatMap((step) => {
     try {
@@ -134,6 +138,19 @@ const runPhaseInterview = async (
 
   const answers = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
   emit({ type: "answer_received", step_id: unit, count: answers.length })
+
+  // Hỏi/đáp của lượt gộp phải nằm trong transcript: user cần thấy lại trong khung chat, và các bước
+  // trong giai đoạn đọc nó như câu trả lời của chính mình.
+  const transcript: IChatMessage[] = [
+    { role: "ai", content: [result.data.reply, ...asked.map((q, i) => `${i + 1}. ${q.question}`)].join("\n"), step: unit, createdAt: new Date() },
+    ...answers.map((a) => ({
+      role: "user" as const,
+      content: Array.isArray(a.answer) ? a.answer.join(", ") : a.answer,
+      step: unit,
+      createdAt: new Date()
+    }))
+  ]
+  await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: { $each: transcript } } })
 
   const answered: AnsweredTopic[] = answers.flatMap((a) => {
     const index = Number(/^Q(\d+)$/.exec(a.question_id)?.[1] ?? 0) - 1
@@ -210,6 +227,9 @@ export const runPhase = async (
   if (!first) return { phase, stopped_at: null, reason_vi: "Đã đi hết quy trình", steps: [] }
 
   const unit = phase.includes("@") || phase === first.phase ? phaseUnitOf(first) : phase
+  // Giai đoạn không còn bước nào tới lượt (FE gọi lại sau khi duyệt bước cuối): về ngay, đừng phỏng vấn
+  // đầu giai đoạn — một lượt gọi model tốn credit cho một giai đoạn đã đóng.
+  if (phaseUnitOf(first) !== unit) return { phase: unit, stopped_at: null, reason_vi: "Đã xong giai đoạn này", steps: [] }
   const totalSteps = orderedSteps(startSpine).filter((s) => phaseUnitOf(s) === unit).length
   const d: StepRunnerDeps = { ...defaultStepRunnerDeps(deps.signal), ...deps }
   const outcomes: PhaseStepOutcome[] = []
