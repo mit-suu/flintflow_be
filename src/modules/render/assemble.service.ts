@@ -483,11 +483,11 @@ export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | nul
 
 /** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, language: 1 }, { lean: true })) as
-    | { layout?: TemplateLayout["layout"]; language?: string }
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, language: 1, legacy_record_of_changes: 1 }, { lean: true })) as
+    | { layout?: TemplateLayout["layout"]; language?: string; legacy_record_of_changes?: TemplateLayout["legacyRecord"] }
     | null
   if (!profile?.layout?.length) return null
-  return { layout: profile.layout, language: profile.language ?? "en" }
+  return { layout: profile.layout, language: profile.language ?? "en", legacyRecord: profile.legacy_record_of_changes ?? [] }
 }
 
 const defaultDeps = (): AssembleDeps => ({ loadDiagramPng: defaultDiagramPngLoader, now: () => new Date(), loadTemplate: loadTemplateLayout })
@@ -550,7 +550,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     source,
     generatedAt: deps.now().toISOString(),
     sections,
-    recordOfChanges: buildRecordOfChanges(input.recordChanges, deps.resolveInCharge),
+    // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, deps.resolveInCharge)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
