@@ -18,7 +18,7 @@ export type MeteredPauseReason = "credits" | "resume_later"
 
 export type MeteredResult<T> =
   | { ok: true; data: T; usageId: string; tokens_in: number; tokens_out: number; cost: number }
-  | { ok: false; reason: MeteredPauseReason; message: string; usageId: string }
+  | { ok: false; reason: MeteredPauseReason; message: string; usageId: string; code?: string }
 
 export interface MeteredContext {
   projectId: string
@@ -54,6 +54,7 @@ export const withMeteredAi = async <T>(
     const credits = isInsufficientCredit(err)
     // BPMN 4.2 (mode 1 v3): hết credit ⇒ báo chủ project nạp; nạp xong bước tự chạy tiếp (credit-flow.service)
     if (credits) void notifyTopUpNeeded(ctx.projectId, ctx.stepId)
-    return { ok: false, reason: credits ? "credits" : "resume_later", message, usageId }
+    const code = err instanceof AiActionError ? err.code : undefined
+    return { ok: false, reason: credits ? "credits" : "resume_later", message, usageId, ...(code ? { code } : {}) }
   }
 }
