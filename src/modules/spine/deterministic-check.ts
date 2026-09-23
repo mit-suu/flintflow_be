@@ -7,12 +7,13 @@
  * Mọi cờ đỏ có `remediation_step` thi hành được. Mọi `section_id` là khoá section phân giải
  * được (flag ghi qua op engine, bất biến 3 chặn khoá chết) — không suy ra được thì dùng `fixed:I`.
  * Luật gắn S-9 (`unconfirmed_assumption`, `*_at_baseline`) chỉ chạy khi `atBaseline`.
+ * Luật "chưa có X" chỉ bắn cờ khi bước sinh ra X đã `accepted` (FLF-213, `StepGate` bên dưới).
  */
 
 import type { Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
 import { tryResolve } from "./path-resolver.js"
-import { loopKeyOfFunction, ownerStepOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
+import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
@@ -93,6 +94,12 @@ export const flagKey = (f: Pick<Flag, "level" | "rule_id" | "section_id"> & { ta
 export interface RuleProfile {
   exclude: ReadonlySet<string>
   downgrade: ReadonlySet<string>
+  /**
+   * FLF-213: bỏ cổng "bước sở hữu đã chốt chưa" của các luật "chưa có X". Mode 1 nhận trọn tài liệu một
+   * lượt và `steps[]` là SUY RA từ file (mục thiếu ⇒ `pending`), nên mục trống là gap phải báo ngay chứ
+   * không phải "chưa tới lượt". Không đặt ⇒ có cổng, như mode 2.
+   */
+  skipOwnerStepGate?: boolean
 }
 
 export interface CheckOptions {
@@ -124,6 +131,46 @@ const NFR_SECTION: Readonly<Record<string, { section: string; step: string }>> =
   reliability: { section: "fixed:4.2.2", step: "S-6.3" },
   performance: { section: "fixed:4.2.3", step: "S-6.4" },
   other: { section: "fixed:4.2.4", step: "S-6.5" }
+}
+
+// ─── cổng "bước sở hữu đã chốt chưa" (FLF-213) ───────────────────
+
+/**
+ * Luật "chưa có X" chỉ là lỗi khi bước SINH RA X đã chốt mà mục vẫn trống. Không xét bước thì một dự án
+ * đang ở S-3.6 lĩnh đủ cờ của §3.1.x (làm ở S-4) và §4.x (S-6): trống ở đó là đúng kế hoạch, nhưng panel
+ * đỏ rực vì chúng, vấn đề thật chìm mất và `readiness.red_open` bị thổi phồng.
+ *
+ * Lượt ký bản (`atBaseline`, S-9) mở hết cổng — tới đó mọi bước phải xong, không mục nào được lọt vì
+ * "chưa tới lượt". Mode 1 cũng mở hết (`skipOwnerStepGate`): xem `RuleProfile`.
+ */
+export interface StepGate {
+  /** Mọi step truyền vào đã `accepted` ⇒ cổng mở, mục trống lúc này là lỗi thật. */
+  done: (...stepIds: string[]) => boolean
+}
+
+/**
+ * Bước sinh ra dữ liệu luật đang soi — KHÁC `remediation_step` ở vài luật. "Use case chưa gắn function"
+ * sửa ở S-3.2, nhưng `use_cases[].function_ids` chỉ được điền từ S-4.1 (function của màn) và S-4.4
+ * (function nền), nên trước khi S-4.4 chốt thì MỌI use case đều "chưa gắn function" — đúng theo kế hoạch.
+ */
+const GATE_STEP = {
+  orphan_actor: "S-3.2",
+  usecase_no_function: "S-4.4",
+  screen_no_function: "S-4.1",
+  orphan_screen: "S-4.2",
+  empty_feature: "S-4.1",
+  role_no_actor: "S-3.1",
+  usecase_floating: "S-3.4",
+  function_without_uc: "S-4.4"
+} as const
+
+const OPEN_GATE: StepGate = { done: () => true }
+
+/** `open` ⇒ cổng mở sẵn (lượt ký bản, mode 1). Ngược lại chỉ `accepted` mới tính là đã chạy qua. */
+export const stepGate = (spine: Spine, open: boolean): StepGate => {
+  if (open) return OPEN_GATE
+  const accepted = new Set(spine.steps.filter((s) => s.status === "accepted").map((s) => s.id))
+  return { done: (...ids) => ids.length > 0 && ids.every((id) => accepted.has(id)) }
 }
 
 // ─── red: section_empty ──────────────────────────────────────────
@@ -162,9 +209,11 @@ export const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> =
 /** Mục đã có dữ liệu trong Spine chưa — luật `section_empty` soi đúng chỗ này; mục ngoài bảng ⇒ `null` (không soi được). */
 export const sectionHasData = (spine: Spine, sectionId: string): boolean | null => SECTION_HAS_DATA[sectionId]?.(spine) ?? null
 
-const sectionEmpty = (spine: Spine): FlagCandidate[] =>
+const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
   REQUIRED_FIXED_SECTION_IDS.filter((id) => !DERIVED_SECTION_IDS.has(id))
     .filter((id) => !(SECTION_HAS_DATA[id]?.(spine) ?? true))
+    // Mọi step sở hữu phải chốt: §1 do S-2.1…S-2.5 nuôi, chốt mỗi S-2.1 chưa nói lên mục đã xong
+    .filter((id) => gate.done(...stepsOf(id, spine)))
     .map((id) => ({
       level: "red",
       rule_id: "section_empty",
@@ -190,8 +239,8 @@ const PROTECTED_ARRAYS: readonly { label: string; count: (s: Spine) => number; s
   { label: "common_requirements", count: (s) => s.common_requirements.length, section: "fixed:5.2", step: "S-7.2" }
 ]
 
-const arrayEmpty = (spine: Spine): FlagCandidate[] =>
-  PROTECTED_ARRAYS.filter((a) => a.count(spine) === 0).map((a) => ({
+const arrayEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+  PROTECTED_ARRAYS.filter((a) => a.count(spine) === 0 && gate.done(a.step)).map((a) => ({
     level: "red",
     rule_id: "array_empty",
     section_id: a.section,
@@ -296,12 +345,16 @@ const diagramStale = (spine: Spine): FlagCandidate[] =>
       remediation_step: renderStepOf(d)
     }))
 
-const nfrMissingNumber = (spine: Spine): FlagCandidate[] =>
+const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
   (["reliability", "performance"] as const).flatMap((category): FlagCandidate[] => {
     const { section, step } = NFR_SECTION[category]
     const items = spine.nfrs.filter((n) => n.category === category)
     if (items.length === 0) {
-      return [{ level: "red" as const, rule_id: "nfr_missing_number", section_id: section, target_id: null, message: `Chưa có NFR ${category} nào`, remediation_step: step }]
+      // "Chưa có NFR nào" là luật "chưa có X" ⇒ qua cổng. Nhánh dưới soi NFR ĐÃ có mà thiếu số đo —
+      // dữ liệu đã nằm đó thì thiếu số là lỗi thật, không phụ thuộc bước nào chốt chưa.
+      return gate.done(step)
+        ? [{ level: "red" as const, rule_id: "nfr_missing_number", section_id: section, target_id: null, message: `Chưa có NFR ${category} nào`, remediation_step: step }]
+        : []
     }
     return items
       .filter((n) => !n.metric || !n.threshold)
@@ -435,7 +488,8 @@ const screenPlaceholder = (spine: Spine, atBaseline: boolean): FlagCandidate[] =
  * không use case nào tham chiếu — thường là thiếu hẳn use case cho một cơ chế chạy theo lịch, nên §2.2
  * không hề nhắc tới nó. Function của màn không tính: chúng đã hiện trong mô tả màn.
  */
-const functionWithoutUseCase = (spine: Spine): FlagCandidate[] => {
+const functionWithoutUseCase = (spine: Spine, gate: StepGate): FlagCandidate[] => {
+  if (!gate.done(GATE_STEP.function_without_uc)) return []
   const used = new Set(spine.use_cases.flatMap((u) => u.function_ids))
   return spine.functions
     .filter((f) => f.screen_id === null && !used.has(f.id))
@@ -498,7 +552,7 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
   })
 }
 
-const cardinality = (spine: Spine): FlagCandidate[] => {
+const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
     level: "yellow",
     rule_id,
@@ -510,27 +564,37 @@ const cardinality = (spine: Spine): FlagCandidate[] => {
   const usedActors = new Set(spine.use_cases.flatMap((u) => u.actor_ids))
   const fnScreens = new Set(spine.functions.map((f) => f.screen_id))
 
+  // Mỗi luật qua cổng của bước SINH RA vế còn thiếu, không phải bước sửa: `usecase_no_function` sửa ở
+  // S-3.2 nhưng chỉ có nghĩa sau S-4.4, lúc function đã được gắn vào use case.
+  const when = (rule: keyof typeof GATE_STEP, make: () => FlagCandidate[]): FlagCandidate[] =>
+    gate.done(GATE_STEP[rule]) ? make() : []
+
   return [
     // Mọi kind: actor system/time không tham gia use case nào cũng bị renderer bỏ khỏi sơ đồ
     // (chỉ actor có cạnh mới được khai báo) — biến mất im lặng nếu chỉ xét actor human.
-    ...spine.actors
-      .filter((a) => !usedActors.has(a.id))
-      .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Actor "${a.name}" không thuộc use case nào`, "S-3.2")),
-    ...spine.use_cases
-      .filter((u) => u.function_ids.length === 0)
-      .map((u) => yellow("usecase_no_function", "fixed:2.2.2", u.id, `Use case "${u.name}" chưa gắn function nào`, "S-3.2")),
-    ...spine.screens
-      .filter((s) => !fnScreens.has(s.id))
-      .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn "${s.name}" chưa có function nào`, "S-4.1")),
-    ...orphanScreens(spine).map(({ screen, why }) =>
-      yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn "${screen.name}" mồ côi: ${why}`, "S-4.2")
-    ),
-    ...spine.features
-      .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
-      .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Feature "${f.name}" không có màn lẫn function`, "S-4.1")),
-    ...spine.roles
-      .filter((r) => r.actor_id === null)
-      .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn actor`, "S-3.1"))
+    ...when("orphan_actor", () =>
+      spine.actors
+        .filter((a) => !usedActors.has(a.id))
+        .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Actor "${a.name}" không thuộc use case nào`, "S-3.2"))),
+    ...when("usecase_no_function", () =>
+      spine.use_cases
+        .filter((u) => u.function_ids.length === 0)
+        .map((u) => yellow("usecase_no_function", "fixed:2.2.2", u.id, `Use case "${u.name}" chưa gắn function nào`, "S-3.2"))),
+    ...when("screen_no_function", () =>
+      spine.screens
+        .filter((s) => !fnScreens.has(s.id))
+        .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn "${s.name}" chưa có function nào`, "S-4.1"))),
+    ...when("orphan_screen", () =>
+      orphanScreens(spine).map(({ screen, why }) =>
+        yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn "${screen.name}" mồ côi: ${why}`, "S-4.2"))),
+    ...when("empty_feature", () =>
+      spine.features
+        .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
+        .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Feature "${f.name}" không có màn lẫn function`, "S-4.1"))),
+    ...when("role_no_actor", () =>
+      spine.roles
+        .filter((r) => r.actor_id === null)
+        .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn actor`, "S-3.1")))
   ]
 }
 
@@ -686,7 +750,8 @@ const useCaseRelations = (spine: Spine): FlagCandidate[] => {
 }
 
 /** Use case không actor, không extend, không bị include ⇒ đứng lơ lửng trên hình. */
-const useCaseFloating = (spine: Spine): FlagCandidate[] => {
+const useCaseFloating = (spine: Spine, gate: StepGate): FlagCandidate[] => {
+  if (!gate.done(GATE_STEP.usecase_floating)) return []
   const included = new Set(spine.use_cases.flatMap((u) => u.includes))
   return spine.use_cases
     .filter((u) => u.actor_ids.length === 0 && u.extends.length === 0 && !included.has(u.id))
@@ -927,20 +992,22 @@ export const runDeterministicCheck = (
   changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[] = [],
   options: CheckOptions = {}
 ): FlagCandidate[] => {
+  const atBaseline = options.atBaseline ?? false
+  const gate = stepGate(spine, atBaseline || (options.ruleProfile?.skipOwnerStepGate ?? false))
   const candidates: FlagCandidate[] = applyRuleProfile([
-    ...sectionEmpty(spine),
-    ...arrayEmpty(spine),
+    ...sectionEmpty(spine, gate),
+    ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
     ...diagramStale(spine),
-    ...nfrMissingNumber(spine),
+    ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
-    ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine)] : []),
-    ...screenPlaceholder(spine, options.atBaseline ?? false),
+    ...(atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine)] : []),
+    ...screenPlaceholder(spine, atBaseline),
     ...derivedFromChangedAssumption(spine, changes),
-    ...functionWithoutUseCase(spine),
-    ...cardinality(spine),
-    ...useCaseFloating(spine),
+    ...functionWithoutUseCase(spine, gate),
+    ...cardinality(spine, gate),
+    ...useCaseFloating(spine, gate),
     ...useCaseAccountAccessRelation(spine),
     ...namingShape(spine),
     ...systemNameMissing(spine),
