@@ -91,7 +91,9 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
-    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
+    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length,
+    // `meter.roundCost` (gate hiện "x credit") đọc thô các dòng usage của vòng
+    find: (filter: Filter) => ({ lean: async () => usages.filter((r) => matches(r, filter)).map((r) => ({ cost: r.cost })) })
   }
   const withMethods = (doc: Doc | null) =>
     doc
@@ -375,14 +377,15 @@ describe("T14: S-1.2 -> S-3.6 content skills end to end on spine-fixture-minimal
       }
 
       // C4: S-3.1 adds a kind=time actor (the credit expiry scheduler) — the context diagram S-2.5
-      // rendered earlier only reads `actors[kind!=human]`, so this MUST stale it (source_hash mismatch).
-      // Contract-change 2026-09-15: S-3.6 now also renders "context", closing the flag at the end of S-3;
-      // the S-2.5 reopen below still has to work (B7) and leave the flag closed.
+      // rendered earlier only reads `actors[kind!=human]`, so its source_hash no longer matches.
+      // FLF-177 BUG-17: a step that writes content now redraws the diagrams it made stale, at the end of
+      // that same step — the user never sees a red `diagram_stale` with no button to fix it.
       if (stepId === "S-3.1") {
         const s = (await repo.get(PROJECT))!
         const staleFlag = s.flags.find((f) => f.rule_id === "diagram_stale" && f.section_id === "fixed:1" && f.resolved_at === null)
-        expect(staleFlag, "adding a kind=time actor at S-3.1 must stale the S-2.5 context diagram").toBeTruthy()
-        expect(staleFlag!.remediation_step, "diagram_stale on the context diagram must point back to S-2.5").toBe("S-2.5")
+        expect(staleFlag, "S-3.1 must redraw the context diagram it staled, not leave a red flag").toBeFalsy()
+        const context = s.diagrams.find((d) => d.kind === "context")!
+        expect(context.render_status, "the redrawn context diagram must be ok").toBe("ok")
       }
     }
 

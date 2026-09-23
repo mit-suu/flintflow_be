@@ -220,6 +220,18 @@ export const roundCounts = async (projectId: string, stepId: string, firstSeq: n
   return { calls_used, regenerate_used }
 }
 
+/**
+ * Credit đã tiêu cho vòng hiện tại của step — gate hiện "58 giây · 4 credit" (03 Lớp 4) để user thấy giá
+ * của mỗi bước, thay vì chỉ thấy số dư tụt dần không rõ vì sao.
+ */
+export const roundCost = async (projectId: string, stepId: string, firstSeq: number | null): Promise<number> => {
+  const since = await roundStartedAt(projectId, stepId, firstSeq)
+  const filter: Record<string, unknown> = { projectId, step_id: stepId, state: { $ne: "refunded" } }
+  if (since) filter.createdAt = { $gte: since }
+  const rows = (await Usage.find(filter, { cost: 1 }).lean()) as unknown as { cost?: number }[]
+  return rows.reduce((sum, r) => sum + (typeof r.cost === "number" ? r.cost : 0), 0)
+}
+
 interface UsageRow {
   step_id: string
   call_kind: string

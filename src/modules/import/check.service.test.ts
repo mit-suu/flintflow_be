@@ -18,14 +18,14 @@ import { IMPORT_SEMANTIC_RULE, MODE1_RULE_PROFILE } from "./mode1-rule-profile.j
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FULL: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8")))
 
-const EXCLUDED = ["array_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "non_english_content", "usecase_no_function"]
+const EXCLUDED = ["array_empty", "section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline", "non_english_content", "usecase_no_function", "usecase_name_style", "system_name_missing"]
 // Mode 1 v2 (D6, FLF-183): section_empty giữ đỏ — mọi đầu mục mẫu FPT là cốt lõi
-const DOWNGRADED = ["nfr_missing_number"]
+const DOWNGRADED = ["nfr_missing_number", "usecase_relation_invalid"]
 
 const rulesOf = (c: FlagCandidate[]) => new Set(c.map((f) => f.rule_id))
 
 describe("hồ sơ luật mode 1", () => {
-  it("cấu hình một chỗ: 6 luật loại trừ, 1 luật hạ mức, đều là luật có thật", () => {
+  it("cấu hình một chỗ: 8 luật loại trừ, 2 luật hạ mức, đều là luật có thật", () => {
     expect([...MODE1_RULE_PROFILE.exclude].sort()).toEqual([...EXCLUDED].sort())
     expect([...MODE1_RULE_PROFILE.downgrade].sort()).toEqual([...DOWNGRADED].sort())
     const known = new Set(RULES.map((r) => r.rule_id))
