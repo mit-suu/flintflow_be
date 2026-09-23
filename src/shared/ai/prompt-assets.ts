@@ -155,6 +155,12 @@ export const OUTPUT_SCHEMA_NAMES = [
   "review",
   "changeInstruction",
   "renderFix",
+  // Mode 1 (FLF-171)
+  "importExtract",
+  "importExtractDiagram",
+  "findings",
+  "crClarify",
+  "crPropose",
   "puml",
   "none"
 ] as const

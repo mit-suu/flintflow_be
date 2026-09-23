@@ -28,6 +28,8 @@ export const releaseScopeSchema = z.strictObject({
 
 export const spineProjectSchema = z.strictObject({
   name: z.string(),
+  /** FLF-177 — Spine trước đó không có ⇒ `null` (dùng tên project). */
+  system_name: z.string().nullable().default(null),
   vision: z.string().nullable(),
   goals: z.array(z.string()),
   type: z.string().nullable(),
@@ -36,6 +38,12 @@ export const spineProjectSchema = z.strictObject({
   form_factor: z.string().nullable(),
   stakes: z.string().nullable(),
   working_mode: z.enum(["fast", "coaching"]).nullable(),
+  /**
+   * Cách duyệt (FLF-208 · R5): `strict` dừng ở mọi bước (như trước), `balanced` chỉ dừng ở cuối phase,
+   * cuối mỗi màn và các bước bắt buộc, `fast` chỉ dừng khi có câu bắt buộc/cờ đỏ mới/lỗi.
+   * Spine cũ không có ⇒ `balanced`.
+   */
+  review_mode: z.enum(["strict", "balanced", "fast"]).default("balanced"),
   release_scope: releaseScopeSchema
 })
 
@@ -49,7 +57,7 @@ export const progressSchema = z.strictObject({
 
 export const stepStateSchema = z.strictObject({
   id,
-  status: z.enum(["pending", "in_progress", "accepted", "revision_requested"]),
+  status: z.enum(["pending", "in_progress", "accepted", "revision_requested", "skipped"]),
   first_seq: z.number().int().min(1).nullable(),
   last_seq: z.number().int().min(1).nullable(),
   accepted_at: isoDateTime.nullable()
@@ -189,6 +197,21 @@ export const addendumSchema = z.strictObject({
   captured_at: isoDateTime
 })
 
+export const customBlockSchema = z.strictObject({
+  kind: z.enum(["paragraph", "list_item", "table", "image"]),
+  text: z.string(),
+  rows: z.array(z.array(z.string())).nullable(),
+  image_ref: z.string().min(1).nullable()
+})
+
+export const customSectionSchema = z.strictObject({
+  id,
+  heading: z.string(),
+  level: z.number().int().min(1).max(9),
+  blocks: z.array(customBlockSchema),
+  source: z.enum(["import", "manual"])
+})
+
 // ─── state nội bộ ────────────────────────────────────────────────
 
 export const diagramSchema = z.strictObject({
@@ -214,6 +237,20 @@ export const assumptionSchema = z.strictObject({
   confirmed_at: isoDateTime.nullable()
 })
 
+/**
+ * Sổ quyết định (FLF-208 · 02-reduce-stops-plan R4). `topic_key` là khoá chống hỏi lặp; `superseded_by`
+ * giữ vết khi user đổi ý thay vì xoá dòng cũ. Spine trước FLF-198 không có ⇒ `[]`.
+ */
+export const decisionSchema = z.strictObject({
+  id,
+  topic_key: z.string().min(1),
+  question: z.string(),
+  answer: z.string(),
+  step_id: z.string().min(1),
+  at: isoDateTime,
+  superseded_by: id.nullable().default(null)
+})
+
 /** Tối thiểu cho lý do waive — srs-spine.md §7. */
 export const WAIVE_REASON_MIN_LENGTH = 20
 
@@ -237,9 +274,17 @@ export const sectionStateSchema = z.strictObject({
   asset_version: z.string()
 })
 
+export const BASELINE_TYPES = ["generated", "imported", "release"] as const satisfies readonly T.BaselineType[]
+
+/** Dữ liệu trước FLF-171 không có `type`/`doc_version` ⇒ đọc ra `generated` / `null`. */
+const baselineTypeSchema = z.enum(BASELINE_TYPES).default("generated")
+const docVersionSchema = z.string().min(1).nullable().default(null)
+
 export const baselineSchema = z.strictObject({
   id,
   version: z.string().min(1),
+  type: baselineTypeSchema,
+  doc_version: docVersionSchema,
   at: isoDateTime,
   snapshot_ref: id,
   checked_at_version: z.number().int().min(1),
@@ -268,9 +313,12 @@ export const spineSchema = z.strictObject({
   other_requirements: z.array(otherRequirementSchema),
   glossary: z.array(glossaryTermSchema),
   addendum: z.array(addendumSchema),
+  /** FLF-182 — Spine trước mode 1 v2 không có ⇒ `[]`. */
+  custom_sections: z.array(customSectionSchema).default([]),
 
   diagrams: z.array(diagramSchema),
   assumptions: z.array(assumptionSchema),
+  decisions: z.array(decisionSchema).default([]),
   flags: z.array(flagSchema),
   sections: z.array(sectionStateSchema),
   baselines: z.array(baselineSchema),
@@ -315,6 +363,8 @@ export const usageSchema = z.strictObject({
 export const baselineSnapshotSchema = z.strictObject({
   projectId: id,
   version: z.string().min(1),
+  type: baselineTypeSchema,
+  doc_version: docVersionSchema,
   at: isoDateTime,
   checked_at_version: z.number().int().min(1),
   waived_count: nonNegativeInt,

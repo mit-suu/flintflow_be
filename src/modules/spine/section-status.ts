@@ -44,12 +44,49 @@ const feedingChanges = (spine: Spine, changes: ChangeLike[]): Map<string, Change
   return bySection
 }
 
+/**
+ * FLF-204 (BUG-26): section của một feature chỉ `accepted` khi MỌI function con của nó cũng đã `accepted`.
+ * Lượt test cho ra §3.7 vừa ghi feature "Accepted" vừa ghi function bên dưới "Draft · Chưa hoàn thiện" —
+ * hai nhãn mâu thuẫn ngay cạnh nhau, và nhãn ở trên là nhãn người đọc tin.
+ */
+const downgradePartialFeatures = (spine: Spine, states: SectionStateView[]): SectionStateView[] => {
+  const byId = new Map(states.map((s) => [s.id, s]))
+  return states.map((state) => {
+    if (state.status !== "accepted" || !state.id.startsWith("feature:")) return state
+    const featureId = state.id.slice("feature:".length)
+    // Function của màn đã được user chủ động để lại (`placeholder`) không tính — việc đó có cờ riêng
+    // (`screen_placeholder`), không phải chuyện feature chưa xong.
+    const deferred = new Set(spine.screens.filter((sc) => sc.detail_status === "placeholder").map((sc) => sc.id))
+    const children = spine.functions.filter((f) => f.feature_id === featureId && (f.screen_id === null || !deferred.has(f.screen_id)))
+    const unfinished = children.some((f) => (byId.get(`function:${f.id}`)?.status ?? "draft") === "draft")
+    return unfinished ? { ...state, status: "draft" as const } : state
+  })
+}
+
+/**
+ * Seq của lượt ghi `accepted_at` gần nhất cho mỗi step — mốc "đã xem tới đây".
+ *
+ * `last_seq` chỉ có khi step THỰC SỰ ghi nội dung. Bước tất định chạy lại mà không đổi gì (sơ đồ vẽ lại
+ * y hệt) chốt với `last_seq = null`, và khi đó ngưỡng 0 làm mọi change nuôi section thành "mới hơn" —
+ * section cũ vĩnh viễn, chạy lại bao nhiêu lần cũng không sạch cờ.
+ */
+const acceptSeqByStep = (changes: ChangeLike[]): Map<string, number> => {
+  const out = new Map<string, number>()
+  for (const change of changes) {
+    const match = /^steps\[id=([^\]]+)\]\.accepted_at$/.exec(change.path)
+    if (!match || change.value === null) continue
+    out.set(match[1], Math.max(out.get(match[1]) ?? 0, change.seq))
+  }
+  return out
+}
+
 /** Trạng thái mọi section của Spine, theo thứ tự FPT. */
 export const computeSectionStates = (spine: Spine, changes: ChangeLike[]): SectionStateView[] => {
   const steps = new Map(spine.steps.map((s) => [s.id, s]))
   const feeding = feedingChanges(spine, changes)
+  const acceptedAtSeq = acceptSeqByStep(changes)
 
-  return listSections(spine).map((def) => {
+  const states = listSections(spine).map((def) => {
     const base = { id: def.id, required: def.required, derived: def.derived }
     if (def.derived) return { ...base, status: "derived" as const, awaiting_reaccept: false }
 
@@ -59,7 +96,8 @@ export const computeSectionStates = (spine: Spine, changes: ChangeLike[]): Secti
     const accepted = states.filter((s) => s?.status === "accepted")
     const awaiting = states.some((s) => s?.status === "revision_requested")
 
-    const threshold = accepted.length > 0 ? Math.max(...accepted.map((s) => s?.last_seq ?? 0)) : null
+    const threshold =
+      accepted.length > 0 ? Math.max(...accepted.map((s) => Math.max(s?.last_seq ?? 0, acceptedAtSeq.get(s?.id ?? "") ?? 0))) : null
     const stale =
       threshold !== null &&
       (feeding.get(def.id) ?? []).some((c) => c.seq > threshold && !(c.step_id !== null && ownSet.has(c.step_id)))
@@ -71,6 +109,8 @@ export const computeSectionStates = (spine: Spine, changes: ChangeLike[]): Secti
         : "draft"
     return { ...base, status, awaiting_reaccept: awaiting }
   })
+
+  return downgradePartialFeatures(spine, states)
 }
 
 export const computeStatus = (spine: Spine, changes: ChangeLike[], sectionId: string): SectionStatus | null =>
@@ -118,12 +158,18 @@ export interface StepProgress {
   show_percent: boolean
 }
 
-/** Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn + 1 nếu có non-screen function. */
+/**
+ * Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn **chưa để lại** + 1 nếu có non-screen function; trừ step
+ * `skipped` (FLF-183). Màn `placeholder` là màn đã quyết định để lại — `nextStep` vốn đã bỏ qua vòng của nó, nên
+ * đếm vào mẫu số chỉ làm tiến độ sai: project mode 1 import ra 61 màn placeholder hiện "38/366" trong khi việc
+ * thật chỉ ~56 bước (2026-09-20). Màn có function trở lại (`detail_status` khác placeholder) thì đếm như thường.
+ */
 export const progressByStep = (spine: Spine): StepProgress => {
-  const n = spine.screens.length + (spine.functions.some((f) => f.screen_id === null) ? 1 : 0)
+  const counted = spine.screens.filter((s) => s.detail_status !== "placeholder").length
+  const n = counted + (spine.functions.some((f) => f.screen_id === null) ? 1 : 0)
   return {
     done: spine.steps.filter((s) => s.status === "accepted").length,
-    total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n,
+    total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n - spine.steps.filter((s) => s.status === "skipped").length,
     current_phase: spine.progress.current_phase,
     current_step: spine.progress.current_step,
     show_percent: spine.steps.some((s) => s.id === N_LOCKED_AT_STEP && s.status === "accepted")

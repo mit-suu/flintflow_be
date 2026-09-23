@@ -9,7 +9,8 @@ import {
   buildIdIndex,
   findDeadReferences,
   iterateReferences,
-  sectionKeyExists
+  sectionKeyExists,
+  sectionKeyWellFormed
 } from "./reference-fields.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -79,5 +80,14 @@ describe("sectionKeyExists", () => {
     expect(sectionKeyExists(index, "feature:F1")).toBe(true)
     expect(sectionKeyExists(index, "function:FN999")).toBe(false)
     expect(sectionKeyExists(index, "bogus")).toBe(false)
+  })
+
+  it("custom:<id> tồn tại theo custom_sections (FLF-182)", () => {
+    const spine = { ...FIXTURE, custom_sections: [{ id: "CS01", heading: "Phụ lục", level: 1, blocks: [], source: "import" as const }] }
+    const index = buildIdIndex(spine)
+    expect(sectionKeyExists(index, "custom:CS01")).toBe(true)
+    expect(sectionKeyExists(index, "custom:CS99")).toBe(false)
+    expect(sectionKeyWellFormed("custom:CS99")).toBe(true)
+    expect(sectionKeyWellFormed("custom:")).toBe(false)
   })
 })

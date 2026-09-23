@@ -70,13 +70,15 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 32 skill: 10 action · 15 content · 5 renderer · 2 output", () => {
+  it("đủ 38 skill: 16 action · 15 content · 5 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
     // và content/brief-analysis (S-1.1/1.3/1.4, T20) tách khỏi project-classifier.
-    expect(listSkillAssets()).toHaveLength(32)
-    expect(byKind("action")).toBe(10)
+    // +5 action khung mode 1 (FLF-171): import-extract, import-semantic-check, cr-clarify, cr-propose, cr-consistency.
+    // +1 action mode 1 v3 phase 5: import-extract-diagram (Gemini đọc ảnh diagram).
+    expect(listSkillAssets()).toHaveLength(38)
+    expect(byKind("action")).toBe(16)
     expect(byKind("content")).toBe(15)
     expect(byKind("renderer")).toBe(5)
     expect(byKind("output")).toBe(2)
@@ -124,10 +126,13 @@ describe("skill trên đĩa (assets/skills)", () => {
     "renderer/usecase"
   ])
 
+  // FLF-171: skill action mode 1 là khung ở P1 (plan mode 1 §5.7); P2 đã viết nội dung cả 5 skill nên tập này rỗng.
+  const MODE1_SKELETON_ACTION = new Set<string>([])
+
   it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
       const dir = s.dir.replace(/\\/g, "/")
-      if (s.kind === "action" || WRITTEN_NON_ACTION.has(dir)) {
+      if ((s.kind === "action" && !MODE1_SKELETON_ACTION.has(dir)) || WRITTEN_NON_ACTION.has(dir)) {
         expect(s.stub, `${s.dir} không được là stub`).toBe(false)
         const lines = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").split("\n")
         expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(150)
@@ -136,7 +141,7 @@ describe("skill trên đĩa (assets/skills)", () => {
       }
     }
     const dirs = new Set(listSkillAssets().map((s) => s.dir.replace(/\\/g, "/")))
-    for (const dir of WRITTEN_NON_ACTION) expect(dirs.has(dir), `${dir} không tồn tại`).toBe(true)
+    for (const dir of [...WRITTEN_NON_ACTION, ...MODE1_SKELETON_ACTION]) expect(dirs.has(dir), `${dir} không tồn tại`).toBe(true)
   })
 
   it("SKILL_BY_ACTION_TYPE trỏ tới skill action có output_schema khớp parser", () => {

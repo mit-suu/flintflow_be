@@ -122,6 +122,8 @@ vi.mock("./rendered-document.model.js", () => ({
 vi.mock("../spine/baseline.model.js", () => ({ Baseline: { findOne: baselineDb.findOne } }))
 vi.mock("../spine/change.model.js", () => ({ Change: { find: changeDb.find } }))
 vi.mock("../user/user.model.js", () => ({ User: { find: userDb.find } }))
+// Project mode 2: chưa có layout file upload ⇒ thứ tự mẫu FPT (FLF-184)
+vi.mock("../import/template-profile.model.js", () => ({ TemplateProfile: { findOne: async () => null } }))
 vi.mock("../spine/spine.repository.js", () => ({
   get: vi.fn(),
   listBaselineRefs: vi.fn(),
@@ -133,12 +135,13 @@ vi.mock("../spine/spine.repository.js", () => ({
 import * as spineRepository from "../spine/spine.repository.js"
 import { _internal, assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { DIAGRAM_PLACEHOLDER_PNG } from "./diagram-placeholder.js"
+import { buildDocxFileName } from "./docx-writer.js"
 
 const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
 
 const baseSpine = (): Spine => ({
-  project: { name: "Demo", vision: "V", goals: ["G1"], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, release_scope: { in: [], out: [] } },
+  project: { name: "Demo", system_name: null, vision: "V", goals: ["G1"], type: null, domain: null, complexity: null, form_factor: null, stakes: null, working_mode: null, review_mode: "balanced" as const, release_scope: { in: [], out: [] } },
   progress: { current_phase: "S-9", current_step: "S-9.5", screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
   steps: [],
   features: [{ id: "F1", name: "Auth", order: 0 }],
@@ -156,8 +159,10 @@ const baseSpine = (): Spine => ({
   other_requirements: [],
   glossary: [],
   addendum: [],
+  custom_sections: [],
   diagrams: [],
   assumptions: [],
+  decisions: [],
   flags: [
     { id: "FLG1", level: "red", rule_id: "dead_reference", section_id: "fixed:1", message: "broken ref", remediation_step: "S-2.1", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null },
     { id: "FLG2", level: "yellow", rule_id: "vague", section_id: "fixed:5.4", message: "vague wording", remediation_step: "S-7.4", opened_at_version: 1, resolved_at: null, waived_by_user: true, waive_reason: "Accepted for release 1.0 scope", waived_at_version: 2 }
@@ -353,6 +358,21 @@ describe("assemble()", () => {
       expect(doc.recordOfChanges[2].in_charge).toBe("65000000…")
     })
   })
+
+  describe("T15 (mode 1 v3) — giữ Record of Changes của file gốc", () => {
+    it("dòng cũ của khách đứng đầu bảng §I, lịch sử FlintFlow nối tiếp bên dưới", async () => {
+      changeDb.setRows([{ projectId: PROJECT, txn: "t1", at: new Date("2026-09-22T00:00:00.000Z"), by: "system", reason: "CR-001: Faster response", op: "set", step_id: null, seq: 1 }])
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 23 }))
+      const legacy = [{ date: "2026-05-01", version: "1.0", change_type: "A" as const, in_charge: "Nhóm 1", description: "Create and edit Product Overview" }]
+      await assemble(PROJECT, "Demo", 23, {
+        loadDiagramPng: async () => null,
+        loadTemplate: async () => ({ layout: [{ order: 0, heading_text: "1 Product Overview", level: 1, section_id: "fixed:1" }], language: "en", legacyRecord: legacy })
+      })
+      const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+      expect(doc.recordOfChanges[0]).toEqual(legacy[0])
+      expect(doc.recordOfChanges[1]).toMatchObject({ description: "CR-001: Faster response" })
+    })
+  })
 })
 
 describe("getDocument() — source=draft", () => {
@@ -523,6 +543,24 @@ describe("_internal.buildDocument — review C4/Th1 heading nhóm", () => {
     expect(ids.indexOf("group:4.2")).toBeLessThan(ids.indexOf("fixed:4.2.1"))
     expect(ids).toContain("group:unassigned-functions")
     expect(ids.indexOf("group:unassigned-functions")).toBeLessThan(ids.indexOf("function:FN9"))
+  })
+})
+
+describe("_internal.buildDocument — tên hệ thống (FLF-177)", () => {
+  const build = (spine: Spine) =>
+    _internal.buildDocument(
+      { projectId: PROJECT, projectName: "Du an giao hang", spine, statusChanges: [], recordChanges: [], source: "draft", version: "v0.1" },
+      { loadDiagramPng: async () => null, now: () => new Date("2026-09-15T00:00:00.000Z") }
+    )
+
+  it("bìa/tiêu đề/tên file lấy project.system_name", async () => {
+    const doc = await build({ ...baseSpine(), project: { ...baseSpine().project, system_name: "ShipFast Delivery" } })
+    expect(doc.projectName).toBe("ShipFast Delivery")
+    expect(buildDocxFileName(doc)).toBe("shipfast-delivery-v0.1-draft.docx")
+  })
+
+  it("chưa đặt system_name ⇒ tên project truyền vào như trước", async () => {
+    expect((await build(baseSpine())).projectName).toBe("Du an giao hang")
   })
 })
 

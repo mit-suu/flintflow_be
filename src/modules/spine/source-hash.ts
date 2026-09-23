@@ -8,6 +8,8 @@
 
 import { createHash } from "node:crypto"
 import type { Diagram, Spine } from "./spine.types.js"
+import { screenActorMap } from "./screen-actors.js"
+import { systemName } from "./system-name.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -18,7 +20,7 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
   switch (diagram.kind) {
     case "context":
       return {
-        project: { name: spine.project.name },
+        project: { name: systemName(spine.project) },
         actors: byId(spine.actors).map(({ id, name, kind, flows_in, flows_out }) => ({
           id,
           name,
@@ -30,6 +32,9 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
       }
     case "usecase":
       return {
+        // Boundary vẽ `system_name ?? project.name` nhưng chỉ hash khi đã đặt `system_name` (undefined bị bỏ khỏi
+        // chuỗi hash) — hình cũ không bị `diagram_stale` hàng loạt; đổi `project.name` vẫn không làm hình cũ như trước.
+        system_name: spine.project.system_name?.trim() || undefined,
         actors: byId(spine.actors).map(({ id, name, kind }) => ({ id, name, kind })),
         use_cases: byId(spine.use_cases).map(({ id, name, actor_ids, includes, extends: ext }) => ({
           id,
@@ -40,8 +45,11 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         }))
       }
     case "screen_flow":
+      // Sơ đồ tách theo actor người: đổi actor của màn (quyền, use case ↔ function) cũng làm hình cũ
       return {
-        screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs }))
+        screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs })),
+        actors: byId(spine.actors.filter((a) => a.kind === "human")).map(({ id, name }) => ({ id, name })),
+        screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       }
     case "erd":
       return { entities: byId(spine.entities).map(({ id, name, relations }) => ({ id, name, relations })) }

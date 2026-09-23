@@ -62,57 +62,130 @@ E06 ||--o{ E01
 "
 `;
 
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow 1`] = `
-"@startuml
-skinparam monochrome true
-hide empty description
-[*] --> S01
-state "Login" as S01
-state "Register" as S02
-state "Forgot Password" as S03
-state "Onboarding" as S04
-state "Project Dashboard" as S05
-state "Create Project" as S06
-state "Project Workspace" as S07 {
-  state "Chat" as S07_T1
-  state "Document" as S07_T2
-  state "History" as S07_T3
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 1 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Founder";
+  START [label="Founder", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S03 [label="Forgot Password\\n(pop-up)", style="rounded,dashed"];
+  S04 [label="Onboarding"];
+  S05 [label="Project Dashboard"];
+  S06 [label="Create Project\\n(pop-up)", style="rounded,dashed"];
+  subgraph cluster_S07 {
+    label="Project Workspace"; style=rounded;
+    S07_T1 [label="Chat"];
+    S07_T2 [label="Document"];
+    S07_T3 [label="History"];
+  }
+  S08 [label="Diagram Preview"];
+  S09 [label="Verification & Change Panel"];
+  S10 [label="Export"];
+  S11 [label="Plan & Pricing"];
+  S12 [label="Billing History"];
+  S13 [label="Notification Center"];
+  START -> S01;
+  START -> S04;
+  S01 -> S03;
+  S01 -> S05;
+  S04 -> S05;
+  S05 -> S06;
+  S05 -> S07_T1 [lhead=cluster_S07];
+  S05 -> S11;
+  S05 -> S13;
+  S06 -> S07_T1 [lhead=cluster_S07];
+  S07_T1 -> S08 [ltail=cluster_S07];
+  S07_T1 -> S09 [ltail=cluster_S07];
+  S07_T1 -> S10 [ltail=cluster_S07];
+  S09 -> S10;
+  S11 -> S12;
 }
-state "Diagram Preview" as S08
-state "Verification & Change Panel" as S09
-state "Export" as S10
-state "Plan & Pricing" as S11
-state "Billing History" as S12
-state "Notification Center" as S13
-state "Admin User List" as S14
-state "Admin User Detail" as S15
-state "Admin Metrics Dashboard" as S16
-state "Admin AI Cost Report" as S17
-state "Admin Prompt Templates" as S18
-state "Admin Audit Log" as S19
-note right of S03 : pop-up
-note right of S06 : pop-up
-S01 --> S02
-S01 --> S03
-S01 --> S05
-S02 --> S01
-S04 --> S05
-S05 --> S06
-S05 --> S07
-S05 --> S11
-S05 --> S13
-S06 --> S07
-S07 --> S08
-S07 --> S09
-S07 --> S10
-S08 --> S07
-S09 --> S07
-S09 --> S10
-S10 --> S07
-S11 --> S12
-S14 --> S15
-S15 --> S14
-@enduml
+@enddot
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 2 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Business Analyst";
+  START [label="Business Analyst", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S04 [label="Onboarding"];
+  S05 [label="Project Dashboard"];
+  subgraph cluster_S07 {
+    label="Project Workspace"; style=rounded;
+    S07_T1 [label="Chat"];
+    S07_T2 [label="Document"];
+    S07_T3 [label="History"];
+  }
+  S08 [label="Diagram Preview"];
+  S09 [label="Verification & Change Panel"];
+  S10 [label="Export"];
+  S13 [label="Notification Center"];
+  START -> S01;
+  START -> S04;
+  S01 -> S05;
+  S04 -> S05;
+  S05 -> S07_T1 [lhead=cluster_S07];
+  S05 -> S13;
+  S07_T1 -> S08 [ltail=cluster_S07];
+  S07_T1 -> S09 [ltail=cluster_S07];
+  S07_T1 -> S10 [ltail=cluster_S07];
+  S09 -> S10;
+}
+@enddot
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 3 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Administrator";
+  START [label="Administrator", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S14 [label="Admin User List"];
+  S15 [label="Admin User Detail"];
+  S16 [label="Admin Metrics Dashboard"];
+  S17 [label="Admin AI Cost Report"];
+  S18 [label="Admin Prompt Templates"];
+  S19 [label="Admin Audit Log"];
+  START -> S01;
+  S01 -> S14;
+  S14 -> S15;
+  S14 -> S16;
+  S14 -> S17;
+  S14 -> S18;
+  S14 -> S19;
+}
+@enddot
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 4 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Guest";
+  START [label="Guest", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S02 [label="Register"];
+  S03 [label="Forgot Password\\n(pop-up)", style="rounded,dashed"];
+  START -> S01;
+  S01 -> S02;
+  S01 -> S03;
+}
+@enddot
 "
 `;
 
@@ -203,32 +276,28 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "
 `;
 
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase 1`] = `
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
 "@startuml
 skinparam monochrome true
 left to right direction
+title Use Cases — Founder
 actor "Founder" as A01
 actor "Business Analyst" as A02
 actor "Administrator" as A03
 actor "Guest" as A04
-actor "Payment Gateway" as A05 <<system>>
-actor "LLM Provider" as A06 <<system>>
-actor "PlantUML Server" as A07 <<system>>
-actor "Email Service" as A08 <<system>>
-actor "Scheduler" as A09 <<time>>
 rectangle "FlintFlow" {
-  usecase "Register Account" as UC01
   usecase "Log In" as UC02
   usecase "Reset Password" as UC03
   usecase "Complete Onboarding" as UC04
-  usecase "Manage Projects" as UC05
   usecase "Create Project" as UC06
+  usecase "Browse Projects" as UC05
   usecase "Resume Project" as UC07
   usecase "Refine Product Brief" as UC08
   usecase "Generate SRS Content" as UC09
-  usecase "Review and Accept Step" as UC10
-  usecase "Request Change" as UC11
+  usecase "Accept Step At Gate" as UC10
   usecase "Render Diagrams" as UC12
+  usecase "Request Change" as UC11
+  usecase "Preview Change Impact" as UC23
   usecase "Verify Document" as UC13
   usecase "Waive Red Flag" as UC14
   usecase "Sign Baseline" as UC15
@@ -236,49 +305,64 @@ rectangle "FlintFlow" {
   usecase "Purchase Credits" as UC17
   usecase "View Billing History" as UC18
   usecase "Receive Notifications" as UC19
-  usecase "Inspect Platform Accounts" as UC20
-  usecase "Monitor Platform Metrics" as UC21
-  usecase "Run Scheduled Housekeeping" as UC22
-  usecase "Preview Change Impact" as UC23
+  usecase "Archive Project" as UC24
 }
-A04 --> UC01
-A08 --> UC01
-A01 --> UC02
-A02 --> UC02
-A03 --> UC02
-A04 --> UC02
-A01 --> UC03
-A08 --> UC03
-A01 --> UC04
-A01 --> UC05
-A01 --> UC06
-A01 --> UC07
-A01 --> UC08
-A06 --> UC08
-A01 --> UC09
-A06 --> UC09
-A01 --> UC10
-A01 --> UC11
-A07 --> UC12
-A01 --> UC13
-A02 --> UC13
-A02 --> UC14
-A02 --> UC15
-A01 --> UC16
-A01 --> UC17
-A05 --> UC17
-A01 --> UC18
-A01 --> UC19
-A03 --> UC20
-A03 --> UC21
-A09 --> UC22
-A01 --> UC23
-UC03 ..> UC02 : <<extend>>
+actor "Payment Gateway" as A05 <<system>>
+actor "LLM Provider" as A06 <<system>>
+actor "PlantUML Server" as A07 <<system>>
+actor "Email Service" as A08 <<system>>
+A01 -- UC02
+A02 -- UC02
+A03 -- UC02
+A04 -- UC02
+A01 -- UC03
+UC03 -- A08
+A01 -- UC06
+A01 -- UC05
+A01 -- UC07
+A01 -- UC08
+UC08 -- A06
+A01 -- UC09
+UC09 -- A06
+UC12 -- A07
+A01 -- UC11
+A02 -- UC15
+A01 -- UC16
+A01 -- UC17
+UC17 -- A05
+A01 -- UC18
+A01 -- UC19
+A01 -- UC24
+UC04 ..> UC06 : <<extend>>
 UC09 ..> UC10 : <<include>>
 UC09 ..> UC12 : <<include>>
 UC11 ..> UC23 : <<include>>
 UC14 ..> UC15 : <<extend>>
 UC15 ..> UC13 : <<include>>
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 2 1`] = `
+"@startuml
+skinparam monochrome true
+left to right direction
+title Use Cases — Administrator / Guest / Scheduler
+actor "Administrator" as A03
+actor "Guest" as A04
+rectangle "FlintFlow" {
+  usecase "Inspect Platform Accounts" as UC20
+  usecase "Monitor Platform Metrics" as UC21
+  usecase "Register Account" as UC01
+  usecase "Run Scheduled Housekeeping" as UC22
+}
+actor "Email Service" as A08 <<system>>
+actor "Scheduler" as A09 <<time>>
+A03 -- UC20
+A03 -- UC21
+A04 -- UC01
+UC01 -- A08
+UC22 -- A09
 @enduml
 "
 `;

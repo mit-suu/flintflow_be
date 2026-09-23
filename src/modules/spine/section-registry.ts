@@ -121,6 +121,8 @@ const row = (key: string, field: string, owner: string[], reads: string[] = [], 
 
 export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("project_core", "project.vision, .goals[], .name", ["fixed:1"]),
+  // FLF-177 — tên hệ thống in trên bìa (§1) và boundary hai sơ đồ
+  row("project_system_name", "project.system_name", ["fixed:1"], [], ["diagram:context", "diagram:usecase"]),
   row("release_scope", "project.release_scope", ["fixed:1"]),
   row("project_class", "project.type, .domain, .complexity, .stakes", [], [], ["fixed:4.2.1", "fixed:4.2.2", "fixed:4.2.3", "fixed:4.2.4"]),
   row("br_high", "business_rules[tier=high]", ["fixed:1"]),
@@ -180,9 +182,10 @@ const matchRows = (t: Target): FieldSectionRow[] => {
   switch (t.root) {
     case "project":
       if (t.sub === "name" || t.sub === "vision" || t.sub === "goals") return rowsOf(["project_core"])
+      if (t.sub === "system_name") return rowsOf(["project_system_name"])
       if (t.sub === "release_scope") return rowsOf(["release_scope"])
       if (t.sub === "type" || t.sub === "domain" || t.sub === "complexity" || t.sub === "stakes") return rowsOf(["project_class"])
-      if (t.sub === null) return rowsOf(["project_core", "release_scope", "project_class"])
+      if (t.sub === null) return rowsOf(["project_core", "project_system_name", "release_scope", "project_class"])
       return []
     case "business_rules":
       if (el?.tier === "high") return rowsOf(["br_high"])
@@ -304,6 +307,11 @@ export const sectionsOfPath = (spine: Spine, path: string, hint: ChangeHint = {}
   }
   const [head, next] = segments
   const id = head.selector?.kind === "match" ? (head.selector.pairs.find(([k]) => k === "id")?.[1] ?? null) : null
+  // Mục riêng của template người dùng (FLF-182): mỗi phần tử là một section `custom:<id>`, không ảnh hưởng section khác
+  if (head.key === "custom_sections") {
+    const own = id ?? pickObject(hint.value)?.id ?? pickObject(hint.before)?.id
+    return { owner: typeof own === "string" ? [`custom:${own}`] : [], reads: [], derived: [] }
+  }
   const element = findElement(spine, head.key, id) ?? pickObject(hint.value) ?? pickObject(hint.before)
   const target: Target = { root: head.key, id, sub: next?.key ?? null, element }
 

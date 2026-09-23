@@ -24,6 +24,9 @@ export type IsoDateTime = string
 
 export type WorkingMode = "fast" | "coaching"
 
+/** Mức độ dừng lại hỏi ý user (02-reduce-stops-plan R5). */
+export type ReviewMode = "strict" | "balanced" | "fast"
+
 export interface ReleaseScope {
   in: string[]
   out: string[]
@@ -31,6 +34,11 @@ export interface ReleaseScope {
 
 export interface SpineProject {
   name: string
+  /**
+   * FLF-177 — tên hệ thống (tiếng Anh) in trên sơ đồ và tài liệu, tách khỏi tên project làm việc.
+   * `null` ⇒ dùng tên project (Spine trước FLF-177 không có field này).
+   */
+  system_name: string | null
   vision: string | null
   goals: string[]
   type: string | null
@@ -39,6 +47,8 @@ export interface SpineProject {
   form_factor: string | null
   stakes: string | null
   working_mode: WorkingMode | null
+  /** Cách duyệt (R5): `strict` | `balanced` | `fast`. */
+  review_mode: ReviewMode
   release_scope: ReleaseScope
 }
 
@@ -50,7 +60,8 @@ export interface Progress {
   elicit_turns_this_phase: number
 }
 
-export type StepStatus = "pending" | "in_progress" | "accepted" | "revision_requested"
+/** `skipped` (FLF-182): step không áp dụng cho template của project mode 1 — bị ẩn, không tính tiến độ. */
+export type StepStatus = "pending" | "in_progress" | "accepted" | "revision_requested" | "skipped"
 
 export interface StepState {
   /** Step id theo registry, có thể kèm `@<screen_id>` cho vòng S-5. */
@@ -209,6 +220,28 @@ export interface GlossaryTerm {
   definition: string
 }
 
+/** Khối nội dung nguyên văn của một mục riêng (FLF-182). Chỉ field hợp với `kind` mang giá trị, còn lại `null`. */
+export interface CustomBlock {
+  kind: "paragraph" | "list_item" | "table" | "image"
+  text: string
+  /** Chỉ với `table`: text từng ô theo hàng. */
+  rows: string[][] | null
+  /** Chỉ với `image`: tham chiếu file ảnh đã lưu. */
+  image_ref: string | null
+}
+
+/**
+ * Mục riêng của template người dùng (mode 1 v2, FLF-182): heading không khớp section FPT nào, hoặc phần văn xuôi
+ * không trích được vào field — giữ nguyên văn để render lại đúng vị trí (section `custom:<id>`) và sửa qua chat.
+ */
+export interface CustomSection {
+  id: string
+  heading: string
+  level: number
+  blocks: CustomBlock[]
+  source: "import" | "manual"
+}
+
 export interface Addendum {
   id: string
   topic: string
@@ -250,6 +283,25 @@ export interface Assumption {
   confirmed_at: IsoDateTime | null
 }
 
+/**
+ * Một quyết định của user đã chốt trong lúc hỏi đáp (FLF-208 · `02-reduce-stops-plan.md` R4).
+ *
+ * Lượt test bị hỏi lại uptime ba lần và "giữ chỗ 15 phút" ba lần, rồi AI còn gợi ý ngược với điều user đã
+ * chốt. Sổ này là bộ nhớ chung của mọi step: hỏi xong ghi vào đây, và mọi lượt hỏi sau đều đọc nó.
+ * `topic_key` là khoá chủ đề (`uptime`, `slot_hold_minutes`…) — trùng khoá nghĩa là đã hỏi rồi.
+ */
+export interface Decision {
+  id: string
+  topic_key: string
+  question: string
+  answer: string
+  /** Step đã hỏi ra quyết định này. */
+  step_id: string
+  at: IsoDateTime
+  /** Quyết định mới thay thế nó (user đổi ý) — giữ lại vết thay vì xoá. */
+  superseded_by: string | null
+}
+
 export type FlagLevel = "red" | "yellow"
 
 export interface Flag {
@@ -275,10 +327,21 @@ export interface SectionState {
   asset_version: string
 }
 
+/**
+ * Nguồn gốc baseline (FLF-171, mode 1):
+ * - `generated` — ký ở S-9.5 của quy trình sinh SRS (mode 2); dữ liệu cũ không có field này đọc ra `generated`.
+ * - `imported` — baseline v0 tạo khi import SRS có sẵn (mode 1, nút 1.10).
+ * - `release` — Lead release bản major ở mode 1 (Flow 6).
+ */
+export type BaselineType = "generated" | "imported" | "release"
+
 export interface Baseline {
   id: string
-  /** `v1.0` hoặc `v1.0-conditional` khi `waived_count > 0`. */
+  /** Mode 2: `v1.0` hoặc `v1.0-conditional` khi `waived_count > 0`. Mode 1: `0.0`, `1.0`, `2.0`… */
   version: string
+  type: BaselineType
+  /** Mode 1: version tài liệu (`DocVersion.version`) mà baseline chụp; mode 2 luôn `null`. */
+  doc_version: string | null
   at: IsoDateTime
   /** `_id` của document trong collection `baselines` (snapshot). */
   snapshot_ref: string
@@ -317,9 +380,12 @@ export interface Spine {
   other_requirements: OtherRequirement[]
   glossary: GlossaryTerm[]
   addendum: Addendum[]
+  custom_sections: CustomSection[]
 
   diagrams: Diagram[]
   assumptions: Assumption[]
+  /** Sổ quyết định đã chốt (R4) — Spine cũ không có ⇒ `[]`. */
+  decisions: Decision[]
   flags: Flag[]
   sections: SectionState[]
   baselines: Baseline[]
@@ -374,6 +440,8 @@ export interface Usage {
 export interface BaselineSnapshot {
   projectId: string
   version: string
+  type: BaselineType
+  doc_version: string | null
   at: IsoDateTime
   checked_at_version: number
   waived_count: number

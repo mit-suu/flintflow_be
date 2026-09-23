@@ -166,7 +166,7 @@ describe("branchOf — ba nhánh", () => {
   })
 
   it("đã có baseline ⇒ post_baseline, kể cả khi không ai phụ thuộc", () => {
-    const baseline = [{ id: "B1", version: "v1.0", at: "2026-09-01T00:00:00.000Z", snapshot_ref: "x", checked_at_version: 1, waived_count: 0 }]
+    const baseline = [{ id: "B1", version: "v1.0", type: "generated" as const, doc_version: null, at: "2026-09-01T00:00:00.000Z", snapshot_ref: "x", checked_at_version: 1, waived_count: 0 }]
     expect(branchOf({ baselines: baseline }, empty)).toBe("post_baseline")
   })
 })
@@ -183,7 +183,7 @@ describe("preview — diff + impact, không ghi", () => {
     expect(result.changes).toHaveLength(1)
     expect(result.changes[0]).toMatchObject({ path: "actors[id=A01].name", before: "Founder", value: "Product Owner" })
     expect(result.impact?.sections.map((s) => s.id)).toEqual(expect.arrayContaining(["fixed:2.1", "fixed:2.2.2", "fixed:3.1.3"]))
-    expect([...(result.impact?.diagrams ?? [])].sort()).toEqual(["context", "usecase"])
+    expect([...(result.impact?.diagrams ?? [])].sort()).toEqual(["context", "screen_flow", "usecase"])
     expect(result.preview_id).toBeTypeOf("string")
 
     // Không ghi gì: version giữ nguyên, changes[] rỗng
@@ -303,6 +303,16 @@ describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
     expect(actors.length).toBeGreaterThan(0)
     expect(Object.keys(actors[0])).toEqual(["id", "label"])
   })
+
+  it("FLF-200 (BUG-08): luôn kèm danh sách id đang tồn tại để model không đoán id", () => {
+    const focused = buildChangeProjection(FIXTURE, "Đổi tên actor A01 thành Product Owner")
+    const ids = focused.existing_ids as Record<string, string[]>
+    expect(ids.use_cases).toEqual(FIXTURE.use_cases.map((u) => u.id))
+    expect(ids.actors).toContain("A01")
+
+    const broad = buildChangeProjection(FIXTURE, "làm cho tài liệu hay hơn")
+    expect((broad.existing_ids as Record<string, string[]>).screens).toContain("S01")
+  })
 })
 
 // ─── apply ───────────────────────────────────────────────────────
@@ -352,7 +362,7 @@ describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
   const withBaseline = (): Spine => {
     const spine = structuredClone(FIXTURE)
     spine.baselines = [
-      { id: "B1", version: "v1.0", at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
+      { id: "B1", version: "v1.0", type: "generated", doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
     ]
     return spine
   }

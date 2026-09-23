@@ -26,6 +26,19 @@ const change = (seq: number, p: string, step_id: string | null = null): Change =
   step_id
 })
 
+describe("FLF-204 (BUG-26) — feature chỉ accepted khi function con cũng xong", () => {
+  it("một function con còn draft ⇒ feature xuống draft", () => {
+    const spine = structuredClone(FIXTURE)
+    // Mở lại vòng của màn S01 (đang signed_off) ⇒ function của nó chưa chốt lại
+    spine.steps = spine.steps.filter((s) => !s.id.endsWith("@S01"))
+    expect(computeStatus(spine, [], "feature:F1")).toBe("draft")
+  })
+
+  it("function của màn đã chủ động để lại (placeholder) không kéo feature xuống", () => {
+    expect(computeStatus(FIXTURE, [], "feature:F1"), "S02–S04 là placeholder, S01 đã signed_off").toBe("accepted")
+  })
+})
+
 describe("computeSectionStates", () => {
   it("fixture không có change: derived / accepted / draft đúng", () => {
     const status = (id: string) => computeStatus(FIXTURE, [], id)
@@ -60,6 +73,22 @@ describe("computeSectionStates", () => {
     expect(own.find((s) => s.id === "fixed:2.2.2")?.status).toBe("stale")
   })
 
+  it("FLF-198: step chốt mà không ghi gì (last_seq null) van co moc 'da xem toi day'", () => {
+    const spine = structuredClone(FIXTURE)
+    const owner = spine.steps.find((s) => s.id === "S-3.1")!
+    owner.first_seq = null
+    owner.last_seq = null
+
+    // Chotist o seq LAST_SEQ+5; change nuoi section den TRUOC do ⇒ khong con la "moi hon"
+    const accepted = { ...change(LAST_SEQ + 5, "steps[id=S-3.1].accepted_at"), value: "2026-09-23T05:00:00.000Z", step_id: "S-3.1" }
+    const before = change(LAST_SEQ + 1, "actors[id=A01].kind", "S-4.1")
+    expect(computeStatus(spine, [before, accepted], "fixed:2.1")).toBe("accepted")
+
+    // Change sau moc chot thi van lam section cu
+    const after = change(LAST_SEQ + 9, "actors[id=A01].kind", "S-4.1")
+    expect(computeStatus(spine, [before, accepted, after], "fixed:2.1")).toBe("stale")
+  })
+
   it("step sở hữu ở revision_requested ⇒ awaiting_reaccept và không còn accepted", () => {
     const spine = structuredClone(FIXTURE)
     spine.steps.find((s) => s.id === "S-3.1")!.status = "revision_requested"
@@ -86,8 +115,14 @@ describe("readiness / progressByStep", () => {
     expect(r.accepted_pct).toBeLessThan(100) // function của màn placeholder còn draft
   })
 
-  it("fixture: 68 step done / 51 + 5×20 = 151, show_percent sau S-4.1", () => {
-    expect(progressByStep(FIXTURE)).toEqual({ done: 68, total: 151, current_phase: "S-9", current_step: "S-9.5", show_percent: true })
+  it("fixture: 68 step done / 51 + 5×6 = 81 — màn để lại (placeholder) không vào mẫu số", () => {
+    // 19 màn: 5 signed_off + 14 placeholder. Đếm cả 14 màn để lại thì mẫu số là 151 và thanh tiến độ không bao giờ
+    // chạm 100% được, trong khi `nextStep` vốn đã bỏ qua vòng của màn placeholder.
+    expect(progressByStep(FIXTURE)).toEqual({ done: 68, total: 81, current_phase: "S-9", current_step: "S-9.5", show_percent: true })
+
+    // màn được tả chi tiết trở lại ⇒ vòng của nó đếm như thường
+    const detailed = { ...FIXTURE, screens: FIXTURE.screens.map((s) => ({ ...s, detail_status: "signed_off" as const })) }
+    expect(progressByStep(detailed).total).toBe(151)
   })
 
   it("trước S-4.1 accepted ⇒ show_percent = false", () => {

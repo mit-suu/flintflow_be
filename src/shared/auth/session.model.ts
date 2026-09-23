@@ -5,6 +5,11 @@ export interface ISession extends Document {
   tokenHash: string
   expiresAt: Date
   isRevoked: boolean
+  /**
+   * Ô "Ghi nhớ tài khoản" lúc đăng nhập: `true` ⇒ phiên 30 ngày, cookie bền; `false` ⇒ cookie phiên
+   * (đóng trình duyệt là mất); `null` ⇒ mặc định cũ (Google login, phiên tạo trước khi có tính năng).
+   */
+  rememberMe?: boolean | null
   userAgent?: string
   ip?: string
   createdAt: Date
@@ -32,6 +37,10 @@ const sessionSchema = new Schema<ISession>(
     isRevoked: {
       type: Boolean,
       default: false
+    },
+    rememberMe: {
+      type: Boolean,
+      default: null
     },
     userAgent: {
       type: String

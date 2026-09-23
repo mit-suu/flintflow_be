@@ -18,7 +18,10 @@
  * FLF-166, thay quyết định T15 review C3/Th4), và PNG xuất hiện sau thì lần đọc kế có ảnh thật mà không cần
  * `spine_version` mới hay dựng lại baseline.
  *
- * KHÔNG ghi Spine ở đây — chỉ đọc (`spine.repository`, `Baseline`, `Change`, `User`) và ghi cache riêng
+ * Mode 1 v2 (FLF-184): project có layout file upload (`TemplateProfile.layout`) ⇒ thứ tự + tiêu đề + số hiệu theo file
+ * đó (`layout-sections.ts`) thay cho mẫu FPT; nội dung section vẫn từ Spine.
+ *
+ * KHÔNG ghi Spine ở đây — chỉ đọc (`spine.repository`, `Baseline`, `Change`, `User`, `TemplateProfile`) và ghi cache riêng
  * (`RenderedDocumentCache`, không phải collection `spines`).
  */
 
@@ -28,6 +31,7 @@ import { listSections } from "../spine/section-registry.js"
 import { computeSectionStates, readiness, type SectionStateView } from "../spine/section-status.js"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
+import { systemName } from "../spine/system-name.js"
 import { Baseline } from "../spine/baseline.model.js"
 // T15 review T5: đọc Change model trực tiếp (chỉ đọc) — projection nhẹ cho §I, không qua
 // spine.repository.listChanges (tải cả before/value, không cần cho Record of Changes).
@@ -45,6 +49,10 @@ import {
 import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
+import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
+// Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
+import { TemplateProfile } from "../import/template-profile.model.js"
+import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
   FlagRow,
@@ -178,6 +186,8 @@ const unassignedFunctionsSection = (number: string): RenderedSection => ({
 export type DiagramPngLoader = (projectId: string, diagramId: string) => Promise<string | null>
 
 const defaultDiagramPngLoader: DiagramPngLoader = async (projectId, diagramId) => {
+  // Phase 5 (T3): ảnh gốc của mục riêng — lấy từ file upload, không phải file diagram
+  if (isMediaId(diagramId)) return loadImportMedia(projectId, diagramId.slice(MEDIA_PREFIX.length)).catch(() => null)
   try {
     const file = await loadDiagramFile(projectId, diagramId, "png")
     return file.data.toString("base64")
@@ -207,8 +217,11 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
     const batch = diagramIds.slice(i, i + IMAGE_LOAD_BATCH_SIZE)
     const results = await Promise.all(batch.map(async (id) => [id, await load(projectId, id)] as const))
     for (const [id, png] of results) {
-      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do
-      if (png === null || png.length === 0) missing.push(id)
+      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do.
+      // Ảnh gốc không nhúng được (EMF/WMF…) không phải "diagram chưa render" — không đưa vào `missing` (khỏi kiểm lại mãi)
+      if (png === null || png.length === 0) {
+        if (!isMediaId(id)) missing.push(id)
+      }
       else loaded.set(id, png)
     }
   }
@@ -218,7 +231,11 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
 const preloadDiagramPngs = (projectId: string, spine: Spine, load: DiagramPngLoader): Promise<ImageLoadResult> =>
   loadDiagramPngs(
     projectId,
-    spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+    [
+      ...spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+      // Phase 5 (T3): ảnh gốc trong mục riêng
+      ...new Set(spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image" && b.image_ref).map((b) => mediaId(b.image_ref!))))
+    ],
     load
   )
 
@@ -244,7 +261,10 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     const id = refDiagramId(b)
     if (id === null || !isImageBlock(b)) return b
     const png = resolve(id)
-    return png ? { ...b, png } : { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
+    if (png) return { ...b, png }
+    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}original image could not be embedded (${id.slice(MEDIA_PREFIX.length)})` }
+    return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
 }
@@ -319,6 +339,7 @@ interface ChangeRecordDoc {
   by: string
   reason: string | null
   op: string
+  path: string
   step_id: string | null
 }
 
@@ -335,6 +356,7 @@ const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[
     by: d.by,
     reason: d.reason,
     op: d.op,
+    path: d.path,
     step_id: d.step_id
   }))
 }
@@ -361,13 +383,17 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
 
 // ─── phụ lục cờ ──────────────────────────────────────────────────
 
-const buildFlagRow = (spine: Spine, flag: Flag, numbers: Map<string, string>): FlagRow => {
-  const number = numbers.get(flag.section_id) ?? (flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : flag.section_id)
-  let heading = flag.section_id
-  try {
-    heading = sectionHeadingOf(spine, flag.section_id)
-  } catch {
-    // section_id không phân giải được (dữ liệu cũ) — giữ khoá logic thô thay vì ném lỗi cả tài liệu
+const buildFlagRow = (spine: Spine, flag: Flag, numbers: Map<string, string>, titles?: Map<string, string>): FlagRow => {
+  // Layout người dùng (có `titles`): số hiệu mẫu FPT không còn đúng ⇒ không suy từ khoá logic
+  const fallbackNumber = titles ? "" : flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : flag.section_id
+  const number = numbers.get(flag.section_id) ?? fallbackNumber
+  let heading = titles?.get(flag.section_id) ?? flag.section_id
+  if (!titles?.has(flag.section_id)) {
+    try {
+      heading = sectionHeadingOf(spine, flag.section_id)
+    } catch {
+      // section_id không phân giải được (dữ liệu cũ, mục riêng đã xoá) — giữ khoá logic thô thay vì ném lỗi cả tài liệu
+    }
   }
   const row: FlagRow = { id: flag.id, rule_id: flag.rule_id, section: `${number} ${heading}`.trim(), message: flag.message }
   if (flag.waived_by_user) row.waive_reason = flag.waive_reason
@@ -381,16 +407,17 @@ const buildFlagsAppendix = (
   changes: StatusChanges,
   numbers: Map<string, string>,
   source: RenderSource,
-  states: SectionStateView[]
+  states: SectionStateView[],
+  titles?: Map<string, string>
 ): FlagsAppendix => {
-  const waived = spine.flags.filter((f) => f.waived_by_user).map((f) => buildFlagRow(spine, f, numbers))
+  const waived = spine.flags.filter((f) => f.waived_by_user).map((f) => buildFlagRow(spine, f, numbers, titles))
   if (source === "baseline") {
     // srs-spine.md §6: bản baseline chỉ cần in danh sách waive — không có cờ đỏ mở (điều kiện ký baseline).
     return { redOpen: [], staleCount: 0, waived }
   }
   const redOpen = spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && !f.waived_by_user)
   // T15 review T4: dùng lại `states` đã tính một lần ở buildDocument thay vì computeSectionStates lần nữa.
-  return { redOpen: redOpen.map((f) => buildFlagRow(spine, f, numbers)), staleCount: readiness(spine, changes, states).stale, waived }
+  return { redOpen: redOpen.map((f) => buildFlagRow(spine, f, numbers, titles)), staleCount: readiness(spine, changes, states).stale, waived }
 }
 
 // ─── dựng sections[] ────────────────────────────────────────────
@@ -461,9 +488,22 @@ export interface AssembleDeps {
   onImagesLoaded?: (result: ImageLoadResult) => void
   /** T15 review Th2: gọi khi S-8.4 chạy xong — caller quyết log/trả `meta`, không tự `console.warn` ở đây. */
   onConsistencyFindings?: (findings: ConsistencyFinding[]) => void
+  /** Mode 1 v2 (FLF-184): layout của file upload — `null` ⇒ thứ tự + số hiệu mẫu FPT (mode 2). */
+  loadTemplate?: TemplateLoader
 }
 
-const defaultDeps = (): AssembleDeps => ({ loadDiagramPng: defaultDiagramPngLoader, now: () => new Date() })
+export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | null>
+
+/** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
+export const loadTemplateLayout: TemplateLoader = async (projectId) => {
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, language: 1, legacy_record_of_changes: 1 }, { lean: true })) as
+    | { layout?: TemplateLayout["layout"]; language?: string; legacy_record_of_changes?: TemplateLayout["legacyRecord"] }
+    | null
+  if (!profile?.layout?.length) return null
+  return { layout: profile.layout, language: profile.language ?? "en", legacyRecord: profile.legacy_record_of_changes ?? [] }
+}
+
+const defaultDeps = (): AssembleDeps => ({ loadDiagramPng: defaultDiagramPngLoader, now: () => new Date(), loadTemplate: loadTemplateLayout })
 
 interface BuildDocumentInput {
   projectId: string
@@ -476,6 +516,8 @@ interface BuildDocumentInput {
   source: RenderSource
   version: string
   partial?: boolean
+  /** Layout của file người dùng (mode 1 v2) — không có ⇒ mẫu FPT. */
+  template?: TemplateLayout | null
 }
 
 interface BuiltDocument {
@@ -490,26 +532,40 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   const images = await preloadDiagramPngs(projectId, spine, deps.loadDiagramPng)
   deps.onImagesLoaded?.(images)
 
-  const { numbers, unassignedNumber, hasUnassigned } = buildNumberMap(spine)
   const states = computeSectionStates(spine, input.statusChanges)
-  const sections = buildSections(spine, numbers, states, {
-    partial: input.partial ?? false,
-    unassignedNumber,
-    hasUnassigned
-  })
+  let sections: RenderedSection[]
+  let numbers: Map<string, string>
+  let titles: Map<string, string> | undefined
+  if (input.template) {
+    // Mode 1 v2: thứ tự + tiêu đề + số hiệu theo file người dùng (layout-sections.ts)
+    ;({ sections, numbers, titles } = buildLayoutSections(spine, input.template, states, {
+      partial: input.partial ?? false,
+      diagramPng: imageRef
+    }))
+  } else {
+    const map = buildNumberMap(spine)
+    numbers = map.numbers
+    sections = buildSections(spine, numbers, states, {
+      partial: input.partial ?? false,
+      unassignedNumber: map.unassignedNumber,
+      hasUnassigned: map.hasUnassigned
+    })
+  }
 
   const findings = await runConsistencyPass(spine, sections)
   deps.onConsistencyFindings?.(findings)
 
   const refDoc: RenderedDocument = {
     projectId,
-    projectName,
+    // FLF-177: bìa, tiêu đề và tên file in tên hệ thống; chưa đặt ⇒ tên project như trước
+    projectName: systemName(spine.project, projectName),
     version,
     source,
     generatedAt: deps.now().toISOString(),
     sections,
-    recordOfChanges: buildRecordOfChanges(input.recordChanges, deps.resolveInCharge),
-    flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states)
+    // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, deps.resolveInCharge)],
+    flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
   return { refDoc, images }
@@ -588,6 +644,7 @@ export async function assemble(
   const changes = await spineRepository.listChanges(projectId)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const template = await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
 
   let findings: ConsistencyFinding[] = []
   const { refDoc, images } = await buildDocumentParts(
@@ -598,7 +655,8 @@ export async function assemble(
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: `v0.${record.spine_version}`
+      version: `v0.${record.spine_version}`,
+      template
     },
     {
       ...merged,
@@ -709,7 +767,8 @@ const getBaselineDocument = async (
       statusChanges: [],
       recordChanges,
       source: "baseline",
-      version: String(baseline.version)
+      version: String(baseline.version),
+      template: await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
     },
     { ...deps, resolveInCharge }
   )
@@ -731,6 +790,42 @@ export async function getDocument(
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
   if (query.source === "baseline") return getBaselineDocument(projectId, projectName, query.baseline_id, merged)
   return getDraftDocument(projectId, merged.loadDiagramPng)
+}
+
+// ─── mode 1 v2: file version tài liệu dựng từ snapshot Spine (FLF-184) ──
+
+/**
+ * `RenderedDocument` sẵn ảnh của một snapshot Spine (không qua cache) — `doc-version` ghi thành file `.docx` cho
+ * version mode 1 (bản `0.0` sau import; V4: bản ghi CR, release). Theo layout của project nếu có.
+ */
+export async function renderSpineDocument(
+  projectId: string,
+  projectName: string,
+  spine: Spine,
+  opts: {
+    version: string
+    source: RenderSource
+    /** Change chưa ghi DB nhưng thuộc snapshot (C-7 render trước khi ghi Spine — FLF-186) — nối vào §I. */
+    pendingRecord?: ChangeRecordRow[]
+  },
+  deps: Partial<AssembleDeps> = {}
+): Promise<RenderedDocument> {
+  const merged: AssembleDeps = { ...defaultDeps(), ...deps }
+  const recordChanges = [...(await listChangesForRecord(projectId)), ...(opts.pendingRecord ?? [])]
+  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  return buildDocument(
+    {
+      projectId,
+      projectName,
+      spine,
+      statusChanges: [],
+      recordChanges,
+      source: opts.source,
+      version: opts.version,
+      template: await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
+    },
+    { ...merged, resolveInCharge }
+  )
 }
 
 // ─── review C2: meta độ mới của bản draft ────────────────────────
