@@ -88,6 +88,10 @@ export const branchOf = (spine: Pick<Spine, "baselines">, impact: Impact): Chang
 
 interface StoredPreview {
   projectId: string
+  /** Người xem trước — chỉ chính họ đính kèm được bản xem trước vào CR (mode 1 v3, 3.1). */
+  userId: string
+  /** Câu lệnh người dùng gõ; gửi lô op sẵn thì `null`. */
+  instruction: string | null
   base_version: number
   ops: Op[]
   reason: string | null
@@ -113,6 +117,17 @@ const prunePreviews = (now: number): void => {
 
 /** Test dùng để cô lập giữa các ca. */
 export const clearPreviewStore = (): void => previewStore.clear()
+
+/**
+ * Mode 1 v3 (BPMN 3.1): bản xem trước đính kèm vào CR làm **gợi ý** cho 3.2/3.4/3.6 — chỉ đọc, không xoá (mode 1 không
+ * áp bản xem trước). Hết hạn / của người khác / project khác ⇒ `null` (CR vẫn tạo, không kèm gợi ý).
+ */
+export const peekPreview = (projectId: string, previewId: string, userId: string): { instruction: string | null; ops: Op[] } | null => {
+  prunePreviews(Date.now())
+  const stored = previewStore.get(previewId)
+  if (!stored || stored.projectId !== projectId || stored.userId !== userId) return null
+  return { instruction: stored.instruction, ops: stored.ops }
+}
 
 const takePreview = (projectId: string, previewId: string): StoredPreview => {
   prunePreviews(Date.now())
@@ -158,6 +173,14 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
   const haystack = instruction.toLowerCase()
   const projection: Record<string, unknown> = {}
   let matched = 0
+  // FLF-200 (BUG-08): model phải thấy id nào ĐANG tồn tại, nếu không nó đoán `UC18`, `UC-REMIND` rồi lô
+  // op chết vì `path_not_resolved` hoặc `duplicate_id`. Id mới thì server cấp — model bỏ trống `id`.
+  const existingIds: Record<string, string[]> = {}
+  for (const collection of TARGET_COLLECTIONS) {
+    const list = spine[collection] as unknown as { id?: unknown }[]
+    if (!Array.isArray(list) || list.length === 0) continue
+    existingIds[collection] = list.map((el) => String(el.id)).slice(0, 200)
+  }
 
   for (const collection of TARGET_COLLECTIONS) {
     const list = spine[collection] as unknown as Record<string, unknown>[]
@@ -173,7 +196,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     matched += hits.length
   }
 
-  if (matched > 0) return projection
+  if (matched > 0) return { ...projection, existing_ids: existingIds }
 
   const index: Record<string, unknown> = {}
   for (const collection of TARGET_COLLECTIONS) {
@@ -181,7 +204,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     if (!Array.isArray(list) || list.length === 0) continue
     index[collection] = list.slice(0, PROJECTION_ELEMENT_LIMIT).map((element) => ({ id: element.id, label: textOf(element) }))
   }
-  return index
+  return { ...index, existing_ids: existingIds }
 }
 
 // ─── nhận diện lệnh sửa trong chat thường ────────────────────────
@@ -341,6 +364,8 @@ export interface ChangePreviewResult extends PreviewResult {
   clarification?: string
   preview_id?: string
   notes?: string
+  /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
+  no_change?: boolean
 }
 
 const rejectedPreview = (baseVersion: number, violations: Violation[], referrers: PreviewResult["referrers"] = []): ChangePreviewResult => ({
@@ -396,6 +421,8 @@ export const preview = async (
   prunePreviews(Date.now())
   previewStore.set(previewId, {
     projectId,
+    userId,
+    instruction: body.instruction?.trim() || null,
     base_version: body.base_version,
     ops: resolved.ops,
     reason: body.reason ?? null,

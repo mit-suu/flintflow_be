@@ -457,3 +457,41 @@ project đi nhanh.
      `nextStep()`; xem `docs/spec-gaps.md`.
 - Model dùng **hai kiểu id function trong cùng một project** (`FN01` rồi `FN002`). Không vi phạm bất biến
   nào (id chỉ cần duy nhất) nhưng nhìn lệch trong tài liệu — ghi vào `docs/spec-gaps.md`.
+
+## FLF-171 P2 — Mode 1 import + change request, provider thật (2026-09-18)
+
+- Tài liệu: SRS Report3 của nhóm (`doc/Report3_Software Requirement Specification.docx.md` chuyển sang .docx bằng thư viện `docx`, bỏ ảnh nhúng): 1 903 block ở mức md ⇒ 3 450 block sau tách, 201 heading, 9 bảng khớp cột tất định.
+- Provider: `glm` / `zai-org/GLM-5.3-Flash` (Modal), Mongo in-memory replica set, luồng HTTP thật (`/import` → `/confirm-latest` → `/mapping confirm_all` → `/extract` → `/fields confirm_all` → `/finalize` → `/gap-report`, rồi 1 CR `clarify → impact → propose → verify`).
+- Kết quả: 98 section trích xong, 0 section lỗi; Spine: 4 actor, 81 UC, 13 feature, 70 function, 150 màn, 15 entity, 41 NFR, 36 BR, 100 message. Cờ: 0 đỏ, 169 vàng; gap report: 1 section thiếu, 5 heading không khớp, 50 field độ tin thấp. Tổng 397 s.
+
+| Bước | Lượt gọi | tokens_in | tokens_out | Credit |
+|---|---:|---:|---:|---:|
+| I-4 trích field | 77 | 363 077 | 41 988 | 154 |
+| 1.11 AI semantic check | 1 | 10 426 | 1 249 | 3 |
+| C-2 làm rõ CR | 1 | 3 789 | 117 | 1 |
+| C-4 đề xuất (80 vị trí, 10 lô) | 10 | 22 521 | 5 744 | 30 |
+| C-5 consistency | 1 | 1 493 | 992 | 2 |
+
+Nhận xét:
+- Output theo thực thể (P0 §4.8) giữ tokens_out ≈ 12% tokens_in (P0 ước tính output phình 0,4–3× nếu theo path).
+- Import một SRS đầy đủ tốn **157 credit** — vẫn vượt 100 credit gói free. Hướng giảm: gộp section nhỏ vào cùng một lượt (hiện một lượt/section, 77 lượt cho 98 section), trích tất định thêm bảng dọc (đặc tả UC/function dạng "nhãn | giá trị").
+- Lượt chạy đầu phát hiện một section gửi ~2,9 triệu token (ảnh base64 nằm trong text) ⇒ đã thêm trần 24k ký tự/lượt và 6k ký tự/block (`extract.service.ts#chunkBlocks`).
+- C-3 chạm trần 80 vị trí với CR "session timeout" (từ khoá rộng) ⇒ C-4 tốn 30 credit, phần lớn kết luận `not_related`.
+- `/import/extract` chạy đồng bộ ~5,6 phút trong một request trên SRS đầy đủ.
+
+## Mode 1 v3 phase 5 — đọc ảnh diagram bằng Gemini (2026-09-22)
+
+- Ảnh: 91 PNG nhúng trong SRS Report3 của nhóm (`doc/Report3_Software Requirement Specification.docx.md`), chọn ảnh dưới mục diagram (Product Overview, 2.2.1, Figure 03–12 use case, 3.1.1 luồng màn, 3.1.5 ERD) + 1 ảnh layout màn hình làm đối chứng.
+- Cách đo: prompt dựng từ skill thật `import-extract-diagram` (`interpolatePrompt`), gọi `callLLM` provider `gemini` / `gemini-3.5-flash` kèm một ảnh, parse bằng `importExtractDiagramSchema` — không qua Mongo/credit.
+
+| Loại (model phân) | Lượt OK | tokens_in / lượt | tokens_out / lượt | Thực thể đọc được / ảnh |
+|---|---:|---:|---:|---|
+| `context` (Product Overview) | 1 | 2 202 | 823 | 6 actor |
+| `usecase` (Figure 03–12, 2.2.1) | 10 | 2 224–2 274 | 359–2 606 | 1–2 actor, 2–19 UC |
+| `other` (layout màn Forgot password) | 1 | 2 217 | 46 | 0 (giữ ảnh gốc) |
+
+Nhận xét:
+- tokens_in gần như cố định ~2,2k/ảnh (ảnh ~1,9k + prompt) ⇒ giá **2 credit/ảnh** (`IMPORT_EXTRACT_DIAGRAM`) ngang một lô chữ I-4. Chỉ gửi ảnh ở mục diagram (`DIAGRAM_SECTIONS`); ảnh chụp màn hình dưới mô tả màn / chức năng không gửi (Report3: ~75/91 ảnh) ⇒ một SRS cỡ Report3 tốn ~15 lượt ảnh ≈ 30 credit.
+- Phân loại đúng cả 12 lượt (context / use case / other). Ảnh use case lớn (19 UC) trả 2,6k token ⇒ `maxTokens` 4096 bị cắt một lần (`RESPONSE_TRUNCATED`) ⇒ nâng lên **8192**.
+- Thời gian 14–24 s/ảnh; Gemini trả 503 "high demand" nhiều lần (retry trong request của `executeAiAction` gánh), rồi **hết quota ngày của key free tier** sau ~20 lượt ⇒ lượt lỗi thành `paused: resume_later` ở I-4 (chạy tiếp được). Môi trường thật cần key trả phí.
+- Chưa đo được `erd` (3.1.5) và `screen_flow` (3.1.1) do hết quota — đo lại khi có key khác.

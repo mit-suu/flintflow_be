@@ -1,6 +1,10 @@
 import mongoose, { Schema, Document } from "mongoose"
 
-export type TokenType = "verify_email" | "reset_password"
+/**
+ * - `verify_email`, `reset_password`: OTP 6 số gửi qua email.
+ * - `reset_password_grant`: vé cấp sau khi nhập đúng OTP quên mật khẩu, dùng một lần để đặt mật khẩu mới.
+ */
+export type TokenType = "verify_email" | "reset_password" | "reset_password_grant"
 
 export interface IAuthToken extends Document {
   userId: mongoose.Types.ObjectId
@@ -8,6 +12,8 @@ export interface IAuthToken extends Document {
   tokenHash: string
   expiresAt: Date
   usedAt?: Date | null
+  /** Số lần nhập sai OTP (chỉ dùng cho verify_email). */
+  attempts: number
   createdAt: Date
   updatedAt: Date
 }
@@ -22,7 +28,7 @@ const authTokenSchema = new Schema<IAuthToken>(
     },
     type: {
       type: String,
-      enum: ["verify_email", "reset_password"],
+      enum: ["verify_email", "reset_password", "reset_password_grant"],
       required: true
     },
     tokenHash: {
@@ -39,6 +45,10 @@ const authTokenSchema = new Schema<IAuthToken>(
     usedAt: {
       type: Date,
       default: null
+    },
+    attempts: {
+      type: Number,
+      default: 0
     }
   },
   { timestamps: true }

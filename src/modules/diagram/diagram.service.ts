@@ -18,7 +18,7 @@ import type { Op } from "../spine/op.types.js"
 import type { Diagram, Spine, SpineRecord } from "../spine/spine.types.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import { checkPlantUml, type CompileCheckResult } from "../../shared/diagram/compile-check.js"
-import { renderPlantUml } from "../../shared/diagram/plantuml.client.js"
+import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantuml.client.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
 import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
@@ -101,12 +101,22 @@ const nextIdFactory = (diagrams: Diagram[]): (() => string) => {
 
 const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (d.owner_id ?? null) === (t.owner_id ?? null)
 
-/** Id cho các phần của một target: giữ id cũ; nhiều phần ⇒ hậu tố `-1, -2`. */
+/**
+ * Id cho các phần của một target. Phần đầu **giữ nguyên id đang có**, dù id đó có hậu tố hay không;
+ * các phần sau là `-2, -3`.
+ *
+ * Giữ id phần đầu là bắt buộc: baseline đã ký lưu tham chiếu `diagram-ref:<id>` trong snapshot và nạp
+ * ảnh từ store **theo id, lúc đọc** (`assemble.service.rehydrateImages` — không tra `diagrams[]`). Id nào
+ * biến mất thì `syncFiles` xoá file của nó và mọi baseline trỏ vào đó mất hình vĩnh viễn. Vì thế hình
+ * một phần thành nhiều phần (`[D02]` ⇒ `[D02, D02-2]`) và hình đã tách sẵn theo lối cũ
+ * (`[D02-1, D02-2]` ⇒ giữ nguyên) đều không gỡ id nào.
+ */
 const assignIds = (existing: Diagram[], count: number, nextId: () => string): string[] => {
   if (count === 0) return []
-  const base = existing.find((d) => !PART_SUFFIX.test(d.id))?.id ?? existing[0]?.id.replace(PART_SUFFIX, "") ?? nextId()
-  if (count === 1) return [existing.find((d) => !PART_SUFFIX.test(d.id))?.id ?? base]
-  return Array.from({ length: count }, (_, i) => `${base}-${i + 1}`)
+  const first = existing.find((d) => !PART_SUFFIX.test(d.id))?.id ?? existing[0]?.id ?? nextId()
+  if (count === 1) return [first]
+  const stem = first.replace(PART_SUFFIX, "")
+  return [first, ...Array.from({ length: count - 1 }, (_, i) => `${stem}-${i + 2}`)]
 }
 
 // ─── render ──────────────────────────────────────────────────────
@@ -252,9 +262,31 @@ export const renderAll = async (projectId: string, options: RenderOptions): Prom
   return renderDiagrams(projectId, allTargets(stripRecord(record)), options)
 }
 
+/**
+ * Vẽ lại mọi diagram khi PlantUML có mặt; không có (dev/test, sự cố) ⇒ `null` thay vì ghi hàng loạt `render_error`.
+ * Lỗi vẽ chỉ ghi log — không chặn việc gọi (finalize import, ghi CR). Hình vẫn lệch thì cờ `diagram_stale` báo.
+ */
+export const renderAllIfAvailable = async (projectId: string, options: RenderOptions): Promise<RenderResult | null> => {
+  try {
+    if (!(await isPlantUmlReachable())) return null
+    return await renderAll(projectId, options)
+  } catch (err) {
+    console.warn(`[diagram] vẽ lại diagram lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */
 export const staleDiagrams = (spine: Spine): Diagram[] =>
   spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== computeSourceHash(spine, d))
+
+/**
+ * Hình ĐÃ vẽ thành công nhưng dữ liệu nguồn đã đổi sau đó — đúng tập hợp mà luật cờ `diagram_stale` bắt.
+ * Khác `staleDiagrams` ở chỗ bỏ qua hình chưa từng vẽ (hash rỗng/legacy): vẽ lại chúng tự động là đi làm
+ * việc của step render, không phải sửa hậu quả của step vừa chạy (FLF-177 BUG-17).
+ */
+export const staleRenderedDiagrams = (spine: Spine): Diagram[] =>
+  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d))
 
 export const loadDiagramFile = async (
   projectId: string,

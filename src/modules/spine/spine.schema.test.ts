@@ -3,6 +3,8 @@ import path from "node:path"
 import { describe, it, expect } from "vitest"
 import {
   actorSchema,
+  baselineSchema,
+  baselineSnapshotSchema,
   changeSchema,
   serializeJsonSchema,
   spineSchema,
@@ -140,7 +142,7 @@ const sampleSpine = (): Spine => {
   ]
   s.sections = [{ id: "fixed:1", asset_version: "1.0.0" }]
   s.baselines = [
-    { id: "B1", version: "v1.0-conditional", at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 1 }
+    { id: "B1", version: "v1.0-conditional", type: "generated", doc_version: null, at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 1 }
   ]
   s.spine_version = 5
   return s
@@ -214,6 +216,107 @@ describe("spineSchema", () => {
 
     const s = sampleSpine()
     s.steps[0].accepted_at = "hôm qua"
+    expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+})
+
+describe("project.system_name (FLF-177)", () => {
+  it("Spine cũ không có system_name ⇒ đọc ra null; có tên ⇒ giữ nguyên", () => {
+    const legacy = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete legacy.project.system_name
+    expect(spineSchema.parse(legacy).project.system_name).toBeNull()
+
+    const named = createEmptySpine({ name: "Old" })
+    named.project.system_name = "ShipFast"
+    expect(spineSchema.parse(named).project.system_name).toBe("ShipFast")
+  })
+
+  it("snapshot baseline cũ thiếu system_name vẫn parse được", () => {
+    const snapshot = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete snapshot.project.system_name
+    const parsed = baselineSnapshotSchema.parse({ projectId: "650000000000000000000001", version: "v1.0", at: AT, checked_at_version: 1, waived_count: 0, snapshot })
+    expect(parsed.snapshot.project.system_name).toBeNull()
+  })
+})
+
+describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1)", () => {
+  const legacy = { id: "B1", version: "v1.0", at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 0 }
+
+  it("baseline cũ (trước FLF-171) không có type/doc_version ⇒ đọc ra generated / null", () => {
+    const parsed = baselineSchema.parse(legacy)
+    expect(parsed.type).toBe("generated")
+    expect(parsed.doc_version).toBeNull()
+  })
+
+  it("Spine cũ có baselines thiếu field mới vẫn hợp lệ", () => {
+    const s = createEmptySpine({ name: "Old" }) as unknown as Record<string, unknown>
+    s.baselines = [legacy]
+    const result = spineSchema.safeParse(s)
+    expect(result.success, result.error?.message).toBe(true)
+    expect(result.data?.baselines[0].type).toBe("generated")
+  })
+
+  it.each(["imported", "release"] as const)("mode 1: type %s kèm doc_version", (type) => {
+    const parsed = baselineSchema.parse({ ...legacy, version: type === "imported" ? "0.0" : "1.0", type, doc_version: type === "imported" ? "0.0" : "1.0" })
+    expect(parsed.type).toBe(type)
+    expect(parsed.doc_version).toBe(type === "imported" ? "0.0" : "1.0")
+  })
+
+  it.each<[string, Record<string, unknown>]>([
+    ["type lạ", { type: "draft" }],
+    ["doc_version rỗng", { doc_version: "" }]
+  ])("từ chối %s", (_label, patch) => {
+    expect(baselineSchema.safeParse({ ...legacy, ...patch }).success).toBe(false)
+  })
+
+  it("snapshot baseline cũ trong collection baselines vẫn parse được", () => {
+    const parsed = baselineSnapshotSchema.parse({ projectId: "650000000000000000000001", version: "v1.0", at: AT, checked_at_version: 1, waived_count: 0, snapshot: createEmptySpine({ name: "Old" }) })
+    expect(parsed.type).toBe("generated")
+    expect(parsed.doc_version).toBeNull()
+  })
+})
+
+describe("mode 1 v2 — steps skipped + custom_sections (FLF-182, contract-change)", () => {
+  const custom = {
+    id: "CS01",
+    heading: "Phụ lục A — Biên bản họp",
+    level: 1,
+    source: "import" as const,
+    blocks: [
+      { kind: "paragraph" as const, text: "Họp ngày 12/09", rows: null, image_ref: null },
+      { kind: "table" as const, text: "", rows: [["Ngày", "Nội dung"], ["12/09", "Chốt phạm vi"]], image_ref: null },
+      { kind: "image" as const, text: "Sequence diagram", rows: null, image_ref: "media/image3.png" }
+    ]
+  }
+
+  it("Spine cũ không có custom_sections ⇒ đọc ra []", () => {
+    const s = createEmptySpine({ name: "Old" }) as unknown as Record<string, unknown>
+    delete s.custom_sections
+    expect(spineSchema.parse(s).custom_sections).toEqual([])
+  })
+
+  it("nhận step skipped và mục riêng đủ loại khối", () => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.steps = [{ id: "B-0.1", status: "skipped", first_seq: null, last_seq: null, accepted_at: null }]
+    s.custom_sections = [custom]
+    const result = spineSchema.safeParse(s)
+    expect(result.success, result.error?.message).toBe(true)
+  })
+
+  it.each<[string, Record<string, unknown>]>([
+    ["kind khối lạ", { blocks: [{ kind: "chart", text: "", rows: null, image_ref: null }] }],
+    ["level ngoài 1–9", { level: 0 }],
+    ["source lạ", { source: "ai" }],
+    ["khối thiếu image_ref (strict)", { blocks: [{ kind: "paragraph", text: "x", rows: null }] }]
+  ])("từ chối mục riêng: %s", (_label, patch) => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.custom_sections = [{ ...custom, ...patch } as never]
+    expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+
+  it("từ chối step status lạ", () => {
+    const s = createEmptySpine({ name: "Lumen" })
+    s.steps = [{ id: "B-0.1", status: "hidden" as never, first_seq: null, last_seq: null, accepted_at: null }]
     expect(spineSchema.safeParse(s).success).toBe(false)
   })
 })

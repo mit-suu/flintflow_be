@@ -29,7 +29,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 - User request (verbatim): {{user_message}}
 - Session is pipeline session: {{is_pipeline}}
 - Baseline exists: {{has_baseline}}
-- Projection around the target (keyed): {{projection}}
+- Projection around the target (keyed): {{projection}} — `existing_ids` lists the ids that exist right now
 - Glossary / proper names: {{glossary}}
 - For `reconcile` — the owning step `{{step_id}}` ({{step_name}}), the paths it may write `{{writable_paths}}`, and the stale section with the exact changes that made it stale: {{stale_sections}}
 
@@ -38,10 +38,27 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
 2. **Ambiguous?** Several possible targets, or the intent could mean different fields → return `clarification_needed` with **one** short question in the user's language, and no ops.
 3. **Minimal batch.** Change exactly what was asked. Do not polish neighbouring text, do not rewrite a section.
+3b. **Adding something new** is `add` into the array, and you **leave `id` out** — the server assigns the next
+   id in that collection's format. Never invent an id (`UC18`, `UC-REMIND`): if it clashes with an existing
+   one your `set` silently overwrites someone else's element, and if it does not exist the batch dies with
+   `path_not_resolved`. Need to point at the new element later in the same batch? Give it a temporary id
+   `"$new1"` and reuse that string — the server swaps it for the real id everywhere.
+   ```json
+   { "op": "add", "path": "use_cases[]", "value": { "name": "Send Appointment Reminder", "actor_ids": ["$new2"], "description": "…" } }
+   ```
+3c. **Removing** one element is `remove` with the element path: `remove use_cases[id=UC07]`,
+   `remove functions[id=FN005].validations[id=FN005-V2]`. Do not "remove" by setting the array to a shorter
+   list — that is how whole elements vanish without a diff line.
+3d. **Elements inside an element** (a function's `validations`) are added and removed one by one, exactly the
+   same way. Sending the whole `validations` array is accepted but it is read as "make it look like this":
+   anything missing from your list is deleted.
 4. **Cascade** deletes in the same batch (`draft-to-ops/references/invariants.md`). If the change necessarily breaks an invariant (e.g. deleting the last screen), return `clarification_needed` explaining what blocks it.
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place — do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the user's language — it becomes the §I Record of Changes line.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
+8. **Only touch what the request names.** An element the user did not mention must come out of this batch
+   unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
+   overwritten in the UI test.
 
 ## Reconcile (`reconcile`)
 

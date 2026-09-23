@@ -1,5 +1,5 @@
 /**
- * §1 System Context — source_fields: `project.name` · `actors[].name/.kind/.flows_in/.flows_out` ·
+ * §1 System Context — source_fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out` ·
  * `use_cases[].name/.actor_ids` (srs-spine §7.1). Sơ đồ luồng dữ liệu mức 0: hệ thống là vòng tròn ở
  * giữa, actor là hình chữ nhật xếp thành vòng quanh nó.
  *
@@ -12,6 +12,7 @@
  */
 
 import type { Actor, Spine } from "../../spine/spine.types.js"
+import { systemName } from "../../spine/system-name.js"
 import type { Renderer } from "./common.js"
 import { alias, byId, label, puml } from "./common.js"
 
@@ -74,7 +75,7 @@ export const renderContext: Renderer = (spine) => {
     "skinparam ranksep 110",
     "skinparam usecaseFontSize 16",
     // usecase vẽ hình ellipse; dòng trống trên/dưới để thành vòng tròn lớn
-    `usecase "\\n\\n   ${label(spine.project.name) || "System"}   \\n\\n" as ${SYSTEM_ALIAS}`,
+    `usecase "\\n\\n   ${label(systemName(spine.project)) || "System"}   \\n\\n" as ${SYSTEM_ALIAS}`,
     ...actors.map((a) => `rectangle "${label(a.name)}" as ${alias(a.id)}`),
     ...actors.map((a, i) => edgeFor(spine, a, sideOf(i)))
   ]

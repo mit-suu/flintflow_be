@@ -15,6 +15,7 @@
  */
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
+import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
 
 /**
@@ -22,11 +23,12 @@ import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spin
  * (`assemble.service.ts`) đọc `Change` model trực tiếp với projection nhẹ này thay vì
  * `spine.repository.listChanges` (tải cả `before`/`value`, nặng không cần thiết cho §I).
  */
-export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id">
+export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string }
 import type {
   Block,
   BulletListBlock,
   HeadingBlock,
+  InlineRun,
   ImageBlock,
   NumberedListBlock,
   ParagraphBlock,
@@ -59,6 +61,120 @@ const tableBlock = (header: string[], rows: string[][]): TableBlock => ({
 })
 const image = (png: string, caption: string): ImageBlock => ({ type: "image", png, caption })
 
+// ─── nhãn cố định theo ngôn ngữ tài liệu (mode 1 v2 — FLF-184) ───
+
+/**
+ * Tiêu đề cột bảng, heading con, chú thích hình mà renderer tự sinh. Mặc định tiếng Anh (mode 2); tài liệu import
+ * tiếng Việt (`TemplateProfile.language = "vi"`) dùng bản dịch dưới — nội dung Spine giữ nguyên, chỉ đổi nhãn.
+ */
+const VI_LABELS: Readonly<Record<string, string>> = {
+  ID: "Mã",
+  Name: "Tên",
+  Kind: "Loại",
+  Description: "Mô tả",
+  Actors: "Tác nhân",
+  Screen: "Màn hình",
+  Type: "Kiểu",
+  Feature: "Chức năng",
+  Trigger: "Kích hoạt",
+  Entity: "Thực thể",
+  Relations: "Quan hệ",
+  Statement: "Yêu cầu",
+  Metric: "Chỉ số",
+  Threshold: "Ngưỡng",
+  Priority: "Ưu tiên",
+  Category: "Nhóm",
+  Code: "Mã",
+  Text: "Nội dung",
+  Functions: "Chức năng",
+  Term: "Thuật ngữ",
+  Native: "Tiếng Việt",
+  Definition: "Định nghĩa",
+  Goals: "Mục tiêu",
+  "Release 1.0 Scope": "Phạm vi phát hành 1.0",
+  "In Scope": "Trong phạm vi",
+  "Out of Scope": "Ngoài phạm vi",
+  "High-Level Business Rules": "Quy tắc nghiệp vụ tổng quát",
+  "External Systems": "Hệ thống bên ngoài",
+  "Normal Flow": "Luồng chính",
+  "Abnormal Flow": "Luồng ngoại lệ",
+  Validations: "Kiểm tra dữ liệu",
+  "Business Rules": "Quy tắc nghiệp vụ",
+  Screens: "Màn hình",
+  "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
+  "Use Case Diagram": "Sơ đồ use case",
+  "Screens Flow Diagram": "Sơ đồ luồng màn hình",
+  "Screens flow for": "Luồng màn hình của",
+  "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
+  "Screen Layout": "Bố cục màn hình"
+}
+
+/** Tiêu đề section FPT tiếng Việt — dùng khi assemble chèn mục FPT mà file người dùng không có. */
+const VI_SECTION_TITLES: Readonly<Record<string, string>> = {
+  "fixed:1": "Tổng quan sản phẩm",
+  "fixed:2.1": "Tác nhân",
+  "fixed:2.2.1": "Sơ đồ use case",
+  "fixed:2.2.2": "Đặc tả use case",
+  "fixed:3.1.1": "Luồng màn hình",
+  "fixed:3.1.2": "Mô tả màn hình",
+  "fixed:3.1.3": "Phân quyền màn hình",
+  "fixed:3.1.4": "Chức năng không có màn hình",
+  "fixed:3.1.5": "Sơ đồ quan hệ thực thể",
+  "fixed:4.1": "Giao tiếp hệ thống ngoài",
+  "fixed:4.2.1": "Tính khả dụng",
+  "fixed:4.2.2": "Độ tin cậy",
+  "fixed:4.2.3": "Hiệu năng",
+  "fixed:4.2.4": "Thuộc tính đặc thù",
+  "fixed:5.1": "Quy tắc nghiệp vụ",
+  "fixed:5.2": "Yêu cầu chung",
+  "fixed:5.3": "Danh sách thông báo",
+  "fixed:5.4": "Yêu cầu khác",
+  "fixed:5.5": "Thuật ngữ"
+}
+
+const isVietnamese = (language: string | undefined): boolean => !!language && language.toLowerCase().startsWith("vi")
+
+/** Nhãn cố định theo ngôn ngữ — thiếu bản dịch ⇒ giữ tiếng Anh. */
+export const labelFor = (language: string | undefined, text: string): string => (isVietnamese(language) ? (VI_LABELS[text] ?? text) : text)
+
+/** Tiêu đề mặc định của section FPT theo ngôn ngữ (feature/function: tên phần tử). */
+export const defaultSectionTitle = (spine: Spine, sectionId: string, language?: string): string =>
+  (isVietnamese(language) ? VI_SECTION_TITLES[sectionId] : undefined) ?? headingAndLevel(spine, sectionId).heading
+
+/** Chú thích hình: dịch phần đầu (`Use Case Diagram (1/2)`, `Screen Layout — Login`), giữ phần sau. */
+const localizeCaption = (language: string | undefined, caption: string): string => {
+  const prefix = Object.keys(VI_LABELS).find((k) => caption === k || caption.startsWith(`${k} `))
+  return prefix ? `${labelFor(language, prefix)}${caption.slice(prefix.length)}` : caption
+}
+
+/**
+ * Dịch nhãn do renderer tự sinh trong khối đã dựng: tiêu đề cột, heading con, nhãn in đậm `Trigger: `, chú thích hình.
+ * Làm sau khi dựng để các hàm dựng nội dung giữ nguyên (mode 2 không đổi) — ô dữ liệu Spine không bị đụng.
+ */
+const localizeBlocks = (blocks: Block[], language: string | undefined): Block[] => {
+  if (!isVietnamese(language)) return blocks
+  const run = (r: InlineRun): InlineRun => ({ ...r, text: labelFor(language, r.text) })
+  return blocks.map((b): Block => {
+    switch (b.type) {
+      case "heading":
+        return { ...b, text: labelFor(language, b.text) }
+      case "table":
+        return { ...b, header: b.header.map((c) => c.map(run)) }
+      case "image":
+        return b.caption === undefined ? b : { ...b, caption: localizeCaption(language, b.caption) }
+      case "paragraph": {
+        const [first, ...rest] = b.runs
+        const label = first?.bold ? /^(.+): $/.exec(first.text) : null
+        if (label) return { ...b, runs: [{ ...first, text: `${labelFor(language, label[1])}: ` }, ...rest] }
+        const screens = !first?.bold && first ? /^Screens: /.exec(first.text) : null
+        return screens ? { ...b, runs: [{ ...first, text: `${labelFor(language, "Screens")}: ${first.text.slice(screens[0].length)}` }, ...rest] } : b
+      }
+      default:
+        return b
+    }
+  })
+}
+
 // ─── context tiêm từ assemble.service ────────────────────────────
 
 export interface SectionRenderContext {
@@ -73,6 +189,8 @@ export interface SectionRenderContext {
   diagramPng: (diagramId: string) => string | undefined
   /** Số hiệu của section khác (khoá logic → số hiển thị) — dùng khi cần trỏ chéo, cấm số cứng. */
   numberOf: (logicalSectionId: string) => string | undefined
+  /** Ngôn ngữ nhãn cố định (`TemplateProfile.language` của tài liệu import); không có ⇒ tiếng Anh. */
+  language?: string
 }
 
 // ─── heading/level của section ────────────────────────────────────
@@ -104,7 +222,9 @@ const diagramImages = (
   kind: DiagramKind,
   ownerId: string | undefined,
   ctx: SectionRenderContext,
-  captionBase: string
+  captionBase: string,
+  /** Chú thích riêng từng hình (vd. tiêu đề sơ đồ theo actor); `null` ⇒ dùng `captionBase`. */
+  captionOf: (d: Spine["diagrams"][number]) => string | null = () => null
 ): ImageBlock[] => {
   const parts = spine.diagrams.filter(
     (d) => d.kind === kind && d.render_status === "ok" && (ownerId === undefined || d.owner_id === ownerId)
@@ -112,7 +232,7 @@ const diagramImages = (
   const out: ImageBlock[] = []
   parts.forEach((d, i) => {
     const png = ctx.diagramPng(d.id)
-    if (png) out.push(image(png, parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase))
+    if (png) out.push(image(png, captionOf(d) ?? (parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase)))
   })
   return out
 }
@@ -151,21 +271,22 @@ const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
 
 const useCaseTable = (spine: Spine): Block[] => {
   if (spine.use_cases.length === 0) return []
-  const actorName = (id: string) => spine.actors.find((a) => a.id === id)?.name ?? id
+  // Id không phân giải được thì in id: bảng không ném lỗi khi Spine có id chết, đó là việc của
+  // cờ đỏ `dead_reference`.
+  const nameOf = (list: readonly { id: string; name: string }[]) => (id: string) => list.find((x) => x.id === id)?.name ?? id
+  const actorName = nameOf(spine.actors)
+  const useCaseName = nameOf(spine.use_cases)
+  // Bốn cột đầu lấy nguyên văn mẫu FPT §2.2.2; Includes/Extends là phần mở rộng.
   return [
     tableBlock(
-      ["ID", "Name", "Actors", "Description", "Include / Extend"],
+      ["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"],
       spine.use_cases.map((uc) => [
         uc.id,
         uc.name,
         uc.actor_ids.map(actorName).join(", "),
         uc.description,
-        [
-          uc.includes.length > 0 ? `include: ${uc.includes.join(", ")}` : "",
-          uc.extends.length > 0 ? `extend: ${uc.extends.join(", ")}` : ""
-        ]
-          .filter(Boolean)
-          .join("; ")
+        uc.includes.map(useCaseName).join(", "),
+        uc.extends.map(useCaseName).join(", ")
       ])
     )
   ]
@@ -173,22 +294,12 @@ const useCaseTable = (spine: Spine): Block[] => {
 
 // ─── §3.1 System Functional Overview (section cố định) ────────────
 
-const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] => {
-  const blocks: Block[] = diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram")
-  if (spine.screens.length > 0) {
-    blocks.push(
-      tableBlock(
-        ["Screen", "Type", "Flows To"],
-        spine.screens.map((s) => [
-          s.name,
-          s.is_popup ? "Popup" : s.tabs.length > 0 ? `Tabbed (${s.tabs.join(", ")})` : "Full page",
-          s.flow_to.map((id) => spine.screens.find((x) => x.id === id)?.name ?? id).join(", ")
-        ])
-      )
-    )
-  }
-  return blocks
-}
+// Chỉ còn sơ đồ luồng màn — bảng Screen | Type | Flows To đã bỏ khỏi cả bản draft lẫn baseline
+/** Sơ đồ tách theo actor mang tiêu đề `Screens flow for <actor>` — dùng luôn làm chú thích ảnh. */
+const flowTitle = (d: Spine["diagrams"][number]): string | null => screenFlowTitleOf(d.puml)
+
+const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] =>
+  diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", flowTitle)
 
 const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (spine.screens.length === 0) return []
@@ -362,7 +473,7 @@ export function renderSection(spine: Spine, sectionId: string, ctx: SectionRende
     number: ctx.number,
     heading: title,
     level,
-    blocks: blocksFor(spine, sectionId, ctx)
+    blocks: localizeBlocks(blocksFor(spine, sectionId, ctx), ctx.language)
   }
   if (ctx.status !== undefined) section.status = ctx.status
   if (ctx.awaiting_reaccept !== undefined) section.awaiting_reaccept = ctx.awaiting_reaccept
@@ -392,6 +503,42 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
  * không cần DB).
  */
+/**
+ * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
+ * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
+ */
+const INTERNAL_REASON =
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ )/
+
+/** Câu do máy sinh → tiếng Anh; câu do user viết giữ nguyên (đó là lời của chính họ). */
+const ENGLISH_DESCRIPTION: readonly { re: RegExp; to: (m: RegExpExecArray) => string }[] = [
+  { re: /^Ký baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
+  { re: /^Baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
+  { re: /^Hoà giải section stale$/, to: () => "Stale sections reconciled" },
+  { re: /^Hoà giải: user xác nhận nội dung không đổi$/, to: () => "Reviewed: content still correct" },
+  { re: /^sửa sau baseline$/, to: () => "Edited after baseline" }
+]
+
+const toEnglish = (description: string): string => {
+  for (const rule of ENGLISH_DESCRIPTION) {
+    const match = rule.re.exec(description)
+    if (match) return rule.to(match)
+  }
+  return description
+}
+
+const isBaselineTxn = (group: readonly ChangeRecordRow[]): boolean => group.some((c) => (c.path ?? "").startsWith("baselines["))
+
+/**
+ * §I giữ lại **quyết định của người** và **các mốc baseline**; bỏ sổ sách của runner.
+ * Một lô chỉ được giữ khi nó chạm `baselines[]`, hoặc mang ít nhất một `reason` do người viết
+ * (yêu cầu sửa, lệnh sửa qua chat, lý do waive).
+ */
+export const keepInRecordOfChanges = (group: readonly ChangeRecordRow[]): boolean => {
+  if (isBaselineTxn(group)) return true
+  return group.some((c) => c.reason !== null && c.reason.trim() !== "" && !INTERNAL_REASON.test(c.reason))
+}
+
 export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge: (by: string) => string = (by) => by): RocRow[] {
   const order: string[] = []
   const groups = new Map<string, ChangeRecordRow[]>()
@@ -403,17 +550,21 @@ export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge
       order.push(change.txn)
     }
   }
-  return order.map((txn, i) => {
+  return order.flatMap((txn, i) => {
     const group = groups.get(txn) as ChangeRecordRow[]
+    if (!keepInRecordOfChanges(group)) return []
     const first = group[0]
-    const reasons = [...new Set(group.map((c) => c.reason).filter((r): r is string => !!r))]
-    return {
-      date: first.at.slice(0, 10),
-      version: `v0.${i + 2}`,
-      change_type: changeTypeOf(new Set(group.map((c) => c.op))),
-      in_charge: resolveInCharge(first.by),
-      description: reasons.length > 0 ? reasons.join("; ") : first.step_id ? `Step ${first.step_id}` : "Spine updated"
-    }
+    const reasons = [...new Set(group.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r)))]
+    const description = reasons.length > 0 ? reasons.map(toEnglish).join("; ") : isBaselineTxn(group) ? "Baseline signed" : "Document updated"
+    return [
+      {
+        date: first.at.slice(0, 10),
+        version: `v0.${i + 2}`,
+        change_type: changeTypeOf(new Set(group.map((c) => c.op))),
+        in_charge: resolveInCharge(first.by),
+        description
+      }
+    ]
   })
 }
 

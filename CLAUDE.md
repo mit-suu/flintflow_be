@@ -19,6 +19,7 @@ npm test -- src/modules/spine/          # chạy một thư mục
 npm run build        # tsc -p tsconfig.build.json
 npm run seed:fixture # nạp fixtures/spine-fixture-19-screens.json vào Mongo
 npm run migrate:sections -- --dry-run   # chuyển project cũ (collection `sections`) sang Spine, ghi docs/migration-report.md
+npm run eval:usecase-s3 -- --label X --runs 3   # đo chất lượng S-3 (actor/use case/include-extend) bằng provider thật, fixtures/s3-eval
 ```
 
 Node 22, ESM (`"type": "module"`) — **mọi import nội bộ phải có đuôi `.js`** kể cả khi file nguồn là `.ts`.
@@ -84,13 +85,13 @@ lường trước trong `pipeline.dto.ts`.
 | Đường dẫn | Việc |
 |---|---|
 | `modules/spine/` | Spine schema/model/repository; op engine, path resolver, cascade, 8 bất biến |
-| `modules/spine/{section-registry,section-status,deterministic-check,flags.service}.ts` | Section theo template FPT, status là hàm tính, 10 luật cờ đỏ + 6 cờ vàng |
+| `modules/spine/{section-registry,section-status,deterministic-check,flags.service}.ts` | Section theo template FPT, status là hàm tính, 11 luật cờ đỏ + 11 cờ vàng |
 | `modules/spine/{impact,change,reconcile,undo,traceability}.service.ts` | Sửa qua hội thoại: impact query, 3 nhánh, hoà giải, undo, bản đồ truy vết |
 | `modules/pipeline/` | Step registry, projection, draft-to-ops, step runner, gate, meter, resume |
 | `modules/diagram/` | 5 renderer PlantUML + compile-check + lưu file |
 | `modules/render/` | Assemble section → `RenderedDocument` → `.docx` |
 | `modules/pipeline/s9/` | Quét cuối, đối chiếu mục tiêu, MoSCoW, ký baseline + snapshot |
-| `modules/{notification,billing,credits,admin,project,user,auth}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`) |
+| `modules/{notification,billing,credits,admin,project,user,auth,feedback,folder}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`, `mode` — `import` | `fpt` | `customer_template`, mặc định `fpt`, xem `project.model.ts`; `folderId` — thư mục, `PATCH /projects/:id/folder`). `folder`: CRUD `/folders`, `POST /folders/:id/projects` thêm nhiều dự án, xoá thư mục giữ dự án. `lastOpenedAt` ghi khi `GET /projects/:id`. `feedback`: `POST /feedback` (UC-12), admin đọc qua `GET /admin/feedback` |
 | `shared/ai/` | `ActionType`, prompt registry, response parser, provider, context tài liệu upload |
 | `assets/skills/` | 32 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
 | `assets/prompts/` | Prompt phẳng chỉ cho `chat`, `summarize_document` |

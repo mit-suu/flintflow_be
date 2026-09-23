@@ -5,6 +5,7 @@ Nguồn sự thật cho mọi prompt của pipeline B-0 → S-9 (`Product-Brief-
 ```text
 assets/skills/
 ├─ action/     10 skill hành động dùng chung mọi phase (Phases §3, §8.2 nhóm A)
+│              + 5 skill mode 1 (import-*, cr-*; FLF-171, khung `stub` tới P2)
 ├─ content/    13 skill nội dung theo phase (nhóm B + product-brief)
 ├─ renderer/   5 renderer PlantUML (Phases §7.1)
 ├─ output/     2 skill đầu ra cuối (assemble, completeness score)
@@ -46,6 +47,11 @@ stub: true                      # tuỳ chọn — skill chờ task sau điền 
 | `review` | `{flags: [{level, rule_id?, section_id, message}]}` | review, consistency_pass |
 | `changeInstruction` | `{clarification_needed?, txn?, ops?, notes?}` | change_instruction |
 | `renderFix` | `{puml, notes?}` | render_fix |
+| `importExtract` | `{section_id, items: [{entity, key, value, confidence, field_confidence, source_block_ids}], unmapped_block_ids}` | import_extract_fields (mode 1) |
+| `importExtractDiagram` | `importExtract` + `diagram_kind: usecase \| erd \| screen_flow \| context \| other` — một ảnh kèm prompt (Gemini) | import_extract_diagram (mode 1 v3 phase 5) |
+| `findings` | `{findings: [{rule, section_id, message, block_ids}]}` — chỉ cờ vàng | import_semantic_check, cr_consistency (mode 1) |
+| `crClarify` | `{ambiguous, questions[], targets: {entity_paths[], keywords[]}}` | cr_clarify (mode 1) |
+| `crPropose` | `{locations: [{location_id, conclusion, reason, new_text?, comment_text?, spine_ops}]}` | cr_propose (mode 1) |
 | `puml` | text `.puml` (renderer, T10 chốt) | — |
 | `none` | không gọi model — skill mô tả logic tất định cho code | — |
 

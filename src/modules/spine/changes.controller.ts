@@ -33,6 +33,7 @@ import { getProjectById } from "../project/project.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
 
@@ -40,6 +41,8 @@ interface Authorized {
   projectId: string
   userId: string
   init: spineRepository.SpineInit
+  /** FLF-171: project mode 1 không sửa Spine trực tiếp (G9, BR-03). */
+  mode: string
 }
 
 /**
@@ -55,7 +58,21 @@ const authorize = async (req: Request): Promise<Authorized> => {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
   const project = await getProjectById(projectId, userId)
-  return { projectId, userId, init: { name: project.name, domain: project.domain ?? null } }
+  return { projectId, userId, init: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
+}
+
+const rawInstruction = (req: Request): string | undefined =>
+  typeof req.body?.instruction === "string" ? req.body.instruction : undefined
+
+/** Mode 1 đã import xong (mode 1 v3, BPMN Flow 1 ⇒ 3.1): mọi sửa phải qua change request. */
+const mode1RequiresCr = async (auth: Authorized): Promise<boolean> => auth.mode === "import" && (await changesRequireCr(auth.projectId))
+
+/**
+ * Lời gọi **có ghi** (`/changes`, `/reconcile`, `/undo`) ở mode 1 sau v0 ⇒ `409 CHANGE_REQUIRES_CR` kèm nội dung
+ * điền sẵn cho form 3.1. Không tự tạo CR (3.1 là việc của BA: nguồn + người yêu cầu bắt buộc).
+ */
+const guardMode1 = async (auth: Authorized, instruction: string | undefined, fallback: string): Promise<void> => {
+  if (await mode1RequiresCr(auth)) throw changeRequiresCr(prefillFrom(instruction, fallback, { kind: "verbal", ref: null }))
 }
 
 const parse = <T extends z.ZodType>(schema: T, value: unknown): z.infer<T> => {
@@ -77,6 +94,7 @@ const sendDomainError = (res: Response, err: unknown): Response => {
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
+  await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(changesRequestSchema, req.body)
   try {
     const result = await changeService.apply(auth.projectId, auth.userId, body, auth.init)
@@ -93,9 +111,12 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
 
 export const previewChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
+  // Xem trước chỉ đọc ⇒ luôn chạy. Mode 1 sau v0: `meta.requires_cr` — bản xem trước dùng để soạn CR (3.1), không áp.
+  const requiresCr = await mode1RequiresCr(auth)
   const body = parse(changesRequestSchema, req.body)
   try {
-    return sendSuccess(res, 200, await changeService.preview(auth.projectId, auth.userId, body, auth.init))
+    const result = await changeService.preview(auth.projectId, auth.userId, body, auth.init)
+    return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
   } catch (err) {
     return sendDomainError(res, err)
   }
@@ -103,6 +124,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
+  await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(reconcileRequestSchema, req.body)
   try {
     const result = await reconcileService.reconcile(auth.projectId, auth.userId, body, auth.init)
@@ -120,6 +142,7 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
 
 export const undoLastChange = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
+  await guardMode1(auth, rawInstruction(req), "Hoàn tác thay đổi gần nhất")
   const body = parse(undoRequestSchema, req.body)
   try {
     const result = await undoService.undoLast(auth.projectId, auth.userId, { base_version: body.base_version })

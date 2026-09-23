@@ -1,0 +1,335 @@
+{
+  "name": "mediqueue",
+  "expected_personas": [
+    {
+      "persona": "Patient",
+      "keywords": [
+        "patient"
+      ]
+    },
+    {
+      "persona": "Receptionist",
+      "keywords": [
+        "reception",
+        "front desk"
+      ]
+    },
+    {
+      "persona": "Doctor / Nurse",
+      "keywords": [
+        "doctor",
+        "nurse",
+        "clinician",
+        "physician",
+        "clinical",
+        "medical staff"
+      ]
+    },
+    {
+      "persona": "Clinic Administrator",
+      "keywords": [
+        "admin",
+        "manager",
+        "owner"
+      ]
+    }
+  ],
+  "spine": {
+    "project": {
+      "name": "MediQueue",
+      "vision": "Replace paper queue numbers and phone bookings in multi-branch outpatient clinics with online booking and a live queue that patients, front desk and doctors all trust.",
+      "goals": [
+        "Cut median patient wait time from 65 to under 25 minutes",
+        "Get at least 60% of visits booked online within 6 months",
+        "Keep the no-show rate under 10% through reminders",
+        "Keep receptionist handling time per booking under 90 seconds"
+      ],
+      "type": "new_product",
+      "domain": "Healthcare",
+      "complexity": "medium",
+      "form_factor": "responsive_web",
+      "stakes": "production",
+      "working_mode": "fast",
+      "release_scope": {
+        "in": [
+          "Online appointment booking with slot picking, for the patient or a family member",
+          "Walk-in ticket issuing at a self check-in kiosk",
+          "Live queue board per consultation room",
+          "Doctor consultation console showing the current and next patient",
+          "Visit fee payment by QR",
+          "Automatic SMS and email reminders 24 hours and 2 hours before an appointment; expiry of no-show tickets",
+          "Clinic admin setup of branches, rooms, doctor schedules and holidays, plus a utilisation report"
+        ],
+        "out": [
+          "Telemedicine video consultation",
+          "Insurance claim submission",
+          "Pharmacy stock management",
+          "Lab result storage"
+        ]
+      }
+    },
+    "progress": {
+      "current_phase": "S-3",
+      "current_step": "S-3.1",
+      "screen_cursor": null,
+      "screen_queue": [],
+      "elicit_turns_this_phase": 0
+    },
+    "steps": [
+      {
+        "id": "B-0.1",
+        "status": "accepted",
+        "first_seq": 1,
+        "last_seq": 3,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-0.2",
+        "status": "accepted",
+        "first_seq": 4,
+        "last_seq": 6,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-0.3",
+        "status": "accepted",
+        "first_seq": 7,
+        "last_seq": 9,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-0.4",
+        "status": "accepted",
+        "first_seq": 10,
+        "last_seq": 12,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.1",
+        "status": "accepted",
+        "first_seq": 13,
+        "last_seq": 15,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.2",
+        "status": "accepted",
+        "first_seq": 16,
+        "last_seq": 18,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.3",
+        "status": "accepted",
+        "first_seq": 19,
+        "last_seq": 21,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.4",
+        "status": "accepted",
+        "first_seq": 22,
+        "last_seq": 24,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.5",
+        "status": "accepted",
+        "first_seq": 25,
+        "last_seq": 27,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.6",
+        "status": "accepted",
+        "first_seq": 28,
+        "last_seq": 30,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-2.1",
+        "status": "accepted",
+        "first_seq": 31,
+        "last_seq": 33,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-2.2",
+        "status": "accepted",
+        "first_seq": 34,
+        "last_seq": 36,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-2.3",
+        "status": "accepted",
+        "first_seq": 37,
+        "last_seq": 39,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.1",
+        "status": "accepted",
+        "first_seq": 40,
+        "last_seq": 42,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.2",
+        "status": "accepted",
+        "first_seq": 43,
+        "last_seq": 45,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.3",
+        "status": "accepted",
+        "first_seq": 46,
+        "last_seq": 48,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.4",
+        "status": "accepted",
+        "first_seq": 49,
+        "last_seq": 51,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.1",
+        "status": "accepted",
+        "first_seq": 52,
+        "last_seq": 54,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.2",
+        "status": "accepted",
+        "first_seq": 55,
+        "last_seq": 57,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.3",
+        "status": "accepted",
+        "first_seq": 58,
+        "last_seq": 60,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.4",
+        "status": "accepted",
+        "first_seq": 61,
+        "last_seq": 63,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.5",
+        "status": "accepted",
+        "first_seq": 64,
+        "last_seq": 66,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      }
+    ],
+    "features": [],
+    "actors": [
+      {
+        "id": "A01",
+        "name": "Payment Gateway",
+        "kind": "system",
+        "description": "VietQR provider that takes visit fee payments by QR and reports the result through an asynchronous webhook."
+      },
+      {
+        "id": "A02",
+        "name": "SMS Gateway",
+        "kind": "system",
+        "description": "Outbound SMS provider that delivers appointment reminders and queue-turn messages to patients."
+      },
+      {
+        "id": "A03",
+        "name": "Email Service",
+        "kind": "system",
+        "description": "Transactional email provider that sends booking confirmations."
+      },
+      {
+        "id": "A04",
+        "name": "Medical Record System",
+        "kind": "system",
+        "description": "The clinic's existing electronic medical record system that supplies patient demographics and receives visit summaries through a nightly file exchange."
+      }
+    ],
+    "roles": [],
+    "use_cases": [],
+    "screens": [],
+    "permissions": [],
+    "entities": [],
+    "functions": [],
+    "nfrs": [],
+    "business_rules": [
+      {
+        "id": "BR01",
+        "tier": "high",
+        "statement": "A booked appointment keeps its slot until 10 minutes after the start time, then becomes a no-show.",
+        "source_validation_ids": []
+      },
+      {
+        "id": "BR02",
+        "tier": "high",
+        "statement": "Patient personal data is encrypted at rest and in transit and every access is audited.",
+        "source_validation_ids": []
+      }
+    ],
+    "common_requirements": [],
+    "messages": [],
+    "other_requirements": [],
+    "glossary": [],
+    "addendum": [
+      {
+        "id": "AD01",
+        "topic": "Users",
+        "content": "Patients book for themselves or a family member; receptionists at the front desk issue tickets and handle phone bookings; doctors and nurses in consultation rooms call the next patient; clinic administrators manage branches, rooms, schedules and reports.",
+        "content_en": "Patients book for themselves or a family member; receptionists at the front desk issue tickets and handle phone bookings; doctors and nurses in consultation rooms call the next patient; clinic administrators manage branches, rooms, schedules and reports.",
+        "target_section": "fixed:2.1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD02",
+        "topic": "Problem",
+        "content": "Patients queue physically from 6am for a paper number, receptionists juggle phone bookings on spreadsheets, doctors have no reliable view of who is next, and owners cannot see utilisation across branches.",
+        "content_en": "Patients queue physically from 6am for a paper number, receptionists juggle phone bookings on spreadsheets, doctors have no reliable view of who is next, and owners cannot see utilisation across branches.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD03",
+        "topic": "Integrations",
+        "content": "VietQR payment gateway (QR payment plus an asynchronous payment-result webhook); an SMS gateway for reminder and queue-turn messages; a transactional email service for booking confirmations; the clinic's existing electronic medical record system, read for patient demographics and written with visit summaries over a nightly file exchange.",
+        "content_en": "VietQR payment gateway (QR payment plus an asynchronous payment-result webhook); an SMS gateway for reminder and queue-turn messages; a transactional email service for booking confirmations; the clinic's existing electronic medical record system, read for patient demographics and written with visit summaries over a nightly file exchange.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD04",
+        "topic": "Scheduled jobs",
+        "content": "A background job sends reminders 24 hours and 2 hours before each appointment and expires no-show tickets.",
+        "content_en": "A background job sends reminders 24 hours and 2 hours before each appointment and expires no-show tickets.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD05",
+        "topic": "Priority rules",
+        "content": "Walk-in versus booked priority rules differ per branch; some branches need the kiosk to work briefly offline.",
+        "content_en": "Walk-in versus booked priority rules differ per branch; some branches need the kiosk to work briefly offline.",
+        "target_section": "fixed:5.4",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      }
+    ],
+    "diagrams": [],
+    "assumptions": [],
+    "flags": [],
+    "sections": [],
+    "baselines": [],
+    "spine_version": 1
+  }
+}

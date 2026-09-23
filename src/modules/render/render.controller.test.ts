@@ -107,10 +107,17 @@ describe("GET /projects/:projectId/document", () => {
     expect(getDocument).toHaveBeenCalledWith(PROJECT, "Demo", { source: "draft" })
   })
 
-  it("409 NO_WORKING_DRAFT kèm meta.hint = S-8.2 khi chưa assemble", async () => {
+  it("FLF-177 BUG-31: chưa ghép bản nháp ⇒ 200 { state: not_assembled }, không phải lỗi 409", async () => {
     vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
     const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "draft" })
     expect(outcome.error).toBeUndefined()
+    expect(outcome.status).toBe(200)
+    expect(outcome.body).toMatchObject({ data: null, meta: { state: "not_assembled", hint: "S-8.2" } })
+  })
+
+  it("source=baseline chưa ghép vẫn là lỗi thật 409 NO_WORKING_DRAFT", async () => {
+    vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
+    const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "baseline" })
     expect(outcome.status).toBe(409)
     expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" }, meta: { hint: "S-8.2" } })
   })

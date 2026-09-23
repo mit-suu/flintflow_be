@@ -28,8 +28,8 @@ describe("section registry", () => {
   })
 
   it("bảng field → section có đúng 34 dòng như srs-spine.md §4, key không trùng", () => {
-    expect(FIELD_SECTION_MAP).toHaveLength(34)
-    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(34)
+    expect(FIELD_SECTION_MAP).toHaveLength(35)
+    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(35)
   })
 
   it("listSections trên fixture: 20 cố định + 6 feature + 89 function, feature/function nằm giữa 3.1.5 và 4.1", () => {
@@ -76,6 +76,12 @@ describe("sectionsOfPath", () => {
     expect(sectionsOfPath(FIXTURE, "functions[id=FN001].order")).toEqual({ owner: [], reads: [], derived: [] })
   })
 
+  it("mục riêng custom_sections ⇒ chỉ section custom:<id> của chính nó (FLF-182)", () => {
+    expect(sectionsOfPath(FIXTURE, "custom_sections[id=CS01].blocks")).toEqual({ owner: ["custom:CS01"], reads: [], derived: [] })
+    expect(sectionsOfPath(FIXTURE, "custom_sections[]", { value: { id: "CS02" } }).owner).toEqual(["custom:CS02"])
+    expect(sectionsOfPath(FIXTURE, "custom_sections[]").owner).toEqual([])
+  })
+
   it("màn: tên đọc ra function của màn; primary_function_id suy dẫn wireframe của đúng màn", () => {
     const impact = sectionsOfPath(FIXTURE, "screens[id=S07].name")
     expect(impact.owner).toEqual(["fixed:3.1.2"])
@@ -92,5 +98,13 @@ describe("sectionsOfPath", () => {
       expect(sectionsOfPath(FIXTURE, p), p).toEqual({ owner: [], reads: [], derived: [] })
     }
     expect(sectionsOfPath(FIXTURE, "$").owner).toHaveLength(115)
+  })
+})
+
+describe("project.system_name (FLF-177)", () => {
+  it("sở hữu fixed:1, suy dẫn hai sơ đồ có boundary tên hệ thống", () => {
+    const impact = sectionsOfPath(FIXTURE, "project.system_name")
+    expect(impact.owner).toEqual(["fixed:1"])
+    expect(impact.reads).toEqual([])
   })
 })

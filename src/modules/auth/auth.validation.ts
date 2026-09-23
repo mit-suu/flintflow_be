@@ -1,10 +1,14 @@
 import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { newPasswordField } from "../../shared/utils/password-field.js"
 
+// CỐ Ý không dùng `newPasswordField`: tài khoản tạo trước khi siết chuẩn vẫn phải đăng nhập được.
+// Xem `shared/utils/password-policy.ts`.
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters")
+  password: z.string().min(1, "Vui lòng nhập mật khẩu"),
+  rememberMe: z.boolean().optional()
 })
 
 export type LoginDTO = z.infer<typeof loginSchema>
@@ -12,7 +16,7 @@ export type LoginDTO = z.infer<typeof loginSchema>
 export const registerSchema = z.object({
   name: z.string().optional(),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters")
+  password: newPasswordField
 })
 
 export type RegisterDTO = z.infer<typeof registerSchema>
@@ -23,8 +27,11 @@ export const resendVerificationSchema = z.object({
 
 export type ResendVerificationDTO = z.infer<typeof resendVerificationSchema>
 
+const otpField = z.string().trim().regex(/^\d{6}$/, "Mã OTP phải gồm 6 chữ số")
+
 export const verifyEmailConfirmSchema = z.object({
-  token: z.string().min(1, "Token is required")
+  email: z.string().email("Invalid email address"),
+  otp: otpField
 })
 
 export type VerifyEmailConfirmDTO = z.infer<typeof verifyEmailConfirmSchema>
@@ -35,15 +42,23 @@ export const forgotPasswordSchema = z.object({
 
 export type ForgotPasswordDTO = z.infer<typeof forgotPasswordSchema>
 
+export const verifyResetOtpSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  otp: otpField
+})
+
+export type VerifyResetOtpDTO = z.infer<typeof verifyResetOtpSchema>
+
 export const resetPasswordSchema = z.object({
-  token: z.string().min(1, "Token is required"),
-  password: z.string().min(6, "Password must be at least 6 characters")
+  resetToken: z.string().min(1, "Reset token is required"),
+  password: newPasswordField
 })
 
 export type ResetPasswordDTO = z.infer<typeof resetPasswordSchema>
 
 export const googleAuthSchema = z.object({
-  idToken: z.string().min(1, "Google ID token is required")
+  idToken: z.string().min(1, "Google ID token is required"),
+  rememberMe: z.boolean().optional()
 })
 
 export type GoogleAuthDTO = z.infer<typeof googleAuthSchema>

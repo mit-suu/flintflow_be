@@ -5,6 +5,7 @@ import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRend
 const emptySpine = (): Spine => ({
   project: {
     name: "Demo",
+    system_name: null,
     vision: null,
     goals: [],
     type: null,
@@ -13,6 +14,7 @@ const emptySpine = (): Spine => ({
     form_factor: null,
     stakes: null,
     working_mode: null,
+    review_mode: "balanced" as const,
     release_scope: { in: [], out: [] }
   },
   progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
@@ -32,8 +34,10 @@ const emptySpine = (): Spine => ({
   other_requirements: [],
   glossary: [],
   addendum: [],
+  custom_sections: [],
   diagrams: [],
   assumptions: [],
+  decisions: [],
   flags: [],
   sections: [],
   baselines: [],
@@ -58,7 +62,8 @@ const spine = (): Spine => ({
   ],
   roles: [{ id: "R1", name: "Registered User", actor_id: "A01" }],
   use_cases: [
-    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] }
+    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] },
+    { id: "UC02", name: "Open Dashboard", actor_ids: ["A01"], function_ids: [], description: "Land on the dashboard.", includes: ["UC01"], extends: [] }
   ],
   screens: [
     {
@@ -176,11 +181,32 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
-  it("fixed:2.2.2 — use case table với actor tên và include/extend", () => {
+  it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
+    const s = spine()
+    const base = s.diagrams.find((d) => d.id === "D03")!
+    s.diagrams = [
+      ...s.diagrams.filter((d) => d.id !== "D03"),
+      { ...base, id: "D03-1", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
+      { ...base, id: "D03-2", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+    ]
+    const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
+    expect(section.blocks).toEqual([
+      { type: "image", png: "png-D03-1", caption: "Screens flow for Founder" },
+      { type: "image", png: "png-D03-2", caption: "Screens flow for Guest" }
+    ])
+    // Hình không có title (sơ đồ chung trước khi tách actor) giữ chú thích cũ
+    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks).toEqual([{ type: "image", png: "png-d03", caption: "Screens Flow Diagram" }])
+  })
+
+  it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
     const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table" })
-    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }]])
+    expect(table.type === "table" && table.header.flat().map((r) => r.text)).toEqual(["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"])
+    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }], [{ text: "" }]])
+    // Cột quan hệ in TÊN use case, không phải id thô
+    expect(table.type === "table" && table.rows[1][4]).toEqual([{ text: "Log In" }])
+    expect(table.type === "table" && table.rows[1][5]).toEqual([{ text: "" }])
   })
 
   it("fixed:3.1.2 — bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
@@ -288,6 +314,7 @@ describe("buildRecordOfChanges", () => {
     at: "2026-09-01T09:00:00.000Z",
     by: "u1",
     step_id: "S-2.1",
+    path: "actors[id=A01].name",
     ...over
   })
 
@@ -304,9 +331,23 @@ describe("buildRecordOfChanges", () => {
     ])
   })
 
-  it("không có reason nào ⇒ mô tả rơi về step_id", () => {
-    const rows = buildRecordOfChanges([change({ reason: null, step_id: "S-3.1" })])
-    expect(rows[0].description).toBe("Step S-3.1")
+  it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", reason: "step-runner: elicit turn" }),
+      change({ txn: "t2", reason: "gate: accept", at: "2026-09-02T09:00:00.000Z" }),
+      change({ txn: "t3", reason: null, at: "2026-09-03T09:00:00.000Z" }),
+      change({ txn: "t4", reason: "Đổi tên actor theo yêu cầu của khách", at: "2026-09-04T09:00:00.000Z" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["Đổi tên actor theo yêu cầu của khách"])
+  })
+
+  it("FLF-204: mốc baseline luôn có một dòng, mô tả bằng tiếng Anh", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[id=BL001]", reason: "Ký baseline v1.0" }),
+      change({ txn: "t1", op: "set", path: "steps[id=S-9.5].status", reason: "step-runner: init step" })
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].description).toBe("Baseline v1.0 signed")
   })
 
   it("changes rỗng ⇒ mảng rỗng", () => {
@@ -314,13 +355,16 @@ describe("buildRecordOfChanges", () => {
   })
 
   it("không truyền resolveInCharge ⇒ giữ nguyên by thô (mặc định identity)", () => {
-    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010" })])
+    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010", reason: "khách yêu cầu" })])
     expect(rows[0].in_charge).toBe("650000000000000000000010")
   })
 
   it("review T7: resolveInCharge được gọi với by của change đầu lô để tra tên hiển thị", () => {
     const rows = buildRecordOfChanges(
-      [change({ txn: "t1", by: "650000000000000000000010" }), change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z" })],
+      [
+        change({ txn: "t1", by: "650000000000000000000010", reason: "khách yêu cầu" }),
+        change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z", reason: "waive vì ngoài phạm vi bản này" })
+      ],
       (by) => (by === "system" ? "System" : `Resolved:${by}`)
     )
     expect(rows[0].in_charge).toBe("Resolved:650000000000000000000010")
