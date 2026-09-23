@@ -48,6 +48,10 @@ export const PIPELINE_ERROR_STATUS = {
   CHANGE_RANGE_INVALID: 422,
   NOTHING_TO_UNDO: 422,
   BASELINE_BLOCKED: 422,
+  /** Nhà cung cấp AI từ chối: hết hạn mức, chưa có phương thức thanh toán, hoặc gọi quá nhanh. */
+  RATE_LIMIT_EXCEEDED: 429,
+  /** Nhà cung cấp AI lỗi / trả rỗng (GLM_EMPTY_OUTPUT, 5xx…) — không phải lỗi logic của pipeline. */
+  AI_PROVIDER_ERROR: 502,
   NOT_IMPLEMENTED: 501
 } as const
 
@@ -186,7 +190,9 @@ export const stepSummarySchema = z.object({
   calls_limit: z.literal(8),
   regenerate_used: z.number().int().min(0),
   regenerate_limit: z.literal(3),
-  accepted_at: isoDateTime.nullable()
+  accepted_at: isoDateTime.nullable(),
+  /** Step đang chạy dở ở một request khác (cùng tiến trình BE) — FE khoá nút chạy thay vì để người dùng bấm rồi nhận 409. */
+  running: z.boolean()
 })
 
 /** GET /projects/:id/steps */
@@ -199,7 +205,13 @@ export const stepsResponseSchema = z.object({
 /** POST /projects/:id/steps/:stepId/run (SSE) */
 export const runStepRequestSchema = z.strictObject({
   session_id: z.string().min(1),
-  base_version: baseVersion
+  base_version: baseVersion,
+  /**
+   * Chạy lại một step đã `accepted` (B7 reopen): đặt `revision_requested`, reset `first_seq/last_seq/accepted_at`
+   * rồi chạy như thường. Cần khi mục của step vẫn còn cờ đỏ dù step đã chốt — vd file có đầu mục nhưng I-4 không
+   * trích được gì nên Spine trống (gặp thật 2026-09-20).
+   */
+  reopen: z.boolean().optional()
 })
 
 /**

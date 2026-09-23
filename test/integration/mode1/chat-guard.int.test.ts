@@ -76,6 +76,35 @@ describe("chặn sửa ngoài CR — /changes, /changes/preview, /reconcile, /un
     expect(mockCalls.length).toBe(calls)
   })
 
+  it("sau v1: /changes và /undo tạo luôn CR nguồn verbal kèm meta.change_request; /changes/preview chỉ điền sẵn (nợ T8)", async () => {
+    const { seeded, projectId } = await importedProject()
+    const c = client(seeded, projectId)
+    const auth = { Authorization: `Bearer ${seeded.token}` }
+    const version = await c.spineVersion()
+    const listCrs = async () => (await request(app).get(`/api/v1/projects/${projectId}/change-requests`).set(auth)).body.data
+
+    // xem trước không đẻ ra CR
+    const preview = await c.post("/changes/preview", { base_version: version, instruction: "Rename actor Learner to Student" })
+    expectBlocked(preview, "preview")
+    expect(changeRequiresCrMetaSchema.parse(preview.body.meta).change_request).toBeUndefined()
+    expect(await listCrs()).toEqual([])
+
+    const change = await c.post("/changes", { base_version: version, instruction: "Rename actor Learner to Student" })
+    expectBlocked(change, "/changes")
+    expect(changeRequiresCrMetaSchema.parse(change.body.meta).change_request).toEqual({ cr_id: "CR-001", status: "draft" })
+
+    // /undo không có câu lệnh ⇒ tiêu đề mặc định
+    const undo = await c.post("/undo", { base_version: version })
+    expectBlocked(undo, "/undo")
+    expect(changeRequiresCrMetaSchema.parse(undo.body.meta).change_request).toEqual({ cr_id: "CR-002", status: "draft" })
+
+    const crs = (await listCrs()) as { cr_id: string; title: string; source: { kind: string } }[]
+    expect(crs.map((x) => [x.cr_id, x.title, x.source.kind])).toEqual([
+      ["CR-002", "Hoàn tác thay đổi gần nhất", "verbal"],
+      ["CR-001", "Rename actor Learner to Student", "verbal"]
+    ])
+  })
+
   it("không có instruction (gửi ops / body rỗng) ⇒ vẫn 409 trước cả kiểm body, prefill mặc định", async () => {
     const seeded = await seedFixture("minimal")
     const c = client(seeded, await createBlocked(seeded))

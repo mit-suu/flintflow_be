@@ -10,7 +10,10 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { lockPaths, unlockPaths } from "./lock.service.js"
-import { findSpineLocations } from "./spine-location.js"
+import { emptySectionTargets, findSpineLocations } from "./spine-location.js"
+import { Mode1Error } from "../import/mode1.errors.js"
+import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
+import { ownerStepOf } from "../spine/section-registry.js"
 
 export { elementPathOf, MAX_LOCATIONS } from "./spine-location.js"
 
@@ -24,6 +27,24 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const spine = stripRecord(record)
 
   const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords)
+  if (!found.length) {
+    // Đứng im ở impact_review với 0 vị trí làm nút "Tìm vị trí" trông như hỏng. Nói rõ: đích nào là mục còn trống
+    // (không có phần tử để sửa — phải chạy step soạn nội dung, D6) và CR đã nhắm vào gì.
+    const layout = await loadLayout(String(cr.projectId))
+    const empty = emptySectionTargets(spine, cr.targets.entity_paths).map((section_id) => ({
+      section_id,
+      title: titleOfSection(spine, section_id, layout),
+      step_id: section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+    }))
+    const emptyTitles = empty.map((e) => `"${e.title}"`).join(", ")
+    throw new Mode1Error(
+      "CR_NO_LOCATIONS",
+      empty.length
+        ? `Không có phần tử nào để sửa: ${emptyTitles} đang trống — chạy step để soạn nội dung trước, hoặc sửa mô tả CR cho trỏ vào phần tử cụ thể`
+        : "Không tìm được phần tử Spine nào khớp với change request — sửa mô tả (nêu mã hoặc tên phần tử) rồi làm rõ lại",
+      { targets: { entity_paths: [...cr.targets.entity_paths], keywords: [...cr.targets.keywords] }, empty_sections: empty }
+    )
+  }
   const previous: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).distinct("path")
   await ChangeLocation.deleteMany({ projectId: cr.projectId, cr_id: cr.cr_id })
   const docs = await ChangeLocation.insertMany(

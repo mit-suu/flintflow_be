@@ -189,6 +189,12 @@ export const changeRequiresCrMetaSchema = z.object({
   change_request: z.object({ cr_id: crIdSchema, status: crStatusSchema }).optional()
 })
 
+/** `meta` của 409 CR_NO_LOCATIONS — C-3 ra 0 vị trí: đích của C-2 + các mục còn trống (kèm step soạn nội dung). */
+export const crNoLocationsMetaSchema = z.object({
+  targets: z.object({ entity_paths: z.array(z.string()), keywords: z.array(z.string()) }),
+  empty_sections: z.array(z.object({ section_id: z.string(), title: z.string(), step_id: z.string().nullable() }))
+})
+
 /** `meta` của 409 CR_LOCATION_UNCONCLUDED. */
 export const locationUnconcludedMetaSchema = z.object({ location_ids: z.array(locationIdSchema) })
 

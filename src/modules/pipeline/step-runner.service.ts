@@ -87,6 +87,8 @@ export interface StepRunnerDeps {
   /** F8: đóng tab/mất mạng giữa chừng — controller abort khi `req` đóng. Runner kiểm trước mỗi lượt gọi
    *  model và khi đang chờ answer; không áp dụng cho `/gate` (không SSE, không có kết nối để huỷ). */
   signal?: AbortSignal
+  /** Người dùng chủ động chạy lại step đã `accepted` (B7 reopen) — xem `runStepRequestSchema.reopen`. */
+  reopen?: boolean
   /** WP-4: cùng controller với `signal`, để `POST /cancel` huỷ được lượt này từ một request khác. */
   abort?: AbortController
   /**
@@ -758,7 +760,7 @@ export const runStep = async (
     const needsDraft = spec.skill !== null && !stepDef.deterministic && !isLoopBookkeeping(stepId)
 
     let { spine, spineVersion } = await refresh(projectId)
-    const existingStep = spine.steps.find((s) => s.id === stepId)
+    let existingStep = spine.steps.find((s) => s.id === stepId)
 
     if (existingStep?.status === "skipped") {
       throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
@@ -769,7 +771,25 @@ export const runStep = async (
       isReopenableLoopStep(spine, stepId) ||
       (existingStep?.status === "accepted" && isReopenableStaleStep(spine, stepId, await spineRepository.listChanges(projectId)))
     if (existingStep?.status === "accepted" && !reopenLoop) {
-      throw new ApiError(409, `Step ${stepId} đã accepted — cần gate revision/regenerate để mở lại (B7)`, STEP_NOT_RUNNABLE)
+      if (!d.reopen) {
+        throw new ApiError(409, `Step ${stepId} đã accepted — chạy lại phải mở lại bước (reopen) hoặc gate revision/regenerate (B7)`, STEP_NOT_RUNNABLE)
+      }
+      // Mở lại đúng như gate revision/regenerate: vòng mới, bỏ mốc seq và thời điểm chốt cũ (B7/F1)
+      const reopened = await applyTransaction(projectId, {
+        base_version: spineVersion,
+        ops: [
+          { op: "set", path: `steps[id=${stepId}].status`, value: "revision_requested" },
+          { op: "set", path: `steps[id=${stepId}].first_seq`, value: null },
+          { op: "set", path: `steps[id=${stepId}].last_seq`, value: null },
+          { op: "set", path: `steps[id=${stepId}].accepted_at`, value: null }
+        ],
+        by: userId,
+        step_id: stepId,
+        reason: "run: mở lại step đã accepted (B7)"
+      })
+      spine = reopened.spine
+      spineVersion = reopened.spine_version
+      existingStep = spine.steps.find((s) => s.id === stepId)
     }
     if (!existingStep && !reopenLoop) {
       const next = nextStepOf(spine)

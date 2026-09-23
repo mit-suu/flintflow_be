@@ -101,6 +101,8 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
 | 422 | `NOTHING_TO_UNDO` | Không còn txn có thể undo | — |
 | 422 | `BASELINE_BLOCKED` | Còn cờ đỏ chưa waive khi ghi baseline | `{ flags[] }` |
+| 429 | `RATE_LIMIT_EXCEEDED` | Nhà cung cấp AI từ chối: hết hạn mức, chưa gắn thanh toán, hoặc gọi quá nhanh | — |
+| 502 | `AI_PROVIDER_ERROR` | Nhà cung cấp AI lỗi / trả rỗng (`GLM_EMPTY_OUTPUT`, 5xx…) | — |
 | 501 | `NOT_IMPLEMENTED` | Nhánh chưa hiện thực (vd `instruction` trước T17) | — |
 
 `violations[]` = `{ rule, message, path?, op_index? }`. `referrers[]` = `{ path, id }`: các khoá đang trỏ tới phần tử bị xoá, để user tự quyết.
@@ -114,7 +116,7 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 1 | `GET /projects/:id/spine` | T01 ✔ | — | `SpineRecord` | — |
 | 2 | `GET /projects/:id/progress` | T09 ✔ | — | `progressResponseSchema` | — |
 | 3 | `GET /projects/:id/steps` | T12/T13 | — | `stepsResponseSchema` | — |
-| 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
+| 4 | `POST /projects/:id/steps/:stepId/run` | T13 | `runStepRequestSchema` (thêm `reopen?: boolean` — chạy lại step đã `accepted`: BE đặt `revision_requested`, reset `first_seq/last_seq/accepted_at` như gate revision, B7) | **SSE** (mục 2) | `NOT_PIPELINE_SESSION`, `STEP_NOT_FOUND`, `STEP_NOT_RUNNABLE`, `NEEDS_USER_INPUT`, `CALL_LIMIT`, `INSUFFICIENT_CREDIT`, `SPINE_VERSION_CONFLICT` |
 | 4a | `POST /projects/:id/phases/:phase/run` | FLF-198 | `runPhaseRequestSchema` | **SSE** (mục 2) — chạy liền cả giai đoạn | như endpoint 4 |
 | 4b | `GET /projects/:id/steps/:stepId/run-state` | FLF-177 | — | `runStateResponseSchema` (null nếu step chưa chạy lần nào) | `PROJECT_NOT_FOUND` |
 | 4c | `POST /projects/:id/steps/:stepId/cancel` | FLF-177 | `cancelRunRequestSchema` | `cancelRunResponseSchema` | `PROJECT_NOT_FOUND` |

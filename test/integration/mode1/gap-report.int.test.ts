@@ -83,7 +83,8 @@ describe("gap report — gộp nhóm", () => {
       missing_sections: report.missing_sections.length,
       unmapped_headings: report.unmapped_headings.length,
       low_confidence_fields: report.low_confidence_fields.length,
-      missing_fpt_sections: report.missing_fpt_sections.length
+      missing_fpt_sections: report.missing_fpt_sections.length,
+      unrendered_diagrams: report.unrendered_diagrams.length
     })
     // FL902 (test đặt) + section_empty của đầu mục FPT file không có (D6, FLF-183)
     expect(report.totals.red).toBe(1 + open.filter((f) => f.level === "red" && f.rule_id === "section_empty").length)
@@ -111,6 +112,18 @@ describe("gap report — gộp nhóm", () => {
     const order = new Map(report.layout.map((l) => [l.section_id, l.order]))
     const ranks = report.sections.map((s) => order.get(s.section_id) ?? Infinity)
     expect(ranks).toEqual([...ranks].sort((a, b) => a - b))
+  })
+
+  it("nợ T4: import khi không có PlantUML ⇒ báo cáo liệt kê hình chưa vẽ (loại có dữ liệu), không chặn baseline", async () => {
+    const { projectId } = await importFinalized()
+    const report = gapReportSchema.parse(await buildGapReport(projectId))
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.diagrams).toEqual([]) // môi trường test không có PlantUML ⇒ finalize bỏ qua bước vẽ
+    expect(report.totals.unrendered_diagrams).toBe(report.unrendered_diagrams.length)
+    expect(report.unrendered_diagrams.length).toBeGreaterThan(0)
+    for (const d of report.unrendered_diagrams) expect(d).toMatchObject({ diagram_id: "", reason: "not_rendered" })
+    // chỉ là thông tin: không đẻ cờ đỏ nào về hình
+    expect(spine.flags.some((f) => f.rule_id === "render_error" && f.resolved_at === null)).toBe(false)
   })
 
   it("section bắt buộc thiếu = required_sections của profile; heading unmapped giữ nguyên văn", async () => {
@@ -157,7 +170,8 @@ describe("gap report — .docx", () => {
       ["Cờ vàng", String(report.totals.yellow)],
       ["Section bắt buộc thiếu", String(report.totals.missing_sections)],
       ["Heading không khớp template", String(report.totals.unmapped_headings)],
-      ["Field độ tin thấp", String(report.totals.low_confidence_fields)]
+      ["Field độ tin thấp", String(report.totals.low_confidence_fields)],
+      ["Hình chưa vẽ được", String(report.totals.unrendered_diagrams)]
     ])
     expect(texts.some((t) => t.includes("5.9 Team Notes"))).toBe(true)
   })
