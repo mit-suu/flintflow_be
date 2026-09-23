@@ -9,9 +9,9 @@
 | `project.type`, `.domain`, `.complexity`, `.stakes` | — | — | `fixed:4.2.1` … `fixed:4.2.4` (NFR thresholds) |
 | `business_rules[tier=high]` | `fixed:1` | — | — |
 | `actors[kind≠human]` | `fixed:1` | `fixed:2.1` | `diagrams[context]` |
-| `actors[]` | `fixed:2.1` | `fixed:2.2.2`, `fixed:3.1.3` | `diagrams[usecase]`, `fixed:5.5` |
+| `actors[]` | `fixed:2.1` | `fixed:2.2.2`, `fixed:3.1.3` | `diagrams[usecase]`, `diagrams[context]`, `fixed:5.5` |
 | `roles[]`, `permissions[]` | `fixed:3.1.3` | — | — |
-| `use_cases[]` | `fixed:2.2.2` | — | `diagrams[usecase]` |
+| `use_cases[]` | `fixed:2.2.2` | — | `diagrams[usecase]`, `diagrams[context]` |
 | `features[]` | `feature:<id>` | `fixed:3.1.2` | §3.x numbering (assemble) |
 | `screens[].name/.description/.feature_id` | `fixed:3.1.2` | `fixed:3.1.1`, `fixed:3.1.3`, `function:<id>` | `diagrams[screen_flow]`, `fixed:5.5` |
 | `screens[].flow_to[]/.is_popup/.tabs[]` | `fixed:3.1.1` | — | `diagrams[screen_flow]` |

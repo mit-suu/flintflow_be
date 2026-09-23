@@ -9,7 +9,7 @@ import { User } from "../../src/modules/user/user.model.js"
 import { Session } from "../../src/shared/auth/session.model.js"
 
 const EMAIL = "profile-user@flintflow.test"
-const PASSWORD = "password-123"
+const PASSWORD = "Fixture2026!"
 
 /** Đăng nhập bằng agent riêng (giữ cookie refreshToken như một trình duyệt). */
 const loginAgent = async () => {
@@ -74,7 +74,7 @@ describe("POST /users/me/password", () => {
     expect((await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })).status).toBe(200)
   })
 
-  it("mật khẩu mới trùng mật khẩu cũ ⇒ SAME_PASSWORD; quá ngắn ⇒ VALIDATION_ERROR", async () => {
+  it("trùng mật khẩu cũ ⇒ SAME_PASSWORD; yếu / chưa đủ mạnh / có dấu ⇒ VALIDATION_ERROR", async () => {
     await seedLocalUser()
     const { agent, auth } = await loginAgent()
     const change = (newPassword: string) =>
@@ -82,6 +82,9 @@ describe("POST /users/me/password", () => {
 
     expect((await change(PASSWORD)).body.error.code).toBe("SAME_PASSWORD")
     expect((await change("123")).body.error.code).toBe("VALIDATION_ERROR")
+    // Qua hết luật cứng nhưng mới mức "Trung bình" ⇒ vẫn chặn, vì ngưỡng là "Khá"
+    expect((await change("muaroi2!")).body.error.code).toBe("VALIDATION_ERROR")
+    expect((await change("Đườngxưa1!")).body.error.code).toBe("VALIDATION_ERROR")
   })
 
   it("tài khoản Google (chưa có mật khẩu) ⇒ hasPassword=false, đổi mật khẩu ⇒ PASSWORD_NOT_SET", async () => {

@@ -112,7 +112,8 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
     }
   }
 
-  await flagsService.recompute(projectId, { by: "import", ruleProfile: MODE1_RULE_PROFILE })
+  // BPMN 1.12: S-9.1 + S-9.2 bằng luật code trên baseline v0 ⇒ bật luật S-9 (`atBaseline`: giả định chưa xác nhận)
+  await flagsService.recompute(projectId, { by: "import", ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
   await transitionImport(doc, "gap_review")
   return true
 }

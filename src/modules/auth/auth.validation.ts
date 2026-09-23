@@ -1,10 +1,13 @@
 import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { newPasswordField } from "../../shared/utils/password-field.js"
 
+// CỐ Ý không dùng `newPasswordField`: tài khoản tạo trước khi siết chuẩn vẫn phải đăng nhập được.
+// Xem `shared/utils/password-policy.ts`.
 export const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(1, "Vui lòng nhập mật khẩu"),
   rememberMe: z.boolean().optional()
 })
 
@@ -13,7 +16,7 @@ export type LoginDTO = z.infer<typeof loginSchema>
 export const registerSchema = z.object({
   name: z.string().optional(),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters")
+  password: newPasswordField
 })
 
 export type RegisterDTO = z.infer<typeof registerSchema>
@@ -48,7 +51,7 @@ export type VerifyResetOtpDTO = z.infer<typeof verifyResetOtpSchema>
 
 export const resetPasswordSchema = z.object({
   resetToken: z.string().min(1, "Reset token is required"),
-  password: z.string().min(6, "Password must be at least 6 characters")
+  password: newPasswordField
 })
 
 export type ResetPasswordDTO = z.infer<typeof resetPasswordSchema>

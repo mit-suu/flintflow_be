@@ -15,6 +15,7 @@
  */
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
+import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
 
 /**
@@ -74,9 +75,6 @@ const VI_LABELS: Readonly<Record<string, string>> = {
   Actors: "Tác nhân",
   Screen: "Màn hình",
   Type: "Kiểu",
-  "Flows To": "Chuyển tới",
-  "Full page": "Toàn trang",
-  Tabbed: "Nhiều tab",
   Feature: "Chức năng",
   Trigger: "Kích hoạt",
   Entity: "Thực thể",
@@ -106,6 +104,7 @@ const VI_LABELS: Readonly<Record<string, string>> = {
   "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
   "Use Case Diagram": "Sơ đồ use case",
   "Screens Flow Diagram": "Sơ đồ luồng màn hình",
+  "Screens flow for": "Luồng màn hình của",
   "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
   "Screen Layout": "Bố cục màn hình"
 }
@@ -223,7 +222,9 @@ const diagramImages = (
   kind: DiagramKind,
   ownerId: string | undefined,
   ctx: SectionRenderContext,
-  captionBase: string
+  captionBase: string,
+  /** Chú thích riêng từng hình (vd. tiêu đề sơ đồ theo actor); `null` ⇒ dùng `captionBase`. */
+  captionOf: (d: Spine["diagrams"][number]) => string | null = () => null
 ): ImageBlock[] => {
   const parts = spine.diagrams.filter(
     (d) => d.kind === kind && d.render_status === "ok" && (ownerId === undefined || d.owner_id === ownerId)
@@ -231,7 +232,7 @@ const diagramImages = (
   const out: ImageBlock[] = []
   parts.forEach((d, i) => {
     const png = ctx.diagramPng(d.id)
-    if (png) out.push(image(png, parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase))
+    if (png) out.push(image(png, captionOf(d) ?? (parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase)))
   })
   return out
 }
@@ -293,22 +294,12 @@ const useCaseTable = (spine: Spine): Block[] => {
 
 // ─── §3.1 System Functional Overview (section cố định) ────────────
 
-const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] => {
-  const blocks: Block[] = diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram")
-  if (spine.screens.length > 0) {
-    blocks.push(
-      tableBlock(
-        ["Screen", "Type", "Flows To"],
-        spine.screens.map((s) => [
-          s.name,
-          s.is_popup ? "Popup" : s.tabs.length > 0 ? `Tabbed (${s.tabs.join(", ")})` : "Full page",
-          s.flow_to.map((id) => spine.screens.find((x) => x.id === id)?.name ?? id).join(", ")
-        ])
-      )
-    )
-  }
-  return blocks
-}
+// Chỉ còn sơ đồ luồng màn — bảng Screen | Type | Flows To đã bỏ khỏi cả bản draft lẫn baseline
+/** Sơ đồ tách theo actor mang tiêu đề `Screens flow for <actor>` — dùng luôn làm chú thích ảnh. */
+const flowTitle = (d: Spine["diagrams"][number]): string | null => screenFlowTitleOf(d.puml)
+
+const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] =>
+  diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", flowTitle)
 
 const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (spine.screens.length === 0) return []

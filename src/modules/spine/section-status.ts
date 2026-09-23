@@ -158,9 +158,15 @@ export interface StepProgress {
   show_percent: boolean
 }
 
-/** Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn + 1 nếu có non-screen function; trừ step `skipped` (FLF-183). */
+/**
+ * Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn **chưa để lại** + 1 nếu có non-screen function; trừ step
+ * `skipped` (FLF-183). Màn `placeholder` là màn đã quyết định để lại — `nextStep` vốn đã bỏ qua vòng của nó, nên
+ * đếm vào mẫu số chỉ làm tiến độ sai: project mode 1 import ra 61 màn placeholder hiện "38/366" trong khi việc
+ * thật chỉ ~56 bước (2026-09-20). Màn có function trở lại (`detail_status` khác placeholder) thì đếm như thường.
+ */
 export const progressByStep = (spine: Spine): StepProgress => {
-  const n = spine.screens.length + (spine.functions.some((f) => f.screen_id === null) ? 1 : 0)
+  const counted = spine.screens.filter((s) => s.detail_status !== "placeholder").length
+  const n = counted + (spine.functions.some((f) => f.screen_id === null) ? 1 : 0)
   return {
     done: spine.steps.filter((s) => s.status === "accepted").length,
     total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n - spine.steps.filter((s) => s.status === "skipped").length,

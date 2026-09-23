@@ -150,7 +150,25 @@ npm run seed:e2e-user -- --email fixture@flintflow.io --password fixture-passwor
 npm run seed:e2e-user -- --email admin@flintflow.io --role admin --credits 5000
 npm run seed:fixture -- --user fixture@flintflow.io --fixture full   # Spine 19 màn
 npm run migrate:sections -- --dry-run                                # project mô hình cũ → Spine
+npm run migrate:mode1-v2 -- --dry-run                                # xem trước
+npm run migrate:mode1-v2                                             # xoá index chết của CR-theo-block (an toàn)
+npm run migrate:mode1-v2 -- --clean-data                             # + xoá vị trí CR bản cũ, bỏ field chết (một chiều)
 ```
+
+**`migrate:mode1-v2` bắt buộc với DB đã chạy P2–P4 trước mode 1 v2 (FLF-186).** Vị trí CR giờ theo `path` phần tử
+Spine, nhưng mongoose **không bao giờ xoá index cũ** nên `changelocations` còn `projectId_1_cr_id_1_block_id_1`
+UNIQUE — vị trí V4 không có `block_id` ⇒ C-3 chết từ vị trí thứ hai với `E11000 … dup key: { …, block_id: null }`.
+Lần chạy mặc định chỉ đụng index (tạo lại được); xoá dữ liệu phải tự gọi `--clean-data`. Unique index
+`(projectId, cr_id, path)` chỉ tạo được sau khi hết vị trí bản cũ (chúng không có `path`).
+
+**Mode 1 v3 (bám BPMN, 2026-09-22) — không cần migration.** Dữ liệu project mode 1 tạo trước v3 vẫn đọc được
+nguyên trạng: baseline v1 đã ký, CR nguồn `chat` (enum giữ để đọc), cờ đã waive, version 0.x/1.0 cũ. Chỉ hành vi
+**từ nay** đổi: sau import mọi sửa qua CR (`CHANGE_REQUIRES_CR`), không chạy step / ký v1 / waive (`MODE1_NO_*`),
+CR mới không nhận nguồn `chat`. Version cũ không có bản có đánh dấu (`has_tracked_file: false` ⇒ tải `tracked` trả
+bản thường); import cũ không có `image_ref` nên bản render cũ vẫn thiếu ảnh — muốn có ảnh thì import lại file.
+Đọc ảnh diagram (phase 5) cần `GEMINI_API_KEY`; thiếu key ⇒ I-4 **không dừng**, ảnh được giữ nguyên + cờ vàng
+`import_image_unread` (không trích được thực thể từ ảnh). Key free tier hết quota ngày sau ~20 ảnh ⇒ lượt lỗi thành
+`paused: resume_later` — môi trường thật dùng key trả phí.
 
 Trong docker compose, image production không có `tsx` nhưng có bản đã biên dịch:
 

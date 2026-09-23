@@ -21,7 +21,7 @@ vi.mock("../spine/spine.repository.js", () => ({
 }))
 
 import { isChangeInstruction } from "../spine/change.service.js"
-import { assertChangesAllowed, changeRequiresCr, changesRequireCr, isMode1Project, prefillFrom } from "./mode1-guard.js"
+import { assertChangesAllowed, assertNotMode1, changeRequiresCr, changesRequireCr, isMode1Project, prefillFrom } from "./mode1-guard.js"
 import { Mode1Error } from "./mode1.errors.js"
 
 beforeEach(() => {
@@ -52,6 +52,15 @@ describe("prefillFrom", () => {
     expect(prefillFrom("   \n ")).toEqual({ title: "Sửa tài liệu", description: "Sửa tài liệu" })
     expect(prefillFrom("", "Hoàn tác thay đổi")).toEqual({ title: "Hoàn tác thay đổi", description: "Hoàn tác thay đổi" })
   })
+
+  it("có nguồn gợi ý ⇒ đưa vào prefill cho form 3.1; không có ⇒ không có khoá source", () => {
+    expect(prefillFrom("Xoá UC-02", "Sửa tài liệu", { kind: "verbal", ref: "chat:c1" })).toEqual({
+      title: "Xoá UC-02",
+      description: "Xoá UC-02",
+      source: { kind: "verbal", ref: "chat:c1" }
+    })
+    expect(prefillFrom("Xoá UC-02")).not.toHaveProperty("source")
+  })
 })
 
 describe("changeRequiresCr", () => {
@@ -81,16 +90,29 @@ describe("isMode1Project / assertChangesAllowed", () => {
     await expect(assertChangesAllowed("missing", prefillFrom("Xoá UC-02"))).resolves.toBeUndefined()
   })
 
-  it("mode 1 v2 (D3, FLF-183): chỉ baseline imported (v0) hoặc chưa có Spine ⇒ sửa tự do; release cũng khoá", async () => {
+  it("mode 1 v3 (BPMN Flow 1 ⇒ 3.1): có baseline imported (v0) là chặn; chưa có Spine / chưa baseline ⇒ cho qua", async () => {
     projects.set("v0", { mode: "import" })
     baselines.set("v0", [{ type: "imported" }])
     projects.set("fresh", { mode: "import" })
+    projects.set("noBaseline", { mode: "import" })
+    baselines.set("noBaseline", [])
     projects.set("rel", { mode: "import" })
     baselines.set("rel", [{ type: "imported" }, { type: "release" }])
-    expect(await changesRequireCr("v0")).toBe(false)
+    expect(await changesRequireCr("v0")).toBe(true)
     expect(await changesRequireCr("fresh")).toBe(false)
+    expect(await changesRequireCr("noBaseline")).toBe(false)
     expect(await changesRequireCr("rel")).toBe(true)
-    await expect(assertChangesAllowed("v0", prefillFrom("Xoá UC-02"))).resolves.toBeUndefined()
+    await expect(assertChangesAllowed("v0", prefillFrom("Xoá UC-02"))).rejects.toMatchObject({ code: "CHANGE_REQUIRES_CR" })
+  })
+})
+
+describe("assertNotMode1", () => {
+  it("mode import ⇒ 409 đúng mã theo việc bị cấm; mode khác / không có mode ⇒ cho qua", () => {
+    expect(() => assertNotMode1("import", "steps")).toThrow(expect.objectContaining({ code: "MODE1_NO_STEPS", statusCode: 409 }))
+    expect(() => assertNotMode1("import", "signoff")).toThrow(expect.objectContaining({ code: "MODE1_NO_SIGNOFF", statusCode: 409 }))
+    expect(() => assertNotMode1("import", "waive")).toThrow(expect.objectContaining({ code: "MODE1_NO_WAIVE", statusCode: 409 }))
+    expect(() => assertNotMode1("fpt", "steps")).not.toThrow()
+    expect(() => assertNotMode1(undefined, "waive")).not.toThrow()
   })
 })
 

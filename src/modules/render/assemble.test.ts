@@ -358,6 +358,21 @@ describe("assemble()", () => {
       expect(doc.recordOfChanges[2].in_charge).toBe("65000000…")
     })
   })
+
+  describe("T15 (mode 1 v3) — giữ Record of Changes của file gốc", () => {
+    it("dòng cũ của khách đứng đầu bảng §I, lịch sử FlintFlow nối tiếp bên dưới", async () => {
+      changeDb.setRows([{ projectId: PROJECT, txn: "t1", at: new Date("2026-09-22T00:00:00.000Z"), by: "system", reason: "CR-001: Faster response", op: "set", step_id: null, seq: 1 }])
+      vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 23 }))
+      const legacy = [{ date: "2026-05-01", version: "1.0", change_type: "A" as const, in_charge: "Nhóm 1", description: "Create and edit Product Overview" }]
+      await assemble(PROJECT, "Demo", 23, {
+        loadDiagramPng: async () => null,
+        loadTemplate: async () => ({ layout: [{ order: 0, heading_text: "1 Product Overview", level: 1, section_id: "fixed:1" }], language: "en", legacyRecord: legacy })
+      })
+      const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+      expect(doc.recordOfChanges[0]).toEqual(legacy[0])
+      expect(doc.recordOfChanges[1]).toMatchObject({ description: "CR-001: Faster response" })
+    })
+  })
 })
 
 describe("getDocument() — source=draft", () => {

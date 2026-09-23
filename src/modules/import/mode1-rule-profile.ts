@@ -18,6 +18,8 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
     "section_stale_at_baseline",
     "section_awaiting_reaccept",
     "screen_pending_at_baseline",
+    // luồng màn trích từ tài liệu có sẵn thường không đủ cạnh/liên kết actor — chỉ giữ cờ vàng `orphan_screen`
+    "orphan_screen_at_baseline",
     // SRS tiếng Việt là hợp lệ ở mode 1
     "non_english_content",
     // tài liệu hiếm liên kết UC ↔ function
@@ -39,4 +41,6 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
 
 /** Rule id của cờ vàng do AI đặt ở mode 1 (không bị recompute tất định đóng — `MODEL_OWNED_RULES`). */
 export const IMPORT_SEMANTIC_RULE = "import_semantic"
+/** Mode 1 v3 phase 5: ảnh ở mục diagram không đọc được thành dữ liệu (loại khác / EMF…) — giữ ảnh gốc, cờ vàng. */
+export const IMPORT_IMAGE_RULE = "import_image_unread"
 export const CR_CONSISTENCY_RULE = "cr_consistency"

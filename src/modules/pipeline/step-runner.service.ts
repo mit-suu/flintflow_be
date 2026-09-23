@@ -32,10 +32,13 @@ import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
+import { sectionHasData } from "../spine/deterministic-check.js"
+import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { buildStepContext, elicitProjection, getStepSpec, parseStepId, type StepContext } from "./context-projection.js"
+import { buildStepContext, elicitProjection, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
 import { draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
@@ -87,6 +90,8 @@ export interface StepRunnerDeps {
   /** F8: đóng tab/mất mạng giữa chừng — controller abort khi `req` đóng. Runner kiểm trước mỗi lượt gọi
    *  model và khi đang chờ answer; không áp dụng cho `/gate` (không SSE, không có kết nối để huỷ). */
   signal?: AbortSignal
+  /** Người dùng chủ động chạy lại step đã `accepted` (B7 reopen) — xem `runStepRequestSchema.reopen`. */
+  reopen?: boolean
   /** WP-4: cùng controller với `signal`, để `POST /cancel` huỷ được lượt này từ một request khác. */
   abort?: AbortController
   /**
@@ -520,6 +525,16 @@ export const runDraftPhase = async (
   }
 }
 
+/**
+ * Mục step này nuôi mà CHẠY XONG VẪN TRỐNG — tính bằng đúng hàm mà luật `section_empty` soi (`sectionHasData`),
+ * nên cái gate nói ra luôn khớp với cờ đỏ hiện trên cột kế hoạch. Mục ngoài bảng ⇒ `sectionHasData` trả `null`
+ * (không soi được) và không vào danh sách.
+ */
+export const emptyFedSections = (spine: Spine, stepId: string): { section_id: string; title: string }[] =>
+  sectionsFedBy(spine, stepId)
+    .filter((id) => sectionHasData(spine, id) === false)
+    .map((id) => ({ section_id: id, title: FIXED_SECTIONS.find((s) => s.id === id)?.title_en ?? id }))
+
 /** Render mọi diagram của step (nếu có) + Review (deterministic check; LLM review tuỳ `REVIEW_LLM_ENABLED`). */
 /** Trần hình tự vẽ lại cuối một step — một step sửa nhiều thứ không được biến thành lượt render cả bộ. */
 export const MAX_AUTO_RERENDER = 4
@@ -558,8 +573,19 @@ export const runRenderReviewPhase = async (
 ): Promise<RenderReviewResult> => {
   let spineVersion = (await refresh(projectId)).spineVersion
 
-  if (renders.length > 0) {
-    const targets: RenderTarget[] = renders.map((kind) => ({ kind, owner_id: kind === "screen_layout" ? loop : null }))
+  // Screens Flow tách theo actor dựa vào quyền (S-4.3) và use case ↔ function (S-4.4/S-5), có SAU lúc S-4.2 vẽ:
+  // hình đã có mà cũ thì vẽ lại ngay ở step làm nó cũ, không chờ người dùng bấm render tay.
+  // Cùng điều kiện cờ `diagram_stale`: hash chưa từng tính ("TBD", fixture) không tính là cũ.
+  const flowStale = (spine: Spine): boolean =>
+    spine.diagrams.some(
+      (d) => d.kind === "screen_flow" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d)
+    )
+  const followUps: RenderTarget["kind"][] =
+    !renders.includes("screen_flow") && flowStale((await refresh(projectId)).spine) ? ["screen_flow"] : []
+  const allRenders = [...renders, ...followUps]
+
+  if (allRenders.length > 0) {
+    const targets: RenderTarget[] = allRenders.map((kind) => ({ kind, owner_id: kind === "screen_layout" ? loop : null }))
     const result = await renderDiagrams(projectId, targets, {
       by: userId,
       step_id: stepId,
@@ -758,7 +784,7 @@ export const runStep = async (
     const needsDraft = spec.skill !== null && !stepDef.deterministic && !isLoopBookkeeping(stepId)
 
     let { spine, spineVersion } = await refresh(projectId)
-    const existingStep = spine.steps.find((s) => s.id === stepId)
+    let existingStep = spine.steps.find((s) => s.id === stepId)
 
     if (existingStep?.status === "skipped") {
       throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
@@ -769,7 +795,25 @@ export const runStep = async (
       isReopenableLoopStep(spine, stepId) ||
       (existingStep?.status === "accepted" && isReopenableStaleStep(spine, stepId, await spineRepository.listChanges(projectId)))
     if (existingStep?.status === "accepted" && !reopenLoop) {
-      throw new ApiError(409, `Step ${stepId} đã accepted — cần gate revision/regenerate để mở lại (B7)`, STEP_NOT_RUNNABLE)
+      if (!d.reopen) {
+        throw new ApiError(409, `Step ${stepId} đã accepted — chạy lại phải mở lại bước (reopen) hoặc gate revision/regenerate (B7)`, STEP_NOT_RUNNABLE)
+      }
+      // Mở lại đúng như gate revision/regenerate: vòng mới, bỏ mốc seq và thời điểm chốt cũ (B7/F1)
+      const reopened = await applyTransaction(projectId, {
+        base_version: spineVersion,
+        ops: [
+          { op: "set", path: `steps[id=${stepId}].status`, value: "revision_requested" },
+          { op: "set", path: `steps[id=${stepId}].first_seq`, value: null },
+          { op: "set", path: `steps[id=${stepId}].last_seq`, value: null },
+          { op: "set", path: `steps[id=${stepId}].accepted_at`, value: null }
+        ],
+        by: userId,
+        step_id: stepId,
+        reason: "run: mở lại step đã accepted (B7)"
+      })
+      spine = reopened.spine
+      spineVersion = reopened.spine_version
+      existingStep = spine.steps.find((s) => s.id === stepId)
     }
     if (!existingStep && !reopenLoop) {
       const next = nextStepOf(spine)
@@ -835,6 +879,8 @@ export const runStep = async (
     const knownAssumptionIds = new Set(spine.assumptions.map((a) => a.id))
     const progressBefore = buildProgressReport(spine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
     const stepSummary: ChangeSummary[] = []
+    /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */
+    let wroteOps = false
 
     /**
      * Câu trả lời đưa vào lượt soạn. Ngoài transcript của chính bước, LUÔN kèm sổ quyết định: khi câu hỏi
@@ -990,6 +1036,7 @@ export const runStep = async (
           runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, "draft", emit, d, { answers: answersText })
         )
         spineVersion = draftPhase.spineVersion
+        if (draftPhase.applied) wroteOps = true
         stepSummary.push(...(draftPhase.summary ?? []))
       }
     }
@@ -1012,20 +1059,31 @@ export const runStep = async (
       await d.assembleDocument(projectId, (await refresh(projectId)).spineVersion)
     }
 
-    const { spine: finalSpine } = await refresh(projectId)
+    const { spine: finalSpine, spineVersion: finalVersion } = await refresh(projectId)
     const finalFirstSeq = finalSpine.steps.find((s) => s.id === stepId)?.first_seq ?? null
     const { calls_used, regenerate_used } = await usageCounts(projectId, stepId, finalFirstSeq)
     const actions: GateAction[] = regenerate_used >= REGENERATE_LIMIT_COUNT ? ["accept", "revision", "accept_as_is"] : ["accept", "revision", "regenerate"]
     const creditsUsed = await meter.roundCost(projectId, stepId, finalFirstSeq)
     const progressAfter = buildProgressReport(finalSpine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
 
-    // Lớp 4 "Bạn vừa có" (03) + WP-5: gate mang nội dung, không chỉ con số
+    // `spine_version` đi kèm gate_ready (L11): sau `ops_applied` còn render diagram + recompute cờ, mỗi lượt một
+    // transaction ⇒ version cuối cao hơn cái FE đang giữ. Không nói ra thì lượt `/run` kế tiếp gửi base_version cũ
+    // và ăn 409 SPINE_VERSION_CONFLICT trong lúc FE còn đang chờ `GET /spine` về.
+    //
+    // `empty_sections` (L11b): mục mà step này nuôi nhưng CHẠY XONG VẪN TRỐNG theo đúng hàm mà luật `section_empty`
+    // soi. Trước đây lô op rỗng vẫn đi thẳng tới gate như một lượt chạy thành công, user accept rồi cờ đỏ vẫn treo,
+    // bấm "Mở lại" lại rơi vào đúng vòng đó. Nói thẳng ở gate để user chọn lối khác (viết tay qua chat / waive).
+    //
+    // Lớp 4 "Bạn vừa có" (03) + WP-5: gate mang nội dung, không chỉ con số.
     const gateEvent: StepEvent = {
       type: "gate_ready",
       step_id: stepId,
       actions,
       regenerate_used,
       calls_used,
+      spine_version: finalVersion,
+      wrote_ops: wroteOps,
+      empty_sections: emptyFedSections(finalSpine, stepId),
       summary: stepSummary,
       new_assumptions: review.new_assumptions,
       flags: { red: review.red_open, yellow: review.yellow_open, red_delta: review.red_delta, yellow_delta: review.yellow_delta },

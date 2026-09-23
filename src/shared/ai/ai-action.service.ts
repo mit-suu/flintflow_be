@@ -9,6 +9,7 @@ import {
 } from "./ai-action.types.js"
 import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.js"
 import { callLLM } from "./providers/llm.router.js"
+import type { LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
@@ -28,10 +29,13 @@ export interface ExecuteAiActionOptions {
   parentLogId?: string
   rawPromptOverride?: string
   /**
-   * FLF-177 WP-4 (BUG-05): huỷ lượt chạy step phải huỷ luôn request HTTP đang mở tới provider. Không có
-   * nó thì khoá step vẫn bị giữ cho tới khi model soạn xong (có lúc tới 20 phút).
+   * FLF-177 WP-4 (BUG-05): huỷ lượt gọi model khi người gọi đã bỏ đi (client đóng SSE của `/run` vì reload
+   * trang) hoặc bấm huỷ. Không có nó thì lượt gọi vẫn chạy hết — có lúc tới 20 phút — và **khoá step chưa nhả**
+   * ⇒ bấm chạy lại nhận `STEP_NOT_RUNNABLE`.
    */
   signal?: AbortSignal
+  /** Ảnh gửi kèm prompt (mode 1 v3 phase 5, `IMPORT_EXTRACT_DIAGRAM`) — provider phải có vision (Gemini). */
+  images?: LlmImage[]
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -145,7 +149,10 @@ export const executeAiAction = async <T = any>(
 
       try {
         if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
-        const llmRes = await callLLM(finalPrompt, providerConfig, options.signal)
+        const llmRes = await callLLM(finalPrompt, providerConfig, {
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.images?.length ? { images: options.images } : {})
+        })
         const latencyMs = Date.now() - startTime
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)

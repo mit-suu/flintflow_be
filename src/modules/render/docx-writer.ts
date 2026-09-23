@@ -35,6 +35,8 @@ import type {
 const PAGE_CONTENT_WIDTH_PX = 602
 /** Cùng vùng chữ tính bằng twip: 11906 − 2 × 1440. */
 const PAGE_CONTENT_WIDTH_TWIP = 9026
+/** Đệm quanh bảng và ảnh, tách chúng khỏi tiêu đề/đoạn ngay trước (twip; 20 twip = 1pt). */
+const BLOCK_SPACE_BEFORE = 120
 const STALE_FILL = "FFF2CC"
 const HEADER_FILL = "D9D9D9"
 const NUMBERING_REF = "ff-numbered"
@@ -69,6 +71,10 @@ const TABLE_BORDERS = {
   insideHorizontal: CELL_BORDER,
   insideVertical: CELL_BORDER
 }
+
+/** Khoảng trống dưới tiêu đề khi ngay sau nó là bảng (twip; 160 = 8pt) — bảng không dính sát tiêu đề. */
+export const HEADING_TABLE_SPACING = 160
+const beforeTable = { spacing: { after: HEADING_TABLE_SPACING } }
 
 type Shading = { type: typeof ShadingType.CLEAR; color: string; fill: string } | undefined
 type BodyChild = Paragraph | Table | TableOfContents
@@ -243,8 +249,10 @@ function recordOfChanges(doc: RenderedDocument): BodyChild[] {
   return [
     new Paragraph({ text: "I. Record of Changes", heading: HeadingLevel.HEADING_1 }),
     new Paragraph({
+      ...beforeTable,
       children: [new TextRun({ text: "*A - Added, M - Modified, D - Deleted", italics: true, size: 20 })]
     }),
+    tableGap(undefined),
     table(
       ["Date", "Version", "A*, M, D", "In charge", "Change Description"].map(plain),
       doc.recordOfChanges.map((row) =>
@@ -287,12 +295,12 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean): BodyChild[] {
       })
     )
     if (appendix.redOpen.length > 0) {
-      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3 }), flagTable(appendix.redOpen, false))
+      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.redOpen, false))
     }
   }
   // srs-spine §6: mọi export, kể cả bản sạch, in danh sách waive
   if (appendix.waived.length > 0) {
-    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3 }), flagTable(appendix.waived, true))
+    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.waived, true))
   }
   return out
 }
@@ -302,7 +310,8 @@ function renderSection(section: RenderedSection, ctx: WriteContext): BodyChild[]
   const shading: Shading = needsReview ? { type: ShadingType.CLEAR, color: "auto", fill: STALE_FILL } : undefined
   const title = section.number ? `${section.number} ${section.heading}` : section.heading
 
-  const out: BodyChild[] = [new Paragraph({ text: title, heading: headingLevel(section.level) })]
+  const tableFirst = !needsReview && section.blocks[0]?.type === "table"
+  const out: BodyChild[] = [new Paragraph({ text: title, heading: headingLevel(section.level), ...(tableFirst ? beforeTable : {}) })]
 
   if (needsReview) {
     const note =
@@ -318,18 +327,20 @@ function renderSection(section: RenderedSection, ctx: WriteContext): BodyChild[]
     )
   }
 
-  for (const block of section.blocks) {
-    out.push(...renderBlock(block, shading, ctx))
-  }
+  section.blocks.forEach((block, i) => {
+    out.push(...renderBlock(block, shading, ctx, section.blocks[i + 1]))
+  })
   return out
 }
 
-function renderBlock(block: Block, shading: Shading, ctx: WriteContext): BodyChild[] {
+function renderBlock(block: Block, shading: Shading, ctx: WriteContext, next?: Block): BodyChild[] {
   switch (block.type) {
     case "paragraph":
       return [new Paragraph({ shading, children: runs(block.runs) })]
     case "heading":
-      return [new Paragraph({ shading, heading: headingLevel(block.level), text: block.text })]
+      return [
+        new Paragraph({ shading, heading: headingLevel(block.level), text: block.text, ...(next?.type === "table" ? beforeTable : {}) })
+      ]
     case "bullet_list":
       return block.items.map((item) => new Paragraph({ shading, bullet: { level: 0 }, children: runs(item) }))
     case "numbered_list": {
@@ -340,7 +351,7 @@ function renderBlock(block: Block, shading: Shading, ctx: WriteContext): BodyChi
       )
     }
     case "table":
-      return [table(block.header, block.rows, shading), new Paragraph({ shading })]
+      return [tableGap(shading), table(block.header, block.rows, shading), new Paragraph({ shading })]
     case "image":
       return image(block.png, block.caption, shading)
     case "page_break":
@@ -358,6 +369,18 @@ function runs(items: InlineRun[]): TextRun[] {
         ...(run.code ? { font: CODE_FONT, shading: { type: ShadingType.CLEAR, color: "auto", fill: "F2F2F2" } } : {})
       })
   )
+}
+
+/**
+ * OOXML không có "space before" cho `w:tbl`, nên đệm trên bảng là một đoạn rỗng cỡ chữ 1pt mang
+ * `spacing.before` — gần như không chiếm chiều cao, chỉ tạo khoảng hở với tiêu đề phía trên.
+ */
+function tableGap(shading: Shading): Paragraph {
+  return new Paragraph({
+    shading,
+    spacing: { before: BLOCK_SPACE_BEFORE, after: 0 },
+    children: [new TextRun({ text: "", size: 2 })]
+  })
 }
 
 function table(header: CellRuns[], rows: CellRuns[][], shading: Shading): Table {
@@ -401,9 +424,11 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
   } catch {
     throw new ApiError(422, "Image block is not a valid PNG", "RENDER_IMAGE_INVALID")
   }
-  if (size.type !== "png" || !size.width || !size.height) {
-    throw new ApiError(422, "Image block is not a valid PNG", "RENDER_IMAGE_INVALID")
+  // Phase 5 (T3): ảnh gốc của file upload có thể là JPEG — nhúng nguyên, không chuyển đổi
+  if ((size.type !== "png" && size.type !== "jpg") || !size.width || !size.height) {
+    throw new ApiError(422, "Image block is not a valid PNG/JPEG", "RENDER_IMAGE_INVALID")
   }
+  const type = size.type === "jpg" ? "jpg" : "png"
 
   // Chỉ thu nhỏ ảnh rộng hơn vùng chữ, không phóng to ảnh nhỏ
   const scale = Math.min(1, PAGE_CONTENT_WIDTH_PX / size.width)
@@ -411,9 +436,10 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
     new Paragraph({
       shading,
       alignment: AlignmentType.CENTER,
+      spacing: { before: BLOCK_SPACE_BEFORE, after: caption ? 0 : BLOCK_SPACE_BEFORE },
       children: [
         new ImageRun({
-          type: "png",
+          type,
           data,
           transformation: {
             width: Math.max(1, Math.round(size.width * scale)),
@@ -428,6 +454,7 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
       new Paragraph({
         shading,
         alignment: AlignmentType.CENTER,
+        spacing: { after: BLOCK_SPACE_BEFORE },
         children: [new TextRun({ text: caption, italics: true, size: 20 })]
       })
     )

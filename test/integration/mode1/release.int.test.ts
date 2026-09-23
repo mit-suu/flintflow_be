@@ -147,7 +147,7 @@ describe("release — bản sạch + baseline", () => {
 
     // tải về 1.0 ⇒ bản sạch không _DRAFT
     const dl = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
+    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
     expect(await documentXml(dl.body as Buffer)).not.toMatch(/<w:ins\b|<w:del\b/)
   })
 })

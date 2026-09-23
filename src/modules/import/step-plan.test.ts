@@ -3,7 +3,7 @@ import { nextStep } from "../pipeline/step-registry.js"
 import { progressByStep } from "../spine/section-status.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine, StepState } from "../spine/spine.types.js"
-import { buildLayout, buildStepPlan, customSectionOps, sectionsOwnedBy, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, continuationOwnerSection, customSectionOps, sectionsOwnedBy, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 
 const h = (block_id: string, text: string, level: number, section_id: string | null = null): LayoutBlock => ({ block_id, kind: "heading", level, text, section_id })
 const p = (block_id: string, text: string, section_id: string | null): LayoutBlock => ({ block_id, kind: "paragraph", level: null, text, section_id })
@@ -75,6 +75,10 @@ describe("buildLayout", () => {
       ["1.4 References", 2, "custom:CS02"]
     ])
     expect(customSections[0]).toMatchObject({ heading: "", level: 2, blocks: [{ text: "Lumen is a learning platform." }, { text: "Purpose text." }] })
+    // nợ T5: tra ngược được mục chủ của phần nối — đúng mục mà assemble gộp nội dung vào
+    expect(continuationOwnerSection(layout, "custom:CS01")).toBe("fixed:1")
+    expect(continuationOwnerSection(layout, "custom:CS02")).toBe("fixed:1") // mục riêng thường: mục bao nó
+    expect(continuationOwnerSection(layout, "custom:CS99")).toBeNull()
   })
 
   it("FLF-184: khối dưới heading nhóm luôn giữ (nhóm không trích); nội dung sau heading con cùng section về section đó, không dồn vào mục riêng đứng trước", () => {

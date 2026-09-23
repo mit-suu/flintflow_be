@@ -64,12 +64,15 @@ const authorize = async (req: Request): Promise<Authorized> => {
 const rawInstruction = (req: Request): string | undefined =>
   typeof req.body?.instruction === "string" ? req.body.instruction : undefined
 
+/** Mode 1 đã import xong (mode 1 v3, BPMN Flow 1 ⇒ 3.1): mọi sửa phải qua change request. */
+const mode1RequiresCr = async (auth: Authorized): Promise<boolean> => auth.mode === "import" && (await changesRequireCr(auth.projectId))
+
 /**
- * Mode 1: sau baseline v1 (sign-off) / release mọi sửa phải qua change request ⇒ 409 CHANGE_REQUIRES_CR kèm nội dung
- * điền sẵn (FLF-171, G9). Trước đó sửa tự do như mode 2 (mode 1 v2, D3 — FLF-183).
+ * Lời gọi **có ghi** (`/changes`, `/reconcile`, `/undo`) ở mode 1 sau v0 ⇒ `409 CHANGE_REQUIRES_CR` kèm nội dung
+ * điền sẵn cho form 3.1. Không tự tạo CR (3.1 là việc của BA: nguồn + người yêu cầu bắt buộc).
  */
-const guardMode1 = async (auth: Authorized, instruction?: string): Promise<void> => {
-  if (auth.mode === "import" && (await changesRequireCr(auth.projectId))) throw changeRequiresCr(prefillFrom(instruction))
+const guardMode1 = async (auth: Authorized, instruction: string | undefined, fallback: string): Promise<void> => {
+  if (await mode1RequiresCr(auth)) throw changeRequiresCr(prefillFrom(instruction, fallback, { kind: "verbal", ref: null }))
 }
 
 const parse = <T extends z.ZodType>(schema: T, value: unknown): z.infer<T> => {
@@ -91,7 +94,7 @@ const sendDomainError = (res: Response, err: unknown): Response => {
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(changesRequestSchema, req.body)
   try {
     const result = await changeService.apply(auth.projectId, auth.userId, body, auth.init)
@@ -108,10 +111,12 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
 
 export const previewChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  // Xem trước chỉ đọc ⇒ luôn chạy. Mode 1 sau v0: `meta.requires_cr` — bản xem trước dùng để soạn CR (3.1), không áp.
+  const requiresCr = await mode1RequiresCr(auth)
   const body = parse(changesRequestSchema, req.body)
   try {
-    return sendSuccess(res, 200, await changeService.preview(auth.projectId, auth.userId, body, auth.init))
+    const result = await changeService.preview(auth.projectId, auth.userId, body, auth.init)
+    return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
   } catch (err) {
     return sendDomainError(res, err)
   }
@@ -119,7 +124,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(reconcileRequestSchema, req.body)
   try {
     const result = await reconcileService.reconcile(auth.projectId, auth.userId, body, auth.init)
@@ -137,7 +142,7 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
 
 export const undoLastChange = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
-  await guardMode1(auth, rawInstruction(req))
+  await guardMode1(auth, rawInstruction(req), "Hoàn tác thay đổi gần nhất")
   const body = parse(undoRequestSchema, req.body)
   try {
     const result = await undoService.undoLast(auth.projectId, auth.userId, { base_version: body.base_version })

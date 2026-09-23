@@ -7,21 +7,22 @@
 import mongoose from "mongoose"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { stripRecord } from "../import/check.service.js"
-import { titleOfSection } from "../import/gap-report.service.js"
+import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
 import { formatCrId } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.dto.js"
-import { ChangeRequest, CrCounter, type IChangeRequest } from "./change-request.model.js"
+import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
 import { lockPaths, unlockPaths } from "./lock.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
-import { elementValue, valueText } from "./spine-location.js"
+import { elementValue, opElement, valueText } from "./spine-location.js"
+import { peekPreview } from "../spine/change.service.js"
 
 // ─── đọc ─────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
   submitted_at: toIso(cr.submitted_at),
   decided_by: cr.decided_by ? String(cr.decided_by) : null,
   closed_reason: cr.closed_reason ?? null,
+  seed: cr.seed ? { instruction: cr.seed.instruction ?? null, ops: [...cr.seed.ops], targets: [...cr.seed.targets] } : null,
   created_at: toIso(cr.createdAt)!,
   updated_at: toIso(cr.updatedAt)!
 })
@@ -71,10 +73,11 @@ export const pendingQuestions = (cr: IChangeRequest): string[] => {
 }
 
 export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail> => {
-  const [locations, groups, record] = await Promise.all([
+  const [locations, groups, record, layout] = await Promise.all([
     ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 }).lean(),
     ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ group_id: 1 }).lean(),
-    spineRepository.get(String(cr.projectId))
+    spineRepository.get(String(cr.projectId)),
+    loadLayout(String(cr.projectId))
   ])
   const spine = record ? stripRecord(record) : null
   return {
@@ -84,7 +87,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         location_id: l.location_id,
         path: l.path,
         section_id: l.section_id,
-        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id) : "",
+        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id, layout) : "",
         current_text: spine ? valueText(elementValue(spine, l.path)) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
@@ -129,6 +132,14 @@ export const listCrs = async (projectId: string, status?: CrStatus): Promise<Cha
 
 // ─── C-1 tạo ─────────────────────────────────────────────────────
 
+/** Bản xem trước ⇒ gợi ý của CR: lệnh, op, phần tử bị op chạm. Hết hạn / của người khác ⇒ `null`. */
+export const seedFromPreview = (projectId: string, userId: string, previewId: string): CrSeed | null => {
+  const preview = peekPreview(projectId, previewId, userId)
+  if (!preview) return null
+  const targets = [...new Set(preview.ops.map((op) => opElement(op.path)).filter((p): p is string => !!p))]
+  return { instruction: preview.instruction, ops: preview.ops.map((op) => ({ ...op }) as Record<string, unknown>), targets }
+}
+
 export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest): Promise<IChangeRequest> => {
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
@@ -143,6 +154,7 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     description: body.description,
     source: body.source,
     requester: body.requester,
+    seed: body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null,
     status: "draft",
     base_doc_version: version.version,
     created_by: userId
@@ -158,6 +170,16 @@ export const submitCr = async (cr: IChangeRequest): Promise<void> => {
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
+  }
+  // `regroup` chỉ gom vị trí `edit`/`comment`. Mọi vị trí `not_related` ⇒ 0 group ⇒ vào `in_review` mà không có gì
+  // để duyệt: CR kẹt, màn duyệt trống không nút (gặp thật 2026-09-20). Chặn ngay ở đây, chỉ hai lối đi thật sự.
+  const decidable = await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } })
+  if (!decidable) {
+    throw new Mode1Error(
+      "CR_NOTHING_TO_APPROVE",
+      "Mọi vị trí đều kết luận \"không liên quan\" — không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
+      { location_count: await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id }) }
+    )
   }
   await regroup(cr)
   cr.submitted_at = new Date()

@@ -28,7 +28,7 @@ const REPORT: GapReport = gapReportSchema.parse({
   project_id: "66f000000000000000000001",
   doc_version: "0.0",
   generated_at: "2026-09-19T00:00:00.000Z",
-  totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1, missing_fpt_sections: 2 },
+  totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1, missing_fpt_sections: 2, unrendered_diagrams: 1 },
   missing_fpt_sections: [
     { section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false },
     { section_id: "fixed:4.2.4", title: "Domain-Specific Attributes", step_id: "S-6.5", in_layout: true }
@@ -42,6 +42,7 @@ const REPORT: GapReport = gapReportSchema.parse({
     { section_id: "fixed:4.2.3", title: "Performance", flags: [flag("FL001", "red", "dead_reference", "fixed:4.2.3", "NFR trỏ UC-99"), flag("FL002", "yellow", "import_semantic", "fixed:4.2.3", "[ambiguity] 95% cần tải")] },
     { section_id: "feature:F-3.2", title: "Authentication", flags: [flag("FL003", "yellow", "empty_feature", "feature:F-3.2", "Feature rỗng")] }
   ],
+  unrendered_diagrams: [{ diagram_id: "D-UC-01", kind: "usecase", section_id: "fixed:2.2.2", title: "Use Cases", reason: "not_rendered" }],
   missing_sections: [{ section_id: "fixed:3.1.1", title: "Screen Flow" }],
   unmapped_headings: [{ block_id: "B0045", text: "5.9 Team Notes" }],
   low_confidence_fields: [
@@ -78,16 +79,19 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
   it("báo cáo rỗng ⇒ câu 'không có' thay cho bảng, file vẫn hợp lệ", async () => {
     const empty = gapReportSchema.parse({
       ...REPORT,
-      totals: { red: 0, yellow: 0, missing_sections: 0, unmapped_headings: 0, low_confidence_fields: 0, missing_fpt_sections: 0 },
+      totals: { red: 0, yellow: 0, missing_sections: 0, unmapped_headings: 0, low_confidence_fields: 0, missing_fpt_sections: 0, unrendered_diagrams: 0 },
       missing_fpt_sections: [],
       layout: [],
       sections: [],
+      unrendered_diagrams: [],
       missing_sections: [],
       unmapped_headings: [],
       low_confidence_fields: []
     })
     const all = (await texts(await renderGapReportDocx(empty, "Rỗng"))).map((b) => b.text)
-    expect(all).toEqual(expect.arrayContaining(["Không có cờ nào đang mở.", "Không thiếu section bắt buộc nào.", "Mọi heading đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT."]))
+    expect(all).toEqual(
+      expect.arrayContaining(["Không có cờ nào đang mở.", "Không thiếu section bắt buộc nào.", "Mọi heading đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
+    )
   })
 
   it("giá trị đã sửa (edited_value) thắng value; giá trị không phải chuỗi được JSON hoá", async () => {
@@ -115,5 +119,17 @@ describe("titleOfSection", () => {
     expect(titleOfSection(spine, "function:FR-9")).toBe("function:FR-9")
     expect(titleOfSection(spine, "fixed:9.9")).toBe("fixed:9.9")
     expect(titleOfSection({ ...(spine as object), custom_sections: [{ id: "CS01", heading: "Phụ lục A" }] } as never, "custom:CS01")).toBe("Phụ lục A")
+  })
+
+  it("phần nối (mục riêng tiêu đề rỗng) hiện theo mục chủ khi có layout; không có layout ⇒ nói rõ là phần nối (nợ T5)", () => {
+    const withCustom = { ...(spine as object), custom_sections: [{ id: "CS01", heading: "" }] } as never
+    const layout = [
+      { order: 0, heading_text: "1 Giới thiệu", level: 1, section_id: "fixed:1" },
+      { order: 1, heading_text: "", level: 2, section_id: "custom:CS01" }
+    ]
+    expect(titleOfSection(withCustom, "custom:CS01", layout)).toBe(`Phần nối của "${titleOfSection(spine, "fixed:1")}"`)
+    expect(titleOfSection(withCustom, "custom:CS01")).toBe("Phần nối (văn xuôi của mục trước)")
+    // mục riêng không còn trong Spine (dữ liệu cũ) ⇒ giữ id
+    expect(titleOfSection(spine, "custom:CS09", layout)).toBe("custom:CS09")
   })
 })
