@@ -69,7 +69,7 @@ export const NON_WAIVABLE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) 
  * theo, không ai kịp đọc. `planFlagOps` bỏ qua chúng khi dọn cờ; muốn đóng thì đóng có chủ đích
  * (user xử lý xong, hoặc bước sở hữu chạy lại và ghi đè).
  */
-export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set(["accepted_as_is", "goal_not_covered", "import_semantic", "cr_consistency"])
+export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set(["accepted_as_is", "goal_not_covered", "import_semantic", "import_image_unread", "cr_consistency"])
 
 export interface FlagCandidate {
   level: FlagLevel

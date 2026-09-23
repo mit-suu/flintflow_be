@@ -26,6 +26,8 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   // Mode 1 (FLF-171). Trích field tính theo LÔ section (gộp section nhỏ ~6k token in) để import một SRS
   // đầy đủ ≤ 100 credit gói free — đo ở spike P0 (claude_plan/reports/mode1-p0-report.md §4.8).
   [ActionType.IMPORT_EXTRACT_FIELDS]: 2,
+  // Một ảnh / lượt (Gemini vision) — đo ở docs/measurements.md (mode 1 v3 phase 5)
+  [ActionType.IMPORT_EXTRACT_DIAGRAM]: 2,
   [ActionType.IMPORT_SEMANTIC_CHECK]: 3,
   [ActionType.CR_CLARIFY]: 1,
   [ActionType.CR_PROPOSE]: 3,

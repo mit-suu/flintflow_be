@@ -12,6 +12,7 @@ import {
   BLOCK_ID_PATTERN,
   DOC_BLOCK_KINDS,
   EXTRACTION_STATUSES,
+  FIELD_ORIGINS,
   HEADING_DETECTORS,
   MENTION_ENTITIES,
   PREFLIGHT_ISSUE_CODES,
@@ -147,7 +148,7 @@ export const reviewFieldSchema = z.object({
   value: z.unknown(),
   confidence,
   source_block_ids: z.array(blockId),
-  origin: z.enum(["deterministic", "ai"]),
+  origin: z.enum(FIELD_ORIGINS),
   confirmed: z.boolean(),
   edited_value: z.unknown().optional()
 })

@@ -11,7 +11,7 @@ import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION } from "./import.constants.js"
+import { UNMAPPED_SECTION, needsConfirm } from "./import.constants.js"
 import type { GapReport, ReviewField } from "./import.dto.js"
 import type { ImportStatus } from "./import.state.js"
 import { latestImport, transitionImport } from "./import.service.js"
@@ -87,7 +87,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const unmapped = (profile?.heading_map ?? []).filter((h) => h.section_id === UNMAPPED_SECTION).map((h) => ({ block_id: h.block_id, text: h.heading_text }))
   const low: ReviewField[] = drafts.flatMap((d) =>
     d.fields
-      .filter((f) => f.confidence < FIELD_CONFIDENCE_THRESHOLD)
+      .filter((f) => needsConfirm(f))
       .map((f) => ({
         section_id: d.section_id,
         path: f.path,

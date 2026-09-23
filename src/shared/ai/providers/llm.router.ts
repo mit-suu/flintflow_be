@@ -15,6 +15,10 @@ export const callLLM = async (
   // `AI_PROVIDER_OVERRIDE` đè frontmatter của skill cho MỌI lượt gọi. Chỉ để CI / smoke test chạy hết
   // một step mà không gọi mạng (`mock`); mọi môi trường thật để trống (T24, `docs/ops.md`).
   const provider = (env.AI_PROVIDER_OVERRIDE || providerConfig.provider || "openai").toLowerCase()
+  // Chỉ Gemini (và mock) nhận ảnh — gửi ảnh cho provider khác thì model chỉ thấy chữ và bịa nội dung ảnh
+  if (options.images?.length && provider !== "gemini" && provider !== "mock") {
+    throw new AiActionError(500, `Provider ${provider} does not accept images`, "AI_PROVIDER_NO_VISION")
+  }
 
   switch (provider) {
     case "openai":
