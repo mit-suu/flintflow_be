@@ -21,6 +21,20 @@ back-office/admin human actor, one external system actor (payment, render, auth�
 has any scheduled behavior (credit expiry, digest email, cleanup) — one `time` actor. Missing any of these
 without a stated reason is a signal to re-check the Brief, not to skip it.
 
+## Access (every human actor)
+
+Decide how each human actor gets into the product and say it in its `description`:
+
+- `self-registers` — creates its own account.
+- `invited` — its account is created or invited by another actor (who then needs a "Create/Invite … Account"
+  use case).
+- `identity provider` — sign-in is delegated; the provider is a `system` actor.
+- `no sign-in` — uses the product publicly, as a guest.
+
+When the Brief/addendum does not say, pick the likeliest option and write **one** `assumptions[]` entry
+(`path: "actors[]"`) listing every unresolved actor — one combined question the user confirms at the gate,
+never one question per actor. S-3.2 derives Log In / Register / Reset Password from this result.
+
 ## Roles
 
 - One `roles[]` row per (actor, distinct permission set). A single actor with one uniform capability set

@@ -1,0 +1,329 @@
+{
+  "name": "bookbox",
+  "expected_personas": [
+    {
+      "persona": "Shopper / Member",
+      "keywords": [
+        "shopper",
+        "customer",
+        "member",
+        "buyer",
+        "reader"
+      ]
+    },
+    {
+      "persona": "Store Staff",
+      "keywords": [
+        "staff",
+        "packer",
+        "clerk"
+      ]
+    },
+    {
+      "persona": "Store Manager",
+      "keywords": [
+        "manager"
+      ]
+    },
+    {
+      "persona": "Owner",
+      "keywords": [
+        "owner",
+        "head office",
+        "executive"
+      ]
+    }
+  ],
+  "spine": {
+    "project": {
+      "name": "BookBox",
+      "vision": "Let readers of a five-store independent book chain find a title, see which store has it, and buy it for delivery or pickup, while staff and managers stop tracking orders on Messenger and paper.",
+      "goals": [
+        "Reach 30% of revenue online within 6 months",
+        "Keep order handling time per order under 3 minutes",
+        "Keep stock mismatch complaints under 1% of orders"
+      ],
+      "type": "new_product",
+      "domain": "E-commerce",
+      "complexity": "medium",
+      "form_factor": "responsive_web",
+      "stakes": "production",
+      "working_mode": "fast",
+      "release_scope": {
+        "in": [
+          "Catalogue search by title, author and ISBN with stock visibility per store",
+          "Shopping cart and checkout with an optional discount voucher",
+          "Payment by card or e-wallet through a payment gateway, or cash on delivery; wallet top-up with the same online payment",
+          "Home delivery or in-store pickup, order tracking, and cancelling an order before it is packed",
+          "Loyalty points earned per order and redeemable at checkout when the member has enough points",
+          "Product reviews by members who bought the book",
+          "Staff order-packing queue",
+          "Manager stock and price editing and voucher creation; owner sales report across stores"
+        ],
+        "out": [
+          "Third-party seller marketplace",
+          "E-books",
+          "Native mobile app",
+          "Subscriptions"
+        ]
+      }
+    },
+    "progress": {
+      "current_phase": "S-3",
+      "current_step": "S-3.1",
+      "screen_cursor": null,
+      "screen_queue": [],
+      "elicit_turns_this_phase": 0
+    },
+    "steps": [
+      {
+        "id": "B-0.1",
+        "status": "accepted",
+        "first_seq": 1,
+        "last_seq": 3,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-0.2",
+        "status": "accepted",
+        "first_seq": 4,
+        "last_seq": 6,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-0.3",
+        "status": "accepted",
+        "first_seq": 7,
+        "last_seq": 9,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-0.4",
+        "status": "accepted",
+        "first_seq": 10,
+        "last_seq": 12,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.1",
+        "status": "accepted",
+        "first_seq": 13,
+        "last_seq": 15,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.2",
+        "status": "accepted",
+        "first_seq": 16,
+        "last_seq": 18,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.3",
+        "status": "accepted",
+        "first_seq": 19,
+        "last_seq": 21,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.4",
+        "status": "accepted",
+        "first_seq": 22,
+        "last_seq": 24,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.5",
+        "status": "accepted",
+        "first_seq": 25,
+        "last_seq": 27,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-1.6",
+        "status": "accepted",
+        "first_seq": 28,
+        "last_seq": 30,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-2.1",
+        "status": "accepted",
+        "first_seq": 31,
+        "last_seq": 33,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-2.2",
+        "status": "accepted",
+        "first_seq": 34,
+        "last_seq": 36,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "B-2.3",
+        "status": "accepted",
+        "first_seq": 37,
+        "last_seq": 39,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.1",
+        "status": "accepted",
+        "first_seq": 40,
+        "last_seq": 42,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.2",
+        "status": "accepted",
+        "first_seq": 43,
+        "last_seq": 45,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.3",
+        "status": "accepted",
+        "first_seq": 46,
+        "last_seq": 48,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-1.4",
+        "status": "accepted",
+        "first_seq": 49,
+        "last_seq": 51,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.1",
+        "status": "accepted",
+        "first_seq": 52,
+        "last_seq": 54,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.2",
+        "status": "accepted",
+        "first_seq": 55,
+        "last_seq": 57,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.3",
+        "status": "accepted",
+        "first_seq": 58,
+        "last_seq": 60,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.4",
+        "status": "accepted",
+        "first_seq": 61,
+        "last_seq": 63,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "S-2.5",
+        "status": "accepted",
+        "first_seq": 64,
+        "last_seq": 66,
+        "accepted_at": "2026-09-22T00:00:00.000Z"
+      }
+    ],
+    "features": [],
+    "actors": [
+      {
+        "id": "A01",
+        "name": "Payment Gateway",
+        "kind": "system",
+        "description": "Card and e-wallet provider that charges online orders and wallet top-ups and reports the result through an asynchronous callback."
+      },
+      {
+        "id": "A02",
+        "name": "Shipping Partner",
+        "kind": "system",
+        "description": "Delivery company API that creates delivery orders and pushes delivery status updates."
+      },
+      {
+        "id": "A03",
+        "name": "Email Service",
+        "kind": "system",
+        "description": "Transactional email provider that sends order confirmations and password reset mail."
+      }
+    ],
+    "roles": [],
+    "use_cases": [],
+    "screens": [],
+    "permissions": [],
+    "entities": [],
+    "functions": [],
+    "nfrs": [],
+    "business_rules": [
+      {
+        "id": "BR01",
+        "tier": "high",
+        "statement": "An order can be cancelled by the member only before it is packed.",
+        "source_validation_ids": []
+      },
+      {
+        "id": "BR02",
+        "tier": "high",
+        "statement": "Card data is never stored; the payment gateway tokenises it.",
+        "source_validation_ids": []
+      }
+    ],
+    "common_requirements": [],
+    "messages": [],
+    "other_requirements": [],
+    "glossary": [],
+    "addendum": [
+      {
+        "id": "AD01",
+        "topic": "Users",
+        "content": "Guests browse the catalogue; registered members buy, review and collect loyalty points; store staff pack orders and hand over pickups; each store manager manages stock, prices and promotions for their store; the head-office owner sees sales across all five stores.",
+        "content_en": "Guests browse the catalogue; registered members buy, review and collect loyalty points; store staff pack orders and hand over pickups; each store manager manages stock, prices and promotions for their store; the head-office owner sees sales across all five stores.",
+        "target_section": "fixed:2.1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD02",
+        "topic": "Problem",
+        "content": "Customers call stores to ask whether a title is in stock, staff take orders over Messenger and lose track of them, managers cannot see stock across stores, and loyalty points live on paper cards.",
+        "content_en": "Customers call stores to ask whether a title is in stock, staff take orders over Messenger and lose track of them, managers cannot see stock across stores, and loyalty points live on paper cards.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD03",
+        "topic": "Integrations",
+        "content": "A payment gateway for card and e-wallet with an asynchronous payment-result callback; a shipping partner API that creates delivery orders and pushes delivery status updates; a transactional email service for order confirmations and password reset.",
+        "content_en": "A payment gateway for card and e-wallet with an asynchronous payment-result callback; a shipping partner API that creates delivery orders and pushes delivery status updates; a transactional email service for order confirmations and password reset.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD04",
+        "topic": "Scheduled jobs",
+        "content": "A job cancels orders left unpaid for 15 minutes and releases their reserved stock; a nightly job expires loyalty points older than 12 months.",
+        "content_en": "A job cancels orders left unpaid for 15 minutes and releases their reserved stock; a nightly job expires loyalty points older than 12 months.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      },
+      {
+        "id": "AD05",
+        "topic": "Open question",
+        "content": "How to handle a title sold out in one store but available in another at checkout time.",
+        "content_en": "How to handle a title sold out in one store but available in another at checkout time.",
+        "target_section": "fixed:5.4",
+        "captured_at": "2026-09-22T00:00:00.000Z"
+      }
+    ],
+    "diagrams": [],
+    "assumptions": [],
+    "flags": [],
+    "sections": [],
+    "baselines": [],
+    "spine_version": 1
+  }
+}
