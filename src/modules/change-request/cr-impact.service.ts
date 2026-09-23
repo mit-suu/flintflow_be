@@ -26,7 +26,10 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   if (!record) throw new Error("Không tìm thấy Spine của project")
   const spine = stripRecord(record)
 
-  const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords)
+  const seedTargets = new Set(cr.seed?.targets ?? [])
+  const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords).map((f) =>
+    seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
+  )
   if (!found.length) {
     // Đứng im ở impact_review với 0 vị trí làm nút "Tìm vị trí" trông như hỏng. Nói rõ: đích nào là mục còn trống
     // mà cũng không thêm mới được và CR đã nhắm vào gì. Mode 1 v3 không còn step ⇒ lối ra duy nhất là sửa mô tả CR.

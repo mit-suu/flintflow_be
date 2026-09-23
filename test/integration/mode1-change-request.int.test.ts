@@ -110,7 +110,7 @@ describe("mode 1 — change request", () => {
     const brLoc = rejected.locations.find((l) => l.group_id === brGroup.group_id)!
     expect(await lockedPaths(projectId, "CR-001")).not.toContain(brLoc.path)
 
-    const written = detail(await c.post(`${cr}/groups/${perfGroup.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+    const written = detail(await c.post(`${cr}/groups/${perfGroup.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
 
     // version 0.1 = bản render từ Spine mới: stamp 0.1, text mới; mọi khoá đã mở

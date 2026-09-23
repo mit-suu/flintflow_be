@@ -24,6 +24,7 @@ export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
   cr_ids: [...v.cr_ids],
   baseline_id: v.baseline_ref ?? null,
   has_clean_file: !!v.clean_file_ref,
+  has_tracked_file: !!v.tracked_file_ref,
   has_original_file: !!v.original_ref,
   created_by: String(v.created_by),
   created_at: toIso(v.createdAt)!
@@ -66,7 +67,8 @@ export const downloadVersion = async (projectId: string, projectName: string, ve
   if (release && variant === "auto" && v.clean_file_ref) {
     return { filename: downloadFileName(projectName, v.version), data: await docFileStore().load(v.clean_file_ref) }
   }
-  const data = await docFileStore().load(v.file_ref)
+  // BPMN 3.14 (mode 1 v3): bản có đánh dấu của CR là file riêng; version không có (0.0, dựng lỗi) ⇒ bản render như cũ
+  const data = await docFileStore().load(variant === "tracked" && v.tracked_file_ref ? v.tracked_file_ref : v.file_ref)
   if (release) return { filename: downloadFileName(projectName, v.version), data }
   const pkg = await DocxPackage.load(data)
   await addDraftWatermark(pkg)
