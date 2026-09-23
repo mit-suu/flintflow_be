@@ -408,3 +408,80 @@ describe("system_name_missing (FLF-177)", () => {
     expect(flags.some((f) => f.message.includes("project.system_name"))).toBe(true)
   })
 })
+
+describe("FLF-213: luật \"chưa có X\" chờ bước sở hữu chốt", () => {
+  /**
+   * Mục của các bước từ S-4 trở đi — ở S-3.6 chúng trống là đúng kế hoạch, không phải lỗi.
+   * Không có `fixed:3.1.3`: `roles[]` do S-3.1 sinh nên mục đó đã có dữ liệu từ trước S-4.
+   */
+  const LATER_SECTIONS = ["fixed:3.1.1", "fixed:3.1.2", "fixed:3.1.4", "fixed:3.1.5", "fixed:4.1", "fixed:4.2.1", "fixed:4.2.2", "fixed:4.2.3", "fixed:5.1", "fixed:5.2", "fixed:5.3"]
+  const GATED_RULES = ["section_empty", "array_empty", "nfr_missing_number"]
+
+  /** Dự án dừng ở S-3.6: chỉ step S-1…S-3 đã accepted, dữ liệu của S-4 trở đi chưa tồn tại. */
+  const atS36 = (extra: (s: Spine) => void = () => {}): Spine =>
+    variant((s) => {
+      s.steps = s.steps.filter((st) => /^S-[123]\./.test(st.id))
+      s.progress.current_phase = "S-3"
+      s.progress.current_step = "S-3.6"
+      s.features = []
+      s.screens = []
+      s.functions = []
+      s.permissions = []
+      s.entities = []
+      s.nfrs = []
+      s.common_requirements = []
+      s.messages = []
+      s.business_rules = s.business_rules.filter((b) => b.tier === "high")
+      s.diagrams = s.diagrams.filter((d) => d.kind === "context" || d.kind === "usecase")
+      s.use_cases.forEach((u) => (u.function_ids = []))
+      s.progress.screen_cursor = null
+      s.progress.screen_queue = []
+      extra(s)
+    })
+
+  it("đang ở S-3.x ⇒ không cờ 'chưa có X' cho mục của S-4 trở đi", () => {
+    const flags = runDeterministicCheck(atS36())
+    for (const id of byRule(flags, "section_empty").map((f) => f.section_id)) expect(LATER_SECTIONS, id).not.toContain(id)
+    expect(byRule(flags, "array_empty")).toEqual([])
+    expect(byRule(flags, "nfr_missing_number")).toEqual([])
+    // function chỉ có từ S-4.1/S-4.4 ⇒ "use case chưa gắn function" chưa phải lỗi
+    expect(byRule(flags, "usecase_no_function")).toEqual([])
+  })
+
+  it("bước sở hữu đã accepted mà mục vẫn trống ⇒ vẫn có cờ", () => {
+    const flags = runDeterministicCheck(
+      atS36((s) => s.steps.push(
+        { id: "S-4.1", status: "accepted", first_seq: null, last_seq: null, accepted_at: "2026-09-23T10:00:00.000Z" },
+        { id: "S-4.5", status: "accepted", first_seq: null, last_seq: null, accepted_at: "2026-09-23T10:00:00.000Z" }
+      ))
+    )
+    expect(byRule(flags, "section_empty").map((f) => f.section_id).sort()).toEqual(["fixed:3.1.2", "fixed:3.1.5"])
+    expect(byRule(flags, "array_empty").map((f) => f.target_id).sort()).toEqual(["entities", "features", "functions", "screens"])
+    // S-4.4 và S-6.x vẫn chưa chạy ⇒ cổng của chúng còn đóng
+    expect(byRule(flags, "usecase_no_function")).toEqual([])
+    expect(byRule(flags, "nfr_missing_number")).toEqual([])
+  })
+
+  it("at_baseline ⇒ mở hết cổng, bắt đủ như trước khi có cổng", () => {
+    const spine = atS36()
+    const flags = runDeterministicCheck(spine, [], { atBaseline: true })
+    for (const id of LATER_SECTIONS) expect(byRule(flags, "section_empty").map((f) => f.section_id), id).toContain(id)
+    expect(byRule(flags, "nfr_missing_number").map((f) => f.section_id).sort()).toEqual(["fixed:4.2.2", "fixed:4.2.3"])
+    expect(byRule(flags, "array_empty").map((f) => f.target_id).sort()).toEqual([
+      "common_requirements", "entities", "features", "functions", "nfrs[category=performance]", "nfrs[category=reliability]", "screens"
+    ])
+    expect(byRule(flags, "usecase_no_function").length).toBeGreaterThan(0)
+    // cùng một Spine, chỉ khác cổng: lượt thường là tập con thật sự của lượt ký bản
+    const normal = runDeterministicCheck(spine).filter((f) => GATED_RULES.includes(f.rule_id))
+    expect(normal.length).toBeLessThan(flags.filter((f) => GATED_RULES.includes(f.rule_id)).length)
+  })
+
+  it("mode 1 (skipOwnerStepGate) giữ nguyên cờ dù step chưa accepted — Spine import suy step từ file", () => {
+    const spine = atS36()
+    const profile = { exclude: new Set<string>(), downgrade: new Set<string>(), skipOwnerStepGate: true }
+    const gated = byRule(runDeterministicCheck(spine), "section_empty").map((f) => f.section_id)
+    const ungated = byRule(runDeterministicCheck(spine, [], { ruleProfile: profile }), "section_empty").map((f) => f.section_id)
+    for (const id of LATER_SECTIONS) expect(ungated, id).toContain(id)
+    expect(gated.length).toBeLessThan(ungated.length)
+  })
+})
