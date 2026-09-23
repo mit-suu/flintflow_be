@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, customBlocks, numberSections, placeSections, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, numberSections, placeSections, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -156,6 +156,54 @@ describe("numberSections", () => {
       ["fixed:1", "1", 1],
       ["custom:A", "1.1", 2]
     ])
+  })
+})
+
+describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
+  const placed = (rows: [string, string, number, string][]) =>
+    rows.map(([section_id, title, level, label]) => ({ section_id, kind: "fpt" as const, title, level, fromLayout: true, typed: label !== "", label }))
+
+  it("file SRS thật: `I. Record of Changes` + `II. SRS` › chương 1..3 ⇒ II giữ nhãn, chương không bị đẩy sâu (3.1.2 vẫn là 3.1.2)", () => {
+    const numbered = numberSections(
+      placed([
+        ["custom:W", "Software Requirement Specification", 1, "II"],
+        ["fixed:1", "Product Overview", 2, "1"],
+        ["group:2", "User Requirements", 2, "2"],
+        ["fixed:2.1", "Actors", 3, "2.1"],
+        ["group:3", "Functional Requirements", 2, "3"],
+        ["group:3.1", "System Functional Overview", 3, "3.1"],
+        ["fixed:3.1.1", "Screens Flow", 4, "3.1.1"],
+        ["fixed:3.1.2", "Screen Descriptions", 4, "3.1.2"],
+        ["custom:APP", "Appendix", 1, ""]
+      ])
+    )
+    expect(numbered.map((n) => [n.section_id, n.number, n.renderLevel])).toEqual([
+      ["custom:W", "II", 1],
+      ["fixed:1", "1", 2],
+      ["group:2", "2", 2],
+      ["fixed:2.1", "2.1", 3],
+      ["group:3", "3", 2],
+      ["group:3.1", "3.1", 3],
+      ["fixed:3.1.1", "3.1.1", 4],
+      ["fixed:3.1.2", "3.1.2", 4],
+      ["custom:APP", "", 1] // ra khỏi phần; file gõ số tay nên heading không gõ số giữ không số
+    ])
+  })
+
+  it("La Mã làm chính số chương (`I.` › `1.1`) ⇒ không phải phần, đánh số như cũ", () => {
+    const numbered = numberSections(
+      placed([
+        ["fixed:1", "Introduction", 1, "I"],
+        ["custom:P", "Purpose", 2, "1.1"],
+        ["group:2", "Overall Description", 1, "II"],
+        ["fixed:2.1", "Actors", 2, "2.1"]
+      ])
+    )
+    expect(numbered.map((n) => n.number)).toEqual(["1", "1.1", "2", "2.1"])
+  })
+
+  it("romanValue", () => {
+    expect([romanValue("I"), romanValue("II"), romanValue("IV"), romanValue("IX"), romanValue("XII"), romanValue("2.1")]).toEqual([1, 2, 4, 9, 12, null])
   })
 })
 
