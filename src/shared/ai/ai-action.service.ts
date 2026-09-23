@@ -28,8 +28,9 @@ export interface ExecuteAiActionOptions {
   parentLogId?: string
   rawPromptOverride?: string
   /**
-   * Huỷ lượt gọi model khi người gọi đã bỏ đi (client đóng SSE của `/run` vì reload trang). Không có nó thì lượt
-   * gọi vẫn chạy hết — có thể vài phút — và **khoá step chưa nhả** ⇒ bấm chạy lại nhận `STEP_NOT_RUNNABLE`.
+   * FLF-177 WP-4 (BUG-05): huỷ lượt gọi model khi người gọi đã bỏ đi (client đóng SSE của `/run` vì reload
+   * trang) hoặc bấm huỷ. Không có nó thì lượt gọi vẫn chạy hết — có lúc tới 20 phút — và **khoá step chưa nhả**
+   * ⇒ bấm chạy lại nhận `STEP_NOT_RUNNABLE`.
    */
   signal?: AbortSignal
 }
@@ -144,6 +145,7 @@ export const executeAiAction = async <T = any>(
       const startTime = Date.now()
 
       try {
+        if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
         const llmRes = await callLLM(finalPrompt, providerConfig, options.signal ? { signal: options.signal } : {})
         const latencyMs = Date.now() - startTime
 
