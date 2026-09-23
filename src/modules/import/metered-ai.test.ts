@@ -87,7 +87,7 @@ describe("withMeteredAi — lỗi", () => {
   it("hết credit (INSUFFICIENT_CREDIT) ⇒ release usage, reason credits, không ném lỗi", async () => {
     exec.mockRejectedValueOnce(new AiActionError(402, "Không đủ credit", "INSUFFICIENT_CREDIT"))
     const res = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "C-4:CR-002" }, ActionType.CR_PROPOSE, {})
-    expect(res).toEqual({ ok: false, reason: "credits", message: "Không đủ credit", usageId: "usage-1" })
+    expect(res).toEqual({ ok: false, reason: "credits", message: "Không đủ credit", usageId: "usage-1", code: "INSUFFICIENT_CREDIT" })
     expect(calls).toEqual(["reserve:C-4:CR-002", "release:usage-1"])
     expect(finalizeCall).not.toHaveBeenCalled()
   })
@@ -101,7 +101,7 @@ describe("withMeteredAi — lỗi", () => {
   it("lỗi provider còn lại sau retry (đã retry trong executeAiAction) ⇒ release, reason resume_later; không tự gọi lại lần nữa", async () => {
     exec.mockRejectedValueOnce(new AiActionError(500, "Provider down", "AI_EXECUTION_FAILED"))
     const res = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "I-4:fixed:1" }, ActionType.IMPORT_EXTRACT_FIELDS, {})
-    expect(res).toEqual({ ok: false, reason: "resume_later", message: "Provider down", usageId: "usage-1" })
+    expect(res).toEqual({ ok: false, reason: "resume_later", message: "Provider down", usageId: "usage-1", code: "AI_EXECUTION_FAILED" })
     expect(exec).toHaveBeenCalledTimes(1)
     expect(calls).toEqual(["reserve:I-4:fixed:1", "release:usage-1"])
   })

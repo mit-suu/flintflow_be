@@ -36,7 +36,8 @@ export const importedProject = async (name = "Lumen LMS") => {
 const replaceOps = (path: string, text: string, from: string, to: string): { op: "set"; path: string; value: string }[] => {
   let value: Record<string, unknown> = {}
   try {
-    value = JSON.parse(text.split("\nPrevious proposal failed checks")[0]) as Record<string, unknown>
+    // Bỏ các dòng C-4 nối sau JSON: lỗi kiểm lần trước, op gợi ý từ bản xem trước (mode 1 v3)
+    value = JSON.parse(text.split("\nPrevious proposal failed checks")[0].split("\nRequester's previewed ops")[0]) as Record<string, unknown>
   } catch {
     return []
   }

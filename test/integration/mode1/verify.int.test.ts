@@ -187,6 +187,22 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
   })
 
+  it("BPMN 3.9 ⇒ huỷ ⇒ 3.10: CR ở manual_fix bị huỷ ⇒ cancelled + lý do, mở hết khoá, Spine không đổi", async () => {
+    routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
+    const { c, cr, crId, projectId } = await toProposed()
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) detail(await c.post(`${cr}/propose`))
+      detail(await c.post(`${cr}/verify`))
+    }
+    expect(detail(await c.get(cr)).change_request.status).toBe("manual_fix")
+    expect(await SpineLock.countDocuments({ projectId, cr_id: crId })).toBeGreaterThan(0)
+    const before = (await Spine.findOne({ projectId }).lean())!.spine_version
+    const cancelled = detail(await c.post(`${cr}/cancel`, { reason: "BA không sửa được, khách rút yêu cầu" }))
+    expect(cancelled.change_request).toMatchObject({ status: "cancelled", closed_reason: "BA không sửa được, khách rút yêu cầu" })
+    expect(await SpineLock.countDocuments({ projectId, cr_id: crId }), "3.10 mở khoá").toBe(0)
+    expect((await Spine.findOne({ projectId }).lean())!.spine_version).toBe(before)
+  })
+
   it("verify sai trạng thái ⇒ 409; service thiếu Spine ⇒ ném", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToImpact(c)

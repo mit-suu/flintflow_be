@@ -161,6 +161,15 @@ UNIQUE — vị trí V4 không có `block_id` ⇒ C-3 chết từ vị trí th�
 Lần chạy mặc định chỉ đụng index (tạo lại được); xoá dữ liệu phải tự gọi `--clean-data`. Unique index
 `(projectId, cr_id, path)` chỉ tạo được sau khi hết vị trí bản cũ (chúng không có `path`).
 
+**Mode 1 v3 (bám BPMN, 2026-09-22) — không cần migration.** Dữ liệu project mode 1 tạo trước v3 vẫn đọc được
+nguyên trạng: baseline v1 đã ký, CR nguồn `chat` (enum giữ để đọc), cờ đã waive, version 0.x/1.0 cũ. Chỉ hành vi
+**từ nay** đổi: sau import mọi sửa qua CR (`CHANGE_REQUIRES_CR`), không chạy step / ký v1 / waive (`MODE1_NO_*`),
+CR mới không nhận nguồn `chat`. Version cũ không có bản có đánh dấu (`has_tracked_file: false` ⇒ tải `tracked` trả
+bản thường); import cũ không có `image_ref` nên bản render cũ vẫn thiếu ảnh — muốn có ảnh thì import lại file.
+Đọc ảnh diagram (phase 5) cần `GEMINI_API_KEY`; thiếu key ⇒ I-4 **không dừng**, ảnh được giữ nguyên + cờ vàng
+`import_image_unread` (không trích được thực thể từ ảnh). Key free tier hết quota ngày sau ~20 ảnh ⇒ lượt lỗi thành
+`paused: resume_later` — môi trường thật dùng key trả phí.
+
 Trong docker compose, image production không có `tsx` nhưng có bản đã biên dịch:
 
 ```bash
