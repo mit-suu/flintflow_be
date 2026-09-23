@@ -145,10 +145,11 @@ describe("import.dto — response", () => {
       project_id: PROJECT_ID,
       doc_version: "0.0",
       generated_at: AT,
-      totals: { red: 0, yellow: 1, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 0, missing_fpt_sections: 1 },
+      totals: { red: 0, yellow: 1, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 0, missing_fpt_sections: 1, unrendered_diagrams: 0 },
       missing_fpt_sections: [{ section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false }],
       layout: [{ order: 0, section_id: "custom:CS01", heading: "Phụ lục B — Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }],
       sections: [],
+      unrendered_diagrams: [],
       missing_sections: [{ section_id: "fixed:5.3", title: "Application Messages List" }],
       unmapped_headings: [{ block_id: "B0100", text: "Phụ lục B — Biên bản họp" }],
       low_confidence_fields: []

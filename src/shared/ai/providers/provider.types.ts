@@ -7,7 +7,13 @@ export interface LLMResponse {
   raw?: any
 }
 
+/** Tuỳ chọn cho một lượt gọi model (khác cấu hình skill): huỷ khi người gọi đã bỏ đi. */
+export interface LlmCallOptions {
+  signal?: AbortSignal
+}
+
 export type LLMCallFn = (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  options?: LlmCallOptions
 ) => Promise<LLMResponse>

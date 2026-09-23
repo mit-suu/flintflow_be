@@ -26,7 +26,7 @@ import { MAX_REDO_PER_LOCATION } from "./change-request.state.js"
 import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./change-location.model.js"
 import { crHeader, glossaryText, truncate } from "./cr-context.js"
 import { locksOf } from "./lock.service.js"
-import { elementValue, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
+import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${loc.path} đã bị sửa ở chỗ khác kể từ lúc đề xuất`, { location_id: loc.location_id, path: loc.path })
@@ -58,6 +58,14 @@ export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocat
     else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Op không đổi gì ở phần tử này" })
     for (const el of opElements(loc)) {
       if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Op sửa ${el} — phần tử này không thuộc vị trí CR đang khoá`, path: el })
+    }
+    // Vị trí "mục trống" (`arr[]`): chỉ được thêm phần tử vào đúng mảng đó, không lấn sang mảng khác
+    if (isArrayPath(loc.path)) {
+      const array = loc.path.slice(0, -2)
+      for (const raw of p.spine_ops) {
+        const path = opPath(raw)
+        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Op chạm ${path} — vị trí này chỉ được thêm mới vào ${loc.path}`, path })
+      }
     }
   }
   if (loc.conclusion === "comment" && !p.comment_text?.trim()) out.push({ rule: "comment_empty", message: "Kết luận comment nhưng không có nội dung" })

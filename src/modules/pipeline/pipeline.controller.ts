@@ -26,6 +26,7 @@ import {
   submitAnswer,
   requirePipelineSession,
   isPipelineErrorCode,
+  isStepLocked,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   type Emit
@@ -102,7 +103,8 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       calls_limit: CALLS_LIMIT,
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
-      accepted_at: state?.accepted_at ?? null
+      accepted_at: state?.accepted_at ?? null,
+      running: isStepLocked(projectId, def.id)
     }
   })
 
@@ -124,6 +126,11 @@ const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
   if (err instanceof ApiError || err instanceof AiActionError) {
     if (isPipelineErrorCode(err.code)) return err.code
     if (err.statusCode === 400) return "VALIDATION_ERROR"
+    // Lỗi của nhà cung cấp AI có mã riêng (GLM_ERROR, GEMINI_ERROR, GLM_EMPTY_OUTPUT…) không nằm trong bảng
+    // pipeline. Trước đây quy hết về NOT_IMPLEMENTED (501) nên người dùng đọc "chưa hiện thực" trong khi thật ra
+    // endpoint AI hết hạn mức / chưa gắn thanh toán (gặp thật 2026-09-20).
+    if (err.statusCode === 429) return "RATE_LIMIT_EXCEEDED"
+    if (err instanceof AiActionError && err.statusCode >= 500) return "AI_PROVIDER_ERROR"
   }
   return "NOT_IMPLEMENTED"
 }
@@ -187,11 +194,6 @@ data: ${JSON.stringify(event)}
     headersSent: () => headersSent,
     closed: () => closed,
     /**
-     * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào (`/phases/:phase/run`
-     * khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo mãi ở trạng thái "đang
-     * chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra response lỗi JSON.
-     */
-    /**
      * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào
      * (`/phases/:phase/run` khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo
      * mãi ở trạng thái "đang chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra
@@ -221,7 +223,11 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   }
 
   try {
-    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: stream.controller.signal, abort: stream.controller })
+    await runStep(projectId, stepId, body.session_id, userId, emit, {
+      signal: stream.controller.signal,
+      abort: stream.controller,
+      ...(body.reopen ? { reopen: true } : {})
+    })
     stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err

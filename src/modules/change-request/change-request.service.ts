@@ -7,7 +7,7 @@
 import mongoose from "mongoose"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { stripRecord } from "../import/check.service.js"
-import { titleOfSection } from "../import/gap-report.service.js"
+import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
@@ -71,10 +71,11 @@ export const pendingQuestions = (cr: IChangeRequest): string[] => {
 }
 
 export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail> => {
-  const [locations, groups, record] = await Promise.all([
+  const [locations, groups, record, layout] = await Promise.all([
     ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 }).lean(),
     ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ group_id: 1 }).lean(),
-    spineRepository.get(String(cr.projectId))
+    spineRepository.get(String(cr.projectId)),
+    loadLayout(String(cr.projectId))
   ])
   const spine = record ? stripRecord(record) : null
   return {
@@ -84,7 +85,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         location_id: l.location_id,
         path: l.path,
         section_id: l.section_id,
-        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id) : "",
+        section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id, layout) : "",
         current_text: spine ? valueText(elementValue(spine, l.path)) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
@@ -158,6 +159,16 @@ export const submitCr = async (cr: IChangeRequest): Promise<void> => {
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
+  }
+  // `regroup` chỉ gom vị trí `edit`/`comment`. Mọi vị trí `not_related` ⇒ 0 group ⇒ vào `in_review` mà không có gì
+  // để duyệt: CR kẹt, màn duyệt trống không nút (gặp thật 2026-09-20). Chặn ngay ở đây, chỉ hai lối đi thật sự.
+  const decidable = await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } })
+  if (!decidable) {
+    throw new Mode1Error(
+      "CR_NOTHING_TO_APPROVE",
+      "Mọi vị trí đều kết luận \"không liên quan\" — không có thay đổi nào để duyệt. Sửa kết luận ở vị trí cần đổi, hoặc huỷ change request.",
+      { location_count: await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id }) }
+    )
   }
   await regroup(cr)
   cr.submitted_at = new Date()
