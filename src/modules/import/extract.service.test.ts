@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
-import { AI_BATCH_CHARS, AI_BLOCK_CHARS, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, tableGrid } from "./extract.service.js"
+import { AI_BATCH_CHARS, AI_BLOCK_CHARS, captionOf, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, tableGrid, visionItems } from "./extract.service.js"
 import { IdAllocator, flattenItem, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
@@ -225,5 +225,21 @@ describe("itemsFromAi — output model ⇒ item", () => {
     )
     expect(out[0].id).toBe("FR-3.2.1")
     expect(out[1].id).not.toBe("FR-3.2.1")
+  })
+})
+
+describe("ảnh diagram (mode 1 v3 phase 5)", () => {
+  const blk = (block_id: string, kind: string, text = "") => ({ block_id, kind, text }) as never
+
+  it("captionOf: caption ngay sau ảnh, không có thì ngay trước; không có ⇒ (none)", () => {
+    const blocks = [blk("B1", "caption", "Hình 0"), blk("B2", "image"), blk("B3", "caption", "Hình 1: Use case"), blk("B4", "image"), blk("B5", "paragraph", "x")]
+    expect(captionOf(blk("B2", "image"), blocks)).toBe("Hình 1: Use case")
+    expect(captionOf(blk("B4", "image"), blocks)).toBe("Hình 1: Use case")
+    expect(captionOf(blk("B9", "image"), [blk("B9", "image"), blk("B10", "paragraph", "y")])).toBe("(none)")
+  })
+
+  it("visionItems: origin vision, độ tin item + từng field ≤ 0.7", () => {
+    const it0: EntityItem = { entity: "actors", id: "A09", value: { name: "Guest" }, confidence: 0.95, field_confidence: { kind: 0.9, name: 0.4 }, source_block_ids: ["B0002"], origin: "ai" }
+    expect(visionItems([it0])).toEqual([{ ...it0, origin: "vision", confidence: 0.7, field_confidence: { kind: 0.7, name: 0.4 } }])
   })
 })

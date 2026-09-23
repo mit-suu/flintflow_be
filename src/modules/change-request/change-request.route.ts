@@ -236,6 +236,36 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/owner-step-draft:
+ *   post:
+ *     summary: "Sửa đề xuất trong step sở hữu (BPMN 3.9, mode 1 v3) — chạy skill của step sở hữu vị trí theo hướng của BA, chỉ ghi đề xuất (manual = true); kiểm lại bằng /verify"
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *       - { in: path, name: locId, required: true, schema: { type: string, example: L001 } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [instruction]
+ *             properties:
+ *               instruction: { type: string, example: "Giữ ngưỡng 1 giây nhưng thêm điều kiện 95% request" }
+ *     responses:
+ *       200: { $ref: '#/components/responses/CrDetail' }
+ *       402: { description: INSUFFICIENT_CREDIT }
+ *       404: { description: CR_LOCATION_NOT_FOUND }
+ *       409: { description: CR_INVALID_TRANSITION (CR không ở manual_fix), CR_NO_OWNER_STEP, PATH_LOCKED }
+ *       502: { description: AI_PROVIDER_ERROR }
+ */
+router.post("/:projectId/change-requests/:crId/locations/:locId/owner-step-draft", authMiddleware, crController.ownerStepDraft)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}/groups/{gid}/decision:
  *   post:
  *     summary: Duyệt / từ chối một change group (UC-52, nút 3.12–3.14)

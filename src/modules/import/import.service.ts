@@ -14,7 +14,7 @@ import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 import { Project } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import { needsConfirm } from "./import.constants.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
 import { assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
@@ -187,7 +187,8 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   section_id: sectionId,
   mentions: b.mentions,
   editable: b.editable,
-  locked_by_cr: null
+  locked_by_cr: null,
+  image_ref: b.image_ref ?? null
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.0`). */
@@ -263,7 +264,7 @@ export const extractionSummary = async (importId: mongoose.Types.ObjectId | stri
   const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
   const review_fields: ReviewField[] = []
   const sections = drafts.map((d) => {
-    const needing = d.fields.filter((f) => !f.confirmed && f.confidence < FIELD_CONFIDENCE_THRESHOLD)
+    const needing = d.fields.filter((f) => !f.confirmed && needsConfirm(f))
     for (const f of needing) {
       review_fields.push({
         section_id: d.section_id,

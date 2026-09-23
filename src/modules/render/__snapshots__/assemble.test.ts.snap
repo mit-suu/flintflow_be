@@ -486,7 +486,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
             ],
             [
               {
-                "text": "Name",
+                "text": "Use Case",
               },
             ],
             [
@@ -496,12 +496,17 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
             ],
             [
               {
-                "text": "Description",
+                "text": "Use Case Description",
               },
             ],
             [
               {
-                "text": "Include / Extend",
+                "text": "Includes",
+              },
+            ],
+            [
+              {
+                "text": "Extends",
               },
             ],
           ],
@@ -525,6 +530,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "A visitor creates an account and verifies the email address.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -559,6 +569,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -583,7 +598,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "extend: UC02",
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
             ],
@@ -605,12 +625,17 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "A first-time user walks through or skips the pipeline introduction.",
+                  "text": "When a first-time user creates their first project, they walk through or skip the pipeline introduction.",
                 },
               ],
               [
                 {
                   "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "Create Project",
                 },
               ],
             ],
@@ -622,7 +647,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "Manage Projects",
+                  "text": "Browse Projects",
                 },
               ],
               [
@@ -632,7 +657,44 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "A user browses, searches, filters and archives their projects.",
+                  "text": "A user browses, searches and filters their projects.",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "",
+                },
+              ],
+            ],
+            [
+              [
+                {
+                  "text": "UC24",
+                },
+              ],
+              [
+                {
+                  "text": "Archive Project",
+                },
+              ],
+              [
+                {
+                  "text": "Founder",
+                },
+              ],
+              [
+                {
+                  "text": "A user archives a project they no longer work on.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -667,6 +729,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -687,6 +754,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "A user reopens a project and resumes at the stored pipeline position.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -721,6 +793,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -745,7 +822,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "include: UC10, UC12",
+                  "text": "Accept Step At Gate, Render Diagrams",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
             ],
@@ -757,7 +839,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "Review and Accept Step",
+                  "text": "Accept Step At Gate",
                 },
               ],
               [
@@ -768,6 +850,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "The user accepts a step's output or requests a revision within the turn ceiling.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -799,7 +886,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "include: UC23",
+                  "text": "Preview Change Impact",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
             ],
@@ -822,6 +914,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "The system compiles .puml sources into images on the PlantUML server.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -856,6 +953,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -876,6 +978,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "The deterministic check reports red and yellow flags with remediation steps.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -907,7 +1014,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "extend: UC15",
+                  "text": "",
+                },
+              ],
+              [
+                {
+                  "text": "Sign Baseline",
                 },
               ],
             ],
@@ -934,7 +1046,12 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "include: UC13",
+                  "text": "Verify Document",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
             ],
@@ -957,6 +1074,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "The user exports a watermarked working draft or a clean baseline to Word.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -991,6 +1113,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -1011,6 +1138,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "The user reviews credit transactions and the current balance.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -1045,6 +1177,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -1065,6 +1202,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "An administrator inspects accounts read-only.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [
@@ -1099,6 +1241,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
                   "text": "",
                 },
               ],
+              [
+                {
+                  "text": "",
+                },
+              ],
             ],
             [
               [
@@ -1119,6 +1266,11 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               [
                 {
                   "text": "Time-triggered jobs keep quotas, subscriptions, aggregates and health data current.",
+                },
+              ],
+              [
+                {
+                  "text": "",
                 },
               ],
               [

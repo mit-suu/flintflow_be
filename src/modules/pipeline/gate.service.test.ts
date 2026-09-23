@@ -68,7 +68,9 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
-    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
+    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length,
+    // `meter.roundCost` (gate hiện "x credit") đọc thô các dòng usage của vòng
+    find: (filter: Filter) => ({ lean: async () => usages.filter((r) => matches(r, filter)).map((r) => ({ cost: r.cost })) })
   }
   const reset = () => {
     spines.length = 0

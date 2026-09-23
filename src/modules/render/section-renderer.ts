@@ -23,7 +23,7 @@ import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spin
  * (`assemble.service.ts`) đọc `Change` model trực tiếp với projection nhẹ này thay vì
  * `spine.repository.listChanges` (tải cả `before`/`value`, nặng không cần thiết cho §I).
  */
-export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id">
+export type ChangeRecordRow = Pick<Change, "txn" | "at" | "by" | "reason" | "op" | "step_id"> & { path?: string }
 import type {
   Block,
   BulletListBlock,
@@ -271,21 +271,22 @@ const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
 
 const useCaseTable = (spine: Spine): Block[] => {
   if (spine.use_cases.length === 0) return []
-  const actorName = (id: string) => spine.actors.find((a) => a.id === id)?.name ?? id
+  // Id không phân giải được thì in id: bảng không ném lỗi khi Spine có id chết, đó là việc của
+  // cờ đỏ `dead_reference`.
+  const nameOf = (list: readonly { id: string; name: string }[]) => (id: string) => list.find((x) => x.id === id)?.name ?? id
+  const actorName = nameOf(spine.actors)
+  const useCaseName = nameOf(spine.use_cases)
+  // Bốn cột đầu lấy nguyên văn mẫu FPT §2.2.2; Includes/Extends là phần mở rộng.
   return [
     tableBlock(
-      ["ID", "Name", "Actors", "Description", "Include / Extend"],
+      ["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"],
       spine.use_cases.map((uc) => [
         uc.id,
         uc.name,
         uc.actor_ids.map(actorName).join(", "),
         uc.description,
-        [
-          uc.includes.length > 0 ? `include: ${uc.includes.join(", ")}` : "",
-          uc.extends.length > 0 ? `extend: ${uc.extends.join(", ")}` : ""
-        ]
-          .filter(Boolean)
-          .join("; ")
+        uc.includes.map(useCaseName).join(", "),
+        uc.extends.map(useCaseName).join(", ")
       ])
     )
   ]
@@ -502,6 +503,42 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
  * không cần DB).
  */
+/**
+ * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
+ * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
+ */
+const INTERNAL_REASON =
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ )/
+
+/** Câu do máy sinh → tiếng Anh; câu do user viết giữ nguyên (đó là lời của chính họ). */
+const ENGLISH_DESCRIPTION: readonly { re: RegExp; to: (m: RegExpExecArray) => string }[] = [
+  { re: /^Ký baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
+  { re: /^Baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
+  { re: /^Hoà giải section stale$/, to: () => "Stale sections reconciled" },
+  { re: /^Hoà giải: user xác nhận nội dung không đổi$/, to: () => "Reviewed: content still correct" },
+  { re: /^sửa sau baseline$/, to: () => "Edited after baseline" }
+]
+
+const toEnglish = (description: string): string => {
+  for (const rule of ENGLISH_DESCRIPTION) {
+    const match = rule.re.exec(description)
+    if (match) return rule.to(match)
+  }
+  return description
+}
+
+const isBaselineTxn = (group: readonly ChangeRecordRow[]): boolean => group.some((c) => (c.path ?? "").startsWith("baselines["))
+
+/**
+ * §I giữ lại **quyết định của người** và **các mốc baseline**; bỏ sổ sách của runner.
+ * Một lô chỉ được giữ khi nó chạm `baselines[]`, hoặc mang ít nhất một `reason` do người viết
+ * (yêu cầu sửa, lệnh sửa qua chat, lý do waive).
+ */
+export const keepInRecordOfChanges = (group: readonly ChangeRecordRow[]): boolean => {
+  if (isBaselineTxn(group)) return true
+  return group.some((c) => c.reason !== null && c.reason.trim() !== "" && !INTERNAL_REASON.test(c.reason))
+}
+
 export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge: (by: string) => string = (by) => by): RocRow[] {
   const order: string[] = []
   const groups = new Map<string, ChangeRecordRow[]>()
@@ -513,17 +550,21 @@ export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge
       order.push(change.txn)
     }
   }
-  return order.map((txn, i) => {
+  return order.flatMap((txn, i) => {
     const group = groups.get(txn) as ChangeRecordRow[]
+    if (!keepInRecordOfChanges(group)) return []
     const first = group[0]
-    const reasons = [...new Set(group.map((c) => c.reason).filter((r): r is string => !!r))]
-    return {
-      date: first.at.slice(0, 10),
-      version: `v0.${i + 2}`,
-      change_type: changeTypeOf(new Set(group.map((c) => c.op))),
-      in_charge: resolveInCharge(first.by),
-      description: reasons.length > 0 ? reasons.join("; ") : first.step_id ? `Step ${first.step_id}` : "Spine updated"
-    }
+    const reasons = [...new Set(group.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r)))]
+    const description = reasons.length > 0 ? reasons.map(toEnglish).join("; ") : isBaselineTxn(group) ? "Baseline signed" : "Document updated"
+    return [
+      {
+        date: first.at.slice(0, 10),
+        version: `v0.${i + 2}`,
+        change_type: changeTypeOf(new Set(group.map((c) => c.op))),
+        in_charge: resolveInCharge(first.by),
+        description
+      }
+    ]
   })
 }
 

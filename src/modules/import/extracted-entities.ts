@@ -7,6 +7,7 @@
  */
 
 import type { ExtractedField } from "./extraction-draft.model.js"
+import type { FieldOrigin } from "./import.constants.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import type { HeadingMapEntry } from "./template-profile.model.js"
 import { splitHeadingNumber } from "./text-similarity.js"
@@ -19,7 +20,7 @@ export interface EntityItem {
   confidence: number
   field_confidence: Record<string, number>
   source_block_ids: string[]
-  origin: "deterministic" | "ai"
+  origin: FieldOrigin
 }
 
 export const ID_PREFIX: Readonly<Record<string, { prefix: string; pad: number }>> = {
@@ -147,6 +148,16 @@ export const flattenItem = (item: EntityItem): ExtractedField[] =>
     }))
 
 /** Gộp field phẳng lại thành thực thể; `edited_value` (UC-22) thắng `value`. */
+/**
+ * Field là danh sách tham chiếu (quan hệ): nhiều nguồn (bảng, chữ, ảnh diagram — phase 5) cùng nói về một phần tử thì
+ * gộp hợp, không ghi đè — vd bảng UC chỉ ghi "Learner", diagram còn nối thêm "Guest".
+ */
+export const REF_LIST_FIELDS: ReadonlySet<string> = new Set(["actor_ids", "includes", "extends", "relations", "flow_to"])
+
+/** Giá trị mới của field khi đã có giá trị cũ: danh sách tham chiếu ⇒ hợp (giữ thứ tự), còn lại ⇒ giá trị mới. */
+export const mergeFieldValue = (field: string, prev: unknown, next: unknown): unknown =>
+  REF_LIST_FIELDS.has(field) && Array.isArray(prev) && Array.isArray(next) ? [...new Set([...prev, ...next])] : next
+
 export const collectEntities = (
   fields: (ExtractedField & { section_id?: string })[]
 ): Map<string, { entity: string; id: string | null; value: Record<string, unknown>; source_block_ids: Set<string>; sections: Set<string> }> => {
@@ -156,7 +167,8 @@ export const collectEntities = (
     if (!p) continue
     const key = `${p.entity}|${p.id ?? ""}`
     const cur = out.get(key) ?? { entity: p.entity, id: p.id, value: {}, source_block_ids: new Set<string>(), sections: new Set<string>() }
-    cur.value[p.field] = f.edited_value !== undefined ? f.edited_value : f.value
+    const next = f.edited_value !== undefined ? f.edited_value : f.value
+    cur.value[p.field] = p.field in cur.value ? mergeFieldValue(p.field, cur.value[p.field], next) : next
     for (const b of f.source_block_ids) cur.source_block_ids.add(b)
     if (f.section_id) cur.sections.add(f.section_id)
     out.set(key, cur)

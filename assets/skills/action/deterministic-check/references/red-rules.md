@@ -12,9 +12,10 @@
 | `section_stale_at_baseline` | `status(s) = stale` for a mandatory `s` | reconcile, or re-Accept at owner step | ✔ |
 | `section_awaiting_reaccept` | `awaiting_reaccept = true` for a mandatory `s` | owner step's gate | ✔ |
 | `screen_pending_at_baseline` | `screens[].detail_status = pending` | S-5 for that screen | ✔ |
+| `usecase_relation_invalid` | A use case includes/extends itself, sits in an include or extend cycle, or the same pair carries both an include and an extend | S-3.4 | ✔ |
 | `orphan_screen_at_baseline` | Same condition as yellow `orphan_screen`, checked at S-9: a screen no human actor uses, or isolated in the flow, or a pop-up nothing opens | S-4.2 | ✔ |
 
-That is 11 rules. Mode 1 (import) excludes `orphan_screen_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
+That is 12 rules. Mode 1 (import) excludes `orphan_screen_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
 
 ## Mandatory sections (invariant 1)
 

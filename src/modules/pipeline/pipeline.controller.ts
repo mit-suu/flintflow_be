@@ -5,6 +5,9 @@
  * POST /projects/:projectId/steps/:stepId/run         chạy step (SSE) — step-runner.service
  * POST /projects/:projectId/steps/:stepId/answer      trả lời Elicit đang chờ (answer_needed)
  * POST /projects/:projectId/steps/:stepId/gate        accept/revision/regenerate/accept_as_is
+ * GET  /projects/:projectId/steps/:stepId/run-state   trạng thái lượt chạy (khôi phục sau reload)
+ * POST /projects/:projectId/steps/:stepId/cancel      huỷ lượt đang chạy (nhả khoá, abort model)
+ * GET  /projects/:projectId/run-state/active          lượt còn sống của dự án (pill "đang chạy nền")
  * POST /projects/:projectId/resume                    revert step `in_progress` dang dở, trả progress
  *
  * `GET /progress` đã có ở T09 (`flags.route.ts`) — không mount lại ở đây.
@@ -16,7 +19,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import * as meter from "./meter.service.js"
-import { orderedSteps } from "./step-registry.js"
+import { nextStep, orderedSteps } from "./step-registry.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import {
   runStep,
@@ -28,12 +31,16 @@ import {
   type Emit
 } from "./step-runner.service.js"
 import { gate, GateLimitError, type GateInput } from "./gate.service.js"
+import { BaselineBlockedError } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
-import { runStepRequestSchema, stepAnswerRequestSchema, gateRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runPhase } from "./phase-runner.service.js"
+import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertNotMode1 } from "../import/mode1-guard.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -48,6 +55,7 @@ interface Context {
   projectId: string
   userId: string
   project: { name: string; domain: string | null }
+  mode: string
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body — người ngoài không dò được DTO qua lỗi 400. */
@@ -58,7 +66,7 @@ const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, userId)
-  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null } }
+  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
 }
 
 // ─── GET /steps ──────────────────────────────────────────────────
@@ -81,6 +89,9 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
     })
   )
 
+  // Khoá lượt chạy nằm ở `step_runs` (FLF-177): mỗi dự án nhiều nhất một lượt sống ⇒ một truy vấn cho cả danh sách.
+  const activeRun = await getActiveRun(projectId)
+
   const steps = defs.map((def) => {
     const state = spine.steps.find((s) => s.id === def.id)
     const stepCounts = counts.get(def.id) ?? { calls_used: 0, regenerate_used: 0 }
@@ -96,11 +107,16 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       calls_limit: CALLS_LIMIT,
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
-      accepted_at: state?.accepted_at ?? null
+      accepted_at: state?.accepted_at ?? null,
+      running: activeRun?.step_id === def.id
     }
   })
 
-  return sendSuccess(res, 200, { current_phase: spine.progress.current_phase, current_step: spine.progress.current_step, steps })
+  // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
+  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
+  // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
+  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
+  return sendSuccess(res, 200, { current_phase: spine.progress.current_phase, current_step: nextStep(spine)?.id ?? null, steps })
 })
 
 // ─── POST /steps/:stepId/run (SSE) ─────────────────────────────────
@@ -114,6 +130,11 @@ const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
   if (err instanceof ApiError || err instanceof AiActionError) {
     if (isPipelineErrorCode(err.code)) return err.code
     if (err.statusCode === 400) return "VALIDATION_ERROR"
+    // Lỗi của nhà cung cấp AI có mã riêng (GLM_ERROR, GEMINI_ERROR, GLM_EMPTY_OUTPUT…) không nằm trong bảng
+    // pipeline. Trước đây quy hết về NOT_IMPLEMENTED (501) nên người dùng đọc "chưa hiện thực" trong khi thật ra
+    // endpoint AI hết hạn mức / chưa gắn thanh toán (gặp thật 2026-09-20).
+    if (err.statusCode === 429) return "RATE_LIMIT_EXCEEDED"
+    if (err instanceof AiActionError && err.statusCode >= 500) return "AI_PROVIDER_ERROR"
   }
   return "NOT_IMPLEMENTED"
 }
@@ -131,31 +152,79 @@ const errorMessageOf = (err: unknown): string => (err instanceof Error ? err.mes
  * `runStep`; runner kiểm cờ trước mỗi lượt gọi model và khi đang chờ answer. Sau khi đóng, không `res.write`
  * nữa (dù `runStep` còn đang dọn dẹp).
  */
-export const runStepController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
-  const stepId = req.params.stepId as string
-  const body = parse(runStepRequestSchema, req.body)
+/**
+ * Luồng SSE dùng chung cho `/steps/:id/run` và `/phases/:phase/run`: header chỉ mở ở sự kiện đầu tiên;
+ * client đóng kết nối thì ngừng ghi và abort lượt chạy (F8).
+ */
+interface SseStream {
+  emit: Emit
+  controller: AbortController
+  headersSent: () => boolean
+  closed: () => boolean
+  end: () => void
+}
 
+const sseStream = (res: Response, req: Request): SseStream => {
   let headersSent = false
   let closed = false
-  const abortController = new AbortController()
+  const controller = new AbortController()
   req.on("close", () => {
     closed = true
-    abortController.abort()
+    controller.abort()
   })
+
+  const sendHeaders = () => {
+    if (headersSent) return
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
+    res.setHeader("Cache-Control", "no-cache, no-transform")
+    res.setHeader("Connection", "keep-alive")
+    res.setHeader("X-Accel-Buffering", "no")
+    res.flushHeaders?.()
+    headersSent = true
+  }
 
   const emit: Emit = (event) => {
     if (closed) return
-    if (!headersSent) {
-      res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
-      res.setHeader("Cache-Control", "no-cache, no-transform")
-      res.setHeader("Connection", "keep-alive")
-      res.setHeader("X-Accel-Buffering", "no")
-      res.flushHeaders?.()
-      headersSent = true
-    }
-    if (!res.writableEnded) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    sendHeaders()
+    if (!res.writableEnded) res.write(`event: ${event.type}
+data: ${JSON.stringify(event)}
+
+`)
   }
+
+  return {
+    emit,
+    controller,
+    headersSent: () => headersSent,
+    closed: () => closed,
+    /**
+     * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào (`/phases/:phase/run`
+     * khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo mãi ở trạng thái "đang
+     * chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra response lỗi JSON.
+     */
+    /**
+     * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào
+     * (`/phases/:phase/run` khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo
+     * mãi ở trạng thái "đang chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra
+     * response lỗi JSON.
+     */
+    end: () => {
+      if (closed || res.writableEnded) return
+      sendHeaders()
+      res.end()
+    }
+  }
+}
+
+
+export const runStepController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
+  const stepId = req.params.stepId as string
+  const body = parse(runStepRequestSchema, req.body)
+
+  const stream = sseStream(res, req)
+  const emit = stream.emit
 
   // base_version lệch ngay từ đầu ⇒ SPINE_VERSION_CONFLICT trước khi mở SSE (guard-clause).
   const record = await spineRepository.get(projectId)
@@ -164,23 +233,60 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   }
 
   try {
-    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: abortController.signal })
+    await runStep(projectId, stepId, body.session_id, userId, emit, {
+      signal: stream.controller.signal,
+      abort: stream.controller,
+      ...(body.reopen ? { reopen: true } : {})
+    })
+    stream.end()
   } catch (err) {
-    if (!headersSent) throw err
-    if (!closed) {
+    if (!stream.headersSent()) throw err
+    if (!stream.closed()) {
       const code = toPipelineErrorCode(err)
       emit({ type: "error", step_id: stepId, code, message: errorMessageOf(err), retryable: code === "SPINE_VERSION_CONFLICT" || code === "INSUFFICIENT_CREDIT" })
     }
     console.error(`[pipeline] /run lỗi giữa chừng cho step ${stepId}:`, err)
-  } finally {
-    if (headersSent && !closed && !res.writableEnded) res.end()
+    stream.end()
+  }
+})
+
+// ─── POST /phases/:phase/run (SSE) ─────────────────────────────────
+
+/**
+ * R2: chạy liền các bước của một giai đoạn trên cùng một luồng. Bước yên lặng tự Accept, chuỗi dừng sớm
+ * khi cần người — mọi sự kiện của từng bước vẫn phát nguyên vẹn nên FE hiển thị như khi chạy lẻ.
+ */
+export const runPhaseController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const phase = req.params.phase as string
+  const body = parse(runPhaseRequestSchema, req.body)
+
+  const stream = sseStream(res, req)
+
+  const record = await spineRepository.get(projectId)
+  if (record && record.spine_version !== body.base_version) {
+    throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
+  }
+
+  try {
+    await runPhase(projectId, phase, body.session_id, userId, stream.emit, { signal: stream.controller.signal, abort: stream.controller })
+    stream.end()
+  } catch (err) {
+    if (!stream.headersSent()) throw err
+    if (!stream.closed()) {
+      const code = toPipelineErrorCode(err)
+      stream.emit({ type: "error", step_id: phase, code, message: errorMessageOf(err), retryable: code === "SPINE_VERSION_CONFLICT" || code === "INSUFFICIENT_CREDIT" })
+    }
+    console.error(`[pipeline] /phases/${phase}/run lỗi giữa chừng:`, err)
+    stream.end()
   }
 })
 
 // ─── POST /steps/:stepId/answer ────────────────────────────────────
 
 export const answerStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId } = await authorize(req)
+  const { projectId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(stepAnswerRequestSchema, req.body)
 
@@ -194,7 +300,8 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 // ─── POST /steps/:stepId/gate ───────────────────────────────────────
 
 export const gateStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(gateRequestSchema, req.body)
   await requirePipelineSession(projectId, body.session_id)
@@ -211,14 +318,66 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
     return sendSuccess(res, 200, result)
   } catch (err) {
     if (err instanceof GateLimitError) return sendError(res, err.statusCode, err.code, err.message, err.details)
+    // BUG-01: Accept ở S-9.5 ký baseline — còn cờ đỏ thì trả đúng danh sách cờ đang chặn để gate hiện ra
+    if (err instanceof BaselineBlockedError) {
+      return sendError(res, err.statusCode, err.code, err.message, {
+        flags: err.flags.map(({ id, rule_id, section_id, target_id, message, remediation_step }) => ({
+          id,
+          rule_id,
+          section_id,
+          target_id,
+          message,
+          remediation_step
+        }))
+      })
+    }
     throw err
   }
+})
+
+// ─── run-state (WP-4: khôi phục sau reload, huỷ lượt) ───────────────
+
+/** `alive` = khoá còn hiệu lực. Lượt `running` mà khoá hết hạn nghĩa là lượt đã chết giữa chừng. */
+const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
+  step_id: doc.step_id,
+  run_id: doc.run_id,
+  status: doc.status,
+  stage: doc.stage,
+  detail_vi: doc.detail_vi,
+  batch: doc.batch,
+  started_at: doc.started_at,
+  last_event_at: doc.last_event_at,
+  alive: doc.status === "running" || doc.status === "waiting_answer" ? new Date(doc.locked_until).getTime() > Date.now() : true,
+  questions: doc.questions,
+  gate_payload: doc.gate_payload,
+  events: doc.events,
+  error: doc.error
+})
+
+export const getStepRunState = catchAsync(async (req: Request, res: Response) => {
+  const { projectId } = await authorize(req)
+  const doc = await getRunState(projectId, req.params.stepId as string)
+  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+})
+
+export const getActiveRunState = catchAsync(async (req: Request, res: Response) => {
+  const { projectId } = await authorize(req)
+  const doc = await getActiveRun(projectId)
+  return sendSuccess(res, 200, doc ? toRunStateResponse(doc) : null)
+})
+
+export const cancelStepRun = catchAsync(async (req: Request, res: Response) => {
+  const { projectId } = await authorize(req)
+  const body = parse(cancelRunRequestSchema, req.body ?? {})
+  const result = await cancelRun(projectId, req.params.stepId as string, body.run_id)
+  return sendSuccess(res, 200, result)
 })
 
 // ─── POST /resume ───────────────────────────────────────────────────
 
 export const resumeProjectController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const result = await resumeProject(projectId, userId)
   return sendSuccess(res, 200, result)
 })

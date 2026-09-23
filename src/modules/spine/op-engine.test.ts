@@ -370,7 +370,7 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     const all = await repo.listChanges(PROJECT)
     expect(all.map((c) => c.seq)).toEqual(Array.from({ length: all.length }, (_, i) => i + 1))
     expect(new Set(all.map((c) => c.txn))).toEqual(new Set([r1.txn, r2.txn]))
-    expect((await repo.get(PROJECT))?.use_cases.find((u) => u.id === "UC05")?.name).toBe("Manage Project Portfolio")
+    expect((await repo.get(PROJECT))?.use_cases.find((u) => u.id === "UC05")?.name).toBe("Browse Project Portfolio")
   })
 
   it("base_version cũ ⇒ 409 SPINE_VERSION_CONFLICT, không ghi change", async () => {
@@ -431,6 +431,13 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     const result = await applyTransaction(PROJECT, txn([{ op: "set", path: "actors[id=A01].name", value: name }]))
     expect(result).toMatchObject({ txn: null, spine_version: 1, changes: [] })
     expect(db.changes).toHaveLength(0)
+  })
+
+  it("FLF-177: set project.system_name qua op", async () => {
+    await seed()
+    const result = await applyTransaction(PROJECT, txn([{ op: "set", path: "project.system_name", value: "ShipFast Delivery" }]))
+    expect(result.spine_version).toBe(2)
+    expect((await repo.get(PROJECT))?.project.system_name).toBe("ShipFast Delivery")
   })
 
   it("preview trên project chưa có Spine dùng Spine rỗng, không tạo Spine", async () => {

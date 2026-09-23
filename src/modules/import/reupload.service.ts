@@ -2,7 +2,8 @@
  * Re-upload sau baseline (nút 1.4, UC-24): so file mới với version tài liệu mới nhất theo block, **không** tạo
  * version. Người dùng xem diff rồi (tuỳ) tạo CR nguồn `reupload`. FLF-171, plan §6 2D.
  * - Stamp của project khác ⇒ `IMPORT_STAMP_FOREIGN_PROJECT`.
- * - File không stamp vẫn so được (khớp theo paraId + text) — người dùng tự chịu việc file có phải bản gốc hay không.
+ * - Mode 1 v3 (BPMN 1.2 ⇒ "Has version stamp?"): chỉ file mang stamp **của project này** mới đi nhánh 1.4. Không stamp
+ *   ⇒ `IMPORT_REUPLOAD_NO_STAMP` (trước đây vẫn so theo text — đã gỡ theo BPMN).
  * Mode 1 v2 (FLF-186): so với **file render** của version mới nhất (người ngoài sửa trên bản tải về), khớp theo text.
  */
 
@@ -52,6 +53,9 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
   }
   if (pre.status === "rejected") {
     throw new Mode1Error("IMPORT_FILE_REJECTED", "File chưa so được, xem danh sách lỗi", { import_id: String(current._id), issues: pre.issues })
+  }
+  if (!pre.stamp) {
+    throw new Mode1Error("IMPORT_REUPLOAD_NO_STAMP", "File không mang stamp của project — chỉ file tải từ FlintFlow mới so khác biệt được")
   }
 
   const lite = (x: OoxmlBlock[]) => x.map((b) => ({ block_id: null, para_id: b.para_id, text: b.text, text_hash: b.text_hash }))

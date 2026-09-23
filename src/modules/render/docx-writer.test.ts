@@ -31,6 +31,16 @@ describe("writeDocx — fixture Working Draft", () => {
     documentXml = readZipText(docx, "word/document.xml")
   })
 
+  it("FLF-198: ô bảng có lề trong, chữ không dán vào khung", () => {
+    // `tblCellMar` ở cấp bảng và `tcMar` ở từng ô — Word và LibreOffice mỗi bên đọc một chỗ
+    expect(documentXml).toContain("<w:tblCellMar>")
+    expect(documentXml).toContain("<w:tcMar>")
+    const margin = (side: string): number[] =>
+      [...documentXml.matchAll(new RegExp(`<w:${side} w:type="dxa" w:w="(\\d+)"\\s*/>`, "g"))].map((m) => Number(m[1]))
+    expect(margin("left").some((value) => value >= 120), `lề trái ô: ${margin("left").join(",")}`).toBe(true)
+    expect(margin("top").some((value) => value >= 80), `lề trên ô: ${margin("top").join(",")}`).toBe(true)
+  })
+
   it("là file zip OOXML hợp lệ, mammoth đọc được", async () => {
     expect(docx.subarray(0, 2).toString("ascii")).toBe("PK")
     const entries = readZipEntries(docx)

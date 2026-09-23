@@ -5,7 +5,7 @@ version: 2.0.0
 description: Mode 1 C-4 — for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
-maxTokens: 4096
+maxTokens: 6144
 temperature: 0.2
 reads:
   - "<change request + clarification answers>"
@@ -44,10 +44,14 @@ and keep every other field exactly as it is — each changed field is a revision
    `{ "op": "set", "path": "nfrs[id=NFR-01].threshold", "value": "1 s" }`. Text fields keep the document's language,
    numbering and codes. A free-form section (`custom_sections[id=…]`) changes by setting its `blocks` array.
    Never change an `id`. Adding a new element (`"path": "business_rules[]"`) is allowed only when the CR asks for it.
-3. `comment` ⇒ the element may need a change you cannot make safely (a diagram, a decision for the stakeholder).
+3. A location whose path is a whole array (`other_requirements[]`, marked **EMPTY SECTION**) is a section with no
+   elements yet. Its only valid `edit` is `add` ops into **that same array**: write the elements the CR asks for,
+   ids continuing the document's scheme (`OR-01`, `BR-07`…), text in the document's language. Nothing to add there
+   ⇒ `not_related` with the reason. Never touch another array from such a location.
+4. `comment` ⇒ the element may need a change you cannot make safely (a diagram, a decision for the stakeholder).
    Nothing changes; `comment_text` tells the reviewer what to check. No `spine_ops`.
-4. `not_related` ⇒ the search hit is a false positive (same word, different meaning); say why. No `spine_ops`.
-5. When a location lists "Previous proposal failed checks", fix exactly that problem.
+5. `not_related` ⇒ the search hit is a false positive (same word, different meaning); say why. No `spine_ops`.
+6. When a location lists "Previous proposal failed checks", fix exactly that problem.
 
 ## Output
 

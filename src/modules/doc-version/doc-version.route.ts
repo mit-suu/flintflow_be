@@ -22,7 +22,7 @@ const router = Router()
  *     parameters:
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *     responses:
- *       200: { description: "`[{ version, kind, based_on, cr_ids, baseline_id, has_clean_file, has_original_file, created_by, created_at }]`" }
+ *       200: { description: "`[{ version, kind, based_on, cr_ids, baseline_id, has_clean_file, has_tracked_file, has_original_file, created_by, created_at }]`" }
  * /api/v1/projects/{projectId}/versions/compare:
  *   get:
  *     summary: So sánh hai version theo block (UC-55)
@@ -51,7 +51,7 @@ const router = Router()
  * /api/v1/projects/{projectId}/versions/{v}/download:
  *   get:
  *     summary: Tải file .docx của một version (UC-57)
- *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx`. `tracked` — luôn bản có Track Changes. `original` — file người dùng upload (chỉ bản 0.0; version khác ⇒ 404)."
+ *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.0; version khác ⇒ 404)."
  *     tags: [Versions (mode 1)]
  *     security:
  *       - BearerAuth: []

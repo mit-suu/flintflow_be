@@ -51,10 +51,15 @@ export default defineConfig({
       reportsDirectory: "coverage",
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts", "src/_archive/**", "src/scripts/**"],
-      // Ngưỡng cho lõi mới (T22 DoD): Spine + pipeline ≥ 70% lines
+      // Ngưỡng cho lõi mới (T22 DoD): Spine + pipeline ≥ 70% lines.
+      // Mode 1 v2 (V6 DoD): import / change-request / render ≥ 80% — đo được 97–99% lúc chốt V6, đặt ngưỡng
+      // để lần sửa sau không âm thầm tụt xuống chứ không phải để vừa đủ qua.
       thresholds: {
         "src/modules/spine/**": { lines: 70 },
-        "src/modules/pipeline/**": { lines: 70 }
+        "src/modules/pipeline/**": { lines: 70 },
+        "src/modules/import/**": { lines: 80 },
+        "src/modules/change-request/**": { lines: 80 },
+        "src/modules/render/**": { lines: 80 }
       }
     }
   }
