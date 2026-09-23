@@ -73,6 +73,22 @@ describe("computeSectionStates", () => {
     expect(own.find((s) => s.id === "fixed:2.2.2")?.status).toBe("stale")
   })
 
+  it("FLF-198: step chốt mà không ghi gì (last_seq null) van co moc 'da xem toi day'", () => {
+    const spine = structuredClone(FIXTURE)
+    const owner = spine.steps.find((s) => s.id === "S-3.1")!
+    owner.first_seq = null
+    owner.last_seq = null
+
+    // Chotist o seq LAST_SEQ+5; change nuoi section den TRUOC do ⇒ khong con la "moi hon"
+    const accepted = { ...change(LAST_SEQ + 5, "steps[id=S-3.1].accepted_at"), value: "2026-09-23T05:00:00.000Z", step_id: "S-3.1" }
+    const before = change(LAST_SEQ + 1, "actors[id=A01].kind", "S-4.1")
+    expect(computeStatus(spine, [before, accepted], "fixed:2.1")).toBe("accepted")
+
+    // Change sau moc chot thi van lam section cu
+    const after = change(LAST_SEQ + 9, "actors[id=A01].kind", "S-4.1")
+    expect(computeStatus(spine, [before, accepted, after], "fixed:2.1")).toBe("stale")
+  })
+
   it("step sở hữu ở revision_requested ⇒ awaiting_reaccept và không còn accepted", () => {
     const spine = structuredClone(FIXTURE)
     spine.steps.find((s) => s.id === "S-3.1")!.status = "revision_requested"

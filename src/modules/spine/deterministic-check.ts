@@ -338,7 +338,11 @@ const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" 
 
   return spine.assumptions.flatMap((assumption): FlagCandidate[] => {
     if (tryResolve(spine, assumption.path) === null) return []
-    const decidedAt = Math.max(lastSeqByPrefix(`assumptions[id=${assumption.id}].statement`), lastSeqByPrefix(`assumptions[id=${assumption.id}].status`))
+    // Xác nhận một giả định là DUYỆT nội dung đang có, không phải đổi nó — chỉ "sửa statement" hoặc "bác
+    // bỏ" mới làm field dẫn xuất lạc hậu. Tính cả lượt xác nhận thì bấm "Đúng hết" ở S-9.1 đẻ ra đúng
+    // bằng ấy cờ vàng vô nghĩa.
+    const rejectedAt = assumption.status === "rejected" ? lastSeqByPrefix(`assumptions[id=${assumption.id}].status`) : 0
+    const decidedAt = Math.max(lastSeqByPrefix(`assumptions[id=${assumption.id}].statement`), rejectedAt)
     if (decidedAt === 0) return []
     const targetAt = lastSeqByPrefix(assumption.path)
     if (targetAt >= decidedAt) return []
