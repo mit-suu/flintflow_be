@@ -184,9 +184,16 @@ export interface PatchRun {
 /** Số sự kiện giữ lại cho một lượt — đủ dựng lại nhật ký, không phình document. */
 export const MAX_KEPT_EVENTS = 100
 
+/** Lượt đã kết thúc — khoá đã nhả, không được gia hạn lại. */
+const TERMINAL_STATUSES = ["gate", "done", "interrupted", "cancelled"] as const satisfies readonly RunStatus[]
+
 /**
  * Cập nhật lượt chạy + gia hạn khoá. Chỉ ghi khi `run_id` khớp: lượt cũ đã bị chiếm khoá thì mọi cập nhật
  * của nó rơi vào hư không thay vì đè lên lượt mới. Trả `false` khi lượt không còn là chủ khoá.
+ *
+ * Cũng bỏ qua khi lượt ĐÃ kết thúc: `tracker.emit`/`tracker.stage` gọi hàm này kiểu bắn-và-quên, nên một
+ * lượt touch của sự kiện cuối có thể về đích SAU `finishRun` và gia hạn lại khoá vừa nhả — bước kế tiếp
+ * (hoặc chính cổng chốt) nhận "bước đang chạy ở lượt trước" và phải chờ hết TTL.
  */
 export const touchRun = async (projectId: string, stepId: string, runId: string, patch: PatchRun = {}): Promise<boolean> => {
   const now = new Date()
@@ -200,12 +207,16 @@ export const touchRun = async (projectId: string, stepId: string, runId: string,
   if (useMemory()) {
     const doc = memory.get(memoryKey(projectId, stepId))
     if (!doc || doc.run_id !== runId) return false
+    if ((TERMINAL_STATUSES as readonly string[]).includes(String(doc.status)) && patch.status === undefined) return false
     Object.assign(doc, set)
     if (patch.appendEvent !== undefined) doc.events = [...((doc.events as unknown[]) ?? []), patch.appendEvent].slice(-MAX_KEPT_EVENTS)
     return true
   }
 
-  const result = await StepRun.updateOne({ projectId: asObjectId(projectId), step_id: stepId, run_id: runId }, update)
+  const result = await StepRun.updateOne(
+    { projectId: asObjectId(projectId), step_id: stepId, run_id: runId, ...(patch.status === undefined ? { status: { $nin: TERMINAL_STATUSES as unknown as RunStatus[] } } : {}) },
+    update
+  )
   return result.matchedCount > 0
 }
 

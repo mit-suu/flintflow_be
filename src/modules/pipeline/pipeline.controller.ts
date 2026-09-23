@@ -19,7 +19,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import * as meter from "./meter.service.js"
-import { orderedSteps } from "./step-registry.js"
+import { nextStep, orderedSteps } from "./step-registry.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import {
   runStep,
@@ -106,7 +106,11 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
     }
   })
 
-  return sendSuccess(res, 200, { current_phase: spine.progress.current_phase, current_step: spine.progress.current_step, steps })
+  // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
+  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
+  // Cùng luật "step tới lượt" với `GET /progress` (pipeline-progress.ts). Trả thẳng con trỏ Spine thì hai
+  // endpoint nói hai chuyện khác nhau ngay sau khi accept: con trỏ còn nằm ở step vừa chốt.
+  return sendSuccess(res, 200, { current_phase: spine.progress.current_phase, current_step: nextStep(spine)?.id ?? null, steps })
 })
 
 // ─── POST /steps/:stepId/run (SSE) ─────────────────────────────────
@@ -158,16 +162,19 @@ const sseStream = (res: Response, req: Request): SseStream => {
     controller.abort()
   })
 
+  const sendHeaders = () => {
+    if (headersSent) return
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
+    res.setHeader("Cache-Control", "no-cache, no-transform")
+    res.setHeader("Connection", "keep-alive")
+    res.setHeader("X-Accel-Buffering", "no")
+    res.flushHeaders?.()
+    headersSent = true
+  }
+
   const emit: Emit = (event) => {
     if (closed) return
-    if (!headersSent) {
-      res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
-      res.setHeader("Cache-Control", "no-cache, no-transform")
-      res.setHeader("Connection", "keep-alive")
-      res.setHeader("X-Accel-Buffering", "no")
-      res.flushHeaders?.()
-      headersSent = true
-    }
+    sendHeaders()
     if (!res.writableEnded) res.write(`event: ${event.type}
 data: ${JSON.stringify(event)}
 
@@ -179,8 +186,21 @@ data: ${JSON.stringify(event)}
     controller,
     headersSent: () => headersSent,
     closed: () => closed,
+    /**
+     * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào (`/phases/:phase/run`
+     * khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo mãi ở trạng thái "đang
+     * chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra response lỗi JSON.
+     */
+    /**
+     * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào
+     * (`/phases/:phase/run` khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo
+     * mãi ở trạng thái "đang chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra
+     * response lỗi JSON.
+     */
     end: () => {
-      if (headersSent && !closed && !res.writableEnded) res.end()
+      if (closed || res.writableEnded) return
+      sendHeaders()
+      res.end()
     }
   }
 }
@@ -202,6 +222,7 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
 
   try {
     await runStep(projectId, stepId, body.session_id, userId, emit, { signal: stream.controller.signal, abort: stream.controller })
+    stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err
     if (!stream.closed()) {
@@ -209,7 +230,6 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
       emit({ type: "error", step_id: stepId, code, message: errorMessageOf(err), retryable: code === "SPINE_VERSION_CONFLICT" || code === "INSUFFICIENT_CREDIT" })
     }
     console.error(`[pipeline] /run lỗi giữa chừng cho step ${stepId}:`, err)
-  } finally {
     stream.end()
   }
 })
@@ -234,6 +254,7 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
 
   try {
     await runPhase(projectId, phase, body.session_id, userId, stream.emit, { signal: stream.controller.signal, abort: stream.controller })
+    stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err
     if (!stream.closed()) {
@@ -241,7 +262,6 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
       stream.emit({ type: "error", step_id: phase, code, message: errorMessageOf(err), retryable: code === "SPINE_VERSION_CONFLICT" || code === "INSUFFICIENT_CREDIT" })
     }
     console.error(`[pipeline] /phases/${phase}/run lỗi giữa chừng:`, err)
-  } finally {
     stream.end()
   }
 })
