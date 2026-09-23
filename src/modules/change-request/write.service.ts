@@ -3,13 +3,15 @@
  * Spine là nguồn sự thật (D1): kiểm giá trị tại path chưa đổi → chạy khô op (`by = cr_id`) → **render** version minor
  * mới từ Spine dự kiến (layout file upload + stamp, §I có dòng của CR này) → lưu file + `DocVersion` → op Spine
  * (bước ghi **cuối** — FLF-178: op engine không nhận Mongo session, Spine là bước duy nhất không hoàn tác được) →
- * recompute cờ → mở khoá → ghép lại bản làm việc.
+ * vẽ lại hình lệch dữ liệu (mode 1 v3: không còn step nào vẽ lại — có hình mới thì in lại file version) → recompute cờ
+ * → mở khoá → ghép lại bản làm việc.
  * Lỗi trước/tại bước Spine ⇒ xoá version + file vừa tạo; Spine và CR giữ nguyên (chạy lại an toàn).
  * Recompute cờ / ghép bản làm việc lỗi sau khi Spine đã ghi ⇒ không huỷ bản ghi (giá trị suy diễn, lần sau tính lại).
  * Vị trí `comment` không đổi Spine — ghi chú nằm ở CR (bản tải "có đánh dấu" theo section: để sau — plan v2 §11).
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
+import { renderAllIfAvailable } from "../diagram/diagram.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
@@ -72,8 +74,11 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     throw err
   }
 
+  await redrawDiagrams(projectId, cr.cr_id, projectName, next, fileRef)
+
   try {
-    await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: MODE1_RULE_PROFILE })
+    // Mode 1 luôn ở sau baseline v0 ⇒ tính cả luật S-9: CR xác nhận giả định thì cờ `unconfirmed_assumption` đóng ngay
+    await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
   } catch (err) {
     console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
   }
@@ -85,4 +90,23 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghép lại bản làm việc lỗi — workspace ghép lại khi mở`, err)
   }
   return next
+}
+
+/**
+ * BPMN 3.14: ghi xong thì bản nháp minor phải khớp dữ liệu — kể cả hình. Mode 1 v3 không còn step vẽ lại, nên sau khi
+ * Spine đã ghi: vẽ lại hình lệch (PlantUML không có mặt ⇒ bỏ qua, cờ `diagram_stale` báo), có hình đổi thì in lại file
+ * version từ Spine mới nhất để nhúng hình mới. Lỗi chỉ ghi log — Spine đã ghi, không huỷ bản ghi.
+ */
+const redrawDiagrams = async (projectId: string, crId: string, projectName: string, version: string, fileRef: string): Promise<void> => {
+  const drawn = await renderAllIfAvailable(projectId, { by: crId, step_id: null })
+  if (!drawn || (!drawn.rendered.length && !drawn.removed.length)) return
+  try {
+    const latest = stripRecord((await spineRepository.get(projectId))!)
+    const buffer = await renderVersionFile(projectId, projectName, latest, { version, stampSource: "cr_revision" })
+    const redone = await docFileStore().save(buffer, { projectId, kind: "version", name: version })
+    await DocVersion.updateOne({ projectId, version }, { $set: { file_ref: redone } })
+    await docFileStore().remove(fileRef)
+  } catch (err) {
+    console.warn(`[C-7] ${crId}: đã vẽ lại hình nhưng in lại ${version} lỗi — file version giữ hình cũ`, err)
+  }
 }

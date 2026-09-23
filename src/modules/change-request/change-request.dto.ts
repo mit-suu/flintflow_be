@@ -184,9 +184,16 @@ export const pathLockedMetaSchema = z.object({
  * `meta` của 409 CHANGE_REQUIRES_CR (sau baseline v1 ở project mode 1). `/changes`, `/undo` ⇒ chỉ `prefill` (FE mở form
  * CR điền sẵn). Lệnh sửa trong chat (FLF-186) ⇒ BE **đã tạo** CR nguồn `chat` — `change_request` trỏ tới nó.
  */
+/**
+ * `meta` của 409 CHANGE_REQUIRES_CR — nội dung điền sẵn cho form 3.1 (mode 1 v3: BE không tự tạo CR; nguồn là gợi ý,
+ * BA vẫn chọn lại). Bỏ `change_request` của V4/T8.
+ */
 export const changeRequiresCrMetaSchema = z.object({
-  prefill: z.object({ title: z.string(), description: z.string() }),
-  change_request: z.object({ cr_id: crIdSchema, status: crStatusSchema }).optional()
+  prefill: z.object({
+    title: z.string(),
+    description: z.string(),
+    source: z.object({ kind: z.enum(CR_SOURCE_KINDS), ref: z.string().nullable() }).optional()
+  })
 })
 
 /** `meta` của 409 CR_NO_LOCATIONS — C-3 ra 0 vị trí: đích của C-2 + các mục còn trống (kèm step soạn nội dung). */
