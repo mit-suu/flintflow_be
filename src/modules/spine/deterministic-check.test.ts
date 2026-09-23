@@ -186,9 +186,12 @@ describe("runDeterministicCheck", () => {
 
     const atBaseline = runDeterministicCheck(spine, changes, { atBaseline: true })
     expect(byRule(atBaseline, "screen_pending_at_baseline")).toMatchObject([{ target_id: "S02", section_id: "function:FN006", remediation_step: "S-5.1@S02" }])
+    // L11c: `remediation_step` là step XỬ LÝ được cờ (S-9.2 Assumption Sweep), không phải step đã sinh ra giả
+    // định — trỏ về nơi sinh thì chạy lại bao nhiêu lần cũng không đóng được cờ, chỉ đốt trần 8 lượt gọi model.
     expect(byRule(atBaseline, "unconfirmed_assumption")).toMatchObject([
-      { target_id: "AS01", section_id: "fixed:4.2.2", remediation_step: "S-6.3" }
+      { target_id: "AS01", section_id: "fixed:4.2.2", remediation_step: "S-9.2" }
     ])
+    expect(byRule(atBaseline, "unconfirmed_assumption")[0]?.message, "vẫn truy được nơi sinh qua message").toContain("S-6.3")
     expect(byRule(atBaseline, "section_stale_at_baseline").map((f) => f.section_id)).toContain("fixed:3.1.5")
     expect(byRule(atBaseline, "section_awaiting_reaccept")).toMatchObject([{ section_id: "fixed:5.2", remediation_step: "S-7.2" }])
   })
