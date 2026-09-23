@@ -8,6 +8,7 @@
 
 import { createHash } from "node:crypto"
 import type { Diagram, Spine } from "./spine.types.js"
+import { screenActorMap } from "./screen-actors.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -33,8 +34,11 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         }))
       }
     case "screen_flow":
+      // Sơ đồ tách theo actor người: đổi actor của màn (quyền, use case ↔ function) cũng làm hình cũ
       return {
-        screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs }))
+        screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs })),
+        actors: byId(spine.actors.filter((a) => a.kind === "human")).map(({ id, name }) => ({ id, name })),
+        screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       }
     case "erd":
       return { entities: byId(spine.entities).map(({ id, name, relations }) => ({ id, name, relations })) }

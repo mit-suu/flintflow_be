@@ -23,9 +23,9 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("10 luật đỏ + 6 luật vàng; 3 luật không waive được", () => {
-    expect(RULES.filter((r) => r.level === "red")).toHaveLength(10)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(6)
+  it("11 luật đỏ + 7 luật vàng; 3 luật không waive được", () => {
+    expect(RULES.filter((r) => r.level === "red")).toHaveLength(11)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(7)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -36,6 +36,34 @@ describe("runDeterministicCheck", () => {
     expect(red(runDeterministicCheck(FIXTURE, [], { atBaseline: true }))).toEqual([])
     const yellowRules = new Set(runDeterministicCheck(FIXTURE).filter((f) => f.level === "yellow").map((f) => f.rule_id))
     for (const r of yellowRules) expect(["screen_no_function"]).toContain(r)
+  })
+
+  it("orphan_screen: màn không actor người nào dùng, màn đứng riêng trong luồng, popup không ai mở", () => {
+    const flags = byRule(
+      runDeterministicCheck(
+        variant((s) => {
+          const tpl = s.screens.find((x) => x.id === "S13")!
+          s.screens.push({ ...tpl, id: "S20", name: "No Actor", flow_to: [] })
+          s.permissions.push({ id: "P999", screen_id: "S21", role_id: s.roles[0].id, action: "view" })
+          s.screens.push({ ...tpl, id: "S21", name: "Isolated", flow_to: [] })
+          s.permissions.push({ id: "P998", screen_id: "S22", role_id: s.roles[0].id, action: "view" })
+          s.screens.push({ ...tpl, id: "S22", name: "Lonely Popup", flow_to: [], is_popup: true })
+        })
+      ),
+      "orphan_screen"
+    )
+    expect(flags.map((f) => f.target_id)).toEqual(["S20", "S21", "S22"])
+    expect(flags.every((f) => f.level === "yellow" && f.section_id === "fixed:3.1.1" && f.remediation_step === "S-4.2")).toBe(true)
+  })
+
+  it("orphan_screen_at_baseline: màn mồ côi thành cờ đỏ chỉ khi ký baseline", () => {
+    const orphaned = variant((s) => {
+      s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "No Actor", flow_to: [] })
+    })
+    expect(byRule(runDeterministicCheck(orphaned), "orphan_screen_at_baseline")).toEqual([])
+    expect(byRule(runDeterministicCheck(orphaned, [], { atBaseline: true }), "orphan_screen_at_baseline")).toMatchObject([
+      { level: "red", section_id: "fixed:3.1.1", target_id: "S20", remediation_step: "S-4.2" }
+    ])
   })
 
   it("xoá actor thẳng tay ⇒ dead_reference ở §2.2.2, remediation S-3.2", () => {

@@ -12,8 +12,9 @@
 | `section_stale_at_baseline` | `status(s) = stale` for a mandatory `s` | reconcile, or re-Accept at owner step | ✔ |
 | `section_awaiting_reaccept` | `awaiting_reaccept = true` for a mandatory `s` | owner step's gate | ✔ |
 | `screen_pending_at_baseline` | `screens[].detail_status = pending` | S-5 for that screen | ✔ |
+| `orphan_screen_at_baseline` | Same condition as yellow `orphan_screen`, checked at S-9: a screen no human actor uses, or isolated in the flow, or a pop-up nothing opens | S-4.2 | ✔ |
 
-That is 10 rules. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
+That is 11 rules. Mode 1 (import) excludes `orphan_screen_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
 
 ## Mandatory sections (invariant 1)
 
@@ -50,6 +51,6 @@ Hash over a projection sorted by `id`, containing only fields actually drawn:
 | --- | --- |
 | `context` | `project.name` · `actors[kind≠human].name` |
 | `usecase` | `actors[].name/.kind` · `use_cases[].name/.actor_ids/.includes/.extends` |
-| `screen_flow` | `screens[].name/.flow_to/.is_popup/.tabs` |
+| `screen_flow` | `screens[].name/.flow_to/.is_popup/.tabs` · `actors[kind=human].name` · screen ↔ actor links (`permissions`→`roles.actor_id`, `use_cases.actor_ids`×`function_ids`→`functions.screen_id`) |
 | `erd` | `entities[].name/.relations` |
 | `screen_layout` | `screens[<owner>].name` · `functions[screen_id=<owner>].name/.description` |
