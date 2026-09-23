@@ -7,9 +7,16 @@ export interface LLMResponse {
   raw?: any
 }
 
-/** Tuỳ chọn cho một lượt gọi model (khác cấu hình skill): huỷ khi người gọi đã bỏ đi. */
+/** Ảnh gửi kèm prompt (mode 1 v3 phase 5 — đọc ảnh diagram). `data` là base64, không tiền tố `data:`. */
+export interface LlmImage {
+  mime: "image/png" | "image/jpeg"
+  data: string
+}
+
+/** Tuỳ chọn cho một lượt gọi model (khác cấu hình skill): huỷ khi người gọi đã bỏ đi; ảnh kèm theo (chỉ provider có vision). */
 export interface LlmCallOptions {
   signal?: AbortSignal
+  images?: LlmImage[]
 }
 
 export type LLMCallFn = (

@@ -52,6 +52,7 @@ import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
+import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
   FlagRow,
@@ -185,6 +186,8 @@ const unassignedFunctionsSection = (number: string): RenderedSection => ({
 export type DiagramPngLoader = (projectId: string, diagramId: string) => Promise<string | null>
 
 const defaultDiagramPngLoader: DiagramPngLoader = async (projectId, diagramId) => {
+  // Phase 5 (T3): ảnh gốc của mục riêng — lấy từ file upload, không phải file diagram
+  if (isMediaId(diagramId)) return loadImportMedia(projectId, diagramId.slice(MEDIA_PREFIX.length)).catch(() => null)
   try {
     const file = await loadDiagramFile(projectId, diagramId, "png")
     return file.data.toString("base64")
@@ -214,8 +217,11 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
     const batch = diagramIds.slice(i, i + IMAGE_LOAD_BATCH_SIZE)
     const results = await Promise.all(batch.map(async (id) => [id, await load(projectId, id)] as const))
     for (const [id, png] of results) {
-      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do
-      if (png === null || png.length === 0) missing.push(id)
+      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do.
+      // Ảnh gốc không nhúng được (EMF/WMF…) không phải "diagram chưa render" — không đưa vào `missing` (khỏi kiểm lại mãi)
+      if (png === null || png.length === 0) {
+        if (!isMediaId(id)) missing.push(id)
+      }
       else loaded.set(id, png)
     }
   }
@@ -225,7 +231,11 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
 const preloadDiagramPngs = (projectId: string, spine: Spine, load: DiagramPngLoader): Promise<ImageLoadResult> =>
   loadDiagramPngs(
     projectId,
-    spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+    [
+      ...spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+      // Phase 5 (T3): ảnh gốc trong mục riêng
+      ...new Set(spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image" && b.image_ref).map((b) => mediaId(b.image_ref!))))
+    ],
     load
   )
 
@@ -251,7 +261,10 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     const id = refDiagramId(b)
     if (id === null || !isImageBlock(b)) return b
     const png = resolve(id)
-    return png ? { ...b, png } : { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
+    if (png) return { ...b, png }
+    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}original image could not be embedded (${id.slice(MEDIA_PREFIX.length)})` }
+    return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
 }

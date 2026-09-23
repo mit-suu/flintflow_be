@@ -416,9 +416,11 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
   } catch {
     throw new ApiError(422, "Image block is not a valid PNG", "RENDER_IMAGE_INVALID")
   }
-  if (size.type !== "png" || !size.width || !size.height) {
-    throw new ApiError(422, "Image block is not a valid PNG", "RENDER_IMAGE_INVALID")
+  // Phase 5 (T3): ảnh gốc của file upload có thể là JPEG — nhúng nguyên, không chuyển đổi
+  if ((size.type !== "png" && size.type !== "jpg") || !size.width || !size.height) {
+    throw new ApiError(422, "Image block is not a valid PNG/JPEG", "RENDER_IMAGE_INVALID")
   }
+  const type = size.type === "jpg" ? "jpg" : "png"
 
   // Chỉ thu nhỏ ảnh rộng hơn vùng chữ, không phóng to ảnh nhỏ
   const scale = Math.min(1, PAGE_CONTENT_WIDTH_PX / size.width)
@@ -429,7 +431,7 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
       spacing: { before: BLOCK_SPACE_BEFORE, after: caption ? 0 : BLOCK_SPACE_BEFORE },
       children: [
         new ImageRun({
-          type: "png",
+          type,
           data,
           transformation: {
             width: Math.max(1, Math.round(size.width * scale)),

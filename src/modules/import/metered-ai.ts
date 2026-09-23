@@ -10,6 +10,7 @@
 
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { AiActionError, type ActionType } from "../../shared/ai/ai-action.types.js"
+import type { LlmImage } from "../../shared/ai/providers/provider.types.js"
 import { finalizeCall, releaseCall, reserveCall } from "../pipeline/meter.service.js"
 import { notifyTopUpNeeded } from "./credit-flow.service.js"
 
@@ -31,11 +32,13 @@ export const isInsufficientCredit = (err: unknown): boolean =>
 export const withMeteredAi = async <T>(
   ctx: MeteredContext,
   actionType: ActionType,
-  promptVariables: Record<string, unknown>
+  promptVariables: Record<string, unknown>,
+  /** Ảnh kèm prompt (phase 5, `IMPORT_EXTRACT_DIAGRAM`). */
+  opts: { images?: LlmImage[] } = {}
 ): Promise<MeteredResult<T>> => {
   const usageId = await reserveCall(ctx.projectId, ctx.userId, ctx.stepId, actionType)
   try {
-    const res = await executeAiAction<T>(actionType, { promptVariables }, ctx.projectId, ctx.userId)
+    const res = await executeAiAction<T>(actionType, { promptVariables }, ctx.projectId, ctx.userId, opts.images?.length ? { images: opts.images } : {})
     await finalizeCall(usageId, {
       call_kind: actionType,
       attempt: 1,

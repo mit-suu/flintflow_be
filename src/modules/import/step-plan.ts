@@ -46,6 +46,8 @@ export interface LayoutBlock {
   /** Section của block sau finalize (heading gần nhất phía trên), `null` nếu nhóm / không khớp. */
   section_id: string | null
   rows?: string[][] | null
+  /** Part ảnh trong file gốc (phase 5, T3) — mục riêng giữ lại để render nhúng ảnh gốc. */
+  image_ref?: string | null
 }
 
 export interface LayoutResult {
@@ -59,7 +61,7 @@ const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
     case "table":
       return { kind: "table", text: "", rows: b.rows ?? [], image_ref: null }
     case "image":
-      return { kind: "image", text, rows: null, image_ref: null }
+      return { kind: "image", text, rows: null, image_ref: b.image_ref ?? null }
     case "list_item":
       return text ? { kind: "list_item", text, rows: null, image_ref: null } : null
     case "paragraph":

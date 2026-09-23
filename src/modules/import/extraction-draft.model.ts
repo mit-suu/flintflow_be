@@ -6,7 +6,8 @@
  */
 
 import mongoose, { Schema, Document } from "mongoose"
-import { EXTRACTION_STATUSES, type ExtractionStatus } from "./import.constants.js"
+import type { DiagramImageKind } from "../../shared/ai/response-parser.js"
+import { EXTRACTION_STATUSES, FIELD_ORIGINS, type ExtractionStatus, type FieldOrigin } from "./import.constants.js"
 
 export interface ExtractedField {
   /** Path Spine phân giải qua khoá, vd `use_cases[id=UC-01].name`. */
@@ -14,8 +15,8 @@ export interface ExtractedField {
   value: unknown
   confidence: number
   source_block_ids: string[]
-  /** `deterministic` = trích từ bảng khớp đủ cột (G7), không tốn credit. */
-  origin: "deterministic" | "ai"
+  /** `deterministic` = trích từ bảng khớp đủ cột (G7), không tốn credit; `vision` = đọc từ ảnh (phase 5). */
+  origin: FieldOrigin
   confirmed: boolean
   edited_value?: unknown
 }
@@ -29,6 +30,12 @@ export interface IExtractionDraft extends Document {
   ops: unknown[]
   /** Block AI báo không trích được (văn xuôi giới thiệu, ghi chú) — finalize giữ nguyên văn trong `custom_sections` (FLF-184). */
   unmapped_block_ids: string[]
+  /**
+   * Ảnh diagram của section đã qua I-4 phần ảnh (mode 1 v3 phase 5): `kind` = loại model đọc được, `unsupported` =
+   * không gửi được (EMF/WMF, file gốc không còn), `other` = không phải diagram đọc được. Finalize: 4 loại diagram ⇒
+   * bỏ ảnh (diagram PlantUML từ Spine thay); còn lại ⇒ giữ ảnh gốc + cờ vàng.
+   */
+  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" }[]
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
   error: string | null
@@ -52,7 +59,7 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
             value: { type: Schema.Types.Mixed },
             confidence: { type: Number, required: true, min: 0, max: 1 },
             source_block_ids: { type: [String], default: [] },
-            origin: { type: String, enum: ["deterministic", "ai"], required: true },
+            origin: { type: String, enum: FIELD_ORIGINS, required: true },
             confirmed: { type: Boolean, default: false },
             edited_value: { type: Schema.Types.Mixed }
           },
@@ -63,6 +70,7 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
     },
     ops: { type: [Schema.Types.Mixed], default: [] },
     unmapped_block_ids: { type: [String], default: [] },
+    diagram_images: { type: [new Schema({ block_id: { type: String, required: true }, kind: { type: String, required: true } }, opts)], default: [] },
     usage_id: { type: String, default: null },
     error: { type: String, default: null }
   },

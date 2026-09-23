@@ -44,6 +44,11 @@ export interface OoxmlBlock {
   cell: CellRef | null
   /** Chỉ với `kind = "table"`: text từng ô theo hàng. */
   rows: string[][] | null
+  /**
+   * Mode 1 v3 phase 5 (T3): part ảnh trong gói (`word/media/image3.png`) của đoạn có hình — từ `a:blip/@r:embed` qua rels
+   * của `document.xml`. `null` nếu đoạn không có hình hoặc hình không nhúng (liên kết ngoài).
+   */
+  image_ref: string | null
   element: Element
 }
 
@@ -143,7 +148,17 @@ const firstCellParagraph = (tbl: Element): Element | null => {
 }
 
 /** Tách block từ DOM (hàm thuần trên DOM, không đọc zip). */
-export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): OoxmlBlock[] => {
+/** `a:blip/@r:embed` đầu tiên của đoạn ⇒ part ảnh (`word/media/…`) theo rels của `document.xml`. */
+const imageRefOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string | null => {
+  for (const blip of Array.from(p.getElementsByTagNameNS("*", "blip"))) {
+    const rid = blip.getAttributeNS(NS.r, "embed")
+    const target = rid ? imageTargets.get(rid) : undefined
+    if (target) return target.startsWith("/") ? target.slice(1) : `word/${target}`
+  }
+  return null
+}
+
+export const parseBlocks = (doc: Document, stylesDoc: Document | null = null, imageTargets: ReadonlyMap<string, string> = new Map()): OoxmlBlock[] => {
   const styles = readStyles(stylesDoc)
   const body = wAll(doc, "body")[0]
   if (!body) return []
@@ -177,7 +192,16 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
     if (chain.some((s) => TOC_NAME.test(s.name)) || hasTocField(p)) return
     const text = paragraphText(p)
     const embedded = hasEmbeddedObject(p)
-    const base = { para_id: p.getAttributeNS(NS.w14, "paraId") || null, xml_path: path, text, cell, rows: null, element: p, style_name: styleName }
+    const base = {
+      para_id: p.getAttributeNS(NS.w14, "paraId") || null,
+      xml_path: path,
+      text,
+      cell,
+      rows: null,
+      element: p,
+      style_name: styleName,
+      image_ref: hasPicture(p) ? imageRefOf(p, imageTargets) : null
+    }
 
     if (!text.trim()) {
       if (!hasPicture(p) && !embedded) return
@@ -235,7 +259,7 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
     const rows = rowsEl.map((tr) => wKids(tr, "tc").map((tc) => wKids(tc, "p").map(paragraphText).join("\n").trim()))
     const text = rows.map((r) => r.join(" | ")).join("\n")
     if (nested) {
-      push({ kind: "unsupported", level: null, heading_detector: null, style_name: null, bookmark: null, para_id: null, xml_path: path, text, editable: false, cell: null, rows, element: tbl })
+      push({ kind: "unsupported", level: null, heading_detector: null, style_name: null, bookmark: null, para_id: null, xml_path: path, text, editable: false, cell: null, rows, element: tbl, image_ref: null })
       return
     }
     const index = tableCount++
@@ -243,7 +267,7 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
     pendingTableBookmark = null
     const bookmark = own && !seenBookmarks.has(own) ? own : null
     if (bookmark) seenBookmarks.add(bookmark)
-    push({ kind: "table", level: null, heading_detector: null, style_name: null, bookmark, para_id: null, xml_path: path, text, editable: false, cell: null, rows, element: tbl })
+    push({ kind: "table", level: null, heading_detector: null, style_name: null, bookmark, para_id: null, xml_path: path, text, editable: false, cell: null, rows, element: tbl, image_ref: null })
     rowsEl.forEach((tr, ri) =>
       wKids(tr, "tc").forEach((tc, ci) => walk(tc, `${path}/tr[${ri}]/tc[${ci}]`, { table: index, row: ri, col: ci }))
     )
@@ -285,8 +309,12 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null): O
   return blocks
 }
 
-export const readBlocks = async (pkg: DocxPackage): Promise<OoxmlBlock[]> =>
-  parseBlocks(await pkg.requireXml(MAIN_PART), await pkg.xml("word/styles.xml"))
+const IMAGE_REL = /\/image$/
+
+export const readBlocks = async (pkg: DocxPackage): Promise<OoxmlBlock[]> => {
+  const images = new Map((await pkg.relationships(MAIN_PART)).filter((r) => IMAGE_REL.test(r.type)).map((r) => [r.id, r.target]))
+  return parseBlocks(await pkg.requireXml(MAIN_PART), await pkg.xml("word/styles.xml"), images)
+}
 
 export const bookmarkName = (blockId: string): string => `${BLOCK_BOOKMARK_PREFIX}${blockId}`
 
