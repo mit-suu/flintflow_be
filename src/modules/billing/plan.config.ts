@@ -4,6 +4,11 @@
  * Nguồn duy nhất cho số credit tặng, ngưỡng cảnh báo và gói nạp credit.
  * Trước đây `getOrCreateWallet` tặng cứng 100 credit (audit E1).
  *
+ * Giá credit (FLF-207 / BUG-33): đồng giá ~400₫/credit cho mọi gói. Gói 100 credit trước đây ghi 4.000₫
+ * (40₫/credit) — lệch 10 lần so với hai gói còn lại, là lỗi nhập liệu. Gói Free cho 300 credit/tháng: một
+ * dự án 7 màn tốn khoảng 400 credit ở lượt test, mục tiêu còn khoảng 250 sau khi giảm điểm dừng, nên 100
+ * credit/tháng không đủ để đi hết một dự án nhỏ dù chỉ một lần.
+ *
  * TODO(monthly_reset): cron reset quota hằng tháng theo
  * `Subscription.monthlyCreditsAllotment` (ghi CreditTransaction type
  * `monthly_reset`) để ngoài vòng một — xem task-04 "Ghi chú / rủi ro".
@@ -34,8 +39,8 @@ export const planConfig = {
   free: {
     id: "free",
     label: "Free",
-    initialCredits: 100,
-    monthlyCredits: 100,
+    initialCredits: 300,
+    monthlyCredits: 300,
     priceVnd: 0
   } satisfies PlanDefinition,
   pro: {
@@ -50,7 +55,7 @@ export const planConfig = {
   /** Kỳ subscription (ngày). */
   periodDays: 30,
   packages: [
-    { id: "pack_100", label: "Gói 100 credit", credits: 100, amount: 4_000, currency: "VND" },
+    { id: "pack_100", label: "Gói 100 credit", credits: 100, amount: 40_000, currency: "VND" },
     { id: "pack_500", label: "Gói 500 credit", credits: 500, amount: 199_000, currency: "VND" },
     { id: "pack_1500", label: "Gói 1500 credit", credits: 1500, amount: 499_000, currency: "VND" }
   ] satisfies CreditPackage[]

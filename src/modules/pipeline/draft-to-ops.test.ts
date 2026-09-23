@@ -63,6 +63,13 @@ const reply = (ops: unknown[], extra: Partial<OpTransaction> = {}): AiActionResu
   cost: 2
 })
 
+/**
+ * FLF-177 WP-2 (BUG-02): ca op sửa phần tử step KHÔNG thấy trong projection nay bị chặn sớm bằng
+ * `op_out_of_scope` — case-10 ở S-4.4 (chỉ đọc function không thuộc màn) sửa FN001 của màn S01. Bất biến 6
+ * vẫn được kiểm ở step thấy FN001 (ca riêng bên dưới).
+ */
+const SCOPE_REJECTS: Readonly<Record<string, string>> = { "case-10.json": "op_out_of_scope" }
+
 describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
   for (let i = 1; i <= 10; i++) {
     const file = `case-${String(i).padStart(2, "0")}.json`
@@ -83,7 +90,7 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
         expect(err).toBeInstanceOf(DraftRejectedError)
         const rejected = err as DraftRejectedError
         expect(rejected).toMatchObject({ statusCode: 422, code: "NEEDS_USER_INPUT" })
-        expect(rejected.errors.map((e) => e.rule)).toContain(opCase.must_reject)
+        expect(rejected.errors.map((e) => e.rule)).toContain(SCOPE_REJECTS[file] ?? opCase.must_reject)
         expect(executor).toHaveBeenCalledTimes(3)
         return
       }
@@ -95,6 +102,70 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
       expect(result.usage).toEqual([{ attempt: 1, call_kind: "draft", tokens_in: 1000, tokens_out: 200, cost: 2, logId: "log-1" }])
     })
   }
+})
+
+describe("draftOps — luật phạm vi (BUG-02)", () => {
+  it("bất biến 6 vẫn chặn khi step thấy function (case-10 chạy ở S-4.1)", async () => {
+    const spine = structuredClone(FIXTURE)
+    const opCase = readJson("op-cases", "case-10.json") as OpCase
+    const executor = vi.fn<DraftExecutor>(async () => reply(opCase.expected_ops))
+    const err = await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect((err as DraftRejectedError).errors.map((e) => e.rule)).toContain("invariant_6_feature_mismatch")
+  })
+
+  it("S-5.4 của màn S01 không được set function của màn khác; lỗi gợi ý add không id", async () => {
+    const spine = structuredClone(FIXTURE)
+    const other = spine.functions.find((f) => f.screen_id !== null && f.screen_id !== "S01")!
+    const executor = vi.fn<DraftExecutor>(async () => reply([{ op: "set", path: `functions[id=${other.id}].name`, value: "Reschedule Appointment" }]))
+    const err = await draftOps("p", "S-5.4@S01", ctxFor(spine, "S-5.4@S01"), { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    const [first] = (err as DraftRejectedError).errors
+    expect(first).toMatchObject({ rule: "op_out_of_scope", op_index: 0 })
+    expect(first.message).toContain("bỏ trống")
+  })
+
+  it("add function không id ⇒ server cấp FN kế tiếp, không đè phần tử cũ", async () => {
+    const spine = structuredClone(FIXTURE)
+    const s01 = spine.screens.find((s) => s.id === "S01")!
+    const executor = vi.fn<DraftExecutor>(async () =>
+      reply([
+        { op: "add", path: "functions[]", value: { id: "$new1", screen_id: "S01", feature_id: s01.feature_id, order: 99, name: "Reschedule Appointment", trigger: "", description: "", normal: [], abnormal: [], validations: [], priority: null } },
+        { op: "set", path: "functions[id=$new1].description", value: "Move an appointment to another slot." }
+      ])
+    )
+    const result = await draftOps("p", "S-5.4@S01", ctxFor(spine, "S-5.4@S01"), { userId: "u", spine, executor })
+    const plan = planTransaction(spine, result.txn!, { startSeq: 1 })
+    const added = plan.spine.functions.filter((f) => !spine.functions.some((x) => x.id === f.id))
+    expect(added).toHaveLength(1)
+    expect(added[0]).toMatchObject({ name: "Reschedule Appointment", description: "Move an appointment to another slot.", business_rule_ids: [] })
+    expect(added[0].id).toMatch(/^FN\d{3}$/)
+    for (const f of spine.functions) expect(plan.spine.functions.find((x) => x.id === f.id)?.name).toBe(f.name)
+  })
+})
+
+describe("draftOps — chuẩn hoá op của model (BUG-03, BUG-29)", () => {
+  it("model không tự để trống màn và không bịa confirmed_at", async () => {
+    const spine = structuredClone(FIXTURE)
+    const s = spine.screens[0]
+    const executor = vi.fn<DraftExecutor>(async () =>
+      reply([
+        { op: "add", path: "screens[]", value: { ...s, id: "S99", name: "Admin Console", queue_order: 99, detail_status: "placeholder" } },
+        { op: "add", path: "assumptions[]", value: { path: "screens[id=S99]", statement: "x", rationale: "y", origin_step_id: "S-4.1", status: "confirmed", confirmed_at: "2025-01-15T00:00:00.000Z" } }
+      ])
+    )
+    const result = await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor })
+    const plan = planTransaction(spine, result.txn!, { startSeq: 1 })
+    expect(plan.spine.screens.find((x) => x.id === "S99")?.detail_status).toBe("pending")
+    const added = plan.spine.assumptions[plan.spine.assumptions.length - 1]
+    expect(added).toMatchObject({ status: "unconfirmed", confirmed_at: null })
+  })
+
+  it("set detail_status bị từ chối để model hỏi user", async () => {
+    const spine = structuredClone(FIXTURE)
+    const executor = vi.fn<DraftExecutor>(async () => reply([{ op: "set", path: "screens[id=S01].detail_status", value: "placeholder" }]))
+    const err = await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect((err as DraftRejectedError).errors[0]).toMatchObject({ rule: "op_not_allowed" })
+  })
 })
 
 describe("draftOps retry", () => {

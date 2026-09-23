@@ -51,6 +51,16 @@ const HEADING_LEVELS = [
 ] as const
 
 const CELL_BORDER = { style: BorderStyle.SINGLE, size: 4, color: "808080" }
+
+/**
+ * Khoảng cách chữ tới khung ô (twip: 1/1440 inch). Mặc định của Word là 0 trên/dưới và 108 hai bên, nên
+ * bảng in ra bị chữ dán sát đường kẻ, nhất là ô nhiều dòng. 80 trên/dưới (~1.4 mm) và 120 hai bên
+ * (~2.1 mm) cho bảng dễ đọc mà không làm cột phình.
+ */
+const CELL_MARGINS = { top: 80, bottom: 80, left: 120, right: 120 }
+
+/** Chừa thêm một nhịp dưới mỗi đoạn trong ô — dòng cuối không chạm mép dưới. */
+const CELL_PARAGRAPH_SPACING = { after: 20 }
 const TABLE_BORDERS = {
   top: CELL_BORDER,
   bottom: CELL_BORDER,
@@ -359,8 +369,12 @@ function table(header: CellRuns[], rows: CellRuns[][], shading: Shading): Table 
       shading: isHeader
         ? { type: ShadingType.CLEAR, color: "auto", fill: HEADER_FILL }
         : shading && { type: ShadingType.CLEAR, color: "auto", fill: shading.fill },
+      margins: CELL_MARGINS,
       children: [
-        new Paragraph({ children: runs(isHeader ? content.map((run) => ({ ...run, bold: true })) : content) })
+        new Paragraph({
+          spacing: CELL_PARAGRAPH_SPACING,
+          children: runs(isHeader ? content.map((run) => ({ ...run, bold: true })) : content)
+        })
       ]
     })
 
@@ -370,6 +384,8 @@ function table(header: CellRuns[], rows: CellRuns[][], shading: Shading): Table 
     width: { size: columnWidth * columns, type: WidthType.DXA },
     columnWidths: Array.from({ length: columns }, () => columnWidth),
     borders: TABLE_BORDERS,
+    // Word lấy lề ô mặc định của bảng khi ô không tự khai; khai cả hai để mọi trình đọc đều giãn đúng
+    margins: CELL_MARGINS,
     rows: [
       new TableRow({ tableHeader: true, children: pad(header).map((content) => cell(content, true)) }),
       ...rows.map((row) => new TableRow({ children: pad(row).map((content) => cell(content, false)) }))
