@@ -5,8 +5,16 @@
 export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat"] as const
 export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
 
+/**
+ * Nguồn nhận khi **tạo** CR mới — đúng 6 nguồn của BPMN 3.1 (email stakeholder, biên bản, gap, re-upload, comment
+ * Viewer, yêu cầu miệng có tên). Mode 1 v3: không tạo CR nguồn `chat` nữa (lệnh trong chat là yêu cầu miệng);
+ * `chat` chỉ còn trong `CR_SOURCE_KINDS` để đọc CR cũ.
+ */
+export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal"] as const satisfies readonly CrSourceKind[]
+
 /** Cách C-3 tìm ra vị trí (nút 3.4): đích + phần tử tham chiếu tới đích (Spine), phần tử nhắc mã/tên của đích, từ khoá. */
-export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword"] as const
+/** `preview` (mode 1 v3): phần tử bị op của bản xem trước đính kèm CR chạm tới. */
+export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview"] as const
 export type LocationFoundBy = (typeof LOCATION_FOUND_BY)[number]
 
 /** Kết luận của C-4 cho từng vị trí (nút 3.6, UC-81). Vị trí chưa kết luận chặn nộp (CR_LOCATION_UNCONCLUDED). */

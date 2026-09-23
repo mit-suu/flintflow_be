@@ -14,7 +14,8 @@ export interface MakeDocxOptions {
   /** Nội dung trong `<w:styles>`. */
   styles?: string
   sectPr?: string
-  extraParts?: Record<string, string>
+  /** Part thêm: XML (string) hoặc nhị phân (ảnh `word/media/*`). */
+  extraParts?: Record<string, string | Buffer>
   extraDocRels?: string
   extraContentTypes?: string
 }
@@ -75,3 +76,11 @@ export const makeDocx = async (opts: MakeDocxOptions): Promise<Buffer> => {
   for (const [name, xml] of Object.entries(opts.extraParts ?? {})) zip.file(name, xml)
   return zip.generateAsync({ type: "nodebuffer" })
 }
+
+/** Đoạn chứa một hình nhúng `a:blip r:embed=<rid>` (tối giản — đủ cho `readBlocks`). */
+export const picture = (rid: string): string =>
+  `<w:p><w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="${rid}"/></w:drawing></w:r></w:p>`
+
+/** Rel ảnh của `document.xml` trỏ tới `media/<file>`. */
+export const imageRel = (rid: string, file: string): string =>
+  `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${file}"/>`

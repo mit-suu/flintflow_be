@@ -23,11 +23,11 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("11 luật đỏ + 15 luật vàng; 3 luật không waive được", () => {
-    expect(RULES.filter((r) => r.level === "red")).toHaveLength(11)
+  it("12 luật đỏ + 16 luật vàng; 3 luật không waive được", () => {
+    expect(RULES.filter((r) => r.level === "red")).toHaveLength(12)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(15)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(16)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -140,6 +140,34 @@ describe("runDeterministicCheck", () => {
     )
   })
 
+  it("orphan_screen: màn không actor người nào dùng, màn đứng riêng trong luồng, popup không ai mở", () => {
+    const flags = byRule(
+      runDeterministicCheck(
+        variant((s) => {
+          const tpl = s.screens.find((x) => x.id === "S13")!
+          s.screens.push({ ...tpl, id: "S20", name: "No Actor", flow_to: [] })
+          s.permissions.push({ id: "P999", screen_id: "S21", role_id: s.roles[0].id, action: "view" })
+          s.screens.push({ ...tpl, id: "S21", name: "Isolated", flow_to: [] })
+          s.permissions.push({ id: "P998", screen_id: "S22", role_id: s.roles[0].id, action: "view" })
+          s.screens.push({ ...tpl, id: "S22", name: "Lonely Popup", flow_to: [], is_popup: true })
+        })
+      ),
+      "orphan_screen"
+    )
+    expect(flags.map((f) => f.target_id)).toEqual(["S20", "S21", "S22"])
+    expect(flags.every((f) => f.level === "yellow" && f.section_id === "fixed:3.1.1" && f.remediation_step === "S-4.2")).toBe(true)
+  })
+
+  it("orphan_screen_at_baseline: màn mồ côi thành cờ đỏ chỉ khi ký baseline", () => {
+    const orphaned = variant((s) => {
+      s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "No Actor", flow_to: [] })
+    })
+    expect(byRule(runDeterministicCheck(orphaned), "orphan_screen_at_baseline")).toEqual([])
+    expect(byRule(runDeterministicCheck(orphaned, [], { atBaseline: true }), "orphan_screen_at_baseline")).toMatchObject([
+      { level: "red", section_id: "fixed:3.1.1", target_id: "S20", remediation_step: "S-4.2" }
+    ])
+  })
+
   it("xoá actor thẳng tay ⇒ dead_reference ở §2.2.2, remediation S-3.2", () => {
     const flags = byRule(runDeterministicCheck(variant((s) => (s.actors = s.actors.filter((a) => a.id !== "A08")))), "dead_reference")
     expect(flags.map((f) => f.target_id).sort()).toEqual(["use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
@@ -186,9 +214,12 @@ describe("runDeterministicCheck", () => {
 
     const atBaseline = runDeterministicCheck(spine, changes, { atBaseline: true })
     expect(byRule(atBaseline, "screen_pending_at_baseline")).toMatchObject([{ target_id: "S02", section_id: "function:FN006", remediation_step: "S-5.1@S02" }])
+    // L11c: `remediation_step` là step XỬ LÝ được cờ (S-9.2 Assumption Sweep), không phải step đã sinh ra giả
+    // định — trỏ về nơi sinh thì chạy lại bao nhiêu lần cũng không đóng được cờ, chỉ đốt trần 8 lượt gọi model.
     expect(byRule(atBaseline, "unconfirmed_assumption")).toMatchObject([
-      { target_id: "AS01", section_id: "fixed:4.2.2", remediation_step: "S-6.3" }
+      { target_id: "AS01", section_id: "fixed:4.2.2", remediation_step: "S-9.2" }
     ])
+    expect(byRule(atBaseline, "unconfirmed_assumption")[0]?.message, "vẫn truy được nơi sinh qua message").toContain("S-6.3")
     expect(byRule(atBaseline, "section_stale_at_baseline").map((f) => f.section_id)).toContain("fixed:3.1.5")
     expect(byRule(atBaseline, "section_awaiting_reaccept")).toMatchObject([{ section_id: "fixed:5.2", remediation_step: "S-7.2" }])
   })
@@ -460,6 +491,19 @@ describe("FLF-213: luật \"chưa có X\" chờ bước sở hữu chốt", () =
     // S-4.4 và S-6.x vẫn chưa chạy ⇒ cổng của chúng còn đóng
     expect(byRule(flags, "usecase_no_function")).toEqual([])
     expect(byRule(flags, "nfr_missing_number")).toEqual([])
+  })
+
+  it("orphan_screen chờ S-4.2: màn vừa lập mà chưa ai nối luồng thì chưa phải mồ côi", () => {
+    const isolated = (s: Spine) => {
+      s.permissions.push({ id: "P997", screen_id: "S30", role_id: s.roles[0].id, action: "view" })
+      s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S30", name: "Isolated", flow_to: [] })
+    }
+    const beforeFlow = variant((s) => {
+      isolated(s)
+      s.steps = s.steps.filter((st) => st.id !== "S-4.2")
+    })
+    expect(byRule(runDeterministicCheck(beforeFlow), "orphan_screen")).toEqual([])
+    expect(byRule(runDeterministicCheck(variant(isolated)), "orphan_screen").map((f) => f.target_id)).toEqual(["S30"])
   })
 
   it("at_baseline ⇒ mở hết cổng, bắt đủ như trước khi có cổng", () => {

@@ -24,6 +24,7 @@ export const toVersionDto = (v: IDocVersion): DocVersionDto => ({
   cr_ids: [...v.cr_ids],
   baseline_id: v.baseline_ref ?? null,
   has_clean_file: !!v.clean_file_ref,
+  has_tracked_file: !!v.tracked_file_ref,
   has_original_file: !!v.original_ref,
   created_by: String(v.created_by),
   created_at: toIso(v.createdAt)!
@@ -60,17 +61,20 @@ export const downloadVersion = async (projectId: string, projectName: string, ve
   if (variant === "original") {
     // Bản gốc người dùng upload (có stamp) — không watermark, tên theo version + hậu tố _original
     if (!v.original_ref) throw new Mode1Error("DOC_VERSION_NOT_FOUND", `Version ${v.version} không có file gốc (chỉ bản import 0.0)`)
-    return { filename: downloadFileName(projectName, v.version).replace(/(_DRAFT)?.docx$/, "_original.docx"), data: await docFileStore().load(v.original_ref) }
+    return { filename: downloadFileName(projectName, v.version, { projectId }).replace(/(_DRAFT)?.docx$/, "_original.docx"), data: await docFileStore().load(v.original_ref) }
   }
   const release = isReleaseVersion(v.version)
   if (release && variant === "auto" && v.clean_file_ref) {
-    return { filename: downloadFileName(projectName, v.version), data: await docFileStore().load(v.clean_file_ref) }
+    return { filename: downloadFileName(projectName, v.version, { projectId }), data: await docFileStore().load(v.clean_file_ref) }
   }
-  const data = await docFileStore().load(v.file_ref)
-  if (release) return { filename: downloadFileName(projectName, v.version), data }
+  // BPMN 3.14 (mode 1 v3): bản có đánh dấu của CR là file riêng; version không có (0.0, dựng lỗi) ⇒ bản render như cũ
+  const tracked = variant === "tracked" && !!v.tracked_file_ref
+  const data = await docFileStore().load(tracked ? v.tracked_file_ref! : v.file_ref)
+  const filename = downloadFileName(projectName, v.version, { projectId, tracked })
+  if (release) return { filename, data }
   const pkg = await DocxPackage.load(data)
   await addDraftWatermark(pkg)
-  return { filename: downloadFileName(projectName, v.version), data: await pkg.toBuffer() }
+  return { filename, data: await pkg.toBuffer() }
 }
 
 export const compareVersions = async (projectId: string, from: string, to: string): Promise<CompareResponse> => {

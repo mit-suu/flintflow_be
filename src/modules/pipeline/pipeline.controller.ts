@@ -40,6 +40,7 @@ import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-st
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertNotMode1 } from "../import/mode1-guard.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -54,6 +55,7 @@ interface Context {
   projectId: string
   userId: string
   project: { name: string; domain: string | null }
+  mode: string
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body — người ngoài không dò được DTO qua lỗi 400. */
@@ -64,7 +66,7 @@ const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, userId)
-  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null } }
+  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
 }
 
 // ─── GET /steps ──────────────────────────────────────────────────
@@ -87,6 +89,9 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
     })
   )
 
+  // Khoá lượt chạy nằm ở `step_runs` (FLF-177): mỗi dự án nhiều nhất một lượt sống ⇒ một truy vấn cho cả danh sách.
+  const activeRun = await getActiveRun(projectId)
+
   const steps = defs.map((def) => {
     const state = spine.steps.find((s) => s.id === def.id)
     const stepCounts = counts.get(def.id) ?? { calls_used: 0, regenerate_used: 0 }
@@ -102,7 +107,8 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       calls_limit: CALLS_LIMIT,
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
-      accepted_at: state?.accepted_at ?? null
+      accepted_at: state?.accepted_at ?? null,
+      running: activeRun?.step_id === def.id
     }
   })
 
@@ -124,6 +130,11 @@ const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
   if (err instanceof ApiError || err instanceof AiActionError) {
     if (isPipelineErrorCode(err.code)) return err.code
     if (err.statusCode === 400) return "VALIDATION_ERROR"
+    // Lỗi của nhà cung cấp AI có mã riêng (GLM_ERROR, GEMINI_ERROR, GLM_EMPTY_OUTPUT…) không nằm trong bảng
+    // pipeline. Trước đây quy hết về NOT_IMPLEMENTED (501) nên người dùng đọc "chưa hiện thực" trong khi thật ra
+    // endpoint AI hết hạn mức / chưa gắn thanh toán (gặp thật 2026-09-20).
+    if (err.statusCode === 429) return "RATE_LIMIT_EXCEEDED"
+    if (err instanceof AiActionError && err.statusCode >= 500) return "AI_PROVIDER_ERROR"
   }
   return "NOT_IMPLEMENTED"
 }
@@ -207,7 +218,8 @@ data: ${JSON.stringify(event)}
 
 
 export const runStepController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(runStepRequestSchema, req.body)
 
@@ -221,7 +233,11 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   }
 
   try {
-    await runStep(projectId, stepId, body.session_id, userId, emit, { signal: stream.controller.signal, abort: stream.controller })
+    await runStep(projectId, stepId, body.session_id, userId, emit, {
+      signal: stream.controller.signal,
+      abort: stream.controller,
+      ...(body.reopen ? { reopen: true } : {})
+    })
     stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err
@@ -269,7 +285,8 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
 // ─── POST /steps/:stepId/answer ────────────────────────────────────
 
 export const answerStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId } = await authorize(req)
+  const { projectId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(stepAnswerRequestSchema, req.body)
 
@@ -283,7 +300,8 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 // ─── POST /steps/:stepId/gate ───────────────────────────────────────
 
 export const gateStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(gateRequestSchema, req.body)
   await requirePipelineSession(projectId, body.session_id)
@@ -358,7 +376,8 @@ export const cancelStepRun = catchAsync(async (req: Request, res: Response) => {
 // ─── POST /resume ───────────────────────────────────────────────────
 
 export const resumeProjectController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const result = await resumeProject(projectId, userId)
   return sendSuccess(res, 200, result)
 })

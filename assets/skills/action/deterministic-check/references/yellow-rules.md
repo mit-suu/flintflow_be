@@ -7,6 +7,7 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `orphan_actor` | An actor of any kind (human, system, time) is in no `use_cases[].actor_ids[]` — the diagram only declares actors that have an edge, so it would vanish silently | S-3.2 |
 | `usecase_no_function` | `use_cases[].function_ids[]` empty | S-3.2 |
 | `screen_no_function` | A screen has no function | S-4.1 |
+| `orphan_screen` | A screen no human actor uses (once any screen ↔ actor link exists), or, once any `flow_to` edge exists, a screen with no incoming and no outgoing edge, or a pop-up nothing opens | S-4.2 |
 | `empty_feature` | A feature has neither screen nor function | S-4.1 |
 | `role_no_actor` | `roles[].actor_id` is null | S-3.1 |
 | `non_english_content` | A field in the **Owns** column contains Vietnamese diacritics | owner step of the field |
@@ -21,13 +22,14 @@ Cardinality is **yellow, not red**: as red, every `placeholder` screen of round 
 
 ## The "not there yet" gate (FLF-213)
 
-The cardinality rules and `usecase_floating` / `function_without_uc` all read *X has no Y*, so they only mean something once Y can exist. Each waits for the step that **produces Y**, which is not always its `remediation_step`:
+The cardinality rules, `orphan_screen` and `usecase_floating` / `function_without_uc` all read *X has no Y*, so they only mean something once Y can exist. Each waits for the step that **produces Y**, which is not always its `remediation_step`:
 
 | `rule_id` | Waits for | Why |
 | --- | --- | --- |
 | `orphan_actor` | S-3.2 | actors are tied to use cases in the Actor-Goal List |
 | `usecase_no_function` | S-4.4 | `use_cases[].function_ids` is filled at S-4.1 (screen functions) and S-4.4 (non-screen ones); the fix is still S-3.2 |
 | `screen_no_function` | S-4.1 | functions are created there |
+| `orphan_screen` | S-4.2 | `flow_to[]` is written there; the rule also self-guards on the data being present at all |
 | `empty_feature` | S-4.1 | screens and functions are created there |
 | `role_no_actor` | S-3.1 | roles and actors both come from S-3.1 |
 | `usecase_floating` | S-3.4 | `extends[]` is written there |

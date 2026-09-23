@@ -22,11 +22,13 @@ import { getProjectById } from "../project/project.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertNotMode1 } from "../import/mode1-guard.js"
 
 interface Context {
   projectId: string
   userId: string
   spine: SpineRecord
+  mode: string
 }
 
 const context = async (req: Request): Promise<Context> => {
@@ -39,7 +41,7 @@ const context = async (req: Request): Promise<Context> => {
   }
   const project = await getProjectById(projectId, userId)
   const spine = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain ?? null })
-  return { projectId, userId, spine }
+  return { projectId, userId, spine, mode: project.mode ?? "fpt" }
 }
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
@@ -78,7 +80,8 @@ export const recomputeFlags = catchAsync(async (req: Request, res: Response) => 
 })
 
 export const waiveFlag = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await context(req)
+  const { projectId, userId, mode } = await context(req)
+  assertNotMode1(mode, "waive") // G5 + mode 1 v3: cờ chỉ đóng bằng change request
   const body = parse(waiveRequestSchema, req.body)
   const flag = await flagsService.waive(projectId, req.params.flagId as string, body.reason, userId)
   return sendSuccess(res, 200, flag)

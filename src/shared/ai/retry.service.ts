@@ -1,14 +1,22 @@
 import { AiActionError } from "./ai-action.types.js"
 
 export const isTransientError = (error: any): boolean => {
+  // Người gọi đã bỏ đi (client đóng kết nối) ⇒ gọi lại chỉ tốn tiền và giữ khoá step lâu thêm
+  if (error?.name === "AbortError" || error?.name === "APIUserAbortError" || error?.code === "AI_CALL_ABORTED" || error?.code === "ERR_CANCELED") {
+    return false
+  }
   const errMsg = (error?.message || error?.details?.error?.message || "").toLowerCase()
-  if (errMsg.includes("insufficient_quota") || errMsg.includes("exceeded your current quota")) {
+  // Hết tiền / chưa gắn thanh toán / vượt hạn mức chi: gọi lại chỉ tốn thời gian, trạng thái không tự đổi
+  const BILLING = ["insufficient_quota", "exceeded your current quota", "payment method", "spend limit", "credits cannot be applied", "billing"]
+  if (BILLING.some((phrase) => errMsg.includes(phrase))) {
     return false
   }
 
   if (error instanceof AiActionError) {
     if (
       error.code === "INSUFFICIENT_CREDIT" ||
+      // `callGLM` đã tự gọi lại một lần với ngân sách gấp đôi trước khi ném lỗi này; lặp y hệt prompt chỉ tốn lượt gọi
+      error.code === "GLM_EMPTY_OUTPUT" ||
       error.statusCode === 402 ||
       error.statusCode === 400 ||
       error.statusCode === 403

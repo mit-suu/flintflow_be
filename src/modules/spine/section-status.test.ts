@@ -115,8 +115,14 @@ describe("readiness / progressByStep", () => {
     expect(r.accepted_pct).toBeLessThan(100) // function của màn placeholder còn draft
   })
 
-  it("fixture: 68 step done / 51 + 5×20 = 151, show_percent sau S-4.1", () => {
-    expect(progressByStep(FIXTURE)).toEqual({ done: 68, total: 151, current_phase: "S-9", current_step: "S-9.5", show_percent: true })
+  it("fixture: 68 step done / 51 + 5×6 = 81 — màn để lại (placeholder) không vào mẫu số", () => {
+    // 19 màn: 5 signed_off + 14 placeholder. Đếm cả 14 màn để lại thì mẫu số là 151 và thanh tiến độ không bao giờ
+    // chạm 100% được, trong khi `nextStep` vốn đã bỏ qua vòng của màn placeholder.
+    expect(progressByStep(FIXTURE)).toEqual({ done: 68, total: 81, current_phase: "S-9", current_step: "S-9.5", show_percent: true })
+
+    // màn được tả chi tiết trở lại ⇒ vòng của nó đếm như thường
+    const detailed = { ...FIXTURE, screens: FIXTURE.screens.map((s) => ({ ...s, detail_status: "signed_off" as const })) }
+    expect(progressByStep(detailed).total).toBe(151)
   })
 
   it("trước S-4.1 accepted ⇒ show_percent = false", () => {

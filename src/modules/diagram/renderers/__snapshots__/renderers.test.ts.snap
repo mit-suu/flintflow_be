@@ -3,18 +3,29 @@
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
 "@startuml
 skinparam monochrome true
-left to right direction
-rectangle "FlintFlow" as SYSTEM_
-rectangle "Payment Gateway" as A05 <<system>>
-rectangle "LLM Provider" as A06 <<system>>
-rectangle "PlantUML Server" as A07 <<system>>
-rectangle "Email Service" as A08 <<system>>
-rectangle "Scheduler" as A09 <<time>>
-SYSTEM_ -- A05
-SYSTEM_ -- A06
-SYSTEM_ -- A07
-SYSTEM_ -- A08
-SYSTEM_ -- A09
+skinparam shadowing false
+skinparam nodesep 45
+skinparam ranksep 110
+skinparam usecaseFontSize 16
+usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_
+rectangle "Founder" as A01
+rectangle "Business Analyst" as A02
+rectangle "Administrator" as A03
+rectangle "Guest" as A04
+rectangle "Payment Gateway" as A05
+rectangle "LLM Provider" as A06
+rectangle "PlantUML Server" as A07
+rectangle "Email Service" as A08
+rectangle "Scheduler" as A09
+A01 <-right-> SYSTEM_ : → brief answers, accepted step\\n← draft section, srs document
+A02 <-left-> SYSTEM_ : ← verification result\\n→ red flag list
+A03 <-down-> SYSTEM_ : ↓ account action\\n↑ platform metrics
+A04 -up-> SYSTEM_ : registration request
+A05 <-down-> SYSTEM_ : ↓ payment result\\n↑ payment request
+A06 <-up-> SYSTEM_ : ↑ generated draft\\n↓ draft request
+A07 <-down-> SYSTEM_ : ↓ diagram png\\n↑ puml source
+SYSTEM_ -down-> A08 : email request
+A09 -down-> SYSTEM_ : housekeeping tick
 @enduml
 "
 `;
@@ -51,57 +62,130 @@ E06 ||--o{ E01
 "
 `;
 
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow 1`] = `
-"@startuml
-skinparam monochrome true
-hide empty description
-[*] --> S01
-state "Login" as S01
-state "Register" as S02
-state "Forgot Password" as S03
-state "Onboarding" as S04
-state "Project Dashboard" as S05
-state "Create Project" as S06
-state "Project Workspace" as S07 {
-  state "Chat" as S07_T1
-  state "Document" as S07_T2
-  state "History" as S07_T3
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 1 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Founder";
+  START [label="Founder", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S03 [label="Forgot Password\\n(pop-up)", style="rounded,dashed"];
+  S04 [label="Onboarding"];
+  S05 [label="Project Dashboard"];
+  S06 [label="Create Project\\n(pop-up)", style="rounded,dashed"];
+  subgraph cluster_S07 {
+    label="Project Workspace"; style=rounded;
+    S07_T1 [label="Chat"];
+    S07_T2 [label="Document"];
+    S07_T3 [label="History"];
+  }
+  S08 [label="Diagram Preview"];
+  S09 [label="Verification & Change Panel"];
+  S10 [label="Export"];
+  S11 [label="Plan & Pricing"];
+  S12 [label="Billing History"];
+  S13 [label="Notification Center"];
+  START -> S01;
+  START -> S04;
+  S01 -> S03;
+  S01 -> S05;
+  S04 -> S05;
+  S05 -> S06;
+  S05 -> S07_T1 [lhead=cluster_S07];
+  S05 -> S11;
+  S05 -> S13;
+  S06 -> S07_T1 [lhead=cluster_S07];
+  S07_T1 -> S08 [ltail=cluster_S07];
+  S07_T1 -> S09 [ltail=cluster_S07];
+  S07_T1 -> S10 [ltail=cluster_S07];
+  S09 -> S10;
+  S11 -> S12;
 }
-state "Diagram Preview" as S08
-state "Verification & Change Panel" as S09
-state "Export" as S10
-state "Plan & Pricing" as S11
-state "Billing History" as S12
-state "Notification Center" as S13
-state "Admin User List" as S14
-state "Admin User Detail" as S15
-state "Admin Metrics Dashboard" as S16
-state "Admin AI Cost Report" as S17
-state "Admin Prompt Templates" as S18
-state "Admin Audit Log" as S19
-note right of S03 : pop-up
-note right of S06 : pop-up
-S01 --> S02
-S01 --> S03
-S01 --> S05
-S02 --> S01
-S04 --> S05
-S05 --> S06
-S05 --> S07
-S05 --> S11
-S05 --> S13
-S06 --> S07
-S07 --> S08
-S07 --> S09
-S07 --> S10
-S08 --> S07
-S09 --> S07
-S09 --> S10
-S10 --> S07
-S11 --> S12
-S14 --> S15
-S15 --> S14
-@enduml
+@enddot
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 2 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Business Analyst";
+  START [label="Business Analyst", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S04 [label="Onboarding"];
+  S05 [label="Project Dashboard"];
+  subgraph cluster_S07 {
+    label="Project Workspace"; style=rounded;
+    S07_T1 [label="Chat"];
+    S07_T2 [label="Document"];
+    S07_T3 [label="History"];
+  }
+  S08 [label="Diagram Preview"];
+  S09 [label="Verification & Change Panel"];
+  S10 [label="Export"];
+  S13 [label="Notification Center"];
+  START -> S01;
+  START -> S04;
+  S01 -> S05;
+  S04 -> S05;
+  S05 -> S07_T1 [lhead=cluster_S07];
+  S05 -> S13;
+  S07_T1 -> S08 [ltail=cluster_S07];
+  S07_T1 -> S09 [ltail=cluster_S07];
+  S07_T1 -> S10 [ltail=cluster_S07];
+  S09 -> S10;
+}
+@enddot
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 3 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Administrator";
+  START [label="Administrator", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S14 [label="Admin User List"];
+  S15 [label="Admin User Detail"];
+  S16 [label="Admin Metrics Dashboard"];
+  S17 [label="Admin AI Cost Report"];
+  S18 [label="Admin Prompt Templates"];
+  S19 [label="Admin Audit Log"];
+  START -> S01;
+  S01 -> S14;
+  S14 -> S15;
+  S14 -> S16;
+  S14 -> S17;
+  S14 -> S18;
+  S14 -> S19;
+}
+@enddot
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 4 1`] = `
+"@startdot
+digraph screens_flow {
+  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  edge [arrowsize=0.8];
+  label="Screens flow for Guest";
+  START [label="Guest", shape=diamond, style=solid];
+  S01 [label="Login"];
+  S02 [label="Register"];
+  S03 [label="Forgot Password\\n(pop-up)", style="rounded,dashed"];
+  START -> S01;
+  S01 -> S02;
+  S01 -> S03;
+}
+@enddot
 "
 `;
 

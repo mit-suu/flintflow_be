@@ -36,7 +36,8 @@ export const importedProject = async (name = "Lumen LMS") => {
 const replaceOps = (path: string, text: string, from: string, to: string): { op: "set"; path: string; value: string }[] => {
   let value: Record<string, unknown> = {}
   try {
-    value = JSON.parse(text.split("\nPrevious proposal failed checks")[0]) as Record<string, unknown>
+    // Bỏ các dòng C-4 nối sau JSON: lỗi kiểm lần trước, op gợi ý từ bản xem trước (mode 1 v3)
+    value = JSON.parse(text.split("\nPrevious proposal failed checks")[0].split("\nRequester's previewed ops")[0]) as Record<string, unknown>
   } catch {
     return []
   }
@@ -83,7 +84,7 @@ export const writeCr = async (c: Mode1Api, title: string, description: string) =
   for (const step of ["clarify", "impact", "propose", "verify", "submit"]) crDetail(await c.post(`${cr}/${step}`))
   const { groups } = crDetail(await c.get(cr))
   let last: ReturnType<typeof crDetail> | null = null
-  for (const g of groups) last = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+  for (const g of groups) last = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
   expect(last?.change_request.status).toBe("written")
   return { crId, version: last!.change_request.result_doc_version as string }
 }

@@ -43,8 +43,13 @@ export const isReleaseVersion = (value: string): boolean => {
   return major >= 1 && minor === 0
 }
 
-/** Tên file tải về: bản draft thêm hậu tố `_DRAFT` (G8), vd `Lumen_SRS_v0.2_DRAFT.docx`. */
-export const downloadFileName = (baseName: string, version: string): string => {
+/**
+ * Tên file tải về: bản draft thêm hậu tố `_DRAFT` (G8), vd `Lumen_SRS_v0.2_DRAFT.docx`. Mode 1 v3 (BPMN 6.3: project ID
+ * và version "đóng trong file **và tên file**"): có `projectId` ⇒ `Lumen_SRS_<projectId>_v1.0.docx`; bản có đánh dấu
+ * (3.14) thêm `_tracked`.
+ */
+export const downloadFileName = (baseName: string, version: string, opts: { projectId?: string; tracked?: boolean } = {}): string => {
   const safe = baseName.replace(/[\\/:*?"<>|]+/g, "_").trim() || "SRS"
-  return `${safe}_v${version}${isReleaseVersion(version) ? "" : "_DRAFT"}.docx`
+  const id = opts.projectId ? `_${opts.projectId}` : ""
+  return `${safe}${id}_v${version}${opts.tracked ? "_tracked" : ""}${isReleaseVersion(version) ? "" : "_DRAFT"}.docx`
 }

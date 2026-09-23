@@ -77,6 +77,8 @@ export interface StepSummary {
   regenerate_used: number
   regenerate_limit: 3
   accepted_at: string | null
+  /** Step đang chạy dở ở request khác (GET /steps); ở kết quả /gate luôn false. */
+  running: boolean
 }
 
 export interface GateResult {
@@ -110,7 +112,9 @@ const buildSummary = (spine: Spine, stepId: string, counts: { calls_used: number
     calls_limit: CALLS_LIMIT,
     regenerate_used: counts.regenerate_used,
     regenerate_limit: REGENERATE_LIMIT_COUNT,
-    accepted_at: state?.accepted_at ?? null
+    accepted_at: state?.accepted_at ?? null,
+    // Tóm tắt này dựng ở cuối `/gate`: khoá nhả ngay sau đó nên client đọc được là step đã xong
+    running: false
   }
 }
 

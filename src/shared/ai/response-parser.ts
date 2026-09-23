@@ -137,6 +137,15 @@ export const importExtractSchema = z.object({
   unmapped_block_ids: z.array(blockIdRef).default([])
 })
 
+/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5); `other` ⇒ không đọc, giữ ảnh gốc. */
+export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "other"] as const
+export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
+
+/** I-4 phần ảnh: cùng hình item với `importExtract` + loại diagram. `other` thì `items` rỗng. */
+export const importExtractDiagramSchema = importExtractSchema.extend({
+  diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
+})
+
 /** Nút 1.11 (IMPORT_SEMANTIC_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
 export const findingsSchema = z.object({
   findings: z
@@ -188,6 +197,7 @@ export const crProposeSchema = z.object({
 })
 
 export type ImportExtractOutput = z.infer<typeof importExtractSchema>
+export type ImportExtractDiagramOutput = z.infer<typeof importExtractDiagramSchema>
 export type FindingsOutput = z.infer<typeof findingsSchema>
 export type CrClarifyOutput = z.infer<typeof crClarifySchema>
 export type CrProposeOutput = z.infer<typeof crProposeSchema>
@@ -215,6 +225,7 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CHANGE_INSTRUCTION]: "changeInstruction",
   [ActionType.RENDER_FIX]: "renderFix",
   [ActionType.IMPORT_EXTRACT_FIELDS]: "importExtract",
+  [ActionType.IMPORT_EXTRACT_DIAGRAM]: "importExtractDiagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "findings",
   [ActionType.CR_CLARIFY]: "crClarify",
   [ActionType.CR_PROPOSE]: "crPropose",
@@ -236,6 +247,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CHAT]: chatSchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
+  [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
   [ActionType.CR_CLARIFY]: crClarifySchema,
   [ActionType.CR_PROPOSE]: crProposeSchema,

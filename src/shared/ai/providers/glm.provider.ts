@@ -1,7 +1,7 @@
 import OpenAI from "openai"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
-import { LLMResponse } from "./provider.types.js"
+import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 import { modalBaseUrl } from "./modal.config.js"
 
 /**
@@ -29,8 +29,7 @@ export const GLM_REQUEST_OPTIONS = {
 export const callGLM = async (
   prompt: string,
   providerConfig: AiProviderConfig,
-  /** Huỷ lượt chạy step ⇒ huỷ luôn request đang mở (FLF-177 BUG-05). */
-  signal?: AbortSignal
+  options: LlmCallOptions = {}
 ): Promise<LLMResponse> => {
   const tokenId = (env.MODAL_PROXY_TOKEN_ID || process.env.MODAL_PROXY_TOKEN_ID)?.trim()
   const tokenSecret = (env.MODAL_PROXY_TOKEN_SECRET || process.env.MODAL_PROXY_TOKEN_SECRET)?.trim()
@@ -65,63 +64,20 @@ export const callGLM = async (
   const temperature = providerConfig.temperature ?? 0.3
 
   try {
-    const stream = (await client.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
-      temperature,
-      max_tokens: maxTokens,
-      top_p: 0.9,
-      stream: true,
-      ...GLM_REQUEST_OPTIONS
-    } as OpenAI.ChatCompletionCreateParamsStreaming, signal ? { signal } : undefined)) as AsyncIterable<OpenAI.ChatCompletionChunk>
+    const first = await streamOnce(client, model, prompt, temperature, maxTokens, options.signal)
+    if (first.answer) return first.response
 
-    let text = ""
-    let reasoningLength = 0
-    let finishReason: string | null = null
-    let promptTokens = 0
-    let completionTokens = 0
-
-    for await (const chunk of stream) {
-      if (signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
-      const choice = chunk.choices?.[0]
-      const delta = choice?.delta?.content
-      if (delta) {
-        text += delta
-      }
-      reasoningLength += ((choice?.delta as { reasoning_content?: string } | undefined)?.reasoning_content ?? "").length
-      if (choice?.finish_reason) finishReason = choice.finish_reason
-      if ((chunk as any).usage) {
-        promptTokens = (chunk as any).usage.prompt_tokens || promptTokens
-        completionTokens = (chunk as any).usage.completion_tokens || completionTokens
-      }
+    // Prompt khó (C-4 nhiều vị trí) ⇒ model suy nghĩ hết sạch ngân sách, chưa kịp trả `content`. Gọi lại y hệt chỉ
+    // hỏng y hệt, nên **nới ngân sách** đúng một lần rồi mới bỏ cuộc.
+    if (first.finishReason === "length" && maxTokens < GLM_MAX_TOKENS_CEILING) {
+      const retryTokens = Math.min(maxTokens * 2, GLM_MAX_TOKENS_CEILING)
+      console.warn(`[GLM] hết ngân sách khi suy nghĩ (max_tokens=${maxTokens}); gọi lại với max_tokens=${retryTokens}`)
+      const second = await streamOnce(client, model, prompt, temperature, retryTokens, options.signal)
+      if (second.answer) return second.response
+      throw emptyOutput(second.finishReason, second.reasoningLength, retryTokens, maxTokens)
     }
 
-    if (!promptTokens) {
-      promptTokens = Math.ceil(prompt.length / 4)
-    }
-    if (!completionTokens) {
-      completionTokens = Math.ceil(text.length / 4)
-    }
-
-    const answer = stripReasoning(text)
-    if (!answer.trim()) {
-      throw new AiActionError(
-        502,
-        `GLM không trả nội dung (finish_reason=${finishReason ?? "?"}, suy nghĩ ${reasoningLength} ký tự, max_tokens=${maxTokens})`,
-        "GLM_EMPTY_OUTPUT"
-      )
-    }
-
-    return {
-      text: answer,
-      promptTokens,
-      completionTokens
-    }
+    throw emptyOutput(first.finishReason, first.reasoningLength, maxTokens)
   } catch (error: any) {
     if (error instanceof AiActionError) throw error
 
@@ -130,4 +86,81 @@ export const callGLM = async (
     const code = status === 429 ? "RATE_LIMIT_EXCEEDED" : "GLM_ERROR"
     throw new AiActionError(status, message, code, error.response?.data || error)
   }
+}
+
+/** Trần ngân sách khi nới: đủ cho lô C-4 lớn, vẫn chặn trường hợp model quay vòng vô tận. */
+export const GLM_MAX_TOKENS_CEILING = 24576
+
+const emptyOutput = (finishReason: string | null, reasoningLength: number, maxTokens: number, firstTry?: number): AiActionError =>
+  new AiActionError(
+    502,
+    `GLM không trả nội dung (finish_reason=${finishReason ?? "?"}, suy nghĩ ${reasoningLength} ký tự, max_tokens=${maxTokens}${
+      firstTry ? `, đã thử ${firstTry} trước đó` : ""
+    })`,
+    "GLM_EMPTY_OUTPUT"
+  )
+
+interface StreamResult {
+  answer: string
+  finishReason: string | null
+  reasoningLength: number
+  response: LLMResponse
+}
+
+const streamOnce = async (
+  client: OpenAI,
+  model: string,
+  prompt: string,
+  temperature: number,
+  maxTokens: number,
+  signal?: AbortSignal
+): Promise<StreamResult> => {
+  const stream = (await client.chat.completions.create({
+    model,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ],
+    temperature,
+    max_tokens: maxTokens,
+    top_p: 0.9,
+    stream: true,
+    ...GLM_REQUEST_OPTIONS
+  } as OpenAI.ChatCompletionCreateParamsStreaming,
+  // Client đóng kết nối (reload trang) ⇒ bỏ luôn lượt gọi, không chờ model trả hết rồi mới nhả khoá step
+  signal ? { signal } : undefined)) as AsyncIterable<OpenAI.ChatCompletionChunk>
+
+  let text = ""
+  let reasoningLength = 0
+  let finishReason: string | null = null
+  let promptTokens = 0
+  let completionTokens = 0
+
+  for await (const chunk of stream) {
+    // Huỷ lượt chạy step ⇒ dừng ngay vòng đọc, không chờ model trả hết (FLF-177 BUG-05).
+    if (signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
+    const choice = chunk.choices?.[0]
+    const delta = choice?.delta?.content
+    if (delta) {
+      text += delta
+    }
+    reasoningLength += ((choice?.delta as { reasoning_content?: string } | undefined)?.reasoning_content ?? "").length
+    if (choice?.finish_reason) finishReason = choice.finish_reason
+    if ((chunk as any).usage) {
+      promptTokens = (chunk as any).usage.prompt_tokens || promptTokens
+      completionTokens = (chunk as any).usage.completion_tokens || completionTokens
+    }
+  }
+
+  if (!promptTokens) {
+    promptTokens = Math.ceil(prompt.length / 4)
+  }
+  if (!completionTokens) {
+    completionTokens = Math.ceil(text.length / 4)
+  }
+
+  const answer = stripReasoning(text).trim()
+  return { answer, finishReason, reasoningLength, response: { text: answer, promptTokens, completionTokens } }
 }

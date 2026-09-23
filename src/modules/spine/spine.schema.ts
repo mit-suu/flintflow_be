@@ -75,7 +75,10 @@ export const actorSchema = z.strictObject({
   id,
   name: z.string(),
   kind: z.enum(["human", "system", "time"]),
-  description: z.string()
+  description: z.string(),
+  /** Nhãn luồng dữ liệu cho §1 context diagram; vắng cả hai ⇒ cạnh lấy tên use case. */
+  flows_in: z.array(z.string()).optional(),
+  flows_out: z.array(z.string()).optional()
 })
 
 export const roleSchema = z.strictObject({

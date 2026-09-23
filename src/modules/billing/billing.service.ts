@@ -6,6 +6,7 @@ import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
+import { resumeAfterTopUp } from "../import/credit-flow.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
@@ -251,6 +252,8 @@ const settleIntent = async (
       link: "/home/billing",
       meta: { intentId, credits: intent.credits, amount: intent.amount }
     })
+    // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (nền, không chặn webhook)
+    void resumeAfterTopUp(userId).catch((err) => console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err))
   } else {
     await notify(userId, {
       type: "payment_failed",

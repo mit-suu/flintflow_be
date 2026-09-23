@@ -24,13 +24,25 @@ export const MODE1_ERROR_STATUS = {
   /** FLF-186: phần tử Spine đang được CR khác giữ khoá (thay `BLOCK_LOCKED` theo block docx). */
   PATH_LOCKED: 409,
   CR_LOCATION_UNCONCLUDED: 409,
+  /** C-3 không tìm được phần tử Spine nào (mô tả CR không trỏ vào phần tử / mục nào điền được). */
+  CR_NO_LOCATIONS: 409,
+  /** Nộp mà mọi vị trí đều `not_related` ⇒ không có group nào để duyệt; cho qua thì CR kẹt ở `in_review`. */
+  CR_NOTHING_TO_APPROVE: 409,
+  /** 3.9 sửa trong step sở hữu: vị trí thuộc mục riêng (`custom:*`), không có step sở hữu. */
+  CR_NO_OWNER_STEP: 409,
   /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
   CR_VALUE_CHANGED: 409,
   CHANGE_REQUIRES_CR: 409,
   /** FLF-182: tắt step của đầu mục mẫu FPT (cốt lõi) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
+  /** Mode 1 v3 (BPMN Flow 1): không chạy step / gate / bật-tắt step, không ký baseline v1, không waive cờ. */
+  MODE1_NO_STEPS: 409,
+  MODE1_NO_SIGNOFF: 409,
+  MODE1_NO_WAIVE: 409,
   IMPORT_FILE_REJECTED: 422,
   IMPORT_STAMP_FOREIGN_PROJECT: 422,
+  /** Mode 1 v3 (BPMN 1.4 chỉ cho file có stamp của project): re-upload file không stamp. */
+  IMPORT_REUPLOAD_NO_STAMP: 422,
   RELEASE_RED_FLAGS_OPEN: 422
 } as const
 
