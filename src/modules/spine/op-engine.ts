@@ -40,6 +40,8 @@ import {
 import { PathError, isRecord, parentArrayPath, parsePath, resolve, selectorFor, formatPath, tryResolve } from "./path-resolver.js"
 import { checkInvariants } from "./invariants.js"
 import { RemovedIds, planCascade, planFeatureRenumber, planScreenQueueAppend } from "./cascade.js"
+import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
+import { withElementDefaults } from "./element-defaults.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -77,6 +79,8 @@ interface WorkState {
    * nội dung không phải là xoá từng phần tử.
    */
   baseline: Spine | null
+  /** Id tạm (`$new1`) → id server đã cấp trong lô này (WP-2). */
+  placeholders: Map<string, string>
 }
 
 const opError = (rule: RejectRule, path: string, message: string): PathError => new PathError(rule, path, message)
@@ -105,6 +109,7 @@ const applySet = (state: WorkState, op: Op): void => {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${target.key}" của phần tử: "${op.path}"`)
     }
     if (isEntityArray(target.value) || isEntityArray(op.value)) {
+      if (expandEntityArraySet(state, op, target.value)) return
       throw opError("op_not_allowed", op.path, `Mảng phần tử có id phải sửa bằng add/remove từng phần tử: "${op.path}"`)
     }
     const before = target.exists ? clone(target.value) : ABSENT
@@ -119,7 +124,7 @@ const applySet = (state: WorkState, op: Op): void => {
   if (!isRecord(element) || !isRecord(op.value)) {
     throw opError("op_not_allowed", op.path, `Op set trên phần tử vô hướng không được hỗ trợ — dùng remove + add: "${op.path}"`)
   }
-  const next = op.value
+  const next = withElementDefaults(lastKey(op.path), op.value) as Record<string, unknown>
   for (const key of target.lockedKeys) {
     if (String(next[key]) !== String(element[key])) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${key}" của phần tử: "${op.path}"`)
@@ -137,6 +142,58 @@ const applySet = (state: WorkState, op: Op): void => {
   state.drafts.push({ op: op.op, path: target.canonical, before: clone(element), value: clone(next), reason: reasonOf(op) })
 }
 
+/**
+ * WP-2: phần tử thêm vào collection có id mà thiếu `id` hoặc mang id tạm (`$new1`) ⇒ server cấp id kế tiếp.
+ * Id tạm được ghi vào `state.placeholders` để các op sau trong lô tham chiếu tới nó được thay bằng id thật.
+ */
+const withAllocatedId = (state: WorkState, path: string, value: unknown): unknown => {
+  if (!isRecord(value)) return value
+  const segments = parsePath(path)
+  const collection = segments[segments.length - 1].key
+  const nested = segments.length === 2 && collection === "validations"
+  if (!allocatesIds(collection) || (segments.length !== 1 && !nested)) return value
+
+  const current = value.id
+  const missing = current === undefined || current === null || current === ""
+  if (!missing && !isPlaceholderId(current)) return value
+
+  const parent = nested ? segments[0].selector : undefined
+  const parentId = parent?.kind === "match" ? (parent.pairs.find(([k]) => k === "id")?.[1] ?? null) : null
+  const id = allocateId(state.spine, collection, parentId)
+  if (id === null) return value
+  if (isPlaceholderId(current)) state.placeholders.set(current, id)
+  return { ...value, id }
+}
+
+/**
+ * `set` cả một mảng phần tử có id LỒNG trong một phần tử (vd `functions[id=FN001].validations`) ⇒ tách
+ * thành remove/set/add từng phần tử (BUG-08: sửa validations qua edit tool bị `op_not_allowed`). Mảng
+ * cấp gốc (`set actors [...]`) KHÔNG được tách: một lô thiếu vài phần tử sẽ xoá hàng loạt — vẫn từ chối.
+ * Trả `false` khi không tách được (để caller báo lỗi như cũ).
+ */
+const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boolean => {
+  const segments = parsePath(op.path)
+  if (segments.length < 2 || !Array.isArray(current) || !Array.isArray(op.value)) return false
+  if (!current.every((el) => isRecord(el) && typeof el.id === "string")) return false
+  if (!op.value.every(isRecord)) return false
+
+  const wanted = op.value as Record<string, unknown>[]
+  const wantedIds = new Set(wanted.map((el) => el.id).filter((id): id is string => typeof id === "string" && !isPlaceholderId(id)))
+  const existing = current as Record<string, unknown>[]
+  const reason = op.reason === undefined ? {} : { reason: op.reason }
+
+  for (const el of existing) {
+    if (!wantedIds.has(el.id as string)) applyRemove(state, { op: "remove", path: `${op.path}[id=${String(el.id)}]`, ...reason })
+  }
+  for (const el of wanted) {
+    const id = el.id
+    const known = typeof id === "string" && existing.some((x) => x.id === id)
+    if (known) applySet(state, { op: "set", path: `${op.path}[id=${id}]`, value: el, ...reason })
+    else applyAdd(state, { op: "add", path: `${op.path}[]`, value: el, ...reason })
+  }
+  return true
+}
+
 const applyAdd = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op add thiếu value: "${op.path}"`)
   const target = resolve(state.spine, op.path)
@@ -144,11 +201,15 @@ const applyAdd = (state: WorkState, op: Op): void => {
     throw opError("op_not_allowed", op.path, `Op add phải nhắm mảng dạng "arr[]": "${op.path}"`)
   }
 
-  const value = op.value
+  const value = withAllocatedId(state, op.path, isRecord(op.value) ? withElementDefaults(lastKey(op.path), op.value) : op.value)
   const selector = selectorFor(value)
   if (isRecord(value)) {
     if (typeof value.id === "string" && target.parent.some((el) => isRecord(el) && el.id === value.id)) {
-      throw opError("duplicate_id", op.path, `Phần tử id "${value.id}" đã tồn tại trong "${op.path}"`)
+      throw opError(
+        "duplicate_id",
+        op.path,
+        `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" — muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
+      )
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)
@@ -272,17 +333,35 @@ export interface PlanOptions {
 export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOptions): PlanResult & { txn: string } => {
   const txnId = txn.txn ?? randomUUID()
   const before = clone(spine)
-  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null }
+  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map() }
 
-  const run = (op: Op, index?: number) => {
+  const run = (raw: Op, index?: number) => {
+    // Id tạm đã cấp ở op trước trong lô ⇒ thay bằng id thật trong path và value
+    const op: Op =
+      state.placeholders.size === 0
+        ? raw
+        : { ...raw, path: substitutePlaceholders(raw.path, state.placeholders), ...(raw.value === undefined ? {} : { value: substituteDeep(raw.value, state.placeholders) }) }
+    const draftsBefore = state.drafts.length
     try {
       applyOp(state, op)
-      state.ops.push(op)
+      // Op add được cấp id: lưu bản mang id thật (preview hiện đúng id, lô ghi lại tái lập được)
+      const added = op.op === "add" && state.drafts.length > draftsBefore ? state.drafts[state.drafts.length - 1].value : undefined
+      const allocated = isRecord(op.value) && isRecord(added) && added.id !== op.value.id
+      state.ops.push(allocated ? { ...op, value: clone(added) } : op)
     } catch (err) {
-      if (!(err instanceof PathError)) throw err
-      throw new TransactionRejectedError(OP_INVALID, [
-        { rule: err.rule, path: err.path, message: err.message, ...(index === undefined ? {} : { op_index: index }) }
-      ])
+      if (err instanceof PathError) {
+        throw new TransactionRejectedError(OP_INVALID, [
+          { rule: err.rule, path: err.path, message: err.message, ...(index === undefined ? {} : { op_index: index }) }
+        ])
+      }
+      // BUG-04: phần tử sai hình (thiếu mảng…) làm code áp op ném TypeError ⇒ lỗi validate cho model sửa,
+      // không phải 501.
+      if (err instanceof TypeError) {
+        throw new TransactionRejectedError(OP_INVALID, [
+          { rule: "schema_invalid", path: op.path, message: `Op ${op.op} "${op.path}" sai hình dữ liệu: ${err.message}`, ...(index === undefined ? {} : { op_index: index }) }
+        ])
+      }
+      throw err
     }
   }
 
@@ -290,17 +369,24 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
 
   // cascade tới điểm bất động
   const referrers = new Map<string, Referrer>()
-  for (let round = 0; ; round++) {
-    if (round >= MAX_CASCADE_ROUNDS) throw new Error(`Cascade không hội tụ sau ${MAX_CASCADE_ROUNDS} vòng`)
-    const plan = planCascade(state.spine, state.removed)
-    for (const r of plan.referrers) referrers.set(r.path, r)
-    if (plan.ops.length === 0) break
-    for (const op of plan.ops) run(op)
+  let invariantViolations: Violation[]
+  try {
+    for (let round = 0; ; round++) {
+      if (round >= MAX_CASCADE_ROUNDS) throw new Error(`Cascade không hội tụ sau ${MAX_CASCADE_ROUNDS} vòng`)
+      const plan = planCascade(state.spine, state.removed)
+      for (const r of plan.referrers) referrers.set(r.path, r)
+      if (plan.ops.length === 0) break
+      for (const op of plan.ops) run(op)
+    }
+    for (const op of planFeatureRenumber(state.spine, state.removed)) run(op)
+    for (const op of planScreenQueueAppend(state.spine, before)) run(op)
+    invariantViolations = checkInvariants(state.spine, state.baseline ?? before)
+  } catch (err) {
+    // BUG-04 (lớp phòng thủ): dữ liệu sai hình lọt tới cascade/bất biến ⇒ schema báo lỗi cho model, không 501
+    if (!(err instanceof TypeError)) throw err
+    const schemaErrors = schemaViolations(state.spine)
+    throw new TransactionRejectedError(OP_INVALID, schemaErrors.length > 0 ? schemaErrors : [{ rule: "schema_invalid", message: `Dữ liệu sai hình: ${err.message}` }])
   }
-  for (const op of planFeatureRenumber(state.spine, state.removed)) run(op)
-  for (const op of planScreenQueueAppend(state.spine, before)) run(op)
-
-  const invariantViolations = checkInvariants(state.spine, state.baseline ?? before)
   if (invariantViolations.length > 0) {
     throw new TransactionRejectedError(INVARIANT_VIOLATION, invariantViolations, [...referrers.values()])
   }
@@ -405,7 +491,7 @@ export interface RevertOptions {
 /** Revert thuần: áp nghịch đảo `changes` theo thứ tự seq giảm dần, kiểm bất biến cuối lô. */
 export const planRevert = (spine: Spine, changes: Change[], options: RevertOptions): PlanResult & { txn: string } => {
   const before = clone(spine)
-  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null }
+  const state: WorkState = { spine: clone(spine), removed: new RemovedIds(), ops: [], drafts: [], baseline: null, placeholders: new Map() }
   const ordered = [...changes].sort((a, b) => b.seq - a.seq)
 
   for (const change of ordered) {

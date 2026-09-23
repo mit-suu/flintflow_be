@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { isWritablePath, validateOps } from "./op-validator.js"
+import { isWritablePath, normalizeSelectorPath, sanitizeModelOps, validateOps } from "./op-validator.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -41,5 +41,37 @@ describe("validateOps", () => {
     expect(isWritablePath("actors[id=A01]", ["actors"])).toBe(true)
     expect(isWritablePath("actors_extra", ["actors"])).toBe(false)
     expect(isWritablePath("progress.screen_queue[]", ["progress"])).toBe(true)
+  })
+})
+
+describe("sanitizeModelOps — path của giả định", () => {
+  it("selector thiếu tên khoá được chuẩn hoá thay vì làm hỏng cả lô", () => {
+    expect(normalizeSelectorPath("addendum[AD8]")).toBe("addendum[id=AD8]")
+    expect(normalizeSelectorPath("nfrs[N03].threshold")).toBe("nfrs[id=N03].threshold")
+    // Path đã đúng, path gốc và giá trị không phải chuỗi thì giữ nguyên
+    expect(normalizeSelectorPath("actors[id=A01].name")).toBe("actors[id=A01].name")
+    expect(normalizeSelectorPath("project.vision")).toBe("project.vision")
+    expect(normalizeSelectorPath(42)).toBe(42)
+  })
+
+  it("add assumptions[] với path viết tắt ⇒ áp được, không còn dead_reference", () => {
+    const raw = [
+      {
+        op: "add",
+        path: "assumptions[]",
+        value: {
+          path: `addendum[${FIXTURE.addendum[0].id}]`,
+          statement: "Giả định demo",
+          rationale: "Vì user chưa nói rõ",
+          origin_step_id: "B-1.2",
+          status: "unconfirmed",
+          confirmed_at: null
+        }
+      }
+    ]
+    const sanitized = sanitizeModelOps(FIXTURE, raw, "B-1.2")
+    expect(sanitized.errors).toEqual([])
+    expect((sanitized.ops[0] as { value: { path: string } }).value.path).toBe(`addendum[id=${FIXTURE.addendum[0].id}]`)
+    expect(validateOps(FIXTURE, sanitized.ops, { writable: ["assumptions"] })).toEqual([])
   })
 })

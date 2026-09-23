@@ -7,7 +7,7 @@
     {
       "op": "set",
       "path": "use_cases[id=UC05].name",
-      "value": "Manage Project Portfolio",
+      "value": "Browse Project Portfolio",
       "reason": "User requested a clearer use case name."
     }
   ]
