@@ -59,6 +59,19 @@ export type MentionEntity = (typeof MENTION_ENTITIES)[number]
 export const MAPPING_CONFIDENCE_THRESHOLD = 0.8
 export const FIELD_CONFIDENCE_THRESHOLD = 0.7
 
+/**
+ * Nguồn của field trích: `deterministic` = bảng khớp đủ cột (G7), `ai` = chữ, `vision` = đọc từ ảnh diagram
+ * (mode 1 v3 phase 5 — Gemini).
+ */
+export const FIELD_ORIGINS = ["deterministic", "ai", "vision"] as const
+export type FieldOrigin = (typeof FIELD_ORIGINS)[number]
+
+/** Field phải qua màn 1.9: độ tin < 0.7, hoặc đọc từ ảnh (độ tin ảnh ≤ 0.7 — luôn để người dùng xác nhận). */
+export const needsConfirm = (f: { confidence: number; origin?: string }): boolean => f.confidence < FIELD_CONFIDENCE_THRESHOLD || f.origin === "vision"
+
+/** Trần độ tin của thực thể đọc từ ảnh. */
+export const VISION_CONFIDENCE_CAP = 0.7
+
 export const EXTRACTION_STATUSES = ["pending", "done", "failed"] as const
 export type ExtractionStatus = (typeof EXTRACTION_STATUSES)[number]
 

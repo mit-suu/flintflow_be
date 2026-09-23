@@ -94,6 +94,27 @@ describe("C-4 kết luận mọi vị trí", () => {
     warn.mockRestore()
   })
 
+  it("lô nhiều vị trí lỗi (model đốt hết ngân sách) ⇒ chia đôi gọi lại từng nửa, CR không bị dừng", async () => {
+    const { c } = await importedProject()
+    const { cr } = await crToImpact(c)
+    // Dựng một lô 2 vị trí: kéo vị trí BR sang cùng owner step với NFR (chỉ để test cách chia lô)
+    await ChangeLocation.updateOne({ path: BR }, { $set: { owner_step: "S-6.4" } })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    routeCr((p) => {
+      if (!p.includes("# CR Propose")) return clarifyPerf(p)
+      return promptLocations(p).length > 1 ? new Error("GLM không trả nội dung (finish_reason=length, max_tokens=10240)") : fakeCrPropose(p)
+    })
+
+    const d = detail(await c.post(`${cr}/propose`))
+
+    expect(d.change_request.paused).toBeNull()
+    expect(d.locations.every((l) => l.conclusion !== null)).toBe(true)
+    const sizes = promptsOf("# CR Propose").map((p) => promptLocations(p).length)
+    expect(sizes).toEqual([2, 1, 1]) // lô đầy đủ hỏng ⇒ hai nửa, mỗi nửa một vị trí
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("chia đôi và thử lại"))
+    warn.mockRestore()
+  })
+
   it("lượt bù trả đủ ⇒ mọi vị trí có kết luận", async () => {
     let first = true
     routeCr((p) => {
@@ -152,6 +173,22 @@ describe("C-4 kết luận mọi vị trí", () => {
     expect(after.status).toBe("ready_to_submit")
     expect(after.submitted_at).toBeNull()
     await expect(submitCr(after)).rejects.toMatchObject({ code: "CR_LOCATION_UNCONCLUDED" })
+  })
+
+  it("mọi vị trí not_related ⇒ 409 CR_NOTHING_TO_APPROVE, không nộp (nếu cho qua thì CR kẹt ở in_review, 0 group để duyệt)", async () => {
+    const { c, projectId } = await importedProject()
+    const { crId, cr } = await crToReady(c)
+    await ChangeLocation.updateMany({ projectId, cr_id: crId }, { $set: { conclusion: "not_related", reason: "Không liên quan" } })
+    const res = await c.post(`${cr}/submit`)
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("CR_NOTHING_TO_APPROVE")
+    const after = await crDoc(projectId, crId)
+    expect(after.status).toBe("ready_to_submit")
+    expect(after.submitted_at).toBeNull()
+
+    // còn ít nhất một vị trí có sửa ⇒ nộp được như thường
+    await ChangeLocation.updateOne({ projectId, cr_id: crId, location_id: "L001" }, { $set: { conclusion: "comment" } })
+    expect(detail(await c.post(`${cr}/submit`)).change_request.status).toBe("in_review")
   })
 })
 

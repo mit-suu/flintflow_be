@@ -303,6 +303,16 @@ describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
     expect(actors.length).toBeGreaterThan(0)
     expect(Object.keys(actors[0])).toEqual(["id", "label"])
   })
+
+  it("FLF-200 (BUG-08): luôn kèm danh sách id đang tồn tại để model không đoán id", () => {
+    const focused = buildChangeProjection(FIXTURE, "Đổi tên actor A01 thành Product Owner")
+    const ids = focused.existing_ids as Record<string, string[]>
+    expect(ids.use_cases).toEqual(FIXTURE.use_cases.map((u) => u.id))
+    expect(ids.actors).toContain("A01")
+
+    const broad = buildChangeProjection(FIXTURE, "làm cho tài liệu hay hơn")
+    expect((broad.existing_ids as Record<string, string[]>).screens).toContain("S01")
+  })
 })
 
 // ─── apply ───────────────────────────────────────────────────────

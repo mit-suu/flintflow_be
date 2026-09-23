@@ -24,6 +24,8 @@ export enum ActionType {
   // ─── Mode 1: import SRS có sẵn + change request (FLF-171, plan mode 1 §5.7) ───
   /** I-4 (nút 1.8): trích field Spine từ text block của một section (hoặc lô section nhỏ). */
   IMPORT_EXTRACT_FIELDS = "import_extract_fields",
+  /** I-4 phần ảnh (mode 1 v3 phase 5): đọc một ảnh diagram của section (Gemini vision) ⇒ loại diagram + thực thể. */
+  IMPORT_EXTRACT_DIAGRAM = "import_extract_diagram",
   /** Nút 1.11: kiểm ngữ nghĩa tài liệu vừa import — chỉ ra cờ vàng. */
   IMPORT_SEMANTIC_CHECK = "import_semantic_check",
   /** C-2 (nút 3.2): làm rõ CR, trả câu hỏi hoặc đích (entity path, từ khoá) cho C-3. */
@@ -52,6 +54,7 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.RECONCILE]: "apply-change-op",
   [ActionType.CHANGE_INSTRUCTION]: "apply-change-op",
   [ActionType.IMPORT_EXTRACT_FIELDS]: "import-extract",
+  [ActionType.IMPORT_EXTRACT_DIAGRAM]: "import-extract-diagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "import-semantic-check",
   [ActionType.CR_CLARIFY]: "cr-clarify",
   [ActionType.CR_PROPOSE]: "cr-propose",

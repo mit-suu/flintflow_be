@@ -24,19 +24,23 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     patch: (suffix: string, body: object) => request(app).patch(`${base}${suffix}`).set(auth).send(body),
     spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
     /**
-     * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi poll `GET /import` tới khi hết `extracting`
-     * hoặc bị `paused`. `run` có hình `extractResponseSchema` (import + sections) ở thời điểm dừng poll.
+     * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi **chờ đúng job** của import đó
+     * (`waitForExtraction`) thay vì chờ theo đồng hồ — máy tải nặng (chạy cả suite song song) không còn làm test
+     * trượt vì hết hạn poll. Job chạy xong / dừng mới đọc `GET /import`; poll chỉ còn là lưới an toàn cho trường
+     * hợp job không nằm trong tiến trình này. `run` có hình `extractResponseSchema` (import + sections).
      */
-    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 25_000) => {
+    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 60_000) => {
       const res = await request(app).post(`${base}${path}`).set(auth).send({ import_id: importId })
       if (res.status !== 200) return { res, run: null }
+      const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
+      await waitForExtraction(importId)
       const deadline = Date.now() + timeoutMs
-      while (Date.now() < deadline) {
+      for (;;) {
         const view = (await request(app).get(`${base}/import`).set(auth)).body.data
         if (view.import.status !== "extracting" || view.import.paused) return { res, run: { import: view.import, sections: view.extraction.sections } }
+        if (Date.now() >= deadline) throw new Error("I-4 chạy nền quá lâu")
         await new Promise((r) => setTimeout(r, 25))
       }
-      throw new Error("I-4 chạy nền quá lâu")
     }
   }
 }
@@ -76,7 +80,25 @@ export const fakeSemanticCheck = (prompt: string): string | undefined => {
   return JSON.stringify({ findings: [{ rule: "ambiguity", section_id: "fixed:4.2.3", message: "\"95% of requests\" needs a load profile.", block_ids: [b] }] })
 }
 
-export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeSemanticCheck(prompt)
+/**
+ * I-4 phần ảnh (phase 5): mặc định ảnh không phải diagram đọc được (`other`). Ảnh có chú thích chứa "USECASE-IMG" ⇒
+ * use case diagram: actor "Guest" mới + UC-02 (đã có từ chữ) thêm actor Guest.
+ */
+export const fakeDiagram = (prompt: string): string | undefined => {
+  if (!prompt.includes("# Read Diagram Image")) return undefined
+  const section = /Section \(registry id\): (\S+)/.exec(prompt)?.[1] ?? "fixed:1"
+  const b = /Image block: \[(B\d{4,})\]/.exec(prompt)?.[1] ?? "B0001"
+  if (!prompt.includes("USECASE-IMG")) return JSON.stringify({ section_id: section, diagram_kind: "other", items: [], unmapped_block_ids: [] })
+  const item = (entity: string, key: string | null, value: object, confidence: number) => ({ entity, key, value, confidence, field_confidence: {}, source_block_ids: [b] })
+  return JSON.stringify({
+    section_id: section,
+    diagram_kind: "usecase",
+    items: [item("actors", null, { name: "Guest", kind: "human" }, 0.95), item("use_cases", "UC-02", { name: "Log in", actor_ids: ["Learner", "Guest"] }, 0.6)],
+    unmapped_block_ids: []
+  })
+}
+
+export const fakeMode1 = (prompt: string): string | undefined => fakeImportExtract(prompt) ?? fakeDiagram(prompt) ?? fakeSemanticCheck(prompt)
 
 // ─── change request ─────────────────────────────────────────────
 

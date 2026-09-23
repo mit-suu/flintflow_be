@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto"
 import type { Diagram, Spine } from "./spine.types.js"
 import { screenActorMap } from "./screen-actors.js"
+import { systemName } from "./system-name.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -19,11 +20,14 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
   switch (diagram.kind) {
     case "context":
       return {
-        project: { name: spine.project.name },
+        project: { name: systemName(spine.project) },
         actors: byId(spine.actors.filter((a) => a.kind !== "human")).map(({ id, name }) => ({ id, name }))
       }
     case "usecase":
       return {
+        // Boundary vẽ `system_name ?? project.name` nhưng chỉ hash khi đã đặt `system_name` (undefined bị bỏ khỏi
+        // chuỗi hash) — hình cũ không bị `diagram_stale` hàng loạt; đổi `project.name` vẫn không làm hình cũ như trước.
+        system_name: spine.project.system_name?.trim() || undefined,
         actors: byId(spine.actors).map(({ id, name, kind }) => ({ id, name, kind })),
         use_cases: byId(spine.use_cases).map(({ id, name, actor_ids, includes, extends: ext }) => ({
           id,

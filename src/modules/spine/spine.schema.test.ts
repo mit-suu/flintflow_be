@@ -199,6 +199,25 @@ describe("spineSchema", () => {
   })
 })
 
+describe("project.system_name (FLF-177)", () => {
+  it("Spine cũ không có system_name ⇒ đọc ra null; có tên ⇒ giữ nguyên", () => {
+    const legacy = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete legacy.project.system_name
+    expect(spineSchema.parse(legacy).project.system_name).toBeNull()
+
+    const named = createEmptySpine({ name: "Old" })
+    named.project.system_name = "ShipFast"
+    expect(spineSchema.parse(named).project.system_name).toBe("ShipFast")
+  })
+
+  it("snapshot baseline cũ thiếu system_name vẫn parse được", () => {
+    const snapshot = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete snapshot.project.system_name
+    const parsed = baselineSnapshotSchema.parse({ projectId: "650000000000000000000001", version: "v1.0", at: AT, checked_at_version: 1, waived_count: 0, snapshot })
+    expect(parsed.snapshot.project.system_name).toBeNull()
+  })
+})
+
 describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1)", () => {
   const legacy = { id: "B1", version: "v1.0", at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 0 }
 

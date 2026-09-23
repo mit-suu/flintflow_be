@@ -23,11 +23,20 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
     // SRS tiếng Việt là hợp lệ ở mode 1
     "non_english_content",
     // tài liệu hiếm liên kết UC ↔ function
-    "usecase_no_function"
+    "usecase_no_function",
+    // U1/U4/U5/U6 gắn chính tả tiếng Anh ⇒ bắn gần như mọi use case của một SRS tiếng Việt,
+    // vốn hợp lệ ở mode 1. Luật ngữ nghĩa (usecase_name_semantic) vẫn chạy.
+    "usecase_name_style",
+    // tên hệ thống lấy từ bìa tài liệu khách — không đòi chốt tên tiếng Anh riêng
+    "system_name_missing"
   ]),
-  downgrade: new Set(["nfr_missing_number"])
+  // `release.service.ts` lọc cờ đỏ KHÔNG trừ `waived_by_user`, nên để nguyên đỏ thì một SRS nhập
+  // có vòng include/extend sẽ không bao giờ release được và waive cũng vô ích.
+  downgrade: new Set(["nfr_missing_number", "usecase_relation_invalid"])
 })
 
 /** Rule id của cờ vàng do AI đặt ở mode 1 (không bị recompute tất định đóng — `MODEL_OWNED_RULES`). */
 export const IMPORT_SEMANTIC_RULE = "import_semantic"
+/** Mode 1 v3 phase 5: ảnh ở mục diagram không đọc được thành dữ liệu (loại khác / EMF…) — giữ ảnh gốc, cờ vàng. */
+export const IMPORT_IMAGE_RULE = "import_image_unread"
 export const CR_CONSISTENCY_RULE = "cr_consistency"

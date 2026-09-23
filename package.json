@@ -23,9 +23,12 @@
     "test:watch": "vitest",
     "seed:fixture": "tsx src/scripts/seed-fixture.ts",
     "migrate:sections": "tsx src/scripts/migrate-sections-to-spine.ts",
+    "migrate:mode1-v2": "tsx src/scripts/migrate-mode1-v2-indexes.ts",
+    "rerender:usecase": "tsx src/scripts/rerender-usecase-diagrams.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
     "measure:tokens": "tsx src/scripts/measure-tokens.ts",
     "run:pipeline": "tsx src/scripts/run-full-pipeline.ts",
+    "eval:usecase-s3": "tsx src/scripts/eval-usecase-s3.ts",
     "seed:e2e-user": "tsx src/scripts/seed-e2e-user.ts"
   },
   "dependencies": {
