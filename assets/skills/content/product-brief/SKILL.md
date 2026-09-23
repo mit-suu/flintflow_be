@@ -1,7 +1,7 @@
 ---
 skill_id: product-brief
 kind: content
-version: 0.2.0
+version: 0.3.0
 description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize — adapted from BMAD bmad-product-brief"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -44,6 +44,10 @@ Two habits decide whether this phase is useful:
   guidance. Extract, then read back a short summary for confirmation. Write **one `addendum[]` entry per
   distinct topic** right now — `{id, topic, content (user's own words/language), content_en (English,
   for rendering), target_section, captured_at}`. Do not wait for a tidy answer before writing.
+  Also settle **`project.system_name`** — the English product name printed on the diagrams and the
+  document cover, kept apart from the working project name (never change `project.name`). The user gave an
+  English name ⇒ set it. No name, or only a Vietnamese one ⇒ suggest 2–3 short English names (2–4 words,
+  Title Case, no "System"/"App" filler) and set it only once the user picks one.
 - **B-0.2 `project.form_factor`** — where the product lives: `web_app`, `mobile_app`, `desktop_app`,
   `api_service`, `cli`, `embedded`. Ask once; infer from the brain dump when it is obvious.
 - **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. This drives NFR defaults at S-6,
@@ -51,6 +55,17 @@ Two habits decide whether this phase is useful:
 - **B-0.4 `project.working_mode`** — `coaching` (gate every step, ask freely) or `fast` (at most two
   question turns per phase, fill gaps with assumptions). Explain the trade-off in one sentence and let
   the user choose; do not choose silently.
+
+### Write the rule the user actually stated (B-0.1, B-1.x)
+
+A policy sentence has three parts: **the trigger, the window, and the consequence**. Keep them apart, and
+never merge two policies into one rule. Lượt test: "huỷ hoặc đổi lịch sau hạn 2 giờ thì mất cọc" was
+written down as a *no-show* rule — two different triggers (the customer cancelled late vs the customer
+never showed up) collapsed into one, so the document stated a policy nobody agreed to.
+
+When the user gives a number (2 hours, 15 minutes, 50.000đ), it belongs in the rule verbatim. When they
+give a policy you are not sure how to classify, write it with the user's own trigger wording and ask at
+the next turn — do not pick the neighbouring concept because it sounds close.
 
 ## B-1 — The brief (6 steps)
 
@@ -117,7 +132,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## Self-check
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
-- [ ] `project.form_factor`, `stakes`, `working_mode` all set by the end of B-0.
+- [ ] `project.system_name` (English, user-picked), `form_factor`, `stakes`, `working_mode` set by the end of B-0.
 - [ ] `project.vision` + 3–6 outcome-shaped `goals[]` by the end of B-1.1.
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.

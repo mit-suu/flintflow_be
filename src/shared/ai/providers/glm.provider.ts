@@ -139,6 +139,8 @@ const streamOnce = async (
   let completionTokens = 0
 
   for await (const chunk of stream) {
+    // Huỷ lượt chạy step ⇒ dừng ngay vòng đọc, không chờ model trả hết (FLF-177 BUG-05).
+    if (signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
     const choice = chunk.choices?.[0]
     const delta = choice?.delta?.content
     if (delta) {
