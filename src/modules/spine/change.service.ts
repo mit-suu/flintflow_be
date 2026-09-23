@@ -158,6 +158,14 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
   const haystack = instruction.toLowerCase()
   const projection: Record<string, unknown> = {}
   let matched = 0
+  // FLF-200 (BUG-08): model phải thấy id nào ĐANG tồn tại, nếu không nó đoán `UC18`, `UC-REMIND` rồi lô
+  // op chết vì `path_not_resolved` hoặc `duplicate_id`. Id mới thì server cấp — model bỏ trống `id`.
+  const existingIds: Record<string, string[]> = {}
+  for (const collection of TARGET_COLLECTIONS) {
+    const list = spine[collection] as unknown as { id?: unknown }[]
+    if (!Array.isArray(list) || list.length === 0) continue
+    existingIds[collection] = list.map((el) => String(el.id)).slice(0, 200)
+  }
 
   for (const collection of TARGET_COLLECTIONS) {
     const list = spine[collection] as unknown as Record<string, unknown>[]
@@ -173,7 +181,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     matched += hits.length
   }
 
-  if (matched > 0) return projection
+  if (matched > 0) return { ...projection, existing_ids: existingIds }
 
   const index: Record<string, unknown> = {}
   for (const collection of TARGET_COLLECTIONS) {
@@ -181,7 +189,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     if (!Array.isArray(list) || list.length === 0) continue
     index[collection] = list.slice(0, PROJECTION_ELEMENT_LIMIT).map((element) => ({ id: element.id, label: textOf(element) }))
   }
-  return index
+  return { ...index, existing_ids: existingIds }
 }
 
 // ─── nhận diện lệnh sửa trong chat thường ────────────────────────
@@ -341,6 +349,8 @@ export interface ChangePreviewResult extends PreviewResult {
   clarification?: string
   preview_id?: string
   notes?: string
+  /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
+  no_change?: boolean
 }
 
 const rejectedPreview = (baseVersion: number, violations: Violation[], referrers: PreviewResult["referrers"] = []): ChangePreviewResult => ({

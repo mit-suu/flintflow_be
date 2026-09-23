@@ -12,6 +12,17 @@ Sau khi nghe: đọc lại một bản tóm tắt ngắn để user xác nhận,
 tách bạch**. Không gộp cả buổi nói thành một entry — entry to thì S-1 không tách ra được, và B-2.2 không
 triage được từng phần.
 
+## Tên hệ thống — `project.system_name` (FLF-177)
+
+Tên **tiếng Anh** in lên boundary sơ đồ use case, sơ đồ ngữ cảnh và bìa/tiêu đề/tên file docx — tách khỏi
+tên project làm việc (`Project.name` ở FE, không đồng bộ). Hỏi ngay ở B-0.1:
+
+- User đã có tên tiếng Anh ⇒ ghi `set project.system_name`.
+- Chưa có tên, hoặc chỉ có tên tiếng Việt ⇒ gợi ý 2–3 tên tiếng Anh ngắn (2–4 từ, Title Case, không thêm
+  "System"/"App" cho đủ chữ) cho user chọn; chỉ ghi khi user đã chọn.
+- Chưa chốt ⇒ sơ đồ và tài liệu dùng tên project; từ S-2.5 có cờ vàng `system_name_missing`. User đổi sau
+  bằng chat (op `set project.system_name`).
+
 ## Ba trường phân loại (B-0.2 đến B-0.4)
 
 | Field | Giá trị | Ảnh hưởng về sau |

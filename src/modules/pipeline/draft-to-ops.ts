@@ -19,7 +19,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import type { StepContext } from "./context-projection.js"
-import { validateOps, type ValidationError } from "./op-validator.js"
+import { sanitizeModelOps, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -75,6 +75,11 @@ export interface DraftOptions {
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
+  /**
+   * Báo ngay khi bắt đầu mỗi lượt gọi model (03-live-status-flow Lớp 3): lượt 2 trở đi kèm lỗi của lượt
+   * trước để runner nói "AI trả kết quả thiếu dữ liệu, đang thử lại (2/3)".
+   */
+  onAttempt?: (info: { attempt: number; max: number; previousErrors: ValidationError[] }) => void
 }
 
 /** 422 sau khi hết lượt retry — `errors` và `lastOps` để UI hỏi user (không ghi gì vào Spine). */
@@ -120,6 +125,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const spine = options.spine ?? (await loadSpine(projectId, ctx.spine_version))
 
   const guidance = contentGuidance(ctx)
+  // BUG-02: model chỉ được sửa/xoá phần tử nó thấy trong projection (của lô hiện tại, nếu S-5 chia lô)
+  const visibleIds = visibleIdsOf(ctx.projection)
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
   let errors: ValidationError[] = []
@@ -127,6 +134,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   let previousOps: unknown[] | null = null
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    options.onAttempt?.({ attempt, max: maxRetries + 1, previousErrors: errors })
     const promptVariables = {
       step_id: stepId,
       step_name: ctx.label_en,
@@ -154,9 +162,11 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         cost: result.cost,
         logId: result.logId || null
       })
-      ops = result.data.ops
       notes = result.data.notes ?? null
-      errors = validateOps(spine, ops, { writable: ctx.writable, stepId })
+      // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
+      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId)
+      ops = sanitized.ops
+      errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds })
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
