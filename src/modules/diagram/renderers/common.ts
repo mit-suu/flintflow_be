@@ -1,6 +1,7 @@
 /**
  * Tiện ích chung cho 5 renderer (assets/skills/action/plantuml-conventions).
- * Renderer là hàm THUẦN: cùng Spine ⇒ cùng text `.puml` (sắp theo id, không timestamp).
+ * Renderer là hàm THUẦN: cùng Spine ⇒ cùng text `.puml` (thứ tự tất định — mặc định theo id, use case
+ * theo nhóm actor rồi id —, không timestamp).
  */
 
 import type { Diagram, Spine } from "../../spine/spine.types.js"

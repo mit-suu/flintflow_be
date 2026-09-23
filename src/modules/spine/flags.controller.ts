@@ -16,6 +16,7 @@ import * as flagsService from "./flags.service.js"
 import type { SpineRecord } from "./spine.types.js"
 // `current_step` trong `progress` là step tới lượt theo step-registry (tính ở tầng pipeline, không phải con trỏ Spine)
 import { buildPipelineProgressReport } from "../pipeline/pipeline-progress.js"
+import { nextStep } from "../pipeline/step-registry.js"
 import { flagsQuerySchema, recomputeFlagsRequestSchema, waiveRequestSchema } from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
@@ -61,9 +62,15 @@ export const getFlags = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const recomputeFlags = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await context(req)
+  const { projectId, userId, spine } = await context(req)
   const body = parse(recomputeFlagsRequestSchema, req.body ?? {})
-  const result = await flagsService.recompute(projectId, { atBaseline: body.at_baseline ?? false, by: userId })
+  // Không nói rõ thì suy từ chỗ đang đứng: ở S-9 thì các luật baseline PHẢI chạy. Mặc định `false` ở đây
+  // làm nút Recompute không bao giờ đóng được cờ `unconfirmed_assumption` — user xác nhận hết giả định mà
+  // cờ đỏ vẫn y nguyên, không còn đường nào ngoài chạy lại S-9.1.
+  const result = await flagsService.recompute(projectId, {
+    atBaseline: body.at_baseline ?? (nextStep(spine)?.phase === "S-9"),
+    by: userId
+  })
   return sendSuccess(res, 200, result.flags, {
     checked_at_version: result.checked_at_version,
     opened: result.opened,
