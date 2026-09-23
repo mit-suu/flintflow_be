@@ -1,8 +1,9 @@
 /**
- * §1 System Context — source_fields: `project.name` · `actors[kind≠human].name` (srs-spine §7.1).
+ * §1 System Context — source_fields: `project.system_name ?? project.name` · `actors[kind≠human].name` (srs-spine §7.1).
  * Cạnh không có nhãn: nhãn tương tác không thuộc source_fields.
  */
 
+import { systemName } from "../../spine/system-name.js"
 import type { Renderer } from "./common.js"
 import { alias, byId, label, puml } from "./common.js"
 
@@ -13,7 +14,7 @@ export const renderContext: Renderer = (spine) => {
   const body = [
     "skinparam monochrome true",
     "left to right direction",
-    `rectangle "${label(spine.project.name) || "System"}" as ${SYSTEM_ALIAS}`,
+    `rectangle "${label(systemName(spine.project)) || "System"}" as ${SYSTEM_ALIAS}`,
     ...externals.map((a) => `rectangle "${label(a.name)}" as ${alias(a.id)}${a.kind === "time" ? " <<time>>" : " <<system>>"}`),
     ...externals.map((a) => `${SYSTEM_ALIAS} -- ${alias(a.id)}`)
   ]
