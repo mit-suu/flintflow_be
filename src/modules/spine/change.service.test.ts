@@ -183,7 +183,7 @@ describe("preview — diff + impact, không ghi", () => {
     expect(result.changes).toHaveLength(1)
     expect(result.changes[0]).toMatchObject({ path: "actors[id=A01].name", before: "Founder", value: "Product Owner" })
     expect(result.impact?.sections.map((s) => s.id)).toEqual(expect.arrayContaining(["fixed:2.1", "fixed:2.2.2", "fixed:3.1.3"]))
-    expect(result.impact?.diagrams).toEqual(["usecase", "screen_flow"])
+    expect([...(result.impact?.diagrams ?? [])].sort()).toEqual(["context", "screen_flow", "usecase"])
     expect(result.preview_id).toBeTypeOf("string")
 
     // Không ghi gì: version giữ nguyên, changes[] rỗng

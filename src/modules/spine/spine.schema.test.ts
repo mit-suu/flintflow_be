@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, it, expect } from "vitest"
 import {
+  actorSchema,
   baselineSchema,
   baselineSnapshotSchema,
   changeSchema,
@@ -146,6 +147,26 @@ const sampleSpine = (): Spine => {
   s.spine_version = 5
   return s
 }
+
+describe.each([
+  ["thiếu cả hai chiều", undefined, undefined],
+  ["chỉ chiều vào", ["payment result"], undefined],
+  ["cả hai chiều", ["payment result"], ["payment request"]]
+])("actorSchema — flows: %s", (_label, flowsIn, flowsOut) => {
+  it("parse được, giữ nguyên giá trị", () => {
+    const actor = {
+      id: "A01",
+      name: "Payment Gateway",
+      kind: "system" as const,
+      description: "",
+      ...(flowsIn ? { flows_in: flowsIn } : {}),
+      ...(flowsOut ? { flows_out: flowsOut } : {})
+    }
+    const parsed = actorSchema.parse(actor)
+    expect(parsed.flows_in).toEqual(flowsIn)
+    expect(parsed.flows_out).toEqual(flowsOut)
+  })
+})
 
 describe("spineSchema", () => {
   it("Spine rỗng hợp lệ", () => {

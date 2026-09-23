@@ -168,3 +168,95 @@ describe("renderPlantUml chỉ nhận phản hồi ảnh (fetch mock)", () => {
     await expect(probePlantUml()).resolves.toEqual({ ok: true })
   })
 })
+
+// Không cần server: mock `fetch` để dựng đúng các phản hồi khó tạo thật —
+// một server lạ chiếm cổng PlantUML và trả JSON kèm HTTP 200.
+describe("renderPlantUml chỉ nhận phản hồi ảnh (fetch mock)", () => {
+  const fetchMock = vi.fn()
+
+  const response = (status: number, contentType: string, body: string) =>
+    new Response(body, { status, headers: { "Content-Type": contentType } })
+
+  beforeEach(() => {
+    env.PLANTUML_BASE_URL = "http://localhost:8080"
+    fetchMock.mockReset()
+    vi.stubGlobal("fetch", fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("200 application/json ⇒ ném lỗi, không trả buffer rác", async () => {
+    fetchMock.mockImplementation(() => response(200, "application/json", '{"message":"hello"}'))
+
+    await expect(renderPlantUml(VALID)).rejects.toThrow(/không phải PlantUML/)
+    // POST rơi xuống GET rồi mới ném ⇒ cả hai đường đều bị chặn.
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("404 HTML ⇒ lỗi nói rõ cổng bị chiếm, không chỉ 'HTTP 404'", async () => {
+    fetchMock.mockImplementation(() => response(404, "text/html", "<html>Not Found</html>"))
+
+    // Server lạ thường không có route /svg/<enc> ⇒ đây mới là hình dạng hay gặp nhất.
+    await expect(renderPlantUml(VALID)).rejects.toThrow(/không phải PlantUML/)
+  })
+
+  it("content-type viết hoa vẫn được nhận là ảnh", async () => {
+    fetchMock.mockImplementation(() => response(200, "Image/SVG+XML", "<svg/>"))
+
+    await expect(renderPlantUml(VALID)).resolves.toMatchObject({ status: 200 })
+  })
+
+  it("200 image/svg+xml ⇒ trả kết quả bình thường", async () => {
+    fetchMock.mockImplementation(() => response(200, "image/svg+xml", "<svg/>"))
+
+    const result = await renderPlantUml(VALID)
+
+    expect(result.transport).toBe("post")
+    expect(result.status).toBe(200)
+    expect(result.data.toString()).toBe("<svg/>")
+  })
+
+  it("400 kèm ảnh lỗi ⇒ vẫn trả kết quả để compile-check kết luận", async () => {
+    fetchMock.mockImplementation(() => response(400, "image/svg+xml", "<svg>syntax error</svg>"))
+
+    const result = await renderPlantUml(BROKEN)
+
+    expect(result.status).toBe(400)
+    expect(result.data.toString()).toContain("syntax error")
+  })
+
+  it("isPlantUmlReachable = false khi server trả JSON", async () => {
+    fetchMock.mockImplementation(() => response(200, "application/json", "{}"))
+
+    await expect(isPlantUmlReachable()).resolves.toBe(false)
+  })
+
+  it("isPlantUmlReachable = true khi server render ra ảnh", async () => {
+    fetchMock.mockImplementation(() => response(200, "image/svg+xml", "<svg/>"))
+
+    await expect(isPlantUmlReachable()).resolves.toBe(true)
+  })
+
+  // Cảnh báo [startup] cần biết hỏng kiểu gì: "dựng PlantUML lên" là lời khuyên
+  // sai khi cổng đang bị một tiến trình khác chiếm.
+  it("probePlantUml phân biệt cổng bị chiếm với không ai nghe", async () => {
+    fetchMock.mockImplementation(() => response(200, "application/json", "{}"))
+    await expect(probePlantUml()).resolves.toMatchObject({
+      ok: false,
+      reason: "not_plantuml",
+      detail: expect.stringContaining("application/json")
+    })
+
+    fetchMock.mockImplementation(() => Promise.reject(new Error("fetch failed: ECONNREFUSED")))
+    await expect(probePlantUml()).resolves.toMatchObject({
+      ok: false,
+      reason: "unreachable",
+      detail: expect.stringContaining("ECONNREFUSED")
+    })
+
+    fetchMock.mockImplementation(() => response(200, "image/svg+xml", "<svg/>"))
+    await expect(probePlantUml()).resolves.toEqual({ ok: true })
+  })
+})
