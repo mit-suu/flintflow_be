@@ -12,7 +12,9 @@ import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { buildPipelineProgressReport, type PipelineProgressReport } from "./pipeline-progress.js"
-import { isStepLocked, assertRangeOwnedByStep, STEP_NOT_RUNNABLE } from "./step-runner.service.js"
+import { assertRangeOwnedByStep } from "./step-runner.service.js"
+import { STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import { isStepRunning } from "./run-state.service.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -36,9 +38,9 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
   let revertedStep: string | null = null
 
   if (inProgress) {
-    // F2/F4: step đang thật sự chạy dở ở một request khác (cùng tiến trình, khoá in-process của
-    // step-runner) — không phải "đóng tab bỏ dở", KHÔNG được revert nội dung đang được ghi.
-    if (isStepLocked(projectId, inProgress.id)) {
+    // F2/F4: step đang thật sự chạy dở ở một request khác (khoá `step_runs` còn hiệu lực) — không phải
+    // "đóng tab bỏ dở", KHÔNG được revert nội dung đang được ghi.
+    if (await isStepRunning(projectId, inProgress.id)) {
       throw new ApiError(409, `Step ${inProgress.id} đang chạy ở một request khác — không thể resume lúc này`, STEP_NOT_RUNNABLE)
     }
     if (inProgress.first_seq !== null && inProgress.last_seq !== null) {
