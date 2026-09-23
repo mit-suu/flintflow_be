@@ -26,7 +26,6 @@ import {
   submitAnswer,
   requirePipelineSession,
   isPipelineErrorCode,
-  isStepLocked,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   type Emit
@@ -88,6 +87,9 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
     })
   )
 
+  // Khoá lượt chạy nằm ở `step_runs` (FLF-177): mỗi dự án nhiều nhất một lượt sống ⇒ một truy vấn cho cả danh sách.
+  const activeRun = await getActiveRun(projectId)
+
   const steps = defs.map((def) => {
     const state = spine.steps.find((s) => s.id === def.id)
     const stepCounts = counts.get(def.id) ?? { calls_used: 0, regenerate_used: 0 }
@@ -104,7 +106,7 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
       accepted_at: state?.accepted_at ?? null,
-      running: isStepLocked(projectId, def.id)
+      running: activeRun?.step_id === def.id
     }
   })
 
@@ -193,6 +195,11 @@ data: ${JSON.stringify(event)}
     controller,
     headersSent: () => headersSent,
     closed: () => closed,
+    /**
+     * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào (`/phases/:phase/run`
+     * khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo mãi ở trạng thái "đang
+     * chạy". Lỗi trước sự kiện đầu tiên thì KHÔNG gọi hàm này: nó còn phải đi ra response lỗi JSON.
+     */
     /**
      * Đóng luồng khi lượt chạy KẾT THÚC BÌNH THƯỜNG. Chuỗi có thể không phát sự kiện nào
      * (`/phases/:phase/run` khi giai đoạn đã xong) — vẫn phải mở header rồi đóng, nếu không client treo
