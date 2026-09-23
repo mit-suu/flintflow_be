@@ -124,26 +124,30 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 10 hình ok, giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 13 hình ok (usecase tách 2 phần, screen_flow tách 4 actor), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
 
     expect(result.spine_version).toBe(2)
-    expect(result.diagrams).toHaveLength(10)
+    expect(result.diagrams).toHaveLength(13)
     expect(result.diagrams.every((d) => d.render_status === "ok" && d.source_hash.length === 64)).toBe(true)
-    const byKind = Object.fromEntries(result.diagrams.filter((d) => !["screen_layout", "usecase"].includes(d.kind)).map((d) => [d.kind, d.id]))
-    expect(byKind).toEqual({ context: "D01", screen_flow: "D03", erd: "D04" })
+    const byKind = Object.fromEntries(
+      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase"].includes(d.kind)).map((d) => [d.kind, d.id])
+    )
+    expect(byKind).toEqual({ context: "D01", erd: "D04" })
     // Sơ đồ use case tách 2 phần; phần đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
     expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2"])
+    // Một sơ đồ luồng màn cho mỗi actor người (Founder, Business Analyst, Administrator, Guest); phần đầu giữ id cũ
+    expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03", "D03-2", "D03-3", "D03-4"])
     expect(result.diagrams.find((d) => d.owner_id === "S07")?.id).toBe("D05")
     expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D06", "D07", "D08", "D09"])
 
     const spine = (await repo.get(PROJECT))!
-    expect(spine.diagrams).toHaveLength(10)
+    expect(spine.diagrams).toHaveLength(13)
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
-    expect(store.files.size).toBe(20)
+    expect(store.files.size).toBe(26)
     expect((await loadDiagramFile(PROJECT, "D01", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
@@ -163,7 +167,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D04", remediation_step: "S-4.5" }])
   })
 
-  it("đổi tên actor ⇒ hình usecase stale ⇒ render lại chỉ hình đó", async () => {
+  it("đổi tên actor ⇒ hình usecase + luồng màn (tiêu đề theo actor) stale ⇒ render lại chỉ các hình đó", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
@@ -174,9 +178,9 @@ describe("renderAll / renderDiagram qua op engine", () => {
     await applyTransaction(PROJECT, { base_version: spine.spine_version, ops: [{ op: "set", path: `actors[id=${actor.id}].name`, value: "Renamed" }], by: USER })
 
     const stale = staleDiagrams((await repo.get(PROJECT))!).map((d) => d.kind)
-    expect(stale).toEqual(["usecase", "usecase"])
+    expect([...new Set(stale)].sort()).toEqual(["screen_flow", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
-    expect(result.rendered).toEqual(["D02", "D02-2"])
+    expect([...result.rendered].sort()).toEqual(["D02", "D02-2", "D03", "D03-2", "D03-3", "D03-4"])
   })
 
   it("usecase vượt 20 ⇒ tách D02, D02-2…, phần đầu giữ id cũ", async () => {
@@ -247,7 +251,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
     const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
-    expect(forced.rendered).toHaveLength(10)
+    expect(forced.rendered).toHaveLength(13)
     expect(forced.spine_version).toBe(2)
   })
 

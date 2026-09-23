@@ -1,7 +1,7 @@
 /**
  * deterministic-check.ts
  * ─────────────────────────────────────────────────────────────────
- * 11 luật cờ đỏ (srs-spine.md §7) + 12 luật vàng (cardinality §8.1, quan hệ và đặt tên use case, tên hệ thống).
+ * 12 luật cờ đỏ (srs-spine.md §7) + 12 luật vàng (cardinality §8.1, quan hệ và đặt tên use case, tên hệ thống).
  * Hàm thuần trên đồ thị khoá, KHÔNG gọi model. Chỉ cờ đỏ chặn `baselines[]`.
  *
  * Mọi cờ đỏ có `remediation_step` thi hành được. Mọi `section_id` là khoá section phân giải
@@ -14,6 +14,7 @@ import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit }
 import { tryResolve } from "./path-resolver.js"
 import { loopKeyOfFunction, ownerStepOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
+import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
 
 export interface RuleDef {
@@ -39,10 +40,11 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("section_stale_at_baseline", "red", true, true),
   rule("section_awaiting_reaccept", "red", true, true),
   rule("screen_pending_at_baseline", "red", true, true),
-
+  rule("orphan_screen_at_baseline", "red", true, true),
   rule("orphan_actor", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
+  rule("orphan_screen", "yellow", true),
   rule("empty_feature", "yellow", true),
   rule("role_no_actor", "yellow", true),
   rule("non_english_content", "yellow", true),
@@ -459,7 +461,42 @@ const screenPendingAtBaseline = (spine: Spine): FlagCandidate[] =>
       remediation_step: `S-5.1@${s.id}`
     }))
 
+/** Màn mồ côi chặn ký baseline: cùng điều kiện `orphan_screen` (vàng lúc soạn), lên đỏ ở S-9. */
+const orphanScreenAtBaseline = (spine: Spine): FlagCandidate[] =>
+  orphanScreens(spine).map(({ screen, why }) => ({
+    level: "red",
+    rule_id: "orphan_screen_at_baseline",
+    section_id: "fixed:3.1.1",
+    target_id: screen.id,
+    message: `Màn "${screen.name}" mồ côi, không ký baseline được: ${why}`,
+    remediation_step: "S-4.2"
+  }))
+
 // ─── yellow ──────────────────────────────────────────────────────
+
+/**
+ * Màn mồ côi (§3.1.1): không actor người nào dùng (khi đã có liên kết màn ↔ actor), hoặc đứng riêng trong luồng
+ * (khi đã có cạnh `flow_to`) — không cạnh vào lẫn ra, hay popup không có màn nào mở.
+ */
+export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number]; why: string }[] => {
+  const actorsOf = screenActorMap(spine)
+  const linked = hasScreenActorLinks(actorsOf)
+  const ids = new Set(spine.screens.map((s) => s.id))
+  const edges = spine.screens.flatMap((s) => s.flow_to.filter((t) => ids.has(t) && t !== s.id).map((t) => [s.id, t] as const))
+  const hasFlow = spine.screens.length > 1 && edges.length > 0
+  const incoming = new Set(edges.map(([, to]) => to))
+  const outgoing = new Set(edges.map(([from]) => from))
+
+  return spine.screens.flatMap((screen) => {
+    if (linked && (actorsOf.get(screen.id) ?? []).length === 0) {
+      return [{ screen, why: "không actor người nào dùng màn này (không có quyền lẫn use case gắn function trên màn)" }]
+    }
+    if (!hasFlow || incoming.has(screen.id)) return []
+    if (screen.is_popup) return [{ screen, why: "popup không có màn nào mở tới" }]
+    if (!outgoing.has(screen.id)) return [{ screen, why: "không có màn nào chuyển tới và màn không chuyển đi đâu" }]
+    return []
+  })
+}
 
 const cardinality = (spine: Spine): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
@@ -485,6 +522,9 @@ const cardinality = (spine: Spine): FlagCandidate[] => {
     ...spine.screens
       .filter((s) => !fnScreens.has(s.id))
       .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn "${s.name}" chưa có function nào`, "S-4.1")),
+    ...orphanScreens(spine).map(({ screen, why }) =>
+      yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn "${screen.name}" mồ côi: ${why}`, "S-4.2")
+    ),
     ...spine.features
       .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
       .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Feature "${f.name}" không có màn lẫn function`, "S-4.1")),
@@ -895,7 +935,7 @@ export const runDeterministicCheck = (
     ...diagramStale(spine),
     ...nfrMissingNumber(spine),
     ...useCaseRelations(spine),
-    ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine)] : []),
+    ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine)] : []),
     ...screenPlaceholder(spine, options.atBaseline ?? false),
     ...derivedFromChangedAssumption(spine, changes),
     ...functionWithoutUseCase(spine),

@@ -72,6 +72,10 @@ const TABLE_BORDERS = {
   insideVertical: CELL_BORDER
 }
 
+/** Khoảng trống dưới tiêu đề khi ngay sau nó là bảng (twip; 160 = 8pt) — bảng không dính sát tiêu đề. */
+export const HEADING_TABLE_SPACING = 160
+const beforeTable = { spacing: { after: HEADING_TABLE_SPACING } }
+
 type Shading = { type: typeof ShadingType.CLEAR; color: string; fill: string } | undefined
 type BodyChild = Paragraph | Table | TableOfContents
 
@@ -245,6 +249,7 @@ function recordOfChanges(doc: RenderedDocument): BodyChild[] {
   return [
     new Paragraph({ text: "I. Record of Changes", heading: HeadingLevel.HEADING_1 }),
     new Paragraph({
+      ...beforeTable,
       children: [new TextRun({ text: "*A - Added, M - Modified, D - Deleted", italics: true, size: 20 })]
     }),
     tableGap(undefined),
@@ -290,12 +295,12 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean): BodyChild[] {
       })
     )
     if (appendix.redOpen.length > 0) {
-      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3 }), tableGap(undefined), flagTable(appendix.redOpen, false))
+      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.redOpen, false))
     }
   }
   // srs-spine §6: mọi export, kể cả bản sạch, in danh sách waive
   if (appendix.waived.length > 0) {
-    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3 }), tableGap(undefined), flagTable(appendix.waived, true))
+    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.waived, true))
   }
   return out
 }
@@ -305,7 +310,8 @@ function renderSection(section: RenderedSection, ctx: WriteContext): BodyChild[]
   const shading: Shading = needsReview ? { type: ShadingType.CLEAR, color: "auto", fill: STALE_FILL } : undefined
   const title = section.number ? `${section.number} ${section.heading}` : section.heading
 
-  const out: BodyChild[] = [new Paragraph({ text: title, heading: headingLevel(section.level) })]
+  const tableFirst = !needsReview && section.blocks[0]?.type === "table"
+  const out: BodyChild[] = [new Paragraph({ text: title, heading: headingLevel(section.level), ...(tableFirst ? beforeTable : {}) })]
 
   if (needsReview) {
     const note =
@@ -321,18 +327,20 @@ function renderSection(section: RenderedSection, ctx: WriteContext): BodyChild[]
     )
   }
 
-  for (const block of section.blocks) {
-    out.push(...renderBlock(block, shading, ctx))
-  }
+  section.blocks.forEach((block, i) => {
+    out.push(...renderBlock(block, shading, ctx, section.blocks[i + 1]))
+  })
   return out
 }
 
-function renderBlock(block: Block, shading: Shading, ctx: WriteContext): BodyChild[] {
+function renderBlock(block: Block, shading: Shading, ctx: WriteContext, next?: Block): BodyChild[] {
   switch (block.type) {
     case "paragraph":
       return [new Paragraph({ shading, children: runs(block.runs) })]
     case "heading":
-      return [new Paragraph({ shading, heading: headingLevel(block.level), text: block.text })]
+      return [
+        new Paragraph({ shading, heading: headingLevel(block.level), text: block.text, ...(next?.type === "table" ? beforeTable : {}) })
+      ]
     case "bullet_list":
       return block.items.map((item) => new Paragraph({ shading, bullet: { level: 0 }, children: runs(item) }))
     case "numbered_list": {

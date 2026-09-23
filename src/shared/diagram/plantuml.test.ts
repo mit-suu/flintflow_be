@@ -59,6 +59,13 @@ describe.skipIf(!reachable)("PlantUML probe (cần server)", () => {
     // nới assertion.
     expect(result.ok).toBe(false)
   })
+
+  it("@startdot SAI (Screens Flow vẽ bằng DOT) phải bị phát hiện — server trả 200 + text `Error:`, không phải SVG", async () => {
+    const result = await checkPlantUml("@startdot\ndigraph g {\n  A -> ;\n}\n@enddot\n")
+    expect(result.ok).toBe(false)
+    expect(result.ok === false && result.error).toContain("syntax error")
+    expect((await checkPlantUml("@startdot\ndigraph g {\n  A -> B;\n}\n@enddot\n")).ok).toBe(true)
+  })
 })
 
 // Không cần server: mock `fetch` để dựng đúng các phản hồi khó tạo thật —
@@ -117,6 +124,15 @@ describe("renderPlantUml chỉ nhận phản hồi ảnh (fetch mock)", () => {
 
     expect(result.status).toBe(400)
     expect(result.data.toString()).toContain("syntax error")
+  })
+
+  it("compile-check: 200 image/svg+xml nhưng thân là text lỗi của dot ⇒ ok=false kèm dòng lỗi", async () => {
+    fetchMock.mockImplementation(() => response(200, "image/svg+xml", "Error: <stdin>: syntax error in line 2 near ';'\n"))
+
+    const result = await checkPlantUml("@startdot\ndigraph g {\n  A -> ;\n}\n@enddot\n")
+
+    expect(result).toMatchObject({ ok: false, method: "svg-scan" })
+    expect(result.ok === false && result.error).toContain("syntax error in line 2")
   })
 
   it("isPlantUmlReachable = false khi server trả JSON", async () => {

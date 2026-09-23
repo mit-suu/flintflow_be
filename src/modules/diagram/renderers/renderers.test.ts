@@ -9,6 +9,7 @@ import { createEmptySpine } from "../../spine/spine.repository.js"
 import { allTargets, layoutOwners, renderKind } from "./index.js"
 import { MAX_ASSOCIATIONS_PER_DIAGRAM, MAX_CLUSTER_SPAN, MAX_USE_CASES_PER_DIAGRAM, actorUseCaseCounts, dependentUseCaseIds, partitionUseCases } from "./usecase.renderer.js"
 import { saltCell } from "./screen-layout.renderer.js"
+import { screenFlowTitleOf } from "./screen-flow.renderer.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -39,7 +40,8 @@ describe("renderers trên fixture 19 màn", () => {
     for (const target of allTargets(FIXTURE)) {
       const rendered = renderKind(FIXTURE, target.kind, target.owner_id)
       for (const [index, part] of rendered.entries()) {
-        const [open, close] = part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : ["@startuml", "@enduml"]
+        const [open, close] =
+          part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : part.kind === "screen_flow" ? ["@startdot", "@enddot"] : ["@startuml", "@enduml"]
         expect(part.puml.startsWith(`${open}\n`), part.kind).toBe(true)
         expect(part.puml.endsWith(`${close}\n`), part.kind).toBe(true)
         expect(VIETNAMESE_DIACRITICS.test(part.puml), part.kind).toBe(false)
@@ -115,13 +117,86 @@ describe("renderers trên fixture 19 màn", () => {
     expect(usecasePuml(spine).match(/^\w+ -- A07$/gm)).toEqual(["UC10 -- A07", "UC12 -- A07"])
   })
 
-  it("screen_flow: composite cho màn có tab, note cho pop-up, cạnh flow_to", () => {
-    const { puml } = only(FIXTURE, "screen_flow")
+  it("screen_flow: DOT — màn nhiều tab là cluster, popup viền đứt, cạnh flow_to", () => {
+    const puml = renderKind(FIXTURE, "screen_flow").map((p) => p.puml).join("\n")
     const tabbed = FIXTURE.screens.find((s) => s.tabs.length > 0)!
-    expect(puml).toContain(`as ${tabbed.id} {`)
-    expect(puml).toContain(`as ${tabbed.id}_T1`)
-    for (const popup of FIXTURE.screens.filter((s) => s.is_popup)) expect(puml).toContain(`note right of ${popup.id} : pop-up`)
-    expect(puml).toContain("S07 --> S08")
+    expect(puml).toContain(`subgraph cluster_${tabbed.id} {`)
+    expect(puml).toContain(`${tabbed.id}_T1 [label="${tabbed.tabs[0]}"];`)
+    for (const popup of FIXTURE.screens.filter((s) => s.is_popup)) {
+      expect(puml).toContain(`${popup.id} [label="${popup.name}\\n(pop-up)", style="rounded,dashed"];`)
+    }
+    // Cạnh đi từ màn nhiều tab gắn vào cluster
+    expect(puml).toContain("S07_T1 -> S08 [ltail=cluster_S07];")
+  })
+
+  it("screen_flow: một sơ đồ cho mỗi actor người, bắt đầu bằng hình thoi mang tên actor", () => {
+    const parts = renderKind(FIXTURE, "screen_flow")
+    expect(parts.map((p) => screenFlowTitleOf(p.puml))).toEqual([
+      "Screens flow for Founder",
+      "Screens flow for Business Analyst",
+      "Screens flow for Administrator",
+      "Screens flow for Guest"
+    ])
+    expect(parts.every((p) => p.owner_id === null && p.section === "fixed:3.1.1")).toBe(true)
+    expect(parts.every((p) => p.puml.startsWith("@startdot\n") && p.puml.endsWith("@enddot\n"))).toBe(true)
+
+    const admin = parts[2].puml
+    expect(admin).toContain('START [label="Administrator", shape=diamond, style=solid];')
+    expect(admin).toContain("START -> S01;")
+    expect(admin).toContain("S14 -> S16;")
+    // Màn của actor khác và cạnh sang màn ngoài nhóm không vẽ
+    expect(admin).not.toContain("cluster_S07")
+    expect(admin).not.toContain("S01 -> S05;")
+
+    const guest = parts[3].puml
+    expect(guest).toContain('START [label="Guest", shape=diamond, style=solid];')
+    expect(guest).toContain("START -> S01;")
+    expect(guest).toContain("S01 -> S02;")
+  })
+
+  it("screen_flow: mũi tên một chiều — cặp màn trỏ qua lại chỉ giữ chiều đi tiếp từ màn vào", () => {
+    const [founder, , admin, guest] = renderKind(FIXTURE, "screen_flow").map((p) => p.puml)
+    // Login ⇄ Register: chỉ Login → Register
+    expect(guest).toContain("S01 -> S02;")
+    expect(guest).not.toContain("S02 -> S01;")
+    // Workspace ⇄ Diagram Preview: chỉ Workspace → Preview
+    expect(founder).toContain("S07_T1 -> S08 [ltail=cluster_S07];")
+    expect(founder).not.toContain("S08 -> S07_T1")
+    expect(admin).toContain("S14 -> S15;")
+    expect(admin).not.toContain("S15 -> S14;")
+    for (const p of [founder, admin, guest]) {
+      const edges = new Set([...p.matchAll(/^ {2}(\w+) -> (\w+)/gm)].map((m) => `${m[1]}>${m[2]}`))
+      for (const e of edges) expect(edges.has(e.split(">").reverse().join(">")), e).toBe(false)
+    }
+  })
+
+  it("screen_flow: màn không actor nào dùng ⇒ sơ đồ Unassigned cuối (chấm đen); chưa có liên kết actor ⇒ một sơ đồ chung", () => {
+    const withOrphan = mutate((s) => {
+      s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Orphan Screen", flow_to: [] })
+    })
+    const parts = renderKind(withOrphan, "screen_flow")
+    const last = parts[parts.length - 1].puml
+    expect(screenFlowTitleOf(last)).toBe("Screens flow for unassigned screens")
+    expect(last).toContain('S20 [label="Orphan Screen"];')
+    expect(last).toContain("START [label=\"\", shape=circle")
+
+    const unlinked = mutate((s) => {
+      s.permissions = []
+      s.use_cases = s.use_cases.map((u) => ({ ...u, function_ids: [] }))
+    })
+    const [single, ...rest] = renderKind(unlinked, "screen_flow")
+    expect(rest).toEqual([])
+    expect(screenFlowTitleOf(single.puml)).toBeNull()
+    expect(single.puml).toContain("START [label=\"\", shape=circle")
+    expect(single.puml).toContain("START -> S01;")
+  })
+
+  it("screen_flow: nhãn DOT escape dấu ngoặc kép và gạch chéo", () => {
+    const tricky = mutate((s) => {
+      s.screens.find((x) => x.id === "S01")!.name = 'Log "in" \\ out'
+    })
+    // Tên có một `\` ⇒ DOT nhận `\\`; `"` đổi thành `'`
+    expect(renderKind(tricky, "screen_flow")[3].puml).toContain("S01 [label=\"Log 'in' \\\\ out\"];")
   })
 
   it("erd: entity và quan hệ crow's foot mặc định", () => {
