@@ -188,7 +188,7 @@ describe("assertChatSessionOwnership (F5 — chặn IDOR: chatId phải thuộc 
   })
 })
 
-describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow", () => {
+describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
   const USER = "650000000000000000000010"
 
   it("lệnh sửa: gọi change.service.preview, ghi thẻ preview vào transcript, KHÔNG gọi CHAT", async () => {
@@ -235,14 +235,27 @@ describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow"
     expect(aiMocks.executeAiAction).toHaveBeenCalledWith(ActionType.CHAT, expect.anything(), PROJECT, USER)
   })
 
-  it("session pipeline không bị chặn: lệnh sửa vẫn đi CHAT (pipeline sửa qua gate/step runner)", async () => {
+  it("FLF-201 (BUG-09): lệnh sửa trong session pipeline cũng đi change flow, không để CHAT hứa suông", async () => {
     const pipeline = await createChatSession(PROJECT)
     aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 })
+    changeMocks.preview.mockResolvedValue({
+      ok: true,
+      txn: "t",
+      base_version: 7,
+      ops: [],
+      changes: [{ op: "add", path: "use_cases[id=UC18]", before: { _absent: true }, value: { id: "UC18" }, reason: null }],
+      violations: [],
+      referrers: [],
+      branch: "dependent",
+      preview_id: "pv-2"
+    })
 
-    await sendMessageAndGetResponse(PROJECT, String(pipeline._id), "Đổi tên actor A01", "overview", USER)
+    const session = await sendMessageAndGetResponse(PROJECT, String(pipeline._id), "Thêm use case nhắc lịch hẹn", "overview", USER)
 
-    expect(changeMocks.preview).not.toHaveBeenCalled()
-    expect(aiMocks.executeAiAction).toHaveBeenCalled()
+    expect(changeMocks.preview).toHaveBeenCalled()
+    expect(aiMocks.executeAiAction, "không gọi CHAT: câu trả lời là bản xem trước thật").not.toHaveBeenCalled()
+    const last = session.messages[session.messages.length - 1] as { role: string; content: string }
+    expect(JSON.parse(last.content)).toMatchObject({ kind: "change_preview" })
   })
 
   it("project chưa có Spine ⇒ không chuyển hướng, vẫn CHAT", async () => {

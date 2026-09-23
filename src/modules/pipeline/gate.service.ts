@@ -8,6 +8,11 @@
  * `revision`/`regenerate` tái dùng `runDraftPhase`/`runRenderReviewPhase` của `step-runner.service.ts`
  * với `emit` no-op.
  *
+ * FLF-177 BUG-01: Accept ở S-9.5 **ký baseline luôn** (trước đây gate chỉ đánh dấu step accepted, còn
+ * `POST /baseline` không được client nào gọi ở mode FlintFlow ⇒ `baselines: []` sau khi đi hết quy trình).
+ * Còn cờ đỏ chưa waive ⇒ `BaselineBlockedError` (422 BASELINE_BLOCKED kèm danh sách cờ), step giữ nguyên
+ * trạng thái để user xử lý cờ rồi Accept lại.
+ *
  * B7 (F6, review T13): step đã `accepted` được PHÉP quay lại qua `revision`/`regenerate` — chuyển
  * `status = revision_requested`, reset `first_seq/last_seq/accepted_at` (vòng mới, F1) rồi mới redraft.
  * `accept`/`accept_as_is` trên step đã accepted vẫn bị chặn (vô nghĩa — step đã ở đích).
@@ -25,8 +30,6 @@ import {
   runRenderReviewPhase,
   trackSeqRange,
   assertRangeOwnedByStep,
-  acquireStepLock,
-  releaseStepLock,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   STEP_NOT_RUNNABLE,
@@ -34,6 +37,8 @@ import {
   type StepRunnerDeps
 } from "./step-runner.service.js"
 import { gateActionSchema } from "./pipeline.dto.js"
+import { acquireRun, finishRun } from "./run-state.service.js"
+import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { z } from "zod"
@@ -237,8 +242,8 @@ const redraft = async (
   const ctx = await buildStepContext(projectId, stepId)
   const noop = (): void => {}
   await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
-  const afterVersion = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
-  return trackSeqRange(projectId, afterVersion, stepId, userId, range.startSeq, range.existing)
+  const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
+  return trackSeqRange(projectId, review.spineVersion, stepId, userId, range.startSeq, range.existing)
 }
 
 // ─── điểm vào công khai ──────────────────────────────────────────────
@@ -250,7 +255,8 @@ export const gate = async (
   input: GateInput,
   deps: Partial<StepRunnerDeps> = {}
 ): Promise<GateResult> => {
-  acquireStepLock(projectId, stepId)
+  // Cùng khoá với `/run` (WP-4): gate cũng ghi Spine, không được chạy song song với một lượt draft
+  const run = await acquireRun(projectId, stepId, { by: userId, stage: "draft", detail_vi: "Xử lý cổng chốt" })
   try {
     const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
     const record = await load(projectId)
@@ -265,10 +271,17 @@ export const gate = async (
 
     let finalVersion = record.spine_version
 
-    if (input.action === "accept") {
-      finalVersion = await doAccept(projectId, stepId, userId, record, null)
-    } else if (input.action === "accept_as_is") {
-      finalVersion = await doAccept(projectId, stepId, userId, record, input.note ?? "")
+    if (input.action === "accept" || input.action === "accept_as_is") {
+      const yellowNote = input.action === "accept_as_is" ? (input.note ?? "") : null
+      if (getStep(stepId).template_id === SIGN_OFF_STEP) {
+        // BUG-01: ký baseline ngay trong lượt Accept — signOff tự quét lại, kiểm cờ đỏ và đánh dấu S-9.5 accepted.
+        // accept_as_is: mở cờ vàng "chấp nhận như hiện tại" TRƯỚC (cờ vàng không chặn baseline), rồi ký.
+        const beforeSign = yellowNote === null ? record : ((await doAccept(projectId, stepId, userId, record, yellowNote), await load(projectId)))
+        const signed = await signOff(projectId, userId, { base_version: beforeSign.spine_version })
+        finalVersion = signed.spine_version
+      } else {
+        finalVersion = await doAccept(projectId, stepId, userId, record, yellowNote)
+      }
     } else {
       // revision | regenerate
       let baseVersion = record.spine_version
@@ -360,6 +373,6 @@ export const gate = async (
 
     return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion }
   } finally {
-    releaseStepLock(projectId, stepId)
+    await finishRun(projectId, stepId, run.run_id, "done")
   }
 }

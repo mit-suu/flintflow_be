@@ -37,7 +37,7 @@ describe("computeSourceHash", () => {
     const human = FIXTURE.actors.findIndex((a) => a.kind === "human")
     const base = computeSourceHash(FIXTURE, { kind: "context", owner_id: null })
     expect(computeSourceHash(mutate((s) => (s.actors[human].name = "X")), { kind: "context", owner_id: null })).toBe(base)
-    expect(computeSourceHash(mutate((s) => (s.project.name = "X")), { kind: "context", owner_id: null })).not.toBe(base)
+    expect(computeSourceHash(mutate((s) => (s.project.system_name = "X")), { kind: "context", owner_id: null })).not.toBe(base)
   })
 
   it("screen_layout theo màn sở hữu; screen_flow, erd theo field vẽ", () => {
@@ -53,5 +53,35 @@ describe("computeSourceHash", () => {
 
     const erd = { kind: "erd" as const, owner_id: null }
     expect(computeSourceHash(mutate((s) => (s.entities[0].relations = [])), erd)).not.toBe(computeSourceHash(FIXTURE, erd))
+  })
+})
+
+describe("computeSourceHash — tên hệ thống (FLF-177)", () => {
+  const usecase = { kind: "usecase" as const, owner_id: null }
+  const context = { kind: "context" as const, owner_id: null }
+
+  it("chưa đặt system_name ⇒ hash như trước FLF-177 (hình cũ không bị diagram_stale hàng loạt)", () => {
+    const legacy = mutate((s) => (s.project.system_name = null))
+    expect(computeSourceHash(legacy, usecase)).toBe(computeSourceHash(mutate((s) => (s.project.system_name = "  ")), usecase))
+    // usecase không hash project.name (giữ hành vi cũ), context hash tên đang vẽ
+    const renamed = mutate((s) => {
+      s.project.system_name = null
+      s.project.name = "X"
+    })
+    expect(computeSourceHash(renamed, usecase)).toBe(computeSourceHash(legacy, usecase))
+    expect(computeSourceHash(renamed, context)).not.toBe(computeSourceHash(legacy, context))
+  })
+
+  it("đặt/đổi system_name làm hình use case + ngữ cảnh cũ; khi đã đặt, đổi project.name không làm cũ", () => {
+    const named = mutate((s) => (s.project.system_name = "ShipFast"))
+    for (const d of [usecase, context]) {
+      expect(computeSourceHash(named, d)).not.toBe(computeSourceHash(FIXTURE, d))
+      expect(computeSourceHash(mutate((s) => (s.project.system_name = "ShipFast Pro")), d)).not.toBe(computeSourceHash(named, d))
+    }
+    const renamed = mutate((s) => {
+      s.project.system_name = "ShipFast"
+      s.project.name = "Du an giao hang"
+    })
+    expect(computeSourceHash(renamed, context)).toBe(computeSourceHash(named, context))
   })
 })

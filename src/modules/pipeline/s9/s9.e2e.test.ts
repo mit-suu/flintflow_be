@@ -85,7 +85,9 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
-    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
+    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length,
+    // `meter.roundCost` (gate hiện "x credit") đọc thô các dòng usage của vòng
+    find: (filter: Filter) => ({ lean: async () => usages.filter((r) => matches(r, filter)).map((r) => ({ cost: r.cost })) })
   }
   const withMethods = (doc: Doc | null) =>
     doc
@@ -272,11 +274,10 @@ describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
     expect(goalFlag, "S-9.3 mở cờ vàng").toBeTruthy()
     expect(goalFlag!.level, "goal_not_covered không bao giờ là cờ đỏ").toBe("yellow")
 
-    const result = await signOff(PROJECT, USER, { base_version: await version() })
-    expect(result.baseline.version).toBe("v1.0")
-
+    // FLF-177 BUG-01: Accept ở S-9.5 (trong walkS9) đã ký baseline — không cần gọi POST /baseline bằng tay
     const signed = (await repo.get(PROJECT))!
     expect(signed.baselines).toHaveLength(1)
+    expect(signed.baselines[0].version).toBe("v1.0")
     expect(signed.steps.find((s) => s.id === "S-9.5")?.status).toBe("accepted")
   })
 
@@ -285,8 +286,8 @@ describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
     await walkS9()
     const before = (await repo.get(PROJECT))!.flags.find((f) => f.rule_id === "goal_not_covered")!
 
-    // Ký được dù cờ vàng còn mở
-    await signOff(PROJECT, USER, { base_version: await version() })
+    // Ký được dù cờ vàng còn mở (gate S-9.5 ở walkS9 đã ký)
+    expect((await repo.get(PROJECT))!.baselines).toHaveLength(1)
 
     // signOff vừa recompute một lượt nữa — cờ do model đặt phải còn nguyên
     const after = (await repo.get(PROJECT))!.flags.find((f) => f.id === before.id)!
@@ -307,7 +308,7 @@ describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
   it("ký xong rồi sửa Spine: bản baseline không đổi, bản draft đổi và có watermark DRAFT", async () => {
     seed()
     await walkS9()
-    const signed = await signOff(PROJECT, USER, { base_version: await version() })
+    const signed = { baseline: (await repo.get(PROJECT))!.baselines[0] }
 
     const originalName = (await repo.get(PROJECT))!.actors[0].name
     await applyTransaction(PROJECT, {
@@ -361,5 +362,33 @@ describe("T19: S-9.1 → S-9.5 rồi ký baseline (mock provider)", () => {
 
     // Cờ đỏ đó chặn ký
     await expect(signOff(PROJECT, USER, { base_version: await version() })).rejects.toMatchObject({ code: "BASELINE_BLOCKED" })
+  })
+
+  it("BUG-01: Accept ở S-9.5 ký baseline; còn cờ đỏ thì trả BASELINE_BLOCKED kèm cờ và step chưa accepted", async () => {
+    seed((spine) => {
+      spine.assumptions.push({
+        id: "AS911",
+        path: "actors[id=A01].name",
+        statement: "Giả định chưa ai xác nhận.",
+        rationale: "Brief không nói rõ.",
+        origin_step_id: "S-3.1",
+        status: "unconfirmed",
+        confirmed_at: null
+      })
+    })
+    for (const stepId of S9_STEPS) {
+      const { emit } = collect()
+      await runStep(PROJECT, stepId, SESSION, USER, emit, deps())
+      if (stepId !== "S-9.5") {
+        await gate(PROJECT, stepId, USER, { action: "accept", base_version: await version() })
+        continue
+      }
+      const err = await gate(PROJECT, stepId, USER, { action: "accept", base_version: await version() }).catch((e: unknown) => e)
+      expect(err).toMatchObject({ code: "BASELINE_BLOCKED", statusCode: 422 })
+      expect((err as { flags: { rule_id: string }[] }).flags.some((f) => f.rule_id === "unconfirmed_assumption")).toBe(true)
+      const blocked = (await repo.get(PROJECT))!
+      expect(blocked.baselines).toHaveLength(0)
+      expect(blocked.steps.find((st) => st.id === "S-9.5")?.status).not.toBe("accepted")
+    }
   })
 })

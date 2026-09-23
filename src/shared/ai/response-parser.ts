@@ -43,9 +43,18 @@ export const opTransactionSchema = z.object({
   notes: z.string().optional()
 })
 
+/**
+ * Câu hỏi của vòng Elicit. `topic_key` (FLF-208 · R4) là khoá chủ đề để sổ quyết định chặn hỏi lặp;
+ * `conflict` là lời giải thích khi model CỐ Ý hỏi lại một chủ đề đã chốt (dữ liệu mới mâu thuẫn).
+ */
+export const elicitQuestionSchema = z.union([
+  chatQuestionSchema.extend({ topic_key: z.string().optional(), conflict: z.string().optional() }),
+  z.string().transform((q) => ({ question: q, suggestedAnswers: [] as string[], multiple: false }))
+])
+
 export const elicitSchema = z.object({
   reply: z.string(),
-  questions: z.array(chatQuestionItemSchema).default([])
+  questions: z.array(elicitQuestionSchema).default([])
 })
 
 /** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. */
