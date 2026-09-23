@@ -19,6 +19,22 @@ Deterministic, non-blocking, each with a `rule_id`.
 
 Cardinality is **yellow, not red**: as red, every `placeholder` screen of round one would hit `screen_no_function` and need mass waivers.
 
+## The "not there yet" gate (FLF-213)
+
+The cardinality rules and `usecase_floating` / `function_without_uc` all read *X has no Y*, so they only mean something once Y can exist. Each waits for the step that **produces Y**, which is not always its `remediation_step`:
+
+| `rule_id` | Waits for | Why |
+| --- | --- | --- |
+| `orphan_actor` | S-3.2 | actors are tied to use cases in the Actor-Goal List |
+| `usecase_no_function` | S-4.4 | `use_cases[].function_ids` is filled at S-4.1 (screen functions) and S-4.4 (non-screen ones); the fix is still S-3.2 |
+| `screen_no_function` | S-4.1 | functions are created there |
+| `empty_feature` | S-4.1 | screens and functions are created there |
+| `role_no_actor` | S-3.1 | roles and actors both come from S-3.1 |
+| `usecase_floating` | S-3.4 | `extends[]` is written there |
+| `function_without_uc` | S-4.4 | non-screen functions and their use case links come from S-4.4 |
+
+"Waits for" means that step is `accepted`. `at_baseline` (S-9) and mode 1 open every gate — see `red-rules.md`. `screen_placeholder` has its own gate (past the S-5 loop) and `system_name_missing` its own condition (a diagram exists); the naming, language and relation rules judge data that is already there, so they never wait.
+
 ## `non_english_content`
 
 - Scan only fields that render into the SRS (Owns column of srs-spine §4).
