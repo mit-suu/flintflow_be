@@ -7,11 +7,12 @@
  * `orphan_screen` bắt nó.
  * Chưa có liên kết màn ↔ actor nào (trước S-4.3/S-4.4) ⇒ một sơ đồ chung như cũ.
  * Vẽ bằng Graphviz DOT (`@startdot`) thay vì state diagram: state diagram không đặt được chữ vào trong hình thoi
- * (`<<choice>>` là hình thoi nhỏ cố định, không nhãn). Màn = hộp bo góc; màn có `tabs[]` ⇒ cluster, mỗi tab một
- * node `<screen>_T<n>`, cạnh tới/đi màn đó gắn vào cluster (`lhead`/`ltail`); `is_popup` ⇒ viền đứt + dòng `(pop-up)`.
+ * (`<<choice>>` là hình thoi nhỏ cố định, không nhãn). Màn = hình chữ nhật; màn có `tabs[]` ⇒ cluster, mỗi tab một
+ * node `<screen>_T<n>`, cạnh tới/đi màn đó gắn vào cluster (`lhead`/`ltail`); `is_popup` ⇒ hình ô-van, không cần chữ
+ * `(pop-up)` (cluster của Graphviz chỉ vẽ được hình chữ nhật ⇒ popup có tab là khung bo góc + dòng `(pop-up)`).
  * Sơ đồ chung (chưa tách actor) và sơ đồ màn mồ côi bắt đầu bằng chấm đen như cũ — không có actor để ghi tên.
  * Font `DejaVu Sans`: font mặc định của Graphviz trong image PlantUML thiếu (fontconfig báo lỗi thay vì vẽ).
- * Hộp màn KHÔNG tô nền: PlantUML vẽ lại SVG của dot và bỏ viền của node vừa `rounded` vừa `filled`.
+ * Hình màn KHÔNG tô nền: PlantUML vẽ lại SVG của dot và bỏ viền của node vừa `rounded` vừa `filled`.
  * Cạnh chỉ vẽ MỘT chiều: cặp màn trỏ qua lại (A → B và B → A) chỉ giữ chiều đi tiếp từ màn vào — màn gần màn vào
  * hơn (BFS) trỏ sang màn xa hơn; bằng nhau thì theo `queue_order`, rồi id. Đường quay lại là ngầm định.
  * Tiêu đề hình `Screens flow for <actor>` (thuộc tính `label` của graph) — `section-renderer` lấy làm chú thích ảnh
@@ -87,7 +88,7 @@ const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
   const body = [
     "digraph screens_flow {",
     `  graph [fontname=${dq(FONT)}, fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];`,
-    `  node [fontname=${dq(FONT)}, fontsize=11, shape=box, style=rounded, color="#000000"];`,
+    `  node [fontname=${dq(FONT)}, fontsize=11, shape=box, color="#000000"];`,
     "  edge [arrowsize=0.8];"
   ]
   if (start) body.push(`  label=${dq(start.title)};`)
@@ -109,14 +110,14 @@ const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
     if (s.tabs.length === 0) {
       body.push(
         s.is_popup
-          ? `  ${alias(s.id)} [label=${dq(s.name, "(pop-up)")}, style="rounded,dashed"];`
+          ? `  ${alias(s.id)} [label=${dq(s.name)}, shape=ellipse];`
           : `  ${alias(s.id)} [label=${dq(s.name)}];`
       )
       continue
     }
     body.push(
       `  subgraph cluster_${alias(s.id)} {`,
-      `    label=${s.is_popup ? dq(s.name, "(pop-up)") : dq(s.name)}; style=${s.is_popup ? '"rounded,dashed"' : "rounded"};`
+      `    label=${s.is_popup ? dq(s.name, "(pop-up)") : dq(s.name)}; style=${s.is_popup ? "rounded" : "solid"};`
     )
     s.tabs.forEach((tab, i) => body.push(`    ${alias(s.id)}_T${i + 1} [label=${dq(tab)}];`))
     body.push("  }")
