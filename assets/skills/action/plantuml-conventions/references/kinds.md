@@ -62,18 +62,18 @@ one-way: of a pair pointing at each other only the forward edge (away from the e
 @startdot
 digraph screens_flow {
   graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
   edge [arrowsize=0.8];
   label="Screens flow for Founder";
   START [label="Founder", shape=diamond, style=solid];
   S1 [label="Login"];
   S2 [label="Project Dashboard"];
   subgraph cluster_S3 {
-    label="Project Workspace"; style=rounded;
+    label="Project Workspace"; style=solid;
     S3_T1 [label="Chat"];
     S3_T2 [label="Document"];
   }
-  S4 [label="Confirm Delete\n(pop-up)", style="rounded,dashed"];
+  S4 [label="Confirm Delete", shape=ellipse];
   START -> S1;
   S1 -> S2;
   S2 -> S3_T1 [lhead=cluster_S3];
@@ -84,7 +84,7 @@ digraph screens_flow {
 
 - Screens with `tabs[]` → `subgraph cluster_<screen>`, one node per tab (`<screen>_T<n>`); edges attach to
   `_T1` with `lhead` / `ltail`.
-- `is_popup = true` → dashed border + `(pop-up)` line. Boxes are not filled (PlantUML drops the border of a
+- Screen = rectangle (`shape=box`); `is_popup = true` → oval (`shape=ellipse`), name only (no `(pop-up)` text). Shapes are not filled (PlantUML drops the border of a
   `rounded,filled` node). Font `DejaVu Sans` is required — the default dot font is missing in the image.
 
 ## `erd` — §3.1.5
