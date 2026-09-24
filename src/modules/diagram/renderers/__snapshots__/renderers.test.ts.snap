@@ -66,17 +66,17 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "@startdot
 digraph screens_flow {
   graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
   edge [arrowsize=0.8];
   label="Screens flow for Founder";
   START [label="Founder", shape=diamond, style=solid];
   S01 [label="Login"];
-  S03 [label="Forgot Password\\n(pop-up)", style="rounded,dashed"];
+  S03 [label="Forgot Password", shape=ellipse];
   S04 [label="Onboarding"];
   S05 [label="Project Dashboard"];
-  S06 [label="Create Project\\n(pop-up)", style="rounded,dashed"];
+  S06 [label="Create Project", shape=ellipse];
   subgraph cluster_S07 {
-    label="Project Workspace"; style=rounded;
+    label="Project Workspace"; style=solid;
     S07_T1 [label="Chat"];
     S07_T2 [label="Document"];
     S07_T3 [label="History"];
@@ -111,7 +111,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "@startdot
 digraph screens_flow {
   graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
   edge [arrowsize=0.8];
   label="Screens flow for Business Analyst";
   START [label="Business Analyst", shape=diamond, style=solid];
@@ -119,7 +119,7 @@ digraph screens_flow {
   S04 [label="Onboarding"];
   S05 [label="Project Dashboard"];
   subgraph cluster_S07 {
-    label="Project Workspace"; style=rounded;
+    label="Project Workspace"; style=solid;
     S07_T1 [label="Chat"];
     S07_T2 [label="Document"];
     S07_T3 [label="History"];
@@ -147,7 +147,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "@startdot
 digraph screens_flow {
   graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
   edge [arrowsize=0.8];
   label="Screens flow for Administrator";
   START [label="Administrator", shape=diamond, style=solid];
@@ -174,13 +174,13 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "@startdot
 digraph screens_flow {
   graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
   edge [arrowsize=0.8];
   label="Screens flow for Guest";
   START [label="Guest", shape=diamond, style=solid];
   S01 [label="Login"];
   S02 [label="Register"];
-  S03 [label="Forgot Password\\n(pop-up)", style="rounded,dashed"];
+  S03 [label="Forgot Password", shape=ellipse];
   START -> S01;
   S01 -> S02;
   S01 -> S03;

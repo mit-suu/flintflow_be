@@ -1,7 +1,7 @@
 ---
 skill_id: screen-flow
 kind: renderer
-version: 2.0.0
+version: 2.1.0
 description: "S-4.2 Screens Flow (Graphviz DOT; one diagram per human actor using the UI, started by a diamond with the actor name)"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -63,14 +63,14 @@ the Screens Flow is DOT wrapped in `@startdot … @enddot`:
 @startdot
 digraph screens_flow {
   graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, style=rounded, color="#000000"];
+  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
   edge [arrowsize=0.8];
   label="Screens flow for Founder";
   START [label="Founder", shape=diamond, style=solid];
   S01 [label="Login"];
-  S03 [label="Forgot Password\n(pop-up)", style="rounded,dashed"];
+  S03 [label="Forgot Password", shape=ellipse];
   subgraph cluster_S07 {
-    label="Project Workspace"; style=rounded;
+    label="Project Workspace"; style=solid;
     S07_T1 [label="Chat"];
   }
   START -> S01;
@@ -80,10 +80,13 @@ digraph screens_flow {
 @enddot
 ```
 
-- Screen = rounded box, **not filled** (PlantUML drops the border of a node that is both `rounded` and `filled`).
+- Screen = **rectangle** (`shape=box`, square corners), **not filled** (PlantUML drops the border of a node that is
+  both `rounded` and `filled`).
 - A screen with `tabs[]` = `subgraph cluster_<id>`, one node `<id>_T<n>` per tab; edges into / out of it attach
   to `<id>_T1` with `lhead=` / `ltail=cluster_<id>`.
-- `is_popup = true` → dashed border and a second line `(pop-up)`.
+- `is_popup = true` → **oval** (`shape=ellipse`), label = the screen name only — the oval alone marks a pop-up,
+  no `(pop-up)` text. A pop-up with `tabs[]` is a cluster, and Graphviz draws clusters only as rectangles, so it
+  gets `style=rounded` and a second label line `(pop-up)` instead (tabbed screen: `style=solid`).
 - Font `DejaVu Sans` on graph and node: the default Graphviz font is missing in the PlantUML image and dot
   answers with a fontconfig error instead of a picture.
 - Labels are double-quoted, `"` becomes `'`, `\` is escaped. `<id> -> <target>` per kept edge, sorted by target id.

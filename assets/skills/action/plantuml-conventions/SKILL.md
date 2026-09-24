@@ -45,7 +45,7 @@ This skill is loaded by every renderer (`renderer/*`) as shared rules, and is th
 7. Monochrome-friendly: at most `skinparam monochrome true` or a few neutral `skinparam` lines; no custom colours per element.
 8. Size: split into several diagrams when > ~25 nodes (use case diagram by actor group, ERD by module). Each part is its own `diagrams[]` entry with the same `kind`.
 9. Quote any label containing spaces, punctuation or keywords.
-10. No notes that restate descriptions. Screen flow marks pop-ups with a dashed border and a `(pop-up)` line, not a note.
+10. No notes that restate descriptions. Screen flow draws screens as rectangles and pop-ups as ovals (the shape alone marks a pop-up — no `(pop-up)` text, no note).
 
 ## Compile-error fix (`render_fix`)
 
