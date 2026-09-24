@@ -31,7 +31,7 @@ describe("C-2 mơ hồ ⇒ câu hỏi; trả lời ⇒ gọi lại", () => {
     const crId = await newCr(c, "Change the login", "AMBIGUOUS-CR: change UC-02 somehow.")
     const asked = detail(await c.post(`/change-requests/${crId}/clarify`))
     expect(asked.change_request.status).toBe("awaiting_answers")
-    expect(asked.change_request.clarifications).toEqual([{ round: 1, questions: ["Which screen?"], answers: [] }])
+    expect(asked.change_request.clarifications).toEqual([{ round: 1, questions: ["Which screen?"], answers: [], suggestions: [[]] }])  // model không gợi ý ⇒ [] cho từng câu
     expect(asked.pending_questions).toEqual(["Which screen?"])
     const [prompt] = promptsOf("# CR Clarify")
     expect(prompt).toContain("Round 1 of at most 3")
@@ -170,8 +170,8 @@ describe("C-2 lỗi và biên", () => {
     const done = detail(await c.post(`${cr}/answers`, { answers: ["A-c"] }))
     expect(done.change_request.status).toBe("impact_review")
     expect(done.change_request.clarifications).toEqual([
-      { round: 1, questions: ["Q-a?", "Q-b?"], answers: ["A-a", "A-b"] },
-      { round: 2, questions: ["Q-c?"], answers: ["A-c"] }
+      { round: 1, questions: ["Q-a?", "Q-b?"], answers: ["A-a", "A-b"], suggestions: [[], []] },
+      { round: 2, questions: ["Q-c?"], answers: ["A-c"], suggestions: [[]] }
     ])
   })
 })

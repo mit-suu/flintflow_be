@@ -161,6 +161,7 @@ export const OUTPUT_SCHEMA_NAMES = [
   "findings",
   "crClarify",
   "crPropose",
+  "crMaterialImage",
   "puml",
   "none"
 ] as const

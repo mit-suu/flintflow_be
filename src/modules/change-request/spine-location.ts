@@ -254,25 +254,38 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
     }
   }
 
-  // Đích là section còn trống: không có phần tử nào để sửa, nhưng CR vẫn làm được việc — **thêm mới** vào mảng
-  // nuôi mục đó (phương án B). Section không đổ được bằng mảng thì bỏ qua ở đây, `emptySectionTargets` báo tiếp.
-  for (const section of emptySections(spine, targets)) {
-    const fieldArray = SECTION_FIELD_ARRAYS[section]
-    // Mục "field" đã có phần tử để sửa ⇒ không mời thêm phần tử mới
-    if (fieldArray && arrayOf(spine, fieldArray).length) continue
-    for (const path of fillPathsOfSection(section)) {
-      if (seen.has(path)) continue
-      seen.add(path)
-      found.push({
-        path,
-        section_id: section,
-        found_by: ["spine_link"],
-        entity_paths: [section],
-        owner_step: ownerStepOf(section, spine)
-      })
-    }
+  // Ô **thêm mới** (`arr[]`) — phương án B cho mục trống, mở rộng 2026-09-24 cho mọi mục được nhắm: CR "thêm bảng /
+  // thực thể / quyền mới" vào mục đã có dữ liệu trước đây chỉ ra các phần tử cũ ⇒ AI không có chỗ thêm, đành comment.
+  // Section không đổ được bằng mảng thì bỏ qua ở đây, `emptySectionTargets` báo tiếp.
+  const slots: FoundLocation[] = []
+  const addSlot = (path: string, section: string) => {
+    if (seen.has(path)) return
+    seen.add(path)
+    slots.push({ path, section_id: section, found_by: ["spine_link"], entity_paths: [section], owner_step: ownerStepOf(section, spine) })
   }
-  return found.slice(0, MAX_LOCATIONS)
+  const empty = new Set(emptySections(spine, targets))
+  for (const section of new Set(targets.filter(isSectionTarget))) {
+    const fieldArray = SECTION_FIELD_ARRAYS[section]
+    // Mục "field" trống vì field của phần tử có sẵn còn trống ⇒ sửa phần tử đó, không mời thêm phần tử mới
+    if (empty.has(section) && fieldArray && arrayOf(spine, fieldArray).length) continue
+    for (const path of fillPathsOfSection(section)) addSlot(path, section)
+  }
+  // C-2 trả thẳng đích thêm mới (`entities[]`) khi thay đổi cần phần tử chưa có
+  for (const t of targets) {
+    const array = ARRAY_PATH.exec(t)?.[1]
+    const section = array ? sectionOfArray(array, targets) : null
+    if (section) addSlot(`${array}[]`, section)
+  }
+  // Ô thêm mới luôn giữ lại khi phải cắt bớt vị trí
+  return [...found.slice(0, Math.max(0, MAX_LOCATIONS - slots.length)), ...slots]
+}
+
+/** Mục nuôi bằng mảng `array` — ưu tiên mục CR đang nhắm; mảng không nuôi mục nào ⇒ null. */
+const sectionOfArray = (array: string, targets: readonly string[]): string | null => {
+  const sections = Object.entries(SECTION_FILL_ARRAYS)
+    .filter(([, arrays]) => arrays.includes(array))
+    .map(([section]) => section)
+  return sections.find((s) => targets.includes(s)) ?? sections[0] ?? null
 }
 
 /**

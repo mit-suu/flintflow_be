@@ -22,6 +22,7 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     get: (suffix: string) => request(app).get(`${base}${suffix}`).set(auth),
     post: (suffix: string, body: object = {}) => request(app).post(`${base}${suffix}`).set(auth).send(body),
     patch: (suffix: string, body: object) => request(app).patch(`${base}${suffix}`).set(auth).send(body),
+    del: (suffix: string) => request(app).delete(`${base}${suffix}`).set(auth),
     spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
     /**
      * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi **chờ đúng job** của import đó

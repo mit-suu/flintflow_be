@@ -42,7 +42,8 @@ import { IMPORT_IMAGE_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps } from "./spine-builder.js"
 import { buildLayout, buildStepPlan, customSectionOps, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
-import { TemplateProfile } from "./template-profile.model.js"
+import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
+import { titleOfSection } from "./gap-report.service.js"
 
 export interface FinalizeResult {
   doc: IImportedDocument
@@ -65,7 +66,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
   const profile = await TemplateProfile.findOne({ projectId })
-  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có template profile", { status: doc.status, to: "checking", allowed: [] })
+  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "checking", allowed: [] })
   const provisional = resolveProvisional(profile.heading_map)
 
   // 1. Thực thể ⇒ op
@@ -151,7 +152,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
   const planOps = [
     ...customSectionOps(customSections),
-    ...unreadImageFlagOps(stripRecord(seeded), drafts, layoutBlocks, provisional),
+    ...unreadImageFlagOps(stripRecord(seeded), drafts, layout, provisional),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
@@ -212,20 +213,22 @@ const READ_DIAGRAM_KINDS: ReadonlySet<string> = new Set(["usecase", "erd", "scre
 const unreadImageFlagOps = (
   spine: Spine,
   drafts: Pick<IExtractionDraft, "section_id" | "diagram_images">[],
-  layoutBlocks: LayoutBlock[],
+  layout: readonly LayoutEntry[],
   provisional: ReturnType<typeof resolveProvisional>
 ): Op[] => {
-  const refOf = new Map(layoutBlocks.map((b) => [b.block_id, b.image_ref ?? ""]))
-  const findings = drafts.flatMap((d) =>
-    (d.diagram_images ?? [])
-      .filter((i) => !READ_DIAGRAM_KINDS.has(i.kind))
-      .map((i) => ({
-        rule: "image",
-        section_id: realSectionId(d.section_id, provisional),
-        message: `Ảnh ${refOf.get(i.block_id) || i.block_id} không đọc được thành dữ liệu (${i.kind === "unsupported" ? "định dạng không hỗ trợ" : "không phải diagram đọc được"}) — giữ ảnh gốc; cần thì cập nhật qua CR`,
-        block_ids: [i.block_id]
-      }))
-  )
+  // Câu cho người đọc: nêu mục theo tiêu đề trong file, không in tên file ảnh / block id (`[image] media/x.emf`, `B0012`)
+  const findings = drafts.flatMap((d) => {
+    const section_id = realSectionId(d.section_id, provisional)
+    const heading = layout.find((l) => l.section_id === d.section_id && l.heading_text.trim())?.heading_text.trim()
+    const title = heading ?? titleOfSection(spine, section_id, layout)
+    const unread = (d.diagram_images ?? []).filter((i) => !READ_DIAGRAM_KINDS.has(i.kind))
+    return unread.map((i, n) => ({
+      rule: "image",
+      section_id,
+      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${i.kind === "unsupported" ? "định dạng ảnh không hỗ trợ" : "không phải sơ đồ đọc được"}) — đã giữ ảnh gốc; cần thì cập nhật qua change request`,
+      block_ids: [i.block_id]
+    }))
+  })
   return findingOps(spine, findings, IMPORT_IMAGE_RULE)
 }
 

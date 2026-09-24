@@ -65,6 +65,8 @@ describe("C-3 findSpineLocations", () => {
       ["actors[id=A01]", ["spine_link"], ["fixed:2.1"]],
       ["actors[id=A02]", ["spine_link"], ["fixed:2.1"]],
       ["custom_sections[id=CS02]", ["spine_link"], ["custom:CS02"]],
+      // 2026-09-24: mục đã có dữ liệu cũng có ô thêm mới (CR thêm tác nhân / thực thể mới vào mục có sẵn)
+      ["actors[]", ["spine_link"], ["fixed:2.1"]],
       // fixed:5.1 (Business Rules) chưa có phần tử nào ⇒ phương án B: vị trí là cả mảng, C-4 đề xuất thêm mới
       ["business_rules[]", ["spine_link"], ["fixed:5.1"]]
     ])
@@ -72,6 +74,13 @@ describe("C-3 findSpineLocations", () => {
     expect(elementValue(s, "business_rules[]")).toEqual([]) // giá trị = cả mảng ⇒ C-5 so được mảng có bị đổi không
     expect(isArrayPath("business_rules[]")).toBe(true)
     expect(isArrayPath("business_rules[id=BR-01]")).toBe(false)
+  })
+
+  it("C-2 trả đích thêm mới `entities[]` ⇒ ô thêm mới ở mục ERD; mảng nuôi nhiều mục ⇒ ưu tiên mục CR nhắm; ô thêm mới không bị cắt", () => {
+    const s = spine()
+    expect(findSpineLocations(s, ["entities[]"], []).map((f) => [f.path, f.section_id])).toEqual([["entities[]", "fixed:3.1.5"]])
+    expect(findSpineLocations(s, ["nfrs[]", "fixed:4.2.3"], []).find((f) => f.path === "nfrs[]")?.section_id).toBe("fixed:4.2.3")
+    expect(findSpineLocations(s, ["khong_co[]"], [])).toEqual([])
   })
 
   it("mode 1 v3: mọi mục FPT mà cờ section_empty soi đều có đường vào CR (không còn step để chỉ sang)", () => {

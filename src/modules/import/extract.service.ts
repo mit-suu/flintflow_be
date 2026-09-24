@@ -34,6 +34,7 @@ import { assertImportStatus, extractionSummary, requireImport, transitionImport 
 import type { IImportedDocument } from "./imported-document.model.js"
 import { withMeteredAi } from "./metered-ai.js"
 import { Mode1Error } from "./mode1.errors.js"
+import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES } from "./table-header-dictionary.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
@@ -256,7 +257,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
   const profile = await TemplateProfile.findOne({ projectId })
-  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có template profile", { status: doc.status, to: "extracting", allowed: [] })
+  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
   const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
   const provisional = resolveProvisional(profile.heading_map)
   const plan = extractionPlan(blocks)
@@ -314,7 +315,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     const pause = async (result: { reason: "credits" | "resume_later"; message: string }): Promise<ExtractionRun> => {
       doc.paused = { reason: result.reason, at: new Date() }
       await doc.save()
-      draft.error = result.message.slice(0, 500)
+      // Lỗi provider giữ nguyên văn (để tra), nhưng nói rõ mục nào — theo tiêu đề trong file, không in khoá section
+      draft.error = `Mục "${heading?.heading_text?.trim() || capitalize(sectionLabel(section_id))}": ${result.message}`.slice(0, 500)
       if (result.reason === "resume_later") draft.status = "failed"
       await draft.save()
       return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
@@ -415,7 +417,7 @@ export const patchFields = async (projectId: string, body: FieldsPatchRequest): 
     const draft = drafts.find((d) => d.section_id === f.section_id)
     const idx = draft?.fields.findIndex((x) => x.path === f.path) ?? -1
     if (!draft || idx < 0) {
-      throw new Mode1Error("IMPORT_INVALID_STATE", `Không có field ${f.path} ở section ${f.section_id}`, { status: doc.status, to: "baselining", allowed: [] })
+      throw new Mode1Error("IMPORT_INVALID_STATE", `Không có dữ liệu "${pathLabel(f.path)}" ở mục đã chọn`, { status: doc.status, to: "baselining", allowed: [] })
     }
     if (!f.confirmed) draft.fields.splice(idx, 1)
     else {

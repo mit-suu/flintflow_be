@@ -9,6 +9,7 @@ import type { FindingsOutput } from "../../shared/ai/response-parser.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import * as flagsService from "../spine/flags.service.js"
+import { aiFindingLabel, humanizeText } from "../spine/human-labels.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
@@ -54,7 +55,10 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
   const ops: Op[] = []
   for (const f of findings) {
     const section = sections.has(f.section_id) ? f.section_id : "fixed:I"
-    const message = `[${f.rule}] ${f.message}`
+    // Không in mã luật thô (`[ambiguity]`) cho người đọc — luật AI biết tên thì thành nhãn tiếng Việt đứng đầu
+    const label = aiFindingLabel(f.rule)
+    const text = humanizeText(f.message)
+    const message = label ? `${label}: ${text}` : text
     if (open.has(`${section}|${message}`)) continue
     open.add(`${section}|${message}`)
     const flag: Flag = {
@@ -71,6 +75,7 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
       waive_reason: null,
       waived_at_version: null
     }
+    // Lý do của máy — `section-renderer` INTERNAL_REASON lọc khỏi Record of Changes
     ops.push({ op: "add", path: "flags[]", value: flag, reason: `AI check: ${f.rule}` })
   }
   return ops

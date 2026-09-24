@@ -22,6 +22,7 @@ import {
 } from "docx"
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { ruleLabel } from "../spine/human-labels.js"
 import type {
   Block,
   FlagRow,
@@ -84,7 +85,14 @@ interface WriteContext {
   nextNumberingInstance: number
 }
 
-export async function writeDocx(doc: RenderedDocument): Promise<Buffer> {
+export type FlagLanguage = "en" | "vi"
+
+export interface WriteDocxOptions {
+  /** Ngôn ngữ phụ lục cờ: `vi` cho project mode 1 (thông điệp cờ tiếng Việt), mặc định `en` (mode 2). */
+  flagLanguage?: FlagLanguage
+}
+
+export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions = {}): Promise<Buffer> {
   const ctx: WriteContext = { nextNumberingInstance: 1 }
   const isDraft = doc.source === "draft" || doc.watermark === "DRAFT"
 
@@ -95,7 +103,7 @@ export async function writeDocx(doc: RenderedDocument): Promise<Buffer> {
     new TableOfContents("Table of Contents", { hyperlink: true, headingStyleRange: "1-3" }),
     new Paragraph({ children: [new PageBreak()] }),
     ...recordOfChanges(doc),
-    ...flagsAppendix(doc, isDraft),
+    ...flagsAppendix(doc, isDraft, options.flagLanguage ?? "en"),
     new Paragraph({ children: [new PageBreak()] })
   ]
 
@@ -263,20 +271,47 @@ function recordOfChanges(doc: RenderedDocument): BodyChild[] {
   ]
 }
 
-function flagsAppendix(doc: RenderedDocument, isDraft: boolean): BodyChild[] {
+/**
+ * Chữ của phụ lục cờ. Mode 1 (tài liệu nhập): thông điệp cờ là tiếng Việt ⇒ tiêu đề cột + tên luật tiếng Việt, cột
+ * luật in nhãn (`ruleLabel`) thay mã máy (`section_empty`). Mode 2 giữ nguyên tiếng Anh như trước.
+ */
+const FLAG_TEXT = {
+  en: {
+    status: "Working Draft Status",
+    open: "Open red flags",
+    stale: "Stale sections",
+    waivedCount: "Waived flags",
+    openHeading: "Open Red Flags",
+    waivedHeading: "Waived Flags",
+    header: ["ID", "Rule", "Section", "Message"],
+    reason: "Waive reason"
+  },
+  vi: {
+    status: "Tình trạng bản làm việc",
+    open: "Lỗi đỏ đang mở",
+    stale: "Mục cần xem lại",
+    waivedCount: "Cờ đã bỏ qua",
+    openHeading: "Lỗi đỏ đang mở",
+    waivedHeading: "Cờ đã bỏ qua",
+    header: ["Mã", "Loại lỗi", "Mục", "Nội dung"],
+    reason: "Lý do bỏ qua"
+  }
+} as const
+
+function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLanguage): BodyChild[] {
   const appendix = doc.flagsAppendix
   if (!appendix) return []
 
+  const t = FLAG_TEXT[language]
+  const rule = (ruleId: string): string => (language === "vi" ? ruleLabel(ruleId) || "Khác" : ruleId)
   const plain = (text: string): CellRuns => [{ text }]
   const flagTable = (rows: FlagRow[], withReason: boolean) =>
     table(
-      (withReason ? ["ID", "Rule", "Section", "Message", "Waive reason"] : ["ID", "Rule", "Section", "Message"]).map(
-        plain
-      ),
+      (withReason ? [...t.header, t.reason] : [...t.header]).map(plain),
       rows.map((flag) =>
         (withReason
-          ? [flag.id, flag.rule_id, flag.section, flag.message, flag.waive_reason ?? ""]
-          : [flag.id, flag.rule_id, flag.section, flag.message]
+          ? [flag.id, rule(flag.rule_id), flag.section, flag.message, flag.waive_reason ?? ""]
+          : [flag.id, rule(flag.rule_id), flag.section, flag.message]
         ).map(plain)
       ),
       undefined
@@ -285,22 +320,22 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean): BodyChild[] {
   const out: BodyChild[] = []
   if (isDraft) {
     out.push(
-      new Paragraph({ text: "Working Draft Status", heading: HeadingLevel.HEADING_2 }),
+      new Paragraph({ text: t.status, heading: HeadingLevel.HEADING_2 }),
       new Paragraph({
         children: [
-          new TextRun({ text: `Open red flags: ${appendix.redOpen.length}`, bold: true }),
-          new TextRun({ text: `  ·  Stale sections: ${appendix.staleCount}`, bold: true }),
-          new TextRun({ text: `  ·  Waived flags: ${appendix.waived.length}`, bold: true })
+          new TextRun({ text: `${t.open}: ${appendix.redOpen.length}`, bold: true }),
+          new TextRun({ text: `  ·  ${t.stale}: ${appendix.staleCount}`, bold: true }),
+          new TextRun({ text: `  ·  ${t.waivedCount}: ${appendix.waived.length}`, bold: true })
         ]
       })
     )
     if (appendix.redOpen.length > 0) {
-      out.push(new Paragraph({ text: "Open Red Flags", heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.redOpen, false))
+      out.push(new Paragraph({ text: t.openHeading, heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.redOpen, false))
     }
   }
   // srs-spine §6: mọi export, kể cả bản sạch, in danh sách waive
   if (appendix.waived.length > 0) {
-    out.push(new Paragraph({ text: "Waived Flags", heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.waived, true))
+    out.push(new Paragraph({ text: t.waivedHeading, heading: HeadingLevel.HEADING_3, ...beforeTable }), tableGap(undefined), flagTable(appendix.waived, true))
   }
   return out
 }

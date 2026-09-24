@@ -5,6 +5,8 @@
  * không bị AI đè; lần làm lại (sau verify trượt) chỉ đề xuất lại vị trí trượt. Gom change group theo section.
  * Mode 1 v2 (FLF-186): vị trí là phần tử Spine, `edit` = op Spine; BE chụp giá trị trước (`old_text`) và sau khi chạy
  * khô op của vị trí (`new_text`) để người duyệt đọc — tài liệu được render lại từ Spine khi ghi (C-7).
+ * Mode 1 v3 phase 7: prompt kèm tài liệu bổ sung + dữ kiện C-2 báo thiếu; dữ kiện model phải tự giả định ghi vào
+ * `proposal.assumptions` để người duyệt xác nhận ở 3.12.
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -25,8 +27,8 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
-import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
-import { elementValue, isArrayPath, opElement, valueText } from "./spine-location.js"
+import { answersText, crHeader, glossaryText, materialsText, missingInfoText, truncate } from "./cr-context.js"
+import { elementValue, isArrayPath, isSectionTarget, opElement, valueText } from "./spine-location.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -78,12 +80,30 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
   const failed = l.verify && !l.verify.code_ok ? `\n  Previous proposal failed checks: ${l.verify.violations.map((v) => v.message).join("; ")}` : ""
   const section = l.section_id === "misc" ? "-" : titleOfSection(spine, l.section_id)
   const value = truncate(valueText(elementValue(spine, l.path)), 2500).split("\n").join("\n  ")
-  // Vị trí "mục trống": path là cả mảng, không có phần tử nào để sửa ⇒ việc hợp lệ duy nhất là thêm phần tử mới
-  const how = isArrayPath(l.path) ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)." : ""
+  // Ô thêm mới: path là cả mảng ⇒ việc hợp lệ duy nhất là thêm phần tử mới. Mục trống (phương án B) hoặc mục đã có
+  // dữ liệu mà CR cần phần tử chưa có (2026-09-24) — phần tử có sẵn là các vị trí riêng, không sửa từ đây.
+  const isEmpty = isArrayPath(l.path) && !(elementValue(spine, l.path) as unknown[] | undefined)?.length
+  const how = !isArrayPath(l.path)
+    ? ""
+    : isEmpty
+      ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)."
+      : "\n  ADD NEW — the only valid edit is adding new elements to this array (`add` ops) that the change needs and that do not exist yet (value above = existing elements, for ids and to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related."
   // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
   const mine = seedOpsFor(seedOps, l.path)
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
   return `[${l.location_id}] ${l.path} (section: ${section}; ${why})\n  ${value}${how}${suggested}${failed}`
+}
+
+/**
+ * Mục đích của CR + mọi ô "thêm mới" của nó — gửi cho **mọi lô** C-4 (lô chia theo step sở hữu, ô thêm mới của mục
+ * khác nằm ở lô khác). Thiếu dòng này model ở lô "màn hình" / "NFR" tự nhét nội dung mới vào phần tử của mình
+ * (2026-09-24: bảng phân quyền rơi vào NFR-07 và thành mục riêng từ vị trí tác nhân).
+ */
+export const targetSectionsText = (spine: Spine, cr: Pick<IChangeRequest, "targets">, locations: readonly Pick<IChangeLocation, "path" | "section_id">[]): string => {
+  const sections = cr.targets.entity_paths.filter(isSectionTarget).map((id) => `- ${titleOfSection(spine, id)}`)
+  const slots = locations.filter((l) => isArrayPath(l.path)).map((l) => `- new ${l.path.slice(0, -2)} go to "${titleOfSection(spine, l.section_id)}" (location ${l.path})`)
+  if (!sections.length && !slots.length) return "(none named)"
+  return [...(sections.length ? ["Sections this change targets:", ...sections] : []), ...(slots.length ? ["Where new elements are added (and only there):", ...slots] : [])].join("\n")
 }
 
 const needsProposal = (l: IChangeLocation): boolean => !l.manual && (l.conclusion === null || (l.verify !== null && !l.verify.code_ok))
@@ -135,6 +155,9 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           ...crHeader(cr),
           answers: answersText(cr),
           owner_skill: ownerSkillText(owner || null),
+          target_sections: targetSectionsText(spine, cr, locations),
+          materials: materialsText(cr),
+          missing_info: missingInfoText(cr),
           locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
           glossary: glossaryText(spine)
         })
@@ -161,7 +184,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
             old_text: valueText(elementValue(spine, loc.path)),
             new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
             comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
-            spine_ops: ops
+            spine_ops: ops,
+            assumptions: out.conclusion === "not_related" ? [] : out.assumptions
           }
           loc.verify = null
           await loc.save()
@@ -180,13 +204,14 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
  * ghi vào **đề xuất** của vị trí (`manual = true`), không ghi Spine; BA chạy lại kiểm (3.7) bằng `/verify`.
  * Mode 1 không chạy step, và phần tử đang bị chính CR này khoá — nên "sửa trong step" là dùng skill của step đó ngay trong CR.
  */
+/** Phase 8: "Sửa lại" trong chat dùng chung đường này — mọi bước đã có đề xuất, trước khi nộp. */
+export const REDRAFT_CR_STATUSES = ["proposing", "verifying", "manual_fix", "ready_to_submit"] as const
+
 export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locationId: string, instruction: string): Promise<void> => {
-  assertCrStatus(cr, ["manual_fix"], "verifying")
+  assertCrStatus(cr, REDRAFT_CR_STATUSES, "verifying")
   const loc = await ChangeLocation.findOne({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: locationId })
-  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", `Không có vị trí ${locationId}`)
-  if (!loc.owner_step) {
-    throw new Mode1Error("CR_NO_OWNER_STEP", `Vị trí ${locationId} không thuộc step nào (mục riêng) — sửa trực tiếp đề xuất`, { location_id: locationId })
-  }
+  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", "Không tìm thấy vị trí cần sửa này")
+  // Phase 8: mục riêng (không có step sở hữu) vẫn soạn lại được — AI viết theo hướng của BA, không kèm skill nội dung
   const holder = (await locksOf(cr.projectId, [loc.path])).get(loc.path)
   if (holder !== cr.cr_id) throw pathLocked(holder ? [{ path: loc.path, cr_id: holder }] : [])
 
@@ -197,8 +222,11 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     ...crHeader(cr),
     answers: `${answersText(cr)}
 
-Analyst's instruction for ${loc.location_id} (3.9 — fix in owner step ${loc.owner_step}): ${instruction}`,
+Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner step ${loc.owner_step}` : "free-form section"}): ${instruction}`,
     owner_skill: ownerSkillText(loc.owner_step),
+    target_sections: targetSectionsText(spine, cr, await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path section_id").lean()),
+    materials: materialsText(cr),
+    missing_info: missingInfoText(cr),
     locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),
     glossary: glossaryText(spine)
   })
@@ -208,7 +236,7 @@ Analyst's instruction for ${loc.location_id} (3.9 — fix in owner step ${loc.ow
     throw new ApiError(502, result.message, "AI_PROVIDER_ERROR")
   }
   const out = matchProposals([loc], result.data.locations).get(loc)
-  if (!out) throw new ApiError(502, "Model không trả đề xuất cho vị trí này — thử lại hoặc sửa trực tiếp", "AI_PROVIDER_ERROR")
+  if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho vị trí này — thử lại hoặc sửa trực tiếp", "AI_PROVIDER_ERROR")
   const ops = out.conclusion === "not_related" ? [] : out.spine_ops
   loc.conclusion = out.conclusion
   loc.reason = out.reason
@@ -216,9 +244,12 @@ Analyst's instruction for ${loc.location_id} (3.9 — fix in owner step ${loc.ow
     old_text: valueText(elementValue(spine, loc.path)),
     new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
-    spine_ops: ops
+    spine_ops: ops,
+    assumptions: out.conclusion === "not_related" ? [] : out.assumptions
   }
   loc.manual = true
   loc.verify = null
   await loc.save()
+  // Đã đạt kiểm mà soạn lại một vị trí ⇒ phải kiểm lại (như sửa tay)
+  if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")
 }

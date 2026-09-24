@@ -137,6 +137,9 @@ export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRe
 
 const clampLevel = (level: number): number => Math.min(9, Math.max(1, Math.round(level)))
 
+/** Mục riêng thêm tay chưa có tiêu đề — không in khoá thô `custom:CS07` vào tài liệu. */
+const untitledCustom = (language: string): string => (language === "vi" ? "Mục bổ sung" : "Additional Section")
+
 /** Mục layout còn dùng được + mục FPT chèn thêm, theo thứ tự tài liệu. */
 export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] => {
   const defs = listSections(spine).filter((d) => d.id !== "fixed:I")
@@ -151,7 +154,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     const { typed, title, label } = splitTypedNumber(entry.heading_text)
     const level = clampLevel(entry.level)
     if (id.startsWith(GROUP_PREFIX)) {
-      placed.push({ section_id: id, kind: "group", title: title || id, level, fromLayout: true, typed, label })
+      placed.push({ section_id: id, kind: "group", title: title || id.slice(GROUP_PREFIX.length), level, fromLayout: true, typed, label })
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
       if (!custom) continue
@@ -179,7 +182,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     if (used.has(id)) continue
     used.add(id)
     const heading = c.heading.trim()
-    placed.push({ section_id: id, kind: "custom", title: heading || id, level: clampLevel(c.level), fromLayout: false, typed: false })
+    placed.push({ section_id: id, kind: "custom", title: heading || untitledCustom(template.language), level: clampLevel(c.level), fromLayout: false, typed: false })
   }
 
   // Section FPT thiếu trong layout ⇒ chèn cạnh mục anh em cùng nhóm mẫu FPT (sau anh em đứng trước, không có thì trước

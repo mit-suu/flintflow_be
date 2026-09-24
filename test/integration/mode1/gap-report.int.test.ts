@@ -72,7 +72,7 @@ describe("gap report — gộp nhóm", () => {
     for (const s of report.sections) for (const f of s.flags) expect(f.section_id).toBe(s.section_id)
 
     const perf = report.sections.find((s) => s.section_id === "fixed:4.2.3")!
-    expect(perf.title).toBe("Performance")
+    expect(perf.title).toBe("4.2.3 Performance")
     expect(perf.flags[0]).toMatchObject({ id: "FL902", level: "red" })
     expect(perf.flags.slice(1).every((f) => f.level === "yellow")).toBe(true)
     expect(perf.flags.map((f) => f.rule_id)).toContain("import_semantic")
@@ -160,20 +160,25 @@ describe("gap report — .docx", () => {
     const buf = await renderGapReportDocx(report, "Lumen import")
     const blocks = await readBlocks(await DocxPackage.load(buf))
     const texts = blocks.map((b) => b.text)
-    expect(texts[0]).toBe("Gap report — Lumen import")
-    for (const s of report.sections) expect(texts).toContain(`${s.title} (${s.section_id})`)
+    expect(texts[0]).toBe("Báo cáo thiếu sót — Lumen import")
+    // tiêu đề mục không kèm khoá máy
+    for (const s of report.sections) expect(texts).toContain(s.title)
     const summary = blocks.find((b) => b.kind === "table")!.rows!
     expect(summary).toEqual([
       ["Hạng mục", "Số lượng"],
-      ["Thiếu mục FPT (đỏ)", String(report.totals.missing_fpt_sections)],
+      ["Thiếu mục theo mẫu FPT (đỏ)", String(report.totals.missing_fpt_sections)],
       ["Cờ đỏ", String(report.totals.red)],
       ["Cờ vàng", String(report.totals.yellow)],
-      ["Section bắt buộc thiếu", String(report.totals.missing_sections)],
-      ["Heading không khớp template", String(report.totals.unmapped_headings)],
-      ["Field độ tin thấp", String(report.totals.low_confidence_fields)],
+      ["Mục bắt buộc còn thiếu", String(report.totals.missing_sections)],
+      ["Tiêu đề không khớp mẫu", String(report.totals.unmapped_headings)],
+      ["Dữ liệu trích có độ tin thấp", String(report.totals.low_confidence_fields)],
       ["Hình chưa vẽ được", String(report.totals.unrendered_diagrams)]
     ])
     expect(texts.some((t) => t.includes("5.9 Team Notes"))).toBe(true)
+    // báo cáo thật (Spine + profile từ import) không lọt mã máy
+    const all = texts.join("\n")
+    for (const raw of ["fixed:", "feature:", "custom:", "[id=", "section_empty", "import_semantic"]) expect(all).not.toContain(raw)
+    expect(all).not.toMatch(/\bB\d{4}\b/)
   })
 
   it("giao báo cáo lần đầu ⇒ delivered; lần sau không đổi; vẫn xem được báo cáo", async () => {

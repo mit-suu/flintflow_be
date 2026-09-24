@@ -10,9 +10,40 @@
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
 import { ChangeRequest } from "../change-request/change-request.model.js"
+import { quotedSectionLabel } from "../spine/human-labels.js"
 import { ImportedDocument } from "./imported-document.model.js"
+import { TemplateProfile } from "./template-profile.model.js"
 
 export const TOPUP_NEEDED = "credit_topup_needed"
+
+/**
+ * Tên bước cho câu thông báo — không in mã step (`I-4:fixed:5.5`, `C-4:CR-001`). `headingOf` tra tiêu đề mục trong file
+ * người dùng (khoá section của I-4); không có ⇒ nhãn mục chung. Mã lạ ⇒ "một bước AI".
+ */
+export const describeStep = (stepId: string, headingOf: (sectionId: string) => string | null = () => null): string => {
+  const at = stepId.indexOf(":")
+  const code = at >= 0 ? stepId.slice(0, at) : stepId
+  const key = at >= 0 ? stepId.slice(at + 1) : ""
+  if (code === "I-4" && key) {
+    const heading = headingOf(key)
+    return `bước trích dữ liệu mục ${heading ? `"${heading}"` : quotedSectionLabel(key)}`
+  }
+  if (code === "I-1.11") return "bước AI kiểm tra nội dung tài liệu vừa nhập"
+  if (code === "C-2") return `bước AI làm rõ yêu cầu của ${key}`
+  if (code === "C-4") return `bước AI đề xuất sửa của ${key}`
+  if (code === "C-5") return `bước AI kiểm tra đề xuất của ${key}`
+  return "một bước AI"
+}
+
+const headingLookup = async (projectId: string): Promise<(sectionId: string) => string | null> => {
+  try {
+    const profile = (await TemplateProfile.findOne({ projectId }, { heading_map: 1 }).lean()) as { heading_map?: { section_id: string | null; heading_text: string }[] } | null
+    const map = new Map((profile?.heading_map ?? []).filter((h) => h.section_id && h.heading_text.trim()).map((h) => [h.section_id as string, h.heading_text.trim()]))
+    return (id) => map.get(id) ?? null
+  } catch {
+    return () => null
+  }
+}
 
 /** 4.2: báo chủ project nạp credit — bước `stepId` đang dừng. Side effect: lỗi chỉ ghi log. */
 export const notifyTopUpNeeded = async (projectId: string, stepId: string): Promise<void> => {
@@ -22,7 +53,7 @@ export const notifyTopUpNeeded = async (projectId: string, stepId: string): Prom
     await notify(String(project.userId), {
       type: TOPUP_NEEDED,
       title: "Hết credit — bước AI đang dừng",
-      body: `Dự án "${project.name ?? projectId}" dừng ở bước ${stepId} vì không đủ credit. Nạp thêm để chạy tiếp — sau khi thanh toán thành công, bước sẽ tự chạy lại.`,
+      body: `Dự án "${project.name ?? projectId}" dừng ở ${describeStep(stepId, await headingLookup(projectId))} vì không đủ credit. Nạp thêm để chạy tiếp — sau khi thanh toán thành công, bước sẽ tự chạy lại.`,
       link: "/home/billing",
       meta: { project_id: projectId, step_id: stepId }
     })

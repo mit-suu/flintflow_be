@@ -146,6 +146,9 @@ export const importExtractDiagramSchema = importExtractSchema.extend({
   diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
 })
 
+/** Mode 1 v3 phase 7 (CR_MATERIAL_IMAGE): chữ đọc được trong ảnh + mô tả ngắn cấu trúc. */
+export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) })
+
 /** Nút 1.11 (IMPORT_SEMANTIC_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
 export const findingsSchema = z.object({
   findings: z
@@ -165,6 +168,10 @@ export const crClarifySchema = z
   .object({
     ambiguous: z.boolean(),
     questions: z.array(z.string().min(1)).max(5).default([]),
+    /** Mode 1 v3 phase 7: dữ kiện cần để viết nội dung mà CR / câu trả lời / tài liệu chưa có (vòng cuối ⇒ C-4 giả định). */
+    missing_info: z.array(z.string().min(1)).max(10).default([]),
+    /** Đáp án gợi ý cho từng câu hỏi (song song `questions`, 0–4 mỗi câu) — người dùng bấm chọn thay vì tự gõ. */
+    suggestions: z.array(z.array(z.string().min(1)).max(4)).max(5).default([]),
     targets: z.object({
       entity_paths: z.array(z.string().min(1)).default([]),
       keywords: z.array(z.string().min(1)).default([])
@@ -188,7 +195,9 @@ export const crProposeSchema = z.object({
         reason: z.string().min(1),
         new_text: z.string().optional(),
         comment_text: z.string().min(1).optional(),
-        spine_ops: z.array(opSchema).default([])
+        spine_ops: z.array(opSchema).default([]),
+        /** Mode 1 v3 phase 7: dữ kiện model tự giả định khi viết đề xuất này. */
+        assumptions: z.array(z.string().min(1)).max(10).default([])
       })
       .refine((l) => l.conclusion !== "edit" || l.spine_ops.length > 0, { message: "edit cần spine_ops" })
       .refine((l) => l.conclusion !== "comment" || l.comment_text !== undefined, { message: "comment cần comment_text" })
@@ -201,6 +210,7 @@ export type ImportExtractDiagramOutput = z.infer<typeof importExtractDiagramSche
 export type FindingsOutput = z.infer<typeof findingsSchema>
 export type CrClarifyOutput = z.infer<typeof crClarifySchema>
 export type CrProposeOutput = z.infer<typeof crProposeSchema>
+export type CrMaterialImageOutput = z.infer<typeof crMaterialImageSchema>
 
 export type SpineOp = z.infer<typeof opSchema>
 export type OpTransaction = z.infer<typeof opTransactionSchema>
@@ -229,7 +239,8 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.IMPORT_SEMANTIC_CHECK]: "findings",
   [ActionType.CR_CLARIFY]: "crClarify",
   [ActionType.CR_PROPOSE]: "crPropose",
-  [ActionType.CR_CONSISTENCY]: "findings"
+  [ActionType.CR_CONSISTENCY]: "findings",
+  [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -251,7 +262,8 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
   [ActionType.CR_CLARIFY]: crClarifySchema,
   [ActionType.CR_PROPOSE]: crProposeSchema,
-  [ActionType.CR_CONSISTENCY]: findingsSchema
+  [ActionType.CR_CONSISTENCY]: findingsSchema,
+  [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema
 }
 
 export const extractJsonFromText = (

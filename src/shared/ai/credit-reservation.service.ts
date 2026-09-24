@@ -31,7 +31,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.IMPORT_SEMANTIC_CHECK]: 3,
   [ActionType.CR_CLARIFY]: 1,
   [ActionType.CR_PROPOSE]: 3,
-  [ActionType.CR_CONSISTENCY]: 2
+  [ActionType.CR_CONSISTENCY]: 2,
+  // Một ảnh / lượt, output ngắn (chép chữ + mô tả) — rẻ hơn ảnh diagram của I-4
+  [ActionType.CR_MATERIAL_IMAGE]: 1
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */
