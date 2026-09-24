@@ -10,6 +10,8 @@
  *   chuyển sang lỗi thì xoá file cũ.
  * - Hình không đổi (`source_hash` giống, đang `ok`) thì không compile lại, không ghi — trừ khi `force`
  *   (vd renderer đổi template mà dữ liệu nguồn không đổi).
+ * - `screen_layout`: có `deps.drawLayout` (FLF-214) thì model vẽ wireframe salt theo skill `screen-layout`;
+ *   model không vẽ được hoặc salt không compile ⇒ bảng function của renderer code như trước.
  */
 
 import * as repository from "../spine/spine.repository.js"
@@ -22,6 +24,7 @@ import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantu
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
 import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
+import { aiScreenLayout, noAiLayout, type DrawLayout } from "./screen-layout.ai.js"
 
 export const DIAGRAM_NOT_FOUND = "DIAGRAM_NOT_FOUND"
 /** Phases §4.1: compile-check → sửa → thử lại, tối đa 2 lần. */
@@ -43,6 +46,8 @@ export interface DiagramServiceDeps {
   renderPng: (source: string) => Promise<Buffer>
   store: DiagramFileStore
   fix: FixPuml
+  /** Wireframe màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
+  drawLayout: DrawLayout
   now: () => Date
 }
 
@@ -52,11 +57,19 @@ export interface DiagramServiceDeps {
  */
 export const noAutoFix: FixPuml = async () => null
 
+/**
+ * Dep cho các lượt vẽ thật (step S-5.3, vẽ lại tự động, nút Vẽ lại, reconcile): wireframe màn do model vẽ.
+ * Test cắm dep riêng thì giữ nguyên dep đó — không gọi model.
+ */
+export const layoutRenderDeps = (injected?: Partial<DiagramServiceDeps>): Partial<DiagramServiceDeps> =>
+  injected ?? { drawLayout: aiScreenLayout }
+
 export const defaultDeps = (): DiagramServiceDeps => ({
   check: checkPlantUml,
   renderPng: async (source) => (await renderPlantUml(source, "png")).data,
   store: gridFsDiagramStore,
   fix: noAutoFix,
+  drawLayout: noAiLayout,
   now: () => new Date()
 })
 
@@ -212,7 +225,13 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
         continue
       }
 
-      const compiled = await compileWithFix(part.kind, part.puml, deps)
+      const drawn =
+        part.kind === "screen_layout" && part.owner_id
+          ? await deps.drawLayout({ projectId, userId: options.by, spine, screenId: part.owner_id }).catch(() => null)
+          : null
+      let compiled = await compileWithFix(part.kind, drawn ?? part.puml, deps)
+      // Salt của model không compile ⇒ vẽ bảng function thay vì để hình lỗi
+      if (drawn !== null && !compiled.ok) compiled = await compileWithFix(part.kind, part.puml, deps)
       const diagram: Diagram = {
         id,
         kind: part.kind,

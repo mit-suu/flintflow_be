@@ -34,7 +34,7 @@ import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
-import { renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
@@ -589,7 +589,7 @@ export const runRenderReviewPhase = async (
     const result = await renderDiagrams(projectId, targets, {
       by: userId,
       step_id: stepId,
-      ...(deps.renderDeps ? { deps: deps.renderDeps } : {})
+      deps: layoutRenderDeps(deps.renderDeps)
     })
     spineVersion = result.spine_version
     for (const id of result.rendered) {
@@ -617,7 +617,7 @@ export const runRenderReviewPhase = async (
   }
   if (staleTargets.length > 0) {
     const before = new Map(spineAfterDraft.diagrams.map((d) => [d.id, d]))
-    const result = await renderDiagrams(projectId, staleTargets.slice(0, MAX_AUTO_RERENDER), { by: userId, step_id: stepId, ...(deps.renderDeps ? { deps: deps.renderDeps } : {}) })
+    const result = await renderDiagrams(projectId, staleTargets.slice(0, MAX_AUTO_RERENDER), { by: userId, step_id: stepId, deps: layoutRenderDeps(deps.renderDeps) })
     spineVersion = result.spine_version
 
     // Vẽ lại tự động mà hỏng (PlantUML chết, cú pháp lạ) thì KHÔNG để lại `render_error` — đó là cờ đỏ
