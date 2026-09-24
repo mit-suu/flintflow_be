@@ -196,7 +196,7 @@ describe("mode 1 — finalize, check, gap report", () => {
     expect(docx.status).toBe(200)
     expect(docx.headers["content-disposition"]).toContain(".docx")
     const zip = await JSZip.loadAsync(docx.body as Buffer)
-    expect(await zip.file("word/document.xml")!.async("string")).toContain("Gap report")
+    expect(await zip.file("word/document.xml")!.async("string")).toContain("Báo cáo thiếu sót")
     expect(getImportResponseSchema.parse((await c.get("/import")).body.data).import?.status).toBe("delivered")
   })
 

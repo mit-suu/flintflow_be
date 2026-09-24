@@ -30,6 +30,18 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords).map((f) =>
     seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
   )
+  // Phase 8: CR gộp thêm lệnh sau khi đã có đề xuất ⇒ vị trí đã có (đề xuất / kết luận / khoá) giữ nguyên, chỉ thêm
+  // phần tử mới. Chưa có đề xuất nào ⇒ tìm lại như cũ (thay toàn bộ vị trí, trả khoá phần tử bị bỏ).
+  const existing = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path location_id conclusion").lean()
+  if (existing.some((l) => l.conclusion !== null)) {
+    const have = new Set(existing.map((l) => l.path))
+    const fresh = found.filter((f) => !have.has(f.path))
+    if (!fresh.length) return
+    const next = existing.reduce((n, l) => Math.max(n, Number(l.location_id.slice(1)) || 0), 0)
+    await lockPaths(cr.projectId, cr.cr_id, fresh.map((f) => f.path))
+    await ChangeLocation.insertMany(fresh.map((f, i) => ({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: formatLocationId(next + i + 1), ...f })))
+    return
+  }
   if (!found.length) {
     // Đứng im ở impact_review với 0 vị trí làm nút "Tìm vị trí" trông như hỏng. Nói rõ: đích nào là mục còn trống
     // mà cũng không thêm mới được và CR đã nhắm vào gì. Mode 1 v3 không còn step ⇒ lối ra duy nhất là sửa mô tả CR.
@@ -44,7 +56,7 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
       "CR_NO_LOCATIONS",
       empty.length
         ? `Không có phần tử nào để sửa: ${emptyTitles} đang trống — sửa mô tả CR cho trỏ vào phần tử cụ thể rồi làm rõ lại`
-        : "Không tìm được phần tử Spine nào khớp với change request — sửa mô tả (nêu mã hoặc tên phần tử) rồi làm rõ lại",
+        : "Không tìm được phần nào trong tài liệu khớp với change request — sửa mô tả (nêu mã hoặc tên phần tử) rồi làm rõ lại",
       { targets: { entity_paths: [...cr.targets.entity_paths], keywords: [...cr.targets.keywords] }, empty_sections: empty }
     )
   }

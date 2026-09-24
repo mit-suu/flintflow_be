@@ -92,7 +92,7 @@ describe("mode 1 — change request", () => {
     expect(await lockedPaths(projectId, "CR-001")).toEqual(impact.locations.map((l) => l.path).sort())
 
     expect(proposed.change_request.status).toBe("proposing")
-    expect(proposed.groups.map((g) => g.title).sort()).toEqual(["Business Rules", "Performance"])
+    expect(proposed.groups.map((g) => g.title).sort()).toEqual(["4.2.3 Performance", "5.1 Business Rules"])
     expect(verified.change_request.status).toBe("ready_to_submit")
     expect(verified.locations.every((l) => l.verify?.code_ok)).toBe(true)
 
@@ -100,8 +100,8 @@ describe("mode 1 — change request", () => {
     expect(submitted.change_request.status).toBe("in_review")
     expect(submitted.change_request.submitted_at).not.toBeNull()
 
-    const perfGroup = submitted.groups.find((g) => g.title === "Performance")!
-    const brGroup = submitted.groups.find((g) => g.title === "Business Rules")!
+    const perfGroup = submitted.groups.find((g) => g.title === "4.2.3 Performance")!
+    const brGroup = submitted.groups.find((g) => g.title === "5.1 Business Rules")!
     const shortReason = await c.post(`${cr}/groups/${brGroup.group_id}/decision`, { decision: "rejected", reason: "no", base_version: 1 })
     expect(shortReason.status).toBe(400)
     const rejected = detail(await c.post(`${cr}/groups/${brGroup.group_id}/decision`, { decision: "rejected", reason: "Ngoài phạm vi bản 1.0", base_version: await c.spineVersion() }))

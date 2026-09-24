@@ -17,6 +17,7 @@ import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DE
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
+import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 
 export interface RuleDef {
   rule_id: string
@@ -219,24 +220,25 @@ const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
       rule_id: "section_empty",
       section_id: id,
       target_id: null,
-      message: `Section bắt buộc ${id} chưa có dữ liệu`,
+      message: `Mục bắt buộc ${quotedSectionLabel(id)} chưa có dữ liệu`,
       remediation_step: ownerStepOf(id)
     }))
 
 // ─── red: array_empty ────────────────────────────────────────────
 
-const PROTECTED_ARRAYS: readonly { label: string; count: (s: Spine) => number; section: string; step: string }[] = [
-  { label: "actors", count: (s) => s.actors.length, section: "fixed:2.1", step: "S-3.1" },
-  { label: "actors[kind=human]", count: (s) => s.actors.filter((a) => a.kind === "human").length, section: "fixed:2.1", step: "S-3.1" },
-  { label: "screens", count: (s) => s.screens.length, section: "fixed:3.1.2", step: "S-4.1" },
-  { label: "entities", count: (s) => s.entities.length, section: "fixed:3.1.5", step: "S-4.5" },
-  { label: "use_cases", count: (s) => s.use_cases.length, section: "fixed:2.2.2", step: "S-3.2" },
-  { label: "features", count: (s) => s.features.length, section: "fixed:3.1.2", step: "S-4.1" },
-  { label: "functions", count: (s) => s.functions.length, section: "fixed:3.1.2", step: "S-4.1" },
-  { label: "roles", count: (s) => s.roles.length, section: "fixed:3.1.3", step: "S-3.1" },
-  { label: "nfrs[category=reliability]", count: (s) => nfrCount(s, "reliability"), section: "fixed:4.2.2", step: "S-6.3" },
-  { label: "nfrs[category=performance]", count: (s) => nfrCount(s, "performance"), section: "fixed:4.2.3", step: "S-6.4" },
-  { label: "common_requirements", count: (s) => s.common_requirements.length, section: "fixed:5.2", step: "S-7.2" }
+/** `label` là khoá máy (ghi vào `target_id`); `name` là chữ cho người đọc trong `message`. */
+const PROTECTED_ARRAYS: readonly { label: string; name: string; count: (s: Spine) => number; section: string; step: string }[] = [
+  { label: "actors", name: "Danh sách tác nhân", count: (s) => s.actors.length, section: "fixed:2.1", step: "S-3.1" },
+  { label: "actors[kind=human]", name: "Danh sách tác nhân là người", count: (s) => s.actors.filter((a) => a.kind === "human").length, section: "fixed:2.1", step: "S-3.1" },
+  { label: "screens", name: "Danh sách màn hình", count: (s) => s.screens.length, section: "fixed:3.1.2", step: "S-4.1" },
+  { label: "entities", name: "Danh sách thực thể dữ liệu", count: (s) => s.entities.length, section: "fixed:3.1.5", step: "S-4.5" },
+  { label: "use_cases", name: "Danh sách use case", count: (s) => s.use_cases.length, section: "fixed:2.2.2", step: "S-3.2" },
+  { label: "features", name: "Danh sách tính năng", count: (s) => s.features.length, section: "fixed:3.1.2", step: "S-4.1" },
+  { label: "functions", name: "Danh sách chức năng", count: (s) => s.functions.length, section: "fixed:3.1.2", step: "S-4.1" },
+  { label: "roles", name: "Danh sách vai trò", count: (s) => s.roles.length, section: "fixed:3.1.3", step: "S-3.1" },
+  { label: "nfrs[category=reliability]", name: "Yêu cầu độ tin cậy", count: (s) => nfrCount(s, "reliability"), section: "fixed:4.2.2", step: "S-6.3" },
+  { label: "nfrs[category=performance]", name: "Yêu cầu hiệu năng", count: (s) => nfrCount(s, "performance"), section: "fixed:4.2.3", step: "S-6.4" },
+  { label: "common_requirements", name: "Danh sách yêu cầu chung", count: (s) => s.common_requirements.length, section: "fixed:5.2", step: "S-7.2" }
 ]
 
 const arrayEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
@@ -245,7 +247,7 @@ const arrayEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
     rule_id: "array_empty",
     section_id: a.section,
     target_id: a.label,
-    message: `${a.label} đang rỗng`,
+    message: `${a.name} đang trống`,
     remediation_step: a.step
   }))
 
@@ -313,7 +315,7 @@ const deadReference = (spine: Spine): FlagCandidate[] =>
       rule_id: "dead_reference",
       section_id: where.section,
       target_id: hit.refPath,
-      message: `${hit.refPath} trỏ tới "${hit.targetId}" không tồn tại`,
+      message: `${pathLabel(hit.refPath)}: tham chiếu tới ${hit.target === "section_key" ? quotedSectionLabel(hit.targetId, spine) : `"${hit.targetId}"`} không còn tồn tại`,
       remediation_step: where.step
     }
   })
@@ -328,7 +330,7 @@ const renderError = (spine: Spine): FlagCandidate[] =>
       rule_id: "render_error",
       section_id: d.section,
       target_id: d.id,
-      message: `Hình ${d.id} (${d.kind}) render lỗi${d.error ? `: ${d.error}` : ""}`,
+      message: `${capitalize(diagramLabel(d, spine))} vẽ lỗi${d.error ? `: ${d.error}` : ""}`,
       remediation_step: renderStepOf(d)
     }))
 
@@ -341,7 +343,7 @@ const diagramStale = (spine: Spine): FlagCandidate[] =>
       rule_id: "diagram_stale",
       section_id: d.section,
       target_id: d.id,
-      message: `Hình ${d.id} (${d.kind}) không còn khớp dữ liệu, cần render lại`,
+      message: `${capitalize(diagramLabel(d, spine))} không còn khớp dữ liệu, cần vẽ lại`,
       remediation_step: renderStepOf(d)
     }))
 
@@ -353,7 +355,7 @@ const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
       // "Chưa có NFR nào" là luật "chưa có X" ⇒ qua cổng. Nhánh dưới soi NFR ĐÃ có mà thiếu số đo —
       // dữ liệu đã nằm đó thì thiếu số là lỗi thật, không phụ thuộc bước nào chốt chưa.
       return gate.done(step)
-        ? [{ level: "red" as const, rule_id: "nfr_missing_number", section_id: section, target_id: null, message: `Chưa có NFR ${category} nào`, remediation_step: step }]
+        ? [{ level: "red" as const, rule_id: "nfr_missing_number", section_id: section, target_id: null, message: `Chưa có yêu cầu ${NFR_CATEGORY_LABELS[category]} nào`, remediation_step: step }]
         : []
     }
     return items
@@ -363,7 +365,7 @@ const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
         rule_id: "nfr_missing_number",
         section_id: section,
         target_id: n.id,
-        message: `NFR ${n.id} (${category}) thiếu metric/threshold`,
+        message: `Yêu cầu ${NFR_CATEGORY_LABELS[category]} ${n.id} thiếu chỉ số đo / ngưỡng`,
         remediation_step: step
       }))
   })
@@ -372,7 +374,7 @@ const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
  * Giả định chưa xác nhận. `remediation_step` phải là step **xử lý được** cờ, không phải step đã sinh ra nó:
  * chỉ S-9.2 (Assumption Sweep) mới đổi được `status` sang `confirmed`. Trước đây trỏ `origin_step_id` nên UI
  * mời "mở lại <step sinh ra giả định>" — chạy lại bao nhiêu lần cũng không đóng được cờ, mà mỗi vòng đốt một
- * phần trần 8 lượt gọi/step cho tới khi CALL_LIMIT (gặp thật 2026-09-20, L11c). Nguồn giữ trong `message`.
+ * phần trần 8 lượt gọi/step cho tới khi CALL_LIMIT (gặp thật 2026-09-20, L11c). Step sinh ra không in vào `message` (mã step không phải chữ cho người đọc).
  */
 const ASSUMPTION_SWEEP_STEP = "S-9.2"
 
@@ -384,7 +386,7 @@ const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
       rule_id: "unconfirmed_assumption",
       section_id: sectionsOfPath(spine, a.path).owner[0] ?? "fixed:5.4",
       target_id: a.id,
-      message: `Giả định ${a.id} chưa được xác nhận${a.origin_step_id ? ` (sinh ở ${a.origin_step_id})` : ""}: ${a.statement}`,
+      message: `Giả định ${a.id} chưa được xác nhận: ${a.statement}`,
       remediation_step: ASSUMPTION_SWEEP_STEP
     }))
 
@@ -419,7 +421,7 @@ const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" 
         rule_id: "derived_from_changed_assumption",
         section_id: sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4",
         target_id: assumption.id,
-        message: `Giả định ${assumption.id} ${verb} ("${assumption.statement}") nhưng "${assumption.path}" chưa cập nhật theo`,
+        message: `Giả định ${assumption.id} ${verb} ("${assumption.statement}") nhưng ${pathLabel(assumption.path)} chưa cập nhật theo`,
         remediation_step: ownerStepOf(sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4", spine)
       }
     ]
@@ -436,7 +438,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_stale_at_baseline",
         section_id: s.id,
         target_id: null,
-        message: `Section ${s.id} đã cũ so với dữ liệu nó phụ thuộc`,
+        message: `Nội dung ${quotedSectionLabel(s.id, spine)} đã cũ so với dữ liệu nó phụ thuộc`,
         remediation_step: ownerStepOf(s.id, spine)
       })),
     ...states
@@ -446,7 +448,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_awaiting_reaccept",
         section_id: s.id,
         target_id: null,
-        message: `Section ${s.id} đang chờ duyệt lại sau hoà giải`,
+        message: `Nội dung ${quotedSectionLabel(s.id, spine)} đang chờ duyệt lại sau hoà giải`,
         remediation_step: ownerStepOf(s.id, spine)
       }))
   ]
@@ -478,7 +480,7 @@ const screenPlaceholder = (spine: Spine, atBaseline: boolean): FlagCandidate[] =
           rule_id: "screen_placeholder",
           section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
           target_id: s.id,
-          message: `Màn ${s.id} "${s.name}" bị để trống mà chưa qua cổng S-5.1 — mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
+          message: `Màn hình "${s.name}" bị để trống mà chưa ai chốt — mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
           remediation_step: `S-5.1@${s.id}`
         }))
 }
@@ -511,7 +513,7 @@ const screenPendingAtBaseline = (spine: Spine): FlagCandidate[] =>
       rule_id: "screen_pending_at_baseline",
       section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
       target_id: s.id,
-      message: `Màn ${s.id} "${s.name}" chưa được mô tả chi tiết (S-5)`,
+      message: `Màn hình "${s.name}" chưa được mô tả chi tiết`,
       remediation_step: `S-5.1@${s.id}`
     }))
 
@@ -522,7 +524,7 @@ const orphanScreenAtBaseline = (spine: Spine): FlagCandidate[] =>
     rule_id: "orphan_screen_at_baseline",
     section_id: "fixed:3.1.1",
     target_id: screen.id,
-    message: `Màn "${screen.name}" mồ côi, không ký baseline được: ${why}`,
+    message: `Màn hình "${screen.name}" không nằm trong luồng nào, chưa chốt bản được: ${why}`,
     remediation_step: "S-4.2"
   }))
 
@@ -543,7 +545,7 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
 
   return spine.screens.flatMap((screen) => {
     if (linked && (actorsOf.get(screen.id) ?? []).length === 0) {
-      return [{ screen, why: "không actor người nào dùng màn này (không có quyền lẫn use case gắn function trên màn)" }]
+      return [{ screen, why: "không tác nhân nào dùng màn này (chưa có phân quyền hay use case nào gắn chức năng trên màn)" }]
     }
     if (!hasFlow || incoming.has(screen.id)) return []
     if (screen.is_popup) return [{ screen, why: "popup không có màn nào mở tới" }]
@@ -575,26 +577,26 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
     ...when("orphan_actor", () =>
       spine.actors
         .filter((a) => !usedActors.has(a.id))
-        .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Actor "${a.name}" không thuộc use case nào`, "S-3.2"))),
+        .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Tác nhân "${a.name}" không thuộc use case nào`, "S-3.2"))),
     ...when("usecase_no_function", () =>
       spine.use_cases
         .filter((u) => u.function_ids.length === 0)
-        .map((u) => yellow("usecase_no_function", "fixed:2.2.2", u.id, `Use case "${u.name}" chưa gắn function nào`, "S-3.2"))),
+        .map((u) => yellow("usecase_no_function", "fixed:2.2.2", u.id, `Use case "${u.name}" chưa gắn chức năng nào`, "S-3.2"))),
     ...when("screen_no_function", () =>
       spine.screens
         .filter((s) => !fnScreens.has(s.id))
-        .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn "${s.name}" chưa có function nào`, "S-4.1"))),
+        .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn hình "${s.name}" chưa có chức năng nào`, "S-4.1"))),
     ...when("orphan_screen", () =>
       orphanScreens(spine).map(({ screen, why }) =>
-        yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn "${screen.name}" mồ côi: ${why}`, "S-4.2"))),
+        yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
     ...when("empty_feature", () =>
       spine.features
         .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
-        .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Feature "${f.name}" không có màn lẫn function`, "S-4.1"))),
+        .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Tính năng "${f.name}" chưa có màn hình hay chức năng nào`, "S-4.1"))),
     ...when("role_no_actor", () =>
       spine.roles
         .filter((r) => r.actor_id === null)
-        .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn actor`, "S-3.1")))
+        .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn tác nhân`, "S-3.1")))
   ]
 }
 
@@ -627,7 +629,12 @@ const NAME_RULE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   A7: "trùng tên với actor khác"
 })
 
-const hint = (codes: string[]): string => codes.map((c) => `${c} (${NAME_RULE_HINTS[c] ?? ""})`).join("; ")
+/** Chỉ lời giải thích — mã luật nội bộ (U2, A7…) không in cho người dùng. */
+const hint = (codes: string[]): string =>
+  codes
+    .map((c) => NAME_RULE_HINTS[c])
+    .filter((h): h is string => !!h)
+    .join("; ")
 const wordsOf = (name: string): string[] => name.trim().split(/\s+/).filter(Boolean)
 const sameText = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
 /** Khớp NGUYÊN TỪ, không phân biệt hoa thường: "Scheduler" không dính "Run Scheduled Housekeeping". */
@@ -760,7 +767,7 @@ const useCaseFloating = (spine: Spine, gate: StepGate): FlagCandidate[] => {
       rule_id: "usecase_floating",
       section_id: "fixed:2.2.2",
       target_id: u.id,
-      message: `Use case "${u.name}" không có actor và không nối use case nào`,
+      message: `Use case "${u.name}" không có tác nhân và không nối với use case nào`,
       remediation_step: "S-3.2"
     }))
 }
@@ -858,7 +865,7 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
       rule_id: "actor_name_shape",
       section_id: "fixed:2.1",
       target_id: a.id,
-      message: `Tên actor "${a.name}" chưa đạt: ${hint(codes)}`,
+      message: `Tên tác nhân "${a.name}" chưa đạt: ${hint(codes)}`,
       remediation_step: "S-3.1"
     })
   }
@@ -975,7 +982,7 @@ const nonEnglishContent = (spine: Spine): FlagCandidate[] =>
         rule_id: "non_english_content",
         section_id: item.section,
         target_id: item.target_id,
-        message: `Nội dung render vào SRS phải bằng tiếng Anh: ${offending.join(", ")}`,
+        message: `Nội dung đưa vào tài liệu SRS phải bằng tiếng Anh: ${offending.map(pathLabel).join(", ")}`,
         remediation_step: item.step
       }
     ]

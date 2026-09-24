@@ -16,6 +16,7 @@ import { withMeteredAi } from "../import/metered-ai.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 import { flagKey, runDeterministicCheck } from "../spine/deterministic-check.js"
+import { humanizeText, pathLabel, ruleLabel } from "../spine/human-labels.js"
 import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -29,7 +30,7 @@ import { locksOf } from "./lock.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
-  new Mode1Error("CR_VALUE_CHANGED", `${loc.path} đã bị sửa ở chỗ khác kể từ lúc đề xuất`, { location_id: loc.location_id, path: loc.path })
+  new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất — tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
 
 type CheckLocation = Pick<IChangeLocation, "location_id" | "path" | "conclusion" | "proposal">
 
@@ -47,28 +48,37 @@ export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocat
   if (!loc.conclusion) return [{ rule: "unconcluded", message: "Vị trí chưa có kết luận" }]
   if (loc.conclusion === "not_related") return []
   const current = elementValue(spine, loc.path)
-  if (current === undefined) return [{ rule: "element_missing", message: `${loc.path} không còn trong Spine`, path: loc.path }]
+  if (current === undefined) return [{ rule: "element_missing", message: `${pathLabel(loc.path)} không còn trong tài liệu`, path: loc.path }]
   const out: VerifyViolation[] = []
-  if (locks.get(loc.path) !== cr.cr_id) out.push({ rule: "path_not_locked", message: `${loc.path} không do ${cr.cr_id} giữ khoá`, path: loc.path })
+  if (locks.get(loc.path) !== cr.cr_id) out.push({ rule: "path_not_locked", message: `${pathLabel(loc.path)} chưa được giữ cho ${cr.cr_id} (có thể một change request khác đang sửa)`, path: loc.path })
   const p = loc.proposal
   if (!p) return [...out, { rule: "no_proposal", message: "Thiếu đề xuất" }]
   if (valueText(current) !== p.old_text) throw valueChanged(loc)
   if (loc.conclusion === "edit") {
-    if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận edit nhưng không có op Spine" })
-    else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Op không đổi gì ở phần tử này" })
+    if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận là sửa nhưng chưa có nội dung sửa" })
+    else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Đề xuất không thay đổi gì ở phần tử này" })
     for (const el of opElements(loc)) {
-      if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Op sửa ${el} — phần tử này không thuộc vị trí CR đang khoá`, path: el })
+      if (el !== loc.path && locks.get(el) !== cr.cr_id) out.push({ rule: "op_path_not_locked", message: `Đề xuất sửa cả ${pathLabel(el)} — phần này không thuộc các vị trí của change request`, path: el })
     }
     // Vị trí "mục trống" (`arr[]`): chỉ được thêm phần tử vào đúng mảng đó, không lấn sang mảng khác
     if (isArrayPath(loc.path)) {
       const array = loc.path.slice(0, -2)
       for (const raw of p.spine_ops) {
         const path = opPath(raw)
-        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Op chạm ${path} — vị trí này chỉ được thêm mới vào ${loc.path}`, path })
+        if (!path.startsWith(array)) out.push({ rule: "op_outside_section", message: `Đề xuất sửa ${pathLabel(path)} — vị trí này chỉ được thêm mới vào ${pathLabel(loc.path)}`, path })
+      }
+    } else {
+      // Phần tử mới chỉ thêm từ ô "thêm mới" của đúng mục (2026-09-24: AI chèn bảng phân quyền thành mục riêng mới từ vị
+      // trí tác nhân A01 / màn SCR-06 — thêm phần tử không qua khoá nên trước đây lọt kiểm)
+      for (const raw of p.spine_ops) {
+        const path = opPath(raw)
+        if (isArrayPath(path)) {
+          out.push({ rule: "add_outside_slot", message: `Đề xuất thêm ${pathLabel(path)} từ ${pathLabel(loc.path)} — phần tử mới phải thêm ở ô “thêm mới” của đúng mục`, path })
+        }
       }
     }
   }
-  if (loc.conclusion === "comment" && !p.comment_text?.trim()) out.push({ rule: "comment_empty", message: "Kết luận comment nhưng không có nội dung" })
+  if (loc.conclusion === "comment" && !p.comment_text?.trim()) out.push({ rule: "comment_empty", message: "Kết luận là ghi chú nhưng chưa có nội dung ghi chú" })
   return out
 }
 
@@ -83,7 +93,7 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
     for (const raw of l.proposal?.spine_ops ?? []) {
       const parsed = userOpSchema.safeParse(raw)
       if (!parsed.success) {
-        push(l.location_id, { rule: "op_invalid", message: "Op Spine sai định dạng" })
+        push(l.location_id, { rule: "op_invalid", message: "Nội dung sửa sai định dạng, không áp dụng được" })
         continue
       }
       ops.push(parsed.data)
@@ -95,12 +105,12 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: cr.cr_id }, { startSeq: 1 })
     const before = new Set(runDeterministicCheck(spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter((c) => c.level === "red").map(flagKey))
     const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter((c) => c.level === "red" && !before.has(flagKey(c)))
-    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Op làm mở cờ đỏ ${c.rule_id}: ${c.message}` })
+    for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} — ` : ""}${c.message}` })
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
     for (const v of err.violations) {
       const locId = v.op_index !== undefined ? owner[v.op_index] : undefined
-      for (const id of locId ? [locId] : [...new Set(owner)]) push(id, { rule: v.rule, message: v.message, ...(v.path ? { path: v.path } : {}) })
+      for (const id of locId ? [locId] : [...new Set(owner)]) push(id, { rule: v.rule, message: humanizeText(v.message), ...(v.path ? { path: v.path } : {}) })
     }
   }
   return out
@@ -157,7 +167,7 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
       // Nhận xét gắn vào vị trí sửa cùng section; không khớp section nào thì vị trí sửa đầu tiên (người duyệt vẫn thấy)
       const hit = changed.filter((c) => c.section_id === f.section_id)
       for (const l of hit.length ? hit : changed.slice(0, 1)) {
-        aiFlags.set(l.location_id, [...(aiFlags.get(l.location_id) ?? []), { rule: f.rule, message: f.message }])
+        aiFlags.set(l.location_id, [...(aiFlags.get(l.location_id) ?? []), { rule: f.rule, message: humanizeText(f.message) }])
       }
     }
   }

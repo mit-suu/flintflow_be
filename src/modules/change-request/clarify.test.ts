@@ -8,7 +8,8 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
-import { answersText, crHeader, crProjection, glossaryText, namedEntities, truncate } from "./cr-context.js"
+import { CR_MATERIAL_MAX_CHARS, clipMaterialText } from "./change-request.constants.js"
+import { MATERIALS_PROMPT_CHARS, answersText, crHeader, crProjection, glossaryText, materialsText, missingInfoText, namedEntities, truncate } from "./cr-context.js"
 
 const spine = (): Spine => {
   const s = createEmptySpine({ name: "Lumen" })
@@ -28,17 +29,61 @@ describe("C-2 giới hạn vòng hỏi", () => {
 })
 
 describe("C-2 ngữ cảnh gửi model", () => {
-  it("câu hỏi – trả lời trước theo vòng; câu chưa trả lời ghi (no answer); chưa có ⇒ (none)", () => {
+  it("câu hỏi – trả lời trước theo vòng; câu chưa / không trả lời (trống) ghi (no answer — unknown); chưa có ⇒ (none)", () => {
     expect(answersText(cr())).toBe("(none)")
     const text = answersText(
       cr({
         clarifications: [
           { round: 1, questions: ["Which screen?", "Which actor?"], answers: ["Login screen", "Learner"] },
-          { round: 2, questions: ["How fast?"], answers: [] }
+          { round: 2, questions: ["How fast?", "Which devices?"], answers: ["  ", "all"] }
         ]
       })
     )
-    expect(text).toBe("Q1.1: Which screen?\nA: Login screen\nQ1.2: Which actor?\nA: Learner\nQ2.1: How fast?\nA: (no answer)")
+    expect(text).toBe("Q1.1: Which screen?\nA: Login screen\nQ1.2: Which actor?\nA: Learner\nQ2.1: How fast?\nA: (no answer — unknown)\nQ2.2: Which devices?\nA: all")
+  })
+
+  it("phase 7: tài liệu bổ sung ⇒ [id] tên (lúc đính kèm) + nội dung; không có ⇒ (none)", () => {
+    const at = new Date()
+    expect(materialsText(cr({ materials: [] }))).toBe("(none)")
+    const text = materialsText(
+      cr({
+        materials: [
+          { material_id: "M01", kind: "text", name: "Email PM", text: "Response ≤ 2 s", truncated: false, round: 0, added_at: at },
+          { material_id: "M02", kind: "image", name: "notes.png", text: "Peak 500 users", truncated: true, round: 2, added_at: at }
+        ]
+      })
+    )
+    expect(text).toBe("[M01] Email PM (attached when the CR was logged)\nResponse ≤ 2 s\n\n[M02] notes.png (attached with the answers of round 2; cut at upload)\nPeak 500 users")
+  })
+
+  it("phase 7: tổng chữ tài liệu ≤ ngân sách prompt — tài liệu ngắn giữ nguyên, tài liệu dài chia phần còn lại", () => {
+    const at = new Date()
+    const long = "a".repeat(CR_MATERIAL_MAX_CHARS)
+    const text = materialsText(
+      cr({
+        materials: [
+          { material_id: "M01", kind: "file", name: "long-1", text: long, truncated: false, round: 0, added_at: at },
+          { material_id: "M02", kind: "text", name: "short", text: "keep me whole", truncated: false, round: 0, added_at: at },
+          { material_id: "M03", kind: "file", name: "long-2", text: long, truncated: false, round: 0, added_at: at }
+        ]
+      })
+    )
+    expect(text).toContain("keep me whole")
+    expect(text.split("…(truncated)").length).toBe(3)
+    expect(text.length).toBeLessThan(MATERIALS_PROMPT_CHARS + 400)
+    expect(text.indexOf("[M01]")).toBeLessThan(text.indexOf("[M02]"))
+  })
+
+  it("phase 7: dữ kiện còn thiếu ⇒ gạch đầu dòng; rỗng ⇒ (none)", () => {
+    expect(missingInfoText(cr({ missing_info: [] }))).toBe("(none)")
+    expect(missingInfoText(cr({ missing_info: ["Ngưỡng thời gian phản hồi", "Số người dùng đồng thời"] }))).toBe("- Ngưỡng thời gian phản hồi\n- Số người dùng đồng thời")
+  })
+
+  it("phase 7: chuẩn hoá chữ tài liệu — xuống dòng Windows, dòng trống thừa, cắt ở giới hạn", () => {
+    expect(clipMaterialText("  a\r\nb\n\n\n\nc  ")).toEqual({ text: "a\nb\n\nc", truncated: false })
+    const clipped = clipMaterialText("x".repeat(CR_MATERIAL_MAX_CHARS + 5))
+    expect(clipped.truncated).toBe(true)
+    expect(clipped.text.length).toBe(CR_MATERIAL_MAX_CHARS)
   })
 
   it("header CR: nguồn kèm ref nếu có", () => {

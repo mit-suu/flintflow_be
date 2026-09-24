@@ -28,5 +28,22 @@ export type GroupDecision = (typeof GROUP_DECISIONS)[number]
 export const CR_ID_PATTERN = /^CR-\d{3,}$/
 export const formatCrId = (seq: number): string => `CR-${String(seq).padStart(3, "0")}`
 
+/**
+ * Tài liệu bổ sung của CR (mode 1 v3 phase 7): người dùng dán chữ / upload file để AI có dữ kiện viết nội dung.
+ * `text` = chữ gõ/dán, `file` = chữ tách từ .docx/.pdf/.txt/.md, `image` = chữ + mô tả Gemini đọc từ ảnh.
+ */
+export const CR_MATERIAL_KINDS = ["text", "file", "image"] as const
+export type CrMaterialKind = (typeof CR_MATERIAL_KINDS)[number]
+export const CR_MAX_MATERIALS = 10
+/** Chữ giữ lại mỗi tài liệu; dài hơn ⇒ cắt, `truncated = true`. */
+export const CR_MATERIAL_MAX_CHARS = 20_000
+export const MATERIAL_ID_PATTERN = /^M\d{2,}$/
+export const formatMaterialId = (seq: number): string => `M${String(seq).padStart(2, "0")}`
+/** Chuẩn hoá chữ tài liệu bổ sung: bỏ khoảng trắng thừa, cắt ở `CR_MATERIAL_MAX_CHARS`. */
+export const clipMaterialText = (raw: string): { text: string; truncated: boolean } => {
+  const text = raw.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  return text.length > CR_MATERIAL_MAX_CHARS ? { text: text.slice(0, CR_MATERIAL_MAX_CHARS), truncated: true } : { text, truncated: false }
+}
+
 export const LOCATION_ID_PATTERN = /^L\d{3,}$/
 export const GROUP_ID_PATTERN = /^G\d{2,}$/

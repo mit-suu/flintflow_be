@@ -46,6 +46,7 @@ yellow notes for the reviewer — you never block, and silence is a valid answer
 2. `section_id` = the section shown next to the element with the problem (the reviewer sees the note there);
    `block_ids` = `[]`.
 3. `message` in the document's language, quoting both sides of the problem. At most 10 findings.
+4. `message`: User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
 
 ## Output
 

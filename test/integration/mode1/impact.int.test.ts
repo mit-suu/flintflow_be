@@ -31,7 +31,7 @@ describe("C-3 trên Spine", () => {
     const d = detail(await c.post(`${cr}/impact`))
     expect(d.change_request.status).toBe("impact_review")
     const byPath = new Map(d.locations.map((l) => [l.path, l]))
-    expect(byPath.get("use_cases[id=UC-01]")).toMatchObject({ section_id: "fixed:2.2.2", section_title: "Use Case Descriptions", owner_step: "S-3.2" })
+    expect(byPath.get("use_cases[id=UC-01]")).toMatchObject({ section_id: "fixed:2.2.2", section_title: "2.2.2 Use Case Descriptions", owner_step: "S-3.2" })
     expect(byPath.get("use_cases[id=UC-01]")?.found_by).toContain("spine_link")
     expect(byPath.get("functions[id=FR-3.2.2]")).toMatchObject({ section_id: "function:FR-3.2.2", found_by: expect.arrayContaining(["spine_link"]) })
     expect(new Set(d.locations.map((l) => l.path)).size).toBe(d.locations.length)

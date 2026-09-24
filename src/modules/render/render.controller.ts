@@ -28,6 +28,8 @@ const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
 interface Context {
   projectId: string
   projectName: string
+  /** `import` = mode 1 (tài liệu nhập) — phụ lục cờ của file Word in tiếng Việt. */
+  mode?: string
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body/query — người ngoài không dò được DTO qua lỗi 400. */
@@ -38,7 +40,7 @@ export const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, userId)
-  return { projectId, projectName: project.name }
+  return { projectId, projectName: project.name, mode: (project as { mode?: string }).mode }
 }
 
 // ─── POST /assemble ──────────────────────────────────────────────

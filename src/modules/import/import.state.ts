@@ -34,6 +34,22 @@ export const IMPORT_STATUSES = [
 
 export type ImportStatus = (typeof IMPORT_STATUSES)[number]
 
+/** Tên trạng thái cho câu chữ gửi người dùng — không in mã enum (`mapping_review`). */
+export const IMPORT_STATUS_LABELS: Readonly<Record<ImportStatus, string>> = {
+  uploaded: "Vừa tải lên",
+  preflight_rejected: "File bị từ chối",
+  awaiting_latest_confirm: "Chờ xác nhận bản mới nhất",
+  parsing: "Đang đọc tài liệu",
+  mapping_review: "Xác nhận khớp mục",
+  extracting: "Đang trích dữ liệu",
+  fields_review: "Duyệt dữ liệu trích",
+  baselining: "Đang chốt bản gốc",
+  checking: "Đang kiểm tra",
+  gap_review: "Xem báo cáo thiếu sót",
+  delivered: "Đã giao báo cáo",
+  change_requested: "Đang sửa qua change request"
+}
+
 export const IMPORT_PAUSE_REASONS = ["credits", "resume_later"] as const
 export type ImportPauseReason = (typeof IMPORT_PAUSE_REASONS)[number]
 
@@ -62,7 +78,7 @@ export const canTransition = (from: ImportStatus, to: ImportStatus): boolean => 
 
 export const assertTransition = (from: ImportStatus, to: ImportStatus): void => {
   if (!canTransition(from, to)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", `Không chuyển được import từ "${from}" sang "${to}"`, {
+    throw new Mode1Error("IMPORT_INVALID_STATE", `Không chuyển được lần nhập tài liệu từ bước "${IMPORT_STATUS_LABELS[from] ?? from}" sang "${IMPORT_STATUS_LABELS[to] ?? to}"`, {
       status: from,
       to,
       allowed: IMPORT_TRANSITIONS[from]

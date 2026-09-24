@@ -295,7 +295,9 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     )
     expect(media.some((m) => m.equals(PNG))).toBe(true)
     const texts = (await readBlocks(rendered)).map((b) => b.text)
-    expect(texts.some((t) => t.includes("original image could not be embedded (word/media/image2.emf)"))).toBe(true)
+    expect(texts.some((t) => t.includes("original image could not be embedded (unsupported format)"))).toBe(true)
+    // không in đường dẫn file ảnh trong tài liệu
+    expect(texts.some((t) => t.includes("word/media/"))).toBe(false)
 
     // I-4: PNG gửi Gemini (mock trả `other`), EMF không gửi ⇒ cả hai giữ ảnh gốc + cờ vàng "không đọc được"
     expect(mockImages.flat()).toEqual([{ mime: "image/png", bytes: PNG.length }])
@@ -304,8 +306,11 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
       ["yellow", "fixed:2.2.1"],
       ["yellow", "fixed:2.2.1"]
     ])
-    expect(imageFlags.map((f) => f.message).join("\n")).toContain("word/media/image2.emf")
-    expect(imageFlags.map((f) => f.message).join("\n")).toContain("định dạng không hỗ trợ")
+    // câu cho người đọc: nêu mục theo tiêu đề, không in tên file ảnh / block id / tiền tố [image]
+    const imageText = imageFlags.map((f) => f.message).join("\n")
+    expect(imageText).toContain("định dạng ảnh không hỗ trợ")
+    expect(imageText).toContain('trong mục "')
+    expect(imageText).not.toMatch(/word\/media|\[image\]|B\d{4}/)
   })
 
   it("I-4 đọc ảnh use case: origin vision, độ tin ≤ 0.7 ⇒ luôn qua 1.9; lượt gọi có ảnh + chú thích", async () => {
@@ -381,6 +386,6 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     await ImportedDocument.updateMany({ projectId }, { $set: { file_ref: null } })
     clearImportMediaCache()
     const doc = await getDocument(projectId, "Lumen", { source: "draft" })
-    expect(JSON.stringify(doc)).toContain("original image could not be embedded (word/media/image1.png)")
+    expect(JSON.stringify(doc)).toContain("original image could not be embedded (unsupported format)")
   })
 })

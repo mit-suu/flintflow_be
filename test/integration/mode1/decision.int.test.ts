@@ -33,7 +33,8 @@ describe("C-6 duyệt một phần", () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, submitted } = await crToReview(c)
     const [g1, g2] = submitted.groups
-    expect([g1.title, g2.title]).toEqual(["Performance", "Business Rules"])
+    // tiêu đề group theo chính heading trong file người dùng
+    expect([g1.title, g2.title]).toEqual(["4.2.3 Performance", "5.1 Business Rules"])
     const pathsOf = (gid: string) => submitted.locations.filter((l) => l.group_id === gid).map((l) => l.path).sort()
 
     const rejected = detail(await decide(c, cr, g2.group_id, "rejected", REASON))
@@ -64,7 +65,7 @@ describe("C-6 duyệt một phần", () => {
     detail(await decide(c, cr, g2.group_id, "rejected", REASON))
     detail(await decide(c, cr, g1.group_id, "approved"))
     const [first, last] = await notificationsOf(seeded.userId, 2)
-    expect(first).toMatchObject({ title: `${crId}: group ${g2.group_id} bị từ chối`, meta: { cr_id: crId, group_id: g2.group_id, decision: "rejected", result_doc_version: null } })
+    expect(first).toMatchObject({ title: `${crId}: nhóm thay đổi “${g2.title}” bị từ chối`, meta: { cr_id: crId, group_id: g2.group_id, decision: "rejected", result_doc_version: null } })
     expect(first.body).toContain(REASON)
     expect(last).toMatchObject({ title: `${crId} đã được ghi vào bản 0.1`, meta: { cr_id: crId, group_id: g1.group_id, decision: "approved", result_doc_version: "0.1" } })
   })
@@ -77,7 +78,8 @@ describe("C-6 duyệt một phần", () => {
     expect(d.change_request).toMatchObject({ status: "in_review", result_doc_version: null })
     expect(await lockedPaths(projectId, crId)).toEqual(held)
     const [n] = await notificationsOf(seeded.userId, 1)
-    expect(n.title).toBe(`${crId}: group ${submitted.groups[0].group_id} được duyệt`)
+    expect(n.title).toBe(`${crId}: nhóm thay đổi “${submitted.groups[0].title}” được duyệt`)
+    expect(n.title).not.toContain("G0")
   })
 })
 

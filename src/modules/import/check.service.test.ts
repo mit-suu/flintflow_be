@@ -116,7 +116,9 @@ describe("findingOps — AI semantic check chỉ ra vàng", () => {
     }
     const flags = ops.map((o) => (o as { value: Flag }).value)
     expect(flags.map((f) => f.id)).toEqual(["FL010", "FL011"])
-    expect(flags[0]).toMatchObject({ section_id: "fixed:4.2.3", target_id: "B0010", message: "[ambiguity] 95% cần tải" })
+    expect(flags[0]).toMatchObject({ section_id: "fixed:4.2.3", target_id: "B0010", message: "Diễn đạt mơ hồ: 95% cần tải" })
+    // mã luật thô không lọt vào câu cho người đọc
+    expect(flags[1].message).toBe("BR mâu thuẫn")
     expect(flags[1].target_id).toBeNull()
   })
 

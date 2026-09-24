@@ -322,7 +322,13 @@ const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
  * (Screen | Role | Action) — không phải "ma trận" như Phases §6.3 yêu cầu.
  */
 const screenAuthorization = (spine: Spine): Block[] => {
-  if (spine.permissions.length === 0) return []
+  // Có vai trò mà chưa phân quyền màn nào (2026-09-24: CR thêm vai trò trước) ⇒ vẫn hiện danh sách vai trò, không để
+  // mục trống như chưa làm gì — ma trận toàn "—" thì đọc thành "không ai được vào màn nào", sai nghĩa
+  if (spine.permissions.length === 0) {
+    if (spine.roles.length === 0) return []
+    const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "—"
+    return [tableBlock(["Role", "Actor"], spine.roles.map((r) => [r.name, actorName(r.actor_id)]))]
+  }
   const actionsOf = (screenId: string, roleId: string): string =>
     spine.permissions
       .filter((p) => p.screen_id === screenId && p.role_id === roleId)
@@ -506,9 +512,11 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
 /**
  * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
  * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
+ * Mode 1: cờ do AI kiểm tra đặt (`AI check: ambiguity`, `AI semantic check (1.11)`) và kế hoạch step lúc import
+ * cũng là sổ sách của máy — không in vào tài liệu.
  */
 const INTERNAL_REASON =
-  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ )/
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step)/
 
 /** Câu do máy sinh → tiếng Anh; câu do user viết giữ nguyên (đó là lời của chính họ). */
 const ENGLISH_DESCRIPTION: readonly { re: RegExp; to: (m: RegExpExecArray) => string }[] = [

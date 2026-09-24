@@ -12,10 +12,10 @@ import { hasBaseline } from "../import/import.state.js"
 import { latestImport, transitionImport } from "../import/import.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { toIso } from "../import/mode1.http.js"
-import { formatCrId } from "./change-request.constants.js"
+import { clipMaterialText, formatCrId, formatMaterialId } from "./change-request.constants.js"
 import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.dto.js"
 import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
-import { assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
+import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
@@ -34,7 +34,7 @@ export const requireCr = async (projectId: string, crId: string): Promise<IChang
 
 export const assertCrStatus = (cr: IChangeRequest, allowed: readonly CrStatus[], to: CrStatus): void => {
   if (!allowed.includes(cr.status)) {
-    throw new Mode1Error("CR_INVALID_TRANSITION", `${cr.cr_id} đang ở "${cr.status}"`, { status: cr.status, to, allowed })
+    throw new Mode1Error("CR_INVALID_TRANSITION", `${cr.cr_id} đang ở bước "${CR_STATUS_LABELS[cr.status] ?? cr.status}", chưa làm được thao tác này`, { status: cr.status, to, allowed })
   }
 }
 
@@ -54,7 +54,12 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
   requester: cr.requester,
   status: cr.status,
   paused: cr.paused ? { reason: cr.paused.reason, at: toIso(cr.paused.at)! } : null,
-  clarifications: cr.clarifications.map((c) => ({ round: c.round, questions: [...c.questions], answers: [...c.answers] })),
+  clarifications: cr.clarifications.map((c) => ({
+    round: c.round,
+    questions: [...c.questions],
+    answers: [...c.answers],
+    suggestions: c.questions.map((_, i) => [...(c.suggestions?.[i] ?? [])])
+  })),
   base_doc_version: cr.base_doc_version,
   result_doc_version: cr.result_doc_version ?? null,
   created_by: String(cr.created_by),
@@ -62,6 +67,17 @@ const toCrDto = (cr: IChangeRequest): ChangeRequestDetail["change_request"] => (
   decided_by: cr.decided_by ? String(cr.decided_by) : null,
   closed_reason: cr.closed_reason ?? null,
   seed: cr.seed ? { instruction: cr.seed.instruction ?? null, ops: [...cr.seed.ops], targets: [...cr.seed.targets] } : null,
+  materials: (cr.materials ?? []).map((m) => ({
+    material_id: m.material_id,
+    kind: m.kind,
+    name: m.name,
+    text: m.text,
+    truncated: m.truncated,
+    round: m.round,
+    added_at: toIso(m.added_at)!
+  })),
+  missing_info: [...(cr.missing_info ?? [])],
+  amendments: (cr.amendments ?? []).map((a) => ({ text: a.text, at: toIso(a.at)! })),
   created_at: toIso(cr.createdAt)!,
   updated_at: toIso(cr.updatedAt)!
 })
@@ -95,7 +111,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         conclusion: l.conclusion ?? null,
         reason: l.reason ?? null,
         proposal: l.proposal
-          ? { old_text: l.proposal.old_text, new_text: l.proposal.new_text ?? null, comment_text: l.proposal.comment_text ?? null, spine_ops: [...(l.proposal.spine_ops ?? [])] }
+          ? { old_text: l.proposal.old_text, new_text: l.proposal.new_text ?? null, comment_text: l.proposal.comment_text ?? null, spine_ops: [...(l.proposal.spine_ops ?? [])], assumptions: [...(l.proposal.assumptions ?? [])] }
           : null,
         manual: l.manual,
         redo_count: l.redo_count,
@@ -144,7 +160,7 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!imported || !hasBaseline(imported.status) || !version) {
-    throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có baseline v0 — hoàn tất import trước khi tạo change request")
+    throw new Mode1Error("CR_REQUIRES_BASELINE", "Chưa có bản gốc của tài liệu — hoàn tất nhập tài liệu trước khi tạo change request")
   }
   const counter = await CrCounter.findOneAndUpdate({ projectId }, { $inc: { seq: 1 } }, { upsert: true, returnDocument: "after" })
   const cr = await ChangeRequest.create({
@@ -155,6 +171,7 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     source: body.source,
     requester: body.requester,
     seed: body.preview_id ? seedFromPreview(projectId, userId, body.preview_id) : null,
+    materials: (body.materials ?? []).map((m, i) => ({ ...clipMaterialText(m.text), material_id: formatMaterialId(i + 1), kind: "text", name: m.name, round: 0, added_at: new Date() })),
     status: "draft",
     base_doc_version: version.version,
     created_by: userId
@@ -191,7 +208,7 @@ export const reviseCr = async (cr: IChangeRequest): Promise<void> => {
   assertCrStatus(cr, ["in_review"], "proposing")
   const groups = await ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id })
   if (groups.some((g) => g.decision !== "rejected")) {
-    throw new Mode1Error("CR_INVALID_TRANSITION", "Chỉ sửa lại được khi mọi group đã bị từ chối", { status: cr.status, to: "proposing", allowed: [] })
+    throw new Mode1Error("CR_INVALID_TRANSITION", "Chỉ sửa lại được khi mọi nhóm thay đổi đã bị từ chối", { status: cr.status, to: "proposing", allowed: [] })
   }
   const paths: string[] = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).distinct("path")
   await lockPaths(cr.projectId, cr.cr_id, paths)

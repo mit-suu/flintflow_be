@@ -39,6 +39,7 @@ import { Change as ChangeModel } from "../spine/change.model.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
+import { capitalize, sectionLabel } from "../spine/human-labels.js"
 import {
   renderSection,
   sectionHeadingOf,
@@ -263,7 +264,7 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     const png = resolve(id)
     if (png) return { ...b, png }
     // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
-    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}original image could not be embedded (${id.slice(MEDIA_PREFIX.length)})` }
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}original image could not be embedded (unsupported format)` }
     return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
@@ -362,6 +363,7 @@ const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[
 }
 
 const SYSTEM_ACTOR = "system"
+const IMPORT_ACTOR = "import"
 const shortenId = (id: string): string => (id.length > 10 ? `${id.slice(0, 8)}…` : id)
 
 /**
@@ -377,6 +379,8 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
   const nameById = new Map(users.map((u) => [String(u._id), (u.name && u.name.trim()) || u.email]))
   return (by: string): string => {
     if (by === SYSTEM_ACTOR) return "System"
+    // Mode 1: lô ghi lúc nhập tài liệu (finalize/check) mang `by: "import"` — không phải người, không in mã thô
+    if (by === IMPORT_ACTOR) return "FlintFlow (import)"
     return nameById.get(by) ?? shortenId(by)
   }
 }
@@ -385,14 +389,16 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
 
 const buildFlagRow = (spine: Spine, flag: Flag, numbers: Map<string, string>, titles?: Map<string, string>): FlagRow => {
   // Layout người dùng (có `titles`): số hiệu mẫu FPT không còn đúng ⇒ không suy từ khoá logic
-  const fallbackNumber = titles ? "" : flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : flag.section_id
+  const fallbackNumber = titles ? "" : flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : ""
   const number = numbers.get(flag.section_id) ?? fallbackNumber
-  let heading = titles?.get(flag.section_id) ?? flag.section_id
+  let heading = titles?.get(flag.section_id) ?? ""
   if (!titles?.has(flag.section_id)) {
     try {
       heading = sectionHeadingOf(spine, flag.section_id)
     } catch {
-      // section_id không phân giải được (dữ liệu cũ, mục riêng đã xoá) — giữ khoá logic thô thay vì ném lỗi cả tài liệu
+      // section_id không phân giải được (dữ liệu cũ, mục riêng đã xoá) — nhãn chung thay vì khoá logic thô hay ném lỗi cả
+      // tài liệu. Mode 1 (có `titles`) nói tiếng Việt như thông điệp cờ; mode 2 giữ tài liệu tiếng Anh.
+      heading = titles ? capitalize(sectionLabel(flag.section_id, spine)) : "(removed section)"
     }
   }
   const row: FlagRow = { id: flag.id, rule_id: flag.rule_id, section: `${number} ${heading}`.trim(), message: flag.message }

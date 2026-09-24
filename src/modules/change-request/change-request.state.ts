@@ -32,6 +32,22 @@ export const CR_STATUSES = [
 
 export type CrStatus = (typeof CR_STATUSES)[number]
 
+/** Tên trạng thái cho câu chữ gửi người dùng — không in mã enum (`impact_review`). */
+export const CR_STATUS_LABELS: Readonly<Record<CrStatus, string>> = {
+  draft: "Nháp",
+  clarifying: "AI đang làm rõ yêu cầu",
+  awaiting_answers: "Chờ trả lời câu hỏi",
+  impact_review: "Xem phạm vi ảnh hưởng",
+  proposing: "AI đang đề xuất sửa",
+  verifying: "Đang kiểm tra đề xuất",
+  manual_fix: "Cần sửa tay",
+  ready_to_submit: "Sẵn sàng gửi duyệt",
+  in_review: "Đang chờ duyệt",
+  written: "Đã ghi vào tài liệu",
+  rejected: "Bị từ chối",
+  cancelled: "Đã huỷ"
+}
+
 export const CR_PAUSE_REASONS = ["credits", "resume_later"] as const
 export type CrPauseReason = (typeof CR_PAUSE_REASONS)[number]
 
@@ -40,11 +56,12 @@ export const CR_TRANSITIONS: Readonly<Record<CrStatus, readonly CrStatus[]>> = {
   draft: ["clarifying", "cancelled"],
   clarifying: ["awaiting_answers", "impact_review", "cancelled"],
   awaiting_answers: ["clarifying", "cancelled"],
-  impact_review: ["proposing", "cancelled"],
-  proposing: ["verifying", "cancelled"],
-  verifying: ["ready_to_submit", "proposing", "manual_fix", "cancelled"],
-  manual_fix: ["verifying", "cancelled"],
-  ready_to_submit: ["in_review", "verifying", "cancelled"],
+  // Mode 1 v3 phase 8: `… → clarifying` = gộp thêm lệnh sửa vào CR chưa nộp (`POST …/amend`) ⇒ làm rõ lại
+  impact_review: ["proposing", "clarifying", "cancelled"],
+  proposing: ["verifying", "clarifying", "cancelled"],
+  verifying: ["ready_to_submit", "proposing", "manual_fix", "clarifying", "cancelled"],
+  manual_fix: ["verifying", "clarifying", "cancelled"],
+  ready_to_submit: ["in_review", "verifying", "clarifying", "cancelled"],
   in_review: ["written", "proposing", "rejected", "cancelled"],
   written: [],
   rejected: [],
@@ -64,7 +81,10 @@ export const CR_STATUSES_HOLDING_LOCKS: readonly CrStatus[] = [
   "in_review"
 ]
 
-/** Số vòng làm rõ tối đa (C-2); quá thì bắt buộc đi tiếp sang impact_review. */
+/** Trạng thái nhận gộp thêm lệnh sửa (phase 8): chưa nộp, không đang chờ trả lời / đang chạy làm rõ. */
+export const AMENDABLE_CR_STATUSES: readonly CrStatus[] = ["draft", "impact_review", "proposing", "verifying", "manual_fix", "ready_to_submit"]
+
+/** Số vòng làm rõ tối đa (C-2) — tính từ lần gộp lệnh gần nhất; quá thì bắt buộc đi tiếp sang impact_review. */
 export const MAX_CLARIFY_ROUNDS = 3
 
 /** Số lần AI làm lại một vị trí trượt verify (C-5) trước khi chuyển sửa tay. */
@@ -74,7 +94,7 @@ export const canTransition = (from: CrStatus, to: CrStatus): boolean => CR_TRANS
 
 export const assertTransition = (from: CrStatus, to: CrStatus): void => {
   if (!canTransition(from, to)) {
-    throw new Mode1Error("CR_INVALID_TRANSITION", `Không chuyển được change request từ "${from}" sang "${to}"`, {
+    throw new Mode1Error("CR_INVALID_TRANSITION", `Không chuyển được change request từ bước "${CR_STATUS_LABELS[from] ?? from}" sang "${CR_STATUS_LABELS[to] ?? to}"`, {
       status: from,
       to,
       allowed: CR_TRANSITIONS[from]

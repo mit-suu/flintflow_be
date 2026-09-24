@@ -7,7 +7,7 @@ describe("matchProposals — ghép output C-4 với vị trí của lô", () => 
     { location_id: "L005", path: "actors[id=A01]" },
     { location_id: "L006", path: "use_cases[id=UC-01]" }
   ]
-  const out = (location_id: string) => ({ location_id, conclusion: "edit" as const, reason: "r", spine_ops: [] })
+  const out = (location_id: string) => ({ location_id, conclusion: "edit" as const, reason: "r", spine_ops: [], assumptions: [] })
 
   it("khớp đúng location_id", () => {
     const m = matchProposals(batch, [out("L006"), out("L005")])

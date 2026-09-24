@@ -230,6 +230,16 @@ describe("renderSection — fixed sections", () => {
     ])
   })
 
+  it("fixed:3.1.3 — có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
+    const base = spine()
+    const rolesOnly = { ...base, permissions: [] }
+    const section = renderSection(rolesOnly, "fixed:3.1.3", ctx({ number: "3.1.3" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.header).toEqual([[{ text: "Role" }], [{ text: "Actor" }]])
+    expect(table.type === "table" && table.rows).toHaveLength(base.roles.length)
+    expect(renderSection({ ...base, permissions: [], roles: [] }, "fixed:3.1.3", ctx({ number: "3.1.3" })).blocks).toEqual([])
+  })
+
   it("fixed:3.1.4 — chỉ function non-screen", () => {
     const section = renderSection(spine(), "fixed:3.1.4", ctx({ number: "3.1.4" }))
     const table = section.blocks[0]

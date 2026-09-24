@@ -47,6 +47,12 @@ const router = Router()
  *                   ref: { type: string, nullable: true }
  *                   note: { type: string, nullable: true }
  *               requester: { type: string }
+ *               preview_id: { type: string }
+ *               materials:
+ *                 type: array
+ *                 maxItems: 5
+ *                 description: "Mode 1 v3 phase 7 — đoạn văn bản nguồn dán ở 3.1; file upload sau qua /materials"
+ *                 items: { type: object, required: [name, text], properties: { name: { type: string }, text: { type: string } } }
  *     responses:
  *       201: { $ref: '#/components/responses/CrDetail' }
  *       400: { description: CR_SOURCE_REQUIRED, VALIDATION_ERROR }
@@ -114,7 +120,7 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *             type: object
  *             required: [answers]
  *             properties:
- *               answers: { type: array, items: { type: string } }
+ *               answers: { type: array, items: { type: string }, description: "Được để trống (= chưa biết — mode 1 v3 phase 7)" }
  *     responses:
  *       200: { $ref: '#/components/responses/CrDetail' }
  *       400: { description: VALIDATION_ERROR (số câu trả lời khác số câu hỏi) }
@@ -194,6 +200,77 @@ router.get("/:projectId/change-requests/:crId", authMiddleware, crController.get
  *       200: { $ref: '#/components/responses/CrDetail' }
  *       409: { description: CR_INVALID_TRANSITION }
  */
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/materials:
+ *   post:
+ *     summary: "Đính kèm tài liệu bổ sung (mode 1 v3 phase 7) — dán chữ (JSON) hoặc upload file (multipart `file`)"
+ *     description: |
+ *       Chỉ khi CR ở `draft` hoặc `awaiting_answers` (trước 3.4). .docx/.pdf/.txt/.md tách chữ tại chỗ; ảnh PNG/JPEG
+ *       nhờ Gemini chép chữ + mô tả (`cr_material_image`, 1 credit). Chỉ lưu chữ (≤ 20 000 ký tự, dài hơn thì cắt).
+ *       Tối đa 10 tài liệu/CR. Chữ này đi vào ngữ cảnh 3.2, 3.6, 3.9.
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [name, text], properties: { name: { type: string }, text: { type: string } } }
+ *         multipart/form-data:
+ *           schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } }
+ *     responses:
+ *       201: { $ref: '#/components/responses/CrDetail' }
+ *       402: { description: INSUFFICIENT_CREDIT (ảnh) }
+ *       409: { description: CR_INVALID_TRANSITION, CR_MATERIAL_LIMIT }
+ *       422: { description: CR_MATERIAL_UNSUPPORTED, CR_MATERIAL_EMPTY }
+ *       502: { description: AI_PROVIDER_ERROR (ảnh) }
+ * /api/v1/projects/{projectId}/change-requests/{crId}/materials/{mid}:
+ *   delete:
+ *     summary: Xoá tài liệu bổ sung (mode 1 v3 phase 7) — cùng điều kiện trạng thái như khi thêm
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *       - { in: path, name: mid, required: true, schema: { type: string, example: M01 } }
+ *     responses:
+ *       200: { $ref: '#/components/responses/CrDetail' }
+ *       404: { description: CR_MATERIAL_NOT_FOUND }
+ *       409: { description: CR_INVALID_TRANSITION }
+ */
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/change-requests/{crId}/amend:
+ *   post:
+ *     summary: "Gộp thêm một lệnh sửa vào CR chưa nộp (mode 1 v3 phase 8 — chat)"
+ *     description: |
+ *       Ở draft ⇒ chỉ ghi lại. Ở impact_review / proposing / verifying / manual_fix / ready_to_submit ⇒ quay lại làm rõ (3.2):
+ *       khoá, vị trí và đề xuất đã có giữ nguyên; tìm vị trí (3.4) chỉ cộng thêm phần tử mới. Tối đa 3 vòng hỏi mỗi lần gộp.
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - $ref: '#/components/parameters/CrId'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [instruction], properties: { instruction: { type: string } } }
+ *     responses:
+ *       200: { $ref: '#/components/responses/CrDetail' }
+ *       409: { description: CR_INVALID_TRANSITION (đang chờ trả lời / đã nộp / đã đóng) }
+ */
+router.post("/:projectId/change-requests/:crId/amend", authMiddleware, crController.amend)
+
+router.post("/:projectId/change-requests/:crId/materials", authMiddleware, crController.receiveMaterial, crController.addCrMaterial)
+router.delete("/:projectId/change-requests/:crId/materials/:mid", authMiddleware, crController.deleteCrMaterial)
+
 router.post("/:projectId/change-requests/:crId/clarify", authMiddleware, crController.clarify)
 router.post("/:projectId/change-requests/:crId/answers", authMiddleware, crController.answers)
 router.post("/:projectId/change-requests/:crId/impact", authMiddleware, crController.impact)
@@ -238,7 +315,7 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
  * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}/locations/{locId}/owner-step-draft:
  *   post:
- *     summary: "Sửa đề xuất trong step sở hữu (BPMN 3.9, mode 1 v3) — chạy skill của step sở hữu vị trí theo hướng của BA, chỉ ghi đề xuất (manual = true); kiểm lại bằng /verify"
+ *     summary: "Soạn lại đề xuất một vị trí theo hướng của BA (BPMN 3.9; phase 8: nút \"Sửa lại\" trong chat) — skill step sở hữu (nếu có), chỉ ghi đề xuất (manual = true); ready_to_submit ⇒ verifying"
  *     tags: [Change requests (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -259,7 +336,7 @@ router.patch("/:projectId/change-requests/:crId/locations/:locId", authMiddlewar
  *       200: { $ref: '#/components/responses/CrDetail' }
  *       402: { description: INSUFFICIENT_CREDIT }
  *       404: { description: CR_LOCATION_NOT_FOUND }
- *       409: { description: CR_INVALID_TRANSITION (CR không ở manual_fix), CR_NO_OWNER_STEP, PATH_LOCKED }
+ *       409: { description: "CR_INVALID_TRANSITION (CR không ở proposing / verifying / manual_fix / ready_to_submit), PATH_LOCKED" }
  *       502: { description: AI_PROVIDER_ERROR }
  */
 router.post("/:projectId/change-requests/:crId/locations/:locId/owner-step-draft", authMiddleware, crController.ownerStepDraft)

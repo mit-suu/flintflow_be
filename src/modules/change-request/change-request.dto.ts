@@ -13,6 +13,9 @@ import {
   LOCATION_CONCLUSIONS,
   LOCATION_FOUND_BY,
   LOCATION_ID_PATTERN,
+  CR_MATERIAL_KINDS,
+  CR_MATERIAL_MAX_CHARS,
+  MATERIAL_ID_PATTERN,
   NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
 
@@ -23,6 +26,7 @@ const text = (max: number) => z.string().trim().min(1).max(max)
 
 export const crIdSchema = z.string().regex(CR_ID_PATTERN, "cr_id dạng CR-001")
 export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "location_id dạng L001")
+export const materialIdSchema = z.string().regex(MATERIAL_ID_PATTERN, "material_id dạng M01")
 export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "group_id dạng G01")
 
 /** Lý do từ chối group / đóng / huỷ — đủ dài để có nghĩa khi đọc lại lịch sử. */
@@ -47,7 +51,15 @@ export const changeRequestDtoSchema = z.object({
   requester: z.string(),
   status: crStatusSchema,
   paused: z.object({ reason: z.enum(CR_PAUSE_REASONS), at: isoDateTime }).nullable(),
-  clarifications: z.array(z.object({ round: z.number().int().min(1), questions: z.array(z.string()), answers: z.array(z.string()) })),
+  clarifications: z.array(
+    z.object({
+      round: z.number().int().min(1),
+      questions: z.array(z.string()),
+      answers: z.array(z.string()),
+      /** Phase 7: đáp án AI gợi ý, song song `questions` (`[]` cho câu không có gợi ý). */
+      suggestions: z.array(z.array(z.string()))
+    })
+  ),
   base_doc_version: z.string().min(1),
   result_doc_version: z.string().nullable(),
   created_by: id,
@@ -56,6 +68,22 @@ export const changeRequestDtoSchema = z.object({
   closed_reason: z.string().nullable(),
   /** Mode 1 v3: bản xem trước đính kèm lúc tạo (gợi ý cho C-2/C-3/C-4), không có ⇒ `null`. */
   seed: z.object({ instruction: z.string().nullable(), ops: z.array(z.record(z.string(), z.unknown())), targets: z.array(z.string()) }).nullable(),
+  /** Mode 1 v3 phase 7: tài liệu bổ sung (chữ đã tách) — ngữ cảnh cho C-2, C-4, 3.9. */
+  materials: z.array(
+    z.object({
+      material_id: materialIdSchema,
+      kind: z.enum(CR_MATERIAL_KINDS),
+      name: z.string(),
+      text: z.string(),
+      truncated: z.boolean(),
+      round: z.number().int().min(0),
+      added_at: isoDateTime
+    })
+  ),
+  /** Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi hết vòng hỏi — C-4 sẽ phải giả định. */
+  missing_info: z.array(z.string()),
+  /** Phase 8: lệnh sửa gộp thêm (chat) theo thứ tự. */
+  amendments: z.array(z.object({ text: z.string(), at: isoDateTime })),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
@@ -80,7 +108,9 @@ export const changeLocationDtoSchema = z.object({
       old_text: z.string(),
       new_text: z.string().nullable(),
       comment_text: z.string().nullable(),
-      spine_ops: z.array(z.unknown())
+      spine_ops: z.array(z.unknown()),
+      /** Mode 1 v3 phase 7: giả định AI đã dùng — người duyệt cần xác nhận. */
+      assumptions: z.array(z.string())
     })
     .nullable(),
   manual: z.boolean(),
@@ -117,7 +147,9 @@ export const createChangeRequestSchema = z.strictObject({
   description: text(5000),
   source: crSourceSchema.extend({ kind: z.enum(NEW_CR_SOURCE_KINDS) }),
   requester: text(200),
-  preview_id: z.string().trim().min(1).max(100).optional()
+  preview_id: z.string().trim().min(1).max(100).optional(),
+  /** Mode 1 v3 phase 7: đoạn văn bản nguồn dán ở 3.1 (email, biên bản…) — file thì upload sau qua `/materials`. */
+  materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional()
 })
 
 /** `GET /projects/:id/change-requests?status=` */
@@ -126,7 +158,16 @@ export const listChangeRequestsQuerySchema = z.object({ status: crStatusSchema.o
 export const crParamsSchema = z.object({ crId: crIdSchema })
 
 /** `POST …/:crId/answers` (UC-49) — trả lời theo đúng thứ tự câu hỏi của vòng làm rõ gần nhất. */
-export const answersRequestSchema = z.strictObject({ answers: z.array(text(4000)).min(1).max(20) })
+/** Mode 1 v3 phase 7: câu trả lời được để trống (= "chưa biết") — C-2/C-4 coi dữ kiện đó là thiếu. */
+export const answersRequestSchema = z.strictObject({ answers: z.array(z.string().trim().max(4000)).min(1).max(20) })
+
+/** `POST …/:crId/amend` (phase 8): gộp thêm một lệnh sửa vào CR chưa nộp. */
+export const amendRequestSchema = z.strictObject({ instruction: text(4000) })
+
+/** `POST …/:crId/materials` dạng JSON (dán chữ). Upload file dùng multipart `file`. */
+export const addMaterialRequestSchema = z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })
+
+export const materialParamsSchema = z.object({ crId: crIdSchema, mid: materialIdSchema })
 
 /** `PATCH …/:crId/locations/:locId` (UC-81) — sửa tay / kết luận tay ⇒ `manual = true`. */
 export const patchLocationRequestSchema = z
