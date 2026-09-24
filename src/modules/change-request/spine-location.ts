@@ -8,6 +8,7 @@
  */
 
 import { sectionHasData } from "../spine/deterministic-check.js"
+import { ORIGINAL_DIAGRAM_DATA, ORIGINAL_DIAGRAM_SECTION, originalDiagramOf } from "../spine/original-diagram.js"
 import { impactOf } from "../spine/impact.service.js"
 import { ownerStepOf, sectionsOfPath } from "../spine/section-registry.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -276,8 +277,47 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
     const section = array ? sectionOfArray(array, targets) : null
     if (section) addSlot(`${array}[]`, section)
   }
-  // Ô thêm mới luôn giữ lại khi phải cắt bớt vị trí
-  return [...found.slice(0, Math.max(0, MAX_LOCATIONS - slots.length)), ...slots]
+  // §4.13: sơ đồ gốc của người dùng mà CR chạm tới dữ liệu ⇒ vị trí "vẽ lại hình" (đề xuất do code tính ở C-4)
+  const diagrams = originalDiagramLocations(spine, targets, [...found, ...slots])
+  for (const d of diagrams) {
+    const same = found.find((f) => f.path === d.path)
+    if (same) {
+      same.found_by = [...new Set([...same.found_by, ...d.found_by])]
+      same.entity_paths = [...new Set([...same.entity_paths, ...d.entity_paths])]
+    }
+  }
+  const extra = diagrams.filter((d) => !found.some((f) => f.path === d.path))
+  // Ô thêm mới và vị trí sơ đồ gốc luôn giữ lại khi phải cắt bớt vị trí
+  return [...found.slice(0, Math.max(0, MAX_LOCATIONS - slots.length - extra.length)), ...slots, ...extra]
+}
+
+/** Mảng Spine mà path thuộc về: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */
+const arrayKeyOf = (path: string): string | null =>
+  path === PROJECT_PATH || path.startsWith(`${PROJECT_PATH}.`) ? PROJECT_PATH : (ARRAY_PATH.exec(path)?.[1] ?? ELEMENT.exec(path)?.[1] ?? null)
+
+/**
+ * Phần nối đang giữ sơ đồ gốc (§4.13) mà CR có thể làm lệch: vị trí khác của CR chạm dữ liệu hình thể hiện
+ * (`ORIGINAL_DIAGRAM_DATA`), hoặc CR nhắm thẳng mục của hình / chính phần nối (vd tạo từ cờ `original_diagram_stale`).
+ * Chỉ là ứng viên — C-4 so hash dữ liệu sau CR để kết luận vẽ lại hay không.
+ */
+export const originalDiagramLocations = (spine: Spine, targets: readonly string[], found: readonly Pick<FoundLocation, "path">[]): FoundLocation[] => {
+  const touched = new Set(found.map((f) => arrayKeyOf(f.path)).filter((k): k is string => !!k))
+  const out: FoundLocation[] = []
+  for (const c of spine.custom_sections) {
+    const kinds = [...new Set(c.blocks.map(originalDiagramOf).flatMap((d) => (d ? [d.kind] : [])))]
+    if (!kinds.length) continue
+    const path = `custom_sections[id=${c.id}]`
+    const hit = kinds.filter(
+      (k) =>
+        ORIGINAL_DIAGRAM_DATA[k].some((a) => touched.has(a)) ||
+        targets.includes(ORIGINAL_DIAGRAM_SECTION[k]) ||
+        targets.includes(`custom:${c.id}`) ||
+        targets.some((t) => elementPathOf(t) === path)
+    )
+    if (!hit.length) continue
+    out.push({ path, section_id: sectionOfElement(spine, path), found_by: ["diagram"], entity_paths: hit.map((k) => ORIGINAL_DIAGRAM_SECTION[k]), owner_step: null })
+  }
+  return out
 }
 
 /** Mục nuôi bằng mảng `array` — ưu tiên mục CR đang nhắm; mảng không nuôi mục nào ⇒ null. */

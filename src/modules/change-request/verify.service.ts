@@ -26,6 +26,7 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { MAX_REDO_PER_LOCATION } from "./change-request.state.js"
 import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./change-location.model.js"
 import { crHeader, glossaryText, truncate } from "./cr-context.js"
+import { refreshDiagramLocations } from "./diagram-location.js"
 import { locksOf } from "./lock.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
 
@@ -104,7 +105,11 @@ export const checkSpineOps = (spine: Spine, cr: Pick<IChangeRequest, "cr_id">, l
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: cr.cr_id }, { startSeq: 1 })
     const before = new Set(runDeterministicCheck(spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter((c) => c.level === "red").map(flagKey))
-    const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter((c) => c.level === "red" && !before.has(flagKey(c)))
+    // `diagram_stale` không tính: sửa dữ liệu hình thể hiện thì hình PlantUML cũ đi là đương nhiên — 3.14 vẽ lại ngay sau
+    // khi ghi. Trước đây mọi CR đổi tên use case / actor / màn đều trượt kiểm vì "lỗi đỏ mới" này.
+    const newRed = runDeterministicCheck(plan.spine, [], { ruleProfile: MODE1_RULE_PROFILE }).filter(
+      (c) => c.level === "red" && c.rule_id !== "diagram_stale" && !before.has(flagKey(c))
+    )
     for (const c of newRed) for (const locId of new Set(owner)) push(locId, { rule: "new_red_flag", message: `Đề xuất làm phát sinh lỗi đỏ mới: ${ruleLabel(c.rule_id) ? `${ruleLabel(c.rule_id)} — ` : ""}${c.message}` })
   } catch (err) {
     if (!(err instanceof TransactionRejectedError)) throw err
@@ -135,6 +140,8 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   if (!record) throw new Error("Không tìm thấy Spine của project")
   const spine = stripRecord(record)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  // Đề xuất của vị trí khác có thể đã đổi (sửa tay, "Sửa lại") ⇒ kết luận vẽ lại sơ đồ gốc tính lại trước khi kiểm (§4.13)
+  await refreshDiagramLocations(spine, locations)
   const locks = await locksOf(cr.projectId, [...locations.map((l) => l.path), ...locations.flatMap(opElements)])
 
   const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks)]))

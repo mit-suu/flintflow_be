@@ -7,6 +7,7 @@
  * khô op của vị trí (`new_text`) để người duyệt đọc — tài liệu được render lại từ Spine khi ghi (C-7).
  * Mode 1 v3 phase 7: prompt kèm tài liệu bổ sung + dữ kiện C-2 báo thiếu; dữ kiện model phải tự giả định ghi vào
  * `proposal.assumptions` để người duyệt xác nhận ở 3.12.
+ * §4.13: vị trí sơ đồ gốc (`found_by: diagram`) không gửi AI — code kết luận sau cùng (`diagram-location.ts`).
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -29,6 +30,7 @@ import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { answersText, crHeader, glossaryText, materialsText, missingInfoText, truncate } from "./cr-context.js"
 import { elementValue, isArrayPath, isSectionTarget, opElement, valueText } from "./spine-location.js"
+import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -141,7 +143,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const spine = stripRecord(record)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
-  const todo = locations.filter(needsProposal)
+  // Vị trí sơ đồ gốc (§4.13) không qua AI — kết luận sau khi các vị trí khác có đề xuất (`refreshDiagramLocations`)
+  const todo = locations.filter((l) => needsProposal(l) && !isDiagramLocation(l))
   const byOwner = new Map<string, IChangeLocation[]>()
   for (const l of todo) byOwner.set(l.owner_step ?? "", [...(byOwner.get(l.owner_step ?? "") ?? []), l])
   for (const [owner, group] of byOwner) {
@@ -195,6 +198,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
       if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt — chờ sửa tay`)
     }
   }
+  await refreshDiagramLocations(spine, locations)
   await regroup(cr)
 }
 
@@ -218,6 +222,15 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
   const record = await spineRepository.get(String(cr.projectId))
   if (!record) throw new Error("Không tìm thấy Spine của project")
   const spine = stripRecord(record)
+  if (isDiagramLocation(loc)) {
+    // Sơ đồ gốc (§4.13): không có gì để AI soạn — tính lại theo đề xuất hiện tại của CR (bỏ quyết định tay trước đó).
+    // Giữ hình gốc thì kết luận "không liên quan" (PATCH vị trí), không đi đường này.
+    loc.manual = false
+    const all = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id })
+    await refreshDiagramLocations(spine, all.map((l) => (l.location_id === loc.location_id ? loc : l)))
+    if (cr.status === "ready_to_submit") await transitionCr(cr, "verifying")
+    return
+  }
   const result = await withMeteredAi<CrProposeOutput>({ projectId: String(cr.projectId), userId, stepId: `C-4:${cr.cr_id}` }, ActionType.CR_PROPOSE, {
     ...crHeader(cr),
     answers: `${answersText(cr)}

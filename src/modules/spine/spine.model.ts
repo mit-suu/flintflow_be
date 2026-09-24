@@ -262,7 +262,12 @@ const customBlockSchema = new Schema(
     kind: { type: String, enum: ["paragraph", "list_item", "table", "image"], required: true },
     text: { type: String, default: "" },
     rows: { type: [[String]], default: null },
-    image_ref: { type: String, default: null }
+    image_ref: { type: String, default: null },
+    // Sơ đồ gốc của người dùng (mode 1 v3 §4.13); ảnh thường không có field này
+    diagram: {
+      type: new Schema({ kind: { type: String, enum: ["context", "usecase", "screen_flow", "erd"], required: true }, source_hash: { type: String, required: true } }, opts),
+      default: undefined
+    }
   },
   opts
 )

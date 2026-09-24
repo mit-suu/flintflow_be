@@ -176,6 +176,8 @@ export interface SkillAsset {
   version: string
   provider: string
   aiModel: string
+  /** Model dự phòng cùng provider khi model chính quá tải (frontmatter `fallbackModels`, tuỳ chọn). */
+  fallbackModels: string[]
   maxTokens: number
   temperature: number
   reads: string[]
@@ -301,6 +303,7 @@ const parseSkill = (skillsDir: string, kind: SkillKind, dirName: string): SkillA
     version: String(data.version),
     provider: String(data.provider),
     aiModel: String(data.aiModel),
+    fallbackModels: data.fallbackModels === undefined ? [] : toStringArray(data.fallbackModels, "fallbackModels", rel),
     maxTokens,
     temperature,
     reads: toStringArray(data.reads, "reads", rel),

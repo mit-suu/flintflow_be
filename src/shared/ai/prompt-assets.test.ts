@@ -222,3 +222,13 @@ describe("computeSkillAssetVersion", () => {
     expect(computeSkillAssetVersion(tmp, refs)).not.toBe(before)
   })
 })
+
+describe("fallbackModels (model dự phòng khi quá tải)", () => {
+  it("skill Gemini đọc ảnh khai 2 model dự phòng, tới providerConfig; skill không khai ⇒ không có", async () => {
+    for (const action of [ActionType.IMPORT_EXTRACT_DIAGRAM, ActionType.CR_MATERIAL_IMAGE]) {
+      const { providerConfig } = await getPromptTemplate(action)
+      expect(providerConfig).toMatchObject({ provider: "gemini", model: "gemini-3.5-flash", fallbackModels: ["gemini-3.6-flash", "gemini-3.5-flash-lite"] })
+    }
+    expect((await getPromptTemplate(ActionType.CR_PROPOSE)).providerConfig.fallbackModels).toBeUndefined()
+  })
+})

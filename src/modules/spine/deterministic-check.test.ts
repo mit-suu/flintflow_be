@@ -23,11 +23,11 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("12 luật đỏ + 16 luật vàng; 3 luật không waive được", () => {
+  it("12 luật đỏ + 17 luật vàng; 3 luật không waive được", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(12)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
-    // derived_from_changed_assumption (BUG-14)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(16)
+    // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(17)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })

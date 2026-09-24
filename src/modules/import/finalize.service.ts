@@ -7,6 +7,7 @@
  *      seed `steps[]` + `progress` ⇒ workspace như mode 2 chạy tiếp từ step còn thiếu. Một txn thứ hai `by: import`.
  *   4. Mode 1 v2 (FLF-184): vẽ diagram từ Spine (PlantUML có mặt), baseline `type: imported`; `DocVersion 0.0` = bản
  *      **render** từ Spine theo layout file upload + stamp, file gốc (bookmark neo + stamp) giữ ở `original_ref`.
+ *      §4.13: loại sơ đồ người dùng đã có hình (ảnh I-4 đọc được) thì bản render giữ ảnh gốc, PlantUML loại đó không in.
  *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp); ghép sẵn
  *      bản làm việc (`POST /assemble`) để workspace mở được ngay.
  * Không dùng `signOff` (mode 2): baseline v0 không bị cờ đỏ chặn — cờ đi vào gap report (P0 báo cáo §3 dòng 6).
@@ -23,9 +24,10 @@ import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
+import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
-import type { Baseline as BaselineEntry, Spine } from "../spine/spine.types.js"
+import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
 import { countOpenFlags, findingOps, runImportCheck, stripRecord } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
@@ -141,11 +143,20 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   }))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
-  // Phase 5 (T3): ảnh dưới mục FPT không trích được thành field ⇒ giữ nguyên văn như văn xuôi không trích được (phần nối
-  // của mục) để bản render nhúng lại ảnh gốc. Trước đây bản render 0.0 mất 35/39 ảnh (T1). Ảnh diagram I-4 đã đọc được
-  // (use case / ERD / luồng màn / ngữ cảnh) thì bỏ: diagram PlantUML vẽ từ Spine thay cho nó.
-  const imageRead = new Set(drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => READ_DIAGRAM_KINDS.has(i.kind)).map((i) => i.block_id)))
-  for (const b of layoutBlocks) if (b.kind === "image" && b.image_ref && b.section_id && !imageRead.has(b.block_id)) unmappedIds.add(b.block_id)
+  // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
+  // render 0.0 mất 35/39 ảnh (T1). §4.13: sơ đồ I-4 đọc được (use case / ERD / luồng màn / ngữ cảnh) cũng **giữ y hình
+  // của người dùng** — dữ liệu đọc được chỉ vào Spine; khối ảnh mang `diagram` (loại + hash dữ liệu lúc import) để bản
+  // render ẩn PlantUML cùng loại, và CR chạm dữ liệu đó sau này đề xuất vẽ lại bằng PlantUML.
+  const imageRead = new Map(
+    drafts.flatMap((d) => (d.diagram_images ?? []).filter((i) => isOriginalDiagramKind(i.kind)).map((i) => [i.block_id, i.kind as OriginalDiagramKind] as const))
+  )
+  const imported = stripRecord(spineNow)
+  for (const b of layoutBlocks) {
+    if (b.kind !== "image" || !b.image_ref || !b.section_id) continue
+    unmappedIds.add(b.block_id)
+    const kind = imageRead.get(b.block_id)
+    if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
+  }
   const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
@@ -162,7 +173,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   profile.legacy_record_of_changes = legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await profile.save()
 
-  // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2
+  // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
+  // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)
   await renderDiagramsIfAvailable(projectId)
 
   // Baseline imported + DocVersion 0.0 — chụp Spine sau lô kế hoạch step; file 0.0 = bản render của đúng snapshot đó
@@ -207,9 +219,12 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
 }
 
-const READ_DIAGRAM_KINDS: ReadonlySet<string> = new Set(["usecase", "erd", "screen_flow", "context"])
+const UNREAD_REASON: Readonly<Record<string, string>> = {
+  unsupported: "định dạng ảnh không hỗ trợ",
+  unavailable: "AI đọc ảnh đang quá tải, chưa đọc được"
+}
 
-/** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
+/** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF / AI lỗi…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
 const unreadImageFlagOps = (
   spine: Spine,
   drafts: Pick<IExtractionDraft, "section_id" | "diagram_images">[],
@@ -221,11 +236,11 @@ const unreadImageFlagOps = (
     const section_id = realSectionId(d.section_id, provisional)
     const heading = layout.find((l) => l.section_id === d.section_id && l.heading_text.trim())?.heading_text.trim()
     const title = heading ?? titleOfSection(spine, section_id, layout)
-    const unread = (d.diagram_images ?? []).filter((i) => !READ_DIAGRAM_KINDS.has(i.kind))
+    const unread = (d.diagram_images ?? []).filter((i) => !isOriginalDiagramKind(i.kind))
     return unread.map((i, n) => ({
       rule: "image",
       section_id,
-      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${i.kind === "unsupported" ? "định dạng ảnh không hỗ trợ" : "không phải sơ đồ đọc được"}) — đã giữ ảnh gốc; cần thì cập nhật qua change request`,
+      message: `${unread.length > 1 ? `Ảnh thứ ${n + 1}` : "Ảnh"} trong mục "${title}" không đọc được thành dữ liệu (${UNREAD_REASON[i.kind] ?? "không phải sơ đồ đọc được"}) — đã giữ ảnh gốc; cần thì cập nhật qua change request`,
       block_ids: [i.block_id]
     }))
   })

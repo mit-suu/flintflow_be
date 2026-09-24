@@ -111,6 +111,8 @@ registry chỉ đọc đĩa.
 - `draftOps` **không nạp** `references/*.md`, nên mọi luật cần thiết phải nằm trong chính `SKILL.md`,
   và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`). `references/` chỉ là tài
   liệu cho người đọc.
+- `fallbackModels` (tuỳ chọn, hiện chỉ provider `gemini`): model dự phòng cùng provider, thử lần lượt khi model chính
+  quá tải (503 / 429 không phải hết tiền / timeout). Log AI ghi model thật sự trả lời.
 - Skill chưa viết mang `stub: true`; viết thật rồi thì bỏ `stub` **và** thêm thư mục vào
   `WRITTEN_NON_ACTION` trong `prompt-assets.test.ts`.
 - `writes` trong frontmatter phải nằm trong `writes` của step tương ứng ở `assets/step-registry.json`.
