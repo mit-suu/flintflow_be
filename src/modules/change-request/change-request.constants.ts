@@ -14,7 +14,11 @@ export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap
 
 /** Cách C-3 tìm ra vị trí (nút 3.4): đích + phần tử tham chiếu tới đích (Spine), phần tử nhắc mã/tên của đích, từ khoá. */
 /** `preview` (mode 1 v3): phần tử bị op của bản xem trước đính kèm CR chạm tới. */
-export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview"] as const
+/**
+ * `diagram` (§4.13): phần nối giữ **sơ đồ gốc** của người dùng mà CR chạm tới dữ liệu (hoặc nhắm mục) của nó. Đề xuất do
+ * code tính, không qua AI: dữ liệu sau CR lệch hình ⇒ `edit` bỏ ảnh gốc (bản render in sơ đồ PlantUML), không ⇒ `not_related`.
+ */
+export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram"] as const
 export type LocationFoundBy = (typeof LOCATION_FOUND_BY)[number]
 
 /** Kết luận của C-4 cho từng vị trí (nút 3.6, UC-81). Vị trí chưa kết luận chặn nộp (CR_LOCATION_UNCONCLUDED). */

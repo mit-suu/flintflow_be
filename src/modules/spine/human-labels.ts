@@ -186,6 +186,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   dead_reference: "Tham chiếu tới phần không tồn tại",
   render_error: "Lỗi vẽ sơ đồ",
   diagram_stale: "Sơ đồ chưa cập nhật",
+  original_diagram_stale: "Hình gốc lệch dữ liệu",
   nfr_missing_number: "Yêu cầu phi chức năng thiếu số đo",
   usecase_relation_invalid: "Quan hệ include/extend không hợp lệ",
   unconfirmed_assumption: "Giả định chưa xác nhận",

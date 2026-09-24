@@ -228,6 +228,20 @@ export interface CustomBlock {
   rows: string[][] | null
   /** Chỉ với `image`: tham chiếu file ảnh đã lưu. */
   image_ref: string | null
+  /**
+   * Chỉ với `image` là **sơ đồ gốc của người dùng** mà I-4 đọc được (mode 1 v3 §4.13): hình giữ nguyên trong tài liệu,
+   * PlantUML cùng loại không in ra. `source_hash` = hash dữ liệu hình thể hiện lúc import (`computeSourceHash`) —
+   * lệch ⇒ cờ vàng `original_diagram_stale`, CR chạm dữ liệu đó thì đề xuất vẽ lại (bỏ ảnh gốc). Không có ⇒ ảnh thường.
+   */
+  diagram?: OriginalDiagram | null
+}
+
+/** Loại sơ đồ gốc đọc được từ ảnh (I-4) — một hình mỗi loại trong tài liệu. */
+export type OriginalDiagramKind = "context" | "usecase" | "screen_flow" | "erd"
+
+export interface OriginalDiagram {
+  kind: OriginalDiagramKind
+  source_hash: string
 }
 
 /**

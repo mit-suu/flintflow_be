@@ -169,7 +169,8 @@ export const executeAiAction = async <T = any>(
           userId: new mongoose.Types.ObjectId(userId),
           actionType,
           provider: providerConfig.provider,
-          aiModel: providerConfig.model,
+          // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
+          aiModel: llmRes.model ?? providerConfig.model,
           status: "success",
           promptTokens: llmRes.promptTokens,
           completionTokens: llmRes.completionTokens,
@@ -185,7 +186,7 @@ export const executeAiAction = async <T = any>(
           rawText: llmRes.text,
           actionType: actionType as ActionType,
           provider: providerConfig.provider,
-          aiModel: providerConfig.model,
+          aiModel: llmRes.model ?? providerConfig.model,
           tokensUsed: {
             promptTokens: llmRes.promptTokens,
             completionTokens: llmRes.completionTokens,

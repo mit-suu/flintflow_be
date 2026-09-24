@@ -350,6 +350,13 @@ export const runExtraction = async (projectId: string, userId: string, importId:
         diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
         continue
       }
+      // AI đọc ảnh vẫn lỗi sau khi đã thử lại + model dự phòng (Gemini "high demand"…) ⇒ không dừng cả I-4 vì một ảnh:
+      // ảnh gốc luôn được giữ (§4.13), chỉ thiếu dữ liệu đọc từ ảnh — cờ vàng báo lúc finalize. Hết credit vẫn dừng.
+      if (!result.ok && result.reason !== "credits") {
+        console.warn(`[I-4] ${section_id}: đọc ảnh ${img.block_id} lỗi (${result.message}) — giữ ảnh gốc, đi tiếp`)
+        diagramImages.push({ block_id: img.block_id, kind: "unavailable" })
+        continue
+      }
       if (!result.ok) return pause(result)
       usageId = result.usageId
       const read =

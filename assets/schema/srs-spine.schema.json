@@ -1006,6 +1006,36 @@
                       "type": "null"
                     }
                   ]
+                },
+                "diagram": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "context",
+                            "usecase",
+                            "screen_flow",
+                            "erd"
+                          ]
+                        },
+                        "source_hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "source_hash"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [

@@ -27,6 +27,7 @@ import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { originalDiagramHash } from "../../../src/modules/spine/original-diagram.js"
 import { getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
@@ -337,7 +338,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(mockImages.flat()).toEqual([{ mime: "image/png", bytes: PNG.length }])
   })
 
-  it("diagram đọc được ⇒ Spine có actor + quan hệ từ ảnh (hợp với bảng), ảnh gốc bỏ khỏi bản render (PlantUML thay), không cờ ảnh", async () => {
+  it("diagram đọc được ⇒ Spine có actor + quan hệ từ ảnh (hợp với bảng), hình gốc giữ y trong bản render + đánh dấu sơ đồ gốc (§4.13), không cờ ảnh", async () => {
     mockOverrides.next = fakeMode1
     const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
     const spine = (await spineRepository.get(projectId))!
@@ -345,12 +346,14 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     const learner = spine.actors.find((a) => a.name === "Learner")!
     expect(guest).toBeTruthy()
     expect(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids.sort()).toEqual([guest.id, learner.id].sort())
-    expect(spine.custom_sections.flatMap((c) => c.blocks).some((b) => b.kind === "image")).toBe(false)
-    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toEqual([])
+    // Hình của người dùng giữ nguyên, đánh dấu loại + hash dữ liệu lúc import (đúng dữ liệu vừa đọc từ ảnh)
+    const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
+    expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: { kind: "usecase", source_hash: originalDiagramHash(spine, "usecase") } })])
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread" || f.rule_id === "original_diagram_stale")).toEqual([])
     const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
     const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
     const media = await Promise.all(rendered.partNames().filter((n) => n.startsWith("word/media/")).map(async (n) => (await rendered.binary(n))!))
-    expect(media.some((m) => m.equals(PNG))).toBe(false)
+    expect(media.some((m) => m.equals(PNG))).toBe(true)
   })
 
   it("môi trường không có vision (thiếu GEMINI_API_KEY) ⇒ I-4 không dừng: ảnh unsupported, giữ ảnh gốc + cờ vàng", async () => {
@@ -379,6 +382,17 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     const again = await runExtraction(projectId, userId, importId)
     expect(again.doc.paused).toBeNull()
     expect(again.doc.status).toBe("fields_review")
+  })
+
+  it("đọc ảnh lỗi sau mọi lượt thử (Gemini quá tải cả model dự phòng) ⇒ I-4 không dừng: giữ ảnh gốc + cờ vàng nói rõ lý do", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
+    mockOverrides.next = (prompt) =>
+      prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand (đã thử gemini-3.5-flash, gemini-3.6-flash, gemini-3.5-flash-lite)", "GEMINI_OVERLOADED") : fakeMode1(prompt)
+    const run = await runExtraction(projectId, userId, importId)
+    expect(run.doc.paused).toBeNull()
+    expect(run.doc.status).toBe("fields_review")
+    const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
+    expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
   })
 
   it("file gốc không còn ⇒ render vẫn chạy, ảnh thành chỗ giữ ảnh", async () => {

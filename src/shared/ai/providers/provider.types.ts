@@ -5,6 +5,8 @@ export interface LLMResponse {
   promptTokens: number
   completionTokens: number
   raw?: any
+  /** Model thật sự trả lời (khác `providerConfig.model` khi đã chuyển sang model dự phòng) — ghi vào log / chi phí. */
+  model?: string
 }
 
 /** Ảnh gửi kèm prompt (mode 1 v3 phase 5 — đọc ảnh diagram). `data` là base64, không tiền tố `data:`. */

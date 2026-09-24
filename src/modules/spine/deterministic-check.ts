@@ -17,6 +17,7 @@ import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DE
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
+import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 
 export interface RuleDef {
@@ -58,7 +59,8 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
   rule("derived_from_changed_assumption", "yellow", true),
-  rule("function_without_uc", "yellow", true)
+  rule("function_without_uc", "yellow", true),
+  rule("original_diagram_stale", "yellow", true)
 ])
 
 /** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
@@ -322,8 +324,17 @@ const deadReference = (spine: Spine): FlagCandidate[] =>
 
 // ─── red: diagram, nfr, S-9 ──────────────────────────────────────
 
+/**
+ * Hình PlantUML đang được in (§4.13): loại sơ đồ còn ảnh gốc của người dùng thì PlantUML loại đó không in ⇒ lỗi vẽ / hình
+ * cũ của nó không phải lỗi của tài liệu (độ lệch của ảnh gốc do `original_diagram_stale` báo).
+ */
+const printedDiagrams = (spine: Spine): Spine["diagrams"] => {
+  const kept: ReadonlySet<string> = keptOriginalKinds(spine)
+  return kept.size ? spine.diagrams.filter((d) => !kept.has(d.kind)) : spine.diagrams
+}
+
 const renderError = (spine: Spine): FlagCandidate[] =>
-  spine.diagrams
+  printedDiagrams(spine)
     .filter((d) => d.render_status === "error")
     .map((d) => ({
       level: "red",
@@ -335,7 +346,7 @@ const renderError = (spine: Spine): FlagCandidate[] =>
     }))
 
 const diagramStale = (spine: Spine): FlagCandidate[] =>
-  spine.diagrams
+  printedDiagrams(spine)
     .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
     .filter((d) => d.source_hash !== computeSourceHash(spine, d))
     .map((d) => ({
@@ -345,6 +356,22 @@ const diagramStale = (spine: Spine): FlagCandidate[] =>
       target_id: d.id,
       message: `${capitalize(diagramLabel(d, spine))} không còn khớp dữ liệu, cần vẽ lại`,
       remediation_step: renderStepOf(d)
+    }))
+
+/**
+ * Sơ đồ gốc của người dùng (§4.13) không còn khớp dữ liệu — vd CR thêm use case mà người duyệt từ chối vẽ lại hình.
+ * Vàng: hình vẫn là hình của người dùng, chỉ nhắc; tạo CR nhắm mục đó sẽ có vị trí "vẽ lại hình".
+ */
+const originalDiagramStale = (spine: Spine): FlagCandidate[] =>
+  keptOriginalDiagrams(spine)
+    .filter((k) => isOriginalStale(spine, k.diagram))
+    .map((k) => ({
+      level: "yellow",
+      rule_id: "original_diagram_stale",
+      section_id: ORIGINAL_DIAGRAM_SECTION[k.diagram.kind],
+      target_id: k.custom_id,
+      message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu — tạo change request để vẽ lại bằng FlintFlow`,
+      remediation_step: RENDER_STEP[k.diagram.kind]
     }))
 
 const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
@@ -1007,6 +1034,7 @@ export const runDeterministicCheck = (
     ...deadReference(spine),
     ...renderError(spine),
     ...diagramStale(spine),
+    ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
     ...(atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine)] : []),

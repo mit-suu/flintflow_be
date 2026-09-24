@@ -5,6 +5,10 @@ version: 1.0.0
 description: Mode 1 I-4 (images) — classify one diagram image of an imported SRS section and extract the Spine entities it shows
 provider: gemini
 aiModel: gemini-3.5-flash
+# Model dự phòng khi model chính báo quá tải (503 high demand) — thử lần lượt; 2.5 đã khoá với key mới
+fallbackModels:
+  - gemini-3.6-flash
+  - gemini-3.5-flash-lite
 maxTokens: 8192
 temperature: 0.1
 reads:

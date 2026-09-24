@@ -32,10 +32,11 @@ export interface IExtractionDraft extends Document {
   unmapped_block_ids: string[]
   /**
    * Ảnh diagram của section đã qua I-4 phần ảnh (mode 1 v3 phase 5): `kind` = loại model đọc được, `unsupported` =
-   * không gửi được (EMF/WMF, file gốc không còn), `other` = không phải diagram đọc được. Finalize: 4 loại diagram ⇒
-   * bỏ ảnh (diagram PlantUML từ Spine thay); còn lại ⇒ giữ ảnh gốc + cờ vàng.
+   * không gửi được (EMF/WMF, file gốc không còn), `other` = không phải diagram đọc được, `unavailable` = AI đọc ảnh lỗi
+   * sau mọi lượt thử (Gemini quá tải cả model dự phòng). Finalize: mọi ảnh giữ nguyên (§4.13); 4 loại diagram đọc được
+   * ⇒ đánh dấu sơ đồ gốc, còn lại ⇒ cờ vàng `import_image_unread`.
    */
-  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" }[]
+  diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" | "unavailable" }[]
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
   error: string | null

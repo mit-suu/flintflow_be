@@ -93,6 +93,11 @@ export interface AiProviderConfig {
   model: string
   maxTokens?: number
   temperature?: number
+  /**
+   * Model dự phòng cùng provider, thử lần lượt khi model chính quá tải (503 / 429 không phải hết tiền). Khai ở frontmatter
+   * skill (`fallbackModels`). Hiện chỉ provider `gemini` dùng — Gemini hay báo "high demand" theo từng model.
+   */
+  fallbackModels?: string[]
   /** `call_kind` của lượt gọi. Provider thật bỏ qua; `mock` dùng nó để trả đúng schema đầu ra (T24). */
   actionType?: string
 }

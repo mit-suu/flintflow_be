@@ -5,8 +5,8 @@
 | `section_empty` | Mandatory section (invariant 1, excluding derived) has no field with data | owner step of the section (inverse of the field → section map) | ✔ |
 | `array_empty` | An array of invariant 2 is empty | step that produces the array | ✘ |
 | `dead_reference` | A key in `reference_fields[]` does not exist | step owning the field that holds the key | ✘ |
-| `render_error` | `diagrams[].render_status = error` | step rendering that diagram | ✘ |
-| `diagram_stale` | `diagrams[].source_hash` ≠ current hash of its `source_fields` | step rendering that diagram | ✔ |
+| `render_error` | `diagrams[].render_status = error` — skipped for a diagram kind the document shows as the user's original image (mode 1 §4.13; that PlantUML is not printed) | step rendering that diagram | ✘ |
+| `diagram_stale` | `diagrams[].source_hash` ≠ current hash of its `source_fields` — same exception; the original image's drift is the yellow `original_diagram_stale` | step rendering that diagram | ✔ |
 | `nfr_missing_number` | `count(nfrs[category=reliability]) = 0` **or** `count(nfrs[category=performance]) = 0` **or** an element of those two lacks `metric`/`threshold` | S-6.3 / S-6.4 | ✔ |
 | `unconfirmed_assumption` | `count(assumptions[status=unconfirmed]) > 0` at S-9 | `assumptions[].origin_step_id`, or S-9.1 sweep | ✔ |
 | `section_stale_at_baseline` | `status(s) = stale` for a mandatory `s` | reconcile, or re-Accept at owner step | ✔ |
