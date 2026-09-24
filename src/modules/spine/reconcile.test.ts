@@ -72,7 +72,15 @@ import { applyTransaction } from "./op-engine.js"
 import { awaitingReaccept, computeStatus } from "./section-status.js"
 import { computeSourceHash } from "./source-hash.js"
 import { clearPreviewStore } from "./change.service.js"
-import { changesMakingStale, clearReconcileState, isReconcileApplied, reconcile, staleSections, type ReconcileDeps } from "./reconcile.service.js"
+import {
+  changesMakingStale,
+  clearReconcileState,
+  defaultReconcileDeps,
+  isReconcileApplied,
+  reconcile,
+  staleSections,
+  type ReconcileDeps
+} from "./reconcile.service.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 
@@ -334,6 +342,13 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     const after = await repo.get(PROJECT)
     const { projectId: _a, ...spineAfter } = after!
     expect(computeStatus(spineAfter, await repo.listChanges(PROJECT), "fixed:2.2.2")).not.toBe("stale")
+  })
+
+  it("dep mặc định đủ cả recomputeFlags — controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
+    const defaults = defaultReconcileDeps()
+    for (const key of ["changeExecutor", "recomputeFlags", "reconcileExecutor", "rerender"] as const) {
+      expect(defaults[key], key).toBeTypeOf("function")
+    }
   })
 
   it("preview_id đã dùng ⇒ 422 PREVIEW_EXPIRED", async () => {
