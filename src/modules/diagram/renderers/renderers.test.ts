@@ -179,13 +179,16 @@ describe("renderers trên fixture 19 màn", () => {
     expect(usecasePuml(spine).match(/^\w+ -- A07$/gm)).toEqual(["UC10 -- A07", "UC12 -- A07"])
   })
 
-  it("screen_flow: DOT — màn nhiều tab là cluster, popup viền đứt, cạnh flow_to", () => {
+  it("screen_flow: DOT — màn là hình chữ nhật, màn nhiều tab là cluster, popup hình ô-van, cạnh flow_to", () => {
     const puml = renderKind(FIXTURE, "screen_flow").map((p) => p.puml).join("\n")
     const tabbed = FIXTURE.screens.find((s) => s.tabs.length > 0)!
+    expect(puml).toContain('node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];')
+    expect(puml).not.toContain("style=rounded")
     expect(puml).toContain(`subgraph cluster_${tabbed.id} {`)
     expect(puml).toContain(`${tabbed.id}_T1 [label="${tabbed.tabs[0]}"];`)
     for (const popup of FIXTURE.screens.filter((s) => s.is_popup)) {
-      expect(puml).toContain(`${popup.id} [label="${popup.name}\\n(pop-up)", style="rounded,dashed"];`)
+      expect(puml).toContain(`${popup.id} [label="${popup.name}", shape=ellipse];`)
+      expect(puml).not.toContain(`${popup.id} [label="${popup.name}\\n(pop-up)"`)
     }
     // Cạnh đi từ màn nhiều tab gắn vào cluster
     expect(puml).toContain("S07_T1 -> S08 [ltail=cluster_S07];")
