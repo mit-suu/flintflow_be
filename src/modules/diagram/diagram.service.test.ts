@@ -276,3 +276,33 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(loser.store.files.size).toBe(0)
   })
 })
+
+describe("screen_layout do model vẽ (FLF-214)", () => {
+  const SALT = ["@startsalt", "{", "  {+", "    Email", "    \"john@example.com  \"", "    [ Log in ]", "  }", "}", "@endsalt", ""].join("\n")
+
+  it("drawLayout trả salt ⇒ lưu salt đó; mặc định không gọi model ⇒ bảng function", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const drawLayout = vi.fn(async () => SALT)
+    const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout } })
+    expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, userId: USER, screenId: "S01" }))
+    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", render_status: "ok", puml: SALT })
+
+    // Không cắm drawLayout (test, script) ⇒ bảng function của renderer code
+    const plain = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps, force: true })
+    expect(plain.diagrams[0].puml).toBe(renderKind(FIXTURE, "screen_layout", "S01")[0].puml)
+    // Hình khác không gọi model
+    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: { ...deps, drawLayout } })
+    expect(drawLayout).toHaveBeenCalledTimes(1)
+  })
+
+  it("salt của model không compile, model trả null hoặc ném ⇒ bảng function, vẫn ok", async () => {
+    await seed()
+    const table = renderKind(FIXTURE, "screen_layout", "S01")[0].puml
+    const { deps } = makeDeps(async (source) => render(source !== SALT))
+    for (const drawLayout of [async () => SALT, async () => null, async () => Promise.reject(new Error("no credit"))]) {
+      const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout }, force: true })
+      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", puml: table })
+    }
+  })
+})

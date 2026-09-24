@@ -23,7 +23,7 @@
  */
 
 import { randomUUID } from "node:crypto"
-import { renderDiagrams, staleDiagrams } from "../diagram/diagram.service.js"
+import { layoutRenderDeps, renderDiagrams, staleDiagrams } from "../diagram/diagram.service.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { projectStep } from "../pipeline/context-projection.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -70,7 +70,7 @@ export interface ReconcileDeps extends ChangeDeps {
 export const defaultReconcileDeps = (): ReconcileDeps => ({
   ...defaultChangeDeps(),
   reconcileExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId),
-  rerender: (projectId, targets, userId) => renderDiagrams(projectId, targets, { by: userId, step_id: null })
+  rerender: (projectId, targets, userId) => renderDiagrams(projectId, targets, { by: userId, step_id: null, deps: layoutRenderDeps() })
 })
 
 // ─── section stale và change gây ra nó ───────────────────────────

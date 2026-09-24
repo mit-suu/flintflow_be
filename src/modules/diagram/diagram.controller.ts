@@ -76,7 +76,7 @@ export const renderDiagramRoute = catchAsync(async (req: Request, res: Response)
   if (known === "screen_layout" && ownerId === null) throw new ApiError(400, "screen_layout cần owner_id (id màn)", "VALIDATION_ERROR")
 
   const { projectId, userId } = await context(req)
-  const options = { by: userId, force: body.data.force ?? false }
+  const options = { by: userId, force: body.data.force ?? false, deps: diagramService.layoutRenderDeps() }
   const result = known
     ? await diagramService.renderDiagram(projectId, known, known === "screen_layout" ? ownerId : null, options)
     : await diagramService.renderAll(projectId, options)
