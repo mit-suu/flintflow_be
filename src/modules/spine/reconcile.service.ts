@@ -34,7 +34,14 @@ import { applyTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
 import { computeSectionStates } from "./section-status.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
-import { apply as applyChange, preview as previewChange, type ChangeApplyResult, type ChangeDeps, type ChangePreviewResult } from "./change.service.js"
+import {
+  apply as applyChange,
+  defaultChangeDeps,
+  preview as previewChange,
+  type ChangeApplyResult,
+  type ChangeDeps,
+  type ChangePreviewResult
+} from "./change.service.js"
 import type { Op } from "./op.types.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
 
@@ -56,7 +63,12 @@ export interface ReconcileDeps extends ChangeDeps {
   rerender: (projectId: string, targets: RenderTarget[], userId: string) => Promise<unknown>
 }
 
-export const defaultReconcileDeps = (): Pick<ReconcileDeps, "reconcileExecutor" | "rerender"> => ({
+/**
+ * Đủ mọi dep (kể cả `recomputeFlags` của ChangeDeps): nhánh "xác nhận không đổi" gọi thẳng `recomputeFlags`,
+ * không đi qua `change.service` — thiếu dep ở đây là lỗi runtime `deps.recomputeFlags is not a function`.
+ */
+export const defaultReconcileDeps = (): ReconcileDeps => ({
+  ...defaultChangeDeps(),
   reconcileExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId),
   rerender: (projectId, targets, userId) => renderDiagrams(projectId, targets, { by: userId, step_id: null })
 })
@@ -185,7 +197,7 @@ export const reconcile = async (
   init: repository.SpineInit = {},
   deps: Partial<ReconcileDeps> = {}
 ): Promise<ReconcileResult> => {
-  const d = { ...defaultReconcileDeps(), ...deps } as ReconcileDeps
+  const d: ReconcileDeps = { ...defaultReconcileDeps(), ...deps }
 
   if (body.preview_id !== undefined && noChangePreviews.has(body.preview_id)) {
     const sections = noChangePreviews.get(body.preview_id) ?? []
