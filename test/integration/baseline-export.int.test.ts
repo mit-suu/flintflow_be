@@ -56,14 +56,14 @@ const expectDocx = (res: { status: number; headers: Record<string, string>; body
 }
 
 describe("chưa assemble / còn cờ đỏ", () => {
-  it("document và export Word ⇒ 409 NO_WORKING_DRAFT kèm hint S-8.2", async () => {
+  it("document bản nháp ⇒ 200 not_assembled (BUG-31); export Word vẫn 409 NO_WORKING_DRAFT", async () => {
     const seeded = await seedFixture("minimal")
     const api = client(seeded)
 
     const doc = await api.get("/document?source=draft")
-    expect(doc.status).toBe(409)
-    expect(doc.body.error.code).toBe("NO_WORKING_DRAFT")
-    expect(doc.body.meta).toEqual({ hint: "S-8.2" })
+    expect(doc.status).toBe(200)
+    expect(doc.body.data).toBeNull()
+    expect(doc.body.meta).toEqual({ state: "not_assembled", hint: "S-8.2" })
 
     const word = await api.get("/export/word?source=draft")
     expect(word.status).toBe(409)

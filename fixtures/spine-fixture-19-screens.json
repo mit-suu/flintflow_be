@@ -1,6 +1,7 @@
 {
   "project": {
     "name": "FlintFlow",
+    "system_name": "FlintFlow",
     "vision": "Enable a solo founder or business analyst to turn a raw product idea into a complete, internally consistent SRS document through a guided AI conversation, without hiring a requirements engineer.",
     "goals": [
       "Produce a baseline-quality SRS following the FPT template within one working day",
@@ -554,55 +555,102 @@
       "id": "A01",
       "name": "Founder",
       "kind": "human",
-      "description": "Startup founder or product owner who authors the SRS through the guided pipeline."
+      "description": "Startup founder or product owner who authors the SRS through the guided pipeline.",
+      "flows_in": [
+        "brief answers",
+        "accepted step"
+      ],
+      "flows_out": [
+        "draft section",
+        "srs document"
+      ]
     },
     {
       "id": "A02",
       "name": "Business Analyst",
       "kind": "human",
-      "description": "Analyst who refines requirements, resolves flags and signs the baseline."
+      "description": "Analyst who refines requirements, resolves flags and signs the baseline.",
+      "flows_in": [
+        "verification result"
+      ],
+      "flows_out": [
+        "red flag list"
+      ]
     },
     {
       "id": "A03",
       "name": "Administrator",
       "kind": "human",
-      "description": "Internal operator with read-only access to users, metrics and AI cost."
+      "description": "Internal operator with read-only access to users, metrics and AI cost.",
+      "flows_in": [
+        "account action"
+      ],
+      "flows_out": [
+        "platform metrics"
+      ]
     },
     {
       "id": "A04",
       "name": "Guest",
       "kind": "human",
-      "description": "Unauthenticated visitor who can register or log in."
+      "description": "Unauthenticated visitor who can register or log in.",
+      "flows_in": [
+        "registration request"
+      ]
     },
     {
       "id": "A05",
       "name": "Payment Gateway",
       "kind": "system",
-      "description": "External payment provider (sandbox) that processes credit purchases and sends webhooks."
+      "description": "External payment provider (sandbox) that processes credit purchases and sends webhooks.",
+      "flows_in": [
+        "payment result"
+      ],
+      "flows_out": [
+        "payment request"
+      ]
     },
     {
       "id": "A06",
       "name": "LLM Provider",
       "kind": "system",
-      "description": "External large language model API that generates draft content as structured ops."
+      "description": "External large language model API that generates draft content as structured ops.",
+      "flows_in": [
+        "generated draft"
+      ],
+      "flows_out": [
+        "draft request"
+      ]
     },
     {
       "id": "A07",
       "name": "PlantUML Server",
       "kind": "system",
-      "description": "Self-hosted diagram renderer that compiles .puml sources into images."
+      "description": "Self-hosted diagram renderer that compiles .puml sources into images.",
+      "flows_in": [
+        "diagram png"
+      ],
+      "flows_out": [
+        "puml source"
+      ]
     },
     {
       "id": "A08",
       "name": "Email Service",
       "kind": "system",
-      "description": "SMTP provider used for account verification and password reset mail."
+      "description": "SMTP provider used for account verification and password reset mail.",
+      "flows_out": [
+        "email request"
+      ]
     },
     {
       "id": "A09",
       "name": "Scheduler",
       "kind": "time",
-      "description": "Cron trigger that fires quota resets, expiry checks and housekeeping jobs."
+      "description": "Cron trigger that fires quota resets, expiry checks and housekeeping jobs.",
+      "flows_in": [
+        "housekeeping tick"
+      ]
     }
   ],
   "roles": [
@@ -675,9 +723,7 @@
       ],
       "description": "A user who forgot the password requests a reset link and sets a new password.",
       "includes": [],
-      "extends": [
-        "UC02"
-      ]
+      "extends": []
     },
     {
       "id": "UC04",
@@ -691,23 +737,37 @@
         "FN016",
         "FN017"
       ],
-      "description": "A first-time user walks through or skips the pipeline introduction.",
+      "description": "When a first-time user creates their first project, they walk through or skip the pipeline introduction.",
       "includes": [],
-      "extends": []
+      "extends": [
+        "UC06"
+      ]
     },
     {
       "id": "UC05",
-      "name": "Manage Projects",
+      "name": "Browse Projects",
       "actor_ids": [
         "A01"
       ],
       "function_ids": [
         "FN018",
         "FN019",
-        "FN020",
+        "FN020"
+      ],
+      "description": "A user browses, searches and filters their projects.",
+      "includes": [],
+      "extends": []
+    },
+    {
+      "id": "UC24",
+      "name": "Archive Project",
+      "actor_ids": [
+        "A01"
+      ],
+      "function_ids": [
         "FN022"
       ],
-      "description": "A user browses, searches, filters and archives their projects.",
+      "description": "A user archives a project they no longer work on.",
       "includes": [],
       "extends": []
     },
@@ -775,7 +835,7 @@
     },
     {
       "id": "UC10",
-      "name": "Review and Accept Step",
+      "name": "Accept Step At Gate",
       "actor_ids": [
         "A01"
       ],
@@ -995,7 +1055,8 @@
       "flow_to": [
         "S02",
         "S03",
-        "S05"
+        "S05",
+        "S14"
       ],
       "is_popup": false,
       "tabs": [],
@@ -1181,7 +1242,11 @@
       "name": "Admin User List",
       "description": "Read-only paginated list of all user accounts.",
       "flow_to": [
-        "S15"
+        "S15",
+        "S16",
+        "S17",
+        "S18",
+        "S19"
       ],
       "is_popup": false,
       "tabs": [],

@@ -22,8 +22,8 @@
  * tới gate. Nó chứng minh **đường đi**, không chứng minh nội dung — muốn kiểm nội dung thì dùng
  * fixture op-case (`fixtures/op-cases/`) hoặc provider thật với `E2E_AI=1`.
  */
-import { AiProviderConfig } from "../ai-action.types.js"
-import { LLMResponse } from "./provider.types.js"
+import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
+import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 
 const OP_TRANSACTION_ACTIONS = new Set(["draft", "regenerate", "revision", "glossary_scan", "reconcile"])
 const ELICIT_ACTIONS = new Set(["elicit", "discovery_step"])
@@ -82,9 +82,10 @@ const freeText = (prompt: string): string => {
   })
 }
 
-export const callMockLLM = async (prompt: string, providerConfig: AiProviderConfig): Promise<LLMResponse> => {
+export const callMockLLM = async (prompt: string, providerConfig: AiProviderConfig, options: LlmCallOptions = {}): Promise<LLMResponse> => {
   // Giữ một chút độ trễ: code gọi model đều là bất đồng bộ, mock trả ngay dễ giấu lỗi thứ tự.
   await new Promise((resolve) => setTimeout(resolve, 50))
+  if (options.signal?.aborted) throw new AiActionError(499, "Lượt gọi model bị huỷ (client đã đóng kết nối)", "AI_CALL_ABORTED")
 
   const text = mockOutputFor(providerConfig.actionType, prompt) ?? freeText(prompt)
 

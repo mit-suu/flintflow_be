@@ -14,9 +14,16 @@
  *      `awaiting_reaccept` (step sở hữu → `revision_requested`, gate Accept của T13 xoá cờ này).
  *
  * User từ chối diff ⇒ không gọi lại gì, section vẫn `stale`. Đó là trạng thái hợp lệ.
+ *
+ * FLF-177 BUG-16: khi model **không đề xuất thay đổi nào** (nội dung vẫn đúng, chỉ là dữ liệu nguồn đã
+ * đổi ở chỗ khác), lượt hoà giải cũ trả "Không có thay đổi nào" với nút Xác nhận bị khoá — cờ đỏ
+ * `section_stale_at_baseline` ở lại vĩnh viễn và user phải waive. Nay lượt đó vẫn có `preview_id`: user
+ * bấm **"Xác nhận không đổi"** để chấp nhận lại section nguyên trạng (step sở hữu được đánh dấu accepted
+ * tới seq hiện tại), cờ tự đóng ở lượt quét kế tiếp.
  */
 
-import { renderDiagrams, staleDiagrams } from "../diagram/diagram.service.js"
+import { randomUUID } from "node:crypto"
+import { layoutRenderDeps, renderDiagrams, staleDiagrams } from "../diagram/diagram.service.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { projectStep } from "../pipeline/context-projection.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -27,7 +34,14 @@ import { applyTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
 import { computeSectionStates } from "./section-status.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
-import { apply as applyChange, preview as previewChange, type ChangeApplyResult, type ChangeDeps, type ChangePreviewResult } from "./change.service.js"
+import {
+  apply as applyChange,
+  defaultChangeDeps,
+  preview as previewChange,
+  type ChangeApplyResult,
+  type ChangeDeps,
+  type ChangePreviewResult
+} from "./change.service.js"
 import type { Op } from "./op.types.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
 
@@ -49,9 +63,14 @@ export interface ReconcileDeps extends ChangeDeps {
   rerender: (projectId: string, targets: RenderTarget[], userId: string) => Promise<unknown>
 }
 
-export const defaultReconcileDeps = (): Pick<ReconcileDeps, "reconcileExecutor" | "rerender"> => ({
+/**
+ * Đủ mọi dep (kể cả `recomputeFlags` của ChangeDeps): nhánh "xác nhận không đổi" gọi thẳng `recomputeFlags`,
+ * không đi qua `change.service` — thiếu dep ở đây là lỗi runtime `deps.recomputeFlags is not a function`.
+ */
+export const defaultReconcileDeps = (): ReconcileDeps => ({
+  ...defaultChangeDeps(),
   reconcileExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId),
-  rerender: (projectId, targets, userId) => renderDiagrams(projectId, targets, { by: userId, step_id: null })
+  rerender: (projectId, targets, userId) => renderDiagrams(projectId, targets, { by: userId, step_id: null, deps: layoutRenderDeps() })
 })
 
 // ─── section stale và change gây ra nó ───────────────────────────
@@ -98,7 +117,13 @@ export const staleSections = (spine: Spine, changes: readonly Change[]): StaleSe
 /** `preview_id` → section đã gộp vào lô, để sau khi áp đặt đúng những section đó `awaiting_reaccept`. */
 const reconciledSections = new Map<string, string[]>()
 
-export const clearReconcileState = (): void => reconciledSections.clear()
+/** `preview_id` của lượt "không có gì cần đổi" → section user sắp xác nhận nguyên trạng (BUG-16). */
+const noChangePreviews = new Map<string, string[]>()
+
+export const clearReconcileState = (): void => {
+  reconciledSections.clear()
+  noChangePreviews.clear()
+}
 
 /**
  * Gọi skill của step sở hữu cho từng section stale, gom ops lại. Step tất định/render (skill null)
@@ -172,7 +197,13 @@ export const reconcile = async (
   init: repository.SpineInit = {},
   deps: Partial<ReconcileDeps> = {}
 ): Promise<ReconcileResult> => {
-  const d = { ...defaultReconcileDeps(), ...deps } as ReconcileDeps
+  const d: ReconcileDeps = { ...defaultReconcileDeps(), ...deps }
+
+  if (body.preview_id !== undefined && noChangePreviews.has(body.preview_id)) {
+    const sections = noChangePreviews.get(body.preview_id) ?? []
+    noChangePreviews.delete(body.preview_id)
+    return await confirmNoChange(projectId, userId, body.base_version, sections, d)
+  }
 
   if (body.preview_id !== undefined) {
     const sections = reconciledSections.get(body.preview_id) ?? []
@@ -196,6 +227,9 @@ export const reconcile = async (
   const proposed = await proposeOps(projectId, userId, spine, briefs, d)
 
   if (proposed.ops.length === 0) {
+    // BUG-16: còn section stale mà không có gì cần sửa ⇒ vẫn cấp `preview_id` để user xác nhận nguyên trạng
+    const previewId = randomUUID()
+    if (briefs.length > 0) noChangePreviews.set(previewId, proposed.sections.length > 0 ? proposed.sections : briefs.map((b) => b.section_id))
     return {
       ok: true,
       txn: `reconcile-${body.base_version}`,
@@ -205,16 +239,70 @@ export const reconcile = async (
       violations: [],
       referrers: [],
       branch: "silent",
+      ...(briefs.length > 0 ? { preview_id: previewId, no_change: true } : {}),
       notes:
         briefs.length === 0
           ? "Không có section nào đang stale."
-          : `${briefs.length} section stale nhưng không có thay đổi nội dung nào được đề xuất — có thể chỉ cần vẽ lại sơ đồ.`
+          : `${briefs.length} section vẫn đúng nội dung — xác nhận không đổi để gỡ cờ, hoặc sửa tay qua chat.`
     }
   }
 
   const preview = await previewChange(projectId, userId, { base_version: body.base_version, ops: proposed.ops, reason: "Hoà giải section stale" }, init, d)
   if (preview.preview_id !== undefined) reconciledSections.set(preview.preview_id, proposed.sections)
   return preview
+}
+
+/**
+ * "Xác nhận không đổi" (BUG-16): user đọc các thay đổi ở nơi khác và thấy section vẫn đúng ⇒ chấp nhận lại
+ * nguyên trạng. Step sở hữu được đánh dấu accepted tới seq hiện tại, nên `stale` (hàm tính từ seq) tắt và
+ * cờ `section_stale_at_baseline` đóng ở lượt quét kế tiếp. Không ghi nội dung nào — đây là một quyết định
+ * của người, và nó được ghi lại như mọi quyết định khác trong `changes[]`.
+ */
+const confirmNoChange = async (
+  projectId: string,
+  userId: string,
+  baseVersion: number,
+  sectionIds: readonly string[],
+  deps: ReconcileDeps
+): Promise<ChangeApplyResult> => {
+  const record = await repository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (record.spine_version !== baseVersion) {
+    throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
+  }
+  const spine = stripRecord(record)
+  const latestSeq = (await repository.nextSeq(projectId)) - 1
+  const at = new Date().toISOString()
+
+  const ops: Op[] = []
+  const seen = new Set<string>()
+  for (const sectionId of sectionIds) {
+    for (const stepId of stepsOf(sectionId, spine)) {
+      const step = spine.steps.find((s) => s.id === stepId)
+      if (!step || step.status !== "accepted" || seen.has(stepId)) continue
+      seen.add(stepId)
+      if (step.last_seq !== latestSeq) ops.push({ op: "set", path: `steps[id=${stepId}].last_seq`, value: latestSeq })
+      ops.push({ op: "set", path: `steps[id=${stepId}].accepted_at`, value: at })
+    }
+  }
+
+  const applied =
+    ops.length > 0
+      ? await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: "Hoà giải: user xác nhận nội dung không đổi" })
+      : { spine: record, changes: [], txn: null, spine_version: record.spine_version }
+
+  await rerenderStale(projectId, userId, applied.spine, deps)
+  await deps.recomputeFlags(projectId, userId)
+  const after = await repository.get(projectId)
+
+  return {
+    spine: after ?? applied.spine,
+    changes: applied.changes,
+    txn: applied.txn,
+    spine_version: after?.spine_version ?? applied.spine_version,
+    branch: "silent",
+    impact: { fields: [], sections: sectionIds.map((id) => ({ id, relation: "owner" as const })), diagrams: [], referrers: [] }
+  }
 }
 
 /** Vẽ lại đúng những hình `source_hash` lệch sau khi áp lô hoà giải. */

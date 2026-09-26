@@ -8,10 +8,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
 import mongoose from "mongoose"
-import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
+import { mockImages, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
-import { importAtBaselining, importFinalized } from "../../helpers/mode1-import-p4.js"
+import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
+import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
+import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
+import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { FieldAnchor } from "../../../src/modules/import/field-anchor.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
@@ -26,6 +30,8 @@ import * as spineRepository from "../../../src/modules/spine/spine.repository.js
 import { getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
+import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
+import { clearImportMediaCache } from "../../../src/modules/render/import-media.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -74,7 +80,6 @@ describe("finalize — Spine", () => {
   it("chỉ field đã xác nhận / độ tin ≥ 0.7 vào Spine: field bị bỏ ở bước 1.9 không có mặt", async () => {
     const { projectId, importId, userId } = await importAtBaselining()
     // import helper đã confirm_all; tạo lại tình huống: xoá trigger đã xác nhận của FR-3.2.1 khỏi draft
-    const { ExtractionDraft } = await import("../../../src/modules/import/extraction-draft.model.js")
     await ExtractionDraft.updateMany({ import_id: importId }, { $pull: { fields: { path: "functions[id=FR-3.2.1].trigger" } } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
@@ -156,10 +161,10 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
     const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
-    expect(rendered.filename).toBe("Lumen_v0.0_DRAFT.docx")
+    expect(rendered.filename).toBe(`Lumen_${projectId}_v0.0_DRAFT.docx`) // 6.3: tên file có mã project
     expect((await readBlocks(await DocxPackage.load(rendered.data))).some((b) => b.text === "1 Product Overview")).toBe(true)
     const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
-    expect(original.filename).toBe("Lumen_v0.0_original.docx")
+    expect(original.filename).toBe(`Lumen_${projectId}_v0.0_original.docx`)
     expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
     expect(toVersionDto(v as never)).toMatchObject({ version: "0.0", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
@@ -264,5 +269,118 @@ describe("finalize — lỗi", () => {
     const v2 = (await spineRepository.get(projectId))!.spine_version
     const again = await finalizeImport(projectId, userId, { import_id: importId, base_version: v2 })
     expect(again.baseline.type).toBe("imported")
+  })
+})
+
+describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 phase 5)", () => {
+  const PNG = buildPlaceholderPng(12, 7, 0x40)
+  const EMF = Buffer.from([0x01, 0x00, 0x00, 0x00, 0x6c, 0x00, 0x00, 0x00, 0, 0, 0, 0])
+  const srs = { images: [{ name: "image1.png", data: PNG }, { name: "image2.emf", data: EMF }] }
+
+  beforeEach(() => clearImportMediaCache())
+
+  it("ảnh dưới mục FPT ⇒ block image_ref ⇒ phần nối nguyên văn của mục; bản render 0.0 nhúng lại đúng bytes PNG, EMF ⇒ chỗ giữ ảnh có lý do", async () => {
+    const { projectId } = await importFinalized({ srs })
+    const blocks = await DocBlock.find({ projectId, doc_version: "0.0", kind: "image" }).lean()
+    expect(blocks.map((b) => b.image_ref).sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
+
+    const spine = (await spineRepository.get(projectId))!
+    const refs = spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image").map((b) => b.image_ref))
+    expect(refs.sort()).toEqual(["word/media/image1.png", "word/media/image2.emf"])
+
+    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
+    const media = await Promise.all(
+      rendered.partNames().filter((n) => n.startsWith("word/media/")).map(async (n) => (await rendered.binary(n))!)
+    )
+    expect(media.some((m) => m.equals(PNG))).toBe(true)
+    const texts = (await readBlocks(rendered)).map((b) => b.text)
+    expect(texts.some((t) => t.includes("original image could not be embedded (word/media/image2.emf)"))).toBe(true)
+
+    // I-4: PNG gửi Gemini (mock trả `other`), EMF không gửi ⇒ cả hai giữ ảnh gốc + cờ vàng "không đọc được"
+    expect(mockImages.flat()).toEqual([{ mime: "image/png", bytes: PNG.length }])
+    const imageFlags = spine.flags.filter((f) => f.rule_id === "import_image_unread")
+    expect(imageFlags.map((f) => [f.level, f.section_id])).toEqual([
+      ["yellow", "fixed:2.2.1"],
+      ["yellow", "fixed:2.2.1"]
+    ])
+    expect(imageFlags.map((f) => f.message).join("\n")).toContain("word/media/image2.emf")
+    expect(imageFlags.map((f) => f.message).join("\n")).toContain("định dạng không hỗ trợ")
+  })
+
+  it("I-4 đọc ảnh use case: origin vision, độ tin ≤ 0.7 ⇒ luôn qua 1.9; lượt gọi có ảnh + chú thích", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
+    const prompts: string[] = []
+    mockOverrides.next = (prompt) => {
+      prompts.push(prompt)
+      return fakeMode1(prompt)
+    }
+    const run = await runExtraction(projectId, userId, importId)
+    expect(run.doc.status).toBe("fields_review")
+    const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
+    expect(draft.diagram_images).toEqual([{ block_id: expect.stringMatching(/^B\d+$/), kind: "usecase" }])
+    const guest = draft.fields.filter((f) => f.origin === "vision")
+    expect(guest.length).toBeGreaterThan(0)
+    for (const f of guest) expect(f.confidence).toBeLessThanOrEqual(0.7)
+    // actor Guest (0.95 từ model) bị hạ trần 0.7 nhưng vẫn phải xác nhận
+    expect(guest.some((f) => f.path.startsWith("actors[") && f.value === "Guest" && f.confidence === 0.7)).toBe(true)
+    const view = await extractionSummary(importId)
+    expect(view.review_fields.some((f) => f.origin === "vision" && f.value === "Guest")).toBe(true)
+    const visionPrompt = prompts.find((p) => p.includes("# Read Diagram Image"))!
+    expect(visionPrompt).toContain("Figure 1 USECASE-IMG")
+    expect(visionPrompt).toContain("Section (registry id): fixed:2.2.1")
+    expect(mockImages.flat()).toEqual([{ mime: "image/png", bytes: PNG.length }])
+  })
+
+  it("diagram đọc được ⇒ Spine có actor + quan hệ từ ảnh (hợp với bảng), ảnh gốc bỏ khỏi bản render (PlantUML thay), không cờ ảnh", async () => {
+    mockOverrides.next = fakeMode1
+    const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
+    const spine = (await spineRepository.get(projectId))!
+    const guest = spine.actors.find((a) => a.name === "Guest")!
+    const learner = spine.actors.find((a) => a.name === "Learner")!
+    expect(guest).toBeTruthy()
+    expect(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids.sort()).toEqual([guest.id, learner.id].sort())
+    expect(spine.custom_sections.flatMap((c) => c.blocks).some((b) => b.kind === "image")).toBe(false)
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toEqual([])
+    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    const rendered = await DocxPackage.load(await docFileStore().load(v.file_ref))
+    const media = await Promise.all(rendered.partNames().filter((n) => n.startsWith("word/media/")).map(async (n) => (await rendered.binary(n))!))
+    expect(media.some((m) => m.equals(PNG))).toBe(false)
+  })
+
+  it("môi trường không có vision (thiếu GEMINI_API_KEY) ⇒ I-4 không dừng: ảnh unsupported, giữ ảnh gốc + cờ vàng", async () => {
+    mockOverrides.next = (prompt) =>
+      prompt.includes("# Read Diagram Image") ? new AiActionError(500, "Gemini API key is missing.", "GEMINI_KEY_MISSING") : fakeMode1(prompt)
+    const { projectId, importId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
+    const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
+    expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unsupported"])
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.actors.some((a) => a.name === "Guest")).toBe(false)
+    expect(spine.flags.filter((f) => f.rule_id === "import_image_unread")).toHaveLength(1)
+    expect(spine.custom_sections.flatMap((c) => c.blocks).some((b) => b.kind === "image" && b.image_ref === "word/media/image1.png")).toBe(true)
+  })
+
+  it("hết credit giữa lượt đọc ảnh ⇒ I-4 dừng (paused credits) ở section có ảnh, chạy tiếp được", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
+    let fail = true
+    mockOverrides.next = (prompt) => {
+      if (fail && prompt.includes("# Read Diagram Image")) return new AiActionError(402, "Insufficient credits", "INSUFFICIENT_CREDIT")
+      return fakeMode1(prompt)
+    }
+    const run = await runExtraction(projectId, userId, importId)
+    expect(run.doc.paused?.reason).toBe("credits")
+    expect(run.doc.extract_cursor).toBe("fixed:2.2.1")
+    fail = false
+    const again = await runExtraction(projectId, userId, importId)
+    expect(again.doc.paused).toBeNull()
+    expect(again.doc.status).toBe("fields_review")
+  })
+
+  it("file gốc không còn ⇒ render vẫn chạy, ảnh thành chỗ giữ ảnh", async () => {
+    const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG }] } })
+    await ImportedDocument.updateMany({ projectId }, { $set: { file_ref: null } })
+    clearImportMediaCache()
+    const doc = await getDocument(projectId, "Lumen", { source: "draft" })
+    expect(JSON.stringify(doc)).toContain("original image could not be embedded (word/media/image1.png)")
   })
 })

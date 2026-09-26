@@ -12,6 +12,7 @@ import {
   BLOCK_ID_PATTERN,
   DOC_BLOCK_KINDS,
   EXTRACTION_STATUSES,
+  FIELD_ORIGINS,
   HEADING_DETECTORS,
   MENTION_ENTITIES,
   PREFLIGHT_ISSUE_CODES,
@@ -147,7 +148,7 @@ export const reviewFieldSchema = z.object({
   value: z.unknown(),
   confidence,
   source_block_ids: z.array(blockId),
-  origin: z.enum(["deterministic", "ai"]),
+  origin: z.enum(FIELD_ORIGINS),
   confirmed: z.boolean(),
   edited_value: z.unknown().optional()
 })
@@ -258,7 +259,9 @@ export const gapReportSchema = z.object({
     unmapped_headings: z.number().int().min(0),
     low_confidence_fields: z.number().int().min(0),
     /** Mode 1 v2 (FLF-184): số đầu mục mẫu FPT còn thiếu. */
-    missing_fpt_sections: z.number().int().min(0)
+    missing_fpt_sections: z.number().int().min(0),
+    /** Mode 1 v2 (nợ T4): số hình chưa vẽ được (PlantUML vắng mặt lúc import / render lỗi). */
+    unrendered_diagrams: z.number().int().min(0)
   }),
   /**
    * Mode 1 v2 (FLF-184, D6): đầu mục mẫu FPT file không có hoặc chỉ có heading — cờ đỏ `section_empty`, chặn sign-off
@@ -279,6 +282,11 @@ export const gapReportSchema = z.object({
   ),
   /** Cờ đỏ/vàng gộp theo section (chỉ section có cờ) — theo thứ tự layout của file upload, section ngoài layout sau cùng. */
   sections: z.array(z.object({ section_id: z.string(), title: z.string(), flags: z.array(flagSchema) })),
+  /**
+   * Mode 1 v2 (nợ T4): hình dựng được từ Spine nhưng **chưa có bản vẽ** — lúc import PlantUML không sẵn sàng, hoặc
+   * render lỗi. Không chặn baseline: người dùng bấm vẽ lại ở workspace. Tính trực tiếp từ Spine mỗi lần đọc báo cáo.
+   */
+  unrendered_diagrams: z.array(z.object({ diagram_id: z.string(), kind: z.string(), section_id: z.string(), title: z.string(), reason: z.enum(["not_rendered", "error"]) })),
   missing_sections: z.array(z.object({ section_id: z.string(), title: z.string() })),
   unmapped_headings: z.array(z.object({ block_id: blockId, text: z.string() })),
   low_confidence_fields: z.array(reviewFieldSchema)

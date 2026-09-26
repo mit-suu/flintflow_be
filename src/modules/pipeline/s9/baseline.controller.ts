@@ -20,10 +20,12 @@ import { requireOrgId } from "../../../shared/auth/org-request.js"
 import { sendError, sendSuccess } from "../../../shared/types/api-response.js"
 import { catchAsync } from "../../../shared/utils/catch-async.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
+import { assertNotMode1 } from "../../import/mode1-guard.js"
 
 interface Authorized {
   projectId: string
   userId: string
+  mode: string
 }
 
 /** Kiểm quyền sở hữu trước khi đọc body; project không thuộc user trả 404, không 403 (hợp đồng §0). */
@@ -35,12 +37,13 @@ const authorize = async (req: Request): Promise<Authorized> => {
   if (!mongoose.isValidObjectId(projectId)) {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
-  await getProjectById(projectId, requireOrgId(req))
-  return { projectId, userId }
+  const project = await getProjectById(projectId, requireOrgId(req))
+  return { projectId, userId, mode: project.mode ?? "fpt" }
 }
 
 export const createBaseline = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
+  assertNotMode1(auth.mode, "signoff") // mode 1 v3: khoá duy nhất sau v0 là release (Flow 6)
   const parsed = baselineRequestSchema.safeParse(req.body)
   if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
 

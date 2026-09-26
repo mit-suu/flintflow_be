@@ -159,6 +159,50 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
   })
 
+  it("BPMN 3.9 (mode 1 v3): manual_fix ⇒ sửa trong step sở hữu — skill step + hướng của BA, chỉ ghi đề xuất; kiểm lại (3.7) ⇒ đạt", async () => {
+    routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
+    const { c, cr, projectId } = await toProposed()
+    const nfr = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
+    // Chưa ở manual_fix ⇒ không dùng được (3.9 chỉ sau khi AI làm lại 2 lần vẫn trượt)
+    const early = await c.post(`${cr}/locations/${nfr.location_id}/owner-step-draft`, { instruction: "Đặt ngưỡng 1 giây" })
+    expect(early.body.error.code).toBe("CR_INVALID_TRANSITION")
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) detail(await c.post(`${cr}/propose`))
+      detail(await c.post(`${cr}/verify`))
+    }
+    expect(detail(await c.get(cr)).change_request.status).toBe("manual_fix")
+
+    routeCr((p) => clarifyPerf(p) ?? fakeCrPropose(p))
+    const before = (await Spine.findOne({ projectId }).lean())!.spine_version
+    const drafted = detail(await c.post(`${cr}/locations/${nfr.location_id}/owner-step-draft`, { instruction: "Đặt ngưỡng 1 giây cho 95% request" }))
+    expect(drafted.change_request.status).toBe("manual_fix")
+    expect(drafted.locations.find((l) => l.location_id === nfr.location_id)).toMatchObject({ conclusion: "edit", manual: true, verify: null })
+    expect((await Spine.findOne({ projectId }).lean())!.spine_version, "chỉ ghi đề xuất, không ghi Spine").toBe(before)
+    const prompt = promptsOf("# CR Propose").at(-1)!
+    expect(prompt).toContain("Analyst's instruction for")
+    expect(prompt).toContain("Đặt ngưỡng 1 giây cho 95% request")
+    // vị trí trượt còn lại (BR-01) cũng sửa trong step của nó rồi mới kiểm lại được cả CR
+    const br = drafted.locations.find((l) => l.path === BR)!
+    detail(await c.post(`${cr}/locations/${br.location_id}/owner-step-draft`, { instruction: "Giữ luật mật khẩu, không đổi gì khác" }))
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+  })
+
+  it("BPMN 3.9 ⇒ huỷ ⇒ 3.10: CR ở manual_fix bị huỷ ⇒ cancelled + lý do, mở hết khoá, Spine không đổi", async () => {
+    routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
+    const { c, cr, crId, projectId } = await toProposed()
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) detail(await c.post(`${cr}/propose`))
+      detail(await c.post(`${cr}/verify`))
+    }
+    expect(detail(await c.get(cr)).change_request.status).toBe("manual_fix")
+    expect(await SpineLock.countDocuments({ projectId, cr_id: crId })).toBeGreaterThan(0)
+    const before = (await Spine.findOne({ projectId }).lean())!.spine_version
+    const cancelled = detail(await c.post(`${cr}/cancel`, { reason: "BA không sửa được, khách rút yêu cầu" }))
+    expect(cancelled.change_request).toMatchObject({ status: "cancelled", closed_reason: "BA không sửa được, khách rút yêu cầu" })
+    expect(await SpineLock.countDocuments({ projectId, cr_id: crId }), "3.10 mở khoá").toBe(0)
+    expect((await Spine.findOne({ projectId }).lean())!.spine_version).toBe(before)
+  })
+
   it("verify sai trạng thái ⇒ 409; service thiếu Spine ⇒ ném", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr } = await crToImpact(c)

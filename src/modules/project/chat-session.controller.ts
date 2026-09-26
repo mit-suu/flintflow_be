@@ -6,8 +6,7 @@ import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { isChangeInstruction } from "../spine/change.service.js"
-import { changesRequireCr } from "../import/mode1-guard.js"
-import { crFromChat } from "../change-request/chat-cr.service.js"
+import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
 
 /**
  * F5 (review T13, IDOR): xác nhận user đã đăng nhập SỞ HỮU `projectId` trên đường dẫn trước khi chạm tới
@@ -56,6 +55,10 @@ export const getChatSession = catchAsync(async (req: Request, res: Response) => 
   return sendSuccess(res, 200, session)
 })
 
+/** Lệnh sửa trong chat là "yêu cầu miệng có tên" (BPMN 3.1) — không có nguồn `chat` riêng. */
+const chatChangeRequiresCr = (chatId: string, content: string) =>
+  changeRequiresCr(prefillFrom(content, "Sửa tài liệu", { kind: "verbal", ref: `chat:${chatId}` }))
+
 export const sendMessage = catchAsync(async (req: Request, res: Response) => {
   const { projectId, userId } = await authorizeProject(req)
   const chatId = requireChatId(req)
@@ -70,8 +73,8 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(400, "Step is required", "STEP_REQUIRED")
   }
 
-  // Mode 1 sau baseline v1 (D3, FLF-186): lệnh sửa trong chat ⇒ tạo CR nguồn chat, trả 409 CHANGE_REQUIRES_CR trỏ tới CR
-  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw await crFromChat(projectId, userId, chatId, content)
+  // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng)
+  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw chatChangeRequiresCr(chatId, content)
 
   const updatedSession = await chatSessionService.sendMessageAndGetResponse(
     projectId,
@@ -98,8 +101,8 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
     throw new ApiError(400, "Step is required", "STEP_REQUIRED")
   }
 
-  // Mode 1 sau baseline v1 (D3, FLF-186): lệnh sửa trong chat ⇒ tạo CR nguồn chat, trả 409 CHANGE_REQUIRES_CR trỏ tới CR
-  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw await crFromChat(projectId, userId, chatId, content)
+  // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng)
+  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw chatChangeRequiresCr(chatId, content)
 
   // Set SSE streaming headers
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8")

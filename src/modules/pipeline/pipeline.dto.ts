@@ -48,6 +48,10 @@ export const PIPELINE_ERROR_STATUS = {
   CHANGE_RANGE_INVALID: 422,
   NOTHING_TO_UNDO: 422,
   BASELINE_BLOCKED: 422,
+  /** Nhà cung cấp AI từ chối: hết hạn mức, chưa có phương thức thanh toán, hoặc gọi quá nhanh. */
+  RATE_LIMIT_EXCEEDED: 429,
+  /** Nhà cung cấp AI lỗi / trả rỗng (GLM_EMPTY_OUTPUT, 5xx…) — không phải lỗi logic của pipeline. */
+  AI_PROVIDER_ERROR: 502,
   NOT_IMPLEMENTED: 501
 } as const
 
@@ -137,7 +141,10 @@ export const changesPreviewResponseSchema = z.object({
   impact: impactSchema.optional(),
   /** T17: lệnh mơ hồ (UC 6.11) — không có ops. */
   clarification: z.string().optional(),
-  preview_id: z.string().optional()
+  preview_id: z.string().optional(),
+  notes: z.string().optional(),
+  /** Hoà giải (BUG-16): không có gì cần đổi — gửi lại `preview_id` để xác nhận section nguyên trạng. */
+  no_change: z.boolean().optional()
 })
 
 /** POST /projects/:id/changes, /undo, /reconcile — kết quả một transaction đã ghi. */
@@ -183,7 +190,9 @@ export const stepSummarySchema = z.object({
   calls_limit: z.literal(8),
   regenerate_used: z.number().int().min(0),
   regenerate_limit: z.literal(3),
-  accepted_at: isoDateTime.nullable()
+  accepted_at: isoDateTime.nullable(),
+  /** Step đang chạy dở ở một request khác (cùng tiến trình BE) — FE khoá nút chạy thay vì để người dùng bấm rồi nhận 409. */
+  running: z.boolean()
 })
 
 /** GET /projects/:id/steps */
@@ -196,20 +205,65 @@ export const stepsResponseSchema = z.object({
 /** POST /projects/:id/steps/:stepId/run (SSE) */
 export const runStepRequestSchema = z.strictObject({
   session_id: z.string().min(1),
-  base_version: baseVersion
+  base_version: baseVersion,
+  /**
+   * Chạy lại một step đã `accepted` (B7 reopen): đặt `revision_requested`, reset `first_seq/last_seq/accepted_at`
+   * rồi chạy như thường. Cần khi mục của step vẫn còn cờ đỏ dù step đã chốt — vd file có đầu mục nhưng I-4 không
+   * trích được gì nên Spine trống (gặp thật 2026-09-20).
+   */
+  reopen: z.boolean().optional()
 })
 
+/**
+ * FLF-177 (03-live-status-flow.md §5): CHỈ THÊM sự kiện và field, không đổi sự kiện cũ — FE cũ vẫn chạy.
+ * `stage`/`heartbeat` cho biết runner đang làm gì và còn sống; `answer_received` trả lời ngay sau khi user
+ * gửi; `draft_retry` nói bằng lời thường khi model trả kết quả hỏng; `auto_accepted`/`phase_progress` cho
+ * chuỗi chạy liền theo phase.
+ */
 export const STEP_EVENT_TYPES = [
   "intake",
   "elicit",
   "answer_needed",
+  "answer_received",
   "draft",
+  "draft_retry",
+  "stage",
+  "heartbeat",
   "ops_applied",
   "render",
   "flags",
   "gate_ready",
+  "auto_accepted",
+  "phase_progress",
+  "phase_gate",
   "error"
 ] as const
+
+export const RUN_STAGES = ["intake", "ask", "draft", "check", "render", "gate"] as const
+
+export const runStageSchema = z.enum(RUN_STAGES)
+
+/** Một dòng tóm tắt thay đổi đọc được cho người (WP-5) — dùng chung cho `ops_applied` và `gate_ready`. */
+export const changeSummarySchema = z.object({
+  kind: z.enum(["add", "update", "remove"]),
+  collection: z.string().min(1),
+  id: z.string().nullable(),
+  title_vi: z.string(),
+  /** Section để nút "xem trong tài liệu" nhảy đúng chỗ. */
+  section_id: z.string().nullable().optional()
+})
+
+export type ChangeSummary = z.infer<typeof changeSummarySchema>
+
+export const assumptionBriefSchema = z.object({ id: z.string(), text: z.string(), conflict: z.string().nullable().optional() })
+
+/** Bảng thu gọn hiện ngay ở gate cho step mà kết quả LÀ một bảng (MoSCoW, ma trận quyền) — BUG-20. */
+export const gateTableSchema = z.object({
+  title_vi: z.string(),
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.string())),
+  truncated: z.number().int().min(0)
+})
 
 export const questionSchema = z.object({
   id: z.string().min(1),
@@ -223,13 +277,54 @@ export const stepEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("intake"), step_id: z.string(), phase: z.string(), empty_fields: z.array(z.string()) }),
   z.object({ type: z.literal("elicit"), step_id: z.string(), delta: z.string() }),
   z.object({ type: z.literal("answer_needed"), step_id: z.string(), questions: z.array(questionSchema) }),
+  z.object({ type: z.literal("answer_received"), step_id: z.string(), count: z.number().int().min(0) }),
   z.object({ type: z.literal("draft"), step_id: z.string(), attempt: z.number().int().min(1) }),
+  z.object({
+    type: z.literal("draft_retry"),
+    step_id: z.string(),
+    attempt: z.number().int().min(1),
+    max: z.number().int().min(1),
+    /** Lời thường cho user: "kết quả thiếu trường, đang thử lại". Không hiện mã lỗi. */
+    reason_vi: z.string()
+  }),
+  z.object({
+    type: z.literal("stage"),
+    step_id: z.string(),
+    stage: runStageSchema,
+    label_vi: z.string(),
+    detail_vi: z.string().optional(),
+    batch: z.object({ i: z.number().int().min(1), n: z.number().int().min(1) }).optional(),
+    est_ms: z.number().int().min(0).optional()
+  }),
+  z.object({ type: z.literal("heartbeat"), step_id: z.string(), stage: runStageSchema, elapsed_ms: z.number().int().min(0) }),
+  z.object({ type: z.literal("auto_accepted"), step_id: z.string(), reason_vi: z.string() }),
+  z.object({
+    type: z.literal("phase_gate"),
+    step_id: z.string(),
+    phase: z.string(),
+    reason_vi: z.string(),
+    /** Tóm tắt của CẢ giai đoạn, gồm cả các bước đã tự Accept. */
+    summary: z.array(changeSummarySchema),
+    new_assumptions: z.array(assumptionBriefSchema),
+    steps: z.array(z.object({ step_id: z.string(), label_vi: z.string(), auto_accepted: z.boolean() })),
+    flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0), red_delta: z.number().int(), yellow_delta: z.number().int() }).optional()
+  }),
+  z.object({
+    type: z.literal("phase_progress"),
+    step_id: z.string(),
+    phase: z.string(),
+    step_index: z.number().int().min(1),
+    step_total: z.number().int().min(1),
+    needs_user: z.boolean()
+  }),
   z.object({
     type: z.literal("ops_applied"),
     step_id: z.string(),
     txn: z.string(),
     spine_version: baseVersion,
-    changes: z.array(changeDiffSchema)
+    changes: z.array(changeDiffSchema),
+    /** WP-5: tóm tắt đọc được của lô vừa ghi ("+3 use case: …"). */
+    summary: z.array(changeSummarySchema).optional()
   }),
   z.object({
     type: z.literal("render"),
@@ -238,13 +333,37 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     render_status: z.enum(["ok", "error"]),
     error: z.string().optional()
   }),
-  z.object({ type: z.literal("flags"), step_id: z.string(), red_open: z.number().int().min(0), yellow_open: z.number().int().min(0) }),
+  z.object({
+    type: z.literal("flags"),
+    step_id: z.string(),
+    red_open: z.number().int().min(0),
+    yellow_open: z.number().int().min(0),
+    red_delta: z.number().int().optional(),
+    yellow_delta: z.number().int().optional(),
+    new_assumptions: z.array(assumptionBriefSchema).optional()
+  }),
   z.object({
     type: z.literal("gate_ready"),
     step_id: z.string(),
     actions: z.array(gateActionSchema),
     regenerate_used: z.number().int().min(0),
-    calls_used: z.number().int().min(0)
+    calls_used: z.number().int().min(0),
+    /** Version cuối cùng của lượt chạy — CAO HƠN `ops_applied` vì render + recompute cờ chạy sau (L11). */
+    spine_version: z.number().int().min(1),
+    /** Lượt chạy này có ghi được op nào vào Spine không (L11b) — `false` = model trả lô rỗng. */
+    wrote_ops: z.boolean(),
+    /** Mục step này nuôi mà chạy xong vẫn trống — accept cũng không đóng được cờ `section_empty` (L11b). */
+    empty_sections: z.array(z.object({ section_id: z.string(), title: z.string() })),
+    /** WP-5 / Lớp 4 "Bạn vừa có": nội dung của gate, không chỉ con số. */
+    summary: z.array(changeSummarySchema).optional(),
+    new_assumptions: z.array(assumptionBriefSchema).optional(),
+    flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0), red_delta: z.number().int(), yellow_delta: z.number().int() }).optional(),
+    duration_ms: z.number().int().min(0).optional(),
+    credits_used: z.number().min(0).optional(),
+    doc_progress: z.object({ before: z.number().min(0).max(100), after: z.number().min(0).max(100) }).optional(),
+    table: gateTableSchema.optional(),
+    /** Step không đổi gì thì phải nói vì sao (Lớp 4). */
+    no_change_reason: z.string().optional()
   }),
   z.object({ type: z.literal("error"), step_id: z.string(), code: pipelineErrorCodeSchema, message: z.string(), retryable: z.boolean() })
 ])
@@ -257,6 +376,9 @@ export const ANSWERS_MAX_ITEMS = 20
 export const GATE_NOTE_MAX_CHARS = 2000
 
 const answerText = z.string().max(ANSWER_MAX_CHARS)
+
+/** POST /projects/:id/phases/:phase/run (SSE) — chạy liền các bước của giai đoạn (R2). */
+export const runPhaseRequestSchema = runStepRequestSchema
 
 /** POST /projects/:id/steps/:stepId/answer */
 export const stepAnswerRequestSchema = z.strictObject({
@@ -325,6 +447,30 @@ export const resumeResponseSchema = z.object({
   spine_version: baseVersion,
   progress: progressResponseSchema
 })
+
+// ─── run-state (WP-4 / 03-live-status-flow §5) ───────────────────
+
+/** GET /projects/:id/steps/:stepId/run-state · GET /projects/:id/run-state/active */
+export const runStateResponseSchema = z.object({
+  step_id: z.string().min(1),
+  run_id: z.string().min(1),
+  status: z.enum(["running", "waiting_answer", "gate", "done", "interrupted", "cancelled"]),
+  stage: runStageSchema,
+  detail_vi: z.string().nullable(),
+  batch: z.object({ i: z.number().int().min(1), n: z.number().int().min(1) }).nullable(),
+  started_at: isoDateTime,
+  last_event_at: isoDateTime,
+  /** Lượt còn sống (khoá chưa hết hạn) hay đã chết giữa chừng. */
+  alive: z.boolean(),
+  questions: z.array(questionSchema).nullable(),
+  gate_payload: z.unknown().nullable(),
+  events: z.array(z.unknown()),
+  error: z.object({ code: z.string(), message: z.string() }).nullable()
+})
+
+/** POST /projects/:id/steps/:stepId/cancel */
+export const cancelRunRequestSchema = z.strictObject({ run_id: z.string().min(1).optional() })
+export const cancelRunResponseSchema = z.object({ cancelled: z.boolean(), run_id: z.string().nullable() })
 
 /** GET /projects/:id/flags?level=&open= */
 export const flagsQuerySchema = z.object({

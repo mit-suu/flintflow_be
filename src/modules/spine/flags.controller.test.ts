@@ -89,7 +89,8 @@ describe("flags.controller", () => {
     expect(outcome.status).toBe(200)
     const data = (outcome.body as { data: unknown }).data
     expect(progressResponseSchema.safeParse(data).success).toBe(true)
-    expect(data).toMatchObject({ readiness: { red_open: 1 }, progress: { total: 151, show_percent: true } })
+    // 81 = 51 + 5×6 (5 màn signed_off + vòng nonscreen); 14 màn placeholder không vào mẫu số
+    expect(data).toMatchObject({ readiness: { red_open: 1 }, progress: { total: 81, show_percent: true } })
   })
 
   it("GET /flags lọc theo level/open; query sai ⇒ 400", async () => {

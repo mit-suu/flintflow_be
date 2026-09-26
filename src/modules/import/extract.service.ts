@@ -11,13 +11,16 @@
 
 import type mongoose from "mongoose"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import type { ImportExtractOutput } from "../../shared/ai/response-parser.js"
+import type { ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
+import { loadImportImage } from "../render/import-media.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
-import { NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
+import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
   IdAllocator,
+  REF_LIST_FIELDS,
   flattenItem,
+  mergeFieldValue,
   normalizeKey,
   parseFieldPath,
   resolveProvisional,
@@ -25,7 +28,7 @@ import {
   type ProvisionalEntity
 } from "./extracted-entities.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import { VISION_CONFIDENCE_CAP, needsConfirm } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
@@ -40,7 +43,7 @@ export interface ExtractionRun {
   sections: GetImportResponse["extraction"]["sections"]
 }
 
-type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor">
+type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref">
 
 /** Section cần trích theo thứ tự xuất hiện trong tài liệu. */
 export const extractionPlan = (blocks: BlockLite[]): string[] => {
@@ -174,6 +177,27 @@ export const itemsFromAi = (
   })
 }
 
+// ─── ảnh diagram (mode 1 v3 phase 5) ─────────────────────────────
+
+/** Mã lỗi cho biết môi trường không đọc được ảnh (không phải lỗi tạm thời) ⇒ bỏ qua ảnh thay vì dừng I-4. */
+const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
+
+/** Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. */
+export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<BlockLite, "block_id" | "kind" | "text">[]): string => {
+  const i = sectionBlocks.findIndex((b) => b.block_id === img.block_id)
+  const near = [sectionBlocks[i + 1], sectionBlocks[i - 1]].find((b) => b?.kind === "caption" && b.text.trim())
+  return near?.text.trim() ?? "(none)"
+}
+
+/** Item đọc từ ảnh: `origin: vision`, độ tin (cả từng field) không vượt trần ⇒ luôn qua màn 1.9. */
+export const visionItems = (items: EntityItem[]): EntityItem[] =>
+  items.map((it) => ({
+    ...it,
+    origin: "vision" as const,
+    confidence: Math.min(it.confidence, VISION_CONFIDENCE_CAP),
+    field_confidence: Object.fromEntries(Object.entries(it.field_confidence).map(([k, v]) => [k, Math.min(v, VISION_CONFIDENCE_CAP)]))
+  }))
+
 // ─── chạy ────────────────────────────────────────────────────────
 
 const itemsOfDraft = (d: Pick<IExtractionDraft, "fields">): EntityItem[] => {
@@ -198,7 +222,16 @@ const mergeItems = (items: EntityItem[]): EntityItem[] => {
       out.set(key, { ...it, value: { ...it.value }, source_block_ids: [...it.source_block_ids] })
       continue
     }
-    for (const [k, v] of Object.entries(it.value)) if (cur.value[k] === undefined) cur.value[k] = v
+    // Chữ / bảng nói cùng phần tử với ảnh ⇒ chữ thắng (tin hơn ảnh), ảnh chỉ bù field chữ không có
+    if (cur.origin === "vision" && it.origin !== "vision") {
+      for (const [k, v] of Object.entries(it.value)) cur.value[k] = k in cur.value ? mergeFieldValue(k, cur.value[k], v) : v
+      cur.origin = it.origin
+      cur.confidence = it.confidence
+      cur.field_confidence = { ...cur.field_confidence, ...it.field_confidence }
+      cur.source_block_ids = [...new Set([...it.source_block_ids, ...cur.source_block_ids])]
+      continue
+    }
+    for (const [k, v] of Object.entries(it.value)) cur.value[k] = cur.value[k] === undefined ? v : REF_LIST_FIELDS.has(k) ? mergeFieldValue(k, cur.value[k], v) : cur.value[k]
     cur.field_confidence = { ...it.field_confidence, ...cur.field_confidence }
     cur.source_block_ids = [...new Set([...cur.source_block_ids, ...it.source_block_ids])]
   }
@@ -214,7 +247,7 @@ const provisionalItems = (sectionId: string, provisional: Map<string, Provisiona
 }
 
 const needsReview = (drafts: Pick<IExtractionDraft, "fields">[]): boolean =>
-  drafts.some((d) => d.fields.some((f) => !f.confirmed && f.confidence < FIELD_CONFIDENCE_THRESHOLD))
+  drafts.some((d) => d.fields.some((f) => !f.confirmed && needsConfirm(f)))
 
 /**
  * Chạy (hoặc chạy tiếp) I-4 cho import đang ở `extracting`. Trả trạng thái mới nhất kể cả khi dừng vì credit/lỗi AI.
@@ -278,6 +311,53 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     const unmapped: string[] = []
     const heading = profile.heading_map.find((h) => h.section_id === section_id)
     const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
+    const pause = async (result: { reason: "credits" | "resume_later"; message: string }): Promise<ExtractionRun> => {
+      doc.paused = { reason: result.reason, at: new Date() }
+      await doc.save()
+      draft.error = result.message.slice(0, 500)
+      if (result.reason === "resume_later") draft.status = "failed"
+      await draft.save()
+      return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
+    }
+
+    // Phase 5: ảnh diagram của section (sau bảng tất định, trước lô chữ) ⇒ Gemini đọc từng ảnh; thực thể đọc được vào
+    // known_keys để lô chữ dùng lại khoá. EMF/WMF / file gốc không còn ⇒ `unsupported` (không gọi AI, giữ ảnh gốc).
+    const diagramImages: IExtractionDraft["diagram_images"] = []
+    for (const img of DIAGRAM_SECTIONS.has(section_id) ? sectionBlocks.filter((b) => b.kind === "image" && b.image_ref) : []) {
+      const image = await loadImportImage(projectId, img.image_ref!)
+      if (!image) {
+        diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
+        continue
+      }
+      const result = await withMeteredAi<ImportExtractDiagramOutput>(
+        { projectId, userId, stepId: `I-4:${section_id}` },
+        ActionType.IMPORT_EXTRACT_DIAGRAM,
+        {
+          section_id,
+          heading_text: heading?.heading_text ?? section_id,
+          block_id: img.block_id,
+          caption: captionOf(img, sectionBlocks),
+          schema_excerpt: schemaExcerptFor(DIAGRAM_TARGETS),
+          known_keys: knownKeysText([...known, ...items])
+        },
+        { images: [image] }
+      )
+      // Môi trường không có vision (thiếu GEMINI_API_KEY / provider không nhận ảnh) ⇒ không dừng import vì ảnh: giữ ảnh
+      // gốc như EMF (cờ vàng lúc finalize) — lỗi cấu hình, chạy lại cũng không khá hơn
+      if (!result.ok && result.code && VISION_UNAVAILABLE.has(result.code)) {
+        diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
+        continue
+      }
+      if (!result.ok) return pause(result)
+      usageId = result.usageId
+      const read =
+        result.data.diagram_kind === "other"
+          ? []
+          : visionItems(itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]) }))
+      diagramImages.push({ block_id: img.block_id, kind: read.length ? result.data.diagram_kind : "other" })
+      items.push(...read)
+    }
+
     for (const batch of targets.length ? chunkBlocks(aiBlocks) : []) {
       const result = await withMeteredAi<ImportExtractOutput>({ projectId, userId, stepId: `I-4:${section_id}` }, ActionType.IMPORT_EXTRACT_FIELDS, {
         section_id,
@@ -287,14 +367,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
         known_keys: knownKeysText([...known, ...items]),
         blocks: blockLines(batch)
       })
-      if (!result.ok) {
-        doc.paused = { reason: result.reason, at: new Date() }
-        await doc.save()
-        draft.error = result.message.slice(0, 500)
-        if (result.reason === "resume_later") draft.status = "failed"
-        await draft.save()
-        return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
-      }
+      if (!result.ok) return pause(result)
       usageId = result.usageId
       // Văn xuôi không trích được ⇒ finalize giữ nguyên văn làm phần nối của section (mode 1 v2 — FLF-184)
       const inBatch = new Set(batch.map((b) => b.block_id))
@@ -317,6 +390,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     draft.error = null
     draft.usage_id = usageId
     draft.unmapped_block_ids = unmapped
+    draft.diagram_images = diagramImages
     draft.markModified("fields")
     await draft.save()
   }

@@ -92,7 +92,9 @@ describe("buildImportOps", () => {
 describe("hồ sơ luật mode 1 + cờ AI", () => {
   it("loại array_empty / non_english_content; section_empty giữ đỏ (D6, FLF-183)", () => {
     const spine = createEmptySpine({ name: "Lumen" })
-    const all = runDeterministicCheck(spine)
+    // FLF-213: Spine rỗng chưa chạy step nào, mode 2 chỉ soi mảng rỗng khi bước sinh ra mảng đã chốt —
+    // so sánh với mode 1 phải ở lượt ký bản, nơi mọi cổng đều mở.
+    const all = runDeterministicCheck(spine, [], { atBaseline: true })
     expect(all.some((c) => c.rule_id === "array_empty")).toBe(true)
     const mode1 = runDeterministicCheck(spine, [], { ruleProfile: MODE1_RULE_PROFILE })
     expect(mode1.some((c) => c.rule_id === "array_empty")).toBe(false)

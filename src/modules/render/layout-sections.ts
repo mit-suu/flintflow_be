@@ -18,12 +18,17 @@
  * - Mục trong layout mà Spine không còn (feature/function/mục riêng đã xoá) ⇒ bỏ.
  * - Số hiệu: đếm theo cấp (cấp nhảy quá 1 được kéo về cấp kế tiếp). File gõ số tay ở phần lớn heading thì heading
  *   không gõ số (vd "Phụ lục A") giữ không số, như bản gốc.
+ * - **Phần** (nợ T14): heading gõ số La Mã mà mục con đầu tiên đánh số lại từ đầu (`II. Software Requirement
+ *   Specification` › `1 Product Overview`, `2.1 Actors`) ⇒ giữ nhãn La Mã gốc, không chiếm một cấp số; mục con đánh
+ *   số lại từ 1 trong phần đó. Trước đây `II.` bị coi là chương 1 ⇒ `3.1.2` thành `1.3.1.2`, tham chiếu chéo trỏ sai.
+ *   La Mã dùng làm chính số chương (`I. Introduction` › `1.1 Purpose`) vẫn đánh số như cũ.
  */
 
 import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
 import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
-import type { Block, InlineRun, RenderedSection, TableCell } from "./rendered-document.types.js"
+import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
+import { mediaId } from "./import-media.js"
 import { defaultSectionTitle, renderSection, type SectionRenderContext } from "./section-renderer.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
@@ -37,6 +42,8 @@ export interface TemplateLayoutEntry {
 export interface TemplateLayout {
   layout: readonly TemplateLayoutEntry[]
   language: string
+  /** T15: dòng Record of Changes của file gốc — in trước lịch sử FlintFlow. */
+  legacyRecord?: readonly RocRow[]
 }
 
 const CUSTOM_PREFIX = "custom:"
@@ -46,9 +53,22 @@ const MAX_LEVEL = 6
 /** Số gõ tay ở đầu heading (`1.2 Scope`, `IV. NFR`) — cùng mẫu `import/text-similarity.ts` `splitHeadingNumber`. */
 const TYPED_NUMBER = /^\s*((?:\d{1,2}\.)*\d{1,2}|[IVX]{1,4})\.?[\s ]+(.*)$/
 
-const splitTypedNumber = (text: string): { typed: boolean; title: string } => {
+const splitTypedNumber = (text: string): { typed: boolean; title: string; label: string } => {
   const m = TYPED_NUMBER.exec(text)
-  return m && m[2].trim() ? { typed: true, title: m[2].trim() } : { typed: false, title: text.trim() }
+  return m && m[2].trim() ? { typed: true, title: m[2].trim(), label: m[1] } : { typed: false, title: text.trim(), label: "" }
+}
+
+const ROMAN: Record<string, number> = { I: 1, V: 5, X: 10 }
+/** `IV` ⇒ 4; không phải số La Mã ⇒ `null`. */
+export const romanValue = (label: string): number | null => {
+  if (!/^[IVX]+$/.test(label)) return null
+  let total = 0
+  for (let i = 0; i < label.length; i++) {
+    const v = ROMAN[label[i]]
+    const next = ROMAN[label[i + 1]] ?? 0
+    total += v < next ? -v : v
+  }
+  return total
 }
 
 type EntryKind = "fpt" | "group" | "custom" | "continuation"
@@ -62,6 +82,8 @@ interface Placed {
   fromLayout: boolean
   /** Heading gốc có số gõ tay. */
   typed: boolean
+  /** Số gõ tay nguyên văn (`2.1`, `II`) — rỗng nếu không gõ số. */
+  label?: string
 }
 
 // ─── mục riêng ⇒ block ─────────────────────────────────────────────
@@ -77,8 +99,11 @@ const customTable = (rows: string[][]): Block | null => {
   return { type: "table", header: pad(header), rows: body.map(pad) }
 }
 
-/** Khối nguyên văn: đoạn · danh sách (gộp dòng liền nhau) · bảng · ảnh (chưa đọc nhị phân ảnh — V5 ⇒ dòng chú thích). */
-export const customBlocks = (blocks: readonly CustomBlock[]): Block[] => {
+/**
+ * Khối nguyên văn: đoạn · danh sách (gộp dòng liền nhau) · bảng · ảnh. Ảnh có `image_ref` + `imagePng` ⇒ khối ảnh thật
+ * (tham chiếu ảnh gốc của file upload — phase 5, T3); không có ⇒ dòng chú thích như trước.
+ */
+export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRef: string) => string | undefined): Block[] => {
   const out: Block[] = []
   for (const b of blocks) {
     switch (b.kind) {
@@ -97,9 +122,12 @@ export const customBlocks = (blocks: readonly CustomBlock[]): Block[] => {
         if (table) out.push(table)
         break
       }
-      case "image":
-        out.push({ type: "paragraph", runs: [{ text: b.text.trim() ? `[Image: ${b.text.trim()}]` : "[Image]", italic: true }] })
+      case "image": {
+        const png = b.image_ref ? imagePng?.(b.image_ref) : undefined
+        if (png) out.push({ type: "image", png, ...(b.text.trim() ? { caption: b.text.trim() } : {}) })
+        else out.push({ type: "paragraph", runs: [{ text: b.text.trim() ? `[Image: ${b.text.trim()}]` : "[Image]", italic: true }] })
         break
+      }
     }
   }
   return out
@@ -120,10 +148,10 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
     const id = entry.section_id
     if (used.has(id)) continue
-    const { typed, title } = splitTypedNumber(entry.heading_text)
+    const { typed, title, label } = splitTypedNumber(entry.heading_text)
     const level = clampLevel(entry.level)
     if (id.startsWith(GROUP_PREFIX)) {
-      placed.push({ section_id: id, kind: "group", title: title || id, level, fromLayout: true, typed })
+      placed.push({ section_id: id, kind: "group", title: title || id, level, fromLayout: true, typed, label })
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
       if (!custom) continue
@@ -134,10 +162,11 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
         title: heading ? splitTypedNumber(heading).title : "",
         level: clampLevel(custom.level),
         fromLayout: true,
-        typed: heading ? splitTypedNumber(heading).typed : false
+        typed: heading ? splitTypedNumber(heading).typed : false,
+        label: heading ? splitTypedNumber(heading).label : ""
       })
     } else if (defById.has(id)) {
-      placed.push({ section_id: id, kind: "fpt", title: title || defaultSectionTitle(spine, id, template.language), level, fromLayout: true, typed })
+      placed.push({ section_id: id, kind: "fpt", title: title || defaultSectionTitle(spine, id, template.language), level, fromLayout: true, typed, label })
     } else {
       continue
     }
@@ -207,19 +236,45 @@ interface Numbered extends Placed {
   renderLevel: number
 }
 
-/** Đánh số theo cấp; phần nối không có số (gộp vào section trước). */
+/**
+ * Heading La Mã là **phần** (T14) khi mục con gõ số đầu tiên của nó đánh số lại: số chương của mục con khác số của phần
+ * (`II.` › `1 …`). La Mã làm chính số chương (`I.` › `1.1 …`) thì không phải phần.
+ */
+const isPart = (placed: readonly Placed[], i: number): boolean => {
+  const p = placed[i]
+  const value = p.fromLayout && p.typed && p.label ? romanValue(p.label) : null
+  if (value === null) return false
+  for (let j = i + 1; j < placed.length && placed[j].level > p.level; j++) {
+    const child = placed[j]
+    if (!child.fromLayout || !child.typed || !child.label || romanValue(child.label) !== null) continue
+    return Number(child.label.split(".")[0]) !== value
+  }
+  return false
+}
+
+/** Đánh số theo cấp; phần nối không có số (gộp vào section trước); phần La Mã giữ nhãn gốc, không chiếm cấp số. */
 export const numberSections = (placed: readonly Placed[]): Numbered[] => {
   const headings = placed.filter((p) => p.kind !== "continuation" && p.fromLayout)
   const typedFile = headings.length > 0 && headings.filter((p) => p.typed).length * 2 >= headings.length
   const counters: number[] = []
   let depth = 0
-  return placed.map((p): Numbered => {
+  /** Cấp của phần đang mở (0 = không trong phần nào): mục bên trong đánh số như thể phần không tồn tại. */
+  let partLevel = 0
+  return placed.map((p, i): Numbered => {
     if (p.kind === "continuation") return { ...p, number: "", renderLevel: Math.min(MAX_LEVEL, p.level) }
+    if (partLevel && p.level <= partLevel) partLevel = 0
+    if (isPart(placed, i)) {
+      partLevel = p.level
+      counters.length = 0
+      depth = 0
+      return { ...p, number: p.label ?? "", renderLevel: Math.min(MAX_LEVEL, p.level) }
+    }
+    const level = partLevel ? p.level - partLevel : p.level
     if (typedFile && p.fromLayout && !p.typed) return { ...p, number: "", renderLevel: Math.min(MAX_LEVEL, p.level) }
-    depth = Math.min(p.level, depth + 1)
+    depth = Math.min(level, depth + 1)
     counters.length = depth
     counters[depth - 1] = (counters[depth - 1] ?? 0) + 1
-    return { ...p, number: counters.slice(0, depth).join("."), renderLevel: Math.min(MAX_LEVEL, depth) }
+    return { ...p, number: counters.slice(0, depth).join("."), renderLevel: Math.min(MAX_LEVEL, depth + partLevel) }
   })
 }
 
@@ -267,7 +322,7 @@ export const buildLayoutSections = (
       continue
     }
     if (n.kind === "custom" || n.kind === "continuation") {
-      const blocks = customBlocks(customById.get(n.section_id)?.blocks ?? [])
+      const blocks = customBlocks(customById.get(n.section_id)?.blocks ?? [], (ref) => opts.diagramPng(mediaId(ref)))
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1

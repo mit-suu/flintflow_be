@@ -111,7 +111,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
       id: e.id,
       name: str(e.value.name) || e.id,
       description: str(e.value.description),
-      relations: strList(e.value.relations).map(resolveEntity).filter((x): x is string => !!x && x !== e.id)
+      relations: [...new Set(strList(e.value.relations).map(resolveEntity).filter((x): x is string => !!x && x !== e.id))]
     })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {
@@ -123,7 +123,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
       feature_id: featureOr(s.value.feature_id),
       name: str(s.value.name) || s.id,
       description: str(s.value.description),
-      flow_to: strList(s.value.flow_to).map(resolveScreen).filter((x): x is string => !!x && x !== s.id),
+      flow_to: [...new Set(strList(s.value.flow_to).map(resolveScreen).filter((x): x is string => !!x && x !== s.id))],
       is_popup: s.value.is_popup === true,
       tabs: strList(s.value.tabs),
       primary_function_id: null,
@@ -168,8 +168,8 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
       actor_ids: [...new Set(strList(u.value.actor_ids ?? u.value.actors).map(resolveActor).filter((x): x is string => !!x))],
       function_ids: strList(u.value.function_ids).filter((x) => functionIds.has(x)),
       description: str(u.value.description),
-      includes: strList(u.value.includes).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id),
-      extends: strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id)
+      includes: [...new Set(strList(u.value.includes).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))],
+      extends: [...new Set(strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))]
     })
   }
   for (const p of of("permissions").filter(skip(spine.permissions))) {

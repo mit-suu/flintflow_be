@@ -1,11 +1,12 @@
 import axios from "axios"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
-import { LLMResponse } from "./provider.types.js"
+import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 
 export const callOpenAI = async (
   prompt: string,
-  providerConfig: AiProviderConfig
+  providerConfig: AiProviderConfig,
+  options: LlmCallOptions = {}
 ): Promise<LLMResponse> => {
   const apiKey = env.OPENAI_API_KEY
   if (!apiKey) {
@@ -30,7 +31,8 @@ export const callOpenAI = async (
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`
         },
-        timeout: 60000
+        timeout: 60000,
+        ...(options.signal ? { signal: options.signal } : {})
       }
     )
 
