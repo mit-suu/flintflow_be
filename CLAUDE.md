@@ -58,6 +58,18 @@ Mỗi step chạy khung: **Intake → Elicit → Draft → Render → Review →
 Context đưa cho model là **projection** của Spine theo `reads` của step, **không bao giờ là cả Spine hay
 cả transcript** (`context-projection.ts`).
 
+## Tổ chức là trục sở hữu dữ liệu (task-26)
+
+Project, thư mục, ví credit và gói thuộc về **org**, không thuộc về người. Mọi request vào tài nguyên org
+đi qua chuỗi `authMiddleware → requireActiveAccount → orgContext → requireRole` (BPMN Flow 10), mount ở
+`app.ts` theo tiền tố chứ không gắn từng route.
+
+- Lấy org của request bằng `requireOrgId(req)` (`shared/auth/org-request.ts`) — **đừng truyền `userId`**.
+  `getProjectById(projectId, orgId)` nhận `string` nên truyền nhầm `userId` vẫn biên dịch sạch mà quyền thì sai.
+- Ví credit trừ vào org **sở hữu project**, suy từ `projectId` trong `credit-reservation.service.ts`; không đổi
+  chữ ký `executeAiAction`.
+- `/api/v1/billing` **không** mount guard ở tiền tố: `POST /billing/payment-callback` là webhook không có token.
+
 ## Điều cấm (PR bị từ chối ngay)
 
 1. Ghi thẳng vào Spine bằng `Model.updateOne/save` ngoài `spine.repository` / `op-engine`.
@@ -91,6 +103,7 @@ lường trước trong `pipeline.dto.ts`.
 | `modules/render/` | Assemble section → `RenderedDocument` → `.docx` |
 | `modules/pipeline/s9/` | Quét cuối, đối chiếu mục tiêu, MoSCoW, ký baseline + snapshot |
 | `modules/{notification,billing,credits,admin,project,user,auth,feedback,folder}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`, `mode` — `import` | `fpt` | `customer_template`, mặc định `fpt`, xem `project.model.ts`; `folderId` — thư mục, `PATCH /projects/:id/folder`). `folder`: CRUD `/folders`, `POST /folders/:id/projects` thêm nhiều dự án, xoá thư mục giữ dự án. `lastOpenedAt` ghi khi `GET /projects/:id`. `feedback`: `POST /feedback` (UC-12), admin đọc qua `GET /admin/feedback` |
+| `modules/organization/` | Tổ chức (task-26): `Organization`, `Membership` (lead/analyst/viewer), `Invitation` (mã băm, dùng một lần). `/orgs` CRUD + switch + thành viên, `/invitations/:code` xem trước / nhận mã. `lead-succession.ts` giữ BR-02 (org luôn còn ≥1 Lead) |
 | `shared/ai/` | `ActionType`, prompt registry, response parser, provider, context tài liệu upload |
 | `assets/skills/` | 32 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
 | `assets/prompts/` | Prompt phẳng chỉ cho `chat`, `summarize_document` |
