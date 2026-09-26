@@ -15,6 +15,8 @@ import * as folderService from "./folder.service.js"
 import { CreateFolderSchema, UpdateFolderSchema } from "./folder.validation.js"
 
 const USER = "64b000000000000000000002"
+// task-26 Pha 4: thư mục thuộc về org, USER chỉ còn là người tạo.
+const ORG = "64b00000000000000000000f"
 const F1 = "64b0000000000000000000f1"
 const F2 = "64b0000000000000000000f2"
 const AT = new Date("2026-09-19T03:00:00.000Z")
@@ -33,10 +35,10 @@ describe("listFolders", () => {
     })
     mocks.Project.aggregate.mockResolvedValue([{ _id: F1, count: 3 }])
 
-    const folders = await folderService.listFolders(USER)
+    const folders = await folderService.listFolders(ORG)
 
     expect(folders.map((f) => [f.name, f.projectCount])).toEqual([["Khách B", 0], ["Khách A", 3]])
-    expect(mocks.Folder.find).toHaveBeenCalledWith({ userId: USER })
+    expect(mocks.Folder.find).toHaveBeenCalledWith({ organizationId: ORG })
   })
 })
 
@@ -48,14 +50,14 @@ describe("deleteFolder", () => {
     mocks.Folder.findOneAndDelete.mockResolvedValue({ _id: F1 })
     mocks.Project.updateMany.mockResolvedValue({ modifiedCount: 2 })
 
-    await expect(folderService.deleteFolder(USER, F1)).resolves.toEqual({ _id: F1, releasedProjects: 2 })
-    expect(mocks.Project.updateMany).toHaveBeenCalledWith({ userId: USER, folderId: F1 }, { $set: { folderId: null } })
+    await expect(folderService.deleteFolder(ORG, F1)).resolves.toEqual({ _id: F1, releasedProjects: 2 })
+    expect(mocks.Project.updateMany).toHaveBeenCalledWith({ organizationId: ORG, folderId: F1 }, { $set: { folderId: null } })
   })
 
   it("folder không thuộc user hoặc id sai ⇒ 404 FOLDER_NOT_FOUND, không đụng dự án", async () => {
     mocks.Folder.exists.mockResolvedValue(null)
-    await expect(folderService.deleteFolder(USER, F1)).rejects.toMatchObject({ statusCode: 404, code: "FOLDER_NOT_FOUND" })
-    await expect(folderService.deleteFolder(USER, "khong-phai-id")).rejects.toMatchObject({ statusCode: 404 })
+    await expect(folderService.deleteFolder(ORG, F1)).rejects.toMatchObject({ statusCode: 404, code: "FOLDER_NOT_FOUND" })
+    await expect(folderService.deleteFolder(ORG, "khong-phai-id")).rejects.toMatchObject({ statusCode: 404 })
     expect(mocks.Project.updateMany).not.toHaveBeenCalled()
   })
 })
@@ -82,8 +84,8 @@ describe("addProjectsToFolder", () => {
     mocks.Project.updateMany.mockResolvedValue({ modifiedCount: 1 })
     const P1 = "64b0000000000000000000a1"
 
-    await expect(folderService.addProjectsToFolder(USER, F1, [P1])).rejects.toMatchObject({ statusCode: 404, code: "FOLDER_NOT_FOUND" })
-    expect(mocks.Project.updateMany).toHaveBeenLastCalledWith({ _id: { $in: [P1] }, userId: USER, folderId: F1 }, { $set: { folderId: null } })
+    await expect(folderService.addProjectsToFolder(ORG, F1, [P1])).rejects.toMatchObject({ statusCode: 404, code: "FOLDER_NOT_FOUND" })
+    expect(mocks.Project.updateMany).toHaveBeenLastCalledWith({ _id: { $in: [P1] }, organizationId: ORG, folderId: F1 }, { $set: { folderId: null } })
   })
 })
 
@@ -96,9 +98,9 @@ describe("removeProjectsFromFolder", () => {
     const P1 = "64b0000000000000000000a1"
     const P2 = "64b0000000000000000000a2"
 
-    await expect(folderService.removeProjectsFromFolder(USER, F1, [P1, P2, P1])).resolves.toEqual({ moved: 2 })
+    await expect(folderService.removeProjectsFromFolder(ORG, F1, [P1, P2, P1])).resolves.toEqual({ moved: 2 })
     expect(mocks.Project.updateMany).toHaveBeenCalledWith(
-      { _id: { $in: [P1, P2] }, userId: USER, folderId: F1 },
+      { _id: { $in: [P1, P2] }, organizationId: ORG, folderId: F1 },
       { $set: { folderId: null } }
     )
   })
@@ -106,14 +108,14 @@ describe("removeProjectsFromFolder", () => {
   it("id sai định dạng bị bỏ qua ⇒ không chạm database", async () => {
     mocks.Folder.exists.mockResolvedValue({ _id: F1 })
 
-    await expect(folderService.removeProjectsFromFolder(USER, F1, ["khong-phai-id"])).resolves.toEqual({ moved: 0 })
+    await expect(folderService.removeProjectsFromFolder(ORG, F1, ["khong-phai-id"])).resolves.toEqual({ moved: 0 })
     expect(mocks.Project.updateMany).not.toHaveBeenCalled()
   })
 
   it("thư mục không thuộc user ⇒ 404", async () => {
     mocks.Folder.exists.mockResolvedValue(null)
 
-    await expect(folderService.removeProjectsFromFolder(USER, F1, ["64b0000000000000000000a1"])).rejects.toMatchObject({
+    await expect(folderService.removeProjectsFromFolder(ORG, F1, ["64b0000000000000000000a1"])).rejects.toMatchObject({
       statusCode: 404,
       code: "FOLDER_NOT_FOUND"
     })

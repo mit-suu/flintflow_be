@@ -4,6 +4,21 @@ import mongoose from "mongoose"
 import type { Server } from "http"
 import type { AddressInfo } from "net"
 
+// task-26: route billing có auth nay đi qua requireActiveAccount (BPMN Flow 10.4) — nó đọc User từ DB,
+// còn test này chạy không Mongo. Guard đã có test riêng ở test/integration/org-permission.int.test.ts.
+vi.mock("../../shared/auth/org-context.middleware.js", () => ({
+  orgContext: (req: { orgContext?: unknown }, _res: unknown, next: () => void) => {
+    req.orgContext = { orgId: "64b00000000000000000000f", role: "lead", membershipId: "m1" }
+    next()
+  }
+}))
+vi.mock("../../shared/auth/require-role.middleware.js", () => ({
+  requireRole: () => (_req: unknown, _res: unknown, next: () => void) => next()
+}))
+vi.mock("../../shared/auth/account-guard.middleware.js", () => ({
+  requireActiveAccount: (_req: unknown, _res: unknown, next: () => void) => next()
+}))
+
 vi.mock("../credits/credit-wallet.model.js", async () => {
   const { fakeDb } = await import("./__tests__/fake-mongo.js")
   return { CreditWallet: fakeDb.model("CreditWallet") }
@@ -51,6 +66,8 @@ import {
 import { planConfig } from "./plan.config.js"
 
 const USER = "64b000000000000000000002"
+// task-26 Pha 4: ví và gói thuộc về org; USER chỉ còn là người thao tác.
+const ORG = "64b00000000000000000000f"
 const OTHER_USER = "64b000000000000000000003"
 const CLIENT_ID = "client_flintflow_test"
 // Lấy giá từ config để test không vỡ mỗi khi đổi giá gói
@@ -107,7 +124,7 @@ describe("billing.service", () => {
 
   describe("createCheckout", () => {
     it("tạo order trên payment_service (amount là number, có callback_url) và lưu QR", async () => {
-      const checkout = await billingService.createCheckout(USER, "pack_100")
+      const checkout = await billingService.createCheckout(ORG, USER, "pack_100")
 
       expect(createPaymentOrder).toHaveBeenCalledWith({
         amount: PACK_100_AMOUNT,
@@ -125,14 +142,14 @@ describe("billing.service", () => {
     })
 
     it("gói không tồn tại thì 404, không gọi payment_service", async () => {
-      await expect(billingService.createCheckout(USER, "pack_nope")).rejects.toMatchObject({ statusCode: 404 })
+      await expect(billingService.createCheckout(ORG, USER, "pack_nope")).rejects.toMatchObject({ statusCode: 404 })
       expect(createPaymentOrder).not.toHaveBeenCalled()
     })
 
     it("chưa cấu hình payment_service thì 503 và không tạo intent", async () => {
       vi.mocked(isPaymentServiceConfigured).mockReturnValue(false)
 
-      await expect(billingService.createCheckout(USER, "pack_100")).rejects.toMatchObject({ statusCode: 503 })
+      await expect(billingService.createCheckout(ORG, USER, "pack_100")).rejects.toMatchObject({ statusCode: 503 })
       expect(fakeDb.model("PaymentIntent").docs).toHaveLength(0)
     })
 
@@ -141,14 +158,14 @@ describe("billing.service", () => {
         new ApiError(502, "Cổng thanh toán từ chối yêu cầu", "PAYMENT_SERVICE_ERROR")
       )
 
-      await expect(billingService.createCheckout(USER, "pack_100")).rejects.toMatchObject({ statusCode: 502 })
+      await expect(billingService.createCheckout(ORG, USER, "pack_100")).rejects.toMatchObject({ statusCode: 502 })
       expect(fakeDb.model("PaymentIntent").docs[0].status).toBe("failed")
     })
   })
 
   describe("handlePaymentCallback", () => {
     it("paid + xác minh remote paid: cộng credit, ghi purchase, notify", async () => {
-      await billingService.createCheckout(USER, "pack_100")
+      await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
 
       const result = await billingService.handlePaymentCallback({
@@ -165,7 +182,7 @@ describe("billing.service", () => {
     })
 
     it("callback gọi lại cùng order_id không cộng lần hai", async () => {
-      await billingService.createCheckout(USER, "pack_100")
+      await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
       const body = { order_id: "order-1", status: "paid", client_id: CLIENT_ID }
 
@@ -178,7 +195,7 @@ describe("billing.service", () => {
     })
 
     it("callback báo paid nhưng remote vẫn pending: KHÔNG cộng (callback chưa được ký)", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { status: "pending", paid_at: null }))
 
       const result = await billingService.handlePaymentCallback({
@@ -193,7 +210,7 @@ describe("billing.service", () => {
     })
 
     it("remote paid nhưng lệch số tiền: không cộng", async () => {
-      await billingService.createCheckout(USER, "pack_100")
+      await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { amount: 2_000 }))
 
       await billingService.handlePaymentCallback({ order_id: "order-1", status: "paid", client_id: CLIENT_ID })
@@ -202,7 +219,7 @@ describe("billing.service", () => {
     })
 
     it("sai client_id → 403; order không có → 404", async () => {
-      await billingService.createCheckout(USER, "pack_100")
+      await billingService.createCheckout(ORG, USER, "pack_100")
 
       await expect(
         billingService.handlePaymentCallback({ order_id: "order-1", status: "paid", client_id: "other" })
@@ -214,7 +231,7 @@ describe("billing.service", () => {
     })
 
     it("remote failed: intent failed, notify payment_failed, không cộng", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { status: "failed", paid_at: null }))
 
       await billingService.handlePaymentCallback({ order_id: "order-1", status: "failed", client_id: CLIENT_ID })
@@ -227,7 +244,7 @@ describe("billing.service", () => {
 
   describe("getCheckout (polling)", () => {
     it("remote đã paid thì chốt luôn — fallback khi callback không tới", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
 
       const detail = await billingService.getCheckout(USER, intentId)
@@ -237,14 +254,14 @@ describe("billing.service", () => {
     })
 
     it("payment_service lỗi tạm thời: vẫn trả pending, không ném lỗi", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockRejectedValue(new ApiError(502, "down", "PAYMENT_SERVICE_UNAVAILABLE"))
 
       await expect(billingService.getCheckout(USER, intentId)).resolves.toMatchObject({ status: "pending" })
     })
 
     it("đã chốt thì không hỏi lại payment_service; intent người khác 404", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
       await billingService.getCheckout(USER, intentId)
       vi.mocked(getPaymentOrder).mockClear()
@@ -256,7 +273,7 @@ describe("billing.service", () => {
     })
 
     it("callback và polling cùng chốt một order chỉ cộng một lần", async () => {
-      const { intentId } = await billingService.createCheckout(USER, "pack_100")
+      const { intentId } = await billingService.createCheckout(ORG, USER, "pack_100")
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1"))
 
       await Promise.all([
@@ -270,7 +287,7 @@ describe("billing.service", () => {
 
   describe("upgrade / balance / transactions", () => {
     it("upgrade thẳng lên gói trả phí trả 402 PAYMENT_REQUIRED, không ghi Subscription", async () => {
-      await expect(billingService.upgradePlan(USER, "pro")).rejects.toMatchObject({
+      await expect(billingService.upgradePlan(ORG, USER, "pro")).rejects.toMatchObject({
         statusCode: 402,
         code: "PAYMENT_REQUIRED"
       })
@@ -278,7 +295,7 @@ describe("billing.service", () => {
     })
 
     it("mua Pro qua checkout plan:pro: tiền về ⇒ Subscription pro + credit kỳ đầu, callback lặp không cộng lần hai", async () => {
-      const checkout = await billingService.createCheckout(USER, "plan:pro")
+      const checkout = await billingService.createCheckout(ORG, USER, "plan:pro")
       expect(checkout).toMatchObject({ amount: planConfig.pro.priceVnd, credits: planConfig.pro.monthlyCredits })
 
       vi.mocked(getPaymentOrder).mockResolvedValue(remoteOrder("order-1", { amount: planConfig.pro.priceVnd }))
@@ -286,7 +303,7 @@ describe("billing.service", () => {
       await billingService.handlePaymentCallback(body)
       await billingService.handlePaymentCallback(body)
 
-      const balance = await billingService.getBalance(USER)
+      const balance = await billingService.getBalance(ORG, USER)
       expect(balance).toMatchObject({ plan: "pro", planLabel: "Pro", reserved: 0 })
       expect(balance.balance).toBe(planConfig.free.initialCredits + planConfig.pro.monthlyCredits)
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
@@ -294,21 +311,22 @@ describe("billing.service", () => {
     })
 
     it("không có checkout cho gói miễn phí; về Free là idempotent", async () => {
-      await expect(billingService.createCheckout(USER, "plan:free")).rejects.toMatchObject({ statusCode: 404 })
+      await expect(billingService.createCheckout(ORG, USER, "plan:free")).rejects.toMatchObject({ statusCode: 404 })
 
-      await billingService.upgradePlan(USER, "free")
+      await billingService.upgradePlan(ORG, USER, "free")
       vi.mocked(notify).mockClear()
-      await billingService.upgradePlan(USER, "free")
+      await billingService.upgradePlan(ORG, USER, "free")
 
       expect(fakeDb.model("Subscription").docs).toHaveLength(1)
       expect(notify).not.toHaveBeenCalled()
     })
 
     it("balance mặc định free và ledger tối đa 20 dòng mới nhất", async () => {
-      await billingService.getBalance(USER)
+      await billingService.getBalance(ORG, USER)
       for (let i = 0; i < 25; i++) {
         await fakeDb.model("CreditTransaction").create({
           userId: new mongoose.Types.ObjectId(USER),
+          organizationId: new mongoose.Types.ObjectId(ORG),
           type: "purchase",
           actionType: "purchase",
           amount: i,
@@ -316,12 +334,12 @@ describe("billing.service", () => {
         })
       }
 
-      const balance = await billingService.getBalance(USER)
+      const balance = await billingService.getBalance(ORG, USER)
       expect(balance.plan).toBe("free")
       expect(balance.ledger).toHaveLength(20)
       expect(balance.ledger[0].amount).toBe(24)
 
-      const page2 = await billingService.listTransactions(USER, 2, 20)
+      const page2 = await billingService.listTransactions(ORG, 2, 20)
       expect(page2.items).toHaveLength(5)
       expect(page2.meta).toMatchObject({ total: 25, totalPages: 2 })
     })
@@ -386,7 +404,7 @@ describe("billing routes (HTTP)", () => {
   })
 
   it("callback sai client_id 403, thiếu field 400", async () => {
-    await billingService.createCheckout(USER, "pack_100")
+    await billingService.createCheckout(ORG, USER, "pack_100")
 
     expect((await postCallback({ order_id: "order-1", status: "paid", client_id: "nope" })).status).toBe(403)
     expect((await postCallback({ order_id: "order-1" })).status).toBe(400)

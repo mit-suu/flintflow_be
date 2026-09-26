@@ -13,6 +13,7 @@ import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
 import { getProjectById } from "../project/project.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema } from "../pipeline/pipeline.dto.js"
 import { assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
@@ -37,7 +38,7 @@ export const authorize = async (req: Request): Promise<Context> => {
 
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
-  const project = await getProjectById(projectId, userId)
+  const project = await getProjectById(projectId, requireOrgId(req))
   return { projectId, projectName: project.name }
 }
 

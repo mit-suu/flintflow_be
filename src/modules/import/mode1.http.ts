@@ -9,6 +9,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import type { IProject } from "../project/project.model.js"
 import { getProjectById } from "../project/project.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendError } from "../../shared/types/api-response.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
@@ -26,7 +27,7 @@ export const authorizeMode1 = async (req: Request): Promise<Mode1Auth> => {
   // Route import dùng `/:id/…`; change request và version vẫn `/:projectId/…`
   const projectId = (req.params.id ?? req.params.projectId) as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
-  const project = await getProjectById(projectId, userId)
+  const project = await getProjectById(projectId, requireOrgId(req))
   const mode = project.mode ?? "fpt"
   if (mode !== "import") {
     throw new Mode1Error("PROJECT_MODE_MISMATCH", "API này chỉ dùng cho project upload SRS có sẵn (mode import)", { mode, expected: "import" })
