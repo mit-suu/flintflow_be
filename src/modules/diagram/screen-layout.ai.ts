@@ -62,6 +62,56 @@ export const extractSalt = (text: string): string | null => {
   return `${body}\n`
 }
 
+/** Khung ngoài của màn: `{+` (màn thường) hoặc `{^"Tên màn"` / `{^` (pop-up). */
+const FRAME_OPEN = /^(\s*)\{(\+|\^(".*")?)\s*$/
+/** Chỉ một chuỗi `"…"` trên dòng — ngay sau `{^` thì đó là tiêu đề model viết xuống dòng, không phải ô nhập. */
+const LONE_QUOTED = /^\s*("[^"]*")\s*$/
+/**
+ * Salt không có padding: widget dính sát viền khung (đo trên SVG: 0–2px). Bọc nội dung trong hàng
+ * `{ . | . | { … } | . | . }` và thêm dòng `.` trên/dưới ⇒ ~15px hai bên, ~20px trên/dưới.
+ */
+export const PAD_ROW_OPEN = "{ . | . | {"
+export const PAD_ROW_CLOSE = "} | . | . }"
+
+/** `{` trừ `}` của một dòng, bỏ phần trong ô nhập `"…"`. */
+const braceDelta = (line: string): number => {
+  const bare = line.replace(/"[^"]*"/g, "")
+  return (bare.match(/\{/g) ?? []).length - (bare.match(/\}/g) ?? []).length
+}
+
+/**
+ * Thêm khoảng đệm giữa viền khung ngoài và nội dung; không thấy khung hoặc đã đệm ⇒ trả nguyên.
+ * Pop-up `{^` có tiêu đề bị viết xuống dòng dưới (salt vẽ thành ô nhập) ⇒ gộp lại thành `{^"Tên"`.
+ */
+export const padFrame = (salt: string): string => {
+  const lines = salt.split("\n")
+  const open = lines.findIndex((l) => FRAME_OPEN.test(l))
+  if (open < 0) return salt
+  const title = lines[open].trim() === "{^" ? LONE_QUOTED.exec(lines[open + 1] ?? "") : null
+  if (title) lines.splice(open, 2, `${FRAME_OPEN.exec(lines[open])![1]}{^${title[1]}`)
+  let depth = 0
+  let close = -1
+  for (let i = open; i < lines.length; i++) {
+    depth += braceDelta(lines[i])
+    if (depth === 0) {
+      close = i
+      break
+    }
+  }
+  const inner = lines.slice(open + 1, close)
+  if (close < 0 || inner.every((l) => !l.trim()) || inner.some((l) => l.trim() === PAD_ROW_OPEN)) return salt
+  const indent = `${FRAME_OPEN.exec(lines[open])![1]}  `
+  return [
+    ...lines.slice(0, open + 1),
+    `${indent}.`,
+    `${indent}${PAD_ROW_OPEN}`,
+    ...inner.map((l) => (l.trim() ? `  ${l}` : l)),
+    `${indent}${PAD_ROW_CLOSE}`,
+    `${indent}.`,
+    ...lines.slice(close)
+  ].join("\n")
+}
+
 export const aiScreenLayout: DrawLayout = async ({ projectId, userId, spine, screenId }) => {
   try {
     const context = layoutContext(spine, screenId)
@@ -74,7 +124,8 @@ export const aiScreenLayout: DrawLayout = async ({ projectId, userId, spine, scr
       userId,
       { provider: skill.providerConfig.provider, model: skill.providerConfig.model }
     )
-    return extractSalt(result.data.puml)
+    const salt = extractSalt(result.data.puml)
+    return salt === null ? null : padFrame(salt)
   } catch (err) {
     console.warn(`[diagram] Model không vẽ được wireframe ${screenId}: ${err instanceof Error ? err.message : String(err)}`)
     return null

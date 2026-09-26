@@ -1,7 +1,7 @@
 ---
 skill_id: screen-layout
 kind: renderer
-version: 2.0.0
+version: 2.1.0
 description: "S-5.3 Screen Layout — the model draws a low-fi PlantUML Salt wireframe of one core screen from its functions"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -70,6 +70,7 @@ Low-fi: what the user sees and can do on the screen, top to bottom — not colou
 @endsalt
 ```
 
+- Draw the frame exactly as above, no `.` spacer rows/columns around the content: code pads the frame for you.
 - The header is `system_name` in capitals, then the screen name; without `system_name` only the screen name.
 - **Pop-up** (`is_popup: true`): no header, the whole body is a titled box `{^"Screen name"` … `}` instead of `{+`.
 - **Tabs** (`tabs[]` not empty): right under the header, `{/ <b>First tab | Second tab | Third tab }`, then
