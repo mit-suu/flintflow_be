@@ -1,6 +1,8 @@
 import { Router } from "express"
 import * as pipelineController from "./pipeline.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+// Viewer đọc được tiến độ nhưng không chạy step AI (business-flow.md §2, bảng vai trò)
+import { requireRole } from "../../shared/auth/require-role.middleware.js"
 
 const router = Router()
 
@@ -76,7 +78,7 @@ router.get("/:projectId/steps", authMiddleware, pipelineController.getSteps)
  *       409:
  *         description: STEP_NOT_RUNNABLE, CALL_LIMIT, SPINE_VERSION_CONFLICT
  */
-router.post("/:projectId/steps/:stepId/run", authMiddleware, pipelineController.runStepController)
+router.post("/:projectId/steps/:stepId/run", authMiddleware, requireRole("lead", "analyst"), pipelineController.runStepController)
 
 /**
  * @swagger
@@ -129,7 +131,7 @@ router.post("/:projectId/steps/:stepId/run", authMiddleware, pipelineController.
  *       409:
  *         description: STEP_NOT_RUNNABLE (step không đang chờ trả lời)
  */
-router.post("/:projectId/steps/:stepId/answer", authMiddleware, pipelineController.answerStep)
+router.post("/:projectId/steps/:stepId/answer", authMiddleware, requireRole("lead", "analyst"), pipelineController.answerStep)
 
 /**
  * @swagger
@@ -175,7 +177,7 @@ router.post("/:projectId/steps/:stepId/answer", authMiddleware, pipelineControll
  *       409:
  *         description: STEP_NOT_RUNNABLE, REGENERATE_LIMIT, CALL_LIMIT, NEEDS_USER_INPUT, SPINE_VERSION_CONFLICT
  */
-router.post("/:projectId/steps/:stepId/gate", authMiddleware, pipelineController.gateStep)
+router.post("/:projectId/steps/:stepId/gate", authMiddleware, requireRole("lead", "analyst"), pipelineController.gateStep)
 
 /**
  * @swagger
@@ -201,6 +203,6 @@ router.post("/:projectId/steps/:stepId/gate", authMiddleware, pipelineController
  *       422:
  *         description: CHANGE_RANGE_INVALID, OP_INVALID (revert_conflict)
  */
-router.post("/:projectId/resume", authMiddleware, pipelineController.resumeProjectController)
+router.post("/:projectId/resume", authMiddleware, requireRole("lead", "analyst"), pipelineController.resumeProjectController)
 
 export default router

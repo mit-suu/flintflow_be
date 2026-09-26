@@ -22,6 +22,19 @@ import { spineSchema } from "./spine.schema.js"
 import { progressResponseSchema } from "../pipeline/pipeline.dto.js"
 import type { Flag } from "./spine.types.js"
 
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE = spineSchema.parse(
   JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../fixtures/spine-fixture-19-screens.json"), "utf8"))
@@ -43,7 +56,7 @@ interface Outcome {
 const invoke = (handler: RequestHandler, opts: { body?: unknown; query?: unknown; params?: Record<string, string> } = {}) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = {}
-    const req = { user: { userId: OWNER }, params: { projectId: PROJECT, ...opts.params }, body: opts.body, query: opts.query ?? {} } as unknown as Request
+    const req = { orgContext: orgCtxFor(OWNER), user: { userId: OWNER }, params: { projectId: PROJECT, ...opts.params }, body: opts.body, query: opts.query ?? {} } as unknown as Request
     const res = {
       status(code: number) {
         outcome.status = code

@@ -31,6 +31,19 @@ import { roundCountsForSteps } from "./meter.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
+
 const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
 
@@ -48,7 +61,7 @@ interface Outcome {
 const invokeSse = (handler: RequestHandler, userId: string | undefined, projectId: string, stepId: string, body: unknown) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = { statusHeaders: 0, headers: {}, headersFlushed: false, written: [], ended: false }
-    const req = { user: userId ? { userId } : undefined, params: { projectId, stepId }, body, on: () => {} } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId, stepId }, body, on: () => {} } as unknown as Request
     const res = {
       writableEnded: false,
       setHeader(name: string, value: string) {
@@ -86,8 +99,8 @@ beforeEach(() => {
   vi.mocked(getSpine).mockReset()
   vi.mocked(getOrCreate).mockReset()
   vi.mocked(roundCountsForSteps).mockReset()
-  vi.mocked(getProjectById).mockImplementation(async (projectId, userId) => {
-    if (projectId !== PROJECT || userId !== OWNER) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  vi.mocked(getProjectById).mockImplementation(async (projectId, orgId) => {
+    if (projectId !== PROJECT || orgId !== ORG) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     return { name: "Lumen", domain: "E-learning" } as never
   })
   vi.mocked(getSpine).mockResolvedValue(null)
@@ -190,6 +203,7 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     const closeListeners: Array<() => void> = []
 
     const req = {
+      orgContext: orgCtxFor(OWNER),
       user: { userId: OWNER },
       params: { projectId: PROJECT, stepId: "S-3.1" },
       body: { session_id: "s1", base_version: 1 },
@@ -233,7 +247,7 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
 describe("GET /projects/:projectId/steps", () => {
   const invokeJson = (handler: RequestHandler, userId: string | undefined, projectId: string) =>
     new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
-      const req = { user: userId ? { userId } : undefined, params: { projectId }, body: {} } as unknown as Request
+      const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId }, body: {} } as unknown as Request
       const res = {
         status(code: number) {
           ;(res as unknown as { _status: number })._status = code
@@ -284,7 +298,7 @@ describe("GET /projects/:projectId/steps", () => {
 /** Handler JSON thường (không SSE): resolve khi `res.json` hoặc `next(err)`. */
 const invokeJsonHandler = (handler: RequestHandler, userId: string, params: Record<string, string>, body: unknown = {}) =>
   new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
-    const req = { user: { userId }, params, body } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: { userId }, params, body } as unknown as Request
     const res = {
       status(code: number) {
         ;(res as unknown as { _status: number })._status = code

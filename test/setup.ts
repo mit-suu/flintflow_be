@@ -88,6 +88,8 @@ export interface SeedOptions {
 export interface SeededFixture {
   user: { _id: mongoose.Types.ObjectId; email: string; role?: string }
   userId: string
+  /** Org của fixture — user là Lead, project và ví thuộc về org này. */
+  orgId: string
   projectId: string
   sessionId: string
   spineVersion: number
@@ -98,12 +100,19 @@ export interface AuthUser {
   _id: mongoose.Types.ObjectId | string
   email: string
   role?: string
+  /** Org đang mở — task-26: orgContext đọc claim này để nạp Membership (BPMN Flow 10.6). */
+  orgId?: string
 }
 
 /** Access token thật (cùng secret với `authMiddleware`). */
 export const authAs = async (user: AuthUser): Promise<string> => {
   const { signAccessToken } = await import("../src/shared/auth/jwt.util.js")
-  return signAccessToken({ userId: String(user._id), email: user.email, ...(user.role ? { role: user.role } : {}) })
+  return signAccessToken({
+    userId: String(user._id),
+    email: user.email,
+    ...(user.role ? { role: user.role } : {}),
+    ...(user.orgId ? { orgId: user.orgId } : {})
+  })
 }
 
 let seedCounter = 0
@@ -113,13 +122,24 @@ let seedCounter = 0
  * → đúng một chat session `is_pipeline` → ví credit. Trả về id + token để gọi API.
  */
 export const seedFixture = async (kind: FixtureKind = "full", options: SeedOptions = {}): Promise<SeededFixture> => {
-  const [{ User }, { Project }, { ChatSession }, { Spine }, { spineSchema }, { CreditWallet }] = await Promise.all([
+  const [
+    { User },
+    { Project },
+    { ChatSession },
+    { Spine },
+    { spineSchema },
+    { CreditWallet },
+    { Organization },
+    { Membership }
+  ] = await Promise.all([
     import("../src/modules/user/user.model.js"),
     import("../src/modules/project/project.model.js"),
     import("../src/modules/project/chat-session.model.js"),
     import("../src/modules/spine/spine.model.js"),
     import("../src/modules/spine/spine.schema.js"),
-    import("../src/modules/credits/credit-wallet.model.js")
+    import("../src/modules/credits/credit-wallet.model.js"),
+    import("../src/modules/organization/organization.model.js"),
+    import("../src/modules/organization/membership.model.js")
   ])
 
   const raw = readFixtureJson<Record<string, unknown>>(FIXTURE_FILES[kind])
@@ -134,8 +154,13 @@ export const seedFixture = async (kind: FixtureKind = "full", options: SeedOptio
     emailVerified: true,
     emailVerifiedAt: new Date()
   })
+  // task-26: mọi fixture sống trong một org 1 thành viên, user là Lead — đúng mô hình mặc định của sản phẩm.
+  const organization = await Organization.create({ name: "Fixture Org", ownerUserId: user._id })
+  await Membership.create({ organizationId: organization._id, userId: user._id, role: "lead" })
+
   const project = await Project.create({
     userId: user._id,
+    organizationId: organization._id,
     name: kind === "full" ? "FlintFlow (Fixture 19 Screens)" : "FlintFlow (Fixture Minimal)",
     domain: spine.project.domain
   })
@@ -144,16 +169,26 @@ export const seedFixture = async (kind: FixtureKind = "full", options: SeedOptio
   }
   const session = await ChatSession.create({ projectId: project._id, messages: [], is_pipeline: true })
   if (options.balance !== null) {
-    await CreditWallet.create({ userId: user._id, balance: options.balance ?? 1000, reserved: 0 })
+    await CreditWallet.create({
+      userId: user._id,
+      organizationId: organization._id,
+      balance: options.balance ?? 1000,
+      reserved: 0
+    })
   }
 
   return {
     user: { _id: user._id as mongoose.Types.ObjectId, email: user.email, role: user.role },
     userId: String(user._id),
+    orgId: String(organization._id),
     projectId: String(project._id),
     sessionId: String(session._id),
     spineVersion: spine.spine_version,
-    token: await authAs({ _id: user._id as mongoose.Types.ObjectId, email: user.email })
+    token: await authAs({
+      _id: user._id as mongoose.Types.ObjectId,
+      email: user.email,
+      orgId: String(organization._id)
+    })
   }
 }
 

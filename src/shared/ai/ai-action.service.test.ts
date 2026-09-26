@@ -37,6 +37,8 @@ const USER = "64b000000000000000000020"
 const reservation = {
   reservationId: "64b0000000000000000000ff",
   userId: USER,
+  // task-26: lượt gọi không gắn project ⇒ ví cá nhân, như trước khi có org.
+  organizationId: null,
   actionType: ActionType.DRAFT,
   cost: 5,
   expiresAt: new Date()

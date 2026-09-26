@@ -81,3 +81,16 @@ export const parseWith = <T extends z.ZodType>(schema: T, input: unknown): z.inf
   }
   return result.data
 }
+
+/** UC-68: `amount` âm là trừ, dương là cộng; 0 vô nghĩa nên chặn. Lý do bắt buộc để còn truy được. */
+export const adjustOrgCreditsSchema = z.object({
+  amount: z
+    .number()
+    .int("Số credit phải là số nguyên")
+    .refine((v) => v !== 0, "Số credit điều chỉnh phải khác 0"),
+  reason: z.string().trim().min(3, "Lý do tối thiểu 3 ký tự").max(500, "Lý do tối đa 500 ký tự")
+})
+
+export const orgIdParamSchema = z.object({
+  orgId: z.string().min(1, "Thiếu orgId")
+})
