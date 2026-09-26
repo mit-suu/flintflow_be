@@ -120,7 +120,15 @@ export async function writeDocx(doc: RenderedDocument): Promise<Buffer> {
         document: { run: { font: FONT, size: 24 } },
         heading1: { run: { font: FONT, size: 32, bold: true } },
         heading2: { run: { font: FONT, size: 28, bold: true } },
-        heading3: { run: { font: FONT, size: 26, bold: true } }
+        heading3: { run: { font: FONT, size: 26, bold: true } },
+        // Mẫu FPT: heading con (Function trigger… của §3.x.y) nhỏ hơn Heading 3; mode 1 giữ style như cũ
+        ...(doc.format === "fpt"
+          ? {
+              heading4: { run: { font: FONT, size: 24, bold: true } },
+              heading5: { run: { font: FONT, size: 24, bold: true, italics: true } },
+              heading6: { run: { font: FONT, size: 24, italics: true } }
+            }
+          : {})
       }
     },
     numbering: {

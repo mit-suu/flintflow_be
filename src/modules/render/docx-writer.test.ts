@@ -222,3 +222,18 @@ describe("buildDocxFileName", () => {
     expect(buildDocxFileName({ projectName: "!!!", version: "v0.4-draft", source: "draft" })).toBe("srs-v0.4-draft.docx")
   })
 })
+
+describe("style heading con theo mẫu FPT (FLF-214)", () => {
+  const heading4 = async (doc: RenderedDocument) =>
+    /<w:style [^>]*w:styleId="Heading4"[\s\S]*?<\/w:style>/.exec(readZipText(await writeDocx(doc), "word/styles.xml"))?.[0] ?? ""
+
+  it("format fpt ⇒ Heading 4 là 12pt đậm (nhỏ hơn Heading 3 13pt); không đặt ⇒ giữ style mặc định như cũ", async () => {
+    const fpt = await heading4({ ...structuredClone(sample), format: "fpt" })
+    expect(fpt).toContain('<w:sz w:val="24"/>')
+    expect(fpt).toContain("<w:b/>")
+    expect(fpt).not.toContain("<w:color")
+
+    const mode1 = await heading4(structuredClone(sample))
+    expect(mode1).not.toContain('<w:sz w:val="24"/>')
+  })
+})
