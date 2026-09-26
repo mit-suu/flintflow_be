@@ -74,6 +74,8 @@ export const wireframeWidgets = (puml: string, screenName: string): string[] | n
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (/^@(start|end)salt/.test(line) || /^[{}]$/.test(line) || /^\{[\^!SI-]*$/.test(line) || /^\{\^"/.test(line)) continue
+    // Hàng đệm quanh nội dung khung ngoài (`padFrame` của screen-layout.ai): `{ . | . | {` … `} | . | . }`
+    if (/^\{(\s*\.\s*\|)+\s*\{$/.test(line) || /^\}(\s*\|\s*\.)+\s*\}$/.test(line)) continue
     if (line.startsWith("{/")) {
       const tabs = line.replace(/^\{\/|\}$/g, "").split("|").map(clean).filter(Boolean)
       if (tabs.length > 0) cells.push({ widget: `tabs (${tabs.join(", ")})` })
