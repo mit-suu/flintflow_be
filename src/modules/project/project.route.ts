@@ -4,6 +4,7 @@ import * as projectController from "./project.controller.js"
 import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+import { requireRole } from "../../shared/auth/require-role.middleware.js"
 import { CreateProjectSchema, MoveProjectSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
@@ -263,7 +264,7 @@ router.delete(
  *         description: Không tìm thấy dự án
  */
 router.get("/:projectId", authMiddleware, projectController.getProject)
-router.delete("/:projectId", authMiddleware, projectController.deleteProject)
+router.delete("/:projectId", authMiddleware, requireRole("lead"), projectController.deleteProject)
 router.patch("/:projectId/name", authMiddleware, projectController.updateProjectName)
 
 /**

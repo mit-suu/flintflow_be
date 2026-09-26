@@ -3,6 +3,7 @@ import * as folderService from "./folder.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import type { ProjectIdsDTO, CreateFolderDTO, UpdateFolderDTO } from "./folder.validation.js"
 
 const requireUserId = (req: Request): string => {
@@ -14,33 +15,33 @@ const requireUserId = (req: Request): string => {
 }
 
 export const listFolders = catchAsync(async (req: Request, res: Response) => {
-  const folders = await folderService.listFolders(requireUserId(req))
+  const folders = await folderService.listFolders(requireOrgId(req))
   return sendSuccess(res, 200, folders)
 })
 
 export const createFolder = catchAsync(async (req: Request, res: Response) => {
-  const folder = await folderService.createFolder(requireUserId(req), req.body as CreateFolderDTO)
+  const folder = await folderService.createFolder(requireOrgId(req), requireUserId(req), req.body as CreateFolderDTO)
   return sendSuccess(res, 201, folder)
 })
 
 export const updateFolder = catchAsync(async (req: Request, res: Response) => {
-  const folder = await folderService.updateFolder(requireUserId(req), req.params.folderId as string, req.body as UpdateFolderDTO)
+  const folder = await folderService.updateFolder(requireOrgId(req), req.params.folderId as string, req.body as UpdateFolderDTO)
   return sendSuccess(res, 200, folder)
 })
 
 export const deleteFolder = catchAsync(async (req: Request, res: Response) => {
-  const result = await folderService.deleteFolder(requireUserId(req), req.params.folderId as string)
+  const result = await folderService.deleteFolder(requireOrgId(req), req.params.folderId as string)
   return sendSuccess(res, 200, result)
 })
 
 export const addProjectsToFolder = catchAsync(async (req: Request, res: Response) => {
   const { projectIds } = req.body as ProjectIdsDTO
-  const result = await folderService.addProjectsToFolder(requireUserId(req), req.params.folderId as string, projectIds)
+  const result = await folderService.addProjectsToFolder(requireOrgId(req), req.params.folderId as string, projectIds)
   return sendSuccess(res, 200, result)
 })
 
 export const removeProjectsFromFolder = catchAsync(async (req: Request, res: Response) => {
   const { projectIds } = req.body as ProjectIdsDTO
-  const result = await folderService.removeProjectsFromFolder(requireUserId(req), req.params.folderId as string, projectIds)
+  const result = await folderService.removeProjectsFromFolder(requireOrgId(req), req.params.folderId as string, projectIds)
   return sendSuccess(res, 200, result)
 })

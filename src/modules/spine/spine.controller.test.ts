@@ -12,6 +12,19 @@ import { getProjectById } from "../project/project.service.js"
 import { getOrCreate } from "./spine.repository.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
+
 const OWNER = "650000000000000000000010"
 const STRANGER = "650000000000000000000020"
 const PROJECT = "650000000000000000000001"
@@ -25,7 +38,7 @@ interface Outcome {
 const invoke = (userId: string | undefined, projectId: string) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = {}
-    const req = { user: userId ? { userId } : undefined, params: { projectId } } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId } } as unknown as Request
     const res = {
       status(code: number) {
         outcome.status = code
@@ -49,8 +62,8 @@ beforeEach(async () => {
   vi.mocked(getOrCreate).mockReset()
 
   // Mô phỏng getProjectById thật: lọc theo { _id, userId }
-  vi.mocked(getProjectById).mockImplementation(async (projectId, userId) => {
-    if (projectId !== PROJECT || userId !== OWNER) {
+  vi.mocked(getProjectById).mockImplementation(async (projectId, orgId) => {
+    if (projectId !== PROJECT || orgId !== ORG) {
       throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     }
     return { name: "Lumen", domain: "E-learning" } as never

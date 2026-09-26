@@ -61,6 +61,8 @@ import * as projectService from "./project.service.js"
 
 const PROJECT = "64b000000000000000000001"
 const USER = "64b000000000000000000002"
+// task-26 Pha 4: dự án thuộc về org, USER chỉ còn là người tạo.
+const ORG = "64b00000000000000000000f"
 
 describe("deleteProject", () => {
   beforeEach(() => {
@@ -71,7 +73,7 @@ describe("deleteProject", () => {
   it("hard: xoá mọi collection theo project, file sơ đồ và asset Cloudinary", async () => {
     mocks.Project.findOneAndDelete.mockResolvedValue({ _id: PROJECT })
 
-    await expect(projectService.deleteProject(PROJECT, USER, true)).resolves.toEqual({ _id: PROJECT, status: "deleted" })
+    await expect(projectService.deleteProject(PROJECT, ORG, true)).resolves.toEqual({ _id: PROJECT, status: "deleted" })
 
     for (const model of [mocks.ChatSession, mocks.ProjectDocument, mocks.Spine, mocks.Change, mocks.Baseline, mocks.Usage, mocks.RenderedDocumentCache]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
@@ -90,14 +92,14 @@ describe("deleteProject", () => {
     mocks.removeDiagram.mockRejectedValueOnce(new Error("gridfs down"))
     vi.spyOn(console, "warn").mockImplementation(() => {})
 
-    await expect(projectService.deleteProject(PROJECT, USER, true)).resolves.toMatchObject({ status: "deleted" })
+    await expect(projectService.deleteProject(PROJECT, ORG, true)).resolves.toMatchObject({ status: "deleted" })
     expect(mocks.removeDiagram).toHaveBeenCalledTimes(2)
   })
 
   it("hard: project không thuộc user ⇒ 404, không xoá gì", async () => {
     mocks.Project.findOneAndDelete.mockResolvedValue(null)
 
-    await expect(projectService.deleteProject(PROJECT, USER, true)).rejects.toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
+    await expect(projectService.deleteProject(PROJECT, ORG, true)).rejects.toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
     expect(mocks.Spine.deleteMany).not.toHaveBeenCalled()
     expect(mocks.destroyDocumentAsset).not.toHaveBeenCalled()
   })
@@ -105,8 +107,8 @@ describe("deleteProject", () => {
   it("mặc định chỉ archive, không đụng dữ liệu", async () => {
     mocks.Project.findOneAndUpdate.mockResolvedValue({ _id: PROJECT, status: "archived" })
 
-    await expect(projectService.deleteProject(PROJECT, USER)).resolves.toMatchObject({ status: "archived" })
-    expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith({ _id: PROJECT, userId: USER }, { status: "archived" }, { new: true })
+    await expect(projectService.deleteProject(PROJECT, ORG)).resolves.toMatchObject({ status: "archived" })
+    expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith({ _id: PROJECT, organizationId: ORG }, { status: "archived" }, { new: true })
     expect(mocks.Spine.deleteMany).not.toHaveBeenCalled()
   })
 })
@@ -117,23 +119,23 @@ describe("createProject", () => {
   it("chỉ lưu metadata, tạo Spine rỗng kèm tên/domain", async () => {
     mocks.Project.create.mockResolvedValue({ id: PROJECT })
 
-    await projectService.createProject(USER, "FlintFlow", "")
+    await projectService.createProject(ORG, USER, "FlintFlow", "")
 
-    expect(mocks.Project.create).toHaveBeenCalledWith({ userId: USER, name: "FlintFlow", domain: null, status: "active", mode: "fpt" })
+    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "FlintFlow", domain: null, status: "active", mode: "fpt" })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "FlintFlow", domain: null })
   })
 
   it("mode import (mode 1) vẫn tạo Spine rỗng làm chỉ mục", async () => {
     mocks.Project.create.mockResolvedValue({ id: PROJECT })
 
-    await projectService.createProject(USER, "Lumen SRS", "E-learning", "import")
+    await projectService.createProject(ORG, USER, "Lumen SRS", "E-learning", "import")
 
-    expect(mocks.Project.create).toHaveBeenCalledWith({ userId: USER, name: "Lumen SRS", domain: "E-learning", status: "active", mode: "import" })
+    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "Lumen SRS", domain: "E-learning", status: "active", mode: "import" })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "Lumen SRS", domain: "E-learning" })
   })
 
   it("mode customer_template chưa hỗ trợ ⇒ 501 NOT_IMPLEMENTED, không tạo gì", async () => {
-    await expect(projectService.createProject(USER, "X", "", "customer_template")).rejects.toMatchObject({ statusCode: 501, code: "NOT_IMPLEMENTED" })
+    await expect(projectService.createProject(ORG, USER, "X", "", "customer_template")).rejects.toMatchObject({ statusCode: 501, code: "NOT_IMPLEMENTED" })
     expect(mocks.Project.create).not.toHaveBeenCalled()
     expect(mocks.getOrCreate).not.toHaveBeenCalled()
   })

@@ -56,11 +56,15 @@ const withOptionalTransaction = async <T>(
 
 // ─── Số dư / gói ─────────────────────────────────────────────────────
 
-export const getBalance = async (userId: string) => {
-  const wallet = await getOrCreateWallet(userId)
+/**
+ * Số dư của TỔ CHỨC (business-flow.md §2: "một ví chung cho mỗi org"). Phải cùng ví mà lượt gọi AI trừ
+ * (`credit-reservation.resolveWalletOrg`), nếu không màn hình báo một đằng còn tiền đi một nẻo.
+ */
+export const getBalance = async (orgId: string, userId: string) => {
+  const wallet = await getOrCreateWallet(userId, undefined, orgId)
   const [subscription, ledger] = await Promise.all([
-    Subscription.findOne({ userId, status: "active" }),
-    CreditTransaction.find({ userId }, null, { sort: { createdAt: -1 }, limit: 20 })
+    Subscription.findOne({ organizationId: orgId, status: "active" }),
+    CreditTransaction.find({ organizationId: orgId }, null, { sort: { createdAt: -1 }, limit: 20 })
   ])
 
   const plan: PlanId = subscription?.plan ?? "free"
@@ -90,14 +94,15 @@ export const listPackages = () => ({
   plans: [planConfig.free, planConfig.pro]
 })
 
-export const listTransactions = async (userId: string, page = 1, limit = 20) => {
+/** UC-79: lịch sử tiêu credit của CẢ org — mỗi dòng giữ `userId` để biết thành viên nào tiêu. */
+export const listTransactions = async (orgId: string, page = 1, limit = 20) => {
   const [items, total] = await Promise.all([
-    CreditTransaction.find({ userId }, null, {
+    CreditTransaction.find({ organizationId: orgId }, null, {
       sort: { createdAt: -1 },
       skip: (page - 1) * limit,
       limit
     }),
-    CreditTransaction.countDocuments({ userId })
+    CreditTransaction.countDocuments({ organizationId: orgId })
   ])
 
   return {
@@ -124,7 +129,7 @@ const toIntentDTO = (intent: IPaymentIntent) => ({
 
 export type PaymentIntentDTO = ReturnType<typeof toIntentDTO>
 
-export const createCheckout = async (userId: string, packageId: string): Promise<PaymentIntentDTO> => {
+export const createCheckout = async (orgId: string, userId: string, packageId: string): Promise<PaymentIntentDTO> => {
   const pkg = findPackage(packageId)
   if (!pkg) {
     throw new ApiError(404, "Không tìm thấy gói credit", "PACKAGE_NOT_FOUND")
@@ -136,6 +141,7 @@ export const createCheckout = async (userId: string, packageId: string): Promise
   // Tạo intent local trước để có ID đối chiếu trong description của order
   const intent = await PaymentIntent.create({
     userId: new mongoose.Types.ObjectId(userId),
+    organizationId: new mongoose.Types.ObjectId(orgId),
     packageId: pkg.id,
     credits: pkg.credits,
     amount: pkg.amount,
@@ -206,9 +212,11 @@ const settleIntent = async (
     if (outcome === "failed") return { intent, balance: undefined, planChange: null }
 
     const userId = intent.userId.toString()
-    await getOrCreateWallet(userId, session)
+    // Callback không mang token: org lấy từ chính intent đã ghi lúc checkout.
+    const orgId = intent.organizationId ? intent.organizationId.toString() : null
+    await getOrCreateWallet(userId, session, orgId)
     const wallet = await CreditWallet.findOneAndUpdate(
-      { userId },
+      orgId ? { organizationId: orgId } : { userId },
       { $inc: { balance: intent.credits } },
       { ...options, returnDocument: "after" }
     )
@@ -220,6 +228,7 @@ const settleIntent = async (
       [
         {
           userId: intent.userId,
+          organizationId: intent.organizationId,
           projectId: null,
           actionType: "purchase",
           amount: intent.credits,
@@ -232,7 +241,7 @@ const settleIntent = async (
 
     // Checkout `plan:<id>`: tiền về thì kích hoạt gói trong cùng transaction với cộng credit
     const plan = planFromPackageId(intent.packageId)
-    const planChange = plan ? await activatePlan(userId, plan, session) : null
+    const planChange = plan ? await activatePlan(orgId, userId, plan, session) : null
 
     return { intent, balance: wallet.balance, planChange }
   })
@@ -253,7 +262,11 @@ const settleIntent = async (
       meta: { intentId, credits: intent.credits, amount: intent.amount }
     })
     // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (nền, không chặn webhook)
-    void resumeAfterTopUp(userId).catch((err) => console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err))
+    // task-26: nạp vào ví tổ chức ⇒ chạy tiếp trong mọi dự án của tổ chức, không chỉ dự án người nạp tạo
+    const paidOrgId = intent.organizationId ? String(intent.organizationId) : null
+    void resumeAfterTopUp(userId, undefined, paidOrgId).catch((err) =>
+      console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err)
+    )
   } else {
     await notify(userId, {
       type: "payment_failed",
@@ -401,10 +414,17 @@ interface PlanChange {
  * Ghi Subscription. Gói trả phí mua lại khi còn hạn thì gia hạn từ cuối kỳ hiện tại;
  * về lại gói miễn phí đang dùng là no-op. Không có side effect ngoài DB (notify gọi sau).
  */
-const activatePlan = async (userId: string, plan: PlanId, session?: ClientSession): Promise<PlanChange> => {
+const activatePlan = async (
+  orgId: string | null,
+  userId: string,
+  plan: PlanId,
+  session?: ClientSession
+): Promise<PlanChange> => {
   const options = sessionOptions(session)
   const definition = getPlan(plan)
-  const current = await Subscription.findOne({ userId }, null, options)
+  // Gói thuộc về org; intent cũ chưa có org thì lùi về khoá theo người như trước task-26.
+  const key = orgId ? { organizationId: orgId } : { userId }
+  const current = await Subscription.findOne(key, null, options)
   const previousPlan = (current?.plan as PlanId | undefined) ?? null
   const now = new Date()
   const active = current?.status === "active" && current.plan === plan
@@ -417,7 +437,7 @@ const activatePlan = async (userId: string, plan: PlanId, session?: ClientSessio
   const periodEnd = new Date(start.getTime() + planConfig.periodDays * 24 * 60 * 60 * 1000)
 
   const subscription = await Subscription.findOneAndUpdate(
-    { userId },
+    key,
     {
       $set: {
         plan,
@@ -426,7 +446,10 @@ const activatePlan = async (userId: string, plan: PlanId, session?: ClientSessio
         currentPeriodStart: active ? current.currentPeriodStart : now,
         currentPeriodEnd: periodEnd
       },
-      $setOnInsert: { userId: new mongoose.Types.ObjectId(userId) }
+      $setOnInsert: {
+        userId: new mongoose.Types.ObjectId(userId),
+        ...(orgId ? { organizationId: new mongoose.Types.ObjectId(orgId) } : {})
+      }
     },
     { ...options, upsert: true, returnDocument: "after" }
   )
@@ -452,7 +475,7 @@ const notifyPlanChanged = async (userId: string, change: PlanChange) => {
  * Đổi gói không qua thanh toán — chỉ cho gói miễn phí. Gói trả phí phải mua qua
  * `POST /billing/checkout { packageId: "plan:<id>" }` (payment_service thật, review T04).
  */
-export const upgradePlan = async (userId: string, plan: PlanId) => {
+export const upgradePlan = async (orgId: string, userId: string, plan: PlanId) => {
   const definition = getPlan(plan)
   if (definition.priceVnd > 0) {
     throw new ApiError(
@@ -462,7 +485,7 @@ export const upgradePlan = async (userId: string, plan: PlanId) => {
     )
   }
 
-  const change = await activatePlan(userId, plan)
+  const change = await activatePlan(orgId, userId, plan)
   if (change.changed) await notifyPlanChanged(userId, change)
   return change.subscription
 }

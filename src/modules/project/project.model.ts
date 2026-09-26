@@ -15,6 +15,8 @@ export type ProjectMode = (typeof PROJECT_MODES)[number]
 
 export interface IProject extends Document {
   userId: mongoose.Types.ObjectId
+  /** Org sở hữu dự án (task-26). null = dữ liệu có trước org, chờ migration backfill. */
+  organizationId: mongoose.Types.ObjectId | null
   name: string
   domain?: string | null
   status: ProjectStatus
@@ -36,6 +38,16 @@ const projectSchema = new Schema<IProject>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true
+    },
+    /**
+     * Org sở hữu (task-26 Pha 0). Nullable ở pha này để migration backfill dần và API cũ chạy y nguyên;
+     * Pha 4 đổi filter sang organizationId rồi mới bỏ nullable.
+     */
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
       index: true
     },
     name: {
@@ -78,5 +90,7 @@ const projectSchema = new Schema<IProject>(
 
 // Compound Index for dashboard list queries (UC06)
 projectSchema.index({ userId: 1, status: 1 })
+// Cùng truy vấn danh sách nhưng theo org (task-26 Pha 4 sẽ thay index theo userId ở trên)
+projectSchema.index({ organizationId: 1, status: 1 })
 
 export const Project = mongoose.model<IProject>("Project", projectSchema)

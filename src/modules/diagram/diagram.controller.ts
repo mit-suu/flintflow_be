@@ -10,6 +10,7 @@ import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { SpineRecord } from "../spine/spine.types.js"
 import { getProjectById } from "../project/project.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -21,7 +22,7 @@ const context = async (req: Request): Promise<{ projectId: string; userId: strin
   if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
-  const project = await getProjectById(projectId, userId)
+  const project = await getProjectById(projectId, requireOrgId(req))
   const spine = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain ?? null })
   return { projectId, userId, spine }
 }

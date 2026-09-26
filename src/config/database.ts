@@ -1,6 +1,7 @@
 import mongoose from "mongoose"
 import { env } from "./env.js"
 import { User } from "../modules/user/user.model.js"
+import { repairLegacyIndexes } from "../modules/credits/legacy-indexes.js"
 
 export const initReplicaSet = async (): Promise<void> => {
   try {
@@ -51,6 +52,13 @@ export const connectDB = async (): Promise<void> => {
     console.log("Database connected successfully")
     await initReplicaSet()
     await initAdmin()
+    // task-26: index cũ lệch schema làm tạo org thứ hai nổ E11000 — tự sửa, không đợi ai nhớ chạy migration.
+    // Lỗi ở đây không được làm sập server.
+    await repairLegacyIndexes()
+      .then((repaired) => {
+        if (repaired.length > 0) console.log("[LegacyIndexes] Đã dựng lại: " + repaired.join(", "))
+      })
+      .catch((error) => console.error("[LegacyIndexes] Không sửa được index cũ:", error))
   } catch (error) {
     console.error("Database connection error:", error)
     process.exit(1)

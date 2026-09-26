@@ -3,7 +3,9 @@ import * as adminService from "./admin.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import {
+  adjustOrgCreditsSchema,
   aiCostQuerySchema,
+  orgIdParamSchema,
   parseWith,
   resolveDateRange,
   userIdParamSchema,
@@ -37,4 +39,11 @@ export const getAiCost = catchAsync(async (req: Request, res: Response) => {
 export const listFeedback = catchAsync(async (_req: Request, res: Response) => {
   const items = await adminService.listFeedback()
   return sendSuccess(res, 200, items, { total: items.length })
+})
+
+export const adjustOrgCredits = catchAsync(async (req: Request, res: Response) => {
+  const { orgId } = parseWith(orgIdParamSchema, req.params)
+  const { amount, reason } = parseWith(adjustOrgCreditsSchema, req.body)
+  const result = await adminService.adjustOrgCredits(orgId, amount, reason)
+  return sendSuccess(res, 200, result)
 })

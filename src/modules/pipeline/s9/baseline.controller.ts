@@ -16,6 +16,7 @@ import { z } from "zod"
 import * as baselineService from "./baseline.service.js"
 import { baselineRequestSchema } from "../pipeline.dto.js"
 import { getProjectById } from "../../project/project.service.js"
+import { requireOrgId } from "../../../shared/auth/org-request.js"
 import { sendError, sendSuccess } from "../../../shared/types/api-response.js"
 import { catchAsync } from "../../../shared/utils/catch-async.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
@@ -36,7 +37,7 @@ const authorize = async (req: Request): Promise<Authorized> => {
   if (!mongoose.isValidObjectId(projectId)) {
     throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
   }
-  const project = await getProjectById(projectId, userId)
+  const project = await getProjectById(projectId, requireOrgId(req))
   return { projectId, userId, mode: project.mode ?? "fpt" }
 }
 
