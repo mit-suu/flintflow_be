@@ -291,6 +291,98 @@ describe("renderSection — feature/function", () => {
     expect(section.blocks.some((b) => b.type === "image" && b.png === "png-d05")).toBe(true)
   })
 
+  it("function:<id> không bật functionLayout (mode 1 import) ⇒ giữ khung cũ Trigger · Description · Normal Flow", () => {
+    const blocks = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" })).blocks
+    expect(blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Trigger: ", bold: true }, { text: "User clicks Log in." }] })
+    expect(blocks).toContainEqual({ type: "heading", level: 4, text: "Normal Flow" })
+    expect(JSON.stringify(blocks)).not.toContain("Function trigger")
+  })
+
+  it("function:<id> — mẫu FPT: 4 nhóm heading 4, mục con là danh sách gạch đầu dòng, mục trống ghi N/A", () => {
+    const item = (label: string, text?: string) => (text === undefined ? [{ text: `${label}: `, bold: true }] : [{ text: `${label}: `, bold: true }, { text }])
+    const bullets = (...items: ReturnType<typeof item>[]) => ({ type: "bullet_list", items })
+    const h = (text: string) => ({ type: "heading", level: 4, text })
+    const onScreen = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1", functionLayout: "fpt" })).blocks
+    expect(onScreen).toEqual([
+      h("Function trigger"),
+      bullets(item("Navigation path", "Login"), item("Timing frequency", "User clicks Log in.")),
+      h("Function description"),
+      bullets(
+        item("Actors / Roles", "Founder"),
+        item("Purpose", "Authenticates the user."),
+        // Hình D05 không phải wireframe salt ⇒ Interface dùng mô tả màn
+        item("Interface", "Login screen: Entry screen."),
+        item("Data processing", "System verifies.")
+      ),
+      h("Screen layout"),
+      { type: "image", png: "png-d05", caption: "Screen Layout — Login" },
+      h("Function details"),
+      bullets(
+        item("Data", "User"),
+        item("Validation", "Password must not be empty."),
+        item("Business rules", "Password must be hashed."),
+        item("Normal case")
+      ),
+      { type: "numbered_list", items: [[{ text: "Enter credentials." }], [{ text: "System verifies." }]] },
+      bullets(item("Abnormal case", "Wrong password: show an error."))
+    ])
+
+    // Function không thuộc màn, không use case: đủ khung, mục không có dữ liệu ghi N/A
+    const nonScreen = renderSection(spine(), "function:FN02", ctx({ number: "3.3.1", functionLayout: "fpt" })).blocks
+    const items = nonScreen.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
+    const value = (label: string) => items.find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect([value("Navigation path"), value("Actors / Roles"), value("Interface"), value("Validation"), value("Abnormal case")]).toEqual(["N/A", "N/A", "N/A", "N/A", "N/A"])
+    expect(nonScreen[nonScreen.findIndex((b) => b.type === "heading" && b.text === "Screen layout") + 1]).toEqual({ type: "paragraph", runs: [{ text: "N/A" }] })
+  })
+
+  it("feature:<id> — mẫu FPT chỉ có tiêu đề, không nội dung; mode 1 giữ dòng liệt kê màn", () => {
+    expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2", functionLayout: "fpt" })).blocks).toEqual([])
+    expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2" })).blocks).not.toEqual([])
+  })
+
+  it("function:<id> — mẫu FPT: Navigation path theo Screens Flow, Actors chỉ actor người, Interface đọc từ wireframe", () => {
+    const s = spine()
+    s.actors.push({ id: "A02", name: "Buyer", kind: "human", description: "" })
+    s.roles.push({ id: "R2", name: "Buyer role", actor_id: "A02" }, { id: "R3", name: "Gateway role", actor_id: "A05" })
+    s.permissions.push({ id: "P2", screen_id: "S03", role_id: "R2", action: "view" }, { id: "P3", screen_id: "S03", role_id: "R3", action: "view" })
+    s.screens.push({ id: "S03", feature_id: "F2", name: "Settings", description: "", flow_to: [], is_popup: true, tabs: [], primary_function_id: "FN03", queue_order: 3, detail_status: "signed_off" })
+    s.screens[1].flow_to = ["S03"]
+    s.diagrams.push({
+      id: "D06",
+      kind: "screen_layout",
+      section: "function:FN03",
+      owner_kind: "screen",
+      owner_id: "S03",
+      puml: ["@startsalt", "{^\"Settings\"", "  Project name", "  \"Sunrise Villa        \"", "  [ ] Archived", "  { [ Cancel ] | [   Save   ] }", "}", "@endsalt", ""].join("\n"),
+      render_status: "ok",
+      source_hash: "h6",
+      rendered_at: "2026-09-01T00:00:00.000Z"
+    })
+    s.functions.push({
+      id: "FN03",
+      screen_id: "S03",
+      feature_id: "F2",
+      order: 0,
+      name: "Rename Project",
+      trigger: "User clicks Save.",
+      description: "Renames a project.",
+      normal: ["User types a name.", "The system stores the new name."],
+      abnormal: [],
+      validations: [{ id: "FN03-V1", kind: "business", statement: "Password must be hashed." }],
+      business_rule_ids: ["BR02"],
+      priority: null
+    })
+    const items = renderSection(s, "function:FN03", ctx({ number: "3.3.2", functionLayout: "fpt" })).blocks.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
+    const value = (label: string) => items.find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect(value("Navigation path")).toBe("Login > Dashboard > Settings")
+    // Không use case nào chứa FN03 ⇒ actor người của vai trò có quyền trên màn; actor system (Payment Gateway) bị bỏ
+    expect(value("Actors / Roles")).toBe("Buyer")
+    expect(value("Interface")).toBe("Settings pop-up: Project name input, Archived checkbox, Cancel button, Save button.")
+    expect(value("Data processing")).toBe("The system stores the new name.")
+    // Validation business + rule đã liên kết trùng nội dung ⇒ một dòng
+    expect(value("Business rules")).toBe("Password must be hashed.")
+  })
+
   it("function:<id> không phải primary_function_id của màn — không nhúng ảnh screen_layout", () => {
     const withSecondFn: Spine = { ...spine(), functions: [...spine().functions, { id: "FN03", screen_id: "S01", feature_id: "F1", order: 1, name: "Toggle", trigger: "t", description: "d", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }] }
     const section = renderSection(withSecondFn, "function:FN03", ctx({ number: "3.2.2" }))

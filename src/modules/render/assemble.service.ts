@@ -463,6 +463,8 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
       number: numbers.get(def.id) ?? "",
       diagramPng,
       numberOf: numberOfCtx,
+      // Tài liệu theo mẫu FPT: §3.x.y dùng khung mục FPT (mode 1 đi `layout-sections.ts`, giữ khung cũ)
+      functionLayout: "fpt",
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
@@ -568,6 +570,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
+  // Không có layout file người dùng ⇒ mẫu FPT (FLF-214: style heading con của §3.x.y)
+  if (!input.template) refDoc.format = "fpt"
   return { refDoc, images }
 }
 
