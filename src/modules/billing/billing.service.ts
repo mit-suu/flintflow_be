@@ -262,7 +262,11 @@ const settleIntent = async (
       meta: { intentId, credits: intent.credits, amount: intent.amount }
     })
     // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (nền, không chặn webhook)
-    void resumeAfterTopUp(userId).catch((err) => console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err))
+    // task-26: nạp vào ví tổ chức ⇒ chạy tiếp trong mọi dự án của tổ chức, không chỉ dự án người nạp tạo
+    const paidOrgId = intent.organizationId ? String(intent.organizationId) : null
+    void resumeAfterTopUp(userId, undefined, paidOrgId).catch((err) =>
+      console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err)
+    )
   } else {
     await notify(userId, {
       type: "payment_failed",
