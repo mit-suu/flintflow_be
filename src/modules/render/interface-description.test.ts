@@ -32,6 +32,13 @@ describe("wireframeWidgets (FLF-214)", () => {
     ])
   })
 
+  it("bỏ qua hàng đệm quanh khung ngoài (padFrame) — cùng danh sách widget như bản không đệm", () => {
+    const body = ["{", "  <b>FLINTFLOW", "  Login", "}", "..", "Email", '"john@example.com       "', "[        Log in        ]"]
+    const padded = salt(".", "{ . | . | {", ...body.map((l) => `  ${l}`), "} | . | . }", ".")
+    expect(wireframeWidgets(padded, "Login")).toEqual(["Email input", "Log in button"])
+    expect(wireframeWidgets(padded, "Login")).toEqual(wireframeWidgets(salt(...body), "Login"))
+  })
+
   it("dropdown có nhãn, khoảng giá trị, radio, tab, bảng, vùng giữ chỗ và ô nhiều dòng", () => {
     const puml = salt(
       "{/ <b>Chat | Document }",
