@@ -122,7 +122,11 @@ const envSchema = z.object({
       message: "ở production phải là domain public, không được trỏ localhost"
     }),
   // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
-  CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000)
+  CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
+  /** Hạn của mã mời vào tổ chức (UC-08). */
+  INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  /** Độ dài mã mời. Mã để người dùng GÕ TAY nên giữ ngắn; bảng chữ 31 ký tự ⇒ 10 ký tự ≈ 49 bit. */
+  INVITE_CODE_LENGTH: z.coerce.number().int().min(8).max(24).default(10)
 })
 
 const parsed = envSchema.safeParse(process.env)

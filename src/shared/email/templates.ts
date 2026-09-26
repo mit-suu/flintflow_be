@@ -90,3 +90,72 @@ export const getOtpEmailText = ({ name, otp, expiresInMinutes, purpose }: OtpEma
     OTP_COPY[purpose].ignore,
     "",
   ].join("\n")
+
+export interface InvitationEmailParams {
+  /** Tên người được mời nếu biết; không có thì chào chung. */
+  name?: string
+  code: string
+  organizationName: string
+  /** Nhãn tiếng Việt của vai trò được mời (Analyst / Viewer). */
+  roleLabel: string
+  inviterName: string
+  expiresInDays: number
+}
+
+/**
+ * Email mời vào tổ chức (UC-08, BPMN Flow 9.2). Giữ đúng lối của email OTP ở trên: không ảnh, không nút,
+ * chữ là chính, có bản text thuần đi kèm — để vào Hộp thư chính thay vì mục Quảng cáo.
+ */
+export const getInvitationEmailHtml = ({
+  name,
+  code,
+  organizationName,
+  roleLabel,
+  inviterName,
+  expiresInDays
+}: InvitationEmailParams): string => {
+  const greeting = name ? `Xin chào ${escapeHtml(name)},` : "Xin chào,"
+  return `<!DOCTYPE html>
+<html lang="vi">
+<head><meta charset="utf-8" /><title>Lời mời vào ${escapeHtml(organizationName)}</title></head>
+<body style="margin:0;padding:0;background:${BRAND_SOFT};font-family:${FONT};color:${TEXT};">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND_SOFT};padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#FFFFFF;border:1px solid ${BORDER};border-radius:12px;padding:32px;">
+        <tr><td style="font-size:14px;line-height:22px;">
+          <p style="margin:0 0 16px;">${greeting}</p>
+          <p style="margin:0 0 16px;">
+            ${escapeHtml(inviterName)} mời bạn tham gia tổ chức
+            <strong>${escapeHtml(organizationName)}</strong> trên FlintFlow với vai trò
+            <strong>${escapeHtml(roleLabel)}</strong>.
+          </p>
+          <p style="margin:0 0 8px;color:${MUTED};">Nhập mã mời này trong ứng dụng:</p>
+          <p style="margin:0 0 16px;font-size:26px;letter-spacing:4px;font-weight:700;color:${BRAND};">${escapeHtml(code)}</p>
+          <p style="margin:0 0 16px;color:${MUTED};">Mã có hiệu lực trong ${expiresInDays} ngày và chỉ dùng được một lần.</p>
+          <p style="margin:0;color:${MUTED};">Nếu bạn không định tham gia tổ chức này, hãy bỏ qua email này.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`
+}
+
+export const getInvitationEmailText = ({
+  name,
+  code,
+  organizationName,
+  roleLabel,
+  inviterName,
+  expiresInDays
+}: InvitationEmailParams): string =>
+  [
+    name ? `Xin chào ${name},` : "Xin chào,",
+    "",
+    `${inviterName} mời bạn tham gia tổ chức ${organizationName} trên FlintFlow với vai trò ${roleLabel}.`,
+    "",
+    `Mã mời: ${code}`,
+    `Mã có hiệu lực trong ${expiresInDays} ngày và chỉ dùng được một lần.`,
+    "",
+    "Nếu bạn không định tham gia tổ chức này, hãy bỏ qua email này."
+  ].join("\n")
