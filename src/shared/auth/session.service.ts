@@ -87,6 +87,24 @@ export const rotateSession = async (
   }
 }
 
+/**
+ * Ghi org đang mở vào ĐÚNG phiên đang dùng (task-26, BPMN Flow 9.3). Tìm phiên qua hash của refresh token
+ * nên đổi org ở thiết bị này không kéo theo thiết bị khác; lượt refresh sau đó cấp access token mang
+ * đúng orgId này.
+ */
+export const findSessionActiveOrg = async (refreshToken: string): Promise<string | null> => {
+  const session = await Session.findOne({ tokenHash: hashToken(refreshToken) }).select("activeOrgId").lean()
+  return session?.activeOrgId ? String(session.activeOrgId) : null
+}
+
+export const setActiveOrg = async (refreshToken: string, organizationId: string): Promise<void> => {
+  const tokenHash = hashToken(refreshToken)
+  await Session.findOneAndUpdate(
+    { tokenHash, isRevoked: false },
+    { activeOrgId: new mongoose.Types.ObjectId(organizationId) }
+  )
+}
+
 export const revokeSession = async (refreshToken: string): Promise<void> => {
   const tokenHash = hashToken(refreshToken)
   await Session.findOneAndUpdate({ tokenHash }, { isRevoked: true })

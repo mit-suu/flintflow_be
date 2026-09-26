@@ -2,6 +2,9 @@ import mongoose, { PipelineStage } from "mongoose"
 import { User, UserRole } from "../user/user.model.js"
 import { Project } from "../project/project.model.js"
 import { CreditWallet } from "../credits/credit-wallet.model.js"
+import { Membership } from "../organization/membership.model.js"
+import { notify } from "../notification/notification.service.js"
+import { Organization } from "../organization/organization.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -43,7 +46,11 @@ export interface AdminUserRow {
   emailVerified: boolean
   authProvider: string
   createdAt: Date
-  walletBalance: number
+  /**
+   * task-26: KHÔNG còn `walletBalance`. Ví là của tổ chức, không của người — một người ở nhiều org thì
+   * "số dư của user" không có nghĩa. Số dư từng org xem ở `getUserDetail`.
+   */
+  organizationsCount: number
   projectsCount: number
   lastLoginAt: Date | null
 }
@@ -65,8 +72,11 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
   const userIds = users.map((u) => u._id)
   const byUser = { $match: { userId: { $in: userIds } } }
 
-  const [wallets, projectCounts, lastLogins] = await Promise.all([
-    CreditWallet.find({ userId: { $in: userIds } }).lean(),
+  const [memberships, projectCounts, lastLogins] = await Promise.all([
+    Membership.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      byUser,
+      { $group: { _id: "$userId", count: { $sum: 1 } } }
+    ]),
     Project.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
       byUser,
       { $group: { _id: "$userId", count: { $sum: 1 } } }
@@ -76,7 +86,7 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
       { $group: { _id: "$userId", at: { $max: "$createdAt" } } }
     ])
   ])
-  const balances = new Map(wallets.map((w) => [String(w.userId), w.balance]))
+  const orgCounts = new Map(memberships.map((r) => [String(r._id), r.count]))
   const projectsCount = new Map(projectCounts.map((r) => [String(r._id), r.count]))
   const lastLoginAt = new Map(lastLogins.map((r) => [String(r._id), r.at]))
 
@@ -91,7 +101,7 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
       emailVerified: u.emailVerified,
       authProvider: u.authProvider,
       createdAt: u.createdAt,
-      walletBalance: balances.get(id) ?? 0,
+      organizationsCount: orgCounts.get(id) ?? 0,
       projectsCount: projectsCount.get(id) ?? 0,
       lastLoginAt: lastLoginAt.get(id) ?? null
     }
@@ -129,15 +139,35 @@ export const getUserDetail = async (userId: string) => {
     throw new ApiError(404, "Không tìm thấy người dùng", "USER_NOT_FOUND")
   }
 
-  const [[row], wallet, recentTransactions] = await Promise.all([
+  const [[row], memberships, recentTransactions] = await Promise.all([
     enrichUsers([user]),
-    CreditWallet.findOne({ userId: user._id }).lean(),
+    Membership.find({ userId: user._id }).lean(),
+    // Giao dịch DO CHÍNH NGƯỜI NÀY thực hiện — ví là của org nhưng ledger vẫn ghi ai tiêu (UC-79).
     CreditTransaction.find({ userId: user._id }).sort({ createdAt: -1 }).limit(20).lean()
   ])
 
+  const orgIds = memberships.map((m) => m.organizationId)
+  const [orgs, wallets] = await Promise.all([
+    Organization.find({ _id: { $in: orgIds } }).select("_id name").lean(),
+    CreditWallet.find({ organizationId: { $in: orgIds } }).lean()
+  ])
+  const orgById = new Map(orgs.map((o) => [String(o._id), o]))
+  const walletByOrg = new Map(wallets.map((w) => [String(w.organizationId), w]))
+
   return {
     ...row,
-    wallet: wallet ? { balance: wallet.balance, reserved: wallet.reserved } : null,
+    // UC-65: admin thấy người này ở org nào, vai trò gì, và ví của org đó còn bao nhiêu.
+    organizations: memberships.map((m) => {
+      const id = String(m.organizationId)
+      const wallet = walletByOrg.get(id)
+      return {
+        id,
+        name: orgById.get(id)?.name ?? "(đã xoá)",
+        role: m.role,
+        joinedAt: m.joinedAt,
+        wallet: wallet ? { balance: wallet.balance, reserved: wallet.reserved } : null
+      }
+    }),
     recentTransactions
   }
 }
@@ -343,3 +373,88 @@ export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCost
 
 // Dữ liệu và shape nằm ở module feedback; admin chỉ mở route đọc
 export const listFeedback = () => feedbackService.listFeedback()
+
+// ─── UC-68 Điều chỉnh credit của tổ chức ─────────────────────────
+
+export interface AdjustOrgCreditsResult {
+  organizationId: string
+  organizationName: string
+  amount: number
+  balance: number
+  reserved: number
+  reason: string
+}
+
+/**
+ * UC-68 — Administrator cộng (amount > 0) hoặc trừ (amount < 0) credit trong ví của MỘT TỔ CHỨC, bắt buộc
+ * kèm lý do. Lý do lưu thẳng vào dòng ledger (`type: "admin_adjust"`) để sau này còn truy được vì sao.
+ *
+ * Không cho số dư xuống âm, và không đụng `reserved`: phần đang giữ thuộc về các lượt gọi AI đang chạy,
+ * admin trừ vào đó sẽ làm hỏng vòng reserve/settle.
+ */
+export const adjustOrgCredits = async (
+  orgId: string,
+  amount: number,
+  reason: string
+): Promise<AdjustOrgCreditsResult> => {
+  if (!mongoose.isValidObjectId(orgId)) {
+    throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
+  }
+  const org = await Organization.findById(orgId).select("_id name").lean()
+  if (!org) {
+    throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
+  }
+
+  // Ví tạo cùng org (Flow 8.2); org có trước task-26 thì chưa có ⇒ tạo tại chỗ để admin vẫn thao tác được.
+  const existing = await CreditWallet.findOne({ organizationId: orgId })
+  if (!existing) {
+    await CreditWallet.create({ organizationId: orgId, userId: org._id, balance: 0, reserved: 0 })
+  }
+
+  // Trừ: chỉ chạm phần KHẢ DỤNG (balance - reserved) và làm trong một lệnh atomic.
+  const filter =
+    amount < 0
+      ? { organizationId: orgId, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, -amount] } }
+      : { organizationId: orgId }
+  const wallet = await CreditWallet.findOneAndUpdate(
+    filter,
+    { $inc: { balance: amount } },
+    { returnDocument: "after" }
+  )
+  if (!wallet) {
+    throw new ApiError(409, "Số dư khả dụng của tổ chức không đủ để trừ", "INSUFFICIENT_CREDIT")
+  }
+
+  await CreditTransaction.create({
+    userId: org.ownerUserId ?? wallet.userId,
+    organizationId: wallet.organizationId,
+    projectId: null,
+    actionType: "admin_adjust",
+    amount: Math.abs(amount),
+    type: "admin_adjust",
+    balanceAfter: wallet.balance - wallet.reserved,
+    reason
+  })
+
+  // Lead của org cần biết ví vừa bị ai đó ngoài tổ chức thay đổi.
+  const leads = await Membership.find({ organizationId: orgId, role: "lead" }).select("userId").lean()
+  for (const lead of leads) {
+    void notify(String(lead.userId), {
+      type: "credits_adjusted",
+      title: amount >= 0 ? "Tổ chức được cộng credit" : "Tổ chức bị trừ credit",
+      body: `${amount >= 0 ? "+" : ""}${amount} credit cho ${org.name}. Lý do: ${reason}`,
+      organizationId: orgId,
+      link: "/home/billing",
+      meta: { organizationId: orgId, amount, reason }
+    })
+  }
+
+  return {
+    organizationId: orgId,
+    organizationName: org.name,
+    amount,
+    balance: wallet.balance,
+    reserved: wallet.reserved,
+    reason
+  }
+}

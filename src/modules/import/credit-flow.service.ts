@@ -11,21 +11,41 @@ import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
 import { ChangeRequest } from "../change-request/change-request.model.js"
 import { ImportedDocument } from "./imported-document.model.js"
+import { Membership } from "../organization/membership.model.js"
 
 export const TOPUP_NEEDED = "credit_topup_needed"
 
-/** 4.2: báo chủ project nạp credit — bước `stepId` đang dừng. Side effect: lỗi chỉ ghi log. */
+/**
+ * 4.2: báo nạp credit — bước `stepId` đang dừng. Side effect: lỗi chỉ ghi log.
+ *
+ * task-26: ví là của TỔ CHỨC và chỉ Lead được nạp (BPMN 4.2 "Notify Lead to top up", lane "Lead (billing)") ⇒ dự án
+ * thuộc tổ chức thì báo mọi Lead của tổ chức đó, không báo người tạo dự án (có thể là Analyst, không nạp được).
+ * Dự án chưa gắn tổ chức (dữ liệu trước migration) ⇒ vẫn báo người tạo như trước.
+ */
 export const notifyTopUpNeeded = async (projectId: string, stepId: string): Promise<void> => {
   try {
-    const project = (await Project.findById(projectId, { userId: 1, name: 1 }).lean()) as { userId?: unknown; name?: string } | null
-    if (!project?.userId) return
-    await notify(String(project.userId), {
-      type: TOPUP_NEEDED,
-      title: "Hết credit — bước AI đang dừng",
-      body: `Dự án "${project.name ?? projectId}" dừng ở bước ${stepId} vì không đủ credit. Nạp thêm để chạy tiếp — sau khi thanh toán thành công, bước sẽ tự chạy lại.`,
-      link: "/home/billing",
-      meta: { project_id: projectId, step_id: stepId }
-    })
+    const project = (await Project.findById(projectId, { userId: 1, name: 1, organizationId: 1 }).lean()) as {
+      userId?: unknown
+      name?: string
+      organizationId?: unknown
+    } | null
+    if (!project) return
+    const organizationId = project.organizationId ? String(project.organizationId) : null
+    const recipients = organizationId
+      ? (await Membership.find({ organizationId, role: "lead" }).select("userId").lean()).map((m) => String(m.userId))
+      : project.userId
+        ? [String(project.userId)]
+        : []
+    for (const recipient of recipients) {
+      await notify(recipient, {
+        type: TOPUP_NEEDED,
+        title: "Hết credit — bước AI đang dừng",
+        body: `Dự án "${project.name ?? projectId}" dừng ở bước ${stepId} vì không đủ credit. Nạp thêm để chạy tiếp — sau khi thanh toán thành công, bước sẽ tự chạy lại.`,
+        link: "/home/billing",
+        ...(organizationId ? { organizationId } : {}),
+        meta: { project_id: projectId, step_id: stepId }
+      })
+    }
   } catch (err) {
     console.warn(`[credit-flow] không gửi được thông báo nạp credit (project ${projectId}):`, err)
   }
@@ -63,11 +83,20 @@ const defaultDeps = async (): Promise<ResumeDeps> => {
 }
 
 /**
- * 4.5 ⇒ 4.1: chạy tiếp mọi bước mode 1 dừng vì hết credit trong các project của `userId`. Trả số bước đã thử chạy lại.
+ * 4.5 ⇒ 4.1: chạy tiếp mọi bước mode 1 dừng vì hết credit. Trả số bước đã thử chạy lại.
+ *
+ * task-26: có `organizationId` (ví nạp là ví tổ chức) ⇒ chạy tiếp trong MỌI dự án import của tổ chức — dự án của thành
+ * viên khác cũng đang chờ đúng số credit vừa nạp. Không có ⇒ các dự án của `userId` như trước.
+ * `userId` (người nạp) là người thực hiện các lượt chạy lại; ví bị trừ vẫn là ví của tổ chức sở hữu dự án.
  */
-export const resumeAfterTopUp = async (userId: string, deps?: ResumeDeps): Promise<number> => {
+export const resumeAfterTopUp = async (
+  userId: string,
+  deps?: ResumeDeps,
+  organizationId?: string | null
+): Promise<number> => {
   const d = deps ?? (await defaultDeps())
-  const projects = (await Project.find({ userId, mode: "import" }, { _id: 1 }).lean()).map((p) => p._id)
+  const owner = organizationId ? { organizationId } : { userId }
+  const projects = (await Project.find({ ...owner, mode: "import" }, { _id: 1 }).lean()).map((p) => p._id)
   if (!projects.length) return 0
   let resumed = 0
   const run = async (label: string, fn: () => Promise<unknown>) => {

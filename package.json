@@ -23,6 +23,7 @@
     "test:watch": "vitest",
     "seed:fixture": "tsx src/scripts/seed-fixture.ts",
     "migrate:sections": "tsx src/scripts/migrate-sections-to-spine.ts",
+    "migrate:orgs": "tsx src/scripts/migrate-users-to-orgs.ts",
     "migrate:mode1-v2": "tsx src/scripts/migrate-mode1-v2-indexes.ts",
     "rerender:usecase": "tsx src/scripts/rerender-usecase-diagrams.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",

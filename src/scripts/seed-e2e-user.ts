@@ -10,11 +10,17 @@
  * Script này đặt thẳng `emailVerified: true` và nạp ví credit, nên kịch bản e2e đăng nhập được ngay.
  *
  * Chạy lại được: tài khoản đã có thì đặt lại mật khẩu, bật verified và nâng ví lên `--credits`.
+ *
+ * task-26: mọi tài nguyên đều thuộc TỔ CHỨC. Tài khoản không thuộc org nào sẽ bị FE đẩy sang màn onboarding
+ * ngay sau khi đăng nhập ⇒ e2e hỏng. Vì vậy tài khoản thường được đảm bảo là Lead của một org, và ví được nạp
+ * là ví của org đó (lượt gọi AI trừ vào ví của org sở hữu dự án).
  */
 import mongoose from "mongoose"
 import { connectDB } from "../config/database.js"
 import { User } from "../modules/user/user.model.js"
 import { CreditWallet } from "../modules/credits/credit-wallet.model.js"
+import { Membership } from "../modules/organization/membership.model.js"
+import { createOrganization } from "../modules/organization/organization.service.js"
 
 interface Args {
   email: string
@@ -81,9 +87,23 @@ const main = async (): Promise<void> => {
     console.log(`[seed-e2e-user] tạo mới ${email}`)
   }
 
-  const wallet = await CreditWallet.findOne({ userId: user._id })
+  const userId = String(user._id)
+  let organizationId: string | null = null
+  if (args.role !== "admin") {
+    const membership = await Membership.findOne({ userId: user._id }).lean()
+    if (membership) {
+      organizationId = String(membership.organizationId)
+    } else {
+      // Cùng đường với người dùng thật: org + Lead + ví + gói free + onboardedAt
+      organizationId = (await createOrganization(userId, args.name + "'s Organization")).id
+      console.log(`[seed-e2e-user] tạo tổ chức ${organizationId}`)
+    }
+  }
+
+  // Có org ⇒ ví của org; admin không thuộc org ⇒ ví cá nhân như trước.
+  const wallet = await CreditWallet.findOne(organizationId ? { organizationId } : { userId: user._id })
   if (!wallet) {
-    await CreditWallet.create({ userId: user._id, balance: args.credits, reserved: 0 })
+    await CreditWallet.create({ userId: user._id, organizationId, balance: args.credits, reserved: 0 })
     console.log(`[seed-e2e-user] ví mới: ${args.credits} credit`)
   } else if (wallet.balance < args.credits) {
     wallet.balance = args.credits
@@ -93,7 +113,7 @@ const main = async (): Promise<void> => {
     console.log(`[seed-e2e-user] ví giữ nguyên: ${wallet.balance} credit`)
   }
 
-  console.log(`[seed-e2e-user] xong — ${email} / userId=${String(user._id)}`)
+  console.log(`[seed-e2e-user] xong — ${email} / userId=${userId}${organizationId ? " / orgId=" + organizationId : ""}`)
   await mongoose.disconnect()
 }
 

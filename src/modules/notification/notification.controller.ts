@@ -12,6 +12,12 @@ const requireUserId = (req: Request): string => {
   return userId
 }
 
+/**
+ * Org đang mở lấy từ claim trong token, KHÔNG bắt buộc phải có: tài khoản chưa onboarding vẫn phải đọc
+ * được thông báo cấp nền tảng. Vì vậy ở đây không dùng orgContext (nó trả 409 khi chưa chọn org).
+ */
+const activeOrgId = (req: Request): string | null => req.user?.orgId ?? null
+
 const parsePositiveInt = (value: unknown, fallback: number): number => {
   const n = Number.parseInt(String(value ?? ""), 10)
   return Number.isFinite(n) && n > 0 ? n : fallback
@@ -23,14 +29,15 @@ export const getNotifications = catchAsync(async (req: Request, res: Response) =
   const result = await notificationService.listNotifications(userId, {
     unreadOnly: unread === "1" || unread === "true",
     page: parsePositiveInt(req.query.page, 1),
-    limit: parsePositiveInt(req.query.limit, 20)
+    limit: parsePositiveInt(req.query.limit, 20),
+    organizationId: activeOrgId(req)
   })
   return sendSuccess(res, 200, result.items, result.meta)
 })
 
 export const getUnreadCount = catchAsync(async (req: Request, res: Response) => {
   const userId = requireUserId(req)
-  const count = await notificationService.countUnread(userId)
+  const count = await notificationService.countUnread(userId, activeOrgId(req))
   return sendSuccess(res, 200, { count })
 })
 
@@ -42,6 +49,6 @@ export const markNotificationRead = catchAsync(async (req: Request, res: Respons
 
 export const markAllNotificationsRead = catchAsync(async (req: Request, res: Response) => {
   const userId = requireUserId(req)
-  const updated = await notificationService.markAllRead(userId)
+  const updated = await notificationService.markAllRead(userId, activeOrgId(req))
   return sendSuccess(res, 200, { updated })
 })

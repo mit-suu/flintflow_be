@@ -25,6 +25,10 @@ export interface PlanDefinition {
   monthlyCredits: number
   /** Giá mỗi kỳ (VND). Gói > 0đ chỉ kích hoạt qua checkout `plan:<id>` (thanh toán thật). */
   priceVnd: number
+  /** Trần số thành viên của một org (task-26). Gói chỉ quyết định giới hạn + credit tặng. */
+  maxMembers: number
+  /** Trần số project đang hoạt động của một org (task-26). */
+  maxProjects: number
 }
 
 export interface CreditPackage {
@@ -41,14 +45,18 @@ export const planConfig = {
     label: "Free",
     initialCredits: 300,
     monthlyCredits: 300,
-    priceVnd: 0
+    priceVnd: 0,
+    maxMembers: 3,
+    maxProjects: 3
   } satisfies PlanDefinition,
   pro: {
     id: "pro",
     label: "Pro",
     initialCredits: 0,
     monthlyCredits: 1000,
-    priceVnd: 199_000
+    priceVnd: 199_000,
+    maxMembers: 20,
+    maxProjects: 50
   } satisfies PlanDefinition,
   /** Số dư (balance) rơi xuống dưới ngưỡng này thì gửi notification một lần. */
   lowCreditThreshold: 10,

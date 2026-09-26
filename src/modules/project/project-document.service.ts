@@ -68,6 +68,7 @@ const parseFileContent = async (
 }
 
 export const uploadProjectDocument = async (
+  orgId: string,
   userId: string,
   projectId: string,
   file: Express.Multer.File
@@ -76,7 +77,7 @@ export const uploadProjectDocument = async (
     throw new ApiError(400, "A file is required", "FILE_REQUIRED")
   }
 
-  const project = await getProjectById(projectId, userId)
+  const project = await getProjectById(projectId, orgId)
 
   const allowedMimeTypes = new Set([
     "application/pdf",
@@ -179,18 +180,18 @@ export const uploadProjectDocument = async (
   return document
 }
 
-export const getProjectDocuments = async (userId: string, projectId: string): Promise<any[]> => {
-  await getProjectById(projectId, userId)
+export const getProjectDocuments = async (orgId: string, projectId: string): Promise<any[]> => {
+  await getProjectById(projectId, orgId)
 
   return await ProjectDocument.find({ projectId }).sort({ createdAt: -1 })
 }
 
 export const deleteProjectDocument = async (
-  userId: string,
+  orgId: string,
   projectId: string,
   documentId: string
 ): Promise<void> => {
-  await getProjectById(projectId, userId)
+  await getProjectById(projectId, orgId)
 
   const document = await ProjectDocument.findOne({ _id: documentId, projectId })
   if (!document) {

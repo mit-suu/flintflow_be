@@ -36,6 +36,19 @@ import * as undoService from "./undo.service.js"
 import { TransactionRejectedError } from "./op-engine.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
+
 const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
 const OP = { op: "set" as const, path: "actors[id=A01].name", value: "Student" }
@@ -52,7 +65,7 @@ interface Outcome {
 const invoke = (handler: RequestHandler, userId: string | undefined, projectId: string, body: unknown, query: unknown = {}) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = {}
-    const req = { user: userId ? { userId } : undefined, params: { projectId }, body, query } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId }, body, query } as unknown as Request
     const res = {
       status(code: number) {
         outcome.status = code
@@ -80,8 +93,8 @@ beforeEach(() => {
   vi.mocked(spineRepository.get).mockReset()
   vi.mocked(spineRepository.listChanges).mockReset()
 
-  vi.mocked(getProjectById).mockImplementation(async (projectId, userId) => {
-    if (projectId !== PROJECT || userId !== OWNER) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  vi.mocked(getProjectById).mockImplementation(async (projectId, orgId) => {
+    if (projectId !== PROJECT || orgId !== ORG) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     return { name: "Lumen", domain: null } as never
   })
 })

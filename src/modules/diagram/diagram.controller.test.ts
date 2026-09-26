@@ -16,6 +16,19 @@ import { createEmptySpine, getOrCreate } from "../spine/spine.repository.js"
 import { loadDiagramFile, renderAll, renderDiagram } from "./diagram.service.js"
 import type { Diagram } from "../spine/spine.types.js"
 
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
+
 vi.mock("../spine/spine.repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/spine.repository.js")>()
   return { ...actual, getOrCreate: vi.fn() }
@@ -45,7 +58,7 @@ interface Outcome {
 const invoke = (handler: RequestHandler, params: Record<string, string> = {}, body: unknown = {}) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = { headers: {} }
-    const req = { user: { userId: OWNER }, params: { projectId: PROJECT, ...params }, body } as unknown as Request
+    const req = { orgContext: orgCtxFor(OWNER), user: { userId: OWNER }, params: { projectId: PROJECT, ...params }, body } as unknown as Request
     const res = {
       status(code: number) {
         outcome.status = code

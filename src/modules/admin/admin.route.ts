@@ -88,6 +88,40 @@ router.get("/users/:id", adminController.getUser)
  *       403:
  *         description: Không phải admin
  */
+/**
+ * @swagger
+ * /api/v1/admin/orgs/{orgId}/credits:
+ *   patch:
+ *     summary: Cộng hoặc trừ credit trong ví của một tổ chức, bắt buộc kèm lý do (UC-68)
+ *     tags: [Admin]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: orgId
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount, reason]
+ *             properties:
+ *               amount:
+ *                 type: integer
+ *                 description: "Dương = cộng, âm = trừ; 0 không hợp lệ"
+ *               reason:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 500
+ *     responses:
+ *       200: { description: Số dư sau điều chỉnh }
+ *       404: { description: ORG_NOT_FOUND }
+ *       409: { description: INSUFFICIENT_CREDIT — số dư khả dụng không đủ để trừ }
+ */
+router.patch("/orgs/:orgId/credits", adminController.adjustOrgCredits)
+
 router.get("/metrics", adminController.getMetrics)
 
 /**

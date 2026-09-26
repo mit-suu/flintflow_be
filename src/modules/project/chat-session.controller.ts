@@ -1,6 +1,7 @@
 import { Request, Response } from "express"
 import * as chatSessionService from "./chat-session.service.js"
 import { getProjectById } from "./project.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -20,7 +21,7 @@ const authorizeProject = async (req: Request): Promise<{ projectId: string; user
   if (!projectId) {
     throw new ApiError(400, "Project ID is required", "PROJECT_ID_REQUIRED")
   }
-  await getProjectById(projectId, userId)
+  await getProjectById(projectId, requireOrgId(req))
   return { projectId, userId }
 }
 
