@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
-import { SCREEN_LAYOUT_SKILL, extractSalt, layoutContext, layoutPrompt } from "./screen-layout.ai.js"
+import { SCREEN_LAYOUT_SKILL, extractSalt, layoutContext, layoutPrompt, padFrame } from "./screen-layout.ai.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -39,5 +39,59 @@ describe("screen-layout.ai (FLF-214)", () => {
     expect(extractSalt("@startsalt\n{\n  [ Đăng nhập ]\n}\n@endsalt")).toBeNull()
     expect(extractSalt("@startsalt\n{ }\n@endsalt\n@startsalt\n{ }\n@endsalt")).toBeNull()
     expect(extractSalt("```\n@startsalt\n{ }\n@endsalt\n```")).toBeNull()
+  })
+
+  it("padFrame: bọc nội dung khung ngoài bằng hàng/cột đệm, giữ nguyên phần ngoài khung, gọi lại không đệm thêm", () => {
+    const salt = [
+      "@startsalt",
+      "{",
+      "  {+",
+      "    {",
+      "      <b>NHATOT",
+      "      Login",
+      "    }",
+      '    "a { b }        "',
+      "    { [ ] Remember me | <u>Forgot password?</u> }",
+      "    [ Log in ]",
+      "  }",
+      "}",
+      "@endsalt",
+      ""
+    ].join("\n")
+    const padded = padFrame(salt)
+    expect(padded).toBe(
+      [
+        "@startsalt",
+        "{",
+        "  {+",
+        "    .",
+        "    { . | . | {",
+        "      {",
+        "        <b>NHATOT",
+        "        Login",
+        "      }",
+        '      "a { b }        "',
+        "      { [ ] Remember me | <u>Forgot password?</u> }",
+        "      [ Log in ]",
+        "    } | . | . }",
+        "    .",
+        "  }",
+        "}",
+        "@endsalt",
+        ""
+      ].join("\n")
+    )
+    expect(padFrame(padded)).toBe(padded)
+  })
+
+  it("padFrame: pop-up `{^\"Tên\"` cũng được đệm; không có khung ngoài ⇒ trả nguyên", () => {
+    const popup = '@startsalt\n{\n  {^"Forgot Password"\n    [ Send ]\n  }\n}\n@endsalt\n'
+    expect(padFrame(popup)).toBe('@startsalt\n{\n  {^"Forgot Password"\n    .\n    { . | . | {\n      [ Send ]\n    } | . | . }\n    .\n  }\n}\n@endsalt\n')
+    const titleBelow = '@startsalt\n{\n  {^\n"Contact Support"\n    Name\n    "Nguyen Van A   "\n  }\n}\n@endsalt\n'
+    expect(padFrame(titleBelow)).toBe(
+      '@startsalt\n{\n  {^"Contact Support"\n    .\n    { . | . | {\n      Name\n      "Nguyen Van A   "\n    } | . | . }\n    .\n  }\n}\n@endsalt\n'
+    )
+    const bare = "@startsalt\n{\n  [ OK ]\n}\n@endsalt\n"
+    expect(padFrame(bare)).toBe(bare)
   })
 })
