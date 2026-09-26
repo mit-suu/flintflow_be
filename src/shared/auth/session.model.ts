@@ -10,6 +10,11 @@ export interface ISession extends Document {
    * (đóng trình duyệt là mất); `null` ⇒ mặc định cũ (Google login, phiên tạo trước khi có tính năng).
    */
   rememberMe?: boolean | null
+  /**
+   * Org đang mở của phiên này (task-26, BPMN Flow 9.3 đổi org). Giữ ở Session để lượt refresh cấp lại
+   * access token mang đúng orgId; null = chưa chọn org (tài khoản chưa onboarding).
+   */
+  activeOrgId?: mongoose.Types.ObjectId | null
   userAgent?: string
   ip?: string
   createdAt: Date
@@ -40,6 +45,11 @@ const sessionSchema = new Schema<ISession>(
     },
     rememberMe: {
       type: Boolean,
+      default: null
+    },
+    activeOrgId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
       default: null
     },
     userAgent: {

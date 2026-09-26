@@ -9,6 +9,7 @@ import * as sessionService from "../../shared/auth/session.service.js"
 import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../shared/email/email.service.js"
 import { env } from "../../config/env.js"
 import { REMEMBER_ME_MAX_AGE_MS, REMEMBER_ME_TTL } from "../../shared/auth/auth-cookie.js"
+import { listMyOrganizations, type OrganizationSummary } from "../organization/organization.service.js"
 
 export interface AuthResult {
   accessToken: string
@@ -22,6 +23,9 @@ export interface AuthResult {
     name?: string
     role?: string
   }
+  organizations: OrganizationSummary[]
+  activeOrgId: string | null
+  needsOnboarding: boolean
 }
 
 export interface RegisterResult {
@@ -36,6 +40,31 @@ export interface RefreshResult {
   accessToken: string
   refreshToken: string
   rememberMe: boolean | null
+}
+
+/**
+ * Phần org của kết quả đăng nhập (task-26, BPMN Flow 7.12–7.14).
+ * - `organizations` rỗng ⇒ `needsOnboarding: true`, FE đưa vào Flow 8 (tạo org hoặc nhập mã mời).
+ * - Đúng một org ⇒ chọn luôn, bỏ qua màn chọn.
+ * - Nhiều org ⇒ `activeOrgId: null`, FE hiện màn "Choose the organization to work in" (7.13).
+ */
+export interface OrgLoginContext {
+  organizations: OrganizationSummary[]
+  activeOrgId: string | null
+  needsOnboarding: boolean
+}
+
+/**
+ * Org của người vừa đăng nhập (BPMN Flow 7.12–7.14). Đúng một org thì chọn luôn; nhiều org thì để người
+ * dùng chọn ở màn 7.13; không org nào thì FE đẩy sang onboarding (Flow 8).
+ */
+const resolveOrgContext = async (userId: string): Promise<OrgLoginContext> => {
+  const organizations = await listMyOrganizations(userId)
+  return {
+    organizations,
+    activeOrgId: organizations.length === 1 ? (organizations[0]?.id ?? null) : null,
+    needsOnboarding: organizations.length === 0
+  }
 }
 
 /** Refresh token + hạn phiên theo chế độ ghi nhớ: tick ⇒ 30 ngày, còn lại ⇒ `REFRESH_TOKEN_EXPIRES`. */
@@ -186,6 +215,10 @@ export const login = async (
     role: user.role
   }
 
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
+  const org = await resolveOrgContext(tokenPayload.userId)
+  if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
+
   const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
@@ -197,6 +230,7 @@ export const login = async (
     ip,
     rememberMe
   )
+  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
 
   return {
     accessToken,
@@ -208,7 +242,8 @@ export const login = async (
       emailVerified: user.emailVerified,
       name: user.name,
       role: user.role
-    }
+    },
+    ...org
   }
 }
 
@@ -241,6 +276,10 @@ export const confirmEmailVerification = async (
     role: user.role
   }
 
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
+  const org = await resolveOrgContext(tokenPayload.userId)
+  if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
+
   const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, null)
 
@@ -252,6 +291,7 @@ export const confirmEmailVerification = async (
     ip,
     null
   )
+  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
 
   return {
     accessToken,
@@ -263,7 +303,8 @@ export const confirmEmailVerification = async (
       emailVerified: user.emailVerified,
       name: user.name,
       role: user.role
-    }
+    },
+    ...org
   }
 }
 
@@ -444,6 +485,10 @@ export const googleAuth = async (
     role: user.role
   }
 
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
+  const org = await resolveOrgContext(tokenPayload.userId)
+  if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
+
   const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
@@ -455,6 +500,7 @@ export const googleAuth = async (
     ip,
     rememberMe
   )
+  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
 
   return {
     accessToken,
@@ -466,7 +512,8 @@ export const googleAuth = async (
       emailVerified: user.emailVerified,
       name: user.name,
       role: user.role
-    }
+    },
+    ...org
   }
 }
 
@@ -497,6 +544,10 @@ export const refresh = async (
 
   // Giữ nguyên chế độ "ghi nhớ" của phiên cũ qua mỗi lần xoay vòng
   const rememberMe = await sessionService.findSessionRememberMe(oldRefreshToken)
+  // Giữ luôn org đang mở: token mới phải mang đúng orgId, nếu không người dùng bị đẩy về màn chọn org
+  // sau mỗi lần refresh. Quyền vẫn do orgContext kiểm lại từ Membership ở mỗi request (Flow 10.6).
+  const activeOrgId = await sessionService.findSessionActiveOrg(oldRefreshToken)
+  if (activeOrgId) newPayload.orgId = activeOrgId
   const newAccessToken = signAccessToken(newPayload)
   const { refreshToken: newRefreshToken, expiresAt } = issueRefreshToken(newPayload, rememberMe)
 
@@ -508,6 +559,7 @@ export const refresh = async (
     ip,
     rememberMe
   )
+  if (activeOrgId) await sessionService.setActiveOrg(newRefreshToken, activeOrgId)
 
   return {
     accessToken: newAccessToken,
