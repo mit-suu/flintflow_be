@@ -16,6 +16,7 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
+import { describeInterface } from "./interface-description.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
 
 /**
@@ -191,6 +192,12 @@ export interface SectionRenderContext {
   numberOf: (logicalSectionId: string) => string | undefined
   /** Ngôn ngữ nhãn cố định (`TemplateProfile.language` của tài liệu import); không có ⇒ tiếng Anh. */
   language?: string
+  /**
+   * Khung mục §3.x.y. `"fpt"` (chỉ tài liệu theo mẫu FPT — `assemble.service#buildSections`): Function trigger ·
+   * Function description · Screen layout · Function details. Không đặt (mode 1 import theo layout file người dùng)
+   * ⇒ khung cũ Trigger · Description · Normal/Abnormal Flow · Validations · Business Rules.
+   */
+  functionLayout?: "fpt"
 }
 
 // ─── heading/level của section ────────────────────────────────────
@@ -353,12 +360,147 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
 
 // ─── feature / function (§3.x, §3.x.y) ────────────────────────────
 
-const featureOverview = (spine: Spine, featureId: string): Block[] => {
+/** §3.x: mẫu FPT chỉ có tiêu đề (nội dung nằm ở các §3.x.y); mode 1 giữ dòng liệt kê màn như cũ. */
+const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderContext): Block[] => {
+  if (ctx.functionLayout === "fpt") return []
   const screens = spine.screens.filter((s) => s.feature_id === featureId)
   return screens.length === 0 ? [] : [p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]
 }
 
-const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => {
+/** Mục con trống của §3.x.y mẫu FPT: giữ đủ khung mục như template, không bịa nội dung. */
+const NA = "N/A"
+
+const unique = (items: string[]): string[] => [...new Set(items.filter((x) => x.trim().length > 0))]
+
+/**
+ * Đường vào màn của function theo Screens Flow: BFS theo `flow_to` từ màn vào (không pop-up, không có cạnh tới;
+ * không có thì màn `queue_order` thấp nhất) — `Login > Project Dashboard > Project Workspace`. Không tới được ⇒ tên màn.
+ */
+const navigationPath = (spine: Spine, screenId: string): string => {
+  const byId = new Map(spine.screens.map((s) => [s.id, s]))
+  const target = byId.get(screenId)
+  if (!target) return NA
+  const targeted = new Set(spine.screens.flatMap((s) => s.flow_to.filter((t) => t !== s.id)))
+  const byOrder = [...spine.screens].sort((a, b) => (a.queue_order ?? Number.MAX_SAFE_INTEGER) - (b.queue_order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id))
+  const entries = byOrder.filter((s) => !s.is_popup && !targeted.has(s.id))
+  const starts = entries.length > 0 ? entries : byOrder.slice(0, 1)
+  const previous = new Map<string, string | null>(starts.map((s) => [s.id, null]))
+  const queue = starts.map((s) => s.id)
+  for (let i = 0; i < queue.length && !previous.has(screenId); i++) {
+    for (const next of byId.get(queue[i])?.flow_to ?? []) {
+      if (previous.has(next) || !byId.has(next)) continue
+      previous.set(next, queue[i])
+      queue.push(next)
+    }
+  }
+  if (!previous.has(screenId)) return target.name
+  const path: string[] = []
+  for (let id: string | null = screenId; id !== null; id = previous.get(id) ?? null) path.unshift(byId.get(id)!.name)
+  return path.join(" > ")
+}
+
+/**
+ * Actor tương tác trực tiếp: actor người (`kind: human`) của các use case chứa function. Không use case nào nối tới
+ * function ⇒ actor người của các vai trò có quyền trên màn. Actor system/time (cổng thanh toán, LLM, lịch) không tính.
+ */
+const directActors = (spine: Spine, fn: Spine["functions"][number]): string => {
+  const human = (id: string | null) => spine.actors.find((a) => a.id === id && a.kind === "human")?.name ?? ""
+  const fromUseCases = unique(spine.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids.map(human)))
+  if (fromUseCases.length > 0) return fromUseCases.join(", ")
+  const fromRoles = unique(
+    spine.permissions
+      .filter((perm) => fn.screen_id !== null && perm.screen_id === fn.screen_id)
+      .map((perm) => human(spine.roles.find((r) => r.id === perm.role_id)?.actor_id ?? null))
+  )
+  return fromRoles.length > 0 ? fromRoles.join(", ") : NA
+}
+
+/** Entity được nhắc tên trong nội dung function (không có liên kết function ↔ entity trong Spine). */
+const dataOf = (spine: Spine, fn: Spine["functions"][number]): string => {
+  const text = [fn.name, fn.trigger, fn.description, ...fn.normal, ...fn.abnormal, ...fn.validations.map((v) => v.statement)].join(" ").toLowerCase()
+  const escape = (name: string) => name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const named = spine.entities.filter((e) => e.name.trim() && new RegExp(`\\b${escape(e.name)}s?\\b`).test(text)).map((e) => e.name)
+  return named.length > 0 ? named.join(", ") : NA
+}
+
+/**
+ * Nhóm mục con dạng danh sách gạch đầu dòng `• Nhãn: giá trị`. Mục nhiều dòng (các bước, nhiều validation) ⇒
+ * `• Nhãn:` rồi danh sách đánh số ngay dưới; rỗng ⇒ `N/A`.
+ */
+type SubItem = { label: string; value: string } | { label: string; steps: string[] }
+
+const subItems = (items: SubItem[]): Block[] => {
+  const out: Block[] = []
+  let bullets: InlineRun[][] = []
+  const flush = () => {
+    if (bullets.length > 0) out.push({ type: "bullet_list", items: bullets })
+    bullets = []
+  }
+  for (const item of items) {
+    const label: InlineRun = { text: `${item.label}: `, bold: true }
+    if ("value" in item) {
+      bullets.push([label, { text: item.value.trim() || NA }])
+    } else if (item.steps.length === 0) {
+      bullets.push([label, { text: NA }])
+    } else if (item.steps.length === 1) {
+      bullets.push([label, { text: item.steps[0] }])
+    } else {
+      bullets.push([label])
+      flush()
+      out.push(numberedList(item.steps))
+    }
+  }
+  flush()
+  return out
+}
+
+/**
+ * §3.x.y theo template FPT: Function trigger (Navigation path, Timing frequency) · Function description
+ * (Actors / Roles, Purpose, Interface, Data processing) · Screen layout · Function details (Data, Validation,
+ * Business rules, Normal case, Abnormal case). Mọi mục dựng từ dữ liệu có sẵn; thiếu ⇒ `N/A`.
+ */
+const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => {
+  const fn = spine.functions.find((f) => f.id === functionId)
+  if (!fn) return []
+  const screen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
+
+  const rules = unique([
+    ...fn.validations.filter((v) => v.kind === "business").map((v) => v.statement),
+    ...fn.business_rule_ids.map((id) => spine.business_rules.find((r) => r.id === id)?.statement ?? "")
+  ])
+  const layout =
+    screen && screen.primary_function_id === fn.id
+      ? diagramImages(spine, "screen_layout", screen.id, ctx, `Screen Layout — ${screen.name}`)
+      : []
+
+  return [
+    heading("Function trigger", 4),
+    ...subItems([
+      { label: "Navigation path", value: screen ? navigationPath(spine, screen.id) : NA },
+      { label: "Timing frequency", value: fn.trigger }
+    ]),
+    heading("Function description", 4),
+    ...subItems([
+      { label: "Actors / Roles", value: directActors(spine, fn) },
+      { label: "Purpose", value: fn.description },
+      { label: "Interface", value: (screen && describeInterface(spine, screen)) || NA },
+      { label: "Data processing", steps: fn.normal.filter((step) => /^(the )?system\b/i.test(step.trim())) }
+    ]),
+    heading("Screen layout", 4),
+    ...(layout.length > 0 ? layout : [p(NA)]),
+    heading("Function details", 4),
+    ...subItems([
+      { label: "Data", value: dataOf(spine, fn) },
+      { label: "Validation", steps: fn.validations.filter((v) => v.kind !== "business").map((v) => v.statement) },
+      { label: "Business rules", steps: rules },
+      { label: "Normal case", steps: fn.normal },
+      { label: "Abnormal case", steps: fn.abnormal }
+    ])
+  ]
+}
+
+/** Khung cũ — tài liệu mode 1 (import) giữ nguyên format như trước FLF-214. */
+const legacyFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => {
   const fn = spine.functions.find((f) => f.id === functionId)
   if (!fn) return []
   const blocks: Block[] = []
@@ -378,6 +520,9 @@ const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderCont
   }
   return blocks
 }
+
+const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] =>
+  ctx.functionLayout === "fpt" ? fptFunctionDetail(spine, functionId, ctx) : legacyFunctionDetail(spine, functionId, ctx)
 
 // ─── §4 Non-Functional Requirements ────────────────────────────────
 
@@ -459,7 +604,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:5.5":
       return glossaryTable(spine)
     default:
-      if (sectionId.startsWith("feature:")) return featureOverview(spine, sectionId.slice("feature:".length))
+      if (sectionId.startsWith("feature:")) return featureOverview(spine, sectionId.slice("feature:".length), ctx)
       if (sectionId.startsWith("function:")) return functionDetail(spine, sectionId.slice("function:".length), ctx)
       throw new Error(`section-renderer: unknown section id "${sectionId}"`)
   }
