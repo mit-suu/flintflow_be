@@ -16,17 +16,20 @@ import * as flagsService from "./flags.service.js"
 import type { SpineRecord } from "./spine.types.js"
 // `current_step` trong `progress` là step tới lượt theo step-registry (tính ở tầng pipeline, không phải con trỏ Spine)
 import { buildPipelineProgressReport } from "../pipeline/pipeline-progress.js"
+import { nextStep } from "../pipeline/step-registry.js"
 import { flagsQuerySchema, recomputeFlagsRequestSchema, waiveRequestSchema } from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertNotMode1 } from "../import/mode1-guard.js"
 
 interface Context {
   projectId: string
   userId: string
   spine: SpineRecord
+  mode: string
 }
 
 const context = async (req: Request): Promise<Context> => {
@@ -39,7 +42,7 @@ const context = async (req: Request): Promise<Context> => {
   }
   const project = await getProjectById(projectId, requireOrgId(req))
   const spine = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain ?? null })
-  return { projectId, userId, spine }
+  return { projectId, userId, spine, mode: project.mode ?? "fpt" }
 }
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
@@ -60,9 +63,15 @@ export const getFlags = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const recomputeFlags = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await context(req)
+  const { projectId, userId, spine } = await context(req)
   const body = parse(recomputeFlagsRequestSchema, req.body ?? {})
-  const result = await flagsService.recompute(projectId, { atBaseline: body.at_baseline ?? false, by: userId })
+  // Không nói rõ thì suy từ chỗ đang đứng: ở S-9 thì các luật baseline PHẢI chạy. Mặc định `false` ở đây
+  // làm nút Recompute không bao giờ đóng được cờ `unconfirmed_assumption` — user xác nhận hết giả định mà
+  // cờ đỏ vẫn y nguyên, không còn đường nào ngoài chạy lại S-9.1.
+  const result = await flagsService.recompute(projectId, {
+    atBaseline: body.at_baseline ?? (nextStep(spine)?.phase === "S-9"),
+    by: userId
+  })
   return sendSuccess(res, 200, result.flags, {
     checked_at_version: result.checked_at_version,
     opened: result.opened,
@@ -72,7 +81,8 @@ export const recomputeFlags = catchAsync(async (req: Request, res: Response) => 
 })
 
 export const waiveFlag = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, userId } = await context(req)
+  const { projectId, userId, mode } = await context(req)
+  assertNotMode1(mode, "waive") // G5 + mode 1 v3: cờ chỉ đóng bằng change request
   const body = parse(waiveRequestSchema, req.body)
   const flag = await flagsService.waive(projectId, req.params.flagId as string, body.reason, userId)
   return sendSuccess(res, 200, flag)

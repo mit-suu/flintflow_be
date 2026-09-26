@@ -63,10 +63,17 @@ describe("withMeteredAi — từng loại gọi", () => {
     expect(res).toEqual({ ok: true, data: { ok: 1 }, usageId: "usage-1", tokens_in: 120, tokens_out: 30, cost: 3 })
     expect(reserveCall).toHaveBeenCalledWith(PROJECT, USER, stepId, action)
     expect(exec).toHaveBeenCalledTimes(1)
-    expect(exec).toHaveBeenCalledWith(action, { promptVariables: { cr_description: "x" } }, PROJECT, USER)
+    expect(exec).toHaveBeenCalledWith(action, { promptVariables: { cr_description: "x" } }, PROJECT, USER, {})
     expect(finalizeCall).toHaveBeenCalledWith("usage-1", { call_kind: action, attempt: 1, tokens_in: 120, tokens_out: 30, cost: 3, logId: "log-1" })
     expect(releaseCall).not.toHaveBeenCalled()
     expect(calls).toEqual([`reserve:${stepId}`, "finalize:usage-1"])
+  })
+
+  it("phase 5: ảnh kèm theo đi thẳng xuống executeAiAction (IMPORT_EXTRACT_DIAGRAM)", async () => {
+    exec.mockResolvedValueOnce(aiOk({ ok: 1 }))
+    const images = [{ mime: "image/png" as const, data: "iVBORw0K" }]
+    await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "I-4:fixed:2.2.1" }, ActionType.IMPORT_EXTRACT_DIAGRAM, { block_id: "B0002" }, { images })
+    expect(exec).toHaveBeenCalledWith(ActionType.IMPORT_EXTRACT_DIAGRAM, { promptVariables: { block_id: "B0002" } }, PROJECT, USER, { images })
   })
 
   it("logId rỗng ⇒ finalize ghi logId null", async () => {
@@ -80,7 +87,7 @@ describe("withMeteredAi — lỗi", () => {
   it("hết credit (INSUFFICIENT_CREDIT) ⇒ release usage, reason credits, không ném lỗi", async () => {
     exec.mockRejectedValueOnce(new AiActionError(402, "Không đủ credit", "INSUFFICIENT_CREDIT"))
     const res = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "C-4:CR-002" }, ActionType.CR_PROPOSE, {})
-    expect(res).toEqual({ ok: false, reason: "credits", message: "Không đủ credit", usageId: "usage-1" })
+    expect(res).toEqual({ ok: false, reason: "credits", message: "Không đủ credit", usageId: "usage-1", code: "INSUFFICIENT_CREDIT" })
     expect(calls).toEqual(["reserve:C-4:CR-002", "release:usage-1"])
     expect(finalizeCall).not.toHaveBeenCalled()
   })
@@ -94,7 +101,7 @@ describe("withMeteredAi — lỗi", () => {
   it("lỗi provider còn lại sau retry (đã retry trong executeAiAction) ⇒ release, reason resume_later; không tự gọi lại lần nữa", async () => {
     exec.mockRejectedValueOnce(new AiActionError(500, "Provider down", "AI_EXECUTION_FAILED"))
     const res = await withMeteredAi({ projectId: PROJECT, userId: USER, stepId: "I-4:fixed:1" }, ActionType.IMPORT_EXTRACT_FIELDS, {})
-    expect(res).toEqual({ ok: false, reason: "resume_later", message: "Provider down", usageId: "usage-1" })
+    expect(res).toEqual({ ok: false, reason: "resume_later", message: "Provider down", usageId: "usage-1", code: "AI_EXECUTION_FAILED" })
     expect(exec).toHaveBeenCalledTimes(1)
     expect(calls).toEqual(["reserve:I-4:fixed:1", "release:usage-1"])
   })

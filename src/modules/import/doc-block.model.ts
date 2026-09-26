@@ -38,6 +38,8 @@ export interface IDocBlock extends Document {
   editable: boolean
   /** CR đang giữ khoá (nút 3.5); mở khi CR ghi xong / bị từ chối / huỷ / đóng. */
   locked_by_cr: string | null
+  /** Mode 1 v3 phase 5 (T3): part ảnh trong file gốc (`word/media/…`) của block ảnh — render nhúng lại ảnh gốc. */
+  image_ref?: string | null
 }
 
 const opts = { _id: false }
@@ -63,6 +65,7 @@ const docBlockSchema = new Schema<IDocBlock>(
       required: true
     },
     text: { type: String, default: "" },
+    image_ref: { type: String, default: null },
     text_hash: { type: String, required: true },
     section_id: { type: String, default: null },
     mentions: {

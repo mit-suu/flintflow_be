@@ -183,7 +183,7 @@ describe("preview — diff + impact, không ghi", () => {
     expect(result.changes).toHaveLength(1)
     expect(result.changes[0]).toMatchObject({ path: "actors[id=A01].name", before: "Founder", value: "Product Owner" })
     expect(result.impact?.sections.map((s) => s.id)).toEqual(expect.arrayContaining(["fixed:2.1", "fixed:2.2.2", "fixed:3.1.3"]))
-    expect(result.impact?.diagrams).toEqual(["usecase"])
+    expect([...(result.impact?.diagrams ?? [])].sort()).toEqual(["context", "screen_flow", "usecase"])
     expect(result.preview_id).toBeTypeOf("string")
 
     // Không ghi gì: version giữ nguyên, changes[] rỗng
@@ -302,6 +302,16 @@ describe("buildChangeProjection — chỉ thực thể được nhắc", () => {
     const actors = projection.actors as { id: string; label: string }[]
     expect(actors.length).toBeGreaterThan(0)
     expect(Object.keys(actors[0])).toEqual(["id", "label"])
+  })
+
+  it("FLF-200 (BUG-08): luôn kèm danh sách id đang tồn tại để model không đoán id", () => {
+    const focused = buildChangeProjection(FIXTURE, "Đổi tên actor A01 thành Product Owner")
+    const ids = focused.existing_ids as Record<string, string[]>
+    expect(ids.use_cases).toEqual(FIXTURE.use_cases.map((u) => u.id))
+    expect(ids.actors).toContain("A01")
+
+    const broad = buildChangeProjection(FIXTURE, "làm cho tài liệu hay hơn")
+    expect((broad.existing_ids as Record<string, string[]>).screens).toContain("S01")
   })
 })
 

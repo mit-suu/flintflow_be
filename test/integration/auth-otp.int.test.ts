@@ -23,7 +23,7 @@ import { Session } from "../../src/shared/auth/session.model.js"
 const EMAIL = "otp-user@flintflow.test"
 const lastOtp = () => sent[sent.length - 1].otp
 const register = () =>
-  request(app).post("/api/v1/auth/register").send({ email: EMAIL, password: "password-123", name: "OTP" })
+  request(app).post("/api/v1/auth/register").send({ email: EMAIL, password: "Fixture2026!", name: "OTP" })
 const confirm = (otp: string) => request(app).post("/api/v1/auth/verify-email/confirm").send({ email: EMAIL, otp })
 const wrongOtp = (otp: string) => (otp === "000000" ? "000001" : "000000")
 
@@ -101,8 +101,8 @@ describe("xác thực email bằng OTP", () => {
 
 describe("đăng nhập", () => {
   it("đăng nhập 2 lần liên tiếp (cùng giây) ⇒ cả hai 200, hai phiên riêng", async () => {
-    await User.create({ email: EMAIL, password: "password-123", emailVerified: true })
-    const login = () => request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: "password-123" })
+    await User.create({ email: EMAIL, password: "Fixture2026!", emailVerified: true })
+    const login = () => request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: "Fixture2026!" })
 
     const [first, second] = await Promise.all([login(), login()])
     expect(first.status).toBe(200)

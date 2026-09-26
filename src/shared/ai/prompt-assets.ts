@@ -157,6 +157,7 @@ export const OUTPUT_SCHEMA_NAMES = [
   "renderFix",
   // Mode 1 (FLF-171)
   "importExtract",
+  "importExtractDiagram",
   "findings",
   "crClarify",
   "crPropose",

@@ -72,7 +72,15 @@ import { applyTransaction } from "./op-engine.js"
 import { awaitingReaccept, computeStatus } from "./section-status.js"
 import { computeSourceHash } from "./source-hash.js"
 import { clearPreviewStore } from "./change.service.js"
-import { changesMakingStale, clearReconcileState, isReconcileApplied, reconcile, staleSections, type ReconcileDeps } from "./reconcile.service.js"
+import {
+  changesMakingStale,
+  clearReconcileState,
+  defaultReconcileDeps,
+  isReconcileApplied,
+  reconcile,
+  staleSections,
+  type ReconcileDeps
+} from "./reconcile.service.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 
@@ -310,6 +318,37 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
 
     expect(computeStatus(spine, changes, "fixed:2.2.2")).toBe("stale")
     expect(deps.rerender).not.toHaveBeenCalled()
+  })
+
+  it("BUG-16: model không đề xuất gì ⇒ vẫn có preview_id để xác nhận không đổi, và cờ stale được gỡ", async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    deps.reconcileExecutor = vi.fn(async () => opsResult([]))
+
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+    expect(previewed.ops).toEqual([])
+    expect(previewed.no_change).toBe(true)
+    expect(previewed.preview_id, "không có nút xác nhận thì cờ đỏ không có đường nào gỡ").toBeTypeOf("string")
+
+    const before = await repo.get(PROJECT)
+    const { projectId: _b, ...spineBefore } = before!
+    expect(computeStatus(spineBefore, await repo.listChanges(PROJECT), "fixed:2.2.2")).toBe("stale")
+
+    const confirmed = await reconcile(PROJECT, USER, { base_version: before!.spine_version, preview_id: previewed.preview_id }, {}, deps)
+    expect(isReconcileApplied(confirmed)).toBe(true)
+
+    const after = await repo.get(PROJECT)
+    const { projectId: _a, ...spineAfter } = after!
+    expect(computeStatus(spineAfter, await repo.listChanges(PROJECT), "fixed:2.2.2")).not.toBe("stale")
+  })
+
+  it("dep mặc định đủ cả recomputeFlags — controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
+    const defaults = defaultReconcileDeps()
+    for (const key of ["changeExecutor", "recomputeFlags", "reconcileExecutor", "rerender"] as const) {
+      expect(defaults[key], key).toBeTypeOf("function")
+    }
   })
 
   it("preview_id đã dùng ⇒ 422 PREVIEW_EXPIRED", async () => {

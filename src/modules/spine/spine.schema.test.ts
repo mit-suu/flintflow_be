@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, it, expect } from "vitest"
 import {
+  actorSchema,
   baselineSchema,
   baselineSnapshotSchema,
   changeSchema,
@@ -147,6 +148,26 @@ const sampleSpine = (): Spine => {
   return s
 }
 
+describe.each([
+  ["thiếu cả hai chiều", undefined, undefined],
+  ["chỉ chiều vào", ["payment result"], undefined],
+  ["cả hai chiều", ["payment result"], ["payment request"]]
+])("actorSchema — flows: %s", (_label, flowsIn, flowsOut) => {
+  it("parse được, giữ nguyên giá trị", () => {
+    const actor = {
+      id: "A01",
+      name: "Payment Gateway",
+      kind: "system" as const,
+      description: "",
+      ...(flowsIn ? { flows_in: flowsIn } : {}),
+      ...(flowsOut ? { flows_out: flowsOut } : {})
+    }
+    const parsed = actorSchema.parse(actor)
+    expect(parsed.flows_in).toEqual(flowsIn)
+    expect(parsed.flows_out).toEqual(flowsOut)
+  })
+})
+
 describe("spineSchema", () => {
   it("Spine rỗng hợp lệ", () => {
     const result = spineSchema.safeParse(createEmptySpine())
@@ -196,6 +217,25 @@ describe("spineSchema", () => {
     const s = sampleSpine()
     s.steps[0].accepted_at = "hôm qua"
     expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+})
+
+describe("project.system_name (FLF-177)", () => {
+  it("Spine cũ không có system_name ⇒ đọc ra null; có tên ⇒ giữ nguyên", () => {
+    const legacy = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete legacy.project.system_name
+    expect(spineSchema.parse(legacy).project.system_name).toBeNull()
+
+    const named = createEmptySpine({ name: "Old" })
+    named.project.system_name = "ShipFast"
+    expect(spineSchema.parse(named).project.system_name).toBe("ShipFast")
+  })
+
+  it("snapshot baseline cũ thiếu system_name vẫn parse được", () => {
+    const snapshot = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete snapshot.project.system_name
+    const parsed = baselineSnapshotSchema.parse({ projectId: "650000000000000000000001", version: "v1.0", at: AT, checked_at_version: 1, waived_count: 0, snapshot })
+    expect(parsed.snapshot.project.system_name).toBeNull()
   })
 })
 

@@ -1,0 +1,27 @@
+name: Discord Push Notify
+
+on:
+  push:
+    branches: [main, develop]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          jq '{
+            embeds: [{
+              author: { name: .repository.name, icon_url: .sender.avatar_url },
+              title: ((if .forced then "⚠️ FORCE PUSH — " else "📦 " end)
+                      + "\(.pusher.name) push \(.commits | length) commit vào \(.ref | sub("refs/heads/"; ""))"),
+              url: .compare,
+              description: ([.commits[-10:][]
+                | "[`\(.id[0:7])`](\(.url)) \(.message | split("\n")[0]) — \(.author.name)"]
+                | join("\n"))[0:4000],
+              color: (if .forced then 13632027 else 2991182 end)
+            }]
+          }' "$GITHUB_EVENT_PATH" \
+          | curl -sf -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK"

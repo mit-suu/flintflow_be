@@ -291,7 +291,9 @@ describe("GET /projects/:projectId/steps", () => {
 
     expect(roundCountsForSteps).toHaveBeenCalledTimes(1)
     expect(outcome.error).toBeUndefined()
-    expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: null } })
+    // `current_step` là step TỚI LƯỢT (cùng luật với GET /progress), không phải con trỏ trong Spine:
+    // spine rỗng ⇒ bước đầu quy trình.
+    expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: "B-0.1" } })
   })
 })
 

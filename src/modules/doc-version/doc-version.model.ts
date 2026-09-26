@@ -2,7 +2,8 @@
  * Một version của tài liệu mode 1 (file .docx lưu GridFS). FLF-171, plan §5.3.
  * - `imported` — `0.0`: mode 1 v2 (FLF-184) `file_ref` = bản **render từ Spine** theo layout file upload + stamp;
  *   `original_ref` = file người dùng upload + stamp + bookmark neo (nút 1.10) để tải lại bản gốc.
- * - `cr_revision` — `0.1`, `0.2`…: bản trước + Track Changes/comment author = CR id (nút 3.14).
+ * - `cr_revision` — `0.1`, `0.2`…: `file_ref` = bản render sạch; `tracked_file_ref` (mode 1 v3) = cùng bản đó kèm Track Changes
+ *   + comment tác giả = CR id so với version trước (nút 3.14).
  * - `release` — `1.0`, `2.0`…: `file_ref` giữ bản có Track Changes, `clean_file_ref` là bản accept-all (Flow 6).
  */
 
@@ -16,6 +17,8 @@ export interface IDocVersion extends Document {
   kind: DocVersionKind
   file_ref: string
   clean_file_ref: string | null
+  /** Mode 1 v3 (BPMN 3.14, T6/T7): bản có đánh dấu so với version trước — chỉ `cr_revision`; dựng lỗi ⇒ `null`. */
+  tracked_file_ref: string | null
   /** File người dùng upload (chỉ `imported`, FLF-184) — `null` với version render/CR/release. */
   original_ref: string | null
   /** Version làm gốc (`null` với `0.0`). */
@@ -35,6 +38,7 @@ const docVersionSchema = new Schema<IDocVersion>(
     kind: { type: String, enum: DOC_VERSION_KINDS, required: true },
     file_ref: { type: String, required: true },
     clean_file_ref: { type: String, default: null },
+    tracked_file_ref: { type: String, default: null },
     original_ref: { type: String, default: null },
     based_on: { type: String, default: null },
     cr_ids: { type: [String], default: [] },
