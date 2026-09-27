@@ -161,9 +161,9 @@ import { getStep, loadStepRegistry, nextStep, orderedSteps, totalSteps } from ".
 import { STEP_SKILLS } from "../context-projection.js"
 import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type OpTransaction, type ElicitOutput } from "../../../shared/ai/response-parser.js"
-import { FUNCTION_BATCH_SIZE, runStep, submitAnswer, type StepRunnerDeps, defaultStepRunnerDeps } from "../step-runner.service.js"
+import { FUNCTION_BATCH_SIZE, runStep, submitAnswer, pendingAnswerFor, type StepRunnerDeps, defaultStepRunnerDeps } from "../step-runner.service.js"
 import { gate } from "../gate.service.js"
-import { runPhase } from "../phase-runner.service.js"
+import { runPhase, resumePhaseInterview } from "../phase-runner.service.js"
 import { getRunState, resetMemoryRuns } from "../run-state.service.js"
 import { getSkill } from "../../../shared/ai/prompt-registry.service.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
@@ -756,5 +756,35 @@ describe("FLF-222: phỏng vấn đầu giai đoạn sống qua reload / rớt k
     expect(state?.pending_answer?.asked[0].topic_key).toBe("screen_scope")
     // Chưa trả lời ⇒ chưa có gì trong transcript hay sổ quyết định, và không bước nào của giai đoạn chạy
     expect(((await repo.get(PROJECT))!.steps ?? []).some((s) => s.id.startsWith("S-4."))).toBe(false)
+  })
+
+  it("/answer sau khi tách ⇒ câu trả lời vào sổ + transcript, run-state done; chạy lại giai đoạn không phỏng vấn lại", async () => {
+    resetMemoryRuns()
+    seedSpine()
+    seedSession()
+    const elicitCalls: string[] = []
+    const controller = new AbortController()
+    const { events, emit } = collectEvents()
+    const run = runPhase(PROJECT, "S-4", SESSION, USER, emit, { ...interviewDeps(elicitCalls), signal: controller.signal, abort: controller })
+    for (let i = 0; i < 80 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    controller.abort()
+    await run
+
+    const answers = [{ question_id: "Q1", answer: "Đặt lịch" }]
+    expect(submitAnswer(PROJECT, "S-4", SESSION, answers)).toBe(false)
+    const pending = await pendingAnswerFor(PROJECT, "S-4", SESSION, answers)
+    await resumePhaseInterview(PROJECT, "S-4", USER, pending, answers)
+
+    expect(await getRunState(PROJECT, "S-4")).toMatchObject({ status: "done", pending_answer: null, questions: null })
+    const spine = (await repo.get(PROJECT))!
+    expect(spine.decisions.find((d) => d.topic_key === "screen_scope")).toMatchObject({ answer: "Đặt lịch", step_id: "S-4" })
+    const transcript = (db.sessions[0].messages as { role: string; content: string; step: string }[]).filter((m) => m.step === "S-4")
+    expect(transcript.map((m) => m.role)).toEqual(["ai", "user"])
+    expect(transcript[0].content).toContain("Vài câu cho cả giai đoạn màn hình")
+
+    // FE chạy lại giai đoạn: phỏng vấn tự bỏ vì chủ đề đã chốt, không tốn thêm lượt hỏi
+    const again = await runPhase(PROJECT, "S-4", SESSION, USER, collectEvents().emit, interviewDeps(elicitCalls))
+    expect(again.stopped_at).toBe("S-4.1")
+    expect(elicitCalls).toEqual(["S-4"])
   })
 })

@@ -28,6 +28,7 @@ import { resumeProject } from "./resume.service.js"
 import { ANSWER_MAX_CHARS } from "./pipeline.dto.js"
 import { get as getSpine, getOrCreate } from "../spine/spine.repository.js"
 import { roundCountsForSteps } from "./meter.service.js"
+import { acquireRun, getRunState, resetMemoryRuns, touchRun } from "./run-state.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
@@ -348,6 +349,30 @@ describe("POST /projects/:projectId/steps/:stepId/answer — giới hạn độ 
     const body = { session_id: "s1", answers: [{ question_id: "Q1", answer: "x".repeat(ANSWER_MAX_CHARS + 1) }] }
     const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
     expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+  })
+})
+
+describe("POST /projects/:projectId/steps/:stepId/answer — không có lượt chờ khớp (FLF-222)", () => {
+  beforeEach(() => resetMemoryRuns())
+
+  it("không lượt nghe, không lượt chờ ở run-state ⇒ 409 STEP_NOT_RUNNABLE như cũ", async () => {
+    const body = { session_id: "s1", answers: [{ question_id: "Q1", answer: "x" }] }
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
+    expect(outcome.error).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+  })
+
+  it("lượt chờ ở run-state của session khác ⇒ 409, lượt chờ giữ nguyên", async () => {
+    const run = await acquireRun(PROJECT, "S-3.1", { sessionId: "s1", by: OWNER })
+    await touchRun(PROJECT, "S-3.1", run.run_id, {
+      status: "waiting_answer",
+      questions: [{ id: "Q1", text: "Actor chính là ai?" }],
+      pending_answer: { kind: "step", unit: "S-3.1", session_id: "s1", asked: [{ question: "Actor chính là ai?", options: [], topic_key: "primary_actor" }], base_answers_text: "" },
+      release: true
+    })
+    const body = { session_id: "s2", answers: [{ question_id: "Q1", answer: "x" }] }
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
+    expect(outcome.error).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+    expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("waiting_answer")
   })
 })
 
