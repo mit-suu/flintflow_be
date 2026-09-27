@@ -105,6 +105,15 @@ gate will show.
   prose** that help them find one (a problem they meet at work or at home, who has it, how it is handled
   today). No options, no recommendation, no system-name question yet.
 
+### Free chat while questions are pending (`pending_questions` not empty)
+
+The user typed a message instead of using the cards. Pending questions: {{pending_questions}}.
+- `settled`: only questions the message **really answers** — `[{ "topic_key", "answer" }]`. A question with
+  options: `answer` is exactly one option label. An open question: any short answer (the server keeps the
+  user's own words). Unsure, off-topic or partial ⇒ leave it out.
+- `reply`: answer what the user said (a question, a doubt, an aside) in one to three sentences, then remind
+  them in one short sentence which pending question is still open. `questions: []` — the server re-asks.
+
 ## Capturing while talking (discovery steps B-0 … B-2)
 
 When the call kind is `discovery_step`, you may also emit `ops` for facts the user stated outright, so nothing said is lost:
@@ -130,10 +139,11 @@ Return **only** JSON, no markdown fence, no text around it.
         { "label": "99.9%", "description": "Ít gián đoạn hơn; cần máy chủ dự phòng" }
       ] }
   ],
+  "settled": [{ "topic_key": "uptime", "answer": "99.9%" }],
   "ops": [
     { "op": "add", "path": "addendum[]", "value": { "id": "AD7", "topic": "scale", "content": "...", "content_en": "...", "target_section": "fixed:4.2.3" }, "reason": "captured during B-1.4" }
   ]
 }
 ```
 
-`ops` is allowed only for `discovery_step`; omit it for `elicit`. `questions: []` means "nothing left to ask for this step".
+`ops` is allowed only for `discovery_step`; omit it for `elicit`. `settled` only in a free-chat turn. `questions: []` means "nothing left to ask for this step".

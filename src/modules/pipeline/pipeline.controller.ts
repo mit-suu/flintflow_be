@@ -305,11 +305,13 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
   const stepId = req.params.stepId as string
   const body = parse(stepAnswerRequestSchema, req.body)
 
-  if (submitAnswer(projectId, stepId, body.session_id, body.answers)) return sendSuccess(res, 200, { accepted: true })
+  // FLF-221: `message` = chat tự do khi đang chờ — AI đọc rồi chỉ chốt câu được trả lời đúng ý (tính credit bằng `userId`)
+  const payload = { answers: body.answers, ...(body.message === undefined ? {} : { message: body.message }) }
+  if (submitAnswer(projectId, stepId, body.session_id, payload)) return sendSuccess(res, 200, { accepted: true })
 
-  const pending = await pendingAnswerFor(projectId, stepId, body.session_id, body.answers)
-  if (pending.kind === "phase_interview") await resumePhaseInterview(projectId, stepId, userId, pending, body.answers)
-  else await resumeWaitingStep(projectId, stepId, userId, pending, body.answers)
+  const pending = await pendingAnswerFor(projectId, stepId, body.session_id, payload)
+  if (pending.kind === "phase_interview") await resumePhaseInterview(projectId, stepId, userId, pending, payload)
+  else await resumeWaitingStep(projectId, stepId, userId, pending, payload)
   return sendSuccess(res, 200, { accepted: true })
 })
 

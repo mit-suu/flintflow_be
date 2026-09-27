@@ -105,7 +105,10 @@ const db = vi.hoisted(() => {
     updateOne: async (filter: { _id: string }, update: Doc | { $push: { messages: unknown } }) => {
       const row = sessions.find((s) => s._id === filter._id)
       if (row) {
-        if ("$push" in update) (row.messages as unknown[]).push((update as { $push: { messages: unknown } }).$push.messages)
+        if ("$push" in update) {
+          const pushed = (update as { $push: { messages: unknown } }).$push.messages as { $each?: unknown[] }
+          ;(row.messages as unknown[]).push(...(pushed && Array.isArray(pushed.$each) ? pushed.$each : [pushed]))
+        }
         else Object.assign(row, update)
       }
       return { modifiedCount: row ? 1 : 0 }
@@ -410,7 +413,7 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     expect(asked.questions.every((q) => q.options === undefined)).toBe(true)
     expect(JSON.stringify(asked.questions)).not.toContain("Khuyến nghị")
     expect(String(prompts[0].user_message)).toMatch(/^\[no_idea\]/)
-    submitAnswer(PROJECT, "B-0.1", SESSION, [{ question_id: "Q1", answer: "Quản lý lịch hẹn" }])
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: [{ question_id: "Q1", answer: "Quản lý lịch hẹn" }] })
     await run
   })
 
@@ -538,5 +541,36 @@ describe("FLF-221: sự kiện cho nhật ký hoạt động", () => {
     expect(stored.some((e) => e.type === "stage")).toBe(true)
     expect(stored.some((e) => e.type === "intake")).toBe(true)
     expect(stored.every((e) => typeof e.at === "string" && !Number.isNaN(Date.parse(e.at)))).toBe(true)
+  })
+})
+
+describe("FLF-221: chat tự do trong phỏng vấn đầu giai đoạn", () => {
+  it("B-1: tin nhắn trả lời câu mở ⇒ ghi sổ bằng nguyên văn user, phỏng vấn xong, giai đoạn chạy tiếp", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
+    const chatTurns: Record<string, unknown>[] = []
+    const { events, emit } = collect()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, {
+      elicitExecutor: async (input) => {
+        const vars = input.promptVariables as Record<string, unknown>
+        if (vars.chat_turn) {
+          chatTurns.push(vars)
+          return { ...elicitResult("Đã ghi mục tiêu.", []), data: { reply: "Đã ghi mục tiêu.", questions: [], settled: [{ topic_key: "goals", answer: "giảm bỏ hẹn" }] } }
+        }
+        if (vars.phase_interview) return elicitResult("Mình hỏi nhanh.", [{ question: "Mục tiêu chính là gì?", topic_key: "goals", options: [] }] as never as ElicitOutput["questions"])
+        return elicitResult("Rõ rồi.", [])
+      },
+      draftExecutor: async () => draftResult([])
+    })
+    await waitFor(events, "answer_needed")
+    expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message: "Mục tiêu là giảm 30% khách bỏ hẹn" })).toBe(true)
+    await run
+
+    expect(chatTurns).toHaveLength(1)
+    const decision = (await repo.get(PROJECT))!.decisions.find((d) => d.topic_key === "goals")
+    expect(decision).toMatchObject({ answer: "Mục tiêu là giảm 30% khách bỏ hẹn", step_id: "B-1" })
+    const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
+    expect(messages.filter((m) => m.step === "B-1").map((m) => m.role)).toEqual(["user", "ai"])
+    expect(events.some((e) => e.type === "gate_ready" && e.step_id.startsWith("B-1."))).toBe(true)
   })
 })

@@ -8,8 +8,7 @@ import { buildDocumentContext } from "../../shared/ai/document-context.service.j
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
-import { chatReplyQuestionId, shapeChatQuestions } from "../pipeline/question-shape.js"
-import { getRunState } from "../pipeline/run-state.service.js"
+import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
 
 /**
@@ -141,8 +140,8 @@ const tryAnswerRunningStep = async (session: IChatSession, projectId: string, co
   const record = await spineRepository.get(projectId)
   const stepId = record?.progress.current_step
   if (!stepId) return false
-  const run = await getRunState(projectId, stepId)
-  return submitAnswer(projectId, stepId, String(session._id), [{ question_id: chatReplyQuestionId(run?.questions), answer: content }])
+  // FLF-221: không nhét cả tin vào câu đầu nữa — tin chat đi vòng chat tự do của step (AI chốt câu đúng ý, nhắc câu còn chờ)
+  return submitAnswer(projectId, stepId, String(session._id), { answers: [], message: content, messageRecorded: true })
 }
 
 export const sendMessageAndGetResponse = async (

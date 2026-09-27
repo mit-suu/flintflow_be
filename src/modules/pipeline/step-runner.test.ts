@@ -145,7 +145,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, CALL_LIMIT, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, CALL_LIMIT, CHAT_BUDGET_REPLY, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumeProject } from "./resume.service.js"
@@ -350,7 +350,7 @@ describe("step-runner: 2 tab — SPINE_VERSION_CONFLICT hoàn usage, không tiê
 
 describe("step-runner: POST /answer", () => {
   it("submitAnswer resolves lượt chờ answer_needed đang treo; không có lượt chờ ⇒ false", () => {
-    expect(submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).toBe(false)
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q1", answer: "x" }] })).toBe(false)
   })
 
   it("F18: waitForAnswer/submitAnswer — elicit trả questions ⇒ answer_needed, submitAnswer từ ngoài đưa luồng tới gate_ready", async () => {
@@ -373,7 +373,7 @@ describe("step-runner: POST /answer", () => {
     expect(answerNeeded).toBeTruthy()
     const questionId = (answerNeeded as Extract<StepEvent, { type: "answer_needed" }>).questions[0]!.id
 
-    const accepted = submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: questionId, answer: "Người quản trị" }])
+    const accepted = submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: questionId, answer: "Người quản trị" }] })
     expect(accepted).toBe(true)
 
     await runPromise
@@ -445,7 +445,7 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
     expect(waiting).toMatchObject({ status: "waiting_answer", stage: "ask" })
     expect(waiting?.questions).toHaveLength(1)
 
-    submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "Quản trị viên" }])
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q1", answer: "Quản trị viên" }] })
     await run
 
     const stages = events.filter((e) => e.type === "stage").map((e) => (e as Extract<StepEvent, { type: "stage" }>).stage)
@@ -505,7 +505,7 @@ describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
       renderDeps: renderStub()
     })
     for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
-    if (events.some((e) => e.type === "answer_needed")) submitAnswer(PROJECT, stepId, SESSION, [{ question_id: "Q1", answer }])
+    if (events.some((e) => e.type === "answer_needed")) submitAnswer(PROJECT, stepId, SESSION, { answers: [{ question_id: "Q1", answer }] })
     await run
     return events
   }
@@ -542,7 +542,7 @@ describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
     const current = (await repo.get(PROJECT))!
     await applyTransaction(PROJECT, { base_version: current.spine_version, ops: [{ op: "set", path: "project.review_mode", value: "strict" }], by: USER, step_id: null, reason: "đổi cách duyệt" })
 
-    submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "99%" }])
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q1", answer: "99%" }] })
     await run
     expect(events.some((e) => e.type === "error")).toBe(false)
     expect(events.some((e) => e.type === "gate_ready")).toBe(true)
@@ -705,7 +705,7 @@ describe("step-runner: lượt chờ trả lời sống qua reload / rớt kết
     expect(events.some((e) => e.type === "error" || e.type === "gate_ready")).toBe(false)
     expect(draftExecutor).not.toHaveBeenCalled()
     // Không còn Promise chờ trong bộ nhớ ⇒ lượt sống không nhận câu trả lời nữa, `/answer` phải đi đường run-state
-    expect(submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).toBe(false)
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q1", answer: "x" }] })).toBe(false)
   })
 
   it("đóng kết nối lúc AI đang soạn ⇒ vẫn huỷ như cũ (F8): interrupted, không để lại lượt chờ", async () => {
@@ -765,9 +765,9 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
       { question_id: "Q1", answer: "Quản trị viên" },
       { question_id: "Q2", answer: "99.9%" }
     ]
-    expect(submitAnswer(PROJECT, "S-3.1", SESSION, answers), "không còn lượt đang nghe").toBe(false)
-    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
-    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor, renderDeps: renderStub() })
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, { answers }), "không còn lượt đang nghe").toBe(false)
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers })
+    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, { answers }, { draftExecutor, renderDeps: renderStub() })
     // `/answer` trả ngay: lượt nền đang giữ khoá
     expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("running")
     await done
@@ -803,12 +803,12 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
   it("question_id lạ, session khác, hay step không đang chờ ⇒ 409 STEP_NOT_RUNNABLE, không chạy gì", async () => {
     seedSpine()
     seedSession(true)
-    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).rejects.toMatchObject({ statusCode: 409, code: STEP_NOT_RUNNABLE })
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q1", answer: "x" }] })).rejects.toMatchObject({ statusCode: 409, code: STEP_NOT_RUNNABLE })
 
     await runUntilAsked("reload")
-    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, [{ question_id: "Q9", answer: "x" }])).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
-    await expect(pendingAnswerFor(PROJECT, "S-3.1", "sess-khac", [{ question_id: "Q1", answer: "x" }])).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
-    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, [])).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q9", answer: "x" }] })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", "sess-khac", { answers: [{ question_id: "Q1", answer: "x" }] })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers: [] })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
     expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("waiting_answer")
   })
 
@@ -817,10 +817,10 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
     seedSession(true)
     const { draftExecutor } = await runUntilAsked("reload")
     const answers = [{ question_id: "Q1", answer: "Quản trị viên" }]
-    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers })
 
-    const first = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor, renderDeps: renderStub() })
-    await expect(resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor, renderDeps: renderStub() })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    const first = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, { answers }, { draftExecutor, renderDeps: renderStub() })
+    await expect(resumeWaitingStep(PROJECT, "S-3.1", USER, pending, { answers }, { draftExecutor, renderDeps: renderStub() })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
     await first.done
     expect(draftExecutor).toHaveBeenCalledTimes(1)
   })
@@ -830,12 +830,12 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
     seedSession(true)
     await runUntilAsked("reload")
     const answers = [{ question_id: "Q1", answer: "Quản trị viên" }]
-    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers })
     const failing = vi.fn(async () => {
       throw new ApiError(502, "provider chết", "AI_PROVIDER_ERROR")
     })
 
-    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor: failing, renderDeps: renderStub() })
+    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, { answers }, { draftExecutor: failing, renderDeps: renderStub() })
     await expect(done).resolves.toBeUndefined()
     expect(await getRunState(PROJECT, "S-3.1")).toMatchObject({ status: "interrupted", error: { code: "AI_PROVIDER_ERROR" } })
   })
@@ -932,10 +932,165 @@ describe("resume sau khi step chết giữa chừng / đang chờ trả lời (F
     expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-3.1")?.status).toBe("in_progress")
 
     const answers = [{ question_id: "Q1", answer: "Kế toán" }]
-    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
-    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor: async () => addActor("A10"), renderDeps: renderStub() })
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers })
+    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, { answers }, { draftExecutor: async () => addActor("A10"), renderDeps: renderStub() })
     await done
     expect(await getRunState(PROJECT, "S-3.1")).toMatchObject({ status: "gate" })
     expect(await actorIds()).toEqual(expect.arrayContaining(["A09", "A10"]))
+  })
+})
+
+describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () => {
+  const ASK = [
+    { question: "Actor chính là ai?", options: [], multiple: false, topic_key: "primary_actor" },
+    { question: "Mức uptime mong muốn?", options: [{ label: "99.9% (Khuyến nghị)" }, { label: "99%" }], multiple: false, topic_key: "uptime" }
+  ] as never as ElicitOutput["questions"]
+
+  const chatReply = (reply: string, settled: { topic_key: string; answer: string }[]): AiActionResult<ElicitOutput> => ({
+    ...elicitReply(reply),
+    data: { reply, questions: [], settled }
+  })
+
+  const waitCount = async (events: StepEvent[], type: StepEvent["type"], n: number) => {
+    for (let i = 0; i < 200 && events.filter((e) => e.type === type).length < n; i++) await new Promise((r) => setTimeout(r, 0))
+  }
+
+  /** Chạy S-3.1 tới lượt hỏi đầu; `chat` là lời AI cho mỗi lượt chat tự do theo thứ tự. */
+  const start = (chat: AiActionResult<ElicitOutput>[], extra: Partial<StepRunnerDeps> = {}) => {
+    const turns = [...chat]
+    const chatPrompts: Record<string, unknown>[] = []
+    const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) => {
+      if (input.promptVariables?.chat_turn) {
+        chatPrompts.push(input.promptVariables)
+        return turns.shift() ?? chatReply("ok", [])
+      }
+      return elicitReply("Hỏi", ASK)
+    })
+    const draftExecutor = vi.fn<StepRunnerDeps["draftExecutor"]>(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, { elicitExecutor: elicitExecutor as never, draftExecutor, renderDeps: renderStub(), ...extra })
+    return { run, events, elicitExecutor, draftExecutor, chatPrompts }
+  }
+
+  const decisionsOf = async () => (await repo.get(PROJECT))!.decisions.filter((d) => d.superseded_by === null)
+
+  it("tin nhắn trả lời 1/2 câu ⇒ 1 decision, hỏi lại đúng câu còn chờ (id ổn định), AI nhắc câu còn chờ", async () => {
+    seedSpine()
+    seedSession(true)
+    const s = start([chatReply("Đã ghi uptime 99%. Còn câu về actor chính nhé.", [{ topic_key: "uptime", answer: "99%" }])])
+    await waitCount(s.events, "answer_needed", 1)
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Uptime 99% là đủ cho tụi mình" })).toBe(true)
+    await waitCount(s.events, "answer_needed", 2)
+
+    const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    expect(again.questions.map((q) => q.id)).toEqual(["Q_primary_actor"])
+    expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["uptime", "99%"]])
+    expect(s.events.some((e) => e.type === "elicit" && e.delta.includes("Còn câu về actor"))).toBe(true)
+    // Lượt chat thấy câu đang chờ và tin nhắn của user
+    expect(s.chatPrompts[0]).toMatchObject({ user_message: "Uptime 99% là đủ cho tụi mình" })
+    expect(JSON.stringify(s.chatPrompts[0].pending_questions)).toContain("Q_uptime")
+
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_primary_actor", answer: "Quản trị viên" }] })
+    await s.run
+    expect(s.events.some((e) => e.type === "gate_ready")).toBe(true)
+    const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
+    expect(userMsgs).toEqual(["Uptime 99% là đủ cho tụi mình", "Quản trị viên"])
+  })
+
+  it("tin nhắn lạc đề ⇒ 0 decision, vẫn chờ đủ 2 câu", async () => {
+    seedSpine()
+    seedSession(true)
+    const s = start([chatReply("Câu hỏi hay! Nhưng mình vẫn cần biết actor chính và uptime.", [])])
+    await waitCount(s.events, "answer_needed", 1)
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Phần mềm này có chạy trên iPad không?" })
+    await waitCount(s.events, "answer_needed", 2)
+    const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    expect(again.questions).toHaveLength(2)
+    expect(await decisionsOf()).toEqual([])
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_primary_actor", answer: "Lễ tân" }, { question_id: "Q_uptime", answer: "99%" }] })
+    await s.run
+  })
+
+  it("settled không khớp nhãn option ⇒ bỏ; câu mở ghi nguyên văn tin user, không lấy câu model diễn lại", async () => {
+    seedSpine()
+    seedSession(true)
+    const s = start([
+      chatReply("Ghi nhận.", [
+        { topic_key: "uptime", answer: "99.5%" },
+        { topic_key: "primary_actor", answer: "Receptionist (model paraphrase)" },
+        { topic_key: "not_asked", answer: "x" }
+      ])
+    ])
+    await waitCount(s.events, "answer_needed", 1)
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Người dùng chính là lễ tân" })
+    await waitCount(s.events, "answer_needed", 2)
+    expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["primary_actor", "Người dùng chính là lễ tân"]])
+    const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    expect(again.questions.map((q) => q.id)).toEqual(["Q_uptime"])
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_uptime", answer: "99.9% (Khuyến nghị)" }] })
+    await s.run
+  })
+
+  it("ngân sách sát trần ⇒ không gọi thêm lượt chat, đi thẳng tới lượt soạn, không lỗi CALL_LIMIT", async () => {
+    seedSpine()
+    seedSession(true)
+    let seeded = false
+    const s = start([], {
+      elicitExecutor: (async (input: { promptVariables?: Record<string, unknown> }) => {
+        if (input.promptVariables?.chat_turn) throw new Error("không được gọi lượt chat khi hết ngân sách")
+        if (!seeded) {
+          seeded = true
+          // Ba lượt đã tiêu trong vòng này ⇒ còn 8 - 4 = 4 < 1 + draft (3) + review (1)
+          for (let i = 0; i < 3; i++) {
+            db.usages.push({ _id: `burn${i}`, projectId: PROJECT, userId: USER, step_id: "S-3.1", call_kind: "draft", attempt: 1, tokens_in: 1, tokens_out: 1, cost: 1, state: "deducted", expires_at: "2099-01-01T00:00:00.000Z", logId: null, createdAt: new Date().toISOString() })
+          }
+        }
+        return elicitReply("Hỏi", ASK)
+      }) as never
+    })
+    await waitCount(s.events, "answer_needed", 1)
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Tuỳ bạn quyết" })
+    await s.run
+    expect(s.events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect(s.events.some((e) => e.type === "elicit" && e.delta === CHAT_BUDGET_REPLY)).toBe(true)
+    const draftInput = s.draftExecutor.mock.calls[0]![1] as { promptVariables: Record<string, unknown> }
+    expect(JSON.stringify(draftInput.promptVariables)).toContain("tự giả định")
+  })
+
+  it("sau reload: /answer chỉ có message ⇒ chạy lượt chat (không nhảy thẳng tới lượt soạn), hỏi lại câu còn chờ", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const s = start([], { signal: controller.signal, abort: controller })
+    await waitCount(s.events, "answer_needed", 1)
+    controller.abort()
+    await s.run
+
+    const payload = { answers: [], message: "Uptime 99% nhé" }
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, payload)).toBe(false)
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, payload)
+    const elicitExecutor = vi.fn(async () => chatReply("Đã ghi 99%.", [{ topic_key: "uptime", answer: "99%" }]))
+    const draftExecutor = vi.fn<StepRunnerDeps["draftExecutor"]>(async () => draftReply([]))
+    await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, payload, { elicitExecutor: elicitExecutor as never, draftExecutor, renderDeps: renderStub() })
+    for (let i = 0; i < 200 && (await getRunState(PROJECT, "S-3.1"))?.status !== "waiting_answer"; i++) await new Promise((r) => setTimeout(r, 0))
+
+    expect(elicitExecutor).toHaveBeenCalledTimes(1)
+    expect(draftExecutor).not.toHaveBeenCalled()
+    const state = await getRunState(PROJECT, "S-3.1")
+    expect(state).toMatchObject({ status: "waiting_answer" })
+    expect((state?.questions as { id: string }[]).map((q) => q.id)).toEqual(["Q_primary_actor"])
+    expect(state?.pending_answer?.asked.map((q) => q.topic_key)).toEqual(["primary_actor"])
+    dropPendingAnswers() // lượt nền đang chờ câu còn lại — dọn như tiến trình kết thúc
+  })
+
+  it("/answer thiếu cả answers lẫn message ⇒ không nhận", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const s = start([], { signal: controller.signal, abort: controller })
+    await waitCount(s.events, "answer_needed", 1)
+    controller.abort()
+    await s.run
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers: [] })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
   })
 })

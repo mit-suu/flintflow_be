@@ -88,13 +88,21 @@ export const elicitQuestionSchema = z.union([
   z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
-export const elicitSchema = z.object({
+const elicitBaseSchema = z.object({
   reply: z.string(),
   questions: z.array(elicitQuestionSchema).default([])
 })
 
-/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. */
-export const discoveryStepSchema = elicitSchema.extend({
+/**
+ * Vòng hỏi của step. `settled` (FLF-221): khi user chat tự do lúc đang có câu chờ, model báo câu nào user đã trả lời
+ * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
+ */
+export const elicitSchema = elicitBaseSchema.extend({
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional()
+})
+
+/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
+export const discoveryStepSchema = elicitBaseSchema.extend({
   ops: z.array(opSchema).optional()
 })
 

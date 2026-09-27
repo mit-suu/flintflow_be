@@ -72,8 +72,32 @@ const shapeHeader = (header: string | undefined): string | undefined => {
   return trimmed ? trimmed : undefined
 }
 
+/**
+ * Id câu hỏi ổn định theo `topic_key` (FLF-221): `Q_<topic_key>`. Id theo vị trí (`Q1`, `Q2`) lệch ngay khi một câu
+ * được chốt qua chat và danh sách câu còn chờ ngắn lại. Câu không có `topic_key` (chat Discovery) giữ `Q<n>`; hai câu
+ * trùng chủ đề trong một lượt ⇒ câu sau thêm hậu tố.
+ */
+export const questionIdsFor = (asked: readonly Pick<ModelQuestion, "topic_key">[]): string[] => {
+  const used = new Set<string>()
+  return asked.map((q, i) => {
+    let id = q.topic_key ? `Q_${q.topic_key}` : `Q${i + 1}`
+    for (let n = 2; used.has(id); n++) id = `${q.topic_key ? `Q_${q.topic_key}` : `Q${i + 1}`}_${n}`
+    used.add(id)
+    return id
+  })
+}
+
+/** Vị trí của `questionId` trong `asked`: id theo chủ đề, hoặc `Q<n>` theo vị trí (run-state lưu trước FLF-221). -1 ⇒ không có. */
+export const indexOfQuestion = (asked: readonly Pick<ModelQuestion, "topic_key">[], questionId: string): number => {
+  const byTopic = questionIdsFor(asked).indexOf(questionId)
+  if (byTopic >= 0) return byTopic
+  const positional = /^Q(\d+)$/.exec(questionId)
+  const index = positional ? Number(positional[1]) - 1 : -1
+  return index >= 0 && index < asked.length ? index : -1
+}
+
 export interface ShapedQuestions<Q extends ModelQuestion> {
-  /** Câu model hỏi còn lại (đã áp luật), cùng thứ tự với `questions` — `asked[i]` là `Q${i + 1}`. */
+  /** Câu model hỏi còn lại (đã áp luật), cùng thứ tự với `questions` — id của `asked[i]` là `questionIdsFor(asked)[i]`. */
   asked: Q[]
   /** Câu gửi FE qua `answer_needed` / lưu run-state. */
   questions: ContractQuestion[]
@@ -99,8 +123,9 @@ export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], sha
       const header = shapeHeader(q.header)
       return { ...q, options, header, multiple: options.length > 0 ? q.multiple : undefined }
     })
+  const ids = questionIdsFor(asked)
   const questions = asked.map((q, i): ContractQuestion => ({
-    id: `Q${i + 1}`,
+    id: ids[i],
     text: q.question,
     ...(q.header ? { header: q.header } : {}),
     ...(q.options.length > 0 ? { options: q.options } : {}),
@@ -121,18 +146,26 @@ export const answerText = (answer: QuestionAnswer["answer"]): string =>
  */
 export const answeredTopics = (
   asked: readonly (ModelQuestion & { topic_key: string })[],
-  answers: readonly QuestionAnswer[]
+  answers: readonly QuestionAnswer[],
+  /**
+   * Câu đã được chốt riêng từng câu (qua chat tự do, server đã kiểm — FLF-221): ghi sổ kể cả khi câu mở khác của lượt
+   * chưa có câu trả lời. Luật "đủ mọi câu mở" chỉ dành cho đoạn chat gõ gộp mà FE gán cả vào một câu.
+   */
+  settledIds: ReadonlySet<string> = new Set()
 ): AnsweredTopic[] => {
   const byIndex = new Map<number, string>()
+  const settled = new Set<number>()
   for (const a of answers) {
-    const index = Number(/^Q(\d+)$/.exec(a.question_id)?.[1] ?? 0) - 1
-    if (asked[index]) byIndex.set(index, answerText(a.answer))
+    const index = indexOfQuestion(asked, a.question_id)
+    if (index < 0) continue
+    byIndex.set(index, answerText(a.answer))
+    if (settledIds.has(a.question_id)) settled.add(index)
   }
   const openIndexes = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
   const openSplit = openIndexes.every((i) => (byIndex.get(i) ?? "") !== "")
   return [...byIndex.entries()].flatMap(([index, answer]) => {
     const question = asked[index]
-    if (question.options.length === 0 && !openSplit) return []
+    if (question.options.length === 0 && !openSplit && !settled.has(index)) return []
     return [{ topic_key: question.topic_key, question: question.question, answer }]
   })
 }

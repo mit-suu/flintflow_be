@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
-import { answerText, answeredTopics, chatReplyQuestionId, shapeChatQuestions, shapeOptions, shapeQuestions, type ModelQuestion } from "./question-shape.js"
+import { answerText, answeredTopics, chatReplyQuestionId, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, type ModelQuestion } from "./question-shape.js"
 
 const opts = (...labels: string[]) => labels.map((label) => ({ label }))
 const q = (question: string, extra: Partial<ModelQuestion> = {}): ModelQuestion & { topic_key: string } => ({
@@ -30,10 +30,11 @@ describe("shapeOptions", () => {
 })
 
 describe("shapeQuestions", () => {
-  it("tối đa 4 câu/lượt, id theo thứ tự còn lại", () => {
+  it("tối đa 4 câu/lượt; id ổn định theo topic_key (FLF-221)", () => {
     const { asked, questions } = shapeQuestions(["A", "B", "", "C", "D", "E"].map((t) => q(t)))
     expect(asked).toHaveLength(4)
-    expect(questions.map((x) => x.id)).toEqual(["Q1", "Q2", "Q3", "Q4"])
+    expect(questions.map((x) => x.id)).toEqual(questionIdsFor(asked))
+    expect(questions.map((x) => x.id)).toEqual(asked.map((a) => `Q_${a.topic_key}`))
     expect(questions.map((x) => x.text)).toEqual(["A", "B", "C", "D"])
   })
 
@@ -42,8 +43,9 @@ describe("shapeQuestions", () => {
       q("Mô tả quy trình đặt lịch?", { multiple: true, header: "  Quy trình đặt lịch  " }),
       q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false, header: "Uptime" })
     ])
-    expect(questions[0]).toEqual({ id: "Q1", text: "Mô tả quy trình đặt lịch?", header: "Quy trình đặ" })
-    expect(questions[1]).toEqual({ id: "Q2", text: "Uptime?", header: "Uptime", options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false })
+    expect(questions[0]).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình đặ" })
+    expect(questions[0].options).toBeUndefined()
+    expect(questions[1]).toEqual({ id: questions[1].id, text: "Uptime?", header: "Uptime", options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false })
   })
 })
 
@@ -137,5 +139,25 @@ describe("FLF-221: shapeQuestions khi user chưa có ý tưởng", () => {
   it("mặc định giữ nhãn khuyến nghị như cũ", () => {
     const { questions } = shapeQuestions(input)
     expect(questions[0].options?.[1].label).toBe("Cho chính mình (Khuyến nghị)")
+  })
+})
+
+describe("FLF-221: id câu hỏi theo topic_key", () => {
+  const asked = [
+    { question: "Uptime?", topic_key: "uptime", options: [] },
+    { question: "Kênh báo?", topic_key: "channel", options: [] },
+    { question: "Kênh báo 2?", topic_key: "channel", options: [] }
+  ]
+  it("id theo chủ đề, trùng chủ đề thêm hậu tố; tra được cả id cũ theo vị trí", () => {
+    expect(questionIdsFor(asked)).toEqual(["Q_uptime", "Q_channel", "Q_channel_2"])
+    expect(indexOfQuestion(asked, "Q_channel")).toBe(1)
+    expect(indexOfQuestion(asked, "Q3")).toBe(2)
+    expect(indexOfQuestion(asked, "Q9")).toBe(-1)
+  })
+
+  it("câu mở chốt qua chat ghi sổ dù câu mở khác chưa trả lời", () => {
+    const answers = [{ question_id: "Q_uptime", answer: "99%" }]
+    expect(answeredTopics(asked, answers)).toEqual([])
+    expect(answeredTopics(asked, answers, new Set(["Q_uptime"]))).toEqual([{ topic_key: "uptime", question: "Uptime?", answer: "99%" }])
   })
 })

@@ -19,8 +19,8 @@ import { runStep, defaultStepRunnerDeps, recordUserMessage, type Emit, type Step
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { projectStep } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, shapeQuestions } from "./question-shape.js"
-import { submitAnswerWait } from "./step-runner.service.js"
+import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
+import { CHAT_BUDGET_REPLY, chatBudgetLeft, runChatTurn, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate } from "./gate.service.js"
@@ -64,41 +64,121 @@ const recordInterviewAnswers = async (
   userId: string,
   reply: string,
   asked: PendingAnswerState["asked"],
-  answers: readonly AnswerInput[]
+  answers: readonly AnswerInput[],
+  /** Lượt chat tự do (FLF-221): transcript đã ghi từng tin, chỉ còn sổ quyết định; câu chốt qua chat ghi sổ riêng. */
+  chat: { settledIds: ReadonlySet<string> } | null = null
 ): Promise<void> => {
-  const transcript: IChatMessage[] = [
-    { role: "ai", content: [reply, ...asked.map((q, i) => `${i + 1}. ${q.question}`)].join("\n"), step: unit, createdAt: new Date() },
-    ...answers.map((a) => ({
-      role: "user" as const,
-      content: answerText(a.answer),
-      step: unit,
-      createdAt: new Date()
-    }))
-  ]
-  await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: { $each: transcript } } })
+  if (!chat) {
+    const transcript: IChatMessage[] = [
+      { role: "ai", content: [reply, ...asked.map((q, i) => `${i + 1}. ${q.question}`)].join("\n"), step: unit, createdAt: new Date() },
+      ...answers.map((a) => ({
+        role: "user" as const,
+        content: answerText(a.answer),
+        step: unit,
+        createdAt: new Date()
+      }))
+    ]
+    await pushInterviewMessages(projectId, sessionId, transcript)
+  }
 
   const { record, spine: spineNow } = await load(projectId)
-  const ops = decisionOps(spineNow, unit, answeredTopics(asked, answers))
+  const ops = decisionOps(spineNow, unit, answeredTopics(asked, answers, chat?.settledIds))
   if (ops.length > 0) {
     await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: `Phỏng vấn đầu giai đoạn ${unit}` })
   }
 }
 
+/** Ghi tin vào transcript của lượt phỏng vấn — lọc cả `projectId` như mọi lượt ghi transcript (FLF-221). */
+const pushInterviewMessages = async (projectId: string, sessionId: string, messages: IChatMessage[]): Promise<void> => {
+  await ChatSession.updateOne({ _id: sessionId, projectId }, { $push: { messages: { $each: messages } } })
+}
+
+/**
+ * Một lượt chat tự do trong phỏng vấn đầu giai đoạn (FLF-221): ghi tin user, AI đọc rồi chốt câu được trả lời đúng ý
+ * (server kiểm), trả lời user + nhắc câu còn chờ. Hết ngân sách chat ⇒ câu cố định, các câu còn lại để các bước tự
+ * giả định. Trả các câu còn chờ (rỗng ⇒ xong phỏng vấn) và lời AI.
+ */
+const interviewChatTurn = async (
+  projectId: string,
+  unit: string,
+  sessionId: string,
+  userId: string,
+  deps: Pick<StepRunnerDeps, "elicitExecutor">,
+  asked: PendingAnswerState["asked"],
+  payload: AnswerPayload,
+  message: string
+): Promise<{ reply: string; remaining: PendingAnswerState["asked"] }> => {
+  const cardAnswers = payload.answers.filter((a) => indexOfQuestion(asked, a.question_id) >= 0)
+  if (!payload.messageRecorded) {
+    await pushInterviewMessages(projectId, sessionId, [{ role: "user", content: message, step: unit, createdAt: new Date() }])
+  }
+  const { spine } = await load(projectId)
+  if (!(await chatBudgetLeft(projectId, unit, null))) {
+    await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: CHAT_BUDGET_REPLY, step: unit, createdAt: new Date() }])
+    await recordInterviewAnswers(projectId, unit, sessionId, userId, "", asked, cardAnswers, { settledIds: new Set() })
+    return { reply: CHAT_BUDGET_REPLY, remaining: [] }
+  }
+  const turn = await runChatTurn({
+    projectId,
+    userId,
+    unit,
+    stepName: `Phỏng vấn đầu giai đoạn ${unit}`,
+    asked,
+    message,
+    recentTurns: `User: ${message}`,
+    projection: {},
+    spine,
+    elicitExecutor: deps.elicitExecutor
+  })
+  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: turn.reply, step: unit, createdAt: new Date() }])
+  const byCard = new Set(cardAnswers.map((a) => indexOfQuestion(asked, a.question_id)))
+  const settled = turn.settled.filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
+  await recordInterviewAnswers(projectId, unit, sessionId, userId, turn.reply, asked, [...cardAnswers, ...settled], {
+    settledIds: new Set(settled.map((a) => a.question_id))
+  })
+  const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
+  return { reply: turn.reply, remaining: asked.filter((_, i) => !answered.has(i)) }
+}
+
 /**
  * `/answer` cho lượt phỏng vấn đầu giai đoạn đã tách khỏi kết nối: ghi câu trả lời rồi đóng lượt (`done`).
- * Không tự chạy cả giai đoạn ở nền — FE chạy lại giai đoạn, phỏng vấn tự bỏ vì chủ đề đã chốt.
+ * Không tự chạy cả giai đoạn ở nền — FE chạy lại giai đoạn, phỏng vấn tự bỏ vì chủ đề đã chốt. Có tin chat tự do
+ * (FLF-221) ⇒ AI đọc nó; còn câu chờ thì lượt quay lại `waiting_answer` với các câu đó, không đóng.
  */
 export const resumePhaseInterview = async (
   projectId: string,
   unit: string,
   userId: string,
   pending: PendingAnswerState,
-  answers: readonly AnswerInput[]
+  payload: AnswerPayload,
+  deps: Partial<StepRunnerDeps> = {}
 ): Promise<void> => {
+  const { answers } = payload
+  const message = payload.message?.trim()
   // Chiếm khoá để hai `/answer` cùng lúc không ghi hai lần (lượt sau 409)
-  const run = await acquireRun(projectId, unit, { sessionId: pending.session_id, by: userId, stage: "ask", detail_vi: `Đã nhận ${answers.length} câu trả lời` })
+  const run = await acquireRun(projectId, unit, { sessionId: pending.session_id, by: userId, stage: "ask", detail_vi: message ? "Đang đọc tin nhắn của bạn" : `Đã nhận ${answers.length} câu trả lời` })
   try {
-    await recordInterviewAnswers(projectId, unit, pending.session_id, userId, pending.reply ?? "", pending.asked, answers)
+    if (message) {
+      const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
+      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message)
+      if (remaining.length > 0) {
+        const { questions } = shapeQuestions(remaining)
+        const elicit: StepEvent = { type: "elicit", step_id: unit, delta: reply }
+        await touchRun(projectId, unit, run.run_id, { appendEvent: { ...elicit, at: new Date().toISOString() } })
+        await touchRun(projectId, unit, run.run_id, {
+          status: "waiting_answer",
+          stage: "ask",
+          detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+          questions,
+          pending_answer: { ...pending, asked: remaining, reply },
+          release: true,
+          appendEvent: { type: "answer_needed", step_id: unit, questions, at: new Date().toISOString() }
+        })
+        return
+      }
+    } else {
+      await recordInterviewAnswers(projectId, unit, pending.session_id, userId, pending.reply ?? "", pending.asked, answers)
+    }
     await finishRun(projectId, unit, run.run_id, "done", { questions: null })
   } catch (err) {
     await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: err instanceof Error ? err.message : String(err) } })
@@ -189,6 +269,7 @@ const askPhaseInterview = async (
           phase_interview: true,
           max_questions: MAX_QUESTIONS_PER_TURN,
           missing,
+          pending_questions: [],
           projection: {},
           addendum: [],
           content_guidance: "",
@@ -227,19 +308,45 @@ const askPhaseInterview = async (
     questions,
     pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: result.data.reply },
     release: true,
-    appendEvent: answerNeeded
+    appendEvent: { ...answerNeeded, at: new Date().toISOString() }
   })
 
-  let answers: AnswerInput[]
-  try {
-    answers = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
-  } catch (err) {
-    if (err instanceof AnswerDetached) return "detached"
-    throw err
+  // Vòng chờ: thẻ ⇒ ghi ngay; chat tự do ⇒ AI đọc, chốt câu đúng ý, hỏi lại câu còn chờ (FLF-221)
+  let pending = asked
+  let reply = result.data.reply
+  for (;;) {
+    let payload: AnswerPayload
+    try {
+      payload = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
+    } catch (err) {
+      if (err instanceof AnswerDetached) return "detached"
+      throw err
+    }
+    const message = payload.message?.trim()
+    const cardAnswers = payload.answers.filter((a) => indexOfQuestion(pending, a.question_id) >= 0)
+    emit({ type: "answer_received", step_id: unit, count: cardAnswers.length })
+    if (!message) {
+      await recordInterviewAnswers(projectId, unit, sessionId, userId, reply, pending, cardAnswers)
+      return "answered"
+    }
+    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message)
+    emit({ type: "elicit", step_id: unit, delta: turn.reply })
+    if (turn.remaining.length === 0) return "answered"
+    pending = turn.remaining
+    reply = turn.reply
+    const { questions: again } = shapeQuestions(pending)
+    const askAgain: StepEvent = { type: "answer_needed", step_id: unit, questions: again }
+    emit(askAgain)
+    await touchRun(projectId, unit, runId, {
+      status: "waiting_answer",
+      stage: "ask",
+      detail_vi: `Chờ bạn trả lời ${again.length} câu`,
+      questions: again,
+      pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply },
+      release: true,
+      appendEvent: { ...askAgain, at: new Date().toISOString() }
+    })
   }
-  emit({ type: "answer_received", step_id: unit, count: answers.length })
-  await recordInterviewAnswers(projectId, unit, sessionId, userId, result.data.reply, asked, answers)
-  return "answered"
 }
 
 export interface PhaseStepOutcome {
