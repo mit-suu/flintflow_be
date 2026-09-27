@@ -231,6 +231,8 @@ export const assumptionSchema = z.strictObject({
   id,
   path: z.string().min(1),
   statement: z.string(),
+  /** Bản ngôn ngữ của user (FLF-221) — hiện ở cổng duyệt/Brief; `statement` (EN) mới vào SRS. Spine cũ không có. */
+  statement_vi: z.string().min(1).nullish(),
   rationale: z.string(),
   origin_step_id: id,
   status: z.enum(["unconfirmed", "confirmed", "rejected"]),

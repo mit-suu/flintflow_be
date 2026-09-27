@@ -1138,6 +1138,17 @@
           "statement": {
             "type": "string"
           },
+          "statement_vi": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rationale": {
             "type": "string"
           },
