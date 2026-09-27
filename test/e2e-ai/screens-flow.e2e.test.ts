@@ -28,6 +28,7 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
   it("S-4.1 → S-4.4", { timeout: 20 * 60_000 }, async () => {
     const { orderedSteps } = await import("../../src/modules/pipeline/step-registry.js")
     const { runStep, submitAnswer } = await import("../../src/modules/pipeline/step-runner.service.js")
+    const { optionLabel, stripRecommended } = await import("../../src/modules/pipeline/question-shape.js")
     const { gate } = await import("../../src/modules/pipeline/gate.service.js")
     const repo = await import("../../src/modules/spine/spine.repository.js")
     const { orphanScreens } = await import("../../src/modules/spine/deterministic-check.js")
@@ -77,7 +78,7 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
       try {
         await runStep(projectId, stepId, sessionId, userId, (event) => {
           if (event.type === "answer_needed") {
-            const answers = event.questions.map((q) => ({ question_id: q.id, answer: q.options?.[0] ?? AUTO_ANSWER }))
+            const answers = event.questions.map((q) => ({ question_id: q.id, answer: q.options?.[0] ? stripRecommended(optionLabel(q.options[0])) : AUTO_ANSWER }))
             setImmediate(() => submitAnswer(projectId, stepId, sessionId, answers))
           }
           if (event.type === "error") error = `${event.code}: ${event.message}`

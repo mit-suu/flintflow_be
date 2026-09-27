@@ -39,7 +39,8 @@ import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { buildStepContext, elicitProjection, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
-import { decisionOps, filterAskedQuestions, ledgerForPrompt, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
+import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, shapeQuestions } from "./question-shape.js"
 import { draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
@@ -94,11 +95,6 @@ export interface StepRunnerDeps {
   reopen?: boolean
   /** WP-4: cùng controller với `signal`, để `POST /cancel` huỷ được lượt này từ một request khác. */
   abort?: AbortController
-  /**
-   * R3: câu hỏi của cả giai đoạn đã được hỏi gộp ở đầu phase (`phase-runner`), nên bước này không hỏi
-   * nữa — vừa đỡ một lượt gọi model mỗi bước, vừa giữ lời hứa "trả lời một lần rồi rời máy".
-   */
-  skipElicit?: boolean
 }
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
@@ -683,7 +679,7 @@ export const runRenderReviewPhase = async (
         const spine = spineForReview
         const spec = getStepSpec(stepId)
         const result = await deps.reviewExecutor(
-          { promptVariables: { step_id: stepId, step_name: spec.label_en, working_mode: spine.project.working_mode ?? "coaching" } },
+          { promptVariables: { step_id: stepId, step_name: spec.label_en } },
           projectId,
           userId
         )
@@ -908,8 +904,9 @@ export const runStep = async (
     }
 
     if (needsDraft) {
-      const workingMode = spine.project.working_mode ?? "coaching"
-      const shouldElicit = !d.skipElicit && (workingMode === "coaching" || spine.progress.elicit_turns_this_phase < 2)
+      // FLF-220: AI tự quyết hỏi nhiều hay ít — hỏi khi bước còn field trống, ở mọi chế độ duyệt. Chủ đề đã
+      // chốt (kể cả ở phỏng vấn đầu giai đoạn) bị `filterAskedQuestions` chặn nên không hỏi lặp.
+      const shouldElicit = ctx.emptyFields.length > 0
 
       if (shouldElicit) {
         assertNotAborted(d.signal, stepId)
@@ -926,8 +923,7 @@ export const runStep = async (
               promptVariables: {
                 step_id: stepId,
                 step_name: ctx.label_en,
-                working_mode: workingMode,
-                elicit_turns_this_phase: spine.progress.elicit_turns_this_phase,
+                max_questions: MAX_QUESTIONS_PER_TURN,
                 missing: ctx.emptyFields,
                 // BUG-19: vòng hỏi phải thấy quy tắc và NFR đã chốt, nếu không nó gợi ý ngược lại chính
                 // câu trả lời của user ở bước trước.
@@ -975,17 +971,8 @@ export const runStep = async (
           console.info(`[step-runner] ${stepId}: bỏ ${filtered.dropped.length} câu đã chốt (${filtered.dropped.map((d) => d.topic_key).join(", ")})`)
         }
 
-        if (filtered.questions.length > 0) {
-          const asked = filtered.questions
-          const questions = asked.map((q, i) => {
-            const options = sanitizeSuggestions(q.topic_key, q.suggestedAnswers)
-            return {
-              id: `Q${i + 1}`,
-              text: q.question,
-              ...(options.length > 0 ? { options } : {}),
-              ...(q.multiple !== undefined ? { multiple: q.multiple } : {})
-            }
-          })
+        const { asked, questions } = shapeQuestions(filtered.questions)
+        if (questions.length > 0) {
           emit({ type: "answer_needed", step_id: stepId, questions })
           // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07)
           await tracker.save({ status: "waiting_answer", stage: "ask", detail_vi: `Chờ bạn trả lời ${questions.length} câu`, questions })
@@ -993,18 +980,15 @@ export const runStep = async (
           // Phản hồi ngay khi nhận trả lời — trước đây status đứng yên tới 2 phút (BUG-32)
           emit({ type: "answer_received", step_id: stepId, count: answers.length })
           await tracker.save({ status: "running", questions: null, detail_vi: `Đã nhận ${answers.length} câu trả lời` })
-          const answersJoined = answers.map((a) => `${a.question_id}: ${Array.isArray(a.answer) ? a.answer.join(", ") : a.answer}`).join("\n")
-          for (const a of answers) await pushTranscript(sessionId, stepId, "user", Array.isArray(a.answer) ? a.answer.join(", ") : a.answer)
+          const answersJoined = answers.map((a) => `${a.question_id}: ${answerText(a.answer)}`).join("\n")
+          for (const a of answers) await pushTranscript(sessionId, stepId, "user", answerText(a.answer))
           answersText = `${answersText}\n${answersJoined}`.trim()
 
-          // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa
-          const answeredTopics: AnsweredTopic[] = answers.flatMap((a) => {
-            const index = Number(/^Q(\d+)$/.exec(a.question_id)?.[1] ?? 0) - 1
-            const question = asked[index]
-            if (!question) return []
-            return [{ topic_key: question.topic_key, question: question.question, answer: Array.isArray(a.answer) ? a.answer.join(", ") : a.answer }]
-          })
-          const ledgerOps = decisionOps(spine, stepId, answeredTopics)
+          // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa. Chờ user có thể mất
+          // vài phút, trong lúc đó Spine đổi ở nơi khác (đổi chế độ duyệt, sửa qua chat, tab khác) — ghi bằng
+          // version cũ là 409 SPINE_VERSION_CONFLICT và cả bước chết sau khi user đã trả lời. Đọc lại trước khi ghi.
+          ;({ spine, spineVersion } = await refresh(projectId))
+          const ledgerOps = decisionOps(spine, stepId, answeredTopics(asked, answers))
           if (ledgerOps.length > 0) {
             const ledgerApplied = await applyTransaction(projectId, {
               base_version: spineVersion,

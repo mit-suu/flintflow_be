@@ -356,7 +356,7 @@ describe("step-runner: POST /answer", () => {
     seedSpine()
     seedSession(true)
     const deps: Partial<StepRunnerDeps> = {
-      elicitExecutor: async () => elicitReply("Bạn muốn actor nào?", [{ question: "Actor chính là ai?", suggestedAnswers: [], multiple: false }]),
+      elicitExecutor: async () => elicitReply("Bạn muốn actor nào?", [{ question: "Actor chính là ai?", header: undefined, options: [], multiple: false }]),
       draftExecutor: async () => draftReply([]),
       renderDeps: renderStub()
     }
@@ -431,7 +431,7 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
     seedSpine()
     seedSession(true)
     const deps: Partial<StepRunnerDeps> = {
-      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Actor chính là ai?", suggestedAnswers: [], multiple: false }]),
+      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Actor chính là ai?", header: undefined, options: [], multiple: false }]),
       draftExecutor: async () => draftReply([]),
       renderDeps: renderStub()
     }
@@ -470,7 +470,7 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
     seedSession(true)
     const controller = new AbortController()
     const deps: Partial<StepRunnerDeps> = {
-      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Actor chính là ai?", suggestedAnswers: [], multiple: false }]),
+      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Actor chính là ai?", header: undefined, options: [], multiple: false }]),
       draftExecutor: async () => draftReply([]),
       renderDeps: renderStub(),
       signal: controller.signal,
@@ -494,7 +494,7 @@ describe("step-runner: trạng thái lượt chạy (FLF-177 BUG-05, BUG-07, BUG
 
 describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
   const askUptime = (topic = "uptime") =>
-    elicitReply("Hỏi", [{ question: "Mức uptime mong muốn?", suggestedAnswers: [], multiple: false, topic_key: topic } as never])
+    elicitReply("Hỏi", [{ question: "Mức uptime mong muốn?", options: [], multiple: false, topic_key: topic } as never])
 
   const runAndAnswer = async (stepId: string, answer: string, elicit: () => ReturnType<typeof elicitReply>) => {
     const { events, emit } = collectEvents()
@@ -524,6 +524,28 @@ describe("step-runner: sổ quyết định (FLF-208 R4 — BUG-21)", () => {
     expect(events.some((e) => e.type === "answer_needed")).toBe(false)
     expect(events.some((e) => e.type === "gate_ready")).toBe(true)
     expect((await repo.get(PROJECT))!.decisions).toHaveLength(1)
+  })
+
+  it("Spine đổi ở nơi khác trong lúc chờ user trả lời ⇒ vẫn ghi sổ và tới gate, không 409", async () => {
+    seedSpine()
+    seedSession(true)
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => askUptime(),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub()
+    })
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+
+    // User đổi chế độ duyệt ở menu AI trong lúc thẻ hỏi đang mở
+    const current = (await repo.get(PROJECT))!
+    await applyTransaction(PROJECT, { base_version: current.spine_version, ops: [{ op: "set", path: "project.review_mode", value: "strict" }], by: USER, step_id: null, reason: "đổi cách duyệt" })
+
+    submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "99%" }])
+    await run
+    expect(events.some((e) => e.type === "error")).toBe(false)
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect((await repo.get(PROJECT))!.decisions[0]).toMatchObject({ topic_key: "uptime", answer: "99%" })
   })
 })
 

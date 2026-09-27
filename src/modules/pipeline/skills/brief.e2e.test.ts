@@ -297,17 +297,10 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(nextStep((await repo.get(PROJECT))!)?.id).toBe("S-2.1")
   })
 
-  it("Coaching hỏi mỗi step một lượt; Fast tối đa 2 lượt mỗi phase", async () => {
-    seedEmpty("coaching")
-    for (const stepId of BRIEF_STEPS.slice(0, 4)) await runAndAccept(stepId)
-    expect(elicitTurns.length, "coaching: mỗi step một lượt elicit").toBe(4)
-
-    db.reset()
-    elicitTurns = []
+  it("FLF-220: hỏi khi bước còn field trống, working_mode không còn cắt lượt hỏi", async () => {
     seedEmpty("fast")
     for (const stepId of BRIEF_STEPS.slice(0, 4)) await runAndAccept(stepId)
-    const inB0 = elicitTurns.filter((id) => id.startsWith("B-0"))
-    expect(inB0.length, "fast: tối đa 2 lượt trong phase B-0").toBeLessThanOrEqual(2)
+    expect(elicitTurns).toEqual(["B-0.1", "B-0.2", "B-0.3", "B-0.4"])
   })
 
   it("skill của pha Brief đã viết thật và không khai ghi collection của SRS", () => {

@@ -186,7 +186,6 @@ export interface StepProjection {
   skill: string | null
   writable: readonly string[]
   spine_version: number
-  working_mode: Spine["project"]["working_mode"]
   projection: Record<string, unknown>
   emptyFields: string[]
   addendum: AddendumForModel[]
@@ -202,6 +201,19 @@ export const ASSUMPTION_KEYS_READ = "assumptions:id,path,status"
 const readsWholeAssumptions = (raw: string): boolean =>
   raw === ASSUMPTIONS_WRITE || raw.startsWith(`${ASSUMPTIONS_WRITE}:`)
 
+/**
+ * Field còn trong schema (hợp đồng đóng băng) nhưng không còn được đọc. `project.working_mode` (FLF-220):
+ * AI tự quyết hỏi nhiều hay ít, nên field này luôn null — để trong projection thì mọi step đọc `project`
+ * đều thấy một "field trống" và gọi elicit vô ích, còn model thì hỏi user cách làm việc.
+ */
+const RETIRED_FIELDS: Readonly<Record<string, readonly string[]>> = { project: ["working_mode"] }
+
+const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
+  const retired = RETIRED_FIELDS[selector.path.join(".")]
+  if (!retired || !isRecord(value)) return value
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !retired.includes(key)))
+}
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -211,7 +223,7 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
 
   for (const raw of stepSpec.reads) {
     const selector = parseSelector(raw)
-    const value = selectValue(spine, selector, loop)
+    const value = withoutRetiredFields(selector, selectValue(spine, selector, loop))
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
   }
@@ -232,7 +244,6 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     skill: stepSpec.skill,
     writable: stepSpec.writes,
     spine_version: spine.spine_version,
-    working_mode: spine.project.working_mode,
     projection,
     emptyFields,
     addendum: addendumFor(spine, stepId).map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
@@ -272,11 +283,17 @@ export const TRANSCRIPT_TAIL_MESSAGES = 20
 
 const estimateTokens = (text: string): number => Math.ceil(text.length / 4)
 
-/** Chỉ tin nhắn gắn đúng step hiện tại (không phải toàn transcript). */
+/**
+ * Tin nhắn của step hiện tại, cộng lượt phỏng vấn đầu giai đoạn của nó (không phải toàn transcript). Lượt
+ * phỏng vấn lưu với `step` là đơn vị giai đoạn (`B-1`, `S-5@S03`); câu trả lời mở user gõ gộp một đoạn không
+ * vào được sổ quyết định, nên thiếu nó ở đây thì lượt soạn không bao giờ thấy điều user đã trả lời.
+ */
 const loadTranscriptTail = async (sessionId: string | null | undefined, stepId: string): Promise<string> => {
   if (!sessionId) return ""
   const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
-  const messages = (session?.messages ?? []).filter((m) => m.step === stepId).slice(-TRANSCRIPT_TAIL_MESSAGES)
+  const { phase, loop } = parseStepId(stepId)
+  const phaseUnit = loop ? `${phase}@${loop}` : phase
+  const messages = (session?.messages ?? []).filter((m) => m.step === stepId || m.step === phaseUnit).slice(-TRANSCRIPT_TAIL_MESSAGES)
   return messages.map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`).join("\n")
 }
 

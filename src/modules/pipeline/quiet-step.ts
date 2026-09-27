@@ -79,9 +79,7 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (conflicting.length > 0) {
     return { quiet: false, reason_vi: `${conflicting.length} giả định trái với điều bạn đã chốt` }
   }
-  // Chế độ Nhanh: giả định mới không mâu thuẫn được gom lại ở cổng chốt cuối phase
-  if (input.reviewMode === "balanced" && input.newAssumptions.length > 0) {
-    return { quiet: false, reason_vi: `${input.newAssumptions.length} giả định mới cần bạn xem` }
-  }
+  // "Cuối giai đoạn" (`fast`, và `balanced` cũ xử lý như `fast` — FLF-220): giả định mới không mâu thuẫn
+  // được gom lên cổng chốt cuối phase, không dừng giữa phase.
   return { quiet: true, reason_vi: "Bước không có gì cần bạn quyết" }
 }

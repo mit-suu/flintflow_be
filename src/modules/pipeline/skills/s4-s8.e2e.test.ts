@@ -485,21 +485,21 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(after.steps.find((s) => s.id === second.stopped_at)?.status, "bước đang chờ user chưa accepted").not.toBe("accepted")
   })
 
-  it("FLF-208 R3: hỏi gộp đầu giai đoạn — user trả lời một lần, các bước bên trong không hỏi lại", async () => {
+  it.each(["balanced", "strict"] as const)("FLF-208 R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (%s) — chủ đề đã trả lời không bị hỏi lại", async (reviewMode) => {
     seedSpine()
+    ;(db.spines[0].project as { review_mode: string }).review_mode = reviewMode
     seedSession()
     const elicitCalls: string[] = []
     const interviewElicit: StepRunnerDeps["elicitExecutor"] = async (input, projectId, userId) => {
       const stepId = (input.promptVariables as { step_id: string }).step_id
       elicitCalls.push(stepId)
       const result = await elicitExecutor(input, projectId, userId)
-      // Chỉ lượt hỏi gộp (step_id = đơn vị giai đoạn) mới có câu hỏi
-      if (stepId !== "S-4") return result
+      // Mọi lượt đều hỏi lại cùng chủ đề — sổ quyết định phải chặn ở các bước bên trong
       return {
         ...result,
         data: {
           reply: "Vài câu cho cả giai đoạn màn hình",
-          questions: [{ question: "Màn nào là màn cốt lõi?", suggestedAnswers: ["Đặt lịch"], multiple: false, topic_key: "screen_scope" } as never]
+          questions: [{ question: "Màn nào là màn cốt lõi?", options: [{ label: "Đặt lịch" }], multiple: false, topic_key: "screen_scope" } as never]
         }
       }
     }
@@ -514,10 +514,10 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(submitAnswer(PROJECT, "S-4", SESSION, [{ question_id: "Q1", answer: "Màn Đặt lịch" }])).toBe(true)
     await run
 
-    // Câu trả lời vào sổ quyết định, và không bước nào trong giai đoạn hỏi lại
+    // Câu trả lời vào sổ quyết định, và không bước nào trong giai đoạn hỏi lại chủ đề đó
     const spine = (await repo.get(PROJECT))!
     expect(spine.decisions.map((d) => d.topic_key)).toContain("screen_scope")
-    expect(elicitCalls.filter((id) => id.startsWith("S-4.")), "bước bên trong không gọi vòng hỏi riêng").toEqual([])
+    expect(elicitCalls[0]).toBe("S-4")
     expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(1)
   })
 

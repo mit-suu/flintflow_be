@@ -8,7 +8,18 @@ import { buildDocumentContext } from "../../shared/ai/document-context.service.j
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
+import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
+
+/**
+ * FLF-220: câu hỏi trong tin nhắn CHAT đi qua cùng luật hình dạng với pipeline (≤ 4 câu, 2–4 lựa chọn, bỏ
+ * "Khác" model tự viết) rồi mới lưu — FE chỉ đọc một dạng `options`.
+ */
+const shapeChatReply = (data: unknown): unknown => {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return data
+  const reply = data as Record<string, unknown>
+  return { ...reply, questions: shapeChatQuestions(reply.questions) }
+}
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
   // T13: không tắt (isActive) session khác của project — nhiều session chat (không pipeline) có thể
@@ -236,9 +247,10 @@ export const sendMessageAndGetResponse = async (
   }
 
   // 7. Add AI response to history
-  const contentToStore = typeof aiResult.data === "string"
-    ? aiResult.data
-    : JSON.stringify(aiResult.data)
+  const replyData = shapeChatReply(aiResult.data)
+  const contentToStore = typeof replyData === "string"
+    ? replyData
+    : JSON.stringify(replyData)
 
   const aiMsg: IChatMessage = {
     role: "ai",
@@ -366,9 +378,10 @@ export const sendMessageStream = async (
     )
 
     // 7. Add AI response to MongoDB history
-    const contentToStore = typeof aiResult.data === "string"
-      ? aiResult.data
-      : JSON.stringify(aiResult.data)
+    const replyData = shapeChatReply(aiResult.data)
+    const contentToStore = typeof replyData === "string"
+      ? replyData
+      : JSON.stringify(replyData)
 
     const aiMsg: IChatMessage = {
       role: "ai",
@@ -387,7 +400,7 @@ export const sendMessageStream = async (
           `data: ${JSON.stringify({
             type: "finish",
             session,
-            data: aiResult.data,
+            data: replyData,
             tokensUsed: aiResult.tokensUsed,
             cost: aiResult.cost
           })}\n\n`

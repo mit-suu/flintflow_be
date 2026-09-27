@@ -19,6 +19,7 @@
 import { allocateId } from "../spine/id-allocator.js"
 import type { Decision, Spine } from "../spine/spine.types.js"
 import type { Op } from "../spine/op.types.js"
+import type { QuestionOption } from "../../shared/ai/response-parser.js"
 
 /**
  * Khoá chủ đề chuẩn hoá. Model được dùng khoá tự do, nhưng mọi khoá quen thuộc phải rơi về đúng một tên —
@@ -94,7 +95,8 @@ export const activeDecisions = (spine: Pick<Spine, "decisions">): Map<string, De
 
 export interface AskedQuestion {
   question: string
-  suggestedAnswers: string[]
+  header?: string
+  options: QuestionOption[]
   multiple?: boolean
   topic_key?: string
   /** Model khẳng định chủ đề này cần hỏi lại (dữ liệu mới mâu thuẫn) — kèm lý do trong `conflict`. */
@@ -152,11 +154,13 @@ export const decisionOps = (spine: Spine, stepId: string, answered: readonly Ans
   const at = now.toISOString()
 
   for (const item of answered) {
-    if (item.answer.trim() === "") continue
+    // Đuôi "(Khuyến nghị)" là nhãn hiển thị của thẻ hỏi, không phải một phần giá trị đã chốt
+    const answer = item.answer.replace(RECOMMENDED_SUFFIX, "").trim()
+    if (answer === "") continue
     const id = allocateId(working, "decisions") ?? `DC${working.decisions.length + 1}`
     const previous = activeDecisions(working).get(item.topic_key)
     if (previous) {
-      if (previous.answer.trim() === item.answer.trim()) continue
+      if (previous.answer.trim() === answer) continue
       ops.push({ op: "set", path: `decisions[id=${previous.id}].superseded_by`, value: id })
       working.decisions = working.decisions.map((d) => (d.id === previous.id ? { ...d, superseded_by: id } : d))
     }
@@ -164,7 +168,7 @@ export const decisionOps = (spine: Spine, stepId: string, answered: readonly Ans
       id,
       topic_key: item.topic_key,
       question: item.question,
-      answer: item.answer.trim(),
+      answer,
       step_id: stepId,
       at,
       superseded_by: null
@@ -175,6 +179,9 @@ export const decisionOps = (spine: Spine, stepId: string, answered: readonly Ans
   return ops
 }
 
+/** Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). */
+export const RECOMMENDED_SUFFIX = /\s*\((khuyến nghị|recommended)\)\s*$/i
+
 /** Đuôi rỗng nghĩa trong tên hệ thống — "Minh An Clinic Appointment System" chỉ dài thêm, không rõ thêm. */
 const FILLER_NAME_SUFFIX = /\s+(system|app|application|platform|software|solution|tool|portal)$/i
 
@@ -183,9 +190,9 @@ const FILLER_NAME_SUFFIX = /\s+(system|app|application|platform|software|solutio
  * vi phạm thì server lọc, thay vì để user chọn nhầm rồi tên sai đi vào bìa tài liệu và mọi sơ đồ.
  * Lọc hết thì trả lại nguyên bản — thà có gợi ý chưa chuẩn còn hơn một câu hỏi trống trơn.
  */
-export const sanitizeSuggestions = (topicKey: string, options: readonly string[]): string[] => {
+export const sanitizeSuggestions = <T extends { label: string }>(topicKey: string, options: readonly T[]): T[] => {
   if (topicKey !== "system_name") return [...options]
-  const kept = options.filter((option) => !FILLER_NAME_SUFFIX.test(option.trim()))
+  const kept = options.filter((option) => !FILLER_NAME_SUFFIX.test(option.label.replace(RECOMMENDED_SUFFIX, "").trim()))
   return kept.length > 0 ? kept : [...options]
 }
 

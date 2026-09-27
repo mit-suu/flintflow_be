@@ -120,6 +120,25 @@ describe("projectStep", () => {
     const overview = projectStep(load("spine-fixture-minimal.json"), "S-2.2")
     expect(overview.emptyFields.every((f) => f.startsWith("project"))).toBe(true)
   })
+
+  it("FLF-220: project.working_mode đã nghỉ — không vào projection, không tính là field trống", () => {
+    const spine = structuredClone(FIXTURE)
+    spine.project = {
+      ...spine.project,
+      system_name: "Minh An Booking",
+      vision: "V",
+      goals: ["G1"],
+      type: "web_application",
+      domain: "healthcare",
+      complexity: "medium",
+      form_factor: "web_app",
+      stakes: "production",
+      working_mode: null
+    }
+    const p = projectStep(spine, "B-0.2")
+    expect(p.emptyFields).toEqual([])
+    expect(p.projection.project).not.toHaveProperty("working_mode")
+  })
 })
 
 describe("buildStepContext", () => {
@@ -144,6 +163,23 @@ describe("buildStepContext", () => {
     expect(ctx.documents).toBe("DOC")
     expect(ctx.contextTokens).toBeGreaterThan(7)
     expect(buildDocumentContext).toHaveBeenCalledWith("p", "draft", "S-3.1", expect.any(Number), undefined, undefined)
+  })
+
+  it("transcriptTail kèm lượt phỏng vấn đầu giai đoạn (câu trả lời mở không vào sổ quyết định)", async () => {
+    vi.mocked(ChatSession.findById).mockReturnValue({
+      lean: async () => ({
+        messages: [
+          { role: "ai", content: "1. Mô tả quy trình?\n2. Ai duyệt?", step: "B-1", createdAt: new Date() },
+          { role: "user", content: "Khách đặt online, quản lý duyệt", step: "B-1", createdAt: new Date() },
+          { role: "user", content: "Câu của bước khác", step: "B-1.2", createdAt: new Date() },
+          { role: "user", content: "Giai đoạn khác", step: "B-0", createdAt: new Date() }
+        ]
+      })
+    } as never)
+    const ctx = await buildStepContext("p", "B-1.1", { sessionId: "s1" })
+    expect(ctx.transcriptTail).toContain("User: Khách đặt online, quản lý duyệt")
+    expect(ctx.transcriptTail).not.toContain("Câu của bước khác")
+    expect(ctx.transcriptTail).not.toContain("Giai đoạn khác")
   })
 
   it("stepNeedsSourceDocuments theo token documents của registry", () => {

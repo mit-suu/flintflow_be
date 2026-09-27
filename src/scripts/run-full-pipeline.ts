@@ -198,9 +198,13 @@ const log = (line: string): void => {
 interface Question {
   id: string
   text: string
-  options?: string[]
+  /** Chuỗi trơn ở run-state cũ; object `{label, description?, preview?}` từ FLF-220. */
+  options?: Array<string | { label: string }>
   multiple?: boolean
 }
+
+const labelOf = (option: string | { label: string }): string =>
+  (typeof option === "string" ? option : option.label).replace(/\s*\((khuyến nghị|recommended)\)\s*$/i, "").trim()
 
 let briefSent = ARGS.noBrief
 
@@ -211,9 +215,8 @@ let briefSent = ARGS.noBrief
  */
 const answerFor = (q: Question): string | string[] => {
   if (q.options?.length) {
-    // Ưu tiên chế độ nhanh khi được hỏi (B-0.4 Working Mode) để một lượt chạy trọn không vượt ví.
-    const fast = q.options.find((o) => /fast|nhanh|quick/i.test(o))
-    const pick = fast ?? (q.options[0] as string)
+    // Phương án đầu là phương án khuyến nghị
+    const pick = labelOf(q.options[0])
     return q.multiple ? [pick] : pick
   }
   if (!briefSent) {

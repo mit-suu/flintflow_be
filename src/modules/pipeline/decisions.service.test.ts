@@ -33,8 +33,8 @@ describe("filterAskedQuestions (BUG-21)", () => {
 
   it("bỏ câu thuộc chủ đề đã chốt và nói rõ giá trị đã chốt", () => {
     const result = filterAskedQuestions(spine, [
-      { question: "Uptime bao nhiêu?", suggestedAnswers: [], topic_key: "availability" },
-      { question: "Cọc bao nhiêu?", suggestedAnswers: [], topic_key: "deposit_amount" }
+      { question: "Uptime bao nhiêu?", options: [], topic_key: "availability" },
+      { question: "Cọc bao nhiêu?", options: [], topic_key: "deposit_amount" }
     ])
     expect(result.questions.map((q) => q.topic_key)).toEqual(["deposit_amount"])
     expect(result.dropped).toEqual([{ topic_key: "uptime", question: "Uptime bao nhiêu?", answer: "99%" }])
@@ -42,7 +42,7 @@ describe("filterAskedQuestions (BUG-21)", () => {
 
   it("model tuyên bố mâu thuẫn thì được hỏi lại", () => {
     const result = filterAskedQuestions(spine, [
-      { question: "Uptime 99% hay 99.9%?", suggestedAnswers: [], topic_key: "uptime", conflict: "Brief mới nói 99.9%" }
+      { question: "Uptime 99% hay 99.9%?", options: [], topic_key: "uptime", conflict: "Brief mới nói 99.9%" }
     ])
     expect(result.questions).toHaveLength(1)
     expect(result.dropped).toEqual([])
@@ -50,8 +50,8 @@ describe("filterAskedQuestions (BUG-21)", () => {
 
   it("hai câu cùng chủ đề trong một lượt cũng là hỏi lặp", () => {
     const result = filterAskedQuestions(spineWith([]), [
-      { question: "Giữ chỗ bao lâu?", suggestedAnswers: [], topic_key: "slot_hold_minutes" },
-      { question: "Thời gian giữ slot?", suggestedAnswers: [], topic_key: "slot_hold" }
+      { question: "Giữ chỗ bao lâu?", options: [], topic_key: "slot_hold_minutes" },
+      { question: "Thời gian giữ slot?", options: [], topic_key: "slot_hold" }
     ])
     expect(result.questions).toHaveLength(1)
     expect(result.dropped).toHaveLength(1)
@@ -60,7 +60,7 @@ describe("filterAskedQuestions (BUG-21)", () => {
   it("quyết định đã bị thay thế không còn chặn câu hỏi", () => {
     const superseded = spineWith([decision({ superseded_by: "DC02" })])
     expect(activeDecisions(superseded).size).toBe(0)
-    expect(filterAskedQuestions(superseded, [{ question: "Uptime?", suggestedAnswers: [], topic_key: "uptime" }]).questions).toHaveLength(1)
+    expect(filterAskedQuestions(superseded, [{ question: "Uptime?", options: [], topic_key: "uptime" }]).questions).toHaveLength(1)
   })
 })
 
@@ -84,6 +84,12 @@ describe("decisionOps", () => {
     expect(decisionOps(spineWith([]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "  " }])).toEqual([])
   })
 
+  it("bỏ đuôi (Khuyến nghị)/(Recommended) — nhãn của thẻ hỏi, không phải giá trị đã chốt", () => {
+    expect(decisionOps(spineWith([decision()]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "99% (Khuyến nghị)" }])).toEqual([])
+    const ops = decisionOps(spineWith([]), "S-6.1", [{ topic_key: "uptime", question: "Uptime?", answer: "99.9% (Recommended)" }])
+    expect(ops[0].value).toMatchObject({ answer: "99.9%" })
+  })
+
   it("sổ đưa vào prompt chỉ gồm điều còn hiệu lực", () => {
     const spine = spineWith([decision(), decision({ id: "DC02", topic_key: "deposit_amount", answer: "50.000đ", superseded_by: "DC03" })])
     expect(ledgerForPrompt(spine)).toEqual([{ topic_key: "uptime", answer: "99%", step_id: "S-1.4" }])
@@ -92,13 +98,13 @@ describe("decisionOps", () => {
 
 describe("sanitizeSuggestions (BUG-30)", () => {
   it("bỏ tên hệ thống có đuôi rỗng nghĩa", () => {
-    expect(sanitizeSuggestions("system_name", ["Minh An Booking", "Minh An Clinic Appointment System", "CarePoint App"])).toEqual([
-      "Minh An Booking"
+    expect(sanitizeSuggestions("system_name", [{ label: "Minh An Booking (Khuyến nghị)" }, { label: "Minh An Clinic Appointment System" }, { label: "CarePoint App" }])).toEqual([
+      { label: "Minh An Booking (Khuyến nghị)" }
     ])
   })
 
   it("lọc hết thì giữ nguyên bản, và chủ đề khác không bị đụng", () => {
-    expect(sanitizeSuggestions("system_name", ["Clinic System"])).toEqual(["Clinic System"])
-    expect(sanitizeSuggestions("uptime", ["99%", "99.9% System"])).toEqual(["99%", "99.9% System"])
+    expect(sanitizeSuggestions("system_name", [{ label: "Clinic System" }])).toEqual([{ label: "Clinic System" }])
+    expect(sanitizeSuggestions("uptime", [{ label: "99%" }, { label: "99.9% System" }])).toEqual([{ label: "99%" }, { label: "99.9% System" }])
   })
 })
