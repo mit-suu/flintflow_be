@@ -99,6 +99,8 @@ export interface StepRunnerDeps {
   message?: string
   /** `no_idea`: user chưa có ý tưởng — B-0.1 hỏi gợi mở bằng văn xuôi, không đưa lựa chọn. */
   intent?: RunIntent
+  /** `runPhase` đã ghi `message` vào transcript (trước lượt phỏng vấn) — `runStep` không ghi lại lần nữa. */
+  messageRecorded?: boolean
 }
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
@@ -295,10 +297,49 @@ const refresh = async (projectId: string): Promise<{ spine: Spine; spineVersion:
   return { spine: stripRecord(record), spineVersion: record.spine_version }
 }
 
-const pushTranscript = async (sessionId: string, stepId: string, role: "user" | "ai", content: string): Promise<void> => {
+/** Lọc cả `projectId`: session của project khác không bao giờ bị ghi, kể cả khi lời gọi quên kiểm session trước. */
+const pushTranscript = async (projectId: string, sessionId: string, stepId: string, role: "user" | "ai", content: string): Promise<void> => {
   const msg: IChatMessage = { role, content, step: stepId, createdAt: new Date() }
-  await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: msg } })
+  await ChatSession.updateOne({ _id: sessionId, projectId }, { $push: { messages: msg } })
 }
+
+/**
+ * FLF-221 — chat là nút chạy: tin nhắn user gõ để khởi động lượt chạy vào transcript gắn `stepId`, để Intake/Elicit/Draft
+ * của step đó thấy nó. Kiểm session TRƯỚC khi ghi (403 `NOT_PIPELINE_SESSION` với session của project khác).
+ */
+export const recordUserMessage = async (projectId: string, sessionId: string, stepId: string, message: string): Promise<void> => {
+  await requirePipelineSession(projectId, sessionId)
+  await pushTranscript(projectId, sessionId, stepId, "user", message)
+}
+
+/**
+ * Có ý tưởng để làm việc chưa — hàm thuần, không dò chữ trong tin nhắn (chip "Mình chưa có ý tưởng" gửi
+ * `intent: "no_idea"`). Chưa có ⇒ B-0.1 hỏi gợi mở bằng văn xuôi, không thẻ lựa chọn, không "(Khuyến nghị)".
+ */
+export const hasIdea = (input: {
+  spine: { addendum: readonly unknown[]; project: { vision: string | null } }
+  documents: string
+  message?: string
+  intent?: RunIntent
+}): boolean =>
+  input.spine.addendum.length > 0 ||
+  (input.spine.project.vision ?? "").trim() !== "" ||
+  input.documents.trim() !== "" ||
+  ((input.message ?? "").trim() !== "" && input.intent !== "no_idea")
+
+/**
+ * B-0.1 không hỏi field mà lượt soạn được phép tự suy ra từ ý tưởng (kèm giả định): nền tảng và mức độ quan trọng.
+ * Hỏi "web hay app?" ngay sau khi user vừa kể "ứng dụng đặt lịch trên điện thoại" là câu hỏi thừa (FLF-221).
+ */
+export const B01_INFERABLE_FIELDS: ReadonlySet<string> = new Set(["project.form_factor", "project.stakes"])
+
+/**
+ * B-0.2/B-0.3 chỉ chốt một field mà B-0.1 thường đã suy ra. Field đã có giá trị ở lượt đầu ⇒ không gọi model
+ * (0 usage), đi thẳng tới cổng/tự duyệt theo chế độ duyệt. Revision/reopen vẫn chạy model như thường.
+ */
+export const B0_FIELD_STEPS: Readonly<Record<string, "form_factor" | "stakes">> = Object.freeze({ "B-0.2": "form_factor", "B-0.3": "stakes" })
+
+const NO_IDEA_USER_MESSAGE = "[no_idea] Mình chưa có ý tưởng cụ thể — gợi ý giúp mình bắt đầu từ đâu."
 
 /** `calls_used`/`regenerate_used` của vòng hiện tại của step. */
 const usageCounts = meter.roundCounts
@@ -825,6 +866,17 @@ export const runStep = async (
       if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
     }
 
+    // FLF-221: tin chat khởi động lượt chạy — ghi sau khi session đã được kiểm và step chạy được, trước Intake để
+    // transcript của step (nạp một lần ở buildStepContext) có nó. Không tự tạo addendum từ đây: Draft bóc tách.
+    const userMessage = d.message?.trim() ? d.message.trim() : undefined
+    if (userMessage && !d.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", userMessage)
+
+    // B-0.2/B-0.3: field đã có sau B-0.1 ⇒ lượt đầu không gọi model. Xét theo giá trị Spine, không theo emptyFields
+    // (`pick` bỏ key thiếu nên emptyFields có thể rỗng sai).
+    const b0Field = B0_FIELD_STEPS[stepDef.template_id]
+    const firstRound = !existingStep || existingStep.status === "pending"
+    const fieldAlreadySet = b0Field !== undefined && firstRound && spine.project[b0Field] !== null && spine.project[b0Field] !== undefined
+
     // ─── init: cập nhật progress cursor + đặt step in_progress (B7: reset vòng khi reopen sau accepted) ──
     const phaseChanged = spine.progress.current_phase !== stepDef.phase
     const reopenedAfterAccept =
@@ -907,10 +959,12 @@ export const runStep = async (
       stepSummary.push(...summarizeChanges(s9Changes, spine))
     }
 
-    if (needsDraft) {
+    if (needsDraft && !fieldAlreadySet) {
       // FLF-220: AI tự quyết hỏi nhiều hay ít — hỏi khi bước còn field trống, ở mọi chế độ duyệt. Chủ đề đã
       // chốt (kể cả ở phỏng vấn đầu giai đoạn) bị `filterAskedQuestions` chặn nên không hỏi lặp.
-      const shouldElicit = ctx.emptyFields.length > 0
+      const missing = stepDef.template_id === "B-0.1" ? ctx.emptyFields.filter((field) => !B01_INFERABLE_FIELDS.has(field)) : ctx.emptyFields
+      const noIdeaYet = !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })
+      const shouldElicit = missing.length > 0 || noIdeaYet
 
       if (shouldElicit) {
         assertNotAborted(d.signal, stepId)
@@ -928,7 +982,7 @@ export const runStep = async (
                 step_id: stepId,
                 step_name: ctx.label_en,
                 max_questions: MAX_QUESTIONS_PER_TURN,
-                missing: ctx.emptyFields,
+                missing,
                 // BUG-19: vòng hỏi phải thấy quy tắc và NFR đã chốt, nếu không nó gợi ý ngược lại chính
                 // câu trả lời của user ở bước trước.
                 projection: elicitProjection(spine, stepId),
@@ -938,7 +992,7 @@ export const runStep = async (
                 // R4: sổ quyết định — "đã chốt gì, ở bước nào"
                 decisions: ledgerForPrompt(spine),
                 recent_turns: ctx.transcriptTail,
-                user_message: "(tự động — vòng elicit đầu step)"
+                user_message: noIdeaYet ? NO_IDEA_USER_MESSAGE : (userMessage ?? "(tự động — vòng elicit đầu step)")
               }
             },
               projectId,
@@ -958,7 +1012,7 @@ export const runStep = async (
           logId: elicitResult.logId || null
         })
         emit({ type: "elicit", step_id: stepId, delta: elicitResult.data.reply })
-        await pushTranscript(sessionId, stepId, "ai", elicitResult.data.reply)
+        await pushTranscript(projectId, sessionId, stepId, "ai", elicitResult.data.reply)
 
         const turnsApplied = await applyTransaction(projectId, {
           base_version: spineVersion,
@@ -975,7 +1029,7 @@ export const runStep = async (
           console.info(`[step-runner] ${stepId}: bỏ ${filtered.dropped.length} câu đã chốt (${filtered.dropped.map((d) => d.topic_key).join(", ")})`)
         }
 
-        const { asked, questions } = shapeQuestions(filtered.questions)
+        const { asked, questions } = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet })
         if (questions.length > 0) {
           emit({ type: "answer_needed", step_id: stepId, questions })
           // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07)
@@ -987,7 +1041,7 @@ export const runStep = async (
           // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
           const questionOf = (id: string): string => asked[Number(/^Q(\d+)$/.exec(id)?.[1] ?? 0) - 1]?.question ?? id
           const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
-          for (const a of answers) await pushTranscript(sessionId, stepId, "user", answerText(a.answer))
+          for (const a of answers) await pushTranscript(projectId, sessionId, stepId, "user", answerText(a.answer))
           answersText = `${answersText}\n${answersJoined}`.trim()
 
           // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa. Chờ user có thể mất

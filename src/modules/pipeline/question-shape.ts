@@ -79,12 +79,23 @@ export interface ShapedQuestions<Q extends ModelQuestion> {
   questions: ContractQuestion[]
 }
 
-export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[]): ShapedQuestions<Q> => {
+export interface ShapeOptions {
+  /**
+   * User chưa có ý tưởng (FLF-221, `hasIdea` false): chưa có gì làm căn cứ để khuyến nghị ⇒ bỏ đuôi "(Khuyến nghị)"
+   * ở mọi option, giữ nguyên thứ tự model đưa (không đẩy option nào lên đầu).
+   */
+  noIdeaYet?: boolean
+  /** Chỉ hỏi bằng văn xuôi: bỏ hết option — câu gợi mở cho user chưa có ý tưởng không phải là câu chọn. */
+  proseOnly?: boolean
+}
+
+export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], shape: ShapeOptions = {}): ShapedQuestions<Q> => {
   const asked = input
     .filter((q) => q.question.trim() !== "")
     .slice(0, MAX_QUESTIONS_PER_TURN)
     .map((q) => {
-      const options = shapeOptions(q.options, q.topic_key)
+      const shaped = shape.proseOnly ? [] : shapeOptions(q.options, q.topic_key)
+      const options = shape.noIdeaYet ? shaped.map((o) => ({ ...o, label: stripRecommended(o.label) })) : shaped
       const header = shapeHeader(q.header)
       return { ...q, options, header, multiple: options.length > 0 ? q.multiple : undefined }
     })

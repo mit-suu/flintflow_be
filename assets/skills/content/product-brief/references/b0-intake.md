@@ -4,6 +4,13 @@
 
 ## B-0.1 Brain Dump
 
+FLF-221: mở đầu kiểu "kể hết → AI chỉ hỏi phần thiếu". User gõ ý tưởng vào ô chat là B-0.1 chạy (tin nhắn vào
+transcript của step). Vòng hỏi **không** hỏi `form_factor`/`stakes` (server loại khỏi `missing`); lượt soạn tự suy
+ra hai field đó kèm giả định, gợi ý `system_name` nếu user chưa đặt, và tóm tắt ý tưởng một câu để user chốt ở cổng
+B-0.1. User bấm "Mình chưa có ý tưởng" (`intent: "no_idea"`) ⇒ vòng hỏi chỉ đưa 2–3 câu gợi mở bằng văn xuôi, không
+thẻ lựa chọn, không "(Khuyến nghị)". B-0.2/B-0.3 không gọi model khi field đã có; B-0 không có phỏng vấn gộp đầu giai
+đoạn.
+
 Mục tiêu không phải là hỏi đúng câu, mà là **để user nói hết** rồi mới sắp xếp. Ba nguồn cùng lúc:
 tin nhắn tự do, tài liệu upload (`document-context` đưa vào content guidance), và những gì đã có trong
 `project{}` nếu project được tạo lại.

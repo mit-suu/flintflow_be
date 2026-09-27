@@ -15,7 +15,7 @@
  * cổng chốt rơi đúng vào S-5.5 của màn đó (Phases §6.2).
  */
 
-import { runStep, defaultStepRunnerDeps, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, defaultStepRunnerDeps, recordUserMessage, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { projectStep } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
@@ -57,14 +57,22 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
  * Không hỏi lại điều đã chốt (sổ quyết định lọc trước), và câu trả lời ghi thẳng vào sổ nên mọi bước sau
  * đều dùng được — kể cả khi user rời máy giữa chừng rồi quay lại. Điều còn thiếu thì step bên trong tự hỏi.
  */
+/**
+ * B-0 không phỏng vấn gộp (FLF-221): user vừa kể ý tưởng ở B-0.1, B-0.2/B-0.3 chỉ chốt hai field B-0.1 thường đã suy
+ * ra — một lượt hỏi gộp ở đây vừa tốn một lượt model vừa hỏi lại điều user chưa kịp nói.
+ */
+export const PHASES_WITHOUT_INTERVIEW: ReadonlySet<string> = new Set(["B-0"])
+
 const runPhaseInterview = async (
   projectId: string,
   unit: string,
   sessionId: string,
   userId: string,
   emit: Emit,
-  deps: StepRunnerDeps
+  deps: StepRunnerDeps,
+  userMessage?: string
 ): Promise<boolean> => {
+  if (PHASES_WITHOUT_INTERVIEW.has(unit)) return false
   const { spine } = await load(projectId)
   // Chuỗi dừng giữa chừng rồi chạy tiếp là chuyện thường (user duyệt một cổng chốt). Không nhớ đã phỏng
   // vấn giai đoạn này thì lần chạy tiếp lại hỏi lại từ đầu — mất credit và hỏi đúng thứ user vừa trả lời.
@@ -98,8 +106,9 @@ const runPhaseInterview = async (
           addendum: [],
           content_guidance: "",
           decisions: ledgerForPrompt(spine),
-          recent_turns: "",
-          user_message: "(tự động — hỏi gộp đầu giai đoạn)"
+          // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói
+          recent_turns: userMessage ? `User: ${userMessage}` : "",
+          user_message: userMessage ?? "(tự động — hỏi gộp đầu giai đoạn)"
         }
       },
       projectId,
@@ -218,9 +227,17 @@ export const runPhase = async (
   const newAssumptions: { id: string; text: string }[] = []
   let flagsAtStart: { red: number; yellow: number } | null = null
 
-  // R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt. Các bước bên trong vẫn hỏi được khi còn field
+  // FLF-221: chat là nút chạy — tin nhắn mở giai đoạn vào transcript gắn với bước ĐẦU sẽ chạy (không gắn đơn vị giai
+  // đoạn: tin gắn đơn vị bị coi là "đã phỏng vấn"). Ghi trước lượt phỏng vấn để thứ tự hội thoại đúng; kiểm session
+  // trước khi ghi. Chỉ bước đầu nhận message/intent — các bước sau là lượt chạy tiếp, không phải lời user.
+  const message = deps.message?.trim() ? deps.message.trim() : undefined
+  if (message) await recordUserMessage(projectId, sessionId, first.id, message)
+  const { message: _message, intent: _intent, messageRecorded: _recorded, ...laterDeps } = deps
+  let firstDeps: Partial<StepRunnerDeps> | null = { ...laterDeps, ...(message ? { message, messageRecorded: true } : {}), ...(deps.intent ? { intent: deps.intent } : {}) }
+
+  // R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (trừ B-0). Các bước bên trong vẫn hỏi được khi còn field
   // trống — sổ quyết định chặn lặp lại chủ đề vừa trả lời ở đây.
-  await runPhaseInterview(projectId, unit, sessionId, userId, emit, d)
+  await runPhaseInterview(projectId, unit, sessionId, userId, emit, d, message)
 
   for (let index = 0; index < MAX_PHASE_STEPS; index++) {
     const { record, spine } = await load(projectId)
@@ -238,7 +255,9 @@ export const runPhase = async (
     emit({ type: "phase_progress", step_id: next.id, phase: unit, step_index: index + 1, step_total: Math.max(totalSteps, index + 1), needs_user: false })
 
     const collector = collectSignals(emit)
-    await runStep(projectId, next.id, sessionId, userId, collector.emit, deps)
+    const stepDeps = firstDeps ?? laterDeps
+    firstDeps = null
+    await runStep(projectId, next.id, sessionId, userId, collector.emit, stepDeps)
     const { asked, gate: gateEvent, error, renderFailed } = collector.signals
 
     if (error || !gateEvent) {
@@ -278,7 +297,7 @@ export const runPhase = async (
       return { phase: unit, stopped_at: next.id, reason_vi: verdict.reason_vi, steps: outcomes }
     }
 
-    const accepted = await gate(projectId, next.id, userId, { action: "accept", base_version: (await load(projectId)).record.spine_version }, deps)
+    const accepted = await gate(projectId, next.id, userId, { action: "accept", base_version: (await load(projectId)).record.spine_version }, laterDeps)
     void accepted
     void record
     emit({ type: "auto_accepted", step_id: next.id, reason_vi: verdict.reason_vi })

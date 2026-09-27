@@ -40,18 +40,18 @@ Two habits decide whether this phase is useful:
 
 ## B-0 — Intake (3 steps)
 
-- **B-0.1 Brain Dump.** The user talks freely, and uploaded documents (if any) arrive in the content
-  guidance. Extract, then read back a short summary for confirmation. Write **one `addendum[]` entry per
-  distinct topic** right now — `{id, topic, content (user's own words/language), content_en (English,
-  for rendering), target_section, captured_at}`. Do not wait for a tidy answer before writing.
-  Also settle **`project.system_name`** — the English product name printed on the diagrams and the
-  document cover, kept apart from the working project name (never change `project.name`). The user gave an
-  English name ⇒ set it. No name, or only a Vietnamese one ⇒ suggest 2–3 short English names (2–4 words,
-  Title Case, no "System"/"App" filler) and set it only once the user picks one.
-- **B-0.2 `project.form_factor`** — where the product lives: `web_app`, `mobile_app`, `desktop_app`,
-  `api_service`, `cli`, `embedded`. Ask once; infer from the brain dump when it is obvious.
-- **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. This drives NFR defaults at S-6,
-  so a guess here must come with an `assumptions[]` entry.
+- **B-0.1 Brain Dump — listen first.** The user's chat message is the idea; uploaded documents (if any)
+  arrive in the content guidance. In one pass: write **one `addendum[]` entry per distinct topic** —
+  `{id, topic, content (user's own words/language), content_en (English, for rendering), target_section,
+  captured_at}`; set **`project.system_name`** (English name on diagrams and cover, never `project.name`)
+  to the name the user gave or picked — none yet ⇒ set your best 2–4-word Title Case suggestion **with an
+  `assumptions[]` entry** saying it is a suggestion; **infer `project.form_factor` and `project.stakes`**
+  from the idea, each with an `assumptions[]` entry and its reason. `notes`: the idea in **one sentence**
+  in the user's language — the gate asks the user to lock it.
+- **B-0.2 `project.form_factor`** — `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`,
+  `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
+- **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. Drives NFR defaults at S-6; a
+  guess comes with an `assumptions[]` entry. B-0.3 closes B-0: on a revision it may fix any B-0 field.
 - Never ask how the user wants to work and never write `project.working_mode` (retired): how much to ask
   is your call, and where the run stops for review is the AI settings menu.
 
@@ -131,7 +131,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## Self-check
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
-- [ ] `project.system_name` (English, user-picked), `form_factor`, `stakes` set by the end of B-0.
+- [ ] `project.system_name` (English; a suggestion carries an assumption), `form_factor`, `stakes` set by the end of B-0.
 - [ ] `project.vision` + 3–6 outcome-shaped `goals[]` by the end of B-1.1.
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.

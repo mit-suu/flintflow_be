@@ -27,6 +27,11 @@ import { activeDecisions } from "./decisions.service.js"
  */
 export const ALWAYS_GATE: ReadonlySet<string> = new Set(["B-0.1", "S-4.1", "S-9.4", "S-9.5"])
 
+/** Lý do dừng riêng của từng bước `ALWAYS_GATE` — cổng B-0.1 là nơi user chốt ý tưởng (FLF-221). */
+const ALWAYS_GATE_REASON: Readonly<Record<string, string>> = Object.freeze({
+  "B-0.1": "Chốt ý tưởng — duyệt để AI đi tiếp, hoặc nhắn điều cần sửa"
+})
+
 export interface QuietInput {
   /** Id template (không có `@màn`). */
   templateId: string
@@ -69,7 +74,7 @@ export const conflictsWithLedger = (statement: string, spine: Spine): boolean =>
 /** Bước này có được tự Accept không, và vì sao. */
 export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (input.reviewMode === "strict") return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
-  if (ALWAYS_GATE.has(input.templateId)) return { quiet: false, reason_vi: "Bước này luôn cần bạn quyết" }
+  if (ALWAYS_GATE.has(input.templateId)) return { quiet: false, reason_vi: ALWAYS_GATE_REASON[input.templateId] ?? "Bước này luôn cần bạn quyết" }
   if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }
   // FLF-220: bước có hỏi thì user đã trả lời ngay trong lượt chạy — ở "Cuối giai đoạn" điều đó không đòi
   // thêm một cổng giữa giai đoạn; nội dung vẫn gom lên cổng chốt cuối phase.

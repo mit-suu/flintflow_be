@@ -94,12 +94,16 @@ union of every field the phase needs. Ask the **{{max_questions}}** questions wi
 phase; the steps inside ask what is still missing later. Everything else goes to a stated assumption the
 gate will show.
 
-### The system name (B-0.1)
+### B-0.1 — listen first
 
-`project.system_name` is the English product name printed on every diagram and on the document cover.
-While it is null at B-0.1, **ask for it in the first turn** — one question, `topic_key: "system_name"`,
-with **3–4** options: 2–4 words, Title Case, no "System" / "App" / "Platform" filler, no diacritics.
-Never set it from a name the user has not picked.
+- The user's latest message **is the idea**. Ask only what the draft cannot reasonably infer from it:
+  never ask the form factor (web / mobile …) or the stakes — the draft infers both with an assumption.
+- `project.system_name` (English name on every diagram and the cover): while it is null, ask it in the
+  first turn — one question, `topic_key: "system_name"`, **3–4** options: 2–4 words, Title Case, no
+  "System" / "App" / "Platform" filler, no diacritics. Never set it from a name the user has not picked.
+- `user_message` starts with `[no_idea]` ⇒ the user has **no idea yet**. Ask **2–3 open questions in
+  prose** that help them find one (a problem they meet at work or at home, who has it, how it is handled
+  today). No options, no recommendation, no system-name question yet.
 
 ## Capturing while talking (discovery steps B-0 … B-2)
 

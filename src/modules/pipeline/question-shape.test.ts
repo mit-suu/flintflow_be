@@ -110,3 +110,32 @@ describe("chatReplyQuestionId", () => {
     expect(chatReplyQuestionId(null)).toBe("Q1")
   })
 })
+
+describe("FLF-221: shapeQuestions khi user chưa có ý tưởng", () => {
+  const input = [
+    {
+      question: "Bạn muốn làm cho ai?",
+      topic_key: "audience",
+      options: [
+        { label: "Cho khách hàng", description: "b" },
+        { label: "Cho chính mình (Khuyến nghị)", description: "a" }
+      ]
+    }
+  ]
+
+  it("noIdeaYet ⇒ bỏ đuôi (Khuyến nghị), giữ nguyên thứ tự option", () => {
+    const { questions } = shapeQuestions(input, { noIdeaYet: true })
+    expect(questions[0].options?.map((o) => o.label)).toEqual(["Cho khách hàng", "Cho chính mình"])
+  })
+
+  it("proseOnly ⇒ không còn option nào", () => {
+    const { questions, asked } = shapeQuestions(input, { noIdeaYet: true, proseOnly: true })
+    expect(questions[0].options).toBeUndefined()
+    expect(asked[0].options).toEqual([])
+  })
+
+  it("mặc định giữ nhãn khuyến nghị như cũ", () => {
+    const { questions } = shapeQuestions(input)
+    expect(questions[0].options?.[1].label).toBe("Cho chính mình (Khuyến nghị)")
+  })
+})

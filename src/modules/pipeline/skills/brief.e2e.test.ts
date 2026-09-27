@@ -138,7 +138,9 @@ import { STEP_SKILLS } from "../context-projection.js"
 import { getSkill } from "../../../shared/ai/prompt-registry.service.js"
 import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type ElicitOutput, type OpTransaction } from "../../../shared/ai/response-parser.js"
-import { runStep, type StepRunnerDeps } from "../step-runner.service.js"
+import { hasIdea, runStep, submitAnswer, type StepRunnerDeps } from "../step-runner.service.js"
+import { runPhase } from "../phase-runner.service.js"
+import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
 
@@ -324,5 +326,193 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(BRIEF_STEPS.filter((s) => s.startsWith("B-1"))).toHaveLength(6)
     expect(BRIEF_STEPS.filter((s) => s.startsWith("B-2"))).toHaveLength(3)
     for (const stepId of [...BRIEF_STEPS, ...S1_STEPS]) expect(getStep(stepId).id, stepId).toBe(stepId)
+  })
+})
+
+// ─── FLF-221: mở đầu kiểu "kể hết → AI chỉ hỏi phần thiếu" ────────────────────────────────
+
+const elicitResult = (reply: string, questions: ElicitOutput["questions"]): AiActionResult<ElicitOutput> => ({
+  success: true,
+  data: { reply, questions },
+  rawText: "{}",
+  actionType: "elicit" as never,
+  provider: "mock",
+  aiModel: "mock",
+  tokensUsed: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+  latencyMs: 1,
+  logId: "elicit",
+  cost: 1
+})
+
+const draftResult = (ops: OpTransaction["ops"], notes?: string): AiActionResult<OpTransaction> => ({
+  success: true,
+  data: { ops, ...(notes ? { notes } : {}) },
+  rawText: "{}",
+  actionType: "draft" as never,
+  provider: "mock",
+  aiModel: "mock",
+  tokensUsed: { promptTokens: 30, completionTokens: 60, totalTokens: 90 },
+  latencyMs: 1,
+  logId: "draft",
+  cost: 2
+})
+
+const waitFor = async (events: StepEvent[], type: StepEvent["type"]): Promise<void> => {
+  for (let i = 0; i < 100 && !events.some((e) => e.type === type); i++) await new Promise((r) => setTimeout(r, 0))
+}
+
+const acceptSteps = (ids: string[]) =>
+  ids.map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }))
+
+const IDEA = "Ứng dụng đặt lịch cắt tóc trên điện thoại cho các tiệm nhỏ, khách tự chọn giờ và thợ."
+
+describe("FLF-221: hasIdea", () => {
+  const empty = { addendum: [] as unknown[], project: { vision: null as string | null } }
+  it("có ý tưởng khi có addendum, vision, tài liệu, hoặc message không kèm intent no_idea", () => {
+    expect(hasIdea({ spine: empty, documents: "" })).toBe(false)
+    expect(hasIdea({ spine: { ...empty, addendum: [{}] }, documents: "" })).toBe(true)
+    expect(hasIdea({ spine: { ...empty, project: { vision: "V" } }, documents: "" })).toBe(true)
+    expect(hasIdea({ spine: empty, documents: "Tài liệu" })).toBe(true)
+    expect(hasIdea({ spine: empty, documents: "", message: IDEA })).toBe(true)
+    expect(hasIdea({ spine: empty, documents: "", message: "Mình chưa có ý tưởng", intent: "no_idea" })).toBe(false)
+    expect(hasIdea({ spine: empty, documents: "", message: "   " })).toBe(false)
+  })
+})
+
+describe("FLF-221: B-0 mở đầu bằng chat", () => {
+  it("intent no_idea ⇒ elicit văn xuôi: câu hỏi không có option, không '(Khuyến nghị)'", async () => {
+    seedEmpty()
+    const prompts: Record<string, unknown>[] = []
+    const { events, emit } = collect()
+    const run = runStep(PROJECT, "B-0.1", SESSION, USER, emit, {
+      draftExecutor: async () => draftResult([]),
+      elicitExecutor: async (input) => {
+        prompts.push(input.promptVariables as Record<string, unknown>)
+        return elicitResult("Mình gợi ý vài hướng nhé.", [
+          { question: "Công việc hằng ngày của bạn có việc gì mất thời gian?", topic_key: "daily_pain", options: [] },
+          {
+            question: "Bạn muốn làm cho ai?",
+            topic_key: "audience",
+            options: [
+              { label: "Cho chính mình (Khuyến nghị)", description: "Dễ bắt đầu" },
+              { label: "Cho khách hàng", description: "Cần hiểu thị trường" }
+            ]
+          }
+        ] as ElicitOutput["questions"])
+      },
+      message: "Mình chưa có ý tưởng",
+      intent: "no_idea"
+    })
+    await waitFor(events, "answer_needed")
+    const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    expect(asked.questions).toHaveLength(2)
+    expect(asked.questions.every((q) => q.options === undefined)).toBe(true)
+    expect(JSON.stringify(asked.questions)).not.toContain("Khuyến nghị")
+    expect(String(prompts[0].user_message)).toMatch(/^\[no_idea\]/)
+    submitAnswer(PROJECT, "B-0.1", SESSION, [{ question_id: "Q1", answer: "Quản lý lịch hẹn" }])
+    await run
+  })
+
+  it("có ý tưởng ⇒ elicit nhận đúng message, không hỏi form_factor/stakes; draft ghi tên, addendum, form_factor, stakes kèm giả định", async () => {
+    seedEmpty()
+    const prompts: Record<string, unknown>[] = []
+    const { events, emit } = collect()
+    await runStep(PROJECT, "B-0.1", SESSION, USER, emit, {
+      elicitExecutor: async (input) => {
+        prompts.push(input.promptVariables as Record<string, unknown>)
+        return elicitResult("Rõ rồi.", [])
+      },
+      draftExecutor: async () =>
+        draftResult(
+          [
+            { op: "set", path: "project.system_name", value: "Salon Slot" },
+            { op: "set", path: "project.form_factor", value: "mobile_app" },
+            { op: "set", path: "project.stakes", value: "production" },
+            { op: "add", path: "addendum[]", value: { id: "AD01", topic: "Booking", content: IDEA, content_en: "Barbershop booking app.", target_section: "fixed:1", captured_at: "2026-09-28T00:00:00.000Z" } },
+            { op: "add", path: "assumptions[]", value: { id: "AS01", path: "project.form_factor", statement: "Mobile app first.", statement_vi: "Ưu tiên ứng dụng điện thoại.", rationale: "User said on the phone.", origin_step_id: "B-0.1", status: "unconfirmed", confirmed_at: null } },
+            { op: "add", path: "assumptions[]", value: { id: "AS02", path: "project.stakes", statement: "Real customers, no regulation.", rationale: "Small shops.", origin_step_id: "B-0.1", status: "unconfirmed", confirmed_at: null } }
+          ],
+          "Ứng dụng đặt lịch cắt tóc cho tiệm nhỏ."
+        ),
+      message: IDEA
+    })
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect(prompts[0].user_message).toBe(IDEA)
+    expect(prompts[0].missing).not.toContain("project.form_factor")
+    expect(prompts[0].missing).not.toContain("project.stakes")
+
+    const final = (await repo.get(PROJECT))!
+    expect(final.project).toMatchObject({ system_name: "Salon Slot", form_factor: "mobile_app", stakes: "production" })
+    expect(final.addendum).toHaveLength(1)
+    expect(final.assumptions.map((a) => a.path)).toEqual(["project.form_factor", "project.stakes"])
+    expect(final.assumptions[0].statement_vi).toBe("Ưu tiên ứng dụng điện thoại.")
+    const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
+    expect(messages[0]).toMatchObject({ role: "user", content: IDEA, step: "B-0.1" })
+  })
+
+  it("/phases/B-0/run với message ⇒ B-0.1 thấy message trong transcript, không phỏng vấn gộp, dừng ở cổng B-0.1", async () => {
+    seedEmpty()
+    const elicitSteps: string[] = []
+    const transcripts: string[] = []
+    const { events, emit } = collect()
+    const result = await runPhase(PROJECT, "B-0", SESSION, USER, emit, {
+      elicitExecutor: async (input) => {
+        const vars = input.promptVariables as { step_id: string; recent_turns: string }
+        elicitSteps.push(vars.step_id)
+        transcripts.push(vars.recent_turns)
+        return elicitResult("Rõ rồi.", [])
+      },
+      draftExecutor: async () => draftResult([]),
+      message: IDEA
+    })
+    expect(elicitSteps).toEqual(["B-0.1"])
+    expect(transcripts[0]).toContain(IDEA)
+    expect(result.stopped_at).toBe("B-0.1")
+    const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
+    expect(phaseGate.reason_vi).toContain("Chốt ý tưởng")
+    const messages = db.sessions[0].messages as { role: string; step: string }[]
+    expect(messages.filter((m) => m.role === "user" && m.step === "B-0.1")).toHaveLength(1)
+  })
+
+  it("B-1 vẫn phỏng vấn gộp đầu giai đoạn và thấy message của user", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
+    const interview: Record<string, unknown>[] = []
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, {
+      elicitExecutor: async (input) => {
+        const vars = input.promptVariables as Record<string, unknown>
+        if (vars.phase_interview) interview.push(vars)
+        return elicitResult("Rõ rồi.", [])
+      },
+      draftExecutor: async () => draftResult([]),
+      message: "Mục tiêu là giảm khách bỏ hẹn"
+    })
+    expect(interview).toHaveLength(1)
+    expect(interview[0]).toMatchObject({ step_id: "B-1", user_message: "Mục tiêu là giảm khách bỏ hẹn" })
+    expect(String(interview[0].recent_turns)).toContain("Mục tiêu là giảm khách bỏ hẹn")
+  })
+
+  it("B-0.2 khi form_factor đã có sau B-0.1 ⇒ không gọi model (0 usage), vẫn tới gate", async () => {
+    seedEmpty()
+    const spine = db.spines[0] as { steps: unknown[]; project: Record<string, unknown> }
+    spine.steps = acceptSteps(["B-0.1"])
+    spine.project.form_factor = "mobile_app"
+    const elicit = vi.fn()
+    const draft = vi.fn()
+    const { events, emit } = collect()
+    await runStep(PROJECT, "B-0.2", SESSION, USER, emit, { elicitExecutor: elicit, draftExecutor: draft })
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect(elicit).not.toHaveBeenCalled()
+    expect(draft).not.toHaveBeenCalled()
+    expect(db.usages.filter((u) => u.step_id === "B-0.2")).toHaveLength(0)
+  })
+
+  it("session của project khác + message ⇒ 403, không ghi transcript", async () => {
+    seedEmpty()
+    db.sessions.push({ _id: "sess-other", projectId: "650000000000000000000099", messages: [], isActive: true, is_pipeline: true })
+    const err = await runStep(PROJECT, "B-0.1", "sess-other", USER, collect().emit, { ...deps(), message: IDEA }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(403)
+    expect(db.sessions.every((s) => (s.messages as unknown[]).length === 0)).toBe(true)
   })
 })
