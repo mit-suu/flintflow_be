@@ -117,7 +117,12 @@ const db = vi.hoisted(() => {
     updateOne: async (filter: { _id: string }, update: Doc | { $push: { messages: unknown } }) => {
       const row = sessions.find((s) => s._id === filter._id)
       if (row) {
-        if ("$push" in update) (row.messages as unknown[]).push((update as { $push: { messages: unknown } }).$push.messages)
+        if ("$push" in update) {
+          // Như Mongo: `$push: { messages: { $each: [...] } }` đẩy từng phần tử
+          const pushed = (update as { $push: { messages: unknown } }).$push.messages
+          const items = typeof pushed === "object" && pushed !== null && "$each" in pushed ? (pushed as { $each: unknown[] }).$each : [pushed]
+          ;(row.messages as unknown[]).push(...items)
+        }
         else Object.assign(row, update)
       }
       return { modifiedCount: row ? 1 : 0 }
@@ -485,21 +490,21 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(after.steps.find((s) => s.id === second.stopped_at)?.status, "bước đang chờ user chưa accepted").not.toBe("accepted")
   })
 
-  it("FLF-208 R3: hỏi gộp đầu giai đoạn — user trả lời một lần, các bước bên trong không hỏi lại", async () => {
+  it.each(["balanced", "strict"] as const)("FLF-208 R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (%s) — chủ đề đã trả lời không bị hỏi lại", async (reviewMode) => {
     seedSpine()
+    ;(db.spines[0].project as { review_mode: string }).review_mode = reviewMode
     seedSession()
     const elicitCalls: string[] = []
     const interviewElicit: StepRunnerDeps["elicitExecutor"] = async (input, projectId, userId) => {
       const stepId = (input.promptVariables as { step_id: string }).step_id
       elicitCalls.push(stepId)
       const result = await elicitExecutor(input, projectId, userId)
-      // Chỉ lượt hỏi gộp (step_id = đơn vị giai đoạn) mới có câu hỏi
-      if (stepId !== "S-4") return result
+      // Mọi lượt đều hỏi lại cùng chủ đề — sổ quyết định phải chặn ở các bước bên trong
       return {
         ...result,
         data: {
           reply: "Vài câu cho cả giai đoạn màn hình",
-          questions: [{ question: "Màn nào là màn cốt lõi?", suggestedAnswers: ["Đặt lịch"], multiple: false, topic_key: "screen_scope" } as never]
+          questions: [{ question: "Màn nào là màn cốt lõi?", options: [{ label: "Đặt lịch" }], multiple: false, topic_key: "screen_scope" } as never]
         }
       }
     }
@@ -514,11 +519,47 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(submitAnswer(PROJECT, "S-4", SESSION, [{ question_id: "Q1", answer: "Màn Đặt lịch" }])).toBe(true)
     await run
 
-    // Câu trả lời vào sổ quyết định, và không bước nào trong giai đoạn hỏi lại
+    // Câu trả lời vào sổ quyết định, và không bước nào trong giai đoạn hỏi lại chủ đề đó
     const spine = (await repo.get(PROJECT))!
     expect(spine.decisions.map((d) => d.topic_key)).toContain("screen_scope")
-    expect(elicitCalls.filter((id) => id.startsWith("S-4.")), "bước bên trong không gọi vòng hỏi riêng").toEqual([])
+    expect(elicitCalls[0]).toBe("S-4")
     expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(1)
+  })
+
+  it("FLF-220: phỏng vấn trả lời câu mở gộp một đoạn (không vào sổ) ⇒ chạy tiếp giai đoạn không phỏng vấn lại", async () => {
+    seedSpine()
+    seedSession()
+    const interviewCalls: string[] = []
+    const openElicit: StepRunnerDeps["elicitExecutor"] = async (input, projectId, userId) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      const result = await elicitExecutor(input, projectId, userId)
+      if (stepId !== "S-4") return result
+      interviewCalls.push(stepId)
+      return {
+        ...result,
+        data: {
+          reply: "Hai câu cho giai đoạn màn hình",
+          questions: [
+            { question: "Người dùng đi qua những màn nào?", options: [], multiple: false, topic_key: "screen_path" },
+            { question: "Màn nào dùng nhiều nhất?", options: [], multiple: false, topic_key: "busiest_screen" }
+          ] as never
+        }
+      }
+    }
+    const deps: Partial<StepRunnerDeps> = { draftExecutor, elicitExecutor: openElicit, renderDeps: renderStub() }
+
+    const first = collectEvents()
+    const run = runPhase(PROJECT, "S-4", SESSION, USER, first.emit, deps)
+    for (let i = 0; i < 80 && !first.events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    submitAnswer(PROJECT, "S-4", SESSION, [{ question_id: "Q1", answer: "Đăng nhập rồi đặt lịch, màn đặt lịch dùng nhiều nhất" }])
+    const stopped = await run
+    expect((await repo.get(PROJECT))!.decisions.filter((d) => d.step_id === "S-4"), "đoạn gộp không vào sổ").toEqual([])
+
+    // User duyệt cổng chốt rồi chạy tiếp giai đoạn: không hỏi lại hai câu vừa trả lời
+    expect(stopped.stopped_at, "S-4.1 luôn dừng cho user quyết").toBe("S-4.1")
+    await gate(PROJECT, "S-4.1", USER, { action: "accept", base_version: (await repo.get(PROJECT))!.spine_version })
+    await runPhase(PROJECT, "S-4", SESSION, USER, collectEvents().emit, deps)
+    expect(interviewCalls).toEqual(["S-4"])
   })
 
   it("FLF-208 R2: chế độ Nhanh đi hết giai đoạn và dừng đúng ở cổng chốt cuối", async () => {

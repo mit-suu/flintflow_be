@@ -8,7 +8,7 @@ Trình mọi `assumptions[status=unconfirmed]`. Hai cách duyệt, cùng hợp l
 
 - **lẻ**: từng giả định một — dùng khi giả định chạm bất biến hoặc nuôi ngưỡng NFR (4.2.2, 4.2.3), vì
   sai một cái là sai cả một chương.
-- **lô**: duyệt cả nhóm một lần — dùng cho phần còn lại, nhất là ở `working_mode: fast`.
+- **lô**: duyệt cả nhóm một lần — dùng cho phần còn lại, nhất là ở chế độ duyệt "Cuối giai đoạn".
 
 `rejected` không phải là "xoá". Giả định bị từ chối nghĩa là **giá trị đang dựa trên nó sai**: phải nói
 rõ chỗ nào cần sửa, hoặc mở một `other_requirements[kind=open_question]`.

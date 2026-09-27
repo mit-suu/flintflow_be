@@ -21,12 +21,23 @@ describe("isQuietStep (R1)", () => {
     expect(isQuietStep(input())).toMatchObject({ quiet: true })
   })
 
+  it("FLF-220: bước đã hỏi và user đã trả lời ⇒ Cuối giai đoạn không dừng giữa phase; Mọi bước vẫn dừng", () => {
+    expect(isQuietStep(input({ asked: true, reviewMode: "fast" })).quiet).toBe(true)
+    expect(isQuietStep(input({ asked: true, reviewMode: "balanced" })).quiet).toBe(true)
+    expect(isQuietStep(input({ asked: true, reviewMode: "strict" })).quiet).toBe(false)
+  })
+
   it("mọi lý do khiến user cần nhìn đều chặn tự Accept", () => {
-    expect(isQuietStep(input({ asked: true })).quiet).toBe(false)
     expect(isQuietStep(input({ redDelta: 2 })).quiet).toBe(false)
     expect(isQuietStep(input({ renderFailed: true })).quiet).toBe(false)
     expect(isQuietStep(input({ phaseTerminal: true })).quiet).toBe(false)
-    expect(isQuietStep(input({ newAssumptions: [{ id: "AS1", text: "Giữ chỗ 15 phút" }] })).quiet).toBe(false)
+  })
+
+  it("balanced cũ xử lý như \"Cuối giai đoạn\": giả định mới không mâu thuẫn không làm dừng giữa phase", () => {
+    const assumption = [{ id: "AS1", text: "Giữ chỗ 15 phút" }]
+    expect(isQuietStep(input({ reviewMode: "balanced", newAssumptions: assumption })).quiet).toBe(true)
+    expect(isQuietStep(input({ reviewMode: "fast", newAssumptions: assumption })).quiet).toBe(true)
+    expect(isQuietStep(input({ reviewMode: "strict", newAssumptions: assumption })).quiet).toBe(false)
   })
 
   it("chế độ Chặt không bao giờ tự Accept; bước luôn cần người cũng vậy", () => {

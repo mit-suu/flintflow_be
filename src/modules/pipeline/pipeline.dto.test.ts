@@ -7,6 +7,7 @@ import {
   STEP_EVENT_TYPES,
   changesRequestSchema,
   gateRequestSchema,
+  questionSchema,
   stepEventSchema,
   waiveRequestSchema
 } from "./pipeline.dto.js"
@@ -33,6 +34,16 @@ describe("pipeline.dto", () => {
 
   it("gate: session_id bắt buộc (contract-change 2026-09-15)", () => {
     expect(gateRequestSchema.safeParse({ action: "accept", base_version: 3 }).success).toBe(false)
+  })
+
+  it("question: option object hoặc string cũ; header tối đa 12 ký tự", () => {
+    const base = { id: "Q1", text: "Uptime bao nhiêu?" }
+    const options = [{ label: "99.9% (Khuyến nghị)", description: "Chuẩn SaaS" }, { label: "99%", preview: "a\nb" }]
+    expect(questionSchema.safeParse({ ...base, header: "Uptime", options }).success).toBe(true)
+    expect(questionSchema.safeParse({ ...base, options: ["99%", "99.9%"] }).success).toBe(true)
+    expect(questionSchema.safeParse(base).success).toBe(true)
+    expect(questionSchema.safeParse({ ...base, header: "Quá dài để làm tab" }).success).toBe(false)
+    expect(questionSchema.safeParse({ ...base, options: [{ description: "thiếu label" }] }).success).toBe(false)
   })
 
   it("waive: lý do ≥ 20 ký tự", () => {

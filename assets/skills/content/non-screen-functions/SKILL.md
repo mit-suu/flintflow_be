@@ -78,8 +78,8 @@ includes: [], extends: []}`) rather than leaving the function unreachable from �
 3. Never set `screen_id` to a screen here — that is what makes it a non-screen function.
 4. Do not add screens, roles or permissions; those collections belong to S-4.1/S-4.3.
 5. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
-6. Fast mode: add the function with the most reasonable cadence plus an `assumptions[]` entry
-   (`status: "unconfirmed"`); Coaching mode leaves it for Elicit (`draft-to-ops` rule 10).
+6. Still unclear: add the function with the most reasonable cadence plus an `assumptions[]` entry
+   (`status: "unconfirmed"`), `draft-to-ops` rule 10.
 
 ## Example (a scheduled job and its use case)
 

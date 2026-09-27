@@ -80,8 +80,8 @@ document.
 3. Values exactly `must` | `should` | `could` | `wont`, lowercase.
 4. Put the reasoning in the op's `reason` (one short clause) — it becomes the Record of Changes line.
 5. English values, no diacritics (`draft-to-ops` rules 6–7).
-6. Fast mode: rank with the most reasonable reading and add an `assumptions[]` entry for anything you had
-   to guess; Coaching mode leaves the genuinely contested call for Elicit (`draft-to-ops` rule 10).
+6. Rank with the most reasonable reading and add an `assumptions[]` entry for anything you had to guess
+   (`draft-to-ops` rule 10).
 
 ## Example
 

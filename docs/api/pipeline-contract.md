@@ -189,7 +189,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `stage` | Runner chuyển giai đoạn (đọc → hỏi → soạn → kiểm → vẽ → duyệt) hoặc sang lô function kế | `{ step_id, stage, label_vi, detail_vi?, batch?, est_ms? }` |
 | `heartbeat` | Mỗi 10 giây trong lúc chờ model/render — để FE biết lượt còn sống | `{ step_id, stage, elapsed_ms }` |
 | `elicit` | Model đang hỏi/giải thích (stream chữ) | `{ step_id, delta }` |
-| `answer_needed` | Cần user trả lời trước khi Draft | `{ step_id, questions[] }` |
+| `answer_needed` | Cần user trả lời trước khi Draft | `{ step_id, questions[] }` — xem 2.1 |
 | `answer_received` | Ngay khi `/answer` tới — trạng thái đổi luôn, không chờ lượt Draft | `{ step_id, count }` |
 | `draft` | Bắt đầu một lượt Draft (kể cả retry schema) | `{ step_id, attempt }` |
 | `draft_retry` | Model trả kết quả không hợp lệ, đang thử lại | `{ step_id, attempt, max, reason_vi }` — lời thường, không mã lỗi |
@@ -197,7 +197,7 @@ Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event:
 | `render` | Mỗi diagram render xong | `{ step_id, diagram_id, render_status, error? }` |
 | `flags` | Deterministic check chạy lại | `{ step_id, red_open, yellow_open, red_delta?, yellow_delta?, new_assumptions[]? }` |
 | `gate_ready` | Chờ user chọn ở cổng chốt | `{ step_id, actions[], regenerate_used, calls_used, spine_version, wrote_ops, empty_sections[], summary[]?, new_assumptions[]?, flags?, duration_ms?, credits_used?, doc_progress?, no_change_reason? }` — `spine_version` là version CUỐI của lượt chạy, cao hơn `ops_applied` vì render + recompute cờ chạy sau (L11); `wrote_ops=false` nghĩa là model trả lô op rỗng; `empty_sections[{section_id,title}]` là mục step nuôi mà chạy xong vẫn trống, accept cũng không đóng được cờ `section_empty` (L11b) |
-| `auto_accepted` | Step "yên lặng" được tự Accept (chế độ duyệt Cân bằng/Nhanh) | `{ step_id, reason_vi }` |
+| `auto_accepted` | Step "yên lặng" được tự Accept (chế độ duyệt "Cuối giai đoạn": `fast`, hoặc `balanced` xử lý như `fast`) | `{ step_id, reason_vi }` |
 | `phase_gate` | Cổng chốt cuối giai đoạn: tóm tắt cả giai đoạn, gồm cả bước đã tự Accept | `{ step_id, phase, reason_vi, summary[], new_assumptions[], steps[], flags? }` |
 | `phase_progress` | Chạy liền cả phase: đang ở step thứ mấy | `{ step_id, phase, step_index, step_total, needs_user }` |
 | `error` | Dừng step | `{ step_id, code, message, retryable }` — `code` thuộc bảng 0.3 |
@@ -206,6 +206,25 @@ Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
 - Trần **8 lượt gọi model/step** và **3 lần Regenerate/step**.
 - `accept_as_is` chỉ có trong `actions[]` khi đã hết Regenerate, hoặc khi `revision` không giải quyết được. Hành động này bắt buộc `note`.
 - Refund do `SPINE_VERSION_CONFLICT` **không** tính vào trần Regenerate.
+
+### 2.1 `Question` trong `answer_needed`
+
+Theo mẫu AskUserQuestion: mặc định AI hỏi bằng văn xuôi (câu **không** có `options`, user trả lời bằng ô chat);
+chỉ đưa lựa chọn khi thật sự cần user quyết.
+
+```json
+{ "id": "Q1", "text": "Hệ thống cần sẵn sàng tới mức nào?", "header": "Uptime", "multiple": false,
+  "options": [
+    { "label": "99.9% (Khuyến nghị)", "description": "Chuẩn SaaS; cần 2 máy chủ dự phòng" },
+    { "label": "99%", "description": "Rẻ hơn; chấp nhận ~7 giờ gián đoạn/tháng" }
+  ] }
+```
+
+- `header` ≤ 12 ký tự (nhãn tab); `options` 2–4 phần tử `{ label, description?, preview? }`; `preview` là chuỗi monospace so bố cục màn/cấu trúc bảng.
+- Server ép luật, không tin prompt: tối đa **4 câu/lượt**; câu còn 1 option ⇒ thành câu mở; > 4 option ⇒ cắt; bỏ option model tự viết kiểu "Khác"/"Other"; `header` cắt ≤ 12.
+- Phương án khuyến nghị đứng đầu, `label` có đuôi ` (Khuyến nghị)` (project EN: ` (Recommended)`). "Khác…" **không** nằm trong `options` — client tự thêm.
+- Tương thích ngược: `options` có thể là `string[]` ở run-state `waiting_answer` lưu trước 2026-09-27; client đọc cả hai dạng.
+- `POST /answer` không đổi: `answer` là `label` đã chọn (không kèm đuôi khuyến nghị — server vẫn tự bỏ đuôi này khi ghi `decisions`) hoặc chữ user gõ.
 
 ## 3. Lịch sử thay đổi contract
 
@@ -218,3 +237,4 @@ Gate (`accept` · `revision` · `regenerate` · `accept_as_is`):
 | 2026-09-18 | contract-change FLF-171 (mode 1, P1 §5.5) | `Baseline` và `BaselineSnapshot` thêm `type` (`generated`, `imported` hoặc `release`) (mặc định `generated` cho dữ liệu cũ) và `doc_version` (chuỗi hoặc `null`) (mặc định `null`). Endpoint 19 `POST /baseline` luôn ghi `type: "generated"`, `doc_version: null`. Baseline `imported`/`release` do API mode 1 tạo (`docs/api/import-change-contract.md`) |
 | 2026-09-22 | contract-change FLF-177 | `Spine.project` thêm `system_name` (chuỗi hoặc `null`, mặc định `null` cho dữ liệu cũ): tên hệ thống tiếng Anh in trên boundary sơ đồ use case/ngữ cảnh và bìa, tiêu đề, tên file docx; `null` ⇒ dùng tên project. `section-registry` thêm dòng `project_system_name` (sở hữu `fixed:1`, suy dẫn `diagram:context`, `diagram:usecase`). `step-registry.json` `reads` S-2.5 thành `project:name,system_name`, S-3.6 thêm `project:name,system_name`. Cờ vàng mới `system_name_missing` |
 | 2026-09-23 | contract-change FLF-198 (fix-plan sau lượt test UI) | SSE thêm 7 sự kiện `stage`, `heartbeat`, `answer_received`, `draft_retry`, `auto_accepted`, `phase_progress`, `phase_gate`; `ops_applied` thêm `summary[]`; `flags` thêm `red_delta`/`yellow_delta`/`new_assumptions[]`; `gate_ready` thêm `summary[]`, `new_assumptions[]`, `flags`, `duration_ms`, `credits_used`, `doc_progress`, `table`, `no_change_reason`. Endpoint mới 4a `POST /phases/:phase/run` (SSE, chạy liền giai đoạn), 4b `GET /steps/:stepId/run-state`, 4c `POST /steps/:stepId/cancel`, 4d `GET /run-state/active`. `GET /document?source=draft` khi chưa ghép trả **200** `{ data: null, meta: { state: "not_assembled" } }` thay vì 409. `changesPreviewResponseSchema` thêm `notes`, `no_change`. `Spine.project` thêm `review_mode` (`strict|balanced|fast`, mặc định `balanced`); `Spine` thêm `decisions[]` (sổ quyết định). Collection mới `step_runs` (khoá step có TTL + trạng thái lượt chạy). Luật cờ mới: `screen_placeholder`, `function_without_uc`, `derived_from_changed_assumption` (đều vàng, waive được) |
+| 2026-09-27 | contract-change FLF-220 | `Question` (sự kiện `answer_needed`, `run-state.questions`) thêm `header` (≤ 12 ký tự); `options` thành `{ label, description?, preview? }[]` (vẫn nhận `string[]` cũ khi đọc). Server tối đa 4 câu/lượt, 2–4 option/câu, bỏ option "Khác" do model viết. `project.working_mode` giữ trong schema nhưng không còn được đọc; `review_mode` `balanced` xử lý như `fast` ("Cuối giai đoạn") |

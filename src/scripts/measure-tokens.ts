@@ -382,6 +382,7 @@ export const measure = async (options: MeasureOptions, log: (line: string) => vo
   ])
   const { orderedSteps, getStep } = await import("../modules/pipeline/step-registry.js")
   const { runStep, submitAnswer } = await import("../modules/pipeline/step-runner.service.js")
+  const { optionLabel, stripRecommended } = await import("../modules/pipeline/question-shape.js")
   const { getPromptTemplate, interpolatePrompt } = await import("../shared/ai/prompt-registry.service.js")
   const { getActionCost } = await import("../shared/ai/credit-reservation.service.js")
   const { ActionType } = await import("../shared/ai/ai-action.types.js")
@@ -485,7 +486,7 @@ export const measure = async (options: MeasureOptions, log: (line: string) => vo
     try {
       await runStep(projectId, stepId, sessionId, userId, (event) => {
         if (event.type === "answer_needed") {
-          const answers = event.questions.map((q) => ({ question_id: q.id, answer: q.options?.[0] ?? AUTO_ANSWER }))
+          const answers = event.questions.map((q) => ({ question_id: q.id, answer: q.options?.[0] ? stripRecommended(optionLabel(q.options[0])) : AUTO_ANSWER }))
           setImmediate(() => submitAnswer(projectId, stepId, sessionId, answers))
         }
         if (event.type === "error") error = `${event.code}: ${event.message}`

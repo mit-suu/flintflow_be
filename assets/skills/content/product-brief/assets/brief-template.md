@@ -3,7 +3,7 @@
 > Mẫu để **đọc lại brief cho user xác nhận** ở cuối B-1 và ở B-2.3. Không phải section của SRS: brief
 > không render thành chương nào, nó nuôi `project{}` và `addendum[]`.
 
-**project.name** · form_factor · stakes · working_mode
+**project.name** · form_factor · stakes
 
 ## 1. Vision
 

@@ -76,8 +76,8 @@ duplicate term is the flag that catches it.
 4. Do not edit the collections you read from; if a name is wrong, say so in `notes`.
 5. 10–30 entries is the usual range. Fewer than 5 on a real product means the sweep was skipped; more
    than 40 usually means ordinary words crept in.
-6. Fast mode: write the most reasonable definition plus an `assumptions[]` entry
-   (`status: "unconfirmed"`); Coaching mode leaves the unclear term for Elicit (`draft-to-ops` rule 10).
+6. Unclear term: write the most reasonable definition plus an `assumptions[]` entry
+   (`status: "unconfirmed"`), `draft-to-ops` rule 10.
 
 ## Example
 

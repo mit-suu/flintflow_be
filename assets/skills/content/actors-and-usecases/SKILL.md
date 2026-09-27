@@ -72,7 +72,7 @@ actor needs at least one use case, and a S-3.2 batch with no new `use_cases[]` i
 ## S-3.3 — Missing Use Case Sweep
 
 Check each theme against the current list. For a theme with no match, decide which it is: a **branch of an existing use case**
-(name it in `notes` for S-3.4 to wire as `extends`), or a **goal of its own** (add a use case; Fast mode: with an `assumptions[]`
+(name it in `notes` for S-3.4 to wire as `extends`), or a **goal of its own** (add a use case, with an `assumptions[]`
 entry). Name the theme in `notes` with a reason if it does not apply — never silently skip. **(1) Administration** — an admin
 actor has view/list + suspend for every entity type end users create. **(2) Support** — a human actor can reach a "something is
 wrong, help me" path unless support is explicitly out of scope. **(3) Notifications** — receiving one is not a use case; the
@@ -128,9 +128,8 @@ extending use case opens with its condition ("When …"); every other one starts
 2. New actor/use-case ids continue the existing sequence (`draft-to-ops` rule 5); check the projection.
 3. English, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 4. `includes`/`extends` only reference use case ids already present after this batch (own adds count).
-5. Fast mode: fill a missing detail with the likeliest default + an `assumptions[]` entry
-   (`status: "unconfirmed"`); Coaching leaves it for Elicit (rule 10) — except S-3.1 access, which in both
-   modes gets the one combined assumption.
+5. A detail still missing after the answers: fill it with the likeliest default + an `assumptions[]`
+   entry (`status: "unconfirmed"`), rule 10 — S-3.1 access gets the one combined assumption.
 
 ## Example (S-3.1, one human actor + role)
 

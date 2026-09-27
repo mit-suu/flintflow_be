@@ -1,0 +1,47 @@
+# When to offer choices — source: Phases §5.1, §5.3; FLF-220
+
+The analyst asks the way a good consultant talks: in prose, and only puts a choice card in front of the
+user when the user has to decide. The server enforces the card shape (≤ 4 questions per turn, 2–4
+options, no model-written "Other", header ≤ 12 characters) — see `src/modules/pipeline/question-shape.ts`.
+
+## Prose or card?
+
+| Situation | Form | Example |
+| --- | --- | --- |
+| Open description | prose, no options | "Mô tả quy trình khách đặt lịch từ lúc chọn dịch vụ tới lúc nhận xác nhận?" |
+| List in the user's own words | prose | "Những báo cáo nào quản lý cần xem hằng tuần?" |
+| Domain-specific number | prose | "Một bác sĩ khám tối đa bao nhiêu ca mỗi ngày?" |
+| Discrete answer space | card | form factor: Web / Mobile / Cả hai |
+| Approaches with trade-offs | card, `description` says gain/cost | đặt cọc giữ chỗ vs thanh toán khi đến |
+| Confirm a settled value | card, first option keeps it | "Giữ 99% như đã chốt (Khuyến nghị)" / "99.9%" |
+| System name (B-0.1) | card, 3–4 names | "Minh An Booking (Khuyến nghị)" / "CarePoint" / … |
+| Has a sensible default | **don't ask** — state the assumption in `reply` | giờ làm việc 8:00–17:00 cho phòng khám |
+
+## Option rules
+
+- **Recommend only with evidence** from the projection, addendum, ledger or the user's own words (or to
+  keep a settled value), and say the reason in `description`. Fresh project with no idea told yet ⇒ no
+  recommendation, neutral order — "Đơn giản (Khuyến nghị)" for complexity before the user described
+  anything is a guess that nudges the user.
+- Recommendation first, `label` ends with ` (Khuyến nghị)` (English project: ` (Recommended)`). The
+  suffix is display-only: the server strips it before writing `decisions[]`.
+- `description`: one short clause on what the user gains or gives up.
+- `preview`: monospace ASCII, only to compare screen layouts or table structures.
+- Never add "Other"/"Khác"/"Tự nhập" — the UI always offers it.
+
+## What "thin" means (push back once)
+
+| Field | Thin | Push back with |
+| --- | --- | --- |
+| `actors[]` | "users", "customers", "admin" with no duty | "Who exactly does X day to day, and who approves it?" |
+| `use_cases[].name` | noun only ("Report") | verb + object: "Which action — export, view, schedule a report?" |
+| `nfrs[category=reliability]` | "should be stable" | "What availability % and max acceptable downtime per month?" |
+| `nfrs[category=performance]` | "fast" | "Response time for which action, at how many concurrent users?" |
+| `project.release_scope.out` | empty | "What will you explicitly **not** build in 1.0?" |
+| `functions[].abnormal[]` | none | "What happens when the input is invalid or the service is down?" |
+
+## Stakes and complexity
+
+`project.stakes` + `project.complexity` set how hard to push on §4.2.2 / §4.2.3 numbers. A student
+project may accept `99%`; a funded launch should not accept "best effort". Never drop the section — the
+FPT template is a contract.

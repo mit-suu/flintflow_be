@@ -53,7 +53,7 @@ server, third-party auth…) with `kind: "system"`. Do **not** add human actors 
 S-3.1. Every system actor needs a `description` stating what it does for this product, not a generic
 one-liner. Derive integrations from vision/goals/scope even when the Brief does not name a vendor: AI
 generation ⇒ "AI Model Provider"; credits/payments/plans ⇒ "Payment Gateway"; export/email/notification ⇒
-the matching service. Fast mode: add them with an `assumptions[]` entry; an empty S-2.3 batch needs a reason
+the matching service. Add them with an `assumptions[]` entry; an empty S-2.3 batch needs a reason
 in `notes`.
 
 ## Rules
@@ -63,9 +63,8 @@ in `notes`.
 2. English (`draft-to-ops` rule 6); no section numbers in prose (rule 7).
 3. New `actors[]` ids continue the sequence (`draft-to-ops` rule 5) — check the projection's existing
    actors before picking an id.
-4. Fast mode: fill a missing vision/goal/scope detail with the most reasonable default and add an
-   `assumptions[]` entry (`status: "unconfirmed"`) instead of leaving it blank; Coaching mode leaves it for
-   Elicit instead of inventing (`draft-to-ops` rule 10).
+4. Fill a missing vision/goal/scope detail with the most reasonable default and add an
+   `assumptions[]` entry (`status: "unconfirmed"`) instead of leaving it blank (`draft-to-ops` rule 10).
 
 ## Example (S-2.3, one system actor)
 

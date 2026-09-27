@@ -140,7 +140,6 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       step_name: ctx.label_en,
       call_kind: callKind,
       writable_paths: ctx.writable.join(", "),
-      working_mode: ctx.working_mode ?? "coaching",
       projection: ctx.projection,
       addendum: ctx.addendum,
       answers: options.answers ?? (ctx.transcriptTail || "(none)"),

@@ -2,15 +2,44 @@ import { z } from "zod"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 // Schemas per ActionType
-export const chatQuestionSchema = z.object({
+/** Lựa chọn của một câu hỏi, đã chuẩn hoá — cùng hình dạng `options` trong hợp đồng `Question`. */
+export interface QuestionOption {
+  label: string
+  description?: string
+  preview?: string
+}
+
+/** Chuỗi model bỏ trống hoặc để `null` coi như không có — một field thừa không được làm hỏng cả lượt hỏi. */
+const optionalText = z.string().nullish().transform((v) => (v == null || v.trim() === "" ? undefined : v))
+
+/** Model mới trả `{label, description?, preview?}`; prompt cũ (và tin nhắn cũ) trả chuỗi trơn. */
+const modelOptionSchema = z.union([
+  z.string().transform((label): QuestionOption => ({ label })),
+  z.object({ label: z.string(), description: optionalText, preview: optionalText }).transform(
+    ({ label, description, preview }): QuestionOption => ({ label, ...(description ? { description } : {}), ...(preview ? { preview } : {}) })
+  )
+])
+
+const questionFields = {
   question: z.string(),
-  suggestedAnswers: z.array(z.string()).default([]),
-  multiple: z.boolean().optional().default(false),
+  header: optionalText,
+  options: z.array(modelOptionSchema).optional(),
+  /** Dạng cũ trước FLF-220 — vẫn nhận, map sang `options`. */
+  suggestedAnswers: z.array(z.string()).optional(),
+  multiple: z.boolean().optional().default(false)
+}
+
+/** Gộp `suggestedAnswers` cũ vào `options`; `options` mới thắng khi có cả hai. */
+const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[] }>({ options, suggestedAnswers, ...rest }: T) => ({
+  ...rest,
+  options: options ?? (suggestedAnswers ?? []).map((label): QuestionOption => ({ label }))
 })
+
+export const chatQuestionSchema = z.object(questionFields).transform(toOptions)
 
 export const chatQuestionItemSchema = z.union([
   chatQuestionSchema,
-  z.string().transform((q) => ({ question: q, suggestedAnswers: [], multiple: false }))
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
 export const chatSchema = z.object({
@@ -48,8 +77,8 @@ export const opTransactionSchema = z.object({
  * `conflict` là lời giải thích khi model CỐ Ý hỏi lại một chủ đề đã chốt (dữ liệu mới mâu thuẫn).
  */
 export const elicitQuestionSchema = z.union([
-  chatQuestionSchema.extend({ topic_key: z.string().optional(), conflict: z.string().optional() }),
-  z.string().transform((q) => ({ question: q, suggestedAnswers: [] as string[], multiple: false }))
+  z.object({ ...questionFields, topic_key: z.string().optional(), conflict: z.string().optional() }).transform(toOptions),
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
 export const elicitSchema = z.object({
@@ -398,49 +427,33 @@ export function extractCleanReplyFromRawText(rawText: string): string {
  */
 export function extractQuestionsFallback(text: string): Array<{
   question: string
-  suggestedAnswers: string[]
+  options: QuestionOption[]
   multiple?: boolean
 }> {
-  const questions: Array<{ question: string; suggestedAnswers: string[]; multiple?: boolean }> = []
+  const questions: Array<{ question: string; options: QuestionOption[]; multiple?: boolean }> = []
+  const unescape = (value: string) => value.replace(/\\"/g, '"').replace(/\\n/g, "\n")
 
-  // Try to find individual question blocks: { "question": "...", "suggestedAnswers": [...] }
-  const blockRegex = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*?)"[\s\S]*?\}/g
-  let match: RegExpExecArray | null
+  // Mỗi khối chạy từ "question" tới trước "question" kế tiếp — option dạng object có "}" riêng nên
+  // không cắt khối ở dấu "}" đầu tiên được.
+  const starts = [...text.matchAll(/"question"\s*:\s*"/g)].map((m) => m.index ?? 0)
+  for (const [i, start] of starts.entries()) {
+    const blockStr = text.slice(start, starts[i + 1] ?? text.length)
+    const qMatch = blockStr.match(/^"question"\s*:\s*"((?:[^"\\]|\\.)*?)"/)
+    if (!qMatch || !qMatch[1]) continue
 
-  while ((match = blockRegex.exec(text)) !== null) {
-    const blockStr = match[0]
-    try {
-      const parsed = JSON.parse(blockStr)
-      if (parsed.question) {
-        questions.push({
-          question: parsed.question,
-          suggestedAnswers: Array.isArray(parsed.suggestedAnswers) ? parsed.suggestedAnswers : [],
-          multiple: Boolean(parsed.multiple)
-        })
-        continue
-      }
-    } catch (_) {}
-
-    // Regex extraction for question & answers inside block
-    const qMatch = blockStr.match(/"question"\s*:\s*"((?:[^"\\]|\\.)*?)"/)
-    if (qMatch && qMatch[1]) {
-      const qText = qMatch[1].replace(/\\"/g, '"').replace(/\\n/g, "\n")
-      const answers: string[] = []
-      const answersMatch = blockStr.match(/"suggestedAnswers"\s*:\s*\[([\s\S]*?)\]/)
+    const labels = [...blockStr.matchAll(/"label"\s*:\s*"((?:[^"\\]|\\.)*?)"/g)].map((m) => unescape(m[1]))
+    if (labels.length === 0) {
+      const answersMatch = blockStr.match(/"(?:suggestedAnswers|options)"\s*:\s*\[([\s\S]*?)\]/)
       if (answersMatch && answersMatch[1]) {
-        const itemRegex = /"((?:[^"\\]|\\.)*?)"/g
-        let aMatch: RegExpExecArray | null
-        while ((aMatch = itemRegex.exec(answersMatch[1])) !== null) {
-          answers.push(aMatch[1].replace(/\\"/g, '"'))
-        }
+        for (const aMatch of answersMatch[1].matchAll(/"((?:[^"\\]|\\.)*?)"/g)) labels.push(unescape(aMatch[1]))
       }
-      const multipleMatch = blockStr.match(/"multiple"\s*:\s*(true|false)/i)
-      questions.push({
-        question: qText,
-        suggestedAnswers: answers,
-        multiple: multipleMatch ? multipleMatch[1].toLowerCase() === "true" : false
-      })
     }
+    const multipleMatch = blockStr.match(/"multiple"\s*:\s*(true|false)/i)
+    questions.push({
+      question: unescape(qMatch[1]),
+      options: labels.map((label) => ({ label })),
+      multiple: multipleMatch ? multipleMatch[1].toLowerCase() === "true" : false
+    })
   }
 
   return questions

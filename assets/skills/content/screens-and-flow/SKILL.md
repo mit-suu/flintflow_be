@@ -112,8 +112,8 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 3. Do not touch `use_cases[].function_ids` here; wiring use cases to functions is S-4.4/S-5.
 4. `detail_status` is only `pending` or `placeholder` at this step — `in_progress` and `signed_off` are
    set by the S-5 loop, never by you.
-5. Fast mode: choose the most reasonable default and add an `assumptions[]` entry
-   (`status: "unconfirmed"`); Coaching mode leaves the open question for Elicit (`draft-to-ops` rule 10).
+5. Still unclear: choose the most reasonable default and add an `assumptions[]` entry
+   (`status: "unconfirmed"`), `draft-to-ops` rule 10.
 
 ## Example (S-4.1, one feature + one core screen + its function)
 
