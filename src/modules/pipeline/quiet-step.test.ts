@@ -21,8 +21,13 @@ describe("isQuietStep (R1)", () => {
     expect(isQuietStep(input())).toMatchObject({ quiet: true })
   })
 
+  it("FLF-220: bước đã hỏi và user đã trả lời ⇒ Cuối giai đoạn không dừng giữa phase; Mọi bước vẫn dừng", () => {
+    expect(isQuietStep(input({ asked: true, reviewMode: "fast" })).quiet).toBe(true)
+    expect(isQuietStep(input({ asked: true, reviewMode: "balanced" })).quiet).toBe(true)
+    expect(isQuietStep(input({ asked: true, reviewMode: "strict" })).quiet).toBe(false)
+  })
+
   it("mọi lý do khiến user cần nhìn đều chặn tự Accept", () => {
-    expect(isQuietStep(input({ asked: true })).quiet).toBe(false)
     expect(isQuietStep(input({ redDelta: 2 })).quiet).toBe(false)
     expect(isQuietStep(input({ renderFailed: true })).quiet).toBe(false)
     expect(isQuietStep(input({ phaseTerminal: true })).quiet).toBe(false)

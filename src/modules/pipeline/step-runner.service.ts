@@ -980,7 +980,9 @@ export const runStep = async (
           // Phản hồi ngay khi nhận trả lời — trước đây status đứng yên tới 2 phút (BUG-32)
           emit({ type: "answer_received", step_id: stepId, count: answers.length })
           await tracker.save({ status: "running", questions: null, detail_vi: `Đã nhận ${answers.length} câu trả lời` })
-          const answersJoined = answers.map((a) => `${a.question_id}: ${answerText(a.answer)}`).join("\n")
+          // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
+          const questionOf = (id: string): string => asked[Number(/^Q(\d+)$/.exec(id)?.[1] ?? 0) - 1]?.question ?? id
+          const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
           for (const a of answers) await pushTranscript(sessionId, stepId, "user", answerText(a.answer))
           answersText = `${answersText}\n${answersJoined}`.trim()
 

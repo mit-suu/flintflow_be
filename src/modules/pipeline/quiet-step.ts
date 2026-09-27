@@ -8,7 +8,7 @@
  * thành phản xạ, và khi tới bước thật sự cần đọc thì user đã hết kiên nhẫn.
  *
  * Bước được tự Accept khi thoả **đủ** các điều kiện dưới đây. Mỗi điều kiện tương ứng với một thứ user
- * lẽ ra phải nhìn: câu hỏi, cờ đỏ mới, giả định trái điều đã chốt, lỗi vẽ hình, và những bước mà quyết
+ * lẽ ra phải nhìn: cờ đỏ mới, giả định trái điều đã chốt, lỗi vẽ hình, và những bước mà quyết
  * định luôn là của người (`ALWAYS_GATE`).
  *
  * Mọi lượt tự Accept đều phát sự kiện `auto_accepted`, ghi vào `changes[]` như một lần accept thường, và
@@ -71,7 +71,8 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (input.reviewMode === "strict") return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
   if (ALWAYS_GATE.has(input.templateId)) return { quiet: false, reason_vi: "Bước này luôn cần bạn quyết" }
   if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }
-  if (input.asked) return { quiet: false, reason_vi: "Bước có câu hỏi cho bạn" }
+  // FLF-220: bước có hỏi thì user đã trả lời ngay trong lượt chạy — ở "Cuối giai đoạn" điều đó không đòi
+  // thêm một cổng giữa giai đoạn; nội dung vẫn gom lên cổng chốt cuối phase.
   if (input.redDelta > 0) return { quiet: false, reason_vi: `Bước mở thêm ${input.redDelta} cờ đỏ` }
   if (input.renderFailed) return { quiet: false, reason_vi: "Có sơ đồ vẽ lỗi" }
 

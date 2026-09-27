@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
-import { answerText, answeredTopics, shapeChatQuestions, shapeOptions, shapeQuestions, type ModelQuestion } from "./question-shape.js"
+import { answerText, answeredTopics, chatReplyQuestionId, shapeChatQuestions, shapeOptions, shapeQuestions, type ModelQuestion } from "./question-shape.js"
 
 const opts = (...labels: string[]) => labels.map((label) => ({ label }))
 const q = (question: string, extra: Partial<ModelQuestion> = {}): ModelQuestion & { topic_key: string } => ({
@@ -100,5 +100,13 @@ describe("shapeChatQuestions (Discovery)", () => {
       { question: "Một lựa chọn?" }
     ])
     expect(shapeChatQuestions(undefined)).toEqual([])
+  })
+})
+
+describe("chatReplyQuestionId", () => {
+  it("chat gõ thẳng gán cho câu mở đầu tiên, không gán vào câu có lựa chọn", () => {
+    expect(chatReplyQuestionId([{ id: "Q1", options: [{ label: "A" }, { label: "B" }] }, { id: "Q2" }])).toBe("Q2")
+    expect(chatReplyQuestionId([{ id: "Q1", options: ["A", "B"] }])).toBe("Q1")
+    expect(chatReplyQuestionId(null)).toBe("Q1")
   })
 })

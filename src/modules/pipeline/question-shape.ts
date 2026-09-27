@@ -155,3 +155,16 @@ export const shapeChatQuestions = (raw: unknown): ChatQuestion[] => {
 
 /** Nhãn của một option trong hợp đồng — run-state cũ còn lưu chuỗi trơn. */
 export const optionLabel = (option: string | { label: string }): string => (typeof option === "string" ? option : option.label)
+
+/**
+ * Tin nhắn chat gõ thẳng (có đính kèm nên không đi đường trả lời theo câu của FE) trong lúc step chờ trả lời:
+ * gán cho câu mở đầu tiên. Gán vào câu có lựa chọn thì cả đoạn văn thành "đáp án" của chủ đề đó trong sổ
+ * quyết định. Không có câu mở (hoặc run-state cũ không có câu hỏi) ⇒ `Q1` như trước.
+ */
+export const chatReplyQuestionId = (questions: readonly unknown[] | null | undefined): string => {
+  for (const item of questions ?? []) {
+    const q = item as { id?: unknown; options?: unknown }
+    if (typeof q.id === "string" && (!Array.isArray(q.options) || q.options.length === 0)) return q.id
+  }
+  return "Q1"
+}

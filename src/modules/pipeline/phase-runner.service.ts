@@ -69,6 +69,10 @@ const runPhaseInterview = async (
   // Chuỗi dừng giữa chừng rồi chạy tiếp là chuyện thường (user duyệt một cổng chốt). Không nhớ đã phỏng
   // vấn giai đoạn này thì lần chạy tiếp lại hỏi lại từ đầu — mất credit và hỏi đúng thứ user vừa trả lời.
   if (spine.decisions.some((d) => d.step_id === unit && d.superseded_by === null)) return false
+  // Câu trả lời mở gõ gộp một đoạn không vào sổ quyết định (FLF-220) ⇒ sổ không đủ làm dấu "đã phỏng vấn".
+  // Transcript của lượt phỏng vấn (lưu với `step` = đơn vị giai đoạn) thì luôn có.
+  const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
+  if ((session?.messages ?? []).some((m) => m.step === unit)) return false
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
   const missing = [...new Set(steps.flatMap((step) => {
     try {

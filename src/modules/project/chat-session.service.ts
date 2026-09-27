@@ -8,7 +8,8 @@ import { buildDocumentContext } from "../../shared/ai/document-context.service.j
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
-import { shapeChatQuestions } from "../pipeline/question-shape.js"
+import { chatReplyQuestionId, shapeChatQuestions } from "../pipeline/question-shape.js"
+import { getRunState } from "../pipeline/run-state.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 
 /**
@@ -140,7 +141,8 @@ const tryAnswerRunningStep = async (session: IChatSession, projectId: string, co
   const record = await spineRepository.get(projectId)
   const stepId = record?.progress.current_step
   if (!stepId) return false
-  return submitAnswer(projectId, stepId, String(session._id), [{ question_id: "Q1", answer: content }])
+  const run = await getRunState(projectId, stepId)
+  return submitAnswer(projectId, stepId, String(session._id), [{ question_id: chatReplyQuestionId(run?.questions), answer: content }])
 }
 
 export const sendMessageAndGetResponse = async (
