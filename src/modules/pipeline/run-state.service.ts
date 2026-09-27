@@ -309,6 +309,12 @@ export const isStepRunning = async (projectId: string, stepId: string): Promise<
   return doc !== null && doc.status === "running" && new Date(doc.locked_until).getTime() > Date.now()
 }
 
+/** Step đang chờ user trả lời và lượt chờ còn trả lời được qua `/answer` — resume không được revert nó (FLF-222). */
+export const isWaitingForAnswer = async (projectId: string, stepId: string): Promise<boolean> => {
+  const doc = await getRunState(projectId, stepId)
+  return doc !== null && doc.status === "waiting_answer" && doc.pending_answer !== null
+}
+
 export interface CancelResult {
   cancelled: boolean
   run_id: string | null
