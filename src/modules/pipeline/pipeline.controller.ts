@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────────
  * GET  /projects/:projectId/steps                    danh sách step + tiến độ trần
  * POST /projects/:projectId/steps/:stepId/run         chạy step (SSE) — step-runner.service
- * POST /projects/:projectId/steps/:stepId/answer      trả lời Elicit đang chờ (answer_needed)
+ * POST /projects/:projectId/steps/:stepId/answer      trả lời Elicit đang chờ (answer_needed) — kể cả khi kết nối đã đóng
  * POST /projects/:projectId/steps/:stepId/gate        accept/revision/regenerate/accept_as_is
  * GET  /projects/:projectId/steps/:stepId/run-state   trạng thái lượt chạy (khôi phục sau reload)
  * POST /projects/:projectId/steps/:stepId/cancel      huỷ lượt đang chạy (nhả khoá, abort model)
@@ -24,6 +24,8 @@ import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import {
   runStep,
   submitAnswer,
+  pendingAnswerFor,
+  resumeWaitingStep,
   requirePipelineSession,
   isPipelineErrorCode,
   CALLS_LIMIT,
@@ -36,7 +38,7 @@ import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
-import { runPhase } from "./phase-runner.service.js"
+import { runPhase, resumePhaseInterview } from "./phase-runner.service.js"
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
@@ -292,16 +294,22 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
 
 // ─── POST /steps/:stepId/answer ────────────────────────────────────
 
+/**
+ * Lượt còn nghe trong tiến trình này ⇒ trả cho nó như cũ (luồng SSE đang mở chạy tiếp). Không còn (FE reload, BE
+ * restart) ⇒ lượt chờ ở run-state: step chạy tiếp ở nền từ sau Elicit, FE theo dõi qua `GET /run-state`;
+ * phỏng vấn đầu giai đoạn chỉ ghi câu trả lời, FE chạy lại giai đoạn (FLF-222). Hợp đồng request/response không đổi.
+ */
 export const answerStep = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, mode } = await authorize(req)
+  const { projectId, userId, mode } = await authorize(req)
   assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(stepAnswerRequestSchema, req.body)
 
-  const accepted = submitAnswer(projectId, stepId, body.session_id, body.answers)
-  if (!accepted) {
-    throw new ApiError(409, `Step ${stepId} không đang chờ trả lời câu hỏi`, "STEP_NOT_RUNNABLE")
-  }
+  if (submitAnswer(projectId, stepId, body.session_id, body.answers)) return sendSuccess(res, 200, { accepted: true })
+
+  const pending = await pendingAnswerFor(projectId, stepId, body.session_id, body.answers)
+  if (pending.kind === "phase_interview") await resumePhaseInterview(projectId, stepId, userId, pending, body.answers)
+  else await resumeWaitingStep(projectId, stepId, userId, pending, body.answers)
   return sendSuccess(res, 200, { accepted: true })
 })
 

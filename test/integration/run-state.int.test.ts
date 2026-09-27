@@ -47,6 +47,32 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(active.step_id).toBe("S-3.1")
   })
 
+  it("FLF-222: lượt chờ lưu pending_answer ở DB nhưng GET /run-state không trả field nội bộ đó", async () => {
+    const seeded = await seedFixture("minimal")
+    const run = await acquireRun(seeded.projectId, "S-3.1", { sessionId: seeded.sessionId, by: seeded.userId })
+    await touchRun(seeded.projectId, "S-3.1", run.run_id, {
+      status: "waiting_answer",
+      stage: "ask",
+      questions: [{ id: "Q1", text: "Actor chính là ai?" }],
+      pending_answer: {
+        kind: "step",
+        unit: "S-3.1",
+        session_id: seeded.sessionId,
+        asked: [{ question: "Actor chính là ai?", options: [], topic_key: "primary_actor" }],
+        base_answers_text: ""
+      },
+      release: true
+    })
+
+    const stored = await StepRun.findOne({ step_id: "S-3.1" }).lean()
+    expect(stored?.pending_answer).toMatchObject({ kind: "step", asked: [{ topic_key: "primary_actor" }] })
+    expect(new Date(stored!.locked_until).getTime()).toBeLessThanOrEqual(Date.now())
+
+    const state = (await api(seeded).get("/steps/S-3.1/run-state")).body.data
+    expect(state).toMatchObject({ status: "waiting_answer", alive: false })
+    expect(state).not.toHaveProperty("pending_answer")
+  })
+
   it("huỷ lượt nhả khoá ngay: lượt mới chiếm được, và run-state báo cancelled", async () => {
     const seeded = await seedFixture("minimal")
     const client = api(seeded)

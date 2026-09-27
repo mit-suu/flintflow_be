@@ -54,15 +54,19 @@ import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
 import { buildProgressReport, computeSectionStates } from "../spine/section-status.js"
 import { ownerStepOf } from "../spine/section-registry.js"
-import { CALL_LIMIT, NOT_PIPELINE_SESSION, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import { AnswerDetached, CALL_LIMIT, NOT_PIPELINE_SESSION, RUN_CANCELLED_REASON, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
 import {
   HEARTBEAT_MS,
   acquireRun,
+  detachRun,
   finishRun,
+  getRunState,
   registerAbort,
   touchRun,
   unregisterAbort,
-  type RunStage
+  type PendingAnswerState,
+  type RunStage,
+  type RunStateDoc
 } from "./run-state.service.js"
 import type { z } from "zod"
 
@@ -101,6 +105,18 @@ export interface StepRunnerDeps {
   intent?: RunIntent
   /** `runPhase` đã ghi `message` vào transcript (trước lượt phỏng vấn) — `runStep` không ghi lại lần nữa. */
   messageRecorded?: boolean
+  /**
+   * FLF-222: chạy tiếp lượt đã tách khỏi kết nối từ ngay sau Elicit — không gọi model hỏi lại, dùng đúng câu đã
+   * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
+   */
+  resumeAnswers?: ResumeAnswers
+}
+
+export interface ResumeAnswers {
+  run: RunStateDoc
+  asked: PendingAnswerState["asked"]
+  answers: AnswerInput[]
+  base_answers_text: string
 }
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
@@ -227,12 +243,24 @@ interface PendingAnswer {
   timeout: ReturnType<typeof setTimeout>
 }
 
-/** 15 phút — đủ để đọc câu hỏi và trả lời; không giữ promise treo vô hạn nếu người dùng bỏ đi. */
+/**
+ * 15 phút — đủ để đọc câu hỏi và trả lời; không giữ promise treo vô hạn nếu người dùng bỏ đi. Hết giờ thì lượt
+ * chờ tách khỏi kết nối (như đóng tab), vẫn trả lời được sau đó qua run-state.
+ */
 export const ANSWER_WAIT_TIMEOUT_MS = 15 * 60 * 1000
 
 const pendingAnswers = new Map<string, PendingAnswer>()
 
 const answerKey = (projectId: string, stepId: string, sessionId: string): string => `${projectId}::${stepId}::${sessionId}`
+
+/**
+ * Quên mọi lượt đang nghe trong bộ nhớ, như khi tiến trình BE restart — test dùng để chứng minh `/answer` chạy
+ * tiếp được chỉ từ run-state. Promise của lượt cũ bị bỏ lại (không resolve), đúng như tiến trình đã chết.
+ */
+export const dropPendingAnswers = (): void => {
+  for (const pending of pendingAnswers.values()) clearTimeout(pending.timeout)
+  pendingAnswers.clear()
+}
 
 /** `POST /answer` gọi hàm này. `false` ⇒ không có lượt chờ khớp (step không ở `answer_needed`). */
 export const submitAnswer = (projectId: string, stepId: string, sessionId: string, answers: AnswerInput[]): boolean => {
@@ -245,26 +273,34 @@ export const submitAnswer = (projectId: string, stepId: string, sessionId: strin
   return true
 }
 
-/** F8: đang chờ answer mà client đóng kết nối ⇒ dọn lượt chờ, không treo promise vô thời hạn. */
+/**
+ * Chờ user trả lời. Đóng kết nối hoặc hết giờ chờ ⇒ ném `AnswerDetached`: lượt chờ đã nằm ở run-state nên
+ * không có gì phải huỷ, `/answer` chạy tiếp sau đó (FLF-222). Chỉ Huỷ (`POST /cancel`) mới dừng hẳn (409).
+ */
 const waitForAnswer = (projectId: string, stepId: string, sessionId: string, signal?: AbortSignal): Promise<AnswerInput[]> => {
   const key = answerKey(projectId, stepId, sessionId)
+  const abortError = (): Error =>
+    signal?.reason === RUN_CANCELLED_REASON
+      ? new ApiError(409, `Lượt chạy của step ${stepId} đã bị huỷ trong khi chờ trả lời`, STEP_NOT_RUNNABLE)
+      : new AnswerDetached(stepId)
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
-      pendingAnswers.delete(key)
+      // Chỉ xoá lượt chờ của chính mình — lượt mới cùng khoá có thể đã thay chỗ
+      if (pendingAnswers.get(key)?.timeout === timeout) pendingAnswers.delete(key)
       if (signal && onAbort) signal.removeEventListener("abort", onAbort)
     }
     const timeout = setTimeout(() => {
       cleanup()
-      reject(new ApiError(409, `Hết thời gian chờ trả lời câu hỏi của step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(new AnswerDetached(stepId))
     }, ANSWER_WAIT_TIMEOUT_MS)
     const onAbort = (): void => {
       clearTimeout(timeout)
       cleanup()
-      reject(new ApiError(409, `Client đã đóng kết nối trong khi chờ trả lời step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(abortError())
     }
     if (signal?.aborted) {
       clearTimeout(timeout)
-      reject(new ApiError(409, `Client đã đóng kết nối trong khi chờ trả lời step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(abortError())
       return
     }
     signal?.addEventListener("abort", onAbort)
@@ -284,6 +320,59 @@ const waitForAnswer = (projectId: string, stepId: string, sessionId: string, sig
  * `stepId` là đơn vị giai đoạn (`S-4`, `S-5@S03`) chứ không phải một bước trong registry.
  */
 export const submitAnswerWait = waitForAnswer
+
+const notWaiting = (stepId: string): ApiError => new ApiError(409, `Step ${stepId} không đang chờ trả lời câu hỏi`, STEP_NOT_RUNNABLE)
+
+/**
+ * `POST /answer` khi không còn lượt sống trong bộ nhớ (FE reload, BE restart): lượt chờ ở run-state còn trả lời
+ * được không. Phải đúng session đã hỏi, mọi `question_id` là câu đã hỏi, và không lượt nào đang giữ khoá.
+ * Không khớp ⇒ 409 STEP_NOT_RUNNABLE như khi không có lượt chờ.
+ */
+export const pendingAnswerFor = async (
+  projectId: string,
+  unit: string,
+  sessionId: string,
+  answers: readonly AnswerInput[]
+): Promise<PendingAnswerState> => {
+  const doc = await getRunState(projectId, unit)
+  const pending = doc?.pending_answer
+  if (!doc || !pending || doc.status !== "waiting_answer") throw notWaiting(unit)
+  if (new Date(doc.locked_until).getTime() > Date.now()) throw notWaiting(unit)
+  if (pending.session_id !== sessionId) throw notWaiting(unit)
+  const known = new Set(pending.asked.map((_, i) => `Q${i + 1}`))
+  if (answers.length === 0 || answers.some((a) => !known.has(a.question_id))) throw notWaiting(unit)
+  return pending
+}
+
+/**
+ * Chạy tiếp step đang chờ trả lời mà không còn kết nối SSE: chiếm khoá ngay (hai `/answer` cùng lúc ⇒ cái sau
+ * 409), rồi chạy nền từ sau Elicit tới gate. FE theo dõi qua `GET /run-state` (stage, events, gate_payload).
+ * Lỗi của lượt nền nằm ở run-state (`interrupted` + `error`), không ném ra ngoài.
+ */
+export const resumeWaitingStep = async (
+  projectId: string,
+  stepId: string,
+  userId: string,
+  pending: PendingAnswerState,
+  answers: AnswerInput[],
+  deps: Partial<StepRunnerDeps> = {}
+): Promise<{ done: Promise<void> }> => {
+  const record = await spineRepository.get(projectId)
+  if (record?.steps.find((s) => s.id === stepId)?.status !== "in_progress") throw notWaiting(stepId)
+
+  const run = await acquireRun(projectId, stepId, { sessionId: pending.session_id, by: userId, stage: "ask", detail_vi: `Đã nhận ${answers.length} câu trả lời` })
+  const abort = deps.abort ?? new AbortController()
+  const background = runStep(projectId, stepId, pending.session_id, userId, () => undefined, {
+    ...deps,
+    signal: abort.signal,
+    abort,
+    resumeAnswers: { run, asked: pending.asked, answers, base_answers_text: pending.base_answers_text }
+  }).catch((err: unknown) => {
+    console.error(`[step-runner] lượt chạy tiếp sau khi trả lời của ${stepId} dừng vì lỗi:`, err)
+  })
+  // Không trả thẳng Promise: `async` sẽ chờ nó xong, biến lượt nền thành lượt đồng bộ của request
+  return { done: background }
+}
 
 /** F8: kiểm huỷ TRƯỚC mỗi lượt gọi model — không gọi model nữa nếu client đã đóng kết nối. */
 const assertNotAborted = (signal: AbortSignal | undefined, stepId: string): void => {
@@ -815,11 +904,11 @@ export const runStep = async (
   deps: Partial<StepRunnerDeps> = {}
 ): Promise<void> => {
   // WP-4: khoá nằm ở Mongo, có TTL + heartbeat. Lượt cũ mất SSE ⇒ khoá tự hết hạn, không còn cảnh chờ 20 phút.
-  const run = await acquireRun(projectId, stepId, { sessionId, by: userId, stage: "intake", detail_vi: STAGE_LABELS.intake })
+  const run = deps.resumeAnswers?.run ?? (await acquireRun(projectId, stepId, { sessionId, by: userId, stage: "intake", detail_vi: STAGE_LABELS.intake }))
   if (deps.abort) registerAbort(run.run_id, deps.abort)
   const tracker = createTracker(projectId, stepId, run.run_id, emitRaw)
   const emit = tracker.emit
-  let outcome: "gate" | "interrupted" = "interrupted"
+  let outcome: "gate" | "interrupted" | "detached" = "interrupted"
   let lastError: { code: string; message: string } | null = null
 
   try {
@@ -948,7 +1037,39 @@ export const runStep = async (
      */
     const ledger = ledgerForPrompt(spine)
     const ledgerText = ledger.length === 0 ? "" : ["Đã chốt với user:", ...ledger.map((d) => `- ${d.topic_key}: ${d.answer}`)].join("\n")
-    let answersText = [ledgerText, ctx.transcriptTail].filter((part) => part.trim() !== "").join("\n")
+    let answersText = d.resumeAnswers?.base_answers_text ?? [ledgerText, ctx.transcriptTail].filter((part) => part.trim() !== "").join("\n")
+
+    /**
+     * Phần "sau khi có câu trả lời" của Elicit — dùng chung cho lượt đang nghe và lượt chạy tiếp qua `/answer`
+     * (FLF-222), để hai đường không lệch nhau.
+     */
+    const applyAnswers = async (asked: PendingAnswerState["asked"], answers: readonly AnswerInput[]): Promise<void> => {
+      // Phản hồi ngay khi nhận trả lời — trước đây status đứng yên tới 2 phút (BUG-32)
+      const answerReceived: StepEvent = { type: "answer_received", step_id: stepId, count: answers.length }
+      await tracker.save({ status: "running", stage: "ask", questions: null, pending_answer: null, detail_vi: `Đã nhận ${answers.length} câu trả lời`, appendEvent: { ...answerReceived, at: new Date().toISOString() } })
+      emitRaw(answerReceived)
+      // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
+      const questionOf = (id: string): string => asked[Number(/^Q(\d+)$/.exec(id)?.[1] ?? 0) - 1]?.question ?? id
+      const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
+      for (const a of answers) await pushTranscript(projectId, sessionId, stepId, "user", answerText(a.answer))
+      answersText = `${answersText}\n${answersJoined}`.trim()
+
+      // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa. Chờ user có thể mất
+      // vài phút, trong lúc đó Spine đổi ở nơi khác (đổi chế độ duyệt, sửa qua chat, tab khác) — ghi bằng
+      // version cũ là 409 SPINE_VERSION_CONFLICT và cả bước chết sau khi user đã trả lời. Đọc lại trước khi ghi.
+      ;({ spine, spineVersion } = await refresh(projectId))
+      const ledgerOps = decisionOps(spine, stepId, answeredTopics(asked, answers))
+      if (ledgerOps.length > 0) {
+        const ledgerApplied = await applyTransaction(projectId, {
+          base_version: spineVersion,
+          ops: ledgerOps,
+          by: userId,
+          step_id: stepId,
+          reason: "step-runner: ghi quyết định đã chốt"
+        })
+        spineVersion = ledgerApplied.spine_version
+      }
+    }
 
     // T19 — pha S-9: việc của từng step nằm ở `s9/run-s9-step.ts`, không đi qua STEP_SKILLS.
     // S-9.1/S-9.5 không gọi model và không Meter (hết credit vẫn quét và vẫn ký baseline được).
@@ -973,7 +1094,11 @@ export const runStep = async (
       const noIdeaYet = !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })
       const shouldElicit = missing.length > 0 || noIdeaYet
 
-      if (shouldElicit) {
+      if (d.resumeAnswers) {
+        // Câu hỏi đã hỏi và đã tính lượt ở lượt trước — không gọi model hỏi lại, không tốn thêm credit
+        await applyAnswers(d.resumeAnswers.asked, d.resumeAnswers.answers)
+        ;({ spine, spineVersion } = await refresh(projectId))
+      } else if (shouldElicit) {
         assertNotAborted(d.signal, stepId)
         tracker.stage("ask", { detail_vi: "Xem bước này còn thiếu gì để hỏi bạn" })
         const { calls_used: callsBeforeElicit } = await meter.roundCounts(projectId, stepId, stepStateForRound?.first_seq ?? null)
@@ -1038,34 +1163,20 @@ export const runStep = async (
 
         const { asked, questions } = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet })
         if (questions.length > 0) {
-          emit({ type: "answer_needed", step_id: stepId, questions })
-          // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07)
-          await tracker.save({ status: "waiting_answer", stage: "ask", detail_vi: `Chờ bạn trả lời ${questions.length} câu`, questions })
-          const answers = await waitForAnswer(projectId, stepId, sessionId, d.signal)
-          // Phản hồi ngay khi nhận trả lời — trước đây status đứng yên tới 2 phút (BUG-32)
-          emit({ type: "answer_received", step_id: stepId, count: answers.length })
-          await tracker.save({ status: "running", questions: null, detail_vi: `Đã nhận ${answers.length} câu trả lời` })
-          // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
-          const questionOf = (id: string): string => asked[Number(/^Q(\d+)$/.exec(id)?.[1] ?? 0) - 1]?.question ?? id
-          const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
-          for (const a of answers) await pushTranscript(projectId, sessionId, stepId, "user", answerText(a.answer))
-          answersText = `${answersText}\n${answersJoined}`.trim()
-
-          // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa. Chờ user có thể mất
-          // vài phút, trong lúc đó Spine đổi ở nơi khác (đổi chế độ duyệt, sửa qua chat, tab khác) — ghi bằng
-          // version cũ là 409 SPINE_VERSION_CONFLICT và cả bước chết sau khi user đã trả lời. Đọc lại trước khi ghi.
-          ;({ spine, spineVersion } = await refresh(projectId))
-          const ledgerOps = decisionOps(spine, stepId, answeredTopics(asked, answers))
-          if (ledgerOps.length > 0) {
-            const ledgerApplied = await applyTransaction(projectId, {
-              base_version: spineVersion,
-              ops: ledgerOps,
-              by: userId,
-              step_id: stepId,
-              reason: "step-runner: ghi quyết định đã chốt"
-            })
-            spineVersion = ledgerApplied.spine_version
-          }
+          // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
+          // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.
+          const answerNeeded: StepEvent = { type: "answer_needed", step_id: stepId, questions }
+          emitRaw(answerNeeded)
+          await tracker.save({
+            status: "waiting_answer",
+            stage: "ask",
+            detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+            questions,
+            pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
+            release: true,
+            appendEvent: { ...answerNeeded, at: new Date().toISOString() }
+          })
+          await applyAnswers(asked, await waitForAnswer(projectId, stepId, sessionId, d.signal))
         }
         ;({ spine, spineVersion } = await refresh(projectId))
       }
@@ -1149,12 +1260,19 @@ export const runStep = async (
     outcome = "gate"
     await tracker.save({ status: "gate", stage: "gate", gate_payload: gateEvent, questions: null })
   } catch (err) {
+    // Mất kết nối lúc đang chờ trả lời: step vẫn `in_progress`, lượt chờ nằm ở run-state (FLF-222)
+    if (err instanceof AnswerDetached) {
+      outcome = "detached"
+      return
+    }
     lastError = { code: err instanceof ApiError ? err.code : "UNKNOWN", message: err instanceof Error ? err.message : String(err) }
     throw err
   } finally {
     if (outcome === "gate") {
       // Khoá nhả ngay khi tới gate: user có thể huỷ/chạy lại mà không phải chờ TTL
       await finishRun(projectId, stepId, run.run_id, "gate")
+    } else if (outcome === "detached") {
+      await detachRun(projectId, stepId, run.run_id)
     } else {
       await finishRun(projectId, stepId, run.run_id, "interrupted", { error: lastError })
     }

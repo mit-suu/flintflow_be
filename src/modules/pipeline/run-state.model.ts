@@ -38,13 +38,21 @@ const runStateSchema = new Schema(
     last_event_at: { type: Date, required: true },
     /** Khoá còn hiệu lực tới lúc này; quá hạn ⇒ lượt mới được chiếm. */
     locked_until: { type: Date, required: true },
-    /** Câu hỏi đang chờ trả lời (status `waiting_answer`). */
+    /**
+     * Câu hỏi đang chờ trả lời (status `waiting_answer`). Lượt chờ không giữ khoá (`locked_until` nhả ngay khi
+     * hỏi): đóng kết nối lúc này không huỷ step, `/answer` chạy tiếp được ở bất kỳ lúc nào sau đó.
+     */
     questions: { type: Schema.Types.Mixed, default: null },
     /** Payload `gate_ready` để dựng lại GateCard sau reload (status `gate`). */
     gate_payload: { type: Schema.Types.Mixed, default: null },
     /** Sự kiện đã phát trong lượt (rút gọn) — để dựng lại nhật ký bước sau reload. */
     events: { type: Schema.Types.Mixed, default: [] },
-    error: { type: Schema.Types.Mixed, default: null }
+    error: { type: Schema.Types.Mixed, default: null },
+    /**
+     * Nội bộ, không trả qua API: đủ để `/answer` chạy tiếp lượt đang chờ mà không cần bộ nhớ tiến trình
+     * (FE reload, BE restart) — câu đã hỏi kèm `topic_key` và ngữ cảnh trả lời trước khi hỏi.
+     */
+    pending_answer: { type: Schema.Types.Mixed, default: null }
   },
   { timestamps: true, strict: true, minimize: false }
 )

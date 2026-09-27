@@ -30,6 +30,9 @@ import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AnswerDetached } from "./step-runner.errors.js"
+import { acquireRun, detachRun, finishRun, registerAbort, touchRun, type PendingAnswerState } from "./run-state.service.js"
+import type { AnswerInput } from "./step-runner.service.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -50,9 +53,69 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
 }
 
 /**
+ * Ghi hỏi/đáp của lượt phỏng vấn đầu giai đoạn: transcript (user thấy lại trong khung chat, các bước trong giai
+ * đoạn đọc nó như câu trả lời của chính mình) + sổ quyết định. Dùng chung cho lượt đang nghe và cho `/answer`
+ * khi lượt chờ đã tách khỏi kết nối (FLF-222).
+ */
+const recordInterviewAnswers = async (
+  projectId: string,
+  unit: string,
+  sessionId: string,
+  userId: string,
+  reply: string,
+  asked: PendingAnswerState["asked"],
+  answers: readonly AnswerInput[]
+): Promise<void> => {
+  const transcript: IChatMessage[] = [
+    { role: "ai", content: [reply, ...asked.map((q, i) => `${i + 1}. ${q.question}`)].join("\n"), step: unit, createdAt: new Date() },
+    ...answers.map((a) => ({
+      role: "user" as const,
+      content: answerText(a.answer),
+      step: unit,
+      createdAt: new Date()
+    }))
+  ]
+  await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: { $each: transcript } } })
+
+  const { record, spine: spineNow } = await load(projectId)
+  const ops = decisionOps(spineNow, unit, answeredTopics(asked, answers))
+  if (ops.length > 0) {
+    await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: `Phỏng vấn đầu giai đoạn ${unit}` })
+  }
+}
+
+/**
+ * `/answer` cho lượt phỏng vấn đầu giai đoạn đã tách khỏi kết nối: ghi câu trả lời rồi đóng lượt (`done`).
+ * Không tự chạy cả giai đoạn ở nền — FE chạy lại giai đoạn, phỏng vấn tự bỏ vì chủ đề đã chốt.
+ */
+export const resumePhaseInterview = async (
+  projectId: string,
+  unit: string,
+  userId: string,
+  pending: PendingAnswerState,
+  answers: readonly AnswerInput[]
+): Promise<void> => {
+  // Chiếm khoá để hai `/answer` cùng lúc không ghi hai lần (lượt sau 409)
+  const run = await acquireRun(projectId, unit, { sessionId: pending.session_id, by: userId, stage: "ask", detail_vi: `Đã nhận ${answers.length} câu trả lời` })
+  try {
+    await recordInterviewAnswers(projectId, unit, pending.session_id, userId, pending.reply ?? "", pending.asked, answers)
+    await finishRun(projectId, unit, run.run_id, "done", { questions: null })
+  } catch (err) {
+    await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: err instanceof Error ? err.message : String(err) } })
+    throw err
+  }
+}
+
+/** Kết quả lượt phỏng vấn: không hỏi, đã có câu trả lời, hoặc lượt chờ tách khỏi kết nối. */
+type InterviewOutcome = "skipped" | "answered" | "detached"
+
+/**
  * Hỏi gộp đầu giai đoạn (R3): một lượt elicit nhận hợp `empty_fields` của MỌI bước trong giai đoạn cùng
  * sổ quyết định, trả tối đa `MAX_QUESTIONS_PER_TURN` câu (FLF-220 — cùng trần với mọi lượt hỏi). Chạy ở
- * mọi chế độ duyệt. Trả `true` khi đã hỏi.
+ * mọi chế độ duyệt.
+ *
+ * Lượt chờ ghi ở run-state của đơn vị giai đoạn (`step_runs` với `step_id` = `unit`) để reload dựng lại thẻ hỏi
+ * và `/answer` ghi được câu trả lời kể cả khi kết nối đã đóng (FLF-222).
  *
  * Không hỏi lại điều đã chốt (sổ quyết định lọc trước), và câu trả lời ghi thẳng vào sổ nên mọi bước sau
  * đều dùng được — kể cả khi user rời máy giữa chừng rồi quay lại. Điều còn thiếu thì step bên trong tự hỏi.
@@ -71,16 +134,16 @@ const runPhaseInterview = async (
   emit: Emit,
   deps: StepRunnerDeps,
   userMessage?: string
-): Promise<boolean> => {
-  if (PHASES_WITHOUT_INTERVIEW.has(unit)) return false
+): Promise<InterviewOutcome> => {
+  if (PHASES_WITHOUT_INTERVIEW.has(unit)) return "skipped"
   const { spine } = await load(projectId)
   // Chuỗi dừng giữa chừng rồi chạy tiếp là chuyện thường (user duyệt một cổng chốt). Không nhớ đã phỏng
   // vấn giai đoạn này thì lần chạy tiếp lại hỏi lại từ đầu — mất credit và hỏi đúng thứ user vừa trả lời.
-  if (spine.decisions.some((d) => d.step_id === unit && d.superseded_by === null)) return false
+  if (spine.decisions.some((d) => d.step_id === unit && d.superseded_by === null)) return "skipped"
   // Câu trả lời mở gõ gộp một đoạn không vào sổ quyết định (FLF-220) ⇒ sổ không đủ làm dấu "đã phỏng vấn".
   // Transcript của lượt phỏng vấn (lưu với `step` = đơn vị giai đoạn) thì luôn có.
   const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
-  if ((session?.messages ?? []).some((m) => m.step === unit)) return false
+  if ((session?.messages ?? []).some((m) => m.step === unit)) return "skipped"
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
   const missing = [...new Set(steps.flatMap((step) => {
     try {
@@ -89,8 +152,32 @@ const runPhaseInterview = async (
       return []
     }
   }))]
-  if (missing.length === 0) return false
+  if (missing.length === 0) return "skipped"
 
+  const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
+  if (deps.abort) registerAbort(run.run_id, deps.abort)
+  let outcome: InterviewOutcome | null = null
+  try {
+    outcome = await askPhaseInterview(projectId, unit, sessionId, userId, emit, deps, spine, missing, run.run_id, userMessage)
+    return outcome
+  } finally {
+    if (outcome === "detached") await detachRun(projectId, unit, run.run_id)
+    else await finishRun(projectId, unit, run.run_id, outcome === null ? "interrupted" : "done", { questions: null })
+  }
+}
+
+const askPhaseInterview = async (
+  projectId: string,
+  unit: string,
+  sessionId: string,
+  userId: string,
+  emit: Emit,
+  deps: StepRunnerDeps,
+  spine: Spine,
+  missing: string[],
+  runId: string,
+  userMessage?: string
+): Promise<InterviewOutcome> => {
   const reservedId = await meter.reserveCall(projectId, userId, unit, "elicit")
   let result
   try {
@@ -128,33 +215,31 @@ const runPhaseInterview = async (
   })
 
   const { asked, questions } = shapeQuestions(filterAskedQuestions(spine, result.data.questions).questions)
-  if (asked.length === 0) return false
+  if (asked.length === 0) return "skipped"
 
   emit({ type: "elicit", step_id: unit, delta: result.data.reply })
-  emit({ type: "answer_needed", step_id: unit, questions })
+  const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions }
+  emit(answerNeeded)
+  await touchRun(projectId, unit, runId, {
+    status: "waiting_answer",
+    stage: "ask",
+    detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+    questions,
+    pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: result.data.reply },
+    release: true,
+    appendEvent: answerNeeded
+  })
 
-  const answers = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
-  emit({ type: "answer_received", step_id: unit, count: answers.length })
-
-  // Hỏi/đáp của lượt gộp phải nằm trong transcript: user cần thấy lại trong khung chat, và các bước
-  // trong giai đoạn đọc nó như câu trả lời của chính mình.
-  const transcript: IChatMessage[] = [
-    { role: "ai", content: [result.data.reply, ...asked.map((q, i) => `${i + 1}. ${q.question}`)].join("\n"), step: unit, createdAt: new Date() },
-    ...answers.map((a) => ({
-      role: "user" as const,
-      content: answerText(a.answer),
-      step: unit,
-      createdAt: new Date()
-    }))
-  ]
-  await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: { $each: transcript } } })
-
-  const { record, spine: spineNow } = await load(projectId)
-  const ops = decisionOps(spineNow, unit, answeredTopics(asked, answers))
-  if (ops.length > 0) {
-    await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: `Phỏng vấn đầu giai đoạn ${unit}` })
+  let answers: AnswerInput[]
+  try {
+    answers = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
+  } catch (err) {
+    if (err instanceof AnswerDetached) return "detached"
+    throw err
   }
-  return true
+  emit({ type: "answer_received", step_id: unit, count: answers.length })
+  await recordInterviewAnswers(projectId, unit, sessionId, userId, result.data.reply, asked, answers)
+  return "answered"
 }
 
 export interface PhaseStepOutcome {
@@ -237,7 +322,9 @@ export const runPhase = async (
 
   // R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (trừ B-0). Các bước bên trong vẫn hỏi được khi còn field
   // trống — sổ quyết định chặn lặp lại chủ đề vừa trả lời ở đây.
-  await runPhaseInterview(projectId, unit, sessionId, userId, emit, d, message)
+  const interview = await runPhaseInterview(projectId, unit, sessionId, userId, emit, d, message)
+  // Kết nối đóng trong lúc chờ trả lời phỏng vấn: dừng chuỗi, câu hỏi nằm ở run-state của giai đoạn (FLF-222)
+  if (interview === "detached") return { phase: unit, stopped_at: unit, reason_vi: "Chờ bạn trả lời câu hỏi đầu giai đoạn", steps: [] }
 
   for (let index = 0; index < MAX_PHASE_STEPS; index++) {
     const { record, spine } = await load(projectId)

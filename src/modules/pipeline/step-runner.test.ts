@@ -145,9 +145,10 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, submitAnswer, CALL_LIMIT, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, CALL_LIMIT, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
+import { resumeProject } from "./resume.service.js"
 import { stepEventSchema, type StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
@@ -662,5 +663,279 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
 
     await runStep(PROJECT, "S-8.3", SESSION, USER, emit, { assembleDocument, renderDeps: renderStub() })
     expect(assembleDocument).not.toHaveBeenCalled()
+  })
+})
+
+describe("step-runner: lượt chờ trả lời sống qua reload / rớt kết nối (FLF-222)", () => {
+  const askTwo = () =>
+    elicitReply("Hỏi", [
+      { question: "Actor chính là ai?", options: [], multiple: false, topic_key: "primary_actor" } as never,
+      { question: "Ai duyệt yêu cầu?", options: [], multiple: false, topic_key: "approver" } as never
+    ])
+
+  const waitFor = async (events: StepEvent[], type: StepEvent["type"]) => {
+    for (let i = 0; i < 50 && !events.some((e) => e.type === type); i++) await new Promise((r) => setTimeout(r, 0))
+  }
+
+  it("đóng kết nối khi đang chờ ⇒ step không bị huỷ: run-state giữ waiting_answer + pending_answer, khoá đã nhả", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => askTwo(),
+      draftExecutor,
+      renderDeps: renderStub(),
+      signal: controller.signal,
+      abort: controller
+    })
+    await waitFor(events, "answer_needed")
+
+    controller.abort() // reload / đóng tab: không kèm lý do huỷ
+    await expect(run).resolves.toBeUndefined()
+
+    const state = await getRunState(PROJECT, "S-3.1")
+    expect(state).toMatchObject({ status: "waiting_answer", stage: "ask", error: null })
+    expect(state?.questions).toHaveLength(2)
+    expect(state?.pending_answer).toMatchObject({ kind: "step", unit: "S-3.1", session_id: SESSION })
+    expect(state?.pending_answer?.asked.map((q) => q.topic_key)).toEqual(["primary_actor", "approver"])
+    expect(new Date(state!.locked_until).getTime()).toBeLessThanOrEqual(Date.now())
+    expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-3.1")?.status).toBe("in_progress")
+    expect(events.some((e) => e.type === "error" || e.type === "gate_ready")).toBe(false)
+    expect(draftExecutor).not.toHaveBeenCalled()
+    // Không còn Promise chờ trong bộ nhớ ⇒ lượt sống không nhận câu trả lời nữa, `/answer` phải đi đường run-state
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).toBe(false)
+  })
+
+  it("đóng kết nối lúc AI đang soạn ⇒ vẫn huỷ như cũ (F8): interrupted, không để lại lượt chờ", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { emit } = collectEvents()
+
+    // Không hỏi gì ⇒ đi thẳng tới Draft; kết nối đóng ngay sau lượt elicit
+    const err = await runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => {
+        controller.abort()
+        return elicitReply()
+      },
+      draftExecutor,
+      renderDeps: renderStub(),
+      signal: controller.signal,
+      abort: controller
+    }).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).code).toBe(STEP_NOT_RUNNABLE)
+    expect(draftExecutor).not.toHaveBeenCalled()
+    const state = await getRunState(PROJECT, "S-3.1")
+    expect(state).toMatchObject({ status: "interrupted", pending_answer: null })
+  })
+})
+
+describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau Elicit (FLF-222)", () => {
+  const askTwo = () =>
+    elicitReply("Hỏi", [
+      { question: "Actor chính là ai?", options: [], multiple: false, topic_key: "primary_actor" } as never,
+      { question: "Mức uptime mong muốn?", options: [{ label: "99%" }, { label: "99.9%" }], multiple: false, topic_key: "uptime" } as never
+    ])
+  const addActor = () => draftReply([{ op: "add", path: "actors[]", value: { id: "A09", name: "Quản trị viên", kind: "human", description: "d" } }])
+
+  /** Chạy S-3.1 tới lúc hỏi; `leave` giả lập cách kết nối mất: reload (abort) hoặc BE restart (mất bộ nhớ). */
+  const runUntilAsked = async (leave: "reload" | "restart") => {
+    const controller = new AbortController()
+    const elicitExecutor = vi.fn(async () => askTwo())
+    const draftExecutor = vi.fn<StepRunnerDeps["draftExecutor"]>(async () => addActor())
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, { elicitExecutor, draftExecutor, renderDeps: renderStub(), signal: controller.signal, abort: controller })
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    if (leave === "reload") {
+      controller.abort()
+      await run
+    } else {
+      dropPendingAnswers() // tiến trình chết: Promise chờ biến mất, run-state ở DB còn nguyên
+    }
+    return { elicitExecutor, draftExecutor }
+  }
+
+  const answerAndFinish = async (draftExecutor: StepRunnerDeps["draftExecutor"]) => {
+    const answers = [
+      { question_id: "Q1", answer: "Quản trị viên" },
+      { question_id: "Q2", answer: "99.9%" }
+    ]
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, answers), "không còn lượt đang nghe").toBe(false)
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
+    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor, renderDeps: renderStub() })
+    // `/answer` trả ngay: lượt nền đang giữ khoá
+    expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("running")
+    await done
+  }
+
+  it.each(["reload", "restart"] as const)("%s giữa lúc chờ ⇒ trả lời được, tới gate, không gọi elicit lần 2", async (leave) => {
+    seedSpine()
+    seedSession(true)
+    const { elicitExecutor, draftExecutor } = await runUntilAsked(leave)
+
+    await answerAndFinish(draftExecutor)
+
+    const state = await getRunState(PROJECT, "S-3.1")
+    expect(state).toMatchObject({ status: "gate", stage: "gate", pending_answer: null, questions: null, error: null })
+    expect(state?.gate_payload).toMatchObject({ type: "gate_ready", step_id: "S-3.1", wrote_ops: true })
+    const kinds = (state?.events as StepEvent[]).map((e) => e.type)
+    expect(kinds).toContain("answer_received")
+    expect(kinds).toContain("ops_applied")
+
+    expect(elicitExecutor).toHaveBeenCalledTimes(1)
+    expect(db.usages.filter((u) => u.call_kind === "elicit")).toHaveLength(1)
+    // Lượt soạn thấy đủ câu hỏi + câu trả lời
+    const draftInput = draftExecutor.mock.calls[0]![1] as { promptVariables: Record<string, unknown> }
+    expect(JSON.stringify(draftInput.promptVariables)).toContain("Actor chính là ai? → Quản trị viên")
+
+    const spine = (await repo.get(PROJECT))!
+    expect(spine.actors.map((a) => a.id)).toContain("A09")
+    expect(spine.decisions.map((d) => d.topic_key)).toContain("uptime")
+    const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
+    expect(userMsgs).toEqual(["Quản trị viên", "99.9%"])
+  })
+
+  it("question_id lạ, session khác, hay step không đang chờ ⇒ 409 STEP_NOT_RUNNABLE, không chạy gì", async () => {
+    seedSpine()
+    seedSession(true)
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).rejects.toMatchObject({ statusCode: 409, code: STEP_NOT_RUNNABLE })
+
+    await runUntilAsked("reload")
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, [{ question_id: "Q9", answer: "x" }])).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", "sess-khac", [{ question_id: "Q1", answer: "x" }])).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, [])).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("waiting_answer")
+  })
+
+  it("hai /answer cùng lúc ⇒ chỉ một lượt chạy tiếp, lượt sau 409", async () => {
+    seedSpine()
+    seedSession(true)
+    const { draftExecutor } = await runUntilAsked("reload")
+    const answers = [{ question_id: "Q1", answer: "Quản trị viên" }]
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
+
+    const first = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor, renderDeps: renderStub() })
+    await expect(resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor, renderDeps: renderStub() })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+    await first.done
+    expect(draftExecutor).toHaveBeenCalledTimes(1)
+  })
+
+  it("lượt nền lỗi ⇒ run-state interrupted kèm lỗi, không ném ra ngoài request", async () => {
+    seedSpine()
+    seedSession(true)
+    await runUntilAsked("reload")
+    const answers = [{ question_id: "Q1", answer: "Quản trị viên" }]
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
+    const failing = vi.fn(async () => {
+      throw new ApiError(502, "provider chết", "AI_PROVIDER_ERROR")
+    })
+
+    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor: failing, renderDeps: renderStub() })
+    await expect(done).resolves.toBeUndefined()
+    expect(await getRunState(PROJECT, "S-3.1")).toMatchObject({ status: "interrupted", error: { code: "AI_PROVIDER_ERROR" } })
+  })
+})
+
+describe("resume sau khi step chết giữa chừng / đang chờ trả lời (FLF-222)", () => {
+  const addActor = (id: string) => draftReply([{ op: "add", path: "actors[]", value: { id, name: `Actor ${id}`, kind: "human", description: "d" } }])
+  const actorIds = async () => (await repo.get(PROJECT))!.actors.map((a) => a.id)
+
+  /** Lượt chạy lại ghi xong nội dung rồi chết (mất kết nối / tiến trình) TRƯỚC khi kịp ghi dải seq của vòng. */
+  const runRoundThatDies = (deps: Partial<StepRunnerDeps>) => {
+    vi.mocked(applyTransaction).mockImplementation(async (projectId, txn) => {
+      if (txn.reason === "step-runner: cập nhật dải seq") throw new Error("tiến trình chết giữa chừng")
+      return actualApplyTransaction(projectId, txn)
+    })
+    return runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, deps)
+      .catch((e: unknown) => e)
+      .finally(() => vi.mocked(applyTransaction).mockImplementation(actualApplyTransaction))
+  }
+
+  it("tới gate rồi chạy lại step, lượt mới chết lúc soạn ⇒ /resume revert sạch cả hai lượt (trước: 422 revert_conflict ở elicit_turns)", async () => {
+    seedSpine()
+    seedSession(true)
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => addActor("A09"), renderDeps: renderStub() })
+    // Lượt 2 ghi thêm nội dung rồi mất kết nối trước khi tới gate: phần nó ghi nằm SAU last_seq của lượt 1
+    let drafted = 0
+    const err = await runRoundThatDies({
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async () => {
+        drafted++
+        return addActor("A10")
+      },
+      renderDeps: renderStub()
+    })
+    expect(err).toBeInstanceOf(Error)
+    expect(drafted).toBe(1)
+    expect(await actorIds()).toEqual(expect.arrayContaining(["A09", "A10"]))
+
+    const result = await resumeProject(PROJECT, USER)
+
+    expect(result.reverted_step).toBe("S-3.1")
+    expect(await actorIds()).toEqual(["A01"])
+    expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-3.1")).toMatchObject({ status: "pending", first_seq: null, last_seq: null })
+  })
+
+  it("gate revision nới dải qua cờ recompute + sổ sách ⇒ /resume revert sạch (trước: 422 CHANGE_RANGE_INVALID)", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps = { elicitExecutor: async () => elicitReply(), draftExecutor: async () => addActor("A09"), renderDeps: renderStub() }
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, deps)
+    await gate(PROJECT, "S-3.1", USER, { action: "revision", note: "thêm actor", base_version: (await repo.get(PROJECT))!.spine_version }, { ...deps, draftExecutor: async () => addActor("A10") })
+    expect(db.changes.some((c) => c.step_id === null && String(c.path).startsWith("flags["))).toBe(true)
+
+    const result = await resumeProject(PROJECT, USER)
+
+    expect(result.reverted_step).toBe("S-3.1")
+    expect(await actorIds()).toEqual(["A01"])
+  })
+
+  it("user sửa tay nội dung xen giữa lượt chạy lại ⇒ vẫn 422 CHANGE_RANGE_INVALID, không revert (F13)", async () => {
+    seedSpine()
+    seedSession(true)
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => addActor("A09"), renderDeps: renderStub() })
+    const current = (await repo.get(PROJECT))!
+    await applyTransaction(PROJECT, { base_version: current.spine_version, ops: [{ op: "add", path: "actors[]", value: { id: "A77", name: "Sửa tay", kind: "human", description: "ngoài step" } }], by: USER, step_id: null, reason: "user /changes" })
+    await runRoundThatDies({ elicitExecutor: async () => elicitReply(), draftExecutor: async () => addActor("A10"), renderDeps: renderStub() })
+
+    const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
+    expect(err).toMatchObject({ statusCode: 422, code: "CHANGE_RANGE_INVALID" })
+    expect(await actorIds()).toEqual(expect.arrayContaining(["A09", "A10", "A77"]))
+  })
+
+  it("step đang chờ trả lời (đã tách) ⇒ /resume không revert, /answer sau đó vẫn chạy tiếp tới gate", async () => {
+    seedSpine()
+    seedSession(true)
+    // Lượt 1 tới gate để step có dải seq — đúng cảnh reload của ticket: chạy lại, hỏi, rồi F5
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => addActor("A09"), renderDeps: renderStub() })
+    const controller = new AbortController()
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitReply("Hỏi", [{ question: "Thêm actor nào?", options: [], multiple: false, topic_key: "extra_actor" } as never]),
+      draftExecutor: async () => addActor("A10"),
+      renderDeps: renderStub(),
+      signal: controller.signal,
+      abort: controller
+    })
+    for (let i = 0; i < 50 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+    controller.abort()
+    await run
+
+    const result = await resumeProject(PROJECT, USER)
+    expect(result.reverted_step).toBeNull()
+    expect(await actorIds()).toContain("A09")
+    expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-3.1")?.status).toBe("in_progress")
+
+    const answers = [{ question_id: "Q1", answer: "Kế toán" }]
+    const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, answers)
+    const { done } = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, answers, { draftExecutor: async () => addActor("A10"), renderDeps: renderStub() })
+    await done
+    expect(await getRunState(PROJECT, "S-3.1")).toMatchObject({ status: "gate" })
+    expect(await actorIds()).toEqual(expect.arrayContaining(["A09", "A10"]))
   })
 })

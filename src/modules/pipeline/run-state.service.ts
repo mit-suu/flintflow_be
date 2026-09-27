@@ -21,7 +21,8 @@ import { StepRun, type RunStage, type RunStatus } from "./run-state.model.js"
 
 export type { RunStage, RunStatus }
 import { ApiError } from "../../shared/utils/api-error.js"
-import { STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import { RUN_CANCELLED_REASON, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import type { ModelQuestion } from "./question-shape.js"
 import { isRegisteredStep } from "./step-registry.js"
 
 /** Khoá hết hạn sau ngần này nếu không có nhịp heartbeat nào — lượt chết không giữ step quá lâu. */
@@ -30,6 +31,25 @@ export const LOCK_TTL_MS = 45_000
 export const HEARTBEAT_MS = 10_000
 
 const STALE_STATUSES: readonly RunStatus[] = ["done", "interrupted", "cancelled"]
+
+/** `locked_until` của lượt đã nhả khoá (kết thúc, huỷ, hoặc đang chờ trả lời). */
+const RELEASED = new Date(0)
+
+/**
+ * Lượt đang chờ trả lời, lưu ở DB để `/answer` chạy tiếp được khi không còn Promise trong bộ nhớ (FE reload,
+ * BE restart). `asked[i]` là câu `Q${i + 1}` đã gửi FE. Nội bộ — không trả qua `GET /run-state`.
+ */
+export interface PendingAnswerState {
+  /** `step`: Elicit của một bước; `phase_interview`: lượt hỏi gộp đầu giai đoạn (`unit` = `S-4`, `S-5@S03`). */
+  kind: "step" | "phase_interview"
+  unit: string
+  session_id: string
+  asked: (ModelQuestion & { topic_key: string })[]
+  /** Câu trả lời/ngữ cảnh đưa vào lượt soạn TRƯỚC khi hỏi (sổ quyết định + transcript). */
+  base_answers_text: string
+  /** Lời AI của lượt phỏng vấn giai đoạn — chỉ ghi vào transcript sau khi có câu trả lời nên phải giữ lại. */
+  reply?: string
+}
 
 export interface RunStateDoc {
   projectId: string
@@ -47,6 +67,7 @@ export interface RunStateDoc {
   gate_payload: unknown | null
   events: unknown[]
   error: { code: string; message: string } | null
+  pending_answer: PendingAnswerState | null
 }
 
 const toDoc = (raw: Record<string, unknown>): RunStateDoc => ({
@@ -64,7 +85,8 @@ const toDoc = (raw: Record<string, unknown>): RunStateDoc => ({
   questions: (raw.questions as unknown[] | null) ?? null,
   gate_payload: raw.gate_payload ?? null,
   events: (raw.events as unknown[] | null) ?? [],
-  error: (raw.error as { code: string; message: string } | null) ?? null
+  error: (raw.error as { code: string; message: string } | null) ?? null,
+  pending_answer: (raw.pending_answer as PendingAnswerState | null | undefined) ?? null
 })
 
 const asObjectId = (projectId: string): mongoose.Types.ObjectId | string =>
@@ -136,7 +158,8 @@ export const acquireRun = async (projectId: string, stepId: string, options: Acq
     questions: null,
     gate_payload: null,
     events: [],
-    error: null
+    error: null,
+    pending_answer: null
   }
 
   const filter: RunFilter = {
@@ -178,9 +201,14 @@ export interface PatchRun {
   questions?: unknown[] | null
   gate_payload?: unknown | null
   error?: { code: string; message: string } | null
+  pending_answer?: PendingAnswerState | null
+  /** Nhả khoá ngay (lượt chuyển sang chờ trả lời) thay vì gia hạn. */
+  release?: boolean
   /** Sự kiện SSE rút gọn để dựng lại nhật ký sau reload. */
   appendEvent?: unknown
 }
+
+const PATCH_KEYS = ["stage", "status", "detail_vi", "batch", "questions", "gate_payload", "error", "pending_answer"] as const
 
 /** Số sự kiện giữ lại cho một lượt — đủ dựng lại nhật ký, không phình document. */
 export const MAX_KEPT_EVENTS = 100
@@ -194,12 +222,13 @@ const TERMINAL_STATUSES = ["gate", "done", "interrupted", "cancelled"] as const 
  *
  * Cũng bỏ qua khi lượt ĐÃ kết thúc: `tracker.emit`/`tracker.stage` gọi hàm này kiểu bắn-và-quên, nên một
  * lượt touch của sự kiện cuối có thể về đích SAU `finishRun` và gia hạn lại khoá vừa nhả — bước kế tiếp
- * (hoặc chính cổng chốt) nhận "bước đang chạy ở lượt trước" và phải chờ hết TTL.
+ * (hoặc chính cổng chốt) nhận "bước đang chạy ở lượt trước" và phải chờ hết TTL. Cùng lý do, lượt đã nhả khoá
+ * (đang chờ trả lời) chỉ nhận cập nhật có `status` — một nhịp trễ không được giành lại khoá cho lượt chờ.
  */
 export const touchRun = async (projectId: string, stepId: string, runId: string, patch: PatchRun = {}): Promise<boolean> => {
   const now = new Date()
-  const set: Record<string, unknown> = { last_event_at: now, locked_until: new Date(now.getTime() + LOCK_TTL_MS) }
-  for (const key of ["stage", "status", "detail_vi", "batch", "questions", "gate_payload", "error"] as const) {
+  const set: Record<string, unknown> = { last_event_at: now, locked_until: patch.release ? RELEASED : new Date(now.getTime() + LOCK_TTL_MS) }
+  for (const key of PATCH_KEYS) {
     if (patch[key] !== undefined) set[key] = patch[key]
   }
   const update: Record<string, unknown> = { $set: set }
@@ -208,22 +237,22 @@ export const touchRun = async (projectId: string, stepId: string, runId: string,
   if (useMemory()) {
     const doc = memory.get(memoryKey(projectId, stepId))
     if (!doc || doc.run_id !== runId) return false
-    if ((TERMINAL_STATUSES as readonly string[]).includes(String(doc.status)) && patch.status === undefined) return false
+    if (patch.status === undefined && ((TERMINAL_STATUSES as readonly string[]).includes(String(doc.status)) || new Date(doc.locked_until as Date).getTime() <= RELEASED.getTime())) return false
     Object.assign(doc, set)
     if (patch.appendEvent !== undefined) doc.events = [...((doc.events as unknown[]) ?? []), patch.appendEvent].slice(-MAX_KEPT_EVENTS)
     return true
   }
 
   const result = await StepRun.updateOne(
-    { projectId: asObjectId(projectId), step_id: stepId, run_id: runId, ...(patch.status === undefined ? { status: { $nin: TERMINAL_STATUSES as unknown as RunStatus[] } } : {}) },
+    { projectId: asObjectId(projectId), step_id: stepId, run_id: runId, ...(patch.status === undefined ? { status: { $nin: TERMINAL_STATUSES as unknown as RunStatus[] }, locked_until: { $gt: RELEASED } } : {}) },
     update
   )
   return result.matchedCount > 0
 }
 
-/** Kết thúc lượt: nhả khoá (đặt `locked_until` về quá khứ) và ghi trạng thái cuối. */
+/** Kết thúc lượt: nhả khoá (đặt `locked_until` về quá khứ) và ghi trạng thái cuối. Lượt đã xong không còn chờ trả lời. */
 export const finishRun = async (projectId: string, stepId: string, runId: string, status: RunStatus, patch: PatchRun = {}): Promise<void> => {
-  const set: Record<string, unknown> = { status, last_event_at: new Date(), locked_until: new Date(0) }
+  const set: Record<string, unknown> = { status, last_event_at: new Date(), locked_until: RELEASED, pending_answer: null }
   for (const key of ["stage", "detail_vi", "questions", "gate_payload", "error"] as const) {
     if (patch[key] !== undefined) set[key] = patch[key]
   }
@@ -232,6 +261,21 @@ export const finishRun = async (projectId: string, stepId: string, runId: string
     if (doc && doc.run_id === runId) Object.assign(doc, set)
   } else {
     await StepRun.updateOne({ projectId: asObjectId(projectId), step_id: stepId, run_id: runId }, { $set: set })
+  }
+  unregisterAbort(runId)
+}
+
+/**
+ * Lượt chờ trả lời mất người nghe (đóng kết nối, hết giờ chờ): giữ nguyên `waiting_answer` + câu hỏi +
+ * `pending_answer`, chỉ chắc chắn khoá đã nhả. Không đụng lượt đã bị huỷ hay đã bị lượt khác chiếm.
+ */
+export const detachRun = async (projectId: string, stepId: string, runId: string): Promise<void> => {
+  const set = { last_event_at: new Date(), locked_until: RELEASED }
+  if (useMemory()) {
+    const doc = memory.get(memoryKey(projectId, stepId))
+    if (doc && doc.run_id === runId && doc.status === "waiting_answer") Object.assign(doc, set)
+  } else {
+    await StepRun.updateOne({ projectId: asObjectId(projectId), step_id: stepId, run_id: runId, status: "waiting_answer" }, { $set: set })
   }
   unregisterAbort(runId)
 }
@@ -272,6 +316,12 @@ export const isStepRunning = async (projectId: string, stepId: string): Promise<
   return doc !== null && doc.status === "running" && new Date(doc.locked_until).getTime() > Date.now()
 }
 
+/** Step đang chờ user trả lời và lượt chờ còn trả lời được qua `/answer` — resume không được revert nó (FLF-222). */
+export const isWaitingForAnswer = async (projectId: string, stepId: string): Promise<boolean> => {
+  const doc = await getRunState(projectId, stepId)
+  return doc !== null && doc.status === "waiting_answer" && doc.pending_answer !== null
+}
+
 export interface CancelResult {
   cancelled: boolean
   run_id: string | null
@@ -287,9 +337,9 @@ export const cancelRun = async (projectId: string, stepId: string, runId?: strin
   if (!current || STALE_STATUSES.includes(current.status)) return { cancelled: false, run_id: current?.run_id ?? null }
   if (runId && runId !== current.run_id) return { cancelled: false, run_id: current.run_id }
 
-  activeAborts.get(current.run_id)?.abort()
+  activeAborts.get(current.run_id)?.abort(RUN_CANCELLED_REASON)
   unregisterAbort(current.run_id)
-  const cancelled = { status: "cancelled" as RunStatus, last_event_at: new Date(), locked_until: new Date(0), questions: null }
+  const cancelled = { status: "cancelled" as RunStatus, last_event_at: new Date(), locked_until: RELEASED, questions: null, pending_answer: null }
   if (useMemory()) {
     const doc = memory.get(memoryKey(projectId, stepId))
     if (doc) Object.assign(doc, cancelled)

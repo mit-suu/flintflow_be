@@ -634,6 +634,19 @@ export const revertRange = async (
     throw new ApiError(422, `Dải seq ${firstSeq}–${lastSeq} không đầy đủ trong changes[]`, CHANGE_RANGE_INVALID)
   }
 
+  return saveRevert(projectId, record, changes, options)
+}
+
+/**
+ * Revert đúng các change được chỉ ra (không cần liền dải seq), theo thứ tự ngược, trong MỘT txn mới. Bên gọi
+ * chịu trách nhiệm chọn tập change; change nào đã bị ghi đè sau đó vẫn bị từ chối (`revert_conflict`).
+ */
+export const revertChanges = async (projectId: string, changes: Change[], options: RevertRangeOptions): Promise<ApplyResult> => {
+  const record = await loadForWrite(projectId, options.base_version)
+  return saveRevert(projectId, record, changes, options)
+}
+
+const saveRevert = async (projectId: string, record: SpineRecord, changes: Change[], options: RevertRangeOptions): Promise<ApplyResult> => {
   const startSeq = await repository.nextSeq(projectId)
   const plan = planRevert(stripRecord(record), changes, { by: options.by, startSeq, step_id: options.step_id ?? null })
   const saved = await repository.applyAndSave(projectId, {
