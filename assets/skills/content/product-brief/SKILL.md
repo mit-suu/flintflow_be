@@ -52,9 +52,10 @@ Two habits decide whether this phase is useful:
   `api_service`, `cli`, `embedded`. Ask once; infer from the brain dump when it is obvious.
 - **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. This drives NFR defaults at S-6,
   so a guess here must come with an `assumptions[]` entry.
-- **B-0.4 `project.working_mode`** — `coaching` (gate every step, ask freely) or `fast` (at most two
-  question turns per phase, fill gaps with assumptions). Explain the trade-off in one sentence and let
-  the user choose; do not choose silently.
+- **B-0.4 Wrap-up of intake.** Do **not** ask how the user wants to work: how much to ask is your call,
+  and where the run stops for review is the AI settings menu. Never write `project.working_mode` (retired).
+  Read back system name, form factor and stakes in one sentence; capture anything new as `addendum[]`.
+  `ops: []` is a valid outcome.
 
 ### Write the rule the user actually stated (B-0.1, B-1.x)
 
@@ -110,8 +111,8 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
    rendered. Both are required, never empty.
 4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here — the Brief is
    input to the SRS, not the SRS. Those come from S-2 onward.
-5. Fast mode: at most two question turns per phase, then fill the rest with the most reasonable reading
-   plus `assumptions[]` entries. Coaching mode: ask until the step is genuinely answered.
+5. Ask what changes the brief; fill the rest with the most reasonable reading plus `assumptions[]`
+   entries — the user reviews them at B-2.1.
 6. `reply` to the user is in **their language**; `content_en` and anything destined for the document is
    English (`draft-to-ops` rules 6–7).
 
@@ -132,7 +133,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## Self-check
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
-- [ ] `project.system_name` (English, user-picked), `form_factor`, `stakes`, `working_mode` set by the end of B-0.
+- [ ] `project.system_name` (English, user-picked), `form_factor`, `stakes` set by the end of B-0.
 - [ ] `project.vision` + 3–6 outcome-shaped `goals[]` by the end of B-1.1.
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.

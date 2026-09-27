@@ -75,8 +75,8 @@ Sweep three sources; for each hit either add the entity or say in `notes` why it
 2. Every id in `relations` exists after this batch — a dangling id is `dead_reference` and blocks the lot.
 3. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 4. Do not write `screens[]`, `functions[]` or `business_rules[]` here.
-5. Fast mode: add the entity with the most reasonable relation direction plus an `assumptions[]` entry
-   (`status: "unconfirmed"`); Coaching mode leaves the open question for Elicit (`draft-to-ops` rule 10).
+5. Still unclear: add the entity with the most reasonable relation direction plus an `assumptions[]`
+   entry (`status: "unconfirmed"`), `draft-to-ops` rule 10.
 
 ## Example (parent with two children and a noted many-to-many)
 

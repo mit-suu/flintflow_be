@@ -72,9 +72,9 @@ Rules that keep the matrix honest:
 2. Every `screen_id`/`role_id` must exist after this batch — a dangling key is `dead_reference`.
 3. English values; `action` from the fixed vocabulary above, lowercase.
 4. Do not edit `screens[]` or `actors[]` here — if a screen or actor is missing, say so in `notes`
-   (Coaching) or add an `assumptions[]` entry naming the gap (Fast); S-4.1/S-3.1 own those collections.
-5. Fast mode: pick the least-privilege default that still lets the flow work and record it as an
-   assumption; Coaching mode leaves an open question for Elicit (`draft-to-ops` rule 10).
+   and add an `assumptions[]` entry naming the gap; S-4.1/S-3.1 own those collections.
+5. Still unanswered: pick the least-privilege default that still lets the flow work and record it as an
+   assumption (`draft-to-ops` rule 10).
 
 ## Example (a guest screen and an owner screen)
 

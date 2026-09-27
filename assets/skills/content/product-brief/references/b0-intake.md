@@ -23,22 +23,19 @@ tên project làm việc (`Project.name` ở FE, không đồng bộ). Hỏi nga
 - Chưa chốt ⇒ sơ đồ và tài liệu dùng tên project; từ S-2.5 có cờ vàng `system_name_missing`. User đổi sau
   bằng chat (op `set project.system_name`).
 
-## Ba trường phân loại (B-0.2 đến B-0.4)
+## Hai trường phân loại (B-0.2, B-0.3)
 
 | Field | Giá trị | Ảnh hưởng về sau |
 | --- | --- | --- |
 | `form_factor` | `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded` | S-4.1 hình dung màn; S-6.2 ngưỡng usability; S-7.2 common requirements |
 | `stakes` | `internal`, `production`, `regulated` | S-6.3/S-6.4 lấy ngưỡng mặc định theo cột này; S-6.5 có cần mục tuân thủ không |
-| `working_mode` | `coaching`, `fast` | Số lượt hỏi mỗi phase, và gate từng step hay gộp cuối phase |
 
 `stakes` là trường hay bị đoán nhất và cũng là trường đắt nhất khi đoán sai: `internal` cho một sản phẩm
 có thanh toán thật kéo mọi ngưỡng NFR xuống quá thấp. Đoán thì phải kèm `assumptions[]`.
 
-## Coaching hay Fast — nói gì với user
+## B-0.4 — không hỏi "cách làm việc" (FLF-220)
 
-- **Coaching**: hỏi tới khi rõ, chốt từng step. Chậm hơn, tài liệu sát ý hơn.
-- **Fast**: tối đa 2 lượt hỏi mỗi phase, chỗ thiếu điền mặc định hợp lý kèm giả định; user duyệt giả định
-  một lượt ở B-2.1 và S-9.1.
-
-Đừng chọn hộ. Câu hỏi đúng là "bạn muốn trả lời nhiều để tài liệu sát ý, hay muốn có bản nháp nhanh rồi
-sửa sau?".
+`working_mode` (Coaching/Fast) đã bỏ: AI tự quyết hỏi nhiều hay ít, còn dừng để duyệt ở đâu là chế độ duyệt
+trong menu cài đặt AI ("Mọi bước" / "Cuối giai đoạn"). B-0.4 chỉ đọc lại tóm tắt intake (tên hệ thống,
+form factor, stakes) và ghi addendum nếu user nói thêm điều mới. Field `project.working_mode` còn trong
+schema (hợp đồng đóng băng) nhưng không ai ghi hay đọc nữa.

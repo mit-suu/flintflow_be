@@ -99,8 +99,8 @@ Wire the function to rules that already exist by appending to `business_rule_ids
    those. `detail_status` in particular is set by code, never by an op you emit.
 3. Validation ids unique within the function; never reuse an id for a different statement.
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
-5. Fast mode: write the most reasonable default flow plus an `assumptions[]` entry
-   (`status: "unconfirmed"`); Coaching mode leaves the open question for Elicit (`draft-to-ops` rule 10).
+5. Still unclear: write the most reasonable default flow plus an `assumptions[]` entry
+   (`status: "unconfirmed"`), `draft-to-ops` rule 10.
 
 ## Example (S-5.4, one function of the batch)
 

@@ -42,7 +42,7 @@ outcomes in an addendum while `project.goals[]` has two.
   weaker than what the addenda say.
 - Fill or extend `project.goals[]` to 3–6 outcome-shaped goals drawn from the addenda — outcomes, not
   features. Do not invent a goal no addendum supports.
-- `project.form_factor`, `stakes`, `working_mode` are set at B-0; only touch one if an addendum
+- `project.form_factor`, `stakes` are set at B-0; only touch one if an addendum
   contradicts it outright, and then add an `assumptions[]` entry explaining the override.
 - **Do not rewrite or delete `addendum[]`.** Extraction reads from it; triage already happened at B-2.2.
 
@@ -86,8 +86,8 @@ A gap list is not a complaint list: each entry should be answerable in one sente
    `screens[]`, `functions[]`, `sections[]`, and no edits to `addendum[]`.
 3. `project.goals[]` is sent as the **full array** (`set` replaces it) — include the goals already there.
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
-5. Fast mode: record the most reasonable reading plus an `assumptions[]` entry; Coaching mode leaves the
-   open question for Elicit (`draft-to-ops` rule 10).
+5. Still unclear: record the most reasonable reading plus an `assumptions[]` entry (`draft-to-ops`
+   rule 10).
 
 ## Example (S-1.4)
 

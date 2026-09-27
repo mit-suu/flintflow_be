@@ -143,7 +143,10 @@ sequenceDiagram
 ```
 
 - Trần **8 lượt gọi model/step**, **3 regenerate/step**; Meter ghi `usages` và trừ credit theo lượt.
-- Coaching path gate từng step; Fast path gate gộp cuối phase.
+- Hỏi đáp tách khỏi chế độ duyệt: AI hỏi gộp đầu giai đoạn (≤ 4 câu) và hỏi thêm ở step còn field trống,
+  mặc định bằng văn xuôi, chỉ đưa thẻ lựa chọn khi cần user quyết (`question-shape.ts` ép luật hình dạng).
+  Chế độ duyệt (`project.review_mode`) chỉ quyết định dừng ở đâu: `strict` ("Mọi bước") gate từng step;
+  `fast` ("Cuối giai đoạn", `balanced` cũ xử lý như `fast`) tự Accept bước yên lặng, gate gộp cuối phase.
 - `POST /resume` revert step `in_progress` dang dở khi mở lại workspace.
 - Đúng **một** chat session `is_pipeline` mỗi project (partial unique index); session khác chỉ hỏi đáp.
 - S-8 assemble tất định; S-9 quét lại, đối chiếu mục tiêu, MoSCoW (`functions[].priority`,

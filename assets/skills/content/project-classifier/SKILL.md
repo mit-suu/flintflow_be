@@ -55,8 +55,8 @@ a different step; here only `assumptions[]` may be added, flagging the gap for l
 
 ## Rules
 
-1. Never invent `project.type`/`domain` values not supported by the Brief or addendum — ask instead
-   (Coaching) or default + `assumptions[]` entry (Fast), same as `draft-to-ops` rule 10.
+1. Never invent `project.type`/`domain` values not supported by the Brief or addendum — take the
+   most reasonable default + an `assumptions[]` entry, same as `draft-to-ops` rule 10.
 2. English for every value (`draft-to-ops` rule 6).
 3. One `set` per field — do not wrap the three fields in a single object `set` on `project` (that would
    overwrite sibling fields such as `vision` outside this step's intent).
