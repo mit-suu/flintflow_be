@@ -265,10 +265,23 @@ export const gateTableSchema = z.object({
   truncated: z.number().int().min(0)
 })
 
+/**
+ * Một lựa chọn của thẻ hỏi (theo AskUserQuestion): `label` là thứ gửi lại qua `/answer`, `description` nói
+ * chọn nó được/mất gì, `preview` là bản so sánh monospace (bố cục màn, cấu trúc bảng). Dạng `string` chỉ
+ * còn để đọc run-state `waiting_answer` lưu trước khi đổi hợp đồng — server luôn phát dạng object.
+ */
+export const questionOptionSchema = z.union([
+  z.string().min(1),
+  z.object({ label: z.string().min(1), description: z.string().optional(), preview: z.string().optional() })
+])
+
 export const questionSchema = z.object({
   id: z.string().min(1),
   text: z.string().min(1),
-  options: z.array(z.string()).optional(),
+  /** Nhãn ngắn cho tab của thẻ hỏi. */
+  header: z.string().max(12).optional(),
+  /** Không có ⇒ câu mở, trả lời bằng ô chat. "Khác…" không nằm ở đây — FE tự thêm. */
+  options: z.array(questionOptionSchema).optional(),
   multiple: z.boolean().optional()
 })
 
