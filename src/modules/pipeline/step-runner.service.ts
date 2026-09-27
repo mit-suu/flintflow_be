@@ -54,10 +54,11 @@ import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
 import { buildProgressReport, computeSectionStates } from "../spine/section-status.js"
 import { ownerStepOf } from "../spine/section-registry.js"
-import { CALL_LIMIT, NOT_PIPELINE_SESSION, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import { AnswerDetached, CALL_LIMIT, NOT_PIPELINE_SESSION, RUN_CANCELLED_REASON, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
 import {
   HEARTBEAT_MS,
   acquireRun,
+  detachRun,
   finishRun,
   registerAbort,
   touchRun,
@@ -216,7 +217,10 @@ interface PendingAnswer {
   timeout: ReturnType<typeof setTimeout>
 }
 
-/** 15 phút — đủ để đọc câu hỏi và trả lời; không giữ promise treo vô hạn nếu người dùng bỏ đi. */
+/**
+ * 15 phút — đủ để đọc câu hỏi và trả lời; không giữ promise treo vô hạn nếu người dùng bỏ đi. Hết giờ thì lượt
+ * chờ tách khỏi kết nối (như đóng tab), vẫn trả lời được sau đó qua run-state.
+ */
 export const ANSWER_WAIT_TIMEOUT_MS = 15 * 60 * 1000
 
 const pendingAnswers = new Map<string, PendingAnswer>()
@@ -234,26 +238,34 @@ export const submitAnswer = (projectId: string, stepId: string, sessionId: strin
   return true
 }
 
-/** F8: đang chờ answer mà client đóng kết nối ⇒ dọn lượt chờ, không treo promise vô thời hạn. */
+/**
+ * Chờ user trả lời. Đóng kết nối hoặc hết giờ chờ ⇒ ném `AnswerDetached`: lượt chờ đã nằm ở run-state nên
+ * không có gì phải huỷ, `/answer` chạy tiếp sau đó (FLF-222). Chỉ Huỷ (`POST /cancel`) mới dừng hẳn (409).
+ */
 const waitForAnswer = (projectId: string, stepId: string, sessionId: string, signal?: AbortSignal): Promise<AnswerInput[]> => {
   const key = answerKey(projectId, stepId, sessionId)
+  const abortError = (): Error =>
+    signal?.reason === RUN_CANCELLED_REASON
+      ? new ApiError(409, `Lượt chạy của step ${stepId} đã bị huỷ trong khi chờ trả lời`, STEP_NOT_RUNNABLE)
+      : new AnswerDetached(stepId)
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
-      pendingAnswers.delete(key)
+      // Chỉ xoá lượt chờ của chính mình — lượt mới cùng khoá có thể đã thay chỗ
+      if (pendingAnswers.get(key)?.timeout === timeout) pendingAnswers.delete(key)
       if (signal && onAbort) signal.removeEventListener("abort", onAbort)
     }
     const timeout = setTimeout(() => {
       cleanup()
-      reject(new ApiError(409, `Hết thời gian chờ trả lời câu hỏi của step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(new AnswerDetached(stepId))
     }, ANSWER_WAIT_TIMEOUT_MS)
     const onAbort = (): void => {
       clearTimeout(timeout)
       cleanup()
-      reject(new ApiError(409, `Client đã đóng kết nối trong khi chờ trả lời step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(abortError())
     }
     if (signal?.aborted) {
       clearTimeout(timeout)
-      reject(new ApiError(409, `Client đã đóng kết nối trong khi chờ trả lời step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(abortError())
       return
     }
     signal?.addEventListener("abort", onAbort)
@@ -768,7 +780,7 @@ export const runStep = async (
   if (deps.abort) registerAbort(run.run_id, deps.abort)
   const tracker = createTracker(projectId, stepId, run.run_id, emitRaw)
   const emit = tracker.emit
-  let outcome: "gate" | "interrupted" = "interrupted"
+  let outcome: "gate" | "interrupted" | "detached" = "interrupted"
   let lastError: { code: string; message: string } | null = null
 
   try {
@@ -973,13 +985,24 @@ export const runStep = async (
 
         const { asked, questions } = shapeQuestions(filtered.questions)
         if (questions.length > 0) {
-          emit({ type: "answer_needed", step_id: stepId, questions })
-          // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07)
-          await tracker.save({ status: "waiting_answer", stage: "ask", detail_vi: `Chờ bạn trả lời ${questions.length} câu`, questions })
+          // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
+          // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.
+          const answerNeeded: StepEvent = { type: "answer_needed", step_id: stepId, questions }
+          emitRaw(answerNeeded)
+          await tracker.save({
+            status: "waiting_answer",
+            stage: "ask",
+            detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+            questions,
+            pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
+            release: true,
+            appendEvent: answerNeeded
+          })
           const answers = await waitForAnswer(projectId, stepId, sessionId, d.signal)
           // Phản hồi ngay khi nhận trả lời — trước đây status đứng yên tới 2 phút (BUG-32)
-          emit({ type: "answer_received", step_id: stepId, count: answers.length })
-          await tracker.save({ status: "running", questions: null, detail_vi: `Đã nhận ${answers.length} câu trả lời` })
+          const answerReceived: StepEvent = { type: "answer_received", step_id: stepId, count: answers.length }
+          await tracker.save({ status: "running", questions: null, pending_answer: null, detail_vi: `Đã nhận ${answers.length} câu trả lời`, appendEvent: answerReceived })
+          emitRaw(answerReceived)
           // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
           const questionOf = (id: string): string => asked[Number(/^Q(\d+)$/.exec(id)?.[1] ?? 0) - 1]?.question ?? id
           const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
@@ -1084,12 +1107,19 @@ export const runStep = async (
     outcome = "gate"
     await tracker.save({ status: "gate", stage: "gate", gate_payload: gateEvent, questions: null })
   } catch (err) {
+    // Mất kết nối lúc đang chờ trả lời: step vẫn `in_progress`, lượt chờ nằm ở run-state (FLF-222)
+    if (err instanceof AnswerDetached) {
+      outcome = "detached"
+      return
+    }
     lastError = { code: err instanceof ApiError ? err.code : "UNKNOWN", message: err instanceof Error ? err.message : String(err) }
     throw err
   } finally {
     if (outcome === "gate") {
       // Khoá nhả ngay khi tới gate: user có thể huỷ/chạy lại mà không phải chờ TTL
       await finishRun(projectId, stepId, run.run_id, "gate")
+    } else if (outcome === "detached") {
+      await detachRun(projectId, stepId, run.run_id)
     } else {
       await finishRun(projectId, stepId, run.run_id, "interrupted", { error: lastError })
     }

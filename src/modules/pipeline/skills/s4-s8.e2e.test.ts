@@ -164,6 +164,7 @@ import { opTransactionSchema, type OpTransaction, type ElicitOutput } from "../.
 import { FUNCTION_BATCH_SIZE, runStep, submitAnswer, type StepRunnerDeps, defaultStepRunnerDeps } from "../step-runner.service.js"
 import { gate } from "../gate.service.js"
 import { runPhase } from "../phase-runner.service.js"
+import { getRunState, resetMemoryRuns } from "../run-state.service.js"
 import { getSkill } from "../../../shared/ai/prompt-registry.service.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
 
@@ -714,4 +715,46 @@ describe("T18: real provider (E2E_AI=1)", () => {
       console.log("[T18 real-provider usage]", JSON.stringify(measuredUsage))
     }
   )
+})
+
+describe("FLF-222: phỏng vấn đầu giai đoạn sống qua reload / rớt kết nối (mock provider)", () => {
+  const interviewDeps = (elicitCalls: string[]): Partial<StepRunnerDeps> => ({
+    draftExecutor,
+    renderDeps: renderStub(),
+    elicitExecutor: async (input, projectId, userId) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      const result = await elicitExecutor(input, projectId, userId)
+      if (stepId !== "S-4") return result
+      elicitCalls.push(stepId)
+      return {
+        ...result,
+        data: {
+          reply: "Vài câu cho cả giai đoạn màn hình",
+          questions: [{ question: "Màn nào là màn cốt lõi?", options: [{ label: "Đặt lịch" }, { label: "Thanh toán" }], multiple: false, topic_key: "screen_scope" } as never]
+        }
+      }
+    }
+  })
+
+  it("đóng kết nối khi đang chờ trả lời phỏng vấn ⇒ chuỗi dừng, lượt chờ nằm ở run-state của giai đoạn", async () => {
+    resetMemoryRuns()
+    seedSpine()
+    seedSession()
+    const controller = new AbortController()
+    const { events, emit } = collectEvents()
+    const run = runPhase(PROJECT, "S-4", SESSION, USER, emit, { ...interviewDeps([]), signal: controller.signal, abort: controller })
+    for (let i = 0; i < 80 && !events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
+
+    controller.abort()
+    const result = await run
+    expect(result).toMatchObject({ stopped_at: "S-4", steps: [] })
+
+    const state = await getRunState(PROJECT, "S-4")
+    expect(state).toMatchObject({ status: "waiting_answer", stage: "ask" })
+    expect(state?.questions).toHaveLength(1)
+    expect(state?.pending_answer).toMatchObject({ kind: "phase_interview", unit: "S-4", session_id: SESSION, reply: "Vài câu cho cả giai đoạn màn hình" })
+    expect(state?.pending_answer?.asked[0].topic_key).toBe("screen_scope")
+    // Chưa trả lời ⇒ chưa có gì trong transcript hay sổ quyết định, và không bước nào của giai đoạn chạy
+    expect(((await repo.get(PROJECT))!.steps ?? []).some((s) => s.id.startsWith("S-4."))).toBe(false)
+  })
 })

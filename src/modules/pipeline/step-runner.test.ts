@@ -664,3 +664,72 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     expect(assembleDocument).not.toHaveBeenCalled()
   })
 })
+
+describe("step-runner: lượt chờ trả lời sống qua reload / rớt kết nối (FLF-222)", () => {
+  const askTwo = () =>
+    elicitReply("Hỏi", [
+      { question: "Actor chính là ai?", options: [], multiple: false, topic_key: "primary_actor" } as never,
+      { question: "Ai duyệt yêu cầu?", options: [], multiple: false, topic_key: "approver" } as never
+    ])
+
+  const waitFor = async (events: StepEvent[], type: StepEvent["type"]) => {
+    for (let i = 0; i < 50 && !events.some((e) => e.type === type); i++) await new Promise((r) => setTimeout(r, 0))
+  }
+
+  it("đóng kết nối khi đang chờ ⇒ step không bị huỷ: run-state giữ waiting_answer + pending_answer, khoá đã nhả", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => askTwo(),
+      draftExecutor,
+      renderDeps: renderStub(),
+      signal: controller.signal,
+      abort: controller
+    })
+    await waitFor(events, "answer_needed")
+
+    controller.abort() // reload / đóng tab: không kèm lý do huỷ
+    await expect(run).resolves.toBeUndefined()
+
+    const state = await getRunState(PROJECT, "S-3.1")
+    expect(state).toMatchObject({ status: "waiting_answer", stage: "ask", error: null })
+    expect(state?.questions).toHaveLength(2)
+    expect(state?.pending_answer).toMatchObject({ kind: "step", unit: "S-3.1", session_id: SESSION })
+    expect(state?.pending_answer?.asked.map((q) => q.topic_key)).toEqual(["primary_actor", "approver"])
+    expect(new Date(state!.locked_until).getTime()).toBeLessThanOrEqual(Date.now())
+    expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-3.1")?.status).toBe("in_progress")
+    expect(events.some((e) => e.type === "error" || e.type === "gate_ready")).toBe(false)
+    expect(draftExecutor).not.toHaveBeenCalled()
+    // Không còn Promise chờ trong bộ nhớ ⇒ lượt sống không nhận câu trả lời nữa, `/answer` phải đi đường run-state
+    expect(submitAnswer(PROJECT, "S-3.1", SESSION, [{ question_id: "Q1", answer: "x" }])).toBe(false)
+  })
+
+  it("đóng kết nối lúc AI đang soạn ⇒ vẫn huỷ như cũ (F8): interrupted, không để lại lượt chờ", async () => {
+    seedSpine()
+    seedSession(true)
+    const controller = new AbortController()
+    const draftExecutor = vi.fn(async () => draftReply([]))
+    const { emit } = collectEvents()
+
+    // Không hỏi gì ⇒ đi thẳng tới Draft; kết nối đóng ngay sau lượt elicit
+    const err = await runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => {
+        controller.abort()
+        return elicitReply()
+      },
+      draftExecutor,
+      renderDeps: renderStub(),
+      signal: controller.signal,
+      abort: controller
+    }).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).code).toBe(STEP_NOT_RUNNABLE)
+    expect(draftExecutor).not.toHaveBeenCalled()
+    const state = await getRunState(PROJECT, "S-3.1")
+    expect(state).toMatchObject({ status: "interrupted", pending_answer: null })
+  })
+})
