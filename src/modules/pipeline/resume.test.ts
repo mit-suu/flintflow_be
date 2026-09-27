@@ -248,3 +248,30 @@ describe("resume.service", () => {
     expect(after!.actors.map((a) => a.id)).toContain("A77")
   })
 })
+
+describe("FLF-221: project cũ đứng ở B-0.4 (step đã rời registry)", () => {
+  it("B-0.4 in_progress không bị revert; tiến độ tính trên 50 step; step tới lượt là B-1.1", async () => {
+    seedSpine()
+    let version = (await repo.get(PROJECT))!.spine_version
+    for (const stepId of ["B-0.1", "B-0.2", "B-0.3"]) {
+      const applied = await applyTransaction(PROJECT, {
+        base_version: version,
+        ops: [{ op: "add", path: "steps[]", value: { id: stepId, status: "accepted", first_seq: null, last_seq: null, accepted_at: "2026-09-16T00:00:00.000Z" } }],
+        by: USER,
+        step_id: stepId,
+        reason: "seed accepted"
+      })
+      version = applied.spine_version
+    }
+    await seedInProgressMidDraft("B-0.4", "A98")
+
+    const result = await resumeProject(PROJECT, USER)
+
+    expect(result.reverted_step).toBeNull()
+    const after = await repo.get(PROJECT)
+    expect(after!.actors.map((a) => a.id)).toContain("A98")
+    expect(result.progress.progress.current_step).toBe("B-1.1")
+    expect(result.progress.progress.done).toBe(3)
+    expect(result.progress.progress.total).toBe(50) // fixture minimal: chưa có màn ⇒ N = 0; B-0.4 accepted/in_progress không đếm
+  })
+})

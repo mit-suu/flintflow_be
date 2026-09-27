@@ -4,8 +4,8 @@
  * Nguồn sự thật về step (Phases §6.4), dùng chung BE/FE — HỢP ĐỒNG ĐÓNG BĂNG tại M2.
  * Dữ liệu: `assets/step-registry.json` (FE copy bằng `npm run sync:registry`).
  *
- *   13 step Brief + 38 step SRS cố định + 5 template vòng S-5 (`S-5.<n>`)
- *   Tổng = 51 + 5 × N,  N = số màn + 1 nếu có non-screen function
+ *   12 step Brief + 38 step SRS cố định + 5 template vòng S-5 (`S-5.<n>`)
+ *   Tổng = 50 + 5 × N,  N = số màn + 1 nếu có non-screen function
  *   Step id của vòng S-5 là `S-5.<n>@<screen_id>` hoặc `S-5.<n>@nonscreen`.
  *
  * `reads` dùng selector projection của T11 (`functions[screen_id=@loop]:id,name`); `documents` nghĩa là
@@ -29,8 +29,8 @@ export type PhaseId = (typeof PHASES)[number]
 
 export const LOOP_PHASE: PhaseId = "S-5"
 export const NONSCREEN_LOOP = "nonscreen"
-/** Phases §6.4: 13 Brief + 38 SRS cố định. */
-export const FIXED_STEP_COUNT = 51
+/** Phases §6.4: 12 Brief (B-0.4 đã bỏ — FLF-221) + 38 SRS cố định. */
+export const FIXED_STEP_COUNT = 50
 export const STEPS_PER_LOOP = 5
 /** N chốt ở S-4.1 (Phases §1.1); trước đó thanh tiến độ không hiện %. */
 export const N_LOCKED_AT_STEP = "S-4.1"
@@ -115,6 +115,19 @@ export const getStep = (stepId: string): ExpandedStep => {
     throw new ApiError(404, `Không có step ${stepId}`, STEP_NOT_FOUND)
   }
   return expand(def, loop)
+}
+
+/**
+ * Step có trong registry hiện hành không (không ném). Spine cũ có thể còn step đã bỏ (B-0.4, FLF-221) trong
+ * `steps[]` hoặc run-state: những step đó không được tính tiến độ, không dựng lại cổng, không bị revert.
+ */
+export const isRegisteredStep = (stepId: string): boolean => {
+  try {
+    getStep(stepId)
+    return true
+  } catch {
+    return false
+  }
 }
 
 export const phaseOf = (stepId: string): PhaseId => getStep(stepId).phase

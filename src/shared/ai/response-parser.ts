@@ -54,6 +54,13 @@ export const summarizeDocumentSchema = z.object({
   keyThemes: z.array(z.string()).optional()
 })
 
+/** FLF-221: bản tiếng Anh của một câu giả định user vừa sửa. */
+export const translateSchema = z.object({
+  statement: z.string().trim().min(1)
+})
+
+export type TranslateOutput = z.infer<typeof translateSchema>
+
 // ─── Pipeline (T03): hợp đồng đầu ra cho T08/T11 ───────────────────
 // Model chỉ phát op; code áp op (Phases §2.1). Parse/validate thất bại thì
 // throw — không bao giờ ghi raw text vào Spine.
@@ -275,6 +282,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.RENDER_FIX]: renderFixSchema,
   [ActionType.CHAT]: chatSchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
+  [ActionType.TRANSLATE]: translateSchema,
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,

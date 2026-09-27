@@ -237,7 +237,9 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
     await runStep(projectId, stepId, body.session_id, userId, emit, {
       signal: stream.controller.signal,
       abort: stream.controller,
-      ...(body.reopen ? { reopen: true } : {})
+      ...(body.reopen ? { reopen: true } : {}),
+      ...(body.message === undefined ? {} : { message: body.message }),
+      ...(body.intent === undefined ? {} : { intent: body.intent })
     })
     stream.end()
   } catch (err) {
@@ -270,7 +272,12 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
   }
 
   try {
-    await runPhase(projectId, phase, body.session_id, userId, stream.emit, { signal: stream.controller.signal, abort: stream.controller })
+    await runPhase(projectId, phase, body.session_id, userId, stream.emit, {
+      signal: stream.controller.signal,
+      abort: stream.controller,
+      ...(body.message === undefined ? {} : { message: body.message }),
+      ...(body.intent === undefined ? {} : { intent: body.intent })
+    })
     stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err

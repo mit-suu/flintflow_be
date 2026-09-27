@@ -11,6 +11,10 @@ vi.mock("./gate.service.js", async (importOriginal) => {
   return { ...actual, gate: vi.fn() }
 })
 vi.mock("./resume.service.js", () => ({ resumeProject: vi.fn() }))
+vi.mock("./phase-runner.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./phase-runner.service.js")>()
+  return { ...actual, runPhase: vi.fn() }
+})
 vi.mock("../spine/spine.repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/spine.repository.js")>()
   return { ...actual, get: vi.fn(), getOrCreate: vi.fn() }
@@ -20,7 +24,8 @@ vi.mock("./meter.service.js", async (importOriginal) => {
   return { ...actual, roundCountsForSteps: vi.fn(async () => new Map()) }
 })
 
-import { runStepController, getSteps, gateStep, answerStep, resumeProjectController } from "./pipeline.controller.js"
+import { runStepController, runPhaseController, getSteps, gateStep, answerStep, resumeProjectController } from "./pipeline.controller.js"
+import { runPhase } from "./phase-runner.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { runStep, requirePipelineSession, NOT_PIPELINE_SESSION } from "./step-runner.service.js"
 import { gate } from "./gate.service.js"
@@ -58,10 +63,10 @@ interface Outcome {
 
 /** Mock `res`/`req` tối thiểu cho SSE: theo dõi setHeader/flushHeaders/write/end — không cần supertest.
  *  `req.on` no-op (F8 wire `req.on("close", ...)` không điều kiện trong controller thật). */
-const invokeSse = (handler: RequestHandler, userId: string | undefined, projectId: string, stepId: string, body: unknown) =>
+const invokeSse = (handler: RequestHandler, userId: string | undefined, projectId: string, stepId: string, body: unknown, params: Record<string, string> = {}) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = { statusHeaders: 0, headers: {}, headersFlushed: false, written: [], ended: false }
-    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId, stepId }, body, on: () => {} } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId, stepId, ...params }, body, on: () => {} } as unknown as Request
     const res = {
       writableEnded: false,
       setHeader(name: string, value: string) {
@@ -340,6 +345,34 @@ describe("POST /projects/:projectId/steps/:stepId/gate — session_id (contract-
     expect(requirePipelineSession).toHaveBeenCalledWith(PROJECT, "s1")
     expect(outcome.status).toBe(200)
     expect(outcome.body).toMatchObject({ data: { next_step: "S-3.2", spine_version: 2 } })
+  })
+})
+
+describe("FLF-221: message/intent — chat là nút chạy", () => {
+  it("/run nhận message + intent và truyền xuống runStep", async () => {
+    vi.mocked(runStep).mockImplementation(async () => {})
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "B-0.1", { session_id: "s1", base_version: 1, message: "Ứng dụng đặt lịch cắt tóc", intent: "no_idea" })
+    expect(outcome.error).toBeUndefined()
+    expect(vi.mocked(runStep).mock.calls[0][5]).toMatchObject({ message: "Ứng dụng đặt lịch cắt tóc", intent: "no_idea" })
+  })
+
+  it("/phases/B-0/run với message ⇒ không 400, message tới được runPhase", async () => {
+    vi.mocked(runPhase).mockReset()
+    vi.mocked(runPhase).mockResolvedValue({ phase: "B-0", stopped_at: null, reason_vi: "", steps: [] })
+    const outcome = await invokeSse(runPhaseController, OWNER, PROJECT, "", { session_id: "s1", base_version: 1, message: "Ý tưởng của mình" }, { phase: "B-0" })
+    expect(outcome.error).toBeUndefined()
+    expect(vi.mocked(runPhase).mock.calls[0][1]).toBe("B-0")
+    expect(vi.mocked(runPhase).mock.calls[0][5]).toMatchObject({ message: "Ý tưởng của mình" })
+  })
+
+  it("intent lạ ⇒ 400 VALIDATION_ERROR", async () => {
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "B-0.1", { session_id: "s1", base_version: 1, intent: "whatever" })
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+  })
+
+  it("/answer: answers rỗng mà không có message ⇒ 400", async () => {
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, { session_id: "s1", answers: [] })
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
   })
 })
 

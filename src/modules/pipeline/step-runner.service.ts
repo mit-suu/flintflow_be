@@ -49,7 +49,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type StepEvent } from "./pipeline.dto.js"
+import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
 import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
 import { buildProgressReport, computeSectionStates } from "../spine/section-status.js"
@@ -95,6 +95,10 @@ export interface StepRunnerDeps {
   reopen?: boolean
   /** WP-4: cùng controller với `signal`, để `POST /cancel` huỷ được lượt này từ một request khác. */
   abort?: AbortController
+  /** Tin nhắn chat khởi động lượt chạy (FLF-221: chat là nút chạy) — ghi vào transcript của step trước Intake. */
+  message?: string
+  /** `no_idea`: user chưa có ý tưởng — B-0.1 hỏi gợi mở bằng văn xuôi, không đưa lựa chọn. */
+  intent?: RunIntent
 }
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */

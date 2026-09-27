@@ -98,13 +98,6 @@
         "accepted_at": "2026-09-22T00:00:00.000Z"
       },
       {
-        "id": "B-0.4",
-        "status": "accepted",
-        "first_seq": 10,
-        "last_seq": 12,
-        "accepted_at": "2026-09-22T00:00:00.000Z"
-      },
-      {
         "id": "B-1.1",
         "status": "accepted",
         "first_seq": 13,

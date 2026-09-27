@@ -46,9 +46,9 @@ const oneScreen = (): Spine => {
 }
 
 describe("assets/step-registry.json", () => {
-  it("parse qua schema: 13 Brief + 38 SRS cố định + 5 template S-5, đủ 12 phase", () => {
+  it("parse qua schema: 12 Brief + 38 SRS cố định + 5 template S-5, đủ 12 phase", () => {
     const steps = loadStepRegistry()
-    expect(steps.filter((s) => s.id.startsWith("B-"))).toHaveLength(13)
+    expect(steps.filter((s) => s.id.startsWith("B-"))).toHaveLength(12)
     expect(steps.filter((s) => s.id.startsWith("S-") && s.kind !== "loop")).toHaveLength(38)
     expect(steps.filter((s) => s.kind === "loop").map((s) => s.id)).toEqual(["S-5.1", "S-5.2", "S-5.3", "S-5.4", "S-5.5"])
     expect(steps.filter((s) => s.kind !== "loop")).toHaveLength(FIXED_STEP_COUNT)
@@ -83,19 +83,19 @@ describe("assets/step-registry.json", () => {
 })
 
 describe("đếm step (DoD T12)", () => {
-  it("N = 1 ⇒ 56 step", () => {
+  it("N = 1 ⇒ 55 step", () => {
     const spine = oneScreen()
     expect(loopKeys(spine)).toEqual(["S01"])
-    expect(totalSteps(spine)).toBe(56)
-    expect(orderedSteps(spine)).toHaveLength(56)
+    expect(totalSteps(spine)).toBe(55)
+    expect(orderedSteps(spine)).toHaveLength(55)
   })
 
-  it("fixture 19 màn + non-screen ⇒ N = 20 ⇒ 151 step", () => {
+  it("fixture 19 màn + non-screen ⇒ N = 20 ⇒ 150 step", () => {
     expect(loopKeys(FIXTURE)).toHaveLength(20)
     const keys = loopKeys(FIXTURE)
     expect(keys[keys.length - 1]).toBe("nonscreen")
-    expect(totalSteps(FIXTURE)).toBe(151)
-    expect(orderedSteps(FIXTURE)).toHaveLength(151)
+    expect(totalSteps(FIXTURE)).toBe(150)
+    expect(orderedSteps(FIXTURE)).toHaveLength(150)
     expect(expandS5(FIXTURE)).toHaveLength(100)
   })
 

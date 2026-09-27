@@ -2,7 +2,7 @@
  * startup-checks.ts
  * ─────────────────────────────────────────────────────────────────
  * Kiểm tra tại thời điểm KHỞI ĐỘNG những thứ mà nếu sai thì phải chết ngay,
- * chứ không phải chết giữa một pipeline 151 step.
+ * chứ không phải chết giữa một pipeline 150 step.
  *
  * Nguyên tắc: lỗi cấu hình là lỗi ồn ào. Trước đây prompt asset thiếu sẽ rơi
  * vào một bảng hardcode trong code và im lặng đổi provider — kiểu lỗi tệ nhất

@@ -15,6 +15,7 @@ import { buildPipelineProgressReport, type PipelineProgressReport } from "./pipe
 import { assertRangeOwnedByStep } from "./step-runner.service.js"
 import { STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
 import { isStepRunning } from "./run-state.service.js"
+import { isRegisteredStep } from "./step-registry.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -32,7 +33,8 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
   if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
 
   const spine = stripRecord(record)
-  const inProgress = spine.steps.find((s) => s.status === "in_progress")
+  // Step đã rời registry (B-0.4, FLF-221) không revert: nội dung nó đã ghi vẫn là dữ liệu của project.
+  const inProgress = spine.steps.find((s) => s.status === "in_progress" && isRegisteredStep(s.id))
 
   let spineVersion = record.spine_version
   let revertedStep: string | null = null

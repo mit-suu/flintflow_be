@@ -215,6 +215,52 @@ router.post("/:projectId/undo", authMiddleware, changesController.undoLastChange
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/assumptions/{assumptionId}:
+ *   patch:
+ *     summary: Sửa một giả định bằng ngôn ngữ của user — AI dịch sang tiếng Anh, ghi cả hai (FLF-221)
+ *     description: |
+ *       Một lượt gọi model `translate` (tính credit). Ghi `statement_vi` (câu user gõ) và `statement` (bản EN vào SRS)
+ *       trong một transaction. Model lỗi ⇒ không ghi gì.
+ *     tags: [Spine]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: assumptionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [statement_vi, base_version]
+ *             properties:
+ *               statement_vi: { type: string }
+ *               base_version: { type: integer }
+ *     responses:
+ *       200:
+ *         description: "{ spine_version, spine }"
+ *       400:
+ *         description: VALIDATION_ERROR
+ *       402:
+ *         description: INSUFFICIENT_CREDIT
+ *       404:
+ *         description: PROJECT_NOT_FOUND · ASSUMPTION_NOT_FOUND
+ *       409:
+ *         description: SPINE_VERSION_CONFLICT · CHANGE_REQUIRES_CR (mode 1 sau v0)
+ */
+router.patch("/:projectId/assumptions/:assumptionId", authMiddleware, changesController.editAssumption)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/changes:
  *   get:
  *     summary: Lịch sử thay đổi theo seq tăng dần

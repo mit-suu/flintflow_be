@@ -149,9 +149,9 @@ const PROJECT = "650000000000000000000007"
 const USER = "650000000000000000000016"
 const SESSION = "sess-t20"
 
-/** 13 step Brief + 4 step S-1 (Phases §5, §6.4). */
+/** 12 step Brief + 4 step S-1 (Phases §5, §6.4; B-0.4 bỏ ở FLF-221). */
 const BRIEF_STEPS = [
-  "B-0.1", "B-0.2", "B-0.3", "B-0.4",
+  "B-0.1", "B-0.2", "B-0.3",
   "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6",
   "B-2.1", "B-2.2", "B-2.3"
 ] as const
@@ -243,7 +243,6 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(final.project.goals.length, "B-1.1 ghi goals").toBeGreaterThanOrEqual(3)
     expect(final.project.form_factor).toBe("web_app")
     expect(final.project.stakes).toBe("production")
-    expect(final.project.working_mode).toBe("coaching")
 
     // Brief lưu trong Spine, không trong transcript
     expect(final.addendum.length, "addendum >= 5").toBeGreaterThanOrEqual(5)
@@ -299,8 +298,8 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
 
   it("FLF-220: hỏi khi bước còn field trống, working_mode không còn cắt lượt hỏi", async () => {
     seedEmpty("fast")
-    for (const stepId of BRIEF_STEPS.slice(0, 4)) await runAndAccept(stepId)
-    expect(elicitTurns).toEqual(["B-0.1", "B-0.2", "B-0.3", "B-0.4"])
+    for (const stepId of BRIEF_STEPS.slice(0, 3)) await runAndAccept(stepId)
+    expect(elicitTurns).toEqual(["B-0.1", "B-0.2", "B-0.3"])
   })
 
   it("skill của pha Brief đã viết thật và không khai ghi collection của SRS", () => {
@@ -320,8 +319,8 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(STEP_SKILLS["S-1.3"]).toBe("brief-analysis")
     expect(STEP_SKILLS["S-1.4"]).toBe("brief-analysis")
     expect(STEP_SKILLS["S-1.2"]).toBe("project-classifier")
-    // 13 step Brief đúng như Phases §5
-    expect(BRIEF_STEPS.filter((s) => s.startsWith("B-0"))).toHaveLength(4)
+    // 12 step Brief (Phases §5, B-0.4 bỏ ở FLF-221)
+    expect(BRIEF_STEPS.filter((s) => s.startsWith("B-0"))).toHaveLength(3)
     expect(BRIEF_STEPS.filter((s) => s.startsWith("B-1"))).toHaveLength(6)
     expect(BRIEF_STEPS.filter((s) => s.startsWith("B-2"))).toHaveLength(3)
     for (const stepId of [...BRIEF_STEPS, ...S1_STEPS]) expect(getStep(stepId).id, stepId).toBe(stepId)

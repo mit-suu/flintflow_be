@@ -368,11 +368,11 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     const visited = await walkToLastStep(deps)
     const final = (await repo.get(PROJECT))!
 
-    // ── S-4.1 fixed N: 4 screens + the nonscreen round; 51 + 5 x N steps ──────────────────────────
+    // ── S-4.1 fixed N: 4 screens + the nonscreen round; 50 + 5 x N steps ──────────────────────────
     expect(final.screens.map((s) => s.id).sort()).toEqual(["S91", "S92", "S93", "S94"])
     expect(final.progress.screen_queue).toEqual(["S91", "S92", "S93", "S94"])
     expect(final.functions.some((f) => f.screen_id === null), "S-4.4 must add a nonscreen function").toBe(true)
-    expect(totalSteps(final), "N = 4 screens + 1 nonscreen round").toBe(51 + 5 * 5)
+    expect(totalSteps(final), "N = 4 screens + 1 nonscreen round").toBe(50 + 5 * 5)
 
     // ── FLF-177 BUG-03: the mock model still asks for placeholders at S-4.1, but only the user may leave a
     // screen out ⇒ every screen gets its S-5 round (4 screens + @nonscreen) ───────────────────────────

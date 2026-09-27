@@ -9,15 +9,17 @@ import { Spine } from "../../src/modules/spine/spine.model.js"
 import { Usage } from "../../src/modules/spine/usage.model.js"
 
 describe("measure() chế độ estimate", () => {
-  it("B-0.1…B-1.2 trên fixture minimal: mỗi step 1 elicit + 1 draft, token in > 0, không tốn credit thật, dọn dữ liệu", { timeout: 120_000 }, async () => {
+  it("B-0.1…B-1.3 trên fixture minimal: step còn field trống 1 elicit + 1 draft, token in > 0, không tốn credit thật, dọn dữ liệu", { timeout: 120_000 }, async () => {
     const options = { ...parseArgs(["--fixture", "minimal", "--no-write"]), limitSteps: 6 }
     const result = await measure(options, () => {})
 
-    expect(result.stepOrder).toEqual(["B-0.1", "B-0.2", "B-0.3", "B-0.4", "B-1.1", "B-1.2"])
+    expect(result.stepOrder).toEqual(["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3"])
     expect(result.records.filter((r) => r.error)).toEqual([])
+    // FLF-221: B-0.2/B-0.3 chỉ đọc form_factor/stakes — fixture đã có ⇒ không còn field trống để hỏi
+    const expectedKinds = (stepId: string): string[] => (["B-0.2", "B-0.3"].includes(stepId) ? ["draft"] : ["draft", "elicit"])
     for (const stepId of result.stepOrder) {
       const calls = result.records.filter((r) => r.step_id === stepId)
-      expect(calls.map((c) => c.call_kind).sort(), stepId).toEqual(["draft", "elicit"])
+      expect(calls.map((c) => c.call_kind).sort(), stepId).toEqual(expectedKinds(stepId))
       expect(calls.every((c) => c.tokens_in > 500 && !c.measured), stepId).toBe(true)
     }
 
@@ -33,6 +35,6 @@ describe("measure() chế độ estimate", () => {
       durationMs: 1,
       thresholds: { credit_per_project: null, usd_per_project: null, tokens_in_per_call: null }
     })
-    expect(report).toContain("| **Tổng** | **6** | **12 (6 + 6)**")
+    expect(report).toContain("| **Tổng** | **6** | **10 (4 + 6)**")
   })
 })

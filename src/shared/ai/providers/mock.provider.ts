@@ -15,6 +15,7 @@
  * | `elicit` `discovery_step` | `{ reply, questions: [] }` |
  * | `review` `consistency_pass` | `{ flags: [] }` |
  * | `render_fix` | `{ puml }` |
+ * | `translate` | `{ statement }` |
  * | còn lại (`chat`, `summarize_document`) | văn bản tự do như cũ |
  *
  * **Lô op rỗng là cố ý.** Mock không biết gì về Spine nên không thể sinh op hợp bất biến; `ops: []`
@@ -48,6 +49,9 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   }
   if (REVIEW_ACTIONS.has(actionType)) {
     return fenced({ flags: [] })
+  }
+  if (actionType === "translate") {
+    return fenced({ statement: "[MOCK AI] Translated assumption." })
   }
   if (actionType === "render_fix") {
     return fenced({ puml: MOCK_PUML, notes: `[MOCK AI] ${prompt.slice(0, 40).replace(/\s+/g, " ")}` })

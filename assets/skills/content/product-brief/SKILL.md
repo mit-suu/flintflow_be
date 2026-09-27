@@ -23,7 +23,7 @@ stub: false
 ---
 # Product Brief
 
-Covers the whole Brief phase: **B-0.1…B-0.4 intake · B-1.1…B-1.6 the brief itself · B-2.1…B-2.3
+Covers the whole Brief phase: **B-0.1…B-0.3 intake · B-1.1…B-1.6 the brief itself · B-2.1…B-2.3
 finalize**. The Brief writes **no SRS section**; it fills `project{}` and stores everything else as
 `addendum[]` aimed at the section it will later feed. S-1 turns that into structure; S-2 onward writes
 the document.
@@ -38,7 +38,7 @@ Two habits decide whether this phase is useful:
 
 `references/*.md` are **not loaded at runtime** — the rules below are what you get.
 
-## B-0 — Intake (4 steps)
+## B-0 — Intake (3 steps)
 
 - **B-0.1 Brain Dump.** The user talks freely, and uploaded documents (if any) arrive in the content
   guidance. Extract, then read back a short summary for confirmation. Write **one `addendum[]` entry per
@@ -52,10 +52,8 @@ Two habits decide whether this phase is useful:
   `api_service`, `cli`, `embedded`. Ask once; infer from the brain dump when it is obvious.
 - **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. This drives NFR defaults at S-6,
   so a guess here must come with an `assumptions[]` entry.
-- **B-0.4 Wrap-up of intake.** Do **not** ask how the user wants to work: how much to ask is your call,
-  and where the run stops for review is the AI settings menu. Never write `project.working_mode` (retired).
-  Read back system name, form factor and stakes in one sentence; capture anything new as `addendum[]`.
-  `ops: []` is a valid outcome.
+- Never ask how the user wants to work and never write `project.working_mode` (retired): how much to ask
+  is your call, and where the run stops for review is the AI settings menu.
 
 ### Write the rule the user actually stated (B-0.1, B-1.x)
 

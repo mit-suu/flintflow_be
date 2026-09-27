@@ -22,6 +22,7 @@ import { StepRun, type RunStage, type RunStatus } from "./run-state.model.js"
 export type { RunStage, RunStatus }
 import { ApiError } from "../../shared/utils/api-error.js"
 import { STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import { isRegisteredStep } from "./step-registry.js"
 
 /** Khoá hết hạn sau ngần này nếu không có nhịp heartbeat nào — lượt chết không giữ step quá lâu. */
 export const LOCK_TTL_MS = 45_000
@@ -244,7 +245,10 @@ export const getRunState = async (projectId: string, stepId: string): Promise<Ru
   return doc ? toDoc(doc as Record<string, unknown>) : null
 }
 
-/** Lượt còn sống của dự án (pill "đang chạy nền" khôi phục sau khi mở lại trang). */
+/**
+ * Lượt còn sống của dự án (pill "đang chạy nền" khôi phục sau khi mở lại trang). Lượt của step đã rời registry
+ * (B-0.4, FLF-221) coi như stale: project cũ đứng ở cổng B-0.4 không được dựng lại cổng của một step không còn chạy được.
+ */
 export const getActiveRun = async (projectId: string): Promise<RunStateDoc | null> => {
   const docs = useMemory()
     ? [...memory.values()]
@@ -255,7 +259,10 @@ export const getActiveRun = async (projectId: string): Promise<RunStateDoc | nul
         .sort({ last_event_at: -1 })
         .limit(5)
         .lean()) as Record<string, unknown>[])
-  const alive = docs.map(toDoc).find((d) => d.status !== "running" || new Date(d.locked_until).getTime() > Date.now())
+  const alive = docs
+    .map(toDoc)
+    .filter((d) => isRegisteredStep(d.step_id))
+    .find((d) => d.status !== "running" || new Date(d.locked_until).getTime() > Date.now())
   return alive ?? null
 }
 

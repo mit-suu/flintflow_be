@@ -8,6 +8,9 @@ import {
   changesRequestSchema,
   gateRequestSchema,
   questionSchema,
+  runPhaseRequestSchema,
+  runStepRequestSchema,
+  stepAnswerRequestSchema,
   stepEventSchema,
   waiveRequestSchema
 } from "./pipeline.dto.js"
@@ -16,6 +19,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTRACT = fs.readFileSync(path.resolve(__dirname, "../../../docs/api/pipeline-contract.md"), "utf8")
 
 describe("pipeline.dto", () => {
+  it("FLF-221: /run và /phases/:phase/run nhận message + intent; answer nhận message thay cho answers", () => {
+    const base = { session_id: "s1", base_version: 3 }
+    for (const schema of [runStepRequestSchema, runPhaseRequestSchema]) {
+      expect(schema.safeParse({ ...base, message: "Ý tưởng" }).success).toBe(true)
+      expect(schema.safeParse({ ...base, intent: "no_idea" }).success).toBe(true)
+      expect(schema.safeParse({ ...base, message: "   " }).success).toBe(false)
+      expect(schema.safeParse({ ...base, intent: "maybe" }).success).toBe(false)
+    }
+    expect(stepAnswerRequestSchema.safeParse({ session_id: "s1", answers: [], message: "Mình muốn bản web trước" }).success).toBe(true)
+    expect(stepAnswerRequestSchema.safeParse({ session_id: "s1", answers: [] }).success).toBe(false)
+    expect(stepAnswerRequestSchema.safeParse({ session_id: "s1", answers: [{ question_id: "Q1", answer: "Web" }] }).success).toBe(true)
+  })
+
   it("changes: đúng một trong ops / instruction; không nhận op hệ thống", () => {
     const op = { op: "set", path: "actors[id=A01].name", value: "X" }
     expect(changesRequestSchema.safeParse({ base_version: 1, ops: [op] }).success).toBe(true)

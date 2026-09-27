@@ -135,9 +135,32 @@ describe("projectStep", () => {
       stakes: "production",
       working_mode: null
     }
-    const p = projectStep(spine, "B-0.2")
-    expect(p.emptyFields).toEqual([])
+    const p = projectStep(spine, "S-1.2")
+    expect(p.emptyFields).not.toContain("project.working_mode")
     expect(p.projection.project).not.toHaveProperty("working_mode")
+  })
+
+  it("FLF-221: B-0.2 chỉ đọc project.form_factor, chỉ ghi project.form_factor + assumptions", () => {
+    const spine = structuredClone(FIXTURE)
+    spine.project = { ...spine.project, form_factor: null }
+    const p = projectStep(spine, "B-0.2")
+    expect(p.projection["project:form_factor"]).toEqual({ form_factor: null })
+    expect(Object.keys(p.projection).filter((k) => k !== ASSUMPTION_KEYS_READ)).toEqual(["project:form_factor"])
+    expect(p.emptyFields).toEqual(["project.form_factor"])
+    expect(p.writable).toEqual(["project.form_factor", "assumptions"])
+  })
+
+  it("FLF-221: step cuối mỗi giai đoạn Brief giữ writes = hợp của giai đoạn (revision ở phase gate)", () => {
+    const registry = loadStepRegistry()
+    for (const phase of ["B-0", "B-1", "B-2"]) {
+      const steps = registry.filter((s) => s.phase === phase)
+      const last = steps[steps.length - 1]
+      const union = new Set(steps.flatMap((s) => s.writes))
+      for (const w of union) {
+        const covered = last.writes.some((lw) => w === lw || w.startsWith(`${lw}.`))
+        expect(covered, `${last.id} phải ghi được ${w}`).toBe(true)
+      }
+    }
   })
 })
 

@@ -20,6 +20,8 @@ export enum ActionType {
   // ─── Ngoài pipeline, còn dùng ───
   CHAT = "chat",
   SUMMARIZE_DOCUMENT = "summarize_document",
+  /** FLF-221: dịch câu giả định user sửa (`statement_vi`) sang tiếng Anh (`statement`) — `PATCH /assumptions/:id`. */
+  TRANSLATE = "translate",
 
   // ─── Mode 1: import SRS có sẵn + change request (FLF-171, plan mode 1 §5.7) ───
   /** I-4 (nút 1.8): trích field Spine từ text block của một section (hoặc lô section nhỏ). */

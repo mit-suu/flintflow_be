@@ -33,9 +33,9 @@ tên project làm việc (`Project.name` ở FE, không đồng bộ). Hỏi nga
 `stakes` là trường hay bị đoán nhất và cũng là trường đắt nhất khi đoán sai: `internal` cho một sản phẩm
 có thanh toán thật kéo mọi ngưỡng NFR xuống quá thấp. Đoán thì phải kèm `assumptions[]`.
 
-## B-0.4 — không hỏi "cách làm việc" (FLF-220)
+## Không hỏi "cách làm việc" (FLF-220, FLF-221)
 
 `working_mode` (Coaching/Fast) đã bỏ: AI tự quyết hỏi nhiều hay ít, còn dừng để duyệt ở đâu là chế độ duyệt
-trong menu cài đặt AI ("Mọi bước" / "Cuối giai đoạn"). B-0.4 chỉ đọc lại tóm tắt intake (tên hệ thống,
-form factor, stakes) và ghi addendum nếu user nói thêm điều mới. Field `project.working_mode` còn trong
-schema (hợp đồng đóng băng) nhưng không ai ghi hay đọc nữa.
+trong menu cài đặt AI ("Mọi bước" / "Cuối giai đoạn"). Step "Cách làm việc" cũ chỉ còn ghi field này nên
+đã bị bỏ khỏi registry ở FLF-221 — B-0 còn 3 step. Field `project.working_mode` còn trong schema (hợp đồng
+đóng băng) nhưng không ai ghi hay đọc nữa.

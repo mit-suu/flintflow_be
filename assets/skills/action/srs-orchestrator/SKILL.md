@@ -32,7 +32,7 @@ Deterministic contract for the step runner (T13). **No model call.** It decides 
 - **Step** (`<phase>.<n>`, S-5 uses `S-5.<n>@<screen_id>` and `S-5.<n>@nonscreen`) — the unit of commit and of progress.
 - **Section** — rendered from Spine fields. A step never writes a section.
 
-Full step list: `references/step-table.md` (51 fixed steps + 5 × N). That table is the only source for step ids.
+Full step list: `references/step-table.md` (50 fixed steps + 5 × N). That table is the only source for step ids.
 
 ## State
 
