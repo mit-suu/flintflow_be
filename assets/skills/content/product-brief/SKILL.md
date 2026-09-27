@@ -122,7 +122,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
     { "op": "set", "path": "project.vision", "value": "Let a solo founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.", "reason": "B-1.1 vision" },
     { "op": "set", "path": "project.goals", "value": ["Cut time to a baseline-quality SRS from weeks to one day", "Keep every section traceable to a stated business goal", "Make the cost of one document predictable"], "reason": "B-1.1 goals" },
     { "op": "add", "path": "addendum[]", "value": { "id": "AD11", "topic": "Why now", "content": "Đội nhỏ không thuê được BA, tài liệu viết tay lệch nhau giữa các phần.", "content_en": "Small teams cannot hire a requirements engineer, and hand-written documents drift between sections.", "target_section": "fixed:1", "captured_at": "2026-09-16T00:00:00.000Z" }, "reason": "B-1.1 problem statement" },
-    { "op": "add", "path": "assumptions[]", "value": { "id": "AS01", "path": "project.goals", "statement": "One day means one working day for one person.", "rationale": "The user said fast but gave no number.", "origin_step_id": "B-1.1", "status": "unconfirmed", "confirmed_at": null }, "reason": "B-1.1 quantified a vague goal" }
+    { "op": "add", "path": "assumptions[]", "value": { "id": "AS01", "path": "project.goals", "statement": "One day means one working day for one person.", "statement_vi": "Một ngày nghĩa là một ngày làm việc của một người.", "rationale": "The user said fast but gave no number.", "origin_step_id": "B-1.1", "status": "unconfirmed", "confirmed_at": null }, "reason": "B-1.1 quantified a vague goal" }
   ],
   "notes": "Vision and three goals written; the why-now went to fixed:1."
 }

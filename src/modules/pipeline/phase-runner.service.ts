@@ -224,7 +224,7 @@ export const runPhase = async (
   const d: StepRunnerDeps = { ...defaultStepRunnerDeps(deps.signal), ...deps }
   const outcomes: PhaseStepOutcome[] = []
   const phaseSummary: ChangeSummary[] = []
-  const newAssumptions: { id: string; text: string }[] = []
+  const newAssumptions: { id: string; text: string; text_vi?: string }[] = []
   let flagsAtStart: { red: number; yellow: number } | null = null
 
   // FLF-221: chat là nút chạy — tin nhắn mở giai đoạn vào transcript gắn với bước ĐẦU sẽ chạy (không gắn đơn vị giai

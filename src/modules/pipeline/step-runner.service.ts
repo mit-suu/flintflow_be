@@ -153,9 +153,12 @@ export const createTracker = (projectId: string, stepId: string, runId: string, 
   const startedAt = Date.now()
   let currentStage: RunStage = "intake"
 
+  // Mỗi sự kiện lưu kèm `at` (ISO) để sau reload nhật ký hoạt động tính lại được thời lượng từng việc (FLF-221).
+  const stamp = (event: StepEvent): StepEvent & { at: string } => ({ ...event, at: new Date().toISOString() })
+
   const tracked: Emit = (event) => {
     emit(event)
-    if (event.type !== "heartbeat") void touchRun(projectId, stepId, runId, { appendEvent: event })
+    if (event.type !== "heartbeat") void touchRun(projectId, stepId, runId, { appendEvent: stamp(event) })
   }
 
   return {
@@ -165,15 +168,17 @@ export const createTracker = (projectId: string, stepId: string, runId: string, 
     stage: (stage, extra = {}) => {
       currentStage = stage
       const detail = extra.detail_vi
-      emit({
+      const event: StepEvent = {
         type: "stage",
         step_id: stepId,
         stage,
         label_vi: STAGE_LABELS[stage],
         ...(detail ? { detail_vi: detail } : {}),
         ...(extra.batch ? { batch: extra.batch } : {})
-      })
-      void touchRun(projectId, stepId, runId, { stage, detail_vi: detail ?? null, batch: extra.batch ?? null })
+      }
+      emit(event)
+      // `stage` cũng vào `events` (FLF-221): nhật ký hoạt động dựng lại sau reload cần biết việc nào đã bắt đầu lúc nào
+      void touchRun(projectId, stepId, runId, { stage, detail_vi: detail ?? null, batch: extra.batch ?? null, appendEvent: stamp(event) })
     },
     save: async (patch) => {
       await touchRun(projectId, stepId, runId, patch)
@@ -599,7 +604,7 @@ export interface RenderReviewResult {
   yellow_open: number
   red_delta: number
   yellow_delta: number
-  new_assumptions: { id: string; text: string }[]
+  new_assumptions: { id: string; text: string; text_vi?: string }[]
 }
 
 export const runRenderReviewPhase = async (
@@ -700,7 +705,8 @@ export const runRenderReviewPhase = async (
   const { spine: spineAfterCheck } = await refresh(projectId)
   const newAssumptions = spineAfterCheck.assumptions
     .filter((a) => !options.knownAssumptionIds?.has(a.id))
-    .map((a) => ({ id: a.id, text: a.statement }))
+    // FLF-221: `text_vi` = câu bằng ngôn ngữ user — FE hiện nó, rơi về `text` (EN) với dữ liệu cũ
+    .map((a) => ({ id: a.id, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) }))
   emit({
     type: "flags",
     step_id: stepId,
@@ -920,7 +926,8 @@ export const runStep = async (
     const stepStateForRound: Pick<StepState, "first_seq" | "last_seq"> | undefined = reopenedAfterAccept ? { first_seq: null, last_seq: null } : existingStep
 
     const ctx = await buildStepContext(projectId, stepId, { sessionId })
-    if (phaseChanged) emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
+    // FLF-221: `intake` ở MỌI step (trước chỉ khi đổi phase) — dòng "Đọc N mục dữ liệu" của nhật ký hoạt động
+    emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
     tracker.stage("intake", { detail_vi: `Đọc dữ liệu cho bước ${stepId}` })
 
     // Mốc để gate nói được "cờ đỏ 3 → 2" và "3 giả định mới" (WP-5, BUG-13)

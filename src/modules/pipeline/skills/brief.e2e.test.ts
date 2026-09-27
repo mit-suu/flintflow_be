@@ -140,6 +140,7 @@ import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type ElicitOutput, type OpTransaction } from "../../../shared/ai/response-parser.js"
 import { hasIdea, runStep, submitAnswer, type StepRunnerDeps } from "../step-runner.service.js"
 import { runPhase } from "../phase-runner.service.js"
+import { getRunState } from "../run-state.service.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
@@ -446,6 +447,12 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     expect(final.addendum).toHaveLength(1)
     expect(final.assumptions.map((a) => a.path)).toEqual(["project.form_factor", "project.stakes"])
     expect(final.assumptions[0].statement_vi).toBe("Ưu tiên ứng dụng điện thoại.")
+    // text_vi đi kèm giả định mới ở gate; dữ liệu không có statement_vi thì không có text_vi
+    const gateReady = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
+    expect(gateReady.new_assumptions).toEqual([
+      { id: "AS01", text: "Mobile app first.", text_vi: "Ưu tiên ứng dụng điện thoại." },
+      { id: "AS02", text: "Real customers, no regulation." }
+    ])
     const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
     expect(messages[0]).toMatchObject({ role: "user", content: IDEA, step: "B-0.1" })
   })
@@ -514,5 +521,22 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).statusCode).toBe(403)
     expect(db.sessions.every((s) => (s.messages as unknown[]).length === 0)).toBe(true)
+  })
+})
+
+describe("FLF-221: sự kiện cho nhật ký hoạt động", () => {
+  it("intake phát ở mọi step (kể cả không đổi phase); stage lưu vào run-state kèm `at`", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1"])
+    ;(db.spines[0] as { progress: Record<string, unknown> }).progress.current_phase = "B-0"
+    const { events, emit } = collect()
+    await runStep(PROJECT, "B-0.2", SESSION, USER, emit, deps())
+    expect(events.some((e) => e.type === "intake")).toBe(true)
+
+    const run = await getRunState(PROJECT, "B-0.2")
+    const stored = (run?.events ?? []) as { type: string; at?: string }[]
+    expect(stored.some((e) => e.type === "stage")).toBe(true)
+    expect(stored.some((e) => e.type === "intake")).toBe(true)
+    expect(stored.every((e) => typeof e.at === "string" && !Number.isNaN(Date.parse(e.at)))).toBe(true)
   })
 })
