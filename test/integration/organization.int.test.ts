@@ -2,7 +2,7 @@
  * task-26 Pha 2 — CRUD org + thành viên + BR-02, gọi qua API thật (supertest + app).
  * Bám BPMN Flow 8.1–8.2 (tạo org), Flow 9.3–9.9 (đổi org, đổi vai trò, xoá, rời, BR-02).
  */
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import request from "supertest"
 import app from "../../src/app.js"
 import { User } from "../../src/modules/user/user.model.js"
@@ -117,8 +117,12 @@ describe("Organization API (Pha 2)", () => {
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ userId: analyst.id, role: "analyst" })
 
-    const note = await Notification.findOne({ userId: analyst.id, type: "org_role_changed" }).lean()
-    expect(note).not.toBeNull()
+    // Thông báo gửi kiểu bắn-rồi-quên sau khi response trả về ⇒ chờ nó được ghi, không đọc ngay
+    const note = await vi.waitFor(async () => {
+      const found = await Notification.findOne({ userId: analyst.id, type: "org_role_changed" }).lean()
+      expect(found).not.toBeNull()
+      return found
+    })
     expect(String(note?.organizationId)).toBe(org.id)
   })
 
@@ -139,8 +143,12 @@ describe("Organization API (Pha 2)", () => {
     expect(res.status).toBe(200)
     expect(await Membership.countDocuments({ organizationId: org.id, userId: analyst.id })).toBe(0)
 
-    const note = await Notification.findOne({ userId: lead.id, type: "org_member_left" }).lean()
-    expect(note).not.toBeNull()
+    // Thông báo gửi kiểu bắn-rồi-quên sau khi response trả về ⇒ chờ nó được ghi, không đọc ngay
+    const note = await vi.waitFor(async () => {
+      const found = await Notification.findOne({ userId: lead.id, type: "org_member_left" }).lean()
+      expect(found).not.toBeNull()
+      return found
+    })
   })
 })
 

@@ -2,7 +2,7 @@
  * task-26 Pha 3 — mời và tham gia tổ chức qua API thật.
  * BPMN Flow 9.1–9.2 (Lead sinh mã, gửi email, thu hồi) và Flow 8.3–8.5 (nhập mã, kiểm mã, vào org).
  */
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import request from "supertest"
 import app from "../../src/app.js"
 import { User } from "../../src/modules/user/user.model.js"
@@ -127,8 +127,12 @@ describe("UC-09 — nhập mã mời (Flow 8.3–8.5)", () => {
     const created = await invite()
     await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(invitee))
 
-    const note = await Notification.findOne({ userId: lead.id, type: "org_member_joined" }).lean()
-    expect(note).not.toBeNull()
+    // Thông báo gửi kiểu bắn-rồi-quên sau khi response trả về ⇒ chờ nó được ghi, không đọc ngay
+    const note = await vi.waitFor(async () => {
+      const found = await Notification.findOne({ userId: lead.id, type: "org_member_joined" }).lean()
+      expect(found).not.toBeNull()
+      return found
+    })
     expect(String(note?.organizationId)).toBe(orgId)
   })
 })
