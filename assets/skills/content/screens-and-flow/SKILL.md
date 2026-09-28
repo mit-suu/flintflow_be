@@ -1,7 +1,7 @@
 ---
 skill_id: screens-and-flow
 kind: content
-version: 0.5.0
+version: 0.6.0
 description: "S-4.1–S-4.2 feature & screen inventory (fixes N and screen_queue), screens flow"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -25,11 +25,9 @@ stub: false
 ---
 # Screens And Flow
 
-Covers **S-4.1 Screen Inventory** and **S-4.2 Screens Flow** — feeds `fixed:3.1.1` (Screens Flow),
-`fixed:3.1.2` (Screen Descriptions) and every `feature:<id>` section. S-4.1 is the step that **fixes N**
-(the loop count for S-5): after it, the progress bar shows a percentage and the step total `50 + 5 × N`
-stops moving, so a screen missed here costs a whole re-plan. `references/*.md` are **not loaded at
-runtime** — every rule needed to draft correctly is inlined below.
+Covers **S-4.1 Screen Inventory** and **S-4.2 Screens Flow** — feeds `fixed:3.1.1`, `fixed:3.1.2` and
+every `feature:<id>` section. S-4.1 **fixes N** (the S-5 loop count, step total `50 + 5 × N`), so a screen
+missed here costs a whole re-plan. Every rule needed is inlined below.
 
 ## S-4.1 — Features, screens, screen_queue
 
@@ -49,15 +47,16 @@ lands on is an orphan and must not be created. `system`/`time` actors (gateway, 
 get **no** screens; their work is a non-screen function (S-4.4). The Screens Flow is drawn once per human
 actor, so an actor with use cases but no screen, or a screen outside every actor's journey, shows up as a
 gap. Name the actor(s) in `description` ("Founder …", "Administrator …").
+If users sign in, create **one** Login screen shared by every signed-in actor (its `description` names them
+all) and give each actor a landing screen — S-4.2 roots every actor's flow at Login.
 
 One `screens[]` row per distinct place the user lands:
 `{id, feature_id, name, description, flow_to: [], is_popup, tabs: [], primary_function_id: null,
 queue_order, detail_status}`. `description` is one sentence: who is here and what they accomplish.
-Rules: every screen belongs to exactly one `feature_id` that exists after this batch; a modal/dialog is a
-screen with `is_popup: true`; a tabbed page is ONE screen with `tabs: ["Overview", "Members"]`, not one
-screen per tab; list and detail of the same entity are two screens. Include the unglamorous ones a human actor
-really uses — login, sign-up, forgot password, empty state/onboarding, admin console, settings,
-notifications, plan & pricing — a missing auth screen is the most common gap. An error or access-denied
+Rules: every screen belongs to exactly one existing `feature_id`; a modal/dialog is a screen with
+`is_popup: true`; a tabbed page is ONE screen with `tabs: [...]`; list and detail are two screens. Include
+the unglamorous ones — login, forgot password, onboarding, admin console, settings, notifications — a
+missing auth screen is the most common gap. An error or access-denied
 page is a screen **only** if you can name the screen that sends the user there (a non-admin opening Admin
 Console); otherwise it is an abnormal flow of a function, not a screen.
 
@@ -81,28 +80,35 @@ screens that have one.
 ## S-4.2 — Flow
 
 Set `flow_to[]`, `is_popup` and `tabs[]` on screens that already exist — **never add a screen here**.
-`flow_to` lists screens reachable by a deliberate navigation from this one (button, link, redirect after
-success). Not: the browser back button, a global nav bar present everywhere, or an error toast.
-**One direction only.** `flow_to` records the forward move of the journey, away from the actor's entry
-screen. Never add the return edge — going back is implicit, even a redirect after success: reset or forgot
-password → login, register → login, detail → list, popup → opener, page → hub, confirm → the page it
-confirms. Before answering, scan every pair: if A lists B and B lists A, delete the edge that points back
-toward the entry screen. Ids in `flow_to` must exist after this batch (`dead_reference` otherwise).
+`flow_to` lists screens reachable by a deliberate navigation (button, link, redirect after success). Not:
+the browser back button, a global nav bar present everywhere, or an error toast. This step sees only
+`features` and `screens`: read each screen's actor(s) from its `description` (named at S-4.1).
 
-**No orphan screens.** Draw the flow per human actor: from each actor's entry screen, every screen that
-actor uses must be reachable through `flow_to`. This step sees only `features` and `screens`, so read the
-actor from each screen's `description` (named at S-4.1). So:
-- every non-popup screen has an incoming edge or is an entry point (login, landing, the page an actor
-  lands on after sign-in) — and an entry point still flows onward;
-- every popup has at least one opener (a screen whose `flow_to` contains it);
-- a sub-area (admin console, settings) is entered from somewhere: link its hub from the actor's landing
-  page and link every page of the area from the hub (no edge back to the hub);
-- an error / access-denied page gets an incoming edge from every screen that can send the user there
-  (Admin Console → Access Denied); no such screen ⇒ `remove` the page, it is an abnormal flow;
-- no screen is left with neither an incoming nor an outgoing edge.
-If a screen cannot be placed on any human actor's journey, it should not exist: `remove` it
-(`screens[id=…]`, cascade takes its functions) with a `reason`, and add an `assumptions[]` entry saying
-why — do not leave it dangling. Yellow flag `orphan_screen` (§3.1.1) catches whatever slips through, and
+**Journey shape — one tree per human actor, rooted at Login:**
+1. **Login is the root.** If users sign in, Login is the first screen of every signed-in actor's journey
+   and has **no** incoming edge. Pre-auth screens hang off it (`Login → Forgot Password → Reset
+   Password`, `Login → First-time Password Setup`), never the reverse.
+2. **Login → one landing per actor.** Login's `flow_to` lists each actor's landing screen (role-based
+   redirect after sign-in): the page that actor works from most (Manager Dashboard, My Exam Schedule…).
+   Actors sharing a landing share the edge. Login never links straight to a deeper screen.
+3. **Landing → feature groups.** From the landing, link the entry screen of each feature the actor uses;
+   inside a feature go hub/list → detail → popup, keeping a feature's screens together. Cross-feature edges
+   only for a real jump (a dashboard alert opening the grade approval list).
+4. **Shared screens** (notifications, profile, settings) are linked from each actor's landing, not chained
+   through business screens.
+Landing and grouping depend on the product: follow the use cases, add an `assumptions[]` entry when you
+choose. No sign-in ⇒ each tree is rooted at the actor's public entry page.
+
+**One direction only.** `flow_to` records the forward move, away from Login. Never add the return edge —
+going back is implicit, even a redirect after success: reset password → login, detail → list, popup →
+opener, page → hub, confirm → the page it confirms. Scan every pair: if A lists B and B lists A, delete the
+edge that points back toward Login. Ids in `flow_to` must exist after this batch (`dead_reference` otherwise).
+
+**No orphan screens.** Per actor, every screen they use is reachable from the root: every non-popup screen
+other than the root has an incoming edge; every popup has an opener; an error / access-denied page gets an
+edge from every screen that sends the user there (Admin Console → Access Denied), none ⇒ `remove` it.
+A screen that fits no human actor's journey is `remove`d (`screens[id=…]`, cascade takes its functions) with
+a `reason` and an `assumptions[]` entry. Yellow flag `orphan_screen` (§3.1.1) catches what slips through;
 at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 
 ## Rules
@@ -112,8 +118,7 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 3. Do not touch `use_cases[].function_ids` here; wiring use cases to functions is S-4.4/S-5.
 4. `detail_status` is only `pending` or `placeholder` at this step — `in_progress` and `signed_off` are
    set by the S-5 loop, never by you.
-5. Still unclear: choose the most reasonable default and add an `assumptions[]` entry
-   (`status: "unconfirmed"`), `draft-to-ops` rule 10.
+5. Still unclear: pick the most reasonable default + an `assumptions[]` entry (`status: "unconfirmed"`).
 
 ## Example (S-4.1, one feature + one core screen + its function)
 
@@ -139,6 +144,6 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 - [ ] Every screen has ≥ 1 function with unique `order` inside its feature, and a `primary_function_id`.
 - [ ] Every screen is used by at least one human actor; no screen exists for a `system`/`time` actor.
 - [ ] S-4.2 only sets `flow_to`/`is_popup`/`tabs` (or removes an unplaceable orphan); every id in `flow_to` exists.
-- [ ] Per human actor, every screen they use is reachable from their entry screen; every popup has an
-      opener; no screen has zero incoming and zero outgoing edges.
+- [ ] Login has no incoming edge and links to each actor's landing; pre-auth screens hang off Login.
+- [ ] Per actor, every screen is reachable from Login via landing → feature; every popup has an opener.
 - [ ] No pair A ⇄ B in `flow_to`: every return edge (to login, list, hub, opener) is removed.
