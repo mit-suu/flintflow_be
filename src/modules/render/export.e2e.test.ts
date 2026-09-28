@@ -52,8 +52,8 @@ describe("export end-to-end — fixture 19 màn", () => {
 
     const roc = documentXml.indexOf("I. Record of Changes")
     expect(roc).toBeGreaterThan(-1)
-    expect(documentXml).toContain("Seed core actors")
-    expect(documentXml).toContain("Refine product vision after review")
+    expect(documentXml).toContain("Create User Requirements")
+    expect(documentXml).toContain("Create Product Overview")
 
     expect(documentXml).toContain("WORKING DRAFT")
 
