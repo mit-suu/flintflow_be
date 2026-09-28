@@ -156,6 +156,7 @@ const proposeOps = async (
         promptVariables: {
           call_kind: "reconcile",
           user_message: "(reconcile)",
+          chat_history: "(none)",
           is_pipeline: false,
           has_baseline: spine.baselines.length > 0,
           step_id: brief.owner_step,

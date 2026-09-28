@@ -7,6 +7,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
+import { formatChatHistory, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -100,20 +101,14 @@ const tryChangeFlow = async (
 
   let payload: Record<string, unknown>
   try {
-    const preview = await changeService.preview(projectId, userId, { instruction: content, base_version: record.spine_version })
-    payload = preview.clarification
-      ? { kind: "change_clarification", reply: preview.clarification }
-      : {
-          kind: "change_preview",
-          reply: preview.ok
-            ? `Đã dựng bản xem trước ${preview.changes.length} thay đổi. Mở Change panel để xem diff rồi xác nhận.`
-            : "Không áp được thay đổi này — xem chi tiết vi phạm trong Change panel.",
-          preview_id: preview.preview_id ?? null,
-          branch: preview.branch ?? null,
-          changes: preview.changes,
-          impact: preview.impact ?? null,
-          violations: preview.violations
-        }
+    // Tin user của lượt này đã nằm cuối phiên — lịch sử là phần trước nó
+    const chatHistory = formatChatHistory(session.messages.slice(0, -1))
+    const preview = await changeService.preview(projectId, userId, {
+      instruction: content,
+      base_version: record.spine_version,
+      chat_history: chatHistory
+    })
+    payload = previewPayload(preview)
   } catch (err) {
     // Lệnh sửa lỗi (hết credit, xung đột version…) không được làm hỏng phiên chat
     const message = err instanceof ApiError ? err.message : "Không xử lý được yêu cầu sửa lúc này."
@@ -178,21 +173,7 @@ export const sendMessageAndGetResponse = async (
   if (await tryChangeFlow(session, projectId, content, step, userId)) return session
 
   // 2. Format history for AI context (last 12 messages)
-  const historyText = session.messages
-    .slice(-12) // take last 12 messages for context
-    .map((msg) => {
-      const roleLabel = msg.role === "user" ? "User" : "AI"
-      let text = msg.content
-      // If AI message is JSON, try to extract the reply text
-      if (msg.role === "ai" && text.startsWith("{") && text.endsWith("}")) {
-        try {
-          const parsed = JSON.parse(text)
-          text = parsed.reply || text
-        } catch (_) {}
-      }
-      return `${roleLabel}: ${text}`
-    })
-    .join("\n")
+  const historyText = formatChatHistory(session.messages)
 
   // 3. Chỉ còn một loại chat
   const actionType = ActionType.CHAT
@@ -321,20 +302,7 @@ export const sendMessageStream = async (
   }
 
   // 2. Format history for AI context (last 12 messages)
-  const historyText = session.messages
-    .slice(-12)
-    .map((msg) => {
-      const roleLabel = msg.role === "user" ? "User" : "AI"
-      let text = msg.content
-      if (msg.role === "ai" && text.startsWith("{") && text.endsWith("}")) {
-        try {
-          const parsed = JSON.parse(text)
-          text = parsed.reply || text
-        } catch (_) {}
-      }
-      return `${roleLabel}: ${text}`
-    })
-    .join("\n")
+  const historyText = formatChatHistory(session.messages)
 
   // 3. T20: chỉ còn một loại chat — Discovery đi qua step runner
   const actionType = ActionType.CHAT

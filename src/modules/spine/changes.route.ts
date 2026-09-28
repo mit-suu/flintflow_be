@@ -43,6 +43,9 @@ const router = Router()
  *         preview_id:
  *           type: string
  *           description: Id bản xem trước user đã xác nhận; có nó thì không gọi lại model
+ *         session_id:
+ *           type: string
+ *           description: Phiên chat nơi user gõ lệnh — model đọc 12 tin cuối phiên, lượt sửa được ghi vào phiên (404 CHAT_SESSION_NOT_FOUND nếu không thuộc project)
  *     Impact:
  *       type: object
  *       properties:
