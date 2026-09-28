@@ -2,7 +2,7 @@
  * task-26 Pha 4b — UC-68 Administrator điều chỉnh credit của TỔ CHỨC (không phải của người),
  * và UC-65 xem một user thuộc những org nào.
  */
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import request from "supertest"
 import app from "../../src/app.js"
 import { User } from "../../src/modules/user/user.model.js"
@@ -86,8 +86,12 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
   it("Lead của org được thông báo kèm lý do", async () => {
     await adjust(25, "Khuyến mãi tháng 9")
 
-    const note = await Notification.findOne({ userId: lead.id, type: "credits_adjusted" }).lean()
-    expect(note).not.toBeNull()
+    // Thông báo gửi kiểu bắn-rồi-quên sau khi response trả về ⇒ chờ nó được ghi, không đọc ngay
+    const note = await vi.waitFor(async () => {
+      const found = await Notification.findOne({ userId: lead.id, type: "credits_adjusted" }).lean()
+      expect(found).not.toBeNull()
+      return found
+    })
     expect(note?.body).toContain("Khuyến mãi tháng 9")
     expect(String(note?.organizationId)).toBe(orgId)
   })
