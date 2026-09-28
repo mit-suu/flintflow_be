@@ -381,7 +381,8 @@ describe("step-runner: POST /answer", () => {
 
     const session = db.sessions.find((s) => s._id === SESSION)!
     const userMsgs = (session.messages as { role: string; content: string }[]).filter((m) => m.role === "user")
-    expect(userMsgs.some((m) => m.content === "Người quản trị")).toBe(true)
+    // Câu trả lời trên thẻ vào lịch sử kèm câu hỏi: "câu hỏi: lựa chọn"
+    expect(userMsgs.some((m) => m.content.endsWith(": Người quản trị"))).toBe(true)
   })
 })
 
@@ -797,7 +798,7 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
     expect(spine.actors.map((a) => a.id)).toContain("A09")
     expect(spine.decisions.map((d) => d.topic_key)).toContain("uptime")
     const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
-    expect(userMsgs).toEqual(["Quản trị viên", "99.9%"])
+    expect(userMsgs).toEqual(["Actor chính là ai?: Quản trị viên\nMức uptime mong muốn?: 99.9%"])
   })
 
   it("question_id lạ, session khác, hay step không đang chờ ⇒ 409 STEP_NOT_RUNNABLE, không chạy gì", async () => {
@@ -855,6 +856,20 @@ describe("resume sau khi step chết giữa chừng / đang chờ trả lời (F
       .catch((e: unknown) => e)
       .finally(() => vi.mocked(applyTransaction).mockImplementation(actualApplyTransaction))
   }
+
+  it("đang ở cổng chốt rồi reload ⇒ /resume không revert, nội dung còn nguyên và Duyệt được ngay", async () => {
+    seedSpine()
+    seedSession(true)
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { elicitExecutor: async () => elicitReply(), draftExecutor: async () => addActor("A09"), renderDeps: renderStub() })
+    expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("gate")
+
+    const result = await resumeProject(PROJECT, USER)
+
+    expect(result.reverted_step).toBeNull()
+    expect(await actorIds()).toContain("A09")
+    const accepted = await gate(PROJECT, "S-3.1", USER, { action: "accept", base_version: (await repo.get(PROJECT))!.spine_version })
+    expect(accepted.step.status).toBe("accepted")
+  })
 
   it("tới gate rồi chạy lại step, lượt mới chết lúc soạn ⇒ /resume revert sạch cả hai lượt (trước: 422 revert_conflict ở elicit_turns)", async () => {
     seedSpine()
@@ -994,7 +1009,50 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     await s.run
     expect(s.events.some((e) => e.type === "gate_ready")).toBe(true)
     const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
-    expect(userMsgs).toEqual(["Uptime 99% là đủ cho tụi mình", "Quản trị viên"])
+    expect(userMsgs).toEqual(["Uptime 99% là đủ cho tụi mình", "Actor chính là ai?: Quản trị viên"])
+  })
+
+  it("B-0.1 chưa có ý tưởng: tin nhắn kể ý tưởng đóng mọi câu gợi mở, không hỏi lại, đi soạn luôn", async () => {
+    const spine = structuredClone(MINIMAL)
+    spine.steps = []
+    spine.addendum = []
+    spine.project.vision = null
+    spine.progress.current_phase = "B-0"
+    spine.progress.current_step = "B-0.1"
+    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    seedSession(true)
+    const IDEA_ASK = [
+      { question: "Việc gì hay làm bạn mất thời gian?", options: [], multiple: false, topic_key: "pain_point" },
+      { question: "Ai gặp vấn đề đó?", options: [], multiple: false, topic_key: "who_and_today" }
+    ] as never as ElicitOutput["questions"]
+    const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) =>
+      input.promptVariables?.chat_turn ? chatReply("ok", []) : elicitReply("Mình gợi ý vài câu", IDEA_ASK)
+    )
+    const draftExecutor = vi.fn<StepRunnerDeps["draftExecutor"]>(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "B-0.1", SESSION, USER, emit, { elicitExecutor: elicitExecutor as never, draftExecutor, renderDeps: renderStub(), intent: "no_idea" })
+    await waitCount(events, "answer_needed", 1)
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: [], message: "Tôi cần một web tạo tài liệu SRS thay vì trao đổi trên chat" })
+    await run
+
+    expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(1)
+    expect(elicitExecutor.mock.calls.some(([input]) => (input as { promptVariables?: { chat_turn?: boolean } }).promptVariables?.chat_turn)).toBe(false)
+    expect(JSON.stringify(draftExecutor.mock.calls[0])).toContain("Tôi cần một web tạo tài liệu SRS")
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+  })
+
+  it("AI viết lại câu còn chờ theo tin nhắn ⇒ hỏi bản mới, không hỏi lại nguyên văn", async () => {
+    seedSpine()
+    seedSession(true)
+    const revised = [{ question: "Lễ tân hay quản lý là người dùng chính?", options: [], multiple: false, topic_key: "primary_actor" }] as never as ElicitOutput["questions"]
+    const s = start([{ ...chatReply("Đã ghi uptime 99%.", [{ topic_key: "uptime", answer: "99%" }]), data: { reply: "Đã ghi uptime 99%.", questions: revised, settled: [{ topic_key: "uptime", answer: "99%" }] } }])
+    await waitCount(s.events, "answer_needed", 1)
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Uptime 99%, người dùng là nhân viên quầy" })
+    await waitCount(s.events, "answer_needed", 2)
+    const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    expect(again.questions.map((q) => q.text)).toEqual(["Lễ tân hay quản lý là người dùng chính?"])
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: again.questions[0].id, answer: "Lễ tân" }] })
+    await s.run
   })
 
   it("tin nhắn lạc đề ⇒ 0 decision, vẫn chờ đủ 2 câu", async () => {

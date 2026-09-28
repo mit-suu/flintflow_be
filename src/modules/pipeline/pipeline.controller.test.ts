@@ -4,7 +4,7 @@ import type { NextFunction, Request, RequestHandler, Response } from "express"
 vi.mock("../project/project.service.js", () => ({ getProjectById: vi.fn() }))
 vi.mock("./step-runner.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./step-runner.service.js")>()
-  return { ...actual, runStep: vi.fn(), requirePipelineSession: vi.fn() }
+  return { ...actual, runStep: vi.fn(), requirePipelineSession: vi.fn(), recordUserMessage: vi.fn() }
 })
 vi.mock("./gate.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./gate.service.js")>()

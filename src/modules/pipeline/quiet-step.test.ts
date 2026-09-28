@@ -33,6 +33,13 @@ describe("isQuietStep (R1)", () => {
     expect(isQuietStep(input({ phaseTerminal: true })).quiet).toBe(false)
   })
 
+  it("bước có field đã chốt ở bước trước ⇒ tự Accept kể cả khi là cổng cuối giai đoạn; Chặt vẫn dừng", () => {
+    const settled = isQuietStep(input({ templateId: "B-0.3", phaseTerminal: true, settledEarlier: true }))
+    expect(settled.quiet).toBe(true)
+    expect(settled.reason_vi).toContain("bước trước")
+    expect(isQuietStep(input({ templateId: "B-0.3", phaseTerminal: true, settledEarlier: true, reviewMode: "strict" })).quiet).toBe(false)
+  })
+
   it("balanced cũ xử lý như \"Cuối giai đoạn\": giả định mới không mâu thuẫn không làm dừng giữa phase", () => {
     const assumption = [{ id: "AS1", text: "Giữ chỗ 15 phút" }]
     expect(isQuietStep(input({ reviewMode: "balanced", newAssumptions: assumption })).quiet).toBe(true)

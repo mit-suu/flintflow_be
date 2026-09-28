@@ -15,12 +15,12 @@
  * cổng chốt rơi đúng vào S-5.5 của màn đó (Phases §6.2).
  */
 
-import { runStep, defaultStepRunnerDeps, recordUserMessage, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { projectStep } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { CHAT_BUDGET_REPLY, chatBudgetLeft, runChatTurn, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
+import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate } from "./gate.service.js"
@@ -106,9 +106,17 @@ const interviewChatTurn = async (
   deps: Pick<StepRunnerDeps, "elicitExecutor">,
   asked: PendingAnswerState["asked"],
   payload: AnswerPayload,
-  message: string
+  message: string,
+  /** Lời AI lúc đặt các câu đang chờ — ghi vào lịch sử cùng câu hỏi nếu lịch sử chưa có lượt hỏi nào của giai đoạn. */
+  askedReply = ""
 ): Promise<{ reply: string; remaining: PendingAnswerState["asked"] }> => {
   const cardAnswers = payload.answers.filter((a) => indexOfQuestion(asked, a.question_id) >= 0)
+  // Lượt hỏi đầu giai đoạn chỉ vào lịch sử khi có câu trả lời trên thẻ — trả lời bằng chat thì câu hỏi biến mất khỏi
+  // khung chat ngay khi user gửi. Ghi nó trước tin của user.
+  const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
+  if (!(session?.messages ?? []).some((m) => m.step === unit && m.role === "ai")) {
+    await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(askedReply, asked), step: unit, createdAt: new Date() }])
+  }
   if (!payload.messageRecorded) {
     await pushInterviewMessages(projectId, sessionId, [{ role: "user", content: message, step: unit, createdAt: new Date() }])
   }
@@ -130,14 +138,16 @@ const interviewChatTurn = async (
     spine,
     elicitExecutor: deps.elicitExecutor
   })
-  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: turn.reply, step: unit, createdAt: new Date() }])
   const byCard = new Set(cardAnswers.map((a) => indexOfQuestion(asked, a.question_id)))
   const settled = turn.settled.filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
   await recordInterviewAnswers(projectId, unit, sessionId, userId, turn.reply, asked, [...cardAnswers, ...settled], {
     settledIds: new Set(settled.map((a) => a.question_id))
   })
   const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
-  return { reply: turn.reply, remaining: asked.filter((_, i) => !answered.has(i)) }
+  const { spine: after } = await load(projectId)
+  const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions)
+  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(turn.reply, remaining), step: unit, createdAt: new Date() }])
+  return { reply: turn.reply, remaining }
 }
 
 /**
@@ -160,7 +170,7 @@ export const resumePhaseInterview = async (
   try {
     if (message) {
       const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
-      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message)
+      const { reply, remaining } = await interviewChatTurn(projectId, unit, pending.session_id, userId, d, pending.asked, payload, message, pending.reply ?? "")
       if (remaining.length > 0) {
         const { questions } = shapeQuestions(remaining)
         const elicit: StepEvent = { type: "elicit", step_id: unit, delta: reply }
@@ -329,7 +339,7 @@ const askPhaseInterview = async (
       await recordInterviewAnswers(projectId, unit, sessionId, userId, reply, pending, cardAnswers)
       return "answered"
     }
-    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message)
+    const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, reply)
     emit({ type: "elicit", step_id: unit, delta: turn.reply })
     if (turn.remaining.length === 0) return "answered"
     pending = turn.remaining
@@ -433,10 +443,15 @@ export const runPhase = async (
   // Kết nối đóng trong lúc chờ trả lời phỏng vấn: dừng chuỗi, câu hỏi nằm ở run-state của giai đoạn (FLF-222)
   if (interview === "detached") return { phase: unit, stopped_at: unit, reason_vi: "Chờ bạn trả lời câu hỏi đầu giai đoạn", steps: [] }
 
+  /** Bước cuối giai đoạn vừa được tự Accept (không có cổng chốt nào của giai đoạn này cho user). */
+  let terminalAutoAccepted = false
   for (let index = 0; index < MAX_PHASE_STEPS; index++) {
     const { record, spine } = await load(projectId)
     const next = nextStepOf(spine)
     if (!next || phaseUnitOf(next) !== unit) {
+      // Cả giai đoạn tự qua (B-0 khi B-0.1 đã chốt nền tảng + mức độ): chạy luôn giai đoạn kế trên cùng luồng —
+      // dừng ở đây thì user đứng trước một khung trống, không biết phải gõ gì để đi tiếp.
+      if (next && terminalAutoAccepted) return runPhase(projectId, phaseUnitOf(next), sessionId, userId, emit, laterDeps)
       return { phase: unit, stopped_at: null, reason_vi: "Đã xong giai đoạn này", steps: outcomes }
     }
     if (flagsAtStart === null) {
@@ -462,14 +477,17 @@ export const runPhase = async (
     newAssumptions.push(...(gateEvent.new_assumptions ?? []))
 
     const { spine: afterSpine } = await load(projectId)
+    const templateId = getStep(next.id).template_id
     const verdict: QuietVerdict = isQuietStep({
-      templateId: getStep(next.id).template_id,
+      templateId,
       reviewMode: afterSpine.project.review_mode ?? "balanced",
       asked,
       redDelta: gateEvent.flags?.red_delta ?? 0,
       newAssumptions: gateEvent.new_assumptions ?? [],
       renderFailed,
       phaseTerminal: isPhaseTerminal(afterSpine, next),
+      // B-0.2/B-0.3 bỏ qua vì B-0.1 đã chốt field: không gọi model, không ghi gì ⇒ không có gì để duyệt
+      settledEarlier: B0_FIELD_STEPS[templateId] !== undefined && !asked && gateEvent.calls_used === 0 && gateEvent.wrote_ops === false,
       spine: afterSpine
     })
 
@@ -495,6 +513,7 @@ export const runPhase = async (
     void accepted
     void record
     emit({ type: "auto_accepted", step_id: next.id, reason_vi: verdict.reason_vi })
+    terminalAutoAccepted = isPhaseTerminal(afterSpine, next)
     outcomes.push({
       step_id: next.id,
       label_vi: getStep(next.id).label_vi,

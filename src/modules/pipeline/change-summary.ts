@@ -54,7 +54,8 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 /** Tên gọi được của một phần tử: `name` → `term` → `statement` → `code` → `text` → `id`. */
 export const titleOf = (element: unknown, fallback: string): string => {
   if (!isRecord(element)) return fallback
-  for (const key of ["name", "term", "statement", "code", "text", "topic", "heading"]) {
+  // Tóm tắt hiện cho user (gate, nhật ký) ⇒ ưu tiên bản ngôn ngữ user: giả định `statement_vi`, ghi chú Brief `content`
+  for (const key of ["name", "term", "statement_vi", "content", "statement", "code", "text", "topic", "heading"]) {
     const value = element[key]
     if (typeof value === "string" && value.trim() !== "") return value.trim()
   }

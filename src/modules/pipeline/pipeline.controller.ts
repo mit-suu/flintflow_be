@@ -27,6 +27,7 @@ import {
   pendingAnswerFor,
   resumeWaitingStep,
   requirePipelineSession,
+  recordUserMessage,
   isPipelineErrorCode,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
@@ -317,6 +318,14 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 
 // ─── POST /steps/:stepId/gate ───────────────────────────────────────
 
+/** Lời thường của một thao tác ở cổng duyệt, như user tự gõ. */
+const gateActionText = (input: GateInput): string => {
+  if (input.action === "accept") return "Duyệt, sang bước tiếp"
+  if (input.action === "regenerate") return "Làm lại bước này"
+  if (input.action === "revision") return `Yêu cầu sửa: ${input.note ?? ""}`.trim()
+  return `Duyệt như hiện tại: ${input.note ?? ""}`.trim()
+}
+
 export const gateStep = catchAsync(async (req: Request, res: Response) => {
   const { projectId, userId, mode } = await authorize(req)
   assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
@@ -333,6 +342,8 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
 
   try {
     const result = await gate(projectId, stepId, userId, input)
+    // Thao tác ở cổng duyệt vào lịch sử chat như một lượt của user — đọc lại biết mình đã duyệt/yêu cầu sửa gì
+    await recordUserMessage(projectId, body.session_id, stepId, gateActionText(input))
     return sendSuccess(res, 200, result)
   } catch (err) {
     if (err instanceof GateLimitError) return sendError(res, err.statusCode, err.code, err.message, err.details)

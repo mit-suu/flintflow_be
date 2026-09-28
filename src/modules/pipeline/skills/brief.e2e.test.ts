@@ -570,7 +570,7 @@ describe("FLF-221: chat tự do trong phỏng vấn đầu giai đoạn", () => 
     const decision = (await repo.get(PROJECT))!.decisions.find((d) => d.topic_key === "goals")
     expect(decision).toMatchObject({ answer: "Mục tiêu là giảm 30% khách bỏ hẹn", step_id: "B-1" })
     const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
-    expect(messages.filter((m) => m.step === "B-1").map((m) => m.role)).toEqual(["user", "ai"])
+    expect(messages.filter((m) => m.step === "B-1").map((m) => m.role)).toEqual(["ai", "user", "ai"]) // lượt hỏi (kèm câu hỏi) còn trong lịch sử sau khi user trả lời bằng chat
     expect(events.some((e) => e.type === "gate_ready" && e.step_id.startsWith("B-1."))).toBe(true)
   })
 })
