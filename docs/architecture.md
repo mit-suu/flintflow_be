@@ -98,7 +98,7 @@ model → op[] → op-engine.applyTransaction() → Spine mới + changes[] → 
 
 ## 4. Luồng step (pipeline)
 
-12 phase, `51 step cố định + 5 × N` (N = số màn, +1 nếu có function không thuộc màn):
+12 phase, `50 step cố định + 5 × N` (N = số màn, +1 nếu có function không thuộc màn):
 
 | Phase | Tên | Step |
 |---|---|---|

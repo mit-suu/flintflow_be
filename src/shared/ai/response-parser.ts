@@ -54,6 +54,13 @@ export const summarizeDocumentSchema = z.object({
   keyThemes: z.array(z.string()).optional()
 })
 
+/** FLF-221: bản tiếng Anh của một câu giả định user vừa sửa. */
+export const translateSchema = z.object({
+  statement: z.string().trim().min(1)
+})
+
+export type TranslateOutput = z.infer<typeof translateSchema>
+
 // ─── Pipeline (T03): hợp đồng đầu ra cho T08/T11 ───────────────────
 // Model chỉ phát op; code áp op (Phases §2.1). Parse/validate thất bại thì
 // throw — không bao giờ ghi raw text vào Spine.
@@ -81,13 +88,21 @@ export const elicitQuestionSchema = z.union([
   z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
-export const elicitSchema = z.object({
+const elicitBaseSchema = z.object({
   reply: z.string(),
   questions: z.array(elicitQuestionSchema).default([])
 })
 
-/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. */
-export const discoveryStepSchema = elicitSchema.extend({
+/**
+ * Vòng hỏi của step. `settled` (FLF-221): khi user chat tự do lúc đang có câu chờ, model báo câu nào user đã trả lời
+ * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
+ */
+export const elicitSchema = elicitBaseSchema.extend({
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional()
+})
+
+/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
+export const discoveryStepSchema = elicitBaseSchema.extend({
   ops: z.array(opSchema).optional()
 })
 
@@ -275,6 +290,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.RENDER_FIX]: renderFixSchema,
   [ActionType.CHAT]: chatSchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
+  [ActionType.TRANSLATE]: translateSchema,
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,

@@ -79,7 +79,7 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
         await runStep(projectId, stepId, sessionId, userId, (event) => {
           if (event.type === "answer_needed") {
             const answers = event.questions.map((q) => ({ question_id: q.id, answer: q.options?.[0] ? stripRecommended(optionLabel(q.options[0])) : AUTO_ANSWER }))
-            setImmediate(() => submitAnswer(projectId, stepId, sessionId, answers))
+            setImmediate(() => submitAnswer(projectId, stepId, sessionId, { answers }))
           }
           if (event.type === "error") error = `${event.code}: ${event.message}`
         }, { renderDeps })

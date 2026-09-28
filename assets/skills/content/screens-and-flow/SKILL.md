@@ -27,7 +27,7 @@ stub: false
 
 Covers **S-4.1 Screen Inventory** and **S-4.2 Screens Flow** — feeds `fixed:3.1.1` (Screens Flow),
 `fixed:3.1.2` (Screen Descriptions) and every `feature:<id>` section. S-4.1 is the step that **fixes N**
-(the loop count for S-5): after it, the progress bar shows a percentage and the step total `51 + 5 × N`
+(the loop count for S-5): after it, the progress bar shows a percentage and the step total `50 + 5 × N`
 stops moving, so a screen missed here costs a whole re-plan. `references/*.md` are **not loaded at
 runtime** — every rule needed to draft correctly is inlined below.
 

@@ -159,6 +159,15 @@ export const applyResultResponseSchema = z.object({
 /** POST /projects/:id/undo */
 export const undoRequestSchema = z.strictObject({ base_version: baseVersion })
 
+/**
+ * PATCH /projects/:id/assumptions/:assumptionId (FLF-221) — user sửa câu giả định bằng ngôn ngữ của mình; server dịch
+ * sang `statement` (EN) và ghi cả hai.
+ */
+export const assumptionEditRequestSchema = z.strictObject({
+  statement_vi: z.string().trim().min(1).max(2000),
+  base_version: baseVersion
+})
+
 /** POST /projects/:id/reconcile — lượt 1 trả preview gộp, lượt 2 gửi `preview_id` để áp. */
 export const reconcileRequestSchema = z.strictObject({
   base_version: baseVersion,
@@ -202,6 +211,22 @@ export const stepsResponseSchema = z.object({
   steps: z.array(stepSummarySchema)
 })
 
+/** Trần độ dài input người dùng ghi vào transcript (contract-change 2026-09-15). */
+export const ANSWER_MAX_CHARS = 4000
+export const ANSWERS_MAX_ITEMS = 20
+export const GATE_NOTE_MAX_CHARS = 2000
+
+const answerText = z.string().max(ANSWER_MAX_CHARS)
+
+/** Tin nhắn chat của user gửi kèm lượt chạy/trả lời (FLF-221: chat là nút chạy). */
+const userMessage = z.string().trim().min(1).max(ANSWER_MAX_CHARS)
+
+/**
+ * `no_idea`: user bấm chip "Mình chưa có ý tưởng" ở B-0.1 — server hỏi gợi mở, không dò chữ trong message (FLF-221).
+ */
+export const RUN_INTENTS = ["no_idea"] as const
+export type RunIntent = (typeof RUN_INTENTS)[number]
+
 /** POST /projects/:id/steps/:stepId/run (SSE) */
 export const runStepRequestSchema = z.strictObject({
   session_id: z.string().min(1),
@@ -211,7 +236,10 @@ export const runStepRequestSchema = z.strictObject({
    * rồi chạy như thường. Cần khi mục của step vẫn còn cờ đỏ dù step đã chốt — vd file có đầu mục nhưng I-4 không
    * trích được gì nên Spine trống (gặp thật 2026-09-20).
    */
-  reopen: z.boolean().optional()
+  reopen: z.boolean().optional(),
+  /** Tin nhắn chat khởi động lượt chạy — ghi vào transcript gắn step trước khi Intake (FLF-221). */
+  message: userMessage.optional(),
+  intent: z.enum(RUN_INTENTS).optional()
 })
 
 /**
@@ -255,7 +283,8 @@ export const changeSummarySchema = z.object({
 
 export type ChangeSummary = z.infer<typeof changeSummarySchema>
 
-export const assumptionBriefSchema = z.object({ id: z.string(), text: z.string(), conflict: z.string().nullable().optional() })
+/** `text` = `statement` (EN); `text_vi` = `statement_vi` (ngôn ngữ user, FLF-221) — thiếu với dữ liệu cũ. */
+export const assumptionBriefSchema = z.object({ id: z.string(), text: z.string(), text_vi: z.string().optional(), conflict: z.string().nullable().optional() })
 
 /** Bảng thu gọn hiện ngay ở gate cho step mà kết quả LÀ một bảng (MoSCoW, ma trận quyền) — BUG-20. */
 export const gateTableSchema = z.object({
@@ -383,24 +412,28 @@ export const stepEventSchema = z.discriminatedUnion("type", [
 
 export type StepEvent = z.infer<typeof stepEventSchema>
 
-/** Trần độ dài input người dùng ghi vào transcript (contract-change 2026-09-15). */
-export const ANSWER_MAX_CHARS = 4000
-export const ANSWERS_MAX_ITEMS = 20
-export const GATE_NOTE_MAX_CHARS = 2000
-
-const answerText = z.string().max(ANSWER_MAX_CHARS)
-
-/** POST /projects/:id/phases/:phase/run (SSE) — chạy liền các bước của giai đoạn (R2). */
+/**
+ * POST /projects/:id/phases/:phase/run (SSE) — chạy liền các bước của giai đoạn (R2). Cùng field với `/run`, gồm
+ * `message`/`intent` (FLF-221) — controller phải truyền xuống `runPhase`.
+ */
 export const runPhaseRequestSchema = runStepRequestSchema
 
-/** POST /projects/:id/steps/:stepId/answer */
-export const stepAnswerRequestSchema = z.strictObject({
-  session_id: z.string().min(1),
-  answers: z
-    .array(z.object({ question_id: z.string().min(1), answer: z.union([answerText, z.array(answerText).max(ANSWERS_MAX_ITEMS)]) }))
-    .min(1)
-    .max(ANSWERS_MAX_ITEMS)
-})
+/**
+ * POST /projects/:id/steps/:stepId/answer. `message` (FLF-221): user gõ chat tự do thay vì bấm thẻ — `answers` được
+ * rỗng khi có `message`; thiếu cả hai ⇒ 400.
+ */
+export const stepAnswerRequestSchema = z
+  .strictObject({
+    session_id: z.string().min(1),
+    answers: z
+      .array(z.object({ question_id: z.string().min(1), answer: z.union([answerText, z.array(answerText).max(ANSWERS_MAX_ITEMS)]) }))
+      .max(ANSWERS_MAX_ITEMS),
+    message: userMessage.optional()
+  })
+  .refine((body) => body.answers.length > 0 || body.message !== undefined, {
+    message: "Cần ít nhất một câu trả lời hoặc một tin nhắn",
+    path: ["answers"]
+  })
 
 /** POST /projects/:id/steps/:stepId/gate — revision/accept_as_is bắt buộc note (lý do). */
 export const gateRequestSchema = z

@@ -8,6 +8,7 @@
  *   POST /projects/:id/undo             hoàn tác lô gần nhất
  *   GET  /projects/:id/changes          lịch sử theo seq
  *   GET  /projects/:id/traceability     bản đồ liên kết read-only
+ *   PATCH /projects/:id/assumptions/:assumptionId  sửa giả định bằng ngôn ngữ user, AI dịch EN (FLF-221)
  *
  * Controller chỉ: xác thực quyền sở hữu → parse DTO → gọi service → map lỗi sang envelope.
  * Nghiệp vụ nằm ở `change.service.ts`, `reconcile.service.ts`, `undo.service.ts`, `traceability.service.ts`.
@@ -19,10 +20,12 @@ import { z } from "zod"
 import * as changeService from "./change.service.js"
 import * as reconcileService from "./reconcile.service.js"
 import * as undoService from "./undo.service.js"
+import { translateAssumption } from "./assumption-translate.service.js"
 import * as spineRepository from "./spine.repository.js"
 import { trace, type TraceEntity } from "./traceability.service.js"
 import { TransactionRejectedError } from "./op-engine.js"
 import {
+  assumptionEditRequestSchema,
   changesQuerySchema,
   changesRequestSchema,
   reconcileRequestSchema,
@@ -136,6 +139,19 @@ export const reconcileChanges = catchAsync(async (req: Request, res: Response) =
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
       { branch: result.branch, impact: result.impact }
     )
+  } catch (err) {
+    return sendDomainError(res, err)
+  }
+})
+
+/** FLF-221: "Sửa" giả định — ghi `statement_vi` user gõ và `statement` EN do AI dịch trong một transaction. */
+export const editAssumption = catchAsync(async (req: Request, res: Response) => {
+  const auth = await authorize(req)
+  await guardMode1(auth, undefined, "Sửa giả định")
+  const body = parse(assumptionEditRequestSchema, req.body)
+  try {
+    const result = await translateAssumption(auth.projectId, req.params.assumptionId as string, auth.userId, body)
+    return sendSuccess(res, 200, { spine_version: result.spine_version, spine: result.spine })
   } catch (err) {
     return sendDomainError(res, err)
   }

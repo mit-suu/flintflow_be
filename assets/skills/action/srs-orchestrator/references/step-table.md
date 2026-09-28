@@ -1,6 +1,6 @@
 # Step table — source: Product-Brief-to-SRS-Phases.md §6.4
 
-Count: Brief 13 · SRS 38 fixed + 5 × N = **51 fixed + 5 × N**. N = 1 → 56 · N = 20 → 151.
+Count: Brief 12 · SRS 38 fixed + 5 × N = **50 fixed + 5 × N**. N = 1 → 55 · N = 20 → 150.
 
 ## Brief
 
@@ -9,7 +9,6 @@ Count: Brief 13 · SRS 38 fixed + 5 × N = **51 fixed + 5 × N**. N = 1 → 56 �
 | B-0.1 | Brain Dump | product-brief |
 | B-0.2 | Form-Factor | product-brief |
 | B-0.3 | Stakes | product-brief |
-| B-0.4 | Working Mode | product-brief |
 | B-1.1 | Product Vision, Problem & Opportunity | product-brief |
 | B-1.2 | Target Users & Jobs-to-be-Done | product-brief |
 | B-1.3 | Value Proposition & Differentiation | product-brief |

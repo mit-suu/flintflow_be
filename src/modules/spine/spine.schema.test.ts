@@ -239,6 +239,52 @@ describe("project.system_name (FLF-177)", () => {
   })
 })
 
+describe("assumptions[].statement_vi (FLF-221)", () => {
+  const assumption = {
+    id: "AS1",
+    path: "project.stakes",
+    statement: "Internal tool only",
+    rationale: "User said it is for the team",
+    origin_step_id: "B-0.1",
+    status: "unconfirmed" as const,
+    confirmed_at: null
+  }
+
+  it("Spine cũ không có statement_vi vẫn hợp lệ; có thì giữ nguyên qua round-trip", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    legacy.assumptions = [assumption]
+    expect(spineSchema.parse(legacy).assumptions[0].statement_vi).toBeUndefined()
+
+    const bilingual = createEmptySpine({ name: "New" })
+    bilingual.assumptions = [{ ...assumption, statement_vi: "Chỉ dùng nội bộ" }]
+    const parsed = spineSchema.parse(JSON.parse(JSON.stringify(bilingual)))
+    expect(parsed.assumptions[0]).toMatchObject({ statement: "Internal tool only", statement_vi: "Chỉ dùng nội bộ" })
+  })
+
+  it("statement_vi rỗng bị từ chối", () => {
+    const spine = createEmptySpine({ name: "X" })
+    spine.assumptions = [{ ...assumption, statement_vi: "" }]
+    expect(spineSchema.safeParse(spine).success).toBe(false)
+  })
+
+  it("rationale_vi: Spine cũ không có vẫn hợp lệ; có thì giữ nguyên; rỗng bị từ chối", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    legacy.assumptions = [assumption]
+    expect(spineSchema.parse(legacy).assumptions[0].rationale_vi).toBeUndefined()
+
+    const bilingual = createEmptySpine({ name: "New" })
+    bilingual.assumptions = [{ ...assumption, rationale_vi: "User nói công cụ dành cho nhóm" }]
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(bilingual))).assumptions[0]).toMatchObject({
+      rationale: "User said it is for the team",
+      rationale_vi: "User nói công cụ dành cho nhóm"
+    })
+
+    const empty = createEmptySpine({ name: "X" })
+    empty.assumptions = [{ ...assumption, rationale_vi: "" }]
+    expect(spineSchema.safeParse(empty).success).toBe(false)
+  })
+})
+
 describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1)", () => {
   const legacy = { id: "B1", version: "v1.0", at: AT, snapshot_ref: "650000000000000000000009", checked_at_version: 4, waived_count: 0 }
 

@@ -110,3 +110,15 @@ describe("huỷ lượt", () => {
     expect(await getRunState(PROJECT, STEP)).toBeNull()
   })
 })
+
+describe("FLF-221: lượt của step đã rời registry", () => {
+  it("run-state B-0.4 đứng ở gate ⇒ getActiveRun bỏ qua (không dựng lại cổng)", async () => {
+    const legacy = await acquireRun(PROJECT, "B-0.4")
+    await finishRun(PROJECT, "B-0.4", legacy.run_id, "gate", { gate_payload: { step_id: "B-0.4" } })
+    expect(await getActiveRun(PROJECT)).toBeNull()
+
+    const live = await acquireRun(PROJECT, "B-1.1")
+    await touchRun(PROJECT, "B-1.1", live.run_id, { status: "waiting_answer" })
+    expect((await getActiveRun(PROJECT))?.step_id).toBe("B-1.1")
+  })
+})

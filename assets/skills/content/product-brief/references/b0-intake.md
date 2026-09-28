@@ -4,6 +4,13 @@
 
 ## B-0.1 Brain Dump
 
+FLF-221: mở đầu kiểu "kể hết → AI chỉ hỏi phần thiếu". User gõ ý tưởng vào ô chat là B-0.1 chạy (tin nhắn vào
+transcript của step). Vòng hỏi **không** hỏi `form_factor`/`stakes` (server loại khỏi `missing`); lượt soạn tự suy
+ra hai field đó kèm giả định, gợi ý `system_name` nếu user chưa đặt, và tóm tắt ý tưởng một câu để user chốt ở cổng
+B-0.1. User bấm "Mình chưa có ý tưởng" (`intent: "no_idea"`) ⇒ vòng hỏi chỉ đưa 2–3 câu gợi mở bằng văn xuôi, không
+thẻ lựa chọn, không "(Khuyến nghị)". B-0.2/B-0.3 không gọi model khi field đã có; B-0 không có phỏng vấn gộp đầu giai
+đoạn.
+
 Mục tiêu không phải là hỏi đúng câu, mà là **để user nói hết** rồi mới sắp xếp. Ba nguồn cùng lúc:
 tin nhắn tự do, tài liệu upload (`document-context` đưa vào content guidance), và những gì đã có trong
 `project{}` nếu project được tạo lại.
@@ -33,9 +40,9 @@ tên project làm việc (`Project.name` ở FE, không đồng bộ). Hỏi nga
 `stakes` là trường hay bị đoán nhất và cũng là trường đắt nhất khi đoán sai: `internal` cho một sản phẩm
 có thanh toán thật kéo mọi ngưỡng NFR xuống quá thấp. Đoán thì phải kèm `assumptions[]`.
 
-## B-0.4 — không hỏi "cách làm việc" (FLF-220)
+## Không hỏi "cách làm việc" (FLF-220, FLF-221)
 
 `working_mode` (Coaching/Fast) đã bỏ: AI tự quyết hỏi nhiều hay ít, còn dừng để duyệt ở đâu là chế độ duyệt
-trong menu cài đặt AI ("Mọi bước" / "Cuối giai đoạn"). B-0.4 chỉ đọc lại tóm tắt intake (tên hệ thống,
-form factor, stakes) và ghi addendum nếu user nói thêm điều mới. Field `project.working_mode` còn trong
-schema (hợp đồng đóng băng) nhưng không ai ghi hay đọc nữa.
+trong menu cài đặt AI ("Mọi bước" / "Cuối giai đoạn"). Step "Cách làm việc" cũ chỉ còn ghi field này nên
+đã bị bỏ khỏi registry ở FLF-221 — B-0 còn 3 step. Field `project.working_mode` còn trong schema (hợp đồng
+đóng băng) nhưng không ai ghi hay đọc nữa.

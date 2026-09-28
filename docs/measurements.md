@@ -234,6 +234,10 @@ kết quả; ô trống hoặc `—` nghĩa là chưa đặt. Điền số (khô
 Sinh bởi `npm run measure:tokens` (`src/scripts/measure-tokens.ts`), 32 s.
 Hình fixture: 19 màn, 89 function, 20 vòng S-5 ⇒ `51 + 5 × 20 = 151` step; đo 81 step (bỏ vòng của màn placeholder).
 Mỗi step chạy `runStep` thật trên Spine fixture ở trạng thái cuối, mọi step trước đó accepted ⇒ input là **trần** của step.
+
+> Ghi chú 2026-09-28 (FLF-221): số liệu đo trước khi bỏ step "Cách làm việc" ⇒ quy trình hiện là `50 + 5 × N`; dòng
+> của step đó trong bảng chi tiết giữ nguyên làm hồ sơ đo, không còn chạy (tiết kiệm ~5 credit/project).
+
 **Số ước lượng**: tokens_in = ký tự/4 của prompt thật (`getPromptTemplate` + `interpolatePrompt`); tokens_out = ký tự/4 của op-case fixture (không gồm reasoning ẩn — lượt chạy thật M3 đo tokens_out gấp 3–5× tokens_in với GLM-5.3-Flash). Credit theo `getActionCost`.
 
 | Phase | Step | Lượt gọi (elicit + draft) | Tokens in | Tokens out | Credit | USD |

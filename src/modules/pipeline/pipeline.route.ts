@@ -17,7 +17,7 @@ const router = Router()
  * @swagger
  * /api/v1/projects/{projectId}/steps:
  *   get:
- *     summary: Danh sách step (51 + 5×N) kèm trạng thái, calls_used/regenerate_used
+ *     summary: Danh sách step (50 + 5×N) kèm trạng thái, calls_used/regenerate_used
  *     tags: [Pipeline]
  *     security:
  *       - BearerAuth: []

@@ -1138,8 +1138,30 @@
           "statement": {
             "type": "string"
           },
+          "statement_vi": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "rationale": {
             "type": "string"
+          },
+          "rationale_vi": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "origin_step_id": {
             "type": "string",

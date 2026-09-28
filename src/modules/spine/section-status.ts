@@ -16,6 +16,7 @@
 
 import type { Change, Spine } from "./spine.types.js"
 import { listSections, sectionsOfPath, stepsOf } from "./section-registry.js"
+import { isRegisteredStep } from "../pipeline/step-registry.js"
 
 export type SectionStatus = "derived" | "stale" | "accepted" | "draft"
 
@@ -144,8 +145,8 @@ export const readiness = (spine: Spine, changes: ChangeLike[], states = computeS
   }
 }
 
-/** Phases §6.4: 13 Brief + 38 SRS cố định. */
-export const FIXED_STEP_COUNT = 51
+/** Phases §6.4: 12 Brief + 38 SRS cố định. */
+export const FIXED_STEP_COUNT = 50
 export const STEPS_PER_SCREEN_LOOP = 5
 /** N chốt ở S-4.1 (Phases §1.1). */
 export const N_LOCKED_AT_STEP = "S-4.1"
@@ -159,17 +160,19 @@ export interface StepProgress {
 }
 
 /**
- * Thanh tiến độ đếm step: `51 + 5 × N`, N = số màn **chưa để lại** + 1 nếu có non-screen function; trừ step
+ * Thanh tiến độ đếm step: `50 + 5 × N`, N = số màn **chưa để lại** + 1 nếu có non-screen function; trừ step
  * `skipped` (FLF-183). Màn `placeholder` là màn đã quyết định để lại — `nextStep` vốn đã bỏ qua vòng của nó, nên
  * đếm vào mẫu số chỉ làm tiến độ sai: project mode 1 import ra 61 màn placeholder hiện "38/366" trong khi việc
  * thật chỉ ~56 bước (2026-09-20). Màn có function trở lại (`detail_status` khác placeholder) thì đếm như thường.
+ * Chỉ đếm step còn trong registry: Spine cũ có thể còn `B-0.4` (đã bỏ ở FLF-221) trong `steps[]`.
  */
 export const progressByStep = (spine: Spine): StepProgress => {
   const counted = spine.screens.filter((s) => s.detail_status !== "placeholder").length
   const n = counted + (spine.functions.some((f) => f.screen_id === null) ? 1 : 0)
+  const steps = spine.steps.filter((s) => isRegisteredStep(s.id))
   return {
-    done: spine.steps.filter((s) => s.status === "accepted").length,
-    total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n - spine.steps.filter((s) => s.status === "skipped").length,
+    done: steps.filter((s) => s.status === "accepted").length,
+    total: FIXED_STEP_COUNT + STEPS_PER_SCREEN_LOOP * n - steps.filter((s) => s.status === "skipped").length,
     current_phase: spine.progress.current_phase,
     current_step: spine.progress.current_step,
     show_percent: spine.steps.some((s) => s.id === N_LOCKED_AT_STEP && s.status === "accepted")

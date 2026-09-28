@@ -48,7 +48,7 @@ model → op[] → op-engine.applyTransaction() → Spine mới + changes[] → 
 
 ## Quy trình 12 phase
 
-`51 step cố định + 5 × N` (N = số màn + 1 nếu có function không thuộc màn nào). Nguồn sự thật:
+`50 step cố định + 5 × N` (N = số màn + 1 nếu có function không thuộc màn nào). Nguồn sự thật:
 `assets/step-registry.json` + `src/modules/pipeline/step-registry.ts`. Step của vòng S-5 mang id
 `S-5.<n>@<screen_id>` hoặc `S-5.<n>@nonscreen`.
 

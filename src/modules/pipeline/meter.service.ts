@@ -244,7 +244,7 @@ export interface StepRoundInput {
 }
 
 /**
- * F10: `GET /steps` cần `calls_used`/`regenerate_used` của 51 + 5×N step — gọi `roundCounts` cho từng
+ * F10: `GET /steps` cần `calls_used`/`regenerate_used` của 50 + 5×N step — gọi `roundCounts` cho từng
  * step tạo ra ~2-3×N truy vấn (N+1). Gộp còn 2 truy vấn: một `listChanges` KHÔNG giới hạn (đủ để suy mốc
  * vòng mọi step theo `first_seq` riêng — xem `roundStartedAt`) và một `Usage.aggregate` lấy thô mọi dòng
  * chưa refund của các step liên quan, rồi đếm trong bộ nhớ theo mốc vòng riêng từng step (mốc lệch nhau

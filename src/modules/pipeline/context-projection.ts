@@ -41,7 +41,7 @@ const skillFor = (skill: string, ids: string[]): [string, string][] => ids.map((
 /** Step → skill content (khoá = id step không có `@`). Step không có trong bảng không Draft bằng model. */
 export const STEP_SKILLS: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries([
-    ...skillFor("product-brief", ["B-0.1", "B-0.2", "B-0.3", "B-0.4", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6", "B-2.1", "B-2.2", "B-2.3"]),
+    ...skillFor("product-brief", ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6", "B-2.1", "B-2.2", "B-2.3"]),
     // XREQ T20→T11: S-1.2 là phân loại dự án; S-1.1/S-1.3/S-1.4 là đọc lại Brief (trích xuất, xung đột,
     // danh sách thiếu) — việc khác hẳn, skill khác (`brief-analysis`, T20).
     ...skillFor("project-classifier", ["S-1.2"]),

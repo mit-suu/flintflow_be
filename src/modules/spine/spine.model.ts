@@ -303,7 +303,9 @@ const assumptionSchema = new Schema(
     id: { type: String, required: true },
     path: { type: String, required: true },
     statement: { type: String, default: "" },
+    statement_vi: { type: String },
     rationale: { type: String, default: "" },
+    rationale_vi: { type: String },
     origin_step_id: { type: String, required: true },
     status: {
       type: String,

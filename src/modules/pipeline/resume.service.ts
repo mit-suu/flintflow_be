@@ -13,7 +13,8 @@ import type { Change, Spine, SpineRecord } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { buildPipelineProgressReport, type PipelineProgressReport } from "./pipeline-progress.js"
 import { STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
-import { isStepRunning, isWaitingForAnswer } from "./run-state.service.js"
+import { isStepRunning, isAwaitingUser } from "./run-state.service.js"
+import { isRegisteredStep } from "./step-registry.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -60,14 +61,15 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
   if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
 
   const spine = stripRecord(record)
-  const inProgress = spine.steps.find((s) => s.status === "in_progress")
+  // Step đã rời registry (B-0.4, FLF-221) không revert: nội dung nó đã ghi vẫn là dữ liệu của project.
+  const inProgress = spine.steps.find((s) => s.status === "in_progress" && isRegisteredStep(s.id))
 
   let spineVersion = record.spine_version
   let revertedStep: string | null = null
 
-  // FLF-222: step đang chờ user trả lời không phải "bỏ dở" — câu hỏi còn đó và `/answer` chạy tiếp được. Mở
-  // workspace (reload) mà revert nó thì chính reload xoá mất lượt chờ.
-  if (inProgress && !(await isWaitingForAnswer(projectId, inProgress.id))) {
+  // Step đang chờ user (chờ trả lời — FLF-222, hoặc chờ duyệt ở cổng chốt) không phải "bỏ dở": mở workspace (reload)
+  // mà revert nó thì chính reload xoá mất câu hỏi / nội dung user sắp duyệt.
+  if (inProgress && !(await isAwaitingUser(projectId, inProgress.id))) {
     // F2/F4: step đang thật sự chạy dở ở một request khác (khoá `step_runs` còn hiệu lực) — không phải
     // "đóng tab bỏ dở", KHÔNG được revert nội dung đang được ghi.
     if (await isStepRunning(projectId, inProgress.id)) {

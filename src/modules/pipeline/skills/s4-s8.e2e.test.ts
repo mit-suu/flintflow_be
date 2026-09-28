@@ -369,11 +369,11 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     const visited = await walkToLastStep(deps)
     const final = (await repo.get(PROJECT))!
 
-    // ── S-4.1 fixed N: 4 screens + the nonscreen round; 51 + 5 x N steps ──────────────────────────
+    // ── S-4.1 fixed N: 4 screens + the nonscreen round; 50 + 5 x N steps ──────────────────────────
     expect(final.screens.map((s) => s.id).sort()).toEqual(["S91", "S92", "S93", "S94"])
     expect(final.progress.screen_queue).toEqual(["S91", "S92", "S93", "S94"])
     expect(final.functions.some((f) => f.screen_id === null), "S-4.4 must add a nonscreen function").toBe(true)
-    expect(totalSteps(final), "N = 4 screens + 1 nonscreen round").toBe(51 + 5 * 5)
+    expect(totalSteps(final), "N = 4 screens + 1 nonscreen round").toBe(50 + 5 * 5)
 
     // ── FLF-177 BUG-03: the mock model still asks for placeholders at S-4.1, but only the user may leave a
     // screen out ⇒ every screen gets its S-5 round (4 screens + @nonscreen) ───────────────────────────
@@ -517,7 +517,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
 
     const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
     expect(asked.step_id, "câu hỏi của cả giai đoạn, không của một bước").toBe("S-4")
-    expect(submitAnswer(PROJECT, "S-4", SESSION, [{ question_id: "Q1", answer: "Màn Đặt lịch" }])).toBe(true)
+    expect(submitAnswer(PROJECT, "S-4", SESSION, { answers: [{ question_id: "Q1", answer: "Màn Đặt lịch" }] })).toBe(true)
     await run
 
     // Câu trả lời vào sổ quyết định, và không bước nào trong giai đoạn hỏi lại chủ đề đó
@@ -552,7 +552,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     const first = collectEvents()
     const run = runPhase(PROJECT, "S-4", SESSION, USER, first.emit, deps)
     for (let i = 0; i < 80 && !first.events.some((e) => e.type === "answer_needed"); i++) await new Promise((r) => setTimeout(r, 0))
-    submitAnswer(PROJECT, "S-4", SESSION, [{ question_id: "Q1", answer: "Đăng nhập rồi đặt lịch, màn đặt lịch dùng nhiều nhất" }])
+    submitAnswer(PROJECT, "S-4", SESSION, { answers: [{ question_id: "Q1", answer: "Đăng nhập rồi đặt lịch, màn đặt lịch dùng nhiều nhất" }] })
     const stopped = await run
     expect((await repo.get(PROJECT))!.decisions.filter((d) => d.step_id === "S-4"), "đoạn gộp không vào sổ").toEqual([])
 
@@ -771,9 +771,9 @@ describe("FLF-222: phỏng vấn đầu giai đoạn sống qua reload / rớt k
     await run
 
     const answers = [{ question_id: "Q1", answer: "Đặt lịch" }]
-    expect(submitAnswer(PROJECT, "S-4", SESSION, answers)).toBe(false)
-    const pending = await pendingAnswerFor(PROJECT, "S-4", SESSION, answers)
-    await resumePhaseInterview(PROJECT, "S-4", USER, pending, answers)
+    expect(submitAnswer(PROJECT, "S-4", SESSION, { answers })).toBe(false)
+    const pending = await pendingAnswerFor(PROJECT, "S-4", SESSION, { answers })
+    await resumePhaseInterview(PROJECT, "S-4", USER, pending, { answers })
 
     expect(await getRunState(PROJECT, "S-4")).toMatchObject({ status: "done", pending_answer: null, questions: null })
     const spine = (await repo.get(PROJECT))!

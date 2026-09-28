@@ -63,7 +63,7 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 
   // T21: prompt phẳng chỉ còn cho action ngoài pipeline — prompt section-based cũ đã xoá
   it("chỉ còn prompt của CHAT và SUMMARIZE_DOCUMENT", () => {
-    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT])
+    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT, ActionType.TRANSLATE])
   })
 })
 

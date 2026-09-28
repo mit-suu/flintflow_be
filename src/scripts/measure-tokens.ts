@@ -7,7 +7,7 @@
  *   npm run measure:tokens -- --mode real                # mọi lượt gọi provider thật; tự trả lời answer_needed
  *   npm run measure:tokens -- --fixture minimal --no-write --usd-in 0.15 --usd-out 0.6
  *
- * Cách đo: với MỖI step trong `orderedSteps(fixture)` (51 + 5 × N, bỏ vòng S-5 của màn placeholder), nạp lại
+ * Cách đo: với MỖI step trong `orderedSteps(fixture)` (50 + 5 × N, bỏ vòng S-5 của màn placeholder), nạp lại
  * Spine fixture với mọi step trước đó accepted rồi gọi `runStep` thật. Spine ở trạng thái cuối nên input đo
  * được là **trần** của từng step — đúng thứ cần biết để phát hiện input tăng theo tiến độ.
  *   - estimate:   executor bắt `promptVariables`, dựng prompt bằng đúng `getPromptTemplate` + `interpolatePrompt`
@@ -294,7 +294,7 @@ export const renderReport = ({ options, records, stepOrder, shape, startedAt, du
     `## End-to-end token measurement — \`${fixtureName}\`, mode \`${options.mode}\` (T22, ${startedAt.toISOString().slice(0, 10)})`,
     "",
     `Sinh bởi \`npm run measure:tokens${options.mode === "estimate" ? "" : ` -- --mode ${options.mode}`}\` (\`src/scripts/measure-tokens.ts\`), ${Math.round(durationMs / 1000)} s.`,
-    `Hình fixture: ${shape.screens} màn, ${shape.functions} function, ${shape.loops} vòng S-5 ⇒ \`51 + 5 × ${shape.loops} = ${shape.totalSteps}\` step; đo ${stepOrder.length} step (bỏ vòng của màn placeholder).`,
+    `Hình fixture: ${shape.screens} màn, ${shape.functions} function, ${shape.loops} vòng S-5 ⇒ \`50 + 5 × ${shape.loops} = ${shape.totalSteps}\` step; đo ${stepOrder.length} step (bỏ vòng của màn placeholder).`,
     "Mỗi step chạy `runStep` thật trên Spine fixture ở trạng thái cuối, mọi step trước đó accepted ⇒ input là **trần** của step.",
     measured
       ? "Token do provider báo; credit trừ thật ở ví seed."
@@ -487,7 +487,7 @@ export const measure = async (options: MeasureOptions, log: (line: string) => vo
       await runStep(projectId, stepId, sessionId, userId, (event) => {
         if (event.type === "answer_needed") {
           const answers = event.questions.map((q) => ({ question_id: q.id, answer: q.options?.[0] ? stripRecommended(optionLabel(q.options[0])) : AUTO_ANSWER }))
-          setImmediate(() => submitAnswer(projectId, stepId, sessionId, answers))
+          setImmediate(() => submitAnswer(projectId, stepId, sessionId, { answers }))
         }
         if (event.type === "error") error = `${event.code}: ${event.message}`
       }, deps)

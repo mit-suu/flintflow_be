@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
 import { isWritablePath, normalizeSelectorPath, sanitizeModelOps, validateOps } from "./op-validator.js"
+import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -41,6 +42,22 @@ describe("validateOps", () => {
     expect(isWritablePath("actors[id=A01]", ["actors"])).toBe(true)
     expect(isWritablePath("actors_extra", ["actors"])).toBe(false)
     expect(isWritablePath("progress.screen_queue[]", ["progress"])).toBe(true)
+  })
+
+  it("FLF-221: writes dạng dot-path — B-0.2 ghi được project.form_factor, không ghi được project.complexity", () => {
+    const writable = getStep("B-0.2").writes
+    expect(validateOps(FIXTURE, [{ op: "set", path: "project.form_factor", value: "mobile_app" }], { writable, stepId: "B-0.2" })).toEqual([])
+    const errors = validateOps(FIXTURE, [{ op: "set", path: "project.complexity", value: "high" }], { writable, stepId: "B-0.2" })
+    expect(errors).toMatchObject([{ rule: "path_not_writable", path: "project.complexity" }])
+  })
+
+  it("FLF-221: mọi op-case b0-s1 nằm trong writes của step (reads/writes Brief đã thu hẹp)", () => {
+    const dir = path.resolve(__dirname, "../../../fixtures/op-cases/b0-s1")
+    for (const file of fs.readdirSync(dir).filter((name) => name.endsWith(".json"))) {
+      const opCase = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8")) as { step_id: string; ops: { path: string }[] }
+      const writable = getStep(opCase.step_id).writes
+      for (const op of opCase.ops) expect(isWritablePath(op.path, writable), `${file}: ${op.path}`).toBe(true)
+    }
   })
 })
 

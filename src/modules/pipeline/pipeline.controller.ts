@@ -27,6 +27,7 @@ import {
   pendingAnswerFor,
   resumeWaitingStep,
   requirePipelineSession,
+  recordUserMessage,
   isPipelineErrorCode,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
@@ -239,7 +240,9 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
     await runStep(projectId, stepId, body.session_id, userId, emit, {
       signal: stream.controller.signal,
       abort: stream.controller,
-      ...(body.reopen ? { reopen: true } : {})
+      ...(body.reopen ? { reopen: true } : {}),
+      ...(body.message === undefined ? {} : { message: body.message }),
+      ...(body.intent === undefined ? {} : { intent: body.intent })
     })
     stream.end()
   } catch (err) {
@@ -272,7 +275,12 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
   }
 
   try {
-    await runPhase(projectId, phase, body.session_id, userId, stream.emit, { signal: stream.controller.signal, abort: stream.controller })
+    await runPhase(projectId, phase, body.session_id, userId, stream.emit, {
+      signal: stream.controller.signal,
+      abort: stream.controller,
+      ...(body.message === undefined ? {} : { message: body.message }),
+      ...(body.intent === undefined ? {} : { intent: body.intent })
+    })
     stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err
@@ -298,15 +306,25 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
   const stepId = req.params.stepId as string
   const body = parse(stepAnswerRequestSchema, req.body)
 
-  if (submitAnswer(projectId, stepId, body.session_id, body.answers)) return sendSuccess(res, 200, { accepted: true })
+  // FLF-221: `message` = chat tự do khi đang chờ — AI đọc rồi chỉ chốt câu được trả lời đúng ý (tính credit bằng `userId`)
+  const payload = { answers: body.answers, ...(body.message === undefined ? {} : { message: body.message }) }
+  if (submitAnswer(projectId, stepId, body.session_id, payload)) return sendSuccess(res, 200, { accepted: true })
 
-  const pending = await pendingAnswerFor(projectId, stepId, body.session_id, body.answers)
-  if (pending.kind === "phase_interview") await resumePhaseInterview(projectId, stepId, userId, pending, body.answers)
-  else await resumeWaitingStep(projectId, stepId, userId, pending, body.answers)
+  const pending = await pendingAnswerFor(projectId, stepId, body.session_id, payload)
+  if (pending.kind === "phase_interview") await resumePhaseInterview(projectId, stepId, userId, pending, payload)
+  else await resumeWaitingStep(projectId, stepId, userId, pending, payload)
   return sendSuccess(res, 200, { accepted: true })
 })
 
 // ─── POST /steps/:stepId/gate ───────────────────────────────────────
+
+/** Lời thường của một thao tác ở cổng duyệt, như user tự gõ. */
+const gateActionText = (input: GateInput): string => {
+  if (input.action === "accept") return "Duyệt, sang bước tiếp"
+  if (input.action === "regenerate") return "Làm lại bước này"
+  if (input.action === "revision") return `Yêu cầu sửa: ${input.note ?? ""}`.trim()
+  return `Duyệt như hiện tại: ${input.note ?? ""}`.trim()
+}
 
 export const gateStep = catchAsync(async (req: Request, res: Response) => {
   const { projectId, userId, mode } = await authorize(req)
@@ -324,6 +342,8 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
 
   try {
     const result = await gate(projectId, stepId, userId, input)
+    // Thao tác ở cổng duyệt vào lịch sử chat như một lượt của user — đọc lại biết mình đã duyệt/yêu cầu sửa gì
+    await recordUserMessage(projectId, body.session_id, stepId, gateActionText(input))
     return sendSuccess(res, 200, result)
   } catch (err) {
     if (err instanceof GateLimitError) return sendError(res, err.statusCode, err.code, err.message, err.details)
