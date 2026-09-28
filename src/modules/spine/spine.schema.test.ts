@@ -266,6 +266,23 @@ describe("assumptions[].statement_vi (FLF-221)", () => {
     spine.assumptions = [{ ...assumption, statement_vi: "" }]
     expect(spineSchema.safeParse(spine).success).toBe(false)
   })
+
+  it("rationale_vi: Spine cũ không có vẫn hợp lệ; có thì giữ nguyên; rỗng bị từ chối", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    legacy.assumptions = [assumption]
+    expect(spineSchema.parse(legacy).assumptions[0].rationale_vi).toBeUndefined()
+
+    const bilingual = createEmptySpine({ name: "New" })
+    bilingual.assumptions = [{ ...assumption, rationale_vi: "User nói công cụ dành cho nhóm" }]
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(bilingual))).assumptions[0]).toMatchObject({
+      rationale: "User said it is for the team",
+      rationale_vi: "User nói công cụ dành cho nhóm"
+    })
+
+    const empty = createEmptySpine({ name: "X" })
+    empty.assumptions = [{ ...assumption, rationale_vi: "" }]
+    expect(spineSchema.safeParse(empty).success).toBe(false)
+  })
 })
 
 describe("baselineSchema — type / doc_version (FLF-171, contract-change mode 1)", () => {

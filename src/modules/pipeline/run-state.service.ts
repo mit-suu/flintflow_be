@@ -316,10 +316,15 @@ export const isStepRunning = async (projectId: string, stepId: string): Promise<
   return doc !== null && doc.status === "running" && new Date(doc.locked_until).getTime() > Date.now()
 }
 
-/** Step đang chờ user trả lời và lượt chờ còn trả lời được qua `/answer` — resume không được revert nó (FLF-222). */
-export const isWaitingForAnswer = async (projectId: string, stepId: string): Promise<boolean> => {
+/**
+ * Step đang chờ user — chờ trả lời (lượt chờ còn trả lời được qua `/answer`, FLF-222) hoặc đã soạn xong và chờ duyệt ở
+ * cổng chốt. Không phải "bỏ dở": resume revert nó thì chính việc mở lại trang xoá mất nội dung user sắp duyệt, rồi thẻ
+ * cổng dựng lại từ run-state thành thẻ cũ (FLF-221).
+ */
+export const isAwaitingUser = async (projectId: string, stepId: string): Promise<boolean> => {
   const doc = await getRunState(projectId, stepId)
-  return doc !== null && doc.status === "waiting_answer" && doc.pending_answer !== null
+  if (doc === null) return false
+  return (doc.status === "waiting_answer" && doc.pending_answer !== null) || doc.status === "gate"
 }
 
 export interface CancelResult {

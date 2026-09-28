@@ -71,7 +71,7 @@ import { orderedSteps } from "./step-registry.js"
 import { isStepRunning } from "./run-state.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
-vi.mock("./run-state.service.js", () => ({ isStepRunning: vi.fn(async () => false), isWaitingForAnswer: vi.fn(async () => false) }))
+vi.mock("./run-state.service.js", () => ({ isStepRunning: vi.fn(async () => false), isAwaitingUser: vi.fn(async () => false) }))
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MINIMAL: SpineT = spineSchema.parse(

@@ -280,6 +280,8 @@ export interface Assumption {
   /** Bản ngôn ngữ của user (FLF-221); Spine cũ không có ⇒ hiện `statement`. */
   statement_vi?: string | null
   rationale: string
+  /** Lý do bằng ngôn ngữ user (hiện ở cổng duyệt); Spine cũ không có. */
+  rationale_vi?: string | null
   origin_step_id: string
   status: AssumptionStatus
   confirmed_at: IsoDateTime | null

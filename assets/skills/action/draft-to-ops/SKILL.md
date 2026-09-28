@@ -48,8 +48,8 @@ You convert the conversation for one step into **a single transaction of operati
 9. **Invariants are checked at the end of the batch**, not per op. If your batch would break one, fix the batch; do not emit it hoping code will repair it.
 10. **Gaps**: when a value is still missing after the answers, fill it with the most reasonable default and add an `assumptions[]` entry with **all 7 fields**: `{ "id": "AS1", "path": "project.vision", "statement": "...", "rationale": "...", "origin_step_id": "<current step>", "status": "unconfirmed", "confirmed_at": null }` (next free `AS<n>` id; `confirmed_at` is required and `null`). `path` is a **resolvable selector**, written
     the same way as an op path — `addendum[id=AD8]`, `nfrs[id=N03].threshold` — never `addendum[AD8]`.
-    Also add `statement_vi`: the same assumption in the **user's language** (what the user reads at the gate);
-    `statement` stays English (it goes into the SRS). Both say the same thing — like `addendum.content`/`content_en`.
+    Also add `statement_vi` and `rationale_vi`: the same assumption and reason in the **user's language** (what the
+    user reads at the gate); `statement`/`rationale` stay English (SRS). Same meaning — like `addendum.content`/`content_en`.
 11. **`regenerate`**: produce a fresh batch for the same fields; do not copy the previous wording. At S-5.4, regenerate applies to the named function only.
 12. **`revision`**: change only what the revision request asks. Leave every other field untouched.
 13. **Batch size**: at S-5, at most 6 functions per call.
