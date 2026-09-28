@@ -2,7 +2,8 @@
  * §3.1.1 Screens Flow — source_fields: `screens[].name/.flow_to/.is_popup/.tabs` + liên kết màn ↔ actor người
  * (`screen-actors.ts`, srs-spine §7.1).
  * Tách MỘT sơ đồ cho mỗi actor người tương tác trực tiếp với UI: chỉ màn actor đó dùng và cạnh giữa chúng,
- * điểm bắt đầu là HÌNH THOI mang tên actor, trỏ vào màn vào (không popup, không có cạnh tới trong nhóm). Màn không
+ * điểm bắt đầu là HÌNH THOI mang tên actor, trỏ vào màn vào (không popup, không có cạnh tới trong nhóm). Màn chỉ tới
+ * được qua màn của actor khác được nối tắt từ màn gần nhất trong nhóm (`bridgeGroup`) để không đứng ngang Login. Màn không
  * thuộc actor nào là màn mồ côi — vẫn vẽ ở sơ đồ "Unassigned screens" cuối cùng để không giấu nội dung, cờ
  * `orphan_screen` bắt nó.
  * Chưa có liên kết màn ↔ actor nào (trước S-4.3/S-4.4) ⇒ một sơ đồ chung như cũ.
@@ -136,6 +137,39 @@ const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
   return { kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: puml("@startdot", body, "@enddot") }
 }
 
+/**
+ * Nối lại màn của nhóm bị đứt khi tách theo actor: màn chỉ tới được qua màn của actor khác (Login → Dashboard của
+ * Manager → Grade Entry, nhóm Lecturer không có Dashboard) sẽ mất cạnh tới và bị coi là màn vào, đứng ngang hàng
+ * Login. Với màn không có cạnh tới trong nhóm, thêm cạnh từ màn gần nhất trong nhóm đi xuyên qua các màn ngoài nhóm.
+ * Màn đã có cạnh tới trong nhóm giữ nguyên (không vẽ đường tắt thừa); màn gốc thật (Login) không ai trỏ tới nên vẫn là
+ * màn vào.
+ */
+const bridgeGroup = (all: Screen[], own: Screen[]): Screen[] => {
+  const ownIds = new Set(own.map((s) => s.id))
+  const flowOf = new Map(all.map((s) => [s.id, s.flow_to]))
+  const targeted = new Set(own.flatMap((s) => s.flow_to.filter((t) => ownIds.has(t) && t !== s.id)))
+  /** Màn trong nhóm chưa có cạnh tới, tới được từ `from` qua đường chỉ gồm màn ngoài nhóm. */
+  const bridgedFrom = (from: string): string[] => {
+    const found = new Set<string>()
+    const seen = new Set<string>([from])
+    const queue = (flowOf.get(from) ?? []).filter((t) => !ownIds.has(t))
+    queue.forEach((t) => seen.add(t))
+    for (let i = 0; i < queue.length; i++) {
+      for (const next of flowOf.get(queue[i]) ?? []) {
+        if (seen.has(next)) continue
+        seen.add(next)
+        if (!ownIds.has(next)) queue.push(next)
+        else if (!targeted.has(next) && next !== from) found.add(next)
+      }
+    }
+    return [...found]
+  }
+  return own.map((s) => {
+    const extra = bridgedFrom(s.id).filter((t) => !s.flow_to.includes(t))
+    return extra.length > 0 ? { ...s, flow_to: [...s.flow_to, ...extra] } : s
+  })
+}
+
 export const renderScreenFlow: Renderer = (spine: Spine) => {
   const screens = byId(spine.screens)
   const actorsOf = screenActorMap(spine)
@@ -144,7 +178,7 @@ export const renderScreenFlow: Renderer = (spine: Spine) => {
   const parts = byId(spine.actors.filter((a) => a.kind === "human"))
     .map((actor) => ({ actor, own: screens.filter((s) => actorsOf.get(s.id)?.includes(actor.id)) }))
     .filter(({ own }) => own.length > 0)
-    .map(({ actor, own }) => flowPart(own, { title: screenFlowTitle(actor.name), actorName: actor.name }))
+    .map(({ actor, own }) => flowPart(bridgeGroup(screens, own), { title: screenFlowTitle(actor.name), actorName: actor.name }))
 
   const unassigned = screens.filter((s) => (actorsOf.get(s.id) ?? []).length === 0)
   if (unassigned.length > 0) parts.push(flowPart(unassigned, { title: UNASSIGNED_SCREENS_TITLE, actorName: null }))

@@ -235,6 +235,41 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
+  it("screen_flow: màn chỉ tới được qua màn của actor khác được nối tắt từ màn trong nhóm, không đứng ngang Login", () => {
+    // Login → Manager Dashboard → Grade Entry; Lecturer dùng Login + Grade Entry nhưng không dùng Dashboard
+    const spine = mutate((s) => {
+      s.actors = [
+        { ...s.actors.find((a) => a.kind === "human")!, id: "A01", name: "Manager" },
+        { ...s.actors.find((a) => a.kind === "human")!, id: "A02", name: "Lecturer" }
+      ]
+      s.roles = [
+        { ...s.roles[0], id: "R1", actor_id: "A01" },
+        { ...s.roles[0], id: "R2", actor_id: "A02" }
+      ]
+      const base = s.screens[0]
+      s.screens = [
+        { ...base, id: "S01", name: "Login", flow_to: ["S02", "S04"], is_popup: false, tabs: [] },
+        { ...base, id: "S02", name: "Manager Dashboard", flow_to: ["S03"], is_popup: false, tabs: [] },
+        { ...base, id: "S03", name: "Grade Entry", flow_to: [], is_popup: false, tabs: [] },
+        { ...base, id: "S04", name: "Lecturer Schedule", flow_to: [], is_popup: false, tabs: [] }
+      ]
+      const perm = s.permissions[0]
+      s.permissions = [
+        ...["S01", "S02", "S03"].map((id) => ({ ...perm, screen_id: id, role_id: "R1" })),
+        ...["S01", "S03", "S04"].map((id) => ({ ...perm, screen_id: id, role_id: "R2" }))
+      ]
+      s.use_cases = []
+    })
+    const [manager, lecturer] = renderKind(spine, "screen_flow").map((p) => p.puml)
+    expect(manager).toContain("START -> S01;")
+    expect(manager).toContain("S02 -> S03;")
+    // Lecturer: Grade Entry nối từ Login (qua Dashboard bị lọc), START chỉ trỏ vào Login
+    expect([...lecturer.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01"])
+    expect(lecturer).toContain("S01 -> S03;")
+    expect(lecturer).toContain("S01 -> S04;")
+    expect(lecturer).not.toContain("S02")
+  })
+
   it("screen_flow: màn không actor nào dùng ⇒ sơ đồ Unassigned cuối (chấm đen); chưa có liên kết actor ⇒ một sơ đồ chung", () => {
     const withOrphan = mutate((s) => {
       s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Orphan Screen", flow_to: [] })
