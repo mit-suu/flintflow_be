@@ -13,6 +13,9 @@ export interface IUser extends Document {
   name?: string
   role: UserRole
   isActive: boolean
+  /** UC-66: thời điểm và lý do Administrator khoá tài khoản; mở khoá (UC-67) thì về null. */
+  suspendedAt?: Date | null
+  suspendReason?: string | null
   emailVerified: boolean
   emailVerifiedAt?: Date | null
   /** UC 1.12: thời điểm hoàn tất onboarding; null = chưa onboarding. */
@@ -59,6 +62,14 @@ const userSchema = new Schema<IUser>(
     isActive: {
       type: Boolean,
       default: true
+    },
+    suspendedAt: {
+      type: Date,
+      default: null
+    },
+    suspendReason: {
+      type: String,
+      default: null
     },
     emailVerified: {
       type: Boolean,
