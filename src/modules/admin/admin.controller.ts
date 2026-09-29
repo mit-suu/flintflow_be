@@ -8,6 +8,7 @@ import {
   orgIdParamSchema,
   parseWith,
   resolveDateRange,
+  setUserStatusSchema,
   userIdParamSchema,
   usersQuerySchema
 } from "./admin.validation.js"
@@ -22,6 +23,13 @@ export const getUser = catchAsync(async (req: Request, res: Response) => {
   const { id } = parseWith(userIdParamSchema, req.params)
   const user = await adminService.getUserDetail(id)
   return sendSuccess(res, 200, user)
+})
+
+export const setUserStatus = catchAsync(async (req: Request, res: Response) => {
+  const { id } = parseWith(userIdParamSchema, req.params)
+  const input = parseWith(setUserStatusSchema, req.body)
+  const result = await adminService.setUserStatus(String(req.user?.userId), id, input)
+  return sendSuccess(res, 200, result)
 })
 
 export const getMetrics = catchAsync(async (_req: Request, res: Response) => {
