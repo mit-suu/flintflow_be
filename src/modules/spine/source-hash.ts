@@ -52,7 +52,16 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       }
     case "erd":
-      return { entities: byId(spine.entities).map(({ id, name, relations }) => ({ id, name, relations })) }
+      return {
+        entities: byId(spine.entities).map(({ id, name, relations, relation_verbs, relation_cardinality, relation_optional }) => ({
+          id,
+          name,
+          relations,
+          relation_verbs: relation_verbs ?? {},
+          relation_cardinality: relation_cardinality ?? {},
+          relation_optional: relation_optional ?? []
+        }))
+      }
     case "screen_layout": {
       const screen = spine.screens.find((s) => s.id === diagram.owner_id)
       return {

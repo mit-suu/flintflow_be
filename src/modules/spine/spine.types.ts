@@ -137,6 +137,14 @@ export interface Entity {
   description: string
   /** Khoá tới `entities[].id` (reference_fields §4.1). */
   relations: string[]
+  /** Động từ của từng quan hệ, khoá là id trong `relations` (vd `{ E02: "contains" }`). Thiếu ⇒ `has`. */
+  relation_verbs?: Record<string, string>
+  /** Bản số phía con của từng quan hệ (`"1"` = một–một). Thiếu ⇒ `"N"`. */
+  relation_cardinality?: Record<string, "1" | "N">
+  /** Id con có liên kết TUỲ CHỌN tới cha này (con tồn tại được khi không có nó). */
+  relation_optional?: string[]
+  /** Dữ liệu chủ tồn tại độc lập — được phép không có cha. */
+  root?: boolean
 }
 
 /** MoSCoW, gán ở S-9.4. `null` trước khi gán. */

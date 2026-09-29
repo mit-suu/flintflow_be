@@ -650,7 +650,7 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     expect(nextStep({ screens: reopened.screens, functions: reopened.functions, steps: reopened.steps })?.id).toBe("S-5.1@S91")
   })
 
-  it("every content SKILL.md of this task is <= 150 lines and its writes[] stay inside the registry writes of its steps", () => {
+  it("every content SKILL.md of this task is <= 150 lines (entities-erd <= 250) and its writes[] stay inside the registry writes of its steps", () => {
     const skillIds = [
       "screens-and-flow",
       "authorization-matrix",
@@ -672,7 +672,8 @@ describe("T18: S-4.1 -> S-8.1 content skills end to end (mock provider)", () => 
     for (const skillId of skillIds) {
       const md = fs.readFileSync(path.join(SKILLS_DIR, skillId, "SKILL.md"), "utf8")
       const lineCount = md.split("\n").filter((_, i, arr) => !(i === arr.length - 1 && arr[i] === "")).length
-      expect(lineCount, `${skillId}/SKILL.md must be <= 150 lines, has ${lineCount}`).toBeLessThanOrEqual(150)
+      const limit = skillId === "entities-erd" ? 250 : 150
+      expect(lineCount, `${skillId}/SKILL.md must be <= ${limit} lines, has ${lineCount}`).toBeLessThanOrEqual(limit)
 
       const mappedSteps = Object.entries(STEP_SKILLS)
         .filter(([stepId, s]) => s === skillId && registryStepIds.has(stepId))

@@ -57,7 +57,10 @@ You convert the conversation for one step into **a single transaction of operati
 
 ## Retry
 
-If *Previous attempt errors* is not empty, the engine rejected your last output. Fix exactly those errors (bad path, wrong type, broken invariant) and return the full corrected batch. After 2 failed retries the user is asked — do not change unrelated ops to "try something else".
+If *Previous attempt errors* is not empty, the engine rejected your last output. **Nothing from that
+attempt was written** — the Spine is exactly as before it. Fix exactly those errors (bad path, wrong type,
+broken invariant) and return the full corrected batch: every op again, the unchanged ones included, never
+only the ops that fix the errors (they would point at elements that do not exist). After 2 failed retries the user is asked — do not change unrelated ops to "try something else".
 
 ## Output
 
