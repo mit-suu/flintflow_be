@@ -76,6 +76,39 @@ router.get("/users/:id", adminController.getUser)
 
 /**
  * @swagger
+ * /api/v1/admin/users/{id}/status:
+ *   patch:
+ *     summary: Khoá (UC-66) hoặc mở khoá (UC-67) tài khoản; khoá thì thu hồi mọi phiên của tài khoản
+ *     tags: [Admin]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [isActive]
+ *             properties:
+ *               isActive: { type: boolean }
+ *               reason:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 500
+ *                 description: Bắt buộc khi isActive = false
+ *     responses:
+ *       200: { description: "{ _id, isActive, suspendedAt, suspendReason }" }
+ *       400: { description: VALIDATION_ERROR hoặc CANNOT_SUSPEND_SELF }
+ *       404: { description: USER_NOT_FOUND }
+ */
+router.patch("/users/:id/status", adminController.setUserStatus)
+
+/**
+ * @swagger
  * /api/v1/admin/metrics:
  *   get:
  *     summary: Số liệu tổng quan hệ thống

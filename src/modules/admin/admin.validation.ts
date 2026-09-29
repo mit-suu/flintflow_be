@@ -91,6 +91,21 @@ export const adjustOrgCreditsSchema = z.object({
   reason: z.string().trim().min(3, "Lý do tối thiểu 3 ký tự").max(500, "Lý do tối đa 500 ký tự")
 })
 
+/** UC-66 / UC-67: khoá bắt buộc kèm lý do (để còn truy được); mở khoá thì không cần. */
+export const setUserStatusSchema = z.discriminatedUnion(
+  "isActive",
+  [
+    z.object({
+      isActive: z.literal(false),
+      reason: z.string().trim().min(3, "Lý do tối thiểu 3 ký tự").max(500, "Lý do tối đa 500 ký tự")
+    }),
+    z.object({ isActive: z.literal(true) })
+  ],
+  { message: "isActive phải là true hoặc false" }
+)
+
+export type SetUserStatusInput = z.infer<typeof setUserStatusSchema>
+
 export const orgIdParamSchema = z.object({
   orgId: z.string().min(1, "Thiếu orgId")
 })

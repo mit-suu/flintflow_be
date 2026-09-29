@@ -187,6 +187,13 @@ export const register = async (
   }
 }
 
+/** UC-03 / UC-66: tài khoản bị Administrator khoá thì không đăng nhập và không gia hạn phiên được. */
+const assertAccountActive = (user: { isActive?: boolean }): void => {
+  if (user.isActive === false) {
+    throw new ApiError(403, "Tài khoản đã bị khoá", "ACCOUNT_SUSPENDED")
+  }
+}
+
 export const login = async (
   email: string,
   password: string,
@@ -204,6 +211,9 @@ export const login = async (
   if (!isPasswordValid) {
     throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
   }
+
+  // Sau khi kiểm mật khẩu: người chưa đúng mật khẩu không được biết tài khoản đang bị khoá.
+  assertAccountActive(user)
 
   if (!user.emailVerified) {
     throw new ApiError(403, "Email chưa được xác thực. Vui lòng kiểm tra email của bạn.", "EMAIL_NOT_VERIFIED")
@@ -449,6 +459,8 @@ export const googleAuth = async (
   })
 
   if (user) {
+    assertAccountActive(user)
+
     // Auto-link Google Account if user already exists
     let updated = false
     if (!user.googleId) {
@@ -530,11 +542,10 @@ export const refresh = async (
     throw new ApiError(401, "Invalid or expired refresh token", "INVALID_REFRESH_TOKEN")
   }
 
-  let role = decoded.role
-  if (!role) {
-    const user = await User.findById(decoded.userId).select("role")
-    role = user?.role
-  }
+  // Luôn đọc DB: token cũ có thể thiếu role, và tài khoản có thể đã bị khoá sau khi token được cấp.
+  const user = await User.findById(decoded.userId).select("role isActive")
+  if (user) assertAccountActive(user)
+  const role = decoded.role ?? user?.role
 
   const newPayload: TokenPayload = {
     userId: decoded.userId,

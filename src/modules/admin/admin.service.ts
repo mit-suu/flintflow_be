@@ -7,10 +7,17 @@ import { notify } from "../notification/notification.service.js"
 import { Organization } from "../organization/organization.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Session } from "../../shared/auth/session.model.js"
+import { revokeAllUserSessions } from "../../shared/auth/session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionLog } from "./ai-action-log.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
-import { AiCostGroupBy, parseDateInput, REPORT_TIMEZONE, UsersQuery } from "./admin.validation.js"
+import {
+  AiCostGroupBy,
+  parseDateInput,
+  REPORT_TIMEZONE,
+  SetUserStatusInput,
+  UsersQuery
+} from "./admin.validation.js"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -43,6 +50,8 @@ export interface AdminUserRow {
   name: string | null
   role: UserRole
   isActive: boolean
+  suspendedAt: Date | null
+  suspendReason: string | null
   emailVerified: boolean
   authProvider: string
   createdAt: Date
@@ -61,6 +70,8 @@ type UserLean = {
   name?: string
   role: UserRole
   isActive: boolean
+  suspendedAt?: Date | null
+  suspendReason?: string | null
   emailVerified: boolean
   authProvider: string
   createdAt: Date
@@ -98,6 +109,8 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
       name: u.name ?? null,
       role: u.role,
       isActive: u.isActive,
+      suspendedAt: u.suspendedAt ?? null,
+      suspendReason: u.suspendReason ?? null,
       emailVerified: u.emailVerified,
       authProvider: u.authProvider,
       createdAt: u.createdAt,
@@ -169,6 +182,49 @@ export const getUserDetail = async (userId: string) => {
       }
     }),
     recentTransactions
+  }
+}
+
+export interface UserStatusResult {
+  _id: string
+  isActive: boolean
+  suspendedAt: Date | null
+  suspendReason: string | null
+}
+
+/**
+ * UC-66 khoá / UC-67 mở khoá tài khoản. Khoá thì thu hồi luôn mọi phiên: refresh token chết ngay, access
+ * token còn hạn bị `requireActiveAccount` chặn từ request kế tiếp. Gọi lại với trạng thái đang có thì
+ * không đổi gì (giữ nguyên lý do và thời điểm khoá cũ).
+ */
+export const setUserStatus = async (
+  adminId: string,
+  userId: string,
+  input: SetUserStatusInput
+): Promise<UserStatusResult> => {
+  // Admin tự khoá mình thì mất quyền vào khu quản trị, và nếu là admin duy nhất thì không ai mở lại được.
+  if (!input.isActive && adminId === userId) {
+    throw new ApiError(400, "Không thể tự khoá tài khoản của chính mình", "CANNOT_SUSPEND_SELF")
+  }
+
+  const user = await User.findById(userId)
+  if (!user) {
+    throw new ApiError(404, "Không tìm thấy người dùng", "USER_NOT_FOUND")
+  }
+
+  if (user.isActive !== input.isActive) {
+    user.isActive = input.isActive
+    user.suspendedAt = input.isActive ? null : new Date()
+    user.suspendReason = input.isActive ? null : input.reason
+    await user.save()
+    if (!input.isActive) await revokeAllUserSessions(userId)
+  }
+
+  return {
+    _id: String(user._id),
+    isActive: user.isActive,
+    suspendedAt: user.suspendedAt ?? null,
+    suspendReason: user.suspendReason ?? null
   }
 }
 
