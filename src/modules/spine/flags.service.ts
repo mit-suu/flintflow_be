@@ -39,7 +39,19 @@ const AT_BASELINE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) => r.at_
 export interface FlagPlanOptions {
   /** Lần check có chạy luật S-9 không. Không chạy thì cờ S-9 đang mở không được coi là đã hết lỗi. */
   atBaseline?: boolean
+  /**
+   * Ứng viên S-9 tính trên Spine hiện tại (`atBaseline: true`). Có danh sách này thì lần check thường:
+   * - đóng cờ S-9 đang mở mà điều kiện đã hết (mục đã cũ nay đã chốt lại — bước đã accepted, `/run` từ chối, user
+   *   không còn cách nào xử lý ngoài Waive một cờ đỏ);
+   * - với mục từng mang cờ "mục đã cũ" / "chờ duyệt lại", theo dõi tiếp hai luật đó cả khi mở cờ: mục hết cũ nhưng
+   *   bước sở hữu đang `revision_requested` phải chuyển sang cờ đỏ "chờ duyệt lại", không được im lặng mất cờ.
+   * Các luật S-9 khác vẫn không mở cờ mới ngoài S-9.
+   */
+  baselineCandidates?: readonly FlagCandidate[]
 }
+
+/** Luật S-9 cấp mục: đã từng gắn cho một mục thì theo dõi liên tục (xem `baselineCandidates`). */
+const TRACKED_SECTION_RULES: ReadonlySet<string> = new Set(["section_stale_at_baseline", "section_awaiting_reaccept"])
 
 const flagIdGenerator = (flags: Flag[]): (() => string) => {
   let n = Math.max(0, ...flags.map((f) => Number(FLAG_ID_RE.exec(f.id)?.[1] ?? 0)))
@@ -73,7 +85,12 @@ export const planFlagOps = (
   const touched = new Set<string>()
   const seen = new Set<string>()
 
-  for (const c of candidates) {
+  const baseline = options.atBaseline ? undefined : options.baselineCandidates
+  const baselineKeys = baseline ? new Set(baseline.map(flagKey)) : undefined
+  const trackedSections = new Set(spine.flags.filter((f) => TRACKED_SECTION_RULES.has(f.rule_id)).map((f) => f.section_id))
+  const tracked = (baseline ?? []).filter((c) => TRACKED_SECTION_RULES.has(c.rule_id) && trackedSections.has(c.section_id))
+
+  for (const c of [...candidates, ...tracked]) {
     const key = flagKey(c)
     if (seen.has(key)) continue
     seen.add(key)
@@ -118,8 +135,9 @@ export const planFlagOps = (
 
   for (const [key, flag] of open) {
     if (seen.has(key)) continue
-    // Check thường không chạy luật S-9 nên không có ứng viên của chúng — không có nghĩa lỗi đã hết
-    if (!options.atBaseline && AT_BASELINE_RULES.has(flag.rule_id)) continue
+    // Check thường không chạy luật S-9 nên không có ứng viên của chúng — không có nghĩa lỗi đã hết. Chỉ đóng khi
+    // điều kiện S-9 đã tính lại (`baselineCandidates`) mà không còn đúng.
+    if (!options.atBaseline && AT_BASELINE_RULES.has(flag.rule_id) && (!baselineKeys || baselineKeys.has(key))) continue
     // Cờ do gate/model đặt (accepted_as_is, goal_not_covered) không bao giờ là ứng viên của check tất định
     if (MODEL_OWNED_RULES.has(flag.rule_id)) continue
     plan.ops.push({ op: "set", path: flagPath(flag.id, "resolved_at"), value: at, reason: `Đóng cờ ${flag.rule_id}: điều kiện không còn` })
@@ -173,7 +191,10 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const atBaseline = options.atBaseline ?? false
   const ruleProfile = options.ruleProfile ?? (await ruleProfileResolver(projectId))
   const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile })
-  const plan = planFlagOps(spine, candidates, new Date(), { atBaseline })
+  const baselineCandidates = atBaseline
+    ? undefined
+    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
+  const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates })
 
   if (plan.ops.length === 0) {
     return { checked_at_version: record.spine_version, flags: record.flags, opened: [], resolved: [], reopened: [] }
