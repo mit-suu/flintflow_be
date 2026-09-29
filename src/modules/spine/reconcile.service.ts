@@ -44,6 +44,7 @@ import {
 } from "./change.service.js"
 import type { Op } from "./op.types.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
+import { stampAddendum } from "./addendum-stamp.js"
 
 /** Trần số section hoà giải trong một lượt — mỗi section là một lượt gọi model. */
 export const MAX_RECONCILE_SECTIONS = 12
@@ -170,7 +171,7 @@ const proposeOps = async (
       projectId,
       userId
     )
-    ops.push(...((result.data.ops ?? []) as Op[]))
+    ops.push(...stampAddendum((result.data.ops ?? []) as Op[]))
   }
 
   return { ops, sections }

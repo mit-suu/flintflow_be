@@ -21,6 +21,7 @@ import * as repository from "./spine.repository.js"
 import { impactOfChanges, type Impact } from "./impact.service.js"
 import * as flagsService from "./flags.service.js"
 import { OP_INVALID, type ApplyResult, type Op, type PreviewResult, type Transaction, type Violation } from "./op.types.js"
+import { stampAddendum } from "./addendum-stamp.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -345,7 +346,7 @@ const opsFromInstruction = async (
 
   const clarification = result.data.clarification_needed?.trim()
   if (clarification) return { ops: [], clarification, notes: null }
-  return { ops: (result.data.ops ?? []) as Op[], clarification: null, notes: result.data.notes ?? null }
+  return { ops: stampAddendum((result.data.ops ?? []) as Op[]), clarification: null, notes: result.data.notes ?? null }
 }
 
 const resolveOps = async (
