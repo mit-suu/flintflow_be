@@ -11,13 +11,14 @@
  * `fixed:I` (Record of Changes) KHÔNG đi qua `renderSection`: hợp đồng `RenderedDocument`
  * có field riêng `recordOfChanges: RocRow[]` (không phải `Block[]`) và `docx-writer.ts` render
  * nó từ field đó, không từ `sections[]`. `buildRecordOfChanges` ở cuối file dựng field đó
- * từ `changes[]`, gộp theo `txn` (S-8.3).
+ * từ `changes[]`, gộp theo ngày + giai đoạn quy trình (S-8.3).
  */
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
 import { relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
+import { loadStepRegistry } from "../pipeline/step-registry.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
 
 /**
@@ -330,7 +331,13 @@ const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
  * (Screen | Role | Action) — không phải "ma trận" như Phases §6.3 yêu cầu.
  */
 const screenAuthorization = (spine: Spine): Block[] => {
-  if (spine.permissions.length === 0) return []
+  // Có vai trò mà chưa phân quyền màn nào (2026-09-24: CR thêm vai trò trước) ⇒ vẫn hiện danh sách vai trò, không để
+  // mục trống như chưa làm gì — ma trận toàn "—" thì đọc thành "không ai được vào màn nào", sai nghĩa
+  if (spine.permissions.length === 0) {
+    if (spine.roles.length === 0) return []
+    const actorName = (id: string | null) => spine.actors.find((a) => a.id === id)?.name ?? "—"
+    return [tableBlock(["Role", "Actor"], spine.roles.map((r) => [r.name, actorName(r.actor_id)]))]
+  }
   const actionsOf = (screenId: string, roleId: string): string =>
     spine.permissions
       .filter((p) => p.screen_id === screenId && p.role_id === roleId)
@@ -637,26 +644,13 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
 }
 
 /**
- * §I: gộp `changes[]` theo `txn` — một dòng mỗi transaction (ngày, người ghi, lý do).
- *
- * `version` (T15 review T7): mỗi txn của op-engine tăng `spine_version` đúng 1 (`saveWithVersion`:
- * `newVersion = baseVersion + 1`), và Spine mới bắt đầu ở `spine_version = 1` (`createEmptySpine`).
- * Nên sau txn thứ `k` (1-based theo thứ tự xuất hiện/`seq`), `spine_version = k + 1`. `changes` ở
- * đây có `i` 0-based (thứ tự xuất hiện trong mảng, đã sort theo `seq` từ nguồn) ⇒ `k = i + 1` ⇒
- * `spine_version = i + 2` ⇒ `version: "v0.<i+2>"`. Dòng cuối vì vậy khớp đúng `v0.<spine_version>`
- * của chính `RenderedDocument` được ghép ngay sau txn cuối — kiểm bằng `assemble.service.ts`
- * `version: v0.${record.spine_version}`.
- *
- * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
- * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
- * không cần DB).
- */
-/**
  * Lý do do MÁY ghi trong lúc chạy quy trình. §I là lịch sử tài liệu cho người đọc, không phải nhật ký của
  * runner: lượt test xuất ra 425 dòng mà phần lớn là "step-runner: elicit turn" (BUG-15).
+ * Mode 1: cờ do AI kiểm tra đặt (`AI check: ambiguity`, `AI semantic check (1.11)`) và kế hoạch step lúc import
+ * cũng là sổ sách của máy — không in vào tài liệu.
  */
 const INTERNAL_REASON =
-  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ )/
+  /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step)/
 
 /** Câu do máy sinh → tiếng Anh; câu do user viết giữ nguyên (đó là lời của chính họ). */
 const ENGLISH_DESCRIPTION: readonly { re: RegExp; to: (m: RegExpExecArray) => string }[] = [
@@ -664,7 +658,8 @@ const ENGLISH_DESCRIPTION: readonly { re: RegExp; to: (m: RegExpExecArray) => st
   { re: /^Baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
   { re: /^Hoà giải section stale$/, to: () => "Stale sections reconciled" },
   { re: /^Hoà giải: user xác nhận nội dung không đổi$/, to: () => "Reviewed: content still correct" },
-  { re: /^sửa sau baseline$/, to: () => "Edited after baseline" }
+  { re: /^sửa sau baseline$/, to: () => "Edited after baseline" },
+  { re: /^User xác nhận giả định ở cổng chốt$/, to: () => "Assumptions confirmed" }
 ]
 
 const toEnglish = (description: string): string => {
@@ -687,6 +682,45 @@ export const keepInRecordOfChanges = (group: readonly ChangeRecordRow[]): boolea
   return group.some((c) => c.reason !== null && c.reason.trim() !== "" && !INTERNAL_REASON.test(c.reason))
 }
 
+/** Một dòng gom nhiều lần sửa — mô tả giữ tối đa chừng này lý do, phần còn lại ghi số lượng. */
+const MAX_REASONS_PER_ROW = 3
+
+/** Giai đoạn của step (`S-3.2` ⇒ `S-3`, `S-5.1@S3` ⇒ `S-5`); sửa ngoài quy trình (step_id null) ⇒ "". */
+const phaseKeyOf = (stepId: string | null): string => (stepId ? (/^([BS]-\d+)\./.exec(stepId)?.[1] ?? "") : "")
+
+let phaseLabels: Map<string, string> | undefined
+const phaseLabelOf = (phase: string): string | undefined => {
+  phaseLabels ??= new Map(loadStepRegistry().map((s) => [s.phase as string, s.phase_label_en]))
+  return phaseLabels.get(phase)
+}
+
+/** Mã baseline (`v1.0`, `v1.2-conditional`) nằm trong lý do `Ký baseline v1.0` do baseline.service ghi. */
+const BASELINE_VERSION = /\bv\d+\.\d+(?:-conditional)?\b/
+
+const describeRow = (reasons: readonly string[]): string => {
+  const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
+  const more = reasons.length - MAX_REASONS_PER_ROW
+  return more > 0 ? `${shown}; and ${more} more change${more > 1 ? "s" : ""}` : shown
+}
+
+/** Lý do op-engine gắn cho op cascade — đi kèm lô của user, không phải lời của user. */
+const MACHINE_REASON = /^Cascade:/
+
+/**
+ * §I là lịch sử cho người đọc tài liệu, không phải nhật ký từng transaction: một ngày chat sửa vài chục lần
+ * từng ra vài chục dòng/version. Nay gộp các lô được giữ (`keepInRecordOfChanges`) **liền nhau, cùng ngày, cùng
+ * giai đoạn quy trình** thành một dòng, mô tả kiểu FPT `Create <giai đoạn>` (lần đầu) / `Update <giai đoạn>`
+ * — không in `reason` từng op vì đó là nhật ký của model. Sau baseline mô tả là lời user (tối đa 3). Lô không gắn
+ * step nhập vào dòng liền trước cùng ngày; sau baseline (không còn giai đoạn) gom theo ngày. Lô ký baseline luôn
+ * là một dòng riêng.
+ *
+ * `version` đánh theo dòng, không theo `spine_version`: trước baseline `v0.1, v0.2…`; dòng ký lấy đúng mã
+ * baseline (`v1.0`); sau đó `v1.0.1, v1.0.2…` cho tới baseline kế tiếp.
+ *
+ * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
+ * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
+ * không cần DB). Nhiều người sửa trong ngày ⇒ liệt kê tên không trùng.
+ */
 export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge: (by: string) => string = (by) => by): RocRow[] {
   const order: string[] = []
   const groups = new Map<string, ChangeRecordRow[]>()
@@ -698,21 +732,58 @@ export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge
       order.push(change.txn)
     }
   }
-  return order.flatMap((txn, i) => {
+
+  // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline đứng riêng.
+  const rows: { date: string; phase: string; baseline: boolean; changes: ChangeRecordRow[] }[] = []
+  for (const txn of order) {
     const group = groups.get(txn) as ChangeRecordRow[]
-    if (!keepInRecordOfChanges(group)) return []
-    const first = group[0]
-    const reasons = [...new Set(group.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r)))]
-    const description = reasons.length > 0 ? reasons.map(toEnglish).join("; ") : isBaselineTxn(group) ? "Baseline signed" : "Document updated"
-    return [
-      {
-        date: first.at.slice(0, 10),
-        version: `v0.${i + 2}`,
-        change_type: changeTypeOf(new Set(group.map((c) => c.op))),
-        in_charge: resolveInCharge(first.by),
-        description
-      }
-    ]
+    if (!keepInRecordOfChanges(group)) continue
+    const date = group[0].at.slice(0, 10)
+    const baseline = isBaselineTxn(group)
+    const last = rows[rows.length - 1]
+    // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
+    const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
+    if (!baseline && last && !last.baseline && last.date === date && last.phase === phase) last.changes.push(...group)
+    else rows.push({ date, phase, baseline, changes: [...group] })
+  }
+
+  let base = "v0"
+  let minor = 0
+  let baselines = 0
+  const seenPhases = new Set<string>()
+  const describe = (row: (typeof rows)[number], reasons: readonly string[]): string => {
+    if (row.baseline) return reasons.length > 0 ? describeRow(reasons) : "Baseline signed"
+    // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
+    const label = phaseLabelOf(row.phase)
+    if (label) {
+      const verb = seenPhases.has(row.phase) ? "Update" : "Create"
+      seenPhases.add(row.phase)
+      return `${verb} ${label}`
+    }
+    // Ngoài quy trình (yêu cầu sửa sau baseline): lời của user
+    return reasons.length > 0 ? describeRow(reasons) : "Document updated"
+  }
+  return rows.map((row) => {
+    const raw = row.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
+    const reasons = [...new Set(raw.map(toEnglish))]
+    let version: string
+    if (row.baseline) {
+      // Fallback khớp `nextBaselineVersion` (baseline.service) khi lý do không mang mã
+      version = raw.map((r) => BASELINE_VERSION.exec(r)?.[0]).find((v) => v !== undefined) ?? `v1.${baselines}`
+      baselines += 1
+      base = version.replace(/-conditional$/, "")
+      minor = 0
+    } else {
+      minor += 1
+      version = `${base}.${minor}`
+    }
+    return {
+      date: row.date,
+      version,
+      change_type: changeTypeOf(new Set(row.changes.map((c) => c.op))),
+      in_charge: [...new Set(row.changes.map((c) => resolveInCharge(c.by)))].join(", "),
+      description: describe(row, reasons)
+    }
   })
 }
 

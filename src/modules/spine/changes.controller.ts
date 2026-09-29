@@ -18,6 +18,7 @@ import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
 import * as changeService from "./change.service.js"
+import * as changeTranscript from "./change-transcript.js"
 import * as reconcileService from "./reconcile.service.js"
 import * as undoService from "./undo.service.js"
 import { translateAssumption } from "./assumption-translate.service.js"
@@ -96,12 +97,29 @@ const sendDomainError = (res: Response, err: unknown): Response => {
   throw err
 }
 
+/** Lỗi nghiệp vụ của lượt sửa ⇒ tin `change_error` trong phiên, để transcript không cụt ở câu lệnh của user. */
+const errorPayload = (err: unknown): Record<string, unknown> | null =>
+  err instanceof ApiError ? { kind: "change_error", reply: err.message } : null
+
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(changesRequestSchema, req.body)
+  const session = body.session_id ? await changeTranscript.loadProjectSession(auth.projectId, body.session_id) : null
+  const chatHistory = session ? changeTranscript.formatChatHistory(session.messages) : undefined
   try {
-    const result = await changeService.apply(auth.projectId, auth.userId, body, auth.init)
+    const result = await changeService.apply(auth.projectId, auth.userId, { ...body, chat_history: chatHistory }, auth.init)
+    if (session) {
+      // Có preview_id ⇒ câu lệnh đã nằm trong phiên từ lượt xem trước; áp thẳng bằng instruction thì ghi cả câu lệnh
+      const userText = body.preview_id === undefined ? (body.instruction ?? null) : null
+      const count = result.changes.length
+      await changeTranscript.recordChangeTurn(session, userText, {
+        kind: "change_applied",
+        reply: count > 0 ? `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).` : "Đã xác nhận: nội dung không đổi.",
+        count,
+        spine_version: result.spine_version
+      })
+    }
     return sendSuccess(
       res,
       200,
@@ -118,12 +136,20 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
   // Xem trước chỉ đọc ⇒ luôn chạy. Mode 1 sau v0: `meta.requires_cr` — bản xem trước dùng để soạn CR (3.1), không áp.
   const requiresCr = await mode1RequiresCr(auth)
   const body = parse(changesRequestSchema, req.body)
+  const session = body.session_id ? await changeTranscript.loadProjectSession(auth.projectId, body.session_id) : null
+  // Lượt ghi vào phiên chỉ khi có câu lệnh để đọc lại — lô op sẵn từ UI không phải một lượt hội thoại
+  const userText = session ? (body.instruction ?? null) : null
+  const chatHistory = session ? changeTranscript.formatChatHistory(session.messages) : undefined
+  let result: changeService.ChangePreviewResult
   try {
-    const result = await changeService.preview(auth.projectId, auth.userId, body, auth.init)
-    return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
+    result = await changeService.preview(auth.projectId, auth.userId, { ...body, chat_history: chatHistory }, auth.init)
   } catch (err) {
+    const payload = errorPayload(err)
+    if (session && userText && payload) await changeTranscript.recordChangeTurn(session, userText, payload)
     return sendDomainError(res, err)
   }
+  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result))
+  return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
 })
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {

@@ -322,8 +322,8 @@ describe("C-7 duyệt một phần", () => {
     const { crId, cr, verified } = await crToReady(c)
     expect(verified.change_request.status).toBe("ready_to_submit")
     const submitted = detail(await c.post(`${cr}/submit`))
-    const perf = submitted.groups.find((g) => g.title === "Performance")!
-    const br = submitted.groups.find((g) => g.title === "Business Rules")!
+    const perf = submitted.groups.find((g) => g.title === "4.2.3 Performance")!
+    const br = submitted.groups.find((g) => g.title === "5.1 Business Rules")!
     detail(await c.post(`${cr}/groups/${perf.group_id}/decision`, { decision: "rejected", reason: "Giữ nguyên 2 giây", base_version: await c.spineVersion() }))
     const written = detail(await c.post(`${cr}/groups/${br.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(written.change_request.result_doc_version).toBe("0.1")

@@ -1,12 +1,14 @@
 import mongoose from "mongoose"
 import { describe, it, expect } from "vitest"
 import {
+  addMaterialRequestSchema,
   answersRequestSchema,
   changeRequestDetailSchema,
   changeRequiresCrMetaSchema,
   closeRequestSchema,
   createChangeRequestSchema,
   groupDecisionRequestSchema,
+  materialParamsSchema,
   patchLocationRequestSchema
 } from "./change-request.dto.js"
 import { formatCrId } from "./change-request.constants.js"
@@ -41,10 +43,22 @@ describe("change-request DTO — request", () => {
     expect(createChangeRequestSchema.safeParse({ ...create, requester: "  " }).success).toBe(false)
   })
 
-  it("trả lời làm rõ: 1–20 câu, không rỗng", () => {
+  it("trả lời làm rõ: 1–20 câu; câu trả lời được để trống (= chưa biết, phase 7)", () => {
     expect(answersRequestSchema.safeParse({ answers: ["Mọi phiên, kể cả mobile"] }).success).toBe(true)
     expect(answersRequestSchema.safeParse({ answers: [] }).success).toBe(false)
-    expect(answersRequestSchema.safeParse({ answers: [""] }).success).toBe(false)
+    expect(answersRequestSchema.safeParse({ answers: [""] }).success).toBe(true)
+    expect(answersRequestSchema.safeParse({ answers: ["x".repeat(4001)] }).success).toBe(false)
+  })
+
+  it("phase 7: tạo CR kèm tối đa 5 đoạn văn bản nguồn; tài liệu dán qua /materials cần tên + nội dung", () => {
+    const base = { title: "Bổ sung NFR", description: "Thiếu mục hiệu năng", source: { kind: "gap_report" }, requester: "PM Lan" }
+    expect(createChangeRequestSchema.safeParse({ ...base, materials: [{ name: "Biên bản 23/09", text: "Phản hồi ≤ 2 s" }] }).success).toBe(true)
+    expect(createChangeRequestSchema.safeParse({ ...base, materials: Array.from({ length: 6 }, (_, i) => ({ name: `m${i}`, text: "x" })) }).success).toBe(false)
+    expect(createChangeRequestSchema.safeParse({ ...base, materials: [{ name: "", text: "x" }] }).success).toBe(false)
+    expect(addMaterialRequestSchema.safeParse({ name: "Email", text: "nội dung" }).success).toBe(true)
+    expect(addMaterialRequestSchema.safeParse({ name: "Email", text: "   " }).success).toBe(false)
+    expect(materialParamsSchema.safeParse({ crId: "CR-001", mid: "M01" }).success).toBe(true)
+    expect(materialParamsSchema.safeParse({ crId: "CR-001", mid: "X1" }).success).toBe(false)
   })
 
   it("sửa vị trí: kết luận nào cần field đó", () => {
@@ -87,7 +101,7 @@ describe("change-request DTO — response", () => {
         requester: "PM Lan",
         status: "in_review",
         paused: null,
-        clarifications: [{ round: 1, questions: ["Có tính cả mobile?"], answers: ["Có"] }],
+        clarifications: [{ round: 1, questions: ["Có tính cả mobile?"], answers: ["Có"], suggestions: [["Có, mọi thiết bị", "Chỉ web"]] }],
         base_doc_version: "0.0",
         result_doc_version: null,
         created_by: "66f000000000000000000001",
@@ -95,6 +109,9 @@ describe("change-request DTO — response", () => {
         decided_by: null,
         closed_reason: null,
         seed: null,
+        materials: [{ material_id: "M01", kind: "file", name: "bien-ban.docx", text: "Phản hồi ≤ 2 s", truncated: false, round: 1, added_at: AT }],
+        missing_info: [],
+        amendments: [{ text: "Thêm cả app mobile", at: AT }],
         created_at: AT,
         updated_at: AT
       },
@@ -110,7 +127,7 @@ describe("change-request DTO — response", () => {
           owner_step: "S-3.2",
           conclusion: "edit",
           reason: "UC đăng xuất phải nói rõ mọi thiết bị",
-          proposal: { old_text: "{…Log out…}", new_text: "{…Sign out…}", comment_text: null, spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out of all devices" }] },
+          proposal: { old_text: "{…Log out…}", new_text: "{…Sign out…}", comment_text: null, spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out of all devices" }], assumptions: [] },
           manual: false,
           redo_count: 0,
           verify: { code_ok: true, violations: [], ai_flags: [], at: AT },

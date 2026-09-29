@@ -3,11 +3,16 @@
  * Mọi hành động trả `changeRequestDetailSchema` (CR + vị trí + group + câu hỏi đang chờ).
  */
 
-import type { Request, Response } from "express"
+import type { NextFunction, Request, Response } from "express"
+import multer from "multer"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { IMPORT_MAX_FILE_BYTES } from "../import/import.constants.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { authorizeMode1, mode1Handler, parseInput, type Mode1Auth } from "../import/mode1.http.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import {
+  addMaterialRequestSchema,
+  amendRequestSchema,
   answersRequestSchema,
   closeRequestSchema,
   createChangeRequestSchema,
@@ -17,15 +22,17 @@ import {
   groupIdSchema,
   listChangeRequestsQuerySchema,
   locationIdSchema,
+  materialParamsSchema,
   ownerStepDraftRequestSchema,
   patchLocationRequestSchema
 } from "./change-request.dto.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import * as crService from "./change-request.service.js"
-import { answerClarification, runClarify } from "./clarify.service.js"
+import { amendCr, answerClarification, runClarify } from "./clarify.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
 import { patchLocation } from "./location.service.js"
+import { addMaterial, removeMaterial } from "./material.service.js"
 import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
 
@@ -57,6 +64,49 @@ export const createCr = mode1Handler(async (req, res) => {
   // Bản xem trước hết hạn / không phải của mình ⇒ CR vẫn tạo (3.1 không phụ thuộc bản xem trước), báo để FE nói rõ
   if (body.preview_id && !cr.seed) return sendSuccess(res, 201, await crService.toDetail(cr), { seed_dropped: true })
   return detail(res, cr, 201)
+})
+
+// ─── tài liệu bổ sung (mode 1 v3 phase 7) ─────────────────────────
+
+/** Field multipart của file tài liệu bổ sung. */
+export const MATERIAL_FILE_FIELD = "file"
+const materialUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_MAX_FILE_BYTES, files: 1 } })
+
+/** Multipart ⇒ `req.file`; JSON đi thẳng. Lỗi multer (quá 10 MB…) ⇒ 400. */
+export const receiveMaterial = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.is("multipart/form-data")) return next()
+  materialUpload.single(MATERIAL_FILE_FIELD)(req, res, (err: unknown) => {
+    if (err instanceof multer.MulterError) return next(new ApiError(400, `Upload lỗi: ${err.message}`, "VALIDATION_ERROR"))
+    next(err)
+  })
+}
+
+export const addCrMaterial = mode1Handler(async (req, res) => {
+  const { auth, cr } = await loadCr(req)
+  if (req.file) {
+    // multer đọc tên file theo latin1 — đổi lại UTF-8 để giữ tên tiếng Việt
+    const originalname = Buffer.from(req.file.originalname, "latin1").toString("utf8")
+    await addMaterial(cr, auth.userId, { file: { buffer: req.file.buffer, mimetype: req.file.mimetype, originalname } })
+  } else {
+    await addMaterial(cr, auth.userId, parseInput(addMaterialRequestSchema, req.body))
+  }
+  return detail(res, cr, 201)
+})
+
+export const deleteCrMaterial = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { crId, mid } = parseInput(materialParamsSchema, req.params)
+  const cr = await crService.requireCr(auth.projectId, crId)
+  await removeMaterial(cr, mid)
+  return detail(res, cr)
+})
+
+/** Phase 8 (chat): gộp thêm một lệnh sửa vào CR chưa nộp. */
+export const amend = mode1Handler(async (req, res) => {
+  const { auth, cr } = await loadCr(req)
+  const body = parseInput(amendRequestSchema, req.body)
+  await amendCr(cr, auth.userId, body.instruction)
+  return detail(res, cr)
 })
 
 export const listCrs = mode1Handler(async (req, res) => {

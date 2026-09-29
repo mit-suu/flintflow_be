@@ -23,11 +23,12 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("13 luật đỏ + 18 luật vàng; 3 luật không waive được", () => {
+  it("13 luật đỏ + 19 luật vàng; 3 luật không waive được", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
-    // derived_from_changed_assumption (BUG-14); orphan_entity, unresolved_many_to_many (ERD)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(18)
+    // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
+    // FLF-225: orphan_entity, unresolved_many_to_many (ERD)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(19)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -263,7 +264,9 @@ describe("runDeterministicCheck", () => {
     expect(byRule(atBaseline, "unconfirmed_assumption")).toMatchObject([
       { target_id: "AS01", section_id: "fixed:4.2.2", remediation_step: "S-9.2" }
     ])
-    expect(byRule(atBaseline, "unconfirmed_assumption")[0]?.message, "vẫn truy được nơi sinh qua message").toContain("S-6.3")
+    // Câu cho người đọc: nêu nội dung giả định, không in mã step sinh ra nó
+    expect(byRule(atBaseline, "unconfirmed_assumption")[0]?.message).toContain("chưa được xác nhận")
+    expect(byRule(atBaseline, "unconfirmed_assumption")[0]?.message).not.toContain("S-6.3")
     expect(byRule(atBaseline, "section_stale_at_baseline").map((f) => f.section_id)).toContain("fixed:3.1.5")
     expect(byRule(atBaseline, "section_awaiting_reaccept")).toMatchObject([{ section_id: "fixed:5.2", remediation_step: "S-7.2" }])
   })
@@ -480,7 +483,27 @@ describe("system_name_missing (FLF-177)", () => {
 
   it("system_name tiếng Việt ⇒ non_english_content", () => {
     const flags = byRule(runDeterministicCheck(withSystemName("Giao hàng nhanh")), "non_english_content")
-    expect(flags.some((f) => f.message.includes("project.system_name"))).toBe(true)
+    expect(flags.some((f) => f.message.includes("Thông tin dự án — Tên hệ thống"))).toBe(true)
+    expect(flags.some((f) => f.message.includes("project.system_name"))).toBe(false)
+  })
+})
+
+describe("thông điệp cờ cho người đọc (mode 1: không in mã kỹ thuật)", () => {
+  const RAW = [/fixed:/, /\bfeature:/, /\bfunction:/, /custom:/, /\[id=/, /\bS-\d/, /\bB\d{4}/, /\bU\d\b/, /\bA\d\b/, /\bNFR (reliability|performance)\b/, /metric\/threshold/]
+  const check = (flags: FlagCandidate[]) => {
+    for (const f of flags) for (const re of RAW) expect(f.message, `${f.rule_id}: ${f.message}`).not.toMatch(re)
+  }
+
+  it("Spine rỗng (section_empty, array_empty, nfr_missing_number) — tên mục/nhóm bằng chữ", () => {
+    const flags = runDeterministicCheck(createEmptySpine(), [], { atBaseline: true })
+    check(flags)
+    expect(flags.find((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.3")?.message).toBe('Mục bắt buộc "5.3 Application Messages List" chưa có dữ liệu')
+    expect(flags.find((f) => f.rule_id === "nfr_missing_number" && f.section_id === "fixed:4.2.3")?.message).toBe("Chưa có yêu cầu hiệu năng nào")
+    expect(flags.find((f) => f.rule_id === "array_empty" && f.target_id === "actors")?.message).toBe("Danh sách tác nhân đang trống")
+  })
+
+  it("Spine mẫu 19 màn, kể cả luật S-9", () => {
+    check(runDeterministicCheck(FIXTURE, [], { atBaseline: true }))
   })
 })
 

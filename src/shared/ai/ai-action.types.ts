@@ -35,7 +35,9 @@ export enum ActionType {
   /** C-4 (nút 3.6): kết luận edit | comment | not_related cho từng vị trí + đề xuất text/op. */
   CR_PROPOSE = "cr_propose",
   /** C-5 (nút 3.8): kiểm nhất quán trên phạm vi thay đổi — chỉ ra cờ vàng. */
-  CR_CONSISTENCY = "cr_consistency"
+  CR_CONSISTENCY = "cr_consistency",
+  /** Mode 1 v3 phase 7: đọc ảnh người dùng đính kèm CR làm tài liệu bổ sung (Gemini vision) ⇒ chữ + mô tả. */
+  CR_MATERIAL_IMAGE = "cr_material_image"
 }
 
 /**
@@ -60,7 +62,8 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.IMPORT_SEMANTIC_CHECK]: "import-semantic-check",
   [ActionType.CR_CLARIFY]: "cr-clarify",
   [ActionType.CR_PROPOSE]: "cr-propose",
-  [ActionType.CR_CONSISTENCY]: "cr-consistency"
+  [ActionType.CR_CONSISTENCY]: "cr-consistency",
+  [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image"
 }
 
 export interface AiActionInput {
@@ -92,6 +95,11 @@ export interface AiProviderConfig {
   model: string
   maxTokens?: number
   temperature?: number
+  /**
+   * Model dự phòng cùng provider, thử lần lượt khi model chính quá tải (503 / 429 không phải hết tiền). Khai ở frontmatter
+   * skill (`fallbackModels`). Hiện chỉ provider `gemini` dùng — Gemini hay báo "high demand" theo từng model.
+   */
+  fallbackModels?: string[]
   /** `call_kind` của lượt gọi. Provider thật bỏ qua; `mock` dùng nó để trả đúng schema đầu ra (T24). */
   actionType?: string
 }

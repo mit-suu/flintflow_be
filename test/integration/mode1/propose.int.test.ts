@@ -73,6 +73,19 @@ describe("C-4 chọn skill của owner step", () => {
     expect(prompts).toHaveLength(3)
     expect(prompts.find((p) => p.includes(`] ${custom.path} (`))).toContain("(none — free-form section kept verbatim from the uploaded file)")
   })
+
+  it("phase 8: \"Sửa lại\" một vị trí mục riêng ⇒ AI soạn lại theo hướng BA (không còn CR_NO_OWNER_STEP)", async () => {
+    routeCr((p) => clarifyWide(p) ?? fakeCrPropose(p))
+    const { c } = await importedProject()
+    const { cr, impact } = await crToImpact(c)
+    const custom = impact.locations.find((l) => l.path.startsWith("custom_sections["))!
+    detail(await c.post(`${cr}/propose`))
+    const redone = detail(await c.post(`${cr}/locations/${custom.location_id}/owner-step-draft`, { instruction: "Ghi rõ nhóm họp mỗi thứ Hai" }))
+    expect(redone.locations.find((l) => l.location_id === custom.location_id)).toMatchObject({ manual: true, verify: null })
+    const prompt = promptsOf("# CR Propose").at(-1)!
+    expect(prompt).toContain("free-form section): Ghi rõ nhóm họp mỗi thứ Hai")
+    expect(prompt).toContain("(none — free-form section kept verbatim from the uploaded file)")
+  })
 })
 
 describe("C-4 kết luận mọi vị trí", () => {
@@ -201,8 +214,8 @@ describe("gom change group", () => {
     const custom = d.locations.find((l) => l.path.startsWith("custom_sections["))!
     expect(custom).toMatchObject({ conclusion: "not_related", group_id: null })
     expect(d.groups.map((g) => ({ id: g.group_id, title: g.title, locs: g.location_ids.map((id) => d.locations.find((l) => l.location_id === id)!.path), decision: g.decision }))).toEqual([
-      { id: "G01", title: "Performance", locs: [NFR], decision: "pending" },
-      { id: "G02", title: "Business Rules", locs: [BR], decision: "pending" }
+      { id: "G01", title: "4.2.3 Performance", locs: [NFR], decision: "pending" },
+      { id: "G02", title: "5.1 Business Rules", locs: [BR], decision: "pending" }
     ])
     for (const g of d.groups) for (const id of g.location_ids) expect(d.locations.find((l) => l.location_id === id)?.group_id).toBe(g.group_id)
   })
@@ -212,7 +225,7 @@ describe("gom change group", () => {
     const { c } = await importedProject()
     const { cr } = await crToImpact(c)
     const d = detail(await c.post(`${cr}/propose`))
-    expect(d.groups.map((g) => g.title)).toEqual(["Performance", "Business Rules", "5.9 Team Notes"])
+    expect(d.groups.map((g) => g.title)).toEqual(["4.2.3 Performance", "5.1 Business Rules", "5.9 Team Notes"])
   })
 
   it("sửa tay sang not_related rồi nộp ⇒ gom lại: vị trí rời group, group rỗng biến mất", async () => {
@@ -225,7 +238,7 @@ describe("gom change group", () => {
     expect(patched.locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: true, verify: null, conclusion: "not_related" })
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
     const submitted = detail(await c.post(`${cr}/submit`))
-    expect(submitted.groups.map((g) => g.title)).toEqual(["Performance"])
+    expect(submitted.groups.map((g) => g.title)).toEqual(["4.2.3 Performance"])
     expect(submitted.locations.find((l) => l.location_id === br.location_id)?.group_id).toBeNull()
   })
 
@@ -264,7 +277,7 @@ describe("C-4 chạy lại", () => {
     const redo = promptsOf("# CR Propose").slice(before)
     expect(redo).toHaveLength(1)
     expect(promptLocations(redo[0]).map((l) => l.path)).toEqual([NFR])
-    expect(redo[0]).toContain("Previous proposal failed checks: Op không đổi gì ở phần tử này")
+    expect(redo[0]).toContain("Previous proposal failed checks: Đề xuất không thay đổi gì ở phần tử này")
     expect(d.locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: true, proposal: { comment_text: "Ghi chú tay" } })
   })
 

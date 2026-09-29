@@ -157,6 +157,50 @@ describe("planFlagOps — luật chỉ chạy ở S-9", () => {
     expect(planFlagOps(spine, []).resolved).toEqual([])
     expect(planFlagOps(spine, [], new Date(), { atBaseline: true }).resolved).toEqual(["FL001"])
   })
+
+  const sectionFlag = (id: string, rule_id: string, section_id: string, remediation_step: string) =>
+    flag({ id, rule_id, section_id, target_id: null, remediation_step })
+  const sectionCandidate = (rule_id: string, section_id: string, remediation_step: string) =>
+    candidate({ rule_id, section_id, target_id: null, remediation_step })
+
+  it("check thường có điều kiện S-9 tính lại: đóng cờ đã hết lỗi, giữ cờ còn lỗi", () => {
+    const spine = withFlags([
+      sectionFlag("FL001", "section_stale_at_baseline", "fixed:1", "S-2.1"),
+      sectionFlag("FL002", "section_stale_at_baseline", "fixed:3.1.1", "S-4.2")
+    ])
+    const plan = planFlagOps(spine, [], new Date(), {
+      baselineCandidates: [sectionCandidate("section_stale_at_baseline", "fixed:3.1.1", "S-4.2")]
+    })
+    expect(plan.resolved).toEqual(["FL001"])
+    expect(plan.opened).toEqual([])
+  })
+
+  it("mục hết cũ nhưng bước sở hữu chờ duyệt lại ⇒ đổi sang cờ đỏ chờ duyệt lại, không im lặng mất cờ", () => {
+    const spine = withFlags([sectionFlag("FL001", "section_stale_at_baseline", "fixed:3.1.1", "S-4.2")])
+    const plan = planFlagOps(spine, [], new Date(), {
+      baselineCandidates: [sectionCandidate("section_awaiting_reaccept", "fixed:3.1.1", "S-4.2")]
+    })
+    expect(plan.resolved).toEqual(["FL001"])
+    expect(plan.opened).toEqual(["FL002"])
+    expect(plan.ops).toContainEqual(
+      expect.objectContaining({ op: "add", value: expect.objectContaining({ level: "red", rule_id: "section_awaiting_reaccept", section_id: "fixed:3.1.1" }) })
+    )
+  })
+
+  it("mục từng bị gắn cờ (đã đóng) mà lại cũ ⇒ mở lại cờ đỏ; mục chưa từng gắn cờ và luật S-9 khác thì không mở ngoài S-9", () => {
+    const spine = withFlags([
+      { ...sectionFlag("FL001", "section_stale_at_baseline", "fixed:3.1.1", "S-4.2"), resolved_at: "2026-09-01T00:00:00.000Z" }
+    ])
+    const plan = planFlagOps(spine, [], new Date(), {
+      baselineCandidates: [
+        sectionCandidate("section_awaiting_reaccept", "fixed:3.1.1", "S-4.2"),
+        sectionCandidate("section_stale_at_baseline", "fixed:1", "S-2.1"),
+        candidate({ rule_id: "unconfirmed_assumption", section_id: "fixed:1", target_id: "AS01" })
+      ]
+    })
+    expect(plan.opened).toEqual(["FL002"])
+    expect(plan.ops).toHaveLength(1)
+  })
 })
 
 describe("recompute / waive qua op engine", () => {

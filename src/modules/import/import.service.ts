@@ -16,7 +16,7 @@ import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
 import { needsConfirm } from "./import.constants.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
-import { assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
+import { IMPORT_STATUS_LABELS, assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { toIso } from "./mode1.http.js"
@@ -107,10 +107,10 @@ export const requireImport = async (projectId: string, importId: string): Promis
 
 export const assertImportStatus = (doc: IImportedDocument, allowed: readonly ImportStatus[], to: ImportStatus): void => {
   if (doc.status === "awaiting_latest_confirm" && !allowed.includes("awaiting_latest_confirm")) {
-    throw new Mode1Error("IMPORT_NEEDS_LATEST_CONFIRM", "Cần xác nhận đây là bản mới nhất trước (nút 1.3)", { import_id: String(doc._id) })
+    throw new Mode1Error("IMPORT_NEEDS_LATEST_CONFIRM", "Cần xác nhận đây là bản mới nhất của tài liệu trước", { import_id: String(doc._id) })
   }
   if (!allowed.includes(doc.status)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", `Không thực hiện được khi import đang ở "${doc.status}"`, { status: doc.status, to, allowed })
+    throw new Mode1Error("IMPORT_INVALID_STATE", `Không thực hiện được khi lần nhập tài liệu đang ở bước "${IMPORT_STATUS_LABELS[doc.status] ?? doc.status}"`, { status: doc.status, to, allowed })
   }
 }
 
@@ -119,7 +119,7 @@ export const assertImportStatus = (doc: IImportedDocument, allowed: readonly Imp
 export const uploadImport = async (projectId: string, userId: string, file: UploadedFile): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Project đã có baseline v0 — upload bản mới qua /reupload để xem khác biệt", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án đã có bản gốc — hãy tải bản mới bằng chức năng tải lại để xem khác biệt", {
       status: current.status,
       to: "uploaded",
       allowed: []
@@ -229,20 +229,20 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   const doc = await requireImport(projectId, body.import_id)
   assertImportStatus(doc, ["mapping_review"], "extracting")
   const profile = await TemplateProfile.findOne({ projectId })
-  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có template profile", { status: doc.status, to: "extracting", allowed: [] })
+  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
 
   for (const h of body.headings) {
     const entry = profile.heading_map.find((e) => e.block_id === h.block_id)
-    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Block ${h.block_id} không phải heading của tài liệu`, { status: doc.status, to: "extracting", allowed: [] })
+    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", "Tiêu đề được chọn không có trong tài liệu", { status: doc.status, to: "extracting", allowed: [] })
     if (!isKnownSectionId(h.section_id)) {
-      throw new Mode1Error("IMPORT_INVALID_STATE", `Section "${h.section_id}" không có trong registry`, { status: doc.status, to: "extracting", allowed: [] })
+      throw new Mode1Error("IMPORT_INVALID_STATE", "Mục được chọn không có trong mẫu FPT", { status: doc.status, to: "extracting", allowed: [] })
     }
     entry.section_id = h.section_id
     entry.confirmed = true
   }
   for (const t of body.tables) {
     const entry = profile.table_map.find((e) => e.block_id === t.block_id && e.column_index === t.column_index)
-    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Cột ${t.column_index} của bảng ${t.block_id} không có`, { status: doc.status, to: "extracting", allowed: [] })
+    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Không tìm thấy cột thứ ${t.column_index + 1} của bảng đã chọn`, { status: doc.status, to: "extracting", allowed: [] })
     entry.field_path = t.field_path
     entry.confirmed = true
   }

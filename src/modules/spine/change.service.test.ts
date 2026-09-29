@@ -260,6 +260,36 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
     await expect(apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)).rejects.toBeInstanceOf(NeedsClarificationError)
   })
 
+  it("trả lời câu hỏi làm rõ ⇒ model đọc đoạn hội thoại trước, projection dò cả yêu cầu gốc", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))
+
+    await preview(
+      PROJECT,
+      USER,
+      {
+        base_version: 1,
+        instruction: "cái thứ nhất",
+        chat_history: "User: đổi tên A01 thành Product Owner\nAI: Bạn muốn đổi actor nào — A01 hay A03?"
+      },
+      {},
+      deps
+    )
+
+    const variables = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(variables.user_message).toBe("cái thứ nhất")
+    expect(variables.chat_history).toContain("A01 hay A03")
+    expect(((variables.projection as { actors?: { id: string }[] }).actors ?? []).map((a) => a.id)).toContain("A01")
+  })
+
+  it("không có lịch sử ⇒ chat_history là (none), không để placeholder trống", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "X" }] }))
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên A01 thành X" }, {}, deps)
+    const variables = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(variables.chat_history).toBe("(none)")
+  })
+
   it("apply với preview_id dùng lại lô đã xem, không gọi model lần hai", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))

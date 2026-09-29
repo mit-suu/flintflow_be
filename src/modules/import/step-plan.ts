@@ -13,7 +13,7 @@ import { loadStepRegistry, loopKeys, orderedSteps, type PhaseId } from "../pipel
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FEATURE_OWNER_STEPS, FIXED_OWNER_STEPS } from "../spine/section-registry.js"
 import type { Op } from "../spine/op.types.js"
-import type { CustomBlock, CustomSection, Spine, StepState } from "../spine/spine.types.js"
+import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } from "../spine/spine.types.js"
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
@@ -48,6 +48,8 @@ export interface LayoutBlock {
   rows?: string[][] | null
   /** Part ảnh trong file gốc (phase 5, T3) — mục riêng giữ lại để render nhúng ảnh gốc. */
   image_ref?: string | null
+  /** Ảnh là sơ đồ I-4 đọc được (§4.13) — giữ nguyên hình của người dùng, đánh dấu để ẩn PlantUML cùng loại. */
+  diagram?: OriginalDiagram | null
 }
 
 export interface LayoutResult {
@@ -61,7 +63,7 @@ const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
     case "table":
       return { kind: "table", text: "", rows: b.rows ?? [], image_ref: null }
     case "image":
-      return { kind: "image", text, rows: null, image_ref: b.image_ref ?? null }
+      return { kind: "image", text, rows: null, image_ref: b.image_ref ?? null, ...(b.diagram ? { diagram: b.diagram } : {}) }
     case "list_item":
       return text ? { kind: "list_item", text, rows: null, image_ref: null } : null
     case "paragraph":

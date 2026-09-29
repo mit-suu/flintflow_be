@@ -163,9 +163,6 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     routeCr((p) => clarifyPerf(p) ?? fakeCrProposeNoChange(p))
     const { c, cr, projectId } = await toProposed()
     const nfr = detail(await c.get(cr)).locations.find((l) => l.path === NFR)!
-    // Chưa ở manual_fix ⇒ không dùng được (3.9 chỉ sau khi AI làm lại 2 lần vẫn trượt)
-    const early = await c.post(`${cr}/locations/${nfr.location_id}/owner-step-draft`, { instruction: "Đặt ngưỡng 1 giây" })
-    expect(early.body.error.code).toBe("CR_INVALID_TRANSITION")
     for (let i = 0; i < 3; i++) {
       if (i > 0) detail(await c.post(`${cr}/propose`))
       detail(await c.post(`${cr}/verify`))

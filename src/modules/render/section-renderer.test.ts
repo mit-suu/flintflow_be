@@ -230,6 +230,16 @@ describe("renderSection — fixed sections", () => {
     ])
   })
 
+  it("fixed:3.1.3 — có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
+    const base = spine()
+    const rolesOnly = { ...base, permissions: [] }
+    const section = renderSection(rolesOnly, "fixed:3.1.3", ctx({ number: "3.1.3" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.header).toEqual([[{ text: "Role" }], [{ text: "Actor" }]])
+    expect(table.type === "table" && table.rows).toHaveLength(base.roles.length)
+    expect(renderSection({ ...base, permissions: [], roles: [] }, "fixed:3.1.3", ctx({ number: "3.1.3" })).blocks).toEqual([])
+  })
+
   it("fixed:3.1.4 — chỉ function non-screen", () => {
     const section = renderSection(spine(), "fixed:3.1.4", ctx({ number: "3.1.4" }))
     const table = section.blocks[0]
@@ -416,10 +426,61 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t1", op: "add", reason: "seed actor" }),
       change({ txn: "t2", op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
     ])
-    // T15 review T7: version = v0.<i+2> (i 0-based) — Spine bắt đầu spine_version=1, mỗi txn +1.
     expect(rows).toEqual([
-      { date: "2026-09-01", version: "v0.2", change_type: "A", in_charge: "u1", description: "seed actor" },
-      { date: "2026-09-02", version: "v0.3", change_type: "M", in_charge: "u2", description: "typo fix" }
+      { date: "2026-09-01", version: "v0.1", change_type: "A", in_charge: "u1", description: "Create Product Overview" },
+      { date: "2026-09-02", version: "v0.2", change_type: "M", in_charge: "u2", description: "Update Product Overview" }
+    ])
+  })
+
+  it("lô liền nhau cùng ngày + cùng giai đoạn ⇒ một dòng: gộp người sửa, change_type; không in reason của op", () => {
+    const rows = buildRecordOfChanges(
+      Array.from({ length: 6 }, (_, i) => change({ txn: `t${i}`, op: i === 0 ? "add" : "set", by: i < 3 ? "u1" : "u2", reason: `sửa ${i}` }))
+    )
+    expect(rows).toEqual([
+      {
+        date: "2026-09-01",
+        version: "v0.1",
+        change_type: "M",
+        in_charge: "u1, u2",
+        description: "Create Product Overview"
+      }
+    ])
+  })
+
+  it("cùng ngày nhưng khác giai đoạn ⇒ tách dòng; vòng S-5 theo màn vẫn chung một giai đoạn", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: "S-3.1", reason: "thêm actor" }),
+      change({ txn: "t2", step_id: "S-3.2", reason: "thêm use case" }),
+      change({ txn: "t3", step_id: "S-5.1@S1", reason: "màn đăng nhập" }),
+      change({ txn: "t4", step_id: "S-5.2@S2", reason: "màn danh sách" })
+    ])
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["v0.1", "Create User Requirements"],
+      ["v0.2", "Create Feature & Function Details"]
+    ])
+  })
+
+  it("lô không gắn step (xác nhận giả định ở cổng) nhập vào dòng giai đoạn liền trước, không cắt nhóm", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: "B-1.1", reason: "vision" }),
+      change({ txn: "t2", step_id: null, reason: "User xác nhận giả định ở cổng chốt" }),
+      change({ txn: "t3", step_id: "B-1.2", reason: "persona" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["Create Product Brief"])
+  })
+
+  it("baseline đứng riêng một dòng mang mã baseline; sửa sau đó đánh v<baseline>.n", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", reason: "sửa trước ký" }),
+      change({ txn: "t2", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+      change({ txn: "t3", step_id: null, reason: "sửa sau ký" }),
+      change({ txn: "t4", step_id: null, reason: "sửa ngày sau", at: "2026-09-02T09:00:00.000Z" })
+    ])
+    expect(rows.map((r) => [r.date, r.version, r.description])).toEqual([
+      ["2026-09-01", "v0.1", "Create Product Overview"],
+      ["2026-09-01", "v1.0", "Baseline v1.0 signed"],
+      ["2026-09-01", "v1.0.1", "sửa sau ký"],
+      ["2026-09-02", "v1.0.2", "sửa ngày sau"]
     ])
   })
 
@@ -430,7 +491,7 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t3", reason: null, at: "2026-09-03T09:00:00.000Z" }),
       change({ txn: "t4", reason: "Đổi tên actor theo yêu cầu của khách", at: "2026-09-04T09:00:00.000Z" })
     ])
-    expect(rows.map((r) => r.description)).toEqual(["Đổi tên actor theo yêu cầu của khách"])
+    expect(rows.map((r) => r.description)).toEqual(["Create Product Overview"])
   })
 
   it("FLF-204: mốc baseline luôn có một dòng, mô tả bằng tiếng Anh", () => {
@@ -440,6 +501,15 @@ describe("buildRecordOfChanges", () => {
     ])
     expect(rows).toHaveLength(1)
     expect(rows[0].description).toBe("Baseline v1.0 signed")
+  })
+
+  it("sau baseline: mô tả là lời user (tối đa 3), bỏ lý do cascade", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+      ...["CR 1", "CR 2", "CR 3", "CR 4"].map((reason, i) => change({ txn: `c${i}`, step_id: null, reason })),
+      change({ txn: "c0", step_id: null, reason: "Cascade: permissions[id=P01].role_id removed" })
+    ])
+    expect(rows[1].description).toBe("CR 1; CR 2; CR 3; and 1 more change")
   })
 
   it("changes rỗng ⇒ mảng rỗng", () => {

@@ -287,6 +287,13 @@ export interface ChangeBody {
   instruction?: string
   reason?: string
   preview_id?: string
+  /** Phiên chat nơi user gõ lệnh — controller nạp đuôi transcript thành `chat_history` và ghi lượt này vào đó. */
+  session_id?: string
+  /**
+   * Nội bộ (DTO không nhận): đuôi hội thoại trước lệnh này, để model hiểu câu trả lời cho câu hỏi làm rõ hay
+   * "cái đó", "mục vừa nói" (UC 6.11). Không có ⇒ lệnh được hiểu độc lập như trước.
+   */
+  chat_history?: string
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -313,17 +320,21 @@ const opsFromInstruction = async (
   userId: string,
   spine: Spine,
   instruction: string,
+  chatHistory: string | undefined,
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
+  const history = chatHistory?.trim() ?? ""
   const result = await deps.changeExecutor(
     ActionType.CHANGE_INSTRUCTION,
     {
       promptVariables: {
         call_kind: "change_instruction",
         user_message: instruction,
+        chat_history: history || "(none)",
         is_pipeline: false,
         has_baseline: spine.baselines.length > 0,
-        projection: buildChangeProjection(spine, instruction),
+        // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
+        projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
         glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
         stale_sections: []
       }
@@ -346,7 +357,7 @@ const resolveOps = async (
 ): Promise<ResolvedOps> => {
   if (body.ops !== undefined) return { ops: body.ops, clarification: null, notes: null }
   if (body.instruction === undefined) throw new ApiError(400, "Cần ops hoặc instruction", "VALIDATION_ERROR")
-  return await opsFromInstruction(projectId, userId, spine, body.instruction, deps)
+  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, deps)
 }
 
 const toTransaction = (userId: string, body: ChangeBody, ops: Op[], txn?: string): Transaction => ({

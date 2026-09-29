@@ -19,7 +19,7 @@ import { elementValue, valueText } from "./spine-location.js"
 export const patchLocation = async (cr: IChangeRequest, locationId: string, body: PatchLocationRequest): Promise<void> => {
   assertCrStatus(cr, ["impact_review", "proposing", "manual_fix", "ready_to_submit"], "verifying")
   const loc = await ChangeLocation.findOne({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: locationId })
-  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", `Không có vị trí ${locationId}`)
+  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", "Không tìm thấy vị trí cần sửa này")
   const holder = (await locksOf(cr.projectId, [loc.path])).get(loc.path)
   if (holder !== cr.cr_id) throw pathLocked(holder ? [{ path: loc.path, cr_id: holder }] : [])
   const conclusion = body.conclusion ?? loc.conclusion
@@ -39,7 +39,9 @@ export const patchLocation = async (cr: IChangeRequest, locationId: string, body
     old_text: valueText(elementValue(spine, loc.path)),
     new_text: conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: conclusion === "comment" ? (body.comment_text ?? loc.proposal?.comment_text ?? null) : null,
-    spine_ops: ops
+    spine_ops: ops,
+    // Người dùng tự viết op / giá trị ⇒ không còn giả định của AI; chỉ đổi kết luận / lý do thì giữ giả định của đề xuất cũ
+    assumptions: conclusion === "edit" && (body.spine_ops || body.new_value !== undefined) ? [] : conclusion === "not_related" ? [] : [...(loc.proposal?.assumptions ?? [])]
   }
   loc.manual = true
   loc.verify = null

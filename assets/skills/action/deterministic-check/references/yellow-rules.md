@@ -19,6 +19,7 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `orphan_entity` | The ERD is not one connected graph (relations read both ways, a self-relation does not count): every entity outside the main component — the largest, ties go to the one holding the lowest id — whether it stands alone or sits in a detached cluster. Skipped with fewer than two entities | S-4.5 |
 | `unresolved_many_to_many` | (Also enforced at draft time: `validateOps` rejects an S-4.5 batch that leaves a mutual pair, a split ERD or a relation without a verb — this flag and `orphan_entity` only catch data from other paths.) Two entities list each other in `relations` (A → B and B → A): a many-to-many not resolved into an associative entity, so the ERD is not in 1NF. One flag per entity, on the lower id of each pair | S-4.5 |
 | `system_name_missing` | A context or use case diagram exists but `project.system_name` is empty, so the diagrams and cover print the working project name (excluded in mode 1) | B-0.1 |
+| `original_diagram_stale` | Mode 1 only: a diagram kept as the **user's original image** (`custom_sections[].blocks[].diagram`, §4.13) no longer matches the Spine data it shows (`computeSourceHash` ≠ hash at import) — e.g. a CR added a use case and the reviewer rejected the redraw. Section = the FPT section of that diagram kind | render step of the kind |
 
 Cardinality is **yellow, not red**: as red, every `placeholder` screen of round one would hit `screen_no_function` and need mass waivers.
 

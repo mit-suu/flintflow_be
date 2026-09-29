@@ -72,6 +72,7 @@ export const getSkill = (skillId: string, options: GetSkillOptions = {}): Loaded
     providerConfig: {
       provider: skill.provider,
       model: skill.aiModel,
+      ...(skill.fallbackModels.length ? { fallbackModels: skill.fallbackModels } : {}),
       maxTokens: skill.maxTokens,
       temperature: skill.temperature
     },
