@@ -201,7 +201,12 @@ export const customBlockSchema = z.strictObject({
   kind: z.enum(["paragraph", "list_item", "table", "image"]),
   text: z.string(),
   rows: z.array(z.array(z.string())).nullable(),
-  image_ref: z.string().min(1).nullable()
+  image_ref: z.string().min(1).nullable(),
+  /** Sơ đồ gốc của người dùng (mode 1 v3 §4.13) — Spine cũ không có. */
+  diagram: z
+    .strictObject({ kind: z.enum(["context", "usecase", "screen_flow", "erd"]), source_hash: z.string().min(1) })
+    .nullable()
+    .optional()
 })
 
 export const customSectionSchema = z.strictObject({

@@ -50,8 +50,9 @@ stub: true                      # tuỳ chọn — skill chờ task sau điền 
 | `importExtract` | `{section_id, items: [{entity, key, value, confidence, field_confidence, source_block_ids}], unmapped_block_ids}` | import_extract_fields (mode 1) |
 | `importExtractDiagram` | `importExtract` + `diagram_kind: usecase \| erd \| screen_flow \| context \| other` — một ảnh kèm prompt (Gemini) | import_extract_diagram (mode 1 v3 phase 5) |
 | `findings` | `{findings: [{rule, section_id, message, block_ids}]}` — chỉ cờ vàng | import_semantic_check, cr_consistency (mode 1) |
-| `crClarify` | `{ambiguous, questions[], targets: {entity_paths[], keywords[]}}` | cr_clarify (mode 1) |
-| `crPropose` | `{locations: [{location_id, conclusion, reason, new_text?, comment_text?, spine_ops}]}` | cr_propose (mode 1) |
+| `crClarify` | `{ambiguous, questions[], suggestions[][], missing_info[], targets: {entity_paths[], keywords[]}}` | cr_clarify (mode 1; `missing_info`, `suggestions` phase 7) |
+| `crPropose` | `{locations: [{location_id, conclusion, reason, new_text?, comment_text?, spine_ops, assumptions[]}]}` | cr_propose (mode 1; `assumptions` phase 7) |
+| `crMaterialImage` | `{text}` — chữ chép nguyên văn + `Description:`; một ảnh kèm prompt (Gemini) | cr_material_image (mode 1 v3 phase 7) |
 | `puml` | text `.puml` (renderer, T10 chốt) | — |
 | `none` | không gọi model — skill mô tả logic tất định cho code | — |
 

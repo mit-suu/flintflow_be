@@ -22,10 +22,12 @@
  *   Specification` › `1 Product Overview`, `2.1 Actors`) ⇒ giữ nhãn La Mã gốc, không chiếm một cấp số; mục con đánh
  *   số lại từ 1 trong phần đó. Trước đây `II.` bị coi là chương 1 ⇒ `3.1.2` thành `1.3.1.2`, tham chiếu chéo trỏ sai.
  *   La Mã dùng làm chính số chương (`I. Introduction` › `1.1 Purpose`) vẫn đánh số như cũ.
+ * - **Sơ đồ gốc** (§4.13): loại sơ đồ còn ảnh gốc của người dùng trong phần nối ⇒ không in hình PlantUML cùng loại.
  */
 
 import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
+import { keptOriginalKinds } from "../spine/original-diagram.js"
 import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
@@ -137,6 +139,9 @@ export const customBlocks = (blocks: readonly CustomBlock[], imagePng?: (imageRe
 
 const clampLevel = (level: number): number => Math.min(9, Math.max(1, Math.round(level)))
 
+/** Mục riêng thêm tay chưa có tiêu đề — không in khoá thô `custom:CS07` vào tài liệu. */
+const untitledCustom = (language: string): string => (language === "vi" ? "Mục bổ sung" : "Additional Section")
+
 /** Mục layout còn dùng được + mục FPT chèn thêm, theo thứ tự tài liệu. */
 export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] => {
   const defs = listSections(spine).filter((d) => d.id !== "fixed:I")
@@ -151,7 +156,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     const { typed, title, label } = splitTypedNumber(entry.heading_text)
     const level = clampLevel(entry.level)
     if (id.startsWith(GROUP_PREFIX)) {
-      placed.push({ section_id: id, kind: "group", title: title || id, level, fromLayout: true, typed, label })
+      placed.push({ section_id: id, kind: "group", title: title || id.slice(GROUP_PREFIX.length), level, fromLayout: true, typed, label })
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
       if (!custom) continue
@@ -179,7 +184,7 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     if (used.has(id)) continue
     used.add(id)
     const heading = c.heading.trim()
-    placed.push({ section_id: id, kind: "custom", title: heading || id, level: clampLevel(c.level), fromLayout: false, typed: false })
+    placed.push({ section_id: id, kind: "custom", title: heading || untitledCustom(template.language), level: clampLevel(c.level), fromLayout: false, typed: false })
   }
 
   // Section FPT thiếu trong layout ⇒ chèn cạnh mục anh em cùng nhóm mẫu FPT (sau anh em đứng trước, không có thì trước
@@ -307,8 +312,12 @@ export const buildLayoutSections = (
   const titles = new Map(numbered.filter((n) => n.title).map((n) => [n.section_id, n.title]))
   const stateById = new Map(states.map((s) => [s.id, s]))
   const customById = new Map<string, CustomSection>(spine.custom_sections.map((c) => [`${CUSTOM_PREFIX}${c.id}`, c]))
+  // §4.13: sơ đồ người dùng đã có hình gốc (in ở phần nối) ⇒ không in thêm PlantUML cùng loại — một sơ đồ một hình
+  const kept = keptOriginalKinds(spine)
+  const contentSpine: Spine = kept.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !(kept as ReadonlySet<string>).has(d.kind)) } : spine
 
   const out: RenderedSection[] = []
+  const emptyUntilMerged = new Set<RenderedSection>()
   /** Cấp layout (chưa chuẩn hoá) của từng section trong `out` — tìm section chủ của phần nối. */
   const levels: number[] = []
   const push = (section: RenderedSection, level: number) => {
@@ -345,9 +354,12 @@ export const buildLayoutSections = (
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
-    const section = renderSection(spine, n.section_id, ctx)
-    if (opts.partial && section.blocks.length === 0) continue
-    push({ ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }, n.level)
+    const section = renderSection(contentSpine, n.section_id, ctx)
+    const rendered = { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+    // `partial`: mục rỗng vẫn giữ chỗ tới khi gộp xong phần nối — mục chỉ có hình gốc của người dùng (§4.13, PlantUML
+    // không in) nhận khối từ phần nối ngay sau nó; bỏ sớm thì khối đó rơi vào mục đứng trước
+    if (opts.partial && rendered.blocks.length === 0) emptyUntilMerged.add(rendered)
+    push(rendered, n.level)
   }
-  return { sections: out, numbers, titles }
+  return { sections: opts.partial ? out.filter((x) => !(emptyUntilMerged.has(x) && x.blocks.length === 0)) : out, numbers, titles }
 }

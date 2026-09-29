@@ -16,6 +16,8 @@ export const MODE1_ERROR_STATUS = {
   STEP_NOT_IN_PLAN: 404,
   CR_LOCATION_NOT_FOUND: 404,
   CR_GROUP_NOT_FOUND: 404,
+  /** Mode 1 v3 phase 7: `material_id` không có trong CR. */
+  CR_MATERIAL_NOT_FOUND: 404,
   PROJECT_MODE_MISMATCH: 409,
   IMPORT_NEEDS_LATEST_CONFIRM: 409,
   IMPORT_INVALID_STATE: 409,
@@ -32,6 +34,8 @@ export const MODE1_ERROR_STATUS = {
   CR_NO_OWNER_STEP: 409,
   /** FLF-186: giá trị tại path đã đổi kể từ lúc đề xuất (thay `CR_OLD_TEXT_MISMATCH`). */
   CR_VALUE_CHANGED: 409,
+  /** Mode 1 v3 phase 7: CR đã có đủ số tài liệu bổ sung tối đa (`CR_MAX_MATERIALS`). */
+  CR_MATERIAL_LIMIT: 409,
   CHANGE_REQUIRES_CR: 409,
   /** FLF-182: tắt step của đầu mục mẫu FPT (cốt lõi) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
@@ -43,7 +47,11 @@ export const MODE1_ERROR_STATUS = {
   IMPORT_STAMP_FOREIGN_PROJECT: 422,
   /** Mode 1 v3 (BPMN 1.4 chỉ cho file có stamp của project): re-upload file không stamp. */
   IMPORT_REUPLOAD_NO_STAMP: 422,
-  RELEASE_RED_FLAGS_OPEN: 422
+  RELEASE_RED_FLAGS_OPEN: 422,
+  /** Mode 1 v3 phase 7: tài liệu bổ sung của CR không phải .docx/.pdf/.txt/.md/PNG/JPEG. */
+  CR_MATERIAL_UNSUPPORTED: 422,
+  /** Mode 1 v3 phase 7: tài liệu bổ sung không đọc ra chữ nào. */
+  CR_MATERIAL_EMPTY: 422
 } as const
 
 export type Mode1ErrorCode = keyof typeof MODE1_ERROR_STATUS

@@ -6,7 +6,7 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import { CR_PAUSE_REASONS, CR_STATUSES, type CrPauseReason, type CrStatus } from "./change-request.state.js"
-import { CR_ID_PATTERN, CR_SOURCE_KINDS, type CrSourceKind } from "./change-request.constants.js"
+import { CR_ID_PATTERN, CR_MATERIAL_KINDS, CR_SOURCE_KINDS, MATERIAL_ID_PATTERN, type CrMaterialKind, type CrSourceKind } from "./change-request.constants.js"
 
 export interface CrSource {
   kind: CrSourceKind
@@ -19,6 +19,32 @@ export interface CrClarification {
   round: number
   questions: string[]
   answers: string[]
+  /** Phase 7: đáp án AI gợi ý cho từng câu hỏi (cùng thứ tự `questions`); CR cũ không có. */
+  suggestions?: string[][]
+}
+
+/**
+ * Tài liệu bổ sung (mode 1 v3 phase 7): dữ kiện người dùng đưa vào để AI viết nội dung (3.1 hoặc khi trả lời 3.3).
+ * Chỉ lưu chữ đã tách (file gốc không giữ). Đi vào ngữ cảnh C-2, C-4 và 3.9.
+ */
+export interface CrMaterial {
+  material_id: string
+  kind: CrMaterialKind
+  /** Tên file, hoặc tên người dùng đặt cho đoạn dán. */
+  name: string
+  text: string
+  /** Chữ dài hơn `CR_MATERIAL_MAX_CHARS` đã bị cắt. */
+  truncated: boolean
+  /** 0 = đính kèm ở 3.1; n = đính kèm khi trả lời vòng làm rõ n. */
+  round: number
+  added_at: Date
+}
+
+/** Lệnh sửa gộp thêm vào CR chưa nộp (mode 1 v3 phase 8 — chat). `after_round`: số vòng làm rõ đã có lúc gộp. */
+export interface CrAmendment {
+  text: string
+  at: Date
+  after_round: number
 }
 
 export interface IChangeRequest extends Document {
@@ -38,6 +64,13 @@ export interface IChangeRequest extends Document {
    * Chỉ là **gợi ý**: C-2 đọc lệnh, C-3 thêm `targets` vào đích, C-4 thấy op đề xuất của vị trí — mọi nút vẫn chạy.
    */
   seed: CrSeed | null
+  materials: CrMaterial[]
+  /**
+   * Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi buộc đi tiếp (hết vòng hỏi) ⇒ C-4 viết nhưng ghi giả định.
+   * Rỗng khi CR + câu trả lời + tài liệu đã đủ.
+   */
+  missing_info: string[]
+  amendments: CrAmendment[]
   /** Version tài liệu lúc tạo CR; ghi Track Changes lên version mới nhất lúc write. */
   base_doc_version: string
   result_doc_version: string | null
@@ -83,7 +116,7 @@ const changeRequestSchema = new Schema<IChangeRequest>(
       default: null
     },
     clarifications: {
-      type: [new Schema({ round: { type: Number, required: true, min: 1 }, questions: [String], answers: [String] }, opts)],
+      type: [new Schema({ round: { type: Number, required: true, min: 1 }, questions: [String], answers: [String], suggestions: { type: [[String]], default: [] } }, opts)],
       default: []
     },
     targets: {
@@ -93,6 +126,28 @@ const changeRequestSchema = new Schema<IChangeRequest>(
     seed: {
       type: new Schema({ instruction: { type: String, default: null }, ops: { type: [Schema.Types.Mixed], default: [] }, targets: { type: [String], default: [] } }, opts),
       default: null
+    },
+    materials: {
+      type: [
+        new Schema(
+          {
+            material_id: { type: String, required: true, match: MATERIAL_ID_PATTERN },
+            kind: { type: String, enum: CR_MATERIAL_KINDS, required: true },
+            name: { type: String, required: true, trim: true, maxlength: 200 },
+            text: { type: String, required: true },
+            truncated: { type: Boolean, default: false },
+            round: { type: Number, required: true, min: 0 },
+            added_at: { type: Date, required: true }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
+    missing_info: { type: [String], default: [] },
+    amendments: {
+      type: [new Schema({ text: { type: String, required: true, maxlength: 4000 }, at: { type: Date, required: true }, after_round: { type: Number, required: true, min: 0 } }, opts)],
+      default: []
     },
     base_doc_version: { type: String, required: true },
     result_doc_version: { type: String, default: null },

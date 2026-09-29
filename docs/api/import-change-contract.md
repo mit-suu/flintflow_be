@@ -300,15 +300,54 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 Plan: `claude_plan/mode1-v3/phase-5-vision.md`.
 
 - **Ảnh gốc (T3)**: block ảnh của file upload giữ `image_ref` (part `word/media/*`). Ảnh dưới mục FPT không được thay bằng diagram ⇒ phần nối nguyên văn của mục (`custom_sections[].blocks[].image_ref`); bản render (0.0, bản làm việc, version CR) nhúng lại **đúng ảnh gốc** (PNG/JPEG). EMF/WMF / file gốc không còn ⇒ chỗ giữ ảnh + chú thích `original image could not be embedded (<part>)`.
-- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit / lỗi ⇒ `paused` như lô chữ.
+- **I-4 phần ảnh (1.8)**: `call_kind` mới **`import_extract_diagram`** (2 credit/ảnh, Gemini) — chỉ cho ảnh ở mục diagram (`fixed:1`, `2.1`, `2.2.1`, `2.2.2`, `3.1.1`, `3.1.5`), sau bảng tất định, trước lô chữ; `step_id` usage vẫn `I-4:<section>`. Hết credit ⇒ `paused` như lô chữ. Lỗi AI khác sau mọi lượt thử (2026-09-24: Gemini quá tải cả model dự phòng) ⇒ **không dừng** I-4: ảnh ghi `kind: unavailable`, giữ ảnh gốc + cờ vàng `import_image_unread` ("AI đọc ảnh đang quá tải").
   Môi trường không có vision (`GEMINI_KEY_MISSING`, `AI_PROVIDER_NO_VISION`) ⇒ không dừng: ảnh coi như định dạng không hỗ trợ (giữ ảnh + cờ vàng).
 - **Field từ ảnh**: `ReviewField.origin` thêm **`vision`**. Độ tin ≤ 0.7 và **luôn** vào `review_fields` (1.9) kể cả bằng ngưỡng — chưa xác nhận thì finalize bỏ. Danh sách tham chiếu (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) từ nhiều nguồn gộp hợp. `screens.flow_to` được trích.
-- **Finalize (1.10)**: ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
+- **Finalize (1.10)** — **đổi ở §4.13** (giữ ảnh gốc): ảnh đọc được (use case / ERD / luồng màn / ngữ cảnh) ⇒ bỏ ảnh gốc, diagram PlantUML vẽ từ Spine thay; ảnh ở mục diagram không đọc được (`other` / định dạng không hỗ trợ) ⇒ giữ ảnh gốc + **cờ vàng `rule_id: import_image_unread`** (model-owned, recompute không đóng).
+
+### 4.11 Mode 1 v3 — CR thiếu thông tin: hỏi dữ kiện, tài liệu bổ sung, giả định (phase 7 — contract-change, chờ 4/4)
+
+Plan: `claude_plan/mode1-v3/phase-7-cr-thieu-thong-tin.md`. Không thêm cạnh BPMN — mở rộng vòng 3.2 ⇄ 3.3.
+
+- **Tài liệu bổ sung** (`ChangeRequestDto.materials[]`): `{ material_id: "M01", kind: text | file | image, name, text, truncated, round, added_at }`. Chỉ lưu chữ (≤ 20 000 ký tự, dài hơn thì cắt + `truncated`); `round` 0 = đính kèm lúc tạo, `n` = khi trả lời vòng `n`. Tối đa 10/CR. Chữ đi vào prompt 3.2, 3.6, 3.9 (tổng ≤ 12 000 ký tự/prompt).
+  - `POST /change-requests` thêm `materials?: [{ name, text }]` (≤ 5 đoạn dán).
+  - **Mới** `POST /change-requests/:crId/materials` — JSON `{ name, text }` hoặc multipart `file` (.docx/.pdf/.txt/.md tách chữ tại chỗ; PNG/JPEG ⇒ `call_kind` mới **`cr_material_image`**, 1 credit, Gemini, usage `step_id: C-1:<cr_id>`; hết credit ⇒ 402, lỗi AI ⇒ 502, không lưu). Chỉ ở `draft` / `awaiting_answers`, khác ⇒ 409 `CR_INVALID_TRANSITION`. Trả 201 + chi tiết CR. Lỗi mới: 409 `CR_MATERIAL_LIMIT`, 422 `CR_MATERIAL_UNSUPPORTED`, 422 `CR_MATERIAL_EMPTY`.
+  - **Mới** `DELETE /change-requests/:crId/materials/:mid` — cùng điều kiện trạng thái; không có ⇒ 404 `CR_MATERIAL_NOT_FOUND`.
+- **3.3**: `answers[]` nhận chuỗi **rỗng** (= "chưa biết"); vẫn phải đủ số câu, đúng thứ tự.
+- **Đáp án gợi ý**: `ChangeRequestDto.clarifications[].suggestions: string[][]` — song song `questions`, 0–4 đáp án AI gợi ý mỗi câu (`[]` nếu không có; CR cũ ⇒ `[]`). Chỉ để FE điền nhanh; BE nhận câu trả lời là chữ như cũ.
+- **3.2** (`cr-clarify` 1.1.0): ngoài "sửa ở đâu", kiểm thêm "đủ dữ kiện để viết nội dung mới chưa" ⇒ thiếu thì hỏi đúng dữ kiện. Output thêm `missing_info[]`; đi tiếp mà còn thiếu (vòng 3) ⇒ lưu **`ChangeRequestDto.missing_info[]`** (rỗng nếu đủ).
+- **3.6 / 3.9** (`cr-propose` 2.1.0): dữ kiện phải tự giả định ⇒ **`ChangeLocationDto.proposal.assumptions[]`** (rỗng nếu mọi dữ kiện có trong CR / câu trả lời / tài liệu). PATCH vị trí bằng `spine_ops` / `new_value` hoặc kết luận `not_related` ⇒ `assumptions: []`.
+
+### 4.12 Mode 1 v3 — CR chạy trong khung chat (phase 8 — contract-change, chờ 4/4)
+
+Plan: `claude_plan/mode1-v3/phase-8-cr-trong-chat.md`. Chat bên trái của workspace mode 1 dẫn người dùng đi từng nút Flow 3 bằng các endpoint sẵn có; thêm:
+
+- **Mới** `POST /change-requests/:crId/amend { instruction }` — gộp thêm lệnh sửa vào CR chưa nộp. `draft` ⇒ chỉ ghi; `impact_review` / `proposing` / `verifying` / `manual_fix` / `ready_to_submit` ⇒ `clarifying` (**cạnh mới** `… → clarifying`) rồi chạy 3.2 ngay. Khác ⇒ 409 `CR_INVALID_TRANSITION`. `ChangeRequestDto.amendments[] { text, at }`. Vòng hỏi (tối đa 3) đếm lại từ lần gộp gần nhất.
+- **3.4 cộng dồn**: CR đã có vị trí mang kết luận / đề xuất ⇒ giữ nguyên vị trí cũ (cả đề xuất / kết luận / khoá), chỉ thêm + khoá phần tử mới (`location_id` tiếp theo); không có gì mới ⇒ không lỗi.
+- **Ô thêm mới cho mục đã có dữ liệu** (2026-09-24): vị trí `arr[]` (vd `entities[]`) không chỉ cho mục trống — mọi mục CR nhắm (`fixed:3.1.5`) và mọi đích dạng `arr[]` C-2 trả về (`cr-clarify` 1.3.0) đều có ô thêm mới; giá trị = các phần tử có sẵn. `cr-propose` 2.2.0: phần tử mới chỉ thêm từ ô này; sơ đồ đổi bằng thêm / sửa phần tử, không bằng comment.
+- **Mục được gọi tên** (2026-09-24): mục người yêu cầu nêu trong tiêu đề / mô tả / lệnh gộp / câu trả lời (tên mục của tài liệu hoặc tên FPT EN/VI, đứng sau số mục hoặc "mục / phần / section"; có tên thì tin tên hơn số) luôn vào `targets.entity_paths`; khi đó bỏ từ khoá của model. Prompt C-4 thêm `{{target_sections}}` (mục đích + mọi ô thêm mới của CR, gửi cho mọi lô; `cr-propose` 2.3.0). **Luật kiểm mới** `add_outside_slot` (đỏ): op thêm phần tử (`arr[]`) từ vị trí không phải ô thêm mới.
+- `POST …/locations/:locId/owner-step-draft` (3.9, nút "Sửa lại" trong chat): nhận ở `proposing`, `verifying`, `manual_fix`, `ready_to_submit` (⇒ `verifying`); vị trí mục riêng (không có step sở hữu) cũng được — **không còn trả `CR_NO_OWNER_STEP`** (mã giữ trong bảng cho client cũ).
+
+### 4.13 Mode 1 v3 — giữ sơ đồ gốc của người dùng, vẽ lại qua CR (contract-change, chờ 4/4)
+
+Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người dùng chỉ đổi khi có CR được duyệt — kể cả hình.
+
+- **Finalize (1.10)**: ảnh sơ đồ I-4 đọc được (use case / ERD / luồng màn / ngữ cảnh) **giữ y nguyên** trong bản render (phần nối của mục, như ảnh không đọc được); dữ liệu đọc từ ảnh vẫn vào Spine. Khối ảnh mang **`CustomBlock.diagram?: { kind: context|usecase|screen_flow|erd, source_hash }`** — `source_hash` = hash dữ liệu hình thể hiện lúc import (cùng hàm `diagram_stale`). Ảnh không đọc được giữ như cũ + cờ vàng `import_image_unread`.
+- **Render**: loại sơ đồ còn ảnh gốc ⇒ **không in** hình PlantUML cùng loại (PlantUML vẫn vẽ sẵn trong `diagrams[]`). Loại không có ảnh gốc ⇒ in PlantUML như trước. `render_error` / `diagram_stale` không bắn cho hình PlantUML đang không in.
+- **Cờ vàng mới `original_diagram_stale`**: ảnh gốc không còn khớp dữ liệu (hash lệch). `section_id` = mục FPT của loại hình (`fixed:1`, `fixed:2.2.1`, `fixed:3.1.1`, `fixed:3.1.5`), `target_id` = id phần nối. Không chặn release.
+- **C-3**: CR có vị trí chạm dữ liệu hình thể hiện (use case / actor / project ⇒ use case & ngữ cảnh; màn / quyền / chức năng ⇒ luồng màn; entity ⇒ ERD), hoặc nhắm mục của hình / chính phần nối ⇒ thêm vị trí `custom_sections[id=…]` với **`found_by: "diagram"`** (giá trị mới của `LOCATION_FOUND_BY`), `owner_step: null`.
+- **C-4 (code, không AI, không tốn credit)**: vị trí `diagram` không gửi `cr-propose`. Sau khi các vị trí khác có đề xuất, code chạy khô op của CR: hình gốc lệch dữ liệu sau CR ⇒ `edit`, op `remove custom_sections[id=…].blocks[image_ref=…]` (bỏ ảnh gốc ⇒ bản render in sơ đồ FlintFlow); không lệch ⇒ `not_related`. Tính lại ở `/verify` (đề xuất vị trí khác có thể đã đổi). `owner-step-draft` trên vị trí này ⇒ tính lại, không gọi AI. Muốn giữ hình ⇒ PATCH vị trí `not_related` (sửa tay, không bị tính đè).
+- **3.12**: từ chối group chứa vị trí này ⇒ giữ ảnh gốc, cờ vàng `original_diagram_stale` sau khi ghi.
+- **C-5**: chạy khô không còn tính `diagram_stale` là "lỗi đỏ mới" — hình PlantUML được vẽ lại ở 3.14 (trước đây mọi CR đổi tên use case / actor / màn trượt kiểm vì cờ này).
 
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-09-24 | Gemini quá tải | §4.10: đọc ảnh lỗi sau mọi lượt thử không còn `paused` — ảnh `unavailable` + cờ vàng. Skill Gemini thêm `fallbackModels` (`gemini-3.6-flash`, `gemini-3.5-flash-lite`); log AI ghi model thật sự trả lời. Hình API không đổi |
+| 2026-09-24 | mode 1 v3 — sơ đồ gốc | §4.13: giữ ảnh sơ đồ gốc khi import (`CustomBlock.diagram`), không in PlantUML cùng loại, cờ vàng `original_diagram_stale`, `found_by: "diagram"` + đề xuất vẽ lại do code (C-4), C-5 bỏ `diagram_stale` khỏi "lỗi đỏ mới" — thay hành vi finalize §4.10, contract-change, chờ 4/4 |
+| 2026-09-24 | mode 1 v3 — phase 8 | §4.12: `POST …/amend` + `amendments[]`, cạnh `… → clarifying`, 3.4 cộng dồn vị trí, `owner-step-draft` nới trạng thái + mục riêng — contract-change, chờ 4/4 |
+| 2026-09-24 | mode 1 v3 — phase 7 | §4.11: `materials[]` + `missing_info[]` của CR, `proposal.assumptions[]`, `POST`/`DELETE …/materials`, câu trả lời 3.3 được trống, `clarifications[].suggestions` (đáp án gợi ý), `call_kind` `cr_material_image`, mã `CR_MATERIAL_LIMIT` · `CR_MATERIAL_UNSUPPORTED` · `CR_MATERIAL_EMPTY` · `CR_MATERIAL_NOT_FOUND` — contract-change, chờ 4/4 |
 | 2026-09-22 | mode 1 v3 — phase 5 (FLF-187) | §4.10: `call_kind` `import_extract_diagram`, `ReviewField.origin` thêm `vision`, cờ `import_image_unread`, ảnh gốc giữ trong bản render (`image_ref`) — contract-change, chờ 4/4 |
 | 2026-09-22 | mode 1 v3 — phase 2 | §4.9: tạo CR bỏ nguồn `chat`, `preview_id` + `seed`, `found_by: preview`, endpoint `owner-step-draft` (3.9), `CR_NO_OWNER_STEP`, lý do bắt buộc khi duyệt, bản có đánh dấu `variant=tracked` + `has_tracked_file` — contract-change, chờ 4/4 (gom với §4.8) |
 | 2026-09-22 | mode 1 v3 — phase 1 | §4.8: `CHANGE_REQUIRES_CR` từ baseline v0, bỏ `meta.change_request` (không tự tạo CR), `prefill.source`, preview `meta.requires_cr`, `MODE1_NO_STEPS` · `MODE1_NO_SIGNOFF` · `MODE1_NO_WAIVE`, `IMPORT_REUPLOAD_NO_STAMP`, C-3 cho mọi mục FPT trống + `assumptions`, luật S-9 khi tính cờ mode 1 — contract-change, chờ 4/4 |

@@ -8,6 +8,7 @@
 import { AlignmentType, Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { latestDocVersion } from "../doc-version/doc-version.service.js"
+import { capitalize, fieldLabel, humanizeText, pathLabel, ruleLabel, sectionLabel } from "../spine/human-labels.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
@@ -25,24 +26,32 @@ const REPORT_STATUSES: readonly ImportStatus[] = ["gap_review", "delivered", "ch
 /**
  * Tiêu đề hiển thị của section. Truyền `layout` (template của project) thì **phần nối** — mục riêng tiêu đề rỗng, văn
  * xuôi mà assemble gộp vào mục trước — hiện theo mục chủ, thay vì trơ mã `custom:CS07` (nợ T5).
+ * Ưu tiên chính tiêu đề người dùng viết trong file (`layout[].heading_text`) hơn tên mẫu FPT tiếng Anh. Không bao giờ
+ * trả khoá thô (`fixed:9.9`, `feature:@B0012`): id lạ ⇒ nhãn chung ("Mục riêng", "Tính năng", "Chức năng", "Mục khác").
+ * Dùng cho gap report, tiêu đề group CR, `section_title` của vị trí CR và CR_NO_LOCATIONS.
  */
 export const titleOfSection = (
   spine: Pick<Spine, "features" | "functions"> & Partial<Pick<Spine, "custom_sections">>,
   id: string,
   layout?: readonly LayoutEntry[]
 ): string => {
-  const [kind, key] = id.split(":")
-  if (id === FEATURE_SECTIONS) return "Functional requirements (features)"
+  const own = layout?.find((l) => l.section_id === id && l.heading_text.trim())?.heading_text.trim()
+  if (own) return own
+  const at = id.indexOf(":")
+  const kind = at >= 0 ? id.slice(0, at) : id
+  const key = at >= 0 ? id.slice(at + 1) : ""
+  if (id === FEATURE_SECTIONS) return "Yêu cầu chức năng (các tính năng)"
   if (kind === "custom") {
     const custom = spine.custom_sections?.find((c) => c.id === key)
-    if (custom?.heading) return custom.heading
-    if (!custom) return id
+    if (custom?.heading.trim()) return custom.heading.trim()
+    if (!custom) return "Mục riêng"
     const owner = layout ? continuationOwnerSection(layout, id) : null
     return owner ? `Phần nối của "${titleOfSection(spine, owner, layout)}"` : "Phần nối (văn xuôi của mục trước)"
   }
-  if (kind === "feature") return spine.features.find((f) => f.id === key)?.name ?? id
-  if (kind === "function") return spine.functions.find((f) => f.id === key)?.name ?? id
-  return sectionTitle(id)
+  if (kind === "feature") return spine.features.find((f) => f.id === key)?.name ?? "Tính năng"
+  if (kind === "function") return spine.functions.find((f) => f.id === key)?.name ?? "Chức năng"
+  const title = sectionTitle(id)
+  return title === id ? "Mục khác" : title
 }
 
 /** Layout template của project (mode 1) — để `titleOfSection` biết mục chủ của phần nối. */
@@ -66,7 +75,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
     ExtractionDraft.find({ import_id: doc._id }).lean(),
     latestDocVersion(projectId)
   ])
-  if (!spine) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!spine) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án", spineRepository.SPINE_NOT_FOUND)
 
   const open = spine.flags.filter((f) => f.resolved_at === null)
   const bySection = new Map<string, typeof open>()
@@ -81,9 +90,9 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
     }))
     .sort((a, b) => (orderOf.get(a.section_id) ?? Infinity) - (orderOf.get(b.section_id) ?? Infinity))
   const unrenderedDiagrams = unrendered(spine)
-  const missingFpt = missingFptSections(profile?.step_plan ?? [], new Set(layout.map((l) => l.section_id)), spine)
+  const missingFpt = missingFptSections(profile?.step_plan ?? [], new Set(layout.map((l) => l.section_id)), spine, profile?.layout)
 
-  const missing = (profile?.required_sections ?? []).map((section_id) => ({ section_id, title: sectionTitle(section_id) }))
+  const missing = (profile?.required_sections ?? []).map((section_id) => ({ section_id, title: titleOfSection(spine, section_id, profile?.layout) }))
   const unmapped = (profile?.heading_map ?? []).filter((h) => h.section_id === UNMAPPED_SECTION).map((h) => ({ block_id: h.block_id, text: h.heading_text }))
   const low: ReviewField[] = drafts.flatMap((d) =>
     d.fields
@@ -166,7 +175,7 @@ const layoutRows = (layout: readonly LayoutEntry[], spine: Spine, bySection: Fla
     })
 
 /** Đầu mục FPT thiếu theo kế hoạch step (D6) — mỗi section một dòng, step đầu tiên sở hữu nó. */
-const missingFptSections = (plan: readonly StepPlanItem[], inLayout: ReadonlySet<string>, spine: Spine): GapReport["missing_fpt_sections"] => {
+const missingFptSections = (plan: readonly StepPlanItem[], inLayout: ReadonlySet<string>, spine: Spine, layout?: readonly LayoutEntry[]): GapReport["missing_fpt_sections"] => {
   const out: GapReport["missing_fpt_sections"] = []
   const seen = new Set<string>()
   for (const item of plan) {
@@ -174,16 +183,19 @@ const missingFptSections = (plan: readonly StepPlanItem[], inLayout: ReadonlySet
     for (const section_id of item.section_ids) {
       if (seen.has(section_id)) continue
       seen.add(section_id)
-      out.push({ section_id, title: titleOfSection(spine, section_id), step_id: item.step_id, in_layout: inLayout.has(section_id) })
+      out.push({ section_id, title: titleOfSection(spine, section_id, layout), step_id: item.step_id, in_layout: inLayout.has(section_id) })
     }
   }
   return out
 }
 
 // ─── docx ────────────────────────────────────────────────────────
+// Báo cáo giao cho người dùng: không in mã máy (`fixed:2.2.1`, `B0012`, `functions[id=…]`, `section_empty`, mã step).
+// Khoá máy vẫn nằm nguyên trong JSON (`GapReport`) để FE tự gắn nhãn.
 
+/** Ô nhiều dòng (`\n`) ⇒ mỗi dòng một đoạn — TextRun không tự xuống dòng. */
 const cell = (text: string, bold = false): TableCell =>
-  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text, bold })] })] })
+  new TableCell({ children: text.split("\n").map((line) => new Paragraph({ children: [new TextRun({ text: line, bold })] })) })
 
 const table = (header: string[], rows: string[][]): Table =>
   new Table({
@@ -191,31 +203,74 @@ const table = (header: string[], rows: string[][]): Table =>
     rows: [new TableRow({ tableHeader: true, children: header.map((h) => cell(h, true)) }), ...rows.map((r) => new TableRow({ children: r.map((c) => cell(c)) }))]
   })
 
-const valueText = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v))
+/** Giá trị trích cho người đọc: mảng ⇒ "a, b"; object ⇒ từng dòng "Nhãn: giá trị" — không in JSON. */
+export const readableValue = (v: unknown): string => {
+  if (v === null || v === undefined) return ""
+  if (typeof v === "string") return v
+  if (typeof v === "boolean") return v ? "Có" : "Không"
+  if (typeof v === "number") return String(v)
+  if (Array.isArray(v)) {
+    const items = v.map(readableValue).filter(Boolean)
+    return items.some((i) => i.includes("\n")) ? items.join("\n\n") : items.join(", ")
+  }
+  if (typeof v === "object") {
+    return Object.entries(v as Record<string, unknown>)
+      .map(([k, x]) => [fieldLabel(k), readableValue(x)] as const)
+      .filter(([, x]) => x)
+      .map(([k, x]) => `${k}: ${x}`)
+      .join("\n")
+  }
+  return String(v)
+}
+
+/** `2026-09-23T03:12:00Z` ⇒ "23/09/2026 10:12" (giờ Việt Nam). */
+export const formatReportTime = (iso: string): string => {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(date)
+      .map((p) => [p.type, p.value])
+  )
+  return `${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}`
+}
+
+/** Thông điệp cờ: bỏ tiền tố mã luật của dữ liệu cũ (`[ambiguity] …`), đổi path Spine còn sót thành nhãn. */
+const flagText = (message: string): string => humanizeText(message.replace(/^\[[a-z_]+\]\s*/, ""))
+
+const percent = (confidence: number): string => `${Math.round(confidence * 100)}%`
 
 export const renderGapReportDocx = async (report: GapReport, projectName: string): Promise<Buffer> => {
   const t = report.totals
+  // Tên mục theo chính báo cáo (tiêu đề trong file người dùng); không có ⇒ nhãn chung, không in khoá
+  const titles = new Map<string, string>([
+    ...report.missing_sections.map((m) => [m.section_id, m.title] as const),
+    ...report.missing_fpt_sections.map((m) => [m.section_id, m.title] as const),
+    ...report.sections.map((s) => [s.section_id, s.title] as const),
+    ...report.layout.map((l) => [l.section_id, l.heading] as const)
+  ])
+  const sectionName = (id: string): string => titles.get(id) ?? capitalize(sectionLabel(id))
   const children: (Paragraph | Table)[] = [
-    new Paragraph({ text: `Gap report — ${projectName}`, heading: HeadingLevel.TITLE }),
-    new Paragraph({ children: [new TextRun({ text: `Version tài liệu ${report.doc_version} · tạo lúc ${report.generated_at}`, italics: true })] }),
+    new Paragraph({ text: `Báo cáo thiếu sót — ${projectName}`, heading: HeadingLevel.TITLE }),
+    new Paragraph({ children: [new TextRun({ text: `Phiên bản tài liệu ${report.doc_version} · tạo lúc ${formatReportTime(report.generated_at)}`, italics: true })] }),
     new Paragraph({ text: "Tổng quan", heading: HeadingLevel.HEADING_1 }),
     table(
       ["Hạng mục", "Số lượng"],
       [
-        ["Thiếu mục FPT (đỏ)", String(t.missing_fpt_sections)],
+        ["Thiếu mục theo mẫu FPT (đỏ)", String(t.missing_fpt_sections)],
         ["Cờ đỏ", String(t.red)],
         ["Cờ vàng", String(t.yellow)],
-        ["Section bắt buộc thiếu", String(t.missing_sections)],
-        ["Heading không khớp template", String(t.unmapped_headings)],
-        ["Field độ tin thấp", String(t.low_confidence_fields)],
+        ["Mục bắt buộc còn thiếu", String(t.missing_sections)],
+        ["Tiêu đề không khớp mẫu", String(t.unmapped_headings)],
+        ["Dữ liệu trích có độ tin thấp", String(t.low_confidence_fields)],
         ["Hình chưa vẽ được", String(t.unrendered_diagrams)]
       ]
     ),
-    new Paragraph({ text: "Thiếu mục FPT", heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: "Thiếu mục theo mẫu FPT", heading: HeadingLevel.HEADING_1 }),
     report.missing_fpt_sections.length
       ? table(
-          ["Mục", "Tình trạng", "Step chạy để soạn"],
-          report.missing_fpt_sections.map((m) => [m.title, m.in_layout ? "Có heading, chưa có nội dung" : "File không có", m.step_id])
+          ["Mục", "Tình trạng", "Cách bổ sung"],
+          report.missing_fpt_sections.map((m) => [m.title, m.in_layout ? "Có tiêu đề, chưa có nội dung" : "File không có", "Bổ sung qua change request"])
         )
       : new Paragraph("Đủ mọi đầu mục mẫu FPT."),
     new Paragraph({ text: "Mục theo tài liệu", heading: HeadingLevel.HEADING_1 }),
@@ -229,34 +284,37 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
             String(l.yellow)
           ])
         )
-      : new Paragraph("Không có layout (import trước mode 1 v2)."),
-    new Paragraph({ text: "Cờ theo section", heading: HeadingLevel.HEADING_1 })
+      : new Paragraph("Không có bố cục tài liệu (bản nhập trước khi có tính năng này)."),
+    new Paragraph({ text: "Cờ theo mục", heading: HeadingLevel.HEADING_1 })
   ]
   if (!report.sections.length) children.push(new Paragraph("Không có cờ nào đang mở."))
   for (const s of report.sections) {
-    children.push(new Paragraph({ text: `${s.title} (${s.section_id})`, heading: HeadingLevel.HEADING_2 }))
-    children.push(table(["Mức", "Luật", "Nội dung"], s.flags.map((f) => [f.level === "red" ? "Đỏ" : "Vàng", f.rule_id, f.message])))
+    children.push(new Paragraph({ text: s.title, heading: HeadingLevel.HEADING_2 }))
+    children.push(table(["Mức", "Loại lỗi", "Nội dung"], s.flags.map((f) => [f.level === "red" ? "Đỏ" : "Vàng", ruleLabel(f.rule_id) || "Khác", flagText(f.message)])))
   }
   children.push(new Paragraph({ text: "Hình chưa vẽ được", heading: HeadingLevel.HEADING_1 }))
   children.push(
     report.unrendered_diagrams.length
       ? table(
-          ["Hình", "Loại", "Mục", "Lý do"],
-          report.unrendered_diagrams.map((d) => [d.diagram_id, d.kind, d.title, d.reason === "error" ? "Vẽ lỗi" : "Chưa vẽ (PlantUML không sẵn sàng lúc import)"])
+          ["Hình", "Lý do"],
+          report.unrendered_diagrams.map((d) => [d.title, d.reason === "error" ? "Vẽ lỗi" : "Chưa vẽ (công cụ vẽ sơ đồ không sẵn sàng lúc nhập)"])
         )
       : new Paragraph("Mọi hình đã có bản vẽ.")
   )
-  children.push(new Paragraph({ text: "Section bắt buộc thiếu", heading: HeadingLevel.HEADING_1 }))
-  children.push(report.missing_sections.length ? table(["Section", "Tiêu đề"], report.missing_sections.map((m) => [m.section_id, m.title])) : new Paragraph("Không thiếu section bắt buộc nào."))
-  children.push(new Paragraph({ text: "Heading không khớp template", heading: HeadingLevel.HEADING_1 }))
-  children.push(report.unmapped_headings.length ? table(["Block", "Heading"], report.unmapped_headings.map((u) => [u.block_id, u.text])) : new Paragraph("Mọi heading đều khớp."))
-  children.push(new Paragraph({ text: "Field độ tin thấp", heading: HeadingLevel.HEADING_1 }))
+  children.push(new Paragraph({ text: "Mục bắt buộc còn thiếu", heading: HeadingLevel.HEADING_1 }))
+  children.push(report.missing_sections.length ? table(["Mục"], report.missing_sections.map((m) => [m.title])) : new Paragraph("Không thiếu mục bắt buộc nào."))
+  children.push(new Paragraph({ text: "Tiêu đề không khớp mẫu", heading: HeadingLevel.HEADING_1 }))
+  children.push(report.unmapped_headings.length ? table(["Tiêu đề trong tài liệu"], report.unmapped_headings.map((u) => [u.text])) : new Paragraph("Mọi tiêu đề đều khớp."))
+  children.push(new Paragraph({ text: "Dữ liệu trích có độ tin thấp", heading: HeadingLevel.HEADING_1 }))
   children.push(
     report.low_confidence_fields.length
-      ? table(["Field", "Giá trị", "Độ tin"], report.low_confidence_fields.map((f) => [f.path, valueText(f.edited_value ?? f.value), f.confidence.toFixed(2)]))
+      ? table(
+          ["Mục", "Nội dung", "Giá trị", "Độ tin"],
+          report.low_confidence_fields.map((f) => [sectionName(f.section_id), pathLabel(f.path), readableValue(f.edited_value ?? f.value), percent(f.confidence)])
+        )
       : new Paragraph({ children: [new TextRun("Không có.")], alignment: AlignmentType.LEFT })
   )
-  const document = new Document({ creator: "FlintFlow", title: `Gap report ${projectName}`, sections: [{ children }] })
+  const document = new Document({ creator: "FlintFlow", title: `Báo cáo thiếu sót ${projectName}`, sections: [{ children }] })
   return Packer.toBuffer(document)
 }
 

@@ -43,7 +43,7 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
  * trong body.
  */
 export const exportWord = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, projectName } = await authorize(req)
+  const { projectId, projectName, mode } = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
   if (!parsedQuery.success) throw new ApiError(400, z.prettifyError(parsedQuery.error), "VALIDATION_ERROR")
 
@@ -64,7 +64,7 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(422, `Invalid RenderedDocument — ${detail}`, "RENDERED_DOCUMENT_INVALID")
   }
 
-  const buffer = await writeDocx(parsed.data)
+  const buffer = await writeDocx(parsed.data, { flagLanguage: mode === "import" ? "vi" : "en" })
   const fileName = buildDocxFileName(parsed.data)
 
   res.status(200)

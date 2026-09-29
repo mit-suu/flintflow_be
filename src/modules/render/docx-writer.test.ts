@@ -237,3 +237,30 @@ describe("style heading con theo mẫu FPT (FLF-214)", () => {
     expect(mode1).not.toContain('<w:sz w:val="24"/>')
   })
 })
+
+describe("writeDocx — phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việt, không in mã luật)", () => {
+  const withFlags = (): RenderedDocument => {
+    const doc = structuredClone(sample)
+    doc.flagsAppendix = {
+      redOpen: [{ id: "FL001", rule_id: "section_empty", section: "5.5 Thuật ngữ", message: 'Mục bắt buộc "5.5 Glossary" chưa có dữ liệu' }],
+      staleCount: 0,
+      waived: []
+    }
+    return doc
+  }
+
+  it("flagLanguage vi ⇒ tiêu đề cột tiếng Việt + nhãn luật thay mã", async () => {
+    const { value } = await mammoth.extractRawText({ buffer: await writeDocx(withFlags(), { flagLanguage: "vi" }) })
+    expect(value).toContain("Lỗi đỏ đang mở")
+    expect(value).toContain("Loại lỗi")
+    expect(value).toContain("Mục còn trống")
+    expect(value).not.toContain("section_empty")
+    expect(value).not.toContain("Open Red Flags")
+  })
+
+  it("mặc định (mode 2) giữ nguyên tiếng Anh", async () => {
+    const { value } = await mammoth.extractRawText({ buffer: await writeDocx(withFlags()) })
+    expect(value).toContain("Open Red Flags")
+    expect(value).toContain("section_empty")
+  })
+})

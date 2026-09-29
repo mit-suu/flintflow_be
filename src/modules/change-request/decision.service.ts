@@ -20,9 +20,9 @@ export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: s
   assertCrStatus(cr, ["in_review"], "written")
   const groups = await ChangeGroup.find({ projectId: cr.projectId, cr_id: cr.cr_id })
   const group = groups.find((g) => g.group_id === groupId)
-  if (!group) throw new Mode1Error("CR_GROUP_NOT_FOUND", `Không có group ${groupId}`)
+  if (!group) throw new Mode1Error("CR_GROUP_NOT_FOUND", "Không tìm thấy nhóm thay đổi này")
   if (group.decision !== "pending") {
-    throw new Mode1Error("CR_INVALID_TRANSITION", `Group ${groupId} đã được quyết định`, { status: cr.status, to: "written", allowed: [] })
+    throw new Mode1Error("CR_INVALID_TRANSITION", `Nhóm thay đổi “${group.title}” đã được quyết định`, { status: cr.status, to: "written", allowed: [] })
   }
   const decidedBy = new mongoose.Types.ObjectId(userId)
   const remaining = groups.filter((g) => g.decision === "pending" && g.group_id !== groupId)
@@ -51,10 +51,12 @@ export const decideGroup = async (cr: IChangeRequest, userId: string, groupId: s
 
   void notify(userId, {
     type: "change_request_decided",
-    title: written ? `${cr.cr_id} đã được ghi vào bản ${written}` : `${cr.cr_id}: group ${groupId} ${body.decision === "approved" ? "được duyệt" : "bị từ chối"}`,
+    title: written
+      ? `${cr.cr_id} đã được ghi vào bản ${written}`
+      : `${cr.cr_id}: nhóm thay đổi “${group.title}” ${body.decision === "approved" ? "được duyệt" : "bị từ chối"}`,
     body: written
-      ? `Thay đổi "${cr.title}" đã ghi vào Spine và bản tài liệu ${written}.`
-      : `Group "${group.title}" của "${cr.title}" ${body.decision === "approved" ? "được duyệt" : `bị từ chối: ${body.reason ?? ""}`}.`,
+      ? `Thay đổi "${cr.title}" đã ghi vào tài liệu, bản ${written}.`
+      : `Nhóm thay đổi “${group.title}” của "${cr.title}" ${body.decision === "approved" ? "được duyệt" : `bị từ chối${body.reason ? `: ${body.reason}` : ""}`}.`,
     meta: { cr_id: cr.cr_id, group_id: groupId, decision: body.decision, result_doc_version: written }
   })
 }
