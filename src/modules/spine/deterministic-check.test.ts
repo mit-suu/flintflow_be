@@ -23,11 +23,11 @@ const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
 
 describe("RULES", () => {
-  it("12 luật đỏ + 16 luật vàng; 3 luật không waive được", () => {
-    expect(RULES.filter((r) => r.level === "red")).toHaveLength(12)
+  it("13 luật đỏ + 18 luật vàng; 3 luật không waive được", () => {
+    expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
-    // derived_from_changed_assumption (BUG-14)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(16)
+    // derived_from_changed_assumption (BUG-14); orphan_entity, unresolved_many_to_many (ERD)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(18)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -138,6 +138,50 @@ describe("runDeterministicCheck", () => {
     expect(byRule(runDeterministicCheck(withBackground), "function_without_uc")).toContainEqual(
       expect.objectContaining({ target_id: "FN900", level: "yellow", remediation_step: "S-3.2" })
     )
+  })
+
+  it("orphan_entity: ERD phải liên thông — entity đứng riêng và cụm tách rời đều bị bắt; chờ S-4.5", () => {
+    const split = variant((s) => {
+      s.entities.push({ id: "E90", name: "Island", description: "", relations: ["E90"] })
+      s.entities.push({ id: "E91", name: "Child Only", description: "", relations: [] })
+      s.entities.push({ id: "E92", name: "Parent", description: "", relations: ["E91"], relation_verbs: { E91: "owns" } })
+    })
+    const flags = byRule(runDeterministicCheck(split, [], { atBaseline: true }), "orphan_entity")
+    expect(flags.map((f) => f.target_id).sort()).toEqual(["E90", "E91", "E92"])
+    expect(flags.find((f) => f.target_id === "E90")!.message).toContain("không có quan hệ")
+    expect(flags.find((f) => f.target_id === "E92")!.message).toContain("cụm 2 entity")
+    expect(flags[0]).toMatchObject({ level: "yellow", section_id: "fixed:3.1.5", remediation_step: "S-4.5" })
+    expect(byRule(runDeterministicCheck(variant((s) => (s.steps = []))), "orphan_entity")).toEqual([])
+    const single = variant((s) => (s.entities = [{ id: "E01", name: "Only", description: "", relations: [] }]))
+    expect(byRule(runDeterministicCheck(single, [], { atBaseline: true }), "orphan_entity")).toEqual([])
+    // Nối cụm vào khối chính (quan hệ theo chiều con → cha vẫn tính là liên thông) ⇒ hết cờ
+    const joined = variant((s) => {
+      s.entities.push({ id: "E91", name: "Child Only", description: "", relations: [] })
+      s.entities.push({ id: "E92", name: "Parent", description: "", relations: ["E91", "E01"] })
+    })
+    expect(byRule(runDeterministicCheck(joined, [], { atBaseline: true }), "orphan_entity")).toEqual([])
+  })
+
+  it("orphan_entity_at_baseline: ERD rời chặn ký baseline (đỏ, chỉ ở S-9)", () => {
+    const split = variant((s) => s.entities.push({ id: "E90", name: "Island", description: "", relations: [] }))
+    expect(byRule(runDeterministicCheck(split, [], { atBaseline: true }), "orphan_entity_at_baseline")).toEqual([
+      expect.objectContaining({ level: "red", target_id: "E90", section_id: "fixed:3.1.5", remediation_step: "S-4.5" })
+    ])
+    expect(byRule(runDeterministicCheck(split), "orphan_entity_at_baseline")).toEqual([])
+  })
+
+  it("unresolved_many_to_many: cặp trỏ lẫn nhau ⇒ một cờ ở id nhỏ hơn; tự thân và một chiều thì không", () => {
+    const mutual = variant((s) => {
+      s.entities.push({ id: "E90", name: "Exam Paper", description: "", relations: ["E91", "E92", "E90"] })
+      s.entities.push({ id: "E91", name: "Question", description: "", relations: ["E90"] })
+      s.entities.push({ id: "E92", name: "Tag", description: "", relations: ["E90"] })
+      s.entities.push({ id: "E93", name: "Topic", description: "", relations: ["E91"] })
+    })
+    const flags = byRule(runDeterministicCheck(mutual, [], { atBaseline: true }), "unresolved_many_to_many")
+    expect(flags.map((f) => f.target_id)).toEqual(["E90"])
+    expect(flags[0]).toMatchObject({ level: "yellow", section_id: "fixed:3.1.5", remediation_step: "S-4.5" })
+    expect(flags[0].message).toContain('"Question", "Tag"')
+    expect(byRule(runDeterministicCheck(FIXTURE, [], { atBaseline: true }), "unresolved_many_to_many")).toEqual([])
   })
 
   it("orphan_screen: màn không actor người nào dùng, màn đứng riêng trong luồng, popup không ai mở", () => {

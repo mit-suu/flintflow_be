@@ -42,6 +42,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("section_awaiting_reaccept", "red", true, true),
   rule("screen_pending_at_baseline", "red", true, true),
   rule("orphan_screen_at_baseline", "red", true, true),
+  rule("orphan_entity_at_baseline", "red", true, true),
   rule("orphan_actor", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
@@ -57,7 +58,9 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
   rule("derived_from_changed_assumption", "yellow", true),
-  rule("function_without_uc", "yellow", true)
+  rule("function_without_uc", "yellow", true),
+  rule("orphan_entity", "yellow", true),
+  rule("unresolved_many_to_many", "yellow", true)
 ])
 
 /** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
@@ -161,7 +164,9 @@ const GATE_STEP = {
   empty_feature: "S-4.1",
   role_no_actor: "S-3.1",
   usecase_floating: "S-3.4",
-  function_without_uc: "S-4.4"
+  function_without_uc: "S-4.4",
+  orphan_entity: "S-4.5",
+  unresolved_many_to_many: "S-4.5"
 } as const
 
 const OPEN_GATE: StepGate = { done: () => true }
@@ -515,6 +520,61 @@ const screenPendingAtBaseline = (spine: Spine): FlagCandidate[] =>
       remediation_step: `S-5.1@${s.id}`
     }))
 
+/** ERD rời chặn ký baseline: cùng điều kiện `orphan_entity` (vàng lúc soạn), lên đỏ ở S-9. */
+const orphanEntityAtBaseline = (spine: Spine): FlagCandidate[] =>
+  orphanEntities(spine).map(({ entity, why }) => ({
+    level: "red",
+    rule_id: "orphan_entity_at_baseline",
+    section_id: "fixed:3.1.5",
+    target_id: entity.id,
+    message: `Entity "${entity.name}" ${why}, không ký baseline được`,
+    remediation_step: "S-4.5"
+  }))
+
+/**
+ * ERD phải là MỘT khối liên thông (quan hệ xét vô hướng, tự thân không tính). Khối chính là khối đông nhất, hoà
+ * thì khối chứa id nhỏ nhất; mọi entity ngoài khối chính là mồ côi — đứng một mình hoặc thuộc một cụm tách rời.
+ */
+export const orphanEntities = (spine: Spine): { entity: Spine["entities"][number]; why: string }[] => {
+  if (spine.entities.length < 2) return []
+  const ids = new Set(spine.entities.map((e) => e.id))
+  const adjacent = new Map<string, Set<string>>([...ids].map((id) => [id, new Set<string>()]))
+  for (const e of spine.entities) {
+    for (const t of e.relations) {
+      if (t === e.id || !ids.has(t)) continue
+      adjacent.get(e.id)!.add(t)
+      adjacent.get(t)!.add(e.id)
+    }
+  }
+  const componentOf = new Map<string, number>()
+  const sizes: number[] = []
+  for (const start of [...ids].sort()) {
+    if (componentOf.has(start)) continue
+    const c = sizes.length
+    const queue = [start]
+    componentOf.set(start, c)
+    for (let i = 0; i < queue.length; i++) {
+      for (const next of adjacent.get(queue[i])!) {
+        if (componentOf.has(next)) continue
+        componentOf.set(next, c)
+        queue.push(next)
+      }
+    }
+    sizes.push(queue.length)
+  }
+  // Duyệt theo id tăng dần ⇒ khi hoà, khối đánh số trước (chứa id nhỏ nhất) thắng
+  const main = sizes.indexOf(Math.max(...sizes))
+  return spine.entities
+    .filter((e) => componentOf.get(e.id) !== main)
+    .map((e) => ({
+      entity: e,
+      why:
+        adjacent.get(e.id)!.size === 0
+          ? "không có quan hệ với entity nào"
+          : `thuộc một cụm ${sizes[componentOf.get(e.id)!]} entity tách khỏi phần còn lại của ERD`
+    }))
+}
+
 /** Màn mồ côi chặn ký baseline: cùng điều kiện `orphan_screen` (vàng lúc soạn), lên đỏ ở S-9. */
 const orphanScreenAtBaseline = (spine: Spine): FlagCandidate[] =>
   orphanScreens(spine).map(({ screen, why }) => ({
@@ -594,7 +654,20 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
     ...when("role_no_actor", () =>
       spine.roles
         .filter((r) => r.actor_id === null)
-        .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn actor`, "S-3.1")))
+        .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn actor`, "S-3.1"))),
+    ...when("orphan_entity", () =>
+      orphanEntities(spine).map(({ entity, why }) => yellow("orphan_entity", "fixed:3.1.5", entity.id, `Entity "${entity.name}" ${why}`, "S-4.5"))),
+    // A → B và B → A: nhiều–nhiều chưa tách thành entity trung gian (1NF). Cờ gắn vào id nhỏ hơn của cặp,
+    // một cờ mỗi entity (khoá cờ theo target_id) nên nhiều cặp của cùng entity gộp vào một câu
+    ...when("unresolved_many_to_many", () => {
+      const byEntity = new Map(spine.entities.map((e) => [e.id, e]))
+      return spine.entities.flatMap((a) => {
+        const partners = [...new Set(a.relations)].filter((b) => b > a.id && byEntity.get(b)?.relations.includes(a.id)).sort()
+        if (partners.length === 0) return []
+        const names = partners.map((b) => `"${byEntity.get(b)!.name}"`).join(", ")
+        return [yellow("unresolved_many_to_many", "fixed:3.1.5", a.id, `"${a.name}" và ${names} trỏ lẫn nhau — quan hệ nhiều–nhiều cần entity trung gian`, "S-4.5")]
+      })
+    })
   ]
 }
 
@@ -1002,7 +1075,7 @@ export const runDeterministicCheck = (
     ...diagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
-    ...(atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine)] : []),
+    ...(atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine), ...orphanEntityAtBaseline(spine)] : []),
     ...screenPlaceholder(spine, atBaseline),
     ...derivedFromChangedAssumption(spine, changes),
     ...functionWithoutUseCase(spine, gate),

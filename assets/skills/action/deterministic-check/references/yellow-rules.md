@@ -16,6 +16,8 @@ Deterministic, non-blocking, each with a `rule_id`.
 | `usecase_name_semantic` | Use case name breaks U2 (two goals joined), U3 (vague verb such as Manage/Handle), or U8 (duplicate name) | S-3.2 |
 | `usecase_name_style` | Use case name breaks U1 (Title Case, no trailing period), U4 (repeats an actor name), U5 (UI or technical term), or U6 (more than 5 words) | S-3.2 |
 | `actor_name_shape` | Actor name breaks A2 (bare `User`/`System`/`Actor`/`Person`) or A7 (duplicate name) | S-3.1 |
+| `orphan_entity` | The ERD is not one connected graph (relations read both ways, a self-relation does not count): every entity outside the main component — the largest, ties go to the one holding the lowest id — whether it stands alone or sits in a detached cluster. Skipped with fewer than two entities | S-4.5 |
+| `unresolved_many_to_many` | (Also enforced at draft time: `validateOps` rejects an S-4.5 batch that leaves a mutual pair, a split ERD or a relation without a verb — this flag and `orphan_entity` only catch data from other paths.) Two entities list each other in `relations` (A → B and B → A): a many-to-many not resolved into an associative entity, so the ERD is not in 1NF. One flag per entity, on the lower id of each pair | S-4.5 |
 | `system_name_missing` | A context or use case diagram exists but `project.system_name` is empty, so the diagrams and cover print the working project name (excluded in mode 1) | B-0.1 |
 
 Cardinality is **yellow, not red**: as red, every `placeholder` screen of round one would hit `screen_no_function` and need mass waivers.
@@ -34,6 +36,8 @@ The cardinality rules, `orphan_screen` and `usecase_floating` / `function_withou
 | `role_no_actor` | S-3.1 | roles and actors both come from S-3.1 |
 | `usecase_floating` | S-3.4 | `extends[]` is written there |
 | `function_without_uc` | S-4.4 | non-screen functions and their use case links come from S-4.4 |
+| `unresolved_many_to_many` | S-4.5 | same source as `orphan_entity` |
+| `orphan_entity` | S-4.5 | `entities[].relations[]` is written there; the whole ERD must be one connected graph. Skipped when there is only one entity |
 
 "Waits for" means that step is `accepted`. `at_baseline` (S-9) and mode 1 open every gate — see `red-rules.md`. `screen_placeholder` has its own gate (past the S-5 loop) and `system_name_missing` its own condition (a diagram exists); the naming, language and relation rules judge data that is already there, so they never wait.
 
