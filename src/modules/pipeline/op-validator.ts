@@ -24,6 +24,7 @@ import { parsePath, PathError } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import { orphanEntities } from "../spine/deterministic-check.js"
+import { stampAddendum } from "../spine/addendum-stamp.js"
 
 export interface ValidationError {
   /** `op_schema` · `path_not_writable` · `op_out_of_scope` · `op_not_allowed` · hoặc `rule` của op engine. */
@@ -146,6 +147,25 @@ const SCREEN_STATUS_PATH = /^screens\[[^\]]+\]\.detail_status$/
 const ASSUMPTION_FIELD_PATH = /^assumptions\[id=([^\]]+)\]\.(confirmed_at|status)$/
 const ASSUMPTION_PATH = /^assumptions\[id=([^\]]+)\]$/
 
+/** Tập giá trị của hai trường phân loại dự án — S-4/S-6/S-7 đọc đúng giá trị, chuỗi ghép "web_app,mobile_app" làm hỏng. */
+export const PROJECT_ENUM_VALUES: Readonly<Record<"form_factor" | "stakes", readonly string[]>> = {
+  form_factor: ["web_app", "mobile_app", "desktop_app", "api_service", "cli", "embedded"],
+  stakes: ["internal", "production", "regulated"]
+}
+
+/** Câu giả định đã chuẩn hoá để so trùng: chữ thường, gộp khoảng trắng, bỏ dấu câu cuối. */
+const assumptionKey = (text: unknown): string =>
+  typeof text === "string" ? text.toLowerCase().replace(/\s+/g, " ").replace(/[\s.,;:!]+$/u, "").trim() : ""
+
+/** Giá trị `form_factor`/`stakes` ngoài tập hợp lệ trong một op `set` (path trường hoặc cả `project`); không có ⇒ null. */
+const invalidProjectEnum = (path: string, value: unknown): keyof typeof PROJECT_ENUM_VALUES | null => {
+  const field = /^project\.(form_factor|stakes)$/.exec(path)?.[1] as keyof typeof PROJECT_ENUM_VALUES | undefined
+  const values: Record<string, unknown> | null = field ? { [field]: value } : path === "project" && isRecord(value) ? value : null
+  if (!values) return null
+  const keys = Object.keys(PROJECT_ENUM_VALUES) as (keyof typeof PROJECT_ENUM_VALUES)[]
+  return keys.find((key) => key in values && values[key] !== null && !PROJECT_ENUM_VALUES[key].includes(String(values[key]))) ?? null
+}
+
 export interface SanitizeResult {
   ops: unknown[]
   errors: ValidationError[]
@@ -159,6 +179,7 @@ export interface SanitizeResult {
  * - `confirmed_at` luôn do server đặt (BUG-29: model bịa ngày xác nhận): `add assumptions[]` ⇒ `unconfirmed`/`null`;
  *   `set …confirmed_at` ⇒ thay bằng giá trị server; `set status = confirmed` ở step rà giả định ⇒ server đặt ngày.
  * - `status` của giả định chỉ đổi được ở `ASSUMPTION_SWEEP_STEPS`.
+ * - `add addendum[]` ⇒ `captured_at` là giờ server (`stampAddendum`), không phải ngày model viết.
  */
 export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | null = null, now: Date = new Date()): SanitizeResult => {
   if (!Array.isArray(ops)) return { ops: [], errors: [] }
@@ -218,7 +239,31 @@ export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | nu
     if (op.op === "add" && op.path === "screens[]" && isRecord(op.value)) {
       return { ...op, value: { ...op.value, detail_status: "pending" } }
     }
+    if (op.op === "set") {
+      const badEnum = invalidProjectEnum(op.path, op.value)
+      if (badEnum) {
+        errors.push({
+          rule: "op_not_allowed",
+          op_index: index,
+          path: op.path,
+          message: `project.${badEnum} chỉ nhận một trong: ${PROJECT_ENUM_VALUES[badEnum].join(", ")}. Nhiều nền tảng ⇒ chọn nền tảng chính, ghi các nền tảng còn lại vào addendum.`
+        })
+        return op
+      }
+    }
     if (op.op === "add" && op.path === "assumptions[]" && isRecord(op.value)) {
+      // Giả định đã có (kể cả đã xác nhận) — thêm lại là bắt user xác nhận lần nữa điều họ vừa chốt
+      const keys = [assumptionKey(op.value.statement), assumptionKey(op.value.statement_vi)].filter((k) => k !== "")
+      const same = spine.assumptions.find((a) => keys.includes(assumptionKey(a.statement)) || keys.includes(assumptionKey(a.statement_vi)))
+      if (same) {
+        errors.push({
+          rule: "op_not_allowed",
+          op_index: index,
+          path: op.path,
+          message: `Giả định này đã có (${same.id}, ${same.status}) — không thêm lại. Điều user đã nói hoặc đã xác nhận là sự thật, không phải giả định mới.`
+        })
+        return op
+      }
       return { ...op, value: { ...op.value, path: normalizeSelectorPath(op.value.path), status: "unconfirmed", confirmed_at: null } }
     }
     if (op.op === "set" && /^assumptions\[id=[^\]]+\]\.path$/.test(op.path)) {
@@ -247,7 +292,7 @@ export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | nu
       if (value !== a.confirmed_at) out.push({ op: "set", path: `assumptions[id=${a.id}].confirmed_at`, value, reason: "confirmed_at do server đặt" })
     }
   }
-  return { ops: out, errors }
+  return { ops: stampAddendum(out, now), errors }
 }
 
 /** Tên màn hình / thành phần kỹ thuật — entity là dữ liệu được lưu, không phải nơi hiển thị hay xử lý nó. */
