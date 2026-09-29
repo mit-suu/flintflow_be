@@ -19,7 +19,7 @@ beforeEach(() => {
 })
 
 describe("PATCH /projects/:id/assumptions/:assumptionId", () => {
-  it("ghi statement_vi user gõ và statement EN do AI dịch, trừ credit một lượt", async () => {
+  it("ghi statement_vi user gõ và statement EN do AI dịch, xác nhận giả định, trừ credit một lượt", async () => {
     const seeded = await seedFixture("full")
     const auth = { Authorization: `Bearer ${seeded.token}` }
     mockOverrides.next = (prompt) =>
@@ -32,8 +32,9 @@ describe("PATCH /projects/:id/assumptions/:assumptionId", () => {
 
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     expect(res.body.data.spine_version).toBe(seeded.spineVersion + 1)
-    const edited = (res.body.data.spine.assumptions as { id: string; statement: string; statement_vi?: string }[]).find((a) => a.id === "AS01")
-    expect(edited).toMatchObject({ statement: "99.9% monthly availability is required.", statement_vi: "Cần sẵn sàng 99,9% mỗi tháng." })
+    const edited = (res.body.data.spine.assumptions as { id: string; statement: string; statement_vi?: string; status: string; confirmed_at: string | null }[]).find((a) => a.id === "AS01")
+    expect(edited).toMatchObject({ statement: "99.9% monthly availability is required.", statement_vi: "Cần sẵn sàng 99,9% mỗi tháng.", status: "confirmed" })
+    expect(Date.now() - Date.parse(edited?.confirmed_at ?? "")).toBeLessThan(60_000)
     expect(mockCalls).toHaveLength(1)
 
     const wallet = await CreditWallet.findOne({ userId: seeded.userId }).lean()

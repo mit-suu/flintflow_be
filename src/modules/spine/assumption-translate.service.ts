@@ -5,6 +5,8 @@
  * AssumptionSweep hoặc Brief panel. SRS in `statement` (tiếng Anh), nên sửa bản của user mà không dịch thì hai bản
  * lệch nhau. Một lượt gọi model ngắn (`translate`, tính credit như mọi lượt gọi khác qua `executeAiAction`) dịch
  * sang tiếng Anh, rồi ghi CẢ HAI trong một transaction. Model lỗi ⇒ không ghi gì, lỗi đi ra để FE giữ ô sửa.
+ * Câu user tự sửa là câu user đã xác nhận: cùng transaction đặt `status = "confirmed"` — không thì giả định còn
+ * `unconfirmed`, bị hỏi lại ở cổng sau.
  *
  * HTTP: `PATCH /projects/:id/assumptions/:assumptionId` (`docs/api/pipeline-contract.md`).
  */
@@ -60,7 +62,9 @@ export const translateAssumption = async (
     base_version: input.base_version,
     ops: [
       { op: "set", path: `assumptions[id=${assumptionId}].statement`, value: result.data.statement.trim() },
-      { op: "set", path: `assumptions[id=${assumptionId}].statement_vi`, value: input.statement_vi }
+      { op: "set", path: `assumptions[id=${assumptionId}].statement_vi`, value: input.statement_vi },
+      { op: "set", path: `assumptions[id=${assumptionId}].status`, value: "confirmed" },
+      { op: "set", path: `assumptions[id=${assumptionId}].confirmed_at`, value: new Date().toISOString() }
     ],
     by: userId,
     step_id: null,
