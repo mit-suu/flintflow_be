@@ -1343,7 +1343,9 @@ export const runStep = async (
 
         // B-0.1 khi user chưa có ý tưởng: câu hỏi chờ chỉ để gợi ý tưởng. Tin nhắn có nội dung CHÍNH LÀ ý tưởng — đóng
         // mọi câu gợi mở và đi soạn luôn. Để AI tự khớp từng câu thì nó hay chốt 0 câu và hỏi lại y nguyên (gặp thật).
-        if (stepDef.template_id === "B-0.1" && !hasIdea({ spine, documents: ctx.documents })) {
+        // Xét cả tin mở lượt chạy: user gõ ý tưởng để chạy B-0.1 thì câu hỏi là câu thường (tên hệ thống, điểm nghẽn…),
+        // gán nguyên tin cho mọi câu là ghi một câu trả lời cho nhiều câu hỏi.
+        if (stepDef.template_id === "B-0.1" && !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })) {
           const byMessage = questionIdsFor(pending)
             .filter((_, i) => !answeredByCard.has(i))
             .map((id) => ({ question_id: id, answer: message }))
