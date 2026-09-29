@@ -4,10 +4,10 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "@startuml
 skinparam monochrome true
 skinparam shadowing false
-skinparam nodesep 45
+skinparam nodesep 20
 skinparam ranksep 110
 skinparam usecaseFontSize 16
-usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_
+usecase "\\n\\n\\n\\n        FlintFlow        \\n\\n\\n\\n" as SYSTEM_
 rectangle "Founder" as A01
 rectangle "Business Analyst" as A02
 rectangle "Administrator" as A03
@@ -17,15 +17,39 @@ rectangle "LLM Provider" as A06
 rectangle "PlantUML Server" as A07
 rectangle "Email Service" as A08
 rectangle "Scheduler" as A09
-A01 <-right-> SYSTEM_ : → brief answers, accepted step\\n← draft section, srs document
-A02 <-left-> SYSTEM_ : ← verification result\\n→ red flag list
-A03 <-down-> SYSTEM_ : ↓ account action\\n↑ platform metrics
-A04 -up-> SYSTEM_ : registration request
-A05 <-down-> SYSTEM_ : ↓ payment result\\n↑ payment request
-A06 <-up-> SYSTEM_ : ↑ generated draft\\n↓ draft request
-A07 <-down-> SYSTEM_ : ↓ diagram png\\n↑ puml source
-SYSTEM_ -down-> A08 : email request
-A09 -down-> SYSTEM_ : housekeeping tick
+A01 -[#transparent]down-> SYSTEM_ : brief answers\\naccepted step
+A01 -down-> SYSTEM_
+A01 -[#transparent]down- SYSTEM_
+SYSTEM_ -up-> A01 : draft section\\nsrs document
+A01 -[#transparent]down- SYSTEM_
+A02 -[#transparent]down-> SYSTEM_ : verification result
+A02 -down-> SYSTEM_
+A02 -[#transparent]down- SYSTEM_
+SYSTEM_ -up-> A02 : red flag list
+A02 -[#transparent]down- SYSTEM_
+A03 -[#transparent]down-> SYSTEM_ : account action
+A03 -down-> SYSTEM_
+A03 -[#transparent]down- SYSTEM_
+SYSTEM_ -up-> A03 : platform metrics
+A03 -[#transparent]down- SYSTEM_
+A04 -right-> SYSTEM_ : registration request
+A05 -[#transparent]down-> SYSTEM_ : payment result
+A05 -down-> SYSTEM_
+A05 -[#transparent]down- SYSTEM_
+SYSTEM_ -up-> A05 : payment request
+A05 -[#transparent]down- SYSTEM_
+A06 -[#transparent]up-> SYSTEM_ : generated draft
+A06 -up-> SYSTEM_
+A06 -[#transparent]up- SYSTEM_
+SYSTEM_ -down-> A06 : draft request
+A06 -[#transparent]up- SYSTEM_
+A07 -[#transparent]up-> SYSTEM_ : diagram png
+A07 -up-> SYSTEM_
+A07 -[#transparent]up- SYSTEM_
+SYSTEM_ -down-> A07 : puml source
+A07 -[#transparent]up- SYSTEM_
+SYSTEM_ -right-> A08 : email request
+A09 -up-> SYSTEM_ : housekeeping tick
 @enduml
 "
 `;

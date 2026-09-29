@@ -52,44 +52,79 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: hệ thống là vòng tròn, actor xếp vòng quanh, mỗi actor đúng MỘT cạnh", () => {
+  it("context: hệ thống là vòng tròn, actor xếp vòng quanh, tối đa hai đường nhìn thấy mỗi actor", () => {
     const { puml, section } = only(FIXTURE, "context")
     expect(section).toBe("fixed:1")
-    expect(puml).toContain('usecase "\\n\\n   FlintFlow   \\n\\n" as SYSTEM_')
+    expect(puml).toContain('usecase "\\n\\n\\n\\n        FlintFlow        \\n\\n\\n\\n" as SYSTEM_')
     expect(puml).not.toContain("skinparam linetype")
     expect(puml).not.toContain("[hidden]")
+    // Không còn đường hai đầu mũi tên: mỗi chiều một đường riêng
+    expect(puml).not.toContain(" <-")
     const lines = puml.split(String.fromCharCode(10))
-    // Vòng quanh theo thứ tự id: actor đầu bên trái, actor thứ hai bên phải, còn lại xen kẽ trên/dưới
-    const SIDES = ["left", "right", "top", "bottom"] as const
-    const sideOf = (i: number) => (i === 0 ? SIDES[0] : i === 1 ? SIDES[1] : i % 2 === 0 ? SIDES[2] : SIDES[3])
-    const INTO = { left: "right", right: "left", top: "down", bottom: "up" } as const
-    const sorted = [...FIXTURE.actors].sort((a, b) => (a.id < b.id ? -1 : 1))
-    sorted.forEach((a, i) => {
+    const visible = (id: string) => lines.filter((l) => l.includes(id) && l.includes("->") && !l.includes("[#transparent]"))
+    for (const a of FIXTURE.actors) {
       expect(puml, a.id).toContain(`rectangle "${a.name}" as ${a.id}\n`)
-      // Một cạnh duy nhất: hai cạnh riêng làm nhãn dồn về một phía, hình bị lệch
-      expect(lines.filter((l) => l.includes(a.id) && l.includes("->")).length, a.id).toBe(1)
-      if (a.flows_in?.length && a.flows_out?.length) expect(puml, a.id).toContain(`${a.id} <-${INTO[sideOf(i)]}-> SYSTEM_ : `)
-    })
+      expect(visible(a.id).length, a.id).toBeLessThanOrEqual(2)
+    }
   })
 
-  it("context: cặp hai chiều ⇒ mũi tên hai đầu, nhãn hai dòng có ký hiệu chiều khớp vị trí", () => {
+  it("context: cặp hai chiều ⇒ nhãn đường vào và đường ra nằm hai phía đối nhau", () => {
     const { puml } = only(FIXTURE, "context")
-    // A01 bên trái: actor → hệ thống là "→", chiều ngược là "←"
-    expect(puml).toContain("A01 <-right-> SYSTEM_ : → brief answers, accepted step\\n← draft section, srs document\n")
-    // A03 hàng trên: actor → hệ thống là "↓"
-    expect(puml).toContain("A03 <-down-> SYSTEM_ : ↓ account action\\n↑ platform metrics\n")
-    // Một chiều ⇒ mũi tên thường, không có ký hiệu chiều trong nhãn
-    expect(puml).toContain("A04 -up-> SYSTEM_ : registration request\n")
-    expect(puml).toContain("SYSTEM_ -down-> A08 : email request\n")
+    const lines = puml.split(String.fromCharCode(10))
+    const twoWay = FIXTURE.actors.filter((a) => a.flows_in?.length && a.flows_out?.length)
+    expect(twoWay.length).toBeGreaterThan(0)
+    for (const a of twoWay) {
+      const carrier = lines.findIndex((l) => l.startsWith(`${a.id} -[#transparent]`))
+      const into = lines.findIndex((l) => /^A\d+ -(up|down)-> SYSTEM_$/.test(l) && l.startsWith(`${a.id} `))
+      const from = lines.findIndex((l) => l.startsWith("SYSTEM_ -") && l.includes(`-> ${a.id} : `))
+      // Graphviz đặt nhãn bên PHẢI cạnh: cạnh trong suốt khai báo trước nằm bên trái đường vào,
+      // nên nhãn của nó (flows_in) ra phía ngoài bên trái; nhãn flows_out ở ngoài bên phải đường ra
+      expect(carrier, a.id).toBeGreaterThanOrEqual(0)
+      expect(lines[carrier], a.id).toMatch(/-\[#transparent\](up|down)-> SYSTEM_ : /)
+      expect(lines[carrier].endsWith(a.flows_in!.join("\\n")), a.id).toBe(true)
+      // Thứ tự: nhãn vào (trong suốt) · đường vào · đệm · đường ra · đệm — đệm giữ actor căn giữa bó cạnh
+      expect(into, a.id).toBe(carrier + 1)
+      expect(lines[carrier + 2], a.id).toMatch(new RegExp(`^${a.id} -\\[#transparent\\](up|down)- SYSTEM_$`))
+      expect(from, a.id).toBe(carrier + 3)
+      expect(lines[carrier + 4], a.id).toBe(lines[carrier + 2])
+      expect(lines[from].endsWith(a.flows_out!.join("\\n")), a.id).toBe(true)
+    }
+    // Trái/phải chỉ chứa actor một chiều: cặp nằm ngang không tách được nhãn hai phía
+    const horizontal = lines.filter((l) => /-(left|right)->/.test(l) && l.includes("SYSTEM_"))
+    expect(horizontal.length).toBeLessThanOrEqual(2)
+    for (const l of horizontal) {
+      const id = l.match(/A\d+/)![0]
+      const actor = FIXTURE.actors.find((a) => a.id === id)!
+      expect(Boolean(actor.flows_in?.length && actor.flows_out?.length), id).toBe(false)
+    }
+  })
+
+  it("context: cặp hai chiều ưu tiên hàng trên (tối đa 4), dư xuống hàng dưới; actor một chiều dư vào hàng ít hơn", () => {
+    const { puml } = only(FIXTURE, "context")
+    const lines = puml.split(String.fromCharCode(10))
+    const sideOf = (id: string): string => {
+      const carrier = lines.find((l) => l.startsWith(`${id} -[#transparent]`))
+      if (carrier) return carrier.includes("down->") ? "top" : "bottom"
+      const edge = lines.find((l) => l.includes(id) && l.includes("->"))!
+      if (edge.startsWith(`${id} -down->`) || edge.startsWith("SYSTEM_ -up->")) return "top"
+      if (edge.startsWith(`${id} -up->`) || edge.startsWith("SYSTEM_ -down->")) return "bottom"
+      return "side"
+    }
+    const twoWay = [...FIXTURE.actors].filter((a) => a.flows_in?.length && a.flows_out?.length).sort((a, b) => (a.id < b.id ? -1 : 1))
+    twoWay.forEach((a, i) => expect(sideOf(a.id), a.id).toBe(i < 4 ? "top" : "bottom"))
+    // Fixture: 6 cặp ⇒ 4 trên, 2 dưới; A04/A08 chiếm trái/phải; A09 (một chiều dư) vào hàng ít hơn = dưới
+    expect(sideOf("A04")).toBe("side")
+    expect(sideOf("A08")).toBe("side")
+    expect(sideOf("A09")).toBe("bottom")
   })
 
   it("context: quá 3 nhãn một chiều ⇒ gộp '+ N more'", () => {
     const many = ["a", "b", "c", "d", "e"]
     const { puml } = only(mutate((s) => (s.actors.find((a) => a.id === "A01")!.flows_in = many)), "context")
-    expect(puml).toContain("A01 <-right-> SYSTEM_ : → a, b, c, + 2 more\\n←")
+    expect(puml).toMatch(/A01 -\[#transparent\](up|down)-> SYSTEM_ : a\\nb\\nc\\n\+ 2 more\n/)
   })
 
-  it("context: không có flows ⇒ cạnh một chiều mang tên use case, chiều suy từ kind", () => {
+  it("context: không có flows ⇒ một cạnh mang tên use case, chiều suy từ kind", () => {
     const { puml } = only(
       mutate((s) =>
         s.actors.forEach((a) => {
@@ -99,7 +134,7 @@ describe("renderers trên fixture 19 màn", () => {
       ),
       "context"
     )
-    expect(puml).not.toContain("<-")
+    expect(puml).not.toContain("[#transparent]")
     expect(puml).toMatch(/SYSTEM_ -\w+-> A05 : Purchase Credits\n/)
     const founderUseCases = FIXTURE.use_cases.filter((uc) => uc.actor_ids.includes("A01")).length
     expect(puml).toMatch(new RegExp(`A01 -\\w+-> SYSTEM_ : [^\\n]*\\\\n\\+ ${founderUseCases - 3} more\\n`))
@@ -320,7 +355,7 @@ describe("renderers trên fixture 19 màn", () => {
     const empty = createEmptySpine({ name: "Empty" })
     expect(only(empty, "screen_flow").puml).toContain("NO_SCREENS")
     expect(only(empty, "erd").puml).toContain("NO_ENTITIES")
-    expect(only(empty, "context").puml).toContain('usecase "\\n\\n   Empty   \\n\\n" as SYSTEM_')
+    expect(only(empty, "context").puml).toContain('usecase "\\n\\n\\n\\n        Empty        \\n\\n\\n\\n" as SYSTEM_')
     expect(only(empty, "context").puml).not.toContain("-> SYSTEM_")
   })
 })

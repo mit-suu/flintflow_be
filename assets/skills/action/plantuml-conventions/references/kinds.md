@@ -8,16 +8,24 @@ Source fields: `project.name` · `actors[].name/.kind/.flows_in/.flows_out` · `
 @startuml
 skinparam monochrome true
 skinparam shadowing false
-skinparam nodesep 45
+skinparam nodesep 20
 skinparam ranksep 110
 skinparam usecaseFontSize 16
-usecase "\n\n   FlintFlow   \n\n" as SYSTEM_
+usecase "\n\n\n\n        FlintFlow        \n\n\n\n" as SYSTEM_
 rectangle "Founder" as A01
 rectangle "Payment Gateway" as A05
 rectangle "Scheduler" as A09
-A01 <-right-> SYSTEM_ : → brief answers, accepted step\n← draft section
-A05 <-left-> SYSTEM_ : ← payment result\n→ payment request
-A09 -down-> SYSTEM_ : housekeeping tick
+A01 -[#transparent]down-> SYSTEM_ : brief answers\naccepted step
+A01 -down-> SYSTEM_
+A01 -[#transparent]down- SYSTEM_
+SYSTEM_ -up-> A01 : draft section
+A01 -[#transparent]down- SYSTEM_
+A05 -[#transparent]down-> SYSTEM_ : payment result
+A05 -down-> SYSTEM_
+A05 -[#transparent]down- SYSTEM_
+SYSTEM_ -up-> A05 : payment request
+A05 -[#transparent]down- SYSTEM_
+A09 -right-> SYSTEM_ : housekeeping tick
 @enduml
 ```
 
