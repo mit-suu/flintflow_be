@@ -41,7 +41,7 @@ describe("renderers trên fixture 19 màn", () => {
       const rendered = renderKind(FIXTURE, target.kind, target.owner_id)
       for (const [index, part] of rendered.entries()) {
         const [open, close] =
-          part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : part.kind === "screen_flow" ? ["@startdot", "@enddot"] : ["@startuml", "@enduml"]
+          part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : part.kind === "screen_flow" ? ["@startdot", "@enddot"] : part.kind === "erd" ? ["@startchen", "@endchen"] : ["@startuml", "@enduml"]
         expect(part.puml.startsWith(`${open}\n`), part.kind).toBe(true)
         expect(part.puml.endsWith(`${close}\n`), part.kind).toBe(true)
         expect(VIETNAMESE_DIACRITICS.test(part.puml), part.kind).toBe(false)
@@ -235,15 +235,19 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("screen_flow: màn không actor nào dùng ⇒ sơ đồ Unassigned cuối (chấm đen); chưa có liên kết actor ⇒ một sơ đồ chung", () => {
+  it("screen_flow: chỉ actor người có sơ đồ — màn mồ côi không vẽ; chưa có liên kết actor ⇒ một sơ đồ chung", () => {
     const withOrphan = mutate((s) => {
       s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Orphan Screen", flow_to: [] })
     })
     const parts = renderKind(withOrphan, "screen_flow")
-    const last = parts[parts.length - 1].puml
-    expect(screenFlowTitleOf(last)).toBe("Screens flow for unassigned screens")
-    expect(last).toContain('S20 [label="Orphan Screen"];')
-    expect(last).toContain("START [label=\"\", shape=circle")
+    expect(parts.map((p) => screenFlowTitleOf(p.puml))).toEqual([
+      "Screens flow for Founder",
+      "Screens flow for Business Analyst",
+      "Screens flow for Administrator",
+      "Screens flow for Guest"
+    ])
+    expect(parts.some((p) => p.puml.includes("S20"))).toBe(false)
+    expect(parts.some((p) => p.puml.includes("shape=circle"))).toBe(false)
 
     const unlinked = mutate((s) => {
       s.permissions = []
@@ -256,6 +260,17 @@ describe("renderers trên fixture 19 màn", () => {
     expect(single.puml).toContain("START -> S01;")
   })
 
+  it("screen_flow: màn công khai (quyền cho role không gắn actor) vẽ vào sơ đồ của mọi actor người", () => {
+    const withPublic = mutate((s) => {
+      s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Public Landing", flow_to: [] })
+      s.roles.push({ id: "R5", name: "Visitor", actor_id: null })
+      s.permissions.push({ id: "P999", screen_id: "S20", role_id: "R5", action: "view" })
+    })
+    const parts = renderKind(withPublic, "screen_flow")
+    expect(parts).toHaveLength(4)
+    for (const p of parts) expect(p.puml).toContain('S20 [label="Public Landing"];')
+  })
+
   it("screen_flow: nhãn DOT escape dấu ngoặc kép và gạch chéo", () => {
     const tricky = mutate((s) => {
       s.screens.find((x) => x.id === "S01")!.name = 'Log "in" \\ out'
@@ -264,10 +279,22 @@ describe("renderers trên fixture 19 màn", () => {
     expect(renderKind(tricky, "screen_flow")[3].puml).toContain("S01 [label=\"Log 'in' \\\\ out\"];")
   })
 
-  it("erd: entity và quan hệ crow's foot mặc định", () => {
+  it("erd: ký pháp Chen — hình thoi chứa động từ, cha 1 – con N, thiếu động từ ⇒ has", () => {
     const { puml } = only(FIXTURE, "erd")
-    expect(puml).toContain('entity "User" as E01')
-    expect(puml).toContain("E01 ||--o{ E02")
+    expect(puml).toContain('entity "User" as E01 {\n}')
+    expect(puml).toContain("E01 -1- R_E01_E02\nR_E01_E02 -N- E02")
+    const withVerb = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_verbs = { E02: "owns" }))
+    expect(only(withVerb, "erd").puml).toContain('relationship "owns" as R_E01_E02 {')
+    const oneToOne = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_cardinality = { E02: "1" }))
+    expect(only(oneToOne, "erd").puml).toContain("R_E01_E02 -1- E02")
+    expect(only(oneToOne, "erd").puml).toContain("R_E01_E05 -N- E05")
+    // Liên kết tuỳ chọn: phía cha (0,1) — `-0..1-` là lỗi cú pháp trong @startchen
+    const optional = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_optional = ["E02"]))
+    expect(only(optional, "erd").puml).toContain("E01 -(0,1)- R_E01_E02")
+    expect(only(optional, "erd").puml).toContain("E01 -1- R_E01_E05")
+    expect(only(mutate((s) => delete s.entities.find((e) => e.id === "E01")!.relation_verbs), "erd").puml).toContain(
+      'relationship "has" as R_E01_E02 {'
+    )
   })
 
   it("screen_layout: salt gắn function:<primary>, chỉ màn có primary function", () => {

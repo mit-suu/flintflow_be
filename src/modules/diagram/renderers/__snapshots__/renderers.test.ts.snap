@@ -31,34 +31,79 @@ A09 -down-> SYSTEM_ : housekeeping tick
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > erd 1`] = `
-"@startuml
+"@startchen
 skinparam monochrome true
-hide circle
-hide empty members
-entity "User" as E01
-entity "Project" as E02
-entity "Spine" as E03
-entity "ChatSession" as E04
-entity "CreditLedger" as E05
-entity "Subscription" as E06
-entity "Notification" as E07
-entity "Baseline" as E08
-entity "ChangeRecord" as E09
-entity "UsageRecord" as E10
-entity "Flag" as E11
-entity "Diagram" as E12
-E01 ||--o{ E02
-E01 ||--o{ E05
-E01 ||--o{ E07
-E02 ||--o{ E03
-E02 ||--o{ E04
-E03 ||--o{ E08
-E03 ||--o{ E09
-E03 ||--o{ E11
-E03 ||--o{ E12
-E05 ||--o{ E10
-E06 ||--o{ E01
-@enduml
+skinparam ranksep 20
+skinparam linetype ortho
+entity "User" as E01 {
+}
+entity "Project" as E02 {
+}
+entity "Spine" as E03 {
+}
+entity "ChatSession" as E04 {
+}
+entity "CreditLedger" as E05 {
+}
+entity "Subscription" as E06 {
+}
+entity "Notification" as E07 {
+}
+entity "Baseline" as E08 {
+}
+entity "ChangeRecord" as E09 {
+}
+entity "UsageRecord" as E10 {
+}
+entity "Flag" as E11 {
+}
+entity "Diagram" as E12 {
+}
+relationship "has" as R_E01_E02 {
+}
+E01 -1- R_E01_E02
+R_E01_E02 -N- E02
+relationship "has" as R_E01_E05 {
+}
+E01 -1- R_E01_E05
+R_E01_E05 -N- E05
+relationship "has" as R_E01_E07 {
+}
+E01 -1- R_E01_E07
+R_E01_E07 -N- E07
+relationship "has" as R_E02_E03 {
+}
+E02 -1- R_E02_E03
+R_E02_E03 -N- E03
+relationship "has" as R_E02_E04 {
+}
+E02 -1- R_E02_E04
+R_E02_E04 -N- E04
+relationship "has" as R_E03_E08 {
+}
+E03 -1- R_E03_E08
+R_E03_E08 -N- E08
+relationship "has" as R_E03_E09 {
+}
+E03 -1- R_E03_E09
+R_E03_E09 -N- E09
+relationship "has" as R_E03_E11 {
+}
+E03 -1- R_E03_E11
+R_E03_E11 -N- E11
+relationship "has" as R_E03_E12 {
+}
+E03 -1- R_E03_E12
+R_E03_E12 -N- E12
+relationship "has" as R_E05_E10 {
+}
+E05 -1- R_E05_E10
+R_E05_E10 -N- E10
+relationship "has" as R_E06_E01 {
+}
+E06 -1- R_E06_E01
+R_E06_E01 -N- E01
+@endchen
 "
 `;
 

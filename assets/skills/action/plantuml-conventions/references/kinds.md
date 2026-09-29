@@ -54,7 +54,8 @@ Source fields: `screens[].name/.flow_to/.is_popup/.tabs` + the human actor each 
 **Graphviz DOT, not a state diagram**: the flow starts at a diamond with the actor name inside, and a
 PlantUML state diagram cannot label a diamond. One part per human actor that uses the UI (graph label
 `Screens flow for <actor>`, also the image caption), holding only that actor's screens and the edges between
-them; screens no human actor uses go to a last `Unassigned screens` part (black-dot start) and raise
+them. No part for unassigned screens: a public screen (granted only to a role with no actor, e.g. Guest on
+Login) is drawn in every human actor's part; any other screen no human actor uses is not drawn and raises
 `orphan_screen`. Before any screen ↔ actor link exists: one unlabelled diagram, black-dot start. Arrows are
 one-way: of a pair pointing at each other only the forward edge (away from the entry) is drawn.
 
@@ -89,22 +90,27 @@ digraph screens_flow {
 
 ## `erd` — §3.1.5
 
-Source fields: `entities[].name/.relations`. Attributes are **not** drawn (not in source fields).
+Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional`. Attributes are **not** drawn (not in source fields).
+Chen notation: entity = rectangle, each relation = a diamond holding a lowercase verb (`relation_verbs`, `has`
+when missing). Braces after `entity` / `relationship` are required even when empty.
 
 ```plantuml
-@startuml
+@startchen
 skinparam monochrome true
-hide circle
-hide empty members
-entity "User" as E1
-entity "Project" as E2
-entity "ChatSession" as E3
-E1 ||--o{ E2 : owns
-E2 ||--|{ E3 : has
-@enduml
+skinparam ranksep 20
+skinparam linetype ortho
+entity "User" as E1 {
+}
+entity "Project" as E2 {
+}
+relationship "owns" as R_E1_E2 {
+}
+E1 -1- R_E1_E2
+R_E1_E2 -N- E2
+@endchen
 ```
 
-Crow's foot: `||` exactly one · `|o` zero or one · `}|` one or many · `}o` zero or many.
+Cardinality labels on the lines: `-1-` one · `-N-` many · `-(0,1)-` optional one. The parent side is `1`, or `(0,1)` when the child is in `relation_optional` (never `-0..1-`: a syntax error in `@startchen`); the child side is `relation_cardinality[<child>]`, `N` when missing.
 
 ## `screen_layout` — §3.x.y (core screens only, Phases §7.2)
 
