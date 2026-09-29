@@ -16,6 +16,7 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
+import { relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
@@ -360,7 +361,9 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   const blocks: Block[] = diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram")
   if (spine.entities.length > 0) {
     const entityName = (id: string) => spine.entities.find((e) => e.id === id)?.name ?? id
-    blocks.push(tableBlock(["Entity", "Description", "Relations"], spine.entities.map((e) => [e.name, e.description, e.relations.map(entityName).join(", ")])))
+    const relations = (e: Spine["entities"][number]) =>
+      e.relations.map((id) => `${relationVerb(e, id)} ${entityName(id)}${e.relation_optional?.includes(id) ? " (optional)" : ""}`).join(", ")
+    blocks.push(tableBlock(["Entity", "Description", "Relations"], spine.entities.map((e) => [e.name, e.description, relations(e)])))
   }
   return blocks
 }

@@ -29,14 +29,14 @@ This skill is loaded by every renderer (`renderer/*`) as shared rules, and is th
 | §1 Context Diagram | `context` | `null` | component / rectangle | `renderer/context` |
 | §2.2.1 Use Case Diagram | `usecase` | `null` | usecase | `renderer/usecase` |
 | §3.1.1 Screens Flow | `screen_flow` | `null` (one part per human actor) | Graphviz DOT (`@startdot`) | `renderer/screen-flow` |
-| §3.1.5 ERD | `erd` | `null` | entity + crow's foot | `renderer/erd` |
+| §3.1.5 ERD | `erd` | `null` | Chen (`@startchen`): entity + verb diamond | `renderer/erd` |
 | §3.x.y Screen Layout | `screen_layout` | `screen` | salt | `renderer/screen-layout` |
 
 **No sequence diagrams.** Per-kind syntax and skeletons: `references/kinds.md`.
 
 ## Common rules
 
-1. Start with `@startuml` and end with `@enduml` (`@startsalt` for screen layout, `@startdot` for screen flow). Exactly one diagram per file.
+1. Start with `@startuml` and end with `@enduml` (`@startsalt` for screen layout, `@startdot` for screen flow, `@startchen` for ERD). Exactly one diagram per file.
 2. **English labels only.** No Vietnamese diacritics anywhere in the file.
 3. **Draw only `source_fields`** of the kind (srs-spine §7.1). Anything else makes `source_hash` meaningless and forces redraws.
 4. **Aliases are Spine ids** (`A03`, `UC04`, `S7`, `E2`); the visible label is the name: `actor "Reviewer" as A03`. Ids stay stable when names change.

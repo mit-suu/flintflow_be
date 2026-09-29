@@ -564,6 +564,41 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "relation_verbs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[a-z]+( [a-z]+)*$"
+            }
+          },
+          "relation_cardinality": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1
+            },
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "1",
+                "N"
+              ]
+            }
+          },
+          "relation_optional": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "root": {
+            "type": "boolean"
           }
         },
         "required": [
