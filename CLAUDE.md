@@ -122,7 +122,7 @@ Prompt sống trong `assets/skills/<kind>/<id>/SKILL.md`: frontmatter là hợp 
 registry chỉ đọc đĩa.
 
 - `draftOps` **không nạp** `references/*.md`, nên mọi luật cần thiết phải nằm trong chính `SKILL.md`,
-  và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`). `references/` chỉ là tài
+  và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`; riêng `content/entities-erd` ≤ 250 qua `LINE_LIMIT_OVERRIDE`). `references/` chỉ là tài
   liệu cho người đọc.
 - Skill chưa viết mang `stub: true`; viết thật rồi thì bỏ `stub` **và** thêm thư mục vào
   `WRITTEN_NON_ACTION` trong `prompt-assets.test.ts`.
