@@ -41,7 +41,7 @@ describe("renderers trên fixture 19 màn", () => {
       const rendered = renderKind(FIXTURE, target.kind, target.owner_id)
       for (const [index, part] of rendered.entries()) {
         const [open, close] =
-          part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : part.kind === "screen_flow" ? ["@startdot", "@enddot"] : ["@startuml", "@enduml"]
+          part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : part.kind === "screen_flow" ? ["@startdot", "@enddot"] : part.kind === "erd" ? ["@startchen", "@endchen"] : ["@startuml", "@enduml"]
         expect(part.puml.startsWith(`${open}\n`), part.kind).toBe(true)
         expect(part.puml.endsWith(`${close}\n`), part.kind).toBe(true)
         expect(VIETNAMESE_DIACRITICS.test(part.puml), part.kind).toBe(false)
@@ -334,10 +334,22 @@ describe("renderers trên fixture 19 màn", () => {
     expect(renderKind(tricky, "screen_flow")[3].puml).toContain("S01 [label=\"Log 'in' \\\\ out\"];")
   })
 
-  it("erd: entity và quan hệ crow's foot mặc định", () => {
+  it("erd: ký pháp Chen — hình thoi chứa động từ, cha 1 – con N, thiếu động từ ⇒ has", () => {
     const { puml } = only(FIXTURE, "erd")
-    expect(puml).toContain('entity "User" as E01')
-    expect(puml).toContain("E01 ||--o{ E02")
+    expect(puml).toContain('entity "User" as E01 {\n}')
+    expect(puml).toContain("E01 -1- R_E01_E02\nR_E01_E02 -N- E02")
+    const withVerb = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_verbs = { E02: "owns" }))
+    expect(only(withVerb, "erd").puml).toContain('relationship "owns" as R_E01_E02 {')
+    const oneToOne = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_cardinality = { E02: "1" }))
+    expect(only(oneToOne, "erd").puml).toContain("R_E01_E02 -1- E02")
+    expect(only(oneToOne, "erd").puml).toContain("R_E01_E05 -N- E05")
+    // Liên kết tuỳ chọn: phía cha (0,1) — `-0..1-` là lỗi cú pháp trong @startchen
+    const optional = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_optional = ["E02"]))
+    expect(only(optional, "erd").puml).toContain("E01 -(0,1)- R_E01_E02")
+    expect(only(optional, "erd").puml).toContain("E01 -1- R_E01_E05")
+    expect(only(mutate((s) => delete s.entities.find((e) => e.id === "E01")!.relation_verbs), "erd").puml).toContain(
+      'relationship "has" as R_E01_E02 {'
+    )
   })
 
   it("screen_layout: salt gắn function:<primary>, chỉ màn có primary function", () => {

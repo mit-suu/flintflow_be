@@ -130,13 +130,16 @@ describe("skill trên đĩa (assets/skills)", () => {
   // FLF-171: skill action mode 1 là khung ở P1 (plan mode 1 §5.7); P2 đã viết nội dung cả 5 skill nên tập này rỗng.
   const MODE1_SKELETON_ACTION = new Set<string>([])
 
-  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
+  // Skill cần quy trình suy luận dài hơn mức chung (quyết định chiều/bản số từng quan hệ ERD)
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 250 }
+
+  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE); skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
       const dir = s.dir.replace(/\\/g, "/")
       if ((s.kind === "action" && !MODE1_SKELETON_ACTION.has(dir)) || WRITTEN_NON_ACTION.has(dir)) {
         expect(s.stub, `${s.dir} không được là stub`).toBe(false)
         const lines = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").split("\n")
-        expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(150)
+        expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(LINE_LIMIT_OVERRIDE[dir] ?? 150)
       } else {
         expect(s.stub, `${s.dir} phải đánh dấu stub`).toBe(true)
       }

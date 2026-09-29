@@ -2403,7 +2403,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "Project, CreditLedger, Notification",
+                  "text": "has Project, has CreditLedger, has Notification",
                 },
               ],
             ],
@@ -2420,7 +2420,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "Spine, ChatSession",
+                  "text": "has Spine, has ChatSession",
                 },
               ],
             ],
@@ -2437,7 +2437,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "Baseline, ChangeRecord, Flag, Diagram",
+                  "text": "has Baseline, has ChangeRecord, has Flag, has Diagram",
                 },
               ],
             ],
@@ -2471,7 +2471,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "UsageRecord",
+                  "text": "has UsageRecord",
                 },
               ],
             ],
@@ -2488,7 +2488,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
               ],
               [
                 {
-                  "text": "User",
+                  "text": "has User",
                 },
               ],
             ],

@@ -121,7 +121,15 @@ export const entitySchema = z.strictObject({
   id,
   name: z.string(),
   description: z.string(),
-  relations: z.array(id)
+  relations: z.array(id),
+  // Động từ trong hình thoi ERD (Chen), khoá là id đích trong `relations`: "Project contains Document"
+  relation_verbs: z.record(id, z.string().regex(/^[a-z]+( [a-z]+)*$/, "động từ tiếng Anh viết thường, vd `contains`")).optional(),
+  // Bản số phía con, khoá là id đích trong `relations`: "1" = một–một; thiếu ⇒ "N" (một–nhiều)
+  relation_cardinality: z.record(id, z.enum(["1", "N"])).optional(),
+  // Id con (trong `relations`) mà liên kết tới cha này là TUỲ CHỌN: con tồn tại được khi không có cha này
+  relation_optional: z.array(id).optional(),
+  // Dữ liệu chủ tồn tại độc lập (User, Course, Room…) — được phép không có cha
+  root: z.boolean().optional()
 })
 
 export const validationSchema = z.strictObject({

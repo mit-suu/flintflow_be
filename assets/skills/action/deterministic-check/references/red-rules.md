@@ -14,8 +14,9 @@
 | `screen_pending_at_baseline` | `screens[].detail_status = pending` | S-5 for that screen | ✔ |
 | `usecase_relation_invalid` | A use case includes/extends itself, sits in an include or extend cycle, or the same pair carries both an include and an extend | S-3.4 | ✔ |
 | `orphan_screen_at_baseline` | Same condition as yellow `orphan_screen`, checked at S-9: a screen no human actor uses, or isolated in the flow, or a pop-up nothing opens | S-4.2 | ✔ |
+| `orphan_entity_at_baseline` | Same condition as yellow `orphan_entity`, checked at S-9: the ERD is not one connected graph | S-4.5 | ✔ |
 
-That is 12 rules. Mode 1 (import) excludes `orphan_screen_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
+That is 13 rules. Mode 1 (import) excludes `orphan_screen_at_baseline` and `orphan_entity_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
 
 ## The "not there yet" gate (FLF-213)
 

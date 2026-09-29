@@ -122,7 +122,7 @@ Prompt sống trong `assets/skills/<kind>/<id>/SKILL.md`: frontmatter là hợp 
 registry chỉ đọc đĩa.
 
 - `draftOps` **không nạp** `references/*.md`, nên mọi luật cần thiết phải nằm trong chính `SKILL.md`,
-  và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`). `references/` chỉ là tài
+  và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`; riêng `content/entities-erd` ≤ 250 qua `LINE_LIMIT_OVERRIDE`). `references/` chỉ là tài
   liệu cho người đọc.
 - `fallbackModels` (tuỳ chọn, hiện chỉ provider `gemini`): model dự phòng cùng provider, thử lần lượt khi model chính
   quá tải (503 / 429 không phải hết tiền / timeout). Log AI ghi model thật sự trả lời.

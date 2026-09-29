@@ -1,7 +1,7 @@
 {
   "step_id": "S-4.5",
   "skill_id": "entities-erd",
-  "notes": "Five entities; relation ids sit on the parent side.",
+  "notes": "Five entities in one connected ERD; relation ids sit on the parent side, each with a verb.",
   "ops": [
     {
       "op": "add",
@@ -13,7 +13,11 @@
         "relations": [
           "E02",
           "E03"
-        ]
+        ],
+        "relation_verbs": {
+          "E02": "contains",
+          "E03": "has"
+        }
       },
       "reason": "S-4.5 domain entity"
     },
@@ -47,8 +51,14 @@
         "name": "Credit Wallet",
         "description": "The balance of AI credits an account can spend.",
         "relations": [
+          "E01",
           "E05"
-        ]
+        ],
+        "relation_verbs": {
+          "E01": "funds",
+          "E05": "holds"
+        },
+        "root": true
       },
       "reason": "S-4.5 domain entity"
     },

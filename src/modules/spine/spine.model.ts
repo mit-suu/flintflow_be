@@ -144,7 +144,11 @@ const entitySchema = new Schema(
     id: { type: String, required: true },
     name: { type: String, default: "" },
     description: { type: String, default: "" },
-    relations: { type: [String], default: [] }
+    relations: { type: [String], default: [] },
+    relation_verbs: { type: Schema.Types.Mixed, default: undefined },
+    relation_cardinality: { type: Schema.Types.Mixed, default: undefined },
+    relation_optional: { type: [String], default: undefined },
+    root: { type: Boolean, default: undefined }
   },
   opts
 )
