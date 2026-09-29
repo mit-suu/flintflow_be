@@ -34,7 +34,9 @@ Two habits decide whether this phase is useful:
   transcript is not read by later steps, only the Spine is.
 - **Record the unknown, do not invent it.** Anything the user has not said becomes an `assumptions[]`
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
-  sentence in `project.vision`.
+  sentence in `project.vision`. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
+  never an assumption, and never an assumption about their answer ("the goal is qualitative"). A user "yes/xác nhận"
+  to a proposal makes it a fact: never re-add an existing assumption; each assumption's `path` is the field it is about.
 
 `references/*.md` are **not loaded at runtime** — the rules below are what you get.
 
@@ -46,7 +48,7 @@ Two habits decide whether this phase is useful:
   captured_at}`; set **`project.system_name`** (English name on diagrams and cover, never `project.name`)
   to the name the user gave or picked — none yet ⇒ set your best 2–4-word Title Case suggestion **with an
   `assumptions[]` entry** saying it is a suggestion; **infer `project.form_factor` and `project.stakes`**
-  from the idea, each with an `assumptions[]` entry and its reason. `notes`: the idea in **one sentence**
+  from the idea, each with an `assumptions[]` entry and its reason — unless the user named it (then no assumption). `notes`: the idea in **one sentence**
   in the user's language — the gate asks the user to lock it.
 - **B-0.2 `project.form_factor`** — `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`,
   `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
@@ -68,14 +70,19 @@ the next turn — do not pick the neighbouring concept because it sounds close.
 
 ## B-1 — The brief (6 steps)
 
-Each step: ask what is missing, then write. `project.vision` and `project.goals[]` are the only
-`project` fields B-1 writes; everything else is an addendum aimed at a section.
+**Draft first, ask last.** Each step writes from what is already known — vision, goals, every addendum, the
+decisions ledger, the user's answers — and records what it inferred as `assumptions[]` the user confirms at the
+gate. A step with a draft to confirm asks **one** card ("Tôi đề xuất: … — đúng chưa?"), not a list of open questions.
+Ask only what cannot be reasonably assumed **and** would make the document wrong; never re-ask what an
+addendum or decision already holds, never ask what a later B-1 step owns (risks ⇒ B-1.6), never interview for a
+section the product does not need. `project.vision` and `project.goals[]` are the only `project` fields B-1
+writes; everything else is an addendum aimed at a section.
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
 | B-1.1 Vision, problem, opportunity | `project.vision`, `project.goals[]` (3–6, outcome-shaped), addendum for the problem/why-now | `fixed:1` |
 | B-1.2 Target users & jobs-to-be-done | addendum per persona/stakeholder, with the job each one needs done | `fixed:2.1` |
-| B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way | `fixed:1` |
+| B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
 | B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself | `fixed:5.4` |
@@ -122,7 +129,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
     { "op": "set", "path": "project.vision", "value": "Let a solo founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.", "reason": "B-1.1 vision" },
     { "op": "set", "path": "project.goals", "value": ["Cut time to a baseline-quality SRS from weeks to one day", "Keep every section traceable to a stated business goal", "Make the cost of one document predictable"], "reason": "B-1.1 goals" },
     { "op": "add", "path": "addendum[]", "value": { "id": "AD11", "topic": "Why now", "content": "Đội nhỏ không thuê được BA, tài liệu viết tay lệch nhau giữa các phần.", "content_en": "Small teams cannot hire a requirements engineer, and hand-written documents drift between sections.", "target_section": "fixed:1", "captured_at": "2026-09-16T00:00:00.000Z" }, "reason": "B-1.1 problem statement" },
-    { "op": "add", "path": "assumptions[]", "value": { "id": "AS01", "path": "project.goals", "statement": "One day means one working day for one person.", "statement_vi": "Một ngày nghĩa là một ngày làm việc của một người.", "rationale": "The user said fast but gave no number.", "rationale_vi": "User nói nhanh nhưng chưa nêu con số.", "origin_step_id": "B-1.1", "status": "unconfirmed", "confirmed_at": null }, "reason": "B-1.1 quantified a vague goal" }
+    { "op": "add", "path": "assumptions[]", "value": { "id": "AS01", "path": "project.goals", "statement": "The first release serves one team of up to 10 people.", "statement_vi": "Bản đầu phục vụ một nhóm tối đa 10 người.", "rationale": "Team size was never mentioned; it sets the scale the goals are measured at.", "rationale_vi": "User chưa nói quy mô nhóm; quy mô quyết định mục tiêu đo ở mức nào.", "origin_step_id": "B-1.1", "status": "unconfirmed", "confirmed_at": null }, "reason": "B-1.1 scale nobody stated" }
   ],
   "notes": "Vision and three goals written; the why-now went to fixed:1."
 }

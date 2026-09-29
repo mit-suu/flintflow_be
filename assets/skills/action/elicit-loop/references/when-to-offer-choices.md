@@ -16,6 +16,9 @@ options, no model-written "Other", header ≤ 12 characters) — see `src/module
 | Confirm a settled value | card, first option keeps it | "Giữ 99% như đã chốt (Khuyến nghị)" / "99.9%" |
 | System name (B-0.1) | card, 3–4 names | "Minh An Booking (Khuyến nghị)" / "CarePoint" / … |
 | Has a sensible default | **don't ask** — state the assumption in `reply` | giờ làm việc 8:00–17:00 cho phòng khám |
+| User delegates ("bạn tự đề xuất", "hệ thống phải tự tìm hiểu", "tôi chưa biết, bạn nghĩ sao") | proposal + reason in `reply`, then a card confirming it (proposal first, `(Khuyến nghị)`) — never the open question again | "Mình đề xuất nhắc lịch qua SMS trước 24 giờ vì…" → card "SMS trước 24 giờ (Khuyến nghị)" / "Zalo" |
+| Technical number a sponsor cannot give (concurrent users, uptime, security package, performance threshold) | card, recommendation sized to known scale/stakes | "Khoảng 50 người dùng cùng lúc (Khuyến nghị)" / "200" / "1.000" |
+| Qualitative answer or an idea that meets the goal | **settled** — do not ask again for a number | "càng sớm càng tốt", "cho bệnh nhân tự chọn giờ trống" |
 
 ## Option rules
 
@@ -30,6 +33,9 @@ options, no model-written "Other", header ≤ 12 characters) — see `src/module
 - Never add "Other"/"Khác"/"Tự nhập" — the UI always offers it.
 
 ## What "thin" means (push back once)
+
+Push back only when the gap would make the document wrong, and only once. A qualitative answer ("càng sớm
+càng tốt") is an answer — settle it, do not re-ask for a number.
 
 | Field | Thin | Push back with |
 | --- | --- | --- |
