@@ -366,7 +366,16 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
 
 // ─── run-state (WP-4: khôi phục sau reload, huỷ lượt) ───────────────
 
-/** `alive` = khoá còn hiệu lực. Lượt `running` mà khoá hết hạn nghĩa là lượt đã chết giữa chừng. */
+/**
+ * `alive` = lượt còn tiếp tục được. `running` ⇒ khoá còn hiệu lực (hết hạn nghĩa là chết giữa chừng). `waiting_answer`
+ * nhả khoá để user trả lời lúc nào cũng được (FLF-222) ⇒ sống khi còn `pending_answer`; tính theo khoá thì mọi lượt chờ
+ * đều "chết" và FE báo "Lượt chạy bị gián đoạn" ngay khi AI hỏi thêm sau một lượt trả lời.
+ */
+const isAlive = (doc: RunStateDoc): boolean => {
+  if (doc.status === "running") return new Date(doc.locked_until).getTime() > Date.now()
+  if (doc.status === "waiting_answer") return doc.pending_answer != null || new Date(doc.locked_until).getTime() > Date.now()
+  return true
+}
 const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
   step_id: doc.step_id,
   run_id: doc.run_id,
@@ -376,7 +385,7 @@ const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
   batch: doc.batch,
   started_at: doc.started_at,
   last_event_at: doc.last_event_at,
-  alive: doc.status === "running" || doc.status === "waiting_answer" ? new Date(doc.locked_until).getTime() > Date.now() : true,
+  alive: isAlive(doc),
   questions: doc.questions,
   gate_payload: doc.gate_payload,
   events: doc.events,
