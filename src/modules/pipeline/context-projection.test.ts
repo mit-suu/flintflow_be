@@ -18,7 +18,7 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { loadStepRegistry, orderedSteps } from "./step-registry.js"
 
@@ -209,5 +209,21 @@ describe("buildStepContext", () => {
     expect(stepNeedsSourceDocuments("S-5.4@S01")).toBe(true)
     expect(stepNeedsSourceDocuments("S-3.4")).toBe(false)
     expect(stepNeedsSourceDocuments("not-a-step")).toBe(false)
+  })
+})
+
+describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đã kể", () => {
+  it("Brief và S-1 (step hoặc đơn vị giai đoạn) ⇒ toàn bộ addendum, dạng gửi model", () => {
+    expect(FIXTURE.addendum.length).toBeGreaterThan(0)
+    for (const unit of ["B-1", "B-1.3", "S-1"]) {
+      expect(addendumForUnit(FIXTURE, unit)).toEqual(
+        FIXTURE.addendum.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+      )
+    }
+  })
+
+  it("giai đoạn khác ⇒ không nạp (giữ như cũ)", () => {
+    expect(addendumForUnit(FIXTURE, "S-4")).toEqual([])
+    expect(addendumForUnit(FIXTURE, "S-5@S03")).toEqual([])
   })
 })
