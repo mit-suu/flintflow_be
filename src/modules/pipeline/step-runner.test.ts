@@ -102,7 +102,11 @@ const db = vi.hoisted(() => {
     updateOne: async (filter: { _id: string }, update: Doc | { $push: { messages: unknown } }) => {
       const row = sessions.find((s) => s._id === filter._id)
       if (row) {
-        if ("$push" in update) (row.messages as unknown[]).push((update as { $push: { messages: unknown } }).$push.messages)
+        if ("$push" in update) {
+          const pushed = (update as { $push: { messages: unknown } }).$push.messages
+          const each = (pushed as { $each?: unknown[] }).$each
+          ;(row.messages as unknown[]).push(...(Array.isArray(each) ? each : [pushed]))
+        }
         else Object.assign(row, update)
       }
       return { modifiedCount: row ? 1 : 0 }
@@ -145,9 +149,10 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, CALL_LIMIT, CHAT_BUDGET_REPLY, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, nextPendingAfterChat, CALL_LIMIT, CHAT_BUDGET_REPLY, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
+import { resumePhaseInterview } from "./phase-runner.service.js"
 import { resumeProject } from "./resume.service.js"
 import { stepEventSchema, type StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -381,8 +386,8 @@ describe("step-runner: POST /answer", () => {
 
     const session = db.sessions.find((s) => s._id === SESSION)!
     const userMsgs = (session.messages as { role: string; content: string }[]).filter((m) => m.role === "user")
-    // Câu trả lời trên thẻ vào lịch sử kèm câu hỏi: "câu hỏi: lựa chọn"
-    expect(userMsgs.some((m) => m.content.endsWith(": Người quản trị"))).toBe(true)
+    // Câu trả lời trên thẻ vào lịch sử chỉ có lựa chọn — câu hỏi đã nằm ở tin AI ngay trên
+    expect(userMsgs.map((m) => m.content)).toContain("Người quản trị")
   })
 })
 
@@ -798,7 +803,7 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
     expect(spine.actors.map((a) => a.id)).toContain("A09")
     expect(spine.decisions.map((d) => d.topic_key)).toContain("uptime")
     const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
-    expect(userMsgs).toEqual(["Actor chính là ai?: Quản trị viên\nMức uptime mong muốn?: 99.9%"])
+    expect(userMsgs).toEqual(["Quản trị viên\n99.9%"])
   })
 
   it("question_id lạ, session khác, hay step không đang chờ ⇒ 409 STEP_NOT_RUNNABLE, không chạy gì", async () => {
@@ -1009,7 +1014,7 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     await s.run
     expect(s.events.some((e) => e.type === "gate_ready")).toBe(true)
     const userMsgs = (db.sessions[0].messages as { role: string; content: string }[]).filter((m) => m.role === "user").map((m) => m.content)
-    expect(userMsgs).toEqual(["Uptime 99% là đủ cho tụi mình", "Actor chính là ai?: Quản trị viên"])
+    expect(userMsgs).toEqual(["Uptime 99% là đủ cho tụi mình", "Quản trị viên"])
   })
 
   it("B-0.1 chưa có ý tưởng: tin nhắn kể ý tưởng đóng mọi câu gợi mở, không hỏi lại, đi soạn luôn", async () => {
@@ -1039,6 +1044,39 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     expect(elicitExecutor.mock.calls.some(([input]) => (input as { promptVariables?: { chat_turn?: boolean } }).promptVariables?.chat_turn)).toBe(false)
     expect(JSON.stringify(draftExecutor.mock.calls[0])).toContain("Tôi cần một web tạo tài liệu SRS")
     expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+  })
+
+  it("B-0.1 chạy bằng tin kể ý tưởng: câu trả lời sau đó đi qua lượt chat, không gán nguyên tin cho mọi câu", async () => {
+    const spine = structuredClone(MINIMAL)
+    spine.steps = []
+    spine.addendum = []
+    spine.project.vision = null
+    spine.progress.current_phase = "B-0"
+    spine.progress.current_step = "B-0.1"
+    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    seedSession(true)
+    const ASK = [
+      { question: "Hiện quy trình đặt lịch đang làm thế nào?", options: [], multiple: false, topic_key: "current_process" },
+      { question: "Khó khăn lớn nhất là gì?", options: [], multiple: false, topic_key: "pain_point" }
+    ] as never as ElicitOutput["questions"]
+    const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) =>
+      input.promptVariables?.chat_turn ? chatReply("Rõ", []) : elicitReply("Mình hỏi thêm chút", ASK)
+    )
+    const draftExecutor = vi.fn<StepRunnerDeps["draftExecutor"]>(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "B-0.1", SESSION, USER, emit, {
+      elicitExecutor: elicitExecutor as never,
+      draftExecutor,
+      renderDeps: renderStub(),
+      message: "Bệnh viện tỉnh cần phần mềm quản lý khám ngoại trú"
+    })
+    await waitCount(events, "answer_needed", 1)
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: [], message: "bn xếp hàng từ sáng sớm lấy số" })
+    await waitCount(events, "answer_needed", 2)
+    expect(elicitExecutor.mock.calls.some(([input]) => (input as { promptVariables?: { chat_turn?: boolean } }).promptVariables?.chat_turn)).toBe(true)
+    const again = events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: again.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })
+    await run
   })
 
   it("AI viết lại câu còn chờ theo tin nhắn ⇒ hỏi bản mới, không hỏi lại nguyên văn", async () => {
@@ -1150,5 +1188,146 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     controller.abort()
     await s.run
     await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers: [] })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+  })
+})
+
+describe("settleFromChat: ghép câu trả lời đúng câu hỏi", () => {
+  const open = (topic_key: string, question: string) => ({ topic_key, question, options: [] })
+  const asked = [
+    open("appointment_goal", "Mục tiêu chính của việc đặt lịch online là gì?"),
+    open("wait_time_target", "Bạn muốn giảm thời gian chờ xuống bao nhiêu?"),
+    { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)" }, { label: "Ứng dụng di động" }] },
+    open("payment", "Có thu phí đặt lịch không?")
+  ]
+  const settledAll = [
+    { topic_key: "appointment_goal", answer: "(model diễn lại mục tiêu)" },
+    { topic_key: "wait_time_target", answer: "(model diễn lại thời gian chờ)" },
+    { topic_key: "payment", answer: "(model diễn lại thu phí)" }
+  ]
+
+  it("tin nhắn đánh số trả lời 3 câu mở ⇒ 3 đoạn khác nhau theo thứ tự câu mở", () => {
+    const message = "1. Giảm tải cho quầy lễ tân,\nbệnh nhân tự chọn giờ\n2. Càng sớm càng tốt\n3. Không thu phí\n4. Thêm nhắc lịch qua SMS"
+    expect(settleFromChat(asked, settledAll, message)).toEqual([
+      { question_id: "Q_appointment_goal", answer: "Giảm tải cho quầy lễ tân, bệnh nhân tự chọn giờ" },
+      { question_id: "Q_wait_time_target", answer: "Càng sớm càng tốt" },
+      { question_id: "Q_payment", answer: "Không thu phí" }
+    ])
+  })
+
+  it("danh sách đánh số nằm trong MỘT câu trả lời ⇒ theo trích đoạn model, không tách sang câu khác", () => {
+    const message = "Tính năng:\n1. Đặt lịch\n2. Nhắc lịch\nNgười dùng là bệnh nhân"
+    const out = settleFromChat(asked, [
+      { topic_key: "appointment_goal", answer: "1. Đặt lịch\n2. Nhắc lịch" },
+      { topic_key: "wait_time_target", answer: "Người dùng là bệnh nhân" }
+    ], message)
+    expect(out).toEqual([
+      { question_id: "Q_appointment_goal", answer: "1. Đặt lịch\n2. Nhắc lịch" },
+      { question_id: "Q_wait_time_target", answer: "Người dùng là bệnh nhân" }
+    ])
+  })
+
+  it("không đánh số: trích đoạn đúng chuỗi con ⇒ nhận; trích bịa ⇒ câu đó vẫn chờ", () => {
+    const message = "Mục tiêu là giảm hàng chờ ở quầy. Thời gian chờ thì càng ngắn càng tốt"
+    const out = settleFromChat(asked, [
+      { topic_key: "appointment_goal", answer: "giảm hàng chờ ở quầy" },
+      { topic_key: "wait_time_target", answer: "dưới 15 phút" }
+    ], message)
+    expect(out).toEqual([{ question_id: "Q_appointment_goal", answer: "giảm hàng chờ ở quầy" }])
+  })
+
+  it("model trả nguyên văn cho nhiều câu ⇒ chỉ câu mở đầu nhận, không ghi trùng", () => {
+    const message = "Giảm tải lễ tân và càng sớm càng tốt"
+    const out = settleFromChat(asked, [
+      { topic_key: "appointment_goal", answer: message },
+      { topic_key: "wait_time_target", answer: message }
+    ], message)
+    expect(out).toEqual([{ question_id: "Q_appointment_goal", answer: message }])
+  })
+
+  it("một câu mở được chốt ⇒ nguyên văn tin nhắn", () => {
+    expect(settleFromChat(asked, [{ topic_key: "payment", answer: "model diễn lại" }], "Không, miễn phí hoàn toàn")).toEqual([
+      { question_id: "Q_payment", answer: "Không, miễn phí hoàn toàn" }
+    ])
+  })
+
+  it("một câu mở, tin nhắn trả lời cả câu khác ⇒ lấy trích đoạn của câu đó, không nguyên văn", () => {
+    expect(settleFromChat(asked, [{ topic_key: "payment", answer: "2, tôi nghĩ có" }], "1 theo khuyến nghị của bạn\n2, tôi nghĩ có")).toEqual([
+      { question_id: "Q_payment", answer: "2, tôi nghĩ có" }
+    ])
+  })
+
+  it("câu lựa chọn giữ luật khớp nhãn", () => {
+    expect(settleFromChat(asked, [{ topic_key: "platform", answer: "web" }], "Làm web thôi")).toEqual([{ question_id: "Q_platform", answer: "Web" }])
+    expect(settleFromChat(asked, [{ topic_key: "platform", answer: "Desktop" }], "Desktop")).toEqual([])
+  })
+})
+
+describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời", () => {
+  const goal = { topic_key: "success_goal", question: "Mục tiêu nào quan trọng nhất để coi dự án thành công?", options: [] }
+  const card = { topic_key: "platform", question: "Nền tảng?", options: [{ label: "Web (Khuyến nghị)" }, { label: "Ứng dụng di động" }] }
+  const idea = "bác sĩ khám xong bấm nút là báo bệnh nhân kế tiếp đến sớm"
+
+  it("câu mở đã được trả lời một lần mà AI vẫn hỏi lại ⇒ lần trả lời kế tiếp chốt nguyên văn", () => {
+    expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea)).toEqual([{ question_id: "Q_success_goal", answer: idea }])
+  })
+
+  it("lần đầu được hỏi, hỏi ngược / uỷ quyền / đồng ý suông, hoặc còn nhiều câu mở ⇒ để AI quyết", () => {
+    expect(settleRepeatedAnswer([goal], [], idea)).toEqual([])
+    for (const text of ["tôi chưa biết nữa bạn nghĩ sao", "ban nghi sao", "vậy nên đo bằng gì?", "oke", "Ừ", "được"]) {
+      expect(settleRepeatedAnswer([{ ...goal, replied: 1 }], [], text)).toEqual([])
+    }
+    const other = { topic_key: "scope", question: "Phạm vi?", options: [], replied: 1 }
+    expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, other], [], idea)).toEqual([])
+  })
+
+  it("tin đã chốt được câu khác ⇒ không gán thêm cho câu mở (một tin không bao giờ cho hai câu)", () => {
+    const wait = { topic_key: "wait_time_target", question: "Chờ tối đa bao lâu?", options: [], replied: 1 }
+    const settled = [{ question_id: "Q_wait_time_target", answer: "Khoảng 30 phút là được" }]
+    expect(settleRepeatedAnswer([wait, { ...goal, replied: 1 }], settled, "Khoảng 30 phút là được")).toEqual(settled)
+    const picked = [{ question_id: "Q_platform", answer: "Ứng dụng di động" }]
+    expect(settleRepeatedAnswer([card, { ...goal, replied: 1 }], picked, "làm ứng dụng di động nhé")).toEqual(picked)
+  })
+
+  it("tin nhắc tới một lựa chọn của câu có lựa chọn đang chờ ⇒ không chốt câu mở", () => {
+    expect(settleRepeatedAnswer([card, { ...goal, replied: 1 }], [], "web thôi")).toEqual([])
+  })
+
+  it("nextPendingAfterChat chỉ đếm tin trả lời thật", () => {
+    const once = nextPendingAfterChat({} as never, [goal], [], idea)
+    expect(once[0].replied).toBe(1)
+    expect(nextPendingAfterChat({} as never, once, [], idea)[0].replied).toBe(2)
+    expect(nextPendingAfterChat({} as never, [goal], [], "bạn nghĩ sao")[0].replied).toBeUndefined()
+    expect(nextPendingAfterChat({} as never, [goal], [], "oke")[0].replied).toBeUndefined()
+  })
+})
+
+describe("phỏng vấn đầu giai đoạn: transcript", () => {
+  const asked = [
+    { topic_key: "uptime", question: "Hệ thống cần sẵn sàng tới mức nào?", options: [{ label: "99%" }, { label: "99.9%" }] },
+    { topic_key: "concurrent_users", question: "Bao nhiêu người dùng cùng lúc?", options: [{ label: "50" }, { label: "500" }] }
+  ]
+  const pending = { kind: "phase_interview" as const, unit: "S-6", session_id: SESSION, asked, base_answers_text: "", reply: "Mình cần chốt vài con số." }
+  const answers = [
+    { question_id: "Q_uptime", answer: "99.9%" },
+    { question_id: "Q_concurrent_users", answer: "50" }
+  ]
+  const messagesOf = () => (db.sessions[0].messages as { role: string; content: string; step: string }[]).filter((m) => m.step === "S-6")
+
+  it("trả lời trên thẻ ⇒ đúng 1 tin AI (JSON lời đáp + câu hỏi) và 1 tin user chỉ có đáp án", async () => {
+    seedSpine()
+    seedSession(true)
+    await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers })
+    const messages = messagesOf()
+    expect(messages.filter((m) => m.role === "ai")).toHaveLength(1)
+    expect(JSON.parse(messages[0].content)).toEqual({ reply: "Mình cần chốt vài con số.", questions: asked.map((q) => ({ question: q.question })) })
+    expect(messages[1]).toMatchObject({ role: "user", content: "99.9%\n50" })
+  })
+
+  it("lượt hỏi đã có trong lịch sử (sau lượt chat) ⇒ không ghi thêm bản thứ hai", async () => {
+    seedSpine()
+    seedSession(true)
+    ;(db.sessions[0].messages as unknown[]).push({ role: "ai", content: JSON.stringify({ reply: "x", questions: [] }), step: "S-6", createdAt: new Date() })
+    await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers })
+    expect(messagesOf().filter((m) => m.role === "ai")).toHaveLength(1)
   })
 })

@@ -39,6 +39,8 @@ export interface ModelQuestion {
   options: QuestionOption[]
   multiple?: boolean
   topic_key?: string
+  /** Nội bộ: số tin chat user đã gửi trong lúc câu này chờ mà AI chưa chốt được (không gửi FE — xem `settleRepeatedAnswer`). */
+  replied?: number
 }
 
 /** Câu gửi user — đúng `questionSchema` của hợp đồng, luôn ở dạng option object. */
@@ -169,6 +171,41 @@ export const answeredTopics = (
     return [{ topic_key: question.topic_key, question: question.question, answer }]
   })
 }
+
+/**
+ * Tách tin nhắn user trả lời theo số (`1. …` / `1) …` đầu dòng) — cùng cách đánh số câu mở trong tin nhắn AI. Khoá là
+ * vị trí 0-based theo số user gõ; dòng không đánh số nối vào đoạn đang mở, chữ trước số đầu tiên bị bỏ.
+ */
+export const splitNumberedAnswer = (message: string): Map<number, string> => {
+  const out = new Map<number, string>()
+  let current = -1
+  for (const line of message.split("\n")) {
+    const match = /^\s*(\d+)[.)]\s+(.*)$/.exec(line)
+    if (match) {
+      current = Number(match[1]) - 1
+      out.set(current, match[2].trim())
+    } else if (current >= 0 && line.trim() !== "") {
+      out.set(current, `${out.get(current) ?? ""} ${line.trim()}`.trim())
+    }
+  }
+  for (const [index, text] of out) if (text === "") out.delete(index)
+  return out
+}
+
+const normalizeText = (s: string): string => s.replace(/\s+/g, " ").trim().toLowerCase()
+
+/**
+ * Trích đoạn model báo là câu trả lời của một câu: chỉ nhận khi nó là chuỗi con của tin nhắn user (bỏ khác biệt khoảng
+ * trắng, hoa/thường) — model không được diễn lại hay bịa câu trả lời. Không phải chuỗi con ⇒ `undefined`.
+ */
+export const verifiedExcerpt = (excerpt: string, message: string): string | undefined => {
+  const text = excerpt.trim()
+  if (text === "") return undefined
+  return normalizeText(message).includes(normalizeText(text)) ? text : undefined
+}
+
+/** Hai đoạn chữ giống nhau khi bỏ khác biệt khoảng trắng, hoa/thường. */
+export const sameText = (a: string, b: string): boolean => normalizeText(a) === normalizeText(b)
 
 /** Câu hỏi lưu trong tin nhắn chat Discovery — FE đọc `question`/`options` (tin nhắn cũ: `suggestedAnswers`). */
 export interface ChatQuestion {

@@ -174,6 +174,17 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
 }
 
 /**
+ * Addendum cho lượt hỏi không có `StepContext` (phỏng vấn đầu giai đoạn, chat tự do) — `unit` là step (`B-1.3`) hoặc
+ * đơn vị giai đoạn (`B-1`, `S-5@S03`). Brief và S-1 thấy toàn bộ "Điều bạn đã kể", như lượt hỏi của step: thiếu nó thì
+ * AI hỏi lại điều user đã kể. Giai đoạn khác giữ như cũ (không nạp) — addendum ở đó lọc theo section của từng step.
+ */
+export const addendumForUnit = (spine: Spine, unit: string): AddendumForModel[] => {
+  const phase = unit.split("@")[0].replace(/\.\d+$/, "")
+  if (!phase.startsWith("B-") && phase !== "S-1") return []
+  return spine.addendum.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+}
+
+/**
  * BUG-19: elicit gợi ý ngược với điều đã chốt (cọc 30% trong khi đã chốt 50.000₫; "tối đa 3 lịch/ngày"
  * trong khi đã chốt 1 lịch đang chờ). Nguyên nhân: context của elicit không có `business_rules` và `nfrs`.
  * Những gốc này luôn được đưa vào vòng hỏi, bất kể `reads` của step, ở dạng rút gọn.

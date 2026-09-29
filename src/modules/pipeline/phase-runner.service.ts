@@ -17,7 +17,7 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { projectStep } from "./context-projection.js"
+import { addendumForUnit, projectStep } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
 import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
@@ -69,16 +69,15 @@ const recordInterviewAnswers = async (
   chat: { settledIds: ReadonlySet<string> } | null = null
 ): Promise<void> => {
   if (!chat) {
-    const transcript: IChatMessage[] = [
-      { role: "ai", content: [reply, ...asked.map((q, i) => `${i + 1}. ${q.question}`)].join("\n"), step: unit, createdAt: new Date() },
-      ...answers.map((a) => ({
-        role: "user" as const,
-        content: answerText(a.answer),
-        step: unit,
-        createdAt: new Date()
-      }))
-    ]
-    await pushInterviewMessages(projectId, sessionId, transcript)
+    // Lượt hỏi vào lịch sử đúng MỘT bản, dạng JSON khung chat vẽ được: sau một lượt chat tự do nó đã được ghi (câu còn
+    // chờ — `interviewChatTurn`), ghi lại ở đây thành hai tin AI cho cùng một lượt hỏi.
+    const transcript: IChatMessage[] = (await hasInterviewAsk(sessionId, unit))
+      ? []
+      : [{ role: "ai", content: askTranscript(reply, asked), step: unit, createdAt: new Date() }]
+    // Câu trả lời trên thẻ: một tin, mỗi đáp án một dòng — câu hỏi đã nằm ngay trên, không lặp lại trong bong bóng user
+    const said = answers.map((a) => answerText(a.answer)).filter((text) => text !== "")
+    if (said.length > 0) transcript.push({ role: "user", content: said.join("\n"), step: unit, createdAt: new Date() })
+    if (transcript.length > 0) await pushInterviewMessages(projectId, sessionId, transcript)
   }
 
   const { record, spine: spineNow } = await load(projectId)
@@ -86,6 +85,12 @@ const recordInterviewAnswers = async (
   if (ops.length > 0) {
     await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: `Phỏng vấn đầu giai đoạn ${unit}` })
   }
+}
+
+/** Lịch sử đã có tin AI của lượt phỏng vấn `unit` chưa. */
+const hasInterviewAsk = async (sessionId: string, unit: string): Promise<boolean> => {
+  const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
+  return (session?.messages ?? []).some((m) => m.step === unit && m.role === "ai")
 }
 
 /** Ghi tin vào transcript của lượt phỏng vấn — lọc cả `projectId` như mọi lượt ghi transcript (FLF-221). */
@@ -113,8 +118,7 @@ const interviewChatTurn = async (
   const cardAnswers = payload.answers.filter((a) => indexOfQuestion(asked, a.question_id) >= 0)
   // Lượt hỏi đầu giai đoạn chỉ vào lịch sử khi có câu trả lời trên thẻ — trả lời bằng chat thì câu hỏi biến mất khỏi
   // khung chat ngay khi user gửi. Ghi nó trước tin của user.
-  const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
-  if (!(session?.messages ?? []).some((m) => m.step === unit && m.role === "ai")) {
+  if (!(await hasInterviewAsk(sessionId, unit))) {
     await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(askedReply, asked), step: unit, createdAt: new Date() }])
   }
   if (!payload.messageRecorded) {
@@ -133,7 +137,8 @@ const interviewChatTurn = async (
     stepName: `Phỏng vấn đầu giai đoạn ${unit}`,
     asked,
     message,
-    recentTurns: `User: ${message}`,
+    // Lời AI lúc đặt các câu đang chờ + tin user: thiếu lời AI thì model không biết user đang trả lời câu nào
+    recentTurns: [askedReply ? `AI: ${askedReply}` : "", `User: ${message}`].filter((t) => t !== "").join("\n"),
     projection: {},
     spine,
     elicitExecutor: deps.elicitExecutor
@@ -145,7 +150,7 @@ const interviewChatTurn = async (
   })
   const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
   const { spine: after } = await load(projectId)
-  const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions)
+  const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
   await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(turn.reply, remaining), step: unit, createdAt: new Date() }])
   return { reply: turn.reply, remaining }
 }
@@ -281,7 +286,7 @@ const askPhaseInterview = async (
           missing,
           pending_questions: [],
           projection: {},
-          addendum: [],
+          addendum: addendumForUnit(spine, unit),
           content_guidance: "",
           decisions: ledgerForPrompt(spine),
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói

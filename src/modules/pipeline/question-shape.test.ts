@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
-import { answerText, answeredTopics, chatReplyQuestionId, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, type ModelQuestion } from "./question-shape.js"
+import { answerText, answeredTopics, chatReplyQuestionId, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
 
 const opts = (...labels: string[]) => labels.map((label) => ({ label }))
 const q = (question: string, extra: Partial<ModelQuestion> = {}): ModelQuestion & { topic_key: string } => ({
@@ -159,5 +159,22 @@ describe("FLF-221: id câu hỏi theo topic_key", () => {
     const answers = [{ question_id: "Q_uptime", answer: "99%" }]
     expect(answeredTopics(asked, answers)).toEqual([])
     expect(answeredTopics(asked, answers, new Set(["Q_uptime"]))).toEqual([{ topic_key: "uptime", question: "Uptime?", answer: "99%" }])
+  })
+})
+
+describe("splitNumberedAnswer / verifiedExcerpt", () => {
+  it("tách theo số đầu dòng, nối dòng tiếp theo, bỏ chữ trước số đầu", () => {
+    const out = splitNumberedAnswer("Trả lời nhé:\n1. Lễ tân\n2) 99%\ncó thể hơn\n3. ")
+    expect([...out.entries()]).toEqual([[0, "Lễ tân"], [1, "99% có thể hơn"]])
+  })
+
+  it("không đánh số ⇒ rỗng", () => {
+    expect(splitNumberedAnswer("Lễ tân, 99%").size).toBe(0)
+  })
+
+  it("trích đoạn chỉ nhận khi là chuỗi con (bỏ khác biệt khoảng trắng, hoa/thường)", () => {
+    expect(verifiedExcerpt("giảm  HÀNG chờ", "Mục tiêu là giảm hàng\nchờ")).toBe("giảm  HÀNG chờ")
+    expect(verifiedExcerpt("dưới 15 phút", "càng sớm càng tốt")).toBeUndefined()
+    expect(verifiedExcerpt("  ", "abc")).toBeUndefined()
   })
 })
