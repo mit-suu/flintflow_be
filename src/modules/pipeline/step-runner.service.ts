@@ -38,9 +38,9 @@ import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramSe
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { buildStepContext, elicitProjection, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
+import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, shapeQuestions, stripRecommended } from "./question-shape.js"
+import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
@@ -404,7 +404,10 @@ export const CHAT_BUDGET_REPLY = "Mình sẽ tự giả định phần còn lạ
  * - chỉ nhận `topic_key` thuộc câu đang chờ, mỗi câu một lần;
  * - câu có lựa chọn: câu trả lời phải trùng đúng nhãn một lựa chọn (bỏ qua đuôi "(Khuyến nghị)", hoa/thường); câu chọn
  *   nhiều nhận danh sách phân tách bằng dấu phẩy, mọi phần đều phải khớp;
- * - câu mở: ghi **nguyên văn tin nhắn của user**, không dùng câu model diễn lại.
+ * - câu mở: trích đoạn model báo nếu là chuỗi con của tin nhắn (chữ của user, không phải câu model diễn lại). Không có
+ *   trích đoạn hợp lệ: chỉ một câu mở được chốt ⇒ **nguyên văn tin nhắn**; nhiều câu mở ⇒ đoạn đánh số — đủ đoạn cho mọi
+ *   câu mở được chốt — theo thứ tự câu mở trong `asked`. Không tách được ⇒ chỉ câu mở đầu nhận nguyên văn, câu còn lại vẫn chờ —
+ *   không bao giờ ghi cùng một đoạn cho nhiều câu.
  */
 export const settleFromChat = (
   asked: PendingAnswerState["asked"],
@@ -415,12 +418,34 @@ export const settleFromChat = (
   const out: AnswerInput[] = []
   const done = new Set<number>()
   const norm = (s: string): string => stripRecommended(s).trim().toLowerCase()
+  const openIndexes = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  const openSettled = new Set(
+    (settled ?? []).flatMap((item) => {
+      const index = asked.findIndex((q) => q.topic_key === item.topic_key)
+      return index >= 0 && asked[index].options.length === 0 ? [index] : []
+    })
+  )
+  const numbered = splitNumberedAnswer(message)
+  const useNumbered = numbered.size >= openSettled.size
+  const openTexts: string[] = []
+  let firstOpen: number | undefined
   for (const item of settled ?? []) {
     const index = asked.findIndex((q, i) => q.topic_key === item.topic_key && !done.has(i))
     if (index < 0) continue
     const question = asked[index]
     if (question.options.length === 0) {
-      out.push({ question_id: ids[index], answer: message })
+      firstOpen ??= index
+      // Trích đoạn model báo (đã kiểm là chuỗi con) trước: một danh sách đánh số nằm trong MỘT câu trả lời ("Tính
+      // năng: 1. … 2. …") không được tách sang câu khác. Model diễn lại ⇒ mới dùng đoạn đánh số theo thứ tự câu mở.
+      // Một câu mở: tin nhắn thường còn trả lời cả câu lựa chọn ("1 theo khuyến nghị / 2, tôi nghĩ có") ⇒ vẫn ưu tiên
+      // trích đoạn, không có thì mới lấy nguyên văn.
+      const text =
+        verifiedExcerpt(item.answer, message) ??
+        (openSettled.size === 1 ? message : useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
+      // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
+      if (!text || (openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
+      out.push({ question_id: ids[index], answer: text })
+      openTexts.push(text)
       done.add(index)
       continue
     }
@@ -432,6 +457,7 @@ export const settleFromChat = (
     out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0] })
     done.add(index)
   }
+  if (firstOpen !== undefined && openTexts.length === 0) out.push({ question_id: ids[firstOpen], answer: message })
   return out
 }
 
@@ -452,15 +478,48 @@ export interface ChatTurnInput {
 /**
  * Câu còn chờ sau một lượt chat: AI viết lại (dựa trên điều user vừa nói, bỏ câu đã thừa) thì dùng bản viết lại — qua
  * đúng bộ lọc của lượt hỏi thường (chủ đề đã chốt bị bỏ); AI không trả câu nào thì hỏi lại nguyên văn câu còn chờ.
+ * `message` là câu trả lời thật (không hỏi ngược / uỷ quyền / chỉ "oke") ⇒ mỗi câu còn chờ đếm thêm một lần được trả lời.
  */
 export const nextPendingAfterChat = (
   spine: Spine,
   remaining: PendingAnswerState["asked"],
-  revised: ElicitOutput["questions"]
+  revised: ElicitOutput["questions"],
+  message = ""
 ): PendingAnswerState["asked"] => {
   if (remaining.length === 0) return remaining
-  if (revised.length === 0) return remaining
-  return shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  const next = revised.length === 0 ? remaining : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  if (!isSubstantiveAnswer(message)) return next
+  // Đếm theo chủ đề, kể cả khi AI viết lại câu
+  const repliedOf = (topic: string | undefined): number => (remaining.find((q) => q.topic_key === topic)?.replied ?? 0) + 1
+  return next.map((q) => (remaining.some((r) => r.topic_key === q.topic_key) ? { ...q, replied: repliedOf(q.topic_key) } : q))
+}
+
+/** Tin user hỏi ngược hoặc uỷ quyền cho AI (có dấu hoặc gõ không dấu) — không phải câu trả lời. */
+const DEFERS_TO_AI =
+  /\?\s*$|b[ạa]n (ngh[ĩi]|th[ấa]y) sao|t[uùủ]y b[ạa]n|b[ạa]n (t[ựu] )?[đd][ềe] xu[ấa]t|theo (khuy[ếe]n ngh[ịi]|[đd][ềe] xu[ấa]t)|ch[ưu]a bi[ếe]t|kh[ôo]ng bi[ếe]t|kh[ôo]ng ngh[ĩi] ra/i
+/** Chỉ đồng ý suông ("oke", "ừ", "được") — đồng ý với đề xuất của AI, không phải nội dung trả lời. */
+const BARE_AGREEMENT = /^(ok(e|ay)?|ừ+m?|uh+|[đd]ư[ợo]c|[đd]c|v[âa]ng|yes|[đd][ồo]ng [ýy]|chu[ẩa]n|[đd]úng r[ồo]i)[\s.!,]*$/i
+
+export const isSubstantiveAnswer = (message: string): boolean => {
+  const text = message.trim()
+  return text !== "" && !DEFERS_TO_AI.test(text) && !BARE_AGREEMENT.test(text)
+}
+
+/**
+ * Chốt chặn "không hỏi lại điều đã trả lời": câu mở user đã trả lời một lần mà AI vẫn hỏi lại (thường vì câu trả lời
+ * định tính hoặc bằng ý tưởng, AI không coi là đủ) ⇒ lần trả lời kế tiếp được chốt bằng nguyên văn tin. Chỉ khi AI
+ * không chốt được câu nào từ tin này (tin không trả lời câu khác), đó là câu mở duy nhất còn chờ, tin không nhắc tới
+ * lựa chọn nào của câu có lựa chọn đang chờ, và tin là câu trả lời thật — không bao giờ gán một tin cho hai câu.
+ */
+export const settleRepeatedAnswer = (asked: PendingAnswerState["asked"], settled: AnswerInput[], message: string): AnswerInput[] => {
+  if (settled.length > 0 || !isSubstantiveAnswer(message)) return settled
+  const open = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  if (open.length !== 1 || (asked[open[0]].replied ?? 0) < 1) return settled
+  const text = message.trim()
+  const lower = text.toLowerCase()
+  const namesOption = asked.some((q) => q.options.some((o) => lower.includes(stripRecommended(o.label).trim().toLowerCase())))
+  if (namesOption) return settled
+  return [{ question_id: questionIdsFor(asked)[open[0]], answer: text }]
 }
 
 /** Một lượt elicit đọc tin chat: trả lời user + câu nào đã chốt được (đã kiểm) + câu còn chờ AI đã viết lại. */
@@ -484,7 +543,7 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
             ...(q.options.length > 0 ? { options: q.options.map((o) => stripRecommended(o.label)) } : {})
           })),
           projection: input.projection,
-          addendum: [],
+          addendum: addendumForUnit(input.spine, input.unit),
           content_guidance: "",
           decisions: ledgerForPrompt(input.spine),
           recent_turns: input.recentTurns,
@@ -506,7 +565,8 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
     cost: result.cost,
     logId: result.logId || null
   })
-  return { reply: result.data.reply, settled: settleFromChat(input.asked, result.data.settled, input.message), questions: result.data.questions ?? [] }
+  const settled = settleRepeatedAnswer(input.asked, settleFromChat(input.asked, result.data.settled, input.message), input.message)
+  return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
 }
 
 /** Còn đủ lượt gọi cho một lượt chat mà vẫn chừa Draft + Review không. */
@@ -1220,12 +1280,10 @@ export const runStep = async (
       // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
       const questionOf = (id: string): string => asked[indexOfQuestion(asked, id)]?.question ?? id
       const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
-      // Một tin cho cả lượt thẻ, mỗi dòng "câu hỏi: lựa chọn" — lịch sử cho thấy được hỏi gì và đã chọn gì
-      const picked = options.transcript ?? answers
-      if (picked.length > 0) {
-        const lines = picked.map((a) => `${questionOf(a.question_id)}: ${answerText(a.answer)}`)
-        await pushTranscript(projectId, sessionId, stepId, "user", lines.join("\n"))
-      }
+      // Một tin cho cả lượt thẻ, mỗi đáp án một dòng — câu hỏi đã nằm ở tin AI ngay trên (`askTranscript`), bong bóng
+      // user chỉ chứa điều user chọn; lượt soạn vẫn thấy cặp câu hỏi → đáp án qua `answersText`
+      const picked = (options.transcript ?? answers).map((a) => answerText(a.answer)).filter((text) => text !== "")
+      if (picked.length > 0) await pushTranscript(projectId, sessionId, stepId, "user", picked.join("\n"))
       answersText = `${answersText}\n${answersJoined}`.trim()
 
       // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa. Chờ user có thể mất
@@ -1327,7 +1385,7 @@ export const runStep = async (
           settledIds: new Set(settled.map((a) => a.question_id))
         })
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
-        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions)
+        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(turn.reply, remaining))
         if (remaining.length === 0) return
         pending = remaining

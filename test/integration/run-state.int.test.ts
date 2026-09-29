@@ -69,7 +69,8 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(new Date(stored!.locked_until).getTime()).toBeLessThanOrEqual(Date.now())
 
     const state = (await api(seeded).get("/steps/S-3.1/run-state")).body.data
-    expect(state).toMatchObject({ status: "waiting_answer", alive: false })
+    // Lượt chờ nhả khoá nhưng vẫn trả lời được (còn pending_answer) ⇒ còn sống — FE không được báo "bị gián đoạn"
+    expect(state).toMatchObject({ status: "waiting_answer", alive: true })
     expect(state).not.toHaveProperty("pending_answer")
   })
 
