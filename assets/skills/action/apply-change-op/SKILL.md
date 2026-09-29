@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.1.0
+version: 1.2.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -27,6 +27,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 
 - Call kind: **{{call_kind}}** (`change_instruction` | `reconcile`)
 - User request (verbatim): {{user_message}}
+- Recent chat before this request, oldest first (`(none)` if empty): {{chat_history}}
 - Session is pipeline session: {{is_pipeline}}
 - Baseline exists: {{has_baseline}}
 - Projection around the target (keyed): {{projection}} — `existing_ids` lists the ids that exist right now
@@ -35,6 +36,10 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 
 ## Change instruction (`change_instruction`)
 
+0. **Read the request in context.** If your last chat turn asked a clarifying question, the request is the
+   answer: combine it with the original request above it ("A03" after "Admin A01 or A03?" → rename A03).
+   Resolve "it", "that one", "the one above" from the chat. Change only what the request asks now — never
+   re-apply edits from earlier turns; those are already in the document.
 1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
 2. **Ambiguous?** Several possible targets, or the intent could mean different fields → return `clarification_needed` with **one** short question in the user's language, and no ops.
 3. **Minimal batch.** Change exactly what was asked. Do not polish neighbouring text, do not rewrite a section.

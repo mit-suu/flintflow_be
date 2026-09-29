@@ -104,7 +104,12 @@ export const changesRequestSchema = z
     /** Bắt buộc sau khi đã có baseline (UC 6.8, T17). */
     reason: z.string().trim().min(1).optional(),
     /** Chỉ `/changes` với `instruction`: id preview đã được user xác nhận (T17). */
-    preview_id: z.string().min(1).optional()
+    preview_id: z.string().min(1).optional(),
+    /**
+     * Phiên chat nơi user gõ lệnh (chip "Sửa tài liệu"): model đọc đuôi hội thoại của phiên, và lượt này
+     * (lệnh + bản xem trước / câu hỏi làm rõ / đã áp) được ghi vào phiên. Không gửi ⇒ như cũ, không ghi transcript.
+     */
+    session_id: z.string().min(1).optional()
   })
   .refine((v) => (v.ops === undefined) !== (v.instruction === undefined), {
     message: "Cần đúng một trong hai: ops hoặc instruction"

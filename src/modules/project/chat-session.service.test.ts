@@ -214,7 +214,8 @@ describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
 
     expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, {
       instruction: "Đổi tên actor A01 thành Product Owner",
-      base_version: 7
+      base_version: 7,
+      chat_history: ""
     })
     expect(aiMocks.executeAiAction).not.toHaveBeenCalled()
 
