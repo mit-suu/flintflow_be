@@ -299,4 +299,48 @@ describe("sanitizeModelOps — path của giả định", () => {
     expect((sanitized.ops[0] as { value: { path: string } }).value.path).toBe(`addendum[id=${FIXTURE.addendum[0].id}]`)
     expect(validateOps(FIXTURE, sanitized.ops, { writable: ["assumptions"] })).toEqual([])
   })
+
+  it("add assumptions[] trùng câu của giả định đã có (khác hoa/thường, dấu câu cuối) ⇒ lỗi, không thêm lại", () => {
+    const existing = {
+      id: "AS90",
+      path: "project.stakes",
+      statement: "Hospital has server infrastructure.",
+      statement_vi: "Bệnh viện đã có hạ tầng máy chủ.",
+      rationale: "demo",
+      origin_step_id: "B-1.1",
+      status: "confirmed" as const,
+      confirmed_at: "2026-09-30T00:00:00.000Z"
+    }
+    const spine: Spine = { ...FIXTURE, assumptions: [...FIXTURE.assumptions, existing] }
+    const raw = [{ op: "add", path: "assumptions[]", value: { path: "project.stakes", statement: "x", statement_vi: "bệnh viện đã có hạ tầng máy chủ", origin_step_id: "B-2.3" } }]
+    const { errors } = sanitizeModelOps(spine, raw, "B-2.3")
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ rule: "op_not_allowed", op_index: 0 })
+    expect(errors[0].message).toContain("AS90")
+  })
+})
+
+describe("sanitizeModelOps — giá trị form_factor / stakes", () => {
+  it("chuỗi ghép nhiều nền tảng hoặc giá trị lạ ⇒ lỗi kèm tập giá trị hợp lệ; giá trị đúng thì qua", () => {
+    const bad = sanitizeModelOps(FIXTURE, [
+      { op: "set", path: "project.form_factor", value: "web_app,mobile_app" },
+      { op: "set", path: "project", value: { ...FIXTURE.project, stakes: "high" } }
+    ], "B-0.1")
+    expect(bad.errors.map((e) => e.op_index)).toEqual([0, 1])
+    expect(bad.errors[0].message).toContain("mobile_app")
+    const good = sanitizeModelOps(FIXTURE, [
+      { op: "set", path: "project.form_factor", value: "mobile_app" },
+      { op: "set", path: "project.stakes", value: null }
+    ], "B-0.1")
+    expect(good.errors).toEqual([])
+  })
+})
+
+describe("sanitizeModelOps — addendum", () => {
+  it("add addendum[] ⇒ captured_at là giờ server, không phải ngày model viết", () => {
+    const now = new Date("2026-09-30T01:40:00.000Z")
+    const raw = [{ op: "add", path: "addendum[]", value: { topic: "scale", content: "50 người", content_en: "50 users", target_section: "fixed:4.2.3", captured_at: "2024-01-01T00:00:00.000Z" } }]
+    const sanitized = sanitizeModelOps(FIXTURE, raw, "B-1.4", now)
+    expect((sanitized.ops[0] as { value: { captured_at: string } }).value.captured_at).toBe("2026-09-30T01:40:00.000Z")
+  })
 })
