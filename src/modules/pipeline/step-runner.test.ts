@@ -1046,6 +1046,39 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     expect(events.some((e) => e.type === "gate_ready")).toBe(true)
   })
 
+  it("B-0.1 chạy bằng tin kể ý tưởng: câu trả lời sau đó đi qua lượt chat, không gán nguyên tin cho mọi câu", async () => {
+    const spine = structuredClone(MINIMAL)
+    spine.steps = []
+    spine.addendum = []
+    spine.project.vision = null
+    spine.progress.current_phase = "B-0"
+    spine.progress.current_step = "B-0.1"
+    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    seedSession(true)
+    const ASK = [
+      { question: "Hiện quy trình đặt lịch đang làm thế nào?", options: [], multiple: false, topic_key: "current_process" },
+      { question: "Khó khăn lớn nhất là gì?", options: [], multiple: false, topic_key: "pain_point" }
+    ] as never as ElicitOutput["questions"]
+    const elicitExecutor = vi.fn(async (input: { promptVariables?: Record<string, unknown> }) =>
+      input.promptVariables?.chat_turn ? chatReply("Rõ", []) : elicitReply("Mình hỏi thêm chút", ASK)
+    )
+    const draftExecutor = vi.fn<StepRunnerDeps["draftExecutor"]>(async () => draftReply([]))
+    const { events, emit } = collectEvents()
+    const run = runStep(PROJECT, "B-0.1", SESSION, USER, emit, {
+      elicitExecutor: elicitExecutor as never,
+      draftExecutor,
+      renderDeps: renderStub(),
+      message: "Bệnh viện tỉnh cần phần mềm quản lý khám ngoại trú"
+    })
+    await waitCount(events, "answer_needed", 1)
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: [], message: "bn xếp hàng từ sáng sớm lấy số" })
+    await waitCount(events, "answer_needed", 2)
+    expect(elicitExecutor.mock.calls.some(([input]) => (input as { promptVariables?: { chat_turn?: boolean } }).promptVariables?.chat_turn)).toBe(true)
+    const again = events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    submitAnswer(PROJECT, "B-0.1", SESSION, { answers: again.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })
+    await run
+  })
+
   it("AI viết lại câu còn chờ theo tin nhắn ⇒ hỏi bản mới, không hỏi lại nguyên văn", async () => {
     seedSpine()
     seedSession(true)
