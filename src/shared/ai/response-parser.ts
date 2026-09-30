@@ -84,7 +84,15 @@ export const opTransactionSchema = z.object({
  * `conflict` là lời giải thích khi model CỐ Ý hỏi lại một chủ đề đã chốt (dữ liệu mới mâu thuẫn).
  */
 export const elicitQuestionSchema = z.union([
-  z.object({ ...questionFields, topic_key: z.string().optional(), conflict: z.string().optional() }).transform(toOptions),
+  z
+    .object({
+      ...questionFields,
+      topic_key: z.string().optional(),
+      conflict: z.string().optional(),
+      /** FLF-232: câu mở đã hỏi ngay trong `reply` — FE không vẽ lại thành thẻ; server vẫn theo dõi qua `topic_key`. */
+      inline: z.boolean().nullish().transform((v) => v ?? undefined)
+    })
+    .transform(toOptions),
   z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
