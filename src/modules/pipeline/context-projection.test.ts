@@ -132,7 +132,7 @@ describe("projectStep", () => {
       type: "web_application",
       domain: "healthcare",
       complexity: "medium",
-      form_factor: "web_app",
+      form_factor: ["web_app"],
       stakes: "production",
       working_mode: null
     }
@@ -143,12 +143,24 @@ describe("projectStep", () => {
 
   it("FLF-221: B-0.2 chỉ đọc project.form_factor, chỉ ghi project.form_factor + assumptions", () => {
     const spine = structuredClone(FIXTURE)
-    spine.project = { ...spine.project, form_factor: null }
+    spine.project = { ...spine.project, form_factor: [] }
     const p = projectStep(spine, "B-0.2")
-    expect(p.projection["project:form_factor"]).toEqual({ form_factor: null })
+    expect(p.projection["project:form_factor"]).toEqual({ form_factor: [] })
     expect(Object.keys(p.projection).filter((k) => k !== ASSUMPTION_KEYS_READ)).toEqual(["project:form_factor"])
     expect(p.emptyFields).toEqual(["project.form_factor"])
     expect(p.writable).toEqual(["project.form_factor", "assumptions"])
+  })
+
+  it("form_factor nhiều nền tảng đi nguyên mảng vào projection của các bước SRS đọc nó (S-6.1…S-6.5, S-7.2; S-4.1 không đọc form_factor theo registry)", () => {
+    const spine = structuredClone(FIXTURE)
+    spine.project = { ...spine.project, form_factor: ["web_app", "mobile_app"] }
+    for (const id of ["S-6.1", "S-6.2", "S-6.3", "S-6.4", "S-6.5", "S-7.2"]) {
+      const { projection, emptyFields } = projectStep(spine, id)
+      const key = Object.keys(projection).find((k) => k.startsWith("project:") && k.includes("form_factor"))
+      expect(key, id).toBeDefined()
+      expect((projection[key as string] as { form_factor: string[] }).form_factor, id).toEqual(["web_app", "mobile_app"])
+      expect(emptyFields, id).not.toContain("project.form_factor")
+    }
   })
 
   it("step B-*: project.vision/goals không bao giờ nằm trong emptyFields; step S-* vẫn tính", () => {
