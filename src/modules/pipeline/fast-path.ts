@@ -67,7 +67,7 @@ export const interviewGuidance = (spine: Spine, unit: string): string =>
     .join("\n")
 
 /** Lời nhận tin khi server bỏ hết câu hỏi của model: không đặt câu hỏi nào mà UI không có thẻ/ô để trả lời. */
-export const NO_QUESTION_ACK_VI = "Mình đã ghi nhận. Chỗ nào chưa rõ mình sẽ viết trước và nói rõ điều mình tự giả định để bạn duyệt một lần ở cuối giai đoạn."
+export const NO_QUESTION_ACK_VI = "Cảm ơn bạn. Chỗ nào còn chưa rõ, tôi sẽ viết theo cách hiểu hợp lý nhất rồi nói lại để bạn xem một lượt ở cuối."
 
 const wordsOf = (text: string): Set<string> =>
   new Set(
@@ -111,6 +111,19 @@ export const reconcileReply = (reply: string, droppedQuestions: readonly string[
       const dropped = best(sentence, droppedQuestions)
       return !(dropped >= 0.6 && dropped > best(sentence, keptQuestions))
     })
+    .join("")
+    .trim()
+  return text === "" ? NO_QUESTION_ACK_VI : text
+}
+
+/**
+ * Lời AI của lượt đóng phỏng vấn fast path: chỉ ghi nhận, không hỏi tiếp — bỏ mọi câu hỏi (kể cả câu hỏi tu từ / hỏi xác nhận);
+ * không còn gì thì dùng lời nhận tin cố định.
+ */
+export const withoutQuestions = (reply: string): string => {
+  const sentences = reply.match(/[^.!?…]+[.!?…]*s*/g) ?? [reply]
+  const text = sentences
+    .filter((sentence) => !sentence.includes("?"))
     .join("")
     .trim()
   return text === "" ? NO_QUESTION_ACK_VI : text

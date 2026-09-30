@@ -1564,3 +1564,38 @@ describe("step-runner: fast path Brief — bước B-1.x không tự hỏi sau l
     expect(await getRunState(PROJECT, "B-1.2")).toMatchObject({ status: "gate", error: null })
   })
 })
+
+describe("đóng phỏng vấn fast path: không chốt câu mở bằng cả tin nhắn", () => {
+  const metric = { topic_key: "success_metrics", question: "Bạn đo thành công bằng gì?", options: [] }
+  const retention = { topic_key: "data_retention", question: "Hồ sơ lưu bao lâu?", options: [] }
+  const offTopic = "bác sĩ bấm nút để gọi số tiếp theo"
+
+  it("mặc định (S-phase, bước thường): một câu mở duy nhất nhận nguyên văn tin — hành vi cũ giữ nguyên", () => {
+    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "diễn lại" }], offTopic)).toEqual([{ question_id: "Q_success_metrics", answer: offTopic }])
+  })
+
+  it("wholeMessage=false: trích đoạn model báo không phải chuỗi con ⇒ không chốt; không dự phòng nguyên văn", () => {
+    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "diễn lại" }], offTopic, false)).toEqual([])
+    expect(settleFromChat([metric], [], offTopic, false)).toEqual([])
+  })
+
+  it("wholeMessage=false: trích đoạn đã kiểm (chuỗi con của tin) và đoạn đánh số vẫn chốt được", () => {
+    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "gọi số tiếp theo" }], offTopic, false)).toEqual([
+      { question_id: "Q_success_metrics", answer: "gọi số tiếp theo" }
+    ])
+    const numbered = "1. giảm 30% lượt bỏ hẹn\n2. lưu 5 năm"
+    const settled = [
+      { topic_key: "success_metrics", answer: "diễn lại" },
+      { topic_key: "data_retention", answer: "diễn lại" }
+    ]
+    expect(settleFromChat([metric, retention], settled, numbered, false)).toEqual([
+      { question_id: "Q_success_metrics", answer: "giảm 30% lượt bỏ hẹn" },
+      { question_id: "Q_data_retention", answer: "lưu 5 năm" }
+    ])
+  })
+
+  it("settleWithoutModel strict: câu trả lời lặp không kéo nguyên tin vào câu mở", () => {
+    expect(settleWithoutModel([{ ...metric, replied: 1 }], "bác sĩ bấm nút và lễ tân xác nhận")).toEqual([{ question_id: "Q_success_metrics", answer: "bác sĩ bấm nút và lễ tân xác nhận" }])
+    expect(settleWithoutModel([{ ...metric, replied: 1 }], "bác sĩ bấm nút và lễ tân xác nhận", false)).toEqual([])
+  })
+})

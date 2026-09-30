@@ -35,7 +35,7 @@ Two habits decide whether this phase is useful:
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
   sentence in the brief. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
   never an assumption, and never an assumption about their answer ("the goal is qualitative"). A user "yes/xác nhận"
-  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about.
+  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about. **Never say the user agreed, nodded or confirmed** unless it is in the decisions ledger or this turn's answers — an `unconfirmed` assumption is still yours.
 
 `references/*.md` are **not loaded at runtime** — the rules below are what you get.
 
@@ -90,7 +90,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## B-2 — Finalize (3 steps)
 
 - **B-2.1 Assumption Sweep.** Present every `assumptions[status=unconfirmed]` gathered so far. The user
-  confirms or rejects, one by one or the whole batch. Write `status` + `confirmed_at`; a rejected
+  confirms or rejects, one by one or the whole batch. Write `status` + `confirmed_at` only for what the user decided in THIS turn (card answers / chat) — with no answer leave `status` alone, never invent a reason; a rejected
   assumption means the underlying value is wrong — say what needs to change rather than leaving it.
 - **B-2.2 Addendum Triage.** Go through `addendum[]`: **keep** (fix `target_section` if it is aimed at the
   wrong place), **park** (true but not this release — retarget it to `fixed:5.4` so S-7.4 picks it up as
@@ -111,7 +111,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 2. `addendum[].target_section` must be a real section key (`fixed:*`, or `feature:<id>` / `function:<id>`
    once those exist). Unsure ⇒ `fixed:5.4`, and say so in `notes`.
 3. `content` keeps the user's own words and language; `content_en` is the English version that will be
-   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`.
+   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`. A gate correction keeps the user's words: "cả web và app" is never rewritten into "chỉ web" — if `project.form_factor` holds one value, put the other platforms in an addendum entry.
 4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here — the Brief is
    input to the SRS, not the SRS. Those come from S-2 onward.
 5. Ask what changes the brief; fill the rest with the most reasonable reading plus `assumptions[]`
