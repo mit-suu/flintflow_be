@@ -316,7 +316,9 @@ export const questionSchema = z.object({
   header: z.string().max(12).optional(),
   /** Không có ⇒ câu mở, trả lời bằng ô chat. "Khác…" không nằm ở đây — FE tự thêm. */
   options: z.array(questionOptionSchema).optional(),
-  multiple: z.boolean().optional()
+  multiple: z.boolean().optional(),
+  /** Câu mở đã hỏi ngay trong lời AI (`elicit.delta`): FE không vẽ thẻ cho câu này, vẫn trả lời bằng ô chat. Thiếu ⇒ false. */
+  inline: z.boolean().optional()
 })
 
 /** Mỗi sự kiện SSE: `event: <type>` + `data: <JSON>` đúng schema dưới. */
@@ -354,7 +356,9 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     summary: z.array(changeSummarySchema),
     new_assumptions: z.array(assumptionBriefSchema),
     steps: z.array(z.object({ step_id: z.string(), label_vi: z.string(), auto_accepted: z.boolean() })),
-    flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0), red_delta: z.number().int(), yellow_delta: z.number().int() }).optional()
+    flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0), red_delta: z.number().int(), yellow_delta: z.number().int() }).optional(),
+    /** FLF-232: tin nhắn cổng cuối giai đoạn = tin của bước cuối + điều còn tạm hiểu từ các bước trước (không gọi thêm model). */
+    message_vi: z.string().optional()
   }),
   z.object({
     type: z.literal("phase_progress"),
@@ -410,7 +414,12 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     doc_progress: z.object({ before: z.number().min(0).max(100), after: z.number().min(0).max(100) }).optional(),
     table: gateTableSchema.optional(),
     /** Step không đổi gì thì phải nói vì sao (Lớp 4). */
-    no_change_reason: z.string().optional()
+    no_change_reason: z.string().optional(),
+    /**
+     * FLF-232: tin nhắn AI của cổng (2–4 câu, ngôn ngữ user) — tóm những gì vừa làm, nói điều AI đang tạm hiểu, mời duyệt.
+     * Lấy từ `notes` của lượt Draft; thiếu `notes` thì dựng tất định từ `summary[]`. Thiếu hẳn (project cũ) ⇒ FE tự dựng như trước.
+     */
+    message_vi: z.string().optional()
   }),
   z.object({ type: z.literal("error"), step_id: z.string(), code: pipelineErrorCodeSchema, message: z.string(), retryable: z.boolean() })
 ])
@@ -459,7 +468,9 @@ export const gateRequestSchema = z
 export const gateResponseSchema = z.object({
   step: stepSummarySchema,
   next_step: z.string().nullable(),
-  spine_version: baseVersion
+  spine_version: baseVersion,
+  /** FLF-232: sau `revision`, lời AI xác nhận bằng chữ điều vừa sửa (từ `notes` của lượt soạn lại). Thiếu với accept/regenerate. */
+  message_vi: z.string().optional()
 })
 
 // ─── progress / flags ────────────────────────────────────────────
