@@ -43,7 +43,7 @@ export interface QuietInput {
   /** Cờ đỏ tăng thêm sau bước (dương ⇒ có cờ đỏ mới). */
   redDelta: number
   /** Giả định mới sinh trong bước. */
-  newAssumptions: readonly { id: string; text: string }[]
+  newAssumptions: readonly { id: string; text: string; text_vi?: string }[]
   /** Có sơ đồ nào vẽ lỗi trong bước không. */
   renderFailed: boolean
   /** Bước là cổng chốt của cả phase (hoặc của một màn trong vòng S-5) — luôn dừng để user xem tổng. */
@@ -72,15 +72,18 @@ const HAS_DIGIT = /[0-9]/
  * chưa chắc mâu thuẫn ("Web" vs "Ứng dụng web cho nhân viên"), còn giả định không nêu con số nào thì không thể "khác
  * số". Trước đây so chữ thô làm cổng báo "N giả định trái với điều bạn đã chốt" khi chẳng có gì trái.
  */
-export const conflictsWithLedger = (statement: string, spine: Spine): boolean => {
-  const text = statement.toLowerCase()
+export const conflictsWithLedger = (statement: string | { text: string; text_vi?: string }, spine: Spine): boolean => {
+  const { text: raw, text_vi: rawVi } = typeof statement === "string" ? { text: statement, text_vi: undefined } : statement
+  const text = raw.toLowerCase()
+  const textVi = (rawVi ?? "").toLowerCase()
   if (!HAS_DIGIT.test(text)) return false
   for (const decision of activeDecisions(spine).values()) {
     const answer = decision.answer.trim().toLowerCase()
     if (answer === "" || !HAS_DIGIT.test(answer)) continue
     const topicWords = decision.topic_key.split("_").filter((w) => w.length >= 4)
     if (topicWords.length === 0 || !topicWords.some((word) => text.includes(word))) continue
-    if (!text.includes(answer)) return true
+    // Giá trị đã chốt có trong bản tiếng Anh HOẶC bản tiếng Việt của giả định ⇒ không mâu thuẫn
+    if (!text.includes(answer) && !textVi.includes(answer)) return true
   }
   return false
 }
@@ -100,7 +103,7 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (input.redDelta > 0) return { quiet: false, reason_vi: `Bước mở thêm ${input.redDelta} cờ đỏ` }
   if (input.renderFailed) return { quiet: false, reason_vi: "Có sơ đồ vẽ lỗi" }
 
-  const conflicting = input.newAssumptions.filter((a) => conflictsWithLedger(a.text, input.spine))
+  const conflicting = input.newAssumptions.filter((a) => conflictsWithLedger(a, input.spine))
   if (conflicting.length > 0) {
     return { quiet: false, reason_vi: `${conflicting.length} giả định trái với điều bạn đã chốt` }
   }

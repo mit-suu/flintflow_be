@@ -35,7 +35,7 @@ Two habits decide whether this phase is useful:
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
   sentence in the brief. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
   never an assumption, and never an assumption about their answer ("the goal is qualitative"). A user "yes/xác nhận"
-  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about.
+  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about. **Never say the user agreed, nodded or confirmed** unless it is in the decisions ledger or this turn's answers — an `unconfirmed` assumption is still yours.
 
 `references/*.md` are **not loaded at runtime** — the rules below are what you get.
 
@@ -70,11 +70,10 @@ the next turn — do not pick the neighbouring concept because it sounds close.
 ## B-1 — The brief (6 steps)
 
 **Draft first, ask last.** Each step writes from what is already known — vision, goals, every addendum, the
-decisions ledger, the user's answers — and records what it inferred as `assumptions[]` the user confirms at the
-gate. A step with a draft to confirm asks **one** card ("Tôi đề xuất: … — đúng chưa?"), not a list of open questions.
-Ask only what cannot be reasonably assumed **and** would make the document wrong; never re-ask what an
-addendum or decision already holds, never ask what a later B-1 step owns (risks ⇒ B-1.6), never interview for a
-section the product does not need. B-1 never writes `project.vision`/`project.goals` — vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
+decisions ledger, the user's answers — and records what it inferred as `assumptions[]`. The phase interview
+before B-1.1 was the only asking turn: **no B-1 step asks**; a gap becomes a stated assumption, and the server reads
+every unconfirmed one back to the user at the B-1.6 gate. Never re-ask what an addendum or decision already holds,
+never write a section the product does not need. B-1 never writes `project.vision`/`project.goals` — vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
@@ -83,7 +82,7 @@ section the product does not need. B-1 never writes `project.vision`/`project.go
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
-| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself | `fixed:5.4` |
+| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` — the server says them | `fixed:5.4` |
 
 Goal entries are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
 not "add an export button". 3–6 of them; more than that and none of them is a goal.
@@ -91,7 +90,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## B-2 — Finalize (3 steps)
 
 - **B-2.1 Assumption Sweep.** Present every `assumptions[status=unconfirmed]` gathered so far. The user
-  confirms or rejects, one by one or the whole batch. Write `status` + `confirmed_at`; a rejected
+  confirms or rejects, one by one or the whole batch. Write `status` + `confirmed_at` only for what the user decided in THIS turn (card answers / chat) — with no answer leave `status` alone, never invent a reason; a rejected
   assumption means the underlying value is wrong — say what needs to change rather than leaving it.
 - **B-2.2 Addendum Triage.** Go through `addendum[]`: **keep** (fix `target_section` if it is aimed at the
   wrong place), **park** (true but not this release — retarget it to `fixed:5.4` so S-7.4 picks it up as
@@ -112,7 +111,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 2. `addendum[].target_section` must be a real section key (`fixed:*`, or `feature:<id>` / `function:<id>`
    once those exist). Unsure ⇒ `fixed:5.4`, and say so in `notes`.
 3. `content` keeps the user's own words and language; `content_en` is the English version that will be
-   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`.
+   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`. A gate correction keeps the user's words: "cả web và app" is never rewritten into "chỉ web" — if `project.form_factor` holds one value, put the other platforms in an addendum entry.
 4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here — the Brief is
    input to the SRS, not the SRS. Those come from S-2 onward.
 5. Ask what changes the brief; fill the rest with the most reasonable reading plus `assumptions[]`

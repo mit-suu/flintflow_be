@@ -419,7 +419,12 @@ export const stepEventSchema = z.discriminatedUnion("type", [
      * FLF-232: tin nhắn AI của cổng (2–4 câu, ngôn ngữ user) — tóm những gì vừa làm, nói điều AI đang tạm hiểu, mời duyệt.
      * Lấy từ `notes` của lượt Draft; thiếu `notes` thì dựng tất định từ `summary[]`. Thiếu hẳn (project cũ) ⇒ FE tự dựng như trước.
      */
-    message_vi: z.string().optional()
+    message_vi: z.string().optional(),
+    /**
+     * FLF-234: bước chạy trong `runPhase` mà server sẽ tự Accept ngay (bước im) — KHÔNG phải cổng chờ user: FE không dựng thẻ cổng/chip.
+     * Thiếu ⇒ cổng thật.
+     */
+    auto: z.boolean().optional()
   }),
   z.object({ type: z.literal("error"), step_id: z.string(), code: pipelineErrorCodeSchema, message: z.string(), retryable: z.boolean() })
 ])
@@ -526,6 +531,8 @@ export const runStateResponseSchema = z.object({
   alive: z.boolean(),
   questions: z.array(questionSchema).nullable(),
   gate_payload: z.unknown().nullable(),
+  /** FLF-234: sự kiện `phase_gate` của bước cuối giai đoạn đang chờ duyệt (đủ tin nhắn + giả định cả giai đoạn); thiếu/null ⇒ bước lẻ. */
+  phase_gate: z.unknown().nullable().optional(),
   events: z.array(z.unknown()),
   error: z.object({ code: z.string(), message: z.string() }).nullable()
 })

@@ -138,11 +138,12 @@ vi.mock("../../notification/notification.service.js", () => ({ notify: vi.fn(asy
 import * as repo from "../../spine/spine.repository.js"
 import { getStep, nextStep } from "../step-registry.js"
 import { STEP_SKILLS } from "../context-projection.js"
-import { getSkill } from "../../../shared/ai/prompt-registry.service.js"
+import { getSkill, interpolatePrompt } from "../../../shared/ai/prompt-registry.service.js"
 import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type ElicitOutput, type OpTransaction } from "../../../shared/ai/response-parser.js"
 import { hasIdea, runStep, submitAnswer, type StepRunnerDeps } from "../step-runner.service.js"
 import { runPhase } from "../phase-runner.service.js"
+import { NO_QUESTION_ACK_VI } from "../fast-path.js"
 import { getRunState } from "../run-state.service.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
@@ -224,9 +225,10 @@ const draftExecutor: StepRunnerDeps["draftExecutor"] = async (actionType, input)
 
 const deps = (): Partial<StepRunnerDeps> => ({ draftExecutor, elicitExecutor })
 
-const runAndAccept = async (stepId: string): Promise<StepEvent[]> => {
+/** `message`: tin chat của user mở lượt chạy — với B-2.1 đó là quyết định của user, điều kiện để giả định được xác nhận. */
+const runAndAccept = async (stepId: string, message?: string): Promise<StepEvent[]> => {
   const { events, emit } = collect()
-  await runStep(PROJECT, stepId, SESSION, USER, emit, deps())
+  await runStep(PROJECT, stepId, SESSION, USER, emit, { ...deps(), ...(message ? { message } : {}) })
   expect(events.some((e) => e.type === "gate_ready"), `${stepId} phải tới gate_ready`).toBe(true)
   const result = await gate(PROJECT, stepId, USER, { action: "accept", base_version: await version() })
   expect(result.step.status, `${stepId} phải accepted`).toBe("accepted")
@@ -280,7 +282,7 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
 
   it("B-2.1 chuyển giả định sang confirmed; B-2.2 để dành addendum chứ không xoá thông tin", async () => {
     seedEmpty()
-    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
+    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId, stepId === "B-2.1" ? "Đúng rồi, các điều bạn đoán đều đúng" : undefined)
     const final = (await repo.get(PROJECT))!
 
     const confirmed = final.assumptions.filter((a) => a.status === "confirmed")
@@ -294,6 +296,15 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     expect(parked, "để dành chứ không bỏ").toBeTruthy()
     expect(parked.target_section).toBe("fixed:5.4")
     expect(parked.topic).toContain("Deferred")
+  })
+
+  it("B-2.1 không có quyết định nào của user trong lượt ⇒ model không tự xác nhận giả định (giữ nguyên status)", async () => {
+    seedEmpty()
+    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
+    const final = (await repo.get(PROJECT))!
+    expect(final.assumptions.length).toBeGreaterThan(0)
+    expect(final.assumptions.filter((a) => a.status !== "unconfirmed")).toEqual([])
+    expect(final.assumptions.every((a) => a.confirmed_at === null)).toBe(true)
   })
 
   it("approve B-2.3 mở S-1: nextStep trỏ S-1.1, và chạy S-1.1 đặt progress.current_phase = S-1", async () => {
@@ -563,7 +574,7 @@ describe("FLF-221: sự kiện cho nhật ký hoạt động", () => {
 })
 
 describe("FLF-221: chat tự do trong phỏng vấn đầu giai đoạn", () => {
-  it("B-1: tin nhắn trả lời câu mở ⇒ ghi sổ bằng nguyên văn user, phỏng vấn xong, giai đoạn chạy tiếp", async () => {
+  it("B-1: tin nhắn trả lời câu mở ⇒ ghi sổ bằng trích đoạn đã kiểm của user, phỏng vấn xong, giai đoạn chạy tiếp", async () => {
     seedEmpty()
     ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
     const chatTurns: Record<string, unknown>[] = []
@@ -573,7 +584,7 @@ describe("FLF-221: chat tự do trong phỏng vấn đầu giai đoạn", () => 
         const vars = input.promptVariables as Record<string, unknown>
         if (vars.chat_turn) {
           chatTurns.push(vars)
-          return { ...elicitResult("Đã ghi mục tiêu.", []), data: { reply: "Đã ghi mục tiêu.", questions: [], settled: [{ topic_key: "goals", answer: "giảm bỏ hẹn" }] } }
+          return { ...elicitResult("Đã ghi mục tiêu.", []), data: { reply: "Đã ghi mục tiêu.", questions: [], settled: [{ topic_key: "goals", answer: "giảm 30% khách bỏ hẹn" }] } }
         }
         if (vars.phase_interview) return elicitResult("Mình hỏi nhanh.", [{ question: "Mục tiêu chính là gì?", topic_key: "goals", options: [] }] as never as ElicitOutput["questions"])
         return elicitResult("Rõ rồi.", [])
@@ -586,7 +597,7 @@ describe("FLF-221: chat tự do trong phỏng vấn đầu giai đoạn", () => 
 
     expect(chatTurns).toHaveLength(1)
     const decision = (await repo.get(PROJECT))!.decisions.find((d) => d.topic_key === "goals")
-    expect(decision).toMatchObject({ answer: "Mục tiêu là giảm 30% khách bỏ hẹn", step_id: "B-1" })
+    expect(decision).toMatchObject({ answer: "giảm 30% khách bỏ hẹn", step_id: "B-1" })
     const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
     expect(messages.filter((m) => m.step === "B-1").map((m) => m.role)).toEqual(["ai", "user", "ai"]) // lượt hỏi (kèm câu hỏi) còn trong lịch sử sau khi user trả lời bằng chat
     expect(events.some((e) => e.type === "gate_ready" && e.step_id.startsWith("B-1."))).toBe(true)
@@ -762,7 +773,7 @@ describe("FLF-232 vòng sửa 1: phỏng vấn đầu giai đoạn", () => {
         const vars = input.promptVariables as Record<string, unknown>
         if (vars.chat_turn) {
           chatTurns.push(vars)
-          return { ...elicitResult("Đã ghi mục tiêu.", []), data: { reply: "Đã ghi mục tiêu.", questions: [], settled: [{ topic_key: "goals", answer: "giảm bỏ hẹn" }] } }
+          return { ...elicitResult("Đã ghi mục tiêu.", []), data: { reply: "Đã ghi mục tiêu.", questions: [], settled: [{ topic_key: "goals", answer: "giảm 30% khách bỏ hẹn" }] } }
         }
         if (vars.phase_interview) {
           return elicitResult("Mình hỏi nhanh.", [
@@ -788,4 +799,380 @@ describe("FLF-232 vòng sửa 1: phỏng vấn đầu giai đoạn", () => {
     const decisions = (await repo.get(PROJECT))!.decisions.map((d) => d.topic_key).sort()
     expect(decisions).toEqual(["goals", "vision_ok"])
   })
+})
+
+describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trước, một cổng cuối", () => {
+  const AFTER_B0 = ["B-0.1", "B-0.2", "B-0.3"]
+  const TEXTS: Record<string, string> = {
+    "B-1.1": "bệnh nhân tự chọn giờ khám trên điện thoại",
+    "B-1.2": "lễ tân xác nhận lịch qua điện thoại",
+    "B-1.3": "phòng khám nhỏ không có đối thủ trực tiếp",
+    "B-1.4": "bản đầu chưa thanh toán trực tuyến",
+    "B-1.5": "thành công là giảm 30% lượt bỏ hẹn",
+    "B-1.6": "máy chủ đặt tại Việt Nam"
+  }
+  const SUMMARY = "Đây là hệ thống đặt lịch khám cho phòng khám nhỏ, giảm bỏ hẹn, rủi ro lớn nhất là dữ liệu sức khoẻ."
+
+  const seedB1 = (opts: { reviewMode?: "fast" | "balanced" | "strict"; stakes?: string } = {}) => {
+    seedEmpty()
+    const spine = db.spines[0] as { steps: unknown[]; project: Record<string, unknown> }
+    spine.steps = acceptSteps(AFTER_B0)
+    if (opts.reviewMode) spine.project.review_mode = opts.reviewMode
+    if (opts.stakes) spine.project.stakes = opts.stakes
+  }
+
+  /** Mỗi bước B-1.x ghi đúng một giả định tiếng Việt; B-1.6 kèm `notes` tóm tắt brief. `failOnce`: bước chết đúng một lần. */
+  const drafts = (failOnce?: string, seen?: Record<string, string>): StepRunnerDeps["draftExecutor"] => {
+    let failed = false
+    const ids = Object.keys(TEXTS)
+    return async (_type, input) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      if (seen) seen[stepId] = JSON.stringify(input.promptVariables)
+      if (!TEXTS[stepId]) return draftResult([])
+      if (stepId === failOnce && !failed) {
+        failed = true
+        throw new ApiError(502, "provider chết", "AI_PROVIDER_ERROR")
+      }
+      const n = ids.indexOf(stepId) + 1
+      return draftResult(
+        [{ op: "add", path: "assumptions[]", value: { id: `AS0${n}`, path: "project.vision", statement: `Assumption ${stepId}`, statement_vi: TEXTS[stepId], rationale: "r", origin_step_id: stepId, status: "unconfirmed", confirmed_at: null } }],
+        stepId === "B-1.6" ? SUMMARY : undefined
+      )
+    }
+  }
+
+  const trackedElicit = (interviewQuestions: ElicitOutput["questions"] = [], interviewReply = "Tôi đã đọc.") => {
+    const calls: { step_id: string; vars: Record<string, unknown> }[] = []
+    const executor: StepRunnerDeps["elicitExecutor"] = async (input) => {
+      const vars = input.promptVariables as Record<string, unknown>
+      calls.push({ step_id: String(vars.step_id), vars })
+      return elicitResult(vars.phase_interview ? interviewReply : "Tôi đã đọc.", vars.phase_interview ? interviewQuestions : [])
+    }
+    return { calls, executor }
+  }
+
+  const gates = (events: StepEvent[]) => events.filter((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>[]
+
+  it("Cuối giai đoạn: 1 lượt hỏi gộp, B-1.1…B-1.5 tự Accept, một phase_gate ở B-1.6 nói đủ giả định của cả giai đoạn", async () => {
+    seedB1({ reviewMode: "fast" })
+    const elicit = trackedElicit()
+    const { events, emit } = collect()
+    const seen: Record<string, string> = {}
+
+    const result = await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(undefined, seen), message: "Đặt lịch khám cho phòng khám nhỏ" })
+
+    expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
+    expect(db.usages.filter((u) => u.call_kind === "elicit").map((u) => u.step_id)).toEqual(["B-1"])
+    expect(events.filter((e) => e.type === "auto_accepted").map((e) => e.step_id)).toEqual(["B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5"])
+    expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(0)
+    expect(result.stopped_at).toBe("B-1.6")
+    const [phaseGate] = gates(events)
+    expect(gates(events)).toHaveLength(1)
+    expect(phaseGate.step_id).toBe("B-1.6")
+    const expected = Object.keys(TEXTS).map((_, i) => `AS0${i + 1}`)
+    expect(phaseGate.new_assumptions.map((a) => a.id).sort()).toEqual(expected)
+    for (const text of Object.values(TEXTS)) expect(phaseGate.message_vi, text).toContain(text)
+    expect(phaseGate.message_vi).toContain(SUMMARY)
+    expect(phaseGate.message_vi).not.toMatch(/giả định|bước|giai đoạn/i)
+    // Lượt hỏi gộp không hỏi gì: lời AI được phát và ghi làm dấu "đã phỏng vấn"; tin mở giai đoạn ghi đúng một lần dưới đơn vị
+    const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
+    expect(messages.filter((m) => m.role === "user")).toEqual([expect.objectContaining({ step: "B-1", content: "Đặt lịch khám cho phòng khám nhỏ" })])
+    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1")).toEqual([expect.objectContaining({ content: "Tôi đã đọc." })])
+    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1", delta: "Tôi đã đọc." }])
+    // Mọi bước B-1.x thấy tin mở giai đoạn qua transcript của đơn vị
+    for (const id of Object.keys(TEXTS)) expect(seen[id], id).toContain("Đặt lịch khám cho phòng khám nhỏ")
+  })
+
+  it("bước im không lộ cổng: gate_ready.auto, run-state không ở `gate`; cổng cuối ghi phase_gate vào run-state để sống qua reload", async () => {
+    seedB1({ reviewMode: "fast" })
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: trackedElicit().executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+
+    const readyBy = (id: string) => events.find((e) => e.type === "gate_ready" && e.step_id === id) as Extract<StepEvent, { type: "gate_ready" }>
+    for (const id of ["B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5"]) {
+      expect(readyBy(id).auto, id).toBe(true)
+      const run = await getRunState(PROJECT, id)
+      expect(run?.status, id).toBe("done")
+      expect(run?.gate_payload, id).toBeNull()
+      expect(run?.phase_gate, id).toBeNull()
+    }
+    expect(readyBy("B-1.6").auto).toBeUndefined()
+    const last = await getRunState(PROJECT, "B-1.6")
+    expect(last?.status).toBe("gate")
+    const [phaseGate] = gates(events)
+    expect(last?.phase_gate).toEqual(phaseGate)
+    expect((last?.phase_gate as typeof phaseGate).new_assumptions).toHaveLength(6)
+    expect((last?.phase_gate as typeof phaseGate).message_vi).toContain(TEXTS["B-1.1"])
+  })
+
+  it("Mọi bước: bước dừng là cổng thật — không auto, run-state `gate`", async () => {
+    seedB1({ reviewMode: "strict" })
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: trackedElicit().executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    const ready = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
+    expect(ready.step_id).toBe("B-1.1")
+    expect(ready.auto).toBeUndefined()
+    expect((await getRunState(PROJECT, "B-1.1"))?.status).toBe("gate")
+  })
+
+  it("chuỗi dừng giữa chừng rồi chạy tiếp ⇒ cổng cuối vẫn nói giả định của các bước đã chạy ở lượt trước", async () => {
+    seedB1({ reviewMode: "fast" })
+    const elicit = trackedElicit()
+    const failing = runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts("B-1.3"), message: "Đặt lịch khám" })
+    await expect(failing).rejects.toBeInstanceOf(ApiError)
+
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts() })
+
+    const [phaseGate] = gates(events)
+    expect(phaseGate.step_id).toBe("B-1.6")
+    for (const text of Object.values(TEXTS)) expect(phaseGate.message_vi, text).toContain(text)
+    expect(phaseGate.new_assumptions).toHaveLength(6)
+    // Đúng một lượt hỏi gộp trên cả chuỗi bị ngắt rồi chạy tiếp, không lượt Elicit nào của B-1.x
+    expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
+  })
+
+  it("Mọi bước: dừng ở B-1.1 với cổng cùng kiểu tin, không Elicit; duyệt rồi chạy tiếp dừng ở B-1.2", async () => {
+    seedB1({ reviewMode: "strict" })
+    const elicit = trackedElicit()
+    const first = collect()
+    const result = await runPhase(PROJECT, "B-1", SESSION, USER, first.emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+
+    expect(result.stopped_at).toBe("B-1.1")
+    expect(gates(first.events)[0]).toMatchObject({ step_id: "B-1.1" })
+    expect(gates(first.events)[0].message_vi).toContain(TEXTS["B-1.1"])
+    expect(first.events.filter((e) => e.type === "auto_accepted")).toHaveLength(0)
+
+    await gate(PROJECT, "B-1.1", USER, { action: "accept", base_version: await version() })
+    const second = collect()
+    const again = await runPhase(PROJECT, "B-1", SESSION, USER, second.emit, { elicitExecutor: elicit.executor, draftExecutor: drafts() })
+    expect(again.stopped_at).toBe("B-1.2")
+    expect(gates(second.events)[0].message_vi).toContain(TEXTS["B-1.2"])
+
+    await gate(PROJECT, "B-1.2", USER, { action: "accept", base_version: await version() })
+    const third = await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts() })
+    expect(third.stopped_at).toBe("B-1.3")
+    // Vào lại giai đoạn sau mỗi lần duyệt không chạy lại lượt hỏi gộp: đúng một lượt trên cả chuỗi
+    expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
+  })
+
+  describe("tin chat sau lượt hỏi gộp: một lượt hỏi duy nhất, đóng phỏng vấn", () => {
+    const questions = [
+      { question: "Bạn đo thành công bằng gì?", topic_key: "success_metrics", options: [] },
+      { question: "Hồ sơ lưu bao lâu?", topic_key: "data_retention", options: [] }
+    ] as never as ElicitOutput["questions"]
+
+    const runInterview = async (chat: { reply: string; questions?: unknown[]; settled?: { topic_key: string; answer: string }[] }, message: string) => {
+      seedB1({ reviewMode: "fast" })
+      const chatCalls: Record<string, unknown>[] = []
+      const executor: StepRunnerDeps["elicitExecutor"] = async (input) => {
+        const vars = input.promptVariables as Record<string, unknown>
+        if (vars.chat_turn) {
+          chatCalls.push(vars)
+          return { ...elicitResult(chat.reply, (chat.questions ?? []) as ElicitOutput["questions"]), data: { reply: chat.reply, questions: (chat.questions ?? []) as ElicitOutput["questions"], settled: chat.settled ?? [] } }
+        }
+        return elicitResult("Tôi đọc rồi.", vars.phase_interview ? questions : [])
+      }
+      const { events, emit } = collect()
+      const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+      await waitFor(events, "answer_needed")
+      expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message })).toBe(true)
+      const result = await run
+      return { events, chatCalls, result }
+    }
+
+    it("tin lạc đề: không hỏi tiếp (kể cả model viết lại câu), không ghi quyết định cho câu đang chờ, lời AI không còn câu hỏi, giai đoạn chạy tiếp", async () => {
+      const { events, chatCalls, result } = await runInterview(
+        {
+          reply: "Ý bác sĩ bấm nút là một tính năng hay. Vậy bạn đo thành công bằng gì?",
+          questions: [{ question: "Bạn đo thành công bằng gì?", topic_key: "success_metrics", options: [] }],
+          settled: [{ topic_key: "success_metrics", answer: "bác sĩ bấm nút gọi số" }]
+        },
+        "bác sĩ bấm nút để gọi số tiếp theo"
+      )
+      expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(1)
+      expect(chatCalls).toHaveLength(1)
+      expect(chatCalls[0]).toMatchObject({ close_interview: true, max_questions: 0 })
+      const decisions = (await repo.get(PROJECT))!.decisions.map((d) => d.topic_key)
+      expect(decisions).not.toContain("success_metrics")
+      expect(decisions).not.toContain("data_retention")
+      const elicitAfter = events.filter((e) => e.type === "elicit").map((e) => (e as { delta: string }).delta)
+      expect(elicitAfter.some((text) => text.includes("?"))).toBe(false)
+      expect(elicitAfter[elicitAfter.length - 1]).toContain("bác sĩ bấm nút là một tính năng hay")
+      const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
+      expect(messages.filter((m) => m.step === "B-1" && m.role === "ai").slice(-1)[0]?.content).not.toContain("?")
+      // Phỏng vấn đóng: run-state `done`, chuỗi chạy tiếp tới cổng cuối
+      expect((await getRunState(PROJECT, "B-1"))?.status).toBe("done")
+      expect(result.stopped_at).toBe("B-1.6")
+    })
+
+    it("tin trả lời đúng một câu bằng trích đoạn nguyên văn: câu đó vào sổ, câu kia không, và cũng không hỏi tiếp", async () => {
+      const { events, result } = await runInterview(
+        { reply: "Ok, giờ tôi đã có mốc đo. Hồ sơ lưu bao lâu tôi sẽ tự đoán.", settled: [{ topic_key: "success_metrics", answer: "giảm 30% lượt bỏ hẹn" }] },
+        "thành công là giảm 30% lượt bỏ hẹn trong 6 tháng"
+      )
+      const ledger = (await repo.get(PROJECT))!.decisions
+      expect(ledger.find((d) => d.topic_key === "success_metrics")).toMatchObject({ answer: "giảm 30% lượt bỏ hẹn" })
+      expect(ledger.some((d) => d.topic_key === "data_retention")).toBe(false)
+      expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(1)
+      expect(result.stopped_at).toBe("B-1.6")
+    })
+  })
+
+  it("lượt hỏi gộp có câu trả lời ⇒ bước đầu không nhận lại tin mở giai đoạn, không bước nào Elicit", async () => {
+    seedB1({ reviewMode: "fast" })
+    const elicit = trackedElicit([{ question: "Bạn lưu hồ sơ bao lâu?", topic_key: "data_retention", options: [] }] as never as ElicitOutput["questions"])
+    const { events, emit } = collect()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    await waitFor(events, "answer_needed")
+    const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [{ question_id: asked.questions[0].id, answer: "5 năm" }] })).toBe(true)
+    await run
+    expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
+    expect(gates(events)).toHaveLength(1)
+  })
+
+  it("phỏng vấn đã diễn ra trước đó mà lượt chạy mang tin mới ⇒ bước đầu nhận tin, Elicit chỉ giữ câu mâu thuẫn", async () => {
+    seedB1({ reviewMode: "fast" })
+    ;(db.spines[0] as { decisions: unknown[] }).decisions = [{ id: "DC01", topic_key: "uptime", question: "Uptime?", answer: "99%", step_id: "B-1", at: "2026-09-30T00:00:00.000Z", superseded_by: null }]
+    const seen: string[] = []
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, {
+      elicitExecutor: async (input) => {
+        const vars = input.promptVariables as { step_id: string; user_message: string }
+        seen.push(`${vars.step_id}:${vars.user_message}`)
+        return elicitResult("Tôi đã đọc.", [{ question: "Bạn lưu hồ sơ bao lâu?", topic_key: "data_retention", options: [] }] as never as ElicitOutput["questions"])
+      },
+      draftExecutor: drafts(),
+      message: "Thêm một ý nữa"
+    })
+    expect(seen).toEqual(["B-1.1:Thêm một ý nữa"])
+    expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(0)
+    expect(gates(events)).toHaveLength(1)
+  })
+
+  it.each([
+    ["internal", 2],
+    ["regulated", 4],
+    ["production", 4]
+  ] as const)("lượt hỏi gộp: stakes %s ⇒ tối đa %i câu; prompt có projection hợp và việc của cả giai đoạn", async (stakes, max) => {
+    seedB1({ reviewMode: "fast", stakes })
+    const many = ["a", "b", "c", "d", "e"].map((k) => ({ question: `Câu ${k}?`, topic_key: `topic_${k}`, options: [] })) as never as ElicitOutput["questions"]
+    const elicit = trackedElicit(many)
+    const { events, emit } = collect()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    await waitFor(events, "answer_needed")
+    const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    expect(asked.questions).toHaveLength(max)
+    expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: asked.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })).toBe(true)
+    await run
+
+    const vars = elicit.calls[0].vars
+    expect(vars.max_questions).toBe(max)
+    expect(Object.keys(vars.projection as object).some((k) => k.startsWith("project:") && k.includes("stakes"))).toBe(true)
+    expect(String(vars.content_guidance).split("\n")).toHaveLength(6)
+  })
+
+  it("giai đoạn ngoài fast path giữ lượt hỏi gộp cũ: projection rỗng, không guidance, trần prompt cũ", async () => {
+    seedB1({ reviewMode: "fast" })
+    const elicit = trackedElicit()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...AFTER_B0, ...Object.keys(TEXTS)])
+    await runPhase(PROJECT, "B-2", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: async () => draftResult([]), message: "Sang phần sau" })
+    const interview = elicit.calls.find((c) => c.vars.phase_interview)
+    expect(interview, "B-2 có lượt hỏi gộp").toBeTruthy()
+    expect(interview!.vars.projection).toEqual({})
+    expect(interview!.vars.content_guidance).toBe("")
+    expect(interview!.vars.max_questions).toBe(2)
+  })
+
+  it("mọi lượt hỏi không hỏi gì đều ghi dấu: không có tin user vẫn không gọi lại lượt hỏi gộp ở lần chạy sau", async () => {
+    seedB1({ reviewMode: "strict" })
+    const elicit = trackedElicit()
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts() })
+    await gate(PROJECT, "B-1.1", USER, { action: "accept", base_version: await version() })
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts() })
+    expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
+    const messages = db.sessions[0].messages as { role: string; step: string }[]
+    expect(messages.filter((m) => m.step === "B-1")).toEqual([expect.objectContaining({ role: "ai" })])
+  })
+
+  it("tin gõ giữa B-1 sau lượt hỏi gộp: một lượt Elicit chỉ hỏi câu mâu thuẫn, lời AI trả lời user", async () => {
+    seedB1({ reviewMode: "strict" })
+    const elicit = trackedElicit()
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    await gate(PROJECT, "B-1.1", USER, { action: "accept", base_version: await version() })
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Lễ tân là người xác nhận lịch" })
+    expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1", "B-1.2"])
+    expect(elicit.calls[1].vars.elicit_policy).toBe("conflict_only")
+    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1.2", delta: "Tôi đã đọc." }])
+    expect(events.filter((e) => e.type === "answer_needed")).toHaveLength(0)
+  })
+
+  it("lượt hỏi gộp bị cắt theo ngân sách: lời AI không còn nêu câu hỏi đã bị cắt", async () => {
+    seedB1({ reviewMode: "fast", stakes: "internal" })
+    const many = [["web", "đặt lịch trên web"], ["zalo", "nhắc lịch qua Zalo"], ["kho", "lưu hồ sơ ở kho lạnh"]].map(([k, t]) => ({ question: `Bạn có muốn ${t} không?`, topic_key: `topic_${k}`, options: [], inline: true })) as never as ElicitOutput["questions"]
+    const elicit = trackedElicit(many, "Mình đã đọc rồi. Bạn có muốn đặt lịch trên web không? Bạn có muốn lưu hồ sơ ở kho lạnh không?")
+    const { events, emit } = collect()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    await waitFor(events, "answer_needed")
+    const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    expect(asked.questions.map((q) => q.text)).toEqual(["Bạn có muốn đặt lịch trên web không?", "Bạn có muốn nhắc lịch qua Zalo không?"])
+    const reply = (events.find((e) => e.type === "elicit") as Extract<StepEvent, { type: "elicit" }>).delta
+    expect(reply).toContain("đặt lịch trên web")
+    expect(reply).not.toContain("kho lạnh")
+    expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: asked.questions.map((q) => ({ question_id: q.id, answer: "ok" })) })).toBe(true)
+    await run
+  })
+
+  it("mọi câu của lượt hỏi gộp bị server bỏ (đã chốt) ⇒ lời AI thành lời nhận tin không có câu hỏi", async () => {
+    seedB1({ reviewMode: "fast" })
+    ;(db.spines[0] as { decisions: unknown[] }).decisions = [{ id: "DC01", topic_key: "data_retention", question: "Lưu bao lâu?", answer: "5 năm", step_id: "B-0.1", at: "2026-09-30T00:00:00.000Z", superseded_by: null }]
+    const elicit = trackedElicit([{ question: "Bạn lưu hồ sơ bao lâu?", topic_key: "data_retention", options: [], inline: true }] as never as ElicitOutput["questions"], "Mình đã đọc. Bạn lưu hồ sơ bao lâu?")
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1", delta: NO_QUESTION_ACK_VI }])
+    const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
+    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1").map((m) => m.content)).toEqual([NO_QUESTION_ACK_VI])
+  })
+
+  it("bước B-1.x có tin mới: câu hỏi thường bị bỏ thì lời AI không còn hỏi nó (phát và ghi transcript)", async () => {
+    seedB1({ reviewMode: "strict" })
+    const calls: string[] = []
+    const executor: StepRunnerDeps["elicitExecutor"] = async (input) => {
+      const vars = input.promptVariables as { step_id: string; phase_interview?: boolean }
+      calls.push(vars.step_id)
+      return elicitResult(vars.phase_interview ? "Ok." : "Mình đã ghi lại. Bạn lưu hồ sơ bao lâu?", vars.phase_interview ? [] : ([{ question: "Bạn lưu hồ sơ bao lâu?", topic_key: "data_retention", options: [], inline: true }] as never as ElicitOutput["questions"]))
+    }
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    await gate(PROJECT, "B-1.1", USER, { action: "accept", base_version: await version() })
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: executor, draftExecutor: drafts(), message: "Lễ tân xác nhận lịch" })
+    expect(calls).toEqual(["B-1", "B-1.2"])
+    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1.2", delta: NO_QUESTION_ACK_VI }])
+    const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
+    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1.2").map((m) => m.content)).toEqual([NO_QUESTION_ACK_VI])
+  })
+
+  it("prompt lượt hỏi gộp: câu luật fast path chỉ có ở B-1, S-phase giữ lời cũ", async () => {
+    const template = getSkill("elicit-loop").template
+    const FAST_SENTENCE = "ONLY asking turn of the phase"
+    seedB1({ reviewMode: "fast" })
+    const elicit = trackedElicit()
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
+    const b1 = elicit.calls.find((c) => c.vars.phase_interview)!
+    expect(interpolatePrompt(template, b1.vars)).toContain(FAST_SENTENCE)
+
+    seedB1({ reviewMode: "fast" })
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...AFTER_B0, ...Object.keys(TEXTS)])
+    const other = trackedElicit()
+    await runPhase(PROJECT, "B-2", SESSION, USER, collect().emit, { elicitExecutor: other.executor, draftExecutor: async () => draftResult([]), message: "Sang phần sau" })
+    const b2 = other.calls.find((c) => c.vars.phase_interview)!
+    const b2Prompt = interpolatePrompt(template, b2.vars)
+    expect(b2Prompt).not.toContain(FAST_SENTENCE)
+    expect(b2Prompt).not.toContain("Depth by")
+    expect(b2Prompt).not.toContain("{{#if")
+    expect(b2Prompt).not.toContain("Conflict-only turn")
+  })
+
 })
