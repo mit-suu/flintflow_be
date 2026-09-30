@@ -19,6 +19,7 @@ import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { FAST_PATH_PHASES, NO_QUESTION_ACK_VI, interviewBudget, interviewGuidance, interviewProjection, reconcileReply } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
 import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import * as meter from "./meter.service.js"
@@ -216,8 +217,12 @@ export const resumePhaseInterview = async (
   }
 }
 
-/** Kết quả lượt phỏng vấn: không hỏi, đã có câu trả lời, hoặc lượt chờ tách khỏi kết nối. */
-type InterviewOutcome = "skipped" | "answered" | "detached"
+/**
+ * Kết quả lượt phỏng vấn: bỏ qua trước khi gọi model (`skipped`), gọi model nhưng không có gì để hỏi (`asked_none`), đã có
+ * câu trả lời (`answered`), hoặc lượt chờ tách khỏi kết nối (`detached`). `answered` và `asked_none` = lượt hỏi gộp đã ĐỌC tin
+ * user mở giai đoạn.
+ */
+type InterviewOutcome = "skipped" | "asked_none" | "answered" | "detached"
 
 /**
  * Hỏi gộp đầu giai đoạn (R3): một lượt elicit nhận hợp `empty_fields` của MỌI bước trong giai đoạn cùng
@@ -228,7 +233,8 @@ type InterviewOutcome = "skipped" | "answered" | "detached"
  * và `/answer` ghi được câu trả lời kể cả khi kết nối đã đóng (FLF-222).
  *
  * Không hỏi lại điều đã chốt (sổ quyết định lọc trước), và câu trả lời ghi thẳng vào sổ nên mọi bước sau
- * đều dùng được — kể cả khi user rời máy giữa chừng rồi quay lại. Điều còn thiếu thì step bên trong tự hỏi.
+ * đều dùng được — kể cả khi user rời máy giữa chừng rồi quay lại. Điều còn thiếu thì step bên trong tự hỏi, trừ giai đoạn fast
+ * path (B-1, `fast-path.ts`): đó là lượt hỏi duy nhất, điều không hỏi được thành giả định.
  */
 /**
  * B-0 không phỏng vấn gộp (FLF-221): user vừa kể ý tưởng ở B-0.1, B-0.2/B-0.3 chỉ chốt hai field B-0.1 thường đã suy
@@ -253,7 +259,10 @@ const runPhaseInterview = async (
   // Câu trả lời mở gõ gộp một đoạn không vào sổ quyết định (FLF-220) ⇒ sổ không đủ làm dấu "đã phỏng vấn".
   // Transcript của lượt phỏng vấn (lưu với `step` = đơn vị giai đoạn) thì luôn có.
   const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
-  if ((session?.messages ?? []).some((m) => m.step === unit)) return "skipped"
+  // Fast path: tin mở giai đoạn của user cũng được ghi dưới đơn vị (để mọi bước B-1.x thấy nó), nên dấu "đã phỏng vấn" là
+  // lời AI của lượt phỏng vấn — lượt không hỏi gì (`asked_none`) cũng ghi một lời AI để làm dấu này.
+  const fast = FAST_PATH_PHASES.has(unit)
+  if ((session?.messages ?? []).some((m) => m.step === unit && (!fast || m.role === "ai"))) return "skipped"
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
   // Tên hệ thống chỉ do chính B-2.3 hỏi: hợp field của mọi bước có B-2.3 nhưng phỏng vấn đầu giai đoạn không được hỏi nó sớm hơn
   const missing = [...new Set(steps.flatMap((step) => {
@@ -290,6 +299,9 @@ const askPhaseInterview = async (
   userMessage?: string
 ): Promise<InterviewOutcome> => {
   const conversation = await loadConversationVariables(sessionId, spine)
+  // Fast path (FLF-234): đây là lượt hỏi DUY NHẤT của giai đoạn ⇒ thấy việc của mọi bước, hỏi nhiều/ít theo mức độ quan trọng
+  const fast = FAST_PATH_PHASES.has(unit)
+  const budget = fast ? interviewBudget(spine.project.stakes) : PROMPT_QUESTIONS_PER_TURN
   const reservedId = await meter.reserveCall(projectId, userId, unit, "elicit")
   let result
   try {
@@ -299,12 +311,13 @@ const askPhaseInterview = async (
           step_id: unit,
           step_name: `Phỏng vấn đầu giai đoạn ${unit}`,
           phase_interview: true,
-          max_questions: PROMPT_QUESTIONS_PER_TURN,
+          max_questions: budget,
+          fast_path: fast,
           missing,
           pending_questions: [],
-          projection: {},
+          projection: fast ? interviewProjection(spine, unit) : {},
           addendum: addendumForUnit(spine, unit),
-          content_guidance: "",
+          content_guidance: fast ? interviewGuidance(spine, unit) : "",
           decisions: ledgerForPrompt(spine),
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
           // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.
@@ -328,10 +341,25 @@ const askPhaseInterview = async (
     logId: result.logId || null
   })
 
-  const { asked, questions } = shapeQuestions(filterAskedQuestions(spine, result.data.questions).questions)
-  if (asked.length === 0) return "skipped"
+  const unasked = filterAskedQuestions(spine, result.data.questions).questions
+  // Server cắt theo ngân sách: không tin model đếm đúng
+  const { asked, questions } = shapeQuestions(fast ? unasked.slice(0, budget) : unasked)
+  // Fast path: câu model hỏi mà server bỏ (đã chốt / quá ngân sách) thì lời AI cũng không được còn hỏi nó
+  const firstReply = fast
+    ? reconcileReply(result.data.reply, result.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), asked.map((a) => a.question))
+    : result.data.reply
+  if (asked.length === 0) {
+    // Lượt phỏng vấn không hỏi gì (chỉ fast path tới được đây với tin của user): vẫn trả lời user và ghi lời AI vào transcript
+    // dưới đơn vị — đó là dấu "đã phỏng vấn", để chạy lại / vào lại giai đoạn không gọi model hỏi thêm lần nữa.
+    const ack = firstReply.trim() === "" ? NO_QUESTION_ACK_VI : firstReply
+    if (fast) {
+      emit({ type: "elicit", step_id: unit, delta: ack })
+      await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: ack, step: unit, createdAt: new Date() }])
+    }
+    return "asked_none"
+  }
 
-  emit({ type: "elicit", step_id: unit, delta: result.data.reply })
+  emit({ type: "elicit", step_id: unit, delta: firstReply })
   const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions }
   emit(answerNeeded)
   await touchRun(projectId, unit, runId, {
@@ -339,14 +367,14 @@ const askPhaseInterview = async (
     stage: "ask",
     detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
     questions,
-    pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: result.data.reply },
+    pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: firstReply },
     release: true,
     appendEvent: { ...answerNeeded, at: new Date().toISOString() }
   })
 
   // Vòng chờ: thẻ ⇒ ghi ngay; chat tự do ⇒ AI đọc, chốt câu đúng ý, hỏi lại câu còn chờ (FLF-221)
   let pending = asked
-  let reply = result.data.reply
+  let reply = firstReply
   for (;;) {
     let payload: AnswerPayload
     try {
@@ -455,15 +483,26 @@ export const runPhase = async (
   // đoạn: tin gắn đơn vị bị coi là "đã phỏng vấn"). Ghi trước lượt phỏng vấn để thứ tự hội thoại đúng; kiểm session
   // trước khi ghi. Chỉ bước đầu nhận message/intent — các bước sau là lượt chạy tiếp, không phải lời user.
   const message = deps.message?.trim() ? deps.message.trim() : undefined
-  if (message) await recordUserMessage(projectId, sessionId, first.id, message)
+  // Fast path: tin mở B-1 gắn đơn vị để bước B-1.2… (chỉ đọc transcript của đơn vị + bước mình) cũng thấy nó; dấu "đã phỏng vấn"
+  // là lời AI (xem `runPhaseInterview`), không phải tin user.
+  const openingStep = FAST_PATH_PHASES.has(unit) && orderedSteps(startSpine).find((s) => phaseUnitOf(s) === unit)?.id === first.id ? unit : first.id
+  if (message) await recordUserMessage(projectId, sessionId, openingStep, message)
   const { message: _message, intent: _intent, messageRecorded: _recorded, ...laterDeps } = deps
-  let firstDeps: Partial<StepRunnerDeps> | null = { ...laterDeps, ...(message ? { message, messageRecorded: true } : {}), ...(deps.intent ? { intent: deps.intent } : {}) }
+  const firstDepsWith = (messageForStep: string | undefined): Partial<StepRunnerDeps> => ({
+    ...laterDeps,
+    ...(message ? { messageRecorded: true } : {}),
+    ...(messageForStep ? { message: messageForStep } : {}),
+    ...(deps.intent ? { intent: deps.intent } : {})
+  })
 
   // R3 + FLF-220: hỏi gộp đầu giai đoạn ở mọi chế độ duyệt (trừ B-0). Các bước bên trong vẫn hỏi được khi còn field
-  // trống — sổ quyết định chặn lặp lại chủ đề vừa trả lời ở đây.
+  // trống (trừ fast path B-1) — sổ quyết định chặn lặp lại chủ đề vừa trả lời ở đây.
   const interview = await runPhaseInterview(projectId, unit, sessionId, userId, emit, d, message)
   // Kết nối đóng trong lúc chờ trả lời phỏng vấn: dừng chuỗi, câu hỏi nằm ở run-state của giai đoạn (FLF-222)
   if (interview === "detached") return { phase: unit, stopped_at: unit, reason_vi: "Chờ bạn trả lời câu hỏi đầu giai đoạn", steps: [] }
+  // Fast path: lượt hỏi gộp đã đọc tin này ⇒ bước đầu không nhận lại nó (sẽ kích một lượt Elicit thừa); tin vẫn đã được ghi.
+  const interviewReadMessage = FAST_PATH_PHASES.has(unit) && (interview === "answered" || interview === "asked_none")
+  let firstDeps: Partial<StepRunnerDeps> | null = firstDepsWith(interviewReadMessage ? undefined : message)
 
   /** Bước cuối giai đoạn vừa được tự Accept (không có cổng chốt nào của giai đoạn này cho user). */
   let terminalAutoAccepted = false
