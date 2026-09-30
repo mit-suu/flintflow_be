@@ -36,7 +36,7 @@ Two habits decide whether this phase is useful:
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
   sentence in `project.vision`. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
   never an assumption, and never an assumption about their answer ("the goal is qualitative"). A user "yes/xác nhận"
-  to a proposal makes it a fact: never re-add an existing assumption; each assumption's `path` is the field it is about.
+  to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about.
 
 `references/*.md` are **not loaded at runtime** — the rules below are what you get.
 
@@ -46,10 +46,10 @@ Two habits decide whether this phase is useful:
   arrive in the content guidance. In one pass: write **one `addendum[]` entry per distinct topic** —
   `{id, topic, content (user's own words/language), content_en (English, for rendering), target_section,
   captured_at}`; set **`project.system_name`** (English name on diagrams and cover, never `project.name`)
-  to the name the user gave or picked — none yet ⇒ set your best 2–4-word Title Case suggestion **with an
-  `assumptions[]` entry** saying it is a suggestion; **infer `project.form_factor` and `project.stakes`**
-  from the idea, each with an `assumptions[]` entry and its reason — unless the user named it (then no assumption). `notes`: the idea in **one sentence**
-  in the user's language — the gate asks the user to lock it.
+  only if the user already gave one — otherwise leave it null (B-2.3 asks; never suggest a name here);
+  set **`project.form_factor` and `project.stakes`** from what the user picked on the cards or said — no
+  assumption for a value they chose; infer only what was neither picked nor said, **with an `assumptions[]`
+  entry** and its reason. `notes`: the gate message (`draft-to-ops` rule 15: "tôi" not "mình", no "bước/giai đoạn/giả định/addendum/brief"), not a field list.
 - **B-0.2 `project.form_factor`** — `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`,
   `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
 - **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. Drives NFR defaults at S-6; a
@@ -105,7 +105,8 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
   brief is under-claiming, what adjacent value is one step away), **Contextual** (what the domain,
   `stakes` and `form_factor` imply that nobody said out loud). Anything the lenses surface becomes an
   `other_requirements[]` or an `assumptions[]` entry — a lens finding with no op is a lens finding that
-  never happened. Then hand over: accepting this gate opens S-1.
+  never happened. `project.system_name` still null ⇒ if the answers hold a name the user picked, `set` it; none
+  picked ⇒ leave it null, never invent one. Then hand over: accepting this gate opens S-1.
 
 ## Rules
 
@@ -138,7 +139,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ## Self-check
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
-- [ ] `project.system_name` (English; a suggestion carries an assumption), `form_factor`, `stakes` set by the end of B-0.
+- [ ] `form_factor`, `stakes` set by the end of B-0; `system_name` (English, user-picked only) by the end of B-2.
 - [ ] `project.vision` + 3–6 outcome-shaped `goals[]` by the end of B-1.1.
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.

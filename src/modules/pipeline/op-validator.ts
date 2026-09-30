@@ -43,7 +43,19 @@ export interface ValidateOptions {
    * trong map ⇒ không giới hạn (step không đọc collection đó thì path cũng chẳng phân giải được).
    */
   visibleIds?: ReadonlyMap<string, ReadonlySet<string>>
+  /**
+   * Path thật của các giả định cổng vừa nói (FLF-232): revision được ghi đúng các path này (và bên dưới) dù nằm ngoài
+   * `writable` / projection của step — user sửa điều AI tạm hiểu thì sửa ở chỗ nó nằm, không phải ở bước của nó.
+   */
+  extraPaths?: readonly string[]
 }
+
+/** `op.path` đúng bằng hoặc nằm dưới một path trong `extraPaths` (đã chuẩn hoá selector). */
+const isExtraPath = (path: string, extraPaths: readonly string[] | undefined): boolean =>
+  (extraPaths ?? []).some((raw) => {
+    const extra = String(normalizeSelectorPath(raw)).trim()
+    return extra !== "" && !extra.endsWith("[]") && (path === extra || path.startsWith(`${extra}.`) || path.startsWith(`${extra}[`))
+  })
 
 /** `actors[id=A01].name` thuộc `actors`; `project.release_scope.in` thuộc `project.release_scope` hoặc `project`. */
 export const isWritablePath = (path: string, writable: readonly string[]): boolean =>
@@ -100,12 +112,14 @@ const scopeErrors = (
   spine: Spine,
   ops: readonly Op[],
   visibleIds: ReadonlyMap<string, ReadonlySet<string>>,
-  stepId: string | null | undefined
+  stepId: string | null | undefined,
+  extraPaths?: readonly string[]
 ): ValidationError[] => {
   const added = idsAddedIn(ops)
   const errors: ValidationError[] = []
   ops.forEach((op, index) => {
     if (op.op !== "set" && op.op !== "remove") return
+    if (isExtraPath(op.path, extraPaths)) return
     const target = targetOf(op.path)
     if (!target || isPlaceholderId(target.id) || added.has(target.id)) return
     const visible = visibleIds.get(target.collection)
@@ -171,6 +185,75 @@ export interface SanitizeResult {
   errors: ValidationError[]
 }
 
+export interface SanitizeOptions {
+  /**
+   * Lượt `revision` ở cổng duyệt (FLF-232): lời sửa của user là lời xác nhận/bác bỏ giả định mà cổng vừa nói, nên model được
+   * đổi `status` (server vẫn đặt `confirmed_at`) — nhưng CHỈ của các giả định trong `gateAssumptionIds`. Kèm luật
+   * `assumption_path_mismatch` cho mọi giả định bị viết lại câu.
+   */
+  revision?: boolean
+  /** Giả định cổng đang nói (`new_assumptions` của gate_ready / phase_gate): revision chỉ đổi `status` của các id này. */
+  gateAssumptionIds?: ReadonlySet<string>
+}
+
+/** Path A và B chỉ cùng một chỗ trong Spine: bằng nhau, cái này là tổ tiên/hậu duệ của cái kia, hoặc `x[]` với `x[...]`. */
+const pathsRelated = (a: string, b: string): boolean => {
+  const norm = (p: string): string => String(normalizeSelectorPath(p)).trim()
+  const [x, y] = [norm(a), norm(b)]
+  if (x === y || x.startsWith(`${y}.`) || x.startsWith(`${y}[`) || y.startsWith(`${x}.`) || y.startsWith(`${x}[`)) return true
+  const collection = (p: string): string => /^[a-z_]+/.exec(p)?.[0] ?? p
+  return (x.endsWith("[]") || y.endsWith("[]")) && collection(x) === collection(y)
+}
+
+/** Câu mới khác câu hiện có. Giả định cũ chưa có `statement_vi` mà model điền thêm bản VI thì không tính là viết lại. */
+const restatedText = (next: unknown, current: string | null | undefined): boolean =>
+  typeof next === "string" && assumptionKey(current) !== "" && assumptionKey(next) !== assumptionKey(current)
+
+const ASSUMPTION_STATEMENT_PATH = /^assumptions\[id=([^\]]+)\]\.(statement|statement_vi)$/
+
+/**
+ * Revision đổi câu của một giả định và xác nhận nó ⇒ lô PHẢI ghi luôn trường thật mà giả định nói về (`assumptions[id].path`).
+ * Đổi câu mà không đổi trường thật là để Spine nói một đằng, giả định nói một nẻo; `set` sai path (vd sửa `project.stakes`
+ * khi giả định nói về `project.form_factor`) không khớp cũng bị chặn ở đây.
+ */
+const assumptionPathErrors = (spine: Spine, ops: readonly unknown[]): ValidationError[] => {
+  const parsed = ops.flatMap((raw, index) => {
+    const op = userOpSchema.safeParse(raw)
+    return op.success ? [{ op: op.data, index }] : []
+  })
+  const errors: ValidationError[] = []
+  for (const assumption of spine.assumptions) {
+    // Câu bị viết lại ở BẤT KỲ trạng thái nào: để `unconfirmed` hay bỏ op status cũng không được để Spine và giả định lệch nhau
+    const restated = parsed.find(({ op }) => {
+      if (op.op !== "set") return false
+      const field = ASSUMPTION_STATEMENT_PATH.exec(op.path)
+      if (field?.[1] === assumption.id) {
+        const current = field[2] === "statement" ? assumption.statement : assumption.statement_vi
+        return typeof op.value === "string" && restatedText(op.value, current)
+      }
+      const whole = ASSUMPTION_PATH.exec(op.path)
+      if (whole?.[1] !== assumption.id || !isRecord(op.value)) return false
+      return (
+        restatedText(op.value.statement, assumption.statement) ||
+        (typeof op.value.statement_vi === "string" && restatedText(op.value.statement_vi, assumption.statement_vi))
+      )
+    })
+    if (!restated) continue
+    const newPaths = parsed.flatMap(({ op }) => (op.op === "set" && op.path === `assumptions[id=${assumption.id}].path` && typeof op.value === "string" ? [op.value] : []))
+    const targets = [assumption.path, ...newPaths]
+    const wroteField = parsed.some(({ op }) => !op.path.startsWith("assumptions") && targets.some((target) => pathsRelated(op.path, target)))
+    if (!wroteField) {
+      errors.push({
+        rule: "assumption_path_mismatch",
+        op_index: restated.index,
+        path: restated.op.path,
+        message: `Bạn đổi câu của ${assumption.id} nhưng không ghi trường thật mà nó nói về ("${assumption.path}"). Lô phải có op set đúng path đó với giá trị mới, cùng lúc với statement và status.`
+      })
+    }
+  }
+  return errors
+}
+
 /**
  * Chuẩn hoá op của MODEL (không áp cho lô user gửi qua `/changes`). Không thêm/bớt op ở giữa lô — `op_index`
  * của lỗi phải còn trỏ đúng lô model đã gửi (chỉ được nối thêm ở cuối).
@@ -181,10 +264,18 @@ export interface SanitizeResult {
  * - `status` của giả định chỉ đổi được ở `ASSUMPTION_SWEEP_STEPS`.
  * - `add addendum[]` ⇒ `captured_at` là giờ server (`stampAddendum`), không phải ngày model viết.
  */
-export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | null = null, now: Date = new Date()): SanitizeResult => {
+export const sanitizeModelOps = (
+  spine: Spine,
+  ops: unknown,
+  stepId: string | null = null,
+  now: Date = new Date(),
+  options: SanitizeOptions = {}
+): SanitizeResult => {
   if (!Array.isArray(ops)) return { ops: [], errors: [] }
   const base = stepId ? stepId.split("@")[0] : ""
-  const sweep = ASSUMPTION_SWEEP_STEPS.has(base)
+  const sweepStep = ASSUMPTION_SWEEP_STEPS.has(base)
+  // Revision ở cổng chỉ đổi status của giả định cổng vừa nói; bước rà giả định đổi được mọi giả định
+  const canSetStatus = (id: string): boolean => sweepStep || (options.revision === true && (options.gateAssumptionIds?.has(id) ?? false))
   const errors: ValidationError[] = []
   const at = now.toISOString()
 
@@ -194,7 +285,7 @@ export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | nu
     const op = userOpSchema.safeParse(raw)
     if (!op.success || op.data.op !== "set") continue
     const field = ASSUMPTION_FIELD_PATH.exec(op.data.path)
-    if (field && field[2] === "status" && typeof op.data.value === "string") statusAfter.set(field[1], op.data.value)
+    if (field && field[2] === "status" && typeof op.data.value === "string" && canSetStatus(field[1])) statusAfter.set(field[1], op.data.value)
     const whole = ASSUMPTION_PATH.exec(op.data.path)
     if (whole && isRecord(op.data.value) && typeof op.data.value.status === "string") statusAfter.set(whole[1], op.data.value.status)
   }
@@ -226,8 +317,12 @@ export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | nu
         confirmedAtWritten.add(field[1])
         return { ...op, value: confirmedAtFor(field[1]) }
       }
-      if (!sweep) {
-        errors.push({ rule: "op_not_allowed", op_index: index, path: op.path, message: "Chỉ user xác nhận/bác bỏ giả định (ở gate hoặc bước rà giả định) — step này không được đổi status" })
+      // Ngoài phạm vi được đổi status: giữ nguyên status hiện tại thay vì làm hỏng cả lô. Model hay tự "xác nhận" giả định
+      // khi user vừa đồng ý trong chat — 3 lượt thử đều bị từ chối thì cả bước thất bại (gặp thật ở B-1.6). Việc xác nhận
+      // thuộc về user ở cổng duyệt (chip "Đúng rồi, đi tiếp") hoặc bước rà giả định.
+      if (!canSetStatus(field[1])) {
+        const current = spine.assumptions.find((a) => a.id === field[1])
+        return { ...op, value: current?.status ?? "unconfirmed" }
       }
       return op
     }
@@ -277,21 +372,22 @@ export const sanitizeModelOps = (spine: Spine, ops: unknown, stepId: string | nu
       const assumption = assumptionId ? spine.assumptions.find((a) => a.id === assumptionId) : undefined
       if (assumption && assumptionId) {
         confirmedAtWritten.add(assumptionId)
-        const status = sweep && typeof op.value.status === "string" ? op.value.status : assumption.status
-        return { ...op, value: { ...op.value, status, confirmed_at: sweep ? confirmedAtFor(assumptionId) : assumption.confirmed_at } }
+        const status = canSetStatus(assumptionId) && typeof op.value.status === "string" ? op.value.status : assumption.status
+        return { ...op, value: { ...op.value, status, confirmed_at: canSetStatus(assumptionId) ? confirmedAtFor(assumptionId) : assumption.confirmed_at } }
       }
     }
     return op
   })
 
   // status đổi ở step rà giả định mà lô không kèm confirmed_at ⇒ nối thêm op đặt ngày (ở cuối — không lệch op_index)
-  if (sweep) {
+  if (sweepStep || options.revision) {
     for (const a of spine.assumptions) {
-      if (confirmedAtWritten.has(a.id) || statusAfter.get(a.id) === a.status) continue
+      if (!canSetStatus(a.id) || confirmedAtWritten.has(a.id) || statusAfter.get(a.id) === a.status) continue
       const value = confirmedAtFor(a.id)
       if (value !== a.confirmed_at) out.push({ op: "set", path: `assumptions[id=${a.id}].confirmed_at`, value, reason: "confirmed_at do server đặt" })
     }
   }
+  if (options.revision) errors.push(...assumptionPathErrors(spine, out))
   return { ops: stampAddendum(out, now), errors }
 }
 
@@ -571,7 +667,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
       errors.push({ rule: "op_schema", op_index: index, message: `Op #${index} sai hình: ${z.prettifyError(op.error)}` })
       return
     }
-    if (options.writable && !isWritablePath(op.data.path, options.writable)) {
+    if (options.writable && !isWritablePath(op.data.path, options.writable) && !isExtraPath(op.data.path, options.extraPaths)) {
       errors.push({
         rule: "path_not_writable",
         op_index: index,
@@ -585,7 +681,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
   if (errors.length > 0 || parsed.length === 0) return errors
 
   if (options.visibleIds) {
-    const outOfScope = scopeErrors(spine, parsed, options.visibleIds, options.stepId)
+    const outOfScope = scopeErrors(spine, parsed, options.visibleIds, options.stepId, options.extraPaths)
     if (outOfScope.length > 0) return outOfScope
   }
 

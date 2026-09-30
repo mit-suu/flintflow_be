@@ -417,7 +417,7 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     await run
   })
 
-  it("có ý tưởng ⇒ elicit nhận đúng message, không hỏi form_factor/stakes; draft ghi tên, addendum, form_factor, stakes kèm giả định", async () => {
+  it("có ý tưởng ⇒ elicit nhận đúng message, hỏi form_factor + stakes chứ không hỏi tên; draft ghi addendum, form_factor, stakes, tin cổng từ notes", async () => {
     seedEmpty()
     const prompts: Record<string, unknown>[] = []
     const { events, emit } = collect()
@@ -429,7 +429,6 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
       draftExecutor: async () =>
         draftResult(
           [
-            { op: "set", path: "project.system_name", value: "Salon Slot" },
             { op: "set", path: "project.form_factor", value: "mobile_app" },
             { op: "set", path: "project.stakes", value: "production" },
             { op: "add", path: "addendum[]", value: { id: "AD01", topic: "Booking", content: IDEA, content_en: "Barbershop booking app.", target_section: "fixed:1", captured_at: "2026-09-28T00:00:00.000Z" } },
@@ -442,16 +441,23 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     })
     expect(events.some((e) => e.type === "gate_ready")).toBe(true)
     expect(prompts[0].user_message).toBe(IDEA)
-    expect(prompts[0].missing).not.toContain("project.form_factor")
-    expect(prompts[0].missing).not.toContain("project.stakes")
+    // FLF-232: nền tảng + mức độ hỏi bằng thẻ ở B-0.1; tên hệ thống dời xuống B-2.3
+    expect(prompts[0].missing).toContain("project.form_factor")
+    expect(prompts[0].missing).toContain("project.stakes")
+    expect(prompts[0].missing).not.toContain("project.system_name")
+    expect(String(prompts[0].conversation_summary)).toContain(IDEA)
 
     const final = (await repo.get(PROJECT))!
-    expect(final.project).toMatchObject({ system_name: "Salon Slot", form_factor: "mobile_app", stakes: "production" })
+    expect(final.project).toMatchObject({ system_name: null, form_factor: "mobile_app", stakes: "production" })
     expect(final.addendum).toHaveLength(1)
     expect(final.assumptions.map((a) => a.path)).toEqual(["project.form_factor", "project.stakes"])
     expect(final.assumptions[0].statement_vi).toBe("Ưu tiên ứng dụng điện thoại.")
     // text_vi đi kèm giả định mới ở gate; dữ liệu không có statement_vi thì không có text_vi
     const gateReady = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
+    // notes không nhắc hai điều tạm hiểu ⇒ server nối thêm câu nói chúng, để chip "Đúng rồi" chỉ xác nhận điều user đã đọc
+    expect(gateReady.message_vi).toBe(
+      "Ứng dụng đặt lịch cắt tóc cho tiệm nhỏ. Tôi tạm hiểu là ưu tiên ứng dụng điện thoại. Tôi cũng tạm hiểu là real customers, no regulation. Nếu chỗ nào khác thì bạn nói tôi nhé."
+    )
     expect(gateReady.new_assumptions).toEqual([
       { id: "AS01", text: "Mobile app first.", text_vi: "Ưu tiên ứng dụng điện thoại." },
       { id: "AS02", text: "Real customers, no regulation." }
@@ -500,6 +506,8 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     expect(interview).toHaveLength(1)
     expect(interview[0]).toMatchObject({ step_id: "B-1", user_message: "Mục tiêu là giảm khách bỏ hẹn" })
     expect(String(interview[0].recent_turns)).toContain("Mục tiêu là giảm khách bỏ hẹn")
+    // FLF-232: trí nhớ xuyên bước — tin nhắn gắn với B-1.1 vẫn có mặt ở lượt hỏi của cả giai đoạn B-1
+    expect(String(interview[0].conversation_summary)).toContain("Mục tiêu là giảm khách bỏ hẹn")
   })
 
   it("B-0.2 khi form_factor đã có sau B-0.1 ⇒ không gọi model (0 usage), vẫn tới gate", async () => {
@@ -572,5 +580,202 @@ describe("FLF-221: chat tự do trong phỏng vấn đầu giai đoạn", () => 
     const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
     expect(messages.filter((m) => m.step === "B-1").map((m) => m.role)).toEqual(["ai", "user", "ai"]) // lượt hỏi (kèm câu hỏi) còn trong lịch sử sau khi user trả lời bằng chat
     expect(events.some((e) => e.type === "gate_ready" && e.step_id.startsWith("B-1."))).toBe(true)
+  })
+})
+
+describe("FLF-232: tên hệ thống hỏi ở B-2.3, không hỏi sớm", () => {
+  const B0_B1 = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6"]
+  const capture = (missingByStep: Map<string, unknown[]>): StepRunnerDeps["elicitExecutor"] => async (input) => {
+    const vars = input.promptVariables as { step_id: string; missing: unknown[] }
+    missingByStep.set(vars.step_id, vars.missing)
+    return elicitResult("Tôi hiểu rồi.", [])
+  }
+
+  it("tên còn null: bước Brief thường (B-1.1) không có system_name trong missing, phỏng vấn đầu B-1 cũng không", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
+    const missing = new Map<string, unknown[]>()
+    await runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: capture(missing), draftExecutor: async () => draftResult([]), message: "Mục tiêu là giảm khách bỏ hẹn" })
+    expect(missing.size).toBeGreaterThan(0)
+    for (const [stepId, fields] of missing) expect(fields, stepId).not.toContain("project.system_name")
+  })
+
+  it("tên còn null: B-2.3 hỏi tên (system_name nằm trong missing); đã có tên thì không", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...B0_B1, "B-2.1", "B-2.2"])
+    const missing = new Map<string, unknown[]>()
+    await runStep(PROJECT, "B-2.3", SESSION, USER, collect().emit, { elicitExecutor: capture(missing), draftExecutor: async () => draftResult([]) })
+    expect(missing.get("B-2.3")).toContain("project.system_name")
+
+    db.reset()
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[]; project: Record<string, unknown> }).steps = acceptSteps([...B0_B1, "B-2.1", "B-2.2"])
+    ;(db.spines[0] as { project: Record<string, unknown> }).project.system_name = "Minh An Booking"
+    const again = new Map<string, unknown[]>()
+    await runStep(PROJECT, "B-2.3", SESSION, USER, collect().emit, { elicitExecutor: capture(again), draftExecutor: async () => draftResult([]) })
+    expect(again.get("B-2.3") ?? []).not.toContain("project.system_name")
+  })
+
+  it("B-2.3 chọn tên qua thẻ ⇒ draft nhận câu trả lời, ghi system_name; tên gợi ý sai luật (đuôi System) bị lọc", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { project: Record<string, unknown> }).project.vision = "Đặt lịch khám cho phòng khám nhỏ"
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps([...B0_B1, "B-2.1", "B-2.2"])
+    const { events, emit } = collect()
+    const run = runStep(PROJECT, "B-2.3", SESSION, USER, emit, {
+      elicitExecutor: async () =>
+        elicitResult("Brief đã đủ để đặt tên rồi.", [
+          {
+            question: "Bạn thích tên nào cho hệ thống?",
+            topic_key: "system_name",
+            header: "Tên",
+            options: [{ label: "Minh An Booking (Khuyến nghị)", description: "Gần gũi" }, { label: "Minh An Clinic System" }, { label: "CarePoint" }],
+            multiple: false
+          }
+        ] as never),
+      draftExecutor: async (_type, input) => {
+        expect(String((input.promptVariables as { answers: string }).answers)).toContain("CarePoint")
+        return draftResult([{ op: "set", path: "project.system_name", value: "CarePoint" }], "Tôi đặt tên hệ thống là CarePoint. Ổn thì mình đi tiếp nhé.")
+      }
+    })
+    await waitFor(events, "answer_needed")
+    const asked = events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    const labels = (asked.questions[0].options ?? []).map((o) => (typeof o === "string" ? o : o.label))
+    expect(labels).toEqual(["Minh An Booking (Khuyến nghị)", "CarePoint"])
+    submitAnswer(PROJECT, "B-2.3", SESSION, { answers: [{ question_id: asked.questions[0].id, answer: "CarePoint" }] })
+    await run
+    expect((await repo.get(PROJECT))!.project.system_name).toBe("CarePoint")
+  })
+})
+
+describe("FLF-232: tin nhắn cổng cuối giai đoạn", () => {
+  it("phase_gate mang message_vi = tin của bước cuối; không notes ⇒ dựng tất định từ tóm tắt", async () => {
+    seedEmpty()
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-0", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitResult("Tôi hiểu rồi.", []),
+      draftExecutor: async () =>
+        draftResult([{ op: "add", path: "addendum[]", value: { id: "AD01", topic: "Booking", content: "Đặt lịch", content_en: "Booking", target_section: "fixed:1", captured_at: "2026-09-28T00:00:00.000Z" } }]),
+      message: "Ứng dụng đặt lịch khám"
+    })
+    const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
+    const gateReady = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
+    expect(gateReady.message_vi).toMatch(/^Tôi đã cập nhật/)
+    expect(phaseGate.message_vi).toBe(gateReady.message_vi)
+    expect(gateReady.message_vi).not.toMatch(/Brief|giả định|ghi nhận/)
+  })
+})
+
+describe("FLF-232 vòng sửa 1: cổng cuối giai đoạn nói mọi điều tạm hiểu của giai đoạn", () => {
+  it("bước im lặng sinh giả định ⇒ phase_gate.new_assumptions = đúng các giả định còn chưa xác nhận và message_vi nói hết", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
+    const spoken: Record<string, string> = {
+      "B-1.2": "Tôi tạm hiểu số một về nhóm người dùng chính",
+      "B-1.3": "Tôi tạm hiểu số hai về kênh thông báo",
+      "B-1.4": "Tôi tạm hiểu số ba về phạm vi bản đầu",
+      "B-1.5": "Tôi tạm hiểu số bốn về chỉ số thành công",
+      "B-1.6": "Tôi tạm hiểu số năm về rủi ro chính"
+    }
+    let n = 0
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitResult("Rõ rồi.", []),
+      draftExecutor: async (_type, input) => {
+        const stepId = (input.promptVariables as { step_id: string }).step_id
+        const text = spoken[stepId]
+        if (!text) return draftResult([])
+        n += 1
+        return draftResult([
+          {
+            op: "add",
+            path: "assumptions[]",
+            value: { id: `AS0${n}`, path: "project.vision", statement: `Assumption ${stepId}`, statement_vi: text, rationale: "r", origin_step_id: stepId, status: "unconfirmed", confirmed_at: null }
+          }
+        ])
+      },
+      message: "Mục tiêu là giảm khách bỏ hẹn"
+    })
+
+    const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
+    expect(phaseGate.new_assumptions.map((a) => a.text_vi).sort()).toEqual(Object.values(spoken).sort())
+    for (const text of Object.values(spoken)) expect(phaseGate.message_vi).toContain(text.charAt(0).toLowerCase() + text.slice(1))
+    expect(phaseGate.message_vi).not.toMatch(/điều nhỏ khác|giả định/)
+    // Bước im lặng thật sự đã tự qua — các giả định của chúng vẫn được nói ở cổng cuối
+    expect(events.filter((e) => e.type === "auto_accepted").length).toBeGreaterThan(0)
+  })
+
+  it("giả định đã xác nhận/bác bỏ không nằm trong danh sách cổng", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitResult("Rõ rồi.", []),
+      draftExecutor: async (_type, input) => {
+        const stepId = (input.promptVariables as { step_id: string }).step_id
+        if (stepId !== "B-1.2") return draftResult([])
+        return draftResult([
+          { op: "add", path: "assumptions[]", value: { id: "AS01", path: "project.vision", statement: "One", statement_vi: "Điều một", rationale: "r", origin_step_id: stepId, status: "unconfirmed", confirmed_at: null } }
+        ])
+      },
+      message: "Mục tiêu là giảm khách bỏ hẹn"
+    })
+    // Người dùng xác nhận AS01 ở nơi khác trước khi cổng dựng: mô phỏng bằng cách kiểm danh sách hiện tại là AS01 chưa xác nhận
+    const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
+    expect(phaseGate.new_assumptions.map((a) => a.id)).toEqual(["AS01"])
+  })
+})
+
+describe("FLF-232 vòng sửa 1: phỏng vấn đầu giai đoạn", () => {
+  it("phỏng vấn đầu B-2 không hỏi tên hệ thống (chỉ B-2.3 hỏi)", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6"])
+    const interview: Record<string, unknown>[] = []
+    await runPhase(PROJECT, "B-2", SESSION, USER, collect().emit, {
+      elicitExecutor: async (input) => {
+        const vars = input.promptVariables as Record<string, unknown>
+        if (vars.phase_interview) interview.push(vars)
+        return elicitResult("Tôi hiểu rồi.", [])
+      },
+      draftExecutor: async () => draftResult([]),
+      message: "Sang phần hoàn thiện"
+    })
+    for (const vars of interview) expect(vars.missing as string[]).not.toContain("project.system_name")
+  })
+
+  it("tin gõ kèm đáp án thẻ: đáp án thẻ vào transcript TRƯỚC lượt chat (model thấy, không hỏi lại) và lượt chat đọc transcript cả session", async () => {
+    seedEmpty()
+    ;(db.spines[0] as { steps: unknown[] }).steps = acceptSteps(["B-0.1", "B-0.2", "B-0.3"])
+    const chatTurns: Record<string, unknown>[] = []
+    const { events, emit } = collect()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, {
+      elicitExecutor: async (input) => {
+        const vars = input.promptVariables as Record<string, unknown>
+        if (vars.chat_turn) {
+          chatTurns.push(vars)
+          return { ...elicitResult("Đã ghi mục tiêu.", []), data: { reply: "Đã ghi mục tiêu.", questions: [], settled: [{ topic_key: "goals", answer: "giảm bỏ hẹn" }] } }
+        }
+        if (vars.phase_interview) {
+          return elicitResult("Mình hỏi nhanh.", [
+            { question: "Mục tiêu chính là gì?", topic_key: "goals", options: [] },
+            { question: "Tầm nhìn đã đúng ý chưa?", topic_key: "vision_ok", options: [{ label: "Đúng như đề xuất" }, { label: "Cần sửa" }] }
+          ] as never as ElicitOutput["questions"])
+        }
+        return elicitResult("Rõ rồi.", [])
+      },
+      draftExecutor: async () => draftResult([])
+    })
+    await waitFor(events, "answer_needed")
+    submitAnswer(PROJECT, "B-1", SESSION, { answers: [{ question_id: "Q_vision_ok", answer: "Đúng như đề xuất" }], message: "Mục tiêu là giảm 30% khách bỏ hẹn" })
+    await run
+
+    expect(chatTurns).toHaveLength(1)
+    // Lượt chat đọc transcript cả session (có sessionId): thấy cả đáp án thẻ lẫn tin gõ
+    expect(String(chatTurns[0].recent_turns)).toContain("Đúng như đề xuất")
+    expect(String(chatTurns[0].recent_turns)).toContain("Mục tiêu là giảm 30% khách bỏ hẹn")
+    const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
+    const users = messages.filter((m) => m.step === "B-1" && m.role === "user").map((m) => m.content)
+    expect(users).toEqual(["Đúng như đề xuất", "Mục tiêu là giảm 30% khách bỏ hẹn"])
+    const decisions = (await repo.get(PROJECT))!.decisions.map((d) => d.topic_key).sort()
+    expect(decisions).toEqual(["goals", "vision_ok"])
   })
 })

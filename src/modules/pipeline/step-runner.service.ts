@@ -38,9 +38,11 @@ import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramSe
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
-import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
+import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
+import { buildConversationSummary } from "./conversation-summary.js"
+import { composeStepGateMessage } from "./gate-message.js"
+import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
@@ -397,7 +399,7 @@ export const resumeWaitingStep = async (
 export const CHAT_RESERVED_CALLS = MAX_SCHEMA_RETRIES + 1 + 1
 
 /** Câu trả lời cố định khi hết ngân sách chat — không gọi model. */
-export const CHAT_BUDGET_REPLY = "Mình sẽ tự giả định phần còn lại, bạn sửa ở bước duyệt nhé."
+export const CHAT_BUDGET_REPLY = "Phần còn lại tôi sẽ tạm hiểu theo hướng hợp lý nhất, bạn xem lại rồi nói tôi nếu chỗ nào khác nhé."
 
 /**
  * Kiểm `settled` model báo — không tin model:
@@ -469,7 +471,10 @@ export interface ChatTurnInput {
   stepName: string
   asked: PendingAnswerState["asked"]
   message: string
+  /** Dự phòng khi không có `sessionId` (test, lời gọi không có transcript). */
   recentTurns: string
+  /** Có ⇒ `recent_turns`/`conversation_summary` đọc lại transcript của cả session (mọi step), không dùng `recentTurns`. */
+  sessionId?: string
   projection: Record<string, unknown>
   spine: Spine
   elicitExecutor: ElicitExecutor
@@ -487,7 +492,10 @@ export const nextPendingAfterChat = (
   message = ""
 ): PendingAnswerState["asked"] => {
   if (remaining.length === 0) return remaining
-  const next = revised.length === 0 ? remaining : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  // Sổ quyết định phải đã ghi câu trả lời thẻ của lượt này (caller đọc lại Spine sau khi ghi) — câu viết lại hỏi lại chủ đề
+  // vừa chốt bị bỏ. Bỏ hết mà vẫn còn câu chưa trả lời ⇒ hỏi lại đúng những câu đó, không để lượt kết thúc trong im lặng.
+  const filtered = revised.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  const next = filtered.length === 0 ? remaining : filtered
   if (!isSubstantiveAnswer(message)) return next
   // Đếm theo chủ đề, kể cả khi AI viết lại câu
   const repliedOf = (topic: string | undefined): number => (remaining.find((q) => q.topic_key === topic)?.replied ?? 0) + 1
@@ -522,9 +530,38 @@ export const settleRepeatedAnswer = (asked: PendingAnswerState["asked"], settled
   return [{ question_id: questionIdsFor(asked)[open[0]], answer: text }]
 }
 
+/**
+ * Hết ngân sách chat ⇒ không còn lượt model để AI chốt câu trả lời, nhưng tin user vẫn có thể đã trả lời. Chốt tất định,
+ * chỉ khi ánh xạ tin ↔ câu là CHẮC CHẮN: câu có lựa chọn — tin nhắc đúng nhãn của một lựa chọn; câu mở — tin đánh số đủ đoạn
+ * cho mọi câu mở, hoặc luật câu-trả-lời-lặp (`settleRepeatedAnswer`). Một tin tự do không đánh số KHÔNG bao giờ được coi là
+ * câu trả lời của câu mở duy nhất (có thể lạc đề): câu vẫn chờ, tin đi vào ghi chú cho bước sau.
+ */
+export const settleWithoutModel = (asked: PendingAnswerState["asked"], message: string): AnswerInput[] => {
+  if (!isSubstantiveAnswer(message)) return []
+  const lower = message.toLowerCase()
+  const namedOptions = (q: PendingAnswerState["asked"][number]): string[] => q.options.map((o) => o.label).filter((label) => lower.includes(stripRecommended(label).toLowerCase()))
+  const candidates: { topic_key: string; answer: string }[] = []
+  const open = asked.filter((q) => q.options.length === 0)
+  const openCovered = open.length > 1 && splitNumberedAnswer(message).size >= open.length
+  for (const q of asked) {
+    const topic_key = q.topic_key ?? ""
+    if (q.options.length === 0) {
+      if (openCovered) candidates.push({ topic_key, answer: "" })
+      continue
+    }
+    const named = namedOptions(q)
+    if (named.length === 0 || (!q.multiple && named.length > 1)) continue
+    candidates.push({ topic_key, answer: q.multiple ? named.join(", ") : named[0] })
+  }
+  return settleRepeatedAnswer(asked, settleFromChat(asked, candidates, message), message)
+}
+
 /** Một lượt elicit đọc tin chat: trả lời user + câu nào đã chốt được (đã kiểm) + câu còn chờ AI đã viết lại. */
 export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string; settled: AnswerInput[]; questions: ElicitOutput["questions"] }> => {
   const ids = questionIdsFor(input.asked)
+  const conversation = input.sessionId
+    ? await loadConversationVariables(input.sessionId, input.spine)
+    : { recent_turns: input.recentTurns, conversation_summary: buildConversationSummary(input.spine, []) }
   const usageId = await meter.reserveCall(input.projectId, input.userId, input.unit, "elicit")
   let result: AiActionResult<ElicitOutput>
   try {
@@ -534,7 +571,7 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           step_id: input.unit,
           step_name: input.stepName,
           chat_turn: true,
-          max_questions: MAX_QUESTIONS_PER_TURN,
+          max_questions: PROMPT_QUESTIONS_PER_TURN,
           missing: [],
           pending_questions: input.asked.map((q, i) => ({
             id: ids[i],
@@ -546,7 +583,7 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           addendum: addendumForUnit(input.spine, input.unit),
           content_guidance: "",
           decisions: ledgerForPrompt(input.spine),
-          recent_turns: input.recentTurns,
+          ...conversation,
           user_message: input.message
         }
       },
@@ -597,8 +634,14 @@ const refresh = async (projectId: string): Promise<{ spine: Spine; spineVersion:
  * câu hỏi còn trong lịch sử sau khi user đã trả lời. Chỉ lưu chữ của câu, không lưu lựa chọn: tin AI cuối có lựa chọn
  * sẽ bị khung chat hiểu là thẻ hỏi của hỏi đáp tự do. Không có câu nào ⇒ chỉ lời đáp.
  */
-export const askTranscript = (reply: string, asked: readonly { question: string }[]): string =>
-  asked.length === 0 ? reply : JSON.stringify({ reply, questions: asked.map((q) => ({ question: q.question })) })
+export const askTranscript = (reply: string, asked: readonly { question: string; inline?: boolean; options?: readonly unknown[] }[]): string =>
+  asked.length === 0
+    ? reply
+    : JSON.stringify({
+        reply,
+        // `inline` ở lại để khung chat không liệt kê lại câu đã hỏi trong lời đáp sau khi tải lại
+        questions: asked.map((q) => ({ question: q.question, ...(q.inline && !q.options?.length ? { inline: true } : {}) }))
+      })
 
 /** Lọc cả `projectId`: session của project khác không bao giờ bị ghi, kể cả khi lời gọi quên kiểm session trước. */
 const pushTranscript = async (projectId: string, sessionId: string, stepId: string, role: "user" | "ai", content: string): Promise<void> => {
@@ -629,12 +672,6 @@ export const hasIdea = (input: {
   (input.spine.project.vision ?? "").trim() !== "" ||
   input.documents.trim() !== "" ||
   ((input.message ?? "").trim() !== "" && input.intent !== "no_idea")
-
-/**
- * B-0.1 không hỏi field mà lượt soạn được phép tự suy ra từ ý tưởng (kèm giả định): nền tảng và mức độ quan trọng.
- * Hỏi "web hay app?" ngay sau khi user vừa kể "ứng dụng đặt lịch trên điện thoại" là câu hỏi thừa (FLF-221).
- */
-export const B01_INFERABLE_FIELDS: ReadonlySet<string> = new Set(["project.form_factor", "project.stakes"])
 
 /**
  * B-0.2/B-0.3 chỉ chốt một field mà B-0.1 thường đã suy ra. Field đã có giá trị ở lượt đầu ⇒ không gọi model
@@ -774,6 +811,8 @@ export interface DraftPhaseResult {
   applied: boolean
   /** Tóm tắt đọc được của lô vừa ghi (WP-5) — gate gom lại thành "Bạn vừa có". */
   summary?: ChangeSummary[]
+  /** `notes` model viết cho cổng (FLF-232: tin nhắn cổng 2–4 câu). Lô rỗng vẫn có — lý do step không đổi gì nằm ở đây. */
+  notes?: string
 }
 
 /**
@@ -788,6 +827,7 @@ export const retryReasonVi = (errors: readonly { rule: string }[]): string => {
   if (rules.has("path_not_resolved")) return "AI trỏ vào mục không tồn tại"
   if ([...rules].some((r) => r.startsWith("invariant_"))) return "kết quả vi phạm quy tắc liên kết của tài liệu"
   if (rules.has("path_not_writable")) return "AI định ghi vào phần không thuộc bước này"
+  if (rules.has("assumption_path_mismatch")) return "AI sửa điều đang tạm hiểu nhưng chưa sửa đúng chỗ tương ứng"
   return "kết quả chưa hợp lệ"
 }
 
@@ -805,7 +845,7 @@ export const runDraftPhase = async (
   callKind: DraftCallKind,
   emit: Emit,
   deps: StepRunnerDeps,
-  extra: { answers?: string; revisionRequest?: string } = {}
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string> } = {}
 ): Promise<DraftPhaseResult> => {
   assertNotAborted(deps.signal, stepId)
   const currentFirstSeq = spine.steps.find((s) => s.id === stepId)?.first_seq ?? null
@@ -854,7 +894,8 @@ export const runDraftPhase = async (
 
   for (const attempt of draftResult.attempts) emit({ type: "draft", step_id: stepId, attempt: attempt.attempt })
 
-  if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false }
+  const notes = draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}
+  if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false, ...notes }
 
   try {
     const applied = await applyTransaction(projectId, draftResult.txn)
@@ -867,7 +908,7 @@ export const runDraftPhase = async (
       changes: applied.changes.map((c) => ({ op: c.op, path: c.path, before: c.before, value: c.value, reason: c.reason })),
       summary
     })
-    return { spineVersion: applied.spine_version, applied: true, summary }
+    return { spineVersion: applied.spine_version, applied: true, summary, ...notes }
   } catch (err) {
     if (err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT) {
       // 409 hai tab: model đã trả lời (credit đã deduct ở ví) nhưng Spine không ghi được — hoàn usage[]
@@ -1247,6 +1288,8 @@ export const runStep = async (
     const stepSummary: ChangeSummary[] = []
     /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */
     let wroteOps = false
+    /** `notes` của lượt Draft cuối — thành tin nhắn cổng (`message_vi`). */
+    let gateNotes: string | undefined
 
     /**
      * Câu trả lời đưa vào lượt soạn. Ngoài transcript của chính bước, LUÔN kèm sổ quyết định: khi câu hỏi
@@ -1338,6 +1381,9 @@ export const runStep = async (
         }
 
         await markReceived(cardAnswers.length, "Đang đọc tin nhắn của bạn")
+        // Đáp án thẻ gửi kèm tin gõ vào transcript TRƯỚC lượt chat: model đọc transcript để biết user đã chọn gì, thiếu thì hỏi lại
+        const pickedByCard = cardAnswers.map((a) => answerText(a.answer)).filter((text) => text !== "")
+        if (pickedByCard.length > 0) await pushTranscript(projectId, sessionId, stepId, "user", pickedByCard.join("\n"))
         if (!payload.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", message)
         const answeredByCard = new Set(cardAnswers.map((a) => indexOfQuestion(pending, a.question_id)))
 
@@ -1349,17 +1395,26 @@ export const runStep = async (
           const byMessage = questionIdsFor(pending)
             .filter((_, i) => !answeredByCard.has(i))
             .map((id) => ({ question_id: id, answer: message }))
-          await recordAnswers(pending, [...cardAnswers, ...byMessage], { transcript: cardAnswers })
+          await recordAnswers(pending, [...cardAnswers, ...byMessage], { transcript: [] })
           return
         }
 
         if (!(await chatBudgetLeft(projectId, stepId, stepStateForRound?.first_seq ?? null))) {
-          emit({ type: "elicit", step_id: stepId, delta: CHAT_BUDGET_REPLY })
-          await pushTranscript(projectId, sessionId, stepId, "ai", CHAT_BUDGET_REPLY)
-          await recordAnswers(pending, cardAnswers)
-          const left = pending.filter((_, i) => !answeredByCard.has(i))
-          const note = [`User nhắn: ${message}`, ...left.map((q) => `Chưa trả lời — tự giả định và ghi assumptions[]: ${q.question}`)].join("\n")
-          answersText = `${answersText}\n${note}`.trim()
+          // Không còn lượt model, nhưng tin user có thể đã trả lời: chốt phần chắc chắn trước, chỉ câu thật sự chưa trả lời
+          // mới để bước sau tự giả định — không bao giờ tạo giả định cho điều user vừa nói.
+          const settledLocally = settleWithoutModel(pending, message).filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
+          await recordAnswers(pending, [...cardAnswers, ...settledLocally], {
+            transcript: [],
+            settledIds: new Set(settledLocally.map((a) => a.question_id))
+          })
+          const answeredNow = new Set([...cardAnswers, ...settledLocally].map((a) => indexOfQuestion(pending, a.question_id)))
+          const left = pending.filter((_, i) => !answeredNow.has(i))
+          if (left.length > 0) {
+            emit({ type: "elicit", step_id: stepId, delta: CHAT_BUDGET_REPLY })
+            await pushTranscript(projectId, sessionId, stepId, "ai", CHAT_BUDGET_REPLY)
+            const note = [`User nhắn: ${message}`, ...left.map((q) => `Chưa trả lời — tự giả định và ghi assumptions[]: ${q.question}`)].join("\n")
+            answersText = `${answersText}\n${note}`.trim()
+          }
           return
         }
 
@@ -1374,6 +1429,7 @@ export const runStep = async (
             asked: pending,
             message,
             recentTurns: ctx.transcriptTail,
+            sessionId,
             projection: elicitProjection(spine, stepId),
             spine,
             elicitExecutor: d.elicitExecutor
@@ -1383,7 +1439,7 @@ export const runStep = async (
 
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
         await recordAnswers(pending, [...cardAnswers, ...settled], {
-          transcript: cardAnswers,
+          transcript: [],
           settledIds: new Set(settled.map((a) => a.question_id))
         })
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
@@ -1415,7 +1471,7 @@ export const runStep = async (
     if (needsDraft && !fieldAlreadySet) {
       // FLF-220: AI tự quyết hỏi nhiều hay ít — hỏi khi bước còn field trống, ở mọi chế độ duyệt. Chủ đề đã
       // chốt (kể cả ở phỏng vấn đầu giai đoạn) bị `filterAskedQuestions` chặn nên không hỏi lặp.
-      const missing = stepDef.template_id === "B-0.1" ? ctx.emptyFields.filter((field) => !B01_INFERABLE_FIELDS.has(field)) : ctx.emptyFields
+      const missing = askableFields(stepDef.template_id, ctx.emptyFields)
       const noIdeaYet = !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })
       const shouldElicit = missing.length > 0 || noIdeaYet
 
@@ -1430,6 +1486,7 @@ export const runStep = async (
         const { calls_used: callsBeforeElicit } = await meter.roundCounts(projectId, stepId, stepStateForRound?.first_seq ?? null)
         if (callsBeforeElicit >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
 
+        const conversation = await loadConversationVariables(sessionId, spine)
         const elicitUsageId = await meter.reserveCall(projectId, userId, stepId, "elicit")
         let elicitResult: AiActionResult<ElicitOutput>
         try {
@@ -1439,7 +1496,7 @@ export const runStep = async (
               promptVariables: {
                 step_id: stepId,
                 step_name: ctx.label_en,
-                max_questions: b0Field ? B0_FIELD_MAX_QUESTIONS : MAX_QUESTIONS_PER_TURN,
+                max_questions: b0Field ? B0_FIELD_MAX_QUESTIONS : PROMPT_QUESTIONS_PER_TURN,
                 missing,
                 pending_questions: [],
                 // BUG-19: vòng hỏi phải thấy quy tắc và NFR đã chốt, nếu không nó gợi ý ngược lại chính
@@ -1450,7 +1507,7 @@ export const runStep = async (
                 content_guidance: elicitGuidance(ctx),
                 // R4: sổ quyết định — "đã chốt gì, ở bước nào"
                 decisions: ledgerForPrompt(spine),
-                recent_turns: ctx.transcriptTail,
+                ...conversation,
                 user_message: noIdeaYet ? NO_IDEA_USER_MESSAGE : (userMessage ?? "(tự động — vòng elicit đầu step)")
               }
             },
@@ -1517,6 +1574,7 @@ export const runStep = async (
         spineVersion = draftPhase.spineVersion
         if (draftPhase.applied) wroteOps = true
         stepSummary.push(...(draftPhase.summary ?? []))
+        if (draftPhase.notes) gateNotes = draftPhase.notes
       }
     }
 
@@ -1554,6 +1612,11 @@ export const runStep = async (
     // bấm "Mở lại" lại rơi vào đúng vòng đó. Nói thẳng ở gate để user chọn lối khác (viết tay qua chat / waive).
     //
     // Lớp 4 "Bạn vừa có" (03) + WP-5: gate mang nội dung, không chỉ con số.
+    const gateMessage = composeStepGateMessage({
+      notes: gateNotes,
+      summary: stepSummary,
+      newAssumptionTexts: review.new_assumptions.map((a) => a.text_vi ?? a.text)
+    })
     const gateEvent: StepEvent = {
       type: "gate_ready",
       step_id: stepId,
@@ -1570,6 +1633,7 @@ export const runStep = async (
       credits_used: creditsUsed,
       ...(gateTableOf(finalSpine, stepDef.template_id) ? { table: gateTableOf(finalSpine, stepDef.template_id) as NonNullable<ReturnType<typeof gateTableOf>> } : {}),
       doc_progress: { before: progressBefore, after: progressAfter },
+      ...(gateMessage ? { message_vi: gateMessage } : {}),
       ...(stepSummary.length === 0
         ? { no_change_reason: fieldAlreadySet && b0Field ? B0_ALREADY_SET_REASON[b0Field] : noChangeReason(stepDef.template_id, needsDraft) }
         : {})
@@ -1600,8 +1664,8 @@ export const runStep = async (
 }
 
 /**
- * BUG-10: `content_guidance` của vòng hỏi trước đây là chuỗi rỗng, nên B-0.1 không hề biết nó phải hỏi
- * tên hệ thống — 5 vòng elicit trôi qua mà `system_name` vẫn null. Dùng đúng skill content của step.
+ * BUG-10: `content_guidance` của vòng hỏi trước đây là chuỗi rỗng, nên vòng hỏi không biết luật của step (tên hệ thống
+ * từng không được hỏi — `system_name` vẫn null sau 5 vòng). Dùng đúng skill content của step; luật hỏi tên ở B-2.3 nằm trong đó.
  */
 export const elicitGuidance = (ctx: StepContext): string => {
   if (!ctx.skill) return ""

@@ -73,3 +73,50 @@ describe("isQuietStep (R1)", () => {
     expect(conflictsWithLedger("Deposit is 50.000đ", ledger), "chủ đề khác không bị đụng").toBe(false)
   })
 })
+
+describe("FLF-232: cổng không báo 'trái điều đã chốt' khi không có mâu thuẫn thật", () => {
+  const ledger = spineWith([
+    { id: "DC01", topic_key: "system_name", question: "Tên?", answer: "Minh An Booking", step_id: "B-2.3", at: "2026-09-22T00:00:00.000Z", superseded_by: null },
+    { id: "DC02", topic_key: "form_factor", question: "Nền tảng?", answer: "Web", step_id: "B-0.1", at: "2026-09-22T00:00:00.000Z", superseded_by: null },
+    { id: "DC03", topic_key: "uptime", question: "Uptime?", answer: "99%", step_id: "S-1.4", at: "2026-09-22T00:00:00.000Z", superseded_by: null }
+  ])
+
+  it("quyết định bằng chữ (tên, nền tảng) không bao giờ bị coi là mâu thuẫn chỉ vì câu giả định nhắc tới chủ đề", () => {
+    expect(conflictsWithLedger("The system is used by clinic staff on desktop computers", ledger)).toBe(false)
+    expect(conflictsWithLedger("The form factor is a mobile app for patients", ledger)).toBe(false)
+  })
+
+  it("giả định không nêu con số nào thì không thể 'khác số' đã chốt", () => {
+    expect(conflictsWithLedger("Uptime is best effort outside business hours", ledger)).toBe(false)
+  })
+
+  it("mâu thuẫn số thật vẫn được bắt", () => {
+    expect(conflictsWithLedger("Uptime target is 99.9%", ledger)).toBe(true)
+  })
+
+  it("giả định mới nói bằng chữ ⇒ bước tự Accept, cổng không có tiêu đề mâu thuẫn", () => {
+    const verdict = isQuietStep(input({ reviewMode: "fast", spine: ledger, newAssumptions: [{ id: "AS1", text: "The system is used on desktop computers" }] }))
+    expect(verdict).toMatchObject({ quiet: true })
+    expect(verdict.reason_vi).not.toContain("trái với")
+  })
+})
+
+describe("FLF-232: B-2.3 hỏi tên hệ thống, không tự Accept khi tên còn null", () => {
+  const withName = (name: string | null): Spine => ({ decisions: [], project: { system_name: name } } as unknown as Spine)
+
+  it("tên còn null ⇒ dừng ở mọi chế độ duyệt, có lý do nói về tên", () => {
+    for (const reviewMode of ["fast", "balanced", "strict"] as const) {
+      const verdict = isQuietStep(input({ templateId: "B-2.3", reviewMode, spine: withName(null) }))
+      expect(verdict.quiet, reviewMode).toBe(false)
+    }
+    expect(isQuietStep(input({ templateId: "B-2.3", reviewMode: "fast", spine: withName(null) })).reason_vi).toContain("tên hệ thống")
+  })
+
+  it("đã có tên (project cũ) ⇒ B-2.3 theo luật thường", () => {
+    expect(isQuietStep(input({ templateId: "B-2.3", reviewMode: "fast", spine: withName("Minh An Booking") })).quiet).toBe(true)
+  })
+
+  it("chỉ B-2.3 bị ràng buộc bởi tên", () => {
+    expect(isQuietStep(input({ templateId: "B-2.2", reviewMode: "fast", spine: withName(null) })).quiet).toBe(true)
+  })
+})
