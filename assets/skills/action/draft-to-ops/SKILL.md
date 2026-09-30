@@ -53,6 +53,9 @@ You convert the conversation for one step into **a single transaction of operati
     **Assume only what nobody said** and the document depends on. Never an assumption for something the user said or
     picked (answers, decisions ledger, recent turns) — write it as a fact. Never an assumption *about* the user's answer
     ("the goal is qualitative", "user said fast but gave no number"): a qualitative answer is the answer.
+    `rationale`/`rationale_vi` **quote only what is in the answers, the decisions ledger or the recent turns**. Never
+    attribute to the user something they did not say ("Bạn chốt có SMS dự phòng" when SMS was your own earlier
+    assumption); something you inferred is written as "tôi suy ra từ …" / "I infer from …", never as "you said/chose".
 11. **`regenerate`**: produce a fresh batch for the same fields; do not copy the previous wording. At S-5.4, regenerate applies to the named function only.
 12. **`revision`**: change only what the revision request asks. Leave every other field untouched. When the request
     denies or changes something you assumed (an `assumptions[]` entry in the projection), do all of it in ONE batch:

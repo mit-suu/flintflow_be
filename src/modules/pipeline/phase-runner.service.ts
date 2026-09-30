@@ -19,7 +19,7 @@ import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { FAST_PATH_PHASES, NO_QUESTION_ACK_VI, interviewBudget, interviewGuidance, interviewProjection, reconcileReply, withoutQuestions } from "./fast-path.js"
+import { FAST_PATH_PHASES, NO_QUESTION_ACK_VI, interviewBudget, interviewGuidance, interviewProjection, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
 import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import * as meter from "./meter.service.js"
@@ -176,8 +176,10 @@ const interviewChatTurn = async (
   }
   const { spine: after } = await load(projectId)
   const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
-  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(turn.reply, remaining), step: unit, createdAt: new Date() }])
-  return { reply: turn.reply, remaining }
+  // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235): đã hỏi lại đủ câu thì không còn "bạn thấy hợp lý chứ?"
+  const reply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN)
+  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, remaining), step: unit, createdAt: new Date() }])
+  return { reply, remaining }
 }
 
 /**
@@ -354,9 +356,12 @@ const askPhaseInterview = async (
   // Server cắt theo ngân sách: không tin model đếm đúng
   const { asked, questions } = shapeQuestions(fast ? unasked.slice(0, budget) : unasked)
   // Fast path: câu model hỏi mà server bỏ (đã chốt / quá ngân sách) thì lời AI cũng không được còn hỏi nó
-  const firstReply = fast
-    ? reconcileReply(result.data.reply, result.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), asked.map((a) => a.question))
-    : result.data.reply
+  const askedTexts = asked.map((a) => a.question)
+  const firstReply = trimTailQuestion(
+    fast ? reconcileReply(result.data.reply, result.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts) : result.data.reply,
+    asked,
+    budget
+  )
   if (asked.length === 0) {
     // Lượt phỏng vấn không hỏi gì (chỉ fast path tới được đây với tin của user): vẫn trả lời user và ghi lời AI vào transcript
     // dưới đơn vị — đó là dấu "đã phỏng vấn", để chạy lại / vào lại giai đoạn không gọi model hỏi thêm lần nữa.

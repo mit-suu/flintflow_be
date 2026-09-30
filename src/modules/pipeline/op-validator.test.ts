@@ -318,6 +318,59 @@ describe("sanitizeModelOps — path của giả định", () => {
     expect(errors[0]).toMatchObject({ rule: "op_not_allowed", op_index: 0 })
     expect(errors[0].message).toContain("AS90")
   })
+
+  it("add assumptions[] diễn lại gần nghĩa giả định đã xác nhận (thêm chi tiết) ⇒ lỗi; giả định khác cùng chủ đề ⇒ qua", () => {
+    const as9 = {
+      id: "AS90",
+      path: "nfrs[id=N01].threshold",
+      statement: "About 200 patients use the app/web at the same time during peak hours.",
+      statement_vi: "Giờ cao điểm có khoảng 200 bệnh nhân dùng app/web cùng lúc.",
+      rationale: "demo",
+      origin_step_id: "B-2.2",
+      status: "confirmed" as const,
+      confirmed_at: "2026-09-30T00:00:00.000Z"
+    }
+    const spine: Spine = { ...FIXTURE, assumptions: [...FIXTURE.assumptions, as9] }
+    const restated = {
+      op: "add",
+      path: "assumptions[]",
+      value: {
+        path: "nfrs[id=N01].threshold",
+        statement: "Peak hours see about 200 concurrent app/web users on top of 800–1,000 visits a day.",
+        statement_vi: "Giờ cao điểm có khoảng 200 người dùng app/web cùng lúc, ngoài 800–1.000 lượt khám mỗi ngày.",
+        origin_step_id: "B-2.3"
+      }
+    }
+    const different = {
+      op: "add",
+      path: "assumptions[]",
+      value: {
+        path: "nfrs[id=N01].threshold",
+        statement: "Next-patient calls are sent through the mobile app with an SMS fallback.",
+        statement_vi: "Thông báo gọi bệnh nhân kế tiếp gửi qua ứng dụng điện thoại, kèm tin nhắn SMS cho bệnh nhân chưa cài app.",
+        origin_step_id: "B-2.3"
+      }
+    }
+    const short = {
+      op: "add",
+      path: "assumptions[]",
+      value: { path: "nfrs[id=N01].threshold", statement: "Peak 200 users.", statement_vi: "Cao điểm 200 người.", origin_step_id: "B-2.3" }
+    }
+    const negatedTwin = {
+      op: "add",
+      path: "assumptions[]",
+      value: {
+        path: "nfrs[id=N01].threshold",
+        statement: "Peak hours do not reach 200 concurrent app/web users.",
+        statement_vi: "Giờ cao điểm không tới 200 bệnh nhân dùng app/web cùng lúc.",
+        origin_step_id: "B-2.3"
+      }
+    }
+    const { errors } = sanitizeModelOps(spine, [restated, different, short, negatedTwin], "B-2.3")
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ rule: "op_not_allowed", op_index: 0 })
+    expect(errors[0].message).toContain("AS90")
+  })
 })
 
 describe("sanitizeModelOps — giá trị form_factor / stakes", () => {
