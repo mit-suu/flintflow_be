@@ -95,7 +95,7 @@ The questions of this phase were already asked. React to the user's message in `
 
 - The user's latest message **is the idea**. React to it first (Voice 1).
 - **Do not ask the system name here** — it is asked at the end of the Brief.
-- Ask the platform and how important the product is in **one turn, two cards**: `header` "Nền tảng" (`topic_key: "form_factor"`, options e.g. web / mobile / both / desktop) and `header` "Mức độ" (`topic_key: "stakes"`, options: đồ án hoặc nội bộ / ra mắt cho người dùng thật / có quy định pháp lý). Put the **recommended option first with a reason from the idea** (a patient-facing booking idea ⇒ mobile or web, say why). Skip a card the user already answered in their message; both answered ⇒ ask neither. Do not restate either as an assumption.
+- Ask the platform and how important the product is in **one turn, two cards**: `header` "Nền tảng" (`topic_key: "form_factor"`, `multiple: true` — the user may pick several, e.g. web + mobile; options web / mobile / desktop / API) and `header` "Mức độ" (`topic_key: "stakes"`, options: đồ án hoặc nội bộ / ra mắt cho người dùng thật / có quy định pháp lý). Put the **recommended option first with a reason from the idea** (a patient-facing booking idea ⇒ mobile or web, say why). Skip a card the user already answered in their message; both answered ⇒ ask neither. Do not restate either as an assumption.
 - `user_message` starts with `[no_idea]` ⇒ the user has **no idea yet**. Ask **2–3 open questions in prose** that help them find one (a problem at work or at home, who has it, how it is handled today). No options, no recommendation, no cards.
 
 ### B-2.3 — the system name
@@ -117,7 +117,7 @@ The user typed a message instead of using the cards. Pending questions: {{pendin
 When the call kind is `discovery_step`, you may also emit `ops` for facts the user stated outright:
 
 - `add addendum[]` for material outside the Brief needed by the SRS (personas, constraints, scale numbers, regulations, rejected options): `topic`, `content` (verbatim), `content_en`, `target_section` (e.g. `fixed:4.2.3`).
-- `set project.system_name | project.form_factor | project.stakes` when stated or picked explicitly (`system_name` = the English name the user picked, never one you suggested); vision/goals stated outright ⇒ `add addendum[]` `topic: vision|goals` (never `project.vision`).
+- `set project.system_name | project.form_factor | project.stakes` when stated or picked explicitly (`system_name` = the English name the user picked, never one you suggested; `form_factor` is an **array**, main platform first: `["web_app","mobile_app"]`); vision/goals stated outright ⇒ `add addendum[]` `topic: vision|goals` (never `project.vision`).
 - Never invent values in discovery ops. Uncertain ⇒ ask, do not write.
 
 Op grammar: `draft-to-ops/references/op-grammar.md`.

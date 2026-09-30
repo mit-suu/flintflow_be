@@ -24,6 +24,7 @@ import { parsePath, PathError } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import { contentWords, normalise, overlapRatio } from "./text-overlap.js"
+import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { orphanEntities } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
 import {
@@ -303,7 +304,19 @@ const invalidProjectEnum = (path: string, value: unknown): keyof typeof PROJECT_
   const values: Record<string, unknown> | null = field ? { [field]: value } : path === "project" && isRecord(value) ? value : null
   if (!values) return null
   const keys = Object.keys(PROJECT_ENUM_VALUES) as (keyof typeof PROJECT_ENUM_VALUES)[]
-  return keys.find((key) => key in values && values[key] !== null && !PROJECT_ENUM_VALUES[key].includes(String(values[key]))) ?? null
+  // form_factor là mảng nền tảng (FLF-237): kiểm từng phần tử; stakes vẫn là một giá trị
+  const items = (key: keyof typeof PROJECT_ENUM_VALUES, v: unknown): unknown[] => (key === "form_factor" && Array.isArray(v) ? v : [v])
+  return keys.find((key) => key in values && values[key] !== null && items(key, values[key]).some((v) => !PROJECT_ENUM_VALUES[key].includes(String(v)))) ?? null
+}
+
+/**
+ * Op `set project.form_factor` / `set project` với `form_factor` đã chuẩn hoá thành mảng (chuỗi đơn của prompt cũ / Mode 1
+ * ⇒ mảng một phần tử, `null` ⇒ `[]`, bỏ trùng) — để kiểm từng phần tử; op-engine chuẩn hoá lại cho mọi đường ghi.
+ */
+const withFormFactorArray = (op: { op: string; path: string; value?: unknown }): typeof op => {
+  if (op.op !== "set" || (op.path !== "project.form_factor" && op.path !== "project")) return op
+  const value = normalizeFormFactorAt(op.path, op.value)
+  return value === op.value ? op : { ...op, value }
 }
 
 export interface SanitizeResult {
@@ -480,16 +493,21 @@ export const sanitizeModelOps = (
       return { ...op, value: { ...op.value, detail_status: "pending" } }
     }
     if (op.op === "set") {
-      const badEnum = invalidProjectEnum(op.path, op.value)
+      const normalized = withFormFactorArray(op)
+      const badEnum = invalidProjectEnum(normalized.path, normalized.value)
       if (badEnum) {
         errors.push({
           rule: "op_not_allowed",
           op_index: index,
           path: op.path,
-          message: `project.${badEnum} chỉ nhận một trong: ${PROJECT_ENUM_VALUES[badEnum].join(", ")}. Nhiều nền tảng ⇒ chọn nền tảng chính, ghi các nền tảng còn lại vào addendum.`
+          message:
+            badEnum === "form_factor"
+              ? `project.form_factor là mảng, mỗi phần tử một trong: ${PROJECT_ENUM_VALUES.form_factor.join(", ")} — nền tảng chính đứng đầu, ví dụ ["web_app","mobile_app"].`
+              : `project.${badEnum} chỉ nhận một trong: ${PROJECT_ENUM_VALUES[badEnum].join(", ")}.`
         })
         return op
       }
+      if (normalized !== op) return normalized
     }
     if (op.op === "add" && op.path === "assumptions[]" && isRecord(op.value)) {
       // Giả định đã có (kể cả đã xác nhận) — thêm lại là bắt user xác nhận lần nữa điều họ vừa chốt. So cả câu diễn lại
