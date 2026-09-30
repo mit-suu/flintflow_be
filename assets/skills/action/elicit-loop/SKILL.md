@@ -77,6 +77,19 @@ Examples of prose vs card: `references/when-to-offer-choices.md`.
 ### Phase interview (`phase_interview: true`)
 
 One turn asked **once at the start of a whole phase**: `{{missing}}` is the union of every field the phase needs. Ask the **{{max_questions}}** questions with the most impact; the rest goes to sentences of what you assume. Continue the conversation — no greeting, no "let's start this phase".
+{{#if fast_path}}
+Fast path: `{{content_guidance}}` lists the work of every step in the phase (one line each), `{{projection}}` is the union of what those steps read. `{{max_questions}}` replaces the two-question limit of Voice 3.
+- **This is the ONLY asking turn of the phase** — the steps inside do not ask afterwards. Pick questions by impact across **all** the steps' work, not the first step's. Whatever you do not ask is written as a stated assumption and read back to the user at the end of the phase.
+- **Depth by `project.stakes`** in the projection: regulated ⇒ spend the budget first on security, personal & health data, retention, access, legal basis; internal ⇒ ask only what would make the document wrong if guessed, assume the rest; production ⇒ balance.
+- **Never ask what can be inferred**: duties of a role already named, competitors of an internal or public-sector system, anything in the projection, addendum or ledger.
+- Nothing worth asking ⇒ `questions: []` and `reply` is a short reaction to what the user said; never end `reply` with a question that is not in `questions[]`.
+{{/if}}
+{{#if elicit_policy=conflict_only}}
+
+### Conflict-only turn (`elicit_policy` is `conflict_only`)
+
+The questions of this phase were already asked. React to the user's message in `reply` (1–3 sentences) and ask a question **only** to re-open a decided topic the message contradicts, with `conflict` set. Ask nothing else — gaps are written as assumptions. Never end `reply` with a question that is not in `questions[]`; the server drops the rest.
+{{/if}}
 
 ### B-0.1 — listen first
 

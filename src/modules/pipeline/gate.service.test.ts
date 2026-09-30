@@ -571,6 +571,29 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     expect(result.message_vi).not.toBe("")
   })
 
+  it("cổng cuối B-1 (B-1.6): sửa addendum do B-1.2 ghi + giả định của B-1.2 được áp, không lỗi phạm vi ghi", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { steps: { id: string; status: string }[]; progress: Record<string, unknown>; assumptions: { id: string; path: string }[]; addendum: unknown[] }
+    spine.steps = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5"]
+      .map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+      .concat([{ id: "B-1.6", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null } as never])
+    spine.progress = { ...spine.progress, current_step: "B-1.6" }
+    spine.addendum = [{ id: "AD2", topic: "Users", content: "Lễ tân nhận lịch qua điện thoại.", content_en: "Receptionists take bookings by phone.", target_section: "fixed:2.1", captured_at: "2026-01-01T00:00:00.000Z" }]
+    spine.assumptions[1].path = "addendum[id=AD2].content"
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "addendum[id=AD2].content", value: "Lễ tân xác nhận lịch qua Zalo." },
+      { op: "set", path: "addendum[id=AD2].content_en", value: "Receptionists confirm bookings via Zalo." },
+      { op: "set", path: "assumptions[id=AS11].statement", value: "Receptionists confirm bookings via Zalo." },
+      { op: "set", path: "assumptions[id=AS11].statement_vi", value: "Lễ tân xác nhận lịch qua Zalo." },
+      { op: "set", path: "assumptions[id=AS11].status", value: "confirmed" }
+    ]
+    await gate(PROJECT, "B-1.6", USER, { action: "revision", note: "lễ tân dùng Zalo chứ không gọi điện", base_version: version }, { draftExecutor: async () => withNotes(ops) })
+
+    const after = await repo.get(PROJECT)
+    expect(after!.addendum.find((a) => a.id === "AD2")!.content).toBe("Lễ tân xác nhận lịch qua Zalo.")
+    expect(after!.assumptions.find((a) => a.id === "AS11")).toMatchObject({ status: "confirmed", statement_vi: "Lễ tân xác nhận lịch qua Zalo." })
+  })
+
   it("giả định cũ có path project.vision ở Brief: sửa qua addendum vision (content + content_en) tính là ghi trường thật", async () => {
     const version = seedB14()
     const spine = db.spines[0] as Record<string, unknown> & { assumptions: { id: string; path: string }[] }

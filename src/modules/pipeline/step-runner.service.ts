@@ -42,6 +42,7 @@ import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadC
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { elicitPolicyFor, keepConflictsOnly, reconcileReply } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
@@ -1473,7 +1474,10 @@ export const runStep = async (
       // chốt (kể cả ở phỏng vấn đầu giai đoạn) bị `filterAskedQuestions` chặn nên không hỏi lặp.
       const missing = askableFields(stepDef.template_id, ctx.emptyFields)
       const noIdeaYet = !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })
-      const shouldElicit = missing.length > 0 || noIdeaYet
+      // Fast path (FLF-234): bước B-1.x không tự hỏi sau lượt hỏi gộp đầu giai đoạn — không có tin user mới thì không gọi
+      // model Elicit; có tin mới thì vẫn gọi nhưng chỉ giữ câu mâu thuẫn với điều đã chốt (`keepConflictsOnly`).
+      const elicitPolicy = elicitPolicyFor({ phase: stepDef.phase, hasUserMessage: userMessage !== undefined })
+      const shouldElicit = (missing.length > 0 || noIdeaYet) && elicitPolicy !== "skip"
 
       if (d.resumeAnswers) {
         // Câu hỏi đã hỏi và đã tính lượt ở lượt trước — không gọi model hỏi lại. Có tin chat thì AI đọc nó (FLF-221).
@@ -1497,6 +1501,7 @@ export const runStep = async (
                 step_id: stepId,
                 step_name: ctx.label_en,
                 max_questions: b0Field ? B0_FIELD_MAX_QUESTIONS : PROMPT_QUESTIONS_PER_TURN,
+                elicit_policy: elicitPolicy,
                 missing,
                 pending_questions: [],
                 // BUG-19: vòng hỏi phải thấy quy tắc và NFR đã chốt, nếu không nó gợi ý ngược lại chính
@@ -1527,7 +1532,6 @@ export const runStep = async (
           cost: elicitResult.cost,
           logId: elicitResult.logId || null
         })
-        emit({ type: "elicit", step_id: stepId, delta: elicitResult.data.reply })
 
         const turnsApplied = await applyTransaction(projectId, {
           base_version: spineVersion,
@@ -1539,13 +1543,23 @@ export const runStep = async (
         spineVersion = turnsApplied.spine_version
 
         // R4: bỏ câu thuộc chủ đề đã chốt — luật của server, không chỉ là lời nhắc trong prompt (BUG-21)
-        const filtered = filterAskedQuestions(spine, elicitResult.data.questions)
+        const afterLedger = filterAskedQuestions(spine, elicitResult.data.questions)
+        if (afterLedger.dropped.length > 0) {
+          console.info(`[step-runner] ${stepId}: bỏ ${afterLedger.dropped.length} câu đã chốt (${afterLedger.dropped.map((d) => d.topic_key).join(", ")})`)
+        }
+        const filtered = elicitPolicy === "conflict_only" ? keepConflictsOnly(spine, afterLedger.questions) : { questions: afterLedger.questions, dropped: [] }
         if (filtered.dropped.length > 0) {
-          console.info(`[step-runner] ${stepId}: bỏ ${filtered.dropped.length} câu đã chốt (${filtered.dropped.map((d) => d.topic_key).join(", ")})`)
+          console.info(`[step-runner] ${stepId}: bỏ ${filtered.dropped.length} câu không mâu thuẫn với điều đã chốt (${filtered.dropped.map((d) => d.topic_key).join(", ")})`)
         }
 
         const { asked, questions } = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet })
-        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(elicitResult.data.reply, asked))
+        // Fast path: câu model đã hỏi mà server bỏ thì lời AI cũng không được còn hỏi nó (user không có chỗ trả lời)
+        const reply =
+          elicitPolicy === "conflict_only"
+            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), asked.map((a) => a.question))
+            : elicitResult.data.reply
+        emit({ type: "elicit", step_id: stepId, delta: reply })
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, asked))
         if (questions.length > 0) {
           // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
           // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.

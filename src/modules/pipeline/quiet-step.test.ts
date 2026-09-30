@@ -94,6 +94,15 @@ describe("FLF-232: cổng không báo 'trái điều đã chốt' khi không có
     expect(conflictsWithLedger("Uptime target is 99.9%", ledger)).toBe(true)
   })
 
+  it("giá trị đã chốt có trong bản tiếng Việt của giả định ⇒ không mâu thuẫn; câu trả lời văn xuôi của lượt hỏi gộp không so được", () => {
+    expect(conflictsWithLedger({ text: "Uptime target is 99.5% during business hours", text_vi: "Hệ thống sẵn sàng 99% trong giờ làm việc" }, ledger)).toBe(false)
+    expect(conflictsWithLedger({ text: "Uptime target is 99.5%", text_vi: "Sẵn sàng 99,5%" }, ledger)).toBe(true)
+    const prose = spineWith([
+      { id: "DC09", topic_key: "roles", question: "Ai làm gì?", answer: "lễ tân nhận lịch qua điện thoại, bác sĩ khám", step_id: "B-1", at: "2026-09-22T00:00:00.000Z", superseded_by: null }
+    ])
+    expect(conflictsWithLedger({ text: "Receptionists confirm bookings by phone within 2 hours", text_vi: "Lễ tân xác nhận lịch qua điện thoại" }, prose)).toBe(false)
+  })
+
   it("giả định mới nói bằng chữ ⇒ bước tự Accept, cổng không có tiêu đề mâu thuẫn", () => {
     const verdict = isQuietStep(input({ reviewMode: "fast", spine: ledger, newAssumptions: [{ id: "AS1", text: "The system is used on desktop computers" }] }))
     expect(verdict).toMatchObject({ quiet: true })
