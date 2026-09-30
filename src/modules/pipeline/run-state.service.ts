@@ -65,6 +65,8 @@ export interface RunStateDoc {
   locked_until: string
   questions: unknown[] | null
   gate_payload: unknown | null
+  /** Sự kiện `phase_gate` (cổng chốt cuối giai đoạn); null với bước lẻ hoặc bước im. */
+  phase_gate: unknown | null
   events: unknown[]
   error: { code: string; message: string } | null
   pending_answer: PendingAnswerState | null
@@ -84,6 +86,7 @@ const toDoc = (raw: Record<string, unknown>): RunStateDoc => ({
   locked_until: new Date(raw.locked_until as string).toISOString(),
   questions: (raw.questions as unknown[] | null) ?? null,
   gate_payload: raw.gate_payload ?? null,
+  phase_gate: raw.phase_gate ?? null,
   events: (raw.events as unknown[] | null) ?? [],
   error: (raw.error as { code: string; message: string } | null) ?? null,
   pending_answer: (raw.pending_answer as PendingAnswerState | null | undefined) ?? null
@@ -157,6 +160,7 @@ export const acquireRun = async (projectId: string, stepId: string, options: Acq
     locked_until: new Date(now.getTime() + LOCK_TTL_MS),
     questions: null,
     gate_payload: null,
+    phase_gate: null,
     events: [],
     error: null,
     pending_answer: null
@@ -200,6 +204,7 @@ export interface PatchRun {
   batch?: { i: number; n: number } | null
   questions?: unknown[] | null
   gate_payload?: unknown | null
+  phase_gate?: unknown | null
   error?: { code: string; message: string } | null
   pending_answer?: PendingAnswerState | null
   /** Nhả khoá ngay (lượt chuyển sang chờ trả lời) thay vì gia hạn. */
@@ -208,7 +213,7 @@ export interface PatchRun {
   appendEvent?: unknown
 }
 
-const PATCH_KEYS = ["stage", "status", "detail_vi", "batch", "questions", "gate_payload", "error", "pending_answer"] as const
+const PATCH_KEYS = ["stage", "status", "detail_vi", "batch", "questions", "gate_payload", "phase_gate", "error", "pending_answer"] as const
 
 /** Số sự kiện giữ lại cho một lượt — đủ dựng lại nhật ký, không phình document. */
 export const MAX_KEPT_EVENTS = 100
@@ -253,7 +258,7 @@ export const touchRun = async (projectId: string, stepId: string, runId: string,
 /** Kết thúc lượt: nhả khoá (đặt `locked_until` về quá khứ) và ghi trạng thái cuối. Lượt đã xong không còn chờ trả lời. */
 export const finishRun = async (projectId: string, stepId: string, runId: string, status: RunStatus, patch: PatchRun = {}): Promise<void> => {
   const set: Record<string, unknown> = { status, last_event_at: new Date(), locked_until: RELEASED, pending_answer: null }
-  for (const key of ["stage", "detail_vi", "questions", "gate_payload", "error"] as const) {
+  for (const key of ["stage", "detail_vi", "questions", "gate_payload", "phase_gate", "error"] as const) {
     if (patch[key] !== undefined) set[key] = patch[key]
   }
   if (useMemory()) {

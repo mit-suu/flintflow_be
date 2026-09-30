@@ -77,6 +77,8 @@ export interface DraftOptions {
    * status/câu của chúng và ghi đúng `path` thật của chúng dù ngoài `writes` của step.
    */
   gateAssumptionIds?: ReadonlySet<string>
+  /** User đã quyết trong lượt của step (thẻ/chat) — cho phép step rà giả định B-2.1 đổi status giả định (xem `USER_DECISION_SWEEP_STEPS`). */
+  userDecided?: boolean
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
@@ -170,7 +172,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       })
       notes = result.data.notes ?? null
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
-      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", ...(gateIds ? { gateAssumptionIds: gateIds } : {}) })
+      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(gateIds ? { gateAssumptionIds: gateIds } : {}) })
       ops = sanitized.ops
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
