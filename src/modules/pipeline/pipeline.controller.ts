@@ -14,6 +14,7 @@
  * Hợp đồng: docs/api/pipeline-contract.md (endpoint 24 `/resume`, `session_id` của `/gate`: contract-change 2026-09-15).
  */
 
+import { gateActionText } from "./gate-message.js"
 import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
@@ -317,14 +318,6 @@ export const answerStep = catchAsync(async (req: Request, res: Response) => {
 })
 
 // ─── POST /steps/:stepId/gate ───────────────────────────────────────
-
-/** Lời thường của một thao tác ở cổng duyệt, như user tự gõ. */
-const gateActionText = (input: GateInput): string => {
-  if (input.action === "accept") return "Duyệt, sang bước tiếp"
-  if (input.action === "regenerate") return "Làm lại bước này"
-  if (input.action === "revision") return `Yêu cầu sửa: ${input.note ?? ""}`.trim()
-  return `Duyệt như hiện tại: ${input.note ?? ""}`.trim()
-}
 
 export const gateStep = catchAsync(async (req: Request, res: Response) => {
   const { projectId, userId, mode } = await authorize(req)
