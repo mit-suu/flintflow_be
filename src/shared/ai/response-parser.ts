@@ -106,7 +106,9 @@ const elicitBaseSchema = z.object({
  * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
  */
 export const elicitSchema = elicitBaseSchema.extend({
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional()
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
+  /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
+  still_open: z.array(z.string()).optional()
 })
 
 /** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
