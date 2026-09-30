@@ -19,7 +19,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import type { StepContext } from "./context-projection.js"
-import { sanitizeModelOps, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { briefExtractionErrors, sanitizeModelOps, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -173,6 +173,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", ...(gateIds ? { gateAssumptionIds: gateIds } : {}) })
       ops = sanitized.ops
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
+      // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
+      if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })

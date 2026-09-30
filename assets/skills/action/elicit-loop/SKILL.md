@@ -100,7 +100,7 @@ The user typed a message instead of using the cards. Pending questions: {{pendin
 When the call kind is `discovery_step`, you may also emit `ops` for facts the user stated outright:
 
 - `add addendum[]` for material outside the Brief needed by the SRS (personas, constraints, scale numbers, regulations, rejected options): `topic`, `content` (verbatim), `content_en`, `target_section` (e.g. `fixed:4.2.3`).
-- `set project.system_name | project.form_factor | project.stakes | project.vision` when stated or picked explicitly (`system_name` = the English name the user picked, never one you suggested).
+- `set project.system_name | project.form_factor | project.stakes` when stated or picked explicitly (`system_name` = the English name the user picked, never one you suggested); vision/goals stated outright ⇒ `add addendum[]` `topic: vision|goals` (never `project.vision`).
 - Never invent values in discovery ops. Uncertain ⇒ ask, do not write.
 
 Op grammar: `draft-to-ops/references/op-grammar.md`.

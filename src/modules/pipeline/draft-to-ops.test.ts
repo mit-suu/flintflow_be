@@ -233,3 +233,38 @@ describe("draftOps retry", () => {
     expect(executor).not.toHaveBeenCalled()
   })
 })
+
+describe("draftOps — S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum lõi", () => {
+  const core = (id: string, topic: string) => ({ id, topic, content: "Nội dung", content_en: "Content", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
+  const briefSpine = (): Spine => ({
+    ...structuredClone(FIXTURE),
+    addendum: [core("AD1", "vision"), core("AD2", "goals"), core("AD3", "goals")],
+    steps: FIXTURE.steps.map((s) => (s.id === "S-1.1" ? { ...s, status: "in_progress" as const } : s))
+  })
+  const vision = { op: "set", path: "project.vision", value: "Patients book visits online." }
+  const goals = { op: "set", path: "project.goals", value: ["Reduce phone calls", "Cut booking time"] }
+
+  it("lô thiếu set project.goals bị trả lại kèm lỗi, lượt sau đủ thì qua", async () => {
+    const spine = briefSpine()
+    const ctx = ctxFor(spine, "S-1.1")
+    const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply([vision])).mockResolvedValueOnce(reply([vision, goals]))
+    const result = await draftOps("p", "S-1.1", ctx, { userId: "u", spine, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["brief_extraction_incomplete"], []])
+    expect(result.txn?.ops).toHaveLength(2)
+    const retryVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(retryVars.validation_errors).toMatchObject([{ path: "project.goals" }])
+  })
+
+  it("ops rỗng khi có addendum lõi vẫn bị từ chối (không được im lặng bỏ qua); hết lượt ⇒ DraftRejectedError", async () => {
+    const spine = briefSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { notes: "nothing" }))
+    await expect(draftOps("p", "S-1.1", ctxFor(spine, "S-1.1"), { userId: "u", spine, executor, callKind: "regenerate" })).rejects.toBeInstanceOf(DraftRejectedError)
+  })
+
+  it("dự án cũ không có addendum lõi ⇒ ops rỗng vẫn hợp lệ (hành vi cũ)", async () => {
+    const spine = { ...briefSpine(), addendum: [] }
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { notes: "nothing" }))
+    const result = await draftOps("p", "S-1.1", ctxFor(spine, "S-1.1"), { userId: "u", spine, executor })
+    expect(result.txn).toBeNull()
+  })
+})

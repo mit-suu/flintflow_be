@@ -40,6 +40,7 @@ import {
 import { PathError, isRecord, parentArrayPath, parsePath, resolve, selectorFor, formatPath, tryResolve } from "./path-resolver.js"
 import { checkInvariants } from "./invariants.js"
 import { RemovedIds, planCascade, planFeatureRenumber, planScreenQueueAppend } from "./cascade.js"
+import { planBriefReextract } from "./brief-core.js"
 import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
 import { withElementDefaults } from "./element-defaults.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -380,6 +381,8 @@ export const planTransaction = (spine: Spine, txn: Transaction, options: PlanOpt
     }
     for (const op of planFeatureRenumber(state.spine, state.removed)) run(op)
     for (const op of planScreenQueueAppend(state.spine, before)) run(op)
+    // migrate nạp lại cả Spine (không phải một lần sửa Brief) ⇒ không đánh dấu S-1.1
+    if (!txn.ops.some((op) => op.op === "migrate")) for (const op of planBriefReextract(state.spine, before)) run(op)
     invariantViolations = checkInvariants(state.spine, state.baseline ?? before)
   } catch (err) {
     // BUG-04 (lớp phòng thủ): dữ liệu sai hình lọt tới cascade/bất biến ⇒ schema báo lỗi cho model, không 501

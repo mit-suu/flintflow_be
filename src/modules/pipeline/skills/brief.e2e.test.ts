@@ -147,6 +147,7 @@ import { getRunState } from "../run-state.service.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
 import { stepEventSchema, type StepEvent } from "../pipeline.dto.js"
+import { briefCoreEntries } from "../../spine/brief-core.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CASES = path.resolve(__dirname, "../../../../fixtures/op-cases/b0-s1")
@@ -240,13 +241,22 @@ beforeEach(() => {
 describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provider)", () => {
   it("ghi project{}, addendum[], assumptions[], other_requirements[] bằng op — không còn nằm trong tin nhắn", async () => {
     seedEmpty()
-    for (const stepId of [...BRIEF_STEPS, ...S1_STEPS]) await runAndAccept(stepId)
+    for (const stepId of BRIEF_STEPS) await runAndAccept(stepId)
 
+    // Pha Brief giữ tầm nhìn/mục tiêu ở addendum lõi, không chạm project.vision/goals
+    const afterBrief = (await repo.get(PROJECT))!
+    expect(afterBrief.project.vision, "Brief không ghi project.vision").toBeNull()
+    expect(afterBrief.project.goals).toEqual([])
+    const core = briefCoreEntries(afterBrief)
+    expect(core.vision, "B-1.1 ghi addendum vision").not.toBeNull()
+    expect(core.goals.length, "B-1.1 ghi addendum goals").toBeGreaterThanOrEqual(3)
+
+    for (const stepId of S1_STEPS) await runAndAccept(stepId)
     const final = (await repo.get(PROJECT))!
 
-    // Năm trường project mà pha Brief phải chốt
-    expect(final.project.vision, "B-1.1 ghi vision").toBeTruthy()
-    expect(final.project.goals.length, "B-1.1 ghi goals").toBeGreaterThanOrEqual(3)
+    // S-1.1 dựng project.vision/goals tiếng Anh, khớp 1:1 với addendum goals
+    expect(final.project.vision, "S-1.1 dựng vision").toBeTruthy()
+    expect(final.project.goals, "S-1.1 dựng goals 1:1").toEqual(core.goals.map((g) => g.content_en))
     expect(final.project.form_factor).toBe("web_app")
     expect(final.project.stakes).toBe("production")
 

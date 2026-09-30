@@ -235,3 +235,31 @@ describe("fallbackModels (model dự phòng khi quá tải)", () => {
     expect((await getPromptTemplate(ActionType.CR_PROPOSE)).providerConfig.fallbackModels).toBeUndefined()
   })
 })
+
+describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản tiếng Anh", () => {
+  const skill = (dir: string): string => fs.readFileSync(path.join(getSkillsDir(), dir, "SKILL.md"), "utf-8")
+
+  it("product-brief: ví dụ B-1.1 không set project.vision/goals, dùng addendum topic vision + goals", () => {
+    const text = skill("content/product-brief")
+    expect(text).not.toMatch(/"path": "project\.(vision|goals)"/)
+    expect(text).toContain('"topic": "vision"')
+    expect(text).toContain('"topic": "goals"')
+    expect(text).toContain("B-1 never writes `project.vision`")
+    expect(text).toContain('path: "addendum[id=<that vision/goals entry>]"')
+  })
+
+  it("brief-analysis: S-1.1 luôn dựng project.vision + goals 1:1 từ addendum và được ghi addendum", () => {
+    const text = skill("content/brief-analysis")
+    expect(text).toContain("**Always** `set project.vision`")
+    expect(text).toContain("1:1")
+    expect(getSkillIndex().get("brief-analysis")?.writes).toContain("addendum[]")
+  })
+
+  it("draft-to-ops: ví dụ giả định không trỏ project.vision", () => {
+    expect(skill("action/draft-to-ops")).not.toMatch(/"path": "project.(vision|goals)"/)
+  })
+
+  it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
+    expect(skill("action/apply-change-op")).toContain("brief_core")
+  })
+})

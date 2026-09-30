@@ -45,6 +45,19 @@ describe("formatRecentTurns", () => {
   })
 })
 
+describe("buildConversationSummary — tầm nhìn/mục tiêu của Brief", () => {
+  const entry = (id: string, topic: string, content: string) => ({ id, topic, content, content_en: "en", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
+
+  it("đọc addendum lõi (ngôn ngữ user) khi project.vision/goals còn trống", () => {
+    const summary = buildConversationSummary(
+      { ...spineOf(), addendum: [entry("AD1", "vision", "Đặt lịch khám online"), entry("AD2", "goals", "Giảm bỏ hẹn"), entry("AD3", "goals", "Giảm thời gian chờ")] },
+      []
+    )
+    expect(summary).toContain("Ý tưởng: Đặt lịch khám online")
+    expect(summary).toContain("Mục tiêu: Giảm bỏ hẹn; Giảm thời gian chờ")
+  })
+})
+
 describe("buildConversationSummary", () => {
   it("chưa có gì ⇒ dấu hiệu rỗng rõ ràng", () => {
     expect(buildConversationSummary(spineOf(), [])).toBe("(chưa có gì)")

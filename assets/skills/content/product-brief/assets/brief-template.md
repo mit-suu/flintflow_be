@@ -7,11 +7,11 @@
 
 ## 1. Vision
 
-project.vision
+addendum topic `vision` (content của user)
 
 ## 2. Mục tiêu
 
-project.goals[] — 3 đến 6 dòng, mỗi dòng một kết quả
+addendum topic `goals` — 3 đến 6 entry, mỗi entry một kết quả
 
 ## 3. Vấn đề và cơ hội
 

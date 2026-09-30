@@ -453,7 +453,8 @@ const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" 
         rule_id: "derived_from_changed_assumption",
         section_id: sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4",
         target_id: assumption.id,
-        message: `Giả định ${assumption.id} ${verb} ("${assumption.statement}") nhưng ${pathLabel(assumption.path)} chưa cập nhật theo`,
+        // Lời cho user (hiện ở cổng duyệt): câu tiếng Việt của giả định, không mã, không chữ "giả định"
+        message: `Điều tôi tạm hiểu ${verb} ("${assumption.statement_vi ?? assumption.statement}") nhưng ${pathLabel(assumption.path)} chưa cập nhật theo`,
         remediation_step: ownerStepOf(sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4", spine)
       }
     ]
@@ -1024,11 +1025,11 @@ const ownedTexts = (spine: Spine): ScanItem[] => {
       fields: {
         ...(p.system_name?.trim() ? {} : { name: p.name }),
         system_name: p.system_name,
-        vision: p.vision,
-        goals: p.goals,
         release_scope: p.release_scope
       }
     },
+    // Tầm nhìn/mục tiêu do S-1.1 dựng từ addendum lõi của Brief ⇒ cờ tiếng Anh chỉ đường về S-1.1
+    { path: "project", target_id: null, section: "fixed:1", step: "S-1.1", fields: { vision: p.vision, goals: p.goals } },
     ...spine.actors.map((a) => ({
       path: `actors[id=${a.id}]`,
       target_id: a.id,

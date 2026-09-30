@@ -544,10 +544,10 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     spine.progress = { ...(spine.progress as Record<string, unknown>), current_phase: "B-1", current_step: "B-1.4" }
     const done = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3"].map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
     spine.steps = [...done, { id: "B-1.4", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null }]
-    spine.project = { ...spine.project, vision: "A booking tool." }
+    spine.project = { ...spine.project, form_factor: "web_app" }
     const base = { rationale: "r", status: "unconfirmed", confirmed_at: null }
     spine.assumptions = [
-      { ...base, id: "AS10", path: "project.vision", statement: "The vision is a booking tool.", statement_vi: "Tầm nhìn là công cụ đặt lịch.", origin_step_id: "B-1.4" },
+      { ...base, id: "AS10", path: "project.form_factor", statement: "The product is a web app.", statement_vi: "Sản phẩm là ứng dụng web.", origin_step_id: "B-1.4" },
       { ...base, id: "AS11", path: "project.stakes", statement: "Stakes are production.", statement_vi: "Mức độ là vận hành thật.", origin_step_id: "B-1.2" }
     ]
     return spine.spine_version
@@ -556,19 +556,60 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
   it("giả định của chính bước ở cổng: ghi được path thật dù ngoài writes của bước (B-1.4 chỉ ghi addendum/assumptions)", async () => {
     const version = seedB14()
     const ops: OpTransaction["ops"] = [
-      { op: "set", path: "project.vision", value: "A clinic queue tool." },
-      { op: "set", path: "assumptions[id=AS10].statement", value: "The vision is a clinic queue tool." },
-      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Tầm nhìn là công cụ xếp hàng cho phòng khám." },
+      { op: "set", path: "project.form_factor", value: "mobile_app" },
+      { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
+      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Sản phẩm là ứng dụng di động." },
       { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
     ]
     const result = await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "không, là xếp hàng phòng khám", base_version: version }, { draftExecutor: async () => withNotes(ops) })
 
     const spine = await repo.get(PROJECT)
-    expect(spine!.project.vision).toBe("A clinic queue tool.")
+    expect(spine!.project.form_factor).toBe("mobile_app")
     expect(spine!.assumptions.find((a) => a.id === "AS10")).toMatchObject({ status: "confirmed" })
     // Không có notes ⇒ vẫn có lời xác nhận dựng từ tóm tắt thay đổi
     expect(result.message_vi).toEqual(expect.any(String))
     expect(result.message_vi).not.toBe("")
+  })
+
+  it("giả định cũ có path project.vision ở Brief: sửa qua addendum vision (content + content_en) tính là ghi trường thật", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { assumptions: { id: string; path: string }[] }
+    spine.addendum = [{ id: "AD1", topic: "vision", content: "Công cụ đặt lịch.", content_en: "A booking tool.", target_section: "fixed:1", captured_at: "2026-01-01T00:00:00.000Z" }]
+    spine.assumptions[0].path = "project.vision"
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "addendum[id=AD1].content", value: "Công cụ xếp hàng cho phòng khám." },
+      { op: "set", path: "addendum[id=AD1].content_en", value: "A clinic queue tool." },
+      { op: "set", path: "assumptions[id=AS10].statement", value: "The vision is a clinic queue tool." },
+      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Tầm nhìn là công cụ xếp hàng cho phòng khám." },
+      { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+    ]
+    await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "không, là xếp hàng phòng khám", base_version: version }, { draftExecutor: async () => withNotes(ops) })
+
+    const after = await repo.get(PROJECT)
+    expect(after!.addendum[0].content_en).toBe("A clinic queue tool.")
+    expect(after!.assumptions.find((a) => a.id === "AS10")).toMatchObject({ status: "confirmed" })
+    expect(after!.project.vision).not.toBe("A clinic queue tool.")
+  })
+
+  it("viết lại câu giả định project.vision mà không sửa addendum vision ⇒ assumption_path_mismatch", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { assumptions: { id: string; path: string }[] }
+    spine.addendum = [{ id: "AD1", topic: "vision", content: "Công cụ đặt lịch.", content_en: "A booking tool.", target_section: "fixed:1", captured_at: "2026-01-01T00:00:00.000Z" }]
+    spine.assumptions[0].path = "project.vision"
+    const err = await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "đổi", base_version: version },
+      {
+        draftExecutor: async () =>
+          withNotes([
+            { op: "set", path: "assumptions[id=AS10].statement", value: "The vision is a clinic queue tool." },
+            { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+          ])
+      }
+    ).catch((e: unknown) => e)
+    expect(JSON.stringify((err as { errors?: unknown }).errors)).toContain("assumption_path_mismatch")
   })
 
   it("path ngoài writes mà KHÔNG thuộc giả định của cổng vẫn bị chặn (path_not_writable)", async () => {
