@@ -149,7 +149,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, nextPendingAfterChat, CALL_LIMIT, CHAT_BUDGET_REPLY, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, CALL_LIMIT, CHAT_BUDGET_REPLY, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumePhaseInterview } from "./phase-runner.service.js"
@@ -1153,6 +1153,71 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     expect(JSON.stringify(draftInput.promptVariables)).toContain("tự giả định")
   })
 
+  it("hết ngân sách chat mà tin lạc đề (không đánh số, không nhắc nhãn) ⇒ KHÔNG chốt câu mở nào; mọi câu chờ, tin đi vào ghi chú soạn", async () => {
+    seedSpine()
+    seedSession(true)
+    let seeded = false
+    const s = start([], {
+      elicitExecutor: (async (input: { promptVariables?: Record<string, unknown> }) => {
+        if (input.promptVariables?.chat_turn) throw new Error("không được gọi lượt chat khi hết ngân sách")
+        if (!seeded) {
+          seeded = true
+          for (let i = 0; i < 3; i++) {
+            db.usages.push({ _id: `burn${i}`, projectId: PROJECT, userId: USER, step_id: "S-3.1", call_kind: "draft", attempt: 1, tokens_in: 1, tokens_out: 1, cost: 1, state: "deducted", expires_at: "2099-01-01T00:00:00.000Z", logId: null, createdAt: new Date().toISOString() })
+          }
+        }
+        return elicitReply("Hỏi", ASK)
+      }) as never
+    })
+    await waitCount(s.events, "answer_needed", 1)
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "có, tiếp đón phải kiểm tra thẻ bhyt trước khi vào khám" })
+    await s.run
+
+    expect(await decisionsOf()).toEqual([])
+    const draftText = JSON.stringify((s.draftExecutor.mock.calls[0]![1] as { promptVariables: Record<string, unknown> }).promptVariables)
+    expect(draftText).toContain("Chưa trả lời — tự giả định và ghi assumptions[]: Actor chính là ai?")
+    expect(draftText).toContain("User nhắn: có, tiếp đón phải kiểm tra thẻ bhyt")
+  })
+
+  it("hết ngân sách chat mà tin nhắc đúng nhãn của thẻ ⇒ chốt thẻ đó, câu mở vẫn chờ", async () => {
+    seedSpine()
+    seedSession(true)
+    let seeded = false
+    const s = start([], {
+      elicitExecutor: (async (input: { promptVariables?: Record<string, unknown> }) => {
+        if (input.promptVariables?.chat_turn) throw new Error("không được gọi lượt chat khi hết ngân sách")
+        if (!seeded) {
+          seeded = true
+          for (let i = 0; i < 3; i++) {
+            db.usages.push({ _id: `burn${i}`, projectId: PROJECT, userId: USER, step_id: "S-3.1", call_kind: "draft", attempt: 1, tokens_in: 1, tokens_out: 1, cost: 1, state: "deducted", expires_at: "2099-01-01T00:00:00.000Z", logId: null, createdAt: new Date().toISOString() })
+          }
+        }
+        return elicitReply("Hỏi", ASK)
+      }) as never
+    })
+    await waitCount(s.events, "answer_needed", 1)
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "chắc 99% là đủ" })
+    await s.run
+
+    expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["uptime", "99%"]])
+    const draftText = JSON.stringify((s.draftExecutor.mock.calls[0]![1] as { promptVariables: Record<string, unknown> }).promptVariables)
+    expect(draftText).toContain("Chưa trả lời — tự giả định và ghi assumptions[]: Actor chính là ai?")
+    expect(draftText).not.toContain("Chưa trả lời — tự giả định và ghi assumptions[]: Mức uptime mong muốn?")
+  })
+
+  it("askTranscript giữ inline của câu mở (không liệt kê lại sau reload), bỏ inline của câu có lựa chọn", () => {
+    const raw = askTranscript("Bạn dùng web hay app?", [
+      { question: "Ai là người dùng chính?", inline: true },
+      { question: "Nền tảng?", inline: true, options: [{ label: "Web" }, { label: "App" }] },
+      { question: "Có tên chưa?" }
+    ])
+    expect(JSON.parse(raw)).toEqual({
+      reply: "Bạn dùng web hay app?",
+      questions: [{ question: "Ai là người dùng chính?", inline: true }, { question: "Nền tảng?" }, { question: "Có tên chưa?" }]
+    })
+    expect(askTranscript("Xong", [])).toBe("Xong")
+  })
+
   it("sau reload: /answer chỉ có message ⇒ chạy lượt chat (không nhảy thẳng tới lượt soạn), hỏi lại câu còn chờ", async () => {
     seedSpine()
     seedSession(true)
@@ -1301,6 +1366,20 @@ describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời
   })
 })
 
+describe("nextPendingAfterChat: dùng sổ quyết định sau khi ghi đáp án thẻ", () => {
+  const server = { topic_key: "hosting", question: "Hệ thống đặt ở đâu?", options: [{ label: "Máy chủ tại bệnh viện" }, { label: "Đám mây" }] }
+  const his = { topic_key: "his_link", question: "Có kết nối HIS sẵn có không?", options: [] }
+  const decided = { decisions: [{ topic_key: "hosting", answer: "Máy chủ tại bệnh viện", superseded_by: null }] } as never
+
+  it("AI viết lại hỏi lại câu vừa chốt bằng thẻ ⇒ bị bỏ, chỉ còn câu chưa trả lời", () => {
+    expect(nextPendingAfterChat(decided, [his], [server, his] as never, "cái này tôi chưa biết")).toEqual([expect.objectContaining({ topic_key: "his_link" })])
+  })
+
+  it("AI chỉ viết lại câu đã chốt ⇒ hỏi lại nguyên văn câu còn chờ, không kết thúc im lặng", () => {
+    expect(nextPendingAfterChat(decided, [his], [server] as never, "")).toEqual([his])
+  })
+})
+
 describe("phỏng vấn đầu giai đoạn: transcript", () => {
   const asked = [
     { topic_key: "uptime", question: "Hệ thống cần sẵn sàng tới mức nào?", options: [{ label: "99%" }, { label: "99.9%" }] },
@@ -1329,5 +1408,41 @@ describe("phỏng vấn đầu giai đoạn: transcript", () => {
     ;(db.sessions[0].messages as unknown[]).push({ role: "ai", content: JSON.stringify({ reply: "x", questions: [] }), step: "S-6", createdAt: new Date() })
     await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers })
     expect(messagesOf().filter((m) => m.role === "ai")).toHaveLength(1)
+  })
+})
+
+describe("settleWithoutModel: chốt tất định khi hết ngân sách chat", () => {
+  const who = { topic_key: "who", question: "Ai dùng chính?", options: [] }
+  const where = { topic_key: "where", question: "Đặt ở đâu?", options: [] }
+  const card = { topic_key: "uptime", question: "Uptime?", options: [{ label: "99.9% (Khuyến nghị)" }, { label: "99%" }] }
+
+  it("tin đánh số đủ đoạn cho mọi câu mở ⇒ chốt từng câu bằng đúng đoạn của nó", () => {
+    const message = "1. bác sĩ bấm nút gọi bệnh nhân\n2. màn hình và loa ở hành lang"
+    expect(settleWithoutModel([who, where], message)).toEqual([
+      { question_id: "Q_who", answer: "bác sĩ bấm nút gọi bệnh nhân" },
+      { question_id: "Q_where", answer: "màn hình và loa ở hành lang" }
+    ])
+  })
+
+  it("nhiều câu mở mà tin không đánh số ⇒ không chốt câu nào (không gán một tin cho hai câu)", () => {
+    expect(settleWithoutModel([who, where], "bác sĩ bấm nút, màn hình ở hành lang")).toEqual([])
+  })
+
+  it("một câu mở duy nhất + tin tự do không đánh số ⇒ KHÔNG chốt (tin có thể lạc đề, câu để chờ)", () => {
+    expect(settleWithoutModel([who, card], "Người dùng chính là lễ tân")).toEqual([])
+    expect(settleWithoutModel([who], "có, tiếp đón phải kiểm tra thẻ bhyt trước khi vào khám")).toEqual([])
+  })
+
+  it("câu mở đã được trả lời một lần mà vẫn hỏi lại ⇒ luật câu-trả-lời-lặp chốt nguyên văn", () => {
+    expect(settleWithoutModel([{ ...who, replied: 1 }], "lễ tân và bác sĩ")).toEqual([{ question_id: "Q_who", answer: "lễ tân và bác sĩ" }])
+  })
+
+  it("tin nhắc tới nhãn lựa chọn ⇒ chốt câu lựa chọn, không gán cả tin cho câu mở", () => {
+    expect(settleWithoutModel([who, card], "chắc 99% là đủ")).toEqual([{ question_id: "Q_uptime", answer: "99%" }])
+  })
+
+  it("hỏi ngược / uỷ quyền / đồng ý suông ⇒ không chốt gì", () => {
+    expect(settleWithoutModel([who, card], "bạn nghĩ sao?")).toEqual([])
+    expect(settleWithoutModel([who], "oke")).toEqual([])
   })
 })

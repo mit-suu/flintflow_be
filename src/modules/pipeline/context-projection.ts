@@ -23,6 +23,7 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { DOCUMENTS_READ, getStep } from "./step-registry.js"
+import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
 
@@ -306,6 +307,19 @@ const loadTranscriptTail = async (sessionId: string | null | undefined, stepId: 
   const phaseUnit = loop ? `${phase}@${loop}` : phase
   const messages = (session?.messages ?? []).filter((m) => m.step === stepId || m.step === phaseUnit).slice(-TRANSCRIPT_TAIL_MESSAGES)
   return messages.map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`).join("\n")
+}
+
+/**
+ * Biến prompt trí nhớ của vòng hỏi (FLF-232): `recent_turns` = đuôi transcript của CẢ session (mọi step, không lọc theo
+ * step như `transcriptTail`), `conversation_summary` = tóm tắt dựng không gọi model. Không có session ⇒ chỉ phần từ Spine.
+ */
+export const loadConversationVariables = async (
+  sessionId: string | null | undefined,
+  spine: Pick<Spine, "project" | "decisions">
+): Promise<{ recent_turns: string; conversation_summary: string }> => {
+  const session = sessionId ? await ChatSession.findById(sessionId, { messages: 1 }).lean() : null
+  const transcript: TranscriptMessage[] = (session?.messages ?? []).map((m) => ({ role: m.role, content: m.content, ...(m.step ? { step: m.step } : {}) }))
+  return { recent_turns: formatRecentTurns(transcript), conversation_summary: buildConversationSummary(spine, transcript) }
 }
 
 export const buildStepContext = async (projectId: string, stepId: string, options: BuildStepContextOptions = {}): Promise<StepContext> => {

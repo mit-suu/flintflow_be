@@ -412,7 +412,8 @@ describe("T14: S-1.2 -> S-3.6 content skills end to end on spine-fixture-minimal
     const draftSteps = STEPS_UNDER_TEST.filter(hasSkill)
     for (const stepId of draftSteps) {
       const stepUsage = db.usages.filter((u) => u.step_id === stepId)
-      expect(stepUsage.map((u) => u.call_kind).sort(), `${stepId} usage`).toEqual(["draft", "elicit"])
+      // S-2.2 chỉ còn field trống là `system_name` — tên hệ thống chỉ hỏi ở B-2.3 nên không có lượt elicit (FLF-232)
+      expect(stepUsage.map((u) => u.call_kind).sort(), `${stepId} usage`).toEqual(stepId === "S-2.2" ? ["draft"] : ["draft", "elicit"])
     }
     expect(db.usages.filter((u) => u.step_id === "S-2.5")).toHaveLength(0)
     expect(db.usages.filter((u) => u.step_id === "S-3.6")).toHaveLength(0)

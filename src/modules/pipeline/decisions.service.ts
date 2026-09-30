@@ -179,6 +179,20 @@ export const decisionOps = (spine: Spine, stepId: string, answered: readonly Ans
   return ops
 }
 
+/**
+ * Tên hệ thống hỏi ở cuối Brief (B-2.3), không phải câu đầu tiên sau khi user kể ý tưởng (FLF-232). Nền tảng và mức độ quan
+ * trọng thì B-0.1 hỏi bằng một lượt hai thẻ có khuyến nghị (bỏ thẻ nào user đã nói rõ) — chúng nằm trong `missing` như mọi field trống.
+ */
+export const SYSTEM_NAME_FIELD = "project.system_name"
+export const SYSTEM_NAME_STEP = "B-2.3"
+
+/**
+ * Field trống mà step này được phép hỏi. `project.system_name` chỉ được hỏi ở B-2.3: các step khác đọc nó (B-1.x, S-1…) cũng
+ * thấy nó trống nhưng hỏi ở đó là hỏi tên trước khi Brief đủ để gợi ý — và đúng điều FLF-232 bỏ khỏi câu đầu.
+ */
+export const askableFields = (templateId: string, fields: readonly string[]): string[] =>
+  templateId === SYSTEM_NAME_STEP ? [...fields] : fields.filter((field) => field !== SYSTEM_NAME_FIELD)
+
 /** Đuôi đánh dấu phương án khuyến nghị trên nhãn lựa chọn (FLF-220). */
 export const RECOMMENDED_SUFFIX = /\s*\((khuyến nghị|recommended)\)\s*$/i
 
