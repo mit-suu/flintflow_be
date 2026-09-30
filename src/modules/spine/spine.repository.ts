@@ -42,7 +42,7 @@ export const createEmptySpine = (init: SpineInit = {}): Spine => ({
     type: null,
     domain: init.domain ?? null,
     complexity: null,
-    form_factor: null,
+    form_factor: [],
     stakes: null,
     working_mode: null,
     review_mode: "balanced",

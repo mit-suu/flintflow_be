@@ -43,6 +43,7 @@ import { RemovedIds, planCascade, planFeatureRenumber, planScreenQueueAppend } f
 import { planBriefReextract } from "./brief-core.js"
 import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
 import { withElementDefaults } from "./element-defaults.js"
+import { normalizeFormFactorAt } from "./form-factor.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -101,6 +102,8 @@ const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value
 
 const applySet = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op set thiếu value: "${op.path}"`)
+  // Mọi đường ghi (model, /changes, import) đều chuẩn hoá form_factor thành mảng — change log không bao giờ giữ chuỗi
+  const value = normalizeFormFactorAt(op.path, op.value)
   const target = resolve(state.spine, op.path)
 
   if (target.kind === "append") throw opError("op_not_allowed", op.path, `Op set không nhận path kết thúc bằng []: "${op.path}"`)
@@ -109,14 +112,14 @@ const applySet = (state: WorkState, op: Op): void => {
     if (target.lockedKeys.includes(target.key)) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${target.key}" của phần tử: "${op.path}"`)
     }
-    if (isEntityArray(target.value) || isEntityArray(op.value)) {
+    if (isEntityArray(target.value) || isEntityArray(value)) {
       if (expandEntityArraySet(state, op, target.value)) return
       throw opError("op_not_allowed", op.path, `Mảng phần tử có id phải sửa bằng add/remove từng phần tử: "${op.path}"`)
     }
     const before = target.exists ? clone(target.value) : ABSENT
-    if (isDeepStrictEqual(target.value, op.value)) return
-    target.parent[target.key] = clone(op.value)
-    state.drafts.push({ op: op.op, path: target.canonical, before, value: clone(op.value), reason: reasonOf(op) })
+    if (isDeepStrictEqual(target.value, value)) return
+    target.parent[target.key] = clone(value)
+    state.drafts.push({ op: op.op, path: target.canonical, before, value: clone(value), reason: reasonOf(op) })
     return
   }
 
@@ -426,7 +429,8 @@ const invertChange = (state: WorkState, change: Change): void => {
     const parsed = spineSchema.omit({ spine_version: true }).safeParse(change.before)
     if (!parsed.success) throw opError("schema_invalid", ROOT_PATH, `before của seq ${change.seq} không phải Spine hợp lệ`)
     const { spine_version: currentVersion, ...current } = state.spine
-    if (!isDeepStrictEqual(current, change.value)) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
+    // Change cũ có thể còn giữ form_factor dạng chuỗi — so sau khi chuẩn hoá
+    if (!isDeepStrictEqual(current, normalizeFormFactorAt(ROOT_PATH, change.value))) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
     state.spine = { ...clone(parsed.data), spine_version: currentVersion }
     state.baseline = clone(state.spine)
     state.drafts.push({ op: "revert", path: ROOT_PATH, before: current, value: clone(parsed.data), reason })
@@ -455,17 +459,20 @@ const invertChange = (state: WorkState, change: Change): void => {
   }
 
   const target = resolve(state.spine, change.path)
+  // Change cũ ghi project.form_factor / project còn giữ chuỗi ⇒ so và khôi phục theo dạng mảng
+  const changeValue = isAbsent(change.value) ? change.value : normalizeFormFactorAt(change.path, change.value)
+  const changeBefore = isAbsent(change.before) ? change.before : normalizeFormFactorAt(change.path, change.before)
 
   // change đã tạo mới ⇒ xoá đi
   if (isAbsent(change.before)) {
     if (target.kind === "element") {
-      if (!isDeepStrictEqual(target.value, change.value)) throw revertConflict(change, "phần tử đã bị sửa")
+      if (!isDeepStrictEqual(target.value, changeValue)) throw revertConflict(change, "phần tử đã bị sửa")
       const [element] = target.parent.splice(target.key, 1)
       state.drafts.push({ op: "revert", path: target.canonical, before: element, value: { ...ABSENT, index: target.key }, reason })
       return
     }
     if (target.kind === "field" && target.exists) {
-      if (!isDeepStrictEqual(target.value, change.value)) throw revertConflict(change, "giá trị đã bị sửa")
+      if (!isDeepStrictEqual(target.value, changeValue)) throw revertConflict(change, "giá trị đã bị sửa")
       const before = clone(target.value)
       delete target.parent[target.key]
       state.drafts.push({ op: "revert", path: target.canonical, before, value: ABSENT, reason })
@@ -477,10 +484,10 @@ const invertChange = (state: WorkState, change: Change): void => {
   // change đã thay giá trị ⇒ đặt lại before
   if (target.kind === "append") throw opError("path_not_resolved", change.path, `Không revert được "${change.path}"`)
   const current = target.exists ? clone(target.value) : ABSENT
-  if (!isDeepStrictEqual(current, change.value)) throw revertConflict(change, "giá trị đã bị sửa")
-  if (target.kind === "field") target.parent[target.key] = clone(change.before)
-  else target.parent[target.key] = clone(change.before)
-  state.drafts.push({ op: "revert", path: target.canonical, before: current, value: clone(change.before), reason })
+  if (!isDeepStrictEqual(current, changeValue)) throw revertConflict(change, "giá trị đã bị sửa")
+  if (target.kind === "field") target.parent[target.key] = clone(changeBefore)
+  else target.parent[target.key] = clone(changeBefore)
+  state.drafts.push({ op: "revert", path: target.canonical, before: current, value: clone(changeBefore), reason })
 }
 
 export interface RevertOptions {

@@ -1254,7 +1254,9 @@ export const runStep = async (
     // (`pick` bỏ key thiếu nên emptyFields có thể rỗng sai).
     const b0Field = B0_FIELD_STEPS[stepDef.template_id]
     const firstRound = !existingStep || existingStep.status === "pending"
-    const fieldAlreadySet = b0Field !== undefined && firstRound && spine.project[b0Field] !== null && spine.project[b0Field] !== undefined
+    const fieldValue = b0Field === undefined ? undefined : spine.project[b0Field]
+    // `form_factor` là mảng (rỗng = chưa chốt), `stakes` là chuỗi hoặc null
+    const fieldAlreadySet = b0Field !== undefined && firstRound && fieldValue !== null && fieldValue !== undefined && !(Array.isArray(fieldValue) && fieldValue.length === 0)
 
     // ─── init: cập nhật progress cursor + đặt step in_progress (B7: reset vòng khi reopen sau accepted) ──
     const phaseChanged = spine.progress.current_phase !== stepDef.phase

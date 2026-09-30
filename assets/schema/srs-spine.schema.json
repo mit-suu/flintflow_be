@@ -68,14 +68,10 @@
           ]
         },
         "form_factor": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "stakes": {
           "anyOf": [
@@ -904,6 +900,17 @@
           },
           "statement": {
             "type": "string"
+          },
+          "statement_vi": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
