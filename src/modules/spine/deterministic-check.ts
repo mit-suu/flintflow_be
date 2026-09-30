@@ -453,7 +453,8 @@ const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" 
         rule_id: "derived_from_changed_assumption",
         section_id: sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4",
         target_id: assumption.id,
-        message: `Giả định ${assumption.id} ${verb} ("${assumption.statement}") nhưng ${pathLabel(assumption.path)} chưa cập nhật theo`,
+        // Lời cho user (hiện ở cổng duyệt): câu tiếng Việt của giả định, không mã, không chữ "giả định"
+        message: `Điều tôi tạm hiểu ${verb} ("${assumption.statement_vi ?? assumption.statement}") nhưng ${pathLabel(assumption.path)} chưa cập nhật theo`,
         remediation_step: ownerStepOf(sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4", spine)
       }
     ]
