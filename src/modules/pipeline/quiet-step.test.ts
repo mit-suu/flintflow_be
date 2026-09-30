@@ -120,3 +120,17 @@ describe("FLF-232: B-2.3 hỏi tên hệ thống, không tự Accept khi tên c�
     expect(isQuietStep(input({ templateId: "B-2.2", reviewMode: "fast", spine: withName(null) })).quiet).toBe(true)
   })
 })
+
+describe("S-1.1 luôn dừng để user soát bản tiếng Anh của tầm nhìn và mục tiêu", () => {
+  it("S-1.1 thuộc ALWAYS_GATE: không tự Accept ở mọi chế độ duyệt, lý do nói về bản tiếng Anh", () => {
+    expect(ALWAYS_GATE.has("S-1.1")).toBe(true)
+    for (const reviewMode of ["fast", "balanced", "strict"] as const) {
+      expect(isQuietStep(input({ templateId: "S-1.1", reviewMode })).quiet, reviewMode).toBe(false)
+    }
+    expect(isQuietStep(input({ templateId: "S-1.1", reviewMode: "fast" })).reason_vi).toContain("tiếng Anh")
+  })
+
+  it("S-1.2 (bước kế) vẫn tự Accept được", () => {
+    expect(isQuietStep(input({ templateId: "S-1.2", reviewMode: "fast" })).quiet).toBe(true)
+  })
+})

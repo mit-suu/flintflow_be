@@ -596,3 +596,22 @@ describe("FLF-213: luật \"chưa có X\" chờ bước sở hữu chốt", () =
     expect(gated.length).toBeLessThan(ungated.length)
   })
 })
+
+describe("non_english_content — tầm nhìn/mục tiêu chỉ về S-1.1", () => {
+  it("vision tiếng Việt ⇒ cờ vàng ở fixed:1 với remediation_step S-1.1", () => {
+    const flags = runDeterministicCheck(variant((s) => (s.project.vision = "Giúp bệnh nhân đặt lịch khám trực tuyến")))
+    expect(byRule(flags, "non_english_content").filter((f) => f.section_id === "fixed:1")).toMatchObject([{ level: "yellow", remediation_step: "S-1.1" }])
+  })
+
+  it("goals tiếng Việt cũng chỉ về S-1.1; tên dự án tiếng Việt vẫn theo luật cũ", () => {
+    const goalsFlags = runDeterministicCheck(variant((s) => (s.project.goals = ["Giảm thời gian chờ"])))
+    expect(byRule(goalsFlags, "non_english_content").find((f) => f.section_id === "fixed:1")).toMatchObject({ remediation_step: "S-1.1" })
+    const nameFlags = runDeterministicCheck(
+      variant((s) => {
+        s.project.name = "Phòng khám Minh An"
+        s.project.system_name = null
+      })
+    )
+    expect(byRule(nameFlags, "non_english_content").find((f) => f.section_id === "fixed:1")).toMatchObject({ remediation_step: "S-2.1" })
+  })
+})

@@ -10,6 +10,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import { briefCoreEntries } from "../spine/brief-core.js"
 
 export interface GateTable {
   title_vi: string
@@ -67,11 +68,25 @@ const permissionTable = (spine: Spine): GateTable => {
   return { title_vi: "Ma trận quyền theo màn", columns: ["Mã màn", "Màn hình", ...roles.map((r) => r.name)], rows, truncated }
 }
 
+const DASH = "—"
+
+/** S-1.1: bản Brief của user (addendum lõi, ngôn ngữ user) cạnh bản tiếng Anh sẽ vào SRS §1 — ghép theo chỉ số. */
+const briefExtractionTable = (spine: Spine): GateTable => {
+  const core = briefCoreEntries(spine)
+  const pick = (v: string | null | undefined): string => (v ?? "").trim() || DASH
+  const goalCount = Math.max(core.goals.length, spine.project.goals.length)
+  const all: string[][] = [["Tầm nhìn", pick(core.vision?.content), pick(spine.project.vision)]]
+  for (let i = 0; i < goalCount; i++) all.push([`Mục tiêu ${i + 1}`, pick(core.goals[i]?.content), pick(spine.project.goals[i])])
+  const { rows, truncated } = clip(all)
+  return { title_vi: "Tầm nhìn & mục tiêu", columns: ["Mục", "Brief của bạn", "Bản đưa vào SRS"], rows, truncated }
+}
+
 /**
  * Bảng của step, hoặc `null` nếu step này không sinh bảng. `templateId` là id step không có `@màn`.
  */
 export const gateTableOf = (spine: Spine, templateId: string): GateTable | null => {
   if (templateId === "S-9.4") return moscowTable(spine)
+  if (templateId === "S-1.1") return briefExtractionTable(spine)
   if (templateId === "S-4.3") return permissionTable(spine)
   return null
 }
