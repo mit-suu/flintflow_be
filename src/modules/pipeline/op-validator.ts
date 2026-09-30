@@ -25,6 +25,15 @@ import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import { orphanEntities } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
+import {
+  BRIEF_EXTRACTION_STEP,
+  BRIEF_PROJECT_WRITE_MESSAGE,
+  briefCoreEntries,
+  hasBriefCore,
+  isBriefCoreTopic,
+  isBriefPhase,
+  writesProjectVisionOrGoals
+} from "../spine/brief-core.js"
 
 export interface ValidationError {
   /** `op_schema` · `path_not_writable` · `op_out_of_scope` · `op_not_allowed` · hoặc `rule` của op engine. */
@@ -136,6 +145,97 @@ const scopeErrors = (
   return errors
 }
 
+/**
+ * S-1.1 được ghi `addendum` chỉ để sửa nghĩa của tầm nhìn/mục tiêu: `set`/`remove` phải nhắm entry lõi hiện có,
+ * `add` phải mang `topic` lõi. Entry khác của addendum thuộc về Brief (B-*) và B-2.2.
+ */
+const briefCoreScopeErrors = (spine: Spine, ops: readonly Op[]): ValidationError[] => {
+  const added = idsAddedIn(ops)
+  const errors: ValidationError[] = []
+  ops.forEach((op, index) => {
+    if (op.path !== "addendum" && op.path !== "addendum[]" && !op.path.startsWith("addendum[")) return
+    let ok = false
+    if (op.op === "add") ok = isRecord(op.value) && isBriefCoreTopic(op.value.topic)
+    else {
+      const target = targetOf(op.path)
+      const entry = target ? spine.addendum.find((a) => a.id === target.id) : undefined
+      ok = target !== null && (added.has(target.id) || (entry !== undefined && isBriefCoreTopic(entry.topic)))
+    }
+    if (ok) return
+    errors.push({
+      rule: "op_out_of_scope",
+      op_index: index,
+      path: op.path,
+      message: `Step ${BRIEF_EXTRACTION_STEP} chỉ được sửa entry addendum topic vision/goals (add phải mang topic vision hoặc goals) — entry khác thuộc về Brief.`
+    })
+  })
+  return errors
+}
+
+const setsProjectField = (ops: readonly Op[], field: "vision" | "goals"): Op | undefined =>
+  ops.find(
+    (op) =>
+      op.op === "set" &&
+      (op.path.replace(/\s+/g, "") === `project.${field}` || (op.path === "project" && isRecord(op.value) && field in op.value))
+  )
+
+const projectFieldValue = (op: Op | undefined, field: "vision" | "goals"): unknown =>
+  op === undefined ? undefined : op.path === "project" && isRecord(op.value) ? op.value[field] : op.value
+
+/**
+ * S-1.1 phải dựng lại `project.vision` + `project.goals[]` (tiếng Anh) từ addendum lõi mỗi lần soạn (`draft`/`regenerate`),
+ * và cả khi revision đổi addendum. Dự án không có addendum lõi (cũ, import) giữ hành vi cũ ⇒ không kiểm.
+ * Đếm mục tiêu theo addendum SAU lô, để lô revision thêm/bỏ entry `goals` được so đúng.
+ */
+export const briefExtractionErrors = (spine: Spine, ops: readonly Op[], stepId: string | null | undefined, callKind: string): ValidationError[] => {
+  if (stepId !== BRIEF_EXTRACTION_STEP) return []
+  const touchesAddendum = ops.some((op) => op.path === "addendum" || op.path.startsWith("addendum["))
+  const required = callKind === "draft" || callKind === "regenerate" || (callKind === "revision" && touchesAddendum)
+  const goalsOp = setsProjectField(ops, "goals")
+  // Lô nào đặt project.goals cũng phải khớp 1:1 với entry goals (kể cả revision không đụng addendum)
+  if (!required && goalsOp === undefined) return []
+
+  let after = spine
+  if (ops.length > 0) {
+    try {
+      after = planTransaction(spine, { base_version: spine.spine_version, ops: [...ops], by: "op-validator", step_id: stepId }, { startSeq: 1 }).spine
+    } catch (err) {
+      // Lô hỏng do lý do khác: validateOps đã báo; ở đây so với addendum hiện tại
+      if (!(err instanceof TransactionRejectedError) && !(err instanceof TypeError) && !(err instanceof RangeError)) throw err
+    }
+  }
+  if (!hasBriefCore(after)) return []
+
+  const core = briefCoreEntries(after)
+  const errors: ValidationError[] = []
+  const vision = projectFieldValue(setsProjectField(ops, "vision"), "vision")
+  // Chỉ đòi field mà addendum có nguồn: không có entry vision/goals thì không ép model bịa
+  if (required && core.vision !== null && (typeof vision !== "string" || vision.trim() === "")) {
+    errors.push({
+      rule: "brief_extraction_incomplete",
+      path: "project.vision",
+      message: "Step S-1.1 phải có op set project.vision (một câu tiếng Anh, từ content_en của entry addendum topic vision)."
+    })
+  }
+  const goals = projectFieldValue(goalsOp, "goals")
+  if (!Array.isArray(goals)) {
+    if (required && core.goals.length > 0) {
+      errors.push({
+        rule: "brief_extraction_incomplete",
+        path: "project.goals",
+        message: `Step S-1.1 phải có op set project.goals (mảng ${core.goals.length} mục tiêu tiếng Anh, 1:1 theo thứ tự các entry addendum topic goals, từ content_en).`
+      })
+    }
+  } else if (goals.length !== core.goals.length) {
+    errors.push({
+      rule: "brief_extraction_incomplete",
+      path: "project.goals",
+      message: `project.goals có ${goals.length} mục nhưng addendum có ${core.goals.length} entry topic goals — phải 1:1, không gộp, không bịa thêm.`
+    })
+  }
+  return errors
+}
+
 // ─── field chỉ user/code quyết (BUG-03, BUG-29) ──────────────────
 
 /**
@@ -212,11 +312,26 @@ const restatedText = (next: unknown, current: string | null | undefined): boolea
 const ASSUMPTION_STATEMENT_PATH = /^assumptions\[id=([^\]]+)\]\.(statement|statement_vi)$/
 
 /**
+ * Ở Brief, tầm nhìn/mục tiêu sống trong addendum lõi: giả định cũ có path `project.vision|goals` được coi là đã ghi trường thật
+ * khi lô `set` `content` / `content_en` (hoặc cả entry) của một entry addendum cùng topic.
+ */
+const wroteBriefCoreEntry = (spine: Spine, parsed: readonly { op: Op }[], assumptionPath: string): boolean => {
+  const topic = /^project\.(vision|goals)(?:$|[.[])/.exec(assumptionPath.replace(/\s+/g, ""))?.[1]
+  if (!topic) return false
+  return parsed.some(({ op }) => {
+    if (op.op !== "set") return false
+    const match = /^addendum\[id=([^\]]+)\](?:\.(?:content|content_en))?$/.exec(op.path)
+    const entry = match ? spine.addendum.find((a) => a.id === match[1]) : undefined
+    return entry !== undefined && entry.topic.trim().toLowerCase() === topic
+  })
+}
+
+/**
  * Revision đổi câu của một giả định và xác nhận nó ⇒ lô PHẢI ghi luôn trường thật mà giả định nói về (`assumptions[id].path`).
  * Đổi câu mà không đổi trường thật là để Spine nói một đằng, giả định nói một nẻo; `set` sai path (vd sửa `project.stakes`
  * khi giả định nói về `project.form_factor`) không khớp cũng bị chặn ở đây.
  */
-const assumptionPathErrors = (spine: Spine, ops: readonly unknown[]): ValidationError[] => {
+const assumptionPathErrors = (spine: Spine, ops: readonly unknown[], stepId: string | null): ValidationError[] => {
   const parsed = ops.flatMap((raw, index) => {
     const op = userOpSchema.safeParse(raw)
     return op.success ? [{ op: op.data, index }] : []
@@ -241,7 +356,9 @@ const assumptionPathErrors = (spine: Spine, ops: readonly unknown[]): Validation
     if (!restated) continue
     const newPaths = parsed.flatMap(({ op }) => (op.op === "set" && op.path === `assumptions[id=${assumption.id}].path` && typeof op.value === "string" ? [op.value] : []))
     const targets = [assumption.path, ...newPaths]
-    const wroteField = parsed.some(({ op }) => !op.path.startsWith("assumptions") && targets.some((target) => pathsRelated(op.path, target)))
+    const wroteField =
+      parsed.some(({ op }) => !op.path.startsWith("assumptions") && targets.some((target) => pathsRelated(op.path, target))) ||
+      (isBriefPhase(stepId) && wroteBriefCoreEntry(spine, parsed, assumption.path))
     if (!wroteField) {
       errors.push({
         rule: "assumption_path_mismatch",
@@ -387,7 +504,7 @@ export const sanitizeModelOps = (
       if (value !== a.confirmed_at) out.push({ op: "set", path: `assumptions[id=${a.id}].confirmed_at`, value, reason: "confirmed_at do server đặt" })
     }
   }
-  if (options.revision) errors.push(...assumptionPathErrors(spine, out))
+  if (options.revision) errors.push(...assumptionPathErrors(spine, out, stepId))
   return { ops: stampAddendum(out, now), errors }
 }
 
@@ -667,6 +784,11 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
       errors.push({ rule: "op_schema", op_index: index, message: `Op #${index} sai hình: ${z.prettifyError(op.error)}` })
       return
     }
+    // Chạy trước check `writable`: B-1.1…B-2.2 không có project.vision trong writes, nhưng model cần đúng hướng dẫn "ghi addendum"
+    if (isBriefPhase(options.stepId) && writesProjectVisionOrGoals(op.data, spine)) {
+      errors.push({ rule: "path_not_writable", op_index: index, path: op.data.path, message: BRIEF_PROJECT_WRITE_MESSAGE })
+      return
+    }
     if (options.writable && !isWritablePath(op.data.path, options.writable) && !isExtraPath(op.data.path, options.extraPaths)) {
       errors.push({
         rule: "path_not_writable",
@@ -679,6 +801,11 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
     parsed.push(op.data)
   })
   if (errors.length > 0 || parsed.length === 0) return errors
+
+  if (options.stepId === BRIEF_EXTRACTION_STEP) {
+    const outOfScope = briefCoreScopeErrors(spine, parsed)
+    if (outOfScope.length > 0) return outOfScope
+  }
 
   if (options.visibleIds) {
     const outOfScope = scopeErrors(spine, parsed, options.visibleIds, options.stepId, options.extraPaths)

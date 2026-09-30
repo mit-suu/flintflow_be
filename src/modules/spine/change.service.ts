@@ -22,6 +22,7 @@ import { impactOfChanges, type Impact } from "./impact.service.js"
 import * as flagsService from "./flags.service.js"
 import { OP_INVALID, type ApplyResult, type Op, type PreviewResult, type Transaction, type Violation } from "./op.types.js"
 import { stampAddendum } from "./addendum-stamp.js"
+import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -54,8 +55,12 @@ export class NeedsClarificationError extends ApiError {
  */
 export const SYSTEM_MANAGED_ROOTS: ReadonlySet<string> = new Set(["flags", "steps", "progress", "baselines", "sections", "diagrams"])
 
-export const notWritableViolations = (ops: readonly Op[]): Violation[] =>
+export const notWritableViolations = (ops: readonly Op[], spine?: Pick<Spine, "project" | "progress" | "steps">): Violation[] =>
   ops.flatMap((op, index): Violation[] => {
+    // Pha Brief (kể cả project mới chưa chạy step, current_phase null): tầm nhìn/mục tiêu nằm ở addendum lõi, project.vision/goals chỉ do S-1.1 dựng
+    if (spine && isInBriefPhase(spine) && writesProjectVisionOrGoals(op, spine)) {
+      return [{ rule: "path_not_writable", path: op.path, op_index: index, message: BRIEF_PROJECT_WRITE_MESSAGE }]
+    }
     let root: string
     try {
       root = parsePath(op.path)[0].key
@@ -197,6 +202,13 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     matched += hits.length
   }
 
+  // Pha Brief: tầm nhìn/mục tiêu là entry addendum lõi (ngôn ngữ user + bản EN) — model sửa ở đó, không ở project
+  if (isInBriefPhase(spine)) {
+    const core = briefCoreEntries(spine)
+    const entries = [...(core.vision ? [core.vision] : []), ...core.goals]
+    if (entries.length > 0) projection.brief_core = entries.map(({ id, topic, content, content_en }) => ({ id, topic, content, content_en }))
+  }
+
   if (matched > 0) return { ...projection, existing_ids: existingIds }
 
   const index: Record<string, unknown> = {}
@@ -205,7 +217,7 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     if (!Array.isArray(list) || list.length === 0) continue
     index[collection] = list.slice(0, PROJECTION_ELEMENT_LIMIT).map((element) => ({ id: element.id, label: textOf(element) }))
   }
-  return { ...index, existing_ids: existingIds }
+  return { ...index, ...(projection.brief_core ? { brief_core: projection.brief_core } : {}), existing_ids: existingIds }
 }
 
 // ─── nhận diện lệnh sửa trong chat thường ────────────────────────
@@ -414,7 +426,7 @@ export const preview = async (
     return { ...rejectedPreview(body.base_version, [{ rule: "op_value_missing", message: "Không có thay đổi nào để xem trước" }]) }
   }
 
-  const notWritable = notWritableViolations(resolved.ops)
+  const notWritable = notWritableViolations(resolved.ops, spine)
   if (notWritable.length > 0) return rejectedPreview(body.base_version, notWritable)
 
   const txnId = randomUUID()
@@ -489,7 +501,7 @@ export const apply = async (
   }
   if (resolved.ops.length === 0) throw new ApiError(400, "Không có thay đổi nào để áp", "VALIDATION_ERROR")
 
-  const notWritable = notWritableViolations(resolved.ops)
+  const notWritable = notWritableViolations(resolved.ops, spine)
   if (notWritable.length > 0) throw new TransactionRejectedError(OP_INVALID, notWritable)
 
   const reason = body.reason ?? stored?.reason ?? undefined

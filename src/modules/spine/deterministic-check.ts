@@ -1024,11 +1024,11 @@ const ownedTexts = (spine: Spine): ScanItem[] => {
       fields: {
         ...(p.system_name?.trim() ? {} : { name: p.name }),
         system_name: p.system_name,
-        vision: p.vision,
-        goals: p.goals,
         release_scope: p.release_scope
       }
     },
+    // Tầm nhìn/mục tiêu do S-1.1 dựng từ addendum lõi của Brief ⇒ cờ tiếng Anh chỉ đường về S-1.1
+    { path: "project", target_id: null, section: "fixed:1", step: "S-1.1", fields: { vision: p.vision, goals: p.goals } },
     ...spine.actors.map((a) => ({
       path: `actors[id=${a.id}]`,
       target_id: a.id,

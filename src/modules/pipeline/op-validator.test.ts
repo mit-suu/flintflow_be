@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { isWritablePath, normalizeSelectorPath, sanitizeModelOps, validateOps } from "./op-validator.js"
+import { briefExtractionErrors, isWritablePath, normalizeSelectorPath, sanitizeModelOps, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -463,5 +463,201 @@ describe("validateOps — extraPaths cho revision ở cổng (giả định củ
     const actor = FIXTURE.actors[0]
     const edit = { op: "set", path: `actors[id=${actor.id}].name`, value: "Renamed" }
     expect(validateOps(FIXTURE, [edit], { writable: writes, stepId: "B-1.3", extraPaths: [`actors[${actor.id}].name`] })).toEqual([])
+  })
+})
+
+describe("validateOps — Brief không ghi project.vision/goals", () => {
+  const set = (path: string, value: unknown) => ({ op: "set", path, value })
+
+  it("mọi step B-* bị từ chối set project.vision / project.goals, thông báo chỉ sang addendum", () => {
+    for (const stepId of ["B-1.1", "B-1.6", "B-2.3", "B-0.1"]) {
+      const writable = getStep(stepId).writes
+      const errors = validateOps(FIXTURE, [set("project.vision", "A vision")], { writable: [...writable, "project"], stepId })
+      expect(errors, stepId).toMatchObject([{ rule: "path_not_writable", path: "project.vision" }])
+      expect(errors[0].message).toContain("addendum")
+      expect(validateOps(FIXTURE, [set("project.goals", ["a"])], { writable: [...writable, "project"], stepId })[0]).toMatchObject({ rule: "path_not_writable" })
+    }
+  })
+
+  it("set project có khoá vision/goals cũng bị chặn ở Brief; field project khác vẫn qua", () => {
+    const writable = getStep("B-1.6").writes
+    expect(validateOps(FIXTURE, [set("project", { ...FIXTURE.project, vision: "V" })], { writable, stepId: "B-1.6" })[0]).toMatchObject({ rule: "path_not_writable" })
+    expect(validateOps(FIXTURE, [set("project.form_factor", "mobile_app")], { writable: getStep("B-0.3").writes, stepId: "B-0.3" })).toEqual([])
+  })
+
+  it("step ngoài Brief (S-2.1) vẫn ghi được project.vision", () => {
+    expect(validateOps(FIXTURE, [set("project.vision", "A vision")], { writable: getStep("S-2.1").writes, stepId: "S-2.1" })).toEqual([])
+  })
+
+  it("B-1.1 ghi được addendum vision/goals", () => {
+    const entry = { topic: "vision", content: "Tầm nhìn", content_en: "Vision", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" }
+    expect(validateOps(FIXTURE, [{ op: "add", path: "addendum[]", value: entry }], { writable: getStep("B-1.1").writes, stepId: "B-1.1" })).toEqual([])
+  })
+})
+
+describe("validateOps / briefExtractionErrors — S-1.1", () => {
+  const core = (id: string, topic: string): Spine["addendum"][number] => ({
+    id,
+    topic,
+    content: "Nội dung",
+    content_en: "Content",
+    target_section: "fixed:1",
+    captured_at: "2026-09-30T00:00:00.000Z"
+  })
+  const withCore: Spine = { ...structuredClone(FIXTURE), addendum: [core("AD1", "vision"), core("AD2", "goals"), core("AD3", "goals"), { ...core("AD4", "Why now"), topic: "Why now" }] }
+  const writable = getStep("S-1.1").writes
+  const vision = { op: "set" as const, path: "project.vision", value: "One English sentence." }
+  const goals = (n: number) => ({ op: "set" as const, path: "project.goals", value: Array.from({ length: n }, (_, i) => `Goal ${i + 1}`) })
+
+  it("registry: S-1.1 được ghi addendum, B-1.1 không ghi project.vision/goals", () => {
+    expect(writable).toContain("addendum")
+    expect(getStep("B-1.1").writes).not.toContain("project.vision")
+    expect(getStep("B-1.1").writes).not.toContain("project.goals")
+  })
+
+  it("draft/regenerate có addendum lõi mà thiếu set project.vision hoặc project.goals ⇒ lỗi", () => {
+    for (const kind of ["draft", "regenerate"]) {
+      expect(briefExtractionErrors(withCore, [], "S-1.1", kind).map((e) => e.path)).toEqual(["project.vision", "project.goals"])
+      expect(briefExtractionErrors(withCore, [vision], "S-1.1", kind).map((e) => e.path)).toEqual(["project.goals"])
+      expect(briefExtractionErrors(withCore, [goals(2)], "S-1.1", kind).map((e) => e.path)).toEqual(["project.vision"])
+    }
+  })
+
+  it("số mục tiêu phải 1:1 với entry goals; đủ thì qua", () => {
+    const [error] = briefExtractionErrors(withCore, [vision, goals(3)], "S-1.1", "draft")
+    expect(error).toMatchObject({ rule: "brief_extraction_incomplete", path: "project.goals" })
+    expect(error.message).toContain("1:1")
+    expect(briefExtractionErrors(withCore, [vision, goals(2)], "S-1.1", "draft")).toEqual([])
+  })
+
+  it("dự án không có addendum lõi (cũ) ⇒ ops rỗng vẫn qua; step khác không bị kiểm", () => {
+    expect(briefExtractionErrors({ ...FIXTURE, addendum: [core("AD4", "Why now")] }, [], "S-1.1", "draft")).toEqual([])
+    expect(briefExtractionErrors(withCore, [], "S-2.1", "draft")).toEqual([])
+  })
+
+  it("revision chỉ bị kiểm khi đụng addendum: thêm entry goals thì số mục tiêu tính theo addendum sau lô", () => {
+    expect(briefExtractionErrors(withCore, [vision], "S-1.1", "revision")).toEqual([])
+    const addGoal = { op: "add" as const, path: "addendum[]", value: { ...core("AD9", "goals") } }
+    expect(briefExtractionErrors(withCore, [addGoal, vision, goals(2)], "S-1.1", "revision").map((e) => e.path)).toEqual(["project.goals"])
+    expect(briefExtractionErrors(withCore, [addGoal, vision, goals(3)], "S-1.1", "revision")).toEqual([])
+  })
+
+  it("S-1.1 chỉ sửa entry addendum lõi: entry thường bị op_out_of_scope, entry lõi và add lõi qua", () => {
+    const edit = (id: string) => ({ op: "set", path: `addendum[id=${id}].content_en`, value: "Reworded" })
+    expect(validateOps(withCore, [edit("AD2")], { writable, stepId: "S-1.1" })).toEqual([])
+    expect(validateOps(withCore, [edit("AD4")], { writable, stepId: "S-1.1" })).toMatchObject([{ rule: "op_out_of_scope", path: "addendum[id=AD4].content_en" }])
+    expect(validateOps(withCore, [{ op: "remove", path: "addendum[id=AD4]" }], { writable, stepId: "S-1.1" })[0]).toMatchObject({ rule: "op_out_of_scope" })
+    const add = (topic: string) => ({ op: "add", path: "addendum[]", value: { ...core("AD9", topic), topic } })
+    expect(validateOps(withCore, [add("goals")], { writable, stepId: "S-1.1" })).toEqual([])
+    expect(validateOps(withCore, [add("Risks")], { writable, stepId: "S-1.1" })[0]).toMatchObject({ rule: "op_out_of_scope" })
+  })
+})
+
+describe("validateOps — Brief chặn chỉ khi giá trị đổi, message ưu tiên", () => {
+  const empty: Spine = { ...structuredClone(FIXTURE), project: { ...FIXTURE.project, vision: null, goals: [] } }
+
+  it("set nguyên object project giữ nguyên vision/goals (null, []) qua validateOps ở B-0.1/B-0.3/B-1.6/B-2.3", () => {
+    for (const stepId of ["B-0.1", "B-0.3", "B-1.6", "B-2.3"]) {
+      const value = { ...empty.project, stakes: "production" }
+      expect(validateOps(empty, [{ op: "set", path: "project", value }], { writable: getStep(stepId).writes, stepId }), stepId).toEqual([])
+    }
+  })
+
+  it("set nguyên object project ĐỔI vision hoặc goals ⇒ path_not_writable; set project.vision = null (giữ nguyên) qua", () => {
+    const writable = getStep("B-0.3").writes
+    const stepId = "B-0.3"
+    expect(validateOps(empty, [{ op: "set", path: "project", value: { ...empty.project, vision: "V" } }], { writable, stepId })[0]).toMatchObject({ rule: "path_not_writable" })
+    expect(validateOps(empty, [{ op: "set", path: "project", value: { ...empty.project, goals: ["G"] } }], { writable, stepId })[0]).toMatchObject({ rule: "path_not_writable" })
+    expect(validateOps(empty, [{ op: "set", path: "project.vision", value: null }], { writable: [...writable, "project.vision"], stepId })).toEqual([])
+  })
+
+  it("B-1.1…B-2.2 (writes không có project.vision): lỗi là hướng dẫn ghi addendum, không phải danh sách writes chung", () => {
+    for (const stepId of ["B-1.1", "B-1.2", "B-1.5", "B-2.1", "B-2.2"]) {
+      const [error] = validateOps(empty, [{ op: "set", path: "project.vision", value: "V" }], { writable: getStep(stepId).writes, stepId })
+      expect(error, stepId).toMatchObject({ rule: "path_not_writable", path: "project.vision" })
+      expect(error.message, stepId).toContain("addendum")
+      expect(error.message, stepId).not.toContain("Được ghi:")
+    }
+  })
+})
+
+describe("briefExtractionErrors — vision/goals chỉ đòi khi addendum có nguồn, goals 1:1 mọi lô", () => {
+  const core = (id: string, topic: string): Spine["addendum"][number] => ({
+    id,
+    topic,
+    content: "Nội dung",
+    content_en: "Content",
+    target_section: "fixed:1",
+    captured_at: "2026-09-30T00:00:00.000Z"
+  })
+  const goalsOp = (n: number) => ({ op: "set" as const, path: "project.goals", value: Array.from({ length: n }, (_, i) => `Goal ${i + 1}`) })
+  const visionOp = { op: "set" as const, path: "project.vision", value: "One English sentence." }
+  const goalsOnly: Spine = { ...structuredClone(FIXTURE), addendum: [core("AD1", "goals"), core("AD2", "goals")] }
+  const visionOnly: Spine = { ...structuredClone(FIXTURE), addendum: [core("AD1", "vision")] }
+  const full: Spine = { ...structuredClone(FIXTURE), addendum: [core("AD1", "vision"), core("AD2", "goals"), core("AD3", "goals"), core("AD4", "goals")] }
+
+  it("chỉ có entry goals ⇒ không đòi project.vision; chỉ có entry vision ⇒ không đòi project.goals", () => {
+    for (const kind of ["draft", "regenerate"]) {
+      expect(briefExtractionErrors(goalsOnly, [goalsOp(2)], "S-1.1", kind)).toEqual([])
+      expect(briefExtractionErrors(goalsOnly, [], "S-1.1", kind).map((e) => e.path)).toEqual(["project.goals"])
+      expect(briefExtractionErrors(visionOnly, [visionOp], "S-1.1", kind)).toEqual([])
+      expect(briefExtractionErrors(visionOnly, [], "S-1.1", kind).map((e) => e.path)).toEqual(["project.vision"])
+    }
+  })
+
+  it("revision chỉ set project.goals (không đụng addendum) vẫn bị so 1:1 với entry goals", () => {
+    expect(briefExtractionErrors(full, [goalsOp(2)], "S-1.1", "revision").map((e) => e.path)).toEqual(["project.goals"])
+    expect(briefExtractionErrors(full, [goalsOp(3)], "S-1.1", "revision")).toEqual([])
+    expect(briefExtractionErrors(full, [visionOp], "S-1.1", "revision")).toEqual([])
+  })
+
+  it("draft/regenerate đặt sai số mục tiêu ⇒ lỗi; đúng ⇒ qua", () => {
+    for (const kind of ["draft", "regenerate"]) {
+      expect(briefExtractionErrors(full, [visionOp, goalsOp(2)], "S-1.1", kind).map((e) => e.path)).toEqual(["project.goals"])
+      expect(briefExtractionErrors(full, [visionOp, goalsOp(3)], "S-1.1", kind)).toEqual([])
+    }
+  })
+})
+
+describe("sanitizeModelOps — giả định path project.vision|goals ở Brief", () => {
+  const core = (id: string, topic: string): Spine["addendum"][number] => ({
+    id,
+    topic,
+    content: "Nội dung",
+    content_en: "Content",
+    target_section: "fixed:1",
+    captured_at: "2026-09-30T00:00:00.000Z"
+  })
+  const assumption = {
+    id: "AS91",
+    path: "project.vision",
+    statement: "The vision is a booking tool.",
+    statement_vi: "Tầm nhìn là công cụ đặt lịch.",
+    rationale: "demo",
+    origin_step_id: "B-1.4",
+    status: "unconfirmed" as const,
+    confirmed_at: null
+  }
+  const spine: Spine = { ...structuredClone(FIXTURE), addendum: [core("AD1", "vision"), core("AD2", "goals")], assumptions: [assumption, { ...assumption, id: "AS92", path: "project.goals[0]" }] }
+  const revision = { revision: true, gateAssumptionIds: new Set(["AS91", "AS92"]) }
+  const restate = (id: string) => [
+    { op: "set", path: `assumptions[id=${id}].statement`, value: "The vision is a clinic queue tool." },
+    { op: "set", path: `assumptions[id=${id}].status`, value: "confirmed" }
+  ]
+
+  it("set addendum[vision].content(_en) trong revision Brief ⇒ hợp lệ", () => {
+    for (const path of ["addendum[id=AD1].content", "addendum[id=AD1].content_en"]) {
+      expect(sanitizeModelOps(spine, [{ op: "set", path, value: "x" }, ...restate("AS91")], "B-1.4", new Date(), revision).errors, path).toEqual([])
+    }
+  })
+
+  it("giả định goals: cần sửa entry topic goals; sửa entry vision không đủ; ngoài Brief không áp", () => {
+    expect(sanitizeModelOps(spine, [{ op: "set", path: "addendum[id=AD2].content_en", value: "x" }, ...restate("AS92")], "B-1.4", new Date(), revision).errors).toEqual([])
+    expect(sanitizeModelOps(spine, [{ op: "set", path: "addendum[id=AD1].content_en", value: "x" }, ...restate("AS92")], "B-1.4", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
+    expect(sanitizeModelOps(spine, [{ op: "set", path: "addendum[id=AD1].content_en", value: "x" }, ...restate("AS91")], "S-1.3", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
+  })
+
+  it("không sửa addendum lõi ⇒ vẫn assumption_path_mismatch", () => {
+    expect(sanitizeModelOps(spine, restate("AS91"), "B-1.4", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
   })
 })

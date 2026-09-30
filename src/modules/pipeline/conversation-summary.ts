@@ -11,6 +11,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import { briefCoreEntries } from "../spine/brief-core.js"
 import { activeDecisions } from "./decisions.service.js"
 
 /** Số tin gần nhất của cả transcript đưa vào `recent_turns`. */
@@ -69,11 +70,17 @@ export const formatRecentTurns = (transcript: readonly TranscriptMessage[], limi
  * `conversation_summary`: ý tưởng + mục tiêu (`project.vision/goals`), điều đã chốt (`decisions`) và vài lời user gần nhất.
  * Rỗng hoàn toàn ⇒ "(chưa có gì)" để prompt không còn chỗ trống khó hiểu.
  */
-export const buildConversationSummary = (spine: Pick<Spine, "project" | "decisions">, transcript: readonly TranscriptMessage[]): string => {
+export const buildConversationSummary = (
+  spine: Pick<Spine, "project" | "decisions"> & Partial<Pick<Spine, "addendum">>,
+  transcript: readonly TranscriptMessage[]
+): string => {
   const parts: string[] = []
-  const vision = spine.project.vision?.trim()
+  // Brief giữ tầm nhìn/mục tiêu ở addendum lõi (ngôn ngữ user); `project.vision/goals` chỉ có sau S-1.1
+  const core = briefCoreEntries({ addendum: spine.addendum ?? [] })
+  const vision = (core.vision?.content ?? spine.project.vision ?? "").trim()
   if (vision) parts.push(`Ý tưởng: ${truncateWords(vision, 40)}`)
-  const goals = (spine.project.goals ?? []).map((g) => g.trim()).filter(Boolean)
+  const coreGoals = core.goals.map((g) => g.content.trim())
+  const goals = (coreGoals.length > 0 ? coreGoals : (spine.project.goals ?? [])).map((g) => g.trim()).filter(Boolean)
   if (goals.length > 0) parts.push(`Mục tiêu: ${goals.map((g) => truncateWords(g, 12)).join("; ")}`)
 
   const decisions = [...activeDecisions(spine).values()].slice(-SUMMARY_MAX_DECISIONS)

@@ -44,3 +44,38 @@ describe("gateTableOf", () => {
     expect(gateTableOf(FIXTURE, "S-3.1")).toBeNull()
   })
 })
+
+describe("gateTableOf — S-1.1 bảng Brief của bạn | Bản đưa vào SRS", () => {
+  const entry = (id: string, topic: string, content: string) => ({
+    id,
+    topic,
+    content,
+    content_en: content,
+    target_section: "fixed:1",
+    captured_at: "2026-09-30T00:00:00.000Z"
+  })
+
+  it("ghép tầm nhìn và từng mục tiêu theo thứ tự; thiếu bên nào ⇒ dấu gạch", () => {
+    const spine: Spine = {
+      ...FIXTURE,
+      addendum: [entry("AD1", "vision", "Giúp bệnh nhân đặt lịch online"), entry("AD2", "goals", "Giảm cuộc gọi"), entry("AD3", "goals", "Rút thời gian đặt lịch")],
+      project: { ...FIXTURE.project, vision: "Patients book visits online.", goals: ["Reduce phone calls"] }
+    }
+    const table = gateTableOf(spine, "S-1.1")!
+    expect(table.columns).toEqual(["Mục", "Brief của bạn", "Bản đưa vào SRS"])
+    expect(table.rows).toEqual([
+      ["Tầm nhìn", "Giúp bệnh nhân đặt lịch online", "Patients book visits online."],
+      ["Mục tiêu 1", "Giảm cuộc gọi", "Reduce phone calls"],
+      ["Mục tiêu 2", "Rút thời gian đặt lịch", "—"]
+    ])
+    expect(table.truncated).toBe(0)
+  })
+
+  it("dự án cũ không có addendum lõi ⇒ cột Brief là dấu gạch, cột SRS vẫn hiện", () => {
+    const spine: Spine = { ...FIXTURE, addendum: [], project: { ...FIXTURE.project, vision: "Old vision.", goals: ["Old goal"] } }
+    expect(gateTableOf(spine, "S-1.1")!.rows).toEqual([
+      ["Tầm nhìn", "—", "Old vision."],
+      ["Mục tiêu 1", "—", "Old goal"]
+    ])
+  })
+})
