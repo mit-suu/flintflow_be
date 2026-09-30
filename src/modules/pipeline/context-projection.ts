@@ -17,6 +17,7 @@
 
 import type { Addendum, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
+import { isBriefPhase } from "../spine/brief-core.js"
 import { listSections, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -226,6 +227,9 @@ const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
   return Object.fromEntries(Object.entries(value).filter(([key]) => !retired.includes(key)))
 }
 
+/** Pha Brief không còn sở hữu `project.vision/goals` (nằm ở addendum lõi, S-1.1 dựng): không bao giờ là field "thiếu" của step B-*. */
+const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "project.goals"])
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -238,6 +242,10 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     const value = withoutRetiredFields(selector, selectValue(spine, selector, loop))
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
+  }
+  if (isBriefPhase(stepId)) {
+    const kept = emptyFields.filter((field) => !BRIEF_UNOWNED_FIELDS.has(field))
+    emptyFields.splice(0, emptyFields.length, ...kept)
   }
 
   // Step Draft nào cũng được ghi `assumptions[]` nhưng registry không khai `reads` cho nó: không thấy id đã có thì model

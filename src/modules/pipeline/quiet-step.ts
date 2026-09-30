@@ -21,15 +21,17 @@ import { activeDecisions, SYSTEM_NAME_STEP } from "./decisions.service.js"
 /**
  * Bước mà quyết định luôn thuộc về người, dù có yên lặng đến đâu:
  * - `B-0.1` ý tưởng, nền tảng và mức độ quan trọng — mọi thứ sau đó dựa vào nó (tên hệ thống hỏi muộn hơn, ở B-2.3);
+ * - `S-1.1` dựng tầm nhìn và mục tiêu tiếng Anh cho SRS từ Brief — user soát bản EN cạnh bản của mình;
  * - `S-4.1` chốt N (số màn) và khung function — sai ở đây là đi lại cả pha S-5;
  * - `S-9.4` xếp ưu tiên MoSCoW — một quyết định kinh doanh;
  * - `S-9.5` ký baseline.
  */
-export const ALWAYS_GATE: ReadonlySet<string> = new Set(["B-0.1", "S-4.1", "S-9.4", "S-9.5"])
+export const ALWAYS_GATE: ReadonlySet<string> = new Set(["B-0.1", "S-1.1", "S-4.1", "S-9.4", "S-9.5"])
 
 /** Lý do dừng riêng của từng bước `ALWAYS_GATE` — cổng B-0.1 là nơi user chốt ý tưởng (FLF-221). */
 const ALWAYS_GATE_REASON: Readonly<Record<string, string>> = Object.freeze({
-  "B-0.1": "Chốt ý tưởng — duyệt để AI đi tiếp, hoặc nhắn điều cần sửa"
+  "B-0.1": "Chốt ý tưởng — duyệt để AI đi tiếp, hoặc nhắn điều cần sửa",
+  "S-1.1": "Soát bản tiếng Anh của tầm nhìn và mục tiêu trước khi đưa vào tài liệu"
 })
 
 export interface QuietInput {

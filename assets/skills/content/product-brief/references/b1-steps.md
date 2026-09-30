@@ -8,7 +8,7 @@ thẳng vào Spine và để **user** chốt ở gate.
 
 | Bước | Câu hỏi cốt lõi | Ghi vào đâu |
 | --- | --- | --- |
-| B-1.1 | Vấn đề gốc là gì, vì sao là bây giờ, thành công trông ra sao | `project.vision`, `project.goals[]`, addendum `fixed:1` |
+| B-1.1 | Vấn đề gốc là gì, vì sao là bây giờ, thành công trông ra sao | addendum `vision` (1 entry) + addendum `goals` (1 entry mỗi mục tiêu), `fixed:1`; S-1.1 dựng `project.vision`/`goals[]` tiếng Anh |
 | B-1.2 | Ai dùng, họ đang cố hoàn thành việc gì | addendum `fixed:2.1` (một entry mỗi persona) |
 | B-1.3 | Vì sao dùng cái này thay vì cách đang làm | addendum `fixed:1` |
 | B-1.4 | Bản đầu tiên có gì, và dứt khoát chưa có gì | addendum `fixed:1`, `fixed:3.1.2` |

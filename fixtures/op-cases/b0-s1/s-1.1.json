@@ -1,18 +1,23 @@
 {
   "step_id": "S-1.1",
   "skill_id": "brief-analysis",
-  "notes": "Trích xuất: goals đã đủ, thêm một goal từ addendum khác biệt.",
+  "notes": "Mình đã chuyển tầm nhìn và ba mục tiêu của bạn sang tiếng Anh để đưa vào tài liệu.",
   "ops": [
+    {
+      "op": "set",
+      "path": "project.vision",
+      "value": "Let a founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.",
+      "reason": "S-1.1 dựng tầm nhìn tiếng Anh từ Brief"
+    },
     {
       "op": "set",
       "path": "project.goals",
       "value": [
         "Cut time to a baseline-quality SRS from weeks to one working day",
         "Keep every section traceable to a stated business goal",
-        "Make the cost of producing one document predictable",
-        "Keep every section consistent with the others without manual cross-checking"
+        "Make the cost of producing one document predictable"
       ],
-      "reason": "S-1.1 goal rút từ addendum khác biệt"
+      "reason": "S-1.1 dựng mục tiêu tiếng Anh, khớp từng mục của Brief"
     }
   ]
 }
