@@ -387,6 +387,20 @@ describe("sanitizeModelOps — giá trị form_factor / stakes", () => {
     ], "B-0.1")
     expect(good.errors).toEqual([])
   })
+
+  it("form_factor là mảng nền tảng: chuỗi đơn ⇒ mảng một phần tử, mảng giữ thứ tự và bỏ trùng, phần tử lạ ⇒ lỗi", () => {
+    const { ops, errors } = sanitizeModelOps(FIXTURE, [
+      { op: "set", path: "project.form_factor", value: "mobile_app" },
+      { op: "set", path: "project.form_factor", value: ["web_app", "mobile_app", "web_app"] },
+      { op: "set", path: "project", value: { ...FIXTURE.project, form_factor: "web_app" } },
+      { op: "set", path: "project.form_factor", value: ["web_app", "smartwatch"] }
+    ], "B-0.1")
+    expect(errors.map((e) => e.op_index)).toEqual([3])
+    expect(errors[0].message).toContain("mảng")
+    expect(ops[0]).toMatchObject({ value: ["mobile_app"] })
+    expect(ops[1]).toMatchObject({ value: ["web_app", "mobile_app"] })
+    expect((ops[2] as { value: { form_factor: string[] } }).value.form_factor).toEqual(["web_app"])
+  })
 })
 
 describe("sanitizeModelOps — addendum", () => {

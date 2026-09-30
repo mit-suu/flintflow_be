@@ -239,6 +239,32 @@ describe("project.system_name (FLF-177)", () => {
   })
 })
 
+describe("project.form_factor là mảng nền tảng (FLF-237)", () => {
+  it("Spine cũ lưu chuỗi ⇒ đọc thành mảng một phần tử; null ⇒ []; mảng giữ nguyên thứ tự", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    const asString = { ...legacy, project: { ...legacy.project, form_factor: "web_app" } }
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(asString))).project.form_factor).toEqual(["web_app"])
+    const asNull = { ...legacy, project: { ...legacy.project, form_factor: null } }
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(asNull))).project.form_factor).toEqual([])
+    legacy.project.form_factor = ["web_app", "mobile_app"]
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(legacy))).project.form_factor).toEqual(["web_app", "mobile_app"])
+    expect(createEmptySpine({ name: "New" }).project.form_factor).toEqual([])
+  })
+})
+
+describe("other_requirements[].statement_vi (FLF-237)", () => {
+  it("dữ liệu cũ không có statement_vi vẫn hợp lệ; có thì giữ nguyên", () => {
+    const spine = createEmptySpine({ name: "OR" })
+    spine.other_requirements = [
+      { id: "OR01", kind: "risk", statement: "Payment gateway may be down." },
+      { id: "OR02", kind: "open_question", statement: "Who suspends accounts?", statement_vi: "Ai khoá tài khoản?" }
+    ]
+    const parsed = spineSchema.parse(JSON.parse(JSON.stringify(spine)))
+    expect(parsed.other_requirements[0].statement_vi).toBeUndefined()
+    expect(parsed.other_requirements[1].statement_vi).toBe("Ai khoá tài khoản?")
+  })
+})
+
 describe("assumptions[].statement_vi (FLF-221)", () => {
   const assumption = {
     id: "AS1",

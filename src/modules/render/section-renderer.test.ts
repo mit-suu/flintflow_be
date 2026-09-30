@@ -11,7 +11,7 @@ const emptySpine = (): Spine => ({
     type: null,
     domain: null,
     complexity: null,
-    form_factor: null,
+    form_factor: [],
     stakes: null,
     working_mode: null,
     review_mode: "balanced" as const,
