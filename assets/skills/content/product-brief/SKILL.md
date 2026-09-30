@@ -78,7 +78,7 @@ section the product does not need. B-1 never writes `project.vision`/`project.go
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
-| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
+| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped — exactly the goals stated in `notes`, same count and wording) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
 | B-1.2 Target users & jobs-to-be-done | addendum per persona/stakeholder, with the job each one needs done | `fixed:2.1` |
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
