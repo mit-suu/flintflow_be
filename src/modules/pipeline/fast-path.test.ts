@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_VI, reconcileReply, withoutQuestions } from "./fast-path.js"
+import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_VI, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 
@@ -95,6 +95,34 @@ describe("reconcileReply", () => {
   it("cắt hết chỉ còn câu hỏi bị bỏ ⇒ lời nhận tin; câu không phải câu hỏi không bị cắt", () => {
     expect(reconcileReply("Bạn lưu hồ sơ bao lâu?", ["Bạn lưu hồ sơ bao lâu?"], ["Bạn dùng điện thoại nào?"])).toBe(NO_QUESTION_ACK_VI)
     expect(reconcileReply("Mình sẽ lưu hồ sơ bao lâu tuỳ bạn.", ["Bạn lưu hồ sơ bao lâu?"], ["Bạn dùng điện thoại nào?"])).toBe("Mình sẽ lưu hồ sơ bao lâu tuỳ bạn.")
+  })
+})
+
+describe("trimTailQuestion: câu hỏi đuôi tính vào trần câu hỏi", () => {
+  const asked = [{ question: "Bạn muốn giảm thời gian chờ xuống bao nhiêu?" }, { question: "Bệnh nhân đặt lịch qua kênh nào?" }]
+  it("đã hỏi đủ ngân sách (thẻ) mà lời AI còn kết bằng câu hỏi lạ ⇒ cắt câu đó; số thập phân không bị coi là hết câu", () => {
+    expect(trimTailQuestion("Quy trình thanh toán hai kênh nghe hợp lý. Tôi sẽ viết theo hướng đó, bạn thấy hợp lý chứ?", asked, 2)).toBe(
+      "Quy trình thanh toán hai kênh nghe hợp lý."
+    )
+    expect(trimTailQuestion("Tầm 1.000 ca mỗi ngày là mức tôi lấy. Bạn thấy ổn chứ?", asked, 2)).toBe("Tầm 1.000 ca mỗi ngày là mức tôi lấy.")
+  })
+  it("chưa đủ ngân sách, hoặc câu cuối là câu đang hỏi, hoặc không kết bằng '?' ⇒ giữ nguyên", () => {
+    const tail = "Ok. Bạn thấy hợp lý chứ?"
+    expect(trimTailQuestion(tail, asked.slice(0, 1), 2)).toBe(tail)
+    const inline = "Ok. Bệnh nhân đặt lịch qua kênh nào?"
+    expect(trimTailQuestion(inline, asked, 2)).toBe(inline)
+    const plain = "Ok. Tôi sẽ viết theo hướng đó."
+    expect(trimTailQuestion(plain, asked, 2)).toBe(plain)
+  })
+  it("câu inline chỉ có trong lời AI: số câu hỏi trong lời ≤ số câu inline ⇒ không cắt dù model viết lại khác chữ", () => {
+    const inlineAsked = [{ question: "Bạn muốn giảm thời gian chờ xuống bao nhiêu?", inline: true }, { question: "Bệnh nhân đặt lịch qua kênh nào?", inline: true }]
+    const reply = "Ok. Còn về thời gian, mức nào là chấp nhận được với bạn? Và về việc hẹn khám, bệnh nhân sẽ dùng gì để đặt?"
+    expect(trimTailQuestion(reply, inlineAsked, 2)).toBe(reply)
+    // Ba câu hỏi mà chỉ hai câu inline ⇒ câu đuôi thứ ba bị cắt
+    expect(trimTailQuestion(`${reply} Bạn thấy hợp lý chứ?`, inlineAsked, 2)).toBe(reply)
+  })
+  it("cắt hết chỉ còn câu hỏi ⇒ lời nhận tin cố định", () => {
+    expect(trimTailQuestion("Bạn thấy hợp lý chứ?", asked, 2)).toBe(NO_QUESTION_ACK_VI)
   })
 })
 

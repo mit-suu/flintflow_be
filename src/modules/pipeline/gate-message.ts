@@ -8,6 +8,7 @@
  */
 
 import type { ChangeSummary } from "./pipeline.dto.js"
+import { contentWords, normalise, sentencesOf, wordsOf } from "./text-overlap.js"
 
 export const FALLBACK_INVITE = "Bạn xem giúp, ổn thì mình đi tiếp nhé."
 const ASSUMPTION_INVITE = "Nếu chỗ nào khác thì bạn nói tôi nhé."
@@ -68,32 +69,41 @@ export const assumptionSentence = (texts: readonly string[]): string | null => {
   return sentences.length === 0 ? null : [...sentences, ASSUMPTION_INVITE].join(" ")
 }
 
-const WORDS = /[\p{L}\p{N}]+/gu
-/** Bỏ dấu + hạ chữ thường: model gõ có/không dấu, hoa/thường đều khớp. */
-const normalise = (text: string): string => text.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "").replace(/đ/g, "d")
-const wordsOf = (text: string): string[] => normalise(text).match(WORDS) ?? []
-
-/** Từ chức năng / xưng hô — không mang nội dung của điều tạm hiểu nên không dùng để so khớp. */
-const STOP_WORDS: ReadonlySet<string> = new Set(
-  "la va cua cho cac mot nhung duoc khong co de se toi ban minh tam hieu nhu thi ma nen cung dang da voi trong tren nay do khi neu hay hoac o tu den ra vao rat can phai".split(" ")
-)
 const MATCH_RATIO = 0.6
+const MIN_CONTENT_WORDS = 3
 
 /**
- * Lời `notes` của model đã nhắc tới điều tạm hiểu này chưa: chứa nguyên câu, hoặc phần lớn TỪ NỘI DUNG của câu (bỏ từ chức
- * năng, bỏ dấu) nằm trong lời. Model diễn đạt lại nên không so nguyên văn; nghi ngờ thì coi là CHƯA nói — nói thừa còn hơn để
- * chip xác nhận điều user chưa thấy.
+ * Câu nói ra điều mình đang đoán (không phải kể như sự thật): "tôi tạm hiểu", "tôi đoán", "nếu khác bạn cứ nói"… Cụm bắt
+ * đầu bằng "tôi" phải giữ dấu ("tới đoạn", "tới lấy" bỏ dấu thành "toi doan", "toi lay" — không phải lời đoán); cụm không
+ * nhầm được thì so trên chữ bỏ dấu để model gõ không dấu vẫn khớp. Đều có ranh giới từ.
+ */
+const HEDGE_ACCENTED = /(^|[^\p{L}])tôi (đoán|nghĩ|giả sử|đề xuất|cho rằng|tạm hiểu)(?!\p{L})/u
+const HEDGE_PLAIN = /(^|[^a-z0-9])(tam hieu|neu khac|co le|chac la)([^a-z0-9]|$)/
+/** Chỉ dùng khi cả câu gõ không dấu (không thể so có dấu): "toi doan" lúc đó không thể là "tới đoạn". */
+const HEDGE_UNACCENTED_TEXT = /(^|[^a-z0-9])toi (doan|nghi|gia su|de xuat|cho rang)([^a-z0-9]|$)/
+const hasDiacritics = (text: string): boolean => /[\p{M}đĐ]/u.test(text.normalize("NFD"))
+const isHedged = (sentence: string): boolean =>
+  HEDGE_ACCENTED.test(sentence.toLowerCase()) ||
+  HEDGE_PLAIN.test(normalise(sentence)) ||
+  (!hasDiacritics(sentence) && HEDGE_UNACCENTED_TEXT.test(normalise(sentence)))
+
+/**
+ * Lời `notes` của model đã nói điều tạm hiểu này NHƯ MỘT ĐIỀU ĐANG ĐOÁN chưa: có một câu vừa mang dấu hiệu đoán (`HEDGE`)
+ * vừa chứa phần lớn TỪ NỘI DUNG của điều đó (so trong phạm vi câu, không phải cả đoạn). Câu tóm tắt kể điều đó như sự thật
+ * ("bệnh nhân đặt lịch trên app, còn nhân viên làm trên web") KHÔNG tính — user không biết đó là điều cần xác nhận.
+ * Nghi ngờ thì coi là CHƯA nói — nói thừa còn hơn để chip xác nhận điều user chưa thấy.
  */
 const isSpokenIn = (message: string, text: string): boolean => {
-  const all = wordsOf(text)
-  if (all.length === 0) return true
-  const spokenWords = wordsOf(message)
-  if (spokenWords.join(" ").includes(all.join(" "))) return true
-  const content = [...new Set(all.filter((w) => !STOP_WORDS.has(w)))]
-  if (content.length === 0) return true
-  const spoken = new Set(spokenWords)
-  const hits = content.filter((w) => spoken.has(w)).length
-  return content.length >= 2 && hits >= 2 && hits / content.length >= MATCH_RATIO
+  const content = [...contentWords(text)]
+  if (wordsOf(text).length === 0 || content.length === 0) return true
+  if (content.length < MIN_CONTENT_WORDS) return normalise(message).includes(normalise(text).trim())
+  return sentencesOf(message).some((sentence) => {
+    if (!isHedged(sentence)) return false
+    if (normalise(sentence).includes(normalise(text).trim())) return true
+    const spoken = contentWords(sentence)
+    const hits = content.filter((w) => spoken.has(w)).length
+    return hits / content.length >= MATCH_RATIO
+  })
 }
 
 const ensureSentenceEnd = (text: string): string => (/[.!?…]$/u.test(text) ? text : `${text}.`)
@@ -105,7 +115,7 @@ const CLOSING_INVITE = /di tiep|tiep nhe|tiep nha|cu noi|noi toi|noi minh|neu (c
 const insertAssumptions = (message: string, texts: readonly string[]): string => {
   const sentences = assumptionSentences(texts)
   if (sentences.length === 0) return message
-  const parts = message.split(/(?<=[.!?…])\s+/u).filter((p) => p !== "")
+  const parts = sentencesOf(message)
   const last = parts[parts.length - 1] ?? ""
   if (parts.length > 1 && CLOSING_INVITE.test(normalise(last))) return [...parts.slice(0, -1), ...sentences, last].join(" ")
   return [ensureSentenceEnd(message), ...sentences, ASSUMPTION_INVITE].join(" ")

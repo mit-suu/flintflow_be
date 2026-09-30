@@ -10,6 +10,7 @@ import { elicitProjection } from "./context-projection.js"
 import { activeDecisions, normalizeTopicKey, type AskedQuestion, type FilteredQuestions } from "./decisions.service.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
 import { getStep, orderedSteps } from "./step-registry.js"
+import { sentencesOf } from "./text-overlap.js"
 
 /** Giai đoạn đi theo fast path: bước bên trong không tự hỏi sau lượt hỏi gộp đầu giai đoạn. */
 export const FAST_PATH_PHASES: ReadonlySet<string> = new Set(["B-1"])
@@ -113,6 +114,31 @@ export const reconcileReply = (reply: string, droppedQuestions: readonly string[
     })
     .join("")
     .trim()
+  return text === "" ? NO_QUESTION_ACK_VI : text
+}
+
+/**
+ * Câu hỏi đuôi trong lời AI ("bạn thấy hợp lý chứ?", "đúng không?") tính vào trần câu hỏi của lượt: đã hỏi đủ `budget` câu
+ * trong `asked` mà lời AI còn kết bằng một câu hỏi KHÔNG phải câu nào đang hỏi (< 60% từ trùng) ⇒ cắt câu đó. Câu hỏi
+ * `inline` chỉ tồn tại trong lời AI (UI không vẽ lại) nên không bao giờ cắt khi số câu hỏi trong lời ≤ số câu inline — model
+ * viết lại câu inline khác chữ `question` thì vẫn giữ. Cắt hết ⇒ lời nhận tin cố định.
+ */
+export const trimTailQuestion = (reply: string, asked: readonly { question: string; inline?: boolean }[], budget: number): string => {
+  if (asked.length < budget) return reply
+  const sentences = sentencesOf(reply)
+  const questionSentences = sentences.filter((s) => s.trim().endsWith("?")).length
+  const inlineCount = asked.filter((q) => q.inline).length
+  if (questionSentences <= inlineCount) return reply
+  const last = sentences[sentences.length - 1] ?? ""
+  if (
+    !last.trim().endsWith("?") ||
+    best(
+      last,
+      asked.map((q) => q.question)
+    ) >= 0.6
+  )
+    return reply
+  const text = sentences.slice(0, -1).join(" ").trim()
   return text === "" ? NO_QUESTION_ACK_VI : text
 }
 
