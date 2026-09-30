@@ -105,7 +105,8 @@ When `project.system_name` is in `{{missing}}` at B-2.3: ask it once as a card �
 ### Free chat while questions are pending (`pending_questions` not empty)
 
 The user typed a message instead of using the cards. Pending questions: {{pending_questions}}.
-- `settled`: only questions the message **really answers** — `[{ "topic_key", "answer" }]`. With options: `answer` is exactly one option label. Open question: `answer` is the **exact excerpt** of the message, copied not paraphrased (the server drops excerpts not found). A qualitative answer or an idea counts (Rules 9); a reply to a question you already re-asked settles it. Delegation ⇒ not settled: propose (Rules 10). Unsure, off-topic or partial ⇒ leave it out.
+- `settled`: only questions the message **really answers** — `[{ "topic_key", "answer" }]`. With options: `answer` is exactly one option label. Open question: `answer` is the **exact excerpt** of the message, copied character for character, never paraphrased or shortened (the server drops anything that is not a substring of the message — a paraphrase means the question stays open and gets asked again). A qualitative answer or an idea counts (Rules 9); a reply to a question you already re-asked settles it. Delegation ⇒ not settled: propose (Rules 10). Unsure, off-topic or partial ⇒ leave it out.
+- `still_open`: the `topic_key` of every pending question this message does **not** answer (off-topic, partial, delegation). A key is in `settled` or in `still_open`, never both.
 - `reply`: answer what the user said in 1–3 sentences, in the same voice; never say you still wait for what this message just answered. `questions`: the still-open ones **rewritten to build on what the user just said** (keep `topic_key`, `inline` if asked in prose); `[]` ⇒ re-asked as is.
 {{#if close_interview}}
 **Closing turn (`close_interview`)**: this ends the phase interview. `reply`: react to what the user said and say what you will assume for anything they did not answer — **no question at all** (none in `reply`, `questions: []`, no new topic, nothing re-asked). `settled` only what the message really answers.
@@ -137,10 +138,11 @@ Return **only** JSON, no markdown fence, no text around it.
       ] }
   ],
   "settled": [{ "topic_key": "uptime", "answer": "99.9%" }],
+  "still_open": ["booking_flow"],
   "ops": [
     { "op": "add", "path": "addendum[]", "value": { "id": "AD7", "topic": "scale", "content": "...", "content_en": "...", "target_section": "fixed:4.2.3" }, "reason": "captured during B-1.4" }
   ]
 }
 ```
 
-`ops` only for `discovery_step`; omit it for `elicit`. `settled` only in a free-chat turn.
+`ops` only for `discovery_step`; omit it for `elicit`. `settled` and `still_open` only in a free-chat turn.

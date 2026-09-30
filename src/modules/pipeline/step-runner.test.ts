@@ -1107,7 +1107,7 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     await s.run
   })
 
-  it("settled không khớp nhãn option ⇒ bỏ; câu mở ghi nguyên văn tin user, không lấy câu model diễn lại", async () => {
+  it("settled không khớp nhãn option ⇒ bỏ; câu mở chỉ ghi trích đoạn đã kiểm của tin user, câu model diễn lại ⇒ vẫn chờ", async () => {
     seedSpine()
     seedSession(true)
     const s = start([
@@ -1115,14 +1115,19 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
         { topic_key: "uptime", answer: "99.5%" },
         { topic_key: "primary_actor", answer: "Receptionist (model paraphrase)" },
         { topic_key: "not_asked", answer: "x" }
-      ])
+      ]),
+      chatReply("Rõ.", [{ topic_key: "primary_actor", answer: "lễ tân" }])
     ])
     await waitCount(s.events, "answer_needed", 1)
     submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Người dùng chính là lễ tân" })
     await waitCount(s.events, "answer_needed", 2)
-    expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["primary_actor", "Người dùng chính là lễ tân"]])
-    const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
-    expect(again.questions.map((q) => q.id)).toEqual(["Q_uptime"])
+    expect(await decisionsOf()).toEqual([])
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Người dùng chính là lễ tân" })
+    await waitCount(s.events, "answer_needed", 3)
+    expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["primary_actor", "lễ tân"]])
+    const askedEvents = s.events.filter((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>[]
+    expect(askedEvents[1].questions.map((q) => q.id)).toEqual(["Q_primary_actor", "Q_uptime"])
+    expect(askedEvents[2].questions.map((q) => q.id)).toEqual(["Q_uptime"])
     submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_uptime", answer: "99.9% (Khuyến nghị)" }] })
     await s.run
   })
@@ -1300,18 +1305,26 @@ describe("settleFromChat: ghép câu trả lời đúng câu hỏi", () => {
     expect(out).toEqual([{ question_id: "Q_appointment_goal", answer: "giảm hàng chờ ở quầy" }])
   })
 
-  it("model trả nguyên văn cho nhiều câu ⇒ chỉ câu mở đầu nhận, không ghi trùng", () => {
+  it("model trả nguyên văn cho nhiều câu ⇒ không tách được, không câu nào chốt (không ghi trùng)", () => {
     const message = "Giảm tải lễ tân và càng sớm càng tốt"
     const out = settleFromChat(asked, [
       { topic_key: "appointment_goal", answer: message },
       { topic_key: "wait_time_target", answer: message }
     ], message)
-    expect(out).toEqual([{ question_id: "Q_appointment_goal", answer: message }])
+    expect(out).toEqual([])
   })
 
-  it("một câu mở được chốt ⇒ nguyên văn tin nhắn", () => {
-    expect(settleFromChat(asked, [{ topic_key: "payment", answer: "model diễn lại" }], "Không, miễn phí hoàn toàn")).toEqual([
-      { question_id: "Q_payment", answer: "Không, miễn phí hoàn toàn" }
+  it("một câu mở được chốt nhưng model diễn lại (không phải chuỗi con) ⇒ không lấy nguyên văn tin, câu vẫn chờ", () => {
+    expect(settleFromChat(asked, [{ topic_key: "payment", answer: "model diễn lại" }], "Không, miễn phí hoàn toàn")).toEqual([])
+    expect(settleFromChat(asked, [], "Không, miễn phí hoàn toàn")).toEqual([])
+  })
+
+  it("một câu mở, trích đoạn đúng chuỗi con (kể cả nguyên tin) ⇒ chốt đúng trích đoạn", () => {
+    expect(settleFromChat(asked, [{ topic_key: "payment", answer: "miễn phí hoàn toàn" }], "Không, miễn phí hoàn toàn")).toEqual([
+      { question_id: "Q_payment", answer: "miễn phí hoàn toàn" }
+    ])
+    expect(settleFromChat(asked, [{ topic_key: "payment", answer: "Không thu phí" }], "Không thu phí")).toEqual([
+      { question_id: "Q_payment", answer: "Không thu phí" }
     ])
   })
 
@@ -1355,6 +1368,11 @@ describe("settleRepeatedAnswer: không hỏi lại điều user đã trả lời
 
   it("tin nhắc tới một lựa chọn của câu có lựa chọn đang chờ ⇒ không chốt câu mở", () => {
     expect(settleRepeatedAnswer([card, { ...goal, replied: 1 }], [], "web thôi")).toEqual([])
+  })
+
+  it("model báo câu đó còn chờ (still_open) ⇒ tin lạc đề, không chốt; không báo ⇒ chốt như cũ", () => {
+    expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea, ["success_goal"])).toEqual([])
+    expect(settleRepeatedAnswer([{ ...goal, replied: 1 }, card], [], idea, ["platform"])).toEqual([{ question_id: "Q_success_goal", answer: idea }])
   })
 
   it("nextPendingAfterChat chỉ đếm tin trả lời thật", () => {
@@ -1570,17 +1588,13 @@ describe("đóng phỏng vấn fast path: không chốt câu mở bằng cả ti
   const retention = { topic_key: "data_retention", question: "Hồ sơ lưu bao lâu?", options: [] }
   const offTopic = "bác sĩ bấm nút để gọi số tiếp theo"
 
-  it("mặc định (S-phase, bước thường): một câu mở duy nhất nhận nguyên văn tin — hành vi cũ giữ nguyên", () => {
-    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "diễn lại" }], offTopic)).toEqual([{ question_id: "Q_success_metrics", answer: offTopic }])
+  it("một câu mở duy nhất: trích đoạn model báo không phải chuỗi con ⇒ không chốt; không dự phòng nguyên văn tin", () => {
+    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "diễn lại" }], offTopic)).toEqual([])
+    expect(settleFromChat([metric], [], offTopic)).toEqual([])
   })
 
-  it("wholeMessage=false: trích đoạn model báo không phải chuỗi con ⇒ không chốt; không dự phòng nguyên văn", () => {
-    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "diễn lại" }], offTopic, false)).toEqual([])
-    expect(settleFromChat([metric], [], offTopic, false)).toEqual([])
-  })
-
-  it("wholeMessage=false: trích đoạn đã kiểm (chuỗi con của tin) và đoạn đánh số vẫn chốt được", () => {
-    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "gọi số tiếp theo" }], offTopic, false)).toEqual([
+  it("trích đoạn đã kiểm (chuỗi con của tin) và đoạn đánh số vẫn chốt được", () => {
+    expect(settleFromChat([metric], [{ topic_key: "success_metrics", answer: "gọi số tiếp theo" }], offTopic)).toEqual([
       { question_id: "Q_success_metrics", answer: "gọi số tiếp theo" }
     ])
     const numbered = "1. giảm 30% lượt bỏ hẹn\n2. lưu 5 năm"
@@ -1588,7 +1602,7 @@ describe("đóng phỏng vấn fast path: không chốt câu mở bằng cả ti
       { topic_key: "success_metrics", answer: "diễn lại" },
       { topic_key: "data_retention", answer: "diễn lại" }
     ]
-    expect(settleFromChat([metric, retention], settled, numbered, false)).toEqual([
+    expect(settleFromChat([metric, retention], settled, numbered)).toEqual([
       { question_id: "Q_success_metrics", answer: "giảm 30% lượt bỏ hẹn" },
       { question_id: "Q_data_retention", answer: "lưu 5 năm" }
     ])
