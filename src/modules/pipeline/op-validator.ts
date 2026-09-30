@@ -245,6 +245,12 @@ export const briefExtractionErrors = (spine: Spine, ops: readonly Op[], stepId: 
 export const ASSUMPTION_SWEEP_STEPS: ReadonlySet<string> = new Set(["B-2.1", "B-2.3", "S-1.3"])
 
 /**
+ * Trong các step rà giả định này, `status` chỉ đổi được khi user đã quyết trong CHÍNH lượt này (`SanitizeOptions.userDecided`: câu trả lời
+ * trên thẻ hoặc tin chat của step, hoặc lời sửa ở cổng). Không có thì model tự "xác nhận" kèm lý do bịa (gặp thật ở B-2.1) — giữ nguyên status.
+ */
+export const USER_DECISION_SWEEP_STEPS: ReadonlySet<string> = new Set(["B-2.1"])
+
+/**
  * Selector thiếu tên khoá: `addendum[AD8]`, `functions[FN010]`. Model hay viết kiểu này trong GIÁ TRỊ
  * `assumptions[].path` (không phải path của op), và lô chết vì `dead_reference` sau 3 lượt thử — đúng lỗi
  * làm B-1.2 dừng ở lượt chạy thật 2026-09-23. Chuẩn hoá thành `addendum[id=AD8]` thay vì bắt model đoán lại.
@@ -294,6 +300,8 @@ export interface SanitizeOptions {
   revision?: boolean
   /** Giả định cổng đang nói (`new_assumptions` của gate_ready / phase_gate): revision chỉ đổi `status` của các id này. */
   gateAssumptionIds?: ReadonlySet<string>
+  /** User đã trả lời / nhắn chat trong lượt của step này — điều kiện để step trong `USER_DECISION_SWEEP_STEPS` được đổi status. */
+  userDecided?: boolean
 }
 
 /** Path A và B chỉ cùng một chỗ trong Spine: bằng nhau, cái này là tổ tiên/hậu duệ của cái kia, hoặc `x[]` với `x[...]`. */
@@ -390,7 +398,7 @@ export const sanitizeModelOps = (
 ): SanitizeResult => {
   if (!Array.isArray(ops)) return { ops: [], errors: [] }
   const base = stepId ? stepId.split("@")[0] : ""
-  const sweepStep = ASSUMPTION_SWEEP_STEPS.has(base)
+  const sweepStep = ASSUMPTION_SWEEP_STEPS.has(base) && (!USER_DECISION_SWEEP_STEPS.has(base) || options.userDecided === true || options.revision === true)
   // Revision ở cổng chỉ đổi status của giả định cổng vừa nói; bước rà giả định đổi được mọi giả định
   const canSetStatus = (id: string): boolean => sweepStep || (options.revision === true && (options.gateAssumptionIds?.has(id) ?? false))
   const errors: ValidationError[] = []

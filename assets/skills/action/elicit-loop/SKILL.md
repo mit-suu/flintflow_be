@@ -107,6 +107,9 @@ When `project.system_name` is in `{{missing}}` at B-2.3: ask it once as a card �
 The user typed a message instead of using the cards. Pending questions: {{pending_questions}}.
 - `settled`: only questions the message **really answers** — `[{ "topic_key", "answer" }]`. With options: `answer` is exactly one option label. Open question: `answer` is the **exact excerpt** of the message, copied not paraphrased (the server drops excerpts not found). A qualitative answer or an idea counts (Rules 9); a reply to a question you already re-asked settles it. Delegation ⇒ not settled: propose (Rules 10). Unsure, off-topic or partial ⇒ leave it out.
 - `reply`: answer what the user said in 1–3 sentences, in the same voice; never say you still wait for what this message just answered. `questions`: the still-open ones **rewritten to build on what the user just said** (keep `topic_key`, `inline` if asked in prose); `[]` ⇒ re-asked as is.
+{{#if close_interview}}
+**Closing turn (`close_interview`)**: this ends the phase interview. `reply`: react to what the user said and say what you will assume for anything they did not answer — **no question at all** (none in `reply`, `questions: []`, no new topic, nothing re-asked). `settled` only what the message really answers.
+{{/if}}
 
 ## Capturing while talking (discovery steps B-0 … B-2)
 

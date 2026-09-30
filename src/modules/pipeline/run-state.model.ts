@@ -45,6 +45,8 @@ const runStateSchema = new Schema(
     questions: { type: Schema.Types.Mixed, default: null },
     /** Payload `gate_ready` để dựng lại GateCard sau reload (status `gate`). */
     gate_payload: { type: Schema.Types.Mixed, default: null },
+    /** Sự kiện `phase_gate` của bước cuối giai đoạn (tin nhắn + đủ giả định cả giai đoạn) — dựng lại cổng chốt sau reload. */
+    phase_gate: { type: Schema.Types.Mixed, default: null },
     /** Sự kiện đã phát trong lượt (rút gọn) — để dựng lại nhật ký bước sau reload. */
     events: { type: Schema.Types.Mixed, default: [] },
     error: { type: Schema.Types.Mixed, default: null },
