@@ -35,7 +35,11 @@ export const spineProjectSchema = z.strictObject({
   type: z.string().nullable(),
   domain: z.string().nullable(),
   complexity: z.string().nullable(),
-  form_factor: z.string().nullable(),
+  /**
+   * Các nền tảng của sản phẩm (FLF-237): phần tử đầu là nền tảng chính; `[]` = chưa chốt. Dữ liệu cũ lưu một chuỗi
+   * (`"web_app"`) hoặc `null` ⇒ đọc thành `["web_app"]` / `[]` — không migration. Giá trị hợp lệ do `op-validator` giữ.
+   */
+  form_factor: z.preprocess((v) => (typeof v === "string" ? [v] : (v ?? [])), z.array(z.string())),
   stakes: z.string().nullable(),
   working_mode: z.enum(["fast", "coaching"]).nullable(),
   /**
@@ -186,7 +190,9 @@ export const messageSchema = z.strictObject({
 export const otherRequirementSchema = z.strictObject({
   id,
   kind: z.enum(["risk", "assumption", "open_question", "technical_risk"]),
-  statement: z.string()
+  statement: z.string(),
+  /** Câu bằng ngôn ngữ user (FLF-237) — panel Hồ sơ dự án hiện câu này; dữ liệu cũ không có ⇒ FE rơi về `statement`. */
+  statement_vi: z.string().min(1).nullish()
 })
 
 export const glossaryTermSchema = z.strictObject({

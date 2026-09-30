@@ -52,7 +52,7 @@ describe("buildImportOps", () => {
   it("dựng op hợp lệ với Spine rỗng: phân giải tên actor, feature General cho màn mồ côi, bỏ tham chiếu lạ", () => {
     const spine = createEmptySpine({ name: "Lumen" })
     const ops = buildImportOps(spine, [
-      { entity: "project", id: null, value: { vision: "Learn online", goals: "1. Grow\n2. Retain" } },
+      { entity: "project", id: null, value: { vision: "Learn online", goals: "1. Grow\n2. Retain", form_factor: "web_app" } },
       { entity: "actors", id: "A01", value: { name: "Learner", kind: "person" } },
       { entity: "use_cases", id: "UC-01", value: { name: "Register", actor_ids: ["learner", "Ghost"], includes: ["UC-99"] } },
       { entity: "screens", id: "SCR-01", value: { name: "Login" } },
@@ -62,6 +62,8 @@ describe("buildImportOps", () => {
     ])
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
     expect(plan.spine.project.goals).toEqual(["Grow", "Retain"])
+    // Tài liệu ghi một nền tảng ⇒ mảng một phần tử (FLF-237)
+    expect(plan.spine.project.form_factor).toEqual(["web_app"])
     expect(plan.spine.actors[0].kind).toBe("human")
     expect(plan.spine.use_cases[0]).toMatchObject({ actor_ids: ["A01"], includes: [] })
     expect(plan.spine.features.map((f) => [f.name, f.order])).toEqual([["General", 0]])

@@ -82,9 +82,11 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
 
   // project
   const project = entities.filter((e) => e.entity === "project").reduce<Record<string, unknown>>((acc, e) => ({ ...acc, ...e.value }), {})
-  for (const field of ["vision", "type", "domain", "complexity", "form_factor", "stakes"] as const) {
+  for (const field of ["vision", "type", "domain", "complexity", "stakes"] as const) {
     if (project[field] !== undefined && str(project[field])) ops.push({ op: "set", path: `project.${field}`, value: str(project[field]) })
   }
+  // form_factor là mảng nền tảng (FLF-237): tài liệu ghi một chuỗi hay danh sách đều thành mảng
+  if (project.form_factor !== undefined && strList(project.form_factor).length) ops.push({ op: "set", path: "project.form_factor", value: strList(project.form_factor) })
   if (project.goals !== undefined && strList(project.goals).length) ops.push({ op: "set", path: "project.goals", value: strList(project.goals) })
 
   // features (+ "General" cho màn/function mồ côi)
