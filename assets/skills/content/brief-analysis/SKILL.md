@@ -73,7 +73,7 @@ what the document will say. Present those; leave the rest for S-9.1's sweep. Do 
 ## S-1.4 — Gap List
 
 What the SRS will need and the Brief does not have yet. Write each as
-`other_requirements[kind=open_question]` — one per gap, phrased as the question a reviewer would ask.
+`other_requirements[kind=open_question]` — one per gap, phrased as the question a reviewer would ask; `statement` English, `statement_vi` in the user's language.
 
 Sweep these, and say in `notes` when one genuinely does not apply:
 
