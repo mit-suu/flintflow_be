@@ -23,10 +23,9 @@ stub: false
 ---
 # Product Brief
 
-Covers the whole Brief phase: **B-0.1…B-0.3 intake · B-1.1…B-1.6 the brief itself · B-2.1…B-2.3
-finalize**. The Brief writes **no SRS section**; it fills `project{}` and stores everything else as
-`addendum[]` aimed at the section it will later feed. S-1 turns that into structure; S-2 onward writes
-the document.
+Covers the whole Brief phase: **B-0.1…B-0.3 intake · B-1.1…B-1.6 the brief itself · B-2.1…B-2.3 finalize**.
+The Brief writes **no SRS section**; it fills `project{}` and stores everything else as `addendum[]` aimed at the
+section it will later feed. S-1 turns that into structure; S-2 onward writes the document.
 
 Two habits decide whether this phase is useful:
 
@@ -34,7 +33,7 @@ Two habits decide whether this phase is useful:
   transcript is not read by later steps, only the Spine is.
 - **Record the unknown, do not invent it.** Anything the user has not said becomes an `assumptions[]`
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
-  sentence in `project.vision`. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
+  sentence in the brief. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
   never an assumption, and never an assumption about their answer ("the goal is qualitative"). A user "yes/xác nhận"
   to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about.
 
@@ -75,19 +74,18 @@ decisions ledger, the user's answers — and records what it inferred as `assump
 gate. A step with a draft to confirm asks **one** card ("Tôi đề xuất: … — đúng chưa?"), not a list of open questions.
 Ask only what cannot be reasonably assumed **and** would make the document wrong; never re-ask what an
 addendum or decision already holds, never ask what a later B-1 step owns (risks ⇒ B-1.6), never interview for a
-section the product does not need. `project.vision` and `project.goals[]` are the only `project` fields B-1
-writes; everything else is an addendum aimed at a section.
+section the product does not need. B-1 never writes `project.vision`/`project.goals` — vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
-| B-1.1 Vision, problem, opportunity | `project.vision`, `project.goals[]` (3–6, outcome-shaped), addendum for the problem/why-now | `fixed:1` |
+| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
 | B-1.2 Target users & jobs-to-be-done | addendum per persona/stakeholder, with the job each one needs done | `fixed:2.1` |
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
 | B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself | `fixed:5.4` |
 
-`project.goals[]` are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
+Goal entries are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
 not "add an export button". 3–6 of them; more than that and none of them is a goal.
 
 ## B-2 — Finalize (3 steps)
@@ -98,8 +96,8 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 - **B-2.2 Addendum Triage.** Go through `addendum[]`: **keep** (fix `target_section` if it is aimed at the
   wrong place), **park** (true but not this release — retarget it to `fixed:5.4` so S-7.4 picks it up as
   an Other Requirement), or **drop** (only when the content is *wrong*, never when it is merely deferred).
-  This step may write `addendum[]` and `assumptions[]` only — parking is a retarget, not a move into
-  `other_requirements[]`. Last cheap moment to fix a wrong `target_section`.
+  May write `addendum[]` and `assumptions[]` only — parking is a retarget, not a move into
+  `other_requirements[]`. `vision`/`goals` entries are always **keep** at `fixed:1`. Last cheap moment to fix a `target_section`.
 - **B-2.3 Three-Lens Review.** Read the brief back through three lenses, one short paragraph each:
   **Skeptic** (what would make this fail, what is asserted without evidence), **Opportunity** (what the
   brief is under-claiming, what adjacent value is one step away), **Contextual** (what the domain,
@@ -114,7 +112,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 2. `addendum[].target_section` must be a real section key (`fixed:*`, or `feature:<id>` / `function:<id>`
    once those exist). Unsure ⇒ `fixed:5.4`, and say so in `notes`.
 3. `content` keeps the user's own words and language; `content_en` is the English version that will be
-   rendered. Both are required, never empty.
+   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`.
 4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here — the Brief is
    input to the SRS, not the SRS. Those come from S-2 onward.
 5. Ask what changes the brief; fill the rest with the most reasonable reading plus `assumptions[]`
@@ -127,12 +125,12 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 ```json
 {
   "ops": [
-    { "op": "set", "path": "project.vision", "value": "Let a solo founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.", "reason": "B-1.1 vision" },
-    { "op": "set", "path": "project.goals", "value": ["Cut time to a baseline-quality SRS from weeks to one day", "Keep every section traceable to a stated business goal", "Make the cost of one document predictable"], "reason": "B-1.1 goals" },
-    { "op": "add", "path": "addendum[]", "value": { "id": "AD11", "topic": "Why now", "content": "Đội nhỏ không thuê được BA, tài liệu viết tay lệch nhau giữa các phần.", "content_en": "Small teams cannot hire a requirements engineer, and hand-written documents drift between sections.", "target_section": "fixed:1", "captured_at": "2026-09-16T00:00:00.000Z" }, "reason": "B-1.1 problem statement" },
-    { "op": "add", "path": "assumptions[]", "value": { "id": "AS01", "path": "project.goals", "statement": "The first release serves one team of up to 10 people.", "statement_vi": "Bản đầu phục vụ một nhóm tối đa 10 người.", "rationale": "Team size was never mentioned; it sets the scale the goals are measured at.", "rationale_vi": "User chưa nói quy mô nhóm; quy mô quyết định mục tiêu đo ở mức nào.", "origin_step_id": "B-1.1", "status": "unconfirmed", "confirmed_at": null }, "reason": "B-1.1 scale nobody stated" }
+    { "op": "add", "path": "addendum[]", "value": { "id": "AD10", "topic": "vision", "content": "Giúp người sáng lập một mình biến ý tưởng thô thành SRS đầy đủ, nhất quán qua một cuộc trò chuyện có hướng dẫn.", "content_en": "Let a solo founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.", "target_section": "fixed:1", "captured_at": "2026-09-16T00:00:00.000Z" }, "reason": "B-1.1 vision" },
+    { "op": "add", "path": "addendum[]", "value": { "id": "AD11", "topic": "goals", "content": "Rút thời gian có SRS đạt chuẩn từ vài tuần xuống một ngày.", "content_en": "Cut time to a baseline-quality SRS from weeks to one day", "target_section": "fixed:1", "captured_at": "2026-09-16T00:00:00.000Z" }, "reason": "B-1.1 goal 1 of 3 (goals 2 and 3 are their own entries)" },
+    { "op": "add", "path": "addendum[]", "value": { "id": "AD13", "topic": "Why now", "content": "Đội nhỏ không thuê được BA, tài liệu viết tay lệch nhau giữa các phần.", "content_en": "Small teams cannot hire a requirements engineer, and hand-written documents drift between sections.", "target_section": "fixed:1", "captured_at": "2026-09-16T00:00:00.000Z" }, "reason": "B-1.1 problem statement" },
+    { "op": "add", "path": "assumptions[]", "value": { "id": "AS01", "path": "addendum[id=AD11]", "statement": "The first release serves one team of up to 10 people.", "statement_vi": "Bản đầu phục vụ một nhóm tối đa 10 người.", "rationale": "Team size was never mentioned; it sets the scale the goals are measured at.", "rationale_vi": "User chưa nói quy mô nhóm; quy mô quyết định mục tiêu đo ở mức nào.", "origin_step_id": "B-1.1", "status": "unconfirmed", "confirmed_at": null }, "reason": "B-1.1 scale nobody stated" }
   ],
-  "notes": "Vision and three goals written; the why-now went to fixed:1."
+  "notes": "Tôi đã ghi lại tầm nhìn và ba mục tiêu của bạn, còn lý do cần làm ngay thì để ở phần tổng quan."
 }
 ```
 
@@ -140,7 +138,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
 - [ ] `form_factor`, `stakes` set by the end of B-0; `system_name` (English, user-picked only) by the end of B-2.
-- [ ] `project.vision` + 3–6 outcome-shaped `goals[]` by the end of B-1.1.
+- [ ] Addendum `vision` + 3–6 `goals` (each `content` + `content_en`) by the end of B-1.1; no `project.vision`/`goals`.
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.
 - [ ] B-2.1 left no `unconfirmed` assumption unasked; B-2.2 left no addendum untriaged, and parked ones
