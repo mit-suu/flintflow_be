@@ -20,7 +20,8 @@ import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
-import { loadStepRegistry, orderedSteps } from "./step-registry.js"
+import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
+import { askableFields } from "./decisions.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const load = (file: string): Spine =>
@@ -148,6 +149,19 @@ describe("projectStep", () => {
     expect(Object.keys(p.projection).filter((k) => k !== ASSUMPTION_KEYS_READ)).toEqual(["project:form_factor"])
     expect(p.emptyFields).toEqual(["project.form_factor"])
     expect(p.writable).toEqual(["project.form_factor", "assumptions"])
+  })
+
+  it("step B-*: project.vision/goals không bao giờ nằm trong emptyFields; step S-* vẫn tính", () => {
+    const spine = structuredClone(FIXTURE)
+    spine.project = { ...spine.project, vision: null, goals: [] }
+    for (const id of ["B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6", "B-2.2", "B-2.3"]) {
+      const { emptyFields } = projectStep(spine, id)
+      expect(emptyFields, id).not.toContain("project.vision")
+      expect(emptyFields, id).not.toContain("project.goals")
+      expect(askableFields(getStep(id).template_id, emptyFields), id).not.toContain("project.vision")
+    }
+    expect(projectStep(spine, "B-2.2").emptyFields).toEqual([])
+    expect(projectStep(spine, "S-1.2").emptyFields.some((f) => f.startsWith("project."))).toBe(true)
   })
 
   it("FLF-221: step cuối mỗi giai đoạn Brief giữ writes = hợp của giai đoạn (revision ở phase gate)", () => {
