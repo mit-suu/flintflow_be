@@ -16,11 +16,11 @@
  */
 
 import type { ReviewMode, Spine } from "../spine/spine.types.js"
-import { activeDecisions } from "./decisions.service.js"
+import { activeDecisions, SYSTEM_NAME_STEP } from "./decisions.service.js"
 
 /**
  * Bước mà quyết định luôn thuộc về người, dù có yên lặng đến đâu:
- * - `B-0.1` ý tưởng và tên hệ thống — mọi thứ sau đó dựa vào nó;
+ * - `B-0.1` ý tưởng, nền tảng và mức độ quan trọng — mọi thứ sau đó dựa vào nó (tên hệ thống hỏi muộn hơn, ở B-2.3);
  * - `S-4.1` chốt N (số màn) và khung function — sai ở đây là đi lại cả pha S-5;
  * - `S-9.4` xếp ưu tiên MoSCoW — một quyết định kinh doanh;
  * - `S-9.5` ký baseline.
@@ -60,18 +60,25 @@ export interface QuietVerdict {
   reason_vi: string
 }
 
+const HAS_DIGIT = /[0-9]/
+
 /**
  * Giả định có trái với một quyết định đã chốt không. So thô theo chủ đề: giả định nhắc tới chủ đề đã chốt
  * mà KHÔNG nhắc lại giá trị đã chốt thì coi là mâu thuẫn (AS28 "uptime 99.5%" trong khi sổ ghi 99%).
- * Nhận nhầm chỉ làm bước đó dừng lại hỏi người — hướng sai an toàn.
+ *
+ * Chỉ so quyết định mang SỐ (99%, 50.000đ, 15 phút) và chỉ khi giả định cũng nêu một con số: hai chuỗi chữ khác nhau
+ * chưa chắc mâu thuẫn ("Web" vs "Ứng dụng web cho nhân viên"), còn giả định không nêu con số nào thì không thể "khác
+ * số". Trước đây so chữ thô làm cổng báo "N giả định trái với điều bạn đã chốt" khi chẳng có gì trái.
  */
 export const conflictsWithLedger = (statement: string, spine: Spine): boolean => {
   const text = statement.toLowerCase()
+  if (!HAS_DIGIT.test(text)) return false
   for (const decision of activeDecisions(spine).values()) {
+    const answer = decision.answer.trim().toLowerCase()
+    if (answer === "" || !HAS_DIGIT.test(answer)) continue
     const topicWords = decision.topic_key.split("_").filter((w) => w.length >= 4)
     if (topicWords.length === 0 || !topicWords.some((word) => text.includes(word))) continue
-    const answer = decision.answer.trim().toLowerCase()
-    if (answer !== "" && !text.includes(answer)) return true
+    if (!text.includes(answer)) return true
   }
   return false
 }
@@ -81,6 +88,10 @@ export const isQuietStep = (input: QuietInput): QuietVerdict => {
   if (input.reviewMode === "strict") return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
   if (ALWAYS_GATE.has(input.templateId)) return { quiet: false, reason_vi: ALWAYS_GATE_REASON[input.templateId] ?? "Bước này luôn cần bạn quyết" }
   if (input.settledEarlier) return { quiet: true, reason_vi: "Đã chốt ở bước trước — không cần hỏi lại" }
+  // Chưa có tên hệ thống thì B-2.3 phải hỏi tên (FLF-232) — không bao giờ tự Accept qua nó, dù chế độ duyệt nào
+  if (input.templateId === SYSTEM_NAME_STEP && (input.spine.project?.system_name ?? null) === null) {
+    return { quiet: false, reason_vi: "Cần chốt tên hệ thống trước khi mở phần tiếp theo" }
+  }
   if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }
   // FLF-220: bước có hỏi thì user đã trả lời ngay trong lượt chạy — ở "Cuối giai đoạn" điều đó không đòi
   // thêm một cổng giữa giai đoạn; nội dung vẫn gom lên cổng chốt cuối phase.

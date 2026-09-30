@@ -976,7 +976,7 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
 
 /**
  * Sơ đồ ngữ cảnh (S-2.5) hay use case đã vẽ mà chưa có `project.system_name` ⇒ boundary đang in tên project làm
- * việc. Chủ sở hữu field là B-0.1; user sửa qua chat (`set project.system_name`).
+ * việc. Chủ sở hữu field là B-2.3 (chốt tên hệ thống); user sửa qua chat (`set project.system_name`).
  */
 const systemNameMissing = (spine: Spine): FlagCandidate[] =>
   !spine.project.system_name?.trim() && (hasKind(spine, "context") || hasKind(spine, "usecase"))
@@ -987,7 +987,7 @@ const systemNameMissing = (spine: Spine): FlagCandidate[] =>
           section_id: "fixed:1",
           target_id: null,
           message: `Chưa chốt tên hệ thống (tiếng Anh) — sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
-          remediation_step: "B-0.1"
+          remediation_step: "B-2.3"
         }
       ]
     : []

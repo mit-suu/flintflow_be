@@ -178,3 +178,29 @@ describe("splitNumberedAnswer / verifiedExcerpt", () => {
     expect(verifiedExcerpt("  ", "abc")).toBeUndefined()
   })
 })
+
+describe("inline (FLF-232)", () => {
+  it("câu mở đã hỏi trong lời AI mang inline: true tới hợp đồng; câu có lựa chọn không bao giờ inline", () => {
+    const { questions, asked } = shapeQuestions([
+      { question: "Quy trình đặt lịch hiện nay thế nào?", options: [], topic_key: "booking_flow", inline: true },
+      { question: "Cần bao nhiêu người dùng?", options: [{ label: "50" }, { label: "200" }], topic_key: "concurrent_users", inline: true },
+      { question: "Ai duyệt?", options: [], topic_key: "approver" }
+    ])
+    expect(questions[0]).toMatchObject({ id: "Q_booking_flow", inline: true })
+    expect(questions[1]).not.toHaveProperty("inline")
+    expect(questions[2]).not.toHaveProperty("inline")
+    // giữ trên câu đang chờ để lượt chat sau vẫn dựng lại đúng
+    expect(asked[0].inline).toBe(true)
+  })
+})
+
+describe("elicitSchema — inline (FLF-232)", () => {
+  it("nhận inline boolean; thiếu hoặc null ⇒ không có; câu dạng chuỗi trơn vẫn parse", () => {
+    const parsed = elicitSchema.parse({
+      reply: "ok",
+      questions: [{ question: "a?", topic_key: "a", inline: true }, { question: "b?", topic_key: "b", inline: null }, { question: "c?" }, "d?"]
+    })
+    const inlines = parsed.questions.map((item) => (item as { inline?: boolean }).inline)
+    expect(inlines).toEqual([true, undefined, undefined, undefined])
+  })
+})

@@ -72,6 +72,11 @@ export interface DraftOptions {
   /** Câu trả lời Elicit; mặc định `ctx.transcriptTail`. */
   answers?: string
   revisionRequest?: string
+  /**
+   * Chỉ với `revision`: giả định cổng đang nói với user (`new_assumptions` của gate_ready / phase_gate). Revision được đổi
+   * status/câu của chúng và ghi đúng `path` thật của chúng dù ngoài `writes` của step.
+   */
+  gateAssumptionIds?: ReadonlySet<string>
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
@@ -127,6 +132,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const guidance = contentGuidance(ctx)
   // BUG-02: model chỉ được sửa/xoá phần tử nó thấy trong projection (của lô hiện tại, nếu S-5 chia lô)
   const visibleIds = visibleIdsOf(ctx.projection)
+  const gateIds = callKind === "revision" ? (options.gateAssumptionIds ?? new Set<string>()) : undefined
+  const extraPaths = gateIds ? spine.assumptions.filter((a) => gateIds.has(a.id)).map((a) => a.path) : undefined
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
   let errors: ValidationError[] = []
@@ -163,9 +170,9 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       })
       notes = result.data.notes ?? null
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
-      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId)
+      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", ...(gateIds ? { gateAssumptionIds: gateIds } : {}) })
       ops = sanitized.ops
-      errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds })
+      errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })

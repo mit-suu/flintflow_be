@@ -17,15 +17,16 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { addendumForUnit, projectStep } from "./context-projection.js"
-import { decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { MAX_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
+import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
+import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
+import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
-import { gate } from "./gate.service.js"
+import { gate, phaseGateAssumptions } from "./gate.service.js"
 import { getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { isQuietStep, type QuietVerdict } from "./quiet-step.js"
+import { composePhaseGateMessage } from "./gate-message.js"
 import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
@@ -121,13 +122,25 @@ const interviewChatTurn = async (
   if (!(await hasInterviewAsk(sessionId, unit))) {
     await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(askedReply, asked), step: unit, createdAt: new Date() }])
   }
+  // Đáp án thẻ gửi kèm tin gõ vào transcript TRƯỚC lượt chat: model đọc transcript để biết user đã chọn gì, thiếu thì hỏi lại
+  const pickedByCard = cardAnswers.map((a) => answerText(a.answer)).filter((text) => text !== "")
+  if (pickedByCard.length > 0) {
+    await pushInterviewMessages(projectId, sessionId, [{ role: "user", content: pickedByCard.join("\n"), step: unit, createdAt: new Date() }])
+  }
   if (!payload.messageRecorded) {
     await pushInterviewMessages(projectId, sessionId, [{ role: "user", content: message, step: unit, createdAt: new Date() }])
   }
   const { spine } = await load(projectId)
   if (!(await chatBudgetLeft(projectId, unit, null))) {
+    // Chốt phần tin nhắn đã trả lời trước; chỉ câu thật sự chưa trả lời mới để các bước tự giả định
+    const byCard = new Set(cardAnswers.map((a) => indexOfQuestion(asked, a.question_id)))
+    const local = settleWithoutModel(asked, message).filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
+    await recordInterviewAnswers(projectId, unit, sessionId, userId, "", asked, [...cardAnswers, ...local], {
+      settledIds: new Set(local.map((a) => a.question_id))
+    })
+    const answeredNow = new Set([...cardAnswers, ...local].map((a) => indexOfQuestion(asked, a.question_id)))
+    if (asked.every((_, i) => answeredNow.has(i))) return { reply: "", remaining: [] }
     await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: CHAT_BUDGET_REPLY, step: unit, createdAt: new Date() }])
-    await recordInterviewAnswers(projectId, unit, sessionId, userId, "", asked, cardAnswers, { settledIds: new Set() })
     return { reply: CHAT_BUDGET_REPLY, remaining: [] }
   }
   const turn = await runChatTurn({
@@ -139,6 +152,8 @@ const interviewChatTurn = async (
     message,
     // Lời AI lúc đặt các câu đang chờ + tin user: thiếu lời AI thì model không biết user đang trả lời câu nào
     recentTurns: [askedReply ? `AI: ${askedReply}` : "", `User: ${message}`].filter((t) => t !== "").join("\n"),
+    // Đọc lại transcript cả session (tóm tắt + lượt gần nhất), không chỉ hai dòng trên
+    sessionId,
     projection: {},
     spine,
     elicitExecutor: deps.elicitExecutor
@@ -240,13 +255,14 @@ const runPhaseInterview = async (
   const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
   if ((session?.messages ?? []).some((m) => m.step === unit)) return "skipped"
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
+  // Tên hệ thống chỉ do chính B-2.3 hỏi: hợp field của mọi bước có B-2.3 nhưng phỏng vấn đầu giai đoạn không được hỏi nó sớm hơn
   const missing = [...new Set(steps.flatMap((step) => {
     try {
-      return projectStep(spine, step.id).emptyFields
+      return askableFields(getStep(step.id).template_id, projectStep(spine, step.id).emptyFields)
     } catch {
       return []
     }
-  }))]
+  }))].filter((field) => field !== SYSTEM_NAME_FIELD)
   if (missing.length === 0) return "skipped"
 
   const run = await acquireRun(projectId, unit, { sessionId, by: userId, stage: "ask", detail_vi: "Xem giai đoạn này còn thiếu gì để hỏi bạn" })
@@ -273,6 +289,7 @@ const askPhaseInterview = async (
   runId: string,
   userMessage?: string
 ): Promise<InterviewOutcome> => {
+  const conversation = await loadConversationVariables(sessionId, spine)
   const reservedId = await meter.reserveCall(projectId, userId, unit, "elicit")
   let result
   try {
@@ -282,15 +299,16 @@ const askPhaseInterview = async (
           step_id: unit,
           step_name: `Phỏng vấn đầu giai đoạn ${unit}`,
           phase_interview: true,
-          max_questions: MAX_QUESTIONS_PER_TURN,
+          max_questions: PROMPT_QUESTIONS_PER_TURN,
           missing,
           pending_questions: [],
           projection: {},
           addendum: addendumForUnit(spine, unit),
           content_guidance: "",
           decisions: ledgerForPrompt(spine),
-          // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói
-          recent_turns: userMessage ? `User: ${userMessage}` : "",
+          // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
+          // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.
+          ...conversation,
           user_message: userMessage ?? "(tự động — hỏi gộp đầu giai đoạn)"
         }
       },
@@ -345,7 +363,7 @@ const askPhaseInterview = async (
       return "answered"
     }
     const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, reply)
-    emit({ type: "elicit", step_id: unit, delta: turn.reply })
+    if (turn.reply) emit({ type: "elicit", step_id: unit, delta: turn.reply })
     if (turn.remaining.length === 0) return "answered"
     pending = turn.remaining
     reply = turn.reply
@@ -431,7 +449,6 @@ export const runPhase = async (
   const d: StepRunnerDeps = { ...defaultStepRunnerDeps(deps.signal), ...deps }
   const outcomes: PhaseStepOutcome[] = []
   const phaseSummary: ChangeSummary[] = []
-  const newAssumptions: { id: string; text: string; text_vi?: string }[] = []
   let flagsAtStart: { red: number; yellow: number } | null = null
 
   // FLF-221: chat là nút chạy — tin nhắn mở giai đoạn vào transcript gắn với bước ĐẦU sẽ chạy (không gắn đơn vị giai
@@ -479,7 +496,6 @@ export const runPhase = async (
     }
 
     phaseSummary.push(...(gateEvent.summary ?? []))
-    newAssumptions.push(...(gateEvent.new_assumptions ?? []))
 
     const { spine: afterSpine } = await load(projectId)
     const templateId = getStep(next.id).template_id
@@ -497,6 +513,12 @@ export const runPhase = async (
     })
 
     if (!verdict.quiet) {
+      // FLF-232: tin nhắn cổng = tin của bước cuối (đã tự nói giả định của nó) + MỌI điều tạm hiểu còn lại của giai đoạn, kể cả do
+      // bước chạy im sinh ra. `new_assumptions` của cổng là đúng danh sách được nói ra — chip "Đúng rồi" chỉ xác nhận chúng.
+      // Dựng từ Spine, không từ bộ nhớ của lần chạy này: chạy tiếp sau khi tải lại thì các bước im của lượt trước không còn ở đó.
+      const lastStepIds = new Set((gateEvent.new_assumptions ?? []).map((a) => a.id))
+      const { assumptions: spokenAssumptions, earlierTexts } = phaseGateAssumptions(afterSpine, next.id, lastStepIds)
+      const phaseMessage = composePhaseGateMessage({ lastMessage: gateEvent.message_vi, unconfirmedTexts: earlierTexts })
       // Bước cuối giai đoạn: gửi kèm tóm tắt của cả giai đoạn để user duyệt một lần, có đủ nội dung
       emit({
         type: "phase_gate",
@@ -504,8 +526,9 @@ export const runPhase = async (
         phase: unit,
         reason_vi: verdict.reason_vi,
         summary: phaseSummary,
-        new_assumptions: newAssumptions,
+        new_assumptions: spokenAssumptions,
         steps: outcomes.map(({ step_id, label_vi, auto_accepted }) => ({ step_id, label_vi, auto_accepted })),
+        ...(phaseMessage ? { message_vi: phaseMessage } : {}),
         ...(flagsAtStart && gateEvent.flags
           ? { flags: { red: gateEvent.flags.red, yellow: gateEvent.flags.yellow, red_delta: gateEvent.flags.red - flagsAtStart.red, yellow_delta: gateEvent.flags.yellow - flagsAtStart.yellow } }
           : {})

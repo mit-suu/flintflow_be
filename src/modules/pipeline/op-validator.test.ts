@@ -344,3 +344,124 @@ describe("sanitizeModelOps — addendum", () => {
     expect((sanitized.ops[0] as { value: { captured_at: string } }).value.captured_at).toBe("2026-09-30T01:40:00.000Z")
   })
 })
+
+describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
+  const assumption = {
+    id: "AS90",
+    path: "project.form_factor",
+    statement: "The product is a web app.",
+    statement_vi: "Sản phẩm là ứng dụng web.",
+    rationale: "demo",
+    origin_step_id: "B-0.1",
+    status: "unconfirmed" as const,
+    confirmed_at: null
+  }
+  const spine: Spine = { ...FIXTURE, assumptions: [assumption] }
+  const restate = [
+    { op: "set", path: "assumptions[id=AS90].statement", value: "The product is a mobile app." },
+    { op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }
+  ]
+  const revision = { revision: true, gateAssumptionIds: new Set(["AS90"]) }
+
+  it("status của giả định chỉ đổi được ở bước rà giả định — revision ở gate thì được, server đặt confirmed_at", () => {
+    const status = [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }]
+    // Lượt thường: không lỗi (không làm hỏng cả lô) nhưng status giữ nguyên
+    const plain = sanitizeModelOps(spine, status, "B-0.3")
+    expect(plain.errors).toEqual([])
+    expect(plain.ops[0]).toMatchObject({ path: "assumptions[id=AS90].status", value: "unconfirmed" })
+    const { errors, ops } = sanitizeModelOps(spine, status, "B-0.3", new Date("2026-09-30T00:00:00.000Z"), revision)
+    expect(errors).toEqual([])
+    expect(ops[ops.length - 1]).toMatchObject({ op: "set", path: "assumptions[id=AS90].confirmed_at", value: "2026-09-30T00:00:00.000Z" })
+  })
+
+  it("đổi câu + confirmed mà có set đúng path của giả định ⇒ hợp lệ", () => {
+    const { errors } = sanitizeModelOps(spine, [{ op: "set", path: "project.form_factor", value: "mobile_app" }, ...restate], "B-0.3", new Date(), revision)
+    expect(errors).toEqual([])
+  })
+
+  it("đổi câu + confirmed mà không ghi trường thật ⇒ assumption_path_mismatch, trỏ đúng op đổi câu", () => {
+    const { errors } = sanitizeModelOps(spine, restate, "B-0.3", new Date(), revision)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toMatchObject({ rule: "assumption_path_mismatch", op_index: 0, path: "assumptions[id=AS90].statement" })
+  })
+
+  it("set nhầm path (trường khác) ⇒ vẫn assumption_path_mismatch", () => {
+    const { errors } = sanitizeModelOps(spine, [{ op: "set", path: "project.stakes", value: "regulated" }, ...restate], "B-0.3", new Date(), revision)
+    expect(errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
+  })
+
+  it("set cả object project chứa trường ⇒ tính là ghi đúng path", () => {
+    const { errors } = sanitizeModelOps(spine, [{ op: "set", path: "project", value: { ...FIXTURE.project, form_factor: "mobile_app" } }, ...restate], "B-0.3", new Date(), revision)
+    expect(errors).toEqual([])
+  })
+
+  it("xác nhận nguyên câu (không đổi statement) hoặc bỏ giả định (rejected) không đòi ghi trường thật", () => {
+    expect(sanitizeModelOps(spine, [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }], "B-0.3", new Date(), revision).errors).toEqual([])
+    expect(sanitizeModelOps(spine, [{ op: "set", path: "assumptions[id=AS90].status", value: "rejected" }], "B-0.3", new Date(), revision).errors).toEqual([])
+  })
+
+  it("đổi câu mà để status unconfirmed hoặc bỏ op status ⇒ vẫn assumption_path_mismatch", () => {
+    const noStatus = [restate[0]]
+    expect(sanitizeModelOps(spine, noStatus, "B-0.3", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
+    const stillUnconfirmed = [restate[0], { op: "set", path: "assumptions[id=AS90].status", value: "unconfirmed" }]
+    expect(sanitizeModelOps(spine, stillUnconfirmed, "B-0.3", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
+  })
+
+  it("đổi câu qua cả object giả định cũng bị soi path", () => {
+    const whole = [{ op: "set", path: "assumptions[id=AS90]", value: { ...assumption, statement: "The product is a mobile app.", status: "confirmed" } }]
+    expect(sanitizeModelOps(spine, whole, "B-0.3", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
+  })
+
+  it("giả định cũ chưa có statement_vi: điền thêm bản VI khi xác nhận không phải là viết lại câu", () => {
+    const legacy: Spine = { ...FIXTURE, assumptions: [{ ...assumption, statement_vi: null }] }
+    const ops = [
+      { op: "set", path: "assumptions[id=AS90].statement_vi", value: "Sản phẩm là ứng dụng web." },
+      { op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }
+    ]
+    expect(sanitizeModelOps(legacy, ops, "B-0.3", new Date(), revision).errors).toEqual([])
+  })
+
+  it("revision chỉ đổi status của giả định cổng vừa nói — giả định khác (kể cả đã xác nhận) giữ nguyên status", () => {
+    const other = { ...assumption, id: "AS91", path: "project.stakes", origin_step_id: "B-0.3", status: "confirmed" as const, confirmed_at: "2026-09-29T00:00:00.000Z" }
+    const both: Spine = { ...FIXTURE, assumptions: [assumption, other] }
+    const flip = [{ op: "set", path: "assumptions[id=AS91].status", value: "rejected" }]
+    const { errors, ops } = sanitizeModelOps(both, flip, "B-0.3", new Date(), revision)
+    expect(errors).toEqual([])
+    expect(ops[0]).toMatchObject({ path: "assumptions[id=AS91].status", value: "confirmed" })
+    const whole = [{ op: "set", path: "assumptions[id=AS91]", value: { ...other, status: "rejected" } }]
+    const kept = sanitizeModelOps(both, whole, "B-0.3", new Date(), revision).ops[0] as { value: { status: string } }
+    expect(kept.value.status).toBe("confirmed")
+  })
+
+  it("revision không có gateAssumptionIds ⇒ không giả định nào đổi được status", () => {
+    const status = [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }]
+    const { errors, ops } = sanitizeModelOps(spine, status, "B-0.3", new Date(), { revision: true })
+    expect(errors).toEqual([])
+    expect(ops).toEqual([{ op: "set", path: "assumptions[id=AS90].status", value: "unconfirmed" }])
+  })
+
+  it("luật path chỉ áp cho revision — lượt draft thường không bị ảnh hưởng", () => {
+    expect(sanitizeModelOps(spine, restate, "B-2.1").errors).toEqual([])
+  })
+})
+
+describe("validateOps — extraPaths cho revision ở cổng (giả định của bước khác)", () => {
+  const writes = ["addendum", "assumptions"]
+  const op = { op: "set", path: "project.form_factor", value: "mobile_app" }
+
+  it("path ngoài writes bị chặn; nằm trong extraPaths (path thật của giả định cổng) thì được ghi", () => {
+    expect(validateOps(FIXTURE, [op], { writable: writes, stepId: "B-1.3" })[0]).toMatchObject({ rule: "path_not_writable" })
+    expect(validateOps(FIXTURE, [op], { writable: writes, stepId: "B-1.3", extraPaths: ["project.form_factor"] })).toEqual([])
+  })
+
+  it("extraPaths không mở rộng sang path khác, kể cả cùng cha", () => {
+    const other = { op: "set", path: "project.stakes", value: "regulated" }
+    expect(validateOps(FIXTURE, [other], { writable: writes, stepId: "B-1.3", extraPaths: ["project.form_factor"] })[0]).toMatchObject({ rule: "path_not_writable" })
+  })
+
+  it("selector viết tắt trong path giả định được chuẩn hoá khi so", () => {
+    const actor = FIXTURE.actors[0]
+    const edit = { op: "set", path: `actors[id=${actor.id}].name`, value: "Renamed" }
+    expect(validateOps(FIXTURE, [edit], { writable: writes, stepId: "B-1.3", extraPaths: [`actors[${actor.id}].name`] })).toEqual([])
+  })
+})

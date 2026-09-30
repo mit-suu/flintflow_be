@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { activeDecisions, decisionOps, filterAskedQuestions, ledgerForPrompt, normalizeTopicKey, sanitizeSuggestions } from "./decisions.service.js"
+import { activeDecisions, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt, normalizeTopicKey, sanitizeSuggestions } from "./decisions.service.js"
 
 const decision = (over: Partial<Decision> = {}): Decision => ({
   id: "DC01",
@@ -106,5 +106,16 @@ describe("sanitizeSuggestions (BUG-30)", () => {
   it("lọc hết thì giữ nguyên bản, và chủ đề khác không bị đụng", () => {
     expect(sanitizeSuggestions("system_name", [{ label: "Clinic System" }])).toEqual([{ label: "Clinic System" }])
     expect(sanitizeSuggestions("uptime", [{ label: "99%" }, { label: "99.9% System" }])).toEqual([{ label: "99%" }, { label: "99.9% System" }])
+  })
+})
+
+describe("askableFields (FLF-232)", () => {
+  const fields = ["project.vision", "project.system_name", "project.form_factor"]
+
+  it("tên hệ thống chỉ được hỏi ở B-2.3; các field khác giữ nguyên ở mọi step", () => {
+    expect(askableFields("B-0.1", fields)).toEqual(["project.vision", "project.form_factor"])
+    expect(askableFields("B-1.1", fields)).toEqual(["project.vision", "project.form_factor"])
+    expect(askableFields("S-2.2", fields)).toEqual(["project.vision", "project.form_factor"])
+    expect(askableFields("B-2.3", fields)).toEqual(fields)
   })
 })
