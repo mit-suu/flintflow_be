@@ -142,3 +142,20 @@ describe("getStep / phaseOf / nextStep", () => {
     expect(nextStep(spine)?.id).toBe("S-3.2")
   })
 })
+
+describe("registry — Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng project.vision/goals", () => {
+  it("B-1.1 không ghi project.vision/goals nhưng vẫn ghi addendum, other_requirements, assumptions", () => {
+    expect(getStep("B-1.1").writes).toEqual(["addendum", "other_requirements", "assumptions"])
+  })
+
+  it("S-1.1 ghi project và addendum (chỉ entry lõi, server ép)", () => {
+    expect(getStep("S-1.1").writes).toEqual(["project", "addendum", "other_requirements", "assumptions"])
+  })
+
+  it("S-1.1 revision_requested (Brief đổi sau khi đã duyệt) ⇒ nextStep quay lại S-1.1", () => {
+    const brief = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6", "B-2.1", "B-2.2", "B-2.3"].map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: null }))
+    const steps = FIXTURE.steps.map((s) => (s.id === "S-1.1" ? { ...s, status: "revision_requested" as const } : s))
+    const spine: Spine = { ...structuredClone(FIXTURE), steps: [...brief, ...steps] }
+    expect(nextStep(spine)?.id).toBe("S-1.1")
+  })
+})

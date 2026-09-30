@@ -223,6 +223,50 @@ describe("preview — diff + impact, không ghi", () => {
     ])
   })
 
+  it("pha Brief: ghi project.vision/goals bị path_not_writable; pha S-* vẫn ghi được", async () => {
+    const brief: Spine = { ...structuredClone(FIXTURE), progress: { ...FIXTURE.progress, current_phase: "B-1" } }
+    await seed(brief)
+    const ops = [
+      { op: "set" as const, path: "project.vision", value: "x" },
+      { op: "set" as const, path: "project.goals", value: ["y"] }
+    ]
+    const blocked = await preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+    expect(blocked.ok).toBe(false)
+    expect(blocked.violations.map((v) => [v.rule, v.op_index])).toEqual([
+      ["path_not_writable", 0],
+      ["path_not_writable", 1]
+    ])
+    expect(blocked.violations[0].message).toContain("addendum")
+
+    await seed()
+    const allowed = await preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+    expect(allowed.ok).toBe(true)
+  })
+
+  it("project mới (current_phase null, chưa step nào accepted) cũng bị chặn ghi project.vision/goals; đã có step accepted thì không", async () => {
+    const fresh: Spine = {
+      ...structuredClone(FIXTURE),
+      progress: { ...FIXTURE.progress, current_phase: null },
+      steps: FIXTURE.steps.map((step) => ({ ...step, status: "pending" as const, accepted_at: null }))
+    }
+    await seed(fresh)
+    const ops = [{ op: "set" as const, path: "project.vision", value: "x" }]
+    const blocked = await preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+    expect(blocked.violations.map((v) => v.rule)).toEqual(["path_not_writable"])
+
+    await seed({ ...fresh, steps: FIXTURE.steps.map((step, i) => (i === 0 ? { ...step, status: "accepted" as const } : { ...step, status: "pending" as const })) })
+    expect((await preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)).ok).toBe(true)
+  })
+
+  it("pha Brief: set nguyên object project giữ nguyên vision/goals vẫn qua; đổi vision thì bị chặn", async () => {
+    const brief: Spine = { ...structuredClone(FIXTURE), project: { ...FIXTURE.project, vision: null, goals: [] }, progress: { ...FIXTURE.progress, current_phase: "B-0" } }
+    await seed(brief)
+    const same = [{ op: "set" as const, path: "project", value: { ...brief.project, stakes: "production" } }]
+    expect((await preview(PROJECT, USER, { base_version: 1, ops: same }, {}, deps)).violations.map((v) => v.rule)).not.toContain("path_not_writable")
+    const changed = [{ op: "set" as const, path: "project", value: { ...brief.project, vision: "x" } }]
+    expect((await preview(PROJECT, USER, { base_version: 1, ops: changed }, {}, deps)).violations.map((v) => v.rule)).toEqual(["path_not_writable"])
+  })
+
   it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT", async () => {
     await seed()
     await expect(preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
@@ -311,6 +355,28 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
       statusCode: 422,
       code: "CHANGE_RANGE_INVALID"
     })
+  })
+})
+
+describe("buildChangeProjection — brief_core ở pha Brief", () => {
+  const entry = (id: string, topic: string) => ({ id, topic, content: "Nội dung", content_en: "Content", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
+  const at = (phase: string): Spine => ({
+    ...structuredClone(FIXTURE),
+    addendum: [entry("AD1", "vision"), entry("AD2", "goals"), entry("AD5", "Why now")],
+    progress: { ...FIXTURE.progress, current_phase: phase }
+  })
+
+  it("phase B-*: có brief_core gồm entry lõi (id, topic, content, content_en), cả khi câu lệnh nhắc thực thể lẫn không", () => {
+    for (const instruction of ["làm cho tài liệu hay hơn", "Đổi tên actor A01 thành Product Owner"]) {
+      expect(buildChangeProjection(at("B-1"), instruction).brief_core).toEqual([
+        { id: "AD1", topic: "vision", content: "Nội dung", content_en: "Content" },
+        { id: "AD2", topic: "goals", content: "Nội dung", content_en: "Content" }
+      ])
+    }
+  })
+
+  it("phase ngoài Brief: không có brief_core", () => {
+    expect(buildChangeProjection(at("S-3"), "làm cho tài liệu hay hơn").brief_core).toBeUndefined()
   })
 })
 
