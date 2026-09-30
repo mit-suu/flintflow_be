@@ -1,30 +1,66 @@
 {
   "step_id": "B-1.1",
   "skill_id": "product-brief",
-  "notes": "Vision + 3 goal dạng kết quả.",
+  "notes": "Tôi đã ghi lại tầm nhìn và ba mục tiêu của bạn.",
   "ops": [
     {
-      "op": "set",
-      "path": "project.vision",
-      "value": "Let a founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.",
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD10",
+        "topic": "vision",
+        "content": "Giúp người sáng lập biến ý tưởng thô thành SRS đầy đủ, nhất quán qua một cuộc trò chuyện có hướng dẫn.",
+        "content_en": "Let a founder turn a raw product idea into a complete, internally consistent SRS through a guided conversation.",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
       "reason": "B-1.1 vision"
     },
     {
-      "op": "set",
-      "path": "project.goals",
-      "value": [
-        "Cut time to a baseline-quality SRS from weeks to one working day",
-        "Keep every section traceable to a stated business goal",
-        "Make the cost of producing one document predictable"
-      ],
-      "reason": "B-1.1 goals"
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD11",
+        "topic": "goals",
+        "content": "Rút thời gian có SRS đạt chuẩn từ vài tuần xuống một ngày làm việc.",
+        "content_en": "Cut time to a baseline-quality SRS from weeks to one working day",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B-1.1 goal 1"
+    },
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD12",
+        "topic": "goals",
+        "content": "Mọi phần của tài liệu đều truy vết được về một mục tiêu kinh doanh.",
+        "content_en": "Keep every section traceable to a stated business goal",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B-1.1 goal 2"
+    },
+    {
+      "op": "add",
+      "path": "addendum[]",
+      "value": {
+        "id": "AD13",
+        "topic": "goals",
+        "content": "Chi phí cho một tài liệu dự đoán được trước.",
+        "content_en": "Make the cost of producing one document predictable",
+        "target_section": "fixed:1",
+        "captured_at": "2026-09-16T00:00:00.000Z"
+      },
+      "reason": "B-1.1 goal 3"
     },
     {
       "op": "add",
       "path": "assumptions[]",
       "value": {
         "id": "AS02",
-        "path": "project.goals",
+        "path": "addendum[id=AD11]",
         "statement": "One working day means one person for eight hours.",
         "rationale": "The user said fast but gave no figure.",
         "origin_step_id": "B-1.1",

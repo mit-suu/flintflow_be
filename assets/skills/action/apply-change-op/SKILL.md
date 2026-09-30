@@ -64,6 +64,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 8. **Only touch what the request names.** An element the user did not mention must come out of this batch
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
+9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
 
 ## Reconcile (`reconcile`)
 
