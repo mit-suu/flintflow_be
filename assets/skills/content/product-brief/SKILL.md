@@ -77,7 +77,7 @@ never write a section the product does not need. B-1 never writes `project.visio
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
-| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped — exactly the goals stated in `notes`, same count and wording) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
+| B-1.1 Vision, problem, opportunity | addendum `vision` (ONE entry: who, what changes, why it matters) + addendum `goals` (ONE entry PER goal, 3–6, outcome-shaped — **exactly the goals the user approved**: the goals list in the decisions ledger / the answers, or the list the user agreed to in the recent turns; same count, same wording — never a goal you thought of while drafting; restate that list in `notes`) + problem/why-now; `content` in the user's language, `content_en` English | `fixed:1` |
 | B-1.2 Target users & jobs-to-be-done | addendum per persona/stakeholder, with the job each one needs done | `fixed:2.1` |
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
@@ -137,7 +137,8 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 
 - [ ] Every step ended with at least one op — nothing important left only in the chat.
 - [ ] `form_factor`, `stakes` set by the end of B-0; `system_name` (English, user-picked only) by the end of B-2.
-- [ ] Addendum `vision` + 3–6 `goals` (each `content` + `content_en`) by the end of B-1.1; no `project.vision`/`goals`.
+- [ ] Addendum `vision` + 3–6 `goals` (each `content` + `content_en`) by the end of B-1.1 — the goals the user approved, same count; no `project.vision`/`goals`.
+- [ ] Every `rationale`/`rationale_vi` quotes only what the user actually said or picked; what you inferred says so ("tôi suy ra từ…").
 - [ ] Every addendum has `content`, `content_en` and a real `target_section`.
 - [ ] Everything you filled in yourself has an `assumptions[]` entry, not a confident sentence.
 - [ ] B-2.1 left no `unconfirmed` assumption unasked; B-2.2 left no addendum untriaged, and parked ones
