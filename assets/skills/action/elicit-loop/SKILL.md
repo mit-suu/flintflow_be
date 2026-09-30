@@ -77,6 +77,19 @@ Examples of prose vs card: `references/when-to-offer-choices.md`.
 ### Phase interview (`phase_interview: true`)
 
 One turn asked **once at the start of a whole phase**: `{{missing}}` is the union of every field the phase needs. Ask the **{{max_questions}}** questions with the most impact; the rest goes to sentences of what you assume. Continue the conversation — no greeting, no "let's start this phase".
+{{#if fast_path}}
+Fast path: `{{content_guidance}}` lists the work of every step in the phase (one line each), `{{projection}}` is the union of what those steps read. `{{max_questions}}` replaces the two-question limit of Voice 3.
+- **This is the ONLY asking turn of the phase** — the steps inside do not ask afterwards. Pick questions by impact across **all** the steps' work, not the first step's. Whatever you do not ask is written as a stated assumption and read back to the user at the end of the phase.
+- **Depth by `project.stakes`** in the projection: regulated ⇒ spend the budget first on security, personal & health data, retention, access, legal basis; internal ⇒ ask only what would make the document wrong if guessed, assume the rest; production ⇒ balance.
+- **Never ask what can be inferred**: duties of a role already named, competitors of an internal or public-sector system, anything in the projection, addendum or ledger.
+- Nothing worth asking ⇒ `questions: []` and `reply` is a short reaction to what the user said; never end `reply` with a question that is not in `questions[]`.
+{{/if}}
+{{#if elicit_policy=conflict_only}}
+
+### Conflict-only turn (`elicit_policy` is `conflict_only`)
+
+The questions of this phase were already asked. React to the user's message in `reply` (1–3 sentences) and ask a question **only** to re-open a decided topic the message contradicts, with `conflict` set. Ask nothing else — gaps are written as assumptions. Never end `reply` with a question that is not in `questions[]`; the server drops the rest.
+{{/if}}
 
 ### B-0.1 — listen first
 
@@ -94,6 +107,9 @@ When `project.system_name` is in `{{missing}}` at B-2.3: ask it once as a card �
 The user typed a message instead of using the cards. Pending questions: {{pending_questions}}.
 - `settled`: only questions the message **really answers** — `[{ "topic_key", "answer" }]`. With options: `answer` is exactly one option label. Open question: `answer` is the **exact excerpt** of the message, copied not paraphrased (the server drops excerpts not found). A qualitative answer or an idea counts (Rules 9); a reply to a question you already re-asked settles it. Delegation ⇒ not settled: propose (Rules 10). Unsure, off-topic or partial ⇒ leave it out.
 - `reply`: answer what the user said in 1–3 sentences, in the same voice; never say you still wait for what this message just answered. `questions`: the still-open ones **rewritten to build on what the user just said** (keep `topic_key`, `inline` if asked in prose); `[]` ⇒ re-asked as is.
+{{#if close_interview}}
+**Closing turn (`close_interview`)**: this ends the phase interview. `reply`: react to what the user said and say what you will assume for anything they did not answer — **no question at all** (none in `reply`, `questions: []`, no new topic, nothing re-asked). `settled` only what the message really answers.
+{{/if}}
 
 ## Capturing while talking (discovery steps B-0 … B-2)
 
