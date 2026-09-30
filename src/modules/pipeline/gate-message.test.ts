@@ -43,9 +43,20 @@ describe("composeStepGateMessage", () => {
     expect(message).not.toMatch(/giả định/i)
   })
 
-  it("notes đã nhắc hết (diễn đạt lại vẫn trùng đủ từ) ⇒ dùng nguyên văn, không nói lặp", () => {
-    const notes = "Mình thấy bệnh nhân đặt lịch qua app điện thoại, còn nhân viên dùng máy tính. Bạn xem giúp nhé."
+  it("notes đã nói điều đó như điều đang đoán (diễn đạt lại vẫn trùng đủ từ) ⇒ dùng nguyên văn, không nói lặp", () => {
+    const notes = "Tôi đoán bệnh nhân đặt lịch qua app điện thoại, còn nhân viên dùng máy tính. Bạn xem giúp nhé."
     expect(composeStepGateMessage({ notes, summary: [], newAssumptionTexts: ["Bệnh nhân đặt lịch qua app điện thoại"] })).toBe(notes)
+  })
+
+  it("notes kể điều đó như SỰ THẬT trong câu tóm tắt ⇒ vẫn thêm câu 'Tôi tạm hiểu…' riêng", () => {
+    const notes =
+      "Tổng quan dự án đã đủ: bệnh viện công cần phần mềm quản lý khám ngoại trú từ đặt lịch đến thanh toán bhyt, bệnh nhân tự đặt lịch và thanh toán trên app/web, còn nhân viên làm trên web. Tôi đoán sẽ có dịch vụ gửi SMS để gọi bệnh nhân chưa cài app — nếu khác bạn cứ nói. Xem lại các điểm này xong thì mình đi tiếp nhé."
+    const as3 = "Bệnh nhân chủ yếu dùng app điện thoại để đặt lịch và thanh toán, còn các vai trò nhân viên làm trên web."
+    const as8 = "Sẽ có dịch vụ gửi SMS (mua hoặc qua nhà cung cấp) để gửi thông báo cho bệnh nhân chưa cài app."
+    const message = composePhaseGateMessage({ lastMessage: notes, unconfirmedTexts: [as3, as8] })!
+    expect(message).toContain("Tôi tạm hiểu là bệnh nhân chủ yếu dùng app điện thoại để đặt lịch và thanh toán, còn các vai trò nhân viên làm trên web.")
+    expect(message).not.toContain("tạm hiểu là sẽ có dịch vụ gửi SMS")
+    expect(message.endsWith("Xem lại các điểm này xong thì mình đi tiếp nhé.")).toBe(true)
   })
 
   it("không có gì để nói (không notes, không thay đổi, không giả định) ⇒ undefined", () => {
@@ -79,8 +90,8 @@ describe("composePhaseGateMessage", () => {
     )
   })
 
-  it("điều đã được bước cuối nói trong lastMessage thì không nhắc lại", () => {
-    const message = composePhaseGateMessage({ lastMessage: "Bệnh nhân tự đặt lịch qua app điện thoại nhé.", unconfirmedTexts: ["Bệnh nhân tự đặt lịch qua app điện thoại", "Không gửi SMS nhắc lịch"] })!
+  it("điều đã được bước cuối nói (như điều đang đoán) trong lastMessage thì không nhắc lại", () => {
+    const message = composePhaseGateMessage({ lastMessage: "Tôi đoán bệnh nhân tự đặt lịch qua app điện thoại nhé.", unconfirmedTexts: ["Bệnh nhân tự đặt lịch qua app điện thoại", "Không gửi SMS nhắc lịch"] })!
     expect(message.match(/tạm hiểu/g)).toHaveLength(1)
     expect(message).toContain("Tôi tạm hiểu là không gửi SMS nhắc lịch.")
   })
@@ -107,6 +118,12 @@ describe("điều tạm hiểu đứng trước lời mời đi tiếp, không n
     })!
     expect(message).toBe("Tôi thấy nhân viên dùng máy tính. Tôi tạm hiểu là bệnh nhân không cần cài app riêng. Nếu ổn thì mình đi tiếp nhé.")
     expect(message.endsWith("đi tiếp nhé.")).toBe(true)
+  })
+
+  it("chữ giống dấu hiệu đoán khi bỏ dấu ('tới lấy', 'đến tới đoạn') không tính là đã nói", () => {
+    const notes = "Bệnh nhân tới lấy số ở quầy rồi đến tới đoạn khám. Bạn xem giúp nhé."
+    const message = composeStepGateMessage({ notes, summary: [], newAssumptionTexts: ["Bệnh nhân tới lấy số ở quầy rồi đến khám"] })!
+    expect(message).toContain("Tôi tạm hiểu là bệnh nhân tới lấy số ở quầy rồi đến khám.")
   })
 
   it("notes diễn đạt lại (bỏ dấu, đổi từ nối) vẫn tính là đã nói", () => {
