@@ -5,9 +5,10 @@
 ## B-0.1 Brain Dump
 
 FLF-221: mở đầu kiểu "kể hết → AI chỉ hỏi phần thiếu". User gõ ý tưởng vào ô chat là B-0.1 chạy (tin nhắn vào
-transcript của step). Vòng hỏi **không** hỏi `form_factor`/`stakes` (server loại khỏi `missing`); lượt soạn tự suy
-ra hai field đó kèm giả định, gợi ý `system_name` nếu user chưa đặt, và tóm tắt ý tưởng một câu để user chốt ở cổng
-B-0.1. User bấm "Mình chưa có ý tưởng" (`intent: "no_idea"`) ⇒ vòng hỏi chỉ đưa 2–3 câu gợi mở bằng văn xuôi, không
+transcript của step). FLF-232: vòng hỏi **không** hỏi `system_name` (server chỉ để B-2.3 hỏi — `askableFields`) mà hỏi `form_factor` +
+`stakes` trong **một lượt hai thẻ** ("Nền tảng", "Mức độ"), lựa chọn khuyến nghị đầu tiên kèm lý do lấy từ ý tưởng,
+bỏ thẻ nào user đã nói rõ. Lượt soạn ghi hai field theo điều user chọn/nói (không tạo giả định cho giá trị user đã
+chọn; chỉ suy ra phần chưa ai nói, kèm giả định), và `notes` là tin nhắn cổng (2–4 câu) để user chốt ở cổng B-0.1. User bấm "Mình chưa có ý tưởng" (`intent: "no_idea"`) ⇒ vòng hỏi chỉ đưa 2–3 câu gợi mở bằng văn xuôi, không
 thẻ lựa chọn, không "(Khuyến nghị)". B-0.2/B-0.3 không gọi model khi field đã có; B-0 không có phỏng vấn gộp đầu giai
 đoạn.
 
@@ -22,11 +23,14 @@ triage được từng phần.
 ## Tên hệ thống — `project.system_name` (FLF-177)
 
 Tên **tiếng Anh** in lên boundary sơ đồ use case, sơ đồ ngữ cảnh và bìa/tiêu đề/tên file docx — tách khỏi
-tên project làm việc (`Project.name` ở FE, không đồng bộ). Hỏi ngay ở B-0.1:
+tên project làm việc (`Project.name` ở FE, không đồng bộ). FLF-232: **không** hỏi ở B-0.1 (câu đầu tiên sau khi
+user kể ý tưởng không nên là đặt tên) mà hỏi ở **B-2.3**, khi vision/goals/phạm vi đã đủ để gợi ý cho hay:
 
-- User đã có tên tiếng Anh ⇒ ghi `set project.system_name`.
-- Chưa có tên, hoặc chỉ có tên tiếng Việt ⇒ gợi ý 2–3 tên tiếng Anh ngắn (2–4 từ, Title Case, không thêm
-  "System"/"App" cho đủ chữ) cho user chọn; chỉ ghi khi user đã chọn.
+- User đã tự nêu tên tiếng Anh từ trước ⇒ ghi `set project.system_name` ngay, B-2.3 không hỏi nữa.
+- `system_name` còn null ở B-2.3 ⇒ hỏi một thẻ với 3–4 tên tiếng Anh ngắn (2–4 từ, Title Case, không thêm
+  "System"/"App" cho đủ chữ, gợi ý đầu có lý do); chỉ ghi khi user đã chọn. Bước này không bao giờ tự Accept
+  khi tên còn null (`quiet-step.ts`).
+- Project cũ đã có tên ⇒ B-2.3 không hỏi; project đang giữa B-0/B-1 chưa có tên ⇒ được hỏi ở B-2.3.
 - Chưa chốt ⇒ sơ đồ và tài liệu dùng tên project; từ S-2.5 có cờ vàng `system_name_missing`. User đổi sau
   bằng chat (op `set project.system_name`).
 

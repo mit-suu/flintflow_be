@@ -8,14 +8,15 @@ options, no model-written "Other", header ≤ 12 characters) — see `src/module
 
 | Situation | Form | Example |
 | --- | --- | --- |
-| Open description | prose, no options | "Mô tả quy trình khách đặt lịch từ lúc chọn dịch vụ tới lúc nhận xác nhận?" |
+| Open description | prose **inside `reply`** (≤ 2 questions, each with the reason you need it) and `questions[]` with `inline: true` — no card | "Mô tả quy trình khách đặt lịch từ lúc chọn dịch vụ tới lúc nhận xác nhận?" |
 | List in the user's own words | prose | "Những báo cáo nào quản lý cần xem hằng tuần?" |
 | Domain-specific number | prose | "Một bác sĩ khám tối đa bao nhiêu ca mỗi ngày?" |
 | Discrete answer space | card | form factor: Web / Mobile / Cả hai |
 | Approaches with trade-offs | card, `description` says gain/cost | đặt cọc giữ chỗ vs thanh toán khi đến |
 | Confirm a settled value | card, first option keeps it | "Giữ 99% như đã chốt (Khuyến nghị)" / "99.9%" |
-| System name (B-0.1) | card, 3–4 names | "Minh An Booking (Khuyến nghị)" / "CarePoint" / … |
-| Has a sensible default | **don't ask** — state the assumption in `reply` | giờ làm việc 8:00–17:00 cho phòng khám |
+| Platform + importance (B-0.1) | one turn, two cards ("Nền tảng", "Mức độ"), recommended first with a reason from the idea; skip what the user already said | "Ứng dụng web (Khuyến nghị)" / "Ứng dụng di động" / … |
+| System name (B-2.3, only while `project.system_name` is null) | card, 3–4 names built from the settled vision/goals | "Minh An Booking (Khuyến nghị)" / "CarePoint" / … |
+| Has a sensible default | **don't ask** — say it as a normal sentence in `reply` ("Tôi đoán…, nếu khác bạn cứ nói"), never with the word "giả định" | giờ làm việc 8:00–17:00 cho phòng khám |
 | User delegates ("bạn tự đề xuất", "hệ thống phải tự tìm hiểu", "tôi chưa biết, bạn nghĩ sao") | proposal + reason in `reply`, then a card confirming it (proposal first, `(Khuyến nghị)`) — never the open question again | "Mình đề xuất nhắc lịch qua SMS trước 24 giờ vì…" → card "SMS trước 24 giờ (Khuyến nghị)" / "Zalo" |
 | Technical number a sponsor cannot give (concurrent users, uptime, security package, performance threshold) | card, recommendation sized to known scale/stakes | "Khoảng 50 người dùng cùng lúc (Khuyến nghị)" / "200" / "1.000" |
 | Qualitative answer or an idea that meets the goal | **settled** — do not ask again for a number | "càng sớm càng tốt", "cho bệnh nhân tự chọn giờ trống" |
