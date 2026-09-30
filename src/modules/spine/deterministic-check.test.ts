@@ -469,9 +469,9 @@ describe("runDeterministicCheck", () => {
 describe("system_name_missing (FLF-177)", () => {
   const withSystemName = (name: string | null) => variant((s) => (s.project.system_name = name))
 
-  it("đã vẽ sơ đồ ngữ cảnh/use case mà chưa có system_name ⇒ một cờ vàng, sửa ở B-0.1", () => {
+  it("đã vẽ sơ đồ ngữ cảnh/use case mà chưa có system_name ⇒ một cờ vàng, sửa ở B-2.3", () => {
     expect(byRule(runDeterministicCheck(withSystemName(null)), "system_name_missing")).toMatchObject([
-      { level: "yellow", section_id: "fixed:1", target_id: null, remediation_step: "B-0.1" }
+      { level: "yellow", section_id: "fixed:1", target_id: null, remediation_step: "B-2.3" }
     ])
     expect(byRule(runDeterministicCheck(withSystemName("  ")), "system_name_missing")).toHaveLength(1)
   })

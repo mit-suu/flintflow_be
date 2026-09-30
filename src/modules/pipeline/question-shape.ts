@@ -16,6 +16,11 @@ import { RECOMMENDED_SUFFIX, sanitizeSuggestions, type AnsweredTopic } from "./d
 
 /** Trần câu hỏi một lượt, cho mọi nơi — kể cả phỏng vấn đầu giai đoạn. Câu còn thiếu để step sau tự hỏi. */
 export const MAX_QUESTIONS_PER_TURN = 4
+/**
+ * Số câu hỏi tối đa mỗi lượt mà PROMPT được phép hỏi (FLF-232): BA thật không tra hỏi 3–4 câu một lượt. Trần `MAX_QUESTIONS_PER_TURN`
+ * ở trên vẫn là lưới an toàn của server cho model không nghe lời.
+ */
+export const PROMPT_QUESTIONS_PER_TURN = 2
 export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 4
 export const MAX_HEADER_LENGTH = 12
@@ -39,6 +44,8 @@ export interface ModelQuestion {
   options: QuestionOption[]
   multiple?: boolean
   topic_key?: string
+  /** FLF-232: câu mở đã hỏi ngay trong lời `reply` ⇒ FE không hiện thêm thẻ. Chỉ có nghĩa với câu không có lựa chọn. */
+  inline?: boolean
   /** Nội bộ: số tin chat user đã gửi trong lúc câu này chờ mà AI chưa chốt được (không gửi FE — xem `settleRepeatedAnswer`). */
   replied?: number
 }
@@ -50,6 +57,7 @@ export interface ContractQuestion {
   header?: string
   options?: QuestionOption[]
   multiple?: boolean
+  inline?: boolean
 }
 
 /** Lọc và cắt lựa chọn theo luật server; trả `[]` khi không còn đủ 2 lựa chọn thật. */
@@ -131,7 +139,8 @@ export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], sha
     text: q.question,
     ...(q.header ? { header: q.header } : {}),
     ...(q.options.length > 0 ? { options: q.options } : {}),
-    ...(q.options.length > 0 && q.multiple !== undefined ? { multiple: q.multiple } : {})
+    ...(q.options.length > 0 && q.multiple !== undefined ? { multiple: q.multiple } : {}),
+    ...(q.options.length === 0 && q.inline ? { inline: true } : {})
   }))
   return { asked, questions }
 }
