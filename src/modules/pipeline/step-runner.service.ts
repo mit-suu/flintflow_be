@@ -42,7 +42,7 @@ import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadC
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { elicitPolicyFor, keepConflictsOnly, reconcileReply } from "./fast-path.js"
+import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
@@ -417,16 +417,15 @@ export const CHAT_BUDGET_REPLY = "Phần còn lại tôi sẽ tạm hiểu theo 
  * - câu có lựa chọn: câu trả lời phải trùng đúng nhãn một lựa chọn (bỏ qua đuôi "(Khuyến nghị)", hoa/thường); câu chọn
  *   nhiều nhận danh sách phân tách bằng dấu phẩy, mọi phần đều phải khớp;
  * - câu mở: trích đoạn model báo nếu là chuỗi con của tin nhắn (chữ của user, không phải câu model diễn lại). Không có
- *   trích đoạn hợp lệ: chỉ một câu mở được chốt ⇒ **nguyên văn tin nhắn**; nhiều câu mở ⇒ đoạn đánh số — đủ đoạn cho mọi
- *   câu mở được chốt — theo thứ tự câu mở trong `asked`. Không tách được ⇒ chỉ câu mở đầu nhận nguyên văn, câu còn lại vẫn chờ —
- *   không bao giờ ghi cùng một đoạn cho nhiều câu.
+ *   trích đoạn hợp lệ ⇒ đoạn đánh số — đủ đoạn cho mọi câu mở được chốt — theo thứ tự câu mở trong `asked`. Không tách
+ *   được ⇒ câu vẫn chờ. **Không bao giờ** lấy nguyên văn cả tin làm đáp án: tin có thể lạc đề (đã gặp decision ghi đoạn
+ *   bối cảnh làm đáp án), hỏi lại tốt hơn chốt sai. Đoạn đánh số chỉ dùng khi có nhiều câu mở — một câu mở mà tin đánh số
+ *   thì số thứ tự thường trả lời thẻ lựa chọn, không phải câu mở. Không ghi cùng một đoạn cho nhiều câu.
  */
 export const settleFromChat = (
   asked: PendingAnswerState["asked"],
   settled: readonly { topic_key: string; answer: string }[] | undefined,
-  message: string,
-  /** `false` (đóng phỏng vấn fast path): câu mở chỉ chốt bằng trích đoạn đã kiểm hoặc đoạn đánh số — không bao giờ nguyên văn cả tin. */
-  wholeMessage = true
+  message: string
 ): AnswerInput[] => {
   const ids = questionIdsFor(asked)
   const out: AnswerInput[] = []
@@ -440,22 +439,16 @@ export const settleFromChat = (
     })
   )
   const numbered = splitNumberedAnswer(message)
-  const useNumbered = numbered.size >= openSettled.size
+  const useNumbered = openSettled.size > 1 && numbered.size >= openSettled.size
   const openTexts: string[] = []
-  let firstOpen: number | undefined
   for (const item of settled ?? []) {
     const index = asked.findIndex((q, i) => q.topic_key === item.topic_key && !done.has(i))
     if (index < 0) continue
     const question = asked[index]
     if (question.options.length === 0) {
-      firstOpen ??= index
       // Trích đoạn model báo (đã kiểm là chuỗi con) trước: một danh sách đánh số nằm trong MỘT câu trả lời ("Tính
       // năng: 1. … 2. …") không được tách sang câu khác. Model diễn lại ⇒ mới dùng đoạn đánh số theo thứ tự câu mở.
-      // Một câu mở: tin nhắn thường còn trả lời cả câu lựa chọn ("1 theo khuyến nghị / 2, tôi nghĩ có") ⇒ vẫn ưu tiên
-      // trích đoạn, không có thì mới lấy nguyên văn.
-      const text =
-        verifiedExcerpt(item.answer, message) ??
-        (openSettled.size === 1 && wholeMessage ? message : useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
+      const text = verifiedExcerpt(item.answer, message) ?? (useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
       // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
       if (!text || (openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
       out.push({ question_id: ids[index], answer: text })
@@ -471,7 +464,6 @@ export const settleFromChat = (
     out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0] })
     done.add(index)
   }
-  if (wholeMessage && firstOpen !== undefined && openTexts.length === 0) out.push({ question_id: ids[firstOpen], answer: message })
   return out
 }
 
@@ -535,11 +527,19 @@ export const isSubstantiveAnswer = (message: string): boolean => {
  * định tính hoặc bằng ý tưởng, AI không coi là đủ) ⇒ lần trả lời kế tiếp được chốt bằng nguyên văn tin. Chỉ khi AI
  * không chốt được câu nào từ tin này (tin không trả lời câu khác), đó là câu mở duy nhất còn chờ, tin không nhắc tới
  * lựa chọn nào của câu có lựa chọn đang chờ, và tin là câu trả lời thật — không bao giờ gán một tin cho hai câu.
+ * Model đã đọc tin và báo câu đó vẫn chờ (`stillOpen` chứa `topic_key`) ⇒ tin lạc đề, không chốt.
  */
-export const settleRepeatedAnswer = (asked: PendingAnswerState["asked"], settled: AnswerInput[], message: string): AnswerInput[] => {
+export const settleRepeatedAnswer = (
+  asked: PendingAnswerState["asked"],
+  settled: AnswerInput[],
+  message: string,
+  stillOpen: readonly string[] = []
+): AnswerInput[] => {
   if (settled.length > 0 || !isSubstantiveAnswer(message)) return settled
   const open = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
   if (open.length !== 1 || (asked[open[0]].replied ?? 0) < 1) return settled
+  const topic = asked[open[0]].topic_key
+  if (topic !== undefined && stillOpen.includes(topic)) return settled
   const text = message.trim()
   const lower = text.toLowerCase()
   const namesOption = asked.some((q) => q.options.some((o) => lower.includes(stripRecommended(o.label).trim().toLowerCase())))
@@ -553,7 +553,12 @@ export const settleRepeatedAnswer = (asked: PendingAnswerState["asked"], settled
  * cho mọi câu mở, hoặc luật câu-trả-lời-lặp (`settleRepeatedAnswer`). Một tin tự do không đánh số KHÔNG bao giờ được coi là
  * câu trả lời của câu mở duy nhất (có thể lạc đề): câu vẫn chờ, tin đi vào ghi chú cho bước sau.
  */
-export const settleWithoutModel = (asked: PendingAnswerState["asked"], message: string, wholeMessage = true): AnswerInput[] => {
+export const settleWithoutModel = (
+  asked: PendingAnswerState["asked"],
+  message: string,
+  /** `false` (đóng phỏng vấn fast path): không áp luật câu-trả-lời-lặp — chỉ nhãn thẻ và đoạn đánh số. */
+  repeatedAnswer = true
+): AnswerInput[] => {
   if (!isSubstantiveAnswer(message)) return []
   const lower = message.toLowerCase()
   const namedOptions = (q: PendingAnswerState["asked"][number]): string[] => q.options.map((o) => o.label).filter((label) => lower.includes(stripRecommended(label).toLowerCase()))
@@ -570,8 +575,8 @@ export const settleWithoutModel = (asked: PendingAnswerState["asked"], message: 
     if (named.length === 0 || (!q.multiple && named.length > 1)) continue
     candidates.push({ topic_key, answer: q.multiple ? named.join(", ") : named[0] })
   }
-  const settled = settleFromChat(asked, candidates, message, wholeMessage)
-  return wholeMessage ? settleRepeatedAnswer(asked, settled, message) : settled
+  const settled = settleFromChat(asked, candidates, message)
+  return repeatedAnswer ? settleRepeatedAnswer(asked, settled, message) : settled
 }
 
 /** Một lượt elicit đọc tin chat: trả lời user + câu nào đã chốt được (đã kiểm) + câu còn chờ AI đã viết lại. */
@@ -621,9 +626,8 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
     cost: result.cost,
     logId: result.logId || null
   })
-  const settled = input.closing
-    ? settleFromChat(input.asked, result.data.settled, input.message, false)
-    : settleRepeatedAnswer(input.asked, settleFromChat(input.asked, result.data.settled, input.message), input.message)
+  const verified = settleFromChat(input.asked, result.data.settled, input.message)
+  const settled = input.closing ? verified : settleRepeatedAnswer(input.asked, verified, input.message, result.data.still_open ?? [])
   return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
 }
 
@@ -1459,8 +1463,6 @@ export const runStep = async (
             elicitExecutor: d.elicitExecutor
           })
         )
-        emit({ type: "elicit", step_id: stepId, delta: turn.reply })
-
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
         await recordAnswers(pending, [...cardAnswers, ...settled], {
           transcript: [],
@@ -1468,7 +1470,10 @@ export const runStep = async (
         })
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
         const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
-        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(turn.reply, remaining))
+        // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
+        const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN)
+        emit({ type: "elicit", step_id: stepId, delta: chatReply })
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, remaining))
         if (remaining.length === 0) return
         pending = remaining
         await announceWaiting(pending)
@@ -1577,10 +1582,15 @@ export const runStep = async (
 
         const { asked, questions } = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet })
         // Fast path: câu model đã hỏi mà server bỏ thì lời AI cũng không được còn hỏi nó (user không có chỗ trả lời)
-        const reply =
+        const askedTexts = asked.map((a) => a.question)
+        // Câu hỏi đuôi ("bạn thấy hợp lý chứ?") tính vào trần câu hỏi của lượt (FLF-235)
+        const reply = trimTailQuestion(
           elicitPolicy === "conflict_only"
-            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), asked.map((a) => a.question))
-            : elicitResult.data.reply
+            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts)
+            : elicitResult.data.reply,
+          asked,
+          PROMPT_QUESTIONS_PER_TURN
+        )
         emit({ type: "elicit", step_id: stepId, delta: reply })
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, asked))
         if (questions.length > 0) {

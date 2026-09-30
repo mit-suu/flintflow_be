@@ -53,3 +53,13 @@ Khách: "tầm 200 ca 1 ngày".
   định để anh/chị xác nhận sau."
 - **Nên**: "Tôi đoán nhân viên bệnh viện sẽ dùng trên máy tính, còn bệnh nhân đặt lịch trên điện thoại — nếu khác thì bạn
   nói tôi nhé."
+
+## 7. Câu hỏi đuôi cũng là một câu hỏi
+
+Trần là **2 câu hỏi một lượt**, tính cả câu đuôi ("bạn thấy hợp lý chứ?", "đúng không?"). Server cắt câu hỏi cuối của lời
+khi đã hỏi đủ trần — nên đừng viết nó ngay từ đầu.
+
+- **Không nên**: "Quy trình thanh toán hai kênh nghe hợp lý, đúng chứ? Mục tiêu chính là giảm chờ ở quầy phải không? Còn
+  bệnh nhân đặt lịch qua kênh nào?" (3 câu hỏi; hai câu đầu hỏi lại điều khách vừa nói).
+- **Nên**: "Quy trình thanh toán hai kênh nghe hợp lý — tôi ghi theo hướng đó. Còn hai điều tôi cần biết: bệnh nhân đặt
+  lịch qua kênh nào, và bạn muốn giảm thời gian chờ ở quầy xuống mức nào?" (đề xuất kết bằng câu khẳng định, đúng 2 câu hỏi).
