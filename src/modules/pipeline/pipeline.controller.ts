@@ -381,6 +381,7 @@ const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
   alive: isAlive(doc),
   questions: doc.questions,
   gate_payload: doc.gate_payload,
+  phase_gate: doc.phase_gate,
   events: doc.events,
   error: doc.error
 })

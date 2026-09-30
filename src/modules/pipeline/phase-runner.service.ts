@@ -15,11 +15,11 @@
  * cổng chốt rơi đúng vào S-5.5 của màn đó (Phases §6.2).
  */
 
-import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type GateResolution, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { FAST_PATH_PHASES, NO_QUESTION_ACK_VI, interviewBudget, interviewGuidance, interviewProjection, reconcileReply } from "./fast-path.js"
+import { FAST_PATH_PHASES, NO_QUESTION_ACK_VI, interviewBudget, interviewGuidance, interviewProjection, reconcileReply, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
 import { CHAT_BUDGET_REPLY, askTranscript, chatBudgetLeft, nextPendingAfterChat, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import * as meter from "./meter.service.js"
@@ -132,10 +132,13 @@ const interviewChatTurn = async (
     await pushInterviewMessages(projectId, sessionId, [{ role: "user", content: message, step: unit, createdAt: new Date() }])
   }
   const { spine } = await load(projectId)
+  // Fast path (B-1): lượt hỏi gộp là lượt hỏi DUY NHẤT — tin chat sau đó chỉ được đọc & chốt, rồi đóng phỏng vấn (không hỏi thêm,
+  // không hỏi lại). Điều còn chưa trả lời không vào sổ quyết định: các bước viết gắn nó thành giả định và cổng cuối nói ra.
+  const closing = FAST_PATH_PHASES.has(unit)
   if (!(await chatBudgetLeft(projectId, unit, null))) {
     // Chốt phần tin nhắn đã trả lời trước; chỉ câu thật sự chưa trả lời mới để các bước tự giả định
     const byCard = new Set(cardAnswers.map((a) => indexOfQuestion(asked, a.question_id)))
-    const local = settleWithoutModel(asked, message).filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
+    const local = settleWithoutModel(asked, message, !closing).filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
     await recordInterviewAnswers(projectId, unit, sessionId, userId, "", asked, [...cardAnswers, ...local], {
       settledIds: new Set(local.map((a) => a.question_id))
     })
@@ -157,7 +160,8 @@ const interviewChatTurn = async (
     sessionId,
     projection: {},
     spine,
-    elicitExecutor: deps.elicitExecutor
+    elicitExecutor: deps.elicitExecutor,
+    ...(closing ? { closing } : {})
   })
   const byCard = new Set(cardAnswers.map((a) => indexOfQuestion(asked, a.question_id)))
   const settled = turn.settled.filter((a) => !byCard.has(indexOfQuestion(asked, a.question_id)))
@@ -165,6 +169,11 @@ const interviewChatTurn = async (
     settledIds: new Set(settled.map((a) => a.question_id))
   })
   const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(asked, a.question_id)))
+  if (closing) {
+    const closingReply = withoutQuestions(turn.reply)
+    await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: closingReply, step: unit, createdAt: new Date() }])
+    return { reply: closingReply, remaining: [] }
+  }
   const { spine: after } = await load(projectId)
   const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
   await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(turn.reply, remaining), step: unit, createdAt: new Date() }])
@@ -453,6 +462,67 @@ const load = async (projectId: string): Promise<{ record: SpineRecord; spine: Sp
   return { record, spine: stripRecord(record) }
 }
 
+interface PhaseDecision {
+  verdict: QuietVerdict
+  afterSpine: Spine
+  /** Chỉ có khi cổng thật: sự kiện `phase_gate` đầy đủ (tin nhắn + mọi giả định cả giai đoạn). */
+  phaseGate: Extract<StepEvent, { type: "phase_gate" }> | null
+}
+
+const toResolution = (d: PhaseDecision): GateResolution => (d.verdict.quiet ? { quiet: true } : { quiet: false, phaseGate: d.phaseGate ?? undefined })
+
+interface DecideInput {
+  projectId: string
+  next: ExpandedStep
+  unit: string
+  gateEvent: Extract<StepEvent, { type: "gate_ready" }>
+  signals: StepSignals
+  phaseSummary: ChangeSummary[]
+  outcomes: PhaseStepOutcome[]
+  flagsAtStart: { red: number; yellow: number } | null
+}
+
+/** Bước vừa tới gate: im (tự Accept) hay dừng chờ user; nếu dừng thì dựng sẵn `phase_gate`. Gọi đúng một lần mỗi bước. */
+const decideStep = async ({ projectId, next, unit, gateEvent, signals, phaseSummary, outcomes, flagsAtStart }: DecideInput): Promise<PhaseDecision> => {
+  phaseSummary.push(...(gateEvent.summary ?? []))
+  const { spine: afterSpine } = await load(projectId)
+  const templateId = getStep(next.id).template_id
+  const verdict: QuietVerdict = isQuietStep({
+    templateId,
+    reviewMode: afterSpine.project.review_mode ?? "balanced",
+    asked: signals.asked,
+    redDelta: gateEvent.flags?.red_delta ?? 0,
+    newAssumptions: gateEvent.new_assumptions ?? [],
+    renderFailed: signals.renderFailed,
+    phaseTerminal: isPhaseTerminal(afterSpine, next),
+    // B-0.2/B-0.3 bỏ qua vì B-0.1 đã chốt field: không gọi model, không ghi gì ⇒ không có gì để duyệt
+    settledEarlier: B0_FIELD_STEPS[templateId] !== undefined && !signals.asked && gateEvent.calls_used === 0 && gateEvent.wrote_ops === false,
+    spine: afterSpine
+  })
+  if (verdict.quiet) return { verdict, afterSpine, phaseGate: null }
+
+  // FLF-232: tin nhắn cổng = tin của bước cuối (đã tự nói giả định của nó) + MỌI điều tạm hiểu còn lại của giai đoạn, kể cả do
+  // bước chạy im sinh ra. `new_assumptions` của cổng là đúng danh sách được nói ra — chip "Đúng rồi" chỉ xác nhận chúng.
+  // Dựng từ Spine, không từ bộ nhớ của lần chạy này: chạy tiếp sau khi tải lại thì các bước im của lượt trước không còn ở đó.
+  const lastStepIds = new Set((gateEvent.new_assumptions ?? []).map((a) => a.id))
+  const { assumptions: spokenAssumptions, earlierTexts } = phaseGateAssumptions(afterSpine, next.id, lastStepIds)
+  const phaseMessage = composePhaseGateMessage({ lastMessage: gateEvent.message_vi, unconfirmedTexts: earlierTexts })
+  const phaseGate: Extract<StepEvent, { type: "phase_gate" }> = {
+    type: "phase_gate",
+    step_id: next.id,
+    phase: unit,
+    reason_vi: verdict.reason_vi,
+    summary: phaseSummary,
+    new_assumptions: spokenAssumptions,
+    steps: outcomes.map(({ step_id, label_vi, auto_accepted }) => ({ step_id, label_vi, auto_accepted })),
+    ...(phaseMessage ? { message_vi: phaseMessage } : {}),
+    ...(flagsAtStart && gateEvent.flags
+      ? { flags: { red: gateEvent.flags.red, yellow: gateEvent.flags.yellow, red_delta: gateEvent.flags.red - flagsAtStart.red, yellow_delta: gateEvent.flags.yellow - flagsAtStart.yellow } }
+      : {})
+  }
+  return { verdict, afterSpine, phaseGate }
+}
+
 /**
  * Chạy hết một giai đoạn. `phase` là id phase (`S-6`) hoặc đơn vị vòng S-5 (`S-5@S03`); truyền phase của
  * bước tới lượt là đủ. Mọi sự kiện của từng bước vẫn phát nguyên vẹn — FE cũ hiển thị được như thường.
@@ -527,51 +597,27 @@ export const runPhase = async (
     const collector = collectSignals(emit)
     const stepDeps = firstDeps ?? laterDeps
     firstDeps = null
-    await runStep(projectId, next.id, sessionId, userId, collector.emit, stepDeps)
-    const { asked, gate: gateEvent, error, renderFailed } = collector.signals
+
+    // Quyết "im hay cổng thật" NGAY khi gate_ready sẵn sàng (trước khi step-runner ghi run-state/phát cổng): bước im không được lộ
+    // thẻ cổng có chip trong lúc chờ tự Accept, và cổng chốt cuối giai đoạn được ghi vào run-state để sống qua reload.
+    let decision: PhaseDecision | null = null
+    const decide = async (gateEvent: Extract<StepEvent, { type: "gate_ready" }>): Promise<PhaseDecision> => {
+      if (decision) return decision
+      decision = await decideStep({ projectId, next, unit, gateEvent, signals: collector.signals, phaseSummary, outcomes, flagsAtStart })
+      return decision
+    }
+    await runStep(projectId, next.id, sessionId, userId, collector.emit, { ...stepDeps, resolveGate: async (g) => toResolution(await decide(g)) })
+    const { gate: gateEvent, error } = collector.signals
 
     if (error || !gateEvent) {
       return { phase: unit, stopped_at: next.id, reason_vi: error ? "Bước dừng vì lỗi" : "Bước chưa tới cổng chốt", steps: outcomes }
     }
 
-    phaseSummary.push(...(gateEvent.summary ?? []))
-
-    const { spine: afterSpine } = await load(projectId)
-    const templateId = getStep(next.id).template_id
-    const verdict: QuietVerdict = isQuietStep({
-      templateId,
-      reviewMode: afterSpine.project.review_mode ?? "balanced",
-      asked,
-      redDelta: gateEvent.flags?.red_delta ?? 0,
-      newAssumptions: gateEvent.new_assumptions ?? [],
-      renderFailed,
-      phaseTerminal: isPhaseTerminal(afterSpine, next),
-      // B-0.2/B-0.3 bỏ qua vì B-0.1 đã chốt field: không gọi model, không ghi gì ⇒ không có gì để duyệt
-      settledEarlier: B0_FIELD_STEPS[templateId] !== undefined && !asked && gateEvent.calls_used === 0 && gateEvent.wrote_ops === false,
-      spine: afterSpine
-    })
+    const { verdict, afterSpine, phaseGate } = await decide(gateEvent)
 
     if (!verdict.quiet) {
-      // FLF-232: tin nhắn cổng = tin của bước cuối (đã tự nói giả định của nó) + MỌI điều tạm hiểu còn lại của giai đoạn, kể cả do
-      // bước chạy im sinh ra. `new_assumptions` của cổng là đúng danh sách được nói ra — chip "Đúng rồi" chỉ xác nhận chúng.
-      // Dựng từ Spine, không từ bộ nhớ của lần chạy này: chạy tiếp sau khi tải lại thì các bước im của lượt trước không còn ở đó.
-      const lastStepIds = new Set((gateEvent.new_assumptions ?? []).map((a) => a.id))
-      const { assumptions: spokenAssumptions, earlierTexts } = phaseGateAssumptions(afterSpine, next.id, lastStepIds)
-      const phaseMessage = composePhaseGateMessage({ lastMessage: gateEvent.message_vi, unconfirmedTexts: earlierTexts })
       // Bước cuối giai đoạn: gửi kèm tóm tắt của cả giai đoạn để user duyệt một lần, có đủ nội dung
-      emit({
-        type: "phase_gate",
-        step_id: next.id,
-        phase: unit,
-        reason_vi: verdict.reason_vi,
-        summary: phaseSummary,
-        new_assumptions: spokenAssumptions,
-        steps: outcomes.map(({ step_id, label_vi, auto_accepted }) => ({ step_id, label_vi, auto_accepted })),
-        ...(phaseMessage ? { message_vi: phaseMessage } : {}),
-        ...(flagsAtStart && gateEvent.flags
-          ? { flags: { red: gateEvent.flags.red, yellow: gateEvent.flags.yellow, red_delta: gateEvent.flags.red - flagsAtStart.red, yellow_delta: gateEvent.flags.yellow - flagsAtStart.yellow } }
-          : {})
-      })
+      emit(phaseGate as Extract<StepEvent, { type: "phase_gate" }>)
       emit({ type: "phase_progress", step_id: next.id, phase: unit, step_index: index + 1, step_total: Math.max(totalSteps, index + 1), needs_user: true })
       return { phase: unit, stopped_at: next.id, reason_vi: verdict.reason_vi, steps: outcomes }
     }

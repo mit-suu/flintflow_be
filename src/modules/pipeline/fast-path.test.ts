@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_VI, reconcileReply } from "./fast-path.js"
+import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_VI, reconcileReply, withoutQuestions } from "./fast-path.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 
@@ -95,5 +95,19 @@ describe("reconcileReply", () => {
   it("cắt hết chỉ còn câu hỏi bị bỏ ⇒ lời nhận tin; câu không phải câu hỏi không bị cắt", () => {
     expect(reconcileReply("Bạn lưu hồ sơ bao lâu?", ["Bạn lưu hồ sơ bao lâu?"], ["Bạn dùng điện thoại nào?"])).toBe(NO_QUESTION_ACK_VI)
     expect(reconcileReply("Mình sẽ lưu hồ sơ bao lâu tuỳ bạn.", ["Bạn lưu hồ sơ bao lâu?"], ["Bạn dùng điện thoại nào?"])).toBe("Mình sẽ lưu hồ sơ bao lâu tuỳ bạn.")
+  })
+})
+
+describe("withoutQuestions: lời AI của lượt đóng phỏng vấn", () => {
+  it("bỏ mọi câu hỏi, giữ phần ghi nhận", () => {
+    expect(withoutQuestions("Tính năng bác sĩ bấm nút rất hợp lý. Vậy bạn đo thành công bằng gì? Tôi sẽ tự đoán phần còn lại.")).toBe(
+      "Tính năng bác sĩ bấm nút rất hợp lý. Tôi sẽ tự đoán phần còn lại."
+    )
+  })
+
+  it("không có câu hỏi ⇒ giữ nguyên; toàn câu hỏi ⇒ lời nhận tin cố định", () => {
+    expect(withoutQuestions("Tôi ghi nhận rồi.")).toBe("Tôi ghi nhận rồi.")
+    expect(withoutQuestions("Bạn đo thành công bằng gì?")).toBe(NO_QUESTION_ACK_VI)
+    expect(withoutQuestions("")).toBe(NO_QUESTION_ACK_VI)
   })
 })

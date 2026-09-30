@@ -661,3 +661,37 @@ describe("sanitizeModelOps — giả định path project.vision|goals ở Brief
     expect(sanitizeModelOps(spine, restate("AS91"), "B-1.4", new Date(), revision).errors.map((e) => e.rule)).toEqual(["assumption_path_mismatch"])
   })
 })
+
+describe("sanitizeModelOps — B-2.1 chỉ đổi status khi user đã quyết trong lượt", () => {
+  const assumption = {
+    id: "AS90",
+    path: "project.form_factor",
+    statement: "The product is a web app.",
+    statement_vi: "Sản phẩm là ứng dụng web.",
+    rationale: "demo",
+    origin_step_id: "B-0.1",
+    status: "unconfirmed" as const,
+    confirmed_at: null
+  }
+  const spine: Spine = { ...FIXTURE, assumptions: [assumption] }
+  const flip = [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }]
+
+  it("không có quyết định của user ⇒ giữ nguyên status, không thêm confirmed_at", () => {
+    const { errors, ops } = sanitizeModelOps(spine, flip, "B-2.1")
+    expect(errors).toEqual([])
+    expect(ops).toEqual([{ op: "set", path: "assumptions[id=AS90].status", value: "unconfirmed" }])
+    const whole = [{ op: "set", path: "assumptions[id=AS90]", value: { ...spine.assumptions[0], status: "confirmed", confirmed_at: "2026-01-01" } }]
+    const kept = sanitizeModelOps(spine, whole, "B-2.1").ops[0] as { value: { status: string; confirmed_at: string | null } }
+    expect(kept.value.status).toBe("unconfirmed")
+  })
+
+  it("user đã trả lời/nhắn trong lượt ⇒ model đổi được status, server đặt confirmed_at", () => {
+    const { ops } = sanitizeModelOps(spine, flip, "B-2.1", new Date("2026-09-30T00:00:00.000Z"), { userDecided: true })
+    expect(ops[0]).toMatchObject({ path: "assumptions[id=AS90].status", value: "confirmed" })
+    expect(ops.some((op) => (op as { path: string }).path === "assumptions[id=AS90].confirmed_at")).toBe(true)
+  })
+
+  it("step rà giả định khác (B-2.3) không đổi hành vi", () => {
+    expect(sanitizeModelOps(spine, flip, "B-2.3").ops[0]).toMatchObject({ value: "confirmed" })
+  })
+})
