@@ -38,7 +38,7 @@ user kể ý tưởng không nên là đặt tên) mà hỏi ở **B-2.3**, khi 
 
 | Field | Giá trị | Ảnh hưởng về sau |
 | --- | --- | --- |
-| `form_factor` | `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded` | S-4.1 hình dung màn; S-6.2 ngưỡng usability; S-7.2 common requirements |
+| `form_factor` | **mảng**, phần tử đầu là nền tảng chính (`["web_app","mobile_app"]`); giá trị `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded` | S-4.1 hình dung màn; S-6.2 ngưỡng usability; S-7.2 common requirements |
 | `stakes` | `internal`, `production`, `regulated` | S-6.3/S-6.4 lấy ngưỡng mặc định theo cột này; S-6.5 có cần mục tuân thủ không |
 
 `stakes` là trường hay bị đoán nhất và cũng là trường đắt nhất khi đoán sai: `internal` cho một sản phẩm

@@ -49,8 +49,8 @@ Two habits decide whether this phase is useful:
   set **`project.form_factor` and `project.stakes`** from what the user picked on the cards or said — no
   assumption for a value they chose; infer only what was neither picked nor said, **with an `assumptions[]`
   entry** and its reason. `notes`: the gate message (`draft-to-ops` rule 15: "tôi" not "mình", no "bước/giai đoạn/giả định/addendum/brief"), not a field list.
-- **B-0.2 `project.form_factor`** — `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`,
-  `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
+- **B-0.2 `project.form_factor`** — an **array** of platforms, main one first (`["web_app","mobile_app"]` when the
+  user says "cả web và app"), values `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
 - **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. Drives NFR defaults at S-6; a
   guess comes with an `assumptions[]` entry. B-0.3 closes B-0: on a revision it may fix any B-0 field.
 - Never ask how the user wants to work and never write `project.working_mode` (retired): how much to ask
@@ -82,7 +82,7 @@ never write a section the product does not need. B-1 never writes `project.visio
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
-| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` — the server says them | `fixed:5.4` |
+| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`; `statement` English + `statement_vi` in the user's language, same meaning) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` — the server says them | `fixed:5.4` |
 
 Goal entries are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
 not "add an export button". 3–6 of them; more than that and none of them is a goal.
@@ -111,7 +111,7 @@ not "add an export button". 3–6 of them; more than that and none of them is a 
 2. `addendum[].target_section` must be a real section key (`fixed:*`, or `feature:<id>` / `function:<id>`
    once those exist). Unsure ⇒ `fixed:5.4`, and say so in `notes`.
 3. `content` keeps the user's own words and language; `content_en` is the English version that will be
-   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`. A gate correction keeps the user's words: "cả web và app" is never rewritten into "chỉ web" — if `project.form_factor` holds one value, put the other platforms in an addendum entry.
+   rendered. Both are required, never empty. A vision/goals correction at any Brief gate ⇒ `set addendum[id=…].content` + `.content_en` (`add`/`remove` a `goals` entry), never `project.vision`/`project.goals`. An `assumptions[]` entry about vision/goals gets `path: "addendum[id=<that vision/goals entry>]"`, never `project.vision`/`project.goals`. A gate correction keeps the user's words: "cả web và app" ⇒ `set project.form_factor` to `["web_app","mobile_app"]` (array, main platform first) — never "chỉ web".
 4. Never write `actors[]`, `use_cases[]`, `screens[]`, `functions[]` or any section here — the Brief is
    input to the SRS, not the SRS. Those come from S-2 onward.
 5. Ask what changes the brief; fill the rest with the most reasonable reading plus `assumptions[]`

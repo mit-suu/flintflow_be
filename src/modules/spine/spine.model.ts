@@ -31,7 +31,8 @@ const projectSchema = new Schema(
     type: nullableString,
     domain: nullableString,
     complexity: nullableString,
-    form_factor: nullableString,
+    // Mảng nền tảng (FLF-237); document cũ còn chuỗi — `spineSchema` chuẩn hoá khi đọc
+    form_factor: { type: [String], default: [] },
     stakes: nullableString,
     working_mode: { type: String, enum: ["fast", "coaching", null], default: null },
     review_mode: { type: String, enum: ["strict", "balanced", "fast"], default: "balanced" },
@@ -234,7 +235,8 @@ const otherRequirementSchema = new Schema(
       enum: ["risk", "assumption", "open_question", "technical_risk"],
       required: true
     },
-    statement: { type: String, default: "" }
+    statement: { type: String, default: "" },
+    statement_vi: { type: String }
   },
   opts
 )

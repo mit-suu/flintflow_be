@@ -457,7 +457,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
       { id: "B-0.2", status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" },
       { id: "B-0.3", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null }
     ]
-    spine.project = { ...spine.project, form_factor: "web_app", stakes: "production" }
+    spine.project = { ...spine.project, form_factor: ["web_app"], stakes: "production" }
     spine.assumptions = [
       {
         id: "AS01",
@@ -495,7 +495,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
 
     expect(result.message_vi).toBe("Được rồi, tôi chuyển sang ứng dụng điện thoại cho bệnh nhân. Bạn xem lại giúp nhé.")
     const spine = await repo.get(PROJECT)
-    expect(spine!.project.form_factor).toBe("mobile_app")
+    expect(spine!.project.form_factor).toEqual(["mobile_app"])
     const assumption = spine!.assumptions.find((a) => a.id === "AS01")!
     expect(assumption).toMatchObject({ statement: "The product is a mobile app.", statement_vi: "Sản phẩm là ứng dụng điện thoại.", status: "confirmed" })
     // confirmed_at do server đặt, không lấy từ model
@@ -513,7 +513,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     )
     const spine = await repo.get(PROJECT)
     expect(spine!.assumptions[0].status).toBe("rejected")
-    expect(spine!.project.form_factor).toBe("web_app")
+    expect(spine!.project.form_factor).toEqual(["web_app"])
   })
 
   it("đổi câu giả định mà không ghi đúng trường thật của nó ⇒ bị từ chối, Spine nguyên trạng", async () => {
@@ -544,7 +544,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     spine.progress = { ...(spine.progress as Record<string, unknown>), current_phase: "B-1", current_step: "B-1.4" }
     const done = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3"].map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
     spine.steps = [...done, { id: "B-1.4", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null }]
-    spine.project = { ...spine.project, form_factor: "web_app" }
+    spine.project = { ...spine.project, form_factor: ["web_app"] }
     const base = { rationale: "r", status: "unconfirmed", confirmed_at: null }
     spine.assumptions = [
       { ...base, id: "AS10", path: "project.form_factor", statement: "The product is a web app.", statement_vi: "Sản phẩm là ứng dụng web.", origin_step_id: "B-1.4" },
@@ -564,7 +564,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     const result = await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "không, là xếp hàng phòng khám", base_version: version }, { draftExecutor: async () => withNotes(ops) })
 
     const spine = await repo.get(PROJECT)
-    expect(spine!.project.form_factor).toBe("mobile_app")
+    expect(spine!.project.form_factor).toEqual(["mobile_app"])
     expect(spine!.assumptions.find((a) => a.id === "AS10")).toMatchObject({ status: "confirmed" })
     // Không có notes ⇒ vẫn có lời xác nhận dựng từ tóm tắt thay đổi
     expect(result.message_vi).toEqual(expect.any(String))

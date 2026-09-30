@@ -259,7 +259,7 @@ describe("T20: project rỗng đi trọn B-0.1 → B-2.3 → S-1.4 (mock provide
     // S-1.1 dựng project.vision/goals tiếng Anh, khớp 1:1 với addendum goals
     expect(final.project.vision, "S-1.1 dựng vision").toBeTruthy()
     expect(final.project.goals, "S-1.1 dựng goals 1:1").toEqual(core.goals.map((g) => g.content_en))
-    expect(final.project.form_factor).toBe("web_app")
+    expect(final.project.form_factor).toEqual(["web_app"])
     expect(final.project.stakes).toBe("production")
 
     // Brief lưu trong Spine, không trong transcript
@@ -469,7 +469,7 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     expect(String(prompts[0].conversation_summary)).toContain(IDEA)
 
     const final = (await repo.get(PROJECT))!
-    expect(final.project).toMatchObject({ system_name: null, form_factor: "mobile_app", stakes: "production" })
+    expect(final.project).toMatchObject({ system_name: null, form_factor: ["mobile_app"], stakes: "production" })
     expect(final.addendum).toHaveLength(1)
     expect(final.assumptions.map((a) => a.path)).toEqual(["project.form_factor", "project.stakes"])
     expect(final.assumptions[0].statement_vi).toBe("Ưu tiên ứng dụng điện thoại.")
@@ -535,7 +535,7 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     seedEmpty()
     const spine = db.spines[0] as { steps: unknown[]; project: Record<string, unknown> }
     spine.steps = acceptSteps(["B-0.1"])
-    spine.project.form_factor = "mobile_app"
+    spine.project.form_factor = ["mobile_app"]
     const elicit = vi.fn()
     const draft = vi.fn()
     const { events, emit } = collect()

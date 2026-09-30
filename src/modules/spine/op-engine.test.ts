@@ -73,7 +73,7 @@ vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
 
 import { spineSchema } from "./spine.schema.js"
-import type { Spine } from "./spine.types.js"
+import type { Change, Spine } from "./spine.types.js"
 import type { Op, Transaction } from "./op.types.js"
 import * as repo from "./spine.repository.js"
 import {
@@ -497,5 +497,36 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
 
   it("project chưa có Spine ⇒ 404", async () => {
     await expect(applyTransaction(PROJECT, txn(CASES[1].opCase.expected_ops))).rejects.toMatchObject({ statusCode: 404 })
+  })
+})
+
+describe("project.form_factor là mảng ở mọi đường ghi (FLF-237)", () => {
+  const base = (): Spine => ({ ...structuredClone(FIXTURE), project: { ...FIXTURE.project, form_factor: ["web_app"] } })
+
+  it("op set chuỗi (user pick qua /changes, prompt cũ) ⇒ Spine và change log giữ mảng; set trùng giá trị hiện có là no-op", () => {
+    const plan = planTransaction(base(), txn([{ op: "set", path: "project.form_factor", value: "mobile_app" }]), { startSeq: 1 })
+    expect(plan.spine.project.form_factor).toEqual(["mobile_app"])
+    expect(plan.changes[0]).toMatchObject({ path: "project.form_factor", before: ["web_app"], value: ["mobile_app"] })
+    const noop = planTransaction(base(), txn([{ op: "set", path: "project.form_factor", value: "web_app" }]), { startSeq: 1 })
+    expect(noop.changes).toEqual([])
+  })
+
+  it("change cũ còn giữ chuỗi vẫn revert được trên Spine đã đọc thành mảng (không revert_conflict)", () => {
+    const legacy = {
+      seq: 5,
+      txn: "t-legacy",
+      op: "set" as const,
+      path: "project.form_factor",
+      before: null,
+      value: "web_app",
+      by: "ai",
+      step_id: "B-0.1",
+      at: "2026-09-01T00:00:00.000Z",
+      reason: "legacy",
+      projectId: "p"
+    }
+    const reverted = planRevert(base(), [legacy as unknown as Change], { by: "user-1", startSeq: 10 })
+    expect(reverted.spine.project.form_factor).toEqual([])
+    expect(reverted.changes[0]).toMatchObject({ op: "revert", path: "project.form_factor", before: ["web_app"], value: [] })
   })
 })

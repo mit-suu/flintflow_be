@@ -103,7 +103,7 @@ Revision that changes an assumption (user: "bệnh nhân dùng app điện tho�
 ```json
 {
   "ops": [
-    { "op": "set", "path": "project.form_factor", "value": "mobile_app", "reason": "user: patients book on their phone" },
+    { "op": "set", "path": "project.form_factor", "value": ["mobile_app", "web_app"], "reason": "user: patients book on their phone; staff keep the web" },
     { "op": "set", "path": "assumptions[id=AS2].statement", "value": "The product is a mobile app.", "reason": "user corrected the platform" },
     { "op": "set", "path": "assumptions[id=AS2].statement_vi", "value": "Sản phẩm là ứng dụng điện thoại.", "reason": "user corrected the platform" },
     { "op": "set", "path": "assumptions[id=AS2].status", "value": "confirmed", "reason": "user settled it" }
