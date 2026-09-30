@@ -70,11 +70,10 @@ the next turn — do not pick the neighbouring concept because it sounds close.
 ## B-1 — The brief (6 steps)
 
 **Draft first, ask last.** Each step writes from what is already known — vision, goals, every addendum, the
-decisions ledger, the user's answers — and records what it inferred as `assumptions[]` the user confirms at the
-gate. A step with a draft to confirm asks **one** card ("Tôi đề xuất: … — đúng chưa?"), not a list of open questions.
-Ask only what cannot be reasonably assumed **and** would make the document wrong; never re-ask what an
-addendum or decision already holds, never ask what a later B-1 step owns (risks ⇒ B-1.6), never interview for a
-section the product does not need. B-1 never writes `project.vision`/`project.goals` — vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
+decisions ledger, the user's answers — and records what it inferred as `assumptions[]`. The phase interview
+before B-1.1 was the only asking turn: **no B-1 step asks**; a gap becomes a stated assumption, and the server reads
+every unconfirmed one back to the user at the B-1.6 gate. Never re-ask what an addendum or decision already holds,
+never write a section the product does not need. B-1 never writes `project.vision`/`project.goals` — vision and goals are addendum entries `topic: "vision"` / `"goals"`; S-1.1 turns them into the English SRS fields. Everything else is an addendum aimed at a section.
 
 | Step | Writes | `target_section` |
 | --- | --- | --- |
@@ -83,7 +82,7 @@ section the product does not need. B-1 never writes `project.vision`/`project.go
 | B-1.3 Value proposition & differentiation | addendum: what makes this worth using over the current way, per user group, drawn from vision/goals/B-1.2 — never invent a moat; no competitor questions or competitor assumptions for internal or public-sector projects | `fixed:1` |
 | B-1.4 MVP scope & feature hypotheses | addendum per capability, and the explicit not-now list | `fixed:1`, `fixed:3.1.2` |
 | B-1.5 Success metrics & learning goals | addendum per metric, with a number where the user gave one | `fixed:4.2.2`, `fixed:4.2.3` |
-| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself | `fixed:5.4` |
+| B-1.6 Risks, assumptions, open questions | `other_requirements[]` (`kind` = `risk` / `assumption` / `open_question`) **and** `assumptions[]` for anything you filled in yourself. `notes` = the closing brief summary, 2–4 sentences: problem & goals (read from the vision/goals addendum), main users, first-release scope, how success is measured, the biggest risk. Do NOT list assumptions in `notes` — the server says them | `fixed:5.4` |
 
 Goal entries are outcomes, not features: "cut the time to a first usable SRS from weeks to a day",
 not "add an export button". 3–6 of them; more than that and none of them is a goal.
