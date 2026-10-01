@@ -40,7 +40,7 @@ import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
-import { composeStepGateMessage } from "./gate-message.js"
+import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
@@ -1666,6 +1666,13 @@ export const runStep = async (
       summary: stepSummary,
       newAssumptionTexts: review.new_assumptions.map((a) => a.text_vi ?? a.text)
     })
+    // FLF-241: `new_assumptions` = đúng những điều tin cổng nói ra, vì FE confirm chính xác tập này khi user bấm "Đúng rồi,
+    // đi tiếp" (`GateCard.tsx` gọi `onConfirmAssumptions(assumptions.map(a => a.id))` trước khi gửi lệnh) — BE không tự
+    // confirm giả định ở `doAccept`. Tin do model viết (`gateNotes`) chỉ nói một phần ⇒ cắt xuống phần đó; phần còn lại ở
+    // lại `unconfirmed`, S-9.1 gom và cờ đỏ `unconfirmed_assumption` chặn ký baseline. Tin tự dựng từ `summary` thì tự nói
+    // hết điều tạm hiểu nên không lọc.
+    const spokenIds = (gateNotes ?? "").trim() === "" ? null : spokenAssumptionIds(gateMessage, review.new_assumptions)
+    const gateAssumptions = spokenIds ? review.new_assumptions.filter((a) => spokenIds.has(a.id)) : review.new_assumptions
     const gateEvent: Extract<StepEvent, { type: "gate_ready" }> = {
       type: "gate_ready",
       step_id: stepId,
@@ -1676,7 +1683,7 @@ export const runStep = async (
       wrote_ops: wroteOps,
       empty_sections: emptyFedSections(finalSpine, stepId),
       summary: stepSummary,
-      new_assumptions: review.new_assumptions,
+      new_assumptions: gateAssumptions,
       flags: { red: review.red_open, yellow: review.yellow_open, red_delta: review.red_delta, yellow_delta: review.yellow_delta },
       duration_ms: Date.now() - tracker.startedAt,
       credits_used: creditsUsed,
@@ -1687,7 +1694,12 @@ export const runStep = async (
         ? { no_change_reason: fieldAlreadySet && b0Field ? B0_ALREADY_SET_REASON[b0Field] : noChangeReason(stepDef.template_id, needsDraft) }
         : {})
     }
-    const resolution: GateResolution = d.resolveGate ? await d.resolveGate(gateEvent) : { quiet: false }
+    // Quyết định "bước im" phải thấy tập giả định ĐẦY ĐỦ: `isQuietStep` lọc chúng qua `conflictsWithLedger` để chặn bước
+    // tự Accept khi model vừa tạo giả định trái với điều user đã chốt. Chỉ `gate_payload` mới cắt xuống phần tin đã nói —
+    // cắt luôn ở đây thì giả định trái sổ không được nói ra sẽ lọt qua và bước tự Accept, user không thấy xung đột.
+    const resolution: GateResolution = d.resolveGate
+      ? await d.resolveGate({ ...gateEvent, new_assumptions: review.new_assumptions })
+      : { quiet: false }
     if (resolution.quiet) {
       // Bước im: không có gì để user bấm — không ghi trạng thái `gate`, đánh dấu `auto` để FE không dựng thẻ cổng
       emit({ ...gateEvent, auto: true })
