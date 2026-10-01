@@ -357,7 +357,7 @@ export const stepEventSchema = z.discriminatedUnion("type", [
     new_assumptions: z.array(assumptionBriefSchema),
     steps: z.array(z.object({ step_id: z.string(), label_vi: z.string(), auto_accepted: z.boolean() })),
     flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0), red_delta: z.number().int(), yellow_delta: z.number().int() }).optional(),
-    /** FLF-232: tin nhắn cổng cuối giai đoạn = tin của bước cuối + điều còn tạm hiểu từ các bước trước (không gọi thêm model). */
+    /** Tin nhắn cổng cuối giai đoạn = tin của bước cuối, cộng một câu đếm cho phần tạm hiểu chưa được nói (FLF-241, không gọi model). */
     message_vi: z.string().optional()
   }),
   z.object({

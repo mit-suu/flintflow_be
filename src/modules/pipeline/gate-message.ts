@@ -2,13 +2,17 @@
  * gate-message.ts
  * ─────────────────────────────────────────────────────────────────
  * Tin nhắn của cổng duyệt (FLF-232): cổng là một tin AI viết bằng lời thường + quick reply, không còn khung liệt kê.
- * Nội dung đến từ `notes` của lượt Draft (skill `draft-to-ops` viết 2–4 câu). Không có `notes` — project cũ, step tất định,
- * hoặc model bỏ trống — thì dựng tất định từ `summary[]` và giả định mới. Cổng cuối giai đoạn ghép tin của bước cuối với
- * những điều còn đang tạm hiểu của cả giai đoạn. Không bước nào ở đây gọi model.
+ * Nội dung đến từ `notes` của lượt Draft (skill `draft-to-ops` viết 2–4 câu) và dùng NGUYÊN VĂN. Không có `notes` — project
+ * cũ, step tất định, hoặc model bỏ trống — thì dựng tất định từ `summary[]` và giả định mới. Cổng cuối giai đoạn lấy tin của
+ * bước cuối, thêm nhiều nhất một câu đếm cho phần tạm hiểu chưa được nói. Không bước nào ở đây gọi model.
+ *
+ * FLF-241: server KHÔNG còn chèn câu "Tôi tạm hiểu là …" vào `notes`. Hợp đồng `new_assumptions` = đúng những gì tin nói ra
+ * vẫn giữ, nhưng theo chiều ngược: `spokenAssumptionIds` cắt danh sách xuống phần tin đã nói, thay vì nhồi câu cho tin phủ
+ * hết danh sách. Phần không được nói ở lại `unconfirmed` ⇒ S-9.1 gom ⇒ cờ đỏ chặn ký baseline.
  */
 
 import type { ChangeSummary } from "./pipeline.dto.js"
-import { contentWords, normalise, sentencesOf, wordsOf } from "./text-overlap.js"
+import { ASSUMPTION_OVERLAP_MIN_WORDS, contentWords, coversAssumption, normalise, sentencesOf } from "./text-overlap.js"
 
 export const FALLBACK_INVITE = "Bạn xem giúp, ổn thì mình đi tiếp nhé."
 const ASSUMPTION_INVITE = "Nếu chỗ nào khác thì bạn nói tôi nhé."
@@ -53,24 +57,7 @@ const stripEndPunctuation = (text: string): string => text.replace(/[\s.!?;,]+$/
 /** Hạ chữ hoa đầu câu khi nối sau "tạm hiểu là": "Nhân viên …" ⇒ "nhân viên …"; giữ nguyên từ viết tắt ("SMS", "HIS"). */
 const lowerFirst = (text: string): string => (/^\p{Lu}\p{Ll}/u.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text)
 
-/** Câu tạm hiểu, chưa có lời mời cuối. */
-const assumptionSentences = (texts: readonly string[]): string[] =>
-  texts
-    .map((t) => stripEndPunctuation(trimmed(t)))
-    .filter((t) => t !== "")
-    .map((text, i) => `Tôi ${i === 0 ? "" : "cũng "}tạm hiểu là ${lowerFirst(text)}.`)
-
-/**
- * Câu nói những điều AI đang tạm hiểu, không dùng chữ "giả định". MỌI điều đều được nói (chip "Đúng rồi" xác nhận đúng những
- * điều này), mỗi điều một câu ngắn: "Tôi tạm hiểu là A. Tôi cũng tạm hiểu là B. Nếu chỗ nào khác thì bạn nói tôi nhé." Rỗng ⇒ null.
- */
-export const assumptionSentence = (texts: readonly string[]): string | null => {
-  const sentences = assumptionSentences(texts)
-  return sentences.length === 0 ? null : [...sentences, ASSUMPTION_INVITE].join(" ")
-}
-
-const MATCH_RATIO = 0.6
-const MIN_CONTENT_WORDS = 3
+const ensureSentenceEnd = (text: string): string => (/[.!?…]$/u.test(text) ? text : `${text}.`)
 
 /**
  * Câu nói ra điều mình đang đoán (không phải kể như sự thật): "tôi tạm hiểu", "tôi đoán", "nếu khác bạn cứ nói"… Cụm bắt
@@ -87,39 +74,112 @@ const isHedged = (sentence: string): boolean =>
   HEDGE_PLAIN.test(normalise(sentence)) ||
   (!hasDiacritics(sentence) && HEDGE_UNACCENTED_TEXT.test(normalise(sentence)))
 
+/** Câu đã tự mang chủ ngữ ("Tôi suy ra …", "Mình hiểu là …") — nối thêm tiền tố sẽ ra câu hai chủ ngữ. */
+const SELF_SUBJECT = /^(tôi|mình|chúng)(?!\p{L})/iu
+
+/** Câu tạm hiểu, chưa có lời mời cuối. Câu đã tự nói ra là lời đoán thì giữ nguyên văn, không bọc tiền tố. */
+const assumptionSentences = (texts: readonly string[]): string[] =>
+  texts
+    .map((t) => stripEndPunctuation(trimmed(t)))
+    .filter((t) => t !== "")
+    .map((text, i) =>
+      isHedged(text) || SELF_SUBJECT.test(text) ? ensureSentenceEnd(text) : `Tôi ${i === 0 ? "" : "cũng "}tạm hiểu là ${lowerFirst(text)}.`
+    )
+
 /**
- * Lời `notes` của model đã nói điều tạm hiểu này NHƯ MỘT ĐIỀU ĐANG ĐOÁN chưa: có một câu vừa mang dấu hiệu đoán (`HEDGE`)
- * vừa chứa phần lớn TỪ NỘI DUNG của điều đó (so trong phạm vi câu, không phải cả đoạn). Câu tóm tắt kể điều đó như sự thật
+ * Câu nói những điều AI đang tạm hiểu, không dùng chữ "giả định". Chỉ dùng cho đường DỰ PHÒNG khi model không viết `notes`
+ * — đường đó tự nói hết nên mọi điều đều được nói, mỗi điều một câu ngắn: "Tôi tạm hiểu là A. Tôi cũng tạm hiểu là B. Nếu
+ * chỗ nào khác thì bạn nói tôi nhé." Rỗng ⇒ null.
+ */
+export const assumptionSentence = (texts: readonly string[]): string | null => {
+  const sentences = assumptionSentences(texts)
+  return sentences.length === 0 ? null : [...sentences, ASSUMPTION_INVITE].join(" ")
+}
+
+/**
+ * Lời của model đã nói điều tạm hiểu này NHƯ MỘT ĐIỀU ĐANG ĐOÁN chưa: có một câu vừa mang dấu hiệu đoán (`HEDGE`) vừa phủ
+ * hết nội dung của điều đó (`coversAssumption`, so trong phạm vi CÂU không phải cả đoạn). Câu tóm tắt kể điều đó như sự thật
  * ("bệnh nhân đặt lịch trên app, còn nhân viên làm trên web") KHÔNG tính — user không biết đó là điều cần xác nhận.
- * Nghi ngờ thì coi là CHƯA nói — nói thừa còn hơn để chip xác nhận điều user chưa thấy.
+ *
+ * FLF-241: phép đo này quyết định điều nào ĐƯỢC XÁC NHẬN ở cổng (trước đây chỉ quyết định có chèn thêm câu hay không), nên
+ * sai lệch phải nghiêng về CHẶT: coi là chưa nói thì điều đó ở lại `unconfirmed`, bị S-9.1 gom và cờ đỏ chặn ký baseline —
+ * vô hại; coi là đã nói khi user chưa đọc thì ghi `confirmed` sai. Vì vậy mẫu số là CHÍNH ĐIỀU TẠM HIỂU, không phải đoạn
+ * ngắn hơn: câu nói thiếu một phần không được tính (xem `coversAssumption`). Điều không có từ nội dung ⇒ chưa nói.
  */
 const isSpokenIn = (message: string, text: string): boolean => {
-  const content = [...contentWords(text)]
-  if (wordsOf(text).length === 0 || content.length === 0) return true
-  if (content.length < MIN_CONTENT_WORDS) return normalise(message).includes(normalise(text).trim())
-  return sentencesOf(message).some((sentence) => {
-    if (!isHedged(sentence)) return false
-    if (normalise(sentence).includes(normalise(text).trim())) return true
-    const spoken = contentWords(sentence)
-    const hits = content.filter((w) => spoken.has(w)).length
-    return hits / content.length >= MATCH_RATIO
-  })
+  const content = contentWords(text)
+  if (content.size === 0) return false
+  const needle = normalise(text).trim()
+  // Điều quá ngắn không đủ từ nội dung để so bằng tỷ lệ ⇒ chỉ nhận khi câu đoán chứa nguyên văn nó.
+  if (content.size < ASSUMPTION_OVERLAP_MIN_WORDS)
+    return sentencesOf(message).some((sentence) => isHedged(sentence) && normalise(sentence).includes(needle))
+  return sentencesOf(message).some(
+    (sentence) => isHedged(sentence) && (normalise(sentence).includes(needle) || coversAssumption(sentence, text))
+  )
 }
 
-const ensureSentenceEnd = (text: string): string => (/[.!?…]$/u.test(text) ? text : `${text}.`)
+export interface GateAssumptionBrief {
+  id: string
+  text: string
+  text_vi?: string
+}
 
-/** Câu cuối là lời mời đi tiếp / sửa ("… mình đi tiếp nhé", "nếu khác bạn cứ nói") — câu tạm hiểu phải chèn TRƯỚC nó. */
-const CLOSING_INVITE = /di tiep|tiep nhe|tiep nha|cu noi|noi toi|noi minh|neu (cho nao )?khac|xem giup|sang phan/
+/**
+ * Id của những điều tạm hiểu mà `message` thực sự nói ra. `gate_payload.new_assumptions` phải đúng tập này: chip "Đúng rồi,
+ * đi tiếp" ở FE xác nhận chính xác những id trong đó (`GateCard.tsx` gọi `onConfirmAssumptions` trước khi gửi lệnh), nên id
+ * nào không được tin nói ra thì không được có mặt — nếu không user xác nhận điều mình chưa đọc.
+ */
+export const spokenAssumptionIds = (message: string | null | undefined, assumptions: readonly GateAssumptionBrief[]): Set<string> => {
+  const text = trimmed(message)
+  if (text === "") return new Set()
+  return new Set(assumptions.filter((a) => isSpokenIn(text, a.text_vi ?? a.text)).map((a) => a.id))
+}
 
-/** Chèn các câu tạm hiểu trước lời mời cuối của `message`; không có lời mời cuối thì nối sau và tự thêm lời mời. */
-const insertAssumptions = (message: string, texts: readonly string[]): string => {
-  const sentences = assumptionSentences(texts)
-  if (sentences.length === 0) return message
+/**
+ * Câu cuối là lời mời đi tiếp / duyệt / sửa — câu thêm vào phải chèn TRƯỚC nó, vì lời mời phải đứng cuối tin. Danh sách đi
+ * theo lời thật của model: ngoài "… mình đi tiếp nhé" / "nếu khác bạn cứ nói" còn có "bạn xem qua, ổn thì mình chốt phần…",
+ * "bạn đồng ý thì mình mở phần…" (gặp ở lượt chạy thật) — thiếu chúng thì câu đếm rơi xuống sau lời mời.
+ */
+const CLOSING_INVITE =
+  /di tiep|tiep nhe|tiep nha|cu noi|noi toi|noi minh|neu (cho nao )?khac|xem giup|xem qua|xem lai|dong y thi|chot phan|sang phan|mo phan/
+
+/** Chèn `sentence` trước lời mời cuối của `message`; không có lời mời cuối thì nối sau. */
+const insertBeforeInvite = (message: string, sentence: string): string => {
   const parts = sentencesOf(message)
   const last = parts[parts.length - 1] ?? ""
-  if (parts.length > 1 && CLOSING_INVITE.test(normalise(last))) return [...parts.slice(0, -1), ...sentences, last].join(" ")
-  return [ensureSentenceEnd(message), ...sentences, ASSUMPTION_INVITE].join(" ")
+  if (parts.length > 0 && CLOSING_INVITE.test(normalise(last))) return [...parts.slice(0, -1), sentence, last].join(" ")
+  return [ensureSentenceEnd(message), sentence].join(" ")
 }
+
+/**
+ * Một câu đếm cho những điều tạm hiểu mà tin cổng giai đoạn KHÔNG nói ra — ngoại lệ duy nhất của luật "tin cổng dùng nguyên
+ * văn `notes`" (FLF-241). Giữ ý định FLF-232 (user biết còn nợ gì) mà bỏ cách làm cũ (nối một câu cho từng điều, đo được 8
+ * câu nối nhau ở B-1.6). Vì không nói ra từng điều nên chúng KHÔNG vào `new_assumptions`; chúng ở lại `unconfirmed`, S-9.1
+ * gom lại và cờ đỏ `unconfirmed_assumption` chặn ký baseline. Dùng đúng cụm "điều tôi tạm hiểu" của cờ ở
+ * `deterministic-check.ts` cho đồng giọng, không dùng chữ nội bộ "giả định".
+ */
+const unspokenCountSentence = (count: number): string => `Còn ${count} điều tôi tạm hiểu nữa, mình rà ở phần tổng kết.`
+
+/**
+ * Câu đếm do model tự viết trong `notes`. Chỉ server được đếm — nó biết số thật từ Spine, model thì đoán: ở lượt chạy
+ * 01/10 model viết "Còn 6 điều…" trong khi số thật là 4, và tin cổng B-1.6 hiện ra hai câu đếm đá nhau. `draft-to-ops` đã
+ * được sửa để không đếm nữa; đây là lưới chặn, vì một câu của model không được phép làm vỡ bất biến "đúng một câu đếm".
+ *
+ * So trên chữ bỏ dấu và cho phép từ đệm mở đầu ("Vẫn còn…", "Hiện còn…") — model gõ không dấu và thêm từ đệm là chuyện
+ * thường, cả file này đã tính tới (`HEDGE_UNACCENTED_TEXT`).
+ */
+const MODEL_COUNT_SENTENCE = /(^|[^a-z0-9])con\s+(\d+|mot|hai|ba|bon|nam|sau|bay|tam|chin|muoi)\s+dieu\s+(toi|minh)\s+tam hieu/
+
+/**
+ * Bỏ mọi câu đếm do model tự viết. Phải chạy TRƯỚC khi đo "tin đã nói những điều nào": nếu đo trên bản chưa lọc thì một
+ * giả định chỉ được nhắc trong câu đếm sẽ bị tính là đã nói, rồi câu đó bị bỏ đi ⇒ `new_assumptions` chứa id mà tin cuối
+ * cùng không hề nói, và số của câu đếm thật bị thiếu.
+ */
+export const stripModelCountSentences = (message: string | null | undefined): string =>
+  sentencesOf(trimmed(message))
+    .filter((s) => !MODEL_COUNT_SENTENCE.test(normalise(s)))
+    .join(" ")
+    .trim()
 
 /** "Tôi đã cập nhật 3 use case và 2 yêu cầu phi chức năng." từ `summary[]`; không có gì đáng kể ⇒ null. */
 const summarySentence = (summary: readonly ChangeSummary[]): string | null => {
@@ -154,10 +214,9 @@ export interface StepGateMessageInput {
  */
 export const composeStepGateMessage = (input: StepGateMessageInput): string | undefined => {
   const notes = trimmed(input.notes)
-  if (notes !== "") {
-    // `notes` là tin cổng, nhưng chip "Đúng rồi" xác nhận mọi `new_assumptions` ⇒ điều model không nhắc thì thêm câu nói nó
-    return insertAssumptions(notes, (input.newAssumptionTexts ?? []).filter((t) => !isSpokenIn(notes, t)))
-  }
+  // `notes` là tin cổng, dùng nguyên văn. Chip "Đúng rồi" xác nhận đúng những điều tin này nói ra — tập đó do
+  // `spokenAssumptionIds` cắt ra khi dựng `new_assumptions`, không còn nhồi câu cho tin phủ hết danh sách (FLF-241).
+  if (notes !== "") return notes
   const changed = summarySentence(input.summary)
   const assumed = assumptionSentence(input.newAssumptionTexts ?? [])
   if (!changed && !assumed) return undefined
@@ -167,18 +226,21 @@ export const composeStepGateMessage = (input: StepGateMessageInput): string | un
 export interface PhaseGateMessageInput {
   /** Tin nhắn cổng của bước cuối giai đoạn (đã qua `composeStepGateMessage`). */
   lastMessage?: string
-  /** Câu tạm hiểu của các bước TRƯỚC trong giai đoạn mà user chưa xác nhận (bước cuối đã tự nói giả định của nó). */
-  unconfirmedTexts: readonly string[]
+  /** Số điều tạm hiểu còn `unconfirmed` của giai đoạn mà tin KHÔNG nói ra — nói bằng một câu đếm, không liệt kê. */
+  unspokenCount: number
 }
 
 /**
- * Cổng cuối giai đoạn: tin của bước cuối (đã tự nói giả định của nó) + MỌI điều còn tạm hiểu từ các bước trước, kể cả bước
- * chạy im. Không có cả hai ⇒ `undefined`.
+ * Cổng cuối giai đoạn: tin của bước cuối dùng nguyên văn, cộng một câu đếm khi còn điều tạm hiểu chưa được nói. Không có cả
+ * hai ⇒ `undefined`.
  */
 export const composePhaseGateMessage = (input: PhaseGateMessageInput): string | undefined => {
-  const last = trimmed(input.lastMessage)
-  const unspokenTexts = input.unconfirmedTexts.filter((t) => last === "" || !isSpokenIn(last, t))
-  return last === "" ? (assumptionSentence(unspokenTexts) ?? undefined) : insertAssumptions(last, unspokenTexts)
+  // Bỏ câu đếm model tự viết trước khi thêm câu đếm thật ⇒ tin luôn có đúng một câu đếm, với số của Spine. Nơi gọi đã lọc
+  // trước khi đo (xem `stripModelCountSentences`); lọc lại ở đây là bất biến tại chỗ, không phải việc lặp.
+  const last = stripModelCountSentences(input.lastMessage)
+  const count = input.unspokenCount > 0 ? unspokenCountSentence(input.unspokenCount) : null
+  if (last === "") return count ?? undefined
+  return count ? insertBeforeInvite(last, count) : last
 }
 
 /**

@@ -683,12 +683,11 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
   it("phaseGateAssumptions: cổng cuối giai đoạn lấy MỌI giả định chưa xác nhận của giai đoạn từ Spine (kể cả bước im chạy ở lượt trước)", async () => {
     seedB14()
     const spine = (await repo.get(PROJECT))!
-    // Chỉ AS10 là của lần chạy hiện tại (bước cuối); AS11 do B-1.2 sinh ở lượt trước
-    const { assumptions, earlierTexts } = phaseGateAssumptions(spine, "B-1.6", new Set(["AS10"]))
-    expect(assumptions.map((a) => a.id).sort()).toEqual(["AS10", "AS11"])
-    expect(earlierTexts).toEqual(["Mức độ là vận hành thật."])
+    // AS10 do bước cuối sinh, AS11 do B-1.2 sinh ở lượt trước — tập trả về là ĐẦY ĐỦ, việc cắt theo lời đã nói là của cổng
+    expect(phaseGateAssumptions(spine, "B-1.6").map((a) => a.id).sort()).toEqual(["AS10", "AS11"])
+    expect(phaseGateAssumptions(spine, "B-1.6").find((a) => a.id === "AS11")?.text_vi).toBe("Mức độ là vận hành thật.")
     spine.assumptions.find((a) => a.id === "AS11")!.status = "confirmed"
-    expect(phaseGateAssumptions(spine, "B-1.6", new Set()).assumptions.map((a) => a.id)).toEqual(["AS10"])
+    expect(phaseGateAssumptions(spine, "B-1.6").map((a) => a.id)).toEqual(["AS10"])
   })
 
   it("accept/regenerate không có message_vi (tương thích FE cũ)", async () => {
