@@ -27,7 +27,7 @@ import { applyTransaction } from "../spine/op-engine.js"
 import { gate, phaseGateAssumptions } from "./gate.service.js"
 import { getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
 import { isQuietStep, type QuietVerdict } from "./quiet-step.js"
-import { composePhaseGateMessage } from "./gate-message.js"
+import { composePhaseGateMessage, spokenAssumptionIds, stripModelCountSentences } from "./gate-message.js"
 import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
@@ -506,12 +506,21 @@ const decideStep = async ({ projectId, next, unit, gateEvent, signals, phaseSumm
   })
   if (verdict.quiet) return { verdict, afterSpine, phaseGate: null }
 
-  // FLF-232: tin nhắn cổng = tin của bước cuối (đã tự nói giả định của nó) + MỌI điều tạm hiểu còn lại của giai đoạn, kể cả do
-  // bước chạy im sinh ra. `new_assumptions` của cổng là đúng danh sách được nói ra — chip "Đúng rồi" chỉ xác nhận chúng.
-  // Dựng từ Spine, không từ bộ nhớ của lần chạy này: chạy tiếp sau khi tải lại thì các bước im của lượt trước không còn ở đó.
-  const lastStepIds = new Set((gateEvent.new_assumptions ?? []).map((a) => a.id))
-  const { assumptions: spokenAssumptions, earlierTexts } = phaseGateAssumptions(afterSpine, next.id, lastStepIds)
-  const phaseMessage = composePhaseGateMessage({ lastMessage: gateEvent.message_vi, unconfirmedTexts: earlierTexts })
+  // FLF-232 giữ ý định, FLF-241 đổi cách làm: `new_assumptions` của cổng vẫn là đúng danh sách tin nói ra (chip "Đúng rồi"
+  // chỉ xác nhận chúng), nhưng tin không còn nối một câu cho từng điều tạm hiểu còn lại của giai đoạn — đo được 8 câu nối
+  // nhau ở B-1.6. Phần không được nói chỉ còn MỘT câu đếm để user biết còn nợ gì, và không vào `new_assumptions`: nó ở lại
+  // `unconfirmed`, S-9.1 gom và cờ đỏ chặn ký baseline. Tập đầy đủ dựng từ Spine, không từ bộ nhớ của lần chạy này: chạy
+  // tiếp sau khi tải lại thì các bước im của lượt trước không còn ở đó.
+  const phaseAssumptions = phaseGateAssumptions(afterSpine, next.id)
+  // Đo trên bản ĐÃ bỏ câu đếm model tự viết, vì đó là lời sẽ bị gỡ khỏi tin cuối: đo trên bản chưa lọc thì điều chỉ được
+  // nhắc trong câu đó bị tính là đã nói rồi câu đó biến mất ⇒ `new_assumptions` chứa id tin không nói, và N bị thiếu.
+  const spokenFrom = stripModelCountSentences(gateEvent.message_vi)
+  const spokenIds = spokenAssumptionIds(spokenFrom, phaseAssumptions)
+  const spokenAssumptions = phaseAssumptions.filter((a) => spokenIds.has(a.id))
+  const phaseMessage = composePhaseGateMessage({
+    lastMessage: spokenFrom,
+    unspokenCount: phaseAssumptions.length - spokenAssumptions.length
+  })
   const phaseGate: Extract<StepEvent, { type: "phase_gate" }> = {
     type: "phase_gate",
     step_id: next.id,

@@ -250,8 +250,19 @@ export const assumptionSchema = z.strictObject({
   id,
   path: z.string().min(1),
   statement: z.string(),
-  /** Bản ngôn ngữ của user (FLF-221) — hiện ở cổng duyệt/Brief; `statement` (EN) mới vào SRS. Spine cũ không có. */
-  statement_vi: z.string().min(1).nullish(),
+  /**
+   * Bản ngôn ngữ của user (FLF-221) — hiện ở cổng duyệt/Brief; `statement` (EN) mới vào SRS. Spine cũ không có.
+   *
+   * FLF-241: trần 200 ký tự là LƯỚI chặn ca cực đoan, không phải cách dạy — `draft-to-ops` dạy viết một mệnh đề ~15 từ, và
+   * điều cần hai mệnh đề thì tách thành hai giả định. Đặt ở đây vì cổng duyệt đọc đúng câu này ra cho user, và phép đo "tin
+   * cổng đã nói điều này chưa" so trên nó; câu 30+ từ vừa khó đọc vừa khó đạt ngưỡng trùng.
+   *
+   * Chỉ trần ở field này. `statement` (EN) render vào SRS nên không bị trần — cùng lý lẽ với `nfrSchema`. Quan trọng hơn:
+   * `spineSchema` được parse trên TOÀN Spine ở cuối mỗi lô (`op-engine.ts` `schemaViolations`), nên một trần quá chặt
+   * không chỉ áp cho bản ghi mới — nó chặn mọi lần ghi tiếp của project đang giữ bản ghi dài hơn. Dữ liệu đo được:
+   * `statement` dài nhất 201 ký tự (đã vượt 200), `statement_vi` dài nhất 160.
+   */
+  statement_vi: z.string().min(1).max(200).nullish(),
   rationale: z.string(),
   /** Lý do bằng ngôn ngữ user — hiện "Vì sao" ở cổng duyệt cạnh `statement_vi`. Spine cũ không có. */
   rationale_vi: z.string().min(1).nullish(),
