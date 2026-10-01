@@ -475,14 +475,11 @@ describe("FLF-221: B-0 mở đầu bằng chat", () => {
     expect(final.assumptions[0].statement_vi).toBe("Ưu tiên ứng dụng điện thoại.")
     // text_vi đi kèm giả định mới ở gate; dữ liệu không có statement_vi thì không có text_vi
     const gateReady = events.find((e) => e.type === "gate_ready") as Extract<StepEvent, { type: "gate_ready" }>
-    // notes không nhắc hai điều tạm hiểu ⇒ server nối thêm câu nói chúng, để chip "Đúng rồi" chỉ xác nhận điều user đã đọc
-    expect(gateReady.message_vi).toBe(
-      "Ứng dụng đặt lịch cắt tóc cho tiệm nhỏ. Tôi tạm hiểu là ưu tiên ứng dụng điện thoại. Tôi cũng tạm hiểu là real customers, no regulation. Nếu chỗ nào khác thì bạn nói tôi nhé."
-    )
-    expect(gateReady.new_assumptions).toEqual([
-      { id: "AS01", text: "Mobile app first.", text_vi: "Ưu tiên ứng dụng điện thoại." },
-      { id: "AS02", text: "Real customers, no regulation." }
-    ])
+    // FLF-241: tin cổng dùng nguyên văn notes. notes không nhắc hai điều tạm hiểu ⇒ danh sách xác nhận cắt xuống rỗng, để
+    // chip "Đúng rồi" chỉ xác nhận điều user đã đọc; hai điều đó ở lại `unconfirmed` cho S-9.1 gom.
+    expect(gateReady.message_vi).toBe("Ứng dụng đặt lịch cắt tóc cho tiệm nhỏ.")
+    expect(gateReady.new_assumptions).toEqual([])
+    expect(final.assumptions.map((a) => a.status)).toEqual(["unconfirmed", "unconfirmed"])
     const messages = db.sessions[0].messages as { role: string; content: string; step: string }[]
     expect(messages[0]).toMatchObject({ role: "user", content: IDEA, step: "B-0.1" })
   })
@@ -718,11 +715,16 @@ describe("FLF-232 vòng sửa 1: cổng cuối giai đoạn nói mọi điều t
     })
 
     const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
-    expect(phaseGate.new_assumptions.map((a) => a.text_vi).sort()).toEqual(Object.values(spoken).sort())
-    for (const text of Object.values(spoken)) expect(phaseGate.message_vi).toContain(text.charAt(0).toLowerCase() + text.slice(1))
+    // FLF-241: chỉ điều tin cổng thực sự nói ra được xác nhận. Tin của B-1.6 (đường dự phòng, không notes) nói điều của
+    // chính B-1.6; bốn điều của các bước im còn lại chỉ được ĐẾM bằng một câu, nên không vào `new_assumptions`.
+    expect(phaseGate.new_assumptions.map((a) => a.text_vi)).toEqual([spoken["B-1.6"]])
+    expect(phaseGate.message_vi).toContain(spoken["B-1.6"])
+    expect(phaseGate.message_vi).toContain("Còn 4 điều tôi tạm hiểu nữa, mình rà ở phần tổng kết.")
+    for (const stepId of ["B-1.2", "B-1.3", "B-1.4", "B-1.5"]) expect(phaseGate.message_vi, stepId).not.toContain(spoken[stepId])
     expect(phaseGate.message_vi).not.toMatch(/điều nhỏ khác|giả định/)
-    // Bước im lặng thật sự đã tự qua — các giả định của chúng vẫn được nói ở cổng cuối
+    // Bước im lặng thật sự đã tự qua — điều tạm hiểu của chúng vẫn ở `unconfirmed` để S-9.1 gom, không mất dấu
     expect(events.filter((e) => e.type === "auto_accepted").length).toBeGreaterThan(0)
+    expect((await repo.get(PROJECT))!.assumptions.filter((a) => a.status === "unconfirmed")).toHaveLength(5)
   })
 
   it("giả định đã xác nhận/bác bỏ không nằm trong danh sách cổng", async () => {
@@ -740,9 +742,13 @@ describe("FLF-232 vòng sửa 1: cổng cuối giai đoạn nói mọi điều t
       },
       message: "Mục tiêu là giảm khách bỏ hẹn"
     })
-    // Người dùng xác nhận AS01 ở nơi khác trước khi cổng dựng: mô phỏng bằng cách kiểm danh sách hiện tại là AS01 chưa xác nhận
+    // AS01 do B-1.2 sinh, tin cổng của B-1.6 không nhắc tới ⇒ không được xác nhận, chỉ vào câu đếm (FLF-241). Giả định đã
+    // xác nhận/bác bỏ thì không vào cả hai: không trong `new_assumptions`, cũng không được đếm.
     const phaseGate = events.find((e) => e.type === "phase_gate") as Extract<StepEvent, { type: "phase_gate" }>
-    expect(phaseGate.new_assumptions.map((a) => a.id)).toEqual(["AS01"])
+    expect(phaseGate.new_assumptions).toEqual([])
+    expect(phaseGate.message_vi).toContain("Còn 1 điều tôi tạm hiểu nữa")
+    const spine = (await repo.get(PROJECT))!
+    expect(spine.assumptions.find((a) => a.id === "AS01")?.status).toBe("unconfirmed")
   })
 })
 
@@ -869,10 +875,12 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     const [phaseGate] = gates(events)
     expect(gates(events)).toHaveLength(1)
     expect(phaseGate.step_id).toBe("B-1.6")
-    const expected = Object.keys(TEXTS).map((_, i) => `AS0${i + 1}`)
-    expect(phaseGate.new_assumptions.map((a) => a.id).sort()).toEqual(expected)
-    for (const text of Object.values(TEXTS)) expect(phaseGate.message_vi, text).toContain(text)
-    expect(phaseGate.message_vi).toContain(SUMMARY)
+    // FLF-241: `notes` của B-1.6 (SUMMARY) kể tóm tắt, không nói điều nào ra như lời đoán ⇒ không điều nào được xác nhận;
+    // cả 6 điều của giai đoạn vào đúng MỘT câu đếm, thay cho 6 câu "Tôi tạm hiểu là …" nối nhau của chiều cũ.
+    expect(phaseGate.new_assumptions).toEqual([])
+    for (const text of Object.values(TEXTS)) expect(phaseGate.message_vi, text).not.toContain(text)
+    expect(phaseGate.message_vi).toBe(`${SUMMARY} Còn 6 điều tôi tạm hiểu nữa, mình rà ở phần tổng kết.`)
+    expect(phaseGate.message_vi?.match(/tạm hiểu/g)).toHaveLength(1)
     expect(phaseGate.message_vi).not.toMatch(/giả định|bước|giai đoạn/i)
     // Lượt hỏi gộp không hỏi gì: lời AI được phát và ghi làm dấu "đã phỏng vấn"; tin mở giai đoạn ghi đúng một lần dưới đơn vị
     const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
@@ -901,8 +909,8 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     expect(last?.status).toBe("gate")
     const [phaseGate] = gates(events)
     expect(last?.phase_gate).toEqual(phaseGate)
-    expect((last?.phase_gate as typeof phaseGate).new_assumptions).toHaveLength(6)
-    expect((last?.phase_gate as typeof phaseGate).message_vi).toContain(TEXTS["B-1.1"])
+    expect((last?.phase_gate as typeof phaseGate).new_assumptions).toEqual([])
+    expect((last?.phase_gate as typeof phaseGate).message_vi).toContain("Còn 6 điều tôi tạm hiểu nữa")
   })
 
   it("Mọi bước: bước dừng là cổng thật — không auto, run-state `gate`", async () => {
@@ -915,7 +923,7 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     expect((await getRunState(PROJECT, "B-1.1"))?.status).toBe("gate")
   })
 
-  it("chuỗi dừng giữa chừng rồi chạy tiếp ⇒ cổng cuối vẫn nói giả định của các bước đã chạy ở lượt trước", async () => {
+  it("chuỗi dừng giữa chừng rồi chạy tiếp ⇒ cổng cuối vẫn đếm đủ giả định của các bước đã chạy ở lượt trước", async () => {
     seedB1({ reviewMode: "fast" })
     const elicit = trackedElicit()
     const failing = runPhase(PROJECT, "B-1", SESSION, USER, collect().emit, { elicitExecutor: elicit.executor, draftExecutor: drafts("B-1.3"), message: "Đặt lịch khám" })
@@ -926,8 +934,9 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
 
     const [phaseGate] = gates(events)
     expect(phaseGate.step_id).toBe("B-1.6")
-    for (const text of Object.values(TEXTS)) expect(phaseGate.message_vi, text).toContain(text)
-    expect(phaseGate.new_assumptions).toHaveLength(6)
+    // Số trong câu đếm dựng từ Spine, không từ bộ nhớ lượt chạy: 6 điều tính đủ cả các bước đã chạy ở lượt bị ngắt
+    expect(phaseGate.message_vi).toContain("Còn 6 điều tôi tạm hiểu nữa")
+    expect(phaseGate.new_assumptions).toEqual([])
     // Đúng một lượt hỏi gộp trên cả chuỗi bị ngắt rồi chạy tiếp, không lượt Elicit nào của B-1.x
     expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
   })
@@ -1030,6 +1039,44 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     await run
     expect(elicit.calls.map((c) => c.step_id)).toEqual(["B-1"])
     expect(gates(events)).toHaveLength(1)
+  })
+
+  /**
+   * FLF-241 cắt `gate_payload.new_assumptions` xuống phần tin cổng thực sự nói ra. Quyết định "bước im" KHÔNG được dùng tập
+   * đã cắt đó: nó lọc giả định qua sổ quyết định để chặn bước tự Accept khi model vừa tạo điều trái với điều user đã chốt.
+   * Dùng tập đã cắt thì giả định trái sổ mà tin không nhắc sẽ lọt, bước tự Accept, user không bao giờ thấy xung đột.
+   */
+  it("giả định trái sổ quyết định mà tin cổng không nhắc ⇒ bước vẫn dừng, không tự Accept", async () => {
+    seedB1({ reviewMode: "fast" })
+    ;(db.spines[0] as { decisions: unknown[] }).decisions = [
+      { id: "DC01", topic_key: "concurrent_users", question: "Bao nhiêu lượt khám mỗi ngày?", answer: "800", step_id: "B-1", at: "2026-09-30T00:00:00.000Z", superseded_by: null }
+    ]
+    const { events, emit } = collect()
+    await runPhase(PROJECT, "B-1", SESSION, USER, emit, {
+      elicitExecutor: trackedElicit().executor,
+      draftExecutor: async (_type, input) => {
+        const stepId = (input.promptVariables as { step_id: string }).step_id
+        if (stepId !== "B-1.4") return draftResult([])
+        // `notes` không nhắc giả định này ⇒ nó rơi khỏi `new_assumptions`, nhưng vẫn phải chặn bước tự Accept
+        return draftResult(
+          [
+            {
+              op: "add",
+              path: "assumptions[]",
+              value: { id: "AS09", path: "project.vision", statement: "System handles 500 concurrent_users per day.", statement_vi: "Hệ thống đáp ứng 500 lượt khám mỗi ngày.", rationale: "r", origin_step_id: stepId, status: "unconfirmed", confirmed_at: null }
+            }
+          ],
+          "Tôi dựng xong phần phạm vi. Bạn xem qua nhé."
+        )
+      },
+      message: "Đặt lịch khám"
+    })
+
+    const ready = events.find((e) => e.type === "gate_ready" && e.step_id === "B-1.4") as Extract<StepEvent, { type: "gate_ready" }>
+    expect(ready.auto, "B-1.4 không được tự Accept khi có giả định trái sổ").toBeUndefined()
+    expect(events.filter((e) => e.type === "auto_accepted").map((e) => e.step_id)).not.toContain("B-1.4")
+    // Payload vẫn bị cắt: tin không nói ra giả định đó nên nó không được chip "Đúng rồi" xác nhận
+    expect(ready.new_assumptions).toEqual([])
   })
 
   it("phỏng vấn đã diễn ra trước đó mà lượt chạy mang tin mới ⇒ bước đầu nhận tin, Elicit chỉ giữ câu mâu thuẫn", async () => {

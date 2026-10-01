@@ -23,7 +23,7 @@ import { userOpSchema, type Op } from "../spine/op.types.js"
 import { parsePath, PathError } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
-import { contentWords, normalise, overlapRatio } from "./text-overlap.js"
+import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { orphanEntities } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
@@ -274,25 +274,6 @@ export const PROJECT_ENUM_VALUES: Readonly<Record<"form_factor" | "stakes", read
   form_factor: ["web_app", "mobile_app", "desktop_app", "api_service", "cli", "embedded"],
   stakes: ["internal", "production", "regulated"]
 }
-
-/**
- * Ngưỡng từ nội dung trùng (theo câu ngắn hơn) để coi giả định mới là diễn lại giả định đã có. Đo trên lượt chạy thật: câu
- * diễn lại kèm chi tiết thêm đạt 0.78–0.83; hai giả định khác nhau nhưng cùng chủ đề (kênh báo qua app / dịch vụ SMS) 0.63.
- */
-const ASSUMPTION_OVERLAP_RATIO = 0.75
-/** Câu quá ngắn (ít từ nội dung) chỉ so nguyên văn — vài từ trùng không đủ nói lên cùng nghĩa ("Assumption B-1.1" / "B-1.2"). */
-const ASSUMPTION_OVERLAP_MIN_WORDS = 5
-/** Từ phủ định: "không cần thanh toán online" và "cần thanh toán online" trùng gần hết từ nhưng ngược nghĩa. */
-const NEGATION = /(^|[^a-z0-9])(khong|chua|not|no|never)([^a-z0-9]|$)/
-const negated = (text: string): boolean => NEGATION.test(normalise(text))
-
-/** Giả định `next` diễn lại gần nghĩa giả định `existing` (cả hai đủ dài, cùng chiều khẳng định/phủ định). */
-const restatesAssumption = (next: string, existing: string | null | undefined): boolean =>
-  typeof existing === "string" &&
-  negated(next) === negated(existing) &&
-  contentWords(next).size >= ASSUMPTION_OVERLAP_MIN_WORDS &&
-  contentWords(existing).size >= ASSUMPTION_OVERLAP_MIN_WORDS &&
-  overlapRatio(next, existing) >= ASSUMPTION_OVERLAP_RATIO
 
 /** Câu giả định đã chuẩn hoá để so trùng: chữ thường, gộp khoảng trắng, bỏ dấu câu cuối. */
 const assumptionKey = (text: unknown): string =>
