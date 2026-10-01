@@ -37,7 +37,7 @@ import {
   type StepRunnerDeps
 } from "./step-runner.service.js"
 import { gateActionSchema, type ChangeSummary } from "./pipeline.dto.js"
-import { composeStepGateMessage } from "./gate-message.js"
+import { composeStepGateMessage, type GateAssumptionBrief } from "./gate-message.js"
 import { acquireRun, finishRun } from "./run-state.service.js"
 import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
@@ -187,6 +187,12 @@ const assertVersion = (record: SpineRecord, baseVersion: number): void => {
 
 // ─── accept / accept_as_is ─────────────────────────────────────────
 
+/**
+ * Chốt một bước. Bất biến phải giữ: hàm này KHÔNG đụng `assumptions[].status` — "Đúng rồi, đi tiếp" xác nhận điều tạm hiểu ở
+ * FE, không ở BE. `GateCard.tsx` gọi `onConfirmAssumptions(assumptions.map(a => a.id))` với đúng `gate_payload.new_assumptions`
+ * TRƯỚC khi gửi lệnh accept, nên tập đó phải là đúng những điều tin cổng đã nói ra (`spokenAssumptionIds`, FLF-241). Điều
+ * không được nói ở lại `unconfirmed`: S-9.1 gom hết, và cờ đỏ `unconfirmed_assumption` chặn ký baseline ở S-9.5.
+ */
 const doAccept = async (projectId: string, stepId: string, userId: string, record: SpineRecord, yellowFlagNote: string | null): Promise<number> => {
   const spine = stripRecord(record)
   const ops: Op[] = [
@@ -250,20 +256,15 @@ export const gateAssumptionIdsOf = (spine: Spine, stepId: string): Set<string> =
 }
 
 /**
- * Điều tạm hiểu cổng cuối giai đoạn nói với user: dựng từ Spine (không từ bộ nhớ của lần chạy hiện tại — chạy tiếp/tải lại
- * sau khi các bước im đã chạy ở lượt trước thì bộ nhớ chỉ còn bước cuối). `earlierTexts` = phần không thuộc bước cuối
- * (`lastStepIds`, đã được tin của bước cuối tự nói) — cần chèn thêm vào tin.
+ * Mọi điều còn tạm hiểu của giai đoạn tới cổng cuối: dựng từ Spine (không từ bộ nhớ của lần chạy hiện tại — chạy tiếp/tải
+ * lại sau khi các bước im đã chạy ở lượt trước thì bộ nhớ chỉ còn bước cuối). Đây là tập ĐẦY ĐỦ; `new_assumptions` của cổng
+ * chỉ lấy phần tin thực sự nói ra (`spokenAssumptionIds`), phần dư được đếm thành một câu (FLF-241).
  */
-export const phaseGateAssumptions = (
-  spine: Spine,
-  stepId: string,
-  lastStepIds: ReadonlySet<string>
-): { assumptions: { id: string; text: string; text_vi?: string }[]; earlierTexts: string[] } => {
+export const phaseGateAssumptions = (spine: Spine, stepId: string): GateAssumptionBrief[] => {
   const ids = gateAssumptionIdsOf(spine, stepId)
-  const assumptions = spine.assumptions
+  return spine.assumptions
     .filter((a) => ids.has(a.id))
     .map((a) => ({ id: a.id, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) }))
-  return { assumptions, earlierTexts: assumptions.filter((a) => !lastStepIds.has(a.id)).map((a) => a.text_vi ?? a.text) }
 }
 
 const redraft = async (
