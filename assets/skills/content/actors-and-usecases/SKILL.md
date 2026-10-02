@@ -1,7 +1,7 @@
 ---
 skill_id: actors-and-usecases
 kind: content
-version: 0.6.0
+version: 0.8.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -24,8 +24,7 @@ stub: false
 ---
 # Actors And Usecases
 
-Covers **S-3.1 Actors, S-3.2 Actor–Goal List, S-3.3 Missing Use Case Sweep, S-3.4 Use Case Relationships,
-S-3.5 Use Case Descriptions** — feeds `fixed:2.1` (Actors) and `fixed:2.2.2` (Use Case Descriptions).
+Covers **S-3.1 Actors, S-3.2 Actor–Goal List, S-3.3 Missing Use Case Sweep, S-3.4 Use Case Relationships, S-3.5 Use Case Descriptions** — feeds `fixed:2.1` (Actors) and `fixed:2.2.2` (Use Case Descriptions).
 `fixed:2.2.1` (the diagram) is `S-3.6`, render-only, no skill. You produce **data**, never a drawing: code
 renders the diagram from `actors[]`, `use_cases[]`, `actor_ids`, `includes`, `extends` — no PlantUML/arrows.
 
@@ -46,6 +45,9 @@ Naming: **A1** a singular role/party noun phrase, never a person's name or a tea
 "Payment Gateway"). **A5** a `time` actor is named after what it triggers ("Cron" ⇒ "Nightly Billing Scheduler"). **A6** two names
 sharing every capability are one actor with two `roles[]` rows. **A8** `description` is one sentence tied to this product, saying
 who they are, what they do here and why they care — not a dictionary gloss.
+
+**Context exchanges (S-3.1/S-3.2/S-3.3 only).** Every actor (including existing S-2.3 actors) needs complete `flows_in` (actor → OUR system) and `flows_out` (OUR system → actor): English data noun phrases from Brief/addendum/use-case outcomes, with a corresponding response/acknowledgement in the other list, in the same order. Human: registration request/result; system: payment result in/payment request out; time: scheduled trigger in/execution status out.
+Both lists must have equal length: `flows_in[i]` pairs with `flows_out[i]`, exactly one exchange per item and one arrow per item. Maintain lists as use cases are added, preserve confirmed labels, show every exchange without `+ N more`; uncertain details need an `assumptions[]` entry. Do not combine exchanges or use use-case verbs as data labels.
 
 ## S-3.2 — Actor–Goal List
 
@@ -128,18 +130,18 @@ extending use case opens with its condition ("When …"); every other one starts
 2. New actor/use-case ids continue the existing sequence (`draft-to-ops` rule 5); check the projection.
 3. English, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
 4. `includes`/`extends` only reference use case ids already present after this batch (own adds count).
-5. A detail still missing after the answers: fill it with the likeliest default + an `assumptions[]`
-   entry (`status: "unconfirmed"`), rule 10 — S-3.1 access gets the one combined assumption.
+5. A detail still missing after the answers: fill it with the likeliest default + an `assumptions[]` entry (`status: "unconfirmed"`), rule 10 — S-3.1 access gets the one combined assumption.
 
 ## Example (S-3.1, one human actor + role)
 
 ```json
-{ "ops": [ { "op": "add", "path": "actors[]", "value": { "id": "A01", "name": "Store Manager", "kind": "human", "description": "Runs a single store and needs the day's orders settled before closing." }, "reason": "S-3.1 primary human actor from Brief" }, { "op": "add", "path": "roles[]", "value": { "id": "R01", "name": "Store Manager", "actor_id": "A01" }, "reason": "S-3.1 role for primary actor" } ], "notes": "Primary human actor and matching role added." }
+{ "ops": [ { "op": "add", "path": "actors[]", "value": { "id": "A01", "name": "Store Manager", "kind": "human", "description": "Runs a single store and needs the day's orders settled before closing.", "flows_in": ["Order settlement request"], "flows_out": ["Order settlement result"] }, "reason": "S-3.1 primary human actor and context exchange from Brief" }, { "op": "add", "path": "roles[]", "value": { "id": "R01", "name": "Store Manager", "actor_id": "A01" }, "reason": "S-3.1 role for primary actor" } ], "notes": "Primary human actor and matching role added." }
 ```
 
 ## Self-check
 
 - [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8.
+- [ ] S-3.1/S-3.2/S-3.3 actors have equal-length, index-paired `flows_in`/`flows_out`, exactly one exchange per item.
 - [ ] Every use case name is verb + object in business terms, shows the actor's value, `function_ids: []`.
 - [ ] `actor_ids` lists participants, primary first; notification actors only on emitting use cases; each
       human actor's access decided; sweep themes covered or ruled out, clock-driven work has its own UC.

@@ -596,6 +596,9 @@
       "description": "Unauthenticated visitor who can register or log in.",
       "flows_in": [
         "registration request"
+      ],
+      "flows_out": [
+        "registration result"
       ]
     },
     {
@@ -639,6 +642,9 @@
       "name": "Email Service",
       "kind": "system",
       "description": "SMTP provider used for account verification and password reset mail.",
+      "flows_in": [
+        "email delivery result"
+      ],
       "flows_out": [
         "email request"
       ]
@@ -650,6 +656,9 @@
       "description": "Cron trigger that fires quota resets, expiry checks and housekeeping jobs.",
       "flows_in": [
         "housekeeping tick"
+      ],
+      "flows_out": [
+        "housekeeping result"
       ]
     }
   ],
