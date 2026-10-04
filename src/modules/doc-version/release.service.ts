@@ -32,7 +32,7 @@ export interface ReleaseResult {
 
 export const release = async (projectId: string, userId: string, baseVersion: number): Promise<ReleaseResult> => {
   const before = await spineRepository.get(projectId)
-  if (!before) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (before.spine_version !== baseVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }

@@ -14,14 +14,15 @@ import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 import * as diagramService from "./diagram.service.js"
 import { DIAGRAM_KINDS } from "./renderers/index.js"
 
 const context = async (req: Request): Promise<{ projectId: string; userId: string; spine: SpineRecord }> => {
   const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   const projectId = req.params.projectId as string
-  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
   const spine = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain ?? null })
   return { projectId, userId, spine }
@@ -47,10 +48,10 @@ export const listDiagrams = catchAsync(async (req: Request, res: Response) => {
 export const getDiagramFile = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
   const match = FILE_RE.exec(String(req.params.file))
-  if (!match) throw new ApiError(404, "Đường dẫn file diagram không hợp lệ", diagramService.DIAGRAM_NOT_FOUND)
+  if (!match) throw new ApiError(404, "Không tìm thấy sơ đồ này.", diagramService.DIAGRAM_NOT_FOUND)
   const [, diagramId, format] = match
   if (!spine.diagrams.some((d) => d.id === diagramId)) {
-    throw new ApiError(404, `Không tìm thấy diagram ${diagramId}`, diagramService.DIAGRAM_NOT_FOUND)
+    throw new ApiError(404, "Không tìm thấy sơ đồ này.", diagramService.DIAGRAM_NOT_FOUND)
   }
   const file = await diagramService.loadDiagramFile(projectId, diagramId, format === "svg" ? "svg" : "png")
   res.setHeader("Content-Type", file.contentType)
@@ -67,14 +68,14 @@ const renderBodySchema = z.object({
 export const renderDiagramRoute = catchAsync(async (req: Request, res: Response) => {
   const kind = String(req.params.kind)
   const body = renderBodySchema.safeParse(req.body ?? {})
-  if (!body.success) throw new ApiError(400, z.prettifyError(body.error), "VALIDATION_ERROR")
+  if (!body.success) throw validationError(body.error)
 
   const known = DIAGRAM_KINDS.find((k) => k === kind)
   if (kind !== "all" && !known) {
-    throw new ApiError(400, `kind phải là all hoặc một trong: ${DIAGRAM_KINDS.join(", ")}`, "VALIDATION_ERROR")
+    throw new ApiError(400, "Loại sơ đồ không hợp lệ.", "VALIDATION_ERROR", { allowed: ["all", ...DIAGRAM_KINDS] })
   }
   const ownerId = body.data.owner_id ?? null
-  if (known === "screen_layout" && ownerId === null) throw new ApiError(400, "screen_layout cần owner_id (id màn)", "VALIDATION_ERROR")
+  if (known === "screen_layout" && ownerId === null) throw new ApiError(400, "Cần chọn màn hình để vẽ sơ đồ bố cục màn.", "VALIDATION_ERROR")
 
   const { projectId, userId } = await context(req)
   const options = { by: userId, force: body.data.force ?? false, deps: diagramService.layoutRenderDeps() }

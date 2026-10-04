@@ -69,7 +69,7 @@ export const completenessSweep = async (projectId: string, userId: string): Prom
   const checked = await flagsService.recompute(projectId, { by: userId, atBaseline: true })
 
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const changes = await repository.listChanges(projectId)
 

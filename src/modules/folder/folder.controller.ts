@@ -9,7 +9,7 @@ import type { ProjectIdsDTO, CreateFolderDTO, UpdateFolderDTO } from "./folder.v
 const requireUserId = (req: Request): string => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
   return userId
 }
