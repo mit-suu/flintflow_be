@@ -298,7 +298,8 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
 
     const result = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)
     expect(result.ok).toBe(false)
-    expect(result.clarification).toBe("Bạn muốn đổi actor nào — A01 hay A03?")
+    // Mã actor model còn chép được đổi sang tên trước khi tới user
+    expect(result.clarification).toBe("Bạn muốn đổi actor nào — 'Founder' hay 'Administrator'?")
     expect(result.changes).toHaveLength(0)
 
     await expect(apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)).rejects.toBeInstanceOf(NeedsClarificationError)
