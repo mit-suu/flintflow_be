@@ -39,11 +39,12 @@ beforeEach(async () => {
   orgId = res.body.data.id
 })
 
-const invite = async (role = "analyst", email?: string) => {
+// Email bắt buộc từ 2026-10-04 (góp ý mentor) ⇒ helper mặc định mời đúng người sẽ nhập mã
+const invite = async (role = "analyst", email = "invitee@flintflow.test") => {
   const res = await request(app)
     .post(ORGS + "/" + orgId + "/invitations")
     .set(bearer(lead))
-    .send({ role, ...(email ? { email } : {}) })
+    .send({ role, email })
   expect(res.status).toBe(201)
   return res.body.data as { id: string; code: string; role: string; state: string }
 }
@@ -69,7 +70,7 @@ describe("UC-08 — Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => 
     const res = await request(app)
       .post(ORGS + "/" + orgId + "/invitations")
       .set(bearer(lead))
-      .send({ role: "lead" })
+      .send({ role: "lead", email: "x@flintflow.test" })
     expect(res.status).toBe(400)
   })
 
@@ -78,7 +79,7 @@ describe("UC-08 — Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => 
     const res = await request(app)
       .post(ORGS + "/" + orgId + "/invitations")
       .set(bearer(invitee))
-      .send({ role: "viewer" })
+      .send({ role: "viewer", email: "x@flintflow.test" })
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
   })
@@ -192,8 +193,31 @@ describe("mã mời hỏng thì từ chối (Flow 8.4 nhánh No)", () => {
     const third = await makeUser("third@flintflow.test")
     await Membership.create({ organizationId: orgId, userId: third.id, role: "viewer" })
 
-    const res = await request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send({ role: "viewer" })
+    const res = await request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send({ role: "viewer", email: "x@flintflow.test" })
     expect(res.status).toBe(402)
     expect(res.body.error.code).toBe("PLAN_LIMIT_MEMBERS")
+  })
+})
+
+describe("email người được mời là bắt buộc (góp ý mentor 2026-10-02)", () => {
+  const post = (body: Record<string, unknown>) =>
+    request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send(body)
+
+  it("thiếu email ⇒ 400, không tạo mã", async () => {
+    const res = await post({ role: "analyst" })
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toContain("Hãy nhập email người được mời")
+    expect(await Invitation.countDocuments({ organizationId: orgId })).toBe(0)
+  })
+
+  it("email sai định dạng hoặc chỉ toàn khoảng trắng ⇒ 400", async () => {
+    expect((await post({ role: "analyst", email: "khong-phai-email" })).status).toBe(400)
+    expect((await post({ role: "analyst", email: "   " })).status).toBe(400)
+  })
+
+  it("email được chuẩn hoá chữ thường, bỏ khoảng trắng hai đầu", async () => {
+    const res = await post({ role: "viewer", email: "  Moi.Nguoi@FlintFlow.Test " })
+    expect(res.status).toBe(201)
+    expect(res.body.data.email).toBe("moi.nguoi@flintflow.test")
   })
 })
