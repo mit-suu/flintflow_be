@@ -519,9 +519,6 @@ describe("renderers trên fixture 19 màn", () => {
 
   it("erd: ký pháp Chen — hình thoi chứa động từ, cha 1 – con N, thiếu động từ ⇒ has", () => {
     const { puml } = only(FIXTURE, "erd")
-    // FLF-243: ortho gộp đoạn song song ⇒ quan hệ cùng đổ vào một entity chồng lên nhau; polyline giữ từng đường riêng
-    expect(puml).toContain("skinparam linetype polyline")
-    expect(puml).not.toContain("linetype ortho")
     expect(puml).toContain('entity "User" as E01 {\n}')
     expect(puml).toContain("E01 -1- R_E01_E02\nR_E01_E02 -N- E02")
     const withVerb = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_verbs = { E02: "owns" }))

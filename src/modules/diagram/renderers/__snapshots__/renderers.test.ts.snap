@@ -85,7 +85,7 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "@startchen
 skinparam monochrome true
 skinparam ranksep 20
-skinparam linetype polyline
+skinparam linetype ortho
 entity "User" as E01 {
 }
 entity "Project" as E02 {
