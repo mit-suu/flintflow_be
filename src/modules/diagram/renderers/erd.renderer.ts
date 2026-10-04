@@ -20,9 +20,8 @@ export const renderErd: Renderer = (spine) => {
   const entities = byId(spine.entities)
   const ids = new Set(entities.map((e) => e.id))
   // Hình thoi chiếm một tầng riêng ⇒ chuỗi cha–con sâu làm hình rất dài; khoảng cách tầng mặc định của Graphviz
-  // quá rộng cho trang A4 dọc. Đường gấp khúc (polyline) thay cho đường cong; KHÔNG dùng ortho (FLF-243): ortho gộp
-  // các đoạn song song làm một nên nhiều quan hệ cùng đổ vào một entity chồng lên nhau, không còn biết hình thoi nào nối đâu.
-  const body = ["skinparam monochrome true", "skinparam ranksep 20", "skinparam linetype polyline"]
+  // quá rộng cho trang A4 dọc. Đường vuông góc thay cho đường cong cắt chéo nhau.
+  const body = ["skinparam monochrome true", "skinparam ranksep 20", "skinparam linetype ortho"]
 
   if (entities.length === 0) body.push('entity "No entities yet" as NO_ENTITIES {', "}")
   for (const e of entities) body.push(`entity "${label(e.name)}" as ${alias(e.id)} {`, "}")
