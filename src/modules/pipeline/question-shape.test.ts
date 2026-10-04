@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
 import { answerText, answeredTopics, chatReplyQuestionId, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
 
@@ -36,6 +36,31 @@ describe("shapeQuestions", () => {
     expect(questions.map((x) => x.id)).toEqual(questionIdsFor(asked))
     expect(questions.map((x) => x.id)).toEqual(asked.map((a) => `Q_${a.topic_key}`))
     expect(questions.map((x) => x.text)).toEqual(["A", "B", "C", "D"])
+  })
+
+  it("model phát quá trần ⇒ giữ 4 câu VÀ ghi log số câu bị bỏ kèm chủ đề của chúng", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    try {
+      const { asked } = shapeQuestions(["A", "B", "C", "D", "E", "F"].map((t) => q(t)))
+      expect(asked).toHaveLength(4)
+      expect(info).toHaveBeenCalledTimes(1)
+      const line = String(info.mock.calls[0][0])
+      expect(line).toContain("bỏ 2 câu")
+      expect(line).toContain("e")
+      expect(line).toContain("f")
+    } finally {
+      info.mockRestore()
+    }
+  })
+
+  it("đúng trần hoặc ít hơn ⇒ không log gì", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {})
+    try {
+      shapeQuestions(["A", "B", "C", "D", ""].map((t) => q(t)))
+      expect(info).not.toHaveBeenCalled()
+    } finally {
+      info.mockRestore()
+    }
   })
 
   it("câu mở không mang options/multiple; header cắt ≤ 12 ký tự", () => {

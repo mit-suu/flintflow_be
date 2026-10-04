@@ -567,7 +567,25 @@ export const settleWithoutModel = (
 ): AnswerInput[] => {
   if (!isSubstantiveAnswer(message)) return []
   const lower = message.toLowerCase()
-  const namedOptions = (q: PendingAnswerState["asked"][number]): string[] => q.options.map((o) => o.label).filter((label) => lower.includes(stripRecommended(label).toLowerCase()))
+  const optionText = (label: string): string => stripRecommended(label).toLowerCase()
+  /**
+   * Một nhãn có thể là chuỗi con của nhãn khác ("Tuân thủ quy định nội bộ" nằm trong "Tuân thủ quy định nội bộ và pháp
+   * luật"): tin nhắc nhãn dài thì nhãn ngắn cũng khớp, câu một-lựa-chọn thấy hai nhãn khớp và bị bỏ qua ⇒ không bao giờ
+   * chốt được, im lặng. Giữ nhãn khớp dài nhất; với các nhãn không lồng nhau, tập kết quả không đổi.
+   */
+  const namedOptions = (q: PendingAnswerState["asked"][number]): string[] => {
+    const matched = q.options.map((o) => o.label).filter((label) => lower.includes(optionText(label)))
+    return matched.filter(
+      (label) =>
+        !matched.some((other) => {
+          const long = optionText(other)
+          const short = optionText(label)
+          // Chỉ loại nhãn ngắn khi nó KHÔNG được nhắc ở đâu khác ngoài nhãn dài. Tin đối lập ("chỉ <ngắn> thôi, không cần
+          // <dài>") nhắc nhãn ngắn độc lập ⇒ giữ cả hai ⇒ câu một-lựa-chọn không chốt, thay vì chốt nhãn user vừa từ chối.
+          return long !== short && long.includes(short) && !lower.split(long).join(" ").includes(short)
+        })
+    )
+  }
   const candidates: { topic_key: string; answer: string }[] = []
   const open = asked.filter((q) => q.options.length === 0)
   const openCovered = open.length > 1 && splitNumberedAnswer(message).size >= open.length
@@ -712,8 +730,8 @@ export const B0_FIELD_STEPS: Readonly<Record<string, "form_factor" | "stakes">> 
 
 /** Lý do ở gate khi B-0.2/B-0.3 bỏ qua vì field đã có — không phải "AI không soạn được gì". */
 const B0_ALREADY_SET_REASON: Readonly<Record<"form_factor" | "stakes", string>> = Object.freeze({
-  form_factor: "Nền tảng đã chốt ở bước Kể hết ý tưởng — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
-  stakes: "Mức độ quan trọng đã chốt ở bước Kể hết ý tưởng — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa."
+  form_factor: "Nền tảng đã rõ từ những gì bạn kể — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+  stakes: "Phần tuân thủ tôi đã ghi theo lựa chọn và ý tưởng của bạn — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa."
 })
 
 /** B-0.2/B-0.3 chỉ chốt một field: hỏi nhiều hơn một câu là hỏi lan sang việc của bước khác. */

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { briefExtractionErrors, dropRedundantScalarAdds, isWritablePath, normalizeSelectorPath, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
+import { briefExtractionErrors, dropRedundantScalarAdds, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -400,6 +400,67 @@ describe("sanitizeModelOps — giá trị form_factor / stakes", () => {
     expect(ops[0]).toMatchObject({ value: ["mobile_app"] })
     expect(ops[1]).toMatchObject({ value: ["web_app", "mobile_app"] })
     expect((ops[2] as { value: { form_factor: string[] } }).value.form_factor).toEqual(["web_app"])
+  })
+})
+
+describe("regulatedFromStakesAnswer", () => {
+  it("nhận đúng vế pháp luật, kể cả kèm đuôi khuyến nghị hoặc user gõ tay", () => {
+    expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ và pháp luật")).toBe(true)
+    expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ và pháp luật (Khuyến nghị)")).toBe(true)
+    expect(regulatedFromStakesAnswer("  tuân thủ quy định nội bộ và PHÁP LUẬT  ")).toBe(true)
+    // Không dấu: user gõ tay trên bàn phím chưa bật tiếng Việt
+    expect(regulatedFromStakesAnswer("Tuan thu quy dinh noi bo va phap luat")).toBe(true)
+  })
+
+  it("vế nội bộ trả false — nó không quyết hết giá trị", () => {
+    expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ")).toBe(false)
+    expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ (Khuyến nghị)")).toBe(false)
+    expect(regulatedFromStakesAnswer("")).toBe(false)
+  })
+})
+
+describe("sanitizeModelOps — stakes phải khớp vế user đã chốt", () => {
+  /** Spine có một quyết định đã chốt cho chủ đề `stakes`. */
+  const withStakesDecision = (answer: string): Spine => ({
+    ...FIXTURE,
+    decisions: [
+      { id: "D1", topic_key: "stakes", question: "Yếu tố tuân thủ, pháp lý của dự án này như thế nào?", answer, step_id: "B-0.1", at: "2026-10-05T00:00:00.000Z", superseded_by: null }
+    ]
+  })
+
+  const legal = withStakesDecision("Tuân thủ quy định nội bộ và pháp luật")
+  const internalOnly = withStakesDecision("Tuân thủ quy định nội bộ")
+
+  it("user bấm vế pháp luật mà op ghi giá trị khác ⇒ op_not_allowed", () => {
+    for (const value of ["internal", "production"]) {
+      const { errors } = sanitizeModelOps(legal, [{ op: "set", path: "project.stakes", value }], "B-0.1")
+      expect(errors, value).toMatchObject([{ rule: "op_not_allowed", op_index: 0, path: "project.stakes" }])
+      expect(errors[0].message).toContain("regulated")
+    }
+  })
+
+  it("bắt cả khi giá trị đi trong op set cả project", () => {
+    const { errors } = sanitizeModelOps(legal, [{ op: "set", path: "project", value: { ...FIXTURE.project, stakes: "internal" } }], "B-0.1")
+    expect(errors).toMatchObject([{ rule: "op_not_allowed", op_index: 0 }])
+  })
+
+  it("ghi regulated sau khi user bấm vế pháp luật ⇒ qua", () => {
+    expect(sanitizeModelOps(legal, [{ op: "set", path: "project.stakes", value: "regulated" }], "B-0.1").errors).toEqual([])
+  })
+
+  it("user bấm vế nội bộ ⇒ cả internal lẫn production đều qua (phần phán đoán không bị chặn)", () => {
+    for (const value of ["internal", "production", "regulated"]) {
+      expect(sanitizeModelOps(internalOnly, [{ op: "set", path: "project.stakes", value }], "B-0.1").errors, value).toEqual([])
+    }
+  })
+
+  it("quyết định đã bị thay thế không còn chặn", () => {
+    const superseded: Spine = { ...legal, decisions: [{ ...legal.decisions[0], superseded_by: "D2" }] }
+    expect(sanitizeModelOps(superseded, [{ op: "set", path: "project.stakes", value: "production" }], "B-0.1").errors).toEqual([])
+  })
+
+  it("chưa có quyết định nào về tuân thủ ⇒ không chặn", () => {
+    expect(sanitizeModelOps(FIXTURE, [{ op: "set", path: "project.stakes", value: "internal" }], "B-0.1").errors).toEqual([])
   })
 })
 

@@ -1541,6 +1541,37 @@ describe("settleWithoutModel: chốt tất định khi hết ngân sách chat", 
     expect(settleWithoutModel([who, card], "bạn nghĩ sao?")).toEqual([])
     expect(settleWithoutModel([who], "oke")).toEqual([])
   })
+
+  // Thẻ tuân thủ: nhãn sau chứa hiển ngôn nhãn trước, nên tin nhắc nhãn dài cũng khớp nhãn ngắn. Không giữ nhãn dài nhất
+  // thì câu một-lựa-chọn thấy hai nhãn khớp và bị bỏ qua ⇒ thẻ không bao giờ chốt được.
+  it("nhãn lồng nhau ⇒ chốt nhãn dài nhất, không bỏ qua câu", () => {
+    const compliance = {
+      topic_key: "stakes",
+      question: "Yếu tố tuân thủ, pháp lý của dự án này như thế nào?",
+      options: [{ label: "Tuân thủ quy định nội bộ" }, { label: "Tuân thủ quy định nội bộ và pháp luật" }]
+    }
+    expect(settleWithoutModel([compliance], "Tuân thủ quy định nội bộ và pháp luật")).toEqual([
+      { question_id: "Q_stakes", answer: "Tuân thủ quy định nội bộ và pháp luật" }
+    ])
+    expect(settleWithoutModel([compliance], "Tuân thủ quy định nội bộ")).toEqual([
+      { question_id: "Q_stakes", answer: "Tuân thủ quy định nội bộ" }
+    ])
+  })
+
+  it("nhãn không lồng nhau mà tin nhắc cả hai ⇒ vẫn không chốt câu một-lựa-chọn", () => {
+    expect(settleWithoutModel([card], "99% hay 99.9% đều được")).toEqual([])
+  })
+
+  // Nhãn ngắn được nhắc ĐỘC LẬP với nhãn dài ⇒ tin đang phân biệt hai lựa chọn, không phải nhắc một cái. Chốt nhãn dài ở
+  // đây là chốt đúng thứ user vừa từ chối; để câu chờ thì an toàn.
+  it("tin đối lập nhắc cả nhãn ngắn lẫn nhãn dài ⇒ không chốt", () => {
+    const compliance = {
+      topic_key: "stakes",
+      question: "Yếu tố tuân thủ, pháp lý của dự án này như thế nào?",
+      options: [{ label: "Tuân thủ quy định nội bộ" }, { label: "Tuân thủ quy định nội bộ và pháp luật" }]
+    }
+    expect(settleWithoutModel([compliance], "chỉ tuân thủ quy định nội bộ thôi, không cần tuân thủ quy định nội bộ và pháp luật")).toEqual([])
+  })
 })
 
 describe("step-runner: fast path Brief — bước B-1.x không tự hỏi sau lượt hỏi gộp", () => {

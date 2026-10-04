@@ -124,8 +124,16 @@ export interface ShapeOptions {
 }
 
 export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], shape: ShapeOptions = {}): ShapedQuestions<Q> => {
-  const asked = input
-    .filter((q) => q.question.trim() !== "")
+  const real = input.filter((q) => q.question.trim() !== "")
+  // Cắt im lặng thì câu thừa rơi mất cùng `topic_key` của nó và không ai biết model đang phát quá trần —
+  // chủ đề đó không vào sổ quyết định nên cũng không step nào hỏi lại.
+  if (real.length > MAX_QUESTIONS_PER_TURN) {
+    const dropped = real.slice(MAX_QUESTIONS_PER_TURN)
+    console.info(
+      `[question-shape] bỏ ${dropped.length} câu quá trần ${MAX_QUESTIONS_PER_TURN} (${dropped.map((q) => q.topic_key ?? "(không có chủ đề)").join(", ")})`
+    )
+  }
+  const asked = real
     .slice(0, MAX_QUESTIONS_PER_TURN)
     .map((q) => {
       const shaped = shape.proseOnly ? [] : shapeOptions(q.options, q.topic_key)
