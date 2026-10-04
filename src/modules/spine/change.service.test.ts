@@ -434,6 +434,15 @@ describe("lệnh chỉ ra cả một mục (\"Trong §3.1.5 …\") ⇒ model th�
     expect((projection.entities as unknown[]).length).toBe(FIXTURE.entities.length)
   })
 
+  it("FLF-248: mục được nhắc mà còn rỗng (§5.2) ⇒ projection có collection rỗng + đường add và field, không rơi về chỉ mục", () => {
+    const bare = { ...FIXTURE, common_requirements: [] }
+    const projection = buildChangeProjection(bare, "Trong §5.2 Common Requirements: thêm yêu cầu phân trang 20 dòng")
+    expect(projection.common_requirements).toEqual([])
+    expect(projection.empty_collections).toEqual({ common_requirements: { add_path: "common_requirements[]", fields: ["category", "statement"] } })
+    // Không phải chỉ mục gọn {id,label} của mọi collection
+    expect(projection.nfrs).toBeUndefined()
+  })
+
   it("mục là sơ đồ ⇒ kèm dữ liệu sinh ra sơ đồ; số mục khớp nguyên số, không khớp tiền tố", () => {
     expect(sectionCollections("fixed:3.1.5")).toEqual(["entities"])
     expect(sectionCollections("fixed:2.2.1")).toEqual(expect.arrayContaining(["actors", "use_cases"]))

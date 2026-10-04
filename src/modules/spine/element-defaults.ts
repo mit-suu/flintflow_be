@@ -80,6 +80,10 @@ const isArraySchema = (schema: z.ZodType): boolean => {
 /** Có schema phần tử cho collection này không (collection có id, thêm bằng `add`). */
 export const hasElementSchema = (collection: string): boolean => collection in ELEMENT_SCHEMAS
 
+/** Field của một phần tử (trừ `id` — server cấp) — cho model thấy hình phần tử khi collection còn rỗng (FLF-248). */
+export const elementFieldsOf = (collection: string): string[] =>
+  Object.keys(ELEMENT_SCHEMAS[collection]?.shape ?? {}).filter((key) => key !== "id")
+
 /**
  * Trả bản sao `value` đã điền mảng rỗng / null cho field bị bỏ trống. Giá trị không phải object, hoặc
  * collection lạ ⇒ trả nguyên. Không bao giờ ghi đè field đã có (kể cả khi sai kiểu — để schema báo).

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { briefExtractionErrors, isWritablePath, normalizeSelectorPath, sanitizeModelOps, validateOps } from "./op-validator.js"
+import { briefExtractionErrors, dropRedundantScalarAdds, isWritablePath, normalizeSelectorPath, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -760,5 +760,46 @@ describe("sanitizeModelOps — B-2.1 chỉ đổi status khi user đã quyết t
 
   it("step rà giả định khác (B-2.3) không đổi hành vi", () => {
     expect(sanitizeModelOps(spine, flip, "B-2.3").ops[0]).toMatchObject({ value: "confirmed" })
+  })
+})
+
+describe("useCaseWiringErrors — S-4.1 gắn chức năng màn hình vào use case ngay khi tạo", () => {
+  const unwired = (): Spine => {
+    const spine = structuredClone(FIXTURE)
+    spine.use_cases = spine.use_cases.map((u) => (u.id === "UC01" ? { ...u, function_ids: [] } : u))
+    return spine
+  }
+  const newFunction = {
+    op: "add" as const,
+    path: "functions[]",
+    value: { id: "FN099", screen_id: "S01", feature_id: "F1", order: 99, name: "Do Thing", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }
+  }
+
+  it("lô S-4.1 tạo chức năng mà use case người dùng chưa gắn ⇒ lỗi trỏ đúng use case", () => {
+    const errors = useCaseWiringErrors(unwired(), [newFunction], "S-4.1")
+    expect(errors).toEqual([expect.objectContaining({ rule: "usecase_not_wired", path: "use_cases[id=UC01].function_ids" })])
+  })
+
+  it("gắn trong cùng lô bằng add …function_ids[] ⇒ không lỗi", () => {
+    const wire = { op: "add" as const, path: "use_cases[id=UC01].function_ids[]", value: "FN099" }
+    expect(useCaseWiringErrors(unwired(), [newFunction, wire], "S-4.1")).toEqual([])
+  })
+
+  it("bước khác, hoặc lô S-4.1 không tạo chức năng (vd sửa tên màn) ⇒ không soi", () => {
+    expect(useCaseWiringErrors(unwired(), [newFunction], "S-4.4")).toEqual([])
+    expect(useCaseWiringErrors(unwired(), [{ op: "set", path: "screens[id=S01].name", value: "Sign In" }], "S-4.1")).toEqual([])
+  })
+})
+
+describe("dropRedundantScalarAdds — gắn lại liên kết đã có không giết cả lô", () => {
+  it("bỏ add giá trị đã có và cặp lặp trong lô; giữ add mới và mọi op khác", () => {
+    const existing = FIXTURE.use_cases[0].function_ids[0]
+    const ops = [
+      { op: "add" as const, path: `use_cases[id=${FIXTURE.use_cases[0].id}].function_ids[]`, value: existing },
+      { op: "add" as const, path: `use_cases[id=${FIXTURE.use_cases[0].id}].function_ids[]`, value: "FN099" },
+      { op: "add" as const, path: `use_cases[id=${FIXTURE.use_cases[0].id}].function_ids[]`, value: "FN099" },
+      { op: "set" as const, path: "actors[id=A01].name", value: "Owner" }
+    ]
+    expect(dropRedundantScalarAdds(FIXTURE, ops)).toEqual([ops[1], ops[3]])
   })
 })

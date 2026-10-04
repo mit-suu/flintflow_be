@@ -27,6 +27,7 @@ import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesPr
 import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
 import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
+import { elementFieldsOf } from "./element-defaults.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
@@ -257,14 +258,24 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
 
   // Lệnh chỉ ra cả một mục ("Trong §3.1.5 Entity Relationship Diagram: …") mà không nhắc tên phần tử nào: không có
   // dòng này model chỉ thấy id + tên entity, không thấy quan hệ, và đòi user dán lại ERD.
+  // FLF-248: mục được nhắc mà collection còn rỗng (vd §5.2 khi S-7.2 không ghi gì) — trước đây bị bỏ qua nên model
+  // không biết `common_requirements` tồn tại, đoán ghi vào `nfrs[]` rồi lô chết vì sai schema. Nay đưa đường add + field.
+  const emptyCollections: Record<string, { add_path: string; fields: string[] }> = {}
   for (const collection of referencedSections(haystack).flatMap(sectionCollections)) {
     // Nhắc cả mục lẫn một phần tử ("§3.1.5 … nối User với Grade") ⇒ vẫn cần đủ mục, không chỉ phần tử được nhắc
     if (collection === "permissions") continue
     const list = spine[collection as (typeof TARGET_COLLECTIONS)[number]] as unknown as Record<string, unknown>[]
-    if (!Array.isArray(list) || list.length === 0) continue
+    if (!Array.isArray(list)) continue
+    if (list.length === 0) {
+      projection[collection] = []
+      emptyCollections[collection] = { add_path: `${collection}[]`, fields: elementFieldsOf(collection) }
+      matched += 1
+      continue
+    }
     projection[collection] = list.slice(0, SECTION_ELEMENT_LIMIT)
     matched += Math.min(list.length, SECTION_ELEMENT_LIMIT)
   }
+  if (Object.keys(emptyCollections).length > 0) projection.empty_collections = emptyCollections
 
   const permissions = permissionRows(spine, haystack, projection)
   if (permissions.length > 0) {
