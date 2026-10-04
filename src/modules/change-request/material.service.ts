@@ -50,7 +50,7 @@ const readImage = async (cr: IChangeRequest, userId: string, file: UploadedFile,
     { images: [{ mime, data: file.buffer.toString("base64") }] }
   )
   if (!result.ok) {
-    if (result.reason === "credits") throw new ApiError(402, result.message, "INSUFFICIENT_CREDIT")
+    if (result.reason === "credits") throw new ApiError(402, result.userMessage, "INSUFFICIENT_CREDIT")
     throw new ApiError(502, "AI chưa đọc được ảnh này — thử lại, hoặc dán nội dung ảnh dưới dạng chữ", "AI_PROVIDER_ERROR")
   }
   return result.data.text

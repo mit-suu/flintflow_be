@@ -4,6 +4,7 @@ import * as userService from "./user.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 import { newPasswordField } from "../../shared/utils/password-field.js"
 
 /** `PATCH /users/me` — chỉ hai field onboarding (UC 1.12), không cho đổi email/role/isActive. */
@@ -12,7 +13,7 @@ export const updateMeSchema = z
     name: z.string().trim().min(1).max(100).optional(),
     onboardedAt: z.iso.datetime().nullable().optional()
   })
-  .refine((v) => v.name !== undefined || v.onboardedAt !== undefined, { message: "Cần ít nhất name hoặc onboardedAt" })
+  .refine((v) => v.name !== undefined || v.onboardedAt !== undefined, { message: "Chưa có thông tin nào để cập nhật." })
 
 export const changePasswordSchema = z.strictObject({
   currentPassword: z.string().min(1, "Vui lòng nhập mật khẩu hiện tại"),
@@ -22,7 +23,7 @@ export const changePasswordSchema = z.strictObject({
 export const getMe = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const user = await userService.getMe(userId)
@@ -32,12 +33,12 @@ export const getMe = catchAsync(async (req: Request, res: Response) => {
 export const changePassword = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const parsed = changePasswordSchema.safeParse(req.body)
   if (!parsed.success) {
-    throw new ApiError(400, parsed.error.issues.map((i) => i.message).join(", "), "VALIDATION_ERROR")
+    throw validationError(parsed.error)
   }
 
   const { currentPassword, newPassword } = parsed.data
@@ -50,11 +51,11 @@ export const changePassword = catchAsync(async (req: Request, res: Response) => 
 export const updateMe = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const parsed = updateMeSchema.safeParse(req.body)
-  if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
+  if (!parsed.success) throw validationError(parsed.error)
 
   const { name, onboardedAt } = parsed.data
   const user = await userService.updateMe(userId, {

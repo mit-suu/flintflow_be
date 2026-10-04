@@ -153,7 +153,7 @@ const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine =>
 
 const load = async (projectId: string): Promise<SpineRecord> => {
   const spine = await repository.get(projectId)
-  if (!spine) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!spine) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   return spine
 }
 
@@ -220,15 +220,15 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
 export const waive = async (projectId: string, flagId: string, reason: string, userId: string): Promise<Flag> => {
   const record = await load(projectId)
   const flag = record.flags.find((f) => f.id === flagId)
-  if (!flag) throw new ApiError(404, `Không tìm thấy cờ ${flagId}`, FLAG_NOT_FOUND)
+  if (!flag) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)
   if (NON_WAIVABLE_RULES.has(flag.rule_id)) {
-    throw new ApiError(400, `Cờ ${flag.rule_id} không được waive — phải sửa dữ liệu`, FLAG_NOT_WAIVABLE)
+    throw new ApiError(400, "Cờ này không bỏ qua được — cần sửa dữ liệu.", FLAG_NOT_WAIVABLE, { rule_id: flag.rule_id })
   }
-  if (flag.resolved_at !== null) throw new ApiError(400, `Cờ ${flagId} đã đóng`, FLAG_NOT_WAIVABLE)
+  if (flag.resolved_at !== null) throw new ApiError(400, "Cờ này đã đóng.", FLAG_NOT_WAIVABLE)
 
   const text = reason.trim()
   if (text.length < WAIVE_REASON_MIN_LENGTH) {
-    throw new ApiError(400, `Lý do waive cần ít nhất ${WAIVE_REASON_MIN_LENGTH} ký tự`, "VALIDATION_ERROR")
+    throw new ApiError(400, `Lý do bỏ qua cờ cần ít nhất ${WAIVE_REASON_MIN_LENGTH} ký tự.`, "VALIDATION_ERROR")
   }
 
   const spine = stripRecord(record)
@@ -247,7 +247,7 @@ export const waive = async (projectId: string, flagId: string, reason: string, u
   })
 
   const updated = result.spine.flags.find((f) => f.id === flagId)
-  if (!updated) throw new ApiError(404, `Không tìm thấy cờ ${flagId}`, FLAG_NOT_FOUND)
+  if (!updated) throw new ApiError(404, "Không tìm thấy cờ này.", FLAG_NOT_FOUND)
   return updated
 }
 

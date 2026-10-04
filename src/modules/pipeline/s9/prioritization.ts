@@ -99,7 +99,7 @@ export interface PrioritizeResult {
  */
 export const prioritize = async (projectId: string, userId: string, options: PrioritizeOptions = {}): Promise<PrioritizeResult> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
 
   const base = await buildStepContext(projectId, PRIORITIZATION_STEP, { sessionId: options.sessionId ?? null })
   const ctx = { ...base, skill: PRIORITIZATION_SKILL }

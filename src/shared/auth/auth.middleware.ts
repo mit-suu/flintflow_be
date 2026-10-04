@@ -11,7 +11,7 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
       req.cookies?.token
 
     if (!token) {
-      throw new ApiError(401, "Access token is missing", "MISSING_ACCESS_TOKEN")
+      throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "MISSING_ACCESS_TOKEN")
     }
 
     const decoded = verifyAccessToken(token)
@@ -21,7 +21,7 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
     if (error instanceof ApiError) {
       next(error)
     } else {
-      next(new ApiError(401, "Invalid or expired access token", "INVALID_ACCESS_TOKEN"))
+      next(new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "INVALID_ACCESS_TOKEN"))
     }
   }
 }

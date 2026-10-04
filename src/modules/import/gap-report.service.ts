@@ -63,7 +63,7 @@ export const loadLayout = async (projectId: string): Promise<LayoutEntry[] | und
 export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const doc = await latestImport(projectId)
   if (!doc || !REPORT_STATUSES.includes(doc.status)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Gap report có sau khi import xong bước check", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Báo cáo phần còn thiếu chỉ có sau khi nhập tài liệu xong bước kiểm tra.", {
       status: doc?.status ?? "uploaded",
       to: "gap_review",
       allowed: REPORT_STATUSES
@@ -75,7 +75,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
     ExtractionDraft.find({ import_id: doc._id }).lean(),
     latestDocVersion(projectId)
   ])
-  if (!spine) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!spine) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
 
   const open = spine.flags.filter((f) => f.resolved_at === null)
   const bySection = new Map<string, typeof open>()

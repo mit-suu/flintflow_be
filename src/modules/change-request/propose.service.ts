@@ -139,7 +139,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   cr.paused = null
   await cr.save()
   const record = await spineRepository.get(String(cr.projectId))
-  if (!record) throw new Error("Không tìm thấy Spine của project")
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
@@ -220,7 +220,7 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
   if (holder !== cr.cr_id) throw pathLocked(holder ? [{ path: loc.path, cr_id: holder }] : [])
 
   const record = await spineRepository.get(String(cr.projectId))
-  if (!record) throw new Error("Không tìm thấy Spine của project")
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   if (isDiagramLocation(loc)) {
     // Sơ đồ gốc (§4.13): không có gì để AI soạn — tính lại theo đề xuất hiện tại của CR (bỏ quyết định tay trước đó).
@@ -245,8 +245,8 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
   })
   if (!result.ok) {
     // `manual_fix` không phải bước pause được (Flow 4/5 của CR chỉ ở clarifying/proposing/verifying) ⇒ báo lỗi, giữ nguyên
-    if (result.reason === "credits") throw new ApiError(402, result.message, "INSUFFICIENT_CREDIT")
-    throw new ApiError(502, result.message, "AI_PROVIDER_ERROR")
+    if (result.reason === "credits") throw new ApiError(402, result.userMessage, "INSUFFICIENT_CREDIT")
+    throw new ApiError(502, result.userMessage, "AI_PROVIDER_ERROR", result.code ? { cause_code: result.code } : undefined)
   }
   const out = matchProposals([loc], result.data.locations).get(loc)
   if (!out) throw new ApiError(502, "AI chưa đưa ra đề xuất cho vị trí này — thử lại hoặc sửa trực tiếp", "AI_PROVIDER_ERROR")

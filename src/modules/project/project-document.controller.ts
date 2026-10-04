@@ -8,7 +8,7 @@ import * as projectDocumentService from "./project-document.service.js"
 export const uploadDocument = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
@@ -21,7 +21,7 @@ export const uploadDocument = catchAsync(async (req: Request, res: Response) => 
 export const getDocuments = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
@@ -32,7 +32,7 @@ export const getDocuments = catchAsync(async (req: Request, res: Response) => {
 export const deleteDocument = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = Array.isArray(req.params.projectId) ? req.params.projectId[0] : req.params.projectId
