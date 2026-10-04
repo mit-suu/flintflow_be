@@ -19,7 +19,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import type { StepContext } from "./context-projection.js"
-import { briefExtractionErrors, sanitizeModelOps, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { briefExtractionErrors, sanitizeModelOps, useCaseNamingErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -177,6 +177,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
+      // FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt cuối thì nhận lô (cờ vàng là lưới cuối)
+      if (errors.length === 0 && attempt <= maxRetries) errors = useCaseNamingErrors(spine, ops as Op[])
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })

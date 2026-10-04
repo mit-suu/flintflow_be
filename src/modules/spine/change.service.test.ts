@@ -345,6 +345,43 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
     expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
   })
 
+  it("FLF-243: model tự đặt tên use case sai luật ⇒ gọi lại MỘT lần kèm lỗi, preview dùng lô sửa lại", async () => {
+    await seed()
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: "use_cases[id=UC05].name", value: "Create, Update and Delete Projects" }] }))
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: "use_cases[id=UC05].name", value: "Find Project" }] }))
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên UC05 cho cụ thể hơn" }, {}, deps)
+
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(2)
+    const first = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    const second = vi.mocked(deps.changeExecutor).mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(first).not.toHaveProperty("previous_problems")
+    expect(second.previous_problems).toContain('"Create, Update and Delete Projects"')
+    expect(second.previous_problems).toContain("TÁCH")
+    expect(result.changes[0]).toMatchObject({ path: "use_cases[id=UC05].name", value: "Find Project" })
+  })
+
+  it("FLF-243: lần gọi lại vẫn sai ⇒ không gọi thêm, giữ lô (cờ vàng là lưới cuối)", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "use_cases[id=UC05].name", value: "Manage Projects" }] }))
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên UC05" }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(2)
+    expect(result.changes[0]).toMatchObject({ value: "Manage Projects" })
+  })
+
+  it("FLF-243: user gõ nguyên văn tên ⇒ dùng như user muốn, không gọi lại; tên đúng luật cũng không gọi lại", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "use_cases[id=UC05].name", value: "Manage Projects" }] }))
+    await preview(PROJECT, USER, { base_version: 1, instruction: 'Đổi tên UC05 thành "Manage Projects"' }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "use_cases[id=UC05].name", value: "Find Project" }] }))
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên UC05" }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+  })
+
   it("preview_id đã dùng rồi ⇒ 422 PREVIEW_EXPIRED", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "X" }] }))

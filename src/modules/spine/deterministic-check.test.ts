@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine } from "./spine.types.js"
-import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
+import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
 import { computeSourceHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
@@ -413,6 +413,20 @@ describe("runDeterministicCheck", () => {
     for (const name of ["Create SRS via Guided Interview", "Copy Item into Folder", "Report Usage per Branch", "Compare Plan vs Actual"]) {
       expect(checkUseCaseName(name, [], [name]).style, name).not.toContain("U1")
     }
+  })
+
+  it("FLF-243 useCaseNameIssues: chỉ báo tên mới/vừa đổi, cùng luật với cờ usecase_name_*", () => {
+    const before = structuredClone(FIXTURE)
+    before.use_cases = before.use_cases.map((u) => (u.id === "UC04" ? { ...u, name: "Manage Onboarding" } : u))
+    const after = structuredClone(before)
+    after.use_cases = after.use_cases.map((u) =>
+      u.id === "UC05" ? { ...u, name: "Create, Update and Delete Projects" } : u.id === "UC06" ? { ...u, name: "Founder Creates Project" } : u)
+    after.use_cases.push({ ...after.use_cases[0], id: "UC99", name: "Archive Old Data" })
+
+    const issues = useCaseNameIssues(before, after)
+    expect(issues.map((i) => i.id)).toEqual(["UC05", "UC06"])
+    expect(issues[0].message).toContain('một mục tiêu duy nhất')
+    expect(issues[1].message).toContain("không nhắc tên actor")
   })
 
   it("use case truy cập tài khoản: nhận theo nguyên cụm từ, không theo chuỗi con", () => {
