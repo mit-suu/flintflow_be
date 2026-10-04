@@ -274,7 +274,10 @@ describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng u
     expect(text).toMatch(/at most 5 words/)
   })
 
-  it("actors-and-usecases không còn dạy mẫu \"Create <Actor> Account\" (vi phạm U4)", () => {
-    expect(skill("content/actors-and-usecases")).not.toContain("<Actor> Account")
+  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s: U4 nói đúng luật code — chỉ cấm actor làm chủ ngữ", (dir) => {
+    const text = skill(dir)
+    expect(text).toContain("never the subject")
+    expect(text).toContain("Create Student Record")
+    expect(text).not.toMatch(/no actor name/i)
   })
 })

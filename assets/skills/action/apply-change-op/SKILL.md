@@ -72,7 +72,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    out) follow the naming rules code checks after you: Title Case, no trailing period; one goal — no "and", "/"
    or comma (two goals ⇒ two use cases); a concrete verb, never Manage, Handle, Process, Maintain, Administer,
    Support, Control, Operate, Use, Do, Perform, Work, Deal or Take ("split Manage Students" ⇒ "Enroll Student",
-   "Update Student Profile", "Deactivate Student", not "Manage Students"); no actor name; no UI or tech term
+   "Update Student Profile", "Deactivate Student", not "Manage Students"); the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades"), but "Create Student Record" is fine; no UI or tech term
    (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database); at most 5 words; unique. A name the user
    dictates word for word is used as given.
 
