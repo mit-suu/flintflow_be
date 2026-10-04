@@ -33,7 +33,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 - Projection around the target (keyed): {{projection}} — `existing_ids` lists the ids that exist right now
 - Glossary / proper names: {{glossary}}
 {{#if previous_problems}}
-- **Your previous batch for this request was rejected** for these use case names — redo the whole batch with every name fixed; a name that bundles several goals becomes several use cases (rule 10): {{previous_problems}}
+- **Your previous batch for this request was rejected** — redo the whole batch fixing every problem below (a field that does not exist, a broken rule, a use case name that bundles several goals ⇒ several use cases, rule 10): {{previous_problems}}
 {{/if}}
 - For `reconcile` — the owning step `{{step_id}}` ({{step_name}}), the paths it may write `{{writable_paths}}`, and the stale section with the exact changes that made it stale: {{stale_sections}}
 
@@ -75,6 +75,12 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    "Update Student Profile", "Deactivate Student", not "Manage Students"); the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades"), but "Create Student Record" is fine; no UI or tech term
    (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database); at most 5 words; unique. A name the user
    dictates word for word is used as given.
+11. **Screen authorization (§3.1.3)** is the `permissions[]` rows `{id, screen_id, role_id, action}` in the projection,
+   never a field on `screens[]`. Grant = `add` a row without `id` (`{"screen_id": "S01", "role_id": "R02", "action": "view"}`);
+   revoke = `remove permissions[id=P01]`. "Remove Guest" from a screen removes that role's rows for it, not the role.
+12. **Redraw / regenerate a diagram** ("gen lại ERD", "vẽ lại sơ đồ") is not a document edit: diagrams are drawn by code
+   from the data. Return `clarification_needed` saying so (user's language): they can press "Vẽ lại" on the diagram, or
+   name the entity / relationship / screen to change.
 
 ## Reconcile (`reconcile`)
 

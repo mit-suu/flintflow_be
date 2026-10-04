@@ -80,7 +80,7 @@ import {
   preview,
   type ChangeDeps
 } from "./change.service.js"
-import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
+import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -414,6 +414,60 @@ describe("buildChangeProjection — brief_core ở pha Brief", () => {
 
   it("phase ngoài Brief: không có brief_core", () => {
     expect(buildChangeProjection(at("S-3"), "làm cho tài liệu hay hơn").brief_core).toBeUndefined()
+  })
+})
+
+describe("sửa phân quyền màn hình (§3.1.3) và output sai khuôn", () => {
+  it("nhắc tên màn ⇒ projection có dòng permissions của đúng màn đó, kèm tên vai trò", () => {
+    const projection = buildChangeProjection(FIXTURE, "Login chỉ cho Analyst và Admin view, xóa Guest")
+    const rows = projection.permissions as { screen_id: string }[]
+    expect(rows.length).toBe(FIXTURE.permissions.filter((p) => p.screen_id === "S01").length)
+    expect(rows.every((p) => p.screen_id === "S01")).toBe(true)
+    expect((projection.roles as { id: string; name: string }[]).map((r) => r.name)).toContain("Guest")
+    expect((projection.existing_ids as Record<string, string[]>).permissions).toContain("P001")
+  })
+
+  it("chỉ nói §3.1.3 / phân quyền ⇒ mọi dòng permissions + danh sách màn và vai trò gọn", () => {
+    const projection = buildChangeProjection(FIXTURE, "Sửa §3.1.3 Screen Authorization cho đúng")
+    expect((projection.permissions as unknown[]).length).toBe(FIXTURE.permissions.length)
+    expect((projection.screens as { id: string; name: string }[])[0]).toEqual({ id: "S01", name: "Login" })
+    expect(buildChangeProjection(FIXTURE, "làm cho tài liệu hay hơn")).not.toHaveProperty("permissions")
+  })
+
+  it("lô sai schema (field không tồn tại) ⇒ gọi lại model MỘT lần kèm lỗi và cách ghi permissions[]", async () => {
+    await seed()
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: "screens[id=S01].authorized_role_ids", value: ["R1", "R2"] }] }))
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: "permissions[id=P001]" }] }))
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "Login xóa Guest" }, {}, deps)
+
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(2)
+    const second = vi.mocked(deps.changeExecutor).mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(second.previous_problems).toContain("authorized_role_ids")
+    expect(second.previous_problems).toContain("permissions[]")
+    expect(result.ok).toBe(true)
+    expect(result.changes[0]).toMatchObject({ path: "permissions[id=P001]" })
+  })
+
+  it("model trả output sai khuôn (lỗi Zod) ⇒ preview hỏi lại bằng tiếng Việt, không ném lỗi kỹ thuật", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => {
+      throw new AiActionError(422, "AI response failed Zod schema validation for action 'change_instruction'", "SCHEMA_MISMATCH")
+    })
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "Trong §3.1.5 Entity Relationship Diagram: gen lại" }, {}, deps)
+    expect(result.ok).toBe(false)
+    expect(result.clarification).toContain("Vẽ lại")
+    expect(result.clarification).not.toMatch(/Zod|schema/i)
+  })
+
+  it("lỗi không phải do output của model (hết credit) vẫn ném thẳng", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => {
+      throw new AiActionError(402, "no credit", "INSUFFICIENT_CREDIT")
+    })
+    await expect(preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên A01" }, {}, deps)).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })
   })
 })
 
