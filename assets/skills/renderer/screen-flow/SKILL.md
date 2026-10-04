@@ -1,7 +1,7 @@
 ---
 skill_id: screen-flow
 kind: renderer
-version: 2.2.0
+version: 2.3.0
 description: "S-4.2 Screens Flow (Graphviz DOT; one diagram per human actor using the UI, started by a diamond with the actor name)"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -51,7 +51,9 @@ One screen can belong to several actors (Login is shared) and then appears in ea
 - The part starts at a **diamond with the actor name inside** (`START`), with an arrow to every entry screen:
   not a pop-up and no incoming edge from a screen of the same part. If every screen has an incoming edge,
   the one with the lowest `queue_order`, then the lowest id. Login and a public landing page both have no
-  incoming edge, so both are entries side by side.
+  incoming edge, so both are entries side by side. The **sign-in gateway** — a screen open to `Guest` with an
+  edge to a screen that is not (Login → each actor's landing) — is always an entry, so `Register → Login`
+  draws Register and Login side by side after the actor diamond, with the arrow between them.
 - There is **no** "unassigned" part: every screen must belong to at least one human actor. A screen linked to
   no human actor is an **orphan** — it is not drawn, and flag `orphan_screen` points at it.
 - No screen ↔ actor link at all yet (before S-4.3 / S-4.4): a single unlabelled diagram of every screen,
