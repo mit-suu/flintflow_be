@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine } from "./spine.types.js"
-import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, type FlagCandidate } from "./deterministic-check.js"
+import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
 import { computeSourceHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
@@ -400,7 +400,18 @@ describe("runDeterministicCheck", () => {
     }
     // `Scheduler` là actor nhưng `Scheduled` không phải ⇒ U4 khớp nguyên từ, không khớp tiền tố
     expect(codes("Run Scheduled Housekeeping").style).not.toContain("U4")
-    expect(codes("Notify Founder").style).toContain("U4")
+    expect(codes("Scheduled Cleanup").style).not.toContain("U4")
+  })
+
+  it("FLF-243 U4: chỉ bắt actor làm CHỦ NGỮ; actor là đối tượng nghiệp vụ thì hợp lệ", () => {
+    const actors = ["Teacher", "Student", "Student Services Office Staff", "Founder"]
+    const u4 = (name: string) => checkUseCaseName(name, actors, [name]).style.includes("U4")
+    for (const name of ["Teacher Enters Grades", "Student Views Grades", "Founder Creates Project", "Approve Leave by Teacher", "Teacher"]) {
+      expect(u4(name), name).toBe(true)
+    }
+    for (const name of ["Create Student Record", "Update Teacher Profile", "Enroll Student", "Notify Founder", "Create Teacher Account", "Find Studentship"]) {
+      expect(u4(name), name).toBe(false)
+    }
   })
 
   it("tên đúng chuẩn không sinh cờ: từ phụ viết hoa giữa tên, actor có định ngữ", () => {
@@ -413,6 +424,20 @@ describe("runDeterministicCheck", () => {
     for (const name of ["Create SRS via Guided Interview", "Copy Item into Folder", "Report Usage per Branch", "Compare Plan vs Actual"]) {
       expect(checkUseCaseName(name, [], [name]).style, name).not.toContain("U1")
     }
+  })
+
+  it("FLF-243 useCaseNameIssues: chỉ báo tên mới/vừa đổi, cùng luật với cờ usecase_name_*", () => {
+    const before = structuredClone(FIXTURE)
+    before.use_cases = before.use_cases.map((u) => (u.id === "UC04" ? { ...u, name: "Manage Onboarding" } : u))
+    const after = structuredClone(before)
+    after.use_cases = after.use_cases.map((u) =>
+      u.id === "UC05" ? { ...u, name: "Create, Update and Delete Projects" } : u.id === "UC06" ? { ...u, name: "Founder Creates Project" } : u)
+    after.use_cases.push({ ...after.use_cases[0], id: "UC99", name: "Archive Old Data" })
+
+    const issues = useCaseNameIssues(before, after)
+    expect(issues.map((i) => i.id)).toEqual(["UC05", "UC06"])
+    expect(issues[0].message).toContain('một mục tiêu duy nhất')
+    expect(issues[1].message).toContain("actor không làm chủ ngữ")
   })
 
   it("use case truy cập tài khoản: nhận theo nguyên cụm từ, không theo chuỗi con", () => {

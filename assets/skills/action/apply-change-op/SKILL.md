@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.2.1
+version: 1.3.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -32,6 +32,9 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 - Baseline exists: {{has_baseline}}
 - Projection around the target (keyed): {{projection}} — `existing_ids` lists the ids that exist right now
 - Glossary / proper names: {{glossary}}
+{{#if previous_problems}}
+- **Your previous batch for this request was rejected** — redo the whole batch fixing every problem below (a field that does not exist, a broken rule, a use case name that bundles several goals ⇒ several use cases, rule 10): {{previous_problems}}
+{{/if}}
 - For `reconcile` — the owning step `{{step_id}}` ({{step_name}}), the paths it may write `{{writable_paths}}`, and the stale section with the exact changes that made it stale: {{stale_sections}}
 
 ## Change instruction (`change_instruction`)
@@ -72,6 +75,22 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
+10. **Use case names you word yourself** (a new use case, a split, a rename the user describes but does not spell
+   out) follow the naming rules code checks after you: Title Case, no trailing period; one goal — no "and", "/"
+   or comma (two goals ⇒ two use cases); a concrete verb, never Manage, Handle, Process, Maintain, Administer,
+   Support, Control, Operate, Use, Do, Perform, Work, Deal or Take ("split Manage Students" ⇒ "Enroll Student",
+   "Update Student Profile", "Deactivate Student", not "Manage Students"); the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades"), but "Create Student Record" is fine; no UI or tech term
+   (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database); at most 5 words; unique. A name the user
+   dictates word for word is used as given.
+11. **Screen authorization (§3.1.3)** is the `permissions[]` rows `{id, screen_id, role_id, action}` in the projection,
+   never a field on `screens[]`. Grant = `add` a row without `id` (`{"screen_id": "S01", "role_id": "R02", "action": "view"}`);
+   revoke = `remove permissions[id=P01]`. "Remove Guest" from a screen removes that role's rows for it, not the role.
+12. **Diagrams are drawn by code from the data**, and a request naming a section ("Trong §3.1.5 …") puts that section's
+   data in the projection (ERD: `entities[]` with `relations`, `relation_verbs`, `relation_cardinality`). Never ask the
+   user to paste a diagram or its elements. "Redraw / regenerate" (`gen lại ERD`, `vẽ lại sơ đồ`) ⇒ `clarification_needed`:
+   press "Vẽ lại sơ đồ" under the diagram. Moving boxes, positions, colours or line style are not stored, the layout is
+   automatic ⇒ `clarification_needed` saying so and naming what does reshape it (ERD: add/remove an entity or a
+   relationship, its verb, its cardinality), with one example from the projection.
 
 ## Reconcile (`reconcile`)
 

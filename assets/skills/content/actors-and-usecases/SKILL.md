@@ -1,7 +1,7 @@
 ---
 skill_id: actors-and-usecases
 kind: content
-version: 0.8.0
+version: 0.9.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -65,11 +65,10 @@ sits on the use case it starts. **Account use cases follow S-3.1 access**, for e
 <Actor> Account" for the managing actor; `identity provider` ⇒ Log In with the provider as participant, no
 Register/Reset; `no sign-in` ⇒ none.
 
-One use case = one goal reachable in one sitting, independent of UI screens: "Manage Project" is too coarse (split
-by real goal), "Click Accept Button" is too fine. Naming: **U7** the object uses the business term from the
-Brief/Glossary, the same term throughout. **U9** the name shows the value the actor gets ("Update Record" ⇒
-"Approve Purchase Order"). Cover every goal in `project.goals[]` and every `release_scope.in` bullet; every human
-actor needs at least one use case, and a S-3.2 batch with no new `use_cases[]` is almost always wrong.
+One use case = one goal reachable in one sitting, independent of UI screens; "Click Accept Button" is too fine.
+Naming — code re-checks every name and flags each miss, so get it right here. **U1** Title Case, no trailing period. **U2** one goal: no "and", "/" or comma — two goals are two use cases. **U3** a concrete verb, never Manage, Handle, Process, Maintain, Administer, Support, Control, Operate, Use, Do, Perform, Work, Deal or Take: "Manage Students" is split by real goal ("Enroll Student", "Update Student Profile", "Deactivate Student"). **U4** the actor is never the subject ("Teacher Enters Grades" ⇒ "Enter Grades", no "… by Teacher"); an actor type that is also the data being handled is fine ("Create Student Record").
+**U5** no UI or tech term (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database). **U6** at most 5 words. **U7** the object uses the business term from the Brief/Glossary, the same term throughout. **U8** no two use cases share a name. **U9** the name shows the value the actor gets ("Update Record" ⇒ "Approve Purchase Order").
+Cover every goal in `project.goals[]` and every `release_scope.in` bullet; every human actor needs at least one use case, and a S-3.2 batch with no new `use_cases[]` is almost always wrong.
 
 ## S-3.3 — Missing Use Case Sweep
 
@@ -142,7 +141,7 @@ extending use case opens with its condition ("When …"); every other one starts
 
 - [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8.
 - [ ] S-3.1/S-3.2/S-3.3 actors have equal-length, index-paired `flows_in`/`flows_out`, exactly one exchange per item.
-- [ ] Every use case name is verb + object in business terms, shows the actor's value, `function_ids: []`.
+- [ ] Every use case name passes U1–U9 (no Manage/Maintain/Handle…, no "and", ≤ 5 words, actor never the subject), `function_ids: []`.
 - [ ] `actor_ids` lists participants, primary first; notification actors only on emitting use cases; each
       human actor's access decided; sweep themes covered or ruled out, clock-driven work has its own UC.
 - [ ] Every relationship passes (a)/(b) and its `reason` says why; Log In / Sign In is never a target and

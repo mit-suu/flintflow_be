@@ -223,6 +223,35 @@ describe("draftOps retry", () => {
     expect(saveWithVersion).not.toHaveBeenCalled()
   })
 
+  it("FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt sau đúng thì qua", async () => {
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([{ op: "set", path: "use_cases[id=UC05].name", value: "Manage Projects" }]))
+      .mockResolvedValueOnce(reply([{ op: "set", path: "use_cases[id=UC05].name", value: "Find Project" }]))
+
+    const result = await draftOps("p", "S-3.2", ctxFor(spine, "S-3.2"), { userId: "u", spine, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["usecase_name_invalid"], []])
+    expect(result.txn?.ops).toEqual([{ op: "set", path: "use_cases[id=UC05].name", value: "Find Project" }])
+    const secondVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(secondVars.validation_errors).toMatchObject([{ rule: "usecase_name_invalid", path: "use_cases[id=UC05].name" }])
+  })
+
+  it("FLF-243: hết lượt mà tên vẫn sai ⇒ lượt cuối vẫn nhận lô, không 422 (lỗi đặt tên là lỗi mềm)", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "use_cases[id=UC05].name", value: "Create, Update and Delete Projects" }]))
+    const result = await draftOps("p", "S-3.2", ctxFor(spine, "S-3.2"), { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(3)
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+
+  it("FLF-243: tên đã có từ trước (không đụng tới trong lô) không chặn step", async () => {
+    const legacy = structuredClone(FIXTURE)
+    legacy.use_cases = legacy.use_cases.map((u) => (u.id === "UC05" ? { ...u, name: "Manage Projects" } : u))
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    const result = await draftOps("p", "S-3.2", ctxFor(legacy, "S-3.2"), { userId: "u", spine: legacy, executor })
+    expect(executor).toHaveBeenCalledTimes(1)
+    expect(result.attempts[0].errors).toEqual([])
+  })
+
   it("lỗi không phải schema (hết credit) ném thẳng, không retry", async () => {
     const executor = vi.fn<DraftExecutor>().mockRejectedValue(new AiActionError(402, "no credit", "INSUFFICIENT_CREDIT"))
     await expect(draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor })).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })

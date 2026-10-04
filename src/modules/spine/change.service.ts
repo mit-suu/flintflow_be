@@ -25,8 +25,10 @@ import { stampAddendum } from "./addendum-stamp.js"
 import { nameElementIds } from "./human-labels.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
+import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
+import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
-import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
+import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -172,6 +174,56 @@ const MIN_NAME_MATCH = 3
 const textOf = (element: Record<string, unknown>): string =>
   [element.name, element.term, element.statement, element.code].filter((v): v is string => typeof v === "string").join(" ")
 
+/** Trần phần tử mỗi collection khi lệnh chỉ ra cả một mục — đủ cho ERD / sơ đồ use case cỡ thật, vẫn không phải cả Spine. */
+const SECTION_ELEMENT_LIMIT = 80
+
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Mục cố định lệnh nhắc tới: "§3.1.5 …" (nút "Sửa mục này" luôn điền sẵn) hoặc tên mục nhiều từ ("Entity Relationship
+ * Diagram"). Mục dẫn xuất (Record of Changes, Glossary tự tính) không có dữ liệu để sửa nên bỏ.
+ */
+export const referencedSections = (haystack: string): string[] =>
+  FIXED_SECTIONS.filter((s) => !s.derived)
+    .filter((s) => {
+      const number = s.id.slice("fixed:".length)
+      if (new RegExp(`§\\s*${escapeRe(number)}(?![.\\d])`).test(haystack)) return true
+      return s.title_en.includes(" ") && haystack.includes(s.title_en.toLowerCase())
+    })
+    .map((s) => s.id)
+
+/**
+ * Collection nuôi một mục (bảng §4): field mục sở hữu, và với mục là sơ đồ thì cả field sinh ra sơ đồ đó (cột Suy dẫn
+ * `diagram:<kind>`). §3.1.5 ⇒ entities; §2.2.1 Use Case Diagram ⇒ actors + use_cases; §3.1.1 ⇒ screens.
+ */
+export const sectionCollections = (sectionId: string): string[] => {
+  const kinds = FIELD_SECTION_MAP.filter((r) => r.owner.includes(sectionId) && r.key.startsWith("diagram_")).map((r) => r.key.slice("diagram_".length))
+  const rows = FIELD_SECTION_MAP.filter((r) => r.owner.includes(sectionId) || kinds.some((k) => r.derived.includes(`diagram:${k}`)))
+  const roots = rows.flatMap((r) => r.field.split(",").map((f) => /^\s*([a-z_]+)\[/.exec(f)?.[1] ?? ""))
+  return [...new Set(roots)].filter((c) => (TARGET_COLLECTIONS as readonly string[]).includes(c) || c === "permissions")
+}
+
+/** Lệnh nói về phân quyền màn hình (§3.1.3) dù không nhắc tên màn hay vai trò nào. */
+const AUTHORIZATION_HINT = /3\.1\.3|authori[sz]ation|permission|phân quyền|quyền truy cập/i
+
+/**
+ * Phân quyền màn hình là các dòng `permissions[]` `{id, screen_id, role_id, action}`, không phải field của `screens[]`.
+ * Collection này không có tên nên không khớp theo chữ như `TARGET_COLLECTIONS`: thiếu nó, model đoán ra
+ * `screens[].authorized_role_ids` và lô chết vì sai schema. Lấy dòng của màn được nhắc; không nhắc màn thì dòng của vai trò
+ * được nhắc; lệnh chỉ nói "phân quyền / §3.1.3" thì tất cả (có trần).
+ */
+const permissionRows = (spine: Spine, haystack: string, projection: Record<string, unknown>): Spine["permissions"] => {
+  const ids = (key: string) => new Set(((projection[key] as { id?: unknown }[] | undefined) ?? []).map((el) => String(el.id)))
+  const screens = ids("screens")
+  const roles = ids("roles")
+  if (screens.size > 0) return spine.permissions.filter((p) => screens.has(p.screen_id)).slice(0, PERMISSION_ROW_LIMIT)
+  if (roles.size > 0) return spine.permissions.filter((p) => roles.has(p.role_id)).slice(0, PERMISSION_ROW_LIMIT)
+  return AUTHORIZATION_HINT.test(haystack) ? spine.permissions.slice(0, PERMISSION_ROW_LIMIT) : []
+}
+
+/** Dòng phân quyền gọn (4 field) nên trần cao hơn `PROJECTION_ELEMENT_LIMIT`. */
+const PERMISSION_ROW_LIMIT = 120
+
 /**
  * Chỉ những phần tử câu lệnh THẬT SỰ nhắc tới (trùng id, hoặc tên/từ khoá xuất hiện trong câu).
  * Không nhắc ai rõ ràng ⇒ đưa chỉ mục gọn (id + nhãn) để model tự định vị, vẫn không phải cả Spine.
@@ -201,6 +253,27 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     if (hits.length === 0) continue
     projection[collection] = hits.slice(0, PROJECTION_ELEMENT_LIMIT)
     matched += hits.length
+  }
+
+  // Lệnh chỉ ra cả một mục ("Trong §3.1.5 Entity Relationship Diagram: …") mà không nhắc tên phần tử nào: không có
+  // dòng này model chỉ thấy id + tên entity, không thấy quan hệ, và đòi user dán lại ERD.
+  for (const collection of referencedSections(haystack).flatMap(sectionCollections)) {
+    // Nhắc cả mục lẫn một phần tử ("§3.1.5 … nối User với Grade") ⇒ vẫn cần đủ mục, không chỉ phần tử được nhắc
+    if (collection === "permissions") continue
+    const list = spine[collection as (typeof TARGET_COLLECTIONS)[number]] as unknown as Record<string, unknown>[]
+    if (!Array.isArray(list) || list.length === 0) continue
+    projection[collection] = list.slice(0, SECTION_ELEMENT_LIMIT)
+    matched += Math.min(list.length, SECTION_ELEMENT_LIMIT)
+  }
+
+  const permissions = permissionRows(spine, haystack, projection)
+  if (permissions.length > 0) {
+    projection.permissions = permissions
+    existingIds.permissions = spine.permissions.map((p) => p.id).slice(0, 200)
+    // Dòng phân quyền chỉ mang id ⇒ kèm tên vai trò/màn (gọn) để model đọc được "S01/R04" là Login/Guest
+    if (!projection.roles) projection.roles = spine.roles.map(({ id, name, actor_id }) => ({ id, name, actor_id }))
+    if (!projection.screens) projection.screens = spine.screens.slice(0, PERMISSION_ROW_LIMIT).map(({ id, name }) => ({ id, name }))
+    matched += permissions.length
   }
 
   // Pha Brief: tầm nhìn/mục tiêu là entry addendum lõi (ngôn ngữ user + bản EN) — model sửa ở đó, không ở project
@@ -328,7 +401,44 @@ interface ResolvedOps {
   notes: string | null
 }
 
-/** Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model, không retry. */
+/** Model gửi field không có trong Spine (`screens[].authorized_role_ids`) — nhắc nó chỉ dùng field thấy trong projection. */
+const SCHEMA_FIX =
+  "Lô bị từ chối: chỉ ghi vào field có trong projection. Phân quyền màn hình là các dòng permissions[] {screen_id, role_id, action} " +
+  "— thêm dòng để cấp quyền, remove permissions[id=…] để thu quyền; không có field nào kiểu authorized_role_ids trên screens[]"
+
+/**
+ * Lỗi của lô model vừa trả, để gọi lại model một lần kèm lỗi:
+ * - lô không áp thử được (sai schema, phá bất biến) ⇒ các violation;
+ * - FLF-243: tên use case model TỰ đặt mà cờ vàng `usecase_name_*` sẽ bắt. Tên user gõ nguyên văn thì để yên.
+ */
+const batchProblems = (spine: Spine, ops: Op[], instruction: string): string[] => {
+  if (ops.length === 0) return []
+  let plan: ReturnType<typeof planTransaction>
+  try {
+    plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
+  } catch (err) {
+    if (!(err instanceof TransactionRejectedError)) return []
+    const messages = err.violations.map((v) => v.message)
+    return err.violations.some((v) => v.rule === "schema_invalid") ? [...messages, SCHEMA_FIX] : messages
+  }
+  const asked = instruction.toLowerCase()
+  const naming = useCaseNameIssues(spine, plan.spine)
+    .filter((issue) => !asked.includes(issue.name.toLowerCase()))
+    .map((issue) => issue.message)
+  return naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []
+}
+
+/** Model trả output sai khuôn (không op, không câu hỏi) ⇒ hỏi lại user thay vì đẩy lỗi Zod tiếng Anh ra giao diện. */
+const UNCLEAR_INSTRUCTION =
+  "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục và nội dung muốn đổi giúp mình " +
+  "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu — muốn vẽ lại ngay thì bấm \"Vẽ lại sơ đồ\" dưới hình."
+
+const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
+
+/**
+ * Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model; lô có lỗi (áp thử bị từ chối, tên
+ * use case sai luật — FLF-243) thì gọi lại đúng MỘT lần kèm lỗi — lần hai vẫn sai thì giữ lô để preview báo lỗi / cờ vàng bắt.
+ */
 const opsFromInstruction = async (
   projectId: string,
   userId: string,
@@ -338,24 +448,44 @@ const opsFromInstruction = async (
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
-  const result = await deps.changeExecutor(
-    ActionType.CHANGE_INSTRUCTION,
-    {
-      promptVariables: {
-        call_kind: "change_instruction",
-        user_message: instruction,
-        chat_history: history || "(none)",
-        is_pipeline: false,
-        has_baseline: spine.baselines.length > 0,
-        // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
-        projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
-        glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
-        stale_sections: []
-      }
-    },
-    projectId,
-    userId
-  )
+  const call = (previousProblems?: string) =>
+    deps.changeExecutor(
+      ActionType.CHANGE_INSTRUCTION,
+      {
+        promptVariables: {
+          call_kind: "change_instruction",
+          user_message: instruction,
+          chat_history: history || "(none)",
+          is_pipeline: false,
+          has_baseline: spine.baselines.length > 0,
+          // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
+          projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
+          glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
+          stale_sections: [],
+          ...(previousProblems ? { previous_problems: previousProblems } : {})
+        }
+      },
+      projectId,
+      userId
+    )
+
+  let result: Awaited<ReturnType<typeof call>>
+  try {
+    result = await call()
+  } catch (err) {
+    if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return { ops: [], clarification: UNCLEAR_INSTRUCTION, notes: null }
+    throw err
+  }
+  if (!result.data.clarification_needed?.trim()) {
+    const problems = batchProblems(spine, stampAddendum((result.data.ops ?? []) as Op[]), instruction)
+    if (problems.length > 0) {
+      const retry = await call(problems.join("\n")).catch((err: unknown) => {
+        if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
+        throw err
+      })
+      if (retry && !retry.data.clarification_needed?.trim() && (retry.data.ops ?? []).length > 0) result = retry
+    }
+  }
 
   // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
   const clarification = result.data.clarification_needed?.trim()

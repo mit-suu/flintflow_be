@@ -722,7 +722,7 @@ const NAME_RULE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   U1: "viết hoa đầu mỗi từ, không chấm cuối",
   U2: 'một mục tiêu duy nhất, không gộp bằng "and", "/" hay dấu phẩy',
   U3: "động từ quá thô, nói mục tiêu cụ thể",
-  U4: "không nhắc tên actor trong tên use case",
+  U4: "actor không làm chủ ngữ trong tên use case (bỏ \"<Actor> …\" ở đầu hay \"… by <Actor>\")",
   U5: "không dùng thuật ngữ giao diện hay kỹ thuật",
   U6: "tối đa 5 từ",
   U8: "trùng tên với use case khác",
@@ -741,6 +741,17 @@ const sameText = (a: string, b: string): boolean => a.trim().toLowerCase() === b
 /** Khớp NGUYÊN TỪ, không phân biệt hoa thường: "Scheduler" không dính "Run Scheduled Housekeeping". */
 const containsWord = (text: string, term: string): boolean =>
   new RegExp(`(?:^|[^A-Za-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^A-Za-z0-9]|$)`, "i").test(text)
+
+/**
+ * U4 — actor là CHỦ NGỮ của tên: tên mở đầu bằng tên actor ("Teacher Enters Grades") hoặc gán người làm bằng
+ * "by <Actor>". Actor là ĐỐI TƯỢNG nghiệp vụ thì hợp lệ (FLF-243): ở hệ thống trường học Student/Teacher vừa là actor vừa
+ * là dữ liệu phòng đào tạo quản lý — "Create Student Record", "Enroll Student" là tên đúng, không có cách đặt nào né được.
+ */
+const actorIsSubject = (name: string, actor: string): boolean => {
+  const text = name.trim().toLowerCase()
+  const who = actor.toLowerCase()
+  return text === who || text.startsWith(`${who} `) || containsWord(name, `by ${actor}`)
+}
 
 /**
  * Mã luật đặt tên use case bị vi phạm, tách làm hai nhóm vì mode 1 đối xử khác nhau:
@@ -766,7 +777,7 @@ export const checkUseCaseName = (
   // bắn vào "2FA", "(Optional)", "e-Sign" hay "iPhone" — cách viết cố ý, không phải lỗi.
   const wrongCase = parts.some((w, i) => !/[A-Z]/.test(w) && /[a-z]/.test(w) && !(i > 0 && MINOR_WORDS.includes(w.toLowerCase())))
   if (wrongCase || name.trim().endsWith(".")) style.push("U1")
-  if (actorNames.some((a) => a.trim() !== "" && containsWord(name, a.trim()))) style.push("U4")
+  if (actorNames.some((a) => a.trim() !== "" && actorIsSubject(name, a.trim()))) style.push("U4")
   if (UI_TERM_BLACKLIST.some((t) => containsWord(name, t))) style.push("U5")
   if (parts.length > 5) style.push("U6")
 
@@ -971,6 +982,35 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
     })
   }
   return out
+}
+
+/** Cách sửa chung cho mọi lỗi tên use case — model cần biết phải TÁCH chứ không chỉ đổi chữ ("Manage X" ⇒ "Create, Update and Delete X" vẫn sai). */
+export const USE_CASE_NAME_FIX =
+  "Đặt lại tên theo luật U1–U9: một động từ cụ thể + đối tượng nghiệp vụ, ≤ 5 từ, không \"and\"/\"/\"/dấu phẩy, actor không làm chủ ngữ. " +
+  "Tên đang gộp nhiều mục tiêu (Manage/Maintain…, \"Create, Update and Delete …\") thì TÁCH thành nhiều use case, mỗi mục tiêu một use case"
+
+export interface UseCaseNameIssue {
+  id: string
+  name: string
+  message: string
+}
+
+/**
+ * FLF-243: tên use case MỚI hoặc VỪA ĐỔI (so `before` với `after`) mà cờ vàng `usecase_name_*` sẽ bắt — để chặn ngay lúc
+ * model sinh (draft, sửa qua chat) thay vì để user gặp cờ sau. Tên cũ không đụng tới thì không xét: lô của step khác
+ * không bị chặn vì một tên đã có từ trước.
+ */
+export const useCaseNameIssues = (before: Spine, after: Spine): UseCaseNameIssue[] => {
+  const previous = new Map(before.use_cases.map((u) => [u.id, u.name]))
+  const actorNames = after.actors.map((a) => a.name)
+  const names = after.use_cases.map((u) => u.name)
+  return after.use_cases
+    .filter((u) => previous.get(u.id) !== u.name)
+    .flatMap((u) => {
+      const { semantic, style } = checkUseCaseName(u.name, actorNames, names)
+      const codes = [...semantic, ...style]
+      return codes.length === 0 ? [] : [{ id: u.id, name: u.name, message: `Tên use case "${u.name}" chưa đạt: ${hint(codes)}` }]
+    })
 }
 
 // ─── tên hệ thống (FLF-177) ─────────────────────────────────
