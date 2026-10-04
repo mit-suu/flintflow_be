@@ -1,0 +1,5 @@
+{
+  "id": "fintech-wallet",
+  "idea": "Tôi muốn xây một ví điện tử cho người dùng cá nhân: nạp tiền từ thẻ ngân hàng, chuyển tiền cho nhau, thanh toán hoá đơn điện nước. Có xác thực danh tính bằng giấy tờ và lịch sử giao dịch thật của khách.",
+  "note": "Dữ liệu tài chính và xác thực danh tính ⇒ thẻ tuân thủ phải khuyến nghị vế pháp luật và stakes phải ra regulated. Mất giá trị này là mất cột ngưỡng regulated trong NFR và mục tuân thủ của tài liệu."
+}
