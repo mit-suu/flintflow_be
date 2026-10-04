@@ -305,15 +305,54 @@ describe("renderers trên fixture 19 màn", () => {
     expect(lecturer).not.toContain("S02")
   })
 
-  it("screen_flow: màn không actor nào dùng ⇒ sơ đồ Unassigned cuối (chấm đen); chưa có liên kết actor ⇒ một sơ đồ chung", () => {
+  it("screen_flow: màn public (chỉ Guest) nằm trong sơ đồ của mọi actor, Login và landing công khai cùng là màn vào", () => {
+    // Login → Reset Password, Login → Teacher Home / Student Home; Public Landing đứng ngang Login
+    const spine = mutate((s) => {
+      s.actors = [
+        { ...s.actors.find((a) => a.kind === "human")!, id: "A01", name: "Teacher" },
+        { ...s.actors.find((a) => a.kind === "human")!, id: "A02", name: "Student" }
+      ]
+      s.roles = [
+        { ...s.roles[0], id: "R1", actor_id: "A01" },
+        { ...s.roles[0], id: "R2", actor_id: "A02" },
+        { ...s.roles[0], id: "R3", name: "Guest", actor_id: null }
+      ]
+      const base = s.screens[0]
+      s.screens = [
+        { ...base, id: "S01", name: "Login", flow_to: ["S02", "S03", "S04"], is_popup: false, tabs: [] },
+        { ...base, id: "S02", name: "Reset Password", flow_to: [], is_popup: false, tabs: [] },
+        { ...base, id: "S03", name: "Teacher Home", flow_to: [], is_popup: false, tabs: [] },
+        { ...base, id: "S04", name: "Student Home", flow_to: [], is_popup: false, tabs: [] },
+        { ...base, id: "S05", name: "Public Landing", flow_to: [], is_popup: false, tabs: [] }
+      ]
+      const perm = s.permissions[0]
+      s.permissions = [
+        ...["S01", "S02", "S05"].map((id) => ({ ...perm, screen_id: id, role_id: "R3" })),
+        { ...perm, screen_id: "S03", role_id: "R1" },
+        { ...perm, screen_id: "S04", role_id: "R2" }
+      ]
+      s.use_cases = []
+    })
+    const parts = renderKind(spine, "screen_flow")
+    expect(parts.map((p) => screenFlowTitleOf(p.puml))).toEqual(["Screens flow for Teacher", "Screens flow for Student"])
+    const [teacher, student] = parts.map((p) => p.puml)
+    for (const p of [teacher, student]) {
+      expect([...p.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01", "S05"])
+      expect(p).toContain("S01 -> S02;")
+    }
+    expect(teacher).toContain("S01 -> S03;")
+    expect(teacher).not.toContain("S04")
+    expect(student).toContain("S01 -> S04;")
+    expect(student).not.toContain("S03")
+  })
+
+  it("screen_flow: màn không actor nào dùng không vẽ ở sơ đồ nào; chưa có liên kết actor ⇒ một sơ đồ chung", () => {
     const withOrphan = mutate((s) => {
       s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Orphan Screen", flow_to: [] })
     })
     const parts = renderKind(withOrphan, "screen_flow")
-    const last = parts[parts.length - 1].puml
-    expect(screenFlowTitleOf(last)).toBe("Screens flow for unassigned screens")
-    expect(last).toContain('S20 [label="Orphan Screen"];')
-    expect(last).toContain("START [label=\"\", shape=circle")
+    expect(parts).toHaveLength(renderKind(FIXTURE, "screen_flow").length)
+    expect(parts.every((p) => !p.puml.includes("S20"))).toBe(true)
 
     const unlinked = mutate((s) => {
       s.permissions = []
