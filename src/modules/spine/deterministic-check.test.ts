@@ -203,6 +203,19 @@ describe("runDeterministicCheck", () => {
     expect(flags.every((f) => f.level === "yellow" && f.section_id === "fixed:3.1.1" && f.remediation_step === "S-4.2")).toBe(true)
   })
 
+  it("orphan_screen: màn chỉ Guest (role không gắn actor) vào là màn public của mọi actor, không mồ côi", () => {
+    const withPublic = variant((s) => {
+      const tpl = s.screens.find((x) => x.id === "S13")!
+      s.roles.push({ id: "R99", name: "Guest", actor_id: null })
+      s.permissions.push({ id: "P999", screen_id: "S20", role_id: "R99", action: "view" })
+      s.screens.push({ ...tpl, id: "S20", name: "Reset Password", flow_to: [] })
+      s.screens.find((x) => x.id === "S01")!.flow_to.push("S20")
+    })
+    const atBaseline = runDeterministicCheck(withPublic, [], { atBaseline: true })
+    expect(byRule(atBaseline, "orphan_screen").map((f) => f.target_id)).not.toContain("S20")
+    expect(byRule(atBaseline, "orphan_screen_at_baseline").map((f) => f.target_id)).not.toContain("S20")
+  })
+
   it("orphan_screen_at_baseline: màn mồ côi thành cờ đỏ chỉ khi ký baseline", () => {
     const orphaned = variant((s) => {
       s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "No Actor", flow_to: [] })

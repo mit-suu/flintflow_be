@@ -6,12 +6,26 @@
  * đường đã có:
  *   1. `permissions[].screen_id` → `roles[].actor_id` (S-4.3 — ai được vào màn),
  *   2. `use_cases[].actor_ids` × `function_ids` → `functions[].screen_id` (use case của actor chạy trên màn).
+ * Màn public — chỉ role không gắn actor (`Guest`, `actor_id: null`) được vào: Login, Forgot/Reset Password, landing
+ * công khai — là cửa vào chung nên thuộc MỌI actor người đã có màn (actor chưa có màn nào không thao tác UI).
  * Actor `system`/`time` không thao tác UI nên bị bỏ. Hàm thuần, kết quả sắp theo id.
  */
 
 import type { Spine } from "./spine.types.js"
 
 type ScreenActorSource = Pick<Spine, "actors" | "roles" | "permissions" | "use_cases" | "functions" | "screens">
+
+/** `screen_id → actor_id` của từng role có quyền trên màn: `null` = role không gắn actor (Guest), `undefined` = role không tồn tại. */
+const roleActorsByScreen = (spine: Pick<Spine, "roles" | "permissions">): Map<string, (string | null | undefined)[]> => {
+  const roleActor = new Map(spine.roles.map((r) => [r.id, r.actor_id]))
+  const out = new Map<string, (string | null | undefined)[]>()
+  for (const p of spine.permissions) out.set(p.screen_id, [...(out.get(p.screen_id) ?? []), roleActor.get(p.role_id)])
+  return out
+}
+
+/** Màn mở cho người chưa đăng nhập: có quyền của ít nhất một role không gắn actor (Guest) — Login, Register, Reset Password. */
+export const guestOpenScreenIds = (spine: Pick<Spine, "roles" | "permissions">): Set<string> =>
+  new Set([...roleActorsByScreen(spine)].filter(([, actors]) => actors.some((a) => a === null)).map(([id]) => id))
 
 /** `screen_id → actor_id[]` (chỉ actor người, sắp theo id). Màn không có actor nào ⇒ mảng rỗng. */
 export const screenActorMap = (spine: ScreenActorSource): Map<string, string[]> => {
@@ -29,6 +43,12 @@ export const screenActorMap = (spine: ScreenActorSource): Map<string, string[]> 
   for (const uc of spine.use_cases) {
     for (const fnId of uc.function_ids) for (const actorId of uc.actor_ids) link(fnScreen.get(fnId) ?? null, actorId)
   }
+
+  // Màn public: có quyền, và mọi quyền đều thuộc role có thật mà không gắn actor
+  const rolesOn = roleActorsByScreen(spine)
+  const isPublic = (screenId: string) => (rolesOn.get(screenId) ?? []).length > 0 && rolesOn.get(screenId)!.every((a) => a === null)
+  const uiActors = new Set([...links].filter(([screenId]) => !isPublic(screenId)).flatMap(([, ids]) => [...ids]))
+  for (const screenId of screenIds) if (isPublic(screenId)) for (const actorId of uiActors) link(screenId, actorId)
 
   const sorted = (ids: Set<string>) => [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   return new Map([...links].map(([screenId, ids]) => [screenId, sorted(ids)]))

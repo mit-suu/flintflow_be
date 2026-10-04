@@ -3,15 +3,17 @@
  * (`screen-actors.ts`, srs-spine §7.1).
  * Tách MỘT sơ đồ cho mỗi actor người tương tác trực tiếp với UI: chỉ màn actor đó dùng và cạnh giữa chúng,
  * điểm bắt đầu là HÌNH THOI mang tên actor, trỏ vào màn vào (không popup, không có cạnh tới trong nhóm). Màn chỉ tới
- * được qua màn của actor khác được nối tắt từ màn gần nhất trong nhóm (`bridgeGroup`) để không đứng ngang Login. Màn không
- * thuộc actor nào là màn mồ côi — vẫn vẽ ở sơ đồ "Unassigned screens" cuối cùng để không giấu nội dung, cờ
- * `orphan_screen` bắt nó.
+ * được qua màn của actor khác được nối tắt từ màn gần nhất trong nhóm (`bridgeGroup`) để không đứng ngang Login. Màn
+ * public (Login, Reset Password, landing công khai — chỉ Guest vào) thuộc mọi actor nên nằm trong mọi sơ đồ; màn không có
+ * cạnh tới như Login hay landing công khai cùng là màn vào, ngang hàng nhau; Register cũng vậy và trỏ sang Login — Login vẫn
+ * là màn vào dù có cạnh tới (`loginGateways`). Mọi màn phải thuộc ít nhất một actor người:
+ * màn mồ côi không vẽ ở sơ đồ nào, cờ `orphan_screen` bắt nó.
  * Chưa có liên kết màn ↔ actor nào (trước S-4.3/S-4.4) ⇒ một sơ đồ chung như cũ.
  * Vẽ bằng Graphviz DOT (`@startdot`) thay vì state diagram: state diagram không đặt được chữ vào trong hình thoi
  * (`<<choice>>` là hình thoi nhỏ cố định, không nhãn). Màn = hình chữ nhật; màn có `tabs[]` ⇒ cluster, mỗi tab một
  * node `<screen>_T<n>`, cạnh tới/đi màn đó gắn vào cluster (`lhead`/`ltail`); `is_popup` ⇒ hình ô-van, không cần chữ
  * `(pop-up)` (cluster của Graphviz chỉ vẽ được hình chữ nhật ⇒ popup có tab là khung bo góc + dòng `(pop-up)`).
- * Sơ đồ chung (chưa tách actor) và sơ đồ màn mồ côi bắt đầu bằng chấm đen như cũ — không có actor để ghi tên.
+ * Sơ đồ chung (chưa tách actor) bắt đầu bằng chấm đen như cũ — không có actor để ghi tên.
  * Font `DejaVu Sans`: font mặc định của Graphviz trong image PlantUML thiếu (fontconfig báo lỗi thay vì vẽ).
  * Hình màn KHÔNG tô nền: PlantUML vẽ lại SVG của dot và bỏ viền của node vừa `rounded` vừa `filled`.
  * Cạnh chỉ vẽ MỘT chiều: cặp màn trỏ qua lại (A → B và B → A) chỉ giữ chiều đi tiếp từ màn vào — màn gần màn vào
@@ -21,7 +23,7 @@
  */
 
 import type { Screen, Spine } from "../../spine/spine.types.js"
-import { hasScreenActorLinks, screenActorMap } from "../../spine/screen-actors.js"
+import { guestOpenScreenIds, hasScreenActorLinks, screenActorMap } from "../../spine/screen-actors.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { alias, byId, compareIds, label, puml } from "./common.js"
 
@@ -32,16 +34,18 @@ const dq = (...lines: string[]): string => `"${lines.map((l) => label(l).replace
 const byQueueOrder = (a: Screen, b: Screen): number =>
   (a.queue_order ?? Number.MAX_SAFE_INTEGER) - (b.queue_order ?? Number.MAX_SAFE_INTEGER) || compareIds(a.id, b.id)
 
-/** Màn vào của nhóm: không popup và không có cạnh tới từ màn cùng nhóm; không có ⇒ màn queue_order thấp nhất. */
-const entryScreens = (screens: Screen[], ids: Set<string>): Screen[] => {
+/**
+ * Màn vào của nhóm: không popup và không có cạnh tới từ màn cùng nhóm, cộng màn cổng đăng nhập (`gateways` — Login vẫn là
+ * màn vào dù Register → Login trỏ tới nó); không có ⇒ màn queue_order thấp nhất.
+ */
+const entryScreens = (screens: Screen[], ids: Set<string>, gateways: ReadonlySet<string>): Screen[] => {
   const targeted = new Set(screens.flatMap((s) => s.flow_to.filter((t) => ids.has(t) && t !== s.id)))
-  const entries = screens.filter((s) => !s.is_popup && !targeted.has(s.id))
+  const entries = screens.filter((s) => !s.is_popup && (!targeted.has(s.id) || gateways.has(s.id)))
   return entries.length > 0 ? entries.sort(byQueueOrder) : [[...screens].sort(byQueueOrder)[0]]
 }
 
 /** Tiêu đề sơ đồ của một actor; cũng là chú thích ảnh (`section-renderer` đọc lại bằng `screenFlowTitleOf`). */
 export const screenFlowTitle = (actorName: string): string => `Screens flow for ${actorName}`
-export const UNASSIGNED_SCREENS_TITLE = "Screens flow for unassigned screens"
 
 /** Tiêu đề đã ghi trong nguồn sơ đồ (dòng `label="…";` cấp graph); sơ đồ chung không có ⇒ `null`. */
 export const screenFlowTitleOf = (source: string): string | null => /^ {2}label="([^"]*)";$/m.exec(source)?.[1] ?? null
@@ -79,8 +83,10 @@ const oneWayEdges = (screens: Screen[], entries: Screen[]): [string, string][] =
 
 interface FlowStart {
   title: string
-  /** Tên trong hình thoi bắt đầu; `null` ⇒ chấm đen (không có actor). */
-  actorName: string | null
+  /** Tên trong hình thoi bắt đầu. */
+  actorName: string
+  /** Màn cổng đăng nhập — luôn là màn vào (xem `loginGateways`). */
+  gateways: ReadonlySet<string>
 }
 
 const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
@@ -100,9 +106,9 @@ const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
   }
 
   // Sơ đồ chung (chưa tách actor) giữ một điểm vào như trước
-  const entries = start === null ? [[...screens].sort(byQueueOrder)[0]] : entryScreens(screens, ids)
+  const entries = start === null ? [[...screens].sort(byQueueOrder)[0]] : entryScreens(screens, ids, start.gateways)
   body.push(
-    start?.actorName
+    start
       ? `  START [label=${dq(start.actorName)}, shape=diamond, style=solid];`
       : '  START [label="", shape=circle, style=filled, fillcolor="#000000", width=0.2, fixedsize=true];'
   )
@@ -170,17 +176,25 @@ const bridgeGroup = (all: Screen[], own: Screen[]): Screen[] => {
   })
 }
 
+/**
+ * Cổng đăng nhập: màn mở cho Guest có cạnh sang màn không mở cho Guest — Login (→ landing của từng actor). Register → Login
+ * không biến Register thành cổng (Login cũng mở cho Guest) và không làm Login mất vai màn vào: hai màn đứng ngang nhau
+ * sau hình thoi actor, cạnh Register → Login vẽ giữa chúng.
+ */
+const loginGateways = (spine: Spine, screens: Screen[]): Set<string> => {
+  const ids = new Set(screens.map((s) => s.id))
+  const guestOpen = guestOpenScreenIds(spine)
+  return new Set(screens.filter((s) => guestOpen.has(s.id) && s.flow_to.some((t) => ids.has(t) && !guestOpen.has(t))).map((s) => s.id))
+}
+
 export const renderScreenFlow: Renderer = (spine: Spine) => {
   const screens = byId(spine.screens)
   const actorsOf = screenActorMap(spine)
   if (screens.length === 0 || !hasScreenActorLinks(actorsOf)) return [flowPart(screens, null)]
 
-  const parts = byId(spine.actors.filter((a) => a.kind === "human"))
+  const gateways = loginGateways(spine, screens)
+  return byId(spine.actors.filter((a) => a.kind === "human"))
     .map((actor) => ({ actor, own: screens.filter((s) => actorsOf.get(s.id)?.includes(actor.id)) }))
     .filter(({ own }) => own.length > 0)
-    .map(({ actor, own }) => flowPart(bridgeGroup(screens, own), { title: screenFlowTitle(actor.name), actorName: actor.name }))
-
-  const unassigned = screens.filter((s) => (actorsOf.get(s.id) ?? []).length === 0)
-  if (unassigned.length > 0) parts.push(flowPart(unassigned, { title: UNASSIGNED_SCREENS_TITLE, actorName: null }))
-  return parts
+    .map(({ actor, own }) => flowPart(bridgeGroup(screens, own), { title: screenFlowTitle(actor.name), actorName: actor.name, gateways }))
 }
