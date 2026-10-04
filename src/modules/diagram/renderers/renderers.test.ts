@@ -346,6 +346,37 @@ describe("renderers trên fixture 19 màn", () => {
     expect(student).not.toContain("S03")
   })
 
+  it("screen_flow: màn Đăng ký đứng ngang Login sau hình thoi actor và trỏ sang Login", () => {
+    // Register → Login → Teacher Home; Login vẫn là màn vào dù có cạnh tới từ Register
+    const spine = mutate((s) => {
+      s.actors = [{ ...s.actors.find((a) => a.kind === "human")!, id: "A01", name: "Teacher" }]
+      s.roles = [
+        { ...s.roles[0], id: "R1", actor_id: "A01" },
+        { ...s.roles[0], id: "R3", name: "Guest", actor_id: null }
+      ]
+      const base = s.screens[0]
+      s.screens = [
+        { ...base, id: "S01", name: "Login", flow_to: ["S02", "S03"], is_popup: false, tabs: [], queue_order: 1 },
+        { ...base, id: "S02", name: "Reset Password", flow_to: [], is_popup: false, tabs: [], queue_order: 2 },
+        { ...base, id: "S03", name: "Teacher Home", flow_to: [], is_popup: false, tabs: [], queue_order: 3 },
+        { ...base, id: "S04", name: "Register", flow_to: ["S01"], is_popup: false, tabs: [], queue_order: 4 }
+      ]
+      const perm = s.permissions[0]
+      s.permissions = [
+        ...["S01", "S02", "S04"].map((id) => ({ ...perm, screen_id: id, role_id: "R3" })),
+        { ...perm, screen_id: "S03", role_id: "R1" }
+      ]
+      s.use_cases = []
+    })
+    const [teacher] = renderKind(spine, "screen_flow").map((p) => p.puml)
+    // Login và Register cùng sau hình thoi; Reset Password treo dưới Login, không phải màn vào
+    expect([...teacher.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01", "S04"])
+    expect(teacher).toContain("S04 -> S01;")
+    expect(teacher).not.toContain("S01 -> S04;")
+    expect(teacher).toContain("S01 -> S02;")
+    expect(teacher).toContain("S01 -> S03;")
+  })
+
   it("screen_flow: màn không actor nào dùng không vẽ ở sơ đồ nào; chưa có liên kết actor ⇒ một sơ đồ chung", () => {
     const withOrphan = mutate((s) => {
       s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Orphan Screen", flow_to: [] })

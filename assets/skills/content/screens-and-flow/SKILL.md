@@ -1,7 +1,7 @@
 ---
 skill_id: screens-and-flow
 kind: content
-version: 0.6.1
+version: 0.6.2
 description: "S-4.1–S-4.2 feature & screen inventory (fixes N and screen_queue), screens flow"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -48,8 +48,8 @@ get **no** screens; their work is a non-screen function (S-4.4). The Screens Flo
 actor and has no "unassigned" part, so a screen outside every actor's journey is a gap. Name the actor(s)
 in `description` ("Founder …"). If users sign in, create **one** Login screen shared by every signed-in
 actor (its `description` names them all) and give each actor a landing screen — S-4.2 roots every flow at
-Login. Pre-auth screens (Login, Forgot/Reset Password, public landing) belong to **every** actor: S-4.3
-grants them to `Guest` only, which draws them in each actor's flow.
+Login. Pre-auth screens (Login, Register, Forgot/Reset Password, public landing) belong to **every**
+actor: S-4.3 grants them to `Guest` only, which draws them in each actor's flow.
 
 One `screens[]` row per distinct place the user lands:
 `{id, feature_id, name, description, flow_to: [], is_popup, tabs: [], primary_function_id: null,
@@ -85,9 +85,9 @@ the browser back button, a global nav bar present everywhere, or an error toast.
 `features` and `screens`: read each screen's actor(s) from its `description` (named at S-4.1).
 
 **Journey shape — one tree per human actor, rooted at Login:**
-1. **Login is the root.** If users sign in, Login is the first screen of every signed-in actor's journey
-   and has **no** incoming edge. Pre-auth screens hang off it (`Login → Forgot Password → Reset
-   Password`, `Login → First-time Password Setup`), never the reverse.
+1. **Login is the root.** If users sign in, Login is the first screen of every signed-in actor's journey;
+   its only incoming edge is `Register → Login`. Register (sign-up) is a root **beside** Login that leads
+   to it — never `Login → Register`. Other pre-auth screens hang off Login (`Login → Forgot Password`).
 2. **Login → one landing per actor.** Login's `flow_to` lists each actor's landing screen (role-based
    redirect after sign-in): the page that actor works from most (Manager Dashboard, My Exam Schedule…).
    Actors sharing a landing share the edge. Login never links straight to a deeper screen.
@@ -102,7 +102,7 @@ root **beside** Login, never above it (no Landing → Login edge, no incoming ed
 **One direction only.** `flow_to` records the forward move, away from Login. Never add the return edge —
 going back is implicit, even a redirect after success: reset password → login, detail → list, popup →
 opener, page → hub, confirm → the page it confirms. Scan every pair: if A lists B and B lists A, delete the
-edge that points back toward Login. Ids in `flow_to` must exist after this batch (`dead_reference` otherwise).
+return edge — for Register ⇄ Login keep `Register → Login`. Ids in `flow_to` must exist (`dead_reference`).
 
 **No orphan screens.** Per actor, every screen they use is reachable from the root: every non-popup screen
 other than the root has an incoming edge; every popup has an opener; an error / access-denied page gets an
@@ -144,6 +144,6 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 - [ ] Every screen has ≥ 1 function with unique `order` inside its feature, and a `primary_function_id`.
 - [ ] Every screen is used by at least one human actor; no screen exists for a `system`/`time` actor.
 - [ ] S-4.2 only sets `flow_to`/`is_popup`/`tabs` (or removes an unplaceable orphan); every id in `flow_to` exists.
-- [ ] Login has no incoming edge and links to each actor's landing; pre-auth screens hang off Login.
+- [ ] Login's only incoming edge is `Register → Login`; Login links to each actor's landing.
 - [ ] Per actor, every screen is reachable from Login via landing → feature; every popup has an opener.
 - [ ] No pair A ⇄ B in `flow_to`: every return edge (to login, list, hub, opener) is removed.

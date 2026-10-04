@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { createEmptySpine } from "./spine.repository.js"
-import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
+import { guestOpenScreenIds, hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import type { Spine } from "./spine.types.js"
 
 const base = (): Spine => {
@@ -73,6 +73,21 @@ describe("screenActorMap", () => {
     s.roles.push({ id: "R1", name: "Staff", actor_id: "A02" })
     s.permissions.push({ id: "P3", screen_id: "S03", role_id: "R1", action: "view" })
     expect(Object.fromEntries(screenActorMap(s))).toEqual({ S01: ["A02"], S02: [], S03: ["A02"] })
+  })
+
+  it("guestOpenScreenIds: màn có ít nhất một quyền của role không gắn actor (kể cả khi role khác cũng vào)", () => {
+    const s = base()
+    s.roles = [
+      { id: "R1", name: "Staff", actor_id: "A02" },
+      { id: "R2", name: "Guest", actor_id: null }
+    ]
+    s.permissions = [
+      { id: "P1", screen_id: "S01", role_id: "R2", action: "view" },
+      { id: "P2", screen_id: "S01", role_id: "R1", action: "view" },
+      { id: "P3", screen_id: "S02", role_id: "R1", action: "view" },
+      { id: "P4", screen_id: "S03", role_id: "R9", action: "view" }
+    ]
+    expect([...guestOpenScreenIds(s)]).toEqual(["S01"])
   })
 
   it("chưa có quyền lẫn use case gắn function ⇒ không có liên kết nào", () => {
