@@ -2,7 +2,7 @@
 
 ## Shape
 
-`name` = **verb + object**, present tense, no actor name inside it: "Draft Product Brief", not "Founder
+`name` = **verb + object**, present tense, the actor never the subject: "Draft Product Brief", not "Founder
 Drafts Brief" or "Brief Drafting". Title Case, no trailing punctuation.
 
 ## Granularity
@@ -56,7 +56,7 @@ The rest need judgement and live in `SKILL.md`.
 | U1 | Title Case, no trailing period; a minor word (`at`, `of`, `the`…) may stay lower case when it is not first | code |
 | U2 | One goal only — no ` and `, `/` or `,` joining two goals | code |
 | U3 | No vague verb (`Manage`, `Handle`, `Process`, `Maintain`…) as the first word | code |
-| U4 | No actor name inside the use case name | code |
+| U4 | The actor is never the subject: not "<Actor> …" at the start nor "… by <Actor>". An actor type that is also the business object is fine ("Create Student Record") | code |
 | U5 | No UI or technical term (`Button`, `Screen`, `Page`, `API`…) | code |
 | U6 | At most 5 words | code |
 | U7 | The object uses the business term from the Brief/Glossary, consistently | prompt |
