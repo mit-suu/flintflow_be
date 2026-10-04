@@ -14,7 +14,7 @@ export const uploadProjectDocument = async (
   file: Express.Multer.File
 ): Promise<any> => {
   if (!file) {
-    throw new ApiError(400, "A file is required", "FILE_REQUIRED")
+    throw new ApiError(400, "Vui lòng chọn file để tải lên.", "FILE_REQUIRED")
   }
 
   const project = await getProjectById(projectId, orgId)
@@ -32,7 +32,7 @@ export const uploadProjectDocument = async (
   const extension = originalName.slice(originalName.lastIndexOf("."))?.toLowerCase() || ""
 
   if (!allowedMimeTypes.has(file.mimetype) && !allowedExtensions.has(extension)) {
-    throw new ApiError(400, "Only PDF, DOCX, MD, TXT files are supported", "UNSUPPORTED_FILE_TYPE")
+    throw new ApiError(400, "Chỉ hỗ trợ file PDF, DOCX, MD hoặc TXT.", "UNSUPPORTED_FILE_TYPE")
   }
 
   // Step 1: Upload lên Cloudinary
@@ -135,7 +135,7 @@ export const deleteProjectDocument = async (
 
   const document = await ProjectDocument.findOne({ _id: documentId, projectId })
   if (!document) {
-    throw new ApiError(404, "Document not found", "DOCUMENT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy tài liệu.", "DOCUMENT_NOT_FOUND")
   }
 
   await ProjectDocument.deleteOne({ _id: documentId, projectId })

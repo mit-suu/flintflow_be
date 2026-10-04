@@ -312,11 +312,12 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     const unmapped: string[] = []
     const heading = profile.heading_map.find((h) => h.section_id === section_id)
     const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
-    const pause = async (result: { reason: "credits" | "resume_later"; message: string }): Promise<ExtractionRun> => {
+    const pause = async (result: { reason: "credits" | "resume_later"; userMessage: string }): Promise<ExtractionRun> => {
       doc.paused = { reason: result.reason, at: new Date() }
       await doc.save()
-      // Lỗi provider giữ nguyên văn (để tra), nhưng nói rõ mục nào — theo tiêu đề trong file, không in khoá section
-      draft.error = `Mục "${heading?.heading_text?.trim() || capitalize(sectionLabel(section_id))}": ${result.message}`.slice(0, 500)
+      // Nói rõ mục nào — theo tiêu đề trong file, không in khoá section. Câu cho user (FLF-247); text thô của provider
+      // đã log ở metered-ai
+      draft.error = `Mục "${heading?.heading_text?.trim() || capitalize(sectionLabel(section_id))}": ${result.userMessage}`.slice(0, 500)
       if (result.reason === "resume_later") draft.status = "failed"
       await draft.save()
       return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }

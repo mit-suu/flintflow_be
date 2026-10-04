@@ -90,6 +90,9 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
         expect(err).toBeInstanceOf(DraftRejectedError)
         const rejected = err as DraftRejectedError
         expect(rejected).toMatchObject({ statusCode: 422, code: "NEEDS_USER_INPUT" })
+        // FLF-247: câu cho user không mang text op/Zod; lỗi thô ở `errors` và `meta.errors`
+        expect(rejected.message).toBe("AI chưa tạo được nội dung hợp lệ sau 3 lần thử. Bạn có thể chạy lại, hoặc nói rõ hơn yêu cầu ở ô chat.")
+        expect(rejected.meta).toMatchObject({ attempts: 3, errors: rejected.errors.slice(0, 10) })
         expect(rejected.errors.map((e) => e.rule)).toContain(SCOPE_REJECTS[file] ?? opCase.must_reject)
         expect(executor).toHaveBeenCalledTimes(3)
         return

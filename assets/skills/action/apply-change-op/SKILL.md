@@ -45,6 +45,13 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    re-apply edits from earlier turns; those are already in the document.
 1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
 2. **Ambiguous?** Several possible targets, or the intent could mean different fields → return `clarification_needed` with **one** short question in the user's language, and no ops.
+2b. **The question is read by the user, not by code.** Name every screen, actor, role, feature, function and
+   entity by its **name** from the projection — never by its id (`S02`, `A03`, `R1`, `F2`, `FN010`, `E04`),
+   and never as a list of ids (`flow_to: S02, S03` ⇒ `'Reset Password', 'Schedule Composer'`). No paths
+   (`screens[id=S01]`) or section keys (`fixed:3.1.1`) either. Use case codes (`UC-01`) are fine.
+2c. **Not a problem, do not ask about it.** In the Screens Flow, Login has **no** incoming edge except
+   `Register → Login` — it is the root every actor starts from. Never ask to add a flow into Login, and never
+   treat "nothing leads to Login" as a gap.
 3. **Minimal batch.** Change exactly what was asked. Do not polish neighbouring text, do not rewrite a section.
 3b. **Adding something new** is `add` into the array, and you **leave `id` out** — the server assigns the next
    id in that collection's format. Never invent an id (`UC18`, `UC-REMIND`): if it clashes with an existing

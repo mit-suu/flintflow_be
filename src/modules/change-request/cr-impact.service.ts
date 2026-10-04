@@ -6,6 +6,7 @@
 
 import { stripRecord } from "../import/check.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
@@ -23,7 +24,7 @@ export const formatLocationId = (n: number): string => `L${String(n).padStart(3,
 export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   assertCrStatus(cr, ["impact_review"], "impact_review")
   const record = await spineRepository.get(String(cr.projectId))
-  if (!record) throw new Error("Không tìm thấy Spine của project")
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
 
   const seedTargets = new Set(cr.seed?.targets ?? [])

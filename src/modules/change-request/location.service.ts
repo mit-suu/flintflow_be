@@ -8,6 +8,7 @@
 import { stripRecord } from "../import/check.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 import type { PatchLocationRequest } from "./change-request.dto.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
@@ -26,7 +27,7 @@ export const patchLocation = async (cr: IChangeRequest, locationId: string, body
   if (!conclusion) throw new Mode1Error("CR_LOCATION_UNCONCLUDED", "Cần chọn kết luận cho vị trí", { location_ids: [locationId] })
 
   const record = await spineRepository.get(String(cr.projectId))
-  if (!record) throw new Error("Không tìm thấy Spine của project")
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const ops: unknown[] =
     conclusion !== "edit"
