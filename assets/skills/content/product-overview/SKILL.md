@@ -56,16 +56,17 @@ generation ⇒ "AI Model Provider"; credits/payments/plans ⇒ "Payment Gateway"
 the matching service. Add them with an `assumptions[]` entry; an empty S-2.3 batch needs a reason
 in `notes`.
 
-For S-2.3 only, every added or updated system actor must have non-empty `flows_in` and `flows_out` for
-the Context Diagram. Directions are relative to OUR system: `flows_out` = requests/data our system sends
-to the external actor; `flows_in` = results/data that actor returns. List every required exchange in
-English noun phrases, exactly one exchange per array item: both lists have equal length, and `flows_in[i]`
-pairs with `flows_out[i]`. Each item becomes its own arrow with one label; never combine exchanges in one item.
-For a payment gateway: `flows_out: ["Payment request"]`, `flows_in: ["Payment result"]`; for an email
-service: `flows_out: ["Email delivery request"]`, `flows_in: ["Email delivery status"]`. Do not use
-use-case verbs or omit exchanges behind `+ N more`. Preserve confirmed exchanges when updating actors;
-repair an existing actor with a missing list. Derive labels from the Brief/scope/description; uncertain
-exchange details need an `assumptions[]` entry rather than an invented confirmed requirement.
+For S-2.3 only, give every added or updated system actor its data exchanges for the Context Diagram.
+Directions are relative to OUR system: `flows_out` = data our system sends to the external actor;
+`flows_in` = data that actor sends back. Write English data noun phrases ("Payment request"), exactly one
+exchange per array item, never a verb or use-case name; each item becomes its own arrow with one label.
+Every actor needs at least one item, and across all actors there must be at least one `flows_in` and one
+`flows_out` item. A one-way actor is valid: leave its other list empty instead of inventing a reply (an email
+service may only have `flows_out: ["Email delivery request"]`); lists need not be equal or paired by index.
+For a payment gateway: `flows_out: ["Payment request"]`, `flows_in: ["Payment result"]`. Keep at most 3
+business-level items per direction (the diagram joins any extra into its third arrow). Preserve confirmed exchanges when updating
+actors. Derive labels from the Brief/scope/description; uncertain exchange details need an `assumptions[]`
+entry rather than an invented confirmed requirement.
 
 ## Rules
 
@@ -93,5 +94,5 @@ exchange details need an `assumptions[]` entry rather than an invented confirmed
 - [ ] Only fields for the current sub-step touched (S-2.1 project text, S-2.2 release_scope, S-2.3 actors).
 - [ ] `release_scope.in` entries each trace to a stated goal.
 - [ ] Every new actor has `kind: "system"` and a project-specific description.
-- [ ] S-2.3 actors have equal-length `flows_in`/`flows_out`; each item has exactly one exchange and a paired result/status at the same index.
+- [ ] S-2.3 system actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
 - [ ] No diacritics, no Vietnamese in any value that renders to SRS.

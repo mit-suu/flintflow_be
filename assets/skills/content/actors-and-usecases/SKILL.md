@@ -46,8 +46,8 @@ Naming: **A1** a singular role/party noun phrase, never a person's name or a tea
 sharing every capability are one actor with two `roles[]` rows. **A8** `description` is one sentence tied to this product, saying
 who they are, what they do here and why they care — not a dictionary gloss.
 
-**Context exchanges (S-3.1/S-3.2/S-3.3 only).** Every actor (including existing S-2.3 actors) needs complete `flows_in` (actor → OUR system) and `flows_out` (OUR system → actor): English data noun phrases from Brief/addendum/use-case outcomes, with a corresponding response/acknowledgement in the other list, in the same order. Human: registration request/result; system: payment result in/payment request out; time: scheduled trigger in/execution status out.
-Both lists must have equal length: `flows_in[i]` pairs with `flows_out[i]`, exactly one exchange per item and one arrow per item. Maintain lists as use cases are added, preserve confirmed labels, show every exchange without `+ N more`; uncertain details need an `assumptions[]` entry. Do not combine exchanges or use use-case verbs as data labels.
+**Context exchanges (S-3.1/S-3.2/S-3.3 only).** Every actor (including existing S-2.3 actors) needs its data exchanges: `flows_in` (actor → OUR system) and `flows_out` (OUR system → actor), English data noun phrases from Brief/addendum/use-case outcomes, one exchange per item and one arrow per item. Human: "Registration request" in, "Account confirmation" out; system: "Payment result" in, "Payment request" out; time: "Scheduled trigger" in only.
+Every actor needs at least one item, and all actors together must have at least one `flows_in` and one `flows_out` item. A one-way actor is valid: leave its other list empty, never invent a reply; lists need not be equal or paired by index. Maintain lists as use cases are added, preserve confirmed labels, keep at most 3 business-level items per direction (the diagram joins any extra into its third arrow); uncertain details need an `assumptions[]` entry. Do not combine exchanges or use use-case verbs as data labels.
 
 ## S-3.2 — Actor–Goal List
 
@@ -140,7 +140,7 @@ extending use case opens with its condition ("When …"); every other one starts
 ## Self-check
 
 - [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8.
-- [ ] S-3.1/S-3.2/S-3.3 actors have equal-length, index-paired `flows_in`/`flows_out`, exactly one exchange per item.
+- [ ] S-3.1/S-3.2/S-3.3 actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
 - [ ] Every use case name passes U1–U9 (no Manage/Maintain/Handle…, no "and", ≤ 5 words, actor never the subject), `function_ids: []`.
 - [ ] `actor_ids` lists participants, primary first; notification actors only on emitting use cases; each
       human actor's access decided; sweep themes covered or ruled out, clock-driven work has its own UC.
