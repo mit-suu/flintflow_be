@@ -206,6 +206,6 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     expect((await c.post(`${cr}/verify`)).body.error.code).toBe("CR_INVALID_TRANSITION")
     detail(await c.post(`${cr}/propose`))
     await Spine.deleteOne({ projectId })
-    await expect(runVerify(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Spine/)
+    await expect(runVerify(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Không tìm thấy dữ liệu tài liệu/)
   })
 })

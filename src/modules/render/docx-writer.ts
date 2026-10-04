@@ -465,11 +465,11 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
   try {
     size = imageSize(data)
   } catch {
-    throw new ApiError(422, "Image block is not a valid PNG", "RENDER_IMAGE_INVALID")
+    throw new ApiError(422, "Một hình trong tài liệu bị lỗi nên chưa xuất được file Word.", "RENDER_IMAGE_INVALID")
   }
   // Phase 5 (T3): ảnh gốc của file upload có thể là JPEG — nhúng nguyên, không chuyển đổi
   if ((size.type !== "png" && size.type !== "jpg") || !size.width || !size.height) {
-    throw new ApiError(422, "Image block is not a valid PNG/JPEG", "RENDER_IMAGE_INVALID")
+    throw new ApiError(422, "Một hình trong tài liệu bị lỗi nên chưa xuất được file Word.", "RENDER_IMAGE_INVALID")
   }
   const type = size.type === "jpg" ? "jpg" : "png"
 

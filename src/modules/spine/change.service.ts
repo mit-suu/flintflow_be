@@ -369,7 +369,7 @@ const resolveOps = async (
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
   if (body.ops !== undefined) return { ops: body.ops, clarification: null, notes: null }
-  if (body.instruction === undefined) throw new ApiError(400, "Cần ops hoặc instruction", "VALIDATION_ERROR")
+  if (body.instruction === undefined) throw new ApiError(400, "Vui lòng nhập nội dung cần sửa.", "VALIDATION_ERROR")
   return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, deps)
 }
 

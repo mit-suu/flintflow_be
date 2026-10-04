@@ -85,6 +85,7 @@ vi.mock("../spine/spine.repository.js", () => spineRepoMocks)
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { createChatSession, deleteChatSession, sendMessageAndGetResponse, assertChatSessionOwnership } from "./chat-session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { TransactionRejectedError } from "../spine/op-engine.js"
 
 const PROJECT = "650000000000000000000001"
 const OTHER_PROJECT = "650000000000000000000002"
@@ -280,5 +281,21 @@ describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
 
     const last = session.messages[session.messages.length - 1] as { content: string }
     expect(JSON.parse(last.content)).toMatchObject({ kind: "change_error", reply: "Không đủ credit" })
+  })
+
+  it("FLF-247: lô op bị từ chối ⇒ change_error là câu thường, không path op", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    changeMocks.preview.mockRejectedValue(
+      new TransactionRejectedError("OP_INVALID", [{ rule: "path_not_resolved", message: "Không resolve được actors[id=A08]", path: "actors[id=A08]" }])
+    )
+
+    const session = await sendMessageAndGetResponse(PROJECT, String(plain._id), "Xoá actor A08", "overview", USER)
+
+    const last = session.messages[session.messages.length - 1] as { content: string }
+    const payload = JSON.parse(last.content) as { kind: string; reply: string }
+    expect(payload.kind).toBe("change_error")
+    expect(payload.reply).toBe("Không tìm thấy mục cần sửa. Hãy nói rõ tên mục (ví dụ: màn “Đặt lịch”, chức năng “Huỷ lịch”).")
+    expect(payload.reply).not.toContain("actors[")
   })
 })

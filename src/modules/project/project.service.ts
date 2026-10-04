@@ -33,7 +33,7 @@ export const createProject = async (
   folderId?: string
 ): Promise<IProject> => {
   if (mode === "customer_template") {
-    throw new ApiError(501, "Mode template khách hàng chưa hỗ trợ", "NOT_IMPLEMENTED")
+    throw new ApiError(501, "Chưa hỗ trợ tạo dự án theo mẫu của khách hàng.", "NOT_IMPLEMENTED")
   }
   // Tạo thẳng trong thư mục (một request) — thư mục phải thuộc cùng org
   if (folderId) await assertFolderOwned(orgId, folderId)
@@ -71,7 +71,7 @@ export const getProjectById = async (
 ): Promise<IProject> => {
   const project = await Project.findOne({ _id: projectId, organizationId: orgId })
   if (!project) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
 }
@@ -81,7 +81,7 @@ export const getProjectById = async (
  * `updatedAt` (mở không phải là sửa). Chỉ route này ghi; các nơi nội bộ vẫn dùng `getProjectById`.
  */
 export const openProject = async (projectId: string, orgId: string): Promise<IProject> => {
-  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const project = await Project.findOneAndUpdate(
     { _id: projectId, organizationId: orgId },
@@ -148,7 +148,7 @@ export const deleteProject = async (
   if (hard) {
     const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId })
     if (!project) {
-      throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+      throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
     }
     await purgeProjectData(projectId)
     return { _id: projectId, status: "deleted" }
@@ -160,7 +160,7 @@ export const deleteProject = async (
     { new: true }
   )
   if (!project) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
 }
@@ -176,7 +176,7 @@ export const updateProjectName = async (
     { new: true }
   )
   if (!project) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
 }
@@ -187,7 +187,7 @@ export const moveProjectToFolder = async (
   orgId: string,
   folderId: string | null
 ): Promise<IProject> => {
-  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   // id sai định dạng ⇒ 404 như dự án của user khác (không để CastError thành 500)
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   if (folderId) await assertFolderOwned(orgId, folderId)
@@ -196,7 +196,7 @@ export const moveProjectToFolder = async (
   // Thư mục bị xoá chen giữa lúc kiểm tra và lúc ghi ⇒ gỡ về ngoài thư mục, báo thư mục không còn
   if (folderId && !(await folderStillExists(orgId, folderId))) {
     await Project.updateOne({ _id: projectId, organizationId: orgId, folderId }, { folderId: null })
-    throw new ApiError(404, "Folder not found or unauthorized", "FOLDER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy thư mục hoặc bạn không có quyền truy cập.", "FOLDER_NOT_FOUND")
   }
   return project
 }

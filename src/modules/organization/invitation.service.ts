@@ -1,7 +1,7 @@
 import crypto from "node:crypto"
 import mongoose from "mongoose"
 import { Invitation, INVITABLE_ROLES, type InvitableRole } from "./invitation.model.js"
-import { Membership } from "./membership.model.js"
+import { Membership, ORG_ROLE_LABELS } from "./membership.model.js"
 import { Organization } from "./organization.model.js"
 import { assertMemberQuota } from "./membership.service.js"
 import { markOnboarded } from "./onboarding.js"
@@ -20,8 +20,8 @@ import { env } from "../../config/env.js"
 const ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
 
 export const ROLE_LABELS: Record<InvitableRole, string> = {
-  analyst: "Analyst",
-  viewer: "Viewer"
+  analyst: ORG_ROLE_LABELS.analyst,
+  viewer: ORG_ROLE_LABELS.viewer
 }
 
 /** Người dùng gõ tay nên chấp nhận chữ thường, khoảng trắng và gạch nối. */

@@ -41,7 +41,7 @@ export const reupload = async (projectId: string, userId: string, file: Uploaded
   const current = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!current || !hasBaseline(current.status) || !version) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có baseline v0 — dùng /import cho lần upload đầu", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án chưa có bản gốc — hãy tải tài liệu lên lần đầu trước.", {
       status: current?.status ?? "uploaded",
       to: "uploaded",
       allowed: []

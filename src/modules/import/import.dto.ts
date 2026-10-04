@@ -22,7 +22,7 @@ import {
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
 const confidence = z.number().min(0).max(1)
-const blockId = z.string().regex(BLOCK_ID_PATTERN, "block_id dạng B0001")
+const blockId = z.string().regex(BLOCK_ID_PATTERN, "Mã khối nội dung không hợp lệ.")
 const baseVersion = z.number().int().min(1)
 
 // ─── thành phần ──────────────────────────────────────────────────
@@ -181,7 +181,7 @@ export const mappingPatchRequestSchema = z
     confirm_all: z.boolean().default(false)
   })
   .refine((v) => v.headings.length > 0 || v.tables.length > 0 || v.confirm_all, {
-    message: "Cần ít nhất một mục mapping hoặc confirm_all"
+    message: "Cần chọn ít nhất một mục, hoặc xác nhận tất cả."
   })
 
 /** `POST /projects/:id/import/extract` (nút 1.8) — chạy hoặc chạy tiếp I-4 từ `extract_cursor`. */
@@ -205,7 +205,7 @@ export const fieldsPatchRequestSchema = z
     /** `true` ⇒ xác nhận mọi field còn lại theo giá trị AI trích và chuyển `baselining`. */
     confirm_all: z.boolean().default(false)
   })
-  .refine((v) => v.fields.length > 0 || v.confirm_all, { message: "Cần ít nhất một field hoặc confirm_all" })
+  .refine((v) => v.fields.length > 0 || v.confirm_all, { message: "Cần chọn ít nhất một trường dữ liệu, hoặc xác nhận tất cả." })
 
 /** `POST /projects/:id/import/finalize` (nút 1.10–1.12) — ghi Spine ⇒ mang `base_version`. */
 export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion })

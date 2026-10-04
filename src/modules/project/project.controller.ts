@@ -9,7 +9,7 @@ import type { CreateProjectDTO, MoveProjectDTO } from "./project.validation.js"
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   // Body đã qua CreateProjectSchema ở route: name không rỗng, mode thuộc PROJECT_MODES (thiếu ⇒ fpt)
@@ -21,7 +21,7 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
 export const getProjects = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const status = req.query.status as string | undefined
@@ -32,7 +32,7 @@ export const getProjects = catchAsync(async (req: Request, res: Response) => {
 export const getProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = req.params.projectId as string
@@ -43,7 +43,7 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
 export const deleteProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = req.params.projectId as string
@@ -55,13 +55,13 @@ export const deleteProject = catchAsync(async (req: Request, res: Response) => {
 export const updateProjectName = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = req.params.projectId as string
   const { name } = req.body
   if (!name) {
-    throw new ApiError(400, "Project name is required", "NAME_REQUIRED")
+    throw new ApiError(400, "Vui lòng nhập tên dự án.", "NAME_REQUIRED")
   }
 
   const project = await projectService.updateProjectName(projectId, requireOrgId(req), name)
@@ -71,7 +71,7 @@ export const updateProjectName = catchAsync(async (req: Request, res: Response) 
 export const moveProjectToFolder = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const { folderId } = req.body as MoveProjectDTO

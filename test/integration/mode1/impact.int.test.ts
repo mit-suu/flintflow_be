@@ -122,7 +122,7 @@ describe("C-3 tìm lại", () => {
     const other = await newCr(c)
     detail(await c.post(`/change-requests/${other}/clarify`))
     await Spine.deleteOne({ projectId })
-    await expect(runImpact(await crDoc(projectId, other))).rejects.toThrow(/Spine/)
+    await expect(runImpact(await crDoc(projectId, other))).rejects.toThrow(/Không tìm thấy dữ liệu tài liệu/)
     expect(await ChangeLocation.countDocuments({ projectId, cr_id: other })).toBe(0)
   })
 })

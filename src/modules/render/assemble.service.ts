@@ -71,7 +71,7 @@ export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
 /** 409 — `GET /document` hoặc `GET /export/word` với `source=draft` trước khi `POST /assemble` chạy lần nào. */
 export class NoWorkingDraftError extends ApiError {
   constructor() {
-    super(409, "Document has not been assembled yet. Run POST /assemble first (S-8.2).", NO_WORKING_DRAFT)
+    super(409, "Tài liệu chưa được ghép. Hãy chạy bước Ghép tài liệu trước.", NO_WORKING_DRAFT)
   }
 }
 
@@ -630,7 +630,7 @@ export async function assemble(
   // T15 review T3: assemble chỉ ĐỌC Spine — tạo Spine rỗng là việc của spine.repository/op-engine,
   // không phải của bước assemble (trước đây dùng getOrCreate, âm thầm ghi Spine rỗng nếu chưa có).
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (record.spine_version !== baseVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
@@ -639,7 +639,7 @@ export async function assemble(
   if (cached) {
     // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài.
     const parsed = renderedDocumentSchema.safeParse(cached.doc)
-    if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
+    if (!parsed.success) throw new ApiError(422, "Bản tài liệu đã ghép bị lỗi. Hãy chạy lại bước Ghép tài liệu.", "RENDERED_DOCUMENT_INVALID")
     // Trúng cache vẫn báo ảnh thiếu — client gọi lại cùng version không bị mất lý do; ảnh đã có lại thì hết báo
     const stillMissing = await recheckMissingImages(projectId, cached._id, cached.missing_diagram_ids ?? [], merged.loadDiagramPng)
     return {
@@ -712,14 +712,14 @@ const getDraftDocument = async (projectId: string, loadDiagramPng: DiagramPngLoa
   )
   if (!cached) throw new NoWorkingDraftError()
   const parsed = renderedDocumentSchema.safeParse(cached.doc)
-  if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
+  if (!parsed.success) throw new ApiError(422, "Bản tài liệu đã ghép bị lỗi. Hãy chạy lại bước Ghép tài liệu.", "RENDERED_DOCUMENT_INVALID")
   return rehydrateImages(parsed.data, projectId, loadDiagramPng)
 }
 
 /** Mã baseline hiển thị `BLnnn` — `Spine.baselines[].id` do `baseline.service.nextBaselineId` sinh. */
 const BASELINE_DISPLAY_ID = /^BL\d+$/
 
-const baselineNotFound = (): ApiError => new ApiError(404, "Baseline không tồn tại", "BASELINE_NOT_FOUND")
+const baselineNotFound = (): ApiError => new ApiError(404, "Không tìm thấy bản baseline này.", "BASELINE_NOT_FOUND")
 
 /**
  * `baseline_id` của `GET /document` và `GET /export/word` nhận cả `_id` Mongo (= `snapshot_ref`) lẫn mã `BLnnn`
@@ -755,13 +755,13 @@ const getBaselineDocument = async (
   const cached = await RenderedDocumentCache.findOne(cacheFilter, null, { lean: true })
   if (cached) {
     const parsed = renderedDocumentSchema.safeParse(cached.doc)
-    if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
+    if (!parsed.success) throw new ApiError(422, "Bản tài liệu đã ghép bị lỗi. Hãy chạy lại bước Ghép tài liệu.", "RENDERED_DOCUMENT_INVALID")
     return rehydrateImages(parsed.data, projectId, deps.loadDiagramPng)
   }
 
   // T15 review T2: snapshot hỏng (dữ liệu cũ, migrate lỗi…) không được làm 500 lộ chi tiết ra ngoài.
   const parsedSpine = spineSchema.safeParse(baseline.snapshot)
-  if (!parsedSpine.success) throw new ApiError(422, "Baseline snapshot không hợp lệ", "BASELINE_SNAPSHOT_INVALID")
+  if (!parsedSpine.success) throw new ApiError(422, "Dữ liệu của bản baseline này bị lỗi nên chưa xuất được.", "BASELINE_SNAPSHOT_INVALID")
   const spine = parsedSpine.data
 
   // §I hiển thị lịch sử đầy đủ hiện có (chưa có mốc "seq tại lúc ký" trong Baseline — T19 chưa chốt);

@@ -45,7 +45,7 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   assertCrStatus(cr, ["draft", "clarifying"], "clarifying")
   await transitionCr(cr, "clarifying")
   const record = await spineRepository.get(String(cr.projectId))
-  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const round = cr.clarifications.length + 1
   // Phase 8: mỗi lần gộp thêm lệnh được hỏi lại tối đa 3 vòng (đếm từ lần gộp gần nhất)

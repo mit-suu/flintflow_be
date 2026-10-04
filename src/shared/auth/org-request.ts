@@ -8,6 +8,6 @@ import { ApiError } from "../utils/api-error.js"
  */
 export const requireOrgId = (req: Request): string => {
   const orgId = req.orgContext?.orgId
-  if (!orgId) throw new ApiError(500, "Route thiếu orgContext", "ORG_CONTEXT_MISSING")
+  if (!orgId) throw new ApiError(500, "Hệ thống gặp lỗi khi xử lý yêu cầu. Vui lòng thử lại sau.", "ORG_CONTEXT_MISSING")
   return orgId
 }

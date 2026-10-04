@@ -29,7 +29,7 @@ export interface UpdateMeInput {
 export const getUserById = async (id: string): Promise<UserDTO> => {
   const user = await User.findById(id).select("-password")
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   
   let balance = 0
@@ -54,7 +54,7 @@ export const getUserById = async (id: string): Promise<UserDTO> => {
 export const getMe = async (id: string): Promise<MeDTO> => {
   const [dto, user] = await Promise.all([getUserById(id), User.findById(id).select("+passwordHash")])
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   return {
     ...dto,
@@ -68,7 +68,7 @@ export const getMe = async (id: string): Promise<MeDTO> => {
 export const updateMe = async (id: string, input: UpdateMeInput): Promise<MeDTO> => {
   const user = await User.findByIdAndUpdate(id, { $set: input }, { new: true })
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   return getMe(id)
 }
@@ -86,7 +86,7 @@ export const changePassword = async (
 ): Promise<void> => {
   const user = await User.findById(id).select("+passwordHash")
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   if (!user.passwordHash) {
     throw new ApiError(
