@@ -27,6 +27,7 @@ import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
+import { RECOMMENDED_SUFFIX } from "./decisions.service.js"
 import {
   BRIEF_EXTRACTION_STEP,
   BRIEF_PROJECT_WRITE_MESSAGE,
@@ -275,6 +276,35 @@ export const PROJECT_ENUM_VALUES: Readonly<Record<"form_factor" | "stakes", read
   stakes: ["internal", "production", "regulated"]
 }
 
+/**
+ * Câu trả lời đã chốt của thẻ tuân thủ có nêu vế pháp luật hay không — phần **tất định** của `project.stakes`.
+ *
+ * Nó ở trong code chứ không trong prompt vì nó không có gì để cân nhắc: user bấm vế pháp luật thì giá trị là
+ * `regulated`, hết. Phần phán đoán (`internal` vs `production` khi user bấm vế còn lại) vẫn thuộc prompt — đó
+ * là suy ra đối tượng dùng từ ý tưởng, không phải ánh xạ.
+ *
+ * Đọc **câu trả lời user đã bấm** (đã nằm trong sổ quyết định), không đọc nhãn model phát: nhãn sinh ở
+ * `temperature: 0.5` nên có thể lệch chữ giữa hai lượt, còn câu trả lời đã chốt thì không.
+ */
+export const regulatedFromStakesAnswer = (answer: string): boolean => {
+  const text = answer.replace(RECOMMENDED_SUFFIX, "").trim().toLowerCase()
+  return /\bph[áa]p lu[ậa]t\b/.test(text)
+}
+
+/**
+ * Giá trị `project.stakes` mà op muốn ghi, khi nó **chống** điều user đã chốt ở thẻ tuân thủ; `null` ⇒ không chống.
+ *
+ * Chặn **một chiều**: user bấm vế pháp luật mà op ghi khác `regulated` ⇒ chặn. Chiều ngược lại không chặn — user
+ * bấm vế nội bộ thì `internal` lẫn `production` đều hợp lệ, đó là phần phán đoán và luật fail-safe của content
+ * skill lo. Chặn cả hai chiều là chặn nhầm đúng phần prompt được quyền quyết.
+ */
+const stakesContradictsUserChoice = (spine: Spine, path: string, value: unknown): string | null => {
+  const written = path === "project.stakes" ? value : path === "project" && isRecord(value) ? value.stakes : undefined
+  if (typeof written !== "string" || written === "regulated") return null
+  const settled = spine.decisions.filter((d) => d.topic_key === "stakes" && d.superseded_by === null)
+  return settled.some((d) => regulatedFromStakesAnswer(d.answer)) ? written : null
+}
+
 /** Câu giả định đã chuẩn hoá để so trùng: chữ thường, gộp khoảng trắng, bỏ dấu câu cuối. */
 const assumptionKey = (text: unknown): string =>
   typeof text === "string" ? text.toLowerCase().replace(/\s+/g, " ").replace(/[\s.,;:!]+$/u, "").trim() : ""
@@ -485,6 +515,16 @@ export const sanitizeModelOps = (
             badEnum === "form_factor"
               ? `project.form_factor là mảng, mỗi phần tử một trong: ${PROJECT_ENUM_VALUES.form_factor.join(", ")} — nền tảng chính đứng đầu, ví dụ ["web_app","mobile_app"].`
               : `project.${badEnum} chỉ nhận một trong: ${PROJECT_ENUM_VALUES[badEnum].join(", ")}.`
+        })
+        return op
+      }
+      const contradicted = stakesContradictsUserChoice(spine, normalized.path, normalized.value)
+      if (contradicted) {
+        errors.push({
+          rule: "op_not_allowed",
+          op_index: index,
+          path: op.path,
+          message: `User đã chốt vế pháp luật ở thẻ tuân thủ nên project.stakes phải là "regulated", không phải "${contradicted}".`
         })
         return op
       }
