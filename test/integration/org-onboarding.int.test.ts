@@ -36,7 +36,7 @@ describe("onboarding xong khi vào được một org (Flow 8)", () => {
     const invite = await request(app)
       .post("/api/v1/orgs/" + org.body.data.id + "/invitations")
       .set(bearer(leadToken))
-      .send({ role: "viewer" })
+      .send({ role: "viewer", email: "new@flintflow.test" })
 
     expect(await onboardedAt(user.id)).toBeNull()
     const accept = await request(app).post("/api/v1/invitations/" + invite.body.data.code + "/accept").set(bearer(user.token))

@@ -36,6 +36,7 @@ import { buildHealthReport } from "./config/health.js"
 import { authMiddleware } from "./shared/auth/auth.middleware.js"
 import { requireActiveAccount } from "./shared/auth/account-guard.middleware.js"
 import { orgContext } from "./shared/auth/org-context.middleware.js"
+import { viewerReadOnly } from "./shared/auth/viewer-read-only.middleware.js"
 
 // Câu lỗi mặc định của Zod sang tiếng Việt, đánh dấu issue không có câu do schema tự viết (FLF-247)
 installZodLocale()
@@ -150,8 +151,10 @@ app.use(
  * Vai trò cụ thể (Lead / Analyst / Viewer) do requireRole ở từng route quyết định (10.7).
  */
 const orgGuard = [authMiddleware, requireActiveAccount, orgContext] as const
-app.use("/api/v1/projects", ...orgGuard)
-app.use("/api/v1/folders", ...orgGuard)
+// Viewer chỉ đọc — chặn mọi thao tác ghi ở một chỗ. Allowlist "ghép tài liệu": chỉ dựng bản đọc từ Spine, không
+// sửa nội dung; chặn thì Viewer không đọc được bản nháp nào chưa có ai ghép.
+app.use("/api/v1/projects", ...orgGuard, viewerReadOnly([new RegExp("^/[^/]+/assemble$")]))
+app.use("/api/v1/folders", ...orgGuard, viewerReadOnly())
 
 /**
  * BPMN Flow 10.4 áp cho MỌI request đã đăng nhập, không riêng tài nguyên org: tài khoản bị khoá (UC-66)

@@ -95,7 +95,7 @@ export const createInvitation = async (
   orgId: string,
   inviterUserId: string,
   role: InvitableRole,
-  email?: string
+  email: string
 ): Promise<CreatedInvitation> => {
   if (!INVITABLE_ROLES.includes(role)) {
     throw new ApiError(400, "Chỉ mời được với vai trò Analyst hoặc Viewer", "VALIDATION_ERROR")
@@ -106,27 +106,25 @@ export const createInvitation = async (
   const expiresAt = new Date(Date.now() + env.INVITE_TTL_DAYS * 86_400_000)
   const invitation = await Invitation.create({
     organizationId: orgId,
-    email: email ?? null,
+    email,
     role,
     codeHash: hashCode(code),
     expiresAt,
     invitedByUserId: inviterUserId
   })
 
-  if (email) {
-    const [org, inviter] = await Promise.all([
-      Organization.findById(orgId).select("name").lean(),
-      User.findById(inviterUserId).select("name email").lean()
-    ])
-    // Gửi mail là side effect: hỏng SMTP không được làm hỏng việc tạo mã (Lead vẫn đọc được mã ở response).
-    void sendOrgInvitationEmail(email, {
-      code,
-      organizationName: org?.name ?? "FlintFlow",
-      roleLabel: ROLE_LABELS[role],
-      inviterName: inviter?.name || inviter?.email || "Một thành viên",
-      expiresInDays: env.INVITE_TTL_DAYS
-    })
-  }
+  const [org, inviter] = await Promise.all([
+    Organization.findById(orgId).select("name").lean(),
+    User.findById(inviterUserId).select("name email").lean()
+  ])
+  // Gửi mail là side effect: hỏng SMTP không được làm hỏng việc tạo mã (Lead vẫn đọc được mã ở response).
+  void sendOrgInvitationEmail(email, {
+    code,
+    organizationName: org?.name ?? "FlintFlow",
+    roleLabel: ROLE_LABELS[role],
+    inviterName: inviter?.name || inviter?.email || "Một thành viên",
+    expiresInDays: env.INVITE_TTL_DAYS
+  })
 
   return { ...toItem(invitation), code }
 }

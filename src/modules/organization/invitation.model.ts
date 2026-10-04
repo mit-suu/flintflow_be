@@ -24,7 +24,10 @@ export type InvitableRole = Exclude<OrgRole, "lead">
  */
 export interface IInvitation extends Document {
   organizationId: mongoose.Types.ObjectId
-  /** Email người được mời — để hiển thị danh sách lời mời đang treo; null = mã dùng chung do Lead tự gửi. */
+  /**
+   * Email người được mời — mã được gửi tới đây. Bắt buộc với mã tạo từ 2026-10-04 (góp ý mentor); null chỉ còn ở
+   * mã tạo trước đó (thời mã còn có thể "dùng chung" do Lead tự gửi tay).
+   */
   email: string | null
   role: InvitableRole
   codeHash: string

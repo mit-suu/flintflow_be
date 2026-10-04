@@ -145,7 +145,7 @@ router.get("/:projectId/steps/:stepId/run-state", authMiddleware, pipelineContro
  *       409:
  *         description: STEP_NOT_RUNNABLE, SPINE_VERSION_CONFLICT
  */
-router.post("/:projectId/phases/:phase/run", authMiddleware, pipelineController.runPhaseController)
+router.post("/:projectId/phases/:phase/run", authMiddleware, requireRole("lead", "analyst"), pipelineController.runPhaseController)
 
 /**
  * @swagger
@@ -170,7 +170,7 @@ router.post("/:projectId/phases/:phase/run", authMiddleware, pipelineController.
  *       200:
  *         description: "{ cancelled, run_id }"
  */
-router.post("/:projectId/steps/:stepId/cancel", authMiddleware, pipelineController.cancelStepRun)
+router.post("/:projectId/steps/:stepId/cancel", authMiddleware, requireRole("lead", "analyst"), pipelineController.cancelStepRun)
 
 /**
  * @swagger

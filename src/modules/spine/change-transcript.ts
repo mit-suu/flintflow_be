@@ -15,6 +15,11 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 import { toClientError, violationMessage } from "../../shared/utils/client-error.js"
 import type { ChangePreviewResult } from "./change.service.js"
+import type { Spine } from "./spine.types.js"
+import { buildConversationSummary, type TranscriptMessage } from "../pipeline/conversation-summary.js"
+
+/** `buildConversationSummary` trả chuỗi này khi chưa có gì để tóm tắt. */
+const EMPTY_SUMMARY = "(chưa có gì)"
 
 /** Số tin cuối phiên đưa vào prompt — cùng mức với CHAT. */
 export const CHAT_HISTORY_TAIL = 12
@@ -38,6 +43,24 @@ export const formatChatHistory = (messages: readonly IChatMessage[], tail = CHAT
     .map((msg) => `${msg.role === "user" ? "User" : "AI"}: ${messageText(msg)}`)
     .join("\n")
 
+/**
+ * Ngữ cảnh hội thoại cho CHAT và lệnh sửa (FLF-244): đuôi `tail` tin như `formatChatHistory`, đứng sau một bản tóm tắt
+ * có trần (ý tưởng, mục tiêu, điều đã chốt, lời user ở phần đã trôi khỏi đuôi) — phiên dài không làm AI quên mạch.
+ * `messages` là phần TRƯỚC lượt hiện tại: tin đang gửi đã có ở `input_text`/`instruction`. Không có Spine ⇒ chỉ đuôi.
+ */
+export const formatChatContext = (
+  messages: readonly IChatMessage[],
+  spine: (Pick<Spine, "project" | "decisions"> & Partial<Pick<Spine, "addendum">>) | null,
+  tail = CHAT_HISTORY_TAIL
+): string => {
+  const history = formatChatHistory(messages, tail)
+  if (!spine) return history
+  const older: TranscriptMessage[] = messages.slice(0, -tail).map((m) => ({ role: m.role, content: m.content }))
+  const summary = buildConversationSummary(spine, older)
+  if (summary === EMPTY_SUMMARY) return history
+  return history ? `Tóm tắt hội thoại trước: ${summary}\n\n${history}` : `Tóm tắt hội thoại trước: ${summary}`
+}
+
 /** Phiên chat của đúng project này — sai project hay không tồn tại đều 404 (không lộ chatId của project khác). */
 export const loadProjectSession = async (projectId: string, sessionId: string): Promise<IChatSession> => {
   const session = mongoose.isValidObjectId(sessionId) ? await ChatSession.findById(sessionId) : null
@@ -47,7 +70,11 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
   return session
 }
 
-/** Tin AI mô tả kết quả xem trước — cùng shape `ChatBubble` (FE) đang đọc. */
+/**
+ * Tin AI mô tả kết quả xem trước — cùng shape `ChatBubble` (FE) đang đọc. Chỉ lưu số thay đổi, không lưu mảng
+ * `changes`/`impact`/`violations` (FLF-244): cả phiên nằm trong một document 16MB, còn bản xem trước thật nằm ở
+ * `previewStore` (`change.service.ts`) theo `preview_id` — không ai đọc lại các mảng đó từ transcript.
+ */
 export const previewPayload = (preview: ChangePreviewResult): Record<string, unknown> =>
   preview.clarification
     ? { kind: "change_clarification", reply: preview.clarification }
@@ -60,9 +87,7 @@ export const previewPayload = (preview: ChangePreviewResult): Record<string, unk
           : violationMessage(preview.violations),
         preview_id: preview.preview_id ?? null,
         branch: preview.branch ?? null,
-        changes: preview.changes,
-        impact: preview.impact ?? null,
-        violations: preview.violations
+        change_count: preview.changes.length
       }
 
 /**

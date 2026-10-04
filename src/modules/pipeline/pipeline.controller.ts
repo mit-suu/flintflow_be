@@ -270,6 +270,8 @@ export const runPhaseController = catchAsync(async (req: Request, res: Response)
   const { projectId, userId } = await authorize(req)
   const phase = req.params.phase as string
   const body = parse(runPhaseRequestSchema, req.body)
+  // Phỏng vấn đầu giai đoạn gọi model và ghi transcript trước khi `runStep` kiểm session — chặn ngay từ đầu (FLF-244)
+  await requirePipelineSession(projectId, body.session_id)
 
   const stream = sseStream(res, req)
 

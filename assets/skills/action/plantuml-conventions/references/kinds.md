@@ -2,28 +2,30 @@
 
 ## `context` — §1 System Context
 
-Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out` · `use_cases[].name/.actor_ids`. Level-0 data flow: a compact circle (`shape=circle`, equal width/height) in the centre. Actors with ONE resolved in/out pair are distributed evenly above/below it (id order, ties top); actors with TWO or more pairs go left/right, balancing total pair counts between sides (id order, ties left). Graphviz DOT with `nop2` preserves the shapes, unique ports, explicit cubic paths and label positions computed in `context-layout.ts`. Arrows curve inward from the actor lanes to distinct ports on the circle; controls stay in separate sectors. Positions (`pos`, `lp`) are in points, dimensions in inches. ONE requirement/output per visible arrow, with its own edge label; the renderer gives flow labels a borderless white HTML backing. Pair `flows_in[i]` (into the system) with `flows_out[i]` (out of it): N exchanges ⇒ N in-arrows + N out-arrows. Never join labels, truncate them or emit `+ N more`. Prefer explicit flow lists. Legacy missing items use response/acknowledgement labels at the corresponding index, or use-case request/result pairs when both lists are absent. See `renderer/context` for fallback rules. The following minimal skeleton uses plain edge labels for readability.
+Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`. Level-0 data flow (context diagram), black and white with a light grey system circle: ONE process — the system as a true circle in the centre — and external entities as plain boxes ringed around it by role (`human` left/`west`, `system` right/`east`, `time` below/`south`; `north` only on overflow). Every `flows_in` item (actor → system) and every `flows_out` item (system → actor) is its own arrow with one data-noun label; one-way actors draw only the arrows that exist — never pair lists by index or invent a counterpart — but the diagram as a whole always has both directions. Every arrow carries data: more than 3 items in a direction ⇒ first 2 + a third arrow joining the rest with `, ` (never `+ N more`); missing flows get a fallback label by kind. Graphviz DOT with `nop2` keeps the geometry computed in `context-layout.ts`: a straight leg from the box holding the label, then one convex cubic into the circle; positions (`pos`, `lp`) in points, dimensions in inches. See `renderer/context` for the full rules. Generated example (the time actor has no flows and falls back to `scheduled trigger`):
 
 ```plantuml
 @startdot
 digraph Context {
-  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", outputorder=edgesfirst];
-  node [fontname="sans-serif", fontsize=14, fixedsize=true, pin=true, style=filled, fillcolor="white", color="#64748B"];
-  edge [fontname="sans-serif", fontsize=12, color="#475569", fontcolor="#334155", headclip=false, tailclip=false];
-  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fillcolor="#F1F5F9"];
-  A01 [shape=box, pos="-306,0!", width=1.5, height=2, label="Founder"];
-  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-252,54!"];
-  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-93.29523,36!"];
-  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-252,18!"];
-  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.27739,12!"];
-  A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-252,-18!"];
-  SYSTEM_A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-99.27739,-12!"];
-  A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-252,-54!"];
-  SYSTEM_A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-93.29523,-36!"];
-  A01_IN_0 -> SYSTEM_A01_IN_0 [label="Brief answers", pos="e,-93.29523,36 -252,54 -199.098,57.58 -146.196,51.58 -101.29523,38.3", lp="-210,71"];
-  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label="Draft section", pos="e,-252,18 -99.27739,12 -150.185,23.33 -201.092,25.33 -244,19.15", lp="-210,35"];
-  A01_IN_1 -> SYSTEM_A01_IN_1 [label="Project request", pos="e,-99.27739,-12 -252,-18 -201.092,-25.33 -150.185,-23.33 -107.27739,-13.78", lp="-210,-35"];
-  SYSTEM_A01_OUT_1 -> A01_OUT_1 [label="Created project", pos="e,-252,-54 -93.29523,-36 -146.196,-51.58 -199.098,-57.58 -244,-54.54", lp="-210,-71"];
+  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];
+  node [fontname="sans-serif", fontsize=14, fontcolor="black", fixedsize=true, pin=true, style=filled, color="black", fillcolor="white", penwidth=1.2];
+  edge [fontname="sans-serif", fontsize=12, color="black", fontcolor="black", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];
+  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fontsize=18, fillcolor="lightgray"];
+  A01 [shape=box, pos="-334.544958,0.000000!", width=1.444444, height=1.111111, label="Founder", sector="west"];
+  A02 [shape=box, pos="356.550000,0.000000!", width=2.031944, height=0.694444, label="Email Service", sector="east"];
+  A03 [shape=box, pos="0.000000,-216.000000!", width=2.369444, height=0.611111, label="Scheduler", sector="south"];
+  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-282.544958,15.000000!"];
+  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.352241,11.363636!"];
+  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.352241,-11.363636!"];
+  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-282.544958,-15.000000!"];
+  SYSTEM_A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="100.000000,0.000000!"];
+  A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="283.400000,0.000000!"];
+  A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-194.000000!"];
+  SYSTEM_A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-100.000000!"];
+  A01_IN_0 -> SYSTEM_A01_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>brief answers</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=0, pos="e,-99.352241,11.363636 -282.544958,15.000000 -232.078291,15.000000 -181.611625,15.000000 -131.144958,15.000000 -131.144958,15.000000 -120.973156,13.836577 -107.300420,12.272727", lp="-206.844958,15.000000"];
+  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft section</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=0, pos="e,-282.544958,-15.000000 -99.352241,-11.363636 -116.838235,-13.363636 -131.144958,-15.000000 -131.144958,-15.000000 -178.944958,-15.000000 -226.744958,-15.000000 -274.544958,-15.000000", lp="-206.844958,-15.000000"];
+  SYSTEM_A02_OUT_0 -> A02_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email request</TD></TR></TABLE>>, actor_id="A02", flow="out", flow_index=0, pos="e,283.400000,0.000000 100.000000,0.000000 117.600000,0.000000 132.000000,0.000000 132.000000,0.000000 179.800000,0.000000 227.600000,0.000000 275.400000,0.000000", lp="207.700000,0.000000"];
+  A03_IN_0 -> SYSTEM_A03_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>scheduled trigger</TD></TR></TABLE>>, actor_id="A03", flow="in", flow_index=0, pos="e,0.000000,-100.000000 0.000000,-194.000000 0.000000,-173.333333 0.000000,-152.666667 0.000000,-132.000000 0.000000,-132.000000 0.000000,-121.761880 0.000000,-108.000000", lp="0.000000,-163.000000"];
 }
 @enddot
 ```

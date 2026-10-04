@@ -118,7 +118,7 @@ describe("xoá tổ chức", () => {
   })
 
   it("mã mời của org bị huỷ, phiên đang mở org được gỡ org đang mở", async () => {
-    await request(app).post("/api/v1/orgs/" + orgId + "/invitations").set(bearer(lead.token)).send({ role: "viewer" })
+    await request(app).post("/api/v1/orgs/" + orgId + "/invitations").set(bearer(lead.token)).send({ role: "viewer", email: "x@flintflow.test" })
     await Session.create({
       userId: lead.id,
       tokenHash: "hash-" + Date.now(),
