@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import { ApiError } from "../utils/api-error.js"
 import { sendError } from "../types/api-response.js"
+import { toClientError } from "../utils/client-error.js"
 
 export const errorHandler = (
   err: Error | ApiError,
@@ -8,18 +9,14 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction
 ): Response => {
+  // Log đủ chi tiết kỹ thuật ở server; client chỉ nhận câu người đọc được (FLF-247).
   console.error("[ERROR]", err)
 
-  if (err instanceof ApiError) {
-    // Lỗi mang `meta` (vd mode 1: CHANGE_REQUIRES_CR { prefill }) giữ nguyên trong envelope — FLF-171
-    const meta = "meta" in err && err.meta && typeof err.meta === "object" ? (err.meta as Record<string, unknown>) : undefined
-    return sendError(res, err.statusCode, err.code, err.message, meta)
-  }
-
-  // Handle Mongoose or JSON parse errors
-  const statusCode = (err as any).statusCode || 500
-  const message = err.message || "Internal Server Error"
-  const code = (err as any).code || (statusCode === 500 ? "INTERNAL_SERVER_ERROR" : "BAD_REQUEST")
-
-  return sendError(res, statusCode, String(code), message)
+  // Lỗi mang `meta` (vd mode 1: CHANGE_REQUIRES_CR { prefill }) giữ nguyên trong envelope — FLF-171
+  const { status, code, message, meta } = toClientError(err)
+  return sendError(res, status, code, message, meta)
 }
+
+/** Không route nào khớp — trả envelope JSON thay cho trang HTML "Cannot GET …" mặc định của Express. */
+export const notFoundHandler = (_req: Request, res: Response): Response =>
+  sendError(res, 404, "NOT_FOUND", "Không tìm thấy địa chỉ yêu cầu.")

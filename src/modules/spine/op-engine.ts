@@ -556,7 +556,7 @@ const assertVersion = (record: SpineRecord, baseVersion?: number): void => {
 
 const loadForWrite = async (projectId: string, baseVersion?: number): Promise<SpineRecord> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   assertVersion(record, baseVersion)
   return record
 }
@@ -636,12 +636,12 @@ export const revertRange = async (
   options: RevertRangeOptions
 ): Promise<ApplyResult> => {
   if (!Number.isInteger(firstSeq) || !Number.isInteger(lastSeq) || firstSeq < 1 || lastSeq < firstSeq) {
-    throw new ApiError(422, `Dải seq không hợp lệ: ${firstSeq}–${lastSeq}`, CHANGE_RANGE_INVALID)
+    throw new ApiError(422, "Không hoàn tác được vì lịch sử thay đổi không hợp lệ.", CHANGE_RANGE_INVALID, { first_seq: firstSeq, last_seq: lastSeq })
   }
   const record = await loadForWrite(projectId, options.base_version)
   const changes = await repository.listChanges(projectId, { fromSeq: firstSeq, toSeq: lastSeq })
   if (changes.length !== lastSeq - firstSeq + 1) {
-    throw new ApiError(422, `Dải seq ${firstSeq}–${lastSeq} không đầy đủ trong changes[]`, CHANGE_RANGE_INVALID)
+    throw new ApiError(422, "Không hoàn tác được vì lịch sử thay đổi không đầy đủ.", CHANGE_RANGE_INVALID, { first_seq: firstSeq, last_seq: lastSeq })
   }
 
   return saveRevert(projectId, record, changes, options)

@@ -14,7 +14,7 @@ export interface FolderItem {
   updatedAt: Date
 }
 
-const notFound = () => new ApiError(404, "Folder not found or unauthorized", "FOLDER_NOT_FOUND")
+const notFound = () => new ApiError(404, "Không tìm thấy thư mục hoặc bạn không có quyền truy cập.", "FOLDER_NOT_FOUND")
 
 const toItem = (folder: Pick<IFolder, "_id" | "name" | "color" | "createdAt" | "updatedAt">, projectCount: number): FolderItem => ({
   _id: String(folder._id),

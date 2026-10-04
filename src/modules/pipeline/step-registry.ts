@@ -112,7 +112,7 @@ export const getStep = (stepId: string): ExpandedStep => {
   const { base, loop } = parseStepId(stepId)
   const def = loadStepRegistry().find((s) => s.id === base)
   if (!def || (def.kind === "loop") !== (loop !== null) || loop === "") {
-    throw new ApiError(404, `Không có step ${stepId}`, STEP_NOT_FOUND)
+    throw new ApiError(404, "Không tìm thấy bước này trong quy trình.", STEP_NOT_FOUND, { step_id: stepId })
   }
   return expand(def, loop)
 }

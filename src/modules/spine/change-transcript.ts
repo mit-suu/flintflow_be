@@ -12,6 +12,8 @@
 import mongoose from "mongoose"
 import { ChatSession, type IChatMessage, type IChatSession } from "../project/chat-session.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
+import { toClientError, violationMessage } from "../../shared/utils/client-error.js"
 import type { ChangePreviewResult } from "./change.service.js"
 
 /** Số tin cuối phiên đưa vào prompt — cùng mức với CHAT. */
@@ -40,7 +42,7 @@ export const formatChatHistory = (messages: readonly IChatMessage[], tail = CHAT
 export const loadProjectSession = async (projectId: string, sessionId: string): Promise<IChatSession> => {
   const session = mongoose.isValidObjectId(sessionId) ? await ChatSession.findById(sessionId) : null
   if (!session || String(session.projectId) !== String(projectId)) {
-    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
   return session
 }
@@ -55,13 +57,21 @@ export const previewPayload = (preview: ChangePreviewResult): Record<string, unk
           ? preview.changes.length > 0
             ? `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`
             : "Không tìm thấy chỗ nào cần đổi theo lệnh này."
-          : `Không áp được thay đổi này: ${preview.violations[0]?.message ?? "tài liệu sẽ mâu thuẫn sau khi sửa."}`,
+          : violationMessage(preview.violations),
         preview_id: preview.preview_id ?? null,
         branch: preview.branch ?? null,
         changes: preview.changes,
         impact: preview.impact ?? null,
         violations: preview.violations
       }
+
+/**
+ * Câu của tin `change_error` trong phiên (FLF-247): lỗi op/bất biến/schema thành câu thường theo luật vi phạm
+ * (`toClientError`), không còn path op hay dump Zod; câu hỏi làm rõ (NEEDS_CLARIFICATION) và câu đã thân thiện giữ
+ * nguyên. Lỗi không rõ nguồn ⇒ câu chung — chi tiết đã được log ở nơi bắt lỗi.
+ */
+export const changeErrorReply = (err: unknown): string =>
+  err instanceof ApiError || err instanceof AiActionError ? toClientError(err).message : "Không xử lý được yêu cầu sửa lúc này."
 
 /**
  * Ghi một lượt vào phiên: tin user (nếu có) rồi tin AI. `step` theo tin cuối phiên để khung chat không chèn

@@ -52,6 +52,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
 import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
@@ -140,7 +141,7 @@ export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => (
   reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, { signal }),
   assembleDocument: async (projectId, spineVersion) => {
     const project = await Project.findById(projectId, { name: 1 }).lean()
-    if (!project) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    if (!project) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
     await assemble(projectId, project.name, spineVersion)
   }
 })
@@ -241,7 +242,12 @@ export const assertRangeOwnedByStep = async (projectId: string, stepId: string, 
   const changes = await spineRepository.listChanges(projectId, { fromSeq: firstSeq, toSeq: lastSeq })
   const foreign = changes.find((c) => c.step_id !== stepId)
   if (foreign) {
-    throw new ApiError(422, `Dải seq ${firstSeq}–${lastSeq} của step ${stepId} chứa thay đổi không thuộc step (seq ${foreign.seq})`, CHANGE_RANGE_INVALID)
+    throw new ApiError(422, "Không hoàn tác được bước này vì đã có thay đổi khác ghi xen vào sau đó.", CHANGE_RANGE_INVALID, {
+      step_id: stepId,
+      first_seq: firstSeq,
+      last_seq: lastSeq,
+      foreign_seq: foreign.seq
+    })
   }
 }
 
@@ -650,7 +656,7 @@ const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine =>
 
 const refresh = async (projectId: string): Promise<{ spine: Spine; spineVersion: number }> => {
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   return { spine: stripRecord(record), spineVersion: record.spine_version }
 }
 
@@ -875,7 +881,7 @@ export const runDraftPhase = async (
   assertNotAborted(deps.signal, stepId)
   const currentFirstSeq = spine.steps.find((s) => s.id === stepId)?.first_seq ?? null
   const { calls_used } = await meter.roundCounts(projectId, stepId, currentFirstSeq)
-  if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
+  if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
 
   const reservedId = await meter.reserveCall(projectId, userId, stepId, callKind)
   let draftResult: Awaited<ReturnType<typeof draftOps>>
@@ -958,6 +964,12 @@ export const emptyFedSections = (spine: Spine, stepId: string): { section_id: st
 /** Trần hình tự vẽ lại cuối một step — một step sửa nhiều thứ không được biến thành lượt render cả bộ. */
 export const MAX_AUTO_RERENDER = 4
 
+/**
+ * Câu gửi cho FE ở sự kiện `render` khi vẽ hỏng (FLF-247). `diagrams[].error` trong Spine giữ nguyên text PlantUML
+ * để debug / cờ `render_error` — chỉ cái đi ra client được làm sạch.
+ */
+export const DIAGRAM_RENDER_ERROR_MESSAGE = "Chưa vẽ được sơ đồ này."
+
 export interface RenderReviewOptions {
   /** Số cờ mở TRƯỚC khi chạy step — để gate nói "cờ đỏ 3 → 2 (−1)" thay vì chỉ một con số. */
   flagsBefore?: { red: number; yellow: number }
@@ -1018,7 +1030,7 @@ export const runRenderReviewPhase = async (
         step_id: stepId,
         diagram_id: id,
         render_status: diagram?.render_status ?? "error",
-        ...(diagram?.error ? { error: diagram.error } : {})
+        ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {})
       })
     }
   }
@@ -1063,7 +1075,7 @@ export const runRenderReviewPhase = async (
         step_id: stepId,
         diagram_id: id,
         render_status: diagram?.render_status ?? "error",
-        ...(diagram?.error ? { error: diagram.error } : {})
+        ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {})
       })
     }
   }
@@ -1166,7 +1178,7 @@ export const trackSeqRange = async (
 export const requirePipelineSession = async (projectId: string, sessionId: string): Promise<void> => {
   const session = await ChatSession.findById(sessionId)
   if (!session || String(session.projectId) !== String(projectId) || !session.is_pipeline) {
-    throw new ApiError(403, "Session này không phải session pipeline của dự án — chỉ dùng để hỏi đáp (CHAT)", NOT_PIPELINE_SESSION)
+    throw new ApiError(403, "Phiên trò chuyện này chỉ dùng để hỏi đáp, không chạy được các bước soạn tài liệu.", NOT_PIPELINE_SESSION)
   }
 }
 
@@ -1242,7 +1254,7 @@ export const runStep = async (
 
     if (needsDraft) {
       const { calls_used } = await usageCounts(projectId, stepId, existingStep?.first_seq ?? null)
-      if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
+      if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
     }
 
     // FLF-221: tin chat khởi động lượt chạy — ghi sau khi session đã được kiểm và step chạy được, trước Intake để
@@ -1518,7 +1530,7 @@ export const runStep = async (
         assertNotAborted(d.signal, stepId)
         tracker.stage("ask", { detail_vi: "Xem bước này còn thiếu gì để hỏi bạn" })
         const { calls_used: callsBeforeElicit } = await meter.roundCounts(projectId, stepId, stepStateForRound?.first_seq ?? null)
-        if (callsBeforeElicit >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
+        if (callsBeforeElicit >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
 
         const conversation = await loadConversationVariables(sessionId, spine)
         const elicitUsageId = await meter.reserveCall(projectId, userId, stepId, "elicit")
@@ -1716,7 +1728,8 @@ export const runStep = async (
       outcome = "detached"
       return
     }
-    lastError = { code: err instanceof ApiError ? err.code : "UNKNOWN", message: err instanceof Error ? err.message : String(err) }
+    // run-state đọc lại ở FE (`GET /run-state`) ⇒ chỉ lưu câu cho user; chi tiết do nơi bắt lỗi log (FLF-247)
+    lastError = { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) }
     throw err
   } finally {
     if (outcome === "gate") {

@@ -45,6 +45,8 @@ import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-st
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { clientErrorMessage } from "../../shared/utils/client-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
@@ -52,7 +54,7 @@ const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine =>
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
   const parsed = schema.safeParse(input)
-  if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
+  if (!parsed.success) throw validationError(parsed.error)
   return parsed.data
 }
 
@@ -66,10 +68,10 @@ interface Context {
 /** Kiểm quyền sở hữu project trước khi đọc body — người ngoài không dò được DTO qua lỗi 400. */
 const authorize = async (req: Request): Promise<Context> => {
   const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
 
   const projectId = req.params.projectId as string
-  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
   return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
 }
@@ -144,7 +146,8 @@ const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
   return "NOT_IMPLEMENTED"
 }
 
-const errorMessageOf = (err: unknown): string => (err instanceof Error ? err.message : "Lỗi không xác định")
+/** Câu cho user của sự kiện SSE `error` — không text thô của provider/thư viện; chi tiết đã `console.error` (FLF-247). */
+const errorMessageOf = (err: unknown): string => clientErrorMessage(err)
 
 /**
  * SSE: header chỉ mở ở lần `emit` đầu tiên. Lỗi guard-clause (session không pipeline, step không tồn

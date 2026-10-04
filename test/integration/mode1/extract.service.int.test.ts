@@ -190,7 +190,7 @@ describe("I-4 — lỗi AI", () => {
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(run.doc.paused?.reason).toBe("resume_later")
     expect(run.doc.extract_cursor).toBe(AI_ORDER[2])
-    expect(run.sections.find((s) => s.section_id === AI_ORDER[2])).toMatchObject({ status: "failed", error: expect.stringContaining("provider down") })
+    expect(run.sections.find((s) => s.section_id === AI_ORDER[2])).toMatchObject({ status: "failed", error: expect.stringContaining("Dịch vụ AI đang gặp sự cố") })
     // 2 lượt thành công đã trừ, lượt lỗi được hoàn: không còn credit treo
     expect(await wallet(ctx.userId)).toMatchObject({ balance: 996, reserved: 0 })
     expect(await Usage.find({ projectId: ctx.projectId, step_id: `I-4:${AI_ORDER[2]}` }).distinct("state")).toEqual(["refunded"])

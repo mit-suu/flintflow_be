@@ -50,7 +50,12 @@ const stepContentToRevert = async (projectId: string, stepId: string, firstSeq: 
   const end = Math.max(lastSeq, ...own.map((c) => c.seq))
   const foreign = changes.find((c) => c.step_id !== stepId && c.seq <= end)
   if (foreign) {
-    throw new ApiError(422, `Dải seq ${firstSeq}–${end} của step ${stepId} chứa thay đổi không thuộc step (seq ${foreign.seq})`, CHANGE_RANGE_INVALID)
+    throw new ApiError(422, "Không hoàn tác được bước này vì đã có thay đổi khác ghi xen vào sau đó.", CHANGE_RANGE_INVALID, {
+      step_id: stepId,
+      first_seq: firstSeq,
+      last_seq: end,
+      foreign_seq: foreign.seq
+    })
   }
   return own
 }
@@ -58,7 +63,7 @@ const stepContentToRevert = async (projectId: string, stepId: string, firstSeq: 
 /** Mở project: revert step `in_progress` dang dở (nếu có) rồi trả tiến độ hiện tại. */
 export const resumeProject = async (projectId: string, userId: string): Promise<ResumeResult> => {
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
 
   const spine = stripRecord(record)
   // Step đã rời registry (B-0.4, FLF-221) không revert: nội dung nó đã ghi vẫn là dữ liệu của project.
@@ -98,7 +103,7 @@ export const resumeProject = async (projectId: string, userId: string): Promise<
   }
 
   const finalRecord = await spineRepository.get(projectId)
-  if (!finalRecord) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!finalRecord) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const finalSpine = stripRecord(finalRecord)
   const changes = await spineRepository.listChanges(projectId)
 

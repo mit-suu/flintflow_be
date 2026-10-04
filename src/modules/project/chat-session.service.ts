@@ -4,10 +4,11 @@ import { ChatSession, IChatSession, IChatMessage } from "./chat-session.model.js
 import { executeAiAction, executeAiActionStream } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
-import { formatChatHistory, previewPayload } from "../spine/change-transcript.js"
+import { changeErrorReply, formatChatHistory, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -54,7 +55,7 @@ export const getChatSessions = async (projectId: string): Promise<IChatSession[]
 export const getChatSessionById = async (chatSessionId: string): Promise<IChatSession> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
-    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
   return session
 }
@@ -69,7 +70,7 @@ export const getChatSessionById = async (chatSessionId: string): Promise<IChatSe
 export const assertChatSessionOwnership = async (projectId: string, chatSessionId: string): Promise<IChatSession> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session || String(session.projectId) !== String(projectId)) {
-    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
   return session
 }
@@ -111,8 +112,8 @@ const tryChangeFlow = async (
     payload = previewPayload(preview)
   } catch (err) {
     // Lệnh sửa lỗi (hết credit, xung đột version…) không được làm hỏng phiên chat
-    const message = err instanceof ApiError ? err.message : "Không xử lý được yêu cầu sửa lúc này."
-    payload = { kind: "change_error", reply: message }
+    if (!(err instanceof ApiError)) console.error("[chat-session] change preview failed:", err)
+    payload = { kind: "change_error", reply: changeErrorReply(err) }
   }
 
   const aiMsg: IChatMessage = { role: "ai", content: JSON.stringify(payload), step, createdAt: new Date() }
@@ -149,7 +150,7 @@ export const sendMessageAndGetResponse = async (
 ): Promise<IChatSession> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
-    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
 
   // T20: Discovery KHÔNG còn là một chế độ chat. B-0…B-2 là 13 step chạy qua step runner và ghi Spine
@@ -258,7 +259,7 @@ export const sendMessageStream = async (
 ): Promise<void> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
-    res.write(`data: ${JSON.stringify({ type: "error", error: "Chat session not found" })}\n\n`)
+    res.write(`data: ${JSON.stringify({ type: "error", error: "Không tìm thấy phiên trò chuyện." })}\n\n`)
     res.end()
     return
   }
@@ -384,7 +385,8 @@ export const sendMessageStream = async (
         res.write(
           `data: ${JSON.stringify({
             type: "error",
-            error: error.message || "AI generation failed"
+            // Không gửi text thô của nhà cung cấp AI / thư viện — đã log đủ ở trên (FLF-247)
+            error: clientErrorMessage(error)
           })}\n\n`
         )
         res.end()
@@ -400,12 +402,12 @@ export const sendMessageStream = async (
 export const deleteChatSession = async (chatSessionId: string): Promise<void> => {
   const target = await ChatSession.findById(chatSessionId, { projectId: 1, is_pipeline: 1 })
   if (!target) {
-    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
 
   const result = await ChatSession.deleteOne({ _id: chatSessionId })
   if (result.deletedCount === 0) {
-    throw new ApiError(404, "Chat session not found", "CHAT_SESSION_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
 
   if (target.is_pipeline) {

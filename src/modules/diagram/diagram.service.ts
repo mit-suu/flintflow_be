@@ -154,7 +154,7 @@ const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine =>
 
 const loadSpine = async (projectId: string): Promise<SpineRecord> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   return record
 }
 
@@ -314,6 +314,6 @@ export const loadDiagramFile = async (
   store: DiagramFileStore = gridFsDiagramStore
 ): Promise<StoredDiagramFile> => {
   const file = await store.load(projectId, diagramId, format)
-  if (!file) throw new ApiError(404, `Chưa có file ${diagramId}.${format}`, DIAGRAM_NOT_FOUND)
+  if (!file) throw new ApiError(404, "Sơ đồ này chưa có file ảnh.", DIAGRAM_NOT_FOUND, { diagram_id: diagramId, format })
   return file
 }

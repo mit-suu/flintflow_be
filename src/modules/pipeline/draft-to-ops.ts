@@ -97,7 +97,14 @@ export class DraftRejectedError extends ApiError {
 
   constructor(attempts: DraftAttempt[]) {
     const last = attempts[attempts.length - 1]
-    super(422, `Model không tạo được lô op hợp lệ sau ${attempts.length} lượt: ${last?.errors[0]?.message ?? "không rõ"}`, NEEDS_USER_INPUT)
+    // FLF-247: câu cho user không mang text op/Zod — lỗi thô ở `errors` / `meta.errors` (lượt retry đưa model đọc
+    // `errors`, không đọc message này)
+    super(
+      422,
+      `AI chưa tạo được nội dung hợp lệ sau ${attempts.length} lần thử. Bạn có thể chạy lại, hoặc nói rõ hơn yêu cầu ở ô chat.`,
+      NEEDS_USER_INPUT,
+      { attempts: attempts.length, errors: (last?.errors ?? []).slice(0, 10) }
+    )
     this.errors = last?.errors ?? []
     this.lastOps = last?.ops ?? []
     this.attempts = attempts
@@ -117,7 +124,7 @@ const contentGuidance = (ctx: StepContext): string => {
 
 const loadSpine = async (projectId: string, expectedVersion: number): Promise<Spine> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   if (record.spine_version !== expectedVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }

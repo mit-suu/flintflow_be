@@ -13,7 +13,7 @@ interface RequestLog {
 }
 
 export const createRateLimiter = (options: RateLimitOptions) => {
-  const { windowMs, max, message = "Too many requests. Please try again later." } = options
+  const { windowMs, max, message = "Bạn thao tác quá nhiều lần. Vui lòng thử lại sau ít phút." } = options
   const ipStore = new Map<string, RequestLog>()
 
   // Cleanup expired entries periodically (every 5 minutes)

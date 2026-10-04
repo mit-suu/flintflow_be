@@ -16,7 +16,7 @@ export const estimateCostHandler = async (
   try {
     const { actionType } = req.body
     if (!actionType) {
-      throw new ApiError(400, "actionType là bắt buộc", "MISSING_ACTION_TYPE")
+      throw new ApiError(400, "Thiếu loại thao tác AI.", "MISSING_ACTION_TYPE")
     }
 
     const cost = await getActionCost(actionType)
@@ -40,17 +40,17 @@ export const executeAiActionHandler = async (
     const { actionType, input, projectId, provider, model } = req.body
 
     if (!actionType) {
-      throw new ApiError(400, "actionType là bắt buộc", "MISSING_ACTION_TYPE")
+      throw new ApiError(400, "Thiếu loại thao tác AI.", "MISSING_ACTION_TYPE")
     }
 
     if (!input) {
-      throw new ApiError(400, "input là bắt buộc", "MISSING_INPUT")
+      throw new ApiError(400, "Thiếu nội dung để AI xử lý.", "MISSING_INPUT")
     }
 
     // Chặn trước khi reserve credit: actionType lạ (vd generate_diagram đã gỡ)
     // sẽ reserve rồi mới nổ ở bước nạp template.
     if (!VALID_ACTION_TYPES.has(actionType)) {
-      throw new ApiError(400, `actionType không hợp lệ: '${actionType}'`, "INVALID_ACTION_TYPE")
+      throw new ApiError(400, "Loại thao tác AI không hợp lệ.", "INVALID_ACTION_TYPE")
     }
 
     const result = await executeAiAction(
@@ -80,12 +80,12 @@ export const retryAiActionHandler = async (
 
     const logId = Array.isArray(req.params.logId) ? req.params.logId[0] : req.params.logId
     if (!logId) {
-      throw new ApiError(400, "logId là bắt buộc", "MISSING_LOG_ID")
+      throw new ApiError(400, "Thiếu thông tin lượt gọi AI cần chạy lại.", "MISSING_LOG_ID")
     }
 
     const originalLog = await AiActionLog.findById(logId)
     if (!originalLog) {
-      throw new ApiError(404, "Không tìm thấy AiActionLog", "LOG_NOT_FOUND")
+      throw new ApiError(404, "Không tìm thấy lượt gọi AI cần chạy lại.", "LOG_NOT_FOUND")
     }
 
     if (originalLog.userId.toString() !== userId) {
