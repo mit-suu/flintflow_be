@@ -91,6 +91,8 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    press "Vẽ lại sơ đồ" under the diagram. Moving boxes, positions, colours or line style are not stored, the layout is
    automatic ⇒ `clarification_needed` saying so and naming what does reshape it (ERD: add/remove an entity or a
    relationship, its verb, its cardinality), with one example from the projection.
+13. **`empty_collections`** in the projection = the named section has nothing yet: `add` into its `add_path` with exactly
+   its `fields`, never into a look-alike collection (§5.2 Common Requirements is `common_requirements[]`, not `nfrs[]`).
 
 ## Reconcile (`reconcile`)
 
