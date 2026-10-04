@@ -973,6 +973,35 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
   return out
 }
 
+/** Cách sửa chung cho mọi lỗi tên use case — model cần biết phải TÁCH chứ không chỉ đổi chữ ("Manage X" ⇒ "Create, Update and Delete X" vẫn sai). */
+export const USE_CASE_NAME_FIX =
+  "Đặt lại tên theo luật U1–U9: một động từ cụ thể + đối tượng nghiệp vụ, ≤ 5 từ, không \"and\"/\"/\"/dấu phẩy, không tên actor. " +
+  "Tên đang gộp nhiều mục tiêu (Manage/Maintain…, \"Create, Update and Delete …\") thì TÁCH thành nhiều use case, mỗi mục tiêu một use case"
+
+export interface UseCaseNameIssue {
+  id: string
+  name: string
+  message: string
+}
+
+/**
+ * FLF-243: tên use case MỚI hoặc VỪA ĐỔI (so `before` với `after`) mà cờ vàng `usecase_name_*` sẽ bắt — để chặn ngay lúc
+ * model sinh (draft, sửa qua chat) thay vì để user gặp cờ sau. Tên cũ không đụng tới thì không xét: lô của step khác
+ * không bị chặn vì một tên đã có từ trước.
+ */
+export const useCaseNameIssues = (before: Spine, after: Spine): UseCaseNameIssue[] => {
+  const previous = new Map(before.use_cases.map((u) => [u.id, u.name]))
+  const actorNames = after.actors.map((a) => a.name)
+  const names = after.use_cases.map((u) => u.name)
+  return after.use_cases
+    .filter((u) => previous.get(u.id) !== u.name)
+    .flatMap((u) => {
+      const { semantic, style } = checkUseCaseName(u.name, actorNames, names)
+      const codes = [...semantic, ...style]
+      return codes.length === 0 ? [] : [{ id: u.id, name: u.name, message: `Tên use case "${u.name}" chưa đạt: ${hint(codes)}` }]
+    })
+}
+
 // ─── tên hệ thống (FLF-177) ─────────────────────────────────
 
 /**

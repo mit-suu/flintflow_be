@@ -32,6 +32,9 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 - Baseline exists: {{has_baseline}}
 - Projection around the target (keyed): {{projection}} — `existing_ids` lists the ids that exist right now
 - Glossary / proper names: {{glossary}}
+{{#if previous_problems}}
+- **Your previous batch for this request was rejected** for these use case names — redo the whole batch with every name fixed; a name that bundles several goals becomes several use cases (rule 10): {{previous_problems}}
+{{/if}}
 - For `reconcile` — the owning step `{{step_id}}` ({{step_name}}), the paths it may write `{{writable_paths}}`, and the stale section with the exact changes that made it stale: {{stale_sections}}
 
 ## Change instruction (`change_instruction`)

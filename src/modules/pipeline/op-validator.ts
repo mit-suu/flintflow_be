@@ -25,7 +25,7 @@ import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
-import { orphanEntities } from "../spine/deterministic-check.js"
+import { USE_CASE_NAME_FIX, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
 import {
   BRIEF_EXTRACTION_STEP,
@@ -805,6 +805,25 @@ const touchesErd = (spine: Spine, ops: readonly Op[]): boolean =>
     const id = /^assumptions\[id=([^\]]+)\]/.exec(op.path)?.[1]
     return id !== undefined && (spine.assumptions.find((a) => a.id === id)?.path ?? "").startsWith("entities[")
   })
+
+/**
+ * FLF-243: tên use case mới/đổi trong lô vi phạm luật cờ vàng `usecase_name_*`. Lỗi **mềm**: `draftOps` dùng để
+ * gửi lại model, hết lượt thì vẫn nhận lô (cờ vàng là lưới cuối) — không chặn step vì một chuyện đặt tên.
+ * Lô không áp thử được ⇒ `[]` (lỗi đó là việc của `validateOps`).
+ */
+export const useCaseNamingErrors = (spine: Spine, ops: readonly Op[]): ValidationError[] => {
+  if (!ops.some((op) => op.path === "use_cases" || op.path.startsWith("use_cases["))) return []
+  try {
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops: [...ops], by: "op-validator", step_id: null }, { startSeq: 1 })
+    return useCaseNameIssues(spine, plan.spine).map((issue) => ({
+      rule: "usecase_name_invalid",
+      path: `use_cases[id=${issue.id}].name`,
+      message: `${issue.message}. ${USE_CASE_NAME_FIX}`
+    }))
+  } catch {
+    return []
+  }
+}
 
 export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions = {}): ValidationError[] => {
   const list = z.array(z.unknown()).safeParse(ops)

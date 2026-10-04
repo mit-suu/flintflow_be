@@ -24,6 +24,7 @@ import { OP_INVALID, type ApplyResult, type Op, type PreviewResult, type Transac
 import { stampAddendum } from "./addendum-stamp.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
+import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
@@ -327,7 +328,27 @@ interface ResolvedOps {
   notes: string | null
 }
 
-/** Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model, không retry. */
+/**
+ * FLF-243: tên use case model TỰ đặt trong lô mà cờ vàng `usecase_name_*` sẽ bắt. Tên user gõ nguyên văn trong lệnh
+ * thì để yên — đó là quyết định của user. Lô không áp thử được ⇒ `[]` (preview sẽ báo lỗi đó).
+ */
+const useCaseNamingProblems = (spine: Spine, ops: Op[], instruction: string): string[] => {
+  if (!ops.some((op) => op.path === "use_cases" || op.path.startsWith("use_cases["))) return []
+  try {
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
+    const asked = instruction.toLowerCase()
+    return useCaseNameIssues(spine, plan.spine)
+      .filter((issue) => !asked.includes(issue.name.toLowerCase()))
+      .map((issue) => issue.message)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model; riêng khi lô đặt tên use case sai
+ * luật thì gọi lại đúng MỘT lần kèm lỗi (FLF-243) — lần hai vẫn sai thì giữ lô, cờ vàng là lưới cuối.
+ */
 const opsFromInstruction = async (
   projectId: string,
   userId: string,
@@ -337,24 +358,35 @@ const opsFromInstruction = async (
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
-  const result = await deps.changeExecutor(
-    ActionType.CHANGE_INSTRUCTION,
-    {
-      promptVariables: {
-        call_kind: "change_instruction",
-        user_message: instruction,
-        chat_history: history || "(none)",
-        is_pipeline: false,
-        has_baseline: spine.baselines.length > 0,
-        // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
-        projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
-        glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
-        stale_sections: []
-      }
-    },
-    projectId,
-    userId
-  )
+  const call = (previousProblems?: string) =>
+    deps.changeExecutor(
+      ActionType.CHANGE_INSTRUCTION,
+      {
+        promptVariables: {
+          call_kind: "change_instruction",
+          user_message: instruction,
+          chat_history: history || "(none)",
+          is_pipeline: false,
+          has_baseline: spine.baselines.length > 0,
+          // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
+          projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
+          glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
+          stale_sections: [],
+          ...(previousProblems ? { previous_problems: previousProblems } : {})
+        }
+      },
+      projectId,
+      userId
+    )
+
+  let result = await call()
+  if (!result.data.clarification_needed?.trim()) {
+    const problems = useCaseNamingProblems(spine, stampAddendum((result.data.ops ?? []) as Op[]), instruction)
+    if (problems.length > 0) {
+      const retry = await call([...problems, USE_CASE_NAME_FIX].join("\n"))
+      if (!retry.data.clarification_needed?.trim() && (retry.data.ops ?? []).length > 0) result = retry
+    }
+  }
 
   const clarification = result.data.clarification_needed?.trim()
   if (clarification) return { ops: [], clarification, notes: null }
