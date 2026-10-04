@@ -1,56 +1,83 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
-"@startuml
-skinparam monochrome true
-skinparam shadowing false
-skinparam nodesep 20
-skinparam ranksep 110
-skinparam usecaseFontSize 16
-usecase "\\n\\n\\n\\n        FlintFlow        \\n\\n\\n\\n" as SYSTEM_
-rectangle "Founder" as A01
-rectangle "Business Analyst" as A02
-rectangle "Administrator" as A03
-rectangle "Guest" as A04
-rectangle "Payment Gateway" as A05
-rectangle "LLM Provider" as A06
-rectangle "PlantUML Server" as A07
-rectangle "Email Service" as A08
-rectangle "Scheduler" as A09
-A01 -[#transparent]down-> SYSTEM_ : brief answers\\naccepted step
-A01 -down-> SYSTEM_
-A01 -[#transparent]down- SYSTEM_
-SYSTEM_ -up-> A01 : draft section\\nsrs document
-A01 -[#transparent]down- SYSTEM_
-A02 -[#transparent]down-> SYSTEM_ : verification result
-A02 -down-> SYSTEM_
-A02 -[#transparent]down- SYSTEM_
-SYSTEM_ -up-> A02 : red flag list
-A02 -[#transparent]down- SYSTEM_
-A03 -[#transparent]down-> SYSTEM_ : account action
-A03 -down-> SYSTEM_
-A03 -[#transparent]down- SYSTEM_
-SYSTEM_ -up-> A03 : platform metrics
-A03 -[#transparent]down- SYSTEM_
-A04 -right-> SYSTEM_ : registration request
-A05 -[#transparent]down-> SYSTEM_ : payment result
-A05 -down-> SYSTEM_
-A05 -[#transparent]down- SYSTEM_
-SYSTEM_ -up-> A05 : payment request
-A05 -[#transparent]down- SYSTEM_
-A06 -[#transparent]up-> SYSTEM_ : generated draft
-A06 -up-> SYSTEM_
-A06 -[#transparent]up- SYSTEM_
-SYSTEM_ -down-> A06 : draft request
-A06 -[#transparent]up- SYSTEM_
-A07 -[#transparent]up-> SYSTEM_ : diagram png
-A07 -up-> SYSTEM_
-A07 -[#transparent]up- SYSTEM_
-SYSTEM_ -down-> A07 : puml source
-A07 -[#transparent]up- SYSTEM_
-SYSTEM_ -right-> A08 : email request
-A09 -up-> SYSTEM_ : housekeeping tick
-@enduml
+"@startdot
+digraph Context {
+  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];
+  node [fontname="sans-serif", fontsize=14, fixedsize=true, pin=true, style=filled, color="#64748B", fillcolor="white", penwidth=1.2];
+  edge [fontname="sans-serif", fontsize=12, color="#475569", fontcolor="#334155", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];
+  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fontsize=18, fillcolor="#F1F5F9", color="#475569"];
+  A01 [shape=box, pos="-378.000000,0.000000!", width=1.444444, height=2.611111, label="Founder", side="left"];
+  A02 [shape=box, pos="-544.800000,1076.833333!", width=2.780556, height=0.611111, label="Business Analyst", side="top"];
+  A03 [shape=box, pos="-459.000000,-914.333333!", width=2.455556, height=0.611111, label="Administrator", side="bottom"];
+  A04 [shape=box, pos="-168.600000,1076.833333!", width=2.888889, height=0.611111, label="Guest", side="top"];
+  A05 [shape=box, pos="-145.200000,-914.333333!", width=2.347222, height=0.611111, label="Payment Gateway", side="bottom"];
+  A06 [shape=box, pos="176.400000,1076.833333!", width=2.347222, height=0.611111, label="LLM Provider", side="top"];
+  A07 [shape=box, pos="129.600000,-914.333333!", width=2.284722, height=0.611111, label="PlantUML Server", side="bottom"];
+  A08 [shape=box, pos="529.200000,1076.833333!", width=2.997222, height=0.611111, label="Email Service", side="top"];
+  A09 [shape=box, pos="435.600000,-914.333333!", width=2.780556, height=0.611111, label="Scheduler", side="bottom"];
+  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-326.000000,63.000000!"];
+  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-90.957860,41.553191!"];
+  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-98.631136,16.489362!"];
+  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-326.000000,25.000000!"];
+  A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-326.000000,-25.000000!"];
+  SYSTEM_A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-98.631136,-16.489362!"];
+  SYSTEM_A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-90.957860,-41.553191!"];
+  A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-326.000000,-63.000000!"];
+  A02_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-632.900000,1054.833333!"];
+  SYSTEM_A02_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-62.000000,78.460181!"];
+  SYSTEM_A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-44.739137,89.433828!"];
+  A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-456.700000,1054.833333!"];
+  A04_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-260.600000,1054.833333!"];
+  SYSTEM_A04_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-25.528836,96.686496!"];
+  SYSTEM_A04_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-7.503871,99.718062!"];
+  A04_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-76.600000,1054.833333!"];
+  A06_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="103.900000,1054.833333!"];
+  SYSTEM_A06_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="10.178227,99.480670!"];
+  SYSTEM_A06_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="24.382683,96.981879!"];
+  A06_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="248.900000,1054.833333!"];
+  A08_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="433.300000,1054.833333!"];
+  SYSTEM_A08_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="42.446832,90.544279!"];
+  SYSTEM_A08_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="61.235898,79.057984!"];
+  A08_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="625.100000,1054.833333!"];
+  A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-535.400000,-892.333333!"];
+  SYSTEM_A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-62.000000,-78.460181!"];
+  SYSTEM_A03_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-44.305566,-89.649411!"];
+  A03_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-382.600000,-892.333333!"];
+  A05_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-217.700000,-892.333333!"];
+  SYSTEM_A05_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-25.209936,-96.770135!"];
+  SYSTEM_A05_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-8.418752,-99.644993!"];
+  A05_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-72.700000,-892.333333!"];
+  A07_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="72.700000,-892.333333!"];
+  SYSTEM_A07_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="8.418752,-99.644993!"];
+  SYSTEM_A07_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="21.596937,-97.640014!"];
+  A07_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="186.500000,-892.333333!"];
+  A09_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="347.500000,-892.333333!"];
+  SYSTEM_A09_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="40.240941,-91.545981!"];
+  SYSTEM_A09_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="60.645125,-79.512067!"];
+  A09_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="523.700000,-892.333333!"];
+  A01_IN_0 -> SYSTEM_A01_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>brief answers</TD></TR></TABLE>>, actor_id="A01", flow="in", pair_index=0, pos="e,-90.957860,41.553191 -326.000000,63.000000 -250.229642,69.781533 -174.459284,63.318211 -98.688927,43.610036", lp="-255.487358,82.487460"];
+  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft section</TD></TR></TABLE>>, actor_id="A01", flow="out", pair_index=0, pos="e,-326.000000,25.000000 -98.631136,16.489362 -171.778562,32.403098 -244.925988,35.600414 -318.073414,26.081309", lp="-257.789341,48.047370"];
+  A01_IN_1 -> SYSTEM_A01_IN_1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>accepted step</TD></TR></TABLE>>, actor_id="A01", flow="in", pair_index=1, pos="e,-98.631136,-16.489362 -326.000000,-25.000000 -252.819407,-35.442510 -179.638815,-33.157065 -106.458222,-18.143665", lp="-257.789341,-48.047370"];
+  SYSTEM_A01_OUT_1 -> A01_OUT_1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>srs document</TD></TR></TABLE>>, actor_id="A01", flow="out", pair_index=1, pos="e,-326.000000,-63.000000 -90.957860,-41.553191 -166.647793,-62.140432 -242.337726,-69.510921 -318.027658,-63.664657", lp="-255.487358,-82.487460"];
+  A02_IN_0 -> SYSTEM_A02_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>verification result</TD></TR></TABLE>>, actor_id="A02", flow="in", pair_index=0, pos="e,-62.000000,78.460181 -632.900000,1054.833333 -462.450246,731.619965 -273.590388,408.406597 -66.320425,85.193228", lp="-654.405600,937.668555"];
+  SYSTEM_A02_OUT_0 -> A02_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>red flag list</TD></TR></TABLE>>, actor_id="A02", flow="out", pair_index=0, pos="e,-456.700000,1054.833333 -44.739137,89.433828 -199.513464,408.732023 -335.910222,728.030218 -453.929411,1047.328412", lp="-473.878296,938.985393"];
+  A04_IN_0 -> SYSTEM_A04_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>registration request</TD></TR></TABLE>>, actor_id="A04", flow="in", pair_index=0, pos="e,-25.528836,96.686496 -260.600000,1054.833333 -201.386537,738.002915 -123.803509,421.172497 -27.850916,104.342079", lp="-326.305060,939.855713"];
+  SYSTEM_A04_OUT_0 -> A04_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>registration result</TD></TR></TABLE>>, actor_id="A04", flow="out", pair_index=0, pos="e,-76.600000,1054.833333 -7.503871,99.718062 -48.853350,415.423421 -71.847523,731.128781 -76.486391,1046.834140", lp="-158.322065,940.219501"];
+  A06_IN_0 -> SYSTEM_A06_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>generated draft</TD></TR></TABLE>>, actor_id="A06", flow="in", pair_index=0, pos="e,10.178227,99.480670 103.900000,1054.833333 91.430106,739.017151 60.601145,423.200968 11.413118,107.384786", lp="30.066987,940.191014"];
+  SYSTEM_A06_OUT_0 -> A06_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft request</TD></TR></TABLE>>, actor_id="A06", flow="out", pair_index=0, pos="e,248.900000,1054.833333 24.382683,96.981879 117.119369,413.639582 191.495192,730.297285 247.510154,1046.954988", lp="167.171522,939.891159"];
+  A08_IN_0 -> SYSTEM_A08_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email delivery result</TD></TR></TABLE>>, actor_id="A08", flow="in", pair_index=0, pos="e,42.446832,90.544279 433.300000,1054.833333 322.522601,735.823559 193.358544,416.813784 45.807830,97.804010", lp="300.411220,939.118647"];
+  SYSTEM_A08_OUT_0 -> A08_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email request</TD></TR></TABLE>>, actor_id="A08", flow="out", pair_index=0, pos="e,625.100000,1054.833333 61.235898,79.057984 266.354861,401.951384 453.077632,724.844784 621.404210,1047.738184", lp="502.649908,937.740291"];
+  A03_IN_0 -> SYSTEM_A03_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>account action</TD></TR></TABLE>>, actor_id="A03", flow="in", pair_index=0, pos="e,-62.000000,-78.460181 -535.400000,-892.333333 -397.413387,-623.278231 -241.066537,-354.223130 -66.359449,-85.168028", lp="-549.105600,-794.668555"];
+  SYSTEM_A03_OUT_0 -> A03_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>platform metrics</TD></TR></TABLE>>, actor_id="A03", flow="out", pair_index=0, pos="e,-382.600000,-892.333333 -44.305566,-89.649411 -174.501571,-354.695606 -286.380197,-619.741802 -379.941446,-884.787998", lp="-420.318268,-796.011263"];
+  A05_IN_0 -> SYSTEM_A05_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>payment result</TD></TR></TABLE>>, actor_id="A05", flow="in", pair_index=0, pos="e,-25.209936,-96.770135 -217.700000,-892.333333 -172.640094,-629.691482 -109.270212,-367.049631 -27.590354,-104.407780", lp="-265.114792,-796.865750"];
+  SYSTEM_A05_OUT_0 -> A05_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>payment request</TD></TR></TABLE>>, actor_id="A05", flow="out", pair_index=0, pos="e,-72.700000,-892.333333 -8.418752,-99.644993 -48.107891,-361.207939 -69.505216,-622.770885 -72.610726,-884.333831", lp="-139.399850,-797.210732"];
+  A07_IN_0 -> SYSTEM_A07_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>diagram png</TD></TR></TABLE>>, actor_id="A07", flow="in", pair_index=0, pos="e,8.418752,-99.644993 72.700000,-892.333333 69.967130,-630.740649 48.938287,-369.147965 9.613470,-107.555281", lp="17.999850,-797.210732"];
+  SYSTEM_A07_OUT_0 -> A07_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>puml source</TD></TR></TABLE>>, actor_id="A07", flow="out", pair_index=0, pos="e,186.500000,-892.333333 21.596937,-97.640014 94.496964,-359.896063 149.100779,-622.152111 185.408382,-884.408160", lp="119.725232,-796.970135"];
+  A09_IN_0 -> SYSTEM_A09_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>housekeeping tick</TD></TR></TABLE>>, actor_id="A09", flow="in", pair_index=0, pos="e,40.240941,-91.545981 347.500000,-892.333333 264.509136,-627.833280 163.189794,-363.333227 43.541974,-98.833174", lp="240.242513,-796.238851"];
+  SYSTEM_A09_OUT_0 -> A09_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>housekeeping result</TD></TR></TABLE>>, actor_id="A09", flow="out", pair_index=0, pos="e,523.700000,-892.333333 60.645125,-79.512067 232.141157,-348.068685 385.297546,-616.625303 520.114291,-885.181922", lp="389.947015,-794.794781"];
+}
+@enddot
 "
 `;
 
