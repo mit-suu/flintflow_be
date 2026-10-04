@@ -36,7 +36,7 @@ sign-in`). Check the account use cases match it, with `actor_ids` = exactly the 
 | Access | Account use cases |
 | --- | --- |
 | `self-registers` | Register Account, Log In, Reset Password |
-| `invited` | Log In, Reset Password; one "Create User Account" for the actor that manages them, invited kinds named in its description — never "Create <Actor> Account" (actor name in a use case name breaks U4) |
+| `invited` | Log In, Reset Password; "Create <Actor> Account" (or "Invite …") for the actor that manages them |
 | `identity provider` | Log In, with the provider `system` actor as participant; no Register/Reset |
 | `no sign-in` | none |
 

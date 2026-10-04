@@ -400,7 +400,18 @@ describe("runDeterministicCheck", () => {
     }
     // `Scheduler` là actor nhưng `Scheduled` không phải ⇒ U4 khớp nguyên từ, không khớp tiền tố
     expect(codes("Run Scheduled Housekeeping").style).not.toContain("U4")
-    expect(codes("Notify Founder").style).toContain("U4")
+    expect(codes("Scheduled Cleanup").style).not.toContain("U4")
+  })
+
+  it("FLF-243 U4: chỉ bắt actor làm CHỦ NGỮ; actor là đối tượng nghiệp vụ thì hợp lệ", () => {
+    const actors = ["Teacher", "Student", "Student Services Office Staff", "Founder"]
+    const u4 = (name: string) => checkUseCaseName(name, actors, [name]).style.includes("U4")
+    for (const name of ["Teacher Enters Grades", "Student Views Grades", "Founder Creates Project", "Approve Leave by Teacher", "Teacher"]) {
+      expect(u4(name), name).toBe(true)
+    }
+    for (const name of ["Create Student Record", "Update Teacher Profile", "Enroll Student", "Notify Founder", "Create Teacher Account", "Find Studentship"]) {
+      expect(u4(name), name).toBe(false)
+    }
   })
 
   it("tên đúng chuẩn không sinh cờ: từ phụ viết hoa giữa tên, actor có định ngữ", () => {
@@ -426,7 +437,7 @@ describe("runDeterministicCheck", () => {
     const issues = useCaseNameIssues(before, after)
     expect(issues.map((i) => i.id)).toEqual(["UC05", "UC06"])
     expect(issues[0].message).toContain('một mục tiêu duy nhất')
-    expect(issues[1].message).toContain("không nhắc tên actor")
+    expect(issues[1].message).toContain("actor không làm chủ ngữ")
   })
 
   it("use case truy cập tài khoản: nhận theo nguyên cụm từ, không theo chuỗi con", () => {
