@@ -708,6 +708,15 @@ export const recordUserMessage = async (projectId: string, sessionId: string, st
 }
 
 /**
+ * Tin của AI vào transcript ngoài luồng SSE — dùng cho tin cổng chốt. Thẻ cổng do FE vẽ từ state sống nên chốt
+ * xong là mất; không ghi lại thì đọc lịch sử chỉ thấy lượt bấm của user đứng một mình.
+ */
+export const recordAiMessage = async (projectId: string, sessionId: string, stepId: string, message: string): Promise<void> => {
+  await requirePipelineSession(projectId, sessionId)
+  await pushTranscript(projectId, sessionId, stepId, "ai", message)
+}
+
+/**
  * Có ý tưởng để làm việc chưa — hàm thuần, không dò chữ trong tin nhắn (chip "Mình chưa có ý tưởng" gửi
  * `intent: "no_idea"`). Chưa có ⇒ B-0.1 hỏi gợi mở bằng văn xuôi, không thẻ lựa chọn, không "(Khuyến nghị)".
  */

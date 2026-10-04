@@ -19,6 +19,7 @@ import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { AiActionLog } from "../../src/modules/admin/ai-action-log.model.js"
 import { Spine } from "../../src/modules/spine/spine.model.js"
 import { ChatSession } from "../../src/modules/project/chat-session.model.js"
+import { StepRun } from "../../src/modules/pipeline/run-state.model.js"
 
 /** Chuỗi T14: op-case của S-3.x tham chiếu id do S-1.2/S-2.x sinh ra nên phải chạy từ S-1.2. */
 const S3_STEPS = ["S-1.2", "S-2.1", "S-2.2", "S-2.3", "S-2.4", "S-2.5", "S-3.1", "S-3.2", "S-3.3", "S-3.4", "S-3.5", "S-3.6"] as const
@@ -70,6 +71,44 @@ describe("S-1.2 → S-3.6 qua /run + /gate", () => {
       .set("Authorization", `Bearer ${seeded.token}`)
     const parsed = stepsResponseSchema.parse(steps.body.data)
     for (const stepId of S3_STEPS) expect(parsed.steps.find((s) => s.id === stepId)?.status).toBe("accepted")
+  })
+})
+
+describe("FLF-249: lịch sử chat giữ lại tin cổng, không chỉ giữ thao tác của user", () => {
+  /** Tin của lượt duyệt, theo thứ tự ghi — thẻ cổng do FE dựng từ lượt chạy sống nên chốt xong là mất. */
+  const gateTurn = async (projectId: string): Promise<Array<{ role: string; content: string }>> => {
+    const session = await ChatSession.findOne({ projectId, is_pipeline: true }).lean()
+    return (session?.messages ?? []).map((m) => ({ role: m.role, content: m.content }))
+  }
+
+  it("duyệt một bước ⇒ transcript có tin cổng NGAY TRƯỚC thao tác của user", { timeout: 60_000 }, async () => {
+    const seeded = await seedFixture("minimal", { mutate: startAt("S-3.1") })
+    const run = await runStepHttp(app, seeded, "S-3.1", await spineVersionOf(app, seeded))
+    const gateReady = run.events[run.events.length - 1] as { type: string; message_vi?: string }
+    expect(gateReady.type).toBe("gate_ready")
+
+    const gate = await gateHttp(app, seeded, "S-3.1", await spineVersionOf(app, seeded))
+    expect(gate.status, JSON.stringify(gate.body.error)).toBe(200)
+
+    const messages = await gateTurn(seeded.projectId)
+    const action = messages.findIndex((m) => m.role === "user" && m.content === "Đúng rồi, đi tiếp")
+    expect(action, "không thấy thao tác của user trong transcript").toBeGreaterThan(0)
+    // Vế đầu của cùng một lượt duyệt: thiếu nó thì đọc lại chỉ thấy "Đúng rồi, đi tiếp" đứng một mình
+    expect(messages[action - 1].role).toBe("ai")
+    expect(messages[action - 1].content).toBe(gateReady.message_vi)
+  })
+
+  it("cổng không có tin ⇒ không ghi tin rỗng, thao tác của user vẫn vào transcript", { timeout: 60_000 }, async () => {
+    const seeded = await seedFixture("minimal", { mutate: startAt("S-3.1") })
+    await runStepHttp(app, seeded, "S-3.1", await spineVersionOf(app, seeded))
+    await StepRun.updateOne({ projectId: seeded.projectId, step_id: "S-3.1" }, { $set: { gate_payload: {}, phase_gate: null } })
+
+    const gate = await gateHttp(app, seeded, "S-3.1", await spineVersionOf(app, seeded))
+    expect(gate.status, JSON.stringify(gate.body.error)).toBe(200)
+
+    const messages = await gateTurn(seeded.projectId)
+    expect(messages.filter((m) => m.content.trim() === "")).toEqual([])
+    expect(messages.some((m) => m.role === "user" && m.content === "Đúng rồi, đi tiếp")).toBe(true)
   })
 })
 
