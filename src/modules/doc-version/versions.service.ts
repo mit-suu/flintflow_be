@@ -60,7 +60,7 @@ export const downloadVersion = async (projectId: string, projectName: string, ve
   const v = await requireDocVersion(projectId, version)
   if (variant === "original") {
     // Bản gốc người dùng upload (có stamp) — không watermark, tên theo version + hậu tố _original
-    if (!v.original_ref) throw new Mode1Error("DOC_VERSION_NOT_FOUND", `Version ${v.version} không có file gốc (chỉ bản import 0.0)`)
+    if (!v.original_ref) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Phiên bản này không có file gốc để tải về.")
     return { filename: downloadFileName(projectName, v.version, { projectId }).replace(/(_DRAFT)?.docx$/, "_original.docx"), data: await docFileStore().load(v.original_ref) }
   }
   const release = isReleaseVersion(v.version)

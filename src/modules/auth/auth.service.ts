@@ -166,7 +166,7 @@ export const register = async (
   const normalizedEmail = email.toLowerCase().trim()
   const existingUser = await User.findOne({ email: normalizedEmail })
   if (existingUser) {
-    throw new ApiError(409, "Email already registered", "EMAIL_EXISTS")
+    throw new ApiError(409, "Email này đã được đăng ký.", "EMAIL_EXISTS")
   }
 
   const user = await User.create({
@@ -204,12 +204,12 @@ export const login = async (
   const normalizedEmail = email.toLowerCase().trim()
   const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash")
   if (!user || !user.passwordHash) {
-    throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
+    throw new ApiError(401, "Email hoặc mật khẩu không đúng.", "INVALID_CREDENTIALS")
   }
 
   const isPasswordValid = await user.comparePassword(password)
   if (!isPasswordValid) {
-    throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
+    throw new ApiError(401, "Email hoặc mật khẩu không đúng.", "INVALID_CREDENTIALS")
   }
 
   // Sau khi kiểm mật khẩu: người chưa đúng mật khẩu không được biết tài khoản đang bị khoá.
@@ -391,7 +391,7 @@ export const resetPassword = async (resetToken: string, newPassword: string): Pr
 
   const user = await User.findById(grant.userId)
   if (!user) {
-    throw new ApiError(404, "User không tồn tại", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
 
   // Update password & save (triggers bcrypt pre-save hook)
@@ -442,12 +442,12 @@ export const googleAuth = async (
         }
       }
     } catch (_) {
-      throw new ApiError(401, "Google Token không hợp lệ", "INVALID_GOOGLE_TOKEN")
+      throw new ApiError(401, "Đăng nhập Google không thành công. Vui lòng thử lại.", "INVALID_GOOGLE_TOKEN")
     }
   }
 
   if (!payload || !payload.email) {
-    throw new ApiError(400, "Google Profile không chứa địa chỉ email", "GOOGLE_EMAIL_MISSING")
+    throw new ApiError(400, "Tài khoản Google không có địa chỉ email.", "GOOGLE_EMAIL_MISSING")
   }
 
   const { sub: googleId, name } = payload
@@ -539,7 +539,7 @@ export const refresh = async (
     const { verifyRefreshToken } = await import("../../shared/auth/jwt.util.js")
     decoded = verifyRefreshToken(oldRefreshToken)
   } catch (error) {
-    throw new ApiError(401, "Invalid or expired refresh token", "INVALID_REFRESH_TOKEN")
+    throw new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "INVALID_REFRESH_TOKEN")
   }
 
   // Luôn đọc DB: token cũ có thể thiếu role, và tài khoản có thể đã bị khoá sau khi token được cấp.

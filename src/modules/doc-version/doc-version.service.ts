@@ -22,7 +22,7 @@ export const latestDocVersion = async (projectId: string | mongoose.Types.Object
 
 export const requireDocVersion = async (projectId: string | mongoose.Types.ObjectId, version: string): Promise<IDocVersion> => {
   const doc = await DocVersion.findOne({ projectId, version })
-  if (!doc) throw new Mode1Error("DOC_VERSION_NOT_FOUND", `Không có version ${version}`)
+  if (!doc) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Không tìm thấy phiên bản tài liệu này.")
   return doc
 }
 

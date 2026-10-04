@@ -1,10 +1,10 @@
 import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
-import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 import { PLAN_IDS } from "./plan.config.js"
 
 export const checkoutSchema = z.object({
-  packageId: z.string().min(1, "packageId là bắt buộc").trim()
+  packageId: z.string().min(1, "Vui lòng chọn gói credit.").trim()
 })
 
 /** Body payment_service POST về callback_url (guide: order_id, status, client_id). */
@@ -31,8 +31,7 @@ export const validateBody = (schema: z.ZodType) => {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body ?? {})
     if (!result.success) {
-      const errorMessage = result.error.issues.map((issue) => issue.message).join(", ")
-      throw new ApiError(400, errorMessage, "VALIDATION_ERROR")
+      throw validationError(result.error)
     }
     req.body = result.data
     next()
@@ -42,8 +41,7 @@ export const validateBody = (schema: z.ZodType) => {
 export const parseQuery = <T extends z.ZodType>(schema: T, query: unknown): z.infer<T> => {
   const result = schema.safeParse(query)
   if (!result.success) {
-    const errorMessage = result.error.issues.map((issue) => issue.message).join(", ")
-    throw new ApiError(400, errorMessage, "VALIDATION_ERROR")
+    throw validationError(result.error)
   }
   return result.data
 }

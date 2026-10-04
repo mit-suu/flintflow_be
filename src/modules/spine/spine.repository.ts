@@ -19,6 +19,7 @@ import { Change as ChangeModel } from "./change.model.js"
 import { changeSchema, spineRecordSchema } from "./spine.schema.js"
 import type { Change, Spine, SpineProject, SpineRecord } from "./spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { validationIssues } from "../../shared/utils/validation-message.js"
 import { TRANSACTION_UNAVAILABLE, runInTransaction, sessionOptions } from "../../shared/db/transaction.js"
 
 export const SPINE_VERSION_CONFLICT = "SPINE_VERSION_CONFLICT"
@@ -155,7 +156,7 @@ export const saveWithVersion = async (
 ): Promise<SpineRecord> => {
   const parsed = spineRecordSchema.safeParse({ ...spine, spine_version: baseVersion + 1 })
   if (!parsed.success) {
-    throw new ApiError(422, `Spine không hợp lệ: ${z.prettifyError(parsed.error)}`, SPINE_SCHEMA_INVALID)
+    throw new ApiError(422, "Dữ liệu tài liệu sau khi sửa không hợp lệ nên chưa lưu được.", SPINE_SCHEMA_INVALID, { issues: validationIssues(parsed.error).slice(0, 20) })
   }
 
   const { projectId, ...content } = parsed.data
@@ -168,7 +169,7 @@ export const saveWithVersion = async (
   if (!updated) {
     const exists = await SpineModel.findOne({ projectId }, { _id: 1 }, { lean: true, ...sessionOptions(session) })
     if (!exists) {
-      throw new ApiError(404, "Không tìm thấy Spine của dự án", SPINE_NOT_FOUND)
+      throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", SPINE_NOT_FOUND)
     }
     throw new ApiError(
       409,
@@ -205,10 +206,10 @@ export const appendChanges = async (
   for (const [i, change] of changes.entries()) {
     const parsed = changeSchema.safeParse({ ...change, projectId })
     if (!parsed.success) {
-      throw new ApiError(422, `Change #${i} không hợp lệ: ${z.prettifyError(parsed.error)}`, CHANGE_INVALID)
+      throw new ApiError(422, "Không ghi được lịch sử thay đổi của tài liệu. Vui lòng thử lại.", CHANGE_INVALID, { index: i, issues: validationIssues(parsed.error).slice(0, 20) })
     }
     if (i > 0 && parsed.data.seq !== docs[i - 1].seq + 1) {
-      throw new ApiError(422, `seq trong lô phải liên tục (vị trí ${i})`, CHANGE_INVALID)
+      throw new ApiError(422, "Không ghi được lịch sử thay đổi của tài liệu. Vui lòng thử lại.", CHANGE_INVALID, { index: i })
     }
     docs.push(parsed.data)
   }
@@ -219,7 +220,7 @@ export const appendChanges = async (
     return inserted.map(parseChange)
   } catch (err) {
     if (!isDuplicateKeyError(err)) throw err
-    throw new ApiError(409, "seq của change đã tồn tại", CHANGE_SEQ_CONFLICT)
+    throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", CHANGE_SEQ_CONFLICT)
   }
 }
 
