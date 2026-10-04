@@ -248,6 +248,15 @@ const PROTECTED_ARRAYS: readonly { label: string; name: string; count: (s: Spine
   { label: "common_requirements", name: "Danh sách yêu cầu chung", count: (s) => s.common_requirements.length, section: "fixed:5.2", step: "S-7.2" }
 ]
 
+/**
+ * FLF-248: danh sách bắt buộc mà `stepId` sở hữu vẫn trống trong `spine`. Luật `array_empty` chỉ bắn SAU khi step
+ * chốt (và không waive được) — draft dùng hàm này để bắt lô rỗng ngay lúc model trả về, trước cổng duyệt.
+ */
+export const emptyProtectedArraysOf = (spine: Spine, stepId: string): { label: string; name: string }[] => {
+  const base = stepId.split("@")[0]
+  return PROTECTED_ARRAYS.filter((a) => a.step === base && a.count(spine) === 0).map(({ label, name }) => ({ label, name }))
+}
+
 const arrayEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
   PROTECTED_ARRAYS.filter((a) => a.count(spine) === 0 && gate.done(a.step)).map((a) => ({
     level: "red",

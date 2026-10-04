@@ -25,7 +25,7 @@ import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
-import { USE_CASE_NAME_FIX, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
+import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
 import { stampAddendum } from "../spine/addendum-stamp.js"
 import {
   BRIEF_EXTRACTION_STEP,
@@ -825,7 +825,22 @@ export const useCaseNamingErrors = (spine: Spine, ops: readonly Op[]): Validatio
   }
 }
 
-export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions = {}): ValidationError[] => {
+/**
+ * FLF-248: model trả lô RỖNG trong khi danh sách bắt buộc mà step sở hữu (bảng `array_empty`) còn trống — vd S-7.2
+ * không ghi gì nên §5.2 Common Requirements rỗng, step vẫn tới cổng duyệt rồi cờ đỏ không waive được chặn ký baseline.
+ * Chỉ soi lô rỗng: lô có op là model đã làm việc, phần còn thiếu để cờ lo (soi mọi lô thì step ghi dần qua nhiều lượt
+ * bị ép retry, tốn trần 8 lượt gọi). Lỗi **mềm** như `useCaseNamingErrors`: hết lượt thì nhận lô.
+ */
+export const requiredArrayErrors = (spine: Spine, ops: readonly Op[], stepId: string): ValidationError[] =>
+  ops.length > 0
+    ? []
+    : emptyProtectedArraysOf(spine, stepId).map((a) => ({
+        rule: "required_array_empty",
+        path: a.label,
+        message: `${a.name} (\`${a.label}\`) là mục bắt buộc của bước này nhưng vẫn trống — thêm ít nhất một phần tử từ những gì user đã chốt ở các bước trước`
+      }))
+
+export const validateOps =(spine: Spine, ops: unknown, options: ValidateOptions = {}): ValidationError[] => {
   const list = z.array(z.unknown()).safeParse(ops)
   if (!list.success) return [{ rule: "op_schema", message: "`ops` phải là mảng" }]
 

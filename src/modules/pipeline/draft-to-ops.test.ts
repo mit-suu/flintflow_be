@@ -252,6 +252,38 @@ describe("draftOps retry", () => {
     expect(result.attempts[0].errors).toEqual([])
   })
 
+  it("FLF-248: lô để trống danh sách bắt buộc của step (S-7.2 · common_requirements) ⇒ gửi lại model kèm lỗi", async () => {
+    const bare = structuredClone(FIXTURE)
+    bare.common_requirements = []
+    const cr = { id: "CR01", category: "pagination", statement: "All list screens paginate server-side with a default page size of 20." }
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([]))
+      .mockResolvedValueOnce(reply([{ op: "add", path: "common_requirements[]", value: cr }]))
+
+    const result = await draftOps("p", "S-7.2", ctxFor(bare, "S-7.2"), { userId: "u", spine: bare, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["required_array_empty"], []])
+    expect(result.txn?.ops).toHaveLength(1)
+    const secondVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(secondVars.validation_errors).toMatchObject([{ rule: "required_array_empty", path: "common_requirements" }])
+  })
+
+  it("FLF-248: hết lượt mà danh sách vẫn trống ⇒ lượt cuối vẫn nhận lô rỗng (cờ array_empty là lưới cuối)", async () => {
+    const bare = structuredClone(FIXTURE)
+    bare.common_requirements = []
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([]))
+    const result = await draftOps("p", "S-7.2", ctxFor(bare, "S-7.2"), { userId: "u", spine: bare, executor })
+    expect(executor).toHaveBeenCalledTimes(3)
+    expect(result.txn).toBeNull()
+  })
+
+  it("FLF-248: danh sách bắt buộc đã có phần tử ⇒ lô rỗng vẫn hợp lệ, không retry", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([]))
+    const result = await draftOps("p", "S-7.2", ctxFor(spine, "S-7.2"), { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(1)
+    expect(result.txn).toBeNull()
+  })
+
   it("lỗi không phải schema (hết credit) ném thẳng, không retry", async () => {
     const executor = vi.fn<DraftExecutor>().mockRejectedValue(new AiActionError(402, "no credit", "INSUFFICIENT_CREDIT"))
     await expect(draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor })).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })
