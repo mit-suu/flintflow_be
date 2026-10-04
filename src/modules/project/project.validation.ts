@@ -1,6 +1,6 @@
 import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
-import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 import { PROJECT_MODES } from "./project.model.js"
 
 /** Không gửi `mode` ⇒ `fpt` (mode 2, hành vi cũ). */
@@ -31,8 +31,7 @@ export const validateRequest = (schema: z.ZodSchema) => {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req.body)
     if (!result.success) {
-      const errorMessage = result.error.issues.map((issue) => issue.message).join(", ")
-      throw new ApiError(400, errorMessage, "VALIDATION_ERROR")
+      throw validationError(result.error)
     }
     req.body = result.data
     next()

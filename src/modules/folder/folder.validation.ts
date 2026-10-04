@@ -10,7 +10,7 @@ export const CreateFolderSchema = z.object({
 
 export const UpdateFolderSchema = z
   .object({ name: name.optional(), color: z.enum(FOLDER_COLORS).optional() })
-  .refine((v) => v.name !== undefined || v.color !== undefined, { message: "Cần name hoặc color" })
+  .refine((v) => v.name !== undefined || v.color !== undefined, { message: "Cần nhập tên hoặc chọn màu cho thư mục." })
 
 /** Danh sách dự án cho thao tác hàng loạt với thư mục (thêm vào / gỡ ra). */
 export const ProjectIdsSchema = z.object({

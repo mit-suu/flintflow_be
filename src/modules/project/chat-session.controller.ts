@@ -15,11 +15,11 @@ import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1
 const authorizeProject = async (req: Request): Promise<{ projectId: string; userId: string }> => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
   const projectId = req.params.projectId as string
   if (!projectId) {
-    throw new ApiError(400, "Project ID is required", "PROJECT_ID_REQUIRED")
+    throw new ApiError(400, "Thiếu thông tin dự án.", "PROJECT_ID_REQUIRED")
   }
   await getProjectById(projectId, requireOrgId(req))
   return { projectId, userId }
@@ -29,7 +29,7 @@ const authorizeProject = async (req: Request): Promise<{ projectId: string; user
 const requireChatId = (req: Request): string => {
   const chatId = req.params.chatId as string
   if (!chatId) {
-    throw new ApiError(400, "Chat Session ID is required", "CHAT_ID_REQUIRED")
+    throw new ApiError(400, "Thiếu thông tin phiên trò chuyện.", "CHAT_ID_REQUIRED")
   }
   return chatId
 }
@@ -67,10 +67,10 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
   const { content, step, discoveryStep } = req.body
 
   if (!content) {
-    throw new ApiError(400, "Message content is required", "CONTENT_REQUIRED")
+    throw new ApiError(400, "Vui lòng nhập nội dung tin nhắn.", "CONTENT_REQUIRED")
   }
   if (!step) {
-    throw new ApiError(400, "Step is required", "STEP_REQUIRED")
+    throw new ApiError(400, "Thiếu thông tin bước đang làm.", "STEP_REQUIRED")
   }
 
   // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng)
@@ -95,10 +95,10 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
   const { content, step, discoveryStep } = req.body
 
   if (!content) {
-    throw new ApiError(400, "Message content is required", "CONTENT_REQUIRED")
+    throw new ApiError(400, "Vui lòng nhập nội dung tin nhắn.", "CONTENT_REQUIRED")
   }
   if (!step) {
-    throw new ApiError(400, "Step is required", "STEP_REQUIRED")
+    throw new ApiError(400, "Thiếu thông tin bước đang làm.", "STEP_REQUIRED")
   }
 
   // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng)

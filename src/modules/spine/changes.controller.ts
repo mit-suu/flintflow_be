@@ -19,6 +19,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import * as changeService from "./change.service.js"
 import * as changeTranscript from "./change-transcript.js"
+import { changeErrorReply } from "./change-transcript.js"
 import * as reconcileService from "./reconcile.service.js"
 import * as undoService from "./undo.service.js"
 import { translateAssumption } from "./assumption-translate.service.js"
@@ -37,7 +38,9 @@ import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
+import { toClientError } from "../../shared/utils/client-error.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
@@ -56,11 +59,11 @@ interface Authorized {
  */
 const authorize = async (req: Request): Promise<Authorized> => {
   const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
 
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   const project = await getProjectById(projectId, requireOrgId(req))
   return { projectId, userId, init: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
@@ -82,14 +85,16 @@ const guardMode1 = async (auth: Authorized, instruction: string | undefined, fal
 
 const parse = <T extends z.ZodType>(schema: T, value: unknown): z.infer<T> => {
   const parsed = schema.safeParse(value)
-  if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
+  if (!parsed.success) throw validationError(parsed.error)
   return parsed.data
 }
 
 /** Lỗi có `meta` riêng theo hợp đồng §0.3 trả envelope tại chỗ; lỗi khác ném tiếp cho error handler chung. */
 const sendDomainError = (res: Response, err: unknown): Response => {
   if (err instanceof TransactionRejectedError) {
-    return sendError(res, err.statusCode, err.code, err.message, { violations: err.violations, referrers: err.referrers })
+    // Câu theo luật vi phạm (không path op); path/luật nằm ở meta.violations — FLF-247
+    const client = toClientError(err)
+    return sendError(res, client.status, client.code, client.message, { violations: err.violations, referrers: err.referrers })
   }
   if (err instanceof changeService.NeedsClarificationError) {
     return sendError(res, err.statusCode, err.code, err.message, { clarification: err.clarification })
@@ -99,7 +104,7 @@ const sendDomainError = (res: Response, err: unknown): Response => {
 
 /** Lỗi nghiệp vụ của lượt sửa ⇒ tin `change_error` trong phiên, để transcript không cụt ở câu lệnh của user. */
 const errorPayload = (err: unknown): Record<string, unknown> | null =>
-  err instanceof ApiError ? { kind: "change_error", reply: err.message } : null
+  err instanceof ApiError ? { kind: "change_error", reply: changeErrorReply(err) } : null
 
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
@@ -214,7 +219,7 @@ export const getTraceability = catchAsync(async (req: Request, res: Response) =>
   const auth = await authorize(req)
   const query = parse(traceabilityQuerySchema, req.query)
   const record = await spineRepository.get(auth.projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const { projectId: _projectId, ...spine } = record
   return sendSuccess(res, 200, trace(spine, { entity: query.entity as TraceEntity, id: query.id }))
 })

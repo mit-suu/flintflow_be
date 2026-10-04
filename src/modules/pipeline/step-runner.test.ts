@@ -661,6 +661,31 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     expect(again.events.filter((e) => e.type === "render")).toEqual([])
   })
 
+  it("FLF-247: vẽ hỏng ⇒ sự kiện render mang câu thường; Spine vẫn giữ text lỗi PlantUML để debug", async () => {
+    seedUpTo("S-8.3")
+    seedSession(true)
+    const spine = db.spines[0] as unknown as SpineT
+    spine.diagrams = spine.diagrams.filter((d) => d.kind !== "screen_flow")
+    spine.diagrams.push({
+      id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
+      puml: "@startuml\n@enduml\n", render_status: "ok", source_hash: "hash-truoc-khi-doi-quyen", rendered_at: "2026-01-01T00:00:00.000Z"
+    })
+    const { events, emit } = collectEvents()
+    const renderDeps: Partial<DiagramServiceDeps> = {
+      ...renderStub(),
+      check: async () => {
+        throw new Error("connect ECONNREFUSED 127.0.0.1:8080")
+      }
+    }
+    await runStep(PROJECT, "S-8.3", SESSION, USER, emit, { assembleDocument: vi.fn(async () => undefined), renderDeps }).catch(() => undefined)
+
+    const failed = events.filter((e) => e.type === "render" && e.render_status === "error")
+    expect(failed.length).toBeGreaterThan(0)
+    for (const event of failed) expect(event).toMatchObject({ error: "Chưa vẽ được sơ đồ này." })
+    const after = (await repo.get(PROJECT))!
+    expect(after.diagrams.some((d) => d.render_status === "error" && (d.error ?? "").includes("ECONNREFUSED"))).toBe(true)
+  })
+
   it("step tất định khác (S-8.3) không ghép", async () => {
     seedUpTo("S-8.3")
     seedSession(true)

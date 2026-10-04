@@ -171,6 +171,10 @@ describe("POST /projects/:projectId/changes", () => {
       error: { code: "INVARIANT_VIOLATION" },
       meta: { violations: [{ rule: "invariant_2_last_element" }], referrers: [{ id: "F1" }] }
     })
+    // FLF-247: câu theo luật vi phạm, không phải message thô của engine
+    expect((outcome.body as { error: { message: string } }).error.message).toBe(
+      "Không xoá được mục này vì tài liệu cần giữ ít nhất một mục ở phần đó."
+    )
   })
 
   it("409 từ engine đi qua error handler", async () => {
