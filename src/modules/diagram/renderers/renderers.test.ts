@@ -29,6 +29,18 @@ const only = (spine: Spine, kind: Parameters<typeof renderKind>[1], owner: strin
 const usecaseParts = (spine: Spine): string[] => renderKind(spine, "usecase").map((p) => p.puml)
 const usecasePuml = (spine: Spine): string => usecaseParts(spine).join("\n")
 const declaredActors = (puml: string): string[] => [...puml.matchAll(/^actor "[^"]*" as (\w+)/gm)].map((m) => m[1])
+const contextFlows = (puml: string, actorId: string) => {
+  const edges = [...puml.matchAll(/-> \w+ \[label=<(.*)>, actor_id="([^"]+)", flow="(in|out)", pair_index=\d+, pos=/g)]
+    .filter((m) => m[2] === actorId)
+  const text = (m: RegExpMatchArray): string => m[1].replace(/<BR\/>/g, " ").replace(/<[^>]*>/g, "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
+  const side = puml.split("\n").find((l) => l.startsWith(`  ${actorId} [shape=box,`))?.match(/side="(\w+)"/)?.[1]
+  return {
+    inputs: edges.filter((m) => m[3] === "in").map(text),
+    outputs: edges.filter((m) => m[3] === "out").map(text),
+    side
+  }
+}
 
 describe("renderers trên fixture 19 màn", () => {
   it("4 hình cố định + wireframe cho 5 màn signed_off", () => {
@@ -41,7 +53,13 @@ describe("renderers trên fixture 19 màn", () => {
       const rendered = renderKind(FIXTURE, target.kind, target.owner_id)
       for (const [index, part] of rendered.entries()) {
         const [open, close] =
-          part.kind === "screen_layout" ? ["@startsalt", "@endsalt"] : part.kind === "screen_flow" ? ["@startdot", "@enddot"] : part.kind === "erd" ? ["@startchen", "@endchen"] : ["@startuml", "@enduml"]
+          part.kind === "screen_layout"
+            ? ["@startsalt", "@endsalt"]
+            : ["screen_flow", "context"].includes(part.kind)
+              ? ["@startdot", "@enddot"]
+              : part.kind === "erd"
+                ? ["@startchen", "@endchen"]
+                : ["@startuml", "@enduml"]
         expect(part.puml.startsWith(`${open}\n`), part.kind).toBe(true)
         expect(part.puml.endsWith(`${close}\n`), part.kind).toBe(true)
         expect(VIETNAMESE_DIACRITICS.test(part.puml), part.kind).toBe(false)
@@ -52,79 +70,168 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: hệ thống là vòng tròn, actor xếp vòng quanh, tối đa hai đường nhìn thấy mỗi actor", () => {
+  it("context: mỗi requirement có một đường in và một đường out, mỗi đường có một nhãn", () => {
     const { puml, section } = only(FIXTURE, "context")
     expect(section).toBe("fixed:1")
-    expect(puml).toContain('usecase "\\n\\n\\n\\n        FlintFlow        \\n\\n\\n\\n" as SYSTEM_')
+    expect(puml).toContain('SYSTEM_ [shape=circle, pos="0,0!"')
+    expect(puml).toContain('label="FlintFlow"')
+    expect(puml).toContain("layout=nop2")
     expect(puml).not.toContain("skinparam linetype")
     expect(puml).not.toContain("[hidden]")
+    expect(puml).not.toContain("[#transparent]")
+    expect(puml).not.toContain("left to right direction")
     // Không còn đường hai đầu mũi tên: mỗi chiều một đường riêng
     expect(puml).not.toContain(" <-")
     const lines = puml.split(String.fromCharCode(10))
-    const visible = (id: string) => lines.filter((l) => l.includes(id) && l.includes("->") && !l.includes("[#transparent]"))
+    const visible = (id: string) => lines.filter((l) => l.includes(`actor_id="${id}"`) && l.includes("->"))
     for (const a of FIXTURE.actors) {
-      expect(puml, a.id).toContain(`rectangle "${a.name}" as ${a.id}\n`)
-      expect(visible(a.id).length, a.id).toBeLessThanOrEqual(2)
+      expect(puml, a.id).toContain(`  ${a.id} [shape=box,`)
+      const edges = visible(a.id)
+      const pairCount = Math.max(a.flows_in!.length, a.flows_out!.length)
+      expect(edges.length, a.id).toBe(pairCount * 2)
+      expect(contextFlows(puml, a.id).inputs, a.id).toHaveLength(pairCount)
+      expect(contextFlows(puml, a.id).outputs, a.id).toHaveLength(pairCount)
+      for (const edge of edges) {
+        expect(edge).toContain('[label=<<TABLE')
+        expect(edge.match(/\[label=/g)).toHaveLength(1)
+      }
     }
   })
 
-  it("context: cặp hai chiều ⇒ nhãn đường vào và đường ra nằm hai phía đối nhau", () => {
+  it("context: mọi nhãn được gắn trực tiếp trên đường tương ứng, không gộp requirement", () => {
     const { puml } = only(FIXTURE, "context")
-    const lines = puml.split(String.fromCharCode(10))
     const twoWay = FIXTURE.actors.filter((a) => a.flows_in?.length && a.flows_out?.length)
     expect(twoWay.length).toBeGreaterThan(0)
     for (const a of twoWay) {
-      const carrier = lines.findIndex((l) => l.startsWith(`${a.id} -[#transparent]`))
-      const into = lines.findIndex((l) => /^A\d+ -(up|down)-> SYSTEM_$/.test(l) && l.startsWith(`${a.id} `))
-      const from = lines.findIndex((l) => l.startsWith("SYSTEM_ -") && l.includes(`-> ${a.id} : `))
-      // Graphviz đặt nhãn bên PHẢI cạnh: cạnh trong suốt khai báo trước nằm bên trái đường vào,
-      // nên nhãn của nó (flows_in) ra phía ngoài bên trái; nhãn flows_out ở ngoài bên phải đường ra
-      expect(carrier, a.id).toBeGreaterThanOrEqual(0)
-      expect(lines[carrier], a.id).toMatch(/-\[#transparent\](up|down)-> SYSTEM_ : /)
-      expect(lines[carrier].endsWith(a.flows_in!.join("\\n")), a.id).toBe(true)
-      // Thứ tự: nhãn vào (trong suốt) · đường vào · đệm · đường ra · đệm — đệm giữ actor căn giữa bó cạnh
-      expect(into, a.id).toBe(carrier + 1)
-      expect(lines[carrier + 2], a.id).toMatch(new RegExp(`^${a.id} -\\[#transparent\\](up|down)- SYSTEM_$`))
-      expect(from, a.id).toBe(carrier + 3)
-      expect(lines[carrier + 4], a.id).toBe(lines[carrier + 2])
-      expect(lines[from].endsWith(a.flows_out!.join("\\n")), a.id).toBe(true)
+      expect(contextFlows(puml, a.id).inputs, a.id).toEqual(a.flows_in)
+      expect(contextFlows(puml, a.id).outputs, a.id).toEqual(a.flows_out)
     }
-    // Trái/phải chỉ chứa actor một chiều: cặp nằm ngang không tách được nhãn hai phía
-    const horizontal = lines.filter((l) => /-(left|right)->/.test(l) && l.includes("SYSTEM_"))
-    expect(horizontal.length).toBeLessThanOrEqual(2)
-    for (const l of horizontal) {
-      const id = l.match(/A\d+/)![0]
-      const actor = FIXTURE.actors.find((a) => a.id === id)!
-      expect(Boolean(actor.flows_in?.length && actor.flows_out?.length), id).toBe(false)
-    }
+    // Fixture: chỉ Founder có nhiều cặp, nên chỉ các đường của Founder nằm ngang.
+    const horizontal = FIXTURE.actors.filter((a) => ["left", "right"].includes(contextFlows(puml, a.id).side!))
+    expect(horizontal.map((a) => a.id)).toEqual(["A01"])
   })
 
-  it("context: cặp hai chiều ưu tiên hàng trên (tối đa 4), dư xuống hàng dưới; actor một chiều dư vào hàng ít hơn", () => {
+  it("context: một cặp chia đều trên/dưới, nhiều cặp cân bằng hai bên theo tổng số cặp", () => {
     const { puml } = only(FIXTURE, "context")
-    const lines = puml.split(String.fromCharCode(10))
-    const sideOf = (id: string): string => {
-      const carrier = lines.find((l) => l.startsWith(`${id} -[#transparent]`))
-      if (carrier) return carrier.includes("down->") ? "top" : "bottom"
-      const edge = lines.find((l) => l.includes(id) && l.includes("->"))!
-      if (edge.startsWith(`${id} -down->`) || edge.startsWith("SYSTEM_ -up->")) return "top"
-      if (edge.startsWith(`${id} -up->`) || edge.startsWith("SYSTEM_ -down->")) return "bottom"
-      return "side"
+    expect(contextFlows(puml, "A01").side).toBe("left") // Founder: hai cặp, bên trái.
+    for (const [i, a] of FIXTURE.actors.slice(1).entries()) {
+      expect(contextFlows(puml, a.id).side, a.id).toBe(i % 2 === 0 ? "top" : "bottom")
     }
-    const twoWay = [...FIXTURE.actors].filter((a) => a.flows_in?.length && a.flows_out?.length).sort((a, b) => (a.id < b.id ? -1 : 1))
-    twoWay.forEach((a, i) => expect(sideOf(a.id), a.id).toBe(i < 4 ? "top" : "bottom"))
-    // Fixture: 6 cặp ⇒ 4 trên, 2 dưới; A04/A08 chiếm trái/phải; A09 (một chiều dư) vào hàng ít hơn = dưới
-    expect(sideOf("A04")).toBe("side")
-    expect(sideOf("A08")).toBe("side")
-    expect(sideOf("A09")).toBe("bottom")
+
+    const mixed = only(mutate((s) => {
+      for (const [i, count] of [5, 3, 2].entries()) {
+        s.actors[i].flows_in = Array.from({ length: count }, (_, j) => `Request ${j}`)
+        s.actors[i].flows_out = Array.from({ length: count }, (_, j) => `Result ${j}`)
+      }
+    }), "context").puml
+    expect(contextFlows(mixed, "A01").side).toBe("left") // trái: 5
+    expect(contextFlows(mixed, "A02").side).toBe("right") // phải: 3
+    expect(contextFlows(mixed, "A03").side).toBe("right") // phải: 3 + 2 = 5
+    expect(contextFlows(mixed, "A04").side).toBe("top")
+    expect(contextFlows(mixed, "A05").side).toBe("bottom")
   })
 
-  it("context: quá 3 nhãn một chiều ⇒ gộp '+ N more'", () => {
+  it("context: chỉ có actor ít luồng ⇒ chia trên/dưới, số lẻ dư ở trên và giữ đủ cặp in/out", () => {
+    const { puml } = only(mutate((s) => {
+      s.actors = s.actors.slice(1, 4)
+    }), "context")
+    expect(puml).not.toContain("left to right direction")
+    expect(contextFlows(puml, "A02").side).toBe("top")
+    expect(contextFlows(puml, "A03").side).toBe("bottom")
+    expect(contextFlows(puml, "A04").side).toBe("top")
+    expect(contextFlows(puml, "A03").inputs).toEqual(["account action"])
+    expect(contextFlows(puml, "A03").outputs).toEqual(["platform metrics"])
+    for (const id of ["A02", "A03", "A04"]) {
+      expect(contextFlows(puml, id).inputs).toHaveLength(1)
+      expect(contextFlows(puml, id).outputs).toHaveLength(1)
+    }
+  })
+
+  it("context: phân vị trí theo cặp sau khi xử lý dữ liệu cũ; bỏ nhãn rỗng, tính cả use case dự phòng", () => {
+    const { puml } = only(mutate((s) => {
+      s.actors[0].flows_in = ["request", "", "  "]
+      s.actors[0].flows_out = ["result", "", ""]
+      delete s.actors[1].flows_in
+      delete s.actors[1].flows_out
+      s.use_cases = [
+        { ...s.use_cases[0], id: "UC01", name: "Review", actor_ids: ["A02"] },
+        { ...s.use_cases[0], id: "UC02", name: "Approve", actor_ids: ["A02"] }
+      ]
+      s.actors[2].flows_in = ["first", "second"]
+      s.actors[2].flows_out = ["first result"]
+    }), "context")
+    expect(contextFlows(puml, "A01").side).toBe("top")
+    expect(contextFlows(puml, "A02").side).toBe("left")
+    expect(contextFlows(puml, "A03").side).toBe("right")
+    expect(contextFlows(puml, "A03").outputs).toEqual(["first result", "Response to second"])
+  })
+
+  it("context: chỉ có actor nhiều cặp ⇒ giữ bố cục hai cột với vị trí cố định", () => {
+    const { puml } = only(mutate((s) => {
+      s.actors = [s.actors[0], { ...s.actors[0], id: "A02", name: "Analyst" }]
+    }), "context")
+    expect(puml).toContain("layout=nop2")
+    expect(contextFlows(puml, "A01").side).toBe("left")
+    expect(contextFlows(puml, "A02").side).toBe("right")
+  })
+
+  it("context: giữ đầy đủ mọi nhãn in/out, kể cả quá 3 requirement", () => {
     const many = ["a", "b", "c", "d", "e"]
-    const { puml } = only(mutate((s) => (s.actors.find((a) => a.id === "A01")!.flows_in = many)), "context")
-    expect(puml).toMatch(/A01 -\[#transparent\](up|down)-> SYSTEM_ : a\\nb\\nc\\n\+ 2 more\n/)
+    const outputs = ["a result", "b result", "c result", "d result", "e result"]
+    const { puml } = only(mutate((s) => {
+      Object.assign(s.actors.find((a) => a.id === "A01")!, { flows_in: many, flows_out: outputs })
+    }), "context")
+    expect(contextFlows(puml, "A01").inputs).toEqual(many)
+    expect(contextFlows(puml, "A01").outputs).toEqual(outputs)
+    expect(puml).not.toMatch(/\+\s*\d+\s+more/)
   })
 
-  it("context: không có flows ⇒ một cạnh mang tên use case, chiều suy từ kind", () => {
+  it("context: HTML label backing preserves punctuation and safely escapes markup", () => {
+    const { puml } = only(mutate((s) => {
+      s.actors = [s.actors[0]]
+      s.actors[0].flows_in = ["Send R&D <proposal>"]
+      s.actors[0].flows_out = ["Accepted > proposal & summary"]
+    }), "context")
+    expect(contextFlows(puml, "A01").inputs).toEqual(["Send R&D <proposal>"])
+    expect(contextFlows(puml, "A01").outputs).toEqual(["Accepted > proposal & summary"])
+    expect(puml).toContain("R&amp;D &lt;proposal&gt;")
+    expect(puml).toContain('CELLPADDING="3" BGCOLOR="white"')
+  })
+
+  it("context: dữ liệu cũ thiếu một chiều ⇒ giữ nhãn đã khai báo, bổ sung chiều còn lại", () => {
+    const { puml } = only(mutate((s) => {
+      s.actors.find((a) => a.id === "A01")!.flows_in = ["brief answers", "accepted step"]
+      s.actors.find((a) => a.id === "A01")!.flows_out = ["", "  "]
+      delete s.actors.find((a) => a.id === "A08")!.flows_in
+    }), "context")
+    expect(contextFlows(puml, "A01").inputs).toEqual(["brief answers", "accepted step"])
+    expect(contextFlows(puml, "A01").outputs).toEqual(["Response to brief answers", "Response to accepted step"])
+    expect(contextFlows(puml, "A08").inputs).toEqual(["Acknowledgement of email request"])
+    expect(contextFlows(puml, "A08").outputs).toEqual(["email request"])
+  })
+
+  it.each([
+    { inputs: ["first request", "second request", "third request"], outputs: ["first result"], count: 3 },
+    { inputs: ["first request"], outputs: ["first result", "second result", "third result"], count: 3 },
+    { inputs: ["", "second request", "third request", "  "], outputs: ["first result", "", "third result", ""], count: 3 }
+  ])("context: $inputs / $outputs ⇒ cân bằng từng cặp, giữ vị trí gốc và không đổi Spine", ({ inputs, outputs, count }) => {
+    const spine = mutate((s) => Object.assign(s.actors[0], { flows_in: inputs, flows_out: outputs }))
+    const before = structuredClone(spine)
+    const { puml } = only(spine, "context")
+    const { inputs: into, outputs: from } = contextFlows(puml, "A01")
+    expect(into).toHaveLength(count)
+    expect(from).toHaveLength(count)
+    const pairs = inputs.map((input, i) => ({ input, output: outputs[i] })).concat(
+      outputs.slice(inputs.length).map((output) => ({ input: "", output }))
+    ).filter(({ input, output }) => input.trim() || output?.trim())
+    for (const [i, { input, output }] of pairs.entries()) {
+      expect(into[i]).toBe(input.trim() || `Acknowledgement of ${output}`)
+      expect(from[i]).toBe(output?.trim() || `Response to ${input}`)
+    }
+    expect(spine).toEqual(before)
+  })
+
+  it("context: không có flows ⇒ đủ request/result cho mọi use case, chiều theo kind", () => {
     const { puml } = only(
       mutate((s) =>
         s.actors.forEach((a) => {
@@ -134,13 +241,15 @@ describe("renderers trên fixture 19 màn", () => {
       ),
       "context"
     )
-    expect(puml).not.toContain("[#transparent]")
-    expect(puml).toMatch(/SYSTEM_ -\w+-> A05 : Purchase Credits\n/)
-    const founderUseCases = FIXTURE.use_cases.filter((uc) => uc.actor_ids.includes("A01")).length
-    expect(puml).toMatch(new RegExp(`A01 -\\w+-> SYSTEM_ : [^\\n]*\\\\n\\+ ${founderUseCases - 3} more\\n`))
+    expect(contextFlows(puml, "A05").inputs).toEqual(["Purchase Credits result"])
+    expect(contextFlows(puml, "A05").outputs).toEqual(["Purchase Credits request"])
+    const founderUseCases = FIXTURE.use_cases.filter((uc) => uc.actor_ids.includes("A01")).sort((a, b) => a.id < b.id ? -1 : 1)
+    expect(contextFlows(puml, "A01").inputs).toEqual(founderUseCases.map((uc) => `${uc.name} request`))
+    expect(contextFlows(puml, "A01").outputs).toEqual(founderUseCases.map((uc) => `${uc.name} result`))
+    expect(puml).not.toMatch(/\+\s*\d+\s+more/)
   })
 
-  it("context: không flows, không use case ⇒ cạnh không nhãn", () => {
+  it("context: không flows, không use case ⇒ nhãn tương tác in/out cho cả human/system/time", () => {
     const { puml } = only(
       mutate((s) => {
         s.use_cases = []
@@ -151,8 +260,12 @@ describe("renderers trên fixture 19 màn", () => {
       }),
       "context"
     )
-    expect(puml).toMatch(/A01 -\w+-> SYSTEM_\n/)
-    expect(puml).toMatch(/SYSTEM_ -\w+-> A05\n/)
+    expect(contextFlows(puml, "A01").inputs).toEqual(["Founder interaction request"])
+    expect(contextFlows(puml, "A01").outputs).toEqual(["Founder interaction result"])
+    expect(contextFlows(puml, "A05").inputs).toEqual(["Payment Gateway interaction result"])
+    expect(contextFlows(puml, "A05").outputs).toEqual(["Payment Gateway interaction request"])
+    expect(contextFlows(puml, "A09").inputs).toEqual(["Scheduled task request"])
+    expect(contextFlows(puml, "A09").outputs).toEqual(["Scheduled task result"])
   })
 
   it("usecase: mọi use case và cạnh include/extend", () => {
@@ -367,8 +480,8 @@ describe("renderers trên fixture 19 màn", () => {
     const empty = createEmptySpine({ name: "Empty" })
     expect(only(empty, "screen_flow").puml).toContain("NO_SCREENS")
     expect(only(empty, "erd").puml).toContain("NO_ENTITIES")
-    expect(only(empty, "context").puml).toContain('usecase "\\n\\n\\n\\n        Empty        \\n\\n\\n\\n" as SYSTEM_')
-    expect(only(empty, "context").puml).not.toContain("-> SYSTEM_")
+    expect(only(empty, "context").puml).toContain('label="Empty"')
+    expect(only(empty, "context").puml).not.toContain(" -> ")
   })
 })
 
@@ -481,14 +594,14 @@ describe("tên hệ thống (FLF-177)", () => {
   it("boundary use case + sơ đồ ngữ cảnh in `project.system_name`, chưa có ⇒ `project.name`", () => {
     const named = mutate((s) => (s.project.system_name = "ShipFast Delivery"))
     for (const part of usecaseParts(named)) expect(part).toContain('rectangle "ShipFast Delivery" {')
-    expect(only(named, "context").puml).toContain('   ShipFast Delivery   ')
+    expect(only(named, "context").puml).toContain('label="ShipFast Delivery"')
 
     const unnamed = mutate((s) => {
       s.project.system_name = null
       s.project.name = "Du an giao hang"
     })
     expect(usecasePuml(unnamed)).toContain('rectangle "Du an giao hang" {')
-    expect(only(unnamed, "context").puml).toContain('   Du an giao hang   ')
+    expect(only(unnamed, "context").puml).toContain('label="Du an giao hang"')
   })
 
   it("system_name rỗng/khoảng trắng coi như chưa đặt", () => {
@@ -496,6 +609,6 @@ describe("tên hệ thống (FLF-177)", () => {
       s.project.system_name = "   "
       s.project.name = "Du an giao hang"
     })
-    expect(only(blank, "context").puml).toContain('   Du an giao hang   ')
+    expect(only(blank, "context").puml).toContain('label="Du an giao hang"')
   })
 })

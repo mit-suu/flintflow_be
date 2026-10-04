@@ -1,7 +1,7 @@
 ---
 skill_id: plantuml-conventions
 kind: action
-version: 1.0.0
+version: 1.1.0
 description: Shared PlantUML rules for the 5 renderers and the compile-error fix call (render_fix)
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -26,7 +26,7 @@ This skill is loaded by every renderer (`renderer/*`) as shared rules, and is th
 
 | SRS section | `kind` | `owner_kind` | PlantUML | Renderer skill |
 | --- | --- | --- | --- | --- |
-| §1 Context Diagram | `context` | `null` | component / rectangle | `renderer/context` |
+| §1 Context Diagram | `context` | `null` | Graphviz DOT (`@startdot`, fixed ports) | `renderer/context` |
 | §2.2.1 Use Case Diagram | `usecase` | `null` | usecase | `renderer/usecase` |
 | §3.1.1 Screens Flow | `screen_flow` | `null` (one part per human actor) | Graphviz DOT (`@startdot`) | `renderer/screen-flow` |
 | §3.1.5 ERD | `erd` | `null` | Chen (`@startchen`): entity + verb diamond | `renderer/erd` |
@@ -36,14 +36,14 @@ This skill is loaded by every renderer (`renderer/*`) as shared rules, and is th
 
 ## Common rules
 
-1. Start with `@startuml` and end with `@enduml` (`@startsalt` for screen layout, `@startdot` for screen flow, `@startchen` for ERD). Exactly one diagram per file.
+1. Start with `@startuml` and end with `@enduml` (`@startsalt` / `@endsalt` for screen layout, `@startdot` / `@enddot` for screen flow and context). Exactly one diagram per file.
 2. **English labels only.** No Vietnamese diacritics anywhere in the file.
 3. **Draw only `source_fields`** of the kind (srs-spine §7.1). Anything else makes `source_hash` meaningless and forces redraws.
 4. **Aliases are Spine ids** (`A03`, `UC04`, `S7`, `E2`); the visible label is the name: `actor "Reviewer" as A03`. Ids stay stable when names change.
 5. Sort elements by `id` so the same Spine produces the same text.
 6. No `!include`, no `!import`, no URLs, no sprites or images, no `skinparam` loaded from remote. The server has no network access to the internet.
 7. Monochrome-friendly: at most `skinparam monochrome true` or a few neutral `skinparam` lines; no custom colours per element.
-8. Size: split into several diagrams when > ~25 nodes (use case diagram by actor group, ERD by module). Each part is its own `diagrams[]` entry with the same `kind`.
+8. Size: split into several diagrams when > ~25 visible nodes (use case diagram by actor group, ERD by module). Context attachment points are invisible geometry anchors, not extra entities; keep the context in one diagram. Each part is its own `diagrams[]` entry with the same `kind`.
 9. Quote any label containing spaces, punctuation or keywords.
 10. No notes that restate descriptions. Screen flow draws screens as rectangles and pop-ups as ovals (the shape alone marks a pop-up — no `(pop-up)` text, no note).
 
