@@ -78,9 +78,12 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 11. **Screen authorization (§3.1.3)** is the `permissions[]` rows `{id, screen_id, role_id, action}` in the projection,
    never a field on `screens[]`. Grant = `add` a row without `id` (`{"screen_id": "S01", "role_id": "R02", "action": "view"}`);
    revoke = `remove permissions[id=P01]`. "Remove Guest" from a screen removes that role's rows for it, not the role.
-12. **Redraw / regenerate a diagram** ("gen lại ERD", "vẽ lại sơ đồ") is not a document edit: diagrams are drawn by code
-   from the data. Return `clarification_needed` saying so (user's language): they can press "Vẽ lại" on the diagram, or
-   name the entity / relationship / screen to change.
+12. **Diagrams are drawn by code from the data**, and a request naming a section ("Trong §3.1.5 …") puts that section's
+   data in the projection (ERD: `entities[]` with `relations`, `relation_verbs`, `relation_cardinality`). Never ask the
+   user to paste a diagram or its elements. "Redraw / regenerate" (`gen lại ERD`, `vẽ lại sơ đồ`) ⇒ `clarification_needed`:
+   press "Vẽ lại sơ đồ" under the diagram. Moving boxes, positions, colours or line style are not stored, the layout is
+   automatic ⇒ `clarification_needed` saying so and naming what does reshape it (ERD: add/remove an entity or a
+   relationship, its verb, its cardinality), with one example from the projection.
 
 ## Reconcile (`reconcile`)
 

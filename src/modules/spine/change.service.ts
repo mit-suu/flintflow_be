@@ -25,6 +25,7 @@ import { stampAddendum } from "./addendum-stamp.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
+import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
@@ -172,6 +173,35 @@ const MIN_NAME_MATCH = 3
 const textOf = (element: Record<string, unknown>): string =>
   [element.name, element.term, element.statement, element.code].filter((v): v is string => typeof v === "string").join(" ")
 
+/** Trần phần tử mỗi collection khi lệnh chỉ ra cả một mục — đủ cho ERD / sơ đồ use case cỡ thật, vẫn không phải cả Spine. */
+const SECTION_ELEMENT_LIMIT = 80
+
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Mục cố định lệnh nhắc tới: "§3.1.5 …" (nút "Sửa mục này" luôn điền sẵn) hoặc tên mục nhiều từ ("Entity Relationship
+ * Diagram"). Mục dẫn xuất (Record of Changes, Glossary tự tính) không có dữ liệu để sửa nên bỏ.
+ */
+export const referencedSections = (haystack: string): string[] =>
+  FIXED_SECTIONS.filter((s) => !s.derived)
+    .filter((s) => {
+      const number = s.id.slice("fixed:".length)
+      if (new RegExp(`§\\s*${escapeRe(number)}(?![.\\d])`).test(haystack)) return true
+      return s.title_en.includes(" ") && haystack.includes(s.title_en.toLowerCase())
+    })
+    .map((s) => s.id)
+
+/**
+ * Collection nuôi một mục (bảng §4): field mục sở hữu, và với mục là sơ đồ thì cả field sinh ra sơ đồ đó (cột Suy dẫn
+ * `diagram:<kind>`). §3.1.5 ⇒ entities; §2.2.1 Use Case Diagram ⇒ actors + use_cases; §3.1.1 ⇒ screens.
+ */
+export const sectionCollections = (sectionId: string): string[] => {
+  const kinds = FIELD_SECTION_MAP.filter((r) => r.owner.includes(sectionId) && r.key.startsWith("diagram_")).map((r) => r.key.slice("diagram_".length))
+  const rows = FIELD_SECTION_MAP.filter((r) => r.owner.includes(sectionId) || kinds.some((k) => r.derived.includes(`diagram:${k}`)))
+  const roots = rows.flatMap((r) => r.field.split(",").map((f) => /^\s*([a-z_]+)\[/.exec(f)?.[1] ?? ""))
+  return [...new Set(roots)].filter((c) => (TARGET_COLLECTIONS as readonly string[]).includes(c) || c === "permissions")
+}
+
 /** Lệnh nói về phân quyền màn hình (§3.1.3) dù không nhắc tên màn hay vai trò nào. */
 const AUTHORIZATION_HINT = /3\.1\.3|authori[sz]ation|permission|phân quyền|quyền truy cập/i
 
@@ -222,6 +252,17 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     if (hits.length === 0) continue
     projection[collection] = hits.slice(0, PROJECTION_ELEMENT_LIMIT)
     matched += hits.length
+  }
+
+  // Lệnh chỉ ra cả một mục ("Trong §3.1.5 Entity Relationship Diagram: …") mà không nhắc tên phần tử nào: không có
+  // dòng này model chỉ thấy id + tên entity, không thấy quan hệ, và đòi user dán lại ERD.
+  for (const collection of referencedSections(haystack).flatMap(sectionCollections)) {
+    // Nhắc cả mục lẫn một phần tử ("§3.1.5 … nối User với Grade") ⇒ vẫn cần đủ mục, không chỉ phần tử được nhắc
+    if (collection === "permissions") continue
+    const list = spine[collection as (typeof TARGET_COLLECTIONS)[number]] as unknown as Record<string, unknown>[]
+    if (!Array.isArray(list) || list.length === 0) continue
+    projection[collection] = list.slice(0, SECTION_ELEMENT_LIMIT)
+    matched += Math.min(list.length, SECTION_ELEMENT_LIMIT)
   }
 
   const permissions = permissionRows(spine, haystack, projection)
@@ -389,7 +430,7 @@ const batchProblems = (spine: Spine, ops: Op[], instruction: string): string[] =
 /** Model trả output sai khuôn (không op, không câu hỏi) ⇒ hỏi lại user thay vì đẩy lỗi Zod tiếng Anh ra giao diện. */
 const UNCLEAR_INSTRUCTION =
   "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục và nội dung muốn đổi giúp mình " +
-  "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu — muốn vẽ lại ngay thì bấm \"Vẽ lại\" trên sơ đồ."
+  "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu — muốn vẽ lại ngay thì bấm \"Vẽ lại sơ đồ\" dưới hình."
 
 const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
 

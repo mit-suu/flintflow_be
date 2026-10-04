@@ -78,6 +78,8 @@ import {
   clearPreviewStore,
   isChangeInstruction,
   preview,
+  referencedSections,
+  sectionCollections,
   type ChangeDeps
 } from "./change.service.js"
 import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -414,6 +416,30 @@ describe("buildChangeProjection — brief_core ở pha Brief", () => {
 
   it("phase ngoài Brief: không có brief_core", () => {
     expect(buildChangeProjection(at("S-3"), "làm cho tài liệu hay hơn").brief_core).toBeUndefined()
+  })
+})
+
+describe("lệnh chỉ ra cả một mục (\"Trong §3.1.5 …\") ⇒ model thấy đủ dữ liệu của mục", () => {
+  it("§3.1.5 ERD không nhắc entity nào ⇒ mọi entity kèm quan hệ, động từ, bản số", () => {
+    const projection = buildChangeProjection(FIXTURE, "Trong §3.1.5 Entity Relationship Diagram: vẽ lại")
+    const entities = projection.entities as { id: string; relations: string[] }[]
+    expect(entities.map((e) => e.id)).toEqual(FIXTURE.entities.map((e) => e.id))
+    expect(entities.some((e) => e.relations.length > 0)).toBe(true)
+  })
+
+  it("nhắc cả mục lẫn một entity ⇒ vẫn đủ mục, không chỉ entity được nhắc", () => {
+    const name = FIXTURE.entities[0].name
+    const projection = buildChangeProjection(FIXTURE, `Trong §3.1.5 Entity Relationship Diagram: nối ${name} với entity khác`)
+    expect((projection.entities as unknown[]).length).toBe(FIXTURE.entities.length)
+  })
+
+  it("mục là sơ đồ ⇒ kèm dữ liệu sinh ra sơ đồ; số mục khớp nguyên số, không khớp tiền tố", () => {
+    expect(sectionCollections("fixed:3.1.5")).toEqual(["entities"])
+    expect(sectionCollections("fixed:2.2.1")).toEqual(expect.arrayContaining(["actors", "use_cases"]))
+    expect(sectionCollections("fixed:3.1.1")).toContain("screens")
+    expect(referencedSections("trong §3.1.5 entity relationship diagram: x")).toEqual(["fixed:3.1.5"])
+    expect(referencedSections("trong §3.1 x")).not.toContain("fixed:3.1.5")
+    expect(referencedSections("đổi tên actor a01")).toEqual([])
   })
 })
 
