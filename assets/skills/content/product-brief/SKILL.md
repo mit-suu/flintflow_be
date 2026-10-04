@@ -1,7 +1,7 @@
 ---
 skill_id: product-brief
 kind: content
-version: 0.3.0
+version: 0.5.0
 description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize — adapted from BMAD bmad-product-brief"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -34,7 +34,9 @@ Two habits decide whether this phase is useful:
 - **Record the unknown, do not invent it.** Anything the user has not said becomes an `assumptions[]`
   entry (`status: "unconfirmed"`) or an `other_requirements[kind=open_question]`, never a confident
   sentence in the brief. What the user **did** say or pick (chat, cards, decisions ledger) is a fact —
-  never an assumption, and never an assumption about their answer ("the goal is qualitative"). A user "yes/xác nhận"
+  never an assumption, and never an assumption about their answer ("the goal is qualitative") — **except the part an
+  option deliberately leaves open** (B-0.1 compliance card: picking the internal-rules-only option does not decide `project.stakes`
+  between `internal` and `production`, so that half is inferred and does get an `assumptions[]` entry). A user "yes/xác nhận"
   to a proposal makes it a fact: never re-add an existing assumption and never set its `status` (the user confirms at the gate); each assumption's `path` is the field it is about. **Never say the user agreed, nodded or confirmed** unless it is in the decisions ledger or this turn's answers — an `unconfirmed` assumption is still yours.
 
 `references/*.md` are **not loaded at runtime** — the rules below are what you get.
@@ -46,12 +48,12 @@ Two habits decide whether this phase is useful:
   `{id, topic, content (user's own words/language), content_en (English, for rendering), target_section,
   captured_at}`; set **`project.system_name`** (English name on diagrams and cover, never `project.name`)
   only if the user already gave one — otherwise leave it null (B-2.3 asks; never suggest a name here);
-  set **`project.form_factor` and `project.stakes`** from what the user picked on the cards or said — no
-  assumption for a value they chose; infer only what was neither picked nor said, **with an `assumptions[]`
-  entry** and its reason. `notes`: the gate message (`draft-to-ops` rule 15: "tôi" not "mình", no "bước/giai đoạn/giả định/addendum/brief"), not a field list.
+  set **`project.form_factor` and `project.stakes`** from what the user picked on the cards or said — the value a user **picked outright** never becomes an assumption, but whatever an option leaves open, and anything neither picked nor said, is inferred **with an `assumptions[]` entry** and its reason.
+  **`project.stakes`** — the only valid values are `internal`, `production`, `regulated`. The answer naming the law ⇒ write `regulated` and **no assumption** for it: the user decided it, nothing is left to judge, and the server rejects any other value for that answer. Your judgement is needed only for the other answer: "Tuân thủ quy định nội bộ" does **not** decide the value on its own — write `internal` **only when the idea proves the system is used inside the team building it** (an internal trial, no users outside that team); **in every other case, including when it is unclear, write `production`** — and always add an `assumptions[]` entry with `path: "project.stakes"` for that inferred part. Guessing `internal` costs the document its encryption and secret-rotation requirements, so the uncertain direction is `production`.
+  `notes`: the gate message (`draft-to-ops` rule 15: "tôi" not "mình", no "bước/giai đoạn/giả định/addendum/brief"), not a field list.
 - **B-0.2 `project.form_factor`** — an **array** of platforms, main one first (`["web_app","mobile_app"]` when the
   user says "cả web và app"), values `web_app`, `mobile_app`, `desktop_app`, `api_service`, `cli`, `embedded`. Runs only when B-0.1 could not infer it (or on a revision).
-- **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. Drives NFR defaults at S-6; a
+- **B-0.3 `project.stakes`** — `internal` | `production` | `regulated`. The B-0.1 card only separates "law applies too" from "internal rules only", so **whenever the internal-rules-only answer was picked** `internal` vs `production` is inferred — same fail-safe, unclear ⇒ `production`. Drives NFR defaults at S-6; a
   guess comes with an `assumptions[]` entry. B-0.3 closes B-0: on a revision it may fix any B-0 field.
 - Never ask how the user wants to work and never write `project.working_mode` (retired): how much to ask
   is your call, and where the run stops for review is the AI settings menu.
