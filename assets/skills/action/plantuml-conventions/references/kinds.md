@@ -2,31 +2,30 @@
 
 ## `context` — §1 System Context
 
-Source fields: `project.name` · `actors[].name/.kind/.flows_in/.flows_out` · `use_cases[].name/.actor_ids`. Level-0 data flow: system circle in the centre, actors ringed around it, one labelled arrow per direction (`flows_in` into the system, `flows_out` out of it), falling back to the actor's use case names (max 3, then `+ N more`).
+Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out` · `use_cases[].name/.actor_ids`. Level-0 data flow: a compact circle (`shape=circle`, equal width/height) in the centre. Actors with ONE resolved in/out pair are distributed evenly above/below it (id order, ties top); actors with TWO or more pairs go left/right, balancing total pair counts between sides (id order, ties left). Graphviz DOT with `nop2` preserves the shapes, unique ports, explicit cubic paths and label positions computed in `context-layout.ts`. Arrows curve inward from the actor lanes to distinct ports on the circle; controls stay in separate sectors. Positions (`pos`, `lp`) are in points, dimensions in inches. ONE requirement/output per visible arrow, with its own edge label; the renderer gives flow labels a borderless white HTML backing. Pair `flows_in[i]` (into the system) with `flows_out[i]` (out of it): N exchanges ⇒ N in-arrows + N out-arrows. Never join labels, truncate them or emit `+ N more`. Prefer explicit flow lists. Legacy missing items use response/acknowledgement labels at the corresponding index, or use-case request/result pairs when both lists are absent. See `renderer/context` for fallback rules. The following minimal skeleton uses plain edge labels for readability.
 
 ```plantuml
-@startuml
-skinparam monochrome true
-skinparam shadowing false
-skinparam nodesep 20
-skinparam ranksep 110
-skinparam usecaseFontSize 16
-usecase "\n\n\n\n        FlintFlow        \n\n\n\n" as SYSTEM_
-rectangle "Founder" as A01
-rectangle "Payment Gateway" as A05
-rectangle "Scheduler" as A09
-A01 -[#transparent]down-> SYSTEM_ : brief answers\naccepted step
-A01 -down-> SYSTEM_
-A01 -[#transparent]down- SYSTEM_
-SYSTEM_ -up-> A01 : draft section
-A01 -[#transparent]down- SYSTEM_
-A05 -[#transparent]down-> SYSTEM_ : payment result
-A05 -down-> SYSTEM_
-A05 -[#transparent]down- SYSTEM_
-SYSTEM_ -up-> A05 : payment request
-A05 -[#transparent]down- SYSTEM_
-A09 -right-> SYSTEM_ : housekeeping tick
-@enduml
+@startdot
+digraph Context {
+  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", outputorder=edgesfirst];
+  node [fontname="sans-serif", fontsize=14, fixedsize=true, pin=true, style=filled, fillcolor="white", color="#64748B"];
+  edge [fontname="sans-serif", fontsize=12, color="#475569", fontcolor="#334155", headclip=false, tailclip=false];
+  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fillcolor="#F1F5F9"];
+  A01 [shape=box, pos="-306,0!", width=1.5, height=2, label="Founder"];
+  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-252,54!"];
+  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-93.29523,36!"];
+  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-252,18!"];
+  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.27739,12!"];
+  A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-252,-18!"];
+  SYSTEM_A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-99.27739,-12!"];
+  A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-252,-54!"];
+  SYSTEM_A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-93.29523,-36!"];
+  A01_IN_0 -> SYSTEM_A01_IN_0 [label="Brief answers", pos="e,-93.29523,36 -252,54 -199.098,57.58 -146.196,51.58 -101.29523,38.3", lp="-210,71"];
+  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label="Draft section", pos="e,-252,18 -99.27739,12 -150.185,23.33 -201.092,25.33 -244,19.15", lp="-210,35"];
+  A01_IN_1 -> SYSTEM_A01_IN_1 [label="Project request", pos="e,-99.27739,-12 -252,-18 -201.092,-25.33 -150.185,-23.33 -107.27739,-13.78", lp="-210,-35"];
+  SYSTEM_A01_OUT_1 -> A01_OUT_1 [label="Created project", pos="e,-252,-54 -93.29523,-36 -146.196,-51.58 -199.098,-57.58 -244,-54.54", lp="-210,-71"];
+}
+@enddot
 ```
 
 ## `usecase` — §2.2.1
