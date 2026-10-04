@@ -62,7 +62,8 @@ Source fields: `screens[].name/.flow_to/.is_popup/.tabs` + the human actor each 
 PlantUML state diagram cannot label a diamond. One part per human actor that uses the UI (graph label
 `Screens flow for <actor>`, also the image caption), holding only that actor's screens and the edges between
 them. No part for unassigned screens: a public screen (granted only to a role with no actor, e.g. Guest on
-Login) is drawn in every human actor's part, and a public landing page is an entry beside Login; any other
+Login) is drawn in every human actor's part; a public landing page and Register are entries beside Login
+(Login stays an entry despite `Register → Login`); any other
 screen no human actor uses is not drawn and raises `orphan_screen`. Before any screen ↔ actor link exists: one unlabelled diagram, black-dot start. Arrows are
 one-way: of a pair pointing at each other only the forward edge (away from the entry) is drawn.
 
