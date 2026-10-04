@@ -1,5 +1,6 @@
 import mongoose from "mongoose"
 import { streamText } from "ai"
+import { env } from "../../config/env.js"
 import {
   ActionType,
   AiActionInput,
@@ -254,21 +255,37 @@ export const executeAiActionStream = async <T = any>(
     throw buildError
   }
 
+  // FLF-244: `AI_PROVIDER_OVERRIDE` đè cả đường stream. Trước đây chỉ `callLLM` đọc nó, nên chat stream vẫn gọi
+  // provider thật khi chạy CI / smoke test với `mock`.
+  const override = env.AI_PROVIDER_OVERRIDE.trim().toLowerCase()
+  if (override) providerConfig = { ...providerConfig, provider: override }
+
   const startTime = Date.now()
   let deducted = false
 
   try {
-    const model = getAiSdkModel(providerConfig)
-    const streamResult = streamText({
-      model,
-      prompt: finalPrompt,
-      temperature: providerConfig.temperature ?? 0.7,
-      maxOutputTokens: providerConfig.maxTokens ?? 2048
-    })
+    let textStream: AsyncIterable<string>
+    let usagePromise: PromiseLike<unknown> | null = null
+    if (providerConfig.provider?.toLowerCase() === "mock") {
+      // AI SDK không có provider mock: lấy trọn câu trả lời của mock rồi phát như một lượt stream duy nhất
+      const mockRes = await callLLM(finalPrompt, providerConfig)
+      textStream = (async function* () {
+        yield mockRes.text
+      })()
+    } else {
+      const streamResult = streamText({
+        model: getAiSdkModel(providerConfig),
+        prompt: finalPrompt,
+        temperature: providerConfig.temperature ?? 0.7,
+        maxOutputTokens: providerConfig.maxTokens ?? 2048
+      })
+      textStream = streamResult.textStream
+      usagePromise = streamResult.usage
+    }
 
     const extractor = new JsonStreamExtractor()
 
-    for await (const chunk of streamResult.textStream) {
+    for await (const chunk of textStream) {
       const delta = extractor.push(chunk)
       if (delta && callbacks.onTextDelta) {
         await callbacks.onTextDelta(delta)
@@ -281,7 +298,7 @@ export const executeAiActionStream = async <T = any>(
     let promptTokens = Math.ceil(finalPrompt.length / 4)
     let completionTokens = Math.ceil(fullRaw.length / 4)
     try {
-      const usage = await streamResult.usage
+      const usage = usagePromise ? await usagePromise : null
       if ((usage as any)?.inputTokens) promptTokens = (usage as any).inputTokens
       else if ((usage as any)?.promptTokens) promptTokens = (usage as any).promptTokens
       if ((usage as any)?.outputTokens) completionTokens = (usage as any).outputTokens

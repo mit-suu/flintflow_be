@@ -9,7 +9,7 @@ vi.mock("./credit-reservation.service.js", () => ({
 vi.mock("./prompt-registry.service.js", () => ({
   getPromptTemplate: vi.fn(async () => ({
     template: "prompt {{x}}",
-    providerConfig: { provider: "mock", model: "mock-model" }
+    providerConfig: { provider: "openai", model: "test-model" }
   })),
   interpolatePrompt: vi.fn(() => "prompt")
 }))
@@ -24,6 +24,9 @@ vi.mock("./retry.service.js", () => ({
 vi.mock("../../modules/admin/ai-action-log.model.js", () => ({
   AiActionLog: { create: vi.fn() }
 }))
+// FLF-244: đổi `AI_PROVIDER_OVERRIDE` theo từng ca
+const envMock = vi.hoisted(() => ({ AI_PROVIDER_OVERRIDE: "" }))
+vi.mock("../../config/env.js", () => ({ env: envMock }))
 
 import { executeAiAction, executeAiActionStream } from "./ai-action.service.js"
 import { reserveCredit, deductCredit, releaseCredit } from "./credit-reservation.service.js"
@@ -166,5 +169,45 @@ describe("executeAiActionStream — thứ tự parse → deduct", () => {
     expect(result.cost).toBe(5)
     expect(deductCredit).toHaveBeenCalledTimes(1)
     expect(releaseCredit).not.toHaveBeenCalled()
+  })
+})
+
+describe("executeAiActionStream — AI_PROVIDER_OVERRIDE (FLF-244)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(mongoose, "startSession").mockRejectedValue(
+      new Error("Transaction numbers are only allowed on a replica set member or mongos")
+    )
+    vi.mocked(reserveCredit).mockResolvedValue(reservation)
+    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(releaseCredit).mockResolvedValue(true)
+    vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
+    vi.mocked(streamText).mockImplementation(() => fakeStream(['{"reply":', '"từ provider thật"}']))
+    vi.mocked(parseResponse).mockImplementation((raw) => JSON.parse(raw as string))
+  })
+
+  it("override = mock ⇒ không gọi streamText (không ra mạng), câu trả lời của mock vẫn tới onTextDelta", async () => {
+    envMock.AI_PROVIDER_OVERRIDE = "mock"
+    vi.mocked(callLLM).mockResolvedValue({ text: '{"reply":"[MOCK AI] ok","questions":[]}', promptTokens: 1, completionTokens: 1 } as any)
+    const deltas: string[] = []
+
+    const result = await executeAiActionStream(ActionType.CHAT, {}, undefined, USER, { onTextDelta: (d) => void deltas.push(d) })
+
+    expect(streamText).not.toHaveBeenCalled()
+    expect(vi.mocked(callLLM).mock.calls[0][1]).toMatchObject({ provider: "mock" })
+    expect(deltas.join("")).toContain("[MOCK AI] ok")
+    expect(result.provider).toBe("mock")
+    envMock.AI_PROVIDER_OVERRIDE = ""
+  })
+
+  it("không override ⇒ stream qua AI SDK như cũ", async () => {
+    envMock.AI_PROVIDER_OVERRIDE = ""
+
+    const result = await executeAiActionStream(ActionType.CHAT, {}, undefined, USER)
+
+    expect(streamText).toHaveBeenCalledTimes(1)
+    expect(callLLM).not.toHaveBeenCalled()
+    expect(result.provider).toBe("openai")
   })
 })
