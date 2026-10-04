@@ -7,18 +7,23 @@
  * Khoá flag `(level, rule_id, section_id, target_id, resolved_at IS NULL)`:
  * - ứng viên chưa có cờ mở ⇒ thêm dòng mới (cờ tái phát sau khi đóng cũng là dòng mới)
  * - cờ mở không còn ứng viên ⇒ đặt `resolved_at`
- * - cờ đã waive mà `spine_version` ≠ `waived_at_version` và điều kiện vẫn đúng ⇒ waiver mất, cờ mở lại
+ * - cờ đã waive mà **đối tượng của cờ** đổi sau lúc waive và điều kiện vẫn đúng ⇒ waiver mất, cờ mở lại
+ *
+ * FLF-243: trước đây mọi lần ghi (kể cả step runner ghi `progress`, sửa một function không liên quan) đều
+ * làm waiver hết hạn — user bỏ qua cờ "Vai trò Guest chưa gắn tác nhân", chạy tiếp S-5 là cờ hiện lại.
+ * Nay chỉ change chạm đúng phần tử `target_id` (hoặc, với cờ cấp mục, field mà mục đó sở hữu) mới tính.
  *
  * Transaction chỉ đổi flags (recompute, waive) cũng tăng `spine_version`. Để waiver không tự hết hạn
  * vì chính các lần ghi flag, lô đó đẩy `waived_at_version` của waiver còn hiệu lực lên version mới.
  */
 
-import type { Flag, Spine, SpineRecord } from "./spine.types.js"
+import type { Change, Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
 import { MODEL_OWNED_RULES, NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate, type RuleProfile } from "./deterministic-check.js"
 import { WAIVE_REASON_MIN_LENGTH } from "./spine.schema.js"
+import { sectionsOfPath } from "./section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const FLAG_NOT_FOUND = "FLAG_NOT_FOUND"
@@ -48,6 +53,11 @@ export interface FlagPlanOptions {
    * Các luật S-9 khác vẫn không mở cờ mới ngoài S-9.
    */
   baselineCandidates?: readonly FlagCandidate[]
+  /**
+   * `changes[]` của project: có thì waiver chỉ hết hạn khi change sau lúc waive chạm đối tượng của cờ
+   * (`waiverLapsed`). Không có ⇒ quy tắc cũ, mọi đổi `spine_version` đều làm waiver hết hạn.
+   */
+  changes?: readonly Change[]
 }
 
 /** Luật S-9 cấp mục: đã từng gắn cho một mục thì theo dõi liên tục (xem `baselineCandidates`). */
@@ -70,6 +80,36 @@ const refreshWaiverOps = (spine: Spine, skip: ReadonlySet<string>): Op[] =>
       value: spine.spine_version + 1,
       reason: "Waiver giữ hiệu lực: lô chỉ cập nhật cờ"
     }))
+
+/** seq của lần waive gần nhất: dòng `flags[id=…].waived_by_user = true` trong `changes[]`. */
+const waivedAtSeq = (changes: readonly Change[], flagId: string): number | null => {
+  const path = flagPath(flagId, "waived_by_user")
+  let seq: number | null = null
+  for (const c of changes) if (c.path === path && c.value === true && (seq === null || c.seq > seq)) seq = c.seq
+  return seq
+}
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Change chạm đối tượng của cờ: path chọn đúng phần tử `target_id` (`roles[id=R04].actor_id`,
+ * `permissions[screen_id=S3,role_id=R04,action=create]`); cờ không có `target_id` thì xét field mà mục
+ * của cờ sở hữu. Ghi `flags[]` không bao giờ tính — đó chính là lần waive.
+ */
+const touchesFlag = (spine: Spine, flag: Flag, change: Change): boolean => {
+  if (change.path === "$") return true
+  if (change.path.startsWith("flags[")) return false
+  if (flag.target_id) return new RegExp(`[\\[,][A-Za-z_]+=${escapeRegExp(flag.target_id)}[,\\]]`).test(change.path)
+  return sectionsOfPath(spine, change.path, change).owner.includes(flag.section_id)
+}
+
+/** Waiver hết hạn? Có `changes[]` thì chỉ khi đối tượng của cờ đổi sau lúc waive; không thì theo version. */
+const waiverLapsed = (spine: Spine, flag: Flag, changes: readonly Change[] | undefined): boolean => {
+  if (flag.waived_at_version === spine.spine_version) return false
+  const since = changes ? waivedAtSeq(changes, flag.id) : null
+  if (changes === undefined || since === null) return true
+  return changes.some((c) => c.seq > since && touchesFlag(spine, flag, c))
+}
 
 /** Kế hoạch thuần: ops đưa `flags[]` về khớp `candidates`. */
 export const planFlagOps = (
@@ -121,7 +161,7 @@ export const planFlagOps = (
     if (existing.remediation_step !== c.remediation_step) {
       plan.ops.push({ op: "set", path: flagPath(existing.id, "remediation_step"), value: c.remediation_step })
     }
-    if (existing.waived_by_user && existing.waived_at_version !== spine.spine_version) {
+    if (existing.waived_by_user && waiverLapsed(spine, existing, options.changes)) {
       const reason = "Waiver hết hạn: nội dung đã đổi mà điều kiện lỗi vẫn đúng"
       plan.ops.push(
         { op: "set", path: flagPath(existing.id, "waived_by_user"), value: false, reason },
@@ -194,7 +234,7 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const baselineCandidates = atBaseline
     ? undefined
     : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
-  const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates })
+  const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates, changes })
 
   if (plan.ops.length === 0) {
     return { checked_at_version: record.spine_version, flags: record.flags, opened: [], resolved: [], reopened: [] }

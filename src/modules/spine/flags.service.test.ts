@@ -63,7 +63,7 @@ vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
 
 import { spineSchema } from "./spine.schema.js"
-import type { Flag, Spine } from "./spine.types.js"
+import type { Change, Flag, Spine } from "./spine.types.js"
 import * as repo from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
 import { filterFlags, planFlagOps, recompute, waive } from "./flags.service.js"
@@ -127,6 +127,43 @@ describe("planFlagOps (thuần)", () => {
       ["flags[id=FL001].waive_reason", null],
       ["flags[id=FL001].waived_at_version", null]
     ])
+  })
+
+  describe("FLF-243: có changes[] thì waiver chỉ hết hạn khi đối tượng của cờ đổi sau lúc waive", () => {
+    const change = (seq: number, path: string, value: unknown = "x"): Change => ({
+      projectId: PROJECT, seq, txn: `t${seq}`, op: "set", path, before: null, value, reason: null, at: "2026-10-04T00:00:00.000Z", by: USER, step_id: null
+    })
+    const waivedSpine = () =>
+      withFlags([flag({ level: "yellow", rule_id: "role_no_actor", section_id: "fixed:3.1.3", target_id: "R04", waived_by_user: true, waive_reason: REASON, waived_at_version: 3 })], 9)
+    const roleCandidate = candidate({ level: "yellow", rule_id: "role_no_actor", section_id: "fixed:3.1.3", target_id: "R04" })
+    const waiveRow = change(10, "flags[id=FL001].waived_by_user", true)
+
+    it("ghi không liên quan (step runner, function khác, chính các dòng flags) ⇒ giữ waiver", () => {
+      const changes = [waiveRow, change(11, "progress.current_step"), change(12, "functions[id=FN001].trigger"), change(13, "roles[id=R040].name"), change(14, "flags[id=FL001].waived_at_version", 4)]
+      expect(planFlagOps(waivedSpine(), [roleCandidate], new Date(), { changes }).reopened).toEqual([])
+    })
+
+    it("change chọn đúng phần tử target (kể cả trong khoá ghép) ⇒ hết hạn", () => {
+      for (const path of ["roles[id=R04].name", "permissions[screen_id=S03,role_id=R04,action=create]"]) {
+        expect(planFlagOps(waivedSpine(), [roleCandidate], new Date(), { changes: [waiveRow, change(11, path)] }).reopened, path).toEqual(["FL001"])
+      }
+    })
+
+    it("change trên target nhưng TRƯỚC lúc waive ⇒ không tính", () => {
+      const changes = [change(9, "roles[id=R04].name"), waiveRow]
+      expect(planFlagOps(waivedSpine(), [roleCandidate], new Date(), { changes }).reopened).toEqual([])
+    })
+
+    it("cờ cấp mục (target null): chỉ change thuộc mục đó mới tính", () => {
+      const spine = withFlags([flag({ level: "yellow", rule_id: "section_empty", section_id: "fixed:2.1", target_id: null, waived_by_user: true, waive_reason: REASON, waived_at_version: 3 })], 9)
+      const sectionCandidate = candidate({ level: "yellow", rule_id: "section_empty", section_id: "fixed:2.1", target_id: null })
+      expect(planFlagOps(spine, [sectionCandidate], new Date(), { changes: [waiveRow, change(11, "nfrs[id=N05].description")] }).reopened).toEqual([])
+      expect(planFlagOps(spine, [sectionCandidate], new Date(), { changes: [waiveRow, change(11, "actors[id=A01].description")] }).reopened).toEqual(["FL001"])
+    })
+
+    it("không tìm thấy dòng waive trong changes[] ⇒ rơi về quy tắc theo version", () => {
+      expect(planFlagOps(waivedSpine(), [roleCandidate], new Date(), { changes: [change(11, "progress.current_step")] }).reopened).toEqual(["FL001"])
+    })
   })
 
   it("waiver còn hiệu lực được đẩy version khi lô có ghi flag khác", () => {
@@ -224,7 +261,13 @@ describe("recompute / waive qua op engine", () => {
     expect((await recompute(PROJECT, { by: USER })).reopened).toEqual([])
     expect((await current()).spine_version).toBe(3)
 
+    // FLF-243: sửa chỗ khác không đụng tới N05 ⇒ waiver giữ nguyên
     await applyTransaction(PROJECT, { base_version: 3, ops: [{ op: "set", path: "entities[id=E01].description", value: "Changed" }], by: USER })
+    expect((await recompute(PROJECT, { by: USER })).reopened).toEqual([])
+    expect(nfrFlag((await current()).flags)[0]).toMatchObject({ id: opened.id, waived_by_user: true, waive_reason: REASON })
+
+    // Sửa chính N05 mà vẫn thiếu số đo ⇒ waiver hết hạn
+    await applyTransaction(PROJECT, { base_version: (await current()).spine_version, ops: [{ op: "set", path: "nfrs[id=N05].statement", value: "The service stays available." }], by: USER })
     const lapsed = await recompute(PROJECT, { by: USER })
     expect(lapsed.reopened).toEqual([opened.id])
     expect(nfrFlag(lapsed.flags)[0]).toMatchObject({ id: opened.id, waived_by_user: false, waive_reason: null })
