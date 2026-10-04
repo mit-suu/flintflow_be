@@ -1,7 +1,7 @@
 ---
 skill_id: screens-and-flow
 kind: content
-version: 0.6.0
+version: 0.6.1
 description: "S-4.1–S-4.2 feature & screen inventory (fixes N and screen_queue), screens flow"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -45,10 +45,11 @@ their entry point (landing, login, deep link) through every screen their use cas
 **only** if at least one human actor who interacts directly with the UI uses it — a screen no human actor
 lands on is an orphan and must not be created. `system`/`time` actors (gateway, LLM provider, scheduler)
 get **no** screens; their work is a non-screen function (S-4.4). The Screens Flow is drawn once per human
-actor, so an actor with use cases but no screen, or a screen outside every actor's journey, shows up as a
-gap. Name the actor(s) in `description` ("Founder …", "Administrator …").
-If users sign in, create **one** Login screen shared by every signed-in actor (its `description` names them
-all) and give each actor a landing screen — S-4.2 roots every actor's flow at Login.
+actor and has no "unassigned" part, so a screen outside every actor's journey is a gap. Name the actor(s)
+in `description` ("Founder …"). If users sign in, create **one** Login screen shared by every signed-in
+actor (its `description` names them all) and give each actor a landing screen — S-4.2 roots every flow at
+Login. Pre-auth screens (Login, Forgot/Reset Password, public landing) belong to **every** actor: S-4.3
+grants them to `Guest` only, which draws them in each actor's flow.
 
 One `screens[]` row per distinct place the user lands:
 `{id, feature_id, name, description, flow_to: [], is_popup, tabs: [], primary_function_id: null,
@@ -56,9 +57,8 @@ queue_order, detail_status}`. `description` is one sentence: who is here and wha
 Rules: every screen belongs to exactly one existing `feature_id`; a modal/dialog is a screen with
 `is_popup: true`; a tabbed page is ONE screen with `tabs: [...]`; list and detail are two screens. Include
 the unglamorous ones — login, forgot password, onboarding, admin console, settings, notifications — a
-missing auth screen is the most common gap. An error or access-denied
-page is a screen **only** if you can name the screen that sends the user there (a non-admin opening Admin
-Console); otherwise it is an abnormal flow of a function, not a screen.
+missing auth screen is the most common gap. An error or access-denied page is a screen **only** if you can
+name the screen that sends the user there (a non-admin opening Admin Console), else a function's abnormal flow.
 
 **3. Core screens and `queue_order`.** Number `queue_order` from 1 in the order a user meets the screens,
 core screens first. **Only 3–5 screens get full detail in S-5** (Phases §9.1): the ones carrying the
@@ -96,8 +96,8 @@ the browser back button, a global nav bar present everywhere, or an error toast.
    only for a real jump (a dashboard alert opening the grade approval list).
 4. **Shared screens** (notifications, profile, settings) are linked from each actor's landing, not chained
    through business screens.
-Landing and grouping depend on the product: follow the use cases, add an `assumptions[]` entry when you
-choose. No sign-in ⇒ each tree is rooted at the actor's public entry page.
+Landing/grouping follow the use cases (`assumptions[]` entry when you choose). A public landing page is a
+root **beside** Login, never above it (no Landing → Login edge, no incoming edge); no sign-in ⇒ only root.
 
 **One direction only.** `flow_to` records the forward move, away from Login. Never add the return edge —
 going back is implicit, even a redirect after success: reset password → login, detail → list, popup →
