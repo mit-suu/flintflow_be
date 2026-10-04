@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.2.0
+version: 1.3.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -65,6 +65,13 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
+10. **Use case names you word yourself** (a new use case, a split, a rename the user describes but does not spell
+   out) follow the naming rules code checks after you: Title Case, no trailing period; one goal — no "and", "/"
+   or comma (two goals ⇒ two use cases); a concrete verb, never Manage, Handle, Process, Maintain, Administer,
+   Support, Control, Operate, Use, Do, Perform, Work, Deal or Take ("split Manage Students" ⇒ "Enroll Student",
+   "Update Student Profile", "Deactivate Student", not "Manage Students"); no actor name; no UI or tech term
+   (Button, Screen, Page, Form, Popup, Tab, Modal, API, Database); at most 5 words; unique. A name the user
+   dictates word for word is used as given.
 
 ## Reconcile (`reconcile`)
 
