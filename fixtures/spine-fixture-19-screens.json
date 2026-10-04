@@ -642,9 +642,7 @@
       "name": "Email Service",
       "kind": "system",
       "description": "SMTP provider used for account verification and password reset mail.",
-      "flows_in": [
-        "email delivery result"
-      ],
+      "flows_in": [],
       "flows_out": [
         "email request"
       ]
@@ -657,9 +655,7 @@
       "flows_in": [
         "housekeeping tick"
       ],
-      "flows_out": [
-        "housekeeping result"
-      ]
+      "flows_out": []
     }
   ],
   "roles": [
