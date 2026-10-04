@@ -1,7 +1,7 @@
 ---
 skill_id: screen-flow
 kind: renderer
-version: 2.1.0
+version: 2.3.0
 description: "S-4.2 Screens Flow (Graphviz DOT; one diagram per human actor using the UI, started by a diamond with the actor name)"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -39,7 +39,9 @@ screens flow — they do not click through screens.
 A screen belongs to an actor when either link exists (`src/modules/spine/screen-actors.ts`):
 
 1. a `permissions[]` row on the screen whose `role_id` → `roles[].actor_id` is that actor, or
-2. a use case with that actor in `actor_ids[]` lists a function whose `screen_id` is the screen.
+2. a use case with that actor in `actor_ids[]` lists a function whose `screen_id` is the screen, or
+3. the screen is **public** — every `permissions[]` row on it is for a role with `actor_id: null` (`Guest` on
+   Login, Forgot/Reset Password, a public landing): it belongs to every human actor that has a screen.
 
 One screen can belong to several actors (Login is shared) and then appears in each of their diagrams.
 
@@ -48,9 +50,12 @@ One screen can belong to several actors (Login is shared) and then appears in ea
 - A part holds only that actor's screens and only the `flow_to` edges between them.
 - The part starts at a **diamond with the actor name inside** (`START`), with an arrow to every entry screen:
   not a pop-up and no incoming edge from a screen of the same part. If every screen has an incoming edge,
-  the one with the lowest `queue_order`, then the lowest id.
-- A screen linked to no human actor is an **orphan**: it is still drawn, in a last part labelled
-  `Screens flow for unassigned screens` that starts at a black dot — and yellow flag `orphan_screen` points at it.
+  the one with the lowest `queue_order`, then the lowest id. Login and a public landing page both have no
+  incoming edge, so both are entries side by side. The **sign-in gateway** — a screen open to `Guest` with an
+  edge to a screen that is not (Login → each actor's landing) — is always an entry, so `Register → Login`
+  draws Register and Login side by side after the actor diamond, with the arrow between them.
+- There is **no** "unassigned" part: every screen must belong to at least one human actor. A screen linked to
+  no human actor is an **orphan** — it is not drawn, and flag `orphan_screen` points at it.
 - No screen ↔ actor link at all yet (before S-4.3 / S-4.4): a single unlabelled diagram of every screen,
   black dot on the lowest `queue_order`.
 
