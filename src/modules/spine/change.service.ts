@@ -22,6 +22,7 @@ import { impactOfChanges, type Impact } from "./impact.service.js"
 import * as flagsService from "./flags.service.js"
 import { OP_INVALID, type ApplyResult, type Op, type PreviewResult, type Transaction, type Violation } from "./op.types.js"
 import { stampAddendum } from "./addendum-stamp.js"
+import { nameElementIds } from "./human-labels.js"
 import { BRIEF_PROJECT_WRITE_MESSAGE, briefCoreEntries, isInBriefPhase, writesProjectVisionOrGoals } from "./brief-core.js"
 import { PathError, parsePath } from "./path-resolver.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
@@ -356,9 +357,11 @@ const opsFromInstruction = async (
     userId
   )
 
+  // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
   const clarification = result.data.clarification_needed?.trim()
-  if (clarification) return { ops: [], clarification, notes: null }
-  return { ops: stampAddendum((result.data.ops ?? []) as Op[]), clarification: null, notes: result.data.notes ?? null }
+  if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null }
+  const notes = result.data.notes ? nameElementIds(result.data.notes, spine) : null
+  return { ops: stampAddendum((result.data.ops ?? []) as Op[]), clarification: null, notes }
 }
 
 const resolveOps = async (
