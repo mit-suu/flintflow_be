@@ -16,7 +16,7 @@ export const requireRole =
     const role = req.orgContext?.role
     if (!role) {
       // Lỗi cấu hình route, không phải lỗi của người dùng: thiếu `orgContext` đứng trước.
-      next(new ApiError(500, "requireRole phải đứng sau orgContext", "ORG_CONTEXT_MISSING"))
+      next(new ApiError(500, "Hệ thống gặp lỗi khi xử lý yêu cầu. Vui lòng thử lại sau.", "ORG_CONTEXT_MISSING"))
       return
     }
     if (!allowed.includes(role)) {

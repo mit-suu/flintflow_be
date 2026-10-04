@@ -5,6 +5,7 @@ import { CreditTransaction } from "../../modules/credits/credit-transaction.mode
 import { PricingConfig } from "../../modules/admin/pricing-config.model.js"
 import { planConfig } from "../../modules/billing/plan.config.js"
 import { notify, notifyAdmins } from "../../modules/notification/notification.service.js"
+import { User } from "../../modules/user/user.model.js"
 import { env } from "../../config/env.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
@@ -77,6 +78,26 @@ export const resolveWalletOrg = async (projectId?: string, session?: ClientSessi
   return project?.organizationId ? String(project.organizationId) : null
 }
 
+/**
+ * Báo admin có người dùng mới — hiện tên/email thay cho `userId` (FLF-247); `userId` vẫn ở `meta` để mở trang quản trị.
+ * Side effect: lỗi chỉ ghi log, không được chặn việc tạo ví.
+ */
+const notifyAdminsNewUser = async (userId: string): Promise<void> => {
+  try {
+    const user = (await User.findById(userId, { name: 1, email: 1 }).lean()) as { name?: string; email?: string } | null
+    const name = user?.name?.trim()
+    const who = name && user?.email ? `${name} (${user.email})` : (name ?? user?.email ?? null)
+    await notifyAdmins({
+      type: "admin_new_user",
+      title: "Người dùng mới",
+      body: who ? `${who} vừa bắt đầu sử dụng FlintFlow.` : "Một người dùng mới vừa bắt đầu sử dụng FlintFlow.",
+      meta: { userId }
+    })
+  } catch (error) {
+    console.warn("[CreditReservation] Không gửi được thông báo người dùng mới cho admin:", error)
+  }
+}
+
 const ledgerInconsistent = (message: string, details: Record<string, unknown>) =>
   new AiActionError(500, message, "CREDIT_LEDGER_INCONSISTENT", details)
 
@@ -125,12 +146,7 @@ export const getOrCreateWallet = async (
       body: `Tài khoản của bạn đã sẵn sàng với ${initialCredits} credit miễn phí.`,
       link: "/home/billing"
     })
-    void notifyAdmins({
-      type: "admin_new_user",
-      title: "Người dùng mới",
-      body: `Một người dùng mới vừa bắt đầu sử dụng FlintFlow (${userId}).`,
-      meta: { userId }
-    })
+    void notifyAdminsNewUser(userId)
 
     return created[0]
   } catch (error: any) {

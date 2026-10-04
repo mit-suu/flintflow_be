@@ -21,7 +21,7 @@ const requireUserId = (req: Request): string => {
 
 /** Các route dưới `/orgs/:orgId` đều đi qua `orgContextFromParam`, nên `req.orgContext` luôn có. */
 const requireOrg = (req: Request) => {
-  if (!req.orgContext) throw new ApiError(500, "Thiếu orgContext trên route", "ORG_CONTEXT_MISSING")
+  if (!req.orgContext) throw new ApiError(500, "Hệ thống gặp lỗi khi xử lý yêu cầu. Vui lòng thử lại sau.", "ORG_CONTEXT_MISSING")
   return req.orgContext
 }
 

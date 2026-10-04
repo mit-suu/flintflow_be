@@ -296,6 +296,6 @@ describe("C-4 chạy lại", () => {
     expect((await c.post(`${cr}/propose`)).body.error.code).toBe("CR_INVALID_TRANSITION")
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { status: "impact_review" } })
     await Spine.deleteOne({ projectId })
-    await expect(runPropose(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Spine/)
+    await expect(runPropose(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Không tìm thấy dữ liệu tài liệu/)
   })
 })

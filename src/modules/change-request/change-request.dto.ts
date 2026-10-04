@@ -24,10 +24,10 @@ const isoDateTime = z.iso.datetime({ offset: true })
 const baseVersion = z.number().int().min(1)
 const text = (max: number) => z.string().trim().min(1).max(max)
 
-export const crIdSchema = z.string().regex(CR_ID_PATTERN, "cr_id dạng CR-001")
-export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "location_id dạng L001")
-export const materialIdSchema = z.string().regex(MATERIAL_ID_PATTERN, "material_id dạng M01")
-export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "group_id dạng G01")
+export const crIdSchema = z.string().regex(CR_ID_PATTERN, "Mã change request không hợp lệ.")
+export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "Mã vị trí cần sửa không hợp lệ.")
+export const materialIdSchema = z.string().regex(MATERIAL_ID_PATTERN, "Mã tài liệu bổ sung không hợp lệ.")
+export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "Mã nhóm thay đổi không hợp lệ.")
 
 /** Lý do từ chối group / đóng / huỷ — đủ dài để có nghĩa khi đọc lại lịch sử. */
 export const DECISION_REASON_MIN_LENGTH = 10
@@ -182,11 +182,11 @@ export const patchLocationRequestSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Cần ít nhất một field để sửa" })
   .refine((v) => v.conclusion !== "edit" || v.new_value !== undefined || v.spine_ops !== undefined, {
-    message: "Kết luận edit cần new_value hoặc spine_ops",
+    message: "Kết luận “Sửa” cần có nội dung mới.",
     path: ["new_value"]
   })
-  .refine((v) => v.conclusion !== "comment" || v.comment_text !== undefined, { message: "Kết luận comment cần comment_text", path: ["comment_text"] })
-  .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận not_related cần lý do", path: ["reason"] })
+  .refine((v) => v.conclusion !== "comment" || v.comment_text !== undefined, { message: "Kết luận “Ghi chú” cần có nội dung ghi chú.", path: ["comment_text"] })
+  .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận “Không liên quan” cần có lý do.", path: ["reason"] })
 
 /**
  * `POST …/:crId/groups/:gid/decision` (UC-52, BPMN 3.12 "quyết định từng group, kèm lý do"). Mode 1 v3: **cả duyệt
