@@ -58,9 +58,9 @@ export const assertChangesAllowed = async (projectId: string, prefill: CrPrefill
 export type Mode1Forbidden = "steps" | "signoff" | "waive"
 
 const FORBIDDEN: Record<Mode1Forbidden, { code: Mode1ErrorCode; message: string }> = {
-  steps: { code: "MODE1_NO_STEPS", message: "Mode 1 không chạy step — sửa tài liệu qua change request" },
-  signoff: { code: "MODE1_NO_SIGNOFF", message: "Mode 1 không ký baseline v1 — release khi hết cờ đỏ" },
-  waive: { code: "MODE1_NO_WAIVE", message: "Mode 1 không waive cờ — xử lý cờ qua change request" }
+  steps: { code: "MODE1_NO_STEPS", message: "Dự án tải SRS lên không chạy theo từng bước — hãy sửa tài liệu bằng change request." },
+  signoff: { code: "MODE1_NO_SIGNOFF", message: "Dự án tải SRS lên không ký baseline theo cách này — hãy phát hành phiên bản khi đã xử lý hết cờ đỏ." },
+  waive: { code: "MODE1_NO_WAIVE", message: "Dự án tải SRS lên không bỏ qua cờ được — hãy xử lý cờ bằng change request." }
 }
 
 /**

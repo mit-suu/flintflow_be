@@ -1,5 +1,5 @@
 import mongoose from "mongoose"
-import { Membership, ORG_ROLES, type OrgRole } from "./membership.model.js"
+import { Membership, ORG_ROLES, ORG_ROLE_LABELS, type OrgRole } from "./membership.model.js"
 import { Organization } from "./organization.model.js"
 import { assertLeadRemains, touchMembership } from "./lead-succession.js"
 import { User } from "../user/user.model.js"
@@ -88,7 +88,7 @@ export const changeMemberRole = async (
 ): Promise<MemberItem> => {
   assertObjectId(targetUserId)
   if (!ORG_ROLES.includes(nextRole)) {
-    throw new ApiError(400, "Vai trò không hợp lệ", "VALIDATION_ERROR")
+    throw new ApiError(400, "Vai trò không hợp lệ.", "VALIDATION_ERROR")
   }
 
   await runMembershipChange(orgId, async (session) => {
@@ -104,7 +104,7 @@ export const changeMemberRole = async (
   void notify(targetUserId, {
     type: "org_role_changed",
     title: "Vai trò của bạn đã thay đổi",
-    body: `Bạn giờ là ${nextRole} trong ${await orgName(orgId)}.`,
+    body: `Bạn giờ là ${ORG_ROLE_LABELS[nextRole]} trong ${await orgName(orgId)}.`,
     organizationId: orgId,
     meta: { organizationId: orgId, role: nextRole }
   })

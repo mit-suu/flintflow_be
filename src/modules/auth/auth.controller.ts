@@ -156,7 +156,7 @@ export const googleAuth = catchAsync(async (req: Request, res: Response) => {
 export const refresh = catchAsync(async (req: Request, res: Response) => {
   const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken
   if (!refreshToken) {
-    throw new ApiError(401, "Refresh token is missing", "MISSING_REFRESH_TOKEN")
+    throw new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "MISSING_REFRESH_TOKEN")
   }
 
   const userAgent = req.headers["user-agent"]
@@ -181,7 +181,7 @@ export const logout = catchAsync(async (req: Request, res: Response) => {
 export const logoutAll = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   await authService.logoutAll(userId)

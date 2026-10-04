@@ -480,8 +480,9 @@ export const upgradePlan = async (orgId: string, userId: string, plan: PlanId) =
   if (definition.priceVnd > 0) {
     throw new ApiError(
       402,
-      `Gói ${definition.label} cần thanh toán. Tạo checkout với packageId "${planPackageId(plan)}".`,
-      "PAYMENT_REQUIRED"
+      `Gói ${definition.label} cần thanh toán trước khi sử dụng.`,
+      "PAYMENT_REQUIRED",
+      { packageId: planPackageId(plan) }
     )
   }
 

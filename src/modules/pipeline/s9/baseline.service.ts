@@ -143,7 +143,7 @@ export interface SignOffResult {
  */
 export const signOff = async (projectId: string, userId: string, options: SignOffOptions): Promise<SignOffResult> => {
   const before = await repository.get(projectId)
-  if (!before) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   if (before.spine_version !== options.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
@@ -154,11 +154,11 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
 
   // 2. Đọc lại Spine sau lượt quét — cờ vừa mở/đóng phải được tính vào
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   if (record.spine_version !== checkedAtVersion) {
     throw new ApiError(
       409,
-      "Spine đổi trong lúc quét trước khi ký. Vui lòng quét lại rồi ký.",
+      "Tài liệu vừa thay đổi trong lúc kiểm tra trước khi ký. Vui lòng kiểm tra lại rồi ký.",
       repository.SPINE_VERSION_CONFLICT
     )
   }
@@ -215,6 +215,6 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
 /** `GET /projects/:id/baselines` — danh sách mốc đã ký, mới nhất cuối (thứ tự ghi). */
 export const listBaselines = async (projectId: string): Promise<BaselineEntry[]> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   return record.baselines
 }

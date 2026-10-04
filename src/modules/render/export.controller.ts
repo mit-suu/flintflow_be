@@ -8,23 +8,24 @@ import { getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.servi
 import { sendError } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError, validationIssues } from "../../shared/utils/validation-message.js"
+
+/** Chi tiết từng issue vào `meta.issues` (debug); user chỉ đọc một câu (FLF-247). */
+const renderedDocumentInvalid = (error: z.ZodError): ApiError =>
+  new ApiError(422, "Chưa xuất được tài liệu vì nội dung không đúng định dạng. Hãy ghép lại tài liệu rồi thử lại.", "RENDERED_DOCUMENT_INVALID", {
+    issues: validationIssues(error).slice(0, 20)
+  })
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 /** Preview writer từ `RenderedDocument` gửi thẳng. Route thật `GET /projects/:id/export/word` ở render.route.ts (review C1). */
 export const previewWord = catchAsync(async (req: Request, res: Response) => {
   if (!req.user?.userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const parsed = renderedDocumentSchema.safeParse(req.body)
-  if (!parsed.success) {
-    const detail = parsed.error.issues
-      .slice(0, 5)
-      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("; ")
-    throw new ApiError(422, `Invalid RenderedDocument — ${detail}`, "RENDERED_DOCUMENT_INVALID")
-  }
+  if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
   const buffer = await writeDocx(parsed.data)
   const fileName = buildDocxFileName(parsed.data)
@@ -45,7 +46,7 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
 export const exportWord = catchAsync(async (req: Request, res: Response) => {
   const { projectId, projectName, mode } = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
-  if (!parsedQuery.success) throw new ApiError(400, z.prettifyError(parsedQuery.error), "VALIDATION_ERROR")
+  if (!parsedQuery.success) throw validationError(parsedQuery.error)
 
   let doc
   try {
@@ -56,13 +57,7 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
   }
 
   const parsed = renderedDocumentSchema.safeParse(doc)
-  if (!parsed.success) {
-    const detail = parsed.error.issues
-      .slice(0, 5)
-      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-      .join("; ")
-    throw new ApiError(422, `Invalid RenderedDocument — ${detail}`, "RENDERED_DOCUMENT_INVALID")
-  }
+  if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
   const buffer = await writeDocx(parsed.data, { flagLanguage: mode === "import" ? "vi" : "en" })
   const fileName = buildDocxFileName(parsed.data)

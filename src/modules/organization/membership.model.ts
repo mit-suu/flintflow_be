@@ -11,6 +11,13 @@ import mongoose, { Schema, Document } from "mongoose"
 export const ORG_ROLES = ["lead", "analyst", "viewer"] as const
 export type OrgRole = (typeof ORG_ROLES)[number]
 
+/** Tên vai trò hiện cho người dùng (thông báo, email) — không in thẳng giá trị enum. */
+export const ORG_ROLE_LABELS: Readonly<Record<OrgRole, string>> = {
+  lead: "Lead",
+  analyst: "Analyst",
+  viewer: "Viewer"
+}
+
 /** Một người trong một org. Đây là nguồn sự thật DUY NHẤT về quyền — RBAC nạp lại mỗi request, không cache. */
 export interface IMembership extends Document {
   organizationId: mongoose.Types.ObjectId

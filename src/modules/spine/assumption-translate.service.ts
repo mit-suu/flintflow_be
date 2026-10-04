@@ -44,13 +44,13 @@ export const translateAssumption = async (
   executor: TranslateExecutor = defaultTranslateExecutor
 ): Promise<TranslateAssumptionResult> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   // Kiểm version TRƯỚC khi gọi model: lệch thì khỏi tốn credit cho một bản dịch sẽ không ghi được.
   if (record.spine_version !== input.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
   const assumption = record.assumptions.find((a) => a.id === assumptionId)
-  if (!assumption) throw new ApiError(404, `Không có giả định ${assumptionId}`, ASSUMPTION_NOT_FOUND)
+  if (!assumption) throw new ApiError(404, "Không tìm thấy giả định này.", ASSUMPTION_NOT_FOUND)
 
   const result = await executor(
     { promptVariables: { path: assumption.path, previous_statement: assumption.statement, statement_vi: input.statement_vi } },

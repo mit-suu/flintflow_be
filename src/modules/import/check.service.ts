@@ -12,6 +12,7 @@ import * as flagsService from "../spine/flags.service.js"
 import { aiFindingLabel, humanizeText } from "../spine/human-labels.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
@@ -94,7 +95,7 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   const semanticDone = await Usage.exists({ projectId, step_id: SEMANTIC_CHECK_STEP, state: "deducted" })
   if (!semanticDone) {
     const record = await spineRepository.get(projectId)
-    if (!record) throw new Error("Không tìm thấy Spine của project")
+    if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
     const spine = stripRecord(record)
     const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })

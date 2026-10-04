@@ -6,7 +6,9 @@ import swaggerUi from "swagger-ui-express"
 import { env } from "./config/env.js"
 import { connectDB } from "./config/database.js"
 import { specs } from "./config/swagger.js"
-import { errorHandler } from "./shared/middlewares/error-handler.js"
+import { errorHandler, notFoundHandler } from "./shared/middlewares/error-handler.js"
+import { CorsRejectedError } from "./shared/utils/client-error.js"
+import { installZodLocale } from "./shared/utils/validation-message.js"
 import authRoutes from "./modules/auth/auth.route.js"
 import userRoutes from "./modules/user/user.route.js"
 import aiActionRoutes from "./shared/ai/ai-action.route.js"
@@ -34,6 +36,9 @@ import { buildHealthReport } from "./config/health.js"
 import { authMiddleware } from "./shared/auth/auth.middleware.js"
 import { requireActiveAccount } from "./shared/auth/account-guard.middleware.js"
 import { orgContext } from "./shared/auth/org-context.middleware.js"
+
+// Câu lỗi mặc định của Zod sang tiếng Việt, đánh dấu issue không có câu do schema tự viết (FLF-247)
+installZodLocale()
 
 const app = express()
 
@@ -84,7 +89,7 @@ app.use(
           return callback(null, true)
         }
         // Production: reject nghiêm ngặt — không cho phép origin không có trong whitelist
-        return callback(new Error(`CORS: Origin '${origin}' is not allowed`))
+        return callback(new CorsRejectedError(origin))
       }
     },
     credentials: true,
@@ -189,6 +194,9 @@ app.use("/api/v1/folders", folderRoutes)
 app.use("/api/v1/orgs", organizationRoutes)
 app.use("/api/v1/invitations", invitationRoutes)
 app.use("/api/v1/export", exportRoutes)
+
+// Không route nào khớp ⇒ 404 JSON (envelope chung), không phải trang HTML của Express
+app.use(notFoundHandler)
 
 // Global Error Handler Middleware
 app.use(errorHandler)

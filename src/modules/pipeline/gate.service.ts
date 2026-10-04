@@ -96,7 +96,7 @@ const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine =>
 
 const load = async (projectId: string): Promise<SpineRecord> => {
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   return record
 }
 
@@ -152,8 +152,9 @@ const phaseFullyAccepted = (spine: Spine, phase: string): boolean =>
 const notifyPhaseAccepted = (userId: string, phase: string): void => {
   void notify(userId, {
     type: "phase_accepted",
-    title: `Đã hoàn tất phase ${phase}`,
-    body: `Mọi step của phase ${phase} đã được accept. Có thể tiếp tục sang phase kế tiếp.`,
+    // Câu lưu sẵn không mang mã giai đoạn (`S-3`) — FE dựng lại tiêu đề có tên giai đoạn từ `meta.phase` (FLF-247)
+    title: "Đã hoàn tất một giai đoạn",
+    body: "Mọi bước của giai đoạn này đã được duyệt. Bạn có thể chuyển sang giai đoạn tiếp theo.",
     meta: { phase }
   })
 }
@@ -349,10 +350,10 @@ export const gate = async (
       } else {
         const counts = await usageCounts(projectId, stepId, state.first_seq)
         if (counts.calls_used >= CALLS_LIMIT) {
-          throw new GateLimitError(CALL_LIMIT, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, { calls_used: counts.calls_used })
+          throw new GateLimitError(CALL_LIMIT, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, { calls_used: counts.calls_used })
         }
         if (input.action === "regenerate" && counts.regenerate_used >= REGENERATE_LIMIT_COUNT) {
-          throw new GateLimitError(REGENERATE_LIMIT, `Step ${stepId} đã dùng hết ${REGENERATE_LIMIT_COUNT} lượt regenerate`, { regenerate_used: counts.regenerate_used })
+          throw new GateLimitError(REGENERATE_LIMIT, `Bước này đã dùng hết ${REGENERATE_LIMIT_COUNT} lượt soạn lại.`, { regenerate_used: counts.regenerate_used })
         }
 
         if (input.action === "regenerate") {

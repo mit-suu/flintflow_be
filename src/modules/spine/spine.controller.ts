@@ -10,13 +10,13 @@ import { ApiError } from "../../shared/utils/api-error.js"
 export const getSpine = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   const projectId = req.params.projectId as string
   // id sai định dạng: trả 404 như project không thuộc user, không để CastError thành 500
   if (!mongoose.isValidObjectId(projectId)) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
 
   const project = await getProjectById(projectId, requireOrgId(req))

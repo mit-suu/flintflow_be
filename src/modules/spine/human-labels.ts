@@ -135,6 +135,30 @@ const PATH_IN_TEXT = new RegExp(
 /** Đổi mọi path Spine nằm trong một câu (vd thông điệp bất biến của op engine) sang nhãn. */
 export const humanizeText = (text: string): string => text.replace(PATH_IN_TEXT, (p) => parsePathLabel(p) ?? p)
 
+type NamedElementSource = Partial<Pick<Spine, "screens" | "actors" | "roles" | "features" | "functions" | "entities">>
+const NAMED_COLLECTIONS = ["screens", "actors", "roles", "features", "functions", "entities"] as const
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+/**
+ * Câu model viết cho người đọc (câu hỏi làm rõ khi sửa mục) mà vẫn chép mã phần tử: `S02` ⇒ `'Reset Password'`. Mã
+ * trong ngoặc đứng ngay sau chính tên của nó (`'Login' (S01)`) thì bỏ hẳn. Mã use case (`UC-01`) là mã tài liệu nên
+ * giữ; mã không có trong spine giữ nguyên.
+ */
+export const nameElementIds = (text: string, spine: NamedElementSource): string => {
+  const names = new Map<string, string>()
+  for (const key of NAMED_COLLECTIONS) {
+    for (const el of spine[key] ?? []) if (el.name?.trim() && !names.has(el.id)) names.set(el.id, el.name.trim())
+  }
+  if (names.size === 0) return text
+  const alt = [...names.keys()].sort((a, b) => b.length - a.length).map(escapeRe).join("|")
+  const quoted = (id: string) => `'${names.get(id)}'`
+
+  const withoutEcho = text.replace(new RegExp(`\\s*\\((${alt})\\)`, "g"), (match, id: string, offset: number) =>
+    text.slice(Math.max(0, offset - 80), offset).toLowerCase().includes(names.get(id)!.toLowerCase()) ? "" : ` ${quoted(id)}`
+  )
+  return withoutEcho.replace(new RegExp(`['"‘“]?(?<![\\w.-])(${alt})(?![\\w-]|\\.\\d)['"’”]?`, "g"), (_m, id: string) => quoted(id))
+}
+
 // ─── section ─────────────────────────────────────────────────────
 
 const FIXED_BY_ID: ReadonlyMap<string, { number: string; title: string }> = new Map(

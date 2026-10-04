@@ -32,6 +32,7 @@ import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { AnswerDetached } from "./step-runner.errors.js"
 import { acquireRun, detachRun, finishRun, registerAbort, touchRun, type PendingAnswerState } from "./run-state.service.js"
 import type { AnswerInput } from "./step-runner.service.js"
@@ -223,7 +224,7 @@ export const resumePhaseInterview = async (
     }
     await finishRun(projectId, unit, run.run_id, "done", { questions: null })
   } catch (err) {
-    await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: err instanceof Error ? err.message : String(err) } })
+    await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) } })
     throw err
   }
 }
@@ -463,7 +464,7 @@ const collectSignals = (emit: Emit): { emit: Emit; signals: StepSignals } => {
 
 const load = async (projectId: string): Promise<{ record: SpineRecord; spine: Spine }> => {
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   return { record, spine: stripRecord(record) }
 }
 

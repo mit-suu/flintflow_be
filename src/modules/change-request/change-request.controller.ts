@@ -5,7 +5,6 @@
 
 import type { NextFunction, Request, Response } from "express"
 import multer from "multer"
-import { ApiError } from "../../shared/utils/api-error.js"
 import { IMPORT_MAX_FILE_BYTES } from "../import/import.constants.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { authorizeMode1, mode1Handler, parseInput, type Mode1Auth } from "../import/mode1.http.js"
@@ -57,7 +56,7 @@ export const createCr = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const raw = (req.body ?? {}) as Record<string, unknown>
   if (!raw.source || typeof raw.requester !== "string" || !raw.requester.trim()) {
-    throw new Mode1Error("CR_SOURCE_REQUIRED", "Change request cần nguồn (source) và người yêu cầu (requester)")
+    throw new Mode1Error("CR_SOURCE_REQUIRED", "Change request cần có nguồn và người yêu cầu.")
   }
   const body = parseInput(createChangeRequestSchema, req.body)
   const cr = await crService.createCr(auth.projectId, auth.userId, body)
@@ -72,11 +71,11 @@ export const createCr = mode1Handler(async (req, res) => {
 export const MATERIAL_FILE_FIELD = "file"
 const materialUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_MAX_FILE_BYTES, files: 1 } })
 
-/** Multipart ⇒ `req.file`; JSON đi thẳng. Lỗi multer (quá 10 MB…) ⇒ 400. */
+/** Multipart ⇒ `req.file`; JSON đi thẳng. Lỗi multer (quá 10 MB…) ⇒ 413 FILE_TOO_LARGE / 400 UPLOAD_FAILED. */
 export const receiveMaterial = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.is("multipart/form-data")) return next()
   materialUpload.single(MATERIAL_FILE_FIELD)(req, res, (err: unknown) => {
-    if (err instanceof multer.MulterError) return next(new ApiError(400, `Upload lỗi: ${err.message}`, "VALIDATION_ERROR"))
+    // Lỗi multer (quá cỡ…) ⇒ error handler chung trả câu thường (FILE_TOO_LARGE / UPLOAD_FAILED) — FLF-247
     next(err)
   })
 }
