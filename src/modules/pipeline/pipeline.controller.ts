@@ -14,7 +14,7 @@
  * Hợp đồng: docs/api/pipeline-contract.md (endpoint 24 `/resume`, `session_id` của `/gate`: contract-change 2026-09-15).
  */
 
-import { gateActionText } from "./gate-message.js"
+import { gateActionText, gateMessageOfRun } from "./gate-message.js"
 import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
@@ -29,6 +29,7 @@ import {
   resumeWaitingStep,
   requirePipelineSession,
   recordUserMessage,
+  recordAiMessage,
   isPipelineErrorCode,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
@@ -338,9 +339,15 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
     ...(body.function_id === undefined ? {} : { function_id: body.function_id })
   }
 
+  // Tin cổng phải đọc TRƯỚC khi chốt: `gate` dọn lượt chạy nên sau đó không còn gì để lấy ra
+  const gateMessage = gateMessageOfRun(await getRunState(projectId, stepId))
+
   try {
     const result = await gate(projectId, stepId, userId, input)
-    // Thao tác ở cổng duyệt vào lịch sử chat như một lượt của user — đọc lại biết mình đã duyệt/yêu cầu sửa gì
+    // Cả hai vế của một lượt duyệt vào lịch sử chat: tin cổng AI vừa nói, rồi tới thao tác của user. Thẻ cổng do
+    // FE dựng từ lượt chạy đang sống nên chốt xong là biến mất — thiếu vế đầu thì đọc lại chỉ thấy "Đúng rồi, đi
+    // tiếp" đứng một mình, biết đã duyệt mà không biết duyệt cái gì.
+    if (gateMessage) await recordAiMessage(projectId, body.session_id, stepId, gateMessage)
     await recordUserMessage(projectId, body.session_id, stepId, gateActionText(input))
     return sendSuccess(res, 200, result)
   } catch (err) {

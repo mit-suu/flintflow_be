@@ -253,3 +253,20 @@ export const gateActionText = (input: { action: "accept" | "revision" | "regener
   if (input.action === "revision") return note || "Tôi muốn sửa"
   return note || "Đúng rồi, đi tiếp"
 }
+
+/**
+ * Tin cổng mà user vừa đọc trước khi bấm, lấy từ lượt chạy đã lưu — hàm thuần.
+ *
+ * Thẻ cổng do FE vẽ từ **state sống**, nên chốt xong là mất và đọc lại lịch sử chỉ còn lượt bấm của user đứng
+ * một mình: biết đã duyệt, không biết duyệt cái gì. Hàm này rút đúng chữ user đã đọc để ghi nó vào transcript
+ * cùng lượt bấm ấy.
+ *
+ * Bước cuối giai đoạn ưu tiên tin của cả giai đoạn, đúng thứ tự FE đang hiển thị.
+ */
+export const gateMessageOfRun = (run: { gate_payload?: unknown; phase_gate?: unknown } | null): string | null => {
+  const messageOf = (payload: unknown): string | null => {
+    const text = (payload as { message_vi?: unknown } | null)?.message_vi
+    return typeof text === "string" && text.trim() !== "" ? text : null
+  }
+  return messageOf(run?.phase_gate) ?? messageOf(run?.gate_payload)
+}

@@ -6,6 +6,7 @@ import {
   composePhaseGateMessage,
   composeStepGateMessage,
   gateActionText,
+  gateMessageOfRun,
   spokenAssumptionIds,
   stripModelCountSentences
 } from "./gate-message.js"
@@ -282,5 +283,28 @@ describe("gateActionText", () => {
     expect(gateActionText({ action: "accept_as_is", note: "" })).toBe("Đúng rồi, đi tiếp")
     expect(gateActionText({ action: "accept_as_is", note: "cứ vậy đi" })).toBe("cứ vậy đi")
     expect(gateActionText({ action: "regenerate" })).not.toMatch(/bước/)
+  })
+})
+
+describe("gateMessageOfRun", () => {
+  it("lấy tin cổng của bước lẻ", () => {
+    expect(gateMessageOfRun({ gate_payload: { message_vi: "Tôi đã ghi ba nhóm người dùng." } })).toBe("Tôi đã ghi ba nhóm người dùng.")
+  })
+
+  it("bước cuối giai đoạn ưu tiên tin cả giai đoạn — đúng tin user đọc trên thẻ", () => {
+    const run = { gate_payload: { message_vi: "tin của bước" }, phase_gate: { message_vi: "tin của cả giai đoạn" } }
+    expect(gateMessageOfRun(run)).toBe("tin của cả giai đoạn")
+  })
+
+  it("không có tin thì không ghi gì — tin rỗng hay thiếu đều là null", () => {
+    expect(gateMessageOfRun(null)).toBeNull()
+    expect(gateMessageOfRun({})).toBeNull()
+    expect(gateMessageOfRun({ gate_payload: null, phase_gate: null })).toBeNull()
+    expect(gateMessageOfRun({ gate_payload: { message_vi: "   " } })).toBeNull()
+    expect(gateMessageOfRun({ gate_payload: { message_vi: 42 } })).toBeNull()
+  })
+
+  it("phase_gate không có tin ⇒ rơi về tin của bước, không trả null", () => {
+    expect(gateMessageOfRun({ gate_payload: { message_vi: "tin của bước" }, phase_gate: {} })).toBe("tin của bước")
   })
 })
