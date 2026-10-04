@@ -1217,6 +1217,8 @@ export const runStep = async (
 
     let { spine, spineVersion } = await refresh(projectId)
     let existingStep = spine.steps.find((s) => s.id === stepId)
+    /** Bước đã từng accepted và đang được mở lại (B7 reopen) — kèm tin chat thì soạn như gate revision, không dựng lại từ đầu. */
+    let reopenedAccepted = false
 
     if (existingStep?.status === "skipped") {
       throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
@@ -1246,6 +1248,13 @@ export const runStep = async (
       spine = reopened.spine
       spineVersion = reopened.spine_version
       existingStep = spine.steps.find((s) => s.id === stepId)
+      reopenedAccepted = true
+    } else if (existingStep && existingStep.status !== "accepted") {
+      // Lượt mở lại trước chết giữa chừng (bước còn in_progress/revision_requested/pending): nội dung của lần chốt cũ
+      // vẫn nằm trong Spine, nên chạy tiếp kèm tin chat vẫn là sửa, không phải dựng lại.
+      reopenedAccepted = (await spineRepository.listChanges(projectId)).some(
+        (c) => c.path === `steps[id=${stepId}].status` && c.value === "accepted"
+      )
     }
     if (!existingStep && !reopenLoop) {
       const next = nextStepOf(spine)
@@ -1629,8 +1638,15 @@ export const runStep = async (
           detail_vi: batchInfo ? `AI đang soạn nội dung · lô ${batchInfo.i}/${batchInfo.n}` : "AI đang soạn nội dung",
           ...(batchInfo ? { batch: batchInfo } : {})
         })
+        // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
+        // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
+        const revise = reopenedAccepted && userMessage !== undefined
         const draftPhase = await tracker.beat("draft", () =>
-          runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, "draft", emit, d, { answers: answersText, userDecided })
+          runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
+            answers: answersText,
+            userDecided,
+            ...(revise ? { revisionRequest: userMessage } : {})
+          })
         )
         spineVersion = draftPhase.spineVersion
         if (draftPhase.applied) wroteOps = true

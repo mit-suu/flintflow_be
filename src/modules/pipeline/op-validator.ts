@@ -20,7 +20,7 @@
 import { z } from "zod"
 import { planTransaction, TransactionRejectedError } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
-import { parsePath, PathError } from "../spine/path-resolver.js"
+import { parsePath, PathError, tryResolve } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
 import { restatesAssumption } from "./text-overlap.js"
@@ -840,7 +840,53 @@ export const requiredArrayErrors = (spine: Spine, ops: readonly Op[], stepId: st
         message: `${a.name} (\`${a.label}\`) là mục bắt buộc của bước này nhưng vẫn trống — thêm ít nhất một phần tử từ những gì user đã chốt ở các bước trước`
       }))
 
-export const validateOps =(spine: Spine, ops: unknown, options: ValidateOptions = {}): ValidationError[] => {
+/**
+ * Bỏ op `add` thêm một giá trị đã có vào mảng id (`use_cases[id=UC08].function_ids[]` ← "FN016" khi UC08 đã gắn
+ * FN016), kể cả cặp lặp lại trong cùng lô. Step đọc projection rút gọn (S-4.1 không thấy `function_ids`) nên gắn lại
+ * liên kết sẵn có là chuyện thường, và vô hại — nhưng op engine coi đó là `duplicate_id` và giết cả lô. Phần tử có
+ * `id` (object) không đụng tới: trùng ở đó là lỗi thật.
+ */
+export const dropRedundantScalarAdds = (spine: Spine, ops: readonly Op[]): Op[] => {
+  const seen = new Map<string, Set<unknown>>()
+  return ops.filter((op) => {
+    if (op.op !== "add" || !op.path.endsWith("[]") || (typeof op.value !== "string" && typeof op.value !== "number")) return true
+    let values = seen.get(op.path)
+    if (!values) {
+      const target = tryResolve(spine, op.path)
+      const current = target?.kind === "append" && Array.isArray(target.parent) ? target.parent : []
+      values = new Set(current.filter((el) => typeof el === "string" || typeof el === "number"))
+      seen.set(op.path, values)
+    }
+    if (values.has(op.value)) return false
+    values.add(op.value)
+    return true
+  })
+}
+
+/**
+ * S-4.1 tạo chức năng màn hình TỪ use case nên phải gắn ngay trong cùng lô (`add use_cases[id=…].function_ids[]`).
+ * Trước đây skill cấm gắn ở đây, đẩy sang "S-4.4/S-5" — mà S-4.4 chỉ gắn chức năng không màn hình, S-5 không gắn gì
+ * ⇒ mọi use case của người dùng mang `function_ids: []`, ký bản với hàng chục cờ `usecase_no_function`.
+ * Lỗi **mềm** như `useCaseNamingErrors`: gửi lại model, hết lượt thì nhận lô (cờ vàng là lưới cuối).
+ */
+export const useCaseWiringErrors = (spine: Spine, ops: readonly Op[], stepId: string): ValidationError[] => {
+  if (stepId.split("@")[0] !== "S-4.1" || !ops.some((op) => op.op === "add" && op.path === "functions[]")) return []
+  try {
+    const after = planTransaction(spine, { base_version: spine.spine_version, ops: [...ops], by: "op-validator", step_id: null }, { startSeq: 1 }).spine
+    const human = new Set(after.actors.filter((a) => a.kind === "human").map((a) => a.id))
+    return after.use_cases
+      .filter((uc) => uc.function_ids.length === 0 && uc.actor_ids.some((id) => human.has(id)))
+      .map((uc) => ({
+        rule: "usecase_not_wired",
+        path: `use_cases[id=${uc.id}].function_ids`,
+        message: `Use case ${uc.id} "${uc.name}" chưa gắn chức năng nào — thêm id chức năng hiện thực nó bằng {"op":"add","path":"use_cases[id=${uc.id}].function_ids[]","value":"<FN id>"}`
+      }))
+  } catch {
+    return []
+  }
+}
+
+export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions = {}): ValidationError[] => {
   const list = z.array(z.unknown()).safeParse(ops)
   if (!list.success) return [{ rule: "op_schema", message: "`ops` phải là mảng" }]
 

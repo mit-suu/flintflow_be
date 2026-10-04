@@ -147,7 +147,7 @@ import { createMemoryDiagramStore } from "../diagram/diagram-file.store.js"
 import type { DiagramServiceDeps } from "../diagram/diagram.service.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
-import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
+import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
 import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, CALL_LIMIT, CHAT_BUDGET_REPLY, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
@@ -388,6 +388,59 @@ describe("step-runner: POST /answer", () => {
     const userMsgs = (session.messages as { role: string; content: string }[]).filter((m) => m.role === "user")
     // Câu trả lời trên thẻ vào lịch sử chỉ có lựa chọn — câu hỏi đã nằm ở tin AI ngay trên
     expect(userMsgs.map((m) => m.content)).toContain("Người quản trị")
+  })
+})
+
+describe("step-runner: mở lại bước đã accepted kèm tin chat (B7 reopen)", () => {
+  it("soạn như gate revision (call kind revision + revision_request), không dựng lại từ đầu bằng draft", async () => {
+    seedSpine()
+    seedSession(true)
+    const calls: { actionType: string; vars: Record<string, unknown> }[] = []
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async (actionType, input) => {
+        calls.push({ actionType: String(actionType), vars: input.promptVariables as Record<string, unknown> })
+        return draftReply([{ op: "add", path: "actors[]", value: { id: `A${70 + calls.length}`, name: `X${calls.length}`, kind: "human", description: "d" } }])
+      },
+      renderDeps: renderStub()
+    }
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, deps)
+    const record = await repo.get(PROJECT)
+    await gate(PROJECT, "S-3.1", USER, { action: "accept", base_version: record!.spine_version })
+
+    const message = "Chỉ đổi tên actor X1 thành Reviewer"
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { ...deps, reopen: true, message })
+
+    expect(calls[0].vars.call_kind).toBe("draft")
+    expect(calls[1].vars.call_kind).toBe("revision")
+    expect(calls[1].vars.revision_request).toBe(message)
+  })
+
+  it("lượt mở lại trước chết giữa chừng (bước còn in_progress) ⇒ chạy tiếp kèm tin chat vẫn là revision", async () => {
+    seedSpine()
+    seedSession(true)
+    const kinds: unknown[] = []
+    let failNext = false
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async (_actionType, input) => {
+        kinds.push((input.promptVariables as Record<string, unknown>).call_kind)
+        if (failNext) throw new AiActionError(402, "no credit", "INSUFFICIENT_CREDIT")
+        return draftReply([{ op: "add", path: "actors[]", value: { id: `A${80 + kinds.length}`, name: `Y${kinds.length}`, kind: "human", description: "d" } }])
+      },
+      renderDeps: renderStub()
+    }
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, deps)
+    const record = await repo.get(PROJECT)
+    await gate(PROJECT, "S-3.1", USER, { action: "accept", base_version: record!.spine_version })
+
+    failNext = true
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { ...deps, reopen: true, message: "sửa A" }).catch(() => undefined)
+    expect((await repo.get(PROJECT))!.steps.find((s) => s.id === "S-3.1")?.status).not.toBe("accepted")
+
+    failNext = false
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, { ...deps, message: "sửa A lần nữa" })
+    expect(kinds).toEqual(["draft", "revision", "revision"])
   })
 })
 

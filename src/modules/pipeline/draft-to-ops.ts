@@ -19,7 +19,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import type { StepContext } from "./context-projection.js"
-import { briefExtractionErrors, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
+import { briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -180,7 +180,9 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       notes = result.data.notes ?? null
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(gateIds ? { gateAssumptionIds: gateIds } : {}) })
-      ops = sanitized.ops
+      // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
+      // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
+      ops = sanitized.errors.length > 0 ? sanitized.ops : dropRedundantScalarAdds(spine, sanitized.ops as Op[])
       errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
       // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
       if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
@@ -188,6 +190,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       if (errors.length === 0 && attempt <= maxRetries) errors = useCaseNamingErrors(spine, ops as Op[])
       // FLF-248: danh sách bắt buộc của step vẫn trống sau lô ⇒ gửi lại model; lượt cuối nhận lô (cờ array_empty là lưới cuối)
       if (errors.length === 0 && attempt <= maxRetries && callKind !== "glossary_scan") errors = requiredArrayErrors(spine, ops as Op[], stepId)
+      // Chức năng màn hình sinh ra từ use case ⇒ S-4.1 gắn ngay; còn use case người dùng chưa gắn ⇒ gửi lại model
+      if (errors.length === 0 && attempt <= maxRetries) errors = useCaseWiringErrors(spine, ops as Op[], stepId)
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })
