@@ -15,6 +15,7 @@ import {
 } from "./prompt-assets.js"
 import { getSkill, getPromptTemplate } from "./prompt-registry.service.js"
 import { OUTPUT_SCHEMA_BY_ACTION_TYPE } from "./response-parser.js"
+import { UI_TERM_BLACKLIST, USE_CASE_VERB_BLACKLIST } from "../../modules/spine/deterministic-check.js"
 
 beforeEach(() => {
   invalidatePromptAssetCache()
@@ -261,5 +262,19 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
 
   it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
     expect(skill("action/apply-change-op")).toContain("brief_core")
+  })
+})
+
+describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng usecase_name_* kiểm", () => {
+  const skill = (dir: string): string => fs.readFileSync(path.join(getSkillsDir(), dir, "SKILL.md"), "utf-8").replace(/\s+/g, " ")
+
+  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s liệt kê đủ động từ cấm (U3) và thuật ngữ giao diện (U5)", (dir) => {
+    const text = skill(dir)
+    for (const term of [...USE_CASE_VERB_BLACKLIST, ...UI_TERM_BLACKLIST]) expect(text, term).toMatch(new RegExp(`\\b${term}\\b`))
+    expect(text).toMatch(/at most 5 words/)
+  })
+
+  it("actors-and-usecases không còn dạy mẫu \"Create <Actor> Account\" (vi phạm U4)", () => {
+    expect(skill("content/actors-and-usecases")).not.toContain("<Actor> Account")
   })
 })
