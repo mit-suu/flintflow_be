@@ -11,7 +11,6 @@ export interface IChatMessage {
 export interface IChatSession extends Document {
   projectId: mongoose.Types.ObjectId
   messages: IChatMessage[]
-  isActive: boolean
   /** Session chạy pipeline (Elicit/Draft/Gate). Đúng một mỗi project — srs-spine.md §6 bất biến 7. */
   is_pipeline: boolean
   createdAt: Date
@@ -55,10 +54,6 @@ const chatSessionSchema = new Schema<IChatSession>(
       index: true
     },
     messages: [chatMessageSchema],
-    isActive: {
-      type: Boolean,
-      default: true
-    },
     is_pipeline: {
       type: Boolean,
       default: false
@@ -67,8 +62,8 @@ const chatSessionSchema = new Schema<IChatSession>(
   { timestamps: true }
 )
 
-// Compound Index for fetching active chat session (UC09)
-chatSessionSchema.index({ projectId: 1, isActive: 1 })
+// FLF-244: bỏ field `isActive` và index `{projectId, isActive}` — không còn đọc. DB cũ có thể drop tay index
+// `projectId_1_isActive_1` (Mongoose không tự xoá index), xem docs/ops.md.
 
 // Bất biến 7: tối đa một session is_pipeline = true mỗi project
 chatSessionSchema.index(

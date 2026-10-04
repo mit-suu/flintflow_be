@@ -111,7 +111,7 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(changesRequestSchema, req.body)
   const session = body.session_id ? await changeTranscript.loadProjectSession(auth.projectId, body.session_id) : null
-  const chatHistory = session ? changeTranscript.formatChatHistory(session.messages) : undefined
+  const chatHistory = session ? changeTranscript.formatChatContext(session.messages, await spineRepository.get(auth.projectId)) : undefined
   try {
     const result = await changeService.apply(auth.projectId, auth.userId, { ...body, chat_history: chatHistory }, auth.init)
     if (session) {
@@ -144,7 +144,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
   const session = body.session_id ? await changeTranscript.loadProjectSession(auth.projectId, body.session_id) : null
   // Lượt ghi vào phiên chỉ khi có câu lệnh để đọc lại — lô op sẵn từ UI không phải một lượt hội thoại
   const userText = session ? (body.instruction ?? null) : null
-  const chatHistory = session ? changeTranscript.formatChatHistory(session.messages) : undefined
+  const chatHistory = session ? changeTranscript.formatChatContext(session.messages, await spineRepository.get(auth.projectId)) : undefined
   let result: changeService.ChangePreviewResult
   try {
     result = await changeService.preview(auth.projectId, auth.userId, { ...body, chat_history: chatHistory }, auth.init)

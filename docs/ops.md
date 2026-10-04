@@ -161,6 +161,10 @@ UNIQUE — vị trí V4 không có `block_id` ⇒ C-3 chết từ vị trí th�
 Lần chạy mặc định chỉ đụng index (tạo lại được); xoá dữ liệu phải tự gọi `--clean-data`. Unique index
 `(projectId, cr_id, path)` chỉ tạo được sau khi hết vị trí bản cũ (chúng không có `path`).
 
+**Chat session bỏ `isActive` (FLF-244) — không bắt buộc.** Field và index `{projectId, isActive}` đã gỡ khỏi model;
+document cũ còn field thì vô hại. Index `projectId_1_isActive_1` mongoose không tự xoá — muốn dọn thì chạy tay
+`db.chatsessions.dropIndex("projectId_1_isActive_1")`.
+
 **Mode 1 v3 (bám BPMN, 2026-09-22) — không cần migration.** Dữ liệu project mode 1 tạo trước v3 vẫn đọc được
 nguyên trạng: baseline v1 đã ký, CR nguồn `chat` (enum giữ để đọc), cờ đã waive, version 0.x/1.0 cũ. Chỉ hành vi
 **từ nay** đổi: sau import mọi sửa qua CR (`CHANGE_REQUIRES_CR`), không chạy step / ký v1 / waive (`MODE1_NO_*`),

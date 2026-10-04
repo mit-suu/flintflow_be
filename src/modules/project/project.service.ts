@@ -69,7 +69,8 @@ export const getProjectById = async (
   projectId: string,
   orgId: string
 ): Promise<IProject> => {
-  const project = await Project.findOne({ _id: projectId, organizationId: orgId })
+  // Id sai định dạng: CastError sẽ thành 500 — coi như không tìm thấy (FLF-244)
+  const project = mongoose.isValidObjectId(projectId) ? await Project.findOne({ _id: projectId, organizationId: orgId }) : null
   if (!project) {
     throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }

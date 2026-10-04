@@ -8,7 +8,7 @@ import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
-import { changeErrorReply, formatChatHistory, previewPayload } from "../spine/change-transcript.js"
+import { changeErrorReply, formatChatContext, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -24,12 +24,11 @@ const shapeChatReply = (data: unknown): unknown => {
 }
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
-  // T13: không tắt (isActive) session khác của project — nhiều session chat (không pipeline) có thể
-  // tồn tại song song, chỉ đúng một session giữ is_pipeline (bất biến 7, srs-spine.md §6).
+  // Nhiều session chat (không pipeline) tồn tại song song, chỉ đúng một session giữ is_pipeline (bất biến 7,
+  // srs-spine.md §6). FE mở session pipeline khi vào workspace — không còn cờ "đang mở" lưu ở DB (FLF-244).
   const base = {
     projectId: new mongoose.Types.ObjectId(projectId),
-    messages: [],
-    isActive: true
+    messages: []
   }
 
   // Session đầu tiên của project giữ cờ pipeline (srs-spine.md §6 bất biến 7)
@@ -48,8 +47,9 @@ export const createChatSession = async (projectId: string): Promise<IChatSession
   }
 }
 
+/** Danh sách phiên chỉ kèm tin cuối (xem trước) — lịch sử đầy đủ lấy qua `GET /chats/:chatId` (FLF-244). */
 export const getChatSessions = async (projectId: string): Promise<IChatSession[]> => {
-  return await ChatSession.find({ projectId }).sort({ createdAt: -1 })
+  return await ChatSession.find({ projectId }, { messages: { $slice: -1 } }).sort({ createdAt: -1 })
 }
 
 export const getChatSessionById = async (chatSessionId: string): Promise<IChatSession> => {
@@ -68,7 +68,7 @@ export const getChatSessionById = async (chatSessionId: string): Promise<IChatSe
  * để không lộ việc chatId đó có tồn tại hay không, cùng pattern các module khác trong repo.
  */
 export const assertChatSessionOwnership = async (projectId: string, chatSessionId: string): Promise<IChatSession> => {
-  const session = await ChatSession.findById(chatSessionId)
+  const session = mongoose.isValidObjectId(chatSessionId) ? await ChatSession.findById(chatSessionId) : null
   if (!session || String(session.projectId) !== String(projectId)) {
     throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
@@ -103,7 +103,7 @@ const tryChangeFlow = async (
   let payload: Record<string, unknown>
   try {
     // Tin user của lượt này đã nằm cuối phiên — lịch sử là phần trước nó
-    const chatHistory = formatChatHistory(session.messages.slice(0, -1))
+    const chatHistory = formatChatContext(session.messages.slice(0, -1), record)
     const preview = await changeService.preview(projectId, userId, {
       instruction: content,
       base_version: record.spine_version,
@@ -173,8 +173,8 @@ export const sendMessageAndGetResponse = async (
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
   if (await tryChangeFlow(session, projectId, content, step, userId)) return session
 
-  // 2. Format history for AI context (last 12 messages)
-  const historyText = formatChatHistory(session.messages)
+  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
+  const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
 
   // 3. Chỉ còn một loại chat
   const actionType = ActionType.CHAT
@@ -302,8 +302,8 @@ export const sendMessageStream = async (
     return
   }
 
-  // 2. Format history for AI context (last 12 messages)
-  const historyText = formatChatHistory(session.messages)
+  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
+  const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
 
   // 3. T20: chỉ còn một loại chat — Discovery đi qua step runner
   const actionType = ActionType.CHAT
@@ -395,23 +395,25 @@ export const sendMessageStream = async (
   }
 }
 
+/** Phiên pipeline không xoá được — xoá nó là mất transcript các step và lượt chờ trả lời đang trỏ vào nó. */
+export const PIPELINE_SESSION_LOCKED = "PIPELINE_SESSION_LOCKED"
+
 /**
- * Xoá session. Nếu session xoá đang giữ `is_pipeline` (bất biến 7): promote session gần nhất còn lại
- * (theo `createdAt`) thành pipeline, để project luôn có đúng một session pipeline khi còn session nào đó.
+ * Xoá session phụ. Session giữ `is_pipeline` (bất biến 7) ⇒ 409 `PIPELINE_SESSION_LOCKED` (FLF-244): trước đây
+ * nó bị xoá rồi một session hỏi đáp được promote lên thay — session đó không có transcript của step nên vòng hỏi
+ * đầu giai đoạn chạy lại (tốn credit), còn `pending_answer` trỏ vào session đã mất.
  */
 export const deleteChatSession = async (chatSessionId: string): Promise<void> => {
   const target = await ChatSession.findById(chatSessionId, { projectId: 1, is_pipeline: 1 })
   if (!target) {
     throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
-
-  const result = await ChatSession.deleteOne({ _id: chatSessionId })
-  if (result.deletedCount === 0) {
-    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
+  if (target.is_pipeline) {
+    throw new ApiError(409, "Không xoá được phiên chính của dự án — phiên này giữ tiến trình soạn tài liệu", PIPELINE_SESSION_LOCKED)
   }
 
-  if (target.is_pipeline) {
-    const next = await ChatSession.findOne({ projectId: target.projectId }).sort({ createdAt: -1 })
-    if (next) await ChatSession.updateOne({ _id: next._id }, { is_pipeline: true })
+  const result = await ChatSession.deleteOne({ _id: chatSessionId, is_pipeline: false })
+  if (result.deletedCount === 0) {
+    throw new ApiError(404, "Không tìm thấy phiên trò chuyện.", "CHAT_SESSION_NOT_FOUND")
   }
 }

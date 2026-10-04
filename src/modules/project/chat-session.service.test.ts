@@ -6,22 +6,30 @@ const db = vi.hoisted(() => {
     _id: string
     projectId: string
     messages: unknown[]
-    isActive: boolean
     is_pipeline: boolean
     createdAt: string
   }
   const rows: Doc[] = []
   let seq = 0
   const copy = <X>(x: X): X => structuredClone(x)
-  const withMethods = (doc: Doc | null) => (doc ? { ...copy(doc), save: async function (this: Doc) { Object.assign(rows.find((r) => r._id === this._id)!, this) } } : null)
+  const withMethods = (doc: Doc | null) =>
+    doc
+      ? {
+          ...copy(doc),
+          // Chỉ ghi dữ liệu, không ghi chính hàm `save` vào store (lượt findById sau sẽ structuredClone được)
+          save: async function (this: Doc & { save?: unknown }) {
+            const { save: _save, ...data } = this
+            Object.assign(rows.find((r) => r._id === this._id)!, data)
+          }
+        }
+      : null
 
   const ChatSession = {
     create: async (input: Partial<Doc>) => {
       const doc: Doc = {
-        _id: `s${++seq}`,
+        _id: String(++seq).padStart(24, "a"), // id hợp lệ ObjectId (service kiểm isValidObjectId)
         projectId: String(input.projectId),
         messages: input.messages ?? [],
-        isActive: input.isActive ?? true,
         is_pipeline: input.is_pipeline ?? false,
         createdAt: new Date(Date.now() + seq).toISOString()
       }
@@ -33,6 +41,15 @@ const db = vi.hoisted(() => {
         ? { _id: "x" }
         : null,
     findById: async (id: string, _proj?: unknown) => withMethods(rows.find((r) => r._id === id) ?? null),
+    /** Chỉ hỗ trợ projection `{ messages: { $slice: -1 } }` mà `getChatSessions` dùng. */
+    find: (filter: { projectId: string }, projection?: { messages?: { $slice: number } }) => ({
+      sort: async (sortSpec: { createdAt?: number }) => {
+        const matched = rows.filter((r) => r.projectId === String(filter.projectId)).map(copy)
+        matched.sort((a, b) => (sortSpec.createdAt === -1 ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt)))
+        const slice = projection?.messages?.$slice
+        return slice === undefined ? matched : matched.map((r) => ({ ...r, messages: r.messages.slice(slice) }))
+      }
+    }),
     findOne: (filter: Partial<Doc>) => ({
       sort: async (sortSpec: { createdAt?: number }) => {
         const matched = rows.filter((r) => filter.projectId === undefined || r.projectId === String(filter.projectId))
@@ -40,8 +57,8 @@ const db = vi.hoisted(() => {
         return withMethods(matched[0] ?? null)
       }
     }),
-    deleteOne: async (filter: { _id: string }) => {
-      const idx = rows.findIndex((r) => r._id === filter._id)
+    deleteOne: async (filter: { _id: string; is_pipeline?: boolean }) => {
+      const idx = rows.findIndex((r) => r._id === filter._id && (filter.is_pipeline === undefined || r.is_pipeline === filter.is_pipeline))
       if (idx < 0) return { deletedCount: 0 }
       rows.splice(idx, 1)
       return { deletedCount: 1 }
@@ -83,7 +100,7 @@ const spineRepoMocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock("../spine/spine.repository.js", () => spineRepoMocks)
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { createChatSession, deleteChatSession, sendMessageAndGetResponse, assertChatSessionOwnership } from "./chat-session.service.js"
+import { createChatSession, deleteChatSession, getChatSessions, sendMessageAndGetResponse, assertChatSessionOwnership, PIPELINE_SESSION_LOCKED } from "./chat-session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { TransactionRejectedError } from "../spine/op-engine.js"
 
@@ -97,35 +114,50 @@ beforeEach(() => {
   changeMocks.preview.mockReset()
   spineRepoMocks.get.mockReset()
   // T20: `tryAnswerRunningStep` đọc `progress.current_step` ⇒ stub phải có `progress` như bản ghi thật
-  spineRepoMocks.get.mockResolvedValue({ projectId: PROJECT, spine_version: 7, progress: { current_step: null } })
+  // FLF-244: CHAT/lệnh sửa dựng tóm tắt từ `project` + `decisions` + `addendum` ⇒ stub có đủ các field đó
+  spineRepoMocks.get.mockResolvedValue({
+    projectId: PROJECT,
+    spine_version: 7,
+    progress: { current_step: null },
+    project: { vision: null, goals: [] },
+    decisions: [],
+    addendum: []
+  })
 })
 
 describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
-  it("createChatSession: session đầu giữ is_pipeline=true, session sau false — không tắt isActive của session khác", async () => {
+  it("createChatSession: session đầu giữ is_pipeline=true, session sau false, session đầu vẫn là pipeline", async () => {
     const first = await createChatSession(PROJECT)
     const second = await createChatSession(PROJECT)
     expect(first.is_pipeline).toBe(true)
     expect(second.is_pipeline).toBe(false)
-    // Tạo session thứ hai không được tắt isActive của session đầu (bỏ hành vi updateMany cũ)
-    const reloadedFirst = db.rows.find((r) => r._id === String(first._id))!
-    expect(reloadedFirst.isActive).toBe(true)
+    expect(db.rows.find((r) => r._id === String(first._id))!.is_pipeline).toBe(true)
   })
 
-  it("deleteChatSession: xoá session pipeline ⇒ promote session gần nhất còn lại thành pipeline", async () => {
+  it("FLF-244: deleteChatSession phiên pipeline ⇒ 409 PIPELINE_SESSION_LOCKED, không xoá, không promote", async () => {
     const pipeline = await createChatSession(PROJECT)
-    const second = await createChatSession(PROJECT)
-    const third = await createChatSession(PROJECT)
-    expect(pipeline.is_pipeline).toBe(true)
+    await createChatSession(PROJECT)
 
-    await deleteChatSession(String(pipeline._id))
+    const err = await deleteChatSession(String(pipeline._id)).catch((e: unknown) => e)
 
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(409)
+    expect((err as ApiError).code).toBe(PIPELINE_SESSION_LOCKED)
     const remaining = db.rows.filter((r) => r.projectId === PROJECT)
     expect(remaining).toHaveLength(2)
-    const pipelineNow = remaining.filter((r) => r.is_pipeline)
-    expect(pipelineNow).toHaveLength(1)
-    // Gần nhất theo createdAt là session tạo sau cùng còn lại (third)
-    expect(pipelineNow[0]._id).toBe(String(third._id))
-    void second
+    expect(remaining.filter((r) => r.is_pipeline).map((r) => r._id)).toEqual([String(pipeline._id)])
+  })
+
+  it("FLF-244: getChatSessions trả mỗi phiên kèm đúng tin cuối, mới nhất trước", async () => {
+    const first = await createChatSession(PROJECT)
+    const second = await createChatSession(PROJECT)
+    db.rows.find((r) => r._id === String(first._id))!.messages = [{ role: "user", content: "a" }, { role: "ai", content: "b" }]
+
+    const list = await getChatSessions(PROJECT)
+
+    expect(list.map((s) => String(s._id))).toEqual([String(second._id), String(first._id)])
+    expect(list[1].messages).toEqual([{ role: "ai", content: "b" }])
+    expect(list[0].messages).toEqual([])
   })
 
   it("deleteChatSession: xoá session không pipeline không đụng tới session pipeline hiện có", async () => {
@@ -297,5 +329,43 @@ describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
     expect(payload.kind).toBe("change_error")
     expect(payload.reply).toBe("Không tìm thấy mục cần sửa. Hãy nói rõ tên mục (ví dụ: màn “Đặt lịch”, chức năng “Huỷ lịch”).")
     expect(payload.reply).not.toContain("actors[")
+  })
+})
+
+describe("FLF-244 — ngữ cảnh CHAT: không lặp tin hiện tại, có tóm tắt hội thoại", () => {
+  const USER = "650000000000000000000010"
+  const reply = { data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 }
+  const historyOf = () => (aiMocks.executeAiAction.mock.calls[0][1] as { promptVariables: { chat_history: string; input_text: string } }).promptVariables
+
+  it("chat_history không chứa tin đang gửi (tin đó chỉ nằm ở input_text)", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    aiMocks.executeAiAction.mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Câu hỏi đầu tiên?", "overview", USER)
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Câu hỏi thứ hai?", "overview", USER)
+
+    const second = aiMocks.executeAiAction.mock.calls[1][1] as { promptVariables: { chat_history: string; input_text: string } }
+    expect(second.promptVariables.input_text).toBe("Câu hỏi thứ hai?")
+    expect(second.promptVariables.chat_history).toContain("User: Câu hỏi đầu tiên?")
+    expect(second.promptVariables.chat_history).not.toContain("Câu hỏi thứ hai?")
+  })
+
+  it("có Spine ⇒ chat_history mở đầu bằng tóm tắt (ý tưởng, điều đã chốt)", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    spineRepoMocks.get.mockResolvedValue({
+      projectId: PROJECT,
+      spine_version: 7,
+      progress: { current_step: null },
+      project: { vision: "Ứng dụng đặt lịch cắt tóc", goals: [] },
+      decisions: [],
+      addendum: []
+    })
+    aiMocks.executeAiAction.mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Tài liệu đang thiếu gì?", "overview", USER)
+
+    expect(historyOf().chat_history).toMatch(/^Tóm tắt hội thoại trước: Ý tưởng: Ứng dụng đặt lịch cắt tóc/)
   })
 })

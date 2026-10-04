@@ -317,11 +317,11 @@ router.patch("/:projectId/folder", authMiddleware, validateRequest(MoveProjectSc
  *         description: ID của dự án
  *     responses:
  *       200:
- *         description: Danh sách cuộc trò chuyện
+ *         description: Danh sách cuộc trò chuyện — mỗi phiên chỉ kèm tin cuối (lịch sử đầy đủ ở GET /chats/{chatId})
  *       401:
  *         description: Chưa xác thực
  *   post:
- *     summary: Tạo cuộc trò chuyện mới trong dự án (tự động tắt kích hoạt các cuộc trò chuyện cũ)
+ *     summary: Tạo cuộc trò chuyện mới. Phiên đầu tiên của dự án là phiên chính (is_pipeline) chạy quy trình; các phiên sau chỉ hỏi đáp và nhận lệnh sửa
  *     tags: [Chat Sessions]
  *     security:
  *       - BearerAuth: []
@@ -337,9 +337,11 @@ router.patch("/:projectId/folder", authMiddleware, validateRequest(MoveProjectSc
  *         description: Tạo thành công
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không tạo phiên)
  */
 router.get("/:projectId/chats", authMiddleware, chatSessionController.getChatSessions)
-router.post("/:projectId/chats", authMiddleware, chatSessionController.createChatSession)
+router.post("/:projectId/chats", authMiddleware, requireRole("lead", "analyst"), chatSessionController.createChatSession)
 
 /**
  * @swagger
@@ -370,7 +372,7 @@ router.post("/:projectId/chats", authMiddleware, chatSessionController.createCha
  *       404:
  *         description: Không tìm thấy cuộc trò chuyện
  *   delete:
- *     summary: Xóa một cuộc trò chuyện
+ *     summary: Xóa một cuộc trò chuyện phụ (phiên chính không xoá được)
  *     tags: [Chat Sessions]
  *     security:
  *       - BearerAuth: []
@@ -392,11 +394,15 @@ router.post("/:projectId/chats", authMiddleware, chatSessionController.createCha
  *         description: Xóa thành công
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không xoá phiên)
  *       404:
  *         description: Không tìm thấy cuộc trò chuyện
+ *       409:
+ *         description: PIPELINE_SESSION_LOCKED — phiên chính (is_pipeline) không xoá được
  */
 router.get("/:projectId/chats/:chatId", authMiddleware, chatSessionController.getChatSession)
-router.delete("/:projectId/chats/:chatId", authMiddleware, chatSessionController.deleteChatSession)
+router.delete("/:projectId/chats/:chatId", authMiddleware, requireRole("lead", "analyst"), chatSessionController.deleteChatSession)
 
 /**
  * @swagger
@@ -441,8 +447,10 @@ router.delete("/:projectId/chats/:chatId", authMiddleware, chatSessionController
  *         description: Thiếu thông tin
  *       401:
  *         description: Chưa xác thực
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không gửi tin — gọi AI tốn credit)
  */
-router.post("/:projectId/chats/:chatId/messages", authMiddleware, chatSessionController.sendMessage)
-router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, chatSessionController.sendMessageStream)
+router.post("/:projectId/chats/:chatId/messages", authMiddleware, requireRole("lead", "analyst"), chatSessionController.sendMessage)
+router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, requireRole("lead", "analyst"), chatSessionController.sendMessageStream)
 
 export default router

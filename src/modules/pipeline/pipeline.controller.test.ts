@@ -366,6 +366,15 @@ describe("FLF-221: message/intent — chat là nút chạy", () => {
     expect(vi.mocked(runPhase).mock.calls[0][5]).toMatchObject({ message: "Ý tưởng của mình" })
   })
 
+  it("FLF-244: /phases/:phase/run từ session không pipeline ⇒ 403 NOT_PIPELINE_SESSION trước khi mở SSE, không gọi runPhase", async () => {
+    vi.mocked(runPhase).mockReset()
+    vi.mocked(requirePipelineSession).mockRejectedValueOnce(new ApiError(403, "not pipeline", NOT_PIPELINE_SESSION))
+    const outcome = await invokeSse(runPhaseController, OWNER, PROJECT, "", { session_id: "s2", base_version: 1 }, { phase: "B-1" })
+    expect(outcome.error).toMatchObject({ statusCode: 403, code: NOT_PIPELINE_SESSION })
+    expect(requirePipelineSession).toHaveBeenCalledWith(PROJECT, "s2")
+    expect(runPhase).not.toHaveBeenCalled()
+  })
+
   it("intent lạ ⇒ 400 VALIDATION_ERROR", async () => {
     const outcome = await invokeSse(runStepController, OWNER, PROJECT, "B-0.1", { session_id: "s1", base_version: 1, intent: "whatever" })
     expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })

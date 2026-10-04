@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 
 vi.mock("../project/chat-session.model.js", () => ({ ChatSession: { findById: vi.fn() } }))
 
-import { formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
+import { formatChatContext, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
 import type { IChatMessage, IChatSession } from "../project/chat-session.model.js"
 import type { ChangePreviewResult } from "./change.service.js"
 
@@ -38,8 +38,43 @@ describe("previewPayload", () => {
       changes: [{ op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }],
       preview_id: "pv"
     })
-    expect(payload).toMatchObject({ kind: "change_preview", preview_id: "pv" })
+    expect(payload).toMatchObject({ kind: "change_preview", preview_id: "pv", change_count: 1 })
     expect(payload.reply).toContain("1 thay đổi")
+  })
+
+  it("FLF-244: không lưu mảng changes/impact/violations vào transcript", () => {
+    const payload = previewPayload({
+      ...base,
+      changes: [{ op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }],
+      impact: { fields: [], sections: [], diagrams: [], referrers: [] },
+      preview_id: "pv"
+    })
+    expect(payload).not.toHaveProperty("changes")
+    expect(payload).not.toHaveProperty("impact")
+    expect(payload).not.toHaveProperty("violations")
+  })
+})
+
+describe("formatChatContext (FLF-244)", () => {
+  const spine = { project: { vision: "Đặt lịch cắt tóc", goals: ["Giảm khách chờ"] }, decisions: [], addendum: [] } as unknown as Parameters<typeof formatChatContext>[1]
+
+  it("không có Spine ⇒ đúng bằng formatChatHistory", () => {
+    const messages = [msg("user", "a"), msg("ai", "b")]
+    expect(formatChatContext(messages, null)).toBe(formatChatHistory(messages))
+  })
+
+  it("có Spine ⇒ tóm tắt đứng trước đuôi; lời user đã trôi khỏi đuôi vào tóm tắt", () => {
+    const messages = Array.from({ length: 14 }, (_, i) => msg("user", `m${i}`))
+    const text = formatChatContext(messages, spine)
+    expect(text.startsWith("Tóm tắt hội thoại trước: Ý tưởng: Đặt lịch cắt tóc")).toBe(true)
+    expect(text).toContain('"m1"')
+    const [, tail] = text.split("\n\n")
+    expect(tail.split("\n")).toHaveLength(12)
+  })
+
+  it("Spine chưa có gì để tóm tắt ⇒ chỉ đuôi", () => {
+    const empty = { project: { vision: null, goals: [] }, decisions: [], addendum: [] } as unknown as Parameters<typeof formatChatContext>[1]
+    expect(formatChatContext([msg("user", "a")], empty)).toBe("User: a")
   })
 })
 
