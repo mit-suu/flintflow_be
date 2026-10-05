@@ -10,7 +10,7 @@ import type { ExtractedField } from "./extraction-draft.model.js"
 import type { FieldOrigin } from "./import.constants.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import type { HeadingMapEntry } from "./template-profile.model.js"
-import { splitHeadingNumber } from "./text-similarity.js"
+import { foldText, splitHeadingNumber } from "./text-similarity.js"
 
 export interface EntityItem {
   entity: string
@@ -45,6 +45,26 @@ export const normalizeKey = (key: string): string => {
   const k = key.trim()
   const m = /^([A-Za-z]{1,5})[-_ ]?(\d+(?:\.\d+)*)$/.exec(k)
   return m ? `${m[1].toUpperCase()}-${m[2]}` : k.replace(/\s+/g, " ")
+}
+
+/**
+ * Khoá so tên khi ghép cùng một phần tử giữa các nguồn (bảng, chữ, heading, ảnh — FLF-251): bỏ số mục đầu, dấu,
+ * hoa/thường, ký tự lạ ⇒ "3.6.2 Send Reminder" = "send reminder", "Log-in" = "log in".
+ */
+export const nameKey = (name: string): string => foldText(splitHeadingNumber(name).title)
+
+const nameOf = (value: Record<string, unknown>): string | null =>
+  typeof value.name === "string" ? value.name : typeof value.term === "string" ? value.term : null
+
+/** Id của phần tử cùng loại đã biết có tên trùng (sau chuẩn hoá); không có ⇒ `null`. */
+export const findKnownId = (known: readonly EntityItem[], entity: string, name: unknown): string | null => {
+  if (typeof name !== "string" || !nameKey(name)) return null
+  const key = nameKey(name)
+  const hit = known.find((k) => {
+    const n = k.entity === entity && k.id ? nameOf(k.value) : null
+    return n !== null && nameKey(n) === key
+  })
+  return hit?.id ?? null
 }
 
 /** Cấp id mới không trùng id đã có của từng mảng. */

@@ -22,6 +22,12 @@ describe("recordRowsOfTable", () => {
     ])
   })
 
+  it("FLF-251: ô tiêu đề có xuống dòng (A*⏎M, D — SRS thật) vẫn nhận đủ cột khi đọc từ ô thật", () => {
+    expect(recordRowsOfTable([["Date", "A*\nM, D", "In charge", "Change Description"], ["29/07/2026", "A", "QuynhTTN", "Added User Requirements"]])).toEqual([
+      { date: "29/07/2026", version: "", change_type: "A", in_charge: "QuynhTTN", description: "Added User Requirements" }
+    ])
+  })
+
   it("bảng không có cột mô tả ⇒ không phải bảng lịch sử ⇒ rỗng", () => {
     expect(recordRowsOfTable([["Actor", "Role"], ["Admin", "Quản trị"]])).toEqual([])
     expect(recordRowsOfTable([])).toEqual([])

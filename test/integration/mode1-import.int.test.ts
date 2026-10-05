@@ -145,7 +145,8 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = api(seeded, projectId)
-    const body = p("2.2 Use Cases") + table([["Use Case ID", "", "Actor"], ["UC-01", "Register", "Learner"]])
+    // Bảng ở mục có trích (2.2.2) — bảng dưới heading nhóm không vào bước map cột (FLF-251)
+    const body = p("2.2.2 Use Case Descriptions") + table([["Use Case ID", "", "Actor"], ["UC-01", "Register", "Learner"]])
     const up = await c.upload(await makeDocx({ body }))
     expect(up.status, JSON.stringify(up.body.error)).toBe(201)
     const importId = importStateResponseSchema.parse(up.body.data).import.id

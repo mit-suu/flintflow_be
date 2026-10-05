@@ -18,7 +18,16 @@ export interface SrsFixtureOptions {
   extraBody?: string
   /** Mode 1 v3 phase 5 (T3): ảnh nhúng dưới 2.2.1 (`word/media/<name>`) — PNG / JPEG / EMF tuỳ bytes truyền vào. */
   images?: { name: string; data: Buffer; caption?: string }[]
+  /**
+   * FLF-251: bảng Record of Changes dưới heading "I. Record of Changes" ở đầu tài liệu. `\n` trong ô ⇒ nhiều đoạn trong
+   * cùng ô (như ô tiêu đề "A*⏎M, D" của SRS thật).
+   */
+  recordOfChanges?: string[][]
 }
+
+/** Bảng mà ô có `\n` thành nhiều đoạn trong ô (helper `table` chỉ dựng một đoạn mỗi ô). */
+const multilineTable = (rows: string[][]): string =>
+  `<w:tbl><w:tblPr/><w:tblGrid/>${rows.map((r) => `<w:tr>${r.map((c) => `<w:tc>${c.split("\n").map((line) => p(line)).join("")}</w:tc>`).join("")}</w:tr>`).join("")}</w:tbl>`
 
 export const SRS_FIXTURE_TEXT = {
   purpose: "Lumen is an online learning platform for small training centers.",
@@ -34,6 +43,7 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
     opts.numberedOnly ? p(`${number} ${title}`) : styled(`u${level}`, `${number} ${title}`)
   const T = SRS_FIXTURE_TEXT
   const body = [
+    ...(opts.recordOfChanges ? [h(1, "I.", "Record of Changes"), multilineTable(opts.recordOfChanges)] : []),
     h(1, "1", "Product Overview"),
     p(T.purpose),
     h(1, "2", "User Requirements"),

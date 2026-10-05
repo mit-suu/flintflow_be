@@ -43,6 +43,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { IMPORT_IMAGE_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps } from "./spine-builder.js"
+import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { titleOfSection } from "./gap-report.service.js"
@@ -137,8 +138,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     level: b.level ?? null,
     text: b.text,
     section_id: b.section_id ?? null,
-    // DocBlock không lưu ô bảng — dựng lại từ text `ô | ô` theo dòng
-    rows: b.kind === "table" ? b.text.split("\n").map((line) => line.split(" | ")) : null,
+    // Ô thật của bảng (FLF-251) — tách `text` theo dòng làm gãy hàng khi ô có xuống dòng (Record of Changes ra 0 dòng)
+    rows: b.kind === "table" ? tableRows(b, ordered) : null,
     image_ref: b.image_ref ?? null
   }))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc

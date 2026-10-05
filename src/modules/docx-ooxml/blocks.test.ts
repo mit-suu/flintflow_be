@@ -111,7 +111,8 @@ describe("readBlocks", () => {
     expect(blocks.map((b) => [b.kind, b.text, b.editable, b.para_id])).toEqual([
       ["paragraph", "Hệ mới\tx\ny", true, "1A2B3C4D"],
       ["image", "", false, null],
-      ["paragraph", "Hình 2", false, null],
+      // chữ "Hình <số>" ⇒ caption theo chữ (FLF-251); vẫn không sửa được vì là field
+      ["caption", "Hình 2", false, null],
       ["paragraph", "Có textbox", false, null]
     ])
     expect(blocks[0].text_hash).toBe(textHash("Hệ  mới x y"))
@@ -311,6 +312,32 @@ describe("readBlocks — bổ sung P4", () => {
     expect(blocks[1].heading_path).toEqual(["Kiến trúc"])
     expect(blocks[2].heading_path).toEqual(["Kiến trúc"])
     expect(blocks[1].xml_path).toBe("body/p[1]")
+  })
+
+  it("FLF-251: chú thích gõ bằng style heading / đoạn thường ⇒ caption theo chữ; heading thật có chữ Table/Figure vẫn là heading", async () => {
+    const blocks = await readBlocks(
+      await load(
+        styled("u1", "2.3 Use Cases") +
+          `<w:p><w:r><w:drawing/></w:r></w:p>` +
+          styled("u2", "Figure 03. Use Case Diagram - Account & Workspace") +
+          p("Hình 2.1: Sơ đồ ngữ cảnh") +
+          styled("u2", "Table of Contents") +
+          styled("u2", "Figure Management") +
+          table([["Table 1", "x"]])
+      )
+    )
+    expect(blocks.filter((b) => b.kind !== "table_cell").map((b) => [b.kind, b.level, b.text])).toEqual([
+      ["heading", 1, "2.3 Use Cases"],
+      ["image", null, ""],
+      ["caption", null, "Figure 03. Use Case Diagram - Account & Workspace"],
+      ["caption", null, "Hình 2.1: Sơ đồ ngữ cảnh"],
+      ["heading", 2, "Table of Contents"],
+      ["heading", 2, "Figure Management"],
+      ["table", null, "Table 1 | x"]
+    ])
+    // caption không mở cấp heading mới
+    expect(blocks[3].heading_path).toEqual(["2.3 Use Cases"])
+    expect(blocks.find((b) => b.kind === "table_cell" && b.text === "Table 1")?.kind).toBe("table_cell")
   })
 
   it("phase 5 (T3): ảnh nhúng ⇒ image_ref = part ảnh theo rels; rel không phải ảnh / liên kết ngoài / không phải hình ⇒ null", async () => {

@@ -9,6 +9,7 @@
  * Độ tin < 0.8 ⇒ `mapping_review` (nút 1.7).
  */
 
+import { isExtractableSection, targetsOf } from "./extract-targets.js"
 import { MAPPING_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, type HeadingDetector } from "./import.constants.js"
 import type { ParsedBlock } from "./parse.service.js"
 import {
@@ -128,9 +129,15 @@ export const matchHeadings = (blocks: ProfileBlock[]): HeadingMapEntry[] => {
   return entries
 }
 
+const extractsFrom = (sectionId: string | null): boolean => !!sectionId && isExtractableSection(sectionId) && targetsOf(sectionId).length > 0
+
+/**
+ * Cột bảng ⇒ field, chỉ cho bảng nằm ở section có trích (FLF-251): bảng lịch sử thay đổi, bảng dưới heading nhóm /
+ * không khớp không bao giờ được trích nên không hiện ở bước xác nhận mapping (trước đây bảng Record of Changes bị đoán là NFR).
+ */
 export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, string | null>): TableMapEntry[] =>
   blocks
-    .filter((b) => b.kind === "table" && b.rows?.length)
+    .filter((b) => b.kind === "table" && b.rows?.length && extractsFrom(blockSections.get(b.block_id) ?? null))
     .flatMap((b) =>
       matchTableHeader(b.rows![0], blockSections.get(b.block_id) ?? null).columns.map((c) => ({
         block_id: b.block_id,

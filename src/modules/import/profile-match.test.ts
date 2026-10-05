@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
-import { assignBlockSections, matchHeadings, matchProfile, missingRequiredSections, needsMappingReview, type ProfileBlock } from "./profile-match.service.js"
+import { assignBlockSections, matchHeadings, matchProfile, matchTables, missingRequiredSections, needsMappingReview, type ProfileBlock } from "./profile-match.service.js"
 import { MAPPING_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -41,6 +41,68 @@ describe("matchTableHeader", () => {
 
   it("không đủ cột bắt buộc ⇒ không thực thể", () => {
     expect(matchTableHeader(["Step", "Action"], "fixed:2.2.2")).toMatchObject({ entity: null })
+  })
+
+  const fields = (headers: string[], section: string | null) => matchTableHeader(headers, section).columns.map((c) => c.field_path)
+
+  it("FLF-251: gán cột theo điểm cao nhất cả bảng — khớp đúng tên thắng khớp gần; cột ký hiệu # không khớp", () => {
+    // trước đây "Message Type" (khớp gần "message") giành mất nội dung, cột "Content" thật bị bỏ
+    expect(fields(["#", "Message Code", "Message Type", "Context", "Content"], "fixed:5.3")).toEqual([null, "messages[].code", null, null, "messages[].text"])
+  })
+
+  it("FLF-251: đủ các cột FlintFlow xuất ra ⇒ file xuất ra import lại không mất dữ liệu bảng", () => {
+    expect(fields(["ID", "Name", "Kind", "Description"], "fixed:2.1")).toEqual(["actors[].id", "actors[].name", "actors[].kind", "actors[].description"])
+    expect(fields(["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"], "fixed:2.2.2")).toEqual([
+      "use_cases[].id",
+      "use_cases[].name",
+      "use_cases[].actor_ids",
+      "use_cases[].description",
+      "use_cases[].includes",
+      "use_cases[].extends"
+    ])
+    expect(fields(["Feature", "Screen", "Description"], "fixed:3.1.2")).toEqual(["screens[].feature_id", "screens[].name", "screens[].description"])
+    expect(fields(["Entity", "Description", "Relations"], "fixed:3.1.5")).toEqual(["entities[].name", "entities[].description", "entities[].relations"])
+    expect(fields(["Statement", "Metric", "Threshold", "Priority"], "fixed:4.2.3")).toEqual(["nfrs[].statement", "nfrs[].metric", "nfrs[].threshold", "nfrs[].priority"])
+    expect(fields(["Code", "Text", "Functions"], "fixed:5.3")).toEqual(["messages[].code", "messages[].text", "messages[].function_ids"])
+    expect(fields(["Term", "Native", "Definition"], "fixed:5.5")).toEqual(["glossary[].term", "glossary[].term_native", "glossary[].definition"])
+  })
+
+  it("FLF-251: bảng chức năng không màn hình (3.1.4) ⇒ functions, không còn bị hiểu thành tác nhân / NFR", () => {
+    expect(matchTableHeader(["Name", "Trigger", "Description"], "fixed:3.1.4")).toMatchObject({ entity: "functions" })
+    expect(fields(["#", "Feature", "System Function", "Description"], "fixed:3.1.4")).toEqual([
+      null,
+      "functions[].feature_id",
+      "functions[].name",
+      "functions[].description"
+    ])
+  })
+
+  it("FLF-251: section đã biết nhưng không phải section của thực thể ⇒ không đoán (để AI đọc)", () => {
+    // ma trận phân quyền trông như bảng màn hình; bảng lịch sử thay đổi trông như NFR; bảng field trong mục chức năng trông như tác nhân
+    expect(matchTableHeader(["Screen", "Guest", "User", "Admin"], "fixed:3.1.3").entity).toBeNull()
+    expect(matchTableHeader(["Date", "Version", "A*, M, D", "In charge", "Change Description"], "fixed:I").entity).toBeNull()
+    expect(matchTableHeader(["Field Name", "Type", "Description"], "function:@B0042").entity).toBeNull()
+  })
+})
+
+describe("matchTables (FLF-251)", () => {
+  it("chỉ bảng ở section có trích mới cần map cột — bỏ bảng Record of Changes, bảng dưới heading nhóm / không khớp", () => {
+    const tbl = (block_id: string, rows: string[][]): ProfileBlock => ({ block_id, kind: "table", level: null, text: "", rows })
+    const blocks = [
+      tbl("B0002", [["Date", "A*\nM, D", "In charge", "Change Description"], ["29/07/2026", "A", "QuynhTTN", "Added"]]),
+      tbl("B0004", [["#", "Actor", "Description"], ["1", "Guest", "Visitor"]]),
+      tbl("B0006", [["Project Name", "[Project Name]"]]),
+      tbl("B0008", [["Feature", "Notes"]])
+    ]
+    const sections = new Map<string, string | null>([
+      ["B0002", "fixed:I"],
+      ["B0004", "fixed:2.1"],
+      ["B0006", null],
+      ["B0008", "feature:@B0007"]
+    ])
+    const map = matchTables(blocks, sections)
+    expect([...new Set(map.map((t) => t.block_id))]).toEqual(["B0004"])
+    expect(map.map((t) => t.field_path)).toEqual([null, "actors[].name", "actors[].description"])
   })
 })
 

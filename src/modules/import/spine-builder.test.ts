@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { applyRuleProfile, runDeterministicCheck } from "../spine/deterministic-check.js"
 import { planTransaction } from "../spine/op-engine.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
-import { IdAllocator, collectEntities, fieldPath, flattenItem, normalizeKey, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import { IdAllocator, collectEntities, fieldPath, findKnownId, flattenItem, nameKey, normalizeKey, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
 import { buildImportOps } from "./spine-builder.js"
@@ -46,6 +46,20 @@ describe("extracted-entities", () => {
     expect(realSectionId("function:@B0011", map)).toBe("function:FR-3.2.1")
     expect(realSectionId("fixed:2.1", map)).toBe("fixed:2.1")
   })
+
+  it("FLF-251: ghép phần tử theo tên đã chuẩn hoá — bỏ số mục, dấu, hoa/thường, ký tự lạ", () => {
+    expect(nameKey("3.6.2 Send Reminder")).toBe("send reminder")
+    expect(nameKey("Log-In")).toBe(nameKey("log in"))
+    expect(nameKey("Đăng nhập")).toBe("dang nhap")
+    const known = [
+      { entity: "functions", id: "FR-3.6.2", value: { name: "3.6.2 Send Paper Submission Deadline Reminder" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" as const },
+      { entity: "glossary", id: "G01", value: { term: "SRS" }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "ai" as const }
+    ]
+    expect(findKnownId(known, "functions", "Send paper submission deadline reminder")).toBe("FR-3.6.2")
+    expect(findKnownId(known, "glossary", "srs")).toBe("G01")
+    expect(findKnownId(known, "actors", "SRS")).toBeNull()
+    expect(findKnownId(known, "functions", "")).toBeNull()
+  })
 })
 
 describe("buildImportOps", () => {
@@ -88,6 +102,27 @@ describe("buildImportOps", () => {
       ["F-03", "General"]
     ])
     expect(plan.spine.screens[0].feature_id).toBe("F-03")
+  })
+
+  it("FLF-251: tham chiếu theo tên chuẩn hoá (cột Feature có số mục), thông báo nối chức năng, thuật ngữ tiếng Việt", () => {
+    const spine = createEmptySpine({ name: "Exam" })
+    const ops = buildImportOps(spine, [
+      { entity: "features", id: "F-3.2", value: { name: "Account Management" } },
+      { entity: "screens", id: "SCR-01", value: { name: "Login", feature_id: "3.2 Account Management" } },
+      { entity: "functions", id: "FR-3.2.1", value: { name: "Sign In", screen_id: "login", feature_id: "F-3.2" } },
+      { entity: "actors", id: "A01", value: { name: "Exam Manager" } },
+      { entity: "use_cases", id: "UC-01", value: { name: "Sign in", actor_ids: ["exam manager"], function_ids: ["sign in", "Ghost"] } },
+      { entity: "messages", id: "MSG-01", value: { code: "AUTH-001", text: "Wrong password", function_ids: ["Sign In", "Nowhere"] } },
+      { entity: "glossary", id: "G01", value: { term: "Absence", term_native: "Vắng thi", definition: "Not present" } },
+      { entity: "glossary", id: "G02", value: { term: "Proctor", definition: "Exam supervisor" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.features.map((f) => f.name)).toEqual(["Account Management"])
+    expect(plan.spine.screens[0].feature_id).toBe("F-3.2")
+    expect(plan.spine.functions[0].screen_id).toBe("SCR-01")
+    expect(plan.spine.use_cases[0]).toMatchObject({ actor_ids: ["A01"], function_ids: ["FR-3.2.1"] })
+    expect(plan.spine.messages[0].function_ids).toEqual(["FR-3.2.1"])
+    expect(plan.spine.glossary.map((g) => g.term_native)).toEqual(["Vắng thi", undefined])
   })
 })
 

@@ -7,7 +7,7 @@
 
 import type { Op } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
-import { IdAllocator } from "./extracted-entities.js"
+import { IdAllocator, nameKey, normalizeKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
   entity: string
@@ -48,15 +48,17 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   const ids = (entity: "features" | "functions") => [...existing(spine[entity]), ...of(entity).map((e) => e.id!)]
   const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions") })
 
-  // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC)
+  // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC). So tên đã chuẩn hoá (FLF-251):
+  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC01" ra "UC-01"
   const resolver = (entity: string, pool: { id: string; name?: string }[]) => {
     const ids = new Set(pool.map((p) => p.id))
-    const byName = new Map(pool.filter((p) => p.name).map((p) => [p.name!.toLowerCase(), p.id]))
+    const byName = new Map(pool.filter((p) => p.name && nameKey(p.name)).map((p) => [nameKey(p.name!), p.id]))
     return (ref: unknown): string | null => {
       const s = str(ref)
       if (!s) return null
       if (ids.has(s)) return s
-      return byName.get(s.toLowerCase()) ?? null
+      if (ids.has(normalizeKey(s))) return normalizeKey(s)
+      return byName.get(nameKey(s)) ?? null
     }
   }
   const pool = (entity: string, spineArr: { id: string; name?: string }[]) => [
@@ -70,6 +72,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   const resolveRole = resolver("roles", pool("roles", spine.roles))
   const resolveEntity = resolver("entities", pool("entities", spine.entities))
   const resolveRule = resolver("business_rules", pool("business_rules", spine.business_rules as { id: string }[]))
+  const resolveFunction = resolver("functions", pool("functions", spine.functions))
   const featurePool = pool("features", spine.features)
   const resolveFeature = resolver("features", featurePool)
 
@@ -162,13 +165,12 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
       priority: priority(f.value.priority)
     })
   }
-  const functionIds = new Set([...spine.functions.map((f) => f.id), ...of("functions").map((f) => f.id!)])
   for (const u of of("use_cases").filter(skip(spine.use_cases))) {
     add("use_cases", {
       id: u.id,
       name: str(u.value.name) || u.id,
       actor_ids: [...new Set(strList(u.value.actor_ids ?? u.value.actors).map(resolveActor).filter((x): x is string => !!x))],
-      function_ids: strList(u.value.function_ids).filter((x) => functionIds.has(x)),
+      function_ids: [...new Set(strList(u.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))],
       description: str(u.value.description),
       includes: [...new Set(strList(u.value.includes).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))],
       extends: [...new Set(strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))]
@@ -197,7 +199,8 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
     add("common_requirements", { id: c.id, category: str(c.value.category) || "General", statement: str(c.value.statement ?? c.value.description) })
   }
   for (const m of of("messages").filter(skip(spine.messages))) {
-    add("messages", { id: m.id, code: str(m.value.code) || m.id!, text: str(m.value.text ?? m.value.message), function_ids: [] })
+    const functionIds = [...new Set(strList(m.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))]
+    add("messages", { id: m.id, code: str(m.value.code) || m.id!, text: str(m.value.text ?? m.value.message), function_ids: functionIds })
   }
   for (const o of of("other_requirements").filter(skip(spine.other_requirements))) {
     add("other_requirements", {
@@ -207,7 +210,13 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
     })
   }
   for (const g of of("glossary").filter(skip(spine.glossary))) {
-    add("glossary", { id: g.id, term: str(g.value.term ?? g.value.name) || g.id, definition: str(g.value.definition ?? g.value.description) })
+    const native = str(g.value.term_native)
+    add("glossary", {
+      id: g.id,
+      term: str(g.value.term ?? g.value.name) || g.id,
+      ...(native ? { term_native: native } : {}),
+      definition: str(g.value.definition ?? g.value.description)
+    })
   }
   // Màn chưa có function nào ⇒ placeholder: workspace không mở vòng S-5 rỗng cho nó (FLF-183, mode 1 v2)
   const screensWithFunction = new Set(ops.filter((o) => o.path === "functions[]").map((o) => (o.value as { screen_id: string | null }).screen_id))
