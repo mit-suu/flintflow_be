@@ -7,12 +7,13 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
-import { AI_BATCH_CHARS, AI_BLOCK_CHARS, captionOf, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, tableGrid, visionItems } from "./extract.service.js"
+import { AI_BATCH_CHARS, AI_BLOCK_CHARS, captionOf, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, splitList, visionItems } from "./extract.service.js"
 import { IdAllocator, flattenItem, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import { tableGrid } from "./table-rows.js"
 
-type Lite = Parameters<typeof tableGrid>[0]
+type Lite = Parameters<typeof deterministicTableItems>[0]
 
 const block = (block_id: string, kind: Lite["kind"], text: string, xml_path: string, section_id: string | null = null): Lite => ({
   block_id,
@@ -76,18 +77,11 @@ describe("extractionPlan", () => {
   })
 })
 
-describe("tableGrid", () => {
-  it("dựng lưới ô từ block table_cell, đoạn cùng ô nối xuống dòng, không lẫn bảng khác", () => {
-    const blocks = [
-      ...ucTable(),
-      block("B0020", "table_cell", "dòng 2 của ô", "body/tbl[0]/tr[2]/tc[1]/p[1]"),
-      block("B0030", "table_cell", "bảng khác", "body/tbl[1]/tr[0]/tc[0]/p[0]")
-    ]
-    expect(tableGrid(blocks[0], blocks)).toEqual([
-      ["Use Case ID", "Use Case Name", "Actor"],
-      ["UC01", "Register account", "Learner, Admin"],
-      ["UC-02", "Log in\ndòng 2 của ô", "Learner"]
-    ])
+describe("splitList — ô danh sách", () => {
+  it("FLF-251: cột tham chiếu tách cả tác nhân phụ trong ngoặc; danh sách thường giữ ngoặc", () => {
+    expect(splitList("Guest (Email Service, Identity Provider); Admin", true)).toEqual(["Guest", "Email Service", "Identity Provider", "Admin"])
+    expect(splitList("Learner, Admin\nGuest")).toEqual(["Learner", "Admin", "Guest"])
+    expect(splitList("Cut cost (by 20%)")).toEqual(["Cut cost (by 20%)"])
   })
 })
 
@@ -134,6 +128,19 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     const items = deterministicTableItems(blocks[0], withEmpty, profileOf([col(0, "use_cases[].id", 0.4, true), col(1, "use_cases[].name", 0.6, true)]))!
     expect(items).toHaveLength(2)
     expect(items.every((i) => i.confidence === 1)).toBe(true)
+  })
+
+  it("FLF-251: cột include/extend tách danh sách tham chiếu như cột tác nhân", () => {
+    const rows = [
+      ["ID", "Use Case", "Actors", "Includes"],
+      ["UC01", "Create slot", "Officer (Email Service)", "Send change notice, UC-07"]
+    ]
+    const items = deterministicTableItems(
+      blocks[0],
+      rows,
+      profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids"), col(3, "use_cases[].includes")])
+    )!
+    expect(items[0].value).toEqual({ name: "Create slot", actor_ids: ["Officer", "Email Service"], includes: ["Send change notice", "UC-07"] })
   })
 
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {

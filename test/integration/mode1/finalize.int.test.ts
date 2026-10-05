@@ -196,6 +196,25 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(doc.watermark).toBe("DRAFT")
   })
 
+  it("FLF-251: Record of Changes có ô tiêu đề xuống dòng (A*⏎M, D) ⇒ đọc đủ dòng từ ô thật, in lên đầu bảng §I của bản render", async () => {
+    const recordOfChanges = [
+      ["Date", "A*\nM, D", "In charge", "Change Description"],
+      ["29/07/2026", "A", "QuynhTTN", "Added User Requirements section"],
+      ["17/08/2026", "M", "HiepTT", "Modified use case descriptions\nand actors"]
+    ]
+    const { projectId } = await importFinalized({ srs: { recordOfChanges } })
+    // DocBlock bảng lưu ô như parser đọc — không phải tách lại text
+    const table = await DocBlock.findOne({ projectId, kind: "table" }).sort({ "anchor.ordinal": 1 }).lean()
+    expect(table!.rows![0]).toEqual(["Date", "A*\nM, D", "In charge", "Change Description"])
+    const legacy = (await TemplateProfile.findOne({ projectId }).lean())!.legacy_record_of_changes
+    expect(legacy.map((r) => [r.date, r.change_type, r.in_charge, r.description])).toEqual([
+      ["29/07/2026", "A", "QuynhTTN", "Added User Requirements section"],
+      ["17/08/2026", "M", "HiepTT", "Modified use case descriptions\nand actors"]
+    ])
+    const doc = await getDocument(projectId, "Lumen", { source: "draft" })
+    expect(doc.recordOfChanges.slice(0, 2).map((r) => r.in_charge)).toEqual(["QuynhTTN", "HiepTT"])
+  })
+
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
     mockOverrides.next = (prompt: string) => {
       const out = fakeMode1(prompt)

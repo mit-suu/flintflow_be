@@ -188,7 +188,8 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   mentions: b.mentions,
   editable: b.editable,
   locked_by_cr: null,
-  image_ref: b.image_ref ?? null
+  image_ref: b.image_ref ?? null,
+  ...(b.kind === "table" && b.rows ? { rows: b.rows } : {})
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.0`). */

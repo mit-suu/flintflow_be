@@ -92,6 +92,11 @@ const styleChain = (styles: Map<string, StyleInfo>, id: string | null): StyleInf
 const HEADING_NAME = /^heading ([1-9])$/i
 const TOC_NAME = /^(toc [1-9]|table of figures|toc heading)$/i
 const CAPTION_NAME = /^caption$/i
+/**
+ * Chú thích hình/bảng nhận theo chữ (FLF-251): SRS thật hay gõ "Figure 03 - Use Case Diagram" bằng style heading để
+ * vào mục lục hình ⇒ trước đây thành heading (rác ở bước mapping, ảnh mất caption). "Table of Contents" không có số ⇒ không khớp.
+ */
+const CAPTION_TEXT = /^(?:figure|fig\.?|hình|table|bảng|sơ đồ|biểu đồ)\s*\d+(?:[.-]\d+)*\b/i
 /** `3.2.1  Register account` — mỗi đoạn số ≤ 2 chữ số, tiêu đề không kết thúc bằng dấu câu. */
 const NUMBERED_HEADING = /^((?:[1-9]\d?)(?:\.(?:\d{1,2})){0,5})\.?[ \t ]+(\S.{0,148})$/
 const SENTENCE_END = /[.;:,!?]$/
@@ -213,6 +218,7 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null, im
     let level: number | null = null
     let detector: HeadingDetector | null = null
     if (chain.some((s) => CAPTION_NAME.test(s.name))) kind = "caption"
+    else if (!cell && CAPTION_TEXT.test(text.trim())) kind = "caption"
     else if (!cell) {
       const direct = pPr ? wAttr(wKid(pPr, "outlineLvl"), "val") : null
       if (direct !== null && Number(direct) < 9) {

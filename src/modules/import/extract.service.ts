@@ -19,6 +19,7 @@ import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractab
 import {
   IdAllocator,
   REF_LIST_FIELDS,
+  findKnownId,
   flattenItem,
   mergeFieldValue,
   normalizeKey,
@@ -37,6 +38,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES } from "./table-header-dictionary.js"
+import { tableRows, tableText } from "./table-rows.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
 
 export interface ExtractionRun {
@@ -44,7 +46,7 @@ export interface ExtractionRun {
   sections: GetImportResponse["extraction"]["sections"]
 }
 
-type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref">
+type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows">
 
 /** Section cần trích theo thứ tự xuất hiện trong tài liệu. */
 export const extractionPlan = (blocks: BlockLite[]): string[] => {
@@ -55,30 +57,17 @@ export const extractionPlan = (blocks: BlockLite[]): string[] => {
 
 // ─── tất định: bảng ─────────────────────────────────────────────
 
-const CELL_PATH = /\/tr\[(\d+)\]\/tc\[(\d+)\]\/p\[\d+\]$/
-
-/** Dựng lưới ô của bảng từ block `table_cell` (đoạn cùng ô nối bằng xuống dòng). */
-export const tableGrid = (table: BlockLite, blocks: BlockLite[]): string[][] => {
-  const grid: string[][] = []
-  const prefix = `${table.anchor.xml_path}/tr[`
-  for (const b of blocks) {
-    if (b.kind !== "table_cell" || !b.anchor.xml_path.startsWith(prefix)) continue
-    const m = CELL_PATH.exec(b.anchor.xml_path)
-    if (!m) continue
-    const [r, c] = [Number(m[1]), Number(m[2])]
-    grid[r] ??= []
-    grid[r][c] = grid[r][c] ? `${grid[r][c]}\n${b.text}` : b.text
-  }
-  return grid.map((row) => Array.from(row ?? [], (cell) => (cell ?? "").trim()))
-}
-
-const splitList = (s: string): string[] =>
-  s
+/**
+ * Ô danh sách ⇒ phần tử. Cột tham chiếu tách cả phần trong ngoặc (FLF-251): "Guest (Email Service, Identity Provider)"
+ * là tác nhân chính + tác nhân phụ ⇒ ba tên, không cắt giữa ngoặc thành "Guest (Email Service".
+ */
+export const splitList = (s: string, refs = false): string[] =>
+  (refs ? s.replace(/[()]/g, ",") : s)
     .split(/[,;\n]/)
     .map((x) => x.trim())
     .filter(Boolean)
 
-const LIST_FIELDS = new Set(["actor_ids", "goals"])
+const LIST_FIELDS = new Set(["actor_ids", "goals", "includes", "extends", "relations", "function_ids"])
 
 /** Bảng có mapping đủ field bắt buộc ⇒ item theo từng hàng dữ liệu; không đủ ⇒ `null` (để AI trích). */
 export const deterministicTableItems = (table: BlockLite, grid: string[][], profile: ITemplateProfile): EntityItem[] | null => {
@@ -93,7 +82,7 @@ export const deterministicTableItems = (table: BlockLite, grid: string[][], prof
     const value: Record<string, unknown> = {}
     for (const [col, field] of fields) {
       const cell = row[col]?.trim()
-      if (cell) value[field] = LIST_FIELDS.has(field) ? splitList(cell) : cell
+      if (cell) value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
     }
     if (!Object.keys(value).length) return []
     const key = typeof value.id === "string" ? normalizeKey(value.id) : null
@@ -127,7 +116,8 @@ export const chunkBlocks = <T extends { text: string }>(blocks: T[], budget = AI
   return out
 }
 
-const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text.split("\n").map((r) => `| ${r} |`).join("\n")}` : b.text}`).join("\n")
+/** Khối gửi AI; `text` của bảng đã là `tableText` (dựng trước khi chia lô để trần ký tự tính đúng phần gửi đi). */
+const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text}` : b.text}`).join("\n")
 
 const knownKeysText = (items: EntityItem[]): string => {
   const byEntity = new Map<string, string[]>()
@@ -144,11 +134,6 @@ export const itemsFromAi = (
   out: ImportExtractOutput,
   ctx: { sectionId: string; alloc: IdAllocator; known: EntityItem[]; sectionFunction: ProvisionalEntity | null; validBlocks: Set<string> }
 ): EntityItem[] => {
-  const byName = (entity: string, name: unknown): string | null => {
-    if (typeof name !== "string") return null
-    const hit = ctx.known.find((k) => k.entity === entity && typeof k.value.name === "string" && k.value.name.toLowerCase() === name.toLowerCase())
-    return hit?.id ?? null
-  }
   let functionUsed = false
   return out.items.map((raw) => {
     const value = { ...raw.value }
@@ -159,7 +144,7 @@ export const itemsFromAi = (
         id = ctx.sectionFunction.id
         functionUsed = true
       } else {
-        id = raw.key ? normalizeKey(raw.key) : byName(raw.entity, value.name ?? value.term)
+        id = raw.key ? normalizeKey(raw.key) : findKnownId(ctx.known, raw.entity, value.name ?? value.term)
         id ??= ctx.alloc.next(raw.entity)
         ctx.alloc.reserve(raw.entity, id)
       }
@@ -289,24 +274,28 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     const items: EntityItem[] = [...provisionalItems(section_id, provisional)]
     const handledTables = new Set<string>()
     for (const t of sectionBlocks.filter((b) => b.kind === "table")) {
-      const rows = deterministicTableItems(t, tableGrid(t, blocks), profile)
+      const rows = deterministicTableItems(t, tableRows(t, blocks), profile)
       if (!rows) continue
       handledTables.add(t.block_id)
       for (const it of rows) {
-        it.id ??= alloc.next(it.entity)
+        // Hàng không có mã: dùng lại id của phần tử cùng tên đã biết (vd chức năng 3.1.4 = function của heading 3.x.y)
+        it.id ??= findKnownId([...known, ...items], it.entity, it.value.name ?? it.value.term) ?? alloc.next(it.entity)
         alloc.reserve(it.entity, it.id)
         items.push(it)
       }
     }
 
     const tablePrefixes = sectionBlocks.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
-    const aiBlocks = sectionBlocks.filter(
-      (b) =>
-        b.kind !== "heading" &&
-        b.text.trim() &&
-        !handledTables.has(b.block_id) &&
-        !(b.kind === "table_cell" && tablePrefixes.some((prefix) => b.anchor.xml_path.startsWith(prefix)))
-    )
+    const aiBlocks = sectionBlocks
+      .filter(
+        (b) =>
+          b.kind !== "heading" &&
+          b.text.trim() &&
+          !handledTables.has(b.block_id) &&
+          !(b.kind === "table_cell" && tablePrefixes.some((prefix) => b.anchor.xml_path.startsWith(prefix)))
+      )
+      // Bảng gửi AI theo ô thật (FLF-251) — tách `text` theo dòng làm ô nhiều dòng thành nhiều hàng
+      .map((b) => (b.kind === "table" ? { ...b, text: tableText(tableRows(b, blocks)) } : b))
     const targets = targetsOf(section_id)
     let usageId: string | null = null
     const unmapped: string[] = []
