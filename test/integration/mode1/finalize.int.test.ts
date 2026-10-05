@@ -368,6 +368,23 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(mockImages.flat()).toEqual([{ mime: "image/png", bytes: PNG.length }])
   })
 
+  it("FLF-252: sơ đồ đọc trước bảng use case, ảnh không ghi mã ⇒ ghép theo tên với bảng phía sau, không cấp mã mới / trùng, phần trùng không phải duyệt", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
+    mockOverrides.next = (prompt: string) => {
+      if (!prompt.includes("# Read Diagram Image")) return fakeMode1(prompt)
+      const b = /Image block: \[(B\d{4,})\]/.exec(prompt)?.[1]
+      const uc = (name: string, actor_ids: string[]) => ({ entity: "use_cases", key: null, value: { name, actor_ids }, confidence: 0.7, field_confidence: {}, source_block_ids: [b] })
+      return JSON.stringify({ section_id: "fixed:2.2.1", diagram_kind: "usecase", items: [uc("register account", ["Learner"]), uc("Log In", ["Learner"])], unmapped_block_ids: [] })
+    }
+    await runExtraction(projectId, userId, importId)
+    const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
+    const ucIds = new Set(drafts.flatMap((d) => d.fields).flatMap((f) => /^use_cases\[id=([^\]]+)\]/.exec(f.path)?.[1] ?? []))
+    // trước đây ảnh không mã được cấp UC-01, UC-02… rồi gộp nhầm với UC của bảng; nay ghép theo tên ⇒ chỉ còn mã của bảng
+    expect([...ucIds].sort()).toEqual(["UC-01", "UC-02"])
+    const review = await extractionSummary(importId)
+    expect(review.review_fields.filter((f) => f.origin === "vision" && f.path.startsWith("use_cases["))).toEqual([])
+  })
+
   it("diagram đọc được ⇒ Spine có actor + quan hệ từ ảnh (hợp với bảng), hình gốc giữ y trong bản render + đánh dấu sơ đồ gốc (§4.13), không cờ ảnh", async () => {
     mockOverrides.next = fakeMode1
     const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
@@ -375,7 +392,8 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     const guest = spine.actors.find((a) => a.name === "Guest")!
     const learner = spine.actors.find((a) => a.name === "Learner")!
     expect(guest).toBeTruthy()
-    expect(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids.sort()).toEqual([guest.id, learner.id].sort())
+    // sắp xếp trên bản sao — `sort()` tại chỗ đổi thứ tự trong `spine` rồi làm hash sơ đồ tính bên dưới lệch
+    expect([...(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids ?? [])].sort()).toEqual([guest.id, learner.id].sort())
     // Hình của người dùng giữ nguyên, đánh dấu loại + hash dữ liệu lúc import (đúng dữ liệu vừa đọc từ ảnh)
     const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
     expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: { kind: "usecase", source_hash: originalDiagramHash(spine, "usecase") } })])

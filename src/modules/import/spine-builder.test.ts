@@ -125,6 +125,16 @@ describe("buildImportOps", () => {
     expect(plan.spine.glossary.map((g) => g.term_native)).toEqual(["Vắng thi", undefined])
   })
 
+  it("FLF-252: tên hệ thống + phạm vi release tài liệu ghi vào project", () => {
+    const spine = createEmptySpine({ name: "Lumen" })
+    const ops = buildImportOps(spine, [
+      { entity: "project", id: null, value: { system_name: "Lumen LMS", release_scope: { in: ["Course catalog", "Enrolment"], out: "Mobile app" } } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.project.system_name).toBe("Lumen LMS")
+    expect(plan.spine.project.release_scope).toEqual({ in: ["Course catalog", "Enrolment"], out: ["Mobile app"] })
+  })
+
   it("FLF-252: khớp lỏng khi chỉ một phần tử khớp — tên màn có phần trong ngoặc / thiếu chữ Screen; mơ hồ ⇒ bỏ", () => {
     const spine = createEmptySpine({ name: "Flint" })
     const ops = buildImportOps(spine, [

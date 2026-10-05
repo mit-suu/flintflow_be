@@ -124,6 +124,12 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   // form_factor là mảng nền tảng (FLF-237): tài liệu ghi một chuỗi hay danh sách đều thành mảng
   if (project.form_factor !== undefined && strList(project.form_factor).length) ops.push({ op: "set", path: "project.form_factor", value: strList(project.form_factor) })
   if (project.goals !== undefined && strList(project.goals).length) ops.push({ op: "set", path: "project.goals", value: strList(project.goals) })
+  // FLF-252: tên hệ thống + phạm vi release tài liệu ghi (mục Scope / In scope / Out of scope)
+  if (str(project.system_name)) ops.push({ op: "set", path: "project.system_name", value: str(project.system_name) })
+  const scope = project.release_scope && typeof project.release_scope === "object" ? (project.release_scope as Record<string, unknown>) : null
+  if (scope && (strList(scope.in).length || strList(scope.out).length)) {
+    ops.push({ op: "set", path: "project.release_scope", value: { in: strList(scope.in), out: strList(scope.out) } })
+  }
 
   // features (+ "General" cho màn/function mồ côi)
   const features = of("features").filter(skip(spine.features))

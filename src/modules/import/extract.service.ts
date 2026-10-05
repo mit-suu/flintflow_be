@@ -22,6 +22,7 @@ import {
   findKnownId,
   flattenItem,
   mergeFieldValue,
+  nameKey,
   normalizeKey,
   parseFieldPath,
   resolveProvisional,
@@ -29,7 +30,7 @@ import {
   type ProvisionalEntity
 } from "./extracted-entities.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
-import { VISION_CONFIDENCE_CAP, needsConfirm } from "./import.constants.js"
+import { VISION_CONFIDENCE_CAP, needsConfirm, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
@@ -40,6 +41,7 @@ import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES, hasRequiredFields } from "./table-header-dictionary.js"
 import { tableRows, tableText } from "./table-rows.js"
 import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
+import { FUNCTION_LABELS, USE_CASE_LABELS, functionSpecValue, readSpecLines, useCaseSpecValue } from "./spec-fields.js"
 import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
 
 export interface ExtractionRun {
@@ -47,7 +49,16 @@ export interface ExtractionRun {
   sections: GetImportResponse["extraction"]["sections"]
 }
 
-type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows">
+type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows"> & Partial<Pick<IDocBlock, "mentions">>
+
+/** Loại mã nhận được trong chữ (mention) ⇒ mảng Spine — giữ chỗ id trước khi cấp mã mới. */
+const MENTION_ARRAYS: Readonly<Partial<Record<MentionEntity, string>>> = {
+  use_case: "use_cases",
+  function: "functions",
+  nfr: "nfrs",
+  business_rule: "business_rules",
+  screen: "screens"
+}
 
 /** Section cần trích theo thứ tự xuất hiện trong tài liệu. */
 export const extractionPlan = (blocks: BlockLite[]): string[] => {
@@ -72,6 +83,69 @@ const LIST_FIELDS = new Set(["actor_ids", "goals", "includes", "extends", "relat
 
 /** Field nhận giá trị hàng trên khi ô trống (ô gộp dọc — "Feature" gộp cho nhiều màn hình liền nhau). */
 const FILL_DOWN_FIELDS = new Set(["feature_id"])
+
+/** Phần đọc tất định của một section (FLF-252): item, bảng đã đọc hết, block đặc tả đã đọc, block phải giữ nguyên văn. */
+export interface Settled {
+  items: EntityItem[]
+  handled: Set<string>
+  consumed: Set<string>
+  verbatim: Set<string>
+}
+const EMPTY_SETTLED: Settled = { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() }
+
+/** Độ tin của phần đọc theo nhãn đặc tả quen (đúng nguyên văn, không đoán) — không cần xác nhận. */
+const SPEC_CONFIDENCE = 0.9
+
+/**
+ * Đọc tất định một section (FLF-252), id cấp sau: bảng khớp đủ cột; bảng dọc đặc tả use case (mỗi bảng một use case —
+ * bảng vẫn giữ nguyên văn vì Spine không chứa luồng / điều kiện); đặc tả chức năng dạng "nhãn: giá trị" của section chức năng.
+ */
+export const settleSection = (
+  sectionId: string,
+  blocks: BlockLite[],
+  profile: ITemplateProfile,
+  provisional: Map<string, ProvisionalEntity>
+): Settled => {
+  const out: Settled = { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() }
+  const sectionBlocks = blocks.filter((b) => b.section_id === sectionId)
+  const targets = targetsOf(sectionId)
+  for (const t of sectionBlocks.filter((b) => b.kind === "table")) {
+    const rows = tableRows(t, blocks)
+    const items = deterministicTableItems(t, rows, profile)
+    if (items) {
+      out.handled.add(t.block_id)
+      out.items.push(...items)
+      continue
+    }
+    if (!targets.includes("use_cases")) continue
+    const uc = useCaseSpecValue(readSpecLines([{ ...t, rows }], USE_CASE_LABELS).values)
+    if (!uc) continue
+    out.handled.add(t.block_id)
+    out.verbatim.add(t.block_id)
+    out.items.push({
+      entity: "use_cases",
+      id: uc.key ? normalizeKey(uc.key) : null,
+      value: uc.value,
+      confidence: SPEC_CONFIDENCE,
+      field_confidence: {},
+      source_block_ids: [t.block_id],
+      origin: "deterministic"
+    })
+  }
+  const fn = provisional.get(sectionId)
+  if (fn?.entity === "functions") {
+    const sources = sectionBlocks
+      .filter((b) => b.kind !== "heading" && b.kind !== "table_cell" && !out.handled.has(b.block_id))
+      .map((b) => (b.kind === "table" ? { ...b, rows: tableRows(b, blocks) } : b))
+    const spec = readSpecLines(sources, FUNCTION_LABELS)
+    const value = functionSpecValue(spec.values)
+    if (Object.keys(value).length) {
+      for (const id of spec.consumed) out.consumed.add(id)
+      out.items.push({ entity: "functions", id: fn.id, value, confidence: SPEC_CONFIDENCE, field_confidence: {}, source_block_ids: [...spec.consumed], origin: "deterministic" })
+    }
+  }
+  return out
+}
 
 /** Tên ngắn từ một câu yêu cầu: bỏ "The system shall", cắt ở ranh giới từ trong 80 ký tự. */
 export const shortName = (statement: string): string => {
@@ -223,6 +297,37 @@ export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<
   return near?.text.trim() ?? "(none)"
 }
 
+/** Caption chỉ hình là sơ đồ đọc được (use case, ngữ cảnh, ERD / class, luồng màn). */
+const DIAGRAM_CAPTION = /(use[\s-]?case|context|erd|entity[\s-]?relationship|class diagram|data model|screens?[\s-]?flow|navigation|sơ đồ|biểu đồ|diagram)/i
+/** Caption chỉ hình không phải 4 loại sơ đồ đọc được (ảnh màn hình, wireframe, sequence / activity…) — đọc chỉ tốn credit. */
+const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|sequence|activity|state machine|deployment|component|workflow)/i
+
+/**
+ * Ảnh có gửi AI đọc không (FLF-252): caption nói là ảnh màn hình / sơ đồ khác loại ⇒ không; ảnh ở mục thường có sơ đồ
+ * (ngữ cảnh, use case, luồng màn, ERD) hoặc caption nói là sơ đồ đọc được (mẫu IEEE đặt sơ đồ ở mục khác FPT) ⇒ có.
+ */
+export const readsImage = (sectionId: string, caption: string): boolean =>
+  !NOT_DIAGRAM_CAPTION.test(caption) && (DIAGRAM_SECTIONS.has(sectionId) || DIAGRAM_CAPTION.test(caption))
+
+/**
+ * Phần tử đọc từ ảnh trùng phần tử đã có từ chữ / bảng (cùng loại, cùng id) ⇒ chỉ giữ quan hệ mới (actor nối thêm,
+ * include / extend…) để bước 1.9 chỉ hỏi phần ảnh thêm vào; không có gì mới ⇒ bỏ item (FLF-252).
+ */
+export const onlyNewFromVision = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] =>
+  items.flatMap((it) => {
+    const existing = known.find((k) => k.entity === it.entity && k.id === it.id && k.origin !== "vision")
+    if (!existing) return [it]
+    const value: Record<string, unknown> = {}
+    for (const [field, v] of Object.entries(it.value)) {
+      if (!REF_LIST_FIELDS.has(field) || !Array.isArray(v)) continue
+      const prev = Array.isArray(existing.value[field]) ? (existing.value[field] as unknown[]).map((x) => nameKey(String(x))) : []
+      const added = v.filter((x) => !prev.includes(nameKey(String(x))))
+      if (added.length) value[field] = added
+    }
+    if (!Object.keys(value).length) return []
+    return [{ ...it, value, field_confidence: Object.fromEntries(Object.entries(it.field_confidence).filter(([field]) => field in value)) }]
+  })
+
 /** Item đọc từ ảnh: `origin: vision`, độ tin (cả từng field) không vượt trần ⇒ luôn qua màn 1.9. */
 export const visionItems = (items: EntityItem[]): EntityItem[] =>
   items.map((it) => ({
@@ -311,6 +416,24 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   for (const p of provisional.values()) known.push(...provisionalItems(p.section, provisional))
   const alloc = new IdAllocator()
   for (const k of known) if (k.id) alloc.reserve(k.entity, k.id)
+  // FLF-252: giữ chỗ mọi mã tài liệu ghi (UC-01, BR-12…) trước khi cấp id mới — ảnh / chữ ở mục đứng trước không còn được
+  // cấp trùng mã thật của bảng phía sau (rồi bị gộp nhầm thành một phần tử lúc finalize)
+  for (const b of blocks) for (const m of b.mentions ?? []) if (MENTION_ARRAYS[m.entity]) alloc.reserve(MENTION_ARRAYS[m.entity]!, m.id)
+
+  // FLF-252: phần đọc tất định (bảng, đặc tả "nhãn: giá trị") của mọi section chưa xong — chạy trước mọi lượt AI để ảnh /
+  // chữ ở mục trước ghép được với phần tử của bảng phía sau (sơ đồ use case ở 2.2.1 ⇄ bảng use case ở 2.2.2)
+  const settled = new Map<string, Settled>()
+  for (const section_id of plan) {
+    if (draftOf.get(section_id)!.status === "done") continue
+    const found = settleSection(section_id, blocks, profile, provisional)
+    for (const it of found.items) {
+      // Không có mã: dùng lại id của phần tử cùng tên đã biết (vd chức năng 3.1.4 = function của heading 3.x.y)
+      it.id ??= findKnownId([...known, ...found.items], it.entity, it.value.name ?? it.value.term) ?? alloc.next(it.entity)
+      alloc.reserve(it.entity, it.id)
+    }
+    settled.set(section_id, found)
+    known.push(...found.items)
+  }
 
   for (const section_id of plan) {
     const draft = draftOf.get(section_id)!
@@ -319,19 +442,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     await doc.save()
 
     const sectionBlocks = blocks.filter((b) => b.section_id === section_id)
-    const items: EntityItem[] = [...provisionalItems(section_id, provisional)]
-    const handledTables = new Set<string>()
-    for (const t of sectionBlocks.filter((b) => b.kind === "table")) {
-      const rows = deterministicTableItems(t, tableRows(t, blocks), profile)
-      if (!rows) continue
-      handledTables.add(t.block_id)
-      for (const it of rows) {
-        // Hàng không có mã: dùng lại id của phần tử cùng tên đã biết (vd chức năng 3.1.4 = function của heading 3.x.y)
-        it.id ??= findKnownId([...known, ...items], it.entity, it.value.name ?? it.value.term) ?? alloc.next(it.entity)
-        alloc.reserve(it.entity, it.id)
-        items.push(it)
-      }
-    }
+    const { items: settledItems, handled: handledTables, consumed, verbatim } = settled.get(section_id) ?? EMPTY_SETTLED
+    const items: EntityItem[] = [...provisionalItems(section_id, provisional), ...settledItems]
 
     const tablePrefixes = sectionBlocks.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
     const aiBlocks = sectionBlocks
@@ -340,13 +452,15 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           b.kind !== "heading" &&
           b.text.trim() &&
           !handledTables.has(b.block_id) &&
+          !consumed.has(b.block_id) &&
           !(b.kind === "table_cell" && tablePrefixes.some((prefix) => b.anchor.xml_path.startsWith(prefix)))
       )
       // Bảng gửi AI theo ô thật (FLF-251) — tách `text` theo dòng làm ô nhiều dòng thành nhiều hàng
       .map((b) => (b.kind === "table" ? { ...b, text: tableText(tableRows(b, blocks)) } : b))
     const targets = targetsOf(section_id)
     let usageId: string | null = null
-    const unmapped: string[] = []
+    // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
+    const unmapped: string[] = [...verbatim]
     const heading = profile.heading_map.find((h) => h.section_id === section_id)
     const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
     const pause = async (result: { reason: "credits" | "resume_later"; userMessage: string }): Promise<ExtractionRun> => {
@@ -363,7 +477,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     // Phase 5: ảnh diagram của section (sau bảng tất định, trước lô chữ) ⇒ Gemini đọc từng ảnh; thực thể đọc được vào
     // known_keys để lô chữ dùng lại khoá. EMF/WMF / file gốc không còn ⇒ `unsupported` (không gọi AI, giữ ảnh gốc).
     const diagramImages: IExtractionDraft["diagram_images"] = []
-    for (const img of DIAGRAM_SECTIONS.has(section_id) ? sectionBlocks.filter((b) => b.kind === "image" && b.image_ref) : []) {
+    for (const img of sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(section_id, captionOf(b, sectionBlocks)))) {
       const image = await loadImportImage(projectId, img.image_ref!)
       if (!image) {
         diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
@@ -402,7 +516,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           ? []
           : visionItems(itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]) }))
       diagramImages.push({ block_id: img.block_id, kind: read.length ? result.data.diagram_kind : "other" })
-      items.push(...read)
+      // Phần tử ảnh trùng phần tử đã có từ chữ / bảng ⇒ chỉ giữ quan hệ mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
+      items.push(...onlyNewFromVision(read, [...known, ...items]))
     }
 
     for (const batch of targets.length ? chunkBlocks(aiBlocks) : []) {

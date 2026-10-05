@@ -7,7 +7,20 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
-import { AI_BATCH_CHARS, AI_BLOCK_CHARS, captionOf, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, shortName, splitList, visionItems } from "./extract.service.js"
+import {
+  AI_BATCH_CHARS,
+  AI_BLOCK_CHARS,
+  captionOf,
+  chunkBlocks,
+  deterministicTableItems,
+  extractionPlan,
+  itemsFromAi,
+  onlyNewFromVision,
+  readsImage,
+  shortName,
+  splitList,
+  visionItems
+} from "./extract.service.js"
 import { IdAllocator, flattenItem, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
@@ -310,6 +323,36 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     expect(captionOf(blk("B2", "image"), blocks)).toBe("Hình 1: Use case")
     expect(captionOf(blk("B4", "image"), blocks)).toBe("Hình 1: Use case")
     expect(captionOf(blk("B9", "image"), [blk("B9", "image"), blk("B10", "paragraph", "y")])).toBe("(none)")
+  })
+
+  it("FLF-252 readsImage: chọn ảnh theo caption — ảnh màn hình / sequence không đọc; sơ đồ đọc được ở mục khác FPT vẫn đọc", () => {
+    expect(readsImage("fixed:2.2.1", "(none)")).toBe(true)
+    expect(readsImage("fixed:2.2.1", "Figure 03. Use Case Diagram - Account")).toBe(true)
+    expect(readsImage("fixed:3.1.1", "Figure 17 - Register account screen layout")).toBe(false)
+    expect(readsImage("fixed:2.2.2", "Figure 5 - Sequence diagram for Login")).toBe(false)
+    expect(readsImage("fixed:4.1", "Figure 9 - Entity Relationship Diagram")).toBe(true)
+    expect(readsImage("function:@B0042", "Hình 3: Giao diện đăng nhập")).toBe(false)
+    expect(readsImage("function:@B0042", "(none)")).toBe(false)
+  })
+
+  it("FLF-252 onlyNewFromVision: phần tử ảnh trùng phần tử của bảng ⇒ chỉ còn quan hệ mới; không có gì mới ⇒ bỏ", () => {
+    const table: EntityItem = { entity: "use_cases", id: "UC-02", value: { name: "Log in", actor_ids: ["Learner"] }, confidence: 0.95, field_confidence: {}, source_block_ids: ["B0010"], origin: "deterministic" }
+    const vision = (value: Record<string, unknown>, id = "UC-02", entity = "use_cases"): EntityItem => ({
+      entity,
+      id,
+      value,
+      confidence: 0.6,
+      field_confidence: { actor_ids: 0.5, name: 0.6 },
+      source_block_ids: ["B0005"],
+      origin: "vision"
+    })
+    expect(onlyNewFromVision([vision({ name: "Log In", actor_ids: ["learner", "Guest"] })], [table])).toEqual([
+      { ...vision({ actor_ids: ["Guest"] }), field_confidence: { actor_ids: 0.5 } }
+    ])
+    expect(onlyNewFromVision([vision({ name: "Log in", actor_ids: ["Learner"] })], [table])).toEqual([])
+    // phần tử mới hoàn toàn từ ảnh ⇒ giữ nguyên để người dùng xác nhận
+    const fresh = vision({ name: "Guest", kind: "human" }, "A02", "actors")
+    expect(onlyNewFromVision([fresh], [table])).toEqual([fresh])
   })
 
   it("visionItems: origin vision, độ tin item + từng field ≤ 0.7", () => {
