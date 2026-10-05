@@ -405,6 +405,37 @@ describe("readBlocks — bổ sung P4", () => {
     expect(await pkg.binary("word/media/none.png")).toBeNull()
   })
 
+  it("FLF-252: đoạn có cả chữ lẫn ảnh ⇒ block chữ + block ảnh đúng thứ tự trong đoạn; chỉ block chữ mang bookmark, đọc lại ổn định", async () => {
+    const blip = (rid: string) => `<w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="${rid}"/></w:drawing></w:r>`
+    const text = (t: string) => `<w:r><w:t xml:space="preserve">${t}</w:t></w:r>`
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body:
+          // "Screen layout:" rồi ảnh màn hình (SRS WDP301)
+          `<w:p>${text("Screen layout:")}${blip("rIdImg1")}</w:p>` +
+          // sơ đồ rồi ngắt dòng + chú thích
+          `<w:p>${blip("rIdImg2")}<w:r><w:br/></w:r>${text("Figure xx - Screen flow for Developer")}</w:p>`,
+        extraDocRels: imageRel("rIdImg1", "image8.jpg") + imageRel("rIdImg2", "image4.jpg")
+      })
+    )
+    const blocks = await readBlocks(pkg)
+    expect(blocks.map((b) => [b.kind, b.text.trim(), b.image_ref, !!b.tail])).toEqual([
+      ["paragraph", "Screen layout:", null, false],
+      ["image", "", "word/media/image8.jpg", true],
+      ["image", "", "word/media/image4.jpg", true],
+      ["paragraph", "Figure xx - Screen flow for Developer", null, false]
+    ])
+    let n = 0
+    expect(ensureBlockBookmarks(blocks, () => `B${String(++n).padStart(4, "0")}`)).toBe(2)
+    const again = await readBlocks(await DocxPackage.load(await pkg.toBuffer()))
+    expect(again.map((b) => [b.kind, b.bookmark])).toEqual([
+      ["paragraph", "_ff_B0001"],
+      ["image", null],
+      ["image", null],
+      ["paragraph", "_ff_B0002"]
+    ])
+  })
+
   it("ảnh nhận bookmark neo nằm ngoài w:p ngay trước nó", async () => {
     const blocks = await readBlocks(
       await load(`<w:bookmarkStart w:id="0" w:name="_ff_B0003"/><w:bookmarkEnd w:id="0"/><w:p><w:r><w:drawing/></w:r></w:p>` + p("Sau ảnh"))

@@ -51,8 +51,9 @@ export interface OoxmlBlock {
   image_ref: string | null
   element: Element
   /**
-   * Phần chữ sau heading gõ chung đoạn ("4.2.4 Security" + ngắt dòng + câu — FLF-252): cùng `w:p` với heading đứng trước
-   * nên không neo bookmark riêng (tìm lại theo `text_hash`), không cho CR sửa tại chỗ.
+   * Block tách ra từ cùng một `w:p` với block khác (FLF-252): phần chữ sau heading gõ chung đoạn ("4.2.4 Security" +
+   * ngắt dòng + câu), hoặc ảnh nằm chung đoạn với chữ ("Screen layout:" + ảnh). Không neo bookmark riêng (đoạn đã mang
+   * bookmark của block kia; chữ tìm lại theo `text_hash`), không cho CR sửa tại chỗ.
    */
   tail?: boolean
 }
@@ -189,14 +190,27 @@ const firstCellParagraph = (tbl: Element): Element | null => {
 }
 
 /** Tách block từ DOM (hàm thuần trên DOM, không đọc zip). */
-/** `a:blip/@r:embed` đầu tiên của đoạn ⇒ part ảnh (`word/media/…`) theo rels của `document.xml`. */
-const imageRefOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string | null => {
+/** Mọi `a:blip/@r:embed` của đoạn theo thứ tự ⇒ part ảnh (`word/media/…`) theo rels của `document.xml`. */
+const imageRefsOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string[] => {
+  const out: string[] = []
   for (const blip of Array.from(p.getElementsByTagNameNS("*", "blip"))) {
     const rid = blip.getAttributeNS(NS.r, "embed")
     const target = rid ? imageTargets.get(rid) : undefined
-    if (target) return target.startsWith("/") ? target.slice(1) : `word/${target}`
+    if (target) out.push(target.startsWith("/") ? target.slice(1) : `word/${target}`)
   }
-  return null
+  return out
+}
+
+/** `a:blip/@r:embed` đầu tiên của đoạn ⇒ part ảnh; không có ⇒ `null`. */
+const imageRefOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string | null => imageRefsOf(p, imageTargets)[0] ?? null
+
+/** Hình đứng trước chữ đầu tiên của đoạn ("[ảnh] ⏎ Figure 3 …"); "Screen layout: [ảnh]" ⇒ chữ trước. */
+const pictureBeforeText = (p: Element): boolean => {
+  for (const el of Array.from(p.getElementsByTagNameNS(NS.w, "*"))) {
+    if (el.localName === "drawing" || el.localName === "pict") return true
+    if (el.localName === "t" && (el.textContent ?? "").trim()) return false
+  }
+  return false
 }
 
 export const parseBlocks = (doc: Document, stylesDoc: Document | null = null, imageTargets: ReadonlyMap<string, string> = new Map()): OoxmlBlock[] => {
@@ -296,6 +310,28 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null, im
       push({ ...base, text: split.heading, kind: "heading", level: split.level, heading_detector: "numbering_pattern", bookmark: takeBookmark(p), editable: false })
       headingStack.push({ level: split.level, text: split.heading })
       push({ ...base, text: split.rest, para_id: null, image_ref: null, kind: "paragraph", level: null, heading_detector: null, bookmark: null, editable: false, tail: true })
+      return
+    }
+
+    // Đoạn có cả chữ lẫn hình ("Screen layout:" + ảnh màn hình, "[sơ đồ] ⏎ Figure xx - Screen flow") ⇒ block chữ + block ảnh
+    // đúng thứ tự trong đoạn (FLF-252). Trước đây cả đoạn là block chữ: bản in mất ảnh, I-4 không đọc được sơ đồ.
+    const pictures = !cell && kind !== "heading" && hasPicture(p) && !wAll(p, "txbxContent").length ? imageRefsOf(p, imageTargets) : []
+    if (pictures.length) {
+      const imagesFirst = pictureBeforeText(p)
+      const textBlock = () => push({ ...base, image_ref: null, kind, level, heading_detector: detector, bookmark: takeBookmark(p), editable: !embedded && !hasField(p) })
+      const imageBlocks = () =>
+        pictures.forEach((ref) =>
+          push({ ...base, text: "", image_ref: ref, para_id: null, kind: "image", level: null, heading_detector: null, bookmark: null, editable: false, tail: true })
+        )
+      if (imagesFirst) {
+        // bookmark của đoạn vẫn về block chữ (block ảnh không neo riêng)
+        const own = takeBookmark(p)
+        imageBlocks()
+        push({ ...base, image_ref: null, kind, level, heading_detector: detector, bookmark: own, editable: !embedded && !hasField(p) })
+      } else {
+        textBlock()
+        imageBlocks()
+      }
       return
     }
 
