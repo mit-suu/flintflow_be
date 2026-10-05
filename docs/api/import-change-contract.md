@@ -340,10 +340,22 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
 - **3.12**: từ chối group chứa vị trí này ⇒ giữ ảnh gốc, cờ vàng `original_diagram_stale` sau khi ghi.
 - **C-5**: chạy khô không còn tính `diagram_stale` là "lỗi đỏ mới" — hình PlantUML được vẽ lại ở 3.14 (trước đây mọi CR đổi tên use case / actor / màn trượt kiểm vì cờ này).
 
+### 4.14 Import đọc bảng theo dữ liệu (FLF-252 — chỉ thêm field, contract-change chờ 4/4)
+
+- **`tableMapEntrySchema`** thêm `role?` (vai trò cột theo dữ liệu dưới tiêu đề: `row_no` số thứ tự · `code` mã · `date` ·
+  `version` · `change_type` · `mark` ô đánh dấu · `text` · `name`) và `samples?` (tối đa 3 giá trị đầu của cột). Bảng chỉ có hàng
+  tiêu đề ⇒ không có hai field này.
+- **`table_map` chỉ còn bảng ở section có trích** (FLF-251): bảng Record of Changes, bảng dưới heading nhóm / không khớp không
+  còn xuất hiện ở #5. `field_path` có thêm giá trị: `actors[].kind`, `use_cases[].includes|extends`, `screens[].feature_id`,
+  `functions[].id|name|feature_id|trigger|description` (bảng 3.1.4), `entities[].relations`, `nfrs[].priority`,
+  `glossary[].term_native`, `messages[].function_ids`, `permissions[].screen_id|role_id` (ma trận phân quyền 3.1.3 — mọi cột
+  vai trò cùng mang `permissions[].role_id`, tên vai trò = tiêu đề cột). Request #5 không đổi hình.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền) — chỉ thêm field, contract-change, chờ 4/4 |
 | 2026-09-24 | Gemini quá tải | §4.10: đọc ảnh lỗi sau mọi lượt thử không còn `paused` — ảnh `unavailable` + cờ vàng. Skill Gemini thêm `fallbackModels` (`gemini-3.6-flash`, `gemini-3.5-flash-lite`); log AI ghi model thật sự trả lời. Hình API không đổi |
 | 2026-09-24 | mode 1 v3 — sơ đồ gốc | §4.13: giữ ảnh sơ đồ gốc khi import (`CustomBlock.diagram`), không in PlantUML cùng loại, cờ vàng `original_diagram_stale`, `found_by: "diagram"` + đề xuất vẽ lại do code (C-4), C-5 bỏ `diagram_stale` khỏi "lỗi đỏ mới" — thay hành vi finalize §4.10, contract-change, chờ 4/4 |
 | 2026-09-24 | mode 1 v3 — phase 8 | §4.12: `POST …/amend` + `amendments[]`, cạnh `… → clarifying`, 3.4 cộng dồn vị trí, `owner-step-draft` nới trạng thái + mục riêng — contract-change, chờ 4/4 |

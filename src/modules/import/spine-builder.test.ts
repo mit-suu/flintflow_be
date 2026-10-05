@@ -5,7 +5,7 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import { IdAllocator, collectEntities, fieldPath, findKnownId, flattenItem, nameKey, normalizeKey, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps } from "./spine-builder.js"
+import { buildImportOps, relationPhrase } from "./spine-builder.js"
 
 describe("extracted-entities", () => {
   it("chuẩn hoá khoá, cấp id không trùng", () => {
@@ -123,6 +123,47 @@ describe("buildImportOps", () => {
     expect(plan.spine.use_cases[0]).toMatchObject({ actor_ids: ["A01"], function_ids: ["FR-3.2.1"] })
     expect(plan.spine.messages[0].function_ids).toEqual(["FR-3.2.1"])
     expect(plan.spine.glossary.map((g) => g.term_native)).toEqual(["Vắng thi", undefined])
+  })
+
+  it("FLF-252: khớp lỏng khi chỉ một phần tử khớp — tên màn có phần trong ngoặc / thiếu chữ Screen; mơ hồ ⇒ bỏ", () => {
+    const spine = createEmptySpine({ name: "Flint" })
+    const ops = buildImportOps(spine, [
+      { entity: "screens", id: "SCR-01", value: { name: "Landing Page" } },
+      { entity: "screens", id: "SCR-02", value: { name: "Sign In Screen" } },
+      { entity: "screens", id: "SCR-03", value: { name: "Report (Daily)" } },
+      { entity: "screens", id: "SCR-04", value: { name: "Report (Weekly)" } },
+      { entity: "roles", id: "R01", value: { name: "Guest" } },
+      { entity: "permissions", id: "P001", value: { screen_id: "Landing Page (Dark)", role_id: "Guest", action: "access" } },
+      { entity: "permissions", id: "P002", value: { screen_id: "Sign In", role_id: "guest", action: "access" } },
+      { entity: "permissions", id: "P003", value: { screen_id: "Report", role_id: "Guest", action: "view" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.permissions.map((p) => [p.screen_id, p.role_id])).toEqual([
+      ["SCR-01", "R01"],
+      ["SCR-02", "R01"]
+    ])
+  })
+
+  it("FLF-252: quan hệ dạng 'động từ + Thực thể' (ERD FlintFlow xuất ra) ⇒ thực thể + nhãn quan hệ", () => {
+    const pool = [
+      { id: "E01", name: "Schedule Slot" },
+      { id: "E02", name: "Slot" },
+      { id: "E03", name: "Grade Record" }
+    ]
+    expect(relationPhrase("teaches Schedule Slot", pool)).toEqual({ id: "E01", verb: "teaches" })
+    expect(relationPhrase("Grade Record", pool)).toEqual({ id: "E03", verb: "" })
+    // động từ không phải tiếng Anh thường ⇒ chỉ giữ quan hệ, không giữ nhãn
+    expect(relationPhrase("ghi nhận Grade Record", pool)).toEqual({ id: "E03", verb: "" })
+    expect(relationPhrase("owns Invoice", pool)).toBeNull()
+
+    const spine = createEmptySpine({ name: "Edu" })
+    const ops = buildImportOps(spine, [
+      { entity: "entities", id: "E01", value: { name: "User", relations: ["teaches Schedule Slot", "earns Grade Record", "Ghost"] } },
+      { entity: "entities", id: "E02", value: { name: "Schedule Slot" } },
+      { entity: "entities", id: "E03", value: { name: "Grade Record" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.entities[0]).toMatchObject({ relations: ["E02", "E03"], relation_verbs: { E02: "teaches", E03: "earns" } })
   })
 })
 

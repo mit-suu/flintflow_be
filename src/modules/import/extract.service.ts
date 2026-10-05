@@ -39,7 +39,8 @@ import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES } from "./table-header-dictionary.js"
 import { tableRows, tableText } from "./table-rows.js"
-import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
+import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
+import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
 
 export interface ExtractionRun {
   doc: IImportedDocument
@@ -69,22 +70,56 @@ export const splitList = (s: string, refs = false): string[] =>
 
 const LIST_FIELDS = new Set(["actor_ids", "goals", "includes", "extends", "relations", "function_ids"])
 
-/** Bảng có mapping đủ field bắt buộc ⇒ item theo từng hàng dữ liệu; không đủ ⇒ `null` (để AI trích). */
+/** Field nhận giá trị hàng trên khi ô trống (ô gộp dọc — "Feature" gộp cho nhiều màn hình liền nhau). */
+const FILL_DOWN_FIELDS = new Set(["feature_id"])
+
+/**
+ * Ma trận phân quyền (FLF-252): mỗi cột vai trò ⇒ một vai trò (tên = tiêu đề cột), mỗi ô đánh dấu ⇒ một quyền
+ * màn hình × vai trò × thao tác ("X"/"✓" ⇒ `access`, "view, create" ⇒ hai quyền). Tên màn / vai trò phân giải lúc dựng op.
+ */
+const matrixItems = (table: BlockLite, grid: string[][], shape: TableShape, cols: TableMapEntry[], confidence: number): EntityItem[] | null => {
+  const screenCol = cols.find((c) => c.field_path === "permissions[].screen_id")?.column_index
+  const roleCols = cols.filter((c) => c.field_path === "permissions[].role_id" && shape.headers[c.column_index]).map((c) => c.column_index)
+  if (screenCol === undefined || !roleCols.length) return null
+  const base = { id: null, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }
+  const roles = roleCols.map((c) => ({ ...base, entity: "roles", value: { name: shape.headers[c], actor_id: shape.headers[c] } }))
+  const permissions = shape.body.flatMap((r) => {
+    const screen = (grid[r][screenCol] ?? "").trim()
+    if (!screen) return []
+    return roleCols.flatMap((c) =>
+      markActions(grid[r][c] ?? "").map((action) => ({ ...base, entity: "permissions", value: { screen_id: screen, role_id: shape.headers[c], action } }))
+    )
+  })
+  return [...roles, ...permissions]
+}
+
+/**
+ * Bảng có mapping đủ field bắt buộc ⇒ item theo từng hàng dữ liệu; không đủ ⇒ `null` (để AI trích). Đọc theo hình dạng
+ * bảng (FLF-252): hàng tiêu đề thật (bỏ hàng tên bảng), hàng nhóm không thành phần tử (nhãn nhóm làm feature của màn).
+ */
 export const deterministicTableItems = (table: BlockLite, grid: string[][], profile: ITemplateProfile): EntityItem[] | null => {
   const cols = profile.table_map.filter((t) => t.block_id === table.block_id && t.field_path)
-  if (!cols.length || grid.length < 2) return null
+  const shape = tableShape(grid)
+  if (!cols.length || !shape.body.length) return null
   const entity = cols[0].field_path!.split("[")[0]
+  const confidence = Math.min(...cols.map((c) => (c.confirmed ? 1 : c.confidence)))
+  if (entity === "permissions") return matrixItems(table, grid, shape, cols, confidence)
   const def = TABLE_ENTITIES.find((d) => d.entity === entity)
   const fields = new Map(cols.filter((c) => c.field_path!.startsWith(`${entity}[`)).map((c) => [c.column_index, c.field_path!.split("].")[1]]))
   if (!def || !def.required.every((f) => [...fields.values()].includes(f))) return null
-  const confidence = Math.min(...cols.map((c) => (c.confirmed ? 1 : c.confidence)))
-  return grid.slice(1).flatMap((row) => {
+  const above = new Map<string, string>()
+  return shape.body.flatMap((r) => {
     const value: Record<string, unknown> = {}
     for (const [col, field] of fields) {
-      const cell = row[col]?.trim()
-      if (cell) value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
+      let cell: string | undefined = grid[r][col]?.trim()
+      if (!cell && FILL_DOWN_FIELDS.has(field)) cell = above.get(field)
+      if (!cell) continue
+      if (FILL_DOWN_FIELDS.has(field)) above.set(field, cell)
+      value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
     }
     if (!Object.keys(value).length) return []
+    const group = groupOf(shape, r)
+    if (entity === "screens" && value.feature_id === undefined && group) value.feature_id = group
     const key = typeof value.id === "string" ? normalizeKey(value.id) : null
     delete value.id
     return [{ entity, id: key, value, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }]

@@ -69,7 +69,9 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     header: t.header,
     field_path: t.field_path ?? null,
     confidence: t.confidence,
-    confirmed: t.confirmed
+    confirmed: t.confirmed,
+    ...(t.role ? { role: t.role } : {}),
+    ...(t.samples?.length ? { samples: [...t.samples] } : {})
   })),
   required_sections: [...p.required_sections],
   language: p.language,

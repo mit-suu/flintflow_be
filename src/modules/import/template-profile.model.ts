@@ -27,6 +27,9 @@ export interface TableMapEntry {
   field_path: string | null
   confidence: number
   confirmed: boolean
+  /** FLF-252: vai trò cột theo dữ liệu (`row_no`, `code`, `mark`…) và tối đa 3 giá trị đầu — người dùng nhìn dữ liệu khi xác nhận. */
+  role?: string
+  samples?: string[]
 }
 
 /** Mục của layout tài liệu người dùng (FLF-182) — xem `layoutEntrySchema`. */
@@ -101,7 +104,9 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             header: { type: String, default: "" },
             field_path: { type: String, default: null },
             confidence,
-            confirmed: { type: Boolean, default: false }
+            confirmed: { type: Boolean, default: false },
+            role: { type: String, default: undefined },
+            samples: { type: [String], default: undefined }
           },
           opts
         )

@@ -91,7 +91,11 @@ export const tableMapEntrySchema = z.object({
   header: z.string(),
   field_path: z.string().nullable(),
   confidence,
-  confirmed: z.boolean()
+  confirmed: z.boolean(),
+  /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
+  role: z.string().optional(),
+  /** FLF-252: tối đa 3 giá trị đầu của cột. */
+  samples: z.array(z.string()).optional()
 })
 
 /**

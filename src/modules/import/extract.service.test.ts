@@ -143,6 +143,52 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(items[0].value).toEqual({ name: "Create slot", actor_ids: ["Officer", "Email Service"], includes: ["Send change notice", "UC-07"] })
   })
 
+  it("FLF-252: hàng nhóm không thành phần tử; hàng tên bảng bị bỏ; nhãn nhóm làm feature của màn; Feature gộp dọc điền xuống", () => {
+    const ucRows = [
+      ["Use cases of the system"],
+      ["ID", "Use Case", "Actors", "Description"],
+      ["1", "Account & Organization"],
+      ["UC-01", "Register Account", "Guest", "Create an account"]
+    ]
+    const uc = deterministicTableItems(blocks[0], ucRows, profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids")]))!
+    expect(uc.map((i) => [i.id, i.value.name])).toEqual([["UC-01", "Register Account"]])
+
+    const screenRows = [
+      ["Screen", "Feature", "Description"],
+      ["PUBLIC SCREENS"],
+      ["Landing Page", "", "Marketing page"],
+      ["Login", "Account", "Sign in"],
+      ["Logout", "", "Sign out"]
+    ]
+    const screens = deterministicTableItems(blocks[0], screenRows, profileOf([col(0, "screens[].name"), col(1, "screens[].feature_id"), col(2, "screens[].description")]))!
+    expect(screens.map((i) => [i.value.name, i.value.feature_id])).toEqual([
+      ["Landing Page", "PUBLIC SCREENS"],
+      ["Login", "Account"],
+      ["Logout", "Account"]
+    ])
+  })
+
+  it("FLF-252: ma trận phân quyền ⇒ vai trò theo tiêu đề cột + quyền theo ô đánh dấu", () => {
+    const rows = [
+      ["Screen", "Guest", "Admin"],
+      ["PUBLIC SCREENS"],
+      ["Landing Page", "X", "X"],
+      ["Users", "", "view, delete"]
+    ]
+    const items = deterministicTableItems(blocks[0], rows, profileOf([col(0, "permissions[].screen_id"), col(1, "permissions[].role_id"), col(2, "permissions[].role_id")]))!
+    expect(items.filter((i) => i.entity === "roles").map((i) => i.value)).toEqual([
+      { name: "Guest", actor_id: "Guest" },
+      { name: "Admin", actor_id: "Admin" }
+    ])
+    expect(items.filter((i) => i.entity === "permissions").map((i) => i.value)).toEqual([
+      { screen_id: "Landing Page", role_id: "Guest", action: "access" },
+      { screen_id: "Landing Page", role_id: "Admin", action: "access" },
+      { screen_id: "Users", role_id: "Admin", action: "view" },
+      { screen_id: "Users", role_id: "Admin", action: "delete" }
+    ])
+    expect(items.every((i) => i.origin === "deterministic" && i.id === null)).toBe(true)
+  })
+
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {
     const items = deterministicTableItems(blocks[0], grid, profileOf([col(0, "use_cases[].id", 0.6), col(1, "use_cases[].name", 0.95)]))!
     const fields = items.flatMap(flattenItem)

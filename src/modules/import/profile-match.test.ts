@@ -4,7 +4,7 @@ import { assignBlockSections, matchHeadings, matchProfile, matchTables, missingR
 import { MAPPING_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
-import { matchTableHeader } from "./table-header-dictionary.js"
+import { matchTable, matchTableHeader } from "./table-header-dictionary.js"
 
 const headingSections = async (numberedOnly = false) => {
   const { blocks } = await parseDocument(await makeSrsDocx({ numberedOnly }))
@@ -82,6 +82,38 @@ describe("matchTableHeader", () => {
     expect(matchTableHeader(["Screen", "Guest", "User", "Admin"], "fixed:3.1.3").entity).toBeNull()
     expect(matchTableHeader(["Date", "Version", "A*, M, D", "In charge", "Change Description"], "fixed:I").entity).toBeNull()
     expect(matchTableHeader(["Field Name", "Type", "Description"], "function:@B0042").entity).toBeNull()
+  })
+})
+
+describe("matchTable — khớp theo cả dữ liệu dưới tiêu đề (FLF-252)", () => {
+  const paths = (rows: string[][], section: string | null) => matchTable(rows, section).columns.map((c) => c.field_path)
+
+  it("cột '#' chứa mã ⇒ cột mã; cột 'ID' chỉ chứa số thứ tự ⇒ không dùng làm mã", () => {
+    expect(paths([["#", "Business Rule"], ["BR-01", "Password ≥ 8 chars"], ["BR-02", "Lock after 5 tries"]], "fixed:5.1")).toEqual(["business_rules[].id", "business_rules[].statement"])
+    expect(paths([["ID", "Actor", "Description"], ["1", "Guest", "Visitor"], ["2", "Admin", "Manager"]], "fixed:2.1")).toEqual([null, "actors[].name", "actors[].description"])
+  })
+
+  it("ma trận màn hình × vai trò ở mục phân quyền ⇒ permissions; cột ghi vai trò, độ tin đủ cao", () => {
+    const m = matchTable([["Screen", "Guest", "User", "Admin"], ["PUBLIC SCREENS"], ["Landing Page", "X", "X", "X"], ["Sign Up", "X", "", ""]], "fixed:3.1.3")
+    expect(m.entity).toBe("permissions")
+    expect(m.columns.map((c) => [c.field_path, c.confidence])).toEqual([
+      ["permissions[].screen_id", 0.9],
+      ["permissions[].role_id", 0.9],
+      ["permissions[].role_id", 0.9],
+      ["permissions[].role_id", 0.9]
+    ])
+    // ma trận ở mục khác không phải phân quyền ⇒ không đoán
+    expect(matchTable([["Screen", "Guest", "User"], ["Login", "X", "X"]], "fixed:3.1.2").entity).not.toBe("permissions")
+  })
+
+  it("cột mang vai trò theo dữ liệu + giá trị mẫu cho bước xác nhận; chỉ có tiêu đề ⇒ không có", () => {
+    const m = matchTable([["#", "Actor", "Description"], ["1", "Guest", "Visitor"], ["2", "Admin", "Manager"]], "fixed:2.1")
+    expect(m.columns.map((c) => [c.role, c.samples])).toEqual([
+      ["row_no", ["1", "2"]],
+      ["name", ["Guest", "Admin"]],
+      ["name", ["Visitor", "Manager"]]
+    ])
+    expect(matchTableHeader(["Actor", "Description"], "fixed:2.1").columns.every((c) => c.role === undefined && c.samples === undefined)).toBe(true)
   })
 })
 

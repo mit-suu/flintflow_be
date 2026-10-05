@@ -34,6 +34,32 @@ const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T)
   return (allowed as readonly string[]).includes(s) ? (s as T) : fallback
 }
 
+/** Khoá lỏng của tên: bỏ phần trong ngoặc và chữ chỉ loại ở cuối ("Screen", "Page", "màn hình"…). */
+const looseKey = (name: string): string =>
+  nameKey(name.replace(/\([^)]*\)/g, " "))
+    .replace(/\s*\b(screen|page|form|dialog|popup|modal|man hinh|trang)$/, "")
+    .trim()
+
+/** Động từ quan hệ hợp lệ của Spine (`relation_verbs`): tiếng Anh viết thường. */
+const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
+
+/**
+ * Cụm quan hệ "động từ + Thực thể" (bảng ERD FlintFlow xuất ra: "teaches Schedule Slot") ⇒ thực thể có tên dài nhất
+ * nằm ở cuối cụm + động từ đứng trước (giữ làm nhãn quan hệ khi là tiếng Anh thường). Không thực thể nào ⇒ `null`.
+ */
+export const relationPhrase = (ref: string, pool: { id: string; name?: string }[]): { id: string; verb: string } | null => {
+  const key = nameKey(ref)
+  const hits = pool
+    .map((p) => ({ id: p.id, k: p.name ? nameKey(p.name) : "" }))
+    .filter((p) => p.k && (key === p.k || key.endsWith(` ${p.k}`)))
+    .sort((a, b) => b.k.length - a.k.length)
+  if (!hits.length) return null
+  // Động từ lấy từ chữ gốc (không lấy từ khoá đã bỏ dấu — "ghi nhận" không thành "ghi nhan")
+  const words = ref.trim().split(/\s+/)
+  const verb = words.slice(0, Math.max(0, words.length - hits[0].k.split(" ").length)).join(" ").toLowerCase()
+  return { id: hits[0].id, verb: RELATION_VERB.test(verb) ? verb : "" }
+}
+
 const PRIORITIES = ["must", "should", "could", "wont"] as const
 const priority = (v: unknown): (typeof PRIORITIES)[number] | null => {
   const s = str(v).toLowerCase()
@@ -49,16 +75,22 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions") })
 
   // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC). So tên đã chuẩn hoá (FLF-251):
-  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC01" ra "UC-01"
+  // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC01" ra "UC-01".
+  // Không khớp ⇒ so khoá lỏng (FLF-252) nếu chỉ một phần tử khớp: "Landing Page (Dark)" ~ "Landing Page", "Sign In" ~ "Sign In Screen"
   const resolver = (entity: string, pool: { id: string; name?: string }[]) => {
     const ids = new Set(pool.map((p) => p.id))
     const byName = new Map(pool.filter((p) => p.name && nameKey(p.name)).map((p) => [nameKey(p.name!), p.id]))
+    const byLoose = new Map<string, string | null>()
+    for (const p of pool) {
+      const k = p.name ? looseKey(p.name) : ""
+      if (k) byLoose.set(k, byLoose.has(k) && byLoose.get(k) !== p.id ? null : p.id)
+    }
     return (ref: unknown): string | null => {
       const s = str(ref)
       if (!s) return null
       if (ids.has(s)) return s
       if (ids.has(normalizeKey(s))) return normalizeKey(s)
-      return byName.get(nameKey(s)) ?? null
+      return byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? null
     }
   }
   const pool = (entity: string, spineArr: { id: string; name?: string }[]) => [
@@ -70,7 +102,8 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   const resolveUseCase = resolver("use_cases", pool("use_cases", spine.use_cases))
   const resolveScreen = resolver("screens", pool("screens", spine.screens))
   const resolveRole = resolver("roles", pool("roles", spine.roles))
-  const resolveEntity = resolver("entities", pool("entities", spine.entities))
+  const entityPool = pool("entities", spine.entities)
+  const resolveEntity = resolver("entities", entityPool)
   const resolveRule = resolver("business_rules", pool("business_rules", spine.business_rules as { id: string }[]))
   const resolveFunction = resolver("functions", pool("functions", spine.functions))
   const featurePool = pool("features", spine.features)
@@ -112,11 +145,21 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   }
   for (const r of of("roles").filter(skip(spine.roles))) add("roles", { id: r.id, name: str(r.value.name) || r.id, actor_id: resolveActor(r.value.actor_id ?? r.value.actor) })
   for (const e of of("entities").filter(skip(spine.entities))) {
+    const relations: string[] = []
+    const verbs: Record<string, string> = {}
+    for (const ref of strList(e.value.relations)) {
+      const direct = resolveEntity(ref)
+      const hit = direct ? { id: direct, verb: "" } : relationPhrase(ref, entityPool)
+      if (!hit || hit.id === e.id || relations.includes(hit.id)) continue
+      relations.push(hit.id)
+      if (hit.verb) verbs[hit.id] = hit.verb
+    }
     add("entities", {
       id: e.id,
       name: str(e.value.name) || e.id,
       description: str(e.value.description),
-      relations: [...new Set(strList(e.value.relations).map(resolveEntity).filter((x): x is string => !!x && x !== e.id))]
+      relations,
+      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {})
     })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {

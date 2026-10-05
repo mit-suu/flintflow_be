@@ -6,6 +6,7 @@
  * để file xuất ra import lại không mất dữ liệu; gán cột theo điểm cao nhất trên cả bảng.
  */
 
+import { isMarkMatrix, tableShape, type ColumnRole, type TableShape } from "./table-shape.js"
 import { foldText, titleSimilarity } from "./text-similarity.js"
 
 export interface ColumnDef {
@@ -71,6 +72,17 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
       { field: "description", headers: ["description", "mô tả"] }
     ],
     required: ["name"]
+  },
+  {
+    // Ma trận phân quyền màn hình × vai trò (3.1.3): cột đầu là màn hình, mỗi cột sau là một vai trò — nhận theo dữ liệu
+    // (`isMarkMatrix`), không theo tiêu đề cột vai trò (tên vai trò của từng dự án)
+    entity: "permissions",
+    sections: ["fixed:3.1.3"],
+    columns: [
+      { field: "screen_id", headers: ["screen", "screen name", "màn hình", "tên màn hình"] },
+      { field: "role_id", headers: ["role", "vai trò"] }
+    ],
+    required: ["screen_id", "role_id"]
   },
   {
     entity: "entities",
@@ -149,6 +161,24 @@ export interface ColumnMatch {
   header: string
   field_path: string | null
   confidence: number
+  /** Vai trò cột theo dữ liệu (FLF-252) — `undefined` khi chỉ khớp tiêu đề. */
+  role?: ColumnRole
+  /** Tối đa 3 giá trị đầu của cột — cho người dùng nhìn dữ liệu khi xác nhận mapping. */
+  samples?: string[]
+}
+
+/** Tiền tố mã ⇒ thực thể (cột mã có tiêu đề "#" / trống vẫn nhận ra là mã của đúng loại phần tử). */
+const PREFIX_ENTITY: Readonly<Record<string, string>> = {
+  UC: "use_cases",
+  BR: "business_rules",
+  MSG: "messages",
+  NFR: "nfrs",
+  SCR: "screens",
+  FR: "functions",
+  A: "actors",
+  E: "entities",
+  COM: "common_requirements",
+  OR: "other_requirements"
 }
 
 type FieldMatch = { field: string; confidence: number }
@@ -163,13 +193,26 @@ const columnScore = (header: string, col: ColumnDef): number => {
 }
 
 /**
+ * Ứng viên field của một cột: theo tiêu đề; tiêu đề không khớp (ký hiệu "#", trống, tên lạ) mà dữ liệu là mã ⇒ cột mã
+ * của thực thể (FLF-252). Cột số thứ tự (1, 2, 3) không bao giờ là mã / tên, kể cả khi tiêu đề ghi "ID".
+ */
+const candidatesOf = (header: string, column: number, def: TableEntityDef, shape: TableShape): (FieldMatch & { column: number })[] => {
+  const profile = shape.columns[column]
+  if (profile?.role === "row_no") return []
+  const byHeader = def.columns.map((col) => ({ column, field: col.field, confidence: columnScore(header, col) })).filter((c) => c.confidence > 0)
+  if (byHeader.length || profile?.role !== "code") return byHeader
+  const idField = def.columns.find((c) => c.field === "id" || c.field === "code")
+  if (!idField) return []
+  return [{ column, field: idField.field, confidence: profile.prefix && PREFIX_ENTITY[profile.prefix] === def.entity ? 0.9 : 0.75 }]
+}
+
+/**
  * Gán cột ⇒ field theo điểm cao nhất trên cả bảng (FLF-251), mỗi cột và mỗi field dùng một lần. Trước đây gán lần lượt
  * trái → phải nên cột khớp gần đứng trước giành mất field ("Message Type" lấy `text`, cột "Content" thật bị bỏ).
  */
-const assignColumns = (headers: string[], def: TableEntityDef): (FieldMatch | null)[] => {
+const assignColumns = (headers: string[], def: TableEntityDef, shape: TableShape): (FieldMatch | null)[] => {
   const candidates = headers
-    .flatMap((header, column) => def.columns.map((col) => ({ column, field: col.field, confidence: columnScore(header, col) })))
-    .filter((c) => c.confidence > 0)
+    .flatMap((header, column) => candidatesOf(header, column, def, shape))
     .sort((a, b) => b.confidence - a.confidence || a.column - b.column)
   const out: (FieldMatch | null)[] = headers.map(() => null)
   const used = new Set<string>()
@@ -181,35 +224,58 @@ const assignColumns = (headers: string[], def: TableEntityDef): (FieldMatch | nu
   return out
 }
 
+/** Ma trận phân quyền: cột đầu ⇒ màn hình, mỗi cột vai trò có tiêu đề ⇒ `role_id` (tên vai trò = tiêu đề cột). */
+const permissionMatrix = (shape: TableShape): (FieldMatch | null)[] =>
+  shape.headers.map((header, column) =>
+    column === 0 ? { field: "screen_id", confidence: 0.9 } : header ? { field: "role_id", confidence: 0.9 } : null
+  )
+
+export interface TableMatch {
+  entity: string | null
+  columns: ColumnMatch[]
+  shape: TableShape
+}
+
 /**
- * Khớp hàng tiêu đề của một bảng. Chọn thực thể theo section chứa bảng trước, rồi theo số cột khớp.
+ * Khớp một bảng theo tiêu đề + dữ liệu (FLF-252). Chọn thực thể theo section chứa bảng trước, rồi theo số cột khớp.
  * Không thực thể nào khớp đủ field bắt buộc ⇒ `entity = null`, mọi cột `field_path = null` (AI trích ở I-4).
- * Bảng nằm ở section đã biết nhưng không phải section của thực thể (ma trận phân quyền ở 3.1.3 trông như bảng màn hình,
- * bảng lịch sử thay đổi trông như NFR, bảng field trong mục chức năng trông như tác nhân…) ⇒ không đoán, để AI đọc theo
- * đích của section (FLF-251). Không rõ section (`null`) ⇒ vẫn đoán, độ tin bị giảm.
+ * Bảng nằm ở section đã biết nhưng không phải section của thực thể (bảng lịch sử thay đổi trông như NFR, bảng field
+ * trong mục chức năng trông như tác nhân…) ⇒ không đoán, để AI đọc theo đích của section (FLF-251). Không rõ section
+ * (`null`) ⇒ vẫn đoán, độ tin bị giảm. Ma trận màn hình × vai trò ở mục phân quyền ⇒ `permissions` theo dữ liệu.
  */
-export const matchTableHeader = (headers: string[], sectionId: string | null): { entity: string | null; columns: ColumnMatch[] } => {
+export const matchTable = (rows: readonly string[][], sectionId: string | null): TableMatch => {
+  const shape = tableShape(rows)
+  const { headers } = shape
+  const withData = (column_index: number, match: Omit<ColumnMatch, "column_index" | "header" | "role" | "samples">): ColumnMatch => {
+    const profile = shape.columns[column_index]
+    return { column_index, header: headers[column_index], ...match, ...(profile && profile.role !== "empty" ? { role: profile.role, samples: profile.samples } : {}) }
+  }
   let best: { def: TableEntityDef; matches: (FieldMatch | null)[]; score: number } | null = null
   for (const def of TABLE_ENTITIES) {
     if (sectionId !== null && !def.sections.includes(sectionId)) continue
-    const matches = assignColumns(headers, def)
+    const matches = def.entity === "permissions" ? (isMarkMatrix(shape) ? permissionMatrix(shape) : []) : assignColumns(headers, def, shape)
     const fields = new Set(matches.filter((m): m is FieldMatch => !!m).map((m) => m.field))
     if (!def.required.every((f) => fields.has(f))) continue
     const score = fields.size + (sectionId && def.sections.includes(sectionId) ? 10 : 0)
     if (!best || score > best.score) best = { def, matches, score }
   }
-  if (!best) {
-    return { entity: null, columns: headers.map((header, column_index) => ({ column_index, header, field_path: null, confidence: 0.9 })) }
-  }
+  if (!best) return { entity: null, shape, columns: headers.map((_, i) => withData(i, { field_path: null, confidence: 0.9 })) }
   const inSection = !!sectionId && best.def.sections.includes(sectionId)
   const { def, matches } = best
   return {
     entity: def.entity,
-    columns: headers.map((header, column_index) => {
-      const m = matches[column_index]
-      if (!m) return { column_index, header, field_path: null, confidence: 0.9 }
+    shape,
+    columns: headers.map((_, i) => {
+      const m = matches[i]
+      if (!m) return withData(i, { field_path: null, confidence: 0.9 })
       // Bảng nằm ngoài section quen thuộc của thực thể ⇒ giảm độ tin để người dùng xác nhận (1.7)
-      return { column_index, header, field_path: `${def.entity}[].${m.field}`, confidence: inSection ? m.confidence : Math.min(m.confidence, 0.7) }
+      return withData(i, { field_path: `${def.entity}[].${m.field}`, confidence: inSection ? m.confidence : Math.min(m.confidence, 0.7) })
     })
   }
+}
+
+/** Khớp chỉ theo hàng tiêu đề (không có dữ liệu) — giữ cho chỗ gọi cũ / test. */
+export const matchTableHeader = (headers: string[], sectionId: string | null): { entity: string | null; columns: ColumnMatch[] } => {
+  const { entity, columns } = matchTable([headers], sectionId)
+  return { entity, columns }
 }

@@ -20,7 +20,7 @@ import {
   provisionalFunctionId,
   type SectionCandidate
 } from "./section-catalog.js"
-import { matchTableHeader } from "./table-header-dictionary.js"
+import { matchTable } from "./table-header-dictionary.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 
@@ -139,13 +139,16 @@ export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, s
   blocks
     .filter((b) => b.kind === "table" && b.rows?.length && extractsFrom(blockSections.get(b.block_id) ?? null))
     .flatMap((b) =>
-      matchTableHeader(b.rows![0], blockSections.get(b.block_id) ?? null).columns.map((c) => ({
+      // Khớp theo tiêu đề + dữ liệu dưới tiêu đề (FLF-252): cột "#" là STT hay mã, ma trận phân quyền, hàng tiêu đề thật
+      matchTable(b.rows!, blockSections.get(b.block_id) ?? null).columns.map((c) => ({
         block_id: b.block_id,
         column_index: c.column_index,
         header: c.header,
         field_path: c.field_path,
         confidence: round(c.confidence),
-        confirmed: false
+        confirmed: false,
+        ...(c.role ? { role: c.role } : {}),
+        ...(c.samples?.length ? { samples: c.samples } : {})
       }))
     )
 
