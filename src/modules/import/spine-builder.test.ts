@@ -22,7 +22,7 @@ import {
 } from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { buildImportOps, relationPhrase } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, relationPhrase, type DroppedPermission } from "./spine-builder.js"
 
 describe("extracted-entities", () => {
   it("chuẩn hoá khoá, cấp id không trùng", () => {
@@ -193,6 +193,38 @@ describe("buildImportOps", () => {
     ])
     expect(featureName(plan.spine.functions[0].feature_id)).toBe("General")
     expect(plan.spine.features.map((f) => f.name)).toEqual(["Reporting & Monitoring", "User Management", "Dashboard", "Billing & Subscription", "General"])
+  })
+
+  it("FLF-252: quyền của ma trận không khớp màn / vai trò ⇒ không vào Spine nhưng được ghi lại để đặt cờ vàng (trước đây bỏ im lặng)", () => {
+    const spine = createEmptySpine({ name: "Smell" })
+    const dropped: DroppedPermission[] = []
+    const ops = buildImportOps(
+      spine,
+      [
+        { entity: "actors", id: "A02", value: { name: "Admin" } },
+        { entity: "roles", id: "R02", value: { name: "Admin", actor_id: "Admin" } },
+        { entity: "screens", id: "SCR-30", value: { name: "Transaction List" } },
+        { entity: "permissions", id: "P001", value: { screen_id: "Transaction List", role_id: "Admin", action: "access" } },
+        { entity: "permissions", id: "P002", value: { screen_id: "Sell Statistics", role_id: "Admin", action: "access" } },
+        { entity: "permissions", id: "P003", value: { screen_id: "Transaction List", role_id: "Auditor", action: "access" } }
+      ],
+      dropped
+    )
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.permissions.map((p) => [p.screen_id, p.role_id])).toEqual([["SCR-30", "R02"]])
+    expect(dropped).toEqual([
+      { screen: "Sell Statistics", role: "Admin", missing: "screen" },
+      { screen: "Transaction List", role: "Auditor", missing: "role" }
+    ])
+    const findings = droppedPermissionFindings([...dropped, { screen: "Sell Statistics", role: "Developer", missing: "screen" }], ["B0333"])
+    expect(findings.map((f) => [f.section_id, f.block_ids, f.message])).toEqual([
+      [
+        "fixed:3.1.3",
+        ["B0333"],
+        'Bảng phân quyền có "Sell Statistics" (quyền của Admin, Developer) nhưng phần mô tả màn hình không có màn này — quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request'
+      ],
+      ["fixed:3.1.3", ["B0333"], 'Bảng phân quyền có vai trò "Auditor" không khớp vai trò / tác nhân nào — quyền trên Transaction List chưa vào dữ liệu; sửa tên cho khớp qua change request']
+    ])
   })
 
   it("FLF-252: use case không ghi chức năng ⇒ nối chức năng trùng hẳn tên; đã ghi thì giữ; tên khác / hai chức năng cùng tên ⇒ không đoán", () => {

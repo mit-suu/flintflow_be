@@ -25,6 +25,7 @@ import {
   findKnownId,
   findKnownKey,
   flattenItem,
+  idKey,
   mergeFieldValue,
   normalizeKey,
   parseFieldPath,
@@ -303,6 +304,21 @@ export const itemsFromAi = (
 
 /** Mã lỗi cho biết môi trường không đọc được ảnh (không phải lỗi tạm thời) ⇒ bỏ qua ảnh thay vì dừng I-4. */
 const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
+
+/**
+ * Mã business rule model gán cho chức năng phải có trong chữ của mục (FLF-252): mục không ghi mã nào mà model vẫn nối
+ * "Logout" với BR-01 (đoán, độ tin 0.5) ⇒ bỏ; câu quy tắc model nhét vào chỗ mã cũng bỏ (không phải mã). Không còn mã ⇒ bỏ field.
+ */
+export const keepMentionedRules = (items: EntityItem[], mentioned: ReadonlySet<string>): EntityItem[] =>
+  items.map((it) => {
+    const refs = it.entity === "functions" && Array.isArray(it.value.business_rule_ids) ? (it.value.business_rule_ids as unknown[]) : null
+    if (!refs) return it
+    const kept = refs.filter((r) => typeof r === "string" && mentioned.has(idKey(r)))
+    if (kept.length === refs.length) return it
+    const value: Record<string, unknown> = { ...it.value, business_rule_ids: kept }
+    if (!kept.length) delete value.business_rule_ids
+    return { ...it, value }
+  })
 
 /** Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. */
 export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<BlockLite, "block_id" | "kind" | "text">[]): string => {
@@ -583,6 +599,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       // Bảng gửi AI theo ô thật (FLF-251) — tách `text` theo dòng làm ô nhiều dòng thành nhiều hàng
       .map((b) => (b.kind === "table" ? { ...b, text: tableText(tableRows(b, blocks)) } : b))
     const targets = targetsOf(section_id)
+    const mentionedRules = new Set(sectionBlocks.flatMap((b) => (b.mentions ?? []).filter((m) => m.entity === "business_rule").map((m) => idKey(m.id))))
     let usageId: string | null = null
     // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
     const unmapped: string[] = [...verbatim]
@@ -668,13 +685,16 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       const inBatch = new Set(batch.map((b) => b.block_id))
       unmapped.push(...result.data.unmapped_block_ids.filter((id) => inBatch.has(id) && !unmapped.includes(id)))
       items.push(
-        ...itemsFromAi(result.data, {
-          sectionId: section_id,
-          alloc,
-          known: [...known, ...items],
-          sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
-          validBlocks: new Set(batch.map((b) => b.block_id))
-        })
+        ...keepMentionedRules(
+          itemsFromAi(result.data, {
+            sectionId: section_id,
+            alloc,
+            known: [...known, ...items],
+            sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
+            validBlocks: new Set(batch.map((b) => b.block_id))
+          }),
+          mentionedRules
+        )
       )
     }
 

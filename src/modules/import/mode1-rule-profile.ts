@@ -45,4 +45,6 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
 export const IMPORT_SEMANTIC_RULE = "import_semantic"
 /** Mode 1 v3 phase 5: ảnh ở mục diagram không đọc được thành dữ liệu (loại khác / EMF…) — giữ ảnh gốc, cờ vàng. */
 export const IMPORT_IMAGE_RULE = "import_image_unread"
+/** FLF-252: quyền của ma trận phân quyền không khớp màn / vai trò nào ⇒ không vào Spine, cờ vàng báo phần bị bỏ. */
+export const IMPORT_UNRESOLVED_RULE = "import_unresolved_ref"
 export const CR_CONSISTENCY_RULE = "cr_consistency"

@@ -15,6 +15,40 @@ export interface BuiltEntity {
   value: Record<string, unknown>
 }
 
+/** Quyền bị bỏ khi dựng op vì màn / vai trò không khớp phần tử nào (FLF-252 — "Sell Statistics" có trong ma trận, không có màn). */
+export interface DroppedPermission {
+  screen: string
+  role: string
+  missing: "screen" | "role"
+}
+
+/**
+ * Cờ vàng cho quyền bị bỏ (FLF-252): trước đây bỏ im lặng — người dùng không biết Admin mất quyền "Sell Statistics".
+ * Gộp theo màn / vai trò, nói rõ phải làm gì; không in mã.
+ */
+export const droppedPermissionFindings = (
+  dropped: readonly DroppedPermission[],
+  blockIds: string[]
+): { rule: string; section_id: string; message: string; block_ids: string[] }[] => {
+  const byName = new Map<string, { missing: DroppedPermission["missing"]; others: Set<string> }>()
+  for (const d of dropped) {
+    const name = d.missing === "screen" ? d.screen : d.role
+    if (!name) continue
+    const cur = byName.get(`${d.missing}|${name}`) ?? { missing: d.missing, others: new Set<string>() }
+    cur.others.add(d.missing === "screen" ? d.role : d.screen)
+    byName.set(`${d.missing}|${name}`, cur)
+  }
+  return [...byName].map(([key, { missing, others }]) => {
+    const name = key.slice(key.indexOf("|") + 1)
+    const list = [...others].filter(Boolean).join(", ")
+    const message =
+      missing === "screen"
+        ? `Bảng phân quyền có "${name}"${list ? ` (quyền của ${list})` : ""} nhưng phần mô tả màn hình không có màn này — quyền chưa vào dữ liệu; thêm màn hoặc sửa tên cho khớp qua change request`
+        : `Bảng phân quyền có vai trò "${name}" không khớp vai trò / tác nhân nào — quyền${list ? ` trên ${list}` : ""} chưa vào dữ liệu; sửa tên cho khớp qua change request`
+    return { rule: "unresolved_permission", section_id: "fixed:3.1.3", message, block_ids: blockIds }
+  })
+}
+
 const str = (v: unknown): string => {
   if (typeof v === "string") return v.trim()
   if (Array.isArray(v)) return v.map(str).filter(Boolean).join("\n")
@@ -79,8 +113,11 @@ const priority = (v: unknown): (typeof PRIORITIES)[number] | null => {
   return (PRIORITIES as readonly string[]).includes(s) ? (s as (typeof PRIORITIES)[number]) : null
 }
 
-/** Dựng op cho Spine rỗng của project mode 1. Phần tử có id đã tồn tại trong `spine` bị bỏ qua. */
-export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
+/**
+ * Dựng op cho Spine rỗng của project mode 1. Phần tử có id đã tồn tại trong `spine` bị bỏ qua. Quyền không phân giải được
+ * màn / vai trò ghi vào `dropped` để finalize đặt cờ.
+ */
+export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: DroppedPermission[] = []): Op[] => {
   const of = (entity: string) => entities.filter((e) => e.entity === entity && e.id !== null)
   const existing = (arr: { id: string }[]) => new Set(arr.map((x) => x.id))
   // Giữ chỗ cả id trích được trong lô — không thì feature "General" có thể nhận trùng F-01 của tài liệu (FLF-179)
@@ -274,6 +311,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
     const roleId = resolveRole(p.value.role_id ?? p.value.role)
     const action = str(p.value.action)
     if (screenId && roleId && action) add("permissions", { id: p.id, screen_id: screenId, role_id: roleId, action })
+    else if (action) dropped.push({ screen: str(p.value.screen_id ?? p.value.screen), role: str(p.value.role_id ?? p.value.role), missing: screenId ? "role" : "screen" })
   }
   for (const n of of("nfrs").filter(skip(spine.nfrs))) {
     const statement = str(n.value.statement ?? n.value.description)

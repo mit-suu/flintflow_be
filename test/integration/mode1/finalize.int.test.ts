@@ -499,6 +499,39 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
   })
 
+  it("FLF-252: ảnh không đọc được + quyền không khớp màn trong cùng lần nhập ⇒ hai cờ vàng khác id, tạo được bản 0.0 (trước đây trùng id ⇒ cả lô bị từ chối)", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
+    mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
+    const run = await runExtraction(projectId, userId, importId)
+    // ma trận phân quyền nhắc một màn không có trong bảng mô tả màn (WDP301: "Sell Statistics")
+    const field = (path: string, value: unknown) => ({ path, value, confidence: 1, source_block_ids: [], origin: "deterministic", confirmed: true })
+    await ExtractionDraft.updateOne(
+      { import_id: importId, section_id: "fixed:2.1" },
+      {
+        $push: {
+          fields: {
+            $each: [
+              field("roles[id=R01].name", "Admin"),
+              field("permissions[id=P001].screen_id", "Sell Statistics"),
+              field("permissions[id=P001].role_id", "Admin"),
+              field("permissions[id=P001].action", "access")
+            ]
+          }
+        }
+      }
+    )
+    if (run.doc.status === "fields_review") await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+
+    const spine = (await spineRepository.get(projectId))!
+    const flags = spine.flags.filter((f) => f.rule_id === "import_image_unread" || f.rule_id === "import_unresolved_ref")
+    expect(flags.map((f) => f.rule_id).sort()).toEqual(["import_image_unread", "import_unresolved_ref"])
+    expect(new Set(flags.map((f) => f.id)).size).toBe(2)
+    expect(flags.find((f) => f.rule_id === "import_unresolved_ref")!.message).toContain('"Sell Statistics"')
+    expect(await DocVersion.countDocuments({ projectId, version: "0.0" })).toBe(1)
+  })
+
   it("file gốc không còn ⇒ render vẫn chạy, ảnh thành chỗ giữ ảnh", async () => {
     const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG }] } })
     await ImportedDocument.updateMany({ projectId }, { $set: { file_ref: null } })

@@ -16,6 +16,7 @@ import {
   dropMutualRelations,
   extractionPlan,
   itemsFromAi,
+  keepMentionedRules,
   mergeItems,
   onlyNewFromVision,
   orientRelations,
@@ -25,7 +26,7 @@ import {
   splitList,
   visionItems
 } from "./extract.service.js"
-import { IdAllocator, flattenItem, type EntityItem } from "./extracted-entities.js"
+import { IdAllocator, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { tableGrid } from "./table-rows.js"
@@ -345,6 +346,24 @@ describe("itemsFromAi — output model ⇒ item", () => {
     )
     expect(out[0]).toMatchObject({ id: "NFR-01", value: { statement: "fast", category: "performance" }, field_confidence: { threshold: 0.4 } })
     expect(out[1].id).toBeNull()
+  })
+
+  it("FLF-252 keepMentionedRules: mã business rule model gán cho chức năng phải có trong chữ của mục", () => {
+    const fn = (ids: unknown[]): EntityItem => ({
+      entity: "functions",
+      id: "FR-3.2.3",
+      value: { name: "Logout", business_rule_ids: ids },
+      confidence: 0.5,
+      field_confidence: {},
+      source_block_ids: ["B0584"],
+      origin: "ai"
+    })
+    // mục không ghi mã BR nào ⇒ mã model đoán bị bỏ, không còn field
+    expect(keepMentionedRules([fn(["BR-01"])], new Set())[0].value).toEqual({ name: "Logout" })
+    // giữ mã có trong chữ (khác dạng vẫn khớp), bỏ mã đoán + câu nhét vào chỗ mã
+    expect(keepMentionedRules([fn(["BR05", "BR-01", "Only admins can log out."])], new Set([idKey("BR-05")]))[0].value.business_rule_ids).toEqual(["BR05"])
+    const ok = fn(["BR-05"])
+    expect(keepMentionedRules([ok], new Set([idKey("BR-05")]))[0]).toBe(ok)
   })
 
   it("section function: item function đầu tiên nhận id của function theo heading", () => {
