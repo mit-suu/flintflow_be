@@ -168,6 +168,54 @@ describe("buildImportOps", () => {
     expect(plan.spine.screens[0].feature_id).toBe("F-03")
   })
 
+  it("FLF-252: cột Feature ghi tính năng mục 3 không có heading ⇒ tính năng theo đúng tên; ghi gọn / thêm hậu tố tên heading ⇒ heading đó; ô trống / mã lạ ⇒ General", () => {
+    const spine = createEmptySpine({ name: "Smell" })
+    const ops = buildImportOps(spine, [
+      { entity: "features", id: "F-3.7", value: { name: "Reporting & Monitoring" } },
+      { entity: "features", id: "F-3.10", value: { name: "User Management" } },
+      { entity: "screens", id: "SCR-01", value: { name: "Dashboard", feature_id: "Dashboard" } },
+      { entity: "screens", id: "SCR-02", value: { name: "Billing Overview", feature_id: "Billing & Subscription" } },
+      { entity: "screens", id: "SCR-03", value: { name: "Usage History", feature_id: "Billing & Subscription" } },
+      { entity: "screens", id: "SCR-04", value: { name: "Analysis Reports", feature_id: "Reporting" } },
+      { entity: "screens", id: "SCR-05", value: { name: "User List", feature_id: "User Management (Admin)" } },
+      { entity: "screens", id: "SCR-06", value: { name: "Home" } },
+      { entity: "functions", id: "FR-01", value: { name: "Publish PR Comment", feature_id: "F-99" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    const featureName = (id: string) => plan.spine.features.find((f) => f.id === id)?.name
+    expect(plan.spine.screens.map((s) => [s.name, featureName(s.feature_id)])).toEqual([
+      ["Dashboard", "Dashboard"],
+      ["Billing Overview", "Billing & Subscription"],
+      ["Usage History", "Billing & Subscription"],
+      ["Analysis Reports", "Reporting & Monitoring"],
+      ["User List", "User Management"],
+      ["Home", "General"]
+    ])
+    expect(featureName(plan.spine.functions[0].feature_id)).toBe("General")
+    expect(plan.spine.features.map((f) => f.name)).toEqual(["Reporting & Monitoring", "User Management", "Dashboard", "Billing & Subscription", "General"])
+  })
+
+  it("FLF-252: use case không ghi chức năng ⇒ nối chức năng trùng hẳn tên; đã ghi thì giữ; tên khác / hai chức năng cùng tên ⇒ không đoán", () => {
+    const spine = createEmptySpine({ name: "Smell" })
+    const ops = buildImportOps(spine, [
+      { entity: "functions", id: "FR-3.2.1", value: { name: "Login with GitHub" } },
+      { entity: "functions", id: "FR-3.5.3", value: { name: "Fix Code Smells" } },
+      { entity: "functions", id: "FR-01", value: { name: "Export Report" } },
+      { entity: "functions", id: "FR-02", value: { name: "Export Report" } },
+      { entity: "use_cases", id: "UC-01", value: { name: "Login with github" } },
+      { entity: "use_cases", id: "UC-02", value: { name: "Fix Recommendations" } },
+      { entity: "use_cases", id: "UC-03", value: { name: "Export Report" } },
+      { entity: "use_cases", id: "UC-04", value: { name: "Login with GitHub", function_ids: ["Fix Code Smells"] } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.use_cases.map((u) => [u.id, u.function_ids])).toEqual([
+      ["UC-01", ["FR-3.2.1"]],
+      ["UC-02", []],
+      ["UC-03", []],
+      ["UC-04", ["FR-3.5.3"]]
+    ])
+  })
+
   it("FLF-251: tham chiếu theo tên chuẩn hoá (cột Feature có số mục), thông báo nối chức năng, thuật ngữ tiếng Việt", () => {
     const spine = createEmptySpine({ name: "Exam" })
     const ops = buildImportOps(spine, [

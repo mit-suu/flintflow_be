@@ -40,6 +40,19 @@ const looseKey = (name: string): string =>
     .replace(/\s*\b(screen|page|form|dialog|popup|modal|man hinh|trang)$/, "")
     .trim()
 
+/** Chuỗi chỉ là mã phần tử (`F-09`, `UC01`, `FR-3.2`) — không dùng làm tên khi tạo phần tử mới. */
+const CODE_LIKE = /^[A-Za-z]{1,6}[-_ ]?\d+(?:\.\d+)*$/
+
+/** Chỉ mục khoá ⇒ id; hai phần tử khác nhau cùng khoá ⇒ `null` (không đoán). */
+const uniqueIndex = (pool: readonly { id: string; name?: string }[], keyOf: (p: { id: string; name?: string }) => string): Map<string, string | null> => {
+  const map = new Map<string, string | null>()
+  for (const p of pool) {
+    const k = keyOf(p)
+    if (k) map.set(k, map.has(k) && map.get(k) !== p.id ? null : p.id)
+  }
+  return map
+}
+
 /** Động từ quan hệ hợp lệ của Spine (`relation_verbs`): tiếng Anh viết thường. */
 const RELATION_VERB = /^[a-z]+( [a-z]+)*$/
 
@@ -80,19 +93,11 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
   const resolver = (entity: string, pool: { id: string; name?: string }[]) => {
     const ids = new Set(pool.map((p) => p.id))
     const byName = new Map(pool.filter((p) => p.name && nameKey(p.name)).map((p) => [nameKey(p.name!), p.id]))
-    const byLoose = new Map<string, string | null>()
+    const byLoose = uniqueIndex(pool, (p) => (p.name ? looseKey(p.name) : ""))
     // Mã so lỏng (FLF-252): quan hệ ghi "E-12" vẫn ra phần tử "E12" (id cấp tự động không cùng dạng mã tài liệu).
     // Tên khác quy ước đặt tên: quan hệ ERD ghi "PrAnalysis" ra thực thể "pr_analyses" của bảng
-    const byIdKey = new Map<string, string | null>()
-    const byCompact = new Map<string, string | null>()
-    const once = (map: Map<string, string | null>, k: string, id: string) => {
-      if (k) map.set(k, map.has(k) && map.get(k) !== id ? null : id)
-    }
-    for (const p of pool) {
-      once(byLoose, p.name ? looseKey(p.name) : "", p.id)
-      once(byIdKey, idKey(p.id), p.id)
-      once(byCompact, p.name ? compactKey(p.name) : "", p.id)
-    }
+    const byIdKey = uniqueIndex(pool, (p) => idKey(p.id))
+    const byCompact = uniqueIndex(pool, (p) => (p.name ? compactKey(p.name) : ""))
     return (ref: unknown): string | null => {
       const s = str(ref)
       if (!s) return null
@@ -139,19 +144,43 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
     ops.push({ op: "set", path: "project.release_scope", value: { in: strList(scope.in), out: strList(scope.out) } })
   }
 
-  // features (+ "General" cho màn/function mồ côi)
+  // features (+ tính năng bảng ghi mà mục 3 không có heading, + "General" cho màn/function không ghi tính năng)
   const features = of("features").filter(skip(spine.features))
   let order = spine.features.length
   for (const f of features) add("features", { id: f.id, name: str(f.value.name) || f.id, order: order++ })
+  const newFeature = (name: string): string => {
+    const id = alloc.next("features")
+    add("features", { id, name, order: order++ })
+    return id
+  }
+  // Cột Feature ghi gọn / dài hơn tên một heading ("Reporting" ⊂ "Reporting & Monitoring") ⇒ heading đó, khi chỉ một heading
+  // khớp đủ chữ
+  const words = (s: string): string[] => looseKey(s).split(" ").filter(Boolean)
+  const featureByWords = (ref: string): string | null => {
+    const want = words(ref)
+    const hits = featurePool.filter((f) => {
+      const have = f.name ? words(f.name) : []
+      return want.length > 0 && have.length > 0 && (want.every((w) => have.includes(w)) || have.every((w) => want.includes(w)))
+    })
+    return hits.length === 1 ? hits[0].id : null
+  }
+  const fromTable = new Map<string, string>()
   let general: string | null = null
   const featureOr = (ref: unknown): string => {
-    const hit = resolveFeature(ref)
+    const name = str(ref)
+    const hit = resolveFeature(ref) ?? (name ? featureByWords(name) : null)
     if (hit) return hit
-    if (!general) {
-      general = alloc.next("features")
-      add("features", { id: general, name: "General", order: order++ })
+    // Không ghi tính năng / chỉ là mã không phân giải được ("F-09") ⇒ "General"
+    if (!name || CODE_LIKE.test(name)) return (general ??= newFeature("General"))
+    // Bảng màn / bảng chức năng ghi tính năng mà mục 3 không có heading (Dashboard, Billing & Subscription…) ⇒ tính năng
+    // theo đúng tên đó (FLF-252) — trước đây gom hết vào "General", mất tên tài liệu ghi
+    const key = looseKey(name)
+    let id = fromTable.get(key)
+    if (!id) {
+      id = newFeature(name)
+      fromTable.set(key, id)
     }
-    return general
+    return id
   }
 
   for (const a of of("actors").filter(skip(spine.actors))) {
@@ -222,12 +251,19 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
       priority: priority(f.value.priority)
     })
   }
+  // Tài liệu không ghi chức năng hiện thực use case ⇒ chức năng trùng hẳn tên (SRS FPT đặt tên use case và chức năng như
+  // nhau, không có cột liên kết — FLF-252); hai chức năng cùng tên ⇒ không đoán
+  const functionByName = uniqueIndex(pool("functions", spine.functions), (p) => (p.name ? nameKey(p.name) : ""))
   for (const u of of("use_cases").filter(skip(spine.use_cases))) {
+    const name = str(u.value.name) || u.id!
+    const functionIds = [...new Set(strList(u.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))]
+    const sameName = functionIds.length ? null : functionByName.get(nameKey(name))
+    if (sameName) functionIds.push(sameName)
     add("use_cases", {
       id: u.id,
-      name: str(u.value.name) || u.id,
+      name,
       actor_ids: [...new Set(strList(u.value.actor_ids ?? u.value.actors).map(resolveActor).filter((x): x is string => !!x))],
-      function_ids: [...new Set(strList(u.value.function_ids).map(resolveFunction).filter((x): x is string => !!x))],
+      function_ids: functionIds,
       description: str(u.value.description),
       includes: [...new Set(strList(u.value.includes).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))],
       extends: [...new Set(strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))]
