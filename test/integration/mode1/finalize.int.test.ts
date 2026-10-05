@@ -226,6 +226,29 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect((await TemplateProfile.findOne({ projectId: ctx.projectId }).lean())!.legacy_record_of_changes).toEqual(edited)
   })
 
+  it("FLF-252: chức năng đọc từ bảng Non-Screen Functions được ghi lại ⇒ bản in: bảng 3.1.4 đúng các dòng đó, không chèn mục 3.x.y cho chúng", async () => {
+    const { projectId, userId, importId } = await importAtBaselining()
+    const doc = (await ImportedDocument.findById(importId))!
+    const row = (path: string, value: unknown) => ({ path, value, confidence: 1, source_block_ids: [] as string[], origin: "deterministic" as const, confirmed: true })
+    await ExtractionDraft.create({
+      projectId: doc.projectId,
+      import_id: doc._id,
+      section_id: "fixed:3.1.4",
+      status: "done",
+      fields: [row("functions[id=FR-90].name", "Nightly Sync Job"), row("functions[id=FR-90].description", "Syncs repositories every night.")],
+      ops: []
+    })
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.non_screen_table).toEqual(["FR-90"])
+    const rendered = await getDocument(projectId, "Lumen", { source: "draft" })
+    expect(rendered.sections.some((s) => s.id === "function:FR-90")).toBe(false)
+    const table = rendered.sections.find((s) => s.id === "fixed:3.1.4")!.blocks.find((b) => b.type === "table") as { header: { text: string }[][]; rows: { text: string }[][][] }
+    expect(table.header.map((c) => c.map((r) => r.text).join(""))).toEqual(["#", "Feature", "System Function", "Description"])
+    expect(table.rows.map((r) => r.map((c) => c.map((x) => x.text).join(""))[2])).toEqual(["Nightly Sync Job"])
+  })
+
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
     mockOverrides.next = (prompt: string) => {
       const out = fakeMode1(prompt)
@@ -504,7 +527,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
     const run = await runExtraction(projectId, userId, importId)
     // ma trận phân quyền nhắc một màn không có trong bảng mô tả màn (WDP301: "Sell Statistics")
-    const field = (path: string, value: unknown) => ({ path, value, confidence: 1, source_block_ids: [], origin: "deterministic", confirmed: true })
+    const field = (path: string, value: unknown) => ({ path, value, confidence: 1, source_block_ids: [] as string[], origin: "deterministic" as const, confirmed: true })
     await ExtractionDraft.updateOne(
       { import_id: importId, section_id: "fixed:2.1" },
       {

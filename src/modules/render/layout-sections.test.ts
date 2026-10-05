@@ -255,6 +255,101 @@ describe("buildLayoutSections", () => {
   })
 })
 
+describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở bảng (SRS WDP301)", () => {
+  const fn = (id: string, name: string, feature_id: string, screen_id: string | null, order: number, detailed: boolean): Spine["functions"][number] => ({
+    id,
+    screen_id,
+    feature_id,
+    order,
+    name,
+    trigger: detailed ? "On demand" : "",
+    description: `${name} description`,
+    normal: detailed ? ["Step 1"] : [],
+    abnormal: [],
+    validations: [],
+    business_rule_ids: [],
+    priority: null
+  })
+  // 3.8 có trong file; "GitHub Integration" / "Dashboard" chỉ là tên ở cột Feature của bảng 3.1.4 / bảng màn
+  const wdp = (): Spine => ({
+    ...createEmptySpine({ name: "Smell" }),
+    features: [
+      { id: "F-3.8", name: "Subscription Management", order: 0 },
+      { id: "F-01", name: "GitHub Integration", order: 1 },
+      { id: "F-02", name: "Dashboard", order: 2 }
+    ],
+    screens: [
+      {
+        id: "SCR-19",
+        feature_id: "F-3.8",
+        name: "Subscription Plans",
+        description: "",
+        flow_to: [],
+        is_popup: false,
+        tabs: [],
+        primary_function_id: null,
+        queue_order: null,
+        detail_status: "signed_off"
+      },
+      { id: "SCR-02", feature_id: "F-02", name: "Dashboard", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "placeholder" }
+    ],
+    functions: [
+      fn("FR-3.8.1", "View Pricing Plans", "F-3.8", "SCR-19", 0, true),
+      // có mục riêng trong file + ảnh màn hình, nhưng đặc tả không ghi tên màn khớp bảng màn ⇒ không màn trong dữ liệu
+      fn("FR-3.8.2", "View Subscription Status", "F-3.8", null, 0, true),
+      // dòng của bảng 3.1.4
+      fn("FR-08", "Usage Tracking Service", "F-3.8", null, 1, false),
+      fn("FR-05", "Publish PR Comment", "F-01", null, 0, false),
+      // chức năng không màn thêm sau qua change request, có chi tiết
+      fn("FR-99", "Nightly Cleanup Job", "F-3.8", null, 2, true)
+    ]
+  })
+  const layout = (nonScreenTable?: string[]): TemplateLayout => ({
+    language: "en",
+    layout: [
+      entry(0, "3.1.4 Non-Screen Functions", 3, "fixed:3.1.4"),
+      entry(1, "3.8 Subscription Management", 2, "feature:F-3.8"),
+      entry(2, "3.8.1 View Pricing Plans", 3, "function:FR-3.8.1"),
+      entry(3, "3.8.2 View Subscription Status", 3, "function:FR-3.8.2")
+    ],
+    ...(nonScreenTable ? { nonScreenTable } : {})
+  })
+  const cells = (row: { text: string }[][]) => row.map((c) => c.map((r) => r.text).join(""))
+
+  it("chức năng chỉ có ở bảng 3.1.4 không thành mục 3.x.y; tính năng chỉ gom chức năng đó / chỉ có màn không thành heading; số mục gốc giữ nguyên", () => {
+    const placed = placeSections(wdp(), layout(["FR-08", "FR-05"])).map((p) => p.section_id)
+    expect(placed).not.toContain("function:FR-08")
+    expect(placed).not.toContain("function:FR-05")
+    expect(placed).not.toContain("feature:F-01")
+    expect(placed).not.toContain("feature:F-02")
+    // chức năng thêm sau có chi tiết ⇒ vẫn chèn, sau các mục của file
+    expect(placed).toContain("function:FR-99")
+    // trong mục 3.8: hai mục của file giữ thứ tự 1, 2 (trước đây chức năng của bảng chèn vào giữa đẩy số); mục thêm sau là 3
+    const numbers = new Map(numberSections(placeSections(wdp(), layout(["FR-08", "FR-05"]))).map((n) => [n.section_id, n.number]))
+    const feature = numbers.get("feature:F-3.8")!
+    expect(["function:FR-3.8.1", "function:FR-3.8.2", "function:FR-99"].map((id) => numbers.get(id))).toEqual([`${feature}.1`, `${feature}.2`, `${feature}.3`])
+  })
+
+  it("bảng 3.1.4 = đúng các dòng bảng của file + chức năng không màn thêm sau; chức năng có mục riêng không vào bảng; cột như mẫu FPT", () => {
+    const { sections } = buildLayoutSections(wdp(), layout(["FR-08", "FR-05"]), [], { diagramPng: () => undefined })
+    const table = sections.find((s) => s.id === "fixed:3.1.4")!.blocks[0] as { header: { text: string }[][]; rows: { text: string }[][][] }
+    expect(cells(table.header)).toEqual(["#", "Feature", "System Function", "Description"])
+    expect(table.rows.map(cells)).toEqual([
+      ["1", "Subscription Management", "Usage Tracking Service", "Usage Tracking Service description"],
+      ["2", "GitHub Integration", "Publish PR Comment", "Publish PR Comment description"],
+      ["3", "Subscription Management", "Nightly Cleanup Job", "Nightly Cleanup Job description"]
+    ])
+  })
+
+  it("tài liệu nhập trước khi có danh sách bảng 3.1.4 ⇒ bản in giữ cách cũ", () => {
+    const placed = placeSections(wdp(), layout()).map((p) => p.section_id)
+    expect(placed).toContain("function:FR-08")
+    const { sections } = buildLayoutSections(wdp(), layout(), [], { diagramPng: () => undefined })
+    const table = sections.find((s) => s.id === "fixed:3.1.4")!.blocks[0] as { header: { text: string }[][] }
+    expect(cells(table.header)).toEqual(["Name", "Trigger", "Description"])
+  })
+})
+
 describe("customBlocks", () => {
   it("bỏ đoạn rỗng, bảng rỗng; ảnh chưa đọc được (V5) ⇒ dòng chú thích nghiêng", () => {
     expect(

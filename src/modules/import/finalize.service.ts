@@ -31,7 +31,7 @@ import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../s
 import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
-import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import { collectEntities, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
@@ -181,6 +181,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // FLF-252: dòng người dùng đã xem/sửa ở wizard thắng; không gửi ⇒ đọc lại từ file
   profile.legacy_record_of_changes =
     body.record_of_changes ?? legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+  // FLF-252: chức năng đọc từ bảng Non-Screen Functions của file — bản in giữ đúng các dòng của bảng này
+  profile.non_screen_table = nonScreenTableIds(drafts)
   await profile.save()
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
@@ -227,6 +229,18 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
+}
+
+/** Id chức năng đọc từ bảng Non-Screen Functions (mục 3.1.4) của file, theo thứ tự bảng (FLF-252). */
+export const nonScreenTableIds = (drafts: Pick<IExtractionDraft, "section_id" | "fields">[]): string[] => {
+  const ids: string[] = []
+  for (const d of drafts.filter((x) => x.section_id === "fixed:3.1.4")) {
+    for (const f of d.fields) {
+      const p = parseFieldPath(f.path)
+      if (p?.entity === "functions" && p.id && !ids.includes(p.id)) ids.push(p.id)
+    }
+  }
+  return ids
 }
 
 const UNREAD_REASON: Readonly<Record<string, string>> = {

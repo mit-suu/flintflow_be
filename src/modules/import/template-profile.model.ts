@@ -70,6 +70,11 @@ export interface ITemplateProfile extends Document {
   step_plan: StepPlanItem[]
   /** Mode 1 v3 (T15): dòng Record of Changes của file gốc — render in lên đầu bảng, lịch sử FlintFlow nối tiếp. */
   legacy_record_of_changes: RocRow[]
+  /**
+   * FLF-252: id chức năng đọc từ bảng Non-Screen Functions (3.1.4) của file. Bảng 3.1.4 của bản in theo đúng các dòng này
+   * (không theo "chưa nối được màn"); chúng không được chèn mục 3.x.y riêng khi file không viết mục chi tiết cho chúng.
+   */
+  non_screen_table: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -119,6 +124,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       default: []
     },
     required_sections: { type: [String], default: [] },
+    non_screen_table: { type: [String], default: [] },
     legacy_record_of_changes: {
       type: [
         new Schema(

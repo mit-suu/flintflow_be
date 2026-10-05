@@ -46,6 +46,11 @@ export interface TemplateLayout {
   language: string
   /** T15: dòng Record of Changes của file gốc — in trước lịch sử FlintFlow. */
   legacyRecord?: readonly RocRow[]
+  /**
+   * FLF-252: id chức năng đọc từ bảng Non-Screen Functions của file. Có ⇒ bảng 3.1.4 in đúng các chức năng này (+ chức năng
+   * không màn thêm sau, chưa có mục trong file), và chức năng chỉ có ở bảng không được chèn mục 3.x.y khi chưa có chi tiết.
+   */
+  nonScreenTable?: readonly string[]
 }
 
 const CUSTOM_PREFIX = "custom:"
@@ -142,9 +147,48 @@ const clampLevel = (level: number): number => Math.min(9, Math.max(1, Math.round
 /** Mục riêng thêm tay chưa có tiêu đề — không in khoá thô `custom:CS07` vào tài liệu. */
 const untitledCustom = (language: string): string => (language === "vi" ? "Mục bổ sung" : "Additional Section")
 
+/** Chức năng có chi tiết riêng (kích hoạt, luồng, kiểm tra) — đủ để thành mục 3.x.y. */
+const hasDetail = (f: Spine["functions"][number]): boolean =>
+  f.trigger.trim().length > 0 || f.normal.length > 0 || f.abnormal.length > 0 || f.validations.length > 0
+
+/**
+ * Mục FPT KHÔNG chèn vào bản in theo layout file (FLF-252):
+ * - chức năng chỉ có ở bảng Non-Screen Functions của file (không màn, chưa có chi tiết): file chỉ liệt kê nó trong bảng
+ *   3.1.4; chèn mục 3.x.y cho nó làm lệch số mục gốc ("3.8.3 View Subscription Status" thành "3.8.8");
+ * - tính năng file không có heading mà không có mục chức năng nào sẽ chèn dưới nó (tính năng lấy từ cột Feature của bảng
+ *   màn / bảng 3.1.4; chức năng có mục trong file vẫn in đúng chỗ của file): heading rỗng file gốc không có.
+ */
+export const sectionsNotInserted = (spine: Spine, template: TemplateLayout): Set<string> => {
+  const inLayout = new Set(template.layout.map((e) => e.section_id))
+  const listed = new Set(template.nonScreenTable ?? [])
+  const out = new Set<string>()
+  for (const f of spine.functions) {
+    if (!inLayout.has(`function:${f.id}`) && listed.has(f.id) && f.screen_id === null && !hasDetail(f)) out.add(`function:${f.id}`)
+  }
+  const inserted = (f: Spine["functions"][number]) => !inLayout.has(`function:${f.id}`) && !out.has(`function:${f.id}`)
+  for (const feature of spine.features) {
+    const id = `feature:${feature.id}`
+    if (!inLayout.has(id) && !spine.functions.some((f) => f.feature_id === feature.id && inserted(f))) out.add(id)
+  }
+  return out
+}
+
+/**
+ * Chức năng in ở bảng Non-Screen Functions (3.1.4) của bản in theo layout file (FLF-252): đúng các dòng bảng 3.1.4 của file
+ * + chức năng không màn thêm sau chưa có mục trong file. Chức năng có mục riêng trong file (có màn nhưng đặc tả không ghi
+ * tên màn khớp bảng màn) không vào bảng. File cũ chưa ghi danh sách ⇒ `null` (bảng theo cách cũ: mọi chức năng không màn).
+ */
+export const nonScreenTableIds = (spine: Spine, template: TemplateLayout): Set<string> | null => {
+  if (!template.nonScreenTable?.length) return null
+  const inLayout = new Set(template.layout.map((e) => e.section_id))
+  const listed = new Set(template.nonScreenTable)
+  return new Set(spine.functions.filter((f) => f.screen_id === null && (listed.has(f.id) || !inLayout.has(`function:${f.id}`))).map((f) => f.id))
+}
+
 /** Mục layout còn dùng được + mục FPT chèn thêm, theo thứ tự tài liệu. */
 export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] => {
-  const defs = listSections(spine).filter((d) => d.id !== "fixed:I")
+  const notInserted = sectionsNotInserted(spine, template)
+  const defs = listSections(spine).filter((d) => d.id !== "fixed:I" && !notInserted.has(d.id))
   const defById = new Map(defs.map((d) => [d.id, d]))
   const customById = new Map(spine.custom_sections.map((c) => [c.id, c]))
   const placed: Placed[] = []
@@ -315,6 +359,7 @@ export const buildLayoutSections = (
   // §4.13: sơ đồ người dùng đã có hình gốc (in ở phần nối) ⇒ không in thêm PlantUML cùng loại — một sơ đồ một hình
   const kept = keptOriginalKinds(spine)
   const contentSpine: Spine = kept.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !(kept as ReadonlySet<string>).has(d.kind)) } : spine
+  const nonScreen = nonScreenTableIds(spine, template)
 
   const out: RenderedSection[] = []
   const emptyUntilMerged = new Set<RenderedSection>()
@@ -351,6 +396,7 @@ export const buildLayoutSections = (
       diagramPng: opts.diagramPng,
       numberOf: (id) => numbers.get(id),
       language: template.language,
+      ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
