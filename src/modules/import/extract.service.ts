@@ -21,6 +21,7 @@ import {
   REF_LIST_FIELDS,
   aiItemId,
   compactKey,
+  findKnownCompact,
   findKnownId,
   findKnownKey,
   flattenItem,
@@ -363,6 +364,78 @@ export const onlyNewFromVision = (items: EntityItem[], known: readonly EntityIte
     return [{ ...it, value, field_confidence: Object.fromEntries(Object.entries(it.field_confidence).filter(([field]) => field in value)) }]
   })
 
+/** Id use case của một tham chiếu (mã hoặc tên) trong `pool`; không phân giải được ⇒ `null`. */
+const useCaseIdIn =
+  (pool: readonly EntityItem[]) =>
+  (ref: unknown): string | null =>
+    typeof ref === "string" ? (findKnownKey(pool, "use_cases", ref) ?? findKnownId(pool, "use_cases", ref) ?? findKnownCompact(pool, "use_cases", ref)) : null
+
+const hasActors = (it: EntityItem | undefined): boolean => Array.isArray(it?.value.actor_ids) && (it.value.actor_ids as unknown[]).length > 0
+
+/**
+ * Chiều include / extend đọc từ ảnh theo nét vẽ (FLF-252). Model (nhất là model dự phòng khi model chính quá tải) hay đọc
+ * ngược đầu mũi tên — "Execute Analyzer include Trigger Analysis Workflow", "View List User extend View User Detail, Ban /
+ * Unban User". Đảo chiều khi:
+ * - đúng một đầu có tác nhân trên ảnh mà nằm sai phía: use case gốc nối với tác nhân, phần được include / phần mở rộng thì không;
+ * - một use case extend từ hai use case trở lên: nhiều phần mở rộng trỏ về một gốc, không có phần mở rộng nào của nhiều gốc.
+ * Còn lại (hai đầu cùng có / cùng không có tác nhân) ⇒ giữ như model đọc.
+ */
+export const orientRelations = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] => {
+  const idOf = useCaseIdIn([...known, ...items])
+  const read = new Map(items.filter((it) => it.entity === "use_cases" && it.id).map((it) => [it.id!, it]))
+  const moves: { field: string; from: string; ref: unknown; to: string }[] = []
+  for (const [id, it] of read) {
+    for (const field of ["includes", "extends"]) {
+      const refs = Array.isArray(it.value[field]) ? (it.value[field] as unknown[]) : []
+      const fanOut = field === "extends" && refs.filter((r) => idOf(r) && idOf(r) !== id).length >= 2
+      for (const ref of refs) {
+        const other = idOf(ref)
+        if (!other || other === id || !read.has(other)) continue
+        const byActors = hasActors(it) !== hasActors(read.get(other))
+        // include: gốc (có tác nhân) include phần chung; extend: phần mở rộng (không tác nhân) extend gốc
+        const reversed = fanOut || (byActors && (field === "includes" ? !hasActors(it) : hasActors(it)))
+        if (reversed) moves.push({ field, from: id, ref, to: other })
+      }
+    }
+  }
+  if (!moves.length) return items
+  const value = new Map([...read].map(([id, it]) => [id, { ...it.value }]))
+  for (const m of moves) {
+    const from = value.get(m.from)!
+    from[m.field] = (from[m.field] as unknown[]).filter((r) => r !== m.ref)
+    const to = value.get(m.to)!
+    const list = Array.isArray(to[m.field]) ? (to[m.field] as unknown[]) : []
+    if (!list.some((r) => idOf(r) === m.from)) to[m.field] = [...list, m.from]
+  }
+  return items.map((it) => (it.entity === "use_cases" && it.id && value.has(it.id) ? { ...it, value: value.get(it.id)! } : it))
+}
+
+/**
+ * Quan hệ ảnh tự mâu thuẫn — A extend B và B extend A (include cũng vậy), model đọc nhầm chiều mũi tên ⇒ bỏ cả cặp:
+ * thiếu quan hệ còn hơn đưa ra duyệt một quan hệ sai, kết thành vòng (FLF-252, sơ đồ use case WDP301).
+ */
+export const dropMutualRelations = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] => {
+  const idOf = useCaseIdIn([...known, ...items])
+  const mutual = new Set<string>()
+  for (const field of ["includes", "extends"]) {
+    const edges = new Set<string>()
+    for (const it of items) if (it.entity === "use_cases" && it.id && Array.isArray(it.value[field])) for (const r of it.value[field] as unknown[]) edges.add(`${it.id}>${idOf(r)}`)
+    for (const e of edges) {
+      const [from, to] = e.split(">")
+      if (edges.has(`${to}>${from}`)) mutual.add(`${field}|${e}`)
+    }
+  }
+  if (!mutual.size) return items
+  return items.map((it) => {
+    if (it.entity !== "use_cases" || !it.id) return it
+    const value = { ...it.value }
+    for (const field of ["includes", "extends"]) {
+      if (Array.isArray(value[field])) value[field] = (value[field] as unknown[]).filter((r) => !mutual.has(`${field}|${it.id}>${idOf(r)}`))
+    }
+    return { ...it, value }
+  })
+}
+
 /** Item đọc từ ảnh: `origin: vision`, độ tin (cả từng field) không vượt trần ⇒ luôn qua màn 1.9. */
 export const visionItems = (items: EntityItem[]): EntityItem[] =>
   items.map((it) => ({
@@ -566,8 +639,14 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       const read =
         result.data.diagram_kind === "other"
           ? []
-          : visionItems(
-              itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true })
+          : dropMutualRelations(
+              orientRelations(
+                visionItems(
+                  itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true })
+                ),
+                [...known, ...items]
+              ),
+              [...known, ...items]
             )
       diagramImages.push({ block_id: img.block_id, kind: read.length ? result.data.diagram_kind : "other" })
       // Phần tử ảnh trùng phần tử đã có (chữ, bảng, ảnh trước) ⇒ chỉ giữ phần mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)

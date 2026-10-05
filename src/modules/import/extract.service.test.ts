@@ -13,10 +13,12 @@ import {
   captionOf,
   chunkBlocks,
   deterministicTableItems,
+  dropMutualRelations,
   extractionPlan,
   itemsFromAi,
   mergeItems,
   onlyNewFromVision,
+  orientRelations,
   readsImage,
   settleSection,
   shortName,
@@ -437,6 +439,78 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
       ["use_cases[id=UC-02].name", "Log in", "ai", 0.9],
       ["use_cases[id=UC-02].actor_ids", ["Learner", "Guest"], "vision", 0.6]
     ])
+  })
+
+  it("FLF-252 orientRelations: model đọc ngược đầu mũi tên ⇒ đảo theo nét nối tác nhân (gốc có tác nhân); đọc đúng / không phân định được ⇒ giữ", () => {
+    const uc = (id: string, name: string, value: Record<string, unknown> = {}): EntityItem => ({
+      entity: "use_cases",
+      id,
+      value: { name, ...value },
+      confidence: 0.65,
+      field_confidence: {},
+      source_block_ids: ["B0069"],
+      origin: "vision"
+    })
+    // đọc ngược như model dự phòng trên sơ đồ WDP301
+    const read = [
+      uc("UC-25", "View List User", { actor_ids: ["Admin"], extends: ["UC-27", "Ban / Unban User"] }),
+      uc("UC-26", "Ban / Unban User"),
+      uc("UC-27", "View User Detail"),
+      uc("UC-34", "Trigger Analysis Workflow", { actor_ids: ["GitHub Actions"] }),
+      uc("UC-35", "Execute Analyzer", { includes: ["UC-34"] }),
+      uc("UC-37", "Process Payment", { actor_ids: ["Payment Gateway"], includes: ["Verify Transaction"] }),
+      uc("UC-38", "Verify Transaction")
+    ]
+    const relations = (items: EntityItem[]) =>
+      items.map((u) => [u.id, (u.value.includes as string[] | undefined) ?? [], (u.value.extends as string[] | undefined) ?? []])
+    expect(relations(orientRelations(read, []))).toEqual([
+      ["UC-25", [], []],
+      ["UC-26", [], ["UC-25"]],
+      ["UC-27", [], ["UC-25"]],
+      ["UC-34", ["UC-35"], []],
+      ["UC-35", [], []],
+      ["UC-37", ["Verify Transaction"], []],
+      ["UC-38", [], []]
+    ])
+    // model không ghi tác nhân cho gốc nhưng một use case "extend" hai use case ⇒ vẫn là đọc ngược
+    const fanOut = [uc("UC-25", "View List User", { extends: ["View User Detail", "UC-26"] }), uc("UC-26", "Ban / Unban User"), uc("UC-27", "View User Detail")]
+    expect(relations(orientRelations(fanOut, []))).toEqual([
+      ["UC-25", [], []],
+      ["UC-26", [], ["UC-25"]],
+      ["UC-27", [], ["UC-25"]]
+    ])
+    // đọc đúng ⇒ không đổi gì
+    const right = [uc("UC-25", "View List User", { actor_ids: ["Admin"] }), uc("UC-27", "View User Detail", { extends: ["UC-25"] })]
+    expect(orientRelations(right, [])).toBe(right)
+    // hai đầu cùng không nối tác nhân ⇒ không đoán
+    const unknown = [uc("UC-01", "A", { includes: ["UC-02"] }), uc("UC-02", "B")]
+    expect(orientRelations(unknown, [])).toBe(unknown)
+  })
+
+  it("FLF-252 dropMutualRelations: ảnh cho hai use case extend lẫn nhau (đọc nhầm chiều mũi tên) ⇒ bỏ cả cặp; quan hệ một chiều giữ nguyên", () => {
+    const uc = (id: string, name: string, value: Record<string, unknown> = {}, origin: EntityItem["origin"] = "vision"): EntityItem => ({
+      entity: "use_cases",
+      id,
+      value: { name, ...value },
+      confidence: 0.65,
+      field_confidence: {},
+      source_block_ids: ["B0069"],
+      origin
+    })
+    const known = [uc("UC-25", "View List User", {}, "deterministic"), uc("UC-26", "Ban / Unban User", {}, "deterministic"), uc("UC-27", "View User Detail", {}, "deterministic")]
+    const read = [
+      uc("UC-27", "View User Detail", { extends: ["Ban / Unban User"] }),
+      uc("UC-26", "Ban / Unban User", { extends: ["UC-27", "View List User"] }),
+      uc("UC-37", "Process Payment", { includes: ["Verify Transaction"] })
+    ]
+    expect(dropMutualRelations(read, known).map((u) => [u.id, u.value.extends ?? u.value.includes])).toEqual([
+      ["UC-27", []],
+      ["UC-26", ["View List User"]],
+      ["UC-37", ["Verify Transaction"]]
+    ])
+    // không có cặp mâu thuẫn ⇒ trả nguyên mảng
+    const oneWay = read.slice(2)
+    expect(dropMutualRelations(oneWay, known)).toBe(oneWay)
   })
 
   it("visionItems: origin vision, độ tin item + từng field ≤ 0.7", () => {
