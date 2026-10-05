@@ -22,7 +22,17 @@ export interface TableEntityDef {
   columns: readonly ColumnDef[]
   /** Field bắt buộc phải có cột mới coi là bảng của thực thể (trích tất định được). */
   required: readonly string[]
+  /** Có ít nhất một trong các field này (thay cho `required` khi bảng có nhiều dạng — FLF-252). */
+  requiredAny?: readonly string[]
 }
+
+/** Section có thuộc danh sách section của thực thể không — `feature:*` khớp mọi section tính năng. */
+export const inSections = (def: Pick<TableEntityDef, "sections">, sectionId: string): boolean =>
+  def.sections.some((s) => s === sectionId || (s.endsWith(":*") && sectionId.startsWith(s.slice(0, -1))))
+
+/** Bảng có đủ field bắt buộc của thực thể. */
+export const hasRequiredFields = (def: Pick<TableEntityDef, "required" | "requiredAny">, fields: ReadonlySet<string>): boolean =>
+  def.required.every((f) => fields.has(f)) && (!def.requiredAny || def.requiredAny.some((f) => fields.has(f)))
 
 export const TABLE_ENTITIES: readonly TableEntityDef[] = [
   {
@@ -61,17 +71,20 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
     required: ["name"]
   },
   {
-    // Bảng chức năng không có màn hình (3.1.4 Non-Screen Functions)
+    // Bảng chức năng không có màn hình (3.1.4 Non-Screen Functions); bảng yêu cầu chức năng dưới một tính năng
+    // (mẫu IEEE: "ID | Requirement | Priority" — FLF-252)
     entity: "functions",
-    sections: ["fixed:3.1.4"],
+    sections: ["fixed:3.1.4", "feature:*"],
     columns: [
-      { field: "id", headers: ["function id", "id", "mã chức năng"] },
-      { field: "name", headers: ["system function", "function", "function name", "name", "tên chức năng", "chức năng"] },
+      { field: "id", headers: ["function id", "requirement id", "req id", "id", "mã chức năng", "mã yêu cầu"] },
+      { field: "name", headers: ["system function", "function", "function name", "name", "title", "tên chức năng", "chức năng"] },
       { field: "feature_id", headers: ["feature", "feature name", "tính năng"] },
       { field: "trigger", headers: ["trigger", "kích hoạt", "sự kiện kích hoạt", "điều kiện kích hoạt"] },
-      { field: "description", headers: ["description", "mô tả"] }
+      { field: "description", headers: ["description", "requirement", "requirement description", "statement", "mô tả", "yêu cầu"] },
+      { field: "priority", headers: ["priority", "ưu tiên", "mức ưu tiên", "độ ưu tiên"] }
     ],
-    required: ["name"]
+    required: [],
+    requiredAny: ["name", "description"]
   },
   {
     // Ma trận phân quyền màn hình × vai trò (3.1.3): cột đầu là màn hình, mỗi cột sau là một vai trò — nhận theo dữ liệu
@@ -252,15 +265,15 @@ export const matchTable = (rows: readonly string[][], sectionId: string | null):
   }
   let best: { def: TableEntityDef; matches: (FieldMatch | null)[]; score: number } | null = null
   for (const def of TABLE_ENTITIES) {
-    if (sectionId !== null && !def.sections.includes(sectionId)) continue
+    if (sectionId !== null && !inSections(def, sectionId)) continue
     const matches = def.entity === "permissions" ? (isMarkMatrix(shape) ? permissionMatrix(shape) : []) : assignColumns(headers, def, shape)
     const fields = new Set(matches.filter((m): m is FieldMatch => !!m).map((m) => m.field))
-    if (!def.required.every((f) => fields.has(f))) continue
-    const score = fields.size + (sectionId && def.sections.includes(sectionId) ? 10 : 0)
+    if (!hasRequiredFields(def, fields)) continue
+    const score = fields.size + (sectionId && inSections(def, sectionId) ? 10 : 0)
     if (!best || score > best.score) best = { def, matches, score }
   }
   if (!best) return { entity: null, shape, columns: headers.map((_, i) => withData(i, { field_path: null, confidence: 0.9 })) }
-  const inSection = !!sectionId && best.def.sections.includes(sectionId)
+  const inSection = !!sectionId && inSections(best.def, sectionId)
   const { def, matches } = best
   return {
     entity: def.entity,

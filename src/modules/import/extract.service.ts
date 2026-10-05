@@ -37,7 +37,7 @@ import { withMeteredAi } from "./metered-ai.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
-import { TABLE_ENTITIES } from "./table-header-dictionary.js"
+import { TABLE_ENTITIES, hasRequiredFields } from "./table-header-dictionary.js"
 import { tableRows, tableText } from "./table-rows.js"
 import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
 import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
@@ -73,6 +73,17 @@ const LIST_FIELDS = new Set(["actor_ids", "goals", "includes", "extends", "relat
 /** Field nhận giá trị hàng trên khi ô trống (ô gộp dọc — "Feature" gộp cho nhiều màn hình liền nhau). */
 const FILL_DOWN_FIELDS = new Set(["feature_id"])
 
+/** Tên ngắn từ một câu yêu cầu: bỏ "The system shall", cắt ở ranh giới từ trong 80 ký tự. */
+export const shortName = (statement: string): string => {
+  const s = statement
+    .replace(/^\s*(the\s+)?(system|application|app|user)\s+(shall|must|should|will|can)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  const first = s.split(/(?<=[.;:])\s/)[0].replace(/[.;:]$/, "")
+  const name = first.length <= 80 ? first : `${first.slice(0, 80).replace(/\s+\S*$/, "")}…`
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
 /**
  * Ma trận phân quyền (FLF-252): mỗi cột vai trò ⇒ một vai trò (tên = tiêu đề cột), mỗi ô đánh dấu ⇒ một quyền
  * màn hình × vai trò × thao tác ("X"/"✓" ⇒ `access`, "view, create" ⇒ hai quyền). Tên màn / vai trò phân giải lúc dựng op.
@@ -106,7 +117,7 @@ export const deterministicTableItems = (table: BlockLite, grid: string[][], prof
   if (entity === "permissions") return matrixItems(table, grid, shape, cols, confidence)
   const def = TABLE_ENTITIES.find((d) => d.entity === entity)
   const fields = new Map(cols.filter((c) => c.field_path!.startsWith(`${entity}[`)).map((c) => [c.column_index, c.field_path!.split("].")[1]]))
-  if (!def || !def.required.every((f) => [...fields.values()].includes(f))) return null
+  if (!def || !hasRequiredFields(def, new Set(fields.values()))) return null
   const above = new Map<string, string>()
   return shape.body.flatMap((r) => {
     const value: Record<string, unknown> = {}
@@ -120,6 +131,8 @@ export const deterministicTableItems = (table: BlockLite, grid: string[][], prof
     if (!Object.keys(value).length) return []
     const group = groupOf(shape, r)
     if (entity === "screens" && value.feature_id === undefined && group) value.feature_id = group
+    // Bảng yêu cầu "ID | Requirement" không có cột tên ⇒ tên chức năng là phần đầu câu yêu cầu (mô tả giữ đủ câu)
+    if (entity === "functions" && value.name === undefined && typeof value.description === "string") value.name = shortName(value.description)
     const key = typeof value.id === "string" ? normalizeKey(value.id) : null
     delete value.id
     return [{ entity, id: key, value, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }]
@@ -418,6 +431,11 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     }
 
     const merged = mergeItems(items)
+    // Chức năng trích ngay dưới một tính năng (FLF-252 — danh sách yêu cầu của mẫu IEEE) thuộc tính năng đó khi tài liệu không ghi
+    const sectionFeature = provisional.get(section_id)
+    if (sectionFeature?.entity === "features") {
+      for (const it of merged) if (it.entity === "functions" && it.value.feature_id === undefined) it.value.feature_id = sectionFeature.id
+    }
     known.push(...merged)
     draft.fields = merged.flatMap(flattenItem) as ExtractedField[]
     draft.status = "done"

@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
-import { assignBlockSections, matchHeadings, matchProfile, matchTables, missingRequiredSections, needsMappingReview, type ProfileBlock } from "./profile-match.service.js"
+import {
+  assignBlockSections,
+  detectTemplateFamily,
+  matchHeadings,
+  matchProfile,
+  matchTables,
+  missingRequiredSections,
+  needsMappingReview,
+  type ProfileBlock
+} from "./profile-match.service.js"
 import { MAPPING_CONFIDENCE_THRESHOLD } from "./import.constants.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -106,6 +115,16 @@ describe("matchTable — khớp theo cả dữ liệu dưới tiêu đề (FLF-2
     expect(matchTable([["Screen", "Guest", "User"], ["Login", "X", "X"]], "fixed:3.1.2").entity).not.toBe("permissions")
   })
 
+  it("bảng yêu cầu dưới mục tính năng (mẫu IEEE) ⇒ chức năng; bảng field trong mục chức năng vẫn không đoán", () => {
+    expect(paths([["ID", "Requirement", "Priority", "Verification"], ["FR-001", "The system shall …", "Must", "Test"]], "feature:@B0099")).toEqual([
+      "functions[].id",
+      "functions[].description",
+      "functions[].priority",
+      null
+    ])
+    expect(matchTable([["Field Name", "Type", "Description"], ["Email", "text", "Login email"]], "function:@B0100").entity).toBeNull()
+  })
+
   it("cột mang vai trò theo dữ liệu + giá trị mẫu cho bước xác nhận; chỉ có tiêu đề ⇒ không có", () => {
     const m = matchTable([["#", "Actor", "Description"], ["1", "Guest", "Visitor"], ["2", "Admin", "Manager"]], "fixed:2.1")
     expect(m.columns.map((c) => [c.role, c.samples])).toEqual([
@@ -133,8 +152,10 @@ describe("matchTables (FLF-251)", () => {
       ["B0008", "feature:@B0007"]
     ])
     const map = matchTables(blocks, sections)
-    expect([...new Set(map.map((t) => t.block_id))]).toEqual(["B0004"])
-    expect(map.map((t) => t.field_path)).toEqual([null, "actors[].name", "actors[].description"])
+    // FLF-252: mục tính năng có trích (danh sách yêu cầu) ⇒ bảng của nó vào bước map, nhưng không đủ cột ⇒ không gán field
+    expect([...new Set(map.map((t) => t.block_id))]).toEqual(["B0004", "B0008"])
+    expect(map.filter((t) => t.block_id === "B0004").map((t) => t.field_path)).toEqual([null, "actors[].name", "actors[].description"])
+    expect(map.filter((t) => t.block_id === "B0008").every((t) => t.field_path === null)).toBe(true)
   })
 })
 
@@ -255,7 +276,7 @@ describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
 })
 
 describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
-  it("heading IEEE khớp section FPT qua alias; số mục khác FPT ⇒ độ tin thấp để người dùng xác nhận", () => {
+  it("heading IEEE khớp section FPT; FLF-252: khớp theo danh mục IEEE nên số mục IEEE là đúng số ⇒ độ tin đủ", () => {
     const map = mapOf([
       heading(1, 1, "1. Introduction"),
       heading(2, 2, "1.3 Definitions, acronyms & abbreviations"),
@@ -269,8 +290,73 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     expect(map["2.3 User characteristics"].section_id).toBe("fixed:2.1")
     expect(map["3. Specific Requirements"].section_id).toBe("group:3")
     expect(map["3.3 Performance requirements"].section_id).toBe("fixed:4.2.3")
-    expect(map["3.3 Performance requirements"].confidence).toBeLessThan(MAPPING_CONFIDENCE_THRESHOLD)
+    expect(map["3.3 Performance requirements"].confidence).toBeGreaterThanOrEqual(MAPPING_CONFIDENCE_THRESHOLD)
     expect(map["3.1 External interface requirements"].section_id).toBe("fixed:4.1")
+  })
+
+  it("FLF-252: dàn mục IEEE 830 ⇒ nhận họ mẫu IEEE, mỗi mục trích vào đúng section FPT, mục chỉ có ở IEEE giữ nguyên văn — không còn dòng sai độ tin cao", () => {
+    const outline = [
+      "1. Introduction", "1.1. Purpose", "1.3. Definitions, acronyms & abbreviations", "1.4. References",
+      "2. Overall description", "2.1. Product perspective", "2.1.3. Hardware interfaces", "2.3. User characteristics", "2.4. Constraints",
+      "3. Specific Requirements", "3.1. External interface requirements", "3.1.1. User interfaces", "3.1.2. Hardware interfaces",
+      "3.2. Specific requirements", "3.2.1. Sequence diagrams", "3.2.3. Register account", "3.3. Performance requirements",
+      "3.4. Design constraints", "3.5. Software system attributes", "3.5.1. Reliability", "3.5.2. Availability", "3.5.4. Maintainability",
+      "3.6. Other requirements", "4. Supporting information", "4.2. Appendixes"
+    ]
+    const blocks = outline.map((text, i) => heading(i + 1, text.split(" ")[0].replace(/\.$/, "").split(".").length, text))
+    expect(detectTemplateFamily(blocks)).toBe("ieee830")
+    const map = mapOf(blocks)
+    const at = (t: string) => [map[t].section_id, map[t].confidence]
+    expect(at("1.3. Definitions, acronyms & abbreviations")).toEqual(["fixed:5.5", 1])
+    expect(at("1.4. References")).toEqual(["unmapped", 1])
+    expect(map["1.4. References"].template_section).toBe("ieee830:1.4")
+    expect(at("2.1.3. Hardware interfaces")).toEqual(["fixed:4.1", 1])
+    expect(at("2.3. User characteristics")).toEqual(["fixed:2.1", 1])
+    expect(at("3.1. External interface requirements")).toEqual(["fixed:4.1", 1])
+    expect(at("3.1.1. User interfaces")).toEqual(["fixed:3.1.2", 1])
+    expect(at("3.4. Design constraints")).toEqual(["fixed:4.2.4", 1])
+    // nhiều mục IEEE cùng một section FPT
+    expect(at("3.5.1. Reliability")).toEqual(["fixed:4.2.2", 1])
+    expect(at("3.5.2. Availability")).toEqual(["fixed:4.2.2", 1])
+    expect(at("3.5.4. Maintainability")).toEqual(["fixed:4.2.4", 1])
+    expect(at("3.6. Other requirements")).toEqual(["fixed:5.4", 1])
+    // chương yêu cầu chức năng ⇒ tính năng; mục con lạ ⇒ chức năng nhưng phải xác nhận
+    expect(map["3.2. Specific requirements"].section_id).toMatch(/^feature:@B\d{4}$/)
+    expect(map["3.2.1. Sequence diagrams"].section_id).toBe("fixed:2.2.2")
+    expect(map["3.2.3. Register account"]).toMatchObject({ section_id: expect.stringMatching(/^function:@/), confidence: 0.75 })
+    // không còn heading nào bị gán sai mà vẫn ≥ 0.8 (trước đây: interface ⇒ function 0.85, Design constraints ⇒ feature 0.85)
+    expect(Object.values(map).filter((h) => /^(feature|function):@/.test(h.section_id) && h.confidence >= 0.8).map((h) => h.heading_text)).toEqual([
+      "3.2. Specific requirements"
+    ])
+  })
+
+  it("FLF-252: mẫu IEEE dạng System Features ⇒ chương tính năng, mục mô tả dưới tính năng thuộc tính năng (không thành chức năng)", () => {
+    const outline: [number, string][] = [
+      [1, "1 Introduction"], [2, "1.2 Document Conventions"], [2, "1.4 Product Scope"],
+      [1, "2 Overall Description"], [2, "2.3 User Classes and Characteristics"], [2, "2.5 Design and Implementation Constraints"],
+      [1, "3 External Interface Requirements"], [2, "3.1 User Interfaces"],
+      [1, "4 System Features"], [2, "4.1 Course Enrollment"], [3, "4.1.1 Description and Priority"], [3, "4.1.3 Functional Requirements"],
+      [2, "4.2 Grade Reports"], [3, "4.2.1 Description and Priority"],
+      [1, "5 Other Nonfunctional Requirements"], [2, "5.1 Performance Requirements"], [2, "5.3 Security Requirements"]
+    ]
+    const blocks = outline.map(([level, text], i) => heading(i + 1, level, text))
+    expect(detectTemplateFamily(blocks)).toBe("ieee_features")
+    const map = mapOf(blocks)
+    const enrollment = map["4.1 Course Enrollment"].section_id
+    expect(enrollment).toMatch(/^feature:@/)
+    expect(map["4.1.1 Description and Priority"].section_id).toBe(enrollment)
+    expect(map["4.1.3 Functional Requirements"].section_id).toBe(enrollment)
+    expect(map["4.2.1 Description and Priority"].section_id).toBe(map["4.2 Grade Reports"].section_id)
+    expect(map["1.2 Document Conventions"].section_id).toBe("unmapped")
+    expect(map["2.5 Design and Implementation Constraints"].section_id).toBe("fixed:4.2.4")
+    expect(map["3.1 User Interfaces"].section_id).toBe("fixed:3.1.2")
+    expect(map["5.3 Security Requirements"].section_id).toBe("fixed:4.2.4")
+  })
+
+  it("FLF-252: tài liệu FPT không bị nhận nhầm là IEEE; ít heading ⇒ khớp như FPT", async () => {
+    const { blocks } = await parseDocument(await makeSrsDocx())
+    expect(detectTemplateFamily(blocks)).toBe("fpt")
+    expect(detectTemplateFamily([heading(1, 1, "1. Introduction"), heading(2, 2, "1.1 Purpose")])).toBe("fpt")
   })
 
   it("mọi đầu mục FPT (trừ Record of Changes tự sinh) là bắt buộc", () => {

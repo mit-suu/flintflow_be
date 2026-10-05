@@ -93,6 +93,11 @@ export const buildLayout = (
   const stack: { level: number; section: string; entry: LayoutEntry }[] = []
   /** Mục riêng đang nhận nguyên văn mọi khối. */
   let current: CustomSection | null = null
+  /**
+   * Mục riêng của heading lặp lại một section FPT có trích (FLF-252 — mẫu IEEE: Reliability + Availability ⇒ 4.2.2): nội dung
+   * đã trích vào Spine và in ở lần đầu của section, mục này chỉ giữ phần không trích được (văn xuôi I-4 báo, ảnh) — không in hai lần.
+   */
+  let currentRepeats = false
   /** Section FPT / nhóm đang mở — khối không trích được thành phần nối của nó. */
   let owner: LayoutEntry | null = null
   const continuations = new Map<LayoutEntry, CustomSection>()
@@ -132,6 +137,7 @@ export const buildLayout = (
         current = null
       } else {
         current = newCustom(heading, clampLevel(b.level))
+        currentRepeats = mapped !== UNMAPPED_SECTION && !mapped.startsWith("group:")
         section = customSectionKey(current.id)
       }
       const entry: LayoutEntry = { order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section }
@@ -142,8 +148,9 @@ export const buildLayout = (
     }
     const block = toCustomBlock(b)
     if (!block) continue
-    if (current) current.blocks.push(block)
-    else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
+    if (current) {
+      if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
+    } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
   return { layout, customSections }
 }

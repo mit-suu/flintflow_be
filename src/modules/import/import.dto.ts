@@ -82,8 +82,16 @@ export const headingMapEntrySchema = z.object({
   section_id: z.string().min(1),
   confidence,
   detected_by: z.enum(HEADING_DETECTORS),
-  confirmed: z.boolean()
+  confirmed: z.boolean(),
+  /**
+   * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
+   * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
+   */
+  template_section: z.string().nullable().optional()
 })
+
+/** Họ mẫu của tài liệu upload (FLF-252). */
+export const TEMPLATE_FAMILIES = ["fpt", "ieee830", "ieee_features"] as const
 
 export const tableMapEntrySchema = z.object({
   block_id: blockId,
@@ -127,7 +135,9 @@ export const templateProfileDtoSchema = z.object({
   /** FLF-182 — rỗng với import trước mode 1 v2. */
   layout: z.array(layoutEntrySchema).default([]),
   /** FLF-252: dòng Record of Changes đọc được từ file (tính lúc tách file, tính lại khi đổi mapping); rỗng = không tìm thấy bảng. */
-  record_of_changes: z.array(recordRowSchema).default([])
+  record_of_changes: z.array(recordRowSchema).default([]),
+  /** FLF-252: họ mẫu nhận được — mẫu IEEE khớp theo danh mục IEEE rồi trích vào section FPT. */
+  template_family: z.enum(TEMPLATE_FAMILIES).default("fpt")
 })
 
 // ─── kế hoạch step theo template (mode 1 v2, FLF-182) ─────────────────

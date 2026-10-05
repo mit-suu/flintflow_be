@@ -356,12 +356,18 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
   phiên bản / loại thay đổi) trước mục nội dung đầu tiên.
 - **#8 `finalizeRequestSchema.record_of_changes?`** (tối đa 500 dòng): dòng người dùng đã xem/sửa ở wizard, thay cho dòng đọc
   từ file khi in lên đầu bảng §I. Không gửi ⇒ như cũ (đọc lại từ file).
+- **Mẫu IEEE**: `templateProfileDtoSchema.template_family` (`fpt` · `ieee830` · `ieee_features`, mặc định `fpt`) và
+  `headingMapEntrySchema.template_section?` (mã nội bộ của mục mẫu IEEE khớp được — `section_id = unmapped` kèm field này là
+  mục chỉ có ở IEEE, giữ nguyên văn). Heading IEEE khớp theo danh mục IEEE (`template-catalog.ts`) rồi trích vào section FPT;
+  nhiều heading có thể cùng `section_id` (Reliability + Availability ⇒ `fixed:4.2.2`). Request #5 không đổi hình.
+- **Section tính năng có trích** (`feature:@B…` / `feature:<id>`): chữ / bảng ngay dưới một tính năng trích thành chức năng
+  của tính năng đó (danh sách yêu cầu FR-… của mẫu IEEE); `table_map` nhận thêm `functions[].priority`.
 
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
-| 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes`, #8 thêm `record_of_changes?` — chỉ thêm field, contract-change, chờ 4/4 |
+| 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |
 | 2026-09-24 | Gemini quá tải | §4.10: đọc ảnh lỗi sau mọi lượt thử không còn `paused` — ảnh `unavailable` + cờ vàng. Skill Gemini thêm `fallbackModels` (`gemini-3.6-flash`, `gemini-3.5-flash-lite`); log AI ghi model thật sự trả lời. Hình API không đổi |
 | 2026-09-24 | mode 1 v3 — sơ đồ gốc | §4.13: giữ ảnh sơ đồ gốc khi import (`CustomBlock.diagram`), không in PlantUML cùng loại, cờ vàng `original_diagram_stale`, `found_by: "diagram"` + đề xuất vẽ lại do code (C-4), C-5 bỏ `diagram_stale` khỏi "lỗi đỏ mới" — thay hành vi finalize §4.10, contract-change, chờ 4/4 |
 | 2026-09-24 | mode 1 v3 — phase 8 | §4.12: `POST …/amend` + `amendments[]`, cạnh `… → clarifying`, 3.4 cộng dồn vị trí, `owner-step-draft` nới trạng thái + mục riêng — contract-change, chờ 4/4 |

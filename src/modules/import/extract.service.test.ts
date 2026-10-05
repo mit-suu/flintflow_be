@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import { matchProfile } from "./profile-match.service.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
-import { AI_BATCH_CHARS, AI_BLOCK_CHARS, captionOf, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, splitList, visionItems } from "./extract.service.js"
+import { AI_BATCH_CHARS, AI_BLOCK_CHARS, captionOf, chunkBlocks, deterministicTableItems, extractionPlan, itemsFromAi, shortName, splitList, visionItems } from "./extract.service.js"
 import { IdAllocator, flattenItem, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
@@ -74,6 +74,16 @@ describe("extractionPlan", () => {
     const plan = extractionPlan(lite)
     expect(plan.filter((s) => s.startsWith("fixed:"))).toEqual(["fixed:1", "fixed:2.1", "fixed:2.2.1", "fixed:2.2.2", "fixed:3.1.2", "fixed:4.2.3", "fixed:5.1"])
     expect(plan.filter((s) => !s.startsWith("fixed:"))).toHaveLength(3) // 1 feature + 2 function
+  })
+})
+
+describe("shortName — tên chức năng từ câu yêu cầu (FLF-252)", () => {
+  it("bỏ 'The system shall', lấy câu đầu, cắt ở ranh giới từ", () => {
+    expect(shortName("The system shall allow users to register with email. A confirmation is sent.")).toBe("Allow users to register with email")
+    expect(shortName("Users must be able to export reports")).toBe("Users must be able to export reports")
+    const long = shortName(`The system shall ${"very ".repeat(30)}long`)
+    expect(long.length).toBeLessThanOrEqual(81)
+    expect(long.endsWith("…")).toBe(true)
   })
 })
 
@@ -187,6 +197,17 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
       { screen_id: "Users", role_id: "Admin", action: "delete" }
     ])
     expect(items.every((i) => i.origin === "deterministic" && i.id === null)).toBe(true)
+  })
+
+  it("FLF-252: bảng yêu cầu 'ID | Requirement | Priority' dưới tính năng ⇒ chức năng có mã, tên rút từ câu, mô tả đủ câu", () => {
+    const rows = [
+      ["ID", "Requirement", "Priority", "Acceptance Criteria"],
+      ["FR-001", "The system shall let a learner enrol in a course.", "Must", "Enrolment appears in My Courses"]
+    ]
+    const items = deterministicTableItems(blocks[0], rows, profileOf([col(0, "functions[].id"), col(1, "functions[].description"), col(2, "functions[].priority")]))!
+    expect(items).toMatchObject([
+      { entity: "functions", id: "FR-001", value: { name: "Let a learner enrol in a course", description: "The system shall let a learner enrol in a course.", priority: "Must" } }
+    ])
   })
 
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {

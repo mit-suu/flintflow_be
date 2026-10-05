@@ -45,9 +45,12 @@ export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
   "fixed:4.2.4": "other"
 }
 
+/**
+ * Thực thể cần trích của section. Feature (FLF-252): chữ / bảng ngay dưới một tính năng — danh sách yêu cầu FR-… của mẫu
+ * IEEE, phần giới thiệu tính năng của FPT — trích thành chức năng của tính năng đó (trước đây không trích gì).
+ */
 export const targetsOf = (sectionId: string): readonly string[] => {
-  const m = PROVISIONAL_SECTION.exec(sectionId)
-  if (m) return m[1] === "function" ? ["functions"] : []
+  if (PROVISIONAL_SECTION.test(sectionId)) return ["functions"]
   return SECTION_TARGETS[sectionId] ?? []
 }
 

@@ -87,3 +87,38 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
       : ""
   })
 }
+
+/**
+ * SRS mẫu IEEE 830 (FLF-252): Revision History, chương 1–3 rút gọn; yêu cầu chức năng là bảng "ID | Requirement | Priority"
+ * ngay dưới 3.2; Reliability + Availability cùng trích vào một section FPT.
+ */
+export const makeIeeeSrsDocx = async (): Promise<Buffer> =>
+  makeDocx({
+    styles: STYLES,
+    body: [
+      styled("u1", "Revision History"),
+      table([["Version", "Date", "Author", "Description"], ["0.1", "01/09/2026", "Lan", "Initial draft"]]),
+      styled("u1", "1. Introduction"),
+      styled("u2", "1.1 Purpose"),
+      p(SRS_FIXTURE_TEXT.purpose),
+      styled("u2", "1.4 References"),
+      p("IEEE Std 830-1998."),
+      styled("u1", "2. Overall Description"),
+      styled("u2", "2.3 User Characteristics"),
+      table([["Actor", "Description"], SRS_FIXTURE_TEXT.actorRow, ["Admin", "Manages courses and users."]]),
+      styled("u1", "3. Specific Requirements"),
+      styled("u2", "3.2 Functional Requirements"),
+      table([
+        ["ID", "Requirement", "Priority"],
+        ["FR-001", "The system shall let a learner register with an email address.", "Must"],
+        ["FR-002", "The system shall let an admin lock a learner account.", "Should"]
+      ]),
+      styled("u2", "3.3 Performance Requirements"),
+      p(SRS_FIXTURE_TEXT.perf),
+      styled("u2", "3.5 Software System Attributes"),
+      styled("u3", "3.5.1 Reliability"),
+      p("The platform shall have a monthly uptime of at least 99.5%."),
+      styled("u3", "3.5.2 Availability"),
+      p("The platform shall be available 24 hours a day, 7 days a week.")
+    ].join("")
+  })

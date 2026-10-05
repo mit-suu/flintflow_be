@@ -62,7 +62,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     section_id: h.section_id,
     confidence: h.confidence,
     detected_by: h.detected_by,
-    confirmed: h.confirmed
+    confirmed: h.confirmed,
+    ...(h.template_section ? { template_section: h.template_section } : {})
   })),
   table_map: p.table_map.map((t) => ({
     block_id: t.block_id,
@@ -77,6 +78,7 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
   required_sections: [...p.required_sections],
   language: p.language,
   layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id })),
+  template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
   record_of_changes: (p.legacy_record_of_changes ?? []).map((r) => ({
     date: r.date,
     version: r.version,

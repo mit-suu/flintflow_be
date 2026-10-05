@@ -63,6 +63,32 @@ describe("buildLayout", () => {
     expect(customSectionOps(customSections).map((o) => o.path)).toEqual(["custom_sections[]", "custom_sections[]", "custom_sections[]"])
   })
 
+  it("FLF-252: heading lặp một section FPT có trích (IEEE Reliability + Availability) ⇒ mục riêng chỉ giữ khối không trích được, không in hai lần", () => {
+    const blocks = [
+      h("B0001", "3.5.1 Reliability", 3, "fixed:4.2.2"),
+      p("B0002", "Uptime is 99.5% per month.", "fixed:4.2.2"),
+      h("B0003", "3.5.2 Availability", 3, "fixed:4.2.2"),
+      p("B0004", "The system is available 24/7.", "fixed:4.2.2"),
+      p("B0005", "See the vendor SLA in the appendix.", "fixed:4.2.2"),
+      h("B0006", "3.5.9 Notes", 3),
+      p("B0007", "Kept as written.", null)
+    ]
+    const headings = new Map([
+      ["B0001", "fixed:4.2.2"],
+      ["B0003", "fixed:4.2.2"],
+      ["B0006", "unmapped"]
+    ])
+    const { layout, customSections } = buildLayout(blocks, headings, new Set(["B0005"]))
+    expect(layout.map((l) => [l.heading_text, l.section_id])).toEqual([
+      ["3.5.1 Reliability", "fixed:4.2.2"],
+      ["3.5.2 Availability", "custom:CS01"],
+      ["3.5.9 Notes", "custom:CS02"]
+    ])
+    // B0004 đã trích vào Spine (in ở 3.5.1) ⇒ không chép lại; B0005 I-4 báo không trích được ⇒ giữ
+    expect(customSections[0].blocks.map((b) => b.text)).toEqual(["See the vendor SLA in the appendix."])
+    expect(customSections[1].blocks.map((b) => b.text)).toEqual(["Kept as written."])
+  })
+
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
     expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [] })
   })
