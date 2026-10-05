@@ -21,6 +21,8 @@ export interface EntityItem {
   field_confidence: Record<string, number>
   source_block_ids: string[]
   origin: FieldOrigin
+  /** Nguồn riêng của field khác nguồn item — phần ảnh bù vào phần tử của chữ / bảng vẫn là `vision` (FLF-252). */
+  field_origin?: Record<string, FieldOrigin>
 }
 
 export const ID_PREFIX: Readonly<Record<string, { prefix: string; pad: number }>> = {
@@ -67,7 +69,41 @@ export const findKnownId = (known: readonly EntityItem[], entity: string, name: 
   return hit?.id ?? null
 }
 
-/** Cấp id mới không trùng id đã có của từng mảng. */
+/**
+ * Khoá so mã phần tử (FLF-252): bỏ dấu nối / gạch dưới / khoảng trắng và số 0 đứng đầu, không phân biệt hoa thường ⇒
+ * "A01" = "A-01" = "a1", "UC01" = "UC-01". Id cấp tự động ("A01", "E01") không cùng dạng `normalizeKey` ("A-01").
+ */
+export const idKey = (id: string): string =>
+  id
+    .trim()
+    .toUpperCase()
+    .replace(/[-_\s]+/g, "")
+    .replace(/(^|\D)0+(?=\d)/g, "$1")
+
+/** Id đã biết cùng loại có mã trùng (so theo `idKey`); không có ⇒ `null`. */
+export const findKnownKey = (known: readonly EntityItem[], entity: string, key: string): string | null => {
+  const k = idKey(key)
+  return known.find((x) => x.entity === entity && x.id !== null && idKey(x.id) === k)?.id ?? null
+}
+
+/**
+ * Id của phần tử model trả về (FLF-252):
+ * - khoá trùng mã đã biết (so lỏng) ⇒ mã đó. Model chép đúng "A01" từ known_keys nhưng `normalizeKey` đổi thành "A-01" ⇒
+ *   trước đây thành phần tử thứ hai: tác nhân của bảng bị nhân đôi khi sơ đồ ngữ cảnh / use case vẽ lại, thực thể khi ERD vẽ lại;
+ * - khoá chỉ là tên chép lại ("LimCallLog") ⇒ coi như không có khoá;
+ * - ảnh hiếm khi ghi mã ⇒ tên trùng phần tử đã biết thắng khoá lạ (model tự đặt); chữ thì mã tài liệu thắng;
+ * - không khớp gì ⇒ khoá chuẩn hoá; không có khoá ⇒ `null` (cấp mới).
+ */
+export const aiItemId = (known: readonly EntityItem[], entity: string, key: string | null, name: unknown, fromImage = false): string | null => {
+  const code = key?.trim() && !(typeof name === "string" && nameKey(key) === nameKey(name)) ? key.trim() : null
+  const sameKey = code ? findKnownKey(known, entity, code) : null
+  if (sameKey) return sameKey
+  const sameName = findKnownId(known, entity, name)
+  if (sameName && (fromImage || !code)) return sameName
+  return code ? normalizeKey(code) : null
+}
+
+/** Cấp id mới không trùng id đã có của từng mảng — so theo `idKey`: đã có "A-01" thì không cấp "A01". */
 export class IdAllocator {
   private readonly used = new Map<string, Set<string>>()
   private readonly counters = new Map<string, number>()
@@ -78,12 +114,12 @@ export class IdAllocator {
 
   reserve(entity: string, id: string): void {
     const set = this.used.get(entity) ?? new Set<string>()
-    set.add(id)
+    set.add(idKey(id))
     this.used.set(entity, set)
   }
 
   has(entity: string, id: string): boolean {
-    return this.used.get(entity)?.has(id) ?? false
+    return this.used.get(entity)?.has(idKey(id)) ?? false
   }
 
   next(entity: string): string {
@@ -163,7 +199,7 @@ export const flattenItem = (item: EntityItem): ExtractedField[] =>
       value,
       confidence: Math.min(1, Math.max(0, item.field_confidence[field] ?? item.confidence)),
       source_block_ids: item.source_block_ids,
-      origin: item.origin,
+      origin: item.field_origin?.[field] ?? item.origin,
       confirmed: false
     }))
 

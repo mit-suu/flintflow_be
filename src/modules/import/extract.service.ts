@@ -19,7 +19,9 @@ import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractab
 import {
   IdAllocator,
   REF_LIST_FIELDS,
+  aiItemId,
   findKnownId,
+  findKnownKey,
   flattenItem,
   mergeFieldValue,
   nameKey,
@@ -30,7 +32,7 @@ import {
   type ProvisionalEntity
 } from "./extracted-entities.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
-import { VISION_CONFIDENCE_CAP, needsConfirm, type MentionEntity } from "./import.constants.js"
+import { VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
@@ -251,10 +253,13 @@ const knownKeysText = (items: EntityItem[]): string => {
   return [...byEntity].map(([e, ids]) => `${e}: ${[...new Set(ids)].join(", ")}`).join("\n") || "(none yet)"
 }
 
-/** Đổi output model sang item: chuẩn hoá khoá, dùng lại id theo tên, ép id function của section function. */
+/**
+ * Đổi output model sang item: id theo mã / tên phần tử đã biết (`aiItemId`), ép id function của section function.
+ * `fromImage`: item đọc từ ảnh diagram — tên trùng phần tử đã biết thắng khoá model đặt.
+ */
 export const itemsFromAi = (
   out: ImportExtractOutput,
-  ctx: { sectionId: string; alloc: IdAllocator; known: EntityItem[]; sectionFunction: ProvisionalEntity | null; validBlocks: Set<string> }
+  ctx: { sectionId: string; alloc: IdAllocator; known: EntityItem[]; sectionFunction: ProvisionalEntity | null; validBlocks: Set<string>; fromImage?: boolean }
 ): EntityItem[] => {
   let functionUsed = false
   return out.items.map((raw) => {
@@ -266,8 +271,7 @@ export const itemsFromAi = (
         id = ctx.sectionFunction.id
         functionUsed = true
       } else {
-        id = raw.key ? normalizeKey(raw.key) : findKnownId(ctx.known, raw.entity, value.name ?? value.term)
-        id ??= ctx.alloc.next(raw.entity)
+        id = aiItemId(ctx.known, raw.entity, raw.key, value.name ?? value.term, ctx.fromImage) ?? ctx.alloc.next(raw.entity)
         ctx.alloc.reserve(raw.entity, id)
       }
     }
@@ -309,19 +313,38 @@ const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|p
 export const readsImage = (sectionId: string, caption: string): boolean =>
   !NOT_DIAGRAM_CAPTION.test(caption) && (DIAGRAM_SECTIONS.has(sectionId) || DIAGRAM_CAPTION.test(caption))
 
+const isBlank = (v: unknown): boolean => v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length)
+
+/** Loại phần tử mà field quan hệ trỏ tới. */
+const REF_ENTITY: Readonly<Record<string, string>> = { actor_ids: "actors", includes: "use_cases", extends: "use_cases", relations: "entities", flow_to: "screens" }
+
+/** Khoá so tham chiếu: mã phần tử đã biết ⇒ tên của nó (ảnh ghi "A01", bảng ghi "Learner" là một), còn lại ⇒ tên chuẩn hoá. */
+const refKey = (known: readonly EntityItem[], field: string, ref: unknown): string => {
+  const entity = REF_ENTITY[field]
+  const id = entity ? findKnownKey(known, entity, String(ref)) : null
+  const name = id ? known.find((k) => k.entity === entity && k.id === id && typeof k.value.name === "string")?.value.name : undefined
+  return nameKey(typeof name === "string" ? name : String(ref))
+}
+
 /**
- * Phần tử đọc từ ảnh trùng phần tử đã có từ chữ / bảng (cùng loại, cùng id) ⇒ chỉ giữ quan hệ mới (actor nối thêm,
- * include / extend…) để bước 1.9 chỉ hỏi phần ảnh thêm vào; không có gì mới ⇒ bỏ item (FLF-252).
+ * Phần tử đọc từ ảnh trùng phần tử đã có (cùng loại, cùng id) — từ chữ / bảng hay từ ảnh trước (sơ đồ ngữ cảnh rồi sơ
+ * đồ use case cùng vẽ các tác nhân) ⇒ chỉ giữ phần ảnh thêm vào: quan hệ mới (actor nối thêm, include / extend…) và field
+ * nguồn trước không có (loại tác nhân khi bảng không có cột loại). Bước 1.9 chỉ hỏi phần đó; không có gì mới ⇒ bỏ item (FLF-252).
  */
 export const onlyNewFromVision = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] =>
   items.flatMap((it) => {
-    const existing = known.find((k) => k.entity === it.entity && k.id === it.id && k.origin !== "vision")
-    if (!existing) return [it]
+    const same = known.filter((k) => k.entity === it.entity && k.id === it.id)
+    if (!same.length) return [it]
     const value: Record<string, unknown> = {}
     for (const [field, v] of Object.entries(it.value)) {
-      if (!REF_LIST_FIELDS.has(field) || !Array.isArray(v)) continue
-      const prev = Array.isArray(existing.value[field]) ? (existing.value[field] as unknown[]).map((x) => nameKey(String(x))) : []
-      const added = v.filter((x) => !prev.includes(nameKey(String(x))))
+      if (isBlank(v)) continue
+      const prev = same.map((k) => k.value[field]).filter((x) => !isBlank(x))
+      if (!REF_LIST_FIELDS.has(field) || !Array.isArray(v)) {
+        if (!prev.length) value[field] = v
+        continue
+      }
+      const seen = new Set(prev.flat().map((x) => refKey(known, field, x)))
+      const added = v.filter((x) => !seen.has(refKey(known, field, x)))
       if (added.length) value[field] = added
     }
     if (!Object.keys(value).length) return []
@@ -352,27 +375,41 @@ const itemsOfDraft = (d: Pick<IExtractionDraft, "fields">): EntityItem[] => {
   return [...map.values()]
 }
 
-const mergeItems = (items: EntityItem[]): EntityItem[] => {
+const fieldConfidence = (it: EntityItem, field: string): number => it.field_confidence[field] ?? it.confidence
+
+/**
+ * Gộp item cùng phần tử trong một section. Chữ / bảng nói cùng phần tử với ảnh ⇒ chữ thắng (tin hơn ảnh), ảnh chỉ bù field
+ * chữ không có + quan hệ mới. Phần ảnh bù giữ nguồn `vision` + độ tin của ảnh (FLF-252) — trước đây nhận độ tin của chữ /
+ * bảng nên vào Spine không qua bước 1.9 (vd quan hệ của ERD gộp vào bảng thực thể cùng mục).
+ */
+export const mergeItems = (items: EntityItem[]): EntityItem[] => {
   const out = new Map<string, EntityItem>()
   for (const it of items) {
     const key = `${it.entity}|${it.id ?? ""}`
     const cur = out.get(key)
     if (!cur) {
-      out.set(key, { ...it, value: { ...it.value }, source_block_ids: [...it.source_block_ids] })
+      out.set(key, { ...it, value: { ...it.value }, field_confidence: { ...it.field_confidence }, source_block_ids: [...it.source_block_ids] })
       continue
     }
-    // Chữ / bảng nói cùng phần tử với ảnh ⇒ chữ thắng (tin hơn ảnh), ảnh chỉ bù field chữ không có
-    if (cur.origin === "vision" && it.origin !== "vision") {
-      for (const [k, v] of Object.entries(it.value)) cur.value[k] = k in cur.value ? mergeFieldValue(k, cur.value[k], v) : v
-      cur.origin = it.origin
-      cur.confidence = it.confidence
-      cur.field_confidence = { ...cur.field_confidence, ...it.field_confidence }
-      cur.source_block_ids = [...new Set([...it.source_block_ids, ...cur.source_block_ids])]
-      continue
+    const [base, extra] = cur.origin === "vision" && it.origin !== "vision" ? [it, cur] : [cur, it]
+    const origins: Record<string, FieldOrigin> = { ...extra.field_origin, ...base.field_origin }
+    const merged: EntityItem = {
+      ...base,
+      value: { ...base.value },
+      field_confidence: { ...extra.field_confidence, ...base.field_confidence },
+      field_origin: origins,
+      source_block_ids: [...new Set([...base.source_block_ids, ...extra.source_block_ids])]
     }
-    for (const [k, v] of Object.entries(it.value)) cur.value[k] = cur.value[k] === undefined ? v : REF_LIST_FIELDS.has(k) ? mergeFieldValue(k, cur.value[k], v) : cur.value[k]
-    cur.field_confidence = { ...it.field_confidence, ...cur.field_confidence }
-    cur.source_block_ids = [...new Set([...cur.source_block_ids, ...it.source_block_ids])]
+    for (const [k, v] of Object.entries(extra.value)) {
+      const had = merged.value[k]
+      const next = had === undefined ? v : REF_LIST_FIELDS.has(k) ? mergeFieldValue(k, had, v) : had
+      if (JSON.stringify(next) === JSON.stringify(had)) continue
+      merged.value[k] = next
+      if (extra.origin !== "vision") continue
+      merged.field_confidence[k] = Math.min(had === undefined ? 1 : fieldConfidence(base, k), fieldConfidence(extra, k))
+      origins[k] = "vision"
+    }
+    out.set(key, merged)
   }
   return [...out.values()]
 }
@@ -425,13 +462,16 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   const settled = new Map<string, Settled>()
   for (const section_id of plan) {
     if (draftOf.get(section_id)!.status === "done") continue
-    const found = settleSection(section_id, blocks, profile, provisional)
+    settled.set(section_id, settleSection(section_id, blocks, profile, provisional))
+  }
+  // Mã bảng ghi giữ chỗ trước khi cấp mã cho phần tử không mã — không cấp "A01" rồi gặp "A-01" của bảng phía sau
+  for (const found of settled.values()) for (const it of found.items) if (it.id) alloc.reserve(it.entity, it.id)
+  for (const found of settled.values()) {
     for (const it of found.items) {
       // Không có mã: dùng lại id của phần tử cùng tên đã biết (vd chức năng 3.1.4 = function của heading 3.x.y)
       it.id ??= findKnownId([...known, ...found.items], it.entity, it.value.name ?? it.value.term) ?? alloc.next(it.entity)
       alloc.reserve(it.entity, it.id)
     }
-    settled.set(section_id, found)
     known.push(...found.items)
   }
 
@@ -514,9 +554,11 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       const read =
         result.data.diagram_kind === "other"
           ? []
-          : visionItems(itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]) }))
+          : visionItems(
+              itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true })
+            )
       diagramImages.push({ block_id: img.block_id, kind: read.length ? result.data.diagram_kind : "other" })
-      // Phần tử ảnh trùng phần tử đã có từ chữ / bảng ⇒ chỉ giữ quan hệ mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
+      // Phần tử ảnh trùng phần tử đã có (chữ, bảng, ảnh trước) ⇒ chỉ giữ phần mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
       items.push(...onlyNewFromVision(read, [...known, ...items]))
     }
 

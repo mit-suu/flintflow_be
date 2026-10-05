@@ -2,7 +2,22 @@ import { describe, expect, it } from "vitest"
 import { applyRuleProfile, runDeterministicCheck } from "../spine/deterministic-check.js"
 import { planTransaction } from "../spine/op-engine.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
-import { IdAllocator, collectEntities, fieldPath, findKnownId, flattenItem, nameKey, normalizeKey, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import {
+  IdAllocator,
+  aiItemId,
+  collectEntities,
+  fieldPath,
+  findKnownId,
+  findKnownKey,
+  flattenItem,
+  idKey,
+  nameKey,
+  normalizeKey,
+  parseFieldPath,
+  realSectionId,
+  resolveProvisional,
+  type EntityItem
+} from "./extracted-entities.js"
 import { findingOps } from "./check.service.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
 import { buildImportOps, relationPhrase } from "./spine-builder.js"
@@ -59,6 +74,37 @@ describe("extracted-entities", () => {
     expect(findKnownId(known, "glossary", "srs")).toBe("G01")
     expect(findKnownId(known, "actors", "SRS")).toBeNull()
     expect(findKnownId(known, "functions", "")).toBeNull()
+  })
+
+  it("FLF-252: mã so lỏng — 'A01' = 'A-01' = 'a1'; cấp id không trùng mã đã có khác dạng", () => {
+    expect(idKey("A-01")).toBe(idKey("A01"))
+    expect(idKey("a1")).toBe(idKey("A01"))
+    expect(idKey("UC01")).toBe(idKey("UC-01"))
+    expect(idKey("FR-3.02")).toBe(idKey("FR-3.2"))
+    expect(idKey("E10")).not.toBe(idKey("E1"))
+    expect(idKey("FR-3.2.1")).not.toBe(idKey("FR-32.1"))
+    const alloc = new IdAllocator({ actors: ["A-01"] })
+    expect(alloc.has("actors", "A01")).toBe(true)
+    expect(alloc.next("actors")).toBe("A02")
+  })
+
+  it("FLF-252 aiItemId: khoá model chép từ known_keys khớp mã đã biết dù khác dạng; khoá là tên ⇒ như không có khoá", () => {
+    const item = (entity: string, id: string, name: string): EntityItem => ({ entity, id, value: { name }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" })
+    const known = [item("actors", "A01", "Developer"), item("actors", "A02", "Admin"), item("entities", "E02", "repositories"), item("use_cases", "UC-02", "Log in")]
+    // trước đây "A01" qua normalizeKey thành "A-01" ⇒ tác nhân thứ hai cùng tên
+    expect(aiItemId(known, "actors", "A01", "Developer", true)).toBe("A01")
+    expect(aiItemId(known, "actors", "a-2", "Admin")).toBe("A02")
+    // model ghép "Repository" của ERD với "repositories" của bảng qua khoá ⇒ giữ
+    expect(aiItemId(known, "entities", "E02", "Repository", true)).toBe("E02")
+    // khoá chép lại tên ⇒ không phải mã: không khớp tên nào ⇒ null (cấp mới), khớp tên ⇒ id đã biết
+    expect(aiItemId(known, "entities", "LimCallLog", "LimCallLog", true)).toBeNull()
+    expect(aiItemId(known, "actors", "Admin", "Admin", true)).toBe("A02")
+    // ảnh: khoá lạ model tự đặt thua tên trùng; chữ: mã tài liệu thắng
+    expect(aiItemId(known, "actors", "ACT-9", "Developer", true)).toBe("A01")
+    expect(aiItemId(known, "use_cases", "UC05", "Log in")).toBe("UC-05")
+    expect(aiItemId(known, "use_cases", null, "log in")).toBe("UC-02")
+    expect(aiItemId(known, "actors", null, "Guest", true)).toBeNull()
+    expect(aiItemId(known, "actors", "A01", "Developer")).toBe(findKnownKey(known, "actors", "A-01"))
   })
 })
 
@@ -174,6 +220,19 @@ describe("buildImportOps", () => {
     ])
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
     expect(plan.spine.entities[0]).toMatchObject({ relations: ["E02", "E03"], relation_verbs: { E02: "teaches", E03: "earns" } })
+  })
+
+  it("FLF-252: tham chiếu ghi mã khác dạng id ('E-02', 'a1') vẫn ra đúng phần tử", () => {
+    const spine = createEmptySpine({ name: "Edu" })
+    const ops = buildImportOps(spine, [
+      { entity: "actors", id: "A01", value: { name: "Developer" } },
+      { entity: "entities", id: "E01", value: { name: "user", relations: ["E-02"] } },
+      { entity: "entities", id: "E02", value: { name: "repositories" } },
+      { entity: "use_cases", id: "UC-01", value: { name: "Log in", actor_ids: ["a1"] } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.entities[0].relations).toEqual(["E02"])
+    expect(plan.spine.use_cases[0].actor_ids).toEqual(["A01"])
   })
 })
 

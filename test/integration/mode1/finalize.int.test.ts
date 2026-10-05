@@ -13,7 +13,7 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { patchFields, runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -383,6 +383,62 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect([...ucIds].sort()).toEqual(["UC-01", "UC-02"])
     const review = await extractionSummary(importId)
     expect(review.review_fields.filter((f) => f.origin === "vision" && f.path.startsWith("use_cases["))).toEqual([])
+  })
+
+  it("FLF-252: sơ đồ ngữ cảnh + sơ đồ use case vẽ lại tác nhân của bảng, model chép khoá 'A01' ⇒ Spine không nhân đôi tác nhân, phần ảnh thêm vào chỉ hỏi một lần", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({
+      srs: {
+        images: [
+          { name: "image1.png", data: PNG, caption: "Figure 1 CONTEXT-IMG" },
+          { name: "image2.png", data: PNG, caption: "Figure 2 USECASE-IMG" }
+        ]
+      }
+    })
+    const visionPrompts: string[] = []
+    mockOverrides.next = (prompt: string) => {
+      if (!prompt.includes("# Read Diagram Image")) return fakeMode1(prompt)
+      visionPrompts.push(prompt)
+      const b = /Image block: \[(B\d{4,})\]/.exec(prompt)?.[1]
+      // model dùng lại khoá của known_keys đúng như được đưa: "A01 (Learner)"
+      const keyOf = (name: string) => new RegExp(`(A\\d+) \\(${name}\\)`).exec(prompt)?.[1] ?? null
+      const item = (entity: string, key: string | null, value: object) => ({ entity, key, value, confidence: 0.7, field_confidence: {}, source_block_ids: [b] })
+      const actors = [
+        item("actors", keyOf("Learner"), { name: "Learner", kind: "human" }),
+        item("actors", keyOf("Admin"), { name: "Admin", kind: "human" }),
+        item("actors", keyOf("Email Service"), { name: "Email Service", kind: "system" })
+      ]
+      if (prompt.includes("CONTEXT-IMG")) return JSON.stringify({ section_id: "fixed:2.2.1", diagram_kind: "context", items: actors, unmapped_block_ids: [] })
+      const uc = item("use_cases", "UC-02", { name: "Log in", actor_ids: [keyOf("Learner"), "Email Service"] })
+      return JSON.stringify({ section_id: "fixed:2.2.1", diagram_kind: "usecase", items: [...actors, uc], unmapped_block_ids: [] })
+    }
+    await runExtraction(projectId, userId, importId)
+    expect(visionPrompts).toHaveLength(2)
+    expect(visionPrompts[0]).toContain("A01 (Learner)")
+
+    // trước đây "A01" chuẩn hoá thành "A-01" ⇒ mỗi ảnh thêm một bản Learner / Admin
+    const fields = (await ExtractionDraft.find({ import_id: importId }).lean()).flatMap((d) => d.fields)
+    const actorIds = new Set(fields.flatMap((f) => /^actors\[id=([^\]]+)\]/.exec(f.path)?.[1] ?? []))
+    expect([...actorIds].sort()).toEqual(["A01", "A02", "A03"])
+    // ảnh chỉ thêm: loại tác nhân bảng không ghi, tác nhân mới, quan hệ mới — mỗi thứ một dòng duyệt, kể cả quan hệ gộp
+    // vào use case chữ cùng mục cũng nói tới
+    const fromImages = fields.filter((f) => f.origin === "vision").map((f) => `${f.path}=${JSON.stringify(f.value)}`)
+    expect(fromImages.sort()).toEqual(
+      [
+        'actors[id=A01].kind="human"',
+        'actors[id=A02].kind="human"',
+        'actors[id=A03].name="Email Service"',
+        'actors[id=A03].kind="system"',
+        'use_cases[id=UC-02].actor_ids=["Learner","Email Service"]'
+      ].sort()
+    )
+    expect(fields.filter((f) => f.origin === "vision").every((f) => f.confidence <= 0.7)).toBe(true)
+
+    await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.actors.map((a) => `${a.name}:${a.kind}`).sort()).toEqual(["Admin:human", "Email Service:system", "Learner:human"])
+    expect([...(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids ?? [])].sort()).toEqual(["A01", "A03"])
   })
 
   it("diagram đọc được ⇒ Spine có actor + quan hệ từ ảnh (hợp với bảng), hình gốc giữ y trong bản render + đánh dấu sơ đồ gốc (§4.13), không cờ ảnh", async () => {

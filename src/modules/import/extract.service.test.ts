@@ -15,6 +15,7 @@ import {
   deterministicTableItems,
   extractionPlan,
   itemsFromAi,
+  mergeItems,
   onlyNewFromVision,
   readsImage,
   shortName,
@@ -278,6 +279,24 @@ describe("itemsFromAi — output model ⇒ item", () => {
     expect(out.every((i) => i.origin === "ai")).toBe(true)
   })
 
+  it("FLF-252: ảnh chép khoá 'A01' của bảng (id cấp tự động) ⇒ đúng tác nhân đó, không thành 'A-01'; khoá là tên ⇒ cấp mã mới", () => {
+    const actor = (id: string, name: string): EntityItem => ({ entity: "actors", id, value: { name }, confidence: 1, field_confidence: {}, source_block_ids: ["B0003"], origin: "deterministic" })
+    const alloc = new IdAllocator({ actors: ["A01", "A02"], entities: ["E01"] })
+    const out = itemsFromAi(
+      {
+        section_id: "fixed:1",
+        items: [
+          item({ entity: "actors", key: "A01", value: { name: "Developer", kind: "human" } }),
+          item({ entity: "actors", key: "ACT-2", value: { name: "admin", kind: "human" } }),
+          item({ entity: "entities", key: "LimCallLog", value: { name: "LimCallLog" } })
+        ],
+        unmapped_block_ids: []
+      },
+      { ...ctx([actor("A01", "Developer"), actor("A02", "Admin")], "fixed:1"), alloc, validBlocks: new Set(["B0005"]), fromImage: true }
+    )
+    expect(out.map((i) => i.id)).toEqual(["A01", "A02", "E02"])
+  })
+
   it("block nguồn không thuộc lô bị lọc; không còn cái nào ⇒ lấy block đầu của lô", () => {
     const out = itemsFromAi(
       { section_id: "x", items: [item({ source_block_ids: ["B0005", "B9999"] }), item({ source_block_ids: ["B9999"] })], unmapped_block_ids: [] },
@@ -353,6 +372,47 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
     // phần tử mới hoàn toàn từ ảnh ⇒ giữ nguyên để người dùng xác nhận
     const fresh = vision({ name: "Guest", kind: "human" }, "A02", "actors")
     expect(onlyNewFromVision([fresh], [table])).toEqual([fresh])
+  })
+
+  it("FLF-252 onlyNewFromVision: field bảng không có (loại tác nhân) là phần ảnh thêm vào; ảnh sau vẽ lại ⇒ không hỏi lại", () => {
+    const actor: EntityItem = { entity: "actors", id: "A03", value: { name: "GitHub Actions", description: "CI service" }, confidence: 1, field_confidence: {}, source_block_ids: ["B0051"], origin: "deterministic" }
+    const context: EntityItem = {
+      entity: "actors",
+      id: "A03",
+      value: { name: "GitHub Actions", kind: "system", description: "" },
+      confidence: 0.7,
+      field_confidence: {},
+      source_block_ids: ["B0048"],
+      origin: "vision"
+    }
+    const fromContext = onlyNewFromVision([context], [actor])
+    expect(fromContext).toEqual([{ ...context, value: { kind: "system" } }])
+    // sơ đồ use case vẽ lại cùng tác nhân: bảng + ảnh trước đã đủ ⇒ không còn gì để hỏi
+    expect(onlyNewFromVision([{ ...context, source_block_ids: ["B0069"] }], [actor, ...fromContext])).toEqual([])
+    // quan hệ rỗng của ảnh không thành dòng duyệt
+    const uc: EntityItem = { entity: "use_cases", id: "UC-02", value: { name: "Log in", actor_ids: ["GitHub Actions"] }, confidence: 1, field_confidence: {}, source_block_ids: ["B0010"], origin: "deterministic" }
+    expect(onlyNewFromVision([{ ...uc, value: { name: "Log in", includes: [], extends: [] }, origin: "vision" }], [uc])).toEqual([])
+    // ảnh nối bằng mã ("A-03"), bảng ghi tên ⇒ cùng tác nhân, không phải quan hệ mới
+    expect(onlyNewFromVision([{ ...uc, value: { actor_ids: ["A-03"] }, origin: "vision" }], [actor, uc])).toEqual([])
+  })
+
+  it("FLF-252 mergeItems: phần ảnh bù vào phần tử của bảng cùng mục giữ nguồn ảnh + độ tin ảnh ⇒ vẫn phải duyệt", () => {
+    const table: EntityItem = { entity: "entities", id: "E01", value: { name: "user", description: "A system user" }, confidence: 1, field_confidence: {}, source_block_ids: ["B0475"], origin: "deterministic" }
+    const erd: EntityItem = { entity: "entities", id: "E01", value: { relations: ["Account", "E02"] }, confidence: 0.7, field_confidence: {}, source_block_ids: ["B0473"], origin: "vision" }
+    const [merged] = mergeItems([table, erd])
+    expect(merged.value).toEqual({ name: "user", description: "A system user", relations: ["Account", "E02"] })
+    expect(flattenItem(merged).map((f) => [f.path, f.origin, f.confidence])).toEqual([
+      ["entities[id=E01].name", "deterministic", 1],
+      ["entities[id=E01].description", "deterministic", 1],
+      ["entities[id=E01].relations", "vision", 0.7]
+    ])
+    // ảnh đọc trước, chữ sau: chữ thắng field trùng, quan hệ ảnh thêm vào làm cả danh sách phải duyệt
+    const image: EntityItem = { entity: "use_cases", id: "UC-02", value: { name: "Log In", actor_ids: ["Guest"] }, confidence: 0.6, field_confidence: {}, source_block_ids: ["B0005"], origin: "vision" }
+    const text: EntityItem = { entity: "use_cases", id: "UC-02", value: { name: "Log in", actor_ids: ["Learner"] }, confidence: 0.9, field_confidence: {}, source_block_ids: ["B0007"], origin: "ai" }
+    expect(flattenItem(mergeItems([image, text])[0]).map((f) => [f.path, f.value, f.origin, f.confidence])).toEqual([
+      ["use_cases[id=UC-02].name", "Log in", "ai", 0.9],
+      ["use_cases[id=UC-02].actor_ids", ["Learner", "Guest"], "vision", 0.6]
+    ])
   })
 
   it("visionItems: origin vision, độ tin item + từng field ≤ 0.7", () => {
