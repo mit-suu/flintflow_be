@@ -170,8 +170,10 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
   profile.step_plan = plan
-  // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I
-  profile.legacy_record_of_changes = legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+  // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I.
+  // FLF-252: dòng người dùng đã xem/sửa ở wizard thắng; không gửi ⇒ đọc lại từ file
+  profile.legacy_record_of_changes =
+    body.record_of_changes ?? legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await profile.save()
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có

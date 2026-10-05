@@ -141,6 +141,26 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     expect(res.status).toBe(400)
   })
 
+  it("FLF-252: Record of Changes đọc ngay lúc tách file ⇒ GET /import trả về để wizard cho xem/sửa; cột bảng có dữ liệu mẫu", async () => {
+    const seeded = await seedFixture("minimal")
+    const projectId = await createMode1Project(seeded)
+    const c = api(seeded, projectId)
+    const recordOfChanges = [
+      ["Date", "A*\nM, D", "In charge", "Change Description"],
+      ["29/07/2026", "A", "QuynhTTN", "Added User Requirements section"]
+    ]
+    const up = await c.upload(await makeSrsDocx({ recordOfChanges }))
+    const importId = importStateResponseSchema.parse(up.body.data).import.id
+    await c.post("/import/confirm-latest", { import_id: importId })
+    const profile = getImportResponseSchema.parse((await c.get()).body.data).profile!
+    expect(profile.record_of_changes).toEqual([
+      { date: "29/07/2026", version: "", change_type: "A", in_charge: "QuynhTTN", description: "Added User Requirements section" }
+    ])
+    // bảng Record of Changes không vào bước map cột; bảng tác nhân mang dữ liệu mẫu
+    expect(profile.table_map.some((t) => t.header === "Change Description")).toBe(false)
+    expect(profile.table_map.find((t) => t.header === "Actor")).toMatchObject({ field_path: "actors[].name", samples: ["Learner", "Admin"] })
+  })
+
   it("bảng có ô tiêu đề cột trống ⇒ upload + tách block vẫn chạy, cột đó có header rỗng (FLF-179)", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)

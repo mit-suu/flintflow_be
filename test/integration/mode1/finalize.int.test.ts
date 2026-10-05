@@ -215,6 +215,17 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(doc.recordOfChanges.slice(0, 2).map((r) => r.in_charge)).toEqual(["QuynhTTN", "HiepTT"])
   })
 
+  it("FLF-252: dòng Record of Changes người dùng sửa ở wizard (gửi kèm finalize) thắng dòng đọc từ file", async () => {
+    const ctx = await importAtBaselining({ srs: { recordOfChanges: [["Date", "In charge", "Change Description"], ["01/05/2026", "An", "Bản đầu"]] } })
+    const before = (await spineRepository.get(ctx.projectId))!
+    const edited = [
+      { date: "01/05/2026", version: "0.1", change_type: "A" as const, in_charge: "An", description: "Bản đầu (đã sửa)" },
+      { date: "02/05/2026", version: "0.2", change_type: "M" as const, in_charge: "Bình", description: "Thêm dòng tay" }
+    ]
+    await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version, record_of_changes: edited })
+    expect((await TemplateProfile.findOne({ projectId: ctx.projectId }).lean())!.legacy_record_of_changes).toEqual(edited)
+  })
+
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
     mockOverrides.next = (prompt: string) => {
       const out = fakeMode1(prompt)
