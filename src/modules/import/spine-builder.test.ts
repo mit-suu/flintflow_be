@@ -6,7 +6,9 @@ import {
   IdAllocator,
   aiItemId,
   collectEntities,
+  compactKey,
   fieldPath,
+  findKnownCompact,
   findKnownId,
   findKnownKey,
   flattenItem,
@@ -105,6 +107,22 @@ describe("extracted-entities", () => {
     expect(aiItemId(known, "use_cases", null, "log in")).toBe("UC-02")
     expect(aiItemId(known, "actors", null, "Guest", true)).toBeNull()
     expect(aiItemId(known, "actors", "A01", "Developer")).toBe(findKnownKey(known, "actors", "A-01"))
+  })
+
+  it("FLF-252: tên khác quy ước đặt tên — lớp ERD 'SubscriptionPlan' / 'PrAnalysis' = bảng 'subscription_plans' / 'pr_analyses'", () => {
+    expect(compactKey("SubscriptionPlan")).toBe(compactKey("subscription_plans"))
+    expect(compactKey("PrAnalysis")).toBe(compactKey("pr_analyses"))
+    expect(compactKey("Category")).toBe(compactKey("categories"))
+    expect(compactKey("ChangedFile")).toBe(compactKey("changed_files"))
+    expect(compactKey("Status")).toBe("status")
+    expect(compactKey("Address")).toBe("address")
+    const entity = (id: string, name: string): EntityItem => ({ entity: "entities", id, value: { name }, confidence: 1, field_confidence: {}, source_block_ids: [], origin: "deterministic" })
+    const known = [entity("E12", "tenant_subscriptions"), entity("E13", "subscription_plans"), entity("E14", "subscription_usage")]
+    expect(findKnownCompact(known, "entities", "SubscriptionPlan")).toBe("E13")
+    // ERD không ghi mã, tên khác quy ước ⇒ thực thể của bảng, không thành thực thể thứ hai
+    expect(aiItemId(known, "entities", null, "SubscriptionPlan", true)).toBe("E13")
+    // nhiều phần tử cùng khoá ⇒ không đoán
+    expect(findKnownCompact([...known, entity("E20", "SubscriptionPlans")], "entities", "subscription plan")).toBeNull()
   })
 })
 
@@ -233,6 +251,17 @@ describe("buildImportOps", () => {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
     expect(plan.spine.entities[0].relations).toEqual(["E02"])
     expect(plan.spine.use_cases[0].actor_ids).toEqual(["A01"])
+  })
+
+  it("FLF-252: quan hệ ERD ghi tên lớp ('PrAnalysis', 'Repository') ra thực thể bảng ghi tên bảng dữ liệu", () => {
+    const spine = createEmptySpine({ name: "Smell" })
+    const ops = buildImportOps(spine, [
+      { entity: "entities", id: "E02", value: { name: "repositories" } },
+      { entity: "entities", id: "E03", value: { name: "pull_requests", relations: ["Repository", "PrAnalysis"] } },
+      { entity: "entities", id: "E04", value: { name: "pr_analyses" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.entities.find((e) => e.id === "E03")!.relations).toEqual(["E02", "E04"])
   })
 })
 

@@ -18,6 +18,7 @@ import {
   mergeItems,
   onlyNewFromVision,
   readsImage,
+  settleSection,
   shortName,
   splitList,
   visionItems
@@ -222,6 +223,29 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(items).toMatchObject([
       { entity: "functions", id: "FR-001", value: { name: "Let a learner enrol in a course", description: "The system shall let a learner enrol in a course.", priority: "Must" } }
     ])
+  })
+
+  it("FLF-252: bảng NFR 'External System | Description' ⇒ tên hệ thống đứng đầu câu (cột tên không map); cột sau câu không ghép", () => {
+    const rows = [
+      ["External System", "Description", "Owner"],
+      ["GitHub", "Provides Pull Request events, repository data, and code changes for analysis.", "DevOps"],
+      ["Payment Gateway", "Payment Gateway handles subscription payments.", "Finance"]
+    ]
+    const items = deterministicTableItems(blocks[0], rows, profileOf([col(0, null), col(1, "nfrs[].statement"), col(2, null)]))!
+    expect(items.map((i) => i.value.statement)).toEqual([
+      "GitHub: Provides Pull Request events, repository data, and code changes for analysis.",
+      // câu đã bắt đầu bằng tên ⇒ không lặp
+      "Payment Gateway handles subscription payments."
+    ])
+  })
+
+  it("FLF-252 settleSection: NFR đọc từ bảng nhận nhóm theo mục như NFR AI trích (4.1 ⇒ interface)", () => {
+    const t = { ...block("B0050", "table", "", "body/tbl[3]", "fixed:4.1"), rows: [["External System", "Description"], ["GitHub", "Provides PR events."]] }
+    const profile = {
+      table_map: [{ block_id: "B0050", column_index: 1, header: "Description", field_path: "nfrs[].statement", confidence: 0.9, confirmed: true }]
+    } as unknown as ITemplateProfile
+    const out = settleSection("fixed:4.1", [t], profile, new Map())
+    expect(out.items.map((i) => i.value)).toEqual([{ statement: "GitHub: Provides PR events.", category: "interface" }])
   })
 
   it("độ tin cột thấp ⇒ field của bảng rơi vào danh sách cần xác nhận (< 0.7)", () => {

@@ -20,11 +20,11 @@ import {
   IdAllocator,
   REF_LIST_FIELDS,
   aiItemId,
+  compactKey,
   findKnownId,
   findKnownKey,
   flattenItem,
   mergeFieldValue,
-  nameKey,
   normalizeKey,
   parseFieldPath,
   resolveProvisional,
@@ -115,6 +115,8 @@ export const settleSection = (
     const rows = tableRows(t, blocks)
     const items = deterministicTableItems(t, rows, profile)
     if (items) {
+      // NFR của bảng nhận nhóm theo mục như NFR AI trích (bảng External Systems ở 4.1 ⇒ interface, không còn "other")
+      for (const it of items) if (it.entity === "nfrs" && it.value.category === undefined && NFR_CATEGORY_BY_SECTION[sectionId]) it.value.category = NFR_CATEGORY_BY_SECTION[sectionId]
       out.handled.add(t.block_id)
       out.items.push(...items)
       continue
@@ -195,6 +197,11 @@ export const deterministicTableItems = (table: BlockLite, grid: string[][], prof
   const fields = new Map(cols.filter((c) => c.field_path!.startsWith(`${entity}[`)).map((c) => [c.column_index, c.field_path!.split("].")[1]]))
   if (!def || !hasRequiredFields(def, new Set(fields.values()))) return null
   const above = new Map<string, string>()
+  // Bảng NFR có cột tên không map ("External System | Description") ⇒ tên đứng đầu câu yêu cầu: không còn câu
+  // "Provides Pull Request events…" mất chữ "GitHub" (FLF-252)
+  const statementCol = [...fields].find(([, field]) => field === "statement")?.[0]
+  const labelCol =
+    entity === "nfrs" && statementCol !== undefined ? shape.columns.find((c) => c.index < statementCol && c.role === "name" && !fields.has(c.index))?.index : undefined
   return shape.body.flatMap((r) => {
     const value: Record<string, unknown> = {}
     for (const [col, field] of fields) {
@@ -204,6 +211,8 @@ export const deterministicTableItems = (table: BlockLite, grid: string[][], prof
       if (FILL_DOWN_FIELDS.has(field)) above.set(field, cell)
       value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
     }
+    const label = labelCol === undefined ? "" : (grid[r][labelCol] ?? "").trim()
+    if (label && typeof value.statement === "string" && !value.statement.toLowerCase().startsWith(label.toLowerCase())) value.statement = `${label}: ${value.statement}`
     if (!Object.keys(value).length) return []
     const group = groupOf(shape, r)
     if (entity === "screens" && value.feature_id === undefined && group) value.feature_id = group
@@ -318,12 +327,15 @@ const isBlank = (v: unknown): boolean => v === undefined || v === null || v === 
 /** Loại phần tử mà field quan hệ trỏ tới. */
 const REF_ENTITY: Readonly<Record<string, string>> = { actor_ids: "actors", includes: "use_cases", extends: "use_cases", relations: "entities", flow_to: "screens" }
 
-/** Khoá so tham chiếu: mã phần tử đã biết ⇒ tên của nó (ảnh ghi "A01", bảng ghi "Learner" là một), còn lại ⇒ tên chuẩn hoá. */
+/**
+ * Khoá so tham chiếu: mã phần tử đã biết ⇒ tên của nó (ảnh ghi "A01", bảng ghi "Learner" là một), còn lại ⇒ tên so cả khác
+ * quy ước đặt tên ("Repository" = "repositories").
+ */
 const refKey = (known: readonly EntityItem[], field: string, ref: unknown): string => {
   const entity = REF_ENTITY[field]
   const id = entity ? findKnownKey(known, entity, String(ref)) : null
   const name = id ? known.find((k) => k.entity === entity && k.id === id && typeof k.value.name === "string")?.value.name : undefined
-  return nameKey(typeof name === "string" ? name : String(ref))
+  return compactKey(typeof name === "string" ? name : String(ref))
 }
 
 /**

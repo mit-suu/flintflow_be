@@ -7,7 +7,7 @@
 
 import type { Op } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
-import { IdAllocator, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
+import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
   entity: string
@@ -81,20 +81,24 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[]): Op[] => {
     const ids = new Set(pool.map((p) => p.id))
     const byName = new Map(pool.filter((p) => p.name && nameKey(p.name)).map((p) => [nameKey(p.name!), p.id]))
     const byLoose = new Map<string, string | null>()
-    // Mã so lỏng (FLF-252): quan hệ ghi "E-12" vẫn ra phần tử "E12" (id cấp tự động không cùng dạng mã tài liệu)
+    // Mã so lỏng (FLF-252): quan hệ ghi "E-12" vẫn ra phần tử "E12" (id cấp tự động không cùng dạng mã tài liệu).
+    // Tên khác quy ước đặt tên: quan hệ ERD ghi "PrAnalysis" ra thực thể "pr_analyses" của bảng
     const byIdKey = new Map<string, string | null>()
+    const byCompact = new Map<string, string | null>()
+    const once = (map: Map<string, string | null>, k: string, id: string) => {
+      if (k) map.set(k, map.has(k) && map.get(k) !== id ? null : id)
+    }
     for (const p of pool) {
-      const k = p.name ? looseKey(p.name) : ""
-      if (k) byLoose.set(k, byLoose.has(k) && byLoose.get(k) !== p.id ? null : p.id)
-      const ik = idKey(p.id)
-      byIdKey.set(ik, byIdKey.has(ik) && byIdKey.get(ik) !== p.id ? null : p.id)
+      once(byLoose, p.name ? looseKey(p.name) : "", p.id)
+      once(byIdKey, idKey(p.id), p.id)
+      once(byCompact, p.name ? compactKey(p.name) : "", p.id)
     }
     return (ref: unknown): string | null => {
       const s = str(ref)
       if (!s) return null
       if (ids.has(s)) return s
       if (ids.has(normalizeKey(s))) return normalizeKey(s)
-      return byIdKey.get(idKey(s)) ?? byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? null
+      return byIdKey.get(idKey(s)) ?? byName.get(nameKey(s)) ?? byLoose.get(looseKey(s)) ?? byCompact.get(compactKey(s)) ?? null
     }
   }
   const pool = (entity: string, spineArr: { id: string; name?: string }[]) => [

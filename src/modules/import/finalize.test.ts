@@ -58,6 +58,21 @@ describe("finalize — field ⇒ thực thể ⇒ op", () => {
     expect([...collectEntities(fields).values()][0].value).toEqual({ actor_ids: ["A01", "Guest"], name: "Log in" })
   })
 
+  it("FLF-252: thứ tự phần tử theo nơi bảng / chữ định nghĩa — quan hệ từ sơ đồ ở mục trước không kéo use case lên đầu bảng", () => {
+    const fields = [
+      // 2.2.1: sơ đồ chỉ thêm quan hệ cho UC-03, UC-02
+      field("use_cases[id=UC-03].actor_ids", ["Admin"], 0.65, true, { origin: "vision" }),
+      field("use_cases[id=UC-02].actor_ids", ["Admin"], 0.65, true, { origin: "vision" }),
+      // 2.2.2: bảng use case theo thứ tự tài liệu
+      field("use_cases[id=UC-01].name", "Login", 1, false, { origin: "deterministic" }),
+      field("use_cases[id=UC-02].name", "Logout", 1, false, { origin: "deterministic" }),
+      field("use_cases[id=UC-03].name", "View Profile", 1, false, { origin: "deterministic" }),
+      // phần tử chỉ có trong ảnh giữ chỗ nơi ảnh nhắc tới
+      field("entities[id=E15].name", "DocChunk", 0.6, true, { origin: "vision" })
+    ]
+    expect([...collectEntities(fields).values()].map((e) => e.id)).toEqual(["UC-01", "UC-02", "UC-03", "E15"])
+  })
+
   it("mọi thực thể thành một lô op duy nhất, chạy khô hợp lệ trên Spine rỗng với by import", () => {
     const fields = [
       field("project.vision", "Lumen is an online learning platform."),
