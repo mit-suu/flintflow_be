@@ -117,13 +117,18 @@ export const groupOf = (shape: TableShape, row: number): string | null => {
 }
 
 /**
- * Bảng ma trận (cột đầu là tên, các cột sau là ô đánh dấu theo vai trò — bảng phân quyền màn hình × vai trò):
- * ≥ 2 cột đánh dấu và mọi cột sau cột đầu đều là ô đánh dấu hoặc trống.
+ * Cột của bảng ma trận (bảng phân quyền màn hình × vai trò): bỏ cột số thứ tự đứng đầu ("#"), cột kế tiếp là tên, mọi cột
+ * sau đó là ô đánh dấu hoặc trống và có ≥ 2 cột đánh dấu. Không phải ma trận ⇒ `null`.
  */
-export const isMarkMatrix = (shape: TableShape): boolean => {
-  const rest = shape.columns.slice(1)
-  return rest.filter((c) => c.role === "mark").length >= 2 && rest.every((c) => c.role === "mark" || c.role === "empty")
+export const markMatrixColumns = (shape: TableShape): { nameColumn: number; markColumns: number[] } | null => {
+  let nameColumn = 0
+  while (shape.columns[nameColumn]?.role === "row_no") nameColumn++
+  const rest = shape.columns.slice(nameColumn + 1)
+  if (rest.filter((c) => c.role === "mark").length < 2 || !rest.every((c) => c.role === "mark" || c.role === "empty")) return null
+  return { nameColumn, markColumns: rest.map((c) => c.index) }
 }
+
+export const isMarkMatrix = (shape: TableShape): boolean => markMatrixColumns(shape) !== null
 
 /** Ô đánh dấu ⇒ thao tác: "X"/"✓" ⇒ `access`; "view, create" ⇒ hai thao tác; ô trống / "—" ⇒ không có quyền. */
 export const markActions = (cell: string): string[] => {

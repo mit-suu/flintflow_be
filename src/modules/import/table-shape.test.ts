@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { columnRole, groupOf, headerRowIndex, isMarkMatrix, markActions, tableShape } from "./table-shape.js"
+import { columnRole, groupOf, headerRowIndex, isMarkMatrix, markActions, markMatrixColumns, tableShape } from "./table-shape.js"
 
 describe("columnRole — vai trò cột theo dữ liệu (FLF-252)", () => {
   it("số thứ tự tăng dần ⇒ row_no; số lặp / không liền mạch ⇒ không phải", () => {
@@ -75,6 +75,17 @@ describe("tableShape", () => {
     expect(markActions("view, create")).toEqual(["view", "create"])
     expect(markActions(" ")).toEqual([])
     expect(markActions("—")).toEqual([])
+  })
+
+  it("ma trận có cột '#' đứng đầu (SRS thật): bỏ cột số thứ tự, cột tên là cột kế tiếp", () => {
+    const shape = tableShape([
+      ["#", "Screen / Function", "Developer", "Admin"],
+      ["1", "Login with GitHub", "X", "X"],
+      ["2", "Dashboard", "X", "X"],
+      ["3", "Repository List", "X", ""]
+    ])
+    expect(markMatrixColumns(shape)).toEqual({ nameColumn: 1, markColumns: [2, 3] })
+    expect(isMarkMatrix(tableShape([["#", "Screen"], ["1", "Login"], ["2", "Home"]]))).toBe(false)
   })
 
   it("ma trận FlintFlow xuất ra: ô '—' là không có quyền, không làm hỏng nhận dạng cột", () => {

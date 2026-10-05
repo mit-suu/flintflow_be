@@ -6,7 +6,7 @@
  * để file xuất ra import lại không mất dữ liệu; gán cột theo điểm cao nhất trên cả bảng.
  */
 
-import { isMarkMatrix, tableShape, type ColumnRole, type TableShape } from "./table-shape.js"
+import { markMatrixColumns, tableShape, type ColumnRole, type TableShape } from "./table-shape.js"
 import { foldText, titleSimilarity } from "./text-similarity.js"
 
 export interface ColumnDef {
@@ -237,11 +237,21 @@ const assignColumns = (headers: string[], def: TableEntityDef, shape: TableShape
   return out
 }
 
-/** Ma trận phân quyền: cột đầu ⇒ màn hình, mỗi cột vai trò có tiêu đề ⇒ `role_id` (tên vai trò = tiêu đề cột). */
-const permissionMatrix = (shape: TableShape): (FieldMatch | null)[] =>
-  shape.headers.map((header, column) =>
-    column === 0 ? { field: "screen_id", confidence: 0.9 } : header ? { field: "role_id", confidence: 0.9 } : null
+/**
+ * Ma trận phân quyền: cột tên (sau các cột số thứ tự) ⇒ màn hình, mỗi cột vai trò có tiêu đề ⇒ `role_id` (tên vai trò =
+ * tiêu đề cột). Không phải ma trận ⇒ `[]`.
+ */
+const permissionMatrix = (shape: TableShape): (FieldMatch | null)[] => {
+  const matrix = markMatrixColumns(shape)
+  if (!matrix) return []
+  return shape.headers.map((header, column) =>
+    column === matrix.nameColumn
+      ? { field: "screen_id", confidence: 0.9 }
+      : matrix.markColumns.includes(column) && header
+        ? { field: "role_id", confidence: 0.9 }
+        : null
   )
+}
 
 export interface TableMatch {
   entity: string | null
@@ -266,7 +276,7 @@ export const matchTable = (rows: readonly string[][], sectionId: string | null):
   let best: { def: TableEntityDef; matches: (FieldMatch | null)[]; score: number } | null = null
   for (const def of TABLE_ENTITIES) {
     if (sectionId !== null && !inSections(def, sectionId)) continue
-    const matches = def.entity === "permissions" ? (isMarkMatrix(shape) ? permissionMatrix(shape) : []) : assignColumns(headers, def, shape)
+    const matches = def.entity === "permissions" ? permissionMatrix(shape) : assignColumns(headers, def, shape)
     const fields = new Set(matches.filter((m): m is FieldMatch => !!m).map((m) => m.field))
     if (!hasRequiredFields(def, fields)) continue
     const score = fields.size + (sectionId && inSections(def, sectionId) ? 10 : 0)

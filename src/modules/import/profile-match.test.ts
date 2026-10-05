@@ -113,6 +113,13 @@ describe("matchTable — khớp theo cả dữ liệu dưới tiêu đề (FLF-2
     ])
     // ma trận ở mục khác không phải phân quyền ⇒ không đoán
     expect(matchTable([["Screen", "Guest", "User"], ["Login", "X", "X"]], "fixed:3.1.2").entity).not.toBe("permissions")
+    // cột "#" đứng trước tên màn (SRS thật) ⇒ bỏ cột số thứ tự
+    expect(paths([["#", "Screen / Function", "Developer", "Admin"], ["1", "Login with GitHub", "X", "X"], ["2", "Repository List", "X", ""]], "fixed:3.1.3")).toEqual([
+      null,
+      "permissions[].screen_id",
+      "permissions[].role_id",
+      "permissions[].role_id"
+    ])
   })
 
   it("bảng yêu cầu dưới mục tính năng (mẫu IEEE) ⇒ chức năng; bảng field trong mục chức năng vẫn không đoán", () => {
