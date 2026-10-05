@@ -1,12 +1,16 @@
 import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow } from "docx"
 import { describe, expect, it } from "vitest"
-import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, readBlocks } from "./blocks.js"
+import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, followsNumber, readBlocks } from "./blocks.js"
 import { DocxPackage } from "./package.js"
 import { imageRel, makeDocx, p, picture, styled, table } from "./testing/make-docx.js"
 import { normalizeText, textHash } from "./text.js"
 import { wAll, wAttr } from "./xml.js"
 
 const load = async (body: string) => DocxPackage.load(await makeDocx({ body }))
+
+/** Một đoạn hai dòng ngăn bằng ngắt dòng (Shift+Enter), không style. */
+const brParagraph = (first: string, second: string) =>
+  `<w:p><w:r><w:t xml:space="preserve">${first} </w:t></w:r><w:r><w:br/><w:t>${second}</w:t></w:r></w:p>`
 
 describe("readBlocks", () => {
   it("heading theo w:name khi styleId bị bản địa hoá, theo outlineLvl của style, bỏ mục lục", async () => {
@@ -31,6 +35,34 @@ describe("readBlocks", () => {
     expect(blocks[4].heading_path).toEqual(["Giới thiệu", "Mục đích", "Phạm vi chi tiết"])
     expect(blocks[5].heading_path).toEqual([])
     expect(blocks.map((b) => b.ordinal)).toEqual([0, 1, 2, 3, 4, 5])
+  })
+
+  it("FLF-252: heading gõ chung đoạn với nội dung (số mục ⏎ câu) nối tiếp heading trước ⇒ heading + phần chữ; danh sách gõ tay / số không nối tiếp không bị tách", async () => {
+    const blocks = await readBlocks(
+      await load(
+        p("4.2.3 Performance") +
+          p("Response time under 2 s.") +
+          brParagraph("4.2.4 Security", "The system must ensure the security of user data.") +
+          p("Users must authenticate through GitHub OAuth.") +
+          brParagraph("1. Open the page", "2. Click login") +
+          brParagraph("7.1 Unrelated", "Text")
+      )
+    )
+    expect(blocks.map((b) => [b.kind, b.level, b.editable, !!b.tail])).toEqual([
+      ["heading", 3, true, false],
+      ["paragraph", null, true, false],
+      ["heading", 3, false, false],
+      ["paragraph", null, false, true],
+      ["paragraph", null, true, false],
+      ["paragraph", null, true, false],
+      ["paragraph", null, true, false]
+    ])
+    expect(blocks.slice(2, 4).map((b) => b.text)).toEqual(["4.2.4 Security", "The system must ensure the security of user data."])
+    expect(blocks[4].heading_path).toEqual(["4.2.4 Security"])
+    expect(followsNumber([4, 2, 3], [4, 2, 4])).toBe(true)
+    expect(followsNumber([4, 2, 3], [4, 3])).toBe(true)
+    expect(followsNumber([4, 2, 3], [4, 2, 3, 1])).toBe(true)
+    expect(followsNumber([4, 2, 3], [4, 2, 6])).toBe(false)
   })
 
   it("heading theo outlineLvl trực tiếp và theo mẫu số mục khi file không dùng style", async () => {
@@ -199,6 +231,21 @@ describe("neo bookmark", () => {
       ["Trùng", null],
       ["Bookmark khác", null]
     ])
+  })
+
+  it("FLF-252: heading gõ chung đoạn — chỉ heading mang bookmark; đọc lại ổn định, phần chữ sau tìm lại theo nội dung", async () => {
+    const pkg = await load(p("4.2.3 Performance") + brParagraph("4.2.4 Security", "The system must ensure security."))
+    const blocks = await readBlocks(pkg)
+    let n = 0
+    expect(ensureBlockBookmarks(blocks, () => `B${String(++n).padStart(4, "0")}`)).toBe(2)
+    expect(blocks.map((b) => b.bookmark)).toEqual(["_ff_B0001", "_ff_B0002", null])
+    const again = await readBlocks(await DocxPackage.load(await pkg.toBuffer()))
+    expect(again.map((b) => [b.kind, b.text, b.bookmark])).toEqual([
+      ["heading", "4.2.3 Performance", "_ff_B0001"],
+      ["heading", "4.2.4 Security", "_ff_B0002"],
+      ["paragraph", "The system must ensure security.", null]
+    ])
+    expect(findBlock(again, { text_hash: textHash("The system must ensure security.") })?.tail).toBe(true)
   })
 
   it("findBlock: bookmark → paraId → text_hash duy nhất; mơ hồ ⇒ null", async () => {
