@@ -25,6 +25,7 @@
  * - **Sơ đồ gốc** (§4.13): loại sơ đồ còn ảnh gốc của người dùng trong phần nối ⇒ không in hình PlantUML cùng loại.
  */
 
+import { createHash } from "node:crypto"
 import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
 import { keptOriginalKinds } from "../spine/original-diagram.js"
@@ -46,7 +47,35 @@ export interface TemplateLayout {
   language: string
   /** T15: dòng Record of Changes của file gốc — in trước lịch sử FlintFlow. */
   legacyRecord?: readonly RocRow[]
+  /**
+   * FLF-252: id chức năng đọc từ bảng Non-Screen Functions của file. Có ⇒ bảng 3.1.4 in đúng các chức năng này (+ chức năng
+   * không màn thêm sau, chưa có mục trong file), và chức năng chỉ có ở bảng không được chèn mục 3.x.y khi chưa có chi tiết.
+   */
+  nonScreenTable?: readonly string[]
+  /**
+   * FLF-252 — in theo file gốc: nguyên văn từng mục chức năng của file + dấu nội dung chức năng lúc nhập. Dấu còn khớp
+   * (chưa change request nào sửa chức năng đó) ⇒ mục in nguyên văn file; lệch ⇒ in từ Spine như cũ.
+   */
+  functionOriginals?: readonly FunctionOriginal[]
 }
+
+export interface FunctionOriginal {
+  section_id: string
+  source_hash: string
+  blocks: readonly CustomBlock[]
+}
+
+/**
+ * Dấu nội dung một chức năng (không gồm thứ tự / tính năng — đổi vị trí không phải sửa nội dung). Lệch so với lúc nhập ⇒
+ * chức năng đã được sửa qua change request, mục in từ Spine.
+ */
+export const functionSourceHash = (f: Spine["functions"][number]): string =>
+  createHash("sha1")
+    .update(
+      JSON.stringify([f.name, f.screen_id, f.trigger, f.description, f.normal, f.abnormal, f.validations.map((v) => [v.kind, v.statement]), f.business_rule_ids, f.priority])
+    )
+    .digest("hex")
+    .slice(0, 16)
 
 const CUSTOM_PREFIX = "custom:"
 const GROUP_PREFIX = "group:"
@@ -142,9 +171,48 @@ const clampLevel = (level: number): number => Math.min(9, Math.max(1, Math.round
 /** Mục riêng thêm tay chưa có tiêu đề — không in khoá thô `custom:CS07` vào tài liệu. */
 const untitledCustom = (language: string): string => (language === "vi" ? "Mục bổ sung" : "Additional Section")
 
+/** Chức năng có chi tiết riêng (kích hoạt, luồng, kiểm tra) — đủ để thành mục 3.x.y. */
+const hasDetail = (f: Spine["functions"][number]): boolean =>
+  f.trigger.trim().length > 0 || f.normal.length > 0 || f.abnormal.length > 0 || f.validations.length > 0
+
+/**
+ * Mục FPT KHÔNG chèn vào bản in theo layout file (FLF-252):
+ * - chức năng chỉ có ở bảng Non-Screen Functions của file (không màn, chưa có chi tiết): file chỉ liệt kê nó trong bảng
+ *   3.1.4; chèn mục 3.x.y cho nó làm lệch số mục gốc ("3.8.3 View Subscription Status" thành "3.8.8");
+ * - tính năng file không có heading mà không có mục chức năng nào sẽ chèn dưới nó (tính năng lấy từ cột Feature của bảng
+ *   màn / bảng 3.1.4; chức năng có mục trong file vẫn in đúng chỗ của file): heading rỗng file gốc không có.
+ */
+export const sectionsNotInserted = (spine: Spine, template: TemplateLayout): Set<string> => {
+  const inLayout = new Set(template.layout.map((e) => e.section_id))
+  const listed = new Set(template.nonScreenTable ?? [])
+  const out = new Set<string>()
+  for (const f of spine.functions) {
+    if (!inLayout.has(`function:${f.id}`) && listed.has(f.id) && f.screen_id === null && !hasDetail(f)) out.add(`function:${f.id}`)
+  }
+  const inserted = (f: Spine["functions"][number]) => !inLayout.has(`function:${f.id}`) && !out.has(`function:${f.id}`)
+  for (const feature of spine.features) {
+    const id = `feature:${feature.id}`
+    if (!inLayout.has(id) && !spine.functions.some((f) => f.feature_id === feature.id && inserted(f))) out.add(id)
+  }
+  return out
+}
+
+/**
+ * Chức năng in ở bảng Non-Screen Functions (3.1.4) của bản in theo layout file (FLF-252): đúng các dòng bảng 3.1.4 của file
+ * + chức năng không màn thêm sau chưa có mục trong file. Chức năng có mục riêng trong file (có màn nhưng đặc tả không ghi
+ * tên màn khớp bảng màn) không vào bảng. File cũ chưa ghi danh sách ⇒ `null` (bảng theo cách cũ: mọi chức năng không màn).
+ */
+export const nonScreenTableIds = (spine: Spine, template: TemplateLayout): Set<string> | null => {
+  if (!template.nonScreenTable?.length) return null
+  const inLayout = new Set(template.layout.map((e) => e.section_id))
+  const listed = new Set(template.nonScreenTable)
+  return new Set(spine.functions.filter((f) => f.screen_id === null && (listed.has(f.id) || !inLayout.has(`function:${f.id}`))).map((f) => f.id))
+}
+
 /** Mục layout còn dùng được + mục FPT chèn thêm, theo thứ tự tài liệu. */
 export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] => {
-  const defs = listSections(spine).filter((d) => d.id !== "fixed:I")
+  const notInserted = sectionsNotInserted(spine, template)
+  const defs = listSections(spine).filter((d) => d.id !== "fixed:I" && !notInserted.has(d.id))
   const defById = new Map(defs.map((d) => [d.id, d]))
   const customById = new Map(spine.custom_sections.map((c) => [c.id, c]))
   const placed: Placed[] = []
@@ -315,6 +383,15 @@ export const buildLayoutSections = (
   // §4.13: sơ đồ người dùng đã có hình gốc (in ở phần nối) ⇒ không in thêm PlantUML cùng loại — một sơ đồ một hình
   const kept = keptOriginalKinds(spine)
   const contentSpine: Spine = kept.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !(kept as ReadonlySet<string>).has(d.kind)) } : spine
+  const nonScreen = nonScreenTableIds(spine, template)
+  // FLF-252: mục chức năng chưa bị sửa từ lúc nhập ⇒ in nguyên văn file (nhãn, gạch đầu dòng, ảnh đúng thứ tự)
+  const originals = new Map((template.functionOriginals ?? []).filter((o) => o.blocks.length).map((o) => [o.section_id, o]))
+  const originalOf = (sectionId: string): FunctionOriginal | null => {
+    const o = originals.get(sectionId)
+    const fn = o ? spine.functions.find((f) => `function:${f.id}` === sectionId) : undefined
+    return o && fn && functionSourceHash(fn) === o.source_hash ? o : null
+  }
+  const fromOriginal = new Set<RenderedSection>()
 
   const out: RenderedSection[] = []
   const emptyUntilMerged = new Set<RenderedSection>()
@@ -338,7 +415,8 @@ export const buildLayoutSections = (
         while (owner >= 0 && levels[owner] >= n.level) owner--
         const target = out[owner >= 0 ? owner : out.length - 1]
         if (target) {
-          target.blocks = [...blocks, ...target.blocks]
+          // Mục chức năng đang in nguyên văn file đã có sẵn mọi khối của phần nối ⇒ không gộp lần nữa
+          if (!fromOriginal.has(target)) target.blocks = [...blocks, ...target.blocks]
           continue
         }
       }
@@ -351,11 +429,16 @@ export const buildLayoutSections = (
       diagramPng: opts.diagramPng,
       numberOf: (id) => numbers.get(id),
       language: template.language,
+      ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
     const section = renderSection(contentSpine, n.section_id, ctx)
-    const rendered = { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+    const original = originalOf(n.section_id)
+    const rendered = original
+      ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(original.blocks, (ref) => opts.diagramPng(mediaId(ref))) }
+      : { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+    if (original) fromOriginal.add(rendered)
     // `partial`: mục rỗng vẫn giữ chỗ tới khi gộp xong phần nối — mục chỉ có hình gốc của người dùng (§4.13, PlantUML
     // không in) nhận khối từ phần nối ngay sau nó; bỏ sớm thì khối đó rơi vào mục đứng trước
     if (opts.partial && rendered.blocks.length === 0) emptyUntilMerged.add(rendered)

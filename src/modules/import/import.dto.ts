@@ -82,8 +82,16 @@ export const headingMapEntrySchema = z.object({
   section_id: z.string().min(1),
   confidence,
   detected_by: z.enum(HEADING_DETECTORS),
-  confirmed: z.boolean()
+  confirmed: z.boolean(),
+  /**
+   * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
+   * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
+   */
+  template_section: z.string().nullable().optional()
 })
+
+/** Họ mẫu của tài liệu upload (FLF-252). */
+export const TEMPLATE_FAMILIES = ["fpt", "ieee830", "ieee_features"] as const
 
 export const tableMapEntrySchema = z.object({
   block_id: blockId,
@@ -91,7 +99,11 @@ export const tableMapEntrySchema = z.object({
   header: z.string(),
   field_path: z.string().nullable(),
   confidence,
-  confirmed: z.boolean()
+  confirmed: z.boolean(),
+  /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
+  role: z.string().optional(),
+  /** FLF-252: tối đa 3 giá trị đầu của cột. */
+  samples: z.array(z.string()).optional()
 })
 
 /**
@@ -105,6 +117,15 @@ export const layoutEntrySchema = z.object({
   section_id: z.string().min(1)
 })
 
+/** Một dòng Record of Changes của file gốc (FLF-252) — cùng hình dòng §I của `RenderedDocument.recordOfChanges`. */
+export const recordRowSchema = z.strictObject({
+  date: z.string().max(100),
+  version: z.string().max(50),
+  change_type: z.enum(["A", "M", "D"]),
+  in_charge: z.string().max(200),
+  description: z.string().max(2000)
+})
+
 export const templateProfileDtoSchema = z.object({
   doc_version: z.string().min(1),
   heading_map: z.array(headingMapEntrySchema),
@@ -112,7 +133,11 @@ export const templateProfileDtoSchema = z.object({
   required_sections: z.array(z.string()),
   language: z.string(),
   /** FLF-182 — rỗng với import trước mode 1 v2. */
-  layout: z.array(layoutEntrySchema).default([])
+  layout: z.array(layoutEntrySchema).default([]),
+  /** FLF-252: dòng Record of Changes đọc được từ file (tính lúc tách file, tính lại khi đổi mapping); rỗng = không tìm thấy bảng. */
+  record_of_changes: z.array(recordRowSchema).default([]),
+  /** FLF-252: họ mẫu nhận được — mẫu IEEE khớp theo danh mục IEEE rồi trích vào section FPT. */
+  template_family: z.enum(TEMPLATE_FAMILIES).default("fpt")
 })
 
 // ─── kế hoạch step theo template (mode 1 v2, FLF-182) ─────────────────
@@ -208,7 +233,11 @@ export const fieldsPatchRequestSchema = z
   .refine((v) => v.fields.length > 0 || v.confirm_all, { message: "Cần chọn ít nhất một trường dữ liệu, hoặc xác nhận tất cả." })
 
 /** `POST /projects/:id/import/finalize` (nút 1.10–1.12) — ghi Spine ⇒ mang `base_version`. */
-export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion })
+/**
+ * `record_of_changes` (FLF-252, tuỳ chọn): các dòng Record of Changes người dùng đã xem/sửa ở wizard — thay cho dòng đọc
+ * được từ file. Không gửi ⇒ đọc lại từ file như trước.
+ */
+export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion, record_of_changes: z.array(recordRowSchema).max(500).optional() })
 
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })

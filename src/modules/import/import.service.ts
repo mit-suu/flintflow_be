@@ -18,6 +18,7 @@ import { needsConfirm } from "./import.constants.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
 import { IMPORT_STATUS_LABELS, assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
+import { legacyRecordRows } from "./legacy-record.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { toIso } from "./mode1.http.js"
 import { parseDocument, type ParsedBlock } from "./parse.service.js"
@@ -61,7 +62,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     section_id: h.section_id,
     confidence: h.confidence,
     detected_by: h.detected_by,
-    confirmed: h.confirmed
+    confirmed: h.confirmed,
+    ...(h.template_section ? { template_section: h.template_section } : {})
   })),
   table_map: p.table_map.map((t) => ({
     block_id: t.block_id,
@@ -69,11 +71,21 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     header: t.header,
     field_path: t.field_path ?? null,
     confidence: t.confidence,
-    confirmed: t.confirmed
+    confirmed: t.confirmed,
+    ...(t.role ? { role: t.role } : {}),
+    ...(t.samples?.length ? { samples: [...t.samples] } : {})
   })),
   required_sections: [...p.required_sections],
   language: p.language,
-  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id }))
+  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id })),
+  template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
+  record_of_changes: (p.legacy_record_of_changes ?? []).map((r) => ({
+    date: r.date,
+    version: r.version,
+    change_type: r.change_type,
+    in_charge: r.in_charge,
+    description: r.description
+  }))
 })
 
 // ─── trạng thái ──────────────────────────────────────────────────
@@ -205,9 +217,11 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const { blocks } = await parseDocument(await loadImportFile(doc))
   const profile = matchProfile(blocks)
   const sections = assignBlockSections(blocks, profile.heading_map)
+  // Record of Changes đọc ngay lúc tách file (FLF-252) — wizard cho người dùng xem/sửa trước khi tạo baseline 0.0
+  const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile })
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, legacy_record_of_changes })
   await transitionImport(doc, needsMappingReview(profile) ? "mapping_review" : "extracting")
 }
 
@@ -251,6 +265,15 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
     for (const e of [...profile.heading_map, ...profile.table_map]) e.confirmed = true
   }
   profile.required_sections = missingRequiredSections(profile.heading_map)
+  // Heading đổi sang / khỏi Record of Changes ⇒ đọc lại bảng lịch sử (FLF-252)
+  const recordBlocks = await DocBlock.find({ projectId: doc.projectId, doc_version: profile.doc_version, kind: { $in: ["heading", "table"] } })
+    .sort({ "anchor.ordinal": 1 })
+    .select("block_id kind level rows")
+    .lean()
+  profile.legacy_record_of_changes = legacyRecordRows(
+    recordBlocks.map((b) => ({ block_id: b.block_id, kind: b.kind, level: b.level ?? null, rows: b.rows ?? null })),
+    new Map(profile.heading_map.map((h) => [h.block_id, h.section_id]))
+  )
   profile.markModified("heading_map")
   profile.markModified("table_map")
   await profile.save()

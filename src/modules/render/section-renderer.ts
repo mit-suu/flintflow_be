@@ -79,6 +79,7 @@ const VI_LABELS: Readonly<Record<string, string>> = {
   Screen: "Màn hình",
   Type: "Kiểu",
   Feature: "Chức năng",
+  "System Function": "Chức năng hệ thống",
   Trigger: "Kích hoạt",
   Entity: "Thực thể",
   Relations: "Quan hệ",
@@ -200,6 +201,11 @@ export interface SectionRenderContext {
    * ⇒ khung cũ Trigger · Description · Normal/Abnormal Flow · Validations · Business Rules.
    */
   functionLayout?: "fpt"
+  /**
+   * FLF-252 — tài liệu nhập có bảng Non-Screen Functions: chức năng in ở bảng 3.1.4 (đúng các dòng bảng của file + chức
+   * năng không màn thêm sau), theo cột của mẫu FPT. Không đặt ⇒ mọi chức năng không màn, cột cũ.
+   */
+  nonScreenFunctionIds?: ReadonlySet<string>
 }
 
 // ─── heading/level của section ────────────────────────────────────
@@ -351,7 +357,15 @@ const screenAuthorization = (spine: Spine): Block[] => {
   ]
 }
 
-const nonScreenFunctions = (spine: Spine): Block[] => {
+const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
+  const listed = ctx.nonScreenFunctionIds
+  if (listed) {
+    // FLF-252: tài liệu nhập — đúng các dòng bảng 3.1.4 của file, cột như mẫu FPT (# · Feature · System Function · Description)
+    const fns = spine.functions.filter((f) => listed.has(f.id))
+    if (fns.length === 0) return []
+    const featureName = (id: string) => spine.features.find((f) => f.id === id)?.name ?? id
+    return [tableBlock(["#", "Feature", "System Function", "Description"], fns.map((f, i) => [String(i + 1), featureName(f.feature_id), f.name, f.description]))]
+  }
   const fns = spine.functions.filter((f) => f.screen_id === null)
   if (fns.length === 0) return []
   return [tableBlock(["Name", "Trigger", "Description"], fns.map((f) => [f.name, f.trigger, f.description]))]
@@ -590,7 +604,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:3.1.3":
       return screenAuthorization(spine)
     case "fixed:3.1.4":
-      return nonScreenFunctions(spine)
+      return nonScreenFunctions(spine, ctx)
     case "fixed:3.1.5":
       return erd(spine, ctx)
     case "fixed:4.1":

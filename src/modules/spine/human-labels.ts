@@ -239,6 +239,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   unresolved_many_to_many: "Quan hệ nhiều–nhiều chưa tách thực thể trung gian",
   import_semantic: "AI phát hiện vấn đề nội dung",
   import_image_unread: "Ảnh chưa đọc được",
+  import_unresolved_ref: "Quyền chưa khớp màn / vai trò",
   accepted_as_is: "Chấp nhận nguyên trạng",
   goal_not_covered: "Mục tiêu chưa được đáp ứng",
   cr_consistency: "Chưa nhất quán sau khi sửa",

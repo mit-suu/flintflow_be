@@ -13,7 +13,7 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { patchFields, runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -27,8 +27,9 @@ import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import { originalDiagramHash } from "../../../src/modules/spine/original-diagram.js"
-import { getDocument } from "../../../src/modules/render/assemble.service.js"
+import { assemble, getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
 import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
@@ -215,6 +216,68 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     expect(doc.recordOfChanges.slice(0, 2).map((r) => r.in_charge)).toEqual(["QuynhTTN", "HiepTT"])
   })
 
+  it("FLF-252: dòng Record of Changes người dùng sửa ở wizard (gửi kèm finalize) thắng dòng đọc từ file", async () => {
+    const ctx = await importAtBaselining({ srs: { recordOfChanges: [["Date", "In charge", "Change Description"], ["01/05/2026", "An", "Bản đầu"]] } })
+    const before = (await spineRepository.get(ctx.projectId))!
+    const edited = [
+      { date: "01/05/2026", version: "0.1", change_type: "A" as const, in_charge: "An", description: "Bản đầu (đã sửa)" },
+      { date: "02/05/2026", version: "0.2", change_type: "M" as const, in_charge: "Bình", description: "Thêm dòng tay" }
+    ]
+    await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version, record_of_changes: edited })
+    expect((await TemplateProfile.findOne({ projectId: ctx.projectId }).lean())!.legacy_record_of_changes).toEqual(edited)
+  })
+
+  it("FLF-252: chức năng đọc từ bảng Non-Screen Functions được ghi lại ⇒ bản in: bảng 3.1.4 đúng các dòng đó, không chèn mục 3.x.y cho chúng", async () => {
+    const { projectId, userId, importId } = await importAtBaselining()
+    const doc = (await ImportedDocument.findById(importId))!
+    const row = (path: string, value: unknown) => ({ path, value, confidence: 1, source_block_ids: [] as string[], origin: "deterministic" as const, confirmed: true })
+    await ExtractionDraft.create({
+      projectId: doc.projectId,
+      import_id: doc._id,
+      section_id: "fixed:3.1.4",
+      status: "done",
+      fields: [row("functions[id=FR-90].name", "Nightly Sync Job"), row("functions[id=FR-90].description", "Syncs repositories every night.")],
+      ops: []
+    })
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+
+    expect((await TemplateProfile.findOne({ projectId }).lean())!.non_screen_table).toEqual(["FR-90"])
+    const rendered = await getDocument(projectId, "Lumen", { source: "draft" })
+    expect(rendered.sections.some((s) => s.id === "function:FR-90")).toBe(false)
+    const table = rendered.sections.find((s) => s.id === "fixed:3.1.4")!.blocks.find((b) => b.type === "table") as { header: { text: string }[][]; rows: { text: string }[][][] }
+    expect(table.header.map((c) => c.map((r) => r.text).join(""))).toEqual(["#", "Feature", "System Function", "Description"])
+    expect(table.rows.map((r) => r.map((c) => c.map((x) => x.text).join(""))[2])).toEqual(["Nightly Sync Job"])
+  })
+
+  it("FLF-252: mục chức năng in theo file gốc — chưa sửa ⇒ đúng nguyên văn file; change request sửa chức năng ⇒ in từ Spine", async () => {
+    const { projectId } = await importFinalized()
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
+    expect(login.blocks).toEqual([
+      { kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null },
+      { kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null }
+    ])
+    const sectionOf = async () => (await getDocument(projectId, "Lumen", { source: "draft" })).sections.find((s) => s.id === "function:FR-3.2.2")!
+    expect((await sectionOf()).blocks).toEqual([
+      { type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.loginNormal }] },
+      { type: "bullet_list", items: [[{ text: "Show an error when the password is wrong." }]] }
+    ])
+
+    // sửa chức năng (như một change request ghi vào Spine) ⇒ dấu nội dung lệch ⇒ in từ Spine
+    const spine = (await spineRepository.get(projectId))!
+    const applied = await applyTransaction(projectId, {
+      base_version: spine.spine_version,
+      ops: [{ op: "set", path: "functions[id=FR-3.2.2].trigger", value: "Learner clicks Sign in" }],
+      by: "import",
+      reason: "test",
+      step_id: null
+    })
+    // luồng change request ghép lại bản làm việc sau khi ghi Spine
+    await assemble(projectId, "Lumen", applied.spine_version)
+    expect(JSON.stringify((await sectionOf()).blocks)).toContain("Learner clicks Sign in")
+  })
+
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {
     mockOverrides.next = (prompt: string) => {
       const out = fakeMode1(prompt)
@@ -357,6 +420,79 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(mockImages.flat()).toEqual([{ mime: "image/png", bytes: PNG.length }])
   })
 
+  it("FLF-252: sơ đồ đọc trước bảng use case, ảnh không ghi mã ⇒ ghép theo tên với bảng phía sau, không cấp mã mới / trùng, phần trùng không phải duyệt", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
+    mockOverrides.next = (prompt: string) => {
+      if (!prompt.includes("# Read Diagram Image")) return fakeMode1(prompt)
+      const b = /Image block: \[(B\d{4,})\]/.exec(prompt)?.[1]
+      const uc = (name: string, actor_ids: string[]) => ({ entity: "use_cases", key: null, value: { name, actor_ids }, confidence: 0.7, field_confidence: {}, source_block_ids: [b] })
+      return JSON.stringify({ section_id: "fixed:2.2.1", diagram_kind: "usecase", items: [uc("register account", ["Learner"]), uc("Log In", ["Learner"])], unmapped_block_ids: [] })
+    }
+    await runExtraction(projectId, userId, importId)
+    const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
+    const ucIds = new Set(drafts.flatMap((d) => d.fields).flatMap((f) => /^use_cases\[id=([^\]]+)\]/.exec(f.path)?.[1] ?? []))
+    // trước đây ảnh không mã được cấp UC-01, UC-02… rồi gộp nhầm với UC của bảng; nay ghép theo tên ⇒ chỉ còn mã của bảng
+    expect([...ucIds].sort()).toEqual(["UC-01", "UC-02"])
+    const review = await extractionSummary(importId)
+    expect(review.review_fields.filter((f) => f.origin === "vision" && f.path.startsWith("use_cases["))).toEqual([])
+  })
+
+  it("FLF-252: sơ đồ ngữ cảnh + sơ đồ use case vẽ lại tác nhân của bảng, model chép khoá 'A01' ⇒ Spine không nhân đôi tác nhân, phần ảnh thêm vào chỉ hỏi một lần", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({
+      srs: {
+        images: [
+          { name: "image1.png", data: PNG, caption: "Figure 1 CONTEXT-IMG" },
+          { name: "image2.png", data: PNG, caption: "Figure 2 USECASE-IMG" }
+        ]
+      }
+    })
+    const visionPrompts: string[] = []
+    mockOverrides.next = (prompt: string) => {
+      if (!prompt.includes("# Read Diagram Image")) return fakeMode1(prompt)
+      visionPrompts.push(prompt)
+      const b = /Image block: \[(B\d{4,})\]/.exec(prompt)?.[1]
+      // model dùng lại khoá của known_keys đúng như được đưa: "A01 (Learner)"
+      const keyOf = (name: string) => new RegExp(`(A\\d+) \\(${name}\\)`).exec(prompt)?.[1] ?? null
+      const item = (entity: string, key: string | null, value: object) => ({ entity, key, value, confidence: 0.7, field_confidence: {}, source_block_ids: [b] })
+      const actors = [
+        item("actors", keyOf("Learner"), { name: "Learner", kind: "human" }),
+        item("actors", keyOf("Admin"), { name: "Admin", kind: "human" }),
+        item("actors", keyOf("Email Service"), { name: "Email Service", kind: "system" })
+      ]
+      if (prompt.includes("CONTEXT-IMG")) return JSON.stringify({ section_id: "fixed:2.2.1", diagram_kind: "context", items: actors, unmapped_block_ids: [] })
+      const uc = item("use_cases", "UC-02", { name: "Log in", actor_ids: [keyOf("Learner"), "Email Service"] })
+      return JSON.stringify({ section_id: "fixed:2.2.1", diagram_kind: "usecase", items: [...actors, uc], unmapped_block_ids: [] })
+    }
+    await runExtraction(projectId, userId, importId)
+    expect(visionPrompts).toHaveLength(2)
+    expect(visionPrompts[0]).toContain("A01 (Learner)")
+
+    // trước đây "A01" chuẩn hoá thành "A-01" ⇒ mỗi ảnh thêm một bản Learner / Admin
+    const fields = (await ExtractionDraft.find({ import_id: importId }).lean()).flatMap((d) => d.fields)
+    const actorIds = new Set(fields.flatMap((f) => /^actors\[id=([^\]]+)\]/.exec(f.path)?.[1] ?? []))
+    expect([...actorIds].sort()).toEqual(["A01", "A02", "A03"])
+    // ảnh chỉ thêm: loại tác nhân bảng không ghi, tác nhân mới, quan hệ mới — mỗi thứ một dòng duyệt, kể cả quan hệ gộp
+    // vào use case chữ cùng mục cũng nói tới
+    const fromImages = fields.filter((f) => f.origin === "vision").map((f) => `${f.path}=${JSON.stringify(f.value)}`)
+    expect(fromImages.sort()).toEqual(
+      [
+        'actors[id=A01].kind="human"',
+        'actors[id=A02].kind="human"',
+        'actors[id=A03].name="Email Service"',
+        'actors[id=A03].kind="system"',
+        'use_cases[id=UC-02].actor_ids=["Learner","Email Service"]'
+      ].sort()
+    )
+    expect(fields.filter((f) => f.origin === "vision").every((f) => f.confidence <= 0.7)).toBe(true)
+
+    await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.actors.map((a) => `${a.name}:${a.kind}`).sort()).toEqual(["Admin:human", "Email Service:system", "Learner:human"])
+    expect([...(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids ?? [])].sort()).toEqual(["A01", "A03"])
+  })
+
   it("diagram đọc được ⇒ Spine có actor + quan hệ từ ảnh (hợp với bảng), hình gốc giữ y trong bản render + đánh dấu sơ đồ gốc (§4.13), không cờ ảnh", async () => {
     mockOverrides.next = fakeMode1
     const { projectId } = await importFinalized({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
@@ -364,7 +500,8 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     const guest = spine.actors.find((a) => a.name === "Guest")!
     const learner = spine.actors.find((a) => a.name === "Learner")!
     expect(guest).toBeTruthy()
-    expect(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids.sort()).toEqual([guest.id, learner.id].sort())
+    // sắp xếp trên bản sao — `sort()` tại chỗ đổi thứ tự trong `spine` rồi làm hash sơ đồ tính bên dưới lệch
+    expect([...(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids ?? [])].sort()).toEqual([guest.id, learner.id].sort())
     // Hình của người dùng giữ nguyên, đánh dấu loại + hash dữ liệu lúc import (đúng dữ liệu vừa đọc từ ảnh)
     const images = spine.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image")
     expect(images).toEqual([expect.objectContaining({ image_ref: "word/media/image1.png", diagram: { kind: "usecase", source_hash: originalDiagramHash(spine, "usecase") } })])
@@ -412,6 +549,39 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(run.doc.status).toBe("fields_review")
     const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
     expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
+  })
+
+  it("FLF-252: ảnh không đọc được + quyền không khớp màn trong cùng lần nhập ⇒ hai cờ vàng khác id, tạo được bản 0.0 (trước đây trùng id ⇒ cả lô bị từ chối)", async () => {
+    const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "USECASE-IMG" }] } })
+    mockOverrides.next = (prompt) => (prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand", "GEMINI_OVERLOADED") : fakeMode1(prompt))
+    const run = await runExtraction(projectId, userId, importId)
+    // ma trận phân quyền nhắc một màn không có trong bảng mô tả màn (WDP301: "Sell Statistics")
+    const field = (path: string, value: unknown) => ({ path, value, confidence: 1, source_block_ids: [] as string[], origin: "deterministic" as const, confirmed: true })
+    await ExtractionDraft.updateOne(
+      { import_id: importId, section_id: "fixed:2.1" },
+      {
+        $push: {
+          fields: {
+            $each: [
+              field("roles[id=R01].name", "Admin"),
+              field("permissions[id=P001].screen_id", "Sell Statistics"),
+              field("permissions[id=P001].role_id", "Admin"),
+              field("permissions[id=P001].action", "access")
+            ]
+          }
+        }
+      }
+    )
+    if (run.doc.status === "fields_review") await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
+    const before = (await spineRepository.get(projectId))!
+    await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
+
+    const spine = (await spineRepository.get(projectId))!
+    const flags = spine.flags.filter((f) => f.rule_id === "import_image_unread" || f.rule_id === "import_unresolved_ref")
+    expect(flags.map((f) => f.rule_id).sort()).toEqual(["import_image_unread", "import_unresolved_ref"])
+    expect(new Set(flags.map((f) => f.id)).size).toBe(2)
+    expect(flags.find((f) => f.rule_id === "import_unresolved_ref")!.message).toContain('"Sell Statistics"')
+    expect(await DocVersion.countDocuments({ projectId, version: "0.0" })).toBe(1)
   })
 
   it("file gốc không còn ⇒ render vẫn chạy, ảnh thành chỗ giữ ảnh", async () => {

@@ -19,8 +19,13 @@ import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractab
 import {
   IdAllocator,
   REF_LIST_FIELDS,
+  aiItemId,
+  compactKey,
+  findKnownCompact,
   findKnownId,
+  findKnownKey,
   flattenItem,
+  idKey,
   mergeFieldValue,
   normalizeKey,
   parseFieldPath,
@@ -29,7 +34,7 @@ import {
   type ProvisionalEntity
 } from "./extracted-entities.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
-import { VISION_CONFIDENCE_CAP, needsConfirm } from "./import.constants.js"
+import { VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
@@ -37,16 +42,27 @@ import { withMeteredAi } from "./metered-ai.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
-import { TABLE_ENTITIES } from "./table-header-dictionary.js"
+import { TABLE_ENTITIES, hasRequiredFields } from "./table-header-dictionary.js"
 import { tableRows, tableText } from "./table-rows.js"
-import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
+import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
+import { FUNCTION_LABELS, USE_CASE_LABELS, functionSpecValue, readSpecLines, useCaseSpecValue } from "./spec-fields.js"
+import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
 
 export interface ExtractionRun {
   doc: IImportedDocument
   sections: GetImportResponse["extraction"]["sections"]
 }
 
-type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows">
+type BlockLite = Pick<IDocBlock, "block_id" | "kind" | "text" | "section_id" | "anchor" | "image_ref" | "rows"> & Partial<Pick<IDocBlock, "mentions">>
+
+/** Loại mã nhận được trong chữ (mention) ⇒ mảng Spine — giữ chỗ id trước khi cấp mã mới. */
+const MENTION_ARRAYS: Readonly<Partial<Record<MentionEntity, string>>> = {
+  use_case: "use_cases",
+  function: "functions",
+  nfr: "nfrs",
+  business_rule: "business_rules",
+  screen: "screens"
+}
 
 /** Section cần trích theo thứ tự xuất hiện trong tài liệu. */
 export const extractionPlan = (blocks: BlockLite[]): string[] => {
@@ -69,22 +85,141 @@ export const splitList = (s: string, refs = false): string[] =>
 
 const LIST_FIELDS = new Set(["actor_ids", "goals", "includes", "extends", "relations", "function_ids"])
 
-/** Bảng có mapping đủ field bắt buộc ⇒ item theo từng hàng dữ liệu; không đủ ⇒ `null` (để AI trích). */
+/** Field nhận giá trị hàng trên khi ô trống (ô gộp dọc — "Feature" gộp cho nhiều màn hình liền nhau). */
+const FILL_DOWN_FIELDS = new Set(["feature_id"])
+
+/** Phần đọc tất định của một section (FLF-252): item, bảng đã đọc hết, block đặc tả đã đọc, block phải giữ nguyên văn. */
+export interface Settled {
+  items: EntityItem[]
+  handled: Set<string>
+  consumed: Set<string>
+  verbatim: Set<string>
+}
+const EMPTY_SETTLED: Settled = { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() }
+
+/** Độ tin của phần đọc theo nhãn đặc tả quen (đúng nguyên văn, không đoán) — không cần xác nhận. */
+const SPEC_CONFIDENCE = 0.9
+
+/**
+ * Đọc tất định một section (FLF-252), id cấp sau: bảng khớp đủ cột; bảng dọc đặc tả use case (mỗi bảng một use case —
+ * bảng vẫn giữ nguyên văn vì Spine không chứa luồng / điều kiện); đặc tả chức năng dạng "nhãn: giá trị" của section chức năng.
+ */
+export const settleSection = (
+  sectionId: string,
+  blocks: BlockLite[],
+  profile: ITemplateProfile,
+  provisional: Map<string, ProvisionalEntity>
+): Settled => {
+  const out: Settled = { items: [], handled: new Set(), consumed: new Set(), verbatim: new Set() }
+  const sectionBlocks = blocks.filter((b) => b.section_id === sectionId)
+  const targets = targetsOf(sectionId)
+  for (const t of sectionBlocks.filter((b) => b.kind === "table")) {
+    const rows = tableRows(t, blocks)
+    const items = deterministicTableItems(t, rows, profile)
+    if (items) {
+      // NFR của bảng nhận nhóm theo mục như NFR AI trích (bảng External Systems ở 4.1 ⇒ interface, không còn "other")
+      for (const it of items) if (it.entity === "nfrs" && it.value.category === undefined && NFR_CATEGORY_BY_SECTION[sectionId]) it.value.category = NFR_CATEGORY_BY_SECTION[sectionId]
+      out.handled.add(t.block_id)
+      out.items.push(...items)
+      continue
+    }
+    if (!targets.includes("use_cases")) continue
+    const uc = useCaseSpecValue(readSpecLines([{ ...t, rows }], USE_CASE_LABELS).values)
+    if (!uc) continue
+    out.handled.add(t.block_id)
+    out.verbatim.add(t.block_id)
+    out.items.push({
+      entity: "use_cases",
+      id: uc.key ? normalizeKey(uc.key) : null,
+      value: uc.value,
+      confidence: SPEC_CONFIDENCE,
+      field_confidence: {},
+      source_block_ids: [t.block_id],
+      origin: "deterministic"
+    })
+  }
+  const fn = provisional.get(sectionId)
+  if (fn?.entity === "functions") {
+    const sources = sectionBlocks
+      .filter((b) => b.kind !== "heading" && b.kind !== "table_cell" && !out.handled.has(b.block_id))
+      .map((b) => (b.kind === "table" ? { ...b, rows: tableRows(b, blocks) } : b))
+    const spec = readSpecLines(sources, FUNCTION_LABELS)
+    const value = functionSpecValue(spec.values)
+    if (Object.keys(value).length) {
+      for (const id of spec.consumed) out.consumed.add(id)
+      out.items.push({ entity: "functions", id: fn.id, value, confidence: SPEC_CONFIDENCE, field_confidence: {}, source_block_ids: [...spec.consumed], origin: "deterministic" })
+    }
+  }
+  return out
+}
+
+/** Tên ngắn từ một câu yêu cầu: bỏ "The system shall", cắt ở ranh giới từ trong 80 ký tự. */
+export const shortName = (statement: string): string => {
+  const s = statement
+    .replace(/^\s*(the\s+)?(system|application|app|user)\s+(shall|must|should|will|can)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  const first = s.split(/(?<=[.;:])\s/)[0].replace(/[.;:]$/, "")
+  const name = first.length <= 80 ? first : `${first.slice(0, 80).replace(/\s+\S*$/, "")}…`
+  return name.charAt(0).toUpperCase() + name.slice(1)
+}
+
+/**
+ * Ma trận phân quyền (FLF-252): mỗi cột vai trò ⇒ một vai trò (tên = tiêu đề cột), mỗi ô đánh dấu ⇒ một quyền
+ * màn hình × vai trò × thao tác ("X"/"✓" ⇒ `access`, "view, create" ⇒ hai quyền). Tên màn / vai trò phân giải lúc dựng op.
+ */
+const matrixItems = (table: BlockLite, grid: string[][], shape: TableShape, cols: TableMapEntry[], confidence: number): EntityItem[] | null => {
+  const screenCol = cols.find((c) => c.field_path === "permissions[].screen_id")?.column_index
+  const roleCols = cols.filter((c) => c.field_path === "permissions[].role_id" && shape.headers[c.column_index]).map((c) => c.column_index)
+  if (screenCol === undefined || !roleCols.length) return null
+  const base = { id: null, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }
+  const roles = roleCols.map((c) => ({ ...base, entity: "roles", value: { name: shape.headers[c], actor_id: shape.headers[c] } }))
+  const permissions = shape.body.flatMap((r) => {
+    const screen = (grid[r][screenCol] ?? "").trim()
+    if (!screen) return []
+    return roleCols.flatMap((c) =>
+      markActions(grid[r][c] ?? "").map((action) => ({ ...base, entity: "permissions", value: { screen_id: screen, role_id: shape.headers[c], action } }))
+    )
+  })
+  return [...roles, ...permissions]
+}
+
+/**
+ * Bảng có mapping đủ field bắt buộc ⇒ item theo từng hàng dữ liệu; không đủ ⇒ `null` (để AI trích). Đọc theo hình dạng
+ * bảng (FLF-252): hàng tiêu đề thật (bỏ hàng tên bảng), hàng nhóm không thành phần tử (nhãn nhóm làm feature của màn).
+ */
 export const deterministicTableItems = (table: BlockLite, grid: string[][], profile: ITemplateProfile): EntityItem[] | null => {
   const cols = profile.table_map.filter((t) => t.block_id === table.block_id && t.field_path)
-  if (!cols.length || grid.length < 2) return null
+  const shape = tableShape(grid)
+  if (!cols.length || !shape.body.length) return null
   const entity = cols[0].field_path!.split("[")[0]
+  const confidence = Math.min(...cols.map((c) => (c.confirmed ? 1 : c.confidence)))
+  if (entity === "permissions") return matrixItems(table, grid, shape, cols, confidence)
   const def = TABLE_ENTITIES.find((d) => d.entity === entity)
   const fields = new Map(cols.filter((c) => c.field_path!.startsWith(`${entity}[`)).map((c) => [c.column_index, c.field_path!.split("].")[1]]))
-  if (!def || !def.required.every((f) => [...fields.values()].includes(f))) return null
-  const confidence = Math.min(...cols.map((c) => (c.confirmed ? 1 : c.confidence)))
-  return grid.slice(1).flatMap((row) => {
+  if (!def || !hasRequiredFields(def, new Set(fields.values()))) return null
+  const above = new Map<string, string>()
+  // Bảng NFR có cột tên không map ("External System | Description") ⇒ tên đứng đầu câu yêu cầu: không còn câu
+  // "Provides Pull Request events…" mất chữ "GitHub" (FLF-252)
+  const statementCol = [...fields].find(([, field]) => field === "statement")?.[0]
+  const labelCol =
+    entity === "nfrs" && statementCol !== undefined ? shape.columns.find((c) => c.index < statementCol && c.role === "name" && !fields.has(c.index))?.index : undefined
+  return shape.body.flatMap((r) => {
     const value: Record<string, unknown> = {}
     for (const [col, field] of fields) {
-      const cell = row[col]?.trim()
-      if (cell) value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
+      let cell: string | undefined = grid[r][col]?.trim()
+      if (!cell && FILL_DOWN_FIELDS.has(field)) cell = above.get(field)
+      if (!cell) continue
+      if (FILL_DOWN_FIELDS.has(field)) above.set(field, cell)
+      value[field] = LIST_FIELDS.has(field) ? splitList(cell, field !== "goals") : cell
     }
+    const label = labelCol === undefined ? "" : (grid[r][labelCol] ?? "").trim()
+    if (label && typeof value.statement === "string" && !value.statement.toLowerCase().startsWith(label.toLowerCase())) value.statement = `${label}: ${value.statement}`
     if (!Object.keys(value).length) return []
+    const group = groupOf(shape, r)
+    if (entity === "screens" && value.feature_id === undefined && group) value.feature_id = group
+    // Bảng yêu cầu "ID | Requirement" không có cột tên ⇒ tên chức năng là phần đầu câu yêu cầu (mô tả giữ đủ câu)
+    if (entity === "functions" && value.name === undefined && typeof value.description === "string") value.name = shortName(value.description)
     const key = typeof value.id === "string" ? normalizeKey(value.id) : null
     delete value.id
     return [{ entity, id: key, value, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }]
@@ -129,10 +264,13 @@ const knownKeysText = (items: EntityItem[]): string => {
   return [...byEntity].map(([e, ids]) => `${e}: ${[...new Set(ids)].join(", ")}`).join("\n") || "(none yet)"
 }
 
-/** Đổi output model sang item: chuẩn hoá khoá, dùng lại id theo tên, ép id function của section function. */
+/**
+ * Đổi output model sang item: id theo mã / tên phần tử đã biết (`aiItemId`), ép id function của section function.
+ * `fromImage`: item đọc từ ảnh diagram — tên trùng phần tử đã biết thắng khoá model đặt.
+ */
 export const itemsFromAi = (
   out: ImportExtractOutput,
-  ctx: { sectionId: string; alloc: IdAllocator; known: EntityItem[]; sectionFunction: ProvisionalEntity | null; validBlocks: Set<string> }
+  ctx: { sectionId: string; alloc: IdAllocator; known: EntityItem[]; sectionFunction: ProvisionalEntity | null; validBlocks: Set<string>; fromImage?: boolean }
 ): EntityItem[] => {
   let functionUsed = false
   return out.items.map((raw) => {
@@ -144,8 +282,7 @@ export const itemsFromAi = (
         id = ctx.sectionFunction.id
         functionUsed = true
       } else {
-        id = raw.key ? normalizeKey(raw.key) : findKnownId(ctx.known, raw.entity, value.name ?? value.term)
-        id ??= ctx.alloc.next(raw.entity)
+        id = aiItemId(ctx.known, raw.entity, raw.key, value.name ?? value.term, ctx.fromImage) ?? ctx.alloc.next(raw.entity)
         ctx.alloc.reserve(raw.entity, id)
       }
     }
@@ -168,11 +305,151 @@ export const itemsFromAi = (
 /** Mã lỗi cho biết môi trường không đọc được ảnh (không phải lỗi tạm thời) ⇒ bỏ qua ảnh thay vì dừng I-4. */
 const VISION_UNAVAILABLE: ReadonlySet<string> = new Set(["GEMINI_KEY_MISSING", "AI_PROVIDER_NO_VISION"])
 
+/**
+ * Mã business rule model gán cho chức năng phải có trong chữ của mục (FLF-252): mục không ghi mã nào mà model vẫn nối
+ * "Logout" với BR-01 (đoán, độ tin 0.5) ⇒ bỏ; câu quy tắc model nhét vào chỗ mã cũng bỏ (không phải mã). Không còn mã ⇒ bỏ field.
+ */
+export const keepMentionedRules = (items: EntityItem[], mentioned: ReadonlySet<string>): EntityItem[] =>
+  items.map((it) => {
+    const refs = it.entity === "functions" && Array.isArray(it.value.business_rule_ids) ? (it.value.business_rule_ids as unknown[]) : null
+    if (!refs) return it
+    const kept = refs.filter((r) => typeof r === "string" && mentioned.has(idKey(r)))
+    if (kept.length === refs.length) return it
+    const value: Record<string, unknown> = { ...it.value, business_rule_ids: kept }
+    if (!kept.length) delete value.business_rule_ids
+    return { ...it, value }
+  })
+
 /** Chú thích của ảnh: block caption ngay sau (hoặc ngay trước) ảnh trong section. */
 export const captionOf = (img: Pick<BlockLite, "block_id">, sectionBlocks: Pick<BlockLite, "block_id" | "kind" | "text">[]): string => {
   const i = sectionBlocks.findIndex((b) => b.block_id === img.block_id)
   const near = [sectionBlocks[i + 1], sectionBlocks[i - 1]].find((b) => b?.kind === "caption" && b.text.trim())
   return near?.text.trim() ?? "(none)"
+}
+
+/** Caption chỉ hình là sơ đồ đọc được (use case, ngữ cảnh, ERD / class, luồng màn). */
+const DIAGRAM_CAPTION = /(use[\s-]?case|context|erd|entity[\s-]?relationship|class diagram|data model|screens?[\s-]?flow|navigation|sơ đồ|biểu đồ|diagram)/i
+/** Caption chỉ hình không phải 4 loại sơ đồ đọc được (ảnh màn hình, wireframe, sequence / activity…) — đọc chỉ tốn credit. */
+const NOT_DIAGRAM_CAPTION = /(layout|screenshot|screen shot|mock-?up|wireframe|prototype|giao diện|sequence|activity|state machine|deployment|component|workflow)/i
+
+/**
+ * Ảnh có gửi AI đọc không (FLF-252): caption nói là ảnh màn hình / sơ đồ khác loại ⇒ không; ảnh ở mục thường có sơ đồ
+ * (ngữ cảnh, use case, luồng màn, ERD) hoặc caption nói là sơ đồ đọc được (mẫu IEEE đặt sơ đồ ở mục khác FPT) ⇒ có.
+ */
+export const readsImage = (sectionId: string, caption: string): boolean =>
+  !NOT_DIAGRAM_CAPTION.test(caption) && (DIAGRAM_SECTIONS.has(sectionId) || DIAGRAM_CAPTION.test(caption))
+
+const isBlank = (v: unknown): boolean => v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length)
+
+/** Loại phần tử mà field quan hệ trỏ tới. */
+const REF_ENTITY: Readonly<Record<string, string>> = { actor_ids: "actors", includes: "use_cases", extends: "use_cases", relations: "entities", flow_to: "screens" }
+
+/**
+ * Khoá so tham chiếu: mã phần tử đã biết ⇒ tên của nó (ảnh ghi "A01", bảng ghi "Learner" là một), còn lại ⇒ tên so cả khác
+ * quy ước đặt tên ("Repository" = "repositories").
+ */
+const refKey = (known: readonly EntityItem[], field: string, ref: unknown): string => {
+  const entity = REF_ENTITY[field]
+  const id = entity ? findKnownKey(known, entity, String(ref)) : null
+  const name = id ? known.find((k) => k.entity === entity && k.id === id && typeof k.value.name === "string")?.value.name : undefined
+  return compactKey(typeof name === "string" ? name : String(ref))
+}
+
+/**
+ * Phần tử đọc từ ảnh trùng phần tử đã có (cùng loại, cùng id) — từ chữ / bảng hay từ ảnh trước (sơ đồ ngữ cảnh rồi sơ
+ * đồ use case cùng vẽ các tác nhân) ⇒ chỉ giữ phần ảnh thêm vào: quan hệ mới (actor nối thêm, include / extend…) và field
+ * nguồn trước không có (loại tác nhân khi bảng không có cột loại). Bước 1.9 chỉ hỏi phần đó; không có gì mới ⇒ bỏ item (FLF-252).
+ */
+export const onlyNewFromVision = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] =>
+  items.flatMap((it) => {
+    const same = known.filter((k) => k.entity === it.entity && k.id === it.id)
+    if (!same.length) return [it]
+    const value: Record<string, unknown> = {}
+    for (const [field, v] of Object.entries(it.value)) {
+      if (isBlank(v)) continue
+      const prev = same.map((k) => k.value[field]).filter((x) => !isBlank(x))
+      if (!REF_LIST_FIELDS.has(field) || !Array.isArray(v)) {
+        if (!prev.length) value[field] = v
+        continue
+      }
+      const seen = new Set(prev.flat().map((x) => refKey(known, field, x)))
+      const added = v.filter((x) => !seen.has(refKey(known, field, x)))
+      if (added.length) value[field] = added
+    }
+    if (!Object.keys(value).length) return []
+    return [{ ...it, value, field_confidence: Object.fromEntries(Object.entries(it.field_confidence).filter(([field]) => field in value)) }]
+  })
+
+/** Id use case của một tham chiếu (mã hoặc tên) trong `pool`; không phân giải được ⇒ `null`. */
+const useCaseIdIn =
+  (pool: readonly EntityItem[]) =>
+  (ref: unknown): string | null =>
+    typeof ref === "string" ? (findKnownKey(pool, "use_cases", ref) ?? findKnownId(pool, "use_cases", ref) ?? findKnownCompact(pool, "use_cases", ref)) : null
+
+const hasActors = (it: EntityItem | undefined): boolean => Array.isArray(it?.value.actor_ids) && (it.value.actor_ids as unknown[]).length > 0
+
+/**
+ * Chiều include / extend đọc từ ảnh theo nét vẽ (FLF-252). Model (nhất là model dự phòng khi model chính quá tải) hay đọc
+ * ngược đầu mũi tên — "Execute Analyzer include Trigger Analysis Workflow", "View List User extend View User Detail, Ban /
+ * Unban User". Đảo chiều khi:
+ * - đúng một đầu có tác nhân trên ảnh mà nằm sai phía: use case gốc nối với tác nhân, phần được include / phần mở rộng thì không;
+ * - một use case extend từ hai use case trở lên: nhiều phần mở rộng trỏ về một gốc, không có phần mở rộng nào của nhiều gốc.
+ * Còn lại (hai đầu cùng có / cùng không có tác nhân) ⇒ giữ như model đọc.
+ */
+export const orientRelations = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] => {
+  const idOf = useCaseIdIn([...known, ...items])
+  const read = new Map(items.filter((it) => it.entity === "use_cases" && it.id).map((it) => [it.id!, it]))
+  const moves: { field: string; from: string; ref: unknown; to: string }[] = []
+  for (const [id, it] of read) {
+    for (const field of ["includes", "extends"]) {
+      const refs = Array.isArray(it.value[field]) ? (it.value[field] as unknown[]) : []
+      const fanOut = field === "extends" && refs.filter((r) => idOf(r) && idOf(r) !== id).length >= 2
+      for (const ref of refs) {
+        const other = idOf(ref)
+        if (!other || other === id || !read.has(other)) continue
+        const byActors = hasActors(it) !== hasActors(read.get(other))
+        // include: gốc (có tác nhân) include phần chung; extend: phần mở rộng (không tác nhân) extend gốc
+        const reversed = fanOut || (byActors && (field === "includes" ? !hasActors(it) : hasActors(it)))
+        if (reversed) moves.push({ field, from: id, ref, to: other })
+      }
+    }
+  }
+  if (!moves.length) return items
+  const value = new Map([...read].map(([id, it]) => [id, { ...it.value }]))
+  for (const m of moves) {
+    const from = value.get(m.from)!
+    from[m.field] = (from[m.field] as unknown[]).filter((r) => r !== m.ref)
+    const to = value.get(m.to)!
+    const list = Array.isArray(to[m.field]) ? (to[m.field] as unknown[]) : []
+    if (!list.some((r) => idOf(r) === m.from)) to[m.field] = [...list, m.from]
+  }
+  return items.map((it) => (it.entity === "use_cases" && it.id && value.has(it.id) ? { ...it, value: value.get(it.id)! } : it))
+}
+
+/**
+ * Quan hệ ảnh tự mâu thuẫn — A extend B và B extend A (include cũng vậy), model đọc nhầm chiều mũi tên ⇒ bỏ cả cặp:
+ * thiếu quan hệ còn hơn đưa ra duyệt một quan hệ sai, kết thành vòng (FLF-252, sơ đồ use case WDP301).
+ */
+export const dropMutualRelations = (items: EntityItem[], known: readonly EntityItem[]): EntityItem[] => {
+  const idOf = useCaseIdIn([...known, ...items])
+  const mutual = new Set<string>()
+  for (const field of ["includes", "extends"]) {
+    const edges = new Set<string>()
+    for (const it of items) if (it.entity === "use_cases" && it.id && Array.isArray(it.value[field])) for (const r of it.value[field] as unknown[]) edges.add(`${it.id}>${idOf(r)}`)
+    for (const e of edges) {
+      const [from, to] = e.split(">")
+      if (edges.has(`${to}>${from}`)) mutual.add(`${field}|${e}`)
+    }
+  }
+  if (!mutual.size) return items
+  return items.map((it) => {
+    if (it.entity !== "use_cases" || !it.id) return it
+    const value = { ...it.value }
+    for (const field of ["includes", "extends"]) {
+      if (Array.isArray(value[field])) value[field] = (value[field] as unknown[]).filter((r) => !mutual.has(`${field}|${it.id}>${idOf(r)}`))
+    }
+    return { ...it, value }
+  })
 }
 
 /** Item đọc từ ảnh: `origin: vision`, độ tin (cả từng field) không vượt trần ⇒ luôn qua màn 1.9. */
@@ -199,27 +476,41 @@ const itemsOfDraft = (d: Pick<IExtractionDraft, "fields">): EntityItem[] => {
   return [...map.values()]
 }
 
-const mergeItems = (items: EntityItem[]): EntityItem[] => {
+const fieldConfidence = (it: EntityItem, field: string): number => it.field_confidence[field] ?? it.confidence
+
+/**
+ * Gộp item cùng phần tử trong một section. Chữ / bảng nói cùng phần tử với ảnh ⇒ chữ thắng (tin hơn ảnh), ảnh chỉ bù field
+ * chữ không có + quan hệ mới. Phần ảnh bù giữ nguồn `vision` + độ tin của ảnh (FLF-252) — trước đây nhận độ tin của chữ /
+ * bảng nên vào Spine không qua bước 1.9 (vd quan hệ của ERD gộp vào bảng thực thể cùng mục).
+ */
+export const mergeItems = (items: EntityItem[]): EntityItem[] => {
   const out = new Map<string, EntityItem>()
   for (const it of items) {
     const key = `${it.entity}|${it.id ?? ""}`
     const cur = out.get(key)
     if (!cur) {
-      out.set(key, { ...it, value: { ...it.value }, source_block_ids: [...it.source_block_ids] })
+      out.set(key, { ...it, value: { ...it.value }, field_confidence: { ...it.field_confidence }, source_block_ids: [...it.source_block_ids] })
       continue
     }
-    // Chữ / bảng nói cùng phần tử với ảnh ⇒ chữ thắng (tin hơn ảnh), ảnh chỉ bù field chữ không có
-    if (cur.origin === "vision" && it.origin !== "vision") {
-      for (const [k, v] of Object.entries(it.value)) cur.value[k] = k in cur.value ? mergeFieldValue(k, cur.value[k], v) : v
-      cur.origin = it.origin
-      cur.confidence = it.confidence
-      cur.field_confidence = { ...cur.field_confidence, ...it.field_confidence }
-      cur.source_block_ids = [...new Set([...it.source_block_ids, ...cur.source_block_ids])]
-      continue
+    const [base, extra] = cur.origin === "vision" && it.origin !== "vision" ? [it, cur] : [cur, it]
+    const origins: Record<string, FieldOrigin> = { ...extra.field_origin, ...base.field_origin }
+    const merged: EntityItem = {
+      ...base,
+      value: { ...base.value },
+      field_confidence: { ...extra.field_confidence, ...base.field_confidence },
+      field_origin: origins,
+      source_block_ids: [...new Set([...base.source_block_ids, ...extra.source_block_ids])]
     }
-    for (const [k, v] of Object.entries(it.value)) cur.value[k] = cur.value[k] === undefined ? v : REF_LIST_FIELDS.has(k) ? mergeFieldValue(k, cur.value[k], v) : cur.value[k]
-    cur.field_confidence = { ...it.field_confidence, ...cur.field_confidence }
-    cur.source_block_ids = [...new Set([...cur.source_block_ids, ...it.source_block_ids])]
+    for (const [k, v] of Object.entries(extra.value)) {
+      const had = merged.value[k]
+      const next = had === undefined ? v : REF_LIST_FIELDS.has(k) ? mergeFieldValue(k, had, v) : had
+      if (JSON.stringify(next) === JSON.stringify(had)) continue
+      merged.value[k] = next
+      if (extra.origin !== "vision") continue
+      merged.field_confidence[k] = Math.min(had === undefined ? 1 : fieldConfidence(base, k), fieldConfidence(extra, k))
+      origins[k] = "vision"
+    }
+    out.set(key, merged)
   }
   return [...out.values()]
 }
@@ -263,6 +554,27 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   for (const p of provisional.values()) known.push(...provisionalItems(p.section, provisional))
   const alloc = new IdAllocator()
   for (const k of known) if (k.id) alloc.reserve(k.entity, k.id)
+  // FLF-252: giữ chỗ mọi mã tài liệu ghi (UC-01, BR-12…) trước khi cấp id mới — ảnh / chữ ở mục đứng trước không còn được
+  // cấp trùng mã thật của bảng phía sau (rồi bị gộp nhầm thành một phần tử lúc finalize)
+  for (const b of blocks) for (const m of b.mentions ?? []) if (MENTION_ARRAYS[m.entity]) alloc.reserve(MENTION_ARRAYS[m.entity]!, m.id)
+
+  // FLF-252: phần đọc tất định (bảng, đặc tả "nhãn: giá trị") của mọi section chưa xong — chạy trước mọi lượt AI để ảnh /
+  // chữ ở mục trước ghép được với phần tử của bảng phía sau (sơ đồ use case ở 2.2.1 ⇄ bảng use case ở 2.2.2)
+  const settled = new Map<string, Settled>()
+  for (const section_id of plan) {
+    if (draftOf.get(section_id)!.status === "done") continue
+    settled.set(section_id, settleSection(section_id, blocks, profile, provisional))
+  }
+  // Mã bảng ghi giữ chỗ trước khi cấp mã cho phần tử không mã — không cấp "A01" rồi gặp "A-01" của bảng phía sau
+  for (const found of settled.values()) for (const it of found.items) if (it.id) alloc.reserve(it.entity, it.id)
+  for (const found of settled.values()) {
+    for (const it of found.items) {
+      // Không có mã: dùng lại id của phần tử cùng tên đã biết (vd chức năng 3.1.4 = function của heading 3.x.y)
+      it.id ??= findKnownId([...known, ...found.items], it.entity, it.value.name ?? it.value.term) ?? alloc.next(it.entity)
+      alloc.reserve(it.entity, it.id)
+    }
+    known.push(...found.items)
+  }
 
   for (const section_id of plan) {
     const draft = draftOf.get(section_id)!
@@ -271,19 +583,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     await doc.save()
 
     const sectionBlocks = blocks.filter((b) => b.section_id === section_id)
-    const items: EntityItem[] = [...provisionalItems(section_id, provisional)]
-    const handledTables = new Set<string>()
-    for (const t of sectionBlocks.filter((b) => b.kind === "table")) {
-      const rows = deterministicTableItems(t, tableRows(t, blocks), profile)
-      if (!rows) continue
-      handledTables.add(t.block_id)
-      for (const it of rows) {
-        // Hàng không có mã: dùng lại id của phần tử cùng tên đã biết (vd chức năng 3.1.4 = function của heading 3.x.y)
-        it.id ??= findKnownId([...known, ...items], it.entity, it.value.name ?? it.value.term) ?? alloc.next(it.entity)
-        alloc.reserve(it.entity, it.id)
-        items.push(it)
-      }
-    }
+    const { items: settledItems, handled: handledTables, consumed, verbatim } = settled.get(section_id) ?? EMPTY_SETTLED
+    const items: EntityItem[] = [...provisionalItems(section_id, provisional), ...settledItems]
 
     const tablePrefixes = sectionBlocks.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
     const aiBlocks = sectionBlocks
@@ -292,13 +593,16 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           b.kind !== "heading" &&
           b.text.trim() &&
           !handledTables.has(b.block_id) &&
+          !consumed.has(b.block_id) &&
           !(b.kind === "table_cell" && tablePrefixes.some((prefix) => b.anchor.xml_path.startsWith(prefix)))
       )
       // Bảng gửi AI theo ô thật (FLF-251) — tách `text` theo dòng làm ô nhiều dòng thành nhiều hàng
       .map((b) => (b.kind === "table" ? { ...b, text: tableText(tableRows(b, blocks)) } : b))
     const targets = targetsOf(section_id)
+    const mentionedRules = new Set(sectionBlocks.flatMap((b) => (b.mentions ?? []).filter((m) => m.entity === "business_rule").map((m) => idKey(m.id))))
     let usageId: string | null = null
-    const unmapped: string[] = []
+    // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
+    const unmapped: string[] = [...verbatim]
     const heading = profile.heading_map.find((h) => h.section_id === section_id)
     const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
     const pause = async (result: { reason: "credits" | "resume_later"; userMessage: string }): Promise<ExtractionRun> => {
@@ -315,7 +619,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     // Phase 5: ảnh diagram của section (sau bảng tất định, trước lô chữ) ⇒ Gemini đọc từng ảnh; thực thể đọc được vào
     // known_keys để lô chữ dùng lại khoá. EMF/WMF / file gốc không còn ⇒ `unsupported` (không gọi AI, giữ ảnh gốc).
     const diagramImages: IExtractionDraft["diagram_images"] = []
-    for (const img of DIAGRAM_SECTIONS.has(section_id) ? sectionBlocks.filter((b) => b.kind === "image" && b.image_ref) : []) {
+    for (const img of sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(section_id, captionOf(b, sectionBlocks)))) {
       const image = await loadImportImage(projectId, img.image_ref!)
       if (!image) {
         diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
@@ -352,9 +656,18 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       const read =
         result.data.diagram_kind === "other"
           ? []
-          : visionItems(itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]) }))
+          : dropMutualRelations(
+              orientRelations(
+                visionItems(
+                  itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true })
+                ),
+                [...known, ...items]
+              ),
+              [...known, ...items]
+            )
       diagramImages.push({ block_id: img.block_id, kind: read.length ? result.data.diagram_kind : "other" })
-      items.push(...read)
+      // Phần tử ảnh trùng phần tử đã có (chữ, bảng, ảnh trước) ⇒ chỉ giữ phần mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
+      items.push(...onlyNewFromVision(read, [...known, ...items]))
     }
 
     for (const batch of targets.length ? chunkBlocks(aiBlocks) : []) {
@@ -372,17 +685,25 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       const inBatch = new Set(batch.map((b) => b.block_id))
       unmapped.push(...result.data.unmapped_block_ids.filter((id) => inBatch.has(id) && !unmapped.includes(id)))
       items.push(
-        ...itemsFromAi(result.data, {
-          sectionId: section_id,
-          alloc,
-          known: [...known, ...items],
-          sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
-          validBlocks: new Set(batch.map((b) => b.block_id))
-        })
+        ...keepMentionedRules(
+          itemsFromAi(result.data, {
+            sectionId: section_id,
+            alloc,
+            known: [...known, ...items],
+            sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
+            validBlocks: new Set(batch.map((b) => b.block_id))
+          }),
+          mentionedRules
+        )
       )
     }
 
     const merged = mergeItems(items)
+    // Chức năng trích ngay dưới một tính năng (FLF-252 — danh sách yêu cầu của mẫu IEEE) thuộc tính năng đó khi tài liệu không ghi
+    const sectionFeature = provisional.get(section_id)
+    if (sectionFeature?.entity === "features") {
+      for (const it of merged) if (it.entity === "functions" && it.value.feature_id === undefined) it.value.feature_id = sectionFeature.id
+    }
     known.push(...merged)
     draft.fields = merged.flatMap(flattenItem) as ExtractedField[]
     draft.status = "done"

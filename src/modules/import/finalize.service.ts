@@ -28,10 +28,10 @@ import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-di
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
 import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
-import { countOpenFlags, findingOps, runImportCheck, stripRecord } from "./check.service.js"
+import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
-import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
+import { collectEntities, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model.js"
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
@@ -40,11 +40,12 @@ import { assertImportStatus, loadImportFile, requireImport, transitionImport } f
 import type { IImportedDocument } from "./imported-document.model.js"
 import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
-import { IMPORT_IMAGE_RULE } from "./mode1-rule-profile.js"
+import { IMPORT_IMAGE_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
-import { buildImportOps } from "./spine-builder.js"
+import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { titleOfSection } from "./gap-report.service.js"
 
@@ -78,7 +79,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     d.fields.filter((f) => f.confirmed || !needsConfirm(f)).map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) }))
   )
   const entities = [...collectEntities(accepted).values()]
-  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })))
+  const droppedPermissions: DroppedPermission[] = []
+  const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })), droppedPermissions)
 
   // 2. File gốc của bản 0.0 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
@@ -162,16 +164,35 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
+  // FLF-252: quyền của ma trận không khớp màn / vai trò nào ⇒ cờ vàng (trước đây bỏ im lặng), neo vào bảng phân quyền
+  const matrixBlocks = [...new Set(entities.filter((e) => e.entity === "permissions").flatMap((e) => [...e.source_block_ids]))].slice(0, 1)
   const planOps = [
     ...customSectionOps(customSections),
-    ...unreadImageFlagOps(stripRecord(seeded), drafts, layout, provisional),
+    // Hai nhóm cờ trong cùng lô ⇒ id cờ cấp nối tiếp (gọi riêng từng nhóm thì trùng id, cả lô bị từ chối)
+    ...findingOpsInOrder(stripRecord(seeded), [
+      { findings: unreadImageFindings(stripRecord(seeded), drafts, layout, provisional), rule: IMPORT_IMAGE_RULE },
+      { findings: droppedPermissionFindings(droppedPermissions, matrixBlocks), rule: IMPORT_UNRESOLVED_RULE }
+    ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
   profile.step_plan = plan
-  // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I
-  profile.legacy_record_of_changes = legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+  // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I.
+  // FLF-252: dòng người dùng đã xem/sửa ở wizard thắng; không gửi ⇒ đọc lại từ file
+  profile.legacy_record_of_changes =
+    body.record_of_changes ?? legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
+  // FLF-252: chức năng đọc từ bảng Non-Screen Functions của file — bản in giữ đúng các dòng của bảng này
+  profile.non_screen_table = nonScreenTableIds(drafts)
+  // FLF-252 — in theo file gốc: nguyên văn từng mục chức năng + dấu nội dung chức năng lúc nhập (chức năng không đổi ở lô
+  // kế hoạch step nên dấu tính trên Spine sau lô thực thể)
+  const fnById = new Map(seeded.functions.map((f) => [`function:${f.id}`, f]))
+  profile.function_originals = [...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))].flatMap(
+    ([section_id, blocks]) => {
+      const fn = fnById.get(section_id)
+      return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), blocks }] : []
+    }
+  )
   await profile.save()
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
@@ -220,18 +241,30 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
 }
 
+/** Id chức năng đọc từ bảng Non-Screen Functions (mục 3.1.4) của file, theo thứ tự bảng (FLF-252). */
+export const nonScreenTableIds = (drafts: Pick<IExtractionDraft, "section_id" | "fields">[]): string[] => {
+  const ids: string[] = []
+  for (const d of drafts.filter((x) => x.section_id === "fixed:3.1.4")) {
+    for (const f of d.fields) {
+      const p = parseFieldPath(f.path)
+      if (p?.entity === "functions" && p.id && !ids.includes(p.id)) ids.push(p.id)
+    }
+  }
+  return ids
+}
+
 const UNREAD_REASON: Readonly<Record<string, string>> = {
   unsupported: "định dạng ảnh không hỗ trợ",
   unavailable: "AI đọc ảnh đang quá tải, chưa đọc được"
 }
 
 /** Ảnh ở mục diagram mà I-4 không đọc được (`other` / EMF / AI lỗi…) ⇒ cờ vàng: ảnh gốc được giữ, dữ liệu trong ảnh chưa vào Spine. */
-const unreadImageFlagOps = (
+const unreadImageFindings = (
   spine: Spine,
   drafts: Pick<IExtractionDraft, "section_id" | "diagram_images">[],
   layout: readonly LayoutEntry[],
   provisional: ReturnType<typeof resolveProvisional>
-): Op[] => {
+): { rule: string; section_id: string; message: string; block_ids: string[] }[] => {
   // Câu cho người đọc: nêu mục theo tiêu đề trong file, không in tên file ảnh / block id (`[image] media/x.emf`, `B0012`)
   const findings = drafts.flatMap((d) => {
     const section_id = realSectionId(d.section_id, provisional)
@@ -245,7 +278,7 @@ const unreadImageFlagOps = (
       block_ids: [i.block_id]
     }))
   })
-  return findingOps(spine, findings, IMPORT_IMAGE_RULE)
+  return findings
 }
 
 /**

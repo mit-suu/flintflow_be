@@ -28,6 +28,21 @@ describe("recordRowsOfTable", () => {
     ])
   })
 
+  it("FLF-252: hàng tên bảng gộp + cột nhận theo dữ liệu + Change Item gộp vào mô tả + bỏ dòng chú thích", () => {
+    expect(
+      recordRowsOfTable([
+        ["RECORD OF CHANGES"],
+        ["No", "Effective Date", "#", "Change Item", "Change Description", "Changed by"],
+        ["1", "01/09/2026", "v1.0", "2.1 Actors", "Add Guest actor", "Hiep"],
+        ["2", "05/09/2026", "v1.1", "", "Fix typos", "Anh"],
+        ["*A - Added, M - Modified, D - Deleted"]
+      ])
+    ).toEqual([
+      { date: "01/09/2026", version: "v1.0", change_type: "M", in_charge: "Hiep", description: "2.1 Actors: Add Guest actor" },
+      { date: "05/09/2026", version: "v1.1", change_type: "M", in_charge: "Anh", description: "Fix typos" }
+    ])
+  })
+
   it("bảng không có cột mô tả ⇒ không phải bảng lịch sử ⇒ rỗng", () => {
     expect(recordRowsOfTable([["Actor", "Role"], ["Admin", "Quản trị"]])).toEqual([])
     expect(recordRowsOfTable([])).toEqual([])
@@ -47,6 +62,19 @@ describe("legacyRecordRows", () => {
       ["H2", "fixed:1"]
     ])
     expect(legacyRecordRows(blocks, map).map((r) => r.description)).toEqual(["Tạo tài liệu"])
-    expect(legacyRecordRows(blocks, new Map())).toEqual([])
+    // heading đầu là mục nội dung, không có heading Record of Changes ⇒ không lấy bảng nào sau nó
+    expect(legacyRecordRows(blocks, new Map([["H1", "fixed:1"], ["H2", "fixed:1"]]))).toEqual([])
+  })
+
+  it("FLF-252: không có heading Record of Changes ⇒ bảng trông như bảng lịch sử trước mục nội dung đầu tiên", () => {
+    const blocks = [
+      { block_id: "T0", kind: "table", level: null, rows: [["Project Name", "Lumen"]] },
+      { block_id: "T1", kind: "table", level: null, rows: [["Version", "Date", "Author", "Description"], ["0.1", "01/05", "Lan", "Initial draft"]] },
+      { block_id: "H1", kind: "heading", level: 1 },
+      { block_id: "T2", kind: "table", level: null, rows: [FPT_HEADER, ["x", "A", "y", "Không phải lịch sử"]] }
+    ]
+    expect(legacyRecordRows(blocks, new Map([["H1", "fixed:1"]]))).toEqual([
+      { date: "01/05", version: "0.1", change_type: "M", in_charge: "Lan", description: "Initial draft" }
+    ])
   })
 })

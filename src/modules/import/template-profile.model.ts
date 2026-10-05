@@ -7,6 +7,7 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
+import type { CustomBlock } from "../spine/spine.types.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
 
 export interface HeadingMapEntry {
@@ -17,6 +18,8 @@ export interface HeadingMapEntry {
   confidence: number
   detected_by: HeadingDetector
   confirmed: boolean
+  /** FLF-252: mục danh mục mẫu khớp được (`ieee830:3.5.2`) — chỉ với mẫu không phải FPT; nội bộ, không hiện cho người dùng. */
+  template_section?: string | null
 }
 
 export interface TableMapEntry {
@@ -27,6 +30,9 @@ export interface TableMapEntry {
   field_path: string | null
   confidence: number
   confirmed: boolean
+  /** FLF-252: vai trò cột theo dữ liệu (`row_no`, `code`, `mark`…) và tối đa 3 giá trị đầu — người dùng nhìn dữ liệu khi xác nhận. */
+  role?: string
+  samples?: string[]
 }
 
 /** Mục của layout tài liệu người dùng (FLF-182) — xem `layoutEntrySchema`. */
@@ -57,12 +63,24 @@ export interface ITemplateProfile extends Document {
   required_sections: string[]
   /** Ngôn ngữ chính của tài liệu (`en`, `vi`…). */
   language: string
+  /** FLF-252: họ mẫu nhận được — `fpt`, `ieee830`, `ieee_features`. */
+  template_family: string
   /** FLF-182: thứ tự + tiêu đề mục của file upload, render lại từ Spine theo đây. */
   layout: LayoutEntry[]
   /** FLF-182: step nào chạy / ẩn / thiếu theo template. */
   step_plan: StepPlanItem[]
   /** Mode 1 v3 (T15): dòng Record of Changes của file gốc — render in lên đầu bảng, lịch sử FlintFlow nối tiếp. */
   legacy_record_of_changes: RocRow[]
+  /**
+   * FLF-252: id chức năng đọc từ bảng Non-Screen Functions (3.1.4) của file. Bảng 3.1.4 của bản in theo đúng các dòng này
+   * (không theo "chưa nối được màn"); chúng không được chèn mục 3.x.y riêng khi file không viết mục chi tiết cho chúng.
+   */
+  non_screen_table: string[]
+  /**
+   * FLF-252 — in theo file gốc: nguyên văn từng mục chức năng của file + dấu nội dung chức năng lúc nhập. Bản in dùng
+   * nguyên văn khi chức năng chưa bị change request sửa (dấu còn khớp).
+   */
+  function_originals: { section_id: string; source_hash: string; blocks: CustomBlock[] }[]
   createdAt: Date
   updatedAt: Date
 }
@@ -84,7 +102,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             section_id: { type: String, required: true },
             confidence,
             detected_by: { type: String, enum: HEADING_DETECTORS, required: true },
-            confirmed: { type: Boolean, default: false }
+            confirmed: { type: Boolean, default: false },
+            template_section: { type: String, default: null }
           },
           opts
         )
@@ -101,7 +120,9 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             header: { type: String, default: "" },
             field_path: { type: String, default: null },
             confidence,
-            confirmed: { type: Boolean, default: false }
+            confirmed: { type: Boolean, default: false },
+            role: { type: String, default: undefined },
+            samples: { type: [String], default: undefined }
           },
           opts
         )
@@ -109,6 +130,21 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       default: []
     },
     required_sections: { type: [String], default: [] },
+    non_screen_table: { type: [String], default: [] },
+    function_originals: {
+      type: [
+        new Schema(
+          {
+            section_id: { type: String, required: true },
+            source_hash: { type: String, required: true },
+            // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image) — chỉ để in lại
+            blocks: { type: [Schema.Types.Mixed], default: [] }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
     legacy_record_of_changes: {
       type: [
         new Schema(
@@ -153,7 +189,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       ],
       default: []
     },
-    language: { type: String, default: "en" }
+    language: { type: String, default: "en" },
+    template_family: { type: String, default: "fpt" }
   },
   { timestamps: true }
 )

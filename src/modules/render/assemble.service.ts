@@ -504,11 +504,28 @@ export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | nul
 
 /** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, language: 1, legacy_record_of_changes: 1 }, { lean: true })) as
-    | { layout?: TemplateLayout["layout"]; language?: string; legacy_record_of_changes?: TemplateLayout["legacyRecord"] }
+  const profile = (await TemplateProfile.findOne(
+    { projectId },
+    { layout: 1, language: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1 },
+    { lean: true }
+  )) as
+    | {
+        layout?: TemplateLayout["layout"]
+        language?: string
+        legacy_record_of_changes?: TemplateLayout["legacyRecord"]
+        non_screen_table?: string[]
+        function_originals?: TemplateLayout["functionOriginals"]
+      }
     | null
   if (!profile?.layout?.length) return null
-  return { layout: profile.layout, language: profile.language ?? "en", legacyRecord: profile.legacy_record_of_changes ?? [] }
+  return {
+    layout: profile.layout,
+    language: profile.language ?? "en",
+    legacyRecord: profile.legacy_record_of_changes ?? [],
+    // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
+    ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
+    ...(profile.function_originals?.length ? { functionOriginals: profile.function_originals } : {})
+  }
 }
 
 const defaultDeps = (): AssembleDeps => ({ loadDiagramPng: defaultDiagramPngLoader, now: () => new Date(), loadTemplate: loadTemplateLayout })

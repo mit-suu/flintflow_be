@@ -50,6 +50,12 @@ export interface OoxmlBlock {
    */
   image_ref: string | null
   element: Element
+  /**
+   * Block tách ra từ cùng một `w:p` với block khác (FLF-252): phần chữ sau heading gõ chung đoạn ("4.2.4 Security" +
+   * ngắt dòng + câu), hoặc ảnh nằm chung đoạn với chữ ("Screen layout:" + ảnh). Không neo bookmark riêng (đoạn đã mang
+   * bookmark của block kia; chữ tìm lại theo `text_hash`), không cho CR sửa tại chỗ.
+   */
+  tail?: boolean
 }
 
 interface StyleInfo {
@@ -107,6 +113,37 @@ const numberingPatternLevel = (text: string): number | null => {
   return m[1].split(".").length
 }
 
+/** Số mục gõ tay ở đầu heading (`4.2.3`); không có ⇒ `null`. */
+const typedNumber = (text: string): number[] | null => {
+  const m = NUMBERED_HEADING.exec(text.trim())
+  return m ? m[1].split(".").map(Number) : null
+}
+
+/** `next` là số mục kế tiếp hợp lý sau `prev`: mục con đầu (4.2.3 ⇒ 4.2.3.1) hoặc mục anh em kế ở mọi cấp (4.2.4, 4.3, 5). */
+export const followsNumber = (prev: readonly number[], next: readonly number[]): boolean => {
+  if (next.length === prev.length + 1 && next[next.length - 1] === 1 && prev.every((n, i) => next[i] === n)) return true
+  const k = next.length
+  return k >= 1 && k <= prev.length && next.slice(0, k - 1).every((n, i) => prev[i] === n) && next[k - 1] === prev[k - 1] + 1
+}
+
+/**
+ * Heading gõ chung đoạn với nội dung, ngăn bằng ngắt dòng (FLF-252 — SRS thật: "4.2.4 Security" Shift+Enter "The system
+ * must…", không style): dòng đầu là số mục nhiều cấp nối tiếp heading đứng trước ⇒ `{ heading, rest }`. Chỉ nhận số nối
+ * tiếp để danh sách gõ tay ("1. Mở trang" ⏎ "2. Bấm nút") không thành heading.
+ */
+export const inlineHeading = (text: string, previousHeading: string | null): { heading: string; level: number; rest: string } | null => {
+  const lines = text.split("\n")
+  const first = lines.findIndex((l) => l.trim())
+  if (first < 0) return null
+  const heading = lines[first].trim()
+  const rest = lines.slice(first + 1).join("\n").trim()
+  const level = numberingPatternLevel(heading)
+  const number = typedNumber(heading)
+  const prev = previousHeading ? typedNumber(previousHeading) : null
+  if (!rest || level === null || level < 2 || heading.length > 80 || !number || !prev || !followsNumber(prev, number)) return null
+  return { heading, level, rest }
+}
+
 /** Nội dung nhúng không phải chữ của đoạn: textbox, OLE, SmartArt. */
 const hasEmbeddedObject = (p: Element): boolean =>
   ["txbxContent", "object"].some((local) => wAll(p, local).length > 0) ||
@@ -153,14 +190,27 @@ const firstCellParagraph = (tbl: Element): Element | null => {
 }
 
 /** Tách block từ DOM (hàm thuần trên DOM, không đọc zip). */
-/** `a:blip/@r:embed` đầu tiên của đoạn ⇒ part ảnh (`word/media/…`) theo rels của `document.xml`. */
-const imageRefOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string | null => {
+/** Mọi `a:blip/@r:embed` của đoạn theo thứ tự ⇒ part ảnh (`word/media/…`) theo rels của `document.xml`. */
+const imageRefsOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string[] => {
+  const out: string[] = []
   for (const blip of Array.from(p.getElementsByTagNameNS("*", "blip"))) {
     const rid = blip.getAttributeNS(NS.r, "embed")
     const target = rid ? imageTargets.get(rid) : undefined
-    if (target) return target.startsWith("/") ? target.slice(1) : `word/${target}`
+    if (target) out.push(target.startsWith("/") ? target.slice(1) : `word/${target}`)
   }
-  return null
+  return out
+}
+
+/** `a:blip/@r:embed` đầu tiên của đoạn ⇒ part ảnh; không có ⇒ `null`. */
+const imageRefOf = (p: Element, imageTargets: ReadonlyMap<string, string>): string | null => imageRefsOf(p, imageTargets)[0] ?? null
+
+/** Hình đứng trước chữ đầu tiên của đoạn ("[ảnh] ⏎ Figure 3 …"); "Screen layout: [ảnh]" ⇒ chữ trước. */
+const pictureBeforeText = (p: Element): boolean => {
+  for (const el of Array.from(p.getElementsByTagNameNS(NS.w, "*"))) {
+    if (el.localName === "drawing" || el.localName === "pict") return true
+    if (el.localName === "t" && (el.textContent ?? "").trim()) return false
+  }
+  return false
 }
 
 export const parseBlocks = (doc: Document, stylesDoc: Document | null = null, imageTargets: ReadonlyMap<string, string> = new Map()): OoxmlBlock[] => {
@@ -252,6 +302,39 @@ export const parseBlocks = (doc: Document, stylesDoc: Document | null = null, im
       else if ((pPr && wKid(pPr, "numPr")) || chain.some((s) => s.numbered)) kind = "list_item"
     }
 
+    // Heading gõ chung đoạn với nội dung (FLF-252) ⇒ block heading + block phần chữ sau; cả hai không sửa tại chỗ được
+    // (sửa một phần đoạn sẽ ghi đè phần kia)
+    const split = kind === "paragraph" ? inlineHeading(text, headingStack[headingStack.length - 1]?.text ?? null) : null
+    if (split) {
+      while (headingStack.length && headingStack[headingStack.length - 1].level >= split.level) headingStack.pop()
+      push({ ...base, text: split.heading, kind: "heading", level: split.level, heading_detector: "numbering_pattern", bookmark: takeBookmark(p), editable: false })
+      headingStack.push({ level: split.level, text: split.heading })
+      push({ ...base, text: split.rest, para_id: null, image_ref: null, kind: "paragraph", level: null, heading_detector: null, bookmark: null, editable: false, tail: true })
+      return
+    }
+
+    // Đoạn có cả chữ lẫn hình ("Screen layout:" + ảnh màn hình, "[sơ đồ] ⏎ Figure xx - Screen flow") ⇒ block chữ + block ảnh
+    // đúng thứ tự trong đoạn (FLF-252). Trước đây cả đoạn là block chữ: bản in mất ảnh, I-4 không đọc được sơ đồ.
+    const pictures = !cell && kind !== "heading" && hasPicture(p) && !wAll(p, "txbxContent").length ? imageRefsOf(p, imageTargets) : []
+    if (pictures.length) {
+      const imagesFirst = pictureBeforeText(p)
+      const textBlock = () => push({ ...base, image_ref: null, kind, level, heading_detector: detector, bookmark: takeBookmark(p), editable: !embedded && !hasField(p) })
+      const imageBlocks = () =>
+        pictures.forEach((ref) =>
+          push({ ...base, text: "", image_ref: ref, para_id: null, kind: "image", level: null, heading_detector: null, bookmark: null, editable: false, tail: true })
+        )
+      if (imagesFirst) {
+        // bookmark của đoạn vẫn về block chữ (block ảnh không neo riêng)
+        const own = takeBookmark(p)
+        imageBlocks()
+        push({ ...base, image_ref: null, kind, level, heading_detector: detector, bookmark: own, editable: !embedded && !hasField(p) })
+      } else {
+        textBlock()
+        imageBlocks()
+      }
+      return
+    }
+
     const bookmark = takeBookmark(p)
     if (kind === "heading" && level !== null) {
       while (headingStack.length && headingStack[headingStack.length - 1].level >= level) headingStack.pop()
@@ -333,8 +416,11 @@ export const blockIdOfBookmark = (name: string | null): string | null =>
       ? name.slice(BLOCK_BOOKMARK_PREFIX.length)
       : null
 
-/** Block neo được bằng bookmark: mọi đoạn + bảng cấp 1 (neo `_fft_` trong ô đầu). Bảng lồng (`unsupported`) thì không. */
-export const isAnchorable = (b: OoxmlBlock): boolean => isW(b.element, "p") || (b.kind === "table" && !!firstCellParagraph(b.element))
+/**
+ * Block neo được bằng bookmark: mọi đoạn + bảng cấp 1 (neo `_fft_` trong ô đầu). Bảng lồng (`unsupported`) và phần chữ
+ * sau heading gõ chung đoạn (`tail` — đoạn đã mang bookmark của heading) thì không.
+ */
+export const isAnchorable = (b: OoxmlBlock): boolean => !b.tail && (isW(b.element, "p") || (b.kind === "table" && !!firstCellParagraph(b.element)))
 
 /**
  * Ghi bookmark ẩn `_ff_<blockId>` vào đầu mỗi đoạn chưa có neo (G3). `assign` trả block id cho block;
@@ -385,7 +471,8 @@ export const findBlock = (blocks: OoxmlBlock[], anchor: AnchorQuery): OoxmlBlock
     if (hits.length === 1) return hits[0]
   }
   if (anchor.text_hash) {
-    const hits = blocks.filter((b) => b.text_hash === anchor.text_hash && isAnchorable(b))
+    // Phần chữ sau heading gõ chung đoạn không có bookmark riêng ⇒ chỉ tìm lại được theo nội dung
+    const hits = blocks.filter((b) => b.text_hash === anchor.text_hash && (isAnchorable(b) || b.tail))
     if (hits.length === 1) return hits[0]
   }
   return null

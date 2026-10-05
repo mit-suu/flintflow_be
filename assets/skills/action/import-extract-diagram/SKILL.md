@@ -51,14 +51,20 @@ labels exactly as drawn, you never invent elements, arrows or names that you can
 
 1. One `item` per element you can read:
    - `usecase`: every actor ⇒ `actors` (`kind`: `human`, or `system` for an external system / service);
-     every oval ⇒ `use_cases` with `actor_ids` = the actors linked to it, `includes` / `extends` = the use cases
-     at the other end of `<<include>>` / `<<extend>>` arrows (the arrow points **to** the included / extended one
-     for include, **from** the extension for extend).
+     every oval ⇒ `use_cases` with `actor_ids` = the actors linked to it by a plain line.
+     `<<include>>` / `<<extend>>` are dashed arrows: find the **arrowhead** first; the oval at the other end is the tail.
+     The relation always goes on the **tail** oval and names the oval at the **arrowhead**; the arrowhead oval gets nothing.
+     - `Checkout - - <<include>> - -> Pay` ⇒ Checkout `includes` ["Pay"] (the base includes the part it always runs).
+     - `Apply Coupon - - <<extend>> - -> Checkout` ⇒ Apply Coupon `extends` ["Checkout"] (the extension names its base).
+     - An oval that lists **extension points** is a base: every use case named there `extends` it.
+     - Never give the same two ovals a relation in both directions; if you cannot see which end has the arrowhead,
+       leave the relation out.
    - `erd`: every box ⇒ `entities` with `relations` = the entities it is connected to.
    - `screen_flow`: every screen ⇒ `screens` with `flow_to` = the screens its outgoing arrows point to.
    - `context`: every external party ⇒ `actors` (`human` or `system`).
 2. `key` = the code written in the image (`UC-01`, `SCR-02`) exactly as written, or a key from *Known keys* when the
-   element is clearly the same one (same name). `null` when there is none — code assigns one.
+   element is clearly the same one (same name). `null` when there is none — code assigns one. Never put the element's
+   name in `key`.
 3. References (`actor_ids`, `includes`, `extends`, `relations`, `flow_to`) use keys from *Known keys* or, for elements
    without a key, their **name as drawn** — code resolves names.
 4. `value` holds only what the image shows (usually just `name` and the references). No descriptions you made up.
