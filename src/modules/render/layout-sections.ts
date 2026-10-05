@@ -25,6 +25,7 @@
  * - **Sơ đồ gốc** (§4.13): loại sơ đồ còn ảnh gốc của người dùng trong phần nối ⇒ không in hình PlantUML cùng loại.
  */
 
+import { createHash } from "node:crypto"
 import { listSections, type SectionDef } from "../spine/section-registry.js"
 import type { SectionStateView } from "../spine/section-status.js"
 import { keptOriginalKinds } from "../spine/original-diagram.js"
@@ -51,7 +52,30 @@ export interface TemplateLayout {
    * không màn thêm sau, chưa có mục trong file), và chức năng chỉ có ở bảng không được chèn mục 3.x.y khi chưa có chi tiết.
    */
   nonScreenTable?: readonly string[]
+  /**
+   * FLF-252 — in theo file gốc: nguyên văn từng mục chức năng của file + dấu nội dung chức năng lúc nhập. Dấu còn khớp
+   * (chưa change request nào sửa chức năng đó) ⇒ mục in nguyên văn file; lệch ⇒ in từ Spine như cũ.
+   */
+  functionOriginals?: readonly FunctionOriginal[]
 }
+
+export interface FunctionOriginal {
+  section_id: string
+  source_hash: string
+  blocks: readonly CustomBlock[]
+}
+
+/**
+ * Dấu nội dung một chức năng (không gồm thứ tự / tính năng — đổi vị trí không phải sửa nội dung). Lệch so với lúc nhập ⇒
+ * chức năng đã được sửa qua change request, mục in từ Spine.
+ */
+export const functionSourceHash = (f: Spine["functions"][number]): string =>
+  createHash("sha1")
+    .update(
+      JSON.stringify([f.name, f.screen_id, f.trigger, f.description, f.normal, f.abnormal, f.validations.map((v) => [v.kind, v.statement]), f.business_rule_ids, f.priority])
+    )
+    .digest("hex")
+    .slice(0, 16)
 
 const CUSTOM_PREFIX = "custom:"
 const GROUP_PREFIX = "group:"
@@ -360,6 +384,14 @@ export const buildLayoutSections = (
   const kept = keptOriginalKinds(spine)
   const contentSpine: Spine = kept.size ? { ...spine, diagrams: spine.diagrams.filter((d) => !(kept as ReadonlySet<string>).has(d.kind)) } : spine
   const nonScreen = nonScreenTableIds(spine, template)
+  // FLF-252: mục chức năng chưa bị sửa từ lúc nhập ⇒ in nguyên văn file (nhãn, gạch đầu dòng, ảnh đúng thứ tự)
+  const originals = new Map((template.functionOriginals ?? []).filter((o) => o.blocks.length).map((o) => [o.section_id, o]))
+  const originalOf = (sectionId: string): FunctionOriginal | null => {
+    const o = originals.get(sectionId)
+    const fn = o ? spine.functions.find((f) => `function:${f.id}` === sectionId) : undefined
+    return o && fn && functionSourceHash(fn) === o.source_hash ? o : null
+  }
+  const fromOriginal = new Set<RenderedSection>()
 
   const out: RenderedSection[] = []
   const emptyUntilMerged = new Set<RenderedSection>()
@@ -383,7 +415,8 @@ export const buildLayoutSections = (
         while (owner >= 0 && levels[owner] >= n.level) owner--
         const target = out[owner >= 0 ? owner : out.length - 1]
         if (target) {
-          target.blocks = [...blocks, ...target.blocks]
+          // Mục chức năng đang in nguyên văn file đã có sẵn mọi khối của phần nối ⇒ không gộp lần nữa
+          if (!fromOriginal.has(target)) target.blocks = [...blocks, ...target.blocks]
           continue
         }
       }
@@ -401,7 +434,11 @@ export const buildLayoutSections = (
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
     const section = renderSection(contentSpine, n.section_id, ctx)
-    const rendered = { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+    const original = originalOf(n.section_id)
+    const rendered = original
+      ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(original.blocks, (ref) => opts.diagramPng(mediaId(ref))) }
+      : { ...section, heading: n.title, level: n.renderLevel, blocks: shiftHeadings(section.blocks, n.renderLevel - section.level) }
+    if (original) fromOriginal.add(rendered)
     // `partial`: mục rỗng vẫn giữ chỗ tới khi gộp xong phần nối — mục chỉ có hình gốc của người dùng (§4.13, PlantUML
     // không in) nhận khối từ phần nối ngay sau nó; bỏ sớm thì khối đó rơi vào mục đứng trước
     if (opts.partial && rendered.blocks.length === 0) emptyUntilMerged.add(rendered)

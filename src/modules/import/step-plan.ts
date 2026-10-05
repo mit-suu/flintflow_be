@@ -155,6 +155,26 @@ export const buildLayout = (
   return { layout, customSections }
 }
 
+/**
+ * Nguyên văn từng mục chức năng của file (FLF-252 — in theo file gốc): mọi khối dưới heading chức năng, đúng thứ tự —
+ * nhãn ("Function Trigger", "Normal Case"…), gạch đầu dòng, bảng, ảnh màn hình; heading con trong mục thành đoạn chữ.
+ * Bản in dùng nguyên văn này khi chức năng chưa bị change request sửa, thay cho khung dựng lại từ Spine (khung đó mất
+ * dòng Interface / Data, còn nhãn trôi nổi tuỳ AI giữ đoạn nào).
+ */
+export const functionOriginals = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Map<string, CustomBlock[]> => {
+  const out = new Map<string, CustomBlock[]>()
+  for (const b of blocks) {
+    const section = b.section_id
+    if (!section?.startsWith("function:")) continue
+    // heading của chính mục chức năng ⇒ đã là tiêu đề mục, không lặp
+    if (b.kind === "heading" && headingSections.get(b.block_id) === section) continue
+    const block = b.kind === "heading" ? (b.text.trim() ? { kind: "paragraph" as const, text: b.text.trim(), rows: null, image_ref: null } : null) : toCustomBlock(b)
+    if (!block) continue
+    out.set(section, [...(out.get(section) ?? []), block])
+  }
+  return out
+}
+
 /** Section có nội dung thật (khối không phải heading) — mục "chỉ có heading" coi như thiếu. */
 export const sectionsWithContent = (blocks: LayoutBlock[]): Set<string> => {
   const out = new Set<string>()

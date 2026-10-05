@@ -27,8 +27,9 @@ import { Baseline } from "../../../src/modules/spine/baseline.model.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Project } from "../../../src/modules/project/project.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
+import { applyTransaction } from "../../../src/modules/spine/op-engine.js"
 import { originalDiagramHash } from "../../../src/modules/spine/original-diagram.js"
-import { getDocument } from "../../../src/modules/render/assemble.service.js"
+import { assemble, getDocument } from "../../../src/modules/render/assemble.service.js"
 import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/versions.service.js"
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
 import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
@@ -247,6 +248,34 @@ describe("finalize — DocVersion 0.0 + baseline imported", () => {
     const table = rendered.sections.find((s) => s.id === "fixed:3.1.4")!.blocks.find((b) => b.type === "table") as { header: { text: string }[][]; rows: { text: string }[][][] }
     expect(table.header.map((c) => c.map((r) => r.text).join(""))).toEqual(["#", "Feature", "System Function", "Description"])
     expect(table.rows.map((r) => r.map((c) => c.map((x) => x.text).join(""))[2])).toEqual(["Nightly Sync Job"])
+  })
+
+  it("FLF-252: mục chức năng in theo file gốc — chưa sửa ⇒ đúng nguyên văn file; change request sửa chức năng ⇒ in từ Spine", async () => {
+    const { projectId } = await importFinalized()
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const login = profile.function_originals.find((o) => o.section_id === "function:FR-3.2.2")!
+    expect(login.blocks).toEqual([
+      { kind: "paragraph", text: SRS_FIXTURE_TEXT.loginNormal, rows: null, image_ref: null },
+      { kind: "list_item", text: "Show an error when the password is wrong.", rows: null, image_ref: null }
+    ])
+    const sectionOf = async () => (await getDocument(projectId, "Lumen", { source: "draft" })).sections.find((s) => s.id === "function:FR-3.2.2")!
+    expect((await sectionOf()).blocks).toEqual([
+      { type: "paragraph", runs: [{ text: SRS_FIXTURE_TEXT.loginNormal }] },
+      { type: "bullet_list", items: [[{ text: "Show an error when the password is wrong." }]] }
+    ])
+
+    // sửa chức năng (như một change request ghi vào Spine) ⇒ dấu nội dung lệch ⇒ in từ Spine
+    const spine = (await spineRepository.get(projectId))!
+    const applied = await applyTransaction(projectId, {
+      base_version: spine.spine_version,
+      ops: [{ op: "set", path: "functions[id=FR-3.2.2].trigger", value: "Learner clicks Sign in" }],
+      by: "import",
+      reason: "test",
+      step_id: null
+    })
+    // luồng change request ghép lại bản làm việc sau khi ghi Spine
+    await assemble(projectId, "Lumen", applied.spine_version)
+    expect(JSON.stringify((await sectionOf()).blocks)).toContain("Learner clicks Sign in")
   })
 
   it("FLF-184: văn xuôi I-4 báo không trích được ⇒ giữ nguyên văn ở đầu section chủ khi render từ Spine", async () => {

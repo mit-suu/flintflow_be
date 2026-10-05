@@ -44,7 +44,8 @@ import { IMPORT_IMAGE_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { titleOfSection } from "./gap-report.service.js"
 
@@ -183,6 +184,15 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     body.record_of_changes ?? legacyRecordRows(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   // FLF-252: chức năng đọc từ bảng Non-Screen Functions của file — bản in giữ đúng các dòng của bảng này
   profile.non_screen_table = nonScreenTableIds(drafts)
+  // FLF-252 — in theo file gốc: nguyên văn từng mục chức năng + dấu nội dung chức năng lúc nhập (chức năng không đổi ở lô
+  // kế hoạch step nên dấu tính trên Spine sau lô thực thể)
+  const fnById = new Map(seeded.functions.map((f) => [`function:${f.id}`, f]))
+  profile.function_originals = [...functionOriginals(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))].flatMap(
+    ([section_id, blocks]) => {
+      const fn = fnById.get(section_id)
+      return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), blocks }] : []
+    }
+  )
   await profile.save()
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có

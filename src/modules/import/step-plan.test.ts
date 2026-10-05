@@ -3,7 +3,17 @@ import { nextStep } from "../pipeline/step-registry.js"
 import { progressByStep } from "../spine/section-status.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine, StepState } from "../spine/spine.types.js"
-import { buildLayout, buildStepPlan, continuationOwnerSection, customSectionOps, sectionsOwnedBy, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import {
+  buildLayout,
+  buildStepPlan,
+  continuationOwnerSection,
+  customSectionOps,
+  functionOriginals,
+  sectionsOwnedBy,
+  sectionsWithContent,
+  seedStepOps,
+  type LayoutBlock
+} from "./step-plan.js"
 
 const h = (block_id: string, text: string, level: number, section_id: string | null = null): LayoutBlock => ({ block_id, kind: "heading", level, text, section_id })
 const p = (block_id: string, text: string, section_id: string | null): LayoutBlock => ({ block_id, kind: "paragraph", level: null, text, section_id })
@@ -133,6 +143,34 @@ describe("buildLayout", () => {
       ["", 3, "custom:CS03"]
     ])
     expect(customSections.map((c) => c.blocks.map((b) => b.text))).toEqual([["This chapter lists who uses Lumen."], ["Draft note"], ["Guests are read-only."]])
+  })
+})
+
+describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () => {
+  it("mọi khối dưới heading chức năng đúng thứ tự: nhãn, gạch đầu dòng, ảnh, bảng; heading con thành đoạn; bỏ heading của chính mục và ô bảng", () => {
+    const fn = "function:FR-3.2.2"
+    const blocks: LayoutBlock[] = [
+      h("B0560", "3.2.2 View Profile", 3, fn),
+      p("B0561", "Function Trigger", fn),
+      { block_id: "B0562", kind: "list_item", level: null, text: "Navigation Path: User Menu → Profile", section_id: fn },
+      h("B0563", "Screen Layout", 4, fn),
+      { block_id: "B0568", kind: "image", level: null, text: "", section_id: fn, image_ref: "word/media/image7.png" },
+      { block_id: "B0569", kind: "table", level: null, text: "", section_id: fn, rows: [["Field", "Rule"], ["Email", "Required"]] },
+      { block_id: "B0570", kind: "table_cell", level: null, text: "Email", section_id: fn },
+      h("B0584", "3.2.3 Logout", 3, "function:FR-3.2.3"),
+      p("B0585", "Function Trigger", "function:FR-3.2.3")
+    ]
+    const originals = functionOriginals(blocks, new Map([["B0560", fn], ["B0584", "function:FR-3.2.3"]]))
+    expect(originals.get(fn)).toEqual([
+      { kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null },
+      { kind: "list_item", text: "Navigation Path: User Menu → Profile", rows: null, image_ref: null },
+      { kind: "paragraph", text: "Screen Layout", rows: null, image_ref: null },
+      { kind: "image", text: "", rows: null, image_ref: "word/media/image7.png" },
+      { kind: "table", text: "", rows: [["Field", "Rule"], ["Email", "Required"]], image_ref: null }
+    ])
+    expect(originals.get("function:FR-3.2.3")).toEqual([{ kind: "paragraph", text: "Function Trigger", rows: null, image_ref: null }])
+    // mục không phải chức năng không gom
+    expect(functionOriginals([p("B0002", "Lumen", "fixed:1")], new Map()).size).toBe(0)
   })
 })
 

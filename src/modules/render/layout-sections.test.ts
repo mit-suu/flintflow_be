@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, customBlocks, numberSections, placeSections, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, functionSourceHash, numberSections, placeSections, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -347,6 +347,59 @@ describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở b
     const { sections } = buildLayoutSections(wdp(), layout(), [], { diagramPng: () => undefined })
     const table = sections.find((s) => s.id === "fixed:3.1.4")!.blocks[0] as { header: { text: string }[][] }
     expect(cells(table.header)).toEqual(["Name", "Trigger", "Description"])
+  })
+})
+
+describe("FLF-252 — mục chức năng in theo file gốc", () => {
+  const original = (s: Spine) => ({
+    section_id: "function:FN01",
+    source_hash: functionSourceHash(s.functions[0]),
+    blocks: [
+      { kind: "paragraph" as const, text: "Function Trigger", rows: null, image_ref: null },
+      { kind: "list_item" as const, text: "Navigation path: Trang chủ → Đăng ký", rows: null, image_ref: null },
+      { kind: "paragraph" as const, text: "Screen layout:", rows: null, image_ref: null },
+      { kind: "image" as const, text: "", rows: null, image_ref: "word/media/image5.png" },
+      { kind: "paragraph" as const, text: "Normal Case", rows: null, image_ref: null },
+      { kind: "list_item" as const, text: "Học viên đăng ký thành công.", rows: null, image_ref: null }
+    ]
+  })
+  // phần nối của mục chức năng (văn xuôi I-4 giữ nguyên văn) — đã có sẵn trong nguyên văn
+  const withContinuation = (s: Spine): Spine => ({
+    ...s,
+    custom_sections: [...s.custom_sections, { id: "CS09", heading: "", level: 3, source: "import", blocks: [{ kind: "paragraph", text: "Screen layout:", rows: null, image_ref: null }] }]
+  })
+  const template = (s: Spine): TemplateLayout => ({
+    ...LAYOUT,
+    layout: [...LAYOUT.layout.slice(0, 5), entry(5, "", 3, "custom:CS09"), ...LAYOUT.layout.slice(5).map((e) => ({ ...e, order: e.order + 1 }))],
+    functionOriginals: [original(s)]
+  })
+  const text = (blocks: readonly unknown[]) => JSON.stringify(blocks)
+
+  it("chức năng chưa bị sửa ⇒ mục in đúng nguyên văn file (nhãn, gạch đầu dòng, ảnh, đúng thứ tự); phần nối không gộp lần nữa", () => {
+    const s = withContinuation(spine())
+    const { sections } = buildLayoutSections(s, template(s), [], { diagramPng: (id) => `ref:${id}` })
+    const fn = sections.find((x) => x.id === "function:FN01")!
+    expect(fn.blocks).toEqual([
+      { type: "paragraph", runs: [{ text: "Function Trigger" }] },
+      { type: "bullet_list", items: [[{ text: "Navigation path: Trang chủ → Đăng ký" }]] },
+      { type: "paragraph", runs: [{ text: "Screen layout:" }] },
+      { type: "image", png: "ref:media:word/media/image5.png" },
+      { type: "paragraph", runs: [{ text: "Normal Case" }] },
+      { type: "bullet_list", items: [[{ text: "Học viên đăng ký thành công." }]] }
+    ])
+    // khung dựng từ Spine không in kèm
+    expect(text(fn.blocks)).not.toContain("Kích hoạt")
+  })
+
+  it("change request đã sửa chức năng (dấu nội dung lệch) ⇒ mục in từ Spine như cũ, có cả phần nối", () => {
+    const s = withContinuation(spine())
+    const tpl = template(s)
+    const edited: Spine = { ...s, functions: [{ ...s.functions[0], trigger: "Học viên bấm Tạo tài khoản." }] }
+    const { sections } = buildLayoutSections(edited, tpl, [], { diagramPng: (id) => `ref:${id}` })
+    const fn = sections.find((x) => x.id === "function:FN01")!
+    expect(text(fn.blocks)).toContain("Học viên bấm Tạo tài khoản.")
+    expect(text(fn.blocks)).not.toContain("Function Trigger")
+    expect(fn.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Screen layout:" }] })
   })
 })
 

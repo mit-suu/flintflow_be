@@ -7,6 +7,7 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
+import type { CustomBlock } from "../spine/spine.types.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
 
 export interface HeadingMapEntry {
@@ -75,6 +76,11 @@ export interface ITemplateProfile extends Document {
    * (không theo "chưa nối được màn"); chúng không được chèn mục 3.x.y riêng khi file không viết mục chi tiết cho chúng.
    */
   non_screen_table: string[]
+  /**
+   * FLF-252 — in theo file gốc: nguyên văn từng mục chức năng của file + dấu nội dung chức năng lúc nhập. Bản in dùng
+   * nguyên văn khi chức năng chưa bị change request sửa (dấu còn khớp).
+   */
+  function_originals: { section_id: string; source_hash: string; blocks: CustomBlock[] }[]
   createdAt: Date
   updatedAt: Date
 }
@@ -125,6 +131,20 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     },
     required_sections: { type: [String], default: [] },
     non_screen_table: { type: [String], default: [] },
+    function_originals: {
+      type: [
+        new Schema(
+          {
+            section_id: { type: String, required: true },
+            source_hash: { type: String, required: true },
+            // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image) — chỉ để in lại
+            blocks: { type: [Schema.Types.Mixed], default: [] }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
     legacy_record_of_changes: {
       type: [
         new Schema(
