@@ -1140,7 +1140,7 @@ const nonEnglishContent = (spine: Spine): FlagCandidate[] =>
         rule_id: "non_english_content",
         section_id: item.section,
         target_id: item.target_id,
-        message: `Nội dung đưa vào tài liệu SRS phải bằng tiếng Anh: ${offending.map(pathLabel).join(", ")}`,
+        message: `Nội dung đưa vào tài liệu SRS phải bằng tiếng Anh: ${offending.map((p) => pathLabel(p)).join(", ")}`,
         remediation_step: item.step
       }
     ]

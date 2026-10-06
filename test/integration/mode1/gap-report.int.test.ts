@@ -86,8 +86,8 @@ describe("gap report — gộp nhóm", () => {
       missing_fpt_sections: report.missing_fpt_sections.length,
       unrendered_diagrams: report.unrendered_diagrams.length
     })
-    // FL902 (test đặt) + section_empty của đầu mục FPT file không có (D6, FLF-183)
-    expect(report.totals.red).toBe(1 + open.filter((f) => f.level === "red" && f.rule_id === "section_empty").length)
+    // chỉ FL902 (test đặt) — đầu mục FPT file không có không còn là cờ đỏ
+    expect(report.totals.red).toBe(1)
     expect(report.doc_version).toBe("0.0")
   })
 
@@ -166,10 +166,10 @@ describe("gap report — .docx", () => {
     const summary = blocks.find((b) => b.kind === "table")!.rows!
     expect(summary).toEqual([
       ["Hạng mục", "Số lượng"],
-      ["Thiếu mục theo mẫu FPT (đỏ)", String(report.totals.missing_fpt_sections)],
+      ["Thiếu mục theo mẫu FPT (không bắt buộc)", String(report.totals.missing_fpt_sections)],
       ["Cờ đỏ", String(report.totals.red)],
       ["Cờ vàng", String(report.totals.yellow)],
-      ["Mục bắt buộc còn thiếu", String(report.totals.missing_sections)],
+      ["Mục mẫu FPT không có tiêu đề trong file", String(report.totals.missing_sections)],
       ["Tiêu đề không khớp mẫu", String(report.totals.unmapped_headings)],
       ["Dữ liệu trích có độ tin thấp", String(report.totals.low_confidence_fields)],
       ["Hình chưa vẽ được", String(report.totals.unrendered_diagrams)]

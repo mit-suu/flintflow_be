@@ -8,6 +8,8 @@ import { DocxPackage, readBlocks } from "../docx-ooxml/index.js"
 import type { Flag } from "../spine/spine.types.js"
 import { gapReportSchema, type GapReport } from "./import.dto.js"
 import { formatReportTime, readableValue, renderGapReportDocx, titleOfSection } from "./gap-report.service.js"
+import { toReviewFields } from "./import.service.js"
+import type { ExtractedField } from "./extraction-draft.model.js"
 
 const flag = (id: string, level: "red" | "yellow", rule_id: string, section_id: string, message: string): Flag => ({
   id,
@@ -62,7 +64,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     const all = blocks.map((b) => b.text)
     expect(all[0]).toBe("Báo cáo thiếu sót — Lumen")
     expect(all[1]).toBe("Phiên bản tài liệu 0.0 · tạo lúc 19/09/2026 07:00")
-    for (const h of ["Tổng quan", "Cờ theo mục", "Mục bắt buộc còn thiếu", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
+    for (const h of ["Tổng quan", "Cờ theo mục", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
     // tiêu đề mục không kèm khoá máy
     expect(all).toContain("Performance")
     expect(all).toContain("Authentication")
@@ -104,7 +106,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     })
     const all = (await texts(await renderGapReportDocx(empty, "Rỗng"))).map((b) => b.text)
     expect(all).toEqual(
-      expect.arrayContaining(["Không có cờ nào đang mở.", "Không thiếu mục bắt buộc nào.", "Mọi tiêu đề đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
+      expect.arrayContaining(["Không có cờ nào đang mở.", "File có đủ tiêu đề các mục mẫu FPT.", "Mọi tiêu đề đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
     )
   })
 
@@ -167,5 +169,39 @@ describe("titleOfSection", () => {
     expect(titleOfSection(withCustom, "custom:CS01")).toBe("Phần nối (văn xuôi của mục trước)")
     // mục riêng không còn trong Spine (dữ liệu cũ) ⇒ nhãn chung, không in khoá
     expect(titleOfSection(spine, "custom:CS09", layout)).toBe("Mục riêng")
+  })
+})
+
+describe("toReviewFields — tên phần tử cho nhãn field cần xác nhận", () => {
+  const ef = (path: string, value: unknown, over: Partial<ExtractedField> = {}): ExtractedField => ({
+    path,
+    value,
+    confidence: 1,
+    source_block_ids: [],
+    origin: "deterministic",
+    confirmed: false,
+    ...over
+  })
+
+  it("tác nhân ở ảnh ngữ cảnh mục 1 chỉ giữ `kind` (FLF-252) ⇒ tên tra từ draft mục khác, không thêm field tên vào danh sách", () => {
+    const drafts = [
+      { section_id: "fixed:2.1", fields: [ef("actors[id=A01].name", "Learner"), ef("actors[id=A02].name", "Old", { edited_value: "Admin" })] },
+      {
+        section_id: "fixed:1",
+        fields: [ef("actors[id=A01].kind", "human", { origin: "vision", confidence: 0.7 }), ef("actors[id=A02].kind", "human", { origin: "vision", confidence: 0.7 })]
+      }
+    ]
+    const out = toReviewFields(drafts, (f) => f.origin === "vision")
+    expect(out.map((f) => [f.section_id, f.path, f.entity_name])).toEqual([
+      ["fixed:1", "actors[id=A01].kind", "Learner"],
+      ["fixed:1", "actors[id=A02].kind", "Admin"]
+    ])
+  })
+
+  it("chính field tên, path không có khoá hoặc phần tử không có tên ⇒ không có `entity_name`", () => {
+    const drafts = [
+      { section_id: "fixed:2.1", fields: [ef("actors[id=A01].name", "Learner"), ef("actors[id=A09].kind", "human"), ef("project.code", "LMS")] }
+    ]
+    expect(toReviewFields(drafts, () => true).every((f) => !("entity_name" in f))).toBe(true)
   })
 })

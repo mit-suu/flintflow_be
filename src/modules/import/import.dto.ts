@@ -175,7 +175,9 @@ export const reviewFieldSchema = z.object({
   source_block_ids: z.array(blockId),
   origin: z.enum(FIELD_ORIGINS),
   confirmed: z.boolean(),
-  edited_value: z.unknown().optional()
+  edited_value: z.unknown().optional(),
+  /** Tên phần tử chứa field (`actors[id=A01].kind` ⇒ "Learner") để nhãn không chỉ trơ mã; field tên / không tra được ⇒ không có. */
+  entity_name: z.string().optional()
 })
 
 export const extractionSectionSchema = z.object({

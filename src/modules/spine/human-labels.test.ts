@@ -23,6 +23,11 @@ describe("pathLabel", () => {
     expect(pathLabel("functions[id=FR-1].normal[0]")).toBe("Chức năng FR-1 › Luồng chính #1")
   })
 
+  it("có tên phần tử ⇒ ghép sau mã (khớp FE); path không có khoá thì bỏ qua tên", () => {
+    expect(pathLabel("actors[id=A01].kind", "Learner")).toBe("Tác nhân A01 (Learner) — Loại")
+    expect(pathLabel("project.code", "X")).toBe("Thông tin dự án — Mã")
+  })
+
   it("path không đọc được ⇒ nhãn chung, không trả nguyên path", () => {
     expect(pathLabel("progress.screen_cursor")).toBe(UNKNOWN_PATH_LABEL)
     expect(pathLabel("flags[id=FL01]")).toBe(UNKNOWN_PATH_LABEL)

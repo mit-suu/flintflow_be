@@ -95,7 +95,7 @@ export const UNKNOWN_PATH_LABEL = "Một phần tử trong tài liệu"
 
 const SEGMENT = /\.?([a-z_]+)(?:\[([^\]]*)\])?/y
 
-const parsePathLabel = (path: string): string | null => {
+const parsePathLabel = (path: string, entityName?: string): string | null => {
   const parts: { name: string; selector: string | undefined }[] = []
   const re = new RegExp(SEGMENT.source, "y")
   let m: RegExpExecArray | null
@@ -118,14 +118,16 @@ const parsePathLabel = (path: string): string | null => {
     }
     field = null
   }
+  if (entityName && parts[0].selector) out[0] += ` (${entityName})`
   return field ? `${out.join(" › ")} — ${fieldLabel(field)}` : out.join(" › ")
 }
 
 /**
  * `use_cases[id=UC-2.4].description` ⇒ "Use case UC-2.4 — Mô tả"; `actors[]` ⇒ "Tác nhân (thêm mới)";
- * `project.code` ⇒ "Thông tin dự án — Mã". Không đọc được ⇒ "Một phần tử trong tài liệu".
+ * `project.code` ⇒ "Thông tin dự án — Mã". Không đọc được ⇒ "Một phần tử trong tài liệu". Có `entityName` ⇒ ghép sau mã phần
+ * tử: "Tác nhân A01 (Learner) — Loại".
  */
-export const pathLabel = (path: string): string => parsePathLabel(path) ?? UNKNOWN_PATH_LABEL
+export const pathLabel = (path: string, entityName?: string): string => parsePathLabel(path, entityName) ?? UNKNOWN_PATH_LABEL
 
 const PATH_IN_TEXT = new RegExp(
   `\\b(?:project\\.[a-z_]+|(?:${Object.keys(ENTITY_LABELS).join("|")})\\[[^\\]\\s]*\\](?:\\.[a-z_]+(?:\\[[^\\]\\s]*\\])?)*)`,

@@ -120,22 +120,21 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     expect(versions0.map((v) => v.version)).toEqual(["0.0"])
     expect(versions0[0]!.has_original_file, "file gốc giữ lại để tải").toBe(true)
 
-    // ── 1.11 + 1.12 ⇒ 1.13 gap report: mục FPT trống ⇒ cờ đỏ section_empty ────────────────────────────────
+    // ── 1.11 + 1.12 ⇒ 1.13 gap report: mục FPT trống chỉ liệt kê, không còn cờ đỏ (không bắt buộc) ───────────
     const gap = gapReportSchema.parse((await c.get("/gap-report")).body.data)
     expect(gap.doc_version).toBe("0.0")
     expect(gap.missing_fpt_sections.map((s) => s.section_id)).toContain("fixed:5.4")
-    expect(gap.totals.red).toBeGreaterThan(0)
+    expect(gap.totals.red, "mục FPT thiếu không chặn release").toBe(0)
     const plan = stepPlanResponseSchema.parse((await c.get("/step-plan")).body.data).steps
     expect(plan.some((s) => s.missing), "kế hoạch step chỉ để đọc — còn đầu mục thiếu").toBe(true)
-    const empties = (await redOpen(c)).filter((f) => f.rule_id === "section_empty")
-    expect(empties.some((f) => f.section_id === "fixed:5.4")).toBe(true)
+    expect(await redOpen(c)).toEqual([])
 
     // Import xong ⇒ mọi đường sửa ngoài CR bị chặn: step, ký v1, waive, áp thẳng
     const session = await ChatSession.create({ projectId, messages: [], is_pipeline: true })
     const v0 = await c.spineVersion()
-    expect(await runStep(seeded.token, projectId, empties[0]!.remediation_step ?? "S-7.1", String(session._id), v0)).toBe("MODE1_NO_STEPS")
+    expect(await runStep(seeded.token, projectId, "S-7.1", String(session._id), v0)).toBe("MODE1_NO_STEPS")
     expect((await c.post("/baseline", { base_version: v0 })).body.error?.code).toBe("MODE1_NO_SIGNOFF")
-    expect((await c.post(`/flags/${empties[0]!.id}/waive`, { reason: "Khách chưa cần mục này ở giai đoạn đầu" })).body.error?.code).toBe("MODE1_NO_WAIVE")
+    expect((await c.post(`/flags/FL001/waive`, { reason: "Khách chưa cần mục này ở giai đoạn đầu" })).body.error?.code).toBe("MODE1_NO_WAIVE")
     const guarded = await c.post("/changes", { base_version: v0, instruction: "Rename actor Learner to Student" })
     expect(guarded.body.error?.code).toBe("CHANGE_REQUIRES_CR")
     expect(changeRequiresCrMetaSchema.parse(guarded.body.meta).prefill.source).toEqual({ kind: "verbal", ref: null })
@@ -151,7 +150,7 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
       requester: "BA Minh"
     })
     expect(gapCr.written.change_request.result_doc_version, "CR đầu ⇒ 0.1").toBe("0.1")
-    expect((await redOpen(c)).some((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.4"), "mục có dữ liệu ⇒ cờ đóng").toBe(false)
+    expect(((await c.get("/spine")).body.data.other_requirements as unknown[]).length, "mục 5.4 có dữ liệu").toBeGreaterThan(0)
 
     // Bản có đánh dấu của 0.1: Track Changes đứng tên CR (3.14); bản thường không có đánh dấu
     const tracked = await documentXml(await download(c, "/versions/0.1/download?variant=tracked"))
