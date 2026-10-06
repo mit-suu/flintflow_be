@@ -124,6 +124,35 @@ router.patch("/users/:id/status", adminController.setUserStatus)
  */
 /**
  * @swagger
+ * /api/v1/admin/orgs:
+ *   get:
+ *     summary: Danh sách tổ chức kèm gói, số dư ví, số thành viên, số dự án (UC-90)
+ *     tags: [Admin]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100 }
+ *       - in: query
+ *         name: plan
+ *         schema: { type: string, enum: [free, pro] }
+ *       - in: query
+ *         name: q
+ *         description: Tìm theo tên tổ chức hoặc email người tạo
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "Org[] { id, name, owner, plan, planLabel, wallet, membersCount, projectsCount, createdAt }; meta gồm page, limit, total, totalPages"
+ *       400: { description: VALIDATION_ERROR }
+ *       403: { description: Không phải admin }
+ */
+router.get("/orgs", adminController.listOrgs)
+
+/**
+ * @swagger
  * /api/v1/admin/orgs/{orgId}/credits:
  *   patch:
  *     summary: Cộng hoặc trừ credit trong ví của một tổ chức, bắt buộc kèm lý do (UC-68)

@@ -6,6 +6,7 @@ import {
   adjustOrgCreditsSchema,
   aiCostQuerySchema,
   orgIdParamSchema,
+  orgsQuerySchema,
   parseWith,
   resolveDateRange,
   setUserStatusSchema,
@@ -47,6 +48,12 @@ export const getAiCost = catchAsync(async (req: Request, res: Response) => {
 export const listFeedback = catchAsync(async (_req: Request, res: Response) => {
   const items = await adminService.listFeedback()
   return sendSuccess(res, 200, items, { total: items.length })
+})
+
+export const listOrgs = catchAsync(async (req: Request, res: Response) => {
+  const query = parseWith(orgsQuerySchema, req.query)
+  const result = await adminService.listOrgs(query)
+  return sendSuccess(res, 200, result.items, result.meta)
 })
 
 export const adjustOrgCredits = catchAsync(async (req: Request, res: Response) => {
