@@ -1,7 +1,7 @@
 /**
- * UC-66 Administrator khoá tài khoản / UC-67 mở khoá lại.
+ * UC-60 (r2: UC-66) Administrator khoá tài khoản / UC-61 (r2: UC-67) mở khoá lại.
  * Khoá ⇒ mọi phiên bị thu hồi, access token còn hạn bị chặn từ request kế tiếp, không đăng nhập hay
- * gia hạn phiên được nữa (UC-03). Mở khoá ⇒ đăng nhập lại bình thường.
+ * gia hạn phiên được nữa (UC-03). Mở khoá (bắt buộc lý do) ⇒ đăng nhập lại bình thường. Đã ở trạng thái đó ⇒ 409.
  */
 import { describe, it, expect, beforeEach } from "vitest"
 import request from "supertest"
@@ -85,6 +85,18 @@ describe("UC-66 — khoá tài khoản", () => {
     expect((await User.findById(memberId))?.isActive).toBe(true)
   })
 
+  it("khoá tài khoản đã bị khoá ⇒ 409 USER_ALREADY_SUSPENDED, giữ nguyên lý do và thời điểm cũ", async () => {
+    await setStatus(memberId, { isActive: false, reason: "Lần khoá đầu" })
+    const before = await User.findById(memberId)
+
+    const res = await setStatus(memberId, { isActive: false, reason: "Lần khoá thứ hai" })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("USER_ALREADY_SUSPENDED")
+    const after = await User.findById(memberId)
+    expect(after?.suspendReason).toBe("Lần khoá đầu")
+    expect(after?.suspendedAt?.getTime()).toBe(before?.suspendedAt?.getTime())
+  })
+
   it("admin không tự khoá được chính mình", async () => {
     const res = await setStatus(adminId, { isActive: false, reason: "Thử tự khoá" })
     expect(res.status).toBe(400)
@@ -113,22 +125,34 @@ describe("UC-66 — khoá tài khoản", () => {
 })
 
 describe("UC-67 — mở khoá tài khoản", () => {
-  it("xoá lý do khoá và cho đăng nhập lại", async () => {
+  it("xoá lý do khoá, ghi lý do mở khoá và cho đăng nhập lại", async () => {
     await setStatus(memberId, { isActive: false, reason: "Nghi bị chiếm tài khoản" })
 
-    const res = await setStatus(memberId, { isActive: true })
+    const res = await setStatus(memberId, { isActive: true, reason: "Đã xác minh chủ tài khoản" })
     expect(res.status).toBe(200)
-    expect(res.body.data).toMatchObject({ isActive: true, suspendedAt: null, suspendReason: null })
+    expect(res.body.data).toMatchObject({ isActive: true, suspendedAt: null, suspendReason: null, reactivateReason: "Đã xác minh chủ tài khoản" })
+    expect(res.body.data.reactivatedAt).toBeTruthy()
 
     const { res: loggedIn } = await login()
     expect(loggedIn.status).toBe(200)
   })
 
-  it("mở khoá tài khoản đang hoạt động ⇒ không đổi gì, không thu hồi phiên", async () => {
-    await login()
+  it("thiếu lý do ⇒ 400, tài khoản vẫn bị khoá", async () => {
+    await setStatus(memberId, { isActive: false, reason: "Vi phạm điều khoản" })
 
     const res = await setStatus(memberId, { isActive: true })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe("VALIDATION_ERROR")
+    expect((await User.findById(memberId))?.isActive).toBe(false)
+  })
+
+  it("mở khoá tài khoản đang hoạt động ⇒ 409 USER_ALREADY_ACTIVE, không đổi gì, không thu hồi phiên", async () => {
+    await login()
+
+    const res = await setStatus(memberId, { isActive: true, reason: "Thử mở khoá" })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("USER_ALREADY_ACTIVE")
+    expect((await User.findById(memberId))?.reactivateReason ?? null).toBeNull()
     expect(await Session.countDocuments({ userId: memberId, isRevoked: false })).toBe(1)
   })
 })

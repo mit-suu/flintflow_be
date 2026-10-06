@@ -92,16 +92,17 @@ router.get("/users/:id", adminController.getUser)
  *         application/json:
  *           schema:
  *             type: object
- *             required: [isActive]
+ *             required: [isActive, reason]
  *             properties:
  *               isActive: { type: boolean }
  *               reason:
  *                 type: string
  *                 minLength: 3
  *                 maxLength: 500
- *                 description: Bắt buộc khi isActive = false
+ *                 description: Bắt buộc cả khi khoá lẫn mở khoá (UC-60, UC-61)
  *     responses:
- *       200: { description: "{ _id, isActive, suspendedAt, suspendReason }" }
+ *       200: { description: "{ _id, isActive, suspendedAt, suspendReason, reactivatedAt, reactivateReason }" }
+ *       409: { description: "USER_ALREADY_SUSPENDED / USER_ALREADY_ACTIVE — tài khoản đã ở trạng thái đó" }
  *       400: { description: VALIDATION_ERROR hoặc CANNOT_SUSPEND_SELF }
  *       404: { description: USER_NOT_FOUND }
  */

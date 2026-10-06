@@ -16,6 +16,9 @@ export interface IUser extends Document {
   /** UC-66: thời điểm và lý do Administrator khoá tài khoản; mở khoá (UC-67) thì về null. */
   suspendedAt?: Date | null
   suspendReason?: string | null
+  /** UC-61: lần mở khoá gần nhất — lý do bắt buộc; chưa có log quản trị nên giữ ngay trên tài khoản. */
+  reactivatedAt?: Date | null
+  reactivateReason?: string | null
   emailVerified: boolean
   emailVerifiedAt?: Date | null
   /** UC 1.12: thời điểm hoàn tất onboarding; null = chưa onboarding. */
@@ -68,6 +71,14 @@ const userSchema = new Schema<IUser>(
       default: null
     },
     suspendReason: {
+      type: String,
+      default: null
+    },
+    reactivatedAt: {
+      type: Date,
+      default: null
+    },
+    reactivateReason: {
       type: String,
       default: null
     },
