@@ -91,15 +91,14 @@ export const adjustOrgCreditsSchema = z.object({
   reason: z.string().trim().min(3, "Lý do tối thiểu 3 ký tự").max(500, "Lý do tối đa 500 ký tự")
 })
 
-/** UC-66 / UC-67: khoá bắt buộc kèm lý do (để còn truy được); mở khoá thì không cần. */
+const statusReason = z.string().trim().min(3, "Lý do tối thiểu 3 ký tự").max(500, "Lý do tối đa 500 ký tự")
+
+/** UC-60 khoá / UC-61 mở khoá: cả hai chiều bắt buộc lý do (Report 3 — để còn truy được). */
 export const setUserStatusSchema = z.discriminatedUnion(
   "isActive",
   [
-    z.object({
-      isActive: z.literal(false),
-      reason: z.string().trim().min(3, "Lý do tối thiểu 3 ký tự").max(500, "Lý do tối đa 500 ký tự")
-    }),
-    z.object({ isActive: z.literal(true) })
+    z.object({ isActive: z.literal(false), reason: statusReason }),
+    z.object({ isActive: z.literal(true), reason: statusReason })
   ],
   { message: "Trạng thái tài khoản không hợp lệ." }
 )

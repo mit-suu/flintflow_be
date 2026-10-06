@@ -23,6 +23,23 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { ChangeRequest, CrCounter } from "../change-request/change-request.model.js"
 import { ChangeLocation } from "../change-request/change-location.model.js"
 import { ChangeGroup } from "../change-request/change-group.model.js"
+import { Subscription } from "../credits/subscription.model.js"
+import { getPlan } from "../billing/plan.config.js"
+
+/**
+ * UC-16: số dự án tối đa theo gói đang active của tổ chức (`plan.config` — free 3, pro 50). Dự án đã xoá
+ * (`archived`) không tính. Kiểm trước khi tạo, không khoá — hai request cùng lúc có thể vượt 1, chấp nhận được.
+ */
+export const assertProjectQuota = async (orgId: string): Promise<void> => {
+  const [subscription, count] = await Promise.all([
+    Subscription.findOne({ organizationId: orgId, status: "active" }).select("plan").lean(),
+    Project.countDocuments({ organizationId: orgId, status: { $ne: "archived" } })
+  ])
+  const definition = getPlan(subscription?.plan ?? "free")
+  if (count >= definition.maxProjects) {
+    throw new ApiError(402, `Gói ${definition.label} chỉ cho tối đa ${definition.maxProjects} dự án`, "PLAN_LIMIT_PROJECTS")
+  }
+}
 
 export const createProject = async (
   orgId: string,
@@ -37,6 +54,7 @@ export const createProject = async (
   }
   // Tạo thẳng trong thư mục (một request) — thư mục phải thuộc cùng org
   if (folderId) await assertFolderOwned(orgId, folderId)
+  await assertProjectQuota(orgId)
   // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     organizationId: orgId,

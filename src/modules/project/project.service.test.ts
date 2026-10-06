@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 const mocks = vi.hoisted(() => {
   const deleteMany = () => vi.fn(async (_filter: unknown) => ({ deletedCount: 1 }))
   return {
-    Project: { findOneAndDelete: vi.fn(), findOneAndUpdate: vi.fn(), create: vi.fn(), find: vi.fn(), findOne: vi.fn() },
+    Project: { findOneAndDelete: vi.fn(), findOneAndUpdate: vi.fn(), create: vi.fn(), find: vi.fn(), findOne: vi.fn(), countDocuments: vi.fn(async () => 0) },
+    // UC-16: gói active của org — null ⇒ Free
+    subscriptionPlan: vi.fn(async (): Promise<{ plan: string } | null> => null),
     ChatSession: { deleteMany: deleteMany() },
     ProjectDocument: {
       deleteMany: deleteMany(),
@@ -56,6 +58,7 @@ vi.mock("../doc-version/doc-file.store.js", () => ({ docFileStore: () => ({ remo
 vi.mock("../change-request/change-request.model.js", () => ({ ChangeRequest: mocks.ChangeRequest, CrCounter: mocks.CrCounter }))
 vi.mock("../change-request/change-location.model.js", () => ({ ChangeLocation: mocks.ChangeLocation }))
 vi.mock("../change-request/change-group.model.js", () => ({ ChangeGroup: mocks.ChangeGroup }))
+vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: () => ({ select: () => ({ lean: mocks.subscriptionPlan }) }) } }))
 
 import * as projectService from "./project.service.js"
 
@@ -132,6 +135,23 @@ describe("createProject", () => {
 
     expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "Lumen SRS", domain: "E-learning", status: "active", mode: "import" })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "Lumen SRS", domain: "E-learning" })
+  })
+
+  it("đủ trần số dự án của gói ⇒ 402 PLAN_LIMIT_PROJECTS, không tạo gì; chỉ đếm dự án chưa xoá", async () => {
+    mocks.Project.countDocuments.mockResolvedValueOnce(3)
+
+    await expect(projectService.createProject(ORG, USER, "Thứ tư", "")).rejects.toMatchObject({ statusCode: 402, code: "PLAN_LIMIT_PROJECTS" })
+    expect(mocks.Project.countDocuments).toHaveBeenCalledWith({ organizationId: ORG, status: { $ne: "archived" } })
+    expect(mocks.Project.create).not.toHaveBeenCalled()
+  })
+
+  it("gói Pro ⇒ trần 50", async () => {
+    mocks.subscriptionPlan.mockResolvedValueOnce({ plan: "pro" })
+    mocks.Project.countDocuments.mockResolvedValueOnce(3)
+    mocks.Project.create.mockResolvedValue({ id: PROJECT })
+
+    await projectService.createProject(ORG, USER, "Thứ tư", "")
+    expect(mocks.Project.create).toHaveBeenCalled()
   })
 
   it("mode customer_template chưa hỗ trợ ⇒ 501 NOT_IMPLEMENTED, không tạo gì", async () => {

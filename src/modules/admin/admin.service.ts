@@ -9,6 +9,7 @@ import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { revokeAllUserSessions } from "../../shared/auth/session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { Baseline } from "../spine/baseline.model.js"
 import { AiActionLog } from "./ai-action-log.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
 import {
@@ -190,12 +191,14 @@ export interface UserStatusResult {
   isActive: boolean
   suspendedAt: Date | null
   suspendReason: string | null
+  reactivatedAt: Date | null
+  reactivateReason: string | null
 }
 
 /**
- * UC-66 khoá / UC-67 mở khoá tài khoản. Khoá thì thu hồi luôn mọi phiên: refresh token chết ngay, access
- * token còn hạn bị `requireActiveAccount` chặn từ request kế tiếp. Gọi lại với trạng thái đang có thì
- * không đổi gì (giữ nguyên lý do và thời điểm khoá cũ).
+ * UC-60 khoá / UC-61 mở khoá tài khoản. Khoá thì thu hồi luôn mọi phiên: refresh token chết ngay, access
+ * token còn hạn bị `requireActiveAccount` chặn từ request kế tiếp. Gọi với trạng thái đang có ⇒ 409, không
+ * đổi gì (Report 3: "already suspended / already active"). Mở khoá ghi lý do + thời điểm lên tài khoản.
  */
 export const setUserStatus = async (
   adminId: string,
@@ -212,19 +215,29 @@ export const setUserStatus = async (
     throw new ApiError(404, "Không tìm thấy người dùng", "USER_NOT_FOUND")
   }
 
-  if (user.isActive !== input.isActive) {
-    user.isActive = input.isActive
-    user.suspendedAt = input.isActive ? null : new Date()
-    user.suspendReason = input.isActive ? null : input.reason
-    await user.save()
-    if (!input.isActive) await revokeAllUserSessions(userId)
+  if (user.isActive === input.isActive) {
+    throw input.isActive
+      ? new ApiError(409, "Tài khoản này đang hoạt động", "USER_ALREADY_ACTIVE")
+      : new ApiError(409, "Tài khoản này đã bị khoá", "USER_ALREADY_SUSPENDED")
   }
+
+  user.isActive = input.isActive
+  user.suspendedAt = input.isActive ? null : new Date()
+  user.suspendReason = input.isActive ? null : input.reason
+  if (input.isActive) {
+    user.reactivatedAt = new Date()
+    user.reactivateReason = input.reason
+  }
+  await user.save()
+  if (!input.isActive) await revokeAllUserSessions(userId)
 
   return {
     _id: String(user._id),
     isActive: user.isActive,
     suspendedAt: user.suspendedAt ?? null,
-    suspendReason: user.suspendReason ?? null
+    suspendReason: user.suspendReason ?? null,
+    reactivatedAt: user.reactivatedAt ?? null,
+    reactivateReason: user.reactivateReason ?? null
   }
 }
 
@@ -236,11 +249,13 @@ export const getMetrics = async (now: Date = new Date()) => {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_TIMEZONE }).format(now)
   const startOfToday = parseDateInput(today, "start")
 
-  const [usersTotal, usersNew7d, projectsTotal, projectsActive7d, aiCallsToday, aiStatus7d] = await Promise.all([
+  const [usersTotal, usersNew7d, projectsTotal, projectsActive7d, baselinesTotal, aiCallsToday, aiStatus7d] = await Promise.all([
     User.countDocuments({}),
     User.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
     Project.countDocuments({}),
     Project.countDocuments({ updatedAt: { $gte: sevenDaysAgo } }),
+    // UC-63: mọi baseline đã ghi — v0 khi import, 1.0 và mọi bản release sau đó
+    Baseline.countDocuments({}),
     AiActionLog.countDocuments({ createdAt: { $gte: startOfToday } }),
     AiActionLog.aggregate<{ _id: string; count: number }>([
       { $match: { createdAt: { $gte: sevenDaysAgo } } },
@@ -256,8 +271,7 @@ export const getMetrics = async (now: Date = new Date()) => {
     usersNew7d,
     projectsTotal,
     projectsActive7d,
-    // Baseline snapshot chưa có tới T19
-    baselinesTotal: 0,
+    baselinesTotal,
     aiCallsToday,
     aiCalls7d: calls7d,
     aiFailRate7d: calls7d === 0 ? 0 : failed7d / calls7d

@@ -81,6 +81,10 @@ const upload = multer({
  *         description: Dự án đã được tạo thành công (kèm mode, import_state)
  *       400:
  *         description: VALIDATION_ERROR — tên trống/quá dài hoặc mode không hợp lệ
+ *       402:
+ *         description: PLAN_LIMIT_PROJECTS — tổ chức đã đủ số dự án tối đa của gói (dự án đã xoá không tính)
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN — Viewer không tạo dự án
  *       501:
  *         description: mode customer_template chưa hỗ trợ (NOT_IMPLEMENTED)
  *       401:
