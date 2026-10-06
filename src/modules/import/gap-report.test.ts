@@ -64,7 +64,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     const all = blocks.map((b) => b.text)
     expect(all[0]).toBe("Báo cáo thiếu sót — Lumen")
     expect(all[1]).toBe("Phiên bản tài liệu 0.0 · tạo lúc 19/09/2026 07:00")
-    for (const h of ["Tổng quan", "Cờ theo mục", "Mục bắt buộc còn thiếu", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
+    for (const h of ["Tổng quan", "Cờ theo mục", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
     // tiêu đề mục không kèm khoá máy
     expect(all).toContain("Performance")
     expect(all).toContain("Authentication")
@@ -106,7 +106,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     })
     const all = (await texts(await renderGapReportDocx(empty, "Rỗng"))).map((b) => b.text)
     expect(all).toEqual(
-      expect.arrayContaining(["Không có cờ nào đang mở.", "Không thiếu mục bắt buộc nào.", "Mọi tiêu đề đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
+      expect.arrayContaining(["Không có cờ nào đang mở.", "File có đủ tiêu đề các mục mẫu FPT.", "Mọi tiêu đề đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
     )
   })
 

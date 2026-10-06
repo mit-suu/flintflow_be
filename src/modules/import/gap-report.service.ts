@@ -1,6 +1,6 @@
 /**
- * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, section bắt buộc thiếu, heading không map,
- * field độ tin thấp. Mode 1 v2 (FLF-184): "Thiếu mục FPT" (đỏ, D6) đứng đầu; cờ và mục xếp theo layout file upload;
+ * Gap report (nút 1.13, UC-23): cờ đỏ/vàng gộp theo section, mục mẫu FPT thiếu (không bắt buộc), heading không map,
+ * field độ tin thấp. Mode 1 v2 (FLF-184): "Thiếu mục FPT" đứng đầu (không bắt buộc, không cờ — 2026-10-06); cờ và mục xếp theo layout file upload;
  * mục riêng ngoài FPT liệt kê riêng, không cờ. Xuất JSON và `.docx` (báo cáo mới, dùng thư viện `docx` như mode 2 — không phải bản SRS).
  * FLF-171, plan §6 2C. Tải bản `.docx` khi đang `gap_review` ⇒ `delivered` (giao báo cáo, nhánh "không cần sửa").
  */
@@ -244,10 +244,10 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     table(
       ["Hạng mục", "Số lượng"],
       [
-        ["Thiếu mục theo mẫu FPT (đỏ)", String(t.missing_fpt_sections)],
+        ["Thiếu mục theo mẫu FPT (không bắt buộc)", String(t.missing_fpt_sections)],
         ["Cờ đỏ", String(t.red)],
         ["Cờ vàng", String(t.yellow)],
-        ["Mục bắt buộc còn thiếu", String(t.missing_sections)],
+        ["Mục mẫu FPT không có tiêu đề trong file", String(t.missing_sections)],
         ["Tiêu đề không khớp mẫu", String(t.unmapped_headings)],
         ["Dữ liệu trích có độ tin thấp", String(t.low_confidence_fields)],
         ["Hình chưa vẽ được", String(t.unrendered_diagrams)]
@@ -257,7 +257,7 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     report.missing_fpt_sections.length
       ? table(
           ["Mục", "Tình trạng", "Cách bổ sung"],
-          report.missing_fpt_sections.map((m) => [m.title, m.in_layout ? "Có tiêu đề, chưa có nội dung" : "File không có", "Bổ sung qua change request"])
+          report.missing_fpt_sections.map((m) => [m.title, m.in_layout ? "Có tiêu đề, chưa có nội dung" : "File không có", "Bổ sung qua change request nếu cần"])
         )
       : new Paragraph("Đủ mọi đầu mục mẫu FPT."),
     new Paragraph({ text: "Mục theo tài liệu", heading: HeadingLevel.HEADING_1 }),
@@ -288,8 +288,8 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
         )
       : new Paragraph("Mọi hình đã có bản vẽ.")
   )
-  children.push(new Paragraph({ text: "Mục bắt buộc còn thiếu", heading: HeadingLevel.HEADING_1 }))
-  children.push(report.missing_sections.length ? table(["Mục"], report.missing_sections.map((m) => [m.title])) : new Paragraph("Không thiếu mục bắt buộc nào."))
+  children.push(new Paragraph({ text: "Mục mẫu FPT không có tiêu đề trong file", heading: HeadingLevel.HEADING_1 }))
+  children.push(report.missing_sections.length ? table(["Mục"], report.missing_sections.map((m) => [m.title])) : new Paragraph("File có đủ tiêu đề các mục mẫu FPT."))
   children.push(new Paragraph({ text: "Tiêu đề không khớp mẫu", heading: HeadingLevel.HEADING_1 }))
   children.push(report.unmapped_headings.length ? table(["Tiêu đề trong tài liệu"], report.unmapped_headings.map((u) => [u.text])) : new Paragraph("Mọi tiêu đề đều khớp."))
   children.push(new Paragraph({ text: "Dữ liệu trích có độ tin thấp", heading: HeadingLevel.HEADING_1 }))

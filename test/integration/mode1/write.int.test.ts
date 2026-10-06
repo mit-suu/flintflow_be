@@ -122,7 +122,7 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(await lockedPaths(projectId, crId)).toEqual([])
   })
 
-  it("mode 1 v3: cờ đỏ đóng được bằng CR — section_empty (thêm vào mục trống) và unconfirmed_assumption (xác nhận giả định)", async () => {
+  it("mode 1 v3: CR thêm được vào mục trống (không còn cờ đỏ section_empty) và đóng cờ đỏ unconfirmed_assumption (xác nhận giả định)", async () => {
     const { c, projectId } = await importedProject()
     // Giả định chưa xác nhận do import để lại — mode 1 không còn S-9.2 ⇒ chỉ CR đóng được cờ này
     await applyTransaction(projectId, {
@@ -135,7 +135,7 @@ describe("C-7 ghi Spine + render version mới", () => {
     await flagsService.recompute(projectId, { by: "test", ruleProfile: MODE1_RULE_PROFILE, atBaseline: true }) // như 1.12
     const redOpen = async () => (await c.get("/flags?level=red&open=true")).body.data as Flag[]
     const before = await redOpen()
-    expect(before.some((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.4")).toBe(true)
+    expect(before.some((f) => f.rule_id === "section_empty"), "mục FPT trống không bắt buộc ở mode 1").toBe(false)
     expect(before.some((f) => f.rule_id === "unconfirmed_assumption" && f.target_id === "AS-01")).toBe(true)
 
     const propose = (p: string) =>
@@ -158,7 +158,7 @@ describe("C-7 ghi Spine + render version mới", () => {
     expect(written.change_request.status).toBe("written")
 
     const after = await redOpen()
-    expect(after.some((f) => f.rule_id === "section_empty" && f.section_id === "fixed:5.4"), "mục đã có dữ liệu ⇒ cờ đóng").toBe(false)
+    expect(((await c.get("/spine")).body.data.other_requirements as { id: string }[]).map((r) => r.id), "mục trống đã có dữ liệu").toContain("OR-01")
     expect(after.some((f) => f.rule_id === "unconfirmed_assumption"), "giả định đã xác nhận ⇒ cờ đóng").toBe(false)
   })
 

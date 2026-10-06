@@ -227,7 +227,7 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 ### 4.3 Endpoint mới
 | # | Method + path | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- |
-| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu" + cờ đỏ `section_empty` (hồ sơ luật mode 1 giữ đỏ — FLF-183)), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
+| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu"; từ 2026-10-06 không còn cờ `section_empty` ở mode 1 — mục thiếu không bắt buộc, chỉ liệt kê ở gap report), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
 | 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt step của đầu mục FPT hoặc step đã có dữ liệu) |
 
 ### 4.4 Thay đổi khác
@@ -371,6 +371,7 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-06 | mục FPT không bắt buộc | #32 / gap report: hồ sơ luật mode 1 loại `section_empty` — đầu mục FPT thiếu không còn cờ đỏ, không chặn release; cờ cũ đang mở tự đóng ở lần tính lại cờ kế tiếp. Hình API không đổi |
 | 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |
 | 2026-09-24 | Gemini quá tải | §4.10: đọc ảnh lỗi sau mọi lượt thử không còn `paused` — ảnh `unavailable` + cờ vàng. Skill Gemini thêm `fallbackModels` (`gemini-3.6-flash`, `gemini-3.5-flash-lite`); log AI ghi model thật sự trả lời. Hình API không đổi |

@@ -3,8 +3,8 @@
  * Spine mode 1 là chỉ mục trích từ tài liệu có sẵn: không có step, SRS thật thường thiếu mảng, viết tiếng Việt…
  * - Loại: luật gắn với quy trình sinh của mode 2 hoặc bắn hàng loạt vô nghĩa.
  * - Hạ đỏ ⇒ vàng: thiếu số đo là "gap" để báo, không phải lỗi kỹ thuật chặn release.
- * - Mode 1 v2 (D6, FLF-183): `section_empty` **giữ đỏ** — mọi đầu mục mẫu FPT là cốt lõi, thiếu nội dung thì chặn
- *   sign-off baseline v1 tới khi chạy step (AI soạn) hoặc viết tay; cờ tự đóng khi section có dữ liệu.
+ * - Mode 1 v2 (D6, FLF-183) từng giữ `section_empty` đỏ (mọi đầu mục mẫu FPT là cốt lõi). Từ 2026-10-06 bản xuất theo
+ *   template người dùng upload nên mục FPT không bắt buộc ⇒ bỏ `section_empty`; mục thiếu chỉ liệt kê ở gap report.
  * Giữ nguyên: `dead_reference`, `render_error`, `diagram_stale`, `unconfirmed_assumption` (đỏ) và các luật
  * cardinality vàng còn lại.
  */
@@ -15,6 +15,8 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
   exclude: new Set([
     // mảng rỗng đưa vào gap report dạng "section thiếu", không chặn baseline v0 / release
     "array_empty",
+    // mục FPT không bắt buộc ở mode 1 (bản xuất theo template upload) — mục thiếu chỉ là gợi ý trong gap report
+    "section_empty",
     "section_stale_at_baseline",
     "section_awaiting_reaccept",
     "screen_pending_at_baseline",
