@@ -470,7 +470,7 @@ export const adjustOrgCredits = async (
   if (!mongoose.isValidObjectId(orgId)) {
     throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
   }
-  const org = await Organization.findById(orgId).select("_id name").lean()
+  const org = await Organization.findById(orgId).select("_id name ownerUserId").lean()
   if (!org) {
     throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
   }
@@ -478,7 +478,7 @@ export const adjustOrgCredits = async (
   // Ví tạo cùng org (Flow 8.2); org có trước task-26 thì chưa có ⇒ tạo tại chỗ để admin vẫn thao tác được.
   const existing = await CreditWallet.findOne({ organizationId: orgId })
   if (!existing) {
-    await CreditWallet.create({ organizationId: orgId, userId: org._id, balance: 0, reserved: 0 })
+    await CreditWallet.create({ organizationId: orgId, userId: org.ownerUserId, balance: 0, reserved: 0 })
   }
 
   // Trừ: chỉ chạm phần KHẢ DỤNG (balance - reserved) và làm trong một lệnh atomic.
