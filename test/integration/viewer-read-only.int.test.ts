@@ -37,6 +37,7 @@ describe("Viewer bị chặn ở mọi thao tác ghi", () => {
     ["post", "/api/v1/projects/" + projectId + "/flags/F-1/waive"],
     ["post", "/api/v1/projects/" + projectId + "/change-requests"],
     ["patch", "/api/v1/projects/" + projectId + "/name"],
+    ["post", "/api/v1/projects/" + projectId + "/documents"],
     ["post", "/api/v1/projects"],
     ["post", "/api/v1/folders"]
   ]
