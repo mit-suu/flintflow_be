@@ -96,6 +96,19 @@ describe("UC-68 — điều chỉnh credit tổ chức", () => {
     expect(String(note?.organizationId)).toBe(orgId)
   })
 
+  it("ledger và ví tạo tại chỗ (org cũ chưa có ví) ghi đúng người tạo org, không ghi id của org", async () => {
+    await CreditWallet.deleteOne({ organizationId: orgId })
+
+    expect((await adjust(30)).status).toBe(200)
+
+    const wallet = await CreditWallet.findOne({ organizationId: orgId }).lean()
+    expect(wallet?.balance).toBe(30)
+    expect(String(wallet?.userId)).toBe(lead.id)
+
+    const entry = await CreditTransaction.findOne({ organizationId: orgId, type: "admin_adjust" }).lean()
+    expect(String(entry?.userId)).toBe(lead.id)
+  })
+
   it("chặn dữ liệu vào không hợp lệ và org không tồn tại", async () => {
     expect((await adjust(0)).status).toBe(400)
 
