@@ -13,7 +13,7 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 import { Project } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
-import { ExtractionDraft } from "./extraction-draft.model.js"
+import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
 import { needsConfirm } from "./import.constants.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
 import { IMPORT_STATUS_LABELS, assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
@@ -284,13 +284,39 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
 
 // ─── UC-19 xem trạng thái ────────────────────────────────────────
 
-export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
-  const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
-  const review_fields: ReviewField[] = []
-  const sections = drafts.map((d) => {
-    const needing = d.fields.filter((f) => !f.confirmed && needsConfirm(f))
-    for (const f of needing) {
-      review_fields.push({
+/** `actors[id=A01].kind` ⇒ `actors[id=A01]`; path không thuộc phần tử có khoá (`project.code`, `actors[]`) ⇒ null. */
+const entityPrefix = (path: string): string | null => /^[a-z_]+\[[a-z_]*=[^\]]+\]/.exec(path)?.[0] ?? null
+
+const NAME_FIELDS = [".name", ".term"] as const
+
+/**
+ * Tên phần tử theo mọi section của bản trích (`actors[id=A01]` ⇒ "Learner"). Phần tử đọc từ ảnh trùng phần tử đã có chỉ
+ * giữ field mới (FLF-252 — vd `kind`), tên nằm ở draft của nguồn trước ⇒ phải tra chéo section.
+ */
+const entityNames = (drafts: readonly Pick<IExtractionDraft, "fields">[]): Map<string, string> => {
+  const names = new Map<string, string>()
+  for (const d of drafts) {
+    for (const f of d.fields) {
+      const prefix = entityPrefix(f.path)
+      const v = f.edited_value ?? f.value
+      if (!prefix || names.has(prefix) || !NAME_FIELDS.some((n) => f.path === prefix + n)) continue
+      if (typeof v === "string" && v.trim()) names.set(prefix, v.trim())
+    }
+  }
+  return names
+}
+
+/** Field cần người xác nhận (1.9 / gap report) kèm tên phần tử để nhãn nói rõ đang hỏi phần tử nào. */
+export const toReviewFields = (
+  drafts: readonly Pick<IExtractionDraft, "section_id" | "fields">[],
+  keep: (f: ExtractedField) => boolean
+): ReviewField[] => {
+  const names = entityNames(drafts)
+  return drafts.flatMap((d) =>
+    d.fields.filter(keep).map((f) => {
+      const prefix = entityPrefix(f.path)
+      const name = prefix && !NAME_FIELDS.some((n) => f.path === prefix + n) ? names.get(prefix) : undefined
+      return {
         section_id: d.section_id,
         path: f.path,
         value: f.value,
@@ -298,12 +324,25 @@ export const extractionSummary = async (importId: mongoose.Types.ObjectId | stri
         source_block_ids: f.source_block_ids,
         origin: f.origin,
         confirmed: f.confirmed,
-        ...(f.edited_value !== undefined ? { edited_value: f.edited_value } : {})
-      })
-    }
-    return { section_id: d.section_id, status: d.status, fields_total: d.fields.length, fields_needing_review: needing.length, error: d.error ?? null }
-  })
-  return { sections, review_fields }
+        ...(f.edited_value !== undefined ? { edited_value: f.edited_value } : {}),
+        ...(name ? { entity_name: name } : {})
+      }
+    })
+  )
+}
+
+const awaitingConfirm = (f: ExtractedField): boolean => !f.confirmed && needsConfirm(f)
+
+export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
+  const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
+  const sections = drafts.map((d) => ({
+    section_id: d.section_id,
+    status: d.status,
+    fields_total: d.fields.length,
+    fields_needing_review: d.fields.filter(awaitingConfirm).length,
+    error: d.error ?? null
+  }))
+  return { sections, review_fields: toReviewFields(drafts, awaitingConfirm) }
 }
 
 export const getImportView = async (projectId: string): Promise<GetImportResponse> => {

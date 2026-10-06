@@ -362,11 +362,16 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
   nhiều heading có thể cùng `section_id` (Reliability + Availability ⇒ `fixed:4.2.2`). Request #5 không đổi hình.
 - **Section tính năng có trích** (`feature:@B…` / `feature:<id>`): chữ / bảng ngay dưới một tính năng trích thành chức năng
   của tính năng đó (danh sách yêu cầu FR-… của mẫu IEEE); `table_map` nhận thêm `functions[].priority`.
+- **`ReviewField.entity_name?`** (#4 `review_fields`, gap report `low_confidence_fields`): tên phần tử chứa field, tra trên mọi
+  section của bản trích (`.name`, glossary `.term`; ưu tiên `edited_value`). Phần tử đọc từ ảnh trùng phần tử đã có chỉ giữ
+  field mới (vd `actors[id=A01].kind` từ sơ đồ ngữ cảnh mục 1) nên tên nằm ở draft mục khác. Không có khi field chính là tên,
+  path không có khoá, hoặc không tra được tên. FE ghép vào nhãn: "Tác nhân A01 (Learner) — Loại".
 
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |
 | 2026-09-24 | Gemini quá tải | §4.10: đọc ảnh lỗi sau mọi lượt thử không còn `paused` — ảnh `unavailable` + cờ vàng. Skill Gemini thêm `fallbackModels` (`gemini-3.6-flash`, `gemini-3.5-flash-lite`); log AI ghi model thật sự trả lời. Hình API không đổi |
 | 2026-09-24 | mode 1 v3 — sơ đồ gốc | §4.13: giữ ảnh sơ đồ gốc khi import (`CustomBlock.diagram`), không in PlantUML cùng loại, cờ vàng `original_diagram_stale`, `found_by: "diagram"` + đề xuất vẽ lại do code (C-4), C-5 bỏ `diagram_stale` khỏi "lỗi đỏ mới" — thay hành vi finalize §4.10, contract-change, chờ 4/4 |

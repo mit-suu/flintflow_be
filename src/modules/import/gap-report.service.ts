@@ -13,9 +13,9 @@ import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
 import { ExtractionDraft } from "./extraction-draft.model.js"
 import { UNMAPPED_SECTION, needsConfirm } from "./import.constants.js"
-import type { GapReport, ReviewField } from "./import.dto.js"
+import type { GapReport } from "./import.dto.js"
 import type { ImportStatus } from "./import.state.js"
-import { latestImport, transitionImport } from "./import.service.js"
+import { latestImport, toReviewFields, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
@@ -94,20 +94,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
 
   const missing = (profile?.required_sections ?? []).map((section_id) => ({ section_id, title: titleOfSection(spine, section_id, profile?.layout) }))
   const unmapped = (profile?.heading_map ?? []).filter((h) => h.section_id === UNMAPPED_SECTION).map((h) => ({ block_id: h.block_id, text: h.heading_text }))
-  const low: ReviewField[] = drafts.flatMap((d) =>
-    d.fields
-      .filter((f) => needsConfirm(f))
-      .map((f) => ({
-        section_id: d.section_id,
-        path: f.path,
-        value: f.value,
-        confidence: f.confidence,
-        source_block_ids: f.source_block_ids,
-        origin: f.origin,
-        confirmed: f.confirmed,
-        ...(f.edited_value !== undefined ? { edited_value: f.edited_value } : {})
-      }))
-  )
+  const low = toReviewFields(drafts, needsConfirm)
 
   return {
     project_id: projectId,
@@ -310,7 +297,7 @@ export const renderGapReportDocx = async (report: GapReport, projectName: string
     report.low_confidence_fields.length
       ? table(
           ["Mục", "Nội dung", "Giá trị", "Độ tin"],
-          report.low_confidence_fields.map((f) => [sectionName(f.section_id), pathLabel(f.path), readableValue(f.edited_value ?? f.value), percent(f.confidence)])
+          report.low_confidence_fields.map((f) => [sectionName(f.section_id), pathLabel(f.path, f.entity_name), readableValue(f.edited_value ?? f.value), percent(f.confidence)])
         )
       : new Paragraph({ children: [new TextRun("Không có.")], alignment: AlignmentType.LEFT })
   )
