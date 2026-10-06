@@ -5,6 +5,8 @@ import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { Membership } from "../organization/membership.model.js"
 import { notify } from "../notification/notification.service.js"
 import { Organization } from "../organization/organization.model.js"
+import { Subscription } from "../credits/subscription.model.js"
+import { getPlan, PlanId } from "../billing/plan.config.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Session } from "../../shared/auth/session.model.js"
 import { revokeAllUserSessions } from "../../shared/auth/session.service.js"
@@ -14,6 +16,7 @@ import { AiActionLog } from "./ai-action-log.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
 import {
   AiCostGroupBy,
+  OrgsQuery,
   parseDateInput,
   REPORT_TIMEZONE,
   SetUserStatusInput,
@@ -443,6 +446,99 @@ export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCost
 
 // Dữ liệu và shape nằm ở module feedback; admin chỉ mở route đọc
 export const listFeedback = () => feedbackService.listFeedback()
+
+// ─── UC-90 Danh sách tổ chức ─────────────────────────────────────
+
+export interface AdminOrgRow {
+  id: string
+  name: string
+  owner: { id: string; email: string; name: string | null } | null
+  plan: PlanId
+  planLabel: string
+  /** null = org có trước task-26 chưa có ví; UC-68 sẽ tạo khi admin điều chỉnh lần đầu. */
+  wallet: { balance: number; reserved: number; available: number } | null
+  membersCount: number
+  /** Dự án chưa xoá (`archived` không tính) — cùng cách đếm với trần dự án UC-16. */
+  projectsCount: number
+  createdAt: Date
+}
+
+/**
+ * UC-90 — Administrator xem mọi tổ chức để chọn một org rồi điều chỉnh credit (UC-68).
+ * Không có gói active ⇒ coi là Free, khớp với `assertProjectQuota` và `billing.getBalance`.
+ */
+export const listOrgs = async (query: OrgsQuery) => {
+  const { page, limit, plan, q } = query
+  const filter: Record<string, unknown> = {}
+
+  if (q) {
+    const pattern = new RegExp(escapeRegex(q), "i")
+    const owners = await User.find({ email: pattern }).select("_id").lean()
+    filter.$or = [{ name: pattern }, { ownerUserId: { $in: owners.map((u) => u._id) } }]
+  }
+  if (plan) {
+    // Free = không có gói trả phí active (kể cả org chưa có Subscription nào).
+    const paidOrgIds = await Subscription.distinct("organizationId", {
+      status: "active",
+      plan: { $ne: "free" },
+      organizationId: { $type: "objectId" }
+    })
+    filter._id = plan === "free" ? { $nin: paidOrgIds } : { $in: paidOrgIds }
+  }
+
+  const [total, orgs] = await Promise.all([
+    Organization.countDocuments(filter),
+    Organization.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select("_id name ownerUserId createdAt")
+      .lean()
+  ])
+
+  const orgIds = orgs.map((o) => o._id)
+  const byOrg = { $match: { organizationId: { $in: orgIds } } }
+  const [owners, subscriptions, wallets, memberCounts, projectCounts] = await Promise.all([
+    User.find({ _id: { $in: orgs.map((o) => o.ownerUserId) } }).select("_id email name").lean(),
+    Subscription.find({ organizationId: { $in: orgIds }, status: "active" }).select("organizationId plan").lean(),
+    CreditWallet.find({ organizationId: { $in: orgIds } }).select("organizationId balance reserved").lean(),
+    Membership.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      byOrg,
+      { $group: { _id: "$organizationId", count: { $sum: 1 } } }
+    ]),
+    Project.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      { $match: { organizationId: { $in: orgIds }, status: { $ne: "archived" } } },
+      { $group: { _id: "$organizationId", count: { $sum: 1 } } }
+    ])
+  ])
+  const ownerById = new Map(owners.map((u) => [String(u._id), u]))
+  const planByOrg = new Map(subscriptions.map((s) => [String(s.organizationId), s.plan]))
+  const walletByOrg = new Map(wallets.map((w) => [String(w.organizationId), w]))
+  const members = new Map(memberCounts.map((r) => [String(r._id), r.count]))
+  const projects = new Map(projectCounts.map((r) => [String(r._id), r.count]))
+
+  const items: AdminOrgRow[] = orgs.map((o) => {
+    const id = String(o._id)
+    const owner = ownerById.get(String(o.ownerUserId))
+    const wallet = walletByOrg.get(id)
+    const orgPlan = planByOrg.get(id) ?? "free"
+    return {
+      id,
+      name: o.name,
+      owner: owner ? { id: String(owner._id), email: owner.email, name: owner.name ?? null } : null,
+      plan: orgPlan,
+      planLabel: getPlan(orgPlan).label,
+      wallet: wallet
+        ? { balance: wallet.balance, reserved: wallet.reserved, available: wallet.balance - wallet.reserved }
+        : null,
+      membersCount: members.get(id) ?? 0,
+      projectsCount: projects.get(id) ?? 0,
+      createdAt: o.createdAt
+    }
+  })
+
+  return { items, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
+}
 
 // ─── UC-68 Điều chỉnh credit của tổ chức ─────────────────────────
 

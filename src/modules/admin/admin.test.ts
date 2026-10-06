@@ -11,7 +11,8 @@ vi.mock("./admin.service.js", async (importOriginal) => {
     getUserDetail: vi.fn(async (id: string) => ({ _id: id, recentTransactions: [] })),
     getMetrics: vi.fn(async () => ({ usersTotal: 3, baselinesTotal: 0 })),
     getAiCost: vi.fn(async () => ({ rows: [], totals: {} })),
-    listFeedback: vi.fn(async () => [])
+    listFeedback: vi.fn(async () => []),
+    listOrgs: vi.fn(async () => ({ items: [], meta: { page: 1, limit: 20, total: 0, totalPages: 1 } }))
   }
 })
 // adminMiddleware luôn tra role/isActive trong DB (không tin role của JWT)
@@ -48,7 +49,7 @@ describe("admin routes (HTTP)", () => {
     Authorization: `Bearer ${signAccessToken({ userId: USER, email: "user@example.com" })}`
   }
 
-  const PATHS = ["/users", `/users/${USER}`, "/metrics", "/ai-cost", "/feedback"]
+  const PATHS = ["/users", `/users/${USER}`, "/metrics", "/ai-cost", "/feedback", "/orgs"]
 
   beforeAll(async () => {
     const app = express()
@@ -110,6 +111,9 @@ describe("admin routes (HTTP)", () => {
       q: "an"
     })
 
+    await fetch(`${baseUrl}/orgs?page=3&limit=10&plan=pro&q=%20acme%20`, { headers: adminAuth })
+    expect(adminService.listOrgs).toHaveBeenLastCalledWith({ page: 3, limit: 10, plan: "pro", q: "acme" })
+
     await fetch(`${baseUrl}/ai-cost?from=2026-09-01&to=2026-09-14&groupBy=provider`, { headers: adminAuth })
     expect(adminService.getAiCost).toHaveBeenLastCalledWith(
       { from: new Date("2026-08-31T17:00:00.000Z"), to: new Date("2026-09-14T17:00:00.000Z") },
@@ -122,6 +126,8 @@ describe("admin routes (HTTP)", () => {
       "/users?limit=500",
       "/users?isActive=yes",
       "/users/not-an-id",
+      "/orgs?plan=enterprise",
+      "/orgs?limit=0",
       "/ai-cost?groupBy=model",
       "/ai-cost?from=hello",
       "/ai-cost?from=2026-09-10&to=2026-09-01"

@@ -24,6 +24,14 @@ export const usersQuerySchema = z.object({
   q: z.string().trim().max(100, "Từ khoá tối đa 100 ký tự").optional()
 })
 
+/** UC-90: danh sách tổ chức cho admin — lọc theo tên/email chủ org và theo gói đang active. */
+export const orgsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  plan: z.enum(["free", "pro"], { message: "Gói không hợp lệ." }).optional(),
+  q: z.string().trim().max(100, "Từ khoá tối đa 100 ký tự").optional()
+})
+
 export const userIdParamSchema = z.object({
   id: z.string().regex(/^[a-f\d]{24}$/i, "Mã người dùng không hợp lệ.")
 })
@@ -42,6 +50,7 @@ export const aiCostQuerySchema = z.object({
 })
 
 export type UsersQuery = z.infer<typeof usersQuerySchema>
+export type OrgsQuery = z.infer<typeof orgsQuerySchema>
 export type AiCostQuery = z.infer<typeof aiCostQuerySchema>
 export type AiCostGroupBy = (typeof AI_COST_GROUP_BY)[number]
 
