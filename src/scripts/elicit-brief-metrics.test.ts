@@ -42,7 +42,41 @@ describe("scoreBrief — câu hỏi và chủ đề", () => {
 })
 
 describe("scoreBrief — hình dạng lựa chọn", () => {
-  it("bắt nhãn lồng nhau: thẻ tuân thủ có option 2 chứa hiển ngôn option 1", () => {
+  /** Một thẻ, nhãn lồng nhau, chỉ khác nhau ở chỗ description có vạch ranh giới hay không. */
+  const nestedPair = (shorter: string | undefined, longer: string | undefined): RecordedRun =>
+    run({
+      turns: [
+        {
+          user_message: "đặt sân cầu lông",
+          reply: "Tôi theo hướng này.",
+          questions: [
+            question({
+              id: "Q_payment_method",
+              text: "Khách trả tiền thế nào?",
+              header: "Thanh toán",
+              options: [
+                { label: "Thanh toán online", description: shorter },
+                { label: "Thanh toán online và tại quầy", description: longer }
+              ]
+            })
+          ]
+        }
+      ]
+    })
+
+  it("bắt nhãn lồng nhau khi một option không có description để vạch ranh giới", () => {
+    const m = scoreBrief(nestedPair(undefined, "Trả trước qua ví, hoặc trả tiền mặt khi tới sân"))
+    expect(m.nested_labels_without_edge).toBe(1)
+    expect(m.options_without_description).toBe(1)
+  })
+
+  it("bắt nhãn lồng nhau khi description của option dài chỉ là description kia thêm đuôi", () => {
+    const m = scoreBrief(nestedPair("Khách trả qua ví điện tử", "Khách trả qua ví điện tử, và tại quầy"))
+    expect(m.nested_labels_without_edge).toBe(1)
+    expect(m.options_without_description).toBe(0)
+  })
+
+  it("không bắt thẻ tuân thủ: nhãn lồng nhau là hình SKILL.md yêu cầu, và description đã vạch ranh giới", () => {
     const m = scoreBrief(
       run({
         turns: [
@@ -55,8 +89,14 @@ describe("scoreBrief — hình dạng lựa chọn", () => {
                 text: "Yếu tố tuân thủ, pháp lý của dự án này như thế nào?",
                 header: "Tuân thủ",
                 options: [
-                  { label: "Tuân thủ quy định nội bộ và pháp luật (Khuyến nghị)", description: "Có quy định pháp luật phải theo" },
-                  { label: "Tuân thủ quy định nội bộ", description: "Chỉ theo quy định nội bộ của tổ chức" }
+                  {
+                    label: "Tuân thủ quy định nội bộ và pháp luật (Khuyến nghị)",
+                    description: "Có quy định pháp luật phải theo — dữ liệu cá nhân, hồ sơ y tế, tài chính, khu vực công"
+                  },
+                  {
+                    label: "Tuân thủ quy định nội bộ",
+                    description: "Chỉ theo quy định nội bộ của tổ chức, không có quy định pháp luật nào ràng buộc"
+                  }
                 ]
               })
             ]
@@ -64,7 +104,7 @@ describe("scoreBrief — hình dạng lựa chọn", () => {
         ]
       })
     )
-    expect(m.nested_labels).toBe(1)
+    expect(m.nested_labels_without_edge).toBe(0)
     expect(m.options_without_description).toBe(0)
   })
 
@@ -210,7 +250,7 @@ describe("scoreBrief — hình dạng lựa chọn", () => {
         ]
       })
     )
-    expect(m.nested_labels).toBe(0)
+    expect(m.nested_labels_without_edge).toBe(0)
   })
 })
 

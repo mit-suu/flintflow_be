@@ -498,7 +498,7 @@ const METRIC_COLUMNS: Array<[string, (m: BriefMetrics) => number | string]> = [
   ["giả định stakes", (m) => (m.has_stakes_assumption ? "có" : "không")],
   ["option thiếu mô tả", (m) => m.options_without_description],
   ["option số trần", (m) => m.numeric_only_options],
-  ["nhãn lồng nhau", (m) => m.nested_labels],
+  ["nhãn lồng thiếu ranh giới", (m) => m.nested_labels_without_edge],
   ["option không-thêm-gì", (m) => m.none_option_on_multiselect],
   ["ứng viên thiếu option", (m) => m.candidate_without_option.join(" ") || "–"],
   ["vốn từ cấm", (m) => m.banned_vocab.join(" ") || "–"],
