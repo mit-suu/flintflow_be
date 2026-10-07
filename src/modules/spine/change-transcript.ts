@@ -14,6 +14,7 @@ import { ChatSession, type IChatMessage, type IChatSession } from "../project/ch
 import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
 import { toClientError, violationMessage } from "../../shared/utils/client-error.js"
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import type { ChangePreviewResult } from "./change.service.js"
 import type { Spine } from "./spine.types.js"
 import { buildConversationSummary, type TranscriptMessage } from "../pipeline/conversation-summary.js"
@@ -74,16 +75,23 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
  * Tin AI mô tả kết quả xem trước — cùng shape `ChatBubble` (FE) đang đọc. Chỉ lưu số thay đổi, không lưu mảng
  * `changes`/`impact`/`violations` (FLF-244): cả phiên nằm trong một document 16MB, còn bản xem trước thật nằm ở
  * `previewStore` (`change.service.ts`) theo `preview_id` — không ai đọc lại các mảng đó từ transcript.
+ * FLF-260: câu cố định theo `language` của lượt; câu hỏi làm rõ đã đúng ngôn ngữ từ change.service.
  */
-export const previewPayload = (preview: ChangePreviewResult): Record<string, unknown> =>
+export const previewPayload = (preview: ChangePreviewResult, language: ReplyLanguage = "vi"): Record<string, unknown> =>
   preview.clarification
     ? { kind: "change_clarification", reply: preview.clarification }
     : {
         kind: "change_preview",
         reply: preview.ok
           ? preview.changes.length > 0
-            ? `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`
-            : "Không tìm thấy chỗ nào cần đổi theo lệnh này."
+            ? byLanguage(language, {
+                vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
+                en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
+              })
+            : byLanguage(language, {
+                vi: "Không tìm thấy chỗ nào cần đổi theo lệnh này.",
+                en: "Nothing in the document needs to change for this request."
+              })
           : violationMessage(preview.violations),
         preview_id: preview.preview_id ?? null,
         branch: preview.branch ?? null,

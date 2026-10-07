@@ -290,6 +290,19 @@ describe("draftOps retry", () => {
     expect(executor).toHaveBeenCalledTimes(1)
   })
 
+  it("FLF-260: replyLanguage ⇒ mọi lượt gọi (kể cả retry) mang nó; không truyền ⇒ input không có field (prompt như cũ)", async () => {
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }]))
+      .mockResolvedValueOnce(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, replyLanguage: "en" })
+    expect(executor.mock.calls.map((c) => c[1].replyLanguage)).toEqual(["en", "en"])
+
+    const plain = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: plain })
+    expect(plain.mock.calls[0][1]).not.toHaveProperty("replyLanguage")
+  })
+
   it("không truyền spine ⇒ đọc repository và chặn khi version lệch ctx", async () => {
     vi.mocked(get).mockResolvedValue({ projectId: "p", ...structuredClone(FIXTURE), spine_version: 5 })
     const executor = vi.fn<DraftExecutor>()

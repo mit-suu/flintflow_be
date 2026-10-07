@@ -46,7 +46,7 @@ const ASSUMPTION_OVERLAP_RATIO = 0.75
 export const ASSUMPTION_OVERLAP_MIN_WORDS = 5
 /** Từ phủ định: "không cần thanh toán online" và "cần thanh toán online" trùng gần hết từ nhưng ngược nghĩa. */
 const NEGATION = /(^|[^a-z0-9])(khong|chua|not|no|never)([^a-z0-9]|$)/
-const negated = (text: string): boolean => NEGATION.test(normalise(text))
+export const negated = (text: string): boolean => NEGATION.test(normalise(text))
 
 /** Cùng chiều khẳng định/phủ định và cả hai đủ dài để so bằng từ nội dung. */
 const comparable = (a: string, b: string): boolean =>

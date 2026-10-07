@@ -385,6 +385,43 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
     expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
   })
 
+  it("FLF-260: reply_language ⇒ lời gọi model mang replyLanguage (preview lẫn apply); không có ⇒ không có field", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "X" }] }))
+
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Rename A01 to X", reply_language: "en" }, {}, deps)
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Đổi tên A01 thành X" }, {}, deps)
+    await apply(PROJECT, USER, { base_version: 1, instruction: "Rename A01 to X", reply_language: "en" }, {}, deps)
+
+    const inputs = vi.mocked(deps.changeExecutor).mock.calls.map((call) => call[1])
+    expect(inputs).toHaveLength(3)
+    expect(inputs[0].replyLanguage).toBe("en")
+    expect(inputs[1]).not.toHaveProperty("replyLanguage")
+    expect(inputs[2].replyLanguage).toBe("en")
+    // Ngôn ngữ đi khối "Reply language" cuối prompt (`buildPrompt`), không thêm biến template nào
+    expect(Object.keys(inputs[0].promptVariables ?? {})).toEqual(Object.keys(inputs[1].promptVariables ?? {}))
+  })
+
+  it("FLF-260: output sai khuôn ở lượt tiếng Anh ⇒ câu hỏi lại tiếng Anh; không có reply_language ⇒ vẫn tiếng Việt", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => {
+      throw new AiActionError(422, "Failed to parse AI response for action 'change_instruction'", "PARSE_FAILED")
+    })
+
+    const english = await preview(PROJECT, USER, { base_version: 1, instruction: "Regenerate the ERD", reply_language: "en" }, {}, deps)
+    expect(english.ok).toBe(false)
+    expect(english.clarification).toMatch(/^I couldn't tell what to change in the document\./)
+    // Giao diện chỉ có tiếng Việt ⇒ gọi nút đúng nhãn đang hiện, kèm chú thích tiếng Anh
+    expect(english.clarification).toContain('"Vẽ lại sơ đồ" (Redraw diagram)')
+    await expect(
+      apply(PROJECT, USER, { base_version: 1, instruction: "Regenerate the ERD", reply_language: "en" }, {}, deps)
+    ).rejects.toMatchObject({ code: "NEEDS_CLARIFICATION", clarification: english.clarification })
+
+    const vietnamese = await preview(PROJECT, USER, { base_version: 1, instruction: "Vẽ lại ERD" }, {}, deps)
+    expect(vietnamese.clarification).toMatch(/^Mình chưa xác định được cần đổi gì trong tài liệu\./)
+    expect(vietnamese.clarification).toContain("Vẽ lại sơ đồ")
+  })
+
   it("preview_id đã dùng rồi ⇒ 422 PREVIEW_EXPIRED", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "X" }] }))
@@ -646,5 +683,33 @@ describe("isChangeInstruction — nhận lệnh sửa trong chat thường", () 
 
   it("động từ nằm quá xa đầu câu ⇒ không nhận (tránh nhận nhầm câu kể)", () => {
     expect(isChangeInstruction("Theo tôi thì phần này có lẽ nên đổi tên lại cho gọn")).toBe(false)
+  })
+
+  it("FLF-260: từ hỏi tiếng Anh khớp nguyên từ — \"how\" trong \"showing\" không chặn lệnh; câu hỏi thật vẫn chặn", () => {
+    expect(isChangeInstruction("Add a field showing the order status")).toBe(true)
+    expect(isChangeInstruction("Update the dashboard so it shows overdue tasks")).toBe(true)
+    expect(isChangeInstruction("How does this work?")).toBe(false)
+    // Không có "?": chặn nhờ chính từ hỏi, dù "add" nằm trong cửa sổ động từ
+    expect(isChangeInstruction("How do I add a new screen")).toBe(false)
+    expect(isChangeInstruction("why delete UC02")).toBe(false)
+  })
+
+  it.each([
+    "Create a use case for refunds",
+    "Edit the description of FN001",
+    "Modify screen S07 to add a search box",
+    "Insert a step after login",
+    "Please create a reminder screen"
+  ])("FLF-260: động từ tiếng Anh create/edit/modify/insert ở đầu câu ⇒ nhận: %s", (message) => {
+    expect(isChangeInstruction(message)).toBe(true)
+  })
+
+  it.each([
+    "Màn Create Order có những trường nào",
+    "Màn edit profile gồm những gì",
+    "Có cần create account không",
+    "Mình muốn hỏi: create user ở đâu"
+  ])("FLF-260: câu hỏi tiếng Việt nhắc tên phần tử tiếng Anh ⇒ vẫn là chat, không tốn lượt sửa: %s", (message) => {
+    expect(isChangeInstruction(message)).toBe(false)
   })
 })

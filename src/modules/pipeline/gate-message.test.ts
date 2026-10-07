@@ -133,6 +133,15 @@ describe("tin cổng nói một lần (FLF-241)", () => {
     expect([...spokenAssumptionIds(notes, [as("AS1", statement)])]).toEqual([])
   })
 
+  it("nguyên văn nằm trong câu đoán nhưng câu phủ định nó ở phía sau ⇒ không tính là đã nói (cả điều ngắn lẫn điều dài)", () => {
+    expect([...spokenAssumptionIds("Tôi tạm hiểu là có thanh toán online là chưa cần ở bản đầu.", [as("AS1", "Có thanh toán online.")])]).toEqual([])
+    const long = "Bệnh nhân đặt lịch khám qua ứng dụng điện thoại"
+    expect([...spokenAssumptionIds(`Tôi đoán ${long.toLowerCase()} là không cần thiết.`, [as("AS1", long)])]).toEqual([])
+    // Đối chứng: cùng câu nhưng khẳng định ⇒ vẫn là đã nói
+    expect([...spokenAssumptionIds("Tôi tạm hiểu là có thanh toán online.", [as("AS1", "Có thanh toán online.")])]).toEqual(["AS1"])
+    expect([...spokenAssumptionIds(`Tôi đoán ${long.toLowerCase()}.`, [as("AS1", long)])]).toEqual(["AS1"])
+  })
+
   it("câu không mang dấu hiệu đoán ⇒ không tính là đã nói, dù trùng nguyên văn", () => {
     const notes = "Bệnh nhân đặt lịch qua app điện thoại, còn nhân viên dùng máy tính."
     expect([...spokenAssumptionIds(notes, [as("AS1", "Bệnh nhân đặt lịch qua app điện thoại")])]).toEqual([])
@@ -338,5 +347,190 @@ describe("gateAssumptionIdsOfRun", () => {
   it("phần tử thiếu id hoặc id không phải chuỗi bị bỏ, phần còn lại vẫn tính", () => {
     const run = { gate_payload: { new_assumptions: [brief("AS1"), { text: "không có id" }, { id: 7 }, null] } }
     expect([...gateAssumptionIdsOfRun(run)]).toEqual(["AS1"])
+  })
+})
+
+/**
+ * FLF-260: phiên tiếng Anh có `notes` tiếng Anh. Dò sót lời đoán tiếng Anh thì `new_assumptions` rỗng, không điều nào được
+ * xác nhận và cờ đỏ `unconfirmed_assumption` chặn ký baseline.
+ */
+describe("FLF-260: tin cổng tiếng Anh", () => {
+  /** Chữ nội bộ không được lộ trong tin dựng tất định tiếng Anh. */
+  const FORBIDDEN_EN = /assumption|brief|phase|\bstep|spine|\bB-\d|\bS-\d|web_app/i
+  const COUNT_EN = (n: number): string =>
+    n === 1 ? "There's 1 more thing I'm assuming; we'll go over it in the summary." : `There are ${n} more things I'm assuming; we'll go over them in the summary.`
+  const INVITE_EN = "Have a look, and if it all looks right we'll move on."
+
+  describe("dò lời đoán tiếng Anh", () => {
+    it("câu đoán kèm đuôi 'tell me if not' ⇒ tính là đã nói, kể cả khi điều đó có dấu chấm cuối", () => {
+      const notes = "I'm assuming staff use desktop computers — tell me if not."
+      expect([...spokenAssumptionIds(notes, [as("AS1", "Staff use desktop computers")])]).toEqual(["AS1"])
+      expect([...spokenAssumptionIds(notes, [as("AS1", "Staff use desktop computers.")])]).toEqual(["AS1"])
+    })
+
+    it("mọi dấu hiệu đoán tiếng Anh đều nhận; nháy cong như nháy thẳng", () => {
+      const statement = "Staff use desktop computers at the front desk"
+      for (const notes of [
+        "I assume staff use desktop computers at the front desk.",
+        "I’m guessing staff use desktop computers at the front desk.",
+        "I suppose staff use desktop computers at the front desk.",
+        "I presume staff use desktop computers at the front desk.",
+        "I've assumed staff use desktop computers at the front desk.",
+        "My guess is that staff use desktop computers at the front desk.",
+        "Staff probably use desktop computers at the front desk.",
+        "Staff use desktop computers at the front desk; if that's wrong, say so.",
+        "Staff use desktop computers at the front desk — let me know if anything is off.",
+        "Correct me if I'm wrong, but staff use desktop computers at the front desk."
+      ])
+        expect([...spokenAssumptionIds(notes, [as("AS1", statement)])], notes).toEqual(["AS1"])
+    })
+
+    it("diễn lại + đuôi 'tell me if not': chữ 'not' của lời mời không đảo chiều phủ định của nội dung", () => {
+      const notes = "I'm assuming reception staff check patients in on desktop computers — tell me if not."
+      expect([...spokenAssumptionIds(notes, [as("AS1", "Reception staff use desktop computers to check patients in.")])]).toEqual(["AS1"])
+      // Chiều ngược lại: câu khẳng định không được khớp điều PHỦ ĐỊNH nhờ chữ "not" của lời mời
+      const affirmative = "I'm assuming patients need to install an app to book — tell me if not."
+      expect([...spokenAssumptionIds(affirmative, [as("AS2", "Patients do not need to install an app to book")])]).toEqual([])
+    })
+
+    it("phủ định viết gọn ('don't', 'cannot') vẫn được tính chiều phủ định", () => {
+      const statement = "Patients need to install an app to book appointments"
+      expect([...spokenAssumptionIds("I'm assuming patients don't need to install an app to book appointments.", [as("AS1", statement)])]).toEqual([])
+      expect([...spokenAssumptionIds("I'm assuming patients cannot install an app to book appointments.", [as("AS1", "Patients can install an app to book appointments")])]).toEqual([])
+      // Cùng chiều phủ định, một bên viết gọn một bên viết đủ, kèm đuôi "tell me if not" ⇒ vẫn là đã nói
+      const notes = "I'm assuming patients don't need to install an app to book appointments — tell me if not."
+      expect([...spokenAssumptionIds(notes, [as("AS2", "Patients do not need to install an app to book appointments.")])]).toEqual(["AS2"])
+    })
+
+    it("so nguyên văn theo cụm trọn từ: bỏ dấu chấm cuối không làm 'web' khớp vào giữa 'website'", () => {
+      expect([...spokenAssumptionIds("I'm assuming patients book on the website.", [as("AS1", "Web.")])]).toEqual([])
+      expect([...spokenAssumptionIds("I'm assuming patients book on the web — tell me if not.", [as("AS1", "On the web.")])]).toEqual(["AS1"])
+      expect([...spokenAssumptionIds("Tôi đoán bạn dùng trên website.", [as("AS1", "Dùng trên web")])]).toEqual([])
+    })
+
+    it("câu kể như sự thật, 'I'm supposed to', hoặc chỉ nói MỘT PHẦN điều tạm hiểu ⇒ chưa nói", () => {
+      expect([...spokenAssumptionIds("Patients book appointments on the mobile app, while staff work on the web.", [as("AS1", "Patients book appointments on the mobile app")])]).toEqual([])
+      expect([...spokenAssumptionIds("I'm supposed to note that staff use desktop computers.", [as("AS1", "Staff use desktop computers")])]).toEqual([])
+      expect([...spokenAssumptionIds("I'm assuming records are kept as the law requires.", [as("AS1", "Records are kept for at least 10 years as the law requires.")])]).toEqual([])
+    })
+  })
+
+  describe("câu đếm tiếng Anh", () => {
+    it("câu đếm model tự viết bị bỏ; giữ đúng một câu đếm của server, đứng trước lời mời cuối", () => {
+      const notes = "Risks are covered. There are 6 more things I'm assuming, which we'll review later. Take a look and we'll continue."
+      expect(composePhaseGateMessage({ lastMessage: notes, unspokenCount: 4, language: "en" })).toBe(
+        `Risks are covered. ${COUNT_EN(4)} Take a look and we'll continue.`
+      )
+    })
+
+    it("các kiểu câu đếm tiếng Anh khác cũng bị lọc; câu thường có số thì giữ", () => {
+      for (const sentence of [
+        "3 more assumptions will come up in the summary.",
+        "I'm also assuming 5 more things we'll check at the end.",
+        "There are two other things I've assumed; we'll go through them later.",
+        "Four assumptions left for the summary.",
+        "There’s one more thing I’m assuming; we’ll go over it in the summary.",
+        COUNT_EN(3)
+      ])
+        expect(stripModelCountSentences(`Risks are covered. ${sentence} Take a look.`), sentence).toBe("Risks are covered. Take a look.")
+      expect(stripModelCountSentences("I added two more use cases. Take a look.")).toBe("I added two more use cases. Take a look.")
+    })
+
+    it("điều chỉ được nhắc trong câu đếm tiếng Anh của model ⇒ không tính là đã nói", () => {
+      const notes = "The goals are in place. There are 3 more things I'm assuming: patients book through the mobile app and pay at the counter. Have a look."
+      const cleaned = stripModelCountSentences(notes)
+      expect(cleaned).toBe("The goals are in place. Have a look.")
+      expect([...spokenAssumptionIds(cleaned, [as("AS1", "Patients book through the mobile app and pay at the counter")])]).toEqual([])
+    })
+
+    it("câu đếm chia số ít/nhiều; không có lời mời cuối thì nối sau; câu đếm không tự thành điều 'đã nói'", () => {
+      expect(composePhaseGateMessage({ lastMessage: "Done with the goals.", unspokenCount: 1, language: "en" })).toBe(`Done with the goals. ${COUNT_EN(1)}`)
+      expect(composePhaseGateMessage({ lastMessage: "Risks are covered. Patients pay at the counter.", unspokenCount: 2, language: "en" })).toBe(
+        `Risks are covered. Patients pay at the counter. ${COUNT_EN(2)}`
+      )
+      expect(composePhaseGateMessage({ unspokenCount: 2, language: "en" })).toBe(COUNT_EN(2))
+      const message = composePhaseGateMessage({ lastMessage: "Done.", unspokenCount: 3, language: "en" })!
+      expect([...spokenAssumptionIds(message, [as("AS1", "Records and patient data are kept for at least 10 years")])]).toEqual([])
+      expect(message).not.toMatch(FORBIDDEN_EN)
+    })
+
+    it("lời mời tiếng Anh thường gặp đều được nhận là lời mời cuối", () => {
+      for (const invite of [
+        "If this looks right, we'll move on.",
+        "Let me know if anything is off.",
+        "Have a look, and we'll go ahead.",
+        "If you agree, we'll lock this in.",
+        "Please review it and we'll continue.",
+        "Tell me what you think."
+      ]) {
+        const message = composePhaseGateMessage({ lastMessage: `Risks are covered. ${invite}`, unspokenCount: 2, language: "en" })
+        expect(message, invite).toBe(`Risks are covered. ${COUNT_EN(2)} ${invite}`)
+      }
+    })
+  })
+
+  describe("đường dự phòng tiếng Anh (không notes)", () => {
+    it("có notes ⇒ vẫn dùng nguyên văn, bất kể language", () => {
+      expect(composeStepGateMessage({ notes: "  I'm guessing you use the web.  ", summary: [row("actors")], language: "en" })).toBe("I'm guessing you use the web.")
+    })
+
+    it("tóm tắt chia số ít/nhiều, nối bằng 'and', kết bằng lời mời tiếng Anh", () => {
+      expect(composeStepGateMessage({ summary: [row("use_cases"), row("use_cases"), row("actors", "update")], language: "en" })).toBe(
+        `I've updated 2 new use cases and 1 actor. ${INVITE_EN}`
+      )
+      expect(composeStepGateMessage({ summary: [row("screens", "update"), row("screens"), row("glossary")], language: "en" })).toBe(
+        `I've updated 2 screens and 1 new glossary term. ${INVITE_EN}`
+      )
+      expect(composeStepGateMessage({ summary: [row("project", "update"), row("project", "update")], language: "en" })).toBe(
+        `I've updated the system overview. ${INVITE_EN}`
+      )
+    })
+
+    it("quá 4 nhóm ⇒ phần còn lại gộp vào danh sách; giả định / sổ quyết định không được kể; không lộ chữ nội bộ", () => {
+      const summary = ["use_cases", "actors", "screens", "roles", "functions", "nfrs", "assumptions", "decisions"].map((c) => row(c))
+      const message = composeStepGateMessage({ summary, language: "en" })!
+      expect(message).toBe(`I've updated 1 new use case, 1 new actor, 1 new screen, 1 new role and 2 other parts. ${INVITE_EN}`)
+      expect(message).not.toMatch(FORBIDDEN_EN)
+    })
+
+    it("giả định mới nói bằng 'I'm (also) assuming …' và chính tin đó tính là đã nói mọi điều", () => {
+      const texts = ["Staff use desktop computers at the front desk.", "Patients book on their phones"]
+      const message = composeStepGateMessage({ summary: [row("project", "update")], newAssumptionTexts: texts, language: "en" })!
+      expect(message).toBe(
+        `I've updated the system overview. I'm assuming staff use desktop computers at the front desk. I'm also assuming patients book on their phones. If anything is different, let me know. ${INVITE_EN}`
+      )
+      expect(message).not.toMatch(FORBIDDEN_EN)
+      expect([...spokenAssumptionIds(message, [as("AS1", texts[0]), as("AS2", texts[1])])]).toEqual(["AS1", "AS2"])
+    })
+
+    it("chỉ có giả định ⇒ chỉ câu tạm hiểu, không lời mời 'have a look'", () => {
+      expect(composeStepGateMessage({ summary: [], newAssumptionTexts: ["The clinic has a single site"], language: "en" })).toBe(
+        "I'm assuming the clinic has a single site. If anything is different, let me know."
+      )
+    })
+
+    it("assumptionSentence tiếng Anh: câu đã tự mang chủ ngữ hoặc dấu hiệu đoán giữ nguyên văn; giữ từ viết tắt; rỗng ⇒ null", () => {
+      expect(assumptionSentence(["I'd say SMS is a backup channel", "We keep records for 10 years", "Staff probably work on desktops", "SMS goes through the carrier"], "en")).toBe(
+        "I'd say SMS is a backup channel. We keep records for 10 years. Staff probably work on desktops. I'm also assuming SMS goes through the carrier. If anything is different, let me know."
+      )
+      expect(assumptionSentence(["  ", "."], "en")).toBeNull()
+    })
+
+    it("tin dự phòng tiếng Anh vào cổng giai đoạn ⇒ câu đếm đứng trước lời mời cuối", () => {
+      const changed = composeStepGateMessage({ summary: [row("actors")], language: "en" })!
+      expect(composePhaseGateMessage({ lastMessage: changed, unspokenCount: 2, language: "en" })).toBe(`I've updated 1 new actor. ${COUNT_EN(2)} ${INVITE_EN}`)
+      const assumed = composeStepGateMessage({ summary: [], newAssumptionTexts: ["The clinic has a single site"], language: "en" })!
+      expect(composePhaseGateMessage({ lastMessage: assumed, unspokenCount: 1, language: "en" })).toBe(
+        `I'm assuming the clinic has a single site. ${COUNT_EN(1)} If anything is different, let me know.`
+      )
+    })
+
+    it("thiếu language ⇒ tiếng Việt như trước", () => {
+      const input = { summary: [row("use_cases")], newAssumptionTexts: ["Dùng trên web"] }
+      expect(composeStepGateMessage(input)).toBe(composeStepGateMessage({ ...input, language: "vi" }))
+      expect(composeStepGateMessage(input)).toContain(FALLBACK_INVITE)
+      expect(composePhaseGateMessage({ unspokenCount: 2 })).toBe("Còn 2 điều tôi tạm hiểu nữa, mình rà ở phần tổng kết.")
+      expect(assumptionSentence(["Dùng trên web"])).toBe(assumptionSentence(["Dùng trên web"], "vi"))
+    })
   })
 })

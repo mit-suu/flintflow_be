@@ -417,6 +417,29 @@ describe("regulatedFromStakesAnswer", () => {
     expect(regulatedFromStakesAnswer("Tuân thủ quy định nội bộ (Khuyến nghị)")).toBe(false)
     expect(regulatedFromStakesAnswer("")).toBe(false)
   })
+
+  it("FLF-260: nhãn tiếng Anh — vế pháp luật là law / legal / legislation, kể cả kèm đuôi (Recommended)", () => {
+    expect(regulatedFromStakesAnswer("Internal rules and the law")).toBe(true)
+    expect(regulatedFromStakesAnswer("Internal rules and the law (Recommended)")).toBe(true)
+    expect(regulatedFromStakesAnswer("  internal rules and the LAWS  ")).toBe(true)
+    expect(regulatedFromStakesAnswer("Legal requirements apply")).toBe(true)
+    expect(regulatedFromStakesAnswer("Data protection legislation applies")).toBe(true)
+  })
+
+  it("FLF-260: chữ pháp luật tiếng Anh bị phủ định trong cùng vế ⇒ không phải vế pháp luật", () => {
+    expect(regulatedFromStakesAnswer("Internal rules only (no legal requirements)")).toBe(false)
+    expect(regulatedFromStakesAnswer("Internal policies only, not bound by law")).toBe(false)
+    expect(regulatedFromStakesAnswer("Chỉ nội bộ, chưa cần qua legal")).toBe(false)
+    // Phủ định ở vế khác thì không tính
+    expect(regulatedFromStakesAnswer("We must follow the law, no exceptions")).toBe(true)
+  })
+
+  it("FLF-260: vế nội bộ tiếng Anh trả false — 'regulations' nội bộ không phải pháp luật", () => {
+    expect(regulatedFromStakesAnswer("Internal rules only")).toBe(false)
+    expect(regulatedFromStakesAnswer("Internal rules only (Recommended)")).toBe(false)
+    expect(regulatedFromStakesAnswer("Comply with internal regulations")).toBe(false)
+    expect(regulatedFromStakesAnswer("Internal regulations only")).toBe(false)
+  })
 })
 
 describe("sanitizeModelOps — stakes phải khớp vế user đã chốt", () => {
@@ -461,6 +484,15 @@ describe("sanitizeModelOps — stakes phải khớp vế user đã chốt", () =
 
   it("chưa có quyết định nào về tuân thủ ⇒ không chặn", () => {
     expect(sanitizeModelOps(FIXTURE, [{ op: "set", path: "project.stakes", value: "internal" }], "B-0.1").errors).toEqual([])
+  })
+
+  it("FLF-260: phiên tiếng Anh — user bấm 'Internal rules and the law' thì chặn y như vế pháp luật tiếng Việt", () => {
+    const legalEn = withStakesDecision("Internal rules and the law")
+    expect(sanitizeModelOps(legalEn, [{ op: "set", path: "project.stakes", value: "production" }], "B-0.1").errors).toMatchObject([
+      { rule: "op_not_allowed", op_index: 0, path: "project.stakes" }
+    ])
+    const internalEn = withStakesDecision("Internal rules only")
+    expect(sanitizeModelOps(internalEn, [{ op: "set", path: "project.stakes", value: "internal" }], "B-0.1").errors).toEqual([])
   })
 })
 

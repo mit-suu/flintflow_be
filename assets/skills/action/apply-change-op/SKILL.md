@@ -44,7 +44,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    Resolve "it", "that one", "the one above" from the chat. Change only what the request asks now — never
    re-apply edits from earlier turns; those are already in the document.
 1. **Locate** the target by key. Resolve names through the projection and glossary: "rename Admin to Administrator" → `actors[id=A03].name`.
-2. **Ambiguous?** Several possible targets, or the intent could mean different fields → return `clarification_needed` with **one** short question in the user's language, and no ops.
+2. **Ambiguous?** Several possible targets, or the intent could mean different fields → return `clarification_needed` with **one** short question in the reply language (the `## Reply language` section at the end of this prompt, Vietnamese when it is absent), and no ops.
 2b. **The question is read by the user, not by code.** Name every screen, actor, role, feature, function and
    entity by its **name** from the projection — never by its id (`S02`, `A03`, `R1`, `F2`, `FN010`, `E04`),
    and never as a list of ids (`flow_to: S02, S03` ⇒ `'Reset Password', 'Schedule Composer'`). No paths
@@ -69,7 +69,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    anything missing from your list is deleted.
 4. **Cascade** deletes in the same batch (`draft-to-ops/references/invariants.md`). If the change necessarily breaks an invariant (e.g. deleting the last screen), return `clarification_needed` explaining what blocks it.
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place — do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
-6. **English** values for SRS content; `reason` in the user's language — it becomes the §I Record of Changes line.
+6. **English** values for SRS content; `reason` in the reply language — it becomes the §I Record of Changes line.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
 8. **Only touch what the request names.** An element the user did not mention must come out of this batch
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got

@@ -41,6 +41,7 @@ import { composeStepGateMessage, gateAssumptionIdsOfRun, type GateAssumptionBrie
 import { acquireRun, finishRun, getRunState } from "./run-state.service.js"
 import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { z } from "zod"
 
@@ -49,7 +50,8 @@ type GateActionKind = z.infer<typeof gateActionSchema>
 export const REGENERATE_LIMIT = "REGENERATE_LIMIT"
 export const CALL_LIMIT = "CALL_LIMIT"
 
-const REVISION_FALLBACK_MESSAGE = "Tôi đã cập nhật lại theo ý bạn."
+/** Lời xác nhận sau revision khi không có gì khác để nói — theo ngôn ngữ trả lời của phiên (FLF-260). */
+const REVISION_FALLBACK_MESSAGE: Readonly<Record<ReplyLanguage, string>> = { vi: "Tôi đã cập nhật lại theo ý bạn.", en: "I've updated it as you asked." }
 
 /** 409 với `meta` cho FE (contract §0.3: `{ regenerate_used: 3 }` / `{ calls_used: 8 }`). */
 export class GateLimitError extends ApiError {
@@ -277,7 +279,7 @@ const redraft = async (
   stepId: string,
   userId: string,
   callKind: "revision" | "regenerate",
-  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string> },
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; replyLanguage?: ReplyLanguage },
   deps: StepRunnerDeps,
   range: SeqRange
 ): Promise<{ spineVersion: number; notes?: string; summary: ChangeSummary[]; applied: boolean }> => {
@@ -307,6 +309,10 @@ export const gate = async (
   const run = await acquireRun(projectId, stepId, { by: userId, stage: "draft", detail_vi: "Xử lý cổng chốt" })
   try {
     const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
+    // FLF-260: ngôn ngữ trả lời do nơi gọi đọc từ phiên (`deps.replyLanguage`) — gate không tự đoán: ghi chú cổng và chữ của
+    // chip không phải tin để đoán ngôn ngữ. Thiếu ⇒ lượt soạn lại như cũ (không khối "Reply language"), câu cố định tiếng Việt.
+    const replyLanguage = d.replyLanguage
+    const language = replyLanguage ? { replyLanguage } : {}
     const record = await load(projectId)
     assertVersion(record, input.base_version)
     const spine = stripRecord(record)
@@ -399,7 +405,7 @@ export const gate = async (
 
       if (input.action === "regenerate") {
         const functionScope = input.function_id ? { revisionRequest: `Regenerate scope: chỉ function ${input.function_id}.` } : {}
-        finalVersion = (await redraft(projectId, stepId, userId, "regenerate", functionScope, d, range)).spineVersion
+        finalVersion = (await redraft(projectId, stepId, userId, "regenerate", { ...functionScope, ...language }, d, range)).spineVersion
       } else {
         const revised = await redraft(
           projectId,
@@ -411,7 +417,8 @@ export const gate = async (
             // Hai quyền, hai tập (FLF-242): sửa câu/ghi path thật được cả tập giả định còn mở của cổng; đổi `status` chỉ
             // được phần tin cổng đã nói ra.
             gateAssumptionIds: gateAssumptionIdsOf(stripRecord(await load(projectId)), stepId),
-            statusAssumptionIds: spokenIds
+            statusAssumptionIds: spokenIds,
+            ...language
           },
           d,
           range
@@ -419,7 +426,9 @@ export const gate = async (
         finalVersion = revised.spineVersion
         // Lời AI xác nhận điều vừa sửa: notes của model; thiếu thì dựng từ tóm tắt; revision có ghi op mà vẫn không có gì để
         // nói (chỉ đổi giả định) thì một câu chung — FE luôn có lời để hiện khi Spine đã đổi
-        revisionMessage = composeStepGateMessage({ notes: revised.notes, summary: revised.summary }) ?? (revised.applied ? REVISION_FALLBACK_MESSAGE : undefined)
+        revisionMessage =
+          composeStepGateMessage({ notes: revised.notes, summary: revised.summary, language: replyLanguage }) ??
+          (revised.applied ? byLanguage(replyLanguage ?? "vi", REVISION_FALLBACK_MESSAGE) : undefined)
         const backToProgress = await applyTransaction(projectId, {
           base_version: finalVersion,
           ops: [{ op: "set", path: `steps[id=${stepId}].status`, value: "in_progress" }],

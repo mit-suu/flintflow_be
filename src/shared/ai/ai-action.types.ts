@@ -3,6 +3,8 @@
  * Bảng giá ở credit-reservation.service.ts, schema đầu ra ở response-parser.ts.
  * Tên giá trị là hợp đồng với T11/T13 — đổi phải qua PR contract-change.
  */
+import type { ReplyLanguage } from "../i18n/reply-language.js"
+
 export enum ActionType {
   // ─── Khung hành động pipeline (Phases §3) ───
   ELICIT = "elicit",
@@ -70,6 +72,8 @@ export interface AiActionInput {
   promptVariables?: Record<string, any>
   rawPrompt?: string
   systemInstruction?: string
+  /** FLF-260: có thì `buildPrompt` nối khối "Reply language" vào cuối prompt (chỉ nhận `vi` | `en`). */
+  replyLanguage?: ReplyLanguage
   [key: string]: any
 }
 
