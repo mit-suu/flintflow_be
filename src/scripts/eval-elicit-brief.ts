@@ -34,7 +34,8 @@
  * Cờ: --api URL · --email · --password · --runs N (mặc định 3) · --cases a,b · --label TÊN · --compare A.json B.json
  *     · --render A.json (dựng lại `.md` từ kết quả đã lưu, không gọi provider)
  *     · --project ID (chạy trên một project TRỐNG có sẵn thay vì tạo mới — tài khoản đã đụng trần dự án của
- *       gói thì không tạo được project nào nữa; chỉ dùng được với `--runs 1` vì lượt sau cần project trắng)
+ *       gói thì không tạo được project nào nữa; chỉ dùng được với `--runs 1` vì lượt sau cần project trắng.
+ *       Project phải thật sự trắng, driver tự kiểm và dừng nếu không — xem `assertVirginProject`)
  * Kết quả: `test/e2e-ai/results/elicit-brief-<label>-<ISO>.{json,md}`.
  */
 import fs from "node:fs"
@@ -371,6 +372,43 @@ const postSse = async (pathname: string, body: unknown): Promise<Response> =>
 const spineVersion = async (projectId: string): Promise<number> =>
   (await call<{ spine_version: number }>("GET", `/projects/${projectId}/spine`)).spine_version
 
+/**
+ * Dừng nếu project đã có hội thoại hoặc quyết định cũ.
+ *
+ * Một project nhìn thì trống (chưa bước nào accepted) vẫn có thể mang hội thoại của lần dùng trước, và chủ đề
+ * đã chốt ở đó nằm trong sổ quyết định. Luật "không hỏi lại điều đã chốt" khi ấy làm AI bỏ hẳn những thẻ mà
+ * ca đo sinh ra để đo — số đo trông như một đợt tụt chất lượng trong khi AI làm đúng. Gặp thật: một project
+ * đã trả lời thẻ Tuân thủ từ lần trước, lượt đo sau đó không còn thẻ nào về nền tảng lẫn tuân thủ.
+ *
+ * Sai kiểu này không có dấu hiệu nào trong báo cáo, nên phải chặn ở đây chứ không cảnh báo rồi chạy tiếp.
+ */
+const assertVirginProject = async (projectId: string): Promise<void> => {
+  const [steps, spine, sessions] = await Promise.all([
+    call<{ steps: Array<{ id: string; status: string }> }>("GET", `/projects/${projectId}/steps`),
+    call<{ decisions: unknown[] }>("GET", `/projects/${projectId}/spine`),
+    call<Array<{ _id: string; is_pipeline: boolean }>>("GET", `/projects/${projectId}/chats`)
+  ])
+  const accepted = steps.steps.filter((s) => s.status === "accepted").map((s) => s.id)
+  const decisions = spine.decisions.length
+  const pipeline = sessions.find((s) => s.is_pipeline)
+  const messages = pipeline
+    ? (await call<{ messages?: unknown[] }>("GET", `/projects/${projectId}/chats/${pipeline._id}`)).messages?.length ?? 0
+    : 0
+
+  const dirt = [
+    accepted.length > 0 ? `${accepted.length} bước đã chốt (${accepted.join(", ")})` : null,
+    decisions > 0 ? `${decisions} chủ đề trong sổ quyết định` : null,
+    messages > 0 ? `${messages} tin trong phiên chính` : null
+  ].filter((x): x is string => x !== null)
+
+  if (dirt.length > 0) {
+    throw new Error(
+      `--project ${projectId} không trắng: ${dirt.join("; ")}. Số đo sẽ sai mà không có dấu hiệu nào — AI bỏ qua ` +
+        "những thẻ mà ca đo sinh ra để đo, vì chủ đề đã chốt từ lần dùng trước. Dùng project khác hoặc bỏ --project để tạo mới."
+    )
+  }
+}
+
 /** Chạy B-0.1 với ý tưởng của ca, ghi mọi thẻ, tới cổng chốt. */
 const driveB01 = async (projectId: string, sessionId: string, idea: string, baseVersion: number): Promise<DriveOutcome> => {
   const res = await postSse(`/projects/${projectId}/steps/${STEP_ID}/run`, { session_id: sessionId, base_version: baseVersion, message: idea })
@@ -419,6 +457,7 @@ const runCase = async (c: EvalCase, onResult: (r: RunResult) => void): Promise<v
     await login()
     const projectId =
       ARGS.project ?? (await call<{ _id: string }>("POST", "/projects", { name: `Brief eval ${c.id} ${ARGS.label} #${run}`, domain: "General" }))._id
+    if (ARGS.project) await assertVirginProject(projectId)
     let result: RunResult
     try {
       const sessions = await call<Array<{ _id: string; is_pipeline: boolean }>>("GET", `/projects/${projectId}/chats`)
