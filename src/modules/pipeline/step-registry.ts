@@ -130,6 +130,21 @@ export const isRegisteredStep = (stepId: string): boolean => {
   }
 }
 
+/**
+ * `id` có phải một ĐƠN VỊ GIAI ĐOẠN không (`"B-1"`, `"S-5@S03"`) — khác id bước (`"B-1.1"`).
+ *
+ * Lượt phỏng vấn mở đầu giai đoạn không thuộc bước nào: nó hỏi gộp cho cả giai đoạn, nên run-state của nó mang
+ * đơn vị giai đoạn làm chủ (`phase-runner.service.ts`). Nơi nào lọc run-state theo `isRegisteredStep` mà quên
+ * đơn vị giai đoạn thì vứt mất lượt đó cùng những câu đang chờ user trả lời.
+ */
+export const isPhaseUnit = (id: string): boolean => {
+  const [phase, loop, ...rest] = id.split("@")
+  if (rest.length > 0 || loop === "") return false
+  if (!(PHASES as readonly string[]).includes(phase)) return false
+  // Chỉ giai đoạn có vòng lặp mới mang đuôi màn; "B-1@x" là id bịa.
+  return loop === undefined || phase === LOOP_PHASE
+}
+
 export const phaseOf = (stepId: string): PhaseId => getStep(stepId).phase
 
 // ─── vòng S-5 ────────────────────────────────────────────────────

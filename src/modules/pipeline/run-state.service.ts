@@ -23,7 +23,7 @@ export type { RunStage, RunStatus }
 import { ApiError } from "../../shared/utils/api-error.js"
 import { RUN_CANCELLED_REASON, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
 import type { ModelQuestion } from "./question-shape.js"
-import { isRegisteredStep } from "./step-registry.js"
+import { isPhaseUnit, isRegisteredStep } from "./step-registry.js"
 
 /** Khoá hết hạn sau ngần này nếu không có nhịp heartbeat nào — lượt chết không giữ step quá lâu. */
 export const LOCK_TTL_MS = 45_000
@@ -297,6 +297,10 @@ export const getRunState = async (projectId: string, stepId: string): Promise<Ru
 /**
  * Lượt còn sống của dự án (pill "đang chạy nền" khôi phục sau khi mở lại trang). Lượt của step đã rời registry
  * (B-0.4, FLF-221) coi như stale: project cũ đứng ở cổng B-0.4 không được dựng lại cổng của một step không còn chạy được.
+ *
+ * Chủ của một lượt là id bước HOẶC đơn vị giai đoạn: lượt phỏng vấn mở đầu giai đoạn hỏi gộp cho cả giai đoạn nên
+ * không thuộc bước nào. Lọc mỗi `isRegisteredStep` thì lượt đó bị bỏ, và rớt kết nối giữa lúc nó đang chờ là user
+ * mở lại trang không thấy câu nào — câu vẫn nằm trong run-state, chỉ không ai lấy ra được.
  */
 export const getActiveRun = async (projectId: string): Promise<RunStateDoc | null> => {
   const docs = useMemory()
@@ -310,7 +314,7 @@ export const getActiveRun = async (projectId: string): Promise<RunStateDoc | nul
         .lean()) as Record<string, unknown>[])
   const alive = docs
     .map(toDoc)
-    .filter((d) => isRegisteredStep(d.step_id))
+    .filter((d) => isRegisteredStep(d.step_id) || isPhaseUnit(d.step_id))
     .find((d) => d.status !== "running" || new Date(d.locked_until).getTime() > Date.now())
   return alive ?? null
 }
