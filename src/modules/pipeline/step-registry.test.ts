@@ -9,6 +9,7 @@ import { FIXED_OWNER_STEPS, FEATURE_OWNER_STEPS, FUNCTION_OWNER_STEP_TEMPLATES }
 import {
   FIXED_STEP_COUNT,
   PHASES,
+  isPhaseUnit,
   expandS5,
   getStep,
   loadStepRegistry,
@@ -157,5 +158,16 @@ describe("registry — Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 d
     const steps = FIXTURE.steps.map((s) => (s.id === "S-1.1" ? { ...s, status: "revision_requested" as const } : s))
     const spine: Spine = { ...structuredClone(FIXTURE), steps: [...brief, ...steps] }
     expect(nextStep(spine)?.id).toBe("S-1.1")
+  })
+})
+
+describe("isPhaseUnit", () => {
+  it("nhận đơn vị giai đoạn, từ chối id bước — hai thứ khác nhau dù trông giống", () => {
+    for (const unit of [...PHASES, "S-5@S03", "S-5@nonscreen"]) expect(isPhaseUnit(unit), unit).toBe(true)
+    for (const step of ["B-1.1", "S-5.4@S03", "B-0.4"]) expect(isPhaseUnit(step), step).toBe(false)
+  })
+
+  it("từ chối id bịa: phase không có thật, đuôi màn gắn vào giai đoạn không có vòng lặp, đuôi rỗng", () => {
+    for (const bad of ["", "X-9", "B-1@S03", "S-5@", "S-5@S03@x"]) expect(isPhaseUnit(bad), bad).toBe(false)
   })
 })

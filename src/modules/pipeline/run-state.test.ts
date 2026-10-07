@@ -5,6 +5,7 @@ import {
   activeRunCount,
   cancelRun,
   clearRuns,
+  detachRun,
   finishRun,
   getActiveRun,
   getRunState,
@@ -79,6 +80,25 @@ describe("khôi phục trạng thái (BUG-07)", () => {
     expect(active?.step_id).toBe("S-3.1")
 
     await finishRun(PROJECT, "S-3.1", active!.run_id, "done")
+    expect(await getActiveRun(PROJECT)).toBeNull()
+  })
+
+  it("lượt phỏng vấn đầu giai đoạn bị tách khỏi kết nối vẫn tìm lại được kèm câu đang chờ", async () => {
+    // Chủ của lượt này là ĐƠN VỊ giai đoạn, không phải id bước — nó hỏi gộp cho cả giai đoạn
+    const run = await acquireRun(PROJECT, "B-1")
+    await touchRun(PROJECT, "B-1", run.run_id, { status: "waiting_answer", questions: [{ id: "Q_data_retention", text: "Giữ hồ sơ bao lâu?" }] })
+    await detachRun(PROJECT, "B-1", run.run_id)
+
+    const active = await getActiveRun(PROJECT)
+    expect(active?.step_id).toBe("B-1")
+    expect(active?.status).toBe("waiting_answer")
+    expect(active?.questions).toHaveLength(1)
+  })
+
+  it("lượt của bước đã rời registry vẫn bị bỏ — B-0.4 không phải đơn vị giai đoạn", async () => {
+    const run = await acquireRun(PROJECT, "B-0.4")
+    await touchRun(PROJECT, "B-0.4", run.run_id, { status: "waiting_answer", questions: [{ id: "Q1", text: "?" }] })
+
     expect(await getActiveRun(PROJECT)).toBeNull()
   })
 })
