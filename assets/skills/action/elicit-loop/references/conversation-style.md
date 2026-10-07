@@ -90,3 +90,24 @@ Hai câu cùng một ý làm lượt nói dài ra mà không thêm gì, và ở 
   hiểu là hệ thống phục vụ một bệnh viện đa khoa tuyến tỉnh; không bao gồm triển khai liên bệnh viện hoặc nhiều cơ sở."
 - **Nên**: "Phạm vi tôi đang theo là một bệnh viện, chưa tính nhiều cơ sở. Nếu khác, bạn nói tôi nhé." (một câu, một ý,
   vẫn mở cửa cho khách sửa)
+
+## 11. Ngắt đoạn — khối chữ liền không ai đọc
+
+Khung chat dựng lời AI theo dòng: một dòng trống thành khoảng cách giữa hai đoạn, `- ` thành gạch đầu dòng. Viết liền
+một mạch là tự vứt bỏ phần đó, và khách phải đọc hết năm sáu câu mới thấy chỗ nào cần mình trả lời.
+
+- **Không nên**: "Ý tưởng bạn vừa nêu đã đủ để bắt đầu rồi: một cổng dịch vụ sinh viên gom xem thời khóa biểu, đăng ký
+  học vượt, làm các loại giấy và xem điểm vào một chỗ, thay vì phải lên phòng dịch vụ sinh viên. Tôi đang hình dung nó
+  phục vụ sinh viên của một trường, còn cán bộ phòng dịch vụ sinh viên là bên xử lý yêu cầu — nếu khác thì bạn nói tôi
+  nhé. Để ý tưởng rõ hơn, bạn kể giúp tôi: ở trường bạn, việc nào trong số đó gây phiền nhất hôm nay và diễn ra thế
+  nào?" (một khối sáu câu, ba việc khác nhau dính vào nhau)
+- **Nên**:
+
+  ```
+  Một cổng gom thời khóa biểu, đăng ký học vượt, làm giấy tờ và xem điểm vào một chỗ — đủ rõ để bắt đầu.
+
+  Tôi đang hình dung nó phục vụ sinh viên của một trường, còn cán bộ phòng dịch vụ sinh viên là bên xử lý yêu cầu.
+  Nếu khác, bạn nói tôi nhé.
+
+  Ở trường bạn, việc nào trong số đó gây phiền nhất hôm nay, và nó diễn ra thế nào?
+  ```
