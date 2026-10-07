@@ -34,6 +34,11 @@ export interface RecordedTurn {
   user_message: string
   reply: string
   questions: RecordedQuestion[]
+  /**
+   * Bước phát lượt này (`B-0.1`, hay `B-1` cho lượt hỏi gộp đầu giai đoạn). Chỉ để người đọc báo cáo biết
+   * thẻ nào của bước nào — cách chấm không đổi theo bước, mọi câu trong mọi lượt đều bị soi cùng một bộ luật.
+   */
+  step_id?: string
 }
 
 /** Spine đọc lại sau khi step kết thúc — chỉ phần luồng Brief ghi. */
