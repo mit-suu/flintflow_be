@@ -10,6 +10,7 @@ import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../share
 import { env } from "../../config/env.js"
 import { REMEMBER_ME_MAX_AGE_MS, REMEMBER_ME_TTL } from "../../shared/auth/auth-cookie.js"
 import { listMyOrganizations, type OrganizationSummary } from "../organization/organization.service.js"
+import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 
 export interface AuthResult {
   accessToken: string
@@ -22,6 +23,8 @@ export interface AuthResult {
     emailVerified: boolean
     name?: string
     role?: string
+    /** FLF-259: FE áp ngôn ngữ tài khoản ngay khi đăng nhập; `null` = chưa chọn. */
+    locale: UserLocale | null
   }
   organizations: OrganizationSummary[]
   activeOrgId: string | null
@@ -251,7 +254,8 @@ export const login = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
+      role: user.role,
+      locale: toUserLocale(user.locale)
     },
     ...org
   }
@@ -312,7 +316,8 @@ export const confirmEmailVerification = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
+      role: user.role,
+      locale: toUserLocale(user.locale)
     },
     ...org
   }
@@ -523,7 +528,8 @@ export const googleAuth = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
+      role: user.role,
+      locale: toUserLocale(user.locale)
     },
     ...org
   }

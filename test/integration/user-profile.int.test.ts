@@ -39,6 +39,38 @@ describe("GET /users/me", () => {
   })
 })
 
+describe("PATCH /users/me — ngôn ngữ giao diện (FLF-259)", () => {
+  it("chưa chọn ⇒ locale null ở login và /users/me; lưu en ⇒ /users/me và lần đăng nhập sau trả en", async () => {
+    await seedLocalUser()
+    const firstLogin = await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })
+    expect(firstLogin.body.data.user.locale).toBeNull()
+    const { agent, auth } = await loginAgent()
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.locale).toBeNull()
+
+    const res = await agent.patch("/api/v1/users/me").set(auth).send({ locale: "en" })
+    expect(res.status).toBe(200)
+    expect(res.body.data.locale).toBe("en")
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.locale).toBe("en")
+
+    const nextLogin = await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })
+    expect(nextLogin.body.data.user.locale).toBe("en")
+  })
+
+  it("locale lạ, hoặc kèm field không cho đổi ⇒ 400 VALIDATION_ERROR, tài khoản giữ nguyên", async () => {
+    await seedLocalUser()
+    const { agent, auth } = await loginAgent()
+
+    for (const body of [{ locale: "fr" }, { locale: "en", role: "admin" }]) {
+      const res = await agent.patch("/api/v1/users/me").set(auth).send(body)
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("VALIDATION_ERROR")
+    }
+    const stored = await User.findOne({ email: EMAIL }).lean()
+    expect(stored?.locale).toBeUndefined()
+    expect(stored?.role).toBe("user")
+  })
+})
+
 describe("POST /users/me/password", () => {
   it("đúng mật khẩu hiện tại ⇒ đổi được, phiên hiện tại giữ nguyên, phiên khác bị thu hồi", async () => {
     await seedLocalUser()

@@ -50,6 +50,20 @@ describe("PATCH /users/me", () => {
     expect(userService.updateMe).not.toHaveBeenCalled()
   })
 
+  it("FLF-259: lưu ngôn ngữ giao diện", async () => {
+    const outcome = await invoke(updateMe, USER, { locale: "en" })
+    expect(outcome.status).toBe(200)
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { locale: "en" })
+  })
+
+  it("FLF-259: locale ngoài vi/en, hoặc kèm field không cho đổi ⇒ 400 VALIDATION_ERROR, không ghi", async () => {
+    const unknownLocale = await invoke(updateMe, USER, { locale: "fr" })
+    const withRole = await invoke(updateMe, USER, { locale: "en", role: "admin" })
+    expect(unknownLocale.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    expect(withRole.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    expect(userService.updateMe).not.toHaveBeenCalled()
+  })
+
   it("chưa đăng nhập ⇒ 401", async () => {
     const outcome = await invoke(updateMe, undefined, { name: "x" })
     expect(outcome.error).toMatchObject({ statusCode: 401, code: "UNAUTHORIZED" })

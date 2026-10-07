@@ -180,3 +180,7 @@ Ba project vitest (`vitest.config.ts`), `npm test` chạy cả ba:
 
 Tiếng Anh cho: tên field Spine (snake_case đúng như tài liệu), nội dung render vào SRS, nhãn `.puml`.
 Tiếng Việt cho: nhãn UI, thông báo lỗi cho user, comment nội bộ.
+
+Ngôn ngữ giao diện của tài khoản: `User.locale` (`vi` | `en`, **không default** — thiếu = chưa chọn), hằng số ở
+`shared/i18n/locale.ts`. Đổi qua `PATCH /users/me`; trả ở `GET /users/me` và `user` của login / Google / xác thực
+email (`null` khi chưa chọn). Email vẫn chỉ tiếng Việt.
