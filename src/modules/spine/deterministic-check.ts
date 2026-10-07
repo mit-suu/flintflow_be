@@ -177,7 +177,9 @@ const GATE_STEP = {
   usecase_floating: "S-3.4",
   function_without_uc: "S-4.4",
   orphan_entity: "S-4.5",
-  unresolved_many_to_many: "S-4.5"
+  unresolved_many_to_many: "S-4.5",
+  /** Tên hệ thống tiếng Anh được chốt ở B-2.3; trước đó tên dự án tiếng Việt chưa phải khuyết tật. */
+  non_english_project_name: "B-2.3"
 } as const
 
 const OPEN_GATE: StepGate = { done: () => true }
@@ -1069,18 +1071,21 @@ interface ScanItem {
 }
 
 /** Field thuộc cột Sở hữu (render vào SRS). Bỏ `addendum`, `glossary[].term_native`, reason, message — theo ngôn ngữ user. */
-const ownedTexts = (spine: Spine): ScanItem[] => {
+const ownedTexts = (spine: Spine, gate: StepGate): ScanItem[] => {
   const p = spine.project
+  // BUG-11: `project.name` là tên user đặt cho dự án (tiếng Việt là bình thường). Nó chỉ lọt vào tài liệu khi
+  // CHƯA có `system_name`; đã chốt tên hệ thống tiếng Anh rồi thì đừng bắt user đổi tên dự án nữa.
+  // Và chừng nào bước chốt tên hệ thống chưa chạy, tên tiếng Việt chưa phải khuyết tật: bước đó sẽ hỏi user
+  // một tên tiếng Anh. Báo trước là báo về việc luồng sắp tự lo, user không có gì đúng để làm lúc đó.
+  const scanProjectName = !p.system_name?.trim() && gate.done(GATE_STEP.non_english_project_name)
   return [
-    // BUG-11: `project.name` là tên user đặt cho dự án (tiếng Việt là bình thường). Nó chỉ lọt vào tài liệu
-    // khi CHƯA có `system_name`; đã chốt tên hệ thống tiếng Anh rồi thì đừng bắt user đổi tên dự án nữa.
     {
       path: "project",
       target_id: null,
       section: "fixed:1",
       step: p.system_name?.trim() ? "B-0.1" : "S-2.1",
       fields: {
-        ...(p.system_name?.trim() ? {} : { name: p.name }),
+        ...(scanProjectName ? { name: p.name } : {}),
         system_name: p.system_name,
         release_scope: p.release_scope
       }
@@ -1128,8 +1133,8 @@ const ownedTexts = (spine: Spine): ScanItem[] => {
   ]
 }
 
-const nonEnglishContent = (spine: Spine): FlagCandidate[] =>
-  ownedTexts(spine).flatMap((item) => {
+const nonEnglishContent = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+  ownedTexts(spine, gate).flatMap((item) => {
     const offending = Object.entries(item.fields)
       .filter(([, v]) => textsOf(v).some((t) => VIETNAMESE_DIACRITICS.test(t)))
       .map(([k]) => `${item.path}.${k}`)
@@ -1177,7 +1182,7 @@ export const runDeterministicCheck = (
     ...useCaseAccountAccessRelation(spine),
     ...namingShape(spine),
     ...systemNameMissing(spine),
-    ...nonEnglishContent(spine)
+    ...nonEnglishContent(spine, gate)
   ], options.ruleProfile)
 
   const index = buildIdIndex(spine)

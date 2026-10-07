@@ -3,7 +3,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
-import type { Change, Spine } from "./spine.types.js"
+import type { Change, Spine, StepStatus } from "./spine.types.js"
 import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
 import { computeSourceHash } from "./source-hash.js"
@@ -21,6 +21,11 @@ const variant = (fn: (s: Spine) => void): Spine => {
 }
 const red = (c: FlagCandidate[]) => c.filter((f) => f.level === "red")
 const byRule = (c: FlagCandidate[], rule: string) => c.filter((f) => f.rule_id === rule)
+
+/** Bước chốt tên hệ thống không có trong fixture; luật tiếng Anh chỉ soi tên dự án sau khi bước đó chốt. */
+const withSystemNameStep = (s: Spine, status: StepStatus): void => {
+  s.steps = [...s.steps, { id: "B-2.3", status, first_seq: null, last_seq: null, accepted_at: null }]
+}
 
 describe("RULES", () => {
   it("13 luật đỏ + 19 luật vàng; 3 luật không waive được", () => {
@@ -306,7 +311,10 @@ describe("runDeterministicCheck", () => {
 
 
   it("BUG-11: đã có system_name tiếng Anh ⇒ không quét project.name nữa", () => {
-    const viName = (s: Spine) => (s.project.name = "Phòng khám Minh An")
+    const viName = (s: Spine) => {
+      s.project.name = "Phòng khám Minh An"
+      withSystemNameStep(s, "accepted")
+    }
     const withoutSystemName = variant((s) => {
       viName(s)
       s.project.system_name = null
@@ -526,6 +534,32 @@ describe("system_name_missing (FLF-177)", () => {
   })
 })
 
+describe("non_english_content — tên dự án chờ bước chốt tên hệ thống", () => {
+  /** Chưa chốt tên hệ thống nên tên dự án sẽ lọt vào tài liệu; `systemNameStep` quyết bước đó đã chạy chưa. */
+  const vietnameseProjectName = (systemNameStep: StepStatus | null): Spine =>
+    variant((s) => {
+      s.project.name = "Cổng dịch vụ sinh viên"
+      s.project.system_name = null
+      if (systemNameStep) withSystemNameStep(s, systemNameStep)
+    })
+
+  const flagsOnProjectName = (spine: Spine, atBaseline = false) =>
+    byRule(runDeterministicCheck(spine, [], { atBaseline }), "non_english_content").filter((f) => f.message.includes("Thông tin dự án — Tên"))
+
+  it("chưa chốt bước đặt tên hệ thống ⇒ không bắt tên dự án", () => {
+    expect(flagsOnProjectName(vietnameseProjectName(null))).toHaveLength(0)
+    expect(flagsOnProjectName(vietnameseProjectName("in_progress"))).toHaveLength(0)
+  })
+
+  it("đã chốt bước đặt tên hệ thống mà vẫn chưa có tên hệ thống ⇒ bắt tên dự án", () => {
+    expect(flagsOnProjectName(vietnameseProjectName("accepted"))).toHaveLength(1)
+  })
+
+  it("lượt ký bản mở hết cổng: tên dự án tiếng Việt bị bắt dù bước đặt tên chưa chạy", () => {
+    expect(flagsOnProjectName(vietnameseProjectName(null), true)).toHaveLength(1)
+  })
+})
+
 describe("thông điệp cờ cho người đọc (mode 1: không in mã kỹ thuật)", () => {
   const RAW = [/fixed:/, /\bfeature:/, /\bfunction:/, /custom:/, /\[id=/, /\bS-\d/, /\bB\d{4}/, /\bU\d\b/, /\bA\d\b/, /\bNFR (reliability|performance)\b/, /metric\/threshold/]
   const check = (flags: FlagCandidate[]) => {
@@ -648,6 +682,7 @@ describe("non_english_content — tầm nhìn/mục tiêu chỉ về S-1.1", () 
       variant((s) => {
         s.project.name = "Phòng khám Minh An"
         s.project.system_name = null
+        withSystemNameStep(s, "accepted")
       })
     )
     expect(byRule(nameFlags, "non_english_content").find((f) => f.section_id === "fixed:1")).toMatchObject({ remediation_step: "S-2.1" })
