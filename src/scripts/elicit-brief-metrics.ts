@@ -2,8 +2,8 @@
  * elicit-brief-metrics.ts — chấm một lượt chạy luồng Brief (B-0.1) bằng phép đếm; hàm thuần, không gọi mạng.
  * ─────────────────────────────────────────────────────────────────
  * Mỗi chỉ số dưới đây là một khuyết tật **đã thật sự xảy ra** khi chạy luồng Brief, không phải chỉ số nghĩ
- * ra cho đủ bảng: option không nói được/mất, option là số trần, nhãn lồng nhau (ca khớp longest-match),
- * vốn từ nội bộ lọt ra chữ user đọc, thẻ "Nền tảng" biến mất khi user đã nêu nền tảng, giá trị B-0 bị tự
+ * ra cho đủ bảng: option không nói được/mất, option là số trần, nhãn lồng nhau mà description không vạch
+ * ranh giới, vốn từ nội bộ lọt ra chữ user đọc, thẻ "Nền tảng" biến mất khi user đã nêu nền tảng, giá trị B-0 bị tự
  * quyết mà không hỏi cũng không ghi giả định, và AI thêm một lượng từ user chưa nói.
  *
  * Chỉ **đếm và tập hợp**, không so chuỗi nguyên văn: model chạy ở `temperature: 0.5` nên so từng chữ thì
@@ -64,8 +64,12 @@ export interface BriefMetrics {
   options_without_description: number
   /** Nhãn là số trần mà không có `description` nói số đó mua được gì (Rule 8). */
   numeric_only_options: number
-  /** Nhãn là chuỗi con của một nhãn khác trong cùng thẻ — ca khớp longest-match. */
-  nested_labels: number
+  /**
+   * Nhãn là chuỗi con của một nhãn khác trong cùng thẻ **và** description của hai option không vạch ranh giới
+   * giữa chúng — khi đó cả hai option đều đọc ra đúng, user không có cơ sở chọn. Nhãn lồng nhau mà ranh giới
+   * đã vạch thì không tính: đó là hình thẻ `elicit-loop/SKILL.md` chủ động yêu cầu ở thẻ tuân thủ.
+   */
+  nested_labels_without_edge: number
   /** Thẻ tick nhiều ô có option nghĩa "không thêm gì" — tick nó cùng option khác là tự mâu thuẫn. */
   none_option_on_multiselect: number
   /** Ứng viên nêu trong ngoặc của câu hỏi mà không option nào nhận — user bị đẩy sang "Khác…". */
@@ -130,6 +134,25 @@ const norm = (s: string): string => s.replace(/\s+/g, " ").trim().toLowerCase()
 const NUMERIC_LABEL = /^\d+(?:[.,]\d+)*\s*(%|ms|s|gb|mb)?$/i
 
 const hasText = (s: string | undefined): boolean => (s ?? "").trim() !== ""
+
+/**
+ * Hai nhãn lồng nhau (nhãn này là chuỗi con của nhãn kia) **không** tự là khuyết tật: rule 8 của
+ * `elicit-loop/SKILL.md` cho phép "make the later one spell out the former", và thẻ tuân thủ ở B-0.1 bắt buộc
+ * đúng hình đó ("Tuân thủ quy định nội bộ" / "… và pháp luật"). Khuyết tật là **ranh giới không được vạch**:
+ * lúc đó cả hai option đều đọc ra đúng và user không có cơ sở chọn.
+ *
+ * Ranh giới coi như đã vạch khi cả hai option có `description` và không description nào chứa description kia —
+ * đúng hai cách description thật sự bỏ rơi người đọc: để trống, hoặc copy của option kia rồi thêm đuôi.
+ *
+ * Phép đo gần đúng, cố ý nghiêng về phía không bắt oan: hai description viết khác chữ mà vẫn cùng đọc ra đúng
+ * thì nó bỏ qua. Đổi lại nó không còn dương tính giả có hệ thống — một chỉ số đỏ mặc định là chỉ số mà người
+ * đọc báo cáo học cách bỏ qua, và nhãn lồng nhau sai thật ở thẻ khác chìm theo.
+ */
+const edgeDrawnBetween = (shorter: RecordedOption, longer: RecordedOption): boolean => {
+  if (!hasText(shorter.description) || !hasText(longer.description)) return false
+  const [short, long] = [norm(shorter.description ?? ""), norm(longer.description ?? "")]
+  return !short.includes(long) && !long.includes(short)
+}
 
 // ─── lượng từ không có nguồn ─────────────────────────────────────
 
@@ -238,7 +261,7 @@ export const scoreBrief = (run: RecordedRun): BriefMetrics => {
 
   let optionsWithoutDescription = 0
   let numericOnlyOptions = 0
-  let nestedLabels = 0
+  let nestedLabelsWithoutEdge = 0
   let noneOptionOnMultiselect = 0
   const candidateWithoutOption: string[] = []
   for (const q of questions) {
@@ -250,7 +273,15 @@ export const scoreBrief = (run: RecordedRun): BriefMetrics => {
         optionsWithoutDescription += 1
         if (NUMERIC_LABEL.test(bareLabel(option.label))) numericOnlyOptions += 1
       }
-      if (labels.some((other, j) => j !== i && other !== labels[i] && other.includes(labels[i]))) nestedLabels += 1
+      // Nhãn của option này nằm trong một nhãn khác mà ranh giới giữa hai option không được vạch.
+      const nestedWithoutEdge = q.options.some(
+        (longer, j) =>
+          j !== i &&
+          labels[j] !== labels[i] &&
+          labels[j].includes(labels[i]) &&
+          !edgeDrawnBetween(option, longer)
+      )
+      if (nestedWithoutEdge) nestedLabelsWithoutEdge += 1
     }
   }
 
@@ -275,7 +306,7 @@ export const scoreBrief = (run: RecordedRun): BriefMetrics => {
     topic_keys: topicKeys,
     options_without_description: optionsWithoutDescription,
     numeric_only_options: numericOnlyOptions,
-    nested_labels: nestedLabels,
+    nested_labels_without_edge: nestedLabelsWithoutEdge,
     none_option_on_multiselect: noneOptionOnMultiselect,
     candidate_without_option: candidateWithoutOption,
     banned_vocab: [...bannedVocab],
