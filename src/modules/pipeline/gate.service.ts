@@ -37,8 +37,8 @@ import {
   type StepRunnerDeps
 } from "./step-runner.service.js"
 import { gateActionSchema, type ChangeSummary } from "./pipeline.dto.js"
-import { composeStepGateMessage, type GateAssumptionBrief } from "./gate-message.js"
-import { acquireRun, finishRun } from "./run-state.service.js"
+import { composeStepGateMessage, gateAssumptionIdsOfRun, type GateAssumptionBrief } from "./gate-message.js"
+import { acquireRun, finishRun, getRunState } from "./run-state.service.js"
 import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -245,8 +245,12 @@ interface SeqRange {
 const stepBase = (id: string): string => id.split("@")[0]
 
 /**
- * Giả định cổng của `stepId` đang nói với user, tính lại từ Spine (cùng nghĩa với `new_assumptions` của gate_ready /
- * phase_gate): giả định còn `unconfirmed` do chính bước sinh ra; bước cuối giai đoạn thì cả giai đoạn (kể cả bước im).
+ * Tập ĐẦY ĐỦ giả định còn `unconfirmed` thuộc cổng của `stepId`, tính từ Spine: do chính bước sinh ra; bước cuối giai
+ * đoạn thì cả giai đoạn (kể cả bước im).
+ *
+ * Đây là danh sách cổng CÓ THỂ nói, không phải danh sách nó ĐÃ nói — `new_assumptions` của gate_ready/phase_gate chỉ
+ * giữ phần tin thực sự nói ra. Quyền sửa giả định dùng tập đầy đủ này; quyền đổi `status` thì không, nó lấy theo phần
+ * đã nói (`gateAssumptionIdsOfRun`).
  */
 export const gateAssumptionIdsOf = (spine: Spine, stepId: string): Set<string> => {
   const step = getStep(stepId)
@@ -273,7 +277,7 @@ const redraft = async (
   stepId: string,
   userId: string,
   callKind: "revision" | "regenerate",
-  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string> },
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string> },
   deps: StepRunnerDeps,
   range: SeqRange
 ): Promise<{ spineVersion: number; notes?: string; summary: ChangeSummary[]; applied: boolean }> => {
@@ -295,6 +299,10 @@ export const gate = async (
   input: GateInput,
   deps: Partial<StepRunnerDeps> = {}
 ): Promise<GateResult> => {
+  // Phạm vi đổi `status` của lượt revision = đúng những điều tin cổng đã nói (FLF-242). Phải đọc TRƯỚC `acquireRun`:
+  // chiếm khoá là ghi lại lượt mới với `gate_payload`/`phase_gate` rỗng, sau đó không còn gì để biết user đã đọc những gì.
+  const spokenIds = input.action === "revision" ? gateAssumptionIdsOfRun(await getRunState(projectId, stepId)) : new Set<string>()
+
   // Cùng khoá với `/run` (WP-4): gate cũng ghi Spine, không được chạy song song với một lượt draft
   const run = await acquireRun(projectId, stepId, { by: userId, stage: "draft", detail_vi: "Xử lý cổng chốt" })
   try {
@@ -398,7 +406,13 @@ export const gate = async (
           stepId,
           userId,
           "revision",
-          { revisionRequest: input.note ?? "", gateAssumptionIds: gateAssumptionIdsOf(stripRecord(await load(projectId)), stepId) },
+          {
+            revisionRequest: input.note ?? "",
+            // Hai quyền, hai tập (FLF-242): sửa câu/ghi path thật được cả tập giả định còn mở của cổng; đổi `status` chỉ
+            // được phần tin cổng đã nói ra.
+            gateAssumptionIds: gateAssumptionIdsOf(stripRecord(await load(projectId)), stepId),
+            statusAssumptionIds: spokenIds
+          },
           d,
           range
         )

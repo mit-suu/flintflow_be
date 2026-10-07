@@ -5,6 +5,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import {
   adjustOrgCreditsSchema,
   aiCostQuerySchema,
+  logIdParamSchema,
   orgIdParamSchema,
   orgsQuerySchema,
   parseWith,
@@ -43,6 +44,12 @@ export const getAiCost = catchAsync(async (req: Request, res: Response) => {
   const range = resolveDateRange(query)
   const report = await adminService.getAiCost(range, query.groupBy)
   return sendSuccess(res, 200, report)
+})
+
+export const getAiActionPayload = catchAsync(async (req: Request, res: Response) => {
+  const { logId } = parseWith(logIdParamSchema, req.params)
+  const payload = await adminService.getAiActionPayload(logId)
+  return sendSuccess(res, 200, payload)
 })
 
 export const listFeedback = catchAsync(async (_req: Request, res: Response) => {

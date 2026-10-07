@@ -23,6 +23,7 @@ import {
 } from "./credit-reservation.service.js"
 import { executeWithInRequestRetry } from "./retry.service.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
+import { capturePayload } from "./ai-action-payload.service.js"
 
 export interface ExecuteAiActionOptions {
   provider?: string
@@ -143,6 +144,9 @@ export const executeAiAction = async <T = any>(
   // chặn release sau khi đã trừ (lỗi ghi log phía sau không được hoàn tiền).
   let deducted = false
   let currentLogId: string = ""
+  // Lượt parse lỗi mới là lượt cần đọc lại output gốc nhất, mà log thất bại được tạo ngoài vòng retry — giữ
+  // chữ thô ở đây để nó không mất theo scope của lượt thử.
+  let lastRawText: string | null = null
 
   try {
     const result = await executeWithInRequestRetry(async (attempt) => {
@@ -155,6 +159,7 @@ export const executeAiAction = async <T = any>(
           ...(options.images?.length ? { images: options.images } : {})
         })
         const latencyMs = Date.now() - startTime
+        lastRawText = llmRes.text
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)
 
@@ -180,6 +185,14 @@ export const executeAiAction = async <T = any>(
         })
 
         currentLogId = logDoc._id.toString()
+        await capturePayload({
+          logId: currentLogId,
+          projectId,
+          userId,
+          actionType: String(actionType),
+          prompt: finalPrompt,
+          response: llmRes.text
+        })
 
         return {
           success: true,
@@ -219,6 +232,15 @@ export const executeAiAction = async <T = any>(
       status: "failed",
       errorMessage: finalError.message || "AI Action execution failed",
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    await capturePayload({
+      logId: failedLog._id.toString(),
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: lastRawText
     })
 
     if (finalError instanceof AiActionError) {
@@ -262,6 +284,7 @@ export const executeAiActionStream = async <T = any>(
 
   const startTime = Date.now()
   let deducted = false
+  let lastRawText: string | null = null
 
   try {
     let textStream: AsyncIterable<string>
@@ -293,6 +316,7 @@ export const executeAiActionStream = async <T = any>(
     }
 
     const { reply: streamedReply, fullRaw } = extractor.finish()
+    lastRawText = fullRaw
     const latencyMs = Date.now() - startTime
 
     let promptTokens = Math.ceil(finalPrompt.length / 4)
@@ -322,6 +346,15 @@ export const executeAiActionStream = async <T = any>(
       completionTokens,
       latencyMs,
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    await capturePayload({
+      logId: (logDoc as any)._id.toString(),
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: fullRaw
     })
 
     // For chat actions, ensure parsedData.reply matches the clean streamed reply
@@ -372,6 +405,15 @@ export const executeAiActionStream = async <T = any>(
       status: "failed",
       errorMessage: finalError.message || "AI Action stream execution failed",
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    await capturePayload({
+      logId: failedLog._id.toString(),
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: lastRawText
     })
 
     if (callbacks.onError) {

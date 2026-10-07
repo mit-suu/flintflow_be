@@ -903,7 +903,7 @@ export const runDraftPhase = async (
   callKind: DraftCallKind,
   emit: Emit,
   deps: StepRunnerDeps,
-  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; userDecided?: boolean } = {}
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; userDecided?: boolean } = {}
 ): Promise<DraftPhaseResult> => {
   assertNotAborted(deps.signal, stepId)
   const currentFirstSeq = spine.steps.find((s) => s.id === stepId)?.first_seq ?? null

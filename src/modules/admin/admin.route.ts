@@ -221,6 +221,30 @@ router.get("/ai-cost", adminController.getAiCost)
 
 /**
  * @swagger
+ * /api/v1/admin/ai-logs/{logId}/payload:
+ *   get:
+ *     summary: Prompt và câu trả lời gốc của một lượt gọi model (giữ có hạn, chỉ admin)
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: logId
+ *         required: true
+ *         schema: { type: string }
+ *         description: "_id của AiActionLog"
+ *     responses:
+ *       200:
+ *         description: "{ logId, actionType, prompt, response, promptChars, responseChars, createdAt } — promptChars/responseChars là độ dài THẬT, lớn hơn chuỗi trả về nghĩa là đã bị cắt giữa"
+ *       403:
+ *         description: Không phải admin
+ *       404:
+ *         description: Không lưu (AI_PAYLOAD_RETENTION_DAYS=0) hoặc đã hết hạn giữ
+ */
+router.get("/ai-logs/:logId/payload", adminController.getAiActionPayload)
+
+/**
+ * @swagger
  * /api/v1/admin/feedback:
  *   get:
  *     summary: Góp ý người dùng (mới nhất trước, kèm email/tên người gửi)

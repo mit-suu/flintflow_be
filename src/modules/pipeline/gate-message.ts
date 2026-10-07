@@ -270,3 +270,21 @@ export const gateMessageOfRun = (run: { gate_payload?: unknown; phase_gate?: unk
   }
   return messageOf(run?.phase_gate) ?? messageOf(run?.gate_payload)
 }
+
+/**
+ * Id của những điều tạm hiểu mà thẻ cổng user vừa đọc THỰC SỰ nói ra, lấy từ lượt chạy đã lưu — hàm thuần.
+ *
+ * Cùng thứ tự ưu tiên với `gateMessageOfRun` và với thẻ FE đang vẽ (`page.tsx`: có cổng cuối giai đoạn thì lấy danh
+ * sách của cổng đó, không thì của cổng bước). Phạm vi quyền phải khớp đúng chữ user đã đọc, nên lấy theo payload nào
+ * đang hiển thị, kể cả khi danh sách của nó rỗng.
+ *
+ * Không đọc được payload nào ⇒ tập rỗng: lời sửa không đổi `status` của giả định nào. Điều chưa chốt ở lại
+ * `unconfirmed`, S-9.1 gom và cờ đỏ `unconfirmed_assumption` chặn ký baseline — mất một lượt xác nhận thì user chốt
+ * lại được, còn tự xác nhận hộ thì không ai thấy.
+ */
+export const gateAssumptionIdsOfRun = (run: { gate_payload?: unknown; phase_gate?: unknown } | null): Set<string> => {
+  const payload = run?.phase_gate ?? run?.gate_payload
+  const list = (payload as { new_assumptions?: unknown } | null | undefined)?.new_assumptions
+  if (!Array.isArray(list)) return new Set<string>()
+  return new Set(list.map((a) => (a as { id?: unknown } | null)?.id).filter((id): id is string => typeof id === "string"))
+}

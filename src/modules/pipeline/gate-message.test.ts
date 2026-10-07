@@ -6,6 +6,7 @@ import {
   composePhaseGateMessage,
   composeStepGateMessage,
   gateActionText,
+  gateAssumptionIdsOfRun,
   gateMessageOfRun,
   spokenAssumptionIds,
   stripModelCountSentences
@@ -306,5 +307,36 @@ describe("gateMessageOfRun", () => {
 
   it("phase_gate không có tin ⇒ rơi về tin của bước, không trả null", () => {
     expect(gateMessageOfRun({ gate_payload: { message_vi: "tin của bước" }, phase_gate: {} })).toBe("tin của bước")
+  })
+})
+
+describe("gateAssumptionIdsOfRun", () => {
+  const brief = (id: string) => ({ id, text: id })
+
+  it("cổng bước: lấy id trong new_assumptions của gate_payload", () => {
+    expect([...gateAssumptionIdsOfRun({ gate_payload: { new_assumptions: [brief("AS1"), brief("AS3")] } })]).toEqual(["AS1", "AS3"])
+  })
+
+  it("bước cuối giai đoạn ưu tiên danh sách của cổng giai đoạn — đúng thẻ user đang đọc", () => {
+    const run = { gate_payload: { new_assumptions: [brief("AS1")] }, phase_gate: { new_assumptions: [brief("AS2"), brief("AS9")] } }
+    expect([...gateAssumptionIdsOfRun(run)]).toEqual(["AS2", "AS9"])
+  })
+
+  it("cổng giai đoạn nói danh sách rỗng là nói rỗng, không rơi về cổng bước", () => {
+    const run = { gate_payload: { new_assumptions: [brief("AS1")] }, phase_gate: { new_assumptions: [] } }
+    expect([...gateAssumptionIdsOfRun(run)]).toEqual([])
+  })
+
+  it("không có lượt chạy / không có payload / danh sách sai hình ⇒ tập rỗng, không điều nào chốt được", () => {
+    expect([...gateAssumptionIdsOfRun(null)]).toEqual([])
+    expect([...gateAssumptionIdsOfRun({})]).toEqual([])
+    expect([...gateAssumptionIdsOfRun({ gate_payload: null, phase_gate: null })]).toEqual([])
+    expect([...gateAssumptionIdsOfRun({ gate_payload: {} })]).toEqual([])
+    expect([...gateAssumptionIdsOfRun({ gate_payload: { new_assumptions: "AS1" } })]).toEqual([])
+  })
+
+  it("phần tử thiếu id hoặc id không phải chuỗi bị bỏ, phần còn lại vẫn tính", () => {
+    const run = { gate_payload: { new_assumptions: [brief("AS1"), { text: "không có id" }, { id: 7 }, null] } }
+    expect([...gateAssumptionIdsOfRun(run)]).toEqual(["AS1"])
   })
 })

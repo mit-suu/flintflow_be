@@ -489,7 +489,7 @@ describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
     { op: "set", path: "assumptions[id=AS90].statement", value: "The product is a mobile app." },
     { op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }
   ]
-  const revision = { revision: true, gateAssumptionIds: new Set(["AS90"]) }
+  const revision = { revision: true, statusAssumptionIds: new Set(["AS90"]) }
 
   it("status của giả định chỉ đổi được ở bước rà giả định — revision ở gate thì được, server đặt confirmed_at", () => {
     const status = [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }]
@@ -561,7 +561,7 @@ describe("sanitizeModelOps — revision sửa giả định (FLF-232)", () => {
     expect(kept.value.status).toBe("confirmed")
   })
 
-  it("revision không có gateAssumptionIds ⇒ không giả định nào đổi được status", () => {
+  it("revision không có statusAssumptionIds ⇒ không giả định nào đổi được status", () => {
     const status = [{ op: "set", path: "assumptions[id=AS90].status", value: "confirmed" }]
     const { errors, ops } = sanitizeModelOps(spine, status, "B-0.3", new Date(), { revision: true })
     expect(errors).toEqual([])
@@ -767,7 +767,7 @@ describe("sanitizeModelOps — giả định path project.vision|goals ở Brief
     confirmed_at: null
   }
   const spine: Spine = { ...structuredClone(FIXTURE), addendum: [core("AD1", "vision"), core("AD2", "goals")], assumptions: [assumption, { ...assumption, id: "AS92", path: "project.goals[0]" }] }
-  const revision = { revision: true, gateAssumptionIds: new Set(["AS91", "AS92"]) }
+  const revision = { revision: true, statusAssumptionIds: new Set(["AS91", "AS92"]) }
   const restate = (id: string) => [
     { op: "set", path: `assumptions[id=${id}].statement`, value: "The vision is a clinic queue tool." },
     { op: "set", path: `assumptions[id=${id}].status`, value: "confirmed" }

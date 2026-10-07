@@ -52,6 +52,10 @@ export const aiCostQuerySchema = z.object({
 export type UsersQuery = z.infer<typeof usersQuerySchema>
 export type OrgsQuery = z.infer<typeof orgsQuerySchema>
 export type AiCostQuery = z.infer<typeof aiCostQuerySchema>
+
+export const logIdParamSchema = z.object({
+  logId: z.string().regex(/^[0-9a-fA-F]{24}$/, "logId không hợp lệ")
+})
 export type AiCostGroupBy = (typeof AI_COST_GROUP_BY)[number]
 
 /**

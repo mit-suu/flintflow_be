@@ -126,7 +126,15 @@ const envSchema = z.object({
   /** Hạn của mã mời vào tổ chức (UC-08). */
   INVITE_TTL_DAYS: z.coerce.number().int().positive().default(7),
   /** Độ dài mã mời. Mã để người dùng GÕ TAY nên giữ ngắn; bảng chữ 31 ký tự ⇒ 10 ký tự ≈ 49 bit. */
-  INVITE_CODE_LENGTH: z.coerce.number().int().min(8).max(24).default(10)
+  INVITE_CODE_LENGTH: z.coerce.number().int().min(8).max(24).default(10),
+
+  /**
+   * Số ngày giữ prompt/response của lượt gọi model (`aiactionpayloads`). Prompt mang nguyên văn điều người
+   * dùng nhập nên có hạn; `0` = không lưu gì. Số liệu token/chi phí trong `aiactionlogs` không bị hạn này.
+   */
+  AI_PAYLOAD_RETENTION_DAYS: z.coerce.number().int().min(0).max(365).default(30),
+  /** Trần ký tự cho mỗi bên prompt/response trước khi cắt giữa; độ dài thật vẫn được ghi lại. */
+  AI_PAYLOAD_MAX_CHARS: z.coerce.number().int().positive().default(40000)
 })
 
 const parsed = envSchema.safeParse(process.env)

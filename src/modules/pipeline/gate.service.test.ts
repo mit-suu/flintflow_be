@@ -103,6 +103,7 @@ import type { StepRunnerDeps } from "./step-runner.service.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { gate, gateAssumptionIdsOf, phaseGateAssumptions, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
+import { acquireRun, finishRun, resetMemoryRuns } from "./run-state.service.js"
 import { resumeProject } from "./resume.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { notify } from "../notification/notification.service.js"
@@ -199,6 +200,7 @@ const draftReply = (ops: OpTransaction["ops"]): AiActionResult<OpTransaction> =>
 
 beforeEach(() => {
   db.reset()
+  resetMemoryRuns()
   vi.mocked(notify).mockClear()
 })
 
@@ -483,8 +485,18 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     return notes ? { ...reply, data: { ops, notes } } : reply
   }
 
+  /**
+   * Dựng lượt chạy đang đứng ở cổng với đúng những điều tin cổng NÓI RA. Quyền đổi `status` của lượt revision lấy từ
+   * đây, nên test phải khai cổng đã nói gì; run-state rỗng nghĩa là cổng chưa nói điều nào và không điều nào chốt được.
+   */
+  const gateSaid = async (stepId: string, ids: readonly string[]): Promise<void> => {
+    const run = await acquireRun(PROJECT, stepId)
+    await finishRun(PROJECT, stepId, run.run_id, "gate", { gate_payload: { new_assumptions: ids.map((id) => ({ id, text: id })) } })
+  }
+
   it("lời sửa đổi trường thật + câu giả định + status confirmed trong một lượt, và trả lời AI xác nhận (message_vi)", async () => {
     const version = seedB03()
+    await gateSaid("B-0.3", ["AS01"])
     const result = await gate(
       PROJECT,
       "B-0.3",
@@ -504,6 +516,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
 
   it("lời sửa bỏ giả định ⇒ status rejected, không cần ghi trường thật", async () => {
     const version = seedB03()
+    await gateSaid("B-0.3", ["AS01"])
     await gate(
       PROJECT,
       "B-0.3",
@@ -555,6 +568,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
 
   it("giả định của chính bước ở cổng: ghi được path thật dù ngoài writes của bước (B-1.4 chỉ ghi addendum/assumptions)", async () => {
     const version = seedB14()
+    await gateSaid("B-1.4", ["AS10"])
     const ops: OpTransaction["ops"] = [
       { op: "set", path: "project.form_factor", value: "mobile_app" },
       { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
@@ -580,6 +594,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     spine.progress = { ...spine.progress, current_step: "B-1.6" }
     spine.addendum = [{ id: "AD2", topic: "Users", content: "Lễ tân nhận lịch qua điện thoại.", content_en: "Receptionists take bookings by phone.", target_section: "fixed:2.1", captured_at: "2026-01-01T00:00:00.000Z" }]
     spine.assumptions[1].path = "addendum[id=AD2].content"
+    await gateSaid("B-1.6", ["AS11"])
     const ops: OpTransaction["ops"] = [
       { op: "set", path: "addendum[id=AD2].content", value: "Lễ tân xác nhận lịch qua Zalo." },
       { op: "set", path: "addendum[id=AD2].content_en", value: "Receptionists confirm bookings via Zalo." },
@@ -599,6 +614,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
     const spine = db.spines[0] as Record<string, unknown> & { assumptions: { id: string; path: string }[] }
     spine.addendum = [{ id: "AD1", topic: "vision", content: "Công cụ đặt lịch.", content_en: "A booking tool.", target_section: "fixed:1", captured_at: "2026-01-01T00:00:00.000Z" }]
     spine.assumptions[0].path = "project.vision"
+    await gateSaid("B-1.4", ["AS10"])
     const ops: OpTransaction["ops"] = [
       { op: "set", path: "addendum[id=AD1].content", value: "Công cụ xếp hàng cho phòng khám." },
       { op: "set", path: "addendum[id=AD1].content_en", value: "A clinic queue tool." },
@@ -650,6 +666,7 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
 
   it("chỉ đổi status của giả định cổng vừa nói: giả định của bước khác (AS11, B-1.2) giữ nguyên, lượt sửa không hỏng", async () => {
     const version = seedB14()
+    await gateSaid("B-1.4", ["AS10"])
     await gate(
       PROJECT,
       "B-1.4",
@@ -658,6 +675,77 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
       { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS11].status", value: "confirmed" }]) }
     )
     expect((await repo.get(PROJECT))!.assumptions.find((a) => a.id === "AS11")!.status).toBe("unconfirmed")
+  })
+
+  it("cổng cuối giai đoạn: giả định thuộc cổng mà tin KHÔNG nói ra vẫn ở unconfirmed, điều tin nói ra thì chốt được", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { steps: unknown[]; progress: Record<string, unknown> }
+    spine.steps = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5"]
+      .map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+      .concat([{ id: "B-1.6", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null } as never])
+    spine.progress = { ...spine.progress, current_step: "B-1.6" }
+    // Cổng B-1.6 sở hữu cả AS10 và AS11, nhưng tin chỉ nói AS10
+    await gateSaid("B-1.6", ["AS10"])
+
+    await gate(
+      PROJECT,
+      "B-1.6",
+      USER,
+      { action: "revision", note: "đúng cả hai", base_version: version },
+      {
+        draftExecutor: async () =>
+          withNotes([
+            { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" },
+            { op: "set", path: "assumptions[id=AS11].status", value: "confirmed" }
+          ])
+      }
+    )
+
+    const after = await repo.get(PROJECT)
+    expect(after!.assumptions.find((a) => a.id === "AS10")!.status).toBe("confirmed")
+    expect(after!.assumptions.find((a) => a.id === "AS11")!.status).toBe("unconfirmed")
+  })
+
+  it("quyền sửa rộng hơn quyền chốt: giả định tin không nói vẫn sửa được câu + path thật, chỉ status giữ nguyên", async () => {
+    const version = seedB14()
+    await gateSaid("B-1.4", [])
+
+    await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "không, là app điện thoại", base_version: version },
+      {
+        draftExecutor: async () =>
+          withNotes([
+            { op: "set", path: "project.form_factor", value: "mobile_app" },
+            { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
+            { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Sản phẩm là ứng dụng điện thoại." },
+            { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+          ])
+      }
+    )
+
+    const after = await repo.get(PROJECT)
+    // project.form_factor ngoài writes của B-1.4 — vẫn ghi được vì AS10 là giả định còn mở của cổng
+    expect(after!.project.form_factor).toEqual(["mobile_app"])
+    expect(after!.assumptions.find((a) => a.id === "AS10")).toMatchObject({
+      statement: "The product is a mobile app.",
+      status: "unconfirmed",
+      confirmed_at: null
+    })
+  })
+
+  it("mở lại bước đã accepted (B7): không còn tin cổng nào trong run-state ⇒ không giả định nào chốt được", async () => {
+    const version = seedB14()
+    await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "sửa lại giúp", base_version: version },
+      { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }]) }
+    )
+    expect((await repo.get(PROJECT))!.assumptions.find((a) => a.id === "AS10")!.status).toBe("unconfirmed")
   })
 
   it("revision chỉ đổi giả định (không có notes, không có nội dung khác) vẫn trả message_vi", async () => {

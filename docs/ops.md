@@ -116,6 +116,8 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `PLANTUML_TIMEOUT_MS` | không | default 15000. Production đặt **30000**: use-case ~70 UC mất 13 s ở lượt đầu sau khi PlantUML restart (JVM chưa JIT-warm), warm còn ~4 s |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
+| `AI_PAYLOAD_RETENTION_DAYS` | không | default 30. Số ngày giữ prompt/response của lượt gọi model (`aiactionpayloads`, TTL index). Prompt mang nguyên văn điều người dùng nhập ⇒ đây là **hạn giữ dữ liệu người dùng**, đổi thì phải đổi cả cam kết với người dùng. `0` = không lưu gì. Đổi giá trị chỉ có tác dụng với document mới: TTL index đã tạo thì phải `collMod` hoặc drop index để Mongo nhận hạn mới |
+| `AI_PAYLOAD_MAX_CHARS` | không | default 40000 ký tự mỗi bên. Quá trần thì cắt giữa, giữ đầu (luật của skill) và cuối (projection + câu trả lời của user); `promptChars`/`responseChars` vẫn là độ dài thật |
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (FE) | không | thiếu ⇒ **không có nút đăng nhập Google**, phần còn lại chạy bình thường (`lib/google-auth.ts`). Nhúng lúc build ⇒ đổi phải build lại image FE |
 
@@ -124,6 +126,9 @@ Vài quyết định hay bị hỏi lại:
 - **Không có `PAYMENT_WEBHOOK_SECRET`.** `handlePaymentCallback` kiểm `client_id` rồi **đọc lại đơn
   hàng từ payment service** (`getPaymentOrder`) thay vì tin payload gửi tới. Chữ ký webhook sẽ là một
   secret nữa phải xoay mà không thêm được gì so với việc không tin payload.
+- **Prompt/response không nằm cùng `aiactionlogs`.** Hai thứ có vòng đời khác nhau: số liệu chi phí giữ
+  lâu dài, còn prompt chứa dữ liệu người dùng nên có hạn. TTL của Mongo xoá cả document chứ không xoá
+  được một field, nên để chung thì đặt hạn giữ là mất luôn số liệu chi phí.
 - **Không có `DIAGRAM_STORAGE`.** Ảnh diagram đã render luôn nằm trong GridFS (bucket `diagram-files`),
   không có lựa chọn thứ hai để cấu hình.
 - **Không có biến chọn provider cho từng skill.** Provider nằm ở frontmatter `SKILL.md` — nó là một
