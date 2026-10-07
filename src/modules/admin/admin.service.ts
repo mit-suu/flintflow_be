@@ -13,6 +13,7 @@ import { revokeAllUserSessions } from "../../shared/auth/session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { Baseline } from "../spine/baseline.model.js"
 import { AiActionLog } from "./ai-action-log.model.js"
+import { AiActionPayload } from "./ai-action-payload.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
 import {
   AiCostGroupBy,
@@ -439,6 +440,37 @@ export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCost
     pricingNote: "estimatedUsd là ước tính theo bảng giá tạm, không phải hoá đơn provider",
     rows,
     totals
+  }
+}
+
+// ─── Prompt/response của lượt gọi model ──────────────────────────
+
+/**
+ * Prompt và câu trả lời gốc của một lượt gọi model. Chỉ admin đọc được vì prompt mang nguyên văn điều người
+ * dùng nhập.
+ *
+ * Không có bản ghi là chuyện bình thường, không phải lỗi hệ thống: lượt chạy trước khi bật việc lưu, hoặc đã
+ * quá hạn giữ (`AI_PAYLOAD_RETENTION_DAYS`) và Mongo đã dọn. Câu lỗi nói rõ hai khả năng đó.
+ */
+export const getAiActionPayload = async (logId: string) => {
+  const payload = await AiActionPayload.findOne({ logId: new mongoose.Types.ObjectId(logId) }).lean()
+  if (!payload) {
+    throw new ApiError(
+      404,
+      "Không còn prompt/response của lượt gọi này — lượt chạy trước khi bật việc lưu, hoặc đã quá hạn giữ.",
+      "AI_PAYLOAD_NOT_FOUND"
+    )
+  }
+  return {
+    logId: String(payload.logId),
+    projectId: payload.projectId ? String(payload.projectId) : null,
+    actionType: payload.actionType,
+    prompt: payload.prompt,
+    response: payload.response ?? null,
+    // Lớn hơn độ dài chuỗi trả về ⇒ bản đang xem đã bị cắt giữa
+    promptChars: payload.promptChars,
+    responseChars: payload.responseChars,
+    createdAt: payload.createdAt
   }
 }
 
