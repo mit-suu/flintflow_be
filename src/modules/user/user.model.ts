@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
 import bcrypt from "bcrypt"
+import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
 
 export type AuthProvider = "local" | "google"
 export type UserRole = "user" | "admin"
@@ -23,6 +24,8 @@ export interface IUser extends Document {
   emailVerifiedAt?: Date | null
   /** UC 1.12: thời điểm hoàn tất onboarding; null = chưa onboarding. */
   onboardedAt?: Date | null
+  /** FLF-259: ngôn ngữ giao diện đã lưu; không có = tài khoản chưa chọn. */
+  locale?: UserLocale
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -93,6 +96,11 @@ const userSchema = new Schema<IUser>(
     onboardedAt: {
       type: Date,
       default: null
+    },
+    // Không đặt default: thiếu field là tín hiệu "chưa chọn" để FE lưu ngôn ngữ đang hiển thị vào tài khoản.
+    locale: {
+      type: String,
+      enum: [...USER_LOCALES]
     }
   },
   { timestamps: true }

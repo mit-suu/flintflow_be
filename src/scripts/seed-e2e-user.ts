@@ -69,10 +69,12 @@ const main = async (): Promise<void> => {
   await connectDB()
 
   const email = args.email.toLowerCase().trim()
+  // Ngôn ngữ tài khoản thắng cookie khi đăng nhập (FLF-259) mà e2e soát nhãn tiếng Việt ⇒ ghim `vi`, để một lần
+  // bấm EN trên tài khoản dùng chung không làm các lần chạy sau ra tiếng Anh.
   let user = await User.findOne({ email })
   if (user) {
     // `password` là virtual/setter băm ở model — gán rồi save, không ghi thẳng passwordHash.
-    user.set({ password: args.password, emailVerified: true, emailVerifiedAt: new Date(), role: args.role })
+    user.set({ password: args.password, emailVerified: true, emailVerifiedAt: new Date(), role: args.role, locale: "vi" })
     await user.save()
     console.log(`[seed-e2e-user] cập nhật ${email}`)
   } else {
@@ -82,7 +84,8 @@ const main = async (): Promise<void> => {
       name: args.name,
       role: args.role,
       emailVerified: true,
-      emailVerifiedAt: new Date()
+      emailVerifiedAt: new Date(),
+      locale: "vi"
     })
     console.log(`[seed-e2e-user] tạo mới ${email}`)
   }
