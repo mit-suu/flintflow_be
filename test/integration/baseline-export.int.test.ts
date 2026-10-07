@@ -55,18 +55,17 @@ const expectDocx = (res: { status: number; headers: Record<string, string>; body
   expect(file.length).toBeGreaterThan(1000)
 }
 
-describe("chưa assemble / còn cờ đỏ", () => {
-  it("document bản nháp ⇒ 200 not_assembled (BUG-31); export Word vẫn 409 NO_WORKING_DRAFT", async () => {
+describe("đọc tài liệu khi chưa dựng / còn cờ đỏ", () => {
+  it("FLF-264: document và export Word đều tự dựng bản nháp ở lần đọc đầu", async () => {
     const seeded = await seedFixture("minimal")
     const api = client(seeded)
 
     const doc = await api.get("/document?source=draft")
     expect(doc.status).toBe(200)
-    expect(doc.body.data).toBeNull()
-    expect(doc.body.meta).toEqual({ state: "not_assembled", hint: "S-8.2" })
+    expect(doc.body.data.sections.length).toBeGreaterThan(0)
 
     const word = await api.get("/export/word?source=draft")
-    expect(word.status).toBe(409)
+    expect(word.status).toBe(200)
   })
 
   it("POST /baseline còn cờ đỏ ⇒ 422 BASELINE_BLOCKED liệt kê cờ; không tạo baseline", async () => {

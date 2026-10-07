@@ -68,10 +68,13 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
 
-/** 409 — `GET /document` hoặc `GET /export/word` với `source=draft` trước khi `POST /assemble` chạy lần nào. */
+/**
+ * 409 — `source=draft` khi project chưa có gì để dựng tài liệu (chưa có Spine: dự án vừa tạo, chưa chạy bước nào).
+ * Từ FLF-264, Spine đã có thì `GET /document` tự dựng bản thiếu, nên lỗi này không còn nghĩa "chưa chạy S-8.2".
+ */
 export class NoWorkingDraftError extends ApiError {
   constructor() {
-    super(409, "Tài liệu chưa được ghép. Hãy chạy bước Ghép tài liệu trước.", NO_WORKING_DRAFT)
+    super(409, "Dự án chưa có nội dung nào để dựng tài liệu.", NO_WORKING_DRAFT)
   }
 }
 
@@ -653,19 +656,20 @@ export async function assemble(
   }
 
   const cached = await RenderedDocumentCache.findOne({ projectId, spine_version: record.spine_version }, null, { lean: true })
-  if (cached) {
-    // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài.
-    const parsed = renderedDocumentSchema.safeParse(cached.doc)
-    if (!parsed.success) throw new ApiError(422, "Bản tài liệu đã ghép bị lỗi. Hãy chạy lại bước Ghép tài liệu.", "RENDERED_DOCUMENT_INVALID")
+  // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài. FLF-264: cũng
+  // không còn là lỗi 422 trả cho người dùng — dựng lại đè lên là việc của code, không phải việc họ phải xử lý.
+  const parsedCache = cached ? renderedDocumentSchema.safeParse(cached.doc) : null
+  if (cached && parsedCache?.success) {
     // Trúng cache vẫn báo ảnh thiếu — client gọi lại cùng version không bị mất lý do; ảnh đã có lại thì hết báo
     const stillMissing = await recheckMissingImages(projectId, cached._id, cached.missing_diagram_ids ?? [], merged.loadDiagramPng)
     return {
       spine_version: record.spine_version,
-      sections: countRealSections(parsed.data.sections),
-      generated_at: parsed.data.generatedAt,
+      sections: countRealSections(parsedCache.data.sections),
+      generated_at: parsedCache.data.generatedAt,
       findings: missingImageFindings(stillMissing)
     }
   }
+  if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn — dựng lại`)
 
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
@@ -721,16 +725,67 @@ export interface DocumentQuery {
   baseline_id?: string
 }
 
-const getDraftDocument = async (projectId: string, loadDiagramPng: DiagramPngLoader): Promise<RenderedDocument> => {
+/**
+ * Bản dựng trong cache: đúng `spineVersion` khi truyền số, bản mới nhất khi truyền `null`.
+ * `null` trả về ⇒ chưa có bản nào dùng được — kể cả khi cache tồn tại nhưng nội dung không còn hợp khuôn
+ * (dữ liệu cũ, ghi tay): lượt đọc kế dựng lại đè lên, không bắt người dùng xử lý một lỗi của cache.
+ */
+const loadDraftCache = async (projectId: string, spineVersion: number | null, load: DiagramPngLoader): Promise<RenderedDocument | null> => {
   const cached = await RenderedDocumentCache.findOne(
-    { projectId, spine_version: { $exists: true } },
+    spineVersion === null ? { projectId, spine_version: { $exists: true } } : { projectId, spine_version: spineVersion },
     null,
     { lean: true, sort: { spine_version: -1 } }
   )
-  if (!cached) throw new NoWorkingDraftError()
+  if (!cached) return null
   const parsed = renderedDocumentSchema.safeParse(cached.doc)
-  if (!parsed.success) throw new ApiError(422, "Bản tài liệu đã ghép bị lỗi. Hãy chạy lại bước Ghép tài liệu.", "RENDERED_DOCUMENT_INVALID")
-  return rehydrateImages(parsed.data, projectId, loadDiagramPng)
+  if (!parsed.success) {
+    console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn — dựng lại`)
+    return null
+  }
+  return rehydrateImages(parsed.data, projectId, load)
+}
+
+/**
+ * Lượt dựng đang chạy, khoá theo `(project, spine_version)`: nhiều tab cùng mở một project chưa có bản dựng ở
+ * version hiện tại thì dùng chung một lượt. Dựng trùng vốn vô hại (tất định, `upsertCache` chịu được đua ghi),
+ * gom lại chỉ để khỏi phí.
+ */
+const assemblingNow = new Map<string, Promise<AssembleResult>>()
+
+const assembleShared = (projectId: string, projectName: string, spineVersion: number, deps: AssembleDeps): Promise<AssembleResult> => {
+  const key = `${projectId}:${spineVersion}`
+  const running = assemblingNow.get(key)
+  if (running) return running
+  const task = assemble(projectId, projectName, spineVersion, deps).finally(() => assemblingNow.delete(key))
+  assemblingNow.set(key, task)
+  return task
+}
+
+const isSpineVersionConflict = (err: unknown): boolean => err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT
+
+/**
+ * Tài liệu bản nháp ở `spine_version` hiện tại. Chưa có bản dựng ở version đó — lần đọc đầu, hoặc Spine vừa đi
+ * tiếp sau một step / lệnh sửa — thì dựng ngay tại đây thay vì trả bản cũ và chờ ai đó bấm một nút: dựng là thao
+ * tác tất định, idempotent theo version, không gọi model và đo được ~20ms cho một SRS 19 màn, nên nó là chi tiết
+ * nội bộ chứ không phải một quyết định của người dùng.
+ */
+const getDraftDocument = async (projectId: string, projectName: string, deps: AssembleDeps): Promise<RenderedDocument> => {
+  const record = await spineRepository.get(projectId)
+  // Dự án chưa có Spine (vừa tạo, chưa chạy bước nào): không có gì để dựng — caller trả trạng thái "chưa có"
+  if (!record) throw new NoWorkingDraftError()
+
+  const current = await loadDraftCache(projectId, record.spine_version, deps.loadDiagramPng)
+  if (current) return current
+
+  // `SPINE_VERSION_CONFLICT`: Spine đi tiếp ngay giữa lúc đọc version và dựng (một step khác đang chạy). Bản vừa
+  // dựng ở version cũ vẫn đọc được và lượt đọc kế sẽ bắt kịp — không chặn lượt xem hiện tại vì một cuộc đua.
+  await assembleShared(projectId, projectName, record.spine_version, deps).catch((err: unknown) => {
+    if (!isSpineVersionConflict(err)) throw err
+  })
+
+  const built = await loadDraftCache(projectId, null, deps.loadDiagramPng)
+  if (!built) throw new NoWorkingDraftError()
+  return built
 }
 
 /** Mã baseline hiển thị `BLnnn` — `Spine.baselines[].id` do `baseline.service.nextBaselineId` sinh. */
@@ -770,11 +825,10 @@ const getBaselineDocument = async (
   // T15 review T5: baseline bất biến — cache theo baseline._id, không dựng lại mỗi lần xem.
   const cacheFilter = { projectId, baseline_id: baselineIdStr }
   const cached = await RenderedDocumentCache.findOne(cacheFilter, null, { lean: true })
-  if (cached) {
-    const parsed = renderedDocumentSchema.safeParse(cached.doc)
-    if (!parsed.success) throw new ApiError(422, "Bản tài liệu đã ghép bị lỗi. Hãy chạy lại bước Ghép tài liệu.", "RENDERED_DOCUMENT_INVALID")
-    return rehydrateImages(parsed.data, projectId, deps.loadDiagramPng)
-  }
+  const parsedCache = cached ? renderedDocumentSchema.safeParse(cached.doc) : null
+  if (parsedCache?.success) return rehydrateImages(parsedCache.data, projectId, deps.loadDiagramPng)
+  // Cache hỏng: snapshot của baseline là bất biến nên dựng lại từ nó luôn đúng — không trả lỗi cho người dùng
+  if (cached) console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
 
   // T15 review T2: snapshot hỏng (dữ liệu cũ, migrate lỗi…) không được làm 500 lộ chi tiết ra ngoài.
   const parsedSpine = spineSchema.safeParse(baseline.snapshot)
@@ -816,7 +870,7 @@ export async function getDocument(
 ): Promise<RenderedDocument> {
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
   if (query.source === "baseline") return getBaselineDocument(projectId, projectName, query.baseline_id, merged)
-  return getDraftDocument(projectId, merged.loadDiagramPng)
+  return getDraftDocument(projectId, projectName, merged)
 }
 
 // ─── mode 1 v2: file version tài liệu dựng từ snapshot Spine (FLF-184) ──

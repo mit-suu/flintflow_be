@@ -401,9 +401,44 @@ describe("getDocument() — source=draft", () => {
     expect(doc.flagsAppendix?.waived[0].waive_reason).toBe("Accepted for release 1.0 scope")
   })
 
-  it("review T2: bản ghi cache hỏng ⇒ 422 RENDERED_DOCUMENT_INVALID, không phải 500 lộ ZodError", async () => {
+  it("chưa có bản dựng nào ⇒ dựng ngay ở spine_version hiện tại, không bắt gọi assemble trước", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 4 }))
+
+    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+
+    expect(doc.version).toBe("v0.4")
+  })
+
+  it("Spine đi tiếp sau bản dựng gần nhất ⇒ dựng lại ở version mới, không trả bản cũ", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
+    await assemble(PROJECT, "Demo", 1)
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 2 }))
+
+    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+
+    expect(doc.version).toBe("v0.2")
+  })
+
+  it("nhiều lượt đọc song song một version chưa dựng ⇒ chỉ dựng một lần", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 7 }))
+
+    const docs = await Promise.all([
+      getDocument(PROJECT, "Demo", { source: "draft" }),
+      getDocument(PROJECT, "Demo", { source: "draft" }),
+      getDocument(PROJECT, "Demo", { source: "draft" })
+    ])
+
+    expect(docs.map((d) => d.version)).toEqual(["v0.7", "v0.7", "v0.7"])
+    expect(cacheDb.docs.filter((d) => d.spine_version === 7)).toHaveLength(1)
+  })
+
+  it("review T2 (FLF-264): bản ghi cache hỏng ⇒ dựng lại đè lên, không ném 422 ra cho người dùng", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 1 }))
     cacheDb.docs.push({ projectId: PROJECT, spine_version: 1, assembled_at_version: 1, generated_at: new Date(), doc: { not: "a rendered document" } })
-    await expect(getDocument(PROJECT, "Demo", { source: "draft" })).rejects.toMatchObject({ statusCode: 422, code: "RENDERED_DOCUMENT_INVALID" })
+
+    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+
+    expect(doc.version).toBe("v0.1")
   })
 })
 

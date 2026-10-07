@@ -82,7 +82,14 @@ describe("FLF-249: lịch sử chat giữ lại tin cổng, không chỉ giữ t
   }
 
   it("duyệt một bước ⇒ transcript có tin cổng NGAY TRƯỚC thao tác của user", { timeout: 60_000 }, async () => {
-    const seeded = await seedFixture("minimal", { mutate: startAt("S-3.1") })
+    // Chế độ duyệt chặt: ca này nói về thứ tự tin trong transcript ở một cổng, nên cổng phải chắc chắn có —
+    // không phụ thuộc vào việc luật "bước im" có cho S-3.1 tự Accept hay không.
+    const seeded = await seedFixture("minimal", {
+      mutate: (spine) => {
+        startAt("S-3.1")(spine)
+        ;(spine.project as Record<string, unknown>).review_mode = "strict"
+      }
+    })
     const run = await runStepHttp(app, seeded, "S-3.1", await spineVersionOf(app, seeded))
     const gateReady = run.events[run.events.length - 1] as { type: string; message_vi?: string }
     expect(gateReady.type).toBe("gate_ready")

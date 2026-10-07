@@ -115,11 +115,11 @@ describe("run-state qua HTTP (BUG-05, BUG-07)", () => {
     expect(res.text).toBe("")
   })
 
-  it("BUG-31: tài liệu chưa ghép ⇒ 200 not_assembled, không phải 409", async () => {
+  it("FLF-264: đọc tài liệu lần đầu đã có nội dung — BE tự dựng, không trả not_assembled", async () => {
     const seeded = await seedFixture("minimal")
     const doc = await api(seeded).get("/document?source=draft")
     expect(doc.status).toBe(200)
-    expect(doc.body.data).toBeNull()
-    expect(doc.body.meta).toEqual({ state: "not_assembled", hint: "S-8.2" })
+    expect(doc.body.data.sections.length).toBeGreaterThan(0)
+    expect(doc.body.meta.stale).toBe(false)
   })
 })

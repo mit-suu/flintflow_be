@@ -12,7 +12,7 @@ import { validationError, validationIssues } from "../../shared/utils/validation
 
 /** Chi tiết từng issue vào `meta.issues` (debug); user chỉ đọc một câu (FLF-247). */
 const renderedDocumentInvalid = (error: z.ZodError): ApiError =>
-  new ApiError(422, "Chưa xuất được tài liệu vì nội dung không đúng định dạng. Hãy ghép lại tài liệu rồi thử lại.", "RENDERED_DOCUMENT_INVALID", {
+  new ApiError(422, "Chưa xuất được tài liệu vì nội dung không đúng định dạng. Hãy thử lại sau giây lát.", "RENDERED_DOCUMENT_INVALID", {
     issues: validationIssues(error).slice(0, 20)
   })
 
@@ -52,7 +52,7 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
   try {
     doc = await getDocument(projectId, projectName, parsedQuery.data)
   } catch (err) {
-    if (err instanceof NoWorkingDraftError) return sendError(res, err.statusCode, err.code, err.message, { hint: "S-8.2" })
+    if (err instanceof NoWorkingDraftError) return sendError(res, err.statusCode, err.code, err.message)
     throw err
   }
 
