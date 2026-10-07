@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_VI, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
+import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_EN, NO_QUESTION_ACK_VI, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 
@@ -137,5 +137,42 @@ describe("withoutQuestions: lời AI của lượt đóng phỏng vấn", () => 
     expect(withoutQuestions("Tôi ghi nhận rồi.")).toBe("Tôi ghi nhận rồi.")
     expect(withoutQuestions("Bạn đo thành công bằng gì?")).toBe(NO_QUESTION_ACK_VI)
     expect(withoutQuestions("")).toBe(NO_QUESTION_ACK_VI)
+  })
+})
+
+describe("FLF-260: lời nhận tin theo ngôn ngữ trả lời", () => {
+  const asked = [{ question: "How much should the waiting time drop?" }, { question: "Which channel do patients book through?" }]
+
+  it("noQuestionAck: thiếu hoặc 'vi' ⇒ câu tiếng Việt cũ; 'en' ⇒ câu tiếng Anh, không có câu hỏi", () => {
+    expect(noQuestionAck()).toBe(NO_QUESTION_ACK_VI)
+    expect(noQuestionAck("vi")).toBe(NO_QUESTION_ACK_VI)
+    expect(noQuestionAck("en")).toBe(NO_QUESTION_ACK_EN)
+    expect(NO_QUESTION_ACK_EN).not.toContain("?")
+  })
+
+  it("reconcileReply / trimTailQuestion / withoutQuestions: cắt hết ⇒ lời nhận tin tiếng Anh", () => {
+    expect(reconcileReply("How long do you keep records?", ["How long do you keep records?"], [], "en")).toBe(NO_QUESTION_ACK_EN)
+    expect(reconcileReply("How long do you keep records?", ["How long do you keep records?"], ["Which phones do patients use?"], "en")).toBe(NO_QUESTION_ACK_EN)
+    expect(trimTailQuestion("Does that sound reasonable?", asked, 2, "en")).toBe(NO_QUESTION_ACK_EN)
+    expect(withoutQuestions("How do you measure success?", "en")).toBe(NO_QUESTION_ACK_EN)
+    expect(withoutQuestions("", "en")).toBe(NO_QUESTION_ACK_EN)
+  })
+
+  it("lời tiếng Anh vẫn được cắt câu hỏi như tiếng Việt; phần còn lại giữ nguyên văn", () => {
+    expect(
+      reconcileReply("Got it. Do you want web booking? DO YOU KEEP RECORDS IN COLD STORAGE?", ["Do you want to keep records in cold storage?"], ["Do you want web booking?"], "en")
+    ).toBe("Got it. Do you want web booking?")
+    expect(trimTailQuestion("Two payment channels make sense. I'll write it that way, does that sound reasonable?", asked, 2, "en")).toBe(
+      "Two payment channels make sense."
+    )
+    expect(withoutQuestions("A doctor call button makes sense. So how do you measure success? I'll guess the rest.", "en")).toBe(
+      "A doctor call button makes sense. I'll guess the rest."
+    )
+  })
+
+  it("lời không bị cắt thì giữ nguyên dù phiên tiếng Anh", () => {
+    expect(reconcileReply("I've read it. How long do you keep records?", [], ["How long do you keep records?"], "en")).toBe("I've read it. How long do you keep records?")
+    expect(trimTailQuestion("Ok. Does that sound reasonable?", asked.slice(0, 1), 2, "en")).toBe("Ok. Does that sound reasonable?")
+    expect(withoutQuestions("Noted.", "en")).toBe("Noted.")
   })
 })

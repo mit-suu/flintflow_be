@@ -100,7 +100,7 @@ import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { orderedSteps } from "./step-registry.js"
 import type { StepRunnerDeps } from "./step-runner.service.js"
-import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
+import type { AiActionInput, AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { gate, gateAssumptionIdsOf, phaseGateAssumptions, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
 import { acquireRun, finishRun, resetMemoryRuns } from "./run-state.service.js"
@@ -255,6 +255,20 @@ describe("gate.service: regenerate — trần 3/step", () => {
     expect(afterSecond!.actors.map((a) => a.id)).toContain("A92")
     expect(afterSecond!.actors.map((a) => a.id)).toContain("A00") // actor gốc không đụng
     expect(second.step.regenerate_used).toBe(2)
+  })
+
+  it("FLF-260: replyLanguage do nơi gọi đọc từ phiên ⇒ lượt soạn lại mang nó", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const inputs: AiActionInput[] = []
+    await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: version }, {
+      replyLanguage: "en",
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        return draftReply([{ op: "add", path: "actors[]", value: { id: "A91", name: "Regenerated", kind: "human", description: "y" } }])
+      }
+    })
+    expect(inputs.map((i) => i.replyLanguage)).toEqual(["en"])
   })
 
   it("resume sau regenerate vẫn revert đúng (F3: resume dùng first_seq/last_seq đã được cập nhật)", async () => {
@@ -758,6 +772,53 @@ describe("gate.service: revision sửa giả định (FLF-232)", () => {
       { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }]) }
     )
     expect(result.message_vi).toBe("Tôi đã cập nhật lại theo ý bạn.")
+  })
+
+  it("FLF-260: revision với replyLanguage en ⇒ lượt soạn lại mang en, lời xác nhận dự phòng bằng tiếng Anh", async () => {
+    const version = seedB14()
+    const inputs: AiActionInput[] = []
+    const result = await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      // Ghi chú cổng viết tiếng Việt không đổi ngôn ngữ: gate không đoán, chỉ theo ngôn ngữ nơi gọi đưa vào
+      { action: "revision", note: "đúng rồi", base_version: version },
+      {
+        replyLanguage: "en",
+        draftExecutor: async (_type, input) => {
+          inputs.push(input)
+          return withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }])
+        }
+      }
+    )
+    expect(inputs.map((i) => i.replyLanguage)).toEqual(["en"])
+    expect(result.message_vi).toBe("I've updated it as you asked.")
+  })
+
+  it("FLF-260: revision không có notes ⇒ lời xác nhận dựng từ tóm tắt bằng ngôn ngữ của phiên", async () => {
+    const version = seedB14()
+    await gateSaid("B-1.4", ["AS10"])
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "project.form_factor", value: "mobile_app" },
+      { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
+      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "The product is a mobile app." },
+      { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+    ]
+    const result = await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "it's a phone app", base_version: version }, { replyLanguage: "en", draftExecutor: async () => withNotes(ops) })
+    expect(result.message_vi).toBe("I've updated the system overview. Have a look, and if it all looks right we'll move on.")
+  })
+
+  it("FLF-260: nơi gọi không đưa ngôn ngữ ⇒ lượt soạn lại không mang field (prompt như cũ)", async () => {
+    const version = seedB14()
+    const inputs: AiActionInput[] = []
+    await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "đúng rồi", base_version: version }, {
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        return withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }])
+      }
+    })
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0]).not.toHaveProperty("replyLanguage")
   })
 
   it("gateAssumptionIdsOf: bước thường = giả định chưa xác nhận do chính nó sinh; bước cuối giai đoạn = cả giai đoạn", async () => {

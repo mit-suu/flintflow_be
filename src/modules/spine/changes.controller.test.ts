@@ -17,6 +17,9 @@ vi.mock("./reconcile.service.js", async (importOriginal) => {
   return { ...actual, reconcile: vi.fn() }
 })
 vi.mock("./undo.service.js", () => ({ undoLast: vi.fn(), NOTHING_TO_UNDO: "NOTHING_TO_UNDO" }))
+vi.mock("../project/chat-session.model.js", () => ({ ChatSession: { findById: vi.fn() } }))
+const account = vi.hoisted(() => ({ locale: null as "vi" | "en" | null }))
+vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: vi.fn(async () => account.locale) }))
 
 import {
   applyChanges,
@@ -35,6 +38,8 @@ import * as reconcileService from "./reconcile.service.js"
 import * as undoService from "./undo.service.js"
 import { TransactionRejectedError } from "./op-engine.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
+import { accountLocaleOf } from "../user/account-locale.js"
 
 /**
  * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
@@ -92,6 +97,9 @@ beforeEach(() => {
   vi.mocked(undoService.undoLast).mockReset()
   vi.mocked(spineRepository.get).mockReset()
   vi.mocked(spineRepository.listChanges).mockReset()
+  vi.mocked(ChatSession.findById).mockReset()
+  vi.mocked(accountLocaleOf).mockClear()
+  account.locale = null
 
   vi.mocked(getProjectById).mockImplementation(async (projectId, orgId) => {
     if (projectId !== PROJECT || orgId !== ORG) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
@@ -119,7 +127,7 @@ describe("POST /projects/:projectId/changes", () => {
       meta: { branch: "dependent", impact: { diagrams: ["usecase"] } },
       error: null
     })
-    expect(changeService.apply).toHaveBeenCalledWith(PROJECT, OWNER, { base_version: 1, ops: [OP], reason: "typo" }, INIT)
+    expect(changeService.apply).toHaveBeenCalledWith(PROJECT, OWNER, { base_version: 1, ops: [OP], reason: "typo", reply_language: "vi" }, INIT)
   })
 
   it("nhánh instruction đi tiếp xuống service (không còn 501 NOT_IMPLEMENTED)", async () => {
@@ -138,7 +146,7 @@ describe("POST /projects/:projectId/changes", () => {
     expect(changeService.apply).toHaveBeenCalledWith(
       PROJECT,
       OWNER,
-      { base_version: 2, instruction: "Đổi tên actor A01 thành Student" },
+      { base_version: 2, instruction: "Đổi tên actor A01 thành Student", reply_language: "vi" },
       INIT
     )
   })
@@ -221,7 +229,141 @@ describe("POST /projects/:projectId/changes/preview", () => {
 
     expect(outcome.status).toBe(200)
     expect(outcome.body).toMatchObject({ data: { ok: false, clarification: "Ý bạn là actor nào?" } })
-    expect(changeService.preview).toHaveBeenCalledWith(PROJECT, OWNER, { base_version: 1, instruction: "đổi tên" }, INIT)
+    expect(changeService.preview).toHaveBeenCalledWith(PROJECT, OWNER, { base_version: 1, instruction: "đổi tên", reply_language: "vi" }, INIT)
+  })
+})
+
+describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
+  const SESSION = "650000000000000000000003"
+  const CHANGE = { op: "set", path: "actors[id=A01].name", before: "Founder", value: "Student", reason: null }
+  const APPLIED = { ...CHANGE, projectId: PROJECT, seq: 5, txn: "t3", at: "2026-10-07T00:00:00.000Z", by: OWNER, step_id: null }
+  const EMPTY_IMPACT = { fields: [], sections: [], diagrams: [], referrers: [] }
+
+  /** Phiên chat giả do `loadProjectSession` nạp; `persisted` là `reply_language` lúc `save()` — thứ thật sự xuống DB. */
+  const fakeSession = (replyLanguage: "vi" | "en" | null) => {
+    const session = {
+      projectId: PROJECT,
+      messages: [] as IChatMessage[],
+      reply_language: replyLanguage,
+      persisted: undefined as string | null | undefined,
+      save: vi.fn(async () => {
+        session.persisted = session.reply_language
+      })
+    }
+    vi.mocked(ChatSession.findById).mockResolvedValue(session as never)
+    return session
+  }
+  const replyOf = (message: IChatMessage) => (JSON.parse(message.content) as { kind: string; reply: string })
+
+  it("câu lệnh tiếng Anh trong phiên ⇒ model nhận en, phiên lưu reply_language en, bong bóng xem trước tiếng Anh", async () => {
+    const session = fakeSession(null)
+    vi.mocked(changeService.preview).mockResolvedValue({
+      ok: true,
+      txn: "t",
+      base_version: 1,
+      ops: [OP, OP],
+      changes: [CHANGE, CHANGE],
+      violations: [],
+      referrers: [],
+      preview_id: "pv1"
+    })
+
+    const instruction = "Rename the actor A01 to Student"
+    const outcome = await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, instruction, session_id: SESSION })
+
+    expect(outcome.status).toBe(200)
+    expect(vi.mocked(changeService.preview).mock.calls[0][2]).toMatchObject({ instruction, reply_language: "en" })
+    // Một lần ghi ngôn ngữ ngay sau khi đoán, một lần ghi lượt chat
+    expect(session.save).toHaveBeenCalledTimes(2)
+    expect(session.persisted).toBe("en")
+    expect(session.messages[0]).toMatchObject({ role: "user", content: instruction })
+    expect(replyOf(session.messages[1])).toMatchObject({
+      kind: "change_preview",
+      reply: 'Built a preview of 2 changes — review it, then press "Áp dụng" (Apply) to save.'
+    })
+  })
+
+  it("lượt gọi model lỗi (không phải ApiError, không tới lượt ghi chat) ⇒ ngôn ngữ phiên vẫn được ghi", async () => {
+    const session = fakeSession("vi")
+    vi.mocked(changeService.preview).mockRejectedValue(new Error("provider down"))
+
+    const outcome = await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, instruction: "Rename the actor A01 to Student", session_id: SESSION })
+
+    expect(outcome.error).toBeInstanceOf(Error)
+    expect(session.persisted).toBe("en")
+  })
+
+  it("áp thẳng bằng câu lệnh tiếng Anh trong phiên tiếng Việt ⇒ phiên chuyển en; không đổi gì ⇒ câu xác nhận tiếng Anh", async () => {
+    const session = fakeSession("vi")
+    vi.mocked(changeService.apply).mockResolvedValue({ txn: null, spine_version: 2, changes: [], spine: SPINE_STUB, branch: "silent", impact: EMPTY_IMPACT })
+
+    await invoke(applyChanges, OWNER, PROJECT, { base_version: 2, instruction: "Rename the actor A01 to Student", session_id: SESSION })
+
+    expect(vi.mocked(changeService.apply).mock.calls[0][2]).toMatchObject({ reply_language: "en" })
+    expect(session.persisted).toBe("en")
+    expect(replyOf(session.messages[1])).toEqual({ kind: "change_applied", reply: "Confirmed: the content is unchanged.", count: 0, spine_version: 2 })
+  })
+
+  it("bấm Áp dụng bản xem trước: câu lệnh FE gửi lại không được đoán lại — giữ ngôn ngữ phiên", async () => {
+    // Xem trước bằng tiếng Việt rồi user chuyển sang viết tiếng Anh (phiên en) trước khi bấm Áp dụng
+    const session = fakeSession("en")
+    vi.mocked(changeService.apply).mockResolvedValue({
+      txn: "t3",
+      spine_version: 3,
+      changes: [APPLIED],
+      spine: SPINE_STUB,
+      branch: "dependent",
+      impact: EMPTY_IMPACT
+    })
+
+    await invoke(applyChanges, OWNER, PROJECT, {
+      base_version: 2,
+      instruction: "Đổi tên actor A01 thành Student",
+      preview_id: "pv1",
+      session_id: SESSION
+    })
+
+    expect(vi.mocked(changeService.apply).mock.calls[0][2]).toMatchObject({ reply_language: "en" })
+    expect(session.persisted).toBe("en")
+    expect(session.messages).toHaveLength(1)
+    expect(replyOf(session.messages[0])).toMatchObject({ kind: "change_applied", reply: "Applied 1 change to the document (v3)." })
+  })
+
+  it("phiên chưa có ngôn ngữ, câu lệnh tiếng Việt ⇒ bong bóng giữ nguyên tiếng Việt", async () => {
+    const session = fakeSession(null)
+    vi.mocked(changeService.apply).mockResolvedValue({
+      txn: "t3",
+      spine_version: 3,
+      changes: [APPLIED],
+      spine: SPINE_STUB,
+      branch: "dependent",
+      impact: EMPTY_IMPACT
+    })
+
+    await invoke(applyChanges, OWNER, PROJECT, { base_version: 2, instruction: "Đổi tên actor A01 thành Student", session_id: SESSION })
+
+    expect(session.persisted).toBe("vi")
+    expect(replyOf(session.messages[1]).reply).toBe("Đã áp dụng 1 thay đổi vào tài liệu (v3).")
+  })
+
+  it("không có phiên: câu lệnh rõ ngôn ngữ thắng; lô op sẵn không có chữ để đoán ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt", async () => {
+    vi.mocked(changeService.preview).mockResolvedValue({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [] })
+
+    await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, instruction: "Please rename the actor A01 to Student" })
+    account.locale = "en"
+    await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, ops: [OP] })
+    account.locale = null
+    await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, ops: [OP] })
+
+    expect(vi.mocked(changeService.preview).mock.calls.map((call) => call[2].reply_language)).toEqual(["en", "en", "vi"])
+    expect(accountLocaleOf).toHaveBeenCalledWith(OWNER)
+    expect(ChatSession.findById).not.toHaveBeenCalled()
+  })
+
+  it("client không gửi được reply_language (DTO strict, không đổi hợp đồng) ⇒ 400", async () => {
+    const outcome = await invoke(previewChanges, OWNER, PROJECT, { base_version: 1, instruction: "đổi tên", reply_language: "en" })
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    expect(changeService.preview).not.toHaveBeenCalled()
   })
 })
 

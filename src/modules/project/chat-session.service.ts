@@ -12,6 +12,12 @@ import { changeErrorReply, formatChatContext, previewPayload } from "../spine/ch
 import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
+
+/** Nội dung tin AI gần nhất của phiên — để biết user đang trả lời thẻ nào (FLF-260). */
+const lastAiContentOf = (session: { messages: readonly IChatMessage[] }): string | undefined =>
+  [...session.messages].reverse().find((m) => m.role === "ai")?.content
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 /**
  * FLF-220: câu hỏi trong tin nhắn CHAT đi qua cùng luật hình dạng với pipeline (≤ 4 câu, 2–4 lựa chọn, bỏ
@@ -86,6 +92,8 @@ export const assertChatSessionOwnership = async (projectId: string, chatSessionI
  * hoặc một câu hỏi làm rõ, chứ không phải lời hứa. Lượt chờ `answer_needed` của step vẫn được ưu tiên
  * trước (kiểm ở `tryAnswerRunningStep`, chạy trước hàm này).
  *
+ * FLF-260: câu làm rõ và câu của thẻ xem trước theo ngôn ngữ trả lời của phiên (`replyLanguage`).
+ *
  * Trả về tin nhắn AI đã ghi vào transcript, hoặc `null` khi tin nhắn không phải lệnh sửa (đi tiếp CHAT).
  */
 const tryChangeFlow = async (
@@ -93,7 +101,8 @@ const tryChangeFlow = async (
   projectId: string,
   content: string,
   step: string,
-  userId: string
+  userId: string,
+  replyLanguage: ReplyLanguage = "vi"
 ): Promise<IChatMessage | null> => {
   if (!changeService.isChangeInstruction(content)) return null
 
@@ -107,9 +116,10 @@ const tryChangeFlow = async (
     const preview = await changeService.preview(projectId, userId, {
       instruction: content,
       base_version: record.spine_version,
-      chat_history: chatHistory
+      chat_history: chatHistory,
+      reply_language: replyLanguage
     })
-    payload = previewPayload(preview)
+    payload = previewPayload(preview, replyLanguage)
   } catch (err) {
     // Lệnh sửa lỗi (hết credit, xung đột version…) không được làm hỏng phiên chat
     if (!(err instanceof ApiError)) console.error("[chat-session] change preview failed:", err)
@@ -165,13 +175,16 @@ export const sendMessageAndGetResponse = async (
     createdAt: new Date()
   }
   session.messages.push(userMsg)
+  // FLF-260: tin user gõ rõ ngôn ngữ ⇒ thành ngôn ngữ phiên; save dưới ghi luôn, trước khi tin rẽ sang step / lệnh sửa.
+  // Chỉ đoán trên chữ user tự gõ — nhãn thẻ AI vừa hỏi (FE gửi kèm khi user bấm chọn) không tính.
+  const replyLanguage = await replyLanguageForSession(session, typedPartOf(content, lastAiContentOf(session)), userId)
   await session.save()
 
   // 1b. T20: session pipeline đang chờ câu trả lời của step ⇒ tin nhắn là câu trả lời, không phải CHAT
   if (await tryAnswerRunningStep(session, projectId, content)) return session
 
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
-  if (await tryChangeFlow(session, projectId, content, step, userId)) return session
+  if (await tryChangeFlow(session, projectId, content, step, userId, replyLanguage)) return session
 
   // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
   const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
@@ -206,7 +219,7 @@ export const sendMessageAndGetResponse = async (
   try {
     aiResult = await executeAiAction(
       actionType,
-      { promptVariables },
+      { promptVariables, replyLanguage },
       projectId,
       userId
     )
@@ -214,7 +227,10 @@ export const sendMessageAndGetResponse = async (
     console.error("AI action failed in chat session service:", error)
     // Fallback response on error
     const errorReply: any = {
-      reply: "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau.",
+      reply: byLanguage(replyLanguage, {
+        vi: "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau.",
+        en: "Sorry, the system could not reach the AI. Please check the credit wallet or try again later."
+      }),
       questions: []
     }
     const aiErrorMsg: IChatMessage = {
@@ -273,6 +289,8 @@ export const sendMessageStream = async (
     createdAt: new Date()
   }
   session.messages.push(userMsg)
+  // FLF-260: như đường JSON — ngôn ngữ phiên được ghi cùng tin user, trước khi tin rẽ sang step / lệnh sửa
+  const replyLanguage = await replyLanguageForSession(session, typedPartOf(content, lastAiContentOf(session)), userId)
   await session.save()
 
   // 1b. T20: session pipeline đang chờ câu trả lời của step ⇒ đưa vào hàng chờ rồi đóng luồng này
@@ -287,7 +305,7 @@ export const sendMessageStream = async (
   }
 
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow — trả một sự kiện rồi đóng luồng
-  const changeMsg = await tryChangeFlow(session, projectId, content, step, userId)
+  const changeMsg = await tryChangeFlow(session, projectId, content, step, userId, replyLanguage)
   if (changeMsg) {
     // Dùng đúng sự kiện `finish` như luồng CHAT (không stream chữ) để FE không phải biết thêm loại event
     try {
@@ -333,7 +351,7 @@ export const sendMessageStream = async (
   try {
     const aiResult = await executeAiActionStream(
       actionType,
-      { promptVariables },
+      { promptVariables, replyLanguage },
       projectId,
       userId,
       {

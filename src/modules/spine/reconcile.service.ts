@@ -30,6 +30,8 @@ import { ActionType, type AiActionInput, type AiActionResult } from "../../share
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { accountLocaleOf } from "../user/account-locale.js"
 import { applyTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
 import { computeSectionStates } from "./section-status.js"
@@ -135,7 +137,8 @@ const proposeOps = async (
   userId: string,
   spine: Spine,
   briefs: readonly StaleSectionBrief[],
-  deps: ReconcileDeps
+  deps: ReconcileDeps,
+  replyLanguage?: ReplyLanguage
 ): Promise<{ ops: Op[]; sections: string[] }> => {
   const ops: Op[] = []
   const sections: string[] = []
@@ -166,7 +169,8 @@ const proposeOps = async (
           projection: projection.projection,
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [brief]
-        }
+        },
+        ...(replyLanguage ? { replyLanguage } : {})
       },
       projectId,
       userId
@@ -226,7 +230,10 @@ export const reconcile = async (
   const spine = stripRecord(record)
   const changes = await repository.listChanges(projectId)
   const briefs = staleSections(spine, changes)
-  const proposed = await proposeOps(projectId, userId, spine, briefs, d)
+  // FLF-260: hoà giải không đi qua phiên chat (DTO đóng băng không có session_id) ⇒ `reason` theo ngôn ngữ tài
+  // khoản; tài khoản chưa chọn thì skill tự dùng tiếng Việt.
+  const replyLanguage = (await accountLocaleOf(userId)) ?? undefined
+  const proposed = await proposeOps(projectId, userId, spine, briefs, d, replyLanguage)
 
   if (proposed.ops.length === 0) {
     // BUG-16: còn section stale mà không có gì cần sửa ⇒ vẫn cấp `preview_id` để user xác nhận nguyên trạng

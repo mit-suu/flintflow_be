@@ -9,13 +9,22 @@
  * FLF-241: server KHÔNG còn chèn câu "Tôi tạm hiểu là …" vào `notes`. Hợp đồng `new_assumptions` = đúng những gì tin nói ra
  * vẫn giữ, nhưng theo chiều ngược: `spokenAssumptionIds` cắt danh sách xuống phần tin đã nói, thay vì nhồi câu cho tin phủ
  * hết danh sách. Phần không được nói ở lại `unconfirmed` ⇒ S-9.1 gom ⇒ cờ đỏ chặn ký baseline.
+ *
+ * FLF-260: phiên trả lời tiếng Anh có `notes` tiếng Anh. Mọi phép dò (dấu hiệu đoán, chủ ngữ tự xưng, lời mời cuối, câu đếm
+ * của model) nhận cả hai ngôn ngữ bất kể phiên — dò sót thì `new_assumptions` rỗng, không điều nào được xác nhận và cờ đỏ
+ * chặn ký baseline. Câu server tự dựng đi theo `language` (mặc định tiếng Việt); `gateActionText` giữ tiếng Việt vì FE
+ * dựng bong bóng tức thì bằng đúng các chuỗi đó.
  */
 
 import type { ChangeSummary } from "./pipeline.dto.js"
-import { ASSUMPTION_OVERLAP_MIN_WORDS, contentWords, coversAssumption, normalise, sentencesOf } from "./text-overlap.js"
+import { ASSUMPTION_OVERLAP_MIN_WORDS, contentWords, coversAssumption, negated, normalise, sentencesOf } from "./text-overlap.js"
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 export const FALLBACK_INVITE = "Bạn xem giúp, ổn thì mình đi tiếp nhé."
 const ASSUMPTION_INVITE = "Nếu chỗ nào khác thì bạn nói tôi nhé."
+/** Bản tiếng Anh của hai lời mời trên — đều phải khớp `CLOSING_INVITE_EN` để câu đếm còn chèn được trước chúng. */
+const FALLBACK_INVITE_EN = "Have a look, and if it all looks right we'll move on."
+const ASSUMPTION_INVITE_EN = "If anything is different, let me know."
 
 /** Tối đa số nhóm nội dung được kể trong câu "Tôi đã cập nhật …". */
 const MAX_SPOKEN_GROUPS = 4
@@ -46,11 +55,35 @@ const SPOKEN_LABELS: Readonly<Record<string, string>> = Object.freeze({
   custom_sections: "mục tự thêm"
 })
 
+/** `project` là một khối (mỗi field một dòng tóm tắt) nên câu tiếng Anh nói nguyên cụm, không đếm. */
+const PROJECT_LABEL_EN = "the system overview"
+/** Nhãn tiếng Anh `[số ít, số nhiều]` — câu tiếng Anh phải chia số ("1 actor", "2 new use cases"). */
+const SPOKEN_LABELS_EN: Readonly<Record<string, readonly [string, string]>> = Object.freeze({
+  addendum: ["note", "notes"],
+  features: ["feature group", "feature groups"],
+  actors: ["actor", "actors"],
+  roles: ["role", "roles"],
+  use_cases: ["use case", "use cases"],
+  screens: ["screen", "screens"],
+  permissions: ["permission", "permissions"],
+  entities: ["data entity", "data entities"],
+  functions: ["function", "functions"],
+  validations: ["validation rule", "validation rules"],
+  nfrs: ["non-functional requirement", "non-functional requirements"],
+  business_rules: ["business rule", "business rules"],
+  common_requirements: ["common requirement", "common requirements"],
+  messages: ["message", "messages"],
+  other_requirements: ["other requirement", "other requirements"],
+  glossary: ["glossary term", "glossary terms"],
+  diagrams: ["diagram", "diagrams"],
+  custom_sections: ["custom section", "custom sections"]
+})
+
 const trimmed = (text: string | null | undefined): string => (text ?? "").trim()
 
-/** "a" · "a và b" · "a, b và c". */
-const joinList = (items: readonly string[]): string =>
-  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} và ${items[items.length - 1]}`
+/** "a" · "a và b" · "a, b và c" (tiếng Anh: "a, b and c"). */
+const joinList = (items: readonly string[], language: ReplyLanguage): string =>
+  items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${byLanguage(language, { vi: "và", en: "and" })} ${items[items.length - 1]}`
 
 const stripEndPunctuation = (text: string): string => text.replace(/[\s.!?;,]+$/u, "")
 
@@ -68,32 +101,85 @@ const HEDGE_ACCENTED = /(^|[^\p{L}])tôi (đoán|nghĩ|giả sử|đề xuất|c
 const HEDGE_PLAIN = /(^|[^a-z0-9])(tam hieu|neu khac|co le|chac la)([^a-z0-9]|$)/
 /** Chỉ dùng khi cả câu gõ không dấu (không thể so có dấu): "toi doan" lúc đó không thể là "tới đoạn". */
 const HEDGE_UNACCENTED_TEXT = /(^|[^a-z0-9])toi (doan|nghi|gia su|de xuat|cho rang)([^a-z0-9]|$)/
+/** Chủ ngữ tự xưng tiếng Anh + trợ động từ + trạng từ đệm: "I", "I'm also", "we've", "I would"… Nháy cong (’) tính như nháy thẳng. */
+const EN_SELF = "(i|we)(['’](m|re|ve|d|ll)|\\s+(am|are|have|would|will))?\\s+(also\\s+|still\\s+|just\\s+)?"
+/** Động từ đoán tiếng Anh. Cố ý không có "supposed": "I'm supposed to …" không phải lời đoán. */
+const EN_GUESS_VERB = "(assume|assumed|assuming|guess|guessed|guessing|suppose|presume|presumed|presuming)"
+/**
+ * Dấu hiệu đoán tiếng Anh (FLF-260), so trên chữ bỏ dấu như `HEDGE_PLAIN`: "I assume", "I'm assuming", "I guess", "I suppose",
+ * "I presume", "my guess", "probably", "if not", "if that's wrong", "let me know if", "tell me if"… Cố ý không có "I think":
+ * câu tiếng Anh dùng nó cả khi không đoán gì, mà phép đo này phải nghiêng về chặt. Chữ Việt bỏ dấu không tạo ra các cụm này.
+ */
+const HEDGE_EN = new RegExp(
+  `(^|[^a-z0-9])(${EN_SELF}${EN_GUESS_VERB}|my (guess|assumption|assumptions)|probably|presumably|if not|` +
+    `if (that|this|it|anything|any of (that|this))(['’]s|\\s+is)\\s+(wrong|off|different|not right|not the case)|if i['’]m wrong|` +
+    `(let me know|tell me|correct me) if)(?![a-z0-9])`
+)
 const hasDiacritics = (text: string): boolean => /[\p{M}đĐ]/u.test(text.normalize("NFD"))
 const isHedged = (sentence: string): boolean =>
   HEDGE_ACCENTED.test(sentence.toLowerCase()) ||
   HEDGE_PLAIN.test(normalise(sentence)) ||
+  HEDGE_EN.test(normalise(sentence)) ||
   (!hasDiacritics(sentence) && HEDGE_UNACCENTED_TEXT.test(normalise(sentence)))
 
-/** Câu đã tự mang chủ ngữ ("Tôi suy ra …", "Mình hiểu là …") — nối thêm tiền tố sẽ ra câu hai chủ ngữ. */
-const SELF_SUBJECT = /^(tôi|mình|chúng)(?!\p{L})/iu
+/** Đuôi mời sửa tiếng Anh mang chữ phủ định: "tell me if not", "if that's not right", "if this is not the case"… */
+const NEGATED_INVITE_EN =
+  /(^|[^a-z0-9])((let me know|tell me|correct me)\s+)?if\s+(not|(that|this|it|anything|any of (that|this))(['’]s|\s+is)\s+not\s+(right|correct|the case))(?![a-z0-9])/g
+/**
+ * Bản đưa vào phép đo phủ (`coversAssumption`), áp cho cả câu đoán lẫn điều tạm hiểu, vì phép đo so cả chiều phủ định:
+ * - phủ định viết gọn ("don't", "isn't", "cannot") mở thành "not" — `text-overlap` chỉ nhận chữ "not" đứng riêng, không mở
+ *   thì "patients don't need an app" khớp nhầm điều "patients need an app" (ngược nghĩa);
+ * - bỏ đuôi mời sửa mang chữ phủ định — lời mời, không phải nội dung; giữ lại thì câu khẳng định thành câu phủ định: điều
+ *   khẳng định không bao giờ khớp, còn điều phủ định lại khớp nhầm.
+ * Chữ Việt bỏ dấu không chứa các mẫu này nên phép đo tiếng Việt không đổi.
+ */
+const forCoverage = (text: string): string =>
+  normalise(text)
+    .replace(/n['’]t(?![a-z0-9])/g, " not")
+    .replace(/(^|[^a-z0-9])cannot(?![a-z0-9])/g, "$1can not")
+    .replace(NEGATED_INVITE_EN, "$1")
+
+/** Câu đã tự mang chủ ngữ ("Tôi suy ra …", "Mình hiểu là …", "I'd say …", "We …") — nối thêm tiền tố sẽ ra câu hai chủ ngữ. */
+const SELF_SUBJECT = /^(tôi|mình|chúng|i|we)(?!\p{L})/iu
 
 /** Câu tạm hiểu, chưa có lời mời cuối. Câu đã tự nói ra là lời đoán thì giữ nguyên văn, không bọc tiền tố. */
-const assumptionSentences = (texts: readonly string[]): string[] =>
+const assumptionSentences = (texts: readonly string[], language: ReplyLanguage): string[] =>
   texts
     .map((t) => stripEndPunctuation(trimmed(t)))
     .filter((t) => t !== "")
     .map((text, i) =>
-      isHedged(text) || SELF_SUBJECT.test(text) ? ensureSentenceEnd(text) : `Tôi ${i === 0 ? "" : "cũng "}tạm hiểu là ${lowerFirst(text)}.`
+      isHedged(text) || SELF_SUBJECT.test(text)
+        ? ensureSentenceEnd(text)
+        : byLanguage(language, {
+            vi: `Tôi ${i === 0 ? "" : "cũng "}tạm hiểu là ${lowerFirst(text)}.`,
+            en: `I'm ${i === 0 ? "" : "also "}assuming ${lowerFirst(text)}.`
+          })
     )
 
 /**
  * Câu nói những điều AI đang tạm hiểu, không dùng chữ "giả định". Chỉ dùng cho đường DỰ PHÒNG khi model không viết `notes`
  * — đường đó tự nói hết nên mọi điều đều được nói, mỗi điều một câu ngắn: "Tôi tạm hiểu là A. Tôi cũng tạm hiểu là B. Nếu
- * chỗ nào khác thì bạn nói tôi nhé." Rỗng ⇒ null.
+ * chỗ nào khác thì bạn nói tôi nhé." (tiếng Anh: "I'm assuming A. I'm also assuming B. If anything is different, let me
+ * know."). Rỗng ⇒ null.
  */
-export const assumptionSentence = (texts: readonly string[]): string | null => {
-  const sentences = assumptionSentences(texts)
-  return sentences.length === 0 ? null : [...sentences, ASSUMPTION_INVITE].join(" ")
+export const assumptionSentence = (texts: readonly string[], language: ReplyLanguage = "vi"): string | null => {
+  const sentences = assumptionSentences(texts, language)
+  return sentences.length === 0 ? null : [...sentences, byLanguage(language, { vi: ASSUMPTION_INVITE, en: ASSUMPTION_INVITE_EN })].join(" ")
+}
+
+const WORD_CHAR = /[\p{L}\p{N}]/u
+/**
+ * `needle` có mặt trong `haystack` như một cụm trọn từ: "web" không khớp "website". Dấu chấm cuối của điều tạm hiểu từng vô
+ * tình làm ranh giới phải; bỏ dấu đó (`isSpokenIn`) thì ranh giới phải được kiểm thật.
+ */
+const containsPhrase = (haystack: string, needle: string): boolean => {
+  if (needle === "") return false
+  for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+    const joinsBefore = WORD_CHAR.test(needle.charAt(0)) && WORD_CHAR.test(haystack.charAt(at - 1))
+    const joinsAfter = WORD_CHAR.test(needle.charAt(needle.length - 1)) && WORD_CHAR.test(haystack.charAt(at + needle.length))
+    if (!joinsBefore && !joinsAfter) return true
+  }
+  return false
 }
 
 /**
@@ -109,12 +195,18 @@ export const assumptionSentence = (texts: readonly string[]): string | null => {
 const isSpokenIn = (message: string, text: string): boolean => {
   const content = contentWords(text)
   if (content.size === 0) return false
-  const needle = normalise(text).trim()
+  // Không tính dấu kết câu của chính điều đó: "… computers." vẫn là nguyên văn trong "… computers — tell me if not."
+  const needle = normalise(stripEndPunctuation(text)).trim()
+  // Nguyên văn mà câu phủ định nó ở phía sau ("… có thanh toán online là chưa cần") là nói ngược lại — so cả chiều phủ
+  // định như phép đo phủ, trên bản đã bỏ đuôi "tell me if not" (xem `forCoverage`).
+  const verbatim = (sentence: string): boolean =>
+    negated(forCoverage(sentence)) === negated(forCoverage(text)) && containsPhrase(normalise(sentence), needle)
   // Điều quá ngắn không đủ từ nội dung để so bằng tỷ lệ ⇒ chỉ nhận khi câu đoán chứa nguyên văn nó.
   if (content.size < ASSUMPTION_OVERLAP_MIN_WORDS)
-    return sentencesOf(message).some((sentence) => isHedged(sentence) && normalise(sentence).includes(needle))
+    return sentencesOf(message).some((sentence) => isHedged(sentence) && verbatim(sentence))
+  // Đo phủ trên bản đã mở phủ định viết gọn và bỏ đuôi "tell me if not" (xem `forCoverage`)
   return sentencesOf(message).some(
-    (sentence) => isHedged(sentence) && (normalise(sentence).includes(needle) || coversAssumption(sentence, text))
+    (sentence) => isHedged(sentence) && (verbatim(sentence) || coversAssumption(forCoverage(sentence), forCoverage(text)))
   )
 }
 
@@ -142,12 +234,16 @@ export const spokenAssumptionIds = (message: string | null | undefined, assumpti
  */
 const CLOSING_INVITE =
   /di tiep|tiep nhe|tiep nha|cu noi|noi toi|noi minh|neu (cho nao )?khac|xem giup|xem qua|xem lai|dong y thi|chot phan|sang phan|mo phan/
+/** Lời mời cuối tiếng Anh (FLF-260): "… we'll move on", "go ahead", "let me know", "take a look", "looks good"… — có ranh giới từ. */
+const CLOSING_INVITE_EN =
+  /(^|[^a-z0-9])(move on|moving on|go ahead|carry on|keep going|continue|proceed|let me know|tell me|correct me|take a look|have a look|look (it |this |that |them )?over|review|(looks?|sounds?) (good|right|fine|ok|okay)|happy with|you agree|sign off|lock (it|this|that) in|wrap (it |this )?up|next (part|section))(?![a-z0-9])/
 
 /** Chèn `sentence` trước lời mời cuối của `message`; không có lời mời cuối thì nối sau. */
 const insertBeforeInvite = (message: string, sentence: string): string => {
   const parts = sentencesOf(message)
   const last = parts[parts.length - 1] ?? ""
-  if (parts.length > 0 && CLOSING_INVITE.test(normalise(last))) return [...parts.slice(0, -1), sentence, last].join(" ")
+  const invite = normalise(last)
+  if (parts.length > 0 && (CLOSING_INVITE.test(invite) || CLOSING_INVITE_EN.test(invite))) return [...parts.slice(0, -1), sentence, last].join(" ")
   return [ensureSentenceEnd(message), sentence].join(" ")
 }
 
@@ -158,7 +254,14 @@ const insertBeforeInvite = (message: string, sentence: string): string => {
  * gom lại và cờ đỏ `unconfirmed_assumption` chặn ký baseline. Dùng đúng cụm "điều tôi tạm hiểu" của cờ ở
  * `deterministic-check.ts` cho đồng giọng, không dùng chữ nội bộ "giả định".
  */
-const unspokenCountSentence = (count: number): string => `Còn ${count} điều tôi tạm hiểu nữa, mình rà ở phần tổng kết.`
+const unspokenCountSentence = (count: number, language: ReplyLanguage): string =>
+  byLanguage(language, {
+    vi: `Còn ${count} điều tôi tạm hiểu nữa, mình rà ở phần tổng kết.`,
+    en:
+      count === 1
+        ? "There's 1 more thing I'm assuming; we'll go over it in the summary."
+        : `There are ${count} more things I'm assuming; we'll go over them in the summary.`
+  })
 
 /**
  * Câu đếm do model tự viết trong `notes`. Chỉ server được đếm — nó biết số thật từ Spine, model thì đoán: ở lượt chạy
@@ -169,6 +272,15 @@ const unspokenCountSentence = (count: number): string => `Còn ${count} điều 
  * thường, cả file này đã tính tới (`HEDGE_UNACCENTED_TEXT`).
  */
 const MODEL_COUNT_SENTENCE = /(^|[^a-z0-9])con\s+(\d+|mot|hai|ba|bon|nam|sau|bay|tam|chin|muoi)\s+dieu\s+(toi|minh)\s+tam hieu/
+const EN_COUNT = "(\\d+|one|two|three|four|five|six|seven|eight|nine|ten)"
+/**
+ * Câu đếm tiếng Anh (FLF-260): "3 more things I'm assuming …", "two other assumptions …", "4 assumptions left …", "I'm also
+ * assuming 5 more things …". Khớp cả câu đếm server tự dựng, như bản tiếng Việt.
+ */
+const MODEL_COUNT_SENTENCE_EN = new RegExp(
+  `(^|[^a-z0-9])(${EN_COUNT}\\s+(more|other|remaining|further)\\s+(assumptions?|(things?|points?)\\s+(that\\s+)?${EN_SELF}${EN_GUESS_VERB})|` +
+    `${EN_COUNT}\\s+assumptions?\\s+(left|remaining|still open|outstanding)|${EN_GUESS_VERB}\\s+${EN_COUNT}\\s+(more|other)\\s+things?)(?![a-z0-9])`
+)
 
 /**
  * Bỏ mọi câu đếm do model tự viết. Phải chạy TRƯỚC khi đo "tin đã nói những điều nào": nếu đo trên bản chưa lọc thì một
@@ -177,12 +289,20 @@ const MODEL_COUNT_SENTENCE = /(^|[^a-z0-9])con\s+(\d+|mot|hai|ba|bon|nam|sau|bay
  */
 export const stripModelCountSentences = (message: string | null | undefined): string =>
   sentencesOf(trimmed(message))
-    .filter((s) => !MODEL_COUNT_SENTENCE.test(normalise(s)))
+    .filter((s) => !MODEL_COUNT_SENTENCE.test(normalise(s)) && !MODEL_COUNT_SENTENCE_EN.test(normalise(s)))
     .join(" ")
     .trim()
 
+/** Một nhóm của câu tóm tắt tiếng Anh: "2 new use cases" · "3 screens" · "1 actor" · "the system overview". */
+const spokenGroupEn =(collection: string, added: number, changed: number): string => {
+  if (collection === "project") return PROJECT_LABEL_EN
+  const total = added + changed
+  const [one, many] = SPOKEN_LABELS_EN[collection] ?? [collection, collection]
+  return `${total}${added > 0 && changed === 0 ? " new" : ""} ${total === 1 ? one : many}`
+}
+
 /** "Tôi đã cập nhật 3 use case và 2 yêu cầu phi chức năng." từ `summary[]`; không có gì đáng kể ⇒ null. */
-const summarySentence = (summary: readonly ChangeSummary[]): string | null => {
+const summarySentence = (summary: readonly ChangeSummary[], language: ReplyLanguage): string | null => {
   const groups = new Map<string, { added: number; changed: number }>()
   for (const row of summary) {
     if (HIDDEN_COLLECTIONS.has(row.collection)) continue
@@ -193,11 +313,18 @@ const summarySentence = (summary: readonly ChangeSummary[]): string | null => {
   }
   const parts = [...groups.entries()].slice(0, MAX_SPOKEN_GROUPS).map(([collection, { added, changed }]) => {
     const label = SPOKEN_LABELS[collection] ?? collection
-    return added > 0 && changed === 0 ? `${added} ${label} mới` : added + changed > 1 ? `${added + changed} ${label}` : label
+    return byLanguage(language, {
+      vi: added > 0 && changed === 0 ? `${added} ${label} mới` : added + changed > 1 ? `${added + changed} ${label}` : label,
+      en: spokenGroupEn(collection, added, changed)
+    })
   })
   if (parts.length === 0) return null
   const rest = groups.size - parts.length
-  return `Tôi đã cập nhật ${joinList(parts)}${rest > 0 ? ` và ${rest} phần khác` : ""}.`
+  // Tiếng Anh gộp phần còn lại vào danh sách ("a, b and 2 other parts") thay vì hai chữ "and" nối nhau
+  return byLanguage(language, {
+    vi: `Tôi đã cập nhật ${joinList(parts, "vi")}${rest > 0 ? ` và ${rest} phần khác` : ""}.`,
+    en: `I've updated ${joinList(rest > 0 ? [...parts, `${rest} other ${rest === 1 ? "part" : "parts"}`] : parts, "en")}.`
+  })
 }
 
 export interface StepGateMessageInput {
@@ -206,6 +333,8 @@ export interface StepGateMessageInput {
   summary: readonly ChangeSummary[]
   /** Câu giả định mới của bước (ngôn ngữ user) — chỉ dùng khi phải dựng tin thay cho `notes`. */
   newAssumptionTexts?: readonly string[]
+  /** Ngôn ngữ trả lời của phiên (FLF-260) cho câu server tự dựng; `notes` của model đã đúng ngôn ngữ. Thiếu ⇒ tiếng Việt. */
+  language?: ReplyLanguage
 }
 
 /**
@@ -217,10 +346,12 @@ export const composeStepGateMessage = (input: StepGateMessageInput): string | un
   // `notes` là tin cổng, dùng nguyên văn. Chip "Đúng rồi" xác nhận đúng những điều tin này nói ra — tập đó do
   // `spokenAssumptionIds` cắt ra khi dựng `new_assumptions`, không còn nhồi câu cho tin phủ hết danh sách (FLF-241).
   if (notes !== "") return notes
-  const changed = summarySentence(input.summary)
-  const assumed = assumptionSentence(input.newAssumptionTexts ?? [])
+  const language = input.language ?? "vi"
+  const changed = summarySentence(input.summary, language)
+  const assumed = assumptionSentence(input.newAssumptionTexts ?? [], language)
   if (!changed && !assumed) return undefined
-  return [changed, assumed, changed ? FALLBACK_INVITE : null].filter((part): part is string => part !== null).join(" ")
+  const invite = byLanguage(language, { vi: FALLBACK_INVITE, en: FALLBACK_INVITE_EN })
+  return [changed, assumed, changed ? invite : null].filter((part): part is string => part !== null).join(" ")
 }
 
 export interface PhaseGateMessageInput {
@@ -228,6 +359,8 @@ export interface PhaseGateMessageInput {
   lastMessage?: string
   /** Số điều tạm hiểu còn `unconfirmed` của giai đoạn mà tin KHÔNG nói ra — nói bằng một câu đếm, không liệt kê. */
   unspokenCount: number
+  /** Ngôn ngữ của câu đếm (FLF-260). Thiếu ⇒ tiếng Việt. */
+  language?: ReplyLanguage
 }
 
 /**
@@ -238,7 +371,7 @@ export const composePhaseGateMessage = (input: PhaseGateMessageInput): string | 
   // Bỏ câu đếm model tự viết trước khi thêm câu đếm thật ⇒ tin luôn có đúng một câu đếm, với số của Spine. Nơi gọi đã lọc
   // trước khi đo (xem `stripModelCountSentences`); lọc lại ở đây là bất biến tại chỗ, không phải việc lặp.
   const last = stripModelCountSentences(input.lastMessage)
-  const count = input.unspokenCount > 0 ? unspokenCountSentence(input.unspokenCount) : null
+  const count = input.unspokenCount > 0 ? unspokenCountSentence(input.unspokenCount, input.language ?? "vi") : null
   if (last === "") return count ?? undefined
   return count ? insertBeforeInvite(last, count) : last
 }

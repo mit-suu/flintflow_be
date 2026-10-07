@@ -9,6 +9,8 @@ import {
   AiActionError
 } from "./ai-action.types.js"
 import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.js"
+import { isUserLocale } from "../i18n/locale.js"
+import { replyLanguageDirective } from "../i18n/reply-language.js"
 import { callLLM } from "./providers/llm.router.js"
 import type { LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
@@ -101,10 +103,15 @@ const buildPrompt = async (
   fallbackVariables: Record<string, any>
 ): Promise<{ finalPrompt: string; providerConfig: AiProviderConfig }> => {
   const loadedTemplate = await getPromptTemplate(actionType)
-  const finalPrompt =
+  const basePrompt =
     options.rawPromptOverride || input.rawPrompt
       ? options.rawPromptOverride || input.rawPrompt || ""
       : interpolatePrompt(loadedTemplate.template, input.promptVariables || fallbackVariables)
+  // FLF-260: ngôn ngữ trả lời nối cuối prompt. Chỉ nhận vi | en — `POST /ai-actions` chuyển nguyên `input` của client,
+  // nên giá trị lạ bị bỏ qua thay vì thành chữ trong prompt.
+  const finalPrompt = isUserLocale(input.replyLanguage)
+    ? `${basePrompt}\n\n${replyLanguageDirective(input.replyLanguage)}`
+    : basePrompt
 
   return {
     finalPrompt,

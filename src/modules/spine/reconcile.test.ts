@@ -64,6 +64,9 @@ const db = vi.hoisted(() => {
 
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
+// FLF-260: ngôn ngữ tài khoản đổi theo từng ca; mặc định chưa chọn
+const account = vi.hoisted(() => ({ locale: null as "vi" | "en" | null }))
+vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: vi.fn(async () => account.locale) }))
 
 import { spineSchema } from "./spine.schema.js"
 import type { Change as SpineChange, Spine } from "./spine.types.js"
@@ -142,6 +145,7 @@ beforeEach(() => {
   db.reset()
   clearPreviewStore()
   clearReconcileState()
+  account.locale = null
   deps = {
     changeExecutor: vi.fn(),
     recomputeFlags: vi.fn(async () => undefined),
@@ -234,6 +238,24 @@ describe("reconcile lượt 1 — preview diff gộp", () => {
     const steps = vi.mocked(deps.reconcileExecutor).mock.calls.map((call) => (call[1].promptVariables as { step_id: string }).step_id)
     expect(steps).toContain("S-3.2")
     expect(steps).toContain("S-4.3")
+  })
+
+  it("FLF-260: tài khoản đã chọn en ⇒ mọi lượt gọi mang replyLanguage en; chưa chọn ⇒ không có field", async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+
+    account.locale = "en"
+    await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    const withLocale = vi.mocked(deps.reconcileExecutor).mock.calls.map((call) => call[1])
+    expect(withLocale.length).toBeGreaterThan(0)
+    expect(withLocale.every((input) => input.replyLanguage === "en")).toBe(true)
+
+    vi.mocked(deps.reconcileExecutor).mockClear()
+    clearReconcileState()
+    account.locale = null
+    await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    expect(vi.mocked(deps.reconcileExecutor).mock.calls.every((call) => !("replyLanguage" in call[1]))).toBe(true)
   })
 
   it("projection gửi cho model chỉ là field step đó đọc + change gây stale", async () => {

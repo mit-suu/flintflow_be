@@ -281,3 +281,23 @@ describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng u
     expect(text).not.toMatch(/no actor name/i)
   })
 })
+
+describe("FLF-260: skill chat viết theo ngôn ngữ trả lời nối ở cuối prompt", () => {
+  const skill = (dir: string): string => fs.readFileSync(path.join(getSkillsDir(), dir, "SKILL.md"), "utf-8").replace(/\s+/g, " ")
+
+  it.each(["action/elicit-loop", "action/draft-to-ops", "action/apply-change-op"])("%s trỏ tới mục Reply language, thiếu mục đó thì tiếng Việt", (dir) => {
+    const text = skill(dir)
+    expect(text).toContain("`## Reply language` section")
+    expect(text).toContain("Vietnamese when it is absent")
+  })
+
+  it("thẻ tuân thủ có cặp nhãn tiếng Anh cố định — server dò chữ 'law' trong câu trả lời đã chốt để ghi project.stakes", () => {
+    expect(skill("action/elicit-loop")).toContain('(English reply: "Internal rules only" / "Internal rules and the law")')
+    // draft-to-ops phải nhận ra vế nội bộ bằng tiếng Anh: vế này không tự quyết internal hay production
+    expect(skill("action/draft-to-ops")).toContain('English reply: "Internal rules only"')
+  })
+
+  it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời — server chỉ nhận chuỗi con của tin user", () => {
+    expect(skill("action/elicit-loop")).toContain("never paraphrased, translated or shortened")
+  })
+})

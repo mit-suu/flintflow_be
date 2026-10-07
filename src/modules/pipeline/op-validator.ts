@@ -285,11 +285,18 @@ export const PROJECT_ENUM_VALUES: Readonly<Record<"form_factor" | "stakes", read
  *
  * Đọc **câu trả lời user đã bấm** (đã nằm trong sổ quyết định), không đọc nhãn model phát: nhãn sinh ở
  * `temperature: 0.5` nên có thể lệch chữ giữa hai lượt, còn câu trả lời đã chốt thì không.
+ *
+ * Phiên tiếng Anh (FLF-260) có thẻ "Internal rules only" / "Internal rules and the law": vế pháp luật là "law", "legal",
+ * "legislation". Cố ý KHÔNG nhận "regulation" — "internal regulations only" là vế nội bộ.
  */
 export const regulatedFromStakesAnswer = (answer: string): boolean => {
   const text = answer.replace(RECOMMENDED_SUFFIX, "").trim().toLowerCase()
-  return /\bph[áa]p lu[ậa]t\b/.test(text)
+  return /\bph[áa]p lu[ậa]t\b/.test(text) || (EN_LEGAL.test(text) && !NEGATED_EN_LEGAL.test(text))
 }
+
+const EN_LEGAL = /\blaws?\b|\blegal\b|\blegislation\b/
+/** Chữ phủ định đứng trước chữ pháp luật trong cùng vế câu: "no legal requirements", "not bound by law", "chưa cần qua legal". */
+const NEGATED_EN_LEGAL = /(?:^|[^\p{L}])(?:no|not|without|never|không|chưa|ko)(?!\p{L})[^,.;:()]*?\b(?:laws?|legal|legislation)\b/u
 
 /**
  * Giá trị `project.stakes` mà op muốn ghi, khi nó **chống** điều user đã chốt ở thẻ tuân thủ; `null` ⇒ không chống.

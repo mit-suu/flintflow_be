@@ -1,4 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
+import { USER_LOCALES } from "../../shared/i18n/locale.js"
+import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 export interface IChatMessage {
   role: "user" | "ai"
@@ -13,6 +15,11 @@ export interface IChatSession extends Document {
   messages: IChatMessage[]
   /** Session chạy pipeline (Elicit/Draft/Gate). Đúng một mỗi project — srs-spine.md §6 bất biến 7. */
   is_pipeline: boolean
+  /**
+   * FLF-260: ngôn ngữ AI trả lời trong phiên — đặt khi một tin user gõ rõ ngôn ngữ, giữ qua các tin mơ hồ.
+   * `null` = chưa rõ ⇒ dùng ngôn ngữ tài khoản, rồi tiếng Việt.
+   */
+  reply_language?: ReplyLanguage | null
   createdAt: Date
   updatedAt: Date
 }
@@ -57,6 +64,11 @@ const chatSessionSchema = new Schema<IChatSession>(
     is_pipeline: {
       type: Boolean,
       default: false
+    },
+    reply_language: {
+      type: String,
+      enum: [...USER_LOCALES],
+      default: null
     }
   },
   { timestamps: true }

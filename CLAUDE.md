@@ -184,3 +184,9 @@ Tiếng Việt cho: nhãn UI, thông báo lỗi cho user, comment nội bộ.
 Ngôn ngữ giao diện của tài khoản: `User.locale` (`vi` | `en`, **không default** — thiếu = chưa chọn), hằng số ở
 `shared/i18n/locale.ts`. Đổi qua `PATCH /users/me`; trả ở `GET /users/me` và `user` của login / Google / xác thực
 email (`null` khi chưa chọn). Email vẫn chỉ tiếng Việt.
+
+Chat: AI trả lời theo ngôn ngữ user đang viết (FLF-260). `shared/i18n/reply-language.ts` đoán ngôn ngữ từng tin
+**user gõ** (không đoán chữ hệ thống ghi thay user như `gateActionText`); rõ ⇒ ghi `ChatSession.reply_language`, mơ hồ ⇒
+giữ ngôn ngữ phiên, phiên chưa có ⇒ `User.locale` ⇒ `vi` (`modules/project/reply-language.service.ts`). Lời gọi model
+hội thoại truyền `AiActionInput.replyLanguage`, `buildPrompt` nối khối `## Reply language` cuối prompt. Câu cố định
+hiện trong bong bóng chat theo ngôn ngữ đó (`byLanguage`); nhãn stage, `*_vi` chrome và thông báo lỗi vẫn tiếng Việt.

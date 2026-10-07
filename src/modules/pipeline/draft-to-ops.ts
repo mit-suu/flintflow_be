@@ -18,6 +18,7 @@ import { ActionType, AiActionError, type AiActionInput, type AiActionResult } fr
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import type { StepContext } from "./context-projection.js"
 import { briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
@@ -84,6 +85,11 @@ export interface DraftOptions {
   statusAssumptionIds?: ReadonlySet<string>
   /** User đã quyết trong lượt của step (thẻ/chat) — cho phép step rà giả định B-2.1 đổi status giả định (xem `USER_DECISION_SWEEP_STEPS`). */
   userDecided?: boolean
+  /**
+   * FLF-260: ngôn ngữ trả lời của phiên — có thì mọi lượt gọi (kể cả retry) mang nó, `buildPrompt` nối khối "Reply language"
+   * để `notes` và câu giả định cho user (`statement_vi`, `rationale_vi`) đúng ngôn ngữ. Thiếu ⇒ prompt như cũ.
+   */
+  replyLanguage?: ReplyLanguage
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
@@ -149,6 +155,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const gateIds = callKind === "revision" ? (options.gateAssumptionIds ?? new Set<string>()) : undefined
   const statusIds = callKind === "revision" ? (options.statusAssumptionIds ?? new Set<string>()) : undefined
   const extraPaths = gateIds ? spine.assumptions.filter((a) => gateIds.has(a.id)).map((a) => a.path) : undefined
+  const language = options.replyLanguage ? { replyLanguage: options.replyLanguage } : {}
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
   let errors: ValidationError[] = []
@@ -174,7 +181,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let ops: unknown[] = []
     let notes: string | null = null
     try {
-      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables }, projectId, options.userId)
+      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId)
       usage.push({
         attempt,
         call_kind: callKind,

@@ -35,12 +35,16 @@ import {
   undoRequestSchema
 } from "../pipeline/pipeline.dto.js"
 import { getProjectById } from "../project/project.service.js"
+import type { IChatSession } from "../project/chat-session.model.js"
+import { replyLanguageForSession } from "../project/reply-language.service.js"
+import { accountLocaleOf } from "../user/account-locale.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { toClientError } from "../../shared/utils/client-error.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
+import { byLanguage, detectMessageLanguage, resolveReplyLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
@@ -106,21 +110,48 @@ const sendDomainError = (res: Response, err: unknown): Response => {
 const errorPayload = (err: unknown): Record<string, unknown> | null =>
   err instanceof ApiError ? { kind: "change_error", reply: changeErrorReply(err) } : null
 
+/**
+ * FLF-260: ngôn ngữ trả lời của lượt sửa. Chỉ đoán trên câu lệnh user vừa gõ (`typed`); lô op sẵn hay bấm Áp dụng bản
+ * xem trước (FE gửi lại câu lệnh cũ) thì không ⇒ ngôn ngữ phiên ⇒ tài khoản ⇒ tiếng Việt. Có phiên ⇒ ghi lên document
+ * phiên, `recordChangeTurn` lưu cùng lượt.
+ */
+const turnReplyLanguage = async (session: IChatSession | null, typed: string | null | undefined, userId: string): Promise<ReplyLanguage> => {
+  if (!session) return resolveReplyLanguage(detectMessageLanguage(typed, { lenient: true }), await accountLocaleOf(userId))
+  const before = session.reply_language
+  const language = await replyLanguageForSession(session, typed, userId)
+  // Ghi ngay, không đợi `recordChangeTurn`: lượt gọi model sau đó có thể lỗi (không tới lượt ghi), và giữ document qua
+  // vài giây chờ model thì lượt ghi muộn sẽ đè ngôn ngữ một request khác vừa đổi.
+  if (session.reply_language !== before) await session.save()
+  return language
+}
+
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
   const body = parse(changesRequestSchema, req.body)
   const session = body.session_id ? await changeTranscript.loadProjectSession(auth.projectId, body.session_id) : null
   const chatHistory = session ? changeTranscript.formatChatContext(session.messages, await spineRepository.get(auth.projectId)) : undefined
+  // Có preview_id ⇒ câu lệnh đã nằm trong phiên từ lượt xem trước; áp thẳng bằng instruction thì ghi cả câu lệnh
+  const userText = body.preview_id === undefined ? (body.instruction ?? null) : null
+  const replyLanguage = await turnReplyLanguage(session, userText, auth.userId)
   try {
-    const result = await changeService.apply(auth.projectId, auth.userId, { ...body, chat_history: chatHistory }, auth.init)
+    const result = await changeService.apply(
+      auth.projectId,
+      auth.userId,
+      { ...body, chat_history: chatHistory, reply_language: replyLanguage },
+      auth.init
+    )
     if (session) {
-      // Có preview_id ⇒ câu lệnh đã nằm trong phiên từ lượt xem trước; áp thẳng bằng instruction thì ghi cả câu lệnh
-      const userText = body.preview_id === undefined ? (body.instruction ?? null) : null
       const count = result.changes.length
       await changeTranscript.recordChangeTurn(session, userText, {
         kind: "change_applied",
-        reply: count > 0 ? `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).` : "Đã xác nhận: nội dung không đổi.",
+        reply:
+          count > 0
+            ? byLanguage(replyLanguage, {
+                vi: `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).`,
+                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document (v${result.spine_version}).`
+              })
+            : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." }),
         count,
         spine_version: result.spine_version
       })
@@ -145,15 +176,21 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
   // Lượt ghi vào phiên chỉ khi có câu lệnh để đọc lại — lô op sẵn từ UI không phải một lượt hội thoại
   const userText = session ? (body.instruction ?? null) : null
   const chatHistory = session ? changeTranscript.formatChatContext(session.messages, await spineRepository.get(auth.projectId)) : undefined
+  const replyLanguage = await turnReplyLanguage(session, body.instruction, auth.userId)
   let result: changeService.ChangePreviewResult
   try {
-    result = await changeService.preview(auth.projectId, auth.userId, { ...body, chat_history: chatHistory }, auth.init)
+    result = await changeService.preview(
+      auth.projectId,
+      auth.userId,
+      { ...body, chat_history: chatHistory, reply_language: replyLanguage },
+      auth.init
+    )
   } catch (err) {
     const payload = errorPayload(err)
     if (session && userText && payload) await changeTranscript.recordChangeTurn(session, userText, payload)
     return sendDomainError(res, err)
   }
-  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result))
+  if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage))
   return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
 })
 

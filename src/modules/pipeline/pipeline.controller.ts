@@ -39,6 +39,7 @@ import { gate, GateLimitError, type GateInput } from "./gate.service.js"
 import { BaselineBlockedError } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
+import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
 import { runPhase, resumePhaseInterview } from "./phase-runner.service.js"
@@ -341,9 +342,12 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
 
   // Tin cổng phải đọc TRƯỚC khi chốt: `gate` dọn lượt chạy nên sau đó không còn gì để lấy ra
   const gateMessage = gateMessageOfRun(await getRunState(projectId, stepId))
+  // FLF-260: ghi chú cổng và chữ của chip ("Đúng rồi, đi tiếp") không phải tin để đoán ngôn ngữ ⇒ không truyền `message`:
+  // ngôn ngữ phiên ⇒ tài khoản ⇒ tiếng Việt. Lời xác nhận sau revision và lượt soạn lại nói theo ngôn ngữ đó.
+  const replyLanguage = await replyLanguageForSessionId({ projectId, sessionId: body.session_id, userId })
 
   try {
-    const result = await gate(projectId, stepId, userId, input)
+    const result = await gate(projectId, stepId, userId, input, { replyLanguage })
     // Cả hai vế của một lượt duyệt vào lịch sử chat: tin cổng AI vừa nói, rồi tới thao tác của user. Thẻ cổng do
     // FE dựng từ lượt chạy đang sống nên chốt xong là biến mất — thiếu vế đầu thì đọc lại chỉ thấy "Đúng rồi, đi
     // tiếp" đứng một mình, biết đã duyệt mà không biết duyệt cái gì.

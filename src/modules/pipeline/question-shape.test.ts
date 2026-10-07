@@ -19,6 +19,23 @@ describe("shapeOptions", () => {
     expect(shapeOptions(opts("Khác biệt theo vai trò", "Giống nhau")).map((o) => o.label)).toEqual(["Khác biệt theo vai trò", "Giống nhau"])
   })
 
+  it("FLF-260: bỏ cả option 'Khác' model viết bằng tiếng Anh, giữ nhãn khuyến nghị tiếng Anh", () => {
+    expect(shapeOptions(opts("Web (Recommended)", "Others", "Mobile", "Another option", "Other options…", "Other option:", "Custom…")).map((o) => o.label)).toEqual([
+      "Web (Recommended)",
+      "Mobile"
+    ])
+  })
+
+  it("FLF-260: 'Custom' trơn là phương án thật — không lọc, kể cả khi được khuyến nghị", () => {
+    expect(shapeOptions(opts("Default theme (Recommended)", "Custom")).map((o) => o.label)).toEqual(["Default theme (Recommended)", "Custom"])
+    expect(shapeOptions(opts("Custom (Recommended)", "Standard")).map((o) => o.label)).toEqual(["Custom (Recommended)", "Standard"])
+    expect(shapeOptions(opts("Standard", "Custom", "Premium")).map((o) => o.label)).toEqual(["Standard", "Custom", "Premium"])
+  })
+
+  it("FLF-260: giữ option tiếng Anh chỉ chứa 'other' / 'custom' như một phần của câu", () => {
+    expect(shapeOptions(opts("Other staff", "Custom reports", "Others (please specify)")).map((o) => o.label)).toEqual(["Other staff", "Custom reports"])
+  })
+
   it("còn 1 option ⇒ thành câu mở; > 4 ⇒ cắt còn 4", () => {
     expect(shapeOptions(opts("Chỉ một", "Khác"))).toEqual([])
     expect(shapeOptions(opts("A", "B", "C", "D", "E"))).toHaveLength(4)

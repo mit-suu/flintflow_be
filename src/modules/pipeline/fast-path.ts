@@ -6,6 +6,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { elicitProjection } from "./context-projection.js"
 import { activeDecisions, normalizeTopicKey, type AskedQuestion, type FilteredQuestions } from "./decisions.service.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
@@ -69,6 +70,11 @@ export const interviewGuidance = (spine: Spine, unit: string): string =>
 
 /** Lời nhận tin khi server bỏ hết câu hỏi của model: không đặt câu hỏi nào mà UI không có thẻ/ô để trả lời. */
 export const NO_QUESTION_ACK_VI = "Cảm ơn bạn. Chỗ nào còn chưa rõ, tôi sẽ viết theo cách hiểu hợp lý nhất rồi nói lại để bạn xem một lượt ở cuối."
+/** Bản tiếng Anh cho phiên trả lời tiếng Anh (FLF-260). */
+export const NO_QUESTION_ACK_EN = "Thanks. Where something is still unclear, I'll go with the most sensible reading and walk you through it once at the end."
+
+/** Lời nhận tin theo ngôn ngữ trả lời của phiên; mặc định tiếng Việt như trước FLF-260. */
+export const noQuestionAck = (language: ReplyLanguage = "vi"): string => byLanguage(language, { vi: NO_QUESTION_ACK_VI, en: NO_QUESTION_ACK_EN })
 
 const wordsOf = (text: string): Set<string> =>
   new Set(
@@ -101,10 +107,16 @@ const best = (sentence: string, questions: readonly string[]): number => questio
  * - còn câu được hỏi ⇒ cắt các câu kết thúc bằng "?" giống câu đã bị bỏ (≥ 60% từ, và giống hơn mọi câu còn được hỏi); phần
  *   còn lại giữ, cắt hết thì thay lời nhận tin.
  * Khớp theo từ nên là best effort — câu diễn đạt quá khác vẫn lọt; prompt đã dặn model đừng viết thế.
+ * `language`: ngôn ngữ của lời nhận tin thay thế (FLF-260).
  */
-export const reconcileReply = (reply: string, droppedQuestions: readonly string[], keptQuestions: readonly string[]): string => {
+export const reconcileReply = (
+  reply: string,
+  droppedQuestions: readonly string[],
+  keptQuestions: readonly string[],
+  language: ReplyLanguage = "vi"
+): string => {
   if (droppedQuestions.length === 0) return reply
-  if (keptQuestions.length === 0) return NO_QUESTION_ACK_VI
+  if (keptQuestions.length === 0) return noQuestionAck(language)
   const sentences = reply.match(/[^.!?…]+[.!?…]*s*/g) ?? [reply]
   const text = sentences
     .filter((sentence) => {
@@ -114,16 +126,21 @@ export const reconcileReply = (reply: string, droppedQuestions: readonly string[
     })
     .join("")
     .trim()
-  return text === "" ? NO_QUESTION_ACK_VI : text
+  return text === "" ? noQuestionAck(language) : text
 }
 
 /**
  * Câu hỏi đuôi trong lời AI ("bạn thấy hợp lý chứ?", "đúng không?") tính vào trần câu hỏi của lượt: đã hỏi đủ `budget` câu
  * trong `asked` mà lời AI còn kết bằng một câu hỏi KHÔNG phải câu nào đang hỏi (< 60% từ trùng) ⇒ cắt câu đó. Câu hỏi
  * `inline` chỉ tồn tại trong lời AI (UI không vẽ lại) nên không bao giờ cắt khi số câu hỏi trong lời ≤ số câu inline — model
- * viết lại câu inline khác chữ `question` thì vẫn giữ. Cắt hết ⇒ lời nhận tin cố định.
+ * viết lại câu inline khác chữ `question` thì vẫn giữ. Cắt hết ⇒ lời nhận tin cố định (theo `language`, FLF-260).
  */
-export const trimTailQuestion = (reply: string, asked: readonly { question: string; inline?: boolean }[], budget: number): string => {
+export const trimTailQuestion = (
+  reply: string,
+  asked: readonly { question: string; inline?: boolean }[],
+  budget: number,
+  language: ReplyLanguage = "vi"
+): string => {
   if (asked.length < budget) return reply
   const sentences = sentencesOf(reply)
   const questionSentences = sentences.filter((s) => s.trim().endsWith("?")).length
@@ -139,18 +156,18 @@ export const trimTailQuestion = (reply: string, asked: readonly { question: stri
   )
     return reply
   const text = sentences.slice(0, -1).join(" ").trim()
-  return text === "" ? NO_QUESTION_ACK_VI : text
+  return text === "" ? noQuestionAck(language) : text
 }
 
 /**
  * Lời AI của lượt đóng phỏng vấn fast path: chỉ ghi nhận, không hỏi tiếp — bỏ mọi câu hỏi (kể cả câu hỏi tu từ / hỏi xác nhận);
- * không còn gì thì dùng lời nhận tin cố định.
+ * không còn gì thì dùng lời nhận tin cố định (theo `language`, FLF-260).
  */
-export const withoutQuestions = (reply: string): string => {
+export const withoutQuestions = (reply: string, language: ReplyLanguage = "vi"): string => {
   const sentences = reply.match(/[^.!?…]+[.!?…]*s*/g) ?? [reply]
   const text = sentences
     .filter((sentence) => !sentence.includes("?"))
     .join("")
     .trim()
-  return text === "" ? NO_QUESTION_ACK_VI : text
+  return text === "" ? noQuestionAck(language) : text
 }

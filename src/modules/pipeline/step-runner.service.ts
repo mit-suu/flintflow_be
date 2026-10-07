@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto"
 import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { Project } from "../project/project.model.js"
+import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
@@ -51,6 +52,7 @@ import { ActionType, type AiActionInput, type AiActionResult } from "../../share
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
+import { byLanguage, detectMessageLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
@@ -110,6 +112,12 @@ export interface StepRunnerDeps {
   /** `runPhase` đã ghi `message` vào transcript (trước lượt phỏng vấn) — `runStep` không ghi lại lần nữa. */
   messageRecorded?: boolean
   /**
+   * FLF-260: ngôn ngữ trả lời biết trước — có thì cửa vào không đoán, không đọc phiên; tin user gõ giữa lượt (chat lúc chờ trả
+   * lời) vẫn được đoán lại. Test không nối Mongo truyền thẳng (`runPhase` giữ nguyên cho mọi bước); `/gate` nhận nó từ controller.
+   * Thiếu ⇒ đoán trên tin mở lượt ⇒ ngôn ngữ phiên ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt.
+   */
+  replyLanguage?: ReplyLanguage
+  /**
    * FLF-222: chạy tiếp lượt đã tách khỏi kết nối từ ngay sau Elicit — không gọi model hỏi lại, dùng đúng câu đã
    * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
    */
@@ -118,9 +126,10 @@ export interface StepRunnerDeps {
    * `runPhase` quyết định bước có tự Accept (im) hay dừng chờ user NGAY khi gate_ready sẵn sàng, trước khi ghi run-state / phát
    * cổng: bước im không được lộ một thẻ cổng có chip trong lúc server đang tự Accept (bấm ⇒ 409, gãy luồng). `quiet` ⇒ phát
    * `gate_ready` với `auto: true`, lượt kết thúc `done`. Ngược lại `phase_gate` (nếu có) được ghi vào run-state để dựng lại cổng
-   * chốt cuối giai đoạn sau reload. Không truyền ⇒ mọi bước là cổng thật (`/run` lẻ, project cũ).
+   * chốt cuối giai đoạn sau reload. Không truyền ⇒ mọi bước là cổng thật (`/run` lẻ, project cũ). `language`: ngôn ngữ trả lời
+   * bước vừa dùng (FLF-260) — câu đếm của cổng cuối giai đoạn nói cùng ngôn ngữ với tin của bước.
    */
-  resolveGate?: (gate: Extract<StepEvent, { type: "gate_ready" }>) => Promise<GateResolution>
+  resolveGate?: (gate: Extract<StepEvent, { type: "gate_ready" }>, language: ReplyLanguage) => Promise<GateResolution>
 }
 
 export type GateResolution = { quiet: true } | { quiet: false; phaseGate?: Extract<StepEvent, { type: "phase_gate" }> }
@@ -416,6 +425,21 @@ export const CHAT_RESERVED_CALLS = MAX_SCHEMA_RETRIES + 1 + 1
 
 /** Câu trả lời cố định khi hết ngân sách chat — không gọi model. */
 export const CHAT_BUDGET_REPLY = "Phần còn lại tôi sẽ tạm hiểu theo hướng hợp lý nhất, bạn xem lại rồi nói tôi nếu chỗ nào khác nhé."
+/** Bản tiếng Anh của `CHAT_BUDGET_REPLY` cho phiên trả lời tiếng Anh (FLF-260). */
+export const CHAT_BUDGET_REPLY_EN = "For the rest, I'll go with the most sensible reading — take a look and tell me if anything should be different."
+
+/** Câu hết ngân sách chat theo ngôn ngữ trả lời của phiên; thiếu ⇒ tiếng Việt. */
+export const chatBudgetReply = (language: ReplyLanguage = "vi"): string => byLanguage(language, { vi: CHAT_BUDGET_REPLY, en: CHAT_BUDGET_REPLY_EN })
+
+/**
+ * FLF-260 — ngôn ngữ trả lời sau một tin user gõ khi đang chờ trả lời. Tin rõ ngôn ngữ ⇒ theo tin và ghi lên phiên; mơ hồ
+ * ("ok", số, mã phần tử) ⇒ giữ `current` — ngôn ngữ lượt đang dùng, không đọc lại phiên. Lượt chạy tiếp sau reload không có
+ * `current` ⇒ ngôn ngữ phiên ⇒ tài khoản ⇒ tiếng Việt.
+ */
+export const replyLanguageAfterMessage = async (
+  input: { projectId: string; sessionId: string; userId: string; message: string },
+  current?: ReplyLanguage
+): Promise<ReplyLanguage> => (current && detectMessageLanguage(input.message) === null ? current : replyLanguageForSessionId(input))
 
 /**
  * Kiểm `settled` model báo — không tin model:
@@ -493,6 +517,8 @@ export interface ChatTurnInput {
    * trích đoạn đã kiểm — tin lạc đề không bao giờ thành câu trả lời của câu đang chờ.
    */
   closing?: boolean
+  /** FLF-260: ngôn ngữ trả lời của lượt — có thì đi vào lời gọi model (`buildPrompt` nối khối "Reply language"). */
+  replyLanguage?: ReplyLanguage
 }
 
 /**
@@ -517,11 +543,11 @@ export const nextPendingAfterChat = (
   return next.map((q) => (remaining.some((r) => r.topic_key === q.topic_key) ? { ...q, replied: repliedOf(q.topic_key) } : q))
 }
 
-/** Tin user hỏi ngược hoặc uỷ quyền cho AI (có dấu hoặc gõ không dấu) — không phải câu trả lời. */
+/** Tin user hỏi ngược hoặc uỷ quyền cho AI (có dấu hoặc gõ không dấu; tiếng Anh — FLF-260) — không phải câu trả lời. */
 const DEFERS_TO_AI =
-  /\?\s*$|b[ạa]n (ngh[ĩi]|th[ấa]y) sao|t[uùủ]y b[ạa]n|b[ạa]n (t[ựu] )?[đd][ềe] xu[ấa]t|theo (khuy[ếe]n ngh[ịi]|[đd][ềe] xu[ấa]t)|ch[ưu]a bi[ếe]t|kh[ôo]ng bi[ếe]t|kh[ôo]ng ngh[ĩi] ra/i
-/** Chỉ đồng ý suông ("oke", "ừ", "được") — đồng ý với đề xuất của AI, không phải nội dung trả lời. */
-const BARE_AGREEMENT = /^(ok(e|ay)?|ừ+m?|uh+|[đd]ư[ợo]c|[đd]c|v[âa]ng|yes|[đd][ồo]ng [ýy]|chu[ẩa]n|[đd]úng r[ồo]i)[\s.!,]*$/i
+  /\?\s*$|b[ạa]n (ngh[ĩi]|th[ấa]y) sao|t[uùủ]y b[ạa]n|b[ạa]n (t[ựu] )?[đd][ềe] xu[ấa]t|theo (khuy[ếe]n ngh[ịi]|[đd][ềe] xu[ấa]t)|ch[ưu]a bi[ếe]t|kh[ôo]ng bi[ếe]t|kh[ôo]ng ngh[ĩi] ra|\b(you decide|up to you|your call|what do you think|i (don['’]?t|do not) know|not sure|no idea)\b/i
+/** Chỉ đồng ý suông ("oke", "ừ", "được", "sure", "sounds good") — đồng ý với đề xuất của AI, không phải nội dung trả lời. */
+const BARE_AGREEMENT = /^(ok(e|ay)?|ừ+m?|uh+|[đd]ư[ợo]c|[đd]c|v[âa]ng|yes|[đd][ồo]ng [ýy]|chu[ẩa]n|[đd]úng r[ồo]i|sure|fine|agreed|yep|yeah|sounds good|got it|right)[\s.!,]*$/i
 
 export const isSubstantiveAnswer = (message: string): boolean => {
   const text = message.trim()
@@ -565,9 +591,12 @@ export const settleWithoutModel = (
   /** `false` (đóng phỏng vấn fast path): không áp luật câu-trả-lời-lặp — chỉ nhãn thẻ và đoạn đánh số. */
   repeatedAnswer = true
 ): AnswerInput[] => {
-  if (!isSubstantiveAnswer(message)) return []
-  const lower = message.toLowerCase()
   const optionText = (label: string): string => stripRecommended(label).toLowerCase()
+  // Gõ đúng nguyên nhãn một lựa chọn ("Right", "Fine", "Yes") là trả lời thẻ, dù chữ đó trông như đồng ý suông
+  const typed = message.trim().toLowerCase().replace(/[\s.!,]+$/u, "")
+  const typedALabel = asked.some((q) => q.options.some((o) => optionText(o.label) === typed))
+  if (!isSubstantiveAnswer(message) && !typedALabel) return []
+  const lower = message.toLowerCase()
   /**
    * Một nhãn có thể là chuỗi con của nhãn khác ("Tuân thủ quy định nội bộ" nằm trong "Tuân thủ quy định nội bộ và pháp
    * luật"): tin nhắc nhãn dài thì nhãn ngắn cũng khớp, câu một-lựa-chọn thấy hai nhãn khớp và bị bỏ qua ⇒ không bao giờ
@@ -633,7 +662,8 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           decisions: ledgerForPrompt(input.spine),
           ...conversation,
           user_message: input.message
-        }
+        },
+        ...(input.replyLanguage ? { replyLanguage: input.replyLanguage } : {})
       },
       input.projectId,
       input.userId
@@ -737,16 +767,24 @@ export const hasIdea = (input: {
  */
 export const B0_FIELD_STEPS: Readonly<Record<string, "form_factor" | "stakes">> = Object.freeze({ "B-0.2": "form_factor", "B-0.3": "stakes" })
 
-/** Lý do ở gate khi B-0.2/B-0.3 bỏ qua vì field đã có — không phải "AI không soạn được gì". */
-const B0_ALREADY_SET_REASON: Readonly<Record<"form_factor" | "stakes", string>> = Object.freeze({
-  form_factor: "Nền tảng đã rõ từ những gì bạn kể — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
-  stakes: "Phần tuân thủ tôi đã ghi theo lựa chọn và ý tưởng của bạn — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa."
+/** Lý do ở gate khi B-0.2/B-0.3 bỏ qua vì field đã có — không phải "AI không soạn được gì". Theo ngôn ngữ trả lời (FLF-260). */
+const B0_ALREADY_SET_REASON: Readonly<Record<"form_factor" | "stakes", Readonly<Record<ReplyLanguage, string>>>> = Object.freeze({
+  form_factor: {
+    vi: "Nền tảng đã rõ từ những gì bạn kể — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+    en: "The platform is already clear from what you told me — no need to ask again. To change it, just tell me what to fix."
+  },
+  stakes: {
+    vi: "Phần tuân thủ tôi đã ghi theo lựa chọn và ý tưởng của bạn — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+    en: "I've recorded the compliance part from your choices and your idea — no need to ask again. To change it, just tell me what to fix."
+  }
 })
 
 /** B-0.2/B-0.3 chỉ chốt một field: hỏi nhiều hơn một câu là hỏi lan sang việc của bước khác. */
 const B0_FIELD_MAX_QUESTIONS = 1
 
 const NO_IDEA_USER_MESSAGE = "[no_idea] Mình chưa có ý tưởng cụ thể — gợi ý giúp mình bắt đầu từ đâu."
+/** Bản tiếng Anh của câu thay thế trên (FLF-260) — chỉ đi vào prompt; giữ tiền tố `[no_idea]` mà skill elicit-loop dò. */
+const NO_IDEA_USER_MESSAGE_EN = "[no_idea] I don't have a concrete idea yet — suggest where I could start."
 
 /** `calls_used`/`regenerate_used` của vòng hiện tại của step. */
 const usageCounts = meter.roundCounts
@@ -893,6 +931,7 @@ export const retryReasonVi = (errors: readonly { rule: string }[]): string => {
  * Chạy một lượt Draft (draft-to-ops T11) và ghi Spine (op engine T08). F2/F11: kiểm trần + ghi usage
  * `reserved` TRƯỚC khi gọi model, `finalizeCall`/`releaseCall` sau. 409 SPINE_VERSION_CONFLICT ⇒ hoàn
  * usage[] của lượt này (không tiêu trần) rồi ném lại. `emit` có thể là no-op (gate.service không stream).
+ * `extra.replyLanguage` (FLF-260): ngôn ngữ trả lời của phiên — `notes` và câu giả định cho user viết bằng nó.
  */
 export const runDraftPhase = async (
   projectId: string,
@@ -903,7 +942,7 @@ export const runDraftPhase = async (
   callKind: DraftCallKind,
   emit: Emit,
   deps: StepRunnerDeps,
-  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; userDecided?: boolean } = {}
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; userDecided?: boolean; replyLanguage?: ReplyLanguage } = {}
 ): Promise<DraftPhaseResult> => {
   assertNotAborted(deps.signal, stepId)
   const currentFirstSeq = spine.steps.find((s) => s.id === stepId)?.first_seq ?? null
@@ -1297,6 +1336,13 @@ export const runStep = async (
     // transcript của step (nạp một lần ở buildStepContext) có nó. Không tự tạo addendum từ đây: Draft bóc tách.
     const userMessage = d.message?.trim() ? d.message.trim() : undefined
     if (userMessage && !d.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", userMessage)
+    // FLF-260: ngôn ngữ trả lời của lượt — đoán trên tin user gõ để mở lượt (`no_idea`: tin FE gửi kèm chip, không phải câu thay
+    // thế trong prompt), tin rõ ngôn ngữ thì thành ngôn ngữ phiên. Không có tin (chạy tiếp, `/answer`) ⇒ ngôn ngữ phiên ⇒ tài
+    // khoản ⇒ tiếng Việt. Tin `runPhase` đã ghi thì nó cũng đã đoán: đoán lại sẽ đè ngôn ngữ user vừa đổi ở lượt phỏng vấn.
+    // Lượt `reopen` (nút chạy lại bước đã cũ) mang câu FE tự viết theo ngôn ngữ giao diện — vẫn vào transcript và
+    // revisionRequest, nhưng không quyết định ngôn ngữ trả lời.
+    const typedMessage = d.messageRecorded || d.reopen ? undefined : userMessage
+    let replyLanguage = d.replyLanguage ?? (await replyLanguageForSessionId({ projectId, sessionId, userId, message: typedMessage }))
 
     // B-0.2/B-0.3: field đã có sau B-0.1 ⇒ lượt đầu không gọi model. Xét theo giá trị Spine, không theo emptyFields
     // (`pick` bỏ key thiếu nên emptyFields có thể rỗng sai).
@@ -1459,6 +1505,9 @@ export const runStep = async (
         }
 
         await markReceived(cardAnswers.length, "Đang đọc tin nhắn của bạn")
+        // FLF-260: tin chat là chữ user gõ ⇒ đoán lại ngôn ngữ trả lời (rõ ⇒ đổi và ghi lên phiên; mơ hồ ⇒ giữ). Đáp án thẻ thì
+        // không: đó là nhãn lựa chọn AI viết, không phải lời user.
+        replyLanguage = await replyLanguageAfterMessage({ projectId, sessionId, userId, message }, replyLanguage)
         // Đáp án thẻ gửi kèm tin gõ vào transcript TRƯỚC lượt chat: model đọc transcript để biết user đã chọn gì, thiếu thì hỏi lại
         const pickedByCard = cardAnswers.map((a) => answerText(a.answer)).filter((text) => text !== "")
         if (pickedByCard.length > 0) await pushTranscript(projectId, sessionId, stepId, "user", pickedByCard.join("\n"))
@@ -1488,8 +1537,9 @@ export const runStep = async (
           const answeredNow = new Set([...cardAnswers, ...settledLocally].map((a) => indexOfQuestion(pending, a.question_id)))
           const left = pending.filter((_, i) => !answeredNow.has(i))
           if (left.length > 0) {
-            emit({ type: "elicit", step_id: stepId, delta: CHAT_BUDGET_REPLY })
-            await pushTranscript(projectId, sessionId, stepId, "ai", CHAT_BUDGET_REPLY)
+            const budgetReply = chatBudgetReply(replyLanguage)
+            emit({ type: "elicit", step_id: stepId, delta: budgetReply })
+            await pushTranscript(projectId, sessionId, stepId, "ai", budgetReply)
             const note = [`User nhắn: ${message}`, ...left.map((q) => `Chưa trả lời — tự giả định và ghi assumptions[]: ${q.question}`)].join("\n")
             answersText = `${answersText}\n${note}`.trim()
           }
@@ -1510,7 +1560,8 @@ export const runStep = async (
             sessionId,
             projection: elicitProjection(spine, stepId),
             spine,
-            elicitExecutor: d.elicitExecutor
+            elicitExecutor: d.elicitExecutor,
+            replyLanguage
           })
         )
         const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
@@ -1521,7 +1572,7 @@ export const runStep = async (
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
         const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
         // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
-        const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN)
+        const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, replyLanguage)
         emit({ type: "elicit", step_id: stepId, delta: chatReply })
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, remaining))
         if (remaining.length === 0) return
@@ -1539,7 +1590,9 @@ export const runStep = async (
         emit({ type: "draft", step_id: stepId, attempt: 1 })
       }
       tracker.stage("draft", { detail_vi: "Quét cuối và xếp ưu tiên" })
-      await tracker.beat("draft", () => runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId }))
+      await tracker.beat("draft", () =>
+        runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId, replyLanguage })
+      )
       ;({ spine, spineVersion } = await refresh(projectId))
       // Pha S-9 ghi thẳng qua service riêng (không qua runDraftPhase) — vẫn phải tóm tắt được ở gate,
       // nếu không thì S-9.4 xếp lại ưu tiên cả tài liệu mà gate hiện đúng một dòng trống (BUG-20).
@@ -1591,8 +1644,11 @@ export const runStep = async (
                 // R4: sổ quyết định — "đã chốt gì, ở bước nào"
                 decisions: ledgerForPrompt(spine),
                 ...conversation,
-                user_message: noIdeaYet ? NO_IDEA_USER_MESSAGE : (userMessage ?? "(tự động — vòng elicit đầu step)")
-              }
+                user_message: noIdeaYet
+                  ? byLanguage(replyLanguage, { vi: NO_IDEA_USER_MESSAGE, en: NO_IDEA_USER_MESSAGE_EN })
+                  : (userMessage ?? "(tự động — vòng elicit đầu step)")
+              },
+              replyLanguage
             },
               projectId,
               userId
@@ -1636,10 +1692,11 @@ export const runStep = async (
         // Câu hỏi đuôi ("bạn thấy hợp lý chứ?") tính vào trần câu hỏi của lượt (FLF-235)
         const reply = trimTailQuestion(
           elicitPolicy === "conflict_only"
-            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts)
+            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts, replyLanguage)
             : elicitResult.data.reply,
           asked,
-          PROMPT_QUESTIONS_PER_TURN
+          PROMPT_QUESTIONS_PER_TURN,
+          replyLanguage
         )
         emit({ type: "elicit", step_id: stepId, delta: reply })
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, asked))
@@ -1672,6 +1729,7 @@ export const runStep = async (
           runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
             answers: answersText,
             userDecided,
+            replyLanguage,
             ...(revise ? { revisionRequest: userMessage } : {})
           })
         )
@@ -1719,7 +1777,8 @@ export const runStep = async (
     const gateMessage = composeStepGateMessage({
       notes: gateNotes,
       summary: stepSummary,
-      newAssumptionTexts: review.new_assumptions.map((a) => a.text_vi ?? a.text)
+      newAssumptionTexts: review.new_assumptions.map((a) => a.text_vi ?? a.text),
+      language: replyLanguage
     })
     // FLF-241: `new_assumptions` = đúng những điều tin cổng nói ra, vì FE confirm chính xác tập này khi user bấm "Đúng rồi,
     // đi tiếp" (`GateCard.tsx` gọi `onConfirmAssumptions(assumptions.map(a => a.id))` trước khi gửi lệnh) — BE không tự
@@ -1746,14 +1805,14 @@ export const runStep = async (
       doc_progress: { before: progressBefore, after: progressAfter },
       ...(gateMessage ? { message_vi: gateMessage } : {}),
       ...(stepSummary.length === 0
-        ? { no_change_reason: fieldAlreadySet && b0Field ? B0_ALREADY_SET_REASON[b0Field] : noChangeReason(stepDef.template_id, needsDraft) }
+        ? { no_change_reason: fieldAlreadySet && b0Field ? byLanguage(replyLanguage, B0_ALREADY_SET_REASON[b0Field]) : noChangeReason(stepDef.template_id, needsDraft, replyLanguage) }
         : {})
     }
     // Quyết định "bước im" phải thấy tập giả định ĐẦY ĐỦ: `isQuietStep` lọc chúng qua `conflictsWithLedger` để chặn bước
     // tự Accept khi model vừa tạo giả định trái với điều user đã chốt. Chỉ `gate_payload` mới cắt xuống phần tin đã nói —
     // cắt luôn ở đây thì giả định trái sổ không được nói ra sẽ lọt qua và bước tự Accept, user không thấy xung đột.
     const resolution: GateResolution = d.resolveGate
-      ? await d.resolveGate({ ...gateEvent, new_assumptions: review.new_assumptions })
+      ? await d.resolveGate({ ...gateEvent, new_assumptions: review.new_assumptions }, replyLanguage)
       : { quiet: false }
     if (resolution.quiet) {
       // Bước im: không có gì để user bấm — không ghi trạng thái `gate`, đánh dấu `auto` để FE không dựng thẻ cổng
@@ -1799,11 +1858,24 @@ export const elicitGuidance = (ctx: StepContext): string => {
   return skill.stub ? "" : skill.template
 }
 
-/** Step không ghi gì thì gate phải nói VÌ SAO (03 Lớp 4) — im lặng là thứ làm user mất tin. */
-export const noChangeReason = (templateId: string, needsDraft: boolean): string => {
-  if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) return "Bước sổ sách của vòng màn hình — không có nội dung để ghi."
-  if (!needsDraft) return "Bước tất định — chỉ kiểm tra lại, không sinh nội dung mới."
-  return "AI không tìm thấy gì cần thêm hoặc sửa ở bước này."
+/**
+ * Step không ghi gì thì gate phải nói VÌ SAO (03 Lớp 4) — im lặng là thứ làm user mất tin. Lý do hiện trong bong bóng cổng
+ * khi tin cổng trống ⇒ theo ngôn ngữ trả lời (FLF-260), thiếu ⇒ tiếng Việt.
+ */
+export const noChangeReason = (templateId: string, needsDraft: boolean, language: ReplyLanguage = "vi"): string => {
+  if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) {
+    return byLanguage(language, {
+      vi: "Bước sổ sách của vòng màn hình — không có nội dung để ghi.",
+      en: "A bookkeeping step of the screen loop — there's no content to write."
+    })
+  }
+  if (!needsDraft) {
+    return byLanguage(language, {
+      vi: "Bước tất định — chỉ kiểm tra lại, không sinh nội dung mới.",
+      en: "A deterministic step — it only re-checks, it doesn't produce new content."
+    })
+  }
+  return byLanguage(language, { vi: "AI không tìm thấy gì cần thêm hoặc sửa ở bước này.", en: "The AI found nothing to add or change in this step." })
 }
 
 /** Mã lỗi pipeline hợp lệ — controller dùng để quyết định phát SSE `error` hay để nguyên lỗi HTTP thường. */

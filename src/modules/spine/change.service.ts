@@ -33,6 +33,7 @@ import { ActionType, AiActionError, type AiActionInput, type AiActionResult } fr
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 export const NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
 /**
@@ -339,8 +340,17 @@ const CHANGE_VERBS: readonly string[] = Object.freeze([
   "update"
 ])
 
+/**
+ * FLF-260: động từ tiếng Anh thêm cho phiên tiếng Anh — chỉ nhận ở ĐẦU câu (sau "please" cũng được). Xét trong cửa sổ
+ * 4 từ thì câu hỏi tiếng Việt nhắc tên phần tử tiếng Anh ("Màn Create Order có những trường nào") thành lệnh sửa.
+ */
+const LEADING_CHANGE_VERBS: readonly string[] = Object.freeze(["create", "edit", "insert", "modify"])
+
 /** Dấu hiệu câu hỏi — không coi là lệnh sửa dù có động từ. */
-const QUESTION_MARKERS: readonly string[] = Object.freeze(["?", "là gì", "tại sao", "thế nào", "có nên", "vì sao", "what", "why", "how"])
+const QUESTION_MARKERS: readonly string[] = Object.freeze(["?", "là gì", "tại sao", "thế nào", "có nên", "vì sao"])
+
+/** Từ hỏi tiếng Anh, khớp nguyên từ (FLF-260): khớp chuỗi con thì "how" trong "showing" biến lệnh sửa thành câu hỏi. */
+const QUESTION_WORDS = /\b(?:what|why|how)\b/
 
 /** Số từ đầu câu được xét — "đổi tên actor A01" nhận, "tôi nghĩ là nên đổi" thì không. */
 export const CHANGE_VERB_WINDOW = 4
@@ -352,8 +362,11 @@ export const CHANGE_VERB_WINDOW = 4
 export const isChangeInstruction = (message: string): boolean => {
   const text = message.trim().toLowerCase()
   if (text.length === 0) return false
-  if (QUESTION_MARKERS.some((marker) => text.includes(marker))) return false
-  return text.split(/\s+/).slice(0, CHANGE_VERB_WINDOW).some((word) => CHANGE_VERBS.includes(word.replace(/[^\p{L}]/gu, "")))
+  if (QUESTION_MARKERS.some((marker) => text.includes(marker)) || QUESTION_WORDS.test(text)) return false
+  const words = text.split(/\s+/).map((word) => word.replace(/[^\p{L}]/gu, ""))
+  const lead = words[0] === "please" ? words[1] : words[0]
+  if (lead !== undefined && LEADING_CHANGE_VERBS.includes(lead)) return true
+  return words.slice(0, CHANGE_VERB_WINDOW).some((word) => CHANGE_VERBS.includes(word))
 }
 
 // ─── dependency injection (mock provider trong test) ─────────────
@@ -392,6 +405,11 @@ export interface ChangeBody {
    * "cái đó", "mục vừa nói" (UC 6.11). Không có ⇒ lệnh được hiểu độc lập như trước.
    */
   chat_history?: string
+  /**
+   * Nội bộ (DTO không nhận) — FLF-260: ngôn ngữ trả lời nơi gọi đã chốt (câu lệnh user gõ → ngôn ngữ phiên → tài khoản).
+   * Có ⇒ lời gọi model trả câu hỏi làm rõ / ghi chú bằng ngôn ngữ đó, câu hỏi lại cố định cũng theo; không có ⇒ như cũ.
+   */
+  reply_language?: ReplyLanguage
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -440,9 +458,15 @@ const batchProblems = (spine: Spine, ops: Op[], instruction: string): string[] =
 }
 
 /** Model trả output sai khuôn (không op, không câu hỏi) ⇒ hỏi lại user thay vì đẩy lỗi Zod tiếng Anh ra giao diện. */
-const UNCLEAR_INSTRUCTION =
-  "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục và nội dung muốn đổi giúp mình " +
-  "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu — muốn vẽ lại ngay thì bấm \"Vẽ lại sơ đồ\" dưới hình."
+const UNCLEAR_INSTRUCTION: Readonly<Record<ReplyLanguage, string>> = {
+  vi:
+    "Mình chưa xác định được cần đổi gì trong tài liệu. Bạn nói rõ mục và nội dung muốn đổi giúp mình " +
+    "(ví dụ: \"thêm quyền view màn Login cho Teacher\"). Sơ đồ được vẽ lại tự động từ dữ liệu — muốn vẽ lại ngay thì bấm \"Vẽ lại sơ đồ\" dưới hình.",
+  en:
+    "I couldn't tell what to change in the document. Please tell me which section and what content you want to change " +
+    "(for example: \"add view permission on the Login screen for Teacher\"). Diagrams are redrawn automatically from the data — " +
+    "to redraw one right away, press \"Vẽ lại sơ đồ\" (Redraw diagram) below it."
+}
 
 const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
 
@@ -456,6 +480,7 @@ const opsFromInstruction = async (
   spine: Spine,
   instruction: string,
   chatHistory: string | undefined,
+  replyLanguage: ReplyLanguage | undefined,
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
@@ -474,7 +499,9 @@ const opsFromInstruction = async (
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [],
           ...(previousProblems ? { previous_problems: previousProblems } : {})
-        }
+        },
+        // FLF-260: `buildPrompt` nối khối "Reply language" cuối prompt — câu hỏi làm rõ, ghi chú theo ngôn ngữ của lượt
+        ...(replyLanguage ? { replyLanguage } : {})
       },
       projectId,
       userId
@@ -484,7 +511,9 @@ const opsFromInstruction = async (
   try {
     result = await call()
   } catch (err) {
-    if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return { ops: [], clarification: UNCLEAR_INSTRUCTION, notes: null }
+    if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) {
+      return { ops: [], clarification: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, UNCLEAR_INSTRUCTION), notes: null }
+    }
     throw err
   }
   if (!result.data.clarification_needed?.trim()) {
@@ -514,7 +543,7 @@ const resolveOps = async (
 ): Promise<ResolvedOps> => {
   if (body.ops !== undefined) return { ops: body.ops, clarification: null, notes: null }
   if (body.instruction === undefined) throw new ApiError(400, "Vui lòng nhập nội dung cần sửa.", "VALIDATION_ERROR")
-  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, deps)
+  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps)
 }
 
 const toTransaction = (userId: string, body: ChangeBody, ops: Op[], txn?: string): Transaction => ({

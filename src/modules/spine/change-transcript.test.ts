@@ -53,6 +53,26 @@ describe("previewPayload", () => {
     expect(payload).not.toHaveProperty("impact")
     expect(payload).not.toHaveProperty("violations")
   })
+
+  it("FLF-260: language en ⇒ câu tiếng Anh (số ít / số nhiều); mặc định giữ nguyên câu tiếng Việt", () => {
+    const change: ChangePreviewResult["changes"][number] = { op: "set", path: "actors[id=A01].name", before: "A", value: "B", reason: null }
+    const one: ChangePreviewResult = { ...base, changes: [change], preview_id: "pv", branch: "dependent" }
+    const two: ChangePreviewResult = { ...one, changes: [change, change] }
+
+    expect(previewPayload(one, "en").reply).toBe('Built a preview of 1 change — review it, then press "Áp dụng" (Apply) to save.')
+    expect(previewPayload(two, "en").reply).toBe('Built a preview of 2 changes — review it, then press "Áp dụng" (Apply) to save.')
+    expect(previewPayload(base, "en").reply).toBe("Nothing in the document needs to change for this request.")
+    expect(previewPayload(two).reply).toBe("Đã dựng bản xem trước 2 thay đổi — xem rồi bấm Áp dụng để ghi.")
+    expect(previewPayload(two, "vi").reply).toBe(previewPayload(two).reply)
+    expect(previewPayload(base).reply).toBe("Không tìm thấy chỗ nào cần đổi theo lệnh này.")
+    // Chỉ câu đổi theo ngôn ngữ — các field FE đọc (kind, preview_id, branch, change_count) giữ nguyên
+    expect({ ...previewPayload(two, "en"), reply: null }).toEqual({ ...previewPayload(two), reply: null })
+    // Câu hỏi làm rõ đã đúng ngôn ngữ từ change.service ⇒ giữ nguyên văn
+    expect(previewPayload({ ...base, ok: false, clarification: "Which actor do you mean?" }, "en")).toEqual({
+      kind: "change_clarification",
+      reply: "Which actor do you mean?"
+    })
+  })
 })
 
 describe("formatChatContext (FLF-244)", () => {

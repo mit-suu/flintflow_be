@@ -20,6 +20,10 @@ description: Mô tả ngắn        # tùy chọn
 Nội dung prompt... {{variable_name}} được thay lúc chạy.
 ```
 
+**Ngôn ngữ trả lời (FLF-260):** không cần biến template. Lời gọi hội thoại (vd `chat`) truyền `AiActionInput.replyLanguage`
+(`vi` | `en`) và `buildPrompt` nối khối `## Reply language` vào cuối prompt — prompt chỉ dặn model theo khối đó, không ghi
+cứng "bằng tiếng Việt".
+
 ## Các file hiện có
 
 | File | actionType | Trạng thái |

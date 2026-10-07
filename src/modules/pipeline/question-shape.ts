@@ -25,8 +25,13 @@ export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 4
 export const MAX_HEADER_LENGTH = 12
 
-/** Option model tự viết thay cho ô nhập tự do — trùng với dòng "Khác…" FE đã có. */
-const MODEL_OTHER_OPTION = /^(khác|lựa chọn khác|ý kiến khác|phương án khác|tự nhập|nhập khác|other|something else)\s*(\.{3}|…|:|\(.*\))?\s*$/i
+/**
+ * Option model tự viết thay cho ô nhập tự do — trùng với dòng "Khác…" FE đã có. Có cả cách viết của lượt trả lời tiếng Anh
+ * (FLF-260). "Custom" chỉ tính khi có dấu mời nhập ("Custom…", "Custom:"): "Custom" trơn là một phương án thật (giao diện
+ * mặc định / tuỳ biến).
+ */
+const MODEL_OTHER_OPTION =
+  /^(?:(khác|lựa chọn khác|ý kiến khác|phương án khác|tự nhập|nhập khác|other|others|other options?|another option|something else)\s*(\.{3}|…|:|\(.*\))?|custom\s*(\.{3}|…|:))\s*$/i
 
 /** Bỏ đuôi "(Khuyến nghị)" — nhãn hiển thị của thẻ, không phải một phần câu trả lời. */
 export const stripRecommended = (label: string): string => label.replace(RECOMMENDED_SUFFIX, "").trim()
@@ -67,7 +72,8 @@ export const shapeOptions = (options: readonly QuestionOption[], topicKey?: stri
   for (const option of options) {
     const label = option.label.trim()
     const key = stripRecommended(label).toLowerCase()
-    if (key === "" || MODEL_OTHER_OPTION.test(label) || seen.has(key)) continue
+    // Phương án được khuyến nghị không bao giờ là ô nhập tự do — đuôi "(Recommended)" không được lọt vào nhánh "(…)"
+    if (key === "" || (!RECOMMENDED_SUFFIX.test(label) && MODEL_OTHER_OPTION.test(label)) || seen.has(key)) continue
     seen.add(key)
     kept.push({ ...option, label })
   }
