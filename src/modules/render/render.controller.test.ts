@@ -125,14 +125,14 @@ describe("GET /projects/:projectId/document", () => {
     const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "draft" })
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(200)
-    expect(outcome.body).toMatchObject({ data: null, meta: { state: "not_assembled", hint: "S-8.2" } })
+    expect(outcome.body).toMatchObject({ data: null, meta: { state: "not_assembled" } })
   })
 
-  it("source=baseline chưa ghép vẫn là lỗi thật 409 NO_WORKING_DRAFT", async () => {
+  it("source=baseline chưa có bản dựng vẫn là lỗi thật 409 NO_WORKING_DRAFT", async () => {
     vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
     const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "baseline" })
     expect(outcome.status).toBe(409)
-    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" }, meta: { hint: "S-8.2" } })
+    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" } })
   })
 
   it("404 BASELINE_NOT_FOUND đi qua error handler (không phải NoWorkingDraftError)", async () => {
@@ -192,12 +192,12 @@ describe("GET /projects/:projectId/export/word", () => {
     expect(outcome.headers?.["x-assembled-at-version"]).toBeUndefined()
   })
 
-  it("409 NO_WORKING_DRAFT kèm meta.hint = S-8.2 khi chưa assemble", async () => {
+  it("409 NO_WORKING_DRAFT khi project chưa có nội dung để dựng", async () => {
     vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
     const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft" })
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(409)
-    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" }, meta: { hint: "S-8.2" } })
+    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" } })
   })
 
   it("400 khi source query sai (không thuộc draft|baseline)", async () => {

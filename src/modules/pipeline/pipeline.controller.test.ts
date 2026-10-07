@@ -127,6 +127,22 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     expect(outcome.written).toHaveLength(0)
   })
 
+  /**
+   * FLF-264: "im" là tính chất của bước, không phải của đường chạy. Trước đây chỉ `runPhase` truyền `resolveGate`,
+   * nên một bước không hỏi gì và không ghi gì vẫn dựng cổng chốt khi gọi qua endpoint lẻ.
+   */
+  it("chạy lẻ một bước vẫn truyền resolveGate ⇒ bước im tự Accept thay vì dựng cổng", async () => {
+    vi.mocked(getSpine).mockResolvedValue({ spine_version: 1, project: { review_mode: "balanced" }, screens: [], functions: [], steps: [], decisions: [] } as never)
+    vi.mocked(runStep).mockResolvedValue(undefined as never)
+
+    await invokeSse(runStepController, OWNER, PROJECT, "S-8.2", { session_id: "s1", base_version: 1 })
+
+    const deps = vi.mocked(runStep).mock.calls[0]?.[5] as { resolveGate?: (g: unknown) => Promise<{ quiet: boolean }> }
+    expect(deps.resolveGate).toBeTypeOf("function")
+    // S-8.2 không hỏi, không ghi, không phải cổng cuối giai đoạn (S-8.4 mới là) ⇒ im
+    await expect(deps.resolveGate?.({ type: "gate_ready", step_id: "S-8.2", flags: { red_delta: 0 }, new_assumptions: [] })).resolves.toMatchObject({ quiet: true })
+  })
+
   it("dự án không thuộc user ⇒ 404 PROJECT_NOT_FOUND, không gọi runStep", async () => {
     const outcome = await invokeSse(runStepController, "other-user", PROJECT, "S-3.1", { session_id: "s1", base_version: 1 })
 

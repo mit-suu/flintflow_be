@@ -42,7 +42,7 @@ import { getProjectById } from "../project/project.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
-import { runPhase, resumePhaseInterview } from "./phase-runner.service.js"
+import { runPhase, resumePhaseInterview, standaloneGate } from "./phase-runner.service.js"
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
@@ -234,7 +234,8 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
   const body = parse(runStepRequestSchema, req.body)
 
   const stream = sseStream(res, req)
-  const emit = stream.emit
+  // Bước im vẫn im khi chạy lẻ: cùng luật `isQuietStep` với lượt chạy cả giai đoạn (FLF-264)
+  const { emit, resolveGate } = standaloneGate(projectId, stepId, stream.emit)
 
   // base_version lệch ngay từ đầu ⇒ SPINE_VERSION_CONFLICT trước khi mở SSE (guard-clause).
   const record = await spineRepository.get(projectId)
@@ -246,6 +247,7 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
     await runStep(projectId, stepId, body.session_id, userId, emit, {
       signal: stream.controller.signal,
       abort: stream.controller,
+      resolveGate,
       ...(body.reopen ? { reopen: true } : {}),
       ...(body.message === undefined ? {} : { message: body.message }),
       ...(body.intent === undefined ? {} : { intent: body.intent })

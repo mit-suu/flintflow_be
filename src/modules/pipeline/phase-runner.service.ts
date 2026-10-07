@@ -478,6 +478,38 @@ const collectSignals = (emit: Emit): { emit: Emit; signals: StepSignals } => {
   }
 }
 
+/**
+ * Lượt chạy lẻ một bước (`POST /steps/:id/run`) cũng theo luật "bước im" như lượt chạy cả giai đoạn: trả về
+ * `emit` có quan sát (bước có hỏi gì / vẽ lỗi không) kèm `resolveGate` dùng chính `isQuietStep`.
+ *
+ * Có mặt vì "im" phải là tính chất của BƯỚC chứ không phải của đường chạy: trước đây chỉ `phase-runner` truyền
+ * `resolveGate`, nên một bước không hỏi gì và không ghi gì vẫn dựng cổng chốt chỉ vì được gọi qua endpoint lẻ —
+ * đúng cái phản xạ bấm Accept mà FLF-208 R1 đã bỏ. Khác lượt chạy giai đoạn ở chỗ không dựng `phase_gate`:
+ * lượt lẻ không chạy tiếp phần còn lại nên không có gì để gộp vào cổng chốt cuối giai đoạn.
+ */
+export const standaloneGate = (projectId: string, stepId: string, emit: Emit): { emit: Emit; resolveGate: StepRunnerDeps["resolveGate"] } => {
+  const watched = collectSignals(emit)
+  return {
+    emit: watched.emit,
+    resolveGate: async (gateEvent) => {
+      const { spine } = await load(projectId)
+      const step = orderedSteps(spine).find((s) => s.id === stepId)
+      if (!step) return { quiet: false }
+      const verdict = isQuietStep({
+        templateId: getStep(stepId).template_id,
+        reviewMode: spine.project.review_mode ?? "balanced",
+        asked: watched.signals.asked,
+        redDelta: gateEvent.flags?.red_delta ?? 0,
+        newAssumptions: gateEvent.new_assumptions ?? [],
+        renderFailed: watched.signals.renderFailed,
+        phaseTerminal: isPhaseTerminal(spine, step),
+        spine
+      })
+      return verdict.quiet ? { quiet: true } : { quiet: false }
+    }
+  }
+}
+
 const load = async (projectId: string): Promise<{ record: SpineRecord; spine: Spine }> => {
   const record = await spineRepository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
