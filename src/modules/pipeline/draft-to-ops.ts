@@ -73,10 +73,15 @@ export interface DraftOptions {
   answers?: string
   revisionRequest?: string
   /**
-   * Chỉ với `revision`: giả định cổng đang nói với user (`new_assumptions` của gate_ready / phase_gate). Revision được đổi
-   * status/câu của chúng và ghi đúng `path` thật của chúng dù ngoài `writes` của step.
+   * Chỉ với `revision`: tập giả định còn mở của cổng — quyền SỬA. Revision được viết lại câu của chúng và ghi đúng `path`
+   * thật của chúng dù ngoài `writes` của step.
    */
   gateAssumptionIds?: ReadonlySet<string>
+  /**
+   * Chỉ với `revision`: tập giả định tin cổng ĐÃ NÓI RA — quyền đổi `status`, hẹp hơn quyền sửa ở trên (FLF-242). Thiếu ⇒
+   * không giả định nào đổi được `status`.
+   */
+  statusAssumptionIds?: ReadonlySet<string>
   /** User đã quyết trong lượt của step (thẻ/chat) — cho phép step rà giả định B-2.1 đổi status giả định (xem `USER_DECISION_SWEEP_STEPS`). */
   userDecided?: boolean
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
@@ -142,6 +147,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   // BUG-02: model chỉ được sửa/xoá phần tử nó thấy trong projection (của lô hiện tại, nếu S-5 chia lô)
   const visibleIds = visibleIdsOf(ctx.projection)
   const gateIds = callKind === "revision" ? (options.gateAssumptionIds ?? new Set<string>()) : undefined
+  const statusIds = callKind === "revision" ? (options.statusAssumptionIds ?? new Set<string>()) : undefined
   const extraPaths = gateIds ? spine.assumptions.filter((a) => gateIds.has(a.id)).map((a) => a.path) : undefined
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
@@ -179,7 +185,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       })
       notes = result.data.notes ?? null
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
-      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(gateIds ? { gateAssumptionIds: gateIds } : {}) })
+      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
       // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
       ops = sanitized.errors.length > 0 ? sanitized.ops : dropRedundantScalarAdds(spine, sanitized.ops as Op[])

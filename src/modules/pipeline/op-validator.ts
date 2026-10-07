@@ -338,12 +338,18 @@ export interface SanitizeResult {
 export interface SanitizeOptions {
   /**
    * Lượt `revision` ở cổng duyệt (FLF-232): lời sửa của user là lời xác nhận/bác bỏ giả định mà cổng vừa nói, nên model được
-   * đổi `status` (server vẫn đặt `confirmed_at`) — nhưng CHỈ của các giả định trong `gateAssumptionIds`. Kèm luật
+   * đổi `status` (server vẫn đặt `confirmed_at`) — nhưng CHỈ của các giả định trong `statusAssumptionIds`. Kèm luật
    * `assumption_path_mismatch` cho mọi giả định bị viết lại câu.
    */
   revision?: boolean
-  /** Giả định cổng đang nói (`new_assumptions` của gate_ready / phase_gate): revision chỉ đổi `status` của các id này. */
-  gateAssumptionIds?: ReadonlySet<string>
+  /**
+   * Giả định mà tin cổng ĐÃ NÓI RA (`new_assumptions` của gate_ready / phase_gate): revision chỉ đổi `status` của các id này.
+   *
+   * Hẹp hơn quyền SỬA giả định có chủ ý (FLF-242): sửa thì được cả tập giả định còn mở của cổng, vì lời sửa của user có thể
+   * chạm điều cổng không kịp nói. Đổi `status` thì không — điều cổng chưa nói là điều user chưa đọc, nên lời sửa của họ
+   * không phải lời quyết về nó.
+   */
+  statusAssumptionIds?: ReadonlySet<string>
   /** User đã trả lời / nhắn chat trong lượt của step này — điều kiện để step trong `USER_DECISION_SWEEP_STEPS` được đổi status. */
   userDecided?: boolean
 }
@@ -444,7 +450,7 @@ export const sanitizeModelOps = (
   const base = stepId ? stepId.split("@")[0] : ""
   const sweepStep = ASSUMPTION_SWEEP_STEPS.has(base) && (!USER_DECISION_SWEEP_STEPS.has(base) || options.userDecided === true || options.revision === true)
   // Revision ở cổng chỉ đổi status của giả định cổng vừa nói; bước rà giả định đổi được mọi giả định
-  const canSetStatus = (id: string): boolean => sweepStep || (options.revision === true && (options.gateAssumptionIds?.has(id) ?? false))
+  const canSetStatus = (id: string): boolean => sweepStep || (options.revision === true && (options.statusAssumptionIds?.has(id) ?? false))
   const errors: ValidationError[] = []
   const at = now.toISOString()
 
