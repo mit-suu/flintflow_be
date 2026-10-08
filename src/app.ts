@@ -31,6 +31,7 @@ import invitationRoutes from "./modules/organization/invitation.route.js"
 import importRoutes from "./modules/import/import.route.js"
 import changeRequestRoutes from "./modules/change-request/change-request.route.js"
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
+import commentRoutes from "./modules/comment/comment.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
 import { authMiddleware } from "./shared/auth/auth.middleware.js"
@@ -152,8 +153,17 @@ app.use(
  */
 const orgGuard = [authMiddleware, requireActiveAccount, orgContext] as const
 // Viewer chỉ đọc — chặn mọi thao tác ghi ở một chỗ. Allowlist "ghép tài liệu": chỉ dựng bản đọc từ Spine, không
-// sửa nội dung; chặn thì Viewer không đọc được bản nháp nào chưa có ai ghép.
-app.use("/api/v1/projects", ...orgGuard, viewerReadOnly([new RegExp("^/[^/]+/assemble$")]))
+// sửa nội dung; chặn thì Viewer không đọc được bản nháp nào chưa có ai ghép. Comment và trả lời comment (UC-49):
+// Viewer được góp ý, comment không đổi nội dung (BR-05); "Resolve" vẫn bị chặn.
+app.use(
+  "/api/v1/projects",
+  ...orgGuard,
+  viewerReadOnly([
+    new RegExp("^/[^/]+/assemble$"),
+    new RegExp("^/[^/]+/comments$"),
+    new RegExp("^/[^/]+/comments/[^/]+/replies$")
+  ])
+)
 app.use("/api/v1/folders", ...orgGuard, viewerReadOnly())
 
 /**
@@ -190,6 +200,7 @@ app.use("/api/v1/projects", renderRoutes)
 app.use("/api/v1/projects", importRoutes)
 app.use("/api/v1/projects", changeRequestRoutes)
 app.use("/api/v1/projects", docVersionRoutes)
+app.use("/api/v1/projects", commentRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/feedback", feedbackRoutes)
