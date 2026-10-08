@@ -10,7 +10,8 @@ Writer **không đọc Spine** — nó nhận `RenderedDocument` do Assemble (T1
 | `rendered-document.types.ts` | Hợp đồng `RenderedDocument` / `RenderedSection` / `Block` (đóng băng sau M1, đổi qua PR `contract-change`, báo T15 và T16) |
 | `rendered-document.schema.ts` | Zod strict của hợp đồng, kiểm compile-time khớp types; `draft` ⇒ bắt buộc `watermark: "DRAFT"`, `baseline` ⇒ cấm watermark |
 | `markdown-to-blocks.ts` | Markdown giới hạn → `Block[]` (heading, đoạn, `**bold**`, `*italic*`, `` `code` ``, bullet, numbered, bảng GFM). `headingOffset` để lồng heading dưới section |
-| `docx-writer.ts` | `writeDocx(doc): Promise<Buffer>`, `buildDocxFileName(doc)` |
+| `docx-writer.ts` | `writeDocx(doc, { flagLanguage?, language? }): Promise<Buffer>`, `buildDocxFileName(doc)` |
+| `labels.ts` | FLF-265: mọi chữ máy theo ngôn ngữ (nhãn, enum, câu ghép, nhóm heading, nhãn phase §I, chữ của writer). `VI_LABELS`/`VI_SECTION_TITLES` dùng chung mode 1 — không thêm key; nhãn mới chỉ bật ở mẫu FPT (`functionLayout: "fpt"`) |
 | `export.controller.ts`, `export.route.ts` | `POST /api/v1/export/word/preview` |
 | `zip.test-helper.ts` | Đọc zip bằng `node:zlib` + sinh PNG cho test (không thêm dependency) |
 
@@ -25,6 +26,8 @@ Fixture: `fixtures/rendered-document-sample.json` (5 chương FPT, 1 bảng, 1 �
    - `draft`: `Working Draft Status` (số cờ đỏ mở, số section stale, số waive) + bảng cờ đỏ + bảng waive.
    - `baseline`: chỉ bảng waive (srs-spine §6: mọi export in danh sách waive).
 5. Các section theo thứ tự mảng, heading `"<number> <heading>"` ở `Heading<level>`. Writer không tự đánh số, không sắp xếp lại.
+
+`language: "vi"` (FLF-265, mặc định `en`): bìa, mục lục, header/footer, §I, ghi chú dưới đây ra tiếng Việt; phụ lục cờ vẫn theo `flagLanguage`.
 
 Section `status = stale` hoặc `awaiting_reaccept = true`: dòng ghi chú `[STALE]` / `[AWAITING RE-ACCEPT]` ngay dưới heading, mọi đoạn và ô bảng của section tô vàng `FFF2CC` (Phases §6.5 — đánh dấu tại chỗ).
 

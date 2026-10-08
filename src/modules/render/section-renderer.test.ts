@@ -533,3 +533,158 @@ describe("buildRecordOfChanges", () => {
     expect(rows[1].in_charge).toBe("System")
   })
 })
+
+// ─── FLF-265: nhãn tiếng Việt của mẫu FPT (mode 2) ─────────────────
+
+describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
+  const vi = (overrides: Partial<SectionRenderContext> = {}) => ctx({ functionLayout: "fpt", language: "vi", ...overrides })
+  const bulletItems = (blocks: ReturnType<typeof renderSection>["blocks"]) => blocks.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
+  const tableOf = (blocks: ReturnType<typeof renderSection>["blocks"]) => {
+    const t = blocks.find((b) => b.type === "table")
+    return t?.type === "table" ? t : undefined
+  }
+  const texts = (cells: { text: string }[][]) => cells.map((c) => c.map((r) => r.text).join(""))
+
+  it("khung §3.x.y: heading 4, nhãn đậm mục con trong item danh sách, N/A, chú thích bố cục đều tiếng Việt; giá trị Spine giữ nguyên", () => {
+    const blocks = renderSection(spine(), "function:FN01", vi({ number: "3.2.1" })).blocks
+    expect(blocks.flatMap((b) => (b.type === "heading" ? [b.text] : []))).toEqual([
+      "Kích hoạt chức năng",
+      "Mô tả chức năng",
+      "Bố cục màn hình",
+      "Chi tiết chức năng"
+    ])
+    const labels = bulletItems(blocks).map((i) => i[0])
+    expect(labels.every((r) => r.bold === true)).toBe(true)
+    expect(labels.map((r) => r.text)).toEqual([
+      "Đường dẫn điều hướng: ",
+      "Thời điểm / tần suất: ",
+      "Tác nhân / Vai trò: ",
+      "Mục đích: ",
+      "Giao diện: ",
+      "Xử lý dữ liệu: ",
+      "Dữ liệu: ",
+      "Kiểm tra dữ liệu: ",
+      "Quy tắc nghiệp vụ: ",
+      "Trường hợp thông thường: ",
+      "Trường hợp ngoại lệ: "
+    ])
+    const value = (label: string) => bulletItems(blocks).find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect(value("Thời điểm / tần suất")).toBe("User clicks Log in.")
+    expect(value("Giao diện")).toBe("Màn hình Login: Entry screen.")
+    // "System verifies." vẫn được chọn vào Xử lý dữ liệu (lọc trên chữ Anh của Spine)
+    expect(value("Xử lý dữ liệu")).toBe("System verifies.")
+    expect(blocks).toContainEqual({ type: "image", png: "png-d05", caption: "Bố cục màn hình — Login" })
+
+    const nonScreen = renderSection(spine(), "function:FN02", vi({ number: "3.3.1" })).blocks
+    const nsValue = (label: string) => bulletItems(nonScreen).find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect([nsValue("Đường dẫn điều hướng"), nsValue("Giao diện"), nsValue("Trường hợp ngoại lệ")]).toEqual(["Không có", "Không có", "Không có"])
+    expect(nonScreen).toContainEqual({ type: "paragraph", runs: [{ text: "Không có" }] })
+    expect(JSON.stringify(nonScreen)).not.toContain("N/A")
+  })
+
+  it("tiêu đề mục cố định theo VI_SECTION_TITLES; feature/function giữ tên Spine; không truyền ngôn ngữ ⇒ tiếng Anh", () => {
+    expect(renderSection(spine(), "fixed:2.1", vi({ number: "2.1" })).heading).toBe("Tác nhân")
+    expect(renderSection(spine(), "fixed:5.5", vi({ number: "5.5" })).heading).toBe("Thuật ngữ")
+    expect(renderSection(spine(), "function:FN01", vi({ number: "3.2.1" })).heading).toBe("Submit Credentials")
+    expect(renderSection(spine(), "fixed:2.1", ctx({ number: "2.1", functionLayout: "fpt" })).heading).toBe("Actors")
+  })
+
+  it("nhãn enum trong ô bảng: actor kind, quyền, ưu tiên, nhóm yêu cầu chung, loại yêu cầu khác; giá trị lạ giữ nguyên", () => {
+    const rows = (id: string, s: Spine = spine()) => (tableOf(renderSection(s, id, vi()).blocks)?.rows ?? []).map(texts)
+    expect(rows("fixed:2.1").map((r) => r[2])).toEqual(["người dùng", "hệ thống"])
+    expect(rows("fixed:3.1.3")).toEqual([["Login", "xem"], ["Dashboard", "—"]])
+    expect(rows("fixed:4.2.2")[0][3]).toBe("Phải có")
+    expect(rows("fixed:5.2")).toEqual([["Phân trang", "Lists paginate at 20."]])
+    expect(rows("fixed:5.4")).toEqual([["Rủi ro", "Provider pricing may change."]])
+    const s = spine()
+    s.permissions[0].action = "impersonate"
+    expect(rows("fixed:3.1.3", s)[0][1]).toBe("impersonate")
+  })
+
+  it("tiêu đề cột mới (Use Case, Includes, Role, Actor) và câu ghép (hệ thống ngoài, quan hệ ERD) tiếng Việt", () => {
+    expect(texts(tableOf(renderSection(spine(), "fixed:2.2.2", vi()).blocks)?.header ?? [])).toEqual([
+      "Mã",
+      "Use case",
+      "Tác nhân",
+      "Mô tả use case",
+      "Bao gồm",
+      "Mở rộng"
+    ])
+    expect(texts(tableOf(renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", vi()).blocks)?.header ?? [])).toEqual(["Vai trò", "Tác nhân"])
+    expect(JSON.stringify(renderSection(spine(), "fixed:1", vi({ number: "1" })).blocks)).toContain("Payment Gateway (hệ thống) — Processes payments.")
+
+    const s = spine()
+    s.entities[0].relation_optional = ["E02"]
+    s.entities[1].relations = ["E01"]
+    s.entities[1].relation_verbs = { E01: "belongs to" }
+    // Động từ mặc định `has` dịch; động từ người viết đặt là nội dung Spine — giữ nguyên
+    expect((tableOf(renderSection(s, "fixed:3.1.5", vi()).blocks)?.rows ?? []).map((r) => texts(r)[2])).toEqual([
+      "có Project (không bắt buộc)",
+      "belongs to User"
+    ])
+  })
+
+  it("câu NFR §4.1 giữ nguyên chỉ số / ngưỡng", () => {
+    const s = spine()
+    s.nfrs[0] = { ...s.nfrs[0], kind: "quantitative", metric: "TLS", threshold: "1.2+" }
+    expect(JSON.stringify(renderSection(s, "fixed:4.1", vi()).blocks)).toContain("HTTPS only. (TLS: 1.2+)")
+  })
+
+  it("vi nhưng không phải mẫu FPT (đường layout mode 1) ⇒ như bản mode 1 cũ: không dịch enum, không đổi tiêu đề, không dịch nhãn mới", () => {
+    const actors = renderSection(spine(), "fixed:2.1", ctx({ language: "vi" }))
+    expect(actors.heading).toBe("Actors")
+    expect((tableOf(actors.blocks)?.rows ?? []).map((r) => texts(r)[2])).toEqual(["human", "system"])
+    expect(texts(tableOf(renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", ctx({ language: "vi" })).blocks)?.header ?? [])).toEqual([
+      "Role",
+      "Actor"
+    ])
+  })
+})
+
+describe("buildRecordOfChanges — tiếng Việt (FLF-265)", () => {
+  const change = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
+    txn: "t1",
+    op: "set",
+    reason: null,
+    at: "2026-09-01T09:00:00.000Z",
+    by: "u1",
+    step_id: "S-2.1",
+    path: "actors[id=A01].name",
+    ...over
+  })
+
+  it("Tạo/Cập nhật <giai đoạn> theo bảng nhãn phase vi; baseline + câu máy dịch; lời user giữ nguyên; 'và N thay đổi khác'", () => {
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "t1", op: "add", reason: "seed" }),
+        change({ txn: "t2", reason: "sửa", at: "2026-09-02T09:00:00.000Z" }),
+        change({ txn: "b1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0", at: "2026-09-03T09:00:00.000Z" }),
+        ...["CR 1", "CR 2", "sửa sau baseline", "CR 4", "CR 5"].map((reason, i) => change({ txn: `c${i}`, step_id: null, reason, at: "2026-09-04T09:00:00.000Z" }))
+      ],
+      undefined,
+      "vi"
+    )
+    expect(rows.map((r) => r.description)).toEqual([
+      "Tạo Tổng quan sản phẩm",
+      "Cập nhật Tổng quan sản phẩm",
+      "Ký baseline v1.0",
+      "CR 1; CR 2; Sửa sau baseline; và 2 thay đổi khác"
+    ])
+  })
+
+  it("baseline không lý do / sửa ngoài quy trình chỉ có lý do máy ⇒ câu máy tiếng Việt", () => {
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "b1", op: "add", path: "baselines[]", step_id: null, reason: null }),
+        change({ txn: "c1", step_id: null, reason: "Cascade: permissions[id=P01] removed", at: "2026-09-02T09:00:00.000Z" })
+      ],
+      undefined,
+      "vi"
+    )
+    expect(rows.map((r) => r.description)).toEqual(["Ký baseline", "Cập nhật tài liệu"])
+  })
+
+  it("không truyền ngôn ngữ ⇒ tiếng Anh như cũ", () => {
+    expect(buildRecordOfChanges([change({ reason: "seed" })])[0].description).toBe("Create Product Overview")
+  })
+})

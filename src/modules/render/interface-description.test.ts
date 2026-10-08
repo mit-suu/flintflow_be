@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { wireframeWidgets } from "./interface-description.js"
+import type { Spine } from "../spine/spine.types.js"
+import { describeInterface, wireframeWidgets } from "./interface-description.js"
 
 const salt = (...body: string[]) => ["@startsalt", "{", "  {+", ...body.map((l) => `    ${l}`), "  }", "}", "@endsalt", ""].join("\n")
 
@@ -68,6 +69,84 @@ describe("wireframeWidgets (FLF-214)", () => {
       "Map area",
       "Message text area"
     ])
+  })
+
+  it("FLF-265: tiếng Việt — tên loại widget đứng trước, chữ trên widget giữ nguyên từ puml", () => {
+    const puml = salt(
+      "<b>Log in to your account",
+      "Email",
+      '"john@example.com       "',
+      "Password",
+      '"........               "',
+      "{ [ ] Remember me | <u>Forgot password?</u> }",
+      "{/ <b>Chat | Document }",
+      '{ Price | "100      " | to | "900      " }',
+      "Location",
+      "^All districts      ^",
+      "^Any^",
+      "{ (X) Fast | ( ) Coaching }",
+      "{# <b>Title | <b>Price",
+      "  Villa | 1,000",
+      "}",
+      "{+",
+      "  Map area",
+      "}",
+      "Message",
+      "{+",
+      "  Type here",
+      "  .",
+      "}",
+      '"Search..."',
+      "[        Log in        ]"
+    )
+    expect(wireframeWidgets(puml, "Login", "vi")).toEqual([
+      'chữ "Log in to your account"',
+      "ô nhập Email",
+      "ô nhập Password (ẩn)",
+      "ô chọn Remember me",
+      "liên kết Forgot password?",
+      "các tab (Chat, Document)",
+      "ô nhập Price (khoảng)",
+      "danh sách chọn Location",
+      "danh sách chọn Any",
+      "lựa chọn Fast",
+      "lựa chọn Coaching",
+      "bảng (Title, Price)",
+      "vùng Map",
+      "ô nhập nhiều dòng Message",
+      'ô nhập "Search..."',
+      "nút Log in"
+    ])
+    // Cùng wireframe, không truyền ngôn ngữ ⇒ đúng chuỗi tiếng Anh như trước
+    expect(wireframeWidgets(puml, "Login")).toEqual([
+      '"Log in to your account" text',
+      "Email input",
+      "Password input (masked)",
+      "Remember me checkbox",
+      "Forgot password? link",
+      "tabs (Chat, Document)",
+      "Price input (range)",
+      "Location dropdown",
+      "Any dropdown",
+      "Fast option",
+      "Coaching option",
+      "table (Title, Price)",
+      "Map area",
+      "Message text area",
+      'input "Search..."',
+      "Log in button"
+    ])
+  })
+
+  it("FLF-265: describeInterface — 'Màn hình X: …' / 'Pop-up X: …', mô tả màn giữ nguyên; mặc định tiếng Anh", () => {
+    const screen = { id: "S1", feature_id: "F1", name: "Login", description: "Entry screen.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
+    const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const withLayout = { diagrams: [{ ...layout, puml: salt("Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
+    expect(describeInterface(withLayout, screen, "vi")).toBe("Màn hình Login: ô nhập Email, nút Log in.")
+    expect(describeInterface(withLayout, screen)).toBe("Login screen: Email input, Log in button.")
+    const noLayout = { diagrams: [] } as unknown as Spine
+    expect(describeInterface(noLayout, { ...screen, is_popup: true }, "vi")).toBe("Pop-up Login: Entry screen.")
+    expect(describeInterface(noLayout, { ...screen, is_popup: true })).toBe("Login pop-up: Entry screen.")
   })
 
   it("không phải wireframe (bảng function của Spine cũ, hình PlantUML khác) ⇒ null", () => {
