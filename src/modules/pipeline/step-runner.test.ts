@@ -137,6 +137,13 @@ vi.mock("../../shared/ai/document-context.service.js", async (importOriginal) =>
 })
 vi.mock("../notification/notification.service.js", () => ({ notify: vi.fn(async () => null), notifyAdmins: vi.fn(async () => 0) }))
 vi.mock("../../shared/ai/credit-reservation.service.js", () => ({ refundDeductedCredit: vi.fn(async () => undefined) }))
+// FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
+vi.mock("../translation/translation.repository.js", async () => (await import("../translation/__tests__/translation-store.js")).fakeRepository)
+// FLF-265 D16: đường thật của lượt (deps không cắm ngôn ngữ) — mặc định gọi hàm thật (không nối Mongo ⇒ null), test bật riêng
+vi.mock("../translation/turn-language.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../translation/turn-language.js")>()
+  return { ...actual, documentLanguageForTurn: vi.fn(actual.documentLanguageForTurn) }
+})
 
 import { refundDeductedCredit } from "../../shared/ai/credit-reservation.service.js"
 import { spineSchema } from "../spine/spine.schema.js"
@@ -149,7 +156,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumePhaseInterview, runPhase } from "./phase-runner.service.js"
@@ -157,6 +164,10 @@ import { NO_QUESTION_ACK_EN } from "./fast-path.js"
 import { resumeProject } from "./resume.service.js"
 import { stepEventSchema, type StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { fakeRepository, resetStore, store as translationStore } from "../translation/__tests__/translation-store.js"
+import { hashSource } from "../translation/translation-units.js"
+import { documentLanguageForTurn } from "../translation/turn-language.js"
+import { buildStepContext } from "./context-projection.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.resolve(__dirname, "../../../fixtures")
@@ -293,6 +304,131 @@ describe("step-runner: S-3.1 → S-3.6 qua runStep + gate accept (mock provider)
     expect((err as ApiError).statusCode).toBe(403)
     expect((err as ApiError).code).toBe("NOT_PIPELINE_SESSION")
     expect(draftExecutor).not.toHaveBeenCalled()
+  })
+})
+
+describe("step-runner: lượt Draft trả kèm bản ngôn ngữ tài liệu (FLF-265 D16)", () => {
+  const VI = { locale: "vi" as const, source: "en" as const, glossary: [{ term: "Requester", translation: "Người yêu cầu" }] }
+  const approver = { op: "add" as const, path: "actors[]", value: { id: "A02", name: "Approver", kind: "human", description: "Approves requests." } }
+
+  beforeEach(() => resetStore())
+
+  it("dự án vi: Draft mang ngôn ngữ + glossary; Spine ghi tiếng Anh như cũ; localized ⇒ bản author theo hash câu Anh", async () => {
+    seedSpine()
+    seedSession(true)
+    const inputs: AiActionInput[] = []
+    const { emit } = collectEvents()
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitReply(),
+      documentLanguage: VI,
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        const reply = draftReply([approver])
+        return { ...reply, data: { ...reply.data, localized: [{ path: "actors[]", value: { id: "A02", name: "Người phê duyệt", description: "Phê duyệt yêu cầu." } }] } }
+      },
+      renderDeps: renderStub()
+    })
+
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0]).toMatchObject({ documentLanguage: "vi", sourceLanguage: "en", documentGlossary: VI.glossary })
+    const record = await repo.get(PROJECT)
+    expect(record!.actors.find((a) => a.id === "A02")).toMatchObject({ name: "Approver", description: "Approves requests." })
+    expect(translationStore.translations.get(`${PROJECT}|vi|${hashSource("Approver")}`)).toMatchObject({ text: "Người phê duyệt", origin: "author", sourceLocale: "en" })
+    expect(translationStore.translations.get(`${PROJECT}|vi|${hashSource("Approves requests.")}`)).toMatchObject({ text: "Phê duyệt yêu cầu.", origin: "author" })
+  })
+
+  it("lưu bản dịch lỗi ⇒ lượt ghi Spine vẫn xong, step tới cổng", async () => {
+    seedSpine()
+    seedSession(true)
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    fakeRepository.saveTranslations.mockRejectedValueOnce(new Error("mongo down"))
+    const { events, emit } = collectEvents()
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitReply(),
+      documentLanguage: VI,
+      draftExecutor: async () => {
+        const reply = draftReply([approver])
+        return { ...reply, data: { ...reply.data, localized: [{ path: "actors[]", value: { id: "A02", name: "Người phê duyệt" } }] } }
+      },
+      renderDeps: renderStub()
+    })
+    expect(events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect((await repo.get(PROJECT))!.actors.map((a) => a.id)).toContain("A02")
+    expect(translationStore.translations.size).toBe(0)
+  })
+
+  it("deps không cắm ngôn ngữ ⇒ runStep tự đọc documentLanguageForTurn (dự án vi) ⇒ Draft kèm khối, lưu bản author", async () => {
+    seedSpine()
+    seedSession(true)
+    const actual = vi.mocked(documentLanguageForTurn).getMockImplementation()
+    vi.mocked(documentLanguageForTurn).mockClear().mockImplementation(async () => VI)
+    try {
+      const inputs: AiActionInput[] = []
+      const { emit } = collectEvents()
+      await runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+        elicitExecutor: async () => elicitReply(),
+        draftExecutor: async (_type, input) => {
+          inputs.push(input)
+          const reply = draftReply([approver])
+          return { ...reply, data: { ...reply.data, localized: [{ path: "actors[]", value: { id: "A02", name: "Người phê duyệt" } }] } }
+        },
+        renderDeps: renderStub()
+      })
+      expect(documentLanguageForTurn).toHaveBeenCalledTimes(1)
+      expect(documentLanguageForTurn).toHaveBeenCalledWith(PROJECT)
+      expect(inputs[0]).toMatchObject({ documentLanguage: "vi", sourceLanguage: "en" })
+      expect(translationStore.translations.get(`${PROJECT}|vi|${hashSource("Approver")}`)).toMatchObject({ text: "Người phê duyệt", origin: "author" })
+    } finally {
+      vi.mocked(documentLanguageForTurn).mockClear().mockImplementation(actual!)
+    }
+  })
+
+  it("nhiều lô cùng deps của lượt (như vòng lô S-5) ⇒ đọc ngôn ngữ đúng MỘT lần, mọi lô mang ngôn ngữ", async () => {
+    seedSpine()
+    seedSession(true)
+    const actual = vi.mocked(documentLanguageForTurn).getMockImplementation()
+    vi.mocked(documentLanguageForTurn).mockClear().mockImplementation(async () => VI)
+    try {
+      const inputs: AiActionInput[] = []
+      const deps: Partial<StepRunnerDeps> = {
+        draftExecutor: async (_type, input) => {
+          inputs.push(input)
+          // Mỗi lô một actor mới (lô rỗng ở S-3.1 bị gửi lại model ⇒ nhiều lượt gọi cho một lô)
+          return draftReply([{ op: "add", path: "actors[]", value: { id: `A0${inputs.length + 1}`, name: ["Approver", "Auditor", "Reviewer"][inputs.length - 1], kind: "human", description: "Does things." } }])
+        },
+        renderDeps: renderStub()
+      }
+      const noop = (): void => {}
+      for (let batch = 0; batch < 3; batch++) {
+        const { projectId: _projectId, ...spine } = (await repo.get(PROJECT))!
+        const ctx = await buildStepContext(PROJECT, "S-3.1")
+        await runDraftPhase(PROJECT, "S-3.1", ctx, spine, USER, "draft", noop, deps as StepRunnerDeps)
+      }
+      expect(documentLanguageForTurn).toHaveBeenCalledTimes(1)
+      expect(inputs).toHaveLength(3)
+      for (const input of inputs) expect(input).toMatchObject({ documentLanguage: "vi", sourceLanguage: "en" })
+      expect(deps.documentLanguage).toEqual(VI)
+    } finally {
+      vi.mocked(documentLanguageForTurn).mockClear().mockImplementation(actual!)
+    }
+  })
+
+  it("không truyền documentLanguage (unit test không nối DB) ⇒ Draft không có field ngôn ngữ tài liệu, không lưu gì", async () => {
+    seedSpine()
+    seedSession(true)
+    const inputs: AiActionInput[] = []
+    const { emit } = collectEvents()
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        const reply = draftReply([approver])
+        return { ...reply, data: { ...reply.data, localized: [{ path: "actors[]", value: { id: "A02", name: "Người phê duyệt" } }] } }
+      },
+      renderDeps: renderStub()
+    })
+    expect(inputs[0]).not.toHaveProperty("documentLanguage")
+    expect(translationStore.translations.size).toBe(0)
   })
 })
 

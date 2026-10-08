@@ -16,6 +16,7 @@
  * | `review` `consistency_pass` | `{ flags: [] }` |
  * | `render_fix` | `{ puml }` |
  * | `translate` | `{ statement }` |
+ * | `translate_document` | `{ items }` — mỗi item của lô trong prompt, chữ thêm tiền tố `[vi] ` |
  * | còn lại (`chat`, `summarize_document`) | văn bản tự do như cũ |
  *
  * **Lô op rỗng là cố ý.** Mock không biết gì về Spine nên không thể sinh op hợp bất biến; `ops: []`
@@ -33,6 +34,38 @@ const REVIEW_ACTIONS = new Set(["review", "consistency_pass"])
 const MOCK_PUML = "@startuml\ntitle Mock diagram\nactor User\n@enduml"
 
 const fenced = (value: unknown): string => "```json\n" + JSON.stringify(value, null, 2) + "\n```"
+
+/** Mã ngôn ngữ đích theo tên trong prompt `translate_document` ("… into Vietnamese."). */
+const TARGET_CODES: Record<string, string> = { Vietnamese: "vi", English: "en" }
+
+/**
+ * FLF-265 §2.5: "dịch" giả một lô `translate_document` — đọc khối `Items:` (JSON, cuối prompt) và trả mỗi key với tiền tố
+ * `[vi] ` (mảng thì tiền tố từng phần tử, giữ độ dài). Cho FE / dev / E2E chạy thử vòng dịch theo lô tới `remaining = 0`
+ * mà không gọi model. Không đọc được lô ⇒ `[]` (service dừng vì lô không tiến).
+ */
+export const mockTranslateItems = (prompt: string): { key: string; text: string | string[] }[] => {
+  // Dòng `Items:` đứng riêng — trong JSON của lô xuống dòng đã được escape nên chữ của user không giả được dòng này
+  const markers = [...prompt.matchAll(/(?:^|\n)Items:\r?\n/g)]
+  const last = markers[markers.length - 1]
+  if (!last || last.index === undefined) return []
+  let items: unknown
+  try {
+    items = JSON.parse(prompt.slice(last.index + last[0].length).trim())
+  } catch {
+    return []
+  }
+  if (!Array.isArray(items)) return []
+  const target = /into (\w+)/.exec(prompt)?.[1]
+  const tag = `[${TARGET_CODES[target ?? ""] ?? "vi"}] `
+  return items.flatMap((item): { key: string; text: string | string[] }[] => {
+    if (typeof item !== "object" || item === null) return []
+    const { key, text } = item as { key?: unknown; text?: unknown }
+    if (typeof key !== "string") return []
+    if (typeof text === "string") return [{ key, text: tag + text }]
+    if (Array.isArray(text) && text.every((t) => typeof t === "string")) return [{ key, text: text.map((t) => (t.trim() ? tag + t : t)) }]
+    return []
+  })
+}
 
 /** Đầu ra hợp schema của `response-parser.ts` cho từng `call_kind`; `null` ⇒ dùng nhánh văn bản tự do. */
 export const mockOutputFor = (actionType: string | undefined, prompt: string): string | null => {
@@ -54,8 +87,7 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
     return fenced({ statement: "[MOCK AI] Translated assumption." })
   }
   if (actionType === "translate_document") {
-    // Mock không đọc được lô ⇒ không trả đơn vị nào: mọi đơn vị giữ trạng thái "thiếu", render dùng chữ gốc.
-    return fenced({ items: [] })
+    return fenced({ items: mockTranslateItems(prompt) })
   }
   if (actionType === "render_fix") {
     return fenced({ puml: MOCK_PUML, notes: `[MOCK AI] ${prompt.slice(0, 40).replace(/\s+/g, " ")}` })

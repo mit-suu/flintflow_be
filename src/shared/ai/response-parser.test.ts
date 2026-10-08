@@ -147,9 +147,64 @@ describe("parseResponse — translate_document (FLF-265)", () => {
     expect(out.items[1].text).toEqual(["Bước 1", "Bước 2"])
   })
 
-  it("nhận lô rỗng (mock), từ chối key rỗng hoặc chữ rỗng", () => {
+  it("nhận lô rỗng; items không phải mảng / thiếu ⇒ SCHEMA_MISMATCH", () => {
     expect(parseResponse<{ items: unknown[] }>('{"items":[]}', ActionType.TRANSLATE_DOCUMENT).items).toEqual([])
-    expectAiError(() => parseResponse('{"items":[{"key":"","text":"x"}]}', ActionType.TRANSLATE_DOCUMENT), "SCHEMA_MISMATCH")
-    expectAiError(() => parseResponse('{"items":[{"key":"a","text":"  "}]}', ActionType.TRANSLATE_DOCUMENT), "SCHEMA_MISMATCH")
+    expectAiError(() => parseResponse('{"items":{"key":"a","text":"x"}}', ActionType.TRANSLATE_DOCUMENT), "SCHEMA_MISMATCH")
+    expectAiError(() => parseResponse('{"result":[]}', ActionType.TRANSLATE_DOCUMENT), "SCHEMA_MISMATCH")
+  })
+
+  it("mục sai khuôn (key rỗng, text null / số / object) ⇒ bỏ đúng mục đó, giữ phần còn lại của lô", () => {
+    const raw = JSON.stringify({
+      items: [
+        { key: "a", text: "Một" },
+        { key: "", text: "x" },
+        { key: "b", text: null },
+        { key: "c", text: 3 },
+        { key: "d", text: { vi: "x" } },
+        "rác",
+        { key: "e", text: ["Bước 1", "Bước 2"] }
+      ]
+    })
+    const out = parseResponse<{ items: { key: string; text: string | string[] }[] }>(raw, ActionType.TRANSLATE_DOCUMENT)
+    expect(out.items).toEqual([
+      { key: "a", text: "Một" },
+      { key: "e", text: ["Bước 1", "Bước 2"] }
+    ])
+  })
+
+  it("chữ rỗng không làm hỏng cả lô — service bỏ đơn vị đó sau (fitTranslation)", () => {
+    const raw = '{"items":[{"key":"a","text":"Một"},{"key":"b","text":"  "}]}'
+    const out = parseResponse<{ items: { key: string; text: string }[] }>(raw, ActionType.TRANSLATE_DOCUMENT)
+    expect(out.items.map((i) => i.key)).toEqual(["a", "b"])
+  })
+})
+
+describe("parseResponse — localized cạnh ops (FLF-265 D16)", () => {
+  const localized = [{ path: "actors[id=A03].name", value: "Quản trị viên" }]
+  const op = { op: "set", path: "actors[id=A03].name", value: "Administrator" }
+
+  it("opTransaction / discoveryStep / changeInstruction nhận localized tuỳ chọn; thiếu vẫn qua", () => {
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], localized }), ActionType.DRAFT).localized).toEqual(localized)
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], localized }), ActionType.RECONCILE).localized).toEqual(localized)
+    expect(parseResponse<ChangeInstructionOutput>(JSON.stringify({ ops: [op], localized }), ActionType.CHANGE_INSTRUCTION).localized).toEqual(localized)
+    expect(parseResponse<{ localized?: unknown }>(JSON.stringify({ reply: "ok", ops: [op], localized }), ActionType.DISCOVERY_STEP).localized).toEqual(localized)
+
+    const plain = parseResponse<OpTransaction>(JSON.stringify({ ops: [op] }), ActionType.DRAFT)
+    expect(plain).toEqual({ ops: [op] })
+    expect(plain).not.toHaveProperty("localized")
+    expect(parseResponse<ChangeInstructionOutput>(JSON.stringify({ clarification_needed: "Which actor?" }), ActionType.CHANGE_INSTRUCTION)).not.toHaveProperty("localized")
+  })
+
+  it("localized sai khuôn không bao giờ làm hỏng lượt ghi: mục hỏng bị bỏ, không phải mảng ⇒ coi như không có", () => {
+    const messy = { ops: [op], localized: [{ path: "", value: "x" }, { value: "x" }, "x", null, ...localized] }
+    expect(parseResponse<OpTransaction>(JSON.stringify(messy), ActionType.DRAFT).localized).toEqual(localized)
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], localized: "Quản trị viên" }), ActionType.DRAFT).localized).toBeUndefined()
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], localized: null }), ActionType.REVISION).ops).toEqual([op])
+  })
+
+  it("op vẫn theo opSchema đóng băng — localized nằm cạnh ops, không phải field của op", () => {
+    expectAiError(() => parseResponse(JSON.stringify({ ops: [{ op: "move", path: "actors[]" }], localized }), ActionType.DRAFT), "SCHEMA_MISMATCH")
+    const out = parseResponse<OpTransaction>(JSON.stringify({ ops: [{ ...op, localized: "x" }] }), ActionType.DRAFT)
+    expect(out.ops[0]).not.toHaveProperty("localized")
   })
 })
