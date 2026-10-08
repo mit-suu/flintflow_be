@@ -107,6 +107,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         current_text: spine ? valueText(elementValue(spine, l.path)) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
+        vector_score: l.vector_score ?? null,
         owner_step: l.owner_step ?? null,
         conclusion: l.conclusion ?? null,
         reason: l.reason ?? null,

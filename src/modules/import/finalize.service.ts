@@ -50,6 +50,7 @@ import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectio
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { titleOfSection } from "./gap-report.service.js"
+import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 
 export interface FinalizeResult {
   doc: IImportedDocument
@@ -241,11 +242,15 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     baseline_ref: baseline.id,
     created_by: userId
   })
+  // Index embedding cho C-3 (hybrid retrieval) từ baseline v0 — chạy nền, không chặn/không làm hỏng finalize. Gọi ngay
+  // sau baseline vì bước check có thể dừng (hết credit ⇒ paused); check ghi thêm thì lượt cuối hàm đồng bộ phần đổi.
+  scheduleEmbeddingSync(projectId)
 
   await transitionImport(doc, "checking")
   await runImportCheck(doc, userId)
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
+  scheduleEmbeddingSync(projectId)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
 }
 
