@@ -9,6 +9,7 @@
  * Chưa ghi Spine: finalize áp mọi field đã xác nhận trong một transaction.
  */
 
+import { createHash } from "node:crypto"
 import type mongoose from "mongoose"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import type { ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
@@ -38,7 +39,8 @@ import { VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEnti
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
-import { withMeteredAi } from "./metered-ai.js"
+import { knownKeysText, scopeKnownKeys } from "./known-keys.js"
+import { withMeteredAi, type MeteredResult } from "./metered-ai.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
@@ -253,16 +255,6 @@ export const chunkBlocks = <T extends { text: string }>(blocks: T[], budget = AI
 
 /** Khối gửi AI; `text` của bảng đã là `tableText` (dựng trước khi chia lô để trần ký tự tính đúng phần gửi đi). */
 const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text}` : b.text}`).join("\n")
-
-const knownKeysText = (items: EntityItem[]): string => {
-  const byEntity = new Map<string, string[]>()
-  for (const it of items) {
-    if (!it.id) continue
-    const name = typeof it.value.name === "string" ? ` (${it.value.name})` : ""
-    byEntity.set(it.entity, [...(byEntity.get(it.entity) ?? []), `${it.id}${name}`])
-  }
-  return [...byEntity].map(([e, ids]) => `${e}: ${[...new Set(ids)].join(", ")}`).join("\n") || "(none yet)"
-}
 
 /**
  * Đổi output model sang item: id theo mã / tên phần tử đã biết (`aiItemId`), ép id function của section function.
@@ -526,17 +518,107 @@ const provisionalItems = (sectionId: string, provisional: Map<string, Provisiona
 const needsReview = (drafts: Pick<IExtractionDraft, "fields">[]): boolean =>
   drafts.some((d) => d.fields.some((f) => !f.confirmed && needsConfirm(f)))
 
+// ─── kế hoạch lượt AI (chung cho lượt chạy và ước tính credit) ───
+
+/** Một lượt AI của section theo thứ tự chạy: ảnh diagram trước (thực thể ảnh vào known_keys của lô chữ), rồi lô chữ. */
+export type SectionAiStep = { kind: "image"; block: BlockLite } | { kind: "text"; batch: BlockLite[] }
+
+/** Section chưa xong: phần đọc tất định + các lượt AI theo thứ tự. */
+export interface PlannedSection {
+  section_id: string
+  settled: Settled
+  steps: SectionAiStep[]
+  /** Băm danh sách lượt — tiến độ từng lượt đã lưu chỉ dùng lại khi khớp. */
+  plan_hash: string
+}
+
+/**
+ * Lượt AI của một section. Tất định theo block + template profile: block của `IMPORTED_DOC_VERSION` chỉ ghi lúc tách file
+ * và lúc finalize, mapping chỉ sửa ở `mapping_review` ⇒ trong lúc `extracting` chạy lại cho đúng các lô cũ.
+ */
+export const sectionAiSteps = (sectionId: string, blocks: BlockLite[], settled: Settled): SectionAiStep[] => {
+  const sectionBlocks = blocks.filter((b) => b.section_id === sectionId)
+  const tablePrefixes = sectionBlocks.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
+  const aiBlocks = sectionBlocks
+    .filter(
+      (b) =>
+        b.kind !== "heading" &&
+        b.text.trim() &&
+        !settled.handled.has(b.block_id) &&
+        !settled.consumed.has(b.block_id) &&
+        !(b.kind === "table_cell" && tablePrefixes.some((prefix) => b.anchor.xml_path.startsWith(prefix)))
+    )
+    // Bảng gửi AI theo ô thật (FLF-251) — tách `text` theo dòng làm ô nhiều dòng thành nhiều hàng
+    .map((b) => (b.kind === "table" ? { ...b, text: tableText(tableRows(b, blocks)) } : b))
+  // Phase 5: ảnh diagram (EMF/WMF / file gốc không còn ⇒ lúc chạy ghi `unsupported`, không gọi AI)
+  const images = sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(sectionId, captionOf(b, sectionBlocks)))
+  const batches = targetsOf(sectionId).length ? chunkBlocks(aiBlocks) : []
+  return [...images.map((block) => ({ kind: "image" as const, block })), ...batches.map((batch) => ({ kind: "text" as const, batch }))]
+}
+
+export const stepsHash = (steps: SectionAiStep[]): string =>
+  createHash("sha1")
+    .update(JSON.stringify(steps.map((s) => (s.kind === "image" ? ["image", s.block.block_id, s.block.image_ref] : ["text", s.batch.map((b) => [b.block_id, b.text])]))))
+    .digest("hex")
+
+/** Đọc tất định + lượt AI của mọi section chưa `done`, theo thứ tự tài liệu. */
+export const planPendingSections = (
+  plan: string[],
+  blocks: BlockLite[],
+  profile: ITemplateProfile,
+  provisional: Map<string, ProvisionalEntity>,
+  done: ReadonlySet<string>
+): PlannedSection[] =>
+  plan
+    .filter((s) => !done.has(s))
+    .map((section_id) => {
+      const settled = settleSection(section_id, blocks, profile, provisional)
+      const steps = sectionAiSteps(section_id, blocks, settled)
+      return { section_id, settled, steps, plan_hash: stepsHash(steps) }
+    })
+
+/** Số lượt đã xong (đã trừ credit) theo tiến độ lưu trong bản nháp; kế hoạch đã khác ⇒ 0 (chạy lại cả section). */
+const stepsDoneOf = (draft: Pick<IExtractionDraft, "partial"> | undefined, planned: PlannedSection): number =>
+  draft?.partial && draft.partial.plan_hash === planned.plan_hash ? Math.min(draft.partial.steps_done, planned.steps.length) : 0
+
+interface ExtractionInputs {
+  profile: ITemplateProfile
+  blocks: BlockLite[]
+  provisional: Map<string, ProvisionalEntity>
+  plan: string[]
+}
+
+const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
+  const profile = await TemplateProfile.findOne({ projectId })
+  if (!profile) return null
+  const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
+  return { profile, blocks, provisional: resolveProvisional(profile.heading_map), plan: extractionPlan(blocks) }
+}
+
+/** Loại phần tử luôn có trong known_keys (danh sách nhỏ, chữ hay nhắc bằng tên): tác nhân, vai trò. */
+const ALWAYS_KNOWN = ["actors", "roles"] as const
+
+/** Feature/function tạm của section + feature cha của function — luôn đứng đầu known_keys. */
+const provisionalScope = (sectionId: string, provisional: Map<string, ProvisionalEntity>): EntityItem[] => {
+  const own = provisionalItems(sectionId, provisional)
+  const p = provisional.get(sectionId)
+  const parent = p?.feature_id ? [...provisional.values()].find((x) => x.entity === "features" && x.id === p.feature_id) : undefined
+  return parent ? [...own, ...provisionalItems(parent.section, provisional)] : own
+}
+
+type MeteredFailure = Extract<MeteredResult<unknown>, { ok: false }>
+
 /**
  * Chạy (hoặc chạy tiếp) I-4 cho import đang ở `extracting`. Trả trạng thái mới nhất kể cả khi dừng vì credit/lỗi AI.
+ * Tiến độ lưu sau từng lượt AI (`ExtractionDraft.partial`): section nhiều lô dừng ở lô k ⇒ chạy tiếp từ lô k, không gọi
+ * (và không trừ credit) lại các lô trước.
  */
 export const runExtraction = async (projectId: string, userId: string, importId: string): Promise<ExtractionRun> => {
   const doc = await requireImport(projectId, importId)
   assertImportStatus(doc, ["extracting"], "extracting")
-  const profile = await TemplateProfile.findOne({ projectId })
-  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
-  const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
-  const provisional = resolveProvisional(profile.heading_map)
-  const plan = extractionPlan(blocks)
+  const inputs = await loadExtractionInputs(projectId)
+  if (!inputs) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
+  const { profile, blocks, provisional, plan } = inputs
 
   doc.paused = null
   await doc.save()
@@ -560,11 +642,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
 
   // FLF-252: phần đọc tất định (bảng, đặc tả "nhãn: giá trị") của mọi section chưa xong — chạy trước mọi lượt AI để ảnh /
   // chữ ở mục trước ghép được với phần tử của bảng phía sau (sơ đồ use case ở 2.2.1 ⇄ bảng use case ở 2.2.2)
-  const settled = new Map<string, Settled>()
-  for (const section_id of plan) {
-    if (draftOf.get(section_id)!.status === "done") continue
-    settled.set(section_id, settleSection(section_id, blocks, profile, provisional))
-  }
+  const pending = planPendingSections(plan, blocks, profile, provisional, new Set(drafts.filter((d) => d.status === "done").map((d) => d.section_id)))
+  const settled = new Map(pending.map((p) => [p.section_id, p.settled]))
   // Mã bảng ghi giữ chỗ trước khi cấp mã cho phần tử không mã — không cấp "A01" rồi gặp "A-01" của bảng phía sau
   for (const found of settled.values()) for (const it of found.items) if (it.id) alloc.reserve(it.entity, it.id)
   for (const found of settled.values()) {
@@ -575,36 +654,35 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     }
     known.push(...found.items)
   }
+  // Phần tử của các lượt đã xong ở lần chạy trước (section dừng giữa chừng) giữ chỗ id như khi chúng được cấp
+  for (const p of pending) {
+    const d = draftOf.get(p.section_id)!
+    if (stepsDoneOf(d, p) > 0) for (const it of d.partial!.items) if (it.id) alloc.reserve(it.entity, it.id)
+  }
 
-  for (const section_id of plan) {
+  for (const planned of pending) {
+    const { section_id, steps } = planned
     const draft = draftOf.get(section_id)!
-    if (draft.status === "done") continue
     doc.extract_cursor = section_id
     await doc.save()
 
     const sectionBlocks = blocks.filter((b) => b.section_id === section_id)
-    const { items: settledItems, handled: handledTables, consumed, verbatim } = settled.get(section_id) ?? EMPTY_SETTLED
+    const { items: settledItems, verbatim } = planned.settled
     const items: EntityItem[] = [...provisionalItems(section_id, provisional), ...settledItems]
-
-    const tablePrefixes = sectionBlocks.filter((b) => b.kind === "table").map((b) => `${b.anchor.xml_path}/`)
-    const aiBlocks = sectionBlocks
-      .filter(
-        (b) =>
-          b.kind !== "heading" &&
-          b.text.trim() &&
-          !handledTables.has(b.block_id) &&
-          !consumed.has(b.block_id) &&
-          !(b.kind === "table_cell" && tablePrefixes.some((prefix) => b.anchor.xml_path.startsWith(prefix)))
-      )
-      // Bảng gửi AI theo ô thật (FLF-251) — tách `text` theo dòng làm ô nhiều dòng thành nhiều hàng
-      .map((b) => (b.kind === "table" ? { ...b, text: tableText(tableRows(b, blocks)) } : b))
+    const ownCount = items.length
     const targets = targetsOf(section_id)
     const mentionedRules = new Set(sectionBlocks.flatMap((b) => (b.mentions ?? []).filter((m) => m.entity === "business_rule").map((m) => idKey(m.id))))
-    let usageId: string | null = null
+    // Chạy tiếp section dừng giữa chừng: dùng lại kết quả các lượt đã xong (đã trừ credit), bắt đầu ở lượt hỏng
+    const skip = stepsDoneOf(draft, planned)
+    const progress = skip > 0 ? draft.partial! : null
+    if (progress) items.push(...progress.items)
+    let usageId: string | null = progress?.usage_id ?? null
     // Bảng đặc tả use case đã đọc tất định nhưng Spine không chứa hết (luồng, tiền / hậu điều kiện) ⇒ giữ nguyên văn
-    const unmapped: string[] = [...verbatim]
+    const unmapped: string[] = progress ? [...progress.unmapped_block_ids] : [...verbatim]
+    const diagramImages: IExtractionDraft["diagram_images"] = progress ? [...progress.diagram_images] : []
     const heading = profile.heading_map.find((h) => h.section_id === section_id)
     const sectionFunction = PROVISIONAL_SECTION.test(section_id) ? (provisional.get(section_id) ?? null) : null
+    const ownProvisional = provisionalScope(section_id, provisional)
     const pause = async (result: { reason: "credits" | "resume_later"; userMessage: string }): Promise<ExtractionRun> => {
       doc.paused = { reason: result.reason, at: new Date() }
       await doc.save()
@@ -618,13 +696,13 @@ export const runExtraction = async (projectId: string, userId: string, importId:
 
     // Phase 5: ảnh diagram của section (sau bảng tất định, trước lô chữ) ⇒ Gemini đọc từng ảnh; thực thể đọc được vào
     // known_keys để lô chữ dùng lại khoá. EMF/WMF / file gốc không còn ⇒ `unsupported` (không gọi AI, giữ ảnh gốc).
-    const diagramImages: IExtractionDraft["diagram_images"] = []
-    for (const img of sectionBlocks.filter((b) => b.kind === "image" && b.image_ref && readsImage(section_id, captionOf(b, sectionBlocks)))) {
+    const readImage = async (img: BlockLite): Promise<MeteredFailure | null> => {
       const image = await loadImportImage(projectId, img.image_ref!)
       if (!image) {
         diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
-        continue
+        return null
       }
+      const caption = captionOf(img, sectionBlocks)
       const result = await withMeteredAi<ImportExtractDiagramOutput>(
         { projectId, userId, stepId: `I-4:${section_id}` },
         ActionType.IMPORT_EXTRACT_DIAGRAM,
@@ -632,9 +710,19 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           section_id,
           heading_text: heading?.heading_text ?? section_id,
           block_id: img.block_id,
-          caption: captionOf(img, sectionBlocks),
+          caption,
           schema_excerpt: schemaExcerptFor(DIAGRAM_TARGETS),
-          known_keys: knownKeysText([...known, ...items])
+          // Ảnh không có chữ: phạm vi theo tiêu đề + chú thích + chữ của section; loại section trích luôn gửi (sơ đồ use case
+          // ở 2.2.1 ⇒ các use case). Chỉ chữ prompt bị thu hẹp — ghép tên ở code vẫn dùng toàn bộ phần tử đã biết
+          known_keys: knownKeysText(
+            scopeKnownKeys([...known, ...items], {
+              provisional: ownProvisional,
+              section: items,
+              text: [heading?.heading_text ?? "", caption, ...sectionBlocks.filter((b) => b.kind !== "image").map((b) => b.text)].join("\n"),
+              mentions: sectionBlocks.flatMap((b) => b.mentions ?? []),
+              always: [...ALWAYS_KNOWN, ...targets]
+            })
+          )
         },
         { images: [image] }
       )
@@ -642,16 +730,16 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       // gốc như EMF (cờ vàng lúc finalize) — lỗi cấu hình, chạy lại cũng không khá hơn
       if (!result.ok && result.code && VISION_UNAVAILABLE.has(result.code)) {
         diagramImages.push({ block_id: img.block_id, kind: "unsupported" })
-        continue
+        return null
       }
       // AI đọc ảnh vẫn lỗi sau khi đã thử lại + model dự phòng (Gemini "high demand"…) ⇒ không dừng cả I-4 vì một ảnh:
       // ảnh gốc luôn được giữ (§4.13), chỉ thiếu dữ liệu đọc từ ảnh — cờ vàng báo lúc finalize. Hết credit vẫn dừng.
       if (!result.ok && result.reason !== "credits") {
         console.warn(`[I-4] ${section_id}: đọc ảnh ${img.block_id} lỗi (${result.message}) — giữ ảnh gốc, đi tiếp`)
         diagramImages.push({ block_id: img.block_id, kind: "unavailable" })
-        continue
+        return null
       }
-      if (!result.ok) return pause(result)
+      if (!result.ok) return result
       usageId = result.usageId
       const read =
         result.data.diagram_kind === "other"
@@ -668,18 +756,29 @@ export const runExtraction = async (projectId: string, userId: string, importId:
       diagramImages.push({ block_id: img.block_id, kind: read.length ? result.data.diagram_kind : "other" })
       // Phần tử ảnh trùng phần tử đã có (chữ, bảng, ảnh trước) ⇒ chỉ giữ phần mới để bước 1.9 chỉ hỏi phần ảnh thêm vào (FLF-252)
       items.push(...onlyNewFromVision(read, [...known, ...items]))
+      return null
     }
 
-    for (const batch of targets.length ? chunkBlocks(aiBlocks) : []) {
+    const readBatch = async (batch: BlockLite[]): Promise<MeteredFailure | null> => {
+      const text = blockLines(batch)
       const result = await withMeteredAi<ImportExtractOutput>({ projectId, userId, stepId: `I-4:${section_id}` }, ActionType.IMPORT_EXTRACT_FIELDS, {
         section_id,
         heading_text: heading?.heading_text ?? section_id,
         target_entities: targets.join(", "),
         schema_excerpt: schemaExcerptFor(targets),
-        known_keys: knownKeysText([...known, ...items]),
-        blocks: blockLines(batch)
+        // Chỉ phần tử lô này có thể nhắc tới (không còn cả tài liệu) — ghép mã / tên ở `itemsFromAi` vẫn dùng toàn bộ `known`
+        known_keys: knownKeysText(
+          scopeKnownKeys([...known, ...items], {
+            provisional: ownProvisional,
+            section: items,
+            text: `${heading?.heading_text ?? ""}\n${text}`,
+            mentions: batch.flatMap((b) => b.mentions ?? []),
+            always: ALWAYS_KNOWN
+          })
+        ),
+        blocks: text
       })
-      if (!result.ok) return pause(result)
+      if (!result.ok) return result
       usageId = result.usageId
       // Văn xuôi không trích được ⇒ finalize giữ nguyên văn làm phần nối của section (mode 1 v2 — FLF-184)
       const inBatch = new Set(batch.map((b) => b.block_id))
@@ -696,6 +795,25 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           mentionedRules
         )
       )
+      return null
+    }
+
+    for (const [i, step] of steps.entries()) {
+      if (i < skip) continue
+      const failed = step.kind === "image" ? await readImage(step.block) : await readBatch(step.batch)
+      if (failed) return pause(failed)
+      if (i + 1 === steps.length) break
+      // Lưu sau từng lượt đã trừ credit: dừng ở lượt sau thì lần chạy tiếp không gọi lại lượt này
+      draft.partial = {
+        plan_hash: planned.plan_hash,
+        steps_done: i + 1,
+        items: items.slice(ownCount),
+        unmapped_block_ids: [...unmapped],
+        diagram_images: [...diagramImages],
+        usage_id: usageId
+      }
+      draft.markModified("partial")
+      await draft.save()
     }
 
     const merged = mergeItems(items)
@@ -711,7 +829,9 @@ export const runExtraction = async (projectId: string, userId: string, importId:
     draft.usage_id = usageId
     draft.unmapped_block_ids = unmapped
     draft.diagram_images = diagramImages
+    draft.partial = null
     draft.markModified("fields")
+    draft.markModified("partial")
     await draft.save()
   }
 
@@ -721,9 +841,6 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   await transitionImport(doc, needsReview(finalDrafts) ? "fields_review" : "baselining")
   return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
 }
-
-
-
 
 // ─── 1.9 xác nhận field ─────────────────────────────────────────
 

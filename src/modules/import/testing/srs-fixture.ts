@@ -23,6 +23,10 @@ export interface SrsFixtureOptions {
    * cùng ô (như ô tiêu đề "A*⏎M, D" của SRS thật).
    */
   recordOfChanges?: string[][]
+  /** Đoạn văn thêm ngay sau đoạn mục đích ở mục 1 (đo / test I-4 nhiều lô chữ trong một section). */
+  overviewParagraphs?: string[]
+  /** Hàng thêm vào bảng business rule 5.1 (`[mã, câu quy tắc]`) — đo known_keys khi có nhiều phần tử không liên quan. */
+  extraRules?: string[][]
 }
 
 /** Bảng mà ô có `\n` thành nhiều đoạn trong ô (helper `table` chỉ dựng một đoạn mỗi ô). */
@@ -46,6 +50,7 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
     ...(opts.recordOfChanges ? [h(1, "I.", "Record of Changes"), multilineTable(opts.recordOfChanges)] : []),
     h(1, "1", "Product Overview"),
     p(T.purpose),
+    ...(opts.overviewParagraphs ?? []).map((text) => p(text)),
     h(1, "2", "User Requirements"),
     h(2, "2.1", "Actors"),
     table([["Actor", "Description"], T.actorRow, ["Admin", "Manages courses and users."]]),
@@ -71,7 +76,7 @@ export const makeSrsDocx = async (opts: SrsFixtureOptions = {}): Promise<Buffer>
     p(T.perf),
     h(1, "5", "Requirement Appendix"),
     h(2, "5.1", "Business Rules"),
-    table([["BR ID", "Business Rule"], T.rule]),
+    table([["BR ID", "Business Rule"], T.rule, ...(opts.extraRules ?? [])]),
     h(2, "5.9", "Team Notes"),
     p("Internal notes that do not belong to the template."),
     opts.extraBody ?? ""
