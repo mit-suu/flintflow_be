@@ -88,7 +88,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
 | 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx` | `DOC_VERSION_NOT_FOUND` |
 | 15 | `GET /projects/:id/versions/compare?from=&to=` | UC-55 | `compareQuerySchema` | `compareResponseSchema` | `DOC_VERSION_NOT_FOUND`, `VALIDATION_ERROR` |
-| 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | `createChangeRequestSchema` | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE` |
+| 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
 | 17 | `GET /projects/:id/change-requests?status=` | UC-48 | `listChangeRequestsQuerySchema` | `ChangeRequest[]`, mới nhất trước | — |
 | 18 | `GET /projects/:id/change-requests/:crId` | UC-48 | — | `changeRequestDetailSchema` | `CR_NOT_FOUND` |
 | 19 | `POST …/:crId/clarify` | UC-49, 3.2 | `{}` | `changeRequestDetailSchema` (`awaiting_answers` kèm `pending_questions`, hoặc `impact_review`) | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
@@ -371,6 +371,7 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-08 | UC-49 (comment) | #16 `createChangeRequestSchema` thêm `comment_id?` (tuỳ chọn, additive): "Create CR from comment" — xem `pipeline-contract.md` endpoint 26–29 |
 | 2026-10-06 | mục FPT không bắt buộc | #32 / gap report: hồ sơ luật mode 1 loại `section_empty` — đầu mục FPT thiếu không còn cờ đỏ, không chặn release; cờ cũ đang mở tự đóng ở lần tính lại cờ kế tiếp. Hình API không đổi |
 | 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |

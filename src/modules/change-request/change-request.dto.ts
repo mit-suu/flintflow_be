@@ -18,6 +18,7 @@ import {
   MATERIAL_ID_PATTERN,
   NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
+import { COMMENT_ID_PATTERN } from "../comment/comment.model.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -148,6 +149,8 @@ export const createChangeRequestSchema = z.strictObject({
   source: crSourceSchema.extend({ kind: z.enum(NEW_CR_SOURCE_KINDS) }),
   requester: text(200),
   preview_id: z.string().trim().min(1).max(100).optional(),
+  /** UC-49 "Create CR from comment": comment còn mở được chuyển thành CR này (status `converted`). Cần `source.kind = viewer_comment`. */
+  comment_id: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.").optional(),
   /** Mode 1 v3 phase 7: đoạn văn bản nguồn dán ở 3.1 (email, biên bản…) — file thì upload sau qua `/materials`. */
   materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional()
 })
