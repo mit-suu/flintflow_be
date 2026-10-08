@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import type { Request, Response } from "express"
-import { CreateProjectSchema, UpdateDocumentLanguageSchema, projectModeSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, UpdateDocumentLanguageSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
 import { Project, PROJECT_MODES } from "./project.model.js"
 
 describe("documentLanguage (FLF-265)", () => {
@@ -67,5 +67,18 @@ describe("CreateProjectSchema qua validateRequest", () => {
     ["tên quá 100 ký tự", { name: "x".repeat(101) }]
   ])("%s ⇒ 400 VALIDATION_ERROR", (_label, body) => {
     expect(() => run(body)).toThrow(expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR" }))
+  })
+})
+
+describe("cờ knowledge của tin chat (FLF-267)", () => {
+  it("thiếu ⇒ false; boolean thật giữ nguyên; field khác của body không bị kiểm", () => {
+    expect(parseKnowledgeFlag({ content: "x", step: "chat" })).toBe(false)
+    expect(parseKnowledgeFlag(undefined)).toBe(false)
+    expect(parseKnowledgeFlag({ knowledge: true })).toBe(true)
+    expect(parseKnowledgeFlag({ knowledge: false, discoveryStep: "2" })).toBe(false)
+  })
+
+  it.each([["chuỗi", "true"], ["số", 1], ["null", null]])("%s ⇒ 400 VALIDATION_ERROR", (_label, value) => {
+    expect(() => parseKnowledgeFlag({ knowledge: value })).toThrow(expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR" }))
   })
 })
