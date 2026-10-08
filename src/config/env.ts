@@ -106,7 +106,7 @@ const envSchema = z.object({
   EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
   /** Số ứng viên vector tối đa C-3 lấy thêm, và điểm tối thiểu (`vectorSearchScore` cosine của Atlas, 0..1). */
   CR_VECTOR_TOP_K: z.coerce.number().int().min(1).max(200).default(20),
-  CR_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.8),
+  CR_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.82),
 
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z

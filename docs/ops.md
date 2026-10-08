@@ -116,7 +116,7 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `PLANTUML_TIMEOUT_MS` | không | default 15000. Production đặt **30000**: use-case ~70 UC mất 13 s ở lượt đầu sau khi PlantUML restart (JVM chưa JIT-warm), warm còn ~4 s |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
-| `EMBEDDING_PROVIDER` | không | `off` (mặc định) · `gemini` · `mock`. C-3 tìm vị trí CR theo nghĩa (§2 "Bật tìm vị trí CR theo nghĩa"). `gemini` dùng `GEMINI_API_KEY`; kèm `EMBEDDING_MODEL` (`gemini-embedding-001`), `EMBEDDING_DIMENSIONS` (768 — phải bằng số chiều của Atlas index), `EMBEDDING_API_BASE_URL`, `EMBEDDING_TIMEOUT_MS`, `CR_VECTOR_TOP_K` (20), `CR_VECTOR_MIN_SCORE` (0.8) |
+| `EMBEDDING_PROVIDER` | không | `off` (mặc định) · `gemini` · `mock`. C-3 tìm vị trí CR theo nghĩa (§2 "Bật tìm vị trí CR theo nghĩa"). `gemini` dùng `GEMINI_API_KEY`; kèm `EMBEDDING_MODEL` (`gemini-embedding-001`), `EMBEDDING_DIMENSIONS` (768 — phải bằng số chiều của Atlas index), `EMBEDDING_API_BASE_URL`, `EMBEDDING_TIMEOUT_MS`, `CR_VECTOR_TOP_K` (20), `CR_VECTOR_MIN_SCORE` (0.82) |
 | `AI_PAYLOAD_RETENTION_DAYS` | không | default 30. Số ngày giữ prompt/response của lượt gọi model (`aiactionpayloads`, TTL index). Prompt mang nguyên văn điều người dùng nhập ⇒ đây là **hạn giữ dữ liệu người dùng**, đổi thì phải đổi cả cam kết với người dùng. `0` = không lưu gì. Đổi giá trị chỉ có tác dụng với document mới: TTL index đã tạo thì phải `collMod` hoặc drop index để Mongo nhận hạn mới |
 | `AI_PAYLOAD_MAX_CHARS` | không | default 40000 ký tự mỗi bên. Quá trần thì cắt giữa, giữ đầu (luật của skill) và cuối (projection + câu trả lời của user); `promptChars`/`responseChars` vẫn là độ dài thật |
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
@@ -266,8 +266,8 @@ npm run migrate:spine-embeddings
   (`docs/spec-gaps.md`).
 - Đổi `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` ⇒ mọi dòng bị coi là lệch hash và embed lại ở lượt đồng bộ sau; số chiều
   phải khớp `numDimensions` của Atlas index (script báo lệch, không tự sửa index).
-- Ngưỡng `CR_VECTOR_MIN_SCORE` (0.8 ≈ cosine 0.6, vì Atlas đổi cosine về `(1 + cos) / 2`) là giá trị khởi điểm — hiệu chỉnh
-  trên dữ liệu dev trước khi bật ở production.
+- Ngưỡng `CR_VECTOR_MIN_SCORE` (0.82 ≈ cosine 0.64, vì Atlas đổi cosine về `(1 + cos) / 2`) chọn theo một mẫu nhỏ đo bằng
+  Gemini thật (`docs/measurements.md`, "C-3 hybrid retrieval") — vẫn phải hiệu chỉnh trên dữ liệu dev trước khi bật ở production.
 
 ## 5. Production trên Azure
 
