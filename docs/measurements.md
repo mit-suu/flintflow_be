@@ -544,3 +544,17 @@ Nhận xét:
   3 lượt (6 credit), tổng credit và field bằng lượt chạy một mạch.
 - Ước tính trước khi trích trên SRS mẫu + 10 đoạn dài ở mục 1 + 3 ảnh (1 PNG use case, 1 EMF, 1 ảnh chụp màn hình): 8 lô chữ
   + 1 ảnh = 9 lượt, 18 credit — trùng số lượt gọi và credit bị trừ của lượt chạy thật.
+
+## Mode 1 — I-4 scoped `known_keys`, provider thật (2026-10-08)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (nhánh `chore/measure-mode1-import`) chạy trên nhánh này, SRS
+  ClinicPlus v1.0, GLM-5.3-Flash; "trước" = `develop` `12f7c50` (cùng file, cùng ngày).
+
+| Bản | Lượt I-4 | tokens_in | tokens_out | Credit |
+|---|---:|---:|---:|---:|
+| trước (`known_keys` = mọi phần tử đã trích) | 22 | 41 900 | 7 476 | 44 |
+| scoped (`known_keys` theo phạm vi lượt, trần 4 000 ký tự) | 22 | 25 673 | 7 378 | 44 |
+
+- tokens_in I-4 giảm **39%**, số lượt và credit không đổi; Spine trích ra cùng cỡ: 12 UC, 15 NFR, 9 BR, 14 màn ở cả hai lượt; function 14 → 15 (dao động của model).
+- Lượt đo cùng nhánh trên SRS StudentManagement v1.0 (có ảnh) **timeout sau 90 phút**, chưa có số — chưa rõ do provider
+  (Gemini ảnh) hay do nhánh; cần chạy lại kèm log.
