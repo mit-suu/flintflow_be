@@ -90,6 +90,8 @@ vi.mock("../../shared/ai/document-context.service.js", async (importOriginal) =>
   return { ...actual, buildDocumentContext: vi.fn(async () => ({ contextText: "", tokenCount: 0, documentsUsed: 0, usedSummary: false })) }
 })
 vi.mock("../project/chat-session.model.js", () => ({ ChatSession: { findById: () => Promise.resolve(null) } }))
+// FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
+vi.mock("../translation/translation.repository.js", async () => (await import("../translation/__tests__/translation-store.js")).fakeRepository)
 
 import fs from "node:fs"
 import path from "node:path"
@@ -107,6 +109,8 @@ import { acquireRun, finishRun, resetMemoryRuns } from "./run-state.service.js"
 import { resumeProject } from "./resume.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { notify } from "../notification/notification.service.js"
+import { resetStore, store } from "../translation/__tests__/translation-store.js"
+import { hashSource } from "../translation/translation-units.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MINIMAL: SpineT = spineSchema.parse(
@@ -269,6 +273,26 @@ describe("gate.service: regenerate — trần 3/step", () => {
       }
     })
     expect(inputs.map((i) => i.replyLanguage)).toEqual(["en"])
+  })
+
+  it("FLF-265 D16: dự án vi ⇒ lượt soạn lại mang ngôn ngữ tài liệu; localized lưu thành bản author, Spine vẫn tiếng Anh", async () => {
+    resetStore()
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const inputs: AiActionInput[] = []
+    await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: version }, {
+      documentLanguage: { locale: "vi", source: "en", glossary: [] },
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        const reply = draftReply([{ op: "add", path: "actors[]", value: { id: "A91", name: "Reviewer", kind: "human", description: "Checks requests." } }])
+        return { ...reply, data: { ...reply.data, localized: [{ path: "actors[]", value: { id: "A91", name: "Người duyệt", description: "Kiểm tra yêu cầu." } }] } }
+      }
+    })
+    expect(inputs.map((i) => [i.documentLanguage, i.sourceLanguage])).toEqual([["vi", "en"]])
+    const spine = await repo.get(PROJECT)
+    expect(spine!.actors.find((a) => a.id === "A91")).toMatchObject({ name: "Reviewer", description: "Checks requests." })
+    expect(store.translations.get(`${PROJECT}|vi|${hashSource("Reviewer")}`)).toMatchObject({ text: "Người duyệt", origin: "author" })
+    expect(store.translations.get(`${PROJECT}|vi|${hashSource("Checks requests.")}`)).toMatchObject({ text: "Kiểm tra yêu cầu.", origin: "author" })
   })
 
   it("resume sau regenerate vẫn revert đúng (F3: resume dùng first_seq/last_seq đã được cập nhật)", async () => {

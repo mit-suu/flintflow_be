@@ -61,6 +61,29 @@ export const translateSchema = z.object({
 
 export type TranslateOutput = z.infer<typeof translateSchema>
 
+/** Một mục của lô dịch: `text` chuỗi hoặc mảng chuỗi. Chữ rỗng / độ dài mảng do service kiểm (`fitTranslation`). */
+const translateDocumentItemSchema = z.object({
+  key: z.string().min(1),
+  text: z.union([z.string(), z.array(z.string())])
+})
+
+/**
+ * FLF-265: một lô đơn vị dịch. `text` cùng kiểu với nguồn (mảng chuỗi giữ nguyên độ dài). `items` phải là mảng (không
+ * thì cả lô hỏng); mục sai khuôn (key rỗng, `text` null / số / object) ⇒ bỏ đúng mục đó như `localized` — một đơn vị
+ * "độc" không được làm hỏng cả lô, nếu không lô đó đứng đầu mãi và kẹt mọi đơn vị cùng lô. Key lạ / chữ rỗng / mảng
+ * khác độ dài do service kiểm theo lô đã gửi (`acceptBatchItems`).
+ */
+export const translateDocumentSchema = z.object({
+  items: z.array(z.unknown()).transform((items) =>
+    items.flatMap((item) => {
+      const parsed = translateDocumentItemSchema.safeParse(item)
+      return parsed.success ? [parsed.data] : []
+    })
+  )
+})
+
+export type TranslateDocumentOutput = z.infer<typeof translateDocumentSchema>
+
 // ─── Pipeline (T03): hợp đồng đầu ra cho T08/T11 ───────────────────
 // Model chỉ phát op; code áp op (Phases §2.1). Parse/validate thất bại thì
 // throw — không bao giờ ghi raw text vào Spine.
@@ -73,10 +96,35 @@ export const opSchema = z.object({
   reason: z.string().optional()
 })
 
+/**
+ * FLF-265 D16: một mục `localized` — chữ theo ngôn ngữ tài liệu của dự án cho op cùng `path` (khối "## Document
+ * language" của `buildPrompt`). Cạnh `ops`, KHÔNG trong op (`opSchema` theo `op.types.ts` đóng băng).
+ */
+export const localizedEntrySchema = z.object({ path: z.string().min(1), value: z.unknown() })
+
+export type LocalizedEntry = z.infer<typeof localizedEntrySchema>
+
+/**
+ * `localized` tuỳ chọn và không bao giờ làm hỏng lượt ghi Spine: không phải mảng ⇒ coi như không có; mục sai khuôn ⇒ bỏ
+ * đúng mục đó. Ghép với op và kiểm hình dạng `value` là việc của `captureLocalized`.
+ */
+const localizedField = z
+  .unknown()
+  .transform((value): LocalizedEntry[] | undefined =>
+    Array.isArray(value)
+      ? value.flatMap((entry) => {
+          const parsed = localizedEntrySchema.safeParse(entry)
+          return parsed.success ? [parsed.data] : []
+        })
+      : undefined
+  )
+  .optional()
+
 export const opTransactionSchema = z.object({
   txn: z.string().optional(),
   ops: z.array(opSchema),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  localized: localizedField
 })
 
 /**
@@ -113,7 +161,8 @@ export const elicitSchema = elicitBaseSchema.extend({
 
 /** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
 export const discoveryStepSchema = elicitBaseSchema.extend({
-  ops: z.array(opSchema).optional()
+  ops: z.array(opSchema).optional(),
+  localized: localizedField
 })
 
 export const reviewFlagSchema = z.object({
@@ -133,7 +182,8 @@ export const changeInstructionSchema = z
     clarification_needed: z.string().optional(),
     txn: z.string().optional(),
     ops: z.array(opSchema).optional(),
-    notes: z.string().optional()
+    notes: z.string().optional(),
+    localized: localizedField
   })
   .refine((v) => Boolean(v.clarification_needed) || (v.ops?.length ?? 0) > 0, {
     message: "Cần clarification_needed hoặc ít nhất một op"
@@ -312,6 +362,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CHAT]: chatSchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
   [ActionType.TRANSLATE]: translateSchema,
+  [ActionType.TRANSLATE_DOCUMENT]: translateDocumentSchema,
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
