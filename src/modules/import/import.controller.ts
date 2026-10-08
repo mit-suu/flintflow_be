@@ -7,7 +7,7 @@ import type { NextFunction, Request, Response } from "express"
 import multer from "multer"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { IMPORT_MAX_FILE_BYTES } from "./import.constants.js"
+import { IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILE_MB, fileTooLargeMessage } from "./import.constants.js"
 import {
   IMPORT_FILE_FIELD,
   confirmLatestRequestSchema,
@@ -32,13 +32,17 @@ import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
 
 /**
  * Multer giữ file trong bộ nhớ. Giới hạn cứng gấp đôi giới hạn nghiệp vụ: file hơi quá cỡ vẫn tới preflight để
- * trả `FILE_TOO_LARGE` có bản ghi; file quá lớn hẳn bị chặn ở đây (413 `FILE_TOO_LARGE` qua error handler chung).
+ * trả `FILE_TOO_LARGE` có bản ghi; file quá lớn hẳn bị chặn ở đây (413 `FILE_TOO_LARGE`, câu nêu giới hạn
+ * `IMPORT_MAX_FILE_MB` — không phải giới hạn gấp đôi này, `meta.max_mb` cho FE dịch).
  */
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_MAX_FILE_BYTES * 2, files: 1 } })
 
 export const receiveDocx = (req: Request, res: Response, next: NextFunction): void => {
   upload.single(IMPORT_FILE_FIELD)(req, res, (err: unknown) => {
-    // Lỗi multer (quá cỡ, sai field…) ⇒ error handler chung trả câu thường (FILE_TOO_LARGE / UPLOAD_FAILED) — FLF-247
+    // Quá cỡ ⇒ câu riêng của import (giới hạn MB + cách nén ảnh); lỗi multer khác ⇒ error handler chung (UPLOAD_FAILED) — FLF-247
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      return next(new ApiError(413, fileTooLargeMessage(), "FILE_TOO_LARGE", { max_mb: IMPORT_MAX_FILE_MB }))
+    }
     if (err) return next(err)
     next()
   })

@@ -7,7 +7,7 @@
 
 import { DocxPackage, MAIN_PART, OoxmlError, enclosingParagraph, listComments, listRevisions, readBlocks, readStamp, commentParagraph } from "../docx-ooxml/index.js"
 import type { OoxmlBlock, Stamp } from "../docx-ooxml/index.js"
-import { CR_AUTHOR_PATTERN, IMPORT_MAX_FILE_BYTES } from "./import.constants.js"
+import { CR_AUTHOR_PATTERN, IMPORT_MAX_FILE_BYTES, fileTooLargeMessage } from "./import.constants.js"
 import type { PreflightIssue } from "./imported-document.model.js"
 
 export interface PreflightResult {
@@ -42,7 +42,7 @@ const REVISION_LABEL: Record<string, string> = {
 
 export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = {}): Promise<PreflightResult> => {
   const maxBytes = opts.maxBytes ?? IMPORT_MAX_FILE_BYTES
-  if (data.length > maxBytes) return reject("FILE_TOO_LARGE", `File ${data.length} byte vượt giới hạn ${maxBytes} byte`)
+  if (data.length > maxBytes) return reject("FILE_TOO_LARGE", fileTooLargeMessage(data.length))
   const magic = data.subarray(0, 4).toString("hex")
   if (magic === OLE_MAGIC) {
     if (data.includes(utf16("EncryptionInfo")) || data.includes(utf16("EncryptedPackage"))) {
@@ -59,7 +59,7 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
   try {
     pkg = await DocxPackage.load(data)
   } catch (err) {
-    if (err instanceof OoxmlError && err.code === "PACKAGE_TOO_LARGE") return reject("FILE_TOO_LARGE", "File giải nén quá lớn")
+    if (err instanceof OoxmlError && err.code === "PACKAGE_TOO_LARGE") return reject("FILE_TOO_LARGE", "Nội dung file sau giải nén quá lớn. Hãy nén ảnh trong Word (File → Compress Pictures) hoặc tách phụ lục rồi tải lại.")
     return reject("CORRUPT_ZIP", "File .docx bị hỏng, không mở được")
   }
   if (!pkg.has(MAIN_PART)) return reject("NOT_DOCX", "File zip không phải tài liệu Word (thiếu word/document.xml)")

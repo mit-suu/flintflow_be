@@ -190,7 +190,7 @@ export const extractionSectionSchema = z.object({
 
 // ─── request ─────────────────────────────────────────────────────
 
-/** `POST /projects/:id/import` — multipart, field `file` (.docx ≤ 10MB). Không có body JSON. */
+/** `POST /projects/:id/import` — multipart, field `file` (.docx ≤ 40MB). Không có body JSON. */
 export const IMPORT_FILE_FIELD = "file"
 
 /** `POST /projects/:id/import/confirm-latest` (nút 1.3). */
