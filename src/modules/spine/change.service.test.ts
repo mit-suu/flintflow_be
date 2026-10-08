@@ -64,6 +64,8 @@ const db = vi.hoisted(() => {
 
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
+// FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
+vi.mock("../translation/translation.repository.js", async () => (await import("../translation/__tests__/translation-store.js")).fakeRepository)
 
 import { spineSchema } from "./spine.schema.js"
 import type { Spine } from "./spine.types.js"
@@ -84,6 +86,8 @@ import {
 } from "./change.service.js"
 import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
+import { fakeRepository, resetStore, store } from "../translation/__tests__/translation-store.js"
+import { hashSource } from "../translation/translation-units.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -711,5 +715,75 @@ describe("isChangeInstruction — nhận lệnh sửa trong chat thường", () 
     "Mình muốn hỏi: create user ở đâu"
   ])("FLF-260: câu hỏi tiếng Việt nhắc tên phần tử tiếng Anh ⇒ vẫn là chat, không tốn lượt sửa: %s", (message) => {
     expect(isChangeInstruction(message)).toBe(false)
+  })
+})
+
+// ─── FLF-265 D16: lượt sửa qua chat trả kèm bản ngôn ngữ tài liệu ─────
+
+describe("instruction ở dự án có ngôn ngữ tài liệu khác ngôn ngữ gốc (FLF-265 D16)", () => {
+  const VI = { locale: "vi" as const, source: "en" as const, glossary: [{ term: "Founder", translation: "Nhà sáng lập" }] }
+  const rename = { op: "set" as const, path: "actors[id=A01].name", value: "Product Owner" }
+  const localized = [{ path: "actors[id=A01].name", value: "Chủ sản phẩm" }]
+  const authorRow = () => store.translations.get(`${PROJECT}|vi|${hashSource("Product Owner")}`)
+
+  beforeEach(() => {
+    resetStore()
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  it("preview mang documentLanguage vào lượt gọi; preview → apply mang localized theo preview_id; Spine vẫn tiếng Anh + bản author", async () => {
+    await seed()
+    deps.documentLanguage = vi.fn(async () => VI)
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [rename], localized }))
+    const instruction = "Đổi tên Founder thành Chủ sản phẩm"
+
+    const planned = await preview(PROJECT, USER, { base_version: 1, instruction }, {}, deps)
+    expect(planned.ok).toBe(true)
+    expect(planned).not.toHaveProperty("localized")
+    const input = vi.mocked(deps.changeExecutor).mock.calls[0][1]
+    expect(input).toMatchObject({ documentLanguage: "vi", sourceLanguage: "en", documentGlossary: VI.glossary })
+    // Xem trước không ghi gì — kể cả bản dịch
+    expect(store.translations.size).toBe(0)
+
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction, preview_id: planned.preview_id }, {}, deps)
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+    expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
+    expect(authorRow()).toMatchObject({ text: "Chủ sản phẩm", origin: "author", sourceLocale: "en" })
+  })
+
+  it("apply thẳng bằng instruction (không preview) cũng lưu bản author", async () => {
+    await seed()
+    deps.documentLanguage = vi.fn(async () => VI)
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [rename], localized }))
+    await apply(PROJECT, USER, { base_version: 1, instruction: "Rename Founder to Product Owner" }, {}, deps)
+    expect(authorRow()).toMatchObject({ text: "Chủ sản phẩm", origin: "author" })
+  })
+
+  it("dự án en (null) ⇒ lượt gọi không có field ngôn ngữ tài liệu, localized model tự trả cũng không được lưu", async () => {
+    await seed()
+    deps.documentLanguage = vi.fn(async () => null)
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [rename], localized }))
+    const planned = await preview(PROJECT, USER, { base_version: 1, instruction: "Rename Founder to Product Owner" }, {}, deps)
+    expect(vi.mocked(deps.changeExecutor).mock.calls[0][1]).not.toHaveProperty("documentLanguage")
+    await apply(PROJECT, USER, { base_version: 1, preview_id: planned.preview_id }, {}, deps)
+    expect(store.translations.size).toBe(0)
+  })
+
+  it("không truyền deps.documentLanguage (unit test không nối DB) ⇒ không kèm khối, như cũ", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [rename] }))
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Rename Founder to Product Owner" }, {}, deps)
+    expect(vi.mocked(deps.changeExecutor).mock.calls[0][1]).not.toHaveProperty("documentLanguage")
+  })
+
+  it("lưu bản dịch lỗi ⇒ lượt ghi Spine vẫn thành công", async () => {
+    await seed()
+    deps.documentLanguage = vi.fn(async () => VI)
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [rename], localized }))
+    fakeRepository.saveTranslations.mockRejectedValueOnce(new Error("mongo down"))
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Rename Founder to Product Owner" }, {}, deps)
+    expect(applied.txn).not.toBeNull()
+    expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
+    expect(store.translations.size).toBe(0)
   })
 })

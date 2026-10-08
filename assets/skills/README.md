@@ -65,7 +65,7 @@ ActionType → skill hành động: `SKILL_BY_ACTION_TYPE` trong `src/shared/ai/
 ## Quy tắc viết
 
 - `reads`/`writes` viết dạng **block list** (`- actors[]`). Flow list `[actors[], roles[]]` là YAML sai vì `[`/`]` trong giá trị.
-- Nội dung render vào SRS: **tiếng Anh**. Hội thoại, `flags[].message`, `changes[].reason`: theo user (Phases §1.3).
+- Nội dung render vào SRS: **tiếng Anh**. Hội thoại, `flags[].message`, `changes[].reason`: theo user (Phases §1.3). Prompt có khối `## Document language` (FLF-265, dự án có ngôn ngữ tài liệu khác tiếng Anh) ⇒ thêm `localized` theo khối đó; `ops` vẫn tiếng Anh.
 - Model chỉ phát op; không bao giờ sinh lại cả section.
 - Không nhắc số hiệu section (`3.4`) trong văn xuôi — dùng khoá logic (`feature:F2`).
 - Placeholder `{{name}}` được `interpolatePrompt` thay lúc chạy.

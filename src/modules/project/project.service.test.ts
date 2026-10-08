@@ -32,6 +32,10 @@ const mocks = vi.hoisted(() => {
     CrCounter: { deleteMany: deleteMany() },
     ChangeLocation: { deleteMany: deleteMany() },
     ChangeGroup: { deleteMany: deleteMany() },
+    // FLF-265: lớp bản dịch
+    SpineTranslation: { deleteMany: deleteMany() },
+    TranslationGlossary: { deleteMany: deleteMany() },
+    TranslationRunLock: { deleteMany: deleteMany() },
     destroyDocumentAsset: vi.fn(async () => true),
     // FLF-265: ngôn ngữ tài khoản — null = chưa chọn
     accountLocaleOf: vi.fn(async (_userId: string): Promise<"vi" | "en" | null> => null)
@@ -60,6 +64,9 @@ vi.mock("../doc-version/doc-file.store.js", () => ({ docFileStore: () => ({ remo
 vi.mock("../change-request/change-request.model.js", () => ({ ChangeRequest: mocks.ChangeRequest, CrCounter: mocks.CrCounter }))
 vi.mock("../change-request/change-location.model.js", () => ({ ChangeLocation: mocks.ChangeLocation }))
 vi.mock("../change-request/change-group.model.js", () => ({ ChangeGroup: mocks.ChangeGroup }))
+vi.mock("../translation/spine-translation.model.js", () => ({ SpineTranslation: mocks.SpineTranslation }))
+vi.mock("../translation/translation-glossary.model.js", () => ({ TranslationGlossary: mocks.TranslationGlossary }))
+vi.mock("../translation/translation-run-lock.model.js", () => ({ TranslationRunLock: mocks.TranslationRunLock }))
 vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: () => ({ select: () => ({ lean: mocks.subscriptionPlan }) }) } }))
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
@@ -86,6 +93,10 @@ describe("deleteProject", () => {
     }
     // Mode 1: mọi collection + file .docx trong GridFS
     for (const model of [mocks.ImportedDocument, mocks.DocBlock, mocks.TemplateProfile, mocks.ExtractionDraft, mocks.FieldAnchor, mocks.ReuploadDiff, mocks.DocVersion, mocks.ChangeRequest, mocks.CrCounter, mocks.ChangeLocation, mocks.ChangeGroup]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
+    }
+    // FLF-265: bản dịch + glossary dịch + khoá lượt dịch
+    for (const model of [mocks.SpineTranslation, mocks.TranslationGlossary, mocks.TranslationRunLock]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
     }
     expect(mocks.removeDocFiles).toHaveBeenCalledWith(PROJECT)

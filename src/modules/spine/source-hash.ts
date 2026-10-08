@@ -80,8 +80,8 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
   }
 }
 
-/** JSON với key sắp xếp — hash không phụ thuộc thứ tự key. */
-const stableStringify = (value: unknown): string => {
+/** JSON với key sắp xếp — hash không phụ thuộc thứ tự key. Lớp bản dịch (FLF-265) cũng băm chữ gốc bằng hàm này. */
+export const stableStringify = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`
   if (typeof value === "object" && value !== null) {
     const entries = Object.entries(value)
