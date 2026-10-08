@@ -7,6 +7,10 @@ import {
   STEP_EVENT_TYPES,
   changesRequestSchema,
   gateRequestSchema,
+  questionSchema,
+  runPhaseRequestSchema,
+  runStepRequestSchema,
+  stepAnswerRequestSchema,
   stepEventSchema,
   waiveRequestSchema
 } from "./pipeline.dto.js"
@@ -15,6 +19,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTRACT = fs.readFileSync(path.resolve(__dirname, "../../../docs/api/pipeline-contract.md"), "utf8")
 
 describe("pipeline.dto", () => {
+  it("FLF-221: /run và /phases/:phase/run nhận message + intent; answer nhận message thay cho answers", () => {
+    const base = { session_id: "s1", base_version: 3 }
+    for (const schema of [runStepRequestSchema, runPhaseRequestSchema]) {
+      expect(schema.safeParse({ ...base, message: "Ý tưởng" }).success).toBe(true)
+      expect(schema.safeParse({ ...base, intent: "no_idea" }).success).toBe(true)
+      expect(schema.safeParse({ ...base, message: "   " }).success).toBe(false)
+      expect(schema.safeParse({ ...base, intent: "maybe" }).success).toBe(false)
+    }
+    expect(stepAnswerRequestSchema.safeParse({ session_id: "s1", answers: [], message: "Mình muốn bản web trước" }).success).toBe(true)
+    expect(stepAnswerRequestSchema.safeParse({ session_id: "s1", answers: [] }).success).toBe(false)
+    expect(stepAnswerRequestSchema.safeParse({ session_id: "s1", answers: [{ question_id: "Q1", answer: "Web" }] }).success).toBe(true)
+  })
+
   it("changes: đúng một trong ops / instruction; không nhận op hệ thống", () => {
     const op = { op: "set", path: "actors[id=A01].name", value: "X" }
     expect(changesRequestSchema.safeParse({ base_version: 1, ops: [op] }).success).toBe(true)
@@ -35,14 +52,40 @@ describe("pipeline.dto", () => {
     expect(gateRequestSchema.safeParse({ action: "accept", base_version: 3 }).success).toBe(false)
   })
 
+  it("question: option object hoặc string cũ; header tối đa 12 ký tự", () => {
+    const base = { id: "Q1", text: "Uptime bao nhiêu?" }
+    const options = [{ label: "99.9% (Khuyến nghị)", description: "Chuẩn SaaS" }, { label: "99%", preview: "a\nb" }]
+    expect(questionSchema.safeParse({ ...base, header: "Uptime", options }).success).toBe(true)
+    expect(questionSchema.safeParse({ ...base, options: ["99%", "99.9%"] }).success).toBe(true)
+    expect(questionSchema.safeParse(base).success).toBe(true)
+    expect(questionSchema.safeParse({ ...base, header: "Quá dài để làm tab" }).success).toBe(false)
+    expect(questionSchema.safeParse({ ...base, options: [{ description: "thiếu label" }] }).success).toBe(false)
+  })
+
   it("waive: lý do ≥ 20 ký tự", () => {
     expect(waiveRequestSchema.safeParse({ reason: "quá ngắn" }).success).toBe(false)
     expect(waiveRequestSchema.safeParse({ reason: "Khách hàng chấp nhận rủi ro này" }).success).toBe(true)
   })
 
-  it("SSE: đủ 9 loại sự kiện, parse theo discriminator", () => {
-    expect(STEP_EVENT_TYPES).toHaveLength(9)
-    expect(stepEventSchema.safeParse({ type: "gate_ready", step_id: "S-3.1", actions: ["accept"], regenerate_used: 0, calls_used: 2 }).success).toBe(true)
+  it("SSE: đủ 16 loại sự kiện, parse theo discriminator", () => {
+    // 9 sự kiện gốc + 7 sự kiện FLF-198 (stage, heartbeat, answer_received, draft_retry, auto_accepted,
+    // phase_progress, phase_gate)
+    expect(STEP_EVENT_TYPES).toHaveLength(16)
+    expect(stepEventSchema.safeParse({ type: "stage", step_id: "S-5.4@S03", stage: "draft", label_vi: "AI đang soạn nội dung", batch: { i: 1, n: 2 } }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "heartbeat", step_id: "S-5.4@S03", stage: "draft", elapsed_ms: 12000 }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "answer_received", step_id: "S-3.1", count: 3 }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "draft_retry", step_id: "S-3.1", attempt: 2, max: 3, reason_vi: "kết quả thiếu trường" }).success).toBe(true)
+    expect(stepEventSchema.safeParse({ type: "stage", step_id: "S-3.1", stage: "unknown", label_vi: "x" }).success).toBe(false)
+    const gateReady = { type: "gate_ready", step_id: "S-3.1", actions: ["accept"], regenerate_used: 0, calls_used: 2, spine_version: 7, wrote_ops: true, empty_sections: [] }
+    expect(stepEventSchema.safeParse(gateReady).success).toBe(true)
+    expect(
+      stepEventSchema.safeParse({ ...gateReady, wrote_ops: false, empty_sections: [{ section_id: "fixed:5.2", title: "Common Requirements" }] }).success
+    ).toBe(true)
+    // L11/L11b: ba field này bắt buộc — thiếu là FE mất đường biết version cuối và lô op rỗng
+    for (const missing of ["spine_version", "wrote_ops", "empty_sections"] as const) {
+      const { [missing]: _omitted, ...without } = gateReady
+      expect(stepEventSchema.safeParse(without).success, missing).toBe(false)
+    }
     expect(stepEventSchema.safeParse({ type: "error", step_id: "S-3.1", code: "CALL_LIMIT", message: "x", retryable: false }).success).toBe(true)
     expect(stepEventSchema.safeParse({ type: "unknown", step_id: "S-3.1" }).success).toBe(false)
   })

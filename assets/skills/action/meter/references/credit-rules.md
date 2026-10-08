@@ -18,7 +18,7 @@
 
 Legacy (removed at T21): `generate_section` 5 · `priority_ranking` 5 · `scope_out_of_scope` 5 · `chat_discovery` 2 · `diagram_classify` 1 · `diagram_generate` 4.
 
-## Worked example — Coaching S-3.2
+## Worked example — S-3.2
 
 | Call | Kind | Credits | State |
 | --- | --- | ---: | --- |

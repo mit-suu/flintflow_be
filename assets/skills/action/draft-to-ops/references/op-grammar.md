@@ -45,7 +45,7 @@ nfrs[]             { id, category: interface|usability|reliability|performance|o
 business_rules[]   { id, tier: high|detail, statement, source_validation_ids[] }
 common_requirements[] { id, category, statement }
 messages[]         { id, code, text, function_ids[] }
-other_requirements[]  { id, kind: risk|assumption|open_question|technical_risk, statement }
+other_requirements[]  { id, kind: risk|assumption|open_question|technical_risk, statement, statement_vi? (user language) }
 glossary[]         { id, term, term_native?, definition }
 addendum[]         { id, topic, content, content_en, target_section, captured_at }
 assumptions[]      { id, path, statement, rationale, origin_step_id, status, confirmed_at }

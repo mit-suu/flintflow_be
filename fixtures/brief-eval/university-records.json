@@ -1,0 +1,5 @@
+{
+  "id": "university-records",
+  "idea": "Tôi muốn làm một hệ thống web quản lý hồ sơ sinh viên cho một trường đại học có nhiều cơ sở ở các tỉnh khác nhau. Hiện mỗi cơ sở tự giữ nhiều file Excel rời rạc nên phòng đào tạo không tổng hợp được điểm và học phí của toàn trường. Người dùng là nhân viên phòng đào tạo, giáo vụ từng cơ sở và ban giám hiệu.",
+  "note": "User nêu rõ \"hệ thống web\" ⇒ thẻ Nền tảng bị bỏ và ngã rẽ nền tảng không được nêu. Cụm \"nhiều file Excel\" là mồi cho chỉ số unsourced_quantifiers (lượt chạy thật: AI trả lời \"Ba file Excel\")."
+}

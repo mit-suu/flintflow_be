@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { describe, it, expect } from "vitest"
 import {
+  actorSchema,
   baselineSchema,
   baselineSnapshotSchema,
   changeSchema,
@@ -147,6 +148,26 @@ const sampleSpine = (): Spine => {
   return s
 }
 
+describe.each([
+  ["thiếu cả hai chiều", undefined, undefined],
+  ["chỉ chiều vào", ["payment result"], undefined],
+  ["cả hai chiều", ["payment result"], ["payment request"]]
+])("actorSchema — flows: %s", (_label, flowsIn, flowsOut) => {
+  it("parse được, giữ nguyên giá trị", () => {
+    const actor = {
+      id: "A01",
+      name: "Payment Gateway",
+      kind: "system" as const,
+      description: "",
+      ...(flowsIn ? { flows_in: flowsIn } : {}),
+      ...(flowsOut ? { flows_out: flowsOut } : {})
+    }
+    const parsed = actorSchema.parse(actor)
+    expect(parsed.flows_in).toEqual(flowsIn)
+    expect(parsed.flows_out).toEqual(flowsOut)
+  })
+})
+
 describe("spineSchema", () => {
   it("Spine rỗng hợp lệ", () => {
     const result = spineSchema.safeParse(createEmptySpine())
@@ -196,6 +217,97 @@ describe("spineSchema", () => {
     const s = sampleSpine()
     s.steps[0].accepted_at = "hôm qua"
     expect(spineSchema.safeParse(s).success).toBe(false)
+  })
+})
+
+describe("project.system_name (FLF-177)", () => {
+  it("Spine cũ không có system_name ⇒ đọc ra null; có tên ⇒ giữ nguyên", () => {
+    const legacy = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete legacy.project.system_name
+    expect(spineSchema.parse(legacy).project.system_name).toBeNull()
+
+    const named = createEmptySpine({ name: "Old" })
+    named.project.system_name = "ShipFast"
+    expect(spineSchema.parse(named).project.system_name).toBe("ShipFast")
+  })
+
+  it("snapshot baseline cũ thiếu system_name vẫn parse được", () => {
+    const snapshot = createEmptySpine({ name: "Old" }) as unknown as { project: Record<string, unknown> }
+    delete snapshot.project.system_name
+    const parsed = baselineSnapshotSchema.parse({ projectId: "650000000000000000000001", version: "v1.0", at: AT, checked_at_version: 1, waived_count: 0, snapshot })
+    expect(parsed.snapshot.project.system_name).toBeNull()
+  })
+})
+
+describe("project.form_factor là mảng nền tảng (FLF-237)", () => {
+  it("Spine cũ lưu chuỗi ⇒ đọc thành mảng một phần tử; null ⇒ []; mảng giữ nguyên thứ tự", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    const asString = { ...legacy, project: { ...legacy.project, form_factor: "web_app" } }
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(asString))).project.form_factor).toEqual(["web_app"])
+    const asNull = { ...legacy, project: { ...legacy.project, form_factor: null } }
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(asNull))).project.form_factor).toEqual([])
+    legacy.project.form_factor = ["web_app", "mobile_app"]
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(legacy))).project.form_factor).toEqual(["web_app", "mobile_app"])
+    expect(createEmptySpine({ name: "New" }).project.form_factor).toEqual([])
+  })
+})
+
+describe("other_requirements[].statement_vi (FLF-237)", () => {
+  it("dữ liệu cũ không có statement_vi vẫn hợp lệ; có thì giữ nguyên", () => {
+    const spine = createEmptySpine({ name: "OR" })
+    spine.other_requirements = [
+      { id: "OR01", kind: "risk", statement: "Payment gateway may be down." },
+      { id: "OR02", kind: "open_question", statement: "Who suspends accounts?", statement_vi: "Ai khoá tài khoản?" }
+    ]
+    const parsed = spineSchema.parse(JSON.parse(JSON.stringify(spine)))
+    expect(parsed.other_requirements[0].statement_vi).toBeUndefined()
+    expect(parsed.other_requirements[1].statement_vi).toBe("Ai khoá tài khoản?")
+  })
+})
+
+describe("assumptions[].statement_vi (FLF-221)", () => {
+  const assumption = {
+    id: "AS1",
+    path: "project.stakes",
+    statement: "Internal tool only",
+    rationale: "User said it is for the team",
+    origin_step_id: "B-0.1",
+    status: "unconfirmed" as const,
+    confirmed_at: null
+  }
+
+  it("Spine cũ không có statement_vi vẫn hợp lệ; có thì giữ nguyên qua round-trip", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    legacy.assumptions = [assumption]
+    expect(spineSchema.parse(legacy).assumptions[0].statement_vi).toBeUndefined()
+
+    const bilingual = createEmptySpine({ name: "New" })
+    bilingual.assumptions = [{ ...assumption, statement_vi: "Chỉ dùng nội bộ" }]
+    const parsed = spineSchema.parse(JSON.parse(JSON.stringify(bilingual)))
+    expect(parsed.assumptions[0]).toMatchObject({ statement: "Internal tool only", statement_vi: "Chỉ dùng nội bộ" })
+  })
+
+  it("statement_vi rỗng bị từ chối", () => {
+    const spine = createEmptySpine({ name: "X" })
+    spine.assumptions = [{ ...assumption, statement_vi: "" }]
+    expect(spineSchema.safeParse(spine).success).toBe(false)
+  })
+
+  it("rationale_vi: Spine cũ không có vẫn hợp lệ; có thì giữ nguyên; rỗng bị từ chối", () => {
+    const legacy = createEmptySpine({ name: "Old" })
+    legacy.assumptions = [assumption]
+    expect(spineSchema.parse(legacy).assumptions[0].rationale_vi).toBeUndefined()
+
+    const bilingual = createEmptySpine({ name: "New" })
+    bilingual.assumptions = [{ ...assumption, rationale_vi: "User nói công cụ dành cho nhóm" }]
+    expect(spineSchema.parse(JSON.parse(JSON.stringify(bilingual))).assumptions[0]).toMatchObject({
+      rationale: "User said it is for the team",
+      rationale_vi: "User nói công cụ dành cho nhóm"
+    })
+
+    const empty = createEmptySpine({ name: "X" })
+    empty.assumptions = [{ ...assumption, rationale_vi: "" }]
+    expect(spineSchema.safeParse(empty).success).toBe(false)
   })
 })
 

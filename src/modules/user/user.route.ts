@@ -16,7 +16,7 @@ const router = Router()
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: User profile fetched successfully
+ *         description: User profile fetched successfully. `locale` là `vi` | `en`, hoặc `null` khi tài khoản chưa chọn ngôn ngữ.
  *       401:
  *         description: Unauthorized
  */
@@ -26,7 +26,7 @@ router.get("/me", authMiddleware, userController.getMe)
  * @swagger
  * /api/v1/users/me:
  *   patch:
- *     summary: Cập nhật tên hiển thị / mốc onboarding của user hiện tại (UC 1.12)
+ *     summary: Cập nhật tên hiển thị / mốc onboarding (UC 1.12) / ngôn ngữ giao diện (FLF-259) của user hiện tại
  *     tags:
  *       - Users
  *     security:
@@ -44,6 +44,9 @@ router.get("/me", authMiddleware, userController.getMe)
  *                 type: string
  *                 format: date-time
  *                 nullable: true
+ *               locale:
+ *                 type: string
+ *                 enum: [vi, en]
  *     responses:
  *       200:
  *         description: User profile sau khi cập nhật

@@ -1,0 +1,5 @@
+{
+  "id": "ngo-donation",
+  "idea": "Một tổ chức từ thiện muốn trang quyên góp trực tuyến: người ủng hộ chọn chương trình, chuyển tiền, nhận thư cảm ơn. Tổ chức lưu tên, số điện thoại, email người ủng hộ để báo cáo minh bạch khoản chi.",
+  "note": "Ca biên giữa production và regulated: có người dùng thật và dữ liệu cá nhân nhưng không phải ngành bị quản chặt. Giá trị nào cũng chấp nhận được, nhưng nó phải ổn định giữa các lần chạy và phải có giả định kèm theo."
+}

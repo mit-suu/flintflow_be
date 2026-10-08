@@ -28,8 +28,8 @@ describe("section registry", () => {
   })
 
   it("bảng field → section có đúng 34 dòng như srs-spine.md §4, key không trùng", () => {
-    expect(FIELD_SECTION_MAP).toHaveLength(34)
-    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(34)
+    expect(FIELD_SECTION_MAP).toHaveLength(35)
+    expect(new Set(FIELD_SECTION_MAP.map((r) => r.key)).size).toBe(35)
   })
 
   it("listSections trên fixture: 20 cố định + 6 feature + 89 function, feature/function nằm giữa 3.1.5 và 4.1", () => {
@@ -98,5 +98,13 @@ describe("sectionsOfPath", () => {
       expect(sectionsOfPath(FIXTURE, p), p).toEqual({ owner: [], reads: [], derived: [] })
     }
     expect(sectionsOfPath(FIXTURE, "$").owner).toHaveLength(115)
+  })
+})
+
+describe("project.system_name (FLF-177)", () => {
+  it("sở hữu fixed:1, suy dẫn hai sơ đồ có boundary tên hệ thống", () => {
+    const impact = sectionsOfPath(FIXTURE, "project.system_name")
+    expect(impact.owner).toEqual(["fixed:1"])
+    expect(impact.reads).toEqual([])
   })
 })

@@ -18,6 +18,7 @@
  *   --until STEP       dừng sau khi accept step này (mặc định chạy tới hết)
  *   --max-steps N      trần số step (mặc định 200) — chặn vòng lặp vô hạn
  *   --waive-blocking   waive cờ đỏ chặn baseline rồi ký `-conditional` (mặc định: dừng và báo cáo)
+ *   --no-brief         không gửi Brief MediQueue — project đã có brief trong Spine (vd. nạp sẵn bởi eval-usecase-s3)
  *   --out FILE         file báo cáo markdown (mặc định test/e2e-ai/results/full-pipeline-<ISO>.md)
  *
  * Script **không** tự nạp credit và **không** đụng vào Spine bằng đường nào khác ngoài API công khai.
@@ -66,6 +67,7 @@ interface Args {
   until: string | null
   maxSteps: number
   waiveBlocking: boolean
+  noBrief: boolean
   out: string
 }
 
@@ -81,6 +83,7 @@ const parseArgs = (): Args => {
     until: null,
     maxSteps: 200,
     waiveBlocking: false,
+    noBrief: false,
     out: path.join(REPO_ROOT, "test/e2e-ai/results", `full-pipeline-${stamp}.md`)
   }
   for (let i = 0; i < argv.length; i++) {
@@ -106,6 +109,9 @@ const parseArgs = (): Args => {
         break
       case "--max-steps":
         args.maxSteps = Number(next())
+        break
+      case "--no-brief":
+        args.noBrief = true
         break
       case "--waive-blocking":
         args.waiveBlocking = true
@@ -192,11 +198,15 @@ const log = (line: string): void => {
 interface Question {
   id: string
   text: string
-  options?: string[]
+  /** Chuỗi trơn ở run-state cũ; object `{label, description?, preview?}` từ FLF-220. */
+  options?: Array<string | { label: string }>
   multiple?: boolean
 }
 
-let briefSent = false
+const labelOf = (option: string | { label: string }): string =>
+  (typeof option === "string" ? option : option.label).replace(/\s*\((khuyến nghị|recommended)\)\s*$/i, "").trim()
+
+let briefSent = ARGS.noBrief
 
 /**
  * Câu hỏi đầu tiên của cả lượt chạy nhận trọn Brief; từ đó trở đi Brief đã nằm trong Spine
@@ -205,16 +215,15 @@ let briefSent = false
  */
 const answerFor = (q: Question): string | string[] => {
   if (q.options?.length) {
-    // Ưu tiên chế độ nhanh khi được hỏi (B-0.4 Working Mode) để một lượt chạy trọn không vượt ví.
-    const fast = q.options.find((o) => /fast|nhanh|quick/i.test(o))
-    const pick = fast ?? (q.options[0] as string)
+    // Phương án đầu là phương án khuyến nghị
+    const pick = labelOf(q.options[0])
     return q.multiple ? [pick] : pick
   }
   if (!briefSent) {
     briefSent = true
     return `${BRIEF}\n\n---\nAnswer the question above using these facts. If something is not covered, choose the most sensible option for this product, proceed, and record it as an assumption.`
   }
-  return "Use the project brief and the document produced so far as the source of truth. If this question is not covered there, choose the most sensible option for a Vietnamese multi-branch outpatient clinic product, proceed without further questions, and record the choice as an assumption."
+  return "Use the project brief and the document produced so far as the source of truth. If this question is not covered there, choose the most sensible option for this product, proceed without further questions, and record the choice as an assumption."
 }
 
 // ─── Chạy một step (SSE) ────────────────────────────────────────────

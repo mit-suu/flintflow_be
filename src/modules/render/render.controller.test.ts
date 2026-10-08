@@ -17,6 +17,19 @@ import { writeDocx } from "./docx-writer.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
+
 const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
 
@@ -31,7 +44,7 @@ interface Outcome {
 const invoke = (handler: RequestHandler, userId: string | undefined, projectId: string, query: Record<string, unknown> = {}, body: unknown = {}) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = { headers: {} }
-    const req = { user: userId ? { userId } : undefined, params: { projectId }, query, body } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId }, query, body } as unknown as Request
     const res = {
       status(code: number) {
         outcome.status = code
@@ -67,8 +80,8 @@ beforeEach(() => {
   vi.mocked(getDraftMeta).mockResolvedValue(null)
   vi.mocked(writeDocx).mockReset()
 
-  vi.mocked(getProjectById).mockImplementation(async (projectId, userId) => {
-    if (projectId !== PROJECT || userId !== OWNER) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  vi.mocked(getProjectById).mockImplementation(async (projectId, orgId) => {
+    if (projectId !== PROJECT || orgId !== ORG) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     return { name: "Demo", domain: null } as never
   })
 })
@@ -107,12 +120,19 @@ describe("GET /projects/:projectId/document", () => {
     expect(getDocument).toHaveBeenCalledWith(PROJECT, "Demo", { source: "draft" })
   })
 
-  it("409 NO_WORKING_DRAFT kèm meta.hint = S-8.2 khi chưa assemble", async () => {
+  it("FLF-177 BUG-31: chưa ghép bản nháp ⇒ 200 { state: not_assembled }, không phải lỗi 409", async () => {
     vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
     const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "draft" })
     expect(outcome.error).toBeUndefined()
+    expect(outcome.status).toBe(200)
+    expect(outcome.body).toMatchObject({ data: null, meta: { state: "not_assembled" } })
+  })
+
+  it("source=baseline chưa có bản dựng vẫn là lỗi thật 409 NO_WORKING_DRAFT", async () => {
+    vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
+    const outcome = await invoke(getDocumentController, OWNER, PROJECT, { source: "baseline" })
     expect(outcome.status).toBe(409)
-    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" }, meta: { hint: "S-8.2" } })
+    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" } })
   })
 
   it("404 BASELINE_NOT_FOUND đi qua error handler (không phải NoWorkingDraftError)", async () => {
@@ -172,12 +192,12 @@ describe("GET /projects/:projectId/export/word", () => {
     expect(outcome.headers?.["x-assembled-at-version"]).toBeUndefined()
   })
 
-  it("409 NO_WORKING_DRAFT kèm meta.hint = S-8.2 khi chưa assemble", async () => {
+  it("409 NO_WORKING_DRAFT khi project chưa có nội dung để dựng", async () => {
     vi.mocked(getDocument).mockRejectedValue(new NoWorkingDraftError())
     const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft" })
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(409)
-    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" }, meta: { hint: "S-8.2" } })
+    expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" } })
   })
 
   it("400 khi source query sai (không thuộc draft|baseline)", async () => {

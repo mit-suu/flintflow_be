@@ -22,7 +22,8 @@ export interface RenderVersionOptions {
 export const renderVersionFile = async (projectId: string, projectName: string, spine: Spine, opts: RenderVersionOptions): Promise<Buffer> => {
   // `baseline`: bản đã chốt của version — không in phụ lục cờ mở / watermark của bản làm việc
   const doc = await renderSpineDocument(projectId, projectName, spine, { version: opts.version, source: "baseline", pendingRecord: opts.pendingRecord })
-  const pkg = await DocxPackage.load(await writeDocx(doc))
+  // Version file chỉ có ở mode 1 ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt)
+  const pkg = await DocxPackage.load(await writeDocx(doc, { flagLanguage: "vi" }))
   await writeStamp(pkg, { project_id: projectId, version: opts.version, source: opts.stampSource })
   return pkg.toBuffer()
 }

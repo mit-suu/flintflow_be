@@ -68,7 +68,9 @@ const db = vi.hoisted(() => {
       for (const r of matched) Object.assign(r, copy(update.$set))
       return { modifiedCount: matched.length }
     },
-    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length
+    countDocuments: async (filter: Filter) => usages.filter((r) => matches(r, filter)).length,
+    // `meter.roundCost` (gate hiện "x credit") đọc thô các dòng usage của vòng
+    find: (filter: Filter) => ({ lean: async () => usages.filter((r) => matches(r, filter)).map((r) => ({ cost: r.cost })) })
   }
   const reset = () => {
     spines.length = 0
@@ -98,9 +100,10 @@ import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { orderedSteps } from "./step-registry.js"
 import type { StepRunnerDeps } from "./step-runner.service.js"
-import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
+import type { AiActionInput, AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
-import { gate, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
+import { gate, gateAssumptionIdsOf, phaseGateAssumptions, GateLimitError, REGENERATE_LIMIT, CALL_LIMIT } from "./gate.service.js"
+import { acquireRun, finishRun, resetMemoryRuns } from "./run-state.service.js"
 import { resumeProject } from "./resume.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { notify } from "../notification/notification.service.js"
@@ -197,6 +200,7 @@ const draftReply = (ops: OpTransaction["ops"]): AiActionResult<OpTransaction> =>
 
 beforeEach(() => {
   db.reset()
+  resetMemoryRuns()
   vi.mocked(notify).mockClear()
 })
 
@@ -251,6 +255,20 @@ describe("gate.service: regenerate — trần 3/step", () => {
     expect(afterSecond!.actors.map((a) => a.id)).toContain("A92")
     expect(afterSecond!.actors.map((a) => a.id)).toContain("A00") // actor gốc không đụng
     expect(second.step.regenerate_used).toBe(2)
+  })
+
+  it("FLF-260: replyLanguage do nơi gọi đọc từ phiên ⇒ lượt soạn lại mang nó", async () => {
+    seedSpine()
+    const version = await seedInProgressWithContent(STEP, "A90")
+    const inputs: AiActionInput[] = []
+    await gate(PROJECT, STEP, USER, { action: "regenerate", base_version: version }, {
+      replyLanguage: "en",
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        return draftReply([{ op: "add", path: "actors[]", value: { id: "A91", name: "Regenerated", kind: "human", description: "y" } }])
+      }
+    })
+    expect(inputs.map((i) => i.replyLanguage)).toEqual(["en"])
   })
 
   it("resume sau regenerate vẫn revert đúng (F3: resume dùng first_seq/last_seq đã được cập nhật)", async () => {
@@ -442,5 +460,388 @@ describe("gate.service: accept", () => {
     expect(result.step.status).toBe("accepted")
 
     expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "phase_accepted", meta: { phase: "S-2" } }))
+  })
+})
+
+describe("gate.service: revision sửa giả định (FLF-232)", () => {
+  const seedB03 = (): number => {
+    seedSpine()
+    const spine = db.spines[0] as Record<string, unknown> & { project: Record<string, unknown>; spine_version: number }
+    spine.progress = { ...(spine.progress as Record<string, unknown>), current_phase: "B-0", current_step: "B-0.3" }
+    spine.steps = [
+      { id: "B-0.1", status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" },
+      { id: "B-0.2", status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" },
+      { id: "B-0.3", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null }
+    ]
+    spine.project = { ...spine.project, form_factor: ["web_app"], stakes: "production" }
+    spine.assumptions = [
+      {
+        id: "AS01",
+        path: "project.form_factor",
+        statement: "The product is a web app.",
+        statement_vi: "Sản phẩm là ứng dụng web.",
+        rationale: "Staff use desktops.",
+        origin_step_id: "B-0.1",
+        status: "unconfirmed",
+        confirmed_at: null
+      }
+    ]
+    return spine.spine_version
+  }
+  const revisedOps: OpTransaction["ops"] = [
+    { op: "set", path: "project.form_factor", value: "mobile_app" },
+    { op: "set", path: "assumptions[id=AS01].statement", value: "The product is a mobile app." },
+    { op: "set", path: "assumptions[id=AS01].statement_vi", value: "Sản phẩm là ứng dụng điện thoại." },
+    { op: "set", path: "assumptions[id=AS01].status", value: "confirmed" }
+  ]
+  const withNotes = (ops: OpTransaction["ops"], notes?: string): AiActionResult<OpTransaction> => {
+    const reply = draftReply(ops)
+    return notes ? { ...reply, data: { ops, notes } } : reply
+  }
+
+  /**
+   * Dựng lượt chạy đang đứng ở cổng với đúng những điều tin cổng NÓI RA. Quyền đổi `status` của lượt revision lấy từ
+   * đây, nên test phải khai cổng đã nói gì; run-state rỗng nghĩa là cổng chưa nói điều nào và không điều nào chốt được.
+   */
+  const gateSaid = async (stepId: string, ids: readonly string[]): Promise<void> => {
+    const run = await acquireRun(PROJECT, stepId)
+    await finishRun(PROJECT, stepId, run.run_id, "gate", { gate_payload: { new_assumptions: ids.map((id) => ({ id, text: id })) } })
+  }
+
+  it("lời sửa đổi trường thật + câu giả định + status confirmed trong một lượt, và trả lời AI xác nhận (message_vi)", async () => {
+    const version = seedB03()
+    await gateSaid("B-0.3", ["AS01"])
+    const result = await gate(
+      PROJECT,
+      "B-0.3",
+      USER,
+      { action: "revision", note: "bệnh nhân dùng app điện thoại", base_version: version },
+      { draftExecutor: async () => withNotes(revisedOps, "Được rồi, tôi chuyển sang ứng dụng điện thoại cho bệnh nhân. Bạn xem lại giúp nhé.") }
+    )
+
+    expect(result.message_vi).toBe("Được rồi, tôi chuyển sang ứng dụng điện thoại cho bệnh nhân. Bạn xem lại giúp nhé.")
+    const spine = await repo.get(PROJECT)
+    expect(spine!.project.form_factor).toEqual(["mobile_app"])
+    const assumption = spine!.assumptions.find((a) => a.id === "AS01")!
+    expect(assumption).toMatchObject({ statement: "The product is a mobile app.", statement_vi: "Sản phẩm là ứng dụng điện thoại.", status: "confirmed" })
+    // confirmed_at do server đặt, không lấy từ model
+    expect(assumption.confirmed_at).toEqual(expect.any(String))
+  })
+
+  it("lời sửa bỏ giả định ⇒ status rejected, không cần ghi trường thật", async () => {
+    const version = seedB03()
+    await gateSaid("B-0.3", ["AS01"])
+    await gate(
+      PROJECT,
+      "B-0.3",
+      USER,
+      { action: "revision", note: "khỏi cần giả định đó", base_version: version },
+      { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS01].status", value: "rejected" }]) }
+    )
+    const spine = await repo.get(PROJECT)
+    expect(spine!.assumptions[0].status).toBe("rejected")
+    expect(spine!.project.form_factor).toEqual(["web_app"])
+  })
+
+  it("đổi câu giả định mà không ghi đúng trường thật của nó ⇒ bị từ chối, Spine nguyên trạng", async () => {
+    const version = seedB03()
+    const wrongPath: OpTransaction["ops"] = [
+      { op: "set", path: "project.stakes", value: "regulated" },
+      revisedOps[1],
+      revisedOps[3]
+    ]
+    const err = await gate(
+      PROJECT,
+      "B-0.3",
+      USER,
+      { action: "revision", note: "bệnh nhân dùng app điện thoại", base_version: version },
+      { draftExecutor: async () => withNotes(wrongPath) }
+    ).catch((e: unknown) => e)
+
+    expect(err).toBeInstanceOf(ApiError)
+    expect(JSON.stringify((err as { errors?: unknown }).errors)).toContain("assumption_path_mismatch")
+    const spine = await repo.get(PROJECT)
+    expect(spine!.project.stakes).toBe("production")
+    expect(spine!.assumptions[0].status).toBe("unconfirmed")
+  })
+
+  const seedB14 = (): number => {
+    seedSpine()
+    const spine = db.spines[0] as Record<string, unknown> & { project: Record<string, unknown>; spine_version: number }
+    spine.progress = { ...(spine.progress as Record<string, unknown>), current_phase: "B-1", current_step: "B-1.4" }
+    const done = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3"].map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+    spine.steps = [...done, { id: "B-1.4", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null }]
+    spine.project = { ...spine.project, form_factor: ["web_app"] }
+    const base = { rationale: "r", status: "unconfirmed", confirmed_at: null }
+    spine.assumptions = [
+      { ...base, id: "AS10", path: "project.form_factor", statement: "The product is a web app.", statement_vi: "Sản phẩm là ứng dụng web.", origin_step_id: "B-1.4" },
+      { ...base, id: "AS11", path: "project.stakes", statement: "Stakes are production.", statement_vi: "Mức độ là vận hành thật.", origin_step_id: "B-1.2" }
+    ]
+    return spine.spine_version
+  }
+
+  it("giả định của chính bước ở cổng: ghi được path thật dù ngoài writes của bước (B-1.4 chỉ ghi addendum/assumptions)", async () => {
+    const version = seedB14()
+    await gateSaid("B-1.4", ["AS10"])
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "project.form_factor", value: "mobile_app" },
+      { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
+      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Sản phẩm là ứng dụng di động." },
+      { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+    ]
+    const result = await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "không, là xếp hàng phòng khám", base_version: version }, { draftExecutor: async () => withNotes(ops) })
+
+    const spine = await repo.get(PROJECT)
+    expect(spine!.project.form_factor).toEqual(["mobile_app"])
+    expect(spine!.assumptions.find((a) => a.id === "AS10")).toMatchObject({ status: "confirmed" })
+    // Không có notes ⇒ vẫn có lời xác nhận dựng từ tóm tắt thay đổi
+    expect(result.message_vi).toEqual(expect.any(String))
+    expect(result.message_vi).not.toBe("")
+  })
+
+  it("cổng cuối B-1 (B-1.6): sửa addendum do B-1.2 ghi + giả định của B-1.2 được áp, không lỗi phạm vi ghi", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { steps: { id: string; status: string }[]; progress: Record<string, unknown>; assumptions: { id: string; path: string }[]; addendum: unknown[] }
+    spine.steps = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5"]
+      .map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+      .concat([{ id: "B-1.6", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null } as never])
+    spine.progress = { ...spine.progress, current_step: "B-1.6" }
+    spine.addendum = [{ id: "AD2", topic: "Users", content: "Lễ tân nhận lịch qua điện thoại.", content_en: "Receptionists take bookings by phone.", target_section: "fixed:2.1", captured_at: "2026-01-01T00:00:00.000Z" }]
+    spine.assumptions[1].path = "addendum[id=AD2].content"
+    await gateSaid("B-1.6", ["AS11"])
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "addendum[id=AD2].content", value: "Lễ tân xác nhận lịch qua Zalo." },
+      { op: "set", path: "addendum[id=AD2].content_en", value: "Receptionists confirm bookings via Zalo." },
+      { op: "set", path: "assumptions[id=AS11].statement", value: "Receptionists confirm bookings via Zalo." },
+      { op: "set", path: "assumptions[id=AS11].statement_vi", value: "Lễ tân xác nhận lịch qua Zalo." },
+      { op: "set", path: "assumptions[id=AS11].status", value: "confirmed" }
+    ]
+    await gate(PROJECT, "B-1.6", USER, { action: "revision", note: "lễ tân dùng Zalo chứ không gọi điện", base_version: version }, { draftExecutor: async () => withNotes(ops) })
+
+    const after = await repo.get(PROJECT)
+    expect(after!.addendum.find((a) => a.id === "AD2")!.content).toBe("Lễ tân xác nhận lịch qua Zalo.")
+    expect(after!.assumptions.find((a) => a.id === "AS11")).toMatchObject({ status: "confirmed", statement_vi: "Lễ tân xác nhận lịch qua Zalo." })
+  })
+
+  it("giả định cũ có path project.vision ở Brief: sửa qua addendum vision (content + content_en) tính là ghi trường thật", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { assumptions: { id: string; path: string }[] }
+    spine.addendum = [{ id: "AD1", topic: "vision", content: "Công cụ đặt lịch.", content_en: "A booking tool.", target_section: "fixed:1", captured_at: "2026-01-01T00:00:00.000Z" }]
+    spine.assumptions[0].path = "project.vision"
+    await gateSaid("B-1.4", ["AS10"])
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "addendum[id=AD1].content", value: "Công cụ xếp hàng cho phòng khám." },
+      { op: "set", path: "addendum[id=AD1].content_en", value: "A clinic queue tool." },
+      { op: "set", path: "assumptions[id=AS10].statement", value: "The vision is a clinic queue tool." },
+      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Tầm nhìn là công cụ xếp hàng cho phòng khám." },
+      { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+    ]
+    await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "không, là xếp hàng phòng khám", base_version: version }, { draftExecutor: async () => withNotes(ops) })
+
+    const after = await repo.get(PROJECT)
+    expect(after!.addendum[0].content_en).toBe("A clinic queue tool.")
+    expect(after!.assumptions.find((a) => a.id === "AS10")).toMatchObject({ status: "confirmed" })
+    expect(after!.project.vision).not.toBe("A clinic queue tool.")
+  })
+
+  it("viết lại câu giả định project.vision mà không sửa addendum vision ⇒ assumption_path_mismatch", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { assumptions: { id: string; path: string }[] }
+    spine.addendum = [{ id: "AD1", topic: "vision", content: "Công cụ đặt lịch.", content_en: "A booking tool.", target_section: "fixed:1", captured_at: "2026-01-01T00:00:00.000Z" }]
+    spine.assumptions[0].path = "project.vision"
+    const err = await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "đổi", base_version: version },
+      {
+        draftExecutor: async () =>
+          withNotes([
+            { op: "set", path: "assumptions[id=AS10].statement", value: "The vision is a clinic queue tool." },
+            { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+          ])
+      }
+    ).catch((e: unknown) => e)
+    expect(JSON.stringify((err as { errors?: unknown }).errors)).toContain("assumption_path_mismatch")
+  })
+
+  it("path ngoài writes mà KHÔNG thuộc giả định của cổng vẫn bị chặn (path_not_writable)", async () => {
+    const version = seedB14()
+    const err = await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "đổi mức độ", base_version: version },
+      { draftExecutor: async () => withNotes([{ op: "set", path: "project.stakes", value: "regulated" }]) }
+    ).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(JSON.stringify((err as { errors?: unknown }).errors)).toContain("path_not_writable")
+  })
+
+  it("chỉ đổi status của giả định cổng vừa nói: giả định của bước khác (AS11, B-1.2) giữ nguyên, lượt sửa không hỏng", async () => {
+    const version = seedB14()
+    await gateSaid("B-1.4", ["AS10"])
+    await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "ok hết", base_version: version },
+      { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS11].status", value: "confirmed" }]) }
+    )
+    expect((await repo.get(PROJECT))!.assumptions.find((a) => a.id === "AS11")!.status).toBe("unconfirmed")
+  })
+
+  it("cổng cuối giai đoạn: giả định thuộc cổng mà tin KHÔNG nói ra vẫn ở unconfirmed, điều tin nói ra thì chốt được", async () => {
+    const version = seedB14()
+    const spine = db.spines[0] as Record<string, unknown> & { steps: unknown[]; progress: Record<string, unknown> }
+    spine.steps = ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5"]
+      .map((id) => ({ id, status: "accepted", first_seq: 1, last_seq: 1, accepted_at: "2026-01-01T00:00:00.000Z" }))
+      .concat([{ id: "B-1.6", status: "in_progress", first_seq: null, last_seq: null, accepted_at: null } as never])
+    spine.progress = { ...spine.progress, current_step: "B-1.6" }
+    // Cổng B-1.6 sở hữu cả AS10 và AS11, nhưng tin chỉ nói AS10
+    await gateSaid("B-1.6", ["AS10"])
+
+    await gate(
+      PROJECT,
+      "B-1.6",
+      USER,
+      { action: "revision", note: "đúng cả hai", base_version: version },
+      {
+        draftExecutor: async () =>
+          withNotes([
+            { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" },
+            { op: "set", path: "assumptions[id=AS11].status", value: "confirmed" }
+          ])
+      }
+    )
+
+    const after = await repo.get(PROJECT)
+    expect(after!.assumptions.find((a) => a.id === "AS10")!.status).toBe("confirmed")
+    expect(after!.assumptions.find((a) => a.id === "AS11")!.status).toBe("unconfirmed")
+  })
+
+  it("quyền sửa rộng hơn quyền chốt: giả định tin không nói vẫn sửa được câu + path thật, chỉ status giữ nguyên", async () => {
+    const version = seedB14()
+    await gateSaid("B-1.4", [])
+
+    await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "không, là app điện thoại", base_version: version },
+      {
+        draftExecutor: async () =>
+          withNotes([
+            { op: "set", path: "project.form_factor", value: "mobile_app" },
+            { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
+            { op: "set", path: "assumptions[id=AS10].statement_vi", value: "Sản phẩm là ứng dụng điện thoại." },
+            { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+          ])
+      }
+    )
+
+    const after = await repo.get(PROJECT)
+    // project.form_factor ngoài writes của B-1.4 — vẫn ghi được vì AS10 là giả định còn mở của cổng
+    expect(after!.project.form_factor).toEqual(["mobile_app"])
+    expect(after!.assumptions.find((a) => a.id === "AS10")).toMatchObject({
+      statement: "The product is a mobile app.",
+      status: "unconfirmed",
+      confirmed_at: null
+    })
+  })
+
+  it("mở lại bước đã accepted (B7): không còn tin cổng nào trong run-state ⇒ không giả định nào chốt được", async () => {
+    const version = seedB14()
+    await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "sửa lại giúp", base_version: version },
+      { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }]) }
+    )
+    expect((await repo.get(PROJECT))!.assumptions.find((a) => a.id === "AS10")!.status).toBe("unconfirmed")
+  })
+
+  it("revision chỉ đổi giả định (không có notes, không có nội dung khác) vẫn trả message_vi", async () => {
+    const version = seedB14()
+    const result = await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      { action: "revision", note: "đúng rồi", base_version: version },
+      { draftExecutor: async () => withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }]) }
+    )
+    expect(result.message_vi).toBe("Tôi đã cập nhật lại theo ý bạn.")
+  })
+
+  it("FLF-260: revision với replyLanguage en ⇒ lượt soạn lại mang en, lời xác nhận dự phòng bằng tiếng Anh", async () => {
+    const version = seedB14()
+    const inputs: AiActionInput[] = []
+    const result = await gate(
+      PROJECT,
+      "B-1.4",
+      USER,
+      // Ghi chú cổng viết tiếng Việt không đổi ngôn ngữ: gate không đoán, chỉ theo ngôn ngữ nơi gọi đưa vào
+      { action: "revision", note: "đúng rồi", base_version: version },
+      {
+        replyLanguage: "en",
+        draftExecutor: async (_type, input) => {
+          inputs.push(input)
+          return withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }])
+        }
+      }
+    )
+    expect(inputs.map((i) => i.replyLanguage)).toEqual(["en"])
+    expect(result.message_vi).toBe("I've updated it as you asked.")
+  })
+
+  it("FLF-260: revision không có notes ⇒ lời xác nhận dựng từ tóm tắt bằng ngôn ngữ của phiên", async () => {
+    const version = seedB14()
+    await gateSaid("B-1.4", ["AS10"])
+    const ops: OpTransaction["ops"] = [
+      { op: "set", path: "project.form_factor", value: "mobile_app" },
+      { op: "set", path: "assumptions[id=AS10].statement", value: "The product is a mobile app." },
+      { op: "set", path: "assumptions[id=AS10].statement_vi", value: "The product is a mobile app." },
+      { op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }
+    ]
+    const result = await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "it's a phone app", base_version: version }, { replyLanguage: "en", draftExecutor: async () => withNotes(ops) })
+    expect(result.message_vi).toBe("I've updated the system overview. Have a look, and if it all looks right we'll move on.")
+  })
+
+  it("FLF-260: nơi gọi không đưa ngôn ngữ ⇒ lượt soạn lại không mang field (prompt như cũ)", async () => {
+    const version = seedB14()
+    const inputs: AiActionInput[] = []
+    await gate(PROJECT, "B-1.4", USER, { action: "revision", note: "đúng rồi", base_version: version }, {
+      draftExecutor: async (_type, input) => {
+        inputs.push(input)
+        return withNotes([{ op: "set", path: "assumptions[id=AS10].status", value: "confirmed" }])
+      }
+    })
+    expect(inputs).toHaveLength(1)
+    expect(inputs[0]).not.toHaveProperty("replyLanguage")
+  })
+
+  it("gateAssumptionIdsOf: bước thường = giả định chưa xác nhận do chính nó sinh; bước cuối giai đoạn = cả giai đoạn", async () => {
+    seedB14()
+    const spine = (await repo.get(PROJECT))!
+    expect([...gateAssumptionIdsOf(spine, "B-1.4")]).toEqual(["AS10"])
+    expect([...gateAssumptionIdsOf(spine, "B-1.2")]).toEqual(["AS11"])
+    expect([...gateAssumptionIdsOf(spine, "B-1.6")].sort()).toEqual(["AS10", "AS11"])
+  })
+
+  it("phaseGateAssumptions: cổng cuối giai đoạn lấy MỌI giả định chưa xác nhận của giai đoạn từ Spine (kể cả bước im chạy ở lượt trước)", async () => {
+    seedB14()
+    const spine = (await repo.get(PROJECT))!
+    // AS10 do bước cuối sinh, AS11 do B-1.2 sinh ở lượt trước — tập trả về là ĐẦY ĐỦ, việc cắt theo lời đã nói là của cổng
+    expect(phaseGateAssumptions(spine, "B-1.6").map((a) => a.id).sort()).toEqual(["AS10", "AS11"])
+    expect(phaseGateAssumptions(spine, "B-1.6").find((a) => a.id === "AS11")?.text_vi).toBe("Mức độ là vận hành thật.")
+    spine.assumptions.find((a) => a.id === "AS11")!.status = "confirmed"
+    expect(phaseGateAssumptions(spine, "B-1.6").map((a) => a.id)).toEqual(["AS10"])
+  })
+
+  it("accept/regenerate không có message_vi (tương thích FE cũ)", async () => {
+    const version = seedB03()
+    const accepted = await gate(PROJECT, "B-0.3", USER, { action: "accept", base_version: version })
+    expect(accepted.message_vi).toBeUndefined()
   })
 })

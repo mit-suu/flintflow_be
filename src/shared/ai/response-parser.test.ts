@@ -42,6 +42,13 @@ describe("parseResponse — schema pipeline (T03)", () => {
     expect(out.questions[0].question).toBe("Ai duyệt yêu cầu?")
   })
 
+  it("CHAT hỏng JSON vẫn cứu được câu hỏi có option object", () => {
+    const raw = '{"reply":"Ok","questions":[{"question":"Nền tảng?","options":[{"label":"Web","description":"Trình duyệt"},{"label":"Mobile"}],"multiple":false},{"question":"Kể thêm?"'
+    const out = parseResponse<{ questions: Array<{ question: string; options: Array<{ label: string }> }> }>(raw, ActionType.CHAT)
+    expect(out.questions[0]).toMatchObject({ question: "Nền tảng?", options: [{ label: "Web" }, { label: "Mobile" }] })
+    expect(out.questions[1]).toMatchObject({ question: "Kể thêm?", options: [] })
+  })
+
   it("REVIEW đòi section_id và message", () => {
     const ok = parseResponse<ReviewOutput>(
       '{"flags":[{"level":"yellow","rule_id":"ambiguity","section_id":"function:FN07","message":"mơ hồ"}]}',

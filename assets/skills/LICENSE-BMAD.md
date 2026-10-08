@@ -5,7 +5,7 @@ Parts of the skills in this directory are adapted from the **BMAD Method** (`bmm
 | FlintFlow skill | Adapted from (BMAD) |
 | --- | --- |
 | `action/srs-orchestrator`, `action/gate-check` | `bmad-prd/SKILL.md` state machine (Discovery → Reviewer Gate → Finalize); `bmad-sprint-planning/references/readiness-gate.md` |
-| `action/elicit-loop`, `content/product-brief` | `bmad-product-brief/SKILL.md` discovery (brain dump → form-factor → stakes → Fast/Coaching); `bmad-product-brief/assets/brief-template.md` |
+| `action/elicit-loop`, `content/product-brief` | `bmad-product-brief/SKILL.md` discovery (brain dump → form-factor → stakes); `bmad-product-brief/assets/brief-template.md` |
 | `action/review-section` | `core-skills/bmad-review/references/lens-*.md` lens pattern |
 | `output/srs-completeness-score` | `bmad-prd/assets/prd-validation-checklist.md`, `references/validate.md` |
 | `content/screens-and-flow` | `bmad-ux/SKILL.md`, `bmad-ux/assets/key-screens.md` |

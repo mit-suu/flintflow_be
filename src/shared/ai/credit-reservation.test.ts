@@ -11,6 +11,9 @@ vi.mock("../../modules/credits/credit-transaction.model.js", async () => {
 vi.mock("../../modules/admin/pricing-config.model.js", () => ({
   PricingConfig: { findOne: async () => null }
 }))
+vi.mock("../../modules/user/user.model.js", () => ({
+  User: { findById: () => ({ lean: async () => ({ name: "Lan", email: "lan@example.com" }) }) }
+}))
 vi.mock("../../modules/notification/notification.service.js", () => ({
   notify: vi.fn(async () => null),
   notifyAdmins: vi.fn(async () => 0)
@@ -51,7 +54,12 @@ describe("credit-reservation.service", () => {
       expect(wallet.balance).toBe(planConfig.free.initialCredits)
       expect(wallet.reserved).toBe(0)
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "welcome" }))
-      expect(notifyAdmins).toHaveBeenCalledWith(expect.objectContaining({ type: "admin_new_user" }))
+      // FLF-247: admin đọc tên/email, không đọc userId thô
+      await vi.waitFor(() =>
+        expect(notifyAdmins).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "admin_new_user", body: "Lan (lan@example.com) vừa bắt đầu sử dụng FlintFlow.", meta: { userId: USER } })
+        )
+      )
     })
 
     it("ví đã có thì không tạo lại và không notify lại", async () => {

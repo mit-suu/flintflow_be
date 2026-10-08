@@ -220,6 +220,18 @@ export const roundCounts = async (projectId: string, stepId: string, firstSeq: n
   return { calls_used, regenerate_used }
 }
 
+/**
+ * Credit đã tiêu cho vòng hiện tại của step — gate hiện "58 giây · 4 credit" (03 Lớp 4) để user thấy giá
+ * của mỗi bước, thay vì chỉ thấy số dư tụt dần không rõ vì sao.
+ */
+export const roundCost = async (projectId: string, stepId: string, firstSeq: number | null): Promise<number> => {
+  const since = await roundStartedAt(projectId, stepId, firstSeq)
+  const filter: Record<string, unknown> = { projectId, step_id: stepId, state: { $ne: "refunded" } }
+  if (since) filter.createdAt = { $gte: since }
+  const rows = (await Usage.find(filter, { cost: 1 }).lean()) as unknown as { cost?: number }[]
+  return rows.reduce((sum, r) => sum + (typeof r.cost === "number" ? r.cost : 0), 0)
+}
+
 interface UsageRow {
   step_id: string
   call_kind: string
@@ -232,7 +244,7 @@ export interface StepRoundInput {
 }
 
 /**
- * F10: `GET /steps` cần `calls_used`/`regenerate_used` của 51 + 5×N step — gọi `roundCounts` cho từng
+ * F10: `GET /steps` cần `calls_used`/`regenerate_used` của 50 + 5×N step — gọi `roundCounts` cho từng
  * step tạo ra ~2-3×N truy vấn (N+1). Gộp còn 2 truy vấn: một `listChanges` KHÔNG giới hạn (đủ để suy mốc
  * vòng mọi step theo `first_seq` riêng — xem `roundStartedAt`) và một `Usage.aggregate` lấy thô mọi dòng
  * chưa refund của các step liên quan, rồi đếm trong bộ nhớ theo mốc vòng riêng từng step (mốc lệch nhau

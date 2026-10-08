@@ -31,7 +31,7 @@ not to.
   therefore cannot finish in one round: it stops at `CALL_LIMIT` and the user accepts what exists at the
   gate. That is deliberate — no loop-specific exemption from the ceiling.
 - **Step count is unchanged.** Batching happens *inside* `S-5.4@<screen>`; it does not add steps, so the
-  `51 + 5 × N` total in the progress bar stays exact.
+  `50 + 5 × N` total in the progress bar stays exact.
 - **Regenerate.** A gate `regenerate` reverts the step's whole seq range and redrafts — every batch runs
   again, not just the last one.
 

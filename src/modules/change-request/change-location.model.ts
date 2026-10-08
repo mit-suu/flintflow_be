@@ -22,6 +22,8 @@ export interface LocationProposal {
   comment_text: string | null
   /** Op Spine (định dạng `op.types.ts`), áp ở C-7 sau khi duyệt. */
   spine_ops: unknown[]
+  /** Mode 1 v3 phase 7: dữ kiện AI phải tự giả định (CR / câu trả lời / tài liệu không nói) — người duyệt cần xác nhận. */
+  assumptions?: string[]
 }
 
 export interface VerifyViolation {
@@ -81,7 +83,8 @@ const changeLocationSchema = new Schema<IChangeLocation>(
           old_text: { type: String, default: "" },
           new_text: { type: String, default: null },
           comment_text: { type: String, default: null },
-          spine_ops: { type: [Schema.Types.Mixed], default: [] }
+          spine_ops: { type: [Schema.Types.Mixed], default: [] },
+          assumptions: { type: [String], default: [] }
         },
         opts
       ),

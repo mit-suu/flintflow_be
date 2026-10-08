@@ -131,4 +131,9 @@ export interface RenderedDocument {
   recordOfChanges: RocRow[]
   /** In sau §I: đầy đủ khi `draft`; bản baseline chỉ in danh sách waive. */
   flagsAppendix?: FlagsAppendix
+  /**
+   * `"fpt"` ⇒ tài liệu theo mẫu FPT (không có layout file người dùng): writer thêm style Heading 4–6 nhỏ hơn
+   * Heading 3 cho khung mục §3.x.y (FLF-214). Vắng ⇒ tài liệu mode 1 theo layout file, style như cũ.
+   */
+  format?: "fpt"
 }

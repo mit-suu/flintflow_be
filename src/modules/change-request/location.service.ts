@@ -8,6 +8,7 @@
 import { stripRecord } from "../import/check.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 import type { PatchLocationRequest } from "./change-request.dto.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
@@ -19,14 +20,14 @@ import { elementValue, valueText } from "./spine-location.js"
 export const patchLocation = async (cr: IChangeRequest, locationId: string, body: PatchLocationRequest): Promise<void> => {
   assertCrStatus(cr, ["impact_review", "proposing", "manual_fix", "ready_to_submit"], "verifying")
   const loc = await ChangeLocation.findOne({ projectId: cr.projectId, cr_id: cr.cr_id, location_id: locationId })
-  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", `Không có vị trí ${locationId}`)
+  if (!loc) throw new Mode1Error("CR_LOCATION_NOT_FOUND", "Không tìm thấy vị trí cần sửa này")
   const holder = (await locksOf(cr.projectId, [loc.path])).get(loc.path)
   if (holder !== cr.cr_id) throw pathLocked(holder ? [{ path: loc.path, cr_id: holder }] : [])
   const conclusion = body.conclusion ?? loc.conclusion
   if (!conclusion) throw new Mode1Error("CR_LOCATION_UNCONCLUDED", "Cần chọn kết luận cho vị trí", { location_ids: [locationId] })
 
   const record = await spineRepository.get(String(cr.projectId))
-  if (!record) throw new Error("Không tìm thấy Spine của project")
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const ops: unknown[] =
     conclusion !== "edit"
@@ -39,7 +40,9 @@ export const patchLocation = async (cr: IChangeRequest, locationId: string, body
     old_text: valueText(elementValue(spine, loc.path)),
     new_text: conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: conclusion === "comment" ? (body.comment_text ?? loc.proposal?.comment_text ?? null) : null,
-    spine_ops: ops
+    spine_ops: ops,
+    // Người dùng tự viết op / giá trị ⇒ không còn giả định của AI; chỉ đổi kết luận / lý do thì giữ giả định của đề xuất cũ
+    assumptions: conclusion === "edit" && (body.spine_ops || body.new_value !== undefined) ? [] : conclusion === "not_related" ? [] : [...(loc.proposal?.assumptions ?? [])]
   }
   loc.manual = true
   loc.verify = null

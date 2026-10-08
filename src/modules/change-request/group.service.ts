@@ -5,7 +5,7 @@
  */
 
 import { stripRecord } from "../import/check.service.js"
-import { titleOfSection } from "../import/gap-report.service.js"
+import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { ChangeGroup } from "./change-group.model.js"
@@ -13,7 +13,7 @@ import { ChangeLocation, type IChangeLocation } from "./change-location.model.js
 
 /** Gom vị trí có sửa/ghi chú thành group theo section; `not_related` không vào group. */
 export const regroup = async (cr: IChangeRequest): Promise<void> => {
-  const record = await spineRepository.get(String(cr.projectId))
+  const [record, layout] = await Promise.all([spineRepository.get(String(cr.projectId)), loadLayout(String(cr.projectId))])
   const spine = stripRecord(record!)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
   const bySection = new Map<string, IChangeLocation[]>()
@@ -28,7 +28,7 @@ export const regroup = async (cr: IChangeRequest): Promise<void> => {
     projectId: cr.projectId,
     cr_id: cr.cr_id,
     group_id: `G${String(++n).padStart(2, "0")}`,
-    title: section === "misc" ? "Khác" : titleOfSection(spine, section),
+    title: section === "misc" ? "Khác" : titleOfSection(spine, section, layout),
     location_ids: locs.map((l) => l.location_id),
     decision: "pending"
   }))

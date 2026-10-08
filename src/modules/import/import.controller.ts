@@ -24,6 +24,7 @@ import * as extractJobs from "./extract-jobs.js"
 import * as finalizeService from "./finalize.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
+import { assertNotMode1 } from "./mode1-guard.js"
 import * as importService from "./import.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
@@ -31,13 +32,13 @@ import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
 
 /**
  * Multer giữ file trong bộ nhớ. Giới hạn cứng gấp đôi giới hạn nghiệp vụ: file hơi quá cỡ vẫn tới preflight để
- * trả `FILE_TOO_LARGE` có bản ghi; file quá lớn hẳn bị chặn ở đây (400).
+ * trả `FILE_TOO_LARGE` có bản ghi; file quá lớn hẳn bị chặn ở đây (413 `FILE_TOO_LARGE` qua error handler chung).
  */
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_MAX_FILE_BYTES * 2, files: 1 } })
 
 export const receiveDocx = (req: Request, res: Response, next: NextFunction): void => {
   upload.single(IMPORT_FILE_FIELD)(req, res, (err: unknown) => {
-    if (err instanceof multer.MulterError) return next(new ApiError(400, `Upload lỗi: ${err.message}`, "VALIDATION_ERROR"))
+    // Lỗi multer (quá cỡ, sai field…) ⇒ error handler chung trả câu thường (FILE_TOO_LARGE / UPLOAD_FAILED) — FLF-247
     if (err) return next(err)
     next()
   })
@@ -45,7 +46,7 @@ export const receiveDocx = (req: Request, res: Response, next: NextFunction): vo
 
 export const requireFile = (req: Request): importService.UploadedFile => {
   const file = req.file
-  if (!file) throw new ApiError(400, `Thiếu file .docx (field "${IMPORT_FILE_FIELD}")`, "VALIDATION_ERROR")
+  if (!file) throw new ApiError(400, "Vui lòng chọn file .docx để tải lên.", "VALIDATION_ERROR", { field: IMPORT_FILE_FIELD })
   // multer đọc tên file theo latin1 — đổi lại UTF-8 để giữ tên tiếng Việt
   const originalname = Buffer.from(file.originalname, "latin1").toString("utf8")
   return { buffer: file.buffer, originalname, size: file.size }
@@ -159,6 +160,7 @@ export const getStepPlan = mode1Handler(async (req, res) => {
 
 export const patchStepPlan = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
+  assertNotMode1(auth.project.mode, "steps") // mode 1 v3: không bật/tắt step (BPMN Flow 1 không có step)
   const body = parseInput(stepPlanPatchRequestSchema, req.body)
   return sendSuccess(res, 200, await stepPlanService.patchStepPlan(auth.projectId, auth.userId, body))
 })

@@ -97,7 +97,7 @@ const seedFixture = async (): Promise<void> => {
     // 4. Đúng một chat session pipeline (bất biến 7): ưu tiên session đã giữ cờ
     let session =
       (await ChatSession.findOne({ projectId: project._id, is_pipeline: true })) ??
-      (await ChatSession.findOne({ projectId: project._id, isActive: true }))
+      (await ChatSession.findOne({ projectId: project._id }).sort({ createdAt: 1 }))
     if (!session) {
       session = await ChatSession.create({ projectId: project._id, messages: [] })
       console.log("✅ Created pipeline chat session")

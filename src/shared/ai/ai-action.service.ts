@@ -1,5 +1,6 @@
 import mongoose from "mongoose"
 import { streamText } from "ai"
+import { env } from "../../config/env.js"
 import {
   ActionType,
   AiActionInput,
@@ -8,7 +9,10 @@ import {
   AiActionError
 } from "./ai-action.types.js"
 import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.js"
+import { isUserLocale } from "../i18n/locale.js"
+import { replyLanguageDirective } from "../i18n/reply-language.js"
 import { callLLM } from "./providers/llm.router.js"
+import type { LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
@@ -21,12 +25,21 @@ import {
 } from "./credit-reservation.service.js"
 import { executeWithInRequestRetry } from "./retry.service.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
+import { capturePayload } from "./ai-action-payload.service.js"
 
 export interface ExecuteAiActionOptions {
   provider?: string
   model?: string
   parentLogId?: string
   rawPromptOverride?: string
+  /**
+   * FLF-177 WP-4 (BUG-05): huỷ lượt gọi model khi người gọi đã bỏ đi (client đóng SSE của `/run` vì reload
+   * trang) hoặc bấm huỷ. Không có nó thì lượt gọi vẫn chạy hết — có lúc tới 20 phút — và **khoá step chưa nhả**
+   * ⇒ bấm chạy lại nhận `STEP_NOT_RUNNABLE`.
+   */
+  signal?: AbortSignal
+  /** Ảnh gửi kèm prompt (mode 1 v3 phase 5, `IMPORT_EXTRACT_DIAGRAM`) — provider phải có vision (Gemini). */
+  images?: LlmImage[]
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -90,10 +103,15 @@ const buildPrompt = async (
   fallbackVariables: Record<string, any>
 ): Promise<{ finalPrompt: string; providerConfig: AiProviderConfig }> => {
   const loadedTemplate = await getPromptTemplate(actionType)
-  const finalPrompt =
+  const basePrompt =
     options.rawPromptOverride || input.rawPrompt
       ? options.rawPromptOverride || input.rawPrompt || ""
       : interpolatePrompt(loadedTemplate.template, input.promptVariables || fallbackVariables)
+  // FLF-260: ngôn ngữ trả lời nối cuối prompt. Chỉ nhận vi | en — `POST /ai-actions` chuyển nguyên `input` của client,
+  // nên giá trị lạ bị bỏ qua thay vì thành chữ trong prompt.
+  const finalPrompt = isUserLocale(input.replyLanguage)
+    ? `${basePrompt}\n\n${replyLanguageDirective(input.replyLanguage)}`
+    : basePrompt
 
   return {
     finalPrompt,
@@ -133,14 +151,22 @@ export const executeAiAction = async <T = any>(
   // chặn release sau khi đã trừ (lỗi ghi log phía sau không được hoàn tiền).
   let deducted = false
   let currentLogId: string = ""
+  // Lượt parse lỗi mới là lượt cần đọc lại output gốc nhất, mà log thất bại được tạo ngoài vòng retry — giữ
+  // chữ thô ở đây để nó không mất theo scope của lượt thử.
+  let lastRawText: string | null = null
 
   try {
     const result = await executeWithInRequestRetry(async (attempt) => {
       const startTime = Date.now()
 
       try {
-        const llmRes = await callLLM(finalPrompt, providerConfig)
+        if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
+        const llmRes = await callLLM(finalPrompt, providerConfig, {
+          ...(options.signal ? { signal: options.signal } : {}),
+          ...(options.images?.length ? { images: options.images } : {})
+        })
         const latencyMs = Date.now() - startTime
+        lastRawText = llmRes.text
 
         const parsedData = parseResponse<T>(llmRes.text, actionType)
 
@@ -156,7 +182,8 @@ export const executeAiAction = async <T = any>(
           userId: new mongoose.Types.ObjectId(userId),
           actionType,
           provider: providerConfig.provider,
-          aiModel: providerConfig.model,
+          // Model thật sự trả lời — khác model của skill khi Gemini đã chuyển sang model dự phòng
+          aiModel: llmRes.model ?? providerConfig.model,
           status: "success",
           promptTokens: llmRes.promptTokens,
           completionTokens: llmRes.completionTokens,
@@ -165,6 +192,14 @@ export const executeAiAction = async <T = any>(
         })
 
         currentLogId = logDoc._id.toString()
+        await capturePayload({
+          logId: currentLogId,
+          projectId,
+          userId,
+          actionType: String(actionType),
+          prompt: finalPrompt,
+          response: llmRes.text
+        })
 
         return {
           success: true,
@@ -172,7 +207,7 @@ export const executeAiAction = async <T = any>(
           rawText: llmRes.text,
           actionType: actionType as ActionType,
           provider: providerConfig.provider,
-          aiModel: providerConfig.model,
+          aiModel: llmRes.model ?? providerConfig.model,
           tokensUsed: {
             promptTokens: llmRes.promptTokens,
             completionTokens: llmRes.completionTokens,
@@ -204,6 +239,15 @@ export const executeAiAction = async <T = any>(
       status: "failed",
       errorMessage: finalError.message || "AI Action execution failed",
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    await capturePayload({
+      logId: failedLog._id.toString(),
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: lastRawText
     })
 
     if (finalError instanceof AiActionError) {
@@ -240,21 +284,38 @@ export const executeAiActionStream = async <T = any>(
     throw buildError
   }
 
+  // FLF-244: `AI_PROVIDER_OVERRIDE` đè cả đường stream. Trước đây chỉ `callLLM` đọc nó, nên chat stream vẫn gọi
+  // provider thật khi chạy CI / smoke test với `mock`.
+  const override = env.AI_PROVIDER_OVERRIDE.trim().toLowerCase()
+  if (override) providerConfig = { ...providerConfig, provider: override }
+
   const startTime = Date.now()
   let deducted = false
+  let lastRawText: string | null = null
 
   try {
-    const model = getAiSdkModel(providerConfig)
-    const streamResult = streamText({
-      model,
-      prompt: finalPrompt,
-      temperature: providerConfig.temperature ?? 0.7,
-      maxOutputTokens: providerConfig.maxTokens ?? 2048
-    })
+    let textStream: AsyncIterable<string>
+    let usagePromise: PromiseLike<unknown> | null = null
+    if (providerConfig.provider?.toLowerCase() === "mock") {
+      // AI SDK không có provider mock: lấy trọn câu trả lời của mock rồi phát như một lượt stream duy nhất
+      const mockRes = await callLLM(finalPrompt, providerConfig)
+      textStream = (async function* () {
+        yield mockRes.text
+      })()
+    } else {
+      const streamResult = streamText({
+        model: getAiSdkModel(providerConfig),
+        prompt: finalPrompt,
+        temperature: providerConfig.temperature ?? 0.7,
+        maxOutputTokens: providerConfig.maxTokens ?? 2048
+      })
+      textStream = streamResult.textStream
+      usagePromise = streamResult.usage
+    }
 
     const extractor = new JsonStreamExtractor()
 
-    for await (const chunk of streamResult.textStream) {
+    for await (const chunk of textStream) {
       const delta = extractor.push(chunk)
       if (delta && callbacks.onTextDelta) {
         await callbacks.onTextDelta(delta)
@@ -262,12 +323,13 @@ export const executeAiActionStream = async <T = any>(
     }
 
     const { reply: streamedReply, fullRaw } = extractor.finish()
+    lastRawText = fullRaw
     const latencyMs = Date.now() - startTime
 
     let promptTokens = Math.ceil(finalPrompt.length / 4)
     let completionTokens = Math.ceil(fullRaw.length / 4)
     try {
-      const usage = await streamResult.usage
+      const usage = usagePromise ? await usagePromise : null
       if ((usage as any)?.inputTokens) promptTokens = (usage as any).inputTokens
       else if ((usage as any)?.promptTokens) promptTokens = (usage as any).promptTokens
       if ((usage as any)?.outputTokens) completionTokens = (usage as any).outputTokens
@@ -291,6 +353,15 @@ export const executeAiActionStream = async <T = any>(
       completionTokens,
       latencyMs,
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    await capturePayload({
+      logId: (logDoc as any)._id.toString(),
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: fullRaw
     })
 
     // For chat actions, ensure parsedData.reply matches the clean streamed reply
@@ -341,6 +412,15 @@ export const executeAiActionStream = async <T = any>(
       status: "failed",
       errorMessage: finalError.message || "AI Action stream execution failed",
       retryOfLogId: options.parentLogId ? new mongoose.Types.ObjectId(options.parentLogId) : null
+    })
+
+    await capturePayload({
+      logId: failedLog._id.toString(),
+      projectId,
+      userId,
+      actionType: String(actionType),
+      prompt: finalPrompt,
+      response: lastRawText
     })
 
     if (callbacks.onError) {

@@ -23,8 +23,26 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { ChangeRequest, CrCounter } from "../change-request/change-request.model.js"
 import { ChangeLocation } from "../change-request/change-location.model.js"
 import { ChangeGroup } from "../change-request/change-group.model.js"
+import { Subscription } from "../credits/subscription.model.js"
+import { getPlan } from "../billing/plan.config.js"
+
+/**
+ * UC-16: số dự án tối đa theo gói đang active của tổ chức (`plan.config` — free 3, pro 50). Dự án đã xoá
+ * (`archived`) không tính. Kiểm trước khi tạo, không khoá — hai request cùng lúc có thể vượt 1, chấp nhận được.
+ */
+export const assertProjectQuota = async (orgId: string): Promise<void> => {
+  const [subscription, count] = await Promise.all([
+    Subscription.findOne({ organizationId: orgId, status: "active" }).select("plan").lean(),
+    Project.countDocuments({ organizationId: orgId, status: { $ne: "archived" } })
+  ])
+  const definition = getPlan(subscription?.plan ?? "free")
+  if (count >= definition.maxProjects) {
+    throw new ApiError(402, `Gói ${definition.label} chỉ cho tối đa ${definition.maxProjects} dự án`, "PLAN_LIMIT_PROJECTS")
+  }
+}
 
 export const createProject = async (
+  orgId: string,
   userId: string,
   name: string,
   domain?: string,
@@ -32,12 +50,15 @@ export const createProject = async (
   folderId?: string
 ): Promise<IProject> => {
   if (mode === "customer_template") {
-    throw new ApiError(501, "Mode template khách hàng chưa hỗ trợ", "NOT_IMPLEMENTED")
+    throw new ApiError(501, "Chưa hỗ trợ tạo dự án theo mẫu của khách hàng.", "NOT_IMPLEMENTED")
   }
-  // Tạo thẳng trong thư mục (một request) — thư mục phải của chính user
-  if (folderId) await assertFolderOwned(userId, folderId)
+  // Tạo thẳng trong thư mục (một request) — thư mục phải thuộc cùng org
+  if (folderId) await assertFolderOwned(orgId, folderId)
+  await assertProjectQuota(orgId)
   // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
+    organizationId: orgId,
+    // userId giữ lại để biết ai tạo; quyền truy cập do organizationId quyết định (task-26 Pha 4).
     userId,
     name,
     domain: domain || null,
@@ -49,21 +70,27 @@ export const createProject = async (
   return project
 }
 
-export const getProjects = async (userId: string, status?: string): Promise<IProject[]> => {
-  const filter: any = { userId }
+export const getProjects = async (orgId: string, status?: string): Promise<IProject[]> => {
+  const filter: any = { organizationId: orgId }
   if (status) {
     filter.status = status
   }
   return await Project.find(filter).sort({ createdAt: -1 })
 }
 
+/**
+ * Điểm chốt quyền truy cập dự án cho CẢ HỆ THỐNG — 10 module gọi hàm này (spine, pipeline, render,
+ * diagram, import, change-request…). Lọc theo org chứ không theo người: dự án thuộc về tổ chức, mọi
+ * thành viên đều vào được, và vai trò quyết định làm được gì (BPMN Flow 10.6–10.7).
+ */
 export const getProjectById = async (
   projectId: string,
-  userId: string
+  orgId: string
 ): Promise<IProject> => {
-  const project = await Project.findOne({ _id: projectId, userId })
+  // Id sai định dạng: CastError sẽ thành 500 — coi như không tìm thấy (FLF-244)
+  const project = mongoose.isValidObjectId(projectId) ? await Project.findOne({ _id: projectId, organizationId: orgId }) : null
   if (!project) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
 }
@@ -72,11 +99,11 @@ export const getProjectById = async (
  * Mở dự án (`GET /projects/:id` — workspace, bản đọc): ghi `lastOpenedAt`. `timestamps: false` ⇒ không đẩy
  * `updatedAt` (mở không phải là sửa). Chỉ route này ghi; các nơi nội bộ vẫn dùng `getProjectById`.
  */
-export const openProject = async (projectId: string, userId: string): Promise<IProject> => {
-  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+export const openProject = async (projectId: string, orgId: string): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const project = await Project.findOneAndUpdate(
-    { _id: projectId, userId },
+    { _id: projectId, organizationId: orgId },
     { $set: { lastOpenedAt: new Date() } },
     { new: true, timestamps: false }
   )
@@ -134,41 +161,41 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
 
 export const deleteProject = async (
   projectId: string,
-  userId: string,
+  orgId: string,
   hard: boolean = false
 ): Promise<IProject | { _id: string; status: "deleted" }> => {
   if (hard) {
-    const project = await Project.findOneAndDelete({ _id: projectId, userId })
+    const project = await Project.findOneAndDelete({ _id: projectId, organizationId: orgId })
     if (!project) {
-      throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+      throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
     }
     await purgeProjectData(projectId)
     return { _id: projectId, status: "deleted" }
   }
 
   const project = await Project.findOneAndUpdate(
-    { _id: projectId, userId },
+    { _id: projectId, organizationId: orgId },
     { status: "archived" },
     { new: true }
   )
   if (!project) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
 }
 
 export const updateProjectName = async (
   projectId: string,
-  userId: string,
+  orgId: string,
   name: string
 ): Promise<IProject> => {
   const project = await Project.findOneAndUpdate(
-    { _id: projectId, userId },
+    { _id: projectId, organizationId: orgId },
     { name },
     { new: true }
   )
   if (!project) {
-    throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   }
   return project
 }
@@ -176,19 +203,19 @@ export const updateProjectName = async (
 /** Chuyển dự án vào thư mục của chính user (`folderId: null` ⇒ ra ngoài thư mục). */
 export const moveProjectToFolder = async (
   projectId: string,
-  userId: string,
+  orgId: string,
   folderId: string | null
 ): Promise<IProject> => {
-  const notFound = () => new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   // id sai định dạng ⇒ 404 như dự án của user khác (không để CastError thành 500)
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
-  if (folderId) await assertFolderOwned(userId, folderId)
-  const project = await Project.findOneAndUpdate({ _id: projectId, userId }, { folderId }, { new: true })
+  if (folderId) await assertFolderOwned(orgId, folderId)
+  const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { folderId }, { new: true })
   if (!project) throw notFound()
   // Thư mục bị xoá chen giữa lúc kiểm tra và lúc ghi ⇒ gỡ về ngoài thư mục, báo thư mục không còn
-  if (folderId && !(await folderStillExists(userId, folderId))) {
-    await Project.updateOne({ _id: projectId, userId, folderId }, { folderId: null })
-    throw new ApiError(404, "Folder not found or unauthorized", "FOLDER_NOT_FOUND")
+  if (folderId && !(await folderStillExists(orgId, folderId))) {
+    await Project.updateOne({ _id: projectId, organizationId: orgId, folderId }, { folderId: null })
+    throw new ApiError(404, "Không tìm thấy thư mục hoặc bạn không có quyền truy cập.", "FOLDER_NOT_FOUND")
   }
   return project
 }

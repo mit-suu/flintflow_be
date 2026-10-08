@@ -3,15 +3,15 @@
 > Mẫu để **đọc lại brief cho user xác nhận** ở cuối B-1 và ở B-2.3. Không phải section của SRS: brief
 > không render thành chương nào, nó nuôi `project{}` và `addendum[]`.
 
-**project.name** · form_factor · stakes · working_mode
+**project.name** · form_factor · stakes
 
 ## 1. Vision
 
-project.vision
+addendum topic `vision` (content của user)
 
 ## 2. Mục tiêu
 
-project.goals[] — 3 đến 6 dòng, mỗi dòng một kết quả
+addendum topic `goals` — 3 đến 6 entry, mỗi entry một kết quả
 
 ## 3. Vấn đề và cơ hội
 

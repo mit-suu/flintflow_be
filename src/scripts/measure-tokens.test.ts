@@ -110,7 +110,7 @@ describe("ngưỡng và ghi file", () => {
       options: parseArgs(["--no-write"]),
       records: order.map((id) => rec(id, "draft", 2000, 100, 4)),
       stepOrder: order,
-      shape: { screens: 2, functions: 3, loops: 0, totalSteps: 51 },
+      shape: { screens: 2, functions: 3, loops: 0, totalSteps: 50 },
       startedAt: new Date("2026-09-16T00:00:00Z"),
       durationMs: 1000,
       thresholds: { credit_per_project: 10, usd_per_project: null, tokens_in_per_call: 5000 }

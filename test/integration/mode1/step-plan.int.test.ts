@@ -1,6 +1,7 @@
 /**
- * Kế hoạch step theo template (#32–#33, mode 1 v2 — FLF-183) trên Mongo thật: finalize seed step, GET/PATCH step-plan,
- * `GET /steps` ẩn step skipped, chạy step skipped bị chặn, đầu mục FPT không tắt được.
+ * Kế hoạch step theo template (#32–#33, mode 1 v2 — FLF-183) trên Mongo thật: finalize seed step, GET step-plan,
+ * `GET /steps` ẩn step skipped. Mode 1 v3 (BPMN Flow 1 không có step): chạy step / gate / PATCH step-plan ⇒ 409
+ * `MODE1_NO_STEPS`; kế hoạch step chỉ còn dùng để xác định step sở hữu field (C-4) và gap report.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
@@ -49,39 +50,20 @@ describe("step-plan (#32–#33)", () => {
     expect(listed.filter((s) => skipped.has(s.id))).toEqual([])
   })
 
-  it("step skipped không chạy được ⇒ 409 STEP_NOT_RUNNABLE", async () => {
+  it("mode 1 v3: chạy step, gate, PATCH step-plan ⇒ 409 MODE1_NO_STEPS; Spine không đổi", async () => {
     const { c, projectId } = await importedProject()
     const session = await ChatSession.create({ projectId, messages: [], is_pipeline: true })
-    const res = await c.post("/steps/B-0.1/run", { session_id: String(session._id), base_version: await c.spineVersion() })
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("STEP_NOT_RUNNABLE")
-  })
-
-  it("bật Brief ⇒ enabled + step pending, hiện ở /steps; tắt lại ⇒ hidden + skipped", async () => {
-    const { c, projectId } = await importedProject()
-    const on = plan(await c.patch("/step-plan", { step_id: "B-0.1", enabled: true }))
-    expect(on.find((s) => s.step_id === "B-0.1")).toMatchObject({ state: "enabled", reason: "Người dùng bật thêm" })
-    expect((await spineRepository.get(projectId))!.steps.find((s) => s.id === "B-0.1")?.status).toBe("pending")
-    expect(((await c.get("/steps")).body.data.steps as { id: string }[]).some((s) => s.id === "B-0.1")).toBe(true)
-
-    const off = plan(await c.patch("/step-plan", { step_id: "B-0.1", enabled: false }))
-    expect(off.find((s) => s.step_id === "B-0.1")?.state).toBe("hidden")
+    const version = await c.spineVersion()
+    const attempts = [
+      await c.post("/steps/S-7.1/run", { session_id: String(session._id), base_version: version }),
+      await c.post("/steps/S-7.1/gate", { session_id: String(session._id), base_version: version, action: "accept" }),
+      await c.patch("/step-plan", { step_id: "B-0.1", enabled: true })
+    ]
+    for (const res of attempts) {
+      expect(res.status, JSON.stringify(res.body)).toBe(409)
+      expect(res.body.error.code).toBe("MODE1_NO_STEPS")
+    }
+    expect(await c.spineVersion()).toBe(version)
     expect((await spineRepository.get(projectId))!.steps.find((s) => s.id === "B-0.1")?.status).toBe("skipped")
-    // bật lại lần nữa vẫn được (không có dữ liệu)
-    plan(await c.patch("/step-plan", { step_id: "B-0.1", enabled: true }))
-  })
-
-  it("tắt step đầu mục FPT ⇒ 409 CORE_STEP_REQUIRED; step lạ ⇒ 404 STEP_NOT_IN_PLAN; body sai ⇒ 400", async () => {
-    const { c } = await importedProject()
-    const core = await c.patch("/step-plan", { step_id: "S-7.1", enabled: false })
-    expect(core.status).toBe(409)
-    expect(core.body.error.code).toBe("CORE_STEP_REQUIRED")
-    const unknown = await c.patch("/step-plan", { step_id: "S-99.9", enabled: true })
-    expect(unknown.status).toBe(404)
-    expect(unknown.body.error.code).toBe("STEP_NOT_IN_PLAN")
-    expect((await c.patch("/step-plan", { step_id: "", enabled: true })).status).toBe(400)
-    // bật step đã applied ⇒ không đổi gì
-    const same = plan(await c.patch("/step-plan", { step_id: "S-7.1", enabled: true }))
-    expect(same.find((s) => s.step_id === "S-7.1")?.state).toBe("applied")
   })
 })

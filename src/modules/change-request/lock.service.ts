@@ -6,6 +6,7 @@
 
 import mongoose from "mongoose"
 import { Mode1Error } from "../import/mode1.errors.js"
+import { pathLabel } from "../spine/human-labels.js"
 import { SpineLock } from "./spine-lock.model.js"
 
 const isDuplicateKey = (err: unknown): boolean => typeof err === "object" && err !== null && (err as { code?: unknown }).code === 11000
@@ -17,7 +18,7 @@ export interface PathLock {
 
 export const pathLocked = (locked: PathLock[]): Mode1Error => {
   const first = locked[0]
-  return new Mode1Error("PATH_LOCKED", first ? `${first.path} đang được ${first.cr_id} sửa` : "Phần tử đang được change request khác sửa", { locked })
+  return new Mode1Error("PATH_LOCKED", first ? `${pathLabel(first.path)} đang được ${first.cr_id} sửa` : "Phần tử đang được change request khác sửa", { locked })
 }
 
 export const lockPaths = async (projectId: string | mongoose.Types.ObjectId, crId: string, paths: string[]): Promise<void> => {

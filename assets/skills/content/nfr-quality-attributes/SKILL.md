@@ -85,8 +85,8 @@ retention periods, key rotation intervals, audit-log horizons.
 3. `metric`/`threshold` are omitted entirely for `descriptive` rows, never set to `""`.
 4. One requirement per row: "fast and always available" is two rows.
 5. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
-6. Fast mode: take the table default plus an `assumptions[]` entry; Coaching mode leaves the number for
-   Elicit (`draft-to-ops` rule 10).
+6. No number from the user: take the table default plus an `assumptions[]` entry (`draft-to-ops`
+   rule 10).
 
 ## Example (S-6.4, production × high)
 

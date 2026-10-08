@@ -58,6 +58,12 @@ export class DocxPackage {
     return doc
   }
 
+  /** Nội dung nhị phân của một part (ảnh `word/media/*`…) — không có ⇒ `null`. Mode 1 v3 phase 5 (T3). */
+  async binary(name: string): Promise<Buffer | null> {
+    const file = this.zip.file(name)
+    return file ? file.async("nodebuffer") : null
+  }
+
   async requireXml(name: string): Promise<Document> {
     const doc = await this.xml(name)
     if (!doc) throw new OoxmlError("PART_MISSING", `Thiếu part ${name}`)

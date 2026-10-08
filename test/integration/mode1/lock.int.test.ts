@@ -129,7 +129,7 @@ describe("khoá theo vòng đời CR", () => {
   it("ghi (write) ⇒ mở hết khoá", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr, submitted } = await crToReview(c)
-    for (const g of submitted.groups) detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() }))
+    for (const g of submitted.groups) detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(detail(await c.get(cr)).change_request.status).toBe("written")
     expect(await lockedPaths(projectId, crId)).toEqual([])
     expect(await SpineLock.countDocuments({ projectId })).toBe(0)

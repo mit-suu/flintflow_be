@@ -15,6 +15,7 @@ import {
 } from "./prompt-assets.js"
 import { getSkill, getPromptTemplate } from "./prompt-registry.service.js"
 import { OUTPUT_SCHEMA_BY_ACTION_TYPE } from "./response-parser.js"
+import { UI_TERM_BLACKLIST, USE_CASE_VERB_BLACKLIST } from "../../modules/spine/deterministic-check.js"
 
 beforeEach(() => {
   invalidatePromptAssetCache()
@@ -63,21 +64,23 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 
   // T21: prompt phẳng chỉ còn cho action ngoài pipeline — prompt section-based cũ đã xoá
   it("chỉ còn prompt của CHAT và SUMMARIZE_DOCUMENT", () => {
-    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT])
+    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT, ActionType.TRANSLATE])
   })
 })
 
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 37 skill: 15 action · 15 content · 5 renderer · 2 output", () => {
+  it("đủ 39 skill: 17 action · 15 content · 5 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
     // và content/brief-analysis (S-1.1/1.3/1.4, T20) tách khỏi project-classifier.
     // +5 action khung mode 1 (FLF-171): import-extract, import-semantic-check, cr-clarify, cr-propose, cr-consistency.
-    expect(listSkillAssets()).toHaveLength(37)
-    expect(byKind("action")).toBe(15)
+    // +1 action mode 1 v3 phase 5: import-extract-diagram (Gemini đọc ảnh diagram).
+    // +1 action mode 1 v3 phase 7: cr-material-image (Gemini đọc ảnh tài liệu bổ sung của CR).
+    expect(listSkillAssets()).toHaveLength(39)
+    expect(byKind("action")).toBe(17)
     expect(byKind("content")).toBe(15)
     expect(byKind("renderer")).toBe(5)
     expect(byKind("output")).toBe(2)
@@ -128,13 +131,16 @@ describe("skill trên đĩa (assets/skills)", () => {
   // FLF-171: skill action mode 1 là khung ở P1 (plan mode 1 §5.7); P2 đã viết nội dung cả 5 skill nên tập này rỗng.
   const MODE1_SKELETON_ACTION = new Set<string>([])
 
-  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng; skill còn lại là stub", () => {
+  // Skill cần quy trình suy luận dài hơn mức chung (quyết định chiều/bản số từng quan hệ ERD)
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 250 }
+
+  it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE); skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
       const dir = s.dir.replace(/\\/g, "/")
       if ((s.kind === "action" && !MODE1_SKELETON_ACTION.has(dir)) || WRITTEN_NON_ACTION.has(dir)) {
         expect(s.stub, `${s.dir} không được là stub`).toBe(false)
         const lines = fs.readFileSync(path.join(getSkillsDir(), s.dir, "SKILL.md"), "utf-8").split("\n")
-        expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(150)
+        expect(lines.length, `${s.dir}: ${lines.length} dòng`).toBeLessThanOrEqual(LINE_LIMIT_OVERRIDE[dir] ?? 150)
       } else {
         expect(s.stub, `${s.dir} phải đánh dấu stub`).toBe(true)
       }
@@ -218,5 +224,80 @@ describe("computeSkillAssetVersion", () => {
     fs.appendFileSync(path.join(tmp, "references", "invariants.md"), "\nextra line\n")
 
     expect(computeSkillAssetVersion(tmp, refs)).not.toBe(before)
+  })
+})
+
+describe("fallbackModels (model dự phòng khi quá tải)", () => {
+  it("skill Gemini đọc ảnh khai 2 model dự phòng, tới providerConfig; skill không khai ⇒ không có", async () => {
+    for (const action of [ActionType.IMPORT_EXTRACT_DIAGRAM, ActionType.CR_MATERIAL_IMAGE]) {
+      const { providerConfig } = await getPromptTemplate(action)
+      expect(providerConfig).toMatchObject({ provider: "gemini", model: "gemini-3.5-flash", fallbackModels: ["gemini-3.6-flash", "gemini-3.5-flash-lite"] })
+    }
+    expect((await getPromptTemplate(ActionType.CR_PROPOSE)).providerConfig.fallbackModels).toBeUndefined()
+  })
+})
+
+describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản tiếng Anh", () => {
+  const skill = (dir: string): string => fs.readFileSync(path.join(getSkillsDir(), dir, "SKILL.md"), "utf-8")
+
+  it("product-brief: ví dụ B-1.1 không set project.vision/goals, dùng addendum topic vision + goals", () => {
+    const text = skill("content/product-brief")
+    expect(text).not.toMatch(/"path": "project\.(vision|goals)"/)
+    expect(text).toContain('"topic": "vision"')
+    expect(text).toContain('"topic": "goals"')
+    expect(text).toContain("B-1 never writes `project.vision`")
+    expect(text).toContain('path: "addendum[id=<that vision/goals entry>]"')
+  })
+
+  it("brief-analysis: S-1.1 luôn dựng project.vision + goals 1:1 từ addendum và được ghi addendum", () => {
+    const text = skill("content/brief-analysis")
+    expect(text).toContain("**Always** `set project.vision`")
+    expect(text).toContain("1:1")
+    expect(getSkillIndex().get("brief-analysis")?.writes).toContain("addendum[]")
+  })
+
+  it("draft-to-ops: ví dụ giả định không trỏ project.vision", () => {
+    expect(skill("action/draft-to-ops")).not.toMatch(/"path": "project.(vision|goals)"/)
+  })
+
+  it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
+    expect(skill("action/apply-change-op")).toContain("brief_core")
+  })
+})
+
+describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng usecase_name_* kiểm", () => {
+  const skill = (dir: string): string => fs.readFileSync(path.join(getSkillsDir(), dir, "SKILL.md"), "utf-8").replace(/\s+/g, " ")
+
+  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s liệt kê đủ động từ cấm (U3) và thuật ngữ giao diện (U5)", (dir) => {
+    const text = skill(dir)
+    for (const term of [...USE_CASE_VERB_BLACKLIST, ...UI_TERM_BLACKLIST]) expect(text, term).toMatch(new RegExp(`\\b${term}\\b`))
+    expect(text).toMatch(/at most 5 words/)
+  })
+
+  it.each(["content/actors-and-usecases", "action/apply-change-op"])("%s: U4 nói đúng luật code — chỉ cấm actor làm chủ ngữ", (dir) => {
+    const text = skill(dir)
+    expect(text).toContain("never the subject")
+    expect(text).toContain("Create Student Record")
+    expect(text).not.toMatch(/no actor name/i)
+  })
+})
+
+describe("FLF-260: skill chat viết theo ngôn ngữ trả lời nối ở cuối prompt", () => {
+  const skill = (dir: string): string => fs.readFileSync(path.join(getSkillsDir(), dir, "SKILL.md"), "utf-8").replace(/\s+/g, " ")
+
+  it.each(["action/elicit-loop", "action/draft-to-ops", "action/apply-change-op"])("%s trỏ tới mục Reply language, thiếu mục đó thì tiếng Việt", (dir) => {
+    const text = skill(dir)
+    expect(text).toContain("`## Reply language` section")
+    expect(text).toContain("Vietnamese when it is absent")
+  })
+
+  it("thẻ tuân thủ có cặp nhãn tiếng Anh cố định — server dò chữ 'law' trong câu trả lời đã chốt để ghi project.stakes", () => {
+    expect(skill("action/elicit-loop")).toContain('(English reply: "Internal rules only" / "Internal rules and the law")')
+    // draft-to-ops phải nhận ra vế nội bộ bằng tiếng Anh: vế này không tự quyết internal hay production
+    expect(skill("action/draft-to-ops")).toContain('English reply: "Internal rules only"')
+  })
+
+  it("trích đoạn chốt câu hỏi mở không bị dịch theo ngôn ngữ trả lời — server chỉ nhận chuỗi con của tin user", () => {
+    expect(skill("action/elicit-loop")).toContain("never paraphrased, translated or shortened")
   })
 })

@@ -1,8 +1,8 @@
 ---
 skill_id: deterministic-check
 kind: action
-version: 1.0.0
-description: 10 red-flag rules + 6 yellow cardinality rules computed on the key graph — no model call
+version: 1.1.0
+description: 11 red-flag rules + 12 yellow rules computed on the key graph — no model call
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
 maxTokens: 1024
@@ -35,8 +35,8 @@ Contract for `deterministic-check.ts` (T09). A pure function over the Spine key 
 
 ## Rules
 
-- 10 red rules: `references/red-rules.md`
-- 6 yellow cardinality rules: `references/yellow-rules.md`
+- 11 red rules: `references/red-rules.md`
+- 12 yellow rules (cardinality, use case relations, naming, system name): `references/yellow-rules.md`
 
 Every red flag **must** carry an executable `remediation_step`. A red rule without one is a defect: the user would be stuck at the final gate.
 

@@ -17,12 +17,14 @@
 
 import type { Addendum, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
+import { isBriefPhase } from "../spine/brief-core.js"
 import { listSections, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { DOCUMENTS_READ, getStep } from "./step-registry.js"
+import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
 
@@ -41,7 +43,7 @@ const skillFor = (skill: string, ids: string[]): [string, string][] => ids.map((
 /** Step → skill content (khoá = id step không có `@`). Step không có trong bảng không Draft bằng model. */
 export const STEP_SKILLS: Readonly<Record<string, string>> = Object.freeze(
   Object.fromEntries([
-    ...skillFor("product-brief", ["B-0.1", "B-0.2", "B-0.3", "B-0.4", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6", "B-2.1", "B-2.2", "B-2.3"]),
+    ...skillFor("product-brief", ["B-0.1", "B-0.2", "B-0.3", "B-1.1", "B-1.2", "B-1.3", "B-1.4", "B-1.5", "B-1.6", "B-2.1", "B-2.2", "B-2.3"]),
     // XREQ T20→T11: S-1.2 là phân loại dự án; S-1.1/S-1.3/S-1.4 là đọc lại Brief (trích xuất, xung đột,
     // danh sách thiếu) — việc khác hẳn, skill khác (`brief-analysis`, T20).
     ...skillFor("project-classifier", ["S-1.2"]),
@@ -173,13 +175,30 @@ const addendumFor = (spine: Spine, stepId: string): Addendum[] => {
   return spine.addendum.filter((a) => sections.has(a.target_section))
 }
 
+/**
+ * Addendum cho lượt hỏi không có `StepContext` (phỏng vấn đầu giai đoạn, chat tự do) — `unit` là step (`B-1.3`) hoặc
+ * đơn vị giai đoạn (`B-1`, `S-5@S03`). Brief và S-1 thấy toàn bộ "Điều bạn đã kể", như lượt hỏi của step: thiếu nó thì
+ * AI hỏi lại điều user đã kể. Giai đoạn khác giữ như cũ (không nạp) — addendum ở đó lọc theo section của từng step.
+ */
+export const addendumForUnit = (spine: Spine, unit: string): AddendumForModel[] => {
+  const phase = unit.split("@")[0].replace(/\.\d+$/, "")
+  if (!phase.startsWith("B-") && phase !== "S-1") return []
+  return spine.addendum.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+}
+
+/**
+ * BUG-19: elicit gợi ý ngược với điều đã chốt (cọc 30% trong khi đã chốt 50.000₫; "tối đa 3 lịch/ngày"
+ * trong khi đã chốt 1 lịch đang chờ). Nguyên nhân: context của elicit không có `business_rules` và `nfrs`.
+ * Những gốc này luôn được đưa vào vòng hỏi, bất kể `reads` của step, ở dạng rút gọn.
+ */
+export const ELICIT_EXTRA_READS = ["business_rules:id,statement", "nfrs:id,statement,metric,threshold"] as const
+
 export interface StepProjection {
   step_id: string
   label_en: string
   skill: string | null
   writable: readonly string[]
   spine_version: number
-  working_mode: Spine["project"]["working_mode"]
   projection: Record<string, unknown>
   emptyFields: string[]
   addendum: AddendumForModel[]
@@ -195,6 +214,22 @@ export const ASSUMPTION_KEYS_READ = "assumptions:id,path,status"
 const readsWholeAssumptions = (raw: string): boolean =>
   raw === ASSUMPTIONS_WRITE || raw.startsWith(`${ASSUMPTIONS_WRITE}:`)
 
+/**
+ * Field còn trong schema (hợp đồng đóng băng) nhưng không còn được đọc. `project.working_mode` (FLF-220):
+ * AI tự quyết hỏi nhiều hay ít, nên field này luôn null — để trong projection thì mọi step đọc `project`
+ * đều thấy một "field trống" và gọi elicit vô ích, còn model thì hỏi user cách làm việc.
+ */
+const RETIRED_FIELDS: Readonly<Record<string, readonly string[]>> = { project: ["working_mode"] }
+
+const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
+  const retired = RETIRED_FIELDS[selector.path.join(".")]
+  if (!retired || !isRecord(value)) return value
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !retired.includes(key)))
+}
+
+/** Pha Brief không còn sở hữu `project.vision/goals` (nằm ở addendum lõi, S-1.1 dựng): không bao giờ là field "thiếu" của step B-*. */
+const BRIEF_UNOWNED_FIELDS: ReadonlySet<string> = new Set(["project.vision", "project.goals"])
+
 /** Phần thuần của `buildStepContext` — không DB. */
 export const projectStep = (spine: Spine, stepId: string): StepProjection => {
   const stepSpec = getStepSpec(stepId)
@@ -204,9 +239,13 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
 
   for (const raw of stepSpec.reads) {
     const selector = parseSelector(raw)
-    const value = selectValue(spine, selector, loop)
+    const value = withoutRetiredFields(selector, selectValue(spine, selector, loop))
     projection[raw] = value
     emptyFields.push(...emptyPaths(selector, value))
+  }
+  if (isBriefPhase(stepId)) {
+    const kept = emptyFields.filter((field) => !BRIEF_UNOWNED_FIELDS.has(field))
+    emptyFields.splice(0, emptyFields.length, ...kept)
   }
 
   // Step Draft nào cũng được ghi `assumptions[]` nhưng registry không khai `reads` cho nó: không thấy id đã có thì model
@@ -225,7 +264,6 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
     skill: stepSpec.skill,
     writable: stepSpec.writes,
     spine_version: spine.spine_version,
-    working_mode: spine.project.working_mode,
     projection,
     emptyFields,
     addendum: addendumFor(spine, stepId).map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
@@ -233,6 +271,18 @@ export const projectStep = (spine: Spine, stepId: string): StepProjection => {
 }
 
 // ─── có DB ───────────────────────────────────────────────────────
+
+/** Projection dành riêng cho vòng hỏi: projection của step + các gốc đã chốt (BUG-19). */
+export const elicitProjection = (spine: Spine, stepId: string): Record<string, unknown> => {
+  const { loop } = parseStepId(stepId)
+  const base = projectStep(spine, stepId).projection
+  const extra: Record<string, unknown> = {}
+  for (const raw of ELICIT_EXTRA_READS) {
+    if (raw in base) continue
+    extra[raw] = selectValue(spine, parseSelector(raw), loop)
+  }
+  return { ...base, ...extra }
+}
 
 export interface StepContext extends StepProjection {
   documents: string
@@ -253,17 +303,36 @@ export const TRANSCRIPT_TAIL_MESSAGES = 20
 
 const estimateTokens = (text: string): number => Math.ceil(text.length / 4)
 
-/** Chỉ tin nhắn gắn đúng step hiện tại (không phải toàn transcript). */
+/**
+ * Tin nhắn của step hiện tại, cộng lượt phỏng vấn đầu giai đoạn của nó (không phải toàn transcript). Lượt
+ * phỏng vấn lưu với `step` là đơn vị giai đoạn (`B-1`, `S-5@S03`); câu trả lời mở user gõ gộp một đoạn không
+ * vào được sổ quyết định, nên thiếu nó ở đây thì lượt soạn không bao giờ thấy điều user đã trả lời.
+ */
 const loadTranscriptTail = async (sessionId: string | null | undefined, stepId: string): Promise<string> => {
   if (!sessionId) return ""
   const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
-  const messages = (session?.messages ?? []).filter((m) => m.step === stepId).slice(-TRANSCRIPT_TAIL_MESSAGES)
+  const { phase, loop } = parseStepId(stepId)
+  const phaseUnit = loop ? `${phase}@${loop}` : phase
+  const messages = (session?.messages ?? []).filter((m) => m.step === stepId || m.step === phaseUnit).slice(-TRANSCRIPT_TAIL_MESSAGES)
   return messages.map((m) => `${m.role === "user" ? "User" : "AI"}: ${m.content}`).join("\n")
+}
+
+/**
+ * Biến prompt trí nhớ của vòng hỏi (FLF-232): `recent_turns` = đuôi transcript của CẢ session (mọi step, không lọc theo
+ * step như `transcriptTail`), `conversation_summary` = tóm tắt dựng không gọi model. Không có session ⇒ chỉ phần từ Spine.
+ */
+export const loadConversationVariables = async (
+  sessionId: string | null | undefined,
+  spine: Pick<Spine, "project" | "decisions">
+): Promise<{ recent_turns: string; conversation_summary: string }> => {
+  const session = sessionId ? await ChatSession.findById(sessionId, { messages: 1 }).lean() : null
+  const transcript: TranscriptMessage[] = (session?.messages ?? []).map((m) => ({ role: m.role, content: m.content, ...(m.step ? { step: m.step } : {}) }))
+  return { recent_turns: formatRecentTurns(transcript), conversation_summary: buildConversationSummary(spine, transcript) }
 }
 
 export const buildStepContext = async (projectId: string, stepId: string, options: BuildStepContextOptions = {}): Promise<StepContext> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
 
   const { projectId: _projectId, ...spine } = record
   const projected = projectStep(spine, stepId)

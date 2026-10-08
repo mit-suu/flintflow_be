@@ -62,14 +62,21 @@ stub: true
 
 ## S-8.3 Record of Changes
 
-`section-renderer.buildRecordOfChanges` gộp `changes[]` theo `txn` thành
-`RenderedDocument.recordOfChanges[]` (KHÔNG phải một section trong `sections[]`
-— `docx-writer.ts` render §I từ field riêng này). Mỗi dòng: ngày (`at` của
-change đầu lô), người ghi (`by`, tra qua `User.name`/email theo lô, "System"
-cho `by="system"`, id rút gọn nếu user đã bị xoá), loại thay đổi suy từ tập
-`op` trong lô (A/M/D), mô tả gộp từ `reason[]` không trùng, `version` =
-`v0.<i+2>` (`i` = thứ tự txn 0-based) vì Spine bắt đầu ở `spine_version=1` và
-mỗi txn tăng đúng 1 — dòng cuối khớp `v0.<spine_version>` của chính tài liệu.
+`section-renderer.buildRecordOfChanges` dựng `RenderedDocument.recordOfChanges[]`
+(KHÔNG phải một section trong `sections[]` — `docx-writer.ts` render §I từ field
+riêng này). §I là lịch sử cho người đọc, không phải nhật ký từng txn:
+
+- Chỉ giữ lô chạm `baselines[]` hoặc có `reason` do người viết (bỏ sổ sách runner).
+- Lô **liền nhau, cùng ngày, cùng giai đoạn** (`S-3.2` ⇒ `S-3`, `S-5.n@màn` ⇒ `S-5`)
+  gộp thành một dòng; lô không gắn step nhập vào dòng liền trước cùng ngày.
+  Lô ký baseline luôn là dòng riêng.
+- Mô tả dòng của quy trình theo kiểu FPT: `Create <tên giai đoạn>` lần đầu, `Update <tên giai đoạn>`
+  các lần sau — không in `reason` từng op (nhật ký của model). Sau baseline, mô tả là lời user:
+  tối đa 3 reason không trùng, `; and N more changes`, bỏ lý do `Cascade:`.
+- Người ghi: tên không trùng của mọi người trong dòng (`User.name`/email,
+  "System" cho `by="system"`, id rút gọn nếu user đã bị xoá). A/M/D suy từ tập `op`.
+- `version` đánh theo dòng: `v0.1, v0.2…` trước baseline; dòng ký lấy mã baseline
+  (`v1.0`); sau đó `v1.0.1, v1.0.2…` tới baseline kế tiếp.
 `assemble.service.ts` đọc `changes[]` cho §I thẳng từ `Change` model (projection
 `{txn, at, by, reason, op, step_id}`, không qua `spine.repository.listChanges`
 — không cần `before`/`value` ở đây).

@@ -44,6 +44,7 @@ export const renderedDocumentSchema = z
     version: z.string().min(1),
     source: z.enum(["draft", "baseline"]),
     watermark: z.literal("DRAFT").optional(),
+    format: z.literal("fpt").optional(),
     generatedAt: z.iso.datetime({ offset: true }),
     sections: z.array(
       z.strictObject({

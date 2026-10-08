@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import type { Response } from "express"
 
 /** Store trong bộ nhớ thay model Mongoose ChatSession. */
 const db = vi.hoisted(() => {
@@ -6,23 +7,34 @@ const db = vi.hoisted(() => {
     _id: string
     projectId: string
     messages: unknown[]
-    isActive: boolean
     is_pipeline: boolean
+    /** FLF-260: như schema thật — mặc định `null` (phiên chưa rõ ngôn ngữ). */
+    reply_language: "vi" | "en" | null
     createdAt: string
   }
   const rows: Doc[] = []
   let seq = 0
   const copy = <X>(x: X): X => structuredClone(x)
-  const withMethods = (doc: Doc | null) => (doc ? { ...copy(doc), save: async function (this: Doc) { Object.assign(rows.find((r) => r._id === this._id)!, this) } } : null)
+  const withMethods = (doc: Doc | null) =>
+    doc
+      ? {
+          ...copy(doc),
+          // Chỉ ghi dữ liệu, không ghi chính hàm `save` vào store (lượt findById sau sẽ structuredClone được)
+          save: async function (this: Doc & { save?: unknown }) {
+            const { save: _save, ...data } = this
+            Object.assign(rows.find((r) => r._id === this._id)!, data)
+          }
+        }
+      : null
 
   const ChatSession = {
     create: async (input: Partial<Doc>) => {
       const doc: Doc = {
-        _id: `s${++seq}`,
+        _id: String(++seq).padStart(24, "a"), // id hợp lệ ObjectId (service kiểm isValidObjectId)
         projectId: String(input.projectId),
         messages: input.messages ?? [],
-        isActive: input.isActive ?? true,
         is_pipeline: input.is_pipeline ?? false,
+        reply_language: input.reply_language ?? null,
         createdAt: new Date(Date.now() + seq).toISOString()
       }
       rows.push(doc)
@@ -33,6 +45,15 @@ const db = vi.hoisted(() => {
         ? { _id: "x" }
         : null,
     findById: async (id: string, _proj?: unknown) => withMethods(rows.find((r) => r._id === id) ?? null),
+    /** Chỉ hỗ trợ projection `{ messages: { $slice: -1 } }` mà `getChatSessions` dùng. */
+    find: (filter: { projectId: string }, projection?: { messages?: { $slice: number } }) => ({
+      sort: async (sortSpec: { createdAt?: number }) => {
+        const matched = rows.filter((r) => r.projectId === String(filter.projectId)).map(copy)
+        matched.sort((a, b) => (sortSpec.createdAt === -1 ? b.createdAt.localeCompare(a.createdAt) : a.createdAt.localeCompare(b.createdAt)))
+        const slice = projection?.messages?.$slice
+        return slice === undefined ? matched : matched.map((r) => ({ ...r, messages: r.messages.slice(slice) }))
+      }
+    }),
     findOne: (filter: Partial<Doc>) => ({
       sort: async (sortSpec: { createdAt?: number }) => {
         const matched = rows.filter((r) => filter.projectId === undefined || r.projectId === String(filter.projectId))
@@ -40,8 +61,8 @@ const db = vi.hoisted(() => {
         return withMethods(matched[0] ?? null)
       }
     }),
-    deleteOne: async (filter: { _id: string }) => {
-      const idx = rows.findIndex((r) => r._id === filter._id)
+    deleteOne: async (filter: { _id: string; is_pipeline?: boolean }) => {
+      const idx = rows.findIndex((r) => r._id === filter._id && (filter.is_pipeline === undefined || r.is_pipeline === filter.is_pipeline))
       if (idx < 0) return { deletedCount: 0 }
       rows.splice(idx, 1)
       return { deletedCount: 1 }
@@ -82,9 +103,22 @@ vi.mock("../spine/change.service.js", async (importOriginal) => {
 const spineRepoMocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock("../spine/spine.repository.js", () => spineRepoMocks)
 
+/** FLF-260: ngôn ngữ tài khoản (`User.locale`) — mặc định chưa chọn. */
+const account = vi.hoisted(() => ({ locale: null as "vi" | "en" | null }))
+vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: vi.fn(async () => account.locale) }))
+/** FLF-260: `submitAnswer` giả để xem ngôn ngữ phiên đã ghi trước khi tin chuyển cho step (mặc định: không có lượt chờ). */
+const stepMocks = vi.hoisted(() => ({ submitAnswer: vi.fn() }))
+vi.mock("../pipeline/step-runner.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../pipeline/step-runner.service.js")>()
+  return { ...actual, submitAnswer: stepMocks.submitAnswer }
+})
+
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-import { createChatSession, deleteChatSession, sendMessageAndGetResponse, assertChatSessionOwnership } from "./chat-session.service.js"
+import { createChatSession, deleteChatSession, getChatSessions, sendMessageAndGetResponse, sendMessageStream, assertChatSessionOwnership, PIPELINE_SESSION_LOCKED } from "./chat-session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { TransactionRejectedError } from "../spine/op-engine.js"
+import { previewPayload } from "../spine/change-transcript.js"
+import type { ChangePreviewResult } from "../spine/change.service.js"
 
 const PROJECT = "650000000000000000000001"
 const OTHER_PROJECT = "650000000000000000000002"
@@ -95,36 +129,53 @@ beforeEach(() => {
   aiMocks.executeAiActionStream.mockReset()
   changeMocks.preview.mockReset()
   spineRepoMocks.get.mockReset()
+  stepMocks.submitAnswer.mockReset().mockResolvedValue(false)
+  account.locale = null
   // T20: `tryAnswerRunningStep` đọc `progress.current_step` ⇒ stub phải có `progress` như bản ghi thật
-  spineRepoMocks.get.mockResolvedValue({ projectId: PROJECT, spine_version: 7, progress: { current_step: null } })
+  // FLF-244: CHAT/lệnh sửa dựng tóm tắt từ `project` + `decisions` + `addendum` ⇒ stub có đủ các field đó
+  spineRepoMocks.get.mockResolvedValue({
+    projectId: PROJECT,
+    spine_version: 7,
+    progress: { current_step: null },
+    project: { vision: null, goals: [] },
+    decisions: [],
+    addendum: []
+  })
 })
 
 describe("chat-session bất biến 7 (srs-spine.md §6)", () => {
-  it("createChatSession: session đầu giữ is_pipeline=true, session sau false — không tắt isActive của session khác", async () => {
+  it("createChatSession: session đầu giữ is_pipeline=true, session sau false, session đầu vẫn là pipeline", async () => {
     const first = await createChatSession(PROJECT)
     const second = await createChatSession(PROJECT)
     expect(first.is_pipeline).toBe(true)
     expect(second.is_pipeline).toBe(false)
-    // Tạo session thứ hai không được tắt isActive của session đầu (bỏ hành vi updateMany cũ)
-    const reloadedFirst = db.rows.find((r) => r._id === String(first._id))!
-    expect(reloadedFirst.isActive).toBe(true)
+    expect(db.rows.find((r) => r._id === String(first._id))!.is_pipeline).toBe(true)
   })
 
-  it("deleteChatSession: xoá session pipeline ⇒ promote session gần nhất còn lại thành pipeline", async () => {
+  it("FLF-244: deleteChatSession phiên pipeline ⇒ 409 PIPELINE_SESSION_LOCKED, không xoá, không promote", async () => {
     const pipeline = await createChatSession(PROJECT)
-    const second = await createChatSession(PROJECT)
-    const third = await createChatSession(PROJECT)
-    expect(pipeline.is_pipeline).toBe(true)
+    await createChatSession(PROJECT)
 
-    await deleteChatSession(String(pipeline._id))
+    const err = await deleteChatSession(String(pipeline._id)).catch((e: unknown) => e)
 
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(409)
+    expect((err as ApiError).code).toBe(PIPELINE_SESSION_LOCKED)
     const remaining = db.rows.filter((r) => r.projectId === PROJECT)
     expect(remaining).toHaveLength(2)
-    const pipelineNow = remaining.filter((r) => r.is_pipeline)
-    expect(pipelineNow).toHaveLength(1)
-    // Gần nhất theo createdAt là session tạo sau cùng còn lại (third)
-    expect(pipelineNow[0]._id).toBe(String(third._id))
-    void second
+    expect(remaining.filter((r) => r.is_pipeline).map((r) => r._id)).toEqual([String(pipeline._id)])
+  })
+
+  it("FLF-244: getChatSessions trả mỗi phiên kèm đúng tin cuối, mới nhất trước", async () => {
+    const first = await createChatSession(PROJECT)
+    const second = await createChatSession(PROJECT)
+    db.rows.find((r) => r._id === String(first._id))!.messages = [{ role: "user", content: "a" }, { role: "ai", content: "b" }]
+
+    const list = await getChatSessions(PROJECT)
+
+    expect(list.map((s) => String(s._id))).toEqual([String(second._id), String(first._id)])
+    expect(list[1].messages).toEqual([{ role: "ai", content: "b" }])
+    expect(list[0].messages).toEqual([])
   })
 
   it("deleteChatSession: xoá session không pipeline không đụng tới session pipeline hiện có", async () => {
@@ -188,7 +239,7 @@ describe("assertChatSessionOwnership (F5 — chặn IDOR: chatId phải thuộc 
   })
 })
 
-describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow", () => {
+describe("T17 — lệnh sửa đi qua change flow (mọi session)", () => {
   const USER = "650000000000000000000010"
 
   it("lệnh sửa: gọi change.service.preview, ghi thẻ preview vào transcript, KHÔNG gọi CHAT", async () => {
@@ -214,7 +265,9 @@ describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow"
 
     expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, {
       instruction: "Đổi tên actor A01 thành Product Owner",
-      base_version: 7
+      base_version: 7,
+      chat_history: "",
+      reply_language: "vi"
     })
     expect(aiMocks.executeAiAction).not.toHaveBeenCalled()
 
@@ -235,14 +288,27 @@ describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow"
     expect(aiMocks.executeAiAction).toHaveBeenCalledWith(ActionType.CHAT, expect.anything(), PROJECT, USER)
   })
 
-  it("session pipeline không bị chặn: lệnh sửa vẫn đi CHAT (pipeline sửa qua gate/step runner)", async () => {
+  it("FLF-201 (BUG-09): lệnh sửa trong session pipeline cũng đi change flow, không để CHAT hứa suông", async () => {
     const pipeline = await createChatSession(PROJECT)
     aiMocks.executeAiAction.mockResolvedValue({ data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 })
+    changeMocks.preview.mockResolvedValue({
+      ok: true,
+      txn: "t",
+      base_version: 7,
+      ops: [],
+      changes: [{ op: "add", path: "use_cases[id=UC18]", before: { _absent: true }, value: { id: "UC18" }, reason: null }],
+      violations: [],
+      referrers: [],
+      branch: "dependent",
+      preview_id: "pv-2"
+    })
 
-    await sendMessageAndGetResponse(PROJECT, String(pipeline._id), "Đổi tên actor A01", "overview", USER)
+    const session = await sendMessageAndGetResponse(PROJECT, String(pipeline._id), "Thêm use case nhắc lịch hẹn", "overview", USER)
 
-    expect(changeMocks.preview).not.toHaveBeenCalled()
-    expect(aiMocks.executeAiAction).toHaveBeenCalled()
+    expect(changeMocks.preview).toHaveBeenCalled()
+    expect(aiMocks.executeAiAction, "không gọi CHAT: câu trả lời là bản xem trước thật").not.toHaveBeenCalled()
+    const last = session.messages[session.messages.length - 1] as { role: string; content: string }
+    expect(JSON.parse(last.content)).toMatchObject({ kind: "change_preview" })
   })
 
   it("project chưa có Spine ⇒ không chuyển hướng, vẫn CHAT", async () => {
@@ -266,5 +332,243 @@ describe("T17 — lệnh sửa từ session KHÔNG pipeline đi qua change flow"
 
     const last = session.messages[session.messages.length - 1] as { content: string }
     expect(JSON.parse(last.content)).toMatchObject({ kind: "change_error", reply: "Không đủ credit" })
+  })
+
+  it("FLF-247: lô op bị từ chối ⇒ change_error là câu thường, không path op", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    changeMocks.preview.mockRejectedValue(
+      new TransactionRejectedError("OP_INVALID", [{ rule: "path_not_resolved", message: "Không resolve được actors[id=A08]", path: "actors[id=A08]" }])
+    )
+
+    const session = await sendMessageAndGetResponse(PROJECT, String(plain._id), "Xoá actor A08", "overview", USER)
+
+    const last = session.messages[session.messages.length - 1] as { content: string }
+    const payload = JSON.parse(last.content) as { kind: string; reply: string }
+    expect(payload.kind).toBe("change_error")
+    expect(payload.reply).toBe("Không tìm thấy mục cần sửa. Hãy nói rõ tên mục (ví dụ: màn “Đặt lịch”, chức năng “Huỷ lịch”).")
+    expect(payload.reply).not.toContain("actors[")
+  })
+})
+
+describe("FLF-244 — ngữ cảnh CHAT: không lặp tin hiện tại, có tóm tắt hội thoại", () => {
+  const USER = "650000000000000000000010"
+  const reply = { data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 }
+  const historyOf = () => (aiMocks.executeAiAction.mock.calls[0][1] as { promptVariables: { chat_history: string; input_text: string } }).promptVariables
+
+  it("chat_history không chứa tin đang gửi (tin đó chỉ nằm ở input_text)", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    aiMocks.executeAiAction.mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Câu hỏi đầu tiên?", "overview", USER)
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Câu hỏi thứ hai?", "overview", USER)
+
+    const second = aiMocks.executeAiAction.mock.calls[1][1] as { promptVariables: { chat_history: string; input_text: string } }
+    expect(second.promptVariables.input_text).toBe("Câu hỏi thứ hai?")
+    expect(second.promptVariables.chat_history).toContain("User: Câu hỏi đầu tiên?")
+    expect(second.promptVariables.chat_history).not.toContain("Câu hỏi thứ hai?")
+  })
+
+  it("có Spine ⇒ chat_history mở đầu bằng tóm tắt (ý tưởng, điều đã chốt)", async () => {
+    await createChatSession(PROJECT)
+    const plain = await createChatSession(PROJECT)
+    spineRepoMocks.get.mockResolvedValue({
+      projectId: PROJECT,
+      spine_version: 7,
+      progress: { current_step: null },
+      project: { vision: "Ứng dụng đặt lịch cắt tóc", goals: [] },
+      decisions: [],
+      addendum: []
+    })
+    aiMocks.executeAiAction.mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, String(plain._id), "Tài liệu đang thiếu gì?", "overview", USER)
+
+    expect(historyOf().chat_history).toMatch(/^Tóm tắt hội thoại trước: Ý tưởng: Ứng dụng đặt lịch cắt tóc/)
+  })
+})
+
+describe("FLF-260 — chat trả lời theo ngôn ngữ user đang viết", () => {
+  const USER = "650000000000000000000010"
+  const reply = { data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 }
+  const PREVIEW = {
+    ok: true,
+    txn: "t",
+    base_version: 7,
+    ops: [],
+    changes: [{ op: "set", path: "actors[id=A01].name", before: "Founder", value: "Product Owner", reason: null }],
+    violations: [],
+    referrers: [],
+    branch: "dependent",
+    preview_id: "pv-1"
+  }
+  /** Thẻ xem trước mà change flow ghi cho `PREVIEW` theo ngôn ngữ — so với hàm thật, không chép câu. */
+  const previewCard = (language: "vi" | "en") => previewPayload(PREVIEW as unknown as ChangePreviewResult, language)
+  const EN_FALLBACK = "Sorry, the system could not reach the AI. Please check the credit wallet or try again later."
+  const VI_FALLBACK = "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau."
+
+  /** Input của lượt gọi model thứ `i` (JSON: `executeAiAction`, SSE: `executeAiActionStream`). */
+  const inputOf = (mock: typeof aiMocks.executeAiAction, i: number) =>
+    mock.mock.calls[i][1] as { promptVariables: Record<string, unknown>; replyLanguage?: string }
+  const stored = (id: string) => db.rows.find((r) => r._id === id)!
+  /** Phiên phụ (không pipeline): tin đi thẳng CHAT hoặc change flow. */
+  const plainSession = async (): Promise<string> => {
+    await createChatSession(PROJECT)
+    return String((await createChatSession(PROJECT))._id)
+  }
+  const lastReply = (session: { messages: unknown[] }): string => {
+    const last = session.messages[session.messages.length - 1] as { content: string }
+    return (JSON.parse(last.content) as { reply: string }).reply
+  }
+  /** `res` giả của SSE: gom các sự kiện `data:` đã ghi. */
+  const sseResponse = () => {
+    const res = {
+      destroyed: false,
+      writableEnded: false,
+      events: [] as Array<Record<string, unknown>>,
+      write: (chunk: string) => {
+        res.events.push(JSON.parse(chunk.replace(/^data: /, "")) as Record<string, unknown>)
+        return true
+      },
+      end: () => {
+        res.writableEnded = true
+      }
+    }
+    return res
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("bấm chọn nhãn thẻ AI viết (có tên riêng tiếng Việt) ⇒ không đổi ngôn ngữ phiên; chữ user gõ thêm vẫn được đoán", async () => {
+    const id = await plainSession()
+    const card = {
+      data: { reply: "Which hospital pilots first?", questions: [{ question: "Which hospital?", options: [{ label: "Bạch Mai Hospital" }, { label: "Chợ Rẫy Hospital" }] }] },
+      tokensUsed: {},
+      cost: 0
+    }
+    aiMocks.executeAiAction.mockResolvedValueOnce(card).mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, id, "Which hospitals should we support first?", "overview", USER)
+    expect(stored(id).reply_language).toBe("en")
+    await sendMessageAndGetResponse(PROJECT, id, "Bạch Mai Hospital", "overview", USER)
+    expect(stored(id).reply_language).toBe("en")
+    expect(inputOf(aiMocks.executeAiAction, 1).replyLanguage).toBe("en")
+  })
+
+  it("tin tiếng Anh ⇒ CHAT nhận replyLanguage en, phiên ghi en; 'ok' giữ en; tin tiếng Việt đổi về vi", async () => {
+    const id = await plainSession()
+    aiMocks.executeAiAction.mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, id, "Can you explain what this document is still missing?", "overview", USER)
+    expect(inputOf(aiMocks.executeAiAction, 0).replyLanguage).toBe("en")
+    expect(stored(id).reply_language).toBe("en")
+
+    await sendMessageAndGetResponse(PROJECT, id, "ok", "overview", USER)
+    expect(inputOf(aiMocks.executeAiAction, 1).replyLanguage).toBe("en")
+    expect(stored(id).reply_language).toBe("en")
+
+    await sendMessageAndGetResponse(PROJECT, id, "Tài liệu này đang thiếu gì?", "overview", USER)
+    expect(inputOf(aiMocks.executeAiAction, 2).replyLanguage).toBe("vi")
+    expect(stored(id).reply_language).toBe("vi")
+  })
+
+  it("phiên mới gõ 'ok' ⇒ ngôn ngữ tài khoản, chưa chọn thì vi; phiên vẫn chưa ghi ngôn ngữ", async () => {
+    const id = await plainSession()
+    aiMocks.executeAiAction.mockResolvedValue(reply)
+
+    await sendMessageAndGetResponse(PROJECT, id, "ok", "overview", USER)
+    expect(inputOf(aiMocks.executeAiAction, 0).replyLanguage).toBe("vi")
+    expect(stored(id).reply_language).toBeNull()
+
+    account.locale = "en"
+    await sendMessageAndGetResponse(PROJECT, id, "ok", "overview", USER)
+    expect(inputOf(aiMocks.executeAiAction, 1).replyLanguage).toBe("en")
+    expect(stored(id).reply_language).toBeNull()
+  })
+
+  it("AI lỗi: phiên tiếng Anh ⇒ câu báo lỗi tiếng Anh; phiên chưa rõ ngôn ngữ ⇒ câu tiếng Việt như cũ", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const en = await plainSession()
+    aiMocks.executeAiAction.mockResolvedValueOnce(reply).mockRejectedValueOnce(new Error("AI down"))
+    await sendMessageAndGetResponse(PROJECT, en, "Can you explain the login flow?", "overview", USER)
+    expect(lastReply(await sendMessageAndGetResponse(PROJECT, en, "ok", "overview", USER))).toBe(EN_FALLBACK)
+
+    const fresh = await plainSession()
+    aiMocks.executeAiAction.mockRejectedValueOnce(new Error("AI down"))
+    expect(lastReply(await sendMessageAndGetResponse(PROJECT, fresh, "ok", "overview", USER))).toBe(VI_FALLBACK)
+  })
+
+  it("lệnh sửa tiếng Anh ⇒ phiên ghi en, preview nhận reply_language en, thẻ xem trước tiếng Anh, không gọi CHAT", async () => {
+    const id = await plainSession()
+    changeMocks.preview.mockResolvedValue(PREVIEW)
+
+    const session = await sendMessageAndGetResponse(PROJECT, id, "Please rename actor A01 to Product Owner", "overview", USER)
+
+    expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, {
+      instruction: "Please rename actor A01 to Product Owner",
+      base_version: 7,
+      chat_history: "",
+      reply_language: "en"
+    })
+    expect(stored(id).reply_language).toBe("en")
+    const last = session.messages[session.messages.length - 1] as { content: string }
+    expect(previewCard("en")).not.toEqual(previewCard("vi"))
+    expect(JSON.parse(last.content)).toEqual(previewCard("en"))
+    expect(aiMocks.executeAiAction).not.toHaveBeenCalled()
+  })
+
+  it("phiên pipeline đang chờ trả lời: ngôn ngữ phiên đã ghi xong trước khi tin chuyển cho step", async () => {
+    const id = String((await createChatSession(PROJECT))._id)
+    spineRepoMocks.get.mockResolvedValue({
+      projectId: PROJECT,
+      spine_version: 7,
+      progress: { current_step: "B-0.1" },
+      project: { vision: null, goals: [] },
+      decisions: [],
+      addendum: []
+    })
+    let languageAtHandoff: unknown
+    stepMocks.submitAnswer.mockImplementation(async () => {
+      languageAtHandoff = stored(id).reply_language
+      return true
+    })
+    const message = "We mostly sell to small clinics and they need online booking."
+
+    await sendMessageAndGetResponse(PROJECT, id, message, "B-0.1", USER)
+
+    expect(stepMocks.submitAnswer).toHaveBeenCalledWith(PROJECT, "B-0.1", id, { answers: [], message, messageRecorded: true })
+    expect(languageAtHandoff).toBe("en")
+    expect(aiMocks.executeAiAction).not.toHaveBeenCalled()
+  })
+
+  it("SSE: tin tiếng Anh ⇒ stream CHAT nhận replyLanguage en, phiên ghi en; 'ok' giữ en", async () => {
+    const id = await plainSession()
+    aiMocks.executeAiActionStream.mockResolvedValue(reply)
+
+    const first = sseResponse()
+    await sendMessageStream(PROJECT, id, "Could you explain how the booking flow works?", "overview", USER, first as unknown as Response)
+    expect(inputOf(aiMocks.executeAiActionStream, 0).replyLanguage).toBe("en")
+    expect(stored(id).reply_language).toBe("en")
+    expect(first.events[first.events.length - 1]).toMatchObject({ type: "finish", data: { reply: "ok" } })
+
+    await sendMessageStream(PROJECT, id, "ok", "overview", USER, sseResponse() as unknown as Response)
+    expect(inputOf(aiMocks.executeAiActionStream, 1).replyLanguage).toBe("en")
+    expect(stored(id).reply_language).toBe("en")
+  })
+
+  it("SSE: lệnh sửa tiếng Anh ⇒ preview nhận reply_language en, trả đúng một sự kiện finish", async () => {
+    const id = await plainSession()
+    changeMocks.preview.mockResolvedValue(PREVIEW)
+    const res = sseResponse()
+
+    await sendMessageStream(PROJECT, id, "Please rename actor A01 to Product Owner", "overview", USER, res as unknown as Response)
+
+    expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, expect.objectContaining({ reply_language: "en" }))
+    expect(stored(id).reply_language).toBe("en")
+    expect(res.events).toEqual([expect.objectContaining({ type: "finish", data: previewCard("en") })])
+    expect(aiMocks.executeAiActionStream).not.toHaveBeenCalled()
   })
 })

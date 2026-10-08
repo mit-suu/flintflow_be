@@ -26,31 +26,59 @@ import { randomUUID } from "node:crypto"
 import { env } from "../../config/env.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { Project } from "../project/project.model.js"
+import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { assemble } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { applyTransaction, CHANGE_RANGE_INVALID } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
-import { renderDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { sectionHasData } from "../spine/deterministic-check.js"
+import { FIXED_SECTIONS } from "../spine/section-registry.js"
+import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { buildStepContext, getStepSpec, parseStepId, type StepContext } from "./context-projection.js"
-import { draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
+import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
+import { buildConversationSummary } from "./conversation-summary.js"
+import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
+import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
+import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
+import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
+import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
+import { byLanguage, detectMessageLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { PIPELINE_ERROR_STATUS, gateActionSchema, type PipelineErrorCode, type StepEvent } from "./pipeline.dto.js"
+import { clientErrorMessage } from "../../shared/utils/client-error.js"
+import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
+import { summarizeChanges } from "./change-summary.js"
+import { gateTableOf } from "./gate-table.js"
+import { buildProgressReport, computeSectionStates } from "../spine/section-status.js"
+import { ownerStepOf } from "../spine/section-registry.js"
+import { AnswerDetached, CALL_LIMIT, NOT_PIPELINE_SESSION, RUN_CANCELLED_REASON, STEP_NOT_RUNNABLE } from "./step-runner.errors.js"
+import {
+  HEARTBEAT_MS,
+  acquireRun,
+  detachRun,
+  finishRun,
+  getRunState,
+  registerAbort,
+  touchRun,
+  unregisterAbort,
+  type PendingAnswerState,
+  type RunStage,
+  type RunStateDoc
+} from "./run-state.service.js"
 import type { z } from "zod"
 
 type GateAction = z.infer<typeof gateActionSchema>
 
-export const NOT_PIPELINE_SESSION = "NOT_PIPELINE_SESSION"
-export const STEP_NOT_RUNNABLE = "STEP_NOT_RUNNABLE"
-export const CALL_LIMIT = "CALL_LIMIT"
+export { CALL_LIMIT, NOT_PIPELINE_SESSION, STEP_NOT_RUNNABLE }
 export const CALLS_LIMIT = 8
 export const REGENERATE_LIMIT_COUNT = 3
 
@@ -73,15 +101,56 @@ export interface StepRunnerDeps {
   /** F8: đóng tab/mất mạng giữa chừng — controller abort khi `req` đóng. Runner kiểm trước mỗi lượt gọi
    *  model và khi đang chờ answer; không áp dụng cho `/gate` (không SSE, không có kết nối để huỷ). */
   signal?: AbortSignal
+  /** Người dùng chủ động chạy lại step đã `accepted` (B7 reopen) — xem `runStepRequestSchema.reopen`. */
+  reopen?: boolean
+  /** WP-4: cùng controller với `signal`, để `POST /cancel` huỷ được lượt này từ một request khác. */
+  abort?: AbortController
+  /** Tin nhắn chat khởi động lượt chạy (FLF-221: chat là nút chạy) — ghi vào transcript của step trước Intake. */
+  message?: string
+  /** `no_idea`: user chưa có ý tưởng — B-0.1 hỏi gợi mở bằng văn xuôi, không đưa lựa chọn. */
+  intent?: RunIntent
+  /** `runPhase` đã ghi `message` vào transcript (trước lượt phỏng vấn) — `runStep` không ghi lại lần nữa. */
+  messageRecorded?: boolean
+  /**
+   * FLF-260: ngôn ngữ trả lời biết trước — có thì cửa vào không đoán, không đọc phiên; tin user gõ giữa lượt (chat lúc chờ trả
+   * lời) vẫn được đoán lại. Test không nối Mongo truyền thẳng (`runPhase` giữ nguyên cho mọi bước); `/gate` nhận nó từ controller.
+   * Thiếu ⇒ đoán trên tin mở lượt ⇒ ngôn ngữ phiên ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt.
+   */
+  replyLanguage?: ReplyLanguage
+  /**
+   * FLF-222: chạy tiếp lượt đã tách khỏi kết nối từ ngay sau Elicit — không gọi model hỏi lại, dùng đúng câu đã
+   * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
+   */
+  resumeAnswers?: ResumeAnswers
+  /**
+   * `runPhase` quyết định bước có tự Accept (im) hay dừng chờ user NGAY khi gate_ready sẵn sàng, trước khi ghi run-state / phát
+   * cổng: bước im không được lộ một thẻ cổng có chip trong lúc server đang tự Accept (bấm ⇒ 409, gãy luồng). `quiet` ⇒ phát
+   * `gate_ready` với `auto: true`, lượt kết thúc `done`. Ngược lại `phase_gate` (nếu có) được ghi vào run-state để dựng lại cổng
+   * chốt cuối giai đoạn sau reload. Không truyền ⇒ mọi bước là cổng thật (`/run` lẻ, project cũ). `language`: ngôn ngữ trả lời
+   * bước vừa dùng (FLF-260) — câu đếm của cổng cuối giai đoạn nói cùng ngôn ngữ với tin của bước.
+   */
+  resolveGate?: (gate: Extract<StepEvent, { type: "gate_ready" }>, language: ReplyLanguage) => Promise<GateResolution>
 }
 
-export const defaultStepRunnerDeps = (): StepRunnerDeps => ({
-  draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId),
-  elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId),
-  reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId),
+export type GateResolution = { quiet: true } | { quiet: false; phaseGate?: Extract<StepEvent, { type: "phase_gate" }> }
+
+export interface ResumeAnswers {
+  run: RunStateDoc
+  asked: PendingAnswerState["asked"]
+  answers: AnswerInput[]
+  /** Chat tự do gửi kèm (FLF-221) — có thì chạy lại vòng hỏi, không đi thẳng tới lượt soạn. */
+  message?: string
+  base_answers_text: string
+}
+
+/** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
+export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => ({
+  draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { signal }),
+  elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId, { signal }),
+  reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, { signal }),
   assembleDocument: async (projectId, spineVersion) => {
     const project = await Project.findById(projectId, { name: 1 }).lean()
-    if (!project) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+    if (!project) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
     await assemble(projectId, project.name, spineVersion)
   }
 })
@@ -93,25 +162,83 @@ export const defaultStepRunnerDeps = (): StepRunnerDeps => ({
  */
 export const ASSEMBLE_STEP = "S-8.2"
 
-// ─── khoá in-process theo step (F2) ─────────────────────────────────
+// ─── tiến trình trực tiếp: stage + heartbeat (03-live-status-flow §5) ───
 
-const runningSteps = new Set<string>()
-const stepLockKey = (projectId: string, stepId: string): string => `${projectId}::${stepId}`
+/** Nhãn tiếng Việt của từng stage — "đang làm gì", nói việc chứ không nói quy trình nội bộ. */
+export const STAGE_LABELS: Readonly<Record<RunStage, string>> = Object.freeze({
+  intake: "Đọc dữ liệu của bước",
+  ask: "Hỏi bạn vài câu",
+  draft: "AI đang soạn nội dung",
+  check: "Kiểm tra quy tắc và tham chiếu",
+  render: "Vẽ lại sơ đồ",
+  gate: "Chờ bạn duyệt"
+})
 
-/** Chiếm khoá step. 409 STEP_NOT_RUNNABLE nếu step đang chạy dở ở một request khác (cùng tiến trình). */
-export const acquireStepLock = (projectId: string, stepId: string): void => {
-  const key = stepLockKey(projectId, stepId)
-  if (runningSteps.has(key)) {
-    throw new ApiError(409, `Step ${stepId} đang được xử lý ở một request khác`, STEP_NOT_RUNNABLE)
+/**
+ * Một lượt chạy đang mở: phát sự kiện SSE và ghi trạng thái vào `step_runs` để reload dựng lại được
+ * (BUG-07), đồng thời gia hạn khoá (BUG-05). Ghi DB là fire-and-forget với sự kiện thường; trạng thái quan
+ * trọng (đang chờ trả lời, gate) thì `await` để không mất nếu tiến trình chết ngay sau đó.
+ */
+export interface RunTracker {
+  runId: string
+  startedAt: number
+  emit: Emit
+  stage: (stage: RunStage, extra?: { detail_vi?: string; batch?: { i: number; n: number } }) => void
+  save: (patch: Parameters<typeof touchRun>[3]) => Promise<void>
+  /** Phát `heartbeat` mỗi `HEARTBEAT_MS` trong lúc chờ model/render; luôn dọn ở `finally`. */
+  beat: <T>(stage: RunStage, run: () => Promise<T>) => Promise<T>
+}
+
+export const createTracker = (projectId: string, stepId: string, runId: string, emit: Emit): RunTracker => {
+  const startedAt = Date.now()
+  let currentStage: RunStage = "intake"
+
+  // Mỗi sự kiện lưu kèm `at` (ISO) để sau reload nhật ký hoạt động tính lại được thời lượng từng việc (FLF-221).
+  const stamp = (event: StepEvent): StepEvent & { at: string } => ({ ...event, at: new Date().toISOString() })
+
+  const tracked: Emit = (event) => {
+    emit(event)
+    if (event.type !== "heartbeat") void touchRun(projectId, stepId, runId, { appendEvent: stamp(event) })
   }
-  runningSteps.add(key)
-}
 
-export const releaseStepLock = (projectId: string, stepId: string): void => {
-  runningSteps.delete(stepLockKey(projectId, stepId))
+  return {
+    runId,
+    startedAt,
+    emit: tracked,
+    stage: (stage, extra = {}) => {
+      currentStage = stage
+      const detail = extra.detail_vi
+      const event: StepEvent = {
+        type: "stage",
+        step_id: stepId,
+        stage,
+        label_vi: STAGE_LABELS[stage],
+        ...(detail ? { detail_vi: detail } : {}),
+        ...(extra.batch ? { batch: extra.batch } : {})
+      }
+      emit(event)
+      // `stage` cũng vào `events` (FLF-221): nhật ký hoạt động dựng lại sau reload cần biết việc nào đã bắt đầu lúc nào
+      void touchRun(projectId, stepId, runId, { stage, detail_vi: detail ?? null, batch: extra.batch ?? null, appendEvent: stamp(event) })
+    },
+    save: async (patch) => {
+      await touchRun(projectId, stepId, runId, patch)
+    },
+    beat: async (stage, run) => {
+      currentStage = stage
+      const timer = setInterval(() => {
+        emit({ type: "heartbeat", step_id: stepId, stage: currentStage, elapsed_ms: Date.now() - startedAt })
+        void touchRun(projectId, stepId, runId, {})
+      }, HEARTBEAT_MS)
+      // Node: nhịp heartbeat không được giữ tiến trình sống thêm
+      timer.unref?.()
+      try {
+        return await run()
+      } finally {
+        clearInterval(timer)
+      }
+    }
+  }
 }
-
-export const isStepLocked = (projectId: string, stepId: string): boolean => runningSteps.has(stepLockKey(projectId, stepId))
 
 // ─── F13: revert không được đụng change ngoài step ──────────────────
 
@@ -124,7 +251,12 @@ export const assertRangeOwnedByStep = async (projectId: string, stepId: string, 
   const changes = await spineRepository.listChanges(projectId, { fromSeq: firstSeq, toSeq: lastSeq })
   const foreign = changes.find((c) => c.step_id !== stepId)
   if (foreign) {
-    throw new ApiError(422, `Dải seq ${firstSeq}–${lastSeq} của step ${stepId} chứa thay đổi không thuộc step (seq ${foreign.seq})`, CHANGE_RANGE_INVALID)
+    throw new ApiError(422, "Không hoàn tác được bước này vì đã có thay đổi khác ghi xen vào sau đó.", CHANGE_RANGE_INVALID, {
+      step_id: stepId,
+      first_seq: firstSeq,
+      last_seq: lastSeq,
+      foreign_seq: foreign.seq
+    })
   }
 }
 
@@ -135,61 +267,428 @@ export interface AnswerInput {
   answer: string | string[]
 }
 
+/**
+ * Thứ user gửi khi đang có câu chờ: câu trả lời trên thẻ và/hoặc một tin chat tự do (FLF-221). Chat tự do không bị nhét
+ * vào câu nào — AI đọc rồi chỉ chốt câu được trả lời đúng ý (`settleFromChat`), nhắc lại câu còn chờ.
+ */
+export interface AnswerPayload {
+  answers: AnswerInput[]
+  message?: string
+  /** Tin chat đã nằm trong transcript (đường chat cũ lưu tin trước khi chuyển vào đây) — không ghi lần nữa. */
+  messageRecorded?: boolean
+}
+
 interface PendingAnswer {
-  resolve: (answers: AnswerInput[]) => void
+  resolve: (payload: AnswerPayload) => void
   timeout: ReturnType<typeof setTimeout>
 }
 
-/** 15 phút — đủ để đọc câu hỏi và trả lời; không giữ promise treo vô hạn nếu người dùng bỏ đi. */
+/**
+ * 15 phút — đủ để đọc câu hỏi và trả lời; không giữ promise treo vô hạn nếu người dùng bỏ đi. Hết giờ thì lượt
+ * chờ tách khỏi kết nối (như đóng tab), vẫn trả lời được sau đó qua run-state.
+ */
 export const ANSWER_WAIT_TIMEOUT_MS = 15 * 60 * 1000
 
 const pendingAnswers = new Map<string, PendingAnswer>()
 
 const answerKey = (projectId: string, stepId: string, sessionId: string): string => `${projectId}::${stepId}::${sessionId}`
 
+/**
+ * Quên mọi lượt đang nghe trong bộ nhớ, như khi tiến trình BE restart — test dùng để chứng minh `/answer` chạy
+ * tiếp được chỉ từ run-state. Promise của lượt cũ bị bỏ lại (không resolve), đúng như tiến trình đã chết.
+ */
+export const dropPendingAnswers = (): void => {
+  for (const pending of pendingAnswers.values()) clearTimeout(pending.timeout)
+  pendingAnswers.clear()
+}
+
 /** `POST /answer` gọi hàm này. `false` ⇒ không có lượt chờ khớp (step không ở `answer_needed`). */
-export const submitAnswer = (projectId: string, stepId: string, sessionId: string, answers: AnswerInput[]): boolean => {
+export const submitAnswer = (projectId: string, stepId: string, sessionId: string, payload: AnswerPayload): boolean => {
   const key = answerKey(projectId, stepId, sessionId)
   const pending = pendingAnswers.get(key)
   if (!pending) return false
   clearTimeout(pending.timeout)
   pendingAnswers.delete(key)
-  pending.resolve(answers)
+  pending.resolve(payload)
   return true
 }
 
-/** F8: đang chờ answer mà client đóng kết nối ⇒ dọn lượt chờ, không treo promise vô thời hạn. */
-const waitForAnswer = (projectId: string, stepId: string, sessionId: string, signal?: AbortSignal): Promise<AnswerInput[]> => {
+/**
+ * Chờ user trả lời. Đóng kết nối hoặc hết giờ chờ ⇒ ném `AnswerDetached`: lượt chờ đã nằm ở run-state nên
+ * không có gì phải huỷ, `/answer` chạy tiếp sau đó (FLF-222). Chỉ Huỷ (`POST /cancel`) mới dừng hẳn (409).
+ */
+const waitForAnswer = (projectId: string, stepId: string, sessionId: string, signal?: AbortSignal): Promise<AnswerPayload> => {
   const key = answerKey(projectId, stepId, sessionId)
+  const abortError = (): Error =>
+    signal?.reason === RUN_CANCELLED_REASON
+      ? new ApiError(409, `Lượt chạy của step ${stepId} đã bị huỷ trong khi chờ trả lời`, STEP_NOT_RUNNABLE)
+      : new AnswerDetached(stepId)
   return new Promise((resolve, reject) => {
     const cleanup = (): void => {
-      pendingAnswers.delete(key)
+      // Chỉ xoá lượt chờ của chính mình — lượt mới cùng khoá có thể đã thay chỗ
+      if (pendingAnswers.get(key)?.timeout === timeout) pendingAnswers.delete(key)
       if (signal && onAbort) signal.removeEventListener("abort", onAbort)
     }
     const timeout = setTimeout(() => {
       cleanup()
-      reject(new ApiError(409, `Hết thời gian chờ trả lời câu hỏi của step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(new AnswerDetached(stepId))
     }, ANSWER_WAIT_TIMEOUT_MS)
     const onAbort = (): void => {
       clearTimeout(timeout)
       cleanup()
-      reject(new ApiError(409, `Client đã đóng kết nối trong khi chờ trả lời step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(abortError())
     }
     if (signal?.aborted) {
       clearTimeout(timeout)
-      reject(new ApiError(409, `Client đã đóng kết nối trong khi chờ trả lời step ${stepId}`, STEP_NOT_RUNNABLE))
+      reject(abortError())
       return
     }
     signal?.addEventListener("abort", onAbort)
     pendingAnswers.set(key, {
-      resolve: (answers) => {
+      resolve: (payload) => {
         clearTimeout(timeout)
         cleanup()
-        resolve(answers)
+        resolve(payload)
       },
       timeout
     })
   })
+}
+
+/**
+ * Chờ user trả lời một lượt hỏi ngoài khung một bước — dùng cho lượt hỏi gộp đầu giai đoạn (R3), nơi
+ * `stepId` là đơn vị giai đoạn (`S-4`, `S-5@S03`) chứ không phải một bước trong registry.
+ */
+export const submitAnswerWait = waitForAnswer
+
+const notWaiting = (stepId: string): ApiError => new ApiError(409, `Step ${stepId} không đang chờ trả lời câu hỏi`, STEP_NOT_RUNNABLE)
+
+/**
+ * `POST /answer` khi không còn lượt sống trong bộ nhớ (FE reload, BE restart): lượt chờ ở run-state còn trả lời
+ * được không. Phải đúng session đã hỏi, mọi `question_id` là câu đã hỏi, và không lượt nào đang giữ khoá.
+ * Không khớp ⇒ 409 STEP_NOT_RUNNABLE như khi không có lượt chờ.
+ */
+export const pendingAnswerFor = async (
+  projectId: string,
+  unit: string,
+  sessionId: string,
+  payload: AnswerPayload
+): Promise<PendingAnswerState> => {
+  const doc = await getRunState(projectId, unit)
+  const pending = doc?.pending_answer
+  if (!doc || !pending || doc.status !== "waiting_answer") throw notWaiting(unit)
+  if (new Date(doc.locked_until).getTime() > Date.now()) throw notWaiting(unit)
+  if (pending.session_id !== sessionId) throw notWaiting(unit)
+  const { answers, message } = payload
+  if ((answers.length === 0 && !message) || answers.some((a) => indexOfQuestion(pending.asked, a.question_id) < 0)) throw notWaiting(unit)
+  return pending
+}
+
+/**
+ * Chạy tiếp step đang chờ trả lời mà không còn kết nối SSE: chiếm khoá ngay (hai `/answer` cùng lúc ⇒ cái sau
+ * 409), rồi chạy nền từ sau Elicit tới gate. FE theo dõi qua `GET /run-state` (stage, events, gate_payload).
+ * Lỗi của lượt nền nằm ở run-state (`interrupted` + `error`), không ném ra ngoài.
+ */
+export const resumeWaitingStep = async (
+  projectId: string,
+  stepId: string,
+  userId: string,
+  pending: PendingAnswerState,
+  payload: AnswerPayload,
+  deps: Partial<StepRunnerDeps> = {}
+): Promise<{ done: Promise<void> }> => {
+  const { answers, message } = payload
+  const record = await spineRepository.get(projectId)
+  if (record?.steps.find((s) => s.id === stepId)?.status !== "in_progress") throw notWaiting(stepId)
+
+  const run = await acquireRun(projectId, stepId, { sessionId: pending.session_id, by: userId, stage: "ask", detail_vi: message ? "Đang đọc tin nhắn của bạn" : `Đã nhận ${answers.length} câu trả lời` })
+  const abort = deps.abort ?? new AbortController()
+  const background = runStep(projectId, stepId, pending.session_id, userId, () => undefined, {
+    ...deps,
+    signal: abort.signal,
+    abort,
+    resumeAnswers: { run, asked: pending.asked, answers, ...(message ? { message } : {}), base_answers_text: pending.base_answers_text }
+  }).catch((err: unknown) => {
+    console.error(`[step-runner] lượt chạy tiếp sau khi trả lời của ${stepId} dừng vì lỗi:`, err)
+  })
+  // Không trả thẳng Promise: `async` sẽ chờ nó xong, biến lượt nền thành lượt đồng bộ của request
+  return { done: background }
+}
+
+// ─── chat tự do khi đang chờ trả lời (FLF-221) ─────────────────────
+
+/**
+ * Lượt chat phải chừa đủ lượt gọi cho phần còn lại của step: Draft (kèm retry schema) + Review. Còn ít hơn thế thì
+ * không hỏi tiếp nữa mà để AI tự giả định phần còn lại — không bao giờ để step chết vì `CALL_LIMIT` giữa vòng chat.
+ */
+export const CHAT_RESERVED_CALLS = MAX_SCHEMA_RETRIES + 1 + 1
+
+/** Câu trả lời cố định khi hết ngân sách chat — không gọi model. */
+export const CHAT_BUDGET_REPLY = "Phần còn lại tôi sẽ tạm hiểu theo hướng hợp lý nhất, bạn xem lại rồi nói tôi nếu chỗ nào khác nhé."
+/** Bản tiếng Anh của `CHAT_BUDGET_REPLY` cho phiên trả lời tiếng Anh (FLF-260). */
+export const CHAT_BUDGET_REPLY_EN = "For the rest, I'll go with the most sensible reading — take a look and tell me if anything should be different."
+
+/** Câu hết ngân sách chat theo ngôn ngữ trả lời của phiên; thiếu ⇒ tiếng Việt. */
+export const chatBudgetReply = (language: ReplyLanguage = "vi"): string => byLanguage(language, { vi: CHAT_BUDGET_REPLY, en: CHAT_BUDGET_REPLY_EN })
+
+/**
+ * FLF-260 — ngôn ngữ trả lời sau một tin user gõ khi đang chờ trả lời. Tin rõ ngôn ngữ ⇒ theo tin và ghi lên phiên; mơ hồ
+ * ("ok", số, mã phần tử) ⇒ giữ `current` — ngôn ngữ lượt đang dùng, không đọc lại phiên. Lượt chạy tiếp sau reload không có
+ * `current` ⇒ ngôn ngữ phiên ⇒ tài khoản ⇒ tiếng Việt.
+ */
+export const replyLanguageAfterMessage = async (
+  input: { projectId: string; sessionId: string; userId: string; message: string },
+  current?: ReplyLanguage
+): Promise<ReplyLanguage> => (current && detectMessageLanguage(input.message) === null ? current : replyLanguageForSessionId(input))
+
+/**
+ * Kiểm `settled` model báo — không tin model:
+ * - chỉ nhận `topic_key` thuộc câu đang chờ, mỗi câu một lần;
+ * - câu có lựa chọn: câu trả lời phải trùng đúng nhãn một lựa chọn (bỏ qua đuôi "(Khuyến nghị)", hoa/thường); câu chọn
+ *   nhiều nhận danh sách phân tách bằng dấu phẩy, mọi phần đều phải khớp;
+ * - câu mở: trích đoạn model báo nếu là chuỗi con của tin nhắn (chữ của user, không phải câu model diễn lại). Không có
+ *   trích đoạn hợp lệ ⇒ đoạn đánh số — đủ đoạn cho mọi câu mở được chốt — theo thứ tự câu mở trong `asked`. Không tách
+ *   được ⇒ câu vẫn chờ. **Không bao giờ** lấy nguyên văn cả tin làm đáp án: tin có thể lạc đề (đã gặp decision ghi đoạn
+ *   bối cảnh làm đáp án), hỏi lại tốt hơn chốt sai. Đoạn đánh số chỉ dùng khi có nhiều câu mở — một câu mở mà tin đánh số
+ *   thì số thứ tự thường trả lời thẻ lựa chọn, không phải câu mở. Không ghi cùng một đoạn cho nhiều câu.
+ */
+export const settleFromChat = (
+  asked: PendingAnswerState["asked"],
+  settled: readonly { topic_key: string; answer: string }[] | undefined,
+  message: string
+): AnswerInput[] => {
+  const ids = questionIdsFor(asked)
+  const out: AnswerInput[] = []
+  const done = new Set<number>()
+  const norm = (s: string): string => stripRecommended(s).trim().toLowerCase()
+  const openIndexes = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  const openSettled = new Set(
+    (settled ?? []).flatMap((item) => {
+      const index = asked.findIndex((q) => q.topic_key === item.topic_key)
+      return index >= 0 && asked[index].options.length === 0 ? [index] : []
+    })
+  )
+  const numbered = splitNumberedAnswer(message)
+  const useNumbered = openSettled.size > 1 && numbered.size >= openSettled.size
+  const openTexts: string[] = []
+  for (const item of settled ?? []) {
+    const index = asked.findIndex((q, i) => q.topic_key === item.topic_key && !done.has(i))
+    if (index < 0) continue
+    const question = asked[index]
+    if (question.options.length === 0) {
+      // Trích đoạn model báo (đã kiểm là chuỗi con) trước: một danh sách đánh số nằm trong MỘT câu trả lời ("Tính
+      // năng: 1. … 2. …") không được tách sang câu khác. Model diễn lại ⇒ mới dùng đoạn đánh số theo thứ tự câu mở.
+      const text = verifiedExcerpt(item.answer, message) ?? (useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
+      // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
+      if (!text || (openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
+      out.push({ question_id: ids[index], answer: text })
+      openTexts.push(text)
+      done.add(index)
+      continue
+    }
+    const labelOf = (part: string): string | undefined => question.options.find((o) => norm(o.label) === norm(part))?.label
+    const parts = question.multiple ? item.answer.split(",").map((p) => p.trim()).filter(Boolean) : [item.answer]
+    const labels = parts.map(labelOf)
+    if (labels.length === 0 || labels.some((l) => l === undefined)) continue
+    const clean = (labels as string[]).map(stripRecommended)
+    out.push({ question_id: ids[index], answer: question.multiple ? clean : clean[0] })
+    done.add(index)
+  }
+  return out
+}
+
+export interface ChatTurnInput {
+  projectId: string
+  userId: string
+  /** Step (hoặc đơn vị giai đoạn với lượt phỏng vấn) — usage của lượt chat tính vào đây. */
+  unit: string
+  stepName: string
+  asked: PendingAnswerState["asked"]
+  message: string
+  /** Dự phòng khi không có `sessionId` (test, lời gọi không có transcript). */
+  recentTurns: string
+  /** Có ⇒ `recent_turns`/`conversation_summary` đọc lại transcript của cả session (mọi step), không dùng `recentTurns`. */
+  sessionId?: string
+  projection: Record<string, unknown>
+  spine: Spine
+  elicitExecutor: ElicitExecutor
+  /**
+   * Lượt đóng phỏng vấn fast path: model không được hỏi thêm (`close_interview`), và chốt câu chỉ bằng nhãn thẻ / đoạn đánh số /
+   * trích đoạn đã kiểm — tin lạc đề không bao giờ thành câu trả lời của câu đang chờ.
+   */
+  closing?: boolean
+  /** FLF-260: ngôn ngữ trả lời của lượt — có thì đi vào lời gọi model (`buildPrompt` nối khối "Reply language"). */
+  replyLanguage?: ReplyLanguage
+}
+
+/**
+ * Câu còn chờ sau một lượt chat: AI viết lại (dựa trên điều user vừa nói, bỏ câu đã thừa) thì dùng bản viết lại — qua
+ * đúng bộ lọc của lượt hỏi thường (chủ đề đã chốt bị bỏ); AI không trả câu nào thì hỏi lại nguyên văn câu còn chờ.
+ * `message` là câu trả lời thật (không hỏi ngược / uỷ quyền / chỉ "oke") ⇒ mỗi câu còn chờ đếm thêm một lần được trả lời.
+ */
+export const nextPendingAfterChat = (
+  spine: Spine,
+  remaining: PendingAnswerState["asked"],
+  revised: ElicitOutput["questions"],
+  message = ""
+): PendingAnswerState["asked"] => {
+  if (remaining.length === 0) return remaining
+  // Sổ quyết định phải đã ghi câu trả lời thẻ của lượt này (caller đọc lại Spine sau khi ghi) — câu viết lại hỏi lại chủ đề
+  // vừa chốt bị bỏ. Bỏ hết mà vẫn còn câu chưa trả lời ⇒ hỏi lại đúng những câu đó, không để lượt kết thúc trong im lặng.
+  const filtered = revised.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
+  const next = filtered.length === 0 ? remaining : filtered
+  if (!isSubstantiveAnswer(message)) return next
+  // Đếm theo chủ đề, kể cả khi AI viết lại câu
+  const repliedOf = (topic: string | undefined): number => (remaining.find((q) => q.topic_key === topic)?.replied ?? 0) + 1
+  return next.map((q) => (remaining.some((r) => r.topic_key === q.topic_key) ? { ...q, replied: repliedOf(q.topic_key) } : q))
+}
+
+/** Tin user hỏi ngược hoặc uỷ quyền cho AI (có dấu hoặc gõ không dấu; tiếng Anh — FLF-260) — không phải câu trả lời. */
+const DEFERS_TO_AI =
+  /\?\s*$|b[ạa]n (ngh[ĩi]|th[ấa]y) sao|t[uùủ]y b[ạa]n|b[ạa]n (t[ựu] )?[đd][ềe] xu[ấa]t|theo (khuy[ếe]n ngh[ịi]|[đd][ềe] xu[ấa]t)|ch[ưu]a bi[ếe]t|kh[ôo]ng bi[ếe]t|kh[ôo]ng ngh[ĩi] ra|\b(you decide|up to you|your call|what do you think|i (don['’]?t|do not) know|not sure|no idea)\b/i
+/** Chỉ đồng ý suông ("oke", "ừ", "được", "sure", "sounds good") — đồng ý với đề xuất của AI, không phải nội dung trả lời. */
+const BARE_AGREEMENT = /^(ok(e|ay)?|ừ+m?|uh+|[đd]ư[ợo]c|[đd]c|v[âa]ng|yes|[đd][ồo]ng [ýy]|chu[ẩa]n|[đd]úng r[ồo]i|sure|fine|agreed|yep|yeah|sounds good|got it|right)[\s.!,]*$/i
+
+export const isSubstantiveAnswer = (message: string): boolean => {
+  const text = message.trim()
+  return text !== "" && !DEFERS_TO_AI.test(text) && !BARE_AGREEMENT.test(text)
+}
+
+/**
+ * Chốt chặn "không hỏi lại điều đã trả lời": câu mở user đã trả lời một lần mà AI vẫn hỏi lại (thường vì câu trả lời
+ * định tính hoặc bằng ý tưởng, AI không coi là đủ) ⇒ lần trả lời kế tiếp được chốt bằng nguyên văn tin. Chỉ khi AI
+ * không chốt được câu nào từ tin này (tin không trả lời câu khác), đó là câu mở duy nhất còn chờ, tin không nhắc tới
+ * lựa chọn nào của câu có lựa chọn đang chờ, và tin là câu trả lời thật — không bao giờ gán một tin cho hai câu.
+ * Model đã đọc tin và báo câu đó vẫn chờ (`stillOpen` chứa `topic_key`) ⇒ tin lạc đề, không chốt.
+ */
+export const settleRepeatedAnswer = (
+  asked: PendingAnswerState["asked"],
+  settled: AnswerInput[],
+  message: string,
+  stillOpen: readonly string[] = []
+): AnswerInput[] => {
+  if (settled.length > 0 || !isSubstantiveAnswer(message)) return settled
+  const open = asked.flatMap((q, i) => (q.options.length === 0 ? [i] : []))
+  if (open.length !== 1 || (asked[open[0]].replied ?? 0) < 1) return settled
+  const topic = asked[open[0]].topic_key
+  if (topic !== undefined && stillOpen.includes(topic)) return settled
+  const text = message.trim()
+  const lower = text.toLowerCase()
+  const namesOption = asked.some((q) => q.options.some((o) => lower.includes(stripRecommended(o.label).trim().toLowerCase())))
+  if (namesOption) return settled
+  return [{ question_id: questionIdsFor(asked)[open[0]], answer: text }]
+}
+
+/**
+ * Hết ngân sách chat ⇒ không còn lượt model để AI chốt câu trả lời, nhưng tin user vẫn có thể đã trả lời. Chốt tất định,
+ * chỉ khi ánh xạ tin ↔ câu là CHẮC CHẮN: câu có lựa chọn — tin nhắc đúng nhãn của một lựa chọn; câu mở — tin đánh số đủ đoạn
+ * cho mọi câu mở, hoặc luật câu-trả-lời-lặp (`settleRepeatedAnswer`). Một tin tự do không đánh số KHÔNG bao giờ được coi là
+ * câu trả lời của câu mở duy nhất (có thể lạc đề): câu vẫn chờ, tin đi vào ghi chú cho bước sau.
+ */
+export const settleWithoutModel = (
+  asked: PendingAnswerState["asked"],
+  message: string,
+  /** `false` (đóng phỏng vấn fast path): không áp luật câu-trả-lời-lặp — chỉ nhãn thẻ và đoạn đánh số. */
+  repeatedAnswer = true
+): AnswerInput[] => {
+  const optionText = (label: string): string => stripRecommended(label).toLowerCase()
+  // Gõ đúng nguyên nhãn một lựa chọn ("Right", "Fine", "Yes") là trả lời thẻ, dù chữ đó trông như đồng ý suông
+  const typed = message.trim().toLowerCase().replace(/[\s.!,]+$/u, "")
+  const typedALabel = asked.some((q) => q.options.some((o) => optionText(o.label) === typed))
+  if (!isSubstantiveAnswer(message) && !typedALabel) return []
+  const lower = message.toLowerCase()
+  /**
+   * Một nhãn có thể là chuỗi con của nhãn khác ("Tuân thủ quy định nội bộ" nằm trong "Tuân thủ quy định nội bộ và pháp
+   * luật"): tin nhắc nhãn dài thì nhãn ngắn cũng khớp, câu một-lựa-chọn thấy hai nhãn khớp và bị bỏ qua ⇒ không bao giờ
+   * chốt được, im lặng. Giữ nhãn khớp dài nhất; với các nhãn không lồng nhau, tập kết quả không đổi.
+   */
+  const namedOptions = (q: PendingAnswerState["asked"][number]): string[] => {
+    const matched = q.options.map((o) => o.label).filter((label) => lower.includes(optionText(label)))
+    return matched.filter(
+      (label) =>
+        !matched.some((other) => {
+          const long = optionText(other)
+          const short = optionText(label)
+          // Chỉ loại nhãn ngắn khi nó KHÔNG được nhắc ở đâu khác ngoài nhãn dài. Tin đối lập ("chỉ <ngắn> thôi, không cần
+          // <dài>") nhắc nhãn ngắn độc lập ⇒ giữ cả hai ⇒ câu một-lựa-chọn không chốt, thay vì chốt nhãn user vừa từ chối.
+          return long !== short && long.includes(short) && !lower.split(long).join(" ").includes(short)
+        })
+    )
+  }
+  const candidates: { topic_key: string; answer: string }[] = []
+  const open = asked.filter((q) => q.options.length === 0)
+  const openCovered = open.length > 1 && splitNumberedAnswer(message).size >= open.length
+  for (const q of asked) {
+    const topic_key = q.topic_key ?? ""
+    if (q.options.length === 0) {
+      if (openCovered) candidates.push({ topic_key, answer: "" })
+      continue
+    }
+    const named = namedOptions(q)
+    if (named.length === 0 || (!q.multiple && named.length > 1)) continue
+    candidates.push({ topic_key, answer: q.multiple ? named.join(", ") : named[0] })
+  }
+  const settled = settleFromChat(asked, candidates, message)
+  return repeatedAnswer ? settleRepeatedAnswer(asked, settled, message) : settled
+}
+
+/** Một lượt elicit đọc tin chat: trả lời user + câu nào đã chốt được (đã kiểm) + câu còn chờ AI đã viết lại. */
+export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string; settled: AnswerInput[]; questions: ElicitOutput["questions"] }> => {
+  const ids = questionIdsFor(input.asked)
+  const conversation = input.sessionId
+    ? await loadConversationVariables(input.sessionId, input.spine)
+    : { recent_turns: input.recentTurns, conversation_summary: buildConversationSummary(input.spine, []) }
+  const usageId = await meter.reserveCall(input.projectId, input.userId, input.unit, "elicit")
+  let result: AiActionResult<ElicitOutput>
+  try {
+    result = await input.elicitExecutor(
+      {
+        promptVariables: {
+          step_id: input.unit,
+          step_name: input.stepName,
+          chat_turn: true,
+          max_questions: input.closing ? 0 : PROMPT_QUESTIONS_PER_TURN,
+          close_interview: input.closing === true,
+          missing: [],
+          pending_questions: input.asked.map((q, i) => ({
+            id: ids[i],
+            topic_key: q.topic_key,
+            question: q.question,
+            ...(q.options.length > 0 ? { options: q.options.map((o) => stripRecommended(o.label)) } : {})
+          })),
+          projection: input.projection,
+          addendum: addendumForUnit(input.spine, input.unit),
+          content_guidance: "",
+          decisions: ledgerForPrompt(input.spine),
+          ...conversation,
+          user_message: input.message
+        },
+        ...(input.replyLanguage ? { replyLanguage: input.replyLanguage } : {})
+      },
+      input.projectId,
+      input.userId
+    )
+  } catch (err) {
+    await meter.releaseCall(usageId)
+    throw err
+  }
+  await meter.finalizeCall(usageId, {
+    call_kind: "elicit",
+    attempt: 1,
+    tokens_in: result.tokensUsed.promptTokens,
+    tokens_out: result.tokensUsed.completionTokens,
+    cost: result.cost,
+    logId: result.logId || null
+  })
+  const verified = settleFromChat(input.asked, result.data.settled, input.message)
+  const settled = input.closing ? verified : settleRepeatedAnswer(input.asked, verified, input.message, result.data.still_open ?? [])
+  return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
+}
+
+/** Còn đủ lượt gọi cho một lượt chat mà vẫn chừa Draft + Review không. */
+export const chatBudgetLeft = async (projectId: string, unit: string, firstSeq: number | null): Promise<boolean> => {
+  const { calls_used } = await meter.roundCounts(projectId, unit, firstSeq)
+  return CALLS_LIMIT - calls_used >= 1 + CHAT_RESERVED_CALLS
 }
 
 /** F8: kiểm huỷ TRƯỚC mỗi lượt gọi model — không gọi model nữa nếu client đã đóng kết nối. */
@@ -205,14 +704,87 @@ const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine =>
 
 const refresh = async (projectId: string): Promise<{ spine: Spine; spineVersion: number }> => {
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   return { spine: stripRecord(record), spineVersion: record.spine_version }
 }
 
-const pushTranscript = async (sessionId: string, stepId: string, role: "user" | "ai", content: string): Promise<void> => {
+/**
+ * Tin AI của một lượt hỏi trong transcript: lời đáp KÈM câu hỏi (`{reply, questions}` — dạng khung chat vẽ được), để
+ * câu hỏi còn trong lịch sử sau khi user đã trả lời. Chỉ lưu chữ của câu, không lưu lựa chọn: tin AI cuối có lựa chọn
+ * sẽ bị khung chat hiểu là thẻ hỏi của hỏi đáp tự do. Không có câu nào ⇒ chỉ lời đáp.
+ */
+export const askTranscript = (reply: string, asked: readonly { question: string; inline?: boolean; options?: readonly unknown[] }[]): string =>
+  asked.length === 0
+    ? reply
+    : JSON.stringify({
+        reply,
+        // `inline` ở lại để khung chat không liệt kê lại câu đã hỏi trong lời đáp sau khi tải lại
+        questions: asked.map((q) => ({ question: q.question, ...(q.inline && !q.options?.length ? { inline: true } : {}) }))
+      })
+
+/** Lọc cả `projectId`: session của project khác không bao giờ bị ghi, kể cả khi lời gọi quên kiểm session trước. */
+const pushTranscript = async (projectId: string, sessionId: string, stepId: string, role: "user" | "ai", content: string): Promise<void> => {
   const msg: IChatMessage = { role, content, step: stepId, createdAt: new Date() }
-  await ChatSession.updateOne({ _id: sessionId }, { $push: { messages: msg } })
+  await ChatSession.updateOne({ _id: sessionId, projectId }, { $push: { messages: msg } })
 }
+
+/**
+ * FLF-221 — chat là nút chạy: tin nhắn user gõ để khởi động lượt chạy vào transcript gắn `stepId`, để Intake/Elicit/Draft
+ * của step đó thấy nó. Kiểm session TRƯỚC khi ghi (403 `NOT_PIPELINE_SESSION` với session của project khác).
+ */
+export const recordUserMessage = async (projectId: string, sessionId: string, stepId: string, message: string): Promise<void> => {
+  await requirePipelineSession(projectId, sessionId)
+  await pushTranscript(projectId, sessionId, stepId, "user", message)
+}
+
+/**
+ * Tin của AI vào transcript ngoài luồng SSE — dùng cho tin cổng chốt. Thẻ cổng do FE vẽ từ state sống nên chốt
+ * xong là mất; không ghi lại thì đọc lịch sử chỉ thấy lượt bấm của user đứng một mình.
+ */
+export const recordAiMessage = async (projectId: string, sessionId: string, stepId: string, message: string): Promise<void> => {
+  await requirePipelineSession(projectId, sessionId)
+  await pushTranscript(projectId, sessionId, stepId, "ai", message)
+}
+
+/**
+ * Có ý tưởng để làm việc chưa — hàm thuần, không dò chữ trong tin nhắn (chip "Mình chưa có ý tưởng" gửi
+ * `intent: "no_idea"`). Chưa có ⇒ B-0.1 hỏi gợi mở bằng văn xuôi, không thẻ lựa chọn, không "(Khuyến nghị)".
+ */
+export const hasIdea = (input: {
+  spine: { addendum: readonly unknown[]; project: { vision: string | null } }
+  documents: string
+  message?: string
+  intent?: RunIntent
+}): boolean =>
+  input.spine.addendum.length > 0 ||
+  (input.spine.project.vision ?? "").trim() !== "" ||
+  input.documents.trim() !== "" ||
+  ((input.message ?? "").trim() !== "" && input.intent !== "no_idea")
+
+/**
+ * B-0.2/B-0.3 chỉ chốt một field mà B-0.1 thường đã suy ra. Field đã có giá trị ở lượt đầu ⇒ không gọi model
+ * (0 usage), đi thẳng tới cổng/tự duyệt theo chế độ duyệt. Revision/reopen vẫn chạy model như thường.
+ */
+export const B0_FIELD_STEPS: Readonly<Record<string, "form_factor" | "stakes">> = Object.freeze({ "B-0.2": "form_factor", "B-0.3": "stakes" })
+
+/** Lý do ở gate khi B-0.2/B-0.3 bỏ qua vì field đã có — không phải "AI không soạn được gì". Theo ngôn ngữ trả lời (FLF-260). */
+const B0_ALREADY_SET_REASON: Readonly<Record<"form_factor" | "stakes", Readonly<Record<ReplyLanguage, string>>>> = Object.freeze({
+  form_factor: {
+    vi: "Nền tảng đã rõ từ những gì bạn kể — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+    en: "The platform is already clear from what you told me — no need to ask again. To change it, just tell me what to fix."
+  },
+  stakes: {
+    vi: "Phần tuân thủ tôi đã ghi theo lựa chọn và ý tưởng của bạn — không cần hỏi lại. Muốn đổi thì nhắn điều cần sửa.",
+    en: "I've recorded the compliance part from your choices and your idea — no need to ask again. To change it, just tell me what to fix."
+  }
+})
+
+/** B-0.2/B-0.3 chỉ chốt một field: hỏi nhiều hơn một câu là hỏi lan sang việc của bước khác. */
+const B0_FIELD_MAX_QUESTIONS = 1
+
+const NO_IDEA_USER_MESSAGE = "[no_idea] Mình chưa có ý tưởng cụ thể — gợi ý giúp mình bắt đầu từ đâu."
+/** Bản tiếng Anh của câu thay thế trên (FLF-260) — chỉ đi vào prompt; giữ tiền tố `[no_idea]` mà skill elicit-loop dò. */
+const NO_IDEA_USER_MESSAGE_EN = "[no_idea] I don't have a concrete idea yet — suggest where I could start."
 
 /** `calls_used`/`regenerate_used` của vòng hiện tại của step. */
 const usageCounts = meter.roundCounts
@@ -236,9 +808,10 @@ const BATCHED_TEMPLATES: ReadonlySet<string> = new Set(["S-5.2", "S-5.4"])
 const isLoopBookkeeping = (stepId: string): boolean => LOOP_BOOKKEEPING_TEMPLATES.has(getStep(stepId).template_id)
 
 /**
- * `S-5.1`: đặt `progress.screen_cursor` sang màn của vòng này và chuyển màn từ `pending` sang
- * `in_progress`. Vòng `@nonscreen` (function không thuộc màn nào) đặt cursor về `null`.
- * Màn đã `signed_off`/`placeholder` giữ nguyên `detail_status` — quay lại vòng cũ không hạ cấp nó.
+ * `S-5.1`: đặt `progress.screen_cursor` sang màn của vòng này và chuyển màn sang `in_progress`. Vòng
+ * `@nonscreen` (function không thuộc màn nào) đặt cursor về `null`. Màn đã `signed_off` giữ nguyên — quay
+ * lại vòng cũ không hạ cấp nó. Màn `placeholder` thì CÓ chuyển (BUG-03): chạy S-5.1 của nó nghĩa là user
+ * vừa mở lại màn bị để trống để mô tả tiếp.
  */
 export const loopCursorOps = (spine: Spine, stepId: string): Op[] => {
   const step = getStep(stepId)
@@ -252,9 +825,34 @@ export const loopCursorOps = (spine: Spine, stepId: string): Op[] => {
   if (!screen) return []
   const ops: Op[] = []
   if (spine.progress.screen_cursor !== screen.id) ops.push({ op: "set", path: "progress.screen_cursor", value: screen.id })
-  if (screen.detail_status === "pending") ops.push({ op: "set", path: `screens[id=${screen.id}].detail_status`, value: "in_progress" })
+  if (screen.detail_status === "pending" || screen.detail_status === "placeholder") {
+    ops.push({ op: "set", path: `screens[id=${screen.id}].detail_status`, value: "in_progress" })
+  }
   return ops
 }
+
+/**
+ * BUG-03: vòng S-5 của một màn `placeholder` bị `nextStep` bỏ qua, nên `S-5.1@<màn>` không bao giờ "tới
+ * lượt" và panel Tiến độ khoá cứng 5 step của màn. Mở lại vòng là hành động hợp lệ của user: cho phép chạy
+ * `S-5.1` của màn placeholder bất cứ lúc nào (các step sau của vòng tự tới lượt sau khi màn `in_progress`).
+ */
+export const isReopenableLoopStep = (spine: Spine, stepId: string): boolean => {
+  const step = getStep(stepId)
+  if (step.template_id !== "S-5.1" || step.loop === null || step.loop === NONSCREEN_LOOP) return false
+  return spine.screens.some((s) => s.id === step.loop && s.detail_status === "placeholder")
+}
+
+/**
+ * Step đã accepted nhưng section nó sở hữu đã **cũ** (`stale`/`awaiting_reaccept`): cho chạy lại.
+ *
+ * Cờ `section_stale_at_baseline` chặn ký baseline và chỉ đường về đúng step này, nhưng step đã accepted
+ * thì `/run` trả STEP_NOT_RUNNABLE và cổng chốt đã đóng — user đi tới nơi rồi không làm được gì, chỉ còn
+ * nước Waive một cờ đỏ. Làm mới lại nội dung mới là việc đúng, nên nó phải chạy được.
+ */
+export const isReopenableStaleStep = (spine: Spine, stepId: string, changes: Parameters<typeof computeSectionStates>[1]): boolean =>
+  computeSectionStates(spine, changes).some(
+    (state) => (state.status === "stale" || state.awaiting_reaccept) && ownerStepOf(state.id, spine) === stepId
+  )
 
 /** Màn `pending` đầu tiên của hàng đợi; hết ⇒ null (runner chuyển sang vòng `@nonscreen`). */
 export const nextPendingScreen = (spine: Spine): string | null => {
@@ -307,12 +905,33 @@ export const batchContext = (ctx: StepContext, functionIds: readonly string[]): 
 export interface DraftPhaseResult {
   spineVersion: number
   applied: boolean
+  /** Tóm tắt đọc được của lô vừa ghi (WP-5) — gate gom lại thành "Bạn vừa có". */
+  summary?: ChangeSummary[]
+  /** `notes` model viết cho cổng (FLF-232: tin nhắn cổng 2–4 câu). Lô rỗng vẫn có — lý do step không đổi gì nằm ở đây. */
+  notes?: string
+}
+
+/**
+ * Lỗi validate của model → một câu user hiểu được. Không bao giờ hiện mã (`path_not_resolved`,
+ * `invariant_3_dead_reference`) ra ngoài; mã chỉ nằm trong phần "Chi tiết" của FE.
+ */
+export const retryReasonVi = (errors: readonly { rule: string }[]): string => {
+  const rules = new Set(errors.map((e) => e.rule))
+  if (rules.has("op_schema") || rules.has("schema_invalid")) return "kết quả thiếu trường hoặc sai kiểu dữ liệu"
+  if (rules.has("op_out_of_scope")) return "AI định sửa phần ngoài phạm vi bước này"
+  if (rules.has("duplicate_id")) return "AI đặt trùng mã của mục đã có"
+  if (rules.has("path_not_resolved")) return "AI trỏ vào mục không tồn tại"
+  if ([...rules].some((r) => r.startsWith("invariant_"))) return "kết quả vi phạm quy tắc liên kết của tài liệu"
+  if (rules.has("path_not_writable")) return "AI định ghi vào phần không thuộc bước này"
+  if (rules.has("assumption_path_mismatch")) return "AI sửa điều đang tạm hiểu nhưng chưa sửa đúng chỗ tương ứng"
+  return "kết quả chưa hợp lệ"
 }
 
 /**
  * Chạy một lượt Draft (draft-to-ops T11) và ghi Spine (op engine T08). F2/F11: kiểm trần + ghi usage
  * `reserved` TRƯỚC khi gọi model, `finalizeCall`/`releaseCall` sau. 409 SPINE_VERSION_CONFLICT ⇒ hoàn
  * usage[] của lượt này (không tiêu trần) rồi ném lại. `emit` có thể là no-op (gate.service không stream).
+ * `extra.replyLanguage` (FLF-260): ngôn ngữ trả lời của phiên — `notes` và câu giả định cho user viết bằng nó.
  */
 export const runDraftPhase = async (
   projectId: string,
@@ -323,17 +942,28 @@ export const runDraftPhase = async (
   callKind: DraftCallKind,
   emit: Emit,
   deps: StepRunnerDeps,
-  extra: { answers?: string; revisionRequest?: string } = {}
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; userDecided?: boolean; replyLanguage?: ReplyLanguage } = {}
 ): Promise<DraftPhaseResult> => {
   assertNotAborted(deps.signal, stepId)
   const currentFirstSeq = spine.steps.find((s) => s.id === stepId)?.first_seq ?? null
   const { calls_used } = await meter.roundCounts(projectId, stepId, currentFirstSeq)
-  if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
+  if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
 
   const reservedId = await meter.reserveCall(projectId, userId, stepId, callKind)
   let draftResult: Awaited<ReturnType<typeof draftOps>>
   try {
-    draftResult = await draftOps(projectId, stepId, ctx, { userId, executor: deps.draftExecutor, spine, callKind, ...extra })
+    draftResult = await draftOps(projectId, stepId, ctx, {
+      userId,
+      executor: deps.draftExecutor,
+      spine,
+      callKind,
+      // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
+      onAttempt: ({ attempt, max, previousErrors }) => {
+        if (attempt === 1 || previousErrors.length === 0) return
+        emit({ type: "draft_retry", step_id: stepId, attempt, max, reason_vi: retryReasonVi(previousErrors) })
+      },
+      ...extra
+    })
   } catch (err) {
     await meter.releaseCall(reservedId)
     throw err
@@ -361,18 +991,21 @@ export const runDraftPhase = async (
 
   for (const attempt of draftResult.attempts) emit({ type: "draft", step_id: stepId, attempt: attempt.attempt })
 
-  if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false }
+  const notes = draftResult.notes?.trim() ? { notes: draftResult.notes.trim() } : {}
+  if (!draftResult.txn) return { spineVersion: spine.spine_version, applied: false, ...notes }
 
   try {
     const applied = await applyTransaction(projectId, draftResult.txn)
+    const summary = summarizeChanges(applied.changes, stripRecord(applied.spine))
     emit({
       type: "ops_applied",
       step_id: stepId,
       txn: applied.txn ?? randomUUID(),
       spine_version: applied.spine_version,
-      changes: applied.changes.map((c) => ({ op: c.op, path: c.path, before: c.before, value: c.value, reason: c.reason }))
+      changes: applied.changes.map((c) => ({ op: c.op, path: c.path, before: c.before, value: c.value, reason: c.reason })),
+      summary
     })
-    return { spineVersion: applied.spine_version, applied: true }
+    return { spineVersion: applied.spine_version, applied: true, summary, ...notes }
   } catch (err) {
     if (err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT) {
       // 409 hai tab: model đã trả lời (credit đã deduct ở ví) nhưng Spine không ghi được — hoàn usage[]
@@ -383,7 +1016,48 @@ export const runDraftPhase = async (
   }
 }
 
+/**
+ * Mục step này nuôi mà CHẠY XONG VẪN TRỐNG — tính bằng đúng hàm mà luật `section_empty` soi (`sectionHasData`),
+ * nên cái gate nói ra luôn khớp với cờ đỏ hiện trên cột kế hoạch. Mục ngoài bảng ⇒ `sectionHasData` trả `null`
+ * (không soi được) và không vào danh sách.
+ */
+export const emptyFedSections = (spine: Spine, stepId: string): { section_id: string; title: string }[] =>
+  sectionsFedBy(spine, stepId)
+    .filter((id) => sectionHasData(spine, id) === false)
+    .map((id) => ({ section_id: id, title: FIXED_SECTIONS.find((s) => s.id === id)?.title_en ?? id }))
+
 /** Render mọi diagram của step (nếu có) + Review (deterministic check; LLM review tuỳ `REVIEW_LLM_ENABLED`). */
+/** Trần hình tự vẽ lại cuối một step — một step sửa nhiều thứ không được biến thành lượt render cả bộ. */
+export const MAX_AUTO_RERENDER = 4
+
+/**
+ * Câu gửi cho FE ở sự kiện `render` khi vẽ hỏng (FLF-247). `diagrams[].error` trong Spine giữ nguyên text PlantUML
+ * để debug / cờ `render_error` — chỉ cái đi ra client được làm sạch.
+ */
+export const DIAGRAM_RENDER_ERROR_MESSAGE = "Chưa vẽ được sơ đồ này."
+
+export interface RenderReviewOptions {
+  /** Số cờ mở TRƯỚC khi chạy step — để gate nói "cờ đỏ 3 → 2 (−1)" thay vì chỉ một con số. */
+  flagsBefore?: { red: number; yellow: number }
+  /** Id giả định đã có trước step — phần còn lại là giả định MỚI, phải hiện ở gate (BUG-13). */
+  knownAssumptionIds?: ReadonlySet<string>
+  /**
+   * Step này có ghi nội dung không. Chỉ khi CÓ mới vẽ lại các hình đã lạc hậu (BUG-17): một step chỉ đọc
+   * mà tự đi vẽ lại hình của step khác thì vừa tốn thời gian, vừa biến lỗi render (vd PlantUML chết) thành
+   * lỗi của step vô can.
+   */
+  rerenderStale?: boolean
+}
+
+export interface RenderReviewResult {
+  spineVersion: number
+  red_open: number
+  yellow_open: number
+  red_delta: number
+  yellow_delta: number
+  new_assumptions: { id: string; text: string; text_vi?: string }[]
+}
+
 export const runRenderReviewPhase = async (
   projectId: string,
   stepId: string,
@@ -391,16 +1065,28 @@ export const runRenderReviewPhase = async (
   loop: string | null,
   userId: string,
   emit: Emit,
-  deps: StepRunnerDeps
-): Promise<number> => {
+  deps: StepRunnerDeps,
+  options: RenderReviewOptions = {}
+): Promise<RenderReviewResult> => {
   let spineVersion = (await refresh(projectId)).spineVersion
 
-  if (renders.length > 0) {
-    const targets: RenderTarget[] = renders.map((kind) => ({ kind, owner_id: kind === "screen_layout" ? loop : null }))
+  // Screens Flow tách theo actor dựa vào quyền (S-4.3) và use case ↔ function (S-4.4/S-5), có SAU lúc S-4.2 vẽ:
+  // hình đã có mà cũ thì vẽ lại ngay ở step làm nó cũ, không chờ người dùng bấm render tay.
+  // Cùng điều kiện cờ `diagram_stale`: hash chưa từng tính ("TBD", fixture) không tính là cũ.
+  const flowStale = (spine: Spine): boolean =>
+    spine.diagrams.some(
+      (d) => d.kind === "screen_flow" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d)
+    )
+  const followUps: RenderTarget["kind"][] =
+    !renders.includes("screen_flow") && flowStale((await refresh(projectId)).spine) ? ["screen_flow"] : []
+  const allRenders = [...renders, ...followUps]
+
+  if (allRenders.length > 0) {
+    const targets: RenderTarget[] = allRenders.map((kind) => ({ kind, owner_id: kind === "screen_layout" ? loop : null }))
     const result = await renderDiagrams(projectId, targets, {
       by: userId,
       step_id: stepId,
-      ...(deps.renderDeps ? { deps: deps.renderDeps } : {})
+      deps: layoutRenderDeps(deps.renderDeps)
     })
     spineVersion = result.spine_version
     for (const id of result.rendered) {
@@ -410,16 +1096,76 @@ export const runRenderReviewPhase = async (
         step_id: stepId,
         diagram_id: id,
         render_status: diagram?.render_status ?? "error",
-        ...(diagram?.error ? { error: diagram.error } : {})
+        ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {})
       })
     }
   }
 
-  const flagsResult = await flagsService.recompute(projectId, { by: userId })
+  // BUG-17: step này sửa dữ liệu nguồn của một hình đã vẽ ở step trước (vd S-5.4 sửa sau khi S-5.3 vẽ)
+  // ⇒ vẽ lại ngay cuối step, thay vì để lại một cờ đỏ `diagram_stale` mà UI không có nút nào để gỡ.
+  const { spine: spineAfterDraft } = await refresh(projectId)
+  const alreadyRendered = new Set(renders)
+  const staleTargets: RenderTarget[] = []
+  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft) : []) {
+    if (alreadyRendered.has(diagram.kind)) continue
+    const key = `${diagram.kind}:${diagram.owner_id ?? ""}`
+    if (staleTargets.some((t) => `${t.kind}:${t.owner_id ?? ""}` === key)) continue
+    staleTargets.push({ kind: diagram.kind, owner_id: diagram.owner_id })
+  }
+  if (staleTargets.length > 0) {
+    const before = new Map(spineAfterDraft.diagrams.map((d) => [d.id, d]))
+    const result = await renderDiagrams(projectId, staleTargets.slice(0, MAX_AUTO_RERENDER), { by: userId, step_id: stepId, deps: layoutRenderDeps(deps.renderDeps) })
+    spineVersion = result.spine_version
+
+    // Vẽ lại tự động mà hỏng (PlantUML chết, cú pháp lạ) thì KHÔNG để lại `render_error` — đó là cờ đỏ
+    // không waive được, và nó sẽ chặn baseline vì một việc user không hề yêu cầu. Trả hình về bản cũ:
+    // cờ `diagram_stale` (waive được) ở lại, kèm nút "Vẽ lại" để user tự quyết.
+    const broken = result.diagrams.filter((d) => d.render_status === "error" && before.get(d.id)?.render_status === "ok")
+    if (broken.length > 0) {
+      const restored = await applyTransaction(projectId, {
+        base_version: spineVersion,
+        ops: broken.map((d) => ({ op: "set" as const, path: `diagrams[id=${d.id}]`, value: before.get(d.id) })),
+        by: userId,
+        step_id: stepId,
+        reason: "step-runner: vẽ lại tự động thất bại, giữ hình cũ"
+      })
+      spineVersion = restored.spine_version
+    }
+
+    const brokenIds = new Set(broken.map((d) => d.id))
+    for (const id of result.rendered) {
+      if (brokenIds.has(id)) continue
+      const diagram = result.diagrams.find((d) => d.id === id)
+      emit({
+        type: "render",
+        step_id: stepId,
+        diagram_id: id,
+        render_status: diagram?.render_status ?? "error",
+        ...(diagram?.error ? { error: DIAGRAM_RENDER_ERROR_MESSAGE } : {})
+      })
+    }
+  }
+
+  // Đang ở S-9 thì phải quét cả luật baseline: chạy lại một bước để làm mới section cũ mà cờ
+  // `section_stale_at_baseline` không được đánh giá lại thì nó nằm đó mãi, dù nội dung đã mới.
+  const { spine: spineBeforeCheck } = await refresh(projectId)
+  const flagsResult = await flagsService.recompute(projectId, { by: userId, atBaseline: nextStepOf(spineBeforeCheck)?.phase === S9_PHASE })
   spineVersion = flagsResult.checked_at_version
   const redOpen = flagsResult.flags.filter((f) => f.level === "red" && f.resolved_at === null).length
   const yellowOpen = flagsResult.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
-  emit({ type: "flags", step_id: stepId, red_open: redOpen, yellow_open: yellowOpen })
+  const { spine: spineAfterCheck } = await refresh(projectId)
+  const newAssumptions = spineAfterCheck.assumptions
+    .filter((a) => !options.knownAssumptionIds?.has(a.id))
+    // FLF-221: `text_vi` = câu bằng ngôn ngữ user — FE hiện nó, rơi về `text` (EN) với dữ liệu cũ
+    .map((a) => ({ id: a.id, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) }))
+  emit({
+    type: "flags",
+    step_id: stepId,
+    red_open: redOpen,
+    yellow_open: yellowOpen,
+    ...(options.flagsBefore ? { red_delta: redOpen - options.flagsBefore.red, yellow_delta: yellowOpen - options.flagsBefore.yellow } : {}),
+    ...(options.knownAssumptionIds ? { new_assumptions: newAssumptions } : {})
+  })
 
   // Lớp phủ LLM review — tắt mặc định (đọc process.env trực tiếp, không qua src/config theo yêu cầu task).
   // F2/F11: kiểm trần + reserve trước khi gọi, như elicit/draft. Lớp phủ không chặn step: lỗi/hết trần chỉ log.
@@ -435,7 +1181,7 @@ export const runRenderReviewPhase = async (
         const spine = spineForReview
         const spec = getStepSpec(stepId)
         const result = await deps.reviewExecutor(
-          { promptVariables: { step_id: stepId, step_name: spec.label_en, working_mode: spine.project.working_mode ?? "coaching" } },
+          { promptVariables: { step_id: stepId, step_name: spec.label_en } },
           projectId,
           userId
         )
@@ -455,7 +1201,14 @@ export const runRenderReviewPhase = async (
     }
   }
 
-  return spineVersion
+  return {
+    spineVersion,
+    red_open: redOpen,
+    yellow_open: yellowOpen,
+    red_delta: redOpen - (options.flagsBefore?.red ?? redOpen),
+    yellow_delta: yellowOpen - (options.flagsBefore?.yellow ?? yellowOpen),
+    new_assumptions: newAssumptions
+  }
 }
 
 /** Ghi lại `steps[id].first_seq/last_seq` theo dải change thực tế đã ghi kể từ `startSeq`. */
@@ -491,7 +1244,7 @@ export const trackSeqRange = async (
 export const requirePipelineSession = async (projectId: string, sessionId: string): Promise<void> => {
   const session = await ChatSession.findById(sessionId)
   if (!session || String(session.projectId) !== String(projectId) || !session.is_pipeline) {
-    throw new ApiError(403, "Session này không phải session pipeline của dự án — chỉ dùng để hỏi đáp (CHAT)", NOT_PIPELINE_SESSION)
+    throw new ApiError(403, "Phiên trò chuyện này chỉ dùng để hỏi đáp, không chạy được các bước soạn tài liệu.", NOT_PIPELINE_SESSION)
   }
 }
 
@@ -509,12 +1262,19 @@ export const runStep = async (
   stepId: string,
   sessionId: string,
   userId: string,
-  emit: Emit,
+  emitRaw: Emit,
   deps: Partial<StepRunnerDeps> = {}
 ): Promise<void> => {
-  acquireStepLock(projectId, stepId)
+  // WP-4: khoá nằm ở Mongo, có TTL + heartbeat. Lượt cũ mất SSE ⇒ khoá tự hết hạn, không còn cảnh chờ 20 phút.
+  const run = deps.resumeAnswers?.run ?? (await acquireRun(projectId, stepId, { sessionId, by: userId, stage: "intake", detail_vi: STAGE_LABELS.intake }))
+  if (deps.abort) registerAbort(run.run_id, deps.abort)
+  const tracker = createTracker(projectId, stepId, run.run_id, emitRaw)
+  const emit = tracker.emit
+  let outcome: "gate" | "auto" | "interrupted" | "detached" = "interrupted"
+  let lastError: { code: string; message: string } | null = null
+
   try {
-    const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
+    const d: StepRunnerDeps = { ...defaultStepRunnerDeps(deps.signal), ...deps }
 
     await requirePipelineSession(projectId, sessionId)
     const stepDef = getStep(stepId) // 404 STEP_NOT_FOUND nếu id sai
@@ -522,27 +1282,80 @@ export const runStep = async (
     const needsDraft = spec.skill !== null && !stepDef.deterministic && !isLoopBookkeeping(stepId)
 
     let { spine, spineVersion } = await refresh(projectId)
-    const existingStep = spine.steps.find((s) => s.id === stepId)
+    let existingStep = spine.steps.find((s) => s.id === stepId)
+    /** Bước đã từng accepted và đang được mở lại (B7 reopen) — kèm tin chat thì soạn như gate revision, không dựng lại từ đầu. */
+    let reopenedAccepted = false
 
     if (existingStep?.status === "skipped") {
       throw new ApiError(409, `Step ${stepId} không áp dụng cho template của dự án — bật lại ở kế hoạch step trước khi chạy`, STEP_NOT_RUNNABLE)
     }
-    if (existingStep?.status === "accepted") {
-      throw new ApiError(409, `Step ${stepId} đã accepted — cần gate revision/regenerate để mở lại (B7)`, STEP_NOT_RUNNABLE)
+    // BUG-03: S-5.1 của màn placeholder chạy lại được ngay (kể cả đã accepted bằng accept_as_is "để sau") —
+    // đó chính là cách user mở lại một màn đã bị bỏ qua.
+    const reopenLoop =
+      isReopenableLoopStep(spine, stepId) ||
+      (existingStep?.status === "accepted" && isReopenableStaleStep(spine, stepId, await spineRepository.listChanges(projectId)))
+    if (existingStep?.status === "accepted" && !reopenLoop) {
+      if (!d.reopen) {
+        throw new ApiError(409, `Step ${stepId} đã accepted — chạy lại phải mở lại bước (reopen) hoặc gate revision/regenerate (B7)`, STEP_NOT_RUNNABLE)
+      }
+      // Mở lại đúng như gate revision/regenerate: vòng mới, bỏ mốc seq và thời điểm chốt cũ (B7/F1)
+      const reopened = await applyTransaction(projectId, {
+        base_version: spineVersion,
+        ops: [
+          { op: "set", path: `steps[id=${stepId}].status`, value: "revision_requested" },
+          { op: "set", path: `steps[id=${stepId}].first_seq`, value: null },
+          { op: "set", path: `steps[id=${stepId}].last_seq`, value: null },
+          { op: "set", path: `steps[id=${stepId}].accepted_at`, value: null }
+        ],
+        by: userId,
+        step_id: stepId,
+        reason: "run: mở lại step đã accepted (B7)"
+      })
+      spine = reopened.spine
+      spineVersion = reopened.spine_version
+      existingStep = spine.steps.find((s) => s.id === stepId)
+      reopenedAccepted = true
+    } else if (existingStep && existingStep.status !== "accepted") {
+      // Lượt mở lại trước chết giữa chừng (bước còn in_progress/revision_requested/pending): nội dung của lần chốt cũ
+      // vẫn nằm trong Spine, nên chạy tiếp kèm tin chat vẫn là sửa, không phải dựng lại.
+      reopenedAccepted = (await spineRepository.listChanges(projectId)).some(
+        (c) => c.path === `steps[id=${stepId}].status` && c.value === "accepted"
+      )
     }
-    if (!existingStep) {
+    if (!existingStep && !reopenLoop) {
       const next = nextStepOf(spine)
       if (!next || next.id !== stepId) throw new ApiError(409, `Step ${stepId} chưa tới lượt chạy`, STEP_NOT_RUNNABLE)
     }
 
     if (needsDraft) {
       const { calls_used } = await usageCounts(projectId, stepId, existingStep?.first_seq ?? null)
-      if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
+      if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
     }
+
+    // FLF-221: tin chat khởi động lượt chạy — ghi sau khi session đã được kiểm và step chạy được, trước Intake để
+    // transcript của step (nạp một lần ở buildStepContext) có nó. Không tự tạo addendum từ đây: Draft bóc tách.
+    const userMessage = d.message?.trim() ? d.message.trim() : undefined
+    if (userMessage && !d.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", userMessage)
+    // FLF-260: ngôn ngữ trả lời của lượt — đoán trên tin user gõ để mở lượt (`no_idea`: tin FE gửi kèm chip, không phải câu thay
+    // thế trong prompt), tin rõ ngôn ngữ thì thành ngôn ngữ phiên. Không có tin (chạy tiếp, `/answer`) ⇒ ngôn ngữ phiên ⇒ tài
+    // khoản ⇒ tiếng Việt. Tin `runPhase` đã ghi thì nó cũng đã đoán: đoán lại sẽ đè ngôn ngữ user vừa đổi ở lượt phỏng vấn.
+    // Lượt `reopen` (nút chạy lại bước đã cũ) mang câu FE tự viết theo ngôn ngữ giao diện — vẫn vào transcript và
+    // revisionRequest, nhưng không quyết định ngôn ngữ trả lời.
+    const typedMessage = d.messageRecorded || d.reopen ? undefined : userMessage
+    let replyLanguage = d.replyLanguage ?? (await replyLanguageForSessionId({ projectId, sessionId, userId, message: typedMessage }))
+
+    // B-0.2/B-0.3: field đã có sau B-0.1 ⇒ lượt đầu không gọi model. Xét theo giá trị Spine, không theo emptyFields
+    // (`pick` bỏ key thiếu nên emptyFields có thể rỗng sai).
+    const b0Field = B0_FIELD_STEPS[stepDef.template_id]
+    const firstRound = !existingStep || existingStep.status === "pending"
+    const fieldValue = b0Field === undefined ? undefined : spine.project[b0Field]
+    // `form_factor` là mảng (rỗng = chưa chốt), `stakes` là chuỗi hoặc null
+    const fieldAlreadySet = b0Field !== undefined && firstRound && fieldValue !== null && fieldValue !== undefined && !(Array.isArray(fieldValue) && fieldValue.length === 0)
 
     // ─── init: cập nhật progress cursor + đặt step in_progress (B7: reset vòng khi reopen sau accepted) ──
     const phaseChanged = spine.progress.current_phase !== stepDef.phase
-    const reopenedAfterAccept = existingStep?.status === "revision_requested" && existingStep.accepted_at !== null
+    const reopenedAfterAccept =
+      (existingStep?.status === "revision_requested" && existingStep.accepted_at !== null) || (existingStep?.status === "accepted" && reopenLoop)
 
     const initOps: Op[] = []
     if (phaseChanged) initOps.push({ op: "set", path: "progress.current_phase", value: stepDef.phase }, { op: "set", path: "progress.elicit_turns_this_phase", value: 0 })
@@ -582,9 +1395,192 @@ export const runStep = async (
     const stepStateForRound: Pick<StepState, "first_seq" | "last_seq"> | undefined = reopenedAfterAccept ? { first_seq: null, last_seq: null } : existingStep
 
     const ctx = await buildStepContext(projectId, stepId, { sessionId })
-    if (phaseChanged) emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
+    // FLF-221: `intake` ở MỌI step (trước chỉ khi đổi phase) — dòng "Đọc N mục dữ liệu" của nhật ký hoạt động
+    emit({ type: "intake", step_id: stepId, phase: stepDef.phase, empty_fields: ctx.emptyFields })
+    tracker.stage("intake", { detail_vi: `Đọc dữ liệu cho bước ${stepId}` })
 
-    let answersText = ctx.transcriptTail
+    // Mốc để gate nói được "cờ đỏ 3 → 2" và "3 giả định mới" (WP-5, BUG-13)
+    const flagsBefore = {
+      red: spine.flags.filter((f) => f.level === "red" && f.resolved_at === null).length,
+      yellow: spine.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
+    }
+    const knownAssumptionIds = new Set(spine.assumptions.map((a) => a.id))
+    const progressBefore = buildProgressReport(spine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
+    const stepSummary: ChangeSummary[] = []
+    /** Lượt chạy này có ghi được op nào không — dùng để báo "AI không soạn được gì" ở gate (L11b). */
+    let wroteOps = false
+    /** `notes` của lượt Draft cuối — thành tin nhắn cổng (`message_vi`). */
+    let gateNotes: string | undefined
+
+    /**
+     * Câu trả lời đưa vào lượt soạn. Ngoài transcript của chính bước, LUÔN kèm sổ quyết định: khi câu hỏi
+     * được hỏi gộp ở đầu giai đoạn (R3), transcript của bước này rỗng — không kèm sổ thì model soạn mà
+     * không biết user đã trả lời gì, và bước ghi ra 0 op.
+     */
+    const ledger = ledgerForPrompt(spine)
+    const ledgerText = ledger.length === 0 ? "" : ["Đã chốt với user:", ...ledger.map((d) => `- ${d.topic_key}: ${d.answer}`)].join("\n")
+    /** User đã trả lời (thẻ) hoặc nhắn chat trong lượt của step này — điều kiện để B-2.1 được đổi status giả định. */
+    let userDecided = userMessage !== undefined || (d.resumeAnswers !== undefined && (d.resumeAnswers.answers.length > 0 || d.resumeAnswers.message !== undefined))
+    let answersText = d.resumeAnswers?.base_answers_text ?? [ledgerText, ctx.transcriptTail].filter((part) => part.trim() !== "").join("\n")
+
+    /**
+     * Phần "sau khi có câu trả lời" của Elicit — dùng chung cho lượt đang nghe và lượt chạy tiếp qua `/answer`
+     * (FLF-222), để hai đường không lệch nhau.
+     */
+    const markReceived = async (count: number, detail: string): Promise<void> => {
+      // Phản hồi ngay khi nhận trả lời — trước đây status đứng yên tới 2 phút (BUG-32)
+      const answerReceived: StepEvent = { type: "answer_received", step_id: stepId, count }
+      await tracker.save({ status: "running", stage: "ask", questions: null, pending_answer: null, detail_vi: detail, appendEvent: { ...answerReceived, at: new Date().toISOString() } })
+      emitRaw(answerReceived)
+    }
+
+    /**
+     * Ghi câu trả lời: vào lượt soạn (kèm câu hỏi), transcript (câu trả lời trên thẻ — tin chat đã ghi riêng), và sổ quyết
+     * định. `settledIds`: câu chốt qua chat, được ghi sổ riêng từng câu (FLF-221).
+     */
+    const recordAnswers = async (
+      asked: PendingAnswerState["asked"],
+      answers: readonly AnswerInput[],
+      options: { transcript?: readonly AnswerInput[]; settledIds?: ReadonlySet<string> } = {}
+    ): Promise<void> => {
+      // Lượt soạn phải thấy câu hỏi, không chỉ "Q2: …" — câu mở không vào sổ thì đây là nơi duy nhất nó xuất hiện
+      const questionOf = (id: string): string => asked[indexOfQuestion(asked, id)]?.question ?? id
+      const answersJoined = answers.map((a) => `${questionOf(a.question_id)} → ${answerText(a.answer)}`).join("\n")
+      // Một tin cho cả lượt thẻ, mỗi đáp án một dòng — câu hỏi đã nằm ở tin AI ngay trên (`askTranscript`), bong bóng
+      // user chỉ chứa điều user chọn; lượt soạn vẫn thấy cặp câu hỏi → đáp án qua `answersText`
+      const picked = (options.transcript ?? answers).map((a) => answerText(a.answer)).filter((text) => text !== "")
+      if (picked.length > 0) await pushTranscript(projectId, sessionId, stepId, "user", picked.join("\n"))
+      answersText = `${answersText}\n${answersJoined}`.trim()
+
+      // R4: ghi câu trả lời vào sổ quyết định để không step nào hỏi lại chủ đề này nữa. Chờ user có thể mất
+      // vài phút, trong lúc đó Spine đổi ở nơi khác (đổi chế độ duyệt, sửa qua chat, tab khác) — ghi bằng
+      // version cũ là 409 SPINE_VERSION_CONFLICT và cả bước chết sau khi user đã trả lời. Đọc lại trước khi ghi.
+      ;({ spine, spineVersion } = await refresh(projectId))
+      const ledgerOps = decisionOps(spine, stepId, answeredTopics(asked, answers, options.settledIds))
+      if (ledgerOps.length > 0) {
+        const ledgerApplied = await applyTransaction(projectId, {
+          base_version: spineVersion,
+          ops: ledgerOps,
+          by: userId,
+          step_id: stepId,
+          reason: "step-runner: ghi quyết định đã chốt"
+        })
+        spineVersion = ledgerApplied.spine_version
+      }
+    }
+
+    /** Hỏi lại những câu còn chờ: phát `answer_needed`, lưu lượt chờ (FLF-222) rồi nhả khoá. */
+    const announceWaiting = async (asked: PendingAnswerState["asked"]): Promise<void> => {
+      const { questions } = shapeQuestions(asked)
+      const answerNeeded: StepEvent = { type: "answer_needed", step_id: stepId, questions }
+      emitRaw(answerNeeded)
+      await tracker.save({
+        status: "waiting_answer",
+        stage: "ask",
+        detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+        questions,
+        pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
+        release: true,
+        appendEvent: { ...answerNeeded, at: new Date().toISOString() }
+      })
+    }
+
+    /**
+     * Vòng chờ trả lời (FLF-221): câu trả lời trên thẻ đi thẳng; tin chat tự do ⇒ một lượt AI đọc tin, chỉ chốt câu được
+     * trả lời đúng ý, trả lời user và nhắc câu còn chờ, rồi chờ tiếp. Không có trần lượt riêng — chỉ `CALLS_LIMIT`, luôn
+     * chừa đủ cho Draft + Review; hết ngân sách chat thì AI tự giả định phần còn lại.
+     */
+    const settleLoop = async (askedAll: PendingAnswerState["asked"], first: AnswerPayload | null): Promise<void> => {
+      let pending = askedAll
+      let payload = first
+      for (;;) {
+        payload ??= await waitForAnswer(projectId, stepId, sessionId, d.signal)
+        const cardAnswers = payload.answers.filter((a) => indexOfQuestion(pending, a.question_id) >= 0)
+        const message = payload.message?.trim()
+        if (cardAnswers.length > 0 || message) userDecided = true
+        if (!message) {
+          await markReceived(cardAnswers.length, `Đã nhận ${cardAnswers.length} câu trả lời`)
+          await recordAnswers(pending, cardAnswers)
+          return
+        }
+
+        await markReceived(cardAnswers.length, "Đang đọc tin nhắn của bạn")
+        // FLF-260: tin chat là chữ user gõ ⇒ đoán lại ngôn ngữ trả lời (rõ ⇒ đổi và ghi lên phiên; mơ hồ ⇒ giữ). Đáp án thẻ thì
+        // không: đó là nhãn lựa chọn AI viết, không phải lời user.
+        replyLanguage = await replyLanguageAfterMessage({ projectId, sessionId, userId, message }, replyLanguage)
+        // Đáp án thẻ gửi kèm tin gõ vào transcript TRƯỚC lượt chat: model đọc transcript để biết user đã chọn gì, thiếu thì hỏi lại
+        const pickedByCard = cardAnswers.map((a) => answerText(a.answer)).filter((text) => text !== "")
+        if (pickedByCard.length > 0) await pushTranscript(projectId, sessionId, stepId, "user", pickedByCard.join("\n"))
+        if (!payload.messageRecorded) await pushTranscript(projectId, sessionId, stepId, "user", message)
+        const answeredByCard = new Set(cardAnswers.map((a) => indexOfQuestion(pending, a.question_id)))
+
+        // B-0.1 khi user chưa có ý tưởng: câu hỏi chờ chỉ để gợi ý tưởng. Tin nhắn có nội dung CHÍNH LÀ ý tưởng — đóng
+        // mọi câu gợi mở và đi soạn luôn. Để AI tự khớp từng câu thì nó hay chốt 0 câu và hỏi lại y nguyên (gặp thật).
+        // Xét cả tin mở lượt chạy: user gõ ý tưởng để chạy B-0.1 thì câu hỏi là câu thường (tên hệ thống, điểm nghẽn…),
+        // gán nguyên tin cho mọi câu là ghi một câu trả lời cho nhiều câu hỏi.
+        if (stepDef.template_id === "B-0.1" && !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })) {
+          const byMessage = questionIdsFor(pending)
+            .filter((_, i) => !answeredByCard.has(i))
+            .map((id) => ({ question_id: id, answer: message }))
+          await recordAnswers(pending, [...cardAnswers, ...byMessage], { transcript: [] })
+          return
+        }
+
+        if (!(await chatBudgetLeft(projectId, stepId, stepStateForRound?.first_seq ?? null))) {
+          // Không còn lượt model, nhưng tin user có thể đã trả lời: chốt phần chắc chắn trước, chỉ câu thật sự chưa trả lời
+          // mới để bước sau tự giả định — không bao giờ tạo giả định cho điều user vừa nói.
+          const settledLocally = settleWithoutModel(pending, message).filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
+          await recordAnswers(pending, [...cardAnswers, ...settledLocally], {
+            transcript: [],
+            settledIds: new Set(settledLocally.map((a) => a.question_id))
+          })
+          const answeredNow = new Set([...cardAnswers, ...settledLocally].map((a) => indexOfQuestion(pending, a.question_id)))
+          const left = pending.filter((_, i) => !answeredNow.has(i))
+          if (left.length > 0) {
+            const budgetReply = chatBudgetReply(replyLanguage)
+            emit({ type: "elicit", step_id: stepId, delta: budgetReply })
+            await pushTranscript(projectId, sessionId, stepId, "ai", budgetReply)
+            const note = [`User nhắn: ${message}`, ...left.map((q) => `Chưa trả lời — tự giả định và ghi assumptions[]: ${q.question}`)].join("\n")
+            answersText = `${answersText}\n${note}`.trim()
+          }
+          return
+        }
+
+        assertNotAborted(d.signal, stepId)
+        tracker.stage("ask", { detail_vi: "Đọc tin nhắn của bạn" })
+        const turn = await tracker.beat("ask", () =>
+          runChatTurn({
+            projectId,
+            userId,
+            unit: stepId,
+            stepName: ctx.label_en,
+            asked: pending,
+            message,
+            recentTurns: ctx.transcriptTail,
+            sessionId,
+            projection: elicitProjection(spine, stepId),
+            spine,
+            elicitExecutor: d.elicitExecutor,
+            replyLanguage
+          })
+        )
+        const settled = turn.settled.filter((a) => !answeredByCard.has(indexOfQuestion(pending, a.question_id)))
+        await recordAnswers(pending, [...cardAnswers, ...settled], {
+          transcript: [],
+          settledIds: new Set(settled.map((a) => a.question_id))
+        })
+        const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
+        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
+        // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
+        const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, replyLanguage)
+        emit({ type: "elicit", step_id: stepId, delta: chatReply })
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, remaining))
+        if (remaining.length === 0) return
+        pending = remaining
+        await announceWaiting(pending)
+        payload = null
+      }
+    }
 
     // T19 — pha S-9: việc của từng step nằm ở `s9/run-s9-step.ts`, không đi qua STEP_SKILLS.
     // S-9.1/S-9.5 không gọi model và không Meter (hết credit vẫn quét và vẫn ký baseline được).
@@ -593,39 +1589,70 @@ export const runStep = async (
         assertNotAborted(d.signal, stepId)
         emit({ type: "draft", step_id: stepId, attempt: 1 })
       }
-      await runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId })
+      tracker.stage("draft", { detail_vi: "Quét cuối và xếp ưu tiên" })
+      await tracker.beat("draft", () =>
+        runS9Step(projectId, stepId, userId, { draftExecutor: d.draftExecutor, reviewExecutor: d.reviewExecutor, sessionId, replyLanguage })
+      )
       ;({ spine, spineVersion } = await refresh(projectId))
+      // Pha S-9 ghi thẳng qua service riêng (không qua runDraftPhase) — vẫn phải tóm tắt được ở gate,
+      // nếu không thì S-9.4 xếp lại ưu tiên cả tài liệu mà gate hiện đúng một dòng trống (BUG-20).
+      const s9Changes = (await spineRepository.listChanges(projectId, { fromSeq: startSeq })).filter((c) => c.step_id === stepId)
+      stepSummary.push(...summarizeChanges(s9Changes, spine))
     }
 
-    if (needsDraft) {
-      const workingMode = spine.project.working_mode ?? "coaching"
-      const shouldElicit = workingMode === "coaching" || spine.progress.elicit_turns_this_phase < 2
+    if (needsDraft && !fieldAlreadySet) {
+      // FLF-220: AI tự quyết hỏi nhiều hay ít — hỏi khi bước còn field trống, ở mọi chế độ duyệt. Chủ đề đã
+      // chốt (kể cả ở phỏng vấn đầu giai đoạn) bị `filterAskedQuestions` chặn nên không hỏi lặp.
+      const missing = askableFields(stepDef.template_id, ctx.emptyFields)
+      const noIdeaYet = !hasIdea({ spine, documents: ctx.documents, message: userMessage, intent: d.intent })
+      // Fast path (FLF-234): bước B-1.x không tự hỏi sau lượt hỏi gộp đầu giai đoạn — không có tin user mới thì không gọi
+      // model Elicit; có tin mới thì vẫn gọi nhưng chỉ giữ câu mâu thuẫn với điều đã chốt (`keepConflictsOnly`).
+      const elicitPolicy = elicitPolicyFor({ phase: stepDef.phase, hasUserMessage: userMessage !== undefined })
+      const shouldElicit = (missing.length > 0 || noIdeaYet) && elicitPolicy !== "skip"
 
-      if (shouldElicit) {
+      if (d.resumeAnswers) {
+        // Câu hỏi đã hỏi và đã tính lượt ở lượt trước — không gọi model hỏi lại. Có tin chat thì AI đọc nó (FLF-221).
+        const { asked, answers, message } = d.resumeAnswers
+        await settleLoop(asked, { answers, ...(message ? { message } : {}) })
+        ;({ spine, spineVersion } = await refresh(projectId))
+      } else if (shouldElicit) {
         assertNotAborted(d.signal, stepId)
+        tracker.stage("ask", { detail_vi: "Xem bước này còn thiếu gì để hỏi bạn" })
         const { calls_used: callsBeforeElicit } = await meter.roundCounts(projectId, stepId, stepStateForRound?.first_seq ?? null)
-        if (callsBeforeElicit >= CALLS_LIMIT) throw new ApiError(409, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, CALL_LIMIT)
+        if (callsBeforeElicit >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
 
+        const conversation = await loadConversationVariables(sessionId, spine)
         const elicitUsageId = await meter.reserveCall(projectId, userId, stepId, "elicit")
         let elicitResult: AiActionResult<ElicitOutput>
         try {
-          elicitResult = await d.elicitExecutor(
+          elicitResult = await tracker.beat("ask", () =>
+            d.elicitExecutor(
             {
               promptVariables: {
                 step_id: stepId,
                 step_name: ctx.label_en,
-                working_mode: workingMode,
-                elicit_turns_this_phase: spine.progress.elicit_turns_this_phase,
-                missing: ctx.emptyFields,
-                projection: ctx.projection,
+                max_questions: b0Field ? B0_FIELD_MAX_QUESTIONS : PROMPT_QUESTIONS_PER_TURN,
+                elicit_policy: elicitPolicy,
+                missing,
+                pending_questions: [],
+                // BUG-19: vòng hỏi phải thấy quy tắc và NFR đã chốt, nếu không nó gợi ý ngược lại chính
+                // câu trả lời của user ở bước trước.
+                projection: elicitProjection(spine, stepId),
                 addendum: ctx.addendum,
-                content_guidance: "",
-                recent_turns: ctx.transcriptTail,
-                user_message: "(tự động — vòng elicit đầu step)"
-              }
+                // BUG-10: guidance của content skill từng bị bỏ trống ⇒ B-0.1 không hỏi tên hệ thống
+                content_guidance: elicitGuidance(ctx),
+                // R4: sổ quyết định — "đã chốt gì, ở bước nào"
+                decisions: ledgerForPrompt(spine),
+                ...conversation,
+                user_message: noIdeaYet
+                  ? byLanguage(replyLanguage, { vi: NO_IDEA_USER_MESSAGE, en: NO_IDEA_USER_MESSAGE_EN })
+                  : (userMessage ?? "(tự động — vòng elicit đầu step)")
+              },
+              replyLanguage
             },
-            projectId,
-            userId
+              projectId,
+              userId
+            )
           )
         } catch (err) {
           await meter.releaseCall(elicitUsageId)
@@ -639,8 +1666,6 @@ export const runStep = async (
           cost: elicitResult.cost,
           logId: elicitResult.logId || null
         })
-        emit({ type: "elicit", step_id: stepId, delta: elicitResult.data.reply })
-        await pushTranscript(sessionId, stepId, "ai", elicitResult.data.reply)
 
         const turnsApplied = await applyTransaction(projectId, {
           base_version: spineVersion,
@@ -651,18 +1676,35 @@ export const runStep = async (
         })
         spineVersion = turnsApplied.spine_version
 
-        if (elicitResult.data.questions.length > 0) {
-          const questions = elicitResult.data.questions.map((q, i) => ({
-            id: `Q${i + 1}`,
-            text: q.question,
-            ...(q.suggestedAnswers.length > 0 ? { options: q.suggestedAnswers } : {}),
-            ...(q.multiple !== undefined ? { multiple: q.multiple } : {})
-          }))
-          emit({ type: "answer_needed", step_id: stepId, questions })
-          const answers = await waitForAnswer(projectId, stepId, sessionId, d.signal)
-          const answersJoined = answers.map((a) => `${a.question_id}: ${Array.isArray(a.answer) ? a.answer.join(", ") : a.answer}`).join("\n")
-          for (const a of answers) await pushTranscript(sessionId, stepId, "user", Array.isArray(a.answer) ? a.answer.join(", ") : a.answer)
-          answersText = `${answersText}\n${answersJoined}`.trim()
+        // R4: bỏ câu thuộc chủ đề đã chốt — luật của server, không chỉ là lời nhắc trong prompt (BUG-21)
+        const afterLedger = filterAskedQuestions(spine, elicitResult.data.questions)
+        if (afterLedger.dropped.length > 0) {
+          console.info(`[step-runner] ${stepId}: bỏ ${afterLedger.dropped.length} câu đã chốt (${afterLedger.dropped.map((d) => d.topic_key).join(", ")})`)
+        }
+        const filtered = elicitPolicy === "conflict_only" ? keepConflictsOnly(spine, afterLedger.questions) : { questions: afterLedger.questions, dropped: [] }
+        if (filtered.dropped.length > 0) {
+          console.info(`[step-runner] ${stepId}: bỏ ${filtered.dropped.length} câu không mâu thuẫn với điều đã chốt (${filtered.dropped.map((d) => d.topic_key).join(", ")})`)
+        }
+
+        const { asked, questions } = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet })
+        // Fast path: câu model đã hỏi mà server bỏ thì lời AI cũng không được còn hỏi nó (user không có chỗ trả lời)
+        const askedTexts = asked.map((a) => a.question)
+        // Câu hỏi đuôi ("bạn thấy hợp lý chứ?") tính vào trần câu hỏi của lượt (FLF-235)
+        const reply = trimTailQuestion(
+          elicitPolicy === "conflict_only"
+            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts, replyLanguage)
+            : elicitResult.data.reply,
+          asked,
+          PROMPT_QUESTIONS_PER_TURN,
+          replyLanguage
+        )
+        emit({ type: "elicit", step_id: stepId, delta: reply })
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, asked))
+        if (questions.length > 0) {
+          // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
+          // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.
+          await announceWaiting(asked)
+          await settleLoop(asked, null)
         }
         ;({ spine, spineVersion } = await refresh(projectId))
       }
@@ -670,16 +1712,44 @@ export const runStep = async (
       // T18 — S-5.2/S-5.4: màn nhiều function chia thành nhiều lượt Draft ≤ 6 function. Mỗi lượt vẫn
       // tự kiểm trần 8 lượt gọi/step trong `runDraftPhase`; màn quá lớn sẽ dừng ở CALL_LIMIT và user
       // chốt phần đã có ở gate (không có ngoại lệ trần cho vòng lặp).
-      for (const batch of functionBatches(spine, stepId)) {
+      const batches = functionBatches(spine, stepId)
+      for (const [index, batch] of batches.entries()) {
         const current = await refresh(projectId)
         spine = current.spine
         spineVersion = current.spineVersion
-        const draftPhase = await runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, "draft", emit, d, { answers: answersText })
+        const batchInfo = batches.length > 1 ? { i: index + 1, n: batches.length } : undefined
+        tracker.stage("draft", {
+          detail_vi: batchInfo ? `AI đang soạn nội dung · lô ${batchInfo.i}/${batchInfo.n}` : "AI đang soạn nội dung",
+          ...(batchInfo ? { batch: batchInfo } : {})
+        })
+        // Mở lại bước đã chốt kèm lời nhắn = sửa đúng chỗ được nhắn (như "Tôi muốn sửa" ở cổng). Gọi `draft` thì skill
+        // dựng lại từ đầu: S-4.1 mở lại để gắn use case thêm lại feature/màn đã có ⇒ trùng mã cả 3 lượt, NEEDS_USER_INPUT.
+        const revise = reopenedAccepted && userMessage !== undefined
+        const draftPhase = await tracker.beat("draft", () =>
+          runDraftPhase(projectId, stepId, batchContext(ctx, batch), spine, userId, revise ? "revision" : "draft", emit, d, {
+            answers: answersText,
+            userDecided,
+            replyLanguage,
+            ...(revise ? { revisionRequest: userMessage } : {})
+          })
+        )
         spineVersion = draftPhase.spineVersion
+        if (draftPhase.applied) wroteOps = true
+        stepSummary.push(...(draftPhase.summary ?? []))
+        if (draftPhase.notes) gateNotes = draftPhase.notes
       }
     }
 
-    spineVersion = await runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d)
+    tracker.stage("check", { detail_vi: "Kiểm tra quy tắc và tham chiếu" })
+    if (stepDef.renders.length > 0) tracker.stage("render", { detail_vi: `Vẽ lại ${stepDef.renders.length} sơ đồ` })
+    const review = await tracker.beat(stepDef.renders.length > 0 ? "render" : "check", () =>
+      runRenderReviewPhase(projectId, stepId, stepDef.renders, parseStepId(stepId).loop, userId, emit, d, {
+        flagsBefore,
+        knownAssumptionIds,
+        rerenderStale: stepSummary.length > 0
+      })
+    )
+    spineVersion = review.spineVersion
     await trackSeqRange(projectId, spineVersion, stepId, userId, startSeq, stepStateForRound)
 
     // Ghép SAU khi cờ đã tính lại và dải seq đã ghi — cache khớp đúng spine_version user nhìn ở gate.
@@ -688,15 +1758,124 @@ export const runStep = async (
       await d.assembleDocument(projectId, (await refresh(projectId)).spineVersion)
     }
 
-    const { spine: finalSpine } = await refresh(projectId)
+    const { spine: finalSpine, spineVersion: finalVersion } = await refresh(projectId)
     const finalFirstSeq = finalSpine.steps.find((s) => s.id === stepId)?.first_seq ?? null
     const { calls_used, regenerate_used } = await usageCounts(projectId, stepId, finalFirstSeq)
     const actions: GateAction[] = regenerate_used >= REGENERATE_LIMIT_COUNT ? ["accept", "revision", "accept_as_is"] : ["accept", "revision", "regenerate"]
+    const creditsUsed = await meter.roundCost(projectId, stepId, finalFirstSeq)
+    const progressAfter = buildProgressReport(finalSpine, await spineRepository.listChanges(projectId)).readiness.accepted_pct
 
-    emit({ type: "gate_ready", step_id: stepId, actions, regenerate_used, calls_used })
+    // `spine_version` đi kèm gate_ready (L11): sau `ops_applied` còn render diagram + recompute cờ, mỗi lượt một
+    // transaction ⇒ version cuối cao hơn cái FE đang giữ. Không nói ra thì lượt `/run` kế tiếp gửi base_version cũ
+    // và ăn 409 SPINE_VERSION_CONFLICT trong lúc FE còn đang chờ `GET /spine` về.
+    //
+    // `empty_sections` (L11b): mục mà step này nuôi nhưng CHẠY XONG VẪN TRỐNG theo đúng hàm mà luật `section_empty`
+    // soi. Trước đây lô op rỗng vẫn đi thẳng tới gate như một lượt chạy thành công, user accept rồi cờ đỏ vẫn treo,
+    // bấm "Mở lại" lại rơi vào đúng vòng đó. Nói thẳng ở gate để user chọn lối khác (viết tay qua chat / waive).
+    //
+    // Lớp 4 "Bạn vừa có" (03) + WP-5: gate mang nội dung, không chỉ con số.
+    const gateMessage = composeStepGateMessage({
+      notes: gateNotes,
+      summary: stepSummary,
+      newAssumptionTexts: review.new_assumptions.map((a) => a.text_vi ?? a.text),
+      language: replyLanguage
+    })
+    // FLF-241: `new_assumptions` = đúng những điều tin cổng nói ra, vì FE confirm chính xác tập này khi user bấm "Đúng rồi,
+    // đi tiếp" (`GateCard.tsx` gọi `onConfirmAssumptions(assumptions.map(a => a.id))` trước khi gửi lệnh) — BE không tự
+    // confirm giả định ở `doAccept`. Tin do model viết (`gateNotes`) chỉ nói một phần ⇒ cắt xuống phần đó; phần còn lại ở
+    // lại `unconfirmed`, S-9.1 gom và cờ đỏ `unconfirmed_assumption` chặn ký baseline. Tin tự dựng từ `summary` thì tự nói
+    // hết điều tạm hiểu nên không lọc.
+    const spokenIds = (gateNotes ?? "").trim() === "" ? null : spokenAssumptionIds(gateMessage, review.new_assumptions)
+    const gateAssumptions = spokenIds ? review.new_assumptions.filter((a) => spokenIds.has(a.id)) : review.new_assumptions
+    const gateEvent: Extract<StepEvent, { type: "gate_ready" }> = {
+      type: "gate_ready",
+      step_id: stepId,
+      actions,
+      regenerate_used,
+      calls_used,
+      spine_version: finalVersion,
+      wrote_ops: wroteOps,
+      empty_sections: emptyFedSections(finalSpine, stepId),
+      summary: stepSummary,
+      new_assumptions: gateAssumptions,
+      flags: { red: review.red_open, yellow: review.yellow_open, red_delta: review.red_delta, yellow_delta: review.yellow_delta },
+      duration_ms: Date.now() - tracker.startedAt,
+      credits_used: creditsUsed,
+      ...(gateTableOf(finalSpine, stepDef.template_id) ? { table: gateTableOf(finalSpine, stepDef.template_id) as NonNullable<ReturnType<typeof gateTableOf>> } : {}),
+      doc_progress: { before: progressBefore, after: progressAfter },
+      ...(gateMessage ? { message_vi: gateMessage } : {}),
+      ...(stepSummary.length === 0
+        ? { no_change_reason: fieldAlreadySet && b0Field ? byLanguage(replyLanguage, B0_ALREADY_SET_REASON[b0Field]) : noChangeReason(stepDef.template_id, needsDraft, replyLanguage) }
+        : {})
+    }
+    // Quyết định "bước im" phải thấy tập giả định ĐẦY ĐỦ: `isQuietStep` lọc chúng qua `conflictsWithLedger` để chặn bước
+    // tự Accept khi model vừa tạo giả định trái với điều user đã chốt. Chỉ `gate_payload` mới cắt xuống phần tin đã nói —
+    // cắt luôn ở đây thì giả định trái sổ không được nói ra sẽ lọt qua và bước tự Accept, user không thấy xung đột.
+    const resolution: GateResolution = d.resolveGate
+      ? await d.resolveGate({ ...gateEvent, new_assumptions: review.new_assumptions }, replyLanguage)
+      : { quiet: false }
+    if (resolution.quiet) {
+      // Bước im: không có gì để user bấm — không ghi trạng thái `gate`, đánh dấu `auto` để FE không dựng thẻ cổng
+      emit({ ...gateEvent, auto: true })
+      outcome = "auto"
+    } else {
+      tracker.stage("gate", { detail_vi: STAGE_LABELS.gate })
+      emit(gateEvent)
+      outcome = "gate"
+      await tracker.save({ status: "gate", stage: "gate", gate_payload: gateEvent, phase_gate: resolution.phaseGate ?? null, questions: null })
+    }
+  } catch (err) {
+    // Mất kết nối lúc đang chờ trả lời: step vẫn `in_progress`, lượt chờ nằm ở run-state (FLF-222)
+    if (err instanceof AnswerDetached) {
+      outcome = "detached"
+      return
+    }
+    // run-state đọc lại ở FE (`GET /run-state`) ⇒ chỉ lưu câu cho user; chi tiết do nơi bắt lỗi log (FLF-247)
+    lastError = { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) }
+    throw err
   } finally {
-    releaseStepLock(projectId, stepId)
+    if (outcome === "gate") {
+      // Khoá nhả ngay khi tới gate: user có thể huỷ/chạy lại mà không phải chờ TTL
+      await finishRun(projectId, stepId, run.run_id, "gate")
+    } else if (outcome === "auto") {
+      await finishRun(projectId, stepId, run.run_id, "done")
+    } else if (outcome === "detached") {
+      await detachRun(projectId, stepId, run.run_id)
+    } else {
+      await finishRun(projectId, stepId, run.run_id, "interrupted", { error: lastError })
+    }
+    unregisterAbort(run.run_id)
   }
+}
+
+/**
+ * BUG-10: `content_guidance` của vòng hỏi trước đây là chuỗi rỗng, nên vòng hỏi không biết luật của step (tên hệ thống
+ * từng không được hỏi — `system_name` vẫn null sau 5 vòng). Dùng đúng skill content của step; luật hỏi tên ở B-2.3 nằm trong đó.
+ */
+export const elicitGuidance = (ctx: StepContext): string => {
+  if (!ctx.skill) return ""
+  const skill = getSkill(ctx.skill)
+  return skill.stub ? "" : skill.template
+}
+
+/**
+ * Step không ghi gì thì gate phải nói VÌ SAO (03 Lớp 4) — im lặng là thứ làm user mất tin. Lý do hiện trong bong bóng cổng
+ * khi tin cổng trống ⇒ theo ngôn ngữ trả lời (FLF-260), thiếu ⇒ tiếng Việt.
+ */
+export const noChangeReason = (templateId: string, needsDraft: boolean, language: ReplyLanguage = "vi"): string => {
+  if (LOOP_BOOKKEEPING_TEMPLATES.has(templateId)) {
+    return byLanguage(language, {
+      vi: "Bước sổ sách của vòng màn hình — không có nội dung để ghi.",
+      en: "A bookkeeping step of the screen loop — there's no content to write."
+    })
+  }
+  if (!needsDraft) {
+    return byLanguage(language, {
+      vi: "Bước tất định — chỉ kiểm tra lại, không sinh nội dung mới.",
+      en: "A deterministic step — it only re-checks, it doesn't produce new content."
+    })
+  }
+  return byLanguage(language, { vi: "AI không tìm thấy gì cần thêm hoặc sửa ở bước này.", en: "The AI found nothing to add or change in this step." })
 }
 
 /** Mã lỗi pipeline hợp lệ — controller dùng để quyết định phát SSE `error` hay để nguyên lỗi HTTP thường. */

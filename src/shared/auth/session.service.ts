@@ -42,7 +42,7 @@ export const rotateSession = async (
   try {
     decoded = verifyRefreshToken(oldRefreshToken)
   } catch (error) {
-    throw new ApiError(401, "Invalid or expired refresh token", "INVALID_REFRESH_TOKEN")
+    throw new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "INVALID_REFRESH_TOKEN")
   }
 
   const oldHash = hashToken(oldRefreshToken)
@@ -56,14 +56,14 @@ export const rotateSession = async (
       { userId: new mongoose.Types.ObjectId(decoded.userId) },
       { isRevoked: true }
     )
-    throw new ApiError(401, "Refresh token reuse detected. All sessions revoked.", "TOKEN_REUSE_DETECTED")
+    throw new ApiError(401, "Phiên đăng nhập không còn an toàn nên đã bị đăng xuất trên mọi thiết bị. Vui lòng đăng nhập lại.", "TOKEN_REUSE_DETECTED")
   }
 
   // Check if token has expired based on DB record
   if (existingSession.expiresAt < new Date()) {
     existingSession.isRevoked = true
     await existingSession.save()
-    throw new ApiError(401, "Refresh token expired", "EXPIRED_REFRESH_TOKEN")
+    throw new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "EXPIRED_REFRESH_TOKEN")
   }
 
   // 3. Atomically revoke old session
@@ -75,7 +75,7 @@ export const rotateSession = async (
 
   if (!revokedSession) {
     // Concurrent rotation attempt
-    throw new ApiError(401, "Refresh token already processed", "CONCURRENT_REFRESH")
+    throw new ApiError(401, "Phiên đăng nhập đang được làm mới. Vui lòng thử lại.", "CONCURRENT_REFRESH")
   }
 
   // 4. Create new session for rotated token
@@ -85,6 +85,24 @@ export const rotateSession = async (
     userId: decoded.userId,
     email: decoded.email
   }
+}
+
+/**
+ * Ghi org đang mở vào ĐÚNG phiên đang dùng (task-26, BPMN Flow 9.3). Tìm phiên qua hash của refresh token
+ * nên đổi org ở thiết bị này không kéo theo thiết bị khác; lượt refresh sau đó cấp access token mang
+ * đúng orgId này.
+ */
+export const findSessionActiveOrg = async (refreshToken: string): Promise<string | null> => {
+  const session = await Session.findOne({ tokenHash: hashToken(refreshToken) }).select("activeOrgId").lean()
+  return session?.activeOrgId ? String(session.activeOrgId) : null
+}
+
+export const setActiveOrg = async (refreshToken: string, organizationId: string): Promise<void> => {
+  const tokenHash = hashToken(refreshToken)
+  await Session.findOneAndUpdate(
+    { tokenHash, isRevoked: false },
+    { activeOrgId: new mongoose.Types.ObjectId(organizationId) }
+  )
 }
 
 export const revokeSession = async (refreshToken: string): Promise<void> => {

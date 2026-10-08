@@ -15,6 +15,11 @@ export type NotificationType =
 
 export interface INotification extends Document {
   userId: mongoose.Types.ObjectId
+  /**
+   * Org mà thông báo thuộc về (task-26). Thông báo vẫn gửi cho NGƯỜI (userId) — thêm org để một người ở
+   * nhiều org không thấy lẫn thông báo của org khác. null = thông báo cấp nền tảng (vd admin_new_user).
+   */
+  organizationId: mongoose.Types.ObjectId | null
   type: NotificationType
   title: string
   body: string
@@ -31,6 +36,16 @@ const notificationSchema = new Schema<INotification>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true
+    },
+    /**
+     * Org sở hữu (task-26 Pha 0). Nullable ở pha này để migration backfill dần và API cũ chạy y nguyên;
+     * Pha 4 đổi filter sang organizationId rồi mới bỏ nullable.
+     */
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
+      index: true
     },
     type: {
       type: String,
@@ -63,5 +78,7 @@ const notificationSchema = new Schema<INotification>(
 
 // Danh sách + đếm chưa đọc theo user
 notificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 })
+// Cùng truy vấn nhưng lọc theo org đang mở
+notificationSchema.index({ userId: 1, organizationId: 1, readAt: 1, createdAt: -1 })
 
 export const Notification = mongoose.model<INotification>("Notification", notificationSchema)

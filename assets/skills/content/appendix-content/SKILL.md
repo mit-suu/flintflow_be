@@ -94,8 +94,8 @@ already sweeps `assumptions[]`. Keep this section to things a stakeholder must d
    The op validator enforces it: S-7.1 may write only `business_rules` and `assumptions`.
 3. Every id in `source_validation_ids` / `function_ids` must exist after this batch (`dead_reference`).
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
-5. Fast mode: derive the most reasonable row plus an `assumptions[]` entry (`status: "unconfirmed"`);
-   Coaching mode leaves the open question for Elicit (`draft-to-ops` rule 10).
+5. Still unanswered: derive the most reasonable row plus an `assumptions[]` entry
+   (`status: "unconfirmed"`), `draft-to-ops` rule 10.
 
 ## Example (S-7.1 merging one policy enforced twice, then S-7.3)
 

@@ -1,4 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
+import { USER_LOCALES } from "../../shared/i18n/locale.js"
+import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 export interface IChatMessage {
   role: "user" | "ai"
@@ -11,9 +13,13 @@ export interface IChatMessage {
 export interface IChatSession extends Document {
   projectId: mongoose.Types.ObjectId
   messages: IChatMessage[]
-  isActive: boolean
   /** Session chạy pipeline (Elicit/Draft/Gate). Đúng một mỗi project — srs-spine.md §6 bất biến 7. */
   is_pipeline: boolean
+  /**
+   * FLF-260: ngôn ngữ AI trả lời trong phiên — đặt khi một tin user gõ rõ ngôn ngữ, giữ qua các tin mơ hồ.
+   * `null` = chưa rõ ⇒ dùng ngôn ngữ tài khoản, rồi tiếng Việt.
+   */
+  reply_language?: ReplyLanguage | null
   createdAt: Date
   updatedAt: Date
 }
@@ -55,20 +61,21 @@ const chatSessionSchema = new Schema<IChatSession>(
       index: true
     },
     messages: [chatMessageSchema],
-    isActive: {
-      type: Boolean,
-      default: true
-    },
     is_pipeline: {
       type: Boolean,
       default: false
+    },
+    reply_language: {
+      type: String,
+      enum: [...USER_LOCALES],
+      default: null
     }
   },
   { timestamps: true }
 )
 
-// Compound Index for fetching active chat session (UC09)
-chatSessionSchema.index({ projectId: 1, isActive: 1 })
+// FLF-244: bỏ field `isActive` và index `{projectId, isActive}` — không còn đọc. DB cũ có thể drop tay index
+// `projectId_1_isActive_1` (Mongoose không tự xoá index), xem docs/ops.md.
 
 // Bất biến 7: tối đa một session is_pipeline = true mỗi project
 chatSessionSchema.index(

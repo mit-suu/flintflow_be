@@ -53,17 +53,25 @@ export const findOpCase = (stepId: string): { ops: unknown[]; notes?: string } |
 }
 
 export const mockCalls: RecordedCall[] = []
+/** Ảnh kèm từng lượt gọi (phase 5): loại + độ dài base64, theo thứ tự gọi. */
+export const mockImages: { mime: string; bytes: number }[][] = []
 
 /** Ghi đè từng lượt (vd ép lỗi); trả `undefined` để đi đường mặc định. */
 export const mockOverrides: { next?: (prompt: string) => string | Error | undefined } = {}
 
 export const resetMockLlm = (): void => {
   mockCalls.length = 0
+  mockImages.length = 0
   mockOverrides.next = undefined
 }
 
-export const mockCallLLM = async (prompt: string): Promise<{ text: string; promptTokens: number; completionTokens: number; raw: unknown }> => {
+export const mockCallLLM = async (
+  prompt: string,
+  _config?: unknown,
+  options: { images?: { mime: string; data: string }[] } = {}
+): Promise<{ text: string; promptTokens: number; completionTokens: number; raw: unknown }> => {
   const { kind, stepId } = detectCall(prompt)
+  mockImages.push((options.images ?? []).map((i) => ({ mime: i.mime, bytes: Buffer.from(i.data, "base64").length })))
   const override = mockOverrides.next?.(prompt)
   if (override instanceof Error) throw override
 

@@ -44,7 +44,7 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     expect(checkLocation(cr, loc({ proposal: null }), spine(), mine).map((v) => v.rule)).toEqual(["no_proposal"])
   })
 
-  it("edit không op ⇒ edit_without_ops; op không đổi gì ⇒ edit_no_change; op chạm phần tử không khoá ⇒ op_path_not_locked; thêm phần tử mới thì được", () => {
+  it("edit không op ⇒ edit_without_ops; op không đổi gì ⇒ edit_no_change; op chạm phần tử không khoá ⇒ op_path_not_locked; thêm phần tử mới từ vị trí phần tử ⇒ add_outside_slot (chỉ thêm từ ô thêm mới — 2026-09-24)", () => {
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: [], new_text: OLD }) }), spine(), mine).map((v) => v.rule)).toEqual(["edit_without_ops"])
     const same = [{ op: "set", path: `${PATH}.name`, value: "Learner" }]
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: same, new_text: previewAfter(spine(), PATH, same) }) }), spine(), mine).map((v) => v.rule)).toEqual([
@@ -53,7 +53,7 @@ describe("C-5 checkLocation — code (đỏ)", () => {
     const other = [...RENAME, { op: "set", path: "actors[id=A02].name", value: "Owner" }]
     expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: other }) }), spine(), mine).map((v) => v.rule)).toEqual(["op_path_not_locked"])
     const add = [...RENAME, { op: "add", path: "business_rules[]", value: { id: "BR-09", statement: "x", tier: "detail" } }]
-    expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: add }) }), spine(), mine)).toEqual([])
+    expect(checkLocation(cr, loc({ proposal: proposal({ spine_ops: add }) }), spine(), mine).map((v) => v.rule)).toEqual(["add_outside_slot"])
   })
 
   it("comment rỗng ⇒ comment_empty; comment có nội dung ⇒ đạt", () => {

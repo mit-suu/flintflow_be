@@ -9,8 +9,10 @@ import type { FindingsOutput } from "../../shared/ai/response-parser.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import * as flagsService from "../spine/flags.service.js"
+import { aiFindingLabel, humanizeText } from "../spine/human-labels.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
@@ -54,7 +56,10 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
   const ops: Op[] = []
   for (const f of findings) {
     const section = sections.has(f.section_id) ? f.section_id : "fixed:I"
-    const message = `[${f.rule}] ${f.message}`
+    // Không in mã luật thô (`[ambiguity]`) cho người đọc — luật AI biết tên thì thành nhãn tiếng Việt đứng đầu
+    const label = aiFindingLabel(f.rule)
+    const text = humanizeText(f.message)
+    const message = label ? `${label}: ${text}` : text
     if (open.has(`${section}|${message}`)) continue
     open.add(`${section}|${message}`)
     const flag: Flag = {
@@ -71,7 +76,24 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
       waive_reason: null,
       waived_at_version: null
     }
+    // Lý do của máy — `section-renderer` INTERNAL_REASON lọc khỏi Record of Changes
     ops.push({ op: "add", path: "flags[]", value: flag, reason: `AI check: ${f.rule}` })
+  }
+  return ops
+}
+
+/**
+ * Nhiều nhóm phát hiện (mỗi nhóm một luật) ghi cờ trong CÙNG một lô (FLF-252): id cờ cấp nối tiếp qua các nhóm. Gọi
+ * `findingOps` riêng từng nhóm trên cùng Spine thì mỗi lần đếm lại từ cờ có sẵn ⇒ hai cờ trùng id, cả lô bị từ chối
+ * ("Mục này đã tồn tại trong tài liệu" lúc tạo bản 0.0 khi vừa có ảnh không đọc được vừa có quyền không khớp màn).
+ */
+export const findingOpsInOrder = (spine: Spine, groups: readonly { findings: FindingsOutput["findings"]; rule: string }[]): Op[] => {
+  const ops: Op[] = []
+  let flags = spine.flags
+  for (const g of groups) {
+    const next = findingOps({ ...spine, flags }, g.findings, g.rule)
+    ops.push(...next)
+    flags = [...flags, ...next.map((o) => o.value as Flag)]
   }
   return ops
 }
@@ -89,7 +111,7 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   const semanticDone = await Usage.exists({ projectId, step_id: SEMANTIC_CHECK_STEP, state: "deducted" })
   if (!semanticDone) {
     const record = await spineRepository.get(projectId)
-    if (!record) throw new Error("Không tìm thấy Spine của project")
+    if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
     const spine = stripRecord(record)
     const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })
@@ -112,7 +134,8 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
     }
   }
 
-  await flagsService.recompute(projectId, { by: "import", ruleProfile: MODE1_RULE_PROFILE })
+  // BPMN 1.12: S-9.1 + S-9.2 bằng luật code trên baseline v0 ⇒ bật luật S-9 (`atBaseline`: giả định chưa xác nhận)
+  await flagsService.recompute(projectId, { by: "import", ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
   await transitionImport(doc, "gap_review")
   return true
 }

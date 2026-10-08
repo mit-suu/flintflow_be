@@ -27,6 +27,15 @@ export const SECTION_TARGETS: Readonly<Record<string, readonly string[]>> = {
   "fixed:5.5": ["glossary"]
 }
 
+/**
+ * Mode 1 v3 phase 5: section mà ảnh thường là diagram đọc được (ngữ cảnh, use case, luồng màn, ERD) ⇒ I-4 gửi ảnh
+ * cho Gemini. Ảnh ở section khác (ảnh chụp màn hình dưới mô tả màn / chức năng…) không gửi — giữ ảnh gốc, khỏi tốn credit.
+ */
+export const DIAGRAM_SECTIONS: ReadonlySet<string> = new Set(["fixed:1", "fixed:2.1", "fixed:2.2.1", "fixed:2.2.2", "fixed:3.1.1", "fixed:3.1.5"])
+
+/** Thực thể một diagram có thể cho (theo loại model phân ra — skill `import-extract-diagram`). */
+export const DIAGRAM_TARGETS = ["actors", "use_cases", "screens", "entities"] as const
+
 /** Category NFR theo section (model không phải đoán). */
 export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
   "fixed:4.1": "interface",
@@ -36,32 +45,41 @@ export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
   "fixed:4.2.4": "other"
 }
 
+/**
+ * Thực thể cần trích của section. Feature (FLF-252): chữ / bảng ngay dưới một tính năng — danh sách yêu cầu FR-… của mẫu
+ * IEEE, phần giới thiệu tính năng của FPT — trích thành chức năng của tính năng đó (trước đây không trích gì).
+ */
 export const targetsOf = (sectionId: string): readonly string[] => {
-  const m = PROVISIONAL_SECTION.exec(sectionId)
-  if (m) return m[1] === "function" ? ["functions"] : []
+  if (PROVISIONAL_SECTION.test(sectionId)) return ["functions"]
   return SECTION_TARGETS[sectionId] ?? []
 }
 
 /** Section có trích (Record of Changes là dẫn xuất, không trích). */
 export const isExtractableSection = (sectionId: string): boolean => sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || sectionId in SECTION_TARGETS)
 
+/**
+ * FLF-252: đủ các field Spine mà tài liệu hay ghi — tên hệ thống, phạm vi release, feature của màn, màn + quy tắc của
+ * chức năng, chức năng dùng thông báo / hiện thực use case, tên tiếng Việt của thuật ngữ (trước đây bị bỏ vì model không biết).
+ */
 export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
-  project: "project: { vision: string, goals: string[], type: string, domain: string } — product-level facts only",
+  project:
+    "project: { system_name: string, vision: string, goals: string[], type: string, domain: string, release_scope: { in: string[], out: string[] } } — product-level facts only",
   actors: 'actors[]: { name, kind: "human" | "system" | "time", description }',
   roles: "roles[]: { name, actor_id: <actor id or null> }",
-  use_cases: "use_cases[]: { name, actor_ids: <actor ids from known_keys>, description, includes: <use case ids>, extends: <use case ids> }",
+  use_cases:
+    "use_cases[]: { name, actor_ids: <actor ids from known_keys>, description, includes: <use case ids>, extends: <use case ids>, function_ids: <function ids / names that implement it> }",
   features: "features[]: { name }",
-  screens: "screens[]: { name, description, is_popup: boolean, tabs: string[] }",
+  screens: "screens[]: { name, description, feature_id: <feature id / name>, is_popup: boolean, tabs: string[], flow_to: <screen ids this screen navigates to> }",
   permissions: 'permissions[]: { screen_id, role_id, action: "view" | "create" | "update" | "delete" | <verb> }',
   entities: "entities[]: { name, description, relations: <entity ids> }",
   functions:
-    'functions[]: { name, trigger, description, normal: string[] (main flow steps), abnormal: string[] (alternative/exception flows), validations: [{ kind: "business" | "format" | "required", statement }], priority: "must" | "should" | "could" | "wont" | null }',
+    'functions[]: { name, trigger, description, screen_id: <screen id / name or null>, normal: string[] (main flow steps), abnormal: string[] (alternative/exception flows), validations: [{ kind: "business" | "format" | "required", statement }], business_rule_ids: <business rule ids>, priority: "must" | "should" | "could" | "wont" | null }',
   nfrs: 'nfrs[]: { statement, kind: "quantitative" | "descriptive", metric?, threshold?, priority }',
   business_rules: 'business_rules[]: { statement, tier: "high" | "detail" }',
   common_requirements: "common_requirements[]: { category, statement }",
-  messages: "messages[]: { code, text }",
+  messages: "messages[]: { code, text, function_ids: <function ids / names that show it> }",
   other_requirements: 'other_requirements[]: { kind: "risk" | "assumption" | "open_question" | "technical_risk", statement }',
-  glossary: "glossary[]: { term, definition }"
+  glossary: "glossary[]: { term, term_native: <term in the other language if given>, definition }"
 }
 
 export const schemaExcerptFor = (targets: readonly string[]): string => targets.map((t) => `- ${SCHEMA_EXCERPT[t] ?? t}`).join("\n")

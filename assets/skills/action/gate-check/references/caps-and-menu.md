@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `calls` | step (S-5: step@screen) | every model call of any kind, successful or not | step `accepted` |
 | `regenerates` | step; **function** at S-5.4 | Regenerate action | step `accepted` |
-| `elicit_turns_this_phase` | phase | Elicit turn (Fast path enforcement) | phase change |
+| `elicit_turns_this_phase` | phase | Elicit turn (bookkeeping only) | phase change |
 
 Counters are derived from `usage[]` rows with `step_id` and `call_kind` since the step's last `accepted_at` — not stored separately — so they survive resume.
 
@@ -33,7 +33,7 @@ Counters are derived from `usage[]` rows with `step_id` and `call_kind` since th
 - Keep the user's Elicit answers; offer to draft again.
 - Does not count toward the regenerate cap.
 
-## Fast path phase gate
+## Phase gate ("Cuối giai đoạn")
 
 - One card lists every step of the phase with its ops summary.
 - Accept applies to all steps; Request revision names the step(s); Regenerate applies to one step at a time.

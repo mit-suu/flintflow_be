@@ -58,7 +58,7 @@ const projectWithRevision = async () => {
   for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
   const groups = changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups
   for (const g of groups) {
-    const res = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
+    const res = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
   }
   return { seeded, projectId, c }
@@ -68,7 +68,7 @@ const releaseNow = async (c: Api) => c.post("/release", { base_version: await c.
 
 describe("mode 1 — version + tải về", () => {
   it("danh sách version, block đọc từ file render, so sánh 0.0 → 0.1, tải bản draft có watermark DRAFT", async () => {
-    const { c } = await projectWithRevision()
+    const { c, projectId } = await projectWithRevision()
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions.map((v) => [v.version, v.kind])).toEqual([
       ["0.1", "cr_revision"],
@@ -91,7 +91,7 @@ describe("mode 1 — version + tải về", () => {
 
     const draft = await binary(c.get("/versions/0.1/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.1_DRAFT.docx")
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v0.1_DRAFT.docx`)
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
@@ -132,7 +132,7 @@ describe("mode 1 — release (Flow 6)", () => {
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
 
     const clean = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
+    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
     const xml = await documentXml(clean.body as Buffer)
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))
@@ -148,7 +148,7 @@ describe("mode 1 — release (Flow 6)", () => {
     for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
     let done = null as Awaited<ReturnType<typeof c.post>> | null
     for (const g of changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups) {
-      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
+      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
     }
     expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)
@@ -158,10 +158,10 @@ describe("mode 1 — release (Flow 6)", () => {
 })
 
 describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
-  it("/changes, /changes/preview, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; chat hỏi đáp vẫn đi", async () => {
+  it("/changes, /undo, /reconcile và chat ra lệnh sửa ⇒ 409 CHANGE_REQUIRES_CR kèm prefill; preview chỉ đọc vẫn chạy", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
-    // D3 (FLF-183): chặn chỉ áp sau baseline v1
+    // mode 1 v3: có baseline bất kỳ là chặn
     await markBaselineV1(projectId)
     const auth = { Authorization: `Bearer ${seeded.token}` }
     const base = `/api/v1/projects/${projectId}`
@@ -172,9 +172,12 @@ describe("mode 1 — chặn sửa ngoài change request (G9, BR-03)", () => {
     expect(change.body.error.code).toBe("CHANGE_REQUIRES_CR")
     expect(changeRequiresCrMetaSchema.parse(change.body.meta).prefill).toEqual({
       title: "Rename actor Learner to Student",
-      description: "Rename actor Learner to Student"
+      description: "Rename actor Learner to Student",
+      source: { kind: "verbal", ref: null }
     })
-    for (const path of ["/changes/preview", "/undo", "/reconcile"]) {
+    const preview = await request(app).post(`${base}/changes/preview`).set(auth).send({ base_version: version, ops: [{ op: "set", path: "project.vision", value: "x" }] })
+    expect(preview.body.error?.code).not.toBe("CHANGE_REQUIRES_CR")
+    for (const path of ["/undo", "/reconcile"]) {
       const res = await request(app).post(`${base}${path}`).set(auth).send({ base_version: version, instruction: "Rename actor" })
       expect(res.body.error?.code, path).toBe("CHANGE_REQUIRES_CR")
     }

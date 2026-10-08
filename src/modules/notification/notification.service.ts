@@ -9,13 +9,31 @@ export interface NotificationPayload {
   body: string
   link?: string
   meta?: Record<string, unknown>
+  /**
+   * Org mà thông báo thuộc về (task-26). Bỏ trống = thông báo cấp nền tảng. Một người ở nhiều org nên
+   * thông báo phải lọc được theo org đang mở.
+   */
+  organizationId?: string
 }
 
 export interface ListNotificationsOptions {
   unreadOnly?: boolean
   page?: number
   limit?: number
+  /** Org đang mở. null/bỏ trống ⇒ chỉ thấy thông báo cấp nền tảng (tài khoản chưa chọn org). */
+  organizationId?: string | null
 }
+
+/**
+ * task-26: một người ở nhiều org không được thấy lẫn thông báo của org khác. Thông báo cấp nền tảng
+ * (`organizationId: null`, vd chào mừng, admin) luôn hiện vì nó không thuộc org nào.
+ */
+export const scopeToOrg = (userId: string, organizationId?: string | null): Record<string, unknown> => ({
+  userId,
+  ...(organizationId
+    ? { $or: [{ organizationId }, { organizationId: null }] }
+    : { organizationId: null })
+})
 
 /**
  * Notification là side effect: lỗi ghi không được làm hỏng luồng chính
@@ -28,6 +46,7 @@ export const notify = async (
   try {
     return await Notification.create({
       userId: new mongoose.Types.ObjectId(userId),
+      organizationId: payload.organizationId ? new mongoose.Types.ObjectId(payload.organizationId) : null,
       type: payload.type,
       title: payload.title,
       body: payload.body,
@@ -62,15 +81,15 @@ export const notifyAdmins = async (payload: NotificationPayload): Promise<number
   }
 }
 
-export const countUnread = async (userId: string): Promise<number> => {
-  return Notification.countDocuments({ userId, readAt: null })
+export const countUnread = async (userId: string, organizationId?: string | null): Promise<number> => {
+  return Notification.countDocuments({ ...scopeToOrg(userId, organizationId), readAt: null })
 }
 
 export const listNotifications = async (
   userId: string,
-  { unreadOnly = false, page = 1, limit = 20 }: ListNotificationsOptions = {}
+  { unreadOnly = false, page = 1, limit = 20, organizationId = null }: ListNotificationsOptions = {}
 ) => {
-  const filter: Record<string, unknown> = { userId }
+  const filter: Record<string, unknown> = scopeToOrg(userId, organizationId)
   if (unreadOnly) filter.readAt = null
 
   const safeLimit = Math.min(Math.max(limit, 1), 100)
@@ -83,7 +102,7 @@ export const listNotifications = async (
       limit: safeLimit
     }),
     Notification.countDocuments(filter),
-    countUnread(userId)
+    countUnread(userId, organizationId)
   ])
 
   return {
@@ -117,9 +136,9 @@ export const markRead = async (userId: string, notificationId: string): Promise<
   return existing
 }
 
-export const markAllRead = async (userId: string): Promise<number> => {
+export const markAllRead = async (userId: string, organizationId?: string | null): Promise<number> => {
   const result = await Notification.updateMany(
-    { userId, readAt: null },
+    { ...scopeToOrg(userId, organizationId), readAt: null },
     { $set: { readAt: new Date() } }
   )
   return result.modifiedCount

@@ -9,7 +9,7 @@ import { planTransaction } from "../spine/op-engine.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import { collectEntities, realSectionId, resolveProvisional } from "./extracted-entities.js"
 import type { ExtractedField } from "./extraction-draft.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import { needsConfirm } from "./import.constants.js"
 import { buildImportOps } from "./spine-builder.js"
 
 const field = (path: string, value: unknown, confidence = 0.9, confirmed = false, extra: Partial<ExtractedField> = {}): ExtractedField => ({
@@ -22,8 +22,8 @@ const field = (path: string, value: unknown, confidence = 0.9, confirmed = false
   ...extra
 })
 
-/** Cùng điều kiện lọc với `finalizeImport`: đã xác nhận hoặc độ tin ≥ 0.7. */
-const acceptedOf = (fields: ExtractedField[]) => fields.filter((f) => f.confirmed || f.confidence >= FIELD_CONFIDENCE_THRESHOLD)
+/** Cùng điều kiện lọc với `finalizeImport`: đã xác nhận hoặc không cần xác nhận (độ tin ≥ 0.7, không đọc từ ảnh). */
+const acceptedOf = (fields: ExtractedField[]) => fields.filter((f) => f.confirmed || !needsConfirm(f))
 
 describe("finalize — field ⇒ thực thể ⇒ op", () => {
   it("field độ tin thấp chưa xác nhận bị bỏ; đã xác nhận (kể cả độ tin thấp) được ghi; edited_value thắng", () => {
@@ -41,6 +41,36 @@ describe("finalize — field ⇒ thực thể ⇒ op", () => {
 
   it("ngưỡng 0.7 đúng biên: 0.7 được nhận, 0.69 bị bỏ", () => {
     expect(acceptedOf([field("actors[id=A01].name", "x", 0.7), field("actors[id=A02].name", "y", 0.69)]).map((f) => f.path)).toEqual(["actors[id=A01].name"])
+  })
+
+  it("phase 5: field đọc từ ảnh (origin vision) chưa xác nhận bị bỏ dù độ tin 0.7; xác nhận rồi thì ghi", () => {
+    const v = (path: string, confirmed: boolean) => field(path, "Guest", 0.7, confirmed, { origin: "vision" })
+    expect(acceptedOf([v("actors[id=A08].name", false), v("actors[id=A09].name", true)]).map((f) => f.path)).toEqual(["actors[id=A09].name"])
+  })
+
+  it("phase 5: danh sách tham chiếu từ nhiều nguồn gộp hợp (bảng + ảnh); field khác lấy giá trị sau", () => {
+    const fields = [
+      field("use_cases[id=UC-02].actor_ids", ["A01", "Guest"], 0.7, true, { origin: "vision" }),
+      field("use_cases[id=UC-02].name", "Login", 0.7, true, { origin: "vision" }),
+      field("use_cases[id=UC-02].actor_ids", ["A01"]),
+      field("use_cases[id=UC-02].name", "Log in")
+    ]
+    expect([...collectEntities(fields).values()][0].value).toEqual({ actor_ids: ["A01", "Guest"], name: "Log in" })
+  })
+
+  it("FLF-252: thứ tự phần tử theo nơi bảng / chữ định nghĩa — quan hệ từ sơ đồ ở mục trước không kéo use case lên đầu bảng", () => {
+    const fields = [
+      // 2.2.1: sơ đồ chỉ thêm quan hệ cho UC-03, UC-02
+      field("use_cases[id=UC-03].actor_ids", ["Admin"], 0.65, true, { origin: "vision" }),
+      field("use_cases[id=UC-02].actor_ids", ["Admin"], 0.65, true, { origin: "vision" }),
+      // 2.2.2: bảng use case theo thứ tự tài liệu
+      field("use_cases[id=UC-01].name", "Login", 1, false, { origin: "deterministic" }),
+      field("use_cases[id=UC-02].name", "Logout", 1, false, { origin: "deterministic" }),
+      field("use_cases[id=UC-03].name", "View Profile", 1, false, { origin: "deterministic" }),
+      // phần tử chỉ có trong ảnh giữ chỗ nơi ảnh nhắc tới
+      field("entities[id=E15].name", "DocChunk", 0.6, true, { origin: "vision" })
+    ]
+    expect([...collectEntities(fields).values()].map((e) => e.id)).toEqual(["UC-01", "UC-02", "UC-03", "E15"])
   })
 
   it("mọi thực thể thành một lô op duy nhất, chạy khô hợp lệ trên Spine rỗng với by import", () => {

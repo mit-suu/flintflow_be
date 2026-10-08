@@ -7,9 +7,10 @@
  */
 
 import type { ExtractedField } from "./extraction-draft.model.js"
+import type { FieldOrigin } from "./import.constants.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import type { HeadingMapEntry } from "./template-profile.model.js"
-import { splitHeadingNumber } from "./text-similarity.js"
+import { foldText, splitHeadingNumber } from "./text-similarity.js"
 
 export interface EntityItem {
   entity: string
@@ -19,7 +20,9 @@ export interface EntityItem {
   confidence: number
   field_confidence: Record<string, number>
   source_block_ids: string[]
-  origin: "deterministic" | "ai"
+  origin: FieldOrigin
+  /** Nguồn riêng của field khác nguồn item — phần ảnh bù vào phần tử của chữ / bảng vẫn là `vision` (FLF-252). */
+  field_origin?: Record<string, FieldOrigin>
 }
 
 export const ID_PREFIX: Readonly<Record<string, { prefix: string; pad: number }>> = {
@@ -46,7 +49,94 @@ export const normalizeKey = (key: string): string => {
   return m ? `${m[1].toUpperCase()}-${m[2]}` : k.replace(/\s+/g, " ")
 }
 
-/** Cấp id mới không trùng id đã có của từng mảng. */
+/**
+ * Khoá so tên khi ghép cùng một phần tử giữa các nguồn (bảng, chữ, heading, ảnh — FLF-251): bỏ số mục đầu, dấu,
+ * hoa/thường, ký tự lạ ⇒ "3.6.2 Send Reminder" = "send reminder", "Log-in" = "log in".
+ */
+export const nameKey = (name: string): string => foldText(splitHeadingNumber(name).title)
+
+const nameOf = (value: Record<string, unknown>): string | null =>
+  typeof value.name === "string" ? value.name : typeof value.term === "string" ? value.term : null
+
+/** Id của phần tử cùng loại đã biết có tên trùng (sau chuẩn hoá); không có ⇒ `null`. */
+export const findKnownId = (known: readonly EntityItem[], entity: string, name: unknown): string | null => {
+  if (typeof name !== "string" || !nameKey(name)) return null
+  const key = nameKey(name)
+  const hit = known.find((k) => {
+    const n = k.entity === entity && k.id ? nameOf(k.value) : null
+    return n !== null && nameKey(n) === key
+  })
+  return hit?.id ?? null
+}
+
+/** Số nhiều tiếng Anh thường gặp ⇒ số ít: categories ⇒ category, analyses ⇒ analysis, files ⇒ file (từ ≤ 3 chữ giữ nguyên). */
+const singular = (w: string): string => {
+  if (w.length <= 3) return w
+  if (w.endsWith("ies")) return `${w.slice(0, -3)}y`
+  if (w.endsWith("yses")) return `${w.slice(0, -4)}ysis`
+  if (/(ss|sh|ch|x)es$/.test(w)) return w.slice(0, -2)
+  if (w.endsWith("s") && !/(ss|us|is)$/.test(w)) return w.slice(0, -1)
+  return w
+}
+
+/**
+ * Khoá so tên khác quy ước đặt tên (FLF-252): ERD vẽ lớp "SubscriptionPlan" / "PrAnalysis", bảng ghi bảng dữ liệu
+ * "subscription_plans" / "pr_analyses" ⇒ cùng "subscriptionplan" / "pranalysis" (tách camelCase, bỏ dấu, về số ít, bỏ khoảng trắng).
+ */
+export const compactKey = (name: string): string =>
+  nameKey(name.replace(/([a-z0-9])([A-Z])/g, "$1 $2"))
+    .split(" ")
+    .map(singular)
+    .join("")
+
+/** Id của phần tử cùng loại DUY NHẤT có `compactKey` trùng (khác quy ước đặt tên); không có / nhiều phần tử ⇒ `null`. */
+export const findKnownCompact = (known: readonly EntityItem[], entity: string, name: unknown): string | null => {
+  const key = typeof name === "string" ? compactKey(name) : ""
+  if (!key) return null
+  const ids = new Set<string>()
+  for (const k of known) {
+    const n = k.entity === entity && k.id ? nameOf(k.value) : null
+    if (n !== null && compactKey(n) === key) ids.add(k.id!)
+  }
+  return ids.size === 1 ? [...ids][0] : null
+}
+
+/**
+ * Khoá so mã phần tử (FLF-252): bỏ dấu nối / gạch dưới / khoảng trắng và số 0 đứng đầu, không phân biệt hoa thường ⇒
+ * "A01" = "A-01" = "a1", "UC01" = "UC-01". Id cấp tự động ("A01", "E01") không cùng dạng `normalizeKey` ("A-01").
+ */
+export const idKey = (id: string): string =>
+  id
+    .trim()
+    .toUpperCase()
+    .replace(/[-_\s]+/g, "")
+    .replace(/(^|\D)0+(?=\d)/g, "$1")
+
+/** Id đã biết cùng loại có mã trùng (so theo `idKey`); không có ⇒ `null`. */
+export const findKnownKey = (known: readonly EntityItem[], entity: string, key: string): string | null => {
+  const k = idKey(key)
+  return known.find((x) => x.entity === entity && x.id !== null && idKey(x.id) === k)?.id ?? null
+}
+
+/**
+ * Id của phần tử model trả về (FLF-252):
+ * - khoá trùng mã đã biết (so lỏng) ⇒ mã đó. Model chép đúng "A01" từ known_keys nhưng `normalizeKey` đổi thành "A-01" ⇒
+ *   trước đây thành phần tử thứ hai: tác nhân của bảng bị nhân đôi khi sơ đồ ngữ cảnh / use case vẽ lại, thực thể khi ERD vẽ lại;
+ * - khoá chỉ là tên chép lại ("LimCallLog") ⇒ coi như không có khoá;
+ * - ảnh hiếm khi ghi mã ⇒ tên trùng phần tử đã biết thắng khoá lạ (model tự đặt); chữ thì mã tài liệu thắng. Tên so cả
+ *   khác quy ước đặt tên khi chỉ một phần tử khớp ("SubscriptionPlan" của ERD = "subscription_plans" của bảng);
+ * - không khớp gì ⇒ khoá chuẩn hoá; không có khoá ⇒ `null` (cấp mới).
+ */
+export const aiItemId = (known: readonly EntityItem[], entity: string, key: string | null, name: unknown, fromImage = false): string | null => {
+  const code = key?.trim() && !(typeof name === "string" && nameKey(key) === nameKey(name)) ? key.trim() : null
+  const sameKey = code ? findKnownKey(known, entity, code) : null
+  if (sameKey) return sameKey
+  const sameName = findKnownId(known, entity, name) ?? findKnownCompact(known, entity, name)
+  if (sameName && (fromImage || !code)) return sameName
+  return code ? normalizeKey(code) : null
+}
+
+/** Cấp id mới không trùng id đã có của từng mảng — so theo `idKey`: đã có "A-01" thì không cấp "A01". */
 export class IdAllocator {
   private readonly used = new Map<string, Set<string>>()
   private readonly counters = new Map<string, number>()
@@ -57,12 +147,12 @@ export class IdAllocator {
 
   reserve(entity: string, id: string): void {
     const set = this.used.get(entity) ?? new Set<string>()
-    set.add(id)
+    set.add(idKey(id))
     this.used.set(entity, set)
   }
 
   has(entity: string, id: string): boolean {
-    return this.used.get(entity)?.has(id) ?? false
+    return this.used.get(entity)?.has(idKey(id)) ?? false
   }
 
   next(entity: string): string {
@@ -142,24 +232,44 @@ export const flattenItem = (item: EntityItem): ExtractedField[] =>
       value,
       confidence: Math.min(1, Math.max(0, item.field_confidence[field] ?? item.confidence)),
       source_block_ids: item.source_block_ids,
-      origin: item.origin,
+      origin: item.field_origin?.[field] ?? item.origin,
       confirmed: false
     }))
 
 /** Gộp field phẳng lại thành thực thể; `edited_value` (UC-22) thắng `value`. */
+/**
+ * Field là danh sách tham chiếu (quan hệ): nhiều nguồn (bảng, chữ, ảnh diagram — phase 5) cùng nói về một phần tử thì
+ * gộp hợp, không ghi đè — vd bảng UC chỉ ghi "Learner", diagram còn nối thêm "Guest".
+ */
+export const REF_LIST_FIELDS: ReadonlySet<string> = new Set(["actor_ids", "includes", "extends", "relations", "flow_to"])
+
+/** Giá trị mới của field khi đã có giá trị cũ: danh sách tham chiếu ⇒ hợp (giữ thứ tự), còn lại ⇒ giá trị mới. */
+export const mergeFieldValue = (field: string, prev: unknown, next: unknown): unknown =>
+  REF_LIST_FIELDS.has(field) && Array.isArray(prev) && Array.isArray(next) ? [...new Set([...prev, ...next])] : next
+
+/**
+ * Thứ tự phần tử theo nơi chữ / bảng định nghĩa nó (field không đọc từ ảnh đầu tiên), không có thì nơi ảnh nhắc đầu tiên
+ * (FLF-252): quan hệ đọc từ sơ đồ use case ở 2.2.1 không còn kéo vài use case lên trước cả bảng 2.2.2 khi in.
+ */
 export const collectEntities = (
   fields: (ExtractedField & { section_id?: string })[]
 ): Map<string, { entity: string; id: string | null; value: Record<string, unknown>; source_block_ids: Set<string>; sections: Set<string> }> => {
   const out = new Map<string, { entity: string; id: string | null; value: Record<string, unknown>; source_block_ids: Set<string>; sections: Set<string> }>()
-  for (const f of fields) {
+  const rank = new Map<string, { any: number; main: number | null }>()
+  fields.forEach((f, i) => {
     const p = parseFieldPath(f.path)
-    if (!p) continue
+    if (!p) return
     const key = `${p.entity}|${p.id ?? ""}`
+    const r = rank.get(key) ?? { any: i, main: null }
+    if (f.origin !== "vision" && r.main === null) r.main = i
+    rank.set(key, r)
     const cur = out.get(key) ?? { entity: p.entity, id: p.id, value: {}, source_block_ids: new Set<string>(), sections: new Set<string>() }
-    cur.value[p.field] = f.edited_value !== undefined ? f.edited_value : f.value
+    const next = f.edited_value !== undefined ? f.edited_value : f.value
+    cur.value[p.field] = p.field in cur.value ? mergeFieldValue(p.field, cur.value[p.field], next) : next
     for (const b of f.source_block_ids) cur.source_block_ids.add(b)
     if (f.section_id) cur.sections.add(f.section_id)
     out.set(key, cur)
-  }
-  return out
+  })
+  const at = (key: string): number => rank.get(key)!.main ?? rank.get(key)!.any
+  return new Map([...out].sort(([a], [b]) => at(a) - at(b)))
 }

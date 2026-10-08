@@ -1,0 +1,5 @@
+{
+  "id": "clinic-booking",
+  "idea": "Tôi cần một hệ thống đặt lịch khám cho một phòng khám đa khoa. Bệnh nhân chọn bác sĩ và giờ khám, lễ tân xếp lại khi có người tới trực tiếp, bác sĩ xem danh sách bệnh nhân trong ngày. Phòng khám nghỉ trưa và thứ bảy chỉ làm buổi sáng.",
+  "note": "Khung giờ làm việc là số liệu nghiệp vụ: đoán sai thì khung giờ đặt lịch, luật nghiệp vụ và cửa sổ bảo trì NFR đều sai. Baseline phải cho thấy giờ làm việc bị tự quyết thay vì được hỏi."
+}

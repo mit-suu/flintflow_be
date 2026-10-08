@@ -77,7 +77,7 @@ router.post("/:projectId/assemble", authMiddleware, renderController.assembleCon
  *       404:
  *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
  *       409:
- *         description: NO_WORKING_DRAFT (chưa gọi POST /assemble lần nào — meta.hint = "S-8.2")
+ *         description: NO_WORKING_DRAFT (project chưa có Spine). source=draft trả 200 + meta.state = "not_assembled"
  */
 router.get("/:projectId/document", authMiddleware, renderController.getDocumentController)
 
@@ -114,7 +114,7 @@ router.get("/:projectId/document", authMiddleware, renderController.getDocumentC
  *       404:
  *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
  *       409:
- *         description: NO_WORKING_DRAFT (chưa assemble — meta.hint = "S-8.2")
+ *         description: NO_WORKING_DRAFT (project chưa có Spine)
  *       422:
  *         description: RENDER_IMAGE_INVALID
  */

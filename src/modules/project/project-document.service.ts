@@ -1,4 +1,3 @@
-import { createRequire } from "module"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ProjectDocument } from "./project-document.model.js"
 import { getProjectById } from "./project.service.js"
@@ -6,77 +5,19 @@ import { uploadFileToCloudinary } from "../../shared/utils/cloudinary.js"
 import { destroyDocumentAsset } from "./project-document.storage.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
-
-// pdf-parse và mammoth không có bundled TypeScript types nên dùng createRequire
-// để import CommonJS module từ ESM context một cách an toàn.
-const require = createRequire(import.meta.url)
-
-/**
- * Ước lượng số token từ độ dài chuỗi.
- * Dùng tỷ lệ ~4 ký tự/token theo OpenAI estimation.
- * Không cần thư viện tokenizer chính xác ở giai đoạn này.
- */
-const estimateTokenCount = (text: string): number => {
-  return Math.ceil(text.length / 4)
-}
-
-/**
- * Parse nội dung text từ file đã upload.
- * Nhận Buffer từ Multer memoryStorage (đã xác nhận config là memoryStorage).
- * Trả về { text, tokenCount } hoặc throw Error nếu parse thất bại.
- */
-const parseFileContent = async (
-  buffer: Buffer,
-  mimeType: string,
-  extension: string
-): Promise<{ text: string; tokenCount: number }> => {
-  const ext = extension.toLowerCase()
-
-  // PDF
-  if (mimeType === "application/pdf" || ext === ".pdf") {
-    const pdfParse = require("pdf-parse")
-    const data = await pdfParse(buffer)
-    const text = (data.text as string).trim()
-    return { text, tokenCount: estimateTokenCount(text) }
-  }
-
-  // DOCX / DOC (mammoth chỉ hỗ trợ .docx tốt; .doc là legacy binary)
-  if (
-    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    mimeType === "application/msword" ||
-    ext === ".docx" ||
-    ext === ".doc"
-  ) {
-    const mammoth = require("mammoth")
-    const result = await mammoth.extractRawText({ buffer })
-    const text = (result.value as string).trim()
-    return { text, tokenCount: estimateTokenCount(text) }
-  }
-
-  // TXT / MD — đọc trực tiếp từ buffer
-  if (
-    mimeType === "text/plain" ||
-    mimeType === "text/markdown" ||
-    ext === ".txt" ||
-    ext === ".md"
-  ) {
-    const text = buffer.toString("utf-8").trim()
-    return { text, tokenCount: estimateTokenCount(text) }
-  }
-
-  throw new Error(`Unsupported file type for parsing: mimeType=${mimeType}, ext=${extension}`)
-}
+import { parseFileContent } from "../../shared/utils/file-text.js"
 
 export const uploadProjectDocument = async (
+  orgId: string,
   userId: string,
   projectId: string,
   file: Express.Multer.File
 ): Promise<any> => {
   if (!file) {
-    throw new ApiError(400, "A file is required", "FILE_REQUIRED")
+    throw new ApiError(400, "Vui lòng chọn file để tải lên.", "FILE_REQUIRED")
   }
 
-  const project = await getProjectById(projectId, userId)
+  const project = await getProjectById(projectId, orgId)
 
   const allowedMimeTypes = new Set([
     "application/pdf",
@@ -91,7 +32,7 @@ export const uploadProjectDocument = async (
   const extension = originalName.slice(originalName.lastIndexOf("."))?.toLowerCase() || ""
 
   if (!allowedMimeTypes.has(file.mimetype) && !allowedExtensions.has(extension)) {
-    throw new ApiError(400, "Only PDF, DOCX, MD, TXT files are supported", "UNSUPPORTED_FILE_TYPE")
+    throw new ApiError(400, "Chỉ hỗ trợ file PDF, DOCX, MD hoặc TXT.", "UNSUPPORTED_FILE_TYPE")
   }
 
   // Step 1: Upload lên Cloudinary
@@ -179,22 +120,22 @@ export const uploadProjectDocument = async (
   return document
 }
 
-export const getProjectDocuments = async (userId: string, projectId: string): Promise<any[]> => {
-  await getProjectById(projectId, userId)
+export const getProjectDocuments = async (orgId: string, projectId: string): Promise<any[]> => {
+  await getProjectById(projectId, orgId)
 
   return await ProjectDocument.find({ projectId }).sort({ createdAt: -1 })
 }
 
 export const deleteProjectDocument = async (
-  userId: string,
+  orgId: string,
   projectId: string,
   documentId: string
 ): Promise<void> => {
-  await getProjectById(projectId, userId)
+  await getProjectById(projectId, orgId)
 
   const document = await ProjectDocument.findOne({ _id: documentId, projectId })
   if (!document) {
-    throw new ApiError(404, "Document not found", "DOCUMENT_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy tài liệu.", "DOCUMENT_NOT_FOUND")
   }
 
   await ProjectDocument.deleteOne({ _id: documentId, projectId })

@@ -1,0 +1,5 @@
+{
+  "id": "retail-pos",
+  "idea": "Tôi mở một chuỗi ba cửa hàng tiện lợi và muốn một hệ thống bán hàng tại quầy: quét mã vạch, in hoá đơn, trừ tồn kho, chốt sổ cuối ngày. Thu ngân dùng khi bán, chủ cửa hàng xem doanh thu từng cửa hàng.",
+  "note": "Ý tưởng không nêu nền tảng nào ⇒ thẻ Nền tảng phải hiện và phải cho tick nhiều ô (quầy có thể cần cả máy tính tại quầy lẫn web xem doanh thu)."
+}

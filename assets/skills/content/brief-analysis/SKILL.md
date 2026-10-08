@@ -14,6 +14,7 @@ reads:
   - "other_requirements[]"
 writes:
   - "project"
+  - "addendum[]"
   - "other_requirements[]"
   - "assumptions[]"
 output_schema: opTransaction
@@ -34,17 +35,25 @@ step that does.
 
 ## S-1.1 — Brief Extraction
 
-Read every `addendum[]` entry and ask one question of each: *is the structured field it implies actually
-filled in?* The Brief may have captured a vision in prose but left `project.vision` empty, or named five
-outcomes in an addendum while `project.goals[]` has two.
+The Brief keeps vision and goals in the user's language as addendum entries (`topic: "vision"` — one entry;
+`topic: "goals"` — one entry per goal), each with `content_en`. B-* never writes `project.vision`/`project.goals`;
+**this step builds them, in English, for SRS §1.**
 
-- Fill `project.vision` (one sentence: who, what changes, why it matters) when it is empty or clearly
-  weaker than what the addenda say.
-- Fill or extend `project.goals[]` to 3–6 outcome-shaped goals drawn from the addenda — outcomes, not
-  features. Do not invent a goal no addendum supports.
-- `project.form_factor`, `stakes`, `working_mode` are set at B-0; only touch one if an addendum
+- **Always** `set project.vision` when a `vision` entry exists (one English sentence: who, what changes, why it matters —
+  from its `content_en`), and `set project.goals` when `goals` entries exist (the full array, 1:1 with the `goals`
+  entries in addendum order, from each `content_en`) — even when the fields already have values. No entry ⇒ do not
+  write that field. Never merge two goals, never invent a goal no entry supports. Any batch that sets `project.goals`
+  (also a revision) must have exactly one item per `goals` entry; the server rejects a mismatch.
+- No such addenda (older project, imported brief): fill `project.vision`/`goals[]` only when empty or clearly weaker
+  than the other addenda say; do not invent.
+- `project.form_factor`, `stakes` are set at B-0; only touch one if an addendum
   contradicts it outright, and then add an `assumptions[]` entry explaining the override.
-- **Do not rewrite or delete `addendum[]`.** Extraction reads from it; triage already happened at B-2.2.
+- **Revision at this gate:** the user changes the *meaning* (drop/add/reword a goal) ⇒ edit the `vision`/`goals`
+  addendum entry (`content` in the user's language + `content_en`; `add`/`remove` a `goals` entry) **and** rebuild
+  both EN fields in the same batch. Only the English wording changes ⇒ edit just the EN fields.
+- `notes` (the message the user reads at the gate) is in the user's language, plain and warm: say what you turned
+  into the SRS vision and goals, no field names.
+- Other `addendum[]` entries are not yours: extraction reads them, triage happened at B-2.2.
 
 Nothing to extract is a valid outcome: return `ops: []` and say so in `notes`.
 
@@ -64,7 +73,7 @@ what the document will say. Present those; leave the rest for S-9.1's sweep. Do 
 ## S-1.4 — Gap List
 
 What the SRS will need and the Brief does not have yet. Write each as
-`other_requirements[kind=open_question]` — one per gap, phrased as the question a reviewer would ask.
+`other_requirements[kind=open_question]` — one per gap, phrased as the question a reviewer would ask; `statement` English, `statement_vi` in the user's language.
 
 Sweep these, and say in `notes` when one genuinely does not apply:
 
@@ -83,11 +92,23 @@ A gap list is not a complaint list: each entry should be answerable in one sente
 
 1. Ids continue the existing sequence (`draft-to-ops` rule 5) — check the projection first.
 2. Write only `project`, `other_requirements[]`, `assumptions[]`. No `actors[]`, `use_cases[]`,
-   `screens[]`, `functions[]`, `sections[]`, and no edits to `addendum[]`.
+   `screens[]`, `functions[]`, `sections[]`; `addendum[]` only for the S-1.1 revision on `vision`/`goals` entries.
 3. `project.goals[]` is sent as the **full array** (`set` replaces it) — include the goals already there.
 4. English values, no diacritics, no section numbers in prose (`draft-to-ops` rules 6–7).
-5. Fast mode: record the most reasonable reading plus an `assumptions[]` entry; Coaching mode leaves the
-   open question for Elicit (`draft-to-ops` rule 10).
+5. Still unclear: record the most reasonable reading plus an `assumptions[]` entry (`draft-to-ops`
+   rule 10).
+
+## Example (S-1.1)
+
+```json
+{
+  "ops": [
+    { "op": "set", "path": "project.vision", "value": "Patients book clinic visits online so they skip the phone queue and reception staff handle fewer calls.", "reason": "S-1.1 dựng tầm nhìn tiếng Anh từ Brief" },
+    { "op": "set", "path": "project.goals", "value": ["Cut the average time to book a visit to under two minutes", "Reduce reception phone calls by half within six months"], "reason": "S-1.1 dựng mục tiêu tiếng Anh, khớp từng mục của Brief" }
+  ],
+  "notes": "Mình đã chuyển tầm nhìn và 2 mục tiêu của bạn sang tiếng Anh để đưa vào tài liệu. Bạn xem bảng bên cạnh, cần chỉnh ý nào thì nhắn mình nhé."
+}
+```
 
 ## Example (S-1.4)
 
@@ -104,8 +125,8 @@ A gap list is not a complaint list: each entry should be answerable in one sente
 
 ## Self-check
 
-- [ ] `project.vision` and 3–6 outcome-shaped `goals[]` are filled and supported by addenda.
-- [ ] `addendum[]` untouched; no SRS collection written.
+- [ ] S-1.1 rebuilt `project.vision` + `goals[]` (English) 1:1 from the `vision`/`goals` addenda.
+- [ ] `addendum[]` untouched except S-1.1 revision on `vision`/`goals`; no SRS collection written.
 - [ ] Every conflict is an `open_question` naming both sides — none silently resolved.
 - [ ] Assumptions only moved to `confirmed` on the user's word, with `confirmed_at`.
 - [ ] The six gap themes are covered or explained in `notes`.

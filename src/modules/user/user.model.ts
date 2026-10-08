@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
 import bcrypt from "bcrypt"
+import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
 
 export type AuthProvider = "local" | "google"
 export type UserRole = "user" | "admin"
@@ -13,10 +14,18 @@ export interface IUser extends Document {
   name?: string
   role: UserRole
   isActive: boolean
+  /** UC-66: thời điểm và lý do Administrator khoá tài khoản; mở khoá (UC-67) thì về null. */
+  suspendedAt?: Date | null
+  suspendReason?: string | null
+  /** UC-61: lần mở khoá gần nhất — lý do bắt buộc; chưa có log quản trị nên giữ ngay trên tài khoản. */
+  reactivatedAt?: Date | null
+  reactivateReason?: string | null
   emailVerified: boolean
   emailVerifiedAt?: Date | null
   /** UC 1.12: thời điểm hoàn tất onboarding; null = chưa onboarding. */
   onboardedAt?: Date | null
+  /** FLF-259: ngôn ngữ giao diện đã lưu; không có = tài khoản chưa chọn. */
+  locale?: UserLocale
   createdAt: Date
   updatedAt: Date
   comparePassword(password: string): Promise<boolean>
@@ -60,6 +69,22 @@ const userSchema = new Schema<IUser>(
       type: Boolean,
       default: true
     },
+    suspendedAt: {
+      type: Date,
+      default: null
+    },
+    suspendReason: {
+      type: String,
+      default: null
+    },
+    reactivatedAt: {
+      type: Date,
+      default: null
+    },
+    reactivateReason: {
+      type: String,
+      default: null
+    },
     emailVerified: {
       type: Boolean,
       default: false
@@ -71,6 +96,11 @@ const userSchema = new Schema<IUser>(
     onboardedAt: {
       type: Date,
       default: null
+    },
+    // Không đặt default: thiếu field là tín hiệu "chưa chọn" để FE lưu ngôn ngữ đang hiển thị vào tài khoản.
+    locale: {
+      type: String,
+      enum: [...USER_LOCALES]
     }
   },
   { timestamps: true }

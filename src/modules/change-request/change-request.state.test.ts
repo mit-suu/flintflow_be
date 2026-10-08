@@ -28,6 +28,12 @@ const FORWARD: [CrStatus, CrStatus][] = [
   ["manual_fix", "verifying"],
   ["ready_to_submit", "in_review"],
   ["ready_to_submit", "verifying"],
+  // phase 8: gộp thêm lệnh sửa ⇒ làm rõ lại
+  ["impact_review", "clarifying"],
+  ["proposing", "clarifying"],
+  ["verifying", "clarifying"],
+  ["manual_fix", "clarifying"],
+  ["ready_to_submit", "clarifying"],
   ["in_review", "written"],
   ["in_review", "proposing"],
   ["in_review", "rejected"]

@@ -118,19 +118,6 @@ describe("re-upload — diff theo block", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
   })
 
-  it("file không stamp (bản gốc sửa ngoài) vẫn so được theo text với bản render", async () => {
-    const { projectId, userId } = await importFinalized()
-    const original = await makeSrsDocx()
-    const pkg = await DocxPackage.load(original)
-    const doc = await pkg.requireXml("word/document.xml")
-    const extra = para(doc, SRS_FIXTURE_TEXT.purpose)
-    extra.parentNode!.insertBefore(newPara(doc, "Brand new paragraph."), extra.nextSibling)
-    const dto = toReuploadDto(await reupload(projectId, userId, fileOf(await pkg.toBuffer())))
-    expect(dto.against_version).toBe("0.0")
-    expect(dto.blocks).toContainEqual({ block_id: null, change: "added", after: "Brand new paragraph." })
-    // đoạn chung giữa bản gốc và bản render (mô tả sản phẩm) khớp được
-    expect(dto.blocks.some((b) => b.before === SRS_FIXTURE_TEXT.purpose || b.after === SRS_FIXTURE_TEXT.purpose)).toBe(false)
-  })
 })
 
 describe("re-upload — từ chối", () => {
@@ -142,6 +129,17 @@ describe("re-upload — từ chối", () => {
       code: "IMPORT_STAMP_FOREIGN_PROJECT",
       meta: { stamp: { project_id: "66f0000000000000000000ff" } }
     })
+    expect(await ReuploadDiff.countDocuments({ projectId })).toBe(0)
+    expect(await DocVersion.countDocuments({ projectId })).toBe(1)
+  })
+
+  it("file không stamp (bản gốc sửa ngoài) ⇒ IMPORT_REUPLOAD_NO_STAMP, không lưu diff/file (BPMN: chỉ file có stamp mới đi 1.4)", async () => {
+    const { projectId, userId } = await importFinalized()
+    const pkg = await DocxPackage.load(await makeSrsDocx())
+    const doc = await pkg.requireXml("word/document.xml")
+    const extra = para(doc, SRS_FIXTURE_TEXT.purpose)
+    extra.parentNode!.insertBefore(newPara(doc, "Brand new paragraph."), extra.nextSibling)
+    await expect(reupload(projectId, userId, fileOf(await pkg.toBuffer()))).rejects.toMatchObject({ code: "IMPORT_REUPLOAD_NO_STAMP", statusCode: 422 })
     expect(await ReuploadDiff.countDocuments({ projectId })).toBe(0)
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
   })

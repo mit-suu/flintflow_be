@@ -73,6 +73,19 @@ describe("C-4 chọn skill của owner step", () => {
     expect(prompts).toHaveLength(3)
     expect(prompts.find((p) => p.includes(`] ${custom.path} (`))).toContain("(none — free-form section kept verbatim from the uploaded file)")
   })
+
+  it("phase 8: \"Sửa lại\" một vị trí mục riêng ⇒ AI soạn lại theo hướng BA (không còn CR_NO_OWNER_STEP)", async () => {
+    routeCr((p) => clarifyWide(p) ?? fakeCrPropose(p))
+    const { c } = await importedProject()
+    const { cr, impact } = await crToImpact(c)
+    const custom = impact.locations.find((l) => l.path.startsWith("custom_sections["))!
+    detail(await c.post(`${cr}/propose`))
+    const redone = detail(await c.post(`${cr}/locations/${custom.location_id}/owner-step-draft`, { instruction: "Ghi rõ nhóm họp mỗi thứ Hai" }))
+    expect(redone.locations.find((l) => l.location_id === custom.location_id)).toMatchObject({ manual: true, verify: null })
+    const prompt = promptsOf("# CR Propose").at(-1)!
+    expect(prompt).toContain("free-form section): Ghi rõ nhóm họp mỗi thứ Hai")
+    expect(prompt).toContain("(none — free-form section kept verbatim from the uploaded file)")
+  })
 })
 
 describe("C-4 kết luận mọi vị trí", () => {
@@ -91,6 +104,27 @@ describe("C-4 kết luận mọi vị trí", () => {
     expect(d.locations.find((l) => l.path === NFR)).toMatchObject({ conclusion: null, proposal: null, group_id: null })
     expect(d.locations.filter((l) => l.conclusion !== null)).toHaveLength(1)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("bỏ sót L001"))
+    warn.mockRestore()
+  })
+
+  it("lô nhiều vị trí lỗi (model đốt hết ngân sách) ⇒ chia đôi gọi lại từng nửa, CR không bị dừng", async () => {
+    const { c } = await importedProject()
+    const { cr } = await crToImpact(c)
+    // Dựng một lô 2 vị trí: kéo vị trí BR sang cùng owner step với NFR (chỉ để test cách chia lô)
+    await ChangeLocation.updateOne({ path: BR }, { $set: { owner_step: "S-6.4" } })
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    routeCr((p) => {
+      if (!p.includes("# CR Propose")) return clarifyPerf(p)
+      return promptLocations(p).length > 1 ? new Error("GLM không trả nội dung (finish_reason=length, max_tokens=10240)") : fakeCrPropose(p)
+    })
+
+    const d = detail(await c.post(`${cr}/propose`))
+
+    expect(d.change_request.paused).toBeNull()
+    expect(d.locations.every((l) => l.conclusion !== null)).toBe(true)
+    const sizes = promptsOf("# CR Propose").map((p) => promptLocations(p).length)
+    expect(sizes).toEqual([2, 1, 1]) // lô đầy đủ hỏng ⇒ hai nửa, mỗi nửa một vị trí
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("chia đôi và thử lại"))
     warn.mockRestore()
   })
 
@@ -153,6 +187,22 @@ describe("C-4 kết luận mọi vị trí", () => {
     expect(after.submitted_at).toBeNull()
     await expect(submitCr(after)).rejects.toMatchObject({ code: "CR_LOCATION_UNCONCLUDED" })
   })
+
+  it("mọi vị trí not_related ⇒ 409 CR_NOTHING_TO_APPROVE, không nộp (nếu cho qua thì CR kẹt ở in_review, 0 group để duyệt)", async () => {
+    const { c, projectId } = await importedProject()
+    const { crId, cr } = await crToReady(c)
+    await ChangeLocation.updateMany({ projectId, cr_id: crId }, { $set: { conclusion: "not_related", reason: "Không liên quan" } })
+    const res = await c.post(`${cr}/submit`)
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("CR_NOTHING_TO_APPROVE")
+    const after = await crDoc(projectId, crId)
+    expect(after.status).toBe("ready_to_submit")
+    expect(after.submitted_at).toBeNull()
+
+    // còn ít nhất một vị trí có sửa ⇒ nộp được như thường
+    await ChangeLocation.updateOne({ projectId, cr_id: crId, location_id: "L001" }, { $set: { conclusion: "comment" } })
+    expect(detail(await c.post(`${cr}/submit`)).change_request.status).toBe("in_review")
+  })
 })
 
 describe("gom change group", () => {
@@ -164,8 +214,8 @@ describe("gom change group", () => {
     const custom = d.locations.find((l) => l.path.startsWith("custom_sections["))!
     expect(custom).toMatchObject({ conclusion: "not_related", group_id: null })
     expect(d.groups.map((g) => ({ id: g.group_id, title: g.title, locs: g.location_ids.map((id) => d.locations.find((l) => l.location_id === id)!.path), decision: g.decision }))).toEqual([
-      { id: "G01", title: "Performance", locs: [NFR], decision: "pending" },
-      { id: "G02", title: "Business Rules", locs: [BR], decision: "pending" }
+      { id: "G01", title: "4.2.3 Performance", locs: [NFR], decision: "pending" },
+      { id: "G02", title: "5.1 Business Rules", locs: [BR], decision: "pending" }
     ])
     for (const g of d.groups) for (const id of g.location_ids) expect(d.locations.find((l) => l.location_id === id)?.group_id).toBe(g.group_id)
   })
@@ -175,7 +225,7 @@ describe("gom change group", () => {
     const { c } = await importedProject()
     const { cr } = await crToImpact(c)
     const d = detail(await c.post(`${cr}/propose`))
-    expect(d.groups.map((g) => g.title)).toEqual(["Performance", "Business Rules", "5.9 Team Notes"])
+    expect(d.groups.map((g) => g.title)).toEqual(["4.2.3 Performance", "5.1 Business Rules", "5.9 Team Notes"])
   })
 
   it("sửa tay sang not_related rồi nộp ⇒ gom lại: vị trí rời group, group rỗng biến mất", async () => {
@@ -188,7 +238,7 @@ describe("gom change group", () => {
     expect(patched.locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: true, verify: null, conclusion: "not_related" })
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
     const submitted = detail(await c.post(`${cr}/submit`))
-    expect(submitted.groups.map((g) => g.title)).toEqual(["Performance"])
+    expect(submitted.groups.map((g) => g.title)).toEqual(["4.2.3 Performance"])
     expect(submitted.locations.find((l) => l.location_id === br.location_id)?.group_id).toBeNull()
   })
 
@@ -227,7 +277,7 @@ describe("C-4 chạy lại", () => {
     const redo = promptsOf("# CR Propose").slice(before)
     expect(redo).toHaveLength(1)
     expect(promptLocations(redo[0]).map((l) => l.path)).toEqual([NFR])
-    expect(redo[0]).toContain("Previous proposal failed checks: Op không đổi gì ở phần tử này")
+    expect(redo[0]).toContain("Previous proposal failed checks: Đề xuất không thay đổi gì ở phần tử này")
     expect(d.locations.find((l) => l.location_id === br.location_id)).toMatchObject({ manual: true, proposal: { comment_text: "Ghi chú tay" } })
   })
 
@@ -246,6 +296,6 @@ describe("C-4 chạy lại", () => {
     expect((await c.post(`${cr}/propose`)).body.error.code).toBe("CR_INVALID_TRANSITION")
     await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { status: "impact_review" } })
     await Spine.deleteOne({ projectId })
-    await expect(runPropose(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Spine/)
+    await expect(runPropose(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Không tìm thấy dữ liệu tài liệu/)
   })
 })

@@ -5,7 +5,16 @@ import { env } from "../../config/env.js"
 export interface TokenPayload {
   userId: string
   email: string
+  /**
+   * Vai trò NỀN TẢNG (user | admin) — không phải vai trò trong org. BPMN Flow 10.4 nói rõ vai trò mang
+   * trong token không bao giờ được tin: mọi guard đọc lại từ DB (adminMiddleware, orgContext).
+   */
   role?: string
+  /**
+   * Org đang mở (task-26). Nguồn: Session.activeOrgId lúc đăng nhập / đổi org (Flow 7.13, 9.3).
+   * Chỉ cho biết người dùng ĐANG làm việc ở org nào — quyền vẫn do Membership trong DB quyết định.
+   */
+  orgId?: string
 }
 
 export const signAccessToken = (payload: TokenPayload): string => {

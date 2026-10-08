@@ -76,6 +76,40 @@ router.get("/users/:id", adminController.getUser)
 
 /**
  * @swagger
+ * /api/v1/admin/users/{id}/status:
+ *   patch:
+ *     summary: Khoá (UC-66) hoặc mở khoá (UC-67) tài khoản; khoá thì thu hồi mọi phiên của tài khoản
+ *     tags: [Admin]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [isActive, reason]
+ *             properties:
+ *               isActive: { type: boolean }
+ *               reason:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 500
+ *                 description: Bắt buộc cả khi khoá lẫn mở khoá (UC-60, UC-61)
+ *     responses:
+ *       200: { description: "{ _id, isActive, suspendedAt, suspendReason, reactivatedAt, reactivateReason }" }
+ *       409: { description: "USER_ALREADY_SUSPENDED / USER_ALREADY_ACTIVE — tài khoản đã ở trạng thái đó" }
+ *       400: { description: VALIDATION_ERROR hoặc CANNOT_SUSPEND_SELF }
+ *       404: { description: USER_NOT_FOUND }
+ */
+router.patch("/users/:id/status", adminController.setUserStatus)
+
+/**
+ * @swagger
  * /api/v1/admin/metrics:
  *   get:
  *     summary: Số liệu tổng quan hệ thống
@@ -88,6 +122,69 @@ router.get("/users/:id", adminController.getUser)
  *       403:
  *         description: Không phải admin
  */
+/**
+ * @swagger
+ * /api/v1/admin/orgs:
+ *   get:
+ *     summary: Danh sách tổ chức kèm gói, số dư ví, số thành viên, số dự án (UC-90)
+ *     tags: [Admin]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100 }
+ *       - in: query
+ *         name: plan
+ *         schema: { type: string, enum: [free, pro] }
+ *       - in: query
+ *         name: q
+ *         description: Tìm theo tên tổ chức hoặc email người tạo
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: "Org[] { id, name, owner, plan, planLabel, wallet, membersCount, projectsCount, createdAt }; meta gồm page, limit, total, totalPages"
+ *       400: { description: VALIDATION_ERROR }
+ *       403: { description: Không phải admin }
+ */
+router.get("/orgs", adminController.listOrgs)
+
+/**
+ * @swagger
+ * /api/v1/admin/orgs/{orgId}/credits:
+ *   patch:
+ *     summary: Cộng hoặc trừ credit trong ví của một tổ chức, bắt buộc kèm lý do (UC-68)
+ *     tags: [Admin]
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: orgId
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [amount, reason]
+ *             properties:
+ *               amount:
+ *                 type: integer
+ *                 description: "Dương = cộng, âm = trừ; 0 không hợp lệ"
+ *               reason:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 500
+ *     responses:
+ *       200: { description: Số dư sau điều chỉnh }
+ *       404: { description: ORG_NOT_FOUND }
+ *       409: { description: INSUFFICIENT_CREDIT — số dư khả dụng không đủ để trừ }
+ */
+router.patch("/orgs/:orgId/credits", adminController.adjustOrgCredits)
+
 router.get("/metrics", adminController.getMetrics)
 
 /**
@@ -121,6 +218,30 @@ router.get("/metrics", adminController.getMetrics)
  *         description: Không phải admin
  */
 router.get("/ai-cost", adminController.getAiCost)
+
+/**
+ * @swagger
+ * /api/v1/admin/ai-logs/{logId}/payload:
+ *   get:
+ *     summary: Prompt và câu trả lời gốc của một lượt gọi model (giữ có hạn, chỉ admin)
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: logId
+ *         required: true
+ *         schema: { type: string }
+ *         description: "_id của AiActionLog"
+ *     responses:
+ *       200:
+ *         description: "{ logId, actionType, prompt, response, promptChars, responseChars, createdAt } — promptChars/responseChars là độ dài THẬT, lớn hơn chuỗi trả về nghĩa là đã bị cắt giữa"
+ *       403:
+ *         description: Không phải admin
+ *       404:
+ *         description: Không lưu (AI_PAYLOAD_RETENTION_DAYS=0) hoặc đã hết hạn giữ
+ */
+router.get("/ai-logs/:logId/payload", adminController.getAiActionPayload)
 
 /**
  * @swagger

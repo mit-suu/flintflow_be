@@ -8,7 +8,7 @@ import type { CreateFeedbackDTO } from "./feedback.validation.js"
 export const createFeedback = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
   if (!userId) {
-    throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
   // Body đã qua CreateFeedbackSchema ở route

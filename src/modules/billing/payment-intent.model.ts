@@ -4,6 +4,8 @@ export type PaymentIntentStatus = "pending" | "succeeded" | "failed"
 
 export interface IPaymentIntent extends Document {
   userId: mongoose.Types.ObjectId
+  /** Org được nạp credit (task-26). Callback không mang token nên org phải nằm sẵn trong intent. */
+  organizationId: mongoose.Types.ObjectId | null
   packageId: string
   credits: number
   amount: number
@@ -27,6 +29,12 @@ const paymentIntentSchema = new Schema<IPaymentIntent>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true
+    },
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: "Organization",
+      default: null,
       index: true
     },
     packageId: {

@@ -224,6 +224,22 @@ describe("prioritize — ghi priority bằng op", () => {
     expect(after.nfrs.find((n) => n.id === spine.nfrs[0].id)?.priority).toBe("should")
   })
 
+  it("FLF-260: ngôn ngữ trả lời của phiên đi vào lượt gọi model (notes là tin user đọc ở cổng)", async () => {
+    await seed()
+    const inputs: Record<string, unknown>[] = []
+    const record = (inner: DraftExecutor): DraftExecutor =>
+      (async (actionType, input, ...rest) => {
+        inputs.push(input as Record<string, unknown>)
+        return inner(actionType, input, ...rest)
+      }) as DraftExecutor
+
+    await prioritize(PROJECT, USER, { executor: record(executorFor([])), replyLanguage: "en" })
+    await prioritize(PROJECT, USER, { executor: record(executorFor([])) })
+
+    expect(inputs[0].replyLanguage).toBe("en")
+    expect(inputs[1]).not.toHaveProperty("replyLanguage")
+  })
+
   it("op đụng release_scope bị op-validator chặn — S-9.4 không được đổi phạm vi", async () => {
     await seed()
     const ops = [{ op: "set" as const, path: "project.release_scope", value: { in: [], out: ["mọi thứ"] } }]
