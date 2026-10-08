@@ -161,8 +161,9 @@ export const migrateKnowledgeIndex = async (db: mongoose.mongo.Db, options: Migr
 
 const main = async (): Promise<void> => {
   const dryRun = process.argv.includes("--dry-run")
-  // Không dùng connectDB: nó còn khởi tạo replica set và tài khoản admin — script không được có tác dụng phụ đó
-  await mongoose.connect(env.MONGO_URI)
+  // Không dùng connectDB: nó còn khởi tạo replica set và tài khoản admin — script không được có tác dụng phụ đó.
+  // Dry-run tắt autoIndex: model đã import thì mongoose tự tạo collection + index lúc kết nối, dry-run sẽ không còn là chỉ đọc
+  await mongoose.connect(env.MONGO_URI, { autoIndex: !dryRun, autoCreate: !dryRun })
   console.log(`🟢 Connected to MongoDB${dryRun ? " (dry-run: không ghi)" : ""}`)
   try {
     await migrateKnowledgeIndex(mongoose.connection.db!, { dryRun, dimensions: env.EMBEDDING_DIMENSIONS, log: (l) => console.log(l) })
