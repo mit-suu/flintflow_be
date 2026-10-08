@@ -194,6 +194,7 @@ describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
   it("mã lỗi mới: CORE_STEP_REQUIRED 409, STEP_NOT_IN_PLAN 404", () => {
     expect(MODE1_ERROR_STATUS.CORE_STEP_REQUIRED).toBe(409)
     expect(MODE1_ERROR_STATUS.STEP_NOT_IN_PLAN).toBe(404)
+    expect(MODE1_ERROR_STATUS.DOCUMENT_LANGUAGE_LOCKED).toBe(409)
   })
 })
 
