@@ -17,14 +17,40 @@ export type EmbeddingProviderName = "gemini" | "mock"
 
 export interface EmbedOptions {
   taskType: EmbeddingTaskType
+  /**
+   * Gặp 429 theo phút thì chờ rồi gọi lại — chỉ cho script chạy lô (ingest, backfill, eval). Mặc định tắt: lượt embed
+   * nằm trong request của người dùng (câu hỏi chat, câu CR) phải hỏng nhanh để người gọi dùng đường từ khoá thay vì chờ.
+   */
+  waitOnRateLimit?: boolean
 }
 
 /** Số text tối đa mỗi lượt `batchEmbedContents` (giới hạn của Gemini là 100). */
 export const EMBED_BATCH_SIZE = 100
 /** Text dài hơn bị cắt — model nhận ~2048 token, vị trí CR chỉ cần phần đầu (tên + mô tả). */
 export const EMBED_MAX_CHARS = 6000
+/**
+ * Trần ký tự mỗi lượt (~17k token): free tier còn trần token/phút — lô 100 text × ~512 token (~51k token) vượt trần, gọi
+ * lại bao nhiêu lần cũng 429 (đo 2026-10-08: lô ~30k token qua, lô ~51k token hỏng mãi). Chia lô theo cả số text lẫn ký tự.
+ */
+export const EMBED_BATCH_MAX_CHARS = 60_000
 /** Chờ trước lượt gọi lại khi lỗi tạm thời (429 / 5xx / timeout). */
 export const EMBED_RETRY_BACKOFF_MS = [1000, 3000]
+/**
+ * `waitOnRateLimit`: 429 theo phút (free tier: 100 text/phút — mỗi text trong lô tính một lượt; còn trần token/phút) ⇒
+ * chờ đúng thời gian Google báo ("retry in Ns"), không báo thì chờ `EMBED_RATE_LIMIT_DEFAULT_WAIT_MS`, rồi gọi lại, tối
+ * đa `EMBED_RATE_LIMIT_RETRIES` lần. Chờ dài hơn `EMBED_RATE_LIMIT_MAX_WAIT_MS` (quota ngày) ⇒ ném ngay.
+ */
+export const EMBED_RATE_LIMIT_MAX_WAIT_MS = 65_000
+export const EMBED_RATE_LIMIT_DEFAULT_WAIT_MS = 60_000
+export const EMBED_RATE_LIMIT_RETRIES = 6
+
+/** Thời gian chờ Google báo trong lỗi 429: `RetryInfo.retryDelay` ("25s") hoặc câu "Please retry in 25.59s". */
+export const retryAfterMs = (data: unknown, message: string): number | null => {
+  const details = (data as { error?: { details?: { retryDelay?: string }[] } } | undefined)?.error?.details ?? []
+  const fromInfo = details.map((d) => /^(\d+(?:\.\d+)?)s$/.exec(d?.retryDelay ?? "")?.[1]).find(Boolean)
+  const seconds = fromInfo ?? /retry in (\d+(?:\.\d+)?)\s*s/i.exec(message)?.[1]
+  return seconds ? Math.ceil(Number(seconds) * 1000) : null
+}
 
 /** Provider đang bật, hoặc `null` khi embedding không dùng được (tắt / thiếu key). */
 export const embeddingProvider = (): EmbeddingProviderName | null => {
@@ -68,19 +94,51 @@ const callGeminiBatch = async (texts: readonly string[], taskType: EmbeddingTask
       throw new AiActionError(504, `Gemini embedding không trả lời kịp (${e.message ?? ""})`, "EMBEDDING_TIMEOUT")
     }
     const status = e.response?.status ?? 500
-    throw new AiActionError(status, e.response?.data?.error?.message ?? e.message ?? "Gemini embedding lỗi", status === 429 ? "RATE_LIMIT_EXCEEDED" : "EMBEDDING_ERROR")
+    const message = e.response?.data?.error?.message ?? e.message ?? "Gemini embedding lỗi"
+    const wait = status === 429 ? retryAfterMs(e.response?.data, message) : null
+    throw new AiActionError(status, message, status === 429 ? "RATE_LIMIT_EXCEEDED" : "EMBEDDING_ERROR", wait !== null ? { retryAfterMs: wait } : undefined)
   }
 }
 
-const withRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
-  for (let attempt = 0; ; attempt++) {
+const withRetry = async <T>(fn: () => Promise<T>, waitOnRateLimit: boolean): Promise<T> => {
+  let rateLimited = 0
+  for (let attempt = 0; ; ) {
     try {
       return await fn()
     } catch (error) {
+      // 429 theo phút: câu lỗi có "exceeded your current quota" nên `isTransientError` coi là hết tiền — xử lý riêng
+      const wait =
+        waitOnRateLimit && error instanceof AiActionError && error.code === "RATE_LIMIT_EXCEEDED"
+          ? ((error.details?.retryAfterMs as number | undefined) ?? EMBED_RATE_LIMIT_DEFAULT_WAIT_MS)
+          : undefined
+      if (wait !== undefined && wait <= EMBED_RATE_LIMIT_MAX_WAIT_MS && rateLimited < EMBED_RATE_LIMIT_RETRIES) {
+        rateLimited++
+        await delay(wait + 500)
+        continue
+      }
+      if (wait !== undefined) throw error
       if (attempt >= EMBED_RETRY_BACKOFF_MS.length || !isTransientError(error)) throw error
-      await delay(EMBED_RETRY_BACKOFF_MS[attempt]!)
+      await delay(EMBED_RETRY_BACKOFF_MS[attempt++]!)
     }
   }
+}
+
+/** Chia text thành lô liên tiếp ≤ `EMBED_BATCH_SIZE` text và ≤ `EMBED_BATCH_MAX_CHARS` ký tự (giữ thứ tự). */
+export const embedBatches = (texts: readonly string[], maxCount = EMBED_BATCH_SIZE, maxChars = EMBED_BATCH_MAX_CHARS): string[][] => {
+  const batches: string[][] = []
+  let cur: string[] = []
+  let chars = 0
+  for (const t of texts) {
+    if (cur.length && (cur.length >= maxCount || chars + t.length > maxChars)) {
+      batches.push(cur)
+      cur = []
+      chars = 0
+    }
+    cur.push(t)
+    chars += t.length
+  }
+  if (cur.length) batches.push(cur)
+  return batches
 }
 
 /**
@@ -93,9 +151,8 @@ export const embedTexts = async (texts: readonly string[], options: EmbedOptions
   const clipped = texts.map((t) => t.slice(0, EMBED_MAX_CHARS))
   if (provider === "mock") return clipped.map((t) => mockEmbedding(t, env.EMBEDDING_DIMENSIONS))
   const out: number[][] = []
-  for (let i = 0; i < clipped.length; i += EMBED_BATCH_SIZE) {
-    const batch = clipped.slice(i, i + EMBED_BATCH_SIZE)
-    out.push(...(await withRetry(() => callGeminiBatch(batch, options.taskType))))
+  for (const batch of embedBatches(clipped)) {
+    out.push(...(await withRetry(() => callGeminiBatch(batch, options.taskType), options.waitOnRateLimit ?? false)))
   }
   return out
 }

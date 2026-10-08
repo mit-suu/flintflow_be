@@ -71,10 +71,60 @@ describe("embedTexts — Gemini", () => {
     await expect(embedTexts(["a"], { taskType: "RETRIEVAL_QUERY" })).rejects.toMatchObject({ code: "EMBEDDING_BAD_RESPONSE" })
   })
 
+  it("waitOnRateLimit: 429 theo phút ⇒ chờ đúng thời gian Google báo rồi gọi lại; quota ngày (chờ quá lâu) ⇒ ném ngay", async () => {
+    const { delay } = await import("../retry.service.js")
+    vi.mocked(delay).mockClear()
+    const perMinute = Object.assign(new Error("429"), {
+      response: { status: 429, data: { error: { message: "You exceeded your current quota… Please retry in 25.59s.", details: [{ retryDelay: "25s" }] } } }
+    })
+    post.mockRejectedValueOnce(perMinute).mockRejectedValueOnce(perMinute).mockResolvedValueOnce(ok(1))
+    await expect(embedTexts(["a"], { taskType: "RETRIEVAL_DOCUMENT", waitOnRateLimit: true })).resolves.toHaveLength(1)
+    expect(post).toHaveBeenCalledTimes(3)
+    expect(vi.mocked(delay).mock.calls.map(([ms]) => ms)).toEqual([25_500, 25_500])
+
+    const perDay = Object.assign(new Error("429"), { response: { status: 429, data: { error: { message: "Quota exceeded. Please retry in 3600s." } } } })
+    post.mockReset().mockRejectedValue(perDay)
+    await expect(embedTexts(["a"], { taskType: "RETRIEVAL_DOCUMENT", waitOnRateLimit: true })).rejects.toMatchObject({ code: "RATE_LIMIT_EXCEEDED", details: { retryAfterMs: 3_600_000 } })
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it("429 không kèm thời gian chờ: waitOnRateLimit ⇒ chờ mặc định 60 s; mặc định (request người dùng) ⇒ hỏng ngay, không chờ", async () => {
+    const { delay } = await import("../retry.service.js")
+    vi.mocked(delay).mockClear()
+    const noHint = Object.assign(new Error("429"), { response: { status: 429, data: { error: { message: "You exceeded your current quota, please check your plan and billing details." } } } })
+    post.mockRejectedValueOnce(noHint).mockResolvedValueOnce(ok(1))
+    await expect(embedTexts(["a"], { taskType: "RETRIEVAL_DOCUMENT", waitOnRateLimit: true })).resolves.toHaveLength(1)
+    expect(vi.mocked(delay).mock.calls.map(([ms]) => ms)).toEqual([60_500])
+
+    vi.mocked(delay).mockClear()
+    post.mockReset().mockRejectedValue(noHint)
+    await expect(embedTexts(["a"], { taskType: "RETRIEVAL_QUERY" })).rejects.toMatchObject({ code: "RATE_LIMIT_EXCEEDED" })
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(delay).not.toHaveBeenCalled()
+  })
+
+  it("retryAfterMs đọc RetryInfo trước, rồi câu lỗi; không có ⇒ null", async () => {
+    const { retryAfterMs } = await import("./embedding.provider.js")
+    expect(retryAfterMs({ error: { details: [{ "@type": "x" }, { retryDelay: "12s" }] } }, "Please retry in 40s")).toBe(12_000)
+    expect(retryAfterMs(undefined, "Please retry in 25.592450374s.")).toBe(25_593)
+    expect(retryAfterMs(undefined, "rate limited")).toBeNull()
+  })
+
   it("timeout ⇒ EMBEDDING_TIMEOUT sau khi hết lượt gọi lại", async () => {
     post.mockRejectedValue(Object.assign(new Error("timeout of 1000ms exceeded"), { code: "ECONNABORTED" }))
     await expect(embedTexts(["a"], { taskType: "RETRIEVAL_QUERY" })).rejects.toMatchObject({ code: "EMBEDDING_TIMEOUT" })
     expect(post).toHaveBeenCalledTimes(3)
+  })
+
+  it("chia lô theo cả số text lẫn ký tự (trần token/phút của free tier), giữ thứ tự", async () => {
+    const { embedBatches, EMBED_BATCH_MAX_CHARS } = await import("./embedding.provider.js")
+    const big = "x".repeat(2_000)
+    const batches = embedBatches(Array.from({ length: 100 }, () => big))
+    expect(batches.every((b) => b.join("").length <= EMBED_BATCH_MAX_CHARS)).toBe(true)
+    expect(batches.map((b) => b.length)).toEqual([30, 30, 30, 10])
+    expect(embedBatches(["a", "b", "c"], 2, 100)).toEqual([["a", "b"], ["c"]])
+    // một text dài hơn trần vẫn đi một mình, không bị bỏ
+    expect(embedBatches(["y".repeat(70_000), "z"])).toEqual([["y".repeat(70_000)], ["z"]])
   })
 
   it("không dùng được ⇒ EMBEDDING_UNAVAILABLE, không gọi mạng", async () => {
