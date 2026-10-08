@@ -29,7 +29,8 @@ import {
   deductCredit,
   releaseCredit,
   refundDeductedCredit,
-  expireStaleReservations
+  expireStaleReservations,
+  getActionCost
 } from "./credit-reservation.service.js"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
@@ -45,6 +46,10 @@ describe("credit-reservation.service", () => {
   beforeEach(() => {
     fakeDb.reset()
     vi.clearAllMocks()
+  })
+
+  it("FLF-265: translate_document tính 2 credit / lô", async () => {
+    expect(await getActionCost(ActionType.TRANSLATE_DOCUMENT)).toBe(2)
   })
 
   describe("getOrCreateWallet", () => {

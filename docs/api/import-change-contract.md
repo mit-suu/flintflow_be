@@ -73,7 +73,8 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 
 | # | Method + path | UC / nút | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `POST /projects` | UC-13 | `{ name, domain?, mode? }` — `mode` ∈ `import \| fpt \| customer_template`, mặc định `fpt` | `Project` (thêm `mode`, `import_state`) | `VALIDATION_ERROR`, `501 NOT_IMPLEMENTED` (`customer_template`) |
+| 1 | `POST /projects` | UC-13 | `{ name, domain?, mode?, documentLanguage? }` — `mode` ∈ `import \| fpt \| customer_template`, mặc định `fpt`; `documentLanguage` ∈ `vi \| en` (FLF-265): thiếu ⇒ `User.locale` ⇒ `en`; mode `import` bỏ qua (ngôn ngữ theo file upload) | `Project` (thêm `mode`, `import_state`, `documentLanguage?`) | `VALIDATION_ERROR`, `501 NOT_IMPLEMENTED` (`customer_template`) |
+| 1a | `PATCH /projects/:id/document-language` | UC-13 | `UpdateDocumentLanguageSchema` `{ documentLanguage: vi \| en }` (strict) — chỉ Lead/Analyst; không đổi Spine, nội dung đã có dịch qua `pipeline-contract.md` #26–#27 (FLF-265) | `Project` | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `409 DOCUMENT_LANGUAGE_LOCKED` (mode `import`: ngôn ngữ theo file) |
 | 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 10MB) | `importStateResponseSchema` | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
 | 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` | — |
@@ -371,6 +372,7 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-06 | mục FPT không bắt buộc | #32 / gap report: hồ sơ luật mode 1 loại `section_empty` — đầu mục FPT thiếu không còn cờ đỏ, không chặn release; cờ cũ đang mở tự đóng ở lần tính lại cờ kế tiếp. Hình API không đổi |
 | 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |

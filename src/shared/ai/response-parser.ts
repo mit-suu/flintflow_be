@@ -61,6 +61,21 @@ export const translateSchema = z.object({
 
 export type TranslateOutput = z.infer<typeof translateSchema>
 
+/**
+ * FLF-265: một lô đơn vị dịch. `text` cùng kiểu với nguồn (mảng chuỗi giữ nguyên độ dài). Thiếu key / key lạ / sai kiểu
+ * do service kiểm theo lô đã gửi — đơn vị lỗi bị bỏ, không bỏ cả lô.
+ */
+export const translateDocumentSchema = z.object({
+  items: z.array(
+    z.object({
+      key: z.string().min(1),
+      text: z.union([z.string().trim().min(1), z.array(z.string())])
+    })
+  )
+})
+
+export type TranslateDocumentOutput = z.infer<typeof translateDocumentSchema>
+
 // ─── Pipeline (T03): hợp đồng đầu ra cho T08/T11 ───────────────────
 // Model chỉ phát op; code áp op (Phases §2.1). Parse/validate thất bại thì
 // throw — không bao giờ ghi raw text vào Spine.
@@ -312,6 +327,7 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CHAT]: chatSchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
   [ActionType.TRANSLATE]: translateSchema,
+  [ActionType.TRANSLATE_DOCUMENT]: translateDocumentSchema,
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,

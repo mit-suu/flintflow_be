@@ -136,3 +136,20 @@ describe("parseResponse — mode 1 (FLF-171)", () => {
     bad({ location_id: "1", conclusion: "comment", reason: "r", comment_text: "c" })
   })
 })
+
+describe("parseResponse — translate_document (FLF-265)", () => {
+  it("nhận lô có chuỗi và mảng chuỗi", () => {
+    const raw =
+      '```json\n{"items":[{"key":"actors[id=A01].name","text":"Quản trị viên"},{"key":"functions[id=FN3].normal","text":["Bước 1","Bước 2"]}]}\n```'
+    const out = parseResponse<{ items: { key: string; text: string | string[] }[] }>(raw, ActionType.TRANSLATE_DOCUMENT)
+
+    expect(out.items).toHaveLength(2)
+    expect(out.items[1].text).toEqual(["Bước 1", "Bước 2"])
+  })
+
+  it("nhận lô rỗng (mock), từ chối key rỗng hoặc chữ rỗng", () => {
+    expect(parseResponse<{ items: unknown[] }>('{"items":[]}', ActionType.TRANSLATE_DOCUMENT).items).toEqual([])
+    expectAiError(() => parseResponse('{"items":[{"key":"","text":"x"}]}', ActionType.TRANSLATE_DOCUMENT), "SCHEMA_MISMATCH")
+    expectAiError(() => parseResponse('{"items":[{"key":"a","text":"  "}]}', ActionType.TRANSLATE_DOCUMENT), "SCHEMA_MISMATCH")
+  })
+})

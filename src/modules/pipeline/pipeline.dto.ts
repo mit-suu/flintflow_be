@@ -579,6 +579,39 @@ export const assembleResponseSchema = z.object({ spine_version: baseVersion, sec
 /** GET /projects/:id/export/word?source= — body là file .docx */
 export const exportWordQuerySchema = documentQuerySchema
 
+// ─── Ngôn ngữ tài liệu (FLF-265) ──────────────────────────────────
+// Ngôn ngữ đọc từ `Project.documentLanguage`, không có query param. Spine mode 2 vẫn tiếng Anh; chữ ngôn ngữ khác lấy
+// từ lớp bản dịch (khoá theo hash chữ gốc). GET không bao giờ gọi model.
+
+const documentLocale = z.enum(["vi", "en"])
+
+/** `meta.translation` của GET /document (16) khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc. `missing` = đơn vị đang in chữ gốc. */
+export const documentTranslationMetaSchema = z.object({
+  locale: documentLocale,
+  source_locale: documentLocale,
+  missing: z.number().int().min(0)
+})
+
+/** GET /projects/:id/translations/status — ước tính trước khi dịch (BR-01). Ngôn ngữ = gốc ⇒ `total: 0`. */
+export const translationStatusResponseSchema = z.object({
+  locale: documentLocale,
+  source_locale: documentLocale,
+  total: z.number().int().min(0),
+  missing: z.number().int().min(0),
+  batches: z.number().int().min(0),
+  estimated_credits: z.number().int().min(0)
+})
+
+/** POST /projects/:id/translations/run — dịch tối đa `max_batches` lô phần còn thiếu; FE gọi lại tới `remaining = 0`. */
+export const translationRunRequestSchema = z.strictObject({
+  max_batches: z.number().int().min(1).max(10).optional()
+})
+export const translationRunResponseSchema = z.object({
+  translated: z.number().int().min(0),
+  remaining: z.number().int().min(0),
+  credits_used: z.number().int().min(0)
+})
+
 /** POST /projects/:id/baseline (T19) — 422 BASELINE_BLOCKED nếu còn cờ đỏ chưa waive. */
 export const baselineRequestSchema = z.strictObject({ base_version: baseVersion })
 export const baselineResponseSchema = baselineSchema
