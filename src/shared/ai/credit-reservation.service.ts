@@ -32,7 +32,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.IMPORT_EXTRACT_FIELDS]: 2,
   // Một ảnh / lượt (Gemini vision) — đo ở docs/measurements.md (mode 1 v3 phase 5)
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: 2,
+  // 1.11 theo lô (~12k token in / lô) + một lượt kiểm chéo trên Spine gọn
   [ActionType.IMPORT_SEMANTIC_CHECK]: 3,
+  [ActionType.IMPORT_CROSS_CHECK]: 3,
   [ActionType.CR_CLARIFY]: 1,
   [ActionType.CR_PROPOSE]: 3,
   [ActionType.CR_CONSISTENCY]: 2,
