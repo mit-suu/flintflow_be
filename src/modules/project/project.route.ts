@@ -5,7 +5,7 @@ import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
-import { CreateProjectSchema, MoveProjectSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -76,6 +76,10 @@ const upload = multer({
  *                 enum: [import, fpt, customer_template]
  *                 default: fpt
  *                 description: "Cách làm SRS: import = upload SRS có sẵn rồi sửa (mode 1), fpt = sinh theo template FPT (mode 2), customer_template = chưa hỗ trợ"
+ *               documentLanguage:
+ *                 type: string
+ *                 enum: [vi, en]
+ *                 description: "Ngôn ngữ xem trước + .docx (FLF-265). Thiếu ⇒ ngôn ngữ tài khoản ⇒ en. Mode import bỏ qua — ngôn ngữ theo file upload"
  *     responses:
  *       201:
  *         description: Dự án đã được tạo thành công (kèm mode, import_state)
@@ -303,6 +307,52 @@ router.patch("/:projectId/name", authMiddleware, projectController.updateProject
  *         description: PROJECT_NOT_FOUND hoặc FOLDER_NOT_FOUND (không thuộc user)
  */
 router.patch("/:projectId/folder", authMiddleware, validateRequest(MoveProjectSchema), projectController.moveProjectToFolder)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/document-language:
+ *   patch:
+ *     summary: Đổi ngôn ngữ tài liệu (xem trước + .docx) của dự án — không đổi Spine, nội dung đã có dịch ở bước sau
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [documentLanguage]
+ *             additionalProperties: false
+ *             properties:
+ *               documentLanguage:
+ *                 type: string
+ *                 enum: [vi, en]
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi đổi (kèm documentLanguage)
+ *       400:
+ *         description: VALIDATION_ERROR — giá trị ngoài vi/en hoặc có key lạ
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không đổi được)
+ *       404:
+ *         description: PROJECT_NOT_FOUND (không thuộc tổ chức)
+ *       409:
+ *         description: DOCUMENT_LANGUAGE_LOCKED — dự án mode import dùng ngôn ngữ của file upload
+ */
+router.patch(
+  "/:projectId/document-language",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  validateRequest(UpdateDocumentLanguageSchema),
+  projectController.setDocumentLanguage
+)
 
 /**
  * @swagger

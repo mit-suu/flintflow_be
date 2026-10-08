@@ -4,7 +4,7 @@ import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import type { CreateProjectDTO, MoveProjectDTO } from "./project.validation.js"
+import type { CreateProjectDTO, MoveProjectDTO, UpdateDocumentLanguageDTO } from "./project.validation.js"
 
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -13,8 +13,8 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
   }
 
   // Body đã qua CreateProjectSchema ở route: name không rỗng, mode thuộc PROJECT_MODES (thiếu ⇒ fpt)
-  const { name, mode, domain, folderId } = req.body as CreateProjectDTO
-  const project = await projectService.createProject(requireOrgId(req), userId, name, domain, mode, folderId)
+  const { name, mode, domain, folderId, documentLanguage } = req.body as CreateProjectDTO
+  const project = await projectService.createProject(requireOrgId(req), userId, name, domain, mode, folderId, documentLanguage)
   return sendSuccess(res, 201, project)
 })
 
@@ -76,5 +76,17 @@ export const moveProjectToFolder = catchAsync(async (req: Request, res: Response
 
   const { folderId } = req.body as MoveProjectDTO
   const project = await projectService.moveProjectToFolder(req.params.projectId as string, requireOrgId(req), folderId)
+  return sendSuccess(res, 200, project)
+})
+
+/** FLF-265: đổi ngôn ngữ tài liệu — body đã qua `UpdateDocumentLanguageSchema` (strict) ở route. */
+export const setDocumentLanguage = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+
+  const { documentLanguage } = req.body as UpdateDocumentLanguageDTO
+  const project = await projectService.setDocumentLanguage(req.params.projectId as string, requireOrgId(req), documentLanguage)
   return sendSuccess(res, 200, project)
 })

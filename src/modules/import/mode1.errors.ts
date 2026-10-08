@@ -43,6 +43,8 @@ export const MODE1_ERROR_STATUS = {
   MODE1_NO_STEPS: 409,
   MODE1_NO_SIGNOFF: 409,
   MODE1_NO_WAIVE: 409,
+  /** FLF-265 (#1a): dự án mode 1 dùng ngôn ngữ của file upload — `PATCH /projects/:id/document-language` không đổi được. */
+  DOCUMENT_LANGUAGE_LOCKED: 409,
   IMPORT_FILE_REJECTED: 422,
   IMPORT_STAMP_FOREIGN_PROJECT: 422,
   /** Mode 1 v3 (BPMN 1.4 chỉ cho file có stamp của project): re-upload file không stamp. */
