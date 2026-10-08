@@ -158,7 +158,7 @@ export const chunksFor = (name: ChunkerName, docs: readonly KnowledgeDoc[]): Kno
 const buildIndex = async (name: ChunkerName, chunks: KnowledgeChunkDraft[]): Promise<InProcessIndex> => {
   const vectors = await embedTexts(
     chunks.map((c) => c.embed_text),
-    { taskType: "RETRIEVAL_DOCUMENT" }
+    { taskType: "RETRIEVAL_DOCUMENT", waitOnRateLimit: true }
   )
   return {
     name,
@@ -568,7 +568,7 @@ export const runKnowledgeEval = async (opts: EvalOptions): Promise<{ report: Eva
 
   const queryVectors = await embedTexts(
     questions.map((q) => q.question),
-    { taskType: "RETRIEVAL_QUERY" }
+    { taskType: "RETRIEVAL_QUERY", waitOnRateLimit: true }
   )
   const byType: Record<string, number> = {}
   for (const q of questions) byType[q.type] = (byType[q.type] ?? 0) + 1

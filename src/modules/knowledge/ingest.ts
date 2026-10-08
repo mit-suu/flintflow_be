@@ -45,7 +45,8 @@ export const ingestChunks = async (chunks: readonly KnowledgeChunkDraft[], optio
     throw new AiActionError(503, "Embedding chưa bật (EMBEDDING_PROVIDER=off hoặc thiếu GEMINI_API_KEY) — không ingest được tri thức", "EMBEDDING_UNAVAILABLE")
   }
   const modelId = options.modelId ?? embeddingModelId()
-  const embed = options.embed ?? ((texts: string[]) => embedTexts(texts, { taskType: "RETRIEVAL_DOCUMENT" }))
+  // Ingest là script chạy lô ⇒ chờ hết rate limit theo phút thay vì hỏng giữa chừng
+  const embed = options.embed ?? ((texts: string[]) => embedTexts(texts, { taskType: "RETRIEVAL_DOCUMENT", waitOnRateLimit: true }))
 
   const existing = await KnowledgeChunk.find({ corpus }, { chunk_id: 1, text_hash: 1, _id: 0 }).lean()
   const hashById = new Map(existing.map((r) => [r.chunk_id, r.text_hash]))
