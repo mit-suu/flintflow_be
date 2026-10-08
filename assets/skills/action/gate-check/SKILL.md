@@ -10,13 +10,12 @@ temperature: 0
 reads:
   - steps[]
   - progress
-  - project.working_mode
+  - project.review_mode
   - flags[]
   - usage[]
 writes:
   - steps[]
   - flags[]
-  - project.working_mode
 output_schema: none
 language: user
 ---
@@ -27,10 +26,10 @@ Contract for `gate.service.ts` (T13) and the FE GateCard (T12). **No model call*
 
 ## When the gate opens
 
-| Mode | Gate |
+| `review_mode` | Gate |
 | --- | --- |
-| Coaching | After Review of **every step** |
-| Fast | **Once at the end of the phase**, covering every step of the phase |
+| `strict` ("Mọi bước") | After Review of **every step** |
+| `fast` ("Cuối giai đoạn"; legacy `balanced` behaves the same) | **Once at the end of the phase**, plus any step that asks the user, opens a new red flag, fails a render, adds an assumption contradicting a settled decision, or is always gated |
 | S-5 | Per screen at S-5.5 Screen Sign-off (both modes) |
 
 The gate card shows: what changed (ops summary + preview diff), open flags for the fed sections, assumptions written, call counter, regenerate counter.
@@ -63,7 +62,7 @@ After the last step of a phase is accepted:
 | --- | --- | --- |
 | `[A]` | Advanced elicitation — deeper critique of the phase (BMAD `bmad-advanced-elicitation`) | cut |
 | `[P]` | Party mode — multi-persona review (most expensive; warn credit first) | cut |
-| `[C]` | Continue to next phase; may switch `working_mode` here (logged to `changes[]`) | ✔ |
+| `[C]` | Continue to next phase | ✔ |
 
 ## Refuse
 

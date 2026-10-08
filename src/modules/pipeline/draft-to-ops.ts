@@ -18,8 +18,9 @@ import { ActionType, AiActionError, type AiActionInput, type AiActionResult } fr
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import type { StepContext } from "./context-projection.js"
-import { validateOps, type ValidationError } from "./op-validator.js"
+import { briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
 export const NEEDS_USER_INPUT = "NEEDS_USER_INPUT"
 /** Phases §4.1: gửi lại model kèm lỗi tối đa 2 lần, rồi hỏi user. */
@@ -72,9 +73,31 @@ export interface DraftOptions {
   /** Câu trả lời Elicit; mặc định `ctx.transcriptTail`. */
   answers?: string
   revisionRequest?: string
+  /**
+   * Chỉ với `revision`: tập giả định còn mở của cổng — quyền SỬA. Revision được viết lại câu của chúng và ghi đúng `path`
+   * thật của chúng dù ngoài `writes` của step.
+   */
+  gateAssumptionIds?: ReadonlySet<string>
+  /**
+   * Chỉ với `revision`: tập giả định tin cổng ĐÃ NÓI RA — quyền đổi `status`, hẹp hơn quyền sửa ở trên (FLF-242). Thiếu ⇒
+   * không giả định nào đổi được `status`.
+   */
+  statusAssumptionIds?: ReadonlySet<string>
+  /** User đã quyết trong lượt của step (thẻ/chat) — cho phép step rà giả định B-2.1 đổi status giả định (xem `USER_DECISION_SWEEP_STEPS`). */
+  userDecided?: boolean
+  /**
+   * FLF-260: ngôn ngữ trả lời của phiên — có thì mọi lượt gọi (kể cả retry) mang nó, `buildPrompt` nối khối "Reply language"
+   * để `notes` và câu giả định cho user (`statement_vi`, `rationale_vi`) đúng ngôn ngữ. Thiếu ⇒ prompt như cũ.
+   */
+  replyLanguage?: ReplyLanguage
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
+  /**
+   * Báo ngay khi bắt đầu mỗi lượt gọi model (03-live-status-flow Lớp 3): lượt 2 trở đi kèm lỗi của lượt
+   * trước để runner nói "AI trả kết quả thiếu dữ liệu, đang thử lại (2/3)".
+   */
+  onAttempt?: (info: { attempt: number; max: number; previousErrors: ValidationError[] }) => void
 }
 
 /** 422 sau khi hết lượt retry — `errors` và `lastOps` để UI hỏi user (không ghi gì vào Spine). */
@@ -85,7 +108,14 @@ export class DraftRejectedError extends ApiError {
 
   constructor(attempts: DraftAttempt[]) {
     const last = attempts[attempts.length - 1]
-    super(422, `Model không tạo được lô op hợp lệ sau ${attempts.length} lượt: ${last?.errors[0]?.message ?? "không rõ"}`, NEEDS_USER_INPUT)
+    // FLF-247: câu cho user không mang text op/Zod — lỗi thô ở `errors` / `meta.errors` (lượt retry đưa model đọc
+    // `errors`, không đọc message này)
+    super(
+      422,
+      `AI chưa tạo được nội dung hợp lệ sau ${attempts.length} lần thử. Bạn có thể chạy lại, hoặc nói rõ hơn yêu cầu ở ô chat.`,
+      NEEDS_USER_INPUT,
+      { attempts: attempts.length, errors: (last?.errors ?? []).slice(0, 10) }
+    )
     this.errors = last?.errors ?? []
     this.lastOps = last?.ops ?? []
     this.attempts = attempts
@@ -105,7 +135,7 @@ const contentGuidance = (ctx: StepContext): string => {
 
 const loadSpine = async (projectId: string, expectedVersion: number): Promise<Spine> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   if (record.spine_version !== expectedVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
@@ -120,6 +150,12 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const spine = options.spine ?? (await loadSpine(projectId, ctx.spine_version))
 
   const guidance = contentGuidance(ctx)
+  // BUG-02: model chỉ được sửa/xoá phần tử nó thấy trong projection (của lô hiện tại, nếu S-5 chia lô)
+  const visibleIds = visibleIdsOf(ctx.projection)
+  const gateIds = callKind === "revision" ? (options.gateAssumptionIds ?? new Set<string>()) : undefined
+  const statusIds = callKind === "revision" ? (options.statusAssumptionIds ?? new Set<string>()) : undefined
+  const extraPaths = gateIds ? spine.assumptions.filter((a) => gateIds.has(a.id)).map((a) => a.path) : undefined
+  const language = options.replyLanguage ? { replyLanguage: options.replyLanguage } : {}
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
   let errors: ValidationError[] = []
@@ -127,12 +163,12 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   let previousOps: unknown[] | null = null
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    options.onAttempt?.({ attempt, max: maxRetries + 1, previousErrors: errors })
     const promptVariables = {
       step_id: stepId,
       step_name: ctx.label_en,
       call_kind: callKind,
       writable_paths: ctx.writable.join(", "),
-      working_mode: ctx.working_mode ?? "coaching",
       projection: ctx.projection,
       addendum: ctx.addendum,
       answers: options.answers ?? (ctx.transcriptTail || "(none)"),
@@ -145,7 +181,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let ops: unknown[] = []
     let notes: string | null = null
     try {
-      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables }, projectId, options.userId)
+      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId)
       usage.push({
         attempt,
         call_kind: callKind,
@@ -154,9 +190,21 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         cost: result.cost,
         logId: result.logId || null
       })
-      ops = result.data.ops
       notes = result.data.notes ?? null
-      errors = validateOps(spine, ops, { writable: ctx.writable, stepId })
+      // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
+      const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
+      // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
+      // Chỉ lọc khi sanitize không báo lỗi: lỗi của nó trỏ op_index theo lô gốc.
+      ops = sanitized.errors.length > 0 ? sanitized.ops : dropRedundantScalarAdds(spine, sanitized.ops as Op[])
+      errors = sanitized.errors.length > 0 ? sanitized.errors : validateOps(spine, ops, { writable: ctx.writable, stepId, visibleIds, ...(extraPaths ? { extraPaths } : {}) })
+      // S-1.1 phải dựng vision/goals tiếng Anh từ addendum lõi — kể cả lô rỗng, nên kiểm sau validateOps
+      if (errors.length === 0) errors = briefExtractionErrors(spine, ops as Op[], stepId, callKind)
+      // FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt cuối thì nhận lô (cờ vàng là lưới cuối)
+      if (errors.length === 0 && attempt <= maxRetries) errors = useCaseNamingErrors(spine, ops as Op[])
+      // FLF-248: danh sách bắt buộc của step vẫn trống sau lô ⇒ gửi lại model; lượt cuối nhận lô (cờ array_empty là lưới cuối)
+      if (errors.length === 0 && attempt <= maxRetries && callKind !== "glossary_scan") errors = requiredArrayErrors(spine, ops as Op[], stepId)
+      // Chức năng màn hình sinh ra từ use case ⇒ S-4.1 gắn ngay; còn use case người dùng chưa gắn ⇒ gửi lại model
+      if (errors.length === 0 && attempt <= maxRetries) errors = useCaseWiringErrors(spine, ops as Op[], stepId)
 
       if (errors.length === 0) {
         attempts.push({ attempt, ops, errors })

@@ -65,7 +65,9 @@ describe("POST /export/word/preview", () => {
 
     expect(outcome.status).toBeUndefined()
     expect(outcome.error).toMatchObject({ statusCode: 422, code: "RENDERED_DOCUMENT_INVALID" })
-    expect((outcome.error as Error).message).toContain("sections")
+    // FLF-247: câu cho user không lộ path schema — path nằm ở meta.issues
+    expect((outcome.error as Error).message).not.toContain("sections")
+    expect((outcome.error as { meta?: { issues?: { path: string }[] } }).meta?.issues?.some((i) => i.path.startsWith("sections"))).toBe(true)
   })
 
   it("401 khi thiếu user", async () => {

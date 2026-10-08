@@ -98,7 +98,7 @@ model → op[] → op-engine.applyTransaction() → Spine mới + changes[] → 
 
 ## 4. Luồng step (pipeline)
 
-12 phase, `51 step cố định + 5 × N` (N = số màn, +1 nếu có function không thuộc màn):
+12 phase, `50 step cố định + 5 × N` (N = số màn, +1 nếu có function không thuộc màn):
 
 | Phase | Tên | Step |
 |---|---|---|
@@ -143,7 +143,10 @@ sequenceDiagram
 ```
 
 - Trần **8 lượt gọi model/step**, **3 regenerate/step**; Meter ghi `usages` và trừ credit theo lượt.
-- Coaching path gate từng step; Fast path gate gộp cuối phase.
+- Hỏi đáp tách khỏi chế độ duyệt: AI hỏi gộp đầu giai đoạn (≤ 4 câu) và hỏi thêm ở step còn field trống,
+  mặc định bằng văn xuôi, chỉ đưa thẻ lựa chọn khi cần user quyết (`question-shape.ts` ép luật hình dạng).
+  Chế độ duyệt (`project.review_mode`) chỉ quyết định dừng ở đâu: `strict` ("Mọi bước") gate từng step;
+  `fast` ("Cuối giai đoạn", `balanced` cũ xử lý như `fast`) tự Accept bước yên lặng, gate gộp cuối phase.
 - `POST /resume` revert step `in_progress` dang dở khi mở lại workspace.
 - Đúng **một** chat session `is_pipeline` mỗi project (partial unique index); session khác chỉ hỏi đáp.
 - S-8 assemble tất định; S-9 quét lại, đối chiếu mục tiêu, MoSCoW (`functions[].priority`,
@@ -198,8 +201,38 @@ diff gộp; user xác nhận thì áp một transaction, section về `awaiting_
 
 ## 8. Nền tảng
 
-`auth` (JWT hai token, Google OAuth), `user`, `credits` (ví, giao dịch, hạn dùng), `billing` (gói, checkout
-qua `payment_service`), `notification` (in-app), `admin` (chỉ đọc: users, metrics, chi phí AI).
+`auth` (JWT hai token, Google OAuth), `user`, `organization` (tổ chức, thành viên, mã mời), `credits` (ví,
+giao dịch, hạn dùng), `billing` (gói, checkout qua `payment_service`), `notification` (in-app), `admin`
+(users, metrics, chi phí AI, điều chỉnh credit org).
+
+### 8.1 Tổ chức là trục sở hữu dữ liệu (task-26)
+
+Mô hình "kiểu Supabase" (`context/business-flow.md` §2): ai cũng thuộc ít nhất một org, làm một mình là org
+một thành viên và người đó là Lead. **Project, thư mục, ví credit và gói thuộc về org**, `userId` còn lại chỉ
+cho biết ai tạo.
+
+Chuỗi kiểm quyền mỗi request (BPMN Flow 10, `context/flintflow-business-flow.bpmn`):
+
+```
+authMiddleware (10.1 token)
+  → requireActiveAccount (10.4 đọc account từ DB; tài khoản bị khoá ⇒ 403 ACCOUNT_SUSPENDED)
+  → orgContext (10.6 nạp Membership MỖI REQUEST, không cache; ngoài org ⇒ 403, chưa chọn org ⇒ 409)
+  → requireRole (10.7 Lead / Analyst / Viewer)
+```
+
+Không cache Membership là điều kiện để UC-73 (đổi vai trò) và UC-74 (xoá thành viên) có hiệu lực **ngay
+từ request kế tiếp**. Guard mount ở `app.ts` theo tiền tố (`/projects`, `/folders` đủ bộ; `/users`,
+`/notifications`, `/feedback`, `/ai-actions`, `/export` chỉ tới bước 10.4). `/billing` gắn từng route vì
+`POST /billing/payment-callback` là webhook không mang token.
+
+**BR-02** (org luôn còn ≥ 1 Lead) nằm ở `lead-succession.ts`. Đếm Lead trong transaction là chưa đủ: hai
+request hạ hai Lead cuối cùng không đụng document chung nào. Vì vậy mọi thao tác đổi thành viên `$inc` vào
+`Organization.membershipVersion` trước khi đếm — hai request đụng nhau sinh WriteConflict, cái thua chạy lại
+và bị chặn.
+
+**Ví credit**: một ví cho mỗi org (partial unique index trên `organizationId`), mở ngay khi tạo org cùng gói
+free. Lượt gọi AI trừ vào ví của **org sở hữu project** — `credit-reservation.service.ts` suy org từ
+`projectId` nên chữ ký `executeAiAction` giữ nguyên. Lượt gọi không gắn project dùng ví cá nhân như trước.
 
 Xoá cứng project (`DELETE /projects/:id?hard=true`) dọn: chat session, tài liệu (+ Cloudinary), Spine,
 changes, baselines, usages, cache render, file sơ đồ GridFS. Notification và PaymentIntent thuộc user nên

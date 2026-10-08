@@ -9,6 +9,8 @@ import * as sessionService from "../../shared/auth/session.service.js"
 import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../shared/email/email.service.js"
 import { env } from "../../config/env.js"
 import { REMEMBER_ME_MAX_AGE_MS, REMEMBER_ME_TTL } from "../../shared/auth/auth-cookie.js"
+import { listMyOrganizations, type OrganizationSummary } from "../organization/organization.service.js"
+import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 
 export interface AuthResult {
   accessToken: string
@@ -21,7 +23,12 @@ export interface AuthResult {
     emailVerified: boolean
     name?: string
     role?: string
+    /** FLF-259: FE áp ngôn ngữ tài khoản ngay khi đăng nhập; `null` = chưa chọn. */
+    locale: UserLocale | null
   }
+  organizations: OrganizationSummary[]
+  activeOrgId: string | null
+  needsOnboarding: boolean
 }
 
 export interface RegisterResult {
@@ -36,6 +43,31 @@ export interface RefreshResult {
   accessToken: string
   refreshToken: string
   rememberMe: boolean | null
+}
+
+/**
+ * Phần org của kết quả đăng nhập (task-26, BPMN Flow 7.12–7.14).
+ * - `organizations` rỗng ⇒ `needsOnboarding: true`, FE đưa vào Flow 8 (tạo org hoặc nhập mã mời).
+ * - Đúng một org ⇒ chọn luôn, bỏ qua màn chọn.
+ * - Nhiều org ⇒ `activeOrgId: null`, FE hiện màn "Choose the organization to work in" (7.13).
+ */
+export interface OrgLoginContext {
+  organizations: OrganizationSummary[]
+  activeOrgId: string | null
+  needsOnboarding: boolean
+}
+
+/**
+ * Org của người vừa đăng nhập (BPMN Flow 7.12–7.14). Đúng một org thì chọn luôn; nhiều org thì để người
+ * dùng chọn ở màn 7.13; không org nào thì FE đẩy sang onboarding (Flow 8).
+ */
+const resolveOrgContext = async (userId: string): Promise<OrgLoginContext> => {
+  const organizations = await listMyOrganizations(userId)
+  return {
+    organizations,
+    activeOrgId: organizations.length === 1 ? (organizations[0]?.id ?? null) : null,
+    needsOnboarding: organizations.length === 0
+  }
 }
 
 /** Refresh token + hạn phiên theo chế độ ghi nhớ: tick ⇒ 30 ngày, còn lại ⇒ `REFRESH_TOKEN_EXPIRES`. */
@@ -137,7 +169,7 @@ export const register = async (
   const normalizedEmail = email.toLowerCase().trim()
   const existingUser = await User.findOne({ email: normalizedEmail })
   if (existingUser) {
-    throw new ApiError(409, "Email already registered", "EMAIL_EXISTS")
+    throw new ApiError(409, "Email này đã được đăng ký.", "EMAIL_EXISTS")
   }
 
   const user = await User.create({
@@ -158,6 +190,13 @@ export const register = async (
   }
 }
 
+/** UC-03 / UC-66: tài khoản bị Administrator khoá thì không đăng nhập và không gia hạn phiên được. */
+const assertAccountActive = (user: { isActive?: boolean }): void => {
+  if (user.isActive === false) {
+    throw new ApiError(403, "Tài khoản đã bị khoá", "ACCOUNT_SUSPENDED")
+  }
+}
+
 export const login = async (
   email: string,
   password: string,
@@ -168,13 +207,16 @@ export const login = async (
   const normalizedEmail = email.toLowerCase().trim()
   const user = await User.findOne({ email: normalizedEmail }).select("+passwordHash")
   if (!user || !user.passwordHash) {
-    throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
+    throw new ApiError(401, "Email hoặc mật khẩu không đúng.", "INVALID_CREDENTIALS")
   }
 
   const isPasswordValid = await user.comparePassword(password)
   if (!isPasswordValid) {
-    throw new ApiError(401, "Invalid credentials", "INVALID_CREDENTIALS")
+    throw new ApiError(401, "Email hoặc mật khẩu không đúng.", "INVALID_CREDENTIALS")
   }
+
+  // Sau khi kiểm mật khẩu: người chưa đúng mật khẩu không được biết tài khoản đang bị khoá.
+  assertAccountActive(user)
 
   if (!user.emailVerified) {
     throw new ApiError(403, "Email chưa được xác thực. Vui lòng kiểm tra email của bạn.", "EMAIL_NOT_VERIFIED")
@@ -185,6 +227,10 @@ export const login = async (
     email: user.email,
     role: user.role
   }
+
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
+  const org = await resolveOrgContext(tokenPayload.userId)
+  if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
 
   const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
@@ -197,6 +243,7 @@ export const login = async (
     ip,
     rememberMe
   )
+  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
 
   return {
     accessToken,
@@ -207,8 +254,10 @@ export const login = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
-    }
+      role: user.role,
+      locale: toUserLocale(user.locale)
+    },
+    ...org
   }
 }
 
@@ -241,6 +290,10 @@ export const confirmEmailVerification = async (
     role: user.role
   }
 
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
+  const org = await resolveOrgContext(tokenPayload.userId)
+  if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
+
   const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, null)
 
@@ -252,6 +305,7 @@ export const confirmEmailVerification = async (
     ip,
     null
   )
+  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
 
   return {
     accessToken,
@@ -262,8 +316,10 @@ export const confirmEmailVerification = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
-    }
+      role: user.role,
+      locale: toUserLocale(user.locale)
+    },
+    ...org
   }
 }
 
@@ -340,7 +396,7 @@ export const resetPassword = async (resetToken: string, newPassword: string): Pr
 
   const user = await User.findById(grant.userId)
   if (!user) {
-    throw new ApiError(404, "User không tồn tại", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
 
   // Update password & save (triggers bcrypt pre-save hook)
@@ -391,12 +447,12 @@ export const googleAuth = async (
         }
       }
     } catch (_) {
-      throw new ApiError(401, "Google Token không hợp lệ", "INVALID_GOOGLE_TOKEN")
+      throw new ApiError(401, "Đăng nhập Google không thành công. Vui lòng thử lại.", "INVALID_GOOGLE_TOKEN")
     }
   }
 
   if (!payload || !payload.email) {
-    throw new ApiError(400, "Google Profile không chứa địa chỉ email", "GOOGLE_EMAIL_MISSING")
+    throw new ApiError(400, "Tài khoản Google không có địa chỉ email.", "GOOGLE_EMAIL_MISSING")
   }
 
   const { sub: googleId, name } = payload
@@ -408,6 +464,8 @@ export const googleAuth = async (
   })
 
   if (user) {
+    assertAccountActive(user)
+
     // Auto-link Google Account if user already exists
     let updated = false
     if (!user.googleId) {
@@ -444,6 +502,10 @@ export const googleAuth = async (
     role: user.role
   }
 
+  // Flow 7.12–7.14: biết org trước khi ký token, để access token mang luôn orgId khi chỉ có một org.
+  const org = await resolveOrgContext(tokenPayload.userId)
+  if (org.activeOrgId) tokenPayload.orgId = org.activeOrgId
+
   const accessToken = signAccessToken(tokenPayload)
   const { refreshToken, expiresAt } = issueRefreshToken(tokenPayload, rememberMe)
 
@@ -455,6 +517,7 @@ export const googleAuth = async (
     ip,
     rememberMe
   )
+  if (org.activeOrgId) await sessionService.setActiveOrg(refreshToken, org.activeOrgId)
 
   return {
     accessToken,
@@ -465,8 +528,10 @@ export const googleAuth = async (
       email: user.email,
       emailVerified: user.emailVerified,
       name: user.name,
-      role: user.role
-    }
+      role: user.role,
+      locale: toUserLocale(user.locale)
+    },
+    ...org
   }
 }
 
@@ -480,14 +545,13 @@ export const refresh = async (
     const { verifyRefreshToken } = await import("../../shared/auth/jwt.util.js")
     decoded = verifyRefreshToken(oldRefreshToken)
   } catch (error) {
-    throw new ApiError(401, "Invalid or expired refresh token", "INVALID_REFRESH_TOKEN")
+    throw new ApiError(401, "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", "INVALID_REFRESH_TOKEN")
   }
 
-  let role = decoded.role
-  if (!role) {
-    const user = await User.findById(decoded.userId).select("role")
-    role = user?.role
-  }
+  // Luôn đọc DB: token cũ có thể thiếu role, và tài khoản có thể đã bị khoá sau khi token được cấp.
+  const user = await User.findById(decoded.userId).select("role isActive")
+  if (user) assertAccountActive(user)
+  const role = decoded.role ?? user?.role
 
   const newPayload: TokenPayload = {
     userId: decoded.userId,
@@ -497,6 +561,10 @@ export const refresh = async (
 
   // Giữ nguyên chế độ "ghi nhớ" của phiên cũ qua mỗi lần xoay vòng
   const rememberMe = await sessionService.findSessionRememberMe(oldRefreshToken)
+  // Giữ luôn org đang mở: token mới phải mang đúng orgId, nếu không người dùng bị đẩy về màn chọn org
+  // sau mỗi lần refresh. Quyền vẫn do orgContext kiểm lại từ Membership ở mỗi request (Flow 10.6).
+  const activeOrgId = await sessionService.findSessionActiveOrg(oldRefreshToken)
+  if (activeOrgId) newPayload.orgId = activeOrgId
   const newAccessToken = signAccessToken(newPayload)
   const { refreshToken: newRefreshToken, expiresAt } = issueRefreshToken(newPayload, rememberMe)
 
@@ -508,6 +576,7 @@ export const refresh = async (
     ip,
     rememberMe
   )
+  if (activeOrgId) await sessionService.setActiveOrg(newRefreshToken, activeOrgId)
 
   return {
     accessToken: newAccessToken,

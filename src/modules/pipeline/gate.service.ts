@@ -8,6 +8,11 @@
  * `revision`/`regenerate` tái dùng `runDraftPhase`/`runRenderReviewPhase` của `step-runner.service.ts`
  * với `emit` no-op.
  *
+ * FLF-177 BUG-01: Accept ở S-9.5 **ký baseline luôn** (trước đây gate chỉ đánh dấu step accepted, còn
+ * `POST /baseline` không được client nào gọi ở mode FlintFlow ⇒ `baselines: []` sau khi đi hết quy trình).
+ * Còn cờ đỏ chưa waive ⇒ `BaselineBlockedError` (422 BASELINE_BLOCKED kèm danh sách cờ), step giữ nguyên
+ * trạng thái để user xử lý cờ rồi Accept lại.
+ *
  * B7 (F6, review T13): step đã `accepted` được PHÉP quay lại qua `revision`/`regenerate` — chuyển
  * `status = revision_requested`, reset `first_seq/last_seq/accepted_at` (vòng mới, F1) rồi mới redraft.
  * `accept`/`accept_as_is` trên step đã accepted vẫn bị chặn (vô nghĩa — step đã ở đích).
@@ -25,16 +30,18 @@ import {
   runRenderReviewPhase,
   trackSeqRange,
   assertRangeOwnedByStep,
-  acquireStepLock,
-  releaseStepLock,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   STEP_NOT_RUNNABLE,
   defaultStepRunnerDeps,
   type StepRunnerDeps
 } from "./step-runner.service.js"
-import { gateActionSchema } from "./pipeline.dto.js"
+import { gateActionSchema, type ChangeSummary } from "./pipeline.dto.js"
+import { composeStepGateMessage, gateAssumptionIdsOfRun, type GateAssumptionBrief } from "./gate-message.js"
+import { acquireRun, finishRun, getRunState } from "./run-state.service.js"
+import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { z } from "zod"
 
@@ -42,6 +49,9 @@ type GateActionKind = z.infer<typeof gateActionSchema>
 
 export const REGENERATE_LIMIT = "REGENERATE_LIMIT"
 export const CALL_LIMIT = "CALL_LIMIT"
+
+/** Lời xác nhận sau revision khi không có gì khác để nói — theo ngôn ngữ trả lời của phiên (FLF-260). */
+const REVISION_FALLBACK_MESSAGE: Readonly<Record<ReplyLanguage, string>> = { vi: "Tôi đã cập nhật lại theo ý bạn.", en: "I've updated it as you asked." }
 
 /** 409 với `meta` cho FE (contract §0.3: `{ regenerate_used: 3 }` / `{ calls_used: 8 }`). */
 export class GateLimitError extends ApiError {
@@ -72,19 +82,23 @@ export interface StepSummary {
   regenerate_used: number
   regenerate_limit: 3
   accepted_at: string | null
+  /** Step đang chạy dở ở request khác (GET /steps); ở kết quả /gate luôn false. */
+  running: boolean
 }
 
 export interface GateResult {
   step: StepSummary
   next_step: string | null
   spine_version: number
+  /** Sau `revision`: lời AI xác nhận điều vừa sửa (`notes` của lượt soạn lại). */
+  message_vi?: string
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
 const load = async (projectId: string): Promise<SpineRecord> => {
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   return record
 }
 
@@ -105,7 +119,9 @@ const buildSummary = (spine: Spine, stepId: string, counts: { calls_used: number
     calls_limit: CALLS_LIMIT,
     regenerate_used: counts.regenerate_used,
     regenerate_limit: REGENERATE_LIMIT_COUNT,
-    accepted_at: state?.accepted_at ?? null
+    accepted_at: state?.accepted_at ?? null,
+    // Tóm tắt này dựng ở cuối `/gate`: khoá nhả ngay sau đó nên client đọc được là step đã xong
+    running: false
   }
 }
 
@@ -138,8 +154,9 @@ const phaseFullyAccepted = (spine: Spine, phase: string): boolean =>
 const notifyPhaseAccepted = (userId: string, phase: string): void => {
   void notify(userId, {
     type: "phase_accepted",
-    title: `Đã hoàn tất phase ${phase}`,
-    body: `Mọi step của phase ${phase} đã được accept. Có thể tiếp tục sang phase kế tiếp.`,
+    // Câu lưu sẵn không mang mã giai đoạn (`S-3`) — FE dựng lại tiêu đề có tên giai đoạn từ `meta.phase` (FLF-247)
+    title: "Đã hoàn tất một giai đoạn",
+    body: "Mọi bước của giai đoạn này đã được duyệt. Bạn có thể chuyển sang giai đoạn tiếp theo.",
     meta: { phase }
   })
 }
@@ -173,6 +190,12 @@ const assertVersion = (record: SpineRecord, baseVersion: number): void => {
 
 // ─── accept / accept_as_is ─────────────────────────────────────────
 
+/**
+ * Chốt một bước. Bất biến phải giữ: hàm này KHÔNG đụng `assumptions[].status` — "Đúng rồi, đi tiếp" xác nhận điều tạm hiểu ở
+ * FE, không ở BE. `GateCard.tsx` gọi `onConfirmAssumptions(assumptions.map(a => a.id))` với đúng `gate_payload.new_assumptions`
+ * TRƯỚC khi gửi lệnh accept, nên tập đó phải là đúng những điều tin cổng đã nói ra (`spokenAssumptionIds`, FLF-241). Điều
+ * không được nói ở lại `unconfirmed`: S-9.1 gom hết, và cờ đỏ `unconfirmed_assumption` chặn ký baseline ở S-9.5.
+ */
 const doAccept = async (projectId: string, stepId: string, userId: string, record: SpineRecord, yellowFlagNote: string | null): Promise<number> => {
   const spine = stripRecord(record)
   const ops: Op[] = [
@@ -220,21 +243,53 @@ interface SeqRange {
 /** Draft lại (revision/regenerate) + render/review; không stream (`emit` no-op — `/gate` không phải SSE).
  *  F3: cập nhật `first_seq/last_seq` theo dải change THẬT sự ghi trong lượt này (bug cũ: không cập nhật
  *  ⇒ regenerate lần 2 revert nhầm/không đủ nội dung của lần 1). */
+/** Base id của step ("S-5.2@S03" ⇒ "S-5.2"); origin_step_id của giả định có thể ghi hai dạng. */
+const stepBase = (id: string): string => id.split("@")[0]
+
+/**
+ * Tập ĐẦY ĐỦ giả định còn `unconfirmed` thuộc cổng của `stepId`, tính từ Spine: do chính bước sinh ra; bước cuối giai
+ * đoạn thì cả giai đoạn (kể cả bước im).
+ *
+ * Đây là danh sách cổng CÓ THỂ nói, không phải danh sách nó ĐÃ nói — `new_assumptions` của gate_ready/phase_gate chỉ
+ * giữ phần tin thực sự nói ra. Quyền sửa giả định dùng tập đầy đủ này; quyền đổi `status` thì không, nó lấy theo phần
+ * đã nói (`gateAssumptionIdsOfRun`).
+ */
+export const gateAssumptionIdsOf = (spine: Spine, stepId: string): Set<string> => {
+  const step = getStep(stepId)
+  const unit = orderedSteps(spine).filter((s) => s.phase === step.phase && s.loop === step.loop)
+  const terminal = unit.length > 0 && unit[unit.length - 1].id === stepId
+  const origins = new Set((terminal ? unit.map((s) => s.id) : [stepId]).map(stepBase))
+  return new Set(spine.assumptions.filter((a) => a.status === "unconfirmed" && origins.has(stepBase(a.origin_step_id))).map((a) => a.id))
+}
+
+/**
+ * Mọi điều còn tạm hiểu của giai đoạn tới cổng cuối: dựng từ Spine (không từ bộ nhớ của lần chạy hiện tại — chạy tiếp/tải
+ * lại sau khi các bước im đã chạy ở lượt trước thì bộ nhớ chỉ còn bước cuối). Đây là tập ĐẦY ĐỦ; `new_assumptions` của cổng
+ * chỉ lấy phần tin thực sự nói ra (`spokenAssumptionIds`), phần dư được đếm thành một câu (FLF-241).
+ */
+export const phaseGateAssumptions = (spine: Spine, stepId: string): GateAssumptionBrief[] => {
+  const ids = gateAssumptionIdsOf(spine, stepId)
+  return spine.assumptions
+    .filter((a) => ids.has(a.id))
+    .map((a) => ({ id: a.id, text: a.statement, ...(a.statement_vi ? { text_vi: a.statement_vi } : {}) }))
+}
+
 const redraft = async (
   projectId: string,
   stepId: string,
   userId: string,
   callKind: "revision" | "regenerate",
-  extra: { answers?: string; revisionRequest?: string },
+  extra: { answers?: string; revisionRequest?: string; gateAssumptionIds?: ReadonlySet<string>; statusAssumptionIds?: ReadonlySet<string>; replyLanguage?: ReplyLanguage },
   deps: StepRunnerDeps,
   range: SeqRange
-): Promise<number> => {
+): Promise<{ spineVersion: number; notes?: string; summary: ChangeSummary[]; applied: boolean }> => {
   const spineNow = stripRecord(await load(projectId))
   const ctx = await buildStepContext(projectId, stepId)
   const noop = (): void => {}
-  await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
-  const afterVersion = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
-  return trackSeqRange(projectId, afterVersion, stepId, userId, range.startSeq, range.existing)
+  const draft = await runDraftPhase(projectId, stepId, ctx, spineNow, userId, callKind, noop, deps, extra)
+  const review = await runRenderReviewPhase(projectId, stepId, getStep(stepId).renders, parseStepId(stepId).loop, userId, noop, deps)
+  const spineVersion = await trackSeqRange(projectId, review.spineVersion, stepId, userId, range.startSeq, range.existing)
+  return { spineVersion, summary: draft.summary ?? [], applied: draft.applied, ...(draft.notes ? { notes: draft.notes } : {}) }
 }
 
 // ─── điểm vào công khai ──────────────────────────────────────────────
@@ -246,9 +301,18 @@ export const gate = async (
   input: GateInput,
   deps: Partial<StepRunnerDeps> = {}
 ): Promise<GateResult> => {
-  acquireStepLock(projectId, stepId)
+  // Phạm vi đổi `status` của lượt revision = đúng những điều tin cổng đã nói (FLF-242). Phải đọc TRƯỚC `acquireRun`:
+  // chiếm khoá là ghi lại lượt mới với `gate_payload`/`phase_gate` rỗng, sau đó không còn gì để biết user đã đọc những gì.
+  const spokenIds = input.action === "revision" ? gateAssumptionIdsOfRun(await getRunState(projectId, stepId)) : new Set<string>()
+
+  // Cùng khoá với `/run` (WP-4): gate cũng ghi Spine, không được chạy song song với một lượt draft
+  const run = await acquireRun(projectId, stepId, { by: userId, stage: "draft", detail_vi: "Xử lý cổng chốt" })
   try {
     const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
+    // FLF-260: ngôn ngữ trả lời do nơi gọi đọc từ phiên (`deps.replyLanguage`) — gate không tự đoán: ghi chú cổng và chữ của
+    // chip không phải tin để đoán ngôn ngữ. Thiếu ⇒ lượt soạn lại như cũ (không khối "Reply language"), câu cố định tiếng Việt.
+    const replyLanguage = d.replyLanguage
+    const language = replyLanguage ? { replyLanguage } : {}
     const record = await load(projectId)
     assertVersion(record, input.base_version)
     const spine = stripRecord(record)
@@ -260,11 +324,19 @@ export const gate = async (
     const reopening = state.status === "accepted"
 
     let finalVersion = record.spine_version
+    let revisionMessage: string | undefined
 
-    if (input.action === "accept") {
-      finalVersion = await doAccept(projectId, stepId, userId, record, null)
-    } else if (input.action === "accept_as_is") {
-      finalVersion = await doAccept(projectId, stepId, userId, record, input.note ?? "")
+    if (input.action === "accept" || input.action === "accept_as_is") {
+      const yellowNote = input.action === "accept_as_is" ? (input.note ?? "") : null
+      if (getStep(stepId).template_id === SIGN_OFF_STEP) {
+        // BUG-01: ký baseline ngay trong lượt Accept — signOff tự quét lại, kiểm cờ đỏ và đánh dấu S-9.5 accepted.
+        // accept_as_is: mở cờ vàng "chấp nhận như hiện tại" TRƯỚC (cờ vàng không chặn baseline), rồi ký.
+        const beforeSign = yellowNote === null ? record : ((await doAccept(projectId, stepId, userId, record, yellowNote), await load(projectId)))
+        const signed = await signOff(projectId, userId, { base_version: beforeSign.spine_version })
+        finalVersion = signed.spine_version
+      } else {
+        finalVersion = await doAccept(projectId, stepId, userId, record, yellowNote)
+      }
     } else {
       // revision | regenerate
       let baseVersion = record.spine_version
@@ -292,10 +364,10 @@ export const gate = async (
       } else {
         const counts = await usageCounts(projectId, stepId, state.first_seq)
         if (counts.calls_used >= CALLS_LIMIT) {
-          throw new GateLimitError(CALL_LIMIT, `Step ${stepId} đã dùng hết ${CALLS_LIMIT} lượt gọi model`, { calls_used: counts.calls_used })
+          throw new GateLimitError(CALL_LIMIT, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, { calls_used: counts.calls_used })
         }
         if (input.action === "regenerate" && counts.regenerate_used >= REGENERATE_LIMIT_COUNT) {
-          throw new GateLimitError(REGENERATE_LIMIT, `Step ${stepId} đã dùng hết ${REGENERATE_LIMIT_COUNT} lượt regenerate`, { regenerate_used: counts.regenerate_used })
+          throw new GateLimitError(REGENERATE_LIMIT, `Bước này đã dùng hết ${REGENERATE_LIMIT_COUNT} lượt soạn lại.`, { regenerate_used: counts.regenerate_used })
         }
 
         if (input.action === "regenerate") {
@@ -333,9 +405,30 @@ export const gate = async (
 
       if (input.action === "regenerate") {
         const functionScope = input.function_id ? { revisionRequest: `Regenerate scope: chỉ function ${input.function_id}.` } : {}
-        finalVersion = await redraft(projectId, stepId, userId, "regenerate", functionScope, d, range)
+        finalVersion = (await redraft(projectId, stepId, userId, "regenerate", { ...functionScope, ...language }, d, range)).spineVersion
       } else {
-        finalVersion = await redraft(projectId, stepId, userId, "revision", { revisionRequest: input.note ?? "" }, d, range)
+        const revised = await redraft(
+          projectId,
+          stepId,
+          userId,
+          "revision",
+          {
+            revisionRequest: input.note ?? "",
+            // Hai quyền, hai tập (FLF-242): sửa câu/ghi path thật được cả tập giả định còn mở của cổng; đổi `status` chỉ
+            // được phần tin cổng đã nói ra.
+            gateAssumptionIds: gateAssumptionIdsOf(stripRecord(await load(projectId)), stepId),
+            statusAssumptionIds: spokenIds,
+            ...language
+          },
+          d,
+          range
+        )
+        finalVersion = revised.spineVersion
+        // Lời AI xác nhận điều vừa sửa: notes của model; thiếu thì dựng từ tóm tắt; revision có ghi op mà vẫn không có gì để
+        // nói (chỉ đổi giả định) thì một câu chung — FE luôn có lời để hiện khi Spine đã đổi
+        revisionMessage =
+          composeStepGateMessage({ notes: revised.notes, summary: revised.summary, language: replyLanguage }) ??
+          (revised.applied ? byLanguage(replyLanguage ?? "vi", REVISION_FALLBACK_MESSAGE) : undefined)
         const backToProgress = await applyTransaction(projectId, {
           base_version: finalVersion,
           ops: [{ op: "set", path: `steps[id=${stepId}].status`, value: "in_progress" }],
@@ -354,8 +447,8 @@ export const gate = async (
     const summary = buildSummary(afterSpine, stepId, afterCounts)
     const next = nextStepOf(afterSpine)
 
-    return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion }
+    return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion, ...(revisionMessage ? { message_vi: revisionMessage } : {}) }
   } finally {
-    releaseStepLock(projectId, stepId)
+    await finishRun(projectId, stepId, run.run_id, "done")
   }
 }

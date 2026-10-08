@@ -1,19 +1,24 @@
 /**
  * deterministic-check.ts
  * ─────────────────────────────────────────────────────────────────
- * 10 luật cờ đỏ (srs-spine.md §7) + 6 luật vàng cardinality (§8.1). Hàm thuần trên đồ thị khoá,
- * KHÔNG gọi model. Chỉ cờ đỏ chặn `baselines[]`.
+ * 12 luật cờ đỏ (srs-spine.md §7) + 12 luật vàng (cardinality §8.1, quan hệ và đặt tên use case, tên hệ thống).
+ * Hàm thuần trên đồ thị khoá, KHÔNG gọi model. Chỉ cờ đỏ chặn `baselines[]`.
  *
  * Mọi cờ đỏ có `remediation_step` thi hành được. Mọi `section_id` là khoá section phân giải
  * được (flag ghi qua op engine, bất biến 3 chặn khoá chết) — không suy ra được thì dùng `fixed:I`.
  * Luật gắn S-9 (`unconfirmed_assumption`, `*_at_baseline`) chỉ chạy khi `atBaseline`.
+ * Luật "chưa có X" chỉ bắn cờ khi bước sinh ra X đã `accepted` (FLF-213, `StepGate` bên dưới).
  */
 
 import type { Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
-import { loopKeyOfFunction, ownerStepOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
+import { tryResolve } from "./path-resolver.js"
+import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
+import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
+import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
+import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 
 export interface RuleDef {
   rule_id: string
@@ -33,16 +38,32 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("render_error", "red", false),
   rule("diagram_stale", "red", true),
   rule("nfr_missing_number", "red", true),
+  rule("usecase_relation_invalid", "red", true),
   rule("unconfirmed_assumption", "red", true, true),
   rule("section_stale_at_baseline", "red", true, true),
   rule("section_awaiting_reaccept", "red", true, true),
   rule("screen_pending_at_baseline", "red", true, true),
+  rule("orphan_screen_at_baseline", "red", true, true),
+  rule("orphan_entity_at_baseline", "red", true, true),
   rule("orphan_actor", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
+  rule("orphan_screen", "yellow", true),
   rule("empty_feature", "yellow", true),
   rule("role_no_actor", "yellow", true),
-  rule("non_english_content", "yellow", true)
+  rule("non_english_content", "yellow", true),
+  rule("usecase_floating", "yellow", true),
+  rule("usecase_auth_relation", "yellow", true),
+  rule("usecase_name_semantic", "yellow", true),
+  rule("usecase_name_style", "yellow", true),
+  rule("actor_name_shape", "yellow", true),
+  rule("system_name_missing", "yellow", true),
+  rule("screen_placeholder", "yellow", true),
+  rule("derived_from_changed_assumption", "yellow", true),
+  rule("function_without_uc", "yellow", true),
+  rule("original_diagram_stale", "yellow", true),
+  rule("orphan_entity", "yellow", true),
+  rule("unresolved_many_to_many", "yellow", true)
 ])
 
 /** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
@@ -57,7 +78,15 @@ export const NON_WAIVABLE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) 
  * theo, không ai kịp đọc. `planFlagOps` bỏ qua chúng khi dọn cờ; muốn đóng thì đóng có chủ đích
  * (user xử lý xong, hoặc bước sở hữu chạy lại và ghi đè).
  */
-export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set(["accepted_as_is", "goal_not_covered", "import_semantic", "cr_consistency"])
+export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
+  "accepted_as_is",
+  "goal_not_covered",
+  "import_semantic",
+  "import_image_unread",
+  // FLF-252: quyền của ma trận phân quyền không khớp màn / vai trò lúc import — chỉ import đặt được, recompute không đóng
+  "import_unresolved_ref",
+  "cr_consistency"
+])
 
 export interface FlagCandidate {
   level: FlagLevel
@@ -79,6 +108,12 @@ export const flagKey = (f: Pick<Flag, "level" | "rule_id" | "section_id"> & { ta
 export interface RuleProfile {
   exclude: ReadonlySet<string>
   downgrade: ReadonlySet<string>
+  /**
+   * FLF-213: bỏ cổng "bước sở hữu đã chốt chưa" của các luật "chưa có X". Mode 1 nhận trọn tài liệu một
+   * lượt và `steps[]` là SUY RA từ file (mục thiếu ⇒ `pending`), nên mục trống là gap phải báo ngay chứ
+   * không phải "chưa tới lượt". Không đặt ⇒ có cổng, như mode 2.
+   */
+  skipOwnerStepGate?: boolean
 }
 
 export interface CheckOptions {
@@ -112,13 +147,57 @@ const NFR_SECTION: Readonly<Record<string, { section: string; step: string }>> =
   other: { section: "fixed:4.2.4", step: "S-6.5" }
 }
 
+// ─── cổng "bước sở hữu đã chốt chưa" (FLF-213) ───────────────────
+
+/**
+ * Luật "chưa có X" chỉ là lỗi khi bước SINH RA X đã chốt mà mục vẫn trống. Không xét bước thì một dự án
+ * đang ở S-3.6 lĩnh đủ cờ của §3.1.x (làm ở S-4) và §4.x (S-6): trống ở đó là đúng kế hoạch, nhưng panel
+ * đỏ rực vì chúng, vấn đề thật chìm mất và `readiness.red_open` bị thổi phồng.
+ *
+ * Lượt ký bản (`atBaseline`, S-9) mở hết cổng — tới đó mọi bước phải xong, không mục nào được lọt vì
+ * "chưa tới lượt". Mode 1 cũng mở hết (`skipOwnerStepGate`): xem `RuleProfile`.
+ */
+export interface StepGate {
+  /** Mọi step truyền vào đã `accepted` ⇒ cổng mở, mục trống lúc này là lỗi thật. */
+  done: (...stepIds: string[]) => boolean
+}
+
+/**
+ * Bước sinh ra dữ liệu luật đang soi — KHÁC `remediation_step` ở vài luật. "Use case chưa gắn function"
+ * sửa ở S-3.2, nhưng `use_cases[].function_ids` chỉ được điền từ S-4.1 (function của màn) và S-4.4
+ * (function nền), nên trước khi S-4.4 chốt thì MỌI use case đều "chưa gắn function" — đúng theo kế hoạch.
+ */
+const GATE_STEP = {
+  orphan_actor: "S-3.2",
+  usecase_no_function: "S-4.4",
+  screen_no_function: "S-4.1",
+  orphan_screen: "S-4.2",
+  empty_feature: "S-4.1",
+  role_no_actor: "S-3.1",
+  usecase_floating: "S-3.4",
+  function_without_uc: "S-4.4",
+  orphan_entity: "S-4.5",
+  unresolved_many_to_many: "S-4.5",
+  /** Tên hệ thống tiếng Anh được chốt ở B-2.3; trước đó tên dự án tiếng Việt chưa phải khuyết tật. */
+  non_english_project_name: "B-2.3"
+} as const
+
+const OPEN_GATE: StepGate = { done: () => true }
+
+/** `open` ⇒ cổng mở sẵn (lượt ký bản, mode 1). Ngược lại chỉ `accepted` mới tính là đã chạy qua. */
+export const stepGate = (spine: Spine, open: boolean): StepGate => {
+  if (open) return OPEN_GATE
+  const accepted = new Set(spine.steps.filter((s) => s.status === "accepted").map((s) => s.id))
+  return { done: (...ids) => ids.length > 0 && ids.every((id) => accepted.has(id)) }
+}
+
 // ─── red: section_empty ──────────────────────────────────────────
 
 const hasKind = (s: Spine, kind: Diagram["kind"]) => s.diagrams.some((d) => d.kind === kind)
 const nfrCount = (s: Spine, category: string) => s.nfrs.filter((n) => n.category === category).length
 
 /** "Không field nào có dữ liệu" theo cột Sở hữu bảng §4. */
-const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> = {
+export const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> = {
   "fixed:1": (s) =>
     Boolean(s.project.vision) ||
     s.project.goals.length > 0 ||
@@ -145,41 +224,56 @@ const SECTION_HAS_DATA: Readonly<Record<string, (s: Spine) => boolean>> = {
   "fixed:5.4": (s) => s.other_requirements.length > 0
 }
 
-const sectionEmpty = (spine: Spine): FlagCandidate[] =>
+/** Mục đã có dữ liệu trong Spine chưa — luật `section_empty` soi đúng chỗ này; mục ngoài bảng ⇒ `null` (không soi được). */
+export const sectionHasData = (spine: Spine, sectionId: string): boolean | null => SECTION_HAS_DATA[sectionId]?.(spine) ?? null
+
+const sectionEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
   REQUIRED_FIXED_SECTION_IDS.filter((id) => !DERIVED_SECTION_IDS.has(id))
     .filter((id) => !(SECTION_HAS_DATA[id]?.(spine) ?? true))
+    // Mọi step sở hữu phải chốt: §1 do S-2.1…S-2.5 nuôi, chốt mỗi S-2.1 chưa nói lên mục đã xong
+    .filter((id) => gate.done(...stepsOf(id, spine)))
     .map((id) => ({
       level: "red",
       rule_id: "section_empty",
       section_id: id,
       target_id: null,
-      message: `Section bắt buộc ${id} chưa có dữ liệu`,
+      message: `Mục bắt buộc ${quotedSectionLabel(id)} chưa có dữ liệu`,
       remediation_step: ownerStepOf(id)
     }))
 
 // ─── red: array_empty ────────────────────────────────────────────
 
-const PROTECTED_ARRAYS: readonly { label: string; count: (s: Spine) => number; section: string; step: string }[] = [
-  { label: "actors", count: (s) => s.actors.length, section: "fixed:2.1", step: "S-3.1" },
-  { label: "actors[kind=human]", count: (s) => s.actors.filter((a) => a.kind === "human").length, section: "fixed:2.1", step: "S-3.1" },
-  { label: "screens", count: (s) => s.screens.length, section: "fixed:3.1.2", step: "S-4.1" },
-  { label: "entities", count: (s) => s.entities.length, section: "fixed:3.1.5", step: "S-4.5" },
-  { label: "use_cases", count: (s) => s.use_cases.length, section: "fixed:2.2.2", step: "S-3.2" },
-  { label: "features", count: (s) => s.features.length, section: "fixed:3.1.2", step: "S-4.1" },
-  { label: "functions", count: (s) => s.functions.length, section: "fixed:3.1.2", step: "S-4.1" },
-  { label: "roles", count: (s) => s.roles.length, section: "fixed:3.1.3", step: "S-3.1" },
-  { label: "nfrs[category=reliability]", count: (s) => nfrCount(s, "reliability"), section: "fixed:4.2.2", step: "S-6.3" },
-  { label: "nfrs[category=performance]", count: (s) => nfrCount(s, "performance"), section: "fixed:4.2.3", step: "S-6.4" },
-  { label: "common_requirements", count: (s) => s.common_requirements.length, section: "fixed:5.2", step: "S-7.2" }
+/** `label` là khoá máy (ghi vào `target_id`); `name` là chữ cho người đọc trong `message`. */
+const PROTECTED_ARRAYS: readonly { label: string; name: string; count: (s: Spine) => number; section: string; step: string }[] = [
+  { label: "actors", name: "Danh sách tác nhân", count: (s) => s.actors.length, section: "fixed:2.1", step: "S-3.1" },
+  { label: "actors[kind=human]", name: "Danh sách tác nhân là người", count: (s) => s.actors.filter((a) => a.kind === "human").length, section: "fixed:2.1", step: "S-3.1" },
+  { label: "screens", name: "Danh sách màn hình", count: (s) => s.screens.length, section: "fixed:3.1.2", step: "S-4.1" },
+  { label: "entities", name: "Danh sách thực thể dữ liệu", count: (s) => s.entities.length, section: "fixed:3.1.5", step: "S-4.5" },
+  { label: "use_cases", name: "Danh sách use case", count: (s) => s.use_cases.length, section: "fixed:2.2.2", step: "S-3.2" },
+  { label: "features", name: "Danh sách tính năng", count: (s) => s.features.length, section: "fixed:3.1.2", step: "S-4.1" },
+  { label: "functions", name: "Danh sách chức năng", count: (s) => s.functions.length, section: "fixed:3.1.2", step: "S-4.1" },
+  { label: "roles", name: "Danh sách vai trò", count: (s) => s.roles.length, section: "fixed:3.1.3", step: "S-3.1" },
+  { label: "nfrs[category=reliability]", name: "Yêu cầu độ tin cậy", count: (s) => nfrCount(s, "reliability"), section: "fixed:4.2.2", step: "S-6.3" },
+  { label: "nfrs[category=performance]", name: "Yêu cầu hiệu năng", count: (s) => nfrCount(s, "performance"), section: "fixed:4.2.3", step: "S-6.4" },
+  { label: "common_requirements", name: "Danh sách yêu cầu chung", count: (s) => s.common_requirements.length, section: "fixed:5.2", step: "S-7.2" }
 ]
 
-const arrayEmpty = (spine: Spine): FlagCandidate[] =>
-  PROTECTED_ARRAYS.filter((a) => a.count(spine) === 0).map((a) => ({
+/**
+ * FLF-248: danh sách bắt buộc mà `stepId` sở hữu vẫn trống trong `spine`. Luật `array_empty` chỉ bắn SAU khi step
+ * chốt (và không waive được) — draft dùng hàm này để bắt lô rỗng ngay lúc model trả về, trước cổng duyệt.
+ */
+export const emptyProtectedArraysOf = (spine: Spine, stepId: string): { label: string; name: string }[] => {
+  const base = stepId.split("@")[0]
+  return PROTECTED_ARRAYS.filter((a) => a.step === base && a.count(spine) === 0).map(({ label, name }) => ({ label, name }))
+}
+
+const arrayEmpty = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+  PROTECTED_ARRAYS.filter((a) => a.count(spine) === 0 && gate.done(a.step)).map((a) => ({
     level: "red",
     rule_id: "array_empty",
     section_id: a.section,
     target_id: a.label,
-    message: `${a.label} đang rỗng`,
+    message: `${a.name} đang trống`,
     remediation_step: a.step
   }))
 
@@ -247,27 +341,36 @@ const deadReference = (spine: Spine): FlagCandidate[] =>
       rule_id: "dead_reference",
       section_id: where.section,
       target_id: hit.refPath,
-      message: `${hit.refPath} trỏ tới "${hit.targetId}" không tồn tại`,
+      message: `${pathLabel(hit.refPath)}: tham chiếu tới ${hit.target === "section_key" ? quotedSectionLabel(hit.targetId, spine) : `"${hit.targetId}"`} không còn tồn tại`,
       remediation_step: where.step
     }
   })
 
 // ─── red: diagram, nfr, S-9 ──────────────────────────────────────
 
+/**
+ * Hình PlantUML đang được in (§4.13): loại sơ đồ còn ảnh gốc của người dùng thì PlantUML loại đó không in ⇒ lỗi vẽ / hình
+ * cũ của nó không phải lỗi của tài liệu (độ lệch của ảnh gốc do `original_diagram_stale` báo).
+ */
+const printedDiagrams = (spine: Spine): Spine["diagrams"] => {
+  const kept: ReadonlySet<string> = keptOriginalKinds(spine)
+  return kept.size ? spine.diagrams.filter((d) => !kept.has(d.kind)) : spine.diagrams
+}
+
 const renderError = (spine: Spine): FlagCandidate[] =>
-  spine.diagrams
+  printedDiagrams(spine)
     .filter((d) => d.render_status === "error")
     .map((d) => ({
       level: "red",
       rule_id: "render_error",
       section_id: d.section,
       target_id: d.id,
-      message: `Hình ${d.id} (${d.kind}) render lỗi${d.error ? `: ${d.error}` : ""}`,
+      message: `${capitalize(diagramLabel(d, spine))} vẽ lỗi${d.error ? `: ${d.error}` : ""}`,
       remediation_step: renderStepOf(d)
     }))
 
 const diagramStale = (spine: Spine): FlagCandidate[] =>
-  spine.diagrams
+  printedDiagrams(spine)
     .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
     .filter((d) => d.source_hash !== computeSourceHash(spine, d))
     .map((d) => ({
@@ -275,16 +378,36 @@ const diagramStale = (spine: Spine): FlagCandidate[] =>
       rule_id: "diagram_stale",
       section_id: d.section,
       target_id: d.id,
-      message: `Hình ${d.id} (${d.kind}) không còn khớp dữ liệu, cần render lại`,
+      message: `${capitalize(diagramLabel(d, spine))} không còn khớp dữ liệu, cần vẽ lại`,
       remediation_step: renderStepOf(d)
     }))
 
-const nfrMissingNumber = (spine: Spine): FlagCandidate[] =>
+/**
+ * Sơ đồ gốc của người dùng (§4.13) không còn khớp dữ liệu — vd CR thêm use case mà người duyệt từ chối vẽ lại hình.
+ * Vàng: hình vẫn là hình của người dùng, chỉ nhắc; tạo CR nhắm mục đó sẽ có vị trí "vẽ lại hình".
+ */
+const originalDiagramStale = (spine: Spine): FlagCandidate[] =>
+  keptOriginalDiagrams(spine)
+    .filter((k) => isOriginalStale(spine, k.diagram))
+    .map((k) => ({
+      level: "yellow",
+      rule_id: "original_diagram_stale",
+      section_id: ORIGINAL_DIAGRAM_SECTION[k.diagram.kind],
+      target_id: k.custom_id,
+      message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu — tạo change request để vẽ lại bằng FlintFlow`,
+      remediation_step: RENDER_STEP[k.diagram.kind]
+    }))
+
+const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
   (["reliability", "performance"] as const).flatMap((category): FlagCandidate[] => {
     const { section, step } = NFR_SECTION[category]
     const items = spine.nfrs.filter((n) => n.category === category)
     if (items.length === 0) {
-      return [{ level: "red" as const, rule_id: "nfr_missing_number", section_id: section, target_id: null, message: `Chưa có NFR ${category} nào`, remediation_step: step }]
+      // "Chưa có NFR nào" là luật "chưa có X" ⇒ qua cổng. Nhánh dưới soi NFR ĐÃ có mà thiếu số đo —
+      // dữ liệu đã nằm đó thì thiếu số là lỗi thật, không phụ thuộc bước nào chốt chưa.
+      return gate.done(step)
+        ? [{ level: "red" as const, rule_id: "nfr_missing_number", section_id: section, target_id: null, message: `Chưa có yêu cầu ${NFR_CATEGORY_LABELS[category]} nào`, remediation_step: step }]
+        : []
     }
     return items
       .filter((n) => !n.metric || !n.threshold)
@@ -293,10 +416,18 @@ const nfrMissingNumber = (spine: Spine): FlagCandidate[] =>
         rule_id: "nfr_missing_number",
         section_id: section,
         target_id: n.id,
-        message: `NFR ${n.id} (${category}) thiếu metric/threshold`,
+        message: `Yêu cầu ${NFR_CATEGORY_LABELS[category]} ${n.id} thiếu chỉ số đo / ngưỡng`,
         remediation_step: step
       }))
   })
+
+/**
+ * Giả định chưa xác nhận. `remediation_step` phải là step **xử lý được** cờ, không phải step đã sinh ra nó:
+ * chỉ S-9.2 (Assumption Sweep) mới đổi được `status` sang `confirmed`. Trước đây trỏ `origin_step_id` nên UI
+ * mời "mở lại <step sinh ra giả định>" — chạy lại bao nhiêu lần cũng không đóng được cờ, mà mỗi vòng đốt một
+ * phần trần 8 lượt gọi/step cho tới khi CALL_LIMIT (gặp thật 2026-09-20, L11c). Step sinh ra không in vào `message` (mã step không phải chữ cho người đọc).
+ */
+const ASSUMPTION_SWEEP_STEP = "S-9.2"
 
 const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
   spine.assumptions
@@ -307,8 +438,47 @@ const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
       section_id: sectionsOfPath(spine, a.path).owner[0] ?? "fixed:5.4",
       target_id: a.id,
       message: `Giả định ${a.id} chưa được xác nhận: ${a.statement}`,
-      remediation_step: a.origin_step_id || "S-9.1"
+      remediation_step: ASSUMPTION_SWEEP_STEP
     }))
+
+/**
+ * BUG-14: user sửa hoặc bác bỏ một giả định, nhưng thứ ĐƯỢC SINH RA TỪ nó không đổi theo — lượt test có
+ * AS28 sửa thành uptime 99% trong khi NFR N08 vẫn ghi ≥ 99.5%, và bản ký xuất ra mang số sai.
+ *
+ * Liên kết đã có sẵn: `assumptions[].path` trỏ đúng field mà giả định đang đỡ. Nếu giả định được sửa
+ * (statement/status) SAU lần cuối field đó được ghi, thì field đang lạc hậu so với quyết định mới.
+ */
+const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {
+  const lastSeqByPrefix = (prefix: string): number => {
+    let last = 0
+    for (const c of changes) if (c.path === prefix || c.path.startsWith(`${prefix}.`) || c.path.startsWith(`${prefix}[`)) last = Math.max(last, c.seq)
+    return last
+  }
+
+  return spine.assumptions.flatMap((assumption): FlagCandidate[] => {
+    if (tryResolve(spine, assumption.path) === null) return []
+    // Xác nhận một giả định là DUYỆT nội dung đang có, không phải đổi nó — chỉ "sửa statement" hoặc "bác
+    // bỏ" mới làm field dẫn xuất lạc hậu. Tính cả lượt xác nhận thì bấm "Đúng hết" ở S-9.1 đẻ ra đúng
+    // bằng ấy cờ vàng vô nghĩa.
+    const rejectedAt = assumption.status === "rejected" ? lastSeqByPrefix(`assumptions[id=${assumption.id}].status`) : 0
+    const decidedAt = Math.max(lastSeqByPrefix(`assumptions[id=${assumption.id}].statement`), rejectedAt)
+    if (decidedAt === 0) return []
+    const targetAt = lastSeqByPrefix(assumption.path)
+    if (targetAt >= decidedAt) return []
+    const verb = assumption.status === "rejected" ? "bị bác bỏ" : "được sửa"
+    return [
+      {
+        level: "yellow",
+        rule_id: "derived_from_changed_assumption",
+        section_id: sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4",
+        target_id: assumption.id,
+        // Lời cho user (hiện ở cổng duyệt): câu tiếng Việt của giả định, không mã, không chữ "giả định"
+        message: `Điều tôi tạm hiểu ${verb} ("${assumption.statement_vi ?? assumption.statement}") nhưng ${pathLabel(assumption.path)} chưa cập nhật theo`,
+        remediation_step: ownerStepOf(sectionsOfPath(spine, assumption.path).owner[0] ?? "fixed:5.4", spine)
+      }
+    ]
+  })
+}
 
 const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {
   const states = computeSectionStates(spine, changes).filter((s) => s.required && !s.derived)
@@ -320,7 +490,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_stale_at_baseline",
         section_id: s.id,
         target_id: null,
-        message: `Section ${s.id} đã cũ so với dữ liệu nó phụ thuộc`,
+        message: `Nội dung ${quotedSectionLabel(s.id, spine)} đã cũ so với dữ liệu nó phụ thuộc`,
         remediation_step: ownerStepOf(s.id, spine)
       })),
     ...states
@@ -330,10 +500,61 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_awaiting_reaccept",
         section_id: s.id,
         target_id: null,
-        message: `Section ${s.id} đang chờ duyệt lại sau hoà giải`,
+        message: `Nội dung ${quotedSectionLabel(s.id, spine)} đang chờ duyệt lại sau hoà giải`,
         remediation_step: ownerStepOf(s.id, spine)
       }))
   ]
+}
+
+/** Thứ tự phase để biết vòng S-5 đã đi qua chưa (không import step-registry: module này thuần trên Spine). */
+const PHASE_ORDER = ["B-0", "B-1", "B-2", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-9"] as const
+
+const pastLoopPhase = (spine: Spine): boolean => {
+  const index = PHASE_ORDER.indexOf((spine.progress.current_phase ?? "") as (typeof PHASE_ORDER)[number])
+  return index > PHASE_ORDER.indexOf("S-5")
+}
+
+/**
+ * BUG-03: màn bị để trống (`placeholder`) mà KHÔNG đi qua cổng S-5.1 của chính nó ⇒ không ai chủ động
+ * quyết để lại màn đó. Trước đây màn như vậy lặng lẽ rơi khỏi hàng đợi: §3.2.1 chỉ còn tiêu đề, không cờ
+ * nào bắt, và panel Tiến độ khoá luôn 5 step của nó. Cờ vàng (không chặn ký) kèm `remediation_step` mở lại
+ * được vòng S-5 của màn.
+ */
+const screenPlaceholder = (spine: Spine, atBaseline: boolean): FlagCandidate[] => {
+  if (!atBaseline && !pastLoopPhase(spine)) return []
+  const decided = new Set(
+    spine.steps.filter((st) => st.status === "accepted" && st.id.startsWith("S-5.1@")).map((st) => st.id.slice("S-5.1@".length))
+  )
+  return spine.screens
+        .filter((s) => s.detail_status === "placeholder" && !decided.has(s.id))
+        .map((s) => ({
+          level: "yellow" as const,
+          rule_id: "screen_placeholder",
+          section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
+          target_id: s.id,
+          message: `Màn hình "${s.name}" bị để trống mà chưa ai chốt — mở lại để mô tả, hoặc chốt "để sau" kèm lý do`,
+          remediation_step: `S-5.1@${s.id}`
+        }))
+}
+
+/**
+ * BUG-12: function NỀN (không thuộc màn nào, do S-4.4 sinh: nhắc lịch, nhả giữ chỗ, no-show, webhook) mà
+ * không use case nào tham chiếu — thường là thiếu hẳn use case cho một cơ chế chạy theo lịch, nên §2.2
+ * không hề nhắc tới nó. Function của màn không tính: chúng đã hiện trong mô tả màn.
+ */
+const functionWithoutUseCase = (spine: Spine, gate: StepGate): FlagCandidate[] => {
+  if (!gate.done(GATE_STEP.function_without_uc)) return []
+  const used = new Set(spine.use_cases.flatMap((u) => u.function_ids))
+  return spine.functions
+    .filter((f) => f.screen_id === null && !used.has(f.id))
+    .map((f) => ({
+      level: "yellow" as const,
+      rule_id: "function_without_uc",
+      section_id: `function:${f.id}`,
+      target_id: f.id,
+      message: `Chức năng nền "${f.name}" không thuộc use case nào — thiếu use case (vd cơ chế chạy theo lịch) hay thiếu liên kết?`,
+      remediation_step: "S-3.2"
+    }))
 }
 
 const screenPendingAtBaseline = (spine: Spine): FlagCandidate[] =>
@@ -344,13 +565,103 @@ const screenPendingAtBaseline = (spine: Spine): FlagCandidate[] =>
       rule_id: "screen_pending_at_baseline",
       section_id: s.primary_function_id ? `function:${s.primary_function_id}` : "fixed:3.1.2",
       target_id: s.id,
-      message: `Màn ${s.id} "${s.name}" chưa được mô tả chi tiết (S-5)`,
+      message: `Màn hình "${s.name}" chưa được mô tả chi tiết`,
       remediation_step: `S-5.1@${s.id}`
     }))
 
+/** ERD rời chặn ký baseline: cùng điều kiện `orphan_entity` (vàng lúc soạn), lên đỏ ở S-9. */
+const orphanEntityAtBaseline = (spine: Spine): FlagCandidate[] =>
+  orphanEntities(spine).map(({ entity, why }) => ({
+    level: "red",
+    rule_id: "orphan_entity_at_baseline",
+    section_id: "fixed:3.1.5",
+    target_id: entity.id,
+    message: `Entity "${entity.name}" ${why}, không ký baseline được`,
+    remediation_step: "S-4.5"
+  }))
+
+/**
+ * ERD phải là MỘT khối liên thông (quan hệ xét vô hướng, tự thân không tính). Khối chính là khối đông nhất, hoà
+ * thì khối chứa id nhỏ nhất; mọi entity ngoài khối chính là mồ côi — đứng một mình hoặc thuộc một cụm tách rời.
+ */
+export const orphanEntities = (spine: Spine): { entity: Spine["entities"][number]; why: string }[] => {
+  if (spine.entities.length < 2) return []
+  const ids = new Set(spine.entities.map((e) => e.id))
+  const adjacent = new Map<string, Set<string>>([...ids].map((id) => [id, new Set<string>()]))
+  for (const e of spine.entities) {
+    for (const t of e.relations) {
+      if (t === e.id || !ids.has(t)) continue
+      adjacent.get(e.id)!.add(t)
+      adjacent.get(t)!.add(e.id)
+    }
+  }
+  const componentOf = new Map<string, number>()
+  const sizes: number[] = []
+  for (const start of [...ids].sort()) {
+    if (componentOf.has(start)) continue
+    const c = sizes.length
+    const queue = [start]
+    componentOf.set(start, c)
+    for (let i = 0; i < queue.length; i++) {
+      for (const next of adjacent.get(queue[i])!) {
+        if (componentOf.has(next)) continue
+        componentOf.set(next, c)
+        queue.push(next)
+      }
+    }
+    sizes.push(queue.length)
+  }
+  // Duyệt theo id tăng dần ⇒ khi hoà, khối đánh số trước (chứa id nhỏ nhất) thắng
+  const main = sizes.indexOf(Math.max(...sizes))
+  return spine.entities
+    .filter((e) => componentOf.get(e.id) !== main)
+    .map((e) => ({
+      entity: e,
+      why:
+        adjacent.get(e.id)!.size === 0
+          ? "không có quan hệ với entity nào"
+          : `thuộc một cụm ${sizes[componentOf.get(e.id)!]} entity tách khỏi phần còn lại của ERD`
+    }))
+}
+
+/** Màn mồ côi chặn ký baseline: cùng điều kiện `orphan_screen` (vàng lúc soạn), lên đỏ ở S-9. */
+const orphanScreenAtBaseline = (spine: Spine): FlagCandidate[] =>
+  orphanScreens(spine).map(({ screen, why }) => ({
+    level: "red",
+    rule_id: "orphan_screen_at_baseline",
+    section_id: "fixed:3.1.1",
+    target_id: screen.id,
+    message: `Màn hình "${screen.name}" không nằm trong luồng nào, chưa chốt bản được: ${why}`,
+    remediation_step: "S-4.2"
+  }))
+
 // ─── yellow ──────────────────────────────────────────────────────
 
-const cardinality = (spine: Spine): FlagCandidate[] => {
+/**
+ * Màn mồ côi (§3.1.1): không actor người nào dùng (khi đã có liên kết màn ↔ actor), hoặc đứng riêng trong luồng
+ * (khi đã có cạnh `flow_to`) — không cạnh vào lẫn ra, hay popup không có màn nào mở.
+ */
+export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number]; why: string }[] => {
+  const actorsOf = screenActorMap(spine)
+  const linked = hasScreenActorLinks(actorsOf)
+  const ids = new Set(spine.screens.map((s) => s.id))
+  const edges = spine.screens.flatMap((s) => s.flow_to.filter((t) => ids.has(t) && t !== s.id).map((t) => [s.id, t] as const))
+  const hasFlow = spine.screens.length > 1 && edges.length > 0
+  const incoming = new Set(edges.map(([, to]) => to))
+  const outgoing = new Set(edges.map(([from]) => from))
+
+  return spine.screens.flatMap((screen) => {
+    if (linked && (actorsOf.get(screen.id) ?? []).length === 0) {
+      return [{ screen, why: "không tác nhân nào dùng màn này (chưa có phân quyền hay use case nào gắn chức năng trên màn)" }]
+    }
+    if (!hasFlow || incoming.has(screen.id)) return []
+    if (screen.is_popup) return [{ screen, why: "popup không có màn nào mở tới" }]
+    if (!outgoing.has(screen.id)) return [{ screen, why: "không có màn nào chuyển tới và màn không chuyển đi đâu" }]
+    return []
+  })
+}
+
+const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
     level: "yellow",
     rule_id,
@@ -362,24 +673,384 @@ const cardinality = (spine: Spine): FlagCandidate[] => {
   const usedActors = new Set(spine.use_cases.flatMap((u) => u.actor_ids))
   const fnScreens = new Set(spine.functions.map((f) => f.screen_id))
 
+  // Mỗi luật qua cổng của bước SINH RA vế còn thiếu, không phải bước sửa: `usecase_no_function` sửa ở
+  // S-3.2 nhưng chỉ có nghĩa sau S-4.4, lúc function đã được gắn vào use case.
+  const when = (rule: keyof typeof GATE_STEP, make: () => FlagCandidate[]): FlagCandidate[] =>
+    gate.done(GATE_STEP[rule]) ? make() : []
+
   return [
-    ...spine.actors
-      .filter((a) => a.kind === "human" && !usedActors.has(a.id))
-      .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Actor "${a.name}" không thuộc use case nào`, "S-3.2")),
-    ...spine.use_cases
-      .filter((u) => u.function_ids.length === 0)
-      .map((u) => yellow("usecase_no_function", "fixed:2.2.2", u.id, `Use case "${u.name}" chưa gắn function nào`, "S-3.2")),
-    ...spine.screens
-      .filter((s) => !fnScreens.has(s.id))
-      .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn "${s.name}" chưa có function nào`, "S-4.1")),
-    ...spine.features
-      .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
-      .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Feature "${f.name}" không có màn lẫn function`, "S-4.1")),
-    ...spine.roles
-      .filter((r) => r.actor_id === null)
-      .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn actor`, "S-3.1"))
+    // Mọi kind: actor system/time không tham gia use case nào cũng bị renderer bỏ khỏi sơ đồ
+    // (chỉ actor có cạnh mới được khai báo) — biến mất im lặng nếu chỉ xét actor human.
+    ...when("orphan_actor", () =>
+      spine.actors
+        .filter((a) => !usedActors.has(a.id))
+        .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Tác nhân "${a.name}" không thuộc use case nào`, "S-3.2"))),
+    ...when("usecase_no_function", () =>
+      spine.use_cases
+        .filter((u) => u.function_ids.length === 0)
+        .map((u) => yellow("usecase_no_function", "fixed:2.2.2", u.id, `Use case "${u.name}" chưa gắn chức năng nào`, "S-3.2"))),
+    ...when("screen_no_function", () =>
+      spine.screens
+        .filter((s) => !fnScreens.has(s.id))
+        .map((s) => yellow("screen_no_function", "fixed:3.1.2", s.id, `Màn hình "${s.name}" chưa có chức năng nào`, "S-4.1"))),
+    ...when("orphan_screen", () =>
+      orphanScreens(spine).map(({ screen, why }) =>
+        yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
+    ...when("empty_feature", () =>
+      spine.features
+        .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))
+        .map((f) => yellow("empty_feature", `feature:${f.id}`, f.id, `Tính năng "${f.name}" chưa có màn hình hay chức năng nào`, "S-4.1"))),
+    ...when("role_no_actor", () =>
+      spine.roles
+        .filter((r) => r.actor_id === null)
+        .map((r) => yellow("role_no_actor", "fixed:3.1.3", r.id, `Vai trò "${r.name}" chưa gắn tác nhân`, "S-3.1"))),
+    ...when("orphan_entity", () =>
+      orphanEntities(spine).map(({ entity, why }) => yellow("orphan_entity", "fixed:3.1.5", entity.id, `Entity "${entity.name}" ${why}`, "S-4.5"))),
+    // A → B và B → A: nhiều–nhiều chưa tách thành entity trung gian (1NF). Cờ gắn vào id nhỏ hơn của cặp,
+    // một cờ mỗi entity (khoá cờ theo target_id) nên nhiều cặp của cùng entity gộp vào một câu
+    ...when("unresolved_many_to_many", () => {
+      const byEntity = new Map(spine.entities.map((e) => [e.id, e]))
+      return spine.entities.flatMap((a) => {
+        const partners = [...new Set(a.relations)].filter((b) => b > a.id && byEntity.get(b)?.relations.includes(a.id)).sort()
+        if (partners.length === 0) return []
+        const names = partners.map((b) => `"${byEntity.get(b)!.name}"`).join(", ")
+        return [yellow("unresolved_many_to_many", "fixed:3.1.5", a.id, `"${a.name}" và ${names} trỏ lẫn nhau — quan hệ nhiều–nhiều cần entity trung gian`, "S-4.5")]
+      })
+    })
   ]
 }
+
+// ─── use case: quan hệ + đặt tên ─────────────────────────────
+
+/** U3 — động từ quá thô: tên use case phải nói mục tiêu, không nói "trông coi". */
+export const USE_CASE_VERB_BLACKLIST = [
+  "Manage", "Handle", "Process", "Maintain", "Administer", "Support",
+  "Control", "Operate", "Use", "Do", "Perform", "Work", "Deal", "Take"
+] as const
+/** U5 — thuật ngữ giao diện hay kỹ thuật không thuộc tên use case. */
+export const UI_TERM_BLACKLIST = ["Button", "Screen", "Page", "Form", "Popup", "Tab", "Modal", "API", "Database"] as const
+/** A2 — tên actor rỗng nghĩa. */
+export const ACTOR_NAME_BLACKLIST = ["User", "System", "Actor", "Person"] as const
+/** U1 — từ phụ không đứng đầu thì viết hoa hay thường đều hợp lệ. */
+const MINOR_WORDS = [
+  "a", "an", "the", "and", "or", "of", "to", "at", "for", "in", "on", "with", "by", "from", "as",
+  "via", "into", "onto", "per", "vs"
+]
+
+const NAME_RULE_HINTS: Readonly<Record<string, string>> = Object.freeze({
+  U1: "viết hoa đầu mỗi từ, không chấm cuối",
+  U2: 'một mục tiêu duy nhất, không gộp bằng "and", "/" hay dấu phẩy',
+  U3: "động từ quá thô, nói mục tiêu cụ thể",
+  U4: "actor không làm chủ ngữ trong tên use case (bỏ \"<Actor> …\" ở đầu hay \"… by <Actor>\")",
+  U5: "không dùng thuật ngữ giao diện hay kỹ thuật",
+  U6: "tối đa 5 từ",
+  U8: "trùng tên với use case khác",
+  A2: "tên quá chung, không nhận ra vai trò",
+  A7: "trùng tên với actor khác"
+})
+
+/** Chỉ lời giải thích — mã luật nội bộ (U2, A7…) không in cho người dùng. */
+const hint = (codes: string[]): string =>
+  codes
+    .map((c) => NAME_RULE_HINTS[c])
+    .filter((h): h is string => !!h)
+    .join("; ")
+const wordsOf = (name: string): string[] => name.trim().split(/\s+/).filter(Boolean)
+const sameText = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase()
+/** Khớp NGUYÊN TỪ, không phân biệt hoa thường: "Scheduler" không dính "Run Scheduled Housekeeping". */
+const containsWord = (text: string, term: string): boolean =>
+  new RegExp(`(?:^|[^A-Za-z0-9])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[^A-Za-z0-9]|$)`, "i").test(text)
+
+/**
+ * U4 — actor là CHỦ NGỮ của tên: tên mở đầu bằng tên actor ("Teacher Enters Grades") hoặc gán người làm bằng
+ * "by <Actor>". Actor là ĐỐI TƯỢNG nghiệp vụ thì hợp lệ (FLF-243): ở hệ thống trường học Student/Teacher vừa là actor vừa
+ * là dữ liệu phòng đào tạo quản lý — "Create Student Record", "Enroll Student" là tên đúng, không có cách đặt nào né được.
+ */
+const actorIsSubject = (name: string, actor: string): boolean => {
+  const text = name.trim().toLowerCase()
+  const who = actor.toLowerCase()
+  return text === who || text.startsWith(`${who} `) || containsWord(name, `by ${actor}`)
+}
+
+/**
+ * Mã luật đặt tên use case bị vi phạm, tách làm hai nhóm vì mode 1 đối xử khác nhau:
+ * `semantic` (U2, U3, U8) là lỗi mô hình hoá, đúng với mọi ngôn ngữ; `style` (U1, U4, U5, U6)
+ * gắn chặt chính tả tiếng Anh nên vô nghĩa với một SRS tiếng Việt nhập vào.
+ */
+export const checkUseCaseName = (
+  name: string,
+  actorNames: readonly string[],
+  allNames: readonly string[]
+): { semantic: string[]; style: string[] } => {
+  const parts = wordsOf(name)
+  const semantic: string[] = []
+  const style: string[] = []
+
+  if (/ and |\/|,/i.test(name)) semantic.push("U2")
+  // Bỏ ký tự không phải chữ cái quanh từ đầu: "Manage:" và "Manage-Projects" vẫn là "Manage"
+  const leadVerb = /[A-Za-z]+/.exec(parts[0] ?? "")?.[0] ?? ""
+  if (USE_CASE_VERB_BLACKLIST.some((v) => sameText(v, leadVerb))) semantic.push("U3")
+  if (allNames.filter((n) => sameText(n, name)).length > 1) semantic.push("U8")
+
+  // Sai hoa thường = từ KHÔNG có chữ hoa nào. Bắt đúng thứ U1 nhắm tới ("step", "gate") mà không
+  // bắn vào "2FA", "(Optional)", "e-Sign" hay "iPhone" — cách viết cố ý, không phải lỗi.
+  const wrongCase = parts.some((w, i) => !/[A-Z]/.test(w) && /[a-z]/.test(w) && !(i > 0 && MINOR_WORDS.includes(w.toLowerCase())))
+  if (wrongCase || name.trim().endsWith(".")) style.push("U1")
+  if (actorNames.some((a) => a.trim() !== "" && actorIsSubject(name, a.trim()))) style.push("U4")
+  if (UI_TERM_BLACKLIST.some((t) => containsWord(name, t))) style.push("U5")
+  if (parts.length > 5) style.push("U6")
+
+  return { semantic, style }
+}
+
+/** Mã luật đặt tên actor bị vi phạm: A2 (tên rỗng nghĩa), A7 (trùng tên). */
+export const checkActorName = (name: string, allNames: readonly string[]): string[] => {
+  const codes: string[] = []
+  if (ACTOR_NAME_BLACKLIST.some((b) => sameText(b, name))) codes.push("A2")
+  if (allNames.filter((n) => sameText(n, name)).length > 1) codes.push("A7")
+  return codes
+}
+
+/**
+ * MỌI id nằm trên một vòng của đồ thị khoá = mọi node thuộc một thành phần liên thông mạnh ≥ 2 node
+ * (Tarjan; tự tham chiếu đã bị loại khỏi đồ thị và báo riêng). Không dựa vào đường duyệt DFS: vòng
+ * khép qua một node đã duyệt xong (UC01→UC05→UC02→UC01 khi UC02 được thăm trước) vẫn phải cờ đủ.
+ * Thứ tự ra ổn định.
+ */
+const cycleNodes = (edges: ReadonlyMap<string, readonly string[]>): string[] => {
+  const index = new Map<string, number>()
+  const low = new Map<string, number>()
+  const stack: string[] = []
+  const onStack = new Set<string>()
+  const found: string[] = []
+  let counter = 0
+  const connect = (id: string): void => {
+    index.set(id, counter)
+    low.set(id, counter)
+    counter += 1
+    stack.push(id)
+    onStack.add(id)
+    for (const next of edges.get(id) ?? []) {
+      if (!index.has(next)) {
+        connect(next)
+        low.set(id, Math.min(low.get(id)!, low.get(next)!))
+      } else if (onStack.has(next)) {
+        low.set(id, Math.min(low.get(id)!, index.get(next)!))
+      }
+    }
+    if (low.get(id) !== index.get(id)) return
+    const component: string[] = []
+    for (let top = stack.pop(); top !== undefined; top = top === id ? undefined : stack.pop()) {
+      onStack.delete(top)
+      component.push(top)
+    }
+    if (component.length > 1) found.push(...component)
+  }
+  for (const id of [...edges.keys()].sort()) if (!index.has(id)) connect(id)
+  return found.sort()
+}
+
+const pairKey = (a: string, b: string): string => (a < b ? `${a}|${b}` : `${b}|${a}`)
+
+const useCaseRelations = (spine: Spine): FlagCandidate[] => {
+  const known = new Set(spine.use_cases.map((u) => u.id))
+  // Tự tham chiếu được báo riêng nên loại khỏi đồ thị; id chết là việc của "dead_reference".
+  const graphOf = (pick: (u: Spine["use_cases"][number]) => readonly string[]): Map<string, string[]> =>
+    new Map(spine.use_cases.map((u) => [u.id, [...pick(u)].filter((t) => known.has(t) && t !== u.id)]))
+  const includes = graphOf((u) => u.includes)
+  const extendsTo = graphOf((u) => u.extends)
+  // Hai đồ thị xét RIÊNG: gộp lại sẽ báo nhầm "A includes B + B extends A" là vòng, trong khi
+  // đó là lỗi "cùng một cặp mang hai quan hệ" và cần thông điệp khác.
+  const cyclic = new Set([...cycleNodes(includes), ...cycleNodes(extendsTo)])
+  const pairsOf = (graph: ReadonlyMap<string, readonly string[]>): Set<string> =>
+    new Set([...graph].flatMap(([a, targets]) => targets.map((b) => pairKey(a, b))))
+  const extendPairs = pairsOf(extendsTo)
+  const bothRelations = new Set([...pairsOf(includes)].filter((k) => extendPairs.has(k)))
+
+  return spine.use_cases.flatMap((u): FlagCandidate[] => {
+    const problems: string[] = []
+    if (u.includes.includes(u.id) || u.extends.includes(u.id)) problems.push("tự tham chiếu chính nó")
+    if (cyclic.has(u.id)) problems.push("nằm trong một vòng include/extend")
+    const both = [...new Set([...(includes.get(u.id) ?? []), ...(extendsTo.get(u.id) ?? [])])]
+      .filter((v) => bothRelations.has(pairKey(u.id, v)))
+      .sort()
+    if (both.length > 0) problems.push(`vừa include vừa extend với ${both.join(", ")}`)
+    if (problems.length === 0) return []
+    return [{
+      level: "red",
+      rule_id: "usecase_relation_invalid",
+      section_id: "fixed:2.2.2",
+      target_id: u.id,
+      message: `Quan hệ của use case "${u.name}" không hợp lệ: ${problems.join("; ")}`,
+      remediation_step: "S-3.4"
+    }]
+  })
+}
+
+/** Use case không actor, không extend, không bị include ⇒ đứng lơ lửng trên hình. */
+const useCaseFloating = (spine: Spine, gate: StepGate): FlagCandidate[] => {
+  if (!gate.done(GATE_STEP.usecase_floating)) return []
+  const included = new Set(spine.use_cases.flatMap((u) => u.includes))
+  return spine.use_cases
+    .filter((u) => u.actor_ids.length === 0 && u.extends.length === 0 && !included.has(u.id))
+    .map((u) => ({
+      level: "yellow" as const,
+      rule_id: "usecase_floating",
+      section_id: "fixed:2.2.2",
+      target_id: u.id,
+      message: `Use case "${u.name}" không có tác nhân và không nối với use case nào`,
+      remediation_step: "S-3.2"
+    }))
+}
+
+/**
+ * Cụm tên của use case xác thực / truy cập tài khoản. Tên (đã chuẩn hoá: NFC, chữ thường, dấu câu thành
+ * khoảng trắng) phải BẮT ĐẦU bằng một cụm, và phần còn lại chỉ được là bổ ngữ cách thức ("with Google",
+ * "to Portal", "bằng Google") — nên "View Login History", "Sign Up for Newsletter", "Registered Book Loan"
+ * không bị nhận nhầm. Có tiếng Việt vì mode 1 nhập SRS tiếng Việt và luật này vẫn chạy ở đó.
+ */
+export const ACCOUNT_ACCESS_PHRASES = [
+  "log in", "login", "log on", "sign in", "signin", "sign up", "signup", "authenticate",
+  "register account", "register an account", "create account", "create an account",
+  "reset password", "reset forgotten password", "forgot password", "recover password",
+  "recover account", "recover an account",
+  "đăng nhập", "đăng ký tài khoản", "quên mật khẩu", "đặt lại mật khẩu", "khôi phục mật khẩu", "khôi phục tài khoản"
+] as const
+/** Tên chỉ gồm đúng một từ này cũng là use case truy cập tài khoản ("Register", "Đăng ký"). */
+const ACCOUNT_ACCESS_EXACT = ["register", "đăng ký"] as const
+
+/** Từ mở đầu bổ ngữ cách thức được phép đứng sau cụm truy cập tài khoản. */
+const ACCOUNT_ACCESS_MANNER = ["with", "to", "via", "using", "into", "through", "bằng", "vào", "qua"] as const
+
+// NFC trước: tài liệu nhập ở mode 1 có thể mang tiếng Việt dạng tổ hợp (NFD), "đăng nhập" sẽ không khớp
+const normalizeName = (name: string): string => name.normalize("NFC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+
+export const isAccountAccessUseCase = (name: string): boolean => {
+  const norm = normalizeName(name)
+  if (ACCOUNT_ACCESS_EXACT.some((w) => norm === w)) return true
+  return ACCOUNT_ACCESS_PHRASES.some((p) => {
+    if (norm === p) return true
+    if (!norm.startsWith(`${p} `)) return false
+    const nextWord = norm.slice(p.length + 1).split(" ")[0] ?? ""
+    return (ACCOUNT_ACCESS_MANNER as readonly string[]).includes(nextWord)
+  })
+}
+
+/**
+ * Use case xác thực / truy cập tài khoản bị mô hình hoá thành luồng con: bị use case khác include,
+ * hoặc chính nó extend một use case khác. Đăng nhập là TIỀN ĐIỀU KIỆN của use case được bảo vệ (một
+ * trạng thái), không phải bước chạy lại mỗi lần; Register / Reset Password là mục tiêu riêng actor chủ
+ * động mở ra làm. Quan hệ sai kiểu này làm renderer bỏ cạnh actor ⇒ use case trông như chương trình con.
+ * Log In làm BASE của một extend (vd. xác thực 2 lớp khi thiết bị lạ) là hợp lệ nên không bắt.
+ */
+const useCaseAccountAccessRelation = (spine: Spine): FlagCandidate[] => {
+  const includers = new Map<string, string[]>()
+  for (const u of spine.use_cases) for (const t of u.includes) includers.set(t, [...(includers.get(t) ?? []), u.name])
+  const nameOf = new Map(spine.use_cases.map((u) => [u.id, u.name]))
+
+  return spine.use_cases
+    .filter((u) => isAccountAccessUseCase(u.name))
+    .flatMap((u): FlagCandidate[] => {
+      const problems: string[] = []
+      const by = includers.get(u.id) ?? []
+      if (by.length > 0) problems.push(`bị include bởi ${by.join(", ")}`)
+      if (u.extends.length > 0) problems.push(`extend ${u.extends.map((id) => nameOf.get(id) ?? id).join(", ")}`)
+      if (problems.length === 0) return []
+      return [{
+        level: "yellow",
+        rule_id: "usecase_auth_relation",
+        section_id: "fixed:2.2.2",
+        target_id: u.id,
+        message:
+          `Use case xác thực/truy cập tài khoản "${u.name}" đang là luồng con (${problems.join("; ")}). ` +
+          "Nên để đứng riêng; yêu cầu đã đăng nhập ghi thành tiền điều kiện trong mô tả use case",
+        remediation_step: "S-3.4"
+      }]
+    })
+}
+
+const namingShape = (spine: Spine): FlagCandidate[] => {
+  const actorNames = spine.actors.map((a) => a.name)
+  const useCaseNames = spine.use_cases.map((u) => u.name)
+  const out: FlagCandidate[] = []
+
+  for (const u of spine.use_cases) {
+    const { semantic, style } = checkUseCaseName(u.name, actorNames, useCaseNames)
+    for (const [rule_id, codes] of [["usecase_name_semantic", semantic], ["usecase_name_style", style]] as const) {
+      if (codes.length === 0) continue
+      out.push({
+        level: "yellow",
+        rule_id,
+        section_id: "fixed:2.2.2",
+        target_id: u.id,
+        message: `Tên use case "${u.name}" chưa đạt: ${hint(codes)}`,
+        remediation_step: "S-3.2"
+      })
+    }
+  }
+  for (const a of spine.actors) {
+    const codes = checkActorName(a.name, actorNames)
+    if (codes.length === 0) continue
+    out.push({
+      level: "yellow",
+      rule_id: "actor_name_shape",
+      section_id: "fixed:2.1",
+      target_id: a.id,
+      message: `Tên tác nhân "${a.name}" chưa đạt: ${hint(codes)}`,
+      remediation_step: "S-3.1"
+    })
+  }
+  return out
+}
+
+/** Cách sửa chung cho mọi lỗi tên use case — model cần biết phải TÁCH chứ không chỉ đổi chữ ("Manage X" ⇒ "Create, Update and Delete X" vẫn sai). */
+export const USE_CASE_NAME_FIX =
+  "Đặt lại tên theo luật U1–U9: một động từ cụ thể + đối tượng nghiệp vụ, ≤ 5 từ, không \"and\"/\"/\"/dấu phẩy, actor không làm chủ ngữ. " +
+  "Tên đang gộp nhiều mục tiêu (Manage/Maintain…, \"Create, Update and Delete …\") thì TÁCH thành nhiều use case, mỗi mục tiêu một use case"
+
+export interface UseCaseNameIssue {
+  id: string
+  name: string
+  message: string
+}
+
+/**
+ * FLF-243: tên use case MỚI hoặc VỪA ĐỔI (so `before` với `after`) mà cờ vàng `usecase_name_*` sẽ bắt — để chặn ngay lúc
+ * model sinh (draft, sửa qua chat) thay vì để user gặp cờ sau. Tên cũ không đụng tới thì không xét: lô của step khác
+ * không bị chặn vì một tên đã có từ trước.
+ */
+export const useCaseNameIssues = (before: Spine, after: Spine): UseCaseNameIssue[] => {
+  const previous = new Map(before.use_cases.map((u) => [u.id, u.name]))
+  const actorNames = after.actors.map((a) => a.name)
+  const names = after.use_cases.map((u) => u.name)
+  return after.use_cases
+    .filter((u) => previous.get(u.id) !== u.name)
+    .flatMap((u) => {
+      const { semantic, style } = checkUseCaseName(u.name, actorNames, names)
+      const codes = [...semantic, ...style]
+      return codes.length === 0 ? [] : [{ id: u.id, name: u.name, message: `Tên use case "${u.name}" chưa đạt: ${hint(codes)}` }]
+    })
+}
+
+// ─── tên hệ thống (FLF-177) ─────────────────────────────────
+
+/**
+ * Sơ đồ ngữ cảnh (S-2.5) hay use case đã vẽ mà chưa có `project.system_name` ⇒ boundary đang in tên project làm
+ * việc. Chủ sở hữu field là B-2.3 (chốt tên hệ thống); user sửa qua chat (`set project.system_name`).
+ */
+const systemNameMissing = (spine: Spine): FlagCandidate[] =>
+  !spine.project.system_name?.trim() && (hasKind(spine, "context") || hasKind(spine, "usecase"))
+    ? [
+        {
+          level: "yellow",
+          rule_id: "system_name_missing",
+          section_id: "fixed:1",
+          target_id: null,
+          message: `Chưa chốt tên hệ thống (tiếng Anh) — sơ đồ và bìa tài liệu đang dùng tên dự án "${spine.project.name}"`,
+          remediation_step: "B-2.3"
+        }
+      ]
+    : []
 
 /** Dấu tiếng Việt (yellow-rules.md). */
 export const VIETNAMESE_DIACRITICS = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i
@@ -400,10 +1071,27 @@ interface ScanItem {
 }
 
 /** Field thuộc cột Sở hữu (render vào SRS). Bỏ `addendum`, `glossary[].term_native`, reason, message — theo ngôn ngữ user. */
-const ownedTexts = (spine: Spine): ScanItem[] => {
+const ownedTexts = (spine: Spine, gate: StepGate): ScanItem[] => {
   const p = spine.project
+  // BUG-11: `project.name` là tên user đặt cho dự án (tiếng Việt là bình thường). Nó chỉ lọt vào tài liệu khi
+  // CHƯA có `system_name`; đã chốt tên hệ thống tiếng Anh rồi thì đừng bắt user đổi tên dự án nữa.
+  // Và chừng nào bước chốt tên hệ thống chưa chạy, tên tiếng Việt chưa phải khuyết tật: bước đó sẽ hỏi user
+  // một tên tiếng Anh. Báo trước là báo về việc luồng sắp tự lo, user không có gì đúng để làm lúc đó.
+  const scanProjectName = !p.system_name?.trim() && gate.done(GATE_STEP.non_english_project_name)
   return [
-    { path: "project", target_id: null, section: "fixed:1", step: "S-2.1", fields: { name: p.name, vision: p.vision, goals: p.goals, release_scope: p.release_scope } },
+    {
+      path: "project",
+      target_id: null,
+      section: "fixed:1",
+      step: p.system_name?.trim() ? "B-0.1" : "S-2.1",
+      fields: {
+        ...(scanProjectName ? { name: p.name } : {}),
+        system_name: p.system_name,
+        release_scope: p.release_scope
+      }
+    },
+    // Tầm nhìn/mục tiêu do S-1.1 dựng từ addendum lõi của Brief ⇒ cờ tiếng Anh chỉ đường về S-1.1
+    { path: "project", target_id: null, section: "fixed:1", step: "S-1.1", fields: { vision: p.vision, goals: p.goals } },
     ...spine.actors.map((a) => ({
       path: `actors[id=${a.id}]`,
       target_id: a.id,
@@ -445,8 +1133,8 @@ const ownedTexts = (spine: Spine): ScanItem[] => {
   ]
 }
 
-const nonEnglishContent = (spine: Spine): FlagCandidate[] =>
-  ownedTexts(spine).flatMap((item) => {
+const nonEnglishContent = (spine: Spine, gate: StepGate): FlagCandidate[] =>
+  ownedTexts(spine, gate).flatMap((item) => {
     const offending = Object.entries(item.fields)
       .filter(([, v]) => textsOf(v).some((t) => VIETNAMESE_DIACRITICS.test(t)))
       .map(([k]) => `${item.path}.${k}`)
@@ -457,7 +1145,7 @@ const nonEnglishContent = (spine: Spine): FlagCandidate[] =>
         rule_id: "non_english_content",
         section_id: item.section,
         target_id: item.target_id,
-        message: `Nội dung render vào SRS phải bằng tiếng Anh: ${offending.join(", ")}`,
+        message: `Nội dung đưa vào tài liệu SRS phải bằng tiếng Anh: ${offending.map((p) => pathLabel(p)).join(", ")}`,
         remediation_step: item.step
       }
     ]
@@ -474,16 +1162,27 @@ export const runDeterministicCheck = (
   changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[] = [],
   options: CheckOptions = {}
 ): FlagCandidate[] => {
+  const atBaseline = options.atBaseline ?? false
+  const gate = stepGate(spine, atBaseline || (options.ruleProfile?.skipOwnerStepGate ?? false))
   const candidates: FlagCandidate[] = applyRuleProfile([
-    ...sectionEmpty(spine),
-    ...arrayEmpty(spine),
+    ...sectionEmpty(spine, gate),
+    ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
     ...diagramStale(spine),
-    ...nfrMissingNumber(spine),
-    ...(options.atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine)] : []),
-    ...cardinality(spine),
-    ...nonEnglishContent(spine)
+    ...originalDiagramStale(spine),
+    ...nfrMissingNumber(spine, gate),
+    ...useCaseRelations(spine),
+    ...(atBaseline ? [...unconfirmedAssumption(spine), ...sectionsAtBaseline(spine, changes), ...screenPendingAtBaseline(spine), ...orphanScreenAtBaseline(spine), ...orphanEntityAtBaseline(spine)] : []),
+    ...screenPlaceholder(spine, atBaseline),
+    ...derivedFromChangedAssumption(spine, changes),
+    ...functionWithoutUseCase(spine, gate),
+    ...cardinality(spine, gate),
+    ...useCaseFloating(spine, gate),
+    ...useCaseAccountAccessRelation(spine),
+    ...namingShape(spine),
+    ...systemNameMissing(spine),
+    ...nonEnglishContent(spine, gate)
   ], options.ruleProfile)
 
   const index = buildIdIndex(spine)

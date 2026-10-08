@@ -5,14 +5,16 @@ import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRend
 const emptySpine = (): Spine => ({
   project: {
     name: "Demo",
+    system_name: null,
     vision: null,
     goals: [],
     type: null,
     domain: null,
     complexity: null,
-    form_factor: null,
+    form_factor: [],
     stakes: null,
     working_mode: null,
+    review_mode: "balanced" as const,
     release_scope: { in: [], out: [] }
   },
   progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
@@ -35,6 +37,7 @@ const emptySpine = (): Spine => ({
   custom_sections: [],
   diagrams: [],
   assumptions: [],
+  decisions: [],
   flags: [],
   sections: [],
   baselines: [],
@@ -59,7 +62,8 @@ const spine = (): Spine => ({
   ],
   roles: [{ id: "R1", name: "Registered User", actor_id: "A01" }],
   use_cases: [
-    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] }
+    { id: "UC01", name: "Log In", actor_ids: ["A01"], function_ids: ["FN01"], description: "Authenticate.", includes: [], extends: [] },
+    { id: "UC02", name: "Open Dashboard", actor_ids: ["A01"], function_ids: [], description: "Land on the dashboard.", includes: ["UC01"], extends: [] }
   ],
   screens: [
     {
@@ -177,11 +181,32 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
-  it("fixed:2.2.2 — use case table với actor tên và include/extend", () => {
+  it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
+    const s = spine()
+    const base = s.diagrams.find((d) => d.id === "D03")!
+    s.diagrams = [
+      ...s.diagrams.filter((d) => d.id !== "D03"),
+      { ...base, id: "D03-1", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
+      { ...base, id: "D03-2", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+    ]
+    const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
+    expect(section.blocks).toEqual([
+      { type: "image", png: "png-D03-1", caption: "Screens flow for Founder" },
+      { type: "image", png: "png-D03-2", caption: "Screens flow for Guest" }
+    ])
+    // Hình không có title (sơ đồ chung trước khi tách actor) giữ chú thích cũ
+    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks).toEqual([{ type: "image", png: "png-d03", caption: "Screens Flow Diagram" }])
+  })
+
+  it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
     const section = renderSection(spine(), "fixed:2.2.2", ctx({ number: "2.2.2" }))
     const table = section.blocks[0]
     expect(table).toMatchObject({ type: "table" })
-    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }]])
+    expect(table.type === "table" && table.header.flat().map((r) => r.text)).toEqual(["ID", "Use Case", "Actors", "Use Case Description", "Includes", "Extends"])
+    expect(table.type === "table" && table.rows[0]).toEqual([[{ text: "UC01" }], [{ text: "Log In" }], [{ text: "Founder" }], [{ text: "Authenticate." }], [{ text: "" }], [{ text: "" }]])
+    // Cột quan hệ in TÊN use case, không phải id thô
+    expect(table.type === "table" && table.rows[1][4]).toEqual([{ text: "Log In" }])
+    expect(table.type === "table" && table.rows[1][5]).toEqual([{ text: "" }])
   })
 
   it("fixed:3.1.2 — bảng Feature | Screen dùng số hiệu feature tính lúc assemble (numberOf)", () => {
@@ -203,6 +228,16 @@ describe("renderSection — fixed sections", () => {
         ]
       }
     ])
+  })
+
+  it("fixed:3.1.3 — có vai trò mà chưa phân quyền ⇒ bảng vai trò (kèm tác nhân), không để mục trống; chưa có gì ⇒ không khối", () => {
+    const base = spine()
+    const rolesOnly = { ...base, permissions: [] }
+    const section = renderSection(rolesOnly, "fixed:3.1.3", ctx({ number: "3.1.3" }))
+    const table = section.blocks[0]
+    expect(table.type === "table" && table.header).toEqual([[{ text: "Role" }], [{ text: "Actor" }]])
+    expect(table.type === "table" && table.rows).toHaveLength(base.roles.length)
+    expect(renderSection({ ...base, permissions: [], roles: [] }, "fixed:3.1.3", ctx({ number: "3.1.3" })).blocks).toEqual([])
   })
 
   it("fixed:3.1.4 — chỉ function non-screen", () => {
@@ -266,6 +301,98 @@ describe("renderSection — feature/function", () => {
     expect(section.blocks.some((b) => b.type === "image" && b.png === "png-d05")).toBe(true)
   })
 
+  it("function:<id> không bật functionLayout (mode 1 import) ⇒ giữ khung cũ Trigger · Description · Normal Flow", () => {
+    const blocks = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1" })).blocks
+    expect(blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Trigger: ", bold: true }, { text: "User clicks Log in." }] })
+    expect(blocks).toContainEqual({ type: "heading", level: 4, text: "Normal Flow" })
+    expect(JSON.stringify(blocks)).not.toContain("Function trigger")
+  })
+
+  it("function:<id> — mẫu FPT: 4 nhóm heading 4, mục con là danh sách gạch đầu dòng, mục trống ghi N/A", () => {
+    const item = (label: string, text?: string) => (text === undefined ? [{ text: `${label}: `, bold: true }] : [{ text: `${label}: `, bold: true }, { text }])
+    const bullets = (...items: ReturnType<typeof item>[]) => ({ type: "bullet_list", items })
+    const h = (text: string) => ({ type: "heading", level: 4, text })
+    const onScreen = renderSection(spine(), "function:FN01", ctx({ number: "3.2.1", functionLayout: "fpt" })).blocks
+    expect(onScreen).toEqual([
+      h("Function trigger"),
+      bullets(item("Navigation path", "Login"), item("Timing frequency", "User clicks Log in.")),
+      h("Function description"),
+      bullets(
+        item("Actors / Roles", "Founder"),
+        item("Purpose", "Authenticates the user."),
+        // Hình D05 không phải wireframe salt ⇒ Interface dùng mô tả màn
+        item("Interface", "Login screen: Entry screen."),
+        item("Data processing", "System verifies.")
+      ),
+      h("Screen layout"),
+      { type: "image", png: "png-d05", caption: "Screen Layout — Login" },
+      h("Function details"),
+      bullets(
+        item("Data", "User"),
+        item("Validation", "Password must not be empty."),
+        item("Business rules", "Password must be hashed."),
+        item("Normal case")
+      ),
+      { type: "numbered_list", items: [[{ text: "Enter credentials." }], [{ text: "System verifies." }]] },
+      bullets(item("Abnormal case", "Wrong password: show an error."))
+    ])
+
+    // Function không thuộc màn, không use case: đủ khung, mục không có dữ liệu ghi N/A
+    const nonScreen = renderSection(spine(), "function:FN02", ctx({ number: "3.3.1", functionLayout: "fpt" })).blocks
+    const items = nonScreen.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
+    const value = (label: string) => items.find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect([value("Navigation path"), value("Actors / Roles"), value("Interface"), value("Validation"), value("Abnormal case")]).toEqual(["N/A", "N/A", "N/A", "N/A", "N/A"])
+    expect(nonScreen[nonScreen.findIndex((b) => b.type === "heading" && b.text === "Screen layout") + 1]).toEqual({ type: "paragraph", runs: [{ text: "N/A" }] })
+  })
+
+  it("feature:<id> — mẫu FPT chỉ có tiêu đề, không nội dung; mode 1 giữ dòng liệt kê màn", () => {
+    expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2", functionLayout: "fpt" })).blocks).toEqual([])
+    expect(renderSection(spine(), "feature:F1", ctx({ number: "3.2" })).blocks).not.toEqual([])
+  })
+
+  it("function:<id> — mẫu FPT: Navigation path theo Screens Flow, Actors chỉ actor người, Interface đọc từ wireframe", () => {
+    const s = spine()
+    s.actors.push({ id: "A02", name: "Buyer", kind: "human", description: "" })
+    s.roles.push({ id: "R2", name: "Buyer role", actor_id: "A02" }, { id: "R3", name: "Gateway role", actor_id: "A05" })
+    s.permissions.push({ id: "P2", screen_id: "S03", role_id: "R2", action: "view" }, { id: "P3", screen_id: "S03", role_id: "R3", action: "view" })
+    s.screens.push({ id: "S03", feature_id: "F2", name: "Settings", description: "", flow_to: [], is_popup: true, tabs: [], primary_function_id: "FN03", queue_order: 3, detail_status: "signed_off" })
+    s.screens[1].flow_to = ["S03"]
+    s.diagrams.push({
+      id: "D06",
+      kind: "screen_layout",
+      section: "function:FN03",
+      owner_kind: "screen",
+      owner_id: "S03",
+      puml: ["@startsalt", "{^\"Settings\"", "  Project name", "  \"Sunrise Villa        \"", "  [ ] Archived", "  { [ Cancel ] | [   Save   ] }", "}", "@endsalt", ""].join("\n"),
+      render_status: "ok",
+      source_hash: "h6",
+      rendered_at: "2026-09-01T00:00:00.000Z"
+    })
+    s.functions.push({
+      id: "FN03",
+      screen_id: "S03",
+      feature_id: "F2",
+      order: 0,
+      name: "Rename Project",
+      trigger: "User clicks Save.",
+      description: "Renames a project.",
+      normal: ["User types a name.", "The system stores the new name."],
+      abnormal: [],
+      validations: [{ id: "FN03-V1", kind: "business", statement: "Password must be hashed." }],
+      business_rule_ids: ["BR02"],
+      priority: null
+    })
+    const items = renderSection(s, "function:FN03", ctx({ number: "3.3.2", functionLayout: "fpt" })).blocks.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
+    const value = (label: string) => items.find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect(value("Navigation path")).toBe("Login > Dashboard > Settings")
+    // Không use case nào chứa FN03 ⇒ actor người của vai trò có quyền trên màn; actor system (Payment Gateway) bị bỏ
+    expect(value("Actors / Roles")).toBe("Buyer")
+    expect(value("Interface")).toBe("Settings pop-up: Project name input, Archived checkbox, Cancel button, Save button.")
+    expect(value("Data processing")).toBe("The system stores the new name.")
+    // Validation business + rule đã liên kết trùng nội dung ⇒ một dòng
+    expect(value("Business rules")).toBe("Password must be hashed.")
+  })
+
   it("function:<id> không phải primary_function_id của màn — không nhúng ảnh screen_layout", () => {
     const withSecondFn: Spine = { ...spine(), functions: [...spine().functions, { id: "FN03", screen_id: "S01", feature_id: "F1", order: 1, name: "Toggle", trigger: "t", description: "d", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }] }
     const section = renderSection(withSecondFn, "function:FN03", ctx({ number: "3.2.2" }))
@@ -289,6 +416,7 @@ describe("buildRecordOfChanges", () => {
     at: "2026-09-01T09:00:00.000Z",
     by: "u1",
     step_id: "S-2.1",
+    path: "actors[id=A01].name",
     ...over
   })
 
@@ -298,16 +426,90 @@ describe("buildRecordOfChanges", () => {
       change({ txn: "t1", op: "add", reason: "seed actor" }),
       change({ txn: "t2", op: "set", reason: "typo fix", at: "2026-09-02T09:00:00.000Z", by: "u2" })
     ])
-    // T15 review T7: version = v0.<i+2> (i 0-based) — Spine bắt đầu spine_version=1, mỗi txn +1.
     expect(rows).toEqual([
-      { date: "2026-09-01", version: "v0.2", change_type: "A", in_charge: "u1", description: "seed actor" },
-      { date: "2026-09-02", version: "v0.3", change_type: "M", in_charge: "u2", description: "typo fix" }
+      { date: "2026-09-01", version: "v0.1", change_type: "A", in_charge: "u1", description: "Create Product Overview" },
+      { date: "2026-09-02", version: "v0.2", change_type: "M", in_charge: "u2", description: "Update Product Overview" }
     ])
   })
 
-  it("không có reason nào ⇒ mô tả rơi về step_id", () => {
-    const rows = buildRecordOfChanges([change({ reason: null, step_id: "S-3.1" })])
-    expect(rows[0].description).toBe("Step S-3.1")
+  it("lô liền nhau cùng ngày + cùng giai đoạn ⇒ một dòng: gộp người sửa, change_type; không in reason của op", () => {
+    const rows = buildRecordOfChanges(
+      Array.from({ length: 6 }, (_, i) => change({ txn: `t${i}`, op: i === 0 ? "add" : "set", by: i < 3 ? "u1" : "u2", reason: `sửa ${i}` }))
+    )
+    expect(rows).toEqual([
+      {
+        date: "2026-09-01",
+        version: "v0.1",
+        change_type: "M",
+        in_charge: "u1, u2",
+        description: "Create Product Overview"
+      }
+    ])
+  })
+
+  it("cùng ngày nhưng khác giai đoạn ⇒ tách dòng; vòng S-5 theo màn vẫn chung một giai đoạn", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: "S-3.1", reason: "thêm actor" }),
+      change({ txn: "t2", step_id: "S-3.2", reason: "thêm use case" }),
+      change({ txn: "t3", step_id: "S-5.1@S1", reason: "màn đăng nhập" }),
+      change({ txn: "t4", step_id: "S-5.2@S2", reason: "màn danh sách" })
+    ])
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["v0.1", "Create User Requirements"],
+      ["v0.2", "Create Feature & Function Details"]
+    ])
+  })
+
+  it("lô không gắn step (xác nhận giả định ở cổng) nhập vào dòng giai đoạn liền trước, không cắt nhóm", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", step_id: "B-1.1", reason: "vision" }),
+      change({ txn: "t2", step_id: null, reason: "User xác nhận giả định ở cổng chốt" }),
+      change({ txn: "t3", step_id: "B-1.2", reason: "persona" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["Create Product Brief"])
+  })
+
+  it("baseline đứng riêng một dòng mang mã baseline; sửa sau đó đánh v<baseline>.n", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", reason: "sửa trước ký" }),
+      change({ txn: "t2", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+      change({ txn: "t3", step_id: null, reason: "sửa sau ký" }),
+      change({ txn: "t4", step_id: null, reason: "sửa ngày sau", at: "2026-09-02T09:00:00.000Z" })
+    ])
+    expect(rows.map((r) => [r.date, r.version, r.description])).toEqual([
+      ["2026-09-01", "v0.1", "Create Product Overview"],
+      ["2026-09-01", "v1.0", "Baseline v1.0 signed"],
+      ["2026-09-01", "v1.0.1", "sửa sau ký"],
+      ["2026-09-02", "v1.0.2", "sửa ngày sau"]
+    ])
+  })
+
+  it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", reason: "step-runner: elicit turn" }),
+      change({ txn: "t2", reason: "gate: accept", at: "2026-09-02T09:00:00.000Z" }),
+      change({ txn: "t3", reason: null, at: "2026-09-03T09:00:00.000Z" }),
+      change({ txn: "t4", reason: "Đổi tên actor theo yêu cầu của khách", at: "2026-09-04T09:00:00.000Z" })
+    ])
+    expect(rows.map((r) => r.description)).toEqual(["Create Product Overview"])
+  })
+
+  it("FLF-204: mốc baseline luôn có một dòng, mô tả bằng tiếng Anh", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[id=BL001]", reason: "Ký baseline v1.0" }),
+      change({ txn: "t1", op: "set", path: "steps[id=S-9.5].status", reason: "step-runner: init step" })
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].description).toBe("Baseline v1.0 signed")
+  })
+
+  it("sau baseline: mô tả là lời user (tối đa 3), bỏ lý do cascade", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+      ...["CR 1", "CR 2", "CR 3", "CR 4"].map((reason, i) => change({ txn: `c${i}`, step_id: null, reason })),
+      change({ txn: "c0", step_id: null, reason: "Cascade: permissions[id=P01].role_id removed" })
+    ])
+    expect(rows[1].description).toBe("CR 1; CR 2; CR 3; and 1 more change")
   })
 
   it("changes rỗng ⇒ mảng rỗng", () => {
@@ -315,13 +517,16 @@ describe("buildRecordOfChanges", () => {
   })
 
   it("không truyền resolveInCharge ⇒ giữ nguyên by thô (mặc định identity)", () => {
-    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010" })])
+    const rows = buildRecordOfChanges([change({ by: "650000000000000000000010", reason: "khách yêu cầu" })])
     expect(rows[0].in_charge).toBe("650000000000000000000010")
   })
 
   it("review T7: resolveInCharge được gọi với by của change đầu lô để tra tên hiển thị", () => {
     const rows = buildRecordOfChanges(
-      [change({ txn: "t1", by: "650000000000000000000010" }), change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z" })],
+      [
+        change({ txn: "t1", by: "650000000000000000000010", reason: "khách yêu cầu" }),
+        change({ txn: "t2", by: "system", at: "2026-09-02T09:00:00.000Z", reason: "waive vì ngoài phạm vi bản này" })
+      ],
       (by) => (by === "system" ? "System" : `Resolved:${by}`)
     )
     expect(rows[0].in_charge).toBe("Resolved:650000000000000000000010")

@@ -21,7 +21,7 @@ const toDto = (items: StepPlanItem[]): { steps: StepPlanEntry[] } => ({
 const requirePlan = async (projectId: string) => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile || !profile.step_plan?.length) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có kế hoạch step — hoàn tất import (finalize) trước", { status: null, to: "checking", allowed: [] })
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có kế hoạch các bước — hãy hoàn tất nhập tài liệu trước.", { status: null, to: "checking", allowed: [] })
   }
   return profile
 }
@@ -31,10 +31,10 @@ export const getStepPlan = async (projectId: string) => toDto((await requirePlan
 export const patchStepPlan = async (projectId: string, userId: string, body: StepPlanPatchRequest) => {
   const profile = await requirePlan(projectId)
   const item = profile.step_plan.find((s) => s.step_id === body.step_id)
-  if (!item) throw new Mode1Error("STEP_NOT_IN_PLAN", `Step ${body.step_id} không có trong kế hoạch của dự án`)
+  if (!item) throw new Mode1Error("STEP_NOT_IN_PLAN", "Bước này không có trong kế hoạch của dự án.")
 
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const state = spine.steps.find((s) => s.id === item.step_id)
 
@@ -44,9 +44,9 @@ export const patchStepPlan = async (projectId: string, userId: string, body: Ste
     item.reason = "Người dùng bật thêm"
     status = "pending"
   } else if (!body.enabled && item.state !== "hidden") {
-    if (item.state === "applied") throw new Mode1Error("CORE_STEP_REQUIRED", `Step ${item.step_id} thuộc đầu mục mẫu FPT hoặc luôn chạy — không tắt được`, { step_id: item.step_id })
+    if (item.state === "applied") throw new Mode1Error("CORE_STEP_REQUIRED", "Bước này thuộc đầu mục bắt buộc của mẫu FPT nên không tắt được.", { step_id: item.step_id })
     const hasData = !!state && (state.status !== "pending" && state.status !== "skipped" || state.first_seq !== null)
-    if (hasData) throw new Mode1Error("CORE_STEP_REQUIRED", `Step ${item.step_id} đã có dữ liệu — không tắt được`, { step_id: item.step_id })
+    if (hasData) throw new Mode1Error("CORE_STEP_REQUIRED", "Bước này đã có dữ liệu nên không tắt được.", { step_id: item.step_id })
     item.state = "hidden"
     item.reason = "Người dùng tắt"
     status = "skipped"

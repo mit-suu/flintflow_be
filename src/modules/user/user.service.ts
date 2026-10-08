@@ -2,6 +2,7 @@ import { User, IUser, AuthProvider } from "./user.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import * as sessionService from "../../shared/auth/session.service.js"
 import { getOrCreateWallet } from "../../shared/ai/credit-reservation.service.js"
+import { toUserLocale, type UserLocale } from "../../shared/i18n/locale.js"
 
 export interface UserDTO {
   id: string
@@ -19,17 +20,20 @@ export interface MeDTO extends UserDTO {
   emailVerified: boolean
   /** Có mật khẩu để đăng nhập (tài khoản Google thuần thì không) ⇒ FE mới hiện form đổi mật khẩu. */
   hasPassword: boolean
+  /** FLF-259: ngôn ngữ giao diện đã lưu; `null` = chưa chọn ⇒ FE lưu ngôn ngữ đang hiển thị. */
+  locale: UserLocale | null
 }
 
 export interface UpdateMeInput {
   name?: string
   onboardedAt?: Date | null
+  locale?: UserLocale
 }
 
 export const getUserById = async (id: string): Promise<UserDTO> => {
   const user = await User.findById(id).select("-password")
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   
   let balance = 0
@@ -54,21 +58,22 @@ export const getUserById = async (id: string): Promise<UserDTO> => {
 export const getMe = async (id: string): Promise<MeDTO> => {
   const [dto, user] = await Promise.all([getUserById(id), User.findById(id).select("+passwordHash")])
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   return {
     ...dto,
     authProvider: user.authProvider,
     emailVerified: user.emailVerified,
-    hasPassword: Boolean(user.passwordHash)
+    hasPassword: Boolean(user.passwordHash),
+    locale: toUserLocale(user.locale)
   }
 }
 
-/** UC 1.12 onboarding: cập nhật tên hiển thị và/hoặc mốc onboarding của chính user. */
+/** UC 1.12 onboarding + FLF-259: cập nhật tên hiển thị, mốc onboarding và/hoặc ngôn ngữ giao diện của chính user. */
 export const updateMe = async (id: string, input: UpdateMeInput): Promise<MeDTO> => {
   const user = await User.findByIdAndUpdate(id, { $set: input }, { new: true })
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   return getMe(id)
 }
@@ -86,7 +91,7 @@ export const changePassword = async (
 ): Promise<void> => {
   const user = await User.findById(id).select("+passwordHash")
   if (!user) {
-    throw new ApiError(404, "User not found", "USER_NOT_FOUND")
+    throw new ApiError(404, "Không tìm thấy người dùng.", "USER_NOT_FOUND")
   }
   if (!user.passwordHash) {
     throw new ApiError(

@@ -1,6 +1,10 @@
 import { Router } from "express"
 import * as billingController from "./billing.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+// Flow 10.4 — gắn từng route: payment-callback là webhook không token, không được chặn.
+import { requireActiveAccount } from "../../shared/auth/account-guard.middleware.js"
+import { orgContext } from "../../shared/auth/org-context.middleware.js"
+import { requireRole } from "../../shared/auth/require-role.middleware.js"
 import { checkoutSchema, paymentCallbackSchema, upgradeSchema, validateBody } from "./billing.validation.js"
 
 const router = Router()
@@ -26,7 +30,7 @@ const router = Router()
  *       401:
  *         description: Chưa xác thực
  */
-router.get("/balance", authMiddleware, billingController.getBalance)
+router.get("/balance", authMiddleware, requireActiveAccount, orgContext, requireRole("lead", "analyst"), billingController.getBalance)
 
 /**
  * @swagger
@@ -42,7 +46,7 @@ router.get("/balance", authMiddleware, billingController.getBalance)
  *       401:
  *         description: Chưa xác thực
  */
-router.get("/packages", authMiddleware, billingController.getPackages)
+router.get("/packages", authMiddleware, requireActiveAccount, billingController.getPackages)
 
 /**
  * @swagger
@@ -77,7 +81,7 @@ router.get("/packages", authMiddleware, billingController.getPackages)
  *       503:
  *         description: Chưa cấu hình PAYMENT_SERVICE_URL / PAYMENT_CLIENT_ID / PAYMENT_API_KEY
  */
-router.post("/checkout", authMiddleware, validateBody(checkoutSchema), billingController.createCheckout)
+router.post("/checkout", authMiddleware, requireActiveAccount, orgContext, requireRole("lead"), validateBody(checkoutSchema), billingController.createCheckout)
 
 /**
  * @swagger
@@ -101,7 +105,7 @@ router.post("/checkout", authMiddleware, validateBody(checkoutSchema), billingCo
  *       404:
  *         description: Không tìm thấy giao dịch của người dùng
  */
-router.get("/checkout/:intentId", authMiddleware, billingController.getCheckout)
+router.get("/checkout/:intentId", authMiddleware, requireActiveAccount, orgContext, requireRole("lead"), billingController.getCheckout)
 
 /**
  * @swagger
@@ -169,7 +173,7 @@ router.post("/payment-callback", validateBody(paymentCallbackSchema), billingCon
  *       401:
  *         description: Chưa xác thực
  */
-router.post("/upgrade", authMiddleware, validateBody(upgradeSchema), billingController.upgradePlan)
+router.post("/upgrade", authMiddleware, requireActiveAccount, orgContext, requireRole("lead"), validateBody(upgradeSchema), billingController.upgradePlan)
 
 /**
  * @swagger
@@ -197,6 +201,6 @@ router.post("/upgrade", authMiddleware, validateBody(upgradeSchema), billingCont
  *       401:
  *         description: Chưa xác thực
  */
-router.get("/transactions", authMiddleware, billingController.getTransactions)
+router.get("/transactions", authMiddleware, requireActiveAccount, orgContext, requireRole("lead", "analyst"), billingController.getTransactions)
 
 export default router

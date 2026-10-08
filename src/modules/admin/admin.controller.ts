@@ -3,9 +3,14 @@ import * as adminService from "./admin.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import {
+  adjustOrgCreditsSchema,
   aiCostQuerySchema,
+  logIdParamSchema,
+  orgIdParamSchema,
+  orgsQuerySchema,
   parseWith,
   resolveDateRange,
+  setUserStatusSchema,
   userIdParamSchema,
   usersQuerySchema
 } from "./admin.validation.js"
@@ -22,6 +27,13 @@ export const getUser = catchAsync(async (req: Request, res: Response) => {
   return sendSuccess(res, 200, user)
 })
 
+export const setUserStatus = catchAsync(async (req: Request, res: Response) => {
+  const { id } = parseWith(userIdParamSchema, req.params)
+  const input = parseWith(setUserStatusSchema, req.body)
+  const result = await adminService.setUserStatus(String(req.user?.userId), id, input)
+  return sendSuccess(res, 200, result)
+})
+
 export const getMetrics = catchAsync(async (_req: Request, res: Response) => {
   const metrics = await adminService.getMetrics()
   return sendSuccess(res, 200, metrics)
@@ -34,7 +46,26 @@ export const getAiCost = catchAsync(async (req: Request, res: Response) => {
   return sendSuccess(res, 200, report)
 })
 
+export const getAiActionPayload = catchAsync(async (req: Request, res: Response) => {
+  const { logId } = parseWith(logIdParamSchema, req.params)
+  const payload = await adminService.getAiActionPayload(logId)
+  return sendSuccess(res, 200, payload)
+})
+
 export const listFeedback = catchAsync(async (_req: Request, res: Response) => {
   const items = await adminService.listFeedback()
   return sendSuccess(res, 200, items, { total: items.length })
+})
+
+export const listOrgs = catchAsync(async (req: Request, res: Response) => {
+  const query = parseWith(orgsQuerySchema, req.query)
+  const result = await adminService.listOrgs(query)
+  return sendSuccess(res, 200, result.items, result.meta)
+})
+
+export const adjustOrgCredits = catchAsync(async (req: Request, res: Response) => {
+  const { orgId } = parseWith(orgIdParamSchema, req.params)
+  const { amount, reason } = parseWith(adjustOrgCreditsSchema, req.body)
+  const result = await adminService.adjustOrgCredits(orgId, amount, reason)
+  return sendSuccess(res, 200, result)
 })

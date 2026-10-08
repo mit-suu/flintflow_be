@@ -34,7 +34,8 @@ let orderSeq = 0
 const remoteOrder = (orderId: string, status: PaymentServiceOrder["status"]): PaymentServiceOrder => ({
   order_id: orderId,
   client_id: CLIENT_ID,
-  amount: 4000,
+  // FLF-207: gói 100 credit là 40.000₫ (đồng giá ~400₫/credit); callback phải khớp số tiền của gói
+  amount: 40_000,
   description: "FlintFlow pack_100",
   reference_code: `REF-${orderId}`,
   callback_url: "http://localhost:5000/api/v1/billing/payment-callback",

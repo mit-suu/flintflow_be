@@ -1,6 +1,6 @@
 # Prompt phẳng — chỉ cho action ngoài pipeline
 
-> Pipeline B-0 → S-9 dùng **skill** ở `assets/skills/` (xem `assets/skills/README.md`). Thư mục này chỉ còn prompt cho action **ngoài pipeline** (`chat`, `summarize_document`).
+> Pipeline B-0 → S-9 dùng **skill** ở `assets/skills/` (xem `assets/skills/README.md`). Thư mục này chỉ còn prompt cho action **ngoài pipeline** (`chat`, `summarize_document`, `translate`).
 
 **Nguồn sự thật là đĩa.** Runtime đọc thẳng file ở đây qua `src/shared/ai/prompt-assets.ts`; không có override qua DB (collection `PromptTemplate` và trang admin prompt đã bỏ). Sửa prompt = sửa file + commit + deploy.
 
@@ -20,12 +20,17 @@ description: Mô tả ngắn        # tùy chọn
 Nội dung prompt... {{variable_name}} được thay lúc chạy.
 ```
 
+**Ngôn ngữ trả lời (FLF-260):** không cần biến template. Lời gọi hội thoại (vd `chat`) truyền `AiActionInput.replyLanguage`
+(`vi` | `en`) và `buildPrompt` nối khối `## Reply language` vào cuối prompt — prompt chỉ dặn model theo khối đó, không ghi
+cứng "bằng tiếng Việt".
+
 ## Các file hiện có
 
 | File | actionType | Trạng thái |
 |------|-----------|-----------|
 | `chat.md` | `chat` | Dùng |
 | `summarize_document.md` | `summarize_document` | Dùng |
+| `translate.md` | `translate` | Dùng — dịch giả định user sửa sang EN (FLF-221) |
 
 `_archive/` — không nạp: prompt của action đã ngừng từ trước refactor, giữ để tra cứu.
 

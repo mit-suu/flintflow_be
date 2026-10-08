@@ -13,32 +13,36 @@ import { Request, Response } from "express"
 import mongoose from "mongoose"
 import { z } from "zod"
 import { getProjectById } from "../project/project.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema } from "../pipeline/pipeline.dto.js"
 import { assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { validationError } from "../../shared/utils/validation-message.js"
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
   const parsed = schema.safeParse(input)
-  if (!parsed.success) throw new ApiError(400, z.prettifyError(parsed.error), "VALIDATION_ERROR")
+  if (!parsed.success) throw validationError(parsed.error)
   return parsed.data
 }
 
 interface Context {
   projectId: string
   projectName: string
+  /** `import` = mode 1 (tài liệu nhập) — phụ lục cờ của file Word in tiếng Việt. */
+  mode?: string
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body/query — người ngoài không dò được DTO qua lỗi 400. */
 export const authorize = async (req: Request): Promise<Context> => {
   const userId = req.user?.userId
-  if (!userId) throw new ApiError(401, "User not authenticated", "UNAUTHORIZED")
+  if (!userId) throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
 
   const projectId = req.params.projectId as string
-  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
-  const project = await getProjectById(projectId, userId)
-  return { projectId, projectName: project.name }
+  if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  const project = await getProjectById(projectId, requireOrgId(req))
+  return { projectId, projectName: project.name, mode: (project as { mode?: string }).mode }
 }
 
 // ─── POST /assemble ──────────────────────────────────────────────
@@ -72,7 +76,14 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
         : undefined
     )
   } catch (err) {
-    if (err instanceof NoWorkingDraftError) return sendError(res, err.statusCode, err.code, err.message, { hint: "S-8.2" })
+    if (err instanceof NoWorkingDraftError) {
+      // FLF-177 BUG-31: dự án chưa có nội dung là trạng thái bình thường của một dự án đang làm dở, không
+      // phải lỗi. Trả 200 kèm `state` để FE hiện chỗ trống có ý nghĩa, thay vì 78 dòng đỏ 409 ở console.
+      // FLF-264: từ khi `GET /document` tự dựng bản thiếu, nhánh này chỉ còn cho project chưa có Spine.
+      // `?source=baseline` vẫn là lỗi thật (client đòi một baseline không có).
+      if (query.source === "draft") return sendSuccess(res, 200, null, { state: "not_assembled" })
+      return sendError(res, err.statusCode, err.code, err.message)
+    }
     throw err
   }
 })

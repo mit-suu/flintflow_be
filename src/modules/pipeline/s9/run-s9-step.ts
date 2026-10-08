@@ -21,6 +21,7 @@ import type { DraftExecutor } from "../draft-to-ops.js"
 import { completenessSweep, type SweepResult } from "./completeness-sweep.js"
 import { validateGoals, type GoalValidationResult, type ReviewExecutor } from "./goal-validation.js"
 import { prioritize, type PrioritizeResult } from "./prioritization.js"
+import type { ReplyLanguage } from "../../../shared/i18n/reply-language.js"
 
 export const S9_PHASE = "S-9"
 
@@ -31,6 +32,8 @@ export interface RunS9Deps {
   draftExecutor?: DraftExecutor
   reviewExecutor?: ReviewExecutor
   sessionId?: string | null
+  /** FLF-260: ngôn ngữ trả lời của phiên — `notes` của S-9.4 là tin user đọc ở cổng. */
+  replyLanguage?: ReplyLanguage
 }
 
 export interface RunS9Result {
@@ -103,7 +106,8 @@ export const runS9Step = async (projectId: string, stepId: string, userId: strin
       const prioritization = await metered(projectId, userId, stepId, "draft", () =>
         prioritize(projectId, userId, {
           ...(deps.draftExecutor ? { executor: deps.draftExecutor } : {}),
-          sessionId: deps.sessionId ?? null
+          sessionId: deps.sessionId ?? null,
+          ...(deps.replyLanguage ? { replyLanguage: deps.replyLanguage } : {})
         })
       )
       return { step_id: stepId, prioritization }

@@ -46,16 +46,63 @@ export const crProjection = (spine: Spine, text: string): string => {
   return truncate(`${index}\n\nMentioned in the CR:\n${mentioned.filter(Boolean).join("\n") || "(none)"}`)
 }
 
+/**
+ * Bản xem trước đính kèm CR (mode 1 v3, BPMN 3.1) — nối vào mô tả để C-2/C-4/C-5 thấy người yêu cầu đã xem thay đổi gì.
+ * Chỉ là gợi ý: model vẫn tự làm rõ, tự kết luận từng vị trí.
+ */
+export const seedText = (cr: Pick<IChangeRequest, "seed">): string => {
+  if (!cr.seed) return ""
+  const instruction = cr.seed.instruction ? `Instruction: ${cr.seed.instruction}
+` : ""
+  return truncate(`
+
+The requester previewed this change before logging the CR (a suggestion — check it, do not copy blindly):
+${instruction}Ops: ${JSON.stringify(cr.seed.ops)}`, 3000)
+}
+
+/** Lệnh sửa gộp thêm (phase 8) — nối sau mô tả, theo thứ tự; cùng một CR phải làm cả lệnh gốc lẫn các lệnh này. */
+export const amendmentsText = (cr: Pick<IChangeRequest, "amendments">): string =>
+  (cr.amendments ?? []).length
+    ? `\n\nThe requester then added (all of these are part of the same change request):\n${cr.amendments.map((a, i) => `${i + 1}. ${a.text}`).join("\n")}`
+    : ""
+
 export const crHeader = (cr: IChangeRequest) => ({
   cr_id: cr.cr_id,
   title: cr.title,
-  description: cr.description,
+  description: `${cr.description}${amendmentsText(cr)}${seedText(cr)}`,
   source: `${cr.source.kind}${cr.source.ref ? ` — ${cr.source.ref}` : ""}`
 })
 
 export const answersText = (cr: IChangeRequest): string =>
   cr.clarifications
-    .flatMap((c) => c.questions.map((q, i) => `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i] ?? "(no answer)"}`))
+    // Mode 1 v3 phase 7: câu trả lời trống = người dùng chưa biết ⇒ model coi dữ kiện đó là thiếu
+    .flatMap((c) => c.questions.map((q, i) => `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i]?.trim() || "(no answer — unknown)"}`))
     .join("\n") || "(none)"
+
+/** Tổng chữ tài liệu bổ sung đưa vào một prompt (mode 1 v3 phase 7) — chia cho các tài liệu. */
+export const MATERIALS_PROMPT_CHARS = 12_000
+
+/**
+ * Tài liệu bổ sung của CR cho prompt C-2 / C-4 / 3.9: `[M01] tên (lúc đính kèm)` rồi nội dung. Tổng
+ * ≤ `MATERIALS_PROMPT_CHARS`; tài liệu ngắn lấy đủ, phần còn lại chia đều cho tài liệu dài hơn.
+ */
+export const materialsText = (cr: Pick<IChangeRequest, "materials">): string => {
+  const materials = cr.materials ?? []
+  if (!materials.length) return "(none)"
+  let budget = MATERIALS_PROMPT_CHARS
+  const parts: string[] = new Array(materials.length)
+  const byLength = materials.map((m, i) => ({ m, i })).sort((a, b) => a.m.text.length - b.m.text.length)
+  byLength.forEach(({ m, i }, k) => {
+    const share = Math.floor(budget / (byLength.length - k))
+    const body = m.text.length > share ? `${m.text.slice(0, share)}\n…(truncated)` : m.text
+    budget -= Math.min(m.text.length, share)
+    const when = m.round === 0 ? "attached when the CR was logged" : `attached with the answers of round ${m.round}`
+    parts[i] = `[${m.material_id}] ${m.name} (${when}${m.truncated ? "; cut at upload" : ""})\n${body}`
+  })
+  return parts.join("\n\n")
+}
+
+export const missingInfoText = (cr: Pick<IChangeRequest, "missing_info">): string =>
+  cr.missing_info?.length ? cr.missing_info.map((f) => `- ${f}`).join("\n") : "(none)"
 
 export const glossaryText = (spine: Spine): string => truncate(spine.glossary.map((g) => `${g.term}: ${g.definition}`).join("\n") || "(empty)", 3000)

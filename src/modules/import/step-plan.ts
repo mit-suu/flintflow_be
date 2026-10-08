@@ -10,15 +10,27 @@
  */
 
 import { loadStepRegistry, loopKeys, orderedSteps, type PhaseId } from "../pipeline/step-registry.js"
+import { sectionHasData } from "../spine/deterministic-check.js"
 import { FEATURE_OWNER_STEPS, FIXED_OWNER_STEPS } from "../spine/section-registry.js"
 import type { Op } from "../spine/op.types.js"
-import type { CustomBlock, CustomSection, Spine, StepState } from "../spine/spine.types.js"
+import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } from "../spine/spine.types.js"
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
 export const customSectionKey = (id: string): string => `${CUSTOM_SECTION_PREFIX}${id}`
+
+/**
+ * Section chủ của một **phần nối** (mục riêng tiêu đề rỗng): mục gần nhất phía trước có cấp nhỏ hơn — đúng mục mà
+ * assemble gộp khối của phần nối vào (xem `render/layout-sections.ts`). Không tìm được ⇒ null.
+ */
+export const continuationOwnerSection = (layout: readonly LayoutEntry[], sectionId: string): string | null => {
+  const at = layout.findIndex((e) => e.section_id === sectionId)
+  if (at < 0) return null
+  for (let i = at - 1; i >= 0; i--) if (layout[i].level < layout[at].level) return layout[i].section_id
+  return null
+}
 const customId = (n: number): string => `CS${String(n).padStart(2, "0")}`
 const clampLevel = (level: number | null): number => Math.min(9, Math.max(1, level ?? 1))
 
@@ -34,6 +46,10 @@ export interface LayoutBlock {
   /** Section của block sau finalize (heading gần nhất phía trên), `null` nếu nhóm / không khớp. */
   section_id: string | null
   rows?: string[][] | null
+  /** Part ảnh trong file gốc (phase 5, T3) — mục riêng giữ lại để render nhúng ảnh gốc. */
+  image_ref?: string | null
+  /** Ảnh là sơ đồ I-4 đọc được (§4.13) — giữ nguyên hình của người dùng, đánh dấu để ẩn PlantUML cùng loại. */
+  diagram?: OriginalDiagram | null
 }
 
 export interface LayoutResult {
@@ -47,7 +63,7 @@ const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
     case "table":
       return { kind: "table", text: "", rows: b.rows ?? [], image_ref: null }
     case "image":
-      return { kind: "image", text, rows: null, image_ref: null }
+      return { kind: "image", text, rows: null, image_ref: b.image_ref ?? null, ...(b.diagram ? { diagram: b.diagram } : {}) }
     case "list_item":
       return text ? { kind: "list_item", text, rows: null, image_ref: null } : null
     case "paragraph":
@@ -77,6 +93,11 @@ export const buildLayout = (
   const stack: { level: number; section: string; entry: LayoutEntry }[] = []
   /** Mục riêng đang nhận nguyên văn mọi khối. */
   let current: CustomSection | null = null
+  /**
+   * Mục riêng của heading lặp lại một section FPT có trích (FLF-252 — mẫu IEEE: Reliability + Availability ⇒ 4.2.2): nội dung
+   * đã trích vào Spine và in ở lần đầu của section, mục này chỉ giữ phần không trích được (văn xuôi I-4 báo, ảnh) — không in hai lần.
+   */
+  let currentRepeats = false
   /** Section FPT / nhóm đang mở — khối không trích được thành phần nối của nó. */
   let owner: LayoutEntry | null = null
   const continuations = new Map<LayoutEntry, CustomSection>()
@@ -116,6 +137,7 @@ export const buildLayout = (
         current = null
       } else {
         current = newCustom(heading, clampLevel(b.level))
+        currentRepeats = mapped !== UNMAPPED_SECTION && !mapped.startsWith("group:")
         section = customSectionKey(current.id)
       }
       const entry: LayoutEntry = { order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section }
@@ -126,10 +148,31 @@ export const buildLayout = (
     }
     const block = toCustomBlock(b)
     if (!block) continue
-    if (current) current.blocks.push(block)
-    else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
+    if (current) {
+      if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
+    } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
   return { layout, customSections }
+}
+
+/**
+ * Nguyên văn từng mục chức năng của file (FLF-252 — in theo file gốc): mọi khối dưới heading chức năng, đúng thứ tự —
+ * nhãn ("Function Trigger", "Normal Case"…), gạch đầu dòng, bảng, ảnh màn hình; heading con trong mục thành đoạn chữ.
+ * Bản in dùng nguyên văn này khi chức năng chưa bị change request sửa, thay cho khung dựng lại từ Spine (khung đó mất
+ * dòng Interface / Data, còn nhãn trôi nổi tuỳ AI giữ đoạn nào).
+ */
+export const functionOriginals = (blocks: readonly LayoutBlock[], headingSections: ReadonlyMap<string, string>): Map<string, CustomBlock[]> => {
+  const out = new Map<string, CustomBlock[]>()
+  for (const b of blocks) {
+    const section = b.section_id
+    if (!section?.startsWith("function:")) continue
+    // heading của chính mục chức năng ⇒ đã là tiêu đề mục, không lặp
+    if (b.kind === "heading" && headingSections.get(b.block_id) === section) continue
+    const block = b.kind === "heading" ? (b.text.trim() ? { kind: "paragraph" as const, text: b.text.trim(), rows: null, image_ref: null } : null) : toCustomBlock(b)
+    if (!block) continue
+    out.set(section, [...(out.get(section) ?? []), block])
+  }
+  return out
 }
 
 /** Section có nội dung thật (khối không phải heading) — mục "chỉ có heading" coi như thiếu. */
@@ -160,8 +203,15 @@ const matches = (section: string, pool: Iterable<string>): boolean => {
   return [...pool].some((s) => s.startsWith("feature:"))
 }
 
-/** Kế hoạch step (không gồm vòng S-5 — xem `seedStepOps`). */
-export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>): StepPlanItem[] =>
+/**
+ * Kế hoạch step (không gồm vòng S-5 — xem `seedStepOps`).
+ * `spine`: Spine **sau khi đã nạp dữ liệu trích được**. Mục nào luật cờ soi được thì "đã có nội dung" tính theo
+ * **dữ liệu Spine**, không theo chữ trong file: file có đầu mục "Screen Authorization" nhưng I-4 không trích ra
+ * role/permission nào ⇒ Spine trống ⇒ cờ đỏ `section_empty`. Trước đây chỗ này chỉ nhìn block của file nên step
+ * được đánh `accepted` ngay từ import, người dùng thấy "đã chốt" mà cờ đỏ vẫn treo (gặp thật 2026-09-20).
+ * Mục ngoài bảng luật (mục riêng, feature…) vẫn theo file như cũ.
+ */
+export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string>, spine?: Spine): StepPlanItem[] =>
   loadStepRegistry()
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
@@ -173,9 +223,19 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
         return { step_id: s.id, state: "applied", missing: false, section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
       }
-      const hasContent = owned.some((sec) => matches(sec, content))
+      const hasContent = owned.some((sec) => {
+        const inSpine = spine ? sectionHasData(spine, sec) : null
+        return inSpine === null ? matches(sec, content) : inSpine
+      })
       const inLayout = owned.some((sec) => matches(sec, layout.map((l) => l.section_id)))
-      const reason = hasContent ? "Có trong file, đã có nội dung" : inLayout ? "Đầu mục mẫu FPT có trong file nhưng trống" : "Đầu mục mẫu FPT — file không có"
+      const inFile = owned.some((sec) => matches(sec, content))
+      const reason = hasContent
+        ? "Có trong file, đã có nội dung"
+        : inFile
+          ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào — chạy step để AI soạn"
+          : inLayout
+            ? "Đầu mục mẫu FPT có trong file nhưng trống"
+            : "Đầu mục mẫu FPT — file không có"
       return { step_id: s.id, state: "applied", missing: !hasContent, section_ids: owned, reason }
     })
 

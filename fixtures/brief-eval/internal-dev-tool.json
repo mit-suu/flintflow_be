@@ -1,0 +1,5 @@
+{
+  "id": "internal-dev-tool",
+  "idea": "Nhóm bốn người của tôi muốn có một công cụ nội bộ để theo dõi các bản build và log lỗi của chính nhóm. Chỉ bốn thành viên trong nhóm dùng, không mở cho ai ngoài nhóm, không có dữ liệu của khách.",
+  "note": "Chiều còn lại của luật fail-safe: ý tưởng chứng minh được hệ thống chỉ dùng trong nhóm làm ⇒ stakes phải là internal. Mọi ca khác không chứng minh được điều đó thì phải ra production."
+}

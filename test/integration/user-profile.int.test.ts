@@ -9,7 +9,7 @@ import { User } from "../../src/modules/user/user.model.js"
 import { Session } from "../../src/shared/auth/session.model.js"
 
 const EMAIL = "profile-user@flintflow.test"
-const PASSWORD = "password-123"
+const PASSWORD = "Fixture2026!"
 
 /** Đăng nhập bằng agent riêng (giữ cookie refreshToken như một trình duyệt). */
 const loginAgent = async () => {
@@ -36,6 +36,38 @@ describe("GET /users/me", () => {
       hasPassword: true
     })
     expect(res.body.data).not.toHaveProperty("passwordHash")
+  })
+})
+
+describe("PATCH /users/me — ngôn ngữ giao diện (FLF-259)", () => {
+  it("chưa chọn ⇒ locale null ở login và /users/me; lưu en ⇒ /users/me và lần đăng nhập sau trả en", async () => {
+    await seedLocalUser()
+    const firstLogin = await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })
+    expect(firstLogin.body.data.user.locale).toBeNull()
+    const { agent, auth } = await loginAgent()
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.locale).toBeNull()
+
+    const res = await agent.patch("/api/v1/users/me").set(auth).send({ locale: "en" })
+    expect(res.status).toBe(200)
+    expect(res.body.data.locale).toBe("en")
+    expect((await agent.get("/api/v1/users/me").set(auth)).body.data.locale).toBe("en")
+
+    const nextLogin = await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })
+    expect(nextLogin.body.data.user.locale).toBe("en")
+  })
+
+  it("locale lạ, hoặc kèm field không cho đổi ⇒ 400 VALIDATION_ERROR, tài khoản giữ nguyên", async () => {
+    await seedLocalUser()
+    const { agent, auth } = await loginAgent()
+
+    for (const body of [{ locale: "fr" }, { locale: "en", role: "admin" }]) {
+      const res = await agent.patch("/api/v1/users/me").set(auth).send(body)
+      expect(res.status).toBe(400)
+      expect(res.body.error.code).toBe("VALIDATION_ERROR")
+    }
+    const stored = await User.findOne({ email: EMAIL }).lean()
+    expect(stored?.locale).toBeUndefined()
+    expect(stored?.role).toBe("user")
   })
 })
 
@@ -74,7 +106,7 @@ describe("POST /users/me/password", () => {
     expect((await request(app).post("/api/v1/auth/login").send({ email: EMAIL, password: PASSWORD })).status).toBe(200)
   })
 
-  it("mật khẩu mới trùng mật khẩu cũ ⇒ SAME_PASSWORD; quá ngắn ⇒ VALIDATION_ERROR", async () => {
+  it("trùng mật khẩu cũ ⇒ SAME_PASSWORD; yếu / chưa đủ mạnh / có dấu ⇒ VALIDATION_ERROR", async () => {
     await seedLocalUser()
     const { agent, auth } = await loginAgent()
     const change = (newPassword: string) =>
@@ -82,6 +114,9 @@ describe("POST /users/me/password", () => {
 
     expect((await change(PASSWORD)).body.error.code).toBe("SAME_PASSWORD")
     expect((await change("123")).body.error.code).toBe("VALIDATION_ERROR")
+    // Qua hết luật cứng nhưng mới mức "Trung bình" ⇒ vẫn chặn, vì ngưỡng là "Khá"
+    expect((await change("muaroi2!")).body.error.code).toBe("VALIDATION_ERROR")
+    expect((await change("Đườngxưa1!")).body.error.code).toBe("VALIDATION_ERROR")
   })
 
   it("tài khoản Google (chưa có mật khẩu) ⇒ hasPassword=false, đổi mật khẩu ⇒ PASSWORD_NOT_SET", async () => {

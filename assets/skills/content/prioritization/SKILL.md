@@ -64,6 +64,14 @@ effect of ranking. So:
   entry (`path` = that requirement, `status: "unconfirmed"`) saying the scope line is missing. Code also
   reports this mismatch; your entry is what gives the reason.
 
+## Say when you are guessing
+
+MoSCoW is a business decision. You have evidence only when `project.goals[]`, `release_scope` or a business
+rule points at the answer. For every item you had to **guess** — especially anything the Brief calls a goal
+(a reminder mechanism that exists to cut no-shows is not a Could) — add an `assumptions[]` entry naming the
+item and the level you chose, so the gate shows it with Đúng / Sửa / Bỏ instead of burying it in the
+document.
+
 ## Rules
 
 1. Cover **every** function and NFR in the projection — a row left `null` is an unfinished step.
@@ -72,8 +80,8 @@ effect of ranking. So:
 3. Values exactly `must` | `should` | `could` | `wont`, lowercase.
 4. Put the reasoning in the op's `reason` (one short clause) — it becomes the Record of Changes line.
 5. English values, no diacritics (`draft-to-ops` rules 6–7).
-6. Fast mode: rank with the most reasonable reading and add an `assumptions[]` entry for anything you had
-   to guess; Coaching mode leaves the genuinely contested call for Elicit (`draft-to-ops` rule 10).
+6. Rank with the most reasonable reading and add an `assumptions[]` entry for anything you had to guess
+   (`draft-to-ops` rule 10).
 
 ## Example
 

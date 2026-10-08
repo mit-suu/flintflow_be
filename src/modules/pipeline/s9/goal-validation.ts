@@ -62,7 +62,7 @@ export interface GoalValidationResult {
  */
 export const validateGoals = async (projectId: string, userId: string, options: GoalValidationOptions = {}): Promise<GoalValidationResult> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
 
   if (spine.project.goals.length === 0) {

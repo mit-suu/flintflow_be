@@ -63,6 +63,13 @@ const reply = (ops: unknown[], extra: Partial<OpTransaction> = {}): AiActionResu
   cost: 2
 })
 
+/**
+ * FLF-177 WP-2 (BUG-02): ca op sửa phần tử step KHÔNG thấy trong projection nay bị chặn sớm bằng
+ * `op_out_of_scope` — case-10 ở S-4.4 (chỉ đọc function không thuộc màn) sửa FN001 của màn S01. Bất biến 6
+ * vẫn được kiểm ở step thấy FN001 (ca riêng bên dưới).
+ */
+const SCOPE_REJECTS: Readonly<Record<string, string>> = { "case-10.json": "op_out_of_scope" }
+
 describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
   for (let i = 1; i <= 10; i++) {
     const file = `case-${String(i).padStart(2, "0")}.json`
@@ -83,7 +90,10 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
         expect(err).toBeInstanceOf(DraftRejectedError)
         const rejected = err as DraftRejectedError
         expect(rejected).toMatchObject({ statusCode: 422, code: "NEEDS_USER_INPUT" })
-        expect(rejected.errors.map((e) => e.rule)).toContain(opCase.must_reject)
+        // FLF-247: câu cho user không mang text op/Zod; lỗi thô ở `errors` và `meta.errors`
+        expect(rejected.message).toBe("AI chưa tạo được nội dung hợp lệ sau 3 lần thử. Bạn có thể chạy lại, hoặc nói rõ hơn yêu cầu ở ô chat.")
+        expect(rejected.meta).toMatchObject({ attempts: 3, errors: rejected.errors.slice(0, 10) })
+        expect(rejected.errors.map((e) => e.rule)).toContain(SCOPE_REJECTS[file] ?? opCase.must_reject)
         expect(executor).toHaveBeenCalledTimes(3)
         return
       }
@@ -95,6 +105,70 @@ describe("draftOps × 10 ca op T02 (mock provider trả expected_ops)", () => {
       expect(result.usage).toEqual([{ attempt: 1, call_kind: "draft", tokens_in: 1000, tokens_out: 200, cost: 2, logId: "log-1" }])
     })
   }
+})
+
+describe("draftOps — luật phạm vi (BUG-02)", () => {
+  it("bất biến 6 vẫn chặn khi step thấy function (case-10 chạy ở S-4.1)", async () => {
+    const spine = structuredClone(FIXTURE)
+    const opCase = readJson("op-cases", "case-10.json") as OpCase
+    const executor = vi.fn<DraftExecutor>(async () => reply(opCase.expected_ops))
+    const err = await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect((err as DraftRejectedError).errors.map((e) => e.rule)).toContain("invariant_6_feature_mismatch")
+  })
+
+  it("S-5.4 của màn S01 không được set function của màn khác; lỗi gợi ý add không id", async () => {
+    const spine = structuredClone(FIXTURE)
+    const other = spine.functions.find((f) => f.screen_id !== null && f.screen_id !== "S01")!
+    const executor = vi.fn<DraftExecutor>(async () => reply([{ op: "set", path: `functions[id=${other.id}].name`, value: "Reschedule Appointment" }]))
+    const err = await draftOps("p", "S-5.4@S01", ctxFor(spine, "S-5.4@S01"), { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(DraftRejectedError)
+    const [first] = (err as DraftRejectedError).errors
+    expect(first).toMatchObject({ rule: "op_out_of_scope", op_index: 0 })
+    expect(first.message).toContain("bỏ trống")
+  })
+
+  it("add function không id ⇒ server cấp FN kế tiếp, không đè phần tử cũ", async () => {
+    const spine = structuredClone(FIXTURE)
+    const s01 = spine.screens.find((s) => s.id === "S01")!
+    const executor = vi.fn<DraftExecutor>(async () =>
+      reply([
+        { op: "add", path: "functions[]", value: { id: "$new1", screen_id: "S01", feature_id: s01.feature_id, order: 99, name: "Reschedule Appointment", trigger: "", description: "", normal: [], abnormal: [], validations: [], priority: null } },
+        { op: "set", path: "functions[id=$new1].description", value: "Move an appointment to another slot." }
+      ])
+    )
+    const result = await draftOps("p", "S-5.4@S01", ctxFor(spine, "S-5.4@S01"), { userId: "u", spine, executor })
+    const plan = planTransaction(spine, result.txn!, { startSeq: 1 })
+    const added = plan.spine.functions.filter((f) => !spine.functions.some((x) => x.id === f.id))
+    expect(added).toHaveLength(1)
+    expect(added[0]).toMatchObject({ name: "Reschedule Appointment", description: "Move an appointment to another slot.", business_rule_ids: [] })
+    expect(added[0].id).toMatch(/^FN\d{3}$/)
+    for (const f of spine.functions) expect(plan.spine.functions.find((x) => x.id === f.id)?.name).toBe(f.name)
+  })
+})
+
+describe("draftOps — chuẩn hoá op của model (BUG-03, BUG-29)", () => {
+  it("model không tự để trống màn và không bịa confirmed_at", async () => {
+    const spine = structuredClone(FIXTURE)
+    const s = spine.screens[0]
+    const executor = vi.fn<DraftExecutor>(async () =>
+      reply([
+        { op: "add", path: "screens[]", value: { ...s, id: "S99", name: "Admin Console", queue_order: 99, detail_status: "placeholder" } },
+        { op: "add", path: "assumptions[]", value: { path: "screens[id=S99]", statement: "x", rationale: "y", origin_step_id: "S-4.1", status: "confirmed", confirmed_at: "2025-01-15T00:00:00.000Z" } }
+      ])
+    )
+    const result = await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor })
+    const plan = planTransaction(spine, result.txn!, { startSeq: 1 })
+    expect(plan.spine.screens.find((x) => x.id === "S99")?.detail_status).toBe("pending")
+    const added = plan.spine.assumptions[plan.spine.assumptions.length - 1]
+    expect(added).toMatchObject({ status: "unconfirmed", confirmed_at: null })
+  })
+
+  it("set detail_status bị từ chối để model hỏi user", async () => {
+    const spine = structuredClone(FIXTURE)
+    const executor = vi.fn<DraftExecutor>(async () => reply([{ op: "set", path: "screens[id=S01].detail_status", value: "placeholder" }]))
+    const err = await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor }).catch((e: unknown) => e)
+    expect((err as DraftRejectedError).errors[0]).toMatchObject({ rule: "op_not_allowed" })
+  })
 })
 
 describe("draftOps retry", () => {
@@ -149,10 +223,84 @@ describe("draftOps retry", () => {
     expect(saveWithVersion).not.toHaveBeenCalled()
   })
 
+  it("FLF-243: tên use case sai luật cờ vàng ⇒ gửi lại model kèm lỗi; lượt sau đúng thì qua", async () => {
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([{ op: "set", path: "use_cases[id=UC05].name", value: "Manage Projects" }]))
+      .mockResolvedValueOnce(reply([{ op: "set", path: "use_cases[id=UC05].name", value: "Find Project" }]))
+
+    const result = await draftOps("p", "S-3.2", ctxFor(spine, "S-3.2"), { userId: "u", spine, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["usecase_name_invalid"], []])
+    expect(result.txn?.ops).toEqual([{ op: "set", path: "use_cases[id=UC05].name", value: "Find Project" }])
+    const secondVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(secondVars.validation_errors).toMatchObject([{ rule: "usecase_name_invalid", path: "use_cases[id=UC05].name" }])
+  })
+
+  it("FLF-243: hết lượt mà tên vẫn sai ⇒ lượt cuối vẫn nhận lô, không 422 (lỗi đặt tên là lỗi mềm)", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "use_cases[id=UC05].name", value: "Create, Update and Delete Projects" }]))
+    const result = await draftOps("p", "S-3.2", ctxFor(spine, "S-3.2"), { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(3)
+    expect(result.txn?.ops).toHaveLength(1)
+  })
+
+  it("FLF-243: tên đã có từ trước (không đụng tới trong lô) không chặn step", async () => {
+    const legacy = structuredClone(FIXTURE)
+    legacy.use_cases = legacy.use_cases.map((u) => (u.id === "UC05" ? { ...u, name: "Manage Projects" } : u))
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    const result = await draftOps("p", "S-3.2", ctxFor(legacy, "S-3.2"), { userId: "u", spine: legacy, executor })
+    expect(executor).toHaveBeenCalledTimes(1)
+    expect(result.attempts[0].errors).toEqual([])
+  })
+
+  it("FLF-248: lô để trống danh sách bắt buộc của step (S-7.2 · common_requirements) ⇒ gửi lại model kèm lỗi", async () => {
+    const bare = structuredClone(FIXTURE)
+    bare.common_requirements = []
+    const cr = { id: "CR01", category: "pagination", statement: "All list screens paginate server-side with a default page size of 20." }
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([]))
+      .mockResolvedValueOnce(reply([{ op: "add", path: "common_requirements[]", value: cr }]))
+
+    const result = await draftOps("p", "S-7.2", ctxFor(bare, "S-7.2"), { userId: "u", spine: bare, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["required_array_empty"], []])
+    expect(result.txn?.ops).toHaveLength(1)
+    const secondVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(secondVars.validation_errors).toMatchObject([{ rule: "required_array_empty", path: "common_requirements" }])
+  })
+
+  it("FLF-248: hết lượt mà danh sách vẫn trống ⇒ lượt cuối vẫn nhận lô rỗng (cờ array_empty là lưới cuối)", async () => {
+    const bare = structuredClone(FIXTURE)
+    bare.common_requirements = []
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([]))
+    const result = await draftOps("p", "S-7.2", ctxFor(bare, "S-7.2"), { userId: "u", spine: bare, executor })
+    expect(executor).toHaveBeenCalledTimes(3)
+    expect(result.txn).toBeNull()
+  })
+
+  it("FLF-248: danh sách bắt buộc đã có phần tử ⇒ lô rỗng vẫn hợp lệ, không retry", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([]))
+    const result = await draftOps("p", "S-7.2", ctxFor(spine, "S-7.2"), { userId: "u", spine, executor })
+    expect(executor).toHaveBeenCalledTimes(1)
+    expect(result.txn).toBeNull()
+  })
+
   it("lỗi không phải schema (hết credit) ném thẳng, không retry", async () => {
     const executor = vi.fn<DraftExecutor>().mockRejectedValue(new AiActionError(402, "no credit", "INSUFFICIENT_CREDIT"))
     await expect(draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor })).rejects.toMatchObject({ code: "INSUFFICIENT_CREDIT" })
     expect(executor).toHaveBeenCalledTimes(1)
+  })
+
+  it("FLF-260: replyLanguage ⇒ mọi lượt gọi (kể cả retry) mang nó; không truyền ⇒ input không có field (prompt như cũ)", async () => {
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }]))
+      .mockResolvedValueOnce(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, replyLanguage: "en" })
+    expect(executor.mock.calls.map((c) => c[1].replyLanguage)).toEqual(["en", "en"])
+
+    const plain = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor: plain })
+    expect(plain.mock.calls[0][1]).not.toHaveProperty("replyLanguage")
   })
 
   it("không truyền spine ⇒ đọc repository và chặn khi version lệch ctx", async () => {
@@ -160,5 +308,40 @@ describe("draftOps retry", () => {
     const executor = vi.fn<DraftExecutor>()
     await expect(draftOps("p", "S-3.1", ctx, { userId: "u", executor })).rejects.toMatchObject({ statusCode: 409, code: "SPINE_VERSION_CONFLICT" })
     expect(executor).not.toHaveBeenCalled()
+  })
+})
+
+describe("draftOps — S-1.1 dựng lại tầm nhìn/mục tiêu từ addendum lõi", () => {
+  const core = (id: string, topic: string) => ({ id, topic, content: "Nội dung", content_en: "Content", target_section: "fixed:1", captured_at: "2026-09-30T00:00:00.000Z" })
+  const briefSpine = (): Spine => ({
+    ...structuredClone(FIXTURE),
+    addendum: [core("AD1", "vision"), core("AD2", "goals"), core("AD3", "goals")],
+    steps: FIXTURE.steps.map((s) => (s.id === "S-1.1" ? { ...s, status: "in_progress" as const } : s))
+  })
+  const vision = { op: "set", path: "project.vision", value: "Patients book visits online." }
+  const goals = { op: "set", path: "project.goals", value: ["Reduce phone calls", "Cut booking time"] }
+
+  it("lô thiếu set project.goals bị trả lại kèm lỗi, lượt sau đủ thì qua", async () => {
+    const spine = briefSpine()
+    const ctx = ctxFor(spine, "S-1.1")
+    const executor = vi.fn<DraftExecutor>().mockResolvedValueOnce(reply([vision])).mockResolvedValueOnce(reply([vision, goals]))
+    const result = await draftOps("p", "S-1.1", ctx, { userId: "u", spine, executor })
+    expect(result.attempts.map((a) => a.errors.map((e) => e.rule))).toEqual([["brief_extraction_incomplete"], []])
+    expect(result.txn?.ops).toHaveLength(2)
+    const retryVars = executor.mock.calls[1][1].promptVariables as Record<string, unknown>
+    expect(retryVars.validation_errors).toMatchObject([{ path: "project.goals" }])
+  })
+
+  it("ops rỗng khi có addendum lõi vẫn bị từ chối (không được im lặng bỏ qua); hết lượt ⇒ DraftRejectedError", async () => {
+    const spine = briefSpine()
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { notes: "nothing" }))
+    await expect(draftOps("p", "S-1.1", ctxFor(spine, "S-1.1"), { userId: "u", spine, executor, callKind: "regenerate" })).rejects.toBeInstanceOf(DraftRejectedError)
+  })
+
+  it("dự án cũ không có addendum lõi ⇒ ops rỗng vẫn hợp lệ (hành vi cũ)", async () => {
+    const spine = { ...briefSpine(), addendum: [] }
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([], { notes: "nothing" }))
+    const result = await draftOps("p", "S-1.1", ctxFor(spine, "S-1.1"), { userId: "u", spine, executor })
+    expect(result.txn).toBeNull()
   })
 })

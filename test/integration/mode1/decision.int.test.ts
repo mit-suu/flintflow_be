@@ -20,7 +20,7 @@ beforeEach(() => resetCrMock())
 const REASON = "Ngoài phạm vi bản 1.0"
 
 const decide = async (c: Mode1Client, cr: string, gid: string, decision: "approved" | "rejected", reason?: string) =>
-  c.post(`${cr}/groups/${gid}/decision`, { decision, ...(reason ? { reason } : {}), base_version: await c.spineVersion() })
+  c.post(`${cr}/groups/${gid}/decision`, { decision, ...(reason ? { reason } : decision === "approved" ? { reason: "Đúng yêu cầu của khách" } : {}), base_version: await c.spineVersion() })
 
 /** notify chạy nền (`void notify(...)`) ⇒ chờ bản ghi xuất hiện. */
 const notificationsOf = async (userId: string, n: number) => {
@@ -33,7 +33,8 @@ describe("C-6 duyệt một phần", () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, submitted } = await crToReview(c)
     const [g1, g2] = submitted.groups
-    expect([g1.title, g2.title]).toEqual(["Performance", "Business Rules"])
+    // tiêu đề group theo chính heading trong file người dùng
+    expect([g1.title, g2.title]).toEqual(["4.2.3 Performance", "5.1 Business Rules"])
     const pathsOf = (gid: string) => submitted.locations.filter((l) => l.group_id === gid).map((l) => l.path).sort()
 
     const rejected = detail(await decide(c, cr, g2.group_id, "rejected", REASON))
@@ -64,7 +65,7 @@ describe("C-6 duyệt một phần", () => {
     detail(await decide(c, cr, g2.group_id, "rejected", REASON))
     detail(await decide(c, cr, g1.group_id, "approved"))
     const [first, last] = await notificationsOf(seeded.userId, 2)
-    expect(first).toMatchObject({ title: `${crId}: group ${g2.group_id} bị từ chối`, meta: { cr_id: crId, group_id: g2.group_id, decision: "rejected", result_doc_version: null } })
+    expect(first).toMatchObject({ title: `${crId}: nhóm thay đổi “${g2.title}” bị từ chối`, meta: { cr_id: crId, group_id: g2.group_id, decision: "rejected", result_doc_version: null } })
     expect(first.body).toContain(REASON)
     expect(last).toMatchObject({ title: `${crId} đã được ghi vào bản 0.1`, meta: { cr_id: crId, group_id: g1.group_id, decision: "approved", result_doc_version: "0.1" } })
   })
@@ -77,7 +78,8 @@ describe("C-6 duyệt một phần", () => {
     expect(d.change_request).toMatchObject({ status: "in_review", result_doc_version: null })
     expect(await lockedPaths(projectId, crId)).toEqual(held)
     const [n] = await notificationsOf(seeded.userId, 1)
-    expect(n.title).toBe(`${crId}: group ${submitted.groups[0].group_id} được duyệt`)
+    expect(n.title).toBe(`${crId}: nhóm thay đổi “${submitted.groups[0].title}” được duyệt`)
+    expect(n.title).not.toContain("G0")
   })
 })
 
@@ -94,7 +96,7 @@ describe("C-6 lỗi quyết định", () => {
     expect(missing.status).toBe(404)
     expect(missing.body.error.code).toBe("CR_GROUP_NOT_FOUND")
     expect((await decide(c, cr, submitted.groups[1].group_id, "rejected")).status).toBe(400)
-    expect((await c.post(`${cr}/groups/G1/decision`, { decision: "approved", base_version: 1 })).status).toBe(400)
+    expect((await c.post(`${cr}/groups/G1/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: 1 })).status).toBe(400)
 
     const other = await newCr(c, "Second CR", "Change the password rule of BR-01 to 10 characters.")
     const early = await decide(c, `/change-requests/${other}`, "G01", "approved")

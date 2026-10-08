@@ -12,7 +12,11 @@ import {
   GROUP_ID_PATTERN,
   LOCATION_CONCLUSIONS,
   LOCATION_FOUND_BY,
-  LOCATION_ID_PATTERN
+  LOCATION_ID_PATTERN,
+  CR_MATERIAL_KINDS,
+  CR_MATERIAL_MAX_CHARS,
+  MATERIAL_ID_PATTERN,
+  NEW_CR_SOURCE_KINDS
 } from "./change-request.constants.js"
 
 const id = z.string().min(1)
@@ -20,9 +24,10 @@ const isoDateTime = z.iso.datetime({ offset: true })
 const baseVersion = z.number().int().min(1)
 const text = (max: number) => z.string().trim().min(1).max(max)
 
-export const crIdSchema = z.string().regex(CR_ID_PATTERN, "cr_id dạng CR-001")
-export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "location_id dạng L001")
-export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "group_id dạng G01")
+export const crIdSchema = z.string().regex(CR_ID_PATTERN, "Mã change request không hợp lệ.")
+export const locationIdSchema = z.string().regex(LOCATION_ID_PATTERN, "Mã vị trí cần sửa không hợp lệ.")
+export const materialIdSchema = z.string().regex(MATERIAL_ID_PATTERN, "Mã tài liệu bổ sung không hợp lệ.")
+export const groupIdSchema = z.string().regex(GROUP_ID_PATTERN, "Mã nhóm thay đổi không hợp lệ.")
 
 /** Lý do từ chối group / đóng / huỷ — đủ dài để có nghĩa khi đọc lại lịch sử. */
 export const DECISION_REASON_MIN_LENGTH = 10
@@ -46,13 +51,39 @@ export const changeRequestDtoSchema = z.object({
   requester: z.string(),
   status: crStatusSchema,
   paused: z.object({ reason: z.enum(CR_PAUSE_REASONS), at: isoDateTime }).nullable(),
-  clarifications: z.array(z.object({ round: z.number().int().min(1), questions: z.array(z.string()), answers: z.array(z.string()) })),
+  clarifications: z.array(
+    z.object({
+      round: z.number().int().min(1),
+      questions: z.array(z.string()),
+      answers: z.array(z.string()),
+      /** Phase 7: đáp án AI gợi ý, song song `questions` (`[]` cho câu không có gợi ý). */
+      suggestions: z.array(z.array(z.string()))
+    })
+  ),
   base_doc_version: z.string().min(1),
   result_doc_version: z.string().nullable(),
   created_by: id,
   submitted_at: isoDateTime.nullable(),
   decided_by: id.nullable(),
   closed_reason: z.string().nullable(),
+  /** Mode 1 v3: bản xem trước đính kèm lúc tạo (gợi ý cho C-2/C-3/C-4), không có ⇒ `null`. */
+  seed: z.object({ instruction: z.string().nullable(), ops: z.array(z.record(z.string(), z.unknown())), targets: z.array(z.string()) }).nullable(),
+  /** Mode 1 v3 phase 7: tài liệu bổ sung (chữ đã tách) — ngữ cảnh cho C-2, C-4, 3.9. */
+  materials: z.array(
+    z.object({
+      material_id: materialIdSchema,
+      kind: z.enum(CR_MATERIAL_KINDS),
+      name: z.string(),
+      text: z.string(),
+      truncated: z.boolean(),
+      round: z.number().int().min(0),
+      added_at: isoDateTime
+    })
+  ),
+  /** Mode 1 v3 phase 7: dữ kiện C-2 báo vẫn thiếu khi hết vòng hỏi — C-4 sẽ phải giả định. */
+  missing_info: z.array(z.string()),
+  /** Phase 8: lệnh sửa gộp thêm (chat) theo thứ tự. */
+  amendments: z.array(z.object({ text: z.string(), at: isoDateTime })),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
@@ -77,7 +108,9 @@ export const changeLocationDtoSchema = z.object({
       old_text: z.string(),
       new_text: z.string().nullable(),
       comment_text: z.string().nullable(),
-      spine_ops: z.array(z.unknown())
+      spine_ops: z.array(z.unknown()),
+      /** Mode 1 v3 phase 7: giả định AI đã dùng — người duyệt cần xác nhận. */
+      assumptions: z.array(z.string())
     })
     .nullable(),
   manual: z.boolean(),
@@ -105,12 +138,18 @@ export const changeGroupDtoSchema = z.object({
 
 // ─── request ─────────────────────────────────────────────────────
 
-/** `POST /projects/:id/change-requests` (C-1, UC-48). Thiếu `source` ⇒ 400 CR_SOURCE_REQUIRED. */
+/**
+ * `POST /projects/:id/change-requests` (C-1, UC-48, BPMN 3.1). Thiếu `source` / `requester` ⇒ 400 CR_SOURCE_REQUIRED.
+ * Mode 1 v3: nguồn chỉ nhận 6 nguồn của BPMN (không `chat`); `preview_id` đính kèm bản xem trước làm gợi ý.
+ */
 export const createChangeRequestSchema = z.strictObject({
   title: text(200),
   description: text(5000),
-  source: crSourceSchema,
-  requester: text(200)
+  source: crSourceSchema.extend({ kind: z.enum(NEW_CR_SOURCE_KINDS) }),
+  requester: text(200),
+  preview_id: z.string().trim().min(1).max(100).optional(),
+  /** Mode 1 v3 phase 7: đoạn văn bản nguồn dán ở 3.1 (email, biên bản…) — file thì upload sau qua `/materials`. */
+  materials: z.array(z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })).max(5).optional()
 })
 
 /** `GET /projects/:id/change-requests?status=` */
@@ -119,7 +158,16 @@ export const listChangeRequestsQuerySchema = z.object({ status: crStatusSchema.o
 export const crParamsSchema = z.object({ crId: crIdSchema })
 
 /** `POST …/:crId/answers` (UC-49) — trả lời theo đúng thứ tự câu hỏi của vòng làm rõ gần nhất. */
-export const answersRequestSchema = z.strictObject({ answers: z.array(text(4000)).min(1).max(20) })
+/** Mode 1 v3 phase 7: câu trả lời được để trống (= "chưa biết") — C-2/C-4 coi dữ kiện đó là thiếu. */
+export const answersRequestSchema = z.strictObject({ answers: z.array(z.string().trim().max(4000)).min(1).max(20) })
+
+/** `POST …/:crId/amend` (phase 8): gộp thêm một lệnh sửa vào CR chưa nộp. */
+export const amendRequestSchema = z.strictObject({ instruction: text(4000) })
+
+/** `POST …/:crId/materials` dạng JSON (dán chữ). Upload file dùng multipart `file`. */
+export const addMaterialRequestSchema = z.strictObject({ name: text(200), text: text(CR_MATERIAL_MAX_CHARS * 2) })
+
+export const materialParamsSchema = z.object({ crId: crIdSchema, mid: materialIdSchema })
 
 /** `PATCH …/:crId/locations/:locId` (UC-81) — sửa tay / kết luận tay ⇒ `manual = true`. */
 export const patchLocationRequestSchema = z
@@ -134,26 +182,24 @@ export const patchLocationRequestSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Cần ít nhất một field để sửa" })
   .refine((v) => v.conclusion !== "edit" || v.new_value !== undefined || v.spine_ops !== undefined, {
-    message: "Kết luận edit cần new_value hoặc spine_ops",
+    message: "Kết luận “Sửa” cần có nội dung mới.",
     path: ["new_value"]
   })
-  .refine((v) => v.conclusion !== "comment" || v.comment_text !== undefined, { message: "Kết luận comment cần comment_text", path: ["comment_text"] })
-  .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận not_related cần lý do", path: ["reason"] })
+  .refine((v) => v.conclusion !== "comment" || v.comment_text !== undefined, { message: "Kết luận “Ghi chú” cần có nội dung ghi chú.", path: ["comment_text"] })
+  .refine((v) => v.conclusion !== "not_related" || v.reason !== undefined, { message: "Kết luận “Không liên quan” cần có lý do.", path: ["reason"] })
 
 /**
- * `POST …/:crId/groups/:gid/decision` (UC-52). Từ chối bắt buộc có lý do. Group cuối cùng được quyết mà có
- * group duyệt ⇒ ghi Track Changes + áp op Spine (C-7) ⇒ mang `base_version`.
+ * `POST …/:crId/groups/:gid/decision` (UC-52, BPMN 3.12 "quyết định từng group, kèm lý do"). Mode 1 v3: **cả duyệt
+ * lẫn từ chối** đều bắt buộc lý do. Group cuối cùng được quyết mà có group duyệt ⇒ ghi (C-7) ⇒ mang `base_version`.
  */
-export const groupDecisionRequestSchema = z
-  .strictObject({
-    decision: z.enum(["approved", "rejected"]),
-    reason: z.string().trim().max(2000).optional(),
-    base_version: baseVersion
-  })
-  .refine((v) => v.decision === "approved" || (v.reason?.length ?? 0) >= DECISION_REASON_MIN_LENGTH, {
-    message: `Từ chối cần lý do ≥ ${DECISION_REASON_MIN_LENGTH} ký tự`,
-    path: ["reason"]
-  })
+export const groupDecisionRequestSchema = z.strictObject({
+  decision: z.enum(["approved", "rejected"]),
+  reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH, `Quyết định cần lý do ≥ ${DECISION_REASON_MIN_LENGTH} ký tự`).max(2000),
+  base_version: baseVersion
+})
+
+/** `POST …/:crId/locations/:locId/owner-step-draft` (BPMN 3.9, mode 1 v3) — hướng sửa của BA cho skill step sở hữu. */
+export const ownerStepDraftRequestSchema = z.strictObject({ instruction: text(4000) })
 
 /** `POST …/:crId/close` (3.13) và `POST …/:crId/cancel` (3.10, UC-53). */
 export const closeRequestSchema = z.strictObject({ reason: z.string().trim().min(DECISION_REASON_MIN_LENGTH).max(2000) })
@@ -181,12 +227,21 @@ export const pathLockedMetaSchema = z.object({
 })
 
 /**
- * `meta` của 409 CHANGE_REQUIRES_CR (sau baseline v1 ở project mode 1). `/changes`, `/undo` ⇒ chỉ `prefill` (FE mở form
- * CR điền sẵn). Lệnh sửa trong chat (FLF-186) ⇒ BE **đã tạo** CR nguồn `chat` — `change_request` trỏ tới nó.
+ * `meta` của 409 CHANGE_REQUIRES_CR — nội dung điền sẵn cho form 3.1 (mode 1 v3: BE không tự tạo CR; nguồn là gợi ý,
+ * BA vẫn chọn lại). Bỏ `change_request` của V4/T8.
  */
 export const changeRequiresCrMetaSchema = z.object({
-  prefill: z.object({ title: z.string(), description: z.string() }),
-  change_request: z.object({ cr_id: crIdSchema, status: crStatusSchema }).optional()
+  prefill: z.object({
+    title: z.string(),
+    description: z.string(),
+    source: z.object({ kind: z.enum(CR_SOURCE_KINDS), ref: z.string().nullable() }).optional()
+  })
+})
+
+/** `meta` của 409 CR_NO_LOCATIONS — C-3 ra 0 vị trí: đích của C-2 + các mục còn trống (kèm step soạn nội dung). */
+export const crNoLocationsMetaSchema = z.object({
+  targets: z.object({ entity_paths: z.array(z.string()), keywords: z.array(z.string()) }),
+  empty_sections: z.array(z.object({ section_id: z.string(), title: z.string(), step_id: z.string().nullable() }))
 })
 
 /** `meta` của 409 CR_LOCATION_UNCONCLUDED. */

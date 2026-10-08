@@ -12,6 +12,7 @@ import {
   BLOCK_ID_PATTERN,
   DOC_BLOCK_KINDS,
   EXTRACTION_STATUSES,
+  FIELD_ORIGINS,
   HEADING_DETECTORS,
   MENTION_ENTITIES,
   PREFLIGHT_ISSUE_CODES,
@@ -21,7 +22,7 @@ import {
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
 const confidence = z.number().min(0).max(1)
-const blockId = z.string().regex(BLOCK_ID_PATTERN, "block_id dạng B0001")
+const blockId = z.string().regex(BLOCK_ID_PATTERN, "Mã khối nội dung không hợp lệ.")
 const baseVersion = z.number().int().min(1)
 
 // ─── thành phần ──────────────────────────────────────────────────
@@ -81,8 +82,16 @@ export const headingMapEntrySchema = z.object({
   section_id: z.string().min(1),
   confidence,
   detected_by: z.enum(HEADING_DETECTORS),
-  confirmed: z.boolean()
+  confirmed: z.boolean(),
+  /**
+   * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
+   * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
+   */
+  template_section: z.string().nullable().optional()
 })
+
+/** Họ mẫu của tài liệu upload (FLF-252). */
+export const TEMPLATE_FAMILIES = ["fpt", "ieee830", "ieee_features"] as const
 
 export const tableMapEntrySchema = z.object({
   block_id: blockId,
@@ -90,7 +99,11 @@ export const tableMapEntrySchema = z.object({
   header: z.string(),
   field_path: z.string().nullable(),
   confidence,
-  confirmed: z.boolean()
+  confirmed: z.boolean(),
+  /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
+  role: z.string().optional(),
+  /** FLF-252: tối đa 3 giá trị đầu của cột. */
+  samples: z.array(z.string()).optional()
 })
 
 /**
@@ -104,6 +117,15 @@ export const layoutEntrySchema = z.object({
   section_id: z.string().min(1)
 })
 
+/** Một dòng Record of Changes của file gốc (FLF-252) — cùng hình dòng §I của `RenderedDocument.recordOfChanges`. */
+export const recordRowSchema = z.strictObject({
+  date: z.string().max(100),
+  version: z.string().max(50),
+  change_type: z.enum(["A", "M", "D"]),
+  in_charge: z.string().max(200),
+  description: z.string().max(2000)
+})
+
 export const templateProfileDtoSchema = z.object({
   doc_version: z.string().min(1),
   heading_map: z.array(headingMapEntrySchema),
@@ -111,7 +133,11 @@ export const templateProfileDtoSchema = z.object({
   required_sections: z.array(z.string()),
   language: z.string(),
   /** FLF-182 — rỗng với import trước mode 1 v2. */
-  layout: z.array(layoutEntrySchema).default([])
+  layout: z.array(layoutEntrySchema).default([]),
+  /** FLF-252: dòng Record of Changes đọc được từ file (tính lúc tách file, tính lại khi đổi mapping); rỗng = không tìm thấy bảng. */
+  record_of_changes: z.array(recordRowSchema).default([]),
+  /** FLF-252: họ mẫu nhận được — mẫu IEEE khớp theo danh mục IEEE rồi trích vào section FPT. */
+  template_family: z.enum(TEMPLATE_FAMILIES).default("fpt")
 })
 
 // ─── kế hoạch step theo template (mode 1 v2, FLF-182) ─────────────────
@@ -147,9 +173,11 @@ export const reviewFieldSchema = z.object({
   value: z.unknown(),
   confidence,
   source_block_ids: z.array(blockId),
-  origin: z.enum(["deterministic", "ai"]),
+  origin: z.enum(FIELD_ORIGINS),
   confirmed: z.boolean(),
-  edited_value: z.unknown().optional()
+  edited_value: z.unknown().optional(),
+  /** Tên phần tử chứa field (`actors[id=A01].kind` ⇒ "Learner") để nhãn không chỉ trơ mã; field tên / không tra được ⇒ không có. */
+  entity_name: z.string().optional()
 })
 
 export const extractionSectionSchema = z.object({
@@ -180,7 +208,7 @@ export const mappingPatchRequestSchema = z
     confirm_all: z.boolean().default(false)
   })
   .refine((v) => v.headings.length > 0 || v.tables.length > 0 || v.confirm_all, {
-    message: "Cần ít nhất một mục mapping hoặc confirm_all"
+    message: "Cần chọn ít nhất một mục, hoặc xác nhận tất cả."
   })
 
 /** `POST /projects/:id/import/extract` (nút 1.8) — chạy hoặc chạy tiếp I-4 từ `extract_cursor`. */
@@ -204,10 +232,14 @@ export const fieldsPatchRequestSchema = z
     /** `true` ⇒ xác nhận mọi field còn lại theo giá trị AI trích và chuyển `baselining`. */
     confirm_all: z.boolean().default(false)
   })
-  .refine((v) => v.fields.length > 0 || v.confirm_all, { message: "Cần ít nhất một field hoặc confirm_all" })
+  .refine((v) => v.fields.length > 0 || v.confirm_all, { message: "Cần chọn ít nhất một trường dữ liệu, hoặc xác nhận tất cả." })
 
 /** `POST /projects/:id/import/finalize` (nút 1.10–1.12) — ghi Spine ⇒ mang `base_version`. */
-export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion })
+/**
+ * `record_of_changes` (FLF-252, tuỳ chọn): các dòng Record of Changes người dùng đã xem/sửa ở wizard — thay cho dòng đọc
+ * được từ file. Không gửi ⇒ đọc lại từ file như trước.
+ */
+export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion, record_of_changes: z.array(recordRowSchema).max(500).optional() })
 
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })
@@ -258,7 +290,9 @@ export const gapReportSchema = z.object({
     unmapped_headings: z.number().int().min(0),
     low_confidence_fields: z.number().int().min(0),
     /** Mode 1 v2 (FLF-184): số đầu mục mẫu FPT còn thiếu. */
-    missing_fpt_sections: z.number().int().min(0)
+    missing_fpt_sections: z.number().int().min(0),
+    /** Mode 1 v2 (nợ T4): số hình chưa vẽ được (PlantUML vắng mặt lúc import / render lỗi). */
+    unrendered_diagrams: z.number().int().min(0)
   }),
   /**
    * Mode 1 v2 (FLF-184, D6): đầu mục mẫu FPT file không có hoặc chỉ có heading — cờ đỏ `section_empty`, chặn sign-off
@@ -279,6 +313,11 @@ export const gapReportSchema = z.object({
   ),
   /** Cờ đỏ/vàng gộp theo section (chỉ section có cờ) — theo thứ tự layout của file upload, section ngoài layout sau cùng. */
   sections: z.array(z.object({ section_id: z.string(), title: z.string(), flags: z.array(flagSchema) })),
+  /**
+   * Mode 1 v2 (nợ T4): hình dựng được từ Spine nhưng **chưa có bản vẽ** — lúc import PlantUML không sẵn sàng, hoặc
+   * render lỗi. Không chặn baseline: người dùng bấm vẽ lại ở workspace. Tính trực tiếp từ Spine mỗi lần đọc báo cáo.
+   */
+  unrendered_diagrams: z.array(z.object({ diagram_id: z.string(), kind: z.string(), section_id: z.string(), title: z.string(), reason: z.enum(["not_rendered", "error"]) })),
   missing_sections: z.array(z.object({ section_id: z.string(), title: z.string() })),
   unmapped_headings: z.array(z.object({ block_id: blockId, text: z.string() })),
   low_confidence_fields: z.array(reviewFieldSchema)

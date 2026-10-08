@@ -5,15 +5,29 @@
 | `section_empty` | Mandatory section (invariant 1, excluding derived) has no field with data | owner step of the section (inverse of the field → section map) | ✔ |
 | `array_empty` | An array of invariant 2 is empty | step that produces the array | ✘ |
 | `dead_reference` | A key in `reference_fields[]` does not exist | step owning the field that holds the key | ✘ |
-| `render_error` | `diagrams[].render_status = error` | step rendering that diagram | ✘ |
-| `diagram_stale` | `diagrams[].source_hash` ≠ current hash of its `source_fields` | step rendering that diagram | ✔ |
+| `render_error` | `diagrams[].render_status = error` — skipped for a diagram kind the document shows as the user's original image (mode 1 §4.13; that PlantUML is not printed) | step rendering that diagram | ✘ |
+| `diagram_stale` | `diagrams[].source_hash` ≠ current hash of its `source_fields` — same exception; the original image's drift is the yellow `original_diagram_stale` | step rendering that diagram | ✔ |
 | `nfr_missing_number` | `count(nfrs[category=reliability]) = 0` **or** `count(nfrs[category=performance]) = 0` **or** an element of those two lacks `metric`/`threshold` | S-6.3 / S-6.4 | ✔ |
 | `unconfirmed_assumption` | `count(assumptions[status=unconfirmed]) > 0` at S-9 | `assumptions[].origin_step_id`, or S-9.1 sweep | ✔ |
 | `section_stale_at_baseline` | `status(s) = stale` for a mandatory `s` | reconcile, or re-Accept at owner step | ✔ |
 | `section_awaiting_reaccept` | `awaiting_reaccept = true` for a mandatory `s` | owner step's gate | ✔ |
 | `screen_pending_at_baseline` | `screens[].detail_status = pending` | S-5 for that screen | ✔ |
+| `usecase_relation_invalid` | A use case includes/extends itself, sits in an include or extend cycle, or the same pair carries both an include and an extend | S-3.4 | ✔ |
+| `orphan_screen_at_baseline` | Same condition as yellow `orphan_screen`, checked at S-9: a screen no human actor uses, or isolated in the flow, or a pop-up nothing opens | S-4.2 | ✔ |
+| `orphan_entity_at_baseline` | Same condition as yellow `orphan_entity`, checked at S-9: the ERD is not one connected graph | S-4.5 | ✔ |
 
-That is 10 rules. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
+That is 13 rules. Mode 1 (import) excludes `orphan_screen_at_baseline` and `orphan_entity_at_baseline`. `placeholder` screens do **not** trigger `screen_pending_at_baseline`.
+
+## The "not there yet" gate (FLF-213)
+
+`section_empty`, `array_empty` and the "no NFR in this category at all" branch of `nfr_missing_number` say *X is missing*. Missing is only a defect once the step that produces X has been **accepted**; before that the slot is empty on plan. So each of them fires only when its owner step is accepted — all of them, for a section fed by several steps (`fixed:1` needs S-2.1 … S-2.5). A project sitting at S-3.6 therefore raises nothing for §3.1.x (S-4) or §4.x (S-6), and `readiness.red_open` counts real problems only.
+
+Two runs open the gate and check every slot regardless:
+
+- `at_baseline` (S-9) — by then every step must be done, so nothing may slip through under "not there yet".
+- Mode 1 (`skipOwnerStepGate` in the rule profile) — the whole document arrives in one go and `steps[]` is *derived from the file* (a heading the file lacks becomes `pending`), so an empty slot is a gap to report, not a step not yet reached. This is what keeps D6 (FLF-183) working.
+
+An NFR that **exists** but lacks `metric`/`threshold` is not gated: the data is already there, so a missing number is a defect whatever step is running.
 
 ## Mandatory sections (invariant 1)
 
@@ -50,6 +64,6 @@ Hash over a projection sorted by `id`, containing only fields actually drawn:
 | --- | --- |
 | `context` | `project.name` · `actors[kind≠human].name` |
 | `usecase` | `actors[].name/.kind` · `use_cases[].name/.actor_ids/.includes/.extends` |
-| `screen_flow` | `screens[].name/.flow_to/.is_popup/.tabs` |
+| `screen_flow` | `screens[].name/.flow_to/.is_popup/.tabs` · `actors[kind=human].name` · screen ↔ actor links (`permissions`→`roles.actor_id`, `use_cases.actor_ids`×`function_ids`→`functions.screen_id`) |
 | `erd` | `entities[].name/.relations` |
 | `screen_layout` | `screens[<owner>].name` · `functions[screen_id=<owner>].name/.description` |

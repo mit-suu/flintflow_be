@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { readFileSync } from "node:fs"
 import mammoth from "mammoth"
-import { buildDocxFileName, writeDocx } from "./docx-writer.js"
+import { HEADING_TABLE_SPACING, buildDocxFileName, writeDocx } from "./docx-writer.js"
 import { makePng, readZipEntries, readZipText } from "./zip.test-helper.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 
@@ -29,6 +29,16 @@ describe("writeDocx — fixture Working Draft", () => {
   beforeAll(async () => {
     docx = await writeDocx(sample)
     documentXml = readZipText(docx, "word/document.xml")
+  })
+
+  it("FLF-198: ô bảng có lề trong, chữ không dán vào khung", () => {
+    // `tblCellMar` ở cấp bảng và `tcMar` ở từng ô — Word và LibreOffice mỗi bên đọc một chỗ
+    expect(documentXml).toContain("<w:tblCellMar>")
+    expect(documentXml).toContain("<w:tcMar>")
+    const margin = (side: string): number[] =>
+      [...documentXml.matchAll(new RegExp(`<w:${side} w:type="dxa" w:w="(\\d+)"\\s*/>`, "g"))].map((m) => Number(m[1]))
+    expect(margin("left").some((value) => value >= 120), `lề trái ô: ${margin("left").join(",")}`).toBe(true)
+    expect(margin("top").some((value) => value >= 80), `lề trên ô: ${margin("top").join(",")}`).toBe(true)
   })
 
   it("là file zip OOXML hợp lệ, mammoth đọc được", async () => {
@@ -164,6 +174,23 @@ describe("writeDocx — biến thể", () => {
     await expect(writeDocx(doc)).rejects.toMatchObject({ statusCode: 422, code: "RENDER_IMAGE_INVALID" })
   })
 
+  it("tiêu đề ngay trước bảng có khoảng trống phía dưới; tiêu đề trước đoạn văn thì không", async () => {
+    const doc = structuredClone(sample)
+    const tableBlock = { type: "table" as const, header: [[{ text: "H" }]], rows: [[[{ text: "v" }]]] }
+    doc.sections = [
+      { id: "fixed:2.1", number: "2.1", heading: "TableFirst", level: 2, blocks: [tableBlock] },
+      { id: "fixed:2.2", number: "2.2", heading: "TextFirst", level: 2, blocks: [{ type: "paragraph", runs: [{ text: "p" }] }] },
+      { id: "fixed:5.1", number: "5.1", heading: "Mixed", level: 2, blocks: [{ type: "heading", level: 3, text: "SubBeforeTable" }, tableBlock] }
+    ]
+    const xml = readZipText(await writeDocx(doc), "word/document.xml")
+    const paragraphOf = (text: string) => [...xml.matchAll(/<w:p>(?:(?!<\/w:p>).)*<\/w:p>/gs)].map((m) => m[0]).find((p) => p.includes(`>${text}<`))!
+    const spaced = `<w:spacing w:after="${HEADING_TABLE_SPACING}"/>`
+    expect(paragraphOf("2.1 TableFirst")).toContain(spaced)
+    expect(paragraphOf("SubBeforeTable")).toContain(spaced)
+    expect(paragraphOf("2.2 TextFirst")).not.toContain(spaced)
+    expect(paragraphOf("5.1 Mixed")).not.toContain(spaced)
+  })
+
   it("mỗi numbered list đánh số lại từ đầu (instance riêng)", async () => {
     const doc = structuredClone(sample)
     const list = { type: "numbered_list" as const, items: [[{ text: "x" }], [{ text: "y" }]] }
@@ -193,5 +220,47 @@ describe("buildDocxFileName", () => {
       "duong-sat-2026-v-0.4-draft.docx"
     )
     expect(buildDocxFileName({ projectName: "!!!", version: "v0.4-draft", source: "draft" })).toBe("srs-v0.4-draft.docx")
+  })
+})
+
+describe("style heading con theo mẫu FPT (FLF-214)", () => {
+  const heading4 = async (doc: RenderedDocument) =>
+    /<w:style [^>]*w:styleId="Heading4"[\s\S]*?<\/w:style>/.exec(readZipText(await writeDocx(doc), "word/styles.xml"))?.[0] ?? ""
+
+  it("format fpt ⇒ Heading 4 là 12pt đậm (nhỏ hơn Heading 3 13pt); không đặt ⇒ giữ style mặc định như cũ", async () => {
+    const fpt = await heading4({ ...structuredClone(sample), format: "fpt" })
+    expect(fpt).toContain('<w:sz w:val="24"/>')
+    expect(fpt).toContain("<w:b/>")
+    expect(fpt).not.toContain("<w:color")
+
+    const mode1 = await heading4(structuredClone(sample))
+    expect(mode1).not.toContain('<w:sz w:val="24"/>')
+  })
+})
+
+describe("writeDocx — phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việt, không in mã luật)", () => {
+  const withFlags = (): RenderedDocument => {
+    const doc = structuredClone(sample)
+    doc.flagsAppendix = {
+      redOpen: [{ id: "FL001", rule_id: "section_empty", section: "5.5 Thuật ngữ", message: 'Mục bắt buộc "5.5 Glossary" chưa có dữ liệu' }],
+      staleCount: 0,
+      waived: []
+    }
+    return doc
+  }
+
+  it("flagLanguage vi ⇒ tiêu đề cột tiếng Việt + nhãn luật thay mã", async () => {
+    const { value } = await mammoth.extractRawText({ buffer: await writeDocx(withFlags(), { flagLanguage: "vi" }) })
+    expect(value).toContain("Lỗi đỏ đang mở")
+    expect(value).toContain("Loại lỗi")
+    expect(value).toContain("Mục còn trống")
+    expect(value).not.toContain("section_empty")
+    expect(value).not.toContain("Open Red Flags")
+  })
+
+  it("mặc định (mode 2) giữ nguyên tiếng Anh", async () => {
+    const { value } = await mammoth.extractRawText({ buffer: await writeDocx(withFlags()) })
+    expect(value).toContain("Open Red Flags")
+    expect(value).toContain("section_empty")
   })
 })

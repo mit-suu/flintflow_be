@@ -45,7 +45,7 @@ describe("GET /api/v1/projects/:id/spine", () => {
     expect(foreign.status).toBe(404)
     expect(foreign.body.error.code).toBe("PROJECT_NOT_FOUND")
 
-    const token = await authAs(owner.user)
+    const token = await authAs({ ...owner.user, orgId: owner.orgId })
     const malformed = await request(app).get("/api/v1/projects/not-an-id/spine").set("Authorization", `Bearer ${token}`)
     expect(malformed.status).toBe(404)
   })

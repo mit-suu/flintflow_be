@@ -6,7 +6,9 @@ import swaggerUi from "swagger-ui-express"
 import { env } from "./config/env.js"
 import { connectDB } from "./config/database.js"
 import { specs } from "./config/swagger.js"
-import { errorHandler } from "./shared/middlewares/error-handler.js"
+import { errorHandler, notFoundHandler } from "./shared/middlewares/error-handler.js"
+import { CorsRejectedError } from "./shared/utils/client-error.js"
+import { installZodLocale } from "./shared/utils/validation-message.js"
 import authRoutes from "./modules/auth/auth.route.js"
 import userRoutes from "./modules/user/user.route.js"
 import aiActionRoutes from "./shared/ai/ai-action.route.js"
@@ -24,11 +26,20 @@ import renderRoutes from "./modules/render/render.route.js"
 import exportRoutes from "./modules/render/export.route.js"
 import feedbackRoutes from "./modules/feedback/feedback.route.js"
 import folderRoutes from "./modules/folder/folder.route.js"
+import organizationRoutes from "./modules/organization/organization.route.js"
+import invitationRoutes from "./modules/organization/invitation.route.js"
 import importRoutes from "./modules/import/import.route.js"
 import changeRequestRoutes from "./modules/change-request/change-request.route.js"
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
+import { authMiddleware } from "./shared/auth/auth.middleware.js"
+import { requireActiveAccount } from "./shared/auth/account-guard.middleware.js"
+import { orgContext } from "./shared/auth/org-context.middleware.js"
+import { viewerReadOnly } from "./shared/auth/viewer-read-only.middleware.js"
+
+// Câu lỗi mặc định của Zod sang tiếng Việt, đánh dấu issue không có câu do schema tự viết (FLF-247)
+installZodLocale()
 
 const app = express()
 
@@ -79,7 +90,7 @@ app.use(
           return callback(null, true)
         }
         // Production: reject nghiêm ngặt — không cho phép origin không có trong whitelist
-        return callback(new Error(`CORS: Origin '${origin}' is not allowed`))
+        return callback(new CorsRejectedError(origin))
       }
     },
     credentials: true,
@@ -130,6 +141,36 @@ app.use(
   })
 )
 
+/**
+ * BPMN Flow 10 — chuỗi kiểm quyền chạy TRƯỚC mọi request vào tài nguyên của tổ chức:
+ *   10.1 token → 10.4 account còn hiệu lực (chặn tài khoản bị khoá, UC-66)
+ *   → 10.6 membership + vai trò trong org đang mở (chặn người vừa bị xoá khỏi org, UC-74)
+ *
+ * Đặt ở tầng app theo tiền tố thay vì gắn vào từng route: 119 chỗ đang dùng authMiddleware, gắn tay từng
+ * chỗ thì chắc chắn sót. Route con vẫn giữ authMiddleware của nó — chạy hai lần là vô hại.
+ * Vai trò cụ thể (Lead / Analyst / Viewer) do requireRole ở từng route quyết định (10.7).
+ */
+const orgGuard = [authMiddleware, requireActiveAccount, orgContext] as const
+// Viewer chỉ đọc — chặn mọi thao tác ghi ở một chỗ. Allowlist "ghép tài liệu": chỉ dựng bản đọc từ Spine, không
+// sửa nội dung; chặn thì Viewer không đọc được bản nháp nào chưa có ai ghép.
+app.use("/api/v1/projects", ...orgGuard, viewerReadOnly([new RegExp("^/[^/]+/assemble$")]))
+app.use("/api/v1/folders", ...orgGuard, viewerReadOnly())
+
+/**
+ * BPMN Flow 10.4 áp cho MỌI request đã đăng nhập, không riêng tài nguyên org: tài khoản bị khoá (UC-66)
+ * phải mất quyền ngay, kể cả ở thông báo, góp ý hay lệnh AI.
+ *
+ * KHÔNG mount ở "/api/v1/billing": POST /billing/payment-callback là webhook của payment_service và
+ * không mang token — chặn ở prefix sẽ làm hỏng thanh toán thật. Ở đó guard gắn vào từng route có auth.
+ * "/api/v1/admin" cũng không cần: adminMiddleware đã đọc account từ DB và kiểm isActive.
+ */
+const accountGuard = [authMiddleware, requireActiveAccount] as const
+app.use("/api/v1/users", ...accountGuard)
+app.use("/api/v1/notifications", ...accountGuard)
+app.use("/api/v1/feedback", ...accountGuard)
+app.use("/api/v1/ai-actions", ...accountGuard)
+app.use("/api/v1/export", ...accountGuard)
+
 // API Routes
 app.use("/api/v1/auth", authRoutes)
 app.use("/api/v1/users", userRoutes)
@@ -153,7 +194,12 @@ app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/feedback", feedbackRoutes)
 app.use("/api/v1/folders", folderRoutes)
+app.use("/api/v1/orgs", organizationRoutes)
+app.use("/api/v1/invitations", invitationRoutes)
 app.use("/api/v1/export", exportRoutes)
+
+// Không route nào khớp ⇒ 404 JSON (envelope chung), không phải trang HTML của Express
+app.use(notFoundHandler)
 
 // Global Error Handler Middleware
 app.use(errorHandler)

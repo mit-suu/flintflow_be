@@ -31,6 +31,7 @@ import { listSections } from "../spine/section-registry.js"
 import { computeSectionStates, readiness, type SectionStateView } from "../spine/section-status.js"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
+import { systemName } from "../spine/system-name.js"
 import { Baseline } from "../spine/baseline.model.js"
 // T15 review T5: đọc Change model trực tiếp (chỉ đọc) — projection nhẹ cho §I, không qua
 // spine.repository.listChanges (tải cả before/value, không cần cho Record of Changes).
@@ -38,6 +39,7 @@ import { Change as ChangeModel } from "../spine/change.model.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
+import { capitalize, sectionLabel } from "../spine/human-labels.js"
 import {
   renderSection,
   sectionHeadingOf,
@@ -51,6 +53,7 @@ import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
+import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
   FlagRow,
@@ -65,10 +68,13 @@ import { ApiError } from "../../shared/utils/api-error.js"
 
 export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
 
-/** 409 — `GET /document` hoặc `GET /export/word` với `source=draft` trước khi `POST /assemble` chạy lần nào. */
+/**
+ * 409 — `source=draft` khi project chưa có gì để dựng tài liệu (chưa có Spine: dự án vừa tạo, chưa chạy bước nào).
+ * Từ FLF-264, Spine đã có thì `GET /document` tự dựng bản thiếu, nên lỗi này không còn nghĩa "chưa chạy S-8.2".
+ */
 export class NoWorkingDraftError extends ApiError {
   constructor() {
-    super(409, "Document has not been assembled yet. Run POST /assemble first (S-8.2).", NO_WORKING_DRAFT)
+    super(409, "Dự án chưa có nội dung nào để dựng tài liệu.", NO_WORKING_DRAFT)
   }
 }
 
@@ -184,6 +190,8 @@ const unassignedFunctionsSection = (number: string): RenderedSection => ({
 export type DiagramPngLoader = (projectId: string, diagramId: string) => Promise<string | null>
 
 const defaultDiagramPngLoader: DiagramPngLoader = async (projectId, diagramId) => {
+  // Phase 5 (T3): ảnh gốc của mục riêng — lấy từ file upload, không phải file diagram
+  if (isMediaId(diagramId)) return loadImportMedia(projectId, diagramId.slice(MEDIA_PREFIX.length)).catch(() => null)
   try {
     const file = await loadDiagramFile(projectId, diagramId, "png")
     return file.data.toString("base64")
@@ -213,8 +221,11 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
     const batch = diagramIds.slice(i, i + IMAGE_LOAD_BATCH_SIZE)
     const results = await Promise.all(batch.map(async (id) => [id, await load(projectId, id)] as const))
     for (const [id, png] of results) {
-      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do
-      if (png === null || png.length === 0) missing.push(id)
+      // File rỗng cũng là thiếu: writer không nhúng được và người đọc cần thấy placeholder có lý do.
+      // Ảnh gốc không nhúng được (EMF/WMF…) không phải "diagram chưa render" — không đưa vào `missing` (khỏi kiểm lại mãi)
+      if (png === null || png.length === 0) {
+        if (!isMediaId(id)) missing.push(id)
+      }
       else loaded.set(id, png)
     }
   }
@@ -224,7 +235,11 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
 const preloadDiagramPngs = (projectId: string, spine: Spine, load: DiagramPngLoader): Promise<ImageLoadResult> =>
   loadDiagramPngs(
     projectId,
-    spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+    [
+      ...spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+      // Phase 5 (T3): ảnh gốc trong mục riêng
+      ...new Set(spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image" && b.image_ref).map((b) => mediaId(b.image_ref!))))
+    ],
     load
   )
 
@@ -250,7 +265,10 @@ const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) =
     const id = refDiagramId(b)
     if (id === null || !isImageBlock(b)) return b
     const png = resolve(id)
-    return png ? { ...b, png } : { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
+    if (png) return { ...b, png }
+    // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}original image could not be embedded (unsupported format)` }
+    return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
 }
@@ -325,6 +343,7 @@ interface ChangeRecordDoc {
   by: string
   reason: string | null
   op: string
+  path: string
   step_id: string | null
 }
 
@@ -341,11 +360,13 @@ const listChangesForRecord = async (projectId: string): Promise<ChangeRecordRow[
     by: d.by,
     reason: d.reason,
     op: d.op,
+    path: d.path,
     step_id: d.step_id
   }))
 }
 
 const SYSTEM_ACTOR = "system"
+const IMPORT_ACTOR = "import"
 const shortenId = (id: string): string => (id.length > 10 ? `${id.slice(0, 8)}…` : id)
 
 /**
@@ -361,6 +382,8 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
   const nameById = new Map(users.map((u) => [String(u._id), (u.name && u.name.trim()) || u.email]))
   return (by: string): string => {
     if (by === SYSTEM_ACTOR) return "System"
+    // Mode 1: lô ghi lúc nhập tài liệu (finalize/check) mang `by: "import"` — không phải người, không in mã thô
+    if (by === IMPORT_ACTOR) return "FlintFlow (import)"
     return nameById.get(by) ?? shortenId(by)
   }
 }
@@ -369,14 +392,16 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
 
 const buildFlagRow = (spine: Spine, flag: Flag, numbers: Map<string, string>, titles?: Map<string, string>): FlagRow => {
   // Layout người dùng (có `titles`): số hiệu mẫu FPT không còn đúng ⇒ không suy từ khoá logic
-  const fallbackNumber = titles ? "" : flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : flag.section_id
+  const fallbackNumber = titles ? "" : flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : ""
   const number = numbers.get(flag.section_id) ?? fallbackNumber
-  let heading = titles?.get(flag.section_id) ?? flag.section_id
+  let heading = titles?.get(flag.section_id) ?? ""
   if (!titles?.has(flag.section_id)) {
     try {
       heading = sectionHeadingOf(spine, flag.section_id)
     } catch {
-      // section_id không phân giải được (dữ liệu cũ, mục riêng đã xoá) — giữ khoá logic thô thay vì ném lỗi cả tài liệu
+      // section_id không phân giải được (dữ liệu cũ, mục riêng đã xoá) — nhãn chung thay vì khoá logic thô hay ném lỗi cả
+      // tài liệu. Mode 1 (có `titles`) nói tiếng Việt như thông điệp cờ; mode 2 giữ tài liệu tiếng Anh.
+      heading = titles ? capitalize(sectionLabel(flag.section_id, spine)) : "(removed section)"
     }
   }
   const row: FlagRow = { id: flag.id, rule_id: flag.rule_id, section: `${number} ${heading}`.trim(), message: flag.message }
@@ -447,6 +472,8 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
       number: numbers.get(def.id) ?? "",
       diagramPng,
       numberOf: numberOfCtx,
+      // Tài liệu theo mẫu FPT: §3.x.y dùng khung mục FPT (mode 1 đi `layout-sections.ts`, giữ khung cũ)
+      functionLayout: "fpt",
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
@@ -480,11 +507,28 @@ export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | nul
 
 /** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1, language: 1 }, { lean: true })) as
-    | { layout?: TemplateLayout["layout"]; language?: string }
+  const profile = (await TemplateProfile.findOne(
+    { projectId },
+    { layout: 1, language: 1, legacy_record_of_changes: 1, non_screen_table: 1, function_originals: 1 },
+    { lean: true }
+  )) as
+    | {
+        layout?: TemplateLayout["layout"]
+        language?: string
+        legacy_record_of_changes?: TemplateLayout["legacyRecord"]
+        non_screen_table?: string[]
+        function_originals?: TemplateLayout["functionOriginals"]
+      }
     | null
   if (!profile?.layout?.length) return null
-  return { layout: profile.layout, language: profile.language ?? "en" }
+  return {
+    layout: profile.layout,
+    language: profile.language ?? "en",
+    legacyRecord: profile.legacy_record_of_changes ?? [],
+    // FLF-252: import trước khi có các field này ⇒ không truyền, bản in giữ cách cũ
+    ...(profile.non_screen_table?.length ? { nonScreenTable: profile.non_screen_table } : {}),
+    ...(profile.function_originals?.length ? { functionOriginals: profile.function_originals } : {})
+  }
 }
 
 const defaultDeps = (): AssembleDeps => ({ loadDiagramPng: defaultDiagramPngLoader, now: () => new Date(), loadTemplate: loadTemplateLayout })
@@ -541,15 +585,19 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
 
   const refDoc: RenderedDocument = {
     projectId,
-    projectName,
+    // FLF-177: bìa, tiêu đề và tên file in tên hệ thống; chưa đặt ⇒ tên project như trước
+    projectName: systemName(spine.project, projectName),
     version,
     source,
     generatedAt: deps.now().toISOString(),
     sections,
-    recordOfChanges: buildRecordOfChanges(input.recordChanges, deps.resolveInCharge),
+    // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, deps.resolveInCharge)],
     flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
+  // Không có layout file người dùng ⇒ mẫu FPT (FLF-214: style heading con của §3.x.y)
+  if (!input.template) refDoc.format = "fpt"
   return { refDoc, images }
 }
 
@@ -602,25 +650,26 @@ export async function assemble(
   // T15 review T3: assemble chỉ ĐỌC Spine — tạo Spine rỗng là việc của spine.repository/op-engine,
   // không phải của bước assemble (trước đây dùng getOrCreate, âm thầm ghi Spine rỗng nếu chưa có).
   const record = await spineRepository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", spineRepository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   if (record.spine_version !== baseVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
   }
 
   const cached = await RenderedDocumentCache.findOne({ projectId, spine_version: record.spine_version }, null, { lean: true })
-  if (cached) {
-    // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài.
-    const parsed = renderedDocumentSchema.safeParse(cached.doc)
-    if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
+  // T15 review T2: cache hỏng (dữ liệu cũ, lỗi ghi thủ công…) không được làm 500 lộ chi tiết ra ngoài. FLF-264: cũng
+  // không còn là lỗi 422 trả cho người dùng — dựng lại đè lên là việc của code, không phải việc họ phải xử lý.
+  const parsedCache = cached ? renderedDocumentSchema.safeParse(cached.doc) : null
+  if (cached && parsedCache?.success) {
     // Trúng cache vẫn báo ảnh thiếu — client gọi lại cùng version không bị mất lý do; ảnh đã có lại thì hết báo
     const stillMissing = await recheckMissingImages(projectId, cached._id, cached.missing_diagram_ids ?? [], merged.loadDiagramPng)
     return {
       spine_version: record.spine_version,
-      sections: countRealSections(parsed.data.sections),
-      generated_at: parsed.data.generatedAt,
+      sections: countRealSections(parsedCache.data.sections),
+      generated_at: parsedCache.data.generatedAt,
       findings: missingImageFindings(stillMissing)
     }
   }
+  if (cached) console.warn(`[render] cache tài liệu v${record.spine_version} của project ${projectId} không hợp khuôn — dựng lại`)
 
   const { projectId: _projectId, ...spine } = record
   const changes = await spineRepository.listChanges(projectId)
@@ -676,22 +725,73 @@ export interface DocumentQuery {
   baseline_id?: string
 }
 
-const getDraftDocument = async (projectId: string, loadDiagramPng: DiagramPngLoader): Promise<RenderedDocument> => {
+/**
+ * Bản dựng trong cache: đúng `spineVersion` khi truyền số, bản mới nhất khi truyền `null`.
+ * `null` trả về ⇒ chưa có bản nào dùng được — kể cả khi cache tồn tại nhưng nội dung không còn hợp khuôn
+ * (dữ liệu cũ, ghi tay): lượt đọc kế dựng lại đè lên, không bắt người dùng xử lý một lỗi của cache.
+ */
+const loadDraftCache = async (projectId: string, spineVersion: number | null, load: DiagramPngLoader): Promise<RenderedDocument | null> => {
   const cached = await RenderedDocumentCache.findOne(
-    { projectId, spine_version: { $exists: true } },
+    spineVersion === null ? { projectId, spine_version: { $exists: true } } : { projectId, spine_version: spineVersion },
     null,
     { lean: true, sort: { spine_version: -1 } }
   )
-  if (!cached) throw new NoWorkingDraftError()
+  if (!cached) return null
   const parsed = renderedDocumentSchema.safeParse(cached.doc)
-  if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
-  return rehydrateImages(parsed.data, projectId, loadDiagramPng)
+  if (!parsed.success) {
+    console.warn(`[render] cache tài liệu của project ${projectId} không hợp khuôn — dựng lại`)
+    return null
+  }
+  return rehydrateImages(parsed.data, projectId, load)
+}
+
+/**
+ * Lượt dựng đang chạy, khoá theo `(project, spine_version)`: nhiều tab cùng mở một project chưa có bản dựng ở
+ * version hiện tại thì dùng chung một lượt. Dựng trùng vốn vô hại (tất định, `upsertCache` chịu được đua ghi),
+ * gom lại chỉ để khỏi phí.
+ */
+const assemblingNow = new Map<string, Promise<AssembleResult>>()
+
+const assembleShared = (projectId: string, projectName: string, spineVersion: number, deps: AssembleDeps): Promise<AssembleResult> => {
+  const key = `${projectId}:${spineVersion}`
+  const running = assemblingNow.get(key)
+  if (running) return running
+  const task = assemble(projectId, projectName, spineVersion, deps).finally(() => assemblingNow.delete(key))
+  assemblingNow.set(key, task)
+  return task
+}
+
+const isSpineVersionConflict = (err: unknown): boolean => err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT
+
+/**
+ * Tài liệu bản nháp ở `spine_version` hiện tại. Chưa có bản dựng ở version đó — lần đọc đầu, hoặc Spine vừa đi
+ * tiếp sau một step / lệnh sửa — thì dựng ngay tại đây thay vì trả bản cũ và chờ ai đó bấm một nút: dựng là thao
+ * tác tất định, idempotent theo version, không gọi model và đo được ~20ms cho một SRS 19 màn, nên nó là chi tiết
+ * nội bộ chứ không phải một quyết định của người dùng.
+ */
+const getDraftDocument = async (projectId: string, projectName: string, deps: AssembleDeps): Promise<RenderedDocument> => {
+  const record = await spineRepository.get(projectId)
+  // Dự án chưa có Spine (vừa tạo, chưa chạy bước nào): không có gì để dựng — caller trả trạng thái "chưa có"
+  if (!record) throw new NoWorkingDraftError()
+
+  const current = await loadDraftCache(projectId, record.spine_version, deps.loadDiagramPng)
+  if (current) return current
+
+  // `SPINE_VERSION_CONFLICT`: Spine đi tiếp ngay giữa lúc đọc version và dựng (một step khác đang chạy). Bản vừa
+  // dựng ở version cũ vẫn đọc được và lượt đọc kế sẽ bắt kịp — không chặn lượt xem hiện tại vì một cuộc đua.
+  await assembleShared(projectId, projectName, record.spine_version, deps).catch((err: unknown) => {
+    if (!isSpineVersionConflict(err)) throw err
+  })
+
+  const built = await loadDraftCache(projectId, null, deps.loadDiagramPng)
+  if (!built) throw new NoWorkingDraftError()
+  return built
 }
 
 /** Mã baseline hiển thị `BLnnn` — `Spine.baselines[].id` do `baseline.service.nextBaselineId` sinh. */
 const BASELINE_DISPLAY_ID = /^BL\d+$/
 
-const baselineNotFound = (): ApiError => new ApiError(404, "Baseline không tồn tại", "BASELINE_NOT_FOUND")
+const baselineNotFound = (): ApiError => new ApiError(404, "Không tìm thấy bản baseline này.", "BASELINE_NOT_FOUND")
 
 /**
  * `baseline_id` của `GET /document` và `GET /export/word` nhận cả `_id` Mongo (= `snapshot_ref`) lẫn mã `BLnnn`
@@ -725,15 +825,14 @@ const getBaselineDocument = async (
   // T15 review T5: baseline bất biến — cache theo baseline._id, không dựng lại mỗi lần xem.
   const cacheFilter = { projectId, baseline_id: baselineIdStr }
   const cached = await RenderedDocumentCache.findOne(cacheFilter, null, { lean: true })
-  if (cached) {
-    const parsed = renderedDocumentSchema.safeParse(cached.doc)
-    if (!parsed.success) throw new ApiError(422, "Bản ghi cache RenderedDocument không hợp lệ", "RENDERED_DOCUMENT_INVALID")
-    return rehydrateImages(parsed.data, projectId, deps.loadDiagramPng)
-  }
+  const parsedCache = cached ? renderedDocumentSchema.safeParse(cached.doc) : null
+  if (parsedCache?.success) return rehydrateImages(parsedCache.data, projectId, deps.loadDiagramPng)
+  // Cache hỏng: snapshot của baseline là bất biến nên dựng lại từ nó luôn đúng — không trả lỗi cho người dùng
+  if (cached) console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
 
   // T15 review T2: snapshot hỏng (dữ liệu cũ, migrate lỗi…) không được làm 500 lộ chi tiết ra ngoài.
   const parsedSpine = spineSchema.safeParse(baseline.snapshot)
-  if (!parsedSpine.success) throw new ApiError(422, "Baseline snapshot không hợp lệ", "BASELINE_SNAPSHOT_INVALID")
+  if (!parsedSpine.success) throw new ApiError(422, "Dữ liệu của bản baseline này bị lỗi nên chưa xuất được.", "BASELINE_SNAPSHOT_INVALID")
   const spine = parsedSpine.data
 
   // §I hiển thị lịch sử đầy đủ hiện có (chưa có mốc "seq tại lúc ký" trong Baseline — T19 chưa chốt);
@@ -771,7 +870,7 @@ export async function getDocument(
 ): Promise<RenderedDocument> {
   const merged: AssembleDeps = { ...defaultDeps(), ...deps }
   if (query.source === "baseline") return getBaselineDocument(projectId, projectName, query.baseline_id, merged)
-  return getDraftDocument(projectId, merged.loadDiagramPng)
+  return getDraftDocument(projectId, projectName, merged)
 }
 
 // ─── mode 1 v2: file version tài liệu dựng từ snapshot Spine (FLF-184) ──

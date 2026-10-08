@@ -13,11 +13,12 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 import { Project } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
-import { ExtractionDraft } from "./extraction-draft.model.js"
-import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
+import { needsConfirm } from "./import.constants.js"
 import type { GetImportResponse, ImportedDocumentDto, MappingPatchRequest, ReviewField, TemplateProfileDto } from "./import.dto.js"
-import { assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
+import { IMPORT_STATUS_LABELS, assertTransition, hasBaseline, type ImportStatus } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
+import { legacyRecordRows } from "./legacy-record.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { toIso } from "./mode1.http.js"
 import { parseDocument, type ParsedBlock } from "./parse.service.js"
@@ -61,7 +62,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     section_id: h.section_id,
     confidence: h.confidence,
     detected_by: h.detected_by,
-    confirmed: h.confirmed
+    confirmed: h.confirmed,
+    ...(h.template_section ? { template_section: h.template_section } : {})
   })),
   table_map: p.table_map.map((t) => ({
     block_id: t.block_id,
@@ -69,11 +71,21 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     header: t.header,
     field_path: t.field_path ?? null,
     confidence: t.confidence,
-    confirmed: t.confirmed
+    confirmed: t.confirmed,
+    ...(t.role ? { role: t.role } : {}),
+    ...(t.samples?.length ? { samples: [...t.samples] } : {})
   })),
   required_sections: [...p.required_sections],
   language: p.language,
-  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id }))
+  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id })),
+  template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
+  record_of_changes: (p.legacy_record_of_changes ?? []).map((r) => ({
+    date: r.date,
+    version: r.version,
+    change_type: r.change_type,
+    in_charge: r.in_charge,
+    description: r.description
+  }))
 })
 
 // ─── trạng thái ──────────────────────────────────────────────────
@@ -107,10 +119,10 @@ export const requireImport = async (projectId: string, importId: string): Promis
 
 export const assertImportStatus = (doc: IImportedDocument, allowed: readonly ImportStatus[], to: ImportStatus): void => {
   if (doc.status === "awaiting_latest_confirm" && !allowed.includes("awaiting_latest_confirm")) {
-    throw new Mode1Error("IMPORT_NEEDS_LATEST_CONFIRM", "Cần xác nhận đây là bản mới nhất trước (nút 1.3)", { import_id: String(doc._id) })
+    throw new Mode1Error("IMPORT_NEEDS_LATEST_CONFIRM", "Cần xác nhận đây là bản mới nhất của tài liệu trước", { import_id: String(doc._id) })
   }
   if (!allowed.includes(doc.status)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", `Không thực hiện được khi import đang ở "${doc.status}"`, { status: doc.status, to, allowed })
+    throw new Mode1Error("IMPORT_INVALID_STATE", `Không thực hiện được khi lần nhập tài liệu đang ở bước "${IMPORT_STATUS_LABELS[doc.status] ?? doc.status}"`, { status: doc.status, to, allowed })
   }
 }
 
@@ -119,7 +131,7 @@ export const assertImportStatus = (doc: IImportedDocument, allowed: readonly Imp
 export const uploadImport = async (projectId: string, userId: string, file: UploadedFile): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Project đã có baseline v0 — upload bản mới qua /reupload để xem khác biệt", {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án đã có bản gốc — hãy tải bản mới bằng chức năng tải lại để xem khác biệt", {
       status: current.status,
       to: "uploaded",
       allowed: []
@@ -187,7 +199,9 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   section_id: sectionId,
   mentions: b.mentions,
   editable: b.editable,
-  locked_by_cr: null
+  locked_by_cr: null,
+  image_ref: b.image_ref ?? null,
+  ...(b.kind === "table" && b.rows ? { rows: b.rows } : {})
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.0`). */
@@ -203,9 +217,11 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const { blocks } = await parseDocument(await loadImportFile(doc))
   const profile = matchProfile(blocks)
   const sections = assignBlockSections(blocks, profile.heading_map)
+  // Record of Changes đọc ngay lúc tách file (FLF-252) — wizard cho người dùng xem/sửa trước khi tạo baseline 0.0
+  const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile })
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, legacy_record_of_changes })
   await transitionImport(doc, needsMappingReview(profile) ? "mapping_review" : "extracting")
 }
 
@@ -228,20 +244,20 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   const doc = await requireImport(projectId, body.import_id)
   assertImportStatus(doc, ["mapping_review"], "extracting")
   const profile = await TemplateProfile.findOne({ projectId })
-  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa có template profile", { status: doc.status, to: "extracting", allowed: [] })
+  if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "extracting", allowed: [] })
 
   for (const h of body.headings) {
     const entry = profile.heading_map.find((e) => e.block_id === h.block_id)
-    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Block ${h.block_id} không phải heading của tài liệu`, { status: doc.status, to: "extracting", allowed: [] })
+    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", "Tiêu đề được chọn không có trong tài liệu", { status: doc.status, to: "extracting", allowed: [] })
     if (!isKnownSectionId(h.section_id)) {
-      throw new Mode1Error("IMPORT_INVALID_STATE", `Section "${h.section_id}" không có trong registry`, { status: doc.status, to: "extracting", allowed: [] })
+      throw new Mode1Error("IMPORT_INVALID_STATE", "Mục được chọn không có trong mẫu FPT", { status: doc.status, to: "extracting", allowed: [] })
     }
     entry.section_id = h.section_id
     entry.confirmed = true
   }
   for (const t of body.tables) {
     const entry = profile.table_map.find((e) => e.block_id === t.block_id && e.column_index === t.column_index)
-    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Cột ${t.column_index} của bảng ${t.block_id} không có`, { status: doc.status, to: "extracting", allowed: [] })
+    if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Không tìm thấy cột thứ ${t.column_index + 1} của bảng đã chọn`, { status: doc.status, to: "extracting", allowed: [] })
     entry.field_path = t.field_path
     entry.confirmed = true
   }
@@ -249,6 +265,15 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
     for (const e of [...profile.heading_map, ...profile.table_map]) e.confirmed = true
   }
   profile.required_sections = missingRequiredSections(profile.heading_map)
+  // Heading đổi sang / khỏi Record of Changes ⇒ đọc lại bảng lịch sử (FLF-252)
+  const recordBlocks = await DocBlock.find({ projectId: doc.projectId, doc_version: profile.doc_version, kind: { $in: ["heading", "table"] } })
+    .sort({ "anchor.ordinal": 1 })
+    .select("block_id kind level rows")
+    .lean()
+  profile.legacy_record_of_changes = legacyRecordRows(
+    recordBlocks.map((b) => ({ block_id: b.block_id, kind: b.kind, level: b.level ?? null, rows: b.rows ?? null })),
+    new Map(profile.heading_map.map((h) => [h.block_id, h.section_id]))
+  )
   profile.markModified("heading_map")
   profile.markModified("table_map")
   await profile.save()
@@ -259,13 +284,39 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
 
 // ─── UC-19 xem trạng thái ────────────────────────────────────────
 
-export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
-  const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
-  const review_fields: ReviewField[] = []
-  const sections = drafts.map((d) => {
-    const needing = d.fields.filter((f) => !f.confirmed && f.confidence < FIELD_CONFIDENCE_THRESHOLD)
-    for (const f of needing) {
-      review_fields.push({
+/** `actors[id=A01].kind` ⇒ `actors[id=A01]`; path không thuộc phần tử có khoá (`project.code`, `actors[]`) ⇒ null. */
+const entityPrefix = (path: string): string | null => /^[a-z_]+\[[a-z_]*=[^\]]+\]/.exec(path)?.[0] ?? null
+
+const NAME_FIELDS = [".name", ".term"] as const
+
+/**
+ * Tên phần tử theo mọi section của bản trích (`actors[id=A01]` ⇒ "Learner"). Phần tử đọc từ ảnh trùng phần tử đã có chỉ
+ * giữ field mới (FLF-252 — vd `kind`), tên nằm ở draft của nguồn trước ⇒ phải tra chéo section.
+ */
+const entityNames = (drafts: readonly Pick<IExtractionDraft, "fields">[]): Map<string, string> => {
+  const names = new Map<string, string>()
+  for (const d of drafts) {
+    for (const f of d.fields) {
+      const prefix = entityPrefix(f.path)
+      const v = f.edited_value ?? f.value
+      if (!prefix || names.has(prefix) || !NAME_FIELDS.some((n) => f.path === prefix + n)) continue
+      if (typeof v === "string" && v.trim()) names.set(prefix, v.trim())
+    }
+  }
+  return names
+}
+
+/** Field cần người xác nhận (1.9 / gap report) kèm tên phần tử để nhãn nói rõ đang hỏi phần tử nào. */
+export const toReviewFields = (
+  drafts: readonly Pick<IExtractionDraft, "section_id" | "fields">[],
+  keep: (f: ExtractedField) => boolean
+): ReviewField[] => {
+  const names = entityNames(drafts)
+  return drafts.flatMap((d) =>
+    d.fields.filter(keep).map((f) => {
+      const prefix = entityPrefix(f.path)
+      const name = prefix && !NAME_FIELDS.some((n) => f.path === prefix + n) ? names.get(prefix) : undefined
+      return {
         section_id: d.section_id,
         path: f.path,
         value: f.value,
@@ -273,12 +324,25 @@ export const extractionSummary = async (importId: mongoose.Types.ObjectId | stri
         source_block_ids: f.source_block_ids,
         origin: f.origin,
         confirmed: f.confirmed,
-        ...(f.edited_value !== undefined ? { edited_value: f.edited_value } : {})
-      })
-    }
-    return { section_id: d.section_id, status: d.status, fields_total: d.fields.length, fields_needing_review: needing.length, error: d.error ?? null }
-  })
-  return { sections, review_fields }
+        ...(f.edited_value !== undefined ? { edited_value: f.edited_value } : {}),
+        ...(name ? { entity_name: name } : {})
+      }
+    })
+  )
+}
+
+const awaitingConfirm = (f: ExtractedField): boolean => !f.confirmed && needsConfirm(f)
+
+export const extractionSummary = async (importId: mongoose.Types.ObjectId | string): Promise<GetImportResponse["extraction"]> => {
+  const drafts = await ExtractionDraft.find({ import_id: importId }).lean()
+  const sections = drafts.map((d) => ({
+    section_id: d.section_id,
+    status: d.status,
+    fields_total: d.fields.length,
+    fields_needing_review: d.fields.filter(awaitingConfirm).length,
+    error: d.error ?? null
+  }))
+  return { sections, review_fields: toReviewFields(drafts, awaitingConfirm) }
 }
 
 export const getImportView = async (projectId: string): Promise<GetImportResponse> => {

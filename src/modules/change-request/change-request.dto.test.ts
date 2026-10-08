@@ -1,12 +1,14 @@
 import mongoose from "mongoose"
 import { describe, it, expect } from "vitest"
 import {
+  addMaterialRequestSchema,
   answersRequestSchema,
   changeRequestDetailSchema,
   changeRequiresCrMetaSchema,
   closeRequestSchema,
   createChangeRequestSchema,
   groupDecisionRequestSchema,
+  materialParamsSchema,
   patchLocationRequestSchema
 } from "./change-request.dto.js"
 import { formatCrId } from "./change-request.constants.js"
@@ -34,14 +36,29 @@ describe("change-request DTO — request", () => {
     expect(createChangeRequestSchema.safeParse({ ...create, source: { kind: "rumor" } }).success).toBe(false)
   })
 
-  it("nguồn chat (FLF-182): CR tạo từ lệnh sửa trong chat sau baseline v1", () => {
-    expect(createChangeRequestSchema.parse({ ...create, source: { kind: "chat", ref: "chat-session 66f0…" } }).source.kind).toBe("chat")
+  it("mode 1 v3: tạo CR chỉ nhận 6 nguồn BPMN 3.1 — `chat` bị từ chối (lệnh trong chat là yêu cầu miệng); preview_id tuỳ chọn", () => {
+    expect(createChangeRequestSchema.safeParse({ ...create, source: { kind: "chat", ref: "chat-session 66f0…" } }).success).toBe(false)
+    expect(createChangeRequestSchema.parse({ ...create, source: { kind: "verbal", ref: "chat:66f0" } }).source.kind).toBe("verbal")
+    expect(createChangeRequestSchema.parse({ ...create, preview_id: "p-1" }).preview_id).toBe("p-1")
+    expect(createChangeRequestSchema.safeParse({ ...create, requester: "  " }).success).toBe(false)
   })
 
-  it("trả lời làm rõ: 1–20 câu, không rỗng", () => {
+  it("trả lời làm rõ: 1–20 câu; câu trả lời được để trống (= chưa biết, phase 7)", () => {
     expect(answersRequestSchema.safeParse({ answers: ["Mọi phiên, kể cả mobile"] }).success).toBe(true)
     expect(answersRequestSchema.safeParse({ answers: [] }).success).toBe(false)
-    expect(answersRequestSchema.safeParse({ answers: [""] }).success).toBe(false)
+    expect(answersRequestSchema.safeParse({ answers: [""] }).success).toBe(true)
+    expect(answersRequestSchema.safeParse({ answers: ["x".repeat(4001)] }).success).toBe(false)
+  })
+
+  it("phase 7: tạo CR kèm tối đa 5 đoạn văn bản nguồn; tài liệu dán qua /materials cần tên + nội dung", () => {
+    const base = { title: "Bổ sung NFR", description: "Thiếu mục hiệu năng", source: { kind: "gap_report" }, requester: "PM Lan" }
+    expect(createChangeRequestSchema.safeParse({ ...base, materials: [{ name: "Biên bản 23/09", text: "Phản hồi ≤ 2 s" }] }).success).toBe(true)
+    expect(createChangeRequestSchema.safeParse({ ...base, materials: Array.from({ length: 6 }, (_, i) => ({ name: `m${i}`, text: "x" })) }).success).toBe(false)
+    expect(createChangeRequestSchema.safeParse({ ...base, materials: [{ name: "", text: "x" }] }).success).toBe(false)
+    expect(addMaterialRequestSchema.safeParse({ name: "Email", text: "nội dung" }).success).toBe(true)
+    expect(addMaterialRequestSchema.safeParse({ name: "Email", text: "   " }).success).toBe(false)
+    expect(materialParamsSchema.safeParse({ crId: "CR-001", mid: "M01" }).success).toBe(true)
+    expect(materialParamsSchema.safeParse({ crId: "CR-001", mid: "X1" }).success).toBe(false)
   })
 
   it("sửa vị trí: kết luận nào cần field đó", () => {
@@ -56,12 +73,14 @@ describe("change-request DTO — request", () => {
     expect(patchLocationRequestSchema.safeParse({ conclusion: "not_related", reason: "Chỉ nói về đăng nhập" }).success).toBe(true)
   })
 
-  it("duyệt group: từ chối cần lý do ≥ 10 ký tự; luôn mang base_version", () => {
-    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", base_version: 7 }).success).toBe(true)
+  it("duyệt group: duyệt lẫn từ chối đều cần lý do ≥ 10 ký tự (BPMN 3.12); luôn mang base_version", () => {
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", base_version: 7 }).success).toBe(false)
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", reason: "ok", base_version: 7 }).success).toBe(false)
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", reason: "Đúng yêu cầu của khách", base_version: 7 }).success).toBe(true)
     expect(groupDecisionRequestSchema.safeParse({ decision: "rejected", base_version: 7 }).success).toBe(false)
     expect(groupDecisionRequestSchema.safeParse({ decision: "rejected", reason: "không", base_version: 7 }).success).toBe(false)
     expect(groupDecisionRequestSchema.safeParse({ decision: "rejected", reason: "Ngoài phạm vi bản 1.0", base_version: 7 }).success).toBe(true)
-    expect(groupDecisionRequestSchema.safeParse({ decision: "approved" }).success).toBe(false)
+    expect(groupDecisionRequestSchema.safeParse({ decision: "approved", reason: "Đúng yêu cầu của khách" }).success).toBe(false)
   })
 
   it("đóng / huỷ cần lý do", () => {
@@ -82,13 +101,17 @@ describe("change-request DTO — response", () => {
         requester: "PM Lan",
         status: "in_review",
         paused: null,
-        clarifications: [{ round: 1, questions: ["Có tính cả mobile?"], answers: ["Có"] }],
+        clarifications: [{ round: 1, questions: ["Có tính cả mobile?"], answers: ["Có"], suggestions: [["Có, mọi thiết bị", "Chỉ web"]] }],
         base_doc_version: "0.0",
         result_doc_version: null,
         created_by: "66f000000000000000000001",
         submitted_at: AT,
         decided_by: null,
         closed_reason: null,
+        seed: null,
+        materials: [{ material_id: "M01", kind: "file", name: "bien-ban.docx", text: "Phản hồi ≤ 2 s", truncated: false, round: 1, added_at: AT }],
+        missing_info: [],
+        amendments: [{ text: "Thêm cả app mobile", at: AT }],
         created_at: AT,
         updated_at: AT
       },
@@ -104,7 +127,7 @@ describe("change-request DTO — response", () => {
           owner_step: "S-3.2",
           conclusion: "edit",
           reason: "UC đăng xuất phải nói rõ mọi thiết bị",
-          proposal: { old_text: "{…Log out…}", new_text: "{…Sign out…}", comment_text: null, spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out of all devices" }] },
+          proposal: { old_text: "{…Log out…}", new_text: "{…Sign out…}", comment_text: null, spine_ops: [{ op: "set", path: "use_cases[id=UC-2.4].name", value: "Sign out of all devices" }], assumptions: [] },
           manual: false,
           redo_count: 0,
           verify: { code_ok: true, violations: [], ai_flags: [], at: AT },

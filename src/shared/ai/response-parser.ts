@@ -2,15 +2,44 @@ import { z } from "zod"
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 // Schemas per ActionType
-export const chatQuestionSchema = z.object({
+/** Lựa chọn của một câu hỏi, đã chuẩn hoá — cùng hình dạng `options` trong hợp đồng `Question`. */
+export interface QuestionOption {
+  label: string
+  description?: string
+  preview?: string
+}
+
+/** Chuỗi model bỏ trống hoặc để `null` coi như không có — một field thừa không được làm hỏng cả lượt hỏi. */
+const optionalText = z.string().nullish().transform((v) => (v == null || v.trim() === "" ? undefined : v))
+
+/** Model mới trả `{label, description?, preview?}`; prompt cũ (và tin nhắn cũ) trả chuỗi trơn. */
+const modelOptionSchema = z.union([
+  z.string().transform((label): QuestionOption => ({ label })),
+  z.object({ label: z.string(), description: optionalText, preview: optionalText }).transform(
+    ({ label, description, preview }): QuestionOption => ({ label, ...(description ? { description } : {}), ...(preview ? { preview } : {}) })
+  )
+])
+
+const questionFields = {
   question: z.string(),
-  suggestedAnswers: z.array(z.string()).default([]),
-  multiple: z.boolean().optional().default(false),
+  header: optionalText,
+  options: z.array(modelOptionSchema).optional(),
+  /** Dạng cũ trước FLF-220 — vẫn nhận, map sang `options`. */
+  suggestedAnswers: z.array(z.string()).optional(),
+  multiple: z.boolean().optional().default(false)
+}
+
+/** Gộp `suggestedAnswers` cũ vào `options`; `options` mới thắng khi có cả hai. */
+const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[] }>({ options, suggestedAnswers, ...rest }: T) => ({
+  ...rest,
+  options: options ?? (suggestedAnswers ?? []).map((label): QuestionOption => ({ label }))
 })
+
+export const chatQuestionSchema = z.object(questionFields).transform(toOptions)
 
 export const chatQuestionItemSchema = z.union([
   chatQuestionSchema,
-  z.string().transform((q) => ({ question: q, suggestedAnswers: [], multiple: false }))
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
 export const chatSchema = z.object({
@@ -24,6 +53,13 @@ export const summarizeDocumentSchema = z.object({
   summary: z.string(),
   keyThemes: z.array(z.string()).optional()
 })
+
+/** FLF-221: bản tiếng Anh của một câu giả định user vừa sửa. */
+export const translateSchema = z.object({
+  statement: z.string().trim().min(1)
+})
+
+export type TranslateOutput = z.infer<typeof translateSchema>
 
 // ─── Pipeline (T03): hợp đồng đầu ra cho T08/T11 ───────────────────
 // Model chỉ phát op; code áp op (Phases §2.1). Parse/validate thất bại thì
@@ -43,13 +79,40 @@ export const opTransactionSchema = z.object({
   notes: z.string().optional()
 })
 
-export const elicitSchema = z.object({
+/**
+ * Câu hỏi của vòng Elicit. `topic_key` (FLF-208 · R4) là khoá chủ đề để sổ quyết định chặn hỏi lặp;
+ * `conflict` là lời giải thích khi model CỐ Ý hỏi lại một chủ đề đã chốt (dữ liệu mới mâu thuẫn).
+ */
+export const elicitQuestionSchema = z.union([
+  z
+    .object({
+      ...questionFields,
+      topic_key: z.string().optional(),
+      conflict: z.string().optional(),
+      /** FLF-232: câu mở đã hỏi ngay trong `reply` — FE không vẽ lại thành thẻ; server vẫn theo dõi qua `topic_key`. */
+      inline: z.boolean().nullish().transform((v) => v ?? undefined)
+    })
+    .transform(toOptions),
+  z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
+])
+
+const elicitBaseSchema = z.object({
   reply: z.string(),
-  questions: z.array(chatQuestionItemSchema).default([])
+  questions: z.array(elicitQuestionSchema).default([])
 })
 
-/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. */
-export const discoveryStepSchema = elicitSchema.extend({
+/**
+ * Vòng hỏi của step. `settled` (FLF-221): khi user chat tự do lúc đang có câu chờ, model báo câu nào user đã trả lời
+ * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
+ */
+export const elicitSchema = elicitBaseSchema.extend({
+  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
+  /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
+  still_open: z.array(z.string()).optional()
+})
+
+/** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */
+export const discoveryStepSchema = elicitBaseSchema.extend({
   ops: z.array(opSchema).optional()
 })
 
@@ -128,6 +191,18 @@ export const importExtractSchema = z.object({
   unmapped_block_ids: z.array(blockIdRef).default([])
 })
 
+/** Loại diagram mà I-4 đọc được từ ảnh (mode 1 v3 phase 5); `other` ⇒ không đọc, giữ ảnh gốc. */
+export const DIAGRAM_IMAGE_KINDS = ["usecase", "erd", "screen_flow", "context", "other"] as const
+export type DiagramImageKind = (typeof DIAGRAM_IMAGE_KINDS)[number]
+
+/** I-4 phần ảnh: cùng hình item với `importExtract` + loại diagram. `other` thì `items` rỗng. */
+export const importExtractDiagramSchema = importExtractSchema.extend({
+  diagram_kind: z.enum(DIAGRAM_IMAGE_KINDS)
+})
+
+/** Mode 1 v3 phase 7 (CR_MATERIAL_IMAGE): chữ đọc được trong ảnh + mô tả ngắn cấu trúc. */
+export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) })
+
 /** Nút 1.11 (IMPORT_SEMANTIC_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
 export const findingsSchema = z.object({
   findings: z
@@ -147,6 +222,10 @@ export const crClarifySchema = z
   .object({
     ambiguous: z.boolean(),
     questions: z.array(z.string().min(1)).max(5).default([]),
+    /** Mode 1 v3 phase 7: dữ kiện cần để viết nội dung mà CR / câu trả lời / tài liệu chưa có (vòng cuối ⇒ C-4 giả định). */
+    missing_info: z.array(z.string().min(1)).max(10).default([]),
+    /** Đáp án gợi ý cho từng câu hỏi (song song `questions`, 0–4 mỗi câu) — người dùng bấm chọn thay vì tự gõ. */
+    suggestions: z.array(z.array(z.string().min(1)).max(4)).max(5).default([]),
     targets: z.object({
       entity_paths: z.array(z.string().min(1)).default([]),
       keywords: z.array(z.string().min(1)).default([])
@@ -170,7 +249,9 @@ export const crProposeSchema = z.object({
         reason: z.string().min(1),
         new_text: z.string().optional(),
         comment_text: z.string().min(1).optional(),
-        spine_ops: z.array(opSchema).default([])
+        spine_ops: z.array(opSchema).default([]),
+        /** Mode 1 v3 phase 7: dữ kiện model tự giả định khi viết đề xuất này. */
+        assumptions: z.array(z.string().min(1)).max(10).default([])
       })
       .refine((l) => l.conclusion !== "edit" || l.spine_ops.length > 0, { message: "edit cần spine_ops" })
       .refine((l) => l.conclusion !== "comment" || l.comment_text !== undefined, { message: "comment cần comment_text" })
@@ -179,9 +260,11 @@ export const crProposeSchema = z.object({
 })
 
 export type ImportExtractOutput = z.infer<typeof importExtractSchema>
+export type ImportExtractDiagramOutput = z.infer<typeof importExtractDiagramSchema>
 export type FindingsOutput = z.infer<typeof findingsSchema>
 export type CrClarifyOutput = z.infer<typeof crClarifySchema>
 export type CrProposeOutput = z.infer<typeof crProposeSchema>
+export type CrMaterialImageOutput = z.infer<typeof crMaterialImageSchema>
 
 export type SpineOp = z.infer<typeof opSchema>
 export type OpTransaction = z.infer<typeof opTransactionSchema>
@@ -206,10 +289,12 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CHANGE_INSTRUCTION]: "changeInstruction",
   [ActionType.RENDER_FIX]: "renderFix",
   [ActionType.IMPORT_EXTRACT_FIELDS]: "importExtract",
+  [ActionType.IMPORT_EXTRACT_DIAGRAM]: "importExtractDiagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "findings",
   [ActionType.CR_CLARIFY]: "crClarify",
   [ActionType.CR_PROPOSE]: "crPropose",
-  [ActionType.CR_CONSISTENCY]: "findings"
+  [ActionType.CR_CONSISTENCY]: "findings",
+  [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -226,11 +311,14 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.RENDER_FIX]: renderFixSchema,
   [ActionType.CHAT]: chatSchema,
   [ActionType.SUMMARIZE_DOCUMENT]: summarizeDocumentSchema,
+  [ActionType.TRANSLATE]: translateSchema,
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
+  [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
   [ActionType.CR_CLARIFY]: crClarifySchema,
   [ActionType.CR_PROPOSE]: crProposeSchema,
-  [ActionType.CR_CONSISTENCY]: findingsSchema
+  [ActionType.CR_CONSISTENCY]: findingsSchema,
+  [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema
 }
 
 export const extractJsonFromText = (
@@ -377,49 +465,33 @@ export function extractCleanReplyFromRawText(rawText: string): string {
  */
 export function extractQuestionsFallback(text: string): Array<{
   question: string
-  suggestedAnswers: string[]
+  options: QuestionOption[]
   multiple?: boolean
 }> {
-  const questions: Array<{ question: string; suggestedAnswers: string[]; multiple?: boolean }> = []
+  const questions: Array<{ question: string; options: QuestionOption[]; multiple?: boolean }> = []
+  const unescape = (value: string) => value.replace(/\\"/g, '"').replace(/\\n/g, "\n")
 
-  // Try to find individual question blocks: { "question": "...", "suggestedAnswers": [...] }
-  const blockRegex = /\{\s*"question"\s*:\s*"((?:[^"\\]|\\.)*?)"[\s\S]*?\}/g
-  let match: RegExpExecArray | null
+  // Mỗi khối chạy từ "question" tới trước "question" kế tiếp — option dạng object có "}" riêng nên
+  // không cắt khối ở dấu "}" đầu tiên được.
+  const starts = [...text.matchAll(/"question"\s*:\s*"/g)].map((m) => m.index ?? 0)
+  for (const [i, start] of starts.entries()) {
+    const blockStr = text.slice(start, starts[i + 1] ?? text.length)
+    const qMatch = blockStr.match(/^"question"\s*:\s*"((?:[^"\\]|\\.)*?)"/)
+    if (!qMatch || !qMatch[1]) continue
 
-  while ((match = blockRegex.exec(text)) !== null) {
-    const blockStr = match[0]
-    try {
-      const parsed = JSON.parse(blockStr)
-      if (parsed.question) {
-        questions.push({
-          question: parsed.question,
-          suggestedAnswers: Array.isArray(parsed.suggestedAnswers) ? parsed.suggestedAnswers : [],
-          multiple: Boolean(parsed.multiple)
-        })
-        continue
-      }
-    } catch (_) {}
-
-    // Regex extraction for question & answers inside block
-    const qMatch = blockStr.match(/"question"\s*:\s*"((?:[^"\\]|\\.)*?)"/)
-    if (qMatch && qMatch[1]) {
-      const qText = qMatch[1].replace(/\\"/g, '"').replace(/\\n/g, "\n")
-      const answers: string[] = []
-      const answersMatch = blockStr.match(/"suggestedAnswers"\s*:\s*\[([\s\S]*?)\]/)
+    const labels = [...blockStr.matchAll(/"label"\s*:\s*"((?:[^"\\]|\\.)*?)"/g)].map((m) => unescape(m[1]))
+    if (labels.length === 0) {
+      const answersMatch = blockStr.match(/"(?:suggestedAnswers|options)"\s*:\s*\[([\s\S]*?)\]/)
       if (answersMatch && answersMatch[1]) {
-        const itemRegex = /"((?:[^"\\]|\\.)*?)"/g
-        let aMatch: RegExpExecArray | null
-        while ((aMatch = itemRegex.exec(answersMatch[1])) !== null) {
-          answers.push(aMatch[1].replace(/\\"/g, '"'))
-        }
+        for (const aMatch of answersMatch[1].matchAll(/"((?:[^"\\]|\\.)*?)"/g)) labels.push(unescape(aMatch[1]))
       }
-      const multipleMatch = blockStr.match(/"multiple"\s*:\s*(true|false)/i)
-      questions.push({
-        question: qText,
-        suggestedAnswers: answers,
-        multiple: multipleMatch ? multipleMatch[1].toLowerCase() === "true" : false
-      })
     }
+    const multipleMatch = blockStr.match(/"multiple"\s*:\s*(true|false)/i)
+    questions.push({
+      question: unescape(qMatch[1]),
+      options: labels.map((label) => ({ label })),
+      multiple: multipleMatch ? multipleMatch[1].toLowerCase() === "true" : false
+    })
   }
 
   return questions

@@ -1,7 +1,7 @@
 import crypto from "crypto"
 import nodemailer from "nodemailer"
 import { env } from "../../config/env.js"
-import { getOtpEmailHtml, getOtpEmailText, type OtpPurpose } from "./templates.js"
+import { getOtpEmailHtml, getOtpEmailText, type OtpPurpose, getInvitationEmailHtml, getInvitationEmailText } from "./templates.js"
 
 let transporter: nodemailer.Transporter | null = null
 
@@ -102,3 +102,48 @@ export const sendVerificationOtpEmail = (toEmail: string, otp: string, name?: st
 
 export const sendPasswordResetOtpEmail = (toEmail: string, otp: string, name?: string): Promise<void> =>
   sendOtpEmail("reset_password", toEmail, otp, name)
+
+export interface OrgInvitationEmailInput {
+  name?: string
+  code: string
+  organizationName: string
+  roleLabel: string
+  inviterName: string
+  expiresInDays: number
+}
+
+/**
+ * UC-08 / BPMN Flow 9.2 — Email Service gửi mã mời cho người được mời.
+ * Cùng đường đi và cùng cách dự phòng như email OTP: SMTP chưa cấu hình hoặc gửi lỗi thì in ra console
+ * để dev vẫn lấy được mã mà chạy tiếp.
+ */
+export const sendOrgInvitationEmail = async (
+  toEmail: string,
+  input: OrgInvitationEmailInput
+): Promise<void> => {
+  const activeTransporter = getTransporter()
+
+  if (activeTransporter) {
+    try {
+      const sender = getSender()
+      await activeTransporter.sendMail({
+        from: sender,
+        to: toEmail,
+        subject: `Lời mời tham gia ${input.organizationName} trên FlintFlow`,
+        text: getInvitationEmailText(input),
+        html: getInvitationEmailHtml(input),
+        ...buildPersonalHeaders(sender)
+      })
+      console.log(`[EMAIL SERVICE] org invitation sent to ${toEmail}`)
+      return
+    } catch (error) {
+      console.error(`[EMAIL SERVICE ERROR] Failed to send invitation to ${toEmail}:`, error)
+    }
+  }
+
+  console.log("\n=======================================================")
+  console.log(`[DEV EMAIL SIMULATION] org invitation for ${toEmail}`)
+  console.log(`Organization: ${input.organizationName} · Role: ${input.roleLabel}`)
+  console.log(`Code: ${input.code}`)
+  console.log("=======================================================\n")
+}

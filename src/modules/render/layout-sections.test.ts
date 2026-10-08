@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
-import { buildLayoutSections, customBlocks, numberSections, placeSections, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
+import { buildLayoutSections, customBlocks, functionSourceHash, numberSections, placeSections, romanValue, type TemplateLayout, type TemplateLayoutEntry } from "./layout-sections.js"
 
 const entry = (order: number, heading_text: string, level: number, section_id: string): TemplateLayoutEntry => ({ order, heading_text, level, section_id })
 
@@ -159,6 +159,54 @@ describe("numberSections", () => {
   })
 })
 
+describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
+  const placed = (rows: [string, string, number, string][]) =>
+    rows.map(([section_id, title, level, label]) => ({ section_id, kind: "fpt" as const, title, level, fromLayout: true, typed: label !== "", label }))
+
+  it("file SRS thật: `I. Record of Changes` + `II. SRS` › chương 1..3 ⇒ II giữ nhãn, chương không bị đẩy sâu (3.1.2 vẫn là 3.1.2)", () => {
+    const numbered = numberSections(
+      placed([
+        ["custom:W", "Software Requirement Specification", 1, "II"],
+        ["fixed:1", "Product Overview", 2, "1"],
+        ["group:2", "User Requirements", 2, "2"],
+        ["fixed:2.1", "Actors", 3, "2.1"],
+        ["group:3", "Functional Requirements", 2, "3"],
+        ["group:3.1", "System Functional Overview", 3, "3.1"],
+        ["fixed:3.1.1", "Screens Flow", 4, "3.1.1"],
+        ["fixed:3.1.2", "Screen Descriptions", 4, "3.1.2"],
+        ["custom:APP", "Appendix", 1, ""]
+      ])
+    )
+    expect(numbered.map((n) => [n.section_id, n.number, n.renderLevel])).toEqual([
+      ["custom:W", "II", 1],
+      ["fixed:1", "1", 2],
+      ["group:2", "2", 2],
+      ["fixed:2.1", "2.1", 3],
+      ["group:3", "3", 2],
+      ["group:3.1", "3.1", 3],
+      ["fixed:3.1.1", "3.1.1", 4],
+      ["fixed:3.1.2", "3.1.2", 4],
+      ["custom:APP", "", 1] // ra khỏi phần; file gõ số tay nên heading không gõ số giữ không số
+    ])
+  })
+
+  it("La Mã làm chính số chương (`I.` › `1.1`) ⇒ không phải phần, đánh số như cũ", () => {
+    const numbered = numberSections(
+      placed([
+        ["fixed:1", "Introduction", 1, "I"],
+        ["custom:P", "Purpose", 2, "1.1"],
+        ["group:2", "Overall Description", 1, "II"],
+        ["fixed:2.1", "Actors", 2, "2.1"]
+      ])
+    )
+    expect(numbered.map((n) => n.number)).toEqual(["1", "1.1", "2", "2.1"])
+  })
+
+  it("romanValue", () => {
+    expect([romanValue("I"), romanValue("II"), romanValue("IV"), romanValue("IX"), romanValue("XII"), romanValue("2.1")]).toEqual([1, 2, 4, 9, 12, null])
+  })
+})
+
 describe("buildLayoutSections", () => {
   const build = (s: Spine = spine()) => buildLayoutSections(s, LAYOUT, [], { diagramPng: (id) => `ref:${id}` })
 
@@ -207,6 +255,154 @@ describe("buildLayoutSections", () => {
   })
 })
 
+describe("FLF-252 — bảng Non-Screen Functions + chức năng chỉ có ở bảng (SRS WDP301)", () => {
+  const fn = (id: string, name: string, feature_id: string, screen_id: string | null, order: number, detailed: boolean): Spine["functions"][number] => ({
+    id,
+    screen_id,
+    feature_id,
+    order,
+    name,
+    trigger: detailed ? "On demand" : "",
+    description: `${name} description`,
+    normal: detailed ? ["Step 1"] : [],
+    abnormal: [],
+    validations: [],
+    business_rule_ids: [],
+    priority: null
+  })
+  // 3.8 có trong file; "GitHub Integration" / "Dashboard" chỉ là tên ở cột Feature của bảng 3.1.4 / bảng màn
+  const wdp = (): Spine => ({
+    ...createEmptySpine({ name: "Smell" }),
+    features: [
+      { id: "F-3.8", name: "Subscription Management", order: 0 },
+      { id: "F-01", name: "GitHub Integration", order: 1 },
+      { id: "F-02", name: "Dashboard", order: 2 }
+    ],
+    screens: [
+      {
+        id: "SCR-19",
+        feature_id: "F-3.8",
+        name: "Subscription Plans",
+        description: "",
+        flow_to: [],
+        is_popup: false,
+        tabs: [],
+        primary_function_id: null,
+        queue_order: null,
+        detail_status: "signed_off"
+      },
+      { id: "SCR-02", feature_id: "F-02", name: "Dashboard", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: null, detail_status: "placeholder" }
+    ],
+    functions: [
+      fn("FR-3.8.1", "View Pricing Plans", "F-3.8", "SCR-19", 0, true),
+      // có mục riêng trong file + ảnh màn hình, nhưng đặc tả không ghi tên màn khớp bảng màn ⇒ không màn trong dữ liệu
+      fn("FR-3.8.2", "View Subscription Status", "F-3.8", null, 0, true),
+      // dòng của bảng 3.1.4
+      fn("FR-08", "Usage Tracking Service", "F-3.8", null, 1, false),
+      fn("FR-05", "Publish PR Comment", "F-01", null, 0, false),
+      // chức năng không màn thêm sau qua change request, có chi tiết
+      fn("FR-99", "Nightly Cleanup Job", "F-3.8", null, 2, true)
+    ]
+  })
+  const layout = (nonScreenTable?: string[]): TemplateLayout => ({
+    language: "en",
+    layout: [
+      entry(0, "3.1.4 Non-Screen Functions", 3, "fixed:3.1.4"),
+      entry(1, "3.8 Subscription Management", 2, "feature:F-3.8"),
+      entry(2, "3.8.1 View Pricing Plans", 3, "function:FR-3.8.1"),
+      entry(3, "3.8.2 View Subscription Status", 3, "function:FR-3.8.2")
+    ],
+    ...(nonScreenTable ? { nonScreenTable } : {})
+  })
+  const cells = (row: { text: string }[][]) => row.map((c) => c.map((r) => r.text).join(""))
+
+  it("chức năng chỉ có ở bảng 3.1.4 không thành mục 3.x.y; tính năng chỉ gom chức năng đó / chỉ có màn không thành heading; số mục gốc giữ nguyên", () => {
+    const placed = placeSections(wdp(), layout(["FR-08", "FR-05"])).map((p) => p.section_id)
+    expect(placed).not.toContain("function:FR-08")
+    expect(placed).not.toContain("function:FR-05")
+    expect(placed).not.toContain("feature:F-01")
+    expect(placed).not.toContain("feature:F-02")
+    // chức năng thêm sau có chi tiết ⇒ vẫn chèn, sau các mục của file
+    expect(placed).toContain("function:FR-99")
+    // trong mục 3.8: hai mục của file giữ thứ tự 1, 2 (trước đây chức năng của bảng chèn vào giữa đẩy số); mục thêm sau là 3
+    const numbers = new Map(numberSections(placeSections(wdp(), layout(["FR-08", "FR-05"]))).map((n) => [n.section_id, n.number]))
+    const feature = numbers.get("feature:F-3.8")!
+    expect(["function:FR-3.8.1", "function:FR-3.8.2", "function:FR-99"].map((id) => numbers.get(id))).toEqual([`${feature}.1`, `${feature}.2`, `${feature}.3`])
+  })
+
+  it("bảng 3.1.4 = đúng các dòng bảng của file + chức năng không màn thêm sau; chức năng có mục riêng không vào bảng; cột như mẫu FPT", () => {
+    const { sections } = buildLayoutSections(wdp(), layout(["FR-08", "FR-05"]), [], { diagramPng: () => undefined })
+    const table = sections.find((s) => s.id === "fixed:3.1.4")!.blocks[0] as { header: { text: string }[][]; rows: { text: string }[][][] }
+    expect(cells(table.header)).toEqual(["#", "Feature", "System Function", "Description"])
+    expect(table.rows.map(cells)).toEqual([
+      ["1", "Subscription Management", "Usage Tracking Service", "Usage Tracking Service description"],
+      ["2", "GitHub Integration", "Publish PR Comment", "Publish PR Comment description"],
+      ["3", "Subscription Management", "Nightly Cleanup Job", "Nightly Cleanup Job description"]
+    ])
+  })
+
+  it("tài liệu nhập trước khi có danh sách bảng 3.1.4 ⇒ bản in giữ cách cũ", () => {
+    const placed = placeSections(wdp(), layout()).map((p) => p.section_id)
+    expect(placed).toContain("function:FR-08")
+    const { sections } = buildLayoutSections(wdp(), layout(), [], { diagramPng: () => undefined })
+    const table = sections.find((s) => s.id === "fixed:3.1.4")!.blocks[0] as { header: { text: string }[][] }
+    expect(cells(table.header)).toEqual(["Name", "Trigger", "Description"])
+  })
+})
+
+describe("FLF-252 — mục chức năng in theo file gốc", () => {
+  const original = (s: Spine) => ({
+    section_id: "function:FN01",
+    source_hash: functionSourceHash(s.functions[0]),
+    blocks: [
+      { kind: "paragraph" as const, text: "Function Trigger", rows: null, image_ref: null },
+      { kind: "list_item" as const, text: "Navigation path: Trang chủ → Đăng ký", rows: null, image_ref: null },
+      { kind: "paragraph" as const, text: "Screen layout:", rows: null, image_ref: null },
+      { kind: "image" as const, text: "", rows: null, image_ref: "word/media/image5.png" },
+      { kind: "paragraph" as const, text: "Normal Case", rows: null, image_ref: null },
+      { kind: "list_item" as const, text: "Học viên đăng ký thành công.", rows: null, image_ref: null }
+    ]
+  })
+  // phần nối của mục chức năng (văn xuôi I-4 giữ nguyên văn) — đã có sẵn trong nguyên văn
+  const withContinuation = (s: Spine): Spine => ({
+    ...s,
+    custom_sections: [...s.custom_sections, { id: "CS09", heading: "", level: 3, source: "import", blocks: [{ kind: "paragraph", text: "Screen layout:", rows: null, image_ref: null }] }]
+  })
+  const template = (s: Spine): TemplateLayout => ({
+    ...LAYOUT,
+    layout: [...LAYOUT.layout.slice(0, 5), entry(5, "", 3, "custom:CS09"), ...LAYOUT.layout.slice(5).map((e) => ({ ...e, order: e.order + 1 }))],
+    functionOriginals: [original(s)]
+  })
+  const text = (blocks: readonly unknown[]) => JSON.stringify(blocks)
+
+  it("chức năng chưa bị sửa ⇒ mục in đúng nguyên văn file (nhãn, gạch đầu dòng, ảnh, đúng thứ tự); phần nối không gộp lần nữa", () => {
+    const s = withContinuation(spine())
+    const { sections } = buildLayoutSections(s, template(s), [], { diagramPng: (id) => `ref:${id}` })
+    const fn = sections.find((x) => x.id === "function:FN01")!
+    expect(fn.blocks).toEqual([
+      { type: "paragraph", runs: [{ text: "Function Trigger" }] },
+      { type: "bullet_list", items: [[{ text: "Navigation path: Trang chủ → Đăng ký" }]] },
+      { type: "paragraph", runs: [{ text: "Screen layout:" }] },
+      { type: "image", png: "ref:media:word/media/image5.png" },
+      { type: "paragraph", runs: [{ text: "Normal Case" }] },
+      { type: "bullet_list", items: [[{ text: "Học viên đăng ký thành công." }]] }
+    ])
+    // khung dựng từ Spine không in kèm
+    expect(text(fn.blocks)).not.toContain("Kích hoạt")
+  })
+
+  it("change request đã sửa chức năng (dấu nội dung lệch) ⇒ mục in từ Spine như cũ, có cả phần nối", () => {
+    const s = withContinuation(spine())
+    const tpl = template(s)
+    const edited: Spine = { ...s, functions: [{ ...s.functions[0], trigger: "Học viên bấm Tạo tài khoản." }] }
+    const { sections } = buildLayoutSections(edited, tpl, [], { diagramPng: (id) => `ref:${id}` })
+    const fn = sections.find((x) => x.id === "function:FN01")!
+    expect(text(fn.blocks)).toContain("Học viên bấm Tạo tài khoản.")
+    expect(text(fn.blocks)).not.toContain("Function Trigger")
+    expect(fn.blocks[0]).toEqual({ type: "paragraph", runs: [{ text: "Screen layout:" }] })
+  })
+})
+
 describe("customBlocks", () => {
   it("bỏ đoạn rỗng, bảng rỗng; ảnh chưa đọc được (V5) ⇒ dòng chú thích nghiêng", () => {
     expect(
@@ -216,5 +412,23 @@ describe("customBlocks", () => {
         { kind: "image", text: "Sơ đồ use case", rows: null, image_ref: null }
       ])
     ).toEqual([{ type: "paragraph", runs: [{ text: "[Image: Sơ đồ use case]", italic: true }] }])
+  })
+
+  it("phase 5 (T3): ảnh có image_ref + ảnh tải được ⇒ khối ảnh thật (kèm chú thích); tải không được ⇒ dòng chú thích", () => {
+    const png = (ref: string) => (ref === "word/media/a.png" ? "QUJD" : undefined)
+    expect(
+      customBlocks(
+        [
+          { kind: "image", text: "Hình 1", rows: null, image_ref: "word/media/a.png" },
+          { kind: "image", text: "", rows: null, image_ref: "word/media/b.png" },
+          { kind: "image", text: "", rows: null, image_ref: "word/media/a.png" }
+        ],
+        png
+      )
+    ).toEqual([
+      { type: "image", png: "QUJD", caption: "Hình 1" },
+      { type: "paragraph", runs: [{ text: "[Image]", italic: true }] },
+      { type: "image", png: "QUJD" }
+    ])
   })
 })

@@ -28,14 +28,26 @@ export const releaseScopeSchema = z.strictObject({
 
 export const spineProjectSchema = z.strictObject({
   name: z.string(),
+  /** FLF-177 — Spine trước đó không có ⇒ `null` (dùng tên project). */
+  system_name: z.string().nullable().default(null),
   vision: z.string().nullable(),
   goals: z.array(z.string()),
   type: z.string().nullable(),
   domain: z.string().nullable(),
   complexity: z.string().nullable(),
-  form_factor: z.string().nullable(),
+  /**
+   * Các nền tảng của sản phẩm (FLF-237): phần tử đầu là nền tảng chính; `[]` = chưa chốt. Dữ liệu cũ lưu một chuỗi
+   * (`"web_app"`) hoặc `null` ⇒ đọc thành `["web_app"]` / `[]` — không migration. Giá trị hợp lệ do `op-validator` giữ.
+   */
+  form_factor: z.preprocess((v) => (typeof v === "string" ? [v] : (v ?? [])), z.array(z.string())),
   stakes: z.string().nullable(),
   working_mode: z.enum(["fast", "coaching"]).nullable(),
+  /**
+   * Cách duyệt (FLF-208 · R5): `strict` dừng ở mọi bước (như trước), `balanced` chỉ dừng ở cuối phase,
+   * cuối mỗi màn và các bước bắt buộc, `fast` chỉ dừng khi có câu bắt buộc/cờ đỏ mới/lỗi.
+   * Spine cũ không có ⇒ `balanced`.
+   */
+  review_mode: z.enum(["strict", "balanced", "fast"]).default("balanced"),
   release_scope: releaseScopeSchema
 })
 
@@ -67,7 +79,10 @@ export const actorSchema = z.strictObject({
   id,
   name: z.string(),
   kind: z.enum(["human", "system", "time"]),
-  description: z.string()
+  description: z.string(),
+  /** Nhãn luồng dữ liệu cho §1 context diagram; vắng cả hai ⇒ cạnh lấy tên use case. */
+  flows_in: z.array(z.string()).optional(),
+  flows_out: z.array(z.string()).optional()
 })
 
 export const roleSchema = z.strictObject({
@@ -110,7 +125,15 @@ export const entitySchema = z.strictObject({
   id,
   name: z.string(),
   description: z.string(),
-  relations: z.array(id)
+  relations: z.array(id),
+  // Động từ trong hình thoi ERD (Chen), khoá là id đích trong `relations`: "Project contains Document"
+  relation_verbs: z.record(id, z.string().regex(/^[a-z]+( [a-z]+)*$/, "động từ tiếng Anh viết thường, vd `contains`")).optional(),
+  // Bản số phía con, khoá là id đích trong `relations`: "1" = một–một; thiếu ⇒ "N" (một–nhiều)
+  relation_cardinality: z.record(id, z.enum(["1", "N"])).optional(),
+  // Id con (trong `relations`) mà liên kết tới cha này là TUỲ CHỌN: con tồn tại được khi không có cha này
+  relation_optional: z.array(id).optional(),
+  // Dữ liệu chủ tồn tại độc lập (User, Course, Room…) — được phép không có cha
+  root: z.boolean().optional()
 })
 
 export const validationSchema = z.strictObject({
@@ -167,7 +190,9 @@ export const messageSchema = z.strictObject({
 export const otherRequirementSchema = z.strictObject({
   id,
   kind: z.enum(["risk", "assumption", "open_question", "technical_risk"]),
-  statement: z.string()
+  statement: z.string(),
+  /** Câu bằng ngôn ngữ user (FLF-237) — panel Hồ sơ dự án hiện câu này; dữ liệu cũ không có ⇒ FE rơi về `statement`. */
+  statement_vi: z.string().min(1).nullish()
 })
 
 export const glossaryTermSchema = z.strictObject({
@@ -190,7 +215,12 @@ export const customBlockSchema = z.strictObject({
   kind: z.enum(["paragraph", "list_item", "table", "image"]),
   text: z.string(),
   rows: z.array(z.array(z.string())).nullable(),
-  image_ref: z.string().min(1).nullable()
+  image_ref: z.string().min(1).nullable(),
+  /** Sơ đồ gốc của người dùng (mode 1 v3 §4.13) — Spine cũ không có. */
+  diagram: z
+    .strictObject({ kind: z.enum(["context", "usecase", "screen_flow", "erd"]), source_hash: z.string().min(1) })
+    .nullable()
+    .optional()
 })
 
 export const customSectionSchema = z.strictObject({
@@ -220,10 +250,39 @@ export const assumptionSchema = z.strictObject({
   id,
   path: z.string().min(1),
   statement: z.string(),
+  /**
+   * Bản ngôn ngữ của user (FLF-221) — hiện ở cổng duyệt/Brief; `statement` (EN) mới vào SRS. Spine cũ không có.
+   *
+   * FLF-241: trần 200 ký tự là LƯỚI chặn ca cực đoan, không phải cách dạy — `draft-to-ops` dạy viết một mệnh đề ~15 từ, và
+   * điều cần hai mệnh đề thì tách thành hai giả định. Đặt ở đây vì cổng duyệt đọc đúng câu này ra cho user, và phép đo "tin
+   * cổng đã nói điều này chưa" so trên nó; câu 30+ từ vừa khó đọc vừa khó đạt ngưỡng trùng.
+   *
+   * Chỉ trần ở field này. `statement` (EN) render vào SRS nên không bị trần — cùng lý lẽ với `nfrSchema`. Quan trọng hơn:
+   * `spineSchema` được parse trên TOÀN Spine ở cuối mỗi lô (`op-engine.ts` `schemaViolations`), nên một trần quá chặt
+   * không chỉ áp cho bản ghi mới — nó chặn mọi lần ghi tiếp của project đang giữ bản ghi dài hơn. Dữ liệu đo được:
+   * `statement` dài nhất 201 ký tự (đã vượt 200), `statement_vi` dài nhất 160.
+   */
+  statement_vi: z.string().min(1).max(200).nullish(),
   rationale: z.string(),
+  /** Lý do bằng ngôn ngữ user — hiện "Vì sao" ở cổng duyệt cạnh `statement_vi`. Spine cũ không có. */
+  rationale_vi: z.string().min(1).nullish(),
   origin_step_id: id,
   status: z.enum(["unconfirmed", "confirmed", "rejected"]),
   confirmed_at: isoDateTime.nullable()
+})
+
+/**
+ * Sổ quyết định (FLF-208 · 02-reduce-stops-plan R4). `topic_key` là khoá chống hỏi lặp; `superseded_by`
+ * giữ vết khi user đổi ý thay vì xoá dòng cũ. Spine trước FLF-198 không có ⇒ `[]`.
+ */
+export const decisionSchema = z.strictObject({
+  id,
+  topic_key: z.string().min(1),
+  question: z.string(),
+  answer: z.string(),
+  step_id: z.string().min(1),
+  at: isoDateTime,
+  superseded_by: id.nullable().default(null)
 })
 
 /** Tối thiểu cho lý do waive — srs-spine.md §7. */
@@ -293,6 +352,7 @@ export const spineSchema = z.strictObject({
 
   diagrams: z.array(diagramSchema),
   assumptions: z.array(assumptionSchema),
+  decisions: z.array(decisionSchema).default([]),
   flags: z.array(flagSchema),
   sections: z.array(sectionStateSchema),
   baselines: z.array(baselineSchema),

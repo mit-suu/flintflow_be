@@ -8,7 +8,7 @@ Trình mọi `assumptions[status=unconfirmed]`. Hai cách duyệt, cùng hợp l
 
 - **lẻ**: từng giả định một — dùng khi giả định chạm bất biến hoặc nuôi ngưỡng NFR (4.2.2, 4.2.3), vì
   sai một cái là sai cả một chương.
-- **lô**: duyệt cả nhóm một lần — dùng cho phần còn lại, nhất là ở `working_mode: fast`.
+- **lô**: duyệt cả nhóm một lần — dùng cho phần còn lại, nhất là ở chế độ duyệt "Cuối giai đoạn".
 
 `rejected` không phải là "xoá". Giả định bị từ chối nghĩa là **giá trị đang dựa trên nó sai**: phải nói
 rõ chỗ nào cần sửa, hoặc mở một `other_requirements[kind=open_question]`.
@@ -36,6 +36,13 @@ Ba lăng kính, mỗi cái một đoạn ngắn, tự định nghĩa trước kh
 
 Phát hiện nào cũng phải thành op (`other_requirements[]` hoặc `assumptions[]`). Ba đoạn văn hay mà không
 đổi Spine thì bước này vô nghĩa.
+
+### Tên hệ thống (FLF-232)
+
+Nếu `project.system_name` còn null, B-2.3 hỏi tên trước khi duyệt: 3–4 gợi ý tiếng Anh dựa trên vision, goals và
+phạm vi đã chốt (luật đặt tên và bộ lọc `sanitizeSuggestions` giữ nguyên), gợi ý đầu là khuyến nghị kèm lý do. Đã có tên
+(project cũ, hoặc user tự nêu từ B-0.1) thì không hỏi. Chưa chọn thì tài liệu dùng `project.name` (fallback sẵn có) và
+S-2.5 mở cờ vàng `system_name_missing`.
 
 Gate của B-2.3 là **Approve** của UC 2.5: chấp nhận ở đây mở S-1. Đây là điểm không quay lại rẻ nữa —
 sau đó Brief đã thành cấu trúc, sửa phải đi qua change flow.

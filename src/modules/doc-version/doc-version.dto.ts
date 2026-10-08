@@ -21,6 +21,8 @@ export const docVersionDtoSchema = z.object({
   baseline_id: z.string().nullable(),
   /** Release có bản sạch để tải (UC-57). */
   has_clean_file: z.boolean(),
+  /** Mode 1 v3: có bản Track Changes của CR (`variant=tracked`). */
+  has_tracked_file: z.boolean(),
   /** Có file gốc người dùng upload (bản import 0.0, FLF-184) — tải qua `variant=original`. */
   has_original_file: z.boolean(),
   created_by: id,

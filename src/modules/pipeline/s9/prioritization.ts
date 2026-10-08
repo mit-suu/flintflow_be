@@ -22,6 +22,7 @@ import type { Priority, Spine, SpineRecord } from "../../spine/spine.types.js"
 import { buildStepContext } from "../context-projection.js"
 import { draftOps, type DraftExecutor, type DraftUsage } from "../draft-to-ops.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
+import type { ReplyLanguage } from "../../../shared/i18n/reply-language.js"
 
 export const PRIORITIZATION_STEP = "S-9.4"
 export const PRIORITIZATION_SKILL = "prioritization"
@@ -80,6 +81,8 @@ export interface PrioritizeOptions {
   /** Mock provider trong test; mặc định `draftOps` gọi model thật. */
   executor?: DraftExecutor
   sessionId?: string | null
+  /** FLF-260: `notes` (tin ở cổng) viết theo ngôn ngữ trả lời của phiên. */
+  replyLanguage?: ReplyLanguage
 }
 
 export interface PrioritizeResult {
@@ -99,7 +102,7 @@ export interface PrioritizeResult {
  */
 export const prioritize = async (projectId: string, userId: string, options: PrioritizeOptions = {}): Promise<PrioritizeResult> => {
   const record = await repository.get(projectId)
-  if (!record) throw new ApiError(404, "Không tìm thấy Spine của dự án", repository.SPINE_NOT_FOUND)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
 
   const base = await buildStepContext(projectId, PRIORITIZATION_STEP, { sessionId: options.sessionId ?? null })
   const ctx = { ...base, skill: PRIORITIZATION_SKILL }
@@ -108,7 +111,8 @@ export const prioritize = async (projectId: string, userId: string, options: Pri
   const draft = await draftOps(projectId, PRIORITIZATION_STEP, ctx, {
     userId,
     spine,
-    ...(options.executor ? { executor: options.executor } : {})
+    ...(options.executor ? { executor: options.executor } : {}),
+    ...(options.replyLanguage ? { replyLanguage: options.replyLanguage } : {})
   })
 
   let spineVersion = record.spine_version

@@ -2,12 +2,27 @@ import mongoose, { PipelineStage } from "mongoose"
 import { User, UserRole } from "../user/user.model.js"
 import { Project } from "../project/project.model.js"
 import { CreditWallet } from "../credits/credit-wallet.model.js"
+import { Membership } from "../organization/membership.model.js"
+import { notify } from "../notification/notification.service.js"
+import { Organization } from "../organization/organization.model.js"
+import { Subscription } from "../credits/subscription.model.js"
+import { getPlan, PlanId } from "../billing/plan.config.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Session } from "../../shared/auth/session.model.js"
+import { revokeAllUserSessions } from "../../shared/auth/session.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { Baseline } from "../spine/baseline.model.js"
 import { AiActionLog } from "./ai-action-log.model.js"
+import { AiActionPayload } from "./ai-action-payload.model.js"
 import * as feedbackService from "../feedback/feedback.service.js"
-import { AiCostGroupBy, parseDateInput, REPORT_TIMEZONE, UsersQuery } from "./admin.validation.js"
+import {
+  AiCostGroupBy,
+  OrgsQuery,
+  parseDateInput,
+  REPORT_TIMEZONE,
+  SetUserStatusInput,
+  UsersQuery
+} from "./admin.validation.js"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -40,10 +55,16 @@ export interface AdminUserRow {
   name: string | null
   role: UserRole
   isActive: boolean
+  suspendedAt: Date | null
+  suspendReason: string | null
   emailVerified: boolean
   authProvider: string
   createdAt: Date
-  walletBalance: number
+  /**
+   * task-26: KHÔNG còn `walletBalance`. Ví là của tổ chức, không của người — một người ở nhiều org thì
+   * "số dư của user" không có nghĩa. Số dư từng org xem ở `getUserDetail`.
+   */
+  organizationsCount: number
   projectsCount: number
   lastLoginAt: Date | null
 }
@@ -54,6 +75,8 @@ type UserLean = {
   name?: string
   role: UserRole
   isActive: boolean
+  suspendedAt?: Date | null
+  suspendReason?: string | null
   emailVerified: boolean
   authProvider: string
   createdAt: Date
@@ -65,8 +88,11 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
   const userIds = users.map((u) => u._id)
   const byUser = { $match: { userId: { $in: userIds } } }
 
-  const [wallets, projectCounts, lastLogins] = await Promise.all([
-    CreditWallet.find({ userId: { $in: userIds } }).lean(),
+  const [memberships, projectCounts, lastLogins] = await Promise.all([
+    Membership.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      byUser,
+      { $group: { _id: "$userId", count: { $sum: 1 } } }
+    ]),
     Project.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
       byUser,
       { $group: { _id: "$userId", count: { $sum: 1 } } }
@@ -76,7 +102,7 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
       { $group: { _id: "$userId", at: { $max: "$createdAt" } } }
     ])
   ])
-  const balances = new Map(wallets.map((w) => [String(w.userId), w.balance]))
+  const orgCounts = new Map(memberships.map((r) => [String(r._id), r.count]))
   const projectsCount = new Map(projectCounts.map((r) => [String(r._id), r.count]))
   const lastLoginAt = new Map(lastLogins.map((r) => [String(r._id), r.at]))
 
@@ -88,10 +114,12 @@ const enrichUsers = async (users: UserLean[]): Promise<AdminUserRow[]> => {
       name: u.name ?? null,
       role: u.role,
       isActive: u.isActive,
+      suspendedAt: u.suspendedAt ?? null,
+      suspendReason: u.suspendReason ?? null,
       emailVerified: u.emailVerified,
       authProvider: u.authProvider,
       createdAt: u.createdAt,
-      walletBalance: balances.get(id) ?? 0,
+      organizationsCount: orgCounts.get(id) ?? 0,
       projectsCount: projectsCount.get(id) ?? 0,
       lastLoginAt: lastLoginAt.get(id) ?? null
     }
@@ -129,16 +157,91 @@ export const getUserDetail = async (userId: string) => {
     throw new ApiError(404, "Không tìm thấy người dùng", "USER_NOT_FOUND")
   }
 
-  const [[row], wallet, recentTransactions] = await Promise.all([
+  const [[row], memberships, recentTransactions] = await Promise.all([
     enrichUsers([user]),
-    CreditWallet.findOne({ userId: user._id }).lean(),
+    Membership.find({ userId: user._id }).lean(),
+    // Giao dịch DO CHÍNH NGƯỜI NÀY thực hiện — ví là của org nhưng ledger vẫn ghi ai tiêu (UC-79).
     CreditTransaction.find({ userId: user._id }).sort({ createdAt: -1 }).limit(20).lean()
   ])
 
+  const orgIds = memberships.map((m) => m.organizationId)
+  const [orgs, wallets] = await Promise.all([
+    Organization.find({ _id: { $in: orgIds } }).select("_id name").lean(),
+    CreditWallet.find({ organizationId: { $in: orgIds } }).lean()
+  ])
+  const orgById = new Map(orgs.map((o) => [String(o._id), o]))
+  const walletByOrg = new Map(wallets.map((w) => [String(w.organizationId), w]))
+
   return {
     ...row,
-    wallet: wallet ? { balance: wallet.balance, reserved: wallet.reserved } : null,
+    // UC-65: admin thấy người này ở org nào, vai trò gì, và ví của org đó còn bao nhiêu.
+    organizations: memberships.map((m) => {
+      const id = String(m.organizationId)
+      const wallet = walletByOrg.get(id)
+      return {
+        id,
+        name: orgById.get(id)?.name ?? "(đã xoá)",
+        role: m.role,
+        joinedAt: m.joinedAt,
+        wallet: wallet ? { balance: wallet.balance, reserved: wallet.reserved } : null
+      }
+    }),
     recentTransactions
+  }
+}
+
+export interface UserStatusResult {
+  _id: string
+  isActive: boolean
+  suspendedAt: Date | null
+  suspendReason: string | null
+  reactivatedAt: Date | null
+  reactivateReason: string | null
+}
+
+/**
+ * UC-60 khoá / UC-61 mở khoá tài khoản. Khoá thì thu hồi luôn mọi phiên: refresh token chết ngay, access
+ * token còn hạn bị `requireActiveAccount` chặn từ request kế tiếp. Gọi với trạng thái đang có ⇒ 409, không
+ * đổi gì (Report 3: "already suspended / already active"). Mở khoá ghi lý do + thời điểm lên tài khoản.
+ */
+export const setUserStatus = async (
+  adminId: string,
+  userId: string,
+  input: SetUserStatusInput
+): Promise<UserStatusResult> => {
+  // Admin tự khoá mình thì mất quyền vào khu quản trị, và nếu là admin duy nhất thì không ai mở lại được.
+  if (!input.isActive && adminId === userId) {
+    throw new ApiError(400, "Không thể tự khoá tài khoản của chính mình", "CANNOT_SUSPEND_SELF")
+  }
+
+  const user = await User.findById(userId)
+  if (!user) {
+    throw new ApiError(404, "Không tìm thấy người dùng", "USER_NOT_FOUND")
+  }
+
+  if (user.isActive === input.isActive) {
+    throw input.isActive
+      ? new ApiError(409, "Tài khoản này đang hoạt động", "USER_ALREADY_ACTIVE")
+      : new ApiError(409, "Tài khoản này đã bị khoá", "USER_ALREADY_SUSPENDED")
+  }
+
+  user.isActive = input.isActive
+  user.suspendedAt = input.isActive ? null : new Date()
+  user.suspendReason = input.isActive ? null : input.reason
+  if (input.isActive) {
+    user.reactivatedAt = new Date()
+    user.reactivateReason = input.reason
+  }
+  await user.save()
+  if (!input.isActive) await revokeAllUserSessions(userId)
+
+  return {
+    _id: String(user._id),
+    isActive: user.isActive,
+    suspendedAt: user.suspendedAt ?? null,
+    suspendReason: user.suspendReason ?? null,
+    reactivatedAt: user.reactivatedAt ?? null,
+    reactivateReason: user.reactivateReason ?? null
   }
 }
 
@@ -150,11 +253,13 @@ export const getMetrics = async (now: Date = new Date()) => {
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_TIMEZONE }).format(now)
   const startOfToday = parseDateInput(today, "start")
 
-  const [usersTotal, usersNew7d, projectsTotal, projectsActive7d, aiCallsToday, aiStatus7d] = await Promise.all([
+  const [usersTotal, usersNew7d, projectsTotal, projectsActive7d, baselinesTotal, aiCallsToday, aiStatus7d] = await Promise.all([
     User.countDocuments({}),
     User.countDocuments({ createdAt: { $gte: sevenDaysAgo } }),
     Project.countDocuments({}),
     Project.countDocuments({ updatedAt: { $gte: sevenDaysAgo } }),
+    // UC-63: mọi baseline đã ghi — v0 khi import, 1.0 và mọi bản release sau đó
+    Baseline.countDocuments({}),
     AiActionLog.countDocuments({ createdAt: { $gte: startOfToday } }),
     AiActionLog.aggregate<{ _id: string; count: number }>([
       { $match: { createdAt: { $gte: sevenDaysAgo } } },
@@ -170,8 +275,7 @@ export const getMetrics = async (now: Date = new Date()) => {
     usersNew7d,
     projectsTotal,
     projectsActive7d,
-    // Baseline snapshot chưa có tới T19
-    baselinesTotal: 0,
+    baselinesTotal,
     aiCallsToday,
     aiCalls7d: calls7d,
     aiFailRate7d: calls7d === 0 ? 0 : failed7d / calls7d
@@ -339,7 +443,216 @@ export const getAiCost = async (range: { from: Date; to: Date }, groupBy: AiCost
   }
 }
 
+// ─── Prompt/response của lượt gọi model ──────────────────────────
+
+/**
+ * Prompt và câu trả lời gốc của một lượt gọi model. Chỉ admin đọc được vì prompt mang nguyên văn điều người
+ * dùng nhập.
+ *
+ * Không có bản ghi là chuyện bình thường, không phải lỗi hệ thống: lượt chạy trước khi bật việc lưu, hoặc đã
+ * quá hạn giữ (`AI_PAYLOAD_RETENTION_DAYS`) và Mongo đã dọn. Câu lỗi nói rõ hai khả năng đó.
+ */
+export const getAiActionPayload = async (logId: string) => {
+  const payload = await AiActionPayload.findOne({ logId: new mongoose.Types.ObjectId(logId) }).lean()
+  if (!payload) {
+    throw new ApiError(
+      404,
+      "Không còn prompt/response của lượt gọi này — lượt chạy trước khi bật việc lưu, hoặc đã quá hạn giữ.",
+      "AI_PAYLOAD_NOT_FOUND"
+    )
+  }
+  return {
+    logId: String(payload.logId),
+    projectId: payload.projectId ? String(payload.projectId) : null,
+    actionType: payload.actionType,
+    prompt: payload.prompt,
+    response: payload.response ?? null,
+    // Lớn hơn độ dài chuỗi trả về ⇒ bản đang xem đã bị cắt giữa
+    promptChars: payload.promptChars,
+    responseChars: payload.responseChars,
+    createdAt: payload.createdAt
+  }
+}
+
 // ─── Feedback ─────────────────────────────────────────────────────
 
 // Dữ liệu và shape nằm ở module feedback; admin chỉ mở route đọc
 export const listFeedback = () => feedbackService.listFeedback()
+
+// ─── UC-90 Danh sách tổ chức ─────────────────────────────────────
+
+export interface AdminOrgRow {
+  id: string
+  name: string
+  owner: { id: string; email: string; name: string | null } | null
+  plan: PlanId
+  planLabel: string
+  /** null = org có trước task-26 chưa có ví; UC-68 sẽ tạo khi admin điều chỉnh lần đầu. */
+  wallet: { balance: number; reserved: number; available: number } | null
+  membersCount: number
+  /** Dự án chưa xoá (`archived` không tính) — cùng cách đếm với trần dự án UC-16. */
+  projectsCount: number
+  createdAt: Date
+}
+
+/**
+ * UC-90 — Administrator xem mọi tổ chức để chọn một org rồi điều chỉnh credit (UC-68).
+ * Không có gói active ⇒ coi là Free, khớp với `assertProjectQuota` và `billing.getBalance`.
+ */
+export const listOrgs = async (query: OrgsQuery) => {
+  const { page, limit, plan, q } = query
+  const filter: Record<string, unknown> = {}
+
+  if (q) {
+    const pattern = new RegExp(escapeRegex(q), "i")
+    const owners = await User.find({ email: pattern }).select("_id").lean()
+    filter.$or = [{ name: pattern }, { ownerUserId: { $in: owners.map((u) => u._id) } }]
+  }
+  if (plan) {
+    // Free = không có gói trả phí active (kể cả org chưa có Subscription nào).
+    const paidOrgIds = await Subscription.distinct("organizationId", {
+      status: "active",
+      plan: { $ne: "free" },
+      organizationId: { $type: "objectId" }
+    })
+    filter._id = plan === "free" ? { $nin: paidOrgIds } : { $in: paidOrgIds }
+  }
+
+  const [total, orgs] = await Promise.all([
+    Organization.countDocuments(filter),
+    Organization.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .select("_id name ownerUserId createdAt")
+      .lean()
+  ])
+
+  const orgIds = orgs.map((o) => o._id)
+  const byOrg = { $match: { organizationId: { $in: orgIds } } }
+  const [owners, subscriptions, wallets, memberCounts, projectCounts] = await Promise.all([
+    User.find({ _id: { $in: orgs.map((o) => o.ownerUserId) } }).select("_id email name").lean(),
+    Subscription.find({ organizationId: { $in: orgIds }, status: "active" }).select("organizationId plan").lean(),
+    CreditWallet.find({ organizationId: { $in: orgIds } }).select("organizationId balance reserved").lean(),
+    Membership.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      byOrg,
+      { $group: { _id: "$organizationId", count: { $sum: 1 } } }
+    ]),
+    Project.aggregate<{ _id: mongoose.Types.ObjectId; count: number }>([
+      { $match: { organizationId: { $in: orgIds }, status: { $ne: "archived" } } },
+      { $group: { _id: "$organizationId", count: { $sum: 1 } } }
+    ])
+  ])
+  const ownerById = new Map(owners.map((u) => [String(u._id), u]))
+  const planByOrg = new Map(subscriptions.map((s) => [String(s.organizationId), s.plan]))
+  const walletByOrg = new Map(wallets.map((w) => [String(w.organizationId), w]))
+  const members = new Map(memberCounts.map((r) => [String(r._id), r.count]))
+  const projects = new Map(projectCounts.map((r) => [String(r._id), r.count]))
+
+  const items: AdminOrgRow[] = orgs.map((o) => {
+    const id = String(o._id)
+    const owner = ownerById.get(String(o.ownerUserId))
+    const wallet = walletByOrg.get(id)
+    const orgPlan = planByOrg.get(id) ?? "free"
+    return {
+      id,
+      name: o.name,
+      owner: owner ? { id: String(owner._id), email: owner.email, name: owner.name ?? null } : null,
+      plan: orgPlan,
+      planLabel: getPlan(orgPlan).label,
+      wallet: wallet
+        ? { balance: wallet.balance, reserved: wallet.reserved, available: wallet.balance - wallet.reserved }
+        : null,
+      membersCount: members.get(id) ?? 0,
+      projectsCount: projects.get(id) ?? 0,
+      createdAt: o.createdAt
+    }
+  })
+
+  return { items, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } }
+}
+
+// ─── UC-68 Điều chỉnh credit của tổ chức ─────────────────────────
+
+export interface AdjustOrgCreditsResult {
+  organizationId: string
+  organizationName: string
+  amount: number
+  balance: number
+  reserved: number
+  reason: string
+}
+
+/**
+ * UC-68 — Administrator cộng (amount > 0) hoặc trừ (amount < 0) credit trong ví của MỘT TỔ CHỨC, bắt buộc
+ * kèm lý do. Lý do lưu thẳng vào dòng ledger (`type: "admin_adjust"`) để sau này còn truy được vì sao.
+ *
+ * Không cho số dư xuống âm, và không đụng `reserved`: phần đang giữ thuộc về các lượt gọi AI đang chạy,
+ * admin trừ vào đó sẽ làm hỏng vòng reserve/settle.
+ */
+export const adjustOrgCredits = async (
+  orgId: string,
+  amount: number,
+  reason: string
+): Promise<AdjustOrgCreditsResult> => {
+  if (!mongoose.isValidObjectId(orgId)) {
+    throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
+  }
+  const org = await Organization.findById(orgId).select("_id name ownerUserId").lean()
+  if (!org) {
+    throw new ApiError(404, "Không tìm thấy tổ chức", "ORG_NOT_FOUND")
+  }
+
+  // Ví tạo cùng org (Flow 8.2); org có trước task-26 thì chưa có ⇒ tạo tại chỗ để admin vẫn thao tác được.
+  const existing = await CreditWallet.findOne({ organizationId: orgId })
+  if (!existing) {
+    await CreditWallet.create({ organizationId: orgId, userId: org.ownerUserId, balance: 0, reserved: 0 })
+  }
+
+  // Trừ: chỉ chạm phần KHẢ DỤNG (balance - reserved) và làm trong một lệnh atomic.
+  const filter =
+    amount < 0
+      ? { organizationId: orgId, $expr: { $gte: [{ $subtract: ["$balance", "$reserved"] }, -amount] } }
+      : { organizationId: orgId }
+  const wallet = await CreditWallet.findOneAndUpdate(
+    filter,
+    { $inc: { balance: amount } },
+    { returnDocument: "after" }
+  )
+  if (!wallet) {
+    throw new ApiError(409, "Số dư khả dụng của tổ chức không đủ để trừ", "INSUFFICIENT_CREDIT")
+  }
+
+  await CreditTransaction.create({
+    userId: org.ownerUserId ?? wallet.userId,
+    organizationId: wallet.organizationId,
+    projectId: null,
+    actionType: "admin_adjust",
+    amount: Math.abs(amount),
+    type: "admin_adjust",
+    balanceAfter: wallet.balance - wallet.reserved,
+    reason
+  })
+
+  // Lead của org cần biết ví vừa bị ai đó ngoài tổ chức thay đổi.
+  const leads = await Membership.find({ organizationId: orgId, role: "lead" }).select("userId").lean()
+  for (const lead of leads) {
+    void notify(String(lead.userId), {
+      type: "credits_adjusted",
+      title: amount >= 0 ? "Tổ chức được cộng credit" : "Tổ chức bị trừ credit",
+      body: `${amount >= 0 ? "+" : ""}${amount} credit cho ${org.name}. Lý do: ${reason}`,
+      organizationId: orgId,
+      link: "/home/billing",
+      meta: { organizationId: orgId, amount, reason }
+    })
+  }
+
+  return {
+    organizationId: orgId,
+    organizationName: org.name,
+    amount,
+    balance: wallet.balance,
+    reserved: wallet.reserved,
+    reason
+  }
+}

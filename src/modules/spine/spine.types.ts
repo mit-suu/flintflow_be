@@ -24,6 +24,9 @@ export type IsoDateTime = string
 
 export type WorkingMode = "fast" | "coaching"
 
+/** Mức độ dừng lại hỏi ý user (02-reduce-stops-plan R5). */
+export type ReviewMode = "strict" | "balanced" | "fast"
+
 export interface ReleaseScope {
   in: string[]
   out: string[]
@@ -31,14 +34,22 @@ export interface ReleaseScope {
 
 export interface SpineProject {
   name: string
+  /**
+   * FLF-177 — tên hệ thống (tiếng Anh) in trên sơ đồ và tài liệu, tách khỏi tên project làm việc.
+   * `null` ⇒ dùng tên project (Spine trước FLF-177 không có field này).
+   */
+  system_name: string | null
   vision: string | null
   goals: string[]
   type: string | null
   domain: string | null
   complexity: string | null
-  form_factor: string | null
+  /** Các nền tảng, phần tử đầu là chính; `[]` = chưa chốt (FLF-237). */
+  form_factor: string[]
   stakes: string | null
   working_mode: WorkingMode | null
+  /** Cách duyệt (R5): `strict` | `balanced` | `fast`. */
+  review_mode: ReviewMode
   release_scope: ReleaseScope
 }
 
@@ -77,6 +88,10 @@ export interface Actor {
   name: string
   kind: ActorKind
   description: string
+  /** Nhãn luồng dữ liệu actor gửi VÀO hệ thống, vẽ lên cạnh §1 context diagram (tiếng Anh). */
+  flows_in?: string[]
+  /** Nhãn luồng dữ liệu hệ thống gửi RA actor (tiếng Anh). */
+  flows_out?: string[]
 }
 
 export interface Role {
@@ -123,6 +138,14 @@ export interface Entity {
   description: string
   /** Khoá tới `entities[].id` (reference_fields §4.1). */
   relations: string[]
+  /** Động từ của từng quan hệ, khoá là id trong `relations` (vd `{ E02: "contains" }`). Thiếu ⇒ `has`. */
+  relation_verbs?: Record<string, string>
+  /** Bản số phía con của từng quan hệ (`"1"` = một–một). Thiếu ⇒ `"N"`. */
+  relation_cardinality?: Record<string, "1" | "N">
+  /** Id con có liên kết TUỲ CHỌN tới cha này (con tồn tại được khi không có nó). */
+  relation_optional?: string[]
+  /** Dữ liệu chủ tồn tại độc lập — được phép không có cha. */
+  root?: boolean
 }
 
 /** MoSCoW, gán ở S-9.4. `null` trước khi gán. */
@@ -197,6 +220,8 @@ export interface OtherRequirement {
   id: string
   kind: OtherRequirementKind
   statement: string
+  /** Câu bằng ngôn ngữ user (FLF-237); dữ liệu cũ không có. */
+  statement_vi?: string | null
 }
 
 export interface GlossaryTerm {
@@ -214,6 +239,20 @@ export interface CustomBlock {
   rows: string[][] | null
   /** Chỉ với `image`: tham chiếu file ảnh đã lưu. */
   image_ref: string | null
+  /**
+   * Chỉ với `image` là **sơ đồ gốc của người dùng** mà I-4 đọc được (mode 1 v3 §4.13): hình giữ nguyên trong tài liệu,
+   * PlantUML cùng loại không in ra. `source_hash` = hash dữ liệu hình thể hiện lúc import (`computeSourceHash`) —
+   * lệch ⇒ cờ vàng `original_diagram_stale`, CR chạm dữ liệu đó thì đề xuất vẽ lại (bỏ ảnh gốc). Không có ⇒ ảnh thường.
+   */
+  diagram?: OriginalDiagram | null
+}
+
+/** Loại sơ đồ gốc đọc được từ ảnh (I-4) — một hình mỗi loại trong tài liệu. */
+export type OriginalDiagramKind = "context" | "usecase" | "screen_flow" | "erd"
+
+export interface OriginalDiagram {
+  kind: OriginalDiagramKind
+  source_hash: string
 }
 
 /**
@@ -263,10 +302,33 @@ export interface Assumption {
   /** Path selector tới field mang giả định. */
   path: string
   statement: string
+  /** Bản ngôn ngữ của user (FLF-221); Spine cũ không có ⇒ hiện `statement`. */
+  statement_vi?: string | null
   rationale: string
+  /** Lý do bằng ngôn ngữ user (hiện ở cổng duyệt); Spine cũ không có. */
+  rationale_vi?: string | null
   origin_step_id: string
   status: AssumptionStatus
   confirmed_at: IsoDateTime | null
+}
+
+/**
+ * Một quyết định của user đã chốt trong lúc hỏi đáp (FLF-208 · `02-reduce-stops-plan.md` R4).
+ *
+ * Lượt test bị hỏi lại uptime ba lần và "giữ chỗ 15 phút" ba lần, rồi AI còn gợi ý ngược với điều user đã
+ * chốt. Sổ này là bộ nhớ chung của mọi step: hỏi xong ghi vào đây, và mọi lượt hỏi sau đều đọc nó.
+ * `topic_key` là khoá chủ đề (`uptime`, `slot_hold_minutes`…) — trùng khoá nghĩa là đã hỏi rồi.
+ */
+export interface Decision {
+  id: string
+  topic_key: string
+  question: string
+  answer: string
+  /** Step đã hỏi ra quyết định này. */
+  step_id: string
+  at: IsoDateTime
+  /** Quyết định mới thay thế nó (user đổi ý) — giữ lại vết thay vì xoá. */
+  superseded_by: string | null
 }
 
 export type FlagLevel = "red" | "yellow"
@@ -351,6 +413,8 @@ export interface Spine {
 
   diagrams: Diagram[]
   assumptions: Assumption[]
+  /** Sổ quyết định đã chốt (R4) — Spine cũ không có ⇒ `[]`. */
+  decisions: Decision[]
   flags: Flag[]
   sections: SectionState[]
   baselines: Baseline[]

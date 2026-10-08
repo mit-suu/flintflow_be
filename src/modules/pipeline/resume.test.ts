@@ -68,8 +68,10 @@ import * as repo from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { resumeProject } from "./resume.service.js"
 import { orderedSteps } from "./step-registry.js"
-import { acquireStepLock, releaseStepLock } from "./step-runner.service.js"
+import { isStepRunning } from "./run-state.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+
+vi.mock("./run-state.service.js", () => ({ isStepRunning: vi.fn(async () => false), isAwaitingUser: vi.fn(async () => false) }))
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MINIMAL: SpineT = spineSchema.parse(
@@ -195,20 +197,17 @@ describe("resume.service", () => {
     expect(after!.steps.find((s) => s.id === "S-2.1")).toMatchObject({ status: "accepted" })
   })
 
-  it("F4: step in_progress nhưng đang bị khoá bởi request khác (cùng tiến trình) ⇒ 409 STEP_NOT_RUNNABLE, KHÔNG revert", async () => {
+  it("F4: step in_progress nhưng lượt chạy của nó còn sống ⇒ 409 STEP_NOT_RUNNABLE, KHÔNG revert", async () => {
     seedSpine()
     await seedInProgressMidDraft("S-3.1", "A99")
     const before = await repo.get(PROJECT)
 
-    acquireStepLock(PROJECT, "S-3.1")
-    try {
-      const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
-      expect(err).toBeInstanceOf(ApiError)
-      expect((err as ApiError).statusCode).toBe(409)
-      expect((err as ApiError).code).toBe("STEP_NOT_RUNNABLE")
-    } finally {
-      releaseStepLock(PROJECT, "S-3.1")
-    }
+    // WP-4: khoá step nằm ở collection `step_runs` (TTL + heartbeat), không còn là Set in-process
+    vi.mocked(isStepRunning).mockResolvedValueOnce(true)
+    const err = await resumeProject(PROJECT, USER).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).statusCode).toBe(409)
+    expect((err as ApiError).code).toBe("STEP_NOT_RUNNABLE")
 
     const after = await repo.get(PROJECT)
     expect(after!.spine_version).toBe(before!.spine_version)
@@ -247,5 +246,32 @@ describe("resume.service", () => {
     expect(after!.spine_version).toBe(before!.spine_version)
     expect(after!.actors.map((a) => a.id)).toContain("A99")
     expect(after!.actors.map((a) => a.id)).toContain("A77")
+  })
+})
+
+describe("FLF-221: project cũ đứng ở B-0.4 (step đã rời registry)", () => {
+  it("B-0.4 in_progress không bị revert; tiến độ tính trên 50 step; step tới lượt là B-1.1", async () => {
+    seedSpine()
+    let version = (await repo.get(PROJECT))!.spine_version
+    for (const stepId of ["B-0.1", "B-0.2", "B-0.3"]) {
+      const applied = await applyTransaction(PROJECT, {
+        base_version: version,
+        ops: [{ op: "add", path: "steps[]", value: { id: stepId, status: "accepted", first_seq: null, last_seq: null, accepted_at: "2026-09-16T00:00:00.000Z" } }],
+        by: USER,
+        step_id: stepId,
+        reason: "seed accepted"
+      })
+      version = applied.spine_version
+    }
+    await seedInProgressMidDraft("B-0.4", "A98")
+
+    const result = await resumeProject(PROJECT, USER)
+
+    expect(result.reverted_step).toBeNull()
+    const after = await repo.get(PROJECT)
+    expect(after!.actors.map((a) => a.id)).toContain("A98")
+    expect(result.progress.progress.current_step).toBe("B-1.1")
+    expect(result.progress.progress.done).toBe(3)
+    expect(result.progress.progress.total).toBe(50) // fixture minimal: chưa có màn ⇒ N = 0; B-0.4 accepted/in_progress không đếm
   })
 })

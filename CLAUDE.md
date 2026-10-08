@@ -19,6 +19,7 @@ npm test -- src/modules/spine/          # chạy một thư mục
 npm run build        # tsc -p tsconfig.build.json
 npm run seed:fixture # nạp fixtures/spine-fixture-19-screens.json vào Mongo
 npm run migrate:sections -- --dry-run   # chuyển project cũ (collection `sections`) sang Spine, ghi docs/migration-report.md
+npm run eval:usecase-s3 -- --label X --runs 3   # đo chất lượng S-3 (actor/use case/include-extend) bằng provider thật, fixtures/s3-eval
 ```
 
 Node 22, ESM (`"type": "module"`) — **mọi import nội bộ phải có đuôi `.js`** kể cả khi file nguồn là `.ts`.
@@ -47,7 +48,7 @@ model → op[] → op-engine.applyTransaction() → Spine mới + changes[] → 
 
 ## Quy trình 12 phase
 
-`51 step cố định + 5 × N` (N = số màn + 1 nếu có function không thuộc màn nào). Nguồn sự thật:
+`50 step cố định + 5 × N` (N = số màn + 1 nếu có function không thuộc màn nào). Nguồn sự thật:
 `assets/step-registry.json` + `src/modules/pipeline/step-registry.ts`. Step của vòng S-5 mang id
 `S-5.<n>@<screen_id>` hoặc `S-5.<n>@nonscreen`.
 
@@ -57,6 +58,18 @@ Mỗi step chạy khung: **Intake → Elicit → Draft → Render → Review →
 
 Context đưa cho model là **projection** của Spine theo `reads` của step, **không bao giờ là cả Spine hay
 cả transcript** (`context-projection.ts`).
+
+## Tổ chức là trục sở hữu dữ liệu (task-26)
+
+Project, thư mục, ví credit và gói thuộc về **org**, không thuộc về người. Mọi request vào tài nguyên org
+đi qua chuỗi `authMiddleware → requireActiveAccount → orgContext → requireRole` (BPMN Flow 10), mount ở
+`app.ts` theo tiền tố chứ không gắn từng route.
+
+- Lấy org của request bằng `requireOrgId(req)` (`shared/auth/org-request.ts`) — **đừng truyền `userId`**.
+  `getProjectById(projectId, orgId)` nhận `string` nên truyền nhầm `userId` vẫn biên dịch sạch mà quyền thì sai.
+- Ví credit trừ vào org **sở hữu project**, suy từ `projectId` trong `credit-reservation.service.ts`; không đổi
+  chữ ký `executeAiAction`.
+- `/api/v1/billing` **không** mount guard ở tiền tố: `POST /billing/payment-callback` là webhook không có token.
 
 ## Điều cấm (PR bị từ chối ngay)
 
@@ -84,13 +97,14 @@ lường trước trong `pipeline.dto.ts`.
 | Đường dẫn | Việc |
 |---|---|
 | `modules/spine/` | Spine schema/model/repository; op engine, path resolver, cascade, 8 bất biến |
-| `modules/spine/{section-registry,section-status,deterministic-check,flags.service}.ts` | Section theo template FPT, status là hàm tính, 10 luật cờ đỏ + 6 cờ vàng |
+| `modules/spine/{section-registry,section-status,deterministic-check,flags.service}.ts` | Section theo template FPT, status là hàm tính, 11 luật cờ đỏ + 11 cờ vàng |
 | `modules/spine/{impact,change,reconcile,undo,traceability}.service.ts` | Sửa qua hội thoại: impact query, 3 nhánh, hoà giải, undo, bản đồ truy vết |
 | `modules/pipeline/` | Step registry, projection, draft-to-ops, step runner, gate, meter, resume |
 | `modules/diagram/` | 5 renderer PlantUML + compile-check + lưu file |
 | `modules/render/` | Assemble section → `RenderedDocument` → `.docx` |
 | `modules/pipeline/s9/` | Quét cuối, đối chiếu mục tiêu, MoSCoW, ký baseline + snapshot |
 | `modules/{notification,billing,credits,admin,project,user,auth,feedback,folder}/` | Nền tảng. `Project` chỉ còn metadata (`name`, `domain`, `status`, `mode` — `import` | `fpt` | `customer_template`, mặc định `fpt`, xem `project.model.ts`; `folderId` — thư mục, `PATCH /projects/:id/folder`). `folder`: CRUD `/folders`, `POST /folders/:id/projects` thêm nhiều dự án, xoá thư mục giữ dự án. `lastOpenedAt` ghi khi `GET /projects/:id`. `feedback`: `POST /feedback` (UC-12), admin đọc qua `GET /admin/feedback` |
+| `modules/organization/` | Tổ chức (task-26): `Organization`, `Membership` (lead/analyst/viewer), `Invitation` (mã băm, dùng một lần). `/orgs` CRUD + switch + thành viên, `/invitations/:code` xem trước / nhận mã. `lead-succession.ts` giữ BR-02 (org luôn còn ≥1 Lead) |
 | `shared/ai/` | `ActionType`, prompt registry, response parser, provider, context tài liệu upload |
 | `assets/skills/` | 32 skill BMAD (`action/`, `content/`, `renderer/`, `output/`), mỗi skill một `SKILL.md` |
 | `assets/prompts/` | Prompt phẳng chỉ cho `chat`, `summarize_document` |
@@ -108,8 +122,10 @@ Prompt sống trong `assets/skills/<kind>/<id>/SKILL.md`: frontmatter là hợp 
 registry chỉ đọc đĩa.
 
 - `draftOps` **không nạp** `references/*.md`, nên mọi luật cần thiết phải nằm trong chính `SKILL.md`,
-  và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`). `references/` chỉ là tài
+  và `SKILL.md` bị khoá **≤ 150 dòng** (`src/shared/ai/prompt-assets.test.ts`; riêng `content/entities-erd` ≤ 250 qua `LINE_LIMIT_OVERRIDE`). `references/` chỉ là tài
   liệu cho người đọc.
+- `fallbackModels` (tuỳ chọn, hiện chỉ provider `gemini`): model dự phòng cùng provider, thử lần lượt khi model chính
+  quá tải (503 / 429 không phải hết tiền / timeout). Log AI ghi model thật sự trả lời.
 - Skill chưa viết mang `stub: true`; viết thật rồi thì bỏ `stub` **và** thêm thư mục vào
   `WRITTEN_NON_ACTION` trong `prompt-assets.test.ts`.
 - `writes` trong frontmatter phải nằm trong `writes` của step tương ứng ở `assets/step-registry.json`.
@@ -164,3 +180,13 @@ Ba project vitest (`vitest.config.ts`), `npm test` chạy cả ba:
 
 Tiếng Anh cho: tên field Spine (snake_case đúng như tài liệu), nội dung render vào SRS, nhãn `.puml`.
 Tiếng Việt cho: nhãn UI, thông báo lỗi cho user, comment nội bộ.
+
+Ngôn ngữ giao diện của tài khoản: `User.locale` (`vi` | `en`, **không default** — thiếu = chưa chọn), hằng số ở
+`shared/i18n/locale.ts`. Đổi qua `PATCH /users/me`; trả ở `GET /users/me` và `user` của login / Google / xác thực
+email (`null` khi chưa chọn). Email vẫn chỉ tiếng Việt.
+
+Chat: AI trả lời theo ngôn ngữ user đang viết (FLF-260). `shared/i18n/reply-language.ts` đoán ngôn ngữ từng tin
+**user gõ** (không đoán chữ hệ thống ghi thay user như `gateActionText`); rõ ⇒ ghi `ChatSession.reply_language`, mơ hồ ⇒
+giữ ngôn ngữ phiên, phiên chưa có ⇒ `User.locale` ⇒ `vi` (`modules/project/reply-language.service.ts`). Lời gọi model
+hội thoại truyền `AiActionInput.replyLanguage`, `buildPrompt` nối khối `## Reply language` cuối prompt. Câu cố định
+hiện trong bong bóng chat theo ngôn ngữ đó (`byLanguage`); nhãn stage, `*_vi` chrome và thông báo lỗi vẫn tiếng Việt.

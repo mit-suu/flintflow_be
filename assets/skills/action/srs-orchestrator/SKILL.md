@@ -2,13 +2,13 @@
 skill_id: srs-orchestrator
 kind: action
 version: 1.0.0
-description: Global state machine B-0 → S-9 — owns progress, working_mode, step order and the S-5 screen loop
+description: Global state machine B-0 → S-9 — owns progress, step order and the S-5 screen loop
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
 maxTokens: 1024
 temperature: 0
 reads:
-  - project.working_mode
+  - project.review_mode
   - progress
   - steps[]
   - screens[].detail_status
@@ -32,7 +32,7 @@ Deterministic contract for the step runner (T13). **No model call.** It decides 
 - **Step** (`<phase>.<n>`, S-5 uses `S-5.<n>@<screen_id>` and `S-5.<n>@nonscreen`) — the unit of commit and of progress.
 - **Section** — rendered from Spine fields. A step never writes a section.
 
-Full step list: `references/step-table.md` (51 fixed steps + 5 × N). That table is the only source for step ids.
+Full step list: `references/step-table.md` (50 fixed steps + 5 × N). That table is the only source for step ids.
 
 ## State
 
@@ -40,7 +40,7 @@ Full step list: `references/step-table.md` (51 fixed steps + 5 × N). That table
 | --- | --- |
 | `progress.current_phase`, `current_step` | Cursor. Belongs to the **project**, not the session |
 | `progress.screen_queue[]`, `screen_cursor` | Fixed at S-4.1; S-5 pops from here |
-| `progress.elicit_turns_this_phase` | Fast-path turn counter; survives resume |
+| `progress.elicit_turns_this_phase` | Elicit turns counted this phase (bookkeeping only; no longer caps asking) |
 | `steps[].status` | `pending` → `in_progress` → `accepted` \| `revision_requested` |
 | `steps[].first_seq`, `last_seq` | Range of `changes[]` written by the step |
 
@@ -64,9 +64,10 @@ Deterministic steps **S-8.2, S-8.3, S-9.1, S-9.5** skip Elicit/Draft and never M
 ## Phase rules
 
 - **Intake once** at phase start (`phase-intake`), not per step.
-- **Fast path**: at most 2 Elicit turns for the whole phase, drafts fill gaps with `assumptions[]`, gate is **once at phase end**.
-- **Coaching path**: at least one Elicit turn per step, gate per step.
-- `working_mode` may change only at a phase boundary (menu `[C]`), written to `changes[]`.
+- **Phase interview** once at phase start (≤ 4 questions, every review mode); a step inside still asks
+  when it has missing fields, and the decision ledger blocks re-asking a settled topic.
+- **Review mode** only decides where the run stops: `strict` gates every step; `fast` (and legacy
+  `balanced`) auto-accepts quiet steps and gates once at phase end. How much to ask is the AI's call.
 - B-0 and S-1 are **soft** phases: steps may be skipped when Intake finds the fields already filled.
 
 ## S-5 screen loop

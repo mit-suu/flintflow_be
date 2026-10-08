@@ -1,12 +1,16 @@
 import { Document, HeadingLevel, Packer, Paragraph, Table, TableCell, TableRow } from "docx"
 import { describe, expect, it } from "vitest"
-import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, readBlocks } from "./blocks.js"
+import { blockIdOfBookmark, bookmarkName, ensureBlockBookmarks, findBlock, followsNumber, readBlocks } from "./blocks.js"
 import { DocxPackage } from "./package.js"
-import { makeDocx, p, styled, table } from "./testing/make-docx.js"
+import { imageRel, makeDocx, p, picture, styled, table } from "./testing/make-docx.js"
 import { normalizeText, textHash } from "./text.js"
 import { wAll, wAttr } from "./xml.js"
 
 const load = async (body: string) => DocxPackage.load(await makeDocx({ body }))
+
+/** Một đoạn hai dòng ngăn bằng ngắt dòng (Shift+Enter), không style. */
+const brParagraph = (first: string, second: string) =>
+  `<w:p><w:r><w:t xml:space="preserve">${first} </w:t></w:r><w:r><w:br/><w:t>${second}</w:t></w:r></w:p>`
 
 describe("readBlocks", () => {
   it("heading theo w:name khi styleId bị bản địa hoá, theo outlineLvl của style, bỏ mục lục", async () => {
@@ -31,6 +35,34 @@ describe("readBlocks", () => {
     expect(blocks[4].heading_path).toEqual(["Giới thiệu", "Mục đích", "Phạm vi chi tiết"])
     expect(blocks[5].heading_path).toEqual([])
     expect(blocks.map((b) => b.ordinal)).toEqual([0, 1, 2, 3, 4, 5])
+  })
+
+  it("FLF-252: heading gõ chung đoạn với nội dung (số mục ⏎ câu) nối tiếp heading trước ⇒ heading + phần chữ; danh sách gõ tay / số không nối tiếp không bị tách", async () => {
+    const blocks = await readBlocks(
+      await load(
+        p("4.2.3 Performance") +
+          p("Response time under 2 s.") +
+          brParagraph("4.2.4 Security", "The system must ensure the security of user data.") +
+          p("Users must authenticate through GitHub OAuth.") +
+          brParagraph("1. Open the page", "2. Click login") +
+          brParagraph("7.1 Unrelated", "Text")
+      )
+    )
+    expect(blocks.map((b) => [b.kind, b.level, b.editable, !!b.tail])).toEqual([
+      ["heading", 3, true, false],
+      ["paragraph", null, true, false],
+      ["heading", 3, false, false],
+      ["paragraph", null, false, true],
+      ["paragraph", null, true, false],
+      ["paragraph", null, true, false],
+      ["paragraph", null, true, false]
+    ])
+    expect(blocks.slice(2, 4).map((b) => b.text)).toEqual(["4.2.4 Security", "The system must ensure the security of user data."])
+    expect(blocks[4].heading_path).toEqual(["4.2.4 Security"])
+    expect(followsNumber([4, 2, 3], [4, 2, 4])).toBe(true)
+    expect(followsNumber([4, 2, 3], [4, 3])).toBe(true)
+    expect(followsNumber([4, 2, 3], [4, 2, 3, 1])).toBe(true)
+    expect(followsNumber([4, 2, 3], [4, 2, 6])).toBe(false)
   })
 
   it("heading theo outlineLvl trực tiếp và theo mẫu số mục khi file không dùng style", async () => {
@@ -111,7 +143,8 @@ describe("readBlocks", () => {
     expect(blocks.map((b) => [b.kind, b.text, b.editable, b.para_id])).toEqual([
       ["paragraph", "Hệ mới\tx\ny", true, "1A2B3C4D"],
       ["image", "", false, null],
-      ["paragraph", "Hình 2", false, null],
+      // chữ "Hình <số>" ⇒ caption theo chữ (FLF-251); vẫn không sửa được vì là field
+      ["caption", "Hình 2", false, null],
       ["paragraph", "Có textbox", false, null]
     ])
     expect(blocks[0].text_hash).toBe(textHash("Hệ  mới x y"))
@@ -198,6 +231,21 @@ describe("neo bookmark", () => {
       ["Trùng", null],
       ["Bookmark khác", null]
     ])
+  })
+
+  it("FLF-252: heading gõ chung đoạn — chỉ heading mang bookmark; đọc lại ổn định, phần chữ sau tìm lại theo nội dung", async () => {
+    const pkg = await load(p("4.2.3 Performance") + brParagraph("4.2.4 Security", "The system must ensure security."))
+    const blocks = await readBlocks(pkg)
+    let n = 0
+    expect(ensureBlockBookmarks(blocks, () => `B${String(++n).padStart(4, "0")}`)).toBe(2)
+    expect(blocks.map((b) => b.bookmark)).toEqual(["_ff_B0001", "_ff_B0002", null])
+    const again = await readBlocks(await DocxPackage.load(await pkg.toBuffer()))
+    expect(again.map((b) => [b.kind, b.text, b.bookmark])).toEqual([
+      ["heading", "4.2.3 Performance", "_ff_B0001"],
+      ["heading", "4.2.4 Security", "_ff_B0002"],
+      ["paragraph", "The system must ensure security.", null]
+    ])
+    expect(findBlock(again, { text_hash: textHash("The system must ensure security.") })?.tail).toBe(true)
   })
 
   it("findBlock: bookmark → paraId → text_hash duy nhất; mơ hồ ⇒ null", async () => {
@@ -311,6 +359,81 @@ describe("readBlocks — bổ sung P4", () => {
     expect(blocks[1].heading_path).toEqual(["Kiến trúc"])
     expect(blocks[2].heading_path).toEqual(["Kiến trúc"])
     expect(blocks[1].xml_path).toBe("body/p[1]")
+  })
+
+  it("FLF-251: chú thích gõ bằng style heading / đoạn thường ⇒ caption theo chữ; heading thật có chữ Table/Figure vẫn là heading", async () => {
+    const blocks = await readBlocks(
+      await load(
+        styled("u1", "2.3 Use Cases") +
+          `<w:p><w:r><w:drawing/></w:r></w:p>` +
+          styled("u2", "Figure 03. Use Case Diagram - Account & Workspace") +
+          p("Hình 2.1: Sơ đồ ngữ cảnh") +
+          styled("u2", "Table of Contents") +
+          styled("u2", "Figure Management") +
+          table([["Table 1", "x"]])
+      )
+    )
+    expect(blocks.filter((b) => b.kind !== "table_cell").map((b) => [b.kind, b.level, b.text])).toEqual([
+      ["heading", 1, "2.3 Use Cases"],
+      ["image", null, ""],
+      ["caption", null, "Figure 03. Use Case Diagram - Account & Workspace"],
+      ["caption", null, "Hình 2.1: Sơ đồ ngữ cảnh"],
+      ["heading", 2, "Table of Contents"],
+      ["heading", 2, "Figure Management"],
+      ["table", null, "Table 1 | x"]
+    ])
+    // caption không mở cấp heading mới
+    expect(blocks[3].heading_path).toEqual(["2.3 Use Cases"])
+    expect(blocks.find((b) => b.kind === "table_cell" && b.text === "Table 1")?.kind).toBe("table_cell")
+  })
+
+  it("phase 5 (T3): ảnh nhúng ⇒ image_ref = part ảnh theo rels; rel không phải ảnh / liên kết ngoài / không phải hình ⇒ null", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body: picture("rIdImg1") + picture("rIdMissing") + p("Chữ"),
+        extraDocRels: imageRel("rIdImg1", "image1.png"),
+        extraParts: { "word/media/image1.png": Buffer.from([0x89, 0x50, 0x4e, 0x47]) }
+      })
+    )
+    const blocks = await readBlocks(pkg)
+    expect(blocks.map((b) => [b.kind, b.image_ref])).toEqual([
+      ["image", "word/media/image1.png"],
+      ["image", null],
+      ["paragraph", null]
+    ])
+    expect(await pkg.binary("word/media/image1.png")).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    expect(await pkg.binary("word/media/none.png")).toBeNull()
+  })
+
+  it("FLF-252: đoạn có cả chữ lẫn ảnh ⇒ block chữ + block ảnh đúng thứ tự trong đoạn; chỉ block chữ mang bookmark, đọc lại ổn định", async () => {
+    const blip = (rid: string) => `<w:r><w:drawing><a:blip xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" r:embed="${rid}"/></w:drawing></w:r>`
+    const text = (t: string) => `<w:r><w:t xml:space="preserve">${t}</w:t></w:r>`
+    const pkg = await DocxPackage.load(
+      await makeDocx({
+        body:
+          // "Screen layout:" rồi ảnh màn hình (SRS WDP301)
+          `<w:p>${text("Screen layout:")}${blip("rIdImg1")}</w:p>` +
+          // sơ đồ rồi ngắt dòng + chú thích
+          `<w:p>${blip("rIdImg2")}<w:r><w:br/></w:r>${text("Figure xx - Screen flow for Developer")}</w:p>`,
+        extraDocRels: imageRel("rIdImg1", "image8.jpg") + imageRel("rIdImg2", "image4.jpg")
+      })
+    )
+    const blocks = await readBlocks(pkg)
+    expect(blocks.map((b) => [b.kind, b.text.trim(), b.image_ref, !!b.tail])).toEqual([
+      ["paragraph", "Screen layout:", null, false],
+      ["image", "", "word/media/image8.jpg", true],
+      ["image", "", "word/media/image4.jpg", true],
+      ["paragraph", "Figure xx - Screen flow for Developer", null, false]
+    ])
+    let n = 0
+    expect(ensureBlockBookmarks(blocks, () => `B${String(++n).padStart(4, "0")}`)).toBe(2)
+    const again = await readBlocks(await DocxPackage.load(await pkg.toBuffer()))
+    expect(again.map((b) => [b.kind, b.bookmark])).toEqual([
+      ["paragraph", "_ff_B0001"],
+      ["image", null],
+      ["image", null],
+      ["paragraph", "_ff_B0002"]
+    ])
   })
 
   it("ảnh nhận bookmark neo nằm ngoài w:p ngay trước nó", async () => {

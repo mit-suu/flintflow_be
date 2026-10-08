@@ -1,6 +1,8 @@
 import { Router } from "express"
 import * as pipelineController from "./pipeline.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+// Viewer đọc được tiến độ nhưng không chạy step AI (business-flow.md §2, bảng vai trò)
+import { requireRole } from "../../shared/auth/require-role.middleware.js"
 
 const router = Router()
 
@@ -15,7 +17,7 @@ const router = Router()
  * @swagger
  * /api/v1/projects/{projectId}/steps:
  *   get:
- *     summary: Danh sách step (51 + 5×N) kèm trạng thái, calls_used/regenerate_used
+ *     summary: Danh sách step (50 + 5×N) kèm trạng thái, calls_used/regenerate_used
  *     tags: [Pipeline]
  *     security:
  *       - BearerAuth: []
@@ -76,7 +78,119 @@ router.get("/:projectId/steps", authMiddleware, pipelineController.getSteps)
  *       409:
  *         description: STEP_NOT_RUNNABLE, CALL_LIMIT, SPINE_VERSION_CONFLICT
  */
-router.post("/:projectId/steps/:stepId/run", authMiddleware, pipelineController.runStepController)
+router.post("/:projectId/steps/:stepId/run", authMiddleware, requireRole("lead", "analyst"), pipelineController.runStepController)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/steps/{stepId}/run-state:
+ *   get:
+ *     summary: Trạng thái lượt chạy step (khôi phục gate/câu hỏi sau khi reload)
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: stepId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "runStateResponseSchema hoặc null nếu step chưa chạy lần nào"
+ */
+router.get("/:projectId/steps/:stepId/run-state", authMiddleware, pipelineController.getStepRunState)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/phases/{phase}/run:
+ *   post:
+ *     summary: Chạy liền các bước của một giai đoạn (SSE) — bước yên lặng tự Accept, dừng khi cần người
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: phase
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: "Id phase (S-6) hoặc đơn vị vòng S-5 (S-5@S03)"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [session_id, base_version]
+ *             properties:
+ *               session_id:
+ *                 type: string
+ *               base_version:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: >
+ *           text/event-stream — như `/steps/:id/run`, thêm `phase_progress`, `auto_accepted` và
+ *           `phase_gate` (tóm tắt cả giai đoạn ở cổng chốt cuối)
+ *       409:
+ *         description: STEP_NOT_RUNNABLE, SPINE_VERSION_CONFLICT
+ */
+router.post("/:projectId/phases/:phase/run", authMiddleware, requireRole("lead", "analyst"), pipelineController.runPhaseController)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/steps/{stepId}/cancel:
+ *   post:
+ *     summary: Huỷ lượt đang chạy của step (nhả khoá, huỷ request tới model)
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: stepId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "{ cancelled, run_id }"
+ */
+router.post("/:projectId/steps/:stepId/cancel", authMiddleware, requireRole("lead", "analyst"), pipelineController.cancelStepRun)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/run-state/active:
+ *   get:
+ *     summary: Lượt chạy còn sống của dự án (pill "đang chạy nền")
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: "runStateResponseSchema hoặc null"
+ */
+router.get("/:projectId/run-state/active", authMiddleware, pipelineController.getActiveRunState)
 
 /**
  * @swagger
@@ -129,7 +243,7 @@ router.post("/:projectId/steps/:stepId/run", authMiddleware, pipelineController.
  *       409:
  *         description: STEP_NOT_RUNNABLE (step không đang chờ trả lời)
  */
-router.post("/:projectId/steps/:stepId/answer", authMiddleware, pipelineController.answerStep)
+router.post("/:projectId/steps/:stepId/answer", authMiddleware, requireRole("lead", "analyst"), pipelineController.answerStep)
 
 /**
  * @swagger
@@ -175,7 +289,7 @@ router.post("/:projectId/steps/:stepId/answer", authMiddleware, pipelineControll
  *       409:
  *         description: STEP_NOT_RUNNABLE, REGENERATE_LIMIT, CALL_LIMIT, NEEDS_USER_INPUT, SPINE_VERSION_CONFLICT
  */
-router.post("/:projectId/steps/:stepId/gate", authMiddleware, pipelineController.gateStep)
+router.post("/:projectId/steps/:stepId/gate", authMiddleware, requireRole("lead", "analyst"), pipelineController.gateStep)
 
 /**
  * @swagger
@@ -201,6 +315,6 @@ router.post("/:projectId/steps/:stepId/gate", authMiddleware, pipelineController
  *       422:
  *         description: CHANGE_RANGE_INVALID, OP_INVALID (revert_conflict)
  */
-router.post("/:projectId/resume", authMiddleware, pipelineController.resumeProjectController)
+router.post("/:projectId/resume", authMiddleware, requireRole("lead", "analyst"), pipelineController.resumeProjectController)
 
 export default router

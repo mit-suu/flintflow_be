@@ -4,13 +4,17 @@ import type { NextFunction, Request, RequestHandler, Response } from "express"
 vi.mock("../project/project.service.js", () => ({ getProjectById: vi.fn() }))
 vi.mock("./step-runner.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./step-runner.service.js")>()
-  return { ...actual, runStep: vi.fn(), requirePipelineSession: vi.fn() }
+  return { ...actual, runStep: vi.fn(), requirePipelineSession: vi.fn(), recordUserMessage: vi.fn() }
 })
 vi.mock("./gate.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./gate.service.js")>()
   return { ...actual, gate: vi.fn() }
 })
 vi.mock("./resume.service.js", () => ({ resumeProject: vi.fn() }))
+vi.mock("./phase-runner.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./phase-runner.service.js")>()
+  return { ...actual, runPhase: vi.fn() }
+})
 vi.mock("../spine/spine.repository.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../spine/spine.repository.js")>()
   return { ...actual, get: vi.fn(), getOrCreate: vi.fn() }
@@ -20,7 +24,8 @@ vi.mock("./meter.service.js", async (importOriginal) => {
   return { ...actual, roundCountsForSteps: vi.fn(async () => new Map()) }
 })
 
-import { runStepController, getSteps, gateStep, answerStep, resumeProjectController } from "./pipeline.controller.js"
+import { runStepController, runPhaseController, getSteps, gateStep, answerStep, resumeProjectController } from "./pipeline.controller.js"
+import { runPhase } from "./phase-runner.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { runStep, requirePipelineSession, NOT_PIPELINE_SESSION } from "./step-runner.service.js"
 import { gate } from "./gate.service.js"
@@ -28,8 +33,22 @@ import { resumeProject } from "./resume.service.js"
 import { ANSWER_MAX_CHARS } from "./pipeline.dto.js"
 import { get as getSpine, getOrCreate } from "../spine/spine.repository.js"
 import { roundCountsForSteps } from "./meter.service.js"
+import { acquireRun, getRunState, resetMemoryRuns, touchRun } from "./run-state.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { AiActionError } from "../../shared/ai/ai-action.types.js"
+
+/**
+ * task-26 Pha 4: quyền truy cập dự án tính theo ORG chứ không theo người. Test cũ phân biệt "chủ dự án"
+ * với "người lạ" qua userId, nên ở đây cho mỗi actor một org riêng để giữ nguyên ý định từng ca.
+ */
+const ORG = "650000000000000000000099"
+const OTHER_ORG = "650000000000000000000097"
+const orgCtxFor = (userId?: string) => ({
+  orgId: userId === OWNER ? ORG : OTHER_ORG,
+  role: "lead" as const,
+  membershipId: "650000000000000000000098"
+})
+
 
 const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
@@ -45,10 +64,10 @@ interface Outcome {
 
 /** Mock `res`/`req` tối thiểu cho SSE: theo dõi setHeader/flushHeaders/write/end — không cần supertest.
  *  `req.on` no-op (F8 wire `req.on("close", ...)` không điều kiện trong controller thật). */
-const invokeSse = (handler: RequestHandler, userId: string | undefined, projectId: string, stepId: string, body: unknown) =>
+const invokeSse = (handler: RequestHandler, userId: string | undefined, projectId: string, stepId: string, body: unknown, params: Record<string, string> = {}) =>
   new Promise<Outcome>((resolve) => {
     const outcome: Outcome = { statusHeaders: 0, headers: {}, headersFlushed: false, written: [], ended: false }
-    const req = { user: userId ? { userId } : undefined, params: { projectId, stepId }, body, on: () => {} } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId, stepId, ...params }, body, on: () => {} } as unknown as Request
     const res = {
       writableEnded: false,
       setHeader(name: string, value: string) {
@@ -86,8 +105,8 @@ beforeEach(() => {
   vi.mocked(getSpine).mockReset()
   vi.mocked(getOrCreate).mockReset()
   vi.mocked(roundCountsForSteps).mockReset()
-  vi.mocked(getProjectById).mockImplementation(async (projectId, userId) => {
-    if (projectId !== PROJECT || userId !== OWNER) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
+  vi.mocked(getProjectById).mockImplementation(async (projectId, orgId) => {
+    if (projectId !== PROJECT || orgId !== ORG) throw new ApiError(404, "Project not found or unauthorized", "PROJECT_NOT_FOUND")
     return { name: "Lumen", domain: "E-learning" } as never
   })
   vi.mocked(getSpine).mockResolvedValue(null)
@@ -106,6 +125,22 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     // Guard-clause: KHÔNG có sự kiện nào được ghi, SSE header chưa mở
     expect(outcome.headersFlushed).toBe(false)
     expect(outcome.written).toHaveLength(0)
+  })
+
+  /**
+   * FLF-264: "im" là tính chất của bước, không phải của đường chạy. Trước đây chỉ `runPhase` truyền `resolveGate`,
+   * nên một bước không hỏi gì và không ghi gì vẫn dựng cổng chốt khi gọi qua endpoint lẻ.
+   */
+  it("chạy lẻ một bước vẫn truyền resolveGate ⇒ bước im tự Accept thay vì dựng cổng", async () => {
+    vi.mocked(getSpine).mockResolvedValue({ spine_version: 1, project: { review_mode: "balanced" }, screens: [], functions: [], steps: [], decisions: [] } as never)
+    vi.mocked(runStep).mockResolvedValue(undefined as never)
+
+    await invokeSse(runStepController, OWNER, PROJECT, "S-8.2", { session_id: "s1", base_version: 1 })
+
+    const deps = vi.mocked(runStep).mock.calls[0]?.[5] as { resolveGate?: (g: unknown) => Promise<{ quiet: boolean }> }
+    expect(deps.resolveGate).toBeTypeOf("function")
+    // S-8.2 không hỏi, không ghi, không phải cổng cuối giai đoạn (S-8.4 mới là) ⇒ im
+    await expect(deps.resolveGate?.({ type: "gate_ready", step_id: "S-8.2", flags: { red_delta: 0 }, new_assumptions: [] })).resolves.toMatchObject({ quiet: true })
   })
 
   it("dự án không thuộc user ⇒ 404 PROJECT_NOT_FOUND, không gọi runStep", async () => {
@@ -190,6 +225,7 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     const closeListeners: Array<() => void> = []
 
     const req = {
+      orgContext: orgCtxFor(OWNER),
       user: { userId: OWNER },
       params: { projectId: PROJECT, stepId: "S-3.1" },
       body: { session_id: "s1", base_version: 1 },
@@ -233,7 +269,7 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
 describe("GET /projects/:projectId/steps", () => {
   const invokeJson = (handler: RequestHandler, userId: string | undefined, projectId: string) =>
     new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
-      const req = { user: userId ? { userId } : undefined, params: { projectId }, body: {} } as unknown as Request
+      const req = { orgContext: orgCtxFor(userId), user: userId ? { userId } : undefined, params: { projectId }, body: {} } as unknown as Request
       const res = {
         status(code: number) {
           ;(res as unknown as { _status: number })._status = code
@@ -277,14 +313,16 @@ describe("GET /projects/:projectId/steps", () => {
 
     expect(roundCountsForSteps).toHaveBeenCalledTimes(1)
     expect(outcome.error).toBeUndefined()
-    expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: null } })
+    // `current_step` là step TỚI LƯỢT (cùng luật với GET /progress), không phải con trỏ trong Spine:
+    // spine rỗng ⇒ bước đầu quy trình.
+    expect(outcome.body).toMatchObject({ data: { current_phase: null, current_step: "B-0.1" } })
   })
 })
 
 /** Handler JSON thường (không SSE): resolve khi `res.json` hoặc `next(err)`. */
 const invokeJsonHandler = (handler: RequestHandler, userId: string, params: Record<string, string>, body: unknown = {}) =>
   new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
-    const req = { user: { userId }, params, body } as unknown as Request
+    const req = { orgContext: orgCtxFor(userId), user: { userId }, params, body } as unknown as Request
     const res = {
       status(code: number) {
         ;(res as unknown as { _status: number })._status = code
@@ -327,11 +365,72 @@ describe("POST /projects/:projectId/steps/:stepId/gate — session_id (contract-
   })
 })
 
+describe("FLF-221: message/intent — chat là nút chạy", () => {
+  it("/run nhận message + intent và truyền xuống runStep", async () => {
+    vi.mocked(runStep).mockImplementation(async () => {})
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "B-0.1", { session_id: "s1", base_version: 1, message: "Ứng dụng đặt lịch cắt tóc", intent: "no_idea" })
+    expect(outcome.error).toBeUndefined()
+    expect(vi.mocked(runStep).mock.calls[0][5]).toMatchObject({ message: "Ứng dụng đặt lịch cắt tóc", intent: "no_idea" })
+  })
+
+  it("/phases/B-0/run với message ⇒ không 400, message tới được runPhase", async () => {
+    vi.mocked(runPhase).mockReset()
+    vi.mocked(runPhase).mockResolvedValue({ phase: "B-0", stopped_at: null, reason_vi: "", steps: [] })
+    const outcome = await invokeSse(runPhaseController, OWNER, PROJECT, "", { session_id: "s1", base_version: 1, message: "Ý tưởng của mình" }, { phase: "B-0" })
+    expect(outcome.error).toBeUndefined()
+    expect(vi.mocked(runPhase).mock.calls[0][1]).toBe("B-0")
+    expect(vi.mocked(runPhase).mock.calls[0][5]).toMatchObject({ message: "Ý tưởng của mình" })
+  })
+
+  it("FLF-244: /phases/:phase/run từ session không pipeline ⇒ 403 NOT_PIPELINE_SESSION trước khi mở SSE, không gọi runPhase", async () => {
+    vi.mocked(runPhase).mockReset()
+    vi.mocked(requirePipelineSession).mockRejectedValueOnce(new ApiError(403, "not pipeline", NOT_PIPELINE_SESSION))
+    const outcome = await invokeSse(runPhaseController, OWNER, PROJECT, "", { session_id: "s2", base_version: 1 }, { phase: "B-1" })
+    expect(outcome.error).toMatchObject({ statusCode: 403, code: NOT_PIPELINE_SESSION })
+    expect(requirePipelineSession).toHaveBeenCalledWith(PROJECT, "s2")
+    expect(runPhase).not.toHaveBeenCalled()
+  })
+
+  it("intent lạ ⇒ 400 VALIDATION_ERROR", async () => {
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "B-0.1", { session_id: "s1", base_version: 1, intent: "whatever" })
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+  })
+
+  it("/answer: answers rỗng mà không có message ⇒ 400", async () => {
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, { session_id: "s1", answers: [] })
+    expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+  })
+})
+
 describe("POST /projects/:projectId/steps/:stepId/answer — giới hạn độ dài", () => {
   it(`answer dài hơn ${ANSWER_MAX_CHARS} ký tự ⇒ 400 VALIDATION_ERROR`, async () => {
     const body = { session_id: "s1", answers: [{ question_id: "Q1", answer: "x".repeat(ANSWER_MAX_CHARS + 1) }] }
     const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
     expect(outcome.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+  })
+})
+
+describe("POST /projects/:projectId/steps/:stepId/answer — không có lượt chờ khớp (FLF-222)", () => {
+  beforeEach(() => resetMemoryRuns())
+
+  it("không lượt nghe, không lượt chờ ở run-state ⇒ 409 STEP_NOT_RUNNABLE như cũ", async () => {
+    const body = { session_id: "s1", answers: [{ question_id: "Q1", answer: "x" }] }
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
+    expect(outcome.error).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+  })
+
+  it("lượt chờ ở run-state của session khác ⇒ 409, lượt chờ giữ nguyên", async () => {
+    const run = await acquireRun(PROJECT, "S-3.1", { sessionId: "s1", by: OWNER })
+    await touchRun(PROJECT, "S-3.1", run.run_id, {
+      status: "waiting_answer",
+      questions: [{ id: "Q1", text: "Actor chính là ai?" }],
+      pending_answer: { kind: "step", unit: "S-3.1", session_id: "s1", asked: [{ question: "Actor chính là ai?", options: [], topic_key: "primary_actor" }], base_answers_text: "" },
+      release: true
+    })
+    const body = { session_id: "s2", answers: [{ question_id: "Q1", answer: "x" }] }
+    const outcome = await invokeJsonHandler(answerStep, OWNER, { projectId: PROJECT, stepId: "S-3.1" }, body)
+    expect(outcome.error).toMatchObject({ statusCode: 409, code: "STEP_NOT_RUNNABLE" })
+    expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("waiting_answer")
   })
 })
 

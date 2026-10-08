@@ -24,15 +24,18 @@ const releaseScopeSchema = new Schema(
 const projectSchema = new Schema(
   {
     name: { type: String, default: "" },
+    system_name: nullableString,
     vision: nullableString,
     goals: { type: [String], default: [] },
     // `type` là tên field thật, không phải khai báo kiểu của Mongoose
     type: nullableString,
     domain: nullableString,
     complexity: nullableString,
-    form_factor: nullableString,
+    // Mảng nền tảng (FLF-237); document cũ còn chuỗi — `spineSchema` chuẩn hoá khi đọc
+    form_factor: { type: [String], default: [] },
     stakes: nullableString,
     working_mode: { type: String, enum: ["fast", "coaching", null], default: null },
+    review_mode: { type: String, enum: ["strict", "balanced", "fast"], default: "balanced" },
     release_scope: { type: releaseScopeSchema, default: () => ({}) }
   },
   opts
@@ -78,7 +81,9 @@ const actorSchema = new Schema(
     id: { type: String, required: true },
     name: { type: String, default: "" },
     kind: { type: String, enum: ["human", "system", "time"], required: true },
-    description: { type: String, default: "" }
+    description: { type: String, default: "" },
+    flows_in: { type: [String], default: undefined },
+    flows_out: { type: [String], default: undefined }
   },
   opts
 )
@@ -140,7 +145,11 @@ const entitySchema = new Schema(
     id: { type: String, required: true },
     name: { type: String, default: "" },
     description: { type: String, default: "" },
-    relations: { type: [String], default: [] }
+    relations: { type: [String], default: [] },
+    relation_verbs: { type: Schema.Types.Mixed, default: undefined },
+    relation_cardinality: { type: Schema.Types.Mixed, default: undefined },
+    relation_optional: { type: [String], default: undefined },
+    root: { type: Boolean, default: undefined }
   },
   opts
 )
@@ -226,7 +235,8 @@ const otherRequirementSchema = new Schema(
       enum: ["risk", "assumption", "open_question", "technical_risk"],
       required: true
     },
-    statement: { type: String, default: "" }
+    statement: { type: String, default: "" },
+    statement_vi: { type: String }
   },
   opts
 )
@@ -258,7 +268,12 @@ const customBlockSchema = new Schema(
     kind: { type: String, enum: ["paragraph", "list_item", "table", "image"], required: true },
     text: { type: String, default: "" },
     rows: { type: [[String]], default: null },
-    image_ref: { type: String, default: null }
+    image_ref: { type: String, default: null },
+    // Sơ đồ gốc của người dùng (mode 1 v3 §4.13); ảnh thường không có field này
+    diagram: {
+      type: new Schema({ kind: { type: String, enum: ["context", "usecase", "screen_flow", "erd"], required: true }, source_hash: { type: String, required: true } }, opts),
+      default: undefined
+    }
   },
   opts
 )
@@ -299,7 +314,9 @@ const assumptionSchema = new Schema(
     id: { type: String, required: true },
     path: { type: String, required: true },
     statement: { type: String, default: "" },
+    statement_vi: { type: String },
     rationale: { type: String, default: "" },
+    rationale_vi: { type: String },
     origin_step_id: { type: String, required: true },
     status: {
       type: String,
@@ -333,6 +350,20 @@ const sectionStateSchema = new Schema(
   {
     id: { type: String, required: true },
     asset_version: { type: String, default: "" }
+  },
+  opts
+)
+
+/** Sổ quyết định đã chốt (FLF-208 · R4) — xem `Decision` ở spine.types.ts. */
+const decisionSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    topic_key: { type: String, required: true },
+    question: { type: String, default: "" },
+    answer: { type: String, default: "" },
+    step_id: { type: String, required: true },
+    at: { type: String, required: true },
+    superseded_by: { type: String, default: null }
   },
   opts
 )
@@ -378,6 +409,7 @@ const spineSchema = new Schema(
 
     diagrams: { type: [diagramSchema], default: [] },
     assumptions: { type: [assumptionSchema], default: [] },
+    decisions: { type: [decisionSchema], default: [] },
     flags: { type: [flagSchema], default: [] },
     sections: { type: [sectionStateSchema], default: [] },
     baselines: { type: [baselineEntrySchema], default: [] },

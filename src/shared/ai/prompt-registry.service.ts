@@ -72,6 +72,7 @@ export const getSkill = (skillId: string, options: GetSkillOptions = {}): Loaded
     providerConfig: {
       provider: skill.provider,
       model: skill.aiModel,
+      ...(skill.fallbackModels.length ? { fallbackModels: skill.fallbackModels } : {}),
       maxTokens: skill.maxTokens,
       temperature: skill.temperature
     },
@@ -134,11 +135,25 @@ export const invalidatePromptCache = (_actionType?: string): void => {
   invalidateSkillCache()
 }
 
+const CONDITIONAL_BLOCK = /\{\{#if\s+(\w+)(?:=(\w+))?\s*\}\}\r?\n?([\s\S]*?)\{\{\/if\}\}\r?\n?/g
+
+/**
+ * Khối điều kiện `{{#if key}}…{{/if}}` (giữ khi biến truthy, khác "false") hoặc `{{#if key=value}}…{{/if}}` (giữ khi biến
+ * bằng đúng `value`). Không lồng nhau. Biến thiếu ⇒ bỏ khối. Xử lý trên template TRƯỚC khi thế biến, nên chữ user
+ * chứa cú pháp này không bao giờ được đọc như điều kiện.
+ */
+const resolveConditionals = (template: string, variables: Record<string, unknown>): string =>
+  template.replace(CONDITIONAL_BLOCK, (_match, key: string, expected: string | undefined, body: string) => {
+    const value = variables[key]
+    const keep = expected !== undefined ? String(value) === expected : Boolean(value) && String(value) !== "false"
+    return keep ? body : ""
+  })
+
 export const interpolatePrompt = (
   template: string,
   variables: Record<string, any> = {}
 ): string => {
-  let result = template
+  let result = resolveConditionals(template, variables)
 
   for (const [key, value] of Object.entries(variables)) {
     const placeholder = new RegExp(`{{\\s*${key}\\s*}}`, "g")
