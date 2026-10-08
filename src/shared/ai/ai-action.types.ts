@@ -24,6 +24,11 @@ export enum ActionType {
   SUMMARIZE_DOCUMENT = "summarize_document",
   /** FLF-221: dịch câu giả định user sửa (`statement_vi`) sang tiếng Anh (`statement`) — `PATCH /assumptions/:id`. */
   TRANSLATE = "translate",
+  /**
+   * FLF-265: dịch theo lô chữ SRS sang ngôn ngữ tài liệu của dự án (lớp bản dịch, Spine không đổi) — chỉ cho phần còn
+   * thiếu; nội dung mới đã có bản dịch do lượt ghi Spine trả kèm.
+   */
+  TRANSLATE_DOCUMENT = "translate_document",
 
   // ─── Mode 1: import SRS có sẵn + change request (FLF-171, plan mode 1 §5.7) ───
   /** I-4 (nút 1.8): trích field Spine từ text block của một section (hoặc lô section nhỏ). */

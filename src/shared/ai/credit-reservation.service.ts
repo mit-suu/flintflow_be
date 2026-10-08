@@ -26,6 +26,7 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CHAT]: 2,
   [ActionType.SUMMARIZE_DOCUMENT]: 2, // Task 2b: tính phí như EXTRACT, 1 lần/document
   [ActionType.TRANSLATE]: 1, // FLF-221: một câu giả định, output ngắn
+  [ActionType.TRANSLATE_DOCUMENT]: 2, // FLF-265: một lô ~40 đơn vị / ~6k ký tự
   // Mode 1 (FLF-171). Trích field tính theo LÔ section (gộp section nhỏ ~6k token in) để import một SRS
   // đầy đủ ≤ 100 credit gói free — đo ở spike P0 (claude_plan/reports/mode1-p0-report.md §4.8).
   [ActionType.IMPORT_EXTRACT_FIELDS]: 2,

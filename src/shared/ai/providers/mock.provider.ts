@@ -53,6 +53,10 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   if (actionType === "translate") {
     return fenced({ statement: "[MOCK AI] Translated assumption." })
   }
+  if (actionType === "translate_document") {
+    // Mock không đọc được lô ⇒ không trả đơn vị nào: mọi đơn vị giữ trạng thái "thiếu", render dùng chữ gốc.
+    return fenced({ items: [] })
+  }
   if (actionType === "render_fix") {
     return fenced({ puml: MOCK_PUML, notes: `[MOCK AI] ${prompt.slice(0, 40).replace(/\s+/g, " ")}` })
   }
