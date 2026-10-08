@@ -145,8 +145,13 @@ describe("import.dto — response", () => {
       flags: { red: 2, yellow: 7 }
     }
     const parsed = finalizeResponseSchema.parse(res)
-    expect(parsed.baseline.type).toBe("imported")
+    expect(parsed.baseline?.type).toBe("imported")
     expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "0.1" }).success).toBe(false)
+  })
+
+  it("finalize chạy nền: trả ngay import baselining, baseline + flags null", () => {
+    const res = { import: { ...sampleImport(), status: "baselining" }, doc_version: "0.0", baseline: null, spine_version: 3, flags: null }
+    expect(finalizeResponseSchema.parse(res)).toMatchObject({ baseline: null, flags: null, import: { status: "baselining" } })
   })
 
   it("gap report và re-upload diff", () => {

@@ -181,6 +181,28 @@ export const saveWithVersion = async (
   return parseRecord(updated)
 }
 
+/**
+ * Đưa Spine về đúng một nội dung đã lưu trước đó (`snapshot`) và bỏ mọi change ghi từ mốc (`seq ≥ fromSeq`) — rollback
+ * một việc nhiều lô chưa xong (finalize import dở: `import/finalize-jobs.ts`), như thể lần chạy đó chưa từng có. Không
+ * phải undo (undo ghi change nghịch đảo và chịu bất biến; Spine rỗng trước import không quay lại được bằng op). Lịch sử
+ * sau mốc thuộc lần chạy bị huỷ — giữ lại thì `changes[]` không còn khớp Spine. `spine_version` vẫn tăng (khoá lạc quan).
+ */
+export const restoreSnapshot = async (
+  projectId: string,
+  snapshot: Spine,
+  { baseVersion, fromSeq }: { baseVersion: number; fromSeq: number }
+): Promise<SpineRecord> => {
+  const transactional = await runInTransaction(async (session) => {
+    await ChangeModel.deleteMany({ projectId, seq: { $gte: fromSeq } }, sessionOptions(session))
+    return saveWithVersion({ ...snapshot, projectId }, baseVersion, session)
+  })
+  if (transactional !== TRANSACTION_UNAVAILABLE) return transactional
+  // Không có transaction: khoá version quyết trước, rồi mới bỏ change (chết giữa chừng ⇒ gọi lại vẫn về đúng mốc)
+  const saved = await saveWithVersion({ ...snapshot, projectId }, baseVersion)
+  await ChangeModel.deleteMany({ projectId, seq: { $gte: fromSeq } })
+  return saved
+}
+
 // ─── changes ─────────────────────────────────────────────────────
 
 /** `seq` kế tiếp cho project, bắt đầu từ 1. */

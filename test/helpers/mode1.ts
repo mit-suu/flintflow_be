@@ -5,6 +5,7 @@
 import request from "supertest"
 import { expect } from "vitest"
 import app from "../../src/app.js"
+import { getImportResponseSchema } from "../../src/modules/import/import.dto.js"
 import type { SeededFixture } from "../setup.js"
 
 export const createMode1Project = async (seeded: SeededFixture, name = "Lumen import"): Promise<string> => {
@@ -16,6 +17,7 @@ export const createMode1Project = async (seeded: SeededFixture, name = "Lumen im
 export const mode1Api = (seeded: SeededFixture, projectId: string) => {
   const auth = { Authorization: `Bearer ${seeded.token}` }
   const base = `/api/v1/projects/${projectId}`
+  const spineVersionOf = async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number
   return {
     base,
     upload: (buf: Buffer, name = "SRS_Lumen.docx", path = "/import") => request(app).post(`${base}${path}`).set(auth).attach("file", buf, name),
@@ -23,7 +25,7 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     post: (suffix: string, body: object = {}) => request(app).post(`${base}${suffix}`).set(auth).send(body),
     patch: (suffix: string, body: object) => request(app).patch(`${base}${suffix}`).set(auth).send(body),
     del: (suffix: string) => request(app).delete(`${base}${suffix}`).set(auth),
-    spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
+    spineVersion: spineVersionOf,
     /**
      * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi **chờ đúng job** của import đó
      * (`waitForExtraction`) thay vì chờ theo đồng hồ — máy tải nặng (chạy cả suite song song) không còn làm test
@@ -42,6 +44,20 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
         if (Date.now() >= deadline) throw new Error("I-4 chạy nền quá lâu")
         await new Promise((r) => setTimeout(r, 25))
       }
+    },
+    /**
+     * Finalize (1.10–1.12) chạy nền: gọi `/import/finalize` (mặc định `base_version` = Spine hiện tại) hoặc `/import/resume`
+     * ở `baselining`/`checking`, rồi chờ đúng job (`waitForFinalize`) và đọc `GET /import`. `view` = dữ liệu `GET /import`
+     * sau khi job xong / dừng; `null` khi request bị từ chối (4xx).
+     */
+    finalizeAndWait: async (importId: string, body: object = {}, path = "/import/finalize") => {
+      const payload = path === "/import/finalize" ? { import_id: importId, base_version: await spineVersionOf(), ...body } : { import_id: importId, ...body }
+      const res = await request(app).post(`${base}${path}`).set(auth).send(payload)
+      if (res.status !== 200) return { res, view: null }
+      const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
+      await waitForFinalize(importId)
+      const view = getImportResponseSchema.parse((await request(app).get(`${base}/import`).set(auth)).body.data)
+      return { res, view }
     }
   }
 }

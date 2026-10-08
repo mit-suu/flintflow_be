@@ -72,8 +72,8 @@ describe("import.state — trạng thái đặc biệt", () => {
     expect(IMPORT_STATUSES.filter(isTerminal)).toEqual(["preflight_rejected", "change_requested"])
   })
 
-  it("chỉ hai bước gọi AI (extracting, checking) được pause", () => {
-    expect(IMPORT_STATUSES.filter(canPause)).toEqual(["extracting", "checking"])
+  it("hai bước gọi AI (extracting, checking) + baselining (job finalize nền lỗi / mất) được pause", () => {
+    expect(IMPORT_STATUSES.filter(canPause)).toEqual(["extracting", "baselining", "checking"])
   })
 
   it("có baseline v0 từ checking trở đi (BR-03)", () => {
