@@ -26,6 +26,8 @@
     "migrate:orgs": "tsx src/scripts/migrate-users-to-orgs.ts",
     "migrate:mode1-v2": "tsx src/scripts/migrate-mode1-v2-indexes.ts",
     "migrate:spine-embeddings": "tsx src/scripts/migrate-spine-embeddings.ts",
+    "migrate:knowledge-index": "tsx src/scripts/migrate-knowledge-index.ts",
+    "ingest:knowledge": "tsx src/scripts/ingest-knowledge.ts",
     "rerender:usecase": "tsx src/scripts/rerender-usecase-diagrams.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
     "measure:tokens": "tsx src/scripts/measure-tokens.ts",
