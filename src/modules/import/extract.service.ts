@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto"
 import type mongoose from "mongoose"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import type { ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
 import { loadImportImage } from "../render/import-media.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
@@ -840,6 +841,59 @@ export const runExtraction = async (projectId: string, userId: string, importId:
   const finalDrafts = await ExtractionDraft.find({ import_id: doc._id })
   await transitionImport(doc, needsReview(finalDrafts) ? "fields_review" : "baselining")
   return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
+}
+
+// ─── ước tính credit trước khi trích ─────────────────────────────
+
+/** Số lượt AI + credit I-4 còn phải chạy (`GET /import` → `credit_estimate`). */
+export interface ExtractionEstimate {
+  text_batches: number
+  diagram_images: number
+  ai_calls: number
+  credits: number
+}
+
+/**
+ * Ước tính từ CHÍNH kế hoạch của lượt chạy (`planPendingSections`): lô chữ sau phần đọc tất định + ảnh qua `readsImage`
+ * mở được (PNG/JPEG), trừ section đã xong và các lượt đã xong của section dừng giữa chừng. Giá theo bảng giá hiện hành
+ * (`getActionCost`). Là cận trên: retry trong một lượt không tính thêm (chỉ trừ một lần), môi trường không có vision thì ảnh
+ * không gọi AI. Chưa có template profile ⇒ `null`.
+ */
+export const estimateExtraction = async (projectId: string, doc: Pick<IImportedDocument, "_id">): Promise<ExtractionEstimate | null> => {
+  const inputs = await loadExtractionInputs(projectId)
+  if (!inputs) return null
+  const drafts = await ExtractionDraft.find({ import_id: doc._id }, { section_id: 1, status: 1, partial: 1 }).lean<Pick<IExtractionDraft, "section_id" | "status" | "partial">[]>()
+  const draftOf = new Map(drafts.map((d) => [d.section_id, d]))
+  const done = new Set(drafts.filter((d) => d.status === "done").map((d) => d.section_id))
+  let text = 0
+  let images = 0
+  for (const planned of planPendingSections(inputs.plan, inputs.blocks, inputs.profile, inputs.provisional, done)) {
+    for (const step of planned.steps.slice(stepsDoneOf(draftOf.get(planned.section_id), planned))) {
+      if (step.kind === "text") text++
+      else if (await loadImportImage(projectId, step.block.image_ref!)) images++
+    }
+  }
+  const [textCost, imageCost] = await Promise.all([getActionCost(ActionType.IMPORT_EXTRACT_FIELDS), getActionCost(ActionType.IMPORT_EXTRACT_DIAGRAM)])
+  return { text_batches: text, diagram_images: images, ai_calls: text + images, credits: text * textCost + images * imageCost }
+}
+
+/**
+ * `credit_estimate` của `GET /import`: chỉ khi import ở `mapping_review` hoặc `extracting` chưa chạy / đang dừng (caller
+ * kiểm job nền). `withBalance` (Lead / Analyst — cùng quyền xem `/billing/balance`) ⇒ kèm số credit khả dụng của ví org sở
+ * hữu project (cùng ví lượt gọi AI trừ, `resolveWalletOrg`).
+ */
+export const creditEstimateFor = async (
+  projectId: string,
+  userId: string,
+  doc: Pick<IImportedDocument, "_id" | "status">,
+  opts: { withBalance: boolean }
+): Promise<(ExtractionEstimate & { available_credits: number | null }) | null> => {
+  if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
+  const estimate = await estimateExtraction(projectId, doc)
+  if (!estimate) return null
+  if (!opts.withBalance) return { ...estimate, available_credits: null }
+  const wallet = await getOrCreateWallet(userId, undefined, await resolveWalletOrg(projectId))
+  return { ...estimate, available_credits: wallet.balance - wallet.reserved }
 }
 
 // ─── 1.9 xác nhận field ─────────────────────────────────────────

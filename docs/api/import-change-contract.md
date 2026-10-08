@@ -368,11 +368,26 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
   field mới (vd `actors[id=A01].kind` từ sơ đồ ngữ cảnh mục 1) nên tên nằm ở draft mục khác. Không có khi field chính là tên,
   path không có khoá, hoặc không tra được tên. FE ghép vào nhãn: "Tác nhân A01 (Learner) — Loại".
 
+### 4.15 Ước tính credit I-4 trước khi trích (chỉ thêm field)
+
+- **#4 `getImportResponseSchema.credit_estimate?`** (`nullable`): `{ text_batches, diagram_images, ai_calls, credits,
+  available_credits }`. Chỉ tính khi import ở `mapping_review`, hoặc `extracting` mà job nền chưa chạy / đang `paused`; trạng
+  thái khác hoặc job đang chạy ⇒ `null`. Đếm từ **chính kế hoạch lượt của I-4** (`planPendingSections` — lô chữ còn lại sau
+  phần đọc tất định + ảnh diagram qua `readsImage` mở được PNG/JPEG), bỏ section đã `done` và các lượt đã xong của section đang
+  dở; `credits` = số lượt × giá hiện hành (`getActionCost` của `import_extract_fields` / `import_extract_diagram`, không hard-code).
+  Là cận trên: retry trong một lượt chỉ trừ một lần, môi trường không có vision thì ảnh không gọi AI. Ở `mapping_review` con số
+  theo mapping hiện tại — sửa mapping (#5) thì đọc lại.
+- **`available_credits`**: credit khả dụng (`balance − reserved`) của ví org sở hữu project (cùng ví lượt gọi AI trừ). `null`
+  với Viewer — cùng quyền xem như `GET /billing/balance` (Lead / Analyst).
+- **Chạy tiếp theo từng lượt** (#10, hình API không đổi): I-4 lưu tiến độ sau mỗi lượt AI đã trừ credit; section nhiều lô dừng ở
+  lô k (hết credit / AI lỗi) ⇒ chạy tiếp bắt đầu ở lô k, không gọi và không trừ lại lô 1…k−1.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
+| 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |
 | 2026-10-06 | mục FPT không bắt buộc | #32 / gap report: hồ sơ luật mode 1 loại `section_empty` — đầu mục FPT thiếu không còn cờ đỏ, không chặn release; cờ cũ đang mở tự đóng ở lần tính lại cờ kế tiếp. Hình API không đổi |
 | 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |
