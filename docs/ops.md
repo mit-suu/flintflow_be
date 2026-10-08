@@ -116,6 +116,7 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `PLANTUML_TIMEOUT_MS` | không | default 15000. Production đặt **30000**: use-case ~70 UC mất 13 s ở lượt đầu sau khi PlantUML restart (JVM chưa JIT-warm), warm còn ~4 s |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
+| `EMBEDDING_PROVIDER` | không | `off` (mặc định) · `gemini` · `mock`. C-3 tìm vị trí CR theo nghĩa (§2 "Bật tìm vị trí CR theo nghĩa"). `gemini` dùng `GEMINI_API_KEY`; kèm `EMBEDDING_MODEL` (`gemini-embedding-001`), `EMBEDDING_DIMENSIONS` (768 — phải bằng số chiều của Atlas index), `EMBEDDING_API_BASE_URL`, `EMBEDDING_TIMEOUT_MS`, `CR_VECTOR_TOP_K` (20), `CR_VECTOR_MIN_SCORE` (0.8) |
 | `AI_PAYLOAD_RETENTION_DAYS` | không | default 30. Số ngày giữ prompt/response của lượt gọi model (`aiactionpayloads`, TTL index). Prompt mang nguyên văn điều người dùng nhập ⇒ đây là **hạn giữ dữ liệu người dùng**, đổi thì phải đổi cả cam kết với người dùng. `0` = không lưu gì. Đổi giá trị chỉ có tác dụng với document mới: TTL index đã tạo thì phải `collMod` hoặc drop index để Mongo nhận hạn mới |
 | `AI_PAYLOAD_MAX_CHARS` | không | default 40000 ký tự mỗi bên. Quá trần thì cắt giữa, giữ đầu (luật của skill) và cuối (projection + câu trả lời của user); `promptChars`/`responseChars` vẫn là độ dài thật |
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
@@ -234,6 +235,39 @@ npm run run:pipeline -- --api http://localhost:5000/api/v1 --until B-0.2 --name 
 
 Nó chứng minh **đường đi**, không chứng minh nội dung — mock không đọc được Spine nên không sinh op nào.
 Kiểm nội dung thì dùng fixture op-case (`fixtures/op-cases/`) hoặc provider thật (`E2E_AI=1`).
+
+---
+
+### Bật tìm vị trí CR theo nghĩa (hybrid retrieval C-3)
+
+C-3 (`cr-impact.service.ts`) tìm vị trí bằng đồ thị Spine (đích C-2, phần tử tham chiếu, phần tử nhắc mã/tên) — phần
+này **không đổi**. Nguồn bổ sung trước đây là khớp chuỗi từ khoá: trượt từ đồng nghĩa / câu Việt–Anh ("tự đăng xuất khi
+không thao tác" ↔ "session timeout") và bắt quá rộng (FLF-171 P2 chạm trần 80 vị trí, phần lớn `not_related`). Khi bật,
+nguồn đó được thay bằng top-K phần tử gần nghĩa nhất theo Atlas Vector Search (`found_by: vector`, `vector_score`); trần 80
+ưu tiên vị trí đồ thị rồi điểm vector. Không có ứng viên vector (tắt, Mongo không phải Atlas, project chưa embed, không
+phần tử nào trên ngưỡng) ⇒ từ khoá như cũ.
+
+```bash
+# .env (dev, DB Atlas): bật provider; GEMINI_API_KEY đã có
+EMBEDDING_PROVIDER=gemini
+# tạo collection + index nếu thiếu (index dev `spine_embeddings_vector` đã tạo tay — script chỉ kiểm định nghĩa)
+npm run migrate:spine-embeddings -- --dry-run
+npm run migrate:spine-embeddings -- --index-only
+# embed mọi project mode import (chạy lại an toàn: chỉ embed phần tử đổi chữ)
+npm run migrate:spine-embeddings
+```
+
+- Index tự cập nhật **chạy nền** sau finalize import (baseline 0.0) và sau khi C-7 ghi CR có op
+  (`embedding-sync.service.ts`): chỉ embed phần tử đổi `text_hash`, xoá dòng của phần tử đã xoá. Lỗi chỉ ghi log
+  `[embedding] …`, không chặn luồng; mỗi project một lượt đang chạy, gọi dồn ⇒ chạy lại một lần.
+- Chỉ số liên quan: log `[C-3] Mongo không có $vectorSearch` (không phải Atlas, nhớ cho cả process), `[C-3] tìm vị trí theo
+  vector lỗi …` (rơi về từ khoá lượt đó).
+- Embedding **không trừ credit** (chi phí một lượt embed vài trăm phần tử ≈ vài nghìn token đầu vào) — chờ nhóm chốt
+  (`docs/spec-gaps.md`).
+- Đổi `EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS` ⇒ mọi dòng bị coi là lệch hash và embed lại ở lượt đồng bộ sau; số chiều
+  phải khớp `numDimensions` của Atlas index (script báo lệch, không tự sửa index).
+- Ngưỡng `CR_VECTOR_MIN_SCORE` (0.8 ≈ cosine 0.6, vì Atlas đổi cosine về `(1 + cos) / 2`) là giá trị khởi điểm — hiệu chỉnh
+  trên dữ liệu dev trước khi bật ở production.
 
 ## 5. Production trên Azure
 

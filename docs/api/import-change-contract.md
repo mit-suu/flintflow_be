@@ -407,6 +407,18 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
   ⇒ đặt `paused: { reason: "resume_later" }` (như I-4). #10 hoàn phần dở rồi chạy lại. Giả định một instance BE.
 - FE: sau #8 / #10 poll #4 tới `gap_review` hoặc `paused`, hiện tiến trình "Đang tạo bản gốc và kiểm tra tài liệu…".
 
+### 4.17 C-3 tìm vị trí theo nghĩa — hybrid retrieval (chỉ thêm field / giá trị enum)
+
+- **`found_by` thêm giá trị `vector`** (`LOCATION_FOUND_BY`): phần tử gần nghĩa với CR (tiêu đề + mô tả + hỏi/đáp làm rõ +
+  từ khoá C-2) theo Atlas Vector Search. Có ứng viên vector thì chúng **thay** nguồn `keyword`; không có (tính năng tắt,
+  Mongo không phải Atlas, project chưa embed, không phần tử nào trên ngưỡng) ⇒ `keyword` như cũ. `spine_link` / `mention` /
+  `preview` / `diagram` không đổi; một vị trí có thể vừa `spine_link` vừa `vector`.
+- **`changeLocationDtoSchema.vector_score?`** (`number | null`, tuỳ chọn): điểm gần nghĩa 0..1 của vị trí có `vector`, còn lại
+  `null`. FE cũ bỏ qua được.
+- Trần 80 vị trí (`MAX_LOCATIONS`) khi có ứng viên vector: vị trí đồ thị luôn giữ, chỗ còn lại cho ứng viên điểm cao nhất;
+  thứ tự trả về vẫn theo thứ tự tài liệu. Không có vector ⇒ cắt như cũ.
+- Không có endpoint mới; embedding không trừ credit (chờ nhóm chốt — `docs/spec-gaps.md`). Vận hành: `docs/ops.md`.
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
@@ -414,6 +426,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |
 | 2026-10-08 | upload lớn + finalize nền | §4.16: file #2/#11 tối đa 40 MB (`413` có `meta.max_mb`); #8 và #10 (`checking`/`baselining`) trả ngay, chạy nền, FE poll #4; `finalizeResponseSchema.baseline`/`flags` nullable (luôn `null`); `paused: resume_later` đặt được ở `baselining` (job finalize lỗi / mất ⇒ hoàn về trước finalize) — contract-change, chờ 4/4 |
+| 2026-10-08 | hybrid retrieval C-3 | §4.17: `found_by` thêm `vector`, `changeLocationDtoSchema.vector_score?` — chỉ thêm field / giá trị enum, mặc định tắt (`EMBEDDING_PROVIDER=off`) |
 | 2026-10-06 | mục FPT không bắt buộc | #32 / gap report: hồ sơ luật mode 1 loại `section_empty` — đầu mục FPT thiếu không còn cờ đỏ, không chặn release; cờ cũ đang mở tự đóng ở lần tính lại cờ kế tiếp. Hình API không đổi |
 | 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |
