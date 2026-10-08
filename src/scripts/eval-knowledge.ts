@@ -20,6 +20,8 @@
  * Cách dùng (provider thật — xem docs/knowledge-rag.md):
  *   EMBEDDING_PROVIDER=gemini npm run eval:knowledge -- --retrieval-only --label baseline
  *   EMBEDDING_PROVIDER=gemini npm run eval:knowledge -- --answers --mode both --label baseline --min-score 0.62
+ * Quota embedding (free tier 1 000 text/ngày): thêm `--cache` (cache vector ra file, lượt sau chỉ embed phần thiếu) và
+ * `--seed-cache-from-db` (nạp vector đã ingest ở `knowledge_chunks` — cần MONGO_URI) — xem `eval-embedding-cache.ts`.
  * Cờ: --dir (mặc định KNOWLEDGE_CORPUS_DIR) · --questions FILE · --label TÊN · --limit N · --ids a,b · --min-score X
  *     · --top-k N · --judge-provider P · --judge-model M · --out DIR
  * Kết quả: `test/e2e-ai/results/knowledge-eval-<label>-<ISO>.{md,json}` (thư mục bị gitignore), in `.md` ra stdout.
@@ -32,7 +34,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import matter from "gray-matter"
 import { env } from "../config/env.js"
 import { ActionType, type AiActionInput, type AiProviderConfig } from "../shared/ai/ai-action.types.js"
-import { embeddingAvailable, embeddingModelId, embeddingProvider, embedTexts } from "../shared/ai/embedding/embedding.provider.js"
+import { embeddingAvailable, embeddingModelId, embeddingProvider } from "../shared/ai/embedding/embedding.provider.js"
 import { getPromptTemplate, interpolatePrompt } from "../shared/ai/prompt-registry.service.js"
 import { callLLM } from "../shared/ai/providers/llm.router.js"
 import { extractJsonFromText, parseResponse, type KnowledgeAnswerOutput } from "../shared/ai/response-parser.js"
@@ -44,6 +46,7 @@ import { chunkCorpus, estimateTokens, type KnowledgeChunkDraft, type KnowledgeDo
 import { loadCorpus } from "../modules/knowledge/corpus.js"
 import { DEFAULT_CANDIDATES, expandToParent, rrfFuse, shouldAbstain, type FusedHit, type RetrievalMode, type RetrievalResult, type RetrievedChunk } from "../modules/knowledge/retrieve.js"
 import { searchRows, type MemoryRow } from "../modules/knowledge/vector-backend.js"
+import { createEmbeddingCache, type EmbeddingCache } from "./eval-embedding-cache.js"
 import {
   aggregateAnswers,
   evalQuestionSetSchema,
@@ -63,6 +66,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "../..")
 export const DEFAULT_QUESTIONS_FILE = path.join(REPO_ROOT, "fixtures/knowledge-eval/questions.json")
 export const DEFAULT_RESULTS_DIR = path.join(REPO_ROOT, "test/e2e-ai/results")
+export const DEFAULT_EMBEDDING_CACHE = path.join(DEFAULT_RESULTS_DIR, ".knowledge-embedding-cache.jsonl")
 const JUDGE_PROMPT_FILE = path.join(REPO_ROOT, "fixtures/knowledge-eval/judge.md")
 const NORAG_PROMPT_FILE = path.join(REPO_ROOT, "fixtures/knowledge-eval/norag.md")
 
@@ -90,6 +94,9 @@ export interface EvalOptions {
   topK: number
   judgeProvider: string | null
   judgeModel: string | null
+  /** File cache vector (`--cache [FILE]`); null ⇒ chỉ trong bộ nhớ. */
+  cacheFile: string | null
+  seedCacheFromDb: boolean
   log: (line: string) => void
 }
 
@@ -108,6 +115,8 @@ export const parseEvalArgs = (argv: readonly string[]): EvalOptions => {
     topK: env.KNOWLEDGE_TOP_K,
     judgeProvider: null,
     judgeModel: null,
+    cacheFile: null,
+    seedCacheFromDb: false,
     log: (line) => process.stdout.write(`${line}\n`)
   }
   for (let i = 0; i < argv.length; i++) {
@@ -135,11 +144,28 @@ export const parseEvalArgs = (argv: readonly string[]): EvalOptions => {
       case "--top-k": o.topK = Number(next()); break
       case "--judge-provider": o.judgeProvider = next(); break
       case "--judge-model": o.judgeModel = next(); break
+      case "--cache": o.cacheFile = argv[i + 1] && !argv[i + 1]!.startsWith("--") ? next() : DEFAULT_EMBEDDING_CACHE; break
+      case "--seed-cache-from-db": o.seedCacheFromDb = true; break
       default: throw new Error(`Cờ không nhận ra: ${argv[i]}`)
     }
   }
   if (o.retrievalOnly === o.answers) throw new Error("Chọn đúng một chế độ: --retrieval-only hoặc --answers")
   return o
+}
+
+// ─── cache embedding ──────────────────────────────────────────────
+
+/** Vector đã ingest (cùng model) của corpus ⇒ cache, khoá theo `embed_text` + RETRIEVAL_DOCUMENT. Trả số khoá mới. */
+const seedCacheFromDb = async (cache: EmbeddingCache, corpus: string): Promise<number> => {
+  const mongoose = (await import("mongoose")).default
+  const { KnowledgeChunk } = await import("../modules/knowledge/knowledge-chunk.model.js")
+  await mongoose.connect(env.MONGO_URI, { autoIndex: false, autoCreate: false })
+  try {
+    const rows = await KnowledgeChunk.find({ corpus, model: embeddingModelId() }, { embed_text: 1, embedding: 1, _id: 0 }).lean()
+    return cache.seed(rows.filter((r) => r.embedding?.length).map((r) => ({ text: r.embed_text, taskType: "RETRIEVAL_DOCUMENT" as const, vector: r.embedding })))
+  } finally {
+    await mongoose.disconnect()
+  }
 }
 
 // ─── chỉ mục trong process ────────────────────────────────────────
@@ -155,10 +181,10 @@ interface InProcessIndex {
 export const chunksFor = (name: ChunkerName, docs: readonly KnowledgeDoc[]): KnowledgeChunkDraft[] =>
   name === "fixed-512/64" ? docs.flatMap((d) => fixedSizeChunks(d)) : name === "heading-no-header" ? docs.flatMap((d) => headingChunksNoHeader(d)) : chunkCorpus(docs).chunks
 
-const buildIndex = async (name: ChunkerName, chunks: KnowledgeChunkDraft[]): Promise<InProcessIndex> => {
-  const vectors = await embedTexts(
+const buildIndex = async (cache: EmbeddingCache, name: ChunkerName, chunks: KnowledgeChunkDraft[]): Promise<InProcessIndex> => {
+  const vectors = await cache.embed(
     chunks.map((c) => c.embed_text),
-    { taskType: "RETRIEVAL_DOCUMENT", waitOnRateLimit: true }
+    "RETRIEVAL_DOCUMENT"
   )
   return {
     name,
@@ -386,7 +412,7 @@ export interface EvalReport {
   answers?: AnswersReport
 }
 
-const runRetrieval = async (opts: EvalOptions, docs: KnowledgeDoc[], questions: EvalQuestion[], queryVectors: number[][]): Promise<RetrievalReport> => {
+const runRetrieval = async (opts: EvalOptions, cache: EmbeddingCache, docs: KnowledgeDoc[], questions: EvalQuestion[], queryVectors: number[][]): Promise<RetrievalReport> => {
   const finalChunks = chunksFor(FINAL_CHUNKER, docs)
   const finalById = new Map(finalChunks.map((c) => [c.chunk_id, c]))
   const inCorpus = questions.filter((q) => !q.out_of_corpus)
@@ -397,7 +423,7 @@ const runRetrieval = async (opts: EvalOptions, docs: KnowledgeDoc[], questions: 
 
   for (const name of CHUNKERS) {
     opts.log(`… embed chunk của ${name}`)
-    const index = await buildIndex(name, name === FINAL_CHUNKER ? finalChunks : chunksFor(name, docs))
+    const index = await buildIndex(cache, name, name === FINAL_CHUNKER ? finalChunks : chunksFor(name, docs))
     if (name === FINAL_CHUNKER) finalIndex = index
     for (const mode of RETRIEVAL_MODES) {
       const ranks = inCorpus.map((q) => {
@@ -424,8 +450,8 @@ const runRetrieval = async (opts: EvalOptions, docs: KnowledgeDoc[], questions: 
   }
 }
 
-const runAnswers = async (opts: EvalOptions, docs: KnowledgeDoc[], questions: EvalQuestion[], queryVectors: number[][]): Promise<AnswersReport> => {
-  const index = await buildIndex(FINAL_CHUNKER, chunksFor(FINAL_CHUNKER, docs))
+const runAnswers = async (opts: EvalOptions, cache: EmbeddingCache, docs: KnowledgeDoc[], questions: EvalQuestion[], queryVectors: number[][]): Promise<AnswersReport> => {
+  const index = await buildIndex(cache, FINAL_CHUNKER, chunksFor(FINAL_CHUNKER, docs))
   const llm = await makeLlm(opts)
   const records: AnswerRecord[] = []
   const details: AnswerDetail[] = []
@@ -566,9 +592,11 @@ export const runKnowledgeEval = async (opts: EvalOptions): Promise<{ report: Eva
   opts.log(`Embedding: ${embeddingProvider()} (${embeddingModelId()}) · LLM override: ${env.AI_PROVIDER_OVERRIDE || "(theo frontmatter)"}`)
   for (const line of formatEstimate(estimate)) opts.log(line)
 
-  const queryVectors = await embedTexts(
+  const cache = createEmbeddingCache(opts.cacheFile)
+  if (opts.seedCacheFromDb) opts.log(`Nạp ${await seedCacheFromDb(cache, corpus)} vector đã ingest từ knowledge_chunks vào cache`)
+  const queryVectors = await cache.embed(
     questions.map((q) => q.question),
-    { taskType: "RETRIEVAL_QUERY", waitOnRateLimit: true }
+    "RETRIEVAL_QUERY"
   )
   const byType: Record<string, number> = {}
   for (const q of questions) byType[q.type] = (byType[q.type] ?? 0) + 1
@@ -579,8 +607,10 @@ export const runKnowledgeEval = async (opts: EvalOptions): Promise<{ report: Eva
     embedding_model: embeddingModelId(),
     questions: { total: questions.length, in_corpus: questions.filter((q) => !q.out_of_corpus).length, out_of_corpus: questions.filter((q) => q.out_of_corpus).length, by_type: byType },
     estimate,
-    ...(opts.retrievalOnly ? { retrieval: await runRetrieval(opts, docs, questions, queryVectors) } : { answers: await runAnswers(opts, docs, questions, queryVectors) })
+    ...(opts.retrievalOnly ? { retrieval: await runRetrieval(opts, cache, docs, questions, queryVectors) } : { answers: await runAnswers(opts, cache, docs, questions, queryVectors) })
   }
+  const cached = cache.stats()
+  opts.log(`Cache embedding: ${cached.hits} lấy từ cache · ${cached.misses} embed mới`)
   const markdown = renderMarkdown(report)
   fs.mkdirSync(opts.outDir, { recursive: true })
   const base = path.join(opts.outDir, `knowledge-eval-${opts.label}-${report.at.replace(/[:.]/g, "-")}`)

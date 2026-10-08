@@ -303,9 +303,13 @@ chối không trừ.
 trước khi chạy):
 
 ```bash
-EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=… npm run eval:knowledge -- --retrieval-only --label baseline
-EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=… MODAL_BASE_URL=… npm run eval:knowledge -- --answers --mode both --label baseline --min-score <ngưỡng chọn>
+EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=… npm run eval:knowledge -- --retrieval-only --label baseline --cache --seed-cache-from-db
+EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=… MODAL_BASE_URL=… npm run eval:knowledge -- --answers --mode both --label baseline --min-score <ngưỡng chọn> --cache
 ```
+
+Gemini free tier: 1 000 text embed / ngày (mỗi text trong lô tính một lượt) và trần token / phút. `--cache` lưu vector ra
+`test/e2e-ai/results/.knowledge-embedding-cache.jsonl` (ghi theo nhóm 50 — quota hết giữa chừng vẫn giữ phần đã embed),
+`--seed-cache-from-db` nạp vector đã ingest ở `knowledge_chunks` (cần `MONGO_URI`) ⇒ bộ chunk chính không embed lại.
 
 ## 5. Production trên Azure
 
