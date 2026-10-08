@@ -39,7 +39,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CR_PROPOSE]: 3,
   [ActionType.CR_CONSISTENCY]: 2,
   // Một ảnh / lượt, output ngắn (chép chữ + mô tả) — rẻ hơn ảnh diagram của I-4
-  [ActionType.CR_MATERIAL_IMAGE]: 1
+  [ActionType.CR_MATERIAL_IMAGE]: 1,
+  // FLF-267: một câu hỏi tri thức ≈ một lượt CHAT (prompt ~5 chunk). Từ chối vì không đủ căn cứ thì không gọi model, không tính
+  [ActionType.KNOWLEDGE_ANSWER]: 2
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */
