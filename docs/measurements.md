@@ -499,3 +499,28 @@ Nhận xét:
 - Phân loại đúng cả 12 lượt (context / use case / other). Ảnh use case lớn (19 UC) trả 2,6k token ⇒ `maxTokens` 4096 bị cắt một lần (`RESPONSE_TRUNCATED`) ⇒ nâng lên **8192**.
 - Thời gian 14–24 s/ảnh; Gemini trả 503 "high demand" nhiều lần (retry trong request của `executeAiAction` gánh), rồi **hết quota ngày của key free tier** sau ~20 lượt ⇒ lượt lỗi thành `paused: resume_later` ở I-4 (chạy tiếp được). Môi trường thật cần key trả phí.
 - Chưa đo được `erd` (3.1.5) và `screen_flow` (3.1.1) do hết quota — đo lại khi có key khác.
+
+## Mode 1 — 1.11 map-reduce, provider thật (2026-10-08)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (`E2E_AI=1`, Mongo in-memory, luồng HTTP thật upload → mapping
+  `confirm_all` → I-4 → fields `confirm_all` → finalize). Provider như skill: `glm` / `zai-org/GLM-5.3-Flash` (I-4 chữ, 1.11),
+  `gemini` (ảnh). PlantUML tắt trong test. "Trước" = `develop` `12f7c50` (1.11 một lượt, khối chữ cắt ở 16 000 ký tự);
+  "sau" = nhánh `feat/semantic-check-map-reduce` (lô ≤ 48k ký tự + một lượt kiểm chéo).
+- Độ phủ 1.11 = phần chữ tài liệu (paragraph / list_item / table_cell) mà lượt AI kiểm tra đọc được.
+
+| SRS | Chữ cho 1.11 | Bản | Độ phủ 1.11 | Lượt 1.11 | tokens_in 1.11 | Credit 1.11 | Cờ AI 1.11 | finalize + check |
+|---|---:|---|---:|---:|---:|---:|---:|---:|
+| ClinicPlus v1.0 (29 KB, 734 block) | 38 627 | trước | 41,4% | 1 | 8 656 | 3 | 12 | 38,5 s |
+| | | sau | **100%** | 1 lô + 1 chéo | 21 503 | 6 | 18 | 56,2 s |
+| StudentManagement v1.0 (3,1 MB, 591 block) | 32 688 | trước | 48,9% | 1 | 8 835 | 3 | 11 | 25,7 s |
+| | | sau | **100%** | 1 lô + 1 chéo | 18 050 | 6 | 13 | 43,5 s |
+
+Toàn luồng (I-4 + 1.11): ClinicPlus 47 → 50 credit, StudentManagement 51 → 54 credit. I-4 không đổi giữa hai bản (22 / 24
+lượt; chênh token và số phần tử là dao động của model giữa hai lượt chạy).
+
+Nhận xét:
+- Ngay SRS nhỏ cũng vượt trần cũ: bản trước chỉ cho AI đọc 41–49% chữ của tài liệu, phần còn lại không được kiểm mà
+  gap report không báo. Bản sau đọc hết với +3 credit (lượt kiểm chéo) khi tài liệu vừa một lô.
+- Hai SRS này chỉ cần **một** lô (< 48k ký tự) nên chưa đo được nhánh nhiều lô / song song bằng provider thật — phần đó
+  mới có test tích hợp với model giả. Ước tính SRS ~200 trang (~600k ký tự chữ): ~13 lô ⇒ ~42 credit cho 1.11; chưa đo.
+- finalize dài thêm ~18 s (lượt kiểm chéo chạy sau map) — thêm lý do chuyển finalize sang chạy nền.
