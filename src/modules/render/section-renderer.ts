@@ -16,9 +16,22 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
-import { relationVerb } from "../diagram/renderers/erd.renderer.js"
+import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
+import {
+  MACHINE_DESCRIPTIONS,
+  VI_FPT_LABELS,
+  VI_LABELS,
+  VI_PHASE_LABELS,
+  VI_SECTION_TITLES,
+  enumLabel,
+  fptLabelFor,
+  isVietnamese,
+  labelFor,
+  recordTextFor,
+  sentencesFor
+} from "./labels.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
 
 /**
@@ -64,82 +77,10 @@ const tableBlock = (header: string[], rows: string[][]): TableBlock => ({
 })
 const image = (png: string, caption: string): ImageBlock => ({ type: "image", png, caption })
 
-// ─── nhãn cố định theo ngôn ngữ tài liệu (mode 1 v2 — FLF-184) ───
+// ─── nhãn cố định theo ngôn ngữ tài liệu (mode 1 v2 — FLF-184; mẫu FPT — FLF-265) ───
 
-/**
- * Tiêu đề cột bảng, heading con, chú thích hình mà renderer tự sinh. Mặc định tiếng Anh (mode 2); tài liệu import
- * tiếng Việt (`TemplateProfile.language = "vi"`) dùng bản dịch dưới — nội dung Spine giữ nguyên, chỉ đổi nhãn.
- */
-const VI_LABELS: Readonly<Record<string, string>> = {
-  ID: "Mã",
-  Name: "Tên",
-  Kind: "Loại",
-  Description: "Mô tả",
-  Actors: "Tác nhân",
-  Screen: "Màn hình",
-  Type: "Kiểu",
-  Feature: "Chức năng",
-  "System Function": "Chức năng hệ thống",
-  Trigger: "Kích hoạt",
-  Entity: "Thực thể",
-  Relations: "Quan hệ",
-  Statement: "Yêu cầu",
-  Metric: "Chỉ số",
-  Threshold: "Ngưỡng",
-  Priority: "Ưu tiên",
-  Category: "Nhóm",
-  Code: "Mã",
-  Text: "Nội dung",
-  Functions: "Chức năng",
-  Term: "Thuật ngữ",
-  Native: "Tiếng Việt",
-  Definition: "Định nghĩa",
-  Goals: "Mục tiêu",
-  "Release 1.0 Scope": "Phạm vi phát hành 1.0",
-  "In Scope": "Trong phạm vi",
-  "Out of Scope": "Ngoài phạm vi",
-  "High-Level Business Rules": "Quy tắc nghiệp vụ tổng quát",
-  "External Systems": "Hệ thống bên ngoài",
-  "Normal Flow": "Luồng chính",
-  "Abnormal Flow": "Luồng ngoại lệ",
-  Validations: "Kiểm tra dữ liệu",
-  "Business Rules": "Quy tắc nghiệp vụ",
-  Screens: "Màn hình",
-  "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
-  "Use Case Diagram": "Sơ đồ use case",
-  "Screens Flow Diagram": "Sơ đồ luồng màn hình",
-  "Screens flow for": "Luồng màn hình của",
-  "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
-  "Screen Layout": "Bố cục màn hình"
-}
-
-/** Tiêu đề section FPT tiếng Việt — dùng khi assemble chèn mục FPT mà file người dùng không có. */
-const VI_SECTION_TITLES: Readonly<Record<string, string>> = {
-  "fixed:1": "Tổng quan sản phẩm",
-  "fixed:2.1": "Tác nhân",
-  "fixed:2.2.1": "Sơ đồ use case",
-  "fixed:2.2.2": "Đặc tả use case",
-  "fixed:3.1.1": "Luồng màn hình",
-  "fixed:3.1.2": "Mô tả màn hình",
-  "fixed:3.1.3": "Phân quyền màn hình",
-  "fixed:3.1.4": "Chức năng không có màn hình",
-  "fixed:3.1.5": "Sơ đồ quan hệ thực thể",
-  "fixed:4.1": "Giao tiếp hệ thống ngoài",
-  "fixed:4.2.1": "Tính khả dụng",
-  "fixed:4.2.2": "Độ tin cậy",
-  "fixed:4.2.3": "Hiệu năng",
-  "fixed:4.2.4": "Thuộc tính đặc thù",
-  "fixed:5.1": "Quy tắc nghiệp vụ",
-  "fixed:5.2": "Yêu cầu chung",
-  "fixed:5.3": "Danh sách thông báo",
-  "fixed:5.4": "Yêu cầu khác",
-  "fixed:5.5": "Thuật ngữ"
-}
-
-const isVietnamese = (language: string | undefined): boolean => !!language && language.toLowerCase().startsWith("vi")
-
-/** Nhãn cố định theo ngôn ngữ — thiếu bản dịch ⇒ giữ tiếng Anh. */
-export const labelFor = (language: string | undefined, text: string): string => (isVietnamese(language) ? (VI_LABELS[text] ?? text) : text)
+// Bảng nhãn nằm ở `labels.ts`; xuất lại `labelFor` cho chỗ đang import từ đây
+export { labelFor }
 
 /** Tiêu đề mặc định của section FPT theo ngôn ngữ (feature/function: tên phần tử). */
 export const defaultSectionTitle = (spine: Spine, sectionId: string, language?: string): string =>
@@ -151,28 +92,62 @@ const localizeCaption = (language: string | undefined, caption: string): string 
   return prefix ? `${labelFor(language, prefix)}${caption.slice(prefix.length)}` : caption
 }
 
+/** Khoá nhãn FPT dài trước: `Use Case Diagram` thắng `Use Case`, `Entity Relationship Diagram` thắng `Entity`. */
+const FPT_CAPTION_KEYS = Object.keys(VI_FPT_LABELS).sort((a, b) => b.length - a.length)
+
+const localizeFptCaption = (language: string | undefined, caption: string): string => {
+  const prefix = FPT_CAPTION_KEYS.find((k) => caption === k || caption.startsWith(`${k} `))
+  return prefix ? `${fptLabelFor(language, prefix)}${caption.slice(prefix.length)}` : caption
+}
+
+/**
+ * Ngôn ngữ cho các nhãn mới của FLF-265 (enum, câu ghép, `N/A`, khung §3.x.y, nhãn mục con, tiêu đề mục cố định).
+ * Chỉ tài liệu mẫu FPT (`functionLayout: "fpt"`, đường `assemble.service#buildSections`) dùng; đường layout mode 1
+ * (`layout-sections.ts`) không đặt `functionLayout` ⇒ `undefined` ⇒ nhãn như cũ, bản in mode 1 không đổi.
+ */
+const fptLanguage = (ctx: SectionRenderContext): string | undefined => (ctx.functionLayout === "fpt" ? ctx.language : undefined)
+
+/**
+ * Bảng có tiêu đề cột lấy từ Spine (ma trận phân quyền §3.1.3: cột = tên vai trò) — mẫu FPT đã dịch cột cố định lúc
+ * dựng, `localizeBlocks` bỏ qua để tên vai trò trùng khoá nhãn (`Actor`, `Data`…) không bị dịch. Mode 1 giữ như cũ.
+ */
+const SPINE_HEADER_TABLES = new WeakSet<TableBlock>()
+
+/** Nhãn đậm `Label: ` ở run đầu (đoạn `labeled`, item mục con FPT) ⇒ dịch nhãn, giữ phần sau. */
+const localizeBoldLabel = (runs: InlineRun[], translate: (text: string) => string): InlineRun[] | null => {
+  const [first, ...rest] = runs
+  const label = first?.bold ? /^(.+): $/.exec(first.text) : null
+  return label ? [{ ...first, text: `${translate(label[1])}: ` }, ...rest] : null
+}
+
 /**
  * Dịch nhãn do renderer tự sinh trong khối đã dựng: tiêu đề cột, heading con, nhãn in đậm `Trigger: `, chú thích hình.
  * Làm sau khi dựng để các hàm dựng nội dung giữ nguyên (mode 2 không đổi) — ô dữ liệu Spine không bị đụng.
+ * `fpt` (FLF-265, chỉ mẫu FPT): bảng nhãn đầy đủ + nhãn đậm trong item danh sách (mục con §3.x.y); không bật ⇒ y như
+ * bản mode 1 cũ.
  */
-const localizeBlocks = (blocks: Block[], language: string | undefined): Block[] => {
+const localizeBlocks = (blocks: Block[], language: string | undefined, fpt = false): Block[] => {
   if (!isVietnamese(language)) return blocks
-  const run = (r: InlineRun): InlineRun => ({ ...r, text: labelFor(language, r.text) })
+  const label = (text: string) => (fpt ? fptLabelFor(language, text) : labelFor(language, text))
+  const run = (r: InlineRun): InlineRun => ({ ...r, text: label(r.text) })
   return blocks.map((b): Block => {
     switch (b.type) {
       case "heading":
-        return { ...b, text: labelFor(language, b.text) }
+        return { ...b, text: label(b.text) }
       case "table":
-        return { ...b, header: b.header.map((c) => c.map(run)) }
+        return fpt && SPINE_HEADER_TABLES.has(b) ? b : { ...b, header: b.header.map((c) => c.map(run)) }
       case "image":
-        return b.caption === undefined ? b : { ...b, caption: localizeCaption(language, b.caption) }
+        return b.caption === undefined ? b : { ...b, caption: fpt ? localizeFptCaption(language, b.caption) : localizeCaption(language, b.caption) }
       case "paragraph": {
         const [first, ...rest] = b.runs
-        const label = first?.bold ? /^(.+): $/.exec(first.text) : null
-        if (label) return { ...b, runs: [{ ...first, text: `${labelFor(language, label[1])}: ` }, ...rest] }
+        const labelled = localizeBoldLabel(b.runs, label)
+        if (labelled) return { ...b, runs: labelled }
         const screens = !first?.bold && first ? /^Screens: /.exec(first.text) : null
-        return screens ? { ...b, runs: [{ ...first, text: `${labelFor(language, "Screens")}: ${first.text.slice(screens[0].length)}` }, ...rest] } : b
+        return screens ? { ...b, runs: [{ ...first, text: `${label("Screens")}: ${first.text.slice(screens[0].length)}` }, ...rest] } : b
       }
+      case "bullet_list":
+      case "numbered_list":
+        return fpt ? { ...b, items: b.items.map((item) => localizeBoldLabel(item, label) ?? item) } : b
       default:
         return b
     }
@@ -268,7 +243,9 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (highRules.length > 0) blocks.push(heading("High-Level Business Rules", 2), bulletList(highRules.map((r) => r.statement)))
   const nonHuman = spine.actors.filter((a) => a.kind !== "human")
   if (nonHuman.length > 0) {
-    blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => `${a.name} (${a.kind}) — ${a.description}`)))
+    const lang = fptLanguage(ctx)
+    const say = sentencesFor(lang)
+    blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description))))
   }
   blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram"))
   return blocks
@@ -276,10 +253,15 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
 
 // ─── §2 User Requirements ──────────────────────────────────────────
 
-const actorsTable = (spine: Spine): Block[] =>
+const actorsTable = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   spine.actors.length === 0
     ? []
-    : [tableBlock(["ID", "Name", "Kind", "Description"], spine.actors.map((a) => [a.id, a.name, a.kind, a.description]))]
+    : [
+        tableBlock(
+          ["ID", "Name", "Kind", "Description"],
+          spine.actors.map((a) => [a.id, a.name, enumLabel(fptLanguage(ctx), "actor_kind", a.kind), a.description])
+        )
+      ]
 
 const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram")
@@ -324,7 +306,7 @@ const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
       spine.screens.map((s) => {
         const feature = spine.features.find((f) => f.id === s.feature_id)
         const number = ctx.numberOf(`feature:${s.feature_id}`)
-        const featureLabel = feature ? (number ? `${number} ${feature.name}` : feature.name) : s.feature_id
+        const featureLabel = feature ? sentencesFor(fptLanguage(ctx)).featureLabel(number, feature.name) : s.feature_id
         return [featureLabel, s.name, s.description]
       })
     )
@@ -336,7 +318,7 @@ const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
  * (screen, role) gộp lại ("—" khi không có quyền nào). Trước đây mỗi permission một dòng
  * (Screen | Role | Action) — không phải "ma trận" như Phases §6.3 yêu cầu.
  */
-const screenAuthorization = (spine: Spine): Block[] => {
+const screenAuthorization = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   // Có vai trò mà chưa phân quyền màn nào (2026-09-24: CR thêm vai trò trước) ⇒ vẫn hiện danh sách vai trò, không để
   // mục trống như chưa làm gì — ma trận toàn "—" thì đọc thành "không ai được vào màn nào", sai nghĩa
   if (spine.permissions.length === 0) {
@@ -347,14 +329,14 @@ const screenAuthorization = (spine: Spine): Block[] => {
   const actionsOf = (screenId: string, roleId: string): string =>
     spine.permissions
       .filter((p) => p.screen_id === screenId && p.role_id === roleId)
-      .map((p) => p.action)
+      .map((p) => enumLabel(fptLanguage(ctx), "permission_action", p.action))
       .join(", ") || "—"
-  return [
-    tableBlock(
-      ["Screen", ...spine.roles.map((r) => r.name)],
-      spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))])
-    )
-  ]
+  const matrix = tableBlock(
+    [fptLabelFor(fptLanguage(ctx), "Screen"), ...spine.roles.map((r) => r.name)],
+    spine.screens.map((s) => [s.name, ...spine.roles.map((r) => actionsOf(s.id, r.id))])
+  )
+  SPINE_HEADER_TABLES.add(matrix)
+  return [matrix]
 }
 
 const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
@@ -375,8 +357,14 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   const blocks: Block[] = diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram")
   if (spine.entities.length > 0) {
     const entityName = (id: string) => spine.entities.find((e) => e.id === id)?.name ?? id
+    const lang = fptLanguage(ctx)
+    // Động từ do người viết đặt là nội dung Spine — chỉ động từ mặc định (`has`) được dịch
+    const verbOf = (e: Spine["entities"][number], id: string) => {
+      const verb = relationVerb(e, id)
+      return verb === DEFAULT_RELATION_VERB ? fptLabelFor(lang, verb) : verb
+    }
     const relations = (e: Spine["entities"][number]) =>
-      e.relations.map((id) => `${relationVerb(e, id)} ${entityName(id)}${e.relation_optional?.includes(id) ? " (optional)" : ""}`).join(", ")
+      e.relations.map((id) => sentencesFor(lang).relation(verbOf(e, id), entityName(id), e.relation_optional?.includes(id) ?? false)).join(", ")
     blocks.push(tableBlock(["Entity", "Description", "Relations"], spine.entities.map((e) => [e.name, e.description, relations(e)])))
   }
   return blocks
@@ -400,10 +388,10 @@ const unique = (items: string[]): string[] => [...new Set(items.filter((x) => x.
  * Đường vào màn của function theo Screens Flow: BFS theo `flow_to` từ màn vào (không pop-up, không có cạnh tới;
  * không có thì màn `queue_order` thấp nhất) — `Login > Project Dashboard > Project Workspace`. Không tới được ⇒ tên màn.
  */
-const navigationPath = (spine: Spine, screenId: string): string => {
+const navigationPath = (spine: Spine, screenId: string, na = NA): string => {
   const byId = new Map(spine.screens.map((s) => [s.id, s]))
   const target = byId.get(screenId)
-  if (!target) return NA
+  if (!target) return na
   const targeted = new Set(spine.screens.flatMap((s) => s.flow_to.filter((t) => t !== s.id)))
   const byOrder = [...spine.screens].sort((a, b) => (a.queue_order ?? Number.MAX_SAFE_INTEGER) - (b.queue_order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id))
   const entries = byOrder.filter((s) => !s.is_popup && !targeted.has(s.id))
@@ -427,7 +415,7 @@ const navigationPath = (spine: Spine, screenId: string): string => {
  * Actor tương tác trực tiếp: actor người (`kind: human`) của các use case chứa function. Không use case nào nối tới
  * function ⇒ actor người của các vai trò có quyền trên màn. Actor system/time (cổng thanh toán, LLM, lịch) không tính.
  */
-const directActors = (spine: Spine, fn: Spine["functions"][number]): string => {
+const directActors = (spine: Spine, fn: Spine["functions"][number], na = NA): string => {
   const human = (id: string | null) => spine.actors.find((a) => a.id === id && a.kind === "human")?.name ?? ""
   const fromUseCases = unique(spine.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids.map(human)))
   if (fromUseCases.length > 0) return fromUseCases.join(", ")
@@ -436,15 +424,15 @@ const directActors = (spine: Spine, fn: Spine["functions"][number]): string => {
       .filter((perm) => fn.screen_id !== null && perm.screen_id === fn.screen_id)
       .map((perm) => human(spine.roles.find((r) => r.id === perm.role_id)?.actor_id ?? null))
   )
-  return fromRoles.length > 0 ? fromRoles.join(", ") : NA
+  return fromRoles.length > 0 ? fromRoles.join(", ") : na
 }
 
 /** Entity được nhắc tên trong nội dung function (không có liên kết function ↔ entity trong Spine). */
-const dataOf = (spine: Spine, fn: Spine["functions"][number]): string => {
+const dataOf = (spine: Spine, fn: Spine["functions"][number], na = NA): string => {
   const text = [fn.name, fn.trigger, fn.description, ...fn.normal, ...fn.abnormal, ...fn.validations.map((v) => v.statement)].join(" ").toLowerCase()
   const escape = (name: string) => name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const named = spine.entities.filter((e) => e.name.trim() && new RegExp(`\\b${escape(e.name)}s?\\b`).test(text)).map((e) => e.name)
-  return named.length > 0 ? named.join(", ") : NA
+  return named.length > 0 ? named.join(", ") : na
 }
 
 /**
@@ -453,7 +441,7 @@ const dataOf = (spine: Spine, fn: Spine["functions"][number]): string => {
  */
 type SubItem = { label: string; value: string } | { label: string; steps: string[] }
 
-const subItems = (items: SubItem[]): Block[] => {
+const subItems = (items: SubItem[], na = NA): Block[] => {
   const out: Block[] = []
   let bullets: InlineRun[][] = []
   const flush = () => {
@@ -463,9 +451,9 @@ const subItems = (items: SubItem[]): Block[] => {
   for (const item of items) {
     const label: InlineRun = { text: `${item.label}: `, bold: true }
     if ("value" in item) {
-      bullets.push([label, { text: item.value.trim() || NA }])
+      bullets.push([label, { text: item.value.trim() || na }])
     } else if (item.steps.length === 0) {
-      bullets.push([label, { text: NA }])
+      bullets.push([label, { text: na }])
     } else if (item.steps.length === 1) {
       bullets.push([label, { text: item.steps[0] }])
     } else {
@@ -487,6 +475,8 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
   const fn = spine.functions.find((f) => f.id === functionId)
   if (!fn) return []
   const screen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
+  const lang = fptLanguage(ctx)
+  const na = fptLabelFor(lang, NA)
 
   const rules = unique([
     ...fn.validations.filter((v) => v.kind === "business").map((v) => v.statement),
@@ -494,32 +484,33 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
   ])
   const layout =
     screen && screen.primary_function_id === fn.id
-      ? diagramImages(spine, "screen_layout", screen.id, ctx, `Screen Layout — ${screen.name}`)
+      ? diagramImages(spine, "screen_layout", screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
       : []
 
+  // Nhãn heading / mục con giữ tiếng Anh ở đây — `localizeBlocks` dịch sau (bảng `VI_FPT_LABELS`)
   return [
     heading("Function trigger", 4),
     ...subItems([
-      { label: "Navigation path", value: screen ? navigationPath(spine, screen.id) : NA },
+      { label: "Navigation path", value: screen ? navigationPath(spine, screen.id, na) : na },
       { label: "Timing frequency", value: fn.trigger }
-    ]),
+    ], na),
     heading("Function description", 4),
     ...subItems([
-      { label: "Actors / Roles", value: directActors(spine, fn) },
+      { label: "Actors / Roles", value: directActors(spine, fn, na) },
       { label: "Purpose", value: fn.description },
-      { label: "Interface", value: (screen && describeInterface(spine, screen)) || NA },
+      { label: "Interface", value: (screen && describeInterface(spine, screen, lang)) || na },
       { label: "Data processing", steps: fn.normal.filter((step) => /^(the )?system\b/i.test(step.trim())) }
-    ]),
+    ], na),
     heading("Screen layout", 4),
-    ...(layout.length > 0 ? layout : [p(NA)]),
+    ...(layout.length > 0 ? layout : [p(na)]),
     heading("Function details", 4),
     ...subItems([
-      { label: "Data", value: dataOf(spine, fn) },
+      { label: "Data", value: dataOf(spine, fn, na) },
       { label: "Validation", steps: fn.validations.filter((v) => v.kind !== "business").map((v) => v.statement) },
       { label: "Business rules", steps: rules },
       { label: "Normal case", steps: fn.normal },
       { label: "Abnormal case", steps: fn.abnormal }
-    ])
+    ], na)
   ]
 }
 
@@ -550,17 +541,18 @@ const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderCont
 
 // ─── §4 Non-Functional Requirements ────────────────────────────────
 
-const nfrStatement = (n: Nfr): string => (n.metric && n.threshold ? `${n.statement} (${n.metric}: ${n.threshold})` : n.statement)
+const nfrStatement = (n: Nfr, language?: string): string =>
+  n.metric && n.threshold ? sentencesFor(language).nfrStatement(n.statement, n.metric, n.threshold) : n.statement
 
-const nfrList = (spine: Spine, category: NfrCategory): Block[] => {
+const nfrList = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext): Block[] => {
   const items = spine.nfrs.filter((n) => n.category === category)
-  return items.length === 0 ? [] : [bulletList(items.map(nfrStatement))]
+  return items.length === 0 ? [] : [bulletList(items.map((n) => nfrStatement(n, fptLanguage(ctx))))]
 }
 
-const nfrTable = (spine: Spine, category: NfrCategory): Block[] => {
+const nfrTable = (spine: Spine, category: NfrCategory, ctx: SectionRenderContext): Block[] => {
   const items = spine.nfrs.filter((n) => n.category === category)
   if (items.length === 0) return []
-  return [tableBlock(["Statement", "Metric", "Threshold", "Priority"], items.map((n) => [n.statement, n.metric ?? "", n.threshold ?? "", n.priority ?? ""]))]
+  return [tableBlock(["Statement", "Metric", "Threshold", "Priority"], items.map((n) => [n.statement, n.metric ?? "", n.threshold ?? "", n.priority ? enumLabel(fptLanguage(ctx), "priority", n.priority) : ""]))]
 }
 
 // ─── §5 Requirement Appendix ────────────────────────────────────────
@@ -570,8 +562,10 @@ const businessRulesDetail = (spine: Spine): Block[] => {
   return items.length === 0 ? [] : [bulletList(items.map((r) => r.statement))]
 }
 
-const commonRequirements = (spine: Spine): Block[] =>
-  spine.common_requirements.length === 0 ? [] : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [c.category, c.statement]))]
+const commonRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
+  spine.common_requirements.length === 0
+    ? []
+    : [tableBlock(["Category", "Statement"], spine.common_requirements.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]))]
 
 const messagesList = (spine: Spine): Block[] => {
   if (spine.messages.length === 0) return []
@@ -579,8 +573,10 @@ const messagesList = (spine: Spine): Block[] => {
   return [tableBlock(["Code", "Text", "Functions"], spine.messages.map((m) => [m.code, m.text, m.function_ids.map(fnName).join(", ")]))]
 }
 
-const otherRequirements = (spine: Spine): Block[] =>
-  spine.other_requirements.length === 0 ? [] : [tableBlock(["Kind", "Statement"], spine.other_requirements.map((o) => [o.kind, o.statement]))]
+const otherRequirements = (spine: Spine, ctx: SectionRenderContext): Block[] =>
+  spine.other_requirements.length === 0
+    ? []
+    : [tableBlock(["Kind", "Statement"], spine.other_requirements.map((o) => [enumLabel(fptLanguage(ctx), "other_kind", o.kind), o.statement]))]
 
 const glossaryTable = (spine: Spine): Block[] =>
   spine.glossary.length === 0 ? [] : [tableBlock(["Term", "Native", "Definition"], spine.glossary.map((g) => [g.term, g.term_native ?? "", g.definition]))]
@@ -592,7 +588,7 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:1":
       return productOverview(spine, ctx)
     case "fixed:2.1":
-      return actorsTable(spine)
+      return actorsTable(spine, ctx)
     case "fixed:2.2.1":
       return useCaseDiagram(spine, ctx)
     case "fixed:2.2.2":
@@ -602,29 +598,29 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:3.1.2":
       return screenDescriptions(spine, ctx)
     case "fixed:3.1.3":
-      return screenAuthorization(spine)
+      return screenAuthorization(spine, ctx)
     case "fixed:3.1.4":
       return nonScreenFunctions(spine, ctx)
     case "fixed:3.1.5":
       return erd(spine, ctx)
     case "fixed:4.1":
-      return nfrList(spine, "interface")
+      return nfrList(spine, "interface", ctx)
     case "fixed:4.2.1":
-      return nfrTable(spine, "usability")
+      return nfrTable(spine, "usability", ctx)
     case "fixed:4.2.2":
-      return nfrTable(spine, "reliability")
+      return nfrTable(spine, "reliability", ctx)
     case "fixed:4.2.3":
-      return nfrTable(spine, "performance")
+      return nfrTable(spine, "performance", ctx)
     case "fixed:4.2.4":
-      return nfrTable(spine, "other")
+      return nfrTable(spine, "other", ctx)
     case "fixed:5.1":
       return businessRulesDetail(spine)
     case "fixed:5.2":
-      return commonRequirements(spine)
+      return commonRequirements(spine, ctx)
     case "fixed:5.3":
       return messagesList(spine)
     case "fixed:5.4":
-      return otherRequirements(spine)
+      return otherRequirements(spine, ctx)
     case "fixed:5.5":
       return glossaryTable(spine)
     default:
@@ -637,12 +633,14 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
 /** Dựng một `RenderedSection` — mọi id trừ `fixed:I` (xem đầu file). */
 export function renderSection(spine: Spine, sectionId: string, ctx: SectionRenderContext): RenderedSection {
   const { heading: title, level } = headingAndLevel(spine, sectionId)
+  const fpt = ctx.functionLayout === "fpt"
   const section: RenderedSection = {
     id: sectionId,
     number: ctx.number,
-    heading: title,
+    // Mẫu FPT tiếng Việt: tiêu đề mục cố định theo `VI_SECTION_TITLES` (mode 1 tự đặt tiêu đề theo file người dùng)
+    heading: fpt ? defaultSectionTitle(spine, sectionId, ctx.language) : title,
     level,
-    blocks: localizeBlocks(blocksFor(spine, sectionId, ctx), ctx.language)
+    blocks: localizeBlocks(blocksFor(spine, sectionId, ctx), ctx.language, fpt)
   }
   if (ctx.status !== undefined) section.status = ctx.status
   if (ctx.awaiting_reaccept !== undefined) section.awaiting_reaccept = ctx.awaiting_reaccept
@@ -666,20 +664,14 @@ const changeTypeOf = (ops: Set<string>): RocChangeType => {
 const INTERNAL_REASON =
   /^(step-runner:|gate:|resume:|Revert seq|Hoà giải: chờ chấp nhận lại|Phỏng vấn đầu giai đoạn|Chốt |confirmed_at do server đặt|Mở cờ |Waiver |Đóng cờ |AI check:|AI semantic check|Import: kế hoạch step)/
 
-/** Câu do máy sinh → tiếng Anh; câu do user viết giữ nguyên (đó là lời của chính họ). */
-const ENGLISH_DESCRIPTION: readonly { re: RegExp; to: (m: RegExpExecArray) => string }[] = [
-  { re: /^Ký baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
-  { re: /^Baseline (.+)$/, to: (m) => `Baseline ${m[1]} signed` },
-  { re: /^Hoà giải section stale$/, to: () => "Stale sections reconciled" },
-  { re: /^Hoà giải: user xác nhận nội dung không đổi$/, to: () => "Reviewed: content still correct" },
-  { re: /^sửa sau baseline$/, to: () => "Edited after baseline" },
-  { re: /^User xác nhận giả định ở cổng chốt$/, to: () => "Assumptions confirmed" }
-]
-
-const toEnglish = (description: string): string => {
-  for (const rule of ENGLISH_DESCRIPTION) {
+/**
+ * Câu do máy sinh → câu theo ngôn ngữ tài liệu (mặc định tiếng Anh; bảng `MACHINE_DESCRIPTIONS` ở `labels.ts`);
+ * câu do user viết giữ nguyên (đó là lời của chính họ).
+ */
+const toDocumentLanguage = (description: string, language?: string): string => {
+  for (const rule of MACHINE_DESCRIPTIONS) {
     const match = rule.re.exec(description)
-    if (match) return rule.to(match)
+    if (match) return isVietnamese(language) ? rule.vi(match) : rule.en(match)
   }
   return description
 }
@@ -703,18 +695,20 @@ const MAX_REASONS_PER_ROW = 3
 const phaseKeyOf = (stepId: string | null): string => (stepId ? (/^([BS]-\d+)\./.exec(stepId)?.[1] ?? "") : "")
 
 let phaseLabels: Map<string, string> | undefined
-const phaseLabelOf = (phase: string): string | undefined => {
+const phaseLabelOf = (phase: string, language?: string): string | undefined => {
   phaseLabels ??= new Map(loadStepRegistry().map((s) => [s.phase as string, s.phase_label_en]))
-  return phaseLabels.get(phase)
+  const label = phaseLabels.get(phase)
+  // Registry (đóng băng) chỉ có nhãn tiếng Anh — bản tiếng Việt tra bảng render, phase lạ giữ nhãn Anh
+  return label !== undefined && isVietnamese(language) ? (VI_PHASE_LABELS[phase] ?? label) : label
 }
 
 /** Mã baseline (`v1.0`, `v1.2-conditional`) nằm trong lý do `Ký baseline v1.0` do baseline.service ghi. */
 const BASELINE_VERSION = /\bv\d+\.\d+(?:-conditional)?\b/
 
-const describeRow = (reasons: readonly string[]): string => {
+const describeRow = (reasons: readonly string[], language?: string): string => {
   const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
   const more = reasons.length - MAX_REASONS_PER_ROW
-  return more > 0 ? `${shown}; and ${more} more change${more > 1 ? "s" : ""}` : shown
+  return more > 0 ? `${shown}${recordTextFor(language).more(more)}` : shown
 }
 
 /** Lý do op-engine gắn cho op cascade — đi kèm lô của user, không phải lời của user. */
@@ -734,8 +728,15 @@ const MACHINE_REASON = /^Cascade:/
  * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
  * không cần DB). Nhiều người sửa trong ngày ⇒ liệt kê tên không trùng.
+ *
+ * `language` (FLF-265, nội bộ): câu máy sinh + nhãn phase theo ngôn ngữ tài liệu; không truyền ⇒ tiếng Anh như trước.
  */
-export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge: (by: string) => string = (by) => by): RocRow[] {
+export function buildRecordOfChanges(
+  changes: ChangeRecordRow[],
+  resolveInCharge: (by: string) => string = (by) => by,
+  language?: string
+): RocRow[] {
+  const text = recordTextFor(language)
   const order: string[] = []
   const groups = new Map<string, ChangeRecordRow[]>()
   for (const change of changes) {
@@ -766,20 +767,20 @@ export function buildRecordOfChanges(changes: ChangeRecordRow[], resolveInCharge
   let baselines = 0
   const seenPhases = new Set<string>()
   const describe = (row: (typeof rows)[number], reasons: readonly string[]): string => {
-    if (row.baseline) return reasons.length > 0 ? describeRow(reasons) : "Baseline signed"
+    if (row.baseline) return reasons.length > 0 ? describeRow(reasons, language) : text.baselineSigned
     // Dòng của quy trình: mô tả bằng giai đoạn, kiểu FPT "Create/Update <mục>" — reason từng op là của model
-    const label = phaseLabelOf(row.phase)
+    const label = phaseLabelOf(row.phase, language)
     if (label) {
-      const verb = seenPhases.has(row.phase) ? "Update" : "Create"
+      const first = !seenPhases.has(row.phase)
       seenPhases.add(row.phase)
-      return `${verb} ${label}`
+      return text.phaseRow(first, label)
     }
     // Ngoài quy trình (yêu cầu sửa sau baseline): lời của user
-    return reasons.length > 0 ? describeRow(reasons) : "Document updated"
+    return reasons.length > 0 ? describeRow(reasons, language) : text.documentUpdated
   }
   return rows.map((row) => {
     const raw = row.changes.map((c) => c.reason).filter((r): r is string => !!r && !INTERNAL_REASON.test(r) && !MACHINE_REASON.test(r))
-    const reasons = [...new Set(raw.map(toEnglish))]
+    const reasons = [...new Set(raw.map((r) => toDocumentLanguage(r, language)))]
     let version: string
     if (row.baseline) {
       // Fallback khớp `nextBaselineVersion` (baseline.service) khi lý do không mang mã

@@ -41,6 +41,7 @@ import { User } from "../user/user.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
 import { capitalize, sectionLabel } from "../spine/human-labels.js"
 import {
+  defaultSectionTitle,
   renderSection,
   sectionHeadingOf,
   buildRecordOfChanges,
@@ -49,6 +50,7 @@ import {
 } from "./section-renderer.js"
 import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
+import { GROUP_HEADINGS, assembleTextFor, isVietnamese, type DocumentLanguage } from "./labels.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
@@ -149,17 +151,9 @@ const buildNumberMap = (spine: Spine): NumberMap => {
  * Nhãn hiển thị của mọi nhóm heading tổng hợp: 4 chương (`"2".."5"`, level 1) + 3 nhóm con
  * (`"2.2"`, `"3.1"`, `"4.2"`, level 2) — suy trực tiếp từ `def.parent` của
  * `section-registry.listSections` (`parentChain`) thay vì bảng "section đầu tiên của mỗi chương"
- * cứng trước đây (chỉ phủ 4 chương, thiếu 3 nhóm con — review C4).
+ * cứng trước đây (chỉ phủ 4 chương, thiếu 3 nhóm con — review C4). Bảng theo ngôn ngữ ở `labels.ts` (FLF-265).
  */
-const GROUP_HEADINGS: Readonly<Record<string, string>> = {
-  "2": "User Requirements",
-  "2.2": "Use Cases",
-  "3": "Functional Requirements",
-  "3.1": "System Functional Overview",
-  "4": "Non-Functional Requirements",
-  "4.2": "Quality Attributes",
-  "5": "Requirement Appendix"
-}
+const groupHeadings = (language?: string): Readonly<Record<string, string>> => GROUP_HEADINGS[isVietnamese(language) ? "vi" : "en"]
 
 /** `"4.2.1"` cha `"4.2"` → chuỗi tổ tiên `["4", "4.2"]`. `feature:<id>` (cha của function) không có nhóm số. */
 const parentChain = (parent: string | undefined): string[] => {
@@ -168,19 +162,19 @@ const parentChain = (parent: string | undefined): string[] => {
   return parts.map((_, i) => parts.slice(0, i + 1).join("."))
 }
 
-const chapterSection = (number: string): RenderedSection => ({
+const chapterSection = (number: string, language?: string): RenderedSection => ({
   id: `group:${number}`,
   number,
-  heading: GROUP_HEADINGS[number] ?? number,
+  heading: groupHeadings(language)[number] ?? number,
   level: number.split(".").length,
   blocks: []
 })
 
 /** T15 review Th1: heading "Unassigned Functions" — chỉ chèn khi thật sự có function feature_id chết. */
-const unassignedFunctionsSection = (number: string): RenderedSection => ({
+const unassignedFunctionsSection = (number: string, language?: string): RenderedSection => ({
   id: "group:unassigned-functions",
   number,
-  heading: "Unassigned Functions",
+  heading: assembleTextFor(language).unassignedFunctions,
   level: 2,
   blocks: []
 })
@@ -260,15 +254,15 @@ const refDiagramId = (b: Block): string | null =>
  * sơ đồ chưa render. Trước đây ảnh không tải lại được bị bỏ khỏi section; giữ block để người đọc thấy lý do
  * thay vì thiếu hình lặng lẽ (kể cả bản draft đã `stale` hay sơ đồ bị xoá sau khi cache).
  */
-const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) => string | null): RenderedDocument => {
+const materializeImages = (doc: RenderedDocument, resolve: (diagramId: string) => string | null, language?: string): RenderedDocument => {
   const materialize = (b: Block): Block => {
     const id = refDiagramId(b)
     if (id === null || !isImageBlock(b)) return b
     const png = resolve(id)
     if (png) return { ...b, png }
     // Ảnh gốc không nhúng được (EMF/WMF, file gốc không còn) ⇒ chỗ giữ ảnh + chú thích nói đúng lý do
-    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}original image could not be embedded (unsupported format)` }
-    return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id) }
+    if (isMediaId(id)) return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: `${b.caption ? `${b.caption} — ` : ""}${assembleTextFor(language).mediaNotEmbedded}` }
+    return { ...b, png: DIAGRAM_PLACEHOLDER_PNG, caption: pendingImageCaption(b.caption, id, language) }
   }
   return { ...doc, sections: doc.sections.map((s) => ({ ...s, blocks: s.blocks.map(materialize) })) }
 }
@@ -284,8 +278,11 @@ const warnMissingImages = (images: ImageLoadResult, target: string): void => {
   }
 }
 
-/** Sau khi đọc cache: tải lại PNG (theo lô) cho mọi tham chiếu rồi phân giải — PNG có sau lúc cache vẫn hiện ảnh thật. */
-const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: DiagramPngLoader): Promise<RenderedDocument> => {
+/**
+ * Sau khi đọc cache: tải lại PNG (theo lô) cho mọi tham chiếu rồi phân giải — PNG có sau lúc cache vẫn hiện ảnh thật.
+ * `language` (FLF-265): ngôn ngữ chú thích placeholder — phải trùng ngôn ngữ đã dựng `doc`; chưa ai truyền ⇒ tiếng Anh.
+ */
+const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: DiagramPngLoader, language?: string): Promise<RenderedDocument> => {
   const refs = new Set<string>()
   for (const section of doc.sections) {
     for (const block of section.blocks) {
@@ -297,7 +294,7 @@ const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: D
 
   const images = await loadDiagramPngs(projectId, [...refs], load)
   warnMissingImages(images, `project ${projectId} (đọc cache)`)
-  return materializeImages(doc, resolveLoaded(images))
+  return materializeImages(doc, resolveLoaded(images), language)
 }
 
 // ─── cache: ghi an toàn (review T10) + dọn bản cũ (review T6) ─────
@@ -388,20 +385,28 @@ const buildInChargeResolver = async (changes: ChangeRecordRow[]): Promise<(by: s
   }
 }
 
+/**
+ * FLF-265: tài liệu tiếng Việt in `"system"` thành "Hệ thống" — resolver do caller dựng (tra `User`) giữ nguyên cho
+ * mọi người ghi khác. Không có ngôn ngữ ⇒ đúng resolver cũ.
+ */
+const inChargeFor = (resolve: ((by: string) => string) | undefined, language?: string): ((by: string) => string) | undefined =>
+  isVietnamese(language) ? (by) => (by === SYSTEM_ACTOR ? assembleTextFor(language).systemInCharge : resolve ? resolve(by) : by) : resolve
+
 // ─── phụ lục cờ ──────────────────────────────────────────────────
 
-const buildFlagRow = (spine: Spine, flag: Flag, numbers: Map<string, string>, titles?: Map<string, string>): FlagRow => {
+const buildFlagRow = (spine: Spine, flag: Flag, numbers: Map<string, string>, titles?: Map<string, string>, language?: string): FlagRow => {
   // Layout người dùng (có `titles`): số hiệu mẫu FPT không còn đúng ⇒ không suy từ khoá logic
   const fallbackNumber = titles ? "" : flag.section_id.startsWith("fixed:") ? flag.section_id.slice("fixed:".length) : ""
   const number = numbers.get(flag.section_id) ?? fallbackNumber
   let heading = titles?.get(flag.section_id) ?? ""
   if (!titles?.has(flag.section_id)) {
     try {
-      heading = sectionHeadingOf(spine, flag.section_id)
+      // FLF-265: mẫu FPT tiếng Việt ⇒ tiêu đề mục cố định theo bảng vi (feature/function: tên Spine)
+      heading = language ? defaultSectionTitle(spine, flag.section_id, language) : sectionHeadingOf(spine, flag.section_id)
     } catch {
       // section_id không phân giải được (dữ liệu cũ, mục riêng đã xoá) — nhãn chung thay vì khoá logic thô hay ném lỗi cả
-      // tài liệu. Mode 1 (có `titles`) nói tiếng Việt như thông điệp cờ; mode 2 giữ tài liệu tiếng Anh.
-      heading = titles ? capitalize(sectionLabel(flag.section_id, spine)) : "(removed section)"
+      // tài liệu. Mode 1 (có `titles`) nói tiếng Việt như thông điệp cờ; mode 2 theo ngôn ngữ tài liệu (mặc định tiếng Anh).
+      heading = titles ? capitalize(sectionLabel(flag.section_id, spine)) : assembleTextFor(language).removedSection
     }
   }
   const row: FlagRow = { id: flag.id, rule_id: flag.rule_id, section: `${number} ${heading}`.trim(), message: flag.message }
@@ -417,16 +422,17 @@ const buildFlagsAppendix = (
   numbers: Map<string, string>,
   source: RenderSource,
   states: SectionStateView[],
-  titles?: Map<string, string>
+  titles?: Map<string, string>,
+  language?: string
 ): FlagsAppendix => {
-  const waived = spine.flags.filter((f) => f.waived_by_user).map((f) => buildFlagRow(spine, f, numbers, titles))
+  const waived = spine.flags.filter((f) => f.waived_by_user).map((f) => buildFlagRow(spine, f, numbers, titles, language))
   if (source === "baseline") {
     // srs-spine.md §6: bản baseline chỉ cần in danh sách waive — không có cờ đỏ mở (điều kiện ký baseline).
     return { redOpen: [], staleCount: 0, waived }
   }
   const redOpen = spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && !f.waived_by_user)
   // T15 review T4: dùng lại `states` đã tính một lần ở buildDocument thay vì computeSectionStates lần nữa.
-  return { redOpen: redOpen.map((f) => buildFlagRow(spine, f, numbers, titles)), staleCount: readiness(spine, changes, states).stale, waived }
+  return { redOpen: redOpen.map((f) => buildFlagRow(spine, f, numbers, titles, language)), staleCount: readiness(spine, changes, states).stale, waived }
 }
 
 // ─── dựng sections[] ────────────────────────────────────────────
@@ -436,6 +442,10 @@ interface BuildSectionsOptions {
   partial?: boolean
   unassignedNumber: string
   hasUnassigned: boolean
+  /**
+   * FLF-265 — ngôn ngữ nhãn của mẫu FPT (nội bộ, chưa nối với project hay request). Không đặt ⇒ tiếng Anh, y như trước.
+   */
+  language?: DocumentLanguage
 }
 
 const buildSections = (spine: Spine, numbers: Map<string, string>, states: SectionStateView[], opts: BuildSectionsOptions): RenderedSection[] => {
@@ -454,7 +464,7 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
     for (const group of parentChain(def.parent)) {
       if (seenGroups.has(group)) continue
       seenGroups.add(group)
-      out.push(chapterSection(group))
+      out.push(chapterSection(group, opts.language))
     }
 
     if (
@@ -463,7 +473,7 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
       def.id.startsWith("function:") &&
       (numbers.get(def.id) ?? "").startsWith(`${opts.unassignedNumber}.`)
     ) {
-      out.push(unassignedFunctionsSection(opts.unassignedNumber))
+      out.push(unassignedFunctionsSection(opts.unassignedNumber, opts.language))
       unassignedHeadingInserted = true
     }
 
@@ -474,6 +484,7 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
       numberOf: numberOfCtx,
       // Tài liệu theo mẫu FPT: §3.x.y dùng khung mục FPT (mode 1 đi `layout-sections.ts`, giữ khung cũ)
       functionLayout: "fpt",
+      ...(opts.language !== undefined ? { language: opts.language } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
@@ -546,6 +557,11 @@ interface BuildDocumentInput {
   partial?: boolean
   /** Layout của file người dùng (mode 1 v2) — không có ⇒ mẫu FPT. */
   template?: TemplateLayout | null
+  /**
+   * FLF-265 — ngôn ngữ nhãn cố định của tài liệu mẫu FPT (mode 2). Tham số nội bộ: chưa caller nào truyền, không phải
+   * query param. Không đặt ⇒ tiếng Anh như trước. Có `template` (mode 1) ⇒ bỏ qua — nhãn mode 1 theo file người dùng.
+   */
+  language?: DocumentLanguage
 }
 
 interface BuiltDocument {
@@ -561,6 +577,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   deps.onImagesLoaded?.(images)
 
   const states = computeSectionStates(spine, input.statusChanges)
+  // Chỉ mẫu FPT nhận ngôn ngữ — đường layout mode 1 giữ nguyên byte
+  const language = input.template ? undefined : input.language
   let sections: RenderedSection[]
   let numbers: Map<string, string>
   let titles: Map<string, string> | undefined
@@ -576,7 +594,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     sections = buildSections(spine, numbers, states, {
       partial: input.partial ?? false,
       unassignedNumber: map.unassignedNumber,
-      hasUnassigned: map.hasUnassigned
+      hasUnassigned: map.hasUnassigned,
+      ...(language !== undefined ? { language } : {})
     })
   }
 
@@ -592,8 +611,8 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     generatedAt: deps.now().toISOString(),
     sections,
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp
-    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, deps.resolveInCharge)],
-    flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles)
+    recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, inChargeFor(deps.resolveInCharge, language), language)],
+    flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
   // Không có layout file người dùng ⇒ mẫu FPT (FLF-214: style heading con của §3.x.y)
@@ -604,7 +623,7 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
 /** Dựng `RenderedDocument` sẵn ảnh (PNG thật hoặc placeholder) — cho writer/test gọi trực tiếp, không qua cache. */
 async function buildDocument(input: BuildDocumentInput, deps: AssembleDeps): Promise<RenderedDocument> {
   const { refDoc, images } = await buildDocumentParts(input, deps)
-  return materializeImages(refDoc, resolveLoaded(images))
+  return materializeImages(refDoc, resolveLoaded(images), input.template ? undefined : input.language)
 }
 
 /**
@@ -699,6 +718,8 @@ export async function assemble(
   )
 
   warnMissingImages(images, `project ${projectId}`)
+  // FLF-265: bản dựng chưa truyền `language` (luôn tiếng Anh). Phase 3 nối `documentLanguage` vào `buildDocumentParts`
+  // thì phải thêm ngôn ngữ vào khoá cache (bản vi và en không dùng chung dòng) và truyền nó cho `rehydrateImages`.
   await upsertCache(
     { projectId, spine_version: record.spine_version },
     {
@@ -857,6 +878,8 @@ const getBaselineDocument = async (
   // Cache dạng tham chiếu kể cả khi thiếu PNG: baseline đã ký không bị "placeholder vĩnh viễn" vì mỗi lần đọc
   // đều thử tải lại ảnh (rehydrateImages) — PNG có sau ⇒ ảnh thật mà không cần dựng lại.
   warnMissingImages(images, `baseline ${baselineIdStr}`)
+  // FLF-265: như bản draft — khi nối `language` thì thêm vào `cacheFilter` và truyền cho `rehydrateImages` /
+  // `materializeImages` bên dưới, kẻo chú thích placeholder lệch ngôn ngữ với phần còn lại.
   await upsertCache(cacheFilter, { generated_at: new Date(refDoc.generatedAt), doc: refDoc, missing_diagram_ids: images.missing })
 
   return materializeImages(refDoc, resolveLoaded(images))
@@ -935,4 +958,4 @@ export async function getDraftMeta(projectId: string): Promise<DraftMeta | null>
 }
 
 // exported for tests that need to build a document without the cache/HTTP layer (dev `partial`)
-export const _internal = { buildDocument, buildNumberMap, buildSections }
+export const _internal = { buildDocument, buildNumberMap, buildSections, rehydrateImages }
