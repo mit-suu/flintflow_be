@@ -25,6 +25,7 @@ import {
   CreditReservation
 } from "./credit-reservation.service.js"
 import { executeWithInRequestRetry } from "./retry.service.js"
+import { TRANSACTION_UNAVAILABLE, runInTransaction } from "../db/transaction.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { capturePayload } from "./ai-action-payload.service.js"
 
@@ -49,40 +50,18 @@ export interface ExecuteAiActionStreamCallbacks<T = any> {
   onError?: (error: any) => void | Promise<void>
 }
 
+/**
+ * Giữ credit trong transaction. `withTransaction` (qua `runInTransaction`) tự chạy lại khi lỗi tạm thời — nhiều lượt gọi
+ * AI cùng lúc trên một ví (1.11 chạy lô song song, hai người cùng tổ chức) gặp write conflict trên `CreditWallet`; trước
+ * đây lượt đó hỏng thành "AI lỗi". Mongo standalone ⇒ giữ credit không transaction như cũ.
+ */
 const reserveCreditWithTransaction = async (
   userId: string,
   actionType: string,
   projectId: string | undefined
 ): Promise<CreditReservation> => {
-  let session: mongoose.ClientSession | undefined
-  try {
-    session = await mongoose.startSession()
-    session.startTransaction()
-    const reservation = await reserveCredit(userId, actionType, projectId, session)
-    await session.commitTransaction()
-    return reservation
-  } catch (err: any) {
-    if (session) {
-      try {
-        await session.abortTransaction()
-      } catch (_) {}
-    }
-
-    // Fallback if standalone MongoDB does not support transactions
-    if (
-      err?.message?.includes("replica set member") ||
-      err?.message?.includes("Transaction numbers") ||
-      err?.message?.includes("retryable writes") ||
-      err?.code === 20
-    ) {
-      return reserveCredit(userId, actionType, projectId)
-    }
-    throw err
-  } finally {
-    if (session) {
-      session.endSession()
-    }
-  }
+  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session))
+  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId) : reservation
 }
 
 /** Release không được che lỗi gốc của action: lỗi release chỉ log. */

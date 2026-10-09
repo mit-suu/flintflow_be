@@ -15,7 +15,7 @@
 - **Neo block** (G3): mỗi block có `block_id` ổn định (`B0001`…), neo bằng bookmark ẩn `_ff_<block_id>` trong file lưu, neo phụ `w14:paraId`, dự phòng `text_hash` + `heading_path`.
 - **Version tài liệu** (G4): import `0.0`; mỗi CR ghi xong lên minor (`0.1`, `0.2`…); release lên major (`1.0`, `2.0`…). Khác `v1.N` của mode 2.
 - **BR-03:** khi đã có baseline v0 thì mọi sửa phải qua CR. Ở project mode 1, chat ra lệnh sửa, `POST /changes`, `POST /reconcile` và `POST /undo` đều trả `409 CHANGE_REQUIRES_CR` (G9). Mode 1 v3 (§4.8): không tự tạo CR, không chạy step, không ký baseline v1, không waive cờ.
-- **Gọi AI** (Flow 4/5): giữ credit trước, quyết toán sau. Lỗi AI thì tự retry 2 lần; vẫn lỗi thì hoàn credit và đặt `paused: { reason: "resume_later" }`. Hết credit thì đặt `paused: { reason: "credits" }`. Resume qua endpoint `…/resume`. `step_id` trong usage (UC-79): `I-4:<section_id>`, `I-1.11`, `C-2:<cr_id>`, `C-4:<cr_id>`, `C-5:<cr_id>`.
+- **Gọi AI** (Flow 4/5): giữ credit trước, quyết toán sau. Lỗi AI thì tự retry 2 lần; vẫn lỗi thì hoàn credit và đặt `paused: { reason: "resume_later" }`. Hết credit thì đặt `paused: { reason: "credits" }`. Resume qua endpoint `…/resume`. `step_id` trong usage (UC-79): `I-4:<section_id>`, `I-1.11:<n>` (lô thứ n của 1.11) và `I-1.11:cross` (lượt kiểm chéo giữa các section) — bản ghi cũ `I-1.11` là lượt đơn trước map-reduce, `C-2:<cr_id>`, `C-4:<cr_id>`, `C-5:<cr_id>`.
 
 ### 0.1 Máy trạng thái import (`import.state.ts`)
 
