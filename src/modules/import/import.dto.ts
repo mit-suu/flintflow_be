@@ -190,7 +190,7 @@ export const extractionSectionSchema = z.object({
 
 // ─── request ─────────────────────────────────────────────────────
 
-/** `POST /projects/:id/import` — multipart, field `file` (.docx ≤ 10MB). Không có body JSON. */
+/** `POST /projects/:id/import` — multipart, field `file` (.docx ≤ 40MB). Không có body JSON. */
 export const IMPORT_FILE_FIELD = "file"
 
 /** `POST /projects/:id/import/confirm-latest` (nút 1.3). */
@@ -286,13 +286,17 @@ export const extractResponseSchema = z.object({
   sections: z.array(extractionSectionSchema)
 })
 
-/** `POST /projects/:id/import/finalize`. */
+/**
+ * `POST /projects/:id/import/finalize` — chạy nền (`finalize-jobs.ts`): trả ngay import `baselining` (đang chạy ⇒ trạng thái
+ * hiện tại), `spine_version` lúc bắt đầu. `baseline` / `flags` giữ khoá cho client cũ nhưng luôn `null` — kết quả đọc ở
+ * `GET /import` (`gap_review`) và gap report sau khi job xong.
+ */
 export const finalizeResponseSchema = z.object({
   import: importedDocumentDtoSchema,
   doc_version: z.literal("0.0"),
-  baseline: baselineSchema,
+  baseline: baselineSchema.nullable(),
   spine_version: z.number().int().min(1),
-  flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0) })
+  flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0) }).nullable()
 })
 
 export const gapReportSchema = z.object({

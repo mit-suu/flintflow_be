@@ -26,7 +26,7 @@ uploaded ─┬─ preflight_rejected
 delivered ─► change_requested
 ```
 
-`paused` chỉ đặt được ở `extracting` và `checking`. Chuyển trạng thái sai trả `409 IMPORT_INVALID_STATE` `{ status, to, allowed }`.
+`paused` chỉ đặt được ở `extracting` và `checking`, và ở `baselining` khi job finalize chạy nền lỗi / mất (chỉ `resume_later`, §4.16). Chuyển trạng thái sai trả `409 IMPORT_INVALID_STATE` `{ status, to, allowed }`.
 
 ### 0.2 Máy trạng thái change request (`change-request.state.ts`)
 
@@ -75,15 +75,15 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | --- | --- | --- | --- | --- | --- |
 | 1 | `POST /projects` | UC-13 | `{ name, domain?, mode?, documentLanguage? }` — `mode` ∈ `import \| fpt \| customer_template`, mặc định `fpt`; `documentLanguage` ∈ `vi \| en` (FLF-265): thiếu ⇒ `User.locale` ⇒ `en`; mode `import` bỏ qua (ngôn ngữ theo file upload) | `Project` (thêm `mode`, `import_state`, `documentLanguage?`) | `VALIDATION_ERROR`, `501 NOT_IMPLEMENTED` (`customer_template`) |
 | 1a | `PATCH /projects/:id/document-language` | UC-13 | `UpdateDocumentLanguageSchema` `{ documentLanguage: vi \| en }` (strict) — chỉ Lead/Analyst; không đổi Spine, nội dung đã có dịch qua `pipeline-contract.md` #26–#27 (FLF-265) | `Project` | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `409 DOCUMENT_LANGUAGE_LOCKED` (mode `import`: ngôn ngữ theo file) |
-| 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 10MB) | `importStateResponseSchema` | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
+| 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 40MB; quá cỡ ⇒ preflight `FILE_TOO_LARGE`, quá gấp đôi ⇒ `413 FILE_TOO_LARGE` `meta: { max_mb }`) | `importStateResponseSchema` | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
 | 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` | — |
 | 5 | `PATCH /projects/:id/import/mapping` | UC-21, 1.7 | `mappingPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
 | 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), I-4 chạy nền; FE poll #4 tới khi rời `extracting` hoặc có `paused` | `IMPORT_INVALID_STATE` |
 | 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
-| 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` | `finalizeResponseSchema` | `IMPORT_INVALID_STATE`, `SPINE_VERSION_CONFLICT`, `INSUFFICIENT_CREDIT` |
+| 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` | `finalizeResponseSchema` — **trả ngay** (`status = baselining`, `baseline: null`, `flags: null`), finalize + 1.11–1.12 chạy nền; FE poll #4 tới `gap_review` hoặc có `paused` (§4.16) | `IMPORT_INVALID_STATE`, `SPINE_VERSION_CONFLICT` |
 | 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema`; `docx` trả file, không bọc envelope | `IMPORT_INVALID_STATE` (chưa tới `gap_review`) |
-| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — ở `extracting`: trả ngay, chạy nền như #6; ở `checking`: chạy xong mới trả | `IMPORT_INVALID_STATE` |
+| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — **trả ngay**, chạy nền: `extracting` như #6; `baselining` (đã từng finalize, job lỗi / mất) ⇒ chạy lại finalize; `checking` ⇒ 1.11–1.12 (§4.16) | `IMPORT_INVALID_STATE` |
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
@@ -169,20 +169,23 @@ Trạng thái trên là kết quả **poll #4** sau khi job nền dừng vì h�
 
 ### 2.4 Finalize (#8)
 
-Request `{ "import_id": "66f0…01", "base_version": 3 }` →
+Request `{ "import_id": "66f0…01", "base_version": 3 }` → trả ngay (job nền, §4.16):
 
 ```json
 {
   "data": {
-    "import": { "status": "gap_review", … },
+    "import": { "status": "baselining", "paused": null, … },
     "doc_version": "0.0",
-    "baseline": { "id": "BL001", "version": "0.0", "type": "imported", "doc_version": "0.0", "at": "2026-09-18T08:20:00.000Z", "snapshot_ref": "66f0…09", "checked_at_version": 4, "waived_count": 0 },
-    "spine_version": 4,
-    "flags": { "red": 1, "yellow": 6 }
+    "baseline": null,
+    "spine_version": 3,
+    "flags": null
   },
   "error": null
 }
 ```
+
+Poll #4 tới `import.status = "gap_review"` (hoặc `paused`). Baseline đọc ở `GET /spine` (`baselines[]`) / #12 versions, số cờ ở
+gap report (#9).
 
 ### 2.5 Tạo CR (#16) và khoá bị trùng (#21)
 
@@ -382,12 +385,35 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
 - **Chạy tiếp theo từng lượt** (#10, hình API không đổi): I-4 lưu tiến độ sau mỗi lượt AI đã trừ credit; section nhiều lô dừng ở
   lô k (hết credit / AI lỗi) ⇒ chạy tiếp bắt đầu ở lô k, không gọi và không trừ lại lô 1…k−1.
 
+### 4.16 Upload SRS lớn + finalize chạy nền (contract-change — chờ 4/4)
+
+SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của file đó (tách lại file, áp Spine, vẽ mọi diagram, render
+0.0, baseline, 1.11 nhiều lượt AI) mất vài phút — reverse proxy 60–100 s cắt request trong khi BE vẫn chạy, bấm lại gặp
+`IMPORT_INVALID_STATE`.
+
+- **Giới hạn file #2 / #11: 40 MB** (trước 10 MB). Quá 40 MB ⇒ preflight `FILE_TOO_LARGE` (có bản ghi `preflight_rejected`);
+  quá 80 MB ⇒ `413 FILE_TOO_LARGE` `meta: { max_mb: 40 }`. Câu báo nêu dung lượng + giới hạn theo MB và gợi ý nén ảnh trong
+  Word (File → Compress Pictures). Trần giải nén 200 MB giữ nguyên.
+- **#8 chạy nền** như #6: lỗi trạng thái / `base_version` vẫn trả ngay (`409 IMPORT_INVALID_STATE` /
+  `SPINE_VERSION_CONFLICT`). Hợp lệ ⇒ trả ngay `finalizeResponseSchema` với `import.status = baselining`, `paused: null`,
+  `spine_version` lúc bắt đầu, **`baseline: null`, `flags: null`** (giữ khoá cho client cũ; kết quả đọc sau khi job xong).
+  Không còn trả `INSUFFICIENT_CREDIT` (1.11 hết credit vẫn là `checking` + `paused: credits` như trước, thấy qua #4).
+- **Gọi #8 / #10 khi job đang chạy** ⇒ không làm gì, trả trạng thái hiện tại (200).
+- **#10 ở `checking`** cũng trả ngay (`checking`, `paused: null`) rồi chạy 1.11–1.12 nền (trước: chạy xong mới trả).
+- **`paused` ở `baselining`** (mới, chỉ `resume_later`): job finalize lỗi giữa chừng ⇒ BE hoàn về đúng trạng thái trước
+  finalize (Spine + `changes[]` của lần chạy dở bị bỏ, xoá bản 0.0 / snapshot baseline dở, heading về section tạm) rồi đặt
+  `paused`. #10 ở `baselining` chạy lại finalize (giữ `record_of_changes` đã gửi ở #8); chưa từng gọi #8 ⇒ `IMPORT_INVALID_STATE`.
+- **Job mất** (máy chủ khởi động lại): #4 thấy `baselining` đã bắt đầu finalize hoặc `checking`, không `paused`, không có job
+  ⇒ đặt `paused: { reason: "resume_later" }` (như I-4). #10 hoàn phần dở rồi chạy lại. Giả định một instance BE.
+- FE: sau #8 / #10 poll #4 tới `gap_review` hoặc `paused`, hiện tiến trình "Đang tạo bản gốc và kiểm tra tài liệu…".
+
 ## 3. Lịch sử thay đổi contract
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |
+| 2026-10-08 | upload lớn + finalize nền | §4.16: file #2/#11 tối đa 40 MB (`413` có `meta.max_mb`); #8 và #10 (`checking`/`baselining`) trả ngay, chạy nền, FE poll #4; `finalizeResponseSchema.baseline`/`flags` nullable (luôn `null`); `paused: resume_later` đặt được ở `baselining` (job finalize lỗi / mất ⇒ hoàn về trước finalize) — contract-change, chờ 4/4 |
 | 2026-10-06 | mục FPT không bắt buộc | #32 / gap report: hồ sơ luật mode 1 loại `section_empty` — đầu mục FPT thiếu không còn cờ đỏ, không chặn release; cờ cũ đang mở tự đóng ở lần tính lại cờ kế tiếp. Hình API không đổi |
 | 2026-10-06 | nhãn field 1.9 | §4.14: `ReviewField.entity_name?` — tên phần tử cho nhãn field cần xác nhận (field ảnh chỉ còn `kind` sau khử trùng FLF-252 không còn trơ "Tác nhân A01 — Loại") — chỉ thêm field |
 | 2026-10-05 | FLF-251 / FLF-252 | §4.14: `table_map` thêm `role?` + `samples?`, chỉ còn bảng ở section có trích, thêm giá trị `field_path` (cột FlintFlow xuất ra, bảng 3.1.4, ma trận phân quyền); profile thêm `record_of_changes` + `template_family`, heading thêm `template_section?`, #8 thêm `record_of_changes?`, section tính năng có trích — chỉ thêm field, contract-change, chờ 4/4 |
