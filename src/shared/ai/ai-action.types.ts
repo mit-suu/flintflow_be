@@ -46,7 +46,11 @@ export enum ActionType {
   /** C-5 (nút 3.8): kiểm nhất quán trên phạm vi thay đổi — chỉ ra cờ vàng. */
   CR_CONSISTENCY = "cr_consistency",
   /** Mode 1 v3 phase 7: đọc ảnh người dùng đính kèm CR làm tài liệu bổ sung (Gemini vision) ⇒ chữ + mô tả. */
-  CR_MATERIAL_IMAGE = "cr_material_image"
+  CR_MATERIAL_IMAGE = "cr_material_image",
+
+  // ─── Knowledge RAG (FLF-267) ───
+  /** Trả lời câu hỏi trong chat chỉ từ chunk tri thức truy hồi được (K1..Kn), mỗi ý kèm trích dẫn. */
+  KNOWLEDGE_ANSWER = "knowledge_answer"
 }
 
 /**
@@ -73,7 +77,8 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.CR_CLARIFY]: "cr-clarify",
   [ActionType.CR_PROPOSE]: "cr-propose",
   [ActionType.CR_CONSISTENCY]: "cr-consistency",
-  [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image"
+  [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image",
+  [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer"
 }
 
 export interface AiActionInput {

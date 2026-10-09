@@ -494,17 +494,67 @@ router.delete("/:projectId/chats/:chatId", authMiddleware, requireRole("lead", "
  *                 type: string
  *                 description: Step id theo step registry (vd B-1.1, S-3.2) — chỉ là nhãn lưu vào transcript
  *                 example: B-1.1
+ *               knowledge:
+ *                 type: boolean
+ *                 default: false
+ *                 description: >
+ *                   FLF-267 — câu hỏi tri thức: trả lời từ Knowledge RAG (call_kind knowledge_answer, 2 credit) thay cho CHAT,
+ *                   đi trước lượt chờ của step và lệnh sửa. Tin AI ghi vào phiên = { reply, questions: [], grounded, citations[] };
+ *                   grounded=false ⇒ câu "không đủ căn cứ" (không gọi model khi truy hồi không đủ gần). Xem pipeline-contract §1.2.
  *     responses:
  *       200:
  *         description: Trả về cuộc trò chuyện được cập nhật tin nhắn và phản hồi từ AI
  *       400:
- *         description: Thiếu thông tin
+ *         description: Thiếu thông tin; VALIDATION_ERROR khi knowledge không phải boolean
  *       401:
  *         description: Chưa xác thực
  *       403:
  *         description: ORG_ROLE_FORBIDDEN (Viewer không gửi tin — gọi AI tốn credit)
+ *       409:
+ *         description: KNOWLEDGE_DISABLED — gửi knowledge=true khi server tắt Knowledge RAG (KNOWLEDGE_ENABLED=false)
  */
 router.post("/:projectId/chats/:chatId/messages", authMiddleware, requireRole("lead", "analyst"), chatSessionController.sendMessage)
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/chats/{chatId}/messages/stream:
+ *   post:
+ *     summary: Như /messages nhưng trả SSE (text-delta… rồi finish); knowledge=true ⇒ chỉ một sự kiện finish
+ *     tags: [Chat Sessions]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: chatId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [content, step]
+ *             properties:
+ *               content:
+ *                 type: string
+ *               step:
+ *                 type: string
+ *               knowledge:
+ *                 type: boolean
+ *                 default: false
+ *                 description: FLF-267 — câu hỏi tri thức; sự kiện finish mang data = { reply, questions, grounded, citations[] }
+ *     responses:
+ *       200:
+ *         description: text/event-stream — sự kiện text-delta (CHAT), finish, error
+ *       409:
+ *         description: KNOWLEDGE_DISABLED — gửi knowledge=true khi server tắt Knowledge RAG
+ */
 router.post("/:projectId/chats/:chatId/messages/stream", authMiddleware, requireRole("lead", "analyst"), chatSessionController.sendMessageStream)
 
 export default router

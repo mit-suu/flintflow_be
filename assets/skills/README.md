@@ -6,6 +6,7 @@ Nguồn sự thật cho mọi prompt của pipeline B-0 → S-9 (`Product-Brief-
 assets/skills/
 ├─ action/     10 skill hành động dùng chung mọi phase (Phases §3, §8.2 nhóm A)
 │              + 5 skill mode 1 (import-*, cr-*; FLF-171, khung `stub` tới P2)
+│              + knowledge-answer (Knowledge RAG, FLF-267; `knowledge_index: false` ⇒ không vào kho tri thức)
 ├─ content/    13 skill nội dung theo phase (nhóm B + product-brief)
 ├─ renderer/   5 renderer PlantUML (Phases §7.1)
 ├─ output/     2 skill đầu ra cuối (assemble, completeness score)
@@ -53,6 +54,7 @@ stub: true                      # tuỳ chọn — skill chờ task sau điền 
 | `crClarify` | `{ambiguous, questions[], suggestions[][], missing_info[], targets: {entity_paths[], keywords[]}}` | cr_clarify (mode 1; `missing_info`, `suggestions` phase 7) |
 | `crPropose` | `{locations: [{location_id, conclusion, reason, new_text?, comment_text?, spine_ops, assumptions[]}]}` | cr_propose (mode 1; `assumptions` phase 7) |
 | `crMaterialImage` | `{text}` — chữ chép nguyên văn + `Description:`; một ảnh kèm prompt (Gemini) | cr_material_image (mode 1 v3 phase 7) |
+| `knowledgeAnswer` | `{grounded, answer, claims: [{text, refs[]}]}` — `refs` là nhãn chunk `K1…`, code hậu kiểm | knowledge_answer (FLF-267) |
 | `puml` | text `.puml` (renderer, T10 chốt) | — |
 | `none` | không gọi model — skill mô tả logic tất định cho code | — |
 

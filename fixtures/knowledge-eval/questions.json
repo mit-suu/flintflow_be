@@ -1,0 +1,317 @@
+{
+  "corpus": "skills",
+  "questions": [
+    {
+      "id": "q01",
+      "type": "exact",
+      "language": "en",
+      "question": "How many model calls are allowed per step, and how many regenerates?",
+      "answer_points": ["At most 8 model calls per step, all call kinds counted", "At most 3 regenerates per step", "Counters reset when the step becomes accepted"],
+      "gold_chunk_ids": ["gate-check#caps"]
+    },
+    {
+      "id": "q02",
+      "type": "exact",
+      "language": "en",
+      "question": "Which red flags can never be waived?",
+      "answer_points": ["dead_reference, array_empty and render_error cannot be waived", "Every other red rule is waivable", "The waive reason is typed by the user and is at least 20 characters"],
+      "gold_chunk_ids": ["deterministic-check#waivers"]
+    },
+    {
+      "id": "q03",
+      "type": "exact",
+      "language": "en",
+      "question": "What is the only condition for signing a baseline? Is there a completeness percentage threshold?",
+      "answer_points": ["The only condition is zero unresolved, unwaived red flags on the spine_version being signed", "There is no percentage threshold anywhere"],
+      "gold_chunk_ids": ["srs-completeness-score#dieu-kien-chot-baseline-khong-phai-diem-nay"]
+    },
+    {
+      "id": "q04",
+      "type": "exact",
+      "language": "en",
+      "question": "How many flags may the section review output per call, and what level are they?",
+      "answer_points": ["At most 15 flags per call, most important first", "Level is always yellow, never red", "rule_id is the lens name"],
+      "gold_chunk_ids": ["review-section#rules"]
+    },
+    {
+      "id": "q05",
+      "type": "exact",
+      "language": "en",
+      "question": "Which action values are allowed in a permissions row of the authorization matrix?",
+      "answer_points": ["view, create, update, delete, export, approve", "A role with any write action on a screen must also have view on it", "An absent row means denied"],
+      "gold_chunk_ids": ["authorization-matrix#permissions"]
+    },
+    {
+      "id": "q06",
+      "type": "exact",
+      "language": "en",
+      "question": "How many functions are detailed in one model call at S-5, and what happens with a screen that has 15 functions?",
+      "answer_points": ["At most six functions per call", "A screen with 15 functions is drafted in three calls", "Ops are emitted only for function ids present in the projection"],
+      "gold_chunk_ids": ["function-detail#batching-read-this-first"]
+    },
+    {
+      "id": "q07",
+      "type": "exact",
+      "language": "en",
+      "question": "How many glossary entries are normal for a product?",
+      "answer_points": ["10–30 entries is the usual range", "Fewer than 5 on a real product means the sweep was skipped", "More than 40 usually means ordinary words crept in"],
+      "gold_chunk_ids": ["glossary#rules"]
+    },
+    {
+      "id": "q08",
+      "type": "exact",
+      "language": "en",
+      "question": "When is the use case diagram split into several parts?",
+      "answer_points": ["One diagram holds at most 20 use cases and at most 24 actor–use case edges", "Over a limit, whole groups are packed into parts", "A cluster longer than 40 is chunked into lots of 20"],
+      "gold_chunk_ids": ["usecase#order-and-splitting"]
+    },
+    {
+      "id": "q09",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "If my credit runs out halfway through a step, is the whole step charged and what happens to work already done?",
+      "answer_points": ["Credit is charged per model call, not per step", "With insufficient credit the model is not called and INSUFFICIENT_CREDIT (402) is returned", "Ops already applied by accepted steps stay"],
+      "gold_chunk_ids": ["meter#rules+refuse", "meter#overview+unit-of-charge"]
+    },
+    {
+      "id": "q10",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "Placing an order needs the customer to be signed in — should Place Order include Log In?",
+      "answer_points": ["No: Log In is an access precondition written in the protected use case's description", "Log In is never the target of include or extend", "Register Account and Reset Password stay standalone goals"],
+      "gold_chunk_ids": ["actors-and-usecases#s-3-4-use-case-relationships"]
+    },
+    {
+      "id": "q11",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "If I mark a requirement as won't-have, does it automatically move out of the release scope?",
+      "answer_points": ["No: wont records a judgement and does not move anything into release_scope.out", "Changing the release scope is the user's decision at S-2.2", "If the out-of-scope list does not mention it, an unconfirmed assumption is added"],
+      "gold_chunk_ids": ["prioritization#won-t-have-does-not-change-scope"]
+    },
+    {
+      "id": "q12",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "What kind of words deserve a glossary line and which ones should be left out?",
+      "answer_points": ["Domain terms a newcomer would not know or would guess wrong", "Abbreviations and acronyms used in the Spine", "Product-specific names such as entities and actors", "Ordinary English words are left out unless the product narrows their meaning"],
+      "gold_chunk_ids": ["glossary#what-earns-an-entry", "glossary#what-does-not-earn-an-entry"]
+    },
+    {
+      "id": "q13",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "What kinds of behind-the-scenes work should be written as functions that have no screen?",
+      "answer_points": ["Scheduled work started by time actors", "Inbound calls from system actors such as webhooks", "Background processing finished out of band", "Data lifecycle work such as retention and purge"],
+      "gold_chunk_ids": ["non-screen-functions#what-counts"]
+    },
+    {
+      "id": "q14",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "How do I tell a must-have from a should-have when ranking requirements?",
+      "answer_points": ["must: the release is not shippable without it", "should: painful to omit but there is a workaround for one release", "could: first thing dropped when time runs out; wont: explicitly not in this release"],
+      "gold_chunk_ids": ["prioritization#the-four-values"]
+    },
+    {
+      "id": "q15",
+      "type": "paraphrase",
+      "language": "en",
+      "question": "Can diagram labels be written in Vietnamese, and can a diagram pull styles from a URL?",
+      "answer_points": ["English labels only, no Vietnamese diacritics", "No !include, !import, URLs or remote skinparam — the server has no internet access", "Aliases are Spine ids and the visible label is the name"],
+      "gold_chunk_ids": ["plantuml-conventions#common-rules"]
+    },
+    {
+      "id": "q16",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Tên use case phải tuân theo những quy tắc đặt tên nào?",
+      "answer_points": ["Title Case, một mục tiêu, không có \"and\", \"/\" hay dấu phẩy", "Động từ cụ thể, không dùng Manage, Handle, Process…", "Tối đa 5 từ, không thuật ngữ giao diện / kỹ thuật", "Actor không bao giờ làm chủ ngữ"],
+      "gold_chunk_ids": ["actors-and-usecases#s-3-2-actor-goal-list"]
+    },
+    {
+      "id": "q17",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Khi phỏng vấn, AI có được hỏi lại điều người dùng đã trả lời rồi không?",
+      "answer_points": ["Không hỏi lại điều đã có trong projection, addendum, sổ quyết định hay câu trả lời trước", "Mỗi câu hỏi mang một topic_key", "Chỉ mở lại chủ đề đã chốt khi có conflict"],
+      "gold_chunk_ids": ["elicit-loop#rules/1-5"]
+    },
+    {
+      "id": "q18",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Khi nào một thực thể trong ERD vi phạm chuẩn hoá 1NF, 2NF hoặc 3NF?",
+      "answer_points": ["1NF: thực thể không chứa danh sách của một thứ khác — danh sách là thực thể con", "2NF: thực thể kết hợp chỉ mô tả cặp quan hệ", "3NF: một thực thể một thứ; mô tả thứ thứ hai thì tách thành hai thực thể"],
+      "gold_chunk_ids": ["entities-erd#pass-6-normal-form-3nf-at-entity-level"]
+    },
+    {
+      "id": "q19",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Định nghĩa một thuật ngữ trong glossary nên viết như thế nào?",
+      "answer_points": ["Một câu, thì hiện tại, không mở bằng mạo từ hay \"refers to\"", "Định nghĩa theo nghĩa bên trong sản phẩm, không nghĩa chung", "Không dùng chính thuật ngữ trong định nghĩa", "term_native chỉ có khi người dùng thật sự nói bằng ngôn ngữ đó"],
+      "gold_chunk_ids": ["glossary#writing-a-definition"]
+    },
+    {
+      "id": "q20",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Chế độ review strict và fast khác nhau thế nào khi chạy một giai đoạn?",
+      "answer_points": ["strict dừng ở cổng duyệt của mọi bước", "fast (và balanced cũ) tự duyệt các bước yên lặng và dừng một lần cuối giai đoạn", "Phỏng vấn đầu giai đoạn chỉ một lần, tối đa 4 câu, ở mọi chế độ"],
+      "gold_chunk_ids": ["srs-orchestrator#phase-rules"]
+    },
+    {
+      "id": "q21",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Luồng dữ liệu của hệ thống bên ngoài như cổng thanh toán được khai báo thế nào cho sơ đồ ngữ cảnh?",
+      "answer_points": ["flows_out là dữ liệu hệ thống của ta gửi đi, flows_in là dữ liệu bên kia gửi về", "Mỗi mục là một cụm danh từ dữ liệu tiếng Anh, thành một mũi tên", "Tối đa 3 mục mỗi chiều; actor một chiều là hợp lệ"],
+      "gold_chunk_ids": ["product-overview#s-2-3-external-systems"]
+    },
+    {
+      "id": "q22",
+      "type": "cross_lingual",
+      "language": "vi",
+      "question": "Credit của một lượt gọi model được giữ, trừ và hoàn lại theo trình tự nào?",
+      "answer_points": ["Giữ (reserve) credit trước khi gọi model", "Thành công và parse được thì trừ (deduct)", "Lỗi hoặc parse hỏng thì hoàn (refunded)", "Xung đột base_version cũng hoàn và không tính vào trần regenerate"],
+      "gold_chunk_ids": ["meter#lifecycle-of-one-call"]
+    },
+    {
+      "id": "q23",
+      "type": "table_list",
+      "language": "en",
+      "question": "What default reliability and performance thresholds apply to a production project with high complexity?",
+      "answer_points": ["Monthly uptime >= 99.9 %", "RTO <= 1 h and RPO <= 15 min", "p95 interactive response time <= 1 s", "At least 5000 concurrent users"],
+      "gold_chunk_ids": ["nfr-quality-attributes#s-6-3-reliability-s-6-4-performance-quantitative-always"]
+    },
+    {
+      "id": "q24",
+      "type": "table_list",
+      "language": "en",
+      "question": "What does each gate action do, and which of them call the model?",
+      "answer_points": ["Accept closes the step without a model call", "Request revision and Regenerate call draft-to-ops (revision / regenerate)", "Accept as-is only when the regenerate cap is spent and a revision did not solve it; it writes a yellow flag"],
+      "gold_chunk_ids": ["gate-check#actions"]
+    },
+    {
+      "id": "q25",
+      "type": "table_list",
+      "language": "en",
+      "question": "Which lenses does the semantic check of an imported SRS look for?",
+      "answer_points": ["ambiguity and missing_acceptance", "fr_nfr_conflict", "semantic_duplicate and term_drift"],
+      "gold_chunk_ids": ["import-semantic-check#context+lenses"]
+    },
+    {
+      "id": "q26",
+      "type": "table_list",
+      "language": "vi",
+      "question": "Trong wireframe Salt, vẽ ô mật khẩu, ô nhập chữ và nút bấm thế nào?",
+      "answer_points": ["Mật khẩu là chuỗi dấu chấm trong ngoặc kép, không dùng **", "Ô nhập luôn nằm trong ngoặc kép; [text] là nút bấm", "Mỗi dòng một widget, cạnh nhau thì dùng hàng { a | b }"],
+      "gold_chunk_ids": ["screen-layout#salt-cheat-sheet-anything-else-breaks-the-compile"]
+    },
+    {
+      "id": "q27",
+      "type": "table_list",
+      "language": "en",
+      "question": "At which steps are the review lenses term_drift and goal_coverage applied?",
+      "answer_points": ["term_drift (and semantic_duplicate) at S-8.4 consistency_pass", "goal_coverage at S-9.3", "ambiguity in every step's review and at S-9.2"],
+      "gold_chunk_ids": ["review-section#lenses"]
+    },
+    {
+      "id": "q28",
+      "type": "generic_heading",
+      "language": "en",
+      "question": "What are the rules for high-level business rules — may that step fix the wording of a detail-tier rule?",
+      "answer_points": ["Only add/set on business_rules with tier=high", "Never touch a tier=detail row; that belongs to S-7.1", "Ids continue the business_rules sequence regardless of tier"],
+      "gold_chunk_ids": ["high-level-rules#rules"]
+    },
+    {
+      "id": "q29",
+      "type": "generic_heading",
+      "language": "en",
+      "question": "According to the screens-and-flow rules, which detail_status values can a screen get at S-4?",
+      "answer_points": ["Only pending or placeholder", "in_progress and signed_off are set by the S-5 loop", "Screen functions are wired to use cases at this step; S-4.4 wires only non-screen functions"],
+      "gold_chunk_ids": ["screens-and-flow#rules"]
+    },
+    {
+      "id": "q30",
+      "type": "generic_heading",
+      "language": "en",
+      "question": "What do the NFR rules say about priority and about metric and threshold?",
+      "answer_points": ["priority stays null; MoSCoW is assigned at S-9.4", "metric/threshold are omitted for descriptive rows, never set to an empty string", "One requirement per row"],
+      "gold_chunk_ids": ["nfr-quality-attributes#rules"]
+    },
+    {
+      "id": "q31",
+      "type": "generic_heading",
+      "language": "vi",
+      "question": "Theo các rule của bước chi tiết function, ở S-5 có được thêm function mới không?",
+      "answer_points": ["Không add functions[] mới ở S-5, chỉ set field của function có sẵn", "add chỉ dùng cho từng phần tử validations[]", "Không đụng order, screen_id, feature_id, priority, detail_status"],
+      "gold_chunk_ids": ["function-detail#rules"]
+    },
+    {
+      "id": "q32",
+      "type": "generic_heading",
+      "language": "en",
+      "question": "What do the non-screen-functions rules say about screen_id and about adding screens or roles?",
+      "answer_points": ["Never set screen_id to a screen there", "Do not add screens, roles or permissions; those belong to S-4.1/S-4.3", "feature_id and every referenced id must exist after the batch"],
+      "gold_chunk_ids": ["non-screen-functions#rules"]
+    },
+    {
+      "id": "q33",
+      "type": "out_of_corpus",
+      "language": "en",
+      "question": "What are the six knowledge areas of BABOK v3?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q34",
+      "type": "out_of_corpus",
+      "language": "en",
+      "question": "Which clause of ISO/IEC/IEEE 29148 defines the characteristics of individual requirements?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q35",
+      "type": "out_of_corpus",
+      "language": "en",
+      "question": "How should a team estimate story points with planning poker in Scrum?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q36",
+      "type": "out_of_corpus",
+      "language": "vi",
+      "question": "Làm sao để viết tài liệu test case theo chuẩn IEEE 829?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q37",
+      "type": "out_of_corpus",
+      "language": "en",
+      "question": "What is the difference between a RACI matrix and a stakeholder onion diagram?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q38",
+      "type": "out_of_corpus",
+      "language": "vi",
+      "question": "Mô hình Kano phân loại tính năng sản phẩm thành những nhóm nào?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q39",
+      "type": "out_of_corpus",
+      "language": "en",
+      "question": "How much does one credit cost on the FlintFlow Pro plan, and how many credits does it include per month?",
+      "out_of_corpus": true
+    },
+    {
+      "id": "q40",
+      "type": "out_of_corpus",
+      "language": "vi",
+      "question": "Theo IREB CPRE, các kỹ thuật khơi gợi yêu cầu được chia thành mấy nhóm?",
+      "out_of_corpus": true
+    }
+  ]
+}

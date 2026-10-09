@@ -117,6 +117,7 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
 | `EMBEDDING_PROVIDER` | không | `off` (mặc định) · `gemini` · `mock`. C-3 tìm vị trí CR theo nghĩa (§2 "Bật tìm vị trí CR theo nghĩa"). `gemini` dùng `GEMINI_API_KEY`; kèm `EMBEDDING_MODEL` (`gemini-embedding-001`), `EMBEDDING_DIMENSIONS` (768 — phải bằng số chiều của Atlas index), `EMBEDDING_API_BASE_URL`, `EMBEDDING_TIMEOUT_MS`, `CR_VECTOR_TOP_K` (20), `CR_VECTOR_MIN_SCORE` (0.82) |
+| `KNOWLEDGE_ENABLED` `KNOWLEDGE_*` | không | Knowledge RAG trong chat, mặc định tắt — xem §4 "Knowledge RAG" |
 | `AI_PAYLOAD_RETENTION_DAYS` | không | default 30. Số ngày giữ prompt/response của lượt gọi model (`aiactionpayloads`, TTL index). Prompt mang nguyên văn điều người dùng nhập ⇒ đây là **hạn giữ dữ liệu người dùng**, đổi thì phải đổi cả cam kết với người dùng. `0` = không lưu gì. Đổi giá trị chỉ có tác dụng với document mới: TTL index đã tạo thì phải `collMod` hoặc drop index để Mongo nhận hạn mới |
 | `AI_PAYLOAD_MAX_CHARS` | không | default 40000 ký tự mỗi bên. Quá trần thì cắt giữa, giữ đầu (luật của skill) và cuối (projection + câu trả lời của user); `promptChars`/`responseChars` vẫn là độ dài thật |
 | `FLINTFLOW_ASSETS_DIR` | không | ghi đè thư mục `assets/`; image production đã có `/app/assets` |
@@ -268,6 +269,48 @@ npm run migrate:spine-embeddings
   phải khớp `numDimensions` của Atlas index (script báo lệch, không tự sửa index).
 - Ngưỡng `CR_VECTOR_MIN_SCORE` (0.82 ≈ cosine 0.64, vì Atlas đổi cosine về `(1 + cos) / 2`) chọn theo một mẫu nhỏ đo bằng
   Gemini thật (`docs/measurements.md`, "C-3 hybrid retrieval") — vẫn phải hiệu chỉnh trên dữ liệu dev trước khi bật ở production.
+
+### Knowledge RAG
+
+Hỏi đáp có trích dẫn trong chat (FLF-267, thiết kế ở `docs/knowledge-rag.md`). Mặc định **tắt**: client gửi
+`knowledge: true` khi tắt nhận `409 KNOWLEDGE_DISABLED`.
+
+| Biến | Mặc định | Ghi chú |
+| --- | --- | --- |
+| `KNOWLEDGE_ENABLED` | `false` | bật cờ `knowledge` của `POST /chats/:chatId/messages(/stream)` |
+| `KNOWLEDGE_TOP_K` | `5` | số chunk đưa vào prompt trả lời |
+| `KNOWLEDGE_MIN_SCORE` | `0.66` | **cosine** của chunk gần nhất; dưới ngưỡng ⇒ "không đủ căn cứ", không gọi model. Chọn theo F1 tốt nhất ở `eval:knowledge --retrieval-only` (bảng "Ngưỡng từ chối", đo 2026-10-09) — đổi corpus thì đo lại |
+| `KNOWLEDGE_LEXICAL_WEIGHT` | `0` | trọng số danh sách từ khoá trong RRF. 0 = xếp theo vector, từ khoá chỉ thêm ứng viên ở cuối (và là đường dự phòng khi không có vector). Eval 2026-10-09: mọi trọng số > 0 đều làm R@5 giảm (100% → 87,5% ở trọng số 1) |
+| `KNOWLEDGE_CORPUS_DIR` | `assets/skills` | thư mục mặc định của `ingest:knowledge` |
+| `KNOWLEDGE_VECTOR_BACKEND` | `atlas` | `atlas` = `$vectorSearch` (Mongo không hỗ trợ ⇒ tự lùi về `memory`); `memory` = cosine vét cạn trong process |
+
+Cần embedding (`EMBEDDING_PROVIDER=gemini` + `GEMINI_API_KEY`, cùng biến với C-3). Embedding tắt ⇒ chỉ tìm theo từ
+khoá (`$text`). Bật lần đầu trên một DB:
+
+```bash
+npm run migrate:knowledge-index -- --dry-run      # xem sẽ tạo gì
+npm run migrate:knowledge-index                   # collection knowledge_chunks + text index + vector index knowledge_chunks_vector (Atlas)
+npm run ingest:knowledge -- --dir assets/skills --corpus skills --dry-run   # thống kê chunk, không embed, không nối DB
+npm run ingest:knowledge -- --dir assets/skills --corpus skills             # embed chunk mới/đổi, xoá chunk đã mất
+```
+
+Script migrate idempotent, **không bao giờ sửa / xoá index đang có** — lệch định nghĩa (đổi `EMBEDDING_DIMENSIONS`,
+trọng số text index) chỉ được báo, sửa tay trên Atlas. Atlas dựng vector index vài phút; trong lúc đó truy hồi chỉ có từ
+khoá. Sửa skill thì chạy lại `ingest:knowledge` sau deploy (chỉ chunk đổi `text_hash` mới được embed lại; đổi model hoặc
+số chiều ⇒ embed lại toàn bộ). Embedding không trừ credit; một câu trả lời `knowledge_answer` trừ 2 credit, câu bị từ
+chối không trừ.
+
+Đo chất lượng bằng provider thật (không nối Mongo, gọi thẳng provider, không trừ credit; script in ước lượng số lượt gọi
+trước khi chạy):
+
+```bash
+EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=… npm run eval:knowledge -- --retrieval-only --label baseline --cache --seed-cache-from-db
+EMBEDDING_PROVIDER=gemini GEMINI_API_KEY=… MODAL_BASE_URL=… npm run eval:knowledge -- --answers --mode both --label baseline --min-score <ngưỡng chọn> --cache
+```
+
+Gemini free tier: 1 000 text embed / ngày (mỗi text trong lô tính một lượt) và trần token / phút. `--cache` lưu vector ra
+`test/e2e-ai/results/.knowledge-embedding-cache.jsonl` (ghi theo nhóm 50 — quota hết giữa chừng vẫn giữ phần đã embed),
+`--seed-cache-from-db` nạp vector đã ingest ở `knowledge_chunks` (cần `MONGO_URI`) ⇒ bộ chunk chính không embed lại.
 
 ## 5. Production trên Azure
 

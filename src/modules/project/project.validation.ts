@@ -34,6 +34,21 @@ export const MoveProjectSchema = z.object({
   folderId: z.string().min(1).nullable()
 })
 
+/**
+ * FLF-267: body của `POST /chats/:chatId/messages(/stream)` chỉ kiểm thêm cờ `knowledge` (boolean thật — `"true"` bị từ
+ * chối); `content` / `step` giữ cách kiểm cũ của controller để mã lỗi `CONTENT_REQUIRED` / `STEP_REQUIRED` không đổi.
+ */
+export const ChatKnowledgeFlagSchema = z.object({
+  knowledge: z.boolean({ error: "Cờ hỏi tri thức (knowledge) phải là true hoặc false." }).optional()
+})
+
+/** Thiếu ⇒ `false`; sai kiểu ⇒ 400 `VALIDATION_ERROR`. */
+export const parseKnowledgeFlag = (body: unknown): boolean => {
+  const result = ChatKnowledgeFlagSchema.safeParse(body ?? {})
+  if (!result.success) throw validationError(result.error)
+  return result.data.knowledge ?? false
+}
+
 export type MoveProjectDTO = z.infer<typeof MoveProjectSchema>
 export type CreateProjectDTO = z.infer<typeof CreateProjectSchema>
 export type RenameProjectDTO = z.infer<typeof RenameProjectSchema>

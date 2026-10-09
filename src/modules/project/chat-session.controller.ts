@@ -7,6 +7,9 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { isChangeInstruction } from "../spine/change.service.js"
 import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
+import { env } from "../../config/env.js"
+import { KNOWLEDGE_DISABLED } from "../knowledge/answer.service.js"
+import { parseKnowledgeFlag } from "./project.validation.js"
 
 /**
  * F5 (review T13, IDOR): xác nhận user đã đăng nhập SỞ HỮU `projectId` trên đường dẫn trước khi chạm tới
@@ -55,6 +58,18 @@ export const getChatSession = catchAsync(async (req: Request, res: Response) => 
   return sendSuccess(res, 200, session)
 })
 
+/**
+ * FLF-267: cờ `knowledge` của tin nhắn. Bật mà máy chủ tắt Knowledge RAG ⇒ 409 `KNOWLEDGE_DISABLED` TRƯỚC khi ghi gì
+ * vào phiên — lùi về CHAT thường sẽ trừ credit và trả lời không căn cứ trong khi user tưởng là câu trả lời có trích dẫn.
+ */
+const knowledgeFlagOf = (body: unknown): boolean => {
+  const knowledge = parseKnowledgeFlag(body)
+  if (knowledge && !env.KNOWLEDGE_ENABLED) {
+    throw new ApiError(409, "Tính năng hỏi đáp tri thức chưa được bật trên máy chủ này.", KNOWLEDGE_DISABLED)
+  }
+  return knowledge
+}
+
 /** Lệnh sửa trong chat là "yêu cầu miệng có tên" (BPMN 3.1) — không có nguồn `chat` riêng. */
 const chatChangeRequiresCr = (chatId: string, content: string) =>
   changeRequiresCr(prefillFrom(content, "Sửa tài liệu", { kind: "verbal", ref: `chat:${chatId}` }))
@@ -72,9 +87,11 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
   if (!step) {
     throw new ApiError(400, "Thiếu thông tin bước đang làm.", "STEP_REQUIRED")
   }
+  const knowledge = knowledgeFlagOf(req.body)
 
-  // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng)
-  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw chatChangeRequiresCr(chatId, content)
+  // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng).
+  // Câu hỏi tri thức (FLF-267) không sửa tài liệu ⇒ không qua chốt này.
+  if (!knowledge && isChangeInstruction(content) && (await changesRequireCr(projectId))) throw chatChangeRequiresCr(chatId, content)
 
   const updatedSession = await chatSessionService.sendMessageAndGetResponse(
     projectId,
@@ -82,7 +99,8 @@ export const sendMessage = catchAsync(async (req: Request, res: Response) => {
     content,
     step,
     userId,
-    discoveryStep ? Number(discoveryStep) : undefined
+    discoveryStep ? Number(discoveryStep) : undefined,
+    { knowledge }
   )
   return sendSuccess(res, 200, updatedSession)
 })
@@ -100,9 +118,11 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
   if (!step) {
     throw new ApiError(400, "Thiếu thông tin bước đang làm.", "STEP_REQUIRED")
   }
+  const knowledge = knowledgeFlagOf(req.body)
 
-  // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng)
-  if (isChangeInstruction(content) && (await changesRequireCr(projectId))) throw chatChangeRequiresCr(chatId, content)
+  // Mode 1 đã import (v3, BPMN 3.1): lệnh sửa trong chat ⇒ 409 CHANGE_REQUIRES_CR kèm form điền sẵn (yêu cầu miệng).
+  // Câu hỏi tri thức (FLF-267) không sửa tài liệu ⇒ không qua chốt này.
+  if (!knowledge && isChangeInstruction(content) && (await changesRequireCr(projectId))) throw chatChangeRequiresCr(chatId, content)
 
   // Set SSE streaming headers
   res.setHeader("Content-Type", "text/event-stream; charset=utf-8")
@@ -118,7 +138,8 @@ export const sendMessageStream = catchAsync(async (req: Request, res: Response) 
     step,
     userId,
     res,
-    discoveryStep ? Number(discoveryStep) : undefined
+    discoveryStep ? Number(discoveryStep) : undefined,
+    { knowledge }
   )
 })
 

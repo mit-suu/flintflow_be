@@ -576,3 +576,13 @@ Nhận xét:
 - Khoảng cách giữa liên quan và không liên quan chỉ ~0,03–0,06 điểm ⇒ ngưỡng tuyệt đối rất nhạy: 0,80 còn giữ "View
   transcript"; **0,82** tách sạch cả ba câu (đặt làm mặc định `CR_VECTOR_MIN_SCORE`). Mẫu 6 × 3 là quá nhỏ — hiệu chỉnh lại
   trên SRS thật sau khi backfill; cân nhắc ngưỡng tương đối (≥ điểm cao nhất − δ) kèm sàn tuyệt đối.
+
+## Knowledge RAG (FLF-267) — provider thật (2026-10-09)
+
+Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
+- Truy hồi (corpus skill, 239 chunk, 32 câu trong corpus): chunk theo section + header ngữ cảnh, vector ⇒ R@3 96,9%,
+  R@5 100%, MRR 0,841. Hybrid RRF chuẩn kém hơn (R@5 87,5%) ⇒ trọng số từ khoá mặc định 0.
+- Từ chối: ngưỡng cosine 0,66 ⇒ F1 0,941, từ chối 100% câu ngoài corpus, trả lời 96,9% câu trong corpus.
+- Trả lời (GLM-5.3-Flash, judge cùng model): đúng 85,5% vs 16,4% no-RAG; trung thực 100%; ảo giác ngoài corpus 0% vs
+  ≥ 50% no-RAG; nhãn trích dẫn hợp lệ 100%.
+- Chi phí một lượt đo đủ: ~950 text embed Gemini (free tier 1 000/ngày/project — dùng `--cache`) + 160 lượt LLM.
