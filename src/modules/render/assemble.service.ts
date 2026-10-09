@@ -21,11 +21,16 @@
  * Mode 1 v2 (FLF-184): project có layout file upload (`TemplateProfile.layout`) ⇒ thứ tự + tiêu đề + số hiệu theo file
  * đó (`layout-sections.ts`) thay cho mẫu FPT; nội dung section vẫn từ Spine.
  *
+ * FLF-265: ngôn ngữ tài liệu ≠ ngôn ngữ gốc của Spine (mode 2 `vi`) ⇒ `getDocumentWithMeta` dựng mỗi lần từ bản xem đã
+ * dịch (`localized-spine.ts` + lớp bản dịch theo hash chữ gốc), KHÔNG qua cache. Cache chỉ giữ bản ngôn ngữ gốc, khoá
+ * không đổi.
+ *
  * KHÔNG ghi Spine ở đây — chỉ đọc (`spine.repository`, `Baseline`, `Change`, `User`, `TemplateProfile`) và ghi cache riêng
  * (`RenderedDocumentCache`, không phải collection `spines`).
  */
 
 import mongoose from "mongoose"
+import type { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import { listSections } from "../spine/section-registry.js"
 import { computeSectionStates, readiness, type SectionStateView } from "../spine/section-status.js"
@@ -51,6 +56,11 @@ import {
 import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
 import { GROUP_HEADINGS, assembleTextFor, isVietnamese, type DocumentLanguage } from "./labels.js"
+import { localizeSpine, renderView, type LocalizedSpine } from "./localized-spine.js"
+import { translationUnits, type TranslationUnit } from "../translation/translation-units.js"
+import { resolveTranslations, type ProjectLanguages, type ResolvedTranslations } from "../translation/translation.service.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
+import type { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
@@ -280,7 +290,9 @@ const warnMissingImages = (images: ImageLoadResult, target: string): void => {
 
 /**
  * Sau khi đọc cache: tải lại PNG (theo lô) cho mọi tham chiếu rồi phân giải — PNG có sau lúc cache vẫn hiện ảnh thật.
- * `language` (FLF-265): ngôn ngữ chú thích placeholder — phải trùng ngôn ngữ đã dựng `doc`; chưa ai truyền ⇒ tiếng Anh.
+ * `language` (FLF-265): ngôn ngữ chú thích placeholder — phải trùng ngôn ngữ đã dựng `doc`. Cache chỉ giữ bản ngôn ngữ
+ * gốc (§3.5) nên đường đọc cache không truyền (chú thích như trước); bản theo ngôn ngữ khác không qua cache, chú thích
+ * theo ngôn ngữ ở `materializeImages`.
  */
 const rehydrateImages = async (doc: RenderedDocument, projectId: string, load: DiagramPngLoader, language?: string): Promise<RenderedDocument> => {
   const refs = new Set<string>()
@@ -423,16 +435,19 @@ const buildFlagsAppendix = (
   source: RenderSource,
   states: SectionStateView[],
   titles?: Map<string, string>,
-  language?: string
+  language?: string,
+  /** FLF-265: bản xem đã dịch — tên mục feature / function của dòng cờ in theo bản này; cờ, số hiệu, độ cũ vẫn theo `spine`. */
+  localized?: LocalizedSpine
 ): FlagsAppendix => {
-  const waived = spine.flags.filter((f) => f.waived_by_user).map((f) => buildFlagRow(spine, f, numbers, titles, language))
+  const headings = localized ? renderView(localized) : spine
+  const waived = spine.flags.filter((f) => f.waived_by_user).map((f) => buildFlagRow(headings, f, numbers, titles, language))
   if (source === "baseline") {
     // srs-spine.md §6: bản baseline chỉ cần in danh sách waive — không có cờ đỏ mở (điều kiện ký baseline).
     return { redOpen: [], staleCount: 0, waived }
   }
   const redOpen = spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && !f.waived_by_user)
   // T15 review T4: dùng lại `states` đã tính một lần ở buildDocument thay vì computeSectionStates lần nữa.
-  return { redOpen: redOpen.map((f) => buildFlagRow(spine, f, numbers, titles, language)), staleCount: readiness(spine, changes, states).stale, waived }
+  return { redOpen: redOpen.map((f) => buildFlagRow(headings, f, numbers, titles, language)), staleCount: readiness(spine, changes, states).stale, waived }
 }
 
 // ─── dựng sections[] ────────────────────────────────────────────
@@ -443,9 +458,14 @@ interface BuildSectionsOptions {
   unassignedNumber: string
   hasUnassigned: boolean
   /**
-   * FLF-265 — ngôn ngữ nhãn của mẫu FPT (nội bộ, chưa nối với project hay request). Không đặt ⇒ tiếng Anh, y như trước.
+   * FLF-265 — ngôn ngữ nhãn của mẫu FPT (nội bộ, không phải tham số request). Không đặt ⇒ tiếng Anh, y như trước.
    */
   language?: DocumentLanguage
+  /**
+   * FLF-265 D11 — bản xem đã dịch: nội dung section dựng từ bản này; danh sách mục, số hiệu, trạng thái và logic dựa chữ
+   * Anh vẫn theo `spine` gốc (truyền vào ctx `canonical`). Không đặt ⇒ dựng thẳng từ `spine` như trước.
+   */
+  localized?: LocalizedSpine
 }
 
 const buildSections = (spine: Spine, numbers: Map<string, string>, states: SectionStateView[], opts: BuildSectionsOptions): RenderedSection[] => {
@@ -453,6 +473,7 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
   const numberOfCtx = (id: string): string | undefined => numbers.get(id)
   // Mọi sơ đồ render_status=ok đều vào section dưới dạng tham chiếu; PNG thật/placeholder gắn lúc trả về
   const diagramPng = (id: string): string | undefined => imageRef(id)
+  const content = opts.localized ? renderView(opts.localized) : spine
 
   const out: RenderedSection[] = []
   const seenGroups = new Set<string>()
@@ -485,10 +506,11 @@ const buildSections = (spine: Spine, numbers: Map<string, string>, states: Secti
       // Tài liệu theo mẫu FPT: §3.x.y dùng khung mục FPT (mode 1 đi `layout-sections.ts`, giữ khung cũ)
       functionLayout: "fpt",
       ...(opts.language !== undefined ? { language: opts.language } : {}),
+      ...(opts.localized ? { canonical: spine } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
     }
-    const section = renderSection(spine, def.id, ctx)
+    const section = renderSection(content, def.id, ctx)
     if (opts.partial && section.blocks.length === 0) continue
     out.push(section)
   }
@@ -512,9 +534,24 @@ export interface AssembleDeps {
   onConsistencyFindings?: (findings: ConsistencyFinding[]) => void
   /** Mode 1 v2 (FLF-184): layout của file upload — `null` ⇒ thứ tự + số hiệu mẫu FPT (mode 2). */
   loadTemplate?: TemplateLoader
+  /**
+   * FLF-265 — tra lớp bản dịch cho bản xem đã dịch; mặc định `translation.service#resolveTranslations` (một truy vấn `$in`
+   * theo hash chữ gốc, không gọi model). Chỉ gọi khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc; test tiêm bản giả, khỏi cần Mongo.
+   */
+  resolveTranslations?: TranslationResolver
 }
 
 export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | null>
+
+/** FLF-265 — key đơn vị dịch ⇒ chữ dịch (chỉ đơn vị đã dịch) + số đơn vị còn thiếu, cùng luật `resolveTranslations`. */
+export type TranslationResolver = (
+  projectId: string,
+  locale: UserLocale,
+  units: TranslationUnit[]
+) => Promise<Pick<ResolvedTranslations, "map" | "missing">>
+
+/** `meta.translation` của GET /document — đúng khuôn `pipeline.dto#documentTranslationMetaSchema` (đóng băng). */
+export type DocumentTranslationMeta = z.infer<typeof documentTranslationMetaSchema>
 
 /** Layout người dùng của project mode 1 (sau finalize import). Project mode 2 / import cũ chưa có layout ⇒ `null`. */
 export const loadTemplateLayout: TemplateLoader = async (projectId) => {
@@ -542,7 +579,12 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
   }
 }
 
-const defaultDeps = (): AssembleDeps => ({ loadDiagramPng: defaultDiagramPngLoader, now: () => new Date(), loadTemplate: loadTemplateLayout })
+const defaultDeps = (): AssembleDeps => ({
+  loadDiagramPng: defaultDiagramPngLoader,
+  now: () => new Date(),
+  loadTemplate: loadTemplateLayout,
+  resolveTranslations
+})
 
 interface BuildDocumentInput {
   projectId: string
@@ -558,16 +600,43 @@ interface BuildDocumentInput {
   /** Layout của file người dùng (mode 1 v2) — không có ⇒ mẫu FPT. */
   template?: TemplateLayout | null
   /**
-   * FLF-265 — ngôn ngữ nhãn cố định của tài liệu mẫu FPT (mode 2). Tham số nội bộ: chưa caller nào truyền, không phải
-   * query param. Không đặt ⇒ tiếng Anh như trước. Có `template` (mode 1) ⇒ bỏ qua — nhãn mode 1 theo file người dùng.
+   * FLF-265 — ngôn ngữ nhãn cố định của tài liệu mẫu FPT (mode 2). Tham số nội bộ (đường bản dịch của
+   * `getDocumentWithMeta` đặt), không phải query param. Không đặt ⇒ tiếng Anh như trước. Có `template` (mode 1) ⇒ bỏ
+   * qua — nhãn mode 1 theo file người dùng.
    */
   language?: DocumentLanguage
+  /**
+   * FLF-265 D11 — ngôn ngữ chữ trong Spine (mode 2 `en`). Khác `language` (mẫu FPT) ⇒ nội dung lấy qua bản xem đã dịch
+   * (`deps.resolveTranslations`); đơn vị chưa dịch giữ chữ gốc. Không đặt ⇒ không dịch.
+   */
+  sourceLanguage?: DocumentLanguage
 }
 
 interface BuiltDocument {
   /** Tài liệu với ảnh ở dạng tham chiếu — đúng dạng ghi cache. */
   refDoc: RenderedDocument
   images: ImageLoadResult
+  /** FLF-265: chỉ có khi nội dung dựng từ bản xem đã dịch. */
+  translation?: DocumentTranslationMeta
+}
+
+/**
+ * FLF-265 D11 — bản xem đã dịch của `spine` + số đơn vị còn in chữ gốc. Một truy vấn lớp bản dịch theo hash
+ * (`deps.resolveTranslations`), không gọi model: GET /document Viewer gọi được, không tiêu credit (D9).
+ */
+const translateSpine = async (
+  projectId: string,
+  spine: Spine,
+  locale: DocumentLanguage,
+  sourceLocale: DocumentLanguage,
+  deps: AssembleDeps
+): Promise<{ localized: LocalizedSpine; translation: DocumentTranslationMeta }> => {
+  const units = translationUnits(spine)
+  const resolved = await (deps.resolveTranslations ?? resolveTranslations)(projectId, locale, units)
+  return {
+    localized: localizeSpine(spine, units, resolved.map),
+    translation: { locale, source_locale: sourceLocale, missing: resolved.missing }
+  }
 }
 
 /** Dựng tài liệu dạng tham chiếu + kết quả tải ảnh — hàm thuần theo nghĩa I/O (chỉ tải ảnh), dùng chung cho draft/baseline. */
@@ -579,28 +648,46 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
   const states = computeSectionStates(spine, input.statusChanges)
   // Chỉ mẫu FPT nhận ngôn ngữ — đường layout mode 1 giữ nguyên byte
   const language = input.template ? undefined : input.language
+  // FLF-265 D11: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ⇒ nội dung từ bản xem đã dịch; số hiệu, thứ tự, trạng thái, ảnh, cờ vẫn
+  // tính trên `spine` gốc
+  const translated =
+    language !== undefined && input.sourceLanguage !== undefined && language !== input.sourceLanguage
+      ? await translateSpine(projectId, spine, language, input.sourceLanguage, deps)
+      : undefined
   let sections: RenderedSection[]
   let numbers: Map<string, string>
   let titles: Map<string, string> | undefined
+  // Section chữ gốc cho S-8.4 — `null` ⇒ bỏ qua pass (xem dưới)
+  let checked: RenderedSection[] | null
   if (input.template) {
     // Mode 1 v2: thứ tự + tiêu đề + số hiệu theo file người dùng (layout-sections.ts)
     ;({ sections, numbers, titles } = buildLayoutSections(spine, input.template, states, {
       partial: input.partial ?? false,
       diagramPng: imageRef
     }))
+    checked = sections
   } else {
     const map = buildNumberMap(spine)
     numbers = map.numbers
-    sections = buildSections(spine, numbers, states, {
+    const options: BuildSectionsOptions = {
       partial: input.partial ?? false,
       unassignedNumber: map.unassignedNumber,
       hasUnassigned: map.hasUnassigned,
       ...(language !== undefined ? { language } : {})
-    })
+    }
+    sections = buildSections(spine, numbers, states, translated ? { ...options, localized: translated.localized } : options)
+    // S-8.4 không bao giờ chạy trên chữ dịch: luật `undefined_term` dò chữ IN HOA tiếng Anh. Bản xem đã dịch chỉ đi
+    // GET /document + export — không ai đọc findings ở đó (POST /assemble dựng bản gốc, trả qua `meta.consistency`) ⇒
+    // chỉ dựng thêm các section chữ gốc cho pass khi caller đăng ký `onConsistencyFindings`; không ai nghe ⇒ bỏ qua.
+    if (!translated) checked = sections
+    else if (deps.onConsistencyFindings) checked = buildSections(spine, numbers, states, { ...options, language: input.sourceLanguage })
+    else checked = null
   }
 
-  const findings = await runConsistencyPass(spine, sections)
-  deps.onConsistencyFindings?.(findings)
+  if (checked) {
+    const findings = await runConsistencyPass(spine, checked)
+    deps.onConsistencyFindings?.(findings)
+  }
 
   const refDoc: RenderedDocument = {
     projectId,
@@ -612,12 +699,12 @@ async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps)
     sections,
     // T15 (mode 1 v3): lịch sử sửa đổi của khách (file gốc) đứng trước, lịch sử FlintFlow nối tiếp
     recordOfChanges: [...(input.template?.legacyRecord ?? []), ...buildRecordOfChanges(input.recordChanges, inChargeFor(deps.resolveInCharge, language), language)],
-    flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language)
+    flagsAppendix: buildFlagsAppendix(spine, input.statusChanges, numbers, source, states, titles, language, translated?.localized)
   }
   if (source === "draft") refDoc.watermark = "DRAFT"
   // Không có layout file người dùng ⇒ mẫu FPT (FLF-214: style heading con của §3.x.y)
   if (!input.template) refDoc.format = "fpt"
-  return { refDoc, images }
+  return { refDoc, images, ...(translated ? { translation: translated.translation } : {}) }
 }
 
 /** Dựng `RenderedDocument` sẵn ảnh (PNG thật hoặc placeholder) — cho writer/test gọi trực tiếp, không qua cache. */
@@ -718,8 +805,9 @@ export async function assemble(
   )
 
   warnMissingImages(images, `project ${projectId}`)
-  // FLF-265: bản dựng chưa truyền `language` (luôn tiếng Anh). Phase 3 nối `documentLanguage` vào `buildDocumentParts`
-  // thì phải thêm ngôn ngữ vào khoá cache (bản vi và en không dùng chung dòng) và truyền nó cho `rehydrateImages`.
+  // FLF-265 §3.5: cache chỉ giữ bản ngôn ngữ gốc — `assemble` (POST /assemble, và GET /document khi ngôn ngữ tài liệu
+  // = gốc) không nhận ngôn ngữ nên khoá `(projectId, spine_version)` giữ nguyên. Ngôn ngữ tài liệu ≠ gốc đi
+  // `getDocumentWithMeta` ⇒ dựng mỗi lần, không đọc / ghi cache (bản dịch mới không tăng `spine_version`).
   await upsertCache(
     { projectId, spine_version: record.spine_version },
     {
@@ -744,6 +832,12 @@ export async function assemble(
 export interface DocumentQuery {
   source: RenderSource
   baseline_id?: string
+  /**
+   * FLF-265 — ngôn ngữ tài liệu + ngôn ngữ gốc của dự án (`translation.service#projectLanguages`). Controller đặt từ
+   * project, KHÔNG lấy từ query string (`documentQuerySchema` đóng băng, `?lang=` bị bỏ qua). Không truyền hoặc
+   * `locale == source` ⇒ đúng đường cache như trước.
+   */
+  languages?: ProjectLanguages
 }
 
 /**
@@ -831,16 +925,29 @@ const resolveBaselineObjectId = async (projectId: string, baselineId: string | u
   return ref
 }
 
+/** Baseline theo `baseline_id` (`_id` hoặc `BLnnn`); không truyền ⇒ bản mới nhất; không có ⇒ 404. */
+const findBaseline = async (projectId: string, baselineId: string | undefined) => {
+  const objectId = await resolveBaselineObjectId(projectId, baselineId)
+  const filter = objectId ? { projectId, _id: objectId } : { projectId }
+  const baseline = await Baseline.findOne(filter, null, { lean: true, sort: { at: -1 } })
+  if (!baseline) throw baselineNotFound()
+  return baseline
+}
+
+/** T15 review T2: snapshot hỏng (dữ liệu cũ, migrate lỗi…) không được làm 500 lộ chi tiết ra ngoài. */
+const baselineSpine = (snapshot: unknown): Spine => {
+  const parsedSpine = spineSchema.safeParse(snapshot)
+  if (!parsedSpine.success) throw new ApiError(422, "Dữ liệu của bản baseline này bị lỗi nên chưa xuất được.", "BASELINE_SNAPSHOT_INVALID")
+  return parsedSpine.data
+}
+
 const getBaselineDocument = async (
   projectId: string,
   projectName: string,
   baselineId: string | undefined,
   deps: AssembleDeps
 ): Promise<RenderedDocument> => {
-  const objectId = await resolveBaselineObjectId(projectId, baselineId)
-  const filter = objectId ? { projectId, _id: objectId } : { projectId }
-  const baseline = await Baseline.findOne(filter, null, { lean: true, sort: { at: -1 } })
-  if (!baseline) throw baselineNotFound()
+  const baseline = await findBaseline(projectId, baselineId)
   const baselineIdStr = String(baseline._id)
 
   // T15 review T5: baseline bất biến — cache theo baseline._id, không dựng lại mỗi lần xem.
@@ -851,10 +958,7 @@ const getBaselineDocument = async (
   // Cache hỏng: snapshot của baseline là bất biến nên dựng lại từ nó luôn đúng — không trả lỗi cho người dùng
   if (cached) console.warn(`[render] cache baseline ${baselineIdStr} của project ${projectId} không hợp khuôn — dựng lại`)
 
-  // T15 review T2: snapshot hỏng (dữ liệu cũ, migrate lỗi…) không được làm 500 lộ chi tiết ra ngoài.
-  const parsedSpine = spineSchema.safeParse(baseline.snapshot)
-  if (!parsedSpine.success) throw new ApiError(422, "Dữ liệu của bản baseline này bị lỗi nên chưa xuất được.", "BASELINE_SNAPSHOT_INVALID")
-  const spine = parsedSpine.data
+  const spine = baselineSpine(baseline.snapshot)
 
   // §I hiển thị lịch sử đầy đủ hiện có (chưa có mốc "seq tại lúc ký" trong Baseline — T19 chưa chốt);
   // status/stale của section thì tính với changes rỗng vì không có gì để so — tránh stale giả cho bản đã ký.
@@ -878,11 +982,133 @@ const getBaselineDocument = async (
   // Cache dạng tham chiếu kể cả khi thiếu PNG: baseline đã ký không bị "placeholder vĩnh viễn" vì mỗi lần đọc
   // đều thử tải lại ảnh (rehydrateImages) — PNG có sau ⇒ ảnh thật mà không cần dựng lại.
   warnMissingImages(images, `baseline ${baselineIdStr}`)
-  // FLF-265: như bản draft — khi nối `language` thì thêm vào `cacheFilter` và truyền cho `rehydrateImages` /
-  // `materializeImages` bên dưới, kẻo chú thích placeholder lệch ngôn ngữ với phần còn lại.
+  // FLF-265 §3.5: như bản draft — cache baseline chỉ giữ bản ngôn ngữ gốc, khoá `(projectId, baseline_id)` giữ nguyên
+  // (chú thích placeholder theo mặc định, trùng lúc `rehydrateImages` đọc lại). Bản theo ngôn ngữ khác dựng mỗi lần từ
+  // snapshot + lớp bản dịch theo hash (Q4) ở `getTranslatedBaselineDocument`, không qua cache.
   await upsertCache(cacheFilter, { generated_at: new Date(refDoc.generatedAt), doc: refDoc, missing_diagram_ids: images.missing })
 
   return materializeImages(refDoc, resolveLoaded(images))
+}
+
+// ─── FLF-265 §3.5: ngôn ngữ tài liệu ≠ ngôn ngữ gốc — dựng mỗi lần, không qua cache ──
+//
+// Bản dịch mới (lượt AI trả kèm — D16, dịch theo lô) không tăng `spine_version`, nên cache khoá theo version / baseline sẽ
+// trả chữ cũ ⇒ đường này KHÔNG đọc / ghi `RenderedDocumentCache` (khoá, index giữ nguyên). Giá mỗi lượt đọc: một lần dựng
+// (~20 ms cho SRS 19 màn) + một truy vấn lớp bản dịch; cache bản dịch để sau nếu đo thấy chậm (`no-ky-thuat.md` N4).
+
+/** Tài liệu sẵn ảnh, chú thích placeholder theo `language` (mode 1 có layout ⇒ mặc định, như `buildDocument`). */
+const withImages = (built: BuiltDocument, language: DocumentLanguage | undefined): DocumentWithMeta => ({
+  doc: materializeImages(built.refDoc, resolveLoaded(built.images), language),
+  ...(built.translation ? { translation: built.translation } : {})
+})
+
+/** Bản nháp ở `spine_version` hiện tại, dựng thẳng từ Spine + lớp bản dịch — không qua cache, không qua `assembleShared`. */
+const getTranslatedDraftDocument = async (
+  projectId: string,
+  projectName: string,
+  languages: ProjectLanguages,
+  deps: AssembleDeps
+): Promise<DocumentWithMeta> => {
+  const record = await spineRepository.get(projectId)
+  if (!record) throw new NoWorkingDraftError()
+
+  const { projectId: _projectId, ...spine } = record
+  const changes = await spineRepository.listChanges(projectId)
+  const recordChanges = await listChangesForRecord(projectId)
+  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
+
+  const built = await buildDocumentParts(
+    {
+      projectId,
+      projectName,
+      spine,
+      statusChanges: changes,
+      recordChanges,
+      source: "draft",
+      version: `v0.${record.spine_version}`,
+      template,
+      language: languages.locale,
+      sourceLanguage: languages.source
+    },
+    { ...deps, resolveInCharge }
+  )
+  warnMissingImages(built.images, `project ${projectId}`)
+  // Độ mới của chính bản vừa dựng — `getDraftMeta` đọc cache, mà đường này không ghi cache
+  const version = record.spine_version
+  return {
+    ...withImages(built, template ? undefined : languages.locale),
+    draftMeta: { assembled_at_version: version, spine_version: version, stale: false }
+  }
+}
+
+/** Baseline đã ký dựng lại từ `Baseline.snapshot` + lớp bản dịch theo hash chữ gốc (Q4) — không qua cache. */
+const getTranslatedBaselineDocument = async (
+  projectId: string,
+  projectName: string,
+  baselineId: string | undefined,
+  languages: ProjectLanguages,
+  deps: AssembleDeps
+): Promise<DocumentWithMeta> => {
+  const baseline = await findBaseline(projectId, baselineId)
+  const spine = baselineSpine(baseline.snapshot)
+  // §I + status rỗng như bản baseline gốc (`getBaselineDocument`)
+  const recordChanges = await listChangesForRecord(projectId)
+  const resolveInCharge = await buildInChargeResolver(recordChanges)
+  const template = await (deps.loadTemplate ?? loadTemplateLayout)(projectId)
+
+  const built = await buildDocumentParts(
+    {
+      projectId,
+      projectName,
+      spine,
+      statusChanges: [],
+      recordChanges,
+      source: "baseline",
+      version: String(baseline.version),
+      template,
+      language: languages.locale,
+      sourceLanguage: languages.source
+    },
+    { ...deps, resolveInCharge }
+  )
+  warnMissingImages(built.images, `baseline ${String(baseline._id)}`)
+  return withImages(built, template ? undefined : languages.locale)
+}
+
+/** Kết quả của `getDocumentWithMeta` — tài liệu + phần caller đính vào `meta` / header. */
+export interface DocumentWithMeta {
+  doc: RenderedDocument
+  /** Chỉ khi nội dung dựng từ bản xem đã dịch: `meta.translation` (`missing` = đơn vị đang in chữ gốc). */
+  translation?: DocumentTranslationMeta
+  /**
+   * Chỉ cho bản draft dựng từ bản xem đã dịch: độ mới của chính bản vừa dựng (`stale: false`) — `getDraftMeta` đọc cache
+   * mà đường này không ghi. Không có ⇒ caller gọi `getDraftMeta` như trước.
+   */
+  draftMeta?: DraftMeta
+}
+
+/**
+ * GET /document, GET /export/word. `query.languages` (FLF-265) với `locale ≠ source` ⇒ dựng mỗi lần từ bản xem đã dịch
+ * (draft: Spine hiện tại; baseline: snapshot + lớp bản dịch theo hash — Q4), không đọc / ghi `RenderedDocumentCache`,
+ * kèm `translation` (+ `draftMeta` cho draft). Không truyền hoặc `locale == source` ⇒ đúng đường cache như trước, chỉ có
+ * `doc`. Không nhánh nào gọi model (D9).
+ */
+export async function getDocumentWithMeta(
+  projectId: string,
+  projectName: string,
+  query: DocumentQuery,
+  deps: Partial<AssembleDeps> = {}
+): Promise<DocumentWithMeta> {
+  const merged: AssembleDeps = { ...defaultDeps(), ...deps }
+  const { languages } = query
+  if (languages && languages.locale !== languages.source) {
+    return query.source === "baseline"
+      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged)
+      : getTranslatedDraftDocument(projectId, projectName, languages, merged)
+  }
+  if (query.source === "baseline") return { doc: await getBaselineDocument(projectId, projectName, query.baseline_id, merged) }
+  return { doc: await getDraftDocument(projectId, projectName, merged) }
 }
 
 export async function getDocument(
@@ -891,9 +1117,7 @@ export async function getDocument(
   query: DocumentQuery,
   deps: Partial<AssembleDeps> = {}
 ): Promise<RenderedDocument> {
-  const merged: AssembleDeps = { ...defaultDeps(), ...deps }
-  if (query.source === "baseline") return getBaselineDocument(projectId, projectName, query.baseline_id, merged)
-  return getDraftDocument(projectId, projectName, merged)
+  return (await getDocumentWithMeta(projectId, projectName, query, deps)).doc
 }
 
 // ─── mode 1 v2: file version tài liệu dựng từ snapshot Spine (FLF-184) ──
