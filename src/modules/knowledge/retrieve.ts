@@ -8,7 +8,9 @@
  *   của bài báo gốc (Cormack et al., 2009): đủ lớn để một hạng đầu ở MỘT danh sách không lấn át chunk đứng khá ở cả hai.
  *   Gộp theo hạng nên không phải chuẩn hoá hai thang điểm khác nhau (cosine vs textScore).
  * - Tín hiệu từ chối: cosine của chunk gần nhất < `KNOWLEDGE_MIN_SCORE` ⇒ người gọi trả "không đủ căn cứ". Không có
- *   vector (embedding tắt / chưa ingest vector) ⇒ chỉ từ khoá, từ chối khi không có kết quả nào.
+ *   vector (embedding tắt / chưa ingest vector) ⇒ chỉ từ khoá: từ chối khi không có kết quả, hoặc chunk tốt nhất chứa
+ *   chưa tới `LEXICAL_MIN_COVERAGE` số từ của câu hỏi — `$text` khớp chỉ cần MỘT từ, nên câu ngoài kho ("BABOK
+ *   knowledge areas") vẫn kéo về chunk lạc đề nhờ một từ chung ("areas").
  * - Small-to-big: chunk là một phần của section bị cắt và cả section ≤ `PARENT_EXPAND_MAX_TOKENS` ⇒ `context_text` là
  *   cả section; còn lại `context_text = text`.
  */
@@ -23,6 +25,8 @@ import { atlasBackend, memoryBackend, isVectorSearchUnsupported, knowledgeMongoF
 export const RRF_K = 60
 /** Số ứng viên mỗi danh sách trước khi gộp. */
 export const DEFAULT_CANDIDATES = 20
+/** Chỉ từ khoá: chunk tốt nhất phải chứa ít nhất ngần này phần từ của câu hỏi, không thì từ chối. */
+export const LEXICAL_MIN_COVERAGE = 0.5
 /** Section cha ≤ ngần này token thì chunk được mở rộng thành cả section. */
 export const PARENT_EXPAND_MAX_TOKENS = 900
 
@@ -107,9 +111,40 @@ export const rrfFuse = (vector: readonly VectorHit[], lexical: readonly string[]
   )
 }
 
-/** Có vector ⇒ từ chối khi cosine cao nhất dưới ngưỡng; chỉ từ khoá ⇒ từ chối khi không có kết quả. */
-export const shouldAbstain = (topVectorScore: number | null, hasVector: boolean, lexicalHits: number, minScore: number): boolean =>
-  hasVector ? topVectorScore === null || topVectorScore < minScore : lexicalHits === 0
+/**
+ * Có vector ⇒ từ chối khi cosine cao nhất dưới ngưỡng. Chỉ từ khoá ⇒ từ chối khi không có kết quả, hoặc (khi truyền
+ * `lexicalCoverage`) chunk tốt nhất phủ chưa tới `LEXICAL_MIN_COVERAGE` từ của câu hỏi.
+ */
+export const shouldAbstain = (topVectorScore: number | null, hasVector: boolean, lexicalHits: number, minScore: number, lexicalCoverage?: number): boolean =>
+  hasVector
+    ? topVectorScore === null || topVectorScore < minScore
+    : lexicalHits === 0 || (lexicalCoverage !== undefined && lexicalCoverage < LEXICAL_MIN_COVERAGE)
+
+/** Từ hư không mang nghĩa — bỏ khi đo độ phủ (tiếng Anh + tiếng Việt thường gặp trong câu hỏi). */
+const STOPWORDS = new Set(
+  [
+    "the and for are what which when where how does that this with from into about there their have has was were will can should must not any all its",
+    "là của và các những cho khi thì có không được một này đó như với trong theo nào gì bao nhiêu sao vậy"
+  ]
+    .join(" ")
+    .split(" ")
+)
+
+/** Từ có nghĩa của câu hỏi: chữ thường, ≥ 3 ký tự, bỏ từ hư. */
+export const queryTerms = (query: string): string[] => [
+  ...new Set((query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((t) => t.length >= 3 && !STOPWORDS.has(t)))
+]
+
+/**
+ * Tỉ lệ từ của câu hỏi có trong chữ chunk. Từ dài khớp theo 5 ký tự đầu (thay cho stemming của `$text`: "rules" ⇔ "rule";
+ * "naming" ⇔ "name" thì không — chấp nhận, đây chỉ là chặn câu lạc đề). Câu không có từ nào ⇒ 1.
+ */
+export const lexicalCoverage = (query: string, text: string): number => {
+  const terms = queryTerms(query)
+  if (!terms.length) return 1
+  const hay = text.toLowerCase()
+  return terms.filter((t) => hay.includes(t.length > 5 ? t.slice(0, 5) : t)).length / terms.length
+}
 
 export interface SiblingChunk {
   chunk_id: string
@@ -224,6 +259,8 @@ export const retrieveKnowledge = async (query: string, options: RetrieveOptions)
     top_vector_score: topVectorScore,
     backend: backend ? backend.name : "lexical-only",
     // Backend vector không trả gì (index Atlas đang dựng / chưa ingest vector) ⇒ xét như chỉ có từ khoá
-    abstain: shouldAbstain(topVectorScore, vectorHits.length > 0, lexicalIds.length, minScore) || chunks.length === 0
+    abstain:
+      shouldAbstain(topVectorScore, vectorHits.length > 0, lexicalIds.length, minScore, Math.max(0, ...chunks.map((c) => lexicalCoverage(query, c.text)))) ||
+      chunks.length === 0
   }
 }

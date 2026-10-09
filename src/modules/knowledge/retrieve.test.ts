@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildFilter, expandToParent, PARENT_EXPAND_MAX_TOKENS, RRF_K, rrfFuse, shouldAbstain, statusesFor } from "./retrieve.js"
+import { buildFilter, expandToParent, lexicalCoverage, LEXICAL_MIN_COVERAGE, PARENT_EXPAND_MAX_TOKENS, queryTerms, RRF_K, rrfFuse, shouldAbstain, statusesFor } from "./retrieve.js"
 
 describe("rrfFuse (Reciprocal Rank Fusion, k = 60)", () => {
   it("cộng 1/(k + hạng) qua hai danh sách; chunk đứng khá ở cả hai vượt chunk chỉ đứng đầu một danh sách", () => {
@@ -24,6 +24,24 @@ describe("rrfFuse (Reciprocal Rank Fusion, k = 60)", () => {
     const fused = rrfFuse([], ["a", "a"])
     expect(fused).toHaveLength(1)
     expect(fused[0]!.rrf).toBeCloseTo(1 / (RRF_K + 1))
+  })
+})
+
+describe("chỉ từ khoá: độ phủ từ của câu hỏi", () => {
+  it("bỏ từ hư / từ ngắn, khớp theo 5 ký tự đầu của từ dài", () => {
+    expect(queryTerms("What are the BABOK knowledge areas?")).toEqual(["babok", "knowledge", "areas"])
+    expect(lexicalCoverage("use case naming rules", "Use case names: verb + object. Naming follows the rules below.")).toBe(1)
+    // câu ngoài kho chỉ chung một từ với chunk lạc đề ⇒ dưới ngưỡng
+    expect(lexicalCoverage("BABOK knowledge areas", "Application messages grouped by functional areas")).toBeCloseTo(1 / 3)
+    expect(lexicalCoverage("?? !!", "bất kỳ")).toBe(1)
+  })
+
+  it("shouldAbstain chỉ từ khoá: có kết quả nhưng phủ dưới ngưỡng ⇒ từ chối; không truyền độ phủ ⇒ như cũ", () => {
+    expect(shouldAbstain(null, false, 4, 0.6, 1 / 3)).toBe(true)
+    expect(shouldAbstain(null, false, 4, 0.6, LEXICAL_MIN_COVERAGE)).toBe(false)
+    expect(shouldAbstain(null, false, 4, 0.6)).toBe(false)
+    // có vector thì độ phủ từ không xét
+    expect(shouldAbstain(0.7, true, 4, 0.6, 0)).toBe(false)
   })
 })
 
