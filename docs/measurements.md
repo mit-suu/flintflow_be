@@ -558,3 +558,21 @@ Nhận xét:
 - tokens_in I-4 giảm **39%**, số lượt và credit không đổi; Spine trích ra cùng cỡ: 12 UC, 15 NFR, 9 BR, 14 màn ở cả hai lượt; function 14 → 15 (dao động của model).
 - Lượt đo cùng nhánh trên SRS StudentManagement v1.0 (có ảnh) **timeout sau 90 phút**, chưa có số — chưa rõ do provider
   (Gemini ảnh) hay do nhánh; cần chạy lại kèm log.
+
+## C-3 hybrid retrieval — Gemini embedding thật, mẫu nhỏ (2026-10-08)
+
+- Cách đo: `embedTexts` của nhánh `feat/cr-hybrid-retrieval`, `gemini-embedding-001`, 768 chiều; 6 phần tử Spine dạng chữ
+  (`RETRIEVAL_DOCUMENT`) × 3 câu CR (`RETRIEVAL_QUERY`). Không qua Atlas, không ghi DB. Một lượt 3 câu ≈ 0,9 s.
+- Điểm Atlas = `(1 + cos) / 2`.
+
+| Câu CR | Phần tử đúng (điểm) | Phần tử liên quan | Không liên quan cao nhất |
+|---|---|---|---|
+| "Tự đăng xuất khi người dùng không thao tác một thời gian" (VI) | NFR session timeout (0,862) | FN Log out (0,830) | NFR thời gian phản hồi (0,768) |
+| "Change the idle timeout to 30 minutes" | NFR session timeout (0,841) | FN Log out (0,791) | NFR thời gian phản hồi (0,778) |
+| "Students should be able to register up to 10 courses" | BR tối đa 8 môn (0,896) | FN Register course (0,838) | UC View transcript (0,803) |
+
+Nhận xét:
+- Cả ba câu: phần tử đúng đứng đầu, kể cả câu tiếng Việt khớp requirement tiếng Anh — đúng chỗ khớp từ khoá bỏ sót.
+- Khoảng cách giữa liên quan và không liên quan chỉ ~0,03–0,06 điểm ⇒ ngưỡng tuyệt đối rất nhạy: 0,80 còn giữ "View
+  transcript"; **0,82** tách sạch cả ba câu (đặt làm mặc định `CR_VECTOR_MIN_SCORE`). Mẫu 6 × 3 là quá nhỏ — hiệu chỉnh lại
+  trên SRS thật sau khi backfill; cân nhắc ngưỡng tương đối (≥ điểm cao nhất − δ) kèm sàn tuyệt đối.
