@@ -329,12 +329,54 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     expect(at("3.6. Other requirements")).toEqual(["fixed:5.4", 1])
     // chương yêu cầu chức năng ⇒ tính năng; mục con lạ ⇒ chức năng nhưng phải xác nhận
     expect(map["3.2. Specific requirements"].section_id).toMatch(/^feature:@B\d{4}$/)
-    expect(map["3.2.1. Sequence diagrams"].section_id).toBe("fixed:2.2.2")
+    // sơ đồ tuần tự: Spine không có loại này ⇒ giữ nguyên văn (trước đây trích thành mô tả use case)
+    expect(map["3.2.1. Sequence diagrams"].section_id).toBe("unmapped")
     expect(map["3.2.3. Register account"]).toMatchObject({ section_id: expect.stringMatching(/^function:@/), confidence: 0.75 })
     // không còn heading nào bị gán sai mà vẫn ≥ 0.8 (trước đây: interface ⇒ function 0.85, Design constraints ⇒ feature 0.85)
     expect(Object.values(map).filter((h) => /^(feature|function):@/.test(h.section_id) && h.confidence >= 0.8).map((h) => h.heading_text)).toEqual([
       "3.2. Specific requirements"
     ])
+  })
+
+  it("IEEE 830 rút gọn: 3.2.2 Classes for classification chứa tính năng (không phải ERD) ⇒ 3.2 chỉ là heading", () => {
+    const outline: [number, string][] = [
+      [1, "1. Introduction"], [2, "1.1. Purpose"], [2, "1.4. References"],
+      [1, "3. Specific Requirements"], [2, "3.2. Specific requirements"], [3, "3.2.1. Sequence diagrams"],
+      [3, "3.2.2. Classes for classification of specific requirements"], [4, "3.2.2.1. Account management"], [5, "3.2.2.1.1. Register account"],
+      [2, "3.3. Performance requirements"]
+    ]
+    const blocks = outline.map(([level, text], i) => heading(i + 1, level, text))
+    expect(detectTemplateFamily(blocks)).toBe("ieee830")
+    const map = mapOf(blocks)
+    expect(map["3.2. Specific requirements"].section_id).toBe("unmapped")
+    expect(map["3.2.1. Sequence diagrams"].section_id).toBe("unmapped")
+    expect(map["3.2.2. Classes for classification of specific requirements"]).toMatchObject({ section_id: "unmapped", template_section: "ieee830:3.2.2" })
+    expect(map["3.2.2.1. Account management"].section_id).toMatch(/^feature:@/)
+    expect(map["3.2.2.1.1. Register account"].section_id).toMatch(/^function:@/)
+    // tên "Class Model" / "Use Cases" vẫn vào ERD / mô tả use case
+    const named = mapOf([...blocks, heading(20, 2, "Data Model"), heading(21, 2, "Use Case Descriptions")])
+    expect(named["Data Model"].section_id).toBe("fixed:3.1.5")
+    expect(named["Use Case Descriptions"].section_id).toBe("fixed:2.2.2")
+  })
+
+  it("tên trùng ở hai chỗ của mẫu (User Interfaces 2.1.2 / 3.1.1) ⇒ phân biệt theo heading cha khi file không đánh số / đánh số khác", () => {
+    const outline: [number, string][] = [
+      [1, "Introduction"], [2, "Purpose"], [2, "Scope"],
+      [1, "Overall Description"], [2, "Product Perspective"], [3, "User Interfaces"], [3, "Hardware Interfaces"],
+      [1, "Specific Requirements"], [2, "External Interface Requirements"], [3, "User Interfaces"]
+    ]
+    const blocks = outline.map(([level, text], i) => heading(i + 1, level, text))
+    // file không đánh số vẫn nhận được là IEEE (trước đây chỉ heading có số mới được tính)
+    expect(detectTemplateFamily(blocks)).toBe("ieee830")
+    const map = matchHeadings(blocks)
+    const ui = map.filter((h) => h.heading_text === "User Interfaces").map((h) => h.template_section)
+    expect(ui).toEqual(["ieee830:2.1.2", "ieee830:3.1.1"])
+    // số mục lệch mẫu (chương giao diện là 4) ⇒ vẫn theo heading cha
+    const shifted = matchHeadings([
+      heading(1, 1, "1 Introduction"), heading(2, 2, "1.1 Purpose"), heading(3, 2, "1.2 Scope"),
+      heading(4, 1, "4 External Interface Requirements"), heading(5, 2, "4.1 User Interfaces"), heading(6, 2, "4.2 Hardware Interfaces")
+    ])
+    expect(shifted.find((h) => h.heading_text === "4.1 User Interfaces")?.template_section).toBe("ieee830:3.1.1")
   })
 
   it("FLF-252: mẫu IEEE dạng System Features ⇒ chương tính năng, mục mô tả dưới tính năng thuộc tính năng (không thành chức năng)", () => {
