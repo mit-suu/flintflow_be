@@ -15,7 +15,7 @@
 
 import type { ActorKind, NfrCategory, OtherRequirementKind, Priority, ValidationKind } from "../spine/spine.types.js"
 
-/** Ngôn ngữ tài liệu render — nội bộ, chưa nối với field nào của project. */
+/** Ngôn ngữ tài liệu render — controller đặt từ `translation.service#projectLanguages` (FLF-265 §3.1), không từ query. */
 export type DocumentLanguage = "vi" | "en"
 
 export const isVietnamese = (language: string | undefined): boolean => !!language && language.toLowerCase().startsWith("vi")
@@ -436,3 +436,16 @@ export const FLAG_TEXT = {
     reason: "Lý do bỏ qua"
   }
 } as const
+
+/**
+ * FLF-265 §3.1 — tuỳ chọn `writeDocx` theo dự án, MỘT chỗ cho export và file version.
+ * - Mode 1 (`import`): đúng tuỳ chọn trước FLF-265 — bìa / mục lục / §I mặc định, phụ lục cờ `vi` vì thông điệp cờ
+ *   mode 1 là tiếng Việt (no-ky-thuat N6). Không theo `documentLanguage` để file mode 1 không đổi byte nào.
+ * - Mode 2: chữ của writer + phụ lục cờ theo ngôn ngữ tài liệu (`en` = mặc định của writer, y như trước).
+ * Trả object thường (khớp `WriteDocxOptions` theo cấu trúc) — bảng nhãn không import docx-writer.
+ */
+export const writerOptionsFor = (
+  mode: string | null | undefined,
+  documentLanguage: DocumentLanguage = "en"
+): { language?: DocumentLanguage; flagLanguage: DocumentLanguage } =>
+  mode === "import" ? { flagLanguage: "vi" } : { language: documentLanguage, flagLanguage: documentLanguage }

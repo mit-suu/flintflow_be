@@ -149,6 +149,15 @@ describe("wireframeWidgets (FLF-214)", () => {
     expect(describeInterface(noLayout, { ...screen, is_popup: true })).toBe("Login pop-up: Entry screen.")
   })
 
+  it("FLF-265: bản xem đã dịch — dòng tên màn đầu wireframe so với tên GỐC (wireframeName), câu in tên đã dịch", () => {
+    const screen = { id: "S1", feature_id: "F1", name: "Đăng nhập", description: "Màn vào.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
+    const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const withLayout = { diagrams: [{ ...layout, puml: salt("Login", "Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
+    expect(describeInterface(withLayout, screen, "vi", "Login")).toBe("Màn hình Đăng nhập: ô nhập Email, nút Log in.")
+    // So với tên đã dịch thì dòng "Login" đầu hình thành chữ trên màn — lý do phải truyền tên gốc
+    expect(describeInterface(withLayout, screen, "vi")).toBe('Màn hình Đăng nhập: chữ "Login", ô nhập Email, nút Log in.')
+  })
+
   it("không phải wireframe (bảng function của Spine cũ, hình PlantUML khác) ⇒ null", () => {
     expect(wireframeWidgets("@startsalt\n{+\n  <b>Login\n  {#\n    <b>Function | <b>Description\n  }\n}\n@endsalt\n", "Login")).toBeNull()
     expect(wireframeWidgets("@startuml\nA -> B\n@enduml\n", "Login")).toBeNull()
