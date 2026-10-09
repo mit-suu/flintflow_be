@@ -46,7 +46,7 @@ import { IMPORT_IMAGE_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { titleOfSection } from "./gap-report.service.js"
@@ -169,7 +169,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     const kind = imageRead.get(b.block_id)
     if (kind) b.diagram = { kind, source_hash: originalDiagramHash(imported, kind) }
   }
-  const { layout, customSections } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
+  const { layout, customSections, slices } = buildLayout(layoutBlocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])), unmappedIds)
   const seeded = await loadSpine(projectId)
   // Kế hoạch đọc Spine đã nạp dữ liệu: mục trích không ra gì thì vẫn là "thiếu", đừng đánh dấu step đã xong
   const plan = buildStepPlan(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded))
@@ -187,6 +187,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   await applyTransaction(projectId, { base_version: seeded.spine_version, ops: planOps, by: "import", reason: "Import: kế hoạch step theo template", step_id: null })
   profile.layout = layout
   profile.step_plan = plan
+  // Mẫu IEEE: phần tử trích từ heading lặp (Availability dưới 4.2.2) in dưới đúng heading đó của file
+  profile.section_slices = sectionSlices(slices, entities)
   // T15: giữ lịch sử sửa đổi của khách (bảng dưới heading Record of Changes) — render in lên đầu bảng §I.
   // FLF-252: dòng người dùng đã xem/sửa ở wizard thắng; không gửi ⇒ đọc lại từ file
   profile.legacy_record_of_changes =

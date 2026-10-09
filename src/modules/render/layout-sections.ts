@@ -22,6 +22,8 @@
  *   Specification` › `1 Product Overview`, `2.1 Actors`) ⇒ giữ nhãn La Mã gốc, không chiếm một cấp số; mục con đánh
  *   số lại từ 1 trong phần đó. Trước đây `II.` bị coi là chương 1 ⇒ `3.1.2` thành `1.3.1.2`, tham chiếu chéo trỏ sai.
  *   La Mã dùng làm chính số chương (`I. Introduction` › `1.1 Purpose`) vẫn đánh số như cũ.
+ * - **Heading lặp một section FPT** (mẫu IEEE: Reliability + Availability ⇒ 4.2.2): phần tử trích từ heading lặp
+ *   (`sectionSlices`) in dưới chính heading đó, trước khối nguyên văn của nó; lần đầu của section in phần còn lại.
  * - **Sơ đồ gốc** (§4.13): loại sơ đồ còn ảnh gốc của người dùng trong phần nối ⇒ không in hình PlantUML cùng loại.
  */
 
@@ -57,6 +59,29 @@ export interface TemplateLayout {
    * (chưa change request nào sửa chức năng đó) ⇒ mục in nguyên văn file; lệch ⇒ in từ Spine như cũ.
    */
   functionOriginals?: readonly FunctionOriginal[]
+  /**
+   * Mẫu IEEE: heading lặp lại một section FPT (`custom_id`, vd Availability dưới 4.2.2) + phần tử trích từ nó
+   * (`nfrs:NFR-03`). Phần tử in dưới heading đó, lần đầu của section chỉ in phần còn lại (kể cả phần tử thêm sau).
+   */
+  sectionSlices?: readonly SectionSliceView[]
+}
+
+export interface SectionSliceView {
+  custom_id: string
+  section_id: string
+  items: readonly string[]
+}
+
+/** Spine chỉ giữ (`keep = true`) hoặc bỏ các phần tử `entity:id` trong `items` — chỉ đụng mảng có mặt trong `items`. */
+export const filterSliceItems = (spine: Spine, items: ReadonlySet<string>, keep: boolean): Spine => {
+  const entities = new Set([...items].map((k) => k.slice(0, k.indexOf(":"))))
+  const out: Record<string, unknown> = { ...spine }
+  for (const entity of entities) {
+    const list = (spine as unknown as Record<string, unknown>)[entity]
+    if (!Array.isArray(list)) continue
+    out[entity] = list.filter((x: { id?: string }) => items.has(`${entity}:${x.id}`) === keep)
+  }
+  return out as unknown as Spine
 }
 
 export interface FunctionOriginal {
@@ -392,6 +417,33 @@ export const buildLayoutSections = (
     return o && fn && functionSourceHash(fn) === o.source_hash ? o : null
   }
   const fromOriginal = new Set<RenderedSection>()
+  // Mẫu IEEE: phần tử của heading lặp in dưới heading đó; lần đầu của section bỏ chúng
+  const sliceOf = new Map((template.sectionSlices ?? []).map((sl) => [`${CUSTOM_PREFIX}${sl.custom_id}`, sl]))
+  const claimed = new Map<string, Set<string>>()
+  for (const sl of template.sectionSlices ?? []) {
+    const set = claimed.get(sl.section_id) ?? new Set<string>()
+    sl.items.forEach((k) => set.add(k))
+    claimed.set(sl.section_id, set)
+  }
+  const contextFor = (sectionId: string, number: string): SectionRenderContext => {
+    const state = stateById.get(sectionId)
+    return {
+      number,
+      diagramPng: opts.diagramPng,
+      numberOf: (id) => numbers.get(id),
+      language: template.language,
+      ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
+      ...(state?.status !== undefined ? { status: state.status } : {}),
+      ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
+    }
+  }
+  /** Khối Spine của heading lặp — phần tử đã xoá hết ⇒ không có gì. */
+  const sliceBlocks = (n: Numbered): Block[] => {
+    const sl = sliceOf.get(n.section_id)
+    if (!sl) return []
+    const section = renderSection(filterSliceItems(contentSpine, new Set(sl.items), true), sl.section_id, contextFor(sl.section_id, n.number))
+    return shiftHeadings(section.blocks, n.renderLevel - section.level)
+  }
 
   const out: RenderedSection[] = []
   const emptyUntilMerged = new Set<RenderedSection>()
@@ -408,7 +460,7 @@ export const buildLayoutSections = (
       continue
     }
     if (n.kind === "custom" || n.kind === "continuation") {
-      const blocks = customBlocks(customById.get(n.section_id)?.blocks ?? [], (ref) => opts.diagramPng(mediaId(ref)))
+      const blocks = [...sliceBlocks(n), ...customBlocks(customById.get(n.section_id)?.blocks ?? [], (ref) => opts.diagramPng(mediaId(ref)))]
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
@@ -423,17 +475,8 @@ export const buildLayoutSections = (
       push({ ...base, heading: base.heading || "—", blocks }, n.level)
       continue
     }
-    const state = stateById.get(n.section_id)
-    const ctx: SectionRenderContext = {
-      number: n.number,
-      diagramPng: opts.diagramPng,
-      numberOf: (id) => numbers.get(id),
-      language: template.language,
-      ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
-      ...(state?.status !== undefined ? { status: state.status } : {}),
-      ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
-    }
-    const section = renderSection(contentSpine, n.section_id, ctx)
+    const taken = claimed.get(n.section_id)
+    const section = renderSection(taken ? filterSliceItems(contentSpine, taken, false) : contentSpine, n.section_id, contextFor(n.section_id, n.number))
     const original = originalOf(n.section_id)
     const rendered = original
       ? { ...section, heading: n.title, level: n.renderLevel, blocks: customBlocks(original.blocks, (ref) => opts.diagramPng(mediaId(ref))) }

@@ -67,6 +67,8 @@ const firstBlock = (prompt: string, after: string): string => {
   return /\[(B\d{4,})\]/.exec(tail)?.[1] ?? "B0001"
 }
 
+const AVAILABILITY_BLOCK = /\[(B\d{4,})\][^\n]*24 hours/
+
 /** Output I-4 giả theo section trong prompt (khớp `makeSrsDocx`). */
 export const fakeImportExtract = (prompt: string): string | undefined => {
   if (!prompt.includes("# Import Extract")) return undefined
@@ -86,7 +88,14 @@ export const fakeImportExtract = (prompt: string): string | undefined => {
   else if (section === "fixed:3.1.2") items = [item("screens", "SCR-01", { name: "Login screen", description: "Lets the learner sign in." })]
   else if (section === "fixed:4.2.3")
     items = [item("nfrs", "NFR-01", { statement: "The system shall respond within 2 seconds for 95% of requests.", kind: "quantitative", metric: "response time", threshold: "2 s" })]
-  else if (section.startsWith("function:"))
+  else if (section === "fixed:4.2.2" && AVAILABILITY_BLOCK.test(prompt)) {
+    // mẫu IEEE (`makeIeeeSrsDocx`): Reliability + Availability cùng 4.2.2 — mỗi câu một NFR, nguồn là đoạn của nó
+    const availability = AVAILABILITY_BLOCK.exec(prompt)![1]
+    items = [
+      item("nfrs", "NFR-R1", { statement: "The platform shall have a monthly uptime of at least 99.5%.", kind: "quantitative", metric: "uptime", threshold: "99.5%" }),
+      { ...item("nfrs", "NFR-R2", { statement: "The platform shall be available 24 hours a day, 7 days a week.", kind: "descriptive" }), source_block_ids: [availability] }
+    ]
+  } else if (section.startsWith("function:"))
     items = [item("functions", null, { trigger: "Learner submits the form", normal: ["Enter email", "Submit"], abnormal: ["Wrong password"] }, 0.85, { trigger: 0.5 })]
   return JSON.stringify({ section_id: section, items, unmapped_block_ids: [] })
 }
