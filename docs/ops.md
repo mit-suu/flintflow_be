@@ -279,7 +279,8 @@ Hỏi đáp có trích dẫn trong chat (FLF-267, thiết kế ở `docs/knowled
 | --- | --- | --- |
 | `KNOWLEDGE_ENABLED` | `false` | bật cờ `knowledge` của `POST /chats/:chatId/messages(/stream)` |
 | `KNOWLEDGE_TOP_K` | `5` | số chunk đưa vào prompt trả lời |
-| `KNOWLEDGE_MIN_SCORE` | `0.6` | **cosine** của chunk gần nhất; dưới ngưỡng ⇒ "không đủ căn cứ", không gọi model. Giá trị tạm — hiệu chỉnh bằng `eval:knowledge --retrieval-only` (bảng "Ngưỡng từ chối") rồi đặt lại |
+| `KNOWLEDGE_MIN_SCORE` | `0.66` | **cosine** của chunk gần nhất; dưới ngưỡng ⇒ "không đủ căn cứ", không gọi model. Chọn theo F1 tốt nhất ở `eval:knowledge --retrieval-only` (bảng "Ngưỡng từ chối", đo 2026-10-09) — đổi corpus thì đo lại |
+| `KNOWLEDGE_LEXICAL_WEIGHT` | `0` | trọng số danh sách từ khoá trong RRF. 0 = xếp theo vector, từ khoá chỉ thêm ứng viên ở cuối (và là đường dự phòng khi không có vector). Eval 2026-10-09: mọi trọng số > 0 đều làm R@5 giảm (100% → 87,5% ở trọng số 1) |
 | `KNOWLEDGE_CORPUS_DIR` | `assets/skills` | thư mục mặc định của `ingest:knowledge` |
 | `KNOWLEDGE_VECTOR_BACKEND` | `atlas` | `atlas` = `$vectorSearch` (Mongo không hỗ trợ ⇒ tự lùi về `memory`); `memory` = cosine vét cạn trong process |
 

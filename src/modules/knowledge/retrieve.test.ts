@@ -8,7 +8,9 @@ describe("rrfFuse (Reciprocal Rank Fusion, k = 60)", () => {
         { chunk_id: "v1", cosine: 0.9 },
         { chunk_id: "both", cosine: 0.8 }
       ],
-      ["l1", "both"]
+      ["l1", "both"],
+      RRF_K,
+      1
     )
     expect(fused[0]).toMatchObject({ chunk_id: "both", vector_rank: 2, lexical_rank: 2, vector_score: 0.8 })
     expect(fused[0]!.rrf).toBeCloseTo(2 / (RRF_K + 2))
@@ -16,12 +18,30 @@ describe("rrfFuse (Reciprocal Rank Fusion, k = 60)", () => {
   })
 
   it("bằng điểm ⇒ hạng vector tốt hơn đi trước; một danh sách rỗng thì giữ thứ tự danh sách kia", () => {
-    expect(rrfFuse([{ chunk_id: "v", cosine: 0.5 }], ["l"]).map((f) => f.chunk_id)).toEqual(["v", "l"])
-    expect(rrfFuse([], ["c", "a", "b"]).map((f) => f.chunk_id)).toEqual(["c", "a", "b"])
+    expect(rrfFuse([{ chunk_id: "v", cosine: 0.5 }], ["l"], RRF_K, 1).map((f) => f.chunk_id)).toEqual(["v", "l"])
+    expect(rrfFuse([], ["c", "a", "b"], RRF_K, 1).map((f) => f.chunk_id)).toEqual(["c", "a", "b"])
+  })
+
+  it("trọng số từ khoá 0 (mặc định theo eval): giữ thứ tự vector, từ khoá chỉ thêm ứng viên ở cuối theo hạng của nó", () => {
+    const fused = rrfFuse(
+      [
+        { chunk_id: "v1", cosine: 0.9 },
+        { chunk_id: "both", cosine: 0.8 }
+      ],
+      ["l2", "both", "l1"],
+      RRF_K,
+      0
+    )
+    expect(fused.map((f) => f.chunk_id)).toEqual(["v1", "both", "l2", "l1"])
+  })
+
+  it("không có vector (chỉ từ khoá) ⇒ trọng số 1 dù cấu hình 0: giữ đúng thứ tự từ khoá", () => {
+    expect(rrfFuse([], ["c", "a", "b"], RRF_K, 0).map((f) => f.chunk_id)).toEqual(["c", "a", "b"])
+    expect(rrfFuse([], ["c"], RRF_K, 0)[0]!.rrf).toBeCloseTo(1 / (RRF_K + 1))
   })
 
   it("id lặp trong một danh sách chỉ tính hạng đầu", () => {
-    const fused = rrfFuse([], ["a", "a"])
+    const fused = rrfFuse([], ["a", "a"], RRF_K, 1)
     expect(fused).toHaveLength(1)
     expect(fused[0]!.rrf).toBeCloseTo(1 / (RRF_K + 1))
   })

@@ -83,7 +83,13 @@ export interface FusedHit {
  * Gộp hai danh sách đã xếp hạng bằng RRF. Bằng điểm ⇒ chunk có hạng vector tốt hơn, rồi theo id (tất định).
  * Danh sách rỗng đóng góp 0 — chỉ một danh sách thì thứ tự giữ nguyên.
  */
-export const rrfFuse = (vector: readonly VectorHit[], lexical: readonly string[], k = RRF_K): FusedHit[] => {
+/**
+ * `lexicalWeight` nhân phần đóng góp của danh sách từ khoá (RRF có trọng số). 1 = RRF chuẩn; 0 = chỉ thứ tự vector (từ
+ * khoá vẫn thêm ứng viên ở cuối, không đẩy ai xuống). Mặc định lấy từ `KNOWLEDGE_LEXICAL_WEIGHT`, chọn bằng eval.
+ * Không có danh sách vector (chỉ từ khoá) ⇒ trọng số luôn là 1: thứ tự từ khoá là tất cả những gì có.
+ */
+export const rrfFuse = (vector: readonly VectorHit[], lexical: readonly string[], k = RRF_K, lexicalWeight = env.KNOWLEDGE_LEXICAL_WEIGHT): FusedHit[] => {
+  const weight = vector.length ? lexicalWeight : 1
   const byId = new Map<string, FusedHit>()
   const hit = (id: string): FusedHit => {
     let h = byId.get(id)
@@ -104,10 +110,14 @@ export const rrfFuse = (vector: readonly VectorHit[], lexical: readonly string[]
     const h = hit(id)
     if (h.lexical_rank !== undefined) return
     h.lexical_rank = i + 1
-    h.rrf += 1 / (k + i + 1)
+    h.rrf += weight / (k + i + 1)
   })
   return [...byId.values()].sort(
-    (a, b) => b.rrf - a.rrf || (a.vector_rank ?? Infinity) - (b.vector_rank ?? Infinity) || a.chunk_id.localeCompare(b.chunk_id)
+    (a, b) =>
+      b.rrf - a.rrf ||
+      (a.vector_rank ?? Infinity) - (b.vector_rank ?? Infinity) ||
+      (a.lexical_rank ?? Infinity) - (b.lexical_rank ?? Infinity) ||
+      a.chunk_id.localeCompare(b.chunk_id)
   )
 }
 

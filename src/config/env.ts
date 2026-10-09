@@ -118,7 +118,9 @@ const envSchema = z.object({
   /** Số chunk đưa vào prompt trả lời. */
   KNOWLEDGE_TOP_K: z.coerce.number().int().min(1).max(20).default(5),
   /** Ngưỡng cosine của chunk gần nhất; thấp hơn ⇒ "không đủ căn cứ", không gọi model. Hiệu chỉnh bằng `npm run eval:knowledge`. */
-  KNOWLEDGE_MIN_SCORE: z.coerce.number().min(-1).max(1).default(0.6),
+  KNOWLEDGE_MIN_SCORE: z.coerce.number().min(-1).max(1).default(0.66),
+  /** Trọng số danh sách từ khoá trong RRF (1 = RRF chuẩn, 0 = chỉ xếp theo vector). Chọn bằng `eval:knowledge --retrieval-only`. */
+  KNOWLEDGE_LEXICAL_WEIGHT: z.coerce.number().min(0).max(1).default(0),
   /** Thư mục corpus mặc định của `npm run ingest:knowledge` (tương đối thư mục chạy). */
   KNOWLEDGE_CORPUS_DIR: z.string().default("assets/skills"),
   /** `atlas` = `$vectorSearch` (Mongo không hỗ trợ ⇒ tự lùi về `memory`); `memory` = cosine vét cạn trong process. */

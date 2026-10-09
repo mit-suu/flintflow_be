@@ -202,12 +202,22 @@ interface Ranked {
   lexicalHits: number
 }
 
-const rankIn = (index: InProcessIndex, queryVector: readonly number[], query: string, mode: RetrievalMode, candidates = DEFAULT_CANDIDATES): Ranked => {
+const rankIn = (
+  index: InProcessIndex,
+  queryVector: readonly number[],
+  query: string,
+  mode: RetrievalMode,
+  candidates = DEFAULT_CANDIDATES,
+  lexicalWeight = env.KNOWLEDGE_LEXICAL_WEIGHT
+): Ranked => {
   const corpus = [...new Set(index.chunks.map((c) => c.corpus))]
   const vector = mode === "lexical" ? [] : searchRows(index.rows, queryVector, { corpus, statuses: ["verified", "placeholder"] }, candidates)
   const lexical = mode === "vector" ? [] : searchBm25(index.bm25, query, candidates).map((h) => h.id)
-  return { fused: rrfFuse(vector, lexical), topCosine: vector[0]?.cosine ?? null, lexicalHits: lexical.length }
+  return { fused: rrfFuse(vector, lexical, undefined, lexicalWeight), topCosine: vector[0]?.cosine ?? null, lexicalHits: lexical.length }
 }
+
+/** Trọng số từ khoá được quét trên cấu hình cuối (chunker cuối · hybrid) — chọn `KNOWLEDGE_LEXICAL_WEIGHT`. */
+export const LEXICAL_WEIGHTS = [0, 0.1, 0.25, 0.5, 0.75, 1] as const
 
 /** Dựng `RetrievalResult` như `retrieveKnowledge` trả, từ chỉ mục trong process (backend `memory`). */
 const retrievalResultFrom = (index: InProcessIndex, ranked: Ranked, topK: number, minScore: number): RetrievalResult => {
@@ -379,6 +389,8 @@ export interface AblationCell {
 
 export interface RetrievalReport {
   ablation: AblationCell[]
+  /** Quét trọng số từ khoá của RRF trên cấu hình cuối. */
+  lexical_weights: { lexical_weight: number; metrics: RetrievalMetrics }[]
   abstention: { config: string; best: AbstentionRow | null; at_current: AbstentionRow | null; rows: AbstentionRow[]; tops: { id: string; ooc: boolean; top: number | null }[] }
   per_question: { id: string; type: string; ranks: Record<string, number | null> }[]
 }
@@ -440,11 +452,21 @@ const runRetrieval = async (opts: EvalOptions, cache: EmbeddingCache, docs: Know
     }
   }
 
+  const weights = LEXICAL_WEIGHTS.map((w) => ({
+    lexical_weight: w,
+    metrics: retrievalMetrics(
+      inCorpus.map((q) => {
+        const ranked = rankIn(finalIndex!, queryVectors[questions.indexOf(q)]!, q.question, FINAL_MODE, DEFAULT_CANDIDATES, w).fused.slice(0, 10)
+        return firstHitRank(ranked.map((f) => ({ chunk_id: f.chunk_id, span: finalIndex!.byId.get(f.chunk_id)!.span })), golds.get(q.id)!)
+      })
+    )
+  }))
   const tops = questions.map((q, i) => ({ id: q.id, ooc: q.out_of_corpus, top: rankIn(finalIndex!, queryVectors[i]!, q.question, FINAL_MODE).topCosine }))
   const sweep = sweepAbstention(tops)
   const atCurrent = sweep.rows.find((r) => Math.abs(r.threshold - opts.minScore) < 1e-9) ?? null
   return {
     ablation,
+    lexical_weights: weights,
     abstention: { config: `${FINAL_CHUNKER} · ${FINAL_MODE}`, best: sweep.best, at_current: atCurrent, rows: sweep.rows, tops },
     per_question: [...perQuestion.values()]
   }
@@ -558,6 +580,11 @@ export const renderMarkdown = (r: EvalReport): string => {
     out.push("## Ablation truy hồi (trùng khớp theo khoảng chữ ≥ 50% chunk vàng)", "", "| Chunker | Truy hồi | Chunk | R@1 | R@3 | R@5 | MRR@10 |", "|---|---|---:|---:|---:|---:|---:|")
     for (const c of r.retrieval.ablation) {
       out.push(`| ${c.chunker} | ${c.mode} | ${c.chunks} | ${pct(c.metrics.recall_at_1)} | ${pct(c.metrics.recall_at_3)} | ${pct(c.metrics.recall_at_5)} | ${num(c.metrics.mrr_at_10)} |`)
+    }
+    out.push("", `## Trọng số từ khoá trong RRF (${FINAL_CHUNKER} · ${FINAL_MODE}; 0 = chỉ thứ tự vector, 1 = RRF chuẩn)`, "")
+    out.push("| Trọng số từ khoá | R@1 | R@3 | R@5 | MRR@10 |", "|---:|---:|---:|---:|---:|")
+    for (const w of r.retrieval.lexical_weights) {
+      out.push(`| ${w.lexical_weight} | ${pct(w.metrics.recall_at_1)} | ${pct(w.metrics.recall_at_3)} | ${pct(w.metrics.recall_at_5)} | ${num(w.metrics.mrr_at_10)} |`)
     }
     const a = r.retrieval.abstention
     out.push("", `## Ngưỡng từ chối (${a.config}, top cosine, quét 0,40–0,85)`, "")
