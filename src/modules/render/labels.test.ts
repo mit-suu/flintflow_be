@@ -20,8 +20,11 @@ import {
   WRITER_TEXT,
   enumLabel,
   fptLabelFor,
-  labelFor
+  labelFor,
+  writerOptionsFor
 } from "./labels.js"
+import { writeDocx } from "./docx-writer.js"
+import { readZipText } from "./zip.test-helper.js"
 
 const fixture = (): Spine =>
   spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
@@ -299,5 +302,34 @@ describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
     // Bằng chứng nhãn mới không lọt vào mode 1: ô actor kind vẫn là giá trị thô
     expect(JSON.stringify(withLanguage)).toContain('"text":"human"')
     expect(withLanguage.recordOfChanges.some((r) => /^Create /.test(r.description))).toBe(true)
+  })
+})
+
+describe("labels — writerOptionsFor (FLF-265 §3.1)", () => {
+  const sample = JSON.parse(readFileSync(new URL("../../../fixtures/rendered-document-sample.json", import.meta.url), "utf8")) as RenderedDocument
+
+  it("mode 1 ⇒ đúng tuỳ chọn trước FLF-265, bỏ qua ngôn ngữ tài liệu", () => {
+    for (const language of ["vi", "en", undefined] as const) expect(writerOptionsFor("import", language)).toEqual({ flagLanguage: "vi" })
+  })
+
+  it("mode 2 ⇒ writer + phụ lục cờ theo ngôn ngữ tài liệu; mặc định en", () => {
+    expect(writerOptionsFor("fpt", "vi")).toEqual({ language: "vi", flagLanguage: "vi" })
+    expect(writerOptionsFor("fpt", "en")).toEqual({ language: "en", flagLanguage: "en" })
+    expect(writerOptionsFor(undefined)).toEqual({ language: "en", flagLanguage: "en" })
+  })
+
+  it("mode 2 en ra document.xml y hệt tuỳ chọn cũ; vi in bìa / mục lục tiếng Việt", async () => {
+    const before = readZipText(await writeDocx(sample, { flagLanguage: "en" }), "word/document.xml")
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("fpt", "en")), "word/document.xml")).toBe(before)
+
+    const vi = readZipText(await writeDocx(sample, writerOptionsFor("fpt", "vi")), "word/document.xml")
+    expect(vi).toContain(WRITER_TEXT.vi.toc)
+    expect(vi).toContain(WRITER_TEXT.vi.coverTitle)
+    expect(vi).not.toContain(WRITER_TEXT.en.toc)
+  })
+
+  it("mode 1 ra document.xml y hệt { flagLanguage: vi } cũ", async () => {
+    const before = readZipText(await writeDocx(sample, { flagLanguage: "vi" }), "word/document.xml")
+    expect(readZipText(await writeDocx(sample, writerOptionsFor("import", "en")), "word/document.xml")).toBe(before)
   })
 })
