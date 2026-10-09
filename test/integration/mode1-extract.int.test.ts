@@ -45,8 +45,9 @@ const importToGapReview = async () => {
   const ex = await s.c.extractAndWait(s.id)
   expect(ex.res.status, JSON.stringify(ex.res.body.error)).toBe(200)
   await s.c.patch("/import/fields", { import_id: s.id, confirm_all: true })
-  const fin = await s.c.post("/import/finalize", { import_id: s.id, base_version: await s.c.spineVersion() })
-  expect(fin.status, JSON.stringify(fin.body.error)).toBe(200)
+  const fin = await s.c.finalizeAndWait(s.id)
+  expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
+  expect(fin.view?.import?.status).toBe("gap_review")
   return s
 }
 
@@ -143,14 +144,17 @@ describe("mode 1 — finalize, check, gap report", () => {
     expect(conflict.status).toBe(409)
     expect(conflict.body.error.code).toBe("SPINE_VERSION_CONFLICT")
 
-    const res = await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })
+    const { res, view } = await c.finalizeAndWait(id)
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    const fin = finalizeResponseSchema.parse(res.body.data)
-    expect(fin.import.status).toBe("gap_review")
-    expect(fin.baseline).toMatchObject({ version: "0.0", type: "imported", doc_version: "0.0" })
-    expect(fin.flags.yellow).toBeGreaterThanOrEqual(1)
+    // chạy nền: trả ngay import baselining, baseline / flags null; kết quả đọc sau khi job xong
+    expect(finalizeResponseSchema.parse(res.body.data)).toMatchObject({ import: { status: "baselining", paused: null }, baseline: null, flags: null })
+    expect(view?.import?.status).toBe("gap_review")
 
     const spine = (await spineRepository.get(projectId))!
+    const baseline = spine.baselines.find((b) => b.type === "imported")
+    expect(baseline).toMatchObject({ version: "0.0", type: "imported", doc_version: "0.0" })
+    const yellow = spine.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
+    expect(yellow).toBeGreaterThanOrEqual(1)
     expect(spine.actors.map((a) => a.name)).toEqual(["Learner", "Admin"])
     expect(spine.use_cases.find((u) => u.id === "UC-01")).toMatchObject({ name: "Register account", actor_ids: ["A01"] })
     expect(spine.use_cases.find((u) => u.id === "UC-02")?.actor_ids).toEqual(["A01"])
@@ -177,13 +181,13 @@ describe("mode 1 — finalize, check, gap report", () => {
 
     // version 0.0: file gốc (original_ref) có stamp + bookmark neo; file_ref là bản render (FLF-184)
     const version = await DocVersion.findOne({ projectId, version: "0.0" }).lean()
-    expect(version).toMatchObject({ kind: "imported", baseline_ref: fin.baseline.id })
+    expect(version).toMatchObject({ kind: "imported", baseline_ref: baseline!.id })
     const pkg = await DocxPackage.load(await docFileStore().load(version!.original_ref ?? version!.file_ref))
     expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
     expect((await readBlocks(pkg))[0].bookmark).toBe("_ff_B0001")
 
     const report = gapReportSchema.parse((await c.get("/gap-report")).body.data)
-    expect(report.totals.yellow).toBe(fin.flags.yellow)
+    expect(report.totals.yellow).toBe(yellow)
     expect(report.unmapped_headings.map((u) => u.text)).toEqual(["5.9 Team Notes"])
     expect(report.missing_sections.map((m) => m.section_id)).toContain("fixed:3.1.1")
     expect(report.low_confidence_fields.length).toBe(2)
@@ -212,12 +216,14 @@ describe("mode 1 — finalize, check, gap report", () => {
     await c.extractAndWait(id)
     await c.patch("/import/fields", { import_id: id, confirm_all: true })
     await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 0 } })
-    const fin = finalizeResponseSchema.parse((await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })).body.data)
-    expect(fin.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
+    const fin = await c.finalizeAndWait(id)
+    expect(fin.view?.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
     await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 100 } })
-    const resumed = await c.post("/import/resume", { import_id: id })
-    expect(resumed.status, JSON.stringify(resumed.body.error)).toBe(200)
-    expect(resumed.body.data.import).toMatchObject({ status: "gap_review", paused: null })
+    // resume ở checking cũng chạy nền: trả ngay checking + paused null, xong job ⇒ gap_review
+    const resumed = await c.finalizeAndWait(id, {}, "/import/resume")
+    expect(resumed.res.status, JSON.stringify(resumed.res.body.error)).toBe(200)
+    expect(resumed.res.body.data.import).toMatchObject({ status: "checking", paused: null })
+    expect(resumed.view?.import).toMatchObject({ status: "gap_review", paused: null })
   })
 })
 

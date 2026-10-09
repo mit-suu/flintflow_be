@@ -499,3 +499,90 @@ Nhận xét:
 - Phân loại đúng cả 12 lượt (context / use case / other). Ảnh use case lớn (19 UC) trả 2,6k token ⇒ `maxTokens` 4096 bị cắt một lần (`RESPONSE_TRUNCATED`) ⇒ nâng lên **8192**.
 - Thời gian 14–24 s/ảnh; Gemini trả 503 "high demand" nhiều lần (retry trong request của `executeAiAction` gánh), rồi **hết quota ngày của key free tier** sau ~20 lượt ⇒ lượt lỗi thành `paused: resume_later` ở I-4 (chạy tiếp được). Môi trường thật cần key trả phí.
 - Chưa đo được `erd` (3.1.5) và `screen_flow` (3.1.1) do hết quota — đo lại khi có key khác.
+
+## Mode 1 — 1.11 map-reduce, provider thật (2026-10-08)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (`E2E_AI=1`, Mongo in-memory, luồng HTTP thật upload → mapping
+  `confirm_all` → I-4 → fields `confirm_all` → finalize). Provider như skill: `glm` / `zai-org/GLM-5.3-Flash` (I-4 chữ, 1.11),
+  `gemini` (ảnh). PlantUML tắt trong test. "Trước" = `develop` `12f7c50` (1.11 một lượt, khối chữ cắt ở 16 000 ký tự);
+  "sau" = nhánh `feat/semantic-check-map-reduce` (lô ≤ 48k ký tự + một lượt kiểm chéo).
+- Độ phủ 1.11 = phần chữ tài liệu (paragraph / list_item / table_cell) mà lượt AI kiểm tra đọc được.
+
+| SRS | Chữ cho 1.11 | Bản | Độ phủ 1.11 | Lượt 1.11 | tokens_in 1.11 | Credit 1.11 | Cờ AI 1.11 | finalize + check |
+|---|---:|---|---:|---:|---:|---:|---:|---:|
+| ClinicPlus v1.0 (29 KB, 734 block) | 38 627 | trước | 41,4% | 1 | 8 656 | 3 | 12 | 38,5 s |
+| | | sau | **100%** | 1 lô + 1 chéo | 21 503 | 6 | 18 | 56,2 s |
+| StudentManagement v1.0 (3,1 MB, 591 block) | 32 688 | trước | 48,9% | 1 | 8 835 | 3 | 11 | 25,7 s |
+| | | sau | **100%** | 1 lô + 1 chéo | 18 050 | 6 | 13 | 43,5 s |
+
+Toàn luồng (I-4 + 1.11): ClinicPlus 47 → 50 credit, StudentManagement 51 → 54 credit. I-4 không đổi giữa hai bản (22 / 24
+lượt; chênh token và số phần tử là dao động của model giữa hai lượt chạy).
+
+Nhận xét:
+- Ngay SRS nhỏ cũng vượt trần cũ: bản trước chỉ cho AI đọc 41–49% chữ của tài liệu, phần còn lại không được kiểm mà
+  gap report không báo. Bản sau đọc hết với +3 credit (lượt kiểm chéo) khi tài liệu vừa một lô.
+- Hai SRS này chỉ cần **một** lô (< 48k ký tự) nên chưa đo được nhánh nhiều lô / song song bằng provider thật — phần đó
+  mới có test tích hợp với model giả. Ước tính SRS ~200 trang (~600k ký tự chữ): ~13 lô ⇒ ~42 credit cho 1.11; chưa đo.
+- finalize dài thêm ~18 s (lượt kiểm chéo chạy sau map) — thêm lý do chuyển finalize sang chạy nền.
+
+## I-4 — known_keys theo phạm vi, chạy tiếp theo lô, ước tính credit (2026-10-08, provider GIẢ)
+
+> Số đo trên **SRS mẫu của test** (`makeSrsDocx`) với provider giả (`test/helpers/mock-llm.ts`) — đếm ký tự prompt thật đã
+> dựng, **không phải** token / chi phí của provider thật. Đo lại trên SRS thật bằng `npm run measure:tokens` khi có key.
+
+| Fixture | Lượt chữ | Prompt (ký tự) trước | known_keys trước | Prompt sau | known_keys sau |
+|---|---:|---:|---:|---:|---:|
+| SRS mẫu | 6 | 19 549 | 1 509 | 18 976 | 624 |
+| SRS mẫu + 150 business rule không mục nào nhắc | 6 | 26 749 | 8 709 | 18 976 | 624 |
+
+- Trước: mỗi lượt nhận mọi phần tử đã biết ⇒ thêm 150 BR làm mỗi lượt dài thêm ~1,2k ký tự. Sau: known_keys chỉ còn phần tử
+  của section, feature/function tạm, mã / tên được nhắc trong lô, tác nhân + vai trò; trần cứng 4 000 ký tự
+  (`known-keys.ts#KNOWN_KEYS_CHARS`) ⇒ prompt không phình theo phần tử không liên quan. "Prompt sau" gồm cả câu mô tả
+  known_keys dài thêm ~50 ký tự/lượt trong skill. Đo bởi `test/integration/mode1/extract-scope.int.test.ts` (in ra khi chạy
+  `--reporter=verbose`).
+- Chạy tiếp theo lô (`extract-batch-resume.int.test.ts`): mục 1 có 3 lô, lô 2 lỗi ⇒ chạy tiếp chỉ gọi lô 2–3; mục 1 trừ đúng
+  3 lượt (6 credit), tổng credit và field bằng lượt chạy một mạch.
+- Ước tính trước khi trích trên SRS mẫu + 10 đoạn dài ở mục 1 + 3 ảnh (1 PNG use case, 1 EMF, 1 ảnh chụp màn hình): 8 lô chữ
+  + 1 ảnh = 9 lượt, 18 credit — trùng số lượt gọi và credit bị trừ của lượt chạy thật.
+
+## Mode 1 — I-4 scoped `known_keys`, provider thật (2026-10-08)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (nhánh `chore/measure-mode1-import`) chạy trên nhánh này, SRS
+  ClinicPlus v1.0, GLM-5.3-Flash; "trước" = `develop` `12f7c50` (cùng file, cùng ngày).
+
+| Bản | Lượt I-4 | tokens_in | tokens_out | Credit |
+|---|---:|---:|---:|---:|
+| trước (`known_keys` = mọi phần tử đã trích) | 22 | 41 900 | 7 476 | 44 |
+| scoped (`known_keys` theo phạm vi lượt, trần 4 000 ký tự) | 22 | 25 673 | 7 378 | 44 |
+
+- tokens_in I-4 giảm **39%**, số lượt và credit không đổi; Spine trích ra cùng cỡ: 12 UC, 15 NFR, 9 BR, 14 màn ở cả hai lượt; function 14 → 15 (dao động của model).
+- Lượt đo cùng nhánh trên SRS StudentManagement v1.0 (có ảnh) **timeout sau 90 phút**, chưa có số — chưa rõ do provider
+  (Gemini ảnh) hay do nhánh; cần chạy lại kèm log.
+
+## C-3 hybrid retrieval — Gemini embedding thật, mẫu nhỏ (2026-10-08)
+
+- Cách đo: `embedTexts` của nhánh `feat/cr-hybrid-retrieval`, `gemini-embedding-001`, 768 chiều; 6 phần tử Spine dạng chữ
+  (`RETRIEVAL_DOCUMENT`) × 3 câu CR (`RETRIEVAL_QUERY`). Không qua Atlas, không ghi DB. Một lượt 3 câu ≈ 0,9 s.
+- Điểm Atlas = `(1 + cos) / 2`.
+
+| Câu CR | Phần tử đúng (điểm) | Phần tử liên quan | Không liên quan cao nhất |
+|---|---|---|---|
+| "Tự đăng xuất khi người dùng không thao tác một thời gian" (VI) | NFR session timeout (0,862) | FN Log out (0,830) | NFR thời gian phản hồi (0,768) |
+| "Change the idle timeout to 30 minutes" | NFR session timeout (0,841) | FN Log out (0,791) | NFR thời gian phản hồi (0,778) |
+| "Students should be able to register up to 10 courses" | BR tối đa 8 môn (0,896) | FN Register course (0,838) | UC View transcript (0,803) |
+
+Nhận xét:
+- Cả ba câu: phần tử đúng đứng đầu, kể cả câu tiếng Việt khớp requirement tiếng Anh — đúng chỗ khớp từ khoá bỏ sót.
+- Khoảng cách giữa liên quan và không liên quan chỉ ~0,03–0,06 điểm ⇒ ngưỡng tuyệt đối rất nhạy: 0,80 còn giữ "View
+  transcript"; **0,82** tách sạch cả ba câu (đặt làm mặc định `CR_VECTOR_MIN_SCORE`). Mẫu 6 × 3 là quá nhỏ — hiệu chỉnh lại
+  trên SRS thật sau khi backfill; cân nhắc ngưỡng tương đối (≥ điểm cao nhất − δ) kèm sàn tuyệt đối.
+
+## Knowledge RAG (FLF-267) — provider thật (2026-10-09)
+
+Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
+- Truy hồi (corpus skill, 239 chunk, 32 câu trong corpus): chunk theo section + header ngữ cảnh, vector ⇒ R@3 96,9%,
+  R@5 100%, MRR 0,841. Hybrid RRF chuẩn kém hơn (R@5 87,5%) ⇒ trọng số từ khoá mặc định 0.
+- Từ chối: ngưỡng cosine 0,66 ⇒ F1 0,941, từ chối 100% câu ngoài corpus, trả lời 96,9% câu trong corpus.
+- Trả lời (GLM-5.3-Flash, judge cùng model): đúng 85,5% vs 16,4% no-RAG; trung thực 100%; ảo giác ngoài corpus 0% vs
+  ≥ 50% no-RAG; nhãn trích dẫn hợp lệ 100%.
+- Chi phí một lượt đo đủ: ~950 text embed Gemini (free tier 1 000/ngày/project — dùng `--cache`) + 160 lượt LLM.

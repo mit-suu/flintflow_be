@@ -109,6 +109,15 @@ describe("import.dto — response", () => {
     expect(getImportResponseSchema.safeParse(empty).success).toBe(true)
   })
 
+  it("GET /import: credit_estimate tuỳ chọn, nullable; available_credits null với Viewer", () => {
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const estimate = { text_batches: 8, diagram_images: 1, ai_calls: 9, credits: 18, available_credits: 300 }
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: estimate }).success).toBe(true)
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: { ...estimate, available_credits: null } }).success).toBe(true)
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: null }).success).toBe(true)
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: { ...estimate, ai_calls: -1 } }).success).toBe(false)
+  })
+
   it("DocBlock có revisions tuỳ chọn cho bản draft", () => {
     const block = {
       block_id: "B0042",
@@ -136,8 +145,13 @@ describe("import.dto — response", () => {
       flags: { red: 2, yellow: 7 }
     }
     const parsed = finalizeResponseSchema.parse(res)
-    expect(parsed.baseline.type).toBe("imported")
+    expect(parsed.baseline?.type).toBe("imported")
     expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "0.1" }).success).toBe(false)
+  })
+
+  it("finalize chạy nền: trả ngay import baselining, baseline + flags null", () => {
+    const res = { import: { ...sampleImport(), status: "baselining" }, doc_version: "0.0", baseline: null, spine_version: 3, flags: null }
+    expect(finalizeResponseSchema.parse(res)).toMatchObject({ baseline: null, flags: null, import: { status: "baselining" } })
   })
 
   it("gap report và re-upload diff", () => {

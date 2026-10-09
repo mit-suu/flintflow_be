@@ -11,6 +11,7 @@
  *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp); ghép sẵn
  *      bản làm việc (`POST /assemble`) để workspace mở được ngay.
  * Không dùng `signOff` (mode 2): baseline v0 không bị cờ đỏ chặn — cờ đi vào gap report (P0 báo cáo §3 dòng 6).
+ * HTTP chạy hàm này nền qua `finalize-jobs.ts`; lần chạy dở ở `baselining` được hoàn về mốc (`rollbackPartialFinalize`).
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -23,6 +24,7 @@ import { renderAllIfAvailable } from "../diagram/diagram.service.js"
 import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
+import { Baseline } from "../spine/baseline.model.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-diagram.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -36,8 +38,8 @@ import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
-import { assertImportStatus, loadImportFile, requireImport, transitionImport } from "./import.service.js"
-import type { IImportedDocument } from "./imported-document.model.js"
+import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, transitionImport } from "./import.service.js"
+import type { FinalizeCheckpoint, IImportedDocument } from "./imported-document.model.js"
 import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { IMPORT_IMAGE_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
@@ -48,6 +50,7 @@ import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectio
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { titleOfSection } from "./gap-report.service.js"
+import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 
 export interface FinalizeResult {
   doc: IImportedDocument
@@ -62,7 +65,8 @@ const loadSpine = async (projectId: string) => {
   return record
 }
 
-export const finalizeImport = async (projectId: string, userId: string, body: FinalizeRequest): Promise<FinalizeResult> => {
+/** Điều kiện finalize (trạng thái, `base_version`, profile) — lỗi 4xx trả ngay cho client, trước khi chạy nền. */
+export const assertCanFinalize = async (projectId: string, body: Pick<FinalizeRequest, "import_id" | "base_version">) => {
   const doc = await requireImport(projectId, body.import_id)
   assertImportStatus(doc, ["baselining"], "checking")
   const before = await loadSpine(projectId)
@@ -71,6 +75,11 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   }
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa đọc xong bố cục tài liệu", { status: doc.status, to: "checking", allowed: [] })
+  return { doc, before, profile }
+}
+
+export const finalizeImport = async (projectId: string, userId: string, body: FinalizeRequest): Promise<FinalizeResult> => {
+  const { doc, before, profile } = await assertCanFinalize(projectId, body)
   const provisional = resolveProvisional(profile.heading_map)
 
   // 1. Thực thể ⇒ op
@@ -233,11 +242,15 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     baseline_ref: baseline.id,
     created_by: userId
   })
+  // Index embedding cho C-3 (hybrid retrieval) từ baseline v0 — chạy nền, không chặn/không làm hỏng finalize. Gọi ngay
+  // sau baseline vì bước check có thể dừng (hết credit ⇒ paused); check ghi thêm thì lượt cuối hàm đồng bộ phần đổi.
+  scheduleEmbeddingSync(projectId)
 
   await transitionImport(doc, "checking")
   await runImportCheck(doc, userId)
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
+  scheduleEmbeddingSync(projectId)
   return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
 }
 
@@ -296,6 +309,54 @@ const assembleWorkingDraft = async (projectId: string, projectName: string, spin
   } catch (err) {
     console.warn(`[finalize] ghép bản làm việc sau import lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
   }
+}
+
+// ─── chạy lại sau lần finalize dở ─────────────────────────────────
+
+/** Mốc hiện tại để hoàn về nếu lần finalize sắp chạy bị dở (ghi vào `ImportedDocument.finalize_checkpoint`). */
+export const finalizeCheckpoint = async (projectId: string, recordOfChanges: FinalizeRequest["record_of_changes"] | null): Promise<FinalizeCheckpoint> => {
+  const [spine, nextSeq, profile] = await Promise.all([loadSpine(projectId), spineRepository.nextSeq(projectId), TemplateProfile.findOne({ projectId }).lean()])
+  return {
+    spine_version: spine.spine_version,
+    spine: stripRecord(spine),
+    next_seq: nextSeq,
+    headings: (profile?.heading_map ?? []).map((h) => ({ block_id: h.block_id, section_id: h.section_id })),
+    record_of_changes: recordOfChanges
+  }
+}
+
+/**
+ * Hoàn lần finalize dở ở `baselining` về `finalize_checkpoint` để chạy lại sạch, như thể lần đó chưa chạy: Spine về đúng
+ * nội dung mốc + bỏ change của lần đó (`restoreSnapshot` — revert bằng op không về được Spine rỗng vì bất biến "phần tử
+ * cuối"), xoá bản 0.0 + snapshot baseline đã ghi, trả heading về section tạm (block đổi theo). FieldAnchor / mention /
+ * layout không cần hoàn: lần chạy lại ghi đè cùng giá trị. Không có mốc ⇒ không làm gì; gọi lại nhiều lần vẫn về đúng mốc.
+ */
+export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<void> => {
+  const checkpoint = doc.finalize_checkpoint
+  if (!checkpoint || doc.status !== "baselining") return
+  const projectId = String(doc.projectId)
+  const spine = await loadSpine(projectId)
+  const touched = spine.spine_version !== checkpoint.spine_version || (await spineRepository.nextSeq(projectId)) !== checkpoint.next_seq
+  if (touched) await spineRepository.restoreSnapshot(projectId, checkpoint.spine, { baseVersion: spine.spine_version, fromSeq: checkpoint.next_seq })
+  const versions = await DocVersion.find({ projectId, version: IMPORTED_DOC_VERSION }).lean()
+  for (const ref of versions.flatMap((v) => [v.file_ref, v.original_ref].filter((r): r is string => !!r))) {
+    await docFileStore().remove(ref).catch(() => undefined)
+  }
+  await DocVersion.deleteMany({ projectId, version: IMPORTED_DOC_VERSION })
+  await Baseline.deleteMany({ projectId, version: IMPORTED_DOC_VERSION, type: "imported" })
+
+  const profile = await TemplateProfile.findOne({ projectId })
+  if (profile) {
+    const original = new Map(checkpoint.headings.map((h) => [h.block_id, h.section_id]))
+    for (const h of profile.heading_map) h.section_id = original.get(h.block_id) ?? h.section_id
+    profile.markModified("heading_map")
+    await profile.save()
+    await recomputeBlockSections(doc.projectId, profile)
+  }
+  // Mốc mới: cùng nội dung + seq, version sau khi khôi phục (lần gọi sau không khôi phục lại)
+  doc.finalize_checkpoint = { ...(await finalizeCheckpoint(projectId, checkpoint.record_of_changes)), headings: checkpoint.headings }
+  doc.markModified("finalize_checkpoint")
+  await doc.save()
 }
 
 /** UC-61/UC-75 cho bước check: chạy lại phần còn thiếu của 1.11–1.12. */

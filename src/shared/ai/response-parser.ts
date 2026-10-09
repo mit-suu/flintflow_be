@@ -253,7 +253,7 @@ export const importExtractDiagramSchema = importExtractSchema.extend({
 /** Mode 1 v3 phase 7 (CR_MATERIAL_IMAGE): chữ đọc được trong ảnh + mô tả ngắn cấu trúc. */
 export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) })
 
-/** Nút 1.11 (IMPORT_SEMANTIC_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
+/** Nút 1.11 (IMPORT_SEMANTIC_CHECK, IMPORT_CROSS_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
 export const findingsSchema = z.object({
   findings: z
     .array(
@@ -309,12 +309,31 @@ export const crProposeSchema = z.object({
   )
 })
 
+/**
+ * FLF-267 (KNOWLEDGE_ANSWER): câu trả lời + từng ý kèm nhãn chunk (`K1`…). Code hậu kiểm bỏ nhãn lạ / ý không có nhãn
+ * hợp lệ (`modules/knowledge/answer.service.ts`) — schema chỉ giữ hình.
+ */
+export const knowledgeAnswerSchema = z.object({
+  grounded: z.boolean(),
+  answer: z.string(),
+  claims: z
+    .array(
+      z.object({
+        text: z.string().min(1),
+        refs: z.array(z.string()).default([])
+      })
+    )
+    .max(20)
+    .default([])
+})
+
 export type ImportExtractOutput = z.infer<typeof importExtractSchema>
 export type ImportExtractDiagramOutput = z.infer<typeof importExtractDiagramSchema>
 export type FindingsOutput = z.infer<typeof findingsSchema>
 export type CrClarifyOutput = z.infer<typeof crClarifySchema>
 export type CrProposeOutput = z.infer<typeof crProposeSchema>
 export type CrMaterialImageOutput = z.infer<typeof crMaterialImageSchema>
+export type KnowledgeAnswerOutput = z.infer<typeof knowledgeAnswerSchema>
 
 export type SpineOp = z.infer<typeof opSchema>
 export type OpTransaction = z.infer<typeof opTransactionSchema>
@@ -341,10 +360,12 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.IMPORT_EXTRACT_FIELDS]: "importExtract",
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: "importExtractDiagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "findings",
+  [ActionType.IMPORT_CROSS_CHECK]: "findings",
   [ActionType.CR_CLARIFY]: "crClarify",
   [ActionType.CR_PROPOSE]: "crPropose",
   [ActionType.CR_CONSISTENCY]: "findings",
-  [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage"
+  [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
+  [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -366,10 +387,12 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.IMPORT_EXTRACT_FIELDS]: importExtractSchema,
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: importExtractDiagramSchema,
   [ActionType.IMPORT_SEMANTIC_CHECK]: findingsSchema,
+  [ActionType.IMPORT_CROSS_CHECK]: findingsSchema,
   [ActionType.CR_CLARIFY]: crClarifySchema,
   [ActionType.CR_PROPOSE]: crProposeSchema,
   [ActionType.CR_CONSISTENCY]: findingsSchema,
-  [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema
+  [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
+  [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema
 }
 
 export const extractJsonFromText = (

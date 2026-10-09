@@ -92,6 +92,7 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 404 | `PROJECT_NOT_FOUND` · `SPINE_NOT_FOUND` · `STEP_NOT_FOUND` · `FLAG_NOT_FOUND` · `BASELINE_NOT_FOUND` · `DIAGRAM_NOT_FOUND` | Không tồn tại / không thuộc user | — |
 | 409 | `SPINE_VERSION_CONFLICT` | `base_version` lệch | `{ spine_version }` tuỳ chọn |
 | 409 | `PIPELINE_SESSION_LOCKED` | `DELETE /projects/:id/chats/:chatId` vào session `is_pipeline` (phiên chính không xoá được) | — |
+| 409 | `KNOWLEDGE_DISABLED` | `POST /projects/:id/chats/:chatId/messages(/stream)` gửi `knowledge: true` khi server tắt Knowledge RAG (`KNOWLEDGE_ENABLED=false`); không ghi gì vào phiên (FLF-267, §1.2) | — |
 | 409 | `NEEDS_USER_INPUT` | Step đang chờ `answer_needed` mà client gọi `run`/`gate` | `{ questions }` |
 | 409 | `NEEDS_CLARIFICATION` | `POST /changes` với `instruction` mơ hồ (UC 6.11) | `{ clarification }` |
 | 409 | `REGENERATE_LIMIT` | Regenerate lần 4 trong một step | `{ regenerate_used: 3 }` |
@@ -184,6 +185,42 @@ Lô bị từ chối:
 }
 ```
 
+### 1.2 Chat — câu hỏi tri thức (FLF-267)
+
+`POST /projects/:id/chats/:chatId/messages` và `POST /projects/:id/chats/:chatId/messages/stream` nhận thêm field tuỳ chọn:
+
+| Field | Kiểu | Ý nghĩa |
+| --- | --- | --- |
+| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, 2 credit) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
+
+Thứ tự xử lý khi `knowledge: true`: đi **trước** lượt chờ trả lời của step (phiên pipeline — lượt chờ giữ nguyên, tin không
+thành câu trả lời của step) và trước lệnh sửa (không có bản xem trước, không đọc / ghi Spine); chốt `409 CHANGE_REQUIRES_CR`
+của mode 1 không áp. Mỗi lượt một câu hỏi, không đọc lịch sử chat.
+
+Tin AI được ghi vào phiên (`messages[].content`, chuỗi JSON) và trả về giống tin CHAT, thêm hai field:
+
+```json
+{
+  "reply": "Theo hướng dẫn nội bộ FlintFlow, mỗi bước tối đa 8 lượt gọi model [K1].",
+  "questions": [],
+  "grounded": true,
+  "citations": [
+    { "ref": "K1", "chunk_id": "gate-check#caps", "source": "gate-check", "section": "Caps", "source_kind": "internal_skill" }
+  ]
+}
+```
+
+- `grounded: false` ⇒ `reply` là câu từ chối cố định theo ngôn ngữ phiên ("Không đủ căn cứ trong kho tri thức của
+  FlintFlow…" / "There is not enough grounding in FlintFlow's knowledge base…"), `citations: []`. Khi từ chối vì truy hồi
+  không đủ gần (cosine < `KNOWLEDGE_MIN_SCORE`) server **không gọi model, không trừ credit**.
+- `citations[]` chỉ gồm chunk thật sự được trích (nhãn model viết mà không có trong tập truy hồi bị bỏ). `source_kind`:
+  `internal_skill` (hướng dẫn nội bộ FlintFlow) | `standard` (chuẩn ngoài, phase 2).
+- Lượt gọi model lỗi (hết credit, provider): route JSON ghi tin xin lỗi như CHAT (`grounded: false`, chữ khác câu từ chối);
+  route stream phát `error` như CHAT.
+- Route JSON trả `data` = phiên chat đã cập nhật (như cũ). Route stream **không stream chữ**: phát đúng một sự kiện
+  `{ type: "finish", session, data: <tin AI ở trên>, tokensUsed, cost }` rồi đóng — cùng sự kiện `finish` của luồng lệnh sửa
+  (`tokensUsed: null`, `cost: 0` khi từ chối).
+
 ## 2. SSE — `POST /projects/:id/steps/:stepId/run`
 
 Response `Content-Type: text/event-stream`. Mỗi sự kiện có dạng `event: <type>` rồi `data: <JSON>`; phần JSON đúng `stepEventSchema` (có trường `type` trùng tên event). Luồng đóng sau `gate_ready` hoặc `error`. Nếu gặp `answer_needed`, client gửi `/answer` và giữ kết nối để nhận các sự kiện tiếp theo. Đóng kết nối (hoặc chờ quá 15 phút) trong lúc chờ trả lời **không** huỷ step: luồng đóng không kèm `error`, câu hỏi nằm ở run-state và `/answer` vẫn nhận (FLF-222). Đóng kết nối ở mọi lúc khác vẫn huỷ lượt như cũ; `POST /cancel` huỷ cả lượt đang chờ.
@@ -257,4 +294,5 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 | 2026-09-30 | FLF-234 (hành vi, không đổi shape) | Không thêm field/endpoint. Vòng sửa 1: lượt hỏi gộp không hỏi gì ghi tin mở giai đoạn + lời AI vào transcript `step: "B-1"` (không gọi lại khi vào lại giai đoạn; mọi B-1.x đọc được tin mở), biến prompt `elicit_policy` / `fast_path` (luật fast path chỉ vào prompt của B-1), lời AI không còn nêu câu hỏi server đã bỏ. Fast path cho giai đoạn B-1: `runStep` bỏ Elicit ở B-1.x khi lượt chạy không mang tin user (0 lượt gọi model, không tin AI, không `elicit_turns_this_phase`); có tin user thì Elicit chạy nhưng server chỉ giữ câu có `conflict` trên chủ đề đã có trong sổ quyết định; lượt chờ trả lời cũ (`/answer`) chạy tiếp như trước. Lượt hỏi gộp của B-1 nhận projection hợp + việc từng bước, `max_questions` và trần server theo `project.stakes` (`internal` 2, còn lại 4); giai đoạn khác giữ nguyên. Bước đầu không nhận lại tin mở giai đoạn khi lượt hỏi gộp đã gọi model với tin đó. `conflictsWithLedger` xét cả `text_vi`. `phase_gate.message_vi` / `new_assumptions[]` không đổi (FLF-232/233 đã dựng từ Spine). Project cũ: không migration. |
 | 2026-10-01 | contract-change FLF-237 | `Spine.project.form_factor`: **chuỗi hoặc `null` ⇒ mảng chuỗi** (`["web_app","mobile_app"]`, phần tử đầu là nền tảng chính, `[]` = chưa chốt). Đọc dữ liệu cũ: chuỗi ⇒ mảng một phần tử, `null` ⇒ `[]` — không migration (`spineSchema` chuẩn hoá khi đọc, Mongoose `[String]`). Op `set project.form_factor` nhận mảng; chuỗi đơn (prompt cũ, Mode 1) vẫn nhận và thành mảng; phần tử phải thuộc tập giá trị cũ, trùng bị bỏ. FE đọc `form_factor` phải chịu cả chuỗi (cache) lẫn mảng. `other_requirements[].statement_vi?` (chuỗi hoặc `null`, như `assumptions[].statement_vi`): câu bằng ngôn ngữ user; dữ liệu cũ không có ⇒ FE rơi về `statement`. JSON Schema `assets/schema/srs-spine.schema.json` xuất lại. |
 | 2026-09-30 | contract-change FLF-234 vòng sửa 2 | Additive: `runStateResponseSchema.phase_gate?` (sự kiện `phase_gate` của bước cuối giai đoạn, ghi vào run-state để cổng chốt cuối giai đoạn sống qua reload / SSE gãy); `gate_ready.auto?` (bước im trong `phases/:phase/run`: run-state `done`, không còn trạng thái `gate` / thẻ cổng có chip). Hai field tuỳ chọn, project cũ và lượt `/run` lẻ không đổi. |
+| 2026-10-08 | contract-change FLF-267 | Additive. `POST /chats/:chatId/messages` và `/messages/stream` nhận `knowledge?: boolean` (mặc định `false`) — câu hỏi tri thức trả lời từ Knowledge RAG, `call_kind` mới `knowledge_answer` (2 credit; từ chối vì không đủ căn cứ thì không gọi model, không trừ). Tin AI của lượt đó = tin CHAT `{ reply, questions: [] }` + `grounded: boolean` + `citations[] { ref, chunk_id, source, section, source_kind }`; route stream phát một sự kiện `finish`. Mã lỗi mới `409 KNOWLEDGE_DISABLED` (`KNOWLEDGE_ENABLED=false`). Tin không gửi `knowledge` giữ nguyên hành vi. §1.2 |
 | 2026-10-08 | contract-change FLF-265 (SRS đa ngôn ngữ) | Additive. `call_kind` mới `translate_document` (dịch theo lô chữ SRS sang ngôn ngữ tài liệu, 2 credit / lô). Endpoint mới 26 `GET /translations/status`, 27 `POST /translations/run`. #16 thêm `meta.translation` khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc; #18 thêm header `X-Document-Language`. Ngôn ngữ đọc từ `Project.documentLanguage` (tạo / đổi ở `import-change-contract.md` #1, #1a) — **không** thêm query param, `RenderedDocument` không đổi, Spine không đổi (mode 2 vẫn tiếng Anh; chữ dịch ở lớp bản dịch ngoài Spine, khoá theo hash chữ gốc). Plan: `claude_plan/srs-da-ngon-ngu/` · bổ sung #27: điều kiện dừng `translated = 0`, `409 TRANSLATION_RUNNING`, `422` khi mọi lô lỗi |

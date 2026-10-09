@@ -49,7 +49,7 @@ const projectWithRevision = async () => {
   await c.post("/import/confirm-latest", { import_id: id })
   await c.extractAndWait(id)
   await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  expect((await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })).status).toBe(200)
+  expect((await c.finalizeAndWait(id)).view?.import?.status).toBe("gap_review")
   // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step, để release chỉ còn chặn bởi cờ test đặt
   await fillCoreSections(projectId)
 

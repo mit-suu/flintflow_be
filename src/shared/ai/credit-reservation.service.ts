@@ -32,12 +32,16 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.IMPORT_EXTRACT_FIELDS]: 2,
   // Một ảnh / lượt (Gemini vision) — đo ở docs/measurements.md (mode 1 v3 phase 5)
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: 2,
+  // 1.11 theo lô (~12k token in / lô) + một lượt kiểm chéo trên Spine gọn
   [ActionType.IMPORT_SEMANTIC_CHECK]: 3,
+  [ActionType.IMPORT_CROSS_CHECK]: 3,
   [ActionType.CR_CLARIFY]: 1,
   [ActionType.CR_PROPOSE]: 3,
   [ActionType.CR_CONSISTENCY]: 2,
   // Một ảnh / lượt, output ngắn (chép chữ + mô tả) — rẻ hơn ảnh diagram của I-4
-  [ActionType.CR_MATERIAL_IMAGE]: 1
+  [ActionType.CR_MATERIAL_IMAGE]: 1,
+  // FLF-267: một câu hỏi tri thức ≈ một lượt CHAT (prompt ~5 chunk). Từ chối vì không đủ căn cứ thì không gọi model, không tính
+  [ActionType.KNOWLEDGE_ANSWER]: 2
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */

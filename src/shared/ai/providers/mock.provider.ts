@@ -17,6 +17,8 @@
  * | `render_fix` | `{ puml }` |
  * | `translate` | `{ statement }` |
  * | `translate_document` | `{ items }` — mỗi item của lô trong prompt, chữ thêm tiền tố `[vi] ` |
+ * | `knowledge_answer` | `{ grounded, answer, claims }` — trích chunk `K1` nếu prompt có chunk, không có ⇒ `grounded: false` |
+ * | `knowledge_judge` `knowledge_norag` (chỉ eval FLF-267, không phải ActionType) | điểm chấm / câu trả lời mẫu |
  * | còn lại (`chat`, `summarize_document`) | văn bản tự do như cũ |
  *
  * **Lô op rỗng là cố ý.** Mock không biết gì về Spine nên không thể sinh op hợp bất biến; `ops: []`
@@ -88,6 +90,21 @@ export const mockOutputFor = (actionType: string | undefined, prompt: string): s
   }
   if (actionType === "translate_document") {
     return fenced({ items: mockTranslateItems(prompt) })
+  }
+  if (actionType === "knowledge_answer") {
+    // Nhãn chunk thật nằm đầu dòng `[K1] source: …` — ví dụ trong SKILL.md cũng có chữ `[K1]` nên không dò chữ trơn
+    const label = /^\[(K\d+)\] source:/m.exec(prompt)?.[1]
+    return fenced(
+      label
+        ? { grounded: true, answer: `[MOCK AI] Câu trả lời mẫu theo ${label}.`, claims: [{ text: "[MOCK AI] Ý mẫu.", refs: [label] }] }
+        : { grounded: false, answer: "[MOCK AI] Không có chunk.", claims: [] }
+    )
+  }
+  if (actionType === "knowledge_judge") {
+    return fenced({ correct: 0.5, faithful: true, abstained: false, notes: "[MOCK AI] judge" })
+  }
+  if (actionType === "knowledge_norag") {
+    return fenced({ answer: "[MOCK AI] Câu trả lời không dùng tri thức." })
   }
   if (actionType === "render_fix") {
     return fenced({ puml: MOCK_PUML, notes: `[MOCK AI] ${prompt.slice(0, 40).replace(/\s+/g, " ")}` })

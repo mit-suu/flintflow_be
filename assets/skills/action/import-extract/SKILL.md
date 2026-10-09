@@ -29,7 +29,8 @@ An SRS that is silent on something stays silent — leave the field out.
 - Target entities for this section: {{target_entities}}
 - Fields you may fill (names and enums):
 {{schema_excerpt}}
-- Keys already used by earlier sections — reuse them to refer to the same element, never create a duplicate:
+- Keys already used that these blocks may refer to (a relevant subset, not every element) — reuse them to refer to the
+  same element, never create a duplicate:
 {{known_keys}}
 - Blocks of the section (`[B0001] text`; a table is `[B0020] (table)` followed by `| cell | cell |` rows):
 {{blocks}}
