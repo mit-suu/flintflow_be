@@ -93,6 +93,8 @@ khác, 7 tiếng Việt hỏi nội dung tiếng Anh, 5 cần bảng/danh sách,
 Embedding `gemini-embedding-001@768`; câu trả lời + judge `glm` / `zai-org/GLM-5.3-Flash`; corpus `skills` (239 chunk);
 40 câu (32 trong corpus, 8 ngoài). Lệnh: `eval:knowledge --retrieval-only --cache --seed-cache-from-db` rồi
 `--answers --mode both --cache`. Một lượt `--retrieval-only` ~670 text embed; `--answers` ~280 text embed + 160 lượt LLM.
+Đo trên corpus 39 skill (239 chunk), trước khi skill `import-cross-check` (FLF-272) vào cùng nhánh; corpus hiện tại 40 skill /
+242 chunk — chạy lại `ingest:knowledge` (chỉ embed 3 chunk mới) trước khi bật tính năng.
 
 **Ablation truy hồi** (trúng = chunk truy hồi chứa ≥ 50% chữ của chunk vàng; hybrid ở đây là RRF chuẩn `w = 1`):
 
