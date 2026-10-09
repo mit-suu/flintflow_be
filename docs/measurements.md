@@ -524,3 +524,37 @@ Nhận xét:
 - Hai SRS này chỉ cần **một** lô (< 48k ký tự) nên chưa đo được nhánh nhiều lô / song song bằng provider thật — phần đó
   mới có test tích hợp với model giả. Ước tính SRS ~200 trang (~600k ký tự chữ): ~13 lô ⇒ ~42 credit cho 1.11; chưa đo.
 - finalize dài thêm ~18 s (lượt kiểm chéo chạy sau map) — thêm lý do chuyển finalize sang chạy nền.
+
+## I-4 — known_keys theo phạm vi, chạy tiếp theo lô, ước tính credit (2026-10-08, provider GIẢ)
+
+> Số đo trên **SRS mẫu của test** (`makeSrsDocx`) với provider giả (`test/helpers/mock-llm.ts`) — đếm ký tự prompt thật đã
+> dựng, **không phải** token / chi phí của provider thật. Đo lại trên SRS thật bằng `npm run measure:tokens` khi có key.
+
+| Fixture | Lượt chữ | Prompt (ký tự) trước | known_keys trước | Prompt sau | known_keys sau |
+|---|---:|---:|---:|---:|---:|
+| SRS mẫu | 6 | 19 549 | 1 509 | 18 976 | 624 |
+| SRS mẫu + 150 business rule không mục nào nhắc | 6 | 26 749 | 8 709 | 18 976 | 624 |
+
+- Trước: mỗi lượt nhận mọi phần tử đã biết ⇒ thêm 150 BR làm mỗi lượt dài thêm ~1,2k ký tự. Sau: known_keys chỉ còn phần tử
+  của section, feature/function tạm, mã / tên được nhắc trong lô, tác nhân + vai trò; trần cứng 4 000 ký tự
+  (`known-keys.ts#KNOWN_KEYS_CHARS`) ⇒ prompt không phình theo phần tử không liên quan. "Prompt sau" gồm cả câu mô tả
+  known_keys dài thêm ~50 ký tự/lượt trong skill. Đo bởi `test/integration/mode1/extract-scope.int.test.ts` (in ra khi chạy
+  `--reporter=verbose`).
+- Chạy tiếp theo lô (`extract-batch-resume.int.test.ts`): mục 1 có 3 lô, lô 2 lỗi ⇒ chạy tiếp chỉ gọi lô 2–3; mục 1 trừ đúng
+  3 lượt (6 credit), tổng credit và field bằng lượt chạy một mạch.
+- Ước tính trước khi trích trên SRS mẫu + 10 đoạn dài ở mục 1 + 3 ảnh (1 PNG use case, 1 EMF, 1 ảnh chụp màn hình): 8 lô chữ
+  + 1 ảnh = 9 lượt, 18 credit — trùng số lượt gọi và credit bị trừ của lượt chạy thật.
+
+## Mode 1 — I-4 scoped `known_keys`, provider thật (2026-10-08)
+
+- Cách đo: `test/e2e-ai/mode1-import-measure.e2e.test.ts` (nhánh `chore/measure-mode1-import`) chạy trên nhánh này, SRS
+  ClinicPlus v1.0, GLM-5.3-Flash; "trước" = `develop` `12f7c50` (cùng file, cùng ngày).
+
+| Bản | Lượt I-4 | tokens_in | tokens_out | Credit |
+|---|---:|---:|---:|---:|
+| trước (`known_keys` = mọi phần tử đã trích) | 22 | 41 900 | 7 476 | 44 |
+| scoped (`known_keys` theo phạm vi lượt, trần 4 000 ký tự) | 22 | 25 673 | 7 378 | 44 |
+
+- tokens_in I-4 giảm **39%**, số lượt và credit không đổi; Spine trích ra cùng cỡ: 12 UC, 15 NFR, 9 BR, 14 màn ở cả hai lượt; function 14 → 15 (dao động của model).
+- Lượt đo cùng nhánh trên SRS StudentManagement v1.0 (có ảnh) **timeout sau 90 phút**, chưa có số — chưa rõ do provider
+  (Gemini ảnh) hay do nhánh; cần chạy lại kèm log.

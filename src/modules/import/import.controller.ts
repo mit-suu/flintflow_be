@@ -69,7 +69,13 @@ export const getImport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const current = await importService.latestImport(auth.projectId)
   if (current) await extractJobs.markOrphanedExtraction(current)
-  return sendSuccess(res, 200, await importService.getImportView(auth.projectId))
+  const view = await importService.getImportView(auth.projectId)
+  // Ước tính credit trước khi trích (bước mapping / bắt đầu / chạy tiếp) — job đang chạy thì FE đang xem tiến độ, không tính
+  if (current && !extractJobs.isExtractionRunning(String(current._id))) {
+    const role = req.orgContext?.role
+    view.credit_estimate = await extractService.creditEstimateFor(auth.projectId, auth.userId, current, { withBalance: role === "lead" || role === "analyst" })
+  }
+  return sendSuccess(res, 200, view)
 })
 
 export const patchMapping = mode1Handler(async (req, res) => {

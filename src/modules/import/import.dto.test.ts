@@ -109,6 +109,15 @@ describe("import.dto — response", () => {
     expect(getImportResponseSchema.safeParse(empty).success).toBe(true)
   })
 
+  it("GET /import: credit_estimate tuỳ chọn, nullable; available_credits null với Viewer", () => {
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const estimate = { text_batches: 8, diagram_images: 1, ai_calls: 9, credits: 18, available_credits: 300 }
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: estimate }).success).toBe(true)
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: { ...estimate, available_credits: null } }).success).toBe(true)
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: null }).success).toBe(true)
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: { ...estimate, ai_calls: -1 } }).success).toBe(false)
+  })
+
   it("DocBlock có revisions tuỳ chọn cho bản draft", () => {
     const block = {
       block_id: "B0042",
