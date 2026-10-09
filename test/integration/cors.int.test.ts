@@ -19,6 +19,13 @@ describe("CORS — Access-Control-Expose-Headers", () => {
     expect(res.headers["access-control-expose-headers"]).toContain("Content-Disposition")
   })
 
+  it("FLF-265: expose X-Document-Language + độ mới của file .docx (contract #18)", async () => {
+    const res = await request(app).get("/health").set("Origin", ORIGIN)
+
+    const exposed = String(res.headers["access-control-expose-headers"])
+    for (const header of ["X-Document-Language", "X-Assembled-At-Version", "X-Spine-Version"]) expect(exposed).toContain(header)
+  })
+
   it("middleware chạy trước mọi route ⇒ cả response lỗi (401) cũng expose header", async () => {
     const res = await request(app).get("/api/v1/projects").set("Origin", ORIGIN)
 
