@@ -95,6 +95,19 @@ const envSchema = z.object({
   // để trống ở mọi môi trường thật. `mock` không gọi mạng và trả output hợp schema theo ActionType.
   AI_PROVIDER_OVERRIDE: z.string().default(""),
 
+  // ─── Embedding cho C-3 tìm vị trí CR theo nghĩa (`shared/ai/embedding/`) ───────────
+  // `off` (mặc định) ⇒ C-3 tìm theo từ khoá như cũ, không gọi mạng. `gemini` cần GEMINI_API_KEY + Atlas Vector Search
+  // (index `spine_embeddings_vector`, tạo bằng `npm run migrate:spine-embeddings`). `mock` = vector băm tất định (test).
+  // AI_PROVIDER_OVERRIDE=mock ép `mock` trừ khi đang `off`.
+  EMBEDDING_PROVIDER: z.enum(["off", "gemini", "mock"]).default("off"),
+  EMBEDDING_MODEL: z.string().default("gemini-embedding-001"),
+  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(768),
+  EMBEDDING_API_BASE_URL: z.string().default("https://generativelanguage.googleapis.com/v1beta"),
+  EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+  /** Số ứng viên vector tối đa C-3 lấy thêm, và điểm tối thiểu (`vectorSearchScore` cosine của Atlas, 0..1). */
+  CR_VECTOR_TOP_K: z.coerce.number().int().min(1).max(200).default(20),
+  CR_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.8),
+
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z
     .string()
