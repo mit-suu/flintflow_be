@@ -81,6 +81,11 @@ export interface ITemplateProfile extends Document {
    * nguyên văn khi chức năng chưa bị change request sửa (dấu còn khớp).
    */
   function_originals: { section_id: string; source_hash: string; blocks: CustomBlock[] }[]
+  /**
+   * Heading lặp lại một section FPT (mẫu IEEE: Reliability + Availability ⇒ 4.2.2) + phần tử Spine trích từ nó
+   * (`nfrs:NFR-03`) — bản in đặt phần tử dưới đúng heading của file thay vì dồn hết lên lần đầu của section.
+   */
+  section_slices: { custom_id: string; section_id: string; items: string[] }[]
   createdAt: Date
   updatedAt: Date
 }
@@ -139,6 +144,19 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             source_hash: { type: String, required: true },
             // khối nguyên văn (CustomBlock của Spine: paragraph / list_item / table / image) — chỉ để in lại
             blocks: { type: [Schema.Types.Mixed], default: [] }
+          },
+          opts
+        )
+      ],
+      default: []
+    },
+    section_slices: {
+      type: [
+        new Schema(
+          {
+            custom_id: { type: String, required: true },
+            section_id: { type: String, required: true },
+            items: { type: [String], default: [] }
           },
           opts
         )

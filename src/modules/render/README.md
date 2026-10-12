@@ -12,6 +12,7 @@ Writer **không đọc Spine** — nó nhận `RenderedDocument` do Assemble (T1
 | `markdown-to-blocks.ts` | Markdown giới hạn → `Block[]` (heading, đoạn, `**bold**`, `*italic*`, `` `code` ``, bullet, numbered, bảng GFM). `headingOffset` để lồng heading dưới section |
 | `docx-writer.ts` | `writeDocx(doc, { flagLanguage?, language? }): Promise<Buffer>`, `buildDocxFileName(doc)` |
 | `labels.ts` | FLF-265: mọi chữ máy theo ngôn ngữ (nhãn, enum, câu ghép, nhóm heading, nhãn phase §I, chữ của writer). `VI_LABELS`/`VI_SECTION_TITLES` dùng chung mode 1 — không thêm key; nhãn mới chỉ bật ở mẫu FPT (`functionLayout: "fpt"`) |
+| `localized-spine.ts` | FLF-265 D11: `localizeSpine(spine, units, translations)` — bản xem Spine đã dịch trong bộ nhớ; kiểu `LocalizedSpine` không gán được cho `Spine` (không lọt vào op-engine / check / prompt / hash), đường render lấy ra qua `renderView`. Logic dựa chữ Anh của renderer quyết trên Spine gốc (`SectionRenderContext.canonical`) |
 | `export.controller.ts`, `export.route.ts` | `POST /api/v1/export/word/preview` |
 | `zip.test-helper.ts` | Đọc zip bằng `node:zlib` + sinh PNG cho test (không thêm dependency) |
 

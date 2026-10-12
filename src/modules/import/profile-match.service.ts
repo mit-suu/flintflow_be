@@ -88,12 +88,15 @@ export const assignBlockSections = (blocks: ProfileBlock[], headingMap: HeadingM
 
 const headingsOf = (blocks: ProfileBlock[]): ProfileBlock[] => blocks.filter((b) => b.kind === "heading" && b.level !== null)
 
-/** Heading khớp chắc một mục của danh mục: tên giống ≥ 0.8 và (mục không đánh số hoặc số mục trùng). */
+/**
+ * Heading khớp chắc một mục của danh mục: tên giống ≥ 0.8 và (mục hoặc heading không đánh số, hoặc số mục trùng). Heading
+ * không số chỉ xét tên — trước đây file IEEE không đánh số không bao giờ được nhận là IEEE.
+ */
 const STRONG_TITLE = 0.8
 const familyScore = (headings: ProfileBlock[], entries: readonly { number: string; titles: readonly string[] }[]): number =>
   headings.filter((b) => {
     const { number, title } = splitHeadingNumber(b.text)
-    return entries.some((c) => (!c.number || number === c.number) && Math.max(...c.titles.map((t) => titleSimilarity(title, t))) >= STRONG_TITLE)
+    return entries.some((c) => (!c.number || !number || number === c.number) && Math.max(...c.titles.map((t) => titleSimilarity(title, t))) >= STRONG_TITLE)
   }).length
 
 /**
@@ -111,13 +114,44 @@ export const detectTemplateFamily = (blocks: ProfileBlock[]): TemplateFamily => 
   return best.family
 }
 
-/** Điểm khớp heading ↔ mục danh mục: mục không đánh số chỉ theo tên; heading không số ⇒ tên × 0.8. */
-const scoreEntry = (text: string, entry: TemplateEntry): number => {
-  const { number, title } = splitHeadingNumber(text)
-  const t = Math.max(...entry.titles.map((alias) => Math.max(titleSimilarity(title, alias), titleSimilarity(text, alias))))
+const aliasSimilarity = (text: string, titles: readonly string[]): number => {
+  const { title } = splitHeadingNumber(text)
+  return Math.max(...titles.map((alias) => Math.max(titleSimilarity(title, alias), titleSimilarity(text, alias))))
+}
+
+/** Mục cha theo số trong cùng danh mục (`3.1.1` ⇒ `3.1`); mục không số / chương ⇒ `null`. */
+const parentEntryOf = (entry: TemplateEntry, catalog: readonly TemplateEntry[]): TemplateEntry | null => {
+  const dot = entry.number.lastIndexOf(".")
+  if (dot < 0) return null
+  const parent = entry.number.slice(0, dot)
+  return catalog.find((c) => c.number === parent) ?? null
+}
+
+/**
+ * Điểm khớp heading ↔ mục danh mục: mục không đánh số chỉ theo tên; heading không số ⇒ tên × 0.8. Tên trùng ở hai chỗ của
+ * mẫu (User Interfaces 2.1.2 / 3.1.1, Specific Requirements 3 / 3.2): heading cha giống mục cha của mục danh mục ⇒ cộng điểm,
+ * để file đánh số khác mẫu (hoặc không đánh số) vẫn vào đúng chỗ.
+ */
+const scoreEntry = (text: string, entry: TemplateEntry, parentText: string | null, catalog: readonly TemplateEntry[]): number => {
+  const { number } = splitHeadingNumber(text)
+  const t = aliasSimilarity(text, entry.titles)
   if (!entry.number) return t
-  if (!number) return 0.8 * t
-  return 0.7 * t + 0.3 * (number === entry.number ? 1 : 0)
+  const parentEntry = parentText === null ? null : parentEntryOf(entry, catalog)
+  const inContext = parentEntry !== null && aliasSimilarity(parentText!, parentEntry.titles) >= STRONG_TITLE
+  if (!number) return (inContext ? 0.95 : 0.8) * t
+  if (number === entry.number) return 0.7 * t + 0.3
+  return 0.7 * t + (inContext ? 0.2 : 0)
+}
+
+/** Heading cha (gần nhất phía trên, cấp nhỏ hơn) của từng heading; heading cấp đầu ⇒ `null`. */
+const parentHeadingTexts = (headings: ProfileBlock[]): (string | null)[] => {
+  const stack: ProfileBlock[] = []
+  return headings.map((b) => {
+    while (stack.length && stack[stack.length - 1].level! >= b.level!) stack.pop()
+    const parent = stack[stack.length - 1]?.text ?? null
+    stack.push(b)
+    return parent
+  })
 }
 
 /** Độ tin của feature/function suy theo cấu trúc ở mẫu không phải FPT — luôn để người dùng xác nhận (FLF-252). */
@@ -132,9 +166,10 @@ const NON_FPT_STRUCTURE_CAP = 0.75
 const matchWithCatalog = (headings: ProfileBlock[], catalog: readonly TemplateEntry[]): HeadingMapEntry[] => {
   const pairs: { h: number; c: TemplateEntry; score: number }[] = []
   const best = new Map<number, number>()
+  const parents = parentHeadingTexts(headings)
   headings.forEach((b, h) => {
     for (const c of catalog) {
-      const score = scoreEntry(b.text, c)
+      const score = scoreEntry(b.text, c, parents[h], catalog)
       best.set(h, Math.max(best.get(h) ?? 0, score))
       if (score >= MATCH_MIN) pairs.push({ h, c, score })
     }
@@ -147,6 +182,16 @@ const matchWithCatalog = (headings: ProfileBlock[], catalog: readonly TemplateEn
     assigned.set(p.h, { entry: p.c, score: p.score })
     used.add(p.c.id)
   }
+
+  // Mục `feature` có mục con chứa tính năng (3.2 › 3.2.2 Classes for classification) ⇒ chỉ là heading: tính năng nằm dưới
+  // mục con, không tạo thêm tính năng rỗng mang tên "Specific requirements"
+  const headingOnly = new Set<number>()
+  headings.forEach((b, h) => {
+    if (assigned.get(h)?.entry.target !== "feature") return
+    for (let k = h + 1; k < headings.length && headings[k].level! > b.level!; k++) {
+      if (assigned.get(k)?.entry.features) headingOnly.add(h)
+    }
+  })
 
   const entries: HeadingMapEntry[] = []
   const stack: { level: number; section: string; features: boolean }[] = []
@@ -161,7 +206,7 @@ const matchWithCatalog = (headings: ProfileBlock[], catalog: readonly TemplateEn
       features = !!hit.entry.features
       confidence = hit.score
       const target = hit.entry.target
-      if (target === "keep") section = UNMAPPED_SECTION
+      if (target === "keep" || headingOnly.has(h)) section = UNMAPPED_SECTION
       else if (target === "feature") section = provisionalFeatureId(b.block_id)
       else if (target === "parent") section = parent && isContentSection(parent.section) ? parent.section : UNMAPPED_SECTION
       else section = target

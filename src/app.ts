@@ -99,7 +99,8 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
     // Trình duyệt chỉ cho JS đọc header ngoài danh sách safelist khi có Access-Control-Expose-Headers:
     // FE tải .docx qua fetch cần đọc tên file BE đặt trong Content-Disposition (GET /export/word).
-    exposedHeaders: ["Content-Disposition"]
+    // FLF-265: FE đọc được ngôn ngữ + độ mới của file .docx (contract #18)
+    exposedHeaders: ["Content-Disposition", "X-Document-Language", "X-Assembled-At-Version", "X-Spine-Version"]
   })
 )
 

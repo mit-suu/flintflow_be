@@ -15,7 +15,8 @@
  */
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
-import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
+import { screenFlowTitle, screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
+import { label as diagramLabel } from "../diagram/renderers/common.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -181,7 +182,25 @@ export interface SectionRenderContext {
    * năng không màn thêm sau), theo cột của mẫu FPT. Không đặt ⇒ mọi chức năng không màn, cột cũ.
    */
   nonScreenFunctionIds?: ReadonlySet<string>
+  /**
+   * FLF-265 D11 — Spine GỐC khi `spine` truyền vào `renderSection` là bản xem đã dịch (`localized-spine.ts`). Logic dựa
+   * chữ Anh hoặc so chuỗi giữa các field (lọc "Data processing", dò tên entity, tên actor trong tiêu đề sơ đồ luồng màn,
+   * gộp câu / tên trùng, dòng tên màn trong wireframe) quyết trên bản gốc rồi in chữ dịch ở cùng vị trí — cùng dòng như
+   * bản tiếng Anh. Không đặt ⇒ y như trước.
+   */
+  canonical?: Spine
 }
+
+/**
+ * Phần tử cùng id trong `list` (bản gốc ⇔ bản xem đã dịch). Không có `list` (không dựng từ bản dịch) ⇒ chính phần tử đó,
+ * không tra gì thêm — đường hôm nay giữ nguyên byte.
+ */
+const sameId = <T extends { id: string }>(list: readonly T[] | undefined, item: T): T =>
+  list ? (list.find((x) => x.id === item.id) ?? item) : item
+
+/** Giữ phần tử của `items` mà phần tử cùng chỉ số của `source` (chữ gốc, cùng độ dài) thoả `keep`. */
+const keepWhere = (items: readonly string[], source: readonly string[], keep: (text: string) => boolean): string[] =>
+  items.filter((item, i) => keep(source[i] ?? item))
 
 // ─── heading/level của section ────────────────────────────────────
 
@@ -293,10 +312,21 @@ const useCaseTable = (spine: Spine): Block[] => {
 
 // Chỉ còn sơ đồ luồng màn — bảng Screen | Type | Flows To đã bỏ khỏi cả bản draft lẫn baseline
 /** Sơ đồ tách theo actor mang tiêu đề `Screens flow for <actor>` — dùng luôn làm chú thích ảnh. */
-const flowTitle = (d: Spine["diagrams"][number]): string | null => screenFlowTitleOf(d.puml)
+const flowTitle =
+  (spine: Spine, ctx: SectionRenderContext) =>
+  (d: Spine["diagrams"][number]): string | null => {
+    const title = screenFlowTitleOf(d.puml)
+    if (title === null || !ctx.canonical) return title
+    // FLF-265: sơ đồ giữ tiếng Anh (D13) nên tiêu đề mang tên actor GỐC (đã qua `label` của renderer) — khớp actor gốc
+    // theo tiêu đề, in tên đã dịch cùng id (`localizeFptCaption` dịch tiếp phần đầu). Không khớp (hình vẽ trước khi đổi
+    // tên actor) ⇒ giữ tiêu đề trong hình
+    const actor = ctx.canonical.actors.find((a) => a.kind === "human" && diagramLabel(screenFlowTitle(a.name)) === title)
+    const shown = actor && spine.actors.find((a) => a.id === actor.id)
+    return shown ? diagramLabel(screenFlowTitle(shown.name)) : title
+  }
 
 const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] =>
-  diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", flowTitle)
+  diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", flowTitle(spine, ctx))
 
 const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (spine.screens.length === 0) return []
@@ -382,7 +412,19 @@ const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderCont
 /** Mục con trống của §3.x.y mẫu FPT: giữ đủ khung mục như template, không bịa nội dung. */
 const NA = "N/A"
 
-const unique = (items: string[]): string[] => [...new Set(items.filter((x) => x.trim().length > 0))]
+/**
+ * Bỏ rỗng + gộp trùng, giữ lần đầu. `source` (FLF-265) = chữ gốc cùng chỉ số: gộp theo chữ gốc, in phần tử của `items` —
+ * hai câu Anh khác nhau mà dịch ra trùng nhau vẫn là hai dòng như bản tiếng Anh. Không truyền ⇒ gộp trên chính `items`.
+ */
+const unique = (items: readonly string[], source: readonly string[] = items): string[] => {
+  const seen = new Set<string>()
+  return items.filter((item, i) => {
+    const key = source[i] ?? item
+    if (key.trim().length === 0 || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
 /**
  * Đường vào màn của function theo Screens Flow: BFS theo `flow_to` từ màn vào (không pop-up, không có cạnh tới;
@@ -414,26 +456,43 @@ const navigationPath = (spine: Spine, screenId: string, na = NA): string => {
 /**
  * Actor tương tác trực tiếp: actor người (`kind: human`) của các use case chứa function. Không use case nào nối tới
  * function ⇒ actor người của các vai trò có quyền trên màn. Actor system/time (cổng thanh toán, LLM, lịch) không tính.
+ * `canonical` (FLF-265): gộp tên trùng theo tên gốc, in tên của `spine` (bản xem đã dịch).
  */
-const directActors = (spine: Spine, fn: Spine["functions"][number], na = NA): string => {
-  const human = (id: string | null) => spine.actors.find((a) => a.id === id && a.kind === "human")?.name ?? ""
-  const fromUseCases = unique(spine.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids.map(human)))
+const directActors = (spine: Spine, fn: Spine["functions"][number], na = NA, canonical: Spine = spine): string => {
+  const humanIn = (s: Spine) => (id: string | null) => s.actors.find((a) => a.id === id && a.kind === "human")?.name ?? ""
+  const names = (actorIds: (string | null)[]) => unique(actorIds.map(humanIn(spine)), actorIds.map(humanIn(canonical)))
+  const fromUseCases = names(spine.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids))
   if (fromUseCases.length > 0) return fromUseCases.join(", ")
-  const fromRoles = unique(
+  const fromRoles = names(
     spine.permissions
       .filter((perm) => fn.screen_id !== null && perm.screen_id === fn.screen_id)
-      .map((perm) => human(spine.roles.find((r) => r.id === perm.role_id)?.actor_id ?? null))
+      .map((perm) => spine.roles.find((r) => r.id === perm.role_id)?.actor_id ?? null)
   )
   return fromRoles.length > 0 ? fromRoles.join(", ") : na
 }
 
-/** Entity được nhắc tên trong nội dung function (không có liên kết function ↔ entity trong Spine). */
-const dataOf = (spine: Spine, fn: Spine["functions"][number], na = NA): string => {
-  const text = [fn.name, fn.trigger, fn.description, ...fn.normal, ...fn.abnormal, ...fn.validations.map((v) => v.statement)].join(" ").toLowerCase()
+/**
+ * Entity được nhắc tên trong nội dung function (không có liên kết function ↔ entity trong Spine). `canonical` (FLF-265):
+ * dò tên entity GỐC trong chữ GỐC của function — bản dịch không còn chữ Anh để khớp — rồi in tên đã dịch cùng id.
+ */
+const dataOf = (spine: Spine, fn: Spine["functions"][number], na = NA, canonical?: Spine): string => {
+  const source = sameId(canonical?.functions, fn)
+  const text = [source.name, source.trigger, source.description, ...source.normal, ...source.abnormal, ...source.validations.map((v) => v.statement)].join(" ").toLowerCase()
   const escape = (name: string) => name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const named = spine.entities.filter((e) => e.name.trim() && new RegExp(`\\b${escape(e.name)}s?\\b`).test(text)).map((e) => e.name)
+  const named = (canonical ?? spine).entities
+    .filter((e) => e.name.trim() && new RegExp(`\\b${escape(e.name)}s?\\b`).test(text))
+    .map((e) => sameId(canonical ? spine.entities : undefined, e).name)
   return named.length > 0 ? named.join(", ") : na
 }
+
+/** Câu "Business rules" của function: validation nghiệp vụ + business rule đã liên kết (id chết ⇒ rỗng, `unique` bỏ). */
+const ruleStatements = (spine: Spine, fn: Spine["functions"][number]): string[] => [
+  ...fn.validations.filter((v) => v.kind === "business").map((v) => v.statement),
+  ...fn.business_rule_ids.map((id) => spine.business_rules.find((r) => r.id === id)?.statement ?? "")
+]
+
+/** Bước hệ thống tự làm trong luồng chính — mục "Data processing" (lọc trên chữ Anh của Spine). */
+const SYSTEM_STEP = /^(the )?system\b/i
 
 /**
  * Nhóm mục con dạng danh sách gạch đầu dòng `• Nhãn: giá trị`. Mục nhiều dòng (các bước, nhiều validation) ⇒
@@ -477,11 +536,11 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
   const screen = fn.screen_id ? spine.screens.find((s) => s.id === fn.screen_id) : undefined
   const lang = fptLanguage(ctx)
   const na = fptLabelFor(lang, NA)
+  // FLF-265 D11: `spine` có thể là bản xem đã dịch — chọn dòng trên bản gốc (`ctx.canonical`), in chữ dịch cùng vị trí
+  const { canonical } = ctx
+  const source = sameId(canonical?.functions, fn)
 
-  const rules = unique([
-    ...fn.validations.filter((v) => v.kind === "business").map((v) => v.statement),
-    ...fn.business_rule_ids.map((id) => spine.business_rules.find((r) => r.id === id)?.statement ?? "")
-  ])
+  const rules = unique(ruleStatements(spine, fn), ruleStatements(canonical ?? spine, source))
   const layout =
     screen && screen.primary_function_id === fn.id
       ? diagramImages(spine, "screen_layout", screen.id, ctx, sentencesFor(lang).screenLayoutCaption(screen.name))
@@ -496,16 +555,16 @@ const fptFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRenderC
     ], na),
     heading("Function description", 4),
     ...subItems([
-      { label: "Actors / Roles", value: directActors(spine, fn, na) },
+      { label: "Actors / Roles", value: directActors(spine, fn, na, canonical) },
       { label: "Purpose", value: fn.description },
-      { label: "Interface", value: (screen && describeInterface(spine, screen, lang)) || na },
-      { label: "Data processing", steps: fn.normal.filter((step) => /^(the )?system\b/i.test(step.trim())) }
+      { label: "Interface", value: (screen && describeInterface(spine, screen, lang, sameId(canonical?.screens, screen).name)) || na },
+      { label: "Data processing", steps: keepWhere(fn.normal, source.normal, (step) => SYSTEM_STEP.test(step.trim())) }
     ], na),
     heading("Screen layout", 4),
     ...(layout.length > 0 ? layout : [p(na)]),
     heading("Function details", 4),
     ...subItems([
-      { label: "Data", value: dataOf(spine, fn, na) },
+      { label: "Data", value: dataOf(spine, fn, na, canonical) },
       { label: "Validation", steps: fn.validations.filter((v) => v.kind !== "business").map((v) => v.statement) },
       { label: "Business rules", steps: rules },
       { label: "Normal case", steps: fn.normal },

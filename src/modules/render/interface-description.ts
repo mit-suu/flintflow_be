@@ -222,10 +222,12 @@ export const wireframeWidgets = (puml: string, screenName: string, language?: st
 /**
  * Câu mô tả giao diện màn; không có wireframe ⇒ mô tả màn (`screens[].description`); không có gì ⇒ `null`.
  * `language` (FLF-265): chữ nối + tên loại widget theo ngôn ngữ; tên màn, chữ trên widget, mô tả màn giữ nguyên.
+ * `wireframeName` (FLF-265): tên màn GỐC — wireframe giữ chữ gốc (D13) nên dòng tên màn đầu hình so với tên gốc, còn câu
+ * in `screen.name` (bản xem đã dịch). Mặc định chính `screen.name`.
  */
-export const describeInterface = (spine: Spine, screen: Screen, language?: string): string | null => {
+export const describeInterface = (spine: Spine, screen: Screen, language?: string, wireframeName = screen.name): string | null => {
   const layout = spine.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === screen.id && d.render_status === "ok")
-  const widgets = layout ? wireframeWidgets(layout.puml, screen.name, language) : null
+  const widgets = layout ? wireframeWidgets(layout.puml, wireframeName, language) : null
   if (widgets) return interfaceSentence(language, screen.name, screen.is_popup, `${widgets.join(", ")}.`)
   return screen.description.trim() ? interfaceSentence(language, screen.name, screen.is_popup, screen.description.trim()) : null
 }

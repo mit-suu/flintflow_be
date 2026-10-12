@@ -16,6 +16,7 @@ import type { Op } from "../spine/op.types.js"
 import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } from "../spine/spine.types.js"
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
+import { targetsOf } from "./extract-targets.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
@@ -52,9 +53,20 @@ export interface LayoutBlock {
   diagram?: OriginalDiagram | null
 }
 
+/**
+ * Heading lặp lại một section FPT đã gặp (mẫu IEEE: Reliability + Availability ⇒ 4.2.2) — mục riêng `custom_id` cùng các
+ * khối nằm dưới nó. Finalize dùng khối để biết phần tử Spine nào trích từ heading này (`sectionSlices`).
+ */
+export interface LayoutSlice {
+  custom_id: string
+  section_id: string
+  block_ids: string[]
+}
+
 export interface LayoutResult {
   layout: LayoutEntry[]
   customSections: CustomSection[]
+  slices: LayoutSlice[]
 }
 
 const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
@@ -89,13 +101,17 @@ export const buildLayout = (
 ): LayoutResult => {
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
+  const slices: LayoutSlice[] = []
+  /** Heading lặp đang mở — gom khối để biết phần tử nào trích từ heading này. */
+  let slice: LayoutSlice | null = null
   const seen = new Set<string>()
   const stack: { level: number; section: string; entry: LayoutEntry }[] = []
   /** Mục riêng đang nhận nguyên văn mọi khối. */
   let current: CustomSection | null = null
   /**
    * Mục riêng của heading lặp lại một section FPT có trích (FLF-252 — mẫu IEEE: Reliability + Availability ⇒ 4.2.2): nội dung
-   * đã trích vào Spine và in ở lần đầu của section, mục này chỉ giữ phần không trích được (văn xuôi I-4 báo, ảnh) — không in hai lần.
+   * đã trích vào Spine, mục này chỉ giữ nguyên văn phần không trích được (văn xuôi I-4 báo, ảnh) — không in hai lần. Phần tử
+   * trích từ chính heading này in dưới nó (`sectionSlices`), không dồn lên lần đầu của section.
    */
   let currentRepeats = false
   /** Section FPT / nhóm đang mở — khối không trích được thành phần nối của nó. */
@@ -127,6 +143,7 @@ export const buildLayout = (
         // heading con của chính section đó — nội dung đã trích vào section FPT; khối sau nó lại thuộc section đó
         stack.push({ level: b.level, section: mapped, entry: enclosing.entry })
         current = null
+        slice = null
         owner = enclosing.entry
         continue
       }
@@ -135,10 +152,13 @@ export const buildLayout = (
         section = mapped
         seen.add(mapped)
         current = null
+        slice = null
       } else {
         current = newCustom(heading, clampLevel(b.level))
         currentRepeats = mapped !== UNMAPPED_SECTION && !mapped.startsWith("group:")
         section = customSectionKey(current.id)
+        slice = currentRepeats ? { custom_id: current.id, section_id: mapped, block_ids: [b.block_id] } : null
+        if (slice) slices.push(slice)
       }
       const entry: LayoutEntry = { order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section }
       layout.push(entry)
@@ -146,13 +166,54 @@ export const buildLayout = (
       owner = current ? null : entry
       continue
     }
+    slice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
     if (current) {
       if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
   }
-  return { layout, customSections }
+  return { layout, customSections, slices }
+}
+
+/** Phần tử Spine đã trích (finalize): khoá `entity` + `id` + khối nguồn. */
+export interface SlicedEntity {
+  entity: string
+  id: string | null
+  source_block_ids: Iterable<string>
+}
+
+/** Phần tử Spine (`nfrs:NFR-03`) in dưới heading lặp `custom_id` thay vì ở lần đầu của section. */
+export interface SectionSlice {
+  custom_id: string
+  section_id: string
+  items: string[]
+}
+
+export const sliceItemKey = (entity: string, id: string): string => `${entity}:${id}`
+
+/**
+ * Chia phần tử của section FPT cho các heading lặp của nó (mẫu IEEE: Reliability + Availability ⇒ 4.2.2): phần tử thuộc
+ * heading chứa **quá nửa** khối nguồn của nó. Còn lại (kể cả phần tử thêm sau qua change request) in ở lần đầu của section
+ * như trước. Section không có mảng phần tử có id (Product Overview) ⇒ không chia.
+ */
+export const sectionSlices = (slices: readonly LayoutSlice[], entities: readonly SlicedEntity[]): SectionSlice[] => {
+  const out = slices.map((s) => ({ custom_id: s.custom_id, section_id: s.section_id, items: [] as string[] }))
+  const owners = new Map<string, number>()
+  slices.forEach((s, i) => s.block_ids.forEach((b) => owners.set(b, i)))
+  for (const e of entities) {
+    if (!e.id) continue
+    const sources = [...new Set(e.source_block_ids)]
+    const counts = new Map<number, number>()
+    for (const b of sources) {
+      const at = owners.get(b)
+      if (at !== undefined) counts.set(at, (counts.get(at) ?? 0) + 1)
+    }
+    for (const [at, n] of counts) {
+      if (n * 2 > sources.length && targetsOf(slices[at].section_id).includes(e.entity)) out[at].items.push(sliceItemKey(e.entity, e.id))
+    }
+  }
+  return out.filter((s) => s.items.length)
 }
 
 /**
