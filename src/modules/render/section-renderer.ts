@@ -317,9 +317,9 @@ const flowTitle =
   (d: Spine["diagrams"][number]): string | null => {
     const title = screenFlowTitleOf(d.puml)
     if (title === null || !ctx.canonical) return title
-    // FLF-265: sơ đồ giữ tiếng Anh (D13) nên tiêu đề mang tên actor GỐC (đã qua `label` của renderer) — khớp actor gốc
-    // theo tiêu đề, in tên đã dịch cùng id (`localizeFptCaption` dịch tiếp phần đầu). Không khớp (hình vẽ trước khi đổi
-    // tên actor) ⇒ giữ tiêu đề trong hình
+    // FLF-265: sơ đồ đã dịch (N1 — nguồn trong bản xem) mang sẵn tiêu đề dịch ⇒ không khớp actor gốc nào, in nguyên. Sơ đồ
+    // chưa dịch được (hình cũ) mang tên actor GỐC (đã qua `label` của renderer) — khớp actor gốc theo tiêu đề, in tên đã
+    // dịch cùng id (`localizeFptCaption` dịch tiếp phần đầu). Không khớp (hình vẽ trước khi đổi tên actor) ⇒ giữ tiêu đề
     const actor = ctx.canonical.actors.find((a) => a.kind === "human" && diagramLabel(screenFlowTitle(a.name)) === title)
     const shown = actor && spine.actors.find((a) => a.id === actor.id)
     return shown ? diagramLabel(screenFlowTitle(shown.name)) : title

@@ -44,6 +44,7 @@ import { Change as ChangeModel } from "../spine/change.model.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
+import { localizedDiagramPng } from "../diagram/localized-diagram.service.js"
 import { capitalize, sectionLabel } from "../spine/human-labels.js"
 import {
   defaultSectionTitle,
@@ -56,7 +57,7 @@ import {
 import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
 import { GROUP_HEADINGS, assembleTextFor, isVietnamese, type DocumentLanguage } from "./labels.js"
-import { localizeSpine, renderView, type LocalizedSpine } from "./localized-spine.js"
+import { localizeSpine, localizedDiagramSources, renderView, type LocalizedSpine } from "./localized-spine.js"
 import { translationUnits, type TranslationUnit } from "../translation/translation-units.js"
 import { resolveTranslations, type ProjectLanguages, type ResolvedTranslations } from "../translation/translation.service.js"
 import type { UserLocale } from "../../shared/i18n/locale.js"
@@ -236,16 +237,56 @@ const loadDiagramPngs = async (projectId: string, diagramIds: readonly string[],
   return { loaded, missing }
 }
 
+/** Id mọi ảnh của tài liệu: sơ đồ đã vẽ + ảnh gốc trong mục riêng (Phase 5 T3). */
+const documentImageIds = (spine: Spine): string[] => [
+  ...spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
+  ...new Set(spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image" && b.image_ref).map((b) => mediaId(b.image_ref!))))
+]
+
 const preloadDiagramPngs = (projectId: string, spine: Spine, load: DiagramPngLoader): Promise<ImageLoadResult> =>
-  loadDiagramPngs(
-    projectId,
-    [
-      ...spine.diagrams.filter((d) => d.render_status === "ok").map((d) => d.id),
-      // Phase 5 (T3): ảnh gốc trong mục riêng
-      ...new Set(spine.custom_sections.flatMap((c) => c.blocks.filter((b) => b.kind === "image" && b.image_ref).map((b) => mediaId(b.image_ref!))))
-    ],
-    load
-  )
+  loadDiagramPngs(projectId, documentImageIds(spine), load)
+
+/** FLF-265 N1 — PNG (base64) của nguồn sơ đồ đã dịch; `null` ⇒ dùng ảnh gốc. Mặc định đọc / vẽ qua PlantUML, không gọi model. */
+export type LocalizedDiagramPngLoader = (projectId: string, diagramId: string, locale: string, puml: string) => Promise<string | null>
+
+/**
+ * N1 — trần thời gian một lượt dựng chờ vẽ PNG theo ngôn ngữ. Lần đọc đầu sau khi dịch phải vẽ mọi sơ đồ (vài giây với
+ * PlantUML local); quá trần ⇒ sơ đồ chưa xong dùng ảnh gốc, lượt vẽ vẫn chạy tiếp và lưu file cho lần đọc sau.
+ */
+export const LOCALIZED_IMAGE_BUDGET_MS = 8_000
+
+/**
+ * Nạp PNG theo ngôn ngữ cho các sơ đồ có nguồn đã dịch — `IMAGE_LOAD_BATCH_SIZE` lượt cùng lúc, mỗi lượt xong là nhận
+ * ngay (một sơ đồ chậm chỉ giữ một chỗ, không chặn cả lô) — trong trần `budgetMs`.
+ */
+const loadLocalizedPngs = async (
+  projectId: string,
+  locale: string,
+  sources: ReadonlyMap<string, string>,
+  load: LocalizedDiagramPngLoader,
+  budgetMs: number
+): Promise<Map<string, string>> => {
+  const loaded = new Map<string, string>()
+  if (sources.size === 0) return loaded
+  const entries = [...sources]
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < entries.length) {
+      const [id, puml] = entries[next++]
+      const png = await load(projectId, id, locale, puml).catch(() => null)
+      if (png) loaded.set(id, png)
+    }
+  }
+  const work = Promise.all(Array.from({ length: Math.min(IMAGE_LOAD_BATCH_SIZE, entries.length) }, worker))
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const budget = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, budgetMs)
+  })
+  await Promise.race([work, budget])
+  clearTimeout(timer)
+  // Bản chụp lúc hết chờ — lượt vẽ còn chạy tiếp không đổi tài liệu đã trả
+  return new Map(loaded)
+}
 
 // ─── ảnh dạng tham chiếu trong section/cache; phân giải lúc trả về (review T6, FLF-166) ──────
 
@@ -539,6 +580,13 @@ export interface AssembleDeps {
    * theo hash chữ gốc, không gọi model). Chỉ gọi khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc; test tiêm bản giả, khỏi cần Mongo.
    */
   resolveTranslations?: TranslationResolver
+  /**
+   * FLF-265 N1 — PNG của sơ đồ có nguồn đã dịch; mặc định `localized-diagram.service#localizedDiagramPng` (đọc file theo
+   * hash, chưa có thì vẽ trên PlantUML rồi lưu). Chỉ gọi trên đường bản dịch; `null` ⇒ ảnh gốc.
+   */
+  loadLocalizedDiagramPng?: LocalizedDiagramPngLoader
+  /** N1 — trần chờ vẽ PNG theo ngôn ngữ của một lượt dựng; mặc định `LOCALIZED_IMAGE_BUDGET_MS`. */
+  localizedImageBudgetMs?: number
 }
 
 export type TemplateLoader = (projectId: string) => Promise<TemplateLayout | null>
@@ -585,7 +633,8 @@ const defaultDeps = (): AssembleDeps => ({
   loadDiagramPng: defaultDiagramPngLoader,
   now: () => new Date(),
   loadTemplate: loadTemplateLayout,
-  resolveTranslations
+  resolveTranslations,
+  loadLocalizedDiagramPng: (projectId, diagramId, locale, puml) => localizedDiagramPng(projectId, diagramId, locale, puml)
 })
 
 interface BuildDocumentInput {
@@ -636,26 +685,50 @@ const translateSpine = async (
   const units = translationUnits(spine)
   const resolved = await (deps.resolveTranslations ?? resolveTranslations)(projectId, locale, units)
   return {
-    localized: localizeSpine(spine, units, resolved.map),
+    // N1: nguồn sơ đồ của bản xem cũng theo `locale` (nhãn máy + chữ đã dịch)
+    localized: localizeSpine(spine, units, resolved.map, locale),
     translation: { locale, source_locale: sourceLocale, missing: resolved.missing }
   }
+}
+
+/**
+ * Ảnh của tài liệu. Bản đã dịch (N1): sơ đồ có nguồn đã dịch lấy PNG theo ngôn ngữ trước (vẽ được trong trần chờ thì
+ * dùng); chỉ ảnh còn lại — kể cả sơ đồ vẽ không kịp / không được — mới tải PNG gốc, khỏi đọc hai lần mỗi sơ đồ.
+ * `missing` chỉ nói về PNG gốc đã tải.
+ */
+const loadDocumentImages = async (
+  projectId: string,
+  spine: Spine,
+  deps: AssembleDeps,
+  translated: { localized: LocalizedSpine; translation: DocumentTranslationMeta } | undefined
+): Promise<ImageLoadResult> => {
+  if (!translated || !deps.loadLocalizedDiagramPng) return preloadDiagramPngs(projectId, spine, deps.loadDiagramPng)
+  const localized = await loadLocalizedPngs(
+    projectId,
+    translated.translation.locale,
+    localizedDiagramSources(spine, translated.localized),
+    deps.loadLocalizedDiagramPng,
+    deps.localizedImageBudgetMs ?? LOCALIZED_IMAGE_BUDGET_MS
+  )
+  const images = await loadDiagramPngs(projectId, documentImageIds(spine).filter((id) => !localized.has(id)), deps.loadDiagramPng)
+  for (const [id, png] of localized) images.loaded.set(id, png)
+  return images
 }
 
 /** Dựng tài liệu dạng tham chiếu + kết quả tải ảnh — hàm thuần theo nghĩa I/O (chỉ tải ảnh), dùng chung cho draft/baseline. */
 async function buildDocumentParts(input: BuildDocumentInput, deps: AssembleDeps): Promise<BuiltDocument> {
   const { projectId, projectName, spine, source, version } = input
-  const images = await preloadDiagramPngs(projectId, spine, deps.loadDiagramPng)
-  deps.onImagesLoaded?.(images)
-
   const states = computeSectionStates(spine, input.statusChanges)
   // Chỉ mẫu FPT nhận ngôn ngữ — đường layout mode 1 giữ nguyên byte
   const language = input.template ? undefined : input.language
-  // FLF-265 D11: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ⇒ nội dung từ bản xem đã dịch; số hiệu, thứ tự, trạng thái, ảnh, cờ vẫn
-  // tính trên `spine` gốc
+  // FLF-265 D11: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ⇒ nội dung từ bản xem đã dịch; số hiệu, thứ tự, trạng thái, cờ vẫn
+  // tính trên `spine` gốc. Ảnh: PNG theo ngôn ngữ của sơ đồ đã dịch (N1), còn lại ảnh gốc
   const translated =
     language !== undefined && input.sourceLanguage !== undefined && language !== input.sourceLanguage
       ? await translateSpine(projectId, spine, language, input.sourceLanguage, deps)
       : undefined
+  const images = await loadDocumentImages(projectId, spine, deps, translated)
+  deps.onImagesLoaded?.(images)
   let sections: RenderedSection[]
   let numbers: Map<string, string>
   let titles: Map<string, string> | undefined
