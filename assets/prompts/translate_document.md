@@ -20,6 +20,11 @@ Rules:
   names, and text inside quotes or backticks.
 - Keep standard requirement terms in English: Use Case, Actor, Business Rule, NFR, Feature, Entity.
 - When translating into Vietnamese, write the obligation levels shall / should / may as phải / nên / có thể.
+- Keys ending in `.labels` hold the visible texts of one screen wireframe (headings, field labels, button and link
+  captions, column headers, sample values): translate them as short UI texts and keep sample person names, codes,
+  dates and numbers unchanged.
+- Keys ending in `.flows_in` / `.flows_out` are data-flow labels on a context diagram and `.relation_verbs` are short
+  lowercase verbs between two entities (`contains`, `belongs to`): translate them as equally short phrases.
 - Use the glossary exactly: a term listed there is always translated as given.
 - Plain sentences, no markdown, no explanations.
 - Return ONLY a valid JSON object, no extra text:

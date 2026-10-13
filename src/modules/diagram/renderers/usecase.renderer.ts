@@ -26,6 +26,7 @@ import { actorParents, ancestorsOf } from "../../spine/actor-generalization.js"
 import type { ActorKind, UseCase } from "../../spine/spine.types.js"
 import type { Renderer } from "./common.js"
 import { alias, byId, compareIds, label, puml } from "./common.js"
+import { DIAGRAM_LABELS } from "./labels.js"
 
 export const MAX_USE_CASES_PER_DIAGRAM = 20
 
@@ -247,19 +248,19 @@ export const actorUseCaseCounts = (useCases: readonly UseCase[]): Map<string, nu
   return counts
 }
 
-export const renderUseCase: Renderer = (spine) => {
+export const renderUseCase: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
   const actors = new Map(spine.actors.map((a) => [a.id, a]))
   const kinds: ActorKinds = new Map(spine.actors.map((a) => [a.id, a.kind]))
   const parents: ActorParents = actorParents(spine.actors)
   const lifted = liftUseCases(spine.use_cases, kinds, parents)
   const parts = partitionUseCases(byId(lifted), kinds, parents)
-  const system = label(systemName(spine.project)) || "System"
+  const system = label(systemName(spine.project)) || labels.system
   const withEdge = new Set(parts.flatMap((p) => [...p.keep].map((k) => k.split("|")[0]!)))
   // Actor con không còn use case riêng (mọi use case đã nâng lên cha) ⇒ vẽ kèm kế thừa ở hình đầu tiên của cha.
   const strays = [...parents.keys()].filter((id) => !withEdge.has(id)).sort(compareIds)
   const firstPartOf = (actorId: string): number => parts.findIndex((p) => p.groupKeys.includes(actorId))
   // Tên actor không bị ràng buộc ở schema ⇒ phải qua `label()`, `"` hay xuống dòng làm vỡ `.puml`.
-  const groupLabel = (key: string): string => label(actors.get(key)?.name ?? (key === "~" ? "Other" : key))
+  const groupLabel = (key: string): string => label(actors.get(key)?.name ?? (key === "~" ? labels.otherGroup : key))
   const declare = (id: string): string[] => {
     const actor = actors.get(id)
     return actor ? [`actor "${label(actor.name)}" as ${alias(actor.id)}${STEREOTYPE[actor.kind] ?? ""}`] : []
@@ -289,7 +290,7 @@ export const renderUseCase: Renderer = (spine) => {
     ].sort(compareIds)
     const actorIds = [...new Set([...edges.map((e) => e.actorId), ...children, ...children.map((id) => parents.get(id)!)])].sort(compareIds)
     const body = ["skinparam monochrome true", "left to right direction"]
-    if (parts.length > 1) body.push(`title Use Cases — ${part.groupKeys.map(groupLabel).join(" / ")}`)
+    if (parts.length > 1) body.push(`title ${labels.useCasesTitle(part.groupKeys.map(groupLabel).join(" / "))}`)
 
     body.push(...actorIds.filter((id) => isHuman(kinds, id)).flatMap(declare))
     body.push(`rectangle "${system}" {`)
