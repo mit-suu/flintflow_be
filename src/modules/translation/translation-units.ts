@@ -8,7 +8,8 @@
  * Bản dịch khoá theo hash chữ gốc (`hashSource`), không theo key: chữ giống nhau dùng chung một bản dịch, baseline
  * cũ vẫn tra được, sửa chữ gốc ⇒ hash đổi ⇒ đơn vị thành "thiếu" (tính khi đọc, không lưu cờ).
  *
- * Danh sách field dùng chung với luật `non_english_content` (`spine/srs-text-fields.ts`). Hàm thuần, không đọc DB.
+ * Danh sách field dùng chung với luật `non_english_content` (`spine/srs-text-fields.ts`), cộng chữ chỉ vẽ lên sơ đồ
+ * (N1 — `DIAGRAM_TEXT_FIELDS`, nhãn wireframe `diagrams[id=…].labels`) mà luật không quét. Hàm thuần, không đọc DB.
  */
 
 import { createHash } from "node:crypto"
@@ -16,17 +17,22 @@ import type { Spine } from "../spine/spine.types.js"
 import { stableStringify } from "../spine/source-hash.js"
 import { parsePath, type Segment } from "../spine/path-resolver.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, SRS_TEXT_GROUPS, VALIDATION_TEXT_FIELDS, type SrsTextGroup } from "../spine/srs-text-fields.js"
+import { wireframeLabels } from "../diagram/salt-text.js"
 
 export type UnitValue = string | string[]
 
-export type TranslationGroup = SrsTextGroup | "project"
+/** `diagrams` (N1): nhãn của wireframe model vẽ — chữ chỉ có trong `diagrams[].puml`, không ở field Spine nào. */
+export type TranslationGroup = SrsTextGroup | "project" | "diagrams"
 
 /** Vị trí của đơn vị trong Spine — phase 3 dùng để dựng bản xem đã dịch. */
 export interface UnitRef {
   group: TranslationGroup
   /** Id phần tử; `null` với `project`. */
   id: string | null
-  /** Tên field, `release_scope.in` / `release_scope.out` với project. Validation: field của validation. */
+  /**
+   * Tên field, `release_scope.in` / `release_scope.out` với project. Validation: field của validation. Wireframe:
+   * `labels` (không phải field thật của `diagrams[]`).
+   */
   field: string
   /** Chỉ có với `functions[].validations[]`. */
   validation_id?: string
@@ -68,7 +74,45 @@ export const translatableValue = (value: unknown): UnitValue | null => {
   return null
 }
 
-const elementPath = (group: SrsTextGroup, id: string): string => `${group}[id=${id}]`
+const elementPath = (group: Exclude<TranslationGroup, "project">, id: string): string => `${group}[id=${id}]`
+
+/**
+ * Field chữ chỉ vẽ lên sơ đồ (FLF-265 N1): mũi tên sơ đồ ngữ cảnh, động từ hình thoi ERD (cũng in ở cột quan hệ §3.1.5).
+ * Là đơn vị dịch nhưng KHÔNG thuộc danh sách dùng chung — luật `non_english_content` giữ nguyên phạm vi quét.
+ */
+export const DIAGRAM_TEXT_FIELDS: Readonly<Partial<Record<SrsTextGroup, readonly string[]>>> = {
+  actors: ["flows_in", "flows_out"],
+  entities: ["relation_verbs"]
+}
+
+/** Field chữ của một nhóm cho lớp bản dịch: danh sách dùng chung rồi field chỉ có trên sơ đồ. */
+const unitFields = (group: SrsTextGroup): readonly string[] => [...SRS_TEXT_FIELDS[group], ...(DIAGRAM_TEXT_FIELDS[group] ?? [])]
+
+/** Field dạng bảng `id đích → chữ` — một đơn vị là MẢNG chữ theo khoá đã sắp. */
+const RECORD_FIELDS: ReadonlySet<string> = new Set(["relation_verbs"])
+
+const sortedKeys = (record: Row): string[] => Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+
+/** Giá trị đơn vị của field: bảng ⇒ mảng chữ theo khoá đã sắp; còn lại giữ nguyên. */
+const unitFieldValue = (field: string, raw: unknown): unknown =>
+  RECORD_FIELDS.has(field) && isRow(raw) ? sortedKeys(raw).map((key) => raw[key]) : raw
+
+/** Chữ dịch của field bảng, xếp theo khoá của bản GỐC — đúng vị trí `unitFieldValue(field, gốc)`. */
+const localizedFieldValue = (field: string, enRaw: unknown, locRaw: unknown): unknown => {
+  if (!RECORD_FIELDS.has(field) || !isRow(enRaw)) return locRaw
+  return isRow(locRaw) ? sortedKeys(enRaw).map((key) => locRaw[key]) : undefined
+}
+
+/** Giá trị đơn vị đang ở `owner[field]` — cho bản xem đã dịch (`render/localized-spine.ts`). */
+export const readUnitField = (owner: Row, field: string): UnitValue | null => translatableValue(unitFieldValue(field, owner[field]))
+
+/** Ghi chữ dịch vào `owner[field]`; field bảng giữ nguyên khoá, thay chữ theo thứ tự khoá đã sắp. */
+export const writeUnitField = (owner: Row, field: string, text: UnitValue): void => {
+  const current = owner[field]
+  owner[field] = RECORD_FIELDS.has(field) && isRow(current) && Array.isArray(text)
+    ? Object.fromEntries(sortedKeys(current).map((key, i) => [key, text[i]]))
+    : text
+}
 
 const keyOf = (ref: UnitRef): string => {
   if (ref.group === "project") return `project.${ref.field}`
@@ -97,7 +141,7 @@ const idOf = (row: Row): string | undefined => (typeof row.id === "string" && ro
 
 /** Field chữ của chính phần tử (không gồm validation lồng). */
 const ownUnits = (group: SrsTextGroup, id: string, element: Row): TranslationUnit[] =>
-  (SRS_TEXT_FIELDS[group] as readonly string[]).flatMap((field) => unitOf({ group, id, field }, element[field]))
+  unitFields(group).flatMap((field) => unitOf({ group, id, field }, unitFieldValue(field, element[field])))
 
 const elementUnits = (group: SrsTextGroup, element: unknown): TranslationUnit[] => {
   if (!isRow(element)) return []
@@ -118,12 +162,27 @@ const validationUnits = (functionId: string, validation: unknown, fallbackId?: s
 }
 
 /**
- * Mọi đơn vị dịch của Spine theo bảng §2.1: `project` rồi từng collection theo thứ tự `SRS_TEXT_FIELDS`. Không có
- * `custom_sections` (mode 1), `addendum`, `assumptions`, `*_vi`, id / mã / enum. Nhóm vắng mặt ⇒ không có đơn vị.
+ * Nhãn của wireframe model vẽ (N1): một đơn vị mảng nhãn mỗi hình `screen_layout` đã vẽ — chữ khác nhau theo thứ tự
+ * xuất hiện (`salt-text#wireframeLabels`). Không gồm tên màn (bản xem đã dịch thay bằng tên màn đã dịch) và tên hệ
+ * thống (không dịch). Bảng Function | Description của renderer code không có đơn vị: vẽ lại từ field Spine đã dịch.
  */
-export const translationUnits = (spine: Partial<Pick<Spine, "project" | SrsTextGroup>>): TranslationUnit[] => [
+const diagramUnits = (spine: Partial<Pick<Spine, "project" | "screens" | "diagrams">>): TranslationUnit[] =>
+  (spine.diagrams ?? []).flatMap((d) => {
+    if (d.kind !== "screen_layout" || d.render_status !== "ok" || !d.owner_id) return []
+    const screen = spine.screens?.find((s) => s.id === d.owner_id)
+    const labels = wireframeLabels(d.puml, [screen?.name, spine.project?.system_name, spine.project?.name])
+    return unitOf({ group: "diagrams", id: d.id, field: "labels" }, labels)
+  })
+
+/**
+ * Mọi đơn vị dịch của Spine theo bảng §2.1: `project` rồi từng collection theo thứ tự `SRS_TEXT_FIELDS` (mỗi phần tử
+ * kèm field chỉ vẽ lên sơ đồ — N1), cuối cùng nhãn wireframe. Không có `custom_sections` (mode 1), `addendum`,
+ * `assumptions`, `*_vi`, id / mã / enum. Nhóm vắng mặt ⇒ không có đơn vị.
+ */
+export const translationUnits = (spine: Partial<Pick<Spine, "project" | SrsTextGroup | "diagrams">>): TranslationUnit[] => [
   ...(spine.project ? projectUnits(spine.project) : []),
-  ...SRS_TEXT_GROUPS.flatMap((group) => ((spine[group] ?? []) as unknown[]).flatMap((element) => elementUnits(group, element)))
+  ...SRS_TEXT_GROUPS.flatMap((group) => ((spine[group] ?? []) as unknown[]).flatMap((element) => elementUnits(group, element))),
+  ...diagramUnits(spine)
 ]
 
 // ─── cặp (giá trị Anh, giá trị dịch) của một op — FLF-265 D16 ───────
@@ -203,7 +262,7 @@ const pairElement = (group: SrsTextGroup, en: unknown, loc: unknown, fallbackId:
   if (!isRow(en) || !isRow(loc)) return []
   if (loc.id !== undefined && en.id !== undefined && loc.id !== en.id) return []
   const id = idOf(en) ?? fallbackId
-  const own = ownUnits(group, id, en).flatMap((unit) => pairOf(unit, loc[unit.ref.field]))
+  const own = ownUnits(group, id, en).flatMap((unit) => pairOf(unit, localizedFieldValue(unit.ref.field, en[unit.ref.field], loc[unit.ref.field])))
   if (group !== "functions" || !Array.isArray(en.validations)) return own
   return [...own, ...pairElements(en.validations, loc.validations, (v, l, index) => pairValidation(id, v, l, positionalId(index)))]
 }
@@ -267,6 +326,9 @@ export const unitsOfValue = (path: string, enValue: unknown, localizedValue: unk
   if (!id) return []
   if (rest.length === 0) return pairElement(group, enValue, localizedValue, id)
   if (group === "functions" && rest[0].key === "validations") return validationPairs(id, rest, enValue, localizedValue)
-  if (rest.length !== 1 || rest[0].selector || !(SRS_TEXT_FIELDS[group] as readonly string[]).includes(rest[0].key)) return []
-  return unitOf({ group, id, field: rest[0].key }, enValue).flatMap((unit) => pairOf(unit, localizedValue))
+  const field = rest[0].key
+  if (rest.length !== 1 || rest[0].selector || !unitFields(group).includes(field)) return []
+  return unitOf({ group, id, field }, unitFieldValue(field, enValue)).flatMap((unit) =>
+    pairOf(unit, localizedFieldValue(field, enValue, localizedValue))
+  )
 }
