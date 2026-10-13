@@ -1,7 +1,7 @@
 import mongoose from "mongoose"
 import { Comment, CommentCounter, formatCommentId, type CommentStatus, type IComment } from "./comment.model.js"
 import { resolveAnchor } from "./comment.anchor.js"
-import type { CreateCommentDTO } from "./comment.validation.js"
+import type { CreateCommentDTO } from "../pipeline/pipeline.dto.js"
 import { getDocument, NoWorkingDraftError } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Membership, type OrgRole } from "../organization/membership.model.js"

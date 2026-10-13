@@ -20,6 +20,8 @@ import {
   WAIVE_REASON_MIN_LENGTH
 } from "../spine/spine.schema.js"
 import { opSchema, userOpSchema } from "../spine/op.types.js"
+import { COMMENT_ID_PATTERN, COMMENT_STATUSES, COMMENT_TEXT_MAX } from "../comment/comment.model.js"
+import { ORG_ROLES } from "../organization/membership.model.js"
 
 // ─── mã lỗi ──────────────────────────────────────────────────────
 
@@ -611,6 +613,71 @@ export const translationRunResponseSchema = z.object({
   remaining: z.number().int().min(0),
   credits_used: z.number().int().min(0)
 })
+
+// ─── Comment ghim vào nội dung (UC-49, endpoint 28–31) ──────────
+// Comment không đổi nội dung (BR-05). Chuyển thành CR qua `comment_id` của POST /change-requests
+// (`change-request.dto.ts`, `import-change-contract.md` #16).
+
+/** Thông báo theo đặc tả UC-49 (SRS v6 §3.9.3, Abnormal case). */
+const commentText = z
+  .string({ error: "Comment không được để trống." })
+  .trim()
+  .min(1, "Comment không được để trống.")
+  .max(COMMENT_TEXT_MAX, `Comment dài quá ${COMMENT_TEXT_MAX} ký tự.`)
+
+/** GET /projects/:id/comments?status= (28) — mặc định chỉ comment còn mở ("Show resolved" tắt). */
+export const listCommentsQuerySchema = z.object({
+  status: z.enum(["open", "all"]).default("open")
+})
+
+/** POST /projects/:id/comments (29) — Viewer chỉ trên baseline (BR-27); `anchor.label`/`excerpt` do server dựng. */
+export const createCommentSchema = z.strictObject({
+  version: z.strictObject({
+    source: z.enum(["draft", "baseline"]),
+    /** `id` (`BLnnn`) hoặc `snapshot_ref` mà `GET /baselines` trả; bỏ trống với baseline ⇒ baseline mới nhất. */
+    baseline_id: z.string().trim().min(1).max(100).optional()
+  }),
+  anchor: z.strictObject({
+    section_id: z.string().trim().min(1).max(200),
+    block_index: z.number().int().min(0).nullable().default(null)
+  }),
+  text: commentText
+})
+
+/** POST /projects/:id/comments/:commentId/replies (30) */
+export const replyCommentSchema = z.strictObject({ text: commentText })
+
+/** `:commentId` của 30, 31 (POST …/resolve, không body). */
+export const commentParamsSchema = z.object({
+  commentId: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.")
+})
+
+const commentPersonSchema = z.object({ _id: z.string().min(1), name: z.string().nullable(), email: z.string().nullable() })
+const orgRole = z.enum(ORG_ROLES)
+
+/** `Comment` — response của 29, 30, 31; 28 trả mảng, cũ trước. */
+export const commentSchema = z.object({
+  comment_id: z.string().regex(COMMENT_ID_PATTERN),
+  version: z.object({ source: z.enum(["draft", "baseline"]), baseline_id: z.string().nullable(), label: z.string().min(1) }),
+  anchor: z.object({
+    section_id: z.string().min(1),
+    block_index: z.number().int().min(0).nullable(),
+    label: z.string(),
+    excerpt: z.string().nullable()
+  }),
+  author: commentPersonSchema,
+  author_role: orgRole,
+  text: z.string().min(1).max(COMMENT_TEXT_MAX),
+  status: z.enum(COMMENT_STATUSES),
+  cr_id: z.string().nullable(),
+  handled_by: commentPersonSchema.nullable(),
+  handled_at: isoDateTime.nullable(),
+  replies: z.array(z.object({ author: commentPersonSchema, author_role: orgRole, text: z.string().min(1), at: isoDateTime })),
+  created_at: isoDateTime
+})
+export const commentsResponseSchema = z.array(commentSchema)
+
+export type CreateCommentDTO = z.infer<typeof createCommentSchema>
 
 /** POST /projects/:id/baseline (T19) — 422 BASELINE_BLOCKED nếu còn cờ đỏ chưa waive. */
 export const baselineRequestSchema = z.strictObject({ base_version: baseVersion })

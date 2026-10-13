@@ -17,6 +17,7 @@ import { User } from "../../src/modules/user/user.model.js"
 import { Membership, type OrgRole } from "../../src/modules/organization/membership.model.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
 import { changeRequestDetailSchema } from "../../src/modules/change-request/change-request.dto.js"
+import { commentSchema, commentsResponseSchema } from "../../src/modules/pipeline/pipeline.dto.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -70,6 +71,7 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
       text: "  Cần nói rõ ai được huỷ đặt chỗ.  "
     })
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
+    expect(commentSchema.safeParse(res.body.data).error).toBeUndefined()
     expect(res.body.data).toMatchObject({
       comment_id: "CM-001",
       version: { source: "draft", baseline_id: null, label: "draft" },
@@ -134,10 +136,12 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
 
     const resolved = await analyst.c.post("/comments/CM-001/resolve")
     expect(resolved.status).toBe(200)
+    expect(commentSchema.safeParse(resolved.body.data).error).toBeUndefined()
     expect(resolved.body.data).toMatchObject({ status: "resolved", handled_by: { name: "analyst" } })
 
     expect((await viewer.get("/comments")).body.data).toEqual([])
     const all = await viewer.get("/comments?status=all")
+    expect(commentsResponseSchema.safeParse(all.body.data).error).toBeUndefined()
     expect(all.body.data.map((c: { comment_id: string }) => c.comment_id)).toEqual(["CM-001"])
 
     const again = await lead.post("/comments/CM-001/resolve")
