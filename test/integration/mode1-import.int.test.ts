@@ -11,6 +11,7 @@ import { makeDocx, p, table } from "../../src/modules/docx-ooxml/testing/make-do
 import { makeSrsDocx } from "../../src/modules/import/testing/srs-fixture.js"
 import { getImportResponseSchema, importStateResponseSchema, importRejectedMetaSchema } from "../../src/modules/import/import.dto.js"
 import { DocBlock } from "../../src/modules/import/doc-block.model.js"
+import { IMPORT_MAX_FILE_BYTES } from "../../src/modules/import/import.constants.js"
 import { Project } from "../../src/modules/project/project.model.js"
 import { createMode1Project } from "../helpers/mode1.js"
 
@@ -139,6 +140,25 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     const projectId = await createMode1Project(seeded)
     const res = await request(app).post(`/api/v1/projects/${projectId}/import`).set("Authorization", `Bearer ${seeded.token}`)
     expect(res.status).toBe(400)
+  })
+
+  it("giới hạn 40 MB: file hơi quá cỡ ⇒ preflight FILE_TOO_LARGE nêu MB + cách nén ảnh; quá gấp đôi ⇒ 413 meta.max_mb", async () => {
+    const seeded = await seedFixture("minimal")
+    const projectId = await createMode1Project(seeded)
+    const c = api(seeded, projectId)
+    const over = await c.upload(Buffer.alloc(IMPORT_MAX_FILE_BYTES + 1024 * 1024))
+    expect(over.status).toBe(422)
+    const issue = importRejectedMetaSchema.parse(over.body.meta).issues[0]
+    expect(issue.code).toBe("FILE_TOO_LARGE")
+    expect(issue.message).toContain("41 MB")
+    expect(issue.message).toContain("giới hạn 40 MB")
+    expect(issue.message).toContain("Compress Pictures")
+
+    const huge = await c.upload(Buffer.alloc(IMPORT_MAX_FILE_BYTES * 2 + 1))
+    expect(huge.status).toBe(413)
+    expect(huge.body.error.code).toBe("FILE_TOO_LARGE")
+    expect(huge.body.error.message).toContain("40 MB")
+    expect(huge.body.meta).toMatchObject({ max_mb: 40 })
   })
 
   it("FLF-252: Record of Changes đọc ngay lúc tách file ⇒ GET /import trả về để wizard cho xem/sửa; cột bảng có dữ liệu mẫu", async () => {

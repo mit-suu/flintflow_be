@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
+import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
 
 export type ProjectStatus = "active" | "archived"
 
@@ -23,6 +24,11 @@ export interface IProject extends Document {
   mode: ProjectMode
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
+  /**
+   * Ngôn ngữ xem trước + .docx (FLF-265). Không default: thiếu field là có nghĩa (dự án cũ; mode 1 theo file upload)
+   * ⇒ đọc qua `documentLanguageOf` (`document-language.ts`), đừng đọc thẳng.
+   */
+  documentLanguage?: UserLocale
   /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
@@ -74,6 +80,11 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: [...IMPORT_STATUSES, null],
       default: null
+    },
+    // FLF-265: KHÔNG default — dự án cũ / mode 1 không có field, giá trị suy ra ở `documentLanguageOf`
+    documentLanguage: {
+      type: String,
+      enum: [...USER_LOCALES]
     },
     folderId: {
       type: Schema.Types.ObjectId,

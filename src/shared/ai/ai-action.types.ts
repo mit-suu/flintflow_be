@@ -24,6 +24,11 @@ export enum ActionType {
   SUMMARIZE_DOCUMENT = "summarize_document",
   /** FLF-221: dịch câu giả định user sửa (`statement_vi`) sang tiếng Anh (`statement`) — `PATCH /assumptions/:id`. */
   TRANSLATE = "translate",
+  /**
+   * FLF-265: dịch theo lô chữ SRS sang ngôn ngữ tài liệu của dự án (lớp bản dịch, Spine không đổi) — chỉ cho phần còn
+   * thiếu; nội dung mới đã có bản dịch do lượt ghi Spine trả kèm.
+   */
+  TRANSLATE_DOCUMENT = "translate_document",
 
   // ─── Mode 1: import SRS có sẵn + change request (FLF-171, plan mode 1 §5.7) ───
   /** I-4 (nút 1.8): trích field Spine từ text block của một section (hoặc lô section nhỏ). */
@@ -32,6 +37,8 @@ export enum ActionType {
   IMPORT_EXTRACT_DIAGRAM = "import_extract_diagram",
   /** Nút 1.11: kiểm ngữ nghĩa tài liệu vừa import — chỉ ra cờ vàng. */
   IMPORT_SEMANTIC_CHECK = "import_semantic_check",
+  /** Nút 1.11 phần reduce: kiểm chéo giữa các section trên Spine gọn của cả tài liệu — chỉ ra cờ vàng. */
+  IMPORT_CROSS_CHECK = "import_cross_check",
   /** C-2 (nút 3.2): làm rõ CR, trả câu hỏi hoặc đích (entity path, từ khoá) cho C-3. */
   CR_CLARIFY = "cr_clarify",
   /** C-4 (nút 3.6): kết luận edit | comment | not_related cho từng vị trí + đề xuất text/op. */
@@ -39,7 +46,11 @@ export enum ActionType {
   /** C-5 (nút 3.8): kiểm nhất quán trên phạm vi thay đổi — chỉ ra cờ vàng. */
   CR_CONSISTENCY = "cr_consistency",
   /** Mode 1 v3 phase 7: đọc ảnh người dùng đính kèm CR làm tài liệu bổ sung (Gemini vision) ⇒ chữ + mô tả. */
-  CR_MATERIAL_IMAGE = "cr_material_image"
+  CR_MATERIAL_IMAGE = "cr_material_image",
+
+  // ─── Knowledge RAG (FLF-267) ───
+  /** Trả lời câu hỏi trong chat chỉ từ chunk tri thức truy hồi được (K1..Kn), mỗi ý kèm trích dẫn. */
+  KNOWLEDGE_ANSWER = "knowledge_answer"
 }
 
 /**
@@ -62,10 +73,12 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.IMPORT_EXTRACT_FIELDS]: "import-extract",
   [ActionType.IMPORT_EXTRACT_DIAGRAM]: "import-extract-diagram",
   [ActionType.IMPORT_SEMANTIC_CHECK]: "import-semantic-check",
+  [ActionType.IMPORT_CROSS_CHECK]: "import-cross-check",
   [ActionType.CR_CLARIFY]: "cr-clarify",
   [ActionType.CR_PROPOSE]: "cr-propose",
   [ActionType.CR_CONSISTENCY]: "cr-consistency",
-  [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image"
+  [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image",
+  [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer"
 }
 
 export interface AiActionInput {

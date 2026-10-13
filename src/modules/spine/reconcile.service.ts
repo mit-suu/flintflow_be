@@ -28,7 +28,8 @@ import type { RenderTarget } from "../diagram/renderers/index.js"
 import { projectStep } from "../pipeline/context-projection.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
-import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import type { LocalizedEntry, OpTransaction } from "../../shared/ai/response-parser.js"
+import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
@@ -139,9 +140,12 @@ const proposeOps = async (
   briefs: readonly StaleSectionBrief[],
   deps: ReconcileDeps,
   replyLanguage?: ReplyLanguage
-): Promise<{ ops: Op[]; sections: string[] }> => {
+): Promise<{ ops: Op[]; sections: string[]; localized: LocalizedEntry[]; language: TurnDocumentLanguage | null }> => {
   const ops: Op[] = []
   const sections: string[] = []
+  // FLF-265 D16: chữ theo ngôn ngữ tài liệu model trả kèm từng section — gom cùng lô, đi theo preview tới lượt áp
+  const localized: LocalizedEntry[] = []
+  let language: TurnDocumentLanguage | null | undefined
 
   for (const brief of briefs) {
     let projection: ReturnType<typeof projectStep>
@@ -153,6 +157,8 @@ const proposeOps = async (
     }
     sections.push(brief.section_id)
     if (projection.skill === null) continue
+    // Một lần mỗi lượt hoà giải, chỉ khi có section cần gọi model
+    if (language === undefined) language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
 
     const result = await deps.reconcileExecutor(
       ActionType.RECONCILE,
@@ -170,15 +176,17 @@ const proposeOps = async (
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [brief]
         },
-        ...(replyLanguage ? { replyLanguage } : {})
+        ...(replyLanguage ? { replyLanguage } : {}),
+        ...documentLanguageInput(language)
       },
       projectId,
       userId
     )
     ops.push(...stampAddendum((result.data.ops ?? []) as Op[]))
+    if (result.data.localized?.length) localized.push(...result.data.localized)
   }
 
-  return { ops, sections }
+  return { ops, sections, localized, language: language ?? null }
 }
 
 // ─── điểm vào ────────────────────────────────────────────────────
@@ -256,7 +264,18 @@ export const reconcile = async (
     }
   }
 
-  const preview = await previewChange(projectId, userId, { base_version: body.base_version, ops: proposed.ops, reason: "Hoà giải section stale" }, init, d)
+  const preview = await previewChange(
+    projectId,
+    userId,
+    {
+      base_version: body.base_version,
+      ops: proposed.ops,
+      reason: "Hoà giải section stale",
+      ...(proposed.localized.length > 0 ? { localized: proposed.localized, document_language: languagePairOf(proposed.language) } : {})
+    },
+    init,
+    d
+  )
   if (preview.preview_id !== undefined) reconciledSections.set(preview.preview_id, proposed.sections)
   return preview
 }

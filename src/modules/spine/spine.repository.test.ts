@@ -76,6 +76,12 @@ const db = vi.hoisted(() => {
       const rows = docs.map((d, i) => ({ _id: `change-${changes.length + i + 1}`, __v: 0, ...copy(d) }))
       changes.push(...rows)
       return rows.map(copy)
+    },
+    deleteMany: async (filter: Filter) => {
+      const keep = changes.filter((c) => !matches(c, filter))
+      const deletedCount = changes.length - keep.length
+      changes.splice(0, changes.length, ...keep)
+      return { deletedCount }
     }
   }
 
@@ -212,6 +218,31 @@ describe("saveWithVersion — khoá lạc quan", () => {
     const current = await repo.get(PROJECT)
     expect(current?.spine_version).toBe(1)
     expect(current?.actors).toEqual([])
+  })
+})
+
+describe("restoreSnapshot — rollback việc nhiều lô dở", () => {
+  it("Spine về đúng nội dung mốc, version vẫn tăng, change từ mốc bị bỏ (change trước mốc giữ)", async () => {
+    const spine = await repo.getOrCreate(PROJECT)
+    const { projectId: _projectId, ...snapshot } = spine
+    await repo.appendChanges(PROJECT, [change(1)])
+    // "lần chạy dở": hai lô sau mốc seq 2
+    await repo.saveWithVersion({ ...spine, actors: [{ id: "A01", name: "Learner", kind: "human", description: "" }] }, 1)
+    await repo.appendChanges(PROJECT, [change(2), change(3)])
+
+    const restored = await repo.restoreSnapshot(PROJECT, snapshot, { baseVersion: 2, fromSeq: 2 })
+    expect(restored.spine_version).toBe(3)
+    expect(restored.actors).toEqual([])
+    expect((await repo.listChanges(PROJECT)).map((c) => c.seq)).toEqual([1])
+    expect(await repo.nextSeq(PROJECT)).toBe(2)
+  })
+
+  it("base lệch ⇒ 409, không bỏ change nào", async () => {
+    const spine = await repo.getOrCreate(PROJECT)
+    const { projectId: _projectId, ...snapshot } = spine
+    await repo.appendChanges(PROJECT, [change(1)])
+    await expect(repo.restoreSnapshot(PROJECT, snapshot, { baseVersion: 7, fromSeq: 1 })).rejects.toMatchObject({ statusCode: 409 })
+    expect(await repo.nextSeq(PROJECT)).toBe(2)
   })
 })
 

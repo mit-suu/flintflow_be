@@ -23,8 +23,17 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import { ChangeRequest, CrCounter } from "../change-request/change-request.model.js"
 import { ChangeLocation } from "../change-request/change-location.model.js"
 import { ChangeGroup } from "../change-request/change-group.model.js"
+import { SpineTranslation } from "../translation/spine-translation.model.js"
+import { TranslationGlossary } from "../translation/translation-glossary.model.js"
+import { TranslationRunLock } from "../translation/translation-run-lock.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { getPlan } from "../billing/plan.config.js"
+import { accountLocaleOf } from "../user/account-locale.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
+import { Mode1Error, type Mode1ErrorCode } from "../import/mode1.errors.js"
+
+/** FLF-265: dự án mode 1 đọc ngôn ngữ theo file upload (D3) — không đổi bằng tay. Mã đăng ký ở `MODE1_ERROR_STATUS`. */
+export const DOCUMENT_LANGUAGE_LOCKED = "DOCUMENT_LANGUAGE_LOCKED" satisfies Mode1ErrorCode
 
 /**
  * UC-16: số dự án tối đa theo gói đang active của tổ chức (`plan.config` — free 3, pro 50). Dự án đã xoá
@@ -47,7 +56,8 @@ export const createProject = async (
   name: string,
   domain?: string,
   mode: ProjectMode = "fpt",
-  folderId?: string
+  folderId?: string,
+  documentLanguage?: UserLocale
 ): Promise<IProject> => {
   if (mode === "customer_template") {
     throw new ApiError(501, "Chưa hỗ trợ tạo dự án theo mẫu của khách hàng.", "NOT_IMPLEMENTED")
@@ -55,6 +65,8 @@ export const createProject = async (
   // Tạo thẳng trong thư mục (một request) — thư mục phải thuộc cùng org
   if (folderId) await assertFolderOwned(orgId, folderId)
   await assertProjectQuota(orgId)
+  // FLF-265 (D2, D3): mode 2 lưu body ⇒ ngôn ngữ tài khoản ⇒ en. Mode 1 bỏ qua giá trị gửi lên, để trống — ngôn ngữ theo file upload
+  const language = mode === "import" ? null : (documentLanguage ?? (await accountLocaleOf(userId)) ?? "en")
   // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     organizationId: orgId,
@@ -64,6 +76,7 @@ export const createProject = async (
     domain: domain || null,
     status: "active",
     mode,
+    ...(language ? { documentLanguage: language } : {}),
     ...(folderId ? { folderId } : {})
   })
   await spineRepository.getOrCreate(project.id, { name, domain: domain || null })
@@ -144,7 +157,11 @@ const purgeProjectData = async (projectId: string): Promise<void> => {
     ChangeRequest.deleteMany({ projectId }),
     CrCounter.deleteMany({ projectId }),
     ChangeLocation.deleteMany({ projectId }),
-    ChangeGroup.deleteMany({ projectId })
+    ChangeGroup.deleteMany({ projectId }),
+    // FLF-265: lớp bản dịch + glossary dịch + khoá lượt dịch
+    SpineTranslation.deleteMany({ projectId }),
+    TranslationGlossary.deleteMany({ projectId }),
+    TranslationRunLock.deleteMany({ projectId })
   ])
 
   // File ngoài collection: lỗi ở đây không được làm hỏng việc xoá đã xong ở trên
@@ -218,4 +235,28 @@ export const moveProjectToFolder = async (
     throw new ApiError(404, "Không tìm thấy thư mục hoặc bạn không có quyền truy cập.", "FOLDER_NOT_FOUND")
   }
   return project
+}
+
+/**
+ * Đổi ngôn ngữ tài liệu (FLF-265, D2). Chỉ ghi field — không đụng Spine, không xoá cache render (phase 3 đưa ngôn
+ * ngữ vào đường render). Mode 1 ⇒ 409 `DOCUMENT_LANGUAGE_LOCKED` (D3). Lọc `mode` ngay trong lệnh ghi: dự án cũ
+ * thiếu `mode` (= fpt) vẫn khớp `$ne`.
+ */
+export const setDocumentLanguage = async (
+  projectId: string,
+  orgId: string,
+  documentLanguage: UserLocale
+): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  const project = await Project.findOneAndUpdate(
+    { _id: projectId, organizationId: orgId, mode: { $ne: "import" } },
+    { documentLanguage },
+    { new: true }
+  )
+  if (project) return project
+  // Không khớp: phân biệt dự án mode 1 (409) với dự án không có / thuộc org khác (404)
+  const existing = await Project.findOne({ _id: projectId, organizationId: orgId }).select("mode").lean()
+  if (!existing) throw notFound()
+  throw new Mode1Error(DOCUMENT_LANGUAGE_LOCKED, "Dự án tải tài liệu lên dùng ngôn ngữ của file, không đổi được.")
 }

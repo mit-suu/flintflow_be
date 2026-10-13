@@ -61,5 +61,10 @@ describe("import mẫu IEEE 830 (FLF-252)", () => {
     // Availability lặp section 4.2.2 ⇒ mục riêng của layout chỉ giữ phần không trích được, không chép lại nội dung đã trích
     const availability = profile.layout.find((l) => l.heading_text === "3.5.2 Availability")!
     expect(availability.section_id).toMatch(/^custom:/)
+    // NFR trích từ đoạn dưới Availability in dưới chính heading đó (không dồn lên 3.5.1 Reliability)
+    const availabilityNfr = spine.nfrs.find((n) => n.statement.includes("24 hours"))!
+    expect(profile.section_slices).toEqual([
+      { custom_id: availability.section_id.slice("custom:".length), section_id: "fixed:4.2.2", items: [`nfrs:${availabilityNfr.id}`] }
+    ])
   })
 })

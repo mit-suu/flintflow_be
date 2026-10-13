@@ -264,3 +264,63 @@ describe("writeDocx — phụ lục cờ theo ngôn ngữ (mode 1: tiếng Việ
     expect(value).toContain("section_empty")
   })
 })
+
+describe("writeDocx — chữ cố định theo ngôn ngữ (FLF-265)", () => {
+  const coreXml = (docx: Buffer) => readZipText(docx, "docProps/core.xml")
+  const footerXml = (docx: Buffer) =>
+    [...readZipEntries(docx).entries()]
+      .filter(([name]) => /^word\/footer\d*\.xml$/.test(name))
+      .map(([, content]) => content.toString("utf8"))
+      .join("\n")
+
+  it("language vi ⇒ bìa, mục lục, §I, ghi chú STALE / chờ chấp nhận lại, footer, core properties tiếng Việt", async () => {
+    const docx = await writeDocx(sample, { language: "vi" })
+    const xml = readZipText(docx, "word/document.xml")
+    for (const text of [
+      "Đặc tả yêu cầu phần mềm",
+      `Phiên bản: ${sample.version}`,
+      `Ngày: ${sample.generatedAt.slice(0, 10)}`,
+      "BẢN LÀM VIỆC - CHƯA BASELINE",
+      "Mục lục",
+      "I. Lịch sử thay đổi",
+      "*A - Thêm, M - Sửa, D - Xoá",
+      "Người thực hiện",
+      "Mô tả thay đổi",
+      "[CẦN XEM LẠI]",
+      "[CHỜ CHẤP NHẬN LẠI]"
+    ]) {
+      expect(xml, text).toContain(text)
+    }
+    // Định nghĩa thuật ngữ "SRS" trong mẫu chứa cụm này (nội dung, không phải nhãn) ⇒ so đúng run của bìa
+    expect(xml).not.toContain(">Software Requirement Specification</w:t>")
+    for (const text of ["Table of Contents", "Record of Changes", "Change Description", "[STALE]", "[AWAITING RE-ACCEPT]", "WORKING DRAFT"]) {
+      expect(xml, text).not.toContain(text)
+    }
+    expect(footerXml(docx)).toContain("Trang ")
+    expect(footerXml(docx)).not.toContain("Page ")
+    expect(coreXml(docx)).toContain(`${sample.projectName} - Đặc tả yêu cầu phần mềm`)
+    expect(coreXml(docx)).toContain(`Bản làm việc ${sample.version}`)
+    expect(headerXml(docx)).toContain(`${sample.projectName} - SRS ${sample.version}`)
+  })
+
+  it("language vi không đổi phụ lục cờ — phụ lục vẫn theo flagLanguage", async () => {
+    const { value } = await mammoth.extractRawText({ buffer: await writeDocx(sample, { language: "vi" }) })
+    expect(value).toContain("Working Draft Status")
+  })
+
+  it("mặc định = language en: document.xml, header, footer y hệt nhau", async () => {
+    const [plain, en] = await Promise.all([writeDocx(sample), writeDocx(sample, { language: "en" })])
+    expect(readZipText(en, "word/document.xml")).toBe(readZipText(plain, "word/document.xml"))
+    expect(headerXml(en)).toBe(headerXml(plain))
+    expect(footerXml(en)).toBe(footerXml(plain))
+    expect(readZipText(plain, "word/document.xml")).toContain("Table of Contents")
+    expect(readZipText(plain, "word/document.xml")).toContain(">Software Requirement Specification</w:t>")
+    expect(footerXml(plain)).toContain("Page ")
+  })
+
+  it("baseline vi ⇒ băng rôn BASELINE, mô tả core 'Baseline'", async () => {
+    const docx = await writeDocx(baseline(), { language: "vi" })
+    expect(readZipText(docx, "word/document.xml")).toContain("BASELINE")
+    expect(coreXml(docx)).toContain("Baseline v1.0 tạo lúc")
+  })
+})

@@ -12,7 +12,18 @@ import { RULES, applyRuleProfile, runDeterministicCheck, type FlagCandidate } fr
 import { spineSchema } from "../spine/spine.schema.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Flag, Spine } from "../spine/spine.types.js"
-import { countOpenFlags, findingOps, semanticProjection } from "./check.service.js"
+import {
+  CROSS_CHECK_STEP,
+  countOpenFlags,
+  crossProjection,
+  elementSections,
+  findingOps,
+  runLimited,
+  semanticBatchStep,
+  semanticBatches,
+  semanticProjection,
+  type CheckBlock
+} from "./check.service.js"
 import { IMPORT_SEMANTIC_RULE, MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -146,10 +157,110 @@ describe("tiện ích check", () => {
     expect(countOpenFlags([f("red", null), f("yellow", null), f("yellow", null), f("red", "2026-01-01T00:00:00.000Z")])).toEqual({ red: 1, yellow: 2 })
   })
 
+  it("semanticProjection có phạm vi: lọc use case / function / NFR / BR, actor luôn giữ đủ", () => {
+    const proj = JSON.parse(semanticProjection(FULL, (array, id) => (array === "use_cases" && id === "UC01") || (array === "nfrs" && id === "N02")))
+    expect(proj.use_cases.map((u: { id: string }) => u.id)).toEqual(["UC01"])
+    expect(proj.nfrs.map((n: { id: string }) => n.id)).toEqual(["N02"])
+    expect(proj.functions).toEqual([])
+    expect(proj.business_rules).toEqual([])
+    expect(proj.actors).toHaveLength(FULL.actors.length)
+  })
+
   it("semanticProjection là phép chiếu gọn (chỉ vài mảng, cắt ở 12k ký tự)", () => {
     const proj = semanticProjection(FULL)
     expect(proj.length).toBeLessThanOrEqual(12_000 + "\n…(truncated)".length)
     const small = semanticProjection(createEmptySpine())
     expect(Object.keys(JSON.parse(small))).toEqual(["actors", "use_cases", "functions", "nfrs", "business_rules"])
+  })
+})
+
+describe("1.11 map-reduce — chia lô, phạm vi, kiểm chéo", () => {
+  const block = (n: number, section: string | null, text: string, mentions: CheckBlock["mentions"] = []): CheckBlock => ({
+    block_id: `B${String(n).padStart(4, "0")}`,
+    section_id: section,
+    text,
+    mentions
+  })
+
+  it("chia hết tài liệu theo thứ tự (không còn cắt ở 16k ký tự đầu), mỗi lô một step I-1.11:<n>, bỏ block rỗng", () => {
+    const blocks = Array.from({ length: 30 }, (_, i) => block(i + 1, i < 15 ? "fixed:3.1" : "fixed:4.2.3", "x".repeat(1_000)))
+    blocks.splice(3, 0, block(99, "fixed:3.1", "   "))
+    const batches = semanticBatches(blocks, 10_000)
+    expect(batches.map((b) => b.step_id)).toEqual([1, 2, 3, 4].map(semanticBatchStep))
+    const lines = batches.flatMap((b) => b.lines.split("\n"))
+    // đủ 30 block có chữ, đúng thứ tự, mỗi dòng mang block id + section
+    expect(lines.map((l) => /^\[(B\d+)\]/.exec(l)?.[1])).toEqual(blocks.filter((b) => b.text.trim()).map((b) => b.block_id))
+    expect(lines[0]).toMatch(/^\[B0001\] \(fixed:3\.1\) x+$/)
+    expect(batches[1].section_ids).toEqual(["fixed:3.1", "fixed:4.2.3"])
+    expect(semanticBatchStep(2)).toBe("I-1.11:2")
+    expect(CROSS_CHECK_STEP).toBe("I-1.11:cross")
+  })
+
+  it("block quá dài bị cắt để một block không chiếm hết lô", () => {
+    const [batch] = semanticBatches([block(1, "fixed:3.1", "y".repeat(20_000))])
+    expect(batch.lines.length).toBeLessThan(7_000)
+    expect(batch.lines).toContain("…(truncated)")
+  })
+
+  it("phạm vi lô: phần tử có anchor trong section của lô hoặc được nhắc mã trong lô (so mã theo idKey)", () => {
+    const blockSection = new Map<string, string | null>([
+      ["B0001", "fixed:3.1"],
+      ["B0002", "fixed:4.2.3"],
+      ["B0003", "fixed:5.1"]
+    ])
+    const scope = elementSections(
+      [
+        { entity_path: "use_cases[id=UC01]", block_ids: ["B0001"] },
+        { entity_path: "nfrs[id=N02]", block_ids: ["B0002"] },
+        { entity_path: "business_rules[id=BR01]", block_ids: ["B0003"] },
+        { entity_path: "project", block_ids: ["B0001"] }
+      ],
+      blockSection
+    )
+    const [batch] = semanticBatches([block(1, "fixed:3.1", "Register account, see BR-1", [{ entity: "business_rule", id: "BR-1" }])])
+    const keep = scope.scopeOf(batch)
+    expect(keep("use_cases", "UC01")).toBe(true) // anchor ở 3.1
+    expect(keep("business_rules", "BR01")).toBe(true) // nhắc "BR-1" = BR01
+    expect(keep("nfrs", "N02")).toBe(false) // section khác, không nhắc
+    expect(keep("functions", "FN001")).toBe(false) // không anchor
+    expect(scope.sectionOf("nfrs", "N02")).toBe("fixed:4.2.3")
+    expect(scope.sectionOf("functions", "FN001")).toBeNull()
+  })
+
+  it("crossProjection: cả tài liệu, câu rút gọn, mỗi phần tử kèm section; NFR / BR đứng trước use case", () => {
+    const s = structuredClone(FULL)
+    s.nfrs[0].statement = "z".repeat(500)
+    const proj = crossProjection(s, (array, id) => (array === "nfrs" && id === s.nfrs[0].id ? "fixed:4.2.3" : null))
+    const parsed = JSON.parse(proj)
+    expect(Object.keys(parsed)).toEqual(["actors", "nfrs", "business_rules", "functions", "use_cases"])
+    expect(parsed.nfrs[0]).toMatchObject({ id: s.nfrs[0].id, section_id: "fixed:4.2.3" })
+    expect(parsed.nfrs[0].statement.length).toBeLessThanOrEqual(201)
+    expect(parsed.functions).toHaveLength(FULL.functions.length)
+    expect(parsed.use_cases[0]).toEqual({ id: "UC01", name: FULL.use_cases[0].name, actor_ids: FULL.use_cases[0].actor_ids, section_id: null })
+  })
+
+  it("runLimited: không vượt số lượt song song, giữ thứ tự kết quả", async () => {
+    let running = 0
+    let peak = 0
+    const out = await runLimited([30, 10, 20, 5, 15], 2, async (ms) => {
+      running++
+      peak = Math.max(peak, running)
+      await new Promise((r) => setTimeout(r, ms))
+      running--
+      return { ok: true, ms }
+    })
+    expect(peak).toBe(2)
+    expect(out.map((r) => r?.ms)).toEqual([30, 10, 20, 5, 15])
+  })
+
+  it("runLimited: một lượt lỗi ⇒ không mở lượt mới, lượt đang chạy vẫn xong; phần chưa chạy là undefined", async () => {
+    const started: number[] = []
+    const out = await runLimited([1, 2, 3, 4, 5], 2, async (n) => {
+      started.push(n)
+      await new Promise((r) => setTimeout(r, n === 2 ? 5 : 20))
+      return { ok: n !== 2 }
+    })
+    expect(started).toEqual([1, 2])
+    expect(out.map((r) => r?.ok)).toEqual([true, false, undefined, undefined, undefined])
   })
 })

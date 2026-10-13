@@ -33,6 +33,7 @@ import type { IChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
 import { elementValue, valueText } from "./spine-location.js"
 import { valueChanged } from "./verify.service.js"
+import { scheduleEmbeddingSync } from "./embedding/embedding-sync.service.js"
 
 /** Ghi các vị trí đã duyệt thành version minor mới. Trả version mới. */
 export const writeApproved = async (cr: IChangeRequest, userId: string, approved: IChangeLocation[], baseVersion: number): Promise<string> => {
@@ -110,6 +111,8 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   } catch (err) {
     console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng ghép lại bản làm việc lỗi — workspace ghép lại khi mở`, err)
   }
+  // Spine vừa đổi ⇒ embed lại phần tử đổi chữ cho C-3 của CR sau — chạy nền, không chặn/không làm hỏng C-7
+  if (ops.length) scheduleEmbeddingSync(projectId)
   return next
 }
 

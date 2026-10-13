@@ -8,6 +8,7 @@
  */
 
 import { deflateSync } from "node:zlib"
+import { assembleTextFor } from "./labels.js"
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
@@ -53,6 +54,6 @@ export const DIAGRAM_PLACEHOLDER_HEIGHT = 240
 /** Base64 của ảnh placeholder — dạng `ImageBlock.png` khi qua HTTP. */
 export const DIAGRAM_PLACEHOLDER_PNG = buildPlaceholderPng(DIAGRAM_PLACEHOLDER_WIDTH, DIAGRAM_PLACEHOLDER_HEIGHT).toString("base64")
 
-/** Caption cho ảnh placeholder (nội dung SRS là tiếng Anh). */
-export const pendingImageCaption = (caption: string | undefined, diagramId: string): string =>
-  `${caption ? `${caption} — ` : ""}image pending: diagram ${diagramId} has not been rendered yet`
+/** Caption cho ảnh placeholder — mặc định tiếng Anh; `language` (FLF-265) theo ngôn ngữ tài liệu mẫu FPT. */
+export const pendingImageCaption = (caption: string | undefined, diagramId: string, language?: string): string =>
+  `${caption ? `${caption} — ` : ""}${assembleTextFor(language).imagePending(diagramId)}`

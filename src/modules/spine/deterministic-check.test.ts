@@ -8,6 +8,7 @@ import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, ru
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
 import { computeSourceHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
+import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -309,6 +310,17 @@ describe("runDeterministicCheck", () => {
     expect(flags.every((f) => f.level === "yellow" || f.rule_id === "dead_reference")).toBe(true)
   })
 
+
+  it("FLF-265: non_english_content chỉ đọc Spine — dự án mode 2 có ngôn ngữ tài liệu vi vẫn bị bắt chữ Việt; mode 1 vẫn tắt", () => {
+    // Ngôn ngữ tài liệu nằm ở Project, bản dịch ở SpineTranslation — luật không nhận cả hai, Spine mode 2 vẫn phải tiếng Anh
+    const vietnameseInSpine = variant((s) => {
+      s.actors[1].name = "Quản trị viên"
+    })
+    expect(byRule(runDeterministicCheck(vietnameseInSpine), "non_english_content")).toMatchObject([{ target_id: FIXTURE.actors[1].id }])
+    expect(byRule(runDeterministicCheck(vietnameseInSpine, [], { ruleProfile: MODE1_RULE_PROFILE }), "non_english_content")).toEqual([])
+    // Spine tiếng Anh (bản tiếng Việt chỉ ở lớp bản dịch) ⇒ không cờ
+    expect(byRule(runDeterministicCheck(FIXTURE), "non_english_content")).toEqual([])
+  })
 
   it("BUG-11: đã có system_name tiếng Anh ⇒ không quét project.name nữa", () => {
     const viName = (s: Spine) => {

@@ -91,18 +91,21 @@ export interface ResumeDeps {
 
 const defaultDeps = async (): Promise<ResumeDeps> => {
   // Nạp muộn: tránh vòng import billing ⇄ import ⇄ change-request lúc khởi động
-  const [{ startExtraction }, { resumeCheck }, clarify, propose, verify] = await Promise.all([
+  const [{ startExtraction }, finalizeJobs, clarify, propose, verify] = await Promise.all([
     import("./extract-jobs.js"),
-    import("./finalize.service.js"),
+    import("./finalize-jobs.js"),
     import("../change-request/clarify.service.js"),
     import("../change-request/propose.service.js"),
     import("../change-request/verify.service.js")
   ])
   return {
     resumeExtraction: startExtraction,
+    // 1.11–1.12 qua job nền (đăng ký job ⇒ `GET /import` không coi là job mất), chờ xong để chạy lần lượt như trước
     resumeCheck: async (importId, userId) => {
       const doc = await ImportedDocument.findById(importId)
-      if (doc) await resumeCheck(doc, userId)
+      if (!doc) return
+      await finalizeJobs.startResume(String(doc.projectId), userId, importId)
+      await finalizeJobs.waitForFinalize(importId)
     },
     resumeCr: async (projectId, crId, userId) => {
       const cr = await ChangeRequest.findOne({ projectId, cr_id: crId })

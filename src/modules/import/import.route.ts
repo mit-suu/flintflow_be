@@ -260,6 +260,11 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  * /api/v1/projects/{id}/import/finalize:
  *   post:
  *     summary: Ghi Spine + tạo version 0.0 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
+ *     description: |
+ *       Chạy nền (SRS lớn mất vài phút — không giữ request qua reverse proxy): kiểm trạng thái + `base_version` ngay
+ *       (409 như cũ), rồi trả ngay `{ import (baselining, paused null), baseline: null, flags: null }`; FE poll `GET /import`
+ *       tới `gap_review` hoặc có `paused`. Gọi lại khi đang chạy ⇒ trả trạng thái hiện tại. Job lỗi giữa chừng ⇒ hoàn về
+ *       trước finalize, `baselining` + `paused: { reason: resume_later }`; gọi `/import/resume` để chạy lại.
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -276,7 +281,7 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  *               import_id: { type: string }
  *               base_version: { type: integer }
  *     responses:
- *       200: { description: "`{ import, doc_version: \"0.0\", baseline, spine_version, flags: { red, yellow } }` — import ở gap_review, hoặc checking + paused" }
+ *       200: { description: "`{ import, doc_version: \"0.0\", baseline: null, spine_version, flags: null }` — trả ngay, import ở baselining (job nền)" }
  *       409: { description: IMPORT_INVALID_STATE, SPINE_VERSION_CONFLICT }
  */
 router.post("/:id/import/finalize", authMiddleware, importController.finalize)
@@ -286,6 +291,9 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  * /api/v1/projects/{id}/import/resume:
  *   post:
  *     summary: Tiếp tục bước AI đang dừng vì hết credit / lỗi AI (UC-61, UC-75)
+ *     description: |
+ *       Chạy nền, trả ngay: `extracting` ⇒ I-4 từ extract_cursor; `baselining` (job finalize lỗi / mất) ⇒ hoàn phần dở rồi
+ *       chạy lại finalize; `checking` ⇒ 1.11–1.12 phần còn thiếu. FE poll `GET /import`.
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -297,7 +305,7 @@ router.post("/:id/import/finalize", authMiddleware, importController.finalize)
  *         application/json:
  *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
  *     responses:
- *       200: { description: "`{ import, sections }`" }
+ *       200: { description: "`{ import, sections }` — trả ngay, import giữ trạng thái (paused null)" }
  *       409: { description: IMPORT_INVALID_STATE }
  */
 router.post("/:id/import/resume", authMiddleware, importController.resume)

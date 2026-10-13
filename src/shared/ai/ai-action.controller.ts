@@ -5,6 +5,7 @@ import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { ApiError } from "../utils/api-error.js"
 import { sendSuccess } from "../types/api-response.js"
 import { ActionType } from "./ai-action.types.js"
+import { withoutDocumentLanguage } from "../i18n/document-language.js"
 
 const VALID_ACTION_TYPES = new Set<string>(Object.values(ActionType))
 
@@ -53,9 +54,10 @@ export const executeAiActionHandler = async (
       throw new ApiError(400, "Loại thao tác AI không hợp lệ.", "INVALID_ACTION_TYPE")
     }
 
+    // FLF-265 D16: khối "Document language" (trần token gấp đôi + lượt dự phòng) chỉ server bật — bỏ khoá client gửi
     const result = await executeAiAction(
       actionType,
-      input,
+      withoutDocumentLanguage(input),
       projectId,
       userId,
       { provider, model }
@@ -96,7 +98,7 @@ export const retryAiActionHandler = async (
 
     const result = await executeAiAction(
       originalLog.actionType,
-      input || { rawPrompt: "Retry previous action" },
+      withoutDocumentLanguage(input || { rawPrompt: "Retry previous action" }),
       originalLog.projectId?.toString(),
       userId,
       {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { DocxPackage, writeStamp } from "../docx-ooxml/index.js"
 import { makeDocx, p, table } from "../docx-ooxml/testing/make-docx.js"
 import { MAX_UNCOMPRESSED_BYTES } from "../docx-ooxml/index.js"
+import { IMPORT_MAX_FILE_BYTES } from "./import.constants.js"
 import { preflightDocx } from "./preflight.service.js"
 
 const ole = (...streams: string[]): Buffer =>
@@ -35,6 +36,10 @@ describe("preflightDocx", () => {
 
   it("quá dung lượng, tài liệu rỗng", async () => {
     expect((await preflightDocx(await makeDocx({ body: p("x") }), { maxBytes: 10 })).issues[0].code).toBe("FILE_TOO_LARGE")
+    // Câu báo nêu dung lượng + giới hạn theo MB và cách nén ảnh trong Word (SRS nhiều ảnh chụp màn hình)
+    const big = await preflightDocx(Buffer.alloc(IMPORT_MAX_FILE_BYTES + 3 * 1024 * 1024))
+    expect(big.issues[0]).toMatchObject({ code: "FILE_TOO_LARGE", message: expect.stringContaining("File nặng 43 MB, vượt giới hạn 40 MB") })
+    expect(big.issues[0].message).toContain("File → Compress Pictures")
     expect((await preflightDocx(await makeDocx({ body: p("") }))).issues[0].code).toBe("EMPTY_DOCUMENT")
   })
 

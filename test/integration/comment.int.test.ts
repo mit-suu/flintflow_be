@@ -198,8 +198,8 @@ describe("UC-49 — Viewer comment trên baseline, Analyst chuyển thành chang
     await c.post("/import/confirm-latest", { import_id: id })
     await c.extractAndWait(id)
     await c.patch("/import/fields", { import_id: id, confirm_all: true })
-    const fin = await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })
-    expect(fin.status, JSON.stringify(fin.body.error)).toBe(200)
+    const fin = await c.finalizeAndWait(id)
+    expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
 
     const viewerUser = await join(seeded, "viewer@flintflow.test", "viewer")
     const viewer = api(projectId, viewerUser.token)

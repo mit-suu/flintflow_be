@@ -190,7 +190,7 @@ export const extractionSectionSchema = z.object({
 
 // ─── request ─────────────────────────────────────────────────────
 
-/** `POST /projects/:id/import` — multipart, field `file` (.docx ≤ 10MB). Không có body JSON. */
+/** `POST /projects/:id/import` — multipart, field `file` (.docx ≤ 40MB). Không có body JSON. */
 export const IMPORT_FILE_FIELD = "file"
 
 /** `POST /projects/:id/import/confirm-latest` (nút 1.3). */
@@ -261,7 +261,23 @@ export const getImportResponseSchema = z.object({
     /** Field độ tin < 0.7 chưa xác nhận (nút 1.9). */
     review_fields: z.array(reviewFieldSchema)
   }),
-  blocks_count: z.number().int().min(0)
+  blocks_count: z.number().int().min(0),
+  /**
+   * Ước tính I-4 còn phải chạy — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
+   * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
+   * ảnh diagram đọc được, trừ phần đã xong) × bảng giá hiện hành. `available_credits` = số credit khả dụng (balance − reserved)
+   * của ví org sở hữu project; `null` với Viewer (không xem được số dư — như `/billing/balance`).
+   */
+  credit_estimate: z
+    .object({
+      text_batches: z.number().int().min(0),
+      diagram_images: z.number().int().min(0),
+      ai_calls: z.number().int().min(0),
+      credits: z.number().min(0),
+      available_credits: z.number().nullable()
+    })
+    .nullable()
+    .optional()
 })
 
 /** `POST /projects/:id/import/extract` — trả khi chạy xong hoặc khi pause (hết credit / lỗi AI 2 lần). */
@@ -270,13 +286,17 @@ export const extractResponseSchema = z.object({
   sections: z.array(extractionSectionSchema)
 })
 
-/** `POST /projects/:id/import/finalize`. */
+/**
+ * `POST /projects/:id/import/finalize` — chạy nền (`finalize-jobs.ts`): trả ngay import `baselining` (đang chạy ⇒ trạng thái
+ * hiện tại), `spine_version` lúc bắt đầu. `baseline` / `flags` giữ khoá cho client cũ nhưng luôn `null` — kết quả đọc ở
+ * `GET /import` (`gap_review`) và gap report sau khi job xong.
+ */
 export const finalizeResponseSchema = z.object({
   import: importedDocumentDtoSchema,
   doc_version: z.literal("0.0"),
-  baseline: baselineSchema,
+  baseline: baselineSchema.nullable(),
   spine_version: z.number().int().min(1),
-  flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0) })
+  flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0) }).nullable()
 })
 
 export const gapReportSchema = z.object({

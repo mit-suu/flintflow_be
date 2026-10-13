@@ -31,6 +31,7 @@ import invitationRoutes from "./modules/organization/invitation.route.js"
 import importRoutes from "./modules/import/import.route.js"
 import changeRequestRoutes from "./modules/change-request/change-request.route.js"
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
+import translationRoutes from "./modules/translation/translation.route.js"
 import commentRoutes from "./modules/comment/comment.route.js"
 import { sendSuccess } from "./shared/types/api-response.js"
 import { buildHealthReport } from "./config/health.js"
@@ -99,7 +100,8 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
     // Trình duyệt chỉ cho JS đọc header ngoài danh sách safelist khi có Access-Control-Expose-Headers:
     // FE tải .docx qua fetch cần đọc tên file BE đặt trong Content-Disposition (GET /export/word).
-    exposedHeaders: ["Content-Disposition"]
+    // FLF-265: FE đọc được ngôn ngữ + độ mới của file .docx (contract #18)
+    exposedHeaders: ["Content-Disposition", "X-Document-Language", "X-Assembled-At-Version", "X-Spine-Version"]
   })
 )
 
@@ -200,6 +202,7 @@ app.use("/api/v1/projects", renderRoutes)
 app.use("/api/v1/projects", importRoutes)
 app.use("/api/v1/projects", changeRequestRoutes)
 app.use("/api/v1/projects", docVersionRoutes)
+app.use("/api/v1/projects", translationRoutes)
 app.use("/api/v1/projects", commentRoutes)
 app.use("/api/v1/notifications", notificationRoutes)
 app.use("/api/v1/billing", billingRoutes)

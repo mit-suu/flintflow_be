@@ -18,7 +18,11 @@ export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap
  * `diagram` (§4.13): phần nối giữ **sơ đồ gốc** của người dùng mà CR chạm tới dữ liệu (hoặc nhắm mục) của nó. Đề xuất do
  * code tính, không qua AI: dữ liệu sau CR lệch hình ⇒ `edit` bỏ ảnh gốc (bản render in sơ đồ PlantUML), không ⇒ `not_related`.
  */
-export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram"] as const
+/**
+ * `vector` (hybrid retrieval): phần tử gần nghĩa với CR theo Atlas Vector Search (`embedding/vector-search.ts`) — thay nguồn
+ * `keyword` khi index embedding dùng được; điểm nằm ở `vector_score` của vị trí.
+ */
+export const LOCATION_FOUND_BY = ["spine_link", "mention", "keyword", "preview", "diagram", "vector"] as const
 export type LocationFoundBy = (typeof LOCATION_FOUND_BY)[number]
 
 /** Kết luận của C-4 cho từng vị trí (nút 3.6, UC-81). Vị trí chưa kết luận chặn nộp (CR_LOCATION_UNCONCLUDED). */
