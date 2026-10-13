@@ -13,7 +13,7 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
  * cũng sẽ sót.
  *
  * `allow`: các thao tác ghi về kỹ thuật nhưng chỉ phục vụ việc ĐỌC (so với `req.path`, tương đối với tiền tố
- * mount). Khi có endpoint comment (UC-56 — Viewer được để lại comment) thì thêm vào đây.
+ * mount). Comment và trả lời comment (UC-49 — Viewer được để lại comment) nằm trong allowlist ở `app.ts`.
  */
 export const viewerReadOnly =
   (allow: readonly RegExp[] = []) =>
