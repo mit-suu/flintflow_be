@@ -43,7 +43,7 @@ This skill is loaded by every renderer (`renderer/*`) as shared rules, and is th
 5. Sort elements by `id` so the same Spine produces the same text.
 6. No `!include`, no `!import`, no URLs, no sprites or images, no `skinparam` loaded from remote. The server has no network access to the internet.
 7. Monochrome-friendly: at most `skinparam monochrome true` or a few neutral `skinparam` lines; no custom colours per element.
-8. Size: split into several diagrams when > ~25 visible nodes (use case diagram by actor group, ERD by module). Context attachment points are invisible geometry anchors, not extra entities; keep the context in one diagram. Each part is its own `diagrams[]` entry with the same `kind`.
+8. Size: split into several diagrams when > ~25 visible nodes (use case diagram: always one diagram per human actor, each use case associated with only that actor; ERD by module). Context attachment points are invisible geometry anchors, not extra entities; keep the context in one diagram. Each part is its own `diagrams[]` entry with the same `kind`.
 9. Quote any label containing spaces, punctuation or keywords.
 10. No notes that restate descriptions. Screen flow draws screens as rectangles and pop-ups as ovals (the shape alone marks a pop-up — no `(pop-up)` text, no note).
 

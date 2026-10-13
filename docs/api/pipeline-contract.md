@@ -56,7 +56,7 @@ Cascade khi xoá phần tử đang được tham chiếu (`reference_fields[]`, 
 | Chính sách | Field |
 | --- | --- |
 | gỡ khoá khỏi mảng | `use_cases[].actor_ids/function_ids/includes/extends`, `screens[].flow_to`, `functions[].business_rule_ids`, `entities[].relations`, `business_rules[].source_validation_ids`, `messages[].function_ids`, `progress.screen_queue` |
-| đặt null | `roles[].actor_id`, `screens[].primary_function_id` |
+| đặt null | `roles[].actor_id`, `actors[].parent_id`, `screens[].primary_function_id` |
 | xoá phần tử chứa khoá | `permissions[]`, `functions[screen_id]`, `diagrams[owner_id]`, `flags[]`, `assumptions[]` (path trỏ phần tử đã xoá), `sections[feature:*/function:*]`, `steps[@screen]` |
 | **không tự xoá** — từ chối lô, trả `referrers` | `screens[].feature_id`, `functions[].feature_id` |
 | để yên | `progress.screen_cursor` (bất biến 8 quyết), `addendum[].target_section` (chỉ cần đúng dạng section key — entry Brief được trỏ section chưa sinh) |

@@ -16,6 +16,7 @@ import { tryResolve } from "./path-resolver.js"
 import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
+import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
@@ -58,6 +59,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_name_semantic", "yellow", true),
   rule("usecase_name_style", "yellow", true),
   rule("actor_name_shape", "yellow", true),
+  rule("actor_generalization_invalid", "yellow", true),
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
   rule("derived_from_changed_assumption", "yellow", true),
@@ -303,6 +305,8 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
       return { section: "fixed:3.1.3", step: "S-4.3" }
     case "roles[].actor_id":
       return { section: "fixed:3.1.3", step: "S-3.1" }
+    case "actors[].parent_id":
+      return { section: "fixed:2.1", step: "S-3.1" }
     case "functions[].screen_id":
     case "functions[].feature_id":
       return { section: `function:${owner}`, step: "S-4.1" }
@@ -671,7 +675,10 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
     message,
     remediation_step
   })
+  // Actor con THỪA KẾ use case của actor cha (`parent_id`): có tổ tiên đang dùng ⇒ không mồ côi.
+  const parents = actorParents(spine.actors)
   const usedActors = new Set(spine.use_cases.flatMap((u) => u.actor_ids))
+  const isUsed = (id: string): boolean => usedActors.has(id) || ancestorsOf(id, parents).some((p) => usedActors.has(p))
   const fnScreens = new Set(spine.functions.map((f) => f.screen_id))
 
   // Mỗi luật qua cổng của bước SINH RA vế còn thiếu, không phải bước sửa: `usecase_no_function` sửa ở
@@ -684,7 +691,7 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
     // (chỉ actor có cạnh mới được khai báo) — biến mất im lặng nếu chỉ xét actor human.
     ...when("orphan_actor", () =>
       spine.actors
-        .filter((a) => !usedActors.has(a.id))
+        .filter((a) => !isUsed(a.id))
         .map((a) => yellow("orphan_actor", "fixed:2.1", a.id, `Tác nhân "${a.name}" không thuộc use case nào`, "S-3.2"))),
     ...when("usecase_no_function", () =>
       spine.use_cases
@@ -805,9 +812,10 @@ export const checkUseCaseName = (
 }
 
 /** Mã luật đặt tên actor bị vi phạm: A2 (tên rỗng nghĩa), A7 (trùng tên). */
-export const checkActorName = (name: string, allNames: readonly string[]): string[] => {
+/** `isGeneral`: actor là CHA của actor khác (`parent_id`) — tên chung "User" đúng là ý của generalization nên miễn A2. */
+export const checkActorName = (name: string, allNames: readonly string[], isGeneral = false): string[] => {
   const codes: string[] = []
-  if (ACTOR_NAME_BLACKLIST.some((b) => sameText(b, name))) codes.push("A2")
+  if (!isGeneral && ACTOR_NAME_BLACKLIST.some((b) => sameText(b, name))) codes.push("A2")
   if (allNames.filter((n) => sameText(n, name)).length > 1) codes.push("A7")
   return codes
 }
@@ -970,6 +978,33 @@ const useCaseAccountAccessRelation = (spine: Spine): FlagCandidate[] => {
     })
 }
 
+const GENERALIZATION_PROBLEM_TEXT: Readonly<Record<GeneralizationProblem, string>> = {
+  not_human: "chỉ actor người mới chuyên biệt hoá được actor khác",
+  parent_not_human: "actor cha phải là actor người, không phải hệ thống ngoài hay bộ hẹn giờ",
+  self: "trỏ tới chính nó",
+  cycle: "nằm trong một vòng kế thừa"
+}
+
+/**
+ * `actors[].parent_id` sai: actor system/time tham gia kế thừa, tự trỏ, hoặc vòng. Renderer bỏ cạnh sai nên
+ * hình vẫn vẽ được — cờ vàng để người sửa dữ liệu; id chết đã là `dead_reference`.
+ */
+const actorGeneralizationInvalid = (spine: Spine): FlagCandidate[] => {
+  const problems = generalizationProblems(spine.actors)
+  return spine.actors.flatMap((a): FlagCandidate[] => {
+    const problem = problems.get(a.id)
+    if (!problem) return []
+    return [{
+      level: "yellow",
+      rule_id: "actor_generalization_invalid",
+      section_id: "fixed:2.1",
+      target_id: a.id,
+      message: `Kế thừa của tác nhân "${a.name}" không hợp lệ: ${GENERALIZATION_PROBLEM_TEXT[problem]}`,
+      remediation_step: "S-3.1"
+    }]
+  })
+}
+
 const namingShape = (spine: Spine): FlagCandidate[] => {
   const actorNames = spine.actors.map((a) => a.name)
   const useCaseNames = spine.use_cases.map((u) => u.name)
@@ -989,8 +1024,9 @@ const namingShape = (spine: Spine): FlagCandidate[] => {
       })
     }
   }
+  const generalIds = new Set(actorParents(spine.actors).values())
   for (const a of spine.actors) {
-    const codes = checkActorName(a.name, actorNames)
+    const codes = checkActorName(a.name, actorNames, generalIds.has(a.id))
     if (codes.length === 0) continue
     out.push({
       level: "yellow",
@@ -1191,6 +1227,7 @@ export const runDeterministicCheck = (
     ...useCaseFloating(spine, gate),
     ...useCaseAccountAccessRelation(spine),
     ...namingShape(spine),
+    ...actorGeneralizationInvalid(spine),
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate)
   ], options.ruleProfile)
