@@ -6,6 +6,10 @@ import {
   PIPELINE_ERROR_STATUS,
   STEP_EVENT_TYPES,
   changesRequestSchema,
+  commentParamsSchema,
+  createCommentSchema,
+  listCommentsQuerySchema,
+  replyCommentSchema,
   gateRequestSchema,
   questionSchema,
   runPhaseRequestSchema,
@@ -21,6 +25,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTRACT = fs.readFileSync(path.resolve(__dirname, "../../../docs/api/pipeline-contract.md"), "utf8")
 
 describe("pipeline.dto", () => {
+  it("UC-49: comment — text 1–2000 ký tự sau trim, block_index mặc định null, status mặc định open, mã CM-nnn", () => {
+    const body = { version: { source: "draft" }, anchor: { section_id: "fixed:1" }, text: "  Góp ý  " }
+    const parsed = createCommentSchema.parse(body)
+    expect(parsed.text).toBe("Góp ý")
+    expect(parsed.anchor.block_index).toBeNull()
+    expect(createCommentSchema.safeParse({ ...body, version: { source: "baseline", baseline_id: "BL001" } }).success).toBe(true)
+    expect(createCommentSchema.safeParse({ ...body, text: "   " }).success).toBe(false)
+    expect(createCommentSchema.safeParse({ ...body, text: "x".repeat(2001) }).success).toBe(false)
+    expect(createCommentSchema.safeParse({ ...body, version: { source: "published" } }).success).toBe(false)
+    expect(createCommentSchema.safeParse({ ...body, anchor: { section_id: "fixed:1", block_index: -1 } }).success).toBe(false)
+    expect(createCommentSchema.safeParse({ ...body, status: "resolved" }).success).toBe(false)
+    expect(replyCommentSchema.safeParse({ text: "Đã rõ" }).success).toBe(true)
+    expect(listCommentsQuerySchema.parse({}).status).toBe("open")
+    expect(listCommentsQuerySchema.safeParse({ status: "resolved" }).success).toBe(false)
+    expect(commentParamsSchema.safeParse({ commentId: "CM-001" }).success).toBe(true)
+    expect(commentParamsSchema.safeParse({ commentId: "CR-001" }).success).toBe(false)
+    expect(CONTRACT).toContain("/comments/:commentId/resolve")
+  })
+
   it("FLF-265: dịch tài liệu — run chỉ nhận max_batches 1–10, status đủ số đếm + ước tính credit", () => {
     expect(translationRunRequestSchema.safeParse({}).success).toBe(true)
     expect(translationRunRequestSchema.safeParse({ max_batches: 5 }).success).toBe(true)
