@@ -3,6 +3,8 @@
  * `actors[id=A01]`, `custom_sections[id=CS02]`…) thay cho block của file docx. Hàm thuần — không DB.
  * - C-3 tìm: phần tử đích của C-2 + phần tử đang tham chiếu tới nó (`spine_link`), phần tử nhắc mã/tên của đích
  *   (`mention`), phần tử chứa từ khoá (`keyword`) — theo ranh giới từ, không phân biệt hoa thường.
+ * - Hybrid retrieval: có ứng viên vector (`embedding/vector-search.ts`) thì chúng (`vector`) **thay** nguồn từ khoá;
+ *   vị trí đồ thị (đích, tham chiếu, nhắc mã/tên) giữ nguyên như cũ và không bao giờ bị trần cắt vì ứng viên vector.
  * - Giá trị của vị trí được chụp thành chuỗi ổn định (`valueText`): C-5 so với Spine hiện tại để biết phần tử đã bị
  *   sửa ở chỗ khác kể từ lúc đề xuất (thay "old text khớp block" của bản theo block).
  */
@@ -169,12 +171,44 @@ export interface FoundLocation {
   /** Phần tử đích của CR mà vị trí này liên quan. */
   entity_paths: string[]
   owner_step: string | null
+  /** Chỉ có khi `found_by` chứa `vector`: điểm gần nghĩa (0..1). */
+  vector_score?: number
+}
+
+/** Ứng viên từ Atlas Vector Search: path phần tử + điểm. Path không còn trong Spine bị bỏ. */
+export interface VectorCandidate {
+  ref: string
+  score: number
+}
+
+/** Vị trí chỉ đến từ ứng viên vector / từ khoá (không có liên kết đồ thị nào). */
+const isRecallOnly = (f: Pick<FoundLocation, "found_by">): boolean => f.found_by.every((b) => b === "vector" || b === "keyword")
+
+/**
+ * Trần `room` vị trí, giữ thứ tự tài liệu. Không có ứng viên vector ⇒ cắt đuôi như trước (hành vi cũ, nguồn từ khoá).
+ * Có ⇒ ưu tiên vị trí đồ thị (không bị ứng viên vector đẩy ra), chỗ còn lại cho ứng viên vector điểm cao nhất.
+ */
+export const capLocations = (found: readonly FoundLocation[], room: number): FoundLocation[] => {
+  if (!found.some((f) => f.found_by.includes("vector"))) return found.slice(0, room)
+  const graph = found.filter((f) => !isRecallOnly(f))
+  const recall = found
+    .filter(isRecallOnly)
+    .sort((a, b) => (b.vector_score ?? 0) - (a.vector_score ?? 0))
+    .slice(0, Math.max(0, room - graph.length))
+  const keep = new Set([...graph.slice(0, room), ...recall].map((f) => f.path))
+  return found.filter((f) => keep.has(f.path))
 }
 
 /**
  * C-3: gom vị trí từ đích C-2 (`targets` — path phần tử hoặc field) và từ khoá. Đích không còn trong Spine bị bỏ.
+ * `vector` khác rỗng ⇒ ứng viên gần nghĩa thay nguồn từ khoá (từ khoá chỉ còn là dự phòng khi index không dùng được).
  */
-export const findSpineLocations = (spine: Spine, targets: readonly string[], keywords: readonly string[]): FoundLocation[] => {
+export const findSpineLocations = (
+  spine: Spine,
+  targets: readonly string[],
+  keywords: readonly string[],
+  vector: readonly VectorCandidate[] = []
+): FoundLocation[] => {
   const elements = listElements(spine)
   const exists = new Set(elements.map((e) => e.path))
   const hits = new Map<string, { found_by: Set<LocationFoundBy>; entity_paths: Set<string> }>()
@@ -226,7 +260,16 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
     .map((k) => k.trim())
     .filter((k) => k.length >= 3)
     .map(wordPattern)
-  for (const e of elements) if (patterns.some((re) => re.test(textOf(e.value)))) hit(e.path, "keyword")
+  const scores = new Map<string, number>()
+  if (vector.length) {
+    for (const v of vector) {
+      if (!exists.has(v.ref)) continue
+      hit(v.ref, "vector")
+      scores.set(v.ref, Math.max(scores.get(v.ref) ?? 0, v.score))
+    }
+  } else {
+    for (const e of elements) if (patterns.some((re) => re.test(textOf(e.value)))) hit(e.path, "keyword")
+  }
 
   const found: FoundLocation[] = elements
     .filter((e) => hits.has(e.path))
@@ -238,7 +281,8 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
         section_id,
         found_by: [...h.found_by],
         entity_paths: [...h.entity_paths],
-        owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine)
+        owner_step: section_id === "misc" || section_id.startsWith("custom:") ? null : ownerStepOf(section_id, spine),
+        ...(scores.has(e.path) ? { vector_score: scores.get(e.path)! } : {})
       }
     })
 
@@ -288,7 +332,7 @@ export const findSpineLocations = (spine: Spine, targets: readonly string[], key
   }
   const extra = diagrams.filter((d) => !found.some((f) => f.path === d.path))
   // Ô thêm mới và vị trí sơ đồ gốc luôn giữ lại khi phải cắt bớt vị trí
-  return [...found.slice(0, Math.max(0, MAX_LOCATIONS - slots.length - extra.length)), ...slots, ...extra]
+  return [...capLocations(found, Math.max(0, MAX_LOCATIONS - slots.length - extra.length)), ...slots, ...extra]
 }
 
 /** Mảng Spine mà path thuộc về: `use_cases[id=UC-01]` / `use_cases[]` ⇒ `use_cases`; `project` ⇒ `project`. */

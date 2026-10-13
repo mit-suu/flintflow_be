@@ -33,7 +33,8 @@ labels exactly as drawn, you never invent elements, arrows or names that you can
 - Image block: [{{block_id}}] — caption / text next to it: {{caption}}
 - Fields you may fill (names and enums):
 {{schema_excerpt}}
-- Keys already used — reuse them to refer to the same element, never create a duplicate:
+- Keys already used that this image may refer to (a relevant subset, not every element) — reuse them to refer to the
+  same element, never create a duplicate:
 {{known_keys}}
 
 ## Step 1 — classify

@@ -51,6 +51,8 @@ export interface IChangeLocation extends Document {
   section_id: string
   found_by: LocationFoundBy[]
   entity_paths: string[]
+  /** Điểm `vectorSearchScore` (0..1) khi vị trí có `found_by: vector`; `null` với vị trí tìm bằng đồ thị / từ khoá. */
+  vector_score: number | null
   /** Step sở hữu section (nạp skill nội dung cho C-4); `null` với mục riêng. */
   owner_step: string | null
   conclusion: LocationConclusion | null
@@ -74,6 +76,7 @@ const changeLocationSchema = new Schema<IChangeLocation>(
     section_id: { type: String, required: true },
     found_by: { type: [{ type: String, enum: LOCATION_FOUND_BY }], default: [] },
     entity_paths: { type: [String], default: [] },
+    vector_score: { type: Number, default: null },
     owner_step: { type: String, default: null },
     conclusion: { type: String, enum: [...LOCATION_CONCLUSIONS, null], default: null },
     reason: { type: String, default: null },

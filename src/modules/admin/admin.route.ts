@@ -2,10 +2,15 @@ import { Router } from "express"
 import * as adminController from "./admin.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { adminMiddleware } from "../../shared/auth/admin.middleware.js"
+import { env } from "../../config/env.js"
+import { createQueueBoardRouter } from "../../shared/queue/board.js"
 
 const router = Router()
 
 router.use(authMiddleware, adminMiddleware)
+
+// Bull Board (docs/background-jobs.md): xem / retry job nền. Chỉ khi job đi qua Redis.
+if (env.JOB_DRIVER === "bullmq") router.use("/queues", createQueueBoardRouter("/api/v1/admin/queues"))
 
 /**
  * @swagger

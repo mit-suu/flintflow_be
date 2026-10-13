@@ -28,7 +28,8 @@ vi.mock("../../modules/admin/ai-action-log.model.js", () => ({
 const envMock = vi.hoisted(() => ({ AI_PROVIDER_OVERRIDE: "" }))
 vi.mock("../../config/env.js", () => ({ env: envMock }))
 
-import { executeAiAction, executeAiActionStream } from "./ai-action.service.js"
+import { LOCALIZED_MAX_TOKENS_FACTOR, executeAiAction, executeAiActionStream } from "./ai-action.service.js"
+import { documentLanguageDirective } from "../i18n/document-language.js"
 import { reserveCredit, deductCredit, releaseCredit } from "./credit-reservation.service.js"
 import { callLLM } from "./providers/llm.router.js"
 import { parseResponse } from "./response-parser.js"
@@ -47,6 +48,9 @@ const reservation = {
   cost: 5,
   expiresAt: new Date()
 }
+
+/** Dòng `AiActionLog` đã ghi — ép kiểu qua `unknown`: kiểu Mongoose của `create` quá sâu cho tsc. */
+const logDocs = (): any[] => (AiActionLog.create as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((call) => call[0])
 
 const parseFailure = () => new AiActionError(500, "JSON hỏng", "PARSE_FAILED")
 
@@ -148,6 +152,159 @@ describe("executeAiAction — ngôn ngữ trả lời (FLF-260)", () => {
 
     expect(vi.mocked(callLLM).mock.calls[0][0]).toBe("prompt")
     expect(vi.mocked(callLLM).mock.calls[1][0]).toBe("prompt")
+  })
+})
+
+describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
+  const vi_ = { documentLanguage: "vi", sourceLanguage: "en" }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.spyOn(mongoose, "startSession").mockRejectedValue(
+      new Error("Transaction numbers are only allowed on a replica set member or mongos")
+    )
+    vi.mocked(reserveCredit).mockResolvedValue(reservation)
+    vi.mocked(deductCredit).mockResolvedValue(undefined)
+    vi.mocked(releaseCredit).mockResolvedValue(true)
+    vi.mocked(callLLM).mockResolvedValue({ text: "{}", promptTokens: 1, completionTokens: 1 } as any)
+    vi.mocked(AiActionLog.create).mockResolvedValue({ _id: "log-1" } as any)
+    vi.mocked(parseResponse).mockReturnValue({ ops: [] })
+  })
+
+  const sent = (i: number) => ({ prompt: vi.mocked(callLLM).mock.calls[i][0], config: vi.mocked(callLLM).mock.calls[i][1] })
+
+  it("dự án en (không field, hoặc en = gốc) ⇒ prompt và cấu hình y hệt hôm nay", async () => {
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {}, replyLanguage: "vi" }, undefined, USER)
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {}, replyLanguage: "vi", documentLanguage: "en", sourceLanguage: "en", documentGlossary: [] }, undefined, USER)
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {}, replyLanguage: "vi", documentLanguage: "en" }, undefined, USER)
+
+    const today = `prompt\n\n${replyLanguageDirective("vi")}`
+    for (const i of [0, 1, 2]) {
+      expect(sent(i).prompt).toBe(today)
+      expect(sent(i).config).toEqual({ provider: "openai", model: "test-model", actionType: "draft" })
+    }
+  })
+
+  it("vi + mọi ActionType ra op ⇒ khối Document language nối cuối (sau Reply language), trần token gấp đôi", async () => {
+    const opTypes = [
+      ActionType.DRAFT,
+      ActionType.REGENERATE,
+      ActionType.REVISION,
+      ActionType.RECONCILE,
+      ActionType.GLOSSARY_SCAN,
+      ActionType.DISCOVERY_STEP,
+      ActionType.CHANGE_INSTRUCTION
+    ]
+    for (const type of opTypes) await executeAiAction(type, { promptVariables: {}, replyLanguage: "vi", ...vi_ }, undefined, USER)
+
+    opTypes.forEach((type, i) => {
+      expect(sent(i).prompt).toBe(`prompt\n\n${replyLanguageDirective("vi")}\n\n${documentLanguageDirective("vi")}`)
+      expect(sent(i).config).toMatchObject({ actionType: type, maxTokens: 2048 * LOCALIZED_MAX_TOKENS_FACTOR })
+    })
+  })
+
+  it("chat / elicit / review / translate_document ⇒ không có khối dù dự án vi", async () => {
+    for (const type of [ActionType.CHAT, ActionType.ELICIT, ActionType.REVIEW, ActionType.TRANSLATE_DOCUMENT]) {
+      await executeAiAction(type, { promptVariables: {}, ...vi_ }, undefined, USER)
+    }
+    for (const call of vi.mocked(callLLM).mock.calls) {
+      expect(call[0]).toBe("prompt")
+      expect(call[0]).not.toContain("## Document language")
+      expect(call[1]).not.toHaveProperty("maxTokens")
+    }
+  })
+
+  it("glossary: chỉ thuật ngữ có mặt trong prompt; dòng hỏng từ client bị bỏ", async () => {
+    await executeAiAction(
+      ActionType.CHANGE_INSTRUCTION,
+      {
+        rawPrompt: "Rename the Student actor.",
+        ...vi_,
+        documentGlossary: [{ term: "Student", translation: "Sinh viên" }, { term: "Course", translation: "Khoá học" }, { term: 3 }, "x"]
+      },
+      undefined,
+      USER
+    )
+    expect(sent(0).prompt).toBe(`Rename the Student actor.\n\n${documentLanguageDirective("vi", [{ term: "Student", translation: "Sinh viên" }])}`)
+  })
+
+  it("đầu ra kèm localized hỏng (JSON bị cắt) ⇒ thử lại NGAY một lần không kèm khối, trần token của skill; một lần giữ / trừ credit", async () => {
+    vi.mocked(callLLM)
+      .mockResolvedValueOnce({ text: '{"ops":[{"op":"set"', promptTokens: 100, completionTokens: 12288 } as any)
+      .mockResolvedValueOnce({ text: '{"ops":[]}', promptTokens: 90, completionTokens: 40 } as any)
+    vi.mocked(parseResponse)
+      .mockImplementationOnce(() => {
+        throw parseFailure()
+      })
+      .mockReturnValueOnce({ ops: [] })
+
+    const result = await executeAiAction(ActionType.DRAFT, { promptVariables: {}, ...vi_ }, undefined, USER)
+
+    expect(result.data).toEqual({ ops: [] })
+    expect(callLLM).toHaveBeenCalledTimes(2)
+    expect(sent(0).prompt).toContain("## Document language")
+    expect(sent(1).prompt).toBe("prompt")
+    expect(sent(1).config).toEqual({ provider: "openai", model: "test-model", actionType: "draft" })
+    expect(reserveCredit).toHaveBeenCalledTimes(1)
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+    expect(releaseCredit).not.toHaveBeenCalled()
+    // Lượt kèm khối bị hỏng có log riêng (token của nó không mất) và token của nó cộng vào tokensUsed (meter)
+    const logs = logDocs()
+    expect(logs).toHaveLength(2)
+    expect(logs[0]).toMatchObject({ status: "failed", promptTokens: 100, completionTokens: 12288 })
+    expect(logs[0].errorMessage).toContain("[localized] PARSE_FAILED")
+    expect(logs[1]).toMatchObject({ status: "success", promptTokens: 90, completionTokens: 40 })
+    expect(result.tokensUsed).toEqual({ promptTokens: 190, completionTokens: 12328, totalTokens: 12518 })
+  })
+
+  it("provider báo bị cắt (RESPONSE_TRUNCATED) ⇒ cũng thử lại không kèm khối; lượt không kèm vẫn hỏng ⇒ ném lỗi, nhả credit", async () => {
+    vi.mocked(callLLM).mockRejectedValueOnce(new AiActionError(422, "truncated", "RESPONSE_TRUNCATED"))
+    vi.mocked(parseResponse).mockImplementation(() => {
+      throw parseFailure()
+    })
+
+    await expect(executeAiAction(ActionType.REVISION, { promptVariables: {}, ...vi_ }, undefined, USER)).rejects.toMatchObject({ code: "PARSE_FAILED" })
+    // Lượt 1 kèm khối (bị cắt) + đúng MỘT lượt không kèm — không lặp vô hạn
+    expect(callLLM).toHaveBeenCalledTimes(2)
+    expect(sent(1).prompt).toBe("prompt")
+    expect(deductCredit).not.toHaveBeenCalled()
+    expect(releaseCredit).toHaveBeenCalledTimes(1)
+    // Hai dòng log thất bại: lượt kèm khối (provider không trả chữ ⇒ không có token) và lượt không kèm
+    const logs = logDocs()
+    expect(logs.map((l: any) => l.status)).toEqual(["failed", "failed"])
+    expect(logs[0].errorMessage).toContain("[localized] RESPONSE_TRUNCATED")
+    expect(logs[0].promptTokens).toBeUndefined()
+  })
+
+  it("ghi log lượt kèm khối lỗi ⇒ chỉ log console, lượt không kèm vẫn chạy và thành công", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    vi.mocked(callLLM)
+      .mockResolvedValueOnce({ text: "{", promptTokens: 1, completionTokens: 1 } as any)
+      .mockResolvedValueOnce({ text: '{"ops":[]}', promptTokens: 1, completionTokens: 1 } as any)
+    vi.mocked(parseResponse)
+      .mockImplementationOnce(() => {
+        throw parseFailure()
+      })
+      .mockReturnValueOnce({ ops: [] })
+    vi.mocked(AiActionLog.create).mockRejectedValueOnce(new Error("mongo down")).mockResolvedValue({ _id: "log-2" } as any)
+
+    const result = await executeAiAction(ActionType.DRAFT, { promptVariables: {}, ...vi_ }, undefined, USER)
+    expect(result.logId).toBe("log-2")
+    expect(deductCredit).toHaveBeenCalledTimes(1)
+  })
+
+  it("không có khối ⇒ parse lỗi không gọi thêm lượt nào; lỗi khác (provider) khi có khối ⇒ không bỏ khối", async () => {
+    vi.mocked(parseResponse).mockImplementation(() => {
+      throw parseFailure()
+    })
+    await expect(executeAiAction(ActionType.DRAFT, { promptVariables: {} }, undefined, USER)).rejects.toMatchObject({ code: "PARSE_FAILED" })
+    expect(callLLM).toHaveBeenCalledTimes(1)
+
+    vi.mocked(callLLM).mockReset().mockRejectedValue(new AiActionError(503, "overloaded", "GEMINI_OVERLOADED"))
+    await expect(executeAiAction(ActionType.DRAFT, { promptVariables: {}, ...vi_ }, undefined, USER)).rejects.toMatchObject({ code: "GEMINI_OVERLOADED" })
+    expect(callLLM).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -71,7 +71,7 @@ export const createCr = mode1Handler(async (req, res) => {
 export const MATERIAL_FILE_FIELD = "file"
 const materialUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: IMPORT_MAX_FILE_BYTES, files: 1 } })
 
-/** Multipart ⇒ `req.file`; JSON đi thẳng. Lỗi multer (quá 10 MB…) ⇒ 413 FILE_TOO_LARGE / 400 UPLOAD_FAILED. */
+/** Multipart ⇒ `req.file`; JSON đi thẳng. Lỗi multer (quá `IMPORT_MAX_FILE_BYTES`…) ⇒ 413 FILE_TOO_LARGE / 400 UPLOAD_FAILED. */
 export const receiveMaterial = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.is("multipart/form-data")) return next()
   materialUpload.single(MATERIAL_FILE_FIELD)(req, res, (err: unknown) => {

@@ -1,7 +1,7 @@
 ---
 skill_id: import-semantic-check
 kind: action
-version: 1.0.0
+version: 1.1.0
 description: Mode 1 node 1.11 — semantic review of an imported SRS → yellow findings only
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -48,6 +48,8 @@ repeat them.
 3. `message` is in the document's language: quote the phrase, name the element, say what would fix it — one or two
    sentences.
 4. Be specific or stay silent. At most 30 findings, most important first. No finding is a valid answer.
+   You see one batch of the document: judge only what these blocks and this projection show. Problems that span
+   sections are reviewed separately.
 5. User-facing text never quotes internal ids: no section ids (`fixed:2.2.1`, `feature:@B0012`), element paths (`actors[id=A02].name`), block ids (`B0012`) or location ids (`L001`). Name a section by its heading and an element by its name or document code (`UC-01` is fine).
 
 ## Output

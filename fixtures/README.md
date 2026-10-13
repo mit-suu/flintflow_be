@@ -9,6 +9,7 @@ Dữ liệu chuẩn cho op engine (T08), deterministic check (T09), renderer (T1
 | `spine-fixture-19-screens.json` | Spine đầy đủ của project mẫu — chính FlintFlow: 9 actor, 4 role, 23 use case, 6 feature, 19 màn, 89 function (83 màn + 6 non-screen), 51 permission, 12 entity, 11 NFR, 9 business rule, 8 message, 16 glossary, 5 addendum, 5 diagram (`.puml` viết tay), 68 step `accepted` (38 SRS cố định + 5×6), progress ở `S-9.5`, `spine_version=1`. |
 | `spine-fixture-minimal.json` | Chỉ `project{}` + `addendum[]` (+ khung mảng rỗng để parse được schema) — đầu vào cho T14 chạy S-2/S-3. |
 | `op-cases/case-01…10.json` | 10 ca thử "model có sinh op đúng path/schema không". |
+| `knowledge-eval/questions.json` | 40 câu đo Knowledge RAG (FLF-267): 32 trong corpus skill (kèm `answer_points`, `gold_chunk_ids` theo chunker chính), 8 ngoài corpus. `judge.md` / `norag.md`: prompt chỉ cho `npm run eval:knowledge`. |
 
 ## Quy ước trong fixture
 

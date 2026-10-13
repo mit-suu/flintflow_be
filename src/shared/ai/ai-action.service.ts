@@ -11,8 +11,9 @@ import {
 import { getPromptTemplate, interpolatePrompt } from "./prompt-registry.service.js"
 import { isUserLocale } from "../i18n/locale.js"
 import { replyLanguageDirective } from "../i18n/reply-language.js"
+import { MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsInText, type DocumentGlossaryEntry } from "../i18n/document-language.js"
 import { callLLM } from "./providers/llm.router.js"
-import type { LlmImage } from "./providers/provider.types.js"
+import type { LLMResponse, LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
@@ -24,6 +25,7 @@ import {
   CreditReservation
 } from "./credit-reservation.service.js"
 import { executeWithInRequestRetry } from "./retry.service.js"
+import { TRANSACTION_UNAVAILABLE, runInTransaction } from "../db/transaction.js"
 import { AiActionLog } from "../../modules/admin/ai-action-log.model.js"
 import { capturePayload } from "./ai-action-payload.service.js"
 
@@ -48,40 +50,18 @@ export interface ExecuteAiActionStreamCallbacks<T = any> {
   onError?: (error: any) => void | Promise<void>
 }
 
+/**
+ * Giữ credit trong transaction. `withTransaction` (qua `runInTransaction`) tự chạy lại khi lỗi tạm thời — nhiều lượt gọi
+ * AI cùng lúc trên một ví (1.11 chạy lô song song, hai người cùng tổ chức) gặp write conflict trên `CreditWallet`; trước
+ * đây lượt đó hỏng thành "AI lỗi". Mongo standalone ⇒ giữ credit không transaction như cũ.
+ */
 const reserveCreditWithTransaction = async (
   userId: string,
   actionType: string,
   projectId: string | undefined
 ): Promise<CreditReservation> => {
-  let session: mongoose.ClientSession | undefined
-  try {
-    session = await mongoose.startSession()
-    session.startTransaction()
-    const reservation = await reserveCredit(userId, actionType, projectId, session)
-    await session.commitTransaction()
-    return reservation
-  } catch (err: any) {
-    if (session) {
-      try {
-        await session.abortTransaction()
-      } catch (_) {}
-    }
-
-    // Fallback if standalone MongoDB does not support transactions
-    if (
-      err?.message?.includes("replica set member") ||
-      err?.message?.includes("Transaction numbers") ||
-      err?.message?.includes("retryable writes") ||
-      err?.code === 20
-    ) {
-      return reserveCredit(userId, actionType, projectId)
-    }
-    throw err
-  } finally {
-    if (session) {
-      session.endSession()
-    }
-  }
+  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session))
+  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId) : reservation
 }
 
 /** Release không được che lỗi gốc của action: lỗi release chỉ log. */
@@ -96,12 +76,82 @@ const releaseQuietly = async (reservation: CreditReservation): Promise<void> => 
   }
 }
 
+/**
+ * FLF-265 D16: khối "Document language" bật ⇒ đầu ra thêm `localized` cạnh `ops`. Ước tính trên fixture 19 màn: lô op +
+ * `localized` dài ~1,6–2,1 lần lô op ⇒ nới trần token của đúng lượt đó (dự án không bật khối giữ nguyên cấu hình skill).
+ */
+export const LOCALIZED_MAX_TOKENS_FACTOR = 2
+
+/** Đầu ra hỏng / bị cắt — khi khối "Document language" đang bật thì thử lại một lần không kèm khối. */
+const OUTPUT_FAILURE_CODES = new Set(["PARSE_FAILED", "SCHEMA_MISMATCH", "RESPONSE_TRUNCATED", "GLM_EMPTY_OUTPUT"])
+
+const isOutputFailure = (error: unknown): error is AiActionError => error instanceof AiActionError && OUTPUT_FAILURE_CODES.has(error.code)
+
+interface PromptVariant {
+  finalPrompt: string
+  providerConfig: AiProviderConfig
+}
+
+interface BuiltPrompt extends PromptVariant {
+  /** Chỉ có khi khối "Document language" được nối: cùng prompt KHÔNG kèm khối, trần token của skill. */
+  withoutLocalized?: PromptVariant
+}
+
+/** `documentGlossary` đi qua `input` (`POST /ai-actions` nhận nguyên văn client) ⇒ chỉ nhận mảng `{term, translation}` chuỗi. */
+const glossaryOf = (value: unknown): DocumentGlossaryEntry[] =>
+  Array.isArray(value)
+    ? value.flatMap((entry) =>
+        typeof entry?.term === "string" && typeof entry?.translation === "string" ? [{ term: entry.term, translation: entry.translation }] : []
+      )
+    : []
+
+/**
+ * Log thất bại của lượt kèm khối "Document language" trước khi thử lại không kèm (FLF-265 D16): dòng `AiActionLog`
+ * riêng (token, model, mã lỗi) + payload (prompt kèm khối, chữ thô). Log phụ — **không bao giờ ném**, lượt thử lại vẫn chạy.
+ */
+const recordLocalizedFailure = async (attempt: {
+  actionType: string
+  projectId: string | undefined
+  userId: string
+  providerConfig: AiProviderConfig
+  prompt: string
+  response: LLMResponse | null
+  error: AiActionError
+  startTime: number
+  parentLogId: string | undefined
+}): Promise<void> => {
+  try {
+    const log = await AiActionLog.create({
+      projectId: attempt.projectId ? new mongoose.Types.ObjectId(attempt.projectId) : null,
+      userId: new mongoose.Types.ObjectId(attempt.userId),
+      actionType: attempt.actionType,
+      provider: attempt.providerConfig.provider,
+      aiModel: attempt.response?.model ?? attempt.providerConfig.model,
+      status: "failed",
+      errorMessage: `[localized] ${attempt.error.code}: ${attempt.error.message}`,
+      ...(attempt.response ? { promptTokens: attempt.response.promptTokens, completionTokens: attempt.response.completionTokens } : {}),
+      latencyMs: Date.now() - attempt.startTime,
+      retryOfLogId: attempt.parentLogId ? new mongoose.Types.ObjectId(attempt.parentLogId) : null
+    })
+    await capturePayload({
+      logId: log._id.toString(),
+      projectId: attempt.projectId,
+      userId: attempt.userId,
+      actionType: attempt.actionType,
+      prompt: attempt.prompt,
+      response: attempt.response?.text ?? null
+    })
+  } catch (err) {
+    console.error(`[executeAiAction] Không ghi được log lượt kèm localized của '${attempt.actionType}':`, err)
+  }
+}
+
 const buildPrompt = async (
   actionType: string,
   input: AiActionInput,
   options: ExecuteAiActionOptions,
   fallbackVariables: Record<string, any>
-): Promise<{ finalPrompt: string; providerConfig: AiProviderConfig }> => {
+): Promise<BuiltPrompt> => {
   const loadedTemplate = await getPromptTemplate(actionType)
   const basePrompt =
     options.rawPromptOverride || input.rawPrompt
@@ -109,19 +159,25 @@ const buildPrompt = async (
       : interpolatePrompt(loadedTemplate.template, input.promptVariables || fallbackVariables)
   // FLF-260: ngôn ngữ trả lời nối cuối prompt. Chỉ nhận vi | en — `POST /ai-actions` chuyển nguyên `input` của client,
   // nên giá trị lạ bị bỏ qua thay vì thành chữ trong prompt.
-  const finalPrompt = isUserLocale(input.replyLanguage)
+  const withReply = isUserLocale(input.replyLanguage)
     ? `${basePrompt}\n\n${replyLanguageDirective(input.replyLanguage)}`
     : basePrompt
+  const providerConfig: AiProviderConfig = {
+    ...loadedTemplate.providerConfig,
+    ...(options.provider ? { provider: options.provider } : {}),
+    ...(options.model ? { model: options.model } : {}),
+    // Provider mock cần biết đang được hỏi gì để trả output đúng schema của ActionType đó (T24).
+    actionType: String(actionType)
+  }
 
+  // FLF-265 D16: ActionType ra op + ngôn ngữ tài liệu khác ngôn ngữ gốc ⇒ nối khối "Document language" SAU "Reply language".
+  // Không bật (dự án `en`, mode 1, ActionType khác) ⇒ prompt và cấu hình y như trước. Glossary chỉ gồm thuật ngữ có trong prompt.
+  if (!shouldLocalize(String(actionType), input.documentLanguage, input.sourceLanguage)) return { finalPrompt: withReply, providerConfig }
+  const glossary = termsInText(glossaryOf(input.documentGlossary), withReply, MAX_DIRECTIVE_TERMS)
   return {
-    finalPrompt,
-    providerConfig: {
-      ...loadedTemplate.providerConfig,
-      ...(options.provider ? { provider: options.provider } : {}),
-      ...(options.model ? { model: options.model } : {}),
-      // Provider mock cần biết đang được hỏi gì để trả output đúng schema của ActionType đó (T24).
-      actionType: String(actionType)
-    }
+    finalPrompt: `${withReply}\n\n${documentLanguageDirective(input.documentLanguage, glossary)}`,
+    providerConfig: { ...providerConfig, maxTokens: (providerConfig.maxTokens ?? 2048) * LOCALIZED_MAX_TOKENS_FACTOR },
+    withoutLocalized: { finalPrompt: withReply, providerConfig }
   }
 }
 
@@ -139,8 +195,9 @@ export const executeAiAction = async <T = any>(
   // Step 2: Build Prompt
   let finalPrompt: string
   let providerConfig: AiProviderConfig
+  let withoutLocalized: PromptVariant | undefined
   try {
-    ;({ finalPrompt, providerConfig } = await buildPrompt(actionType, input, options, input))
+    ;({ finalPrompt, providerConfig, withoutLocalized } = await buildPrompt(actionType, input, options, input))
   } catch (buildError) {
     await releaseQuietly(reservation)
     throw buildError
@@ -160,15 +217,55 @@ export const executeAiAction = async <T = any>(
       const startTime = Date.now()
 
       try {
-        if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
-        const llmRes = await callLLM(finalPrompt, providerConfig, {
-          ...(options.signal ? { signal: options.signal } : {}),
-          ...(options.images?.length ? { images: options.images } : {})
-        })
-        const latencyMs = Date.now() - startTime
-        lastRawText = llmRes.text
+        // Câu trả lời của lượt gọi gần nhất (cả khi parse lỗi) — để ghi log lượt kèm khối bị hỏng
+        let callResponse: LLMResponse | null = null
+        const callAndParse = async () => {
+          callResponse = null
+          if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
+          const response = await callLLM(finalPrompt, providerConfig, {
+            ...(options.signal ? { signal: options.signal } : {}),
+            ...(options.images?.length ? { images: options.images } : {})
+          })
+          callResponse = response
+          lastRawText = response.text
+          return { llmRes: response, parsedData: parseResponse<T>(response.text, actionType) }
+        }
 
-        const parsedData = parseResponse<T>(llmRes.text, actionType)
+        let outcome: Awaited<ReturnType<typeof callAndParse>>
+        // Token của lượt kèm khối đã hỏng — vẫn là token đã tiêu ⇒ cộng vào `tokensUsed` (meter / DraftUsage)
+        let discardedTokens = { promptTokens: 0, completionTokens: 0 }
+        try {
+          outcome = await callAndParse()
+        } catch (error) {
+          // FLF-265 D16: đầu ra kèm `localized` dài hơn ⇒ dễ bị cắt / hỏng JSON. Lượt ghi Spine quan trọng hơn bản dịch:
+          // thử lại NGAY một lần không kèm khối (câu đó thành "thiếu", dịch theo lô sau); các lượt retry sau cũng không kèm.
+          if (!withoutLocalized || !isOutputFailure(error)) throw error
+          console.warn(`[executeAiAction] '${actionType}': đầu ra kèm localized lỗi (${error.code}) — thử lại một lần không kèm khối Document language`)
+          const failedResponse = callResponse as LLMResponse | null
+          discardedTokens = { promptTokens: failedResponse?.promptTokens ?? 0, completionTokens: failedResponse?.completionTokens ?? 0 }
+          // Lượt kèm khối có log riêng (prompt + chữ thô + token) — dữ liệu để chỉnh `LOCALIZED_MAX_TOKENS_FACTOR`
+          await recordLocalizedFailure({
+            actionType: String(actionType),
+            projectId,
+            userId,
+            providerConfig,
+            prompt: finalPrompt,
+            response: failedResponse,
+            error,
+            startTime,
+            parentLogId: options.parentLogId
+          })
+          lastRawText = null
+          ;({ finalPrompt, providerConfig } = withoutLocalized)
+          withoutLocalized = undefined
+          outcome = await callAndParse()
+        }
+        const { llmRes, parsedData } = outcome
+        const tokensUsed = {
+          promptTokens: llmRes.promptTokens + discardedTokens.promptTokens,
+          completionTokens: llmRes.completionTokens + discardedTokens.completionTokens
+        }
+        const latencyMs = Date.now() - startTime
 
         // Success: Deduct Credit (chỉ sau khi parse thành công)
         if (!deducted) {
@@ -208,11 +305,7 @@ export const executeAiAction = async <T = any>(
           actionType: actionType as ActionType,
           provider: providerConfig.provider,
           aiModel: llmRes.model ?? providerConfig.model,
-          tokensUsed: {
-            promptTokens: llmRes.promptTokens,
-            completionTokens: llmRes.completionTokens,
-            totalTokens: llmRes.promptTokens + llmRes.completionTokens
-          },
+          tokensUsed: { ...tokensUsed, totalTokens: tokensUsed.promptTokens + tokensUsed.completionTokens },
           latencyMs,
           logId: currentLogId,
           cost

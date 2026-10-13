@@ -10,7 +10,9 @@
  *   thành chức năng của tính năng đó;
  * - `parent` — mục con mô tả chính mục cha (Wiegers "Description and Priority", "Functional Requirements" dưới một tính năng):
  *   nội dung thuộc section của mục cha.
- * `features: true` — mục con không khớp danh mục là tính năng (như chương 3 của FPT).
+ * `features: true` — mục con không khớp danh mục là tính năng (như chương 3 của FPT). Mục `feature` có mục con
+ *   `features: true` (IEEE 830 rút gọn: 3.2 › 3.2.2 Classes for classification) ⇒ mục cha chỉ là heading, tính năng ở mục con.
+ * Tên trùng ở hai chỗ (User Interfaces 2.1.2 / 3.1.1) phân biệt bằng số mục, không có số thì bằng heading cha.
  */
 
 export type TemplateFamily = "fpt" | "ieee830" | "ieee_features"
@@ -68,8 +70,15 @@ export const IEEE_830: readonly TemplateEntry[] = [
   e("ieee830", "3.1.3", "fixed:4.1", ["Software Interfaces", "Giao diện phần mềm"]),
   e("ieee830", "3.1.4", "fixed:4.1", ["Communications Interfaces", "Communication Interfaces", "Giao diện truyền thông"]),
   e("ieee830", "3.2", "feature", ["Functional Requirements", "Specific Requirements", "System Features", "Yêu cầu chức năng"]),
-  e("ieee830", "3.2.1", "fixed:2.2.2", ["Use Cases / Sequence Diagrams", "Use Cases", "Sequence Diagrams", "Use Case Descriptions", "Ca sử dụng"]),
-  e("ieee830", "3.2.2", "fixed:3.1.5", ["Classes for Classification of Specific Requirements", "Data / Class Model", "Class Model", "Data Model", "Class Diagram", "Mô hình dữ liệu"]),
+  // Sơ đồ tuần tự: Spine không có loại sơ đồ này ⇒ giữ nguyên văn (ảnh gốc), không trích thành mô tả use case
+  e("ieee830", "3.2.1", "keep", ["Sequence Diagrams", "Sequence Diagram", "Biểu đồ tuần tự", "Sơ đồ tuần tự"]),
+  e("ieee830", "", "fixed:2.2.2", ["Use Cases / Sequence Diagrams", "Use Cases", "Use Case Descriptions", "Ca sử dụng"]),
+  // IEEE 830 §5.3.2: cách chia yêu cầu chức năng (theo tính năng / nhóm người dùng / chế độ…) — mục con là tính năng, không
+  // phải class diagram
+  e("ieee830", "3.2.2", "keep", ["Classes for Classification of Specific Requirements", "Classes for Classification", "Organizing the Specific Requirements"], {
+    features: true
+  }),
+  e("ieee830", "", "fixed:3.1.5", ["Data / Class Model", "Class Model", "Data Model", "Class Diagram", "Mô hình dữ liệu"]),
   e("ieee830", "3.3", "fixed:4.2.3", ["Performance Requirements", "Yêu cầu hiệu năng"]),
   e("ieee830", "3.4", "fixed:4.2.4", ["Design Constraints", "Ràng buộc thiết kế"]),
   e("ieee830", "3.5", "group:4.2", ["Software System Attributes", "Thuộc tính hệ thống phần mềm"]),

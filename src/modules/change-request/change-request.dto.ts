@@ -100,6 +100,8 @@ export const changeLocationDtoSchema = z.object({
   current_text: z.string(),
   found_by: z.array(z.enum(LOCATION_FOUND_BY)),
   entity_paths: z.array(z.string()),
+  /** Hybrid retrieval: điểm gần nghĩa (0..1) của vị trí `found_by: vector`, còn lại `null`. Tuỳ chọn — client cũ bỏ qua. */
+  vector_score: z.number().nullable().optional(),
   owner_step: z.string().nullable(),
   conclusion: z.enum(LOCATION_CONCLUSIONS).nullable(),
   reason: z.string().nullable(),

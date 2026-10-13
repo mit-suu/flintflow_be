@@ -7,6 +7,7 @@
  * Bước dừng vì lỗi AI (`resume_later`) không tự chạy lại: đó là lựa chọn "để sau" của người dùng (Flow 5).
  */
 
+import { defineJob, enqueueJob } from "../../shared/queue/job-runner.js"
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
 import { ChangeRequest } from "../change-request/change-request.model.js"
@@ -91,18 +92,21 @@ export interface ResumeDeps {
 
 const defaultDeps = async (): Promise<ResumeDeps> => {
   // Nạp muộn: tránh vòng import billing ⇄ import ⇄ change-request lúc khởi động
-  const [{ startExtraction }, { resumeCheck }, clarify, propose, verify] = await Promise.all([
+  const [{ startExtraction }, finalizeJobs, clarify, propose, verify] = await Promise.all([
     import("./extract-jobs.js"),
-    import("./finalize.service.js"),
+    import("./finalize-jobs.js"),
     import("../change-request/clarify.service.js"),
     import("../change-request/propose.service.js"),
     import("../change-request/verify.service.js")
   ])
   return {
     resumeExtraction: startExtraction,
+    // 1.11–1.12 qua job nền (đăng ký job ⇒ `GET /import` không coi là job mất), chờ xong để chạy lần lượt như trước
     resumeCheck: async (importId, userId) => {
       const doc = await ImportedDocument.findById(importId)
-      if (doc) await resumeCheck(doc, userId)
+      if (!doc) return
+      await finalizeJobs.startResume(String(doc.projectId), userId, importId)
+      await finalizeJobs.waitForFinalize(importId)
     },
     resumeCr: async (projectId, crId, userId) => {
       const cr = await ChangeRequest.findOne({ projectId, cr_id: crId })
@@ -149,3 +153,26 @@ export const resumeAfterTopUp = async (
   for (const cr of crs) await run(cr.cr_id, () => d.resumeCr(String(cr.projectId), cr.cr_id, userId))
   return resumed
 }
+
+interface TopUpResumeJobData {
+  userId: string
+  organizationId: string | null
+}
+
+/**
+ * 4.5 ⇒ 4.1 qua hàng đợi `system`: webhook thanh toán trả lời ngay, việc chạy tiếp nằm trong Redis nên không mất khi
+ * máy chủ khởi động lại giữa chừng. Chạy lại an toàn: chỉ lấy bước còn `paused: credits`, job import khoá theo import.
+ */
+const topUpResumeJob = defineJob<TopUpResumeJobData>({
+  queue: "system",
+  name: "topup-resume",
+  options: { attempts: 3, backoff: { type: "exponential", delay: 15_000 } },
+  process: async ({ userId, organizationId }) => {
+    await resumeAfterTopUp(userId, undefined, organizationId)
+  },
+  onFinalFailure: async (_data, err) => console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err)
+})
+
+/** Gọi từ webhook thanh toán thành công. Một intent chỉ một lượt (khoá `topup-<intentId>`). */
+export const scheduleResumeAfterTopUp = (userId: string, organizationId: string | null, intentId: string): Promise<void> =>
+  enqueueJob(topUpResumeJob, { userId, organizationId }, { key: `topup-${intentId}` })

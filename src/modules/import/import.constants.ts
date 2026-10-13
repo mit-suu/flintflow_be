@@ -15,8 +15,19 @@ export const PREFLIGHT_ISSUE_CODES = [
 ] as const
 export type PreflightIssueCode = (typeof PREFLIGHT_ISSUE_CODES)[number]
 
-/** Giới hạn dung lượng file upload mode 1 (bằng multer hiện có của project-document). */
-export const IMPORT_MAX_FILE_BYTES = 10 * 1024 * 1024
+/**
+ * Giới hạn dung lượng file upload mode 1. SRS thật ~200 trang kèm ảnh chụp màn hình dễ vượt 10 MB ⇒ 40 MB; phần giải
+ * nén vẫn chặn ở `MAX_UNCOMPRESSED_BYTES` (200 MB — ảnh vốn đã nén nên file 40 MB giải nén thường dưới 100 MB).
+ */
+export const IMPORT_MAX_FILE_MB = 40
+export const IMPORT_MAX_FILE_BYTES = IMPORT_MAX_FILE_MB * 1024 * 1024
+
+/** Byte ⇒ MB làm tròn một chữ số cho câu báo người dùng (`12.3`). */
+export const toMb = (bytes: number): string => (Math.round((bytes / (1024 * 1024)) * 10) / 10).toString()
+
+/** Câu báo file quá lớn (preflight + 413 của multer): nêu giới hạn theo MB và cách nén ảnh trong Word. */
+export const fileTooLargeMessage = (bytes?: number): string =>
+  `${bytes === undefined ? "File" : `File nặng ${toMb(bytes)} MB,`} vượt giới hạn ${IMPORT_MAX_FILE_MB} MB. Hãy nén ảnh trong Word (File → Compress Pictures) hoặc tách phụ lục rồi tải lại.`
 
 /** Author Track Changes/comment do FlintFlow ghi = mã CR (plan §1 nút 3.14). Tác giả khác ⇒ preflight từ chối. */
 export const CR_AUTHOR_PATTERN = /^CR-\d{3,}$/

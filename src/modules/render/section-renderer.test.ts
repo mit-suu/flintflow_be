@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
 import type { Spine } from "../spine/spine.types.js"
+import { spineSchema } from "../spine/spine.schema.js"
+import { listSections } from "../spine/section-registry.js"
+import { translationUnits, type UnitValue } from "../translation/translation-units.js"
+import { localizeSpine, renderView } from "./localized-spine.js"
+import type { Block } from "./rendered-document.types.js"
 import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
 
 const emptySpine = (): Spine => ({
@@ -531,5 +537,286 @@ describe("buildRecordOfChanges", () => {
     )
     expect(rows[0].in_charge).toBe("Resolved:650000000000000000000010")
     expect(rows[1].in_charge).toBe("System")
+  })
+})
+
+// ─── FLF-265: nhãn tiếng Việt của mẫu FPT (mode 2) ─────────────────
+
+describe("renderSection — mẫu FPT tiếng Việt (FLF-265)", () => {
+  const vi = (overrides: Partial<SectionRenderContext> = {}) => ctx({ functionLayout: "fpt", language: "vi", ...overrides })
+  const bulletItems = (blocks: ReturnType<typeof renderSection>["blocks"]) => blocks.flatMap((b) => (b.type === "bullet_list" ? b.items : []))
+  const tableOf = (blocks: ReturnType<typeof renderSection>["blocks"]) => {
+    const t = blocks.find((b) => b.type === "table")
+    return t?.type === "table" ? t : undefined
+  }
+  const texts = (cells: { text: string }[][]) => cells.map((c) => c.map((r) => r.text).join(""))
+
+  it("khung §3.x.y: heading 4, nhãn đậm mục con trong item danh sách, N/A, chú thích bố cục đều tiếng Việt; giá trị Spine giữ nguyên", () => {
+    const blocks = renderSection(spine(), "function:FN01", vi({ number: "3.2.1" })).blocks
+    expect(blocks.flatMap((b) => (b.type === "heading" ? [b.text] : []))).toEqual([
+      "Kích hoạt chức năng",
+      "Mô tả chức năng",
+      "Bố cục màn hình",
+      "Chi tiết chức năng"
+    ])
+    const labels = bulletItems(blocks).map((i) => i[0])
+    expect(labels.every((r) => r.bold === true)).toBe(true)
+    expect(labels.map((r) => r.text)).toEqual([
+      "Đường dẫn điều hướng: ",
+      "Thời điểm / tần suất: ",
+      "Tác nhân / Vai trò: ",
+      "Mục đích: ",
+      "Giao diện: ",
+      "Xử lý dữ liệu: ",
+      "Dữ liệu: ",
+      "Kiểm tra dữ liệu: ",
+      "Quy tắc nghiệp vụ: ",
+      "Trường hợp thông thường: ",
+      "Trường hợp ngoại lệ: "
+    ])
+    const value = (label: string) => bulletItems(blocks).find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect(value("Thời điểm / tần suất")).toBe("User clicks Log in.")
+    expect(value("Giao diện")).toBe("Màn hình Login: Entry screen.")
+    // "System verifies." vẫn được chọn vào Xử lý dữ liệu (lọc trên chữ Anh của Spine)
+    expect(value("Xử lý dữ liệu")).toBe("System verifies.")
+    expect(blocks).toContainEqual({ type: "image", png: "png-d05", caption: "Bố cục màn hình — Login" })
+
+    const nonScreen = renderSection(spine(), "function:FN02", vi({ number: "3.3.1" })).blocks
+    const nsValue = (label: string) => bulletItems(nonScreen).find((i) => i[0].text === `${label}: `)?.[1]?.text
+    expect([nsValue("Đường dẫn điều hướng"), nsValue("Giao diện"), nsValue("Trường hợp ngoại lệ")]).toEqual(["Không có", "Không có", "Không có"])
+    expect(nonScreen).toContainEqual({ type: "paragraph", runs: [{ text: "Không có" }] })
+    expect(JSON.stringify(nonScreen)).not.toContain("N/A")
+  })
+
+  it("tiêu đề mục cố định theo VI_SECTION_TITLES; feature/function giữ tên Spine; không truyền ngôn ngữ ⇒ tiếng Anh", () => {
+    expect(renderSection(spine(), "fixed:2.1", vi({ number: "2.1" })).heading).toBe("Tác nhân")
+    expect(renderSection(spine(), "fixed:5.5", vi({ number: "5.5" })).heading).toBe("Thuật ngữ")
+    expect(renderSection(spine(), "function:FN01", vi({ number: "3.2.1" })).heading).toBe("Submit Credentials")
+    expect(renderSection(spine(), "fixed:2.1", ctx({ number: "2.1", functionLayout: "fpt" })).heading).toBe("Actors")
+  })
+
+  it("nhãn enum trong ô bảng: actor kind, quyền, ưu tiên, nhóm yêu cầu chung, loại yêu cầu khác; giá trị lạ giữ nguyên", () => {
+    const rows = (id: string, s: Spine = spine()) => (tableOf(renderSection(s, id, vi()).blocks)?.rows ?? []).map(texts)
+    expect(rows("fixed:2.1").map((r) => r[2])).toEqual(["người dùng", "hệ thống"])
+    expect(rows("fixed:3.1.3")).toEqual([["Login", "xem"], ["Dashboard", "—"]])
+    expect(rows("fixed:4.2.2")[0][3]).toBe("Phải có")
+    expect(rows("fixed:5.2")).toEqual([["Phân trang", "Lists paginate at 20."]])
+    expect(rows("fixed:5.4")).toEqual([["Rủi ro", "Provider pricing may change."]])
+    const s = spine()
+    s.permissions[0].action = "impersonate"
+    expect(rows("fixed:3.1.3", s)[0][1]).toBe("impersonate")
+  })
+
+  it("tiêu đề cột mới (Use Case, Includes, Role, Actor) và câu ghép (hệ thống ngoài, quan hệ ERD) tiếng Việt", () => {
+    expect(texts(tableOf(renderSection(spine(), "fixed:2.2.2", vi()).blocks)?.header ?? [])).toEqual([
+      "Mã",
+      "Use case",
+      "Tác nhân",
+      "Mô tả use case",
+      "Bao gồm",
+      "Mở rộng"
+    ])
+    expect(texts(tableOf(renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", vi()).blocks)?.header ?? [])).toEqual(["Vai trò", "Tác nhân"])
+    expect(JSON.stringify(renderSection(spine(), "fixed:1", vi({ number: "1" })).blocks)).toContain("Payment Gateway (hệ thống) — Processes payments.")
+
+    const s = spine()
+    s.entities[0].relation_optional = ["E02"]
+    s.entities[1].relations = ["E01"]
+    s.entities[1].relation_verbs = { E01: "belongs to" }
+    // Động từ mặc định `has` dịch; động từ người viết đặt là nội dung Spine — giữ nguyên
+    expect((tableOf(renderSection(s, "fixed:3.1.5", vi()).blocks)?.rows ?? []).map((r) => texts(r)[2])).toEqual([
+      "có Project (không bắt buộc)",
+      "belongs to User"
+    ])
+  })
+
+  it("câu NFR §4.1 giữ nguyên chỉ số / ngưỡng", () => {
+    const s = spine()
+    s.nfrs[0] = { ...s.nfrs[0], kind: "quantitative", metric: "TLS", threshold: "1.2+" }
+    expect(JSON.stringify(renderSection(s, "fixed:4.1", vi()).blocks)).toContain("HTTPS only. (TLS: 1.2+)")
+  })
+
+  it("vi nhưng không phải mẫu FPT (đường layout mode 1) ⇒ như bản mode 1 cũ: không dịch enum, không đổi tiêu đề, không dịch nhãn mới", () => {
+    const actors = renderSection(spine(), "fixed:2.1", ctx({ language: "vi" }))
+    expect(actors.heading).toBe("Actors")
+    expect((tableOf(actors.blocks)?.rows ?? []).map((r) => texts(r)[2])).toEqual(["human", "system"])
+    expect(texts(tableOf(renderSection({ ...spine(), permissions: [] }, "fixed:3.1.3", ctx({ language: "vi" })).blocks)?.header ?? [])).toEqual([
+      "Role",
+      "Actor"
+    ])
+  })
+})
+
+describe("buildRecordOfChanges — tiếng Việt (FLF-265)", () => {
+  const change = (over: Partial<Parameters<typeof buildRecordOfChanges>[0][number]>) => ({
+    txn: "t1",
+    op: "set",
+    reason: null,
+    at: "2026-09-01T09:00:00.000Z",
+    by: "u1",
+    step_id: "S-2.1",
+    path: "actors[id=A01].name",
+    ...over
+  })
+
+  it("Tạo/Cập nhật <giai đoạn> theo bảng nhãn phase vi; baseline + câu máy dịch; lời user giữ nguyên; 'và N thay đổi khác'", () => {
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "t1", op: "add", reason: "seed" }),
+        change({ txn: "t2", reason: "sửa", at: "2026-09-02T09:00:00.000Z" }),
+        change({ txn: "b1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0", at: "2026-09-03T09:00:00.000Z" }),
+        ...["CR 1", "CR 2", "sửa sau baseline", "CR 4", "CR 5"].map((reason, i) => change({ txn: `c${i}`, step_id: null, reason, at: "2026-09-04T09:00:00.000Z" }))
+      ],
+      undefined,
+      "vi"
+    )
+    expect(rows.map((r) => r.description)).toEqual([
+      "Tạo Tổng quan sản phẩm",
+      "Cập nhật Tổng quan sản phẩm",
+      "Ký baseline v1.0",
+      "CR 1; CR 2; Sửa sau baseline; và 2 thay đổi khác"
+    ])
+  })
+
+  it("baseline không lý do / sửa ngoài quy trình chỉ có lý do máy ⇒ câu máy tiếng Việt", () => {
+    const rows = buildRecordOfChanges(
+      [
+        change({ txn: "b1", op: "add", path: "baselines[]", step_id: null, reason: null }),
+        change({ txn: "c1", step_id: null, reason: "Cascade: permissions[id=P01] removed", at: "2026-09-02T09:00:00.000Z" })
+      ],
+      undefined,
+      "vi"
+    )
+    expect(rows.map((r) => r.description)).toEqual(["Ký baseline", "Cập nhật tài liệu"])
+  })
+
+  it("không truyền ngôn ngữ ⇒ tiếng Anh như cũ", () => {
+    expect(buildRecordOfChanges([change({ reason: "seed" })])[0].description).toBe("Create Product Overview")
+  })
+})
+
+// ─── FLF-265 D11: bản xem đã dịch — logic dựa chữ Anh quyết trên Spine gốc (`ctx.canonical`) ─────
+
+describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)", () => {
+  const fixture = (): Spine =>
+    spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
+
+  /** Spine gốc: wireframe salt có dòng tên màn, sơ đồ luồng màn theo actor, hai actor / hai câu quy tắc khác chữ. */
+  const canonical = (): Spine => {
+    const s = spine()
+    s.actors.push({ id: "A03", name: "Co-Founder", kind: "human", description: "Helps the founder." })
+    s.use_cases[0].actor_ids = ["A01", "A03"]
+    s.functions[0].validations.push({ id: "FN01-V2", kind: "business", statement: "Passwords are stored hashed." })
+    s.diagrams = s.diagrams.map((d) => {
+      if (d.id === "D03") return { ...d, puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' }
+      if (d.id === "D05") return { ...d, puml: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
+      return d
+    })
+    return s
+  }
+
+  /** Bản dịch giả: vài câu có bản dịch thật (hai tên / hai câu Anh khác nhau dịch TRÙNG nhau), còn lại tiền tố `vi:`. */
+  const VI: Readonly<Record<string, string>> = {
+    Founder: "Nhà sáng lập",
+    "Co-Founder": "Nhà sáng lập",
+    Login: "Đăng nhập",
+    User: "Người dùng",
+    "Enter credentials.": "Nhập thông tin đăng nhập.",
+    "System verifies.": "Hệ thống xác minh.",
+    "Password must be hashed.": "Mật khẩu phải được băm.",
+    "Passwords are stored hashed.": "Mật khẩu phải được băm."
+  }
+  const toVi = (text: string): string => VI[text] ?? `vi:${text}`
+  const translate = (value: UnitValue): UnitValue => (typeof value === "string" ? toVi(value) : value.map(toVi))
+  const translatedView = (s: Spine): Spine => {
+    const units = translationUnits(s)
+    return renderView(localizeSpine(s, units, new Map(units.map((u) => [u.key, translate(u.value)]))))
+  }
+
+  /** Mục con §3.x.y ⇒ giá trị: một dòng ⇒ chuỗi, nhiều dòng ⇒ mảng (danh sách đánh số ngay sau nhãn). */
+  const subItemValues = (blocks: Block[]): Record<string, string | string[]> => {
+    const out: Record<string, string | string[]> = {}
+    blocks.forEach((b, i) => {
+      if (b.type !== "bullet_list") return
+      for (const item of b.items) {
+        const next = blocks[i + 1]
+        out[item[0].text.replace(/: $/, "")] = item.length > 1 ? item[1].text : next?.type === "numbered_list" ? next.items.map((it) => it[0].text) : []
+      }
+    })
+    return out
+  }
+  const fpt = (overrides: Partial<SectionRenderContext> = {}) => ctx({ number: "3.2.1", functionLayout: "fpt", ...overrides })
+
+  it("Xử lý dữ liệu / Dữ liệu / Giao diện / Tác nhân / Quy tắc: chọn trên bản gốc, in chữ dịch cùng vị trí", () => {
+    const s = canonical()
+    const en = subItemValues(renderSection(s, "function:FN01", fpt()).blocks)
+    expect(en).toMatchObject({
+      "Actors / Roles": "Founder, Co-Founder",
+      Interface: "Login screen: Email input, Log in button.",
+      "Data processing": "System verifies.",
+      Data: "User",
+      "Business rules": ["Passwords are stored hashed.", "Password must be hashed."]
+    })
+
+    const vi = subItemValues(renderSection(translatedView(s), "function:FN01", fpt({ language: "vi", canonical: s })).blocks)
+    expect(vi).toMatchObject({
+      // Gộp trùng theo tên / câu gốc: hai tên Anh khác nhau vẫn là hai mục như bản tiếng Anh
+      "Tác nhân / Vai trò": "Nhà sáng lập, Nhà sáng lập",
+      // Dòng "Login" đầu wireframe so với tên màn gốc ⇒ không thành chữ trên màn; câu in tên màn đã dịch
+      "Giao diện": "Màn hình Đăng nhập: ô nhập Email, nút Log in.",
+      "Xử lý dữ liệu": "Hệ thống xác minh.",
+      "Dữ liệu": "Người dùng",
+      "Quy tắc nghiệp vụ": ["Mật khẩu phải được băm.", "Mật khẩu phải được băm."],
+      "Trường hợp thông thường": ["Nhập thông tin đăng nhập.", "Hệ thống xác minh."]
+    })
+
+    // Không có bản gốc: regex chữ Anh / so tên trượt trên chữ dịch — lý do phải có `canonical`
+    const blind = subItemValues(renderSection(translatedView(s), "function:FN01", fpt({ language: "vi" })).blocks)
+    expect(blind).toMatchObject({ "Xử lý dữ liệu": "Không có", "Dữ liệu": "Không có", "Tác nhân / Vai trò": "Nhà sáng lập" })
+    expect(blind["Giao diện"]).toContain('chữ "Login"')
+  })
+
+  it("chú thích sơ đồ luồng màn: tên actor trong hình (tiếng Anh) đổi sang tên actor đã dịch cùng id", () => {
+    const captions = (s: Spine, overrides: Partial<SectionRenderContext> = {}) =>
+      renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", functionLayout: "fpt", ...overrides })).blocks.map((b) => (b.type === "image" ? b.caption : null))
+    const s = canonical()
+    expect(captions(s)).toEqual(["Screens flow for Founder"])
+    expect(captions(translatedView(s), { language: "vi", canonical: s })).toEqual(["Luồng màn hình của Nhà sáng lập"])
+    // Hình vẽ trước khi đổi tên actor (không khớp actor gốc nào) ⇒ giữ tên trong hình, chỉ dịch phần đầu
+    const renamed = canonical()
+    renamed.actors[0].name = "Owner"
+    expect(captions(translatedView(renamed), { language: "vi", canonical: renamed })).toEqual(["Luồng màn hình của Founder"])
+  })
+
+  it("fixture 19 màn: mọi function — Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {
+    const f = fixture()
+    const view = translatedView(f)
+    const asVi = (value: string | string[] | undefined, split = false): string | string[] | undefined => {
+      if (value === "N/A") return "Không có"
+      if (Array.isArray(value)) return value.map(toVi)
+      return value === undefined ? undefined : split ? value.split(", ").map(toVi).join(", ") : toVi(value)
+    }
+    let picked = 0
+    for (const fn of f.functions) {
+      const en = subItemValues(renderSection(f, `function:${fn.id}`, fpt()).blocks)
+      const vi = subItemValues(renderSection(view, `function:${fn.id}`, fpt({ language: "vi", canonical: f })).blocks)
+      expect(vi["Xử lý dữ liệu"], fn.id).toEqual(asVi(en["Data processing"]))
+      expect(vi["Dữ liệu"], fn.id).toEqual(asVi(en.Data, true))
+      expect(vi["Tác nhân / Vai trò"], fn.id).toEqual(asVi(en["Actors / Roles"], true))
+      if (en["Data processing"] !== "N/A" && en.Data !== "N/A") picked += 1
+    }
+    // Fixture thật sự có dòng để chọn — nếu không, test này không kiểm gì
+    expect(picked).toBeGreaterThan(20)
+  })
+
+  it("ctx.canonical là chính Spine đang dựng ⇒ y hệt không có canonical (mọi mục, tiếng Anh và tiếng Việt)", () => {
+    for (const s of [fixture(), canonical()]) {
+      for (const def of listSections(s).filter((d) => d.id !== "fixed:I")) {
+        for (const language of [undefined, "vi"]) {
+          const base = ctx({ number: "x", functionLayout: "fpt", ...(language ? { language } : {}) })
+          expect(renderSection(s, def.id, { ...base, canonical: s }), def.id).toEqual(renderSection(s, def.id, base))
+        }
+      }
+    }
   })
 })

@@ -1,6 +1,7 @@
 import crypto from "crypto"
 import nodemailer from "nodemailer"
 import { env } from "../../config/env.js"
+import { defineJob, enqueueJob } from "../queue/job-runner.js"
 import { getOtpEmailHtml, getOtpEmailText, type OtpPurpose, getInvitationEmailHtml, getInvitationEmailText } from "./templates.js"
 
 let transporter: nodemailer.Transporter | null = null
@@ -62,46 +63,63 @@ const OTP_SUBJECT: Record<OtpPurpose, (otp: string) => string> = {
   reset_password: (otp) => `${otp} là mã đặt lại mật khẩu FlintFlow của bạn`
 }
 
-const sendOtpEmail = async (
-  purpose: OtpPurpose,
-  toEmail: string,
-  otp: string,
-  name?: string
-): Promise<void> => {
-  const params = { name, otp, expiresInMinutes: 2, purpose }
-  const activeTransporter = getTransporter()
-
-  if (activeTransporter) {
-    try {
-      const sender = getSender()
-      await activeTransporter.sendMail({
-        from: sender,
-        to: toEmail,
-        subject: OTP_SUBJECT[purpose](otp),
-        text: getOtpEmailText(params),
-        html: getOtpEmailHtml(params),
-        ...buildPersonalHeaders(sender)
-      })
-      console.log(`[EMAIL SERVICE] ${purpose} OTP sent to ${toEmail}`)
-      return
-    } catch (error) {
-      console.error(`[EMAIL SERVICE ERROR] Failed to send email via SMTP to ${toEmail}:`, error)
-      // Fallback to console log so developer/user can proceed
-    }
-  }
-
-  // Console Fallback if SMTP not configured or failed
+/** SMTP chưa cấu hình (dev, test, CI) hoặc gửi hết lượt vẫn lỗi ⇒ in ra console để dev vẫn lấy được mã mà chạy tiếp. */
+const printSimulation = (title: string, lines: string[]): void => {
   console.log("\n=======================================================")
-  console.log(`[DEV EMAIL SIMULATION] ${purpose} OTP for ${toEmail}`)
-  console.log(`OTP: ${otp}`)
+  console.log(`[DEV EMAIL SIMULATION] ${title}`)
+  for (const line of lines) console.log(line)
   console.log("=======================================================\n")
 }
 
+/** Gửi thật. SMTP lỗi ⇒ NÉM để queue retry; SMTP chưa cấu hình ⇒ in console. */
+export const deliverOtpEmail = async (purpose: OtpPurpose, toEmail: string, otp: string, name?: string): Promise<void> => {
+  const activeTransporter = getTransporter()
+  if (!activeTransporter) {
+    printSimulation(`${purpose} OTP for ${toEmail}`, [`OTP: ${otp}`])
+    return
+  }
+  const params = { name, otp, expiresInMinutes: 2, purpose }
+  const sender = getSender()
+  await activeTransporter.sendMail({
+    from: sender,
+    to: toEmail,
+    subject: OTP_SUBJECT[purpose](otp),
+    text: getOtpEmailText(params),
+    html: getOtpEmailHtml(params),
+    ...buildPersonalHeaders(sender)
+  })
+  console.log(`[EMAIL SERVICE] ${purpose} OTP sent to ${toEmail}`)
+}
+
+interface OtpEmailJob {
+  purpose: OtpPurpose
+  toEmail: string
+  otp: string
+  name?: string
+}
+
+/**
+ * OTP chỉ sống 2 phút ⇒ retry nhanh (5s, 10s) rồi thôi. Job mang OTP dạng rõ ⇒ xoá khỏi Redis ngay khi xong, job lỗi
+ * giữ 10 phút (quá hạn OTP) — không log `data`.
+ */
+const otpEmailJob = defineJob<OtpEmailJob>({
+  queue: "email",
+  name: "otp",
+  options: { attempts: 3, backoff: { type: "exponential", delay: 5_000 }, removeOnComplete: true, removeOnFail: { age: 600 } },
+  // Driver inline: chờ gửi xong như trước khi có queue
+  inlineAwait: true,
+  process: (d) => deliverOtpEmail(d.purpose, d.toEmail, d.otp, d.name),
+  onFinalFailure: async (d, error) => {
+    console.error(`[EMAIL SERVICE ERROR] Failed to send email via SMTP to ${d.toEmail}:`, error)
+    printSimulation(`${d.purpose} OTP for ${d.toEmail}`, [`OTP: ${d.otp}`])
+  }
+})
+
 export const sendVerificationOtpEmail = (toEmail: string, otp: string, name?: string): Promise<void> =>
-  sendOtpEmail("verify_email", toEmail, otp, name)
+  enqueueJob(otpEmailJob, { purpose: "verify_email", toEmail, otp, ...(name ? { name } : {}) })
 
 export const sendPasswordResetOtpEmail = (toEmail: string, otp: string, name?: string): Promise<void> =>
-  sendOtpEmail("reset_password", toEmail, otp, name)
+  enqueueJob(otpEmailJob, { purpose: "reset_password", toEmail, otp, ...(name ? { name } : {}) })
 
 export interface OrgInvitationEmailInput {
   name?: string
@@ -112,38 +130,43 @@ export interface OrgInvitationEmailInput {
   expiresInDays: number
 }
 
-/**
- * UC-08 / BPMN Flow 9.2 — Email Service gửi mã mời cho người được mời.
- * Cùng đường đi và cùng cách dự phòng như email OTP: SMTP chưa cấu hình hoặc gửi lỗi thì in ra console
- * để dev vẫn lấy được mã mà chạy tiếp.
- */
-export const sendOrgInvitationEmail = async (
-  toEmail: string,
-  input: OrgInvitationEmailInput
-): Promise<void> => {
+/** UC-08 / BPMN Flow 9.2 — gửi thật mã mời. SMTP lỗi ⇒ ném để queue retry; chưa cấu hình ⇒ in console. */
+export const deliverOrgInvitationEmail = async (toEmail: string, input: OrgInvitationEmailInput): Promise<void> => {
   const activeTransporter = getTransporter()
-
-  if (activeTransporter) {
-    try {
-      const sender = getSender()
-      await activeTransporter.sendMail({
-        from: sender,
-        to: toEmail,
-        subject: `Lời mời tham gia ${input.organizationName} trên FlintFlow`,
-        text: getInvitationEmailText(input),
-        html: getInvitationEmailHtml(input),
-        ...buildPersonalHeaders(sender)
-      })
-      console.log(`[EMAIL SERVICE] org invitation sent to ${toEmail}`)
-      return
-    } catch (error) {
-      console.error(`[EMAIL SERVICE ERROR] Failed to send invitation to ${toEmail}:`, error)
-    }
+  if (!activeTransporter) {
+    printInvitationSimulation(toEmail, input)
+    return
   }
-
-  console.log("\n=======================================================")
-  console.log(`[DEV EMAIL SIMULATION] org invitation for ${toEmail}`)
-  console.log(`Organization: ${input.organizationName} · Role: ${input.roleLabel}`)
-  console.log(`Code: ${input.code}`)
-  console.log("=======================================================\n")
+  const sender = getSender()
+  await activeTransporter.sendMail({
+    from: sender,
+    to: toEmail,
+    subject: `Lời mời tham gia ${input.organizationName} trên FlintFlow`,
+    text: getInvitationEmailText(input),
+    html: getInvitationEmailHtml(input),
+    ...buildPersonalHeaders(sender)
+  })
+  console.log(`[EMAIL SERVICE] org invitation sent to ${toEmail}`)
 }
+
+const printInvitationSimulation = (toEmail: string, input: OrgInvitationEmailInput): void =>
+  printSimulation(`org invitation for ${toEmail}`, [`Organization: ${input.organizationName} · Role: ${input.roleLabel}`, `Code: ${input.code}`])
+
+/** Mã mời sống nhiều ngày ⇒ retry thưa hơn OTP. */
+const invitationEmailJob = defineJob<{ toEmail: string; input: OrgInvitationEmailInput }>({
+  queue: "email",
+  name: "invitation",
+  options: { attempts: 5, backoff: { type: "exponential", delay: 30_000 }, removeOnComplete: true },
+  process: (d) => deliverOrgInvitationEmail(d.toEmail, d.input),
+  onFinalFailure: async (d, error) => {
+    console.error(`[EMAIL SERVICE ERROR] Failed to send invitation to ${d.toEmail}:`, error)
+    printInvitationSimulation(d.toEmail, d.input)
+  }
+})
+
+/**
+ * Đưa email mời vào hàng đợi (không chờ gửi). Hỏng SMTP không được làm hỏng việc tạo mã — Lead vẫn đọc được mã ở
+ * response; queue tự gửi lại.
+ */
+export const sendOrgInvitationEmail = (toEmail: string, input: OrgInvitationEmailInput): Promise<void> =>
+  enqueueJob(invitationEmailJob, { toEmail, input })

@@ -6,7 +6,7 @@
  * điều đó bằng cách parse đầu ra bằng đúng schema mà `response-parser.ts` dùng.
  */
 import { describe, expect, it } from "vitest"
-import { callMockLLM, mockOutputFor } from "./mock.provider.js"
+import { callMockLLM, mockOutputFor, mockTranslateItems } from "./mock.provider.js"
 import { ActionType } from "../ai-action.types.js"
 import {
   changeInstructionSchema,
@@ -14,7 +14,8 @@ import {
   elicitSchema,
   opTransactionSchema,
   renderFixSchema,
-  reviewSchema
+  reviewSchema,
+  translateDocumentSchema
 } from "../response-parser.js"
 
 /** Bóc khối ```json ... ``` giống đường parse thật. */
@@ -59,6 +60,32 @@ describe("mockOutputFor — đúng schema theo ActionType", () => {
     const parsed = renderFixSchema.parse(outputOf(ActionType.RENDER_FIX))
     expect(parsed.puml.startsWith("@startuml")).toBe(true)
     expect(parsed.puml.trimEnd().endsWith("@enduml")).toBe(true)
+  })
+
+  it("translate_document (FLF-265 §2.5): 'dịch' giả từng item của lô bằng tiền tố [vi], mảng giữ độ dài; hợp schema", () => {
+    const items = [
+      { key: "actors[id=A01].name", text: "Librarian" },
+      { key: "functions[id=FN1].normal", text: ["Open the form.", "", "Save."] },
+      { key: "messages[id=M1].text", text: 'Text with "Items:" inside' }
+    ]
+    const prompt = [
+      "You translate a batch of texts from a Software Requirements Specification from English into Vietnamese.",
+      "",
+      "Glossary (English → Vietnamese):",
+      "(none)",
+      "",
+      "Items:",
+      JSON.stringify(items, null, 2)
+    ].join("\r\n")
+    const parsed = translateDocumentSchema.parse(json(mockOutputFor(ActionType.TRANSLATE_DOCUMENT, prompt) as string))
+    expect(parsed.items).toEqual([
+      { key: "actors[id=A01].name", text: "[vi] Librarian" },
+      { key: "functions[id=FN1].normal", text: ["[vi] Open the form.", "", "[vi] Save."] },
+      { key: "messages[id=M1].text", text: '[vi] Text with "Items:" inside' }
+    ])
+    // Không đọc được lô ⇒ không có item (service dừng vì lô không tiến)
+    expect(translateDocumentSchema.parse(json(mockOutputFor(ActionType.TRANSLATE_DOCUMENT, "prompt bất kỳ") as string)).items).toEqual([])
+    expect(mockTranslateItems("Items:\nkhông phải JSON")).toEqual([])
   })
 
   it("ActionType ngoài pipeline (chat) không có output riêng — rơi về văn bản tự do", () => {

@@ -42,7 +42,7 @@ You convert the conversation for one step into **a single transaction of operati
 3. **Write only** paths listed in *Fields this step may write*, plus `assumptions[]`. Anything else is rejected by the engine.
 4. **Never change a key.** Renaming a glossary term is `set glossary[id=G07].term`, not a new id.
 5. **New ids**: continue the existing sequence of that array (`A04` after `A03`, `F3` after `F2`, `FN12` after `FN11`). Never reuse a removed id.
-6. **English** for every value that renders into the SRS: names, descriptions, rules, messages, NFR statements. Keep user wording's meaning; translate, do not embellish. `reason` follows the reply language — the `## Reply language` section at the end of this prompt, Vietnamese when it is absent.
+6. **English** for every value that renders into the SRS: names, descriptions, rules, messages, NFR statements. Keep user wording's meaning; translate, do not embellish. `reason` follows the reply language — the `## Reply language` section at the end of this prompt, Vietnamese when it is absent. When a `## Document language` section is present, also add `localized` exactly as it says; `ops` stay English.
 7. **No section numbers in prose.** Refer to other parts by logical key (`feature:F2`) or by name — never "see 3.4".
 8. **Deletes cascade in the same batch.** Removing a screen also removes its functions, permissions, `flow_to` entries, `use_cases[].function_ids`, and queue entry. Removing a feature in the middle needs `renumber`. See `references/invariants.md`.
 9. **Invariants are checked at the end of the batch**, not per op. If your batch would break one, fix the batch; do not emit it hoping code will repair it.

@@ -303,6 +303,33 @@ describe("draftOps retry", () => {
     expect(plain.mock.calls[0][1]).not.toHaveProperty("replyLanguage")
   })
 
+  it("FLF-265 D16: documentLanguage ⇒ mọi lượt gọi mang ngôn ngữ + glossary; localized của lô được nhận đi kèm txn, ops vẫn tiếng Anh", async () => {
+    const language = { locale: "vi" as const, source: "en" as const, glossary: [{ term: "Owner", translation: "Chủ sở hữu" }] }
+    const localized = [{ path: "actors[id=A01].name", value: "Chủ sở hữu" }]
+    const executor = vi
+      .fn<DraftExecutor>()
+      .mockResolvedValueOnce(reply([{ op: "set", path: "actors[id=A99].name", value: "Ghost" }], { localized: [{ path: "actors[id=A99].name", value: "Ma" }] }))
+      .mockResolvedValueOnce(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }], { localized }))
+    const result = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: language })
+
+    expect(executor.mock.calls.map((c) => [c[1].documentLanguage, c[1].sourceLanguage])).toEqual([["vi", "en"], ["vi", "en"]])
+    expect(executor.mock.calls[0][1].documentGlossary).toEqual(language.glossary)
+    expect(result.txn?.ops).toEqual([{ op: "set", path: "actors[id=A01].name", value: "Owner" }])
+    // Chỉ localized của lô được nhận — lô hỏng lượt 1 không lọt ra
+    expect(result.localized).toEqual(localized)
+  })
+
+  it("FLF-265 D16: documentLanguage null / thiếu ⇒ input không có field (prompt như cũ), kết quả không có localized", async () => {
+    const executor = vi.fn<DraftExecutor>().mockResolvedValue(reply([{ op: "set", path: "actors[id=A01].name", value: "Owner" }]))
+    const a = await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor, documentLanguage: null })
+    await draftOps("p", "S-3.1", ctx, { userId: "u", spine, executor })
+    for (const call of executor.mock.calls) {
+      expect(call[1]).not.toHaveProperty("documentLanguage")
+      expect(call[1]).not.toHaveProperty("documentGlossary")
+    }
+    expect(a).not.toHaveProperty("localized")
+  })
+
   it("không truyền spine ⇒ đọc repository và chặn khi version lệch ctx", async () => {
     vi.mocked(get).mockResolvedValue({ projectId: "p", ...structuredClone(FIXTURE), spine_version: 5 })
     const executor = vi.fn<DraftExecutor>()

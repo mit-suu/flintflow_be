@@ -31,7 +31,9 @@ import { elementFieldsOf } from "./element-defaults.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
-import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
+import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/response-parser.js"
+import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
+import { captureForTurn } from "../translation/capture.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
@@ -108,6 +110,12 @@ interface StoredPreview {
   reason: string | null
   impact: Impact
   branch: ChangeBranch
+  /**
+   * FLF-265 D16: chữ theo ngôn ngữ tài liệu model trả kèm lô (hoặc lô hoà giải gom lại) + ngôn ngữ của lượt xem trước —
+   * lưu cùng preview vì lượt áp (`preview_id`) không gọi model lần hai; áp xong mới lưu bản dịch.
+   */
+  localized?: LocalizedEntry[]
+  language?: TurnLanguagePair | null
   expires_at: number
 }
 
@@ -383,11 +391,18 @@ export interface ChangeDeps {
   changeExecutor: ChangeExecutor
   /** Chạy lại deterministic check sau khi ghi (T09). */
   recomputeFlags: (projectId: string, userId: string) => Promise<unknown>
+  /**
+   * FLF-265 D16: ngôn ngữ tài liệu của lượt — đọc một lần trước lượt gọi model; `null` ⇒ không kèm khối "Document
+   * language" (dự án `en`, mode 1). Thiếu ⇒ `documentLanguageForTurn` (unit test không nối Mongo ⇒ luôn `null`); test cắm
+   * hàm giả để bật.
+   */
+  documentLanguage?: (projectId: string) => Promise<TurnDocumentLanguage | null>
 }
 
 export const defaultChangeDeps = (): ChangeDeps => ({
   changeExecutor: (actionType, input, projectId, userId) => executeAiAction<ChangeInstructionOutput>(actionType, input, projectId, userId),
-  recomputeFlags: (projectId, userId) => flagsService.recompute(projectId, { by: userId })
+  recomputeFlags: (projectId, userId) => flagsService.recompute(projectId, { by: userId }),
+  documentLanguage: documentLanguageForTurn
 })
 
 // ─── body ────────────────────────────────────────────────────────
@@ -410,6 +425,12 @@ export interface ChangeBody {
    * Có ⇒ lời gọi model trả câu hỏi làm rõ / ghi chú bằng ngôn ngữ đó, câu hỏi lại cố định cũng theo; không có ⇒ như cũ.
    */
   reply_language?: ReplyLanguage
+  /**
+   * Nội bộ (DTO `strictObject` không nhận — client không gửi được bản dịch, D7): lô `ops` do server gom (hoà giải) kèm chữ
+   * theo ngôn ngữ tài liệu model trả cùng lô, và ngôn ngữ của lượt đó. Đi theo preview tới lượt áp.
+   */
+  localized?: LocalizedEntry[]
+  document_language?: TurnLanguagePair | null
 }
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
@@ -428,6 +449,9 @@ interface ResolvedOps {
   clarification: string | null
   /** Ghi chú ngắn model trả về, hiện trên thẻ preview. */
   notes: string | null
+  /** FLF-265 D16: chữ theo ngôn ngữ tài liệu kèm lô (cùng `path` với op) + ngôn ngữ của lượt — lưu sau khi áp. */
+  localized?: LocalizedEntry[]
+  language?: TurnLanguagePair | null
 }
 
 /** Model gửi field không có trong Spine (`screens[].authorized_role_ids`) — nhắc nó chỉ dùng field thấy trong projection. */
@@ -484,6 +508,8 @@ const opsFromInstruction = async (
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
+  // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
+  const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
   const call = (previousProblems?: string) =>
     deps.changeExecutor(
       ActionType.CHANGE_INSTRUCTION,
@@ -501,7 +527,9 @@ const opsFromInstruction = async (
           ...(previousProblems ? { previous_problems: previousProblems } : {})
         },
         // FLF-260: `buildPrompt` nối khối "Reply language" cuối prompt — câu hỏi làm rõ, ghi chú theo ngôn ngữ của lượt
-        ...(replyLanguage ? { replyLanguage } : {})
+        ...(replyLanguage ? { replyLanguage } : {}),
+        // FLF-265 D16: ngôn ngữ tài liệu ≠ ngôn ngữ gốc ⇒ `buildPrompt` nối khối "Document language", model trả `localized`
+        ...documentLanguageInput(language)
       },
       projectId,
       userId
@@ -531,7 +559,8 @@ const opsFromInstruction = async (
   const clarification = result.data.clarification_needed?.trim()
   if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null }
   const notes = result.data.notes ? nameElementIds(result.data.notes, spine) : null
-  return { ops: stampAddendum((result.data.ops ?? []) as Op[]), clarification: null, notes }
+  const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
+  return { ops: stampAddendum((result.data.ops ?? []) as Op[]), clarification: null, notes, ...localized, language: languagePairOf(language) }
 }
 
 const resolveOps = async (
@@ -541,7 +570,9 @@ const resolveOps = async (
   body: ChangeBody,
   deps: ChangeDeps
 ): Promise<ResolvedOps> => {
-  if (body.ops !== undefined) return { ops: body.ops, clarification: null, notes: null }
+  if (body.ops !== undefined) {
+    return { ops: body.ops, clarification: null, notes: null, ...(body.localized?.length ? { localized: body.localized, language: languagePairOf(body.document_language) } : {}) }
+  }
   if (body.instruction === undefined) throw new ApiError(400, "Vui lòng nhập nội dung cần sửa.", "VALIDATION_ERROR")
   return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps)
 }
@@ -625,6 +656,7 @@ export const preview = async (
     reason: body.reason ?? null,
     impact,
     branch,
+    ...(resolved.localized?.length ? { localized: resolved.localized, language: languagePairOf(resolved.language) } : {}),
     expires_at: Date.now() + PREVIEW_TTL_MS
   })
 
@@ -666,7 +698,7 @@ export const apply = async (
 
   const stored = body.preview_id === undefined ? null : takePreview(projectId, body.preview_id)
   const resolved: ResolvedOps = stored
-    ? { ops: stored.ops, clarification: null, notes: null }
+    ? { ops: stored.ops, clarification: null, notes: null, ...(stored.localized ? { localized: stored.localized, language: languagePairOf(stored.language) } : {}) }
     : await resolveOps(projectId, userId, spine, body, d)
 
   if (resolved.clarification !== null) {
@@ -692,6 +724,8 @@ export const apply = async (
   // Project cũ chưa có Spine: tạo Spine rỗng như GET /spine để lô đầu tiên có chỗ ghi
   await repository.getOrCreate(projectId, init)
   const applied = await applyTransaction(projectId, toTransaction(userId, { ...body, ...(reason === undefined ? {} : { reason }) }, resolved.ops))
+  // FLF-265 D16: Spine đã ghi ⇒ lưu bản ngôn ngữ tài liệu kèm lô (lỗi chỉ log, không làm hỏng lượt ghi)
+  await captureForTurn(projectId, resolved.language, resolved.ops, resolved.localized)
 
   // Cờ tính lại sau khi ghi: thay đổi của user có thể mở cờ đỏ mới (chặn baseline kế tiếp).
   if (applied.txn !== null) await d.recomputeFlags(projectId, userId)

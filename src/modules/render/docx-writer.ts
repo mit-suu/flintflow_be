@@ -23,6 +23,7 @@ import {
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ruleLabel } from "../spine/human-labels.js"
+import { FLAG_TEXT, WRITER_TEXT, type DocumentLanguage, type WriterText } from "./labels.js"
 import type {
   Block,
   FlagRow,
@@ -90,32 +91,38 @@ export type FlagLanguage = "en" | "vi"
 export interface WriteDocxOptions {
   /** Ngôn ngữ phụ lục cờ: `vi` cho project mode 1 (thông điệp cờ tiếng Việt), mặc định `en` (mode 2). */
   flagLanguage?: FlagLanguage
+  /**
+   * FLF-265 — ngôn ngữ chữ cố định của writer (bìa, mục lục, header/footer, §I, ghi chú STALE). Mặc định `en`.
+   * Độc lập với `flagLanguage` (chỉ phụ lục cờ) để file version mode 1 (`flagLanguage: "vi"`) giữ nguyên.
+   */
+  language?: DocumentLanguage
 }
 
 export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions = {}): Promise<Buffer> {
   const ctx: WriteContext = { nextNumberingInstance: 1 }
   const isDraft = doc.source === "draft" || doc.watermark === "DRAFT"
+  const t = WRITER_TEXT[options.language ?? "en"]
 
   const children: BodyChild[] = [
-    ...coverPage(doc, isDraft),
+    ...coverPage(doc, isDraft, t),
     new Paragraph({ children: [new PageBreak()] }),
-    new Paragraph({ text: "Table of Contents", heading: HeadingLevel.TITLE }),
-    new TableOfContents("Table of Contents", { hyperlink: true, headingStyleRange: "1-3" }),
+    new Paragraph({ text: t.toc, heading: HeadingLevel.TITLE }),
+    new TableOfContents(t.toc, { hyperlink: true, headingStyleRange: "1-3" }),
     new Paragraph({ children: [new PageBreak()] }),
-    ...recordOfChanges(doc),
+    ...recordOfChanges(doc, t),
     ...flagsAppendix(doc, isDraft, options.flagLanguage ?? "en"),
     new Paragraph({ children: [new PageBreak()] })
   ]
 
   for (const section of doc.sections) {
-    children.push(...renderSection(section, ctx))
+    children.push(...renderSection(section, ctx, t))
   }
 
   const document = new Document({
-    title: `${doc.projectName} - Software Requirement Specification`,
+    title: t.title(doc.projectName),
     subject: `flintflow_version:${doc.version}`,
     creator: "FlintFlow",
-    description: `${isDraft ? "Working Draft" : "Baseline"} ${doc.version} generated ${doc.generatedAt}`,
+    description: t.description(isDraft, doc.version, doc.generatedAt),
     keywords: "SRS",
     customProperties: [
       { name: "flintflow_project_id", value: doc.projectId },
@@ -163,8 +170,8 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
             margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }
           }
         },
-        headers: { default: pageHeader(doc, isDraft) },
-        footers: { default: pageFooter() },
+        headers: { default: pageHeader(doc, isDraft, t) },
+        footers: { default: pageFooter(t) },
         children
       }
     ]
@@ -191,7 +198,7 @@ function toSlug(value: string): string {
     .toLowerCase()
 }
 
-function coverPage(doc: RenderedDocument, isDraft: boolean): Paragraph[] {
+function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {
   const centered = (text: string, size: number, bold = false) =>
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -202,30 +209,30 @@ function coverPage(doc: RenderedDocument, isDraft: boolean): Paragraph[] {
   return [
     new Paragraph({ spacing: { before: 3600 } }),
     centered(doc.projectName, 48, true),
-    centered("Software Requirement Specification", 36, true),
-    centered(`Version: ${doc.version}`, 28),
-    centered(`Date: ${doc.generatedAt.slice(0, 10)}`, 28),
-    centered(isDraft ? "WORKING DRAFT - NOT BASELINED" : "BASELINE", 28, true)
+    centered(t.coverTitle, 36, true),
+    centered(`${t.version} ${doc.version}`, 28),
+    centered(`${t.date} ${doc.generatedAt.slice(0, 10)}`, 28),
+    centered(isDraft ? t.draftBanner : t.baselineBanner, 28, true)
   ]
 }
 
-function pageHeader(doc: RenderedDocument, isDraft: boolean): Header {
+function pageHeader(doc: RenderedDocument, isDraft: boolean, t: WriterText): Header {
   const children: Paragraph[] = [
     new Paragraph({
       alignment: AlignmentType.RIGHT,
-      children: [new TextRun({ text: `${doc.projectName} - SRS ${doc.version}`, size: 18, color: "808080" })]
+      children: [new TextRun({ text: t.header(doc.projectName, doc.version), size: 18, color: "808080" })]
     })
   ]
   if (isDraft) children.push(watermarkParagraph("DRAFT"))
   return new Header({ children })
 }
 
-function pageFooter(): Footer {
+function pageFooter(t: WriterText): Footer {
   return new Footer({
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun({ children: ["Page ", PageNumber.CURRENT, " / ", PageNumber.TOTAL_PAGES], size: 18 })]
+        children: [new TextRun({ children: [t.footer[0], PageNumber.CURRENT, t.footer[1], PageNumber.TOTAL_PAGES], size: 18 })]
       })
     ]
   })
@@ -260,17 +267,17 @@ function watermarkParagraph(text: string): Paragraph {
   return imported.root[0] as Paragraph
 }
 
-function recordOfChanges(doc: RenderedDocument): BodyChild[] {
+function recordOfChanges(doc: RenderedDocument, t: WriterText): BodyChild[] {
   const plain = (text: string): CellRuns => [{ text }]
   return [
-    new Paragraph({ text: "I. Record of Changes", heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: t.rocTitle, heading: HeadingLevel.HEADING_1 }),
     new Paragraph({
       ...beforeTable,
-      children: [new TextRun({ text: "*A - Added, M - Modified, D - Deleted", italics: true, size: 20 })]
+      children: [new TextRun({ text: t.rocLegend, italics: true, size: 20 })]
     }),
     tableGap(undefined),
     table(
-      ["Date", "Version", "A*, M, D", "In charge", "Change Description"].map(plain),
+      t.rocHeader.map(plain),
       doc.recordOfChanges.map((row) =>
         [row.date, row.version, row.change_type, row.in_charge, row.description].map(plain)
       ),
@@ -279,32 +286,7 @@ function recordOfChanges(doc: RenderedDocument): BodyChild[] {
   ]
 }
 
-/**
- * Chữ của phụ lục cờ. Mode 1 (tài liệu nhập): thông điệp cờ là tiếng Việt ⇒ tiêu đề cột + tên luật tiếng Việt, cột
- * luật in nhãn (`ruleLabel`) thay mã máy (`section_empty`). Mode 2 giữ nguyên tiếng Anh như trước.
- */
-const FLAG_TEXT = {
-  en: {
-    status: "Working Draft Status",
-    open: "Open red flags",
-    stale: "Stale sections",
-    waivedCount: "Waived flags",
-    openHeading: "Open Red Flags",
-    waivedHeading: "Waived Flags",
-    header: ["ID", "Rule", "Section", "Message"],
-    reason: "Waive reason"
-  },
-  vi: {
-    status: "Tình trạng bản làm việc",
-    open: "Lỗi đỏ đang mở",
-    stale: "Mục cần xem lại",
-    waivedCount: "Cờ đã bỏ qua",
-    openHeading: "Lỗi đỏ đang mở",
-    waivedHeading: "Cờ đã bỏ qua",
-    header: ["Mã", "Loại lỗi", "Mục", "Nội dung"],
-    reason: "Lý do bỏ qua"
-  }
-} as const
+// Chữ của phụ lục cờ (`FLAG_TEXT`) và chữ cố định của writer (`WRITER_TEXT`) nằm ở `labels.ts` (FLF-265).
 
 function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLanguage): BodyChild[] {
   const appendix = doc.flagsAppendix
@@ -348,7 +330,7 @@ function flagsAppendix(doc: RenderedDocument, isDraft: boolean, language: FlagLa
   return out
 }
 
-function renderSection(section: RenderedSection, ctx: WriteContext): BodyChild[] {
+function renderSection(section: RenderedSection, ctx: WriteContext, t: WriterText): BodyChild[] {
   const needsReview = section.status === "stale" || section.awaiting_reaccept === true
   const shading: Shading = needsReview ? { type: ShadingType.CLEAR, color: "auto", fill: STALE_FILL } : undefined
   const title = section.number ? `${section.number} ${section.heading}` : section.heading
@@ -357,10 +339,7 @@ function renderSection(section: RenderedSection, ctx: WriteContext): BodyChild[]
   const out: BodyChild[] = [new Paragraph({ text: title, heading: headingLevel(section.level), ...(tableFirst ? beforeTable : {}) })]
 
   if (needsReview) {
-    const note =
-      section.status === "stale"
-        ? "[STALE] Source data of this section changed after it was accepted. Content below may be outdated."
-        : "[AWAITING RE-ACCEPT] This section was regenerated and is waiting for the user to accept it again."
+    const note = section.status === "stale" ? t.staleNote : t.awaitingNote
     out.push(
       new Paragraph({
         shading,

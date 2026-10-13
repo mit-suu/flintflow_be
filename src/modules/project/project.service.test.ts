@@ -32,7 +32,13 @@ const mocks = vi.hoisted(() => {
     CrCounter: { deleteMany: deleteMany() },
     ChangeLocation: { deleteMany: deleteMany() },
     ChangeGroup: { deleteMany: deleteMany() },
-    destroyDocumentAsset: vi.fn(async () => true)
+    // FLF-265: lớp bản dịch
+    SpineTranslation: { deleteMany: deleteMany() },
+    TranslationGlossary: { deleteMany: deleteMany() },
+    TranslationRunLock: { deleteMany: deleteMany() },
+    destroyDocumentAsset: vi.fn(async () => true),
+    // FLF-265: ngôn ngữ tài khoản — null = chưa chọn
+    accountLocaleOf: vi.fn(async (_userId: string): Promise<"vi" | "en" | null> => null)
   }
 })
 
@@ -58,7 +64,11 @@ vi.mock("../doc-version/doc-file.store.js", () => ({ docFileStore: () => ({ remo
 vi.mock("../change-request/change-request.model.js", () => ({ ChangeRequest: mocks.ChangeRequest, CrCounter: mocks.CrCounter }))
 vi.mock("../change-request/change-location.model.js", () => ({ ChangeLocation: mocks.ChangeLocation }))
 vi.mock("../change-request/change-group.model.js", () => ({ ChangeGroup: mocks.ChangeGroup }))
+vi.mock("../translation/spine-translation.model.js", () => ({ SpineTranslation: mocks.SpineTranslation }))
+vi.mock("../translation/translation-glossary.model.js", () => ({ TranslationGlossary: mocks.TranslationGlossary }))
+vi.mock("../translation/translation-run-lock.model.js", () => ({ TranslationRunLock: mocks.TranslationRunLock }))
 vi.mock("../credits/subscription.model.js", () => ({ Subscription: { findOne: () => ({ select: () => ({ lean: mocks.subscriptionPlan }) }) } }))
+vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: mocks.accountLocaleOf }))
 
 import * as projectService from "./project.service.js"
 
@@ -83,6 +93,10 @@ describe("deleteProject", () => {
     }
     // Mode 1: mọi collection + file .docx trong GridFS
     for (const model of [mocks.ImportedDocument, mocks.DocBlock, mocks.TemplateProfile, mocks.ExtractionDraft, mocks.FieldAnchor, mocks.ReuploadDiff, mocks.DocVersion, mocks.ChangeRequest, mocks.CrCounter, mocks.ChangeLocation, mocks.ChangeGroup]) {
+      expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
+    }
+    // FLF-265: bản dịch + glossary dịch + khoá lượt dịch
+    for (const model of [mocks.SpineTranslation, mocks.TranslationGlossary, mocks.TranslationRunLock]) {
       expect(model.deleteMany).toHaveBeenCalledWith({ projectId: PROJECT })
     }
     expect(mocks.removeDocFiles).toHaveBeenCalledWith(PROJECT)
@@ -124,7 +138,8 @@ describe("createProject", () => {
 
     await projectService.createProject(ORG, USER, "FlintFlow", "")
 
-    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "FlintFlow", domain: null, status: "active", mode: "fpt" })
+    // FLF-265: mode 2 luôn lưu ngôn ngữ tài liệu — tài khoản chưa chọn ⇒ en
+    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "FlintFlow", domain: null, status: "active", mode: "fpt", documentLanguage: "en" })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "FlintFlow", domain: null })
   })
 
@@ -158,5 +173,85 @@ describe("createProject", () => {
     await expect(projectService.createProject(ORG, USER, "X", "", "customer_template")).rejects.toMatchObject({ statusCode: 501, code: "NOT_IMPLEMENTED" })
     expect(mocks.Project.create).not.toHaveBeenCalled()
     expect(mocks.getOrCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe("createProject — ngôn ngữ tài liệu (FLF-265)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.Project.create.mockResolvedValue({ id: PROJECT })
+  })
+
+  const stored = () => (mocks.Project.create.mock.calls[0] as unknown as [Record<string, unknown>])[0]
+
+  it("body gửi giá trị ⇒ lưu đúng giá trị, không đọc tài khoản", async () => {
+    await projectService.createProject(ORG, USER, "Lumen", undefined, "fpt", undefined, "vi")
+
+    expect(stored().documentLanguage).toBe("vi")
+    expect(mocks.accountLocaleOf).not.toHaveBeenCalled()
+  })
+
+  it("thiếu ⇒ lấy ngôn ngữ tài khoản (User.locale) của người tạo", async () => {
+    mocks.accountLocaleOf.mockResolvedValueOnce("vi")
+
+    await projectService.createProject(ORG, USER, "Lumen")
+
+    expect(mocks.accountLocaleOf).toHaveBeenCalledWith(USER)
+    expect(stored().documentLanguage).toBe("vi")
+  })
+
+  it("thiếu và tài khoản chưa chọn (accountLocaleOf null) ⇒ en", async () => {
+    await projectService.createProject(ORG, USER, "Lumen")
+
+    expect(stored().documentLanguage).toBe("en")
+  })
+
+  it("mode import bỏ qua giá trị gửi lên, không lưu field (ngôn ngữ theo file upload)", async () => {
+    await projectService.createProject(ORG, USER, "Lumen SRS", undefined, "import", undefined, "vi")
+
+    expect(stored()).not.toHaveProperty("documentLanguage")
+    expect(mocks.accountLocaleOf).not.toHaveBeenCalled()
+  })
+})
+
+describe("setDocumentLanguage (FLF-265)", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  const existing = (value: { mode: string } | null) =>
+    mocks.Project.findOne.mockReturnValueOnce({ select: () => ({ lean: async () => value }) })
+
+  it("ghi field, lọc theo org và loại dự án mode 1 ngay trong lệnh ghi", async () => {
+    mocks.Project.findOneAndUpdate.mockResolvedValueOnce({ _id: PROJECT, documentLanguage: "vi" })
+
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).resolves.toMatchObject({ documentLanguage: "vi" })
+    expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: PROJECT, organizationId: ORG, mode: { $ne: "import" } },
+      { documentLanguage: "vi" },
+      { new: true }
+    )
+    expect(mocks.Project.findOne).not.toHaveBeenCalled()
+  })
+
+  it("dự án của org khác ⇒ 404 PROJECT_NOT_FOUND", async () => {
+    mocks.Project.findOneAndUpdate.mockResolvedValueOnce(null)
+    existing(null)
+
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).rejects.toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
+    expect(mocks.Project.findOne).toHaveBeenCalledWith({ _id: PROJECT, organizationId: ORG })
+  })
+
+  it("id sai định dạng ⇒ 404, không chạm DB", async () => {
+    await expect(projectService.setDocumentLanguage("khong-phai-id", ORG, "vi")).rejects.toMatchObject({ statusCode: 404, code: "PROJECT_NOT_FOUND" })
+    expect(mocks.Project.findOneAndUpdate).not.toHaveBeenCalled()
+  })
+
+  it("dự án mode 1 ⇒ 409 DOCUMENT_LANGUAGE_LOCKED", async () => {
+    mocks.Project.findOneAndUpdate.mockResolvedValueOnce(null)
+    existing({ mode: "import" })
+
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "en")).rejects.toMatchObject({
+      statusCode: 409,
+      code: projectService.DOCUMENT_LANGUAGE_LOCKED
+    })
   })
 })

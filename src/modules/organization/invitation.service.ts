@@ -117,14 +117,15 @@ export const createInvitation = async (
     Organization.findById(orgId).select("name").lean(),
     User.findById(inviterUserId).select("name email").lean()
   ])
-  // Gửi mail là side effect: hỏng SMTP không được làm hỏng việc tạo mã (Lead vẫn đọc được mã ở response).
-  void sendOrgInvitationEmail(email, {
+  // Gửi mail là side effect qua hàng đợi email (tự retry): hỏng SMTP — kể cả không đưa được vào Redis — không được
+  // làm hỏng việc tạo mã (Lead vẫn đọc được mã ở response).
+  await sendOrgInvitationEmail(email, {
     code,
     organizationName: org?.name ?? "FlintFlow",
     roleLabel: ROLE_LABELS[role],
     inviterName: inviter?.name || inviter?.email || "Một thành viên",
     expiresInDays: env.INVITE_TTL_DAYS
-  })
+  }).catch((err: unknown) => console.error(`[invitation] Không đưa được email mời ${email} vào hàng đợi:`, err))
 
   return { ...toItem(invitation), code }
 }

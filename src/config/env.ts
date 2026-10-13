@@ -95,6 +95,37 @@ const envSchema = z.object({
   // để trống ở mọi môi trường thật. `mock` không gọi mạng và trả output hợp schema theo ActionType.
   AI_PROVIDER_OVERRIDE: z.string().default(""),
 
+  // ─── Embedding cho C-3 tìm vị trí CR theo nghĩa (`shared/ai/embedding/`) ───────────
+  // `off` (mặc định) ⇒ C-3 tìm theo từ khoá như cũ, không gọi mạng. `gemini` cần GEMINI_API_KEY + Atlas Vector Search
+  // (index `spine_embeddings_vector`, tạo bằng `npm run migrate:spine-embeddings`). `mock` = vector băm tất định (test).
+  // AI_PROVIDER_OVERRIDE=mock ép `mock` trừ khi đang `off`.
+  EMBEDDING_PROVIDER: z.enum(["off", "gemini", "mock"]).default("off"),
+  EMBEDDING_MODEL: z.string().default("gemini-embedding-001"),
+  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(768),
+  EMBEDDING_API_BASE_URL: z.string().default("https://generativelanguage.googleapis.com/v1beta"),
+  EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(20000),
+  /** Số ứng viên vector tối đa C-3 lấy thêm, và điểm tối thiểu (`vectorSearchScore` cosine của Atlas, 0..1). */
+  CR_VECTOR_TOP_K: z.coerce.number().int().min(1).max(200).default(20),
+  CR_VECTOR_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.82),
+
+  // ─── Knowledge RAG (FLF-267, `modules/knowledge/`, docs/ops.md "Knowledge RAG") ───────────
+  // Tắt ⇒ chat gửi `knowledge: true` nhận 409 KNOWLEDGE_DISABLED. Cần embedding (EMBEDDING_PROVIDER) + đã ingest corpus;
+  // thiếu embedding thì chỉ tìm theo từ khoá ($text).
+  KNOWLEDGE_ENABLED: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+  /** Số chunk đưa vào prompt trả lời. */
+  KNOWLEDGE_TOP_K: z.coerce.number().int().min(1).max(20).default(5),
+  /** Ngưỡng cosine của chunk gần nhất; thấp hơn ⇒ "không đủ căn cứ", không gọi model. Hiệu chỉnh bằng `npm run eval:knowledge`. */
+  KNOWLEDGE_MIN_SCORE: z.coerce.number().min(-1).max(1).default(0.66),
+  /** Trọng số danh sách từ khoá trong RRF (1 = RRF chuẩn, 0 = chỉ xếp theo vector). Chọn bằng `eval:knowledge --retrieval-only`. */
+  KNOWLEDGE_LEXICAL_WEIGHT: z.coerce.number().min(0).max(1).default(0),
+  /** Thư mục corpus mặc định của `npm run ingest:knowledge` (tương đối thư mục chạy). */
+  KNOWLEDGE_CORPUS_DIR: z.string().default("assets/skills"),
+  /** `atlas` = `$vectorSearch` (Mongo không hỗ trợ ⇒ tự lùi về `memory`); `memory` = cosine vét cạn trong process. */
+  KNOWLEDGE_VECTOR_BACKEND: z.enum(["atlas", "memory"]).default("atlas"),
+
   // S-9.2 Quality Lens bằng LLM — mặc định TẮT (Phases §9.1, hoãn vì ngân sách).
   REVIEW_LLM_ENABLED: z
     .string()
@@ -121,6 +152,24 @@ const envSchema = z.object({
     .refine((v) => !isProd || !v.includes("localhost"), {
       message: "ở production phải là domain public, không được trỏ localhost"
     }),
+  // ─── Job nền (`shared/queue/`, docs/background-jobs.md) ───────────
+  // `inline` (mặc định) ⇒ job chạy trong chính tiến trình API như trước, không cần Redis (dev, test, CI).
+  // `bullmq` ⇒ job đi qua Redis; tiến trình `npm run worker` (hoặc WORKERS_IN_PROCESS=true) xử lý.
+  JOB_DRIVER: z.enum(["inline", "bullmq"]).default("inline"),
+  REDIS_URL: z.string().default(""),
+  /**
+   * Tiền tố key Redis. Hai môi trường dùng CHUNG một Redis (máy dev + production cùng Redis Cloud) phải khác tiền tố —
+   * nếu không worker trên máy dev nhận job của production rồi chạy với Mongo của máy dev.
+   */
+  QUEUE_PREFIX: z.string().regex(/^[\w-]+$/).default("flintflow"),
+  /** Chạy worker ngay trong tiến trình API (dev một terminal). Production: để `false` và chạy service `worker` riêng. */
+  WORKERS_IN_PROCESS: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+  /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
+  JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+
   // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
   CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
   /** Hạn của mã mời vào tổ chức (UC-08). */
@@ -135,6 +184,9 @@ const envSchema = z.object({
   AI_PAYLOAD_RETENTION_DAYS: z.coerce.number().int().min(0).max(365).default(30),
   /** Trần ký tự cho mỗi bên prompt/response trước khi cắt giữa; độ dài thật vẫn được ghi lại. */
   AI_PAYLOAD_MAX_CHARS: z.coerce.number().int().positive().default(40000)
+}).refine((v) => v.JOB_DRIVER !== "bullmq" || v.REDIS_URL !== "", {
+  message: "JOB_DRIVER=bullmq cần REDIS_URL (vd. redis://localhost:6379)",
+  path: ["REDIS_URL"]
 })
 
 const parsed = envSchema.safeParse(process.env)

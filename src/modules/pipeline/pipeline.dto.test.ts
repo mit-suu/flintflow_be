@@ -12,6 +12,8 @@ import {
   runStepRequestSchema,
   stepAnswerRequestSchema,
   stepEventSchema,
+  translationRunRequestSchema,
+  translationStatusResponseSchema,
   waiveRequestSchema
 } from "./pipeline.dto.js"
 
@@ -19,6 +21,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONTRACT = fs.readFileSync(path.resolve(__dirname, "../../../docs/api/pipeline-contract.md"), "utf8")
 
 describe("pipeline.dto", () => {
+  it("FLF-265: dịch tài liệu — run chỉ nhận max_batches 1–10, status đủ số đếm + ước tính credit", () => {
+    expect(translationRunRequestSchema.safeParse({}).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ max_batches: 5 }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ max_batches: 0 }).success).toBe(false)
+    expect(translationRunRequestSchema.safeParse({ max_batches: 11 }).success).toBe(false)
+    expect(translationRunRequestSchema.safeParse({ locale: "vi" }).success).toBe(false)
+    const status = { locale: "vi", source_locale: "en", total: 800, missing: 120, batches: 3, estimated_credits: 6 }
+    expect(translationStatusResponseSchema.safeParse(status).success).toBe(true)
+    expect(translationStatusResponseSchema.safeParse({ ...status, locale: "fr" }).success).toBe(false)
+    expect(CONTRACT).toContain("/translations/status")
+    expect(CONTRACT).toContain("/translations/run")
+  })
+
   it("FLF-221: /run và /phases/:phase/run nhận message + intent; answer nhận message thay cho answers", () => {
     const base = { session_id: "s1", base_version: 3 }
     for (const schema of [runStepRequestSchema, runPhaseRequestSchema]) {

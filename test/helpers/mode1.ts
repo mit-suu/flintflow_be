@@ -5,6 +5,7 @@
 import request from "supertest"
 import { expect } from "vitest"
 import app from "../../src/app.js"
+import { getImportResponseSchema } from "../../src/modules/import/import.dto.js"
 import type { SeededFixture } from "../setup.js"
 
 export const createMode1Project = async (seeded: SeededFixture, name = "Lumen import"): Promise<string> => {
@@ -16,6 +17,7 @@ export const createMode1Project = async (seeded: SeededFixture, name = "Lumen im
 export const mode1Api = (seeded: SeededFixture, projectId: string) => {
   const auth = { Authorization: `Bearer ${seeded.token}` }
   const base = `/api/v1/projects/${projectId}`
+  const spineVersionOf = async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number
   return {
     base,
     upload: (buf: Buffer, name = "SRS_Lumen.docx", path = "/import") => request(app).post(`${base}${path}`).set(auth).attach("file", buf, name),
@@ -23,7 +25,7 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     post: (suffix: string, body: object = {}) => request(app).post(`${base}${suffix}`).set(auth).send(body),
     patch: (suffix: string, body: object) => request(app).patch(`${base}${suffix}`).set(auth).send(body),
     del: (suffix: string) => request(app).delete(`${base}${suffix}`).set(auth),
-    spineVersion: async () => (await request(app).get(`${base}/spine`).set(auth)).body.data.spine_version as number,
+    spineVersion: spineVersionOf,
     /**
      * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi **chờ đúng job** của import đó
      * (`waitForExtraction`) thay vì chờ theo đồng hồ — máy tải nặng (chạy cả suite song song) không còn làm test
@@ -42,6 +44,20 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
         if (Date.now() >= deadline) throw new Error("I-4 chạy nền quá lâu")
         await new Promise((r) => setTimeout(r, 25))
       }
+    },
+    /**
+     * Finalize (1.10–1.12) chạy nền: gọi `/import/finalize` (mặc định `base_version` = Spine hiện tại) hoặc `/import/resume`
+     * ở `baselining`/`checking`, rồi chờ đúng job (`waitForFinalize`) và đọc `GET /import`. `view` = dữ liệu `GET /import`
+     * sau khi job xong / dừng; `null` khi request bị từ chối (4xx).
+     */
+    finalizeAndWait: async (importId: string, body: object = {}, path = "/import/finalize") => {
+      const payload = path === "/import/finalize" ? { import_id: importId, base_version: await spineVersionOf(), ...body } : { import_id: importId, ...body }
+      const res = await request(app).post(`${base}${path}`).set(auth).send(payload)
+      if (res.status !== 200) return { res, view: null }
+      const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
+      await waitForFinalize(importId)
+      const view = getImportResponseSchema.parse((await request(app).get(`${base}/import`).set(auth)).body.data)
+      return { res, view }
     }
   }
 }
@@ -50,6 +66,8 @@ const firstBlock = (prompt: string, after: string): string => {
   const tail = prompt.slice(prompt.indexOf(after))
   return /\[(B\d{4,})\]/.exec(tail)?.[1] ?? "B0001"
 }
+
+const AVAILABILITY_BLOCK = /\[(B\d{4,})\][^\n]*24 hours/
 
 /** Output I-4 giả theo section trong prompt (khớp `makeSrsDocx`). */
 export const fakeImportExtract = (prompt: string): string | undefined => {
@@ -70,7 +88,14 @@ export const fakeImportExtract = (prompt: string): string | undefined => {
   else if (section === "fixed:3.1.2") items = [item("screens", "SCR-01", { name: "Login screen", description: "Lets the learner sign in." })]
   else if (section === "fixed:4.2.3")
     items = [item("nfrs", "NFR-01", { statement: "The system shall respond within 2 seconds for 95% of requests.", kind: "quantitative", metric: "response time", threshold: "2 s" })]
-  else if (section.startsWith("function:"))
+  else if (section === "fixed:4.2.2" && AVAILABILITY_BLOCK.test(prompt)) {
+    // mẫu IEEE (`makeIeeeSrsDocx`): Reliability + Availability cùng 4.2.2 — mỗi câu một NFR, nguồn là đoạn của nó
+    const availability = AVAILABILITY_BLOCK.exec(prompt)![1]
+    items = [
+      item("nfrs", "NFR-R1", { statement: "The platform shall have a monthly uptime of at least 99.5%.", kind: "quantitative", metric: "uptime", threshold: "99.5%" }),
+      { ...item("nfrs", "NFR-R2", { statement: "The platform shall be available 24 hours a day, 7 days a week.", kind: "descriptive" }), source_block_ids: [availability] }
+    ]
+  } else if (section.startsWith("function:"))
     items = [item("functions", null, { trigger: "Learner submits the form", normal: ["Enter email", "Submit"], abnormal: ["Wrong password"] }, 0.85, { trigger: 0.5 })]
   return JSON.stringify({ section_id: section, items, unmapped_block_ids: [] })
 }

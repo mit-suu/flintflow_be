@@ -63,15 +63,15 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
   })
 
   // T21: prompt phẳng chỉ còn cho action ngoài pipeline — prompt section-based cũ đã xoá
-  it("chỉ còn prompt của CHAT và SUMMARIZE_DOCUMENT", () => {
-    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT, ActionType.TRANSLATE])
+  it("chỉ còn prompt của CHAT, SUMMARIZE_DOCUMENT, TRANSLATE, TRANSLATE_DOCUMENT", () => {
+    expect(listPromptAssets().map((a) => a.actionType).sort()).toEqual([ActionType.CHAT, ActionType.SUMMARIZE_DOCUMENT, ActionType.TRANSLATE, ActionType.TRANSLATE_DOCUMENT])
   })
 })
 
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 39 skill: 17 action · 15 content · 5 renderer · 2 output", () => {
+  it("đủ 41 skill: 19 action · 15 content · 5 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
@@ -79,8 +79,10 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +5 action khung mode 1 (FLF-171): import-extract, import-semantic-check, cr-clarify, cr-propose, cr-consistency.
     // +1 action mode 1 v3 phase 5: import-extract-diagram (Gemini đọc ảnh diagram).
     // +1 action mode 1 v3 phase 7: cr-material-image (Gemini đọc ảnh tài liệu bổ sung của CR).
-    expect(listSkillAssets()).toHaveLength(39)
-    expect(byKind("action")).toBe(17)
+    // +1 action 1.11 map-reduce: import-cross-check (kiểm chéo giữa các section).
+    // +1 action FLF-267: knowledge-answer (trả lời câu hỏi tri thức chỉ từ chunk truy hồi, có trích dẫn).
+    expect(listSkillAssets()).toHaveLength(41)
+    expect(byKind("action")).toBe(19)
     expect(byKind("content")).toBe(15)
     expect(byKind("renderer")).toBe(5)
     expect(byKind("output")).toBe(2)

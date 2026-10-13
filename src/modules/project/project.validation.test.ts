@@ -1,7 +1,23 @@
 import { describe, it, expect, vi } from "vitest"
 import type { Request, Response } from "express"
-import { CreateProjectSchema, projectModeSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, UpdateDocumentLanguageSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
 import { Project, PROJECT_MODES } from "./project.model.js"
+
+describe("documentLanguage (FLF-265)", () => {
+  it("tạo dự án: tuỳ chọn, chỉ nhận vi | en", () => {
+    expect(CreateProjectSchema.parse({ name: "Lumen" }).documentLanguage).toBeUndefined()
+    expect(CreateProjectSchema.parse({ name: "Lumen", documentLanguage: "vi" }).documentLanguage).toBe("vi")
+    expect(CreateProjectSchema.parse({ name: "Lumen", documentLanguage: "en" }).documentLanguage).toBe("en")
+    expect(CreateProjectSchema.safeParse({ name: "Lumen", documentLanguage: "fr" }).success).toBe(false)
+  })
+
+  it("đổi ngôn ngữ: bắt buộc, không nhận key lạ", () => {
+    expect(UpdateDocumentLanguageSchema.safeParse({ documentLanguage: "en" }).success).toBe(true)
+    expect(UpdateDocumentLanguageSchema.safeParse({}).success).toBe(false)
+    expect(UpdateDocumentLanguageSchema.safeParse({ documentLanguage: "fr" }).success).toBe(false)
+    expect(UpdateDocumentLanguageSchema.safeParse({ documentLanguage: "vi", name: "x" }).success).toBe(false)
+  })
+})
 
 describe("Project.mode (FLF-171)", () => {
   it("không gửi mode ⇒ fpt (hành vi cũ của mode 2)", () => {
@@ -51,5 +67,18 @@ describe("CreateProjectSchema qua validateRequest", () => {
     ["tên quá 100 ký tự", { name: "x".repeat(101) }]
   ])("%s ⇒ 400 VALIDATION_ERROR", (_label, body) => {
     expect(() => run(body)).toThrow(expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR" }))
+  })
+})
+
+describe("cờ knowledge của tin chat (FLF-267)", () => {
+  it("thiếu ⇒ false; boolean thật giữ nguyên; field khác của body không bị kiểm", () => {
+    expect(parseKnowledgeFlag({ content: "x", step: "chat" })).toBe(false)
+    expect(parseKnowledgeFlag(undefined)).toBe(false)
+    expect(parseKnowledgeFlag({ knowledge: true })).toBe(true)
+    expect(parseKnowledgeFlag({ knowledge: false, discoveryStep: "2" })).toBe(false)
+  })
+
+  it.each([["chuỗi", "true"], ["số", 1], ["null", null]])("%s ⇒ 400 VALIDATION_ERROR", (_label, value) => {
+    expect(() => parseKnowledgeFlag({ knowledge: value })).toThrow(expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR" }))
   })
 })

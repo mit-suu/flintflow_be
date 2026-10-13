@@ -5,6 +5,7 @@ import { createEmptySpine } from "../spine/spine.repository.js"
 import type { Spine, StepState } from "../spine/spine.types.js"
 import {
   buildLayout,
+  sectionSlices,
   buildStepPlan,
   continuationOwnerSection,
   customSectionOps,
@@ -88,7 +89,8 @@ describe("buildLayout", () => {
       ["B0003", "fixed:4.2.2"],
       ["B0006", "unmapped"]
     ])
-    const { layout, customSections } = buildLayout(blocks, headings, new Set(["B0005"]))
+    const { layout, customSections, slices } = buildLayout(blocks, headings, new Set(["B0005"]))
+    expect(slices).toEqual([{ custom_id: "CS01", section_id: "fixed:4.2.2", block_ids: ["B0003", "B0004", "B0005"] }])
     expect(layout.map((l) => [l.heading_text, l.section_id])).toEqual([
       ["3.5.1 Reliability", "fixed:4.2.2"],
       ["3.5.2 Availability", "custom:CS01"],
@@ -99,8 +101,25 @@ describe("buildLayout", () => {
     expect(customSections[1].blocks.map((b) => b.text)).toEqual(["Kept as written."])
   })
 
+  it("sectionSlices: phần tử có quá nửa khối nguồn dưới heading lặp ⇒ in dưới heading đó; còn lại / sai loại ⇒ lần đầu", () => {
+    const slices = [{ custom_id: "CS01", section_id: "fixed:4.2.2", block_ids: ["B0003", "B0004", "B0005"] }]
+    expect(
+      sectionSlices(slices, [
+        { entity: "nfrs", id: "NFR-01", source_block_ids: ["B0002"] },
+        { entity: "nfrs", id: "NFR-02", source_block_ids: ["B0004"] },
+        // nửa trên nửa dưới ⇒ giữ ở lần đầu
+        { entity: "nfrs", id: "NFR-03", source_block_ids: ["B0002", "B0005"] },
+        // không phải phần tử của section 4.2.2
+        { entity: "glossary", id: "G01", source_block_ids: ["B0004"] },
+        { entity: "nfrs", id: null, source_block_ids: ["B0004"] }
+      ])
+    ).toEqual([{ custom_id: "CS01", section_id: "fixed:4.2.2", items: ["nfrs:NFR-02"] }])
+    // section không có phần tử có id (Product Overview) ⇒ không chia
+    expect(sectionSlices([{ custom_id: "CS02", section_id: "fixed:1", block_ids: ["B0009"] }], [{ entity: "project", id: null, source_block_ids: ["B0009"] }])).toEqual([])
+  })
+
   it("không có heading ⇒ layout rỗng; block trước heading đầu tiên không vào mục riêng", () => {
-    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [] })
+    expect(buildLayout([p("B0001", "Cover page", null)], new Map())).toEqual({ layout: [], customSections: [], slices: [] })
   })
 
   it("FLF-184: văn xuôi I-4 không trích được ⇒ phần nối (tiêu đề rỗng, cấp + 1) ngay sau section; khối dưới heading con cùng section gom vào cùng phần nối", () => {

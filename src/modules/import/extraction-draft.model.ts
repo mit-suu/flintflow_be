@@ -7,6 +7,7 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import type { DiagramImageKind } from "../../shared/ai/response-parser.js"
+import type { EntityItem } from "./extracted-entities.js"
 import { EXTRACTION_STATUSES, FIELD_ORIGINS, type ExtractionStatus, type FieldOrigin } from "./import.constants.js"
 
 export interface ExtractedField {
@@ -19,6 +20,21 @@ export interface ExtractedField {
   origin: FieldOrigin
   confirmed: boolean
   edited_value?: unknown
+}
+
+/**
+ * Tiến độ AI của section đang dở (lượt = một ảnh diagram hoặc một lô chữ, theo `sectionAiSteps`). Lưu sau mỗi lượt đã trừ
+ * credit; section xong ⇒ `null`. Chạy tiếp chỉ dùng lại khi `plan_hash` khớp kế hoạch lượt hiện tại.
+ */
+export interface ExtractionProgress {
+  plan_hash: string
+  /** Số lượt đầu đã xong — chạy tiếp bắt đầu ở lượt thứ `steps_done` (đếm từ 0). */
+  steps_done: number
+  /** Phần tử các lượt đó trả về (đã cấp id) — chưa gộp, chưa làm phẳng. */
+  items: EntityItem[]
+  unmapped_block_ids: string[]
+  diagram_images: IExtractionDraft["diagram_images"]
+  usage_id: string | null
 }
 
 export interface IExtractionDraft extends Document {
@@ -39,6 +55,7 @@ export interface IExtractionDraft extends Document {
   diagram_images: { block_id: string; kind: DiagramImageKind | "unsupported" | "unavailable" }[]
   /** Usage của lượt gọi AI (null nếu section chỉ trích deterministic). */
   usage_id: string | null
+  partial: ExtractionProgress | null
   error: string | null
   createdAt: Date
   updatedAt: Date
@@ -73,6 +90,7 @@ const extractionDraftSchema = new Schema<IExtractionDraft>(
     unmapped_block_ids: { type: [String], default: [] },
     diagram_images: { type: [new Schema({ block_id: { type: String, required: true }, kind: { type: String, required: true } }, opts)], default: [] },
     usage_id: { type: String, default: null },
+    partial: { type: Schema.Types.Mixed, default: null },
     error: { type: String, default: null }
   },
   { timestamps: true, minimize: false }

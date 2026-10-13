@@ -9,6 +9,8 @@
  *   - **Mongo hỏng ⇒ `status: "error"`** (HTTP 503). Không có Mongo thì không làm được gì.
  *   - **PlantUML hỏng ⇒ `status: "degraded"`** (HTTP 200). Diagram trả `render_status: "error"`,
  *     mọi thứ còn lại vẫn chạy — chặn deploy vì nó là phản ứng thái quá.
+ *   - **Redis hỏng ⇒ `status: "degraded"`** (chỉ khi `JOB_DRIVER=bullmq`; inline ⇒ `redis: "off"`). API vẫn trả lời,
+ *     nhưng job nền (import, email, embedding) không vào được hàng đợi.
  *   - Asset thiếu là lỗi khởi động (`startup-checks.ts`), tới được đây nghĩa là đã đủ; con số vẫn
  *     được trả về để so nhanh giữa hai môi trường.
  */
@@ -16,6 +18,7 @@ import mongoose from "mongoose"
 import { getPromptAssetIndex, getSkillIndex } from "../shared/ai/prompt-assets.js"
 import { loadStepRegistry } from "../modules/pipeline/step-registry.js"
 import { isPlantUmlReachable } from "../shared/diagram/plantuml.client.js"
+import { redisStatus } from "../shared/queue/connection.js"
 
 export type ComponentStatus = "ok" | "error"
 
@@ -23,6 +26,7 @@ export interface HealthReport {
   status: "ok" | "degraded" | "error"
   mongo: ComponentStatus
   plantuml: ComponentStatus
+  redis: ComponentStatus | "off"
   version: string
   assets: { prompts: number; skills: number; steps: number }
 }
@@ -69,7 +73,7 @@ const assetCounts = (): HealthReport["assets"] => {
 }
 
 export const buildHealthReport = async (): Promise<HealthReport> => {
-  const [mongo, plantuml] = await Promise.all([mongoStatus(), plantumlStatus()])
-  const status: HealthReport["status"] = mongo === "error" ? "error" : plantuml === "error" ? "degraded" : "ok"
-  return { status, mongo, plantuml, version: VERSION, assets: assetCounts() }
+  const [mongo, plantuml, redis] = await Promise.all([mongoStatus(), plantumlStatus(), redisStatus()])
+  const status: HealthReport["status"] = mongo === "error" ? "error" : plantuml === "error" || redis === "error" ? "degraded" : "ok"
+  return { status, mongo, plantuml, redis, version: VERSION, assets: assetCounts() }
 }

@@ -403,6 +403,43 @@ describe("FLF-252 — mục chức năng in theo file gốc", () => {
   })
 })
 
+describe("mẫu IEEE — nhiều heading cùng một section FPT (Reliability + Availability ⇒ 4.2.2)", () => {
+  const nfr = (id: string, statement: string): Spine["nfrs"][number] => ({ id, category: "reliability", kind: "descriptive", statement, priority: null })
+  const ieee = (): Spine => ({
+    ...createEmptySpine({ name: "Lumen" }),
+    nfrs: [nfr("NFR-01", "Uptime 99.5% per month"), nfr("NFR-02", "Available 24/7"), nfr("NFR-03", "Added later by a change request")],
+    custom_sections: [
+      { id: "CS01", heading: "3.5.2 Availability", level: 2, source: "import", blocks: [{ kind: "paragraph", text: "See the vendor SLA.", rows: null, image_ref: null }] }
+    ]
+  })
+  const layout = (slices: TemplateLayout["sectionSlices"]): TemplateLayout => ({
+    language: "en",
+    layout: [entry(0, "3.5 Software System Attributes", 1, "group:4.2"), entry(1, "3.5.1 Reliability", 2, "fixed:4.2.2"), entry(2, "3.5.2 Availability", 2, "custom:CS01")],
+    ...(slices ? { sectionSlices: slices } : {})
+  })
+  const text = (blocks: unknown[]) => JSON.stringify(blocks)
+
+  it("phần tử trích từ heading lặp in dưới heading đó; lần đầu của section in phần còn lại (kể cả phần tử thêm sau)", () => {
+    const { sections } = buildLayoutSections(ieee(), layout([{ custom_id: "CS01", section_id: "fixed:4.2.2", items: ["nfrs:NFR-02"] }]), [], { diagramPng: () => undefined })
+    const reliability = sections.find((x) => x.id === "fixed:4.2.2")!
+    const availability = sections.find((x) => x.id === "custom:CS01")!
+    expect(text(reliability.blocks)).toContain("Uptime 99.5% per month")
+    expect(text(reliability.blocks)).toContain("Added later by a change request")
+    expect(text(reliability.blocks)).not.toContain("Available 24/7")
+    // Spine trước, nguyên văn không trích được sau
+    expect(text(availability.blocks)).toContain("Available 24/7")
+    expect(text(availability.blocks).indexOf("Available 24/7")).toBeLessThan(text(availability.blocks).indexOf("See the vendor SLA."))
+  })
+
+  it("phần tử đã xoá ⇒ heading lặp chỉ còn nguyên văn; import cũ chưa có slice ⇒ như trước (dồn lên lần đầu)", () => {
+    const deleted = { ...ieee(), nfrs: ieee().nfrs.filter((n) => n.id !== "NFR-02") }
+    const after = buildLayoutSections(deleted, layout([{ custom_id: "CS01", section_id: "fixed:4.2.2", items: ["nfrs:NFR-02"] }]), [], { diagramPng: () => undefined })
+    expect(after.sections.find((x) => x.id === "custom:CS01")!.blocks).toEqual([{ type: "paragraph", runs: [{ text: "See the vendor SLA." }] }])
+    const legacy = buildLayoutSections(ieee(), layout(undefined), [], { diagramPng: () => undefined })
+    expect(text(legacy.sections.find((x) => x.id === "fixed:4.2.2")!.blocks)).toContain("Available 24/7")
+  })
+})
+
 describe("customBlocks", () => {
   it("bỏ đoạn rỗng, bảng rỗng; ảnh chưa đọc được (V5) ⇒ dòng chú thích nghiêng", () => {
     expect(

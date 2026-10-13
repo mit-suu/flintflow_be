@@ -39,7 +39,7 @@ const scriptClarify = (plan: (n: number) => string | Error | undefined) => {
 }
 
 describe("withMeteredAi — usage theo từng loại gọi (luồng thật)", () => {
-  it("import + CR: usage I-4:<section>, I-1.11, C-2/C-4/C-5:<cr> đều deducted; ví bị trừ đúng tổng cost; không còn hold", async () => {
+  it("import + CR: usage I-4:<section>, I-1.11:<lô>/cross, C-2/C-4/C-5:<cr> đều deducted; ví bị trừ đúng tổng cost; không còn hold", async () => {
     const { c, projectId, seeded } = await importedProject()
     const crId = await createCr(c, "Faster", "1 second instead of 2 seconds")
     const cr = `/change-requests/${crId}`
@@ -49,12 +49,13 @@ describe("withMeteredAi — usage theo từng loại gọi (luồng thật)", ()
     const steps = new Set(rows.map((r) => r.step_id))
     expect([...steps].filter((s) => s.startsWith("I-4:")).length).toBeGreaterThan(0)
     for (const s of [...steps].filter((x) => x.startsWith("I-4:"))) expect(s).toMatch(/^I-4:(fixed|function):/)
-    for (const s of ["I-1.11", "C-2:CR-001", "C-4:CR-001", "C-5:CR-001"]) expect(steps.has(s), s).toBe(true)
+    for (const s of ["I-1.11:1", "I-1.11:cross", "C-2:CR-001", "C-4:CR-001", "C-5:CR-001"]) expect(steps.has(s), s).toBe(true)
     expect(rows.every((r) => r.state === "deducted")).toBe(true)
     expect(rows.find((r) => r.step_id === "C-2:CR-001")).toMatchObject({ call_kind: ActionType.CR_CLARIFY, attempt: 1 })
     expect(rows.find((r) => r.step_id === "C-4:CR-001")).toMatchObject({ call_kind: ActionType.CR_PROPOSE })
     expect(rows.find((r) => r.step_id === "C-5:CR-001")).toMatchObject({ call_kind: ActionType.CR_CONSISTENCY })
-    expect(rows.find((r) => r.step_id === "I-1.11")).toMatchObject({ call_kind: ActionType.IMPORT_SEMANTIC_CHECK })
+    expect(rows.find((r) => r.step_id === "I-1.11:1")).toMatchObject({ call_kind: ActionType.IMPORT_SEMANTIC_CHECK })
+    expect(rows.find((r) => r.step_id === "I-1.11:cross")).toMatchObject({ call_kind: ActionType.IMPORT_CROSS_CHECK })
     expect(rows.every((r) => r.tokens_in > 0 && r.tokens_out > 0 && r.logId)).toBe(true)
 
     const w = await wallet(seeded.userId)
@@ -145,5 +146,20 @@ describe("withMeteredAi — gọi trực tiếp", () => {
     expect(res.data.ambiguous).toBe(false)
     const row = (await Usage.findById(res.usageId).lean())!
     expect(row).toMatchObject({ step_id: "C-2:CR-099", state: "deducted", tokens_in: res.tokens_in, tokens_out: res.tokens_out, cost: res.cost })
+  })
+
+  it("nhiều lượt cùng lúc trên một ví (1.11 chạy lô song song) ⇒ write conflict lúc giữ credit được thử lại, không lượt nào hỏng", async () => {
+    const { projectId, seeded } = await importedProject()
+    const before = await wallet(seeded.userId)
+    mockOverrides.next = (p) => fakeCrClarify({ entity_paths: [], keywords: ["x"] })(p)
+    const vars = { cr_id: "CR-099", title: "t", description: "d", round: 1, clarifications: "", projection: "", outline: "" }
+    const results = await Promise.all(
+      Array.from({ length: 6 }, (_, i) => withMeteredAi({ projectId, userId: seeded.userId, stepId: `C-2:CR-${100 + i}` }, ActionType.CR_CLARIFY, vars))
+    )
+    expect(results.map((r) => r.ok)).toEqual(Array(6).fill(true))
+    const after = await wallet(seeded.userId)
+    const spent = results.reduce((sum, r) => sum + (r.ok ? r.cost : 0), 0)
+    expect(before.balance - after.balance).toBe(spent)
+    expect(after.reserved).toBe(0)
   })
 })
