@@ -35,7 +35,8 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         // Boundary vẽ `system_name ?? project.name` nhưng chỉ hash khi đã đặt `system_name` (undefined bị bỏ khỏi
         // chuỗi hash) — hình cũ không bị `diagram_stale` hàng loạt; đổi `project.name` vẫn không làm hình cũ như trước.
         system_name: spine.project.system_name?.trim() || undefined,
-        actors: byId(spine.actors).map(({ id, name, kind }) => ({ id, name, kind })),
+        // `parent_id` vắng ⇒ undefined ⇒ bị bỏ khỏi chuỗi hash: hình cũ không có generalization không bị stale.
+        actors: byId(spine.actors).map(({ id, name, kind, parent_id }) => ({ id, name, kind, parent_id: parent_id ?? undefined })),
         use_cases: byId(spine.use_cases).map(({ id, name, actor_ids, includes, extends: ext }) => ({
           id,
           name,
