@@ -61,7 +61,7 @@ core screens first. **Only 3–5 screens get full detail in S-5** (Phases §9.1)
 product's own value, not CRUD chrome. Give those `detail_status: "pending"` and the lowest
 `queue_order`. Every other screen gets `detail_status: "placeholder"` in this same batch — it keeps its
 row, its feature and its `functions[]` frame, it just skips S-5.2…S-5.5. Marking a screen `placeholder`
-here is a decision, so add an `assumptions[]` entry naming why it was left out.
+here is a decision, so add an `assumptions[]` entry naming why it was left out, with `path: "screens[id=<screen>].detail_status"` (retired once S-5 details it).
 
 **4. `functions[]` frame.** Each screen gets at least one `functions[]` row now — the action that screen
 exists for: `{id, screen_id, feature_id, order, name: verb + object, trigger: "", description: "",

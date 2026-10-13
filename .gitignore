@@ -21,3 +21,6 @@ coverage/
 # Giữ lại báo cáo mốc M4 làm bằng chứng, bỏ .docx và các lượt chạy lẻ.
 /test/e2e-ai/results/*
 !/test/e2e-ai/results/m4-full-run.md
+
+# graphify (knowledge graph cache)
+graphify-out/

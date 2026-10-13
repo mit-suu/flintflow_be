@@ -235,7 +235,7 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
 
   const stream = sseStream(res, req)
   // Bước im vẫn im khi chạy lẻ: cùng luật `isQuietStep` với lượt chạy cả giai đoạn (FLF-264)
-  const { emit, resolveGate } = standaloneGate(projectId, stepId, stream.emit)
+  const { emit, resolveGate, acceptIfQuiet } = standaloneGate(projectId, stepId, stream.emit)
 
   // base_version lệch ngay từ đầu ⇒ SPINE_VERSION_CONFLICT trước khi mở SSE (guard-clause).
   const record = await spineRepository.get(projectId)
@@ -252,6 +252,7 @@ export const runStepController = catchAsync(async (req: Request, res: Response) 
       ...(body.message === undefined ? {} : { message: body.message }),
       ...(body.intent === undefined ? {} : { intent: body.intent })
     })
+    await acceptIfQuiet(userId)
     stream.end()
   } catch (err) {
     if (!stream.headersSent()) throw err

@@ -370,6 +370,24 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     expect(computeStatus(spineAfter, await repo.listChanges(PROJECT), "fixed:2.2.2")).not.toBe("stale")
   })
 
+  it("model ghi lại đúng giá trị đang có (mọi op bị bỏ vì trùng) ⇒ vẫn là no_change có preview_id, xác nhận gỡ được stale", async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    deps.reconcileExecutor = vi.fn(async () => opsResult([{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }]))
+
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+    expect(previewed.changes).toEqual([])
+    expect(previewed.no_change, "preview rỗng mà không no_change thì FE không có nút xác nhận").toBe(true)
+    expect(previewed.preview_id).toBeTypeOf("string")
+
+    await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+    const after = await repo.get(PROJECT)
+    const { projectId: _a, ...spineAfter } = after!
+    expect(computeStatus(spineAfter, await repo.listChanges(PROJECT), "fixed:2.2.2")).not.toBe("stale")
+  })
+
   it("dep mặc định đủ cả recomputeFlags — controller không truyền deps, nhánh xác nhận không đổi gọi thẳng hàm này", () => {
     const defaults = defaultReconcileDeps()
     for (const key of ["changeExecutor", "recomputeFlags", "reconcileExecutor", "rerender"] as const) {

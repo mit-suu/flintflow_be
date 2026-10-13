@@ -486,11 +486,25 @@ const collectSignals = (emit: Emit): { emit: Emit; signals: StepSignals } => {
  * `resolveGate`, nên một bước không hỏi gì và không ghi gì vẫn dựng cổng chốt chỉ vì được gọi qua endpoint lẻ —
  * đúng cái phản xạ bấm Accept mà FLF-208 R1 đã bỏ. Khác lượt chạy giai đoạn ở chỗ không dựng `phase_gate`:
  * lượt lẻ không chạy tiếp phần còn lại nên không có gì để gộp vào cổng chốt cuối giai đoạn.
+ *
+ * `acceptIfQuiet`: bước im thì không có cổng nào cho user bấm — phải tự Accept như lượt giai đoạn. Trước đây lượt lẻ phát
+ * `gate_ready` `auto` rồi kết thúc, không ai Accept: bước kẹt `in_progress` không chip duyệt ("Cập nhật lại bước này" ở chế độ
+ * duyệt "Cuối giai đoạn" — E2E FAP #19).
  */
-export const standaloneGate = (projectId: string, stepId: string, emit: Emit): { emit: Emit; resolveGate: StepRunnerDeps["resolveGate"] } => {
+export const standaloneGate = (
+  projectId: string,
+  stepId: string,
+  emit: Emit
+): { emit: Emit; resolveGate: StepRunnerDeps["resolveGate"]; acceptIfQuiet: (userId: string) => Promise<void> } => {
   const watched = collectSignals(emit)
+  let quietReason: string | null = null
   return {
     emit: watched.emit,
+    acceptIfQuiet: async (userId) => {
+      if (quietReason === null || watched.signals.error) return
+      await gate(projectId, stepId, userId, { action: "accept", base_version: (await load(projectId)).record.spine_version })
+      emit({ type: "auto_accepted", step_id: stepId, reason_vi: quietReason })
+    },
     resolveGate: async (gateEvent) => {
       const { spine } = await load(projectId)
       const step = orderedSteps(spine).find((s) => s.id === stepId)
@@ -505,6 +519,7 @@ export const standaloneGate = (projectId: string, stepId: string, emit: Emit): {
         phaseTerminal: isPhaseTerminal(spine, step),
         spine
       })
+      if (verdict.quiet) quietReason = verdict.reason_vi
       return verdict.quiet ? { quiet: true } : { quiet: false }
     }
   }
