@@ -162,6 +162,8 @@ export const OUTPUT_SCHEMA_NAMES = [
   "crClarify",
   "crPropose",
   "crMaterialImage",
+  // Knowledge RAG (FLF-267)
+  "knowledgeAnswer",
   "puml",
   "none"
 ] as const

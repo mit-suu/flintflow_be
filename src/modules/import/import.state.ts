@@ -12,7 +12,8 @@
  * delivered ─► change_requested                         (giao gap report xong, sau đó mới quyết định sửa)
  *
  * `paused` là field riêng (`{ reason, at }`), chỉ đặt được khi đang `extracting` hoặc `checking`
- * (hai bước gọi AI, Flow 4/5). Trạng thái không đổi khi pause; resume chạy tiếp từ `extract_cursor`.
+ * (hai bước gọi AI, Flow 4/5), hoặc `baselining` khi job finalize nền lỗi / mất giữa chừng (chỉ `resume_later`).
+ * Trạng thái không đổi khi pause; resume chạy tiếp từ `extract_cursor` / chạy lại finalize từ mốc.
  */
 
 import { Mode1Error } from "./mode1.errors.js"
@@ -68,8 +69,11 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
   change_requested: []
 }
 
-/** Hai bước có gọi AI (I-4 trích field, 1.11 AI semantic check) — hết credit/lỗi AI thì pause. */
-export const PAUSABLE_IMPORT_STATUSES: readonly ImportStatus[] = ["extracting", "checking"]
+/**
+ * Hai bước có gọi AI (I-4 trích field, 1.11 AI semantic check) — hết credit/lỗi AI thì pause. `baselining`: job finalize
+ * chạy nền lỗi hoặc mất (máy chủ khởi động lại) ⇒ hoàn về mốc + `resume_later`, resume chạy lại finalize (`finalize-jobs.ts`).
+ */
+export const PAUSABLE_IMPORT_STATUSES: readonly ImportStatus[] = ["extracting", "baselining", "checking"]
 
 /** Đã có baseline v0 (từ `checking` trở đi) — BR-03: mọi sửa sau đây phải qua CR. */
 export const IMPORT_STATUSES_WITH_BASELINE: readonly ImportStatus[] = ["checking", "gap_review", "delivered", "change_requested"]

@@ -19,14 +19,16 @@ app.listen(PORT, () => {
   void warnStartupConfig()
 })
 
-// Dọn reservation credit treo quá expires_at (task-04). Không dùng queue lib.
-const { expireStaleReservations } = await import("./shared/ai/credit-reservation.service.js")
-setInterval(() => {
-  expireStaleReservations()
-    .then(({ expiredCount, releasedCredits }) => {
-      if (expiredCount > 0) {
-        console.log(`[CreditReservation] Expired ${expiredCount} reservation(s), released ${releasedCredits} credit(s)`)
-      }
-    })
-    .catch((error) => console.error("[CreditReservation] expireStaleReservations failed:", error))
-}, 60_000)
+// Job nền (docs/background-jobs.md). inline: chạy trong tiến trình này, job định kỳ bằng setInterval.
+// bullmq: worker riêng (`npm run worker`) — hoặc ngay đây khi WORKERS_IN_PROCESS=true (dev một terminal).
+const { env } = await import("./config/env.js")
+const { loadJobDefinitions } = await import("./jobs.js")
+await loadJobDefinitions()
+if (env.JOB_DRIVER === "inline") {
+  const { startInlineSchedules } = await import("./shared/queue/job-runner.js")
+  startInlineSchedules()
+} else if (env.WORKERS_IN_PROCESS) {
+  const { installGracefulShutdown, startWorkers } = await import("./shared/queue/workers.js")
+  installGracefulShutdown()
+  await startWorkers()
+}

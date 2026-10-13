@@ -11,12 +11,14 @@ import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport, resumeCheck } from "../../../src/modules/import/finalize.service.js"
-import { SEMANTIC_CHECK_STEP } from "../../../src/modules/import/check.service.js"
+import { CROSS_CHECK_STEP, semanticBatchStep } from "../../../src/modules/import/check.service.js"
 import { MODE1_RULE_PROFILE } from "../../../src/modules/import/mode1-rule-profile.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 import { runDeterministicCheck } from "../../../src/modules/spine/deterministic-check.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
+import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
+import { IMPORTED_DOC_VERSION } from "../../../src/modules/doc-version/versioning.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 
 let semanticCalls = 0
@@ -62,7 +64,7 @@ describe("check — hồ sơ luật mode 1", () => {
 })
 
 describe("check — AI semantic (1.11)", () => {
-  it("finding của AI chỉ ra cờ vàng rule import_semantic, section bịa ⇒ fixed:I; trừ credit một lượt I-1.11", async () => {
+  it("finding của AI chỉ ra cờ vàng rule import_semantic, section bịa ⇒ fixed:I; trừ credit một lô map + một lượt kiểm chéo", async () => {
     const { projectId, userId, result } = await importFinalized()
     expect(semanticCalls).toBe(1)
     const spine = (await spineRepository.get(projectId))!
@@ -73,10 +75,14 @@ describe("check — AI semantic (1.11)", () => {
     // AI chỉ đặt cờ vàng; đầu mục FPT thiếu không còn là cờ đỏ
     expect(result.flags.red).toBe(0)
     expect(result.flags.yellow).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "yellow").length)
-    const usage = await Usage.find({ projectId, step_id: SEMANTIC_CHECK_STEP }).lean()
-    expect(usage.map((u) => u.state)).toEqual(["deducted"])
-    // 6 lượt I-4 × 2 + 1 lượt check × 3
-    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 985, reserved: 0 })
+    // tài liệu mẫu ngắn ⇒ một lô map; thêm một lượt kiểm chéo
+    const usage = await Usage.find({ projectId, step_id: /^I-1\.11/ }).sort({ step_id: 1 }).lean()
+    expect(usage.map((u) => [u.step_id, u.state, u.call_kind])).toEqual([
+      [semanticBatchStep(1), "deducted", "import_semantic_check"],
+      [CROSS_CHECK_STEP, "deducted", "import_cross_check"]
+    ])
+    // 6 lượt I-4 × 2 + 1 lô check × 3 + 1 lượt kiểm chéo × 3
+    expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance: 982, reserved: 0 })
   })
 
   it("cờ AI không bị recompute tất định đóng ở lượt sau", async () => {
@@ -113,17 +119,70 @@ describe("check — AI semantic (1.11)", () => {
     const fin = await finalizeImport(projectId, userId, { import_id: importId, base_version: v })
     expect(fin.doc).toMatchObject({ status: "checking", paused: { reason: "resume_later" } })
     expect(await CreditWallet.findOne({ userId }).lean()).toMatchObject({ balance, reserved: 0 })
-    expect(await Usage.find({ projectId, step_id: SEMANTIC_CHECK_STEP }).distinct("state")).toEqual(["refunded"])
+    expect(await Usage.find({ projectId, step_id: semanticBatchStep(1) }).distinct("state")).toEqual(["refunded"])
+    // lô lỗi ⇒ chưa chạy kiểm chéo
+    expect(await Usage.exists({ projectId, step_id: CROSS_CHECK_STEP })).toBeNull()
 
     mockOverrides.next = semanticRed
     const doc = (await ImportedDocument.findById(importId))!
     await resumeCheck(doc, userId)
     expect(doc.status).toBe("gap_review")
     expect(semanticCalls).toBe(1)
-    // gọi lại lần nữa (đã có usage deducted cho I-1.11) ⇒ không gọi AI; chỉ chuyển trạng thái nếu còn hợp lệ
+    // gọi lại lần nữa (lô và kiểm chéo đều đã deducted) ⇒ không gọi AI; chỉ chuyển trạng thái nếu còn hợp lệ
     doc.status = "checking"
     await doc.save()
     await resumeCheck(doc, userId)
     expect(semanticCalls).toBe(1)
+  })
+
+  it("tài liệu dài ⇒ nhiều lô map; một lô lỗi ⇒ lô khác vẫn ghi cờ, chưa kiểm chéo; resume chỉ gọi lại lô lỗi rồi kiểm chéo", async () => {
+    const { projectId, userId, importId } = await importAtBaselining()
+    // dừng ở checking trước mọi lượt AI (hết credit), rồi nối thêm ~80k ký tự chữ để tài liệu cần nhiều lô
+    await CreditWallet.updateOne({ userId }, { $set: { balance: 0 } })
+    const v = (await spineRepository.get(projectId))!.spine_version
+    expect((await finalizeImport(projectId, userId, { import_id: importId, base_version: v })).doc.paused?.reason).toBe("credits")
+    const last = (await DocBlock.findOne({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": -1 }).lean())!
+    const extra = Array.from({ length: 40 }, (_, i) => ({
+      projectId: last.projectId,
+      doc_version: IMPORTED_DOC_VERSION,
+      block_id: `B${9000 + i}`,
+      kind: "paragraph",
+      anchor: { xml_path: `/extra/${i}`, ordinal: last.anchor.ordinal + 1 + i },
+      text: `${i === 39 ? "TAIL-MARKER " : ""}${"The system shall keep records as needed. ".repeat(48)}`,
+      text_hash: `extra-${i}`,
+      section_id: "fixed:4.2.3"
+    }))
+    await DocBlock.insertMany(extra)
+    await CreditWallet.updateOne({ userId }, { $set: { balance: 100 } })
+
+    // lô chứa block cuối lỗi, các lô còn lại trả finding
+    mockOverrides.next = (prompt) => (prompt.includes("# Import Semantic Check") && prompt.includes("TAIL-MARKER") ? new Error("provider down") : semanticRed(prompt))
+    const doc = (await ImportedDocument.findById(importId))!
+    await resumeCheck(doc, userId)
+    expect(doc).toMatchObject({ status: "checking", paused: { reason: "resume_later" } })
+    const steps = async (state: "deducted" | "refunded") => (await Usage.find({ projectId, step_id: /^I-1\.11/, state }).distinct("step_id")).sort()
+    const deducted = await steps("deducted")
+    // lô lỗi = hoàn credit mà chưa từng trừ (lô 1 có thêm một bản hoàn từ lượt hết credit lúc finalize)
+    const failed = (await steps("refunded")).filter((s) => !deducted.includes(s))
+    expect(deducted.length).toBeGreaterThan(0)
+    expect(failed).toHaveLength(1)
+    expect(deducted).not.toContain(CROSS_CHECK_STEP)
+    // cờ của lô đã xong được ghi ngay, không chờ lô lỗi
+    expect((await spineRepository.get(projectId))!.flags.some((f) => f.rule_id === "import_semantic")).toBe(true)
+
+    semanticCalls = 0
+    let crossCalls = 0
+    mockOverrides.next = (prompt) => {
+      if (prompt.includes("# Import Cross-Section Check")) crossCalls++
+      return semanticRed(prompt)
+    }
+    await resumeCheck(doc, userId)
+    expect(doc.status).toBe("gap_review")
+    expect(semanticCalls).toBe(1)
+    expect(crossCalls).toBe(1)
+    expect(await steps("deducted")).toEqual([...deducted, ...failed, CROSS_CHECK_STEP].sort())
+    // finding giống nhau ở nhiều lô chỉ thành một cờ
+    const ai = (await spineRepository.get(projectId))!.flags.filter((f) => f.rule_id === "import_semantic")
+    expect(new Set(ai.map((f) => `${f.section_id}|${f.message}`)).size).toBe(ai.length)
   })
 })

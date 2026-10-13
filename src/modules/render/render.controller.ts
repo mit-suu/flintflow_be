@@ -14,8 +14,10 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import { getProjectById } from "../project/project.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema } from "../pipeline/pipeline.dto.js"
-import { assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { assembleRequestSchema, assembleResponseSchema, documentQuerySchema, documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
+import { assemble, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { projectLanguages } from "../translation/translation.service.js"
+import type { UserLocale } from "../../shared/i18n/locale.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -32,6 +34,10 @@ interface Context {
   projectName: string
   /** `import` = mode 1 (tài liệu nhập) — phụ lục cờ của file Word in tiếng Việt. */
   mode?: string
+  /** FLF-265 §3.1 — ngôn ngữ tài liệu (xem trước + .docx) theo `Project.documentLanguage`, không theo mode / query. */
+  documentLanguage: UserLocale
+  /** Ngôn ngữ chữ trong Spine (mode 2 = `en`). Khác `documentLanguage` ⇒ tài liệu dựng từ lớp bản dịch. */
+  sourceLanguage: UserLocale
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body/query — người ngoài không dò được DTO qua lỗi 400. */
@@ -42,7 +48,9 @@ export const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
-  return { projectId, projectName: project.name, mode: (project as { mode?: string }).mode }
+  // FLF-265: mode 2 không truy vấn thêm; mode 1 đọc `TemplateProfile.language` (cả hai cùng ngôn ngữ file)
+  const { locale, source } = await projectLanguages(projectId, project)
+  return { projectId, projectName: project.name, mode: (project as { mode?: string }).mode, documentLanguage: locale, sourceLanguage: source }
 }
 
 // ─── POST /assemble ──────────────────────────────────────────────
@@ -59,22 +67,24 @@ export const assembleController = catchAsync(async (req: Request, res: Response)
 // ─── GET /document ───────────────────────────────────────────────
 
 export const getDocumentController = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, projectName } = await authorize(req)
+  const { projectId, projectName, documentLanguage, sourceLanguage } = await authorize(req)
   const query = parse(documentQuerySchema, req.query)
 
   try {
-    const doc = await getDocument(projectId, projectName, query)
+    // FLF-265: ngôn ngữ lấy từ project (`documentQuerySchema` đóng băng — `?lang=` bị parse lọc bỏ)
+    const result = await getDocumentWithMeta(projectId, projectName, { ...query, languages: { locale: documentLanguage, source: sourceLanguage } })
     // review C2: source=draft trước đây trả im lặng bản cache mới nhất dù Spine đã đổi tiếp — đính
     // kèm độ mới để caller (FE) tự quyết định có báo "tài liệu đang xem đã cũ" hay không.
-    const draftMeta = query.source === "draft" ? await getDraftMeta(projectId) : null
-    return sendSuccess(
-      res,
-      200,
-      doc,
-      draftMeta
+    // FLF-265: bản dịch dựng mới mỗi lần, không ghi cache ⇒ độ mới lấy từ chính bản vừa dựng.
+    const draftMeta = query.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId))) : null
+    const meta = {
+      ...(draftMeta
         ? { assembled_at_version: draftMeta.assembled_at_version, spine_version: draftMeta.spine_version, stale: draftMeta.stale }
-        : undefined
-    )
+        : {}),
+      // Chỉ khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc (contract #16) — draft lẫn baseline
+      ...(result.translation ? { translation: documentTranslationMetaSchema.parse(result.translation) } : {})
+    }
+    return sendSuccess(res, 200, result.doc, Object.keys(meta).length ? meta : undefined)
   } catch (err) {
     if (err instanceof NoWorkingDraftError) {
       // FLF-177 BUG-31: dự án chưa có nội dung là trạng thái bình thường của một dự án đang làm dở, không

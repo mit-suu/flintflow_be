@@ -13,6 +13,7 @@ import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
+import { answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
 
 /** Nội dung tin AI gần nhất của phiên — để biết user đang trả lời thẻ nào (FLF-260). */
 const lastAiContentOf = (session: { messages: readonly IChatMessage[] }): string | undefined =>
@@ -150,13 +151,56 @@ const tryAnswerRunningStep = async (session: IChatSession, projectId: string, co
   return submitAnswer(projectId, stepId, String(session._id), { answers: [], message: content, messageRecorded: true })
 }
 
+/** Tuỳ chọn của một tin nhắn chat. */
+export interface SendMessageOptions {
+  /** FLF-267: câu hỏi tri thức — trả lời từ Knowledge RAG thay cho CHAT (controller đã kiểm `KNOWLEDGE_ENABLED`). */
+  knowledge?: boolean
+}
+
+/** Câu xin lỗi khi lượt gọi model của chat lỗi (CHAT và câu hỏi tri thức dùng chung). */
+const aiUnavailableReply = (replyLanguage: ReplyLanguage): string =>
+  byLanguage(replyLanguage, {
+    vi: "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau.",
+    en: "Sorry, the system could not reach the AI. Please check the credit wallet or try again later."
+  })
+
+/** FLF-267: tin AI của câu hỏi tri thức = hình tin CHAT `{ reply, questions: [] }` + `grounded` + `citations[]`. */
+export const knowledgeReplyPayload = (answer: Pick<KnowledgeAnswer, "answer" | "grounded" | "citations">) => ({
+  reply: answer.answer,
+  questions: [],
+  grounded: answer.grounded,
+  citations: answer.citations
+})
+
+/**
+ * FLF-267: tin nhắn gắn cờ `knowledge` là câu hỏi tri thức. Cờ là lựa chọn tường minh của user nên đi TRƯỚC lượt chờ
+ * trả lời của step và lệnh sửa: câu hỏi không bị nuốt thành câu trả lời của step (lượt chờ vẫn còn nguyên) và không
+ * thành bản xem trước sửa tài liệu. Không đọc / ghi Spine. Ghi tin AI vào phiên rồi trả về.
+ */
+const answerKnowledgeTurn = async (
+  session: IChatSession,
+  projectId: string,
+  content: string,
+  step: string,
+  userId: string,
+  replyLanguage: ReplyLanguage,
+  discoveryStep?: number
+): Promise<{ payload: ReturnType<typeof knowledgeReplyPayload>; answer: KnowledgeAnswer }> => {
+  const answer = await answerKnowledgeQuestion(content, { projectId, userId, language: replyLanguage })
+  const payload = knowledgeReplyPayload(answer)
+  session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
+  await session.save()
+  return { payload, answer }
+}
+
 export const sendMessageAndGetResponse = async (
   projectId: string,
   chatSessionId: string,
   content: string,
   step: string,
   userId: string,
-  discoveryStep?: number
+  discoveryStep?: number,
+  options: SendMessageOptions = {}
 ): Promise<IChatSession> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
@@ -179,6 +223,20 @@ export const sendMessageAndGetResponse = async (
   // Chỉ đoán trên chữ user tự gõ — nhãn thẻ AI vừa hỏi (FE gửi kèm khi user bấm chọn) không tính.
   const replyLanguage = await replyLanguageForSession(session, typedPartOf(content, lastAiContentOf(session)), userId)
   await session.save()
+
+  // 1a. FLF-267: câu hỏi tri thức — đi trước step / lệnh sửa (xem `answerKnowledgeTurn`)
+  if (options.knowledge) {
+    try {
+      await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep)
+    } catch (error) {
+      console.error("Knowledge answer failed in chat session service:", error)
+      // Như CHAT: lỗi (hết credit, provider) thành tin xin lỗi trong phiên — `grounded: false`, chữ khác câu "không đủ căn cứ"
+      const payload = { reply: aiUnavailableReply(replyLanguage), questions: [], grounded: false, citations: [] }
+      session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
+      await session.save()
+    }
+    return session
+  }
 
   // 1b. T20: session pipeline đang chờ câu trả lời của step ⇒ tin nhắn là câu trả lời, không phải CHAT
   if (await tryAnswerRunningStep(session, projectId, content)) return session
@@ -227,10 +285,7 @@ export const sendMessageAndGetResponse = async (
     console.error("AI action failed in chat session service:", error)
     // Fallback response on error
     const errorReply: any = {
-      reply: byLanguage(replyLanguage, {
-        vi: "Rất tiếc, hệ thống gặp gián đoạn khi kết nối với AI. Vui lòng kiểm tra ví credit hoặc thử lại sau.",
-        en: "Sorry, the system could not reach the AI. Please check the credit wallet or try again later."
-      }),
+      reply: aiUnavailableReply(replyLanguage),
       questions: []
     }
     const aiErrorMsg: IChatMessage = {
@@ -271,7 +326,8 @@ export const sendMessageStream = async (
   step: string,
   userId: string,
   res: Response,
-  discoveryStep?: number
+  discoveryStep?: number,
+  options: SendMessageOptions = {}
 ): Promise<void> => {
   const session = await ChatSession.findById(chatSessionId)
   if (!session) {
@@ -292,6 +348,27 @@ export const sendMessageStream = async (
   // FLF-260: như đường JSON — ngôn ngữ phiên được ghi cùng tin user, trước khi tin rẽ sang step / lệnh sửa
   const replyLanguage = await replyLanguageForSession(session, typedPartOf(content, lastAiContentOf(session)), userId)
   await session.save()
+
+  // 1a. FLF-267: câu hỏi tri thức — một sự kiện `finish` như lệnh sửa (không stream chữ: câu trả lời phải hậu kiểm
+  // trích dẫn xong mới được hiện)
+  if (options.knowledge) {
+    try {
+      const { payload, answer } = await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep)
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: answer.tokensUsed, cost: answer.cost })}\n\n`)
+        res.end()
+      }
+    } catch (error) {
+      console.error("Knowledge answer failed in chat stream:", error)
+      try {
+        if (!res.destroyed && !res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ type: "error", error: clientErrorMessage(error) })}\n\n`)
+          res.end()
+        }
+      } catch (_) {}
+    }
+    return
+  }
 
   // 1b. T20: session pipeline đang chờ câu trả lời của step ⇒ đưa vào hàng chờ rồi đóng luồng này
   if (await tryAnswerRunningStep(session, projectId, content)) {

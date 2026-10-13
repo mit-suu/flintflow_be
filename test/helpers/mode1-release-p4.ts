@@ -25,8 +25,9 @@ export const importedProject = async (name = "Lumen LMS") => {
   await c.post("/import/confirm-latest", { import_id: id })
   await c.extractAndWait(id)
   await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  const fin = await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })
-  expect(fin.status, JSON.stringify(fin.body.error)).toBe(200)
+  const fin = await c.finalizeAndWait(id)
+  expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
+  expect(fin.view?.import?.status).toBe("gap_review")
   // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step (release cần hết cờ đỏ)
   await fillCoreSections(projectId)
   return { seeded, projectId, c }

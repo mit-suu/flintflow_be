@@ -21,9 +21,11 @@ import {
   onlyNewFromVision,
   orientRelations,
   readsImage,
+  sectionAiSteps,
   settleSection,
   shortName,
   splitList,
+  stepsHash,
   visionItems
 } from "./extract.service.js"
 import { IdAllocator, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
@@ -92,6 +94,41 @@ describe("extractionPlan", () => {
     const plan = extractionPlan(lite)
     expect(plan.filter((s) => s.startsWith("fixed:"))).toEqual(["fixed:1", "fixed:2.1", "fixed:2.2.1", "fixed:2.2.2", "fixed:3.1.2", "fixed:4.2.3", "fixed:5.1"])
     expect(plan.filter((s) => !s.startsWith("fixed:"))).toHaveLength(3) // 1 feature + 2 function
+  })
+})
+
+describe("sectionAiSteps — kế hoạch lượt AI (chung cho lượt chạy và ước tính credit)", () => {
+  const none = { items: [], handled: new Set<string>(), consumed: new Set<string>(), verbatim: new Set<string>() }
+  const img = (block_id: string, caption: string): Lite[] => [
+    { ...block(block_id, "image", "", `body/p[${block_id}]`, "fixed:2.2.1"), image_ref: `word/media/${block_id}.png` },
+    block(`${block_id}C`, "caption", caption, `body/p[${block_id}c]`, "fixed:2.2.1")
+  ]
+
+  it("ảnh đọc được trước, rồi lô chữ; bỏ heading, bảng đã đọc tất định, ảnh chụp màn hình; băm ổn định", () => {
+    const blocks: Lite[] = [
+      block("B0001", "heading", "2.2.1 Use Case Diagram", "body/p[0]", "fixed:2.2.1"),
+      block("B0002", "paragraph", "x".repeat(AI_BLOCK_CHARS), "body/p[1]", "fixed:2.2.1"),
+      ...img("B0003", "Figure 1 Use case diagram"),
+      ...img("B0004", "Figure 2 Login screenshot"),
+      block("B0005", "paragraph", "y".repeat(AI_BLOCK_CHARS), "body/p[5]", "fixed:2.2.1"),
+      block("B0006", "paragraph", "z", "body/p[6]", "fixed:3.1.2")
+    ]
+    const steps = sectionAiSteps("fixed:2.2.1", blocks, none)
+    expect(steps.map((s) => (s.kind === "image" ? `img:${s.block.block_id}` : s.batch.map((b) => b.block_id).join("+")))).toEqual([
+      "img:B0003",
+      "B0002+B0003C+B0004C+B0005"
+    ])
+    expect(stepsHash(steps)).toBe(stepsHash(sectionAiSteps("fixed:2.2.1", blocks, none)))
+    // block đổi ⇒ băm đổi (tiến độ đã lưu không dùng lại)
+    const changed = blocks.map((b) => (b.block_id === "B0005" ? { ...b, text: "changed" } : b))
+    expect(stepsHash(sectionAiSteps("fixed:2.2.1", changed, none))).not.toBe(stepsHash(steps))
+    // block đã đọc tất định không vào lô
+    const settled = { ...none, consumed: new Set(["B0002", "B0003C", "B0004C"]) }
+    expect(sectionAiSteps("fixed:2.2.1", blocks, settled).map((s) => s.kind)).toEqual(["image", "text"])
+  })
+
+  it("section không có mục tiêu trích ⇒ không có lô chữ (ảnh mục diagram vẫn đọc)", () => {
+    expect(sectionAiSteps("fixed:9.9", [block("B0001", "paragraph", "a", "p", "fixed:9.9")], none)).toEqual([])
   })
 })
 

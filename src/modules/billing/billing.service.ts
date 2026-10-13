@@ -6,7 +6,7 @@ import { CreditWallet } from "../credits/credit-wallet.model.js"
 import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
-import { resumeAfterTopUp } from "../import/credit-flow.service.js"
+import { scheduleResumeAfterTopUp } from "../import/credit-flow.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
@@ -261,11 +261,11 @@ const settleIntent = async (
       link: "/home/billing",
       meta: { intentId, credits: intent.credits, amount: intent.amount }
     })
-    // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (nền, không chặn webhook)
+    // BPMN 4.5 ⇒ 4.1 (mode 1 v3): nạp xong ⇒ bước AI mode 1 đang dừng vì hết credit chạy tiếp (job nền, không chặn webhook)
     // task-26: nạp vào ví tổ chức ⇒ chạy tiếp trong mọi dự án của tổ chức, không chỉ dự án người nạp tạo
     const paidOrgId = intent.organizationId ? String(intent.organizationId) : null
-    void resumeAfterTopUp(userId, undefined, paidOrgId).catch((err) =>
-      console.warn("[billing] chạy tiếp bước mode 1 sau khi nạp lỗi:", err)
+    await scheduleResumeAfterTopUp(userId, paidOrgId, intentId).catch((err) =>
+      console.warn("[billing] không đưa được lượt chạy tiếp mode 1 sau khi nạp vào hàng đợi:", err)
     )
   } else {
     await notify(userId, {

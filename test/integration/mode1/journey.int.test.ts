@@ -113,8 +113,9 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     expect(await c.post("/import/confirm-latest", { import_id: importId })).toMatchObject({ status: 200 })
     await c.extractAndWait(importId)
     expect((await c.patch("/import/fields", { import_id: importId, confirm_all: true })).status).toBe(200)
-    const finalize = await c.post("/import/finalize", { import_id: importId, base_version: await c.spineVersion() })
-    expect(finalize.status, JSON.stringify(finalize.body.error)).toBe(200)
+    const finalize = await c.finalizeAndWait(importId)
+    expect(finalize.res.status, JSON.stringify(finalize.res.body.error)).toBe(200)
+    expect(finalize.view?.import?.status).toBe("gap_review")
 
     const versions0 = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions0.map((v) => v.version)).toEqual(["0.0"])

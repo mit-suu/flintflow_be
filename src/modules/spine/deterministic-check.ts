@@ -19,6 +19,7 @@ import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
+import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
 
 export interface RuleDef {
   rule_id: string
@@ -1070,7 +1071,16 @@ interface ScanItem {
   fields: Record<string, unknown>
 }
 
-/** Field thuộc cột Sở hữu (render vào SRS). Bỏ `addendum`, `glossary[].term_native`, reason, message — theo ngôn ngữ user. */
+/**
+ * Field thuộc cột Sở hữu (render vào SRS). Bỏ `addendum`, `glossary[].term_native`, reason, message — theo ngôn ngữ user.
+ * Field chữ của từng collection lấy từ `SRS_TEXT_FIELDS` (dùng chung với đơn vị dịch FLF-265); `project` giữ hai mục
+ * riêng vì khác bước sửa — field của nó là `PROJECT_TEXT_FIELDS` cộng `name` / `system_name`.
+ */
+/** Field `project` do S-1.1 dựng từ addendum lõi của Brief — cờ chỉ đường về S-1.1. */
+const BRIEF_PROJECT_FIELDS: readonly string[] = ["vision", "goals"]
+/** Phần còn lại của `PROJECT_TEXT_FIELDS` (field mới thêm vào danh sách dùng chung tự vào đây, không bị bỏ sót). */
+const OTHER_PROJECT_FIELDS: readonly string[] = PROJECT_TEXT_FIELDS.filter((field) => !BRIEF_PROJECT_FIELDS.includes(field))
+
 const ownedTexts = (spine: Spine, gate: StepGate): ScanItem[] => {
   const p = spine.project
   // BUG-11: `project.name` là tên user đặt cho dự án (tiếng Việt là bình thường). Nó chỉ lọt vào tài liệu khi
@@ -1087,48 +1097,48 @@ const ownedTexts = (spine: Spine, gate: StepGate): ScanItem[] => {
       fields: {
         ...(scanProjectName ? { name: p.name } : {}),
         system_name: p.system_name,
-        release_scope: p.release_scope
+        ...pickTextFields(p, OTHER_PROJECT_FIELDS)
       }
     },
     // Tầm nhìn/mục tiêu do S-1.1 dựng từ addendum lõi của Brief ⇒ cờ tiếng Anh chỉ đường về S-1.1
-    { path: "project", target_id: null, section: "fixed:1", step: "S-1.1", fields: { vision: p.vision, goals: p.goals } },
+    { path: "project", target_id: null, section: "fixed:1", step: "S-1.1", fields: pickTextFields(p, BRIEF_PROJECT_FIELDS) },
     ...spine.actors.map((a) => ({
       path: `actors[id=${a.id}]`,
       target_id: a.id,
       section: a.kind === "human" ? "fixed:2.1" : "fixed:1",
       step: a.kind === "human" ? "S-3.1" : "S-2.3",
-      fields: { name: a.name, description: a.description }
+      fields: pickTextFields(a, SRS_TEXT_FIELDS.actors)
     })),
-    ...spine.roles.map((r) => ({ path: `roles[id=${r.id}]`, target_id: r.id, section: "fixed:3.1.3", step: "S-3.1", fields: { name: r.name } })),
-    ...spine.use_cases.map((u) => ({ path: `use_cases[id=${u.id}]`, target_id: u.id, section: "fixed:2.2.2", step: "S-3.5", fields: { name: u.name, description: u.description } })),
-    ...spine.features.map((f) => ({ path: `features[id=${f.id}]`, target_id: f.id, section: `feature:${f.id}`, step: "S-4.1", fields: { name: f.name } })),
-    ...spine.screens.map((s) => ({ path: `screens[id=${s.id}]`, target_id: s.id, section: "fixed:3.1.2", step: "S-4.1", fields: { name: s.name, description: s.description, tabs: s.tabs } })),
+    ...spine.roles.map((r) => ({ path: `roles[id=${r.id}]`, target_id: r.id, section: "fixed:3.1.3", step: "S-3.1", fields: pickTextFields(r, SRS_TEXT_FIELDS.roles) })),
+    ...spine.use_cases.map((u) => ({ path: `use_cases[id=${u.id}]`, target_id: u.id, section: "fixed:2.2.2", step: "S-3.5", fields: pickTextFields(u, SRS_TEXT_FIELDS.use_cases) })),
+    ...spine.features.map((f) => ({ path: `features[id=${f.id}]`, target_id: f.id, section: `feature:${f.id}`, step: "S-4.1", fields: pickTextFields(f, SRS_TEXT_FIELDS.features) })),
+    ...spine.screens.map((s) => ({ path: `screens[id=${s.id}]`, target_id: s.id, section: "fixed:3.1.2", step: "S-4.1", fields: pickTextFields(s, SRS_TEXT_FIELDS.screens) })),
     ...spine.functions.map((f) => ({
       path: `functions[id=${f.id}]`,
       target_id: f.id,
       section: `function:${f.id}`,
       step: functionStep(spine, f.id, "S-5.2"),
-      fields: { name: f.name, trigger: f.trigger, description: f.description, normal: f.normal, abnormal: f.abnormal, validations: f.validations.map((v) => v.statement) }
+      fields: { ...pickTextFields(f, SRS_TEXT_FIELDS.functions), validations: f.validations.map((v) => pickTextFields(v, VALIDATION_TEXT_FIELDS)) }
     })),
-    ...spine.entities.map((e) => ({ path: `entities[id=${e.id}]`, target_id: e.id, section: "fixed:3.1.5", step: "S-4.5", fields: { name: e.name, description: e.description } })),
+    ...spine.entities.map((e) => ({ path: `entities[id=${e.id}]`, target_id: e.id, section: "fixed:3.1.5", step: "S-4.5", fields: pickTextFields(e, SRS_TEXT_FIELDS.entities) })),
     ...spine.nfrs.map((n) => ({
       path: `nfrs[id=${n.id}]`,
       target_id: n.id,
       section: NFR_SECTION[n.category].section,
       step: NFR_SECTION[n.category].step,
-      fields: { statement: n.statement, metric: n.metric, threshold: n.threshold }
+      fields: pickTextFields(n, SRS_TEXT_FIELDS.nfrs)
     })),
     ...spine.business_rules.map((b) => ({
       path: `business_rules[id=${b.id}]`,
       target_id: b.id,
       section: b.tier === "high" ? "fixed:1" : "fixed:5.1",
       step: b.tier === "high" ? "S-2.4" : "S-7.1",
-      fields: { statement: b.statement }
+      fields: pickTextFields(b, SRS_TEXT_FIELDS.business_rules)
     })),
-    ...spine.common_requirements.map((c) => ({ path: `common_requirements[id=${c.id}]`, target_id: c.id, section: "fixed:5.2", step: "S-7.2", fields: { category: c.category, statement: c.statement } })),
-    ...spine.messages.map((m) => ({ path: `messages[id=${m.id}]`, target_id: m.id, section: "fixed:5.3", step: "S-7.3", fields: { text: m.text } })),
-    ...spine.other_requirements.map((o) => ({ path: `other_requirements[id=${o.id}]`, target_id: o.id, section: "fixed:5.4", step: "S-7.4", fields: { statement: o.statement } })),
-    ...spine.glossary.map((g) => ({ path: `glossary[id=${g.id}]`, target_id: g.id, section: "fixed:5.5", step: "S-8.1", fields: { term: g.term, definition: g.definition } })),
+    ...spine.common_requirements.map((c) => ({ path: `common_requirements[id=${c.id}]`, target_id: c.id, section: "fixed:5.2", step: "S-7.2", fields: { category: c.category, ...pickTextFields(c, SRS_TEXT_FIELDS.common_requirements) } })),
+    ...spine.messages.map((m) => ({ path: `messages[id=${m.id}]`, target_id: m.id, section: "fixed:5.3", step: "S-7.3", fields: pickTextFields(m, SRS_TEXT_FIELDS.messages) })),
+    ...spine.other_requirements.map((o) => ({ path: `other_requirements[id=${o.id}]`, target_id: o.id, section: "fixed:5.4", step: "S-7.4", fields: pickTextFields(o, SRS_TEXT_FIELDS.other_requirements) })),
+    ...spine.glossary.map((g) => ({ path: `glossary[id=${g.id}]`, target_id: g.id, section: "fixed:5.5", step: "S-8.1", fields: pickTextFields(g, SRS_TEXT_FIELDS.glossary) })),
     ...spine.diagrams.map((d) => ({ path: `diagrams[id=${d.id}]`, target_id: d.id, section: d.section, step: renderStepOf(d), fields: { puml: d.puml } }))
   ]
 }

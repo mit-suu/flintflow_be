@@ -4,7 +4,8 @@ import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { buildDocxFileName, writeDocx } from "./docx-writer.js"
 import { authorize } from "./render.controller.js"
 import { exportWordQuerySchema } from "../pipeline/pipeline.dto.js"
-import { getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type DocumentWithMeta } from "./assemble.service.js"
+import { writerOptionsFor } from "./labels.js"
 import { sendError } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -44,31 +45,35 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
  * trong body.
  */
 export const exportWord = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, projectName, mode } = await authorize(req)
+  const { projectId, projectName, mode, documentLanguage, sourceLanguage } = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
   if (!parsedQuery.success) throw validationError(parsedQuery.error)
 
-  let doc
+  let result: DocumentWithMeta
   try {
-    doc = await getDocument(projectId, projectName, parsedQuery.data)
+    // FLF-265: ngôn ngữ theo project, không theo query (`exportWordQuerySchema` đóng băng)
+    result = await getDocumentWithMeta(projectId, projectName, { ...parsedQuery.data, languages: { locale: documentLanguage, source: sourceLanguage } })
   } catch (err) {
     if (err instanceof NoWorkingDraftError) return sendError(res, err.statusCode, err.code, err.message)
     throw err
   }
 
-  const parsed = renderedDocumentSchema.safeParse(doc)
+  const parsed = renderedDocumentSchema.safeParse(result.doc)
   if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
-  const buffer = await writeDocx(parsed.data, { flagLanguage: mode === "import" ? "vi" : "en" })
+  const buffer = await writeDocx(parsed.data, writerOptionsFor(mode, documentLanguage))
   const fileName = buildDocxFileName(parsed.data)
 
   res.status(200)
   res.setHeader("Content-Type", DOCX_MIME)
   res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
   res.setHeader("Content-Length", String(buffer.length))
+  // FLF-265 (contract #18): mọi lần xuất thành công, cả mode 1 — chỉ là header, không đổi file
+  res.setHeader("X-Document-Language", documentLanguage)
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
+  // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   if (parsedQuery.data.source === "draft") {
-    const meta = await getDraftMeta(projectId)
+    const meta = result.draftMeta ?? (await getDraftMeta(projectId))
     if (meta) {
       res.setHeader("X-Assembled-At-Version", String(meta.assembled_at_version))
       res.setHeader("X-Spine-Version", String(meta.spine_version))

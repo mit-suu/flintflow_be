@@ -2,6 +2,8 @@
  * C-3 tìm vị trí ảnh hưởng (nút 3.4, UC-50) — tất định, không tốn credit — rồi khoá (3.5).
  * Mode 1 v2 (FLF-186): vị trí là **phần tử Spine** (`spine-location.ts` — đích C-2 + phần tử tham chiếu tới nó,
  * phần tử nhắc mã/tên của đích, phần tử chứa từ khoá), khoá theo path (`lock.service.ts`).
+ * Hybrid retrieval: index embedding dùng được (`embedding/vector-search.ts`) ⇒ phần tử gần nghĩa với CR (top-K, trên
+ * ngưỡng điểm) thay nguồn từ khoá; không có ⇒ từ khoá như cũ. Embed query không trừ credit.
  */
 
 import { stripRecord } from "../import/check.service.js"
@@ -15,6 +17,8 @@ import { emptySectionTargets, findSpineLocations } from "./spine-location.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { ownerStepOf } from "../spine/section-registry.js"
+import { crQueryText } from "./embedding/element-text.js"
+import { vectorCandidates } from "./embedding/vector-search.js"
 
 export { elementPathOf, MAX_LOCATIONS } from "./spine-location.js"
 
@@ -28,7 +32,8 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const spine = stripRecord(record)
 
   const seedTargets = new Set(cr.seed?.targets ?? [])
-  const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords).map((f) =>
+  const vector = await vectorCandidates(String(cr.projectId), crQueryText(cr))
+  const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, vector).map((f) =>
     seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
   )
   // Phase 8: CR gộp thêm lệnh sau khi đã có đề xuất ⇒ vị trí đã có (đề xuất / kết luận / khoá) giữ nguyên, chỉ thêm

@@ -17,8 +17,9 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
-import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import type { LocalizedEntry, OpTransaction } from "../../shared/ai/response-parser.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
+import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
 import { briefExtractionErrors, dropRedundantScalarAdds, requiredArrayErrors, sanitizeModelOps, useCaseNamingErrors, useCaseWiringErrors, validateOps, visibleIdsOf, type ValidationError } from "./op-validator.js"
 
@@ -64,6 +65,11 @@ export interface DraftResult {
   usage: DraftUsage[]
   notes: string | null
   contextTokens: number
+  /**
+   * FLF-265 D16: chữ theo ngôn ngữ tài liệu model trả kèm lô được nhận (cùng `path` với op). Người gọi lưu SAU khi áp
+   * `txn` (`captureForTurn`); thiếu / rỗng ⇒ không có gì để lưu.
+   */
+  localized?: LocalizedEntry[]
 }
 
 export interface DraftOptions {
@@ -90,6 +96,11 @@ export interface DraftOptions {
    * để `notes` và câu giả định cho user (`statement_vi`, `rationale_vi`) đúng ngôn ngữ. Thiếu ⇒ prompt như cũ.
    */
   replyLanguage?: ReplyLanguage
+  /**
+   * FLF-265 D16: ngôn ngữ tài liệu của lượt (`documentLanguageForTurn`) — có thì mọi lượt gọi mang nó, `buildPrompt` nối khối
+   * "Document language" và model trả `localized` cạnh `ops`. Thiếu / `null` (dự án `en`, mode 1) ⇒ prompt như cũ.
+   */
+  documentLanguage?: TurnDocumentLanguage | null
   /** Spine để validate; mặc định đọc repository (phải cùng `spine_version` với ctx). */
   spine?: Spine
   executor?: DraftExecutor
@@ -155,7 +166,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
   const gateIds = callKind === "revision" ? (options.gateAssumptionIds ?? new Set<string>()) : undefined
   const statusIds = callKind === "revision" ? (options.statusAssumptionIds ?? new Set<string>()) : undefined
   const extraPaths = gateIds ? spine.assumptions.filter((a) => gateIds.has(a.id)).map((a) => a.path) : undefined
-  const language = options.replyLanguage ? { replyLanguage: options.replyLanguage } : {}
+  const language = { ...(options.replyLanguage ? { replyLanguage: options.replyLanguage } : {}), ...documentLanguageInput(options.documentLanguage) }
   const attempts: DraftAttempt[] = []
   const usage: DraftUsage[] = []
   let errors: ValidationError[] = []
@@ -180,6 +191,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
 
     let ops: unknown[] = []
     let notes: string | null = null
+    let localized: LocalizedEntry[] | undefined
     try {
       const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId)
       usage.push({
@@ -191,6 +203,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
         logId: result.logId || null
       })
       notes = result.data.notes ?? null
+      localized = result.data.localized?.length ? result.data.localized : undefined
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
@@ -217,7 +230,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
           by: options.userId,
           step_id: stepId
         }
-        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens }
+        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}) }
       }
     } catch (err) {
       if (!(err instanceof AiActionError) || !SCHEMA_ERROR_CODES.has(err.code)) throw err

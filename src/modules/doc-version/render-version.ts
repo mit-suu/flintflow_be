@@ -9,6 +9,7 @@ import { DocxPackage, writeStamp } from "../docx-ooxml/index.js"
 import { renderSpineDocument } from "../render/assemble.service.js"
 import type { ChangeRecordRow } from "../render/section-renderer.js"
 import { writeDocx } from "../render/docx-writer.js"
+import { writerOptionsFor } from "../render/labels.js"
 import type { Spine } from "../spine/spine.types.js"
 
 export interface RenderVersionOptions {
@@ -22,8 +23,10 @@ export interface RenderVersionOptions {
 export const renderVersionFile = async (projectId: string, projectName: string, spine: Spine, opts: RenderVersionOptions): Promise<Buffer> => {
   // `baseline`: bản đã chốt của version — không in phụ lục cờ mở / watermark của bản làm việc
   const doc = await renderSpineDocument(projectId, projectName, spine, { version: opts.version, source: "baseline", pendingRecord: opts.pendingRecord })
-  // Version file chỉ có ở mode 1 ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt)
-  const pkg = await DocxPackage.load(await writeDocx(doc, { flagLanguage: "vi" }))
+  // Version file chỉ có ở mode 1 (người gọi: import/finalize, change-request/write, doc-version/release — đều trên
+  // DocVersion, chỉ import mode 1 tạo) ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt). FLF-265: chung helper
+  // với export; mode 1 bỏ qua ngôn ngữ tài liệu ⇒ file version không đổi byte nào, không cần đọc project.
+  const pkg = await DocxPackage.load(await writeDocx(doc, writerOptionsFor("import")))
   await writeStamp(pkg, { project_id: projectId, version: opts.version, source: opts.stampSource })
   return pkg.toBuffer()
 }

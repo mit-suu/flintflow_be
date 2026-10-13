@@ -64,6 +64,8 @@ const db = vi.hoisted(() => {
 
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
+// FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
+vi.mock("../translation/translation.repository.js", async () => (await import("../translation/__tests__/translation-store.js")).fakeRepository)
 // FLF-260: ngôn ngữ tài khoản đổi theo từng ca; mặc định chưa chọn
 const account = vi.hoisted(() => ({ locale: null as "vi" | "en" | null }))
 vi.mock("../user/account-locale.js", () => ({ accountLocaleOf: vi.fn(async () => account.locale) }))
@@ -86,6 +88,8 @@ import {
 } from "./reconcile.service.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
+import { resetStore, store } from "../translation/__tests__/translation-store.js"
+import { hashSource } from "../translation/translation-units.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -382,5 +386,38 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     await expect(reconcile(PROJECT, USER, { base_version: next, preview_id: previewed.preview_id }, {}, deps)).rejects.toMatchObject({
       code: "CHANGE_RANGE_INVALID"
     })
+  })
+})
+
+// ─── FLF-265 D16: hoà giải trả kèm bản ngôn ngữ tài liệu ───────────
+
+describe("reconcile ở dự án có ngôn ngữ tài liệu khác ngôn ngữ gốc (FLF-265 D16)", () => {
+  const VI = { locale: "vi" as const, source: "en" as const, glossary: [] }
+  const description = "The Product Owner creates a project."
+
+  it("lượt 1 mang documentLanguage, gom localized theo preview; lượt 2 áp ⇒ Spine tiếng Anh + bản author", async () => {
+    resetStore()
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    deps.documentLanguage = vi.fn(async () => VI)
+    deps.reconcileExecutor = vi.fn(async (_type, input) => {
+      const stepId = (input.promptVariables as { step_id: string }).step_id
+      if (stepId !== "S-3.2") return opsResult([])
+      const result = opsResult([{ op: "set", path: "use_cases[id=UC02].description", value: description }])
+      return { ...result, data: { ...result.data, localized: [{ path: "use_cases[id=UC02].description", value: "Chủ sản phẩm tạo dự án." }] } }
+    })
+
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+    for (const call of vi.mocked(deps.reconcileExecutor).mock.calls) expect(call[1]).toMatchObject({ documentLanguage: "vi", sourceLanguage: "en" })
+    // Đọc ngôn ngữ một lần cho cả lượt hoà giải
+    expect(deps.documentLanguage).toHaveBeenCalledTimes(1)
+    expect(store.translations.size).toBe(0)
+
+    const applied = await reconcile(PROJECT, USER, { base_version: (await repo.get(PROJECT))!.spine_version, preview_id: previewed.preview_id }, {}, deps)
+    if (!isReconcileApplied(applied)) throw new Error("lượt 2 lẽ ra áp")
+    expect(applied.spine.use_cases.find((u) => u.id === "UC02")?.description).toBe(description)
+    expect(store.translations.get(`${PROJECT}|vi|${hashSource(description)}`)).toMatchObject({ text: "Chủ sản phẩm tạo dự án.", origin: "author" })
   })
 })

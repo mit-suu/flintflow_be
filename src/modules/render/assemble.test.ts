@@ -131,11 +131,24 @@ vi.mock("../spine/spine.repository.js", () => ({
   SPINE_VERSION_CONFLICT: "SPINE_VERSION_CONFLICT",
   SPINE_NOT_FOUND: "SPINE_NOT_FOUND"
 }))
+// FLF-265: S-8.4 thật, chỉ bọc để xem section nó nhận (không bao giờ là chữ dịch)
+vi.mock("./consistency-pass.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./consistency-pass.js")>()
+  return { ...actual, runConsistencyPass: vi.fn(actual.runConsistencyPass) }
+})
+// FLF-265: lớp bản dịch không có Mongo — test tiêm `resolveTranslations`, riêng một test đi resolver mặc định qua kho giả này
+vi.mock("../translation/translation.repository.js", () => ({ findByHashes: vi.fn() }))
 
 import * as spineRepository from "../spine/spine.repository.js"
-import { _internal, assemble, getDocument, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { _internal, assemble, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type TranslationResolver } from "./assemble.service.js"
+import { runConsistencyPass } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG } from "./diagram-placeholder.js"
 import { buildDocxFileName } from "./docx-writer.js"
+import type { RenderedDocument } from "./rendered-document.types.js"
+import type { ChangeRecordRow } from "./section-renderer.js"
+import { findByHashes } from "../translation/translation.repository.js"
+import { hashSource, translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
+import { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 
 const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
@@ -184,6 +197,9 @@ beforeEach(() => {
   vi.mocked(spineRepository.listBaselineRefs).mockResolvedValue([])
   vi.mocked(spineRepository.listChanges).mockReset()
   vi.mocked(spineRepository.listChanges).mockResolvedValue([])
+  vi.mocked(runConsistencyPass).mockClear()
+  vi.mocked(findByHashes).mockReset()
+  vi.mocked(findByHashes).mockResolvedValue(new Map())
 })
 
 describe("assemble()", () => {
@@ -619,5 +635,210 @@ describe("DoD1 — snapshot RenderedDocument từ fixture 19 màn", () => {
       }))
     }
     expect(forSnapshot).toMatchSnapshot()
+  })
+})
+
+// ─── FLF-265 §3.2 + §3.5: ngôn ngữ tài liệu ≠ ngôn ngữ gốc — bản xem đã dịch, không qua cache ──
+
+describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dịch)", () => {
+  const LANG_VI = { locale: "vi", source: "en" } as const
+  const NOW = () => new Date("2026-09-15T00:00:00.000Z")
+  const fixture19 = (): Spine =>
+    spineSchema.parse(JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8")))
+  /** Bản dịch giả: tiền tố `[vi] ` trên từng chuỗi (mảng giữ độ dài) — dễ thấy chữ nào đã dịch. */
+  const toVi = (value: UnitValue): UnitValue => (typeof value === "string" ? `[vi] ${value}` : value.map((v) => `[vi] ${v}`))
+  /** Lớp bản dịch giả, cùng hợp đồng `resolveTranslations`: `translate` trả `undefined` ⇒ đơn vị thiếu. Không Mongo, không model. */
+  const overlay = (translate: (unit: TranslationUnit) => UnitValue | undefined = (unit) => toVi(unit.value)) =>
+    vi.fn<TranslationResolver>(async (_projectId, _locale, units) => {
+      const map = new Map<string, UnitValue>()
+      for (const unit of units) {
+        const text = translate(unit)
+        if (text !== undefined) map.set(unit.key, text)
+      }
+      return { map, missing: units.length - map.size }
+    })
+  const sectionOf = (doc: RenderedDocument, id: string) => doc.sections.find((s) => s.id === id)
+  const firstText = (doc: RenderedDocument, id: string) => {
+    const block = sectionOf(doc, id)?.blocks[0]
+    return block?.type === "paragraph" ? block.runs.map((r) => r.text).join("") : undefined
+  }
+  const imagesOf = (doc: RenderedDocument) => doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
+  const contextDiagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+  const baselineRow = (snapshot: Spine) => ({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 1, snapshot })
+  const cacheCalls = () => [cacheDb.findOne, cacheDb.findOneAndUpdate, cacheDb.find, cacheDb.deleteMany, cacheDb.updateOne]
+
+  it("ngôn ngữ = gốc (mode 2 en/en, mode 1 vi/vi) ⇒ đúng đường cache cũ: cùng khoá, cùng tài liệu, không tra lớp bản dịch", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 31 }))
+    const resolveTranslations = overlay()
+    const plain = await getDocument(PROJECT, "Demo", { source: "draft" })
+
+    for (const languages of [{ locale: "en", source: "en" }, { locale: "vi", source: "vi" }] as const) {
+      expect(await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages }, { resolveTranslations })).toEqual({ doc: plain })
+    }
+    expect(resolveTranslations).not.toHaveBeenCalled()
+    expect(cacheDb.docs.map((d) => [d.projectId, d.spine_version])).toEqual([[PROJECT, 31]])
+  })
+
+  it("'en' giữ nguyên snapshot DoD1: fixture 19 màn với language = sourceLanguage = en ⇒ y hệt bản dựng không ngôn ngữ", async () => {
+    const spine = fixture19()
+    const resolveTranslations = overlay()
+    const build = (extra: { language?: "en"; sourceLanguage?: "en" }) =>
+      _internal.buildDocument(
+        { projectId: PROJECT, projectName: "FlintFlow", spine, statusChanges: [], recordChanges: [], source: "draft", version: "v0.1", ...extra },
+        { loadDiagramPng: async () => "PNG", now: NOW, resolveTranslations }
+      )
+    expect(await build({ language: "en", sourceLanguage: "en" })).toEqual(await build({}))
+    expect(resolveTranslations).not.toHaveBeenCalled()
+  })
+
+  it("vi + lớp bản dịch đủ (fixture 19 màn): nhãn vi, nội dung dịch; mục, số hiệu, trạng thái, ảnh, cờ theo Spine gốc", async () => {
+    const spine = fixture19()
+    const flag = (id: string, section_id: string, waived: boolean): Spine["flags"][number] => ({
+      id,
+      level: "red",
+      rule_id: "section_empty",
+      section_id,
+      message: "Section is empty",
+      remediation_step: "S-8.1",
+      opened_at_version: 1,
+      resolved_at: null,
+      waived_by_user: waived,
+      waive_reason: waived ? "Out of scope" : null,
+      waived_at_version: waived ? 2 : null
+    })
+    spine.flags = [flag("FL1", "function:FN001", false), flag("FL2", "feature:F2", true)]
+    const recordChanges: ChangeRecordRow[] = [{ txn: "t1", op: "add", reason: "seed", at: "2026-09-01T09:00:00.000Z", by: "system", step_id: "S-2.1", path: "project.vision" }]
+    const build = (extra: { language?: "vi"; sourceLanguage?: "en" }, resolveTranslations: TranslationResolver) =>
+      _internal.buildDocument(
+        { projectId: PROJECT, projectName: "FlintFlow", spine, statusChanges: [], recordChanges, source: "draft", version: "v0.1", ...extra },
+        { loadDiagramPng: async () => "PNG", now: NOW, resolveTranslations }
+      )
+    const resolveTranslations = overlay()
+    const en = await build({}, resolveTranslations)
+    const viDoc = await build({ language: "vi", sourceLanguage: "en" }, resolveTranslations)
+
+    expect(resolveTranslations).toHaveBeenCalledTimes(1)
+    expect(resolveTranslations).toHaveBeenCalledWith(PROJECT, "vi", translationUnits(spine))
+    // Khung tài liệu từ Spine gốc: cùng mục, số hiệu, cấp, trạng thái, cùng ảnh
+    const frame = (doc: RenderedDocument) => doc.sections.map((s) => [s.id, s.number, s.level, s.status, s.awaiting_reaccept])
+    expect(frame(viDoc)).toEqual(frame(en))
+    expect(imagesOf(viDoc).map((b) => b.png)).toEqual(imagesOf(en).map((b) => b.png))
+    // Tiêu đề mục cố định / nhóm theo bảng vi; tiêu đề feature / function là tên Spine ĐÃ DỊCH
+    expect(sectionOf(viDoc, "fixed:1")?.heading).toBe("Tổng quan sản phẩm")
+    expect(sectionOf(viDoc, "group:3")?.heading).toBe("Yêu cầu chức năng")
+    expect(sectionOf(viDoc, "feature:F1")?.heading).toBe("[vi] Authentication & Onboarding")
+    expect(sectionOf(viDoc, "function:FN001")?.heading).toBe("[vi] Submit Credentials")
+    for (const s of viDoc.sections.filter((x) => /^(feature|function):/.test(x.id))) expect(s.heading, s.id).toMatch(/^\[vi\] /)
+    // Nội dung dịch, khung FPT tiếng Việt
+    expect(firstText(viDoc, "fixed:1")).toBe(`[vi] ${spine.project.vision}`)
+    expect(JSON.stringify(sectionOf(viDoc, "function:FN001")?.blocks)).toContain('"text":"Kích hoạt chức năng"')
+    // Phụ lục cờ: số hiệu như bản gốc, tên mục theo bản dịch; §I theo ngôn ngữ tài liệu như trước
+    const numberOf = (id: string) => sectionOf(en, id)?.number
+    expect(en.flagsAppendix?.redOpen.map((r) => r.section)).toEqual([`${numberOf("function:FN001")} Submit Credentials`])
+    expect(viDoc.flagsAppendix?.redOpen.map((r) => r.section)).toEqual([`${numberOf("function:FN001")} [vi] Submit Credentials`])
+    expect(viDoc.flagsAppendix?.waived.map((r) => r.section)).toEqual([`${numberOf("feature:F2")} [vi] Project Dashboard`])
+    expect(viDoc.recordOfChanges.map((r) => [r.in_charge, r.description])).toEqual([["Hệ thống", "Tạo Tổng quan sản phẩm"]])
+  })
+
+  it("lớp bản dịch thiếu một phần ⇒ chỗ thiếu in chữ gốc, meta.translation.missing đúng; draftMeta là bản vừa dựng", async () => {
+    const spine = fixture19()
+    vi.mocked(spineRepository.get).mockResolvedValue({ ...spine, projectId: PROJECT, spine_version: 41 })
+    // Chỉ function đã có bản dịch (vd. sinh sau khi chọn vi — D16); phần còn lại chưa bấm "Dịch tài liệu"
+    const resolveTranslations = overlay((unit) => (unit.ref.group === "functions" ? toVi(unit.value) : undefined))
+    const result = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations, loadDiagramPng: async () => "PNG" })
+
+    const missing = translationUnits(spine).filter((u) => u.ref.group !== "functions").length
+    expect(missing).toBeGreaterThan(0)
+    expect(result.translation).toEqual({ locale: "vi", source_locale: "en", missing })
+    expect(documentTranslationMetaSchema.parse(result.translation)).toEqual(result.translation)
+    expect(result.draftMeta).toEqual({ assembled_at_version: 41, spine_version: 41, stale: false })
+    expect(result.doc.version).toBe("v0.41")
+    expect(sectionOf(result.doc, "function:FN001")?.heading).toBe("[vi] Submit Credentials")
+    expect(sectionOf(result.doc, "feature:F1")?.heading).toBe("Authentication & Onboarding")
+    expect(firstText(result.doc, "fixed:1")).toBe(spine.project.vision)
+    // Nhãn vẫn tiếng Việt dù nội dung còn chữ gốc
+    expect(sectionOf(result.doc, "fixed:1")?.heading).toBe("Tổng quan sản phẩm")
+  })
+
+  it("S-8.4 không bao giờ chạy trên chữ dịch: không ai nghe ⇒ bỏ qua; có người nghe ⇒ chạy trên section chữ gốc", async () => {
+    // Chữ gốc có thuật ngữ IN HOA chưa định nghĩa (API); bản dịch có thuật ngữ khác (XYZ) — pass chỉ được thấy API
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 71, project: { ...baseSpine().project, vision: "Expose the API." } }))
+    const resolveTranslations = overlay((unit) => (unit.key === "project.vision" ? "Mở cổng XYZ." : toVi(unit.value)))
+
+    await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })
+    expect(runConsistencyPass).not.toHaveBeenCalled()
+
+    const onConsistencyFindings = vi.fn()
+    const doc = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations, onConsistencyFindings })
+    expect(firstText(doc, "fixed:1")).toBe("Mở cổng XYZ.")
+    expect(runConsistencyPass).toHaveBeenCalledTimes(1)
+    const checked = JSON.stringify(vi.mocked(runConsistencyPass).mock.calls[0][1])
+    expect(checked).toContain("Expose the API.")
+    expect(checked).not.toMatch(/XYZ|\[vi\]|Tổng quan/)
+    const terms = (onConsistencyFindings.mock.calls[0][0] as { rule: string; message: string }[]).filter((f) => f.rule === "undefined_term").map((f) => f.message)
+    expect(terms.some((m) => m.includes('"API"'))).toBe(true)
+    expect(terms.some((m) => m.includes('"XYZ"'))).toBe(false)
+  })
+
+  it("không đọc / ghi cache (draft + baseline); bản dịch mới hiện ngay ở lượt đọc kế dù spine_version không đổi", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 51 }))
+    // Bản gốc đã cache đúng version hiện tại — đường bản dịch không được trả bản này
+    await assemble(PROJECT, "Demo", 51)
+    const cached = structuredClone(cacheDb.docs)
+    for (const fn of cacheCalls()) fn.mockClear()
+
+    let vision = "Tầm nhìn (bản máy)"
+    const resolveTranslations = overlay((unit) => (unit.key === "project.vision" ? vision : toVi(unit.value)))
+    const first = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })
+    // Lượt AI ghi Spine trả kèm bản dịch khác (D16) — spine_version không đổi
+    vision = "Tầm nhìn (bản tác giả)"
+    const second = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })
+    baselineDb.findOne.mockResolvedValue(baselineRow(baseSpine()))
+    const baseline = await getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI }, { resolveTranslations })
+
+    expect(firstText(first.doc, "fixed:1")).toBe("Tầm nhìn (bản máy)")
+    expect(firstText(second.doc, "fixed:1")).toBe("Tầm nhìn (bản tác giả)")
+    expect(firstText(baseline.doc, "fixed:1")).toBe("Tầm nhìn (bản tác giả)")
+    expect(baseline.doc).toMatchObject({ source: "baseline", version: "v1.0" })
+    expect(baseline.translation).toEqual({ locale: "vi", source_locale: "en", missing: 0 })
+    expect(baseline.draftMeta).toBeUndefined()
+    for (const fn of cacheCalls()) expect(fn).not.toHaveBeenCalled()
+    expect(cacheDb.docs).toEqual(cached)
+  })
+
+  it("ảnh chưa có PNG ⇒ placeholder, chú thích tiếng Việt (draft + baseline)", async () => {
+    const resolveTranslations = overlay()
+    const pending = "Hình — Sơ đồ ngữ cảnh hệ thống — ảnh đang chờ: sơ đồ D01 chưa được render"
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 81, diagrams: [contextDiagram] }))
+    const draft = await getDocument(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations, loadDiagramPng: async () => null })
+    expect(imagesOf(draft)).toEqual([{ type: "image", png: DIAGRAM_PLACEHOLDER_PNG, caption: pending }])
+
+    baselineDb.findOne.mockResolvedValue(baselineRow({ ...baseSpine(), diagrams: [contextDiagram] }))
+    const baseline = await getDocument(PROJECT, "Demo", { source: "baseline", baseline_id: BASELINE_ID, languages: LANG_VI }, { resolveTranslations, loadDiagramPng: async () => null })
+    expect(imagesOf(baseline)).toEqual([{ type: "image", png: DIAGRAM_PLACEHOLDER_PNG, caption: pending }])
+  })
+
+  it("mặc định tra lớp bản dịch qua resolveTranslations: một truy vấn theo hash chữ gốc, không cần tiêm", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 61 }))
+    vi.mocked(findByHashes).mockResolvedValue(new Map([[hashSource("V"), { sourceHash: hashSource("V"), text: "Tầm nhìn", origin: "machine" as const }]]))
+    const result = await getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI })
+
+    const units = translationUnits(baseSpine())
+    expect(findByHashes).toHaveBeenCalledTimes(1)
+    expect(findByHashes).toHaveBeenCalledWith(PROJECT, "vi", units.map((u) => hashSource(u.value)))
+    expect(firstText(result.doc, "fixed:1")).toBe("Tầm nhìn")
+    expect(result.translation).toEqual({ locale: "vi", source_locale: "en", missing: units.length - 1 })
+  })
+
+  it("chưa có Spine ⇒ NoWorkingDraftError; baseline không có ⇒ 404 — như đường gốc, không tra lớp bản dịch", async () => {
+    const resolveTranslations = overlay()
+    vi.mocked(spineRepository.get).mockResolvedValue(null)
+    await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "draft", languages: LANG_VI }, { resolveTranslations })).rejects.toBeInstanceOf(NoWorkingDraftError)
+    baselineDb.findOne.mockResolvedValue(null)
+    await expect(getDocumentWithMeta(PROJECT, "Demo", { source: "baseline", languages: LANG_VI }, { resolveTranslations })).rejects.toMatchObject({
+      statusCode: 404,
+      code: "BASELINE_NOT_FOUND"
+    })
+    expect(resolveTranslations).not.toHaveBeenCalled()
   })
 })

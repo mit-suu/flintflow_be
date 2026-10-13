@@ -48,6 +48,8 @@ import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion,
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
+import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
+import { captureForTurn } from "../translation/capture.service.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
@@ -117,6 +119,12 @@ export interface StepRunnerDeps {
    * Thiếu ⇒ đoán trên tin mở lượt ⇒ ngôn ngữ phiên ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt.
    */
   replyLanguage?: ReplyLanguage
+  /**
+   * FLF-265 D16: ngôn ngữ tài liệu của lượt — `null` = không kèm bản dịch (dự án `en`, mode 1). Thiếu (`undefined`) ⇒
+   * `runDraftPhase` đọc một lần khi lượt cần Draft (`documentLanguageForTurn`) rồi giữ trên deps của lượt cho các lô sau.
+   * Test không nối Mongo truyền thẳng.
+   */
+  documentLanguage?: TurnDocumentLanguage | null
   /**
    * FLF-222: chạy tiếp lượt đã tách khỏi kết nối từ ngay sau Elicit — không gọi model hỏi lại, dùng đúng câu đã
    * hỏi + câu trả lời vừa nhận. `run` là khoá `/answer` đã chiếm (xem `resumeWaitingStep`).
@@ -949,6 +957,10 @@ export const runDraftPhase = async (
   const { calls_used } = await meter.roundCounts(projectId, stepId, currentFirstSeq)
   if (calls_used >= CALLS_LIMIT) throw new ApiError(409, `Bước này đã dùng hết ${CALLS_LIMIT} lượt gọi AI.`, CALL_LIMIT)
 
+  // FLF-265 D16: đọc một lần mỗi lượt (lượt S-5 chia lô gọi hàm này nhiều lần với cùng deps của lượt)
+  if (deps.documentLanguage === undefined) deps.documentLanguage = await documentLanguageForTurn(projectId)
+  const documentLanguage = deps.documentLanguage
+
   const reservedId = await meter.reserveCall(projectId, userId, stepId, callKind)
   let draftResult: Awaited<ReturnType<typeof draftOps>>
   try {
@@ -957,6 +969,7 @@ export const runDraftPhase = async (
       executor: deps.draftExecutor,
       spine,
       callKind,
+      documentLanguage,
       // Lượt thử lại phải nói ngay, bằng lời thường — user đang nhìn màn hình chờ (03 Lớp 3)
       onAttempt: ({ attempt, max, previousErrors }) => {
         if (attempt === 1 || previousErrors.length === 0) return
@@ -996,6 +1009,8 @@ export const runDraftPhase = async (
 
   try {
     const applied = await applyTransaction(projectId, draftResult.txn)
+    // Spine đã ghi ⇒ lưu bản ngôn ngữ tài liệu model trả kèm (lỗi chỉ log, không làm hỏng lượt ghi)
+    await captureForTurn(projectId, documentLanguage, draftResult.txn.ops, draftResult.localized)
     const summary = summarizeChanges(applied.changes, stripRecord(applied.spine))
     emit({
       type: "ops_applied",
