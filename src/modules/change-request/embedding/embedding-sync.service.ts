@@ -7,13 +7,14 @@
  *   - embed vài trăm phần tử mất vài giây gọi mạng; finalize / duyệt CR đã dài, không cộng thêm độ trễ đó;
  *   - lỗi chỉ ghi log: index là dữ liệu suy diễn, lần đồng bộ sau (hoặc script) dựng lại; C-3 thiếu vector thì
  *     tự rơi về từ khoá;
- *   - mỗi project tối đa **một** lượt đang chạy (cờ trong module): gọi thêm lúc đang chạy ⇒ đánh dấu chạy lại một lần
- *     sau khi xong (gộp lượt), tránh hai lượt upsert cùng phần tử đè nhau.
+ *   - mỗi project tối đa **một** lượt đang chạy (queue `embedding`, `shared/queue/`): gọi thêm lúc đang chạy ⇒ chạy lại
+ *     một lần sau khi xong (gộp lượt), tránh hai lượt upsert cùng phần tử đè nhau; lỗi mạng ⇒ retry có backoff.
  * Embedding tắt / thiếu key ⇒ bỏ qua ngay, không đụng DB; Mongo không có `$vectorSearch` ⇒ bỏ qua (không có index để
  * dùng thì embed chỉ tốn tiền).
  */
 
 import mongoose from "mongoose"
+import { defineJob, enqueueJob, waitForJob } from "../../../shared/queue/job-runner.js"
 import { embeddingAvailable, embeddingModelId, embedTexts } from "../../../shared/ai/embedding/embedding.provider.js"
 import * as spineRepository from "../../spine/spine.repository.js"
 import { elementDocs, planSync } from "./element-text.js"
@@ -56,32 +57,35 @@ export const syncProjectEmbeddings = async (projectId: string): Promise<Embeddin
   return { embedded: plan.embed.length, removed: plan.remove.length, kept: plan.keep.length }
 }
 
-const inFlight = new Map<string, Promise<void>>()
-const again = new Set<string>()
+const syncKey = (projectId: string) => `embed-${projectId}`
+
+/**
+ * Job đồng bộ (queue `embedding`, worker chạy một lượt một lần). Lỗi mạng ⇒ retry có backoff; hết lượt ⇒ chỉ ghi log
+ * (index là dữ liệu suy diễn, lượt sau dựng lại).
+ */
+const embeddingSyncJob = defineJob<{ projectId: string }>({
+  queue: "embedding",
+  name: "sync",
+  options: { attempts: 3, backoff: { type: "exponential", delay: 10_000 } },
+  process: async ({ projectId }) => {
+    const res = await syncProjectEmbeddings(projectId)
+    if (res && (res.embedded || res.removed)) console.log(`[embedding] project ${projectId}: embed ${res.embedded}, xoá ${res.removed}, giữ ${res.kept}`)
+  },
+  onFinalFailure: async ({ projectId }, err) => {
+    console.warn(`[embedding] đồng bộ index embedding lỗi (project ${projectId}) — index giữ bản cũ tới lượt sau: ${err instanceof Error ? err.message : String(err)}`)
+  }
+})
 
 /** Lượt đồng bộ nền đang chạy của project (test / script chờ được); không có ⇒ resolve ngay. */
-export const pendingEmbeddingSync = (projectId: string): Promise<void> => inFlight.get(projectId) ?? Promise.resolve()
+export const pendingEmbeddingSync = (projectId: string): Promise<void> => waitForJob(embeddingSyncJob, syncKey(projectId))
 
-/** Đồng bộ nền, không chờ, không ném. Embedding không dùng được ⇒ không làm gì. */
+/**
+ * Đồng bộ nền, không chờ, không ném. Embedding không dùng được ⇒ không làm gì. Gọi dồn khi đang chạy ⇒ gộp thành
+ * một lượt chạy lại sau khi lượt hiện tại xong (`keepLastIfActive`); đang chờ chưa chạy ⇒ bỏ (lượt chờ đọc Spine mới nhất).
+ */
 export const scheduleEmbeddingSync = (projectId: string): void => {
   if (!embeddingAvailable()) return
-  if (inFlight.has(projectId)) {
-    again.add(projectId)
-    return
-  }
-  const run = async (): Promise<void> => {
-    do {
-      again.delete(projectId)
-      try {
-        const res = await syncProjectEmbeddings(projectId)
-        if (res && (res.embedded || res.removed)) console.log(`[embedding] project ${projectId}: embed ${res.embedded}, xoá ${res.removed}, giữ ${res.kept}`)
-      } catch (err) {
-        console.warn(`[embedding] đồng bộ index embedding lỗi (project ${projectId}) — index giữ bản cũ tới lượt sau: ${err instanceof Error ? err.message : String(err)}`)
-      }
-    } while (again.has(projectId))
-  }
-  inFlight.set(
-    projectId,
-    run().finally(() => inFlight.delete(projectId))
+  enqueueJob(embeddingSyncJob, { projectId }, { key: syncKey(projectId), keepLastIfActive: true }).catch((err: unknown) =>
+    console.warn(`[embedding] không đưa được lượt đồng bộ vào hàng đợi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
   )
 }

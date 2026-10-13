@@ -152,6 +152,24 @@ const envSchema = z.object({
     .refine((v) => !isProd || !v.includes("localhost"), {
       message: "ở production phải là domain public, không được trỏ localhost"
     }),
+  // ─── Job nền (`shared/queue/`, docs/background-jobs.md) ───────────
+  // `inline` (mặc định) ⇒ job chạy trong chính tiến trình API như trước, không cần Redis (dev, test, CI).
+  // `bullmq` ⇒ job đi qua Redis; tiến trình `npm run worker` (hoặc WORKERS_IN_PROCESS=true) xử lý.
+  JOB_DRIVER: z.enum(["inline", "bullmq"]).default("inline"),
+  REDIS_URL: z.string().default(""),
+  /**
+   * Tiền tố key Redis. Hai môi trường dùng CHUNG một Redis (máy dev + production cùng Redis Cloud) phải khác tiền tố —
+   * nếu không worker trên máy dev nhận job của production rồi chạy với Mongo của máy dev.
+   */
+  QUEUE_PREFIX: z.string().regex(/^[\w-]+$/).default("flintflow"),
+  /** Chạy worker ngay trong tiến trình API (dev một terminal). Production: để `false` và chạy service `worker` riêng. */
+  WORKERS_IN_PROCESS: z
+    .string()
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+  /** Số job import (I-4 / finalize, mỗi job vài phút gọi AI) một worker chạy song song. */
+  JOB_IMPORT_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+
   // Reservation credit quá TTL sẽ bị cron dọn (expireStaleReservations).
   CREDIT_RESERVE_TTL_MS: z.coerce.number().int().positive().default(10 * 60 * 1000),
   /** Hạn của mã mời vào tổ chức (UC-08). */
@@ -166,6 +184,9 @@ const envSchema = z.object({
   AI_PAYLOAD_RETENTION_DAYS: z.coerce.number().int().min(0).max(365).default(30),
   /** Trần ký tự cho mỗi bên prompt/response trước khi cắt giữa; độ dài thật vẫn được ghi lại. */
   AI_PAYLOAD_MAX_CHARS: z.coerce.number().int().positive().default(40000)
+}).refine((v) => v.JOB_DRIVER !== "bullmq" || v.REDIS_URL !== "", {
+  message: "JOB_DRIVER=bullmq cần REDIS_URL (vd. redis://localhost:6379)",
+  path: ["REDIS_URL"]
 })
 
 const parsed = envSchema.safeParse(process.env)

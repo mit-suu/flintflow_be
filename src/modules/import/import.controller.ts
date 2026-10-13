@@ -78,7 +78,7 @@ export const getImport = mode1Handler(async (req, res) => {
   }
   const view = await importService.getImportView(auth.projectId)
   // Ước tính credit trước khi trích (bước mapping / bắt đầu / chạy tiếp) — job đang chạy thì FE đang xem tiến độ, không tính
-  if (current && !extractJobs.isExtractionRunning(String(current._id))) {
+  if (current && !(await extractJobs.isExtractionRunning(String(current._id)))) {
     const role = req.orgContext?.role
     view.credit_estimate = await extractService.creditEstimateFor(auth.projectId, auth.userId, current, { withBalance: role === "lead" || role === "analyst" })
   }

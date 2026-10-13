@@ -1,10 +1,10 @@
 # Toàn bộ FlintFlow bằng một lệnh (T24).
 #
 #   cp .env.example .env            # điền secret thật vào .env
-#   docker compose up -d            # mongo (rs0) + plantuml + backend + frontend
+#   docker compose up -d            # mongo (rs0) + redis + plantuml + backend + worker + frontend
 #   curl http://localhost:5000/health
 #
-# Chỉ hạ tầng, code chạy trên máy:  docker compose up -d mongo mongo-init plantuml
+# Chỉ hạ tầng, code chạy trên máy:  docker compose up -d mongo mongo-init redis plantuml
 # Xem thêm docs/ops.md.
 #
 # Frontend build từ repo anh em `../flintflow_fe`. Chỉ clone repo này thì đặt
@@ -45,6 +45,24 @@ services:
     restart: "no"
     networks: [flintflow]
 
+  # ─── Redis: hàng đợi job nền (BullMQ, docs/background-jobs.md) ────
+  # `noeviction` là BẮT BUỘC với BullMQ: Redis đầy mà tự xoá key thì mất job. AOF (`appendonly`) giữ job qua lần
+  # khởi động lại Redis. Không mở cổng ra ngoài ở production — job email mang OTP.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [flintflow]
+
   # ─── PlantUML ──────────────────────────────────────────────────────
   # Render phía server vì web preview và export .docx dùng CHUNG một pipeline (Phases §7.1), và vì
   # dữ liệu khách hàng không đi qua server công cộng.
@@ -76,6 +94,8 @@ services:
         condition: service_completed_successfully
       plantuml:
         condition: service_started
+      redis:
+        condition: service_healthy
     # Secret và khoá provider lấy từ .env (không commit). Các giá trị dưới ghi đè phần "địa chỉ"
     # cho đúng mạng nội bộ của compose — đó là thứ khác nhau giữa chạy trên máy và chạy trong compose.
     env_file:
@@ -90,6 +110,10 @@ services:
       CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
       APP_URL: ${APP_URL:-http://localhost:3000}
       AI_PROVIDER_OVERRIDE: ${AI_PROVIDER_OVERRIDE:-}
+      JOB_DRIVER: bullmq
+      REDIS_URL: redis://redis:6379
+      # Job do service `worker` chạy, API chỉ đưa job vào hàng đợi
+      WORKERS_IN_PROCESS: "false"
     ports:
       - "${BACKEND_PORT:-5000}:5000"
     healthcheck:
@@ -105,6 +129,38 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+    restart: unless-stopped
+    networks: [flintflow]
+
+  # ─── Worker: chạy job nền (I-4, finalize import, embedding, email, dọn reservation) ───
+  # Cùng image với backend, khác lệnh. Scale ngang: `docker compose up -d --scale worker=3`.
+  # `docker compose kill worker` giữa lúc finalize ⇒ job stalled, khởi động lại worker là job chạy tiếp.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
+      plantuml:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: mongodb://mongo:27017/${MONGO_DB:-flintflow}?replicaSet=rs0
+      PLANTUML_BASE_URL: http://plantuml:8080
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      AI_PROVIDER_OVERRIDE: ${AI_PROVIDER_OVERRIDE:-}
+      JOB_DRIVER: bullmq
+      REDIS_URL: redis://redis:6379
+    # Cho job đang chạy thời gian kết thúc gọn; quá hạn ⇒ SIGKILL, job stalled và được worker khác nhận lại
+    stop_grace_period: 60s
     restart: unless-stopped
     networks: [flintflow]
 
@@ -139,6 +195,7 @@ services:
 
 volumes:
   mongo-data:
+  redis-data:
 
 networks:
   flintflow:

@@ -70,7 +70,7 @@ describe("finalize chạy nền — trả ngay, kiểm điều kiện ngay", () 
     const conflict = await c.post("/import/finalize", { import_id: id, base_version: 999 })
     expect(conflict.status).toBe(409)
     expect(conflict.body.error.code).toBe("SPINE_VERSION_CONFLICT")
-    expect(isFinalizeRunning(id)).toBe(false)
+    expect(await isFinalizeRunning(id)).toBe(false)
     expect((await ImportedDocument.findById(id).lean())?.finalize_checkpoint).toBeNull()
 
     const v = await c.spineVersion()
