@@ -34,6 +34,9 @@ import { patchLocation } from "./location.service.js"
 import { addMaterial, removeMaterial } from "./material.service.js"
 import { draftInOwnerStep, runPropose } from "./propose.service.js"
 import { runVerify } from "./verify.service.js"
+import { assertConvertible, markConverted } from "../comment/comment.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 
 const loadCr = async (req: Request): Promise<{ auth: Mode1Auth; cr: IChangeRequest }> => {
   const auth = await authorizeMode1(req)
@@ -59,7 +62,16 @@ export const createCr = mode1Handler(async (req, res) => {
     throw new Mode1Error("CR_SOURCE_REQUIRED", "Change request cần có nguồn và người yêu cầu.")
   }
   const body = parseInput(createChangeRequestSchema, req.body)
+  // UC-49: chỉ Analyst/Lead chuyển comment (Viewer đã bị `viewerReadOnly` chặn ở tầng app), nguồn phải là "Viewer comment"
+  // và comment còn mở — kiểm trước khi tạo để không sinh CR rồi mới báo comment đã xử lý.
+  if (body.comment_id) {
+    if (body.source.kind !== "viewer_comment") {
+      throw new ApiError(400, "Change request tạo từ comment phải có nguồn \"Viewer comment\".", "VALIDATION_ERROR")
+    }
+    await assertConvertible(auth.projectId, body.comment_id)
+  }
   const cr = await crService.createCr(auth.projectId, auth.userId, body)
+  if (body.comment_id) await markConverted(auth.projectId, body.comment_id, cr.cr_id, auth.userId, requireOrgId(req))
   // Bản xem trước hết hạn / không phải của mình ⇒ CR vẫn tạo (3.1 không phụ thuộc bản xem trước), báo để FE nói rõ
   if (body.preview_id && !cr.seed) return sendSuccess(res, 201, await crService.toDetail(cr), { seed_dropped: true })
   return detail(res, cr, 201)
