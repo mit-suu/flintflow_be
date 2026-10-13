@@ -130,21 +130,32 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
     expect(reply.status, JSON.stringify(reply.body.error)).toBe(201)
     expect(reply.body.data.replies).toMatchObject([{ author_role: "viewer", text: "Tôi cũng thắc mắc", author: { name: "viewer" } }])
 
-    const viewerResolve = await viewer.post("/comments/CM-001/resolve")
+    const viewerResolve = await viewer.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(viewerResolve.status).toBe(403)
     expect(viewerResolve.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
 
-    const resolved = await analyst.c.post("/comments/CM-001/resolve")
+    // §3.5: giữ nguyên thì PHẢI nêu lý do — Lead duyệt lại đọc lý do đó, nên không nhận chuỗi rỗng
+    for (const body of [{ kind: "kept" }, { kind: "kept", reason: "ok" }]) {
+      const bad = await analyst.c.post("/comments/CM-001/resolve", body)
+      expect(bad.status, JSON.stringify(body)).toBe(400)
+      expect(bad.body.error.code).toBe("VALIDATION_ERROR")
+    }
+
+    const resolved = await analyst.c.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(resolved.status).toBe(200)
     expect(commentSchema.safeParse(resolved.body.data).error).toBeUndefined()
-    expect(resolved.body.data).toMatchObject({ status: "resolved", handled_by: { name: "analyst" } })
+    expect(resolved.body.data).toMatchObject({
+      status: "resolved",
+      handled_by: { name: "analyst" },
+      resolution: { kind: "fixed", reason: null }
+    })
 
     expect((await viewer.get("/comments")).body.data).toEqual([])
     const all = await viewer.get("/comments?status=all")
     expect(commentsResponseSchema.safeParse(all.body.data).error).toBeUndefined()
     expect(all.body.data.map((c: { comment_id: string }) => c.comment_id)).toEqual(["CM-001"])
 
-    const again = await lead.post("/comments/CM-001/resolve")
+    const again = await lead.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(again.status).toBe(409)
     expect(again.body.error.code).toBe("COMMENT_NOT_OPEN")
 
@@ -176,13 +187,18 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
     expect(String(note?.organizationId)).toBe(seeded.orgId)
 
     // Analyst Resolve comment của Lead ⇒ báo Lead
-    await analyst.c.post("/comments/CM-001/resolve")
+    await analyst.c.post("/comments/CM-001/resolve", { kind: "fixed" })
     expect(await recipients("comment_resolved")).toEqual([seeded.userId])
 
     // Lead tự Resolve comment của mình ⇒ không báo ai
     await lead.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Tự ghi chú" })
     await Notification.deleteMany({})
-    expect((await lead.post("/comments/CM-002/resolve")).status).toBe(200)
+    const kept = await lead.post("/comments/CM-002/resolve", {
+      kind: "kept",
+      reason: "Khách xác nhận giữ nguyên cách gọi này trong hợp đồng."
+    })
+    expect(kept.status, JSON.stringify(kept.body.error)).toBe(200)
+    expect(kept.body.data.resolution).toMatchObject({ kind: "kept", reason: expect.stringContaining("Khách xác nhận") })
     expect(await recipients("comment_resolved")).toEqual([])
   })
 

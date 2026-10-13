@@ -533,7 +533,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         rule_id: "section_awaiting_reaccept",
         section_id: s.id,
         target_id: null,
-        message: `Nội dung ${quotedSectionLabel(s.id, spine)} đang chờ duyệt lại sau hoà giải`,
+        message: `Bước soạn ${quotedSectionLabel(s.id, spine)} đã mở lại — chạy lại bước đó rồi duyệt để gỡ`,
         remediation_step: awaitingOwnerOf(s.id, spine)
       }))
   ]
