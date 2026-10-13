@@ -125,6 +125,35 @@ describe("runDeterministicCheck", () => {
     expect(byRule(runDeterministicCheck(rejected, rejectChanges), "derived_from_changed_assumption")).toHaveLength(1)
   })
 
+  it("E2E FAP #21: câu được viết lại rồi user xác nhận ở lượt sau ⇒ không cờ; user tự sửa + xác nhận cùng txn ⇒ vẫn cờ", () => {
+    const nfr = FIXTURE.nfrs[0]
+    const spine = variant((s) => {
+      s.assumptions.push({
+        id: "AS31",
+        path: `nfrs[id=${nfr.id}].statement`,
+        statement: "Uptime is 99%",
+        rationale: "r",
+        origin_step_id: "S-6.3",
+        status: "confirmed",
+        confirmed_at: "2026-09-22T10:00:00.000Z"
+      })
+    })
+    const base = { before: null, value: "x", step_id: null }
+    const reworded = [
+      { ...base, seq: 10, path: `nfrs[id=${nfr.id}].statement`, txn: "t1" },
+      { ...base, seq: 20, path: "assumptions[id=AS31].statement", txn: "t2" },
+      { ...base, seq: 30, path: "assumptions[id=AS31].status", txn: "t3" }
+    ]
+    expect(byRule(runDeterministicCheck(spine, reworded), "derived_from_changed_assumption")).toEqual([])
+
+    const userEdit = [
+      { ...base, seq: 10, path: `nfrs[id=${nfr.id}].statement`, txn: "t1" },
+      { ...base, seq: 20, path: "assumptions[id=AS31].statement", txn: "t2" },
+      { ...base, seq: 21, path: "assumptions[id=AS31].status", txn: "t2" }
+    ]
+    expect(byRule(runDeterministicCheck(spine, userEdit), "derived_from_changed_assumption")).toHaveLength(1)
+  })
+
   it("BUG-12: function nền không use case nào tham chiếu ⇒ cờ vàng về S-3.2", () => {
     const withBackground = variant((s) => {
       s.functions.push({
@@ -288,6 +317,15 @@ describe("runDeterministicCheck", () => {
     expect(byRule(atBaseline, "unconfirmed_assumption")[0]?.message).not.toContain("S-6.3")
     expect(byRule(atBaseline, "section_stale_at_baseline").map((f) => f.section_id)).toContain("fixed:3.1.5")
     expect(byRule(atBaseline, "section_awaiting_reaccept")).toMatchObject([{ section_id: "fixed:5.2", remediation_step: "S-7.2" }])
+  })
+
+  it("E2E FAP #18: mục nhiều bước sở hữu ⇒ 'Duyệt lại ở' trỏ bước đang chờ duyệt, không phải bước đầu đã chốt", () => {
+    const spine = variant((s) => {
+      s.steps.find((x) => x.id === "S-3.4")!.status = "revision_requested"
+    })
+    expect(byRule(runDeterministicCheck(spine, [], { atBaseline: true }), "section_awaiting_reaccept")).toMatchObject([
+      { section_id: "fixed:2.2.2", remediation_step: "S-3.4" }
+    ])
   })
 
   it("luật vàng cardinality + non_english_content (bỏ qua addendum)", () => {

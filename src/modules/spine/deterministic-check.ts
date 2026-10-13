@@ -453,12 +453,16 @@ const unconfirmedAssumption = (spine: Spine): FlagCandidate[] =>
  * Liên kết đã có sẵn: `assumptions[].path` trỏ đúng field mà giả định đang đỡ. Nếu giả định được sửa
  * (statement/status) SAU lần cuối field đó được ghi, thì field đang lạc hậu so với quyết định mới.
  */
-const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {
-  const lastSeqByPrefix = (prefix: string): number => {
-    let last = 0
-    for (const c of changes) if (c.path === prefix || c.path.startsWith(`${prefix}.`) || c.path.startsWith(`${prefix}[`)) last = Math.max(last, c.seq)
+const derivedFromChangedAssumption = (
+  spine: Spine,
+  changes: (Pick<Change, "seq" | "path" | "before" | "value" | "step_id"> & { txn?: string })[]
+): FlagCandidate[] => {
+  const lastChange = (prefix: string) => {
+    let last: (typeof changes)[number] | undefined
+    for (const c of changes) if ((c.path === prefix || c.path.startsWith(`${prefix}.`) || c.path.startsWith(`${prefix}[`)) && c.seq > (last?.seq ?? 0)) last = c
     return last
   }
+  const lastSeqByPrefix = (prefix: string): number => lastChange(prefix)?.seq ?? 0
 
   return spine.assumptions.flatMap((assumption): FlagCandidate[] => {
     if (tryResolve(spine, assumption.path) === null) return []
@@ -466,8 +470,22 @@ const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" 
     // bỏ" mới làm field dẫn xuất lạc hậu. Tính cả lượt xác nhận thì bấm "Đúng hết" ở S-9.1 đẻ ra đúng
     // bằng ấy cờ vàng vô nghĩa.
     const rejectedAt = assumption.status === "rejected" ? lastSeqByPrefix(`assumptions[id=${assumption.id}].status`) : 0
-    const decidedAt = Math.max(lastSeqByPrefix(`assumptions[id=${assumption.id}].statement`), rejectedAt)
+    const statementChange = lastChange(`assumptions[id=${assumption.id}].statement`)
+    const decidedAt = Math.max(statementChange?.seq ?? 0, rejectedAt)
     if (decidedAt === 0) return []
+    // Câu chữ được viết lại (model, bản dịch) rồi user mới xác nhận ở một lượt SAU ⇒ user đã duyệt câu mới cạnh field đang
+    // có (E2E FAP #21: AS08/AS28 khớp nội dung mà vẫn cờ vàng). User tự sửa giả định thì sửa + xác nhận cùng một txn — đó
+    // vẫn là thay đổi quyết định, field dẫn xuất phải theo.
+    const confirmChange = lastChange(`assumptions[id=${assumption.id}].status`)
+    if (
+      assumption.status === "confirmed" &&
+      statementChange &&
+      confirmChange &&
+      confirmChange.seq > statementChange.seq &&
+      (confirmChange.txn === undefined || confirmChange.txn !== statementChange.txn)
+    ) {
+      return []
+    }
     const targetAt = lastSeqByPrefix(assumption.path)
     if (targetAt >= decidedAt) return []
     const verb = assumption.status === "rejected" ? "bị bác bỏ" : "được sửa"
@@ -483,6 +501,16 @@ const derivedFromChangedAssumption = (spine: Spine, changes: Pick<Change, "seq" 
       }
     ]
   })
+}
+
+/**
+ * Bước sở hữu đang chờ duyệt lại (`revision_requested`) — đích của "Duyệt lại ở …". Section nhiều chủ (§2.2.2: S-3.2…S-3.5)
+ * mà trỏ về chủ đầu tiên đã accepted thì user chạy lại nhầm bước: ghi đè nội dung, làm thêm mục khác "cũ", còn cờ vẫn nguyên
+ * (E2E FAP #18).
+ */
+const awaitingOwnerOf = (sectionId: string, spine: Spine): string => {
+  const owners = stepsOf(sectionId, spine)
+  return owners.find((id) => spine.steps.find((s) => s.id === id)?.status === "revision_requested") ?? ownerStepOf(sectionId, spine)
 }
 
 const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" | "before" | "value" | "step_id">[]): FlagCandidate[] => {
@@ -506,7 +534,7 @@ const sectionsAtBaseline = (spine: Spine, changes: Pick<Change, "seq" | "path" |
         section_id: s.id,
         target_id: null,
         message: `Nội dung ${quotedSectionLabel(s.id, spine)} đang chờ duyệt lại sau hoà giải`,
-        remediation_step: ownerStepOf(s.id, spine)
+        remediation_step: awaitingOwnerOf(s.id, spine)
       }))
   ]
 }

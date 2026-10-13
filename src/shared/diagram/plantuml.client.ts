@@ -115,6 +115,27 @@ const withTimeout = async (
   }
 }
 
+/** Chờ trước mỗi lần thử lại khi không kết nối được PlantUML. */
+export const PLANTUML_RETRY_DELAYS_MS = [500, 1500]
+
+/**
+ * Lỗi kết nối (`fetch failed`: server đang khởi động, socket bị reset) thường hết sau vài giây — thử lại
+ * thay vì ghi `render_error` ngay và bắt user bấm "Vẽ lại". Hết giờ (abort) không thử lại: đã chờ đủ
+ * `PLANTUML_TIMEOUT_MS`, thử tiếp chỉ làm lượt chạy treo lâu hơn.
+ */
+const getWithRetry = async (url: string): Promise<Response> => {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await withTimeout(url, { method: "GET" })
+    } catch (err) {
+      const isConnectionError = err instanceof TypeError
+      const delay = PLANTUML_RETRY_DELAYS_MS[attempt]
+      if (!isConnectionError || delay === undefined) throw err
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
+  }
+}
+
 /**
  * Render `.puml` thành SVG/PNG.
  *
@@ -155,10 +176,7 @@ export const renderPlantUml = async (
   }
 
   // Đường 2: GET với source đã encode
-  const res = await withTimeout(
-    `${baseUrl()}/${format}/${encodePlantUml(source)}`,
-    { method: "GET" }
-  )
+  const res = await getWithRetry(`${baseUrl()}/${format}/${encodePlantUml(source)}`)
 
   // Kiểm content-type TRƯỚC status: server lạ chiếm cổng thường không có route
   // `/svg/<enc>` nên trả 404 HTML — báo "HTTP 404" thì người đọc log tưởng PlantUML
