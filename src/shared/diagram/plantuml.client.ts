@@ -115,13 +115,11 @@ const withTimeout = async (
   }
 }
 
-/** Chờ trước mỗi lần thử lại khi không kết nối được PlantUML. */
-export const PLANTUML_RETRY_DELAYS_MS = [500, 1500]
-
 /**
  * Lỗi kết nối (`fetch failed`: server đang khởi động, socket bị reset) thường hết sau vài giây — thử lại
- * thay vì ghi `render_error` ngay và bắt user bấm "Vẽ lại". Hết giờ (abort) không thử lại: đã chờ đủ
- * `PLANTUML_TIMEOUT_MS`, thử tiếp chỉ làm lượt chạy treo lâu hơn.
+ * thay vì ghi `render_error` ngay và bắt user bấm "Vẽ lại". Chờ theo `PLANTUML_RETRY_DELAYS_MS` (mặc định 0,5 s rồi
+ * 1,5 s; test tích hợp đặt rỗng). Hết giờ (abort) không thử lại: đã chờ đủ `PLANTUML_TIMEOUT_MS`, thử tiếp chỉ làm
+ * lượt chạy treo lâu hơn.
  */
 const getWithRetry = async (url: string): Promise<Response> => {
   for (let attempt = 0; ; attempt++) {
@@ -129,7 +127,7 @@ const getWithRetry = async (url: string): Promise<Response> => {
       return await withTimeout(url, { method: "GET" })
     } catch (err) {
       const isConnectionError = err instanceof TypeError
-      const delay = PLANTUML_RETRY_DELAYS_MS[attempt]
+      const delay = env.PLANTUML_RETRY_DELAYS_MS[attempt]
       if (!isConnectionError || delay === undefined) throw err
       await new Promise((resolve) => setTimeout(resolve, delay))
     }
