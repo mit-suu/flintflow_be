@@ -26,6 +26,7 @@ import type { Screen, Spine } from "../../spine/spine.types.js"
 import { guestOpenScreenIds, hasScreenActorLinks, screenActorMap } from "../../spine/screen-actors.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { alias, byId, compareIds, label, puml } from "./common.js"
+import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
 
 const FONT = "DejaVu Sans"
 /** Chuỗi DOT trong ngoặc kép: nhãn một dòng (`label` bỏ `"`), escape `\`. `lines` nối bằng `\n` của DOT. */
@@ -45,7 +46,7 @@ const entryScreens = (screens: Screen[], ids: Set<string>, gateways: ReadonlySet
 }
 
 /** Tiêu đề sơ đồ của một actor; cũng là chú thích ảnh (`section-renderer` đọc lại bằng `screenFlowTitleOf`). */
-export const screenFlowTitle = (actorName: string): string => `Screens flow for ${actorName}`
+export const screenFlowTitle = (actorName: string): string => DIAGRAM_LABELS.en.screensFlowTitle(actorName)
 
 /** Tiêu đề đã ghi trong nguồn sơ đồ (dòng `label="…";` cấp graph); sơ đồ chung không có ⇒ `null`. */
 export const screenFlowTitleOf = (source: string): string | null => /^ {2}label="([^"]*)";$/m.exec(source)?.[1] ?? null
@@ -89,7 +90,7 @@ interface FlowStart {
   gateways: ReadonlySet<string>
 }
 
-const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
+const flowPart = (screens: Screen[], start: FlowStart | null, labels: DiagramLabels): RenderedPart => {
   const ids = new Set(screens.map((s) => s.id))
   const tabbed = new Map(screens.filter((s) => s.tabs.length > 0).map((s) => [s.id, `${alias(s.id)}_T1`]))
   const body = [
@@ -101,7 +102,7 @@ const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
   if (start) body.push(`  label=${dq(start.title)};`)
 
   if (screens.length === 0) {
-    body.push(`  NO_SCREENS [label=${dq("No screens yet")}];`, "}")
+    body.push(`  NO_SCREENS [label=${dq(labels.noScreens)}];`, "}")
     return { kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: puml("@startdot", body, "@enddot") }
   }
 
@@ -124,7 +125,7 @@ const flowPart = (screens: Screen[], start: FlowStart | null): RenderedPart => {
     }
     body.push(
       `  subgraph cluster_${alias(s.id)} {`,
-      `    label=${s.is_popup ? dq(s.name, "(pop-up)") : dq(s.name)}; style=${s.is_popup ? "rounded" : "solid"};`
+      `    label=${s.is_popup ? dq(s.name, labels.popup) : dq(s.name)}; style=${s.is_popup ? "rounded" : "solid"};`
     )
     s.tabs.forEach((tab, i) => body.push(`    ${alias(s.id)}_T${i + 1} [label=${dq(tab)}];`))
     body.push("  }")
@@ -187,14 +188,16 @@ const loginGateways = (spine: Spine, screens: Screen[]): Set<string> => {
   return new Set(screens.filter((s) => guestOpen.has(s.id) && s.flow_to.some((t) => ids.has(t) && !guestOpen.has(t))).map((s) => s.id))
 }
 
-export const renderScreenFlow: Renderer = (spine: Spine) => {
+export const renderScreenFlow: Renderer = (spine: Spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
   const screens = byId(spine.screens)
   const actorsOf = screenActorMap(spine)
-  if (screens.length === 0 || !hasScreenActorLinks(actorsOf)) return [flowPart(screens, null)]
+  if (screens.length === 0 || !hasScreenActorLinks(actorsOf)) return [flowPart(screens, null, labels)]
 
   const gateways = loginGateways(spine, screens)
   return byId(spine.actors.filter((a) => a.kind === "human"))
     .map((actor) => ({ actor, own: screens.filter((s) => actorsOf.get(s.id)?.includes(actor.id)) }))
     .filter(({ own }) => own.length > 0)
-    .map(({ actor, own }) => flowPart(bridgeGroup(screens, own), { title: screenFlowTitle(actor.name), actorName: actor.name, gateways }))
+    .map(({ actor, own }) =>
+      flowPart(bridgeGroup(screens, own), { title: labels.screensFlowTitle(actor.name), actorName: actor.name, gateways }, labels)
+    )
 }
