@@ -226,21 +226,32 @@ describe("renderers trên fixture 19 màn", () => {
     for (const uc of FIXTURE.use_cases) for (const base of uc.extends) expect(puml).toContain(`${uc.id} ..> ${base} : <<extend>>`)
   })
 
-  it("usecase: cạnh actor là association, use case mở rộng/bị include không nối actor người", () => {
-    const puml = usecasePuml(FIXTURE)
-    expect(puml).not.toMatch(/^A\d+ -->/m)
-
+  it("usecase: cạnh actor là association; actor người không nối use case phụ thuộc khi gốc của nó cùng hình", () => {
+    expect(usecasePuml(FIXTURE)).not.toMatch(/^A\d+ -->/m)
     const human = new Set(FIXTURE.actors.filter((a) => a.kind === "human").map((a) => a.id))
-    const dependent = dependentUseCaseIds(FIXTURE.use_cases)
-    const counts = actorUseCaseCounts(FIXTURE.use_cases)
-    for (const uc of FIXTURE.use_cases.filter((u) => dependent.has(u.id))) {
-      for (const actorId of uc.actor_ids.filter((a) => human.has(a) && (counts.get(a) ?? 0) > 1)) {
-        expect(puml, `${actorId} -- ${uc.id}`).not.toContain(`${actorId} -- ${uc.id}`)
+    const byUc = new Map(FIXTURE.use_cases.map((u) => [u.id, u]))
+    for (const puml of usecaseParts(FIXTURE)) {
+      const inPart = new Set([...puml.matchAll(/usecase "[^"]*" as (\w+)/g)].map((m) => m[1]))
+      for (const [, actorId, ucId] of puml.matchAll(/^(A\d+) -- (UC\d+)$/gm)) {
+        if (!human.has(actorId)) continue
+        const uc = byUc.get(ucId)!
+        const viaBase = FIXTURE.use_cases.some((o) => o.id !== ucId && inPart.has(o.id) && o.includes.includes(ucId)) || uc.extends.some((b) => inPart.has(b))
+        // ngoại lệ: actor không còn cạnh nào khác trong hình thì giữ một cạnh
+        const others = [...puml.matchAll(new RegExp(`^${actorId} -- `, "gm"))].length
+        if (others > 1) expect(viaBase, `${actorId} -- ${ucId}`).toBe(false)
       }
     }
-    expect(puml).toContain("UC12 -- A07") // actor system giữ cạnh ở use case bị include
-    // 33 cặp (actor, use case) trong fixture, 6 cặp (đều là actor người) bị luật bỏ cạnh loại
-    expect(puml.match(/^\w+ -- \w+$/gm)).toHaveLength(27)
+    expect(usecasePuml(FIXTURE)).toContain("UC12 -- A07") // actor system giữ cạnh ở use case bị include
+  })
+
+  it("usecase: mỗi hình tối đa một actor người có cạnh; use case chung xuất hiện ở hình của từng actor", () => {
+    for (const puml of usecaseParts(FIXTURE)) {
+      expect(new Set([...puml.matchAll(/^(A\d+) -- UC/gm)].map((m) => m[1])).size, puml).toBeLessThanOrEqual(1)
+    }
+    // Log In (UC02) có Founder, Business Analyst, Administrator, Guest ⇒ có mặt ở 4 hình, mỗi hình một cạnh
+    const withLogIn = usecaseParts(FIXTURE).filter((p) => p.includes('as UC02'))
+    expect(withLogIn).toHaveLength(4)
+    expect(withLogIn.map((p) => p.match(/^(A\d+) -- UC02$/m)?.[1])).toEqual(["A01", "A02", "A03", "A04"])
   })
 
   it("usecase: actor người viết `A -- UC` (trái), actor system/time viết `UC -- A` (phải)", () => {
@@ -263,13 +274,14 @@ describe("renderers trên fixture 19 màn", () => {
     const declared = usecaseParts(FIXTURE).flatMap(declaredActors)
     for (const id of participating) expect(declared, id).toContain(id)
 
-    // A03 (người) chỉ còn tham gia UC20, UC21 và cả hai đều bị UC05 include ⇒ vẫn còn đúng một cạnh
+    // A03 (người) chỉ còn tham gia UC20, UC21, cả hai bị UC05 (của Founder) include. UC05 không nằm trong
+    // hình của A03 ⇒ A03 nối thẳng cả hai, không use case nào lơ lửng
     const spine = mutate((s) => {
       const uc02 = s.use_cases.find((u) => u.id === "UC02")!
       uc02.actor_ids = uc02.actor_ids.filter((a) => a !== "A03")
       s.use_cases.find((u) => u.id === "UC05")!.includes = ["UC20", "UC21"]
     })
-    expect(usecasePuml(spine).match(/^A03 -- \w+$/gm)).toEqual(["A03 -- UC20"])
+    expect(usecasePuml(spine).match(/^A03 -- \w+$/gm)).toEqual(["A03 -- UC20", "A03 -- UC21"])
   })
 
   it("usecase: actor system chỉ tham gia use case mở rộng/bị include vẫn giữ mọi cạnh", () => {

@@ -29,12 +29,12 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 19 luật vàng; 3 luật không waive được", () => {
+  it("13 luật đỏ + 20 luật vàng; 3 luật không waive được", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
-    // FLF-225: orphan_entity, unresolved_many_to_many (ERD)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(19)
+    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(20)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(["array_empty", "dead_reference", "render_error"])
   })
 })
@@ -402,6 +402,26 @@ describe("runDeterministicCheck", () => {
 
     const actorFlags = byRule(runDeterministicCheck(variant((s) => (s.actors[0].name = "User"))), "actor_name_shape")
     expect(actorFlags).toMatchObject([{ target_id: FIXTURE.actors[0].id, level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+  })
+
+  it("generalization: actor cha tên User được miễn A2, actor con thừa kế use case, parent_id sai ⇒ cờ vàng", () => {
+    const general = variant((s) => {
+      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Any signed-in person." })
+      s.actors.find((a) => a.id === "A02")!.parent_id = "A10"
+      s.actors.find((a) => a.id === "A03")!.parent_id = "A10"
+      // A03 không còn use case riêng nào — vẫn không mồ côi vì thừa kế từ User
+      s.use_cases = s.use_cases.filter((u) => !["UC20", "UC21"].includes(u.id))
+      for (const u of s.use_cases) u.actor_ids = u.actor_ids.filter((a) => a !== "A03")
+      s.use_cases.find((u) => u.id === "UC02")!.actor_ids.push("A10")
+    })
+    const flags = runDeterministicCheck(general)
+    expect(byRule(flags, "actor_name_shape").filter((f) => f.target_id === "A10")).toEqual([])
+    expect(byRule(flags, "orphan_actor").map((f) => f.target_id)).not.toContain("A03")
+    expect(byRule(flags, "actor_generalization_invalid")).toEqual([])
+
+    const wrong = runDeterministicCheck(variant((s) => (s.actors.find((a) => a.id === "A01")!.parent_id = "A05")))
+    expect(byRule(wrong, "actor_generalization_invalid")).toMatchObject([{ target_id: "A01", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+    expect(byRule(runDeterministicCheck(variant((s) => (s.actors[0].parent_id = "A99"))), "dead_reference")).toHaveLength(1)
   })
 
   it("U1 xét CHỮ CÁI đầu tiên, U3 bỏ dấu câu quanh từ đầu", () => {
