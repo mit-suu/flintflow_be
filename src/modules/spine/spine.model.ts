@@ -383,6 +383,21 @@ const baselineEntrySchema = new Schema(
   opts
 )
 
+/** Lượt nộp baseline chờ Lead quyết / vừa bị từ chối (FLF-275). Một object hoặc `null`. */
+const baselineSubmissionSchema = new Schema(
+  {
+    status: { type: String, enum: ["pending", "rejected"], required: true },
+    submitted_by: { type: String, required: true },
+    submitted_at: { type: Date, required: true },
+    spine_version: { type: Number, required: true, min: 1 },
+    decided_by: { type: String, default: null },
+    decided_at: { type: Date, default: null },
+    reason: { type: String, default: null },
+    rejection_comment_ids: { type: [String], default: [] }
+  },
+  opts
+)
+
 const spineSchema = new Schema(
   {
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
@@ -414,6 +429,7 @@ const spineSchema = new Schema(
     flags: { type: [flagSchema], default: [] },
     sections: { type: [sectionStateSchema], default: [] },
     baselines: { type: [baselineEntrySchema], default: [] },
+    baseline_submission: { type: baselineSubmissionSchema, default: null },
 
     spine_version: { type: Number, default: 1, min: 1 }
   },

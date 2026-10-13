@@ -371,7 +371,7 @@ export type BaselineType = "generated" | "imported" | "release"
 
 export interface Baseline {
   id: string
-  /** Mode 2: `v1.0` hoặc `v1.0-conditional` khi `waived_count > 0`. Mode 1: `0.0`, `1.0`, `2.0`… */
+  /** Mode 2: `v1.0`, `v1.1`… Mode 1: `0.0`, `1.0`, `2.0`… */
   version: string
   type: BaselineType
   /** Mode 1: version tài liệu (`DocVersion.version`) mà baseline chụp; mode 2 luôn `null`. */
@@ -381,6 +381,26 @@ export interface Baseline {
   snapshot_ref: string
   checked_at_version: number
   waived_count: number
+}
+
+export type BaselineSubmissionStatus = "pending" | "rejected"
+
+/**
+ * Lượt nộp baseline đang chờ Lead quyết, hoặc lượt vừa bị Lead từ chối. `null` = chưa ai nộp —
+ * Lead tự duyệt đi thẳng từ trạng thái này. Lịch sử nộp/từ chối suy được từ `changes[]`, không lưu thêm.
+ */
+export interface BaselineSubmission {
+  status: BaselineSubmissionStatus
+  submitted_by: string
+  submitted_at: IsoDateTime
+  /** `spine_version` lúc nộp — Lead biết tài liệu có đổi sau khi nộp hay không. */
+  spine_version: number
+  decided_by: string | null
+  decided_at: IsoDateTime | null
+  /** Lý do từ chối; `null` khi đang chờ duyệt. */
+  reason: string | null
+  /** `CM-nnn` Lead ghim kèm lần từ chối — phải kết luận hết mới nộp lại được. */
+  rejection_comment_ids: string[]
 }
 
 // ─── Spine document ──────────────────────────────────────────────
@@ -423,6 +443,8 @@ export interface Spine {
   flags: Flag[]
   sections: SectionState[]
   baselines: Baseline[]
+  /** Lượt nộp baseline đang chờ Lead quyết hoặc vừa bị từ chối. Spine cũ không có ⇒ `null`. */
+  baseline_submission: BaselineSubmission | null
 
   /** Tăng đơn điệu, đúng một lần mỗi transaction. Bắt đầu từ 1. */
   spine_version: number

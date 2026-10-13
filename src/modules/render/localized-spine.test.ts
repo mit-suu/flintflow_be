@@ -76,6 +76,7 @@ const spine = (): Spine => ({
   flags: [],
   sections: [],
   baselines: [],
+  baseline_submission: null,
   spine_version: 3
 })
 

@@ -79,6 +79,7 @@ export const createEmptySpine = (init: SpineInit = {}): Spine => ({
   flags: [],
   sections: [],
   baselines: [],
+  baseline_submission: null,
   spine_version: 1
 })
 
