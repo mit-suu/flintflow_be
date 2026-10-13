@@ -137,11 +137,10 @@ beforeEach(() => {
 })
 
 describe("nextBaselineVersion", () => {
-  it("đánh số theo thứ tự ký, hậu tố -conditional khi có waive", () => {
-    expect(nextBaselineVersion([], 0)).toBe("v1.0")
-    expect(nextBaselineVersion([], 2)).toBe("v1.0-conditional")
-    expect(nextBaselineVersion([{ id: "BL001" } as never], 0)).toBe("v1.1")
-    expect(nextBaselineVersion([{ id: "BL001" } as never, { id: "BL002" } as never], 1)).toBe("v1.2-conditional")
+  it("đánh số theo thứ tự ký, không còn mức -conditional", () => {
+    expect(nextBaselineVersion([])).toBe("v1.0")
+    expect(nextBaselineVersion([{ id: "BL001" } as never])).toBe("v1.1")
+    expect(nextBaselineVersion([{ id: "BL001" } as never, { id: "BL002" } as never])).toBe("v1.2")
   })
 })
 
@@ -177,18 +176,18 @@ describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phầ
     expect(db.baselines, "không để lại snapshot mồ côi").toHaveLength(0)
   })
 
-  it("waive cờ đó rồi ký ⇒ v1.0-conditional, waived_count = 1", async () => {
+  it("waive cờ đỏ rồi ký lại ⇒ vẫn bị chặn, không có baseline (BR-04)", async () => {
     await seed(withUnconfirmedAssumption)
 
-    // Lượt ký đầu bị chặn nhưng đã mở cờ — waive chính cờ vừa mở, rồi ký lại
+    // Lượt ký đầu bị chặn nhưng đã mở cờ — waive chính cờ vừa mở, rồi thử ký lại
     await expect(signOff(PROJECT, USER, { base_version: await version() })).rejects.toBeInstanceOf(BaselineBlockedError)
     const opened = (await repo.get(PROJECT))!.flags.find((f) => f.rule_id === "unconfirmed_assumption" && f.resolved_at === null)!
     await flagsService.waive(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)
 
-    const result = await signOff(PROJECT, USER, { base_version: await version() })
-    expect(result.baseline.version).toBe("v1.0-conditional")
-    expect(result.baseline.waived_count).toBe(1)
-    expect(result.waived.map((f) => f.id)).toEqual([opened.id])
+    const err = await signOff(PROJECT, USER, { base_version: await version() }).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(BaselineBlockedError)
+    expect((err as BaselineBlockedError).flags.map((f) => f.id)).toContain(opened.id)
+    expect((await repo.get(PROJECT))!.baselines).toHaveLength(0)
   })
 
   it("ký lần hai ra v1.1, cả hai snapshot cùng tồn tại", async () => {
