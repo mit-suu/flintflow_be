@@ -18,6 +18,8 @@ export interface IProjectDocument extends Document {
   // AI summary fields (Task 2b)
   summary?: string | null
   summaryStatus: "pending" | "success" | "failed"
+  /** Số tài liệu trong project (FLF-292) — phần `D<n>` của mã đoạn `D1-P03`; gán một lần, không đổi khi xoá tài liệu khác. */
+  docCode?: number | null
   createdAt: Date
   updatedAt: Date
 }
@@ -98,6 +100,11 @@ const projectDocumentSchema = new Schema<IProjectDocument>(
       type: String,
       enum: ["pending", "success", "failed"],
       default: "pending"
+    },
+    docCode: {
+      type: Number,
+      default: null,
+      min: 1
     }
   },
   { timestamps: true }

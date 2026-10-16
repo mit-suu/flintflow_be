@@ -38,6 +38,8 @@ import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { AnswerDetached } from "./step-runner.errors.js"
 import { acquireRun, detachRun, finishRun, registerAbort, touchRun, type PendingAnswerState } from "./run-state.service.js"
 import type { AnswerInput } from "./step-runner.service.js"
+import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
+import { ActionType } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -55,6 +57,16 @@ export const isPhaseTerminal = (spine: Spine, step: ExpandedStep): boolean => {
   const unit = phaseUnitOf(step)
   const steps = orderedSteps(spine).filter((s) => phaseUnitOf(s) === unit)
   return steps.length > 0 && steps[steps.length - 1].id === step.id
+}
+
+/**
+ * FLF-292: tài liệu upload cho lượt hỏi gộp đầu giai đoạn — nạp khi có bước nào trong đơn vị đọc `documents` (cùng ngân
+ * sách token với lượt Draft của bước đó). Không bước nào đọc ⇒ `""`.
+ */
+export const unitDocuments = async (projectId: string, spine: Spine, unit: string): Promise<string> => {
+  const step = orderedSteps(spine).find((s) => phaseUnitOf(s) === unit && stepNeedsSourceDocuments(s.id))
+  if (!step) return ""
+  return (await buildDocumentContext(projectId, ActionType.DRAFT, step.id)).contextText
 }
 
 /**
@@ -341,6 +353,8 @@ const askPhaseInterview = async (
           projection: fast ? interviewProjection(spine, unit) : {},
           addendum: addendumForUnit(spine, unit),
           content_guidance: fast ? interviewGuidance(spine, unit) : "",
+          // FLF-292: lượt hỏi gộp thấy tài liệu upload ⇒ chỉ hỏi điều tài liệu chưa có
+          documents: (await unitDocuments(projectId, spine, unit)) || "(none)",
           decisions: ledgerForPrompt(spine),
           // FLF-221: user mở giai đoạn bằng một tin chat — lượt hỏi gộp phải thấy điều user vừa nói. FLF-232: kèm đuôi hội
           // thoại của các bước trước, để sang giai đoạn mới AI nối mạch thay vì chào lại.

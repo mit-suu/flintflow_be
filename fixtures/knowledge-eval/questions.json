@@ -135,7 +135,7 @@
       "language": "vi",
       "question": "Khi phỏng vấn, AI có được hỏi lại điều người dùng đã trả lời rồi không?",
       "answer_points": ["Không hỏi lại điều đã có trong projection, addendum, sổ quyết định hay câu trả lời trước", "Mỗi câu hỏi mang một topic_key", "Chỉ mở lại chủ đề đã chốt khi có conflict"],
-      "gold_chunk_ids": ["elicit-loop#rules/1-5"]
+      "gold_chunk_ids": ["elicit-loop#rules/1-4"]
     },
     {
       "id": "q18",

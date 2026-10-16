@@ -120,11 +120,33 @@ const localizedField = z
   )
   .optional()
 
+/**
+ * FLF-292: một mục `sources` — phần tử Spine `path` được viết từ các đoạn tài liệu `paras` (`D1-P03`). Cạnh `ops`, KHÔNG
+ * trong op (`opSchema` đóng băng), như `localized`.
+ */
+export const sourceEntrySchema = z.object({ path: z.string().min(1), paras: z.array(z.string().min(1)).min(1) })
+
+export type SourceEntry = z.infer<typeof sourceEntrySchema>
+
+/** Như `localized`: tuỳ chọn, mục sai khuôn bị bỏ, không bao giờ làm hỏng lượt ghi Spine. Tra mã đoạn là việc của `captureSources`. */
+const sourcesField = z
+  .unknown()
+  .transform((value): SourceEntry[] | undefined =>
+    Array.isArray(value)
+      ? value.flatMap((entry) => {
+          const parsed = sourceEntrySchema.safeParse(entry)
+          return parsed.success ? [parsed.data] : []
+        })
+      : undefined
+  )
+  .optional()
+
 export const opTransactionSchema = z.object({
   txn: z.string().optional(),
   ops: z.array(opSchema),
   notes: z.string().optional(),
-  localized: localizedField
+  localized: localizedField,
+  sources: sourcesField
 })
 
 /**

@@ -208,3 +208,19 @@ describe("parseResponse — localized cạnh ops (FLF-265 D16)", () => {
     expect(out.ops[0]).not.toHaveProperty("localized")
   })
 })
+
+describe("parseResponse — sources cạnh ops (FLF-292)", () => {
+  const op = { op: "set", path: "nfrs[id=N03].threshold", value: "3 s" }
+  const sources = [{ path: "nfrs[id=N03]", paras: ["D1-P07"] }]
+
+  it("opTransaction nhận sources tuỳ chọn; thiếu vẫn qua và không có key", () => {
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], sources }), ActionType.DRAFT).sources).toEqual(sources)
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op] }), ActionType.DRAFT)).not.toHaveProperty("sources")
+  })
+
+  it("mục sai khuôn bị bỏ, không phải mảng ⇒ coi như không có — không bao giờ làm hỏng lượt ghi", () => {
+    const messy = { ops: [op], sources: [{ path: "nfrs[id=N03]", paras: [] }, { paras: ["D1-P01"] }, { path: "x", paras: "D1-P01" }, null, ...sources] }
+    expect(parseResponse<OpTransaction>(JSON.stringify(messy), ActionType.DRAFT).sources).toEqual(sources)
+    expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], sources: "D1-P07" }), ActionType.REVISION).sources).toBeUndefined()
+  })
+})

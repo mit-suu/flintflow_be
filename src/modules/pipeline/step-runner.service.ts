@@ -50,6 +50,7 @@ import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
 import { documentLanguageForTurn, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
+import { captureSources } from "../project/requirement-source.service.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
@@ -675,6 +676,8 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           projection: input.projection,
           addendum: addendumForUnit(input.spine, input.unit),
           content_guidance: "",
+          // FLF-292: lượt chat khi còn câu chờ chỉ ghép câu trả lời — tài liệu đã được đọc ở lượt hỏi trước
+          documents: "(none)",
           decisions: ledgerForPrompt(input.spine),
           ...conversation,
           user_message: input.message
@@ -1022,6 +1025,8 @@ export const runDraftPhase = async (
     const applied = await applyTransaction(projectId, draftResult.txn)
     // Spine đã ghi ⇒ lưu bản ngôn ngữ tài liệu model trả kèm (lỗi chỉ log, không làm hỏng lượt ghi)
     await captureForTurn(projectId, documentLanguage, draftResult.txn.ops, draftResult.localized)
+    // FLF-292: nguồn tài liệu của phần tử vừa viết — kiểm trên Spine sau lô; lỗi chỉ log
+    await captureSources(projectId, stepId, stripRecord(applied.spine), draftResult.sources)
     const summary = summarizeChanges(applied.changes, stripRecord(applied.spine))
     emit({
       type: "ops_applied",
@@ -1667,6 +1672,8 @@ export const runStep = async (
                 addendum: ctx.addendum,
                 // BUG-10: guidance của content skill từng bị bỏ trống ⇒ B-0.1 không hỏi tên hệ thống
                 content_guidance: elicitGuidance(ctx),
+                // FLF-292: tài liệu user upload (có mã đoạn) — vòng hỏi không hỏi lại điều tài liệu đã ghi
+                documents: ctx.documents || "(none)",
                 // R4: sổ quyết định — "đã chốt gì, ở bước nào"
                 decisions: ledgerForPrompt(spine),
                 ...conversation,
