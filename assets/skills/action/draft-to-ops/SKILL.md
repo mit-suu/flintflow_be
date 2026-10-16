@@ -1,7 +1,7 @@
 ---
 skill_id: draft-to-ops
 kind: action
-version: 1.2.0
+version: 1.3.0
 description: Turn the user's answers into ONE Spine op transaction — validated by schema, invariants checked at end of batch
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -86,6 +86,16 @@ You convert the conversation for one step into **a single transaction of operati
     **two that matter** and stop — never a list of "Tôi tạm hiểu là …" sentences, and **never count the rest** ("Còn 3
     điều…"): the gate adds that line itself from the real number, so your own count would contradict it. On a `revision`,
     confirm in words what changed. Empty `ops` ⇒ say why.
+{{#if has_documents}}
+16. **Sources.** The content guidance ends with the customer's uploaded documents, one paragraph per line, each starting
+    with its code (`[D1-P03]`). For every element you add or change **from what a document says**, add an entry to
+    `sources` next to `ops`: `{ "path": "<element>", "paras": ["D1-P03"] }`. `path` is the element itself —
+    `use_cases[id=UC04]`, `functions[id=FN12]`, `nfrs[id=N03]`, `business_rules[id=BR2]`, `actors[id=A02]`,
+    `addendum[id=AD5]`, `project.vision` — and `paras` the 1–3 codes whose words it rests on. Cite only codes that appear
+    in the documents, and only for what that paragraph actually says. An element taken from the user's answers, the
+    decisions ledger or your own default gets **no** entry (a default still gets its `assumptions[]` entry). Codes never
+    appear inside `value`, `reason` or `notes`: the user reads names of documents, not codes.
+{{/if}}
 
 ## Voice
 
@@ -134,3 +144,6 @@ Revision that changes an assumption (user: "bệnh nhân dùng app điện tho�
 ```
 
 An empty `ops` array is valid only when the Spine already satisfies the step; say so in `notes`.
+{{#if has_documents}}
+With uploaded documents, `sources` sits beside `ops` (rule 16): `{ "ops": [ … ], "sources": [{ "path": "nfrs[id=N03]", "paras": ["D1-P07"] }], "notes": "…" }`.
+{{/if}}

@@ -147,6 +147,32 @@ router.post("/", authMiddleware, validateRequest(CreateProjectSchema), projectCo
  *         description: Chưa xác thực
  */
 router.get("/:projectId/documents", authMiddleware, projectDocumentController.getDocuments)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/sources:
+ *   get:
+ *     summary: Nguồn tài liệu của từng yêu cầu (FLF-292) — phần tử Spine nào được viết từ đoạn nào của tài liệu upload
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: >
+ *           `{ sources: [{ path, step_id, updated_at, refs: [{ para_id, document_id, document_name, quote }] }] }` —
+ *           `path` như `functions[id=FN12]`; `para_id` như `D1-P03`; tài liệu đã xoá ⇒ `document_name: null`, `quote` vẫn còn
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: Không tìm thấy dự án
+ */
+router.get("/:projectId/sources", authMiddleware, projectDocumentController.getSources)
 router.post(
   "/:projectId/documents",
   authMiddleware,

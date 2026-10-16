@@ -6,6 +6,7 @@ import { destroyDocumentAsset } from "./project-document.storage.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { parseFileContent } from "../../shared/utils/file-text.js"
+import { assignDocCodes } from "./document-code.service.js"
 
 export const uploadProjectDocument = async (
   orgId: string,
@@ -54,6 +55,8 @@ export const uploadProjectDocument = async (
     parseStatus: "pending",
     summaryStatus: "pending"
   })
+  // FLF-292: số tài liệu cho mã đoạn `D<n>-P<m>` — gán ngay để lượt chat kế tiếp đã có mã ổn định
+  await assignDocCodes(project._id)
 
   // Step 3: Parse nội dung text (chạy đồng bộ trong request, có try-catch riêng)
   // Lỗi parse KHÔNG làm fail toàn bộ request — document vẫn được trả về dù parse thất bại.

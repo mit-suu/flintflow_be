@@ -10,6 +10,8 @@ import { ActionType } from "./ai-action.types.js"
 import { ProjectDocument } from "../../modules/project/project-document.model.js"
 import { DOCUMENTS_READ, getStep } from "../../modules/pipeline/step-registry.js"
 import { ApiError } from "../utils/api-error.js"
+import { assignDocCodes } from "../../modules/project/document-code.service.js"
+import { formatCodedParagraphs } from "./document-paragraphs.js"
 
 // ─── Action-level: các action ngoài pipeline ────────────────────────────────
 
@@ -122,10 +124,15 @@ export const buildDocumentContext = async (
 
   // ─── Lấy documents đã parse thành công ────────────────────────────────────
 
+  // FLF-292: tài liệu cũ chưa có số ⇒ gán bù trước khi đọc, để mã đoạn trong prompt ổn định qua các lượt
+  await assignDocCodes(projectId)
   const documents = await ProjectDocument.find({
     projectId,
     parseStatus: "success"
-  }).select("_id originalName extractedText summary summaryStatus tokenCount").lean()
+  })
+    .select("_id originalName extractedText summary summaryStatus tokenCount docCode")
+    .sort({ docCode: 1, createdAt: 1 })
+    .lean()
 
   if (documents.length === 0) return empty
 
@@ -160,8 +167,8 @@ export const buildDocumentContext = async (
     let content: string | null = null
 
     if (!useSummary) {
-      // Dùng full text nếu trong ngưỡng
-      content = doc.extractedText || null
+      // Dùng full text nếu trong ngưỡng — FLF-292: mỗi đoạn mang mã `D<n>-P<m>` để model trích làm nguồn
+      content = doc.extractedText ? (doc.docCode ? formatCodedParagraphs(doc.docCode, doc.extractedText) : doc.extractedText) : null
     } else {
       // Dùng summary nếu vượt ngưỡng
       usedSummary = true
@@ -178,7 +185,8 @@ export const buildDocumentContext = async (
 
     if (!content) continue
 
-    const snippet = `[Nguồn: ${docName} | documentId: ${docId}]\n${content}`
+    const codeLabel = doc.docCode && !useSummary ? ` | mã tài liệu: D${doc.docCode}` : ""
+    const snippet = `[Nguồn: ${docName} | documentId: ${docId}${codeLabel}]\n${content}`
     const snippetTokens = Math.ceil(snippet.length / 4)
 
     // Dừng nếu thêm document này sẽ vượt budget

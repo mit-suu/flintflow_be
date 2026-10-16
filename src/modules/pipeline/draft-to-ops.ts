@@ -17,7 +17,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
-import type { LocalizedEntry, OpTransaction } from "../../shared/ai/response-parser.js"
+import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { documentLanguageInput, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import type { StepContext } from "./context-projection.js"
@@ -70,6 +70,8 @@ export interface DraftResult {
    * `txn` (`captureForTurn`); thiếu / rỗng ⇒ không có gì để lưu.
    */
   localized?: LocalizedEntry[]
+  /** FLF-292: nguồn tài liệu model khai cho phần tử nó viết. Người gọi lưu SAU khi áp `txn` (`captureSources`). */
+  sources?: SourceEntry[]
 }
 
 export interface DraftOptions {
@@ -185,6 +187,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       answers: options.answers ?? (ctx.transcriptTail || "(none)"),
       revision_request: options.revisionRequest ?? "(none)",
       content_guidance: ctx.documents ? `${guidance}\n\n${ctx.documents}` : guidance,
+      // FLF-292: có tài liệu upload ⇒ skill bật luật khai `sources` (khối `{{#if has_documents}}`)
+      has_documents: ctx.documents ? true : false,
       validation_errors: errors.length > 0 ? errors : "(none)",
       previous_ops: previousOps ?? "(none)"
     }
@@ -192,6 +196,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let ops: unknown[] = []
     let notes: string | null = null
     let localized: LocalizedEntry[] | undefined
+    let sources: SourceEntry[] | undefined
     try {
       const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId)
       usage.push({
@@ -204,6 +209,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
       })
       notes = result.data.notes ?? null
       localized = result.data.localized?.length ? result.data.localized : undefined
+      sources = result.data.sources?.length ? result.data.sources : undefined
       // BUG-03/BUG-29: field chỉ user/code quyết được chuẩn hoá trước khi kiểm; lô ghi là lô ĐÃ chuẩn hoá
       const sanitized = sanitizeModelOps(spine, result.data.ops, stepId, new Date(), { revision: callKind === "revision", userDecided: options.userDecided === true, ...(statusIds ? { statusAssumptionIds: statusIds } : {}) })
       // Gắn lại liên kết đã có (S-4.1 không thấy function_ids) là vô hại — bỏ trước khi kiểm, không để chết cả lô.
@@ -230,7 +236,7 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
           by: options.userId,
           step_id: stepId
         }
-        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}) }
+        return { txn, attempts, usage, notes, contextTokens: ctx.contextTokens, ...(localized ? { localized } : {}), ...(sources ? { sources } : {}) }
       }
     } catch (err) {
       if (!(err instanceof AiActionError) || !SCHEMA_ERROR_CODES.has(err.code)) throw err
