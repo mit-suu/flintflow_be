@@ -17,7 +17,6 @@
  *   --project ID       dùng lại project có sẵn thay vì tạo mới (chạy tiếp lượt dở)
  *   --until STEP       dừng sau khi accept step này (mặc định chạy tới hết)
  *   --max-steps N      trần số step (mặc định 200) — chặn vòng lặp vô hạn
- *   --waive-blocking   waive cờ đỏ chặn baseline rồi ký `-conditional` (mặc định: dừng và báo cáo)
  *   --no-brief         không gửi Brief MediQueue — project đã có brief trong Spine (vd. nạp sẵn bởi eval-usecase-s3)
  *   --out FILE         file báo cáo markdown (mặc định test/e2e-ai/results/full-pipeline-<ISO>.md)
  *
@@ -66,7 +65,6 @@ interface Args {
   projectId: string | null
   until: string | null
   maxSteps: number
-  waiveBlocking: boolean
   noBrief: boolean
   out: string
 }
@@ -82,7 +80,6 @@ const parseArgs = (): Args => {
     projectId: null,
     until: null,
     maxSteps: 200,
-    waiveBlocking: false,
     noBrief: false,
     out: path.join(REPO_ROOT, "test/e2e-ai/results", `full-pipeline-${stamp}.md`)
   }
@@ -112,9 +109,6 @@ const parseArgs = (): Args => {
         break
       case "--no-brief":
         args.noBrief = true
-        break
-      case "--waive-blocking":
-        args.waiveBlocking = true
         break
       case "--out":
         args.out = path.resolve(next())
@@ -513,7 +507,7 @@ const main = async (): Promise<void> => {
   let assembled = ""
   let docx = ""
   let baselineLine = ""
-  const waived: string[] = []
+  const blockingRules: string[] = []
 
   if (current === "S-9.5") {
     try {
@@ -547,27 +541,15 @@ const main = async (): Promise<void> => {
       const signed = await signBaseline()
       baselineLine = `${signed.data.version} (waived ${signed.data.waived_count})`
     } catch (err) {
-      if (err instanceof ApiFail && err.code === "BASELINE_BLOCKED" && ARGS.waiveBlocking) {
+      if (err instanceof ApiFail && err.code === "BASELINE_BLOCKED") {
+        // Cờ đỏ không waive được: "giữ nguyên kèm lý do" ghi lại lý do nhưng vẫn chặn, nên lượt chạy
+        // chỉ liệt kê cờ còn chặn thay vì thử gỡ.
         const flags = await call<Array<{ id: string; rule_id: string; level: string; open: boolean }>>(
           "GET",
           `/projects/${projectId}/flags?level=red&open=true`
         )
-        for (const flag of flags.data) {
-          try {
-            await call("POST", `/projects/${projectId}/flags/${flag.id}/waive`, {
-              reason: `Lượt chạy M4 tự động: waive ${flag.rule_id} để ký baseline có điều kiện`
-            })
-            waived.push(flag.rule_id)
-          } catch (waiveErr) {
-            log(`  ! waive ${flag.rule_id} lỗi: ${String(waiveErr)}`)
-          }
-        }
-        try {
-          const signed = await signBaseline()
-          baselineLine = `${signed.data.version} (waived ${signed.data.waived_count})`
-        } catch (retryErr) {
-          baselineLine = `thất bại sau waive: ${String(retryErr)}`
-        }
+        blockingRules.push(...flags.data.map((f) => f.rule_id))
+        baselineLine = `${err.code} — còn cờ đỏ: ${[...new Set(blockingRules)].join(", ") || "không đọc được danh sách"}`
       } else {
         baselineLine = err instanceof ApiFail ? `${err.code} — ${err.message}` : String(err)
       }
@@ -599,7 +581,7 @@ const main = async (): Promise<void> => {
 ${assembled ? `- Assemble: ${assembled}` : ""}
 ${docx ? `- Word: ${docx}` : ""}
 ${baselineLine ? `- Baseline: ${baselineLine}` : ""}
-${waived.length ? `- Cờ đã waive: ${waived.join(", ")}` : ""}
+${blockingRules.length ? `- Cờ đỏ còn chặn baseline: ${[...new Set(blockingRules)].join(", ")}` : ""}
 
 | Step | Lượt gọi | Lượt hỏi | Gate | Credit | Giây | Lỗi |
 | --- | ---: | ---: | --- | ---: | ---: | --- |

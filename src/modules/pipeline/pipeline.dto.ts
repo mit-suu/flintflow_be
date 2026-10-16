@@ -14,13 +14,14 @@
 import { z } from "zod"
 import {
   baselineSchema,
+  baselineSubmissionSchema,
   changeSchema,
   flagSchema,
   spineRecordSchema,
   WAIVE_REASON_MIN_LENGTH
 } from "../spine/spine.schema.js"
 import { opSchema, userOpSchema } from "../spine/op.types.js"
-import { COMMENT_ID_PATTERN, COMMENT_STATUSES, COMMENT_TEXT_MAX } from "../comment/comment.model.js"
+import { COMMENT_ID_PATTERN, COMMENT_RESOLUTIONS, COMMENT_STATUSES, COMMENT_TEXT_MAX, KEEP_REASON_MIN_LENGTH } from "../comment/comment.model.js"
 import { ORG_ROLES } from "../organization/membership.model.js"
 
 // ─── mã lỗi ──────────────────────────────────────────────────────
@@ -647,10 +648,26 @@ export const createCommentSchema = z.strictObject({
 /** POST /projects/:id/comments/:commentId/replies (30) */
 export const replyCommentSchema = z.strictObject({ text: commentText })
 
-/** `:commentId` của 30, 31 (POST …/resolve, không body). */
+/** `:commentId` của 30, 31. */
 export const commentParamsSchema = z.object({
   commentId: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.")
 })
+
+/**
+ * POST /projects/:id/comments/:commentId/resolve (31) — hai nhánh kết luận của `business-flow.md §3.5`:
+ * `fixed` (đã sửa qua chat) hoặc `kept` (giữ nguyên, **bắt buộc lý do**). Lý do là thứ Lead đọc khi
+ * duyệt lại, nên không cho để trống hay viết cho có.
+ */
+export const resolveCommentSchema = z
+  .strictObject({
+    kind: z.enum(COMMENT_RESOLUTIONS),
+    reason: z.string().trim().max(COMMENT_TEXT_MAX).nullish()
+  })
+  .refine((v) => v.kind !== "kept" || (v.reason?.length ?? 0) >= KEEP_REASON_MIN_LENGTH, {
+    path: ["reason"],
+    message: `Giữ nguyên thì phải nêu lý do (ít nhất ${KEEP_REASON_MIN_LENGTH} ký tự).`
+  })
+  .transform((v) => ({ kind: v.kind, reason: v.kind === "kept" ? (v.reason as string) : null }))
 
 const commentPersonSchema = z.object({ _id: z.string().min(1), name: z.string().nullable(), email: z.string().nullable() })
 const orgRole = z.enum(ORG_ROLES)
@@ -669,6 +686,7 @@ export const commentSchema = z.object({
   author_role: orgRole,
   text: z.string().min(1).max(COMMENT_TEXT_MAX),
   status: z.enum(COMMENT_STATUSES),
+  resolution: z.object({ kind: z.enum(COMMENT_RESOLUTIONS), reason: z.string().nullable() }).nullable().default(null),
   cr_id: z.string().nullable(),
   handled_by: commentPersonSchema.nullable(),
   handled_at: isoDateTime.nullable(),
@@ -679,7 +697,23 @@ export const commentsResponseSchema = z.array(commentSchema)
 
 export type CreateCommentDTO = z.infer<typeof createCommentSchema>
 
-/** POST /projects/:id/baseline (T19) — 422 BASELINE_BLOCKED nếu còn cờ đỏ chưa waive. */
+/** POST /projects/:id/baseline (T19) — Lead duyệt; 422 BASELINE_BLOCKED nếu còn cờ đỏ. */
 export const baselineRequestSchema = z.strictObject({ base_version: baseVersion })
 export const baselineResponseSchema = baselineSchema
 export const baselinesResponseSchema = z.array(baselineSchema)
+
+/** POST /projects/:id/baseline/submit (32) — Analyst gửi Lead duyệt (UC-45). */
+export const baselineSubmitRequestSchema = z.strictObject({ base_version: baseVersion })
+
+/**
+ * POST /projects/:id/baseline/reject (33) — Lead từ chối kèm lý do và comment đã ghim (UC-46).
+ * `business-flow.md §3.5`: "bắt buộc lý do **+ comment ghim**" — từ chối bằng mỗi câu lý do thì Analyst
+ * không biết sửa chỗ nào và không step nào được mở lại, nên `comment_ids` phải có ít nhất một mã.
+ */
+export const baselineRejectRequestSchema = z.strictObject({
+  base_version: baseVersion,
+  reason: z.string().trim().min(1).max(2000),
+  comment_ids: z.array(z.string().trim().regex(COMMENT_ID_PATTERN)).min(1).max(100)
+})
+
+export const baselineSubmissionResponseSchema = baselineSubmissionSchema

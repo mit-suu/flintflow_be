@@ -8,6 +8,25 @@ import { ORG_ROLES, type OrgRole } from "../organization/membership.model.js"
 export const COMMENT_STATUSES = ["open", "resolved", "converted"] as const
 export type CommentStatus = (typeof COMMENT_STATUSES)[number]
 
+/**
+ * Hai nhánh kết luận một comment theo `business-flow.md §3.5` — *"chat yêu cầu AI sửa / giữ nguyên + lý do"*,
+ * cùng lối với C-4 (*"mỗi chỗ phải có kết luận: sửa / chỉ comment / không liên quan + lý do"*).
+ *
+ * Tách hai nhánh vì Lead duyệt lại cần biết **vì sao** comment được đóng: một danh sách tick xanh không
+ * nói được Analyst đã sửa thật hay chỉ bấm cho xong.
+ */
+export const COMMENT_RESOLUTIONS = ["fixed", "kept"] as const
+export type CommentResolutionKind = (typeof COMMENT_RESOLUTIONS)[number]
+
+/** Lý do bắt buộc khi giữ nguyên — đủ dài để là một câu giải thích, không phải "ok". */
+export const KEEP_REASON_MIN_LENGTH = 10
+
+export interface CommentResolution {
+  kind: CommentResolutionKind
+  /** Bắt buộc với `kept`; `null` với `fixed` (nội dung đã đổi, bản thân thay đổi là lời giải thích). */
+  reason: string | null
+}
+
 export const COMMENT_TEXT_MAX = 2000
 /** Đoạn trích nội dung đã ghim — đủ để người đọc nhận ra chỗ ghim khi nội dung ở bản sau đã khác. */
 export const COMMENT_EXCERPT_MAX = 160
@@ -54,6 +73,8 @@ export interface IComment extends Document {
   cr_id: string | null
   handled_by: mongoose.Types.ObjectId | null
   handled_at: Date | null
+  /** Kết luận của lượt resolve (§3.5); `null` khi chưa xử lý hoặc đã chuyển thành CR. */
+  resolution: CommentResolution | null
   replies: CommentReply[]
   createdAt: Date
   updatedAt: Date
@@ -92,6 +113,13 @@ const commentSchema = new Schema<IComment>(
     cr_id: { type: String, default: null },
     handled_by: { type: Schema.Types.ObjectId, ref: "User", default: null },
     handled_at: { type: Date, default: null },
+    resolution: {
+      type: new Schema<CommentResolution>(
+        { kind: { type: String, enum: COMMENT_RESOLUTIONS, required: true }, reason: { type: String, default: null } },
+        { _id: false }
+      ),
+      default: null
+    },
     replies: { type: [replySchema], default: [] }
   },
   { timestamps: true }

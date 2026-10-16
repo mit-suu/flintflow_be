@@ -1,9 +1,12 @@
 import mongoose from "mongoose"
-import { Comment, CommentCounter, formatCommentId, type CommentStatus, type IComment } from "./comment.model.js"
+import { Comment, CommentCounter, formatCommentId, type CommentResolution, type CommentStatus, type IComment } from "./comment.model.js"
 import { resolveAnchor } from "./comment.anchor.js"
 import type { CreateCommentDTO } from "../pipeline/pipeline.dto.js"
 import { getDocument, NoWorkingDraftError } from "../render/assemble.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { applyTransaction } from "../spine/op-engine.js"
+import { stepsOf } from "../spine/section-registry.js"
+import type { Op } from "../spine/op.types.js"
 import { Membership, type OrgRole } from "../organization/membership.model.js"
 import { User } from "../user/user.model.js"
 import { notify } from "../notification/notification.service.js"
@@ -42,6 +45,8 @@ export interface CommentDto {
   cr_id: string | null
   handled_by: CommentPerson | null
   handled_at: string | null
+  /** Kết luận lượt xử lý (§3.5): `fixed` đã sửa qua chat, `kept` giữ nguyên kèm lý do. */
+  resolution: CommentResolution | null
   replies: CommentReplyDto[]
   created_at: string
 }
@@ -103,6 +108,7 @@ const toDto = (c: IComment, people: Map<string, CommentPerson>): CommentDto => (
   cr_id: c.cr_id ?? null,
   handled_by: toPerson(c.handled_by ?? null, people),
   handled_at: c.handled_at ? c.handled_at.toISOString() : null,
+  resolution: c.resolution ?? null,
   replies: c.replies.map((r) => ({
     author: toPerson(r.author_id, people) as CommentPerson,
     author_role: r.author_role,
@@ -225,14 +231,56 @@ const notOpen = (comment: IComment): ApiError =>
     "COMMENT_NOT_OPEN"
   )
 
-/** "Resolve": Analyst/Lead đánh dấu đã xử lý mà không đổi gì (role kiểm ở route); báo tác giả comment. */
-export const resolveComment = async (actor: CommentActor, commentId: string): Promise<CommentDto> => {
+/**
+ * Mở lại step sở hữu section được ghim (UC-41, UC-47): đánh dấu một comment đã xử lý trên nội dung đã accepted
+ * nghĩa là nội dung đó phải chạy lại vòng gate. Không đổi nội dung — giữ BR-05.
+ *
+ * Section không có step sở hữu, hoặc step chưa accepted ⇒ không ghi gì. Lệch `base_version` vì có lô
+ * khác chen vào ⇒ đọc lại và thử một lần nữa; vẫn lệch thì ném 409 (comment đã resolved, client tải lại).
+ */
+const reopenOwnerSteps = async (projectId: string, sectionId: string, userId: string): Promise<void> => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const record = await spineRepository.get(projectId)
+    if (!record) return
+    const owners = stepsOf(sectionId, record)
+    const ops: Op[] = owners
+      .filter((stepId) => record.steps.find((s) => s.id === stepId)?.status === "accepted")
+      .map((stepId) => ({ op: "set" as const, path: `steps[id=${stepId}].status`, value: "revision_requested" }))
+    if (ops.length === 0) return
+
+    try {
+      await applyTransaction(projectId, {
+        base_version: record.spine_version,
+        ops,
+        by: userId,
+        step_id: null,
+        reason: "Mở lại bước theo comment đã xử lý"
+      })
+      return
+    } catch (err) {
+      const conflict = err instanceof ApiError && err.code === spineRepository.SPINE_VERSION_CONFLICT
+      if (!conflict || attempt === 1) throw err
+    }
+  }
+}
+
+/**
+ * Kết luận một comment theo `business-flow.md §3.5`: **đã sửa** (nội dung đổi qua chat) hoặc **giữ nguyên
+ * kèm lý do**. Hai nhánh, không phải một cú tick — Lead duyệt lại phải đọc được vì sao comment được đóng.
+ * Role kiểm ở route; báo tác giả comment.
+ */
+export const resolveComment = async (
+  actor: CommentActor,
+  commentId: string,
+  resolution: CommentResolution
+): Promise<CommentDto> => {
   const updated = await Comment.findOneAndUpdate(
     { projectId: actor.projectId, comment_id: commentId, status: "open" },
-    { $set: { status: "resolved", handled_by: actor.userId, handled_at: new Date() } },
+    { $set: { status: "resolved", handled_by: actor.userId, handled_at: new Date(), resolution } },
     { returnDocument: "after" }
   )
   if (!updated) throw notOpen(await requireComment(actor.projectId, commentId))
+  await reopenOwnerSteps(actor.projectId, updated.anchor.section_id, actor.userId)
   if (String(updated.author_id) !== actor.userId) {
     await notify(String(updated.author_id), {
       type: "comment_resolved",

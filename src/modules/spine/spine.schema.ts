@@ -327,6 +327,20 @@ export const baselineSchema = z.strictObject({
   waived_count: nonNegativeInt
 })
 
+export const BASELINE_SUBMISSION_STATUSES = ["pending", "rejected"] as const satisfies readonly T.BaselineSubmissionStatus[]
+
+/** Lượt nộp baseline chờ Lead quyết (UC-45) / vừa bị từ chối (UC-46). Spine trước FLF-275 không có ⇒ `null`. */
+export const baselineSubmissionSchema = z.strictObject({
+  status: z.enum(BASELINE_SUBMISSION_STATUSES),
+  submitted_by: id,
+  submitted_at: isoDateTime,
+  spine_version: z.number().int().min(1),
+  decided_by: id.nullable().default(null),
+  decided_at: isoDateTime.nullable().default(null),
+  reason: z.string().min(1).max(2000).nullable().default(null),
+  rejection_comment_ids: z.array(z.string().min(1)).default([])
+})
+
 // ─── Spine ───────────────────────────────────────────────────────
 
 export const spineSchema = z.strictObject({
@@ -358,6 +372,8 @@ export const spineSchema = z.strictObject({
   flags: z.array(flagSchema),
   sections: z.array(sectionStateSchema),
   baselines: z.array(baselineSchema),
+  /** FLF-275 — Spine trước luồng phê duyệt không có ⇒ `null`. */
+  baseline_submission: baselineSubmissionSchema.nullable().default(null),
 
   spine_version: z.number().int().min(1)
 })

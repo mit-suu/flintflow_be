@@ -32,11 +32,15 @@ export const SIGN_OFF_STEP = "S-9.5"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
-/** Cờ đỏ đang chặn: chưa đóng và chưa được user waive. */
+/**
+ * Cờ đỏ đang chặn: mọi cờ đỏ chưa đóng, **kể cả cờ đã được user waive**. Chọn "giữ nguyên kèm lý do"
+ * ghi lại được lý do nhưng không gỡ chặn — cờ đỏ chỉ hết chặn khi nội dung được sửa thật và lượt quét
+ * lại đóng nó.
+ */
 export const blockingFlags = (spine: Pick<Spine, "flags">): Flag[] =>
-  spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && !f.waived_by_user)
+  spine.flags.filter((f) => f.level === "red" && f.resolved_at === null)
 
-/** Cờ đã waive còn hiệu lực — quyết định baseline có `-conditional` không. */
+/** Cờ đã waive còn hiệu lực — in vào phụ lục bản ký. Cờ đỏ không bao giờ lọt tới đây vì nó chặn từ trước. */
 export const waivedFlags = (spine: Pick<Spine, "flags">): Flag[] =>
   spine.flags.filter((f) => f.waived_by_user && f.resolved_at === null)
 
@@ -50,12 +54,11 @@ export class BaselineBlockedError extends ApiError {
 }
 
 /**
- * `v1.0`, `v1.1`, `v1.2`… theo số baseline đã có. Có waive còn hiệu lực thì thêm `-conditional`
- * (srs-spine.md §7) — đánh số theo thứ tự chứ không theo "sạch/không sạch", nên `(projectId, version)`
- * không bao giờ đụng unique index dù lần trước là conditional.
+ * `v1.0`, `v1.1`, `v1.2`… theo số baseline đã có. Không còn mức `-conditional`: cờ đỏ chặn tuyệt đối
+ * nên mọi baseline ký ra đều sạch cờ đỏ. Project có baseline `-conditional` ký trước đây vẫn đánh số
+ * tiếp theo `existing.length` nên `(projectId, version)` không đụng unique index.
  */
-export const nextBaselineVersion = (existing: readonly BaselineEntry[], waivedCount: number): string =>
-  `v1.${existing.length}${waivedCount > 0 ? "-conditional" : ""}`
+export const nextBaselineVersion = (existing: readonly BaselineEntry[]): string => `v1.${existing.length}`
 
 export const nextBaselineId = (existing: readonly BaselineEntry[]): string => {
   const max = existing.reduce((acc, b) => {
@@ -130,29 +133,25 @@ export interface SignOffOptions {
   base_version: number
 }
 
-export interface SignOffResult {
-  baseline: BaselineEntry
-  spine_version: number
-  /** Cờ vàng/đỏ đã waive được in vào phụ lục bản ký. */
-  waived: Flag[]
-}
-
 /**
- * Ký baseline. Ném `BaselineBlockedError` (422) khi còn cờ đỏ chưa waive, `409` khi `spine_version`
- * đổi giữa lúc quét và lúc ghi.
+ * Quét lại tất định ở mức ký rồi đọc lại Spine — bước mở đầu bắt buộc của cả lượt nộp (UC-45) lẫn
+ * lượt duyệt (UC-46), vì điều kiện của hai việc là một: cờ đỏ phải bằng 0 trên chính version được xét.
+ * Ném 409 khi Spine đổi giữa lúc quét và lúc đọc lại, 404 khi không có Spine.
  */
-export const signOff = async (projectId: string, userId: string, options: SignOffOptions): Promise<SignOffResult> => {
+export const recheckAtBaseline = async (
+  projectId: string,
+  userId: string,
+  baseVersion: number
+): Promise<{ spine: Spine; checkedAtVersion: number }> => {
   const before = await repository.get(projectId)
   if (!before) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
-  if (before.spine_version !== options.base_version) {
+  if (before.spine_version !== baseVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
 
-  // 1. Quét lại tất định NGAY TRƯỚC khi ký, có cả luật chỉ chạy ở S-9
   const checked = await flagsService.recompute(projectId, { by: userId, atBaseline: true })
   const checkedAtVersion = checked.checked_at_version
 
-  // 2. Đọc lại Spine sau lượt quét — cờ vừa mở/đóng phải được tính vào
   const record = await repository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)
   if (record.spine_version !== checkedAtVersion) {
@@ -162,13 +161,29 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
       repository.SPINE_VERSION_CONFLICT
     )
   }
+  return { spine: stripRecord(record), checkedAtVersion }
+}
 
-  const spine = stripRecord(record)
+export interface SignOffResult {
+  baseline: BaselineEntry
+  spine_version: number
+  /** Cờ vàng/đỏ đã waive được in vào phụ lục bản ký. */
+  waived: Flag[]
+}
+
+/**
+ * Duyệt và ký baseline (UC-46). Chỉ Lead gọi tới đây — route gắn `requireRole("lead")`. Dùng cho cả
+ * hai đường: duyệt bản Analyst đã nộp, và Lead tự duyệt việc của chính mình khi chưa ai nộp.
+ * Ném `BaselineBlockedError` (422) khi còn cờ đỏ, `409` khi `spine_version` đổi giữa lúc quét và lúc ghi.
+ */
+export const signOff = async (projectId: string, userId: string, options: SignOffOptions): Promise<SignOffResult> => {
+  const { spine, checkedAtVersion } = await recheckAtBaseline(projectId, userId, options.base_version)
+
   const blocking = blockingFlags(spine)
   if (blocking.length > 0) throw new BaselineBlockedError(blocking)
 
   const waived = waivedFlags(spine)
-  const version = nextBaselineVersion(spine.baselines, waived.length)
+  const version = nextBaselineVersion(spine.baselines)
   const at = new Date()
 
   // Ghi vào Spine + đánh dấu step S-9.5 accepted trong CÙNG một transaction
@@ -187,6 +202,10 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
     )
   }
 
+  // Bản nộp đã được quyết — xoá trong cùng lô để không còn trạng thái "chờ duyệt" treo sau khi ký.
+  const submission = spine.baseline_submission
+  if (submission) stepOps.push({ op: "set", path: "baseline_submission", value: null, reason: "Lead đã duyệt baseline" })
+
   const { baseline: entry, spine_version } = await snapshotBaseline(projectId, spine, {
     base_version: checkedAtVersion,
     version,
@@ -204,10 +223,21 @@ export const signOff = async (projectId: string, userId: string, options: SignOf
     title: `Đã chốt baseline ${version}`,
     body:
       waived.length > 0
-        ? `Tài liệu đã được ký ở mức ${version} với ${waived.length} cờ được bỏ qua có lý do.`
+        ? `Tài liệu đã được ký ở mức ${version} với ${waived.length} cờ vàng được bỏ qua có lý do.`
         : `Tài liệu đã được ký ở mức ${version}, không còn cờ đỏ nào.`,
     meta: { version, baseline_id: entry.id, waived_count: waived.length }
   })
+
+  // Người nộp biết kết quả — bỏ qua khi Lead tự duyệt việc của chính mình.
+  if (submission && submission.submitted_by !== userId) {
+    void notify(submission.submitted_by, {
+      type: "baseline_approved",
+      title: `Baseline ${version} đã được duyệt`,
+      body: `Bản bạn gửi duyệt đã được Lead chấp nhận và khoá ở mức ${version}.`,
+      link: `/projects/${projectId}`,
+      meta: { projectId, version, baseline_id: entry.id }
+    })
+  }
 
   return { baseline: entry, spine_version: applied.spine_version, waived }
 }

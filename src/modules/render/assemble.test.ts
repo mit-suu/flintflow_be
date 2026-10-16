@@ -183,6 +183,7 @@ const baseSpine = (): Spine => ({
   ],
   sections: [],
   baselines: [],
+  baseline_submission: null,
   spine_version: 1
 })
 
