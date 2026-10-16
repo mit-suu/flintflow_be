@@ -37,8 +37,10 @@ import {
   type StepRunnerDeps
 } from "./step-runner.service.js"
 import { gateActionSchema, type ChangeSummary } from "./pipeline.dto.js"
+import { retireFrameOnlyAssumptionOps } from "./screen-assumptions.js"
 import { composeStepGateMessage, gateAssumptionIdsOfRun, type GateAssumptionBrief } from "./gate-message.js"
-import { acquireRun, finishRun, getRunState } from "./run-state.service.js"
+import { acquireRun, finishRun, getRunState, type PatchRun } from "./run-state.service.js"
+import type { RunStatus } from "./run-state.model.js"
 import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -127,7 +129,7 @@ const buildSummary = (spine: Spine, stepId: string, counts: { calls_used: number
 
 /**
  * Trạng thái chi tiết của màn do hai cổng của vòng S-5 quyết (T13 §4.3, T18 Phases §6.2, §9.1):
- * - `S-5.5` accept / accept_as_is ⇒ `signed_off` (màn đã mô tả xong).
+ * - `S-5.5` accept / accept_as_is ⇒ `signed_off` (màn đã mô tả xong), gỡ giả định "chỉ giữ khung" S-4.1 ghi cho màn.
  * - `S-5.1` **accept_as_is** ⇒ `placeholder` — hành động "để lại màn này": bỏ qua S-5.2…S-5.5 của màn
  *   (`step-registry.nextStep` không tính vòng của màn placeholder) nhưng GIỮ nguyên khung `functions[]`
  *   do S-4.1 sinh, nên `screen_pending_at_baseline` không bắn mà nội dung vẫn còn chỗ để quay lại.
@@ -135,10 +137,12 @@ const buildSummary = (spine: Spine, stepId: string, counts: { calls_used: number
  *
  * Vòng `@nonscreen` không có màn nào để đánh dấu.
  */
-const loopScreenStatusOps = (stepId: string, asIs: boolean): Op[] => {
+const loopScreenStatusOps = (spine: Spine, stepId: string, asIs: boolean): Op[] => {
   const step = getStep(stepId)
   if (step.loop === null || step.loop === "nonscreen") return []
-  if (step.template_id === "S-5.5") return [{ op: "set", path: `screens[id=${step.loop}].detail_status`, value: "signed_off" }]
+  if (step.template_id === "S-5.5") {
+    return [{ op: "set", path: `screens[id=${step.loop}].detail_status`, value: "signed_off" }, ...retireFrameOnlyAssumptionOps(spine, step.loop)]
+  }
   if (step.template_id === "S-5.1" && asIs) return [{ op: "set", path: `screens[id=${step.loop}].detail_status`, value: "placeholder" }]
   return []
 }
@@ -201,7 +205,7 @@ const doAccept = async (projectId: string, stepId: string, userId: string, recor
   const ops: Op[] = [
     { op: "set", path: `steps[id=${stepId}].status`, value: "accepted" },
     { op: "set", path: `steps[id=${stepId}].accepted_at`, value: new Date().toISOString() },
-    ...loopScreenStatusOps(stepId, yellowFlagNote !== null)
+    ...loopScreenStatusOps(spine, stepId, yellowFlagNote !== null)
   ]
 
   if (yellowFlagNote !== null) {
@@ -303,10 +307,12 @@ export const gate = async (
 ): Promise<GateResult> => {
   // Phạm vi đổi `status` của lượt revision = đúng những điều tin cổng đã nói (FLF-242). Phải đọc TRƯỚC `acquireRun`:
   // chiếm khoá là ghi lại lượt mới với `gate_payload`/`phase_gate` rỗng, sau đó không còn gì để biết user đã đọc những gì.
-  const spokenIds = input.action === "revision" ? gateAssumptionIdsOfRun(await getRunState(projectId, stepId)) : new Set<string>()
+  const previous = await getRunState(projectId, stepId)
+  const spokenIds = input.action === "revision" ? gateAssumptionIdsOfRun(previous) : new Set<string>()
 
   // Cùng khoá với `/run` (WP-4): gate cũng ghi Spine, không được chạy song song với một lượt draft
   const run = await acquireRun(projectId, stepId, { by: userId, stage: "draft", detail_vi: "Xử lý cổng chốt" })
+  let succeeded = false
   try {
     const d: StepRunnerDeps = { ...defaultStepRunnerDeps(), ...deps }
     // FLF-260: ngôn ngữ trả lời do nơi gọi đọc từ phiên (`deps.replyLanguage`) — gate không tự đoán: ghi chú cổng và chữ của
@@ -447,8 +453,29 @@ export const gate = async (
     const summary = buildSummary(afterSpine, stepId, afterCounts)
     const next = nextStepOf(afterSpine)
 
+    succeeded = true
     return { step: summary, next_step: next?.id ?? null, spine_version: finalVersion, ...(revisionMessage ? { message_vi: revisionMessage } : {}) }
   } finally {
-    await finishRun(projectId, stepId, run.run_id, "done")
+    await finishRun(projectId, stepId, run.run_id, ...(await runEndAfterGate(projectId, stepId, succeeded ? null : previous)))
   }
+}
+
+/**
+ * Cổng chốt thất bại (409 lệch version, 422 còn cờ đỏ khi ký baseline…) mà bước vẫn đang chờ duyệt ⇒ trả lại thẻ cổng của
+ * lượt trước. `acquireRun` đã xoá `gate_payload`; ghi "done" trơn thì sau reload `/run-state/active` không còn gì, resume coi
+ * bước là bỏ dở và đưa về chờ chạy — mất luôn chip "Đúng rồi, đi tiếp" (E2E FAP #2, #3).
+ */
+const runEndAfterGate = async (
+  projectId: string,
+  stepId: string,
+  failedFrom: Awaited<ReturnType<typeof getRunState>>
+): Promise<[RunStatus, PatchRun?]> => {
+  if (!failedFrom || failedFrom.status !== "gate" || !failedFrom.gate_payload) return ["done"]
+  const record = await spineRepository.get(projectId)
+  const status = record?.steps.find((s) => s.id === stepId)?.status
+  if (status !== "in_progress" && status !== "revision_requested") return ["done"]
+  return [
+    "gate",
+    { gate_payload: failedFrom.gate_payload, phase_gate: failedFrom.phase_gate ?? null, stage: failedFrom.stage, detail_vi: failedFrom.detail_vi ?? null }
+  ]
 }

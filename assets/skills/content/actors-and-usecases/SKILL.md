@@ -1,7 +1,7 @@
 ---
 skill_id: actors-and-usecases
 kind: content
-version: 0.9.0
+version: 0.11.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -44,7 +44,7 @@ Naming: **A1** a singular role/party noun phrase, never a person's name or a tea
 ("Dashboard User" ⇒ "Project Owner"). **A4** a `system` actor is the outside role, not the vendor or version ("Stripe API v3" ⇒
 "Payment Gateway"). **A5** a `time` actor is named after what it triggers ("Cron" ⇒ "Nightly Billing Scheduler"). **A6** two names
 sharing every capability are one actor with two `roles[]` rows. **A8** `description` is one sentence tied to this product, saying
-who they are, what they do here and why they care — not a dictionary gloss.
+who they are, what they do here and why they care — not a dictionary gloss. **Generalization.** Read the Brief first: add a general human actor `User` (no role of its own) only when ≥ 2 human actors each sign in to the SAME product as a kind of user **and** at least one goal is done the same way by every one of them (Log In, Reset Password, Update Own Profile, View Dashboard). Then set `parent_id` on each of them (`{"op":"set","path":"actors[id=A02].parent_id","value":"A05"}`; diagram: `Customer --|> User`). Human ↔ human only: never a `system`/`time` actor, an external system, or a party that is not a signed-in user (a Guest with no account, a customer who only receives emails). One human actor, or nothing every role shares ⇒ no `User`, `parent_id` unset.
 
 **Context exchanges (S-3.1/S-3.2/S-3.3 only).** Every actor (including existing S-2.3 actors) needs its data exchanges: `flows_in` (actor → OUR system) and `flows_out` (OUR system → actor), English data noun phrases from Brief/addendum/use-case outcomes, one exchange per item and one arrow per item. Human: "Registration request" in, "Account confirmation" out; system: "Payment result" in, "Payment request" out; time: "Scheduled trigger" in only.
 Every actor needs at least one item, and all actors together must have at least one `flows_in` and one `flows_out` item. A one-way actor is valid: leave its other list empty, never invent a reply; lists need not be equal or paired by index. Maintain lists as use cases are added, preserve confirmed labels, keep at most 3 business-level items per direction (the diagram joins any extra into its third arrow); uncertain details need an `assumptions[]` entry. Do not combine exchanges or use use-case verbs as data labels.
@@ -56,6 +56,7 @@ function_ids: [], description: "<actor, trigger, outcome — one full sentence, 
 extends: []}`.
 
 `actor_ids` = every actor that **participates** in the use case (UML association), primary actor first.
+With a general `User`: a goal **every** specialized role does the same way ⇒ `User` only (they inherit it); a goal only **some** roles do (View Timetable: Lecturer, Student, not Office) ⇒ exactly those roles, never `User`.
 Participation is not initiation: an actor the flow calls out to belongs here too. Do not invent a use case for a
 `system` or `time` actor just to give it something to do — it participates in the use case it is actually part of.
 A **notification actor** (email, SMS, push) sits on the use case whose flow *changes a state and emits the event*
@@ -108,7 +109,7 @@ out.
 never the target of `<<include>>` or `<<extend>>`. Register Account and Reset Password stay standalone goals, never
 included/extended because another use case needs an account.
 
-**What goes wrong otherwise.** A use case that has `extends[]`, or is included, is drawn **without its human actor link**, so a
+**What goes wrong otherwise.** A use case that has `extends[]`, or is included, is drawn **without its human actor link** in the diagram holding its base, so a
 wrong relationship turns a real goal into a subroutine the actor can never start. Wrong: "Place Order includes Log In" (a state,
 (a)); "Reset Password extends Log In" (deliberate, (b)). Right: "Apply Discount Voucher extends Place Order"; "Place Order
 includes Calculate Shipping Fee" (every order).
@@ -139,7 +140,7 @@ extending use case opens with its condition ("When …"); every other one starts
 
 ## Self-check
 
-- [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8.
+- [ ] Every actor has `kind` correct, a product-specific `description`, and a name following A1/A3–A6/A8; `parent_id` only human → general human actor; `User` only on goals every specialized role shares, subsets list their roles.
 - [ ] S-3.1/S-3.2/S-3.3 actors each have ≥1 `flows_in`/`flows_out` data noun phrase, one exchange per item; all actors together have both directions; one-way actors fine, no invented replies.
 - [ ] Every use case name passes U1–U9 (no Manage/Maintain/Handle…, no "and", ≤ 5 words, actor never the subject), `function_ids: []`.
 - [ ] `actor_ids` lists participants, primary first; notification actors only on emitting use cases; each

@@ -83,7 +83,8 @@ const actorSchema = new Schema(
     kind: { type: String, enum: ["human", "system", "time"], required: true },
     description: { type: String, default: "" },
     flows_in: { type: [String], default: undefined },
-    flows_out: { type: [String], default: undefined }
+    flows_out: { type: [String], default: undefined },
+    parent_id: { type: String, default: undefined }
   },
   opts
 )

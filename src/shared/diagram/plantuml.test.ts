@@ -260,3 +260,42 @@ describe("renderPlantUml chỉ nhận phản hồi ảnh (fetch mock)", () => {
     await expect(probePlantUml()).resolves.toEqual({ ok: true })
   })
 })
+
+describe("renderPlantUml thử lại khi không kết nối được (fetch mock)", () => {
+  const fetchMock = vi.fn()
+
+  const response = (status: number, contentType: string, body: string) =>
+    new Response(body, { status, headers: { "Content-Type": contentType } })
+
+  beforeEach(() => {
+    env.PLANTUML_BASE_URL = "http://localhost:8080"
+    fetchMock.mockReset()
+    vi.stubGlobal("fetch", fetchMock)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it("fetch failed (server đang khởi động) ⇒ thử lại rồi vẽ được, không ghi lỗi ngay", async () => {
+    fetchMock
+      .mockImplementationOnce(() => Promise.reject(new TypeError("fetch failed")))
+      .mockImplementationOnce(() => Promise.reject(new TypeError("fetch failed")))
+      .mockImplementationOnce(() => response(200, "image/svg+xml", "<svg/>"))
+    const pending = renderPlantUml(VALID)
+    await vi.runAllTimersAsync()
+    await expect(pending).resolves.toMatchObject({ transport: "get", status: 200 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("fetch failed mãi ⇒ hết lượt thử thì ném lỗi gốc", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new TypeError("fetch failed")))
+    const settled = expect(renderPlantUml(VALID)).rejects.toThrow("fetch failed")
+    await vi.runAllTimersAsync()
+    await settled
+    // POST + GET + 2 lần thử lại GET
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+})

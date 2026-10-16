@@ -9,21 +9,22 @@
 import type { Entity } from "../../spine/spine.types.js"
 import type { Renderer } from "./common.js"
 import { alias, byId, compareIds, label, puml } from "./common.js"
+import { DIAGRAM_LABELS } from "./labels.js"
 
-/** Động từ khi quan hệ chưa có `relation_verbs` — hình thoi không bao giờ trống. */
-export const DEFAULT_RELATION_VERB = "has"
+/** Động từ khi quan hệ chưa có `relation_verbs` — hình thoi không bao giờ trống (bản tiếng Anh — `labels.ts`). */
+export const DEFAULT_RELATION_VERB = DIAGRAM_LABELS.en.relationVerb
 
-export const relationVerb = (entity: Pick<Entity, "relation_verbs">, targetId: string): string =>
-  entity.relation_verbs?.[targetId]?.trim() || DEFAULT_RELATION_VERB
+export const relationVerb = (entity: Pick<Entity, "relation_verbs">, targetId: string, fallback: string = DEFAULT_RELATION_VERB): string =>
+  entity.relation_verbs?.[targetId]?.trim() || fallback
 
-export const renderErd: Renderer = (spine) => {
+export const renderErd: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
   const entities = byId(spine.entities)
   const ids = new Set(entities.map((e) => e.id))
   // Hình thoi chiếm một tầng riêng ⇒ chuỗi cha–con sâu làm hình rất dài; khoảng cách tầng mặc định của Graphviz
   // quá rộng cho trang A4 dọc. Đường vuông góc thay cho đường cong cắt chéo nhau.
   const body = ["skinparam monochrome true", "skinparam ranksep 20", "skinparam linetype ortho"]
 
-  if (entities.length === 0) body.push('entity "No entities yet" as NO_ENTITIES {', "}")
+  if (entities.length === 0) body.push(`entity "${labels.noEntities}" as NO_ENTITIES {`, "}")
   for (const e of entities) body.push(`entity "${label(e.name)}" as ${alias(e.id)} {`, "}")
   for (const e of entities) {
     for (const target of [...new Set(e.relations)].sort(compareIds)) {
@@ -31,7 +32,7 @@ export const renderErd: Renderer = (spine) => {
       const rel = `R_${alias(e.id)}_${alias(target)}`
       const child = e.relation_cardinality?.[target] ?? "N"
       const parent = e.relation_optional?.includes(target) ? "(0,1)" : "1"
-      body.push(`relationship "${label(relationVerb(e, target))}" as ${rel} {`, "}", `${alias(e.id)} -${parent}- ${rel}`, `${rel} -${child}- ${alias(target)}`)
+      body.push(`relationship "${label(relationVerb(e, target, labels.relationVerb))}" as ${rel} {`, "}", `${alias(e.id)} -${parent}- ${rel}`, `${rel} -${child}- ${alias(target)}`)
     }
   }
 

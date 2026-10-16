@@ -124,30 +124,31 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 13 hình ok (usecase tách 2 phần, screen_flow tách 4 actor), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 16 hình ok (usecase mỗi actor một hình — 5 phần, screen_flow tách 4 actor), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
 
     expect(result.spine_version).toBe(2)
-    expect(result.diagrams).toHaveLength(13)
+    expect(result.diagrams).toHaveLength(16)
     expect(result.diagrams.every((d) => d.render_status === "ok" && d.source_hash.length === 64)).toBe(true)
     const byKind = Object.fromEntries(
       result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase"].includes(d.kind)).map((d) => [d.kind, d.id])
     )
     expect(byKind).toEqual({ context: "D01", erd: "D04" })
-    // Sơ đồ use case tách 2 phần; phần đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
-    expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2"])
+    // Sơ đồ use case mỗi actor một hình (Founder, Business Analyst, Administrator, Guest, Scheduler); phần
+    // đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
+    expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4", "D02-5"])
     // Một sơ đồ luồng màn cho mỗi actor người (Founder, Business Analyst, Administrator, Guest); phần đầu giữ id cũ
     expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03", "D03-2", "D03-3", "D03-4"])
     expect(result.diagrams.find((d) => d.owner_id === "S07")?.id).toBe("D05")
     expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D06", "D07", "D08", "D09"])
 
     const spine = (await repo.get(PROJECT))!
-    expect(spine.diagrams).toHaveLength(13)
+    expect(spine.diagrams).toHaveLength(16)
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
-    expect(store.files.size).toBe(26)
+    expect(store.files.size).toBe(32)
     expect((await loadDiagramFile(PROJECT, "D01", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
@@ -180,10 +181,10 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const stale = staleDiagrams((await repo.get(PROJECT))!).map((d) => d.kind)
     expect([...new Set(stale)].sort()).toEqual(["context", "screen_flow", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
-    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D03", "D03-2", "D03-3", "D03-4"])
+    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D02-3", "D02-4", "D02-5", "D03", "D03-2", "D03-3", "D03-4"])
   })
 
-  it("usecase vượt 20 ⇒ tách D02, D02-2…, phần đầu giữ id cũ", async () => {
+  it("40 use case của 4 actor ⇒ mỗi actor một hình D02, D02-2…, phần đầu giữ id cũ", async () => {
     const spine = structuredClone(FIXTURE)
     const human = spine.actors.filter((a) => a.kind === "human").map((a) => a.id)
     spine.use_cases = Array.from({ length: 40 }, (_, i) => ({
@@ -199,8 +200,8 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const { deps } = makeDeps()
     const result = await renderDiagram(PROJECT, "usecase", null, { by: USER, deps })
     expect(result.removed).toEqual([])
-    expect(result.diagrams.map((d) => d.id)).toEqual(["D02", "D02-2"])
-    expect((await repo.get(PROJECT))!.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2"])
+    expect(result.diagrams.map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4"])
+    expect((await repo.get(PROJECT))!.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4"])
   })
 
   it("dự án đã tách theo id cũ (D02-1, D02-2): không gỡ id nào, `force` mới làm sạch cả hai phần", async () => {
@@ -228,16 +229,17 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const result = await renderDiagram(PROJECT, "usecase", null, { by: USER, deps })
     // Phần đầu giữ NGUYÊN id đang có (`D02-1`), không gỡ id nào ⇒ baseline đã ký trỏ `diagram-ref:D02-1`
     // vẫn nạp được ảnh từ store
-    expect(result.diagrams.map((d) => d.id)).toEqual(["D02-1", "D02-2"])
+    expect(result.diagrams.map((d) => d.id)).toEqual(["D02-1", "D02-2", "D02-3", "D02-4"])
     expect(result.removed).toEqual([])
     // `source_hash` tính theo TARGET nên mọi phần chung một giá trị và không phủ code vẽ ⇒ `unchanged()`
     // giữ nguyên cả hai bản cũ: không có tín hiệu tự động nào báo `.puml` đã sai chuẩn
-    expect(result.rendered).toEqual([])
-    for (const d of result.diagrams) expect(d.puml).toBe(stale.puml)
+    // Hai phần mới (mỗi actor một hình) được vẽ; hai phần cũ cùng hash nên giữ nguyên bản cũ
+    expect(result.rendered).toEqual(["D02-3", "D02-4"])
+    for (const d of result.diagrams.slice(0, 2)) expect(d.puml).toBe(stale.puml)
 
     // `force: true` (`npm run rerender:usecase`) là đường duy nhất làm cả hai phần đúng chuẩn mới
     const forced = await renderDiagram(PROJECT, "usecase", null, { by: USER, deps, force: true })
-    expect(forced.rendered).toEqual(["D02-1", "D02-2"])
+    expect(forced.rendered).toEqual(["D02-1", "D02-2", "D02-3", "D02-4"])
     for (const d of forced.diagrams) expect(d.puml).not.toMatch(/^A\d+ -->/m)
   })
 
@@ -251,7 +253,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
     const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
-    expect(forced.rendered).toHaveLength(13)
+    expect(forced.rendered).toHaveLength(16)
     expect(forced.spine_version).toBe(2)
   })
 

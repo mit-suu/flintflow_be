@@ -205,6 +205,20 @@ describe("cascade tự sinh đúng lô chuẩn của T02", () => {
     expect(plan.spine.roles.find((r) => r.id === "R4")?.actor_id).toBeNull()
   })
 
+  it("set actors[].parent_id rồi xoá actor cha ⇒ parent_id = null", () => {
+    const withUser = planTransaction(
+      FIXTURE,
+      txn([
+        { op: "add", path: "actors[]", value: { id: "A10", name: "User", kind: "human", description: "Any signed-in person." } },
+        { op: "set", path: "actors[id=A01].parent_id", value: "A10" }
+      ]),
+      { startSeq: 1 }
+    ).spine
+    expect(withUser.actors.find((a) => a.id === "A01")?.parent_id).toBe("A10")
+    const plan = planTransaction(withUser, txn([{ op: "remove", path: "actors[id=A10]" }]), { startSeq: 1 })
+    expect(plan.spine.actors.find((a) => a.id === "A01")?.parent_id).toBeNull()
+  })
+
   it("xoá feature còn màn ⇒ từ chối cả lô, trả referrers", () => {
     const err = rejection(() => planTransaction(FIXTURE, txn([{ op: "remove", path: "features[id=F6]" }]), { startSeq: 1 }))
     expect(err.code).toBe("INVARIANT_VIOLATION")

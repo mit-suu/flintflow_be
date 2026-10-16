@@ -73,6 +73,17 @@ describe("computeSectionStates", () => {
     expect(own.find((s) => s.id === "fixed:2.2.2")?.status).toBe("stale")
   })
 
+  it("vẽ lại sơ đồ mà nguồn không đổi (source_hash như cũ) không làm section stale; nguồn đổi thì có", () => {
+    const diagram = FIXTURE.diagrams.find((d) => d.kind === "usecase")!
+    const redraw = (hashAfter: string): Change => ({
+      ...change(LAST_SEQ + 1, `diagrams[id=${diagram.id}]`),
+      before: { ...diagram, source_hash: "h1" },
+      value: { ...diagram, source_hash: hashAfter, rendered_at: "2026-10-13T00:00:00.000Z" }
+    })
+    expect(computeStatus(FIXTURE, [redraw("h1")], "fixed:2.2.1"), "chỉ compile lại").toBe("accepted")
+    expect(computeStatus(FIXTURE, [redraw("h2")], "fixed:2.2.1"), "nguồn đổi").toBe("stale")
+  })
+
   it("FLF-198: step chốt mà không ghi gì (last_seq null) van co moc 'da xem toi day'", () => {
     const spine = structuredClone(FIXTURE)
     const owner = spine.steps.find((s) => s.id === "S-3.1")!

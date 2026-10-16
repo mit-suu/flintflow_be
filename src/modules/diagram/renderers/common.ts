@@ -5,6 +5,7 @@
  */
 
 import type { Diagram, Spine } from "../../spine/spine.types.js"
+import type { DiagramLabels } from "./labels.js"
 
 export type DiagramKind = Diagram["kind"]
 
@@ -16,7 +17,8 @@ export interface RenderedPart {
   puml: string
 }
 
-export type Renderer = (spine: Spine, ownerId?: string | null) => RenderedPart[]
+/** `labels`: chữ máy trên hình (FLF-265 N1) — thiếu ⇒ tiếng Anh, đúng hình ghi vào `diagrams[]`. */
+export type Renderer = (spine: Spine, ownerId?: string | null, labels?: DiagramLabels) => RenderedPart[]
 
 /** So sánh chuỗi theo code unit — không phụ thuộc locale máy chạy. */
 export const compareIds = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)

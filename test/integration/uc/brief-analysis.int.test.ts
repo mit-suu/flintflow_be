@@ -12,7 +12,7 @@ vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await imp
 import app from "../../../src/app.js"
 import { parseSse, seedFixture, type SeededFixture } from "../../setup.js"
 import { detectCall, mockCalls, mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
-import { gateHttp, runStepHttp, spineVersionOf, startAt } from "../../helpers/pipeline.js"
+import { gateHttp, reachedGate, runStepHttp, spineVersionOf, startAt } from "../../helpers/pipeline.js"
 import { createEmptySpine } from "../../../src/modules/spine/spine.repository.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 import { Usage } from "../../../src/modules/spine/usage.model.js"
@@ -259,7 +259,7 @@ describe("UC-28 — hoàn thiện Product Brief (B-0 … B-1)", () => {
     expect(elicitPrompts["B-0.2"]).toBeDefined()
     expect(elicitPrompts["B-0.2"]).toContain("payment_method")
     expect(run.events.some((e) => e.type === "answer_needed")).toBe(false)
-    expect(run.events.at(-1)?.type).toBe("gate_ready")
+    expect(reachedGate(run.events), JSON.stringify(run.events.at(-1))).toBe(true)
     expect((await spineOf(seeded))?.decisions.filter((d) => d.topic_key === "payment_method")).toHaveLength(1)
   })
 
@@ -272,7 +272,7 @@ describe("UC-28 — hoàn thiện Product Brief (B-0 … B-1)", () => {
     })
     const run = await runStepHttp(app, seeded, "B-0.2", await spineVersionOf(app, seeded))
     expect(run.errorCode).toBeNull()
-    expect(run.events.at(-1)?.type).toBe("gate_ready")
+    expect(reachedGate(run.events), JSON.stringify(run.events.at(-1))).toBe(true)
     expect(run.events.some((e) => e.type === "answer_needed")).toBe(false)
     expect(mockCalls).toHaveLength(0)
     expect(await Usage.countDocuments({ projectId: seeded.projectId })).toBe(0)
@@ -303,7 +303,7 @@ describe("UC-28 — hoàn thiện Product Brief (B-0 … B-1)", () => {
     // Author chạy lại (UC-22) ⇒ bước đi tiếp tới cổng
     const again = await runStepHttp(app, seeded, "B-1.1", await spineVersionOf(app, seeded))
     expect(again.errorCode, JSON.stringify(again.events.at(-1))).toBeNull()
-    expect(again.events.at(-1)?.type).toBe("gate_ready")
+    expect(reachedGate(again.events), JSON.stringify(again.events.at(-1))).toBe(true)
     expect(mockCalls.length).toBeGreaterThan(0)
   })
 
