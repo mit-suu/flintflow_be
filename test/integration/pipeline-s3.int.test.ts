@@ -30,7 +30,13 @@ beforeEach(() => {
 
 describe("S-1.2 → S-3.6 qua /run + /gate", () => {
   it("mỗi step: SSE hợp lệ tới gate_ready, accept chuyển sang step kế; credit trừ đúng tổng Usage", { timeout: 120_000 }, async () => {
-    const seeded = await seedFixture("minimal", { mutate: startAt("S-1.2", S3_STEPS) })
+    // Ca này kiểm /run + /gate từng bước ⇒ cổng phải là cổng thật (bước im khi chạy lẻ được server tự Accept — FAP #19)
+    const seeded = await seedFixture("minimal", {
+      mutate: (spine) => {
+        startAt("S-1.2", S3_STEPS)(spine)
+        ;(spine.project as Record<string, unknown>).review_mode = "strict"
+      }
+    })
 
     for (const [i, stepId] of S3_STEPS.entries()) {
       const run = await runStepHttp(app, seeded, stepId, await spineVersionOf(app, seeded))
@@ -106,7 +112,12 @@ describe("FLF-249: lịch sử chat giữ lại tin cổng, không chỉ giữ t
   })
 
   it("cổng không có tin ⇒ không ghi tin rỗng, thao tác của user vẫn vào transcript", { timeout: 60_000 }, async () => {
-    const seeded = await seedFixture("minimal", { mutate: startAt("S-3.1") })
+    const seeded = await seedFixture("minimal", {
+      mutate: (spine) => {
+        startAt("S-3.1")(spine)
+        ;(spine.project as Record<string, unknown>).review_mode = "strict"
+      }
+    })
     await runStepHttp(app, seeded, "S-3.1", await spineVersionOf(app, seeded))
     await StepRun.updateOne({ projectId: seeded.projectId, step_id: "S-3.1" }, { $set: { gate_payload: {}, phase_gate: null } })
 

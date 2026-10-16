@@ -95,7 +95,8 @@ export const assertChatSessionOwnership = async (projectId: string, chatSessionI
  *
  * FLF-260: câu làm rõ và câu của thẻ xem trước theo ngôn ngữ trả lời của phiên (`replyLanguage`).
  *
- * Trả về tin nhắn AI đã ghi vào transcript, hoặc `null` khi tin nhắn không phải lệnh sửa (đi tiếp CHAT).
+ * Trả về tin nhắn AI đã ghi vào transcript kèm bản xem trước đầy đủ (chỉ gửi qua SSE cho FE dựng thẻ có nút Áp dụng —
+ * transcript chỉ lưu `change_count`, FLF-244), hoặc `null` khi tin nhắn không phải lệnh sửa (đi tiếp CHAT).
  */
 const tryChangeFlow = async (
   session: IChatSession,
@@ -104,13 +105,14 @@ const tryChangeFlow = async (
   step: string,
   userId: string,
   replyLanguage: ReplyLanguage = "vi"
-): Promise<IChatMessage | null> => {
+): Promise<{ message: IChatMessage; preview: changeService.ChangePreviewResult | null } | null> => {
   if (!changeService.isChangeInstruction(content)) return null
 
   const record = await spineRepository.get(projectId)
   if (!record) return null
 
   let payload: Record<string, unknown>
+  let shown: changeService.ChangePreviewResult | null = null
   try {
     // Tin user của lượt này đã nằm cuối phiên — lịch sử là phần trước nó
     const chatHistory = formatChatContext(session.messages.slice(0, -1), record)
@@ -121,6 +123,7 @@ const tryChangeFlow = async (
       reply_language: replyLanguage
     })
     payload = previewPayload(preview, replyLanguage)
+    if (preview.ok && preview.preview_id && preview.changes.length > 0) shown = preview
   } catch (err) {
     // Lệnh sửa lỗi (hết credit, xung đột version…) không được làm hỏng phiên chat
     if (!(err instanceof ApiError)) console.error("[chat-session] change preview failed:", err)
@@ -130,7 +133,7 @@ const tryChangeFlow = async (
   const aiMsg: IChatMessage = { role: "ai", content: JSON.stringify(payload), step, createdAt: new Date() }
   session.messages.push(aiMsg)
   await session.save()
-  return aiMsg
+  return { message: aiMsg, preview: shown }
 }
 
 /**
@@ -387,7 +390,8 @@ export const sendMessageStream = async (
     // Dùng đúng sự kiện `finish` như luồng CHAT (không stream chữ) để FE không phải biết thêm loại event
     try {
       if (!res.destroyed && !res.writableEnded) {
-        const payload: unknown = JSON.parse(changeMsg.content)
+        // `preview`: bản xem trước đầy đủ để FE mở thẻ sửa có nút Áp dụng ngay (E2E FAP: tin "bấm Áp dụng" mà không có nút)
+        const payload = { ...(JSON.parse(changeMsg.message.content) as Record<string, unknown>), ...(changeMsg.preview ? { preview: changeMsg.preview } : {}) }
         res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: null, cost: 0 })}
 
 `)

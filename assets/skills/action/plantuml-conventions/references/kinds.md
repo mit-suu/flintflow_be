@@ -32,7 +32,7 @@ digraph Context {
 
 ## `usecase` — §2.2.1
 
-Source fields: `actors[].name/.kind` · `use_cases[].name/.actor_ids/.includes/.extends`.
+Source fields: `actors[].name/.kind/.parent_id` · `use_cases[].name/.actor_ids/.includes/.extends`.
 
 ```plantuml
 @startuml
@@ -55,6 +55,13 @@ UC07 .> UC01 : <<include>>
 - `includes[]` → `base .> included : <<include>>`
 - `extends[]` → `extension .> base : <<extend>>`
 - `kind = time` actors: `actor "Scheduler" as A08 <<time>>`
+- One diagram per human actor (`title Use Cases — <actor>`): in a diagram each use case is associated with
+  only that human actor (system/time actors are secondary, on the right). A use case several roles share is
+  repeated in each role's diagram, never drawn with two human actors on it.
+- `actors[].parent_id` (human → human) → `User <|-- Customer` (= `Customer --|> User`). Common use cases
+  (Log In, Register Account — done by EVERY specialized actor) go in the `User` part; each specialized
+  actor gets its own part with its role-specific use cases and the generalization arrow. A use case shared
+  by only some roles is not lifted to `User`: it is repeated in each of those roles' diagrams. Never between a `system`/`time` or unrelated actor.
 
 ## `screen_flow` — §3.1.1
 

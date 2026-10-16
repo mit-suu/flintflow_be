@@ -40,6 +40,22 @@ describe("screenActorMap", () => {
     expect(hasScreenActorLinks(map)).toBe(true)
   })
 
+  it("actor tổng quát (User, cha qua parent_id) không có màn riêng: màn của nó thuộc mọi actor chuyên biệt", () => {
+    const s = base()
+    s.actors.push({ id: "A04", name: "User", kind: "human", description: "" })
+    s.actors[0].parent_id = "A04"
+    s.actors[1].parent_id = "A04"
+    s.functions = [
+      { id: "FN1", screen_id: "S01", feature_id: "F1", order: 0, name: "Log In", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null },
+      { id: "FN2", screen_id: "S02", feature_id: "F1", order: 1, name: "Pay", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }
+    ] as Spine["functions"]
+    s.use_cases = [
+      { id: "UC1", name: "Log In", actor_ids: ["A04"], function_ids: ["FN1"], description: "", includes: [], extends: [] },
+      { id: "UC2", name: "Pay", actor_ids: ["A01"], function_ids: ["FN2"], description: "", includes: [], extends: [] }
+    ]
+    expect(Object.fromEntries(screenActorMap(s))).toEqual({ S01: ["A01", "A02"], S02: ["A01"], S03: [] })
+  })
+
   it("màn chỉ role không gắn actor (Guest) được vào ⇒ thuộc mọi actor người đã có màn", () => {
     const s = base()
     s.roles = [

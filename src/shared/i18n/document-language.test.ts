@@ -65,6 +65,9 @@ describe("documentLanguageDirective", () => {
     expect(block).toContain("English text, ids, codes and enum values exactly as before")
     expect(block).toContain('"shall" ⇒ "phải"')
     expect(block).not.toContain("Use these translations")
+    // N1: chữ chỉ vẽ lên sơ đồ cũng là đơn vị dịch ⇒ lượt ghi Spine trả kèm luôn
+    expect(block).toContain("`flows_in`, `flows_out`")
+    expect(block).toContain("`relation_verbs`")
   })
 
   it("glossary ép một dòng, tối đa MAX_DIRECTIVE_TERMS dòng", () => {

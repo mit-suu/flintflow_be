@@ -30,10 +30,26 @@ export interface SectionStateView {
 
 type ChangeLike = Pick<Change, "seq" | "path" | "before" | "value" | "step_id">
 
+const sourceHashOf = (value: unknown): unknown =>
+  value !== null && typeof value === "object" ? (value as { source_hash?: unknown }).source_hash : undefined
+
+/**
+ * Vẽ lại một sơ đồ mà dữ liệu nguồn không đổi (`source_hash` trước = sau): chỉ compile lại hình ("Vẽ lại tất
+ * cả", thử lại sau lỗi PlantUML). Nội dung người đọc duyệt không đổi nên không làm section stale — trước đây
+ * một lần "Vẽ lại tất cả" đẩy mọi section có sơ đồ về "Cũ" và tụt % đã chốt. Nguồn đổi thì change của chính
+ * trường nguồn (và hash mới) vẫn làm stale như thường.
+ */
+export const isRerenderOnly = (change: Pick<ChangeLike, "path" | "before" | "value">): boolean => {
+  if (!/^diagrams\[id=[^\]]+\]$/.test(change.path)) return false
+  const before = sourceHashOf(change.before)
+  return typeof before === "string" && before === sourceHashOf(change.value)
+}
+
 /** Seq lớn nhất của change nuôi từng section, tách theo step ghi. */
 const feedingChanges = (spine: Spine, changes: ChangeLike[]): Map<string, ChangeLike[]> => {
   const bySection = new Map<string, ChangeLike[]>()
   for (const change of changes) {
+    if (isRerenderOnly(change)) continue
     const impact = sectionsOfPath(spine, change.path, change)
     for (const id of new Set([...impact.owner, ...impact.reads, ...impact.derived])) {
       // push tại chỗ: spread mỗi lần là O(n²) theo số change của section

@@ -158,8 +158,21 @@ describe("wireframeWidgets (FLF-214)", () => {
     expect(describeInterface(withLayout, screen, "vi")).toBe('Màn hình Đăng nhập: chữ "Login", ô nhập Email, nút Log in.')
   })
 
-  it("không phải wireframe (bảng function của Spine cũ, hình PlantUML khác) ⇒ null", () => {
+  it("N1: wireframe đã dịch — dòng tên màn là tên đã dịch (bỏ qua như tên gốc), chữ trên widget là chữ dịch", () => {
+    const screen = { id: "S1", feature_id: "F1", name: "Đăng nhập", description: "Màn vào.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
+    const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const localized = { diagrams: [{ ...layout, puml: salt("Đăng nhập", "Email", '"a@b.c   "', "Giá", '"1"', "đến", '"9"', "[ Đăng nhập ]") }] } as unknown as Spine
+    expect(describeInterface(localized, screen, "vi", "Login")).toBe("Màn hình Đăng nhập: ô nhập Email, ô nhập Giá (khoảng), nút Đăng nhập.")
+  })
+
+  it("N1: vùng giữ chỗ đã dịch không lặp chữ 'vùng'; nhận cả chữ tiếng Việt (bản đồ, hình ảnh)", () => {
+    expect(wireframeWidgets(salt("[ OK ]", "{+", "Vùng bản đồ", "}"), "X", "vi")).toEqual(["nút OK", "vùng bản đồ"])
+    expect(wireframeWidgets(salt("[ OK ]", "Vị trí", "{+", "Hình ảnh phòng", "}"), "X", "vi")).toEqual(["nút OK", "Vị trí (vùng hình ảnh phòng)"])
+  })
+
+  it("không phải wireframe (bảng function của Spine cũ — mọi ngôn ngữ, hình PlantUML khác) ⇒ null", () => {
     expect(wireframeWidgets("@startsalt\n{+\n  <b>Login\n  {#\n    <b>Function | <b>Description\n  }\n}\n@endsalt\n", "Login")).toBeNull()
+    expect(wireframeWidgets("@startsalt\n{+\n  <b>Đăng nhập\n  {#\n    <b>Chức năng | <b>Mô tả\n  }\n}\n@endsalt\n", "Đăng nhập")).toBeNull()
     expect(wireframeWidgets("@startuml\nA -> B\n@enduml\n", "Login")).toBeNull()
   })
 })

@@ -10,7 +10,7 @@
  *
  * Chính sách theo field (§4.1):
  *   pull          gỡ phần tử khỏi mảng khoá            use_cases[].actor_ids[] …
- *   null          đặt khoá về null                     roles[].actor_id, screens[].primary_function_id
+ *   null          đặt khoá về null                     roles[].actor_id, actors[].parent_id, screens[].primary_function_id
  *   remove_owner  xoá luôn phần tử chứa khoá           permissions, functions[screen_id], diagrams, flags,
  *                                                      assumptions, sections[function:*|feature:*], steps[@X]
  *   restrict      không tự xoá; trả `referrers`,       screens[].feature_id, functions[].feature_id
@@ -44,6 +44,7 @@ export const CASCADE_POLICY: Readonly<Record<string, CascadePolicy>> = Object.fr
   "permissions[].screen_id": "remove_owner",
   "permissions[].role_id": "remove_owner",
   "roles[].actor_id": "null",
+  "actors[].parent_id": "null",
   "functions[].screen_id": "remove_owner",
   "functions[].feature_id": "restrict",
   "functions[].business_rule_ids[]": "pull",

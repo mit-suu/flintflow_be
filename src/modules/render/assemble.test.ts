@@ -149,6 +149,7 @@ import type { ChangeRecordRow } from "./section-renderer.js"
 import { findByHashes } from "../translation/translation.repository.js"
 import { hashSource, translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
+import { allTargets, renderKind } from "../diagram/renderers/index.js"
 
 const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
@@ -828,6 +829,81 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     expect(findByHashes).toHaveBeenCalledWith(PROJECT, "vi", units.map((u) => hashSource(u.value)))
     expect(firstText(result.doc, "fixed:1")).toBe("Tầm nhìn")
     expect(result.translation).toEqual({ locale: "vi", source_locale: "en", missing: units.length - 1 })
+  })
+
+  describe("N1 — ảnh sơ đồ theo ngôn ngữ", () => {
+    /** Fixture 19 màn với `diagrams[]` vẽ bằng renderer hiện tại (như sau một lượt vẽ thật). */
+    const renderedFixture = (): Spine => {
+      const spine = fixture19()
+      spine.diagrams = allTargets(spine).flatMap((target) =>
+        renderKind(spine, target.kind, target.owner_id).map((part, i) => ({
+          id: `D-${target.kind}-${target.owner_id ?? "x"}-${i + 1}`,
+          kind: part.kind,
+          puml: part.puml,
+          section: part.section,
+          owner_kind: part.owner_kind,
+          owner_id: part.owner_id,
+          render_status: "ok" as const,
+          source_hash: part.source_hash,
+          rendered_at: "2026-10-13T00:00:00.000Z"
+        }))
+      )
+      return spine
+    }
+    const build = (spine: Spine, deps: Partial<Parameters<typeof _internal.buildDocument>[1]>, translated = true) =>
+      _internal.buildDocument(
+        {
+          projectId: PROJECT,
+          projectName: "FlintFlow",
+          spine,
+          statusChanges: [],
+          recordChanges: [],
+          source: "draft",
+          version: "v0.1",
+          ...(translated ? { language: "vi" as const, sourceLanguage: "en" as const } : {})
+        },
+        { loadDiagramPng: async (_projectId, id) => `EN:${id}`, now: NOW, resolveTranslations: overlay(), ...deps }
+      )
+
+    it("sơ đồ đã dịch ⇒ PNG theo ngôn ngữ từ nguồn tiếng Việt; chú thích luồng màn theo tiêu đề đã dịch", async () => {
+      const spine = renderedFixture()
+      const loadLocalizedDiagramPng = vi.fn(async (_projectId: string, id: string, _locale: string, _puml: string) => `VI:${id}`)
+      const loadDiagramPng = vi.fn(async (_projectId: string, id: string) => `EN:${id}`)
+      const doc = await build(spine, { loadLocalizedDiagramPng, loadDiagramPng })
+      // Có PNG theo ngôn ngữ ⇒ không đọc PNG gốc của sơ đồ đó
+      expect(loadDiagramPng).not.toHaveBeenCalled()
+
+      const pngs = imagesOf(doc).map((b) => b.png)
+      expect(pngs.length).toBeGreaterThan(0)
+      // Mọi sơ đồ của fixture có chữ đã dịch ⇒ đều dùng ảnh theo ngôn ngữ
+      for (const png of pngs) expect(png).toMatch(/^VI:/)
+      for (const [projectId, id, locale, puml] of loadLocalizedDiagramPng.mock.calls) {
+        expect([projectId, locale]).toEqual([PROJECT, "vi"])
+        expect(puml, id).not.toBe(spine.diagrams.find((d) => d.id === id)?.puml)
+      }
+      const flow = imagesOf(doc).filter((b) => String(b.png).startsWith("VI:D-screen_flow"))
+      expect(flow.length).toBeGreaterThan(1)
+      for (const b of flow) expect(b.caption).toMatch(/^Luồng màn hình của \[vi\] /)
+      expect(JSON.stringify(spine.diagrams)).not.toContain("Luồng màn hình")
+    })
+
+    it("vẽ không được / quá trần chờ ⇒ ảnh gốc cho đúng sơ đồ đó; ngôn ngữ = gốc ⇒ không đụng loader", async () => {
+      const spine = renderedFixture()
+      const [failing, slow] = spine.diagrams.map((d) => d.id)
+      const loadLocalizedDiagramPng = vi.fn(async (_p: string, id: string) =>
+        id === failing ? null : id === slow ? new Promise<string>(() => {}) : `VI:${id}`
+      )
+      const loadDiagramPng = vi.fn(async (_projectId: string, id: string) => `EN:${id}`)
+      const doc = await build(spine, { loadLocalizedDiagramPng, loadDiagramPng, localizedImageBudgetMs: 30 })
+      const pngOf = (id: string) => imagesOf(doc).find((b) => String(b.png).endsWith(`:${id}`))?.png
+      expect(pngOf(failing)).toBe(`EN:${failing}`)
+      expect(pngOf(slow)).toBe(`EN:${slow}`)
+      // Ảnh gốc chỉ tải cho đúng hai sơ đồ không có bản theo ngôn ngữ
+      expect(loadDiagramPng.mock.calls.map(([, id]) => id).sort()).toEqual([failing, slow].sort())
+
+      const english = await build(spine, { loadLocalizedDiagramPng: vi.fn() }, false)
+      for (const b of imagesOf(english)) expect(b.png).toMatch(/^EN:/)
+    })
   })
 
   it("chưa có Spine ⇒ NoWorkingDraftError; baseline không có ⇒ 404 — như đường gốc, không tra lớp bản dịch", async () => {

@@ -63,7 +63,7 @@ The rest need judgement and live in `SKILL.md`.
 | U8 | No duplicate use case name | code |
 | U9 | The name shows the value the actor gets ("Update Record" ⇒ "Approve Purchase Order") | prompt |
 | A1 | Singular role/party noun phrase, Title Case — never a person's name or a team | prompt |
-| A2 | Not a bare `User`/`System`/`Actor`/`Person` (a qualified name such as "Registered User" is fine) | code |
+| A2 | Not a bare `User`/`System`/`Actor`/`Person` (a qualified name such as "Registered User" is fine). Exception: the general actor of a generalization (other actors point at it via `parent_id`) may be named `User` | code |
 | A3 | Not named after a screen or a feature | prompt |
 | A4 | A `system` actor is the outside role, not the vendor or version | prompt |
 | A5 | A `time` actor is named after what it triggers | prompt |

@@ -156,7 +156,7 @@ import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { orderedSteps } from "./step-registry.js"
 import { AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { OpTransaction, ElicitOutput } from "../../shared/ai/response-parser.js"
-import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
+import { runStep, runDraftPhase, submitAnswer, dropPendingAnswers, pendingAnswerFor, resumeWaitingStep, settleFromChat, settleRepeatedAnswer, settleWithoutModel, askTranscript, nextPendingAfterChat, isSubstantiveAnswer, isBareAgreement, noChangeReason, replyLanguageAfterMessage, CALL_LIMIT, CHAT_BUDGET_REPLY, CHAT_BUDGET_REPLY_EN, STEP_NOT_RUNNABLE, type StepRunnerDeps } from "./step-runner.service.js"
 import { cancelRun, getRunState, resetMemoryRuns } from "./run-state.service.js"
 import { gate } from "./gate.service.js"
 import { resumePhaseInterview, runPhase } from "./phase-runner.service.js"
@@ -525,6 +525,32 @@ describe("step-runner: POST /answer", () => {
     const userMsgs = (session.messages as { role: string; content: string }[]).filter((m) => m.role === "user")
     // Câu trả lời trên thẻ vào lịch sử chỉ có lựa chọn — câu hỏi đã nằm ở tin AI ngay trên
     expect(userMsgs.map((m) => m.content)).toContain("Người quản trị")
+  })
+})
+
+describe("gate thất bại không xoá thẻ cổng (E2E FAP #2, #3)", () => {
+  it("accept với base_version cũ ⇒ 409, run-state vẫn là gate kèm payload để reload còn chip duyệt", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply(),
+      draftExecutor: async () => draftReply([{ op: "add", path: "actors[]", value: { id: "A90", name: "Z", kind: "human", description: "d" } }]),
+      renderDeps: renderStub()
+    }
+    await runStep(PROJECT, "S-3.1", SESSION, USER, collectEvents().emit, deps)
+    const before = await getRunState(PROJECT, "S-3.1")
+    expect(before?.status).toBe("gate")
+
+    const stale = (await repo.get(PROJECT))!.spine_version - 1
+    await expect(gate(PROJECT, "S-3.1", USER, { action: "accept", base_version: stale })).rejects.toMatchObject({ code: repo.SPINE_VERSION_CONFLICT })
+
+    const after = await getRunState(PROJECT, "S-3.1")
+    expect(after?.status).toBe("gate")
+    expect(after?.gate_payload).toEqual(before?.gate_payload)
+
+    // Gate thành công thì lượt kết thúc như cũ
+    await gate(PROJECT, "S-3.1", USER, { action: "accept", base_version: (await repo.get(PROJECT))!.spine_version })
+    expect((await getRunState(PROJECT, "S-3.1"))?.status).toBe("done")
   })
 })
 
@@ -1473,6 +1499,37 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     controller.abort()
     await s.run
     await expect(pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers: [] })).rejects.toMatchObject({ code: STEP_NOT_RUNNABLE })
+  })
+})
+
+describe("E2E FAP S17: 'Đúng rồi, đi tiếp' sau khi AI đề xuất mặc định cho câu mở", () => {
+  const asked = [
+    { topic_key: "semester_structure", question: "Mỗi năm trường bạn tổ chức mấy học kỳ?", options: [] },
+    { topic_key: "notification_set", question: "Bộ thông báo mặc định đã đủ chưa?", options: [] }
+  ]
+  const proposal =
+    "Tôi lấy hai mặc định hợp lý cho phần còn lại: mỗi năm hai học kỳ, mỗi kỳ khoảng 15 tuần. Bộ thông báo tôi giữ đúng bảy tình huống đã liệt kê."
+  const settled = [
+    { topic_key: "semester_structure", answer: "mỗi năm hai học kỳ, mỗi kỳ khoảng 15 tuần" },
+    { topic_key: "notification_set", answer: "giữ đúng bảy tình huống đã liệt kê" }
+  ]
+
+  it("chip 'Đúng rồi, đi tiếp' là đồng ý suông, không phải nội dung trả lời", () => {
+    for (const text of ["Đúng rồi, đi tiếp", "ok nhé", "Đồng ý, tiếp tục", "sounds good, go ahead"]) {
+      expect(isBareAgreement(text), text).toBe(true)
+      expect(isSubstantiveAnswer(text), text).toBe(false)
+    }
+    expect(isBareAgreement("Đúng rồi, nhưng mỗi kỳ 18 tuần")).toBe(false)
+  })
+
+  it("đáp án trích từ đề xuất AI user vừa đồng ý ⇒ chốt; không có đề xuất ⇒ vẫn bỏ như cũ", () => {
+    expect(settleFromChat(asked, settled, "Đúng rồi, đi tiếp", proposal)).toEqual([
+      { question_id: "Q_semester_structure", answer: "mỗi năm hai học kỳ, mỗi kỳ khoảng 15 tuần" },
+      { question_id: "Q_notification_set", answer: "giữ đúng bảy tình huống đã liệt kê" }
+    ])
+    expect(settleFromChat(asked, settled, "Đúng rồi, đi tiếp")).toEqual([])
+    // Model bịa giá trị không có trong đề xuất ⇒ không chốt
+    expect(settleFromChat(asked, [{ topic_key: "semester_structure", answer: "ba học kỳ" }], "Đúng rồi, đi tiếp", proposal)).toEqual([])
   })
 })
 

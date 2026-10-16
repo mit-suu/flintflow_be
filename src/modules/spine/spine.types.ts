@@ -92,6 +92,11 @@ export interface Actor {
   flows_in?: string[]
   /** Nhãn luồng dữ liệu hệ thống gửi RA actor (tiếng Anh). */
   flows_out?: string[]
+  /**
+   * Actor tổng quát mà actor này là một dạng chuyên biệt (UML generalization `Customer --|> User`).
+   * Chỉ actor người ↔ actor người. Use case dùng chung đặt ở actor cha; actor con thừa kế.
+   */
+  parent_id?: string | null
 }
 
 export interface Role {

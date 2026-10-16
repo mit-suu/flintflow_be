@@ -14,7 +14,7 @@ vi.mock("../../src/shared/ai/providers/llm.router.js", async () => (await import
 import app from "../../src/app.js"
 import { parseSse, seedFixture, type SeededFixture } from "../setup.js"
 import { detectCall, mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
-import { spineVersionOf, startAt } from "../helpers/pipeline.js"
+import { reachedGate, spineVersionOf, startAt } from "../helpers/pipeline.js"
 import { ChatSession } from "../../src/modules/project/chat-session.model.js"
 import { replyLanguageDirective } from "../../src/shared/i18n/reply-language.js"
 
@@ -48,7 +48,7 @@ describe("FLF-260 pipeline — ngôn ngữ trả lời qua HTTP", () => {
     const seeded = await seedFixture("minimal", { mutate: startAt("S-3.1") })
     const events = await runHttp(seeded, "steps/S-3.1/run", { message: "We need to describe who uses the booking system" })
 
-    expect(events.at(-1)?.type, JSON.stringify(events.at(-1))).toBe("gate_ready")
+    expect(reachedGate(events as { type: string }[]), JSON.stringify(events.at(-1))).toBe(true)
     expect((await sessionOf(seeded))?.reply_language).toBe("en")
     expect(prompts.some((p) => p.kind === "draft")).toBe(true)
     expect(prompts.map((p) => p.text).every(endsWithDirective("en"))).toBe(true)

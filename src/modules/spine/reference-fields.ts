@@ -53,6 +53,7 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "permissions[].screen_id", targetCollection: "screens", cardinality: "one" },
   { path: "permissions[].role_id", targetCollection: "roles", cardinality: "one" },
   { path: "roles[].actor_id", targetCollection: "actors", cardinality: "one" },
+  { path: "actors[].parent_id", targetCollection: "actors", cardinality: "one" },
   { path: "functions[].screen_id", targetCollection: "screens", cardinality: "one" },
   { path: "functions[].feature_id", targetCollection: "features", cardinality: "one" },
   { path: "functions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" },
@@ -140,6 +141,7 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     permScreen,
     permRole,
     roleActor,
+    actorParent,
     fnScreen,
     fnFeature,
     fnRules,
@@ -188,6 +190,9 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
   }
   for (const r of spine.roles) {
     if (r.actor_id !== null) yield one(roleActor, `roles[id=${r.id}]`, "actor_id", r.actor_id)
+  }
+  for (const a of spine.actors) {
+    if (a.parent_id) yield one(actorParent, `actors[id=${a.id}]`, "parent_id", a.parent_id)
   }
   for (const f of spine.functions) {
     const owner = `functions[id=${f.id}]`

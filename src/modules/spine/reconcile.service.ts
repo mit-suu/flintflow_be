@@ -35,7 +35,7 @@ import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
 import { applyTransaction } from "./op-engine.js"
 import * as repository from "./spine.repository.js"
-import { computeSectionStates } from "./section-status.js"
+import { computeSectionStates, isRerenderOnly } from "./section-status.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
 import {
   apply as applyChange,
@@ -93,6 +93,7 @@ export const changesMakingStale = (spine: Spine, changes: readonly Change[], sec
   return changes.filter((change) => {
     if (change.seq <= threshold) return false
     if (change.step_id !== null && own.has(change.step_id)) return false
+    if (isRerenderOnly(change)) return false
     const impact = sectionsOfPath(spine, change.path, change)
     return [...impact.owner, ...impact.reads, ...impact.derived].includes(sectionId)
   })
@@ -243,8 +244,8 @@ export const reconcile = async (
   const replyLanguage = (await accountLocaleOf(userId)) ?? undefined
   const proposed = await proposeOps(projectId, userId, spine, briefs, d, replyLanguage)
 
-  if (proposed.ops.length === 0) {
-    // BUG-16: còn section stale mà không có gì cần sửa ⇒ vẫn cấp `preview_id` để user xác nhận nguyên trạng
+  // BUG-16: còn section stale mà không có gì cần sửa ⇒ vẫn cấp `preview_id` để user xác nhận nguyên trạng
+  const noChange = (): ChangePreviewResult => {
     const previewId = randomUUID()
     if (briefs.length > 0) noChangePreviews.set(previewId, proposed.sections.length > 0 ? proposed.sections : briefs.map((b) => b.section_id))
     return {
@@ -264,6 +265,8 @@ export const reconcile = async (
     }
   }
 
+  if (proposed.ops.length === 0) return noChange()
+
   const preview = await previewChange(
     projectId,
     userId,
@@ -276,6 +279,9 @@ export const reconcile = async (
     init,
     d
   )
+  // Model ghi lại đúng giá trị đang có: op engine bỏ hết op trùng ⇒ preview rỗng mà không `no_change`, FE không
+  // có nút xác nhận và cờ không bao giờ gỡ được (E2E FAP: "Viết lại" → "Không có thay đổi nào").
+  if (preview.ok && preview.changes.length === 0) return noChange()
   if (preview.preview_id !== undefined) reconciledSections.set(preview.preview_id, proposed.sections)
   return preview
 }

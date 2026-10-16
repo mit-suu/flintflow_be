@@ -9,10 +9,13 @@
  * truyền nhầm được vào op-engine, deterministic-check, prompt / projection hay `computeSourceHash`: mọi chỗ đó chạy trên
  * chữ gốc (luật `non_english_content`, hash sơ đồ…). Đường render lấy Spine đã dịch qua đúng một cửa là `renderView`;
  * thứ tự, số hiệu, trạng thái và logic dựa chữ Anh vẫn quyết trên Spine gốc (`SectionRenderContext.canonical`).
+ * N1: `diagrams[].puml` của bản xem là nguồn sơ đồ theo ngôn ngữ tài liệu (`localized-diagrams.ts`) — ảnh PNG theo nguồn
+ * đó do `assemble.service` nạp / vẽ, `diagrams[]` của Spine không đổi.
  */
 
 import type { Spine } from "../spine/spine.types.js"
-import { fitTranslation, translatableValue, type TranslationUnit, type UnitRef, type UnitValue } from "../translation/translation-units.js"
+import { fitTranslation, readUnitField, writeUnitField, type TranslationUnit, type UnitRef, type UnitValue } from "../translation/translation-units.js"
+import { changedDiagramSources, localizeDiagrams } from "./localized-diagrams.js"
 
 const VIEW: unique symbol = Symbol("LocalizedSpine")
 
@@ -49,21 +52,33 @@ const slotOf = (view: Spine, ref: UnitRef): { owner: Row; field: string } | null
  * (`translation.service#resolveTranslations().map`). Thay khi có key VÀ chữ dịch cùng hình dạng với giá trị đang ở đúng
  * chỗ đó (`fitTranslation`: chuỗi ⇔ chuỗi, mảng ⇔ mảng cùng độ dài) — logic chọn theo chỉ số trên Spine gốc lấy phần tử
  * dịch ở cùng chỉ số. Không có key / lệch hình dạng ⇒ giữ chữ gốc. Không sửa `spine` (clone sâu).
+ * `language` (N1): có ⇒ nguồn sơ đồ trong bản xem cũng theo ngôn ngữ đó (`localized-diagrams.ts`); không ⇒ giữ nguồn gốc.
  */
 export const localizeSpine = (
   spine: Spine,
   units: readonly TranslationUnit[],
-  translations: ReadonlyMap<string, UnitValue>
+  translations: ReadonlyMap<string, UnitValue>,
+  language?: string
 ): LocalizedSpine => {
   const view = structuredClone(spine)
+  /** Nhãn wireframe đã dịch theo id sơ đồ: chữ gốc ⇒ chữ dịch. */
+  const wireframeText = new Map<string, Map<string, string>>()
   for (const unit of units) {
     const translated = translations.get(unit.key)
     if (translated === undefined) continue
+    if (unit.ref.group === "diagrams") {
+      const text = fitTranslation(unit.value, translated)
+      if (unit.ref.id && Array.isArray(unit.value) && Array.isArray(text)) {
+        wireframeText.set(unit.ref.id, new Map(unit.value.map((source, i) => [source, text[i]])))
+      }
+      continue
+    }
     const slot = slotOf(view, unit.ref)
-    const source = slot ? translatableValue(slot.owner[slot.field]) : null
+    const source = slot ? readUnitField(slot.owner, slot.field) : null
     const text = source === null ? null : fitTranslation(source, translated)
-    if (slot && text !== null) slot.owner[slot.field] = text
+    if (slot && text !== null) writeUnitField(slot.owner, slot.field, text)
   }
+  if (language) localizeDiagrams(spine, view, language, wireframeText)
   return { [VIEW]: view }
 }
 
@@ -72,3 +87,10 @@ export const localizeSpine = (
  * cờ). Không đưa kết quả vào op-engine, check, prompt hay hash: các chỗ đó cần Spine gốc.
  */
 export const renderView = (localized: LocalizedSpine): Spine => localized[VIEW]
+
+/**
+ * Sơ đồ có nguồn theo ngôn ngữ khác nguồn gốc của `spine` (N1): id ⇒ nguồn cần ảnh riêng. Sơ đồ không đổi chữ nào ⇒ không
+ * có mặt, tài liệu dùng thẳng ảnh gốc.
+ */
+export const localizedDiagramSources = (spine: Spine, localized: LocalizedSpine): Map<string, string> =>
+  changedDiagramSources(spine, localized[VIEW])

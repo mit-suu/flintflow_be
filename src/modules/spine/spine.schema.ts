@@ -82,7 +82,9 @@ export const actorSchema = z.strictObject({
   description: z.string(),
   /** Nhãn luồng dữ liệu cho §1 context diagram; vắng cả hai ⇒ cạnh lấy tên use case. */
   flows_in: z.array(z.string()).optional(),
-  flows_out: z.array(z.string()).optional()
+  flows_out: z.array(z.string()).optional(),
+  /** Actor cha (generalization); vắng/null ⇒ actor không chuyên biệt hoá actor nào. */
+  parent_id: id.nullable().optional()
 })
 
 export const roleSchema = z.strictObject({

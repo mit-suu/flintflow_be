@@ -568,7 +568,8 @@ describe("FLF-260 — chat trả lời theo ngôn ngữ user đang viết", () =
 
     expect(changeMocks.preview).toHaveBeenCalledWith(PROJECT, USER, expect.objectContaining({ reply_language: "en" }))
     expect(stored(id).reply_language).toBe("en")
-    expect(res.events).toEqual([expect.objectContaining({ type: "finish", data: previewCard("en") })])
+    // Bản xem trước đầy đủ đi kèm `finish` (FE mở thẻ có nút Áp dụng), transcript vẫn chỉ lưu thẻ gọn
+    expect(res.events).toEqual([expect.objectContaining({ type: "finish", data: { ...previewCard("en"), preview: PREVIEW } })])
     expect(aiMocks.executeAiActionStream).not.toHaveBeenCalled()
   })
 })

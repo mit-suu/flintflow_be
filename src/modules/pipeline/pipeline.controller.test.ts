@@ -143,6 +143,21 @@ describe("POST /projects/:projectId/steps/:stepId/run", () => {
     await expect(deps.resolveGate?.({ type: "gate_ready", step_id: "S-8.2", flags: { red_delta: 0 }, new_assumptions: [] })).resolves.toMatchObject({ quiet: true })
   })
 
+  it("E2E FAP #19: bước im khi chạy lẻ được server Accept thật và phát auto_accepted — không kẹt in_progress", async () => {
+    vi.mocked(getSpine).mockResolvedValue({ spine_version: 7, project: { review_mode: "balanced" }, screens: [], functions: [], steps: [], decisions: [] } as never)
+    vi.mocked(gate).mockResolvedValue({} as never)
+    vi.mocked(runStep).mockImplementation(async (_p, stepId, _s, _u, emit, deps) => {
+      const gateEvent = { type: "gate_ready", step_id: stepId, flags: { red_delta: 0 }, new_assumptions: [] } as never
+      const resolution = await deps?.resolveGate?.(gateEvent, "vi")
+      emit({ ...(gateEvent as object), auto: resolution?.quiet === true } as never)
+    })
+
+    const outcome = await invokeSse(runStepController, OWNER, PROJECT, "S-8.2", { session_id: "s1", base_version: 7 })
+
+    expect(gate).toHaveBeenCalledWith(PROJECT, "S-8.2", OWNER, { action: "accept", base_version: 7 })
+    expect(outcome.written.some((w) => w.startsWith("event: auto_accepted"))).toBe(true)
+  })
+
   it("dự án không thuộc user ⇒ 404 PROJECT_NOT_FOUND, không gọi runStep", async () => {
     const outcome = await invokeSse(runStepController, "other-user", PROJECT, "S-3.1", { session_id: "s1", base_version: 1 })
 

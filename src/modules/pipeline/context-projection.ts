@@ -330,6 +330,25 @@ export const loadConversationVariables = async (
   return { recent_turns: formatRecentTurns(transcript), conversation_summary: buildConversationSummary(spine, transcript) }
 }
 
+/**
+ * Lời AI gần nhất của `unit` trong phiên — đề xuất mà user vừa "Đúng rồi" theo. Tin AI có câu hỏi lưu dạng JSON
+ * (`askTranscript`) ⇒ chỉ lấy `reply`.
+ */
+export const loadLastAiReply = async (sessionId: string, unit: string): Promise<string | null> => {
+  const session = await ChatSession.findById(sessionId, { messages: 1 }).lean()
+  const last = [...(session?.messages ?? [])].reverse().find((m) => m.role === "ai" && m.step === unit)
+  if (!last) return null
+  try {
+    const parsed: unknown = JSON.parse(last.content)
+    if (parsed !== null && typeof parsed === "object" && typeof (parsed as { reply?: unknown }).reply === "string") {
+      return (parsed as { reply: string }).reply
+    }
+  } catch {
+    // tin thường, không phải JSON
+  }
+  return last.content
+}
+
 export const buildStepContext = async (projectId: string, stepId: string, options: BuildStepContextOptions = {}): Promise<StepContext> => {
   const record = await repository.get(projectId)
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", repository.SPINE_NOT_FOUND)

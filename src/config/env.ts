@@ -137,6 +137,13 @@ const envSchema = z.object({
   // service RIÊNG, không phải sidecar trong image này.
   PLANTUML_BASE_URL: z.string().default("http://localhost:8080"),
   PLANTUML_TIMEOUT_MS: z.coerce.number().int().positive().default(15000),
+  // Chờ (ms) trước mỗi lần thử lại khi không kết nối được PlantUML, phân cách bằng dấu phẩy; rỗng ⇒ không thử lại
+  // (test tích hợp: PlantUML cố ý ở cổng đóng, mỗi lần thử lại làm một lượt vẽ chậm thêm vài giây)
+  PLANTUML_RETRY_DELAYS_MS: z
+    .string()
+    .default("500,1500")
+    .transform((value) => value.split(",").map((part) => part.trim()).filter(Boolean).map(Number))
+    .pipe(z.array(z.number().int().nonnegative()).max(5)),
 
   // ─── Billing: payment_service dùng chung (VietQR/SePay) ───────────
   // Để trống ⇒ checkout trả 503 PAYMENT_SERVICE_NOT_CONFIGURED.

@@ -33,6 +33,8 @@ process.env.PAYMENT_CLIENT_ID = "flintflow-test-client"
 // (máy dev đang chạy PlantUML ở :8080 cũng không làm kết quả đổi theo máy)
 process.env.PLANTUML_BASE_URL = "http://127.0.0.1:9"
 process.env.PLANTUML_TIMEOUT_MS = "1000"
+// Cổng đóng là cố ý ⇒ không thử lại (mặc định chờ 0,5 s + 1,5 s mỗi lượt vẽ: ca nhiều sơ đồ chạm trần 30 s)
+process.env.PLANTUML_RETRY_DELAYS_MS = ""
 // Embedding (hybrid retrieval C-3) tắt dù `.env` máy dev bật: Mongo in-memory không có $vectorSearch, và test không
 // được gọi provider thật. Test cần vector thì stub `vectorCandidates` / bật `mock` trong file của mình.
 process.env.EMBEDDING_PROVIDER = "off"

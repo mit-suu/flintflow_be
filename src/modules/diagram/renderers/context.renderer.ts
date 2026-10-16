@@ -18,13 +18,14 @@ import { systemName } from "../../spine/system-name.js"
 import type { Renderer } from "./common.js"
 import { alias, byId, label, puml } from "./common.js"
 import { buildContextLayout, contextLabelLines, type ContextActor, type ContextEdge, type Point } from "./context-layout.js"
+import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
 
 const SYSTEM_ALIAS = "SYSTEM_"
 /** Số mũi tên tối đa mỗi chiều của một actor; dữ liệu dư gộp vào mũi tên cuối. */
 export const MAX_ARROWS = 3
-/** Nhãn dự phòng khi Spine thiếu luồng: chiều vào / chiều ra theo `kind`. */
-export const DEFAULT_IN: Readonly<Record<ActorKind, string>> = { human: "user input", system: "service response", time: "scheduled trigger" }
-export const DEFAULT_OUT: Readonly<Record<ActorKind, string>> = { human: "processing result", system: "service request", time: "job status" }
+/** Nhãn dự phòng khi Spine thiếu luồng: chiều vào / chiều ra theo `kind` (bản tiếng Anh — `labels.ts`). */
+export const DEFAULT_IN: Readonly<Record<ActorKind, string>> = DIAGRAM_LABELS.en.defaultIn
+export const DEFAULT_OUT: Readonly<Record<ActorKind, string>> = DIAGRAM_LABELS.en.defaultOut
 /** Khoảng cắt bớt cuối đường để chừa chỗ cho đầu mũi tên. */
 const ARROWHEAD = 8
 
@@ -33,12 +34,13 @@ const merged = (values: string[]): string[] =>
   values.length > MAX_ARROWS ? [...values.slice(0, MAX_ARROWS - 1), values.slice(MAX_ARROWS - 1).join(", ")] : values
 
 /** Actor của sơ đồ, theo id: mỗi actor ít nhất một mũi tên có nhãn, toàn sơ đồ có cả chiều vào lẫn chiều ra. */
-export const contextActors = (actors: readonly Actor[]): ContextActor[] => {
+export const contextActors = (actors: readonly Actor[], labels: DiagramLabels = DIAGRAM_LABELS.en): ContextActor[] => {
+  const { defaultIn, defaultOut } = labels
   const result = byId([...actors]).map((a) => {
     const flows = { id: a.id, name: label(a.name), kind: a.kind, inbound: merged(clean(a.flows_in)), outbound: merged(clean(a.flows_out)) }
     // Chưa có luồng nào: chiều chính theo kind — human/time gửi vào hệ thống, system nhận yêu cầu từ hệ thống
     if (flows.inbound.length > 0 || flows.outbound.length > 0) return flows
-    return a.kind === "system" ? { ...flows, outbound: [DEFAULT_OUT.system] } : { ...flows, inbound: [DEFAULT_IN[a.kind]] }
+    return a.kind === "system" ? { ...flows, outbound: [defaultOut.system] } : { ...flows, inbound: [defaultIn[a.kind]] }
   })
   // Cả sơ đồ chỉ một chiều: thêm chiều thiếu cho actor đầu tiên theo thứ tự kind ưu tiên
   const first = (order: ActorKind[]): number => {
@@ -50,11 +52,11 @@ export const contextActors = (actors: readonly Actor[]): ContextActor[] => {
   }
   if (result.length > 0 && !result.some((a) => a.outbound.length > 0)) {
     const i = first(["human", "system", "time"])
-    result[i] = { ...result[i], outbound: [DEFAULT_OUT[result[i].kind]] }
+    result[i] = { ...result[i], outbound: [defaultOut[result[i].kind]] }
   }
   if (result.length > 0 && !result.some((a) => a.inbound.length > 0)) {
     const i = first(["system", "human", "time"])
-    result[i] = { ...result[i], inbound: [DEFAULT_IN[result[i].kind]] }
+    result[i] = { ...result[i], inbound: [defaultIn[result[i].kind]] }
   }
   return result
 }
@@ -92,9 +94,9 @@ const edgePosition = (edge: ContextEdge): string => {
   return JSON.stringify(`e,${coordinates(end)} ${[...head, ...prefix((lower + upper) / 2)].map(coordinates).join(" ")}`)
 }
 
-export const renderContext: Renderer = (spine) => {
-  const name = label(systemName(spine.project)) || "System"
-  const layout = buildContextLayout(contextActors(spine.actors), name)
+export const renderContext: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
+  const name = label(systemName(spine.project)) || labels.system
+  const layout = buildContextLayout(contextActors(spine.actors, labels), name)
   const ports: string[] = []
   const edges: string[] = []
   for (const edge of layout.edges) {

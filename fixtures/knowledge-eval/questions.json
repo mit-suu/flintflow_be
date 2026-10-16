@@ -62,7 +62,7 @@
       "type": "exact",
       "language": "en",
       "question": "When is the use case diagram split into several parts?",
-      "answer_points": ["One diagram holds at most 20 use cases and at most 24 actor–use case edges", "Over a limit, whole groups are packed into parts", "A cluster longer than 40 is chunked into lots of 20"],
+      "answer_points": ["Always one diagram per human actor", "One diagram holds at most 20 use cases and at most 24 actor–use case edges; over a limit an actor's part is split by relation cluster", "A cluster longer than 40 is chunked into lots of 20"],
       "gold_chunk_ids": ["usecase#order-and-splitting"]
     },
     {

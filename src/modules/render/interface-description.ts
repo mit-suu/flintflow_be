@@ -8,12 +8,14 @@
  * chữ ngay trên), nút `[ … ]`, link `<u>…</u>`, checkbox `[ ] …`, radio `( ) …`, dropdown `^…^`, bảng `{#`, tab `{/`.
  * Hình không phải wireframe (bảng Function | Description của Spine cũ) ⇒ `null`, người gọi dùng mô tả màn.
  *
- * FLF-265: câu theo ngôn ngữ tài liệu — tiếng Việt `Màn hình Login: ô nhập Email, nút Log in.`. Widget giữ dạng có
- * cấu trúc (loại + chữ trên widget), chỉ lúc in mới ghép theo ngôn ngữ; chữ trên widget lấy nguyên từ puml (tiếng Anh).
- * Mọi điều kiện ghép (nhãn cho ô nhập, khoảng giá trị) vẫn so trên câu tiếng Anh ⇒ bản tiếng Anh không đổi.
+ * FLF-265: câu theo ngôn ngữ tài liệu — tiếng Việt `Màn hình Đăng nhập: ô nhập Email, nút Đăng nhập.`. Widget giữ dạng có
+ * cấu trúc (loại + chữ trên widget), chỉ lúc in mới ghép theo ngôn ngữ; chữ trên widget lấy nguyên từ puml — trên bản
+ * xem đã dịch là wireframe đã thay chữ dịch (N1), còn lại tiếng Anh. Mọi điều kiện ghép (nhãn cho ô nhập, khoảng giá
+ * trị) vẫn so trên câu tiếng Anh của widget ⇒ bản tiếng Anh không đổi.
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import { isFunctionTable } from "../diagram/renderers/screen-layout.renderer.js"
 import { VI_WIDGET_LABELS, VI_WIDGET_NOTES, interfaceSentence, isVietnamese } from "./labels.js"
 
 type Screen = Spine["screens"][number]
@@ -31,7 +33,9 @@ type Widget =
   | { kind: "text"; text: string }
 
 const areaEn = (content: string): string => (/\barea$/i.test(content) ? content : `${content} area`)
-const areaVi = (content: string): string => `${VI_WIDGET_LABELS.area} ${content.replace(/\s*\barea$/i, "") || content}`
+/** Wireframe đã dịch (N1) có thể đã mang chữ `Vùng …` — không in hai lần. */
+const areaVi = (content: string): string =>
+  `${VI_WIDGET_LABELS.area} ${content.replace(/\s*\barea$/i, "").replace(/^vùng\s+/iu, "") || content}`
 
 /** Câu tiếng Anh của widget — đúng chuỗi trước FLF-265. */
 const widgetEn = (w: Widget): string => {
@@ -108,7 +112,7 @@ const cellOf = (raw: string): Cell => {
 }
 
 /** Chữ nối giữa hai ô của một khoảng giá trị: `Price "…" to "…"`. */
-const RANGE_JOINER = /^(to|-|–|~|and)$/i
+const RANGE_JOINER = /^(to|-|–|~|and|đến|tới)$/i
 
 /**
  * Ô nhập / dropdown lấy dòng chữ đứng ngay trước làm nhãn: `Email` + `"john@…"` ⇒ `Email input`,
@@ -144,9 +148,12 @@ const labelled = (cells: Cell[]): Widget[] => {
   return out
 }
 
-/** Widget có cấu trúc theo thứ tự trên màn; `null` nếu `puml` không phải wireframe salt. */
-const parseWireframe = (puml: string, screenName: string): Widget[] | null => {
-  if (!puml.startsWith("@startsalt") || puml.includes("<b>Function | <b>Description")) return null
+/**
+ * Widget có cấu trúc theo thứ tự trên màn; `null` nếu `puml` không phải wireframe salt. `screenNames`: dòng tên màn
+ * đầu hình (bỏ qua) — tên gốc và tên đã dịch, vì wireframe đã dịch (FLF-265 N1) mang tên dịch.
+ */
+const parseWireframe = (puml: string, screenNames: readonly string[]): Widget[] | null => {
+  if (!puml.startsWith("@startsalt") || isFunctionTable(puml)) return null
   const lines = puml.replace(/\r\n/g, "\n").split("\n").map((l) => l.trim())
   const cells: Cell[] = []
   for (let i = 0; i < lines.length; i++) {
@@ -186,7 +193,8 @@ const parseWireframe = (puml: string, screenName: string): Widget[] | null => {
       if (plain && inner.length > 0 && inner.every((l) => { const c = cellOf(l); return c !== null && "text" in c })) {
         const previous = cells[cells.length - 1]
         const content = clean(inner[0])
-        const placeholder = /\b(map|image|photo|picture|gallery|chart|video)\b/i.test(content)
+        const placeholder =
+          /\b(map|image|photo|picture|gallery|chart|video)\b/i.test(content) || /(^|[^\p{L}])(bản đồ|hình ảnh|ảnh|biểu đồ)($|[^\p{L}])/iu.test(content)
         if (previous && "text" in previous) {
           cells[cells.length - 1] = {
             widget: placeholder ? { kind: "area", content, owner: previous.text } : { kind: "text_area", label: previous.text }
@@ -205,7 +213,7 @@ const parseWireframe = (puml: string, screenName: string): Widget[] | null => {
     }
     const cell = cellOf(line)
     // Tên màn / tên hệ thống ở đầu trang không phải nội dung
-    if (cell && "text" in cell && (cell.text === screenName || cell.text === cell.text.toUpperCase())) continue
+    if (cell && "text" in cell && (screenNames.includes(cell.text) || cell.text === cell.text.toUpperCase())) continue
     cells.push(cell)
   }
   const widgets = labelled(cells)
@@ -216,18 +224,19 @@ const parseWireframe = (puml: string, screenName: string): Widget[] | null => {
  * Danh sách widget theo thứ tự trên màn, in theo ngôn ngữ (mặc định tiếng Anh); `null` nếu `puml` không phải
  * wireframe salt.
  */
-export const wireframeWidgets = (puml: string, screenName: string, language?: string): string[] | null =>
-  parseWireframe(puml, screenName)?.map(isVietnamese(language) ? widgetVi : widgetEn) ?? null
+export const wireframeWidgets = (puml: string, screenName: string | readonly string[], language?: string): string[] | null =>
+  parseWireframe(puml, typeof screenName === "string" ? [screenName] : screenName)?.map(isVietnamese(language) ? widgetVi : widgetEn) ?? null
 
 /**
  * Câu mô tả giao diện màn; không có wireframe ⇒ mô tả màn (`screens[].description`); không có gì ⇒ `null`.
- * `language` (FLF-265): chữ nối + tên loại widget theo ngôn ngữ; tên màn, chữ trên widget, mô tả màn giữ nguyên.
- * `wireframeName` (FLF-265): tên màn GỐC — wireframe giữ chữ gốc (D13) nên dòng tên màn đầu hình so với tên gốc, còn câu
- * in `screen.name` (bản xem đã dịch). Mặc định chính `screen.name`.
+ * `language` (FLF-265): chữ nối + tên loại widget theo ngôn ngữ; tên màn, chữ trên widget, mô tả màn giữ nguyên — trên
+ * bản xem đã dịch, wireframe đã mang chữ dịch (N1, `localized-diagrams.ts`) nên câu cũng ra chữ dịch.
+ * `wireframeName`: tên màn GỐC — dòng tên màn đầu hình là tên gốc khi wireframe chưa dịch được, tên dịch (`screen.name`)
+ * khi đã dịch; bỏ qua cả hai. Mặc định chính `screen.name`.
  */
 export const describeInterface = (spine: Spine, screen: Screen, language?: string, wireframeName = screen.name): string | null => {
   const layout = spine.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === screen.id && d.render_status === "ok")
-  const widgets = layout ? wireframeWidgets(layout.puml, wireframeName, language) : null
+  const widgets = layout ? wireframeWidgets(layout.puml, [screen.name, wireframeName], language) : null
   if (widgets) return interfaceSentence(language, screen.name, screen.is_popup, `${widgets.join(", ")}.`)
   return screen.description.trim() ? interfaceSentence(language, screen.name, screen.is_popup, screen.description.trim()) : null
 }

@@ -66,3 +66,13 @@ export const startAt = (stepId: string, targets?: readonly string[]) => (spine: 
   progress.current_phase = all[idx].phase
   progress.current_step = stepId
 }
+
+/**
+ * Lượt `/run` đã tới cổng: cổng thật (`gate_ready` cuối luồng), hoặc bước im mà server tự Accept (`gate_ready` `auto`
+ * rồi `auto_accepted` — contract §`gate_ready.auto`, E2E FAP #19).
+ */
+export const reachedGate = (events: readonly { type: string; auto?: unknown }[]): boolean => {
+  const last = events.at(-1)
+  if (last?.type === "gate_ready") return true
+  return last?.type === "auto_accepted" && events.some((e) => e.type === "gate_ready" && e.auto === true)
+}

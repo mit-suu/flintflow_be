@@ -8,10 +8,14 @@
  *   2. `use_cases[].actor_ids` × `function_ids` → `functions[].screen_id` (use case của actor chạy trên màn).
  * Màn public — chỉ role không gắn actor (`Guest`, `actor_id: null`) được vào: Login, Forgot/Reset Password, landing
  * công khai — là cửa vào chung nên thuộc MỌI actor người đã có màn (actor chưa có màn nào không thao tác UI).
- * Actor `system`/`time` không thao tác UI nên bị bỏ. Hàm thuần, kết quả sắp theo id.
+ * Actor `system`/`time` không thao tác UI nên bị bỏ. Actor TỔNG QUÁT (`User`, cha của actor khác qua `parent_id`)
+ * không dùng màn nào của riêng nó: màn nó chạm tới (Login của use case "Log In" gắn `User`) thuộc mọi actor
+ * chuyên biệt bên dưới, vì chúng thừa kế use case — nên không có sơ đồ luồng màn riêng cho `User`.
+ * Hàm thuần, kết quả sắp theo id.
  */
 
 import type { Spine } from "./spine.types.js"
+import { actorParents, ancestorsOf } from "./actor-generalization.js"
 
 type ScreenActorSource = Pick<Spine, "actors" | "roles" | "permissions" | "use_cases" | "functions" | "screens">
 
@@ -32,8 +36,16 @@ export const screenActorMap = (spine: ScreenActorSource): Map<string, string[]> 
   const human = new Set(spine.actors.filter((a) => a.kind === "human").map((a) => a.id))
   const screenIds = new Set(spine.screens.map((s) => s.id))
   const links = new Map<string, Set<string>>(spine.screens.map((s) => [s.id, new Set<string>()]))
+  // Actor tổng quát ⇒ các actor lá (không còn con) bên dưới nó; actor thường ⇒ chính nó
+  const parents = actorParents(spine.actors)
+  const general = new Set(parents.values())
+  const leavesOf = (actorId: string): string[] => {
+    if (!general.has(actorId)) return [actorId]
+    return [...human].filter((id) => !general.has(id) && ancestorsOf(id, parents).includes(actorId))
+  }
   const link = (screenId: string | null, actorId: string | null) => {
-    if (screenId && actorId && screenIds.has(screenId) && human.has(actorId)) links.get(screenId)?.add(actorId)
+    if (!screenId || !actorId || !screenIds.has(screenId) || !human.has(actorId)) return
+    for (const id of leavesOf(actorId)) links.get(screenId)?.add(id)
   }
 
   const roleActor = new Map(spine.roles.map((r) => [r.id, r.actor_id]))

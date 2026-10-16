@@ -45,6 +45,35 @@ never one question per actor. S-3.2 derives Log In / Register / Reset Password f
 - Do not create a role before its actor exists in the same batch — order `add actors[]` before the
   matching `add roles[]` (both may be in the same transaction; the engine resolves within-batch adds).
 
+## Generalization (`parent_id`)
+
+When two or more human actors share use cases (Log In, Register Account, Reset Password, Update Profile)
+**and** each is genuinely a specialized type of one general user, add a general human actor (`User`, or a
+more precise "Registered User") and set `parent_id` on each specialized actor:
+
+```json
+{ "op": "add", "path": "actors[]", "value": { "id": "A05", "name": "User", "kind": "human", "description": "Anyone with an account who signs in to the platform.", "flows_in": ["Sign-in request"], "flows_out": ["Session"] } }
+{ "op": "set", "path": "actors[id=A01].parent_id", "value": "A05" }
+```
+
+- Put a use case on the general actor only when **every** specialized actor does it the same way
+  (`actor_ids: ["A05", …]`), never on every specialized actor again — they inherit it.
+- A use case shared by **some** roles only lists exactly those roles, never `User`. Example (university
+  portal, `User` = Lecturer + Student + Office): Log In, Reset Password, View Dashboard → `User`;
+  View Timetable → Lecturer, Student; Export Grade Sheet → Lecturer, Office; Record Attendance → Lecturer.
+  Putting View Timetable on `User` would claim Office staff have a timetable.
+- Roles playing different parts in one goal (Student requests a leave, Office approves) list each role,
+  primary first — it is not a common use case.
+- Role-specific use cases stay on the specialized actor.
+- The use case diagram is always one diagram per human actor; with a `User` actor it has a `User` diagram
+  (common use cases) and one diagram per specialized actor (its use cases + `Customer --|> User`). A use
+  case shared by some roles is repeated in each of their diagrams, each time connected to that role only.
+- `User` gets no Screens Flow diagram: its screens belong to every specialized actor.
+- Only human ↔ human. Never make a `system`/`time` actor, an external system or an unrelated party (a
+  Guest who has no account, a Courier who never signs in to the same app) inherit from `User`.
+- The general actor needs no `roles[]` row of its own when it has no permission set beyond its children's.
+- Without such a shared, genuine "is a" relation, leave `parent_id` unset.
+
 ## Naming
 
 - Actor name: a noun phrase describing the party, not a screen name — "Founder / Business Analyst", not

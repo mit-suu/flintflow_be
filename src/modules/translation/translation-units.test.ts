@@ -6,7 +6,18 @@ import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
 import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS } from "../spine/srs-text-fields.js"
-import { fitTranslation, hashSource, translatableValue, translationUnits, unitsOfValue, type TranslationUnit } from "./translation-units.js"
+import { renderKind } from "../diagram/renderers/index.js"
+import {
+  DIAGRAM_TEXT_FIELDS,
+  fitTranslation,
+  hashSource,
+  readUnitField,
+  translatableValue,
+  translationUnits,
+  unitsOfValue,
+  writeUnitField,
+  type TranslationUnit
+} from "./translation-units.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -22,10 +33,15 @@ const variant = (fn: (s: Spine) => void): Spine => {
 const UNITS = translationUnits(FIXTURE)
 const unit = (key: string): TranslationUnit | undefined => UNITS.find((u) => u.key === key)
 
+/** N1: chữ chỉ vẽ lên sơ đồ — mũi tên sơ đồ ngữ cảnh, động từ ERD, nhãn wireframe. */
+const isDiagramOnly = (u: TranslationUnit): boolean =>
+  u.ref.group === "diagrams" || (u.ref.group !== "project" && (DIAGRAM_TEXT_FIELDS[u.ref.group] ?? []).includes(u.ref.field))
+
 describe("translationUnits — bảng §2.1 trên fixture 19 màn", () => {
   it("khoá theo id, không trùng key, đủ mọi nhóm của bảng", () => {
     expect(new Set(UNITS.map((u) => u.key)).size).toBe(UNITS.length)
-    expect(new Set(UNITS.map((u) => u.ref.group))).toEqual(new Set(["project", ...Object.keys(SRS_TEXT_FIELDS)]))
+    // N1: + nhãn wireframe (`diagrams`) — fixture có một wireframe salt (D05)
+    expect(new Set(UNITS.map((u) => u.ref.group))).toEqual(new Set(["project", ...Object.keys(SRS_TEXT_FIELDS), "diagrams"]))
     for (const u of UNITS) {
       if (u.ref.group === "project") expect(u.key).toMatch(/^project\.(vision|goals|release_scope\.(in|out))$/)
       else expect(u.key).toMatch(/^[a-z_]+\[id=[^\]]+\]\.(validations\[id=[^\]]+\]\.)?[a-z_]+$/)
@@ -40,12 +56,13 @@ describe("translationUnits — bảng §2.1 trên fixture 19 màn", () => {
     expect(unit("project.goals")?.value).toEqual(FIXTURE.project.goals)
   })
 
-  it("không có id, mã, enum, relation_verbs, addendum, assumptions, *_vi", () => {
+  it("không có id, mã, enum, addendum, assumptions, *_vi; sơ đồ chỉ có nhãn wireframe", () => {
     const fields = new Set(UNITS.map((u) => u.ref.field))
-    for (const banned of ["id", "kind", "priority", "category", "tier", "code", "relation_verbs", "statement_vi", "term_native", "name_vi"]) {
+    for (const banned of ["id", "kind", "priority", "category", "tier", "code", "statement_vi", "term_native", "name_vi", "puml"]) {
       expect(fields.has(banned), banned).toBe(false)
     }
-    expect(UNITS.some((u) => /^(addendum|assumptions|custom_sections|diagrams|permissions)/.test(u.key))).toBe(false)
+    expect(UNITS.some((u) => /^(addendum|assumptions|custom_sections|permissions)/.test(u.key))).toBe(false)
+    expect(UNITS.filter((u) => u.ref.group === "diagrams").every((u) => /^diagrams\[id=[^\]]+\]\.labels$/.test(u.key))).toBe(true)
     expect(unit("project.name")).toBeUndefined()
     expect(unit("project.system_name")).toBeUndefined()
   })
@@ -105,9 +122,10 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
   const nonEnglish = (s: Spine) => runDeterministicCheck(s).filter((f) => f.rule_id === "non_english_content").map((f) => f.message)
 
   it("mỗi loại đơn vị (nhóm × field) chèn tiếng Việt ⇒ luật bắt được", () => {
-    // Một đơn vị đại diện cho mỗi (nhóm, field) — chạy luật trên cả fixture cho mọi đơn vị thì quá chậm
+    // Một đơn vị đại diện cho mỗi (nhóm, field) — chạy luật trên cả fixture cho mọi đơn vị thì quá chậm. Chữ chỉ vẽ lên
+    // sơ đồ (N1) không thuộc danh sách dùng chung — test riêng bên dưới
     const samples = new Map<string, TranslationUnit>()
-    for (const u of UNITS) {
+    for (const u of UNITS.filter((x) => !isDiagramOnly(x))) {
       const kind = `${u.ref.group}.${u.ref.validation_id ? "validations." : ""}${u.ref.field}`
       if (!samples.has(kind)) samples.set(kind, u)
     }
@@ -123,6 +141,22 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
       "functions.validations.statement"
     ]
     expect([...samples.keys()].sort()).toEqual(expected.sort())
+  })
+
+  it("N1: chữ chỉ vẽ lên sơ đồ là đơn vị dịch nhưng luật không quét (phạm vi luật giữ nguyên)", () => {
+    const spine = variant((s) => {
+      s.entities[0].relation_verbs = { E02: "contains" }
+    })
+    const units = translationUnits(spine).filter(isDiagramOnly)
+    expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "diagrams.labels"])
+    )
+    const before = new Set(nonEnglish(spine))
+    const withVietnamese = variant((s) => {
+      s.actors[0].flows_in = ["Người dùng đăng nhập"]
+      s.actors[0].flows_out = ["Kết quả đăng nhập"]
+    })
+    expect(nonEnglish(withVietnamese).filter((m) => !before.has(m))).toEqual([])
   })
 })
 
@@ -256,5 +290,67 @@ describe("unitsOfValue — cặp (hash câu Anh, câu dịch) của một op", (
     expect(unitsOfValue(`actors[id=${FIXTURE.actors[0].id}].name`, FIXTURE.actors[0].name, ["mảng"])).toEqual([])
     expect(unitsOfValue(`actors[id=${FIXTURE.actors[0].id}].name`, FIXTURE.actors[0].name, "   ")).toEqual([])
     expect(unitsOfValue("permissions[screen_id=S1,role_id=R1,action=view]", {}, {})).toEqual([])
+  })
+})
+
+describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wireframe", () => {
+  const A = FIXTURE.actors[0]
+  const E = FIXTURE.entities[0]
+
+  it("flows_in / flows_out là đơn vị mảng của actor; relation_verbs là mảng động từ theo id đích đã sắp", () => {
+    expect(unit(`actors[id=${A.id}].flows_in`)).toMatchObject({ value: A.flows_in, ref: { group: "actors", id: A.id, field: "flows_in" } })
+    const units = translationUnits(variant((s) => (s.entities[0].relation_verbs = { E09: "places", E02: "belongs to" })))
+    expect(units.find((u) => u.key === `entities[id=${E.id}].relation_verbs`)?.value).toEqual(["belongs to", "places"])
+    // Không có động từ ⇒ không có đơn vị (renderer in "has" / nhãn máy)
+    expect(unit(`entities[id=${E.id}].relation_verbs`)).toBeUndefined()
+  })
+
+  it("đọc / ghi field bảng giữ khoá, thay chữ theo thứ tự khoá đã sắp", () => {
+    const owner: Record<string, unknown> = { relation_verbs: { E09: "places", E02: "belongs to" }, flows_in: ["order"] }
+    expect(readUnitField(owner, "relation_verbs")).toEqual(["belongs to", "places"])
+    writeUnitField(owner, "relation_verbs", ["thuộc về", "đặt"])
+    expect(owner.relation_verbs).toEqual({ E02: "thuộc về", E09: "đặt" })
+    writeUnitField(owner, "flows_in", ["đơn hàng"])
+    expect(owner.flows_in).toEqual(["đơn hàng"])
+    expect(readUnitField({ relation_verbs: {} }, "relation_verbs")).toBeNull()
+  })
+
+  it("nhãn wireframe: một đơn vị mảng mỗi hình screen_layout đã vẽ; bảng function / hình lỗi / hình khác ⇒ không có", () => {
+    const wireframe = FIXTURE.diagrams.find((d) => d.kind === "screen_layout")!
+    const labels = unit(`diagrams[id=${wireframe.id}].labels`)
+    expect(labels?.ref).toEqual({ group: "diagrams", id: wireframe.id, field: "labels" })
+    expect(labels?.value).toEqual(expect.arrayContaining(["Chat", "Document", "Accept", "Type a message..."]))
+    // Tên hệ thống / tên dự án không dịch
+    expect(labels?.value).not.toContain("FlintFlow")
+
+    const table = renderKind(FIXTURE, "screen_layout", wireframe.owner_id)[0]
+    const withTable = translationUnits(variant((s) => (s.diagrams.find((d) => d.id === wireframe.id)!.puml = table.puml)))
+    expect(withTable.some((u) => u.ref.group === "diagrams")).toBe(false)
+    const errored = translationUnits(variant((s) => (s.diagrams.find((d) => d.id === wireframe.id)!.render_status = "error")))
+    expect(errored.some((u) => u.ref.group === "diagrams")).toBe(false)
+  })
+
+  it("unitsOfValue: op actor / entity cả object ghép mũi tên và động từ (bản dịch lệch thứ tự khoá vẫn đúng chỗ)", () => {
+    const en = { id: "E01", name: "Order", description: "A purchase", relations: ["E02", "E09"], relation_verbs: { E09: "places", E02: "belongs to" } }
+    const loc = { id: "E01", name: "Đơn hàng", description: "Một lần mua", relation_verbs: { E02: "thuộc về", E09: "đặt" } }
+    const pairs = unitsOfValue("entities[]", [en], [loc])
+    expect(pairs.find((p) => p.key === "entities[id=E01].relation_verbs")).toMatchObject({
+      source: ["belongs to", "places"],
+      text: ["thuộc về", "đặt"],
+      sourceHash: hashSource(["belongs to", "places"])
+    })
+    // Thiếu một động từ ⇒ bỏ đơn vị đó, phần còn lại vẫn ghép
+    const partial = unitsOfValue("entities[id=E01]", en, { ...loc, relation_verbs: { E02: "thuộc về" } })
+    expect(partial.map((p) => p.key)).toEqual(["entities[id=E01].name", "entities[id=E01].description"])
+
+    expect(unitsOfValue("entities[id=E01].relation_verbs", en.relation_verbs, loc.relation_verbs)).toEqual([
+      { key: "entities[id=E01].relation_verbs", sourceHash: hashSource(["belongs to", "places"]), source: ["belongs to", "places"], text: ["thuộc về", "đặt"] }
+    ])
+    expect(unitsOfValue(`actors[id=${A.id}].flows_out`, ["order status"], ["trạng thái đơn"])).toEqual([
+      { key: `actors[id=${A.id}].flows_out`, sourceHash: hashSource(["order status"]), source: ["order status"], text: ["trạng thái đơn"] }
+    ])
+    const actor = { id: "A09", name: "Payment Gateway", description: "Takes payments", kind: "system", flows_in: ["payment result"], flows_out: ["payment request"] }
+    const actorPairs = unitsOfValue("actors[]", [actor], [{ id: "A09", name: "Cổng thanh toán", description: "Nhận thanh toán", flows_in: ["kết quả thanh toán"], flows_out: ["yêu cầu thanh toán"] }])
+    expect(actorPairs.map((p) => p.key)).toEqual(["actors[id=A09].name", "actors[id=A09].description", "actors[id=A09].flows_in", "actors[id=A09].flows_out"])
   })
 })

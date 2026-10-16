@@ -39,7 +39,7 @@ import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramSe
 import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
+import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
@@ -463,7 +463,9 @@ export const replyLanguageAfterMessage = async (
 export const settleFromChat = (
   asked: PendingAnswerState["asked"],
   settled: readonly { topic_key: string; answer: string }[] | undefined,
-  message: string
+  message: string,
+  /** Tin user chỉ là "Đúng rồi" với đề xuất AI vừa nêu ⇒ đề xuất đó (lời AI trước) cũng là nguồn trích đoạn hợp lệ. */
+  agreedProposal?: string
 ): AnswerInput[] => {
   const ids = questionIdsFor(asked)
   const out: AnswerInput[] = []
@@ -486,7 +488,10 @@ export const settleFromChat = (
     if (question.options.length === 0) {
       // Trích đoạn model báo (đã kiểm là chuỗi con) trước: một danh sách đánh số nằm trong MỘT câu trả lời ("Tính
       // năng: 1. … 2. …") không được tách sang câu khác. Model diễn lại ⇒ mới dùng đoạn đánh số theo thứ tự câu mở.
-      const text = verifiedExcerpt(item.answer, message) ?? (useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
+      const text =
+        verifiedExcerpt(item.answer, message) ??
+        (agreedProposal ? verifiedExcerpt(item.answer, agreedProposal) : undefined) ??
+        (useNumbered ? numbered.get(openIndexes.indexOf(index)) : undefined)
       // Nguyên văn cả tin nhắn hoặc đoạn đã gán cho câu khác ⇒ không tách được cho câu này, câu vẫn chờ
       if (!text || (openSettled.size > 1 && sameText(text, message)) || openTexts.some((t) => sameText(t, text))) continue
       out.push({ question_id: ids[index], answer: text })
@@ -555,7 +560,10 @@ export const nextPendingAfterChat = (
 const DEFERS_TO_AI =
   /\?\s*$|b[ạa]n (ngh[ĩi]|th[ấa]y) sao|t[uùủ]y b[ạa]n|b[ạa]n (t[ựu] )?[đd][ềe] xu[ấa]t|theo (khuy[ếe]n ngh[ịi]|[đd][ềe] xu[ấa]t)|ch[ưu]a bi[ếe]t|kh[ôo]ng bi[ếe]t|kh[ôo]ng ngh[ĩi] ra|\b(you decide|up to you|your call|what do you think|i (don['’]?t|do not) know|not sure|no idea)\b/i
 /** Chỉ đồng ý suông ("oke", "ừ", "được", "sure", "sounds good") — đồng ý với đề xuất của AI, không phải nội dung trả lời. */
-const BARE_AGREEMENT = /^(ok(e|ay)?|ừ+m?|uh+|[đd]ư[ợo]c|[đd]c|v[âa]ng|yes|[đd][ồo]ng [ýy]|chu[ẩa]n|[đd]úng r[ồo]i|sure|fine|agreed|yep|yeah|sounds good|got it|right)[\s.!,]*$/i
+const BARE_AGREEMENT = /^(ok(e|ay)?|ừ+m?|uh+|[đd]ư[ợo]c|[đd]c|v[âa]ng|yes|[đd][ồo]ng [ýy]|chu[ẩa]n|[đd]úng r[ồo]i|sure|fine|agreed|yep|yeah|sounds good|got it|right)([\s.!,]+(nh[ée]|[đd]i ti[ếe]p|ti[ếe]p t[ụu]c|l[àa]m ti[ếe]p|continue|go on|go ahead))*[\s.!,]*$/i
+
+/** "Đúng rồi", "ok", kể cả kèm đuôi "đi tiếp"/"nhé" như chip "Đúng rồi, đi tiếp". */
+export const isBareAgreement = (message: string): boolean => BARE_AGREEMENT.test(message.trim())
 
 export const isSubstantiveAnswer = (message: string): boolean => {
   const text = message.trim()
@@ -688,7 +696,10 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
     cost: result.cost,
     logId: result.logId || null
   })
-  const verified = settleFromChat(input.asked, result.data.settled, input.message)
+  // "Đúng rồi, đi tiếp" sau khi AI đề xuất mặc định cho câu mở: model chốt bằng chữ của đề xuất, không có trong tin user.
+  // Trước đây đoạn đó bị bỏ ⇒ câu bị gắn lại mãi (E2E FAP, vòng S17).
+  const proposal = input.sessionId && isBareAgreement(input.message) ? await loadLastAiReply(input.sessionId, input.unit) : null
+  const verified = settleFromChat(input.asked, result.data.settled, input.message, proposal ?? undefined)
   const settled = input.closing ? verified : settleRepeatedAnswer(input.asked, verified, input.message, result.data.still_open ?? [])
   return { reply: result.data.reply, settled, questions: result.data.questions ?? [] }
 }
