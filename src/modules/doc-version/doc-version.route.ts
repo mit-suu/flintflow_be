@@ -31,8 +31,8 @@ const router = Router()
  *       - BearerAuth: []
  *     parameters:
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
- *       - { in: query, name: from, required: true, schema: { type: string, example: "0.0" } }
- *       - { in: query, name: to, required: true, schema: { type: string, example: "0.1" } }
+ *       - { in: query, name: from, required: true, schema: { type: string, example: "0.1" } }
+ *       - { in: query, name: to, required: true, schema: { type: string, example: "0.2" } }
  *     responses:
  *       200: { description: "`{ from, to, summary: { added, removed, modified, moved }, blocks: [{ block_id, change, before?, after? }] }`" }
  *       404: { description: DOC_VERSION_NOT_FOUND }
@@ -51,7 +51,7 @@ const router = Router()
  * /api/v1/projects/{projectId}/versions/{v}/download:
  *   get:
  *     summary: Tải file .docx của một version (UC-57)
- *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.0; version khác ⇒ 404)."
+ *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.1_DRAFT.docx`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.0; version khác ⇒ 404)."
  *     tags: [Versions (mode 1)]
  *     security:
  *       - BearerAuth: []

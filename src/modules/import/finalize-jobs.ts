@@ -1,6 +1,6 @@
 /**
  * Finalize (nút 1.10–1.12) chạy nền — cùng cách với I-4 (`extract-jobs.ts`). SRS ~200 trang: tách lại file, áp Spine, vẽ
- * mọi diagram, render bản 0.0, chụp baseline rồi 1.11 (nhiều lượt AI) mất vài phút; reverse proxy (60–100 s) cắt request
+ * mọi diagram, render bản 0.1, chụp baseline rồi 1.11 (nhiều lượt AI) mất vài phút; reverse proxy (60–100 s) cắt request
  * trong khi BE vẫn chạy, lần bấm lại gặp `IMPORT_INVALID_STATE`. Vì vậy:
  *   - `POST /import/finalize` kiểm điều kiện **ngay** (trạng thái, `base_version`, profile — lỗi 4xx như cũ), ghi mốc
  *     (`finalize_checkpoint`) rồi trả ngay import `baselining`; FE poll `GET /import` tới `gap_review` hoặc `paused`.
@@ -113,7 +113,7 @@ export const startResume = async (projectId: string, userId: string, importId: s
     return launch(doc, { mode: "check", projectId, userId, importId }, prepare)
   }
   if (!doc.finalize_checkpoint) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa bắt đầu tạo bản gốc — hãy bấm tạo baseline 0.0", { status: doc.status, to: "checking", allowed: ["checking"] })
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa bắt đầu tạo bản gốc — hãy bấm tạo baseline 0.1", { status: doc.status, to: "checking", allowed: ["checking"] })
   }
   return launch(doc, { mode: "finalize", projectId, userId, importId }, prepareFinalize(doc, doc.finalize_checkpoint.record_of_changes ?? null))
 }

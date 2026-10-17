@@ -20,6 +20,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry, type StepPlanItem } from "./template-profile.model.js"
+import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
 const REPORT_STATUSES: readonly ImportStatus[] = ["gap_review", "delivered", "change_requested"]
 
@@ -98,7 +99,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
 
   return {
     project_id: projectId,
-    doc_version: version?.version ?? "0.0",
+    doc_version: version?.version ?? IMPORTED_DOC_VERSION,
     generated_at: new Date().toISOString(),
     totals: {
       red: open.filter((f) => f.level === "red").length,

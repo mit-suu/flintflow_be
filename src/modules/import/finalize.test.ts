@@ -1,7 +1,7 @@
 /**
  * Finalize (nút 1.10) — phần hàm thuần mà `finalize.service.ts` ghép lại: field đã xác nhận ⇒ thực thể ⇒ op
  * một lô, section tạm ⇒ id thật. Plan §8.2 `finalize.test.ts`. FLF-172 P4.
- * Transaction `by: import`, FieldAnchor, DocVersion 0.0, baseline `imported` (cần Mongo) ở
+ * Transaction `by: import`, FieldAnchor, DocVersion 0.1, baseline `imported` (cần Mongo) ở
  * `test/integration/mode1/finalize.int.test.ts`.
  */
 import { describe, expect, it } from "vitest"

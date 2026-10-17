@@ -56,7 +56,7 @@ beforeEach(() => {
 const projectWithRevision = async () => {
   const ctx = await importedProject()
   const first = await writeCr(ctx.c, "Faster", "1 second instead of 2 seconds")
-  expect(first).toEqual({ crId: "CR-001", version: "0.1" })
+  expect(first).toEqual({ crId: "CR-001", version: "0.2" })
   return ctx
 }
 
@@ -124,7 +124,7 @@ describe("release — bản sạch + baseline", () => {
     const { c, projectId } = await projectWithRevision()
     const spineBefore = (await spineRepository.get(projectId))!
     const rel = await released(c)
-    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.1", has_clean_file: true })
+    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.2", has_clean_file: true })
     expect(rel.cr_ids).toEqual(["CR-001"])
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
     expect(rel.spine_version).toBeGreaterThan(spineBefore.spine_version)
@@ -174,7 +174,7 @@ describe("release — gom CR", () => {
     const spine = (await spineRepository.get(projectId))!
     expect(spine.baselines.filter((b) => b.type === "release").map((b) => b.version)).toEqual(["1.0", "2.0"])
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
-    expect(versions.map((v) => v.version)).toEqual(["2.0", "1.2", "1.1", "1.0", "0.1", "0.0"])
+    expect(versions.map((v) => v.version)).toEqual(["2.0", "1.2", "1.1", "1.0", "0.2", "0.1"])
 
     const v20 = await DocVersion.findOne({ projectId, version: "2.0" }).lean()
     const clean = await DocxPackage.load(await docFileStore().load(v20!.clean_file_ref!))
@@ -232,16 +232,16 @@ describe("doc-file.store — GridFS", () => {
 
   it("file lớn nhiều chunk đọc lại đủ", async () => {
     const big = Buffer.alloc(600 * 1024, 7)
-    const ref = await gridFsDocFileStore.save(big, { projectId: "P2", kind: "version", name: "0.0" })
+    const ref = await gridFsDocFileStore.save(big, { projectId: "P2", kind: "version", name: "0.1" })
     const back = await gridFsDocFileStore.load(ref)
     expect(back.length).toBe(big.length)
     expect(Buffer.compare(back, big)).toBe(0)
   })
 
   it("remove: xoá được; ref không có / ref sai ⇒ im lặng; removeProject chỉ xoá file của project đó", async () => {
-    const a = await gridFsDocFileStore.save(Buffer.from("a"), { projectId: "A", kind: "version", name: "0.0" })
+    const a = await gridFsDocFileStore.save(Buffer.from("a"), { projectId: "A", kind: "version", name: "0.1" })
     await gridFsDocFileStore.save(Buffer.from("a2"), { projectId: "A", kind: "clean", name: "1.0" })
-    const b = await gridFsDocFileStore.save(Buffer.from("b"), { projectId: "B", kind: "version", name: "0.0" })
+    const b = await gridFsDocFileStore.save(Buffer.from("b"), { projectId: "B", kind: "version", name: "0.1" })
     await gridFsDocFileStore.remove(a)
     await expect(gridFsDocFileStore.load(a)).rejects.toBeInstanceOf(DocFileNotFoundError)
     await expect(gridFsDocFileStore.remove(a)).resolves.toBeUndefined()

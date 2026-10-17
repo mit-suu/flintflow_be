@@ -40,7 +40,7 @@ const atBaselining = async () => {
   return { seeded, projectId, c, id }
 }
 
-/** Store file bọc store thật: lần lưu file `version` thứ `nth` (bản render 0.0) ném lỗi — lỗi sau khi Spine đã đổi. */
+/** Store file bọc store thật: lần lưu file `version` thứ `nth` (bản render 0.1) ném lỗi — lỗi sau khi Spine đã đổi. */
 const failingVersionSave = (nth: number): (() => void) => {
   const real = docFileStore()
   let saves = 0
@@ -48,7 +48,7 @@ const failingVersionSave = (nth: number): (() => void) => {
     get(target, prop) {
       if (prop === "save") {
         return async (...args: Parameters<DocFileStore["save"]>) => {
-          if (args[1].kind === "version" && ++saves === nth) throw new Error("render bản 0.0 hỏng (test)")
+          if (args[1].kind === "version" && ++saves === nth) throw new Error("render bản 0.1 hỏng (test)")
           return target.save(...args)
         }
       }
@@ -117,7 +117,7 @@ describe("finalize chạy nền — lỗi giữa chừng, job mất", () => {
     }
     expect(failed.res.status).toBe(200)
     expect(failed.view?.import).toMatchObject({ status: "baselining", paused: { reason: "resume_later" } })
-    // trạng thái nhất quán: dữ liệu Spine, heading, block về như trước finalize; không còn bản 0.0 / snapshot dở
+    // trạng thái nhất quán: dữ liệu Spine, heading, block về như trước finalize; không còn bản 0.1 / snapshot dở
     expect(await dataOf(projectId)).toEqual(before)
     expect((await TemplateProfile.findOne({ projectId }).lean())!.heading_map.map((h) => [h.block_id, h.section_id])).toEqual(headingsBefore)
     expect((await DocBlock.find({ projectId }).sort({ "anchor.ordinal": 1 }).lean()).map((b) => b.section_id ?? null)).toEqual(blocksBefore)

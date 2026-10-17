@@ -8,6 +8,7 @@
 import { z } from "zod"
 import { baselineSchema, flagSchema } from "../spine/spine.schema.js"
 import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES } from "./import.state.js"
+import { DOC_VERSION_PATTERN } from "../doc-version/versioning.js"
 import {
   BLOCK_ID_PATTERN,
   DOC_BLOCK_KINDS,
@@ -293,7 +294,7 @@ export const extractResponseSchema = z.object({
  */
 export const finalizeResponseSchema = z.object({
   import: importedDocumentDtoSchema,
-  doc_version: z.literal("0.0"),
+  doc_version: z.string().regex(DOC_VERSION_PATTERN),
   baseline: baselineSchema.nullable(),
   spine_version: z.number().int().min(1),
   flags: z.object({ red: z.number().int().min(0), yellow: z.number().int().min(0) }).nullable()

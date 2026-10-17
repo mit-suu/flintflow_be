@@ -31,7 +31,7 @@ const project = async () => {
 }
 const stamped = async (projectId: string, buf?: Buffer) => {
   const pkg = await DocxPackage.load(buf ?? (await makeSrsDocx()))
-  await writeStamp(pkg, { project_id: projectId, version: "0.2", source: "cr_revision" })
+  await writeStamp(pkg, { project_id: projectId, version: "0.3", source: "cr_revision" })
   return pkg.toBuffer()
 }
 const sourceFiles = async (projectId: string) =>
@@ -51,7 +51,7 @@ describe("preflight — 3 nhánh stamp", () => {
   it("stamp đúng project (chưa có baseline) ⇒ coi như đã xác nhận, parse ngay", async () => {
     const { projectId, userId } = await project()
     const doc = await uploadImport(projectId, userId, fileOf(await stamped(projectId)))
-    expect(doc.stamp).toMatchObject({ project_id: projectId, version: "0.2" })
+    expect(doc.stamp).toMatchObject({ project_id: projectId, version: "0.3" })
     expect(doc.confirmed_latest_at).toBeInstanceOf(Date)
     expect(doc.status).toBe("extracting")
     expect(await DocBlock.countDocuments({ projectId })).toBeGreaterThan(20)

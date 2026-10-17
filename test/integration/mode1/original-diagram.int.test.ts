@@ -1,7 +1,7 @@
 /**
  * Sơ đồ gốc của người dùng (mode 1 v3 §4.13) trên Mongo + GridFS thật, AI giả:
- * upload SRS có hình use case vẽ sẵn ⇒ 0.0 giữ y hình ⇒ CR đổi tên use case ⇒ C-3 thêm vị trí "vẽ lại hình" (code, không
- * AI) ⇒ duyệt ⇒ 0.1 bỏ ảnh gốc (in sơ đồ FlintFlow); từ chối ⇒ giữ ảnh gốc + cờ vàng `original_diagram_stale`.
+ * upload SRS có hình use case vẽ sẵn ⇒ 0.1 giữ y hình ⇒ CR đổi tên use case ⇒ C-3 thêm vị trí "vẽ lại hình" (code, không
+ * AI) ⇒ duyệt ⇒ 0.2 bỏ ảnh gốc (in sơ đồ FlintFlow); từ chối ⇒ giữ ảnh gốc + cờ vàng `original_diagram_stale`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
@@ -89,27 +89,27 @@ const renameToReview = async (c: ReturnType<typeof mode1Api>) => {
 }
 
 describe("§4.13 sơ đồ gốc của người dùng", () => {
-  it("0.0 giữ y hình use case của người dùng", async () => {
+  it("0.1 giữ y hình use case của người dùng", async () => {
     const { projectId } = await importWithDiagram()
     expect(await keptImages(projectId)).toHaveLength(1)
-    expect((await mediaOf(projectId, "0.0")).some((m) => m.equals(PNG))).toBe(true)
+    expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(true)
   })
 
-  it("CR đổi tên use case ⇒ đề xuất vẽ lại; duyệt ⇒ 0.1 bỏ ảnh gốc, không cờ hình lệch", async () => {
+  it("CR đổi tên use case ⇒ đề xuất vẽ lại; duyệt ⇒ 0.2 bỏ ảnh gốc, không cờ hình lệch", async () => {
     const { projectId, c } = await importWithDiagram()
     const { cr, submitted } = await renameToReview(c)
     let last = submitted
     for (const g of submitted.groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-    expect(last.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
+    expect(last.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
 
     const spine = (await spineRepository.get(projectId))!
     expect(spine.use_cases.find((u) => u.id === "UC-02")?.name).toBe(NEW_NAME)
     expect(await keptImages(projectId)).toEqual([])
     expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([])
-    expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(false)
+    expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(false)
   })
 
-  it("từ chối group vẽ lại ⇒ 0.1 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
+  it("từ chối group vẽ lại ⇒ 0.2 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
     const { projectId, c } = await importWithDiagram()
     const { cr, submitted, diagramGroup } = await renameToReview(c)
     const others = submitted.groups.filter((g) => g.group_id !== diagramGroup.group_id)
@@ -123,6 +123,6 @@ describe("§4.13 sơ đồ gốc của người dùng", () => {
     expect(spine.flags.filter((f) => f.rule_id === "original_diagram_stale" && !f.resolved_at)).toEqual([
       expect.objectContaining({ level: "yellow", section_id: "fixed:2.2.1" })
     ])
-    expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(true)
+    expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(true)
   })
 })

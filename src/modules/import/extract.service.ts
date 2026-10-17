@@ -15,7 +15,7 @@ import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { getActionCost, getOrCreateWallet, resolveWalletOrg } from "../../shared/ai/credit-reservation.service.js"
 import type { ImportExtractDiagramOutput, ImportExtractOutput } from "../../shared/ai/response-parser.js"
 import { loadImportImage } from "../render/import-media.js"
-import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock, type IDocBlock } from "./doc-block.model.js"
 import { DIAGRAM_SECTIONS, DIAGRAM_TARGETS, NFR_CATEGORY_BY_SECTION, isExtractableSection, schemaExcerptFor, targetsOf } from "./extract-targets.js"
 import {
@@ -592,7 +592,7 @@ interface ExtractionInputs {
 const loadExtractionInputs = async (projectId: string): Promise<ExtractionInputs | null> => {
   const profile = await TemplateProfile.findOne({ projectId })
   if (!profile) return null
-  const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
+  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean<BlockLite[]>()
   return { profile, blocks, provisional: resolveProvisional(profile.heading_map), plan: extractionPlan(blocks) }
 }
 

@@ -259,7 +259,7 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  * @swagger
  * /api/v1/projects/{id}/import/finalize:
  *   post:
- *     summary: Ghi Spine + tạo version 0.0 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
+ *     summary: Ghi Spine + tạo version 0.1 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
  *     description: |
  *       Chạy nền (SRS lớn mất vài phút — không giữ request qua reverse proxy): kiểm trạng thái + `base_version` ngay
  *       (409 như cũ), rồi trả ngay `{ import (baselining, paused null), baseline: null, flags: null }`; FE poll `GET /import`
@@ -281,7 +281,7 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  *               import_id: { type: string }
  *               base_version: { type: integer }
  *     responses:
- *       200: { description: "`{ import, doc_version: \"0.0\", baseline: null, spine_version, flags: null }` — trả ngay, import ở baselining (job nền)" }
+ *       200: { description: "`{ import, doc_version: \"0.1\", baseline: null, spine_version, flags: null }` — trả ngay, import ở baselining (job nền)" }
  *       409: { description: IMPORT_INVALID_STATE, SPINE_VERSION_CONFLICT }
  */
 router.post("/:id/import/finalize", authMiddleware, importController.finalize)

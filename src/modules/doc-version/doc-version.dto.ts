@@ -23,7 +23,7 @@ export const docVersionDtoSchema = z.object({
   has_clean_file: z.boolean(),
   /** Mode 1 v3: có bản Track Changes của CR (`variant=tracked`). */
   has_tracked_file: z.boolean(),
-  /** Có file gốc người dùng upload (bản import 0.0, FLF-184) — tải qua `variant=original`. */
+  /** Có file gốc người dùng upload (bản import 0.1, FLF-184) — tải qua `variant=original`. */
   has_original_file: z.boolean(),
   created_by: id,
   created_at: isoDateTime
@@ -35,9 +35,9 @@ export const versionParamsSchema = z.object({ v: docVersionString })
 
 /**
  * `GET /projects/:id/versions/:v/download?variant=` —
- * `auto`: release ⇒ bản sạch; draft ⇒ bản Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx` (G8).
+ * `auto`: release ⇒ bản sạch; draft ⇒ bản Track Changes + watermark DRAFT, tên `…_v0.1_DRAFT.docx` (G8).
  * `tracked`: luôn bản có Track Changes (cả với release).
- * `original` (mode 1 v2, FLF-184): file người dùng upload của bản `0.0` (bản lưu `0.0` giờ là bản render từ Spine).
+ * `original` (mode 1 v2, FLF-184): file người dùng upload của bản `0.1` (bản lưu `0.1` giờ là bản render từ Spine).
  */
 export const downloadQuerySchema = z.object({ variant: z.enum(["auto", "tracked", "original"]).default("auto") })
 
