@@ -291,6 +291,16 @@ describe("runDeterministicCheck", () => {
     expect(byRule(runDeterministicCheck(fresh), "diagram_stale")).toEqual([])
   })
 
+  it("hình tách phần (D02, D02-2, D02-3) cùng lệch ⇒ một cờ diagram_stale, gắn phần đầu (FLF-296)", () => {
+    const d = FIXTURE.diagrams.find((x) => x.kind === "usecase")!
+    const split = variant((s) => {
+      const stale = { ...s.diagrams.find((x) => x.id === d.id)!, source_hash: "0".repeat(64) }
+      // Thứ tự lưu không theo id: phần sau đứng trước phần đầu
+      s.diagrams = [...s.diagrams.filter((x) => x.id !== d.id), { ...stale, id: `${d.id}-3` }, stale, { ...stale, id: `${d.id}-2` }]
+    })
+    expect(byRule(runDeterministicCheck(split), "diagram_stale")).toMatchObject([{ section_id: "fixed:2.2.1", target_id: d.id }])
+  })
+
   it("luật S-9 chỉ chạy khi atBaseline", () => {
     const spine = variant((s) => {
       s.screens.find((x) => x.id === "S02")!.detail_status = "pending"
