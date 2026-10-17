@@ -1,5 +1,5 @@
 /**
- * Mode 1 — I-4 trích field, xác nhận field, finalize (baseline v0 + version 0.0), check, gap report, re-upload
+ * Mode 1 — I-4 trích field, xác nhận field, finalize (baseline v0 + version 0.1), check, gap report, re-upload
  * qua HTTP trên Mongo thật, provider AI giả (FLF-171, P2 2C + 2D).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -135,7 +135,7 @@ describe("mode 1 — I-4 chạy nền", () => {
 })
 
 describe("mode 1 — finalize, check, gap report", () => {
-  it("finalize: Spine một txn by import, version 0.0 (bản gốc) có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
+  it("finalize: Spine một txn by import, version 0.1 (bản gốc) có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
     const { c, id, projectId } = await startImport()
     await c.extractAndWait(id)
     await c.patch("/import/fields", { import_id: id, confirm_all: true })
@@ -152,7 +152,7 @@ describe("mode 1 — finalize, check, gap report", () => {
 
     const spine = (await spineRepository.get(projectId))!
     const baseline = spine.baselines.find((b) => b.type === "imported")
-    expect(baseline).toMatchObject({ version: "0.0", type: "imported", doc_version: "0.0" })
+    expect(baseline).toMatchObject({ version: "0.1", type: "imported", doc_version: "0.1" })
     const yellow = spine.flags.filter((f) => f.level === "yellow" && f.resolved_at === null).length
     expect(yellow).toBeGreaterThanOrEqual(1)
     expect(spine.actors.map((a) => a.name)).toEqual(["Learner", "Admin"])
@@ -179,11 +179,11 @@ describe("mode 1 — finalize, check, gap report", () => {
     expect(fnBlock?.mentions).toEqual(expect.arrayContaining([{ entity: "use_case", id: "UC-01" }, { entity: "actor", id: "A01" }]))
     expect((await FieldAnchor.findOne({ projectId, entity_path: "use_cases[id=UC-01]" }).lean())?.block_ids.length).toBeGreaterThan(0)
 
-    // version 0.0: file gốc (original_ref) có stamp + bookmark neo; file_ref là bản render (FLF-184)
-    const version = await DocVersion.findOne({ projectId, version: "0.0" }).lean()
+    // version 0.1: file gốc (original_ref) có stamp + bookmark neo; file_ref là bản render (FLF-184)
+    const version = await DocVersion.findOne({ projectId, version: "0.1" }).lean()
     expect(version).toMatchObject({ kind: "imported", baseline_ref: baseline!.id })
     const pkg = await DocxPackage.load(await docFileStore().load(version!.original_ref ?? version!.file_ref))
-    expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.0", source: "import" })
+    expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.1", source: "import" })
     expect((await readBlocks(pkg))[0].bookmark).toBe("_ff_B0001")
 
     const report = gapReportSchema.parse((await c.get("/gap-report")).body.data)
@@ -230,7 +230,7 @@ describe("mode 1 — finalize, check, gap report", () => {
 describe("mode 1 — re-upload (UC-24)", () => {
   it("file sửa ngoài FlintFlow ⇒ diff theo block, không tạo version; /import sau baseline bị chặn", async () => {
     const { c, projectId } = await importToGapReview()
-    const version = await DocVersion.findOne({ projectId, version: "0.0" }).lean()
+    const version = await DocVersion.findOne({ projectId, version: "0.1" }).lean()
     // FLF-186: người ngoài sửa trên bản tải về (bản render từ Spine)
     const pkg = await DocxPackage.load(await docFileStore().load(version!.file_ref))
     const blocks = await readBlocks(pkg)
@@ -245,7 +245,7 @@ describe("mode 1 — re-upload (UC-24)", () => {
     const res = await c.upload(await pkg.toBuffer(), "SRS_Lumen_v2.docx", "/reupload")
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
     const diff = reuploadDiffDtoSchema.parse(res.body.data)
-    expect(diff.against_version).toBe("0.0")
+    expect(diff.against_version).toBe("0.1")
     expect(diff.summary).toEqual({ added: 0, removed: 0, modified: 1, moved: 0 })
     expect(diff.blocks[0]).toMatchObject({ block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED })
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)

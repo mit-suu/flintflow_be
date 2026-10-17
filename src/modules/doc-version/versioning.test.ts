@@ -53,7 +53,7 @@ describe("versioning — G4", () => {
   it("tên file tải về: draft có _DRAFT, release thì không; bỏ ký tự cấm của Windows", () => {
     expect(downloadFileName("Lumen SRS", "0.2")).toBe("Lumen SRS_v0.2_DRAFT.docx")
     expect(downloadFileName("Lumen SRS", "1.0")).toBe("Lumen SRS_v1.0.docx")
-    expect(downloadFileName("A/B:C", "0.0")).toBe("A_B_C_v0.0_DRAFT.docx")
+    expect(downloadFileName("A/B:C", "0.1")).toBe("A_B_C_v0.1_DRAFT.docx")
     expect(downloadFileName("   ", "1.0")).toBe("SRS_v1.0.docx")
   })
 

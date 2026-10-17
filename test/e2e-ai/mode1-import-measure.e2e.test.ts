@@ -3,7 +3,7 @@
  *   MEASURE_SRS="<đường dẫn .docx>" MEASURE_LABEL=<nhãn> npm run test:e2e-ai -- test/e2e-ai/mode1-import-measure.e2e.test.ts
  *
  * Luồng HTTP thật: upload → confirm-latest → mapping (confirm_all) → I-4 (chạy nền, chờ job) → fields (confirm_all) →
- * finalize (baseline 0.0 + 1.11 + 1.12). Mongo in-memory — không đụng DB thật. PlantUML tắt trong test nên sơ đồ có
+ * finalize (baseline 0.1 + 1.11 + 1.12). Mongo in-memory — không đụng DB thật. PlantUML tắt trong test nên sơ đồ có
  * cờ render, không ảnh hưởng số đo AI.
  *
  * Ghi `test/e2e-ai/results/mode1-measure-<label>-<file>-<ISO>.{md,json}`: lượt gọi / token / credit theo bước, thời gian

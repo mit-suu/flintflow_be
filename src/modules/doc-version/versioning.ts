@@ -1,12 +1,13 @@
 /**
  * Đánh số version tài liệu mode 1 (G4) — hàm thuần. FLF-171, plan §5.3.
- * Import = `0.0`; mỗi CR ghi xong = minor tiếp theo (`0.1`, `0.2`…); release = major tiếp theo (`1.0`, `2.0`…).
+ * Import = `0.1`; mỗi CR ghi xong = minor tiếp theo (`0.2`, `0.3`…); release = major tiếp theo (`1.0`, `2.0`…).
  * Khác quy ước `v1.N[-conditional]` của mode 2 (`pipeline/s9/baseline.service.ts`), không dùng chung.
  */
 
 export const DOC_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
-export const IMPORTED_DOC_VERSION = "0.0"
+/** Bản gốc khi import SRS mới. Project cũ có thể còn bản `0.0` — vẫn hợp lệ theo `DOC_VERSION_PATTERN`. */
+export const IMPORTED_DOC_VERSION = "0.1"
 
 export interface ParsedDocVersion {
   major: number

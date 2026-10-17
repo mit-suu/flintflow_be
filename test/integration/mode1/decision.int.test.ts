@@ -46,10 +46,10 @@ describe("C-6 duyệt một phần", () => {
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
 
     const written = detail(await decide(c, cr, g1.group_id, "approved"))
-    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.1", decided_by: seeded.userId })
+    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.2", decided_by: seeded.userId })
     expect(written.groups.map((g) => g.decision)).toEqual(["approved", "rejected"])
     // chỉ vị trí của group duyệt được ghi: op của NFR-01 (G01) vào Spine, by = mã CR
-    const v01 = await DocVersion.findOne({ projectId, version: "0.1" }).lean()
+    const v01 = await DocVersion.findOne({ projectId, version: "0.2" }).lean()
     expect(v01?.cr_ids).toEqual([crId])
     const spine = (await spineRepository.get(projectId))!
     expect(spine.nfrs.find((n) => n.id === "NFR-01")?.threshold).toBe("1 s")
@@ -67,7 +67,7 @@ describe("C-6 duyệt một phần", () => {
     const [first, last] = await notificationsOf(seeded.userId, 2)
     expect(first).toMatchObject({ title: `${crId}: nhóm thay đổi “${g2.title}” bị từ chối`, meta: { cr_id: crId, group_id: g2.group_id, decision: "rejected", result_doc_version: null } })
     expect(first.body).toContain(REASON)
-    expect(last).toMatchObject({ title: `${crId} đã được ghi vào bản 0.1`, meta: { cr_id: crId, group_id: g1.group_id, decision: "approved", result_doc_version: "0.1" } })
+    expect(last).toMatchObject({ title: `${crId} đã được ghi vào bản 0.2`, meta: { cr_id: crId, group_id: g1.group_id, decision: "approved", result_doc_version: "0.2" } })
   })
 
   it("duyệt group đầu khi còn group chờ ⇒ chưa ghi, thông báo 'được duyệt', vẫn giữ khoá", async () => {

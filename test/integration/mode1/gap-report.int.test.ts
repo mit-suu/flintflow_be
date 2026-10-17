@@ -88,7 +88,7 @@ describe("gap report — gộp nhóm", () => {
     })
     // chỉ FL902 (test đặt) — đầu mục FPT file không có không còn là cờ đỏ
     expect(report.totals.red).toBe(1)
-    expect(report.doc_version).toBe("0.0")
+    expect(report.doc_version).toBe("0.1")
   })
 
   it("FLF-184: thiếu mục FPT theo kế hoạch step (D6); cờ + mục xếp theo layout file upload; mục riêng loại custom, phần nối không liệt kê", async () => {

@@ -50,7 +50,7 @@ describe("C-1 tạo CR — kiểm đầu vào", () => {
       status: "draft",
       source: { kind: "verbal", ref: null, note: null },
       requester: "PM Lan",
-      base_doc_version: "0.0",
+      base_doc_version: "0.1",
       paused: null,
       result_doc_version: null
     })

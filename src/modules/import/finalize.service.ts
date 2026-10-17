@@ -5,7 +5,7 @@
  *      quét lại mention theo tên (actor, entity, feature, screen).
  *   3. Mode 1 v2 (FLF-183): layout + mục riêng (`custom_sections`) theo file upload, kế hoạch step theo template (D6),
  *      seed `steps[]` + `progress` ⇒ workspace như mode 2 chạy tiếp từ step còn thiếu. Một txn thứ hai `by: import`.
- *   4. Mode 1 v2 (FLF-184): vẽ diagram từ Spine (PlantUML có mặt), baseline `type: imported`; `DocVersion 0.0` = bản
+ *   4. Mode 1 v2 (FLF-184): vẽ diagram từ Spine (PlantUML có mặt), baseline `type: imported`; `DocVersion 0.1` = bản
  *      **render** từ Spine theo layout file upload + stamp, file gốc (bookmark neo + stamp) giữ ở `original_ref`.
  *      §4.13: loại sơ đồ người dùng đã có hình (ảnh I-4 đọc được) thì bản render giữ ảnh gốc, PlantUML loại đó không in.
  *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp); ghép sẵn
@@ -91,7 +91,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })), droppedPermissions)
 
-  // 2. File gốc của bản 0.0 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
+  // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
   await writeStamp(parsed.pkg, { project_id: projectId, version: IMPORTED_DOC_VERSION, source: "import" })
   const fileRef = await docFileStore().save(await parsed.pkg.toBuffer(), { projectId, kind: "version", name: IMPORTED_DOC_VERSION })
@@ -156,7 +156,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
-  // render 0.0 mất 35/39 ảnh (T1). §4.13: sơ đồ I-4 đọc được (use case / ERD / luồng màn / ngữ cảnh) cũng **giữ y hình
+  // render 0.1 mất 35/39 ảnh (T1). §4.13: sơ đồ I-4 đọc được (use case / ERD / luồng màn / ngữ cảnh) cũng **giữ y hình
   // của người dùng** — dữ liệu đọc được chỉ vào Spine; khối ảnh mang `diagram` (loại + hash dữ liệu lúc import) để bản
   // render ẩn PlantUML cùng loại, và CR chạm dữ liệu đó sau này đề xuất vẽ lại bằng PlantUML.
   const imageRead = new Map(
@@ -210,7 +210,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)
   await renderDiagramsIfAvailable(projectId)
 
-  // Baseline imported + DocVersion 0.0 — chụp Spine sau lô kế hoạch step; file 0.0 = bản render của đúng snapshot đó
+  // Baseline imported + DocVersion 0.1 — chụp Spine sau lô kế hoạch step; file 0.1 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
   const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? doc.original_name
   const renderedRef = await docFileStore().save(
@@ -330,7 +330,7 @@ export const finalizeCheckpoint = async (projectId: string, recordOfChanges: Fin
 /**
  * Hoàn lần finalize dở ở `baselining` về `finalize_checkpoint` để chạy lại sạch, như thể lần đó chưa chạy: Spine về đúng
  * nội dung mốc + bỏ change của lần đó (`restoreSnapshot` — revert bằng op không về được Spine rỗng vì bất biến "phần tử
- * cuối"), xoá bản 0.0 + snapshot baseline đã ghi, trả heading về section tạm (block đổi theo). FieldAnchor / mention /
+ * cuối"), xoá bản 0.1 + snapshot baseline đã ghi, trả heading về section tạm (block đổi theo). FieldAnchor / mention /
  * layout không cần hoàn: lần chạy lại ghi đè cùng giá trị. Không có mốc ⇒ không làm gì; gọi lại nhiều lần vẫn về đúng mốc.
  */
 export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<void> => {

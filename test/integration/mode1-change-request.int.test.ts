@@ -1,6 +1,6 @@
 /**
  * Mode 1 — change request trọn luồng qua HTTP trên Mongo thật, provider AI giả (FLF-171, P2 2E):
- * log → làm rõ → impact + khoá → đề xuất → verify → nộp → duyệt một phần → file 0.1 có Track Changes + comment
+ * log → làm rõ → impact + khoá → đề xuất → verify → nộp → duyệt một phần → file 0.2 có Track Changes + comment
  * author CR-001; khoá trùng giữa hai CR; verify trượt 3 lần ⇒ manual_fix; huỷ mở khoá.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -78,7 +78,7 @@ describe("mode 1 — change request", () => {
     expect(noSource.body.error.code).toBe("CR_SOURCE_REQUIRED")
   })
 
-  it("trọn luồng: làm rõ → impact + khoá → đề xuất → verify → nộp → duyệt một phần ⇒ Spine đổi + 0.1 render lại (FLF-186)", async () => {
+  it("trọn luồng: làm rõ → impact + khoá → đề xuất → verify → nộp → duyệt một phần ⇒ Spine đổi + 0.2 render lại (FLF-186)", async () => {
     const { c, projectId, seeded } = await importedProject()
     const { crId, cr, impact, proposed, verified } = await crToReady(c)
     expect(crId).toBe("CR-001")
@@ -112,13 +112,13 @@ describe("mode 1 — change request", () => {
     expect(await lockedPaths(projectId, "CR-001")).not.toContain(brLoc.path)
 
     const written = detail(await c.post(`${cr}/groups/${perfGroup.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
+    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
 
-    // version 0.1 = bản render từ Spine mới: stamp 0.1, text mới; mọi khoá đã mở
-    const v01 = await DocVersion.findOne({ projectId, version: "0.1" }).lean()
-    expect(v01).toMatchObject({ kind: "cr_revision", based_on: "0.0", cr_ids: ["CR-001"] })
+    // version 0.2 = bản render từ Spine mới: stamp 0.2, text mới; mọi khoá đã mở
+    const v01 = await DocVersion.findOne({ projectId, version: "0.2" }).lean()
+    expect(v01).toMatchObject({ kind: "cr_revision", based_on: "0.1", cr_ids: ["CR-001"] })
     const pkg = await DocxPackage.load(await docFileStore().load(v01!.file_ref))
-    expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.1", source: "cr_revision" })
+    expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.2", source: "cr_revision" })
     const blocks = await readBlocks(pkg)
     expect(blocks.some((b) => b.text === "The system shall respond within 1 second for 95% of requests.")).toBe(true)
     expect(await lockedPaths(projectId, "CR-001")).toEqual([])

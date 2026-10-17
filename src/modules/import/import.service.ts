@@ -204,7 +204,7 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   ...(b.kind === "table" && b.rows ? { rows: b.rows } : {})
 })
 
-/** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.0`). */
+/** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.1`). */
 const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Promise<void> => {
   await Promise.all([
     DocBlock.deleteMany({ projectId, doc_version: IMPORTED_DOC_VERSION }),
@@ -217,7 +217,7 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const { blocks } = await parseDocument(await loadImportFile(doc))
   const profile = matchProfile(blocks)
   const sections = assignBlockSections(blocks, profile.heading_map)
-  // Record of Changes đọc ngay lúc tách file (FLF-252) — wizard cho người dùng xem/sửa trước khi tạo baseline 0.0
+  // Record of Changes đọc ngay lúc tách file (FLF-252) — wizard cho người dùng xem/sửa trước khi tạo baseline 0.1
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))

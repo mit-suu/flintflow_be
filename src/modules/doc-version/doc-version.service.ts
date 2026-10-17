@@ -1,6 +1,6 @@
 /**
  * Đọc version tài liệu mode 1 (FLF-171): version mới nhất, block theo version, file theo version.
- * Ghi version mới ở finalize (0.0), C-7 (minor) và release (major).
+ * Ghi version mới ở finalize (0.1), C-7 (minor) và release (major).
  * Mode 1 v2 (FLF-186): mỗi version là bản **render** từ Spine — block của version đọc thẳng từ file của nó
  * (`fileBlocksOfVersion`), không còn bản sao `DocBlock` theo version.
  */

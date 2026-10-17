@@ -28,7 +28,7 @@ const flag = (id: string, level: "red" | "yellow", rule_id: string, section_id: 
 
 const REPORT: GapReport = gapReportSchema.parse({
   project_id: "66f000000000000000000001",
-  doc_version: "0.0",
+  doc_version: "0.1",
   generated_at: "2026-09-19T00:00:00.000Z",
   totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1, missing_fpt_sections: 2, unrendered_diagrams: 1 },
   missing_fpt_sections: [
@@ -63,7 +63,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
     const blocks = await texts(buf)
     const all = blocks.map((b) => b.text)
     expect(all[0]).toBe("Báo cáo thiếu sót — Lumen")
-    expect(all[1]).toBe("Phiên bản tài liệu 0.0 · tạo lúc 19/09/2026 07:00")
+    expect(all[1]).toBe("Phiên bản tài liệu 0.1 · tạo lúc 19/09/2026 07:00")
     for (const h of ["Tổng quan", "Cờ theo mục", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
     // tiêu đề mục không kèm khoá máy
     expect(all).toContain("Performance")

@@ -218,7 +218,7 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
 /**
  * Nhiều nhóm phát hiện (mỗi nhóm một luật) ghi cờ trong CÙNG một lô (FLF-252): id cờ cấp nối tiếp qua các nhóm. Gọi
  * `findingOps` riêng từng nhóm trên cùng Spine thì mỗi lần đếm lại từ cờ có sẵn ⇒ hai cờ trùng id, cả lô bị từ chối
- * ("Mục này đã tồn tại trong tài liệu" lúc tạo bản 0.0 khi vừa có ảnh không đọc được vừa có quyền không khớp màn).
+ * ("Mục này đã tồn tại trong tài liệu" lúc tạo bản 0.1 khi vừa có ảnh không đọc được vừa có quyền không khớp màn).
  */
 export const findingOpsInOrder = (spine: Spine, groups: readonly { findings: FindingsOutput["findings"]; rule: string }[]): Op[] => {
   const ops: Op[] = []

@@ -71,7 +71,7 @@ describe("C-7 mode 1 v3 — vẽ lại hình, bản có đánh dấu lỗi", () 
 
     const written = await approveAll(c, cr, submitted.groups)
     expect(written.change_request.status).toBe("written")
-    const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
+    const v = (await DocVersion.findOne({ projectId, version: "0.2" }).lean())!
     // lượt đầu: bản sạch + bản có đánh dấu; vẽ lại: in lại cả hai
     expect(saved).toHaveLength(4)
     expect(v.file_ref).toBe(saved[2])
@@ -89,8 +89,8 @@ describe("C-7 mode 1 v3 — vẽ lại hình, bản có đánh dấu lỗi", () 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 
     const written = await approveAll(c, cr, submitted.groups)
-    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.1" })
-    const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
+    expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
+    const v = (await DocVersion.findOne({ projectId, version: "0.2" }).lean())!
     expect(v.tracked_file_ref).toBeNull()
     expect(await exists(v.file_ref)).toBe(true)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("dựng bản có đánh dấu"), expect.anything())

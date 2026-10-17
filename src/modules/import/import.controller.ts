@@ -29,6 +29,7 @@ import * as importService from "./import.service.js"
 import * as reuploadService from "./reupload.service.js"
 import * as stepPlanService from "./step-plan.service.js"
 import { authorizeMode1, mode1Handler, parseInput } from "./mode1.http.js"
+import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
 /**
  * Multer giữ file trong bộ nhớ. Giới hạn cứng gấp đôi giới hạn nghiệp vụ: file hơi quá cỡ vẫn tới preflight để
@@ -127,7 +128,7 @@ export const finalize = mode1Handler(async (req, res) => {
   const body = parseInput(finalizeRequestSchema, req.body)
   const doc = await finalizeJobs.startFinalize(auth.projectId, auth.userId, body)
   const spineVersion = doc.finalize_checkpoint?.spine_version ?? body.base_version
-  return sendSuccess(res, 200, { import: importService.toImportDto(doc), doc_version: "0.0", baseline: null, spine_version: spineVersion, flags: null })
+  return sendSuccess(res, 200, { import: importService.toImportDto(doc), doc_version: IMPORTED_DOC_VERSION, baseline: null, spine_version: spineVersion, flags: null })
 })
 
 /**
