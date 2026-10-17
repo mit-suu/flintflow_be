@@ -1,7 +1,7 @@
 ---
 actionType: summarize_document
-provider: openai
-aiModel: gpt-4o-mini
+provider: glm
+aiModel: zai-org/GLM-5.3-Flash
 maxTokens: 2048
 temperature: 0.3
 isActive: true

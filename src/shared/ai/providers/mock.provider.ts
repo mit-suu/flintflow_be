@@ -118,7 +118,7 @@ const freeText = (prompt: string): string => {
       summary: "[MOCK AI] Bản tóm tắt mẫu hệ thống FlintFlow. Phân tích yêu cầu và quy trình thực thi ngắn gọn.",
       keyPoints: [
         "Khởi tạo hệ thống quản lý Prompt Template (UC83)",
-        "Hỗ trợ Multi-provider: OpenAI, Gemini, Anthropic & Mock AI",
+        "Hỗ trợ Multi-provider: GLM, Gemini, Anthropic & Mock AI",
         "Kiểm tra và thử nghiệm biến template real-time"
       ]
     })

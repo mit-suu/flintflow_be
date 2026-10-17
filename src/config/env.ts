@@ -79,7 +79,6 @@ const envSchema = z.object({
   ADMIN_EMAIL: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
 
-  OPENAI_API_KEY: z.string().default(""),
   ANTHROPIC_API_KEY: z.string().default(""),
   GEMINI_API_KEY: z.string().default(""),
 
