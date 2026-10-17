@@ -374,10 +374,26 @@ const renderError = (spine: Spine): FlagCandidate[] =>
       remediation_step: renderStepOf(d)
     }))
 
+/**
+ * Một hình mỗi target (kind + owner): hình lớn được tách phần (`D02`, `D02-2`, …) cùng chung dữ liệu nguồn nên lệch cùng
+ * lúc, và "Vẽ lại" vẽ cả target — một cờ là đủ (FLF-296). Giữ phần đầu: id không hậu tố, như `diagram.service.assignIds`.
+ */
+const onePerTarget = (diagrams: Spine["diagrams"]): Spine["diagrams"] => {
+  const first = new Map<string, Spine["diagrams"][number]>()
+  for (const d of [...diagrams].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const key = `${d.kind}|${d.owner_id ?? ""}`
+    const kept = first.get(key)
+    if (!kept || (/-\d+$/.test(kept.id) && !/-\d+$/.test(d.id))) first.set(key, d)
+  }
+  return diagrams.filter((d) => first.get(`${d.kind}|${d.owner_id ?? ""}`) === d)
+}
+
 const diagramStale = (spine: Spine): FlagCandidate[] =>
-  printedDiagrams(spine)
-    .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
-    .filter((d) => d.source_hash !== computeSourceHash(spine, d))
+  onePerTarget(
+    printedDiagrams(spine)
+      .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
+      .filter((d) => d.source_hash !== computeSourceHash(spine, d))
+  )
     .map((d) => ({
       level: "red",
       rule_id: "diagram_stale",
