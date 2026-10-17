@@ -10,7 +10,7 @@
 
 - **Runtime & Framework**: Node.js 22, Express 5, TypeScript 5 (ESM — import nội bộ có đuôi `.js`)
 - **Database**: MongoDB (replica set để dùng transaction), Mongoose 9, GridFS cho file sơ đồ
-- **AI**: Vercel AI SDK, provider GLM / OpenAI / Anthropic / Gemini; prompt là skill trên đĩa
+- **AI**: Vercel AI SDK, provider GLM / Anthropic / Gemini; prompt là skill trên đĩa
 - **Sơ đồ**: PlantUML server (compile-check + render SVG/PNG)
 - **Xuất tài liệu**: `docx`
 - **Auth**: JWT hai token (access header + refresh cookie `httpOnly` xoay vòng, session trong DB), Google OAuth

@@ -1,3 +1,4 @@
+// GIỮ @ai-sdk/openai: GLM chạy trên endpoint tương thích OpenAI (Modal) nên dùng client này. KHÔNG phải provider OpenAI.
 import { createOpenAI } from "@ai-sdk/openai"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createAnthropic } from "@ai-sdk/anthropic"
@@ -23,7 +24,7 @@ export const glmFetch: typeof fetch = (input, init) => {
 }
 
 export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
-  const provider = (providerConfig.provider || "openai").toLowerCase()
+  const provider = (providerConfig.provider || "glm").toLowerCase()
   const modelName = providerConfig.model
 
   switch (provider) {
@@ -57,20 +58,6 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
       })
 
       return modalOpenAi.chat(modelName || "zai-org/GLM-5.3-Flash")
-    }
-
-    case "openai": {
-      const apiKey = env.OPENAI_API_KEY || process.env.OPENAI_API_KEY
-      if (!apiKey) {
-        throw new AiActionError(
-          500,
-          "OpenAI API key is missing. Set OPENAI_API_KEY in environment.",
-          "OPENAI_KEY_MISSING"
-        )
-      }
-
-      const openai = createOpenAI({ apiKey })
-      return openai.chat(modelName || "gpt-4o-mini")
     }
 
     case "gemini": {
@@ -109,16 +96,11 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
         return modalOpenAi.chat(modelName)
       }
 
-      const apiKey = env.OPENAI_API_KEY || process.env.OPENAI_API_KEY
-      if (!apiKey) {
-        throw new AiActionError(
-          500,
-          `Unsupported provider: ${providerConfig.provider}`,
-          "AI_PROVIDER_UNSUPPORTED"
-        )
-      }
-      const openai = createOpenAI({ apiKey })
-      return openai.chat(modelName || "gpt-4o-mini")
+      throw new AiActionError(
+        500,
+        `Unsupported provider: ${providerConfig.provider}`,
+        "AI_PROVIDER_UNSUPPORTED"
+      )
     }
   }
 }

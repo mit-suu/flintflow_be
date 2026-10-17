@@ -25,7 +25,7 @@ skill_id: draft-to-ops          # BẮT BUỘC — trùng tên thư mục, duy n
 kind: action                    # BẮT BUỘC — action | content | renderer | output, trùng thư mục cha
 version: 1.0.0                  # BẮT BUỘC — semver do người sửa tăng (asset_version tự tính)
 description: Một câu mô tả      # tuỳ chọn
-provider: glm                   # BẮT BUỘC — glm | openai | anthropic | gemini | modal
+provider: glm                   # BẮT BUỘC — glm | anthropic | gemini | modal
 aiModel: zai-org/GLM-5.3-Flash  # BẮT BUỘC
 maxTokens: 4096                 # BẮT BUỘC, > 0
 temperature: 0.2                # BẮT BUỘC

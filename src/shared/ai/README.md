@@ -1,7 +1,7 @@
 # 🤖 FlintFlow AI Action Framework (`src/shared/ai/`)
 
 > **Entrypoint duy nhất** bọc toàn bộ các tương tác với LLM trong toàn hệ thống FlintFlow.
-> Mọi module (pipeline step runner, draft-to-ops, change/reconcile, chat, tài liệu upload…) đều bắt buộc gọi AI qua `executeAiAction()`. KHÔNG tự gọi API của OpenAI / Anthropic / Gemini trực tiếp.
+> Mọi module (pipeline step runner, draft-to-ops, change/reconcile, chat, tài liệu upload…) đều bắt buộc gọi AI qua `executeAiAction()`. KHÔNG tự gọi API của GLM / Anthropic / Gemini trực tiếp.
 
 ---
 

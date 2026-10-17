@@ -395,7 +395,7 @@ Thứ tự đúng để không làm rơi request nào:
 1. **JWT.** Đổi `JWT_ACCESS_SECRET` làm mọi access token đang lưu hành hết hiệu lực ngay — người dùng
    phải đăng nhập lại. Làm vào giờ thấp điểm; refresh token cũng phải đổi (`JWT_REFRESH_SECRET`) nếu
    nghi ngờ lộ, và khi đó xoá luôn collection refresh token.
-2. **Khoá provider AI** (`MODAL_*`, `OPENAI_API_KEY`…): tạo khoá mới ở nhà cung cấp → cập nhật biến →
+2. **Khoá provider AI** (`MODAL_*`, `ANTHROPIC_API_KEY`…): tạo khoá mới ở nhà cung cấp → cập nhật biến →
    restart backend → thu hồi khoá cũ. Không thu hồi trước khi restart: mọi step đang chạy sẽ hỏng giữa
    chừng và credit đã reserve phải đợi TTL mới hoàn.
 3. **`PAYMENT_API_KEY`**: phối hợp với payment service; `client_id` đổi thì callback cũ bị từ chối
