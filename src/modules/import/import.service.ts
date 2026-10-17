@@ -10,7 +10,7 @@
 import { createHash } from "node:crypto"
 import mongoose from "mongoose"
 import { docFileStore } from "../doc-version/doc-file.store.js"
-import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { IMPORTED_DOC_VERSION, IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { Project } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
@@ -207,7 +207,7 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.1`). */
 const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Promise<void> => {
   await Promise.all([
-    DocBlock.deleteMany({ projectId, doc_version: IMPORTED_DOC_VERSION }),
+    DocBlock.deleteMany({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }),
     TemplateProfile.deleteMany({ projectId }),
     ExtractionDraft.deleteMany({ projectId })
   ])
@@ -351,7 +351,7 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
   const [profile, extraction, blocksCount] = await Promise.all([
     TemplateProfile.findOne({ projectId }),
     extractionSummary(doc._id as mongoose.Types.ObjectId),
-    DocBlock.countDocuments({ projectId, doc_version: IMPORTED_DOC_VERSION })
+    DocBlock.countDocuments({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
   ])
   return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount }
 }

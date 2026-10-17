@@ -592,3 +592,27 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(JSON.stringify(doc)).toContain("original image could not be embedded (unsupported format)")
   })
 })
+
+describe("finalize — tương thích bản gốc cũ 0.0 (FLF-284)", () => {
+  it("import đang dở có block gắn 0.0 ⇒ finalize vẫn thấy block, tạo bản gốc mới 0.1", async () => {
+    const ctx = await importAtBaselining()
+    await DocBlock.updateMany({ projectId: ctx.projectId }, { $set: { doc_version: "0.0" } })
+    const before = (await spineRepository.get(ctx.projectId))!
+    const result = await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
+    expect(result.baseline).toMatchObject({ version: "0.1", type: "imported" })
+    expect(await DocVersion.countDocuments({ projectId: ctx.projectId, version: "0.1" })).toBe(1)
+    expect(await DocBlock.countDocuments({ projectId: ctx.projectId })).toBeGreaterThan(0)
+  })
+
+  it("project cũ đã có bản gốc 0.0 ⇒ vẫn đọc DTO và tải về bình thường", async () => {
+    const { projectId } = await importFinalized()
+    await DocVersion.updateMany({ projectId }, { $set: { version: "0.0" } })
+    await Baseline.updateMany({ projectId }, { $set: { version: "0.0", doc_version: "0.0" } })
+    const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+    expect(toVersionDto(v as never)).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
+    const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
+    expect(rendered.filename).toBe(`Lumen_${projectId}_v0.0_DRAFT.docx`)
+    const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
+    expect(original.filename).toBe(`Lumen_${projectId}_v0.0_original.docx`)
+  })
+})

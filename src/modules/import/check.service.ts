@@ -20,7 +20,7 @@ import * as spineRepository from "../spine/spine.repository.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { Flag, Spine, SpineRecord } from "../spine/spine.types.js"
 import { Usage } from "../spine/usage.model.js"
-import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { DocBlock } from "./doc-block.model.js"
 import { chunkBlocks } from "./extract.service.js"
 import { idKey } from "./extracted-entities.js"
@@ -268,12 +268,12 @@ type CheckFailure = Extract<MeteredResult<FindingsOutput>, { ok: false }>
 const runSemanticCheck = async (projectId: string, userId: string, done: ReadonlySet<string>): Promise<CheckFailure | null> => {
   const spine = await loadSpine(projectId)
   const [blocks, anchors, sectioned] = await Promise.all([
-    DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
+    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
       .sort({ "anchor.ordinal": 1 })
       .select("block_id text section_id mentions")
       .lean<CheckBlock[]>(),
     FieldAnchor.find({ projectId }).select("entity_path block_ids").lean(),
-    DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).select("block_id section_id").lean()
+    DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).select("block_id section_id").lean()
   ])
   const scope = elementSections(anchors, new Map(sectioned.map((b) => [b.block_id, b.section_id ?? null])))
   const glossary = glossaryText(spine)

@@ -9,6 +9,12 @@ export const DOC_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 /** Bản gốc khi import SRS mới. Project cũ có thể còn bản `0.0` — vẫn hợp lệ theo `DOC_VERSION_PATTERN`. */
 export const IMPORTED_DOC_VERSION = "0.1"
 
+/** Bản gốc cũ `0.0` (trước FLF-284): import đang dở / project cũ vẫn phải tìm thấy block + version import. */
+export const LEGACY_IMPORTED_DOC_VERSION = "0.0"
+
+/** Dùng cho truy vấn ĐỌC / XOÁ bản gốc; ghi mới luôn dùng `IMPORTED_DOC_VERSION`. */
+export const IMPORTED_DOC_VERSIONS = [IMPORTED_DOC_VERSION, LEGACY_IMPORTED_DOC_VERSION]
+
 export interface ParsedDocVersion {
   major: number
   minor: number

@@ -18,7 +18,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { writeStamp } from "../docx-ooxml/index.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
-import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { IMPORTED_DOC_VERSION, IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
 import { renderAllIfAvailable } from "../diagram/diagram.service.js"
 import { Project } from "../project/project.model.js"
@@ -132,7 +132,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     ...spineNow.features.map((f) => ({ entity: "feature" as const, id: f.id, name: f.name })),
     ...spineNow.screens.map((s) => ({ entity: "screen" as const, id: s.id, name: s.name }))
   ]
-  const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).select("block_id text section_id").lean()
+  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).select("block_id text section_id").lean()
   const updates = blocks.map((b) => ({
     updateOne: {
       filter: { _id: b._id },
@@ -142,7 +142,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   if (updates.length) await DocBlock.bulkWrite(updates)
 
   // 3b. Layout + mục riêng + kế hoạch step theo template người dùng (mode 1 v2, D2/D6)
-  const ordered = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean()
+  const ordered = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean()
   const layoutBlocks: LayoutBlock[] = ordered.map((b) => ({
     block_id: b.block_id,
     kind: b.kind,
@@ -340,12 +340,12 @@ export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<v
   const spine = await loadSpine(projectId)
   const touched = spine.spine_version !== checkpoint.spine_version || (await spineRepository.nextSeq(projectId)) !== checkpoint.next_seq
   if (touched) await spineRepository.restoreSnapshot(projectId, checkpoint.spine, { baseVersion: spine.spine_version, fromSeq: checkpoint.next_seq })
-  const versions = await DocVersion.find({ projectId, version: IMPORTED_DOC_VERSION }).lean()
+  const versions = await DocVersion.find({ projectId, version: { $in: IMPORTED_DOC_VERSIONS }, kind: "imported" }).lean()
   for (const ref of versions.flatMap((v) => [v.file_ref, v.original_ref].filter((r): r is string => !!r))) {
     await docFileStore().remove(ref).catch(() => undefined)
   }
-  await DocVersion.deleteMany({ projectId, version: IMPORTED_DOC_VERSION })
-  await Baseline.deleteMany({ projectId, version: IMPORTED_DOC_VERSION, type: "imported" })
+  await DocVersion.deleteMany({ projectId, version: { $in: IMPORTED_DOC_VERSIONS }, kind: "imported" })
+  await Baseline.deleteMany({ projectId, version: { $in: IMPORTED_DOC_VERSIONS }, type: "imported" })
 
   const profile = await TemplateProfile.findOne({ projectId })
   if (profile) {
