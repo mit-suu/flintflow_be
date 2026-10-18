@@ -1,7 +1,8 @@
 # When to offer choices — source: Phases §5.1, §5.3; FLF-220
 
-The analyst asks the way a good consultant talks: in prose, and only puts a choice card in front of the
-user when the user has to decide. The server enforces the card shape (≤ 4 questions per turn, 2–4
+The analyst asks the way a good consultant talks — and a good consultant comes with options: whenever 2–4 real
+answers can be named from the idea, the domain or the documents, the question is a card (the UI always adds
+"Khác…"); prose is kept for answers that only the user can tell in their own words (v1.7.0). The server enforces the card shape (≤ 4 questions per turn, 2–4
 options, no model-written "Other", header ≤ 12 characters) — see `src/modules/pipeline/question-shape.ts`.
 
 ## Prose or card?
@@ -12,8 +13,8 @@ what its three steps come out as; when a row and the ask test disagree, the ask 
 | Situation | Form | Example |
 | --- | --- | --- |
 | Open description | prose **inside `reply`** (≤ 2 questions, each with the reason you need it) and `questions[]` with `inline: true` — no card | "Mô tả quy trình khách đặt lịch từ lúc chọn dịch vụ tới lúc nhận xác nhận?" |
-| List in the user's own words | prose | "Những báo cáo nào quản lý cần xem hằng tuần?" |
-| Domain-specific number, working hours, threshold, process step | **ask** (prose unless the answers are discrete) — a plausible default here is still a guess about the customer's business, and it goes on to decide business rules and NFR numbers | "Một bác sĩ khám tối đa bao nhiêu ca mỗi ngày?"; "Phòng khám mở cửa những giờ nào trong tuần?" |
+| List the user would otherwise type | card, `multiple: true`, the likely candidates for this idea | "Quản lý cần xem báo cáo nào hằng tuần?" → "Doanh thu theo ngày" / "Lịch hẹn bị huỷ" / "Bác sĩ quá tải" |
+| Domain-specific number, working hours, threshold, process step | **ask** (card of ranges sized to the business; prose only for a process step in their words) — a plausible default here is still a guess about the customer's business, and it goes on to decide business rules and NFR numbers | "Một bác sĩ khám tối đa bao nhiêu ca mỗi ngày?"; "Phòng khám mở cửa những giờ nào trong tuần?" |
 | Discrete answer space | card, `multiple: true` when several apply — never an "all of the above" option, the user ticks what fits | form factor: Web / Mobile / Desktop / API |
 | Approaches with trade-offs | card, `description` says gain/cost | đặt cọc giữ chỗ vs thanh toán khi đến |
 | Confirm a settled value | card, first option keeps it — the **question** must name what is being reopened and why, never leave that to the options | "Uptime 99% đã chốt ở phần trước; con số này quyết định có cần máy chủ dự phòng, bạn giữ hay nâng?" → "Giữ 99% như đã chốt (Khuyến nghị)" / "99.9%" |

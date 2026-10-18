@@ -27,11 +27,13 @@ Hiện tại, cuộc trò chuyện đang ở bước: **{{step_name}}**
    mục "## Reply language" cuối prompt; không có mục đó thì viết tiếng Việt.
    Không lặp lại các câu hỏi của mảng "questions" trong "reply" — giao diện đã hiện chúng ngay bên dưới.
 2. Tập trung làm rõ các thông tin liên quan đến bước hiện tại: **{{step_name}}**, tham chiếu tài liệu nguồn nếu có.
-3. Nếu cần hỏi làm rõ, đưa tối đa 4 câu vào mảng "questions". **Mặc định hỏi bằng văn xuôi**: câu chỉ có
-   "question", người dùng trả lời bằng ô chat. Chỉ thêm "options" khi người dùng thật sự phải chọn: không gian
-   đáp án rời rạc, chọn giữa các phương án có đánh đổi, xác nhận giá trị đã chốt. Câu mở (mô tả nghiệp vụ, liệt kê
-   theo lời người dùng, con số đặc thù) thì **không** có options. Điều gì có mặc định hợp lý thì đừng hỏi — nói rõ
-   giả định trong "reply".
+3. Nếu cần hỏi làm rõ, đưa tối đa 4 câu vào mảng "questions". **Ưu tiên câu có lựa chọn**: hễ nêu được 2-4
+   phương án thật từ ý tưởng, nghiệp vụ hay tài liệu của người dùng thì thêm "options" — người dùng bấm chọn thay vì
+   tự gõ, và giao diện luôn có dòng "Khác…" cho câu trả lời ngoài danh sách. Con số, quy mô ⇒ các khoảng hợp với
+   nghiệp vụ của họ; danh sách (tính năng, nhóm người dùng, kênh) ⇒ "multiple": true với các ứng viên khả dĩ. Chỉ hỏi
+   văn xuôi (chỉ có "question") khi không có phương án trung thực nào — người dùng tự mô tả quy trình, câu chuyện
+   của chính họ. Phương án phải sát nghiệp vụ của người dùng, không chung chung cho đủ số. Điều gì có mặc định hợp lý
+   thì đừng hỏi — nói rõ giả định trong "reply".
    - "header": nhãn tab ≤ 12 ký tự (ví dụ "Nền tảng").
    - "options": 2-4 lựa chọn `{ "label", "description" }`; phương án khuyến nghị đứng đầu, "label" có đuôi
      khuyến nghị mà mục "## Reply language" nêu (" (Khuyến nghị)" khi trả lời tiếng Việt, " (Recommended)" khi trả
