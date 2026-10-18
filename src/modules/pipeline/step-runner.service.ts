@@ -43,7 +43,7 @@ import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadC
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
+import { alignReply, elicitPolicyFor, keepConflictsOnly } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
@@ -550,12 +550,18 @@ export const nextPendingAfterChat = (
   // Sổ quyết định phải đã ghi câu trả lời thẻ của lượt này (caller đọc lại Spine sau khi ghi) — câu viết lại hỏi lại chủ đề
   // vừa chốt bị bỏ. Bỏ hết mà vẫn còn câu chưa trả lời ⇒ hỏi lại đúng những câu đó, không để lượt kết thúc trong im lặng.
   const filtered = revised.length === 0 ? [] : shapeQuestions(filterAskedQuestions(spine, revised).questions).asked
-  const next = filtered.length === 0 ? remaining : filtered
+  // Chỉ nhận bản viết lại của câu CÒN CHỜ (cùng `topic_key`): lượt chat không được mở chủ đề mới — câu lạ hiện ra thành câu
+  // hỏi không liên quan tới điều đang hỏi — và câu chờ model quên viết lại vẫn ở lại, không biến mất khi user chưa trả lời.
+  const next = remaining.map((q) => (q.topic_key === undefined ? undefined : filtered.find((r) => r.topic_key === q.topic_key)) ?? q)
   if (!isSubstantiveAnswer(message)) return next
   // Đếm theo chủ đề, kể cả khi AI viết lại câu
   const repliedOf = (topic: string | undefined): number => (remaining.find((q) => q.topic_key === topic)?.replied ?? 0) + 1
   return next.map((q) => (remaining.some((r) => r.topic_key === q.topic_key) ? { ...q, replied: repliedOf(q.topic_key) } : q))
 }
+
+/** Câu model viết mà server không hỏi (lọc, cắt trần, chủ đề lạ) — lời AI không được còn hỏi chúng (`alignReply`). */
+export const droppedQuestions = (raw: readonly { question: string }[], asked: readonly { question: string }[]): string[] =>
+  raw.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question)
 
 /** Tin user hỏi ngược hoặc uỷ quyền cho AI (có dấu hoặc gõ không dấu; tiếng Anh — FLF-260) — không phải câu trả lời. */
 const DEFERS_TO_AI =
@@ -1601,9 +1607,13 @@ export const runStep = async (
           settledIds: new Set(settled.map((a) => a.question_id))
         })
         const answered = new Set([...cardAnswers, ...settled].map((a) => indexOfQuestion(pending, a.question_id)))
-        const remaining = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
-        // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
-        const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, replyLanguage)
+        const next = nextPendingAfterChat(spine, pending.filter((_, i) => !answered.has(i)), turn.questions, message)
+        // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235); câu viết lại bị bỏ / hết câu chờ ⇒ lời không còn hỏi nó
+        const { reply: chatReply, asked: remaining } = alignReply(turn.reply, next, {
+          dropped: droppedQuestions(turn.questions, next),
+          budget: PROMPT_QUESTIONS_PER_TURN,
+          language: replyLanguage
+        })
         emit({ type: "elicit", step_id: stepId, delta: chatReply })
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, remaining))
         if (remaining.length === 0) return
@@ -1719,21 +1729,17 @@ export const runStep = async (
           console.info(`[step-runner] ${stepId}: bỏ ${filtered.dropped.length} câu không mâu thuẫn với điều đã chốt (${filtered.dropped.map((d) => d.topic_key).join(", ")})`)
         }
 
-        const { asked, questions } = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet })
-        // Fast path: câu model đã hỏi mà server bỏ thì lời AI cũng không được còn hỏi nó (user không có chỗ trả lời)
-        const askedTexts = asked.map((a) => a.question)
-        // Câu hỏi đuôi ("bạn thấy hợp lý chứ?") tính vào trần câu hỏi của lượt (FLF-235)
-        const reply = trimTailQuestion(
-          elicitPolicy === "conflict_only"
-            ? reconcileReply(elicitResult.data.reply, elicitResult.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts, replyLanguage)
-            : elicitResult.data.reply,
-          asked,
-          PROMPT_QUESTIONS_PER_TURN,
-          replyLanguage
-        )
+        const shaped = shapeQuestions(filtered.questions, { noIdeaYet, proseOnly: noIdeaYet }).asked
+        // Câu model đã hỏi mà server bỏ (đã chốt, trùng chủ đề, quá trần) thì lời AI cũng không được còn hỏi nó — user không
+        // có chỗ trả lời; câu hỏi đuôi tính vào trần câu hỏi của lượt (FLF-235); câu inline phải còn trong lời, không thì thành thẻ
+        const { reply, asked } = alignReply(elicitResult.data.reply, shaped, {
+          dropped: droppedQuestions(elicitResult.data.questions, shaped),
+          budget: PROMPT_QUESTIONS_PER_TURN,
+          language: replyLanguage
+        })
         emit({ type: "elicit", step_id: stepId, delta: reply })
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, asked))
-        if (questions.length > 0) {
+        if (asked.length > 0) {
           // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
           // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.
           await announceWaiting(asked)

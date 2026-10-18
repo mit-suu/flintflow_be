@@ -19,9 +19,9 @@ import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
 import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
-import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
+import { FAST_PATH_PHASES, alignReply, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
+import { askTranscript, chatBudgetLeft, chatBudgetReply, droppedQuestions, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
@@ -194,9 +194,14 @@ const interviewChatTurn = async (
     return { reply: closingReply, remaining: [] }
   }
   const { spine: after } = await load(projectId)
-  const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
-  // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235): đã hỏi lại đủ câu thì không còn "bạn thấy hợp lý chứ?"
-  const reply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, language)
+  const next = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
+  // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235): đã hỏi lại đủ câu thì không còn "bạn thấy hợp lý chứ?";
+  // câu viết lại bị bỏ / hết câu chờ ⇒ lời không còn hỏi nó; câu inline không còn trong lời ⇒ thành thẻ
+  const { reply, asked: remaining } = alignReply(turn.reply, next, {
+    dropped: droppedQuestions(turn.questions, next),
+    budget: PROMPT_QUESTIONS_PER_TURN,
+    language
+  })
   await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, remaining), step: unit, createdAt: new Date() }])
   return { reply, remaining }
 }
@@ -381,15 +386,14 @@ const askPhaseInterview = async (
 
   const unasked = filterAskedQuestions(spine, result.data.questions).questions
   // Server cắt theo ngân sách: không tin model đếm đúng
-  const { asked, questions } = shapeQuestions(fast ? unasked.slice(0, budget) : unasked)
-  // Fast path: câu model hỏi mà server bỏ (đã chốt / quá ngân sách) thì lời AI cũng không được còn hỏi nó
-  const askedTexts = asked.map((a) => a.question)
-  const firstReply = trimTailQuestion(
-    fast ? reconcileReply(result.data.reply, result.data.questions.filter((q) => !asked.some((a) => a.question === q.question)).map((q) => q.question), askedTexts, replyLanguage) : result.data.reply,
-    asked,
+  const shaped = shapeQuestions(fast ? unasked.slice(0, budget) : unasked).asked
+  // Câu model hỏi mà server bỏ (đã chốt / quá ngân sách) thì lời AI cũng không được còn hỏi nó; câu inline phải còn trong lời
+  const { reply: firstReply, asked } = alignReply(result.data.reply, shaped, {
+    dropped: droppedQuestions(result.data.questions, shaped),
     budget,
-    replyLanguage
-  )
+    language: replyLanguage
+  })
+  const { questions } = shapeQuestions(asked)
   if (asked.length === 0) {
     // Lượt phỏng vấn không hỏi gì (chỉ fast path tới được đây với tin của user): vẫn trả lời user và ghi lời AI vào transcript
     // dưới đơn vị — đó là dấu "đã phỏng vấn", để chạy lại / vào lại giai đoạn không gọi model hỏi thêm lần nữa.
@@ -401,9 +405,13 @@ const askPhaseInterview = async (
     return "asked_none"
   }
 
-  emit({ type: "elicit", step_id: unit, delta: firstReply })
+  const firstElicit: StepEvent = { type: "elicit", step_id: unit, delta: firstReply }
+  emit(firstElicit)
   const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions }
   emit(answerNeeded)
+  // Lời hỏi vào nhật ký run-state như ở bước thường: reload giữa lượt chờ thì FE dựng lại được lời AI cạnh thẻ hỏi (lịch sử
+  // chat chưa có lượt hỏi này cho tới khi user trả lời)
+  await touchRun(projectId, unit, runId, { appendEvent: { ...firstElicit, at: new Date().toISOString() } })
   await touchRun(projectId, unit, runId, {
     status: "waiting_answer",
     stage: "ask",
@@ -436,7 +444,11 @@ const askPhaseInterview = async (
     // FLF-260: tin chat là chữ user gõ ⇒ đoán lại ngôn ngữ trả lời (rõ ⇒ đổi và ghi lên phiên; mơ hồ ⇒ giữ)
     language = await replyLanguageAfterMessage({ projectId, sessionId, userId, message }, language)
     const turn = await interviewChatTurn(projectId, unit, sessionId, userId, deps, pending, payload, message, language, reply)
-    if (turn.reply) emit({ type: "elicit", step_id: unit, delta: turn.reply })
+    if (turn.reply) {
+      const elicit: StepEvent = { type: "elicit", step_id: unit, delta: turn.reply }
+      emit(elicit)
+      await touchRun(projectId, unit, runId, { appendEvent: { ...elicit, at: new Date().toISOString() } })
+    }
     if (turn.remaining.length === 0) return "answered"
     pending = turn.remaining
     reply = turn.reply

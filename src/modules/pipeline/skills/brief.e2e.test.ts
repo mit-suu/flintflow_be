@@ -143,7 +143,6 @@ import type { AiActionResult } from "../../../shared/ai/ai-action.types.js"
 import { opTransactionSchema, type ElicitOutput, type OpTransaction } from "../../../shared/ai/response-parser.js"
 import { hasIdea, runStep, submitAnswer, type StepRunnerDeps } from "../step-runner.service.js"
 import { runPhase } from "../phase-runner.service.js"
-import { NO_QUESTION_ACK_VI } from "../fast-path.js"
 import { getRunState } from "../run-state.service.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { gate } from "../gate.service.js"
@@ -1172,15 +1171,15 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     await run
   })
 
-  it("mọi câu của lượt hỏi gộp bị server bỏ (đã chốt) ⇒ lời AI thành lời nhận tin không có câu hỏi", async () => {
+  it("mọi câu của lượt hỏi gộp bị server bỏ (đã chốt) ⇒ lời AI giữ phần phản hồi, không còn câu hỏi", async () => {
     seedB1({ reviewMode: "fast" })
     ;(db.spines[0] as { decisions: unknown[] }).decisions = [{ id: "DC01", topic_key: "data_retention", question: "Lưu bao lâu?", answer: "5 năm", step_id: "B-0.1", at: "2026-09-30T00:00:00.000Z", superseded_by: null }]
     const elicit = trackedElicit([{ question: "Bạn lưu hồ sơ bao lâu?", topic_key: "data_retention", options: [], inline: true }] as never as ElicitOutput["questions"], "Mình đã đọc. Bạn lưu hồ sơ bao lâu?")
     const { events, emit } = collect()
     await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: elicit.executor, draftExecutor: drafts(), message: "Đặt lịch khám" })
-    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1", delta: NO_QUESTION_ACK_VI }])
+    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1", delta: "Mình đã đọc." }])
     const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
-    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1").map((m) => m.content)).toEqual([NO_QUESTION_ACK_VI])
+    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1").map((m) => m.content)).toEqual(["Mình đã đọc."])
   })
 
   it("bước B-1.x có tin mới: câu hỏi thường bị bỏ thì lời AI không còn hỏi nó (phát và ghi transcript)", async () => {
@@ -1196,9 +1195,9 @@ describe("fast path Brief: một lượt hỏi gộp, bước B-1.x viết trư�
     const { events, emit } = collect()
     await runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: executor, draftExecutor: drafts(), message: "Lễ tân xác nhận lịch" })
     expect(calls).toEqual(["B-1", "B-1.2"])
-    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1.2", delta: NO_QUESTION_ACK_VI }])
+    expect(events.filter((e) => e.type === "elicit")).toEqual([{ type: "elicit", step_id: "B-1.2", delta: "Mình đã ghi lại." }])
     const messages = db.sessions[0].messages as { role: string; step: string; content: string }[]
-    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1.2").map((m) => m.content)).toEqual([NO_QUESTION_ACK_VI])
+    expect(messages.filter((m) => m.role === "ai" && m.step === "B-1.2").map((m) => m.content)).toEqual(["Mình đã ghi lại."])
   })
 
   it("prompt lượt hỏi gộp: câu luật fast path chỉ có ở B-1, S-phase giữ lời cũ", async () => {

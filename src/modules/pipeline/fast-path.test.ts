@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { Decision, Spine } from "../spine/spine.types.js"
-import { FAST_PATH_PHASES, elicitPolicyFor, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_EN, NO_QUESTION_ACK_VI, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
+import { FAST_PATH_PHASES, alignReply, elicitPolicyFor, keepInlineVisible, replyChunks, interviewBudget, interviewGuidance, interviewProjection, keepConflictsOnly, NO_QUESTION_ACK_EN, NO_QUESTION_ACK_VI, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
 import { createEmptySpine } from "../spine/spine.repository.js"
 
@@ -75,10 +75,10 @@ describe("reconcileReply", () => {
   it("không bỏ câu nào ⇒ giữ nguyên lời AI", () => {
     expect(reconcileReply("Mình đã đọc. Bạn lưu bao lâu?", [], ["Bạn lưu bao lâu?"])).toBe("Mình đã đọc. Bạn lưu bao lâu?")
   })
-  it("bỏ mà không còn câu nào ⇒ lời nhận tin không có câu hỏi", () => {
-    const reply = reconcileReply("Mình đã đọc. Bạn lưu hồ sơ bao lâu?", ["Bạn lưu hồ sơ bao lâu?"], [])
-    expect(reply).toBe(NO_QUESTION_ACK_VI)
-    expect(reply).not.toContain("?")
+  it("bỏ mà không còn câu nào ⇒ cắt mọi câu hỏi, giữ phần phản hồi user; chỉ có câu hỏi ⇒ lời nhận tin", () => {
+    const reply = reconcileReply("Mình đã đọc. Bạn lưu hồ sơ bao lâu? Còn bạn dùng điện thoại nào?", ["Bạn lưu hồ sơ bao lâu?"], [])
+    expect(reply).toBe("Mình đã đọc.")
+    expect(reconcileReply("Bạn lưu hồ sơ bao lâu?", ["Bạn lưu hồ sơ bao lâu?"], [])).toBe(NO_QUESTION_ACK_VI)
   })
   it("còn câu được hỏi ⇒ cắt câu hỏi khớp câu bị bỏ (không dấu, không phân biệt hoa thường), giữ câu còn được hỏi", () => {
     const reply = reconcileReply(
@@ -174,5 +174,59 @@ describe("FLF-260: lời nhận tin theo ngôn ngữ trả lời", () => {
     expect(reconcileReply("I've read it. How long do you keep records?", [], ["How long do you keep records?"], "en")).toBe("I've read it. How long do you keep records?")
     expect(trimTailQuestion("Ok. Does that sound reasonable?", asked.slice(0, 1), 2, "en")).toBe("Ok. Does that sound reasonable?")
     expect(withoutQuestions("Noted.", "en")).toBe("Noted.")
+  })
+})
+
+describe("replyChunks: tách câu không mất chữ", () => {
+  it("nối lại đúng nguyên văn; số thập phân và phiên bản không bị cắt; mỗi dòng là một mảnh", () => {
+    const reply = "Tôi lấy mức 99.9% cho bản 1.2.\n\n- Lễ tân xác nhận lịch\n- Bác sĩ xem lịch\n\nBạn thấy sao?"
+    const chunks = replyChunks(reply)
+    expect(chunks.join("")).toBe(reply)
+    expect(chunks.map((c) => c.trim())).toEqual(["Tôi lấy mức 99.9% cho bản 1.2.", "- Lễ tân xác nhận lịch", "- Bác sĩ xem lịch", "Bạn thấy sao?"])
+  })
+})
+
+describe("trimTailQuestion / reconcileReply giữ đoạn và gạch đầu dòng", () => {
+  it("cắt câu hỏi đuôi không dồn cả lời thành một dòng", () => {
+    const asked = [{ question: "Bạn muốn giảm thời gian chờ xuống bao nhiêu?" }, { question: "Bệnh nhân đặt lịch qua kênh nào?" }]
+    const reply = "Tôi hiểu luồng đặt lịch.\n\n- Lễ tân xác nhận\n- Bác sĩ xem lịch\n\nBạn thấy hợp lý chứ?"
+    expect(trimTailQuestion(reply, asked, 2)).toBe("Tôi hiểu luồng đặt lịch.\n\n- Lễ tân xác nhận\n- Bác sĩ xem lịch")
+  })
+  it("câu hỏi có số thập phân bị bỏ ⇒ cắt trọn câu, không để lại mẩu 'Bạn cần 99.'", () => {
+    const reply = "Tôi đã đọc. Bạn cần 99.9% thời gian hoạt động không? Bệnh nhân đặt lịch qua kênh nào?"
+    expect(reconcileReply(reply, ["Bạn cần 99.9% thời gian hoạt động không?"], ["Bệnh nhân đặt lịch qua kênh nào?"])).toBe(
+      "Tôi đã đọc. Bệnh nhân đặt lịch qua kênh nào?"
+    )
+  })
+})
+
+describe("keepInlineVisible: câu inline phải còn trong lời AI", () => {
+  const flow = { question: "Mô tả giúp tôi quy trình khách đặt lịch?", inline: true, options: [] }
+  const card = { question: "Hệ thống cần sẵn sàng tới mức nào?", options: [{ label: "99%" }, { label: "99.9%" }] }
+  it("lời có hỏi câu đó (kể cả diễn lại khác chữ) ⇒ giữ inline", () => {
+    expect(keepInlineVisible("Ok. Mô tả giúp tôi quy trình khách đặt lịch nhé?", [flow])).toEqual([flow])
+    expect(keepInlineVisible("Ok. Khách đi từ lúc chọn dịch vụ tới lúc nhận xác nhận ra sao?", [flow])).toEqual([flow])
+  })
+  it("lời không hỏi câu đó ⇒ bỏ inline (FE vẽ thẻ câu mở); câu chép lại thẻ lựa chọn không tính", () => {
+    expect(keepInlineVisible("Tôi đã ghi nhận ý tưởng.", [flow, card])).toEqual([{ question: flow.question, options: [] }, card])
+    expect(keepInlineVisible("Ok. Hệ thống cần sẵn sàng tới mức nào?", [flow, card])).toEqual([{ question: flow.question, options: [] }, card])
+  })
+  it("câu mở model quên gắn inline mà lời đã hỏi (gạch đầu dòng) ⇒ gắn inline; câu không có trong lời giữ nguyên", () => {
+    const users = { question: "Ai là người dùng chính của app?", options: [] }
+    const kpi = { question: "Thành công của bản đầu đo bằng gì?", options: [] }
+    const reply = "Mấy điểm cần lời của bạn:\n- Ai là người dùng chính của app và họ cần làm gì?\n- Đăng nhập theo hướng nào?"
+    expect(keepInlineVisible(reply, [users, kpi])).toEqual([{ ...users, inline: true }, kpi])
+  })
+})
+
+describe("alignReply: lời AI khớp câu server thật sự hỏi", () => {
+  it("server không hỏi câu nào ⇒ lời không còn câu hỏi nào, giữ phần phản hồi", () => {
+    expect(alignReply("Ý tưởng rõ rồi. Bạn muốn web hay app?", [], { budget: 2 })).toEqual({ reply: "Ý tưởng rõ rồi.", asked: [] })
+  })
+  it("câu bị bỏ cắt khỏi lời; câu inline bị cắt theo ⇒ thành thẻ", () => {
+    const kept = { question: "Ai là người duyệt lịch hẹn?", inline: true, options: [] }
+    const out = alignReply("Tôi đã đọc. Bạn lưu hồ sơ bao lâu?", [kept], { dropped: ["Bạn lưu hồ sơ bao lâu?"], budget: 2 })
+    expect(out.reply).toBe("Tôi đã đọc.")
+    expect(out.asked).toEqual([{ question: kept.question, options: [] }])
   })
 })

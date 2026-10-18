@@ -1668,6 +1668,14 @@ describe("nextPendingAfterChat: dùng sổ quyết định sau khi ghi đáp án
   it("AI chỉ viết lại câu đã chốt ⇒ hỏi lại nguyên văn câu còn chờ, không kết thúc im lặng", () => {
     expect(nextPendingAfterChat(decided, [his], [server] as never, "")).toEqual([his])
   })
+
+  it("AI mở chủ đề mới ⇒ bỏ; câu chờ AI quên viết lại vẫn ở lại", () => {
+    const users = { topic_key: "user_count", question: "Bao nhiêu người dùng?", options: [] }
+    const rewritten = { topic_key: "his_link", question: "Bệnh viện đang dùng HIS nào?", options: [] }
+    const unrelated = { topic_key: "brand_color", question: "Màu chủ đạo là gì?", options: [] }
+    const next = nextPendingAfterChat({ decisions: [] } as never, [his, users], [rewritten, unrelated] as never, "")
+    expect(next.map((q) => q.question)).toEqual(["Bệnh viện đang dùng HIS nào?", "Bao nhiêu người dùng?"])
+  })
 })
 
 describe("phỏng vấn đầu giai đoạn: transcript", () => {

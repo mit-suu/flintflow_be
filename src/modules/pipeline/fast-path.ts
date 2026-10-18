@@ -11,7 +11,6 @@ import { elicitProjection } from "./context-projection.js"
 import { activeDecisions, normalizeTopicKey, type AskedQuestion, type FilteredQuestions } from "./decisions.service.js"
 import { MAX_QUESTIONS_PER_TURN } from "./question-shape.js"
 import { getStep, orderedSteps } from "./step-registry.js"
-import { sentencesOf } from "./text-overlap.js"
 
 /** Giai đoạn đi theo fast path: bước bên trong không tự hỏi sau lượt hỏi gộp đầu giai đoạn. */
 export const FAST_PATH_PHASES: ReadonlySet<string> = new Set(["B-1"])
@@ -101,12 +100,21 @@ const overlap = (sentence: string, question: string): number => {
 const best = (sentence: string, questions: readonly string[]): number => questions.reduce((max, q) => Math.max(max, overlap(sentence, q)), 0)
 
 /**
- * Lời AI sau khi server bỏ bớt câu hỏi của model (fast path): `reply` không được nêu câu hỏi mà UI không hỏi.
+ * Tách lời AI thành từng câu mà KHÔNG mất chữ nào: nối các mảnh lại ra đúng nguyên văn, giữ dòng trống giữa các đoạn và
+ * dòng `- ` (cắt câu xong nối bằng dấu cách thì cả lời dính thành một khối). Cắt sau dấu kết câu có khoảng trắng theo sau
+ * — "99.9%", "1.000", "v1.2" không bị cắt đôi — và ở mỗi lần xuống dòng (dòng `- ` không có dấu chấm vẫn là một mảnh).
+ */
+export const replyChunks = (text: string): string[] => text.split(/(?<=[.!?…][)"'”»*_]*\s+|\n\s*)(?=\S)/u)
+
+/** Mảnh là một câu hỏi: kết bằng "?" (kể cả khi còn ngoặc, nháy hay `**` markdown phía sau). */
+export const isQuestionChunk = (chunk: string): boolean => /[?？][)"'”»*_]*\s*$/u.test(chunk)
+
+/**
+ * Lời AI sau khi server bỏ bớt câu hỏi của model: `reply` không được nêu câu hỏi mà UI không hỏi.
  * - không bỏ câu nào ⇒ giữ nguyên;
- * - bỏ mà không còn câu nào được hỏi ⇒ thay bằng lời nhận tin không có câu hỏi;
- * - còn câu được hỏi ⇒ cắt các câu kết thúc bằng "?" giống câu đã bị bỏ (≥ 60% từ, và giống hơn mọi câu còn được hỏi); phần
- *   còn lại giữ, cắt hết thì thay lời nhận tin.
- * Khớp theo từ nên là best effort — câu diễn đạt quá khác vẫn lọt; prompt đã dặn model đừng viết thế.
+ * - bỏ mà không còn câu nào được hỏi ⇒ cắt MỌI câu hỏi trong lời (không câu nào còn chỗ trả lời), giữ phần phản hồi user;
+ * - còn câu được hỏi ⇒ cắt các câu kết thúc bằng "?" giống câu đã bị bỏ (≥ 60% từ, và giống hơn mọi câu còn được hỏi).
+ * Cắt hết ⇒ lời nhận tin. Khớp theo từ nên là best effort — câu diễn đạt quá khác vẫn lọt; prompt đã dặn model đừng viết thế.
  * `language`: ngôn ngữ của lời nhận tin thay thế (FLF-260).
  */
 export const reconcileReply = (
@@ -116,13 +124,12 @@ export const reconcileReply = (
   language: ReplyLanguage = "vi"
 ): string => {
   if (droppedQuestions.length === 0) return reply
-  if (keptQuestions.length === 0) return noQuestionAck(language)
-  const sentences = reply.match(/[^.!?…]+[.!?…]*s*/g) ?? [reply]
-  const text = sentences
-    .filter((sentence) => {
-      if (!sentence.trim().endsWith("?")) return true
-      const dropped = best(sentence, droppedQuestions)
-      return !(dropped >= 0.6 && dropped > best(sentence, keptQuestions))
+  const text = replyChunks(reply)
+    .filter((chunk) => {
+      if (!isQuestionChunk(chunk)) return true
+      if (keptQuestions.length === 0) return false
+      const dropped = best(chunk, droppedQuestions)
+      return !(dropped >= 0.6 && dropped > best(chunk, keptQuestions))
     })
     .join("")
     .trim()
@@ -142,21 +149,90 @@ export const trimTailQuestion = (
   language: ReplyLanguage = "vi"
 ): string => {
   if (asked.length < budget) return reply
-  const sentences = sentencesOf(reply)
-  const questionSentences = sentences.filter((s) => s.trim().endsWith("?")).length
+  const chunks = replyChunks(reply.trimEnd())
+  const questionSentences = chunks.filter(isQuestionChunk).length
   const inlineCount = asked.filter((q) => q.inline).length
   if (questionSentences <= inlineCount) return reply
-  const last = sentences[sentences.length - 1] ?? ""
+  const last = chunks[chunks.length - 1] ?? ""
   if (
-    !last.trim().endsWith("?") ||
+    !isQuestionChunk(last) ||
     best(
       last,
       asked.map((q) => q.question)
     ) >= 0.6
   )
     return reply
-  const text = sentences.slice(0, -1).join(" ").trim()
+  const text = chunks.slice(0, -1).join("").trim()
   return text === "" ? noQuestionAck(language) : text
+}
+
+/** Câu hỏi đi kèm lời AI — đủ để biết câu nào user thấy trên thẻ, câu nào chỉ nằm trong lời (`inline`). */
+export interface ReplyQuestion {
+  question: string
+  inline?: boolean
+  options: readonly unknown[]
+}
+
+/**
+ * Câu `inline` (FE không vẽ thẻ) phải thật sự được hỏi trong lời AI: model hay gắn `inline: true` mà không viết câu đó vào
+ * `reply`, hoặc server vừa cắt nó khỏi lời ⇒ câu đang chờ mà user không thấy và không biết trả lời gì. Khớp một câu hỏi trong
+ * lời (≥ 60% từ) ⇒ giữ; không khớp thì vẫn giữ nếu lời còn một câu hỏi chưa ứng với câu nào (model diễn lại khác chữ), trừ
+ * câu chép lại thẻ lựa chọn. Còn lại ⇒ bỏ `inline` để FE vẽ thành thẻ câu mở. Ngược lại, câu mở không gắn `inline` mà lời
+ * đã hỏi nó ⇒ gắn `inline` (lịch sử chat không liệt kê lại; FE vẫn có ô nhập cho mọi câu trên thẻ hỏi).
+ */
+export const keepInlineVisible = <Q extends ReplyQuestion>(reply: string, asked: readonly Q[]): Q[] => {
+  const isInline = (q: Q): boolean => q.inline === true && q.options.length === 0
+  if (!asked.some((q) => q.options.length === 0)) return [...asked]
+  const cards = asked.filter((q) => q.options.length > 0).map((q) => q.question)
+  const free = replyChunks(reply)
+    .filter(isQuestionChunk)
+    .filter((chunk) => cards.length === 0 || best(chunk, cards) < 0.6)
+  const visible = new Set<number>()
+  asked.forEach((q, i) => {
+    if (!isInline(q)) return
+    const at = free.findIndex((chunk) => overlap(chunk, q.question) >= 0.6)
+    if (at < 0) return
+    visible.add(i)
+    free.splice(at, 1)
+  })
+  // Câu mở model quên gắn `inline` mà lời đã hỏi nó (≥ 60% từ) ⇒ gắn, để lịch sử chat không liệt kê câu đó lần nữa
+  const askedInReply = new Set<number>()
+  asked.forEach((q, i) => {
+    if (q.options.length > 0 || isInline(q)) return
+    const at = free.findIndex((chunk) => overlap(chunk, q.question) >= 0.6)
+    if (at < 0) return
+    askedInReply.add(i)
+    free.splice(at, 1)
+  })
+  return asked.map((q, i) => {
+    if (askedInReply.has(i)) return { ...q, inline: true }
+    if (!isInline(q) || visible.has(i)) return q
+    if (free.length > 0) {
+      free.shift()
+      return q
+    }
+    const { inline: _inline, ...card } = q
+    return card as Q
+  })
+}
+
+/**
+ * Lời AI và câu server thật sự hỏi phải khớp nhau — user chỉ trả lời được câu có thẻ hoặc câu `inline` nằm ngay trong lời.
+ * Áp ở MỌI lượt hỏi (step, phỏng vấn đầu giai đoạn, lượt chat khi còn câu chờ), không riêng fast path:
+ * - câu model hỏi mà server bỏ (`dropped`: đã chốt, trùng chủ đề, quá trần, chủ đề lạ) ⇒ cắt khỏi lời (`reconcileReply`);
+ * - server không hỏi câu nào ⇒ lời không được còn câu hỏi: lượt chạy đi tiếp ngay, câu hỏi trong lời không có chỗ trả lời;
+ * - câu hỏi đuôi quá trần ⇒ cắt (`trimTailQuestion`);
+ * - câu `inline` mà lời (sau khi cắt) không còn hỏi ⇒ thành thẻ (`keepInlineVisible`).
+ */
+export const alignReply = <Q extends ReplyQuestion>(
+  reply: string,
+  asked: readonly Q[],
+  options: { dropped?: readonly string[]; budget: number; language?: ReplyLanguage }
+): { reply: string; asked: Q[] } => {
+  const language = options.language ?? "vi"
+  const reconciled = asked.length === 0 ? withoutQuestions(reply, language) : reconcileReply(reply, options.dropped ?? [], asked.map((q) => q.question), language)
+  const text = trimTailQuestion(reconciled, asked, options.budget, language)
+  return { reply: text, asked: keepInlineVisible(text, asked) }
 }
 
 /**
@@ -164,8 +240,7 @@ export const trimTailQuestion = (
  * không còn gì thì dùng lời nhận tin cố định (theo `language`, FLF-260).
  */
 export const withoutQuestions = (reply: string, language: ReplyLanguage = "vi"): string => {
-  const sentences = reply.match(/[^.!?…]+[.!?…]*s*/g) ?? [reply]
-  const text = sentences
+  const text = replyChunks(reply)
     .filter((sentence) => !sentence.includes("?"))
     .join("")
     .trim()
