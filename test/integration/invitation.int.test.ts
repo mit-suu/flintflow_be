@@ -9,6 +9,8 @@ import { User } from "../../src/modules/user/user.model.js"
 import { Membership } from "../../src/modules/organization/membership.model.js"
 import { Invitation } from "../../src/modules/organization/invitation.model.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
+import { Subscription } from "../../src/modules/credits/subscription.model.js"
+import { planConfig } from "../../src/modules/billing/plan.config.js"
 import { authAs } from "../setup.js"
 import { verifyAccessToken } from "../../src/shared/auth/jwt.util.js"
 
@@ -194,6 +196,23 @@ describe("mã mời hỏng thì từ chối (Flow 8.4 nhánh No)", () => {
     await Membership.create({ organizationId: orgId, userId: third.id, role: "viewer" })
 
     const res = await request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send({ role: "viewer", email: "x@flintflow.test" })
+    expect(res.status).toBe(402)
+    expect(res.body.error.code).toBe("PLAN_LIMIT_MEMBERS")
+  })
+
+  it("org gói pro dùng trần của pro, không bị kẹt ở trần free", async () => {
+    await Subscription.updateOne({ organizationId: orgId }, { $set: { plan: "pro" } })
+    // 3 thành viên = trần free; pro vẫn mời được tới đủ trần pro
+    await Membership.create({ organizationId: orgId, userId: invitee.id, role: "analyst" })
+    const third = await makeUser("third@flintflow.test")
+    await Membership.create({ organizationId: orgId, userId: third.id, role: "viewer" })
+    await invite("viewer", "fourth@flintflow.test")
+
+    for (let i = 4; i <= planConfig.pro.maxMembers; i++) {
+      const extra = await makeUser(`extra${i}@flintflow.test`)
+      await Membership.create({ organizationId: orgId, userId: extra.id, role: "viewer" })
+    }
+    const res = await request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send({ role: "viewer", email: "y@flintflow.test" })
     expect(res.status).toBe(402)
     expect(res.body.error.code).toBe("PLAN_LIMIT_MEMBERS")
   })

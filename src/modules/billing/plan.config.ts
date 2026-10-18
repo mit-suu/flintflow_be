@@ -55,7 +55,7 @@ export const planConfig = {
     initialCredits: 0,
     monthlyCredits: 1000,
     priceVnd: 199_000,
-    maxMembers: 20,
+    maxMembers: 5,
     maxProjects: 50
   } satisfies PlanDefinition,
   /** Số dư (balance) rơi xuống dưới ngưỡng này thì gửi notification một lần. */
