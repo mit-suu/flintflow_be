@@ -3,7 +3,8 @@ import { Membership, ORG_ROLES, ORG_ROLE_LABELS, type OrgRole } from "./membersh
 import { Organization } from "./organization.model.js"
 import { assertLeadRemains, touchMembership } from "./lead-succession.js"
 import { User } from "../user/user.model.js"
-import { planConfig } from "../billing/plan.config.js"
+import { getPlan } from "../billing/plan.config.js"
+import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { runInTransaction, TRANSACTION_UNAVAILABLE, sessionOptions } from "../../shared/db/transaction.js"
@@ -46,11 +47,15 @@ export const listMembers = async (orgId: string): Promise<MemberItem[]> => {
 
 /**
  * Trần số thành viên theo gói. Gọi trước khi thêm người (mã mời ở Pha 3); tách ra đây để chỗ nào thêm
- * thành viên cũng đi qua đúng một luật.
+ * thành viên cũng đi qua đúng một luật. Gói đọc từ Subscription active của org (như `assertProjectQuota`) —
+ * trước đây nhận `plan` qua tham số mặc định "free" mà không nơi nào truyền, nên org Pro bị chặn ở trần free.
  */
-export const assertMemberQuota = async (orgId: string, plan: keyof typeof planConfig = "free"): Promise<void> => {
-  const definition = plan === "pro" ? planConfig.pro : planConfig.free
-  const count = await Membership.countDocuments({ organizationId: orgId })
+export const assertMemberQuota = async (orgId: string): Promise<void> => {
+  const [subscription, count] = await Promise.all([
+    Subscription.findOne({ organizationId: orgId, status: "active" }).select("plan").lean(),
+    Membership.countDocuments({ organizationId: orgId })
+  ])
+  const definition = getPlan(subscription?.plan ?? "free")
   if (count >= definition.maxMembers) {
     throw new ApiError(
       402,
