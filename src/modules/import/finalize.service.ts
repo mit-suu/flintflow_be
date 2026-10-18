@@ -5,7 +5,7 @@
  *      quét lại mention theo tên (actor, entity, feature, screen).
  *   3. Mode 1 v2 (FLF-183): layout + mục riêng (`custom_sections`) theo file upload, kế hoạch step theo template (D6),
  *      seed `steps[]` + `progress` ⇒ workspace như mode 2 chạy tiếp từ step còn thiếu. Một txn thứ hai `by: import`.
- *   4. Mode 1 v2 (FLF-184): vẽ diagram từ Spine (PlantUML có mặt), baseline `type: imported`; `DocVersion 0.0` = bản
+ *   4. Mode 1 v2 (FLF-184): vẽ diagram từ Spine (PlantUML có mặt), baseline `type: imported`; `DocVersion 0.1` = bản
  *      **render** từ Spine theo layout file upload + stamp, file gốc (bookmark neo + stamp) giữ ở `original_ref`.
  *      §4.13: loại sơ đồ người dùng đã có hình (ảnh I-4 đọc được) thì bản render giữ ảnh gốc, PlantUML loại đó không in.
  *   5. `checking` ⇒ AI semantic + code rule ⇒ `gap_review` (AI lỗi/hết credit ⇒ paused, resume chạy tiếp); ghép sẵn
@@ -18,7 +18,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { writeStamp } from "../docx-ooxml/index.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
-import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
+import { IMPORTED_DOC_VERSION, IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
 import { renderAllIfAvailable } from "../diagram/diagram.service.js"
 import { Project } from "../project/project.model.js"
@@ -91,7 +91,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })), droppedPermissions)
 
-  // 2. File gốc của bản 0.0 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
+  // 2. File gốc của bản 0.1 (ghi file trước; lô Spine hỏng thì xoá file, không để mồ côi)
   const parsed = await parseDocument(await loadImportFile(doc))
   await writeStamp(parsed.pkg, { project_id: projectId, version: IMPORTED_DOC_VERSION, source: "import" })
   const fileRef = await docFileStore().save(await parsed.pkg.toBuffer(), { projectId, kind: "version", name: IMPORTED_DOC_VERSION })
@@ -132,7 +132,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     ...spineNow.features.map((f) => ({ entity: "feature" as const, id: f.id, name: f.name })),
     ...spineNow.screens.map((s) => ({ entity: "screen" as const, id: s.id, name: s.name }))
   ]
-  const blocks = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).select("block_id text section_id").lean()
+  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).select("block_id text section_id").lean()
   const updates = blocks.map((b) => ({
     updateOne: {
       filter: { _id: b._id },
@@ -142,7 +142,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   if (updates.length) await DocBlock.bulkWrite(updates)
 
   // 3b. Layout + mục riêng + kế hoạch step theo template người dùng (mode 1 v2, D2/D6)
-  const ordered = await DocBlock.find({ projectId, doc_version: IMPORTED_DOC_VERSION }).sort({ "anchor.ordinal": 1 }).lean()
+  const ordered = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } }).sort({ "anchor.ordinal": 1 }).lean()
   const layoutBlocks: LayoutBlock[] = ordered.map((b) => ({
     block_id: b.block_id,
     kind: b.kind,
@@ -156,7 +156,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))
   // Phase 5 (T3): ảnh dưới mục FPT ⇒ giữ nguyên văn (phần nối của mục) để bản render nhúng lại ảnh gốc. Trước đây bản
-  // render 0.0 mất 35/39 ảnh (T1). §4.13: sơ đồ I-4 đọc được (use case / ERD / luồng màn / ngữ cảnh) cũng **giữ y hình
+  // render 0.1 mất 35/39 ảnh (T1). §4.13: sơ đồ I-4 đọc được (use case / ERD / luồng màn / ngữ cảnh) cũng **giữ y hình
   // của người dùng** — dữ liệu đọc được chỉ vào Spine; khối ảnh mang `diagram` (loại + hash dữ liệu lúc import) để bản
   // render ẩn PlantUML cùng loại, và CR chạm dữ liệu đó sau này đề xuất vẽ lại bằng PlantUML.
   const imageRead = new Map(
@@ -210,7 +210,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)
   await renderDiagramsIfAvailable(projectId)
 
-  // Baseline imported + DocVersion 0.0 — chụp Spine sau lô kế hoạch step; file 0.0 = bản render của đúng snapshot đó
+  // Baseline imported + DocVersion 0.1 — chụp Spine sau lô kế hoạch step; file 0.1 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
   const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? doc.original_name
   const renderedRef = await docFileStore().save(
@@ -330,7 +330,7 @@ export const finalizeCheckpoint = async (projectId: string, recordOfChanges: Fin
 /**
  * Hoàn lần finalize dở ở `baselining` về `finalize_checkpoint` để chạy lại sạch, như thể lần đó chưa chạy: Spine về đúng
  * nội dung mốc + bỏ change của lần đó (`restoreSnapshot` — revert bằng op không về được Spine rỗng vì bất biến "phần tử
- * cuối"), xoá bản 0.0 + snapshot baseline đã ghi, trả heading về section tạm (block đổi theo). FieldAnchor / mention /
+ * cuối"), xoá bản 0.1 + snapshot baseline đã ghi, trả heading về section tạm (block đổi theo). FieldAnchor / mention /
  * layout không cần hoàn: lần chạy lại ghi đè cùng giá trị. Không có mốc ⇒ không làm gì; gọi lại nhiều lần vẫn về đúng mốc.
  */
 export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<void> => {
@@ -340,12 +340,12 @@ export const rollbackPartialFinalize = async (doc: IImportedDocument): Promise<v
   const spine = await loadSpine(projectId)
   const touched = spine.spine_version !== checkpoint.spine_version || (await spineRepository.nextSeq(projectId)) !== checkpoint.next_seq
   if (touched) await spineRepository.restoreSnapshot(projectId, checkpoint.spine, { baseVersion: spine.spine_version, fromSeq: checkpoint.next_seq })
-  const versions = await DocVersion.find({ projectId, version: IMPORTED_DOC_VERSION }).lean()
+  const versions = await DocVersion.find({ projectId, version: { $in: IMPORTED_DOC_VERSIONS }, kind: "imported" }).lean()
   for (const ref of versions.flatMap((v) => [v.file_ref, v.original_ref].filter((r): r is string => !!r))) {
     await docFileStore().remove(ref).catch(() => undefined)
   }
-  await DocVersion.deleteMany({ projectId, version: IMPORTED_DOC_VERSION })
-  await Baseline.deleteMany({ projectId, version: IMPORTED_DOC_VERSION, type: "imported" })
+  await DocVersion.deleteMany({ projectId, version: { $in: IMPORTED_DOC_VERSIONS }, kind: "imported" })
+  await Baseline.deleteMany({ projectId, version: { $in: IMPORTED_DOC_VERSIONS }, type: "imported" })
 
   const profile = await TemplateProfile.findOne({ projectId })
   if (profile) {

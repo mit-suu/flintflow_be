@@ -136,28 +136,29 @@ describe("import.dto — response", () => {
     expect(docBlockDtoSchema.safeParse({ ...block, kind: "textbox" }).success).toBe(false)
   })
 
-  it("finalize trả baseline type imported, doc_version 0.0", () => {
+  it("finalize trả baseline type imported, doc_version 0.1", () => {
     const res = {
       import: { ...sampleImport(), status: "checking" },
-      doc_version: "0.0",
-      baseline: { id: "BL001", version: "0.0", type: "imported", doc_version: "0.0", at: AT, snapshot_ref: "66f000000000000000000009", checked_at_version: 4, waived_count: 0 },
+      doc_version: "0.1",
+      baseline: { id: "BL001", version: "0.1", type: "imported", doc_version: "0.1", at: AT, snapshot_ref: "66f000000000000000000009", checked_at_version: 4, waived_count: 0 },
       spine_version: 4,
       flags: { red: 2, yellow: 7 }
     }
     const parsed = finalizeResponseSchema.parse(res)
     expect(parsed.baseline?.type).toBe("imported")
-    expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "0.1" }).success).toBe(false)
+    expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "0.0" }).success).toBe(true) // project cũ ở 0.0 vẫn hợp lệ
+    expect(finalizeResponseSchema.safeParse({ ...res, doc_version: "v0.1" }).success).toBe(false)
   })
 
   it("finalize chạy nền: trả ngay import baselining, baseline + flags null", () => {
-    const res = { import: { ...sampleImport(), status: "baselining" }, doc_version: "0.0", baseline: null, spine_version: 3, flags: null }
+    const res = { import: { ...sampleImport(), status: "baselining" }, doc_version: "0.1", baseline: null, spine_version: 3, flags: null }
     expect(finalizeResponseSchema.parse(res)).toMatchObject({ baseline: null, flags: null, import: { status: "baselining" } })
   })
 
   it("gap report và re-upload diff", () => {
     const report = {
       project_id: PROJECT_ID,
-      doc_version: "0.0",
+      doc_version: "0.1",
       generated_at: AT,
       totals: { red: 0, yellow: 1, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 0, missing_fpt_sections: 1, unrendered_diagrams: 0 },
       missing_fpt_sections: [{ section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false }],
@@ -182,7 +183,7 @@ describe("import.dto — response", () => {
 })
 
 describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
-  const profile = { doc_version: "0.0", heading_map: [], table_map: [], required_sections: [], language: "en" }
+  const profile = { doc_version: "0.1", heading_map: [], table_map: [], required_sections: [], language: "en" }
 
   it("profile cũ không có layout ⇒ []; layout mang section FPT hoặc custom:<id>", () => {
     expect(templateProfileDtoSchema.parse(profile).layout).toEqual([])

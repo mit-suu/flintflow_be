@@ -50,7 +50,7 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     const view = getImportResponseSchema.parse((await c.get()).body.data)
     expect(view.blocks_count).toBeGreaterThan(20)
     expect(view.profile?.heading_map.find((h) => h.heading_text === "2.1 Actors")?.section_id).toBe("fixed:2.1")
-    const blocks = await DocBlock.find({ projectId, doc_version: "0.0" }).sort({ "anchor.ordinal": 1 }).lean()
+    const blocks = await DocBlock.find({ projectId, doc_version: "0.1" }).sort({ "anchor.ordinal": 1 }).lean()
     expect(blocks[0]).toMatchObject({ block_id: "B0001", kind: "heading", section_id: "fixed:1", anchor: { bookmark: "_ff_B0001" } })
     expect((await Project.findById(projectId).lean())?.import_state).toBe("extracting")
 

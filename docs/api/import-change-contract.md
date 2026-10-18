@@ -175,7 +175,7 @@ Request `{ "import_id": "66f0…01", "base_version": 3 }` → trả ngay (job n�
 {
   "data": {
     "import": { "status": "baselining", "paused": null, … },
-    "doc_version": "0.0",
+    "doc_version": "0.1",
     "baseline": null,
     "spine_version": 3,
     "flags": null
@@ -242,7 +242,7 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 
 ### 4.5 V2 — render theo template người dùng (FLF-184, chỉ thêm field)
 - `RenderedDocument` của project có layout (mode 1 sau finalize): `sections[]` theo **thứ tự + tiêu đề file upload** (bỏ số gõ tay, `number` đánh lại theo cấp; heading không gõ số trong file gõ số tay ⇒ `number: ""`). Section FPT file không có ⇒ chèn cạnh mục cùng nhóm, tiêu đề mẫu FPT theo `TemplateProfile.language`. `group:<id>` lấy theo `section_id` của layout (vd `group:4`), không còn là số hiệu. Văn xuôi không trích được nằm ở đầu `blocks` của section chủ. Hình `RenderedSection` không đổi. Project mode 2 không đổi.
-- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.0`; version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.0_original.docx`. Bản `0.0` mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
+- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.1` (project cũ: `0.0`); version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.0_original.docx`. Bản `0.0` mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
 - `DocVersionDto` thêm `has_original_file: boolean`.
 - `gapReportSchema` thêm `totals.missing_fpt_sections`, `missing_fpt_sections[]` `{ section_id, title, step_id, in_layout }` (đầu mục FPT thiếu — D6, đứng đầu báo cáo; `feature:*` = chức năng chương 3), `layout[]` `{ order, section_id, heading, level, kind: fpt|group|custom, red, yellow }`; `sections[]` xếp theo layout.
 - **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của `0.0`.

@@ -1,6 +1,6 @@
 /**
  * Một version của tài liệu mode 1 (file .docx lưu GridFS). FLF-171, plan §5.3.
- * - `imported` — `0.0`: mode 1 v2 (FLF-184) `file_ref` = bản **render từ Spine** theo layout file upload + stamp;
+ * - `imported` — `0.1`: mode 1 v2 (FLF-184) `file_ref` = bản **render từ Spine** theo layout file upload + stamp;
  *   `original_ref` = file người dùng upload + stamp + bookmark neo (nút 1.10) để tải lại bản gốc.
  * - `cr_revision` — `0.1`, `0.2`…: `file_ref` = bản render sạch; `tracked_file_ref` (mode 1 v3) = cùng bản đó kèm Track Changes
  *   + comment tác giả = CR id so với version trước (nút 3.14).
@@ -21,7 +21,7 @@ export interface IDocVersion extends Document {
   tracked_file_ref: string | null
   /** File người dùng upload (chỉ `imported`, FLF-184) — `null` với version render/CR/release. */
   original_ref: string | null
-  /** Version làm gốc (`null` với `0.0`). */
+  /** Version làm gốc (`null` với `0.1`). */
   based_on: string | null
   /** CR đã ghi vào version này (`cr_revision`: đúng 1; `release`: mọi CR `written` từ lần release trước). */
   cr_ids: string[]

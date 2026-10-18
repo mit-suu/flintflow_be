@@ -50,9 +50,9 @@ const newPara = (doc: Document, text: string) => {
   return el
 }
 
-/** Tải file version 0.0 (bản render từ Spine + stamp — FLF-186), sửa như người dùng sửa trong Word. */
+/** Tải file version 0.1 (bản render từ Spine + stamp — FLF-186), sửa như người dùng sửa trong Word. */
 const editVersion = async (projectId: string, fn: (doc: Document) => void) => {
-  const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
+  const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
   const pkg = await DocxPackage.load(await docFileStore().load(v.file_ref))
   fn(await pkg.requireXml("word/document.xml"))
   return { pkg, buffer: await pkg.toBuffer() }
@@ -71,7 +71,7 @@ const snapshotCounts = async (projectId: string) => ({
 })
 
 describe("re-upload — diff theo block", () => {
-  it("so với bản render 0.0 (FLF-186): thêm + xoá + sửa + di chuyển ⇒ đúng từng loại (khớp theo text); không tạo version, không đổi Spine/block", async () => {
+  it("so với bản render 0.1 (FLF-186): thêm + xoá + sửa + di chuyển ⇒ đúng từng loại (khớp theo text); không tạo version, không đổi Spine/block", async () => {
     const { projectId, userId, importId } = await importFinalized()
     const before = await snapshotCounts(projectId)
     const EDITED = "Lumen is an online learning platform for large training centers."
@@ -91,7 +91,7 @@ describe("re-upload — diff theo block", () => {
     })
     const diff = await reupload(projectId, userId, fileOf(buffer, "SRS_Lumen_v2.docx"))
     const dto = toReuploadDto(diff)
-    expect(dto).toMatchObject({ original_name: "SRS_Lumen_v2.docx", against_version: "0.0", summary: { added: 1, removed: 1, modified: 1, moved: 1 } })
+    expect(dto).toMatchObject({ original_name: "SRS_Lumen_v2.docx", against_version: "0.1", summary: { added: 1, removed: 1, modified: 1, moved: 1 } })
     expect(dto.blocks).toEqual(
       expect.arrayContaining([
         { block_id: null, change: "modified", before: SRS_FIXTURE_TEXT.purpose, after: EDITED },
@@ -124,7 +124,7 @@ describe("re-upload — từ chối", () => {
   it("stamp của project khác ⇒ IMPORT_STAMP_FOREIGN_PROJECT, không lưu diff/file", async () => {
     const { projectId, userId } = await importFinalized()
     const { pkg } = await editVersion(projectId, () => undefined)
-    await writeStamp(pkg, { project_id: "66f0000000000000000000ff", version: "0.3", source: "cr_revision" })
+    await writeStamp(pkg, { project_id: "66f0000000000000000000ff", version: "0.4", source: "cr_revision" })
     await expect(reupload(projectId, userId, fileOf(await pkg.toBuffer()))).rejects.toMatchObject({
       code: "IMPORT_STAMP_FOREIGN_PROJECT",
       meta: { stamp: { project_id: "66f0000000000000000000ff" } }

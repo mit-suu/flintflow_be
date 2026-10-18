@@ -67,31 +67,31 @@ const projectWithRevision = async () => {
 const releaseNow = async (c: Api) => c.post("/release", { base_version: await c.spineVersion() })
 
 describe("mode 1 — version + tải về", () => {
-  it("danh sách version, block đọc từ file render, so sánh 0.0 → 0.1, tải bản draft có watermark DRAFT", async () => {
+  it("danh sách version, block đọc từ file render, so sánh 0.1 → 0.2, tải bản draft có watermark DRAFT", async () => {
     const { c, projectId } = await projectWithRevision()
     const versions = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions.map((v) => [v.version, v.kind])).toEqual([
-      ["0.1", "cr_revision"],
-      ["0.0", "imported"]
+      ["0.2", "cr_revision"],
+      ["0.1", "imported"]
     ])
 
-    const blocks = versionBlocksResponseSchema.parse((await c.get("/versions/0.1/blocks")).body.data)
-    // FLF-186: 0.1 là bản render từ Spine sau CR — NFR hiện trong bảng Performance, không còn Track Changes theo block
+    const blocks = versionBlocksResponseSchema.parse((await c.get("/versions/0.2/blocks")).body.data)
+    // FLF-186: 0.2 là bản render từ Spine sau CR — NFR hiện trong bảng Performance, không còn Track Changes theo block
     const perf = blocks.find((b) => b.text.includes("The system shall respond"))!
     expect(perf.text).toContain("1 s")
     expect(perf.revisions).toBeUndefined()
     expect((await c.get("/versions/9.9/blocks")).body.error.code).toBe("DOC_VERSION_NOT_FOUND")
 
-    const diff = compareResponseSchema.parse((await c.get("/versions/compare?from=0.0&to=0.1")).body.data)
+    const diff = compareResponseSchema.parse((await c.get("/versions/compare?from=0.1&to=0.2")).body.data)
     // bảng Performance: khớp theo text (file render không có neo) ⇒ modified 2 s → 1 s
     expect(diff.blocks).toContainEqual(
       expect.objectContaining({ block_id: null, change: "modified", before: expect.stringContaining("| 2 s |"), after: expect.stringContaining("| 1 s |") })
     )
-    expect((await c.get("/versions/compare?from=0.1&to=0.1")).status).toBe(400)
+    expect((await c.get("/versions/compare?from=0.2&to=0.2")).status).toBe(400)
 
-    const draft = await binary(c.get("/versions/0.1/download"))
+    const draft = await binary(c.get("/versions/0.2/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v0.1_DRAFT.docx`)
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v0.2_DRAFT.docx`)
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
@@ -127,7 +127,7 @@ describe("mode 1 — release (Flow 6)", () => {
     const res = await releaseNow(c)
     expect(res.status, JSON.stringify(res.body.error)).toBe(201)
     const rel = releaseResponseSchema.parse(res.body.data)
-    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.1", has_clean_file: true })
+    expect(rel.version).toMatchObject({ version: "1.0", kind: "release", based_on: "0.2", has_clean_file: true })
     expect(rel.cr_ids).toEqual(["CR-001"])
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
 
