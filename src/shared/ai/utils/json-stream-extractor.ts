@@ -52,7 +52,9 @@ export class JsonStreamExtractor {
           else if (nextChar === "'") delta += "'"
           else if (nextChar === "\\") delta += "\\"
           else if (nextChar === "/") delta += "/"
-          else if (nextChar === "u" && i + 5 < this.buffer.length) {
+          // `\uXXXX` bị cắt giữa hai chunk: chờ chunk sau, không in "u00e9" ra bong bóng chat
+          else if (nextChar === "u" && i + 5 >= this.buffer.length) break
+          else if (nextChar === "u") {
             const hex = this.buffer.slice(i + 2, i + 6)
             if (/^[0-9a-fA-F]{4}$/.test(hex)) {
               delta += String.fromCharCode(parseInt(hex, 16))

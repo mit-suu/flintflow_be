@@ -20,14 +20,37 @@ const modelOptionSchema = z.union([
   )
 ])
 
+/**
+ * Model hay để `null` cho field không dùng (`"multiple": null`, `"options": null`) — coi như không có, không làm hỏng cả lượt
+ * hỏi (trước đây cả lượt thành SCHEMA_MISMATCH và phải gọi lại model).
+ */
 const questionFields = {
   question: z.string(),
   header: optionalText,
-  options: z.array(modelOptionSchema).optional(),
+  options: z.array(modelOptionSchema).nullish().transform((v) => v ?? undefined),
   /** Dạng cũ trước FLF-220 — vẫn nhận, map sang `options`. */
-  suggestedAnswers: z.array(z.string()).optional(),
-  multiple: z.boolean().optional().default(false)
+  suggestedAnswers: z.array(z.string()).nullish().transform((v) => v ?? undefined),
+  multiple: z.boolean().nullish().transform((v) => v ?? false)
 }
+
+/** Model đôi khi đặt chữ câu hỏi vào `text` (tên field câu hỏi gửi FE) thay vì `question`. */
+const withQuestionText = (item: unknown): unknown => {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return item
+  const record = item as Record<string, unknown>
+  return typeof record.question !== "string" && typeof record.text === "string" ? { ...record, question: record.text } : item
+}
+
+/** Mảng mà mục sai khuôn chỉ bỏ đúng mục đó (như `localized`); `null` ⇒ rỗng. */
+const lenientArray = <T extends z.ZodTypeAny>(item: T) =>
+  z
+    .array(z.unknown())
+    .nullish()
+    .transform((items): z.output<T>[] =>
+      (items ?? []).flatMap((entry) => {
+        const parsed = item.safeParse(entry)
+        return parsed.success ? [parsed.data as z.output<T>] : []
+      })
+    )
 
 /** Gộp `suggestedAnswers` cũ vào `options`; `options` mới thắng khi có cả hai. */
 const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: string[] }>({ options, suggestedAnswers, ...rest }: T) => ({
@@ -38,7 +61,7 @@ const toOptions = <T extends { options?: QuestionOption[]; suggestedAnswers?: st
 export const chatQuestionSchema = z.object(questionFields).transform(toOptions)
 
 export const chatQuestionItemSchema = z.union([
-  chatQuestionSchema,
+  z.preprocess(withQuestionText, chatQuestionSchema),
   z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
@@ -154,21 +177,25 @@ export const opTransactionSchema = z.object({
  * `conflict` là lời giải thích khi model CỐ Ý hỏi lại một chủ đề đã chốt (dữ liệu mới mâu thuẫn).
  */
 export const elicitQuestionSchema = z.union([
-  z
+  z.preprocess(
+    withQuestionText,
+    z
     .object({
       ...questionFields,
-      topic_key: z.string().optional(),
-      conflict: z.string().optional(),
+      topic_key: optionalText,
+      conflict: optionalText,
       /** FLF-232: câu mở đã hỏi ngay trong `reply` — FE không vẽ lại thành thẻ; server vẫn theo dõi qua `topic_key`. */
       inline: z.boolean().nullish().transform((v) => v ?? undefined)
     })
-    .transform(toOptions),
+    .transform(toOptions)
+  ),
   z.string().transform((q) => ({ question: q, header: undefined as string | undefined, options: [] as QuestionOption[], multiple: false }))
 ])
 
 const elicitBaseSchema = z.object({
   reply: z.string(),
-  questions: z.array(elicitQuestionSchema).default([])
+  // Một câu hỏi sai khuôn (`"question": null`) chỉ bỏ câu đó, không làm hỏng cả lượt hỏi
+  questions: lenientArray(elicitQuestionSchema)
 })
 
 /**
@@ -176,9 +203,9 @@ const elicitBaseSchema = z.object({
  * đúng ý — server kiểm lại từng dòng (`topic_key` phải là câu đang chờ, câu có lựa chọn phải khớp nhãn), không tin mù.
  */
 export const elicitSchema = elicitBaseSchema.extend({
-  settled: z.array(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
+  settled: lenientArray(z.object({ topic_key: z.string().min(1), answer: z.string() })).optional(),
   /** `topic_key` của câu đang chờ mà tin này KHÔNG trả lời — server không tự chốt câu đó bằng luật trả-lời-lặp. */
-  still_open: z.array(z.string()).optional()
+  still_open: lenientArray(z.string()).optional()
 })
 
 /** B-0…B-2: vừa hỏi vừa ghi ngay (addendum, project.*) — ops tuỳ chọn. Không có `settled`. */

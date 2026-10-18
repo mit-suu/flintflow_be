@@ -224,3 +224,29 @@ describe("parseResponse — sources cạnh ops (FLF-292)", () => {
     expect(parseResponse<OpTransaction>(JSON.stringify({ ops: [op], sources: "D1-P07" }), ActionType.REVISION).sources).toBeUndefined()
   })
 })
+
+describe("parseResponse — câu hỏi Elicit/Chat chịu được field null", () => {
+  it("ELICIT: null ở field phụ coi như không có, câu sai khuôn chỉ bỏ đúng câu đó, `text` thay cho `question`", () => {
+    const raw = JSON.stringify({
+      reply: "Tôi cần chốt một điều.",
+      questions: [
+        { question: "Bao nhiêu người dùng cùng lúc?", topic_key: "concurrent_users", conflict: null, multiple: null, header: null, options: [{ label: "50" }, { label: "500" }] },
+        { text: "Mô tả quy trình đặt lịch?", topic_key: "booking_flow", inline: true, options: null },
+        { question: null, topic_key: "broken" }
+      ],
+      settled: null,
+      still_open: null
+    })
+    const out = parseResponse<{ questions: { question: string; topic_key?: string; conflict?: string; multiple: boolean; options: unknown[] }[]; settled?: unknown[] }>(raw, ActionType.ELICIT)
+    expect(out.questions.map((q) => q.question)).toEqual(["Bao nhiêu người dùng cùng lúc?", "Mô tả quy trình đặt lịch?"])
+    expect(out.questions[0]).toMatchObject({ multiple: false, options: [{ label: "50" }, { label: "500" }] })
+    expect(out.questions[0].conflict).toBeUndefined()
+    expect(out.questions[1].options).toEqual([])
+    expect(out.settled).toEqual([])
+  })
+
+  it("CHAT: câu hỏi viết bằng `text` vẫn được nhận", () => {
+    const out = parseResponse<{ questions: { question: string }[] }>(JSON.stringify({ reply: "Ok.", questions: [{ text: "Ai duyệt lịch?" }] }), ActionType.CHAT)
+    expect(out.questions.map((q) => q.question)).toEqual(["Ai duyệt lịch?"])
+  })
+})
