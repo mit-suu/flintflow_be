@@ -5,6 +5,8 @@
  *   `comment` có nội dung; toàn bộ op của CR qua `planTransaction` chạy khô + bất biến; Spine giả lập không thêm cờ đỏ
  *   (hồ sơ luật mode 1).
  * - AI `CR_CONSISTENCY` (không chặn): nhận xét vàng trên phạm vi thay đổi (phần tử cùng section), gắn theo `section_id`.
+ *   FLF-307: chỉ chạy khi cả CR qua kiểm code và có vị trí đổi đề xuất từ lần trước; nhận xét cũ giữ lại và đưa AI xem
+ *   để không nêu lại.
  * Trượt ⇒ AI làm lại vị trí đó (`redo_count` ≤ 2) ⇒ vẫn trượt / vị trí sửa tay trượt ⇒ `manual_fix` (3.9).
  */
 
@@ -26,9 +28,10 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { MAX_REDO_PER_LOCATION } from "./change-request.state.js"
 import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./change-location.model.js"
-import { crHeader, glossaryText, truncate } from "./cr-context.js"
+import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { locksOf } from "./lock.service.js"
+import { fixDuplicateIds } from "./propose.service.js"
 import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
@@ -132,6 +135,17 @@ const scopeText = (spine: Spine, changed: IChangeLocation[], limit = 20): string
   return neighbours.map((e) => `[${e.path}] (${sectionOfElement(spine, e.path)}) ${truncate(valueText(e.value), 600)}`).join("\n") || "(none)"
 }
 
+type AiFlag = { rule: string; message: string }
+
+/** Nhận xét AI của lần kiểm trước, theo vị trí (vị trí vừa đề xuất lại có `verify = null` ⇒ không còn nhận xét). */
+export const previousFlags = (locations: readonly Pick<IChangeLocation, "location_id" | "verify">[]): Map<string, AiFlag[]> =>
+  new Map(locations.flatMap((l) => (l.verify?.ai_flags.length ? [[l.location_id, l.verify.ai_flags.map((f) => ({ rule: f.rule, message: f.message }))] as const] : [])))
+
+export const previousFindingsText = (flags: ReadonlyMap<string, readonly AiFlag[]>): string => {
+  const messages = [...new Set([...flags.values()].flat().map((f) => `- (${f.rule}) ${f.message}`))]
+  return messages.length ? truncate(messages.join("\n"), 3000) : "(none)"
+}
+
 export const runVerify = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["proposing", "manual_fix", "ready_to_submit", "verifying"], "verifying")
   await transitionCr(cr, "verifying")
@@ -141,6 +155,8 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
   const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  // Sửa tay / "Sửa lại" cũng có thể mang id trùng ⇒ đổi trước khi chạy khô (FLF-307)
+  await fixDuplicateIds(spine, locations)
   // Đề xuất của vị trí khác có thể đã đổi (sửa tay, "Sửa lại") ⇒ kết luận vẽ lại sơ đồ gốc tính lại trước khi kiểm (§4.13)
   await refreshDiagramLocations(spine, locations)
   const locks = await locksOf(cr.projectId, [...locations.map((l) => l.path), ...locations.flatMap(opElements)])
@@ -148,12 +164,20 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   const violations = new Map(locations.map((l) => [l.location_id, checkLocation(cr, l, spine, locks)]))
   for (const [locId, vs] of checkSpineOps(spine, cr, locations)) violations.set(locId, [...(violations.get(locId) ?? []), ...vs])
 
-  // AI consistency trên các vị trí có thay đổi và đã qua kiểm code
-  const changed = locations.filter((l) => (l.conclusion === "edit" || l.conclusion === "comment") && !violations.get(l.location_id)?.length)
-  const aiFlags = new Map<string, { rule: string; message: string }[]>()
-  if (changed.length) {
+  // AI consistency (FLF-307): chỉ khi cả CR đã qua kiểm code — vòng nào còn trượt thì AI làm lại, nhận xét lúc đó vô
+  // ích. Không vị trí nào đổi đề xuất kể từ lần kiểm trước (`verify` còn nguyên) ⇒ giữ nhận xét cũ, không gọi lại: mỗi
+  // lượt gọi ra một bộ nhận xét khác, người dùng tưởng sửa mãi không hết.
+  const previous = previousFlags(locations)
+  const codeOk = locations.every((l) => !violations.get(l.location_id)?.length)
+  const changed = locations.filter((l) => l.conclusion === "edit" || l.conclusion === "comment")
+  const aiFlags = new Map(previous)
+  if (codeOk && changed.some((l) => l.verify === null)) {
+    // Vị trí vừa đề xuất lại bỏ nhận xét cũ (có thể đã sửa đúng chỗ đó); AI thấy mọi nhận xét cũ để không nêu lại
+    for (const l of changed) if (l.verify === null) aiFlags.delete(l.location_id)
     const result = await withMeteredAi<FindingsOutput>({ projectId: String(cr.projectId), userId, stepId: `C-5:${cr.cr_id}` }, ActionType.CR_CONSISTENCY, {
       ...crHeader(cr),
+      answers: answersText(cr),
+      previous_findings: previousFindingsText(previous),
       edits: truncate(
         changed
           .map((l) =>
@@ -174,8 +198,10 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
     for (const f of result.data.findings) {
       // Nhận xét gắn vào vị trí sửa cùng section; không khớp section nào thì vị trí sửa đầu tiên (người duyệt vẫn thấy)
       const hit = changed.filter((c) => c.section_id === f.section_id)
+      const flag = { rule: f.rule, message: humanizeText(f.message) }
       for (const l of hit.length ? hit : changed.slice(0, 1)) {
-        aiFlags.set(l.location_id, [...(aiFlags.get(l.location_id) ?? []), { rule: f.rule, message: humanizeText(f.message) }])
+        const mine = aiFlags.get(l.location_id) ?? []
+        if (!mine.some((x) => x.message === flag.message)) aiFlags.set(l.location_id, [...mine, flag])
       }
     }
   }

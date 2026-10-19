@@ -4,7 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { spineSchema } from "./spine.schema.js"
 import type { Spine } from "./spine.types.js"
-import { allocateId, allocatesIds, isPlaceholderId, nextIdIn, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
+import { allocateId, allocatesIds, formatFor, isPlaceholderId, nextIdIn, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -39,6 +39,16 @@ describe("allocateId", () => {
     const id = allocateId(FIXTURE, "validations", fn.id)!
     expect(id.startsWith(`${fn.id}-V`)).toBe(true)
     expect(FIXTURE.functions.flatMap((f) => f.validations.map((v) => v.id))).not.toContain(id)
+  })
+
+  it("FLF-307: tài liệu upload đánh id khác khuôn mặc định ⇒ nối tiếp khuôn của tài liệu", () => {
+    const s = structuredClone(FIXTURE)
+    s.use_cases = ["UC-78", "UC-125", "UC-1", "UC-14"].map((id) => ({ ...FIXTURE.use_cases[0], id }))
+    s.screens = ["SCR-01", "SCR-84"].map((id) => ({ ...FIXTURE.screens[0], id }))
+    expect(allocateId(s, "use_cases")).toBe("UC-126")
+    expect(allocateId(s, "screens")).toBe("SCR-85")
+    expect(formatFor(["UC01", "UC-7"], { prefix: "UC", width: 2 })).toEqual({ prefix: "UC", width: 2 })
+    expect(formatFor([], { prefix: "UC", width: 2 })).toEqual({ prefix: "UC", width: 2 })
   })
 
   it("collection không đánh số (steps, sections) ⇒ null", () => {

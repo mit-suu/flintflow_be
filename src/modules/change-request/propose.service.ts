@@ -31,6 +31,7 @@ import { ChangeLocation, type IChangeLocation } from "./change-location.model.js
 import { answersText, crHeader, glossaryText, materialsText, missingInfoText, truncate } from "./cr-context.js"
 import { elementValue, isArrayPath, isSectionTarget, opElement, valueText } from "./spine-location.js"
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
+import { reassignDuplicateIds } from "./new-ids.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -67,6 +68,27 @@ export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknow
   }
 }
 
+/** FLF-307: id trùng trong op `add` của CR đổi sang id chưa dùng (`new-ids.ts`); vị trí bị đổi tính lại bản xem trước. */
+export const fixDuplicateIds = async (spine: Spine, locations: IChangeLocation[]): Promise<void> => {
+  for (const l of reassignDuplicateIds(spine, locations)) {
+    l.proposal!.new_text = previewAfter(spine, l.path, l.proposal!.spine_ops)
+    l.verify = null
+    l.markModified("proposal")
+    await l.save()
+  }
+}
+
+/**
+ * Mọi id đang có của mảng (giá trị JSON phía trên bị cắt ở 2500 ký tự — mảng 60 use case chỉ thấy vài chục đầu, file
+ * upload còn xếp id không theo thứ tự) ⇒ model không đoán id đã dùng. FLF-307.
+ */
+const existingIdsText = (spine: Spine, path: string): string => {
+  const ids = ((elementValue(spine, path) as unknown[] | undefined) ?? []).flatMap((el) =>
+    el && typeof el === "object" && typeof (el as { id?: unknown }).id === "string" ? [(el as { id: string }).id] : []
+  )
+  return ids.length ? `\n  Ids already used (never reuse one): ${truncate(ids.join(", "), 1500)}` : ""
+}
+
 type PromptLocation = Pick<IChangeLocation, "location_id" | "path" | "section_id" | "found_by" | "entity_paths" | "verify">
 
 /** Op của bản xem trước đính kèm CR chạm vào vị trí này (phần tử, hoặc thêm vào đúng mảng của vị trí "mục trống"). */
@@ -89,7 +111,7 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
     ? ""
     : isEmpty
       ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)."
-      : "\n  ADD NEW — the only valid edit is adding new elements to this array (`add` ops) that the change needs and that do not exist yet (value above = existing elements, for ids and to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related."
+      : `\n  ADD NEW — the only valid edit is adding new elements to this array (\`add\` ops) that the change needs and that do not exist yet (value above = existing elements, to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related.${existingIdsText(spine, l.path)}`
   // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
   const mine = seedOpsFor(seedOps, l.path)
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
@@ -198,6 +220,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
       if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt — chờ sửa tay`)
     }
   }
+  await fixDuplicateIds(spine, locations)
   await refreshDiagramLocations(spine, locations)
   await regroup(cr)
 }
