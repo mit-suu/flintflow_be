@@ -40,7 +40,7 @@ const toProposed = async () => {
 describe("C-5 kiểm code (đỏ)", () => {
   it("giá trị tại path đổi sau khi đề xuất ⇒ 409 CR_VALUE_CHANGED, không lưu kết quả verify, không gọi AI", async () => {
     const { c, projectId, cr } = await toProposed()
-    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" } })
+    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" }, $inc: { spine_version: 1 } })
     const res = await c.post(`${cr}/verify`)
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_VALUE_CHANGED")

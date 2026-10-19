@@ -90,7 +90,7 @@ const db = vi.hoisted(() => {
     changes.length = 0
   }
 
-  return { Spine, Change, reset, duplicateKey }
+  return { Spine, Change, spines, reset, duplicateKey }
 })
 
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
@@ -117,7 +117,43 @@ const change = (seq: number, overrides: Partial<repo.NewChange> = {}): repo.NewC
 
 beforeEach(() => {
   db.reset()
+  // Store giả cấp lại `_id` spine-1 sau mỗi reset — Mongo thật không bao giờ dùng lại `_id`
+  repo.clearReadCache()
   vi.restoreAllMocks()
+})
+
+describe("cache đọc theo (_id, spine_version) — FLF-308", () => {
+  const fullReads = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.filter((c) => !c[1]).length
+
+  it("Spine không đổi ⇒ chỉ hỏi version, không tải lại; bản trả về là bản sao (sửa không lan sang lần sau)", async () => {
+    await repo.getOrCreate(PROJECT, { name: "Lumen" })
+    const spy = vi.spyOn(db.Spine, "findOne")
+    const first = (await repo.get(PROJECT))!
+    first.project.name = "đã sửa ở caller"
+    const second = (await repo.get(PROJECT))!
+    expect(second.project.name).toBe("Lumen")
+    expect(fullReads(spy)).toBe(1)
+  })
+
+  it("ghi qua saveWithVersion nạp sẵn cache; version đổi ở chỗ khác ⇒ tải lại đúng nội dung mới", async () => {
+    const created = await repo.getOrCreate(PROJECT, { name: "Lumen" })
+    await repo.saveWithVersion({ ...created, project: { ...created.project, vision: "V2" } }, 1)
+    const spy = vi.spyOn(db.Spine, "findOne")
+    expect((await repo.get(PROJECT))?.project.vision).toBe("V2")
+    expect(fullReads(spy)).toBe(0)
+
+    // instance BE khác ghi: version tăng trong DB, cache ở đây chưa biết
+    Object.assign(db.spines[0], { spine_version: 3, project: { ...created.project, vision: "V3" } })
+    expect((await repo.get(PROJECT))?.project.vision).toBe("V3")
+    expect(fullReads(spy)).toBe(1)
+  })
+
+  it("Spine bị xoá ⇒ null, không trả bản cache", async () => {
+    await repo.getOrCreate(PROJECT)
+    await repo.get(PROJECT)
+    db.reset()
+    expect(await repo.get(PROJECT)).toBeNull()
+  })
 })
 
 describe("getOrCreate / get", () => {

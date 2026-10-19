@@ -29,7 +29,7 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { answersText, crHeader, glossaryText, materialsText, missingInfoText, truncate } from "./cr-context.js"
-import { elementValue, isArrayPath, isSectionTarget, opElement, valueText } from "./spine-location.js"
+import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, snapshotOf, valueText } from "./spine-location.js"
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
 
@@ -52,7 +52,10 @@ const ownerSkillText = (ownerStep: string | null): string => {
   }
 }
 
-/** Giá trị phần tử `path` sau khi chạy khô `rawOps` trên Spine hiện tại — op sai ⇒ `null` (C-5 báo lỗi cụ thể). */
+/**
+ * Giá trị phần tử `path` sau khi chạy khô `rawOps` trên Spine hiện tại — op sai ⇒ `null` (C-5 báo lỗi cụ thể). Vị trí
+ * "thêm mới" (`arr[]`) ⇒ chỉ các phần tử được thêm (FLF-308), khớp `old_text = "[]"` của `snapshotOf`.
+ */
 export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknown[]): string | null => {
   const ops: Op[] = []
   for (const raw of rawOps) {
@@ -60,9 +63,11 @@ export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknow
     if (!parsed.success) return null
     ops.push(parsed.data)
   }
-  if (!ops.length) return valueText(elementValue(spine, path))
+  const shown = (after: Spine): string =>
+    isArrayPath(path) ? valueText(addedElements(elementValue(spine, path), elementValue(after, path))) : valueText(elementValue(after, path))
+  if (!ops.length) return shown(spine)
   try {
-    return valueText(elementValue(planTransaction(spine, { base_version: spine.spine_version, ops, by: "preview" }, { startSeq: 1 }).spine, path))
+    return shown(planTransaction(spine, { base_version: spine.spine_version, ops, by: "preview" }, { startSeq: 1 }).spine)
   } catch {
     return null
   }
@@ -206,7 +211,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           loc.conclusion = out.conclusion
           loc.reason = out.reason
           loc.proposal = {
-            old_text: valueText(elementValue(spine, loc.path)),
+            ...snapshotOf(spine, loc.path),
             new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
             comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
             spine_ops: ops,
@@ -277,7 +282,7 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
   loc.conclusion = out.conclusion
   loc.reason = out.reason
   loc.proposal = {
-    old_text: valueText(elementValue(spine, loc.path)),
+    ...snapshotOf(spine, loc.path),
     new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
     spine_ops: ops,

@@ -29,7 +29,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -84,7 +84,7 @@ const USER = "650000000000000000000010"
 const seedSpine = () => {
   const spine = structuredClone(MINIMAL)
   spine.actors = [{ id: "A00", name: "Base actor", kind: "human", description: "sẵn có từ trước" }]
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 }
 
 /** Step `in_progress` giữa chừng Draft: đã ghi một op nội dung thật (add actor) nhưng chưa gate accept. */

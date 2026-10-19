@@ -114,7 +114,7 @@ describe("CR cần phần tử chưa có (2026-09-24: CR thêm bảng vào mục
     })
     const { c, projectId } = await importedProject()
     // mục ERD đã có dữ liệu (đúng ca người dùng gặp: thêm bảng vào mục có sẵn)
-    await Spine.updateOne({ projectId }, { $push: { entities: { id: "E-01", name: "Đơn đặt", description: "Đơn đặt món", relations: [] } } })
+    await Spine.updateOne({ projectId }, { $push: { entities: { id: "E-01", name: "Đơn đặt", description: "Đơn đặt món", relations: [] } }, $inc: { spine_version: 1 } })
     const crId = await newCr(c, "Phân quyền màn hình", "Điều phối viên gán / thu hồi quyền truy cập từng màn hình cho người dùng — cần bảng lưu quyền.")
     const cr = `/change-requests/${crId}`
     detail(await c.post(`${cr}/clarify`))
