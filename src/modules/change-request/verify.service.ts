@@ -32,7 +32,7 @@ import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
 import { refreshDiagramLocations } from "./diagram-location.js"
 import { locksOf } from "./lock.service.js"
 import { fixDuplicateIds } from "./propose.service.js"
-import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, valueText } from "./spine-location.js"
+import { elementValue, isArrayPath, listElements, opElement, sectionOfElement, unchangedSince, valueText } from "./spine-location.js"
 
 export const valueChanged = (loc: Pick<IChangeLocation, "location_id" | "path">): Mode1Error =>
   new Mode1Error("CR_VALUE_CHANGED", `${pathLabel(loc.path)} đã bị sửa ở chỗ khác kể từ lúc đề xuất — tải lại rồi đề xuất lại`, { location_id: loc.location_id, path: loc.path })
@@ -58,7 +58,7 @@ export const checkLocation = (cr: Pick<IChangeRequest, "cr_id">, loc: CheckLocat
   if (locks.get(loc.path) !== cr.cr_id) out.push({ rule: "path_not_locked", message: `${pathLabel(loc.path)} chưa được giữ cho ${cr.cr_id} (có thể một change request khác đang sửa)`, path: loc.path })
   const p = loc.proposal
   if (!p) return [...out, { rule: "no_proposal", message: "Thiếu đề xuất" }]
-  if (valueText(current) !== p.old_text) throw valueChanged(loc)
+  if (!unchangedSince(spine, loc.path, p)) throw valueChanged(loc)
   if (loc.conclusion === "edit") {
     if (!p.spine_ops.length) out.push({ rule: "edit_without_ops", message: "Kết luận là sửa nhưng chưa có nội dung sửa" })
     else if (p.new_text !== null && p.new_text === p.old_text) out.push({ rule: "edit_no_change", message: "Đề xuất không thay đổi gì ở phần tử này" })

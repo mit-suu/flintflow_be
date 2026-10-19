@@ -17,11 +17,11 @@ import type { ChangeRequestDetail, CreateChangeRequest } from "./change-request.
 import { ChangeRequest, CrCounter, type CrSeed, type IChangeRequest } from "./change-request.model.js"
 import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from "./change-request.state.js"
 import { ChangeGroup } from "./change-group.model.js"
-import { ChangeLocation } from "./change-location.model.js"
+import { ChangeLocation, type LocationProposal } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
 import { lockPaths, unlockPaths } from "./lock.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
-import { elementValue, opElement, valueText } from "./spine-location.js"
+import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
 
 // ─── đọc ─────────────────────────────────────────────────────────
@@ -88,6 +88,24 @@ export const pendingQuestions = (cr: IChangeRequest): string[] => {
   return last && last.answers.length === 0 ? [...last.questions] : []
 }
 
+const parseJson = (text: string | null | undefined): unknown => {
+  try {
+    return text ? JSON.parse(text) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * `old_text` / `new_text` gửi FE. Vị trí "thêm mới" (`arr[]`) lưu trước FLF-308 chép cả mảng hai bên (vài chục–trăm KB
+ * mỗi vị trí) ⇒ rút về như bản ghi mới: trước `"[]"`, sau = chỉ phần tử thêm. Không đổi DB (C-5 vẫn so `old_text` cũ).
+ */
+export const shownTexts = (path: string, p: Pick<LocationProposal, "old_text" | "new_text" | "base_hash">): { old_text: string; new_text: string | null } => {
+  if (!isArrayPath(path) || p.base_hash || p.old_text === "[]") return { old_text: p.old_text, new_text: p.new_text ?? null }
+  const newText = p.new_text ?? null
+  return { old_text: "[]", new_text: newText === null ? null : valueText(addedElements(parseJson(p.old_text), parseJson(newText))) }
+}
+
 export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail> => {
   const [locations, groups, record, layout] = await Promise.all([
     ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 }).lean(),
@@ -104,7 +122,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         path: l.path,
         section_id: l.section_id,
         section_title: spine && l.section_id !== "misc" ? titleOfSection(spine, l.section_id, layout) : "",
-        current_text: spine ? valueText(elementValue(spine, l.path)) : "",
+        current_text: spine ? currentText(spine, l.path) : "",
         found_by: [...l.found_by],
         entity_paths: [...l.entity_paths],
         vector_score: l.vector_score ?? null,
@@ -112,7 +130,7 @@ export const toDetail = async (cr: IChangeRequest): Promise<ChangeRequestDetail>
         conclusion: l.conclusion ?? null,
         reason: l.reason ?? null,
         proposal: l.proposal
-          ? { old_text: l.proposal.old_text, new_text: l.proposal.new_text ?? null, comment_text: l.proposal.comment_text ?? null, spine_ops: [...(l.proposal.spine_ops ?? [])], assumptions: [...(l.proposal.assumptions ?? [])] }
+          ? { ...shownTexts(l.path, l.proposal), comment_text: l.proposal.comment_text ?? null, spine_ops: [...(l.proposal.spine_ops ?? [])], assumptions: [...(l.proposal.assumptions ?? [])] }
           : null,
         manual: l.manual,
         redo_count: l.redo_count,
