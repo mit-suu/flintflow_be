@@ -17,7 +17,7 @@ import {
   PaymentServiceOrder
 } from "./payment-service.client.js"
 
-const sessionOptions = (session?: ClientSession) => (session ? { session } : {})
+export const sessionOptions = (session?: ClientSession) => (session ? { session } : {})
 
 const isTransactionUnsupported = (err: any): boolean =>
   Boolean(
@@ -33,7 +33,7 @@ const isTransactionUnsupported = (err: any): boolean =>
  * transaction thì chạy lại không session — cùng cách ai-action.service xử lý.
  * `fn` KHÔNG được có side effect ngoài DB (notify gọi sau khi xong).
  */
-const withOptionalTransaction = async <T>(
+export const withOptionalTransaction = async <T>(
   fn: (session?: ClientSession) => Promise<T>
 ): Promise<T> => {
   let session: ClientSession | undefined
