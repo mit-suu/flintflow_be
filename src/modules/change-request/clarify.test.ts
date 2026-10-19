@@ -39,7 +39,12 @@ describe("C-2 ngữ cảnh gửi model", () => {
         ]
       })
     )
-    expect(text).toBe("Q1.1: Which screen?\nA: Login screen\nQ1.2: Which actor?\nA: Learner\nQ2.1: How fast?\nA: (no answer — unknown)\nQ2.2: Which devices?\nA: all")
+    expect(text).toBe("Later rounds refine earlier ones: where two answers disagree, the answer from the later round wins and the earlier one no longer applies (round 2 is final).\nQ1.1: Which screen?\nA: Login screen\nQ1.2: Which actor?\nA: Learner\nQ2.1: How fast?\nA: (no answer — unknown)\nQ2.2: Which devices?\nA: all")
+  })
+
+  it("FLF-307: một vòng ⇒ không kèm câu dặn vòng sau thắng", () => {
+    const text = answersText(cr({ clarifications: [{ round: 1, questions: ["Which actor?"], answers: ["All"] }] }))
+    expect(text).toBe("Q1.1: Which actor?\nA: All")
   })
 
   it("phase 7: tài liệu bổ sung ⇒ [id] tên (lúc đính kèm) + nội dung; không có ⇒ (none)", () => {
