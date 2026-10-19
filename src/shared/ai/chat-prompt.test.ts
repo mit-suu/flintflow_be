@@ -12,7 +12,8 @@ const VARIABLES = {
   step_name: "overview",
   chat_history: "User: Hello\nAI: Hi, what are you building?",
   input_text: "Can you explain what this document is still missing?",
-  documentContext: "## Tài liệu tham khảo\n(không có)"
+  documentContext: "## Tài liệu tham khảo\n(không có)",
+  spine_index: "- Use cases: 2 — UC01 Log In; UC02 Log Out"
 }
 
 /** Như `buildPrompt`: thế biến vào template rồi nối khối ngôn ngữ trả lời vào cuối. */
