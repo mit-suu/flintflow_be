@@ -106,13 +106,25 @@ describe("nhánh và baseline", () => {
     expect(baseline.status, JSON.stringify(baseline.body.error)).toBe(201)
 
     const ops = [{ op: "set", path: "actors[id=A02].name", value: "Lead Analyst", reason: "rename" }]
-    const noReason = await api.post("/changes", { base_version: await api.version(), ops })
+    // FLF-294: sau baseline lượt áp là một change request — người yêu cầu + nguồn + lý do
+    const changeRequest = { requester: "Ms. Lan", source: { kind: "meeting_minutes", ref: "Minutes 15/10" } }
+    const noCr = await api.post("/changes", { base_version: await api.version(), reason: "Customer renamed the role", ops })
+    expect(noCr.status).toBe(400)
+    expect(noCr.body.error.code).toBe("CR_FIELDS_REQUIRED")
+
+    const noReason = await api.post("/changes", { base_version: await api.version(), ops, change_request: changeRequest })
     expect(noReason.status).toBe(400)
     expect(noReason.body.error.code).toBe("VALIDATION_ERROR")
 
-    const withReason = await api.post("/changes", { base_version: await api.version(), reason: "Customer renamed the role", ops })
+    const withReason = await api.post("/changes", { base_version: await api.version(), reason: "Customer renamed the role", ops, change_request: changeRequest })
     expect(withReason.status, JSON.stringify(withReason.body.error)).toBe(200)
     expect(withReason.body.meta.branch).toBe("post_baseline")
+    expect(withReason.body.meta.cr_id).toBe("CR-001")
+
+    // BR-03: sau baseline không hoàn tác — gỡ thay đổi là một CR mới
+    const undo = await api.post("/undo", { base_version: await api.version() })
+    expect(undo.status).toBe(409)
+    expect(undo.body.error.code).toBe("UNDO_AFTER_BASELINE")
   })
 
   it("không có section stale ⇒ reconcile trả preview silent rỗng, không ghi gì", async () => {
