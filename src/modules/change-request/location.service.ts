@@ -15,7 +15,14 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { locksOf, pathLocked } from "./lock.service.js"
 import { previewAfter } from "./propose.service.js"
-import { elementValue, valueText } from "./spine-location.js"
+import { isArrayPath, snapshotOf } from "./spine-location.js"
+
+/**
+ * `new_value` ⇒ op. Phần tử: `set` cả phần tử. Vị trí "thêm mới" (`arr[]`, FLF-308): FE hiện và cho sửa đúng danh sách
+ * phần tử thêm mới (`new_text`) ⇒ mỗi phần tử một op `add` (`set` vào `arr[]` không áp được).
+ */
+export const valueOps = (path: string, value: unknown): unknown[] =>
+  isArrayPath(path) && Array.isArray(value) ? value.map((v) => ({ op: "add", path, value: v })) : [{ op: "set", path, value }]
 
 export const patchLocation = async (cr: IChangeRequest, locationId: string, body: PatchLocationRequest): Promise<void> => {
   assertCrStatus(cr, ["impact_review", "proposing", "manual_fix", "ready_to_submit"], "verifying")
@@ -32,12 +39,12 @@ export const patchLocation = async (cr: IChangeRequest, locationId: string, body
   const ops: unknown[] =
     conclusion !== "edit"
       ? []
-      : (body.spine_ops ?? (body.new_value !== undefined ? [{ op: "set", path: loc.path, value: body.new_value }] : (loc.proposal?.spine_ops ?? [])))
+      : (body.spine_ops ?? (body.new_value !== undefined ? valueOps(loc.path, body.new_value) : (loc.proposal?.spine_ops ?? [])))
 
   loc.conclusion = conclusion
   if (body.reason !== undefined) loc.reason = body.reason
   loc.proposal = {
-    old_text: valueText(elementValue(spine, loc.path)),
+    ...snapshotOf(spine, loc.path),
     new_text: conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: conclusion === "comment" ? (body.comment_text ?? loc.proposal?.comment_text ?? null) : null,
     spine_ops: ops,

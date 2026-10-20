@@ -1,7 +1,7 @@
 ---
 skill_id: cr-propose
 kind: action
-version: 2.4.0
+version: 2.5.0
 description: Mode 1 C-4 — for every affected Spine element conclude edit | comment | not_related and propose the Spine ops
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
@@ -29,7 +29,7 @@ and keep every other field exactly as it is — each changed field is a revision
 
 - CR {{cr_id}}: {{title}}
 - Description: {{description}}
-- Clarification answers (an empty answer means "I don't know"): {{answers}}
+- Clarification answers (an empty answer means "I don't know"; when rounds disagree, the later round wins): {{answers}}
 - Source material attached by the user (the requester's own documents — the primary source of facts):
 {{materials}}
 - Facts the clarify step reported as still missing: {{missing_info}}
@@ -52,11 +52,12 @@ and keep every other field exactly as it is — each changed field is a revision
    Never change an `id`. New elements are added only from a whole-array location (rule 3), never from here.
 3. A location whose path is a whole array (`other_requirements[]`, `entities[]`) is where **new elements** are added.
    **EMPTY SECTION** = the section has no elements yet; **ADD NEW** = it has some (listed as the value, so you can
-   continue the id scheme and avoid duplicates). Its only valid `edit` is `add` ops into **that same array**: add
+   avoid duplicates; "Ids already used" lists every id). Its only valid `edit` is `add` ops into **that same array**: add
    every element the change needs that does not exist yet — asked for explicitly *or* required to carry the change
    out (a new stored data concept ⇒ a new entity with its fields and relations; a new access rule ⇒ a new permission;
-   a new screen ⇒ a new screen). Ids continue the document's scheme (`E-07`, `BR-07`…), text in the document's
-   language. Nothing new needed ⇒ `not_related` with the reason. Never touch another array from such a location.
+   a new screen ⇒ a new screen). Give a new element an id in the document's scheme (`UC-126`, `SCR-85`) that is
+   **not** in "Ids already used" — the server renumbers a clashing id and the references to it in the other new
+   elements of this CR. Text in the document's language. Nothing new needed ⇒ `not_related` with the reason. Never touch another array from such a location.
    Reference fields (`actor_id`, `role_id`, `screen_id`, `entity_id`, relations…) point to **existing elements
    by id** whenever one matches (a new role "Chủ bếp" ⇒ `actor_id` of the actor named "Chủ bếp") — never leave them
    empty when a match exists. Elements added by another add location of the same CR can be referenced by the ids

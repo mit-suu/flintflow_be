@@ -31,7 +31,7 @@ import * as spineRepository from "../spine/spine.repository.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import type { IChangeLocation } from "./change-location.model.js"
 import { unlockPaths } from "./lock.service.js"
-import { elementValue, valueText } from "./spine-location.js"
+import { unchangedSince } from "./spine-location.js"
 import { valueChanged } from "./verify.service.js"
 import { scheduleEmbeddingSync } from "./embedding/embedding-sync.service.js"
 
@@ -45,7 +45,7 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
   }
   const current = stripRecord(record)
   const edits = approved.filter((l) => l.conclusion === "edit" && l.proposal)
-  for (const loc of edits) if (valueText(elementValue(current, loc.path)) !== loc.proposal!.old_text) throw valueChanged(loc)
+  for (const loc of edits) if (!unchangedSince(current, loc.path, loc.proposal!)) throw valueChanged(loc)
 
   // 0. Chạy khô op Spine: op sai / phá bất biến bị chặn trước khi ghi gì
   const ops: Op[] = edits.flatMap((l) => (l.proposal!.spine_ops ?? []).map((raw) => userOpSchema.parse(raw)))

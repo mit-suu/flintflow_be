@@ -40,7 +40,7 @@ const toProposed = async () => {
 describe("C-5 kiểm code (đỏ)", () => {
   it("giá trị tại path đổi sau khi đề xuất ⇒ 409 CR_VALUE_CHANGED, không lưu kết quả verify, không gọi AI", async () => {
     const { c, projectId, cr } = await toProposed()
-    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" } })
+    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "3 s" }, $inc: { spine_version: 1 } })
     const res = await c.post(`${cr}/verify`)
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_VALUE_CHANGED")
@@ -59,10 +59,8 @@ describe("C-5 kiểm code (đỏ)", () => {
     expect(nfr.verify!.violations.length).toBeGreaterThan(0) // đổi category làm hỏng bất biến / schema
     expect(nfr.redo_count).toBe(1)
     expect(d.locations.find((l) => l.path === BR)).toMatchObject({ verify: { code_ok: true, violations: [] }, redo_count: 0 })
-    // AI consistency chỉ nhận vị trí đã qua kiểm code (BR comment)
-    const [consistency] = promptsOf("# CR Consistency")
-    expect(consistency).toContain(`[L002][${BR}] (comment) Check ${BR}`)
-    expect(consistency).not.toContain(`[L001][${NFR}]`)
+    // FLF-307: CR còn vị trí trượt kiểm code ⇒ AI làm lại, chưa chạy AI consistency
+    expect(promptsOf("# CR Consistency")).toHaveLength(0)
   })
 
   it("phần tử mất khoá ⇒ path_not_locked (đỏ)", async () => {
@@ -100,6 +98,12 @@ describe("C-5 AI consistency chỉ vàng", () => {
     expect(prompt).toContain(`[L001][${NFR}] (fixed:4.2.3 Performance)`)
     expect(prompt).toMatch(/before: [\s\S]*"threshold": "2 s"/)
     expect(prompt).toMatch(/after: [\s\S]*"threshold": "1 s"/)
+    expect(prompt).toContain("Notes already shown to the reviewer on an earlier check of this CR:\n(none)")
+
+    // FLF-307: kiểm lại mà không vị trí nào đổi đề xuất ⇒ không gọi AI lần nữa, giữ nguyên nhận xét
+    const again = detail(await c.post(`${cr}/verify`))
+    expect(promptsOf("# CR Consistency")).toHaveLength(1)
+    expect(again.locations.find((l) => l.path === NFR)!.verify!.ai_flags.map((f) => f.rule)).toEqual(["contradiction", "term_drift"])
   })
 
   it("mọi vị trí not_related ⇒ không gọi AI consistency, đạt", async () => {
