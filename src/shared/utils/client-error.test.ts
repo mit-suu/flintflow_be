@@ -49,7 +49,28 @@ describe("toClientError (FLF-247)", () => {
       referrers: []
     })
     expect(toClientError(rejected("duplicate_id")).message).toBe(CHANGE_DUPLICATE_MESSAGE)
-    expect(toClientError(rejected("schema_invalid")).message).toBe(CHANGE_INVALID_RESULT_MESSAGE)
+    expect(toClientError(rejected("schema_invalid")).message).toBe("Chưa áp được thay đổi này: Tác nhân A03 — Tên sai định dạng sau khi sửa.")
+  })
+
+  it("FLF-300: dữ liệu sau khi sửa hỏng ⇒ câu nói phần nào hỏng, không còn câu chung", () => {
+    const rejected = (rule: string, path: string | undefined, message = "") =>
+      Object.assign(new ApiError(422, "x", "INVARIANT_VIOLATION"), { violations: [{ rule, message, path }], referrers: [] })
+    expect(
+      toClientError(rejected("invariant_3_dead_reference", "screens[id=S20].feature_id", 'Khoá "F09" (screens[].feature_id) không trỏ tới phần tử tồn tại')).message
+    ).toBe("Màn hình S20 — Tính năng trỏ tới “F09” không có trong tài liệu. Hãy nói rõ phần đó hoặc thêm nó trước.")
+    expect(toClientError(rejected("invariant_6_feature_mismatch", "functions[id=FN018].feature_id")).message).toBe(
+      "Chức năng FN018 — Tính năng không cùng tính năng với màn hình chứa nó."
+    )
+    // path Zod dạng chấm
+    expect(toClientError(rejected("schema_invalid", "screens.3.is_popup")).message).toBe(
+      "Chưa áp được thay đổi này: Màn hình #4 — Là popup sai định dạng sau khi sửa."
+    )
+    expect(toClientError(rejected("key_change_forbidden", "use_cases[id=UC27].id")).message).toBe(
+      "Không đổi hay xoá được mã định danh của Use case UC27 — Mã."
+    )
+    // không có path đọc được ⇒ vẫn câu chung, không in path thô
+    expect(toClientError(rejected("schema_invalid", undefined)).message).toBe(CHANGE_INVALID_RESULT_MESSAGE)
+    expect(toClientError(rejected("invariant_9_unknown", "progress.screen_queue")).message).toBe(CHANGE_INVALID_RESULT_MESSAGE)
   })
 
   it("AiActionError giữ status + code; câu theo nhóm lỗi, không text của provider", () => {
