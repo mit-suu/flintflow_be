@@ -147,6 +147,8 @@ export interface AnswerContext {
   language: ReplyLanguage
   corpus?: string | readonly string[]
   appliesTo?: RetrieveOptions["appliesTo"]
+  /** User bấm dừng / đóng luồng chat ⇒ huỷ lượt gọi model (chưa deduct ⇒ hoàn credit). */
+  signal?: AbortSignal
 }
 
 export const answerKnowledgeQuestion = async (question: string, ctx: AnswerContext): Promise<KnowledgeAnswer> => {
@@ -155,7 +157,7 @@ export const answerKnowledgeQuestion = async (question: string, ctx: AnswerConte
     ...(ctx.appliesTo !== undefined ? { appliesTo: ctx.appliesTo } : {})
   })
   return answerFromRetrieval(question, retrieval, ctx.language, async (input) => {
-    const res = await executeAiAction<KnowledgeAnswerOutput>(ActionType.KNOWLEDGE_ANSWER, input, ctx.projectId, ctx.userId)
+    const res = await executeAiAction<KnowledgeAnswerOutput>(ActionType.KNOWLEDGE_ANSWER, input, ctx.projectId, ctx.userId, ctx.signal ? { signal: ctx.signal } : {})
     return { data: res.data, cost: res.cost, tokensUsed: res.tokensUsed }
   })
 }

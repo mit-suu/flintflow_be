@@ -162,7 +162,15 @@ const tryAnswerRunningStep = async (session: IChatSession, projectId: string, co
 export interface SendMessageOptions {
   /** FLF-267: câu hỏi tri thức — trả lời từ Knowledge RAG thay cho CHAT (controller đã kiểm `KNOWLEDGE_ENABLED`). */
   knowledge?: boolean
+  /**
+   * Đường stream: user bấm dừng (FE huỷ fetch) ⇒ controller abort khi luồng đóng giữa chừng. Lượt gọi model bị
+   * ngắt, credit chưa deduct được hoàn, tin AI dở không ghi vào phiên (tin user vẫn giữ — như Esc của Claude Code).
+   */
+  signal?: AbortSignal
 }
+
+/** Lượt chat đã bị user dừng — không ghi tin AI, không gửi gì thêm (luồng đã đóng). */
+const isStopped = (signal?: AbortSignal): boolean => signal?.aborted === true
 
 /** Câu xin lỗi khi lượt gọi model của chat lỗi (CHAT và câu hỏi tri thức dùng chung). */
 const aiUnavailableReply = (replyLanguage: ReplyLanguage): string =>
@@ -191,10 +199,13 @@ const answerKnowledgeTurn = async (
   step: string,
   userId: string,
   replyLanguage: ReplyLanguage,
-  discoveryStep?: number
-): Promise<{ payload: ReturnType<typeof knowledgeReplyPayload>; answer: KnowledgeAnswer }> => {
-  const answer = await answerKnowledgeQuestion(content, { projectId, userId, language: replyLanguage })
+  discoveryStep?: number,
+  signal?: AbortSignal
+): Promise<{ payload: ReturnType<typeof knowledgeReplyPayload>; answer: KnowledgeAnswer } | null> => {
+  const answer = await answerKnowledgeQuestion(content, { projectId, userId, language: replyLanguage, ...(signal ? { signal } : {}) })
   const payload = knowledgeReplyPayload(answer)
+  // Câu từ chối không gọi model nên không bị ngắt — user đã dừng thì cũng không ghi
+  if (isStopped(signal)) return null
   session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
   await session.save()
   return { payload, answer }
@@ -362,12 +373,15 @@ export const sendMessageStream = async (
   // trích dẫn xong mới được hiện)
   if (options.knowledge) {
     try {
-      const { payload, answer } = await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep)
+      const turn = await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep, options.signal)
+      if (!turn) return
+      const { payload, answer } = turn
       if (!res.destroyed && !res.writableEnded) {
         res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: answer.tokensUsed, cost: answer.cost })}\n\n`)
         res.end()
       }
     } catch (error) {
+      if (isStopped(options.signal)) return
       console.error("Knowledge answer failed in chat stream:", error)
       try {
         if (!res.destroyed && !res.writableEnded) {
@@ -451,8 +465,12 @@ export const sendMessageStream = async (
             }
           } catch (_) {}
         }
-      }
+      },
+      options.signal ? { signal: options.signal } : {}
     )
+
+    // Dừng sát lúc model vừa xong: lượt đã tính phí nhưng user không còn chờ — không ghi tin dở vào phiên
+    if (isStopped(options.signal)) return
 
     // 7. Add AI response to MongoDB history
     const replyData = shapeChatReply(aiResult.data)
@@ -486,6 +504,7 @@ export const sendMessageStream = async (
       }
     } catch (_) {}
   } catch (error: any) {
+    if (isStopped(options.signal)) return
     console.error("AI stream failed in chat session service:", error)
     try {
       if (!res.destroyed && !res.writableEnded) {
