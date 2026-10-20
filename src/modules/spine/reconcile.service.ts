@@ -223,7 +223,8 @@ export const reconcile = async (
   if (body.preview_id !== undefined) {
     const sections = reconciledSections.get(body.preview_id) ?? []
     reconciledSections.delete(body.preview_id)
-    const applied = await applyChange(projectId, userId, { base_version: body.base_version, preview_id: body.preview_id }, init, d)
+    // FLF-294: hoà giải kéo theo một CR đã ghi — không đòi người yêu cầu / nguồn lần nữa
+    const applied = await applyChange(projectId, userId, { base_version: body.base_version, preview_id: body.preview_id, cr_exempt: true }, init, d)
     const afterRender = await rerenderStale(projectId, userId, applied.spine, d)
     const version = await markAwaitingReaccept(projectId, userId, afterRender, sections)
     const record = await repository.get(projectId)

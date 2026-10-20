@@ -225,4 +225,16 @@ describe("undoLast — khôi phục Spine", () => {
     await seed()
     await expect(undoLast(PROJECT, USER, { base_version: 1 })).rejects.toMatchObject({ code: "NOTHING_TO_UNDO" })
   })
+
+  it("FLF-294: đã có baseline ⇒ 409 UNDO_AFTER_BASELINE, không ghi gì (gỡ thay đổi là một CR mới)", async () => {
+    await seed({
+      ...FIXTURE,
+      baselines: [{ id: "B1", version: "v1.0", type: "generated", doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }]
+    })
+    await applyTransaction(PROJECT, { base_version: 1, by: USER, ops: [{ op: "set", path: "actors[id=A01].name", value: "X" }] })
+    const seqBefore = await repo.nextSeq(PROJECT)
+
+    await expect(undoLast(PROJECT, USER, { base_version: 2 })).rejects.toMatchObject({ statusCode: 409, code: "UNDO_AFTER_BASELINE" })
+    expect(await repo.nextSeq(PROJECT)).toBe(seqBefore)
+  })
 })

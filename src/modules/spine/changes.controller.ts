@@ -146,21 +146,27 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
       await changeTranscript.recordChangeTurn(session, userText, {
         kind: "change_applied",
         reply:
-          count > 0
+          count > 0 && result.cr_id
+            ? byLanguage(replyLanguage, {
+                vi: `Đã ghi ${result.cr_id} vào tài liệu (${count} thay đổi).`,
+                en: `Recorded ${result.cr_id} in the document (${count} change${count === 1 ? "" : "s"}).`
+              })
+            : count > 0
             ? byLanguage(replyLanguage, {
                 vi: `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).`,
                 en: `Applied ${count} change${count === 1 ? "" : "s"} to the document (v${result.spine_version}).`
               })
             : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." }),
         count,
-        spine_version: result.spine_version
+        spine_version: result.spine_version,
+        ...(result.cr_id ? { cr_id: result.cr_id } : {})
       })
     }
     return sendSuccess(
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact }
+      { branch: result.branch, impact: result.impact, ...(result.cr_id ? { cr_id: result.cr_id } : {}) }
     )
   } catch (err) {
     return sendDomainError(res, err)

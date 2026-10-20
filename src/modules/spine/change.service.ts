@@ -28,12 +28,14 @@ import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
 import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import { elementFieldsOf } from "./element-defaults.js"
+import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/response-parser.js"
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
+import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
@@ -425,6 +427,10 @@ export interface ChangeBody {
    * Có ⇒ lời gọi model trả câu hỏi làm rõ / ghi chú bằng ngôn ngữ đó, câu hỏi lại cố định cũng theo; không có ⇒ như cũ.
    */
   reply_language?: ReplyLanguage
+  /** FLF-294: người yêu cầu + nguồn của change request (DTO `change_request`), bắt buộc sau baseline. */
+  change_request?: ChangeRequestInfo
+  /** Nội bộ (DTO không nhận) — FLF-294: lượt áp của hoà giải, việc kéo theo một CR đã ghi, không đòi CR riêng. */
+  cr_exempt?: boolean
   /**
    * Nội bộ (DTO `strictObject` không nhận — client không gửi được bản dịch, D7): lô `ops` do server gom (hoà giải) kèm chữ
    * theo ngôn ngữ tài liệu model trả cùng lô, và ngôn ngữ của lượt đó. Đi theo preview tới lượt áp.
@@ -678,6 +684,8 @@ export const preview = async (
 export interface ChangeApplyResult extends ApplyResult {
   branch: ChangeBranch
   impact: Impact
+  /** FLF-294: mã change request của lượt áp sau baseline; trước baseline / hoà giải ⇒ `null`. */
+  cr_id?: string | null
 }
 
 /**
@@ -695,6 +703,9 @@ export const apply = async (
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
   const spine = stripRecord(record)
+  // FLF-294 (BR-03): sau baseline lượt áp là một change request — kiểm TRƯỚC khi lấy bản xem trước (`takePreview` xoá
+  // nó), để author thiếu người yêu cầu / nguồn điền rồi bấm lại vẫn còn bản xem trước. Hoà giải là việc kéo theo của CR.
+  const crInfo = spine.baselines.length > 0 && !body.cr_exempt ? assertCrInfo(body.change_request) : null
 
   const stored = body.preview_id === undefined ? null : takePreview(projectId, body.preview_id)
   const resolved: ResolvedOps = stored
@@ -721,9 +732,13 @@ export const apply = async (
     throw new ApiError(400, "Dự án đã có baseline — mọi thay đổi cần ghi lý do (vào Record of Changes)", "VALIDATION_ERROR")
   }
 
+  // FLF-294: mã cấp sau mọi bước kiểm của lượt áp (lỗi trước đó không phí số); mã + người yêu cầu + nguồn vào reason
+  const crId = crInfo && reason ? await nextCrId(projectId) : null
+  const recorded = crId && crInfo && reason ? crReason(crId, crInfo, reason) : reason
+
   // Project cũ chưa có Spine: tạo Spine rỗng như GET /spine để lô đầu tiên có chỗ ghi
   await repository.getOrCreate(projectId, init)
-  const applied = await applyTransaction(projectId, toTransaction(userId, { ...body, ...(reason === undefined ? {} : { reason }) }, resolved.ops))
+  const applied = await applyTransaction(projectId, toTransaction(userId, { ...body, ...(recorded === undefined ? {} : { reason: recorded }) }, resolved.ops))
   // FLF-265 D16: Spine đã ghi ⇒ lưu bản ngôn ngữ tài liệu kèm lô (lỗi chỉ log, không làm hỏng lượt ghi)
   await captureForTurn(projectId, resolved.language, resolved.ops, resolved.localized)
 
@@ -735,6 +750,7 @@ export const apply = async (
     ...applied,
     ...(after ? { spine: after, spine_version: after.spine_version } : {}),
     branch,
-    impact
+    impact,
+    cr_id: crId
   }
 }
