@@ -391,7 +391,7 @@ export const executeAiActionStream = async <T = any>(
     let usagePromise: PromiseLike<unknown> | null = null
     if (providerConfig.provider?.toLowerCase() === "mock") {
       // AI SDK không có provider mock: lấy trọn câu trả lời của mock rồi phát như một lượt stream duy nhất
-      const mockRes = await callLLM(finalPrompt, providerConfig)
+      const mockRes = await callLLM(finalPrompt, providerConfig, options.signal ? { signal: options.signal } : undefined)
       textStream = (async function* () {
         yield mockRes.text
       })()
@@ -400,7 +400,9 @@ export const executeAiActionStream = async <T = any>(
         model: getAiSdkModel(providerConfig),
         prompt: finalPrompt,
         temperature: providerConfig.temperature ?? 0.7,
-        maxOutputTokens: providerConfig.maxTokens ?? 2048
+        maxOutputTokens: providerConfig.maxTokens ?? 2048,
+        // User bấm dừng / đóng tab ⇒ ngắt luồng của nhà cung cấp, không sinh tiếp
+        ...(options.signal ? { abortSignal: options.signal } : {})
       })
       textStream = streamResult.textStream
       usagePromise = streamResult.usage
@@ -409,6 +411,8 @@ export const executeAiActionStream = async <T = any>(
     const extractor = new JsonStreamExtractor()
 
     for await (const chunk of textStream) {
+      // Huỷ trước parse ⇒ chưa deduct, `catch` dưới nhả reservation (dừng = không tốn credit)
+      if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
       const delta = extractor.push(chunk)
       if (delta && callbacks.onTextDelta) {
         await callbacks.onTextDelta(delta)
