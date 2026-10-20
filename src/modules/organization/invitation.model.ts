@@ -19,6 +19,7 @@ export type InvitableRole = Exclude<OrgRole, "lead">
  * suy diễn" của repo):
  *   revokedAt != null            → đã thu hồi
  *   acceptedAt != null           → đã dùng (mã dùng một lần)
+ *   declinedAt != null           → người được mời đã từ chối
  *   expiresAt <= now             → hết hạn
  *   còn lại                      → dùng được
  */
@@ -29,12 +30,18 @@ export interface IInvitation extends Document {
    * mã tạo trước đó (thời mã còn có thể "dùng chung" do Lead tự gửi tay).
    */
   email: string | null
+  /**
+   * Tài khoản được mời — chỉ người này xem trước / nhận / từ chối được (như lời mời collaborator của GitHub).
+   * null chỉ còn ở mã tạo trước khi có ràng buộc này; mã đó đối chiếu theo `email`.
+   */
+  inviteeUserId: mongoose.Types.ObjectId | null
   role: InvitableRole
   codeHash: string
   expiresAt: Date
   invitedByUserId: mongoose.Types.ObjectId
   acceptedByUserId: mongoose.Types.ObjectId | null
   acceptedAt: Date | null
+  declinedAt: Date | null
   revokedAt: Date | null
   createdAt: Date
   updatedAt: Date
@@ -52,6 +59,11 @@ const invitationSchema = new Schema<IInvitation>(
       default: null,
       lowercase: true,
       trim: true
+    },
+    inviteeUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null
     },
     role: {
       type: String,
@@ -81,6 +93,10 @@ const invitationSchema = new Schema<IInvitation>(
       type: Date,
       default: null
     },
+    declinedAt: {
+      type: Date,
+      default: null
+    },
     revokedAt: {
       type: Date,
       default: null
@@ -91,5 +107,7 @@ const invitationSchema = new Schema<IInvitation>(
 
 // Danh sách lời mời của một org, mới nhất trước (UC-08).
 invitationSchema.index({ organizationId: 1, createdAt: -1 })
+// Lời mời đang chờ của một người (mục "Lời mời đang chờ").
+invitationSchema.index({ inviteeUserId: 1, createdAt: -1 })
 
 export const Invitation = mongoose.model<IInvitation>("Invitation", invitationSchema)

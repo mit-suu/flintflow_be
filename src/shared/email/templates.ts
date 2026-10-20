@@ -132,6 +132,7 @@ export const getInvitationEmailHtml = ({
           <p style="margin:0 0 8px;color:${MUTED};">Nhập mã mời này trong ứng dụng:</p>
           <p style="margin:0 0 16px;font-size:26px;letter-spacing:4px;font-weight:700;color:${BRAND};">${escapeHtml(code)}</p>
           <p style="margin:0 0 16px;color:${MUTED};">Mã có hiệu lực trong ${expiresInDays} ngày và chỉ dùng được một lần.</p>
+          <p style="margin:0 0 16px;color:${MUTED};">Bạn cũng có thể chấp nhận hoặc từ chối lời mời ngay trong mục <strong>Tổ chức</strong> của FlintFlow.</p>
           <p style="margin:0;color:${MUTED};">Nếu bạn không định tham gia tổ chức này, hãy bỏ qua email này.</p>
         </td></tr>
       </table>
@@ -156,6 +157,7 @@ export const getInvitationEmailText = ({
     "",
     `Mã mời: ${code}`,
     `Mã có hiệu lực trong ${expiresInDays} ngày và chỉ dùng được một lần.`,
+    "Bạn cũng có thể chấp nhận hoặc từ chối lời mời ngay trong mục Tổ chức của FlintFlow.",
     "",
     "Nếu bạn không định tham gia tổ chức này, hãy bỏ qua email này."
   ].join("\n")
