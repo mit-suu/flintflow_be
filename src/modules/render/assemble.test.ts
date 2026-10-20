@@ -225,7 +225,7 @@ describe("assemble()", () => {
     expect(cacheDb.docs).toHaveLength(1)
     const cachedDoc = cacheDb.docs[0].doc as { watermark?: string; sections: unknown[]; version: string }
     expect(cachedDoc.watermark).toBe("DRAFT")
-    expect(cachedDoc.version).toBe("v0.5")
+    expect(cachedDoc.version).toBe("v0")
     // 4 chương tổng hợp (group:2..5) phải có mặt trong tài liệu lưu cache
     const ids = (cachedDoc.sections as { id: string }[]).map((s) => s.id)
     expect(ids).toEqual(expect.arrayContaining(["group:2", "group:3", "group:4", "group:5", "fixed:1"]))
@@ -406,7 +406,9 @@ describe("getDocument() — source=draft", () => {
     await assemble(PROJECT, "Demo", 2)
 
     const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
-    expect(doc.version).toBe("v0.2")
+    expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(2)
+    // FLF-295: nhãn version không lộ spine_version
+    expect(doc.version).toBe("v0")
   })
 
   it("flagsAppendix: cờ đỏ mở + waive đúng", async () => {
@@ -422,9 +424,9 @@ describe("getDocument() — source=draft", () => {
   it("chưa có bản dựng nào ⇒ dựng ngay ở spine_version hiện tại, không bắt gọi assemble trước", async () => {
     vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 4 }))
 
-    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+    await getDocument(PROJECT, "Demo", { source: "draft" })
 
-    expect(doc.version).toBe("v0.4")
+    expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(4)
   })
 
   it("Spine đi tiếp sau bản dựng gần nhất ⇒ dựng lại ở version mới, không trả bản cũ", async () => {
@@ -432,9 +434,9 @@ describe("getDocument() — source=draft", () => {
     await assemble(PROJECT, "Demo", 1)
     vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 2 }))
 
-    const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
+    await getDocument(PROJECT, "Demo", { source: "draft" })
 
-    expect(doc.version).toBe("v0.2")
+    expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(2)
   })
 
   it("nhiều lượt đọc song song một version chưa dựng ⇒ chỉ dựng một lần", async () => {
@@ -446,7 +448,7 @@ describe("getDocument() — source=draft", () => {
       getDocument(PROJECT, "Demo", { source: "draft" })
     ])
 
-    expect(docs.map((d) => d.version)).toEqual(["v0.7", "v0.7", "v0.7"])
+    expect(docs.map((d) => d.version)).toEqual(["v0", "v0", "v0"])
     expect(cacheDb.docs.filter((d) => d.spine_version === 7)).toHaveLength(1)
   })
 
@@ -456,7 +458,8 @@ describe("getDocument() — source=draft", () => {
 
     const doc = await getDocument(PROJECT, "Demo", { source: "draft" })
 
-    expect(doc.version).toBe("v0.1")
+    expect((await getDraftMeta(PROJECT))?.assembled_at_version).toBe(1)
+    expect(doc.version).toBe("v0")
   })
 })
 
@@ -754,7 +757,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     expect(result.translation).toEqual({ locale: "vi", source_locale: "en", missing })
     expect(documentTranslationMetaSchema.parse(result.translation)).toEqual(result.translation)
     expect(result.draftMeta).toEqual({ assembled_at_version: 41, spine_version: 41, stale: false })
-    expect(result.doc.version).toBe("v0.41")
+    expect(result.doc.version).toBe("v0")
     expect(sectionOf(result.doc, "function:FN001")?.heading).toBe("[vi] Submit Credentials")
     expect(sectionOf(result.doc, "feature:F1")?.heading).toBe("Authentication & Onboarding")
     expect(firstText(result.doc, "fixed:1")).toBe(spine.project.vision)
