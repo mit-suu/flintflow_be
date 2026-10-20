@@ -273,6 +273,15 @@ describe("preview — diff + impact, không ghi", () => {
     expect((await preview(PROJECT, USER, { base_version: 1, ops: changed }, {}, deps)).violations.map((v) => v.rule)).toEqual(["path_not_writable"])
   })
 
+  it("FLF-298: thêm use case không gắn chức năng ⇒ notes báo thiếu màn hình / phân quyền, không chặn bản xem trước", async () => {
+    await seed()
+    const value = { name: "Send Absence Warning", actor_ids: ["A01"], function_ids: [], description: "Warn students.", includes: [], extends: [] }
+    const result = await preview(PROJECT, USER, { base_version: 1, ops: [{ op: "add", path: "use_cases[]", value }] }, {}, deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.notes).toMatch(/"Send Absence Warning" chưa gắn chức năng nào/)
+  })
+
   it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT", async () => {
     await seed()
     await expect(preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
