@@ -30,6 +30,8 @@ import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import { elementFieldsOf } from "./element-defaults.js"
 import { newUseCaseGapNote, newUseCaseGaps } from "./new-usecase-gaps.js"
 import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
+import { addedScreenIds, addsUseCaseOrScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode } from "./use-case-propagation.js"
+import { layoutRenderDeps, renderChangedIfAvailable } from "../diagram/diagram.service.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
@@ -401,12 +403,19 @@ export interface ChangeDeps {
    * hàm giả để bật.
    */
   documentLanguage?: (projectId: string) => Promise<TurnDocumentLanguage | null>
+  /**
+   * FLF-311: lô vừa thêm use case / màn ⇒ vẽ lại sơ đồ đã cũ + bố cục màn mới. Không được ném (lỗi vẽ là dữ liệu, cờ
+   * `diagram_stale` / `render_error` ghi nhận); thiếu ⇒ `renderChangedIfAvailable`.
+   */
+  renderAfterChange?: (projectId: string, userId: string, newScreenIds: string[]) => Promise<unknown>
 }
 
 export const defaultChangeDeps = (): ChangeDeps => ({
   changeExecutor: (actionType, input, projectId, userId) => executeAiAction<ChangeInstructionOutput>(actionType, input, projectId, userId),
   recomputeFlags: (projectId, userId) => flagsService.recompute(projectId, { by: userId }),
-  documentLanguage: documentLanguageForTurn
+  documentLanguage: documentLanguageForTurn,
+  renderAfterChange: (projectId, userId, newScreenIds) =>
+    renderChangedIfAvailable(projectId, newScreenIds, { by: userId, step_id: null, deps: layoutRenderDeps() })
 })
 
 // ─── body ────────────────────────────────────────────────────────
@@ -525,6 +534,10 @@ const opsFromInstruction = async (
   clarificationRounds = 0
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
+  // FLF-311: lệnh thêm use case (hoặc câu trả lời cho câu hỏi làm rõ của lệnh đó) ⇒ model soạn đủ phần liên quan
+  const addsUseCase = isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history))
+  const ucMode = addsUseCase ? useCaseMode(spine) : null
+  const prepare = (ops: Op[]): Op[] => (ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops))
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
   const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
   const call = (previousProblems?: string) =>
@@ -538,7 +551,11 @@ const opsFromInstruction = async (
           is_pipeline: false,
           has_baseline: spine.baselines.length > 0,
           // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
-          projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
+          projection: {
+            ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
+            ...(ucMode ? { use_case_context: useCaseContext(spine, ucMode) } : {})
+          },
+          use_case_mode: ucMode ?? "none",
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [],
           clarification_rounds: clarificationRounds,
@@ -573,7 +590,7 @@ const opsFromInstruction = async (
     if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) result = forced
   }
   if (!result.data.clarification_needed?.trim()) {
-    const problems = batchProblems(spine, stampAddendum((result.data.ops ?? []) as Op[]), instruction)
+    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction)
     if (problems.length > 0) {
       const retry = await call(problems.join("\n")).catch((err: unknown) => {
         if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
@@ -588,7 +605,7 @@ const opsFromInstruction = async (
   if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null }
   const notes = result.data.notes ? nameElementIds(result.data.notes, spine) : null
   const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
-  return { ops: stampAddendum((result.data.ops ?? []) as Op[]), clarification: null, notes, ...localized, language: languagePairOf(language) }
+  return { ops: prepare((result.data.ops ?? []) as Op[]), clarification: null, notes, ...localized, language: languagePairOf(language) }
 }
 
 const resolveOps = async (
@@ -768,6 +785,11 @@ export const apply = async (
   // FLF-265 D16: Spine đã ghi ⇒ lưu bản ngôn ngữ tài liệu kèm lô (lỗi chỉ log, không làm hỏng lượt ghi)
   await captureForTurn(projectId, resolved.language, resolved.ops, resolved.localized)
 
+  // FLF-311: thêm use case / màn ⇒ vẽ lại sơ đồ use case, screen flow và bố cục màn mới TRƯỚC khi tính cờ (khỏi cờ
+  // `diagram_stale` cho chính lô này). Lỗi vẽ không làm hỏng lượt sửa.
+  if (applied.txn !== null && addsUseCaseOrScreen(spine, applied.spine)) {
+    await d.renderAfterChange?.(projectId, userId, addedScreenIds(spine, applied.spine))
+  }
   // Cờ tính lại sau khi ghi: thay đổi của user có thể mở cờ đỏ mới (chặn baseline kế tiếp).
   if (applied.txn !== null) await d.recomputeFlags(projectId, userId)
   const after = await repository.get(projectId)
