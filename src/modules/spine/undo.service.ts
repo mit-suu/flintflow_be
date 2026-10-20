@@ -23,6 +23,7 @@ import type { ApplyResult } from "./op.types.js"
 import type { Change } from "./spine.types.js"
 import { parsePath, PathError } from "./path-resolver.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 
 export const NOTHING_TO_UNDO = "NOTHING_TO_UNDO"
 
@@ -110,12 +111,14 @@ export interface UndoOptions {
   base_version: number
 }
 
-/** Undo lô gần nhất của project. Ném 422 `NOTHING_TO_UNDO` nếu không còn lô nào undo được. */
 /** FLF-294 (BR-03, UC-37): sau baseline không hoàn tác — lô đã ghi là một change request, gỡ nó là một CR mới. */
 export const UNDO_AFTER_BASELINE = "UNDO_AFTER_BASELINE"
 
+/** Undo lô gần nhất của project. Ném 422 `NOTHING_TO_UNDO` nếu không còn lô nào undo được. */
 export const undoLast = async (projectId: string, userId: string, options: UndoOptions): Promise<ApplyResult> => {
-  if (((await repository.get(projectId))?.baselines.length ?? 0) > 0) {
+  const record = await repository.get(projectId)
+  assertDraftUnlocked(record)
+  if ((record?.baselines.length ?? 0) > 0) {
     throw new ApiError(409, "Dự án đã có baseline — không hoàn tác được. Muốn gỡ thay đổi, hãy gõ lệnh sửa trong chat để tạo change request mới.", UNDO_AFTER_BASELINE)
   }
   const changes = await repository.listChanges(projectId)

@@ -35,6 +35,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/response-parser.js"
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -626,6 +627,7 @@ export const preview = async (
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
+  assertDraftUnlocked(record)
   const spine = stripRecord(record)
 
   const resolved = await resolveOps(projectId, userId, spine, body, d)
@@ -702,6 +704,7 @@ export const apply = async (
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
+  assertDraftUnlocked(record)
   const spine = stripRecord(record)
   // FLF-294 (BR-03): sau baseline lượt áp là một change request — kiểm TRƯỚC khi lấy bản xem trước (`takePreview` xoá
   // nó), để author thiếu người yêu cầu / nguồn điền rồi bấm lại vẫn còn bản xem trước. Hoà giải là việc kéo theo của CR.
