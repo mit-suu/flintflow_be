@@ -77,6 +77,7 @@ import type {
   RenderSource
 } from "./rendered-document.types.js"
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
+import { draftVersionLabel } from "./draft-version.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const NO_WORKING_DRAFT = "NO_WORKING_DRAFT"
@@ -867,7 +868,7 @@ export async function assemble(
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: `v0.${record.spine_version}`,
+      version: draftVersionLabel(spine, changes),
       template
     },
     {
@@ -1101,7 +1102,7 @@ const getTranslatedDraftDocument = async (
       statusChanges: changes,
       recordChanges,
       source: "draft",
-      version: `v0.${record.spine_version}`,
+      version: draftVersionLabel(spine, changes),
       template,
       language: languages.locale,
       sourceLanguage: languages.source
