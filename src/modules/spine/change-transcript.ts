@@ -84,10 +84,16 @@ export const previewPayload = (preview: ChangePreviewResult, language: ReplyLang
         kind: "change_preview",
         reply: preview.ok
           ? preview.changes.length > 0
-            ? byLanguage(language, {
-                vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
-                en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
-              })
+            ? [
+                byLanguage(language, {
+                  vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
+                  en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
+                }),
+                // FLF-298: phần còn thiếu (vd use case mới chưa có màn hình) phải hiện ngay trong chat, không chỉ trong thẻ
+                preview.notes
+              ]
+                .filter(Boolean)
+                .join("\n")
             : byLanguage(language, {
                 vi: "Không tìm thấy chỗ nào cần đổi theo lệnh này.",
                 en: "Nothing in the document needs to change for this request."
