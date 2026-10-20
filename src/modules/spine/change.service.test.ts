@@ -64,6 +64,11 @@ const db = vi.hoisted(() => {
 
 vi.mock("./spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("./change.model.js", () => ({ Change: db.Change }))
+// FLF-294: bộ đếm mã CR trong bộ nhớ (project `unit` không nối Mongo)
+const crCounter = vi.hoisted(() => ({ seq: 0 }))
+vi.mock("../change-request/change-request.model.js", () => ({
+  CrCounter: { findOneAndUpdate: async () => ({ seq: ++crCounter.seq }) }
+}))
 // FLF-265: kho bản dịch trong bộ nhớ (project `unit` không nối Mongo)
 vi.mock("../translation/translation.repository.js", async () => (await import("../translation/__tests__/translation-store.js")).fakeRepository)
 
@@ -273,6 +278,15 @@ describe("preview — diff + impact, không ghi", () => {
     expect((await preview(PROJECT, USER, { base_version: 1, ops: changed }, {}, deps)).violations.map((v) => v.rule)).toEqual(["path_not_writable"])
   })
 
+  it("FLF-298: thêm use case không gắn chức năng ⇒ notes báo thiếu màn hình / phân quyền, không chặn bản xem trước", async () => {
+    await seed()
+    const value = { name: "Send Absence Warning", actor_ids: ["A01"], function_ids: [], description: "Warn students.", includes: [], extends: [] }
+    const result = await preview(PROJECT, USER, { base_version: 1, ops: [{ op: "add", path: "use_cases[]", value }] }, {}, deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.notes).toMatch(/"Send Absence Warning" chưa gắn chức năng nào/)
+  })
+
   it("base_version lệch ⇒ 409 SPINE_VERSION_CONFLICT", async () => {
     await seed()
     await expect(preview(PROJECT, USER, { base_version: 99, ops: [{ op: "set", path: "project.vision", value: "x" }] }, {}, deps)).rejects.toMatchObject({
@@ -331,6 +345,35 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
     expect(result.changes).toHaveLength(0)
 
     await expect(apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)).rejects.toBeInstanceOf(NeedsClarificationError)
+  })
+
+  it("FLF-299: số câu đã hỏi vào prompt; đã hỏi đủ mà model vẫn hỏi ⇒ gọi lại MỘT lần, dùng lô soạn được", async () => {
+    await seed()
+    const ops = [{ op: "set" as const, path: "actors[id=A01].name", value: "Product Owner" }]
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ clarification_needed: "Áp dụng cho màn nào?" }))
+      .mockResolvedValueOnce(aiResult({ ops }))
+    const body = { base_version: 1, instruction: "chỉ thao tác xóa", clarification_rounds: 2 }
+
+    const result = await preview(PROJECT, USER, body, {}, deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.changes).toHaveLength(1)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[0][1].promptVariables).toMatchObject({ clarification_rounds: 2 })
+    expect(String(calls[1][1].promptVariables?.previous_problems)).toMatch(/Do not ask again/)
+  })
+
+  it("FLF-299: mới hỏi lần đầu ⇒ câu hỏi làm rõ đi thẳng tới user, không gọi lại", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Thao tác nào cần xác nhận?" }))
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "thêm popup xác nhận", clarification_rounds: 0 }, {}, deps)
+
+    expect(result.clarification).toBe("Thao tác nào cần xác nhận?")
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
   })
 
   it("trả lời câu hỏi làm rõ ⇒ model đọc đoạn hội thoại trước, projection dò cả yêu cầu gốc", async () => {
@@ -644,7 +687,12 @@ describe("apply — ghi Spine, section phụ thuộc thành stale", () => {
   })
 })
 
-describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
+describe("apply sau baseline — change request (FLF-294): người yêu cầu + nguồn + reason bắt buộc, impact luôn có", () => {
+  const cr = { requester: "Ms. Lan", source: { kind: "meeting_minutes" as const, ref: "Biên bản 15/10" } }
+  beforeEach(() => {
+    crCounter.seq = 0
+  })
+
   const withBaseline = (): Spine => {
     const spine = structuredClone(FIXTURE)
     spine.baselines = [
@@ -653,27 +701,53 @@ describe("apply sau baseline — reason bắt buộc, impact luôn có", () => {
     return spine
   }
 
-  it("thiếu reason ⇒ 400, không ghi gì", async () => {
+  it("thiếu người yêu cầu / nguồn ⇒ 400 CR_FIELDS_REQUIRED, không ghi; bản xem trước còn nguyên để điền rồi áp lại", async () => {
     await seed(withBaseline())
-    await expect(
-      apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }] }, {}, deps)
-    ).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    const ops = [{ op: "set" as const, path: "project.vision", value: "Tầm nhìn mới" }]
+    await expect(apply(PROJECT, USER, { base_version: 1, ops, reason: "Khách hàng đổi mục tiêu" }, {}, deps)).rejects.toMatchObject({
+      statusCode: 400,
+      code: "CR_FIELDS_REQUIRED"
+    })
     expect(await writtenChanges()).toBe(0)
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, ops }, {}, deps)
+    await expect(apply(PROJECT, USER, { base_version: 1, ops, preview_id: shown.preview_id, reason: "x" }, {}, deps)).rejects.toMatchObject({
+      code: "CR_FIELDS_REQUIRED"
+    })
+    const applied = await apply(PROJECT, USER, { base_version: 1, ops, preview_id: shown.preview_id, reason: "x", change_request: cr }, {}, deps)
+    expect(applied.cr_id).toBe("CR-001")
   })
 
-  it("có reason ⇒ áp được, branch post_baseline, impact trong kết quả, reason vào changes[]", async () => {
+  it("có CR nhưng thiếu reason ⇒ 400 VALIDATION_ERROR, không ghi, không phí mã CR", async () => {
+    await seed(withBaseline())
+    await expect(
+      apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }], change_request: cr }, {}, deps)
+    ).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    expect(await writtenChanges()).toBe(0)
+    expect(crCounter.seq).toBe(0)
+  })
+
+  it("đủ CR ⇒ áp được, cr_id, branch post_baseline, mã + người yêu cầu + nguồn vào reason (Record of Changes)", async () => {
     await seed(withBaseline())
     const applied = await apply(
       PROJECT,
       USER,
-      { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }], reason: "Khách hàng đổi mục tiêu" },
+      { base_version: 1, ops: [{ op: "set", path: "project.vision", value: "Tầm nhìn mới" }], reason: "Khách hàng đổi mục tiêu", change_request: cr },
       {},
       deps
     )
 
+    expect(applied.cr_id).toBe("CR-001")
     expect(applied.branch).toBe("post_baseline")
     expect(applied.impact.sections.map((s) => s.id)).toContain("fixed:1")
-    expect(applied.changes[0].reason).toBe("Khách hàng đổi mục tiêu")
+    expect(applied.changes[0].reason).toBe("CR-001 · Ms. Lan · meeting minutes: Biên bản 15/10 — Khách hàng đổi mục tiêu")
+  })
+
+  it("trước baseline ⇒ không đòi CR, cr_id null", async () => {
+    await seed()
+    const applied = await apply(PROJECT, USER, { base_version: 1, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }, {}, deps)
+    expect(applied.cr_id).toBeNull()
+    expect(crCounter.seq).toBe(0)
   })
 
   it("preview sau baseline cũng báo nhánh post_baseline", async () => {

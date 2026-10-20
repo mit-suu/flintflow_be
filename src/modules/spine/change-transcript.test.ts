@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 
 vi.mock("../project/chat-session.model.js", () => ({ ChatSession: { findById: vi.fn() } }))
 
-import { formatChatContext, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
+import { clarificationRounds, formatChatContext, formatChatHistory, previewPayload, recordChangeTurn } from "./change-transcript.js"
 import type { IChatMessage, IChatSession } from "../project/chat-session.model.js"
 import type { ChangePreviewResult } from "./change.service.js"
 
@@ -25,6 +25,22 @@ describe("formatChatHistory", () => {
   })
 })
 
+describe("clarificationRounds — FLF-299", () => {
+  const ask = (q: string) => msg("ai", JSON.stringify({ kind: "change_clarification", reply: q }))
+
+  it("đếm câu hỏi làm rõ liên tiếp ở cuối phiên, bỏ qua tin user", () => {
+    expect(clarificationRounds([msg("user", "thêm popup xác nhận"), ask("Thao tác nào?"), msg("user", "chỉ thao tác xóa"), ask("Màn nào?")])).toBe(2)
+    expect(clarificationRounds([msg("user", "thêm popup"), ask("Thao tác nào?"), msg("user", "chỉ xóa")])).toBe(1)
+  })
+
+  it("dừng ở tin AI khác (yêu cầu trước đã khép); phiên rỗng ⇒ 0", () => {
+    const applied = msg("ai", JSON.stringify({ kind: "change_applied", reply: "Đã áp dụng" }))
+    expect(clarificationRounds([ask("Cũ?"), applied, msg("user", "đổi tên admin")])).toBe(0)
+    expect(clarificationRounds([msg("ai", "Xin chào"), msg("user", "x")])).toBe(0)
+    expect(clarificationRounds([])).toBe(0)
+  })
+})
+
 describe("previewPayload", () => {
   const base: ChangePreviewResult = { ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [] }
 
@@ -40,6 +56,16 @@ describe("previewPayload", () => {
     })
     expect(payload).toMatchObject({ kind: "change_preview", preview_id: "pv", change_count: 1 })
     expect(payload.reply).toContain("1 thay đổi")
+  })
+
+  it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {
+    const payload = previewPayload({
+      ...base,
+      changes: [{ op: "add", path: "use_cases[]", before: null, value: {}, reason: null }],
+      preview_id: "pv",
+      notes: 'Use case mới "Send Absence Warning" chưa gắn chức năng nào'
+    })
+    expect(String(payload.reply).split("\n")).toEqual([expect.stringContaining("1 thay đổi"), 'Use case mới "Send Absence Warning" chưa gắn chức năng nào'])
   })
 
   it("FLF-244: không lưu mảng changes/impact/violations vào transcript", () => {

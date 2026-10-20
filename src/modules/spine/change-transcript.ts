@@ -62,6 +62,31 @@ export const formatChatContext = (
   return history ? `Tóm tắt hội thoại trước: ${summary}\n\n${history}` : `Tóm tắt hội thoại trước: ${summary}`
 }
 
+const messageKind = (msg: IChatMessage): string | null => {
+  if (msg.role !== "ai" || !msg.content.startsWith("{")) return null
+  try {
+    const kind = (JSON.parse(msg.content) as { kind?: unknown }).kind
+    return typeof kind === "string" ? kind : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * FLF-299: số câu hỏi làm rõ AI đã hỏi liên tiếp cho yêu cầu sửa đang dở — đếm từ cuối phiên lùi về, bỏ qua tin user,
+ * dừng ở tin AI đầu tiên không phải `change_clarification` (một lượt khác đã khép yêu cầu trước).
+ */
+export const clarificationRounds = (messages: readonly IChatMessage[]): number => {
+  let rounds = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.role === "user") continue
+    if (messageKind(msg) !== "change_clarification") break
+    rounds++
+  }
+  return rounds
+}
+
 /** Phiên chat của đúng project này — sai project hay không tồn tại đều 404 (không lộ chatId của project khác). */
 export const loadProjectSession = async (projectId: string, sessionId: string): Promise<IChatSession> => {
   const session = mongoose.isValidObjectId(sessionId) ? await ChatSession.findById(sessionId) : null
@@ -84,10 +109,16 @@ export const previewPayload = (preview: ChangePreviewResult, language: ReplyLang
         kind: "change_preview",
         reply: preview.ok
           ? preview.changes.length > 0
-            ? byLanguage(language, {
-                vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
-                en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
-              })
+            ? [
+                byLanguage(language, {
+                  vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
+                  en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
+                }),
+                // FLF-298: phần còn thiếu (vd use case mới chưa có màn hình) phải hiện ngay trong chat, không chỉ trong thẻ
+                preview.notes
+              ]
+                .filter(Boolean)
+                .join("\n")
             : byLanguage(language, {
                 vi: "Không tìm thấy chỗ nào cần đổi theo lệnh này.",
                 en: "Nothing in the document needs to change for this request."
