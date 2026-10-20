@@ -9,6 +9,7 @@
  *   sửa ở chỗ khác kể từ lúc đề xuất (thay "old text khớp block" của bản theo block).
  */
 
+import { createHash } from "node:crypto"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { ORIGINAL_DIAGRAM_DATA, ORIGINAL_DIAGRAM_SECTION, originalDiagramOf } from "../spine/original-diagram.js"
 import { impactOf } from "../spine/impact.service.js"
@@ -134,6 +135,36 @@ const sortKeys = (value: unknown): unknown => {
 
 /** Chuỗi ổn định (khoá sắp xếp) của giá trị — hiển thị cho người duyệt và so ở C-5. Phần tử không còn ⇒ "". */
 export const valueText = (value: unknown): string => (value === undefined ? "" : JSON.stringify(sortKeys(value), null, 2))
+
+/** sha256 hex — `base_hash` của vị trí "thêm mới". */
+export const sha256 = (text: string): string => createHash("sha256").update(text).digest("hex")
+
+/**
+ * Chụp giá trị lúc đề xuất (FLF-308). Vị trí phần tử: `old_text` = giá trị phần tử. Vị trí "thêm mới" (`arr[]`): chép cả
+ * mảng làm request CR nặng hàng trăm KB (`functions[]` 111 KB) mà người duyệt chỉ cần phần tử thêm ⇒ `old_text = "[]"`,
+ * còn mảng lúc đề xuất giữ bằng `base_hash` để C-5/C-7 vẫn biết có ai sửa mảng ở chỗ khác không.
+ */
+export const snapshotOf = (spine: Spine, path: string): { old_text: string; base_hash: string | null } =>
+  isArrayPath(path) ? { old_text: "[]", base_hash: sha256(valueText(elementValue(spine, path))) } : { old_text: valueText(elementValue(spine, path)), base_hash: null }
+
+/** Giá trị tại `path` chưa đổi kể từ lúc chụp (`snapshotOf`); bản ghi cũ (không có `base_hash`) so `old_text`. */
+export const unchangedSince = (spine: Spine, path: string, proposal: { old_text: string; base_hash?: string | null }): boolean => {
+  const current = valueText(elementValue(spine, path))
+  return proposal.base_hash ? sha256(current) === proposal.base_hash : current === proposal.old_text
+}
+
+/** Giá trị hiện tại gửi FE (`current_text`): vị trí "thêm mới" ⇒ `"[]"` — phần tử có sẵn là các vị trí riêng. */
+export const currentText = (spine: Spine, path: string): string => (isArrayPath(path) ? "[]" : valueText(elementValue(spine, path)))
+
+/** Phần tử của `after` không có trong `before` (khớp theo `id`, phần tử không id thì theo giá trị) — vị trí `arr[]` sau op. */
+export const addedElements = (before: unknown, after: unknown): unknown[] => {
+  const prev = Array.isArray(before) ? before : []
+  const ids = new Set(prev.flatMap((el) => (el && typeof el === "object" && "id" in el ? [String((el as Row).id)] : [])))
+  const texts = new Set(prev.map(valueText))
+  return (Array.isArray(after) ? after : []).filter((el) =>
+    el && typeof el === "object" && "id" in el ? !ids.has(String((el as Row).id)) : !texts.has(valueText(el))
+  )
+}
 
 /** Mọi chuỗi trong giá trị, nối lại — để tìm từ khoá / mã / tên. */
 const textOf = (value: unknown): string => {

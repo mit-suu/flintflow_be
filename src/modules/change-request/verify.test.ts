@@ -10,7 +10,7 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { MAX_REDO_PER_LOCATION, nextAfterVerifyFail } from "./change-request.state.js"
 import { previewAfter } from "./propose.service.js"
 import { elementValue, valueText } from "./spine-location.js"
-import { checkLocation, checkSpineOps } from "./verify.service.js"
+import { checkLocation, checkSpineOps, previousFindingsText, previousFlags } from "./verify.service.js"
 
 const cr = { cr_id: "CR-001" } as IChangeRequest
 const PATH = "actors[id=A01]"
@@ -94,5 +94,21 @@ describe("C-5 checkSpineOps — op Spine chạy khô", () => {
 describe("C-5 redo ≤ 2 rồi sửa tay", () => {
   it(`trượt lần 1, 2 ⇒ AI làm lại; từ lần ${MAX_REDO_PER_LOCATION + 1} ⇒ manual_fix`, () => {
     expect([0, 1, 2, 3].map(nextAfterVerifyFail)).toEqual(["proposing", "proposing", "manual_fix", "manual_fix"])
+  })
+})
+
+describe("C-5 nhận xét AI lần trước (FLF-307)", () => {
+  const flagged = (location_id: string, ai_flags: { rule: string; message: string }[] | null) =>
+    ({ location_id, verify: ai_flags ? { code_ok: true, violations: [], ai_flags, at: new Date() } : null }) as Pick<IChangeLocation, "location_id" | "verify">
+
+  it("giữ nhận xét theo vị trí; vị trí vừa đề xuất lại (verify null) không còn nhận xét", () => {
+    const prev = previousFlags([flagged("L004", [{ rule: "contradiction", message: "A" }]), flagged("L005", []), flagged("L074", null)])
+    expect([...prev.keys()]).toEqual(["L004"])
+  })
+
+  it("liệt kê nhận xét cũ không lặp cho prompt; không có ⇒ (none)", () => {
+    const same = [{ rule: "contradiction", message: "A" }]
+    expect(previousFindingsText(new Map([["L004", same], ["L005", same]]))).toBe("- (contradiction) A")
+    expect(previousFindingsText(new Map())).toBe("(none)")
   })
 })
