@@ -111,9 +111,16 @@ export interface UndoOptions {
   base_version: number
 }
 
+/** FLF-294 (BR-03, UC-37): sau baseline không hoàn tác — lô đã ghi là một change request, gỡ nó là một CR mới. */
+export const UNDO_AFTER_BASELINE = "UNDO_AFTER_BASELINE"
+
 /** Undo lô gần nhất của project. Ném 422 `NOTHING_TO_UNDO` nếu không còn lô nào undo được. */
 export const undoLast = async (projectId: string, userId: string, options: UndoOptions): Promise<ApplyResult> => {
-  assertDraftUnlocked(await repository.get(projectId))
+  const record = await repository.get(projectId)
+  assertDraftUnlocked(record)
+  if ((record?.baselines.length ?? 0) > 0) {
+    throw new ApiError(409, "Dự án đã có baseline — không hoàn tác được. Muốn gỡ thay đổi, hãy gõ lệnh sửa trong chat để tạo change request mới.", UNDO_AFTER_BASELINE)
+  }
   const changes = await repository.listChanges(projectId)
   const target = findUndoTarget(changes)
   if (!target) throw new ApiError(422, "Không còn thao tác nào để hoàn tác", NOTHING_TO_UNDO)
