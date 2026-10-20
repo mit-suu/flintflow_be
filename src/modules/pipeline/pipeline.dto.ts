@@ -23,6 +23,7 @@ import {
 import { opSchema, userOpSchema } from "../spine/op.types.js"
 import { COMMENT_ID_PATTERN, COMMENT_RESOLUTIONS, COMMENT_STATUSES, COMMENT_TEXT_MAX, KEEP_REASON_MIN_LENGTH } from "../comment/comment.model.js"
 import { ORG_ROLES } from "../organization/membership.model.js"
+import { NEW_CR_SOURCE_KINDS } from "../change-request/change-request.constants.js"
 
 // ─── mã lỗi ──────────────────────────────────────────────────────
 
@@ -98,6 +99,17 @@ const isoDateTime = z.iso.datetime({ offset: true })
 /** GET /projects/:id/spine */
 export const getSpineResponseSchema = spineRecordSchema
 
+/** FLF-294: người yêu cầu + nguồn của change request sau baseline — cùng 6 nguồn của C-1 mode 1. */
+export const changeRequestInfoSchema = z.strictObject({
+  requester: z.string().trim().min(1).max(120),
+  source: z.strictObject({
+    kind: z.enum(NEW_CR_SOURCE_KINDS),
+    ref: z.string().trim().max(300).nullable().optional()
+  })
+})
+
+export type ChangeRequestInfo = z.infer<typeof changeRequestInfoSchema>
+
 /** POST /projects/:id/changes và /changes/preview — `ops` thuần (T08) hoặc `instruction` (T17). */
 export const changesRequestSchema = z
   .strictObject({
@@ -112,7 +124,12 @@ export const changesRequestSchema = z
      * Phiên chat nơi user gõ lệnh (chip "Sửa tài liệu"): model đọc đuôi hội thoại của phiên, và lượt này
      * (lệnh + bản xem trước / câu hỏi làm rõ / đã áp) được ghi vào phiên. Không gửi ⇒ như cũ, không ghi transcript.
      */
-    session_id: z.string().min(1).optional()
+    session_id: z.string().min(1).optional(),
+    /**
+     * FLF-294 (BR-03, UC-48): sau baseline, lượt áp là một change request — bắt buộc người yêu cầu + nguồn ở `/changes`
+     * (thiếu ⇒ 400 `CR_FIELDS_REQUIRED`). Trước baseline bỏ qua. `/changes/preview` không cần.
+     */
+    change_request: changeRequestInfoSchema.optional()
   })
   .refine((v) => (v.ops === undefined) !== (v.instruction === undefined), {
     message: "Cần đúng một trong hai: ops hoặc instruction"
