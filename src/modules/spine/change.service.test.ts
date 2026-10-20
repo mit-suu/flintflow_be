@@ -310,7 +310,10 @@ describe("preview — diff + impact, không ghi", () => {
       },
       { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
       { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } },
-      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "create" } }
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "create" } },
+      // Thông báo cho luồng bất thường: một mới (code cấp số), một dùng lại thông báo có sẵn
+      { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "Select at least one student, then send the warning again.", function_ids: ["$newFn"] } },
+      { op: "set", path: "messages[id=MSG04].function_ids", value: ["FN028", "$newFn"] }
     ]
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: fullBatch as ChangeInstructionOutput["ops"], notes: "Thêm chức năng, màn Absence Warning, luồng và phân quyền." }))
     deps.renderAfterChange = vi.fn(async () => undefined)
@@ -320,7 +323,9 @@ describe("preview — diff + impact, không ghi", () => {
     expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
     const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
     expect(vars.use_case_mode).toBe("full")
-    expect((vars.projection as Record<string, unknown>).use_case_context).toMatchObject({ mode: "full" })
+    // S-7.3 đã chạy ⇒ lô phải tự thêm thông báo (luật 3f)
+    expect(vars.messages_ready).toBe(true)
+    expect((vars.projection as Record<string, unknown>).use_case_context).toMatchObject({ mode: "full", messages_ready: true })
     // Đủ phần liên quan ⇒ không còn cảnh báo thiếu màn / chức năng (FLF-298)
     expect(shown.notes ?? "").not.toMatch(/chưa gắn chức năng/)
 
@@ -334,7 +339,31 @@ describe("preview — diff + impact, không ghi", () => {
     expect(screen).toMatchObject({ name: "Absence Warning", detail_status: "signed_off", primary_function_id: fn.id })
     expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
     expect(spine.permissions.filter((p) => p.screen_id === screen.id).map((p) => p.action).sort()).toEqual(["create", "view"])
+    expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
+    expect(spine.messages.find((m) => m.id === "MSG04")?.function_ids).toEqual(["FN028", fn.id])
     expect(deps.renderAfterChange).toHaveBeenCalledWith(PROJECT, USER, [screen.id])
+  })
+
+  it("FLF-311: lô thêm use case phá bất biến (vai trò không tồn tại) ⇒ preview ok=false kèm vi phạm, apply từ chối, không ghi, không vẽ lại", async () => {
+    await seed()
+    const broken = [
+      { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "…" } },
+      { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "…", feature_id: "F3", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$newFn", name: "Send Absence Warning", screen_id: "$newScreen", feature_id: "F3", trigger: "…", description: "…", normal: [], abnormal: [], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R9", action: "view" } }
+    ]
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: broken as ChangeInstructionOutput["ops"] }))
+    deps.renderAfterChange = vi.fn(async () => undefined)
+    const instruction = "Thêm use case Send Absence Warning cho Analyst"
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction }, {}, deps)
+    expect(shown.ok).toBe(false)
+    expect(shown.violations).toContainEqual(expect.objectContaining({ rule: "invariant_3_dead_reference", path: expect.stringContaining("role_id") }))
+
+    await expect(apply(PROJECT, USER, { base_version: 1, instruction }, {}, deps)).rejects.toBeInstanceOf(TransactionRejectedError)
+    expect(await writtenChanges()).toBe(0)
+    expect(deps.renderAfterChange).not.toHaveBeenCalled()
   })
 
   it("FLF-311: đang ở S-5 ⇒ màn mới pending và tự vào hàng đợi S-5 (bất biến 8), vòng S-5 mô tả tiếp", async () => {

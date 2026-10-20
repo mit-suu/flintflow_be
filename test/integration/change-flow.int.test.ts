@@ -180,7 +180,8 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
       }
     },
     { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
-    { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } }
+    { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } },
+    { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "Select at least one student, then send the warning again.", function_ids: ["$newFn"] } }
   ]
   const instruction = "Thêm use case Send Absence Warning cho Business Analyst"
 
@@ -208,6 +209,7 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
     expect(screen).toMatchObject({ detail_status: "signed_off", primary_function_id: fn.id, feature_id: "F3" })
     expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
     expect(spine.permissions.some((p) => p.screen_id === screen.id && p.role_id === "R2")).toBe(true)
+    expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
   })
 
   it("sau baseline ⇒ cả lô là MỘT change request (một mã CR cho mọi dòng thay đổi)", async () => {

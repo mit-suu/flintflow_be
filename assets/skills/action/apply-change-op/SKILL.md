@@ -92,6 +92,12 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    layout and diagrams are drawn by code after apply. System/time actor ⇒ only the function, `screen_id: null`.
    Code sets `order` and `detail_status`. Say in `notes` (reply language) what the batch adds besides the use case.
 {{/if}}
+{{#if messages_ready}}
+3f. **Application messages** (§ Messages) for the new function: each user-visible `abnormal[]` case needs a message —
+   same meaning as one in `use_case_context.messages` ⇒ `set messages[id=…].function_ids` to its old list plus
+   `$newFn`; otherwise `add messages[]` `{ "code": "<AREA>-001", "text": …, "function_ids": ["$newFn"] }` — area
+   that fits (an existing one from the context), code fixes the number; text: one sentence saying what to do next.
+{{/if}}
 3c. **Removing** one element is `remove` with the element path: `remove use_cases[id=UC07]`,
    `remove functions[id=FN005].validations[id=FN005-V2]`. Do not "remove" by setting the array to a shorter
    list — that is how whole elements vanish without a diff line.

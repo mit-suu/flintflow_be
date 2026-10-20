@@ -30,7 +30,7 @@ import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import { elementFieldsOf } from "./element-defaults.js"
 import { newUseCaseGapNote, newUseCaseGaps } from "./new-usecase-gaps.js"
 import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
-import { addedScreenIds, addsUseCaseOrScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, isAddUseCaseInstruction, messagesReady, normalizeUseCaseBatch, useCaseContext, useCaseMode } from "./use-case-propagation.js"
 import { layoutRenderDeps, renderChangedIfAvailable } from "../diagram/diagram.service.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -556,6 +556,7 @@ const opsFromInstruction = async (
             ...(ucMode ? { use_case_context: useCaseContext(spine, ucMode) } : {})
           },
           use_case_mode: ucMode ?? "none",
+          messages_ready: ucMode === "full" && messagesReady(spine),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [],
           clarification_rounds: clarificationRounds,
