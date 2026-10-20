@@ -153,8 +153,8 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
               })
             : count > 0
             ? byLanguage(replyLanguage, {
-                vi: `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).`,
-                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document (v${result.spine_version}).`
+                vi: `Đã áp dụng ${count} thay đổi vào tài liệu.`,
+                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document.`
               })
             : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." }),
         count,
