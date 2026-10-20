@@ -43,6 +43,11 @@ describe("trạng thái mã mời là giá trị suy diễn", () => {
     expect(invitationState({ expiresAt: at(60_000), acceptedAt: new Date() })).toBe("accepted")
   })
 
+  it("người được mời từ chối ⇒ declined, kể cả khi đã quá hạn sau đó", () => {
+    expect(invitationState({ expiresAt: at(60_000), declinedAt: new Date() })).toBe("declined")
+    expect(invitationState({ expiresAt: at(-1), declinedAt: new Date() })).toBe("declined")
+  })
+
   it("thu hồi thắng mọi trạng thái khác", () => {
     expect(
       invitationState({ expiresAt: at(60_000), acceptedAt: new Date(), revokedAt: new Date() })

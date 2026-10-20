@@ -166,23 +166,24 @@ describe("mã mời hỏng thì từ chối (Flow 8.4 nhánh No)", () => {
     expect(await Membership.countDocuments({ organizationId: orgId, userId: second.id })).toBe(0)
   })
 
-  it("hai người nhập cùng một mã đồng thời — chỉ một người vào được", async () => {
+  it("nhận cùng một mã hai lượt đồng thời (bằng mã và bằng nút Chấp nhận) — chỉ một lượt vào được", async () => {
     const created = await invite()
-    const other = await makeUser("other@flintflow.test")
 
     const results = await Promise.all([
       request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(invitee)),
-      request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(other))
+      request(app).post(INVITES + "/mine/" + created.id + "/accept").set(bearer(invitee))
     ])
 
     expect(results.filter((r) => r.status === 200)).toHaveLength(1)
-    expect(results.filter((r) => r.status === 410)).toHaveLength(1)
+    // Lượt thua nhận 410 (mất lượt claim) hoặc 409 (lượt kia đã kịp tạo membership) — không bao giờ vào hai lần
+    expect(results.filter((r) => r.status === 410 || r.status === 409)).toHaveLength(1)
     expect(await Membership.countDocuments({ organizationId: orgId })).toBe(2)
   })
 
   it("người đã là thành viên nhận 409, không phải 410", async () => {
-    await Membership.create({ organizationId: orgId, userId: invitee.id, role: "analyst" })
+    // Mời lúc chưa là thành viên, rồi vào org bằng đường khác trước khi nhập mã
     const created = await invite("viewer")
+    await Membership.create({ organizationId: orgId, userId: invitee.id, role: "analyst" })
 
     const res = await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(invitee))
     expect(res.status).toBe(409)
@@ -206,6 +207,7 @@ describe("mã mời hỏng thì từ chối (Flow 8.4 nhánh No)", () => {
     await Membership.create({ organizationId: orgId, userId: invitee.id, role: "analyst" })
     const third = await makeUser("third@flintflow.test")
     await Membership.create({ organizationId: orgId, userId: third.id, role: "viewer" })
+    await makeUser("fourth@flintflow.test")
     await invite("viewer", "fourth@flintflow.test")
 
     for (let i = 4; i <= planConfig.pro.maxMembers; i++) {
@@ -235,8 +237,216 @@ describe("email người được mời là bắt buộc (góp ý mentor 2026-10
   })
 
   it("email được chuẩn hoá chữ thường, bỏ khoảng trắng hai đầu", async () => {
+    await makeUser("moi.nguoi@flintflow.test")
     const res = await post({ role: "viewer", email: "  Moi.Nguoi@FlintFlow.Test " })
     expect(res.status).toBe(201)
     expect(res.body.data.email).toBe("moi.nguoi@flintflow.test")
+  })
+})
+
+describe("email người được mời phải là tài khoản đã đăng ký", () => {
+  const post = (body: Record<string, unknown>) =>
+    request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send(body)
+
+  it("email chưa có tài khoản ⇒ 404, không tạo mã (nên cũng không gửi mail)", async () => {
+    const res = await post({ role: "analyst", email: "chua-dang-ky@flintflow.test" })
+    expect(res.status).toBe(404)
+    expect(res.body.error.code).toBe("INVITEE_NOT_FOUND")
+    expect(await Invitation.countDocuments({ organizationId: orgId })).toBe(0)
+  })
+
+  it("người đã là thành viên ⇒ 409, không tạo mã", async () => {
+    await Membership.create({ organizationId: orgId, userId: invitee.id, role: "viewer" })
+    const res = await post({ role: "analyst", email: invitee.email })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("INVITEE_ALREADY_MEMBER")
+    expect(await Invitation.countDocuments({ organizationId: orgId })).toBe(0)
+  })
+
+  it("mời chính mình (Lead đã ở trong org) cũng bị chặn", async () => {
+    const res = await post({ role: "viewer", email: lead.email })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("INVITEE_ALREADY_MEMBER")
+  })
+})
+
+describe("chỉ người dùng đúng email được mời mới nhập được mã (như collaborator GitHub)", () => {
+  it("email khác cầm được mã cũng không xem trước, không nhận được — 403 nói rõ mã dành cho email khác", async () => {
+    const created = await invite()
+    const stranger = await makeUser("stranger@flintflow.test")
+
+    const preview = await request(app).get(INVITES + "/" + created.code).set(bearer(stranger))
+    expect(preview.status).toBe(403)
+    expect(preview.body.error.code).toBe("INVITE_EMAIL_MISMATCH")
+
+    const accept = await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(stranger))
+    expect(accept.status).toBe(403)
+    expect(accept.body.error.code).toBe("INVITE_EMAIL_MISMATCH")
+    expect(await Membership.countDocuments({ organizationId: orgId, userId: stranger.id })).toBe(0)
+
+    // Mã vẫn còn nguyên cho đúng người
+    const mine = await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(invitee))
+    expect(mine.status).toBe(200)
+  })
+
+  it("mã cũ chưa có inviteeUserId thì đối chiếu theo email", async () => {
+    const created = await invite()
+    await Invitation.updateOne({ _id: created.id }, { $set: { inviteeUserId: null } })
+    const stranger = await makeUser("stranger@flintflow.test")
+
+    expect((await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(stranger))).status).toBe(403)
+    expect((await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(invitee))).status).toBe(200)
+  })
+
+  it("mã đã hỏng thì báo hỏng (410) trước, dù người nhập sai email", async () => {
+    const created = await invite()
+    await Invitation.updateOne({ _id: created.id }, { expiresAt: new Date(Date.now() - 1000) })
+    const stranger = await makeUser("stranger@flintflow.test")
+
+    const res = await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(stranger))
+    expect(res.status).toBe(410)
+    expect(res.body.error.code).toBe("INVITE_INVALID")
+  })
+
+  it("lưu inviteeUserId lúc tạo", async () => {
+    const created = await invite()
+    const stored = await Invitation.findById(created.id).lean()
+    expect(String(stored?.inviteeUserId)).toBe(invitee.id)
+  })
+})
+
+describe("chặn mời trùng và mời tài khoản bị khoá", () => {
+  const post = (body: Record<string, unknown>) =>
+    request(app).post(ORGS + "/" + orgId + "/invitations").set(bearer(lead)).send(body)
+
+  it("email đang có lời mời chờ ⇒ 409, không tạo mã thứ hai", async () => {
+    await invite()
+    const res = await post({ role: "viewer", email: invitee.email })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("INVITE_ALREADY_PENDING")
+    expect(await Invitation.countDocuments({ organizationId: orgId })).toBe(1)
+  })
+
+  it("thu hồi, hết hạn hoặc bị từ chối rồi thì mời lại được", async () => {
+    const first = await invite()
+    await request(app).delete(ORGS + "/" + orgId + "/invitations/" + first.id).set(bearer(lead))
+    const second = await invite()
+    await Invitation.updateOne({ _id: second.id }, { expiresAt: new Date(Date.now() - 1000) })
+    const third = await invite()
+    await request(app).post(INVITES + "/mine/" + third.id + "/decline").set(bearer(invitee))
+    await invite()
+  })
+
+  it("lời mời chờ ở org khác không chặn org này", async () => {
+    await invite()
+    const otherOrg = await request(app).post(ORGS).set(bearer(lead)).send({ name: "Org B" })
+    const res = await request(app)
+      .post(ORGS + "/" + otherOrg.body.data.id + "/invitations")
+      .set(bearer(lead))
+      .send({ role: "viewer", email: invitee.email })
+    expect(res.status).toBe(201)
+  })
+
+  it("tài khoản bị khoá ⇒ 409 lỗi riêng báo tài khoản đang bị khoá, không tạo mã", async () => {
+    await User.updateOne({ _id: invitee.id }, { isActive: false })
+    const res = await post({ role: "analyst", email: invitee.email })
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("INVITEE_SUSPENDED")
+    expect(res.body.error.message).toContain("đang bị khoá")
+    expect(await Invitation.countDocuments({ organizationId: orgId })).toBe(0)
+  })
+})
+
+describe("lời mời đang chờ trong app — chấp nhận / từ chối không cần mã", () => {
+  it("người được mời nhận thông báo cấp nền tảng dẫn tới trang Tổ chức", async () => {
+    const created = await invite("viewer")
+    const note = await vi.waitFor(async () => {
+      const found = await Notification.findOne({ userId: invitee.id, type: "org_invitation" }).lean()
+      expect(found).not.toBeNull()
+      return found
+    })
+    expect(note?.organizationId).toBeNull()
+    expect(note?.link).toBe("/home/organizations")
+    expect(note?.meta).toMatchObject({ invitationId: created.id, organizationId: orgId })
+  })
+
+  it("danh sách chỉ có lời mời còn hạn của chính mình, kèm tên org và người mời", async () => {
+    const created = await invite("viewer")
+    const stranger = await makeUser("stranger@flintflow.test")
+
+    const mine = await request(app).get(INVITES + "/mine").set(bearer(invitee))
+    expect(mine.status).toBe(200)
+    expect(mine.body.data).toHaveLength(1)
+    expect(mine.body.data[0]).toMatchObject({
+      id: created.id,
+      organizationId: orgId,
+      organizationName: "Org A",
+      role: "viewer",
+      inviterName: lead.email
+    })
+    expect(JSON.stringify(mine.body.data)).not.toContain(created.code)
+
+    const theirs = await request(app).get(INVITES + "/mine").set(bearer(stranger))
+    expect(theirs.body.data).toEqual([])
+
+    await Invitation.updateOne({ _id: created.id }, { expiresAt: new Date(Date.now() - 1000) })
+    expect((await request(app).get(INVITES + "/mine").set(bearer(invitee))).body.data).toEqual([])
+  })
+
+  it("chấp nhận bằng id: vào org đúng vai trò, token mới mang orgId, hết khỏi danh sách", async () => {
+    const created = await invite("viewer")
+
+    const res = await request(app).post(INVITES + "/mine/" + created.id + "/accept").set(bearer(invitee))
+    expect(res.status).toBe(200)
+    expect(res.body.data.organization).toMatchObject({ id: orgId, role: "viewer" })
+    expect(verifyAccessToken(res.body.data.accessToken).orgId).toBe(orgId)
+    expect((await Membership.findOne({ organizationId: orgId, userId: invitee.id }).lean())?.role).toBe("viewer")
+    expect((await request(app).get(INVITES + "/mine").set(bearer(invitee))).body.data).toEqual([])
+  })
+
+  it("từ chối: lời mời thành declined, mã hết dùng, Lead được báo", async () => {
+    const created = await invite()
+
+    const res = await request(app).post(INVITES + "/mine/" + created.id + "/decline").set(bearer(invitee))
+    expect(res.status).toBe(200)
+    expect(res.body.data.state).toBe("declined")
+
+    const list = await request(app).get(ORGS + "/" + orgId + "/invitations").set(bearer(lead))
+    expect(list.body.data[0].state).toBe("declined")
+
+    expect((await request(app).post(INVITES + "/" + created.code + "/accept").set(bearer(invitee))).status).toBe(410)
+    expect((await request(app).post(INVITES + "/mine/" + created.id + "/decline").set(bearer(invitee))).status).toBe(410)
+
+    const note = await vi.waitFor(async () => {
+      const found = await Notification.findOne({ userId: lead.id, type: "org_invitation_declined" }).lean()
+      expect(found).not.toBeNull()
+      return found
+    })
+    expect(String(note?.organizationId)).toBe(orgId)
+  })
+
+  it("Lead thu hồi lời mời đã bị từ chối thì vẫn giữ trạng thái declined", async () => {
+    const created = await invite()
+    await request(app).post(INVITES + "/mine/" + created.id + "/decline").set(bearer(invitee))
+    const res = await request(app).delete(ORGS + "/" + orgId + "/invitations/" + created.id).set(bearer(lead))
+    expect(res.status).toBe(200)
+    expect(res.body.data.state).toBe("declined")
+  })
+
+  it("người khác không chấp nhận / từ chối được lời mời không phải của mình — 404", async () => {
+    const created = await invite()
+    const stranger = await makeUser("stranger@flintflow.test")
+
+    const accept = await request(app).post(INVITES + "/mine/" + created.id + "/accept").set(bearer(stranger))
+    expect(accept.status).toBe(404)
+    expect(accept.body.error.code).toBe("INVITE_NOT_FOUND")
+    const decline = await request(app).post(INVITES + "/mine/" + created.id + "/decline").set(bearer(stranger))
+    expect(decline.status).toBe(404)
+    expect((await Invitation.findById(created.id).lean())?.declinedAt).toBeNull()
+  })
+
+  it("id không hợp lệ ⇒ 404", async () => {
+    const res = await request(app).post(INVITES + "/mine/khong-phai-id/accept").set(bearer(invitee))
+    expect(res.status).toBe(404)
   })
 })

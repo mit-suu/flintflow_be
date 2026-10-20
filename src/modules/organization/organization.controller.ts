@@ -105,16 +105,39 @@ export const revokeInvitation = catchAsync(async (req: Request, res: Response) =
   return sendSuccess(res, 200, invitation)
 })
 
+/** Email đọc từ DB (`requireActiveAccount`), không tin email trong token — dùng để đối chiếu đúng người được mời. */
+const accountEmail = (req: Request): string => req.account?.email ?? req.user?.email ?? ""
+
 export const previewInvitation = catchAsync(async (req: Request, res: Response) => {
-  return sendSuccess(res, 200, await invitationService.previewInvitation(req.params.code as string))
+  const preview = await invitationService.previewInvitation(req.params.code as string, requireUserId(req), accountEmail(req))
+  return sendSuccess(res, 200, preview)
 })
 
 export const acceptInvitation = catchAsync(async (req: Request, res: Response) => {
   const result = await invitationService.acceptInvitation(
     req.params.code as string,
     requireUserId(req),
-    req.user?.email ?? "",
+    accountEmail(req),
     req.user?.role
   )
+  return sendSuccess(res, 200, result)
+})
+
+export const listMyInvitations = catchAsync(async (req: Request, res: Response) => {
+  return sendSuccess(res, 200, await invitationService.listMyInvitations(requireUserId(req), accountEmail(req)))
+})
+
+export const acceptMyInvitation = catchAsync(async (req: Request, res: Response) => {
+  const result = await invitationService.acceptMyInvitation(
+    req.params.invitationId as string,
+    requireUserId(req),
+    accountEmail(req),
+    req.user?.role
+  )
+  return sendSuccess(res, 200, result)
+})
+
+export const declineInvitation = catchAsync(async (req: Request, res: Response) => {
+  const result = await invitationService.declineInvitation(req.params.invitationId as string, requireUserId(req), accountEmail(req))
   return sendSuccess(res, 200, result)
 })
