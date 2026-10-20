@@ -8,7 +8,7 @@ import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
-import { changeErrorReply, formatChatContext, previewPayload } from "../spine/change-transcript.js"
+import { changeErrorReply, clarificationRounds, formatChatContext, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -120,11 +120,14 @@ const tryChangeFlow = async (
   try {
     // Tin user của lượt này đã nằm cuối phiên — lịch sử là phần trước nó
     const chatHistory = formatChatContext(session.messages.slice(0, -1), record)
+    const rounds = clarificationRounds(session.messages)
     const preview = await changeService.preview(projectId, userId, {
       instruction: content,
       base_version: record.spine_version,
       chat_history: chatHistory,
-      reply_language: replyLanguage
+      reply_language: replyLanguage,
+      // FLF-299: chỉ truyền khi đã hỏi — lượt thường giữ nguyên tham số
+      ...(rounds > 0 ? { clarification_rounds: rounds } : {})
     })
     payload = previewPayload(preview, replyLanguage)
     if (preview.ok && preview.preview_id && preview.changes.length > 0) shown = preview
