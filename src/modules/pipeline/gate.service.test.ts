@@ -34,7 +34,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -134,7 +134,7 @@ const seedSpine = () => {
   spine.progress.current_phase = "S-3"
   spine.progress.current_step = "S-3.1"
   spine.steps = stepsBeforeS3()
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 }
 
 /** Đặt step `in_progress` với một change nội dung THẬT (add actor `actorId`) để regenerate revert được. */
@@ -477,7 +477,7 @@ describe("gate.service: accept", () => {
     spine.progress.current_phase = "S-2"
     spine.progress.current_step = "S-2.5"
     spine.steps = stepsBeforeS3().filter((s) => s.id !== "S-2.5")
-    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 
     const version = await seedInProgressWithContent("S-2.5", "A90")
     const result = await gate(PROJECT, "S-2.5", USER, { action: "accept", base_version: version })

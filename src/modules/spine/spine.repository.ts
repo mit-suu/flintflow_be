@@ -105,9 +105,50 @@ const seqOnlySchema = z.object({ seq: z.number().int() })
 
 // ─── Spine ───────────────────────────────────────────────────────
 
+/**
+ * Cache đọc Spine theo project (FLF-308). Spine một project vài trăm KB (dự án upload 125 use case ≈ 460 KB) và mọi
+ * request CR / step đều đọc lại cả Spine: qua mạng tới Atlas chậm, một lượt đọc mất 2–40 s. Mỗi lượt `get` chỉ hỏi
+ * `_id` + `spine_version` (vài trăm byte); khớp bản đã cache ⇒ trả bản sao, khỏi tải + parse lại.
+ *
+ * Đúng vì mọi lần ghi nội dung đi qua `saveWithVersion` và **luôn tăng** `spine_version` (khoá lạc quan) ⇒ một cặp
+ * `(_id, spine_version)` chỉ ứng với đúng một nội dung đã commit. Nhiều instance BE vẫn đúng: version đọc từ DB mỗi lần.
+ * Ghi trong transaction không nạp cache (transaction có thể bị huỷ, version đó sau này có thể là nội dung khác).
+ * Trả `structuredClone` — caller được phép sửa bản ghi nhận về.
+ */
+const READ_CACHE_MAX = 32
+const readCache = new Map<string, { key: string; record: SpineRecord }>()
+
+const cacheKey = (doc: { _id?: unknown; spine_version?: unknown }): string => `${String(doc._id)}:${String(doc.spine_version)}`
+
+const remember = (projectId: string, key: string, record: SpineRecord): void => {
+  readCache.delete(projectId)
+  readCache.set(projectId, { key, record: structuredClone(record) })
+  if (readCache.size > READ_CACHE_MAX) readCache.delete(readCache.keys().next().value as string)
+}
+
+/** Xoá cache đọc — cho test ghi thẳng vào collection. */
+export const clearReadCache = (): void => readCache.clear()
+
 export const get = async (projectId: string): Promise<SpineRecord | null> => {
+  const key = String(projectId)
+  const head = await SpineModel.findOne({ projectId }, { _id: 1, spine_version: 1 }, { lean: true })
+  if (!head) {
+    readCache.delete(key)
+    return null
+  }
+  const hit = readCache.get(key)
+  if (hit && hit.key === cacheKey(head)) {
+    // LRU: dùng lại thì đưa về cuối
+    readCache.delete(key)
+    readCache.set(key, hit)
+    return structuredClone(hit.record)
+  }
   const doc = await SpineModel.findOne({ projectId }, null, { lean: true })
-  return doc ? parseRecord(doc) : null
+  if (!doc) return null
+  const record = parseRecord(doc)
+  // Khoá theo chính bản vừa đọc — version có thể đã tăng giữa hai lượt đọc
+  remember(key, cacheKey(doc), record)
+  return record
 }
 
 const baselineRefsSchema = z.array(z.object({ id: z.string().min(1), snapshot_ref: z.string().min(1) }))
@@ -179,7 +220,9 @@ export const saveWithVersion = async (
     )
   }
 
-  return parseRecord(updated)
+  const saved = parseRecord(updated)
+  if (!session) remember(String(projectId), cacheKey(updated), saved)
+  return saved
 }
 
 /**

@@ -15,8 +15,13 @@ import {
 import { MAX_REDO_PER_LOCATION } from "./change-request.state.js"
 
 export interface LocationProposal {
-  /** Giá trị phần tử lúc đề xuất (`valueText`) — C-5/C-7 so với Spine hiện tại, lệch ⇒ CR_VALUE_CHANGED. */
+  /**
+   * Giá trị phần tử lúc đề xuất (`valueText`) — C-5/C-7 so với Spine hiện tại, lệch ⇒ CR_VALUE_CHANGED. Vị trí "thêm mới"
+   * (`arr[]`, FLF-308): `"[]"` — không chép cả mảng; so bằng `base_hash`.
+   */
   old_text: string
+  /** FLF-308: sha256 của mảng lúc đề xuất (chỉ vị trí `arr[]`); `null`/thiếu ⇒ so `old_text` (vị trí phần tử, bản ghi cũ). */
+  base_hash?: string | null
   /** Giá trị phần tử sau khi áp `spine_ops` của vị trí (chạy khô) — để người duyệt đọc; `null` khi không sửa. */
   new_text: string | null
   comment_text: string | null
@@ -84,6 +89,7 @@ const changeLocationSchema = new Schema<IChangeLocation>(
       type: new Schema(
         {
           old_text: { type: String, default: "" },
+          base_hash: { type: String, default: null },
           new_text: { type: String, default: null },
           comment_text: { type: String, default: null },
           spine_ops: { type: [Schema.Types.Mixed], default: [] },

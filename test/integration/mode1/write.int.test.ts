@@ -221,7 +221,7 @@ describe("C-7 chặn trước khi ghi", () => {
     const { crId, cr, submitted } = await crToReview(c)
     const held = await lockedPaths(projectId, crId)
     const last = await approveAllButLast(c, cr, submitted.groups)
-    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "5 s" } })
+    await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "5 s" }, $inc: { spine_version: 1 } })
     const files = await gridFsFiles(projectId)
     const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
     expect(res.status).toBe(409)

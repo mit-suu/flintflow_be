@@ -73,11 +73,21 @@ export const crHeader = (cr: IChangeRequest) => ({
   source: `${cr.source.kind}${cr.source.ref ? ` — ${cr.source.ref}` : ""}`
 })
 
-export const answersText = (cr: IChangeRequest): string =>
-  cr.clarifications
+/**
+ * Câu hỏi – trả lời làm rõ theo vòng. FLF-307: vòng sau thường sửa vòng trước (vòng 1 "mọi actor", vòng 2 "chỉ tài
+ * khoản email/mật khẩu") — model đọc ngang hàng thì vẫn làm theo vòng 1 ⇒ nói rõ vòng sau thắng khi lệch nhau.
+ */
+export const answersText = (cr: Pick<IChangeRequest, "clarifications">): string => {
+  const rounds = cr.clarifications ?? []
+  const lines = rounds
     // Mode 1 v3 phase 7: câu trả lời trống = người dùng chưa biết ⇒ model coi dữ kiện đó là thiếu
     .flatMap((c) => c.questions.map((q, i) => `Q${c.round}.${i + 1}: ${q}\nA: ${c.answers[i]?.trim() || "(no answer — unknown)"}`))
-    .join("\n") || "(none)"
+    .join("\n")
+  if (!lines) return "(none)"
+  if (rounds.length < 2) return lines
+  const last = rounds[rounds.length - 1].round
+  return `Later rounds refine earlier ones: where two answers disagree, the answer from the later round wins and the earlier one no longer applies (round ${last} is final).\n${lines}`
+}
 
 /** Tổng chữ tài liệu bổ sung đưa vào một prompt (mode 1 v3 phase 7) — chia cho các tài liệu. */
 export const MATERIALS_PROMPT_CHARS = 12_000
