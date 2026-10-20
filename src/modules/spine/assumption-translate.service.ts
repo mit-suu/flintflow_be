@@ -18,6 +18,7 @@ import { ActionType, type AiActionInput, type AiActionResult } from "../../share
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { TranslateOutput } from "../../shared/ai/response-parser.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 
 export const ASSUMPTION_NOT_FOUND = "ASSUMPTION_NOT_FOUND"
 
@@ -49,6 +50,7 @@ export const translateAssumption = async (
   if (record.spine_version !== input.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
+  assertDraftUnlocked(record)
   const assumption = record.assumptions.find((a) => a.id === assumptionId)
   if (!assumption) throw new ApiError(404, "Không tìm thấy giả định này.", ASSUMPTION_NOT_FOUND)
 

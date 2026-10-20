@@ -34,6 +34,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/response-parser.js"
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
@@ -620,6 +621,7 @@ export const preview = async (
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
+  assertDraftUnlocked(record)
   const spine = stripRecord(record)
 
   const resolved = await resolveOps(projectId, userId, spine, body, d)
@@ -694,6 +696,7 @@ export const apply = async (
   const d: ChangeDeps = { ...defaultChangeDeps(), ...deps }
   const record = await loadSpine(projectId, init)
   assertVersion(record, body.base_version)
+  assertDraftUnlocked(record)
   const spine = stripRecord(record)
 
   const stored = body.preview_id === undefined ? null : takePreview(projectId, body.preview_id)
