@@ -347,6 +347,35 @@ describe("instruction — câu lệnh tự nhiên qua skill apply-change-op", ()
     await expect(apply(PROJECT, USER, { base_version: 1, instruction: "đổi tên admin" }, {}, deps)).rejects.toBeInstanceOf(NeedsClarificationError)
   })
 
+  it("FLF-299: số câu đã hỏi vào prompt; đã hỏi đủ mà model vẫn hỏi ⇒ gọi lại MỘT lần, dùng lô soạn được", async () => {
+    await seed()
+    const ops = [{ op: "set" as const, path: "actors[id=A01].name", value: "Product Owner" }]
+    deps.changeExecutor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ clarification_needed: "Áp dụng cho màn nào?" }))
+      .mockResolvedValueOnce(aiResult({ ops }))
+    const body = { base_version: 1, instruction: "chỉ thao tác xóa", clarification_rounds: 2 }
+
+    const result = await preview(PROJECT, USER, body, {}, deps)
+
+    expect(result.ok).toBe(true)
+    expect(result.changes).toHaveLength(1)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[0][1].promptVariables).toMatchObject({ clarification_rounds: 2 })
+    expect(String(calls[1][1].promptVariables?.previous_problems)).toMatch(/Do not ask again/)
+  })
+
+  it("FLF-299: mới hỏi lần đầu ⇒ câu hỏi làm rõ đi thẳng tới user, không gọi lại", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: "Thao tác nào cần xác nhận?" }))
+
+    const result = await preview(PROJECT, USER, { base_version: 1, instruction: "thêm popup xác nhận", clarification_rounds: 0 }, {}, deps)
+
+    expect(result.clarification).toBe("Thao tác nào cần xác nhận?")
+    expect(deps.changeExecutor).toHaveBeenCalledTimes(1)
+  })
+
   it("trả lời câu hỏi làm rõ ⇒ model đọc đoạn hội thoại trước, projection dò cả yêu cầu gốc", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))

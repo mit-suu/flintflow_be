@@ -434,6 +434,11 @@ export interface ChangeBody {
   /** Nội bộ (DTO không nhận) — FLF-294: lượt áp của hoà giải, việc kéo theo một CR đã ghi, không đòi CR riêng. */
   cr_exempt?: boolean
   /**
+   * Nội bộ (DTO không nhận) — FLF-299: số câu hỏi làm rõ AI đã hỏi liên tiếp cho yêu cầu này (`clarificationRounds` của
+   * phiên). Có ⇒ model không hỏi lại điều đã được trả lời; đủ `MAX_CLARIFICATION_ROUNDS` ⇒ ép soạn bản xem trước.
+   */
+  clarification_rounds?: number
+  /**
    * Nội bộ (DTO `strictObject` không nhận — client không gửi được bản dịch, D7): lô `ops` do server gom (hoà giải) kèm chữ
    * theo ngôn ngữ tài liệu model trả cùng lô, và ngôn ngữ của lượt đó. Đi theo preview tới lượt áp.
    */
@@ -506,6 +511,9 @@ const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
  * Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model; lô có lỗi (áp thử bị từ chối, tên
  * use case sai luật — FLF-243) thì gọi lại đúng MỘT lần kèm lỗi — lần hai vẫn sai thì giữ lô để preview báo lỗi / cờ vàng bắt.
  */
+/** FLF-299: sau số câu hỏi làm rõ này cho cùng một yêu cầu, model phải soạn bản xem trước thay vì hỏi tiếp. */
+export const MAX_CLARIFICATION_ROUNDS = 2
+
 const opsFromInstruction = async (
   projectId: string,
   userId: string,
@@ -513,7 +521,8 @@ const opsFromInstruction = async (
   instruction: string,
   chatHistory: string | undefined,
   replyLanguage: ReplyLanguage | undefined,
-  deps: ChangeDeps
+  deps: ChangeDeps,
+  clarificationRounds = 0
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
@@ -532,6 +541,7 @@ const opsFromInstruction = async (
           projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [],
+          clarification_rounds: clarificationRounds,
           ...(previousProblems ? { previous_problems: previousProblems } : {})
         },
         // FLF-260: `buildPrompt` nối khối "Reply language" cuối prompt — câu hỏi làm rõ, ghi chú theo ngôn ngữ của lượt
@@ -551,6 +561,16 @@ const opsFromInstruction = async (
       return { ops: [], clarification: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, UNCLEAR_INSTRUCTION), notes: null }
     }
     throw err
+  }
+  // FLF-299: đã hỏi đủ mà model vẫn hỏi ⇒ gọi lại MỘT lần, bắt soạn từ câu trả lời của user + projection
+  if (result.data.clarification_needed?.trim() && clarificationRounds >= MAX_CLARIFICATION_ROUNDS) {
+    const forced = await call(
+      `You already asked ${clarificationRounds} clarifying questions for this request and the user answered them. Do not ask again: draft the batch now from those answers and the projection (rule 2a).`
+    ).catch((err: unknown) => {
+      if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
+      throw err
+    })
+    if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) result = forced
   }
   if (!result.data.clarification_needed?.trim()) {
     const problems = batchProblems(spine, stampAddendum((result.data.ops ?? []) as Op[]), instruction)
@@ -582,7 +602,7 @@ const resolveOps = async (
     return { ops: body.ops, clarification: null, notes: null, ...(body.localized?.length ? { localized: body.localized, language: languagePairOf(body.document_language) } : {}) }
   }
   if (body.instruction === undefined) throw new ApiError(400, "Vui lòng nhập nội dung cần sửa.", "VALIDATION_ERROR")
-  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps)
+  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps, body.clarification_rounds)
 }
 
 const toTransaction = (userId: string, body: ChangeBody, ops: Op[], txn?: string): Transaction => ({
