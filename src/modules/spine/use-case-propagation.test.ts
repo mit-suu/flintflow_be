@@ -98,6 +98,31 @@ describe("normalizeUseCaseBatch", () => {
   })
 })
 
+describe("normalizeUseCaseBatch — mã thông báo (S-7.3) cho luồng bất thường mới", () => {
+  const withFn = (message: Record<string, unknown>): Op[] => [
+    ...batch(),
+    { op: "add", path: "messages[]", value: { text: "Select at least one student, then send again.", function_ids: ["$newFn"], ...message } }
+  ]
+  const codeOf = (ops: Op[]) => (ops.find((o) => o.path === "messages[]")?.value as { code: string }).code
+
+  it("model chọn vùng ⇒ giữ vùng, code cấp số kế tiếp không trùng", () => {
+    expect(codeOf(normalizeUseCaseBatch(FIXTURE, withFn({ code: "E-AUTH-001" })))).toBe("E-AUTH-004")
+    expect(codeOf(normalizeUseCaseBatch(FIXTURE, withFn({ code: "E-WARN-001" })))).toBe("E-WARN-001")
+  })
+
+  it("không có mã ⇒ vùng của thông báo cùng feature; feature chưa có thông báo ⇒ chữ đầu tên feature", () => {
+    expect(codeOf(normalizeUseCaseBatch(FIXTURE, withFn({})))).toMatch(/^E-(CRED|PIPE|SPINE)-\d{3}$/)
+    const noMessages = { ...FIXTURE, messages: [] }
+    expect(codeOf(normalizeUseCaseBatch(noMessages, withFn({})))).toBe("SRSW-001")
+  })
+
+  it("hai thông báo mới trong một lô không trùng mã", () => {
+    const ops: Op[] = [...withFn({ code: "E-WARN-001" }), { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "x", function_ids: ["$newFn"] } }]
+    const codes = normalizeUseCaseBatch(FIXTURE, ops).filter((o) => o.path === "messages[]").map((o) => (o.value as { code: string }).code)
+    expect(codes).toEqual(["E-WARN-001", "E-WARN-002"])
+  })
+})
+
 describe("addedScreenIds / addsUseCaseOrScreen", () => {
   it("nhận ra màn và use case mới", () => {
     const after = { ...FIXTURE, screens: [...FIXTURE.screens, { ...FIXTURE.screens[0], id: "S20" }] }
@@ -124,6 +149,13 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
     const prompt = await render("screen_pending")
     expect(prompt).toContain("the screen loop")
     expect(prompt).not.toContain("all its related parts in the same batch")
+  })
+
+  it("messages_ready ⇒ thêm luật 3f (thông báo cho luồng bất thường); không bật ⇒ không có", async () => {
+    const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
+    const template = getSkill("apply-change-op").template
+    expect(interpolatePrompt(template, { use_case_mode: "full", messages_ready: true })).toMatch(/^3f\. \*\*Application messages/m)
+    expect(interpolatePrompt(template, { use_case_mode: "full", messages_ready: false })).not.toMatch(/^3f\./m)
   })
 
   it("none / use_case_only ⇒ không có luật 3e (lệnh sửa thường giữ nguyên prompt cũ)", async () => {
