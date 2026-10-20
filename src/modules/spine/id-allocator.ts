@@ -71,6 +71,23 @@ export const nextIdIn = (existing: readonly string[], format: IdFormat): string 
   }
 }
 
+/**
+ * Khuôn id dùng cho `existing`: khuôn mặc định nếu tài liệu đang dùng nó (hoặc chưa có phần tử), ngược lại tiền tố
+ * phổ biến nhất của các id `<tiền tố><số>` đang có. FLF-307: tài liệu upload đánh `UC-125`, `SCR-84` ⇒ phần tử mới
+ * là `UC-126`, `SCR-85` thay vì `UC01`, `S01` lạc khuôn.
+ */
+export const formatFor = (existing: readonly string[], fallback: IdFormat): IdFormat => {
+  const own = new RegExp(`^${escapeRe(fallback.prefix)}\\d+$`)
+  if (existing.some((id) => own.test(id))) return fallback
+  const counts = new Map<string, number>()
+  for (const id of existing) {
+    const m = /^(.*\D)\d+$/.exec(id)
+    if (m) counts.set(m[1], (counts.get(m[1]) ?? 0) + 1)
+  }
+  const [prefix] = [...counts].sort((a, b) => b[1] - a[1])[0] ?? []
+  return prefix ? { prefix, width: 1 } : fallback
+}
+
 /** Collection này có được server cấp id không. */
 export const allocatesIds = (collection: string): boolean => collection === "validations" || collection in ID_FORMATS
 
@@ -90,7 +107,7 @@ export const allocateId = (spine: Spine, collection: string, parentId: string | 
   const ids = Array.isArray(list)
     ? list.map((el) => (typeof el === "object" && el !== null ? (el as { id?: unknown }).id : undefined)).filter((id): id is string => typeof id === "string")
     : []
-  return nextIdIn(ids, format)
+  return nextIdIn(ids, formatFor(ids, format))
 }
 
 /** Thay id tạm đã được cấp trong chuỗi (path, hoặc giá trị như `assumptions[].path`). */

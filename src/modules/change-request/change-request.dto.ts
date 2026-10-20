@@ -92,6 +92,8 @@ export const changeRequestDtoSchema = z.object({
 /**
  * Vị trí CR — mode 1 v2 (FLF-186): phần tử Spine (`path`) + section hiển thị nó, thay `block_id`/`block` của file docx.
  * `current_text`: giá trị hiện tại của phần tử (JSON ổn định) để FE hiện mà không cần gọi thêm; `""` nếu đã bị xoá.
+ * Vị trí "thêm mới" (`arr[]`, FLF-308): `current_text` và `proposal.old_text` là `"[]"`, `proposal.new_text` chỉ gồm phần
+ * tử được thêm (phần tử có sẵn là các vị trí riêng).
  */
 export const changeLocationDtoSchema = z.object({
   location_id: locationIdSchema,

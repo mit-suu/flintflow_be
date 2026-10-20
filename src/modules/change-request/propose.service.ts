@@ -29,8 +29,9 @@ import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { regroup } from "./group.service.js"
 import { ChangeLocation, type IChangeLocation } from "./change-location.model.js"
 import { answersText, crHeader, glossaryText, materialsText, missingInfoText, truncate } from "./cr-context.js"
-import { elementValue, isArrayPath, isSectionTarget, opElement, valueText } from "./spine-location.js"
+import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, snapshotOf, valueText } from "./spine-location.js"
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
+import { reassignDuplicateIds } from "./new-ids.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -51,7 +52,10 @@ const ownerSkillText = (ownerStep: string | null): string => {
   }
 }
 
-/** Giá trị phần tử `path` sau khi chạy khô `rawOps` trên Spine hiện tại — op sai ⇒ `null` (C-5 báo lỗi cụ thể). */
+/**
+ * Giá trị phần tử `path` sau khi chạy khô `rawOps` trên Spine hiện tại — op sai ⇒ `null` (C-5 báo lỗi cụ thể). Vị trí
+ * "thêm mới" (`arr[]`) ⇒ chỉ các phần tử được thêm (FLF-308), khớp `old_text = "[]"` của `snapshotOf`.
+ */
 export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknown[]): string | null => {
   const ops: Op[] = []
   for (const raw of rawOps) {
@@ -59,12 +63,35 @@ export const previewAfter = (spine: Spine, path: string, rawOps: readonly unknow
     if (!parsed.success) return null
     ops.push(parsed.data)
   }
-  if (!ops.length) return valueText(elementValue(spine, path))
+  const shown = (after: Spine): string =>
+    isArrayPath(path) ? valueText(addedElements(elementValue(spine, path), elementValue(after, path))) : valueText(elementValue(after, path))
+  if (!ops.length) return shown(spine)
   try {
-    return valueText(elementValue(planTransaction(spine, { base_version: spine.spine_version, ops, by: "preview" }, { startSeq: 1 }).spine, path))
+    return shown(planTransaction(spine, { base_version: spine.spine_version, ops, by: "preview" }, { startSeq: 1 }).spine)
   } catch {
     return null
   }
+}
+
+/** FLF-307: id trùng trong op `add` của CR đổi sang id chưa dùng (`new-ids.ts`); vị trí bị đổi tính lại bản xem trước. */
+export const fixDuplicateIds = async (spine: Spine, locations: IChangeLocation[]): Promise<void> => {
+  for (const l of reassignDuplicateIds(spine, locations)) {
+    l.proposal!.new_text = previewAfter(spine, l.path, l.proposal!.spine_ops)
+    l.verify = null
+    l.markModified("proposal")
+    await l.save()
+  }
+}
+
+/**
+ * Mọi id đang có của mảng (giá trị JSON phía trên bị cắt ở 2500 ký tự — mảng 60 use case chỉ thấy vài chục đầu, file
+ * upload còn xếp id không theo thứ tự) ⇒ model không đoán id đã dùng. FLF-307.
+ */
+const existingIdsText = (spine: Spine, path: string): string => {
+  const ids = ((elementValue(spine, path) as unknown[] | undefined) ?? []).flatMap((el) =>
+    el && typeof el === "object" && typeof (el as { id?: unknown }).id === "string" ? [(el as { id: string }).id] : []
+  )
+  return ids.length ? `\n  Ids already used (never reuse one): ${truncate(ids.join(", "), 1500)}` : ""
 }
 
 type PromptLocation = Pick<IChangeLocation, "location_id" | "path" | "section_id" | "found_by" | "entity_paths" | "verify">
@@ -89,7 +116,7 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
     ? ""
     : isEmpty
       ? "\n  EMPTY SECTION — the only valid edit is adding new elements to this array (`add` ops)."
-      : "\n  ADD NEW — the only valid edit is adding new elements to this array (`add` ops) that the change needs and that do not exist yet (value above = existing elements, for ids and to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related."
+      : `\n  ADD NEW — the only valid edit is adding new elements to this array (\`add\` ops) that the change needs and that do not exist yet (value above = existing elements, to avoid duplicates). Existing elements are separate locations. Nothing new needed ⇒ not_related.${existingIdsText(spine, l.path)}`
   // Mode 1 v3: op người yêu cầu đã xem trước cho đúng vị trí này — gợi ý, AI vẫn tự kết luận
   const mine = seedOpsFor(seedOps, l.path)
   const suggested = mine.length ? `\n  Requester's previewed ops for this location (suggestion): ${JSON.stringify(mine)}` : ""
@@ -184,7 +211,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           loc.conclusion = out.conclusion
           loc.reason = out.reason
           loc.proposal = {
-            old_text: valueText(elementValue(spine, loc.path)),
+            ...snapshotOf(spine, loc.path),
             new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
             comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
             spine_ops: ops,
@@ -198,6 +225,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
       if (batch.length) console.warn(`[C-4] ${cr.cr_id}: model bỏ sót ${batch.map((l) => l.location_id).join(", ")} sau ${PROPOSE_ATTEMPTS} lượt — chờ sửa tay`)
     }
   }
+  await fixDuplicateIds(spine, locations)
   await refreshDiagramLocations(spine, locations)
   await regroup(cr)
 }
@@ -254,7 +282,7 @@ Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner s
   loc.conclusion = out.conclusion
   loc.reason = out.reason
   loc.proposal = {
-    old_text: valueText(elementValue(spine, loc.path)),
+    ...snapshotOf(spine, loc.path),
     new_text: out.conclusion === "edit" ? previewAfter(spine, loc.path, ops) : null,
     comment_text: out.conclusion === "comment" ? (out.comment_text ?? null) : null,
     spine_ops: ops,

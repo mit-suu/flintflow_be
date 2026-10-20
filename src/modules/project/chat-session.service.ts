@@ -14,6 +14,10 @@ import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
 import { answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
+import { buildChatSpineIndex } from "./chat-spine-index.js"
+
+/** Chưa có Spine ⇒ nói thẳng cho model, để nó không đoán số phần tử theo lịch sử chat. */
+const NO_SPINE_INDEX = "(tài liệu chưa có dữ liệu)"
 
 /** Nội dung tin AI gần nhất của phiên — để biết user đang trả lời thẻ nào (FLF-260). */
 const lastAiContentOf = (session: { messages: readonly IChatMessage[] }): string | undefined =>
@@ -247,8 +251,9 @@ export const sendMessageAndGetResponse = async (
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
   if (await tryChangeFlow(session, projectId, content, step, userId, replyLanguage)) return session
 
-  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
-  const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
+  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`) + chỉ mục Spine gọn
+  const spine = await spineRepository.get(projectId)
+  const historyText = formatChatContext(session.messages.slice(0, -1), spine)
 
   // 3. Chỉ còn một loại chat
   const actionType = ActionType.CHAT
@@ -272,7 +277,8 @@ export const sendMessageAndGetResponse = async (
     step_name: stepName,
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
-    documentContext: docContext.contextText
+    documentContext: docContext.contextText,
+    spine_index: buildChatSpineIndex(spine) || NO_SPINE_INDEX
   }
 
   // 6. Execute AI Action
@@ -401,8 +407,9 @@ export const sendMessageStream = async (
     return
   }
 
-  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`)
-  const historyText = formatChatContext(session.messages.slice(0, -1), await spineRepository.get(projectId))
+  // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`) + chỉ mục Spine gọn
+  const spine = await spineRepository.get(projectId)
+  const historyText = formatChatContext(session.messages.slice(0, -1), spine)
 
   // 3. T20: chỉ còn một loại chat — Discovery đi qua step runner
   const actionType = ActionType.CHAT
@@ -425,7 +432,8 @@ export const sendMessageStream = async (
     step_name: stepName,
     chat_history: historyText || "Không có lịch sử trước đó.",
     input_text: content,
-    documentContext: docContext.contextText
+    documentContext: docContext.contextText,
+    spine_index: buildChatSpineIndex(spine) || NO_SPINE_INDEX
   }
 
   // 6. Execute stream with Vercel AI SDK

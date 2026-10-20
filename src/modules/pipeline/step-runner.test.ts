@@ -38,7 +38,7 @@ const db = vi.hoisted(() => {
         return copy(doc)
       }
       if (!options.upsert) return null
-      const created = { _id: "spine", ...filter, ...copy(update.$setOnInsert ?? {}) }
+      const created = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, ...filter, ...copy(update.$setOnInsert ?? {}) }
       spines.push(created)
       return copy(created)
     }
@@ -191,7 +191,7 @@ const seedSpine = () => {
   spine.progress.current_phase = "S-2"
   spine.progress.current_step = "S-2.4"
   spine.steps = stepsBeforeS3()
-  db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+  db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
 }
 
 const seedSession = (isPipeline: boolean) => {
@@ -1265,7 +1265,7 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     spine.project.vision = null
     spine.progress.current_phase = "B-0"
     spine.progress.current_step = "B-0.1"
-    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
     seedSession(true)
     const IDEA_ASK = [
       { question: "Việc gì hay làm bạn mất thời gian?", options: [], multiple: false, topic_key: "pain_point" },
@@ -1294,7 +1294,7 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     spine.project.vision = null
     spine.progress.current_phase = "B-0"
     spine.progress.current_step = "B-0.1"
-    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
     seedSession(true)
     const ASK = [
       { question: "Hiện quy trình đặt lịch đang làm thế nào?", options: [], multiple: false, topic_key: "current_process" },
@@ -2080,7 +2080,7 @@ describe("FLF-260: ngôn ngữ trả lời của một bước", () => {
     spine.project.vision = null
     spine.progress.current_phase = "B-0"
     spine.progress.current_step = "B-0.1"
-    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
     seedSession(true)
     const prompts: { language: AiActionInput["replyLanguage"]; userMessage: unknown }[] = []
     const elicitExecutor = async (input: AiActionInput) => {
@@ -2108,7 +2108,7 @@ describe("FLF-260: ngôn ngữ trả lời của một bước", () => {
       const spine = repo.createEmptySpine({ name: "Clinic", domain: null })
       spine.project.form_factor = ["mobile_app"]
       spine.steps = [{ id: "B-0.1", status: "accepted", first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }]
-      db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+      db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
       seedSession(true)
       const elicitExecutor = vi.fn()
       const { events, emit } = collectEvents()
@@ -2150,7 +2150,7 @@ describe("FLF-260: runPhase — ngôn ngữ đi qua phỏng vấn đầu giai đ
     const spine = repo.createEmptySpine({ name: "Clinic", domain: null })
     spine.project.review_mode = "fast"
     spine.steps = ["B-0.1", "B-0.2", "B-0.3"].map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }))
-    db.spines[0] = { _id: "spine", projectId: PROJECT, ...spine }
+    db.spines[0] = { _id: crypto.randomUUID() /* mỗi lần seed một Spine mới, như Mongo — cache đọc khoá theo (_id, version) */, projectId: PROJECT, ...spine }
     seedSession(true)
   }
 
