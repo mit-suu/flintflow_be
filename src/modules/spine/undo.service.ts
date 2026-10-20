@@ -23,6 +23,7 @@ import type { ApplyResult } from "./op.types.js"
 import type { Change } from "./spine.types.js"
 import { parsePath, PathError } from "./path-resolver.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 
 export const NOTHING_TO_UNDO = "NOTHING_TO_UNDO"
 
@@ -112,6 +113,7 @@ export interface UndoOptions {
 
 /** Undo lô gần nhất của project. Ném 422 `NOTHING_TO_UNDO` nếu không còn lô nào undo được. */
 export const undoLast = async (projectId: string, userId: string, options: UndoOptions): Promise<ApplyResult> => {
+  assertDraftUnlocked(await repository.get(projectId))
   const changes = await repository.listChanges(projectId)
   const target = findUndoTarget(changes)
   if (!target) throw new ApiError(422, "Không còn thao tác nào để hoàn tác", NOTHING_TO_UNDO)

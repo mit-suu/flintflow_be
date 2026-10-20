@@ -31,6 +31,7 @@ import { executeAiAction } from "../../shared/ai/ai-action.service.js"
 import type { LocalizedEntry, OpTransaction } from "../../shared/ai/response-parser.js"
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { assertDraftUnlocked } from "./draft-lock.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
 import { applyTransaction } from "./op-engine.js"
@@ -235,6 +236,7 @@ export const reconcile = async (
   if (record.spine_version !== body.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
+  assertDraftUnlocked(record)
 
   const spine = stripRecord(record)
   const changes = await repository.listChanges(projectId)
