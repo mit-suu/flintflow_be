@@ -2,6 +2,7 @@ import { z } from "zod"
 import { ApiError } from "./api-error.js"
 import { AiActionError } from "../ai/ai-action.types.js"
 import { validationMessage, validationMeta } from "./validation-message.js"
+import { pathLabel, UNKNOWN_PATH_LABEL } from "../../modules/spine/human-labels.js"
 
 /**
  * Lỗi bất kỳ → `{ status, code, message, meta }` an toàn để gửi cho user (FLF-247).
@@ -82,6 +83,50 @@ export const CHANGE_DUPLICATE_MESSAGE = "Mục này đã tồn tại trong tài 
 export const CHANGE_INVALID_RESULT_MESSAGE =
   "Chưa áp được thay đổi này vì dữ liệu sau khi sửa không hợp lệ. Hãy diễn đạt lại yêu cầu rồi thử lại."
 
+/**
+ * Path của vi phạm ⇒ tên phần tử ("Màn hình (thêm mới) — Tính năng"); path Zod dạng chấm (`screens.3.feature_id`) đổi
+ * sang selector trước. Không đọc được ⇒ null, để câu không in nguyên path.
+ */
+const violationPlace = (path: string | undefined): string | null => {
+  if (!path) return null
+  const label = pathLabel(path.replace(/\.(\d+)(?=\.|$)/g, "[$1]"))
+  return label === UNKNOWN_PATH_LABEL ? null : label
+}
+
+/** Mã phần tử bị trỏ tới trong câu của invariant 3: `Khoá "F09" (…) không trỏ …`. */
+const deadTarget = (message: string): string | null => /Khoá "([^"]+)"/.exec(message)?.[1] ?? null
+
+/**
+ * Câu cho luật làm dữ liệu sau khi sửa hỏng (FLF-300): nói phần nào, hỏng thế nào — không còn một câu chung
+ * "dữ liệu không hợp lệ, hãy diễn đạt lại" khiến người dùng không biết lỗi ở yêu cầu hay ở tài liệu.
+ */
+const invalidResultMessage = (v: ViolationLike): string | null => {
+  const place = violationPlace(v.path)
+  switch (v.rule) {
+    case "invariant_3_dead_reference": {
+      const target = deadTarget(v.message)
+      return `${place ?? "Phần vừa sửa"} trỏ tới ${target ? `“${target}”` : "một phần tử"} không có trong tài liệu. Hãy nói rõ phần đó hoặc thêm nó trước.`
+    }
+    case "invariant_4_screen_missing":
+      return `${place ?? "Chức năng vừa sửa"} gắn với một màn hình không có trong tài liệu.`
+    case "invariant_5_feature_order":
+      return "Thứ tự các tính năng bị trùng hoặc ngắt quãng sau khi sửa."
+    case "invariant_5_function_order":
+      return "Thứ tự các chức năng trong một tính năng bị trùng sau khi sửa."
+    case "invariant_6_feature_mismatch":
+      return `${place ?? "Chức năng vừa sửa"} không cùng tính năng với màn hình chứa nó.`
+    case "invariant_8_screen_not_pending":
+    case "invariant_8_screen_not_queued":
+      return "Màn hình mới thêm trong bước soạn chi tiết màn phải được đưa vào hàng chờ soạn."
+    case "key_change_forbidden":
+      return `Không đổi hay xoá được mã định danh${place ? ` của ${place}` : ""}.`
+    case "schema_invalid":
+      return place ? `Chưa áp được thay đổi này: ${place} sai định dạng sau khi sửa.` : null
+    default:
+      return place ? `Chưa áp được thay đổi này: ${place} không hợp lệ sau khi sửa.` : null
+  }
+}
+
 /** Câu cho một lô op bị từ chối — theo luật của vi phạm đầu tiên; path/op/mã luật ở `meta.violations`. */
 export const violationMessage = (violations: readonly ViolationLike[]): string => {
   const rule = violations[0]?.rule ?? ""
@@ -94,7 +139,7 @@ export const violationMessage = (violations: readonly ViolationLike[]): string =
     return "Không xoá được mục này vì tài liệu cần giữ ít nhất một mục ở phần đó."
   }
   if (rule === "invariant_8_cursor_screen") return "Không xoá được màn đang được soạn chi tiết."
-  return CHANGE_INVALID_RESULT_MESSAGE
+  return (violations[0] && invalidResultMessage(violations[0])) ?? CHANGE_INVALID_RESULT_MESSAGE
 }
 
 const isTransactionRejected = (err: ApiError): err is ApiError & { violations: ViolationLike[]; referrers?: unknown[] } =>
