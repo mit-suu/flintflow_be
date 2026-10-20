@@ -280,6 +280,28 @@ describe("preview — diff + impact, không ghi", () => {
       code: "SPINE_VERSION_CONFLICT"
     })
   })
+
+  it("FLF-293: đang chờ Lead duyệt ⇒ preview và apply đều 409 DRAFT_LOCKED, không gọi model, không ghi", async () => {
+    await seed({
+      ...FIXTURE,
+      baseline_submission: {
+        status: "pending",
+        submitted_by: USER,
+        submitted_at: "2026-10-17T10:08:00.000Z",
+        spine_version: 1,
+        decided_by: null,
+        decided_at: null,
+        reason: null,
+        rejection_comment_ids: []
+      }
+    })
+    const body = { base_version: 1, instruction: "Thêm use case mới Send Absence Warning" }
+    await expect(preview(PROJECT, USER, body, {}, deps)).rejects.toMatchObject({ statusCode: 409, code: "DRAFT_LOCKED" })
+    await expect(apply(PROJECT, USER, body, {}, deps)).rejects.toMatchObject({ statusCode: 409, code: "DRAFT_LOCKED" })
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+    expect((await repo.get(PROJECT))?.spine_version).toBe(1)
+    expect(await writtenChanges()).toBe(0)
+  })
 })
 
 // ─── nhánh instruction ───────────────────────────────────────────
