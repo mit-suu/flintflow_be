@@ -28,6 +28,7 @@ import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
 import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import { elementFieldsOf } from "./element-defaults.js"
+import { newUseCaseGapNote, newUseCaseGaps } from "./new-usecase-gaps.js"
 import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -653,6 +654,8 @@ export const preview = async (
 
   const impact = impactOfChanges(spine, plan.changes, plan.spine)
   const branch = branchOf(spine, impact)
+  // FLF-298: use case mới chưa có chức năng/màn hình — sửa không tự lan, báo ngay để author yêu cầu tiếp
+  const notes = [resolved.notes, newUseCaseGapNote(newUseCaseGaps(spine, plan.spine), body.reply_language)].filter(Boolean).join("\n")
   const previewId = randomUUID()
   prunePreviews(Date.now())
   previewStore.set(previewId, {
@@ -679,7 +682,7 @@ export const preview = async (
     branch,
     impact,
     preview_id: previewId,
-    ...(resolved.notes ? { notes: resolved.notes } : {})
+    ...(notes ? { notes } : {})
   }
 }
 

@@ -61,6 +61,8 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    ```json
    { "op": "add", "path": "use_cases[]", "value": { "name": "Send Appointment Reminder", "actor_ids": ["$new2"], "description": "…" } }
    ```
+   A new use case: put in `function_ids` the existing functions from the projection that carry it out. None fits ⇒ leave
+   it empty and do not invent screens or functions the user did not ask for — code warns the user what is still missing.
 3c. **Removing** one element is `remove` with the element path: `remove use_cases[id=UC07]`,
    `remove functions[id=FN005].validations[id=FN005-V2]`. Do not "remove" by setting the array to a shorter
    list — that is how whole elements vanish without a diff line.
@@ -134,7 +136,7 @@ Return **only** JSON, no fence, no commentary.
   "ops": [
     { "op": "set", "path": "actors[id=A03].name", "value": "Administrator", "reason": "đổi tên theo yêu cầu" }
   ],
-  "notes": "optional short summary for the preview card"
+  "notes": "optional short summary for the preview card, in the reply language"
 }
 ```
 

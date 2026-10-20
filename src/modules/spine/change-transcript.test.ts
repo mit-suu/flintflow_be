@@ -42,6 +42,16 @@ describe("previewPayload", () => {
     expect(payload.reply).toContain("1 thay đổi")
   })
 
+  it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {
+    const payload = previewPayload({
+      ...base,
+      changes: [{ op: "add", path: "use_cases[]", before: null, value: {}, reason: null }],
+      preview_id: "pv",
+      notes: 'Use case mới "Send Absence Warning" chưa gắn chức năng nào'
+    })
+    expect(String(payload.reply).split("\n")).toEqual([expect.stringContaining("1 thay đổi"), 'Use case mới "Send Absence Warning" chưa gắn chức năng nào'])
+  })
+
   it("FLF-244: không lưu mảng changes/impact/violations vào transcript", () => {
     const payload = previewPayload({
       ...base,
