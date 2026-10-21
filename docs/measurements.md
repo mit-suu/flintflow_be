@@ -606,3 +606,6 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
   ca Suspend — trước khi siết luật màn: 3/3 có cảnh báo trùng UC20, 1/3 có popup; sau: 3/3 popup mới từ "User Account
   Management" + cạnh luồng + quyền + thông báo, cảnh báo trùng vẫn hiện. Ca "Request Grade Review" (sinh viên): popup
   mới từ "My Grades", nằm trong luồng. Fixture 19 màn chạy lại: 12/12.
+- **Vẽ thật (21/10):** `E2E_REAL_RENDER=1` (PlantUML trong `.env` + model vẽ wireframe) trên ca "Request Grade Review":
+  popup mới S18 có bố cục D22 `ok` (salt: môn, điểm, ô lý do, Cancel / Submit Request); Screens Flow D03-2, D03-3 vẽ lại
+  có màn mới. Không đặt biến này thì test giữ PlantUML giả của `test/setup.ts` (cổng chết) và bước vẽ được thay bằng hàm giả.
