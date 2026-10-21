@@ -60,7 +60,7 @@ export const executeAiActionHandler = async (
       withoutDocumentLanguage(input),
       projectId,
       userId,
-      { provider, model }
+      { provider, model, activeOrgId: (req as any).user?.orgId ?? null }
     )
 
     return sendSuccess(res, 200, result)
@@ -104,7 +104,8 @@ export const retryAiActionHandler = async (
       {
         provider: provider || originalLog.provider,
         model: model || originalLog.aiModel,
-        parentLogId: logId
+        parentLogId: logId,
+        activeOrgId: (req as any).user?.orgId ?? null
       }
     )
 

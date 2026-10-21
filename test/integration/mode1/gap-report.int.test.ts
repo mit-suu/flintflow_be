@@ -80,10 +80,7 @@ describe("gap report — gộp nhóm", () => {
     expect(report.totals).toEqual({
       red: open.filter((f) => f.level === "red").length,
       yellow: open.filter((f) => f.level === "yellow").length,
-      missing_sections: report.missing_sections.length,
-      unmapped_headings: report.unmapped_headings.length,
       low_confidence_fields: report.low_confidence_fields.length,
-      missing_fpt_sections: report.missing_fpt_sections.length,
       unrendered_diagrams: report.unrendered_diagrams.length
     })
     // chỉ FL902 (test đặt) — đầu mục FPT file không có không còn là cờ đỏ
@@ -91,18 +88,13 @@ describe("gap report — gộp nhóm", () => {
     expect(report.doc_version).toBe("0.1")
   })
 
-  it("FLF-184: thiếu mục FPT theo kế hoạch step (D6); cờ + mục xếp theo layout file upload; mục riêng loại custom, phần nối không liệt kê", async () => {
+  it("FLF-312: không liệt kê mục FPT thiếu; cờ + mục xếp theo layout file upload; mục riêng loại custom, phần nối không liệt kê", async () => {
     const { projectId } = await importFinalized()
     await seedFlags(projectId)
     const report = gapReportSchema.parse(await buildGapReport(projectId))
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
-    // Mỗi section FPT thiếu một dòng, step đầu tiên sở hữu nó; Screens Flow + Business Rules… file không có
-    const missing = new Map(report.missing_fpt_sections.map((m) => [m.section_id, m]))
-    expect(missing.get("fixed:3.1.1")).toMatchObject({ title: "Screens Flow", step_id: "S-4.2", in_layout: false })
-    expect(missing.has("fixed:2.1")).toBe(false)
-    expect(new Set(report.missing_fpt_sections.map((m) => m.section_id)).size).toBe(report.missing_fpt_sections.length)
-    const planMissing = new Set(profile.step_plan.filter((p) => p.missing && p.state !== "hidden").flatMap((p) => p.section_ids))
-    expect(new Set(missing.keys())).toEqual(planMissing)
+    // Mẫu FPT không bắt buộc: file thiếu Screens Flow, Business Rules… vẫn không có phần "thiếu mục FPT"
+    for (const key of ["missing_fpt_sections", "missing_sections", "unmapped_headings"]) expect(report).not.toHaveProperty(key)
     // Layout: đúng thứ tự file, bỏ phần nối (tiêu đề rỗng)
     expect(report.layout.map((l) => l.heading)).toEqual(profile.layout.filter((l) => l.heading_text).map((l) => l.heading_text))
     expect(report.layout.find((l) => l.heading === "5.9 Team Notes")?.kind).toBe("custom")
@@ -124,17 +116,6 @@ describe("gap report — gộp nhóm", () => {
     for (const d of report.unrendered_diagrams) expect(d).toMatchObject({ diagram_id: "", reason: "not_rendered" })
     // chỉ là thông tin: không đẻ cờ đỏ nào về hình
     expect(spine.flags.some((f) => f.rule_id === "render_error" && f.resolved_at === null)).toBe(false)
-  })
-
-  it("section bắt buộc thiếu = required_sections của profile; heading unmapped giữ nguyên văn", async () => {
-    const { projectId } = await importFinalized()
-    const report = await buildGapReport(projectId)
-    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
-    expect(report.missing_sections.map((m) => m.section_id)).toEqual(profile.required_sections)
-    expect(report.missing_sections.find((m) => m.section_id === "fixed:3.1.1")?.title).toBe("Screens Flow")
-    expect(report.missing_sections.map((m) => m.section_id)).not.toContain("fixed:2.1")
-    const notes = profile.heading_map.find((h) => h.heading_text === "5.9 Team Notes")!
-    expect(report.unmapped_headings).toEqual([{ block_id: notes.block_id, text: "5.9 Team Notes" }])
   })
 
   it("field độ tin thấp: gồm cả field đã xác nhận (kèm confirmed/edited_value), không gồm field độ tin cao", async () => {
@@ -166,11 +147,8 @@ describe("gap report — .docx", () => {
     const summary = blocks.find((b) => b.kind === "table")!.rows!
     expect(summary).toEqual([
       ["Hạng mục", "Số lượng"],
-      ["Thiếu mục theo mẫu FPT (không bắt buộc)", String(report.totals.missing_fpt_sections)],
       ["Cờ đỏ", String(report.totals.red)],
       ["Cờ vàng", String(report.totals.yellow)],
-      ["Mục mẫu FPT không có tiêu đề trong file", String(report.totals.missing_sections)],
-      ["Tiêu đề không khớp mẫu", String(report.totals.unmapped_headings)],
       ["Dữ liệu trích có độ tin thấp", String(report.totals.low_confidence_fields)],
       ["Hình chưa vẽ được", String(report.totals.unrendered_diagrams)]
     ])

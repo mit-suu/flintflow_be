@@ -1,7 +1,8 @@
 /**
  * Kế hoạch step theo template (#32–#33, mode 1 v2 — FLF-183). Đọc / bật / tắt step; trạng thái step ở Spine đi kèm:
  * bật step ẩn ⇒ `skipped` → `pending` (chạy được trong workspace); tắt step đã bật chưa có dữ liệu ⇒ `pending` → `skipped`.
- * Không tắt được step `applied` (đầu mục mẫu FPT — D6 — hoặc bước luôn chạy) và step đã có dữ liệu ⇒ 409 CORE_STEP_REQUIRED.
+ * Không tắt được bước luôn chạy (ghép / kiểm tra tài liệu, không sở hữu section) và step đã có dữ liệu ⇒ 409
+ * CORE_STEP_REQUIRED. Step của đầu mục mẫu FPT tắt được — mẫu FPT không bắt buộc (FLF-312).
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -15,7 +16,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { TemplateProfile, type StepPlanItem } from "./template-profile.model.js"
 
 const toDto = (items: StepPlanItem[]): { steps: StepPlanEntry[] } => ({
-  steps: items.map((i) => ({ step_id: i.step_id, state: i.state, missing: i.missing, section_ids: [...i.section_ids], reason: i.reason }))
+  steps: items.map((i) => ({ step_id: i.step_id, state: i.state, section_ids: [...i.section_ids], reason: i.reason }))
 })
 
 const requirePlan = async (projectId: string) => {
@@ -44,7 +45,7 @@ export const patchStepPlan = async (projectId: string, userId: string, body: Ste
     item.reason = "Người dùng bật thêm"
     status = "pending"
   } else if (!body.enabled && item.state !== "hidden") {
-    if (item.state === "applied") throw new Mode1Error("CORE_STEP_REQUIRED", "Bước này thuộc đầu mục bắt buộc của mẫu FPT nên không tắt được.", { step_id: item.step_id })
+    if (!item.section_ids.length) throw new Mode1Error("CORE_STEP_REQUIRED", "Bước ghép / kiểm tra tài liệu luôn chạy nên không tắt được.", { step_id: item.step_id })
     const hasData = !!state && (state.status !== "pending" && state.status !== "skipped" || state.first_seq !== null)
     if (hasData) throw new Mode1Error("CORE_STEP_REQUIRED", "Bước này đã có dữ liệu nên không tắt được.", { step_id: item.step_id })
     item.state = "hidden"

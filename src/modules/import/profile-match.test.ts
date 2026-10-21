@@ -6,7 +6,6 @@ import {
   matchHeadings,
   matchProfile,
   matchTables,
-  missingRequiredSections,
   needsMappingReview,
   type ProfileBlock
 } from "./profile-match.service.js"
@@ -181,8 +180,8 @@ describe("matchProfile", () => {
     expect(map["5.1 Business Rules"].section_id).toBe("fixed:5.1")
     expect(map["5.9 Team Notes"]).toMatchObject({ section_id: "unmapped", confidence: 0.9 })
     expect(profile.language).toBe("en")
-    expect(profile.required_sections).toContain("fixed:3.1.1")
-    expect(profile.required_sections).not.toContain("fixed:2.1")
+    // FLF-312: mẫu FPT không bắt buộc — profile không còn danh sách đầu mục FPT thiếu
+    expect(profile).not.toHaveProperty("required_sections")
     expect(needsMappingReview(profile)).toBe(false)
   })
 
@@ -406,13 +405,5 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     const { blocks } = await parseDocument(await makeSrsDocx())
     expect(detectTemplateFamily(blocks)).toBe("fpt")
     expect(detectTemplateFamily([heading(1, 1, "1. Introduction"), heading(2, 2, "1.1 Purpose")])).toBe("fpt")
-  })
-
-  it("mọi đầu mục FPT (trừ Record of Changes tự sinh) là bắt buộc", () => {
-    const missing = missingRequiredSections([])
-    expect(missing).toContain("fixed:4.2.4")
-    expect(missing).toContain("fixed:5.5")
-    expect(missing).not.toContain("fixed:I")
-    expect(missing).toHaveLength(19)
   })
 })
