@@ -32,6 +32,7 @@ import type { LocalizedEntry, OpTransaction } from "../../shared/ai/response-par
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage } from "../translation/turn-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { assertDraftUnlocked } from "./draft-lock.js"
+import { expandIndexSelectors } from "./index-selector-fix.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { accountLocaleOf } from "../user/account-locale.js"
 import { applyTransaction } from "./op-engine.js"
@@ -188,7 +189,9 @@ const proposeOps = async (
     if (result.data.localized?.length) localized.push(...result.data.localized)
   }
 
-  return { ops, sections, localized, language: language ?? null }
+  // Model sửa một dòng mảng chuỗi bằng chỉ số (`normal[2]`) ⇒ viết lại thành set cả mảng; không thì một op như vậy
+  // làm chết cả bản xem trước gộp của mọi section
+  return { ops: expandIndexSelectors(spine, ops), sections, localized, language: language ?? null }
 }
 
 // ─── điểm vào ────────────────────────────────────────────────────

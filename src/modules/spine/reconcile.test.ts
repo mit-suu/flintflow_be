@@ -244,6 +244,22 @@ describe("reconcile lượt 1 — preview diff gộp", () => {
     expect(steps).toContain("S-4.3")
   })
 
+  it("model sửa một dòng mảng chuỗi bằng chỉ số (actor_ids[0]) ⇒ vẫn ra bản xem trước ok (set cả mảng), không chết cả lô", async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    const before = (await repo.get(PROJECT))!.use_cases.find((u) => u.id === "UC02")!.actor_ids
+    deps.reconcileExecutor = vi.fn(async (_type, input) =>
+      (input.promptVariables as { step_id: string }).step_id === "S-3.2" ? opsResult([{ op: "set", path: "use_cases[id=UC02].actor_ids[0]", value: "A02" }]) : opsResult([])
+    )
+
+    const result = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+
+    if (isReconcileApplied(result)) throw new Error("preview mong đợi")
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true)
+    expect(result.ops).toContainEqual(expect.objectContaining({ op: "set", path: "use_cases[id=UC02].actor_ids", value: ["A02", ...before.slice(1)] }))
+  })
+
   it("FLF-260: tài khoản đã chọn en ⇒ mọi lượt gọi mang replyLanguage en; chưa chọn ⇒ không có field", async () => {
     await seed()
     await renameActor()

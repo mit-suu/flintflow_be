@@ -126,7 +126,9 @@ export const previewPayload = (preview: ChangePreviewResult, language: ReplyLang
               ]
                 .filter(Boolean)
                 .join("\n")
-            : byLanguage(language, {
+            : // Không có thay đổi mà có ghi chú (vd người dùng rút lại yêu cầu) ⇒ nói đúng ghi chú đó
+              preview.notes ||
+              byLanguage(language, {
                 vi: "Không tìm thấy chỗ nào cần đổi theo lệnh này.",
                 en: "Nothing in the document needs to change for this request."
               })
