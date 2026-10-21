@@ -230,7 +230,14 @@ export const reconcile = async (
     // FLF-294: hoà giải kéo theo một CR đã ghi — không đòi người yêu cầu / nguồn lần nữa
     const applied = await applyChange(projectId, userId, { base_version: body.base_version, preview_id: body.preview_id, cr_exempt: true }, init, d)
     const afterRender = await rerenderStale(projectId, userId, applied.spine, d)
-    const version = await markAwaitingReaccept(projectId, userId, afterRender, sections)
+    // Sau baseline (BR-03): bản xem trước hoà giải user vừa duyệt CHÍNH LÀ lượt duyệt — ghi thẳng vào bản nháp như
+    // một CR, không mở lại bước soạn (trước đây đòi chạy lại + duyệt lại 13 bước mới gỡ được cờ đỏ để chốt baseline).
+    // Trước baseline giữ luồng cũ: section chờ user chấp nhận lại ở pipeline.
+    const version =
+      applied.spine.baselines.length > 0
+        ? await acceptSections(projectId, userId, afterRender, sections, "Hoà giải sau baseline: user đã duyệt nội dung cập nhật")
+        : await markAwaitingReaccept(projectId, userId, afterRender, sections)
+    if (applied.spine.baselines.length > 0) await d.recomputeFlags(projectId, userId)
     const record = await repository.get(projectId)
     return { ...applied, ...(record ? { spine: record, spine_version: record.spine_version } : { spine_version: version }) }
   }
@@ -298,6 +305,33 @@ export const reconcile = async (
  * cờ `section_stale_at_baseline` đóng ở lượt quét kế tiếp. Không ghi nội dung nào — đây là một quyết định
  * của người, và nó được ghi lại như mọi quyết định khác trong `changes[]`.
  */
+/** Mốc chấp nhận của step sở hữu các section dời tới change mới nhất ⇒ section hết `stale` mà step không mở lại. */
+const acceptOps = async (projectId: string, spine: Spine, sectionIds: readonly string[]): Promise<Op[]> => {
+  const latestSeq = (await repository.nextSeq(projectId)) - 1
+  const at = new Date().toISOString()
+  const ops: Op[] = []
+  const seen = new Set<string>()
+  for (const sectionId of sectionIds) {
+    for (const stepId of stepsOf(sectionId, spine)) {
+      const step = spine.steps.find((s) => s.id === stepId)
+      if (!step || step.status !== "accepted" || seen.has(stepId)) continue
+      seen.add(stepId)
+      if (step.last_seq !== latestSeq) ops.push({ op: "set", path: `steps[id=${stepId}].last_seq`, value: latestSeq })
+      ops.push({ op: "set", path: `steps[id=${stepId}].accepted_at`, value: at })
+    }
+  }
+  return ops
+}
+
+/** Sau baseline: user đã duyệt bản xem trước hoà giải ⇒ chấp nhận luôn các section đó (không mở lại step). */
+const acceptSections = async (projectId: string, userId: string, baseVersion: number, sectionIds: readonly string[], reason: string): Promise<number> => {
+  const record = await repository.get(projectId)
+  if (!record) return baseVersion
+  const ops = await acceptOps(projectId, stripRecord(record), sectionIds)
+  if (ops.length === 0) return record.spine_version
+  return (await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason })).spine_version
+}
+
 const confirmNoChange = async (
   projectId: string,
   userId: string,
@@ -310,22 +344,7 @@ const confirmNoChange = async (
   if (record.spine_version !== baseVersion) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", repository.SPINE_VERSION_CONFLICT)
   }
-  const spine = stripRecord(record)
-  const latestSeq = (await repository.nextSeq(projectId)) - 1
-  const at = new Date().toISOString()
-
-  const ops: Op[] = []
-  const seen = new Set<string>()
-  for (const sectionId of sectionIds) {
-    for (const stepId of stepsOf(sectionId, spine)) {
-      const step = spine.steps.find((s) => s.id === stepId)
-      if (!step || step.status !== "accepted" || seen.has(stepId)) continue
-      seen.add(stepId)
-      if (step.last_seq !== latestSeq) ops.push({ op: "set", path: `steps[id=${stepId}].last_seq`, value: latestSeq })
-      ops.push({ op: "set", path: `steps[id=${stepId}].accepted_at`, value: at })
-    }
-  }
-
+  const ops = await acceptOps(projectId, stripRecord(record), sectionIds)
   const applied =
     ops.length > 0
       ? await applyTransaction(projectId, { base_version: record.spine_version, ops, by: userId, step_id: null, reason: "Hoà giải: user xác nhận nội dung không đổi" })
