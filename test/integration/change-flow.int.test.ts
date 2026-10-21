@@ -183,7 +183,7 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
     { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } },
     { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "Select at least one student, then send the warning again.", function_ids: ["$newFn"] } }
   ]
-  const instruction = "Thêm use case Send Absence Warning cho Business Analyst"
+  const instruction = "Thêm use case Send Absence Warning cho Business Analyst, làm màn hình riêng"
 
   const addUseCase = async (api: ReturnType<typeof client>, extra: object = {}) => {
     mockOverrides.next = () => JSON.stringify({ ops: fullBatch, notes: "Thêm chức năng, màn, luồng và phân quyền." })

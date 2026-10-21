@@ -202,6 +202,8 @@ export const reviewSchema = z.object({
 export const changeInstructionSchema = z
   .object({
     clarification_needed: z.string().optional(),
+    /** FLF-311: lựa chọn ngắn cho câu hỏi làm rõ (vd màn riêng / popup) — FE hiện thẻ chọn nhanh. */
+    choices: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
     txn: z.string().optional(),
     ops: z.array(opSchema).optional(),
     notes: z.string().optional(),

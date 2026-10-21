@@ -203,7 +203,9 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
     return sendDomainError(res, err)
   }
   if (session && userText) await changeTranscript.recordChangeTurn(session, userText, changeTranscript.previewPayload(result, replyLanguage))
-  return requiresCr ? sendSuccess(res, 200, result, { requires_cr: true }) : sendSuccess(res, 200, result)
+  // FLF-311: lựa chọn chỉ cho transcript (thẻ chọn trong chat) — hình response giữ đúng hợp đồng
+  const { clarification_choices: _choices, ...data } = result
+  return requiresCr ? sendSuccess(res, 200, data, { requires_cr: true }) : sendSuccess(res, 200, data)
 })
 
 export const reconcileChanges = catchAsync(async (req: Request, res: Response) => {

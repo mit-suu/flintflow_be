@@ -609,3 +609,9 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
 - **Vẽ thật (21/10):** `E2E_REAL_RENDER=1` (PlantUML trong `.env` + model vẽ wireframe) trên ca "Request Grade Review":
   popup mới S18 có bố cục D22 `ok` (salt: môn, điểm, ô lý do, Cancel / Submit Request); Screens Flow D03-2, D03-3 vẽ lại
   có màn mới. Không đặt biến này thì test giữ PlantUML giả của `test/setup.ts` (cổng chết) và bước vẽ được thay bằng hàm giả.
+- **Hỏi màn riêng hay popup (21/10):** UC cần giao diện mà người dùng chưa chọn ⇒ hỏi trước (một tin, kèm `choices` cho
+  thẻ chọn nhanh, kèm chi tiết còn thiếu), code chặn lô có màn mới khi chưa chọn và chưa hỏi lượt nào, và áp đúng lựa
+  chọn (`is_popup`) khi người dùng đã chọn. FAP thật: ca C lượt 1 model hỏi "Màn hình riêng / Popup mở từ My Grades" + "ai
+  xử lý yêu cầu"; lượt 2 trả lời popup ⇒ lô popup "Grade Review Request" mở từ My Grades, 3 validation, quyền, thông báo.
+  Ca A (Suspend) lượt 1 hỏi màn riêng hay popup mở từ User Account Management; cảnh báo trùng UC20 hiện ở bản xem trước
+  sau khi chọn. Fixture (câu lệnh có "màn hình riêng"): 12/12.

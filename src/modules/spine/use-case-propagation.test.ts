@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
-import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Fixture 19 màn: S-9, mọi bước accepted. */
@@ -179,7 +179,8 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
   it("full ⇒ kiểm trùng use case + màn riêng khi có tương tác + chức năng đủ Functional Requirements", async () => {
     const prompt = await render({ use_case_mode: "full", use_case_ui: true })
     expect(prompt).toContain("First compare it with `use_case_context.use_cases` of the same actor")
-    expect(prompt).toContain("**its own screen**: anything that changes data")
+    expect(prompt).toContain("**its own screen or popup** (as chosen)")
+    expect(prompt).toContain('`choices` ["Màn hình riêng", "Popup mở từ <screen>"]')
     expect(prompt).toContain("`normal[]` steps, `abnormal[]` cases, `validations[]`")
     expect(prompt).not.toContain("the screen loop details it")
   })
@@ -234,5 +235,32 @@ describe("useCaseOverlaps — use case mới chồng mục tiêu với use case 
 
   it("ngữ cảnh model có danh sách use case để tự kiểm trùng", () => {
     expect((useCaseContext(FIXTURE, "full").use_cases as { id: string }[]).map((u) => u.id)).toContain("UC24")
+  })
+})
+
+describe("màn hình riêng hay popup — người dùng chọn (FLF-311)", () => {
+  it("screenKindChoice: đọc lời user (câu lệnh + tin User:), bỏ lời AI; nhắc sau cùng thắng", () => {
+    expect(screenKindChoice("Thêm use case X dạng popup")).toBe("popup")
+    expect(screenKindChoice("thêm UC X, làm màn hình riêng")).toBe("screen")
+    expect(screenKindChoice("Popup mở từ My Grades")).toBe("popup")
+    expect(screenKindChoice("Thêm use case X")).toBeNull()
+    expect(screenKindChoice("người nhận là sinh viên", "User: thêm UC X\nAI: Màn hình riêng hay popup?")).toBeNull()
+    expect(screenKindChoice("à không, màn hình riêng", "User: thêm UC X dạng popup")).toBe("screen")
+  })
+
+  it("screenKindQuestion: câu hỏi nêu màn mở ra (từ cạnh luồng) + hai lựa chọn; lô không thêm màn ⇒ null", () => {
+    const ops = normalizeUseCaseBatch(FIXTURE, [...batch(), { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "$newScreen"] }])
+    expect(screenKindQuestion(FIXTURE, ops)).toEqual({
+      text: expect.stringContaining('popup mở từ "Project Workspace"'),
+      choices: ["Màn hình riêng", "Popup mở từ Project Workspace"]
+    })
+    expect(screenKindQuestion(FIXTURE, ops, "en")?.choices).toEqual(["Separate screen", "Popup opened from Project Workspace"])
+    expect(screenKindQuestion(FIXTURE, [{ op: "set", path: "use_cases[id=UC01].name", value: "X" }])).toBeNull()
+  })
+
+  it("applyScreenKind: đặt is_popup cho màn mới của lô, không đụng op khác", () => {
+    const ops = applyScreenKind(batch(), "popup")
+    expect((ops.find((o) => o.path === "screens[]")?.value as { is_popup: boolean }).is_popup).toBe(true)
+    expect(ops.filter((o) => o.path !== "screens[]")).toEqual(batch().filter((o) => o.path !== "screens[]"))
   })
 })
