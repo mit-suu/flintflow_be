@@ -146,3 +146,10 @@ describe("recordChangeTurn", () => {
     expect(save).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("previewPayload — không có thay đổi mà có ghi chú", () => {
+  it("rút lại yêu cầu ⇒ câu trả lời là ghi chú, không ghép câu 'Không tìm thấy chỗ nào cần đổi'", () => {
+    const payload = previewPayload({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [], notes: "Đã bỏ yêu cầu này — tài liệu không đổi gì." })
+    expect(payload).toMatchObject({ kind: "change_preview", reply: "Đã bỏ yêu cầu này — tài liệu không đổi gì.", change_count: 0 })
+  })
+})

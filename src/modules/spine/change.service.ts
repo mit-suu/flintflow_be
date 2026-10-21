@@ -52,6 +52,7 @@ import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/re
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
 import { assertDraftUnlocked } from "./draft-lock.js"
+import { expandIndexSelectors } from "./index-selector-fix.js"
 import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -484,6 +485,8 @@ interface ResolvedOps {
   clarification: string | null
   /** FLF-311: lựa chọn kèm câu hỏi làm rõ (thẻ chọn nhanh trong chat). */
   choices?: string[]
+  /** Người dùng rút lại yêu cầu đang dở — không có gì để xem trước hay áp. */
+  withdrawn?: boolean
   /** Ghi chú ngắn model trả về, hiện trên thẻ preview. */
   notes: string | null
   /** FLF-265 D16: chữ theo ngôn ngữ tài liệu kèm lô (cùng `path` với op) + ngôn ngữ của lượt — lưu sau khi áp. */
@@ -535,6 +538,15 @@ const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
  * Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model; lô có lỗi (áp thử bị từ chối, tên
  * use case sai luật — FLF-243) thì gọi lại đúng MỘT lần kèm lỗi — lần hai vẫn sai thì giữ lô để preview báo lỗi / cờ vàng bắt.
  */
+/** Câu rút lại yêu cầu đang dở ("thôi không cần thêm nữa", "bỏ qua", "never mind") — chỉ xét khi đang trả lời câu hỏi. */
+// Hết từ = không còn chữ cái theo sau (`\b` của JS coi "ỷ" là ký tự ngoài từ ⇒ "huỷ" không khớp)
+const WITHDRAWAL = /^\s*(thôi|thoi|bỏ qua|bo qua|không cần|khong can|huỷ|hủy|huy|dừng|dung lai|cancel|never ?mind|skip it|forget it|no need)(?!\p{L})/iu
+export const isWithdrawal = (text: string): boolean => WITHDRAWAL.test(text)
+const WITHDRAWN = {
+  vi: "Đã bỏ yêu cầu này — tài liệu không đổi gì. Khi cần, bạn cứ nhắn yêu cầu mới.",
+  en: "Dropped this request — nothing in the document changed. Send a new request whenever you need."
+}
+
 /** FLF-299: sau số câu hỏi làm rõ này cho cùng một yêu cầu, model phải soạn bản xem trước thay vì hỏi tiếp. */
 export const MAX_CLARIFICATION_ROUNDS = 2
 
@@ -549,10 +561,16 @@ const opsFromInstruction = async (
   clarificationRounds = 0
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
+  // Người dùng rút lại yêu cầu đang dở (đang trả lời câu hỏi làm rõ) ⇒ dừng, không gọi model (model không có cách trả
+  // "không làm gì" — lô rỗng bị schema từ chối 3 lần rồi thành câu "chưa xác định được cần đổi gì")
+  if (clarificationRounds > 0 && isWithdrawal(instruction)) {
+    return { ops: [], clarification: null, notes: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, WITHDRAWN), withdrawn: true }
+  }
   // FLF-311: lệnh thêm use case (hoặc câu trả lời cho câu hỏi làm rõ của lệnh đó) ⇒ model soạn đủ phần liên quan
   const addsUseCase = isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history))
   const ucMode = addsUseCase ? useCaseMode(spine) : null
-  const prepare = (ops: Op[]): Op[] => (ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops))
+  // Op chỉ số trên mảng chuỗi (`normal[2]`) ⇒ set cả mảng (op engine cấm chỉ số)
+  const prepare = (ops: Op[]): Op[] => expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops))
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
   const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
   const call = (previousProblems?: string) =>
@@ -710,6 +728,7 @@ export const preview = async (
       ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {})
     }
   }
+  if (resolved.withdrawn) return { ok: true, txn: randomUUID(), base_version: body.base_version, ops: [], changes: [], violations: [], referrers: [], notes: resolved.notes ?? undefined }
   if (resolved.ops.length === 0) {
     return { ...rejectedPreview(body.base_version, [{ rule: "op_value_missing", message: "Không có thay đổi nào để xem trước" }]) }
   }

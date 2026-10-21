@@ -84,6 +84,7 @@ import {
   buildChangeProjection,
   clearPreviewStore,
   isChangeInstruction,
+  isWithdrawal,
   preview,
   referencedSections,
   sectionCollections,
@@ -450,6 +451,22 @@ describe("preview — diff + impact, không ghi", () => {
       const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning" }, {}, deps)
       expect(shown.clarification_choices).toEqual(["Màn hình riêng", "Popup mở từ Project Workspace"])
     })
+  })
+
+  it("đang trả lời câu hỏi làm rõ mà rút lại yêu cầu ('thôi không cần thêm nữa') ⇒ bỏ yêu cầu, không gọi model, không ghi", async () => {
+    await seed()
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: [] }))
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "thôi không cần thêm nữa", clarification_rounds: 1 }, {}, deps)
+
+    expect(shown).toMatchObject({ ok: true, changes: [], notes: expect.stringContaining("Đã bỏ yêu cầu") })
+    expect(shown.preview_id).toBeUndefined()
+    expect(deps.changeExecutor).not.toHaveBeenCalled()
+    expect(await writtenChanges()).toBe(0)
+  })
+
+  it("isWithdrawal: chỉ câu mở đầu bằng lời rút lại; câu sửa bình thường không tính", () => {
+    for (const t of ["thôi không cần thêm nữa", "Bỏ qua", "huỷ yêu cầu", "never mind", "Không cần nữa"]) expect(isWithdrawal(t), t).toBe(true)
+    for (const t of ["Thêm use case X", "đổi tên A01 thành Product Owner", "chỉ thao tác xóa"]) expect(isWithdrawal(t), t).toBe(false)
   })
 
   it("FLF-311: lệnh sửa thường ⇒ chế độ none, không nạp ngữ cảnh use case, không vẽ lại", async () => {
