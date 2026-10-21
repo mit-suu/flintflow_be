@@ -156,7 +156,17 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     const { projectId, userId } = await seedFap()
     const before = (await repo.get(projectId))!
     const instruction = "Thêm use case mới Request Grade Review: sinh viên gửi yêu cầu phúc khảo điểm một môn, ghi lý do; Phòng khảo thí nhận yêu cầu"
-    const deps = { renderAfterChange: async () => undefined }
+    // E2E_REAL_RENDER=1 ⇒ vẽ thật sau khi áp (PlantUML ở PLANTUML_BASE_URL + model vẽ wireframe), không thay bằng hàm giả
+    const realRender = process.env.E2E_REAL_RENDER === "1"
+    // test/setup.ts cố ý trỏ PlantUML vào cổng chết ⇒ vẽ thật phải lấy lại địa chỉ server trong .env
+    if (realRender) {
+      const { parse } = await import("dotenv")
+      const url = parse(fs.readFileSync(path.resolve(__dirname, "../../.env"))).PLANTUML_BASE_URL
+      // `env` của app parse một lần lúc import ⇒ sửa thẳng object đó, đổi process.env không có tác dụng
+      const { env } = await import("../../src/config/env.js")
+      if (url) Object.assign(env, { PLANTUML_BASE_URL: url, PLANTUML_TIMEOUT_MS: 30000 })
+    }
+    const deps = realRender ? {} : { renderAfterChange: async () => undefined }
     const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction }, {}, deps)
     fapLog(`[FAP B] ok=${shown.ok} clarification=${shown.clarification ?? "-"}\n[FAP B] notes=${shown.notes ?? "-"}\n[FAP B] ops=${shown.ops.map((o) => `${o.op} ${o.path}`).join(" | ")}`)
     expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
@@ -167,5 +177,17 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     fapLog(`[FAP B] màn mới: ${newScreens.map((s) => `${s.id} ${s.name} popup=${s.is_popup} từ ${spine.screens.filter((x) => x.flow_to.includes(s.id)).map((x) => x.id)}`).join("; ") || "không"} | cr=${applied.cr_id}`)
     expect(newScreens.length).toBeGreaterThan(0)
     expect(newScreens.every((s) => !orphan.has(s.id))).toBe(true)
+    if (realRender) {
+      const after = (await repo.get(projectId))!
+      for (const s of newScreens) {
+        const layout = after.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === s.id)
+        fapLog(`[FAP B] bố cục ${s.id}: ${layout ? `${layout.id} ${layout.render_status}${layout.error ? ` (${layout.error})` : ""}` : "KHÔNG CÓ"}`)
+        if (layout) fapLog("```\n" + layout.puml + "\n```")
+        expect(layout?.render_status).toBe("ok")
+      }
+      const flow = after.diagrams.filter((d) => d.kind === "screen_flow")
+      fapLog(`[FAP B] screen flow: ${flow.map((d) => `${d.id} ${d.render_status}${d.puml.includes(newScreens[0].name) ? " (có màn mới)" : ""}`).join(", ")}`)
+      expect(flow.some((d) => d.puml.includes(newScreens[0].name))).toBe(true)
+    }
   })
 })
