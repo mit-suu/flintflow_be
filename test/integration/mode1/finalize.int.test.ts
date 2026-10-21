@@ -60,19 +60,19 @@ describe("finalize — Spine", () => {
   it("kế hoạch step (FLF-183): steps[] seed theo template; không cờ stale/awaiting — step accepted có last_seq của lô import", async () => {
     const { projectId } = await importFinalized()
     const spine = (await spineRepository.get(projectId))!
-    // Mode 1 v2: step sở hữu section có nội dung ⇒ accepted; đầu mục FPT thiếu ⇒ pending; Brief ⇒ skipped
+    // Step sở hữu section có nội dung ⇒ accepted; đầu mục FPT file không có ⇒ skipped như Brief (FLF-312 — mẫu FPT không bắt buộc)
     const status = (id: string) => spine.steps.find((s) => s.id === id)?.status
     expect(status("B-0.1")).toBe("skipped")
     expect(status("S-1.1")).toBe("skipped")
     expect(status("S-3.1")).toBe("accepted")
     const plan = (await TemplateProfile.findOne({ projectId }).lean())!.step_plan
-    const missing = plan.filter((p) => p.state === "applied" && p.missing)
-    expect(missing.length).toBeGreaterThan(0)
-    for (const p of missing) expect(status(p.step_id), p.step_id).toBe("pending")
-    for (const p of plan.filter((x) => x.state === "applied" && !x.missing && x.section_ids.length)) expect(status(p.step_id), p.step_id).toBe("accepted")
+    // file mẫu không có Screens Flow (3.1.1) ⇒ step sở hữu nó ẩn, không "thiếu"
+    expect(plan.find((p) => p.section_ids.includes("fixed:3.1.1"))?.state).toBe("hidden")
+    expect(plan.every((p) => !("missing" in p))).toBe(true)
+    for (const p of plan.filter((x) => x.state === "enabled")) expect(status(p.step_id), p.step_id).toBe("pending")
+    for (const p of plan.filter((x) => x.state === "applied" && x.section_ids.length)) expect(status(p.step_id), p.step_id).toBe("accepted")
     for (const p of plan.filter((x) => x.state === "hidden")) expect(status(p.step_id), p.step_id).toBe("skipped")
-    expect(spine.progress.current_step).not.toBeNull()
-    expect(status(spine.progress.current_step!)).toBe("pending")
+    if (spine.progress.current_step) expect(status(spine.progress.current_step)).toBe("pending")
     const stepRules = ["section_stale_at_baseline", "section_awaiting_reaccept", "screen_pending_at_baseline"]
     expect(spine.flags.filter((f) => stepRules.includes(f.rule_id))).toEqual([])
     // màn trích từ tài liệu không ở trạng thái chờ mô tả chi tiết của mode 2

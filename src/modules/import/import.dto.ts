@@ -131,7 +131,6 @@ export const templateProfileDtoSchema = z.object({
   doc_version: z.string().min(1),
   heading_map: z.array(headingMapEntrySchema),
   table_map: z.array(tableMapEntrySchema),
-  required_sections: z.array(z.string()),
   language: z.string(),
   /** FLF-182 — rỗng với import trước mode 1 v2. */
   layout: z.array(layoutEntrySchema).default([]),
@@ -144,16 +143,16 @@ export const templateProfileDtoSchema = z.object({
 // ─── kế hoạch step theo template (mode 1 v2, FLF-182) ─────────────────
 
 /**
- * `applied` — step chạy trong workspace (đầu mục có trong template, đầu mục FPT bị thiếu, hoặc step phải chạy);
- * `hidden` — ẩn (không sinh đầu mục, vd Brief), bật được; `enabled` — người dùng đã bật step từng ẩn.
+ * `applied` — step chạy trong workspace (đầu mục có nội dung trong file, hoặc bước ghép / kiểm tra luôn chạy);
+ * `hidden` — ẩn (file không có đầu mục đó, hoặc không sinh đầu mục như Brief), bật được; `enabled` — step đang bật
+ * nhưng chưa có dữ liệu (người dùng bật, hoặc đầu mục có trong file mà chưa trích được gì) — tắt được.
+ * Mẫu FPT không bắt buộc (FLF-312): bản xuất theo template người dùng upload, đầu mục FPT file không có không phải "thiếu".
  */
 export const STEP_PLAN_STATES = ["applied", "hidden", "enabled"] as const
 
 export const stepPlanEntrySchema = z.object({
   step_id: z.string().min(1),
   state: z.enum(STEP_PLAN_STATES),
-  /** Đầu mục mẫu FPT mà file không có (hoặc chỉ có heading) ⇒ "Thiếu" + cờ đỏ `section_empty` (hồ sơ luật mode 1 giữ đỏ — FLF-183). */
-  missing: z.boolean(),
   /** Section do step sở hữu (FPT). */
   section_ids: z.array(z.string()),
   /** Lý do chọn/ẩn, hiển thị cho người dùng. */
@@ -307,20 +306,11 @@ export const gapReportSchema = z.object({
   totals: z.object({
     red: z.number().int().min(0),
     yellow: z.number().int().min(0),
-    missing_sections: z.number().int().min(0),
-    unmapped_headings: z.number().int().min(0),
     low_confidence_fields: z.number().int().min(0),
-    /** Mode 1 v2 (FLF-184): số đầu mục mẫu FPT còn thiếu. */
-    missing_fpt_sections: z.number().int().min(0),
     /** Mode 1 v2 (nợ T4): số hình chưa vẽ được (PlantUML vắng mặt lúc import / render lỗi). */
     unrendered_diagrams: z.number().int().min(0)
   }),
-  /**
-   * Mode 1 v2 (FLF-184, D6): đầu mục mẫu FPT file không có hoặc chỉ có heading — cờ đỏ `section_empty`, chặn sign-off
-   * v1 tới khi chạy `step_id` (AI soạn) hoặc viết tay. Đứng đầu báo cáo. `feature:*` = chức năng chương 3.
-   */
-  missing_fpt_sections: z.array(z.object({ section_id: z.string(), title: z.string(), step_id: z.string(), in_layout: z.boolean() })),
-  /** Mode 1 v2 (FLF-184): mục theo thứ tự file upload — `fpt` khớp mẫu FPT, `group` heading nhóm, `custom` mục riêng ngoài FPT (không cờ thiếu). */
+  /** Mode 1 v2 (FLF-184): mục theo thứ tự file upload — `fpt` khớp mẫu FPT, `group` heading nhóm, `custom` mục riêng ngoài FPT. */
   layout: z.array(
     z.object({
       order: z.number().int().min(0),
@@ -339,8 +329,6 @@ export const gapReportSchema = z.object({
    * render lỗi. Không chặn baseline: người dùng bấm vẽ lại ở workspace. Tính trực tiếp từ Spine mỗi lần đọc báo cáo.
    */
   unrendered_diagrams: z.array(z.object({ diagram_id: z.string(), kind: z.string(), section_id: z.string(), title: z.string(), reason: z.enum(["not_rendered", "error"]) })),
-  missing_sections: z.array(z.object({ section_id: z.string(), title: z.string() })),
-  unmapped_headings: z.array(z.object({ block_id: blockId, text: z.string() })),
   low_confidence_fields: z.array(reviewFieldSchema)
 })
 

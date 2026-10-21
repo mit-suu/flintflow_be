@@ -122,7 +122,7 @@ describe("gọi AI trừ vào ví của org sở hữu project (business-flow.md
 
     const orgId = await createOrg()
     const member = await joinOrg(orgId, "author@flintflow.test", "analyst")
-    // Ví cá nhân cũ của chính người gọi — không được đụng tới
+    // Ví cá nhân cũ của chính người gọi (dữ liệu trước FLF-310) — không được đụng tới
     await CreditWallet.create({ userId: member.id, organizationId: null, balance: 500, reserved: 0 })
 
     const project = await Project.create({
@@ -151,15 +151,42 @@ describe("gọi AI trừ vào ví của org sở hữu project (business-flow.md
     expect(personal?.reserved).toBe(0)
   })
 
-  it("lượt gọi không gắn project vẫn dùng ví cá nhân như trước", async () => {
+  it("FLF-310: lượt gọi không gắn project trừ ví org đang chọn; chưa chọn org ⇒ 409, không tạo ví cá nhân", async () => {
     const { reserveCredit } = await import("../../src/shared/ai/credit-reservation.service.js")
-    const solo = await makeUser("solo@flintflow.test")
+    const orgId = await createOrg()
+    const member = await joinOrg(orgId, "solo@flintflow.test", "analyst")
 
-    const reservation = await reserveCredit(solo.id, "chat")
-    expect(reservation.organizationId).toBeNull()
+    const reservation = await reserveCredit(member.id, "chat", undefined, undefined, orgId)
+    expect(reservation.organizationId).toBe(orgId)
+    expect((await CreditWallet.findOne({ organizationId: orgId }).lean())?.reserved).toBe(reservation.cost)
 
-    const personal = await CreditWallet.findOne({ userId: solo.id }).lean()
-    expect(personal?.reserved).toBe(reservation.cost)
+    await expect(reserveCredit(member.id, "chat")).rejects.toMatchObject({ statusCode: 409, code: "NO_ACTIVE_ORG" })
+    // org đang chọn trong token nhưng đã bị xoá khỏi org ⇒ không được trừ ví org đó
+    const outsider = await makeUser("outsider@flintflow.test")
+    await expect(reserveCredit(outsider.id, "chat", undefined, undefined, orgId)).rejects.toMatchObject({ code: "NO_ACTIVE_ORG" })
+    expect(await CreditWallet.countDocuments({ organizationId: null })).toBe(0)
+  })
+})
+
+describe("FLF-310 — GET /users/me: credit của tổ chức đang chọn", () => {
+  it("trả số dư khả dụng + tên org đang chọn; không đọc ví cá nhân cũ, không tạo ví", async () => {
+    const orgId = await createOrg("Org Hồ sơ")
+    await CreditWallet.updateOne({ organizationId: orgId }, { balance: 321, reserved: 21 })
+    await CreditWallet.create({ userId: lead.id, organizationId: null, balance: 999, reserved: 0 })
+    const token = await authAs({ _id: lead.id, email: lead.email, orgId })
+
+    const res = await request(app).get("/api/v1/users/me").set(bearer(token))
+    expect(res.status).toBe(200)
+    expect(res.body.data.balance).toBe(300)
+    expect(res.body.data.creditOrganization).toEqual({ id: orgId, name: "Org Hồ sơ" })
+  })
+
+  it("chưa chọn org ⇒ balance 0, creditOrganization null; mở hồ sơ không đẻ ví / thông báo chào mừng", async () => {
+    const fresh = await makeUser("fresh@flintflow.test")
+    const res = await request(app).get("/api/v1/users/me").set(bearer(fresh.token))
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ balance: 0, creditOrganization: null })
+    expect(await CreditWallet.countDocuments({ userId: fresh.id })).toBe(0)
   })
 })
 

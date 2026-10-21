@@ -23,7 +23,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { toIso } from "./mode1.http.js"
 import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
-import { assignBlockSections, matchProfile, missingRequiredSections, needsMappingReview } from "./profile-match.service.js"
+import { assignBlockSections, matchProfile, needsMappingReview } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
 
@@ -75,7 +75,6 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     ...(t.role ? { role: t.role } : {}),
     ...(t.samples?.length ? { samples: [...t.samples] } : {})
   })),
-  required_sections: [...p.required_sections],
   language: p.language,
   layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id })),
   template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
@@ -264,7 +263,6 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
   if (body.confirm_all) {
     for (const e of [...profile.heading_map, ...profile.table_map]) e.confirmed = true
   }
-  profile.required_sections = missingRequiredSections(profile.heading_map)
   // Heading đổi sang / khỏi Record of Changes ⇒ đọc lại bảng lịch sử (FLF-252)
   const recordBlocks = await DocBlock.find({ projectId: doc.projectId, doc_version: profile.doc_version, kind: { $in: ["heading", "table"] } })
     .sort({ "anchor.ordinal": 1 })

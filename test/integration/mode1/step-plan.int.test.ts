@@ -34,12 +34,12 @@ describe("step-plan (#32–#33)", () => {
     expect(res.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 
-  it("sau finalize: Brief ẩn, đầu mục FPT applied; GET /steps không có step skipped", async () => {
+  it("sau finalize: Brief ẩn, đầu mục FPT file không có cũng ẩn (FLF-312); GET /steps không có step skipped", async () => {
     const { c, projectId } = await importedProject()
     const steps = plan(await c.get("/step-plan"))
     expect(steps.find((s) => s.step_id === "B-0.1")).toMatchObject({ state: "hidden" })
-    expect(steps.filter((s) => s.section_ids.length && s.step_id !== "S-8.3").every((s) => s.state === "applied")).toBe(true)
-    expect(steps.some((s) => s.missing)).toBe(true)
+    expect(steps.find((s) => s.section_ids.includes("fixed:3.1.1"))).toMatchObject({ state: "hidden" })
+    expect(steps.some((s) => s.section_ids.length && s.state === "applied")).toBe(true)
 
     const listed = (await c.get("/steps")).body.data.steps as { id: string; status: string }[]
     expect(listed.some((s) => s.id === "B-0.1")).toBe(false)

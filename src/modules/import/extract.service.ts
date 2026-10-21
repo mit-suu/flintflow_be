@@ -892,7 +892,9 @@ export const creditEstimateFor = async (
   const estimate = await estimateExtraction(projectId, doc)
   if (!estimate) return null
   if (!opts.withBalance) return { ...estimate, available_credits: null }
-  const wallet = await getOrCreateWallet(userId, undefined, await resolveWalletOrg(projectId))
+  const orgId = await resolveWalletOrg(projectId)
+  if (!orgId) return { ...estimate, available_credits: null }
+  const wallet = await getOrCreateWallet(userId, undefined, orgId)
   return { ...estimate, available_credits: wallet.balance - wallet.reserved }
 }
 

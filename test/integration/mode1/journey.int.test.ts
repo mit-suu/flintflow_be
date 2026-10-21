@@ -121,13 +121,13 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     expect(versions0.map((v) => v.version)).toEqual(["0.1"])
     expect(versions0[0]!.has_original_file, "file gốc giữ lại để tải").toBe(true)
 
-    // ── 1.11 + 1.12 ⇒ 1.13 gap report: mục FPT trống chỉ liệt kê, không còn cờ đỏ (không bắt buộc) ───────────
+    // ── 1.11 + 1.12 ⇒ 1.13 gap report: mẫu FPT không bắt buộc (FLF-312) — không liệt kê mục FPT thiếu, không cờ đỏ ───
     const gap = gapReportSchema.parse((await c.get("/gap-report")).body.data)
     expect(gap.doc_version).toBe("0.1")
-    expect(gap.missing_fpt_sections.map((s) => s.section_id)).toContain("fixed:5.4")
-    expect(gap.totals.red, "mục FPT thiếu không chặn release").toBe(0)
+    expect(gap).not.toHaveProperty("missing_fpt_sections")
+    expect(gap.totals.red, "mục FPT file không có không chặn release").toBe(0)
     const plan = stepPlanResponseSchema.parse((await c.get("/step-plan")).body.data).steps
-    expect(plan.some((s) => s.missing), "kế hoạch step chỉ để đọc — còn đầu mục thiếu").toBe(true)
+    expect(plan.find((s) => s.section_ids.includes("fixed:5.4"))?.state, "đầu mục FPT file không có ⇒ step ẩn").toBe("hidden")
     expect(await redOpen(c)).toEqual([])
 
     // Import xong ⇒ mọi đường sửa ngoài CR bị chặn: step, ký v1, waive, áp thẳng
