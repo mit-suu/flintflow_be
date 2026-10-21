@@ -160,13 +160,10 @@ describe("import.dto — response", () => {
       project_id: PROJECT_ID,
       doc_version: "0.1",
       generated_at: AT,
-      totals: { red: 0, yellow: 1, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 0, missing_fpt_sections: 1, unrendered_diagrams: 0 },
-      missing_fpt_sections: [{ section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false }],
+      totals: { red: 0, yellow: 1, low_confidence_fields: 0, unrendered_diagrams: 0 },
       layout: [{ order: 0, section_id: "custom:CS01", heading: "Phụ lục B — Biên bản họp", level: 1, kind: "custom", red: 0, yellow: 0 }],
       sections: [],
       unrendered_diagrams: [],
-      missing_sections: [{ section_id: "fixed:5.3", title: "Application Messages List" }],
-      unmapped_headings: [{ block_id: "B0100", text: "Phụ lục B — Biên bản họp" }],
       low_confidence_fields: []
     }
     expect(gapReportSchema.safeParse(report).success).toBe(true)
@@ -183,7 +180,7 @@ describe("import.dto — response", () => {
 })
 
 describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
-  const profile = { doc_version: "0.1", heading_map: [], table_map: [], required_sections: [], language: "en" }
+  const profile = { doc_version: "0.1", heading_map: [], table_map: [], language: "en" }
 
   it("profile cũ không có layout ⇒ []; layout mang section FPT hoặc custom:<id>", () => {
     expect(templateProfileDtoSchema.parse(profile).layout).toEqual([])
@@ -195,10 +192,10 @@ describe("mode 1 v2 — layout + step-plan (FLF-182, contract-change)", () => {
     expect(templateProfileDtoSchema.safeParse({ ...profile, layout: [{ ...layout[0], level: 0 }] }).success).toBe(false)
   })
 
-  it("step-plan: state applied | hidden | enabled, missing đánh dấu đầu mục FPT bị thiếu", () => {
+  it("step-plan: state applied | hidden | enabled", () => {
     const steps = [
-      { step_id: "S-7.1", state: "applied", missing: true, section_ids: ["fixed:5.1"], reason: "Đầu mục mẫu FPT — file không có" },
-      { step_id: "B-0.1", state: "hidden", missing: false, section_ids: [], reason: "Không sinh đầu mục" }
+      { step_id: "S-7.1", state: "hidden", section_ids: ["fixed:5.1"], reason: "File không có đầu mục này — bật nếu muốn AI soạn thêm" },
+      { step_id: "B-0.1", state: "hidden", section_ids: [], reason: "Không sinh đầu mục" }
     ]
     expect(stepPlanResponseSchema.parse({ steps }).steps).toHaveLength(2)
     expect(stepPlanResponseSchema.safeParse({ steps: [{ ...steps[0], state: "suggested" }] }).success).toBe(false)
