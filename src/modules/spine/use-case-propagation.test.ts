@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
-import { addedScreenIds, addsUseCaseOrScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Fixture 19 màn: S-9, mọi bước accepted. */
@@ -120,6 +120,44 @@ describe("normalizeUseCaseBatch — mã thông báo (S-7.3) cho luồng bất th
     const ops: Op[] = [...withFn({ code: "E-WARN-001" }), { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "x", function_ids: ["$newFn"] } }]
     const codes = normalizeUseCaseBatch(FIXTURE, ops).filter((o) => o.path === "messages[]").map((o) => (o.value as { code: string }).code)
     expect(codes).toEqual(["E-WARN-001", "E-WARN-002"])
+  })
+})
+
+describe("declareTempIds — model dùng id tạm mà quên khai báo (e2e FLF-311, GLM thật)", () => {
+  /** Đúng dạng lô GLM trả: `$newFn1/2`, `$newScreen` được tham chiếu nhưng phần tử thêm vào không mang `id`. */
+  const glmBatch = (): Op[] => [
+    { op: "add", path: "use_cases[]", value: { name: "Share Read-Only Link", actor_ids: ["A02"], function_ids: ["$newFn1", "$newFn2"] } },
+    { op: "add", path: "functions[]", value: { name: "Create Share Link", screen_id: "$newScreen", feature_id: "F4" } },
+    { op: "add", path: "functions[]", value: { name: "Revoke Share Link", screen_id: "$newScreen", feature_id: "F4" } },
+    { op: "add", path: "screens[]", value: { name: "Share Link", feature_id: "F4", flow_to: ["S07"], tabs: [] } },
+    { op: "set", path: "screens[id=S10].flow_to", value: ["S07", "$newScreen"] },
+    { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } }
+  ]
+
+  it("gán id tạm được tham chiếu cho phần tử chưa có id cùng loại, theo thứ tự", () => {
+    const ops = declareTempIds(glmBatch())
+    const ids = (path: string) => ops.filter((o) => o.path === path).map((o) => (o.value as { id?: string }).id)
+    expect(ids("functions[]")).toEqual(["$newFn1", "$newFn2"])
+    expect(ids("screens[]")).toEqual(["$newScreen"])
+  })
+
+  it("đã khai báo đủ ⇒ không đổi; thiếu phần tử để gán ⇒ để nguyên (bất biến báo lỗi)", () => {
+    const declaredBatch = batch()
+    expect(declareTempIds(declaredBatch)).toEqual(declaredBatch)
+    const orphanRef: Op[] = [{ op: "add", path: "use_cases[]", value: { name: "X", function_ids: ["$ghost"] } }]
+    expect(declareTempIds(orphanRef)).toEqual(orphanRef)
+  })
+
+  it("lô GLM sau chuẩn hoá: mọi tham chiếu tạm có phần tử khai báo đứng trước nó", () => {
+    const ops = normalizeUseCaseBatch(FIXTURE, glmBatch())
+    const declaredAt = new Map<string, number>()
+    ops.forEach((o, i) => {
+      const id = (o.value as { id?: unknown } | undefined)?.id
+      if (o.op === "add" && typeof id === "string") declaredAt.set(id, i)
+    })
+    ops.forEach((o, i) => {
+      for (const ref of JSON.stringify(o).match(/\$new\w+/g) ?? []) expect(declaredAt.get(ref), `${ref} ở op ${i}`).toBeLessThanOrEqual(i)
+    })
   })
 })
 
