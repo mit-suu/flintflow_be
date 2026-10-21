@@ -33,7 +33,7 @@ export const getMe = catchAsync(async (req: Request, res: Response) => {
     throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
   }
 
-  const user = await userService.getMe(userId)
+  const user = await userService.getMe(userId, req.user?.orgId)
   return sendSuccess(res, 200, user)
 })
 
@@ -69,7 +69,7 @@ export const updateMe = catchAsync(async (req: Request, res: Response) => {
     ...(name === undefined ? {} : { name }),
     ...(onboardedAt === undefined ? {} : { onboardedAt: onboardedAt === null ? null : new Date(onboardedAt) }),
     ...(locale === undefined ? {} : { locale })
-  })
+  }, req.user?.orgId)
   return sendSuccess(res, 200, user)
 })
 

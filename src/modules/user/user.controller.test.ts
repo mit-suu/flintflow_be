@@ -34,12 +34,12 @@ describe("PATCH /users/me", () => {
   it("cập nhật name + onboardedAt (ISO → Date)", async () => {
     const outcome = await invoke(updateMe, USER, { name: "Hiệp", onboardedAt: "2026-09-15T08:00:00.000Z" })
     expect(outcome.status).toBe(200)
-    expect(userService.updateMe).toHaveBeenCalledWith(USER, { name: "Hiệp", onboardedAt: new Date("2026-09-15T08:00:00.000Z") })
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { name: "Hiệp", onboardedAt: new Date("2026-09-15T08:00:00.000Z") }, undefined)
   })
 
   it("onboardedAt = null được phép (reset onboarding)", async () => {
     await invoke(updateMe, USER, { onboardedAt: null })
-    expect(userService.updateMe).toHaveBeenCalledWith(USER, { onboardedAt: null })
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { onboardedAt: null }, undefined)
   })
 
   it("body rỗng hoặc field lạ (role) ⇒ 400 VALIDATION_ERROR, không ghi", async () => {
@@ -53,7 +53,7 @@ describe("PATCH /users/me", () => {
   it("FLF-259: lưu ngôn ngữ giao diện", async () => {
     const outcome = await invoke(updateMe, USER, { locale: "en" })
     expect(outcome.status).toBe(200)
-    expect(userService.updateMe).toHaveBeenCalledWith(USER, { locale: "en" })
+    expect(userService.updateMe).toHaveBeenCalledWith(USER, { locale: "en" }, undefined)
   })
 
   it("FLF-259: locale ngoài vi/en, hoặc kèm field không cho đổi ⇒ 400 VALIDATION_ERROR, không ghi", async () => {

@@ -326,7 +326,7 @@ describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
     expect(vi.mocked(changeService.apply).mock.calls[0][2]).toMatchObject({ reply_language: "en" })
     expect(session.persisted).toBe("en")
     expect(session.messages).toHaveLength(1)
-    expect(replyOf(session.messages[0])).toMatchObject({ kind: "change_applied", reply: "Applied 1 change to the document (v3)." })
+    expect(replyOf(session.messages[0])).toMatchObject({ kind: "change_applied", reply: "Applied 1 change to the document." })
   })
 
   it("phiên chưa có ngôn ngữ, câu lệnh tiếng Việt ⇒ bong bóng giữ nguyên tiếng Việt", async () => {
@@ -343,7 +343,7 @@ describe("FLF-260 — ngôn ngữ trả lời của lượt sửa", () => {
     await invoke(applyChanges, OWNER, PROJECT, { base_version: 2, instruction: "Đổi tên actor A01 thành Student", session_id: SESSION })
 
     expect(session.persisted).toBe("vi")
-    expect(replyOf(session.messages[1]).reply).toBe("Đã áp dụng 1 thay đổi vào tài liệu (v3).")
+    expect(replyOf(session.messages[1]).reply).toBe("Đã áp dụng 1 thay đổi vào tài liệu.")
   })
 
   it("không có phiên: câu lệnh rõ ngôn ngữ thắng; lô op sẵn không có chữ để đoán ⇒ ngôn ngữ tài khoản ⇒ tiếng Việt", async () => {
