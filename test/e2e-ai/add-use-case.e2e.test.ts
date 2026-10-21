@@ -213,4 +213,59 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     fapLog(`[FAP C] màn mới: ${screen ? `${screen.name} popup=${screen.is_popup}` : "không"}`)
     expect(screen?.is_popup).toBe(true)
   })
+
+  it("D. trọn luồng sửa sau baseline: thêm UC (popup) ⇒ CR ⇒ Viết lại các mục cũ ⇒ hết cờ đỏ ⇒ Lead chốt baseline mới", { timeout: 20 * 60_000 }, async () => {
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const { reconcile, isReconcileApplied } = await import("../../src/modules/spine/reconcile.service.js")
+    const { signOff, blockingFlags } = await import("../../src/modules/pipeline/s9/baseline.service.js")
+    const flagsService = await import("../../src/modules/spine/flags.service.js")
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    // PlantUML thật: không vẽ lại được thì cờ đỏ diagram_stale chặn chốt baseline như ngoài app
+    const { parse } = await import("dotenv")
+    const url = parse(fs.readFileSync(path.resolve(__dirname, "../../.env"))).PLANTUML_BASE_URL
+    const { env } = await import("../../src/config/env.js")
+    if (url) Object.assign(env, { PLANTUML_BASE_URL: url, PLANTUML_TIMEOUT_MS: 30000 })
+
+    const { projectId, userId } = await seedFap()
+    const before = (await repo.get(projectId))!
+    const step = (line: string) => fapLog(`[FAP D] ${line}`)
+    step(`bắt đầu: v${before.spine_version}, baseline ${before.baselines.map((b) => b.version).join(", ")}`)
+
+    // 1–2. thêm UC dạng popup, áp kèm CR
+    const instruction = "Thêm use case mới Request Grade Review: sinh viên gửi yêu cầu phúc khảo điểm một môn, ghi lý do; Phòng khảo thí xử lý. Dạng popup."
+    const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction }, {}, {})
+    step(`xem trước: ok=${shown.ok}, ${shown.changes.length} thay đổi${shown.clarification ? `, hỏi: ${shown.clarification}` : ""}`)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const applied = await changeService.apply(projectId, userId, { base_version: before.spine_version, instruction, preview_id: shown.preview_id, reason: "Phúc khảo điểm", change_request: CR }, {}, {})
+    step(`áp dụng: ${applied.cr_id}, v${applied.spine_version}`)
+    expect(applied.cr_id).toMatch(/^CR-\d{3}$/)
+
+    // 3. Viết lại (hoà giải) tới khi không còn mục cũ — tối đa 3 vòng
+    for (let round = 1; round <= 3; round++) {
+      const rec = (await repo.get(projectId))!
+      const planned = await reconcile(projectId, userId, { base_version: rec.spine_version }, { name: "FAP" })
+      if (isReconcileApplied(planned)) throw new Error("hoà giải không có preview_id phải ra bản xem trước")
+      step(`viết lại vòng ${round}: ok=${planned.ok}, ${planned.changes.length} thay đổi, no_change=${planned.no_change ?? false}${planned.violations.length ? `, vi phạm ${JSON.stringify(planned.violations)}` : ""}`)
+      expect(planned.ok, JSON.stringify(planned.violations)).toBe(true)
+      if (!planned.preview_id) break
+      const done = await reconcile(projectId, userId, { base_version: rec.spine_version, preview_id: planned.preview_id }, { name: "FAP" })
+      step(`  áp vòng ${round}: v${(done as { spine_version: number }).spine_version}`)
+    }
+
+    // 4. cờ đỏ
+    await flagsService.recompute(projectId, { by: userId })
+    const ready = (await repo.get(projectId))!
+    const blocking = blockingFlags(ready)
+    step(`cờ đỏ chặn chốt: ${blocking.length ? blocking.map((f) => `${f.rule_id}:${f.section_id}`).join(", ") : "không còn"}`)
+
+    // 5. Lead chốt baseline mới
+    if (blocking.length === 0) {
+      const signed = await signOff(projectId, userId, { base_version: ready.spine_version })
+      step(`chốt baseline: ${signed.baseline.version} (v${signed.spine_version})`)
+      const after = (await repo.get(projectId))!
+      expect(after.baselines.length).toBe(before.baselines.length + 1)
+    }
+    expect(blocking).toEqual([])
+  })
 })
+
