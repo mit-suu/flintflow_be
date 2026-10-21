@@ -322,7 +322,7 @@ router.post("/:id/import/resume", authMiddleware, importController.resume)
  *       - { in: path, name: id, required: true, schema: { type: string } }
  *       - { in: query, name: format, schema: { type: string, enum: [json, docx], default: json } }
  *     responses:
- *       200: { description: "JSON: `{ project_id, doc_version, generated_at, totals, sections, missing_sections, unmapped_headings, low_confidence_fields }`; docx: file (tải lần đầu khi đang gap_review ⇒ delivered)" }
+ *       200: { description: "JSON: `{ project_id, doc_version, generated_at, totals, layout, sections, unrendered_diagrams, low_confidence_fields }`; docx: file (tải lần đầu khi đang gap_review ⇒ delivered)" }
  *       409: { description: IMPORT_INVALID_STATE (chưa tới gap_review) }
  */
 router.get("/:id/gap-report", authMiddleware, importController.gapReport)
@@ -338,7 +338,7 @@ router.get("/:id/gap-report", authMiddleware, importController.gapReport)
  *     parameters:
  *       - { in: path, name: id, required: true, schema: { type: string } }
  *     responses:
- *       200: { description: "`{ steps: [{ step_id, state: applied|hidden|enabled, missing, section_ids, reason }] }`" }
+ *       200: { description: "`{ steps: [{ step_id, state: applied|hidden|enabled, section_ids, reason }] }`" }
  *       409: { description: IMPORT_INVALID_STATE (chưa finalize) }
  *   patch:
  *     summary: Bật step ẩn / tắt step đã bật chưa có dữ liệu (#33)
@@ -355,7 +355,7 @@ router.get("/:id/gap-report", authMiddleware, importController.gapReport)
  *     responses:
  *       200: { description: "`{ steps }` sau khi đổi" }
  *       404: { description: STEP_NOT_IN_PLAN }
- *       409: { description: "CORE_STEP_REQUIRED (tắt đầu mục FPT / bước luôn chạy / step đã có dữ liệu), IMPORT_INVALID_STATE" }
+ *       409: { description: "CORE_STEP_REQUIRED (tắt bước luôn chạy / step đã có dữ liệu), IMPORT_INVALID_STATE" }
  */
 router.get("/:id/step-plan", authMiddleware, importController.getStepPlan)
 router.patch("/:id/step-plan", authMiddleware, importController.patchStepPlan)

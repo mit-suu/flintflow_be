@@ -3,9 +3,10 @@
  * - Layout: thứ tự + tiêu đề các mục của file upload. Heading mở một section FPT mới ⇒ giữ section đó; heading con
  *   cùng section với mục bao nó ⇒ không thành mục riêng (nội dung đã trích vào section FPT); heading không khớp section
  *   FPT nào, hoặc lặp một section FPT đã gặp ở chỗ khác ⇒ **mục riêng** `custom:<id>`, khối bên dưới giữ nguyên văn.
- * - Kế hoạch step (D6 — mọi đầu mục mẫu FPT là cốt lõi): step sở hữu section FPT luôn `applied`, `missing` khi section
- *   không có nội dung; Brief (B-*) và S-1.x `hidden`; step không sở hữu section (S-8.2, S-8.4, S-9.x) luôn chạy.
- *   Luật 2 của business-flow §5 (thêm step được đọc tới) không cần tách riêng: với D6 mọi step ghi field FPT đã chạy.
+ * - Kế hoạch step: mẫu FPT **không bắt buộc** (FLF-312 — bản xuất theo template người dùng upload, bỏ D6). Step sở hữu
+ *   section có nội dung ⇒ `applied`; file có đầu mục mà chưa trích được dữ liệu ⇒ `enabled` (chạy được, tắt được); file
+ *   không có đầu mục ⇒ `hidden` như Brief (B-*) và S-1.x — bật nếu muốn AI soạn thêm. Step không sở hữu section
+ *   (S-8.2, S-8.4, S-9.x) luôn chạy.
  * - Seed: op đặt `steps[]` (accepted / pending / skipped), vòng S-5 theo màn, `progress` — áp sau lô thực thể của finalize.
  */
 
@@ -277,33 +278,31 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
     .filter((s) => s.kind !== "loop")
     .map((s): StepPlanItem => {
       if (isHiddenPhase(s.phase)) {
-        return { step_id: s.id, state: "hidden", missing: false, section_ids: [], reason: "Không sinh đầu mục — bật nếu muốn AI phân tích lại ý tưởng" }
+        return { step_id: s.id, state: "hidden", section_ids: [], reason: "Không sinh đầu mục — bật nếu muốn AI phân tích lại ý tưởng" }
       }
       const owned = sectionsOwnedBy(s.id)
-      if (!owned.length) return { step_id: s.id, state: "applied", missing: false, section_ids: [], reason: "Bước ghép / kiểm tra tài liệu — luôn chạy" }
+      if (!owned.length) return { step_id: s.id, state: "applied", section_ids: [], reason: "Bước ghép / kiểm tra tài liệu — luôn chạy" }
       if (owned.every((sec) => DERIVED_SECTIONS.has(sec))) {
-        return { step_id: s.id, state: "applied", missing: false, section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
+        return { step_id: s.id, state: "applied", section_ids: owned, reason: "Mục tự sinh từ lịch sử thay đổi" }
       }
       const hasContent = owned.some((sec) => {
         const inSpine = spine ? sectionHasData(spine, sec) : null
         return inSpine === null ? matches(sec, content) : inSpine
       })
+      if (hasContent) return { step_id: s.id, state: "applied", section_ids: owned, reason: "Có trong file, đã có nội dung" }
       const inLayout = owned.some((sec) => matches(sec, layout.map((l) => l.section_id)))
       const inFile = owned.some((sec) => matches(sec, content))
-      const reason = hasContent
-        ? "Có trong file, đã có nội dung"
-        : inFile
-          ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào — chạy step để AI soạn"
-          : inLayout
-            ? "Đầu mục mẫu FPT có trong file nhưng trống"
-            : "Đầu mục mẫu FPT — file không có"
-      return { step_id: s.id, state: "applied", missing: !hasContent, section_ids: owned, reason }
+      if (inFile || inLayout) {
+        const reason = inFile ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào — chạy step nếu muốn AI soạn" : "Đầu mục có trong file nhưng trống — chạy step nếu muốn AI soạn"
+        return { step_id: s.id, state: "enabled", section_ids: owned, reason }
+      }
+      return { step_id: s.id, state: "hidden", section_ids: owned, reason: "File không có đầu mục này — bật nếu muốn AI soạn thêm" }
     })
 
-/** Trạng thái step khởi đầu theo kế hoạch: ẩn ⇒ skipped; đã có nội dung ⇒ accepted; còn lại ⇒ pending. */
+/** Trạng thái step khởi đầu theo kế hoạch: ẩn ⇒ skipped; `applied` có section (đã có nội dung) ⇒ accepted; còn lại ⇒ pending. */
 const initialStatus = (item: StepPlanItem): StepState["status"] => {
   if (item.state === "hidden") return "skipped"
-  if (item.section_ids.length && !item.missing) return "accepted"
+  if (item.state === "applied" && item.section_ids.length) return "accepted"
   return "pending"
 }
 
