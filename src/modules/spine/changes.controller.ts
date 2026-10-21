@@ -125,6 +125,12 @@ const turnReplyLanguage = async (session: IChatSession | null, typed: string | n
   return language
 }
 
+/** FLF-299: số câu hỏi làm rõ đã hỏi cho yêu cầu đang dở — chỉ truyền khi có, lượt thường giữ nguyên tham số. */
+const clarificationRoundsOf = (session: IChatSession | null): { clarification_rounds?: number } => {
+  const rounds = session ? changeTranscript.clarificationRounds(session.messages) : 0
+  return rounds > 0 ? { clarification_rounds: rounds } : {}
+}
+
 export const applyChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
   await guardMode1(auth, rawInstruction(req), "Sửa tài liệu")
@@ -138,7 +144,7 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
     const result = await changeService.apply(
       auth.projectId,
       auth.userId,
-      { ...body, chat_history: chatHistory, reply_language: replyLanguage },
+      { ...body, chat_history: chatHistory, reply_language: replyLanguage, ...clarificationRoundsOf(session) },
       auth.init
     )
     if (session) {
@@ -146,21 +152,27 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
       await changeTranscript.recordChangeTurn(session, userText, {
         kind: "change_applied",
         reply:
-          count > 0
+          count > 0 && result.cr_id
             ? byLanguage(replyLanguage, {
-                vi: `Đã áp dụng ${count} thay đổi vào tài liệu (v${result.spine_version}).`,
-                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document (v${result.spine_version}).`
+                vi: `Đã ghi ${result.cr_id} vào tài liệu (${count} thay đổi).`,
+                en: `Recorded ${result.cr_id} in the document (${count} change${count === 1 ? "" : "s"}).`
+              })
+            : count > 0
+            ? byLanguage(replyLanguage, {
+                vi: `Đã áp dụng ${count} thay đổi vào tài liệu.`,
+                en: `Applied ${count} change${count === 1 ? "" : "s"} to the document.`
               })
             : byLanguage(replyLanguage, { vi: "Đã xác nhận: nội dung không đổi.", en: "Confirmed: the content is unchanged." }),
         count,
-        spine_version: result.spine_version
+        spine_version: result.spine_version,
+        ...(result.cr_id ? { cr_id: result.cr_id } : {})
       })
     }
     return sendSuccess(
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact }
+      { branch: result.branch, impact: result.impact, ...(result.cr_id ? { cr_id: result.cr_id } : {}) }
     )
   } catch (err) {
     return sendDomainError(res, err)
@@ -182,7 +194,7 @@ export const previewChanges = catchAsync(async (req: Request, res: Response) => 
     result = await changeService.preview(
       auth.projectId,
       auth.userId,
-      { ...body, chat_history: chatHistory, reply_language: replyLanguage },
+      { ...body, chat_history: chatHistory, reply_language: replyLanguage, ...clarificationRoundsOf(session) },
       auth.init
     )
   } catch (err) {

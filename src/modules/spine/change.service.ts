@@ -28,6 +28,8 @@ import { PathError, parsePath } from "./path-resolver.js"
 import { USE_CASE_NAME_FIX, useCaseNameIssues } from "./deterministic-check.js"
 import { FIELD_SECTION_MAP, FIXED_SECTIONS } from "./section-registry.js"
 import { elementFieldsOf } from "./element-defaults.js"
+import { newUseCaseGapNote, newUseCaseGaps } from "./new-usecase-gaps.js"
+import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
@@ -35,6 +37,7 @@ import type { ChangeInstructionOutput, LocalizedEntry } from "../../shared/ai/re
 import { documentLanguageForTurn, documentLanguageInput, languagePairOf, type TurnDocumentLanguage, type TurnLanguagePair } from "../translation/turn-language.js"
 import { captureForTurn } from "../translation/capture.service.js"
 import { assertDraftUnlocked } from "./draft-lock.js"
+import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
@@ -426,6 +429,15 @@ export interface ChangeBody {
    * Có ⇒ lời gọi model trả câu hỏi làm rõ / ghi chú bằng ngôn ngữ đó, câu hỏi lại cố định cũng theo; không có ⇒ như cũ.
    */
   reply_language?: ReplyLanguage
+  /** FLF-294: người yêu cầu + nguồn của change request (DTO `change_request`), bắt buộc sau baseline. */
+  change_request?: ChangeRequestInfo
+  /** Nội bộ (DTO không nhận) — FLF-294: lượt áp của hoà giải, việc kéo theo một CR đã ghi, không đòi CR riêng. */
+  cr_exempt?: boolean
+  /**
+   * Nội bộ (DTO không nhận) — FLF-299: số câu hỏi làm rõ AI đã hỏi liên tiếp cho yêu cầu này (`clarificationRounds` của
+   * phiên). Có ⇒ model không hỏi lại điều đã được trả lời; đủ `MAX_CLARIFICATION_ROUNDS` ⇒ ép soạn bản xem trước.
+   */
+  clarification_rounds?: number
   /**
    * Nội bộ (DTO `strictObject` không nhận — client không gửi được bản dịch, D7): lô `ops` do server gom (hoà giải) kèm chữ
    * theo ngôn ngữ tài liệu model trả cùng lô, và ngôn ngữ của lượt đó. Đi theo preview tới lượt áp.
@@ -499,6 +511,9 @@ const AI_OUTPUT_ERRORS = new Set(["SCHEMA_MISMATCH", "PARSE_FAILED"])
  * Câu lệnh tự nhiên → lô op, hoặc một câu hỏi làm rõ (UC 6.11). Một lượt gọi model; lô có lỗi (áp thử bị từ chối, tên
  * use case sai luật — FLF-243) thì gọi lại đúng MỘT lần kèm lỗi — lần hai vẫn sai thì giữ lô để preview báo lỗi / cờ vàng bắt.
  */
+/** FLF-299: sau số câu hỏi làm rõ này cho cùng một yêu cầu, model phải soạn bản xem trước thay vì hỏi tiếp. */
+export const MAX_CLARIFICATION_ROUNDS = 2
+
 const opsFromInstruction = async (
   projectId: string,
   userId: string,
@@ -506,7 +521,8 @@ const opsFromInstruction = async (
   instruction: string,
   chatHistory: string | undefined,
   replyLanguage: ReplyLanguage | undefined,
-  deps: ChangeDeps
+  deps: ChangeDeps,
+  clarificationRounds = 0
 ): Promise<ResolvedOps> => {
   const history = chatHistory?.trim() ?? ""
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
@@ -525,6 +541,7 @@ const opsFromInstruction = async (
           projection: buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
           stale_sections: [],
+          clarification_rounds: clarificationRounds,
           ...(previousProblems ? { previous_problems: previousProblems } : {})
         },
         // FLF-260: `buildPrompt` nối khối "Reply language" cuối prompt — câu hỏi làm rõ, ghi chú theo ngôn ngữ của lượt
@@ -544,6 +561,16 @@ const opsFromInstruction = async (
       return { ops: [], clarification: byLanguage(replyLanguage ?? DEFAULT_REPLY_LANGUAGE, UNCLEAR_INSTRUCTION), notes: null }
     }
     throw err
+  }
+  // FLF-299: đã hỏi đủ mà model vẫn hỏi ⇒ gọi lại MỘT lần, bắt soạn từ câu trả lời của user + projection
+  if (result.data.clarification_needed?.trim() && clarificationRounds >= MAX_CLARIFICATION_ROUNDS) {
+    const forced = await call(
+      `You already asked ${clarificationRounds} clarifying questions for this request and the user answered them. Do not ask again: draft the batch now from those answers and the projection (rule 2a).`
+    ).catch((err: unknown) => {
+      if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
+      throw err
+    })
+    if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) result = forced
   }
   if (!result.data.clarification_needed?.trim()) {
     const problems = batchProblems(spine, stampAddendum((result.data.ops ?? []) as Op[]), instruction)
@@ -575,7 +602,7 @@ const resolveOps = async (
     return { ops: body.ops, clarification: null, notes: null, ...(body.localized?.length ? { localized: body.localized, language: languagePairOf(body.document_language) } : {}) }
   }
   if (body.instruction === undefined) throw new ApiError(400, "Vui lòng nhập nội dung cần sửa.", "VALIDATION_ERROR")
-  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps)
+  return await opsFromInstruction(projectId, userId, spine, body.instruction, body.chat_history, body.reply_language, deps, body.clarification_rounds)
 }
 
 const toTransaction = (userId: string, body: ChangeBody, ops: Op[], txn?: string): Transaction => ({
@@ -647,6 +674,8 @@ export const preview = async (
 
   const impact = impactOfChanges(spine, plan.changes, plan.spine)
   const branch = branchOf(spine, impact)
+  // FLF-298: use case mới chưa có chức năng/màn hình — sửa không tự lan, báo ngay để author yêu cầu tiếp
+  const notes = [resolved.notes, newUseCaseGapNote(newUseCaseGaps(spine, plan.spine), body.reply_language)].filter(Boolean).join("\n")
   const previewId = randomUUID()
   prunePreviews(Date.now())
   previewStore.set(previewId, {
@@ -673,13 +702,15 @@ export const preview = async (
     branch,
     impact,
     preview_id: previewId,
-    ...(resolved.notes ? { notes: resolved.notes } : {})
+    ...(notes ? { notes } : {})
   }
 }
 
 export interface ChangeApplyResult extends ApplyResult {
   branch: ChangeBranch
   impact: Impact
+  /** FLF-294: mã change request của lượt áp sau baseline; trước baseline / hoà giải ⇒ `null`. */
+  cr_id?: string | null
 }
 
 /**
@@ -698,6 +729,9 @@ export const apply = async (
   assertVersion(record, body.base_version)
   assertDraftUnlocked(record)
   const spine = stripRecord(record)
+  // FLF-294 (BR-03): sau baseline lượt áp là một change request — kiểm TRƯỚC khi lấy bản xem trước (`takePreview` xoá
+  // nó), để author thiếu người yêu cầu / nguồn điền rồi bấm lại vẫn còn bản xem trước. Hoà giải là việc kéo theo của CR.
+  const crInfo = spine.baselines.length > 0 && !body.cr_exempt ? assertCrInfo(body.change_request) : null
 
   const stored = body.preview_id === undefined ? null : takePreview(projectId, body.preview_id)
   const resolved: ResolvedOps = stored
@@ -724,9 +758,13 @@ export const apply = async (
     throw new ApiError(400, "Dự án đã có baseline — mọi thay đổi cần ghi lý do (vào Record of Changes)", "VALIDATION_ERROR")
   }
 
+  // FLF-294: mã cấp sau mọi bước kiểm của lượt áp (lỗi trước đó không phí số); mã + người yêu cầu + nguồn vào reason
+  const crId = crInfo && reason ? await nextCrId(projectId) : null
+  const recorded = crId && crInfo && reason ? crReason(crId, crInfo, reason) : reason
+
   // Project cũ chưa có Spine: tạo Spine rỗng như GET /spine để lô đầu tiên có chỗ ghi
   await repository.getOrCreate(projectId, init)
-  const applied = await applyTransaction(projectId, toTransaction(userId, { ...body, ...(reason === undefined ? {} : { reason }) }, resolved.ops))
+  const applied = await applyTransaction(projectId, toTransaction(userId, { ...body, ...(recorded === undefined ? {} : { reason: recorded }) }, resolved.ops))
   // FLF-265 D16: Spine đã ghi ⇒ lưu bản ngôn ngữ tài liệu kèm lô (lỗi chỉ log, không làm hỏng lượt ghi)
   await captureForTurn(projectId, resolved.language, resolved.ops, resolved.localized)
 
@@ -738,6 +776,7 @@ export const apply = async (
     ...applied,
     ...(after ? { spine: after, spine_version: after.spine_version } : {}),
     branch,
-    impact
+    impact,
+    cr_id: crId
   }
 }
