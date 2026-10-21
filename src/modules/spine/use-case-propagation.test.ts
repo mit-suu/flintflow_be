@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
-import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Fixture 19 màn: S-9, mọi bước accepted. */
@@ -171,36 +171,68 @@ describe("addedScreenIds / addsUseCaseOrScreen", () => {
 })
 
 describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)", () => {
-  const render = async (mode: string): Promise<string> => {
+  const render = async (vars: Record<string, unknown>): Promise<string> => {
     const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
-    return interpolatePrompt(getSkill("apply-change-op").template, { use_case_mode: mode })
+    return interpolatePrompt(getSkill("apply-change-op").template, vars)
   }
 
-  it("full ⇒ đủ chi tiết chức năng + màn + luồng + phân quyền; không có khối screen_pending", async () => {
-    const prompt = await render("full")
-    expect(prompt).toContain("all its related parts in the same batch")
+  it("full ⇒ kiểm trùng use case + màn riêng khi có tương tác + chức năng đủ Functional Requirements", async () => {
+    const prompt = await render({ use_case_mode: "full", use_case_ui: true })
+    expect(prompt).toContain("First compare it with `use_case_context.use_cases` of the same actor")
+    expect(prompt).toContain("**its own screen**: anything that changes data")
     expect(prompt).toContain("`normal[]` steps, `abnormal[]` cases, `validations[]`")
-    expect(prompt).not.toContain("the screen loop")
+    expect(prompt).not.toContain("the screen loop details it")
   })
 
-  it("screen_pending ⇒ màn + chức năng tối thiểu, để vòng S-5 mô tả", async () => {
-    const prompt = await render("screen_pending")
-    expect(prompt).toContain("the screen loop")
-    expect(prompt).not.toContain("all its related parts in the same batch")
+  it("screen_pending ⇒ cùng luật kiểm trùng + màn, chức năng tối thiểu để vòng S-5 mô tả", async () => {
+    const prompt = await render({ use_case_mode: "screen_pending", use_case_ui: true })
+    expect(prompt).toContain("First compare it with `use_case_context.use_cases`")
+    expect(prompt).toContain("the screen loop details it")
+    expect(prompt).not.toContain("`normal[]` steps")
   })
 
   it("messages_ready ⇒ thêm luật 3f (thông báo cho luồng bất thường); không bật ⇒ không có", async () => {
-    const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
-    const template = getSkill("apply-change-op").template
-    expect(interpolatePrompt(template, { use_case_mode: "full", messages_ready: true })).toMatch(/^3f\. \*\*Application messages/m)
-    expect(interpolatePrompt(template, { use_case_mode: "full", messages_ready: false })).not.toMatch(/^3f\./m)
+    expect(await render({ use_case_mode: "full", use_case_ui: true, messages_ready: true })).toMatch(/^3f\. \*\*Application messages/m)
+    expect(await render({ use_case_mode: "full", use_case_ui: true, messages_ready: false })).not.toMatch(/^3f\./m)
   })
 
   it("none / use_case_only ⇒ không có luật 3e (lệnh sửa thường giữ nguyên prompt cũ)", async () => {
-    for (const mode of ["none", "use_case_only"]) {
-      const prompt = await render(mode)
-      expect(prompt).not.toMatch(/^3e\./m)
+    for (const mode of ["none", "use_case_only"]) expect(await render({ use_case_mode: mode, use_case_ui: false })).not.toMatch(/^3e\./m)
+    expect(await render({ use_case_mode: "use_case_only", use_case_ui: false })).toContain("screens do not exist yet")
+  })
+})
+
+describe("useCaseOverlaps — use case mới chồng mục tiêu với use case có sẵn (FLF-311)", () => {
+  const uc = (id: string, name: string, actor_ids: string[]) => ({ id, name, actor_ids, function_ids: [], description: "", includes: [], extends: [] })
+  const before = { use_cases: [uc("UC20", "Deactivate Student Record", ["A03"]), uc("UC08", "Create Student Record", ["A03"]), uc("UC24", "Archive Project", ["A01"])] }
+
+  it("động từ cùng nhóm nghĩa + chung đối tượng, cùng actor ⇒ chồng (Suspend Student Account ~ Deactivate Student Record)", () => {
+    const after = { use_cases: [...before.use_cases, uc("UC27", "Suspend Student Account", ["A03"])] }
+    expect(useCaseOverlaps(before, after)).toEqual([
+      { use_case: { id: "UC27", name: "Suspend Student Account" }, existing: { id: "UC20", name: "Deactivate Student Record" }, shared: ["student"] }
+    ])
+  })
+
+  it("khác nhóm động từ (Update ~ Create), khác actor, hay khác đối tượng ⇒ không báo", () => {
+    const after = {
+      use_cases: [
+        ...before.use_cases,
+        uc("UC28", "Update Student Profile", ["A03"]),
+        uc("UC29", "Suspend Student Account", ["A01"]),
+        uc("UC30", "Deactivate Classroom", ["A03"])
+      ]
     }
-    expect(await render("use_case_only")).toContain("screens do not exist yet")
+    expect(useCaseOverlaps(before, after)).toEqual([])
+  })
+
+  it("trùng tên (khác hoa thường) ⇒ báo; câu cảnh báo nêu use case cũ", () => {
+    const overlaps = useCaseOverlaps(before, { use_cases: [...before.use_cases, uc("UC31", "archive project", ["A01"])] })
+    expect(overlaps.map((o) => o.existing.id)).toEqual(["UC24"])
+    expect(useCaseOverlapNote(overlaps)).toMatch(/UC24 "Archive Project"/)
+    expect(useCaseOverlapNote([])).toBeNull()
+  })
+
+  it("ngữ cảnh model có danh sách use case để tự kiểm trùng", () => {
+    expect((useCaseContext(FIXTURE, "full").use_cases as { id: string }[]).map((u) => u.id)).toContain("UC24")
   })
 })

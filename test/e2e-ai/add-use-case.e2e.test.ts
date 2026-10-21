@@ -107,3 +107,65 @@ describe.skipIf(!enabled)("Thêm use case kéo theo đủ phần liên quan — 
 describe.skipIf(enabled)("Thêm use case kéo theo đủ phần liên quan — provider thật", () => {
   it.skip("bỏ qua: đặt E2E_AI=1 để gọi provider thật (tốn credit)", () => {})
 })
+
+/**
+ * FAP thật (dữ liệu dev, không commit): `E2E_AI=1 E2E_FAP_SPINE=<file Spine JSON>`. Hai ca người dùng gặp ngày 21/10:
+ *   A. use case chồng mục tiêu với use case có sẵn (Suspend Student Account ~ UC20 Deactivate Student Record) ⇒ model hỏi lại,
+ *      hoặc ít nhất bản xem trước cảnh báo trùng;
+ *   B. use case có tương tác riêng ⇒ màn riêng nối vào Screens Flow (không gắn lặng lẽ vào màn có sẵn).
+ */
+const fapSpine = process.env.E2E_FAP_SPINE
+const fapLog = (line: string): void => {
+  fs.mkdirSync(OUT_DIR, { recursive: true })
+  fs.appendFileSync(path.join(OUT_DIR, `add-use-case-fap-${new Date().toISOString().slice(0, 10)}.md`), `${line}
+`)
+  console.log(line)
+}
+describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + màn riêng (E2E_FAP_SPINE)", () => {
+  const CR = { requester: "Phòng đào tạo", source: { kind: "verbal" as const, ref: null } }
+
+  const seedFap = async () =>
+    seedFixture("full", {
+      balance: 5000,
+      mutate: (raw) => {
+        // Bản xuất từ Mongo còn field của Mongoose — schema Spine strict không nhận
+        const { __v: _v, createdAt: _c, updatedAt: _u, ...fap } = JSON.parse(fs.readFileSync(fapSpine!, "utf8")) as Record<string, unknown>
+        for (const key of Object.keys(raw)) delete (raw as Record<string, unknown>)[key]
+        Object.assign(raw, fap)
+      }
+    })
+
+  it("A. Suspend Student Account trùng UC20 Deactivate Student Record ⇒ hỏi lại hoặc cảnh báo", { timeout: 10 * 60_000 }, async () => {
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const { projectId, userId } = await seedFap()
+    const before = (await repo.get(projectId))!
+    const instruction = "thêm use case Suspend Student Account — Phòng quản lý đào tạo khóa tài khoản đăng nhập của sinh viên; chỉ Phòng quản lý đào tạo mở khóa thủ công"
+    const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction, change_request: CR }, {}, { renderAfterChange: async () => undefined })
+    const asked = Boolean(shown.clarification && /UC20|Deactivate Student Record/i.test(shown.clarification))
+    const warned = /UC20|Deactivate Student Record/.test(shown.notes ?? "")
+    fapLog(`[FAP A] ok=${shown.ok} violations=${JSON.stringify(shown.violations)}`)
+    fapLog(`[FAP A] clarification=${shown.clarification ?? "-"}\n[FAP A] notes=${shown.notes ?? "-"}\n[FAP A] ops=${shown.ops.map((o) => `${o.op} ${o.path}`).join(" | ")}`)
+    expect(asked || warned, "model phải hỏi lại hoặc bản xem trước phải cảnh báo trùng UC20").toBe(true)
+  })
+
+  it("B. Request Grade Review (sinh viên gửi phúc khảo kèm lý do) ⇒ màn riêng trong Screens Flow", { timeout: 10 * 60_000 }, async () => {
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const { orphanScreens } = await import("../../src/modules/spine/deterministic-check.js")
+    const { projectId, userId } = await seedFap()
+    const before = (await repo.get(projectId))!
+    const instruction = "Thêm use case mới Request Grade Review: sinh viên gửi yêu cầu phúc khảo điểm một môn, ghi lý do; Phòng khảo thí nhận yêu cầu"
+    const deps = { renderAfterChange: async () => undefined }
+    const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction }, {}, deps)
+    fapLog(`[FAP B] ok=${shown.ok} clarification=${shown.clarification ?? "-"}\n[FAP B] notes=${shown.notes ?? "-"}\n[FAP B] ops=${shown.ops.map((o) => `${o.op} ${o.path}`).join(" | ")}`)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const applied = await changeService.apply(projectId, userId, { base_version: before.spine_version, instruction, preview_id: shown.preview_id, reason: "Phúc khảo điểm", change_request: CR }, {}, deps)
+    const spine = applied.spine as import("../../src/modules/spine/spine.types.js").Spine
+    const newScreens = spine.screens.filter((s) => !before.screens.some((b) => b.id === s.id))
+    const orphan = new Set(orphanScreens(spine).map((o) => o.screen.id))
+    fapLog(`[FAP B] màn mới: ${newScreens.map((s) => `${s.id} ${s.name} popup=${s.is_popup} từ ${spine.screens.filter((x) => x.flow_to.includes(s.id)).map((x) => x.id)}`).join("; ") || "không"} | cr=${applied.cr_id}`)
+    expect(newScreens.length).toBeGreaterThan(0)
+    expect(newScreens.every((s) => !orphan.has(s.id))).toBe(true)
+  })
+})

@@ -599,3 +599,10 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
 - Sau sửa, 5 lượt: 4 lượt tạo màn mới, 12/12; 1 lượt gắn chức năng vào màn Export có sẵn (đúng theo ticket mục 7), đạt khi
   tiêu chí chấp nhận cả hai cách. Mỗi lượt **1 lượt gọi model**, ~19,5 nghìn token, 15–43 s; bản xem trước 10 thay đổi
   (UC, 1–2 chức năng, màn, cạnh luồng, 3–4 dòng quyền, 1 thông báo).
+- **Bổ sung 21/10 (sau khi thử trên FAP):** người dùng thêm "Suspend Student Account" ⇒ model gắn chức năng vào màn có
+  sẵn (Screens Flow không đổi) và không nhắc UC20 "Deactivate Student Record" cùng mục tiêu. Sửa: luật 3e kiểm trùng với
+  use case cùng actor (`use_case_context.use_cases`) + `useCaseOverlaps` cảnh báo trong bản xem trước; thao tác đổi dữ
+  liệu luôn có ít nhất một popup nối vào luồng. Đo trên Spine FAP thật (`E2E_FAP_SPINE`, dữ liệu dev không commit):
+  ca Suspend — trước khi siết luật màn: 3/3 có cảnh báo trùng UC20, 1/3 có popup; sau: 3/3 popup mới từ "User Account
+  Management" + cạnh luồng + quyền + thông báo, cảnh báo trùng vẫn hiện. Ca "Request Grade Review" (sinh viên): popup
+  mới từ "My Grades", nằm trong luồng. Fixture 19 màn chạy lại: 12/12.

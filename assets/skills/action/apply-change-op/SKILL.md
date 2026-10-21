@@ -69,29 +69,29 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 {{#if use_case_mode=use_case_only}}
    None fits ⇒ leave it empty; screens do not exist yet in this project, do not add any.
 {{/if}}
+{{#if use_case_ui}}
+3e. **New use case ⇒ check it, then add its related parts in the same batch** (exception to rule 3; context in
+   `use_case_context`). First compare it with `use_case_context.use_cases` of the same actor: same or overlapping goal
+   on the same thing (Suspend Student Account vs Deactivate Student Record) and the user has not said how they
+   differ ⇒ `clarification_needed` naming that use case and asking: extend it, replace it, or keep both and how they
+   differ. Then, when a human actor does it through the UI:
+   - **its own screen**: anything that changes data (suspend, approve, submit, delete, cancel…) or takes input needs
+     at least a confirmation / form popup (`is_popup: true`) opened from the screen where the user starts it; reuse an
+     existing screen only for a pure read addition (a column, a filter, a read-only field) — never just a button;
+   - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `set
+     screens[id=…].flow_to` to the old list plus the new screen on the screen that opens it, so it is reachable;
+   - one `permissions[]` row per role of the actor (`view`, and `create`/`update`/`delete` when the function does it);
+   - the function on that screen. Declare temporary ids as each added element's own `"id": "$newFn"` /
+     `"id": "$newScreen"`; `$newFn` goes in the use case's `function_ids`. System/time actor ⇒ only a function with
+     `screen_id: null`. Code sets `order` and `detail_status`; the layout and diagrams are drawn after apply.
+{{/if}}
 {{#if use_case_mode=screen_pending}}
-3e. **New use case ⇒ its related parts in the same batch** (exception to rule 3; context in `use_case_context`). No
-   existing function fits and a human actor does it through the UI ⇒ also add: a function (`name`, `trigger`,
-   `description`, `screen_id`, `feature_id`), its screen (`name`, `description`, `feature_id`, `flow_to`, `tabs`), the
-   flow edge (`set screens[id=…].flow_to` to the old list plus the new screen, from the actor's screen that leads
-   there), one `permissions[]` row per role of the actor. Link them with temporary ids (`$newFn`, `$newScreen`) and
-   put `$newFn` in the use case's `function_ids`. Leave `normal`, `abnormal`, `validations` empty — the screen loop
-   details them. System/time actor ⇒ only a function with `screen_id: null`. Code sets `order` and `detail_status`.
+   The function needs only `name`, `trigger`, `description`, `screen_id`, `feature_id` — the screen loop details it.
 {{/if}}
 {{#if use_case_mode=full}}
-3e. **New use case ⇒ all its related parts in the same batch** (exception to rule 3; context in `use_case_context`),
-   because no later step will describe them. No existing function fits and a human actor does it through the UI ⇒ add:
-   - the function, fully written like `sample_function` (Functional Requirements): `name`, `trigger`, `description`,
-     `normal[]` steps, `abnormal[]` cases, `validations[]` (`kind`, `statement`, no id), `business_rule_ids` reused
-     from the context, `screen_id`, `feature_id` — in English;
-   - its screen: `name`, `description`, `feature_id`, `flow_to` (screens it leads on to), `tabs`;
-   - the flow edge into it: `set screens[id=…].flow_to` to the old list plus the new screen, on the actor's screen
-     that leads there — the screen must be reachable in the screens flow;
-   - one `permissions[]` row per role of the actor (`view`, and `create`/`update`/`delete` when the function does it).
-   Link them with temporary ids declared as each added element's own `"id": "$newFn"` / `"id": "$newScreen"`;
-   `$newFn` goes in the use case's `function_ids`. The screen
-   layout and diagrams are drawn by code after apply. System/time actor ⇒ only the function, `screen_id: null`.
-   Code sets `order` and `detail_status`. Say in `notes` (reply language) what the batch adds besides the use case.
+   No later step will describe it ⇒ write the function fully like `sample_function` (Functional Requirements, in
+   English): `trigger`, `description`, `normal[]` steps, `abnormal[]` cases, `validations[]` (`kind`, `statement`, no
+   id), `business_rule_ids` reused from the context. Say in `notes` (reply language) what the batch adds.
 {{/if}}
 {{#if messages_ready}}
 3f. **Application messages** (§ Messages) for the new function: each user-visible `abnormal[]` case needs a message —
