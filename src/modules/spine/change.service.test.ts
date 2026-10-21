@@ -386,6 +386,20 @@ describe("preview — diff + impact, không ghi", () => {
     expect(spine.progress.screen_queue).toContain(screen.id)
   })
 
+  it("FLF-311: use case mới chồng mục tiêu với use case có sẵn cùng actor ⇒ bản xem trước cảnh báo; model nhận use_case_ui + danh sách use case", async () => {
+    await seed()
+    const batch = [{ op: "add", path: "use_cases[]", value: { name: "Deactivate Project", actor_ids: ["A01"], function_ids: ["FN020"], description: "Founder hides a project." } }]
+    deps.changeExecutor = vi.fn(async () => aiResult({ ops: batch as ChangeInstructionOutput["ops"] }))
+
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Deactivate Project cho Founder" }, {}, deps)
+
+    expect(shown.ok).toBe(true)
+    expect(shown.notes).toMatch(/UC24 "Archive Project"/)
+    const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
+    expect(vars.use_case_ui).toBe(true)
+    expect(((vars.projection as Record<string, unknown>).use_case_context as { use_cases: { id: string }[] }).use_cases.map((u) => u.id)).toContain("UC24")
+  })
+
   it("FLF-311: lệnh sửa thường ⇒ chế độ none, không nạp ngữ cảnh use case, không vẽ lại", async () => {
     await seed()
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner" }] }))

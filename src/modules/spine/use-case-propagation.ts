@@ -55,6 +55,8 @@ export const useCaseContext = (spine: Spine, mode: UseCaseMode): Record<string, 
   const sample = spine.functions.find((f) => f.screen_id !== null && f.normal.length > 0 && f.validations.length > 0) ?? null
   return {
     mode,
+    // Kiểm trùng / chồng mục tiêu với use case có sẵn của cùng actor (luật 3e) — mô tả cắt ngắn
+    use_cases: spine.use_cases.map(({ id, name, actor_ids, description }) => ({ id, name, actor_ids, description: description.slice(0, 160) })),
     features: spine.features.map(({ id, name }) => ({ id, name })),
     roles: spine.roles.map(({ id, name, actor_id }) => ({ id, name, actor_id })),
     screens: spine.screens
@@ -240,3 +242,73 @@ export const addedScreenIds = (before: Pick<Spine, "screens">, after: Pick<Spine
 
 export const addsUseCaseOrScreen = (before: Pick<Spine, "screens" | "use_cases">, after: Pick<Spine, "screens" | "use_cases">): boolean =>
   after.use_cases.length > before.use_cases.length || addedScreenIds(before, after).length > 0
+
+// ─── trùng / chồng mục tiêu với use case có sẵn ─────────────────────
+
+/** Động từ cùng nhóm nghĩa ⇒ hai use case cùng đối tượng là cùng một việc (Suspend Account ~ Deactivate Record). */
+const VERB_GROUPS: readonly (readonly string[])[] = [
+  ["deactivate", "suspend", "disable", "lock", "block", "ban", "freeze", "revoke", "deny", "archive"],
+  ["activate", "reactivate", "unlock", "unblock", "unban", "restore", "enable"],
+  ["create", "add", "register", "record", "submit", "enroll", "open"],
+  ["update", "edit", "modify", "change", "correct", "adjust"],
+  ["delete", "remove", "cancel", "withdraw", "drop", "close"],
+  ["view", "review", "browse", "list", "see", "check", "search", "track", "monitor"],
+  ["export", "download", "print", "share", "send"],
+  ["approve", "accept", "confirm", "sign", "decide"],
+  ["reject", "decline", "refuse"],
+  ["assign", "allocate", "schedule", "set"]
+]
+const groupOf = (verb: string): number => VERB_GROUPS.findIndex((g) => g.includes(verb))
+/** Từ không mang đối tượng ("Student Record" và "Student Account" cùng là sinh viên). */
+const NOISE = new Set(["a", "an", "the", "of", "for", "to", "in", "on", "and", "by", "with", "from", "record", "records", "account", "accounts", "information", "info", "details", "data", "list"])
+const singular = (w: string): string => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w)
+const words = (name: string): string[] => name.toLowerCase().split(/[^a-z]+/).filter(Boolean)
+
+interface ParsedUseCase {
+  verbGroup: number
+  objects: Set<string>
+}
+
+const parse = (name: string): ParsedUseCase => {
+  const [verb = "", ...rest] = words(name)
+  return { verbGroup: groupOf(verb), objects: new Set(rest.map(singular).filter((w) => !NOISE.has(w))) }
+}
+
+export interface UseCaseOverlap {
+  use_case: { id: string; name: string }
+  existing: { id: string; name: string }
+  shared: string[]
+}
+
+/**
+ * Use case mới trong lô chồng mục tiêu với use case có sẵn của cùng actor: động từ cùng nhóm nghĩa và chung ít nhất một
+ * từ đối tượng, hoặc trùng tên. Lưới an toàn sau luật 3e (model phải hỏi trước) — chỉ cảnh báo, không chặn.
+ */
+export const useCaseOverlaps = (before: Pick<Spine, "use_cases">, after: Pick<Spine, "use_cases">): UseCaseOverlap[] => {
+  const existed = new Set(before.use_cases.map((u) => u.id))
+  const out: UseCaseOverlap[] = []
+  for (const added of after.use_cases.filter((u) => !existed.has(u.id))) {
+    const a = parse(added.name)
+    for (const old of before.use_cases) {
+      if (!old.actor_ids.some((id) => added.actor_ids.includes(id))) continue
+      const b = parse(old.name)
+      const shared = [...a.objects].filter((w) => b.objects.has(w))
+      const sameName = words(added.name).join(" ") === words(old.name).join(" ")
+      if (sameName || (a.verbGroup >= 0 && a.verbGroup === b.verbGroup && shared.length > 0)) {
+        out.push({ use_case: { id: added.id, name: added.name }, existing: { id: old.id, name: old.name }, shared })
+      }
+    }
+  }
+  return out
+}
+
+export const useCaseOverlapNote = (overlaps: readonly UseCaseOverlap[], language: "vi" | "en" = "vi"): string | null => {
+  if (overlaps.length === 0) return null
+  return overlaps
+    .map((o) =>
+      language === "en"
+        ? `New use case "${o.use_case.name}" may overlap with ${o.existing.id} "${o.existing.name}" (same actor, same goal). Check whether to merge them or say how they differ.`
+        : `Use case mới "${o.use_case.name}" có thể trùng mục tiêu với ${o.existing.id} "${o.existing.name}" (cùng actor, cùng việc). Xem lại: gộp vào use case cũ, hay nói rõ hai use case khác nhau ở đâu.`
+    )
+    .join("\n")
+}
