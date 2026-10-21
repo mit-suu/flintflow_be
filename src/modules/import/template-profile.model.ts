@@ -48,7 +48,6 @@ export interface LayoutEntry {
 export interface StepPlanItem {
   step_id: string
   state: "applied" | "hidden" | "enabled"
-  missing: boolean
   section_ids: string[]
   reason: string
 }
@@ -59,15 +58,13 @@ export interface ITemplateProfile extends Document {
   doc_version: string
   heading_map: HeadingMapEntry[]
   table_map: TableMapEntry[]
-  /** Section bắt buộc (registry `required`) không tìm thấy heading — đưa vào gap report. */
-  required_sections: string[]
   /** Ngôn ngữ chính của tài liệu (`en`, `vi`…). */
   language: string
   /** FLF-252: họ mẫu nhận được — `fpt`, `ieee830`, `ieee_features`. */
   template_family: string
   /** FLF-182: thứ tự + tiêu đề mục của file upload, render lại từ Spine theo đây. */
   layout: LayoutEntry[]
-  /** FLF-182: step nào chạy / ẩn / thiếu theo template. */
+  /** FLF-182: step nào chạy / ẩn theo template. */
   step_plan: StepPlanItem[]
   /** Mode 1 v3 (T15): dòng Record of Changes của file gốc — render in lên đầu bảng, lịch sử FlintFlow nối tiếp. */
   legacy_record_of_changes: RocRow[]
@@ -134,7 +131,6 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       ],
       default: []
     },
-    required_sections: { type: [String], default: [] },
     non_screen_table: { type: [String], default: [] },
     function_originals: {
       type: [
@@ -198,7 +194,6 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
           {
             step_id: { type: String, required: true },
             state: { type: String, enum: ["applied", "hidden", "enabled"], required: true },
-            missing: { type: Boolean, default: false },
             section_ids: { type: [String], default: [] },
             reason: { type: String, default: "" }
           },

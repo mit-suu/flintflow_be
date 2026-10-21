@@ -40,7 +40,6 @@ export interface ProfileBlock {
 export interface ProfileMatch {
   heading_map: HeadingMapEntry[]
   table_map: TableMapEntry[]
-  required_sections: string[]
   language: string
   /** FLF-252: họ mẫu nhận được (`fpt` / `ieee830` / `ieee_features`). */
   template_family: TemplateFamily
@@ -313,15 +312,6 @@ export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, s
       }))
     )
 
-/**
- * Đầu mục mẫu FPT không có heading nào khớp. Mode 1 v2 (D6, FLF-183): **mọi** đầu mục FPT là cốt lõi — chỉ trừ
- * Record of Changes (`fixed:I`) vì hệ thống tự sinh từ lịch sử thay đổi.
- */
-export const missingRequiredSections = (headingMap: HeadingMapEntry[]): string[] => {
-  const mapped = new Set(headingMap.map((h) => h.section_id))
-  return SECTION_CANDIDATES.filter((c) => c.kind === "fixed" && !mapped.has(c.id) && c.id !== "fixed:I").map((c) => c.id)
-}
-
 export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   const template_family = detectTemplateFamily(blocks)
   const heading_map = matchHeadings(blocks, template_family)
@@ -329,7 +319,6 @@ export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   return {
     heading_map,
     table_map: matchTables(blocks, sections),
-    required_sections: missingRequiredSections(heading_map),
     language: detectLanguage(blocks),
     template_family
   }

@@ -4,7 +4,7 @@
  * - Loại: luật gắn với quy trình sinh của mode 2 hoặc bắn hàng loạt vô nghĩa.
  * - Hạ đỏ ⇒ vàng: thiếu số đo là "gap" để báo, không phải lỗi kỹ thuật chặn release.
  * - Mode 1 v2 (D6, FLF-183) từng giữ `section_empty` đỏ (mọi đầu mục mẫu FPT là cốt lõi). Từ 2026-10-06 bản xuất theo
- *   template người dùng upload nên mục FPT không bắt buộc ⇒ bỏ `section_empty`; mục thiếu chỉ liệt kê ở gap report.
+ *   template người dùng upload nên mục FPT không bắt buộc ⇒ bỏ `section_empty` (FLF-312: gap report cũng không liệt kê mục FPT thiếu).
  * Giữ nguyên: `dead_reference`, `render_error`, `diagram_stale`, `unconfirmed_assumption` (đỏ) và các luật
  * cardinality vàng còn lại.
  */
@@ -15,7 +15,7 @@ export const MODE1_RULE_PROFILE: RuleProfile = Object.freeze({
   exclude: new Set([
     // mảng rỗng đưa vào gap report dạng "section thiếu", không chặn baseline v0 / release
     "array_empty",
-    // mục FPT không bắt buộc ở mode 1 (bản xuất theo template upload) — mục thiếu chỉ là gợi ý trong gap report
+    // mục FPT không bắt buộc ở mode 1 (bản xuất theo template upload)
     "section_empty",
     "section_stale_at_baseline",
     "section_awaiting_reaccept",

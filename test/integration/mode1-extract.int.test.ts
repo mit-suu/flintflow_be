@@ -188,8 +188,7 @@ describe("mode 1 — finalize, check, gap report", () => {
 
     const report = gapReportSchema.parse((await c.get("/gap-report")).body.data)
     expect(report.totals.yellow).toBe(yellow)
-    expect(report.unmapped_headings.map((u) => u.text)).toEqual(["5.9 Team Notes"])
-    expect(report.missing_sections.map((m) => m.section_id)).toContain("fixed:3.1.1")
+    expect(report.layout.find((l) => l.heading === "5.9 Team Notes")?.kind).toBe("custom")
     expect(report.low_confidence_fields.length).toBe(2)
 
     const docx = await c.get("/gap-report?format=docx").buffer(true).parse((res, cb) => {
