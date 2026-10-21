@@ -42,6 +42,8 @@ export interface ExecuteAiActionOptions {
   signal?: AbortSignal
   /** Ảnh gửi kèm prompt (mode 1 v3 phase 5, `IMPORT_EXTRACT_DIAGRAM`) — provider phải có vision (Gemini). */
   images?: LlmImage[]
+  /** FLF-310: org đang chọn của người gọi — ví bị trừ khi lượt gọi không gắn project. */
+  activeOrgId?: string | null
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -58,10 +60,11 @@ export interface ExecuteAiActionStreamCallbacks<T = any> {
 const reserveCreditWithTransaction = async (
   userId: string,
   actionType: string,
-  projectId: string | undefined
+  projectId: string | undefined,
+  activeOrgId?: string | null
 ): Promise<CreditReservation> => {
-  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session))
-  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId) : reservation
+  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session, activeOrgId))
+  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId, undefined, activeOrgId) : reservation
 }
 
 /** Release không được che lỗi gốc của action: lỗi release chỉ log. */
@@ -189,7 +192,7 @@ export const executeAiAction = async <T = any>(
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
   // Step 1: Reserve Credit
-  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId)
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId)
   const cost = reservation.cost
 
   // Step 2: Build Prompt
@@ -365,7 +368,7 @@ export const executeAiActionStream = async <T = any>(
   callbacks: ExecuteAiActionStreamCallbacks<T> = {},
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
-  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId)
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId)
   const cost = reservation.cost
 
   let finalPrompt: string
