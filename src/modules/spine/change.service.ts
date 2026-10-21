@@ -33,6 +33,9 @@ import { assertCrInfo, crReason, nextCrId } from "./post-baseline-cr.js"
 import {
   addedScreenIds,
   addsUseCaseOrScreen,
+  applyScreenKind,
+  screenKindChoice,
+  screenKindQuestion,
   isAddUseCaseInstruction,
   messagesReady,
   normalizeUseCaseBatch,
@@ -479,6 +482,8 @@ const assertVersion = (record: SpineRecord, baseVersion: number): void => {
 interface ResolvedOps {
   ops: Op[]
   clarification: string | null
+  /** FLF-311: lựa chọn kèm câu hỏi làm rõ (thẻ chọn nhanh trong chat). */
+  choices?: string[]
   /** Ghi chú ngắn model trả về, hiện trên thẻ preview. */
   notes: string | null
   /** FLF-265 D16: chữ theo ngôn ngữ tài liệu kèm lô (cùng `path` với op) + ngôn ngữ của lượt — lưu sau khi áp. */
@@ -614,10 +619,22 @@ const opsFromInstruction = async (
 
   // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
   const clarification = result.data.clarification_needed?.trim()
-  if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null }
+  const choices = result.data.choices?.length ? { choices: result.data.choices.map((c) => nameElementIds(c, spine)) } : {}
+  if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null, ...choices }
+  let ops = prepare((result.data.ops ?? []) as Op[])
+  // FLF-311: màn riêng hay popup là quyết định của người dùng. Đã chọn ⇒ code áp đúng lựa chọn; chưa chọn mà lô thêm màn
+  // và chưa hỏi lượt nào ⇒ hỏi (kèm hai lựa chọn) thay vì tự quyết.
+  if (ucMode === "screen_pending" || ucMode === "full") {
+    const kind = screenKindChoice(instruction, history)
+    if (kind) ops = applyScreenKind(ops, kind)
+    else if (clarificationRounds === 0) {
+      const ask = screenKindQuestion(spine, ops, replyLanguage ?? DEFAULT_REPLY_LANGUAGE)
+      if (ask) return { ops: [], clarification: ask.text, notes: null, choices: ask.choices }
+    }
+  }
   const notes = result.data.notes ? nameElementIds(result.data.notes, spine) : null
   const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
-  return { ops: prepare((result.data.ops ?? []) as Op[]), clarification: null, notes, ...localized, language: languagePairOf(language) }
+  return { ops, clarification: null, notes, ...localized, language: languagePairOf(language) }
 }
 
 const resolveOps = async (
@@ -651,6 +668,11 @@ export interface ChangePreviewResult extends PreviewResult {
   notes?: string
   /** Hoà giải: section vẫn đúng nội dung, user chỉ cần xác nhận nguyên trạng (BUG-16). */
   no_change?: boolean
+  /**
+   * Nội bộ (không trả qua HTTP — controller bỏ đi) — FLF-311: lựa chọn kèm `clarification`, ghi vào phiên chat dạng
+   * `questions[].options` để FE hiện thẻ chọn nhanh.
+   */
+  clarification_choices?: string[]
 }
 
 const rejectedPreview = (baseVersion: number, violations: Violation[], referrers: PreviewResult["referrers"] = []): ChangePreviewResult => ({
@@ -682,7 +704,11 @@ export const preview = async (
 
   const resolved = await resolveOps(projectId, userId, spine, body, d)
   if (resolved.clarification !== null) {
-    return { ...rejectedPreview(body.base_version, []), clarification: resolved.clarification }
+    return {
+      ...rejectedPreview(body.base_version, []),
+      clarification: resolved.clarification,
+      ...(resolved.choices?.length ? { clarification_choices: resolved.choices } : {})
+    }
   }
   if (resolved.ops.length === 0) {
     return { ...rejectedPreview(body.base_version, [{ rule: "op_value_missing", message: "Không có thay đổi nào để xem trước" }]) }

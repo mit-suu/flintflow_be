@@ -58,6 +58,15 @@ describe("previewPayload", () => {
     expect(payload.reply).toContain("1 thay đổi")
   })
 
+  it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
+    expect(payload).toEqual({
+      kind: "change_clarification",
+      reply: "Màn hình riêng hay popup?",
+      questions: [{ question: "Chọn giao diện", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
+    })
+  })
+
   it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {
     const payload = previewPayload({
       ...base,

@@ -104,7 +104,14 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
  */
 export const previewPayload = (preview: ChangePreviewResult, language: ReplyLanguage = "vi"): Record<string, unknown> =>
   preview.clarification
-    ? { kind: "change_clarification", reply: preview.clarification }
+    ? {
+        kind: "change_clarification",
+        reply: preview.clarification,
+        // FLF-311: câu có lựa chọn (màn riêng / popup) ⇒ FE hiện thẻ chọn nhanh; chọn xong đi tiếp lệnh sửa
+        ...(preview.clarification_choices?.length
+          ? { questions: [{ question: byLanguage(language, { vi: "Chọn giao diện", en: "Choose the UI" }), options: preview.clarification_choices.map((label) => ({ label })) }] }
+          : {})
+      }
     : {
         kind: "change_preview",
         reply: preview.ok

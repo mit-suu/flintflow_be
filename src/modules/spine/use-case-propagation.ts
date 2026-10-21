@@ -312,3 +312,63 @@ export const useCaseOverlapNote = (overlaps: readonly UseCaseOverlap[], language
     )
     .join("\n")
 }
+
+// ─── màn hình riêng hay popup — người dùng chọn ─────────────────────
+
+export type ScreenKind = "screen" | "popup"
+
+const POPUP_WORDS = /(pop[\s-]?up|hộp thoại|dialog|modal)/i
+const SCREEN_WORDS = /(màn hình riêng|màn riêng|trang riêng|màn hình mới|trang mới|separate screen|full screen|new screen|own screen|new page)/i
+
+/**
+ * Lựa chọn màn riêng / popup trong lời USER (câu lệnh + các tin `User:` của đoạn hội thoại) — lời AI không tính, vì câu
+ * hỏi của AI nhắc cả hai. Nhắc sau cùng thắng ("popup… à không, màn hình riêng").
+ */
+export const screenKindChoice = (instruction: string, history = ""): ScreenKind | null => {
+  const userLines = history.split("\n").filter((l) => l.startsWith("User:")).map((l) => l.slice(5))
+  let choice: ScreenKind | null = null
+  for (const text of [...userLines, instruction]) {
+    const popup = text.search(POPUP_WORDS)
+    const screen = text.search(SCREEN_WORDS)
+    if (popup < 0 && screen < 0) continue
+    choice = screen > popup ? "screen" : "popup"
+  }
+  return choice
+}
+
+const addedScreenOps = (ops: readonly Op[]): Element[] => ops.filter((op) => isAdd(op, "screens")).map((op) => op.value as Element)
+
+/** Áp lựa chọn của người dùng lên màn mới của lô — code giữ đúng lời người dùng, không để model tự đổi. */
+export const applyScreenKind = (ops: readonly Op[], kind: ScreenKind): Op[] =>
+  ops.map((op) => (isAdd(op, "screens") ? { ...op, value: { ...(op.value as Element), is_popup: kind === "popup" } } : op))
+
+export interface ScreenKindQuestion {
+  text: string
+  choices: string[]
+}
+
+/**
+ * Lô có màn mới mà người dùng chưa nói màn riêng hay popup ⇒ câu hỏi kèm hai lựa chọn (thẻ chọn nhanh ở FE). Màn mở ra
+ * nó lấy từ cạnh luồng của lô (`set screens[id=…].flow_to` chứa id màn mới). Lô không thêm màn ⇒ `null`.
+ */
+export const screenKindQuestion = (spine: Pick<Spine, "screens">, ops: readonly Op[], language: "vi" | "en" = "vi"): ScreenKindQuestion | null => {
+  const added = addedScreenOps(ops)
+  if (added.length === 0) return null
+  const newIds = new Set(added.map((s) => String(s.id)))
+  const hostId = ops
+    .filter((op) => op.op === "set" && /^screens\[id=[^\]]+\]\.flow_to$/.test(op.path) && Array.isArray(op.value))
+    .find((op) => (op.value as unknown[]).some((v) => newIds.has(String(v))))
+    ?.path.match(/^screens\[id=([^\]]+)\]/)?.[1]
+  const host = spine.screens.find((s) => s.id === hostId)?.name
+  const name = String(added[0].name ?? "")
+  if (language === "en") {
+    return {
+      text: `"${name}" needs a UI: a separate screen, or a popup${host ? ` opened from "${host}"` : ""}? You can also add what the user enters or any rule it must follow.`,
+      choices: ["Separate screen", host ? `Popup opened from ${host}` : "Popup"]
+    }
+  }
+  return {
+    text: `"${name}" cần giao diện: làm một màn hình riêng, hay một popup${host ? ` mở từ "${host}"` : ""}? Nếu cần, bạn mô tả thêm người dùng nhập gì hoặc quy tắc phải tuân theo.`,
+    choices: ["Màn hình riêng", host ? `Popup mở từ ${host}` : "Popup"]
+  }
+}

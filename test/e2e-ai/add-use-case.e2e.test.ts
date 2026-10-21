@@ -17,7 +17,7 @@ import { seedFixture } from "../setup.js"
 
 const enabled = process.env.E2E_AI === "1"
 const INSTRUCTION =
-  'Thêm use case mới "Share Read-Only Link": Business Analyst tạo một đường link chỉ-đọc của tài liệu SRS để gửi stakeholder xem, có thể đặt hạn dùng và thu hồi link.'
+  'Thêm use case mới "Share Read-Only Link": Business Analyst tạo một đường link chỉ-đọc của tài liệu SRS để gửi stakeholder xem, có thể đặt hạn dùng và thu hồi link. Làm màn hình riêng.'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OUT_DIR = path.resolve(__dirname, "results")
@@ -142,11 +142,12 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     const before = (await repo.get(projectId))!
     const instruction = "thêm use case Suspend Student Account — Phòng quản lý đào tạo khóa tài khoản đăng nhập của sinh viên; chỉ Phòng quản lý đào tạo mở khóa thủ công"
     const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction, change_request: CR }, {}, { renderAfterChange: async () => undefined })
-    const asked = Boolean(shown.clarification && /UC20|Deactivate Student Record/i.test(shown.clarification))
+    // Chưa nói màn hay popup ⇒ hỏi trước (FLF-311); hoặc đã soạn thì bản xem trước phải cảnh báo trùng UC20
+    const asked = Boolean(shown.clarification)
     const warned = /UC20|Deactivate Student Record/.test(shown.notes ?? "")
     fapLog(`[FAP A] ok=${shown.ok} violations=${JSON.stringify(shown.violations)}`)
     fapLog(`[FAP A] clarification=${shown.clarification ?? "-"}\n[FAP A] notes=${shown.notes ?? "-"}\n[FAP A] ops=${shown.ops.map((o) => `${o.op} ${o.path}`).join(" | ")}`)
-    expect(asked || warned, "model phải hỏi lại hoặc bản xem trước phải cảnh báo trùng UC20").toBe(true)
+    expect(asked || warned, "phải hỏi lại trước khi soạn, hoặc bản xem trước phải cảnh báo trùng UC20").toBe(true)
   })
 
   it("B. Request Grade Review (sinh viên gửi phúc khảo kèm lý do) ⇒ màn riêng trong Screens Flow", { timeout: 10 * 60_000 }, async () => {
@@ -155,7 +156,7 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     const { orphanScreens } = await import("../../src/modules/spine/deterministic-check.js")
     const { projectId, userId } = await seedFap()
     const before = (await repo.get(projectId))!
-    const instruction = "Thêm use case mới Request Grade Review: sinh viên gửi yêu cầu phúc khảo điểm một môn, ghi lý do; Phòng khảo thí nhận yêu cầu"
+    const instruction = "Thêm use case mới Request Grade Review: sinh viên gửi yêu cầu phúc khảo điểm một môn, ghi lý do; Phòng khảo thí nhận yêu cầu. Dạng popup."
     // E2E_REAL_RENDER=1 ⇒ vẽ thật sau khi áp (PlantUML ở PLANTUML_BASE_URL + model vẽ wireframe), không thay bằng hàm giả
     const realRender = process.env.E2E_REAL_RENDER === "1"
     // test/setup.ts cố ý trỏ PlantUML vào cổng chết ⇒ vẽ thật phải lấy lại địa chỉ server trong .env
@@ -189,5 +190,27 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
       fapLog(`[FAP B] screen flow: ${flow.map((d) => `${d.id} ${d.render_status}${d.puml.includes(newScreens[0].name) ? " (có màn mới)" : ""}`).join(", ")}`)
       expect(flow.some((d) => d.puml.includes(newScreens[0].name))).toBe(true)
     }
+  })
+
+  it("C. chưa nói màn hay popup ⇒ hỏi kèm lựa chọn; trả lời 'Popup mở từ My Grades' ⇒ lô có popup mở từ My Grades", { timeout: 10 * 60_000 }, async () => {
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const { projectId, userId } = await seedFap()
+    const before = (await repo.get(projectId))!
+    const deps = { renderAfterChange: async () => undefined }
+    const first = "Thêm use case mới Request Grade Review: sinh viên gửi yêu cầu phúc khảo điểm một môn, ghi lý do"
+    const asked = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: first }, {}, deps)
+    fapLog(`[FAP C] lượt 1: clarification=${asked.clarification ?? "-"} | choices=${JSON.stringify(asked.clarification_choices ?? [])}`)
+    expect(asked.clarification).toBeTruthy()
+
+    const popupChoice = asked.clarification_choices?.find((c) => /popup/i.test(c)) ?? "Popup"
+    const history = `User: ${first}\nAI: ${asked.clarification}`
+    const answer = `${popupChoice}. Sinh viên chọn môn và nhập lý do, tối đa 500 ký tự.`
+    const shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: answer, chat_history: history, clarification_rounds: 1 }, {}, deps)
+    fapLog(`[FAP C] lượt 2 (${answer}): ok=${shown.ok} clarification=${shown.clarification ?? "-"} | ops=${shown.ops.map((o) => `${o.op} ${o.path}`).join(" | ")}`)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const screen = shown.ops.find((o) => o.op === "add" && o.path === "screens[]")?.value as { name?: string; is_popup?: boolean } | undefined
+    fapLog(`[FAP C] màn mới: ${screen ? `${screen.name} popup=${screen.is_popup}` : "không"}`)
+    expect(screen?.is_popup).toBe(true)
   })
 })

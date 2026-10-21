@@ -317,7 +317,7 @@ describe("preview — diff + impact, không ghi", () => {
     ]
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: fullBatch as ChangeInstructionOutput["ops"], notes: "Thêm chức năng, màn Absence Warning, luồng và phân quyền." }))
     deps.renderAfterChange = vi.fn(async () => undefined)
-    const instruction = 'Thêm use case mới "Send Absence Warning": Analyst gửi cảnh báo vắng mặt'
+    const instruction = 'Thêm use case mới "Send Absence Warning": Analyst gửi cảnh báo vắng mặt, làm màn hình riêng'
 
     const shown = await preview(PROJECT, USER, { base_version: 1, instruction }, {}, deps)
     expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
@@ -355,7 +355,7 @@ describe("preview — diff + impact, không ghi", () => {
     ]
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: broken as ChangeInstructionOutput["ops"] }))
     deps.renderAfterChange = vi.fn(async () => undefined)
-    const instruction = "Thêm use case Send Absence Warning cho Analyst"
+    const instruction = "Thêm use case Send Absence Warning cho Analyst, màn hình riêng"
 
     const shown = await preview(PROJECT, USER, { base_version: 1, instruction }, {}, deps)
     expect(shown.ok).toBe(false)
@@ -378,7 +378,7 @@ describe("preview — diff + impact, không ghi", () => {
     deps.changeExecutor = vi.fn(async () => aiResult({ ops: batch as ChangeInstructionOutput["ops"] }))
     deps.renderAfterChange = vi.fn(async () => undefined)
 
-    const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst, màn hình riêng" }, {}, deps)
     const spine = applied.spine as Spine
     const screen = spine.screens.find((s) => s.name === "Absence Warning")!
     expect(vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables).toMatchObject({ use_case_mode: "screen_pending" })
@@ -398,6 +398,58 @@ describe("preview — diff + impact, không ghi", () => {
     const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as Record<string, unknown>
     expect(vars.use_case_ui).toBe(true)
     expect(((vars.projection as Record<string, unknown>).use_case_context as { use_cases: { id: string }[] }).use_cases.map((u) => u.id)).toContain("UC24")
+  })
+
+  describe("FLF-311: người dùng chọn màn hình riêng hay popup", () => {
+    const uiBatch = () => [
+      { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "Warn students." } },
+      { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "…", feature_id: "F3", flow_to: [], tabs: [] } },
+      { op: "add", path: "functions[]", value: { id: "$newFn", name: "Send Absence Warning", screen_id: "$newScreen", feature_id: "F3", trigger: "Analyst clicks Send.", description: "Sends a warning.", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+      { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+      { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } }
+    ]
+    beforeEach(() => {
+      deps.changeExecutor = vi.fn(async () => aiResult({ ops: uiBatch() as ChangeInstructionOutput["ops"] }))
+      deps.renderAfterChange = vi.fn(async () => undefined)
+    })
+
+    it("chưa chọn, chưa hỏi lượt nào ⇒ bản xem trước là câu hỏi kèm hai lựa chọn (màn mở ra lấy từ cạnh luồng), không ghi", async () => {
+      await seed()
+      const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+
+      expect(shown.ok).toBe(false)
+      expect(shown.clarification).toMatch(/"Absence Warning" cần giao diện: làm một màn hình riêng, hay một popup mở từ "Project Workspace"/)
+      expect(shown.clarification_choices).toEqual(["Màn hình riêng", "Popup mở từ Project Workspace"])
+      expect(await writtenChanges()).toBe(0)
+    })
+
+    it("chọn popup ⇒ màn mới is_popup = true (code giữ lời người dùng dù model đặt khác)", async () => {
+      await seed()
+      const body = { base_version: 1, instruction: "Popup mở từ Project Workspace", clarification_rounds: 1, chat_history: "User: Thêm use case Send Absence Warning cho Analyst\nAI: …" }
+      const applied = await apply(PROJECT, USER, body, {}, deps)
+      expect((applied.spine as Spine).screens.find((s) => s.name === "Absence Warning")?.is_popup).toBe(true)
+    })
+
+    it("chọn màn hình riêng ⇒ is_popup = false; đã hỏi mà câu trả lời không nói ⇒ không hỏi lại, đi tiếp", async () => {
+      await seed()
+      const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning, màn hình riêng" }, {}, deps)
+      expect((applied.spine as Spine).screens.find((s) => s.name === "Absence Warning")?.is_popup).toBe(false)
+
+      await seed()
+      const history = "User: Thêm use case Send Absence Warning cho Analyst\nAI: Màn hình riêng hay popup?"
+      const again = await preview(PROJECT, USER, { base_version: 1, instruction: "người nhận là sinh viên", clarification_rounds: 1, chat_history: history }, {}, deps)
+      expect(again.ok).toBe(true)
+      expect(again.clarification).toBeUndefined()
+    })
+
+    it("model tự hỏi kèm choices ⇒ lựa chọn đi theo bản xem trước (cho thẻ chọn nhanh trong chat)", async () => {
+      await seed()
+      deps.changeExecutor = vi.fn(async () =>
+        aiResult({ clarification_needed: "Màn hình riêng hay popup? Sinh viên nhận cảnh báo qua đâu?", choices: ["Màn hình riêng", "Popup mở từ Project Workspace"] })
+      )
+      const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning" }, {}, deps)
+      expect(shown.clarification_choices).toEqual(["Màn hình riêng", "Popup mở từ Project Workspace"])
+    })
   })
 
   it("FLF-311: lệnh sửa thường ⇒ chế độ none, không nạp ngữ cảnh use case, không vẽ lại", async () => {
