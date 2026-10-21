@@ -214,9 +214,11 @@ const settleIntent = async (
     const userId = intent.userId.toString()
     // Callback không mang token: org lấy từ chính intent đã ghi lúc checkout.
     const orgId = intent.organizationId ? intent.organizationId.toString() : null
+    // FLF-310: credit chỉ nằm ở ví tổ chức — intent cũ không gắn org thì không có ví để cộng
+    if (!orgId) throw new ApiError(409, "Giao dịch thanh toán không gắn tổ chức nào nên không cộng được credit.", "NO_WALLET_ORG")
     await getOrCreateWallet(userId, session, orgId)
     const wallet = await CreditWallet.findOneAndUpdate(
-      orgId ? { organizationId: orgId } : { userId },
+      { organizationId: orgId },
       { $inc: { balance: intent.credits } },
       { ...options, returnDocument: "after" }
     )

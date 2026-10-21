@@ -14,6 +14,14 @@ vi.mock("../../modules/admin/pricing-config.model.js", () => ({
 vi.mock("../../modules/user/user.model.js", () => ({
   User: { findById: () => ({ lean: async () => ({ name: "Lan", email: "lan@example.com" }) }) }
 }))
+// FLF-310: ví = org — lượt gọi không gắn project dùng org đang chọn nếu còn là thành viên; có project thì org của project
+const { membership, projectOrg } = vi.hoisted(() => ({ membership: { member: true }, projectOrg: { id: null as string | null } }))
+vi.mock("../../modules/organization/membership.model.js", () => ({
+  Membership: { exists: () => ({ session: async () => (membership.member ? { _id: "m1" } : null) }) }
+}))
+vi.mock("../../modules/project/project.model.js", () => ({
+  Project: { findById: () => ({ lean: async () => (projectOrg.id === null ? { organizationId: null } : { organizationId: projectOrg.id }) }) }
+}))
 vi.mock("../../modules/notification/notification.service.js", () => ({
   notify: vi.fn(async () => null),
   notifyAdmins: vi.fn(async () => 0)
@@ -35,6 +43,8 @@ import {
 import { ActionType, AiActionError } from "./ai-action.types.js"
 
 const USER = "64b000000000000000000001"
+const ORG = "64b0000000000000000000a1"
+const PROJECT = "64b0000000000000000000b1"
 const CHAT_COST = 2
 
 const wallets = () => fakeDb.model("CreditWallet")
@@ -46,6 +56,8 @@ describe("credit-reservation.service", () => {
   beforeEach(() => {
     fakeDb.reset()
     vi.clearAllMocks()
+    membership.member = true
+    projectOrg.id = null
   })
 
   it("FLF-265: translate_document tính 2 credit / lô", async () => {
@@ -54,7 +66,7 @@ describe("credit-reservation.service", () => {
 
   describe("getOrCreateWallet", () => {
     it("tặng initialCredits từ plan.config (không cứng 100) và phát notification chào mừng", async () => {
-      const wallet = await getOrCreateWallet(USER)
+      const wallet = await getOrCreateWallet(USER, undefined, ORG)
 
       expect(wallet.balance).toBe(planConfig.free.initialCredits)
       expect(wallet.reserved).toBe(0)
@@ -68,9 +80,9 @@ describe("credit-reservation.service", () => {
     })
 
     it("ví đã có thì không tạo lại và không notify lại", async () => {
-      await getOrCreateWallet(USER)
+      await getOrCreateWallet(USER, undefined, ORG)
       vi.clearAllMocks()
-      await getOrCreateWallet(USER)
+      await getOrCreateWallet(USER, undefined, ORG)
 
       expect(wallets().docs).toHaveLength(1)
       expect(notify).not.toHaveBeenCalled()
@@ -80,7 +92,7 @@ describe("credit-reservation.service", () => {
   describe("reserveCredit", () => {
     it("giữ credit, ghi state=reserved và expires_at = now + CREDIT_RESERVE_TTL_MS", async () => {
       const before = Date.now()
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
 
       expect(reservation.cost).toBe(CHAT_COST)
       expect(walletOf().reserved).toBe(CHAT_COST)
@@ -93,10 +105,10 @@ describe("credit-reservation.service", () => {
     })
 
     it("không đủ credit khả dụng thì 402 và không đụng ví", async () => {
-      await getOrCreateWallet(USER)
+      await getOrCreateWallet(USER, undefined, ORG)
       walletOf().balance = 1
 
-      await expect(reserveCredit(USER, ActionType.CHAT)).rejects.toMatchObject({
+      await expect(reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)).rejects.toMatchObject({
         statusCode: 402,
         code: "INSUFFICIENT_CREDIT"
       })
@@ -105,9 +117,48 @@ describe("credit-reservation.service", () => {
     })
   })
 
+  describe("ví tổ chức (FLF-310 — bỏ ví cá nhân)", () => {
+    it("không gắn project ⇒ trừ ví org đang chọn; ví mang organizationId, ledger cũng vậy", async () => {
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
+      expect(reservation.organizationId).toBe(ORG)
+      expect(String(walletOf().organizationId)).toBe(ORG)
+      expect(String(ledger().docs[0].organizationId)).toBe(ORG)
+    })
+
+    it("có project ⇒ ví của org sở hữu project, bỏ qua org đang chọn", async () => {
+      const PROJECT_ORG = "64b0000000000000000000a2"
+      projectOrg.id = PROJECT_ORG
+      const reservation = await reserveCredit(USER, ActionType.CHAT, PROJECT, undefined, ORG)
+      expect(reservation.organizationId).toBe(PROJECT_ORG)
+      expect(wallets().docs.map((w) => String(w.organizationId))).toEqual([PROJECT_ORG])
+    })
+
+    it("chưa chọn org / không còn là thành viên ⇒ 409 NO_ACTIVE_ORG, không tạo ví cá nhân", async () => {
+      await expect(reserveCredit(USER, ActionType.CHAT)).rejects.toMatchObject({ statusCode: 409, code: "NO_ACTIVE_ORG" })
+      membership.member = false
+      await expect(reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)).rejects.toMatchObject({ code: "NO_ACTIVE_ORG" })
+      expect(wallets().docs).toHaveLength(0)
+    })
+
+    it("project chưa thuộc org nào ⇒ 409 NO_WALLET_ORG", async () => {
+      await expect(reserveCredit(USER, ActionType.CHAT, PROJECT, undefined, ORG)).rejects.toMatchObject({ statusCode: 409, code: "NO_WALLET_ORG" })
+      expect(wallets().docs).toHaveLength(0)
+    })
+
+    it("hoàn khoản đã trừ không truyền org ⇒ hoàn về ví org của project (trước đây trượt sang ví cá nhân)", async () => {
+      projectOrg.id = ORG
+      const reservation = await reserveCredit(USER, ActionType.CHAT, PROJECT)
+      await deductCredit(reservation)
+      const before = walletOf().balance
+      await refundDeductedCredit({ userId: USER, actionType: ActionType.DRAFT, amount: CHAT_COST, projectId: PROJECT })
+      expect(walletOf().balance).toBe(before + CHAT_COST)
+      expect(wallets().docs).toHaveLength(1)
+    })
+  })
+
   describe("expireStaleReservations", () => {
     it("reserve rồi hết hạn: trả reserved về ví, ghi state=expired và trả về số đã giải phóng", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       const balanceBefore = walletOf().balance
 
       const result = await expireStaleReservations(afterTtl())
@@ -124,7 +175,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("không đụng reservation chưa hết hạn và không expire hai lần", async () => {
-      await reserveCredit(USER, ActionType.CHAT)
+      await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
 
       expect(await expireStaleReservations(new Date())).toEqual({ expiredCount: 0, releasedCredits: 0 })
       expect(walletOf().reserved).toBe(CHAT_COST)
@@ -135,7 +186,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("không đụng reservation đã deducted", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await deductCredit(reservation)
 
       expect(await expireStaleReservations(afterTtl())).toEqual({ expiredCount: 0, releasedCredits: 0 })
@@ -144,7 +195,7 @@ describe("credit-reservation.service", () => {
 
   describe("deductCredit / releaseCredit", () => {
     it("deduct trừ balance và reserved đúng một lần (idempotent)", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       const balanceBefore = walletOf().balance
 
       await deductCredit(reservation)
@@ -156,7 +207,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("release sau deduct là no-op (sửa lỗi deduct rồi lại release)", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await deductCredit(reservation)
       const snapshot = { ...walletOf() }
 
@@ -167,7 +218,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("release trả reserved, ghi state=refunded; release lần hai không làm reserved âm", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
 
       expect(await releaseCredit(reservation)).toBe(true)
       expect(await releaseCredit(reservation)).toBe(false)
@@ -178,7 +229,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("release sau khi cron đã expire không trả lại lần hai", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await expireStaleReservations(afterTtl())
 
       expect(await releaseCredit(reservation)).toBe(false)
@@ -186,7 +237,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("deduct sau khi expire vẫn tính phí nhưng chỉ trừ balance", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       const balanceBefore = walletOf().balance
       await expireStaleReservations(afterTtl())
 
@@ -197,20 +248,20 @@ describe("credit-reservation.service", () => {
     })
 
     it("deduct trên reservation đã refunded thì báo lỗi thay vì âm thầm trừ", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await releaseCredit(reservation)
 
       await expect(deductCredit(reservation)).rejects.toBeInstanceOf(AiActionError)
     })
 
     it("notify low_credit đúng một lần khi balance vượt xuống dưới ngưỡng", async () => {
-      await getOrCreateWallet(USER)
+      await getOrCreateWallet(USER, undefined, ORG)
       walletOf().balance = planConfig.lowCreditThreshold + 1
       vi.clearAllMocks()
 
-      const first = await reserveCredit(USER, ActionType.CHAT)
+      const first = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await deductCredit(first)
-      const second = await reserveCredit(USER, ActionType.CHAT)
+      const second = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await deductCredit(second)
 
       const lowCreditCalls = vi
@@ -220,7 +271,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("ví không khớp khi deduct: báo lỗi, reservation trở lại reserved và release vẫn trả được credit", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       // vd admin trừ credit giữa lúc AI đang chạy
       walletOf().balance = 0
 
@@ -234,7 +285,7 @@ describe("credit-reservation.service", () => {
     })
 
     it("deduct sau expire chỉ trừ trên số khả dụng và không trừ hai lần", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await expireStaleReservations(afterTtl())
       // reservation khác đang giữ hết số khả dụng
       walletOf().reserved = walletOf().balance
@@ -254,11 +305,11 @@ describe("credit-reservation.service", () => {
 
   describe("refundDeductedCredit", () => {
     it("cộng lại số dư đã trừ và ghi dòng type=refund", async () => {
-      const reservation = await reserveCredit(USER, ActionType.CHAT)
+      const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
       await deductCredit(reservation)
       const balanceAfterDeduct = walletOf().balance
 
-      await refundDeductedCredit({ userId: USER, actionType: ActionType.DRAFT, amount: CHAT_COST })
+      await refundDeductedCredit({ userId: USER, organizationId: ORG, actionType: ActionType.DRAFT, amount: CHAT_COST })
 
       expect(walletOf().balance).toBe(balanceAfterDeduct + CHAT_COST)
       const row = ledger().docs.find((d) => d.type === "refund")!
@@ -267,9 +318,9 @@ describe("credit-reservation.service", () => {
     })
 
     it("amount = 0 thì không đụng ví", async () => {
-      await getOrCreateWallet(USER)
+      await getOrCreateWallet(USER, undefined, ORG)
       const before = walletOf().balance
-      await refundDeductedCredit({ userId: USER, actionType: ActionType.DRAFT, amount: 0 })
+      await refundDeductedCredit({ userId: USER, organizationId: ORG, actionType: ActionType.DRAFT, amount: 0 })
       expect(walletOf().balance).toBe(before)
       expect(ledger().docs.some((d) => d.type === "refund")).toBe(false)
     })
