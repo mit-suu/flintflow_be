@@ -586,3 +586,16 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
 - Trả lời (GLM-5.3-Flash, judge cùng model): đúng 85,5% vs 16,4% no-RAG; trung thực 100%; ảo giác ngoài corpus 0% vs
   ≥ 50% no-RAG; nhãn trích dẫn hợp lệ 100%.
 - Chi phí một lượt đo đủ: ~950 text embed Gemini (free tier 1 000/ngày/project — dùng `--cache`) + 160 lượt LLM.
+
+## Thêm use case kéo theo phần liên quan (FLF-311) — provider thật (2026-10-21)
+
+- Cách đo: `npm run test:e2e-ai -- test/e2e-ai/add-use-case.e2e.test.ts`, fixture 19 màn (đã qua S-5 và S-7.3 ⇒ chế độ
+  `full` + `messages_ready`), lệnh "Thêm use case mới Share Read-Only Link: Business Analyst tạo link chỉ-đọc…",
+  `apply-change-op` 1.4.0 trên GLM-5.3-Flash. Chấm 12 tiêu chí: UC + chức năng đủ FR (trigger, mô tả, normal, abnormal,
+  validation có id), màn (mới hoặc có sẵn) trong Screens Flow, quyền cho vai trò của actor, thông báo cho luồng bất thường,
+  không còn cảnh báo FLF-298, vẽ bố cục màn mới.
+- Lần đầu: bản xem trước bị từ chối — model **dùng** id tạm (`$newFn1`, `$newScreen`) mà không khai báo làm `id` của phần
+  tử ⇒ 11 vi phạm tham chiếu chết. Sửa: `declareTempIds` (code gán id tạm cho phần tử chưa có id cùng loại) + skill nói rõ.
+- Sau sửa, 5 lượt: 4 lượt tạo màn mới, 12/12; 1 lượt gắn chức năng vào màn Export có sẵn (đúng theo ticket mục 7), đạt khi
+  tiêu chí chấp nhận cả hai cách. Mỗi lượt **1 lượt gọi model**, ~19,5 nghìn token, 15–43 s; bản xem trước 10 thay đổi
+  (UC, 1–2 chức năng, màn, cạnh luồng, 3–4 dòng quyền, 1 thông báo).

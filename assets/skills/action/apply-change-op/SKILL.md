@@ -88,7 +88,8 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    - the flow edge into it: `set screens[id=…].flow_to` to the old list plus the new screen, on the actor's screen
      that leads there — the screen must be reachable in the screens flow;
    - one `permissions[]` row per role of the actor (`view`, and `create`/`update`/`delete` when the function does it).
-   Link them with temporary ids (`$newFn`, `$newScreen`); `$newFn` goes in the use case's `function_ids`. The screen
+   Link them with temporary ids declared as each added element's own `"id": "$newFn"` / `"id": "$newScreen"`;
+   `$newFn` goes in the use case's `function_ids`. The screen
    layout and diagrams are drawn by code after apply. System/time actor ⇒ only the function, `screen_id: null`.
    Code sets `order` and `detail_status`. Say in `notes` (reply language) what the batch adds besides the use case.
 {{/if}}

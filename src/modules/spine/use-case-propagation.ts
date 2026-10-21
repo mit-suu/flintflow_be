@@ -84,6 +84,55 @@ const screenFeatures = (spine: Spine, ops: readonly Op[]): Map<string, string> =
   return features
 }
 
+/** Field tham chiếu ⇒ collection mà id trong nó trỏ tới (đủ cho lô thêm use case). */
+const REF_COLLECTION: Readonly<Record<string, string>> = {
+  function_ids: "functions",
+  primary_function_id: "functions",
+  screen_id: "screens",
+  flow_to: "screens",
+  business_rule_ids: "business_rules"
+}
+
+const TEMP_ID = /^\$[A-Za-z]\w*$/
+
+/**
+ * Model thật hay DÙNG id tạm (`$newFn1` trong `function_ids`, `$newScreen` trong `permissions[].screen_id`) mà quên KHAI
+ * BÁO nó làm `id` của phần tử nó thêm (e2e FLF-311) ⇒ cả lô chết vì tham chiếu chết. Id tạm được tham chiếu mà chưa ai
+ * khai báo được gán, theo thứ tự xuất hiện, cho các op `add` chưa có id của đúng collection (suy từ field tham chiếu).
+ * Không đoán được (thiếu phần tử chưa có id) ⇒ để nguyên, bất biến báo lỗi như cũ.
+ */
+export const declareTempIds = (ops: readonly Op[]): Op[] => {
+  const declared = new Set<string>()
+  for (const op of ops) {
+    const id = op.op === "add" && typeof op.value === "object" && op.value !== null ? (op.value as Element).id : undefined
+    if (typeof id === "string" && TEMP_ID.test(id)) declared.add(id)
+  }
+  const wanted = new Map<string, string[]>()
+  const want = (collection: string, id: string) => {
+    if (declared.has(id) || [...wanted.values()].some((list) => list.includes(id))) return
+    wanted.set(collection, [...(wanted.get(collection) ?? []), id])
+  }
+  for (const op of ops) {
+    const field = /\.(\w+)$/.exec(op.path)?.[1]
+    if (field && REF_COLLECTION[field]) for (const v of [op.value].flat()) if (typeof v === "string" && TEMP_ID.test(v)) want(REF_COLLECTION[field], v)
+    if (typeof op.value !== "object" || op.value === null || Array.isArray(op.value)) continue
+    for (const [key, v] of Object.entries(op.value as Element)) {
+      const collection = REF_COLLECTION[key]
+      if (!collection) continue
+      for (const item of [v].flat()) if (typeof item === "string" && TEMP_ID.test(item)) want(collection, item)
+    }
+  }
+  if (wanted.size === 0) return [...ops]
+  return ops.map((op) => {
+    const collection = /^(\w+)\[\]$/.exec(op.path)?.[1]
+    const queue = collection ? wanted.get(collection) : undefined
+    if (op.op !== "add" || !queue?.length || typeof op.value !== "object" || op.value === null) return op
+    const value = op.value as Element
+    if (value.id !== undefined) return op
+    return { ...op, value: { ...value, id: queue.shift() } }
+  })
+}
+
 /** `E-AUTH-003` ⇒ `E-AUTH`; mã không theo `<AREA>-<NNN>` ⇒ `null`. */
 const codeArea = (code: string): string | null => /^(.+)-\d+$/.exec(code)?.[1] ?? null
 
@@ -119,8 +168,9 @@ const withMessageCode = (spine: Spine, value: Element, featureOfFunction: Readon
  * Chuẩn hoá lô op do MODEL soạn cho lệnh thêm use case. Không thêm/bớt op, chỉ điền/sửa field của op `add` vào
  * `functions[]` / `screens[]` theo luật cứng ở đầu file. Lô không thêm chức năng / màn nào ⇒ trả nguyên.
  */
-export const normalizeUseCaseBatch = (spine: Spine, ops: readonly Op[]): Op[] => {
-  if (!ops.some((op) => isAdd(op, "functions") || isAdd(op, "screens") || isAdd(op, "messages"))) return [...ops]
+export const normalizeUseCaseBatch = (spine: Spine, input: readonly Op[]): Op[] => {
+  if (!input.some((op) => isAdd(op, "functions") || isAdd(op, "screens") || isAdd(op, "messages"))) return [...input]
+  const ops = declareTempIds(input)
   const featureOfScreen = screenFeatures(spine, ops)
   const usedCodes = new Set(spine.messages.map((m) => m.code))
   const pastScreenLoop = useCaseMode(spine) === "full"
