@@ -199,29 +199,29 @@ describe("sectionsWithContent", () => {
   })
 })
 
-describe("buildStepPlan (D6 — mọi đầu mục FPT là cốt lõi)", () => {
+describe("buildStepPlan (FLF-312 — mẫu FPT không bắt buộc)", () => {
   const { layout } = buildLayout(BLOCKS, HEADINGS)
   const plan = buildStepPlan(layout, sectionsWithContent(BLOCKS))
   const of = (id: string) => plan.find((s) => s.step_id === id)!
 
-  it("Brief và S-1 ẩn; step đầu mục FPT luôn applied; không có vòng S-5", () => {
-    expect(of("B-0.1")).toMatchObject({ state: "hidden", missing: false })
+  it("Brief và S-1 ẩn; không có vòng S-5; không còn cờ \"thiếu\"", () => {
+    expect(of("B-0.1")).toMatchObject({ state: "hidden" })
     expect(of("S-1.3")).toMatchObject({ state: "hidden" })
-    expect(plan.filter((s) => s.state !== "hidden").every((s) => s.state === "applied")).toBe(true)
     expect(plan.some((s) => s.step_id.startsWith("S-5."))).toBe(false)
+    expect(plan.every((s) => !("missing" in s))).toBe(true)
   })
 
-  it("có nội dung ⇒ không thiếu; có heading nhưng trống / file không có ⇒ missing kèm lý do", () => {
-    expect(of("S-2.1")).toMatchObject({ missing: false, section_ids: ["fixed:1"], reason: "Có trong file, đã có nội dung" })
-    expect(of("S-7.1")).toMatchObject({ missing: true, reason: "Đầu mục mẫu FPT có trong file nhưng trống" })
-    expect(of("S-6.4")).toMatchObject({ missing: true, section_ids: ["fixed:4.2.3"], reason: "Đầu mục mẫu FPT — file không có" })
+  it("có nội dung ⇒ applied; có heading nhưng trống ⇒ enabled; file không có ⇒ hidden (bật được)", () => {
+    expect(of("S-2.1")).toMatchObject({ state: "applied", section_ids: ["fixed:1"], reason: "Có trong file, đã có nội dung" })
+    expect(of("S-7.1")).toMatchObject({ state: "enabled", reason: "Đầu mục có trong file nhưng trống — chạy step nếu muốn AI soạn" })
+    expect(of("S-6.4")).toMatchObject({ state: "hidden", section_ids: ["fixed:4.2.3"], reason: "File không có đầu mục này — bật nếu muốn AI soạn thêm" })
     expect(of("S-4.1").section_ids).toEqual(["fixed:3.1.2", "feature:*"])
   })
 
-  it("Record of Changes tự sinh — không thiếu; bước ghép / kiểm tra luôn chạy", () => {
-    expect(of("S-8.3")).toMatchObject({ state: "applied", missing: false, reason: "Mục tự sinh từ lịch sử thay đổi" })
-    expect(of("S-8.4")).toMatchObject({ state: "applied", missing: false, section_ids: [] })
-    expect(of("S-9.5")).toMatchObject({ state: "applied", missing: false })
+  it("Record of Changes tự sinh; bước ghép / kiểm tra luôn chạy", () => {
+    expect(of("S-8.3")).toMatchObject({ state: "applied", reason: "Mục tự sinh từ lịch sử thay đổi" })
+    expect(of("S-8.4")).toMatchObject({ state: "applied", section_ids: [] })
+    expect(of("S-9.5")).toMatchObject({ state: "applied" })
   })
 
   it("sectionsOwnedBy theo bảng step sở hữu", () => {
@@ -244,7 +244,7 @@ describe("seedStepOps + step engine với step skipped", () => {
   const { layout } = buildLayout(BLOCKS, HEADINGS)
   const plan = buildStepPlan(layout, sectionsWithContent(BLOCKS))
 
-  it("ẩn ⇒ skipped; có nội dung ⇒ accepted (last_seq của lô import); thiếu ⇒ pending; vòng S-5 của màn có function ⇒ accepted", () => {
+  it("ẩn ⇒ skipped; có nội dung ⇒ accepted (last_seq của lô import); có đầu mục mà trống ⇒ pending; vòng S-5 của màn có function ⇒ accepted", () => {
     const ops = seedStepOps(spineWith(), plan, { firstSeq: 3, lastSeq: 40, at: "2026-09-19T08:00:00.000Z" })
     const steps = ops.filter((o) => o.path === "steps[]").map((o) => o.value as StepState)
     const st = (id: string) => steps.find((s) => s.id === id)

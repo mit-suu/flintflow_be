@@ -30,11 +30,7 @@ const REPORT: GapReport = gapReportSchema.parse({
   project_id: "66f000000000000000000001",
   doc_version: "0.1",
   generated_at: "2026-09-19T00:00:00.000Z",
-  totals: { red: 1, yellow: 2, missing_sections: 1, unmapped_headings: 1, low_confidence_fields: 1, missing_fpt_sections: 2, unrendered_diagrams: 1 },
-  missing_fpt_sections: [
-    { section_id: "fixed:5.1", title: "Business Rules", step_id: "S-7.1", in_layout: false },
-    { section_id: "fixed:4.2.4", title: "Domain-Specific Attributes", step_id: "S-6.5", in_layout: true }
-  ],
+  totals: { red: 1, yellow: 2, low_confidence_fields: 1, unrendered_diagrams: 1 },
   layout: [
     { order: 0, section_id: "fixed:1", heading: "1 Giới thiệu", level: 1, kind: "fpt", red: 0, yellow: 0 },
     { order: 1, section_id: "fixed:4.2.3", heading: "5.2 Hiệu năng", level: 2, kind: "fpt", red: 1, yellow: 1 },
@@ -45,8 +41,6 @@ const REPORT: GapReport = gapReportSchema.parse({
     { section_id: "feature:F-3.2", title: "Authentication", flags: [flag("FL003", "yellow", "empty_feature", "feature:F-3.2", "Feature rỗng")] }
   ],
   unrendered_diagrams: [{ diagram_id: "D-UC-01", kind: "usecase", section_id: "fixed:2.2.2", title: "Use Cases", reason: "not_rendered" }],
-  missing_sections: [{ section_id: "fixed:3.1.1", title: "Screen Flow" }],
-  unmapped_headings: [{ block_id: "B0045", text: "5.9 Team Notes" }],
   low_confidence_fields: [
     { section_id: "function:@B0031", path: "functions[id=FR-3.2.1].trigger", value: "Learner submits", confidence: 0.5, source_block_ids: ["B0032"], origin: "ai", confirmed: false }
   ]
@@ -57,14 +51,15 @@ const NL = String.fromCharCode(10)
 const texts = async (buf: Buffer) => (await readBlocks(await DocxPackage.load(buf))).map((b) => ({ kind: b.kind, text: b.text }))
 
 describe("renderGapReportDocx — xuất .docx mở được", () => {
-  it("đọc lại bằng docx-ooxml: tiêu đề, bảng tổng quan, cờ theo mục (đỏ trước), mục thiếu, tiêu đề lạ, dữ liệu độ tin thấp", async () => {
+  it("đọc lại bằng docx-ooxml: tiêu đề, bảng tổng quan, cờ theo mục (đỏ trước), bố cục, dữ liệu độ tin thấp; không còn mục FPT thiếu (FLF-312)", async () => {
     const buf = await renderGapReportDocx(REPORT, "Lumen")
     expect(buf.subarray(0, 4).toString("hex")).toBe("504b0304")
     const blocks = await texts(buf)
     const all = blocks.map((b) => b.text)
     expect(all[0]).toBe("Báo cáo thiếu sót — Lumen")
     expect(all[1]).toBe("Phiên bản tài liệu 0.1 · tạo lúc 19/09/2026 07:00")
-    for (const h of ["Tổng quan", "Cờ theo mục", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
+    for (const h of ["Tổng quan", "Cờ theo mục", "Dữ liệu trích có độ tin thấp"]) expect(all).toContain(h)
+    for (const h of ["Thiếu mục theo mẫu FPT", "Mục mẫu FPT không có tiêu đề trong file", "Tiêu đề không khớp mẫu"]) expect(all).not.toContain(h)
     // tiêu đề mục không kèm khoá máy
     expect(all).toContain("Performance")
     expect(all).toContain("Authentication")
@@ -76,11 +71,7 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
       "Đỏ | Tham chiếu tới phần không tồn tại | NFR trỏ UC-99",
       "Vàng | AI phát hiện vấn đề nội dung | 95% cần tải"
     ])
-    expect(tables.some((t) => t.includes("Screen Flow"))).toBe(true)
-    expect(tables.some((t) => t.includes("5.9 Team Notes"))).toBe(true)
-    expect(all.indexOf("Thiếu mục theo mẫu FPT")).toBeLessThan(all.indexOf("Cờ theo mục"))
-    expect(tables.some((t) => t.includes("Business Rules | File không có | Bổ sung qua change request"))).toBe(true)
-    expect(tables.some((t) => t.includes("Domain-Specific Attributes | Có tiêu đề, chưa có nội dung | Bổ sung qua change request"))).toBe(true)
+    expect(tables[0]).not.toContain("mẫu FPT")
     expect(tables.some((t) => t.includes("Phụ lục A Biên bản họp | Mục riêng (ngoài FPT) | 0 | 0"))).toBe(true)
     expect(tables.some((t) => t.includes("Chức năng FR-3.2.1 — Điều kiện kích hoạt | Learner submits | 50%"))).toBe(true)
   })
@@ -95,18 +86,15 @@ describe("renderGapReportDocx — xuất .docx mở được", () => {
   it("báo cáo rỗng ⇒ câu 'không có' thay cho bảng, file vẫn hợp lệ", async () => {
     const empty = gapReportSchema.parse({
       ...REPORT,
-      totals: { red: 0, yellow: 0, missing_sections: 0, unmapped_headings: 0, low_confidence_fields: 0, missing_fpt_sections: 0, unrendered_diagrams: 0 },
-      missing_fpt_sections: [],
+      totals: { red: 0, yellow: 0, low_confidence_fields: 0, unrendered_diagrams: 0 },
       layout: [],
       sections: [],
       unrendered_diagrams: [],
-      missing_sections: [],
-      unmapped_headings: [],
       low_confidence_fields: []
     })
     const all = (await texts(await renderGapReportDocx(empty, "Rỗng"))).map((b) => b.text)
     expect(all).toEqual(
-      expect.arrayContaining(["Không có cờ nào đang mở.", "File có đủ tiêu đề các mục mẫu FPT.", "Mọi tiêu đề đều khớp.", "Không có.", "Đủ mọi đầu mục mẫu FPT.", "Mọi hình đã có bản vẽ."])
+      expect.arrayContaining(["Không có cờ nào đang mở.", "Không có.", "Mọi hình đã có bản vẽ."])
     )
   })
 

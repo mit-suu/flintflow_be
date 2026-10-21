@@ -231,8 +231,8 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 ### 4.3 Endpoint mới
 | # | Method + path | Request | Response `data` | Lỗi riêng |
 | --- | --- | --- | --- | --- |
-| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` | `hidden` | `enabled`), `missing` (đầu mục mẫu FPT mà file không có ⇒ "Thiếu"; từ 2026-10-06 không còn cờ `section_empty` ở mode 1 — mục thiếu không bắt buộc, chỉ liệt kê ở gap report), `section_ids`, `reason` | `IMPORT_INVALID_STATE` (chưa finalize) |
-| 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt step của đầu mục FPT hoặc step đã có dữ liệu) |
+| 32 | `GET /projects/:id/step-plan` | — | `stepPlanResponseSchema` — mỗi step: `state` (`applied` có nội dung / bước luôn chạy · `hidden` file không có đầu mục hoặc Brief · `enabled` có đầu mục mà trống, hoặc người dùng bật), `section_ids`, `reason` — mẫu FPT không bắt buộc (FLF-312), không còn `missing` | `IMPORT_INVALID_STATE` (chưa finalize) |
+| 33 | `PATCH /projects/:id/step-plan` | `stepPlanPatchRequestSchema` `{ step_id, enabled }` | `stepPlanResponseSchema` | `STEP_NOT_IN_PLAN` (404), `CORE_STEP_REQUIRED` (409 — tắt bước luôn chạy hoặc step đã có dữ liệu) |
 
 ### 4.4 Thay đổi khác
 - `templateProfileDtoSchema` thêm `layout[]` `{ order, heading_text, level, section_id }` — thứ tự + tiêu đề mục của file upload (`section_id` = section FPT hoặc `custom:<id>`). Import cũ ⇒ `[]`.
@@ -423,6 +423,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-20 | FLF-312 — bỏ bắt buộc mẫu FPT | Gap report bỏ `missing_fpt_sections[]`, `missing_sections[]`, `unmapped_headings[]` và các `totals` tương ứng; `TemplateProfile` bỏ `required_sections`; #32 bỏ `missing` — đầu mục FPT file không có ⇒ `hidden`, có heading mà trống ⇒ `enabled`; #33 `CORE_STEP_REQUIRED` chỉ còn cho bước luôn chạy / step đã có dữ liệu — breaking (FE cập nhật cùng đợt) |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |
 | 2026-10-08 | upload lớn + finalize nền | §4.16: file #2/#11 tối đa 40 MB (`413` có `meta.max_mb`); #8 và #10 (`checking`/`baselining`) trả ngay, chạy nền, FE poll #4; `finalizeResponseSchema.baseline`/`flags` nullable (luôn `null`); `paused: resume_later` đặt được ở `baselining` (job finalize lỗi / mất ⇒ hoàn về trước finalize) — contract-change, chờ 4/4 |
