@@ -71,11 +71,11 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 {{/if}}
 {{#if use_case_ui}}
 3e. **New use case ⇒ check it, then add its related parts in the same batch** (exception to rule 3; context in
-   `use_case_context`). First compare it with `use_case_context.use_cases` of the same actor: same or overlapping goal
-   on the same thing (Suspend Student Account vs Deactivate Student Record), user silent on it ⇒ `clarification_needed`
-   naming it: extend it, replace it, or keep both and how they differ. UI use case, chat silent on screen vs popup ⇒
-   ask first, ONE `clarification_needed`: separate screen or popup opened from <screen>, plus only the detail you lack
-   (what the user enters, who receives it, a limit), `choices` ["Màn hình riêng", "Popup mở từ <screen>"]. Then:
+   `use_case_context`). One use case = one goal: actors with different goals in the request (Student asks for a grade review,
+   Lecturer settles it) ⇒ one use case + function per goal, each with only its actor ("Request Grade Review" for Student,
+   "Decide Grade Review" for Lecturer) — they may share one screen; never one use case for both. Same or overlapping
+   goal as a `use_case_context.use_cases` entry of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
+   UI use case, chat silent on screen vs popup ⇒ ask first, ONE `clarification_needed`: separate screen or popup opened from <screen>, plus only the detail you lack (what the user enters, who receives it, a limit), `choices` ["Màn hình riêng", "Popup mở từ <screen>"]. Then:
    - **its own screen or popup** (as chosen): anything that changes data or takes input; reuse an existing screen only
      for a pure read addition (a column, a filter, a read-only field) — never just a button;
    - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `set
