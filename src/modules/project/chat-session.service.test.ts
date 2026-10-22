@@ -572,4 +572,37 @@ describe("FLF-260 — chat trả lời theo ngôn ngữ user đang viết", () =
     expect(res.events).toEqual([expect.objectContaining({ type: "finish", data: { ...previewCard("en"), preview: PREVIEW } })])
     expect(aiMocks.executeAiActionStream).not.toHaveBeenCalled()
   })
+
+  it("SSE: user dừng giữa lượt stream ⇒ signal tới executeAiActionStream, giữ tin user, không ghi tin AI, không gửi error", async () => {
+    const id = await plainSession()
+    const stop = new AbortController()
+    aiMocks.executeAiActionStream.mockImplementation(async () => {
+      stop.abort()
+      throw new Error("aborted")
+    })
+    const res = sseResponse()
+
+    await sendMessageStream(PROJECT, id, "Explain the booking flow", "overview", USER, res as unknown as Response, undefined, { signal: stop.signal })
+
+    expect(aiMocks.executeAiActionStream.mock.calls[0][5]).toEqual({ signal: stop.signal })
+    const messages = stored(id).messages as Array<{ role: string; content: string }>
+    expect(messages[messages.length - 1]).toMatchObject({ role: "user", content: "Explain the booking flow" })
+    expect(res.events).toEqual([])
+  })
+
+  it("SSE: dừng sát lúc model vừa trả xong ⇒ vẫn không ghi tin AI", async () => {
+    const id = await plainSession()
+    const stop = new AbortController()
+    aiMocks.executeAiActionStream.mockImplementation(async () => {
+      stop.abort()
+      return reply
+    })
+    const res = sseResponse()
+
+    await sendMessageStream(PROJECT, id, "Explain the booking flow", "overview", USER, res as unknown as Response, undefined, { signal: stop.signal })
+
+    const messages = stored(id).messages as Array<{ role: string }>
+    expect(messages[messages.length - 1].role).toBe("user")
+    expect(res.events).toEqual([])
+  })
 })

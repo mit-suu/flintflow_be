@@ -29,6 +29,21 @@ export const tableGrid = (table: TableBlockLike, blocks: readonly TableBlockLike
   return grid.map((row) => Array.from(row ?? [], (cell) => (cell ?? "").trim()))
 }
 
+/**
+ * Ô thụt lề (`"r:c"`): đoạn đầu của ô mở bằng ≥ 2 dấu cách / tab. `rows` lưu trên block bảng đã cắt khoảng trắng, nên đọc
+ * từ block `table_cell` — ma trận phân quyền mẫu FPT thụt lề dòng thao tác dưới màn ("    Confirm / Reject Order").
+ */
+export const indentedCells = (table: TableBlockLike, blocks: readonly TableBlockLike[]): Set<string> => {
+  const out = new Set<string>()
+  const prefix = `${table.anchor.xml_path}/tr[`
+  for (const b of blocks) {
+    if (b.kind !== "table_cell" || !b.anchor.xml_path.startsWith(prefix) || !b.anchor.xml_path.endsWith("/p[0]")) continue
+    const m = CELL_PATH.exec(b.anchor.xml_path)
+    if (m && /^(?:[  ]{2,}|\t)\S/.test(b.text)) out.add(`${m[1]}:${m[2]}`)
+  }
+  return out
+}
+
 /** Ô của bảng theo hàng: `rows` đã lưu, không có thì dựng từ block ô. */
 export const tableRows = (table: TableBlockLike, blocks: readonly TableBlockLike[]): string[][] =>
   table.rows?.length ? table.rows.map((row) => row.map((cell) => (cell ?? "").trim())) : tableGrid(table, blocks)
