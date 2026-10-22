@@ -9,9 +9,8 @@
  * dự án 7 màn tốn khoảng 400 credit ở lượt test, mục tiêu còn khoảng 250 sau khi giảm điểm dừng, nên 100
  * credit/tháng không đủ để đi hết một dự án nhỏ dù chỉ một lần.
  *
- * TODO(monthly_reset): cron reset quota hằng tháng theo
- * `Subscription.monthlyCreditsAllotment` (ghi CreditTransaction type
- * `monthly_reset`) để ngoài vòng một — xem task-04 "Ghi chú / rủi ro".
+ * Hết kỳ (`periodDays`): job `system/renew-subscriptions` hạ gói trả phí về Free và nạp ví lên tới
+ * `monthlyCredits` của gói (CreditTransaction `monthly_reset`) — `subscription-renewal.service.ts` (UC-80).
  */
 
 export type PlanId = "free" | "pro"

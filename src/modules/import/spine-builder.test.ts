@@ -298,6 +298,40 @@ describe("buildImportOps", () => {
     ])
   })
 
+  it("ma trận FPT: ô 'A / B' ⇒ quyền trên từng màn; dòng con không phải màn ⇒ thao tác trên màn cha", () => {
+    const spine = createEmptySpine({ name: "TechMart" })
+    const dropped: DroppedPermission[] = []
+    const ops = buildImportOps(
+      spine,
+      [
+        { entity: "screens", id: "SCR-01", value: { name: "Search Results" } },
+        { entity: "screens", id: "SCR-02", value: { name: "Product Detail" } },
+        { entity: "screens", id: "SCR-03", value: { name: "Order Queue" } },
+        { entity: "screens", id: "SCR-04", value: { name: "Cancel Order" } },
+        { entity: "roles", id: "R01", value: { name: "Guest" } },
+        { entity: "roles", id: "R02", value: { name: "Sales Staff" } },
+        { entity: "permissions", id: "P001", value: { screen_id: "Search Results / Product Detail", role_id: "Guest", action: "access" } },
+        { entity: "permissions", id: "P002", value: { screen_id: "Order Queue", role_id: "Sales Staff", action: "access" } },
+        { entity: "permissions", id: "P003", value: { screen_id: "Confirm / Reject Order", parent_screen: "Order Queue", role_id: "Sales Staff", action: "access" } },
+        // Dòng con trùng tên một màn ⇒ vẫn là màn đó
+        { entity: "permissions", id: "P004", value: { screen_id: "Cancel Order", parent_screen: "Order Queue", role_id: "Sales Staff", action: "access" } },
+        // Một phần không khớp màn nào ⇒ không đoán, vẫn đặt cờ
+        { entity: "permissions", id: "P005", value: { screen_id: "Search Results / Wishlist", role_id: "Guest", action: "access" } }
+      ],
+      dropped
+    )
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.permissions.map((p) => [p.screen_id, p.role_id, p.action])).toEqual([
+      ["SCR-01", "R01", "access"],
+      ["SCR-02", "R01", "access"],
+      ["SCR-03", "R02", "access"],
+      ["SCR-03", "R02", "Confirm / Reject Order"],
+      ["SCR-04", "R02", "access"]
+    ])
+    expect(new Set(plan.spine.permissions.map((p) => p.id)).size).toBe(5)
+    expect(dropped).toEqual([{ screen: "Search Results / Wishlist", role: "Guest", missing: "screen" }])
+  })
+
   it("FLF-252: quan hệ dạng 'động từ + Thực thể' (ERD FlintFlow xuất ra) ⇒ thực thể + nhãn quan hệ", () => {
     const pool = [
       { id: "E01", name: "Schedule Slot" },
