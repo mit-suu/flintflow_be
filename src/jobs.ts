@@ -9,6 +9,7 @@ export const loadJobDefinitions = async (): Promise<void> => {
     import("./modules/import/credit-flow.service.js"),
     import("./modules/change-request/embedding/embedding-sync.service.js"),
     import("./shared/email/email.service.js"),
-    import("./shared/ai/credit-reservation.jobs.js")
+    import("./shared/ai/credit-reservation.jobs.js"),
+    import("./modules/billing/subscription-renewal.jobs.js")
   ])
 }
