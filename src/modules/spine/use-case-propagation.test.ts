@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
-import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion } from "./use-case-propagation.js"
+import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, newUseCaseScreenIssues, useCaseScreenNote, useCaseScreenProblemText, wantsSharedScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 /** Fixture 19 màn: S-9, mọi bước accepted. */
@@ -170,6 +170,75 @@ describe("addedScreenIds / addsUseCaseOrScreen", () => {
   })
 })
 
+describe("newUseCaseScreenIssues — phần giao diện còn thiếu của use case mới, theo lựa chọn của user", () => {
+  /** Lệnh sinh hai use case: Business Analyst (R2) gửi yêu cầu, Founder (R1) duyệt — màn mở từ S01. */
+  const withUseCases = (pairs: { uc: string; actor: string; role: string; screen: string; edge?: boolean; view?: boolean }[]): Spine => {
+    const after = structuredClone(FIXTURE)
+    for (const [i, p] of pairs.entries()) {
+      const fn = `FN9${i}`
+      if (!after.screens.some((s) => s.id === p.screen)) after.screens.push({ ...FIXTURE.screens[1], id: p.screen, name: `Screen ${p.screen}`, flow_to: [] })
+      if (p.edge !== false) after.screens[0].flow_to.push(p.screen)
+      after.functions.push({ ...FIXTURE.functions[0], id: fn, screen_id: p.screen })
+      after.use_cases.push({ ...FIXTURE.use_cases[0], id: p.uc, name: `Use Case ${p.uc}`, actor_ids: [p.actor], function_ids: [fn] })
+      if (p.view !== false) after.permissions.push({ id: `P9${i}`, screen_id: p.screen, role_id: p.role, action: "view" })
+    }
+    return after
+  }
+  const shared = () =>
+    withUseCases([
+      { uc: "UC90", actor: "A02", role: "R2", screen: "S90" },
+      { uc: "UC91", actor: "A01", role: "R1", screen: "S90", edge: false }
+    ])
+
+  it("mỗi use case một màn mới có luồng vào và quyền ⇒ không thiếu gì", () => {
+    const after = withUseCases([
+      { uc: "UC90", actor: "A02", role: "R2", screen: "S90" },
+      { uc: "UC91", actor: "A01", role: "R1", screen: "S91" }
+    ])
+    expect(newUseCaseScreenIssues(FIXTURE, after)).toEqual([])
+  })
+
+  it("hai use case mới chung một màn mới, user không chọn dùng chung ⇒ nhắc tách", () => {
+    const issues = newUseCaseScreenIssues(FIXTURE, shared())
+    expect(issues).toEqual([{ kind: "shared_new_screen", use_case: "UC91", name: "Use Case UC91", other: "UC90", screen: "Screen S90" }])
+    expect(useCaseScreenProblemText(issues[0])).toContain("unless the user chose one shared screen")
+  })
+
+  it("user chọn dùng chung một màn ⇒ không nhắc gì (không ép tách)", () => {
+    expect(newUseCaseScreenIssues(FIXTURE, shared(), { allowShared: true })).toEqual([])
+  })
+
+  it("màn có sẵn dùng chung luôn được", () => {
+    const after = withUseCases([
+      { uc: "UC90", actor: "A02", role: "R2", screen: "S02", edge: false },
+      { uc: "UC91", actor: "A01", role: "R1", screen: "S02", edge: false }
+    ])
+    expect(newUseCaseScreenIssues(FIXTURE, after)).toEqual([])
+  })
+
+  it("màn mới không có cạnh vào / vai trò thiếu quyền view / chức năng không màn ⇒ báo từng chỗ", () => {
+    const after = withUseCases([
+      { uc: "UC90", actor: "A02", role: "R2", screen: "S90", edge: false },
+      { uc: "UC91", actor: "A01", role: "R1", screen: "S91", view: false }
+    ])
+    after.use_cases.push({ ...FIXTURE.use_cases[0], id: "UC92", name: "Use Case UC92", actor_ids: ["A03"], function_ids: [] })
+    expect(newUseCaseScreenIssues(FIXTURE, after).map((i) => `${i.kind}:${i.use_case}`)).toEqual(["no_edge:UC90", "no_view:UC91", "no_screen:UC92"])
+  })
+
+  it("use case mới của actor hệ thống / thời gian ⇒ không cần màn", () => {
+    const after = structuredClone(FIXTURE)
+    after.use_cases.push({ ...FIXTURE.use_cases[0], id: "UC90", name: "Send Weekly Report", actor_ids: ["A09"], function_ids: [] })
+    expect(newUseCaseScreenIssues(FIXTURE, after)).toEqual([])
+  })
+
+  it("useCaseScreenNote: ghi chú cho người dùng trên bản xem trước (vi / en), không có gì ⇒ null", () => {
+    const issues = newUseCaseScreenIssues(FIXTURE, shared())
+    expect(useCaseScreenNote(issues)).toContain('Nhắn "tách màn riêng"')
+    expect(useCaseScreenNote(issues, "en")).toContain('"separate screens"')
+    expect(useCaseScreenNote([])).toBeNull()
+  })
+})
+
 describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)", () => {
   const render = async (vars: Record<string, unknown>): Promise<string> => {
     const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
@@ -179,8 +248,9 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
   it("full ⇒ kiểm trùng use case + màn riêng khi có tương tác + chức năng đủ Functional Requirements", async () => {
     const prompt = await render({ use_case_mode: "full", use_case_ui: true })
     expect(prompt).toContain("One use case = one goal")
-    expect(prompt).toContain("goal as a `use_case_context.use_cases` entry of that actor")
-    expect(prompt).toContain("**its own screen or popup** (as chosen)")
+    expect(prompt).toContain("Same or overlapping goal as a `use_case_context.use_cases` entry")
+    expect(prompt).toContain("**The UI of each new use case is the user's call**")
+    expect(prompt).toContain("**the screen or popup the user chose**")
     expect(prompt).toContain('`choices` ["Màn hình riêng", "Popup mở từ <screen>"]')
     expect(prompt).toContain("`normal[]` steps, `abnormal[]` cases, `validations[]`")
     expect(prompt).not.toContain("the screen loop details it")
@@ -247,6 +317,33 @@ describe("màn hình riêng hay popup — người dùng chọn (FLF-311)", () =
     expect(screenKindChoice("Thêm use case X")).toBeNull()
     expect(screenKindChoice("người nhận là sinh viên", "User: thêm UC X\nAI: Màn hình riêng hay popup?")).toBeNull()
     expect(screenKindChoice("à không, màn hình riêng", "User: thêm UC X dạng popup")).toBe("screen")
+  })
+
+  it("screenKindChoice: chọn khác nhau cho từng use case trong một câu ⇒ null (để nguyên lựa chọn từng màn)", () => {
+    expect(screenKindChoice("1 màn hình riêng, 2 popup mở từ Class Grade Sheet")).toBeNull()
+    expect(screenKindChoice("popup à không, màn hình riêng")).toBe("screen")
+  })
+
+  it("wantsSharedScreen: user chọn dùng chung một màn", () => {
+    expect(wantsSharedScreen("Dùng chung một màn hình")).toBe(true)
+    expect(wantsSharedScreen("ok", "User: thêm UC X\nAI: hỏi\nUser: hai use case cùng một màn")).toBe(true)
+    expect(wantsSharedScreen("One shared screen")).toBe(true)
+    expect(wantsSharedScreen("Mỗi use case một màn hình riêng")).toBe(false)
+  })
+
+  it("screenKindQuestion: lô sinh nhiều use case có giao diện ⇒ hỏi cho từng use case, có lựa chọn dùng chung", () => {
+    const ops: Op[] = [
+      { op: "add", path: "screens[]", value: { id: "$s1", name: "Grade Review", feature_id: "F4", flow_to: [], tabs: [] } },
+      { op: "add", path: "use_cases[]", value: { name: "Request Grade Review", actor_ids: ["A02"], description: "…" } },
+      { op: "add", path: "use_cases[]", value: { name: "Decide Grade Review", actor_ids: ["A01"], description: "…" } },
+      { op: "add", path: "use_cases[]", value: { name: "Send Review Reminder", actor_ids: ["A09"], description: "…" } }
+    ]
+    const ask = screenKindQuestion(FIXTURE, ops)
+    expect(ask?.text).toContain('1. "Request Grade Review" (Business Analyst)')
+    expect(ask?.text).toContain('2. "Decide Grade Review" (Founder)')
+    expect(ask?.text).not.toContain("Send Review Reminder")
+    expect(ask?.choices).toEqual(["Mỗi use case một màn hình riêng", "Dùng chung một màn hình", "Popup"])
+    expect(screenKindQuestion(FIXTURE, ops, "en")?.choices[1]).toBe("One shared screen")
   })
 
   it("screenKindQuestion: câu hỏi nêu màn mở ra (từ cạnh luồng) + hai lựa chọn; lô không thêm màn ⇒ null", () => {

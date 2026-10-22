@@ -38,11 +38,16 @@ import {
   screenKindQuestion,
   isAddUseCaseInstruction,
   messagesReady,
+  newUseCaseScreenIssues,
   normalizeUseCaseBatch,
   useCaseContext,
   useCaseMode,
   useCaseOverlapNote,
-  useCaseOverlaps
+  useCaseOverlaps,
+  useCaseScreenNote,
+  useCaseScreenProblemText,
+  wantsSharedScreen,
+  type UseCaseMode
 } from "./use-case-propagation.js"
 import { layoutRenderDeps, renderChangedIfAvailable } from "../diagram/diagram.service.js"
 import type { Spine, SpineRecord } from "./spine.types.js"
@@ -504,7 +509,19 @@ const SCHEMA_FIX =
  * - lô không áp thử được (sai schema, phá bất biến) ⇒ các violation;
  * - FLF-243: tên use case model TỰ đặt mà cờ vàng `usecase_name_*` sẽ bắt. Tên user gõ nguyên văn thì để yên.
  */
-const batchProblems = (spine: Spine, ops: Op[], instruction: string): string[] => {
+/** Lệnh thêm use case có màn: phần giao diện còn thiếu của các use case mới (lô không áp thử được ⇒ để lỗi bất biến lo). */
+const screenIssuesOf = (spine: Spine, ops: Op[], ucMode: UseCaseMode | null, allowShared: boolean) => {
+  if (ops.length === 0 || (ucMode !== "screen_pending" && ucMode !== "full")) return []
+  try {
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
+    return newUseCaseScreenIssues(spine, plan.spine, { allowShared })
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return []
+    throw err
+  }
+}
+
+const batchProblems = (spine: Spine, ops: Op[], instruction: string, ucMode: UseCaseMode | null = null, allowShared = false): string[] => {
   if (ops.length === 0) return []
   let plan: ReturnType<typeof planTransaction>
   try {
@@ -518,7 +535,9 @@ const batchProblems = (spine: Spine, ops: Op[], instruction: string): string[] =
   const naming = useCaseNameIssues(spine, plan.spine)
     .filter((issue) => !asked.includes(issue.name.toLowerCase()))
     .map((issue) => issue.message)
-  return naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []
+  // Lệnh thêm use case có màn: mỗi use case mới phải có màn (theo lựa chọn của user), luồng vào và quyền
+  const screens = screenIssuesOf(spine, ops, ucMode, allowShared).map(useCaseScreenProblemText)
+  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens]
 }
 
 /** Model trả output sai khuôn (không op, không câu hỏi) ⇒ hỏi lại user thay vì đẩy lỗi Zod tiếng Anh ra giao diện. */
@@ -569,6 +588,8 @@ const opsFromInstruction = async (
   // FLF-311: lệnh thêm use case (hoặc câu trả lời cho câu hỏi làm rõ của lệnh đó) ⇒ model soạn đủ phần liên quan
   const addsUseCase = isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history))
   const ucMode = addsUseCase ? useCaseMode(spine) : null
+  // FLF-311: người dùng chọn cho các use case mới dùng chung một màn ⇒ không nhắc tách màn
+  const allowShared = ucMode !== null && wantsSharedScreen(instruction, history)
   // Op chỉ số trên mảng chuỗi (`normal[2]`) ⇒ set cả mảng (op engine cấm chỉ số)
   const prepare = (ops: Op[]): Op[] => expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops))
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
@@ -625,7 +646,7 @@ const opsFromInstruction = async (
     if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) result = forced
   }
   if (!result.data.clarification_needed?.trim()) {
-    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction)
+    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared)
     if (problems.length > 0) {
       const retry = await call(problems.join("\n")).catch((err: unknown) => {
         if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
@@ -650,7 +671,9 @@ const opsFromInstruction = async (
       if (ask) return { ops: [], clarification: ask.text, notes: null, choices: ask.choices }
     }
   }
-  const notes = result.data.notes ? nameElementIds(result.data.notes, spine) : null
+  // Còn thiếu sau lượt soạn lại ⇒ báo trên bản xem trước, người dùng quyết định (không chặn)
+  const screenNote = useCaseScreenNote(screenIssuesOf(spine, ops, ucMode, allowShared), replyLanguage ?? DEFAULT_REPLY_LANGUAGE)
+  const notes = [result.data.notes ? nameElementIds(result.data.notes, spine) : null, screenNote].filter(Boolean).join("\n") || null
   const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
   return { ops, clarification: null, notes, ...localized, language: languagePairOf(language) }
 }
