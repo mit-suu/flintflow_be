@@ -178,7 +178,8 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
 
   it("full ⇒ kiểm trùng use case + màn riêng khi có tương tác + chức năng đủ Functional Requirements", async () => {
     const prompt = await render({ use_case_mode: "full", use_case_ui: true })
-    expect(prompt).toContain("First compare it with `use_case_context.use_cases` of the same actor")
+    expect(prompt).toContain("One use case = one goal")
+    expect(prompt).toContain("goal as a `use_case_context.use_cases` entry of that actor")
     expect(prompt).toContain("**its own screen or popup** (as chosen)")
     expect(prompt).toContain('`choices` ["Màn hình riêng", "Popup mở từ <screen>"]')
     expect(prompt).toContain("`normal[]` steps, `abnormal[]` cases, `validations[]`")
@@ -187,7 +188,7 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
 
   it("screen_pending ⇒ cùng luật kiểm trùng + màn, chức năng tối thiểu để vòng S-5 mô tả", async () => {
     const prompt = await render({ use_case_mode: "screen_pending", use_case_ui: true })
-    expect(prompt).toContain("First compare it with `use_case_context.use_cases`")
+    expect(prompt).toContain("One use case = one goal")
     expect(prompt).toContain("the screen loop details it")
     expect(prompt).not.toContain("`normal[]` steps")
   })
