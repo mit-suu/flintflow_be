@@ -243,6 +243,100 @@ export const addedScreenIds = (before: Pick<Spine, "screens">, after: Pick<Spine
 export const addsUseCaseOrScreen = (before: Pick<Spine, "screens" | "use_cases">, after: Pick<Spine, "screens" | "use_cases">): boolean =>
   after.use_cases.length > before.use_cases.length || addedScreenIds(before, after).length > 0
 
+// ─── mỗi use case mới có giao diện: màn của nó, có luồng vào, có quyền ─────────────────────
+
+type ScreenParts = Pick<Spine, "use_cases" | "functions" | "screens" | "actors" | "roles" | "permissions">
+
+export type UseCaseScreenIssue =
+  | { kind: "no_screen"; use_case: string; name: string }
+  | { kind: "shared_new_screen"; use_case: string; name: string; other: string; screen: string }
+  | { kind: "no_edge"; use_case: string; screen: string }
+  | { kind: "no_view"; use_case: string; role: string }
+
+/**
+ * Use case mới của actor người dùng (chế độ có màn) mà thiếu phần giao diện — để §3.1.1 có luồng, §3.1.2 có bố cục và
+ * §3.1.3 có quyền cho use case đó. Kiểu giao diện (màn riêng, popup, màn có sẵn, dùng chung) là lựa chọn của người dùng;
+ * ở đây chỉ bắt chỗ THIẾU:
+ * - không chức năng nào thuộc màn ⇒ thiếu màn;
+ * - hai use case mới cùng một màn MỚI mà người dùng không chọn dùng chung (`allowShared`) ⇒ nhắc tách màn (màn có sẵn
+ *   dùng chung luôn được — phần thêm chỉ đọc, luật 3e);
+ * - màn mới không màn nào mở tới (`flow_to`) ⇒ không có trong screen flow;
+ * - vai trò của actor không có quyền `view` trên màn của use case ⇒ thiếu dòng §3.1.3.
+ */
+export const newUseCaseScreenIssues = (
+  before: Pick<Spine, "use_cases" | "screens">,
+  after: ScreenParts,
+  options: { allowShared?: boolean } = {}
+): UseCaseScreenIssue[] => {
+  const existedUc = new Set(before.use_cases.map((u) => u.id))
+  const existedScreen = new Set(before.screens.map((s) => s.id))
+  const human = new Set(after.actors.filter((a) => a.kind === "human").map((a) => a.id))
+  const screenOf = new Map(after.functions.map((f) => [f.id, f.screen_id]))
+  const nameOf = new Map(after.screens.map((s) => [s.id, s.name]))
+  const reachable = new Set(after.screens.flatMap((s) => s.flow_to))
+  const issues: UseCaseScreenIssue[] = []
+  const ownerOfNewScreen = new Map<string, string>()
+  for (const uc of after.use_cases.filter((u) => !existedUc.has(u.id) && u.actor_ids.some((id) => human.has(id)))) {
+    const screens = [...new Set(uc.function_ids.map((id) => screenOf.get(id)).filter((s): s is string => typeof s === "string"))]
+    if (screens.length === 0) {
+      issues.push({ kind: "no_screen", use_case: uc.id, name: uc.name })
+      continue
+    }
+    for (const screenId of screens.filter((s) => !existedScreen.has(s))) {
+      const other = ownerOfNewScreen.get(screenId)
+      if (other && !options.allowShared) issues.push({ kind: "shared_new_screen", use_case: uc.id, name: uc.name, other, screen: nameOf.get(screenId) ?? screenId })
+      if (!other) ownerOfNewScreen.set(screenId, uc.id)
+      if (!reachable.has(screenId) && !other) issues.push({ kind: "no_edge", use_case: uc.id, screen: nameOf.get(screenId) ?? screenId })
+    }
+    const roles = after.roles.filter((r) => r.actor_id !== null && uc.actor_ids.includes(r.actor_id) && human.has(r.actor_id))
+    for (const role of roles) {
+      if (screens.some((s) => after.permissions.some((p) => p.screen_id === s && p.role_id === role.id && p.action === "view"))) continue
+      issues.push({ kind: "no_view", use_case: uc.id, role: role.name })
+    }
+  }
+  return issues
+}
+
+/** Lỗi gửi model để soạn lại một lần (tiếng Anh, theo luật 3e). */
+export const useCaseScreenProblemText = (issue: UseCaseScreenIssue): string => {
+  switch (issue.kind) {
+    case "no_screen":
+      return `New use case ${issue.use_case} "${issue.name}" has no screen: put its function on a screen or popup the user chose (own, popup, existing or shared), with an edge into it (rule 3e).`
+    case "shared_new_screen":
+      return `New use cases ${issue.other} and ${issue.use_case} "${issue.name}" share the new screen "${issue.screen}" but the user did not ask to share: give each its own screen or popup, edge and permission rows, unless the user chose one shared screen (rule 3e).`
+    case "no_edge":
+      return `New screen "${issue.screen}" of ${issue.use_case} has no edge into it: set flow_to on the screen that opens it (rule 3e).`
+    case "no_view":
+      return `Role "${issue.role}" of ${issue.use_case} has no view permission on its screen: add a permissions[] row (rule 3e).`
+  }
+}
+
+/** Còn sót sau lượt soạn lại ⇒ ghi chú trên bản xem trước để người dùng quyết định, không chặn lượt áp. */
+export const useCaseScreenNote = (issues: readonly UseCaseScreenIssue[], language: "vi" | "en" = "vi"): string | null => {
+  if (issues.length === 0) return null
+  const line = (issue: UseCaseScreenIssue): string => {
+    switch (issue.kind) {
+      case "no_screen":
+        return language === "en"
+          ? `Use case "${issue.name}" has no screen yet, so it is missing from the screens flow (§3.1.1) and screen layouts (§3.1.2).`
+          : `Use case "${issue.name}" chưa có màn hình nên chưa có trong screen flow (§3.1.1) và bố cục màn (§3.1.2).`
+      case "shared_new_screen":
+        return language === "en"
+          ? `Use cases ${issue.other} and "${issue.name}" share the screen "${issue.screen}". Say "separate screens" if each should have its own.`
+          : `Use case ${issue.other} và "${issue.name}" đang dùng chung màn "${issue.screen}". Nhắn "tách màn riêng" nếu muốn mỗi use case một màn.`
+      case "no_edge":
+        return language === "en"
+          ? `Screen "${issue.screen}" has no screen leading to it, so it is not reachable in the screens flow.`
+          : `Màn "${issue.screen}" chưa có màn nào mở tới nên chưa nằm trong luồng màn hình.`
+      case "no_view":
+        return language === "en"
+          ? `Role "${issue.role}" has no view permission on the screen of ${issue.use_case} (§3.1.3).`
+          : `Vai trò "${issue.role}" chưa có quyền xem trên màn của ${issue.use_case} (§3.1.3).`
+    }
+  }
+  return issues.map(line).join("\n")
+}
+
 // ─── trùng / chồng mục tiêu với use case có sẵn ─────────────────────
 
 /** Động từ cùng nhóm nghĩa ⇒ hai use case cùng đối tượng là cùng một việc (Suspend Account ~ Deactivate Record). */
@@ -319,22 +413,31 @@ export type ScreenKind = "screen" | "popup"
 
 const POPUP_WORDS = /(pop[\s-]?up|hộp thoại|dialog|modal)/i
 const SCREEN_WORDS = /(màn hình riêng|màn riêng|trang riêng|màn hình mới|trang mới|separate screen|full screen|new screen|own screen|new page)/i
+const SHARED_WORDS = /(dùng chung|chung một màn|chung 1 màn|cùng một màn|cùng 1 màn|một màn hình chung|share[sd]? (one|a|the same) screen|same screen|one shared screen)/i
+
+const userTexts = (instruction: string, history: string): string[] => [
+  ...history.split("\n").filter((l) => l.startsWith("User:")).map((l) => l.slice(5)),
+  instruction
+]
 
 /**
  * Lựa chọn màn riêng / popup trong lời USER (câu lệnh + các tin `User:` của đoạn hội thoại) — lời AI không tính, vì câu
- * hỏi của AI nhắc cả hai. Nhắc sau cùng thắng ("popup… à không, màn hình riêng").
+ * hỏi của AI nhắc cả hai. Nhắc sau cùng thắng ("popup… à không, màn hình riêng"). Một câu chọn khác nhau cho từng use
+ * case ("Request màn riêng, Decide popup") ⇒ `null`: model đã soạn theo câu đó, code không ép một kiểu cho cả lô.
  */
 export const screenKindChoice = (instruction: string, history = ""): ScreenKind | null => {
-  const userLines = history.split("\n").filter((l) => l.startsWith("User:")).map((l) => l.slice(5))
   let choice: ScreenKind | null = null
-  for (const text of [...userLines, instruction]) {
+  for (const text of userTexts(instruction, history)) {
     const popup = text.search(POPUP_WORDS)
     const screen = text.search(SCREEN_WORDS)
     if (popup < 0 && screen < 0) continue
-    choice = screen > popup ? "screen" : "popup"
+    choice = popup >= 0 && screen >= 0 && !/(à không|à mà thôi|nhầm|I mean|actually)/i.test(text) ? null : screen > popup ? "screen" : "popup"
   }
   return choice
 }
+
+/** Người dùng muốn các use case mới dùng chung một màn ("dùng chung một màn", "same screen") — không bắt tách màn. */
+export const wantsSharedScreen = (instruction: string, history = ""): boolean => userTexts(instruction, history).some((t) => SHARED_WORDS.test(t))
 
 const addedScreenOps = (ops: readonly Op[]): Element[] => ops.filter((op) => isAdd(op, "screens")).map((op) => op.value as Element)
 
@@ -351,7 +454,11 @@ export interface ScreenKindQuestion {
  * Lô có màn mới mà người dùng chưa nói màn riêng hay popup ⇒ câu hỏi kèm hai lựa chọn (thẻ chọn nhanh ở FE). Màn mở ra
  * nó lấy từ cạnh luồng của lô (`set screens[id=…].flow_to` chứa id màn mới). Lô không thêm màn ⇒ `null`.
  */
-export const screenKindQuestion = (spine: Pick<Spine, "screens">, ops: readonly Op[], language: "vi" | "en" = "vi"): ScreenKindQuestion | null => {
+export const screenKindQuestion = (
+  spine: Pick<Spine, "screens" | "actors">,
+  ops: readonly Op[],
+  language: "vi" | "en" = "vi"
+): ScreenKindQuestion | null => {
   const added = addedScreenOps(ops)
   if (added.length === 0) return null
   const newIds = new Set(added.map((s) => String(s.id)))
@@ -360,6 +467,28 @@ export const screenKindQuestion = (spine: Pick<Spine, "screens">, ops: readonly 
     .find((op) => (op.value as unknown[]).some((v) => newIds.has(String(v))))
     ?.path.match(/^screens\[id=([^\]]+)\]/)?.[1]
   const host = spine.screens.find((s) => s.id === hostId)?.name
+  // Lệnh sinh nhiều use case có giao diện ⇒ hỏi giao diện cho TỪNG use case, gợi ý vài cách hay gặp; trả lời tự do vẫn được
+  const human = new Set(spine.actors.filter((a) => a.kind === "human").map((a) => a.id))
+  const actorName = new Map(spine.actors.map((a) => [a.id, a.name]))
+  const uiUseCases = ops
+    .filter((op) => isAdd(op, "use_cases"))
+    .map((op) => op.value as Element)
+    .filter((u) => Array.isArray(u.actor_ids) && (u.actor_ids as unknown[]).some((id) => human.has(String(id))))
+  if (uiUseCases.length > 1) {
+    const list = uiUseCases
+      .map((u, i) => `${i + 1}. "${String(u.name ?? "")}" (${(u.actor_ids as unknown[]).map((id) => actorName.get(String(id)) ?? String(id)).join(", ")})`)
+      .join("\n")
+    if (language === "en") {
+      return {
+        text: `This request adds ${uiUseCases.length} use cases that need a UI:\n${list}\nHow should each one look: its own screen, a popup${host ? ` opened from "${host}"` : ""}, an existing screen, or one screen they share? You can answer per use case (e.g. "1 separate screen, 2 popup").`,
+        choices: ["Each use case its own screen", "One shared screen", host ? `Popups opened from ${host}` : "Popups"]
+      }
+    }
+    return {
+      text: `Yêu cầu này sinh ${uiUseCases.length} use case cần giao diện:\n${list}\nMỗi use case dùng giao diện nào: màn hình riêng, popup${host ? ` mở từ "${host}"` : ""}, một màn có sẵn, hay dùng chung một màn? Bạn có thể trả lời riêng từng use case (vd. "1 màn hình riêng, 2 popup").`,
+      choices: ["Mỗi use case một màn hình riêng", "Dùng chung một màn hình", host ? `Popup mở từ ${host}` : "Popup"]
+    }
+  }
   const name = String(added[0].name ?? "")
   if (language === "en") {
     return {

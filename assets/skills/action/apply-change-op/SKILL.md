@@ -73,14 +73,14 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 3e. **New use case ⇒ check it, then add its related parts in the same batch** (exception to rule 3; context in
    `use_case_context`). One use case = one goal: actors with different goals in the request (Student asks for a grade review,
    Lecturer settles it) ⇒ one use case + function per goal, each with only its actor ("Request Grade Review" for Student,
-   "Decide Grade Review" for Lecturer) — they may share one screen; never one use case for both. Same or overlapping
-   goal as a `use_case_context.use_cases` entry of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
-   UI use case, chat silent on screen vs popup ⇒ ask first, ONE `clarification_needed`: separate screen or popup opened from <screen>, plus only the detail you lack (what the user enters, who receives it, a limit), `choices` ["Màn hình riêng", "Popup mở từ <screen>"]. Then:
-   - **its own screen or popup** (as chosen): anything that changes data or takes input; reuse an existing screen only
-     for a pure read addition (a column, a filter, a read-only field) — never just a button;
+   "Decide Grade Review" for Lecturer); never one use case for both. Same or overlapping goal as a `use_case_context.use_cases` entry
+   of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
+   **The UI of each new use case is the user's call**: its own screen, a popup opened from <screen>, an existing screen, or one screen shared by the new use cases. Chat silent ⇒ ask first, ONE `clarification_needed` (several UI use cases ⇒ list them, the user may answer per use case), plus only the detail you lack (what the user enters, who receives it, a limit), `choices` ["Màn hình riêng", "Popup mở từ <screen>"]. Follow the answer exactly; nothing said for one ⇒ its own screen. Then:
+   - **the screen or popup the user chose**; when you propose: anything that changes data or takes input gets a new one, an
+     existing screen fits a pure read addition (a column, a filter, a read-only field) — never just a button;
    - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `set
      screens[id=…].flow_to` to the old list plus the new screen on the screen that opens it, so it is reachable;
-   - one `permissions[]` row per role of the actor (`view`, and `create`/`update`/`delete` when the function does it);
+   - one `permissions[]` row per role of each actor on its screen, shared screen included (`view`, plus `create`/`update`/`delete` it does);
    - the function on that screen (system/time actor ⇒ only a function, `screen_id: null`). Declare temporary ids as
      each added element's own `"id": "$newFn"` / `"id": "$newScreen"`; `$newFn` goes in `function_ids`. Code sets
      `order`, `detail_status`; layout and diagrams are drawn after apply.
