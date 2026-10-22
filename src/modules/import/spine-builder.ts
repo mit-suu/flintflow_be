@@ -121,8 +121,8 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
   const of = (entity: string) => entities.filter((e) => e.entity === entity && e.id !== null)
   const existing = (arr: { id: string }[]) => new Set(arr.map((x) => x.id))
   // Giữ chỗ cả id trích được trong lô — không thì feature "General" có thể nhận trùng F-01 của tài liệu (FLF-179)
-  const ids = (entity: "features" | "functions") => [...existing(spine[entity]), ...of(entity).map((e) => e.id!)]
-  const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions") })
+  const ids = (entity: "features" | "functions" | "permissions") => [...existing(spine[entity]), ...of(entity).map((e) => e.id!)]
+  const alloc = new IdAllocator({ features: ids("features"), functions: ids("functions"), permissions: ids("permissions") })
 
   // Chỉ mục tên ⇒ id để phân giải tham chiếu ghi bằng tên (vd cột "Actor" của bảng UC). So tên đã chuẩn hoá (FLF-251):
   // cột Feature ghi "3.2 Account Management" vẫn ra feature "Account Management"; mã gõ "UC01" ra "UC-01".
@@ -306,12 +306,29 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       extends: [...new Set(strList(u.value.extends).map(resolveUseCase).filter((x): x is string => !!x && x !== u.id))]
     })
   }
+  // Ô ghi nhiều màn ("Search Results / Product Detail") ⇒ từng màn, khi cả chuỗi không là một màn và mọi phần đều khớp màn
+  const resolveScreens = (ref: unknown): string[] => {
+    const one = resolveScreen(ref)
+    if (one) return [one]
+    const parts = str(ref).split(/\s*\/\s*/).filter(Boolean)
+    if (parts.length < 2) return []
+    const hits = parts.map(resolveScreen)
+    return hits.every((x): x is string => !!x) ? [...new Set(hits)] : []
+  }
   for (const p of of("permissions").filter(skip(spine.permissions))) {
-    const screenId = resolveScreen(p.value.screen_id ?? p.value.screen)
+    const ref = str(p.value.screen_id ?? p.value.screen)
+    let screenIds = resolveScreens(ref)
+    let action = str(p.value.action)
+    // Dòng con dưới một màn (FPT: "Order Queue" rồi "    Confirm / Reject Order") không phải màn ⇒ thao tác trên màn cha
+    const parent = str(p.value.parent_screen)
+    if (!screenIds.length && parent && action) {
+      screenIds = resolveScreens(parent)
+      if (screenIds.length) action = action === "access" ? ref : `${ref}: ${action}`
+    }
     const roleId = resolveRole(p.value.role_id ?? p.value.role)
-    const action = str(p.value.action)
-    if (screenId && roleId && action) add("permissions", { id: p.id, screen_id: screenId, role_id: roleId, action })
-    else if (action) dropped.push({ screen: str(p.value.screen_id ?? p.value.screen), role: str(p.value.role_id ?? p.value.role), missing: screenId ? "role" : "screen" })
+    if (screenIds.length && roleId && action) {
+      screenIds.forEach((screenId, i) => add("permissions", { id: i === 0 ? p.id : alloc.next("permissions"), screen_id: screenId, role_id: roleId, action }))
+    } else if (action) dropped.push({ screen: ref, role: str(p.value.role_id ?? p.value.role), missing: screenIds.length ? "role" : "screen" })
   }
   for (const n of of("nfrs").filter(skip(spine.nfrs))) {
     const statement = str(n.value.statement ?? n.value.description)
