@@ -9,8 +9,8 @@
 ```
 ---
 actionType: <tên action>       # BẮT BUỘC — khớp ActionType enum
-provider: glm                  # BẮT BUỘC — glm | anthropic | gemini
-aiModel: zai-org/GLM-5.3-Flash # BẮT BUỘC
+provider: anthropic                  # BẮT BUỘC — anthropic | glm | gemini
+aiModel: claude-sonnet-5-5 # BẮT BUỘC
 maxTokens: 1024                # BẮT BUỘC
 temperature: 0.3               # BẮT BUỘC
 isActive: true                 # tùy chọn, mặc định true

@@ -3,8 +3,8 @@ skill_id: project-classifier
 kind: content
 version: 0.2.0
 description: "S-1 Analyze & Validate Brief — extraction, project type/domain/complexity, conflicts, gap list"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

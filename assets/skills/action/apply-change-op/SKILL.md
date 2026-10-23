@@ -3,8 +3,8 @@ skill_id: apply-change-op
 kind: action
 version: 1.3.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 4096
 temperature: 0.2
 reads:

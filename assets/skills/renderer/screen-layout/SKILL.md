@@ -3,8 +3,8 @@ skill_id: screen-layout
 kind: renderer
 version: 2.1.0
 description: "S-5.3 Screen Layout — the model draws a low-fi PlantUML Salt wireframe of one core screen from its functions"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 4096
 temperature: 0.2
 reads:
