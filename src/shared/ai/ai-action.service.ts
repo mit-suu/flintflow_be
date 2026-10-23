@@ -15,6 +15,7 @@ import { MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsIn
 import { callLLM } from "./providers/llm.router.js"
 import type { LLMResponse, LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
+import { ANTHROPIC_EFFORT, anthropicMaxTokens } from "./providers/anthropic.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
 import { parseResponse } from "./response-parser.js"
@@ -399,11 +400,20 @@ export const executeAiActionStream = async <T = any>(
         yield mockRes.text
       })()
     } else {
+      // Anthropic: suy nghĩ ăn vào max_tokens và Sonnet 5.5 không nhận temperature — cùng tham số với `callAnthropic`
+      const isAnthropic = providerConfig.provider?.toLowerCase() === "anthropic"
       const streamResult = streamText({
         model: getAiSdkModel(providerConfig),
         prompt: finalPrompt,
-        temperature: providerConfig.temperature ?? 0.7,
-        maxOutputTokens: providerConfig.maxTokens ?? 2048,
+        ...(isAnthropic
+          ? {
+              maxOutputTokens: anthropicMaxTokens(providerConfig),
+              providerOptions: { anthropic: { effort: ANTHROPIC_EFFORT } }
+            }
+          : {
+              temperature: providerConfig.temperature ?? 0.7,
+              maxOutputTokens: providerConfig.maxTokens ?? 2048
+            }),
         // User bấm dừng / đóng tab ⇒ ngắt luồng của nhà cung cấp, không sinh tiếp
         ...(options.signal ? { abortSignal: options.signal } : {})
       })

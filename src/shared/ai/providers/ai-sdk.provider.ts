@@ -5,6 +5,7 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { GLM_REQUEST_OPTIONS } from "./glm.provider.js"
+import { DEFAULT_ANTHROPIC_MODEL } from "./anthropic.provider.js"
 import { modalBaseUrl } from "./modal.config.js"
 
 /**
@@ -85,7 +86,7 @@ export const getAiSdkModel = (providerConfig: AiProviderConfig) => {
       }
 
       const anthropic = createAnthropic({ apiKey })
-      return anthropic(modelName || "claude-3-5-sonnet-20241022")
+      return anthropic(modelName || DEFAULT_ANTHROPIC_MODEL)
     }
 
     default: {
