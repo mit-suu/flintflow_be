@@ -1,7 +1,7 @@
 ---
 actionType: generate_diagram
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 4096
 temperature: 0.2
 isActive: true

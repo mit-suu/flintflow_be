@@ -3,8 +3,8 @@ skill_id: brief-analysis
 kind: content
 version: 0.1.0
 description: "S-1.1 Brief Extraction, S-1.3 Conflict & Assumption Review, S-1.4 Gap List"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:
