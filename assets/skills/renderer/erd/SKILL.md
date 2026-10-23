@@ -3,8 +3,8 @@ skill_id: erd
 kind: renderer
 version: 1.1.0
 description: "S-4.5 Entity Relationship Diagram (Chen notation: entity + verb diamond)"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:
