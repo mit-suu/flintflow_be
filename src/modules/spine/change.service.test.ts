@@ -424,6 +424,34 @@ describe("preview — diff + impact, không ghi", () => {
       expect(await writtenChanges()).toBe(0)
     })
 
+    it("model đề xuất thêm use case ⇒ hỏi giữ / bỏ (tách nhóm AI đề xuất); trả lời 'bỏ 2' ⇒ use case đó và phần chỉ của nó ra khỏi lô", async () => {
+      const withProposal = () => [
+        ...uiBatch(),
+        { op: "add", path: "use_cases[]", value: { name: "Review Absence Warnings", actor_ids: ["A01"], function_ids: ["$newFn2"], description: "Founder reviews warnings." } },
+        { op: "add", path: "screens[]", value: { id: "$newScreen2", name: "Warning Review", description: "…", feature_id: "F3", flow_to: [], tabs: [] } },
+        { op: "add", path: "functions[]", value: { id: "$newFn2", name: "Review Absence Warnings", screen_id: "$newScreen2", feature_id: "F3", trigger: "Founder opens it.", description: "Lists warnings.", normal: ["a"], abnormal: ["b"], validations: [], business_rule_ids: [] } },
+        { op: "set", path: "screens[id=S01].flow_to", value: [...FIXTURE.screens[0].flow_to, "$newScreen2"] },
+        { op: "add", path: "permissions[]", value: { screen_id: "$newScreen2", role_id: "R1", action: "view" } }
+      ]
+      deps.changeExecutor = vi.fn(async () => aiResult({ ops: withProposal() as ChangeInstructionOutput["ops"], proposed_use_cases: ["Review Absence Warnings"] }))
+      await seed()
+      const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst, màn hình riêng" }, {}, deps)
+      expect(asked.ok).toBe(false)
+      expect(asked.clarification).toContain('AI đề xuất thêm để khớp dự án (giữ hay bỏ):\n2. "Review Absence Warnings" (Founder) — màn mới: "Warning Review"')
+      expect(asked.clarification_choices).toContain("Bỏ các use case AI đề xuất")
+
+      const history = `User: Thêm use case Send Absence Warning cho Analyst, màn hình riêng\nAI: ${asked.clarification}`
+      const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "1 màn riêng, bỏ 2", clarification_rounds: 1, chat_history: history }, {}, deps)
+      expect(shown.ok).toBe(true)
+      const added = shown.changes.filter((c) => c.op === "add" && /^(use_cases|screens)\[/.test(c.path)).map((c) => (c.value as { name: string }).name)
+      expect(added).toEqual(expect.arrayContaining(["Send Absence Warning", "Absence Warning"]))
+      expect(added).not.toContain("Review Absence Warnings")
+      expect(added).not.toContain("Warning Review")
+      const calls = vi.mocked(deps.changeExecutor).mock.calls
+      const vars = calls[calls.length - 1][1].promptVariables as { projection: { use_case_context: { ui_plan: unknown } } }
+      expect(vars.projection.use_case_context.ui_plan).toContainEqual({ use_case: "Review Absence Warnings", ui: "DROPPED by the user: do not add this use case or any of its parts" })
+    })
+
     it("chọn popup ⇒ màn mới is_popup = true (code giữ lời người dùng dù model đặt khác)", async () => {
       await seed()
       const body = { base_version: 1, instruction: "Popup mở từ Project Workspace", clarification_rounds: 1, chat_history: "User: Thêm use case Send Absence Warning cho Analyst\nAI: …" }

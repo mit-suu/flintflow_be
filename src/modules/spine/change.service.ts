@@ -47,6 +47,15 @@ import {
   useCaseScreenNote,
   useCaseScreenProblemText,
   wantsSharedScreen,
+  uiAskedBefore,
+  confirmedProposals,
+  applyUiPlan,
+  uiPlanFor,
+  uiPlanForModel,
+  uiPlanIssues,
+  uiPlanNote,
+  uiPlanProblemText,
+  type UiPlanEntry,
   type UseCaseMode
 } from "./use-case-propagation.js"
 import { layoutRenderDeps, renderChangedIfAvailable } from "../diagram/diagram.service.js"
@@ -510,18 +519,26 @@ const SCHEMA_FIX =
  * - FLF-243: tên use case model TỰ đặt mà cờ vàng `usecase_name_*` sẽ bắt. Tên user gõ nguyên văn thì để yên.
  */
 /** Lệnh thêm use case có màn: phần giao diện còn thiếu của các use case mới (lô không áp thử được ⇒ để lỗi bất biến lo). */
-const screenIssuesOf = (spine: Spine, ops: Op[], ucMode: UseCaseMode | null, allowShared: boolean) => {
-  if (ops.length === 0 || (ucMode !== "screen_pending" && ucMode !== "full")) return []
+const screenIssuesOf = (spine: Spine, ops: Op[], ucMode: UseCaseMode | null, allowShared: boolean, uiPlan: readonly UiPlanEntry[] = []) => {
+  if (ops.length === 0 || (ucMode !== "screen_pending" && ucMode !== "full")) return { screen: [], plan: [] }
   try {
-    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
-    return newUseCaseScreenIssues(spine, plan.spine, { allowShared })
+    const planned = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
+    const expectUseCase = !(uiPlan.length > 0 && uiPlan.every((e) => e.drop))
+    return { screen: newUseCaseScreenIssues(spine, planned.spine, { allowShared, expectUseCase }), plan: uiPlanIssues(spine, planned.spine, uiPlan) }
   } catch (err) {
-    if (err instanceof TransactionRejectedError) return []
+    if (err instanceof TransactionRejectedError) return { screen: [], plan: [] }
     throw err
   }
 }
 
-const batchProblems = (spine: Spine, ops: Op[], instruction: string, ucMode: UseCaseMode | null = null, allowShared = false): string[] => {
+const batchProblems = (
+  spine: Spine,
+  ops: Op[],
+  instruction: string,
+  ucMode: UseCaseMode | null = null,
+  allowShared = false,
+  uiPlan: readonly UiPlanEntry[] = []
+): string[] => {
   if (ops.length === 0) return []
   let plan: ReturnType<typeof planTransaction>
   try {
@@ -536,7 +553,8 @@ const batchProblems = (spine: Spine, ops: Op[], instruction: string, ucMode: Use
     .filter((issue) => !asked.includes(issue.name.toLowerCase()))
     .map((issue) => issue.message)
   // Lệnh thêm use case có màn: mỗi use case mới phải có màn (theo lựa chọn của user), luồng vào và quyền
-  const screens = screenIssuesOf(spine, ops, ucMode, allowShared).map(useCaseScreenProblemText)
+  const ui = screenIssuesOf(spine, ops, ucMode, allowShared, uiPlan)
+  const screens = [...ui.screen.map(useCaseScreenProblemText), ...ui.plan.map(uiPlanProblemText)]
   return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens]
 }
 
@@ -588,10 +606,14 @@ const opsFromInstruction = async (
   // FLF-311: lệnh thêm use case (hoặc câu trả lời cho câu hỏi làm rõ của lệnh đó) ⇒ model soạn đủ phần liên quan
   const addsUseCase = isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history))
   const ucMode = addsUseCase ? useCaseMode(spine) : null
-  // FLF-311: người dùng chọn cho các use case mới dùng chung một màn ⇒ không nhắc tách màn
-  const allowShared = ucMode !== null && wantsSharedScreen(instruction, history)
+  const ucUi = ucMode === "screen_pending" || ucMode === "full"
+  // FLF-311: câu trả lời cho câu hỏi giao diện ⇒ kế hoạch từng use case (màn riêng / popup / màn có sẵn / dùng chung)
+  const uiPlan = ucUi ? uiPlanFor(instruction, history) : []
+  // Có kế hoạch ⇒ dùng chung hay không do kế hoạch kiểm; không có ⇒ user nói "dùng chung" thì không nhắc tách màn
+  const allowShared = ucMode !== null && (uiPlan.length > 0 || wantsSharedScreen(instruction, history))
   // Op chỉ số trên mảng chuỗi (`normal[2]`) ⇒ set cả mảng (op engine cấm chỉ số)
-  const prepare = (ops: Op[]): Op[] => expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops))
+  const prepare = (ops: Op[]): Op[] =>
+    applyUiPlan(expandIndexSelectors(spine, ucMode ? normalizeUseCaseBatch(spine, stampAddendum(ops)) : stampAddendum(ops)), uiPlan)
   // FLF-265 D16: một lần cho cả lượt (kể cả lượt gọi lại kèm lỗi)
   const language = await (deps.documentLanguage ?? documentLanguageForTurn)(projectId)
   const call = (previousProblems?: string) =>
@@ -607,7 +629,7 @@ const opsFromInstruction = async (
           // Câu trả lời cho câu hỏi làm rõ ("A03") thường không nhắc lại thực thể của yêu cầu gốc ⇒ dò cả đoạn hội thoại
           projection: {
             ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
-            ...(ucMode ? { use_case_context: useCaseContext(spine, ucMode) } : {})
+            ...(ucMode ? { use_case_context: { ...useCaseContext(spine, ucMode), ...(uiPlan.length ? { ui_plan: uiPlanForModel(uiPlan) } : {}) } } : {})
           },
           use_case_mode: ucMode ?? "none",
           use_case_ui: ucMode === "screen_pending" || ucMode === "full",
@@ -645,15 +667,16 @@ const opsFromInstruction = async (
     })
     if (forced && !forced.data.clarification_needed?.trim() && (forced.data.ops ?? []).length > 0) result = forced
   }
-  if (!result.data.clarification_needed?.trim()) {
-    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared)
-    if (problems.length > 0) {
-      const retry = await call(problems.join("\n")).catch((err: unknown) => {
-        if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
-        throw err
-      })
-      if (retry && !retry.data.clarification_needed?.trim() && (retry.data.ops ?? []).length > 0) result = retry
-    }
+  // Lô sai thì gọi lại kèm lỗi: một lần; có kế hoạch giao diện (lệnh nhiều use case, 3–4 màn) thì tới hai lần
+  for (let attempt = 0, max = uiPlan.length > 0 ? 2 : 1; attempt < max && !result.data.clarification_needed?.trim(); attempt++) {
+    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan)
+    if (problems.length === 0) break
+    const retry = await call(problems.join("\n")).catch((err: unknown) => {
+      if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
+      throw err
+    })
+    if (!retry || retry.data.clarification_needed?.trim() || (retry.data.ops ?? []).length === 0) break
+    result = retry
   }
 
   // Câu hỏi làm rõ và ghi chú preview hiện thẳng cho user: mã phần tử model còn chép (`S02`) đổi sang tên
@@ -661,19 +684,26 @@ const opsFromInstruction = async (
   const choices = result.data.choices?.length ? { choices: result.data.choices.map((c) => nameElementIds(c, spine)) } : {}
   if (clarification) return { ops: [], clarification: nameElementIds(clarification, spine), notes: null, ...choices }
   let ops = prepare((result.data.ops ?? []) as Op[])
-  // FLF-311: màn riêng hay popup là quyết định của người dùng. Đã chọn ⇒ code áp đúng lựa chọn; chưa chọn mà lô thêm màn
-  // và chưa hỏi lượt nào ⇒ hỏi (kèm hai lựa chọn) thay vì tự quyết.
-  if (ucMode === "screen_pending" || ucMode === "full") {
-    const kind = screenKindChoice(instruction, history)
-    if (kind) ops = applyScreenKind(ops, kind)
-    else if (clarificationRounds === 0) {
-      const ask = screenKindQuestion(spine, ops, replyLanguage ?? DEFAULT_REPLY_LANGUAGE)
+  // FLF-311: giao diện là quyết định của người dùng. Đã chọn ⇒ code áp đúng lựa chọn; chưa chọn mà lô thêm màn và đoạn
+  // hội thoại chưa có câu hỏi giao diện ⇒ hỏi (kèm lựa chọn nhanh) thay vì tự quyết — model không tự hỏi phần này.
+  // Use case model ĐỀ XUẤT thêm mà người dùng chưa xác nhận giữ / bỏ ⇒ luôn hỏi (kể cả khi đã chọn màn riêng / popup).
+  if (ucUi) {
+    const userText = [instruction, ...history.split("\n").filter((l) => l.startsWith("User:"))].join("\n")
+    const proposed = uiPlan.length > 0 ? [] : confirmedProposals(spine, ops, result.data.proposed_use_cases ?? [], userText)
+    const kind = uiPlan.length > 0 ? null : screenKindChoice(instruction, history)
+    if (proposed.length > 0 || (!kind && !uiAskedBefore(history) && clarificationRounds <= MAX_CLARIFICATION_ROUNDS)) {
+      const ask = screenKindQuestion(spine, ops, replyLanguage ?? DEFAULT_REPLY_LANGUAGE, proposed)
       if (ask) return { ops: [], clarification: ask.text, notes: null, choices: ask.choices }
     }
+    if (kind) ops = applyScreenKind(ops, kind)
   }
   // Còn thiếu sau lượt soạn lại ⇒ báo trên bản xem trước, người dùng quyết định (không chặn)
-  const screenNote = useCaseScreenNote(screenIssuesOf(spine, ops, ucMode, allowShared), replyLanguage ?? DEFAULT_REPLY_LANGUAGE)
-  const notes = [result.data.notes ? nameElementIds(result.data.notes, spine) : null, screenNote].filter(Boolean).join("\n") || null
+  const left = screenIssuesOf(spine, ops, ucMode, allowShared, uiPlan)
+  const noteLanguage = replyLanguage ?? DEFAULT_REPLY_LANGUAGE
+  const notes =
+    [result.data.notes ? nameElementIds(result.data.notes, spine) : null, useCaseScreenNote(left.screen, noteLanguage), uiPlanNote(left.plan, noteLanguage)]
+      .filter(Boolean)
+      .join("\n") || null
   const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
   return { ops, clarification: null, notes, ...localized, language: languagePairOf(language) }
 }
