@@ -3,8 +3,8 @@ skill_id: import-cross-check
 kind: action
 version: 1.0.0
 description: Mode 1 node 1.11 (reduce) — cross-section review of an imported SRS over a compact Spine → yellow findings only
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 3072
 temperature: 0.2
 reads:

@@ -3,8 +3,8 @@ skill_id: review-section
 kind: action
 version: 1.0.0
 description: LLM lens review of one section or the assembled draft → yellow flags only
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 3072
 temperature: 0.2
 reads:
