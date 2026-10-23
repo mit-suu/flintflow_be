@@ -39,6 +39,7 @@ import { authMiddleware } from "./shared/auth/auth.middleware.js"
 import { requireActiveAccount } from "./shared/auth/account-guard.middleware.js"
 import { orgContext } from "./shared/auth/org-context.middleware.js"
 import { viewerReadOnly } from "./shared/auth/viewer-read-only.middleware.js"
+import { viewerReadScope } from "./shared/auth/viewer-read-scope.middleware.js"
 
 // Câu lỗi mặc định của Zod sang tiếng Việt, đánh dấu issue không có câu do schema tự viết (FLF-247)
 installZodLocale()
@@ -164,7 +165,9 @@ app.use(
     new RegExp("^/[^/]+/assemble$"),
     new RegExp("^/[^/]+/comments$"),
     new RegExp("^/[^/]+/comments/[^/]+/replies$")
-  ])
+  ]),
+  // Viewer chỉ đọc bản dành cho người xem (UC-47/50/51) — mọi GET khác 403
+  viewerReadScope()
 )
 app.use("/api/v1/folders", ...orgGuard, viewerReadOnly())
 

@@ -8,6 +8,9 @@ import { DOCX_CONTENT_TYPE } from "./doc-file.store.js"
 import { compareQuerySchema, downloadQuerySchema, releaseRequestSchema, versionParamsSchema } from "./doc-version.dto.js"
 import { release } from "./release.service.js"
 import { compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
+import { IMPORTED_DOC_VERSIONS, isReleaseVersion } from "./versioning.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { ApiError } from "../../shared/utils/api-error.js"
 
 export const list = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
@@ -24,6 +27,10 @@ export const download = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const { v } = parseInput(versionParamsSchema, req.params)
   const { variant } = parseInput(downloadQuerySchema, req.query)
+  // UC-50: Viewer chỉ tải bản đã phát hành (kể cả v0) — không bản nháp 0.x, không bản đánh dấu theo CR
+  if (isViewer(req) && (variant === "tracked" || !(IMPORTED_DOC_VERSIONS.includes(v) || isReleaseVersion(v)))) {
+    throw new ApiError(403, "Viewer chỉ tải được phiên bản đã phát hành.", "ORG_ROLE_FORBIDDEN")
+  }
   const file = await downloadVersion(auth.projectId, auth.project.name, v, variant)
   res.setHeader("Content-Type", DOCX_CONTENT_TYPE)
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`)

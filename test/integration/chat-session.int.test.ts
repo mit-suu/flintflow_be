@@ -29,12 +29,12 @@ const bearer = (token: string) => ({ Authorization: "Bearer " + token })
 const chats = (projectId: string) => `/api/v1/projects/${projectId}/chats`
 
 describe("FLF-244 chat session — vai trò", () => {
-  it("Viewer đọc được danh sách phiên nhưng không tạo, không nhắn, không xoá", async () => {
+  it("Viewer không đọc, không tạo, không nhắn, không xoá phiên chat (chat là dữ liệu làm việc — UC-47)", async () => {
     const owner = await seedFixture("minimal")
     const viewer = await joinOrg(owner.orgId, "viewer@flintflow.test", "viewer")
 
     const list = await request(app).get(chats(owner.projectId)).set(bearer(viewer))
-    expect(list.status).toBe(200)
+    expect(list.status).toBe(403)
 
     const create = await request(app).post(chats(owner.projectId)).set(bearer(viewer))
     expect(create.status).toBe(403)
