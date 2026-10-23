@@ -1,11 +1,11 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.3.0
+version: 1.4.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-sonnet-5-5
-maxTokens: 4096
+maxTokens: 8192
 temperature: 0.2
 reads:
   - "<impact projection: referenced + referencing fields>"
@@ -65,8 +65,43 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    ```json
    { "op": "add", "path": "use_cases[]", "value": { "name": "Send Appointment Reminder", "actor_ids": ["$new2"], "description": "…" } }
    ```
-   A new use case: put in `function_ids` the existing functions from the projection that carry it out. None fits ⇒ leave
-   it empty and do not invent screens or functions the user did not ask for — code warns the user what is still missing.
+   A new use case: put in `function_ids` the existing functions from the projection that carry it out.
+{{#if use_case_mode=use_case_only}}
+   None fits ⇒ leave it empty; screens do not exist yet in this project, do not add any.
+{{/if}}
+{{#if use_case_ui}}
+3e. **New use case ⇒ check it, then add its related parts in the same batch** (exception to rule 3; context in
+   `use_case_context`). One use case = one goal: actors with different goals in the request (Student asks for a grade review,
+   Lecturer settles it) ⇒ one use case + function per goal, each with only its actor ("Request Grade Review" for Student,
+   "Decide Grade Review" for Lecturer); never one use case for both. Same or overlapping goal as a `use_case_context.use_cases` entry
+   of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
+   **Supporting use cases**: the requested one may need others to fit the project (someone decides a request, the requester follows its status) — you MAY
+   add them in the same batch, each name listed in `proposed_use_cases`, never silently — a goal the user describes (even unnamed, e.g. "Lecturer regrades it") is requested, never listed there; the user keeps or drops them (`ui_plan` drop ⇒ leave it and all its parts out).
+   **Several steps** (pick, fill in, confirm) ⇒ one screen per step, chained in order by `flow_to`; `ui_plan` "one screen" ⇒ a single screen for it.
+   **The UI of each new use case is the user's call**: its own screen, a popup opened from <screen>, an existing screen, or one screen shared by the new use cases. Never ask about the UI yourself: draft your best proposal (a new screen per step) — code then shows the user every new use case and screen to choose from; ask only for a fact you cannot fill (who receives it, what the user enters, a limit). Follow the answer exactly — `use_case_context.ui_plan` (when present) is that answer per use case: obey every entry; nothing said for one ⇒ its own screen. Then:
+   - **the screen or popup the user chose**; when you propose: anything that changes data or takes input gets a new one, an
+     existing screen fits a pure read addition (a column, a filter, a read-only field) — never just a button;
+   - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `set
+     screens[id=…].flow_to` to the old list plus the new screen on the screen that opens it, so it is reachable;
+   - one `permissions[]` row per role of each actor on its screen, shared screen included (`view`, plus `create`/`update`/`delete` it does);
+   - the function on that screen (system/time actor ⇒ only a function, `screen_id: null`). Declare temporary ids as
+     each added element's own `"id": "$newFn"` / `"id": "$newScreen"`; `$newFn` goes in `function_ids`. Code sets
+     `order`, `detail_status`; layout and diagrams are drawn after apply.
+{{/if}}
+{{#if use_case_mode=screen_pending}}
+   The function needs only `name`, `trigger`, `description`, `screen_id`, `feature_id` — the screen loop details it.
+{{/if}}
+{{#if use_case_mode=full}}
+   No later step will describe it ⇒ write the function fully like `sample_function` (Functional Requirements, in
+   English): `trigger`, `description`, `normal[]` steps, `abnormal[]` cases, `validations[]` (`kind`, `statement`, no
+   id), `business_rule_ids` reused from the context. Say in `notes` (reply language) what the batch adds.
+{{/if}}
+{{#if messages_ready}}
+3f. **Application messages** (§ Messages) for the new function: each user-visible `abnormal[]` case needs a message —
+   same meaning as one in `use_case_context.messages` ⇒ `set messages[id=…].function_ids` to its old list plus
+   `$newFn`; otherwise `add messages[]` `{ "code": "<AREA>-001", "text": …, "function_ids": ["$newFn"] }` — area
+   that fits (an existing one from the context), code fixes the number; text: one sentence saying what to do next.
+{{/if}}
 3c. **Removing** one element is `remove` with the element path: `remove use_cases[id=UC07]`,
    `remove functions[id=FN005].validations[id=FN005-V2]`. Do not "remove" by setting the array to a shorter
    list — that is how whole elements vanish without a diff line.
@@ -77,7 +112,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place — do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the reply language — it becomes the §I Record of Changes line.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
-8. **Only touch what the request names.** An element the user did not mention must come out of this batch
+8. **Only touch what the request names** (only exception: supporting use cases of rule 3e, listed in `proposed_use_cases`). An element the user did not mention must come out of this batch
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
@@ -112,18 +147,9 @@ User clicked **Reconcile** once for all `stale` sections (UC 6.10). For each sta
 - Nothing to bring back in line ⇒ return `{"ops": []}`. An empty batch is a valid answer, not a failure.
 - Output `opTransaction`. The user sees ONE merged preview diff for all sections; a rejected diff leaves every section `stale` — that is valid, and nothing is retried automatically.
 
-## Branches (code applies — for your awareness)
+## Branches (code applies — for your awareness; detail in `references/impact-branches.md`)
 
-Summary; detail in `references/impact-branches.md`.
-
-| Impact | Behaviour |
-| --- | --- |
-| Nothing references the changed field | Apply silently, log `changes[]` (UC 6.2) |
-| Dependents exist | Show scope → preview diff (UC 6.1) → confirm → apply; dependents compute `stale` |
-| Baseline exists | Impact Analysis is mandatory (UC 6.8); new red flags block a new baseline |
-| Breaks an invariant | Whole batch rejected, referrers returned |
-
-**No auto-propagation.** Changing §2.1 does not rewrite §2.2; it only makes it `stale`.
+Nothing references the change ⇒ applied silently; dependents ⇒ preview diff, then they turn `stale`; baseline ⇒ Impact Analysis mandatory; broken invariant ⇒ whole batch rejected. **No auto-propagation**: changing §2.1 only makes §2.2 `stale`. Only exception: rule 3e (new use case).
 
 ## Output
 
@@ -132,7 +158,7 @@ Return **only** JSON, no fence, no commentary.
 `change_instruction`:
 
 ```json
-{ "clarification_needed": "Bạn muốn đổi tên vai trò 'Admin' hay actor 'System Admin'?" }
+{ "clarification_needed": "Bạn muốn đổi tên vai trò 'Admin' hay actor 'System Admin'?", "choices": ["Vai trò Admin", "Actor System Admin"] }
 ```
 
 ```json
@@ -143,5 +169,7 @@ Return **only** JSON, no fence, no commentary.
   "notes": "optional short summary for the preview card, in the reply language"
 }
 ```
+
+Supporting use cases you added beyond the request (rule 3e): also return `"proposed_use_cases": ["View Review Status"]`.
 
 `reconcile`: `{ "ops": [...], "notes": "..." }` — same op grammar as `draft-to-ops`.

@@ -58,6 +58,15 @@ describe("previewPayload", () => {
     expect(payload.reply).toContain("1 thay đổi")
   })
 
+  it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
+    const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
+    expect(payload).toEqual({
+      kind: "change_clarification",
+      reply: "Màn hình riêng hay popup?",
+      questions: [{ question: "Chọn giao diện", options: [{ label: "Màn hình riêng" }, { label: "Popup mở từ My Grades" }] }]
+    })
+  })
+
   it("FLF-298: notes (vd use case mới chưa có màn hình) nối vào câu trả lời", () => {
     const payload = previewPayload({
       ...base,
@@ -135,5 +144,12 @@ describe("recordChangeTurn", () => {
     expect(session.messages[1]).toMatchObject({ role: "user", content: "đổi tên A01", step: "S-3.1" })
     expect(JSON.parse(session.messages[2].content)).toMatchObject({ kind: "change_applied" })
     expect(save).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("previewPayload — không có thay đổi mà có ghi chú", () => {
+  it("rút lại yêu cầu ⇒ câu trả lời là ghi chú, không ghép câu 'Không tìm thấy chỗ nào cần đổi'", () => {
+    const payload = previewPayload({ ok: true, txn: "t", base_version: 1, ops: [], changes: [], violations: [], referrers: [], notes: "Đã bỏ yêu cầu này — tài liệu không đổi gì." })
+    expect(payload).toMatchObject({ kind: "change_preview", reply: "Đã bỏ yêu cầu này — tài liệu không đổi gì.", change_count: 0 })
   })
 })
