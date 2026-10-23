@@ -3,8 +3,8 @@ skill_id: gate-check
 kind: action
 version: 1.0.0
 description: Commit gate — Accept / Request revision / Regenerate / Accept as-is; caps 8 calls and 3 regenerates per step; phase menu [A]/[P]/[C]
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 1024
 temperature: 0
 reads:

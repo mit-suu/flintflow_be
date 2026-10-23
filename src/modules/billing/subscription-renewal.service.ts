@@ -47,6 +47,8 @@ const topUpToAllotment = async (sub: ISubscription, allotment: number, session?:
   const options = sessionOptions(session)
   const userId = String(sub.userId)
   const orgId = sub.organizationId ? String(sub.organizationId) : null
+  // FLF-310: credit chỉ nằm ở ví tổ chức — subscription cũ không gắn org thì không có ví để nạp
+  if (!orgId) return 0
   const wallet = await getOrCreateWallet(userId, session, orgId)
   const granted = Math.max(0, allotment - wallet.balance)
   if (granted === 0) return 0

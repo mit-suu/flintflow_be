@@ -3,8 +3,8 @@ skill_id: srs-orchestrator
 kind: action
 version: 1.0.0
 description: Global state machine B-0 → S-9 — owns progress, step order and the S-5 screen loop
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 1024
 temperature: 0
 reads:

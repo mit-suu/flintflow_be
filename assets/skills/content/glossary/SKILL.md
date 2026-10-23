@@ -3,8 +3,8 @@ skill_id: glossary
 kind: content
 version: 0.3.0
 description: "S-8.1 sweep the Spine for domain terms and abbreviations into glossary[]"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:
