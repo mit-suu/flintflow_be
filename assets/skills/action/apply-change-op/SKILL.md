@@ -5,7 +5,7 @@ version: 1.4.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: glm
 aiModel: zai-org/GLM-5.3-Flash
-maxTokens: 4096
+maxTokens: 8192
 temperature: 0.2
 reads:
   - "<impact projection: referenced + referencing fields>"
@@ -75,7 +75,10 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    Lecturer settles it) ⇒ one use case + function per goal, each with only its actor ("Request Grade Review" for Student,
    "Decide Grade Review" for Lecturer); never one use case for both. Same or overlapping goal as a `use_case_context.use_cases` entry
    of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
-   **The UI of each new use case is the user's call**: its own screen, a popup opened from <screen>, an existing screen, or one screen shared by the new use cases. Chat silent ⇒ ask first, ONE `clarification_needed` (several UI use cases ⇒ list them, the user may answer per use case), plus only the detail you lack (what the user enters, who receives it, a limit), `choices` ["Màn hình riêng", "Popup mở từ <screen>"]. Follow the answer exactly; nothing said for one ⇒ its own screen. Then:
+   **Supporting use cases**: the requested one may need others to fit the project (someone decides a request, the requester follows its status) — you MAY
+   add them in the same batch, each name listed in `proposed_use_cases`, never silently — a goal the user describes (even unnamed, e.g. "Lecturer regrades it") is requested, never listed there; the user keeps or drops them (`ui_plan` drop ⇒ leave it and all its parts out).
+   **Several steps** (pick, fill in, confirm) ⇒ one screen per step, chained in order by `flow_to`; `ui_plan` "one screen" ⇒ a single screen for it.
+   **The UI of each new use case is the user's call**: its own screen, a popup opened from <screen>, an existing screen, or one screen shared by the new use cases. Never ask about the UI yourself: draft your best proposal (a new screen per step) — code then shows the user every new use case and screen to choose from; ask only for a fact you cannot fill (who receives it, what the user enters, a limit). Follow the answer exactly — `use_case_context.ui_plan` (when present) is that answer per use case: obey every entry; nothing said for one ⇒ its own screen. Then:
    - **the screen or popup the user chose**; when you propose: anything that changes data or takes input gets a new one, an
      existing screen fits a pure read addition (a column, a filter, a read-only field) — never just a button;
    - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `set
@@ -109,7 +112,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place — do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the reply language — it becomes the §I Record of Changes line.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
-8. **Only touch what the request names.** An element the user did not mention must come out of this batch
+8. **Only touch what the request names** (only exception: supporting use cases of rule 3e, listed in `proposed_use_cases`). An element the user did not mention must come out of this batch
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
@@ -144,18 +147,9 @@ User clicked **Reconcile** once for all `stale` sections (UC 6.10). For each sta
 - Nothing to bring back in line ⇒ return `{"ops": []}`. An empty batch is a valid answer, not a failure.
 - Output `opTransaction`. The user sees ONE merged preview diff for all sections; a rejected diff leaves every section `stale` — that is valid, and nothing is retried automatically.
 
-## Branches (code applies — for your awareness)
+## Branches (code applies — for your awareness; detail in `references/impact-branches.md`)
 
-Summary; detail in `references/impact-branches.md`.
-
-| Impact | Behaviour |
-| --- | --- |
-| Nothing references the changed field | Apply silently, log `changes[]` (UC 6.2) |
-| Dependents exist | Show scope → preview diff (UC 6.1) → confirm → apply; dependents compute `stale` |
-| Baseline exists | Impact Analysis is mandatory (UC 6.8); new red flags block a new baseline |
-| Breaks an invariant | Whole batch rejected, referrers returned |
-
-**No auto-propagation.** Changing §2.1 does not rewrite §2.2; it only makes it `stale`. Only exception: rule 3e (new use case).
+Nothing references the change ⇒ applied silently; dependents ⇒ preview diff, then they turn `stale`; baseline ⇒ Impact Analysis mandatory; broken invariant ⇒ whole batch rejected. **No auto-propagation**: changing §2.1 only makes §2.2 `stale`. Only exception: rule 3e (new use case).
 
 ## Output
 
@@ -175,5 +169,7 @@ Return **only** JSON, no fence, no commentary.
   "notes": "optional short summary for the preview card, in the reply language"
 }
 ```
+
+Supporting use cases you added beyond the request (rule 3e): also return `"proposed_use_cases": ["View Review Status"]`.
 
 `reconcile`: `{ "ops": [...], "notes": "..." }` — same op grammar as `draft-to-ops`.
