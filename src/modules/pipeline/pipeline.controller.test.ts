@@ -335,9 +335,15 @@ describe("GET /projects/:projectId/steps", () => {
 })
 
 /** Handler JSON thường (không SSE): resolve khi `res.json` hoặc `next(err)`. */
-const invokeJsonHandler = (handler: RequestHandler, userId: string, params: Record<string, string>, body: unknown = {}) =>
+const invokeJsonHandler = (
+  handler: RequestHandler,
+  userId: string,
+  params: Record<string, string>,
+  body: unknown = {},
+  role: "lead" | "analyst" | "viewer" = "lead"
+) =>
   new Promise<{ status: number; body: unknown; error?: unknown }>((resolve) => {
-    const req = { orgContext: orgCtxFor(userId), user: { userId }, params, body } as unknown as Request
+    const req = { orgContext: { ...orgCtxFor(userId), role }, user: { userId }, params, body } as unknown as Request
     const res = {
       status(code: number) {
         ;(res as unknown as { _status: number })._status = code
@@ -377,6 +383,38 @@ describe("POST /projects/:projectId/steps/:stepId/gate — session_id (contract-
     expect(requirePipelineSession).toHaveBeenCalledWith(PROJECT, "s1")
     expect(outcome.status).toBe(200)
     expect(outcome.body).toMatchObject({ data: { next_step: "S-3.2", spine_version: 2 } })
+  })
+})
+
+describe("POST /projects/:projectId/steps/:stepId/gate — chỉ Lead ký baseline ở S-9.5 (UC-38/39)", () => {
+  beforeEach(() => {
+    vi.mocked(requirePipelineSession).mockReset()
+    vi.mocked(requirePipelineSession).mockResolvedValue(undefined)
+    vi.mocked(gate).mockReset()
+    vi.mocked(gate).mockResolvedValue({ step: { id: "S-9.5" }, next_step: null, spine_version: 2 } as never)
+  })
+
+  it.each(["accept", "accept_as_is"])("Analyst %s ở S-9.5 ⇒ 403, không gọi gate", async (action) => {
+    const body = { session_id: "s1", action, base_version: 1, ...(action === "accept_as_is" ? { note: "ok" } : {}) }
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.5" }, body, "analyst")
+    expect(outcome.error).toMatchObject({ statusCode: 403, code: "ORG_ROLE_FORBIDDEN" })
+    expect(gate).not.toHaveBeenCalled()
+  })
+
+  it("Lead accept ở S-9.5 ⇒ gọi gate (ký baseline)", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.5" }, { session_id: "s1", action: "accept", base_version: 1 })
+    expect(outcome.status).toBe(200)
+    expect(gate).toHaveBeenCalled()
+  })
+
+  it("Analyst accept ở bước khác vẫn được", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.4" }, { session_id: "s1", action: "accept", base_version: 1 }, "analyst")
+    expect(outcome.status).toBe(200)
+  })
+
+  it("Analyst yêu cầu sửa ở S-9.5 vẫn được", async () => {
+    const outcome = await invokeJsonHandler(gateStep, OWNER, { projectId: PROJECT, stepId: "S-9.5" }, { session_id: "s1", action: "revision", base_version: 1, note: "sửa" }, "analyst")
+    expect(outcome.status).toBe(200)
   })
 })
 
