@@ -1,7 +1,7 @@
 ---
 actionType: rewrite
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 2048
 temperature: 0.5
 isActive: true

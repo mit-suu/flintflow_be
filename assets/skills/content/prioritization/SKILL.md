@@ -3,8 +3,8 @@ skill_id: prioritization
 kind: content
 version: 0.1.0
 description: "S-9.4 MoSCoW priority for every function and NFR, written into functions[].priority / nfrs[].priority"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 6144
 temperature: 0.2
 reads:

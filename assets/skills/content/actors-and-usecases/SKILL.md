@@ -3,8 +3,8 @@ skill_id: actors-and-usecases
 kind: content
 version: 0.11.0
 description: "S-3.1–S-3.5 actors, roles, actor–goal list, missing use case sweep, relationships, descriptions"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

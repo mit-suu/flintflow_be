@@ -51,6 +51,7 @@ export const stepNeedsSourceDocuments = (stepId: string): boolean => {
  * Giá trị an toàn — thực tế có thể lớn hơn nhưng không nên dùng hết.
  */
 const CONTEXT_WINDOW_BY_MODEL: Record<string, number> = {
+  "claude-sonnet-5-5": 1000000,
   "claude-3-5-sonnet": 200000,
   "claude-haiku-4-5-20251001": 200000,
   "claude-haiku-4-5": 200000,

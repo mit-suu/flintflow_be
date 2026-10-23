@@ -3,8 +3,8 @@ skill_id: appendix-content
 kind: content
 version: 0.3.0
 description: "S-7 appendix — detail business rules, common requirements, messages, other requirements (mostly derived)"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-sonnet-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:
