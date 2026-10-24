@@ -10,6 +10,7 @@ import { sendError } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError, validationIssues } from "../../shared/utils/validation-message.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
 
 /** Chi tiết từng issue vào `meta.issues` (debug); user chỉ đọc một câu (FLF-247). */
 const renderedDocumentInvalid = (error: z.ZodError): ApiError =>
@@ -48,6 +49,10 @@ export const exportWord = catchAsync(async (req: Request, res: Response) => {
   const { projectId, projectName, mode, documentLanguage, sourceLanguage } = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
   if (!parsedQuery.success) throw validationError(parsedQuery.error)
+  // UC-50: Viewer chỉ tải bản đã phát hành — bản nháp (DRAFT) không
+  if (isViewer(req) && parsedQuery.data.source !== "baseline") {
+    throw new ApiError(403, "Viewer chỉ tải được phiên bản đã phát hành.", "ORG_ROLE_FORBIDDEN")
+  }
 
   let result: DocumentWithMeta
   try {
