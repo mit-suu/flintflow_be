@@ -20,7 +20,7 @@ import mongoose from "mongoose"
 import { z } from "zod"
 import * as spineRepository from "../spine/spine.repository.js"
 import * as meter from "./meter.service.js"
-import { nextStep, orderedSteps } from "./step-registry.js"
+import { getStep, nextStep, orderedSteps } from "./step-registry.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import {
   runStep,
@@ -36,7 +36,7 @@ import {
   type Emit
 } from "./step-runner.service.js"
 import { gate, GateLimitError, type GateInput } from "./gate.service.js"
-import { BaselineBlockedError } from "./s9/baseline.service.js"
+import { BaselineBlockedError, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
@@ -334,6 +334,11 @@ export const gateStep = catchAsync(async (req: Request, res: Response) => {
   assertNotMode1(mode, "steps") // mode 1 v3: Flow 1 không có step (BPMN)
   const stepId = req.params.stepId as string
   const body = parse(gateRequestSchema, req.body)
+  // Accept ở S-9.5 là ký baseline 1.0 (UC-39) — chỉ Lead; Analyst nộp cho Lead duyệt (UC-38, `POST /baseline/submit`)
+  const signsBaseline = (body.action === "accept" || body.action === "accept_as_is") && getStep(stepId).template_id === SIGN_OFF_STEP
+  if (signsBaseline && req.orgContext?.role !== "lead") {
+    throw new ApiError(403, "Chỉ Lead ký được baseline. Hãy nộp baseline để Lead duyệt.", "ORG_ROLE_FORBIDDEN")
+  }
   await requirePipelineSession(projectId, body.session_id)
 
   const input: GateInput = {
