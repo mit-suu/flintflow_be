@@ -67,7 +67,7 @@ mọi trạng thái chưa kết thúc ─► cancelled
 
 Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`, `402 INSUFFICIENT_CREDIT` (`{ required, balance }`), `404 PROJECT_NOT_FOUND`, `409 SPINE_VERSION_CONFLICT`, `501 NOT_IMPLEMENTED`.
 
-`issues[]` của preflight là `{ code, message, location? }`, với `code` ∈ `NOT_DOCX`, `CORRUPT_ZIP`, `LEGACY_DOC`, `FILE_ENCRYPTED`, `FILE_TOO_LARGE`, `EMPTY_DOCUMENT`, `FOREIGN_TRACK_CHANGE`, `FOREIGN_COMMENT`. Loại file nhận theo magic bytes, không theo đuôi (spike P0 §4.6). Track Changes/comment có author khớp `^CR-\d{3,}$` (do FlintFlow ghi) được chấp nhận.
+`issues[]` của preflight là `{ code, message, location? }`, với `code` ∈ `NOT_DOCX`, `CORRUPT_ZIP`, `LEGACY_DOC`, `FILE_ENCRYPTED`, `FILE_TOO_LARGE`, `EMPTY_DOCUMENT`, `FOREIGN_TRACK_CHANGE`, `FOREIGN_COMMENT`, **`NOT_SRS`** (FLF-331: Code không thấy dấu hiệu SRS / mẫu SRS — CV, hoá đơn, test plan, biên bản họp…; `message` nêu lý do ngắn; 0 credit). `preflight.document_kind` (`{ kind: srs | srs_template | not_srs | unknown, confidence 0–1, signals[], reasons[] }`, `null` với bản ghi cũ hoặc file mang dấu version FlintFlow): `unknown` ⇒ vẫn nhận, FE cảnh báo ở bước xác nhận 1.5; mẫu SRS trống (chỉ heading + chữ hướng dẫn) là `srs_template`, vẫn nhận. Loại file nhận theo magic bytes, không theo đuôi (spike P0 §4.6). Track Changes/comment có author khớp `^CR-\d{3,}$` (do FlintFlow ghi) được chấp nhận.
 
 ## 1. Endpoint
 
@@ -446,3 +446,5 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |
+
+- **FLF-331 (2026-10-26) — I-1 nhận diện SRS bằng Code**: preflight thêm mã `NOT_SRS` (từ chối CV / hoá đơn / test plan / biên bản họp / hợp đồng trước khi tốn credit, `IMPORT_FILE_REJECTED` như các mã khác) và `preflight.document_kind` (loại + độ tin + lý do, additive, bản ghi cũ `null`). File có dấu version FlintFlow không phân loại lại. Ngưỡng / danh sách tín hiệu ở `src/modules/import/srs-detect.ts` `SRS_DETECT_CONFIG`.

@@ -1,7 +1,8 @@
 import JSZip from "jszip"
 import { describe, expect, it } from "vitest"
 import { DocxPackage, writeStamp } from "../docx-ooxml/index.js"
-import { makeDocx, p, table } from "../docx-ooxml/testing/make-docx.js"
+import { makeDocx, p, styled, table } from "../docx-ooxml/testing/make-docx.js"
+import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { MAX_UNCOMPRESSED_BYTES } from "../docx-ooxml/index.js"
 import { IMPORT_MAX_FILE_BYTES } from "./import.constants.js"
 import { preflightDocx } from "./preflight.service.js"
@@ -53,13 +54,44 @@ describe("preflightDocx", () => {
 
   it("Track Changes/comment author mã CR ⇒ nhận", async () => {
     const res = await preflightDocx(await makeDocx({ body: trackedBody("CR-003") }))
-    expect(res).toEqual({ status: "accepted", issues: [], stamp: null })
+    expect(res).toMatchObject({ status: "accepted", issues: [], stamp: null })
     expect((await preflightDocx(await withComment("CR-001"))).status).toBe("accepted")
   })
 
   it("comment của người khác ⇒ FOREIGN_COMMENT có vị trí", async () => {
     const res = await preflightDocx(await withComment("Lan"))
     expect(res.issues).toEqual([{ code: "FOREIGN_COMMENT", message: 'Comment của "Lan" chưa được xử lý', location: { block_ord: 0, text: "Có comment" } }])
+  })
+
+  it("FLF-331: CV / hoá đơn ⇒ từ chối NOT_SRS kèm lý do, chưa tới bước đọc file; SRS và mẫu FPT trống ⇒ nhận kèm document_kind", async () => {
+    const cv = await makeDocx({
+      body: [p("NGUYEN VAN A"), p("Senior Backend Developer"), styled("u1", "Work Experience"), p("2021–2024: FPT Software — billing services."), styled("u1", "Education"), p("FPT University, Software Engineering"), styled("u1", "Skills"), p("Node.js, TypeScript, Docker"), p("Hobbies: football")].join("")
+    })
+    const rejected = await preflightDocx(cv)
+    expect(rejected.status).toBe("rejected")
+    expect(rejected.issues).toHaveLength(1)
+    expect(rejected.issues[0]).toMatchObject({ code: "NOT_SRS", location: null })
+    expect(rejected.issues[0].message).toContain("Không thấy dấu hiệu tài liệu yêu cầu")
+    expect(rejected.document_kind?.kind).toBe("not_srs")
+
+    const srs = await preflightDocx(await makeSrsDocx())
+    expect(srs.status).toBe("accepted")
+    expect(srs.document_kind?.kind).toBe("srs")
+
+    const template = await preflightDocx(
+      await makeDocx({ body: [p("Software Requirement Specification"), styled("u1", "1 Product Overview"), p("[Describe the product]"), styled("u1", "2 User Requirements"), styled("u2", "2.1 Actors"), p("[List actors]"), styled("u2", "2.2 Use Cases"), styled("u1", "3 Functional Requirements"), styled("u1", "4 Non-Functional Requirements")].join("") })
+    )
+    expect(template.status).toBe("accepted")
+    expect(template.document_kind?.kind).toBe("srs_template")
+  })
+
+  it("FLF-331: file mang dấu version FlintFlow không bị phân loại lại dù nội dung không giống SRS", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: [p("Hôm nay trời đẹp."), p("Chúng tôi đi dã ngoại."), p("Buổi chiều về sớm.")].join("") }))
+    await writeStamp(pkg, { project_id: "p1", version: "1.0", source: "release" })
+    const res = await preflightDocx(await pkg.toBuffer())
+    expect(res.status).toBe("accepted")
+    expect(res.document_kind).toBeNull()
+    expect(res.stamp?.project_id).toBe("p1")
   })
 
   it("đọc stamp", async () => {
@@ -111,6 +143,7 @@ describe("preflightDocx", () => {
 
   it("không có stamp ⇒ stamp null; bảng không ảnh hưởng việc nhận file", async () => {
     const res = await preflightDocx(await makeDocx({ body: p("A") + table([["x", "y"]]) }))
-    expect(res).toEqual({ status: "accepted", issues: [], stamp: null })
+    // FLF-331: tài liệu ngắn không đủ bằng chứng ⇒ vẫn nhận, document_kind = unknown
+    expect(res).toMatchObject({ status: "accepted", issues: [], stamp: null, document_kind: { kind: "unknown" } })
   })
 })
