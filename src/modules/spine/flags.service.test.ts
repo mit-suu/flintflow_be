@@ -66,7 +66,8 @@ import { spineSchema } from "./spine.schema.js"
 import type { Change, Flag, Spine } from "./spine.types.js"
 import * as repo from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
-import { filterFlags, planFlagOps, recompute, waive } from "./flags.service.js"
+import { filterFlags, keep, planFlagOps, recompute, waive } from "./flags.service.js"
+import { countRedOpen } from "./section-status.js"
 import type { FlagCandidate } from "./deterministic-check.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -100,6 +101,9 @@ const flag = (over: Partial<Flag> = {}): Flag => ({
   waived_by_user: false,
   waive_reason: null,
   waived_at_version: null,
+  kept_reason: null,
+  kept_by: null,
+  kept_at: null,
   ...over
 })
 
@@ -243,12 +247,15 @@ describe("planFlagOps — luật chỉ chạy ở S-9", () => {
 describe("recompute / waive qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("vòng đời: mở → waive → giữ → hết hạn khi nội dung đổi → đóng → tái phát là dòng mới", async () => {
-    await seed({ ...structuredClone(FIXTURE), nfrs: FIXTURE.nfrs.map((n) => (n.id === "N05" ? { ...n, metric: undefined } : n)).map(({ metric, ...rest }) => (metric === undefined ? rest : { ...rest, metric })) })
+  it("vòng đời (cờ vàng — FLF-329 cờ đỏ không waive được): mở → waive → giữ → hết hạn khi nội dung đổi → đóng → tái phát là dòng mới", async () => {
+    const VI = "Người sáng lập khởi nghiệp, người viết tài liệu yêu cầu phần mềm qua hệ thống."
+    const EN = "Startup founder who authors the SRS through the guided pipeline."
+    const a01Flag = (flags: Flag[]) => flags.filter((f) => f.rule_id === "non_english_content" && f.target_id === "A01")
+    await seed({ ...structuredClone(FIXTURE), actors: FIXTURE.actors.map((a) => (a.id === "A01" ? { ...a, description: VI } : a)) })
 
     const first = await recompute(PROJECT, { by: USER })
-    const [opened] = nfrFlag(first.flags)
-    expect(opened).toMatchObject({ target_id: "N05", section_id: "fixed:4.2.2", resolved_at: null, opened_at_version: 2 })
+    const [opened] = a01Flag(first.flags)
+    expect(opened).toMatchObject({ level: "yellow", target_id: "A01", resolved_at: null, opened_at_version: 2 })
     expect(first.checked_at_version).toBe(2)
 
     const again = await recompute(PROJECT, { by: USER })
@@ -261,25 +268,25 @@ describe("recompute / waive qua op engine", () => {
     expect((await recompute(PROJECT, { by: USER })).reopened).toEqual([])
     expect((await current()).spine_version).toBe(3)
 
-    // FLF-243: sửa chỗ khác không đụng tới N05 ⇒ waiver giữ nguyên
+    // FLF-243: sửa chỗ khác không đụng tới A01 ⇒ waiver giữ nguyên
     await applyTransaction(PROJECT, { base_version: 3, ops: [{ op: "set", path: "entities[id=E01].description", value: "Changed" }], by: USER })
     expect((await recompute(PROJECT, { by: USER })).reopened).toEqual([])
-    expect(nfrFlag((await current()).flags)[0]).toMatchObject({ id: opened.id, waived_by_user: true, waive_reason: REASON })
+    expect(a01Flag((await current()).flags)[0]).toMatchObject({ id: opened.id, waived_by_user: true, waive_reason: REASON })
 
-    // Sửa chính N05 mà vẫn thiếu số đo ⇒ waiver hết hạn
-    await applyTransaction(PROJECT, { base_version: (await current()).spine_version, ops: [{ op: "set", path: "nfrs[id=N05].statement", value: "The service stays available." }], by: USER })
+    // Sửa chính A01 mà mô tả vẫn tiếng Việt ⇒ waiver hết hạn
+    await applyTransaction(PROJECT, { base_version: (await current()).spine_version, ops: [{ op: "set", path: "actors[id=A01].name", value: "Startup Founder" }], by: USER })
     const lapsed = await recompute(PROJECT, { by: USER })
     expect(lapsed.reopened).toEqual([opened.id])
-    expect(nfrFlag(lapsed.flags)[0]).toMatchObject({ id: opened.id, waived_by_user: false, waive_reason: null })
+    expect(a01Flag(lapsed.flags)[0]).toMatchObject({ id: opened.id, waived_by_user: false, waive_reason: null })
 
     let version = (await current()).spine_version
-    await applyTransaction(PROJECT, { base_version: version, ops: [{ op: "set", path: "nfrs[id=N05].metric", value: "Availability" }], by: USER })
+    await applyTransaction(PROJECT, { base_version: version, ops: [{ op: "set", path: "actors[id=A01].description", value: EN }], by: USER })
     expect((await recompute(PROJECT, { by: USER })).resolved).toEqual([opened.id])
 
     version = (await current()).spine_version
-    await applyTransaction(PROJECT, { base_version: version, ops: [{ op: "remove", path: "nfrs[id=N05].metric" }], by: USER })
+    await applyTransaction(PROJECT, { base_version: version, ops: [{ op: "set", path: "actors[id=A01].description", value: VI }], by: USER })
     const recurring = await recompute(PROJECT, { by: USER })
-    const rows = nfrFlag(recurring.flags)
+    const rows = a01Flag(recurring.flags)
     expect(rows).toHaveLength(2)
     expect(rows[0]).toMatchObject({ id: opened.id })
     expect(rows[0].resolved_at).not.toBeNull()
@@ -287,14 +294,32 @@ describe("recompute / waive qua op engine", () => {
     expect(rows[1].id).not.toBe(opened.id)
   })
 
-  it("waive luật không waive được ⇒ 400 FLAG_NOT_WAIVABLE; cờ không tồn tại ⇒ 404", async () => {
+  it("FLF-329: mọi cờ đỏ ⇒ 400 FLAG_NOT_WAIVABLE; cờ không tồn tại ⇒ 404", async () => {
     await seed({ ...structuredClone(FIXTURE), common_requirements: [] })
     const { flags } = await recompute(PROJECT, { by: USER })
     const arrayEmpty = flags.find((f) => f.rule_id === "array_empty")!
     const sectionEmpty = flags.find((f) => f.rule_id === "section_empty")!
 
     await expect(waive(PROJECT, arrayEmpty.id, REASON, USER)).rejects.toMatchObject({ statusCode: 400, code: "FLAG_NOT_WAIVABLE" })
+    await expect(waive(PROJECT, sectionEmpty.id, REASON, USER)).rejects.toMatchObject({ statusCode: 400, code: "FLAG_NOT_WAIVABLE", meta: { level: "red" } })
     await expect(waive(PROJECT, "FL999", REASON, USER)).rejects.toMatchObject({ statusCode: 404, code: "FLAG_NOT_FOUND" })
-    expect(await waive(PROJECT, sectionEmpty.id, REASON, USER)).toMatchObject({ waived_by_user: true })
+  })
+
+  it("FLF-329: keep ghi lý do / người / thời điểm, cờ vẫn mở và vẫn tính là cờ đỏ chặn; cờ đã đóng ⇒ FLAG_NOT_KEEPABLE", async () => {
+    await seed({ ...structuredClone(FIXTURE), common_requirements: [] })
+    const { flags } = await recompute(PROJECT, { by: USER })
+    const sectionEmpty = flags.find((f) => f.rule_id === "section_empty")!
+
+    await expect(keep(PROJECT, sectionEmpty.id, "ngắn", USER)).rejects.toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+    const kept = await keep(PROJECT, sectionEmpty.id, REASON, USER)
+    expect(kept).toMatchObject({ kept_reason: REASON, kept_by: USER, resolved_at: null, waived_by_user: false })
+    expect(kept.kept_at).toBeTruthy()
+    const after = (await repo.get(PROJECT))!
+    expect(countRedOpen(after)).toBe(flags.filter((f) => f.level === "red").length)
+
+    // Cờ đã đóng thì không giữ nguyên được
+    await seed({ ...structuredClone(FIXTURE) })
+    const closed = (await recompute(PROJECT, { by: USER })).flags.find((f) => f.resolved_at !== null)
+    if (closed) await expect(keep(PROJECT, closed.id, REASON, USER)).rejects.toMatchObject({ statusCode: 400, code: "FLAG_NOT_KEEPABLE" })
   })
 })

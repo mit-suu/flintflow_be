@@ -83,6 +83,32 @@ describe("deterministic check qua HTTP", () => {
     expect(missing.body.error.code).toBe("FLAG_NOT_FOUND")
   })
 
+  it("FLF-329: cờ đỏ nào cũng không waive được; keep ghi lý do mà cờ vẫn mở, readiness.red_open không giảm", async () => {
+    const seeded = await seedFixture("minimal")
+    const client = api(seeded)
+    const flags = flagsResponseSchema.parse((await client.post("/flags/recompute", { at_baseline: true })).body.data)
+    const red = flags.find((f) => f.level === "red" && !NON_WAIVABLE_RULES.has(f.rule_id) && f.resolved_at === null) ?? flags.find((f) => f.level === "red")
+    expect(red).toBeDefined()
+    const redOpen = flags.filter((f) => f.level === "red" && f.resolved_at === null).length
+
+    const reason = "Integration test: keep this red flag with a written reason."
+    const waived = await client.post(`/flags/${red!.id}/waive`, { reason })
+    expect(waived.status).toBe(400)
+    expect(waived.body.error.code).toBe("FLAG_NOT_WAIVABLE")
+
+    const tooShort = await client.post(`/flags/${red!.id}/keep`, { reason: "ok" })
+    expect(tooShort.status).toBe(400)
+
+    const kept = await client.post(`/flags/${red!.id}/keep`, { reason })
+    expect(kept.status, JSON.stringify(kept.body.error)).toBe(200)
+    expect(kept.body.data).toMatchObject({ id: red!.id, kept_reason: reason, resolved_at: null, waived_by_user: false })
+    expect(kept.body.data.kept_by).toBeTruthy()
+
+    const progress = progressResponseSchema.parse((await client.get("/progress")).body.data)
+    expect(progress.readiness.red_open).toBe(redOpen)
+    expect((await client.post("/flags/FL999/keep", { reason })).status).toBe(404)
+  })
+
   it("nội dung không phải tiếng Anh ⇒ cờ vàng non_english_content; waive cần lý do ≥ 20 ký tự; sửa lại ⇒ cờ đóng", async () => {
     const seeded = await seedFixture("full")
     const client = api(seeded)
