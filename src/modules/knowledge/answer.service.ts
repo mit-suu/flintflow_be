@@ -1,5 +1,6 @@
 /**
- * Trả lời có căn cứ (FLF-267): truy hồi → (không đủ căn cứ ⇒ câu cố định, KHÔNG gọi model, không trừ credit) → gắn nhãn
+ * Trả lời có căn cứ (FLF-267): truy hồi → (không đủ căn cứ ⇒ câu cố định, KHÔNG gọi model) → gắn nhãn.
+ * FLF-333: cả lượt gọi model cũng 0 credit (business-flow nguyên tắc 9) — chỉ giới hạn số câu / ngày.
  * chunk K1..Kn vào prompt `knowledge-answer` → hậu kiểm trích dẫn bằng code:
  *   - bỏ nhãn không có trong tập đã truy hồi, bỏ ý không còn nhãn hợp lệ nào;
  *   - `grounded = false` hoặc không còn ý nào ⇒ câu "không đủ căn cứ" (theo ngôn ngữ trả lời);
@@ -8,6 +9,9 @@
  */
 
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
+import { AiActionLog } from "../admin/ai-action-log.model.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { env } from "../../config/env.js"
 import { ActionType, type AiActionInput } from "../../shared/ai/ai-action.types.js"
 import type { KnowledgeAnswerOutput } from "../../shared/ai/response-parser.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -151,7 +155,29 @@ export interface AnswerContext {
   signal?: AbortSignal
 }
 
+export const KNOWLEDGE_DAILY_LIMIT = "KNOWLEDGE_DAILY_LIMIT"
+
+/** Đầu ngày theo giờ máy chủ — đủ cho hạn mức chống lạm dụng, không cần theo múi giờ người dùng. */
+const startOfToday = (): Date => {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+/**
+ * FLF-333: hỏi tri thức không tốn credit ⇒ giới hạn số câu mỗi user mỗi ngày (đếm lượt đã gọi model trong `AiActionLog`;
+ * câu bị từ chối không gọi model nên không tính). Vượt ⇒ 429 `KNOWLEDGE_DAILY_LIMIT`, KHÔNG chuyển sang trừ credit.
+ */
+export const assertKnowledgeDailyLimit = async (userId: string): Promise<void> => {
+  const limit = env.KNOWLEDGE_DAILY_LIMIT
+  const used = await AiActionLog.countDocuments({ userId, actionType: ActionType.KNOWLEDGE_ANSWER, createdAt: { $gte: startOfToday() } })
+  if (used >= limit) {
+    throw new ApiError(429, `Bạn đã hỏi ${used} câu tri thức hôm nay — hạn mức ${limit} câu/ngày để tránh lạm dụng (không tốn credit). Mai hỏi tiếp nhé.`, KNOWLEDGE_DAILY_LIMIT, { limit, used })
+  }
+}
+
 export const answerKnowledgeQuestion = async (question: string, ctx: AnswerContext): Promise<KnowledgeAnswer> => {
+  await assertKnowledgeDailyLimit(ctx.userId)
   const retrieval = await retrieveKnowledge(question, {
     corpus: ctx.corpus ?? DEFAULT_KNOWLEDGE_CORPUS,
     ...(ctx.appliesTo !== undefined ? { appliesTo: ctx.appliesTo } : {})

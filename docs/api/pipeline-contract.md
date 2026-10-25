@@ -107,6 +107,7 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
 | 422 | `NOTHING_TO_UNDO` | Không còn txn có thể undo | — |
 | 422 | `BASELINE_BLOCKED` | Còn cờ đỏ chưa waive khi ghi baseline | `{ flags[] }` |
+| 429 | `KNOWLEDGE_DAILY_LIMIT` | Chat `knowledge: true` khi user đã hết hạn mức câu hỏi tri thức trong ngày (FLF-333; hỏi tri thức không tốn credit nên chặn lạm dụng bằng số câu) | `{ limit, used }` |
 | 429 | `RATE_LIMIT_EXCEEDED` | Nhà cung cấp AI từ chối: hết hạn mức, chưa gắn thanh toán, hoặc gọi quá nhanh | — |
 | 502 | `AI_PROVIDER_ERROR` | Nhà cung cấp AI lỗi / trả rỗng (`GLM_EMPTY_OUTPUT`, 5xx…) | — |
 | 501 | `NOT_IMPLEMENTED` | Nhánh chưa hiện thực (vd `instruction` trước T17) | — |
@@ -200,7 +201,7 @@ Lô bị từ chối:
 
 | Field | Kiểu | Ý nghĩa |
 | --- | --- | --- |
-| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, 2 credit) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
+| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, **0 credit** — FLF-333, giới hạn `KNOWLEDGE_DAILY_LIMIT` câu / user / ngày, vượt ⇒ `429 KNOWLEDGE_DAILY_LIMIT`) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
 
 Thứ tự xử lý khi `knowledge: true`: đi **trước** lượt chờ trả lời của step (phiên pipeline — lượt chờ giữ nguyên, tin không
 thành câu trả lời của step) và trước lệnh sửa (không có bản xem trước, không đọc / ghi Spine); chốt `409 CHANGE_REQUIRES_CR`
@@ -313,3 +314,4 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 | 2026-10-20 | contract-change FLF-293 (khoá draft khi chờ duyệt) | Additive. Mã lỗi mới `409 DRAFT_LOCKED` cho #7–#10 và sửa giả định khi `baseline_submission.status = pending`; Lead duyệt hoặc từ chối thì mở khoá. Không đổi shape request/response |
 | 2026-10-20 | contract-change FLF-294 (change request sau baseline, mode tạo SRS) | Additive + một siết luật (BR-03). `changesRequestSchema` thêm `change_request?` `{ requester, source: { kind, ref? } }`; sau baseline `POST /changes` thiếu nó ⇒ `400 CR_FIELDS_REQUIRED` (trước đây chỉ đòi `reason`). Lượt áp thành CR `CR-nnn`, `meta.cr_id`; `reason` của lô lưu `CR-nnn · người yêu cầu · nguồn — lý do`. `/reconcile` không đòi (kéo theo CR đã ghi). `POST /undo` sau baseline ⇒ `409 UNDO_AFTER_BASELINE`. Gói phát hành (UC-51/52) cho mode này chưa làm |
 | 2026-10-23 | contract-change (quyền Lead/Viewer theo UC-20/38/39/47/50) | Siết quyền, không đổi shape. `POST /steps/S-9.5/gate` với `accept`/`accept_as_is` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`; Analyst nộp qua #32). Viewer chỉ còn GET: danh sách/chi tiết dự án, `document`, `export/word`, `diagrams`, `baselines`, `versions` (+`compare`, `blocks`, `download`), `progress`, `traceability`, `comments` — mọi GET khác 403 `ORG_ROLE_FORBIDDEN`. Với Viewer: `document` bỏ `flagsAppendix`/`awaiting_reaccept`, `stale` ⇒ `draft`; `progress` trả `red_open`/`awaiting_reaccept`/`stale` = 0; `export/word?source=draft` ⇒ 403. |
+| 2026-10-26 | contract-change FLF-333 (hỏi tri thức không tốn credit) | Additive. `knowledge_answer` giá 0 credit (không giữ / trừ ví, vẫn ghi `aiactionlogs`); mã lỗi mới `429 KNOWLEDGE_DAILY_LIMIT` (`meta { limit, used }`), hạn mức `KNOWLEDGE_DAILY_LIMIT` (mặc định 60 câu / user / ngày). Không đổi shape request/response |
