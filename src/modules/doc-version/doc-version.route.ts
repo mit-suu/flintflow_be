@@ -89,4 +89,68 @@ router.get("/:projectId/versions/:v/download", authMiddleware, versionController
 // Release = khoá baseline mới (UC-45 / BPMN 5.3): chỉ Lead
 router.post("/:projectId/release", authMiddleware, requireRole("lead"), versionController.releaseVersion)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/review-package:
+ *   get:
+ *     summary: Gói duyệt (FLF-330, C-7) — mọi CR đã ghi kể từ lần phát hành trước, trạng thái chờ Lead, nhãn bản nháp
+ *     tags: [Version (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     responses:
+ *       200:
+ *         description: "`reviewPackageSchema`"
+ */
+router.get("/:projectId/review-package", authMiddleware, versionController.getReviewPackage)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/review-package/submit:
+ *   post:
+ *     summary: BA gửi Lead duyệt cả gói (cờ đỏ = 0) — bản nháp khoá tới khi Lead duyệt / yêu cầu sửa
+ *     tags: [Version (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [base_version], properties: { base_version: { type: integer } } }
+ *     responses:
+ *       200:
+ *         description: "`reviewPackageSchema` (status pending)"
+ *       409:
+ *         description: PACKAGE_ALREADY_SUBMITTED, PACKAGE_EMPTY, SPINE_VERSION_CONFLICT
+ *       422:
+ *         description: RELEASE_RED_FLAGS_OPEN (meta.flags[])
+ */
+router.post("/:projectId/review-package/submit", authMiddleware, requireRole("lead", "analyst"), versionController.submitReviewPackage)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/review-package/request-changes:
+ *   post:
+ *     summary: Lead yêu cầu sửa gói kèm lý do — mở khoá bản nháp, BA sửa / hoàn tác bằng CR mới rồi gửi lại
+ *     tags: [Version (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: projectId, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [base_version, reason], properties: { base_version: { type: integer }, reason: { type: string, minLength: 10 } } }
+ *     responses:
+ *       200:
+ *         description: "`reviewPackageSchema` (status changes_requested)"
+ *       422:
+ *         description: NO_PENDING_SUBMISSION
+ */
+router.post("/:projectId/review-package/request-changes", authMiddleware, requireRole("lead"), versionController.requestPackageChanges)
+
 export default router
