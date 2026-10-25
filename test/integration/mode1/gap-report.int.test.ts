@@ -37,7 +37,10 @@ const flag = (id: string, level: "red" | "yellow", section_id: string, message: 
   resolved_at,
   waived_by_user: false,
   waive_reason: null,
-  waived_at_version: null
+  waived_at_version: null,
+  kept_reason: null,
+  kept_by: null,
+  kept_at: null
 })
 
 /** Thêm cờ tay: đỏ + vàng ở 4.2.3 (đã có cờ AI vàng), vàng ở 5.1, một cờ đã đóng. */

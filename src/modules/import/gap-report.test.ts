@@ -23,7 +23,10 @@ const flag = (id: string, level: "red" | "yellow", rule_id: string, section_id: 
   resolved_at: null,
   waived_by_user: false,
   waive_reason: null,
-  waived_at_version: null
+  waived_at_version: null,
+  kept_reason: null,
+  kept_by: null,
+  kept_at: null
 })
 
 const REPORT: GapReport = gapReportSchema.parse({

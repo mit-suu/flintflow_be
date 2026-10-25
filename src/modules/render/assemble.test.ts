@@ -178,8 +178,8 @@ const baseSpine = (): Spine => ({
   assumptions: [],
   decisions: [],
   flags: [
-    { id: "FLG1", level: "red", rule_id: "dead_reference", section_id: "fixed:1", message: "broken ref", remediation_step: "S-2.1", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null },
-    { id: "FLG2", level: "yellow", rule_id: "vague", section_id: "fixed:5.4", message: "vague wording", remediation_step: "S-7.4", opened_at_version: 1, resolved_at: null, waived_by_user: true, waive_reason: "Accepted for release 1.0 scope", waived_at_version: 2 }
+    { id: "FLG1", level: "red", rule_id: "dead_reference", section_id: "fixed:1", message: "broken ref", remediation_step: "S-2.1", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null, kept_reason: null, kept_by: null, kept_at: null },
+    { id: "FLG2", level: "yellow", rule_id: "vague", section_id: "fixed:5.4", message: "vague wording", remediation_step: "S-7.4", opened_at_version: 1, resolved_at: null, waived_by_user: true, waive_reason: "Accepted for release 1.0 scope", waived_at_version: 2, kept_reason: null, kept_by: null, kept_at: null }
   ],
   sections: [],
   baselines: [],
@@ -698,10 +698,11 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
 
   it("vi + lớp bản dịch đủ (fixture 19 màn): nhãn vi, nội dung dịch; mục, số hiệu, trạng thái, ảnh, cờ theo Spine gốc", async () => {
     const spine = fixture19()
+    // FLF-329: cờ đỏ không waive được ⇒ cờ đã waive trong ca này là cờ vàng
     const flag = (id: string, section_id: string, waived: boolean): Spine["flags"][number] => ({
       id,
-      level: "red",
-      rule_id: "section_empty",
+      level: waived ? "yellow" : "red",
+      rule_id: waived ? "orphan_actor" : "section_empty",
       section_id,
       message: "Section is empty",
       remediation_step: "S-8.1",
@@ -709,7 +710,10 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
       resolved_at: null,
       waived_by_user: waived,
       waive_reason: waived ? "Out of scope" : null,
-      waived_at_version: waived ? 2 : null
+      waived_at_version: waived ? 2 : null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     })
     spine.flags = [flag("FL1", "function:FN001", false), flag("FL2", "feature:F2", true)]
     const recordChanges: ChangeRecordRow[] = [{ txn: "t1", op: "add", reason: "seed", at: "2026-09-01T09:00:00.000Z", by: "system", step_id: "S-2.1", path: "project.vision" }]

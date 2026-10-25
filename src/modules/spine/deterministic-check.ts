@@ -34,19 +34,19 @@ const rule = (rule_id: string, level: FlagLevel, waivable: boolean, at_baseline 
   Object.freeze({ rule_id, level, waivable, at_baseline })
 
 export const RULES: readonly RuleDef[] = Object.freeze([
-  rule("section_empty", "red", true),
+  rule("section_empty", "red", false),
   rule("array_empty", "red", false),
   rule("dead_reference", "red", false),
   rule("render_error", "red", false),
-  rule("diagram_stale", "red", true),
-  rule("nfr_missing_number", "red", true),
-  rule("usecase_relation_invalid", "red", true),
-  rule("unconfirmed_assumption", "red", true, true),
-  rule("section_stale_at_baseline", "red", true, true),
-  rule("section_awaiting_reaccept", "red", true, true),
-  rule("screen_pending_at_baseline", "red", true, true),
-  rule("orphan_screen_at_baseline", "red", true, true),
-  rule("orphan_entity_at_baseline", "red", true, true),
+  rule("diagram_stale", "red", false),
+  rule("nfr_missing_number", "red", false),
+  rule("usecase_relation_invalid", "red", false),
+  rule("unconfirmed_assumption", "red", false, true),
+  rule("section_stale_at_baseline", "red", false, true),
+  rule("section_awaiting_reaccept", "red", false, true),
+  rule("screen_pending_at_baseline", "red", false, true),
+  rule("orphan_screen_at_baseline", "red", false, true),
+  rule("orphan_entity_at_baseline", "red", false, true),
   rule("orphan_actor", "yellow", true),
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
@@ -69,7 +69,11 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("unresolved_many_to_many", "yellow", true)
 ])
 
-/** Ba luật là vi phạm bất biến/lỗi kỹ thuật — waive nghĩa là ký baseline trên Spine gãy (§7). */
+/**
+ * FLF-329 (BR-04, business-flow §2): **mọi cờ đỏ** không waive được — cờ đỏ = 0 là gate cứng, không có waive, không có
+ * version "conditional". Người dùng chỉ có "Giữ nguyên + lý do" (`flags.service.keep`): lý do được ghi, cờ vẫn mở và vẫn chặn.
+ * Cờ vàng waive như cũ.
+ */
 export const NON_WAIVABLE_RULES: ReadonlySet<string> = new Set(RULES.filter((r) => !r.waivable).map((r) => r.rule_id))
 
 /**

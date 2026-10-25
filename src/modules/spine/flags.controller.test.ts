@@ -43,8 +43,8 @@ const OWNER = "650000000000000000000010"
 const PROJECT = "650000000000000000000001"
 
 const FLAGS: Flag[] = [
-  { id: "FL001", level: "red", rule_id: "section_empty", section_id: "fixed:5.2", target_id: null, message: "", remediation_step: "S-7.2", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null },
-  { id: "FL002", level: "yellow", rule_id: "orphan_actor", section_id: "fixed:2.1", target_id: "A01", message: "", remediation_step: "S-3.2", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null }
+  { id: "FL001", level: "red", rule_id: "section_empty", section_id: "fixed:5.2", target_id: null, message: "", remediation_step: "S-7.2", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null, kept_reason: null, kept_by: null, kept_at: null },
+  { id: "FL002", level: "yellow", rule_id: "orphan_actor", section_id: "fixed:2.1", target_id: "A01", message: "", remediation_step: "S-3.2", opened_at_version: 1, resolved_at: null, waived_by_user: false, waive_reason: null, waived_at_version: null, kept_reason: null, kept_by: null, kept_at: null }
 ]
 
 interface Outcome {
