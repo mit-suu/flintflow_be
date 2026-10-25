@@ -3,8 +3,8 @@ skill_id: context
 kind: renderer
 version: 2.1.0
 description: "S-2.5 System Context Diagram (level-0 data flow: grey system circle, actor rectangles ringed by role, black and white)"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:

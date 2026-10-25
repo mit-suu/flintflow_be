@@ -423,6 +423,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-23 | contract-change (quyền Lead/Viewer) | `POST /release` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`). Viewer: `GET /versions/:v/download` chỉ cho bản release (`x.0`) và v0, `variant=tracked` ⇒ 403; `GET /import`, `/gap-report`, `/step-plan`, `/change-requests*` ⇒ 403. |
 | 2026-10-20 | FLF-312 — bỏ bắt buộc mẫu FPT | Gap report bỏ `missing_fpt_sections[]`, `missing_sections[]`, `unmapped_headings[]` và các `totals` tương ứng; `TemplateProfile` bỏ `required_sections`; #32 bỏ `missing` — đầu mục FPT file không có ⇒ `hidden`, có heading mà trống ⇒ `enabled`; #33 `CORE_STEP_REQUIRED` chỉ còn cho bước luôn chạy / step đã có dữ liệu — breaking (FE cập nhật cùng đợt) |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |

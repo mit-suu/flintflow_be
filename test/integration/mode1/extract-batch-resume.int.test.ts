@@ -157,9 +157,9 @@ describe("I-4 — ước tính credit", () => {
     expect(view.credit_estimate).toMatchObject({ ai_calls: expect.any(Number), available_credits: 7 })
     expect(view.credit_estimate!.credits).toBe(view.credit_estimate!.ai_calls * 2)
 
+    // Viewer không đọc luồng import (dữ liệu làm việc — UC-47)
     await Membership.updateOne({ userId: seeded.userId }, { $set: { role: "viewer" } })
-    const asViewer = getImportResponseSchema.parse((await c.get("/import")).body.data)
-    expect(asViewer.credit_estimate).toMatchObject({ ai_calls: view.credit_estimate!.ai_calls, available_credits: null })
+    expect((await c.get("/import")).status).toBe(403)
     await Membership.updateOne({ userId: seeded.userId }, { $set: { role: "lead" } })
 
     await CreditWallet.updateOne({ organizationId: seeded.orgId }, { $set: { balance: 1000 } })

@@ -46,7 +46,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { capitalize, pathLabel, sectionLabel } from "../spine/human-labels.js"
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
 import { TABLE_ENTITIES, hasRequiredFields } from "./table-header-dictionary.js"
-import { tableRows, tableText } from "./table-rows.js"
+import { indentedCells, tableRows, tableText } from "./table-rows.js"
 import { groupOf, markActions, tableShape, type TableShape } from "./table-shape.js"
 import { FUNCTION_LABELS, USE_CASE_LABELS, functionSpecValue, readSpecLines, useCaseSpecValue } from "./spec-fields.js"
 import { TemplateProfile, type ITemplateProfile, type TableMapEntry } from "./template-profile.model.js"
@@ -118,7 +118,7 @@ export const settleSection = (
   const targets = targetsOf(sectionId)
   for (const t of sectionBlocks.filter((b) => b.kind === "table")) {
     const rows = tableRows(t, blocks)
-    const items = deterministicTableItems(t, rows, profile)
+    const items = deterministicTableItems(t, rows, profile, indentedCells(t, blocks))
     if (items) {
       // NFR của bảng nhận nhóm theo mục như NFR AI trích (bảng External Systems ở 4.1 ⇒ interface, không còn "other")
       for (const it of items) if (it.entity === "nfrs" && it.value.category === undefined && NFR_CATEGORY_BY_SECTION[sectionId]) it.value.category = NFR_CATEGORY_BY_SECTION[sectionId]
@@ -167,21 +167,38 @@ export const shortName = (statement: string): string => {
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
+/** Dấu đầu dòng của dòng con trong cột tên ma trận ("- Adjust Stock", "↳ Adjust Stock"). */
+const SUB_ROW_MARKER = /^[-–•+↳└]\s*/
+
 /**
  * Ma trận phân quyền (FLF-252): mỗi cột vai trò ⇒ một vai trò (tên = tiêu đề cột), mỗi ô đánh dấu ⇒ một quyền
  * màn hình × vai trò × thao tác ("X"/"✓" ⇒ `access`, "view, create" ⇒ hai quyền). Tên màn / vai trò phân giải lúc dựng op.
+ * Dòng thụt lề / có dấu đầu dòng dưới một màn là thao tác của màn đó (mẫu FPT: "Order Queue" rồi "    Confirm / Reject
+ * Order") ⇒ ghi kèm `parent_screen`; lúc dựng op tên dòng không phải màn thì thành thao tác trên màn cha.
  */
-const matrixItems = (table: BlockLite, grid: string[][], shape: TableShape, cols: TableMapEntry[], confidence: number): EntityItem[] | null => {
+const matrixItems = (
+  table: BlockLite,
+  grid: string[][],
+  shape: TableShape,
+  cols: TableMapEntry[],
+  confidence: number,
+  indented: ReadonlySet<string>
+): EntityItem[] | null => {
   const screenCol = cols.find((c) => c.field_path === "permissions[].screen_id")?.column_index
   const roleCols = cols.filter((c) => c.field_path === "permissions[].role_id" && shape.headers[c.column_index]).map((c) => c.column_index)
   if (screenCol === undefined || !roleCols.length) return null
   const base = { id: null, confidence, field_confidence: {}, source_block_ids: [table.block_id], origin: "deterministic" as const }
   const roles = roleCols.map((c) => ({ ...base, entity: "roles", value: { name: shape.headers[c], actor_id: shape.headers[c] } }))
+  let parent: string | null = null
   const permissions = shape.body.flatMap((r) => {
-    const screen = (grid[r][screenCol] ?? "").trim()
-    if (!screen) return []
+    const raw = (grid[r][screenCol] ?? "").trim()
+    if (!raw) return []
+    const sub = parent !== null && (indented.has(`${r}:${screenCol}`) || SUB_ROW_MARKER.test(raw))
+    const screen = sub ? raw.replace(SUB_ROW_MARKER, "") : raw
+    if (!sub) parent = screen
+    const extra = sub ? { parent_screen: parent } : {}
     return roleCols.flatMap((c) =>
-      markActions(grid[r][c] ?? "").map((action) => ({ ...base, entity: "permissions", value: { screen_id: screen, role_id: shape.headers[c], action } }))
+      markActions(grid[r][c] ?? "").map((action) => ({ ...base, entity: "permissions", value: { screen_id: screen, role_id: shape.headers[c], action, ...extra } }))
     )
   })
   return [...roles, ...permissions]
@@ -191,13 +208,18 @@ const matrixItems = (table: BlockLite, grid: string[][], shape: TableShape, cols
  * Bảng có mapping đủ field bắt buộc ⇒ item theo từng hàng dữ liệu; không đủ ⇒ `null` (để AI trích). Đọc theo hình dạng
  * bảng (FLF-252): hàng tiêu đề thật (bỏ hàng tên bảng), hàng nhóm không thành phần tử (nhãn nhóm làm feature của màn).
  */
-export const deterministicTableItems = (table: BlockLite, grid: string[][], profile: ITemplateProfile): EntityItem[] | null => {
+export const deterministicTableItems = (
+  table: BlockLite,
+  grid: string[][],
+  profile: ITemplateProfile,
+  indented: ReadonlySet<string> = new Set()
+): EntityItem[] | null => {
   const cols = profile.table_map.filter((t) => t.block_id === table.block_id && t.field_path)
   const shape = tableShape(grid)
   if (!cols.length || !shape.body.length) return null
   const entity = cols[0].field_path!.split("[")[0]
   const confidence = Math.min(...cols.map((c) => (c.confirmed ? 1 : c.confidence)))
-  if (entity === "permissions") return matrixItems(table, grid, shape, cols, confidence)
+  if (entity === "permissions") return matrixItems(table, grid, shape, cols, confidence, indented)
   const def = TABLE_ENTITIES.find((d) => d.entity === entity)
   const fields = new Map(cols.filter((c) => c.field_path!.startsWith(`${entity}[`)).map((c) => [c.column_index, c.field_path!.split("].")[1]]))
   if (!def || !hasRequiredFields(def, new Set(fields.values()))) return null

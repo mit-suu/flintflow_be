@@ -3,8 +3,8 @@ skill_id: usecase
 kind: renderer
 version: 2.0.0
 description: "S-3.6 Use Case Diagram (one diagram per actor, include/extend, actor generalization)"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:

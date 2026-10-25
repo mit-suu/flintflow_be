@@ -42,6 +42,9 @@ export const validateStartupAssets = (): void => {
  * Chạy bất đồng bộ sau khi server đã nghe cổng để không làm chậm khởi động.
  */
 export const warnStartupConfig = async (): Promise<void> => {
+  if (!env.ANTHROPIC_API_KEY.trim()) {
+    console.warn("[startup] ⚠ ANTHROPIC_API_KEY trống — mọi skill `provider: anthropic` sẽ trả ANTHROPIC_KEY_MISSING")
+  }
   if (!env.MODAL_BASE_URL.trim()) {
     console.warn("[startup] ⚠ MODAL_BASE_URL trống — mọi skill `provider: glm` sẽ trả AI_PROVIDER_NOT_CONFIGURED")
   }

@@ -1,7 +1,7 @@
 ---
 actionType: summarize_document
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0.3
 isActive: true

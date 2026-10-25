@@ -586,3 +586,32 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
 - Trả lời (GLM-5.3-Flash, judge cùng model): đúng 85,5% vs 16,4% no-RAG; trung thực 100%; ảo giác ngoài corpus 0% vs
   ≥ 50% no-RAG; nhãn trích dẫn hợp lệ 100%.
 - Chi phí một lượt đo đủ: ~950 text embed Gemini (free tier 1 000/ngày/project — dùng `--cache`) + 160 lượt LLM.
+
+## Thêm use case kéo theo phần liên quan (FLF-311) — provider thật (2026-10-21)
+
+- Cách đo: `npm run test:e2e-ai -- test/e2e-ai/add-use-case.e2e.test.ts`, fixture 19 màn (đã qua S-5 và S-7.3 ⇒ chế độ
+  `full` + `messages_ready`), lệnh "Thêm use case mới Share Read-Only Link: Business Analyst tạo link chỉ-đọc…",
+  `apply-change-op` 1.4.0 trên GLM-5.3-Flash. Chấm 12 tiêu chí: UC + chức năng đủ FR (trigger, mô tả, normal, abnormal,
+  validation có id), màn (mới hoặc có sẵn) trong Screens Flow, quyền cho vai trò của actor, thông báo cho luồng bất thường,
+  không còn cảnh báo FLF-298, vẽ bố cục màn mới.
+- Lần đầu: bản xem trước bị từ chối — model **dùng** id tạm (`$newFn1`, `$newScreen`) mà không khai báo làm `id` của phần
+  tử ⇒ 11 vi phạm tham chiếu chết. Sửa: `declareTempIds` (code gán id tạm cho phần tử chưa có id cùng loại) + skill nói rõ.
+- Sau sửa, 5 lượt: 4 lượt tạo màn mới, 12/12; 1 lượt gắn chức năng vào màn Export có sẵn (đúng theo ticket mục 7), đạt khi
+  tiêu chí chấp nhận cả hai cách. Mỗi lượt **1 lượt gọi model**, ~19,5 nghìn token, 15–43 s; bản xem trước 10 thay đổi
+  (UC, 1–2 chức năng, màn, cạnh luồng, 3–4 dòng quyền, 1 thông báo).
+- **Bổ sung 21/10 (sau khi thử trên FAP):** người dùng thêm "Suspend Student Account" ⇒ model gắn chức năng vào màn có
+  sẵn (Screens Flow không đổi) và không nhắc UC20 "Deactivate Student Record" cùng mục tiêu. Sửa: luật 3e kiểm trùng với
+  use case cùng actor (`use_case_context.use_cases`) + `useCaseOverlaps` cảnh báo trong bản xem trước; thao tác đổi dữ
+  liệu luôn có ít nhất một popup nối vào luồng. Đo trên Spine FAP thật (`E2E_FAP_SPINE`, dữ liệu dev không commit):
+  ca Suspend — trước khi siết luật màn: 3/3 có cảnh báo trùng UC20, 1/3 có popup; sau: 3/3 popup mới từ "User Account
+  Management" + cạnh luồng + quyền + thông báo, cảnh báo trùng vẫn hiện. Ca "Request Grade Review" (sinh viên): popup
+  mới từ "My Grades", nằm trong luồng. Fixture 19 màn chạy lại: 12/12.
+- **Vẽ thật (21/10):** `E2E_REAL_RENDER=1` (PlantUML trong `.env` + model vẽ wireframe) trên ca "Request Grade Review":
+  popup mới S18 có bố cục D22 `ok` (salt: môn, điểm, ô lý do, Cancel / Submit Request); Screens Flow D03-2, D03-3 vẽ lại
+  có màn mới. Không đặt biến này thì test giữ PlantUML giả của `test/setup.ts` (cổng chết) và bước vẽ được thay bằng hàm giả.
+- **Hỏi màn riêng hay popup (21/10):** UC cần giao diện mà người dùng chưa chọn ⇒ hỏi trước (một tin, kèm `choices` cho
+  thẻ chọn nhanh, kèm chi tiết còn thiếu), code chặn lô có màn mới khi chưa chọn và chưa hỏi lượt nào, và áp đúng lựa
+  chọn (`is_popup`) khi người dùng đã chọn. FAP thật: ca C lượt 1 model hỏi "Màn hình riêng / Popup mở từ My Grades" + "ai
+  xử lý yêu cầu"; lượt 2 trả lời popup ⇒ lô popup "Grade Review Request" mở từ My Grades, 3 validation, quyền, thông báo.
+  Ca A (Suspend) lượt 1 hỏi màn riêng hay popup mở từ User Account Management; cảnh báo trùng UC20 hiện ở bản xem trước
+  sau khi chọn. Fixture (câu lệnh có "màn hình riêng"): 12/12.

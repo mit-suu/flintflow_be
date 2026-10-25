@@ -58,6 +58,12 @@ const db = vi.hoisted(() => {
 
 vi.mock("../spine/spine.model.js", () => ({ Spine: db.Spine }))
 vi.mock("../spine/change.model.js", () => ({ Change: db.Change }))
+// FLF-311: renderChangedIfAvailable hỏi PlantUML có chạy không — test bật / tắt
+const plantuml = vi.hoisted(() => ({ reachable: true }))
+vi.mock("../../shared/diagram/plantuml.client.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/diagram/plantuml.client.js")>()),
+  isPlantUmlReachable: async () => plantuml.reachable
+}))
 
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
@@ -66,7 +72,8 @@ import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
 import { renderKind } from "./renderers/index.js"
-import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderDiagram, staleDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderChangedIfAvailable, renderDiagram, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { applyTransaction } from "../spine/op-engine.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -306,5 +313,44 @@ describe("screen_layout do model vẽ (FLF-214)", () => {
       const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout }, force: true })
       expect(result.diagrams[0]).toMatchObject({ render_status: "ok", puml: table })
     }
+  })
+})
+
+describe("renderChangedIfAvailable — FLF-311 vẽ lại sau lô thêm use case / màn", () => {
+  beforeEach(() => {
+    db.reset()
+    plantuml.reachable = true
+  })
+
+  const renderedThenRenamed = async (deps: Partial<DiagramServiceDeps>) => {
+    await seed()
+    const rendered = await renderAll(PROJECT, { by: USER, deps })
+    // Đổi tên actor ⇒ các hình đã vẽ của actor đó cũ đi (đúng tập cờ diagram_stale)
+    await applyTransaction(PROJECT, { base_version: rendered.spine_version, by: USER, ops: [{ op: "set", path: "actors[id=A02].name", value: "Lead Analyst" }] })
+    const spine = (await repo.get(PROJECT))!
+    expect(staleRenderedDiagrams(spine).length).toBeGreaterThan(0)
+    return spine
+  }
+
+  it("vẽ lại hình đã cũ + bố cục màn mới trong một lượt; không còn hình cũ", async () => {
+    const { deps } = makeDeps()
+    const before = await renderedThenRenamed(deps)
+    const newScreen = before.screens.find((s) => !before.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === s.id))!.id
+
+    const result = await renderChangedIfAvailable(PROJECT, [newScreen], { by: USER, deps })
+
+    expect(result).not.toBeNull()
+    const after = (await repo.get(PROJECT))!
+    expect(staleRenderedDiagrams(after)).toEqual([])
+    expect(after.diagrams.some((d) => d.kind === "screen_layout" && d.owner_id === newScreen && d.render_status === "ok")).toBe(true)
+  })
+
+  it("PlantUML không chạy ⇒ null, không ghi gì, không ném", async () => {
+    const { deps } = makeDeps()
+    const before = await renderedThenRenamed(deps)
+    plantuml.reachable = false
+
+    await expect(renderChangedIfAvailable(PROJECT, ["S02"], { by: USER, deps })).resolves.toBeNull()
+    expect((await repo.get(PROJECT))?.spine_version).toBe(before.spine_version)
   })
 })

@@ -1,6 +1,7 @@
 import { Router } from "express"
 import * as versionController from "./doc-version.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
+import { requireRole } from "../../shared/auth/require-role.middleware.js"
 
 const router = Router()
 
@@ -77,6 +78,7 @@ const router = Router()
  *           schema: { type: object, required: [base_version], properties: { base_version: { type: integer } } }
  *     responses:
  *       201: { description: "`{ version, baseline (type release), cr_ids, spine_version }`" }
+ *       403: { description: "ORG_ROLE_FORBIDDEN — chỉ Lead release" }
  *       409: { description: SPINE_VERSION_CONFLICT }
  *       422: { description: "RELEASE_RED_FLAGS_OPEN (`meta.flags`)" }
  */
@@ -84,6 +86,7 @@ router.get("/:projectId/versions", authMiddleware, versionController.list)
 router.get("/:projectId/versions/compare", authMiddleware, versionController.compare)
 router.get("/:projectId/versions/:v/blocks", authMiddleware, versionController.blocks)
 router.get("/:projectId/versions/:v/download", authMiddleware, versionController.download)
-router.post("/:projectId/release", authMiddleware, versionController.releaseVersion)
+// Release = khoá baseline mới (UC-45 / BPMN 5.3): chỉ Lead
+router.post("/:projectId/release", authMiddleware, requireRole("lead"), versionController.releaseVersion)
 
 export default router

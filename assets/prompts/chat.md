@@ -1,7 +1,7 @@
 ---
 actionType: chat
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.7
 isActive: true

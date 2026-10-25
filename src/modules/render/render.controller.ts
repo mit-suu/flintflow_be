@@ -22,6 +22,8 @@ import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerDocument } from "./viewer-projection.js"
 
 const parse = <T extends z.ZodType>(schema: T, input: unknown): z.infer<T> => {
   const parsed = schema.safeParse(input)
@@ -84,7 +86,9 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
       // Chỉ khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc (contract #16) — draft lẫn baseline
       ...(result.translation ? { translation: documentTranslationMetaSchema.parse(result.translation) } : {})
     }
-    return sendSuccess(res, 200, result.doc, Object.keys(meta).length ? meta : undefined)
+    // UC-47: Viewer nhận bản không cờ / trạng thái nội bộ
+    const doc = isViewer(req) && result.doc ? viewerDocument(result.doc) : result.doc
+    return sendSuccess(res, 200, doc, Object.keys(meta).length ? meta : undefined)
   } catch (err) {
     if (err instanceof NoWorkingDraftError) {
       // FLF-177 BUG-31: dự án chưa có nội dung là trạng thái bình thường của một dự án đang làm dở, không

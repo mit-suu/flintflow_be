@@ -244,6 +244,22 @@ describe("reconcile lượt 1 — preview diff gộp", () => {
     expect(steps).toContain("S-4.3")
   })
 
+  it("model sửa một dòng mảng chuỗi bằng chỉ số (actor_ids[0]) ⇒ vẫn ra bản xem trước ok (set cả mảng), không chết cả lô", async () => {
+    await seed()
+    await renameActor()
+    const version = (await repo.get(PROJECT))!.spine_version
+    const before = (await repo.get(PROJECT))!.use_cases.find((u) => u.id === "UC02")!.actor_ids
+    deps.reconcileExecutor = vi.fn(async (_type, input) =>
+      (input.promptVariables as { step_id: string }).step_id === "S-3.2" ? opsResult([{ op: "set", path: "use_cases[id=UC02].actor_ids[0]", value: "A02" }]) : opsResult([])
+    )
+
+    const result = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+
+    if (isReconcileApplied(result)) throw new Error("preview mong đợi")
+    expect(result.ok, JSON.stringify(result.violations)).toBe(true)
+    expect(result.ops).toContainEqual(expect.objectContaining({ op: "set", path: "use_cases[id=UC02].actor_ids", value: ["A02", ...before.slice(1)] }))
+  })
+
   it("FLF-260: tài khoản đã chọn en ⇒ mọi lượt gọi mang replyLanguage en; chưa chọn ⇒ không có field", async () => {
     await seed()
     await renameActor()
@@ -334,6 +350,33 @@ describe("reconcile lượt 2 — áp, vẽ lại hình, awaiting_reaccept", () 
     expect(awaitingReaccept(spine, "fixed:3.1.3")).toBe(true)
     // Section không hoà giải giữ nguyên trạng thái
     expect(awaitingReaccept(spine, "fixed:3.1.5")).toBe(false)
+  })
+
+  it("sau baseline: duyệt bản xem trước hoà giải là đủ — section hết stale, KHÔNG mở lại step (không chờ chấp nhận lại)", async () => {
+    const baseline = { id: "BL001", version: "v1.0", type: "generated" as const, doc_version: null, at: "2026-09-10T00:00:00.000Z", snapshot_ref: "650000000000000000000099", checked_at_version: 1, waived_count: 0 }
+    await seed({ ...FIXTURE, baselines: [baseline] })
+    await renameActor()
+    deps.reconcileExecutor = vi.fn(async (_type, input) =>
+      (input.promptVariables as { step_id: string }).step_id === "S-3.2"
+        ? opsResult([{ op: "set", path: "use_cases[id=UC02].description", value: "The Product Owner creates a project." }])
+        : opsResult([])
+    )
+    const version = (await repo.get(PROJECT))!.spine_version
+    const previewed = await reconcile(PROJECT, USER, { base_version: version }, {}, deps)
+    if (isReconcileApplied(previewed)) throw new Error("lượt 1 lẽ ra trả preview")
+
+    const result = await reconcile(PROJECT, USER, { base_version: version, preview_id: previewed.preview_id }, {}, deps)
+
+    expect(isReconcileApplied(result)).toBe(true)
+    const record = await repo.get(PROJECT)
+    const { projectId: _p, ...spine } = record!
+    const changes = await repo.listChanges(PROJECT)
+    for (const section of ["fixed:2.2.2", "fixed:3.1.3"]) {
+      expect(awaitingReaccept(spine, section), section).toBe(false)
+      expect(computeStatus(spine, changes, section), section).not.toBe("stale")
+    }
+    expect(spine.steps.filter((s) => s.status === "revision_requested")).toEqual([])
+    expect(deps.recomputeFlags).toHaveBeenCalled()
   })
 
   it("user từ chối diff (không gửi lượt 2) ⇒ section vẫn stale, không ghi gì thêm", async () => {

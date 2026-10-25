@@ -59,9 +59,10 @@ beforeEach(async () => {
 const useVietnamese = () => Project.updateOne({ _id: seeded.projectId }, { documentLanguage: "vi" })
 
 describe("GET /projects/:id/translations/status", () => {
-  it("dự án en (mặc định) ⇒ total 0; Viewer đọc được; không gọi model", async () => {
+  it("dự án en (mặc định) ⇒ total 0; không gọi model; Viewer không đọc được (dữ liệu làm việc)", async () => {
     const viewer = await join(seeded.orgId, "viewer@flintflow.test", "viewer")
-    const res = await status(seeded.projectId, viewer)
+    expect((await status(seeded.projectId, viewer)).status).toBe(403)
+    const res = await status(seeded.projectId, seeded.token)
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     expect(res.body.data).toEqual({ locale: "en", source_locale: "en", total: 0, missing: 0, batches: 0, estimated_credits: 0 })
     expect(mockCalls).toHaveLength(0)

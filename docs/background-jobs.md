@@ -30,7 +30,7 @@ quyết định *ai chạy và khi nào*. Vì vậy mọi processor phải chạ
 | `import` | `extract` (I-4), `finalize` (1.10–1.12 / resume `checking`) | `extract-<importId>`, `finalize-<importId>` | 2 lần, backoff 30 s | `JOB_IMPORT_CONCURRENCY` (2) |
 | `embedding` | `sync` | `embed-<projectId>`, gộp lượt khi đang chạy (`keepLastIfActive`) | 3 lần, backoff 10 s | 1 |
 | `email` | `otp`, `invitation` | không | OTP 3 lần / 5 s; mời 5 lần / 30 s | 5 |
-| `system` | `topup-resume` (chạy tiếp mode 1 sau khi nạp tiền), `expire-reservations` (mỗi phút) | `topup-<intentId>` | 3 lần | 4 |
+| `system` | `topup-resume` (chạy tiếp mode 1 sau khi nạp tiền), `expire-reservations` (mỗi phút), `renew-subscriptions` (mỗi giờ, UC-80: gói hết kỳ ⇒ Pro về Free, nạp ví tới hạn mức) | `topup-<intentId>` | 3 lần | 4 |
 
 Vì sao chạy lại được an toàn:
 - **I-4** đi tiếp từ `extract_cursor`, nên section đã trích không gọi AI lại.

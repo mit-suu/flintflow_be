@@ -3,8 +3,8 @@ skill_id: meter
 kind: action
 version: 1.0.0
 description: Reserve / deduct / refund credit per model call and record usage[] (UC 9.6)
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 512
 temperature: 0
 reads:

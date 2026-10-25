@@ -25,6 +25,8 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
+import { isViewer } from "../../shared/auth/viewer-read-scope.middleware.js"
+import { viewerProgress } from "../render/viewer-projection.js"
 
 interface Context {
   projectId: string
@@ -92,5 +94,7 @@ export const waiveFlag = catchAsync(async (req: Request, res: Response) => {
 export const getProgress = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
   const changes = await spineRepository.listChanges(projectId)
-  return sendSuccess(res, 200, buildPipelineProgressReport(spine, changes))
+  const report = buildPipelineProgressReport(spine, changes)
+  // UC-20: Viewer không thấy cờ đỏ
+  return sendSuccess(res, 200, isViewer(req) ? viewerProgress(report) : report)
 })
