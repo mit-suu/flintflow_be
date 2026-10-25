@@ -4,7 +4,7 @@ kind: output
 version: 1.0.0
 description: "S-8.2 Document Assembly + S-8.3 Record of Changes — deterministic, FPT order, section numbering"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 1024
 temperature: 0.1
 reads:

@@ -4,7 +4,7 @@ kind: action
 version: 1.1.0
 description: Mode 1 node 1.11 — semantic review of an imported SRS → yellow findings only
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 3072
 temperature: 0.2
 reads:

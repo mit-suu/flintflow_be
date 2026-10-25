@@ -4,7 +4,7 @@ kind: content
 version: 0.3.0
 description: "S-5.2 and S-5.4 per screen — trigger, description, normal/abnormal flows, validations (<= 6 functions per call)"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

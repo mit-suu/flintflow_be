@@ -4,7 +4,7 @@ kind: content
 version: 0.3.0
 description: "S-4.3 roles and the screen x role permission matrix, with per-action sub-rows"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

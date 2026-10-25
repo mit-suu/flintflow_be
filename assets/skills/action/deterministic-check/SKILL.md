@@ -4,7 +4,7 @@ kind: action
 version: 1.1.0
 description: 11 red-flag rules + 12 yellow rules computed on the key graph — no model call
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 1024
 temperature: 0
 reads:

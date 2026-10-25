@@ -4,7 +4,7 @@ kind: action
 version: 1.0.0
 description: Knowledge RAG (FLF-267) — answer a user's question only from retrieved knowledge chunks K1..Kn, citing a chunk for every claim
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0.2
 reads:

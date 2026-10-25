@@ -4,7 +4,7 @@ kind: action
 version: 1.3.0
 description: Turn the user's answers into ONE Spine op transaction — validated by schema, invariants checked at end of batch
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.2
 reads:

@@ -1,7 +1,7 @@
 ---
 actionType: chat
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.7
 isActive: true

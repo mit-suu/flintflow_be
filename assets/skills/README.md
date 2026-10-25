@@ -26,7 +26,7 @@ kind: action                    # BẮT BUỘC — action | content | renderer |
 version: 1.0.0                  # BẮT BUỘC — semver do người sửa tăng (asset_version tự tính)
 description: Một câu mô tả      # tuỳ chọn
 provider: anthropic                   # BẮT BUỘC — anthropic | glm | gemini | modal
-aiModel: claude-sonnet-5-5  # BẮT BUỘC
+aiModel: claude-haiku-5-5  # BẮT BUỘC
 maxTokens: 4096                 # BẮT BUỘC, > 0
 temperature: 0.2                # BẮT BUỘC
 reads:                          # BẮT BUỘC — field Spine skill được nạp (cột Sở hữu/Đọc/Suy dẫn, srs-spine §4)

@@ -3,7 +3,7 @@ import { env } from "../../../config/env.js"
 import { AiProviderConfig, AiActionError } from "../ai-action.types.js"
 import { LLMResponse, LlmCallOptions } from "./provider.types.js"
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
+export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-5-5"
 
 /**
  * Claude 5.x luôn suy nghĩ (adaptive thinking) và phần suy nghĩ ăn vào `max_tokens`. `maxTokens` trong frontmatter
@@ -13,7 +13,7 @@ export const ANTHROPIC_THINKING_HEADROOM_TOKENS = 4096
 
 /**
  * Tham số chung cho cả `callAnthropic` lẫn đường stream (AI SDK): suy nghĩ ít (`effort: low`, tương đương
- * `reasoning_effort: "low"` của GLM). Không gửi `temperature` — Sonnet 5.5 trả 400 với giá trị khác mặc định.
+ * `reasoning_effort: "low"` của GLM). Không gửi `temperature` — Haiku 5.5 trả 400 với giá trị khác mặc định.
  */
 export const ANTHROPIC_EFFORT = "low"
 

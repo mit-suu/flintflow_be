@@ -4,7 +4,7 @@ kind: content
 version: 0.3.0
 description: "S-4.4 functions with no screen — cron jobs, webhooks, background engines"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

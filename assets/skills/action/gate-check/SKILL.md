@@ -4,7 +4,7 @@ kind: action
 version: 1.0.0
 description: Commit gate — Accept / Request revision / Regenerate / Accept as-is; caps 8 calls and 3 regenerates per step; phase menu [A]/[P]/[C]
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 1024
 temperature: 0
 reads:

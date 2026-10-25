@@ -4,7 +4,7 @@ kind: action
 version: 1.0.0
 description: Mode 1 I-4 — extract Spine entities from the text blocks of one imported SRS section
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:

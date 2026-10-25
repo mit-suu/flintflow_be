@@ -1,7 +1,7 @@
 ---
 actionType: translate
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 512
 temperature: 0.2
 isActive: true

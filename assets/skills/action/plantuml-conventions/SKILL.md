@@ -4,7 +4,7 @@ kind: action
 version: 1.1.0
 description: Shared PlantUML rules for the 5 renderers and the compile-error fix call (render_fix)
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:
