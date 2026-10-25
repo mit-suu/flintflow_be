@@ -116,13 +116,22 @@ describe("GET /export/pdf", () => {
     expect(errorCode(res)).toBe("VALIDATION_ERROR")
   })
 
-  it("Viewer xuất được (endpoint chỉ đọc); người ngoài org nhận 404", async () => {
-    const owner = await seedFixture("minimal")
+  it("Viewer chỉ xuất bản baseline (UC-50): draft ⇒ 403, baseline ⇒ 200; người ngoài org nhận 404", async () => {
+    const owner = await seedFixture("full")
+    await seedDiagramPngs(owner)
+    const created = await request(app)
+      .post(`/api/v1/projects/${owner.projectId}/baseline`)
+      .set({ Authorization: `Bearer ${owner.token}` })
+      .send({ base_version: owner.spineVersion })
+    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
     const viewer = await User.create({ email: "viewer@flintflow.test", password: "test-password-123", emailVerified: true })
     await Membership.create({ organizationId: owner.orgId, userId: viewer._id, role: "viewer" })
     const viewerToken = await authAs({ _id: viewer._id, email: "viewer@flintflow.test", orgId: owner.orgId })
 
-    expect((await download(owner.projectId, viewerToken, "/export/pdf?source=draft")).status).toBe(200)
+    const draft = await download(owner.projectId, viewerToken, "/export/pdf?source=draft")
+    expect(draft.status).toBe(403)
+    expect(errorCode(draft)).toBe("ORG_ROLE_FORBIDDEN")
+    expect((await download(owner.projectId, viewerToken, "/export/pdf?source=baseline")).status).toBe(200)
 
     const stranger = await seedFixture("minimal")
     const res = await download(owner.projectId, stranger.token, "/export/pdf?source=draft")
