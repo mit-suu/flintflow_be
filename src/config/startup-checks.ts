@@ -17,6 +17,7 @@ import { loadStepRegistry } from "../modules/pipeline/step-registry.js"
 import { getAssetsRoot } from "./paths.js"
 import { env } from "./env.js"
 import { probePlantUml } from "../shared/diagram/plantuml.client.js"
+import { isGotenbergReachable } from "../shared/pdf/gotenberg.client.js"
 
 export const validateStartupAssets = (): void => {
   const assetsRoot = getAssetsRoot()
@@ -61,6 +62,12 @@ export const warnStartupConfig = async (): Promise<void> => {
             "Đổi PLANTUML_BASE_URL sang cổng khác, hoặc tắt tiến trình đang chiếm."
         : `[startup] ⚠ PlantUML không phản hồi ở ${env.PLANTUML_BASE_URL} (${plantuml.detail}) — ` +
             'diagram sẽ có render_status "error". Dựng bằng: docker compose up -d plantuml'
+    )
+  }
+  if (!(await isGotenbergReachable())) {
+    console.warn(
+      `[startup] ⚠ Gotenberg không phản hồi ở ${env.GOTENBERG_URL} — xuất PDF sẽ trả 503 PDF_EXPORT_UNAVAILABLE ` +
+        "(xuất Word vẫn chạy). Dựng bằng: docker compose up -d gotenberg"
     )
   }
 }
