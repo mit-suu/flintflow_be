@@ -69,15 +69,12 @@ const runCrToWritten = async (c: Client, body: Record<string, unknown>) => {
   expect(impact.locations.length, "3.4 tìm vị trí, 3.5 khoá").toBeGreaterThan(0)
   crDetail(await c.post(`${cr}/propose`)) // 3.6 (+ 3.7 dựng nhóm)
   expect(crDetail(await c.post(`${cr}/verify`)).change_request.status, "3.8 qua ⇒ 3.11").toBe("ready_to_submit")
-  const { groups } = crDetail(await c.post(`${cr}/submit`))
-  expect(groups.length, "phải có nhóm thay đổi để duyệt").toBeGreaterThan(0)
-  // 3.12: duyệt không kèm lý do ⇒ 400 (BPMN "quyết định từng group, kèm lý do")
-  const noReason = await c.post(`${cr}/groups/${groups[0]!.group_id}/decision`, { decision: "approved", base_version: await c.spineVersion() })
-  expect(noReason.status).toBe(400)
-  let last: ReturnType<typeof crDetail> | null = null
-  for (const g of groups) last = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-  expect(last?.change_request.status, "3.14 ghi xong").toBe("written")
-  return { crId, impact, written: last! }
+  // FLF-330 C-6: BA xác nhận ⇒ ghi ngay vào bản nháp; mọi group ghi nhận "đã duyệt" bởi người xác nhận
+  const written = crDetail(await c.post(`${cr}/submit`))
+  expect(written.groups.length, "phải có nhóm thay đổi").toBeGreaterThan(0)
+  expect(written.groups.every((g) => g.decision === "approved")).toBe(true)
+  expect(written.change_request.status, "3.14 ghi xong").toBe("written")
+  return { crId, impact, written }
 }
 
 /** Provider giả cho CR bổ sung mục 5.4 đang trống: C-2 trỏ `fixed:5.4`, C-4 thêm một other_requirement. */

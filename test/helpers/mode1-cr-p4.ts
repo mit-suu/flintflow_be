@@ -88,13 +88,14 @@ export const crToReady = async (c: Mode1Client, title?: string, description?: st
   return { crId, cr, impact, proposed, verified }
 }
 
-/** Tạo CR rồi nộp (`in_review`). */
+/** Tạo CR rồi BA xác nhận — FLF-330 C-6: xác nhận là ghi ngay vào bản nháp (`written`), không còn `in_review`. */
 export const crToReview = async (c: Mode1Client) => {
   const ready = await crToReady(c)
   const submitted = detail(await c.post(`${ready.cr}/submit`))
-  expect(submitted.change_request.status).toBe("in_review")
+  expect(submitted.change_request.status, JSON.stringify(submitted.change_request)).toBe("written")
   return { ...ready, submitted }
 }
+export const crToWritten = crToReview
 
 /** Document CR (gọi service trực tiếp). */
 export const crDoc = async (projectId: string, crId: string): Promise<IChangeRequest> => {
