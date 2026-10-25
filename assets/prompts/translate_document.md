@@ -1,7 +1,7 @@
 ---
 actionType: translate_document
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 8192
 temperature: 0.2
 isActive: true

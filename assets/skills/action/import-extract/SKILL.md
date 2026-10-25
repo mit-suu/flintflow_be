@@ -3,8 +3,8 @@ skill_id: import-extract
 kind: action
 version: 1.0.0
 description: Mode 1 I-4 — extract Spine entities from the text blocks of one imported SRS section
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:

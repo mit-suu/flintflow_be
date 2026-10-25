@@ -15,6 +15,7 @@ import { MAX_DIRECTIVE_TERMS, documentLanguageDirective, shouldLocalize, termsIn
 import { callLLM } from "./providers/llm.router.js"
 import type { LLMResponse, LlmImage } from "./providers/provider.types.js"
 import { getAiSdkModel } from "./providers/ai-sdk.provider.js"
+import { ANTHROPIC_EFFORT, anthropicMaxTokens } from "./providers/anthropic.provider.js"
 import { stripReasoning } from "./providers/glm.provider.js"
 import { JsonStreamExtractor } from "./utils/json-stream-extractor.js"
 import { parseResponse } from "./response-parser.js"
@@ -394,16 +395,27 @@ export const executeAiActionStream = async <T = any>(
     let usagePromise: PromiseLike<unknown> | null = null
     if (providerConfig.provider?.toLowerCase() === "mock") {
       // AI SDK không có provider mock: lấy trọn câu trả lời của mock rồi phát như một lượt stream duy nhất
-      const mockRes = await callLLM(finalPrompt, providerConfig)
+      const mockRes = await callLLM(finalPrompt, providerConfig, options.signal ? { signal: options.signal } : undefined)
       textStream = (async function* () {
         yield mockRes.text
       })()
     } else {
+      // Anthropic: suy nghĩ ăn vào max_tokens và Haiku 5.5 không nhận temperature — cùng tham số với `callAnthropic`
+      const isAnthropic = providerConfig.provider?.toLowerCase() === "anthropic"
       const streamResult = streamText({
         model: getAiSdkModel(providerConfig),
         prompt: finalPrompt,
-        temperature: providerConfig.temperature ?? 0.7,
-        maxOutputTokens: providerConfig.maxTokens ?? 2048
+        ...(isAnthropic
+          ? {
+              maxOutputTokens: anthropicMaxTokens(providerConfig),
+              providerOptions: { anthropic: { effort: ANTHROPIC_EFFORT } }
+            }
+          : {
+              temperature: providerConfig.temperature ?? 0.7,
+              maxOutputTokens: providerConfig.maxTokens ?? 2048
+            }),
+        // User bấm dừng / đóng tab ⇒ ngắt luồng của nhà cung cấp, không sinh tiếp
+        ...(options.signal ? { abortSignal: options.signal } : {})
       })
       textStream = streamResult.textStream
       usagePromise = streamResult.usage
@@ -412,6 +424,8 @@ export const executeAiActionStream = async <T = any>(
     const extractor = new JsonStreamExtractor()
 
     for await (const chunk of textStream) {
+      // Huỷ trước parse ⇒ chưa deduct, `catch` dưới nhả reservation (dừng = không tốn credit)
+      if (options.signal?.aborted) throw new AiActionError(499, "Lượt chạy đã bị huỷ", "RUN_CANCELLED")
       const delta = extractor.push(chunk)
       if (delta && callbacks.onTextDelta) {
         await callbacks.onTextDelta(delta)

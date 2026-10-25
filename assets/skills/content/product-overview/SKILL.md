@@ -3,8 +3,8 @@ skill_id: product-overview
 kind: content
 version: 0.4.0
 description: "S-2.1–S-2.3 Product Overview, Release 1.0 scope, external systems"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

@@ -202,6 +202,10 @@ export const reviewSchema = z.object({
 export const changeInstructionSchema = z
   .object({
     clarification_needed: z.string().optional(),
+    /** FLF-311: lựa chọn ngắn cho câu hỏi làm rõ (vd màn riêng / popup) — FE hiện thẻ chọn nhanh. */
+    choices: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
+    /** FLF-311: tên use case model TỰ đề xuất thêm (ngoài yêu cầu) để khớp dự án — người dùng giữ hay bỏ. */
+    proposed_use_cases: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
     txn: z.string().optional(),
     ops: z.array(opSchema).optional(),
     notes: z.string().optional(),

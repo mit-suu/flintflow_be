@@ -3,8 +3,8 @@ skill_id: import-semantic-check
 kind: action
 version: 1.1.0
 description: Mode 1 node 1.11 — semantic review of an imported SRS → yellow findings only
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 3072
 temperature: 0.2
 reads:

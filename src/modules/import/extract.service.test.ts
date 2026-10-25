@@ -31,7 +31,7 @@ import {
 import { IdAllocator, flattenItem, idKey, type EntityItem } from "./extracted-entities.js"
 import type { ITemplateProfile, TableMapEntry } from "./template-profile.model.js"
 import { FIELD_CONFIDENCE_THRESHOLD } from "./import.constants.js"
-import { tableGrid } from "./table-rows.js"
+import { indentedCells, tableGrid } from "./table-rows.js"
 
 type Lite = Parameters<typeof deterministicTableItems>[0]
 
@@ -252,6 +252,39 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
       { screen_id: "Users", role_id: "Admin", action: "delete" }
     ])
     expect(items.every((i) => i.origin === "deterministic" && i.id === null)).toBe(true)
+  })
+
+  it("ma trận FPT: dòng thụt lề / có dấu đầu dòng dưới màn ⇒ quyền kèm parent_screen", () => {
+    const rows = [
+      ["Screen", "Guest", "Admin"],
+      ["Order Queue", "", "X"],
+      ["Confirm / Reject Order", "", "X"],
+      ["- Query All Data", "", "X"],
+      ["Inventory", "X", ""]
+    ]
+    const items = deterministicTableItems(
+      blocks[0],
+      rows,
+      profileOf([col(0, "permissions[].screen_id"), col(1, "permissions[].role_id"), col(2, "permissions[].role_id")]),
+      new Set(["2:0"])
+    )!
+    expect(items.filter((i) => i.entity === "permissions").map((i) => i.value)).toEqual([
+      { screen_id: "Order Queue", role_id: "Admin", action: "access" },
+      { screen_id: "Confirm / Reject Order", role_id: "Admin", action: "access", parent_screen: "Order Queue" },
+      { screen_id: "Query All Data", role_id: "Admin", action: "access", parent_screen: "Order Queue" },
+      { screen_id: "Inventory", role_id: "Guest", action: "access" }
+    ])
+  })
+
+  it("indentedCells: ô mở bằng ≥ 2 dấu cách (đoạn đầu của ô) ⇒ thụt lề", () => {
+    const t = block("B0100", "table", "", "body/tbl[4]")
+    const cells = [
+      block("B0101", "table_cell", "Order Queue", "body/tbl[4]/tr[1]/tc[0]/p[0]"),
+      block("B0102", "table_cell", "    Confirm / Reject Order", "body/tbl[4]/tr[2]/tc[0]/p[0]"),
+      block("B0103", "table_cell", " X", "body/tbl[4]/tr[2]/tc[1]/p[0]"),
+      block("B0104", "table_cell", "    ghi chú", "body/tbl[4]/tr[1]/tc[0]/p[1]")
+    ]
+    expect([...indentedCells(t, cells)]).toEqual(["2:0"])
   })
 
   it("FLF-252: bảng yêu cầu 'ID | Requirement | Priority' dưới tính năng ⇒ chức năng có mã, tên rút từ câu, mô tả đủ câu", () => {

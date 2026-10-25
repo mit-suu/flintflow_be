@@ -62,7 +62,7 @@ describe("vai trò quyết định làm được gì (Flow 10.7)", () => {
     const owner = await seedFixture("minimal")
     const viewer = await joinOrg(owner.orgId, "viewer@flintflow.test", "viewer")
 
-    const read = await request(app).get("/api/v1/projects/" + owner.projectId + "/steps").set(bearer(viewer))
+    const read = await request(app).get("/api/v1/projects/" + owner.projectId + "/progress").set(bearer(viewer))
     expect(read.status).toBe(200)
 
     const run = await request(app)

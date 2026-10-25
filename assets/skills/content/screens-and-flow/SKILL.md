@@ -3,8 +3,8 @@ skill_id: screens-and-flow
 kind: content
 version: 0.6.2
 description: "S-4.1–S-4.2 feature & screen inventory (fixes N and screen_queue), screens flow"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

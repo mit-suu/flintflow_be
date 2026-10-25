@@ -3,8 +3,8 @@ skill_id: high-level-rules
 kind: content
 version: 0.2.0
 description: "S-2.4 High-Level Business Rules (tier=high)"
-provider: glm
-aiModel: zai-org/GLM-5.3-Flash
+provider: anthropic
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

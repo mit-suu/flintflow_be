@@ -134,8 +134,16 @@ describe("answerKnowledgeQuestion", () => {
     })
     const out = await answerKnowledgeQuestion("How many calls?", { projectId: "p1", userId: "u1", language: "en" })
     expect(retrieveKnowledge).toHaveBeenCalledWith("How many calls?", { corpus: "skills" })
-    expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.objectContaining({ replyLanguage: "en" }), "p1", "u1")
+    expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.objectContaining({ replyLanguage: "en" }), "p1", "u1", {})
     expect(out).toMatchObject({ grounded: true, cost: 2, tokensUsed: { totalTokens: 15 } })
     expect(out.citations).toEqual([{ ref: "K1", chunk_id: "gate-check#caps", source: "gate-check", section: "Rules", source_kind: "internal_skill" }])
+  })
+
+  it("user dừng lượt chat ⇒ signal đi tới executeAiAction để ngắt lượt gọi model", async () => {
+    retrieveKnowledge.mockResolvedValue(retrieval([chunk("gate-check#caps")]))
+    executeAiAction.mockResolvedValue({ data: { grounded: true, answer: "x [K1]", claims: [{ text: "x", refs: ["K1"] }] }, cost: 2 })
+    const signal = new AbortController().signal
+    await answerKnowledgeQuestion("How many calls?", { projectId: "p1", userId: "u1", language: "en", signal })
+    expect(executeAiAction).toHaveBeenCalledWith(ActionType.KNOWLEDGE_ANSWER, expect.anything(), "p1", "u1", { signal })
   })
 })

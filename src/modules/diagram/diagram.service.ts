@@ -295,6 +295,33 @@ export const renderAllIfAvailable = async (projectId: string, options: RenderOpt
   }
 }
 
+/**
+ * FLF-311: sau lô sửa thêm use case / màn — vẽ lại các hình đã vẽ mà dữ liệu nguồn vừa đổi (use case, screen flow…, đúng
+ * tập cờ `diagram_stale` bắt) cùng bố cục các màn mới. Không có PlantUML hoặc lỗi ⇒ `null`, lượt sửa vẫn thành công
+ * (cờ `diagram_stale` còn đó, nút "Vẽ lại sơ đồ" như trước).
+ */
+export const renderChangedIfAvailable = async (projectId: string, newScreenIds: readonly string[], options: RenderOptions): Promise<RenderResult | null> => {
+  try {
+    if (!(await isPlantUmlReachable())) return null
+    const spine = stripRecord(await loadSpine(projectId))
+    const seen = new Set<string>()
+    const targets: RenderTarget[] = [
+      ...staleRenderedDiagrams(spine).map((d) => ({ kind: d.kind, owner_id: d.owner_id })),
+      ...newScreenIds.map((id) => ({ kind: "screen_layout" as const, owner_id: id }))
+    ].filter((t) => {
+      const key = `${t.kind}|${t.owner_id ?? ""}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (targets.length === 0) return null
+    return await renderDiagrams(projectId, targets, options)
+  } catch (err) {
+    console.warn(`[diagram] vẽ lại sau lô sửa lỗi (project ${projectId}, by ${options.by}): ${err instanceof Error ? err.message : String(err)}`)
+    return null
+  }
+}
+
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */
 export const staleDiagrams = (spine: Spine): Diagram[] =>
   spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== computeSourceHash(spine, d))

@@ -32,7 +32,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
  */
 export const PROVIDER_USD_PER_1K: Record<string, { input: number; output: number }> = {
   openai: { input: 0.00015, output: 0.0006 },
-  anthropic: { input: 0.003, output: 0.015 },
+  // claude-haiku-5-5: $0.10 / $0.50 mỗi 1M token (prompt ≤ 100K token)
+  anthropic: { input: 0.0001, output: 0.0005 },
   gemini: { input: 0.0003, output: 0.0025 },
   mock: { input: 0, output: 0 }
 }

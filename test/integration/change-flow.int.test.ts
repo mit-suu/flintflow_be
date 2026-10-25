@@ -157,3 +157,73 @@ describe("GET /traceability", () => {
     expect(bad.body.error.code).toBe("VALIDATION_ERROR")
   })
 })
+
+describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phân quyền", () => {
+  /** Lô model soạn cho "Thêm use case Send Absence Warning cho Business Analyst" (fixture đã qua S-5). */
+  const fullBatch = [
+    { op: "add", path: "use_cases[]", value: { name: "Send Absence Warning", actor_ids: ["A02"], function_ids: ["$newFn"], description: "The analyst warns students over the absence limit." } },
+    { op: "add", path: "screens[]", value: { id: "$newScreen", name: "Absence Warning", description: "Lists students over the absence limit.", feature_id: "F3", flow_to: ["S07"], tabs: [] } },
+    {
+      op: "add",
+      path: "functions[]",
+      value: {
+        id: "$newFn",
+        name: "Send Absence Warning",
+        screen_id: "$newScreen",
+        feature_id: "F3",
+        trigger: "Analyst clicks Send warning.",
+        description: "Sends a warning to each student whose absence rate is above 20%.",
+        normal: ["Analyst selects the students.", "System sends the warning."],
+        abnormal: ["No student selected: system shows an error."],
+        validations: [{ kind: "required", statement: "At least one student must be selected." }],
+        business_rule_ids: []
+      }
+    },
+    { op: "set", path: "screens[id=S07].flow_to", value: ["S08", "S09", "S10", "$newScreen"] },
+    { op: "add", path: "permissions[]", value: { screen_id: "$newScreen", role_id: "R2", action: "view" } },
+    { op: "add", path: "messages[]", value: { code: "E-WARN-001", text: "Select at least one student, then send the warning again.", function_ids: ["$newFn"] } }
+  ]
+  const instruction = "Thêm use case Send Absence Warning cho Business Analyst, làm màn hình riêng"
+
+  const addUseCase = async (api: ReturnType<typeof client>, extra: object = {}) => {
+    mockOverrides.next = () => JSON.stringify({ ops: fullBatch, notes: "Thêm chức năng, màn, luồng và phân quyền." })
+    const preview = await api.post("/changes/preview", { base_version: await api.version(), instruction })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    expect(planned.ok, JSON.stringify(planned.violations)).toBe(true)
+    return api.post("/changes", { base_version: await api.version(), instruction, preview_id: planned.preview_id, ...extra })
+  }
+
+  it("một bản xem trước, áp một lần ⇒ UC + chức năng đủ chi tiết + màn trong screen flow + phân quyền, bất biến giữ", async () => {
+    const seeded = await seedFixture("full")
+    const api = client(seeded)
+
+    const applied = await addUseCase(api)
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    const spine = applyResultResponseSchema.parse(applied.body.data).spine
+    const uc = spine.use_cases.find((u) => u.name === "Send Absence Warning")!
+    const fn = spine.functions.find((f) => f.id === uc.function_ids[0])!
+    const screen = spine.screens.find((s) => s.id === fn.screen_id)!
+    expect(fn.abnormal).toHaveLength(1)
+    expect(fn.validations[0].id).toBe(`${fn.id}-V1`)
+    expect(screen).toMatchObject({ detail_status: "signed_off", primary_function_id: fn.id, feature_id: "F3" })
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
+    expect(spine.permissions.some((p) => p.screen_id === screen.id && p.role_id === "R2")).toBe(true)
+    expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
+  })
+
+  it("sau baseline ⇒ cả lô là MỘT change request (một mã CR cho mọi dòng thay đổi)", async () => {
+    const seeded = await seedFixture("full")
+    const api = client(seeded)
+    expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
+
+    const applied = await addUseCase(api, {
+      reason: "Phòng đào tạo cần cảnh báo vắng",
+      change_request: { requester: "Ms. Lan", source: { kind: "meeting_minutes", ref: "Minutes 15/10" } }
+    })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(applied.body.meta.cr_id).toBe("CR-001")
+    const reasons = new Set(applyResultResponseSchema.parse(applied.body.data).changes.map((c) => c.reason))
+    expect([...reasons]).toEqual(["CR-001 · Ms. Lan · meeting minutes: Minutes 15/10 — Phòng đào tạo cần cảnh báo vắng"])
+  })
+})
