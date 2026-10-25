@@ -3,9 +3,10 @@
 Chạy hệ thống trên máy, chạy bằng docker compose, biến môi trường, seed dữ liệu, sao lưu, xoay secret.
 Kiến trúc code ở `docs/architecture.md` và `flintflow_fe/docs/fe-architecture.md`.
 
-Hệ thống có **bốn** tiến trình: Mongo · PlantUML · backend (:5000) · frontend (:3000). Ba cái đầu là
-phụ thuộc bắt buộc của backend — thiếu PlantUML thì diagram trả `render_status: "error"` chứ không làm
-sập app, thiếu Mongo thì không làm gì được.
+Hệ thống có **năm** tiến trình: Mongo · PlantUML · Gotenberg · backend (:5000) · frontend (:3000). Ba cái
+đầu là phụ thuộc của backend — thiếu PlantUML thì diagram trả `render_status: "error"`, thiếu Gotenberg thì
+xuất PDF trả `503 PDF_EXPORT_UNAVAILABLE` (xuất Word vẫn chạy), cả hai đều không làm sập app; thiếu Mongo
+thì không làm gì được.
 
 ---
 
@@ -15,7 +16,7 @@ sập app, thiếu Mongo thì không làm gì được.
 # 1. hạ tầng
 cd flintflow_be
 cp .env.example .env            # điền secret thật
-docker compose up -d mongo mongo-init plantuml
+docker compose up -d mongo mongo-init plantuml gotenberg
 
 # 2. backend
 npm ci
@@ -29,7 +30,11 @@ npm ci
 npm run dev                     # :3000
 ```
 
-Kiểm nhanh: `curl http://localhost:5000/health` phải trả `mongo: "ok"`, `plantuml: "ok"`.
+Kiểm nhanh: `curl http://localhost:5000/health` phải trả `mongo: "ok"`, `plantuml: "ok"`, `gotenberg: "ok"`.
+
+Gotenberg (xuất PDF, FLF-316) chỉ cần `docker compose up -d gotenberg` **một lần**: `restart: unless-stopped`
+nên container tự lên lại cùng Docker. Lần kéo đầu ~1,5 GB. BE chạy trên máy gọi nó ở `GOTENBERG_URL`
+(mặc định `http://localhost:3001`).
 
 Mongo của compose chạy **replica set `rs0`**, nên từ máy phải nối bằng `directConnection=true`:
 
@@ -47,7 +52,7 @@ service chỉ phân giải được bên trong mạng docker.
 ```bash
 cd flintflow_be
 cp .env.example .env
-docker compose up -d            # mongo + mongo-init + plantuml + backend + frontend
+docker compose up -d            # mongo + mongo-init + plantuml + gotenberg + backend + frontend
 docker compose ps
 curl http://localhost:5000/health
 open http://localhost:3000
@@ -58,21 +63,23 @@ open http://localhost:3000
 | `mongo` | `mongo:7` | 27017 | `--replSet rs0`; dữ liệu ở volume `mongo-data` |
 | `mongo-init` | `mongo:7` | — | chạy `scripts/mongo-init-rs.sh` rồi thoát; chạy lại được |
 | `plantuml` | `plantuml/plantuml-server:jetty-v1.2025.4` | 8080 | tag **được ghim** |
+| `gotenberg` | `gotenberg/gotenberg:8.38.1` | 3001 → 3000 | `.docx` → PDF (LibreOffice + font Noto); tag **được ghim**; `--api-timeout=90s` |
 | `backend` | build từ `./Dockerfile` | 5000 | đợi `mongo-init` xong mới khởi động |
 | `frontend` | build từ `../flintflow_fe/Dockerfile` | 3000 | đợi `backend` healthy |
 
 Biến điều chỉnh: `BACKEND_PORT` · `FRONTEND_PORT` · `MONGO_PORT` · `PLANTUML_PORT` · `PLANTUML_TAG` ·
+`GOTENBERG_PORT` · `GOTENBERG_TAG` ·
 `MONGO_DB` · `PUBLIC_API_URL` · `GOOGLE_CLIENT_ID` · `AI_PROVIDER_OVERRIDE` · `FRONTEND_CONTEXT`.
 Đặt cổng khác là cách chạy compose song song với stack dev đang mở trên máy.
 
 `/health` trả:
 
 ```json
-{"status":"ok","mongo":"ok","plantuml":"ok","version":"1.0.0","assets":{"prompts":2,"skills":32,"steps":56}}
+{"status":"ok","mongo":"ok","plantuml":"ok","gotenberg":"ok","redis":"off","version":"1.0.0","assets":{"prompts":2,"skills":32,"steps":56}}
 ```
 
-`mongo: "error"` ⇒ `status: "error"` + HTTP 503 (load balancer rút instance ra). `plantuml: "error"` chỉ
-là `degraded` + HTTP 200 — diagram hỏng nhưng phần còn lại phục vụ được, chặn deploy vì nó là phản ứng
+`mongo: "error"` ⇒ `status: "error"` + HTTP 503 (load balancer rút instance ra). `plantuml: "error"` hay
+`gotenberg: "error"` chỉ là `degraded` + HTTP 200 — diagram hỏng nhưng phần còn lại phục vụ được, chặn deploy vì nó là phản ứng
 thái quá.
 
 **Vì sao replica set dù chỉ một node.** Mongo chỉ cho phép transaction đa document trên replica set.
@@ -114,6 +121,8 @@ tiếp. `.env.example` là danh sách đầy đủ kèm giải thích; dưới �
 | `APP_PUBLIC_URL` | khi bật billing | domain public của **BE này** để payment service POST callback (`payment-service.client.ts:48`); production không được là localhost |
 | `PLANTUML_BASE_URL` | production | thiếu ⇒ default `localhost:8080` ⇒ **mọi** diagram `render_status: "error"` trong khi `/health` vẫn trả HTTP 200. Production: `https://flintflow-plantuml.azurewebsites.net` (§5) |
 | `PLANTUML_TIMEOUT_MS` | không | default 15000. Production đặt **30000**: use-case ~70 UC mất 13 s ở lượt đầu sau khi PlantUML restart (JVM chưa JIT-warm), warm còn ~4 s |
+| `GOTENBERG_URL` | production | thiếu ⇒ default `localhost:3001` ⇒ xuất PDF luôn `503 PDF_EXPORT_UNAVAILABLE` trong khi `/health` vẫn HTTP 200 (`gotenberg: "error"`). Production: `https://flintflow-gotenberg.azurewebsites.net` (§5) |
+| `GOTENBERG_TIMEOUT_MS` | không | default 60000. Production đặt **90000**, khớp `--api-timeout=90s` của Gotenberg: tài liệu lớn ở lượt đầu sau khi container khởi động lâu hơn nhiều so với lúc warm |
 | `AI_PROVIDER_OVERRIDE` | không | ghi đè provider của mọi skill; chỉ dùng cho CI / smoke (`mock`) |
 | `REVIEW_LLM_ENABLED` | không | S-9.2 Quality Lens bằng LLM, mặc định tắt |
 | `EMBEDDING_PROVIDER` | không | `off` (mặc định) · `gemini` · `mock`. C-3 tìm vị trí CR theo nghĩa (§2 "Bật tìm vị trí CR theo nghĩa"). `gemini` dùng `GEMINI_API_KEY`; kèm `EMBEDDING_MODEL` (`gemini-embedding-001`), `EMBEDDING_DIMENSIONS` (768 — phải bằng số chiều của Atlas index), `EMBEDDING_API_BASE_URL`, `EMBEDDING_TIMEOUT_MS`, `CR_VECTOR_TOP_K` (20), `CR_VECTOR_MIN_SCORE` (0.82) |
@@ -319,7 +328,8 @@ Subscription `Azure for Students`, region Southeast Asia.
 | Thành phần | Tài nguyên | App Service Plan |
 | --- | --- | --- |
 | Backend | Web App `flintflow-be` (RG `flintflow-be_group`), image từ ACR `flintflowacr` | `ASP-mitsu-b404` (B1) — dùng chung với `payment-service` và 2 app khác |
-| PlantUML | Web App `flintflow-plantuml` (RG `flintflow-be_group`), image `plantuml/plantuml-server:jetty-v1.2025.4` kéo thẳng từ Docker Hub, **không qua ACR** | `asp-flintflow-plantuml` (B1) — **của riêng nó** |
+| PlantUML | Web App `flintflow-plantuml` (RG `flintflow-be_group`), image `plantuml/plantuml-server:jetty-v1.2025.4` kéo thẳng từ Docker Hub, **không qua ACR** | `asp-flintflow-plantuml` (B1) — tách khỏi plan của BE |
+| Gotenberg | Web App `flintflow-gotenberg` (RG `flintflow-be_group`), image `gotenberg/gotenberg:8.38.1` kéo thẳng từ Docker Hub, **không qua ACR** | `asp-flintflow-plantuml` (B1) — **chung** với PlantUML |
 | Frontend | không nằm trên Azure | — |
 
 **Vì sao PlantUML có plan riêng.** Nó là JVM và phải bật Always On, tức giữ RAM thường trú. Nhét chung
@@ -346,6 +356,64 @@ az webapp config access-restriction add -g flintflow-be_group -n flintflow-plant
 
 `deploy.yml` **không phải đổi**: PlantUML là app độc lập, không nằm trong pipeline.
 
+### Gotenberg (xuất PDF, FLF-316)
+
+**Mô hình.** 2 container trên 1 máy: `flintflow-gotenberg` chạy **chung plan** `asp-flintflow-plantuml` với
+`flintflow-plantuml`. App Service tính tiền theo plan ⇒ **không phát sinh chi phí**. Không ghép vào
+`ASP-mitsu-b404` của BE cùng lý do PlantUML không ở đó: thiếu RAM là restart cả plan, kéo theo
+`payment-service`.
+
+```bash
+RG=flintflow-be_group
+PLAN=asp-flintflow-plantuml
+APP=flintflow-gotenberg
+IMAGE=gotenberg/gotenberg:8.38.1   # GHIM, cùng tag với docker-compose.yml
+
+# 1. Web App trên plan có sẵn của PlantUML
+az webapp create -g $RG -p $PLAN -n $APP --container-image-name $IMAGE
+
+# 2. Cổng + thời gian khởi động (image ~1,5 GB, lần kéo đầu lâu)
+az webapp config appsettings set -g $RG -n $APP --settings WEBSITES_PORT=3000 WEBSITES_CONTAINER_START_TIME_LIMIT=600
+
+# 3. Always On + HTTPS only; timeout API của Gotenberg mặc định 30 s, nới lên 90 s
+az webapp config set -g $RG -n $APP --always-on true --startup-file "gotenberg --api-timeout=90s"
+az webapp update -g $RG -n $APP --https-only true
+
+# 4. Mạng: .docx chứa dữ liệu khách ⇒ chỉ nhận request từ outbound IP của flintflow-be (như PlantUML)
+i=100
+for ip in $(az webapp show -g $RG -n flintflow-be --query possibleOutboundIpAddresses -o tsv | tr ',' ' '); do
+  az webapp config access-restriction add -g $RG -n $APP --rule-name allow-be-$i --action Allow --ip-address $ip/32 --priority $i
+  i=$((i+1))
+done
+
+# 5. Trỏ BE sang Gotenberg
+az webapp config appsettings set -g $RG -n flintflow-be --settings GOTENBERG_URL=https://$APP.azurewebsites.net GOTENBERG_TIMEOUT_MS=90000
+```
+
+App setting của `flintflow-gotenberg`: `WEBSITES_PORT=3000` · `WEBSITES_CONTAINER_START_TIME_LIMIT=600` ·
+Always On · HTTPS only · startup `gotenberg --api-timeout=90s`.
+
+Kiểm sau deploy:
+
+```bash
+az webapp log tail -g $RG -n $APP                                                  # Gotenberg lắng nghe cổng 3000
+curl -s -o /dev/null -w "%{http_code}\n" https://$APP.azurewebsites.net/health    # từ máy cá nhân: 403 (đúng)
+curl -s https://<api>/health | jq                                                  # "gotenberg": "ok"
+```
+
+Rồi xuất PDF một tài liệu lớn (fixture 19 màn) trên production.
+
+**RAM của plan** (PlantUML + Gotenberg chung ~1,75 GB) — theo dõi vài ngày đầu; thường xuyên > 80% ⇒ tách
+Gotenberg sang Azure Container Apps (scale về 0) hoặc plan riêng:
+
+```bash
+PLAN_ID=$(az appservice plan show -g $RG -n $PLAN --query id -o tsv)
+az monitor metrics list --resource $PLAN_ID --metric MemoryPercentage --interval PT1H -o table
+```
+
+Đổi plan của BE làm đổi outbound IP ⇒ chạy lại bước 4 cho **cả** `flintflow-plantuml` và `flintflow-gotenberg`.
+Gỡ: `az webapp delete -g $RG -n $APP` + xoá `GOTENBERG_URL` trên `flintflow-be`.
+
 ### Smoke test sau khi deploy
 
 `/health` trả **HTTP 200 cả khi PlantUML hỏng** (`degraded`, `health.ts:10-11`), nên `curl -sf` một mình
@@ -357,6 +425,7 @@ body=$(curl -sf https://<api>/health) || { echo "BE không trả lời"; exit 1;
 echo "$body" | jq
 echo "$body" | grep -q '"mongo":"ok"'    || { echo "Mongo hỏng"; exit 1; }
 echo "$body" | grep -q '"plantuml":"ok"' || { echo "PlantUML hỏng ⇒ diagram sẽ render_status: error"; exit 1; }
+echo "$body" | grep -q '"gotenberg":"ok"' || { echo "Gotenberg hỏng ⇒ xuất PDF sẽ trả 503"; exit 1; }
 
 # đi vài step đầu của pipeline bằng provider thật, không đụng dữ liệu người dùng
 npm run run:pipeline -- --api https://<api>/api/v1 --until S-1.4 --name "Smoke $(date -I)"
