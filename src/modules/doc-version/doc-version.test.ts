@@ -46,6 +46,9 @@ describe("doc-version DTO", () => {
 
   it("download mặc định auto; compare cần hai version khác nhau", () => {
     expect(downloadQuerySchema.parse({}).variant).toBe("auto")
+    expect(downloadQuerySchema.parse({}).format).toBe("docx")
+    expect(downloadQuerySchema.parse({ format: "pdf" }).format).toBe("pdf")
+    expect(downloadQuerySchema.safeParse({ format: "xlsx" }).success).toBe(false)
     expect(compareQuerySchema.safeParse({ from: "0.1", to: "0.2" }).success).toBe(true)
     expect(compareQuerySchema.safeParse({ from: "0.1", to: "0.1" }).success).toBe(false)
     expect(compareQuerySchema.safeParse({ from: "0.1" }).success).toBe(false)
