@@ -4,7 +4,7 @@ kind: renderer
 version: 2.3.0
 description: "S-4.2 Screens Flow (Graphviz DOT; one diagram per human actor using the UI, started by a diamond with the actor name)"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:

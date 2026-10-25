@@ -1,7 +1,7 @@
 ---
 actionType: summarize_document
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0.3
 isActive: true

@@ -4,7 +4,7 @@ kind: action
 version: 1.6.0
 description: Talk like a senior BA — reply first, ask at most two questions in prose, cards only when the user must pick
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0.5
 reads:

@@ -4,7 +4,7 @@ kind: action
 version: 1.0.0
 description: Build the Spine projection for a phase, list empty fields, collect relevant addendum entries
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 1024
 temperature: 0
 reads:

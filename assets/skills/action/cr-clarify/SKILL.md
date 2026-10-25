@@ -4,7 +4,7 @@ kind: action
 version: 1.4.0
 description: Mode 1 C-2 — decide whether a change request is clear and has the facts it needs; ask questions or return targets for impact search
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0
 reads:

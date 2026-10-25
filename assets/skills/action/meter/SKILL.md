@@ -4,7 +4,7 @@ kind: action
 version: 1.0.0
 description: Reserve / deduct / refund credit per model call and record usage[] (UC 9.6)
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 512
 temperature: 0
 reads:

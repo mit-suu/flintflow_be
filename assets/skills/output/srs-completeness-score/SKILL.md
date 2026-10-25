@@ -4,7 +4,7 @@ kind: output
 version: 0.2.0
 description: "S-9.1 Completeness & Assumption Sweep — readiness feedback, never a gate threshold"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 1024
 temperature: 0.1
 reads:

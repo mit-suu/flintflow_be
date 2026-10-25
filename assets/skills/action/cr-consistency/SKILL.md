@@ -4,7 +4,7 @@ kind: action
 version: 2.1.0
 description: Mode 1 C-5 (node 3.8) — consistency check limited to the scope a change request touches → yellow findings
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 2048
 temperature: 0.1
 reads:

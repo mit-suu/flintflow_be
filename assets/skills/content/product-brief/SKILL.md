@@ -4,7 +4,7 @@ kind: content
 version: 0.5.0
 description: "B-0 Intake, B-1 Product Brief, B-2 Brief Finalize — adapted from BMAD bmad-product-brief"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

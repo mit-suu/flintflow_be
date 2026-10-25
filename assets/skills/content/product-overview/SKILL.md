@@ -4,7 +4,7 @@ kind: content
 version: 0.4.0
 description: "S-2.1–S-2.3 Product Overview, Release 1.0 scope, external systems"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.3
 reads:

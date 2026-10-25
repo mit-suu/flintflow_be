@@ -10,7 +10,7 @@
 ---
 actionType: <tên action>       # BẮT BUỘC — khớp ActionType enum
 provider: anthropic                  # BẮT BUỘC — anthropic | glm | gemini
-aiModel: claude-sonnet-5-5 # BẮT BUỘC
+aiModel: claude-haiku-5-5 # BẮT BUỘC
 maxTokens: 1024                # BẮT BUỘC
 temperature: 0.3               # BẮT BUỘC
 isActive: true                 # tùy chọn, mặc định true

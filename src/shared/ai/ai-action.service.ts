@@ -400,7 +400,7 @@ export const executeAiActionStream = async <T = any>(
         yield mockRes.text
       })()
     } else {
-      // Anthropic: suy nghĩ ăn vào max_tokens và Sonnet 5.5 không nhận temperature — cùng tham số với `callAnthropic`
+      // Anthropic: suy nghĩ ăn vào max_tokens và Haiku 5.5 không nhận temperature — cùng tham số với `callAnthropic`
       const isAnthropic = providerConfig.provider?.toLowerCase() === "anthropic"
       const streamResult = streamText({
         model: getAiSdkModel(providerConfig),

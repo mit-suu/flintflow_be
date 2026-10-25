@@ -4,7 +4,7 @@ kind: content
 version: 0.11.0
 description: "S-4.5 domain entities and their relations, feeding the ERD renderer"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 12288
 temperature: 0.2
 reads:

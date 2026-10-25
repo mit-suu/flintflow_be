@@ -4,7 +4,7 @@ kind: content
 version: 0.1.0
 description: "S-9.4 MoSCoW priority for every function and NFR, written into functions[].priority / nfrs[].priority"
 provider: anthropic
-aiModel: claude-sonnet-5-5
+aiModel: claude-haiku-5-5
 maxTokens: 6144
 temperature: 0.2
 reads:
