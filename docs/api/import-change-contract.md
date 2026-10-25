@@ -446,3 +446,17 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |
+
+## FLF-330 (2026-10-26) — CR kiểu GitHub: xác nhận là ghi ngay, Lead duyệt cả gói một lần
+
+Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **Đổi luật + additive** ⇒ PR nhãn `contract-change`.
+
+- **#25 `POST …/change-requests/:crId/submit`** nay là **C-6 BA xác nhận**: `ready_to_submit` ⇒ Code kiểm lại trên nội dung hiện tại (`CR_VALUE_CHANGED` nếu lệch) ⇒ ghi Track Changes vào bản nháp **ngay** ⇒ `written` (có `result_doc_version`), mọi group ghi nhận `approved` bởi chính người xác nhận. Không còn `in_review` cho CR mới; vị trí BA muốn bỏ thì đặt kết luận `not_related` trước khi xác nhận (#27). `in_review` + #26 `groups/:gid/decision` + `revise` / `close` chỉ còn cho CR tạo trước FLF-330 (script `npm run migrate:cr-package` đưa chúng về `ready_to_submit` để BA xác nhận lại).
+- **Gói duyệt (C-7)** — không có model riêng: gói = mọi CR `written` kể từ lần phát hành trước (suy từ `DocVersion.cr_revision`), trạng thái chờ nằm ở `Spine.baseline_submission` (cùng field với nộp baseline mode 2 ⇒ `DRAFT_LOCKED` / `PACKAGE_PENDING` khoá mọi đường sửa):
+  - `GET /projects/:id/review-package` → `reviewPackageSchema` `{ status: drafting | pending | changes_requested, base_version ("v0" / "1.0"), latest_version, next_version, draft_label ("1.0 · 3 thay đổi chưa duyệt"), change_requests[], red_open, submission, spine_version }`. Mọi vai trò trong org.
+  - `POST /projects/:id/review-package/submit` `{ base_version }` (Lead, Analyst): quét lại cờ (hồ sơ mode 1, `at_baseline`), cờ đỏ > 0 ⇒ `422 RELEASE_RED_FLAGS_OPEN` (`meta.flags[]`); chưa có CR ⇒ `409 PACKAGE_EMPTY`; đã gửi ⇒ `409 PACKAGE_ALREADY_SUBMITTED`. Đặt `baseline_submission = pending`, báo in-app `review_package_submitted` cho mọi Lead khác.
+  - `POST /projects/:id/review-package/request-changes` `{ base_version, reason ≥ 10 }` (Lead): `baseline_submission = rejected` + lý do, mở khoá, báo người gửi `review_package_changes_requested`; không có gói chờ ⇒ `422 NO_PENDING_SUBMISSION`.
+  - **Lead duyệt cả gói = `POST /projects/:id/release`** (#31, không đổi body): phát hành số chính như cũ, rồi xoá `baseline_submission` và báo người gửi `review_package_released`. Lead tự làm thì gọi thẳng, không qua bước gửi.
+- **Khoá bản nháp khi gói chờ duyệt**: `POST /change-requests` (#16) và `#25 submit` trả `409 PACKAGE_PENDING`; `/changes`, `/reconcile`, `/undo` trả `409 DRAFT_LOCKED` như FLF-293.
+- **Đánh số**: bản nháp sau mỗi CR vẫn là một `DocVersion` minor (`0.2`, `1.1`…) để giữ file Track Changes theo từng CR cho Lead xem diff — nhưng người dùng thấy `draft_label` (chỉ số chính); tên file bản nháp theo FLF-334.
+- Thông báo mới: `change_request_written`, `review_package_submitted`, `review_package_changes_requested`, `review_package_released`.
