@@ -1212,6 +1212,11 @@ export async function renderSpineDocument(
     source: RenderSource
     /** Change chưa ghi DB nhưng thuộc snapshot (C-7 render trước khi ghi Spine — FLF-186) — nối vào §I. */
     pendingRecord?: ChangeRecordRow[]
+    /**
+     * FLF-318: dự án chuyển từ mode 2 — mẫu FPT theo ngôn ngữ tài liệu, nội dung qua lớp bản dịch (như bản Lead đã ký).
+     * Không truyền ⇒ như trước (mode 1 theo layout file, không dịch).
+     */
+    languages?: ProjectLanguages
   },
   deps: Partial<AssembleDeps> = {}
 ): Promise<RenderedDocument> {
@@ -1227,7 +1232,8 @@ export async function renderSpineDocument(
       recordChanges,
       source: opts.source,
       version: opts.version,
-      template: await (merged.loadTemplate ?? loadTemplateLayout)(projectId)
+      template: await (merged.loadTemplate ?? loadTemplateLayout)(projectId),
+      ...(opts.languages ? { language: opts.languages.locale, sourceLanguage: opts.languages.source } : {})
     },
     { ...merged, resolveInCharge }
   )

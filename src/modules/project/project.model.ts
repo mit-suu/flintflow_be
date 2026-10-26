@@ -25,6 +25,12 @@ export interface IProject extends Document {
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
   /**
+   * FLF-318: dự án tạo SRS (`fpt`) đã được Lead ký baseline và chuyển sang `mode = import` (quản lý thay đổi qua CR).
+   * `null` = dự án import thật hoặc chưa chuyển. Chữ trong Spine vẫn là tiếng Anh như mode 2 (`document-language.ts`).
+   */
+  converted_from: "fpt" | null
+  converted_at: Date | null
+  /**
    * Ngôn ngữ xem trước + .docx (FLF-265). Không default: thiếu field là có nghĩa (dự án cũ; mode 1 theo file upload)
    * ⇒ đọc qua `documentLanguageOf` (`document-language.ts`), đừng đọc thẳng.
    */
@@ -79,6 +85,15 @@ const projectSchema = new Schema<IProject>(
     import_state: {
       type: String,
       enum: [...IMPORT_STATUSES, null],
+      default: null
+    },
+    converted_from: {
+      type: String,
+      enum: ["fpt", null],
+      default: null
+    },
+    converted_at: {
+      type: Date,
       default: null
     },
     // FLF-265: KHÔNG default — dự án cũ / mode 1 không có field, giá trị suy ra ở `documentLanguageOf`
