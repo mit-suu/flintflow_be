@@ -23,6 +23,7 @@ import { readFixtureJson, seedFixture, type SeededFixture } from "../../setup.js
 import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeCrClarify, fakeMode1, mode1Api, promptLocations } from "../../helpers/mode1.js"
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
+import { ChatSession } from "../../../src/modules/project/chat-session.model.js"
 import { ADD_USE_CASE_REASON, REMOVE_USE_CASE_REASON } from "../../../src/modules/change-request/add-use-case.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { binary, documentXml, releaseNow, routeReplaceCr, writeCr } from "../../helpers/mode1-release-p4.js"
@@ -316,7 +317,7 @@ describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký basel
 
     // Chat mode 1: bản xem trước chỉ đọc (meta.requires_cr), đúng vòng hỏi đáp của trước baseline
     const instruction = "Thêm use case Send Absence Warning cho Lecturer, màn hình riêng"
-    const shown = await c.post("/changes/preview", { base_version: await c.spineVersion(), instruction })
+    const shown = await c.post("/changes/preview", { base_version: await c.spineVersion(), instruction, session_id: seeded.sessionId })
     expect(shown.status, JSON.stringify(shown.body.error)).toBe(200)
     expect(shown.body.meta.requires_cr).toBe(true)
     expect(shown.body.data.ok, JSON.stringify(shown.body.data.violations)).toBe(true)
@@ -334,6 +335,13 @@ Trả lời làm rõ:
     })
     expect(created.status, JSON.stringify(created.body.error)).toBe(201)
     const crId = created.body.data.change_request.cr_id as string
+    // Tin bản xem trước trong chat: trước khi tạo nói "Tạo change request"; tạo xong đổi thành "đã tạo CR-…"
+    const aiMessages = async () =>
+      ((await ChatSession.findById(seeded.sessionId).lean())!.messages as { role: string; content: string }[])
+        .filter((m) => m.role === "ai" && m.content.includes(shown.body.data.preview_id))
+        .map((m) => JSON.parse(m.content) as { kind: string; reply: string; cr_id?: string })
+    expect(await aiMessages()).toEqual([expect.objectContaining({ kind: "change_cr", cr_id: crId })])
+    expect((await aiMessages())[0].reply).toContain(`Đã tạo ${crId}`)
     const cr = `/change-requests/${crId}`
     // FLF-330: BA xác nhận (submit) là ghi ngay vào bản nháp — không còn Lead duyệt từng CR
     let last: { change_request: { status: string; result_doc_version: string | null } } | null = null
