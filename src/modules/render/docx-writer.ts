@@ -133,9 +133,11 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
     styles: {
       default: {
         document: { run: { font: FONT, size: 24 } },
-        heading1: { run: { font: FONT, size: 32, bold: true } },
-        heading2: { run: { font: FONT, size: 28, bold: true } },
-        heading3: { run: { font: FONT, size: 26, bold: true } },
+        // `outlineLevel` (FLF-316): Word dựng mục lục `TOC \o "1-3"` theo tên style, còn LibreOffice (bản PDF qua
+        // Gotenberg) theo cấp outline — thiếu nó thì mục lục của PDF trống trơn
+        heading1: { run: { font: FONT, size: 32, bold: true }, paragraph: { outlineLevel: 0 } },
+        heading2: { run: { font: FONT, size: 28, bold: true }, paragraph: { outlineLevel: 1 } },
+        heading3: { run: { font: FONT, size: 26, bold: true }, paragraph: { outlineLevel: 2 } },
         // Mẫu FPT: heading con (Function trigger… của §3.x.y) nhỏ hơn Heading 3; mode 1 giữ style như cũ
         ...(doc.format === "fpt"
           ? {
