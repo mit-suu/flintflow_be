@@ -176,13 +176,14 @@ describe("signOff — điều kiện ký là cờ đỏ = 0, không phải phầ
     expect(db.baselines, "không để lại snapshot mồ côi").toHaveLength(0)
   })
 
-  it("waive cờ đỏ rồi ký lại ⇒ vẫn bị chặn, không có baseline (BR-04)", async () => {
+  it("giữ nguyên + lý do cờ đỏ rồi ký lại ⇒ vẫn bị chặn, không có baseline (BR-04, FLF-329); waive cờ đỏ bị từ chối", async () => {
     await seed(withUnconfirmedAssumption)
 
     // Lượt ký đầu bị chặn nhưng đã mở cờ — waive chính cờ vừa mở, rồi thử ký lại
     await expect(signOff(PROJECT, USER, { base_version: await version() })).rejects.toBeInstanceOf(BaselineBlockedError)
     const opened = (await repo.get(PROJECT))!.flags.find((f) => f.rule_id === "unconfirmed_assumption" && f.resolved_at === null)!
-    await flagsService.waive(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)
+    await expect(flagsService.waive(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)).rejects.toMatchObject({ code: "FLAG_NOT_WAIVABLE" })
+    await flagsService.keep(PROJECT, opened.id, "Giả định này chốt ở bản sau, khách hàng đã đồng ý", USER)
 
     const err = await signOff(PROJECT, USER, { base_version: await version() }).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(BaselineBlockedError)

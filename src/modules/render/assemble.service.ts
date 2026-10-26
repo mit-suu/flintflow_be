@@ -487,7 +487,8 @@ const buildFlagsAppendix = (
     // srs-spine.md §6: bản baseline chỉ cần in danh sách waive — không có cờ đỏ mở (điều kiện ký baseline).
     return { redOpen: [], staleCount: 0, waived }
   }
-  const redOpen = spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && !f.waived_by_user)
+  // FLF-329: cờ đỏ giữ nguyên / waive cũ vẫn là cờ đỏ mở — vẫn in vào phụ lục và vẫn chặn
+  const redOpen = spine.flags.filter((f) => f.level === "red" && f.resolved_at === null)
   // T15 review T4: dùng lại `states` đã tính một lần ở buildDocument thay vì computeSectionStates lần nữa.
   return { redOpen: redOpen.map((f) => buildFlagRow(headings, f, numbers, titles, language)), staleCount: readiness(spine, changes, states).stale, waived }
 }
