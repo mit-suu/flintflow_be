@@ -137,17 +137,19 @@ describe("UC-33 — hoàn tác thay đổi gần nhất", () => {
     expect((await api.spine()).actors.find((a: Body) => a.id === "A01").name).toBe("Product Owner")
   })
 
-  // BR-03 (FLF-294): "Undo is available only before the first baseline; after it, undoing a written change is a new change request"
-  it("sau baseline ⇒ không hoàn tác được, Spine giữ nguyên (BR-03)", async () => {
+  // BR-03: "Undo is available only before the first baseline; after it, undoing a written change is a new change request".
+  // FLF-318: ký baseline ⇒ dự án sang mode 1, sửa thẳng bị chặn (CHANGE_REQUIRES_CR) nên cũng không có gì để hoàn tác
+  it("sau baseline ⇒ không sửa thẳng, không hoàn tác được, Spine giữ nguyên (BR-03)", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
     const changed = await api.change(renameA01(), { reason: "Customer renamed the role", change_request: CR })
-    expect(changed.status, JSON.stringify(changed.body.error)).toBe(200)
+    expect(changed.status).toBe(409)
+    expect(changed.body.error.code).toBe("CHANGE_REQUIRES_CR")
 
     const undo = await api.post("/undo", { base_version: await api.version() })
     expect(undo.status).toBeGreaterThanOrEqual(400)
-    expect((await api.spine()).actors.find((a: Body) => a.id === "A01").name).toBe("Product Owner")
+    expect((await api.spine()).actors.find((a: Body) => a.id === "A01").name).toBe("Founder")
   })
 })
 
@@ -289,30 +291,18 @@ describe("UC-35 — định nghĩa glossary của SRS", () => {
     expect(res.body.data.spine.glossary.find((g: Body) => g.id === "G01").term).toBe("Software Requirements Specification")
   })
 
-  it("sau baseline: đổi tên không kèm lý do ⇒ 400, glossary không đổi", async () => {
-    const seeded = await seedFixture("full")
-    const api = client(seeded)
-    expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
-    const res = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }], { change_request: CR })
-    expect(res.status).toBe(400)
-    expect(res.body.error.code).toBe("VALIDATION_ERROR")
-    expect((await api.spine()).glossary.find((g: Body) => g.id === "G01").term).toBe("SRS")
-  })
-
-  // UC-35 / BR-03 (FLF-294): sau baseline đổi tên là một change request — thiếu người yêu cầu + nguồn ⇒ không sửa thẳng
+  // UC-35 / BR-03 (FLF-318): sau baseline đổi tên là một change request — sửa thẳng bị từ chối kèm nội dung điền sẵn cho form CR
   it("sau baseline: đổi tên thuật ngữ phải qua change request, không sửa thẳng", async () => {
     const seeded = await seedFixture("full")
     const api = client(seeded)
     expect((await api.post("/baseline", { base_version: seeded.spineVersion })).status).toBe(201)
-    const res = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }], { reason: "Customer renamed the term" })
-    expect(res.status).toBe(400)
-    expect(res.body.error.code).toBe("CR_FIELDS_REQUIRED")
+    for (const body of [{ reason: "Customer renamed the term" }, { reason: "Customer renamed the term", change_request: CR }, { change_request: CR }]) {
+      const res = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }], body)
+      expect(res.status).toBe(409)
+      expect(res.body.error.code).toBe("CHANGE_REQUIRES_CR")
+      expect(res.body.meta.prefill.title).toBeTruthy()
+    }
     expect((await api.spine()).glossary.find((g: Body) => g.id === "G01").term).toBe("SRS")
-
-    const asCr = await api.change([{ op: "set", path: "glossary[id=G01].term", value: "Spec" }], { reason: "Customer renamed the term", change_request: CR })
-    expect(asCr.status, JSON.stringify(asCr.body.error)).toBe(200)
-    expect(asCr.body.meta.cr_id).toMatch(/^CR-\d{3}$/)
-    expect((await api.spine()).glossary.find((g: Body) => g.id === "G01").term).toBe("Spec")
   })
 })
 
@@ -520,8 +510,9 @@ describe("UC-39 — Lead duyệt baseline SRS", () => {
     const api = client(seeded)
     const created = await api.post("/baseline", { base_version: seeded.spineVersion })
     expect(created.status).toBe(201)
+    // FLF-318: sau baseline sửa đi qua change request — sửa thẳng bị chặn
     const changed = await api.change(renameA01(), { reason: "Customer renamed the role", change_request: CR })
-    expect(changed.status, JSON.stringify(changed.body.error)).toBe(200)
+    expect(changed.status).toBe(409)
 
     const snapshot = await Baseline.findById(created.body.data.snapshot_ref).lean()
     const actors = (snapshot?.snapshot as { actors: Body[] }).actors

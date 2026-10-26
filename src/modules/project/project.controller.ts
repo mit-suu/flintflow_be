@@ -1,5 +1,6 @@
 import { Request, Response } from "express"
 import * as projectService from "./project.service.js"
+import { retryPendingConversion } from "../import/convert-from-fpt.service.js"
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -36,7 +37,10 @@ export const getProject = catchAsync(async (req: Request, res: Response) => {
   }
 
   const projectId = req.params.projectId as string
-  const project = await projectService.openProject(projectId, requireOrgId(req))
+  const orgId = requireOrgId(req)
+  const project = await projectService.openProject(projectId, orgId)
+  // FLF-318: dự án tạo SRS đã ký baseline mà chưa chuyển sang mode 1 (lượt ký lỗi giữa chừng / ký trước khi deploy)
+  if (await retryPendingConversion(project, userId)) return sendSuccess(res, 200, await projectService.getProjectById(projectId, orgId))
   return sendSuccess(res, 200, project)
 })
 

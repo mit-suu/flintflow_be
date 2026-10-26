@@ -452,6 +452,19 @@ describe("preview — diff + impact, không ghi", () => {
       expect(vars.projection.use_case_context.ui_plan).toContainEqual({ use_case: "Review Absence Warnings", ui: "DROPPED by the user: do not add this use case or any of its parts" })
     })
 
+    it("FLF-318 (luật 3e): không rõ ai xử lý yêu cầu ⇒ model hỏi kèm lựa chọn actor; bản xem trước trả câu hỏi đó, không lô nào", async () => {
+      const question = "Ai xử lý yêu cầu phúc khảo điểm: Founder, Analyst, hay cả hai theo thứ tự đó?"
+      deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices: ["Founder", "Analyst", "Founder rồi Analyst duyệt"] }))
+      await seed()
+      const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Request Grade Review cho Analyst" }, {}, deps)
+      expect(asked.ok).toBe(false)
+      expect(asked.clarification).toBe(question)
+      expect(asked.clarification_choices).toEqual(["Founder", "Analyst", "Founder rồi Analyst duyệt"])
+      expect(asked.changes ?? []).toEqual([])
+      const vars = vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as { projection: { use_case_context: { actors: { id: string }[] } } }
+      expect(vars.projection.use_case_context.actors.map((a) => a.id)).toEqual(FIXTURE.actors.map((a) => a.id))
+    })
+
     it("chọn popup ⇒ màn mới is_popup = true (code giữ lời người dùng dù model đặt khác)", async () => {
       await seed()
       const body = { base_version: 1, instruction: "Popup mở từ Project Workspace", clarification_rounds: 1, chat_history: "User: Thêm use case Send Absence Warning cho Analyst\nAI: …" }
@@ -1102,5 +1115,97 @@ describe("instruction ở dự án có ngôn ngữ tài liệu khác ngôn ngữ
     expect(applied.txn).not.toBeNull()
     expect(applied.spine.actors.find((a) => a.id === "A01")?.name).toBe("Product Owner")
     expect(store.translations.size).toBe(0)
+  })
+})
+
+describe("FLF-318: xoá use case kéo theo phần chỉ thuộc nó (luật 3g), use case cùng luồng hỏi trước", () => {
+  const uc = FIXTURE.use_cases.find((u) => u.function_ids.some((id) => !FIXTURE.use_cases.some((o) => o.id !== u.id && o.function_ids.includes(id))))!
+  const exclusive = uc.function_ids.filter((id) => !FIXTURE.use_cases.some((o) => o.id !== uc.id && o.function_ids.includes(id)))
+
+  it("lệnh xoá ⇒ prompt bật luật 3g kèm use_case_context; lô chỉ xoá use case ⇒ gọi lại kèm phần còn sót; lô đủ ⇒ bản xem trước ok", async () => {
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "remove", path: `use_cases[id=${uc.id}]` }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({ ops: [{ op: "remove", path: `use_cases[id=${uc.id}]` }, ...exclusive.map((id) => ({ op: "remove", path: `functions[id=${id}]` }))] as ChangeInstructionOutput["ops"] })
+      )
+    deps.changeExecutor = executor
+    await seed()
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: `xoá use case ${uc.name}` }, {}, deps)
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as { use_case_removal: boolean; projection: { use_case_context?: { use_cases: unknown[] } } }
+    expect(first.use_case_removal).toBe(true)
+    expect(first.projection.use_case_context?.use_cases.length).toBe(FIXTURE.use_cases.length)
+    const retry = executor.mock.calls[1][1].promptVariables as { previous_problems: string }
+    for (const id of exclusive) expect(retry.previous_problems).toContain(`remove functions[id=${id}]`)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    expect(shown.ops.filter((o) => o.op === "remove").map((o) => o.path)).toEqual(expect.arrayContaining(exclusive.map((id) => `functions[id=${id}]`)))
+  })
+
+  it("model hỏi về use case cùng luồng ⇒ bản xem trước trả câu hỏi + lựa chọn; câu trả lời (không nhắc 'use case') vẫn là lệnh xoá", async () => {
+    const question = `Xoá "${uc.name}" sẽ làm các use case cùng luồng không còn yêu cầu nào để xử lý: …`
+    const choices = ["Xoá cả luồng", `Chỉ xoá ${uc.name}`, "Chọn từng cái"]
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices }))
+    await seed()
+    const asked = await preview(PROJECT, USER, { base_version: 1, instruction: `xoá UC ${uc.name}` }, {}, deps)
+    expect(asked.ok).toBe(false)
+    expect(asked.clarification).toBe(question)
+    expect(asked.clarification_choices).toEqual(choices)
+
+    const history = `User: xoá UC ${uc.name}
+AI: ${question}`
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Xoá cả luồng", clarification_rounds: 1, chat_history: history }, {}, deps)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    expect((calls[calls.length - 1][1].promptVariables as { use_case_removal: boolean }).use_case_removal).toBe(true)
+  })
+
+  it("lệnh thêm use case không bật luật 3g", async () => {
+    await seed()
+    await preview(PROJECT, USER, { base_version: 1, instruction: "Thêm use case Send Absence Warning cho Analyst" }, {}, deps)
+    expect((vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as { use_case_removal: boolean }).use_case_removal).toBe(false)
+  })
+})
+
+describe("FLF-318: sửa use case kéo theo phần của nó (luật 3h)", () => {
+  const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+  const newActors = uc.actor_ids.map((a) => (a === "A04" ? "A03" : a))
+  const screens = [...new Set(FIXTURE.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+
+  it("lệnh sửa ⇒ prompt bật luật 3h kèm edit_targets của use case được nhắc; đổi actor mà quên quyền ⇒ gọi lại kèm lỗi", async () => {
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({
+          ops: [
+            { op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors },
+            ...screens.map((screen) => ({ op: "add", path: "permissions[]", value: { screen_id: screen, role_id: "R3", action: "view" } }))
+          ] as ChangeInstructionOutput["ops"]
+        })
+      )
+    deps.changeExecutor = executor
+    await seed()
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi actor của use case UC01 từ Guest sang Administrator" }, {}, deps)
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as { use_case_edit: boolean; projection: { use_case_context: { edit_targets: { use_case: { id: string } }[] } } }
+    expect(first.use_case_edit).toBe(true)
+    expect(first.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3h")
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+  })
+
+  it("không rõ sửa use case nào ⇒ model hỏi kèm lựa chọn tên use case; câu trả lời (không nhắc 'use case') vẫn là lệnh sửa", async () => {
+    const question = "Bạn muốn sửa use case nào?"
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices: [uc.name, FIXTURE.use_cases[1].name] }))
+    await seed()
+    const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "sửa UC đăng ký: thêm bước xác thực email" }, {}, deps)
+    expect(asked.clarification).toBe(question)
+    const history = `User: sửa UC đăng ký: thêm bước xác thực email\nAI: ${question}`
+    await preview(PROJECT, USER, { base_version: 1, instruction: uc.name, clarification_rounds: 1, chat_history: history }, {}, deps)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    const last = calls[calls.length - 1][1].promptVariables as { use_case_edit: boolean; projection: { use_case_context: { edit_targets: { use_case: { id: string } }[] } } }
+    expect(last.use_case_edit).toBe(true)
+    // Câu trả lời là đúng tên use case ⇒ lượt sau có đủ chi tiết để sửa
+    expect(last.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
   })
 })

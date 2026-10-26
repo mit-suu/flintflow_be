@@ -6,11 +6,13 @@
  */
 
 import { DocxPackage, writeStamp } from "../docx-ooxml/index.js"
+import { Project } from "../project/project.model.js"
 import { renderSpineDocument } from "../render/assemble.service.js"
 import type { ChangeRecordRow } from "../render/section-renderer.js"
 import { writeDocx } from "../render/docx-writer.js"
 import { writerOptionsFor } from "../render/labels.js"
 import type { Spine } from "../spine/spine.types.js"
+import { projectLanguages, type ProjectLanguages } from "../translation/translation.service.js"
 
 export interface RenderVersionOptions {
   version: string
@@ -18,15 +20,33 @@ export interface RenderVersionOptions {
   stampSource: string
   /** Change của snapshot chưa ghi DB (C-7 render trước khi ghi Spine). */
   pendingRecord?: ChangeRecordRow[]
+  /** FLF-318: ngôn ngữ cho bản 1.0 lúc chuyển đổi — dự án chưa đổi mode nên chưa tự suy ra được. */
+  languages?: ProjectLanguages
+}
+
+/**
+ * FLF-318: dự án tạo SRS đã chuyển sang mode 1 ⇒ ngôn ngữ tài liệu + ngôn ngữ gốc (`en`) để render mẫu FPT qua lớp bản
+ * dịch, như bản Lead đã ký. Dự án import thật ⇒ `null` (giữ đường cũ, không đổi byte nào).
+ */
+const convertedLanguages = async (projectId: string): Promise<ProjectLanguages | null> => {
+  const project = await Project.findById(projectId, { mode: 1, converted_from: 1, documentLanguage: 1 }).lean()
+  if (project?.converted_from !== "fpt") return null
+  return projectLanguages(projectId, project)
 }
 
 export const renderVersionFile = async (projectId: string, projectName: string, spine: Spine, opts: RenderVersionOptions): Promise<Buffer> => {
+  const languages = opts.languages ?? (await convertedLanguages(projectId))
   // `baseline`: bản đã chốt của version — không in phụ lục cờ mở / watermark của bản làm việc
-  const doc = await renderSpineDocument(projectId, projectName, spine, { version: opts.version, source: "baseline", pendingRecord: opts.pendingRecord })
-  // Version file chỉ có ở mode 1 (người gọi: import/finalize, change-request/write, doc-version/release — đều trên
-  // DocVersion, chỉ import mode 1 tạo) ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt). FLF-265: chung helper
-  // với export; mode 1 bỏ qua ngôn ngữ tài liệu ⇒ file version không đổi byte nào, không cần đọc project.
-  const pkg = await DocxPackage.load(await writeDocx(doc, writerOptionsFor("import")))
+  const doc = await renderSpineDocument(projectId, projectName, spine, {
+    version: opts.version,
+    source: "baseline",
+    pendingRecord: opts.pendingRecord,
+    ...(languages ? { languages } : {})
+  })
+  // Version file của dự án import thật ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt), bỏ qua ngôn ngữ tài
+  // liệu ⇒ file không đổi byte nào so với trước FLF-265. Dự án chuyển từ mode 2 (FLF-318) theo ngôn ngữ tài liệu.
+  const options = languages ? writerOptionsFor("import", languages.locale, "fpt") : writerOptionsFor("import")
+  const pkg = await DocxPackage.load(await writeDocx(doc, options))
   await writeStamp(pkg, { project_id: projectId, version: opts.version, source: opts.stampSource })
   return pkg.toBuffer()
 }

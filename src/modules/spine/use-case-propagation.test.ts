@@ -6,6 +6,7 @@ import { spineSchema } from "./spine.schema.js"
 import { planTransaction } from "./op-engine.js"
 import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
+import { editIssues, editNote, editProblemText, removalLeftovers, removalNote, removalProblemText, removesUseCaseOrScreen, useCaseEditContext, useCaseIntent } from "./use-case-propagation.js"
 import { addedScreenIds, addsUseCaseOrScreen, declareTempIds, newUseCaseScreenIssues, useCaseScreenNote, useCaseScreenProblemText, wantsSharedScreen, isAddUseCaseInstruction, normalizeUseCaseBatch, useCaseContext, useCaseMode, useCaseOverlapNote, useCaseOverlaps, applyScreenKind, screenKindChoice, screenKindQuestion, askedList, askedUseCases, confirmedProposals, parseUiAnswer, uiPlanFor, uiPlanForModel, applyUiPlan, uiPlanIssues, uiPlanNote, uiPlanProblemText } from "./use-case-propagation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -48,6 +49,8 @@ describe("useCaseContext", () => {
     const context = useCaseContext(FIXTURE, "full")
     expect(context.mode).toBe("full")
     expect(context.roles).toContainEqual({ id: "R2", name: "Analyst", actor_id: "A02" })
+    // FLF-318: model chọn actor xử lý yêu cầu từ danh sách này (luật 3e), không bịa actor
+    expect((context.actors as { id: string; name: string }[]).map((a) => a.id)).toEqual(FIXTURE.actors.map((a) => a.id))
     expect((context.screens as { id: string; flow_to: string[] }[]).find((s) => s.id === "S01")?.flow_to).toContain("S02")
     const sample = context.sample_function as Spine["functions"][number]
     expect(sample.normal.length).toBeGreaterThan(0)
@@ -306,8 +309,12 @@ describe("skill apply-change-op — khối luật 3e theo chế độ (FLF-311)"
     expect(prompt).toContain("**The UI of each new use case is the user's call**")
     expect(prompt).toContain("**the screen or popup the user chose**")
     expect(prompt).toContain("Never ask about the UI yourself")
-    expect(prompt).toContain("listed in `proposed_use_cases`")
+    expect(prompt).toContain("`proposed_use_cases`, never silently")
     expect(prompt).toContain("one screen per step, chained in order by `flow_to`")
+    // FLF-318: yêu cầu gửi đi phải có người xử lý (giảng viên chấm lại, phòng đào tạo duyệt) — không để luồng cụt; không rõ ai ⇒ hỏi
+    expect(prompt).toContain("A request needs someone to settle it — never leave the flow dead-ended")
+    expect(prompt).toContain("the batch MUST also hold the rest of that flow")
+    expect(prompt).toContain("`clarification_needed` asking who decides")
     expect(prompt).toContain("`normal[]` steps, `abnormal[]` cases, `validations[]`")
     expect(prompt).not.toContain("the screen loop details it")
   })
@@ -620,5 +627,113 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
     const left = applyUiPlan(ops, [{ index: 1, name: "Submit Absence Request", proposed: true, drop: true }])
     expect(left.map((o) => o.path)).toEqual(["screens[id=S01].flow_to"])
     expect(left[0].value).toEqual(FIXTURE.screens[0].flow_to)
+  })
+})
+
+describe("FLF-318 — xoá use case (luật 3g)", () => {
+  it("useCaseIntent: động từ đứng trước thắng; không nhắc use case ⇒ null", () => {
+    expect(useCaseIntent("xoá UC phúc khảo điểm")).toBe("remove")
+    expect(useCaseIntent("Xóa use case Request Grade Review")).toBe("remove")
+    expect(useCaseIntent("bỏ use case vừa tạo")).toBe("remove")
+    expect(useCaseIntent("remove the Approve Grade Review use case")).toBe("remove")
+    expect(useCaseIntent("thêm UC phúc khảo điểm cho học sinh")).toBe("add")
+    expect(useCaseIntent("bổ sung use case xem trạng thái")).toBe("add")
+    expect(useCaseIntent("thêm use case X, bỏ màn popup cũ")).toBe("add")
+    expect(useCaseIntent("xoá màn Login")).toBeNull()
+  })
+
+  const uc = FIXTURE.use_cases.find((u) => u.function_ids.length > 0)!
+
+  it("removalLeftovers: chỉ xoá use case ⇒ chức năng chỉ thuộc nó còn sót; xoá đủ ⇒ không sót", () => {
+    const onlyUc = planTransaction(FIXTURE, { base_version: FIXTURE.spine_version, ops: [{ op: "remove", path: `use_cases[id=${uc.id}]` }], by: "t" }, { startSeq: 1 }).spine
+    expect(removesUseCaseOrScreen(FIXTURE, onlyUc)).toBe(true)
+    const exclusive = uc.function_ids.filter((id) => !FIXTURE.use_cases.some((u) => u.id !== uc.id && u.function_ids.includes(id)))
+    const left = removalLeftovers(FIXTURE, onlyUc)
+    expect(left.filter((o) => o.kind === "function").map((o) => o.id).sort()).toEqual([...exclusive].sort())
+    expect(removalProblemText(left[0])).toContain("rule 3g")
+    expect(removalNote(left, "vi")).toContain("xoá luôn các phần đó")
+
+    const full = planTransaction(
+      FIXTURE,
+      { base_version: FIXTURE.spine_version, ops: [{ op: "remove", path: `use_cases[id=${uc.id}]` }, ...exclusive.map((id) => ({ op: "remove" as const, path: `functions[id=${id}]` }))], by: "t" },
+      { startSeq: 1 }
+    ).spine
+    expect(removalLeftovers(FIXTURE, full).filter((o) => o.kind === "function")).toEqual([])
+  })
+
+  it("removalLeftovers: màn mất hết chức năng và thông báo mất hết chức năng được nêu", () => {
+    const screen = FIXTURE.screens.find((s) => FIXTURE.functions.some((f) => f.screen_id === s.id))!
+    const fns = FIXTURE.functions.filter((f) => f.screen_id === screen.id)
+    const ops = fns.map((f) => ({ op: "remove" as const, path: `functions[id=${f.id}]` }))
+    const after = planTransaction(FIXTURE, { base_version: FIXTURE.spine_version, ops, by: "t" }, { startSeq: 1 }).spine
+    const left = removalLeftovers(FIXTURE, after)
+    expect(left).toContainEqual({ kind: "screen", id: screen.id, name: screen.name })
+    // Thông báo chỉ gắn với các chức năng vừa xoá ⇒ cũng được nêu
+    const orphanMessages = FIXTURE.messages.filter((m) => m.function_ids.length > 0 && m.function_ids.every((id) => fns.some((f) => f.id === id)))
+    for (const m of orphanMessages) expect(left).toContainEqual({ kind: "message", id: m.id, code: m.code })
+  })
+})
+
+describe("skill apply-change-op — luật 3g xoá use case (FLF-318)", () => {
+  const render = async (vars: Record<string, unknown>): Promise<string> => {
+    const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
+    return interpolatePrompt(getSkill("apply-change-op").template, vars)
+  }
+  it("lệnh xoá ⇒ có luật 3g: xoá phần chỉ thuộc nó, hỏi trước use case cùng luồng; lệnh khác ⇒ không có", async () => {
+    const removal = await render({ use_case_removal: true })
+    expect(removal).toContain("3g. **Removing a use case ⇒ remove what belongs only to it")
+    expect(removal).toContain("ask first, never remove them silently")
+    expect(removal).toContain("whole flow / remove only the named one / pick one by one")
+    expect(await render({ use_case_removal: false })).not.toContain("3g. **Removing a use case")
+  })
+})
+
+describe("FLF-318 — sửa use case (luật 3h)", () => {
+  it("useCaseIntent: lệnh sửa / đổi / cập nhật / rename ⇒ edit; động từ đứng trước thắng", () => {
+    expect(useCaseIntent("sửa UC phúc khảo điểm: thêm bước phòng đào tạo duyệt")).toBe("edit")
+    expect(useCaseIntent("đổi actor của use case Register Account sang Administrator")).toBe("edit")
+    expect(useCaseIntent("cập nhật luồng UC01")).toBe("edit")
+    expect(useCaseIntent("rename use case UC26 to Submit Grade Appeal")).toBe("edit")
+    expect(useCaseIntent("thêm use case X, sửa màn Y")).toBe("add")
+    expect(useCaseIntent("xoá UC01 rồi sửa lại UC02")).toBe("remove")
+  })
+
+  it("useCaseEditContext: use case được nhắc (mã hoặc tên) kèm chức năng đủ luồng, màn, quyền, phần dùng chung; không nhắc ⇒ []", () => {
+    const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+    const [target] = useCaseEditContext(FIXTURE, "sửa use case UC01: thêm bước xác thực email") as { use_case: { id: string }; functions: { id: string; normal: string[]; shared_with: string[] }[]; screens: { id: string }[]; permissions: { screen_id: string }[] }[]
+    expect(target.use_case.id).toBe("UC01")
+    expect(target.functions.map((f) => f.id)).toEqual(uc.function_ids)
+    expect(target.functions.every((f) => Array.isArray(f.normal) && Array.isArray(f.shared_with))).toBe(true)
+    expect(target.permissions.every((p) => target.screens.some((s) => s.id === p.screen_id))).toBe(true)
+    expect(useCaseEditContext(FIXTURE, `đổi tên use case ${uc.name}`).length).toBe(1)
+    expect(useCaseEditContext(FIXTURE, "sửa UC phúc khảo điểm")).toEqual([])
+  })
+
+  it("editIssues: đổi actor mà chưa cấp quyền cho vai trò mới / chưa thu quyền vai trò cũ ⇒ nêu ra; lô đủ ⇒ không còn", () => {
+    const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+    const plan = (ops: Op[]) => planTransaction(FIXTURE, { base_version: FIXTURE.spine_version, ops, by: "t" }, { startSeq: 1 }).spine
+    const newActors = uc.actor_ids.map((a) => (a === "A04" ? "A03" : a))
+    const onlyActor = plan([{ op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors }])
+    const issues = editIssues(FIXTURE, onlyActor)
+    expect(issues.some((i) => i.kind === "new_actor_no_view" && i.role === "Admin")).toBe(true)
+    expect(editProblemText(issues[0])).toContain("rule 3h")
+    expect(editNote(issues, "vi")).toContain("§3.1.3")
+
+    const screens = [...new Set(FIXTURE.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+    const guestOnlyHere = (screen: string) => !FIXTURE.use_cases.some((o) => o.id !== "UC01" && o.actor_ids.includes("A04") && FIXTURE.functions.some((f) => f.screen_id === screen && o.function_ids.includes(f.id)))
+    const fixed = plan([
+      { op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors },
+      ...screens.map((screen) => ({ op: "add" as const, path: "permissions[]", value: { screen_id: screen, role_id: "R3", action: "view" } })),
+      ...FIXTURE.permissions.filter((p) => p.role_id === "R4" && screens.includes(p.screen_id) && guestOnlyHere(p.screen_id)).map((p) => ({ op: "remove" as const, path: `permissions[id=${p.id}]` }))
+    ])
+    expect(editIssues(FIXTURE, fixed)).toEqual([])
+  })
+
+  it("skill apply-change-op: lệnh sửa ⇒ có luật 3h (hỏi use case nào, phần dùng chung hỏi trước); lệnh khác ⇒ không có", async () => {
+    const { getSkill, interpolatePrompt } = await import("../../shared/ai/prompt-registry.service.js")
+    const prompt = interpolatePrompt(getSkill("apply-change-op").template, { use_case_edit: true })
+    expect(prompt).toContain("3h. **Editing a use case ⇒ update what belongs only to it")
+    expect(prompt).toContain("**Shared parts are the user's call**")
+    expect(interpolatePrompt(getSkill("apply-change-op").template, { use_case_edit: false })).not.toContain("3h. **Editing a use case")
   })
 })

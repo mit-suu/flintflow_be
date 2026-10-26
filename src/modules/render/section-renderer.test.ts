@@ -491,6 +491,31 @@ describe("buildRecordOfChanges", () => {
     ])
   })
 
+  it("FLF-318 (business-flow §5.1): mỗi CR một dòng mang số bản phát hành sẽ chứa nó — sau v1.0 là v2.0, không số phụ; release in đúng v2.0", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[]", step_id: "S-9.5", reason: "Ký baseline v1.0" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Thêm use case gửi cảnh báo" }),
+      change({ txn: "t3", step_id: null, by: "CR-002", reason: "CR-002: Sửa tên màn" }),
+      change({ txn: "t4", op: "add", path: "baselines[]", step_id: null, reason: "Baseline 2.0", at: "2026-09-02T09:00:00.000Z" }),
+      change({ txn: "t5", step_id: null, by: "CR-003", reason: "CR-003: Bổ sung NFR", at: "2026-09-03T09:00:00.000Z" })
+    ])
+    expect(rows.map((r) => [r.version, r.description])).toEqual([
+      ["v1.0", "Baseline v1.0 signed"],
+      ["v2.0", "CR-001: Thêm use case gửi cảnh báo"],
+      ["v2.0", "CR-002: Sửa tên màn"],
+      ["v2.0", "Baseline 2.0 signed"],
+      ["v3.0", "CR-003: Bổ sung NFR"]
+    ])
+  })
+
+  it("FLF-318: baseline import 0.1 in v0.1 (trước đây rơi về v1.0); CR sau đó mang bản phát hành đầu tiên v1.0", () => {
+    const rows = buildRecordOfChanges([
+      change({ txn: "t1", op: "add", path: "baselines[]", step_id: null, by: "import", reason: "Baseline 0.1" }),
+      change({ txn: "t2", step_id: null, by: "CR-001", reason: "CR-001: Sửa mô tả" })
+    ])
+    expect(rows.map((r) => r.version)).toEqual(["v0.1", "v1.0"])
+  })
+
   it("FLF-204 (BUG-15): sổ sách của runner không vào §I", () => {
     const rows = buildRecordOfChanges([
       change({ txn: "t1", reason: "step-runner: elicit turn" }),

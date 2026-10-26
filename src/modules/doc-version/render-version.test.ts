@@ -12,6 +12,11 @@ vi.mock("../render/docx-writer.js", async (importOriginal) => {
   return { ...actual, writeDocx: vi.fn(actual.writeDocx) }
 })
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: vi.fn() }))
+const { findProject } = vi.hoisted(() => ({ findProject: vi.fn() }))
+vi.mock("../project/project.model.js", () => ({ Project: { findById: () => ({ lean: findProject }) } }))
+vi.mock("../translation/translation.service.js", () => ({
+  projectLanguages: vi.fn(async (_id: string, p: { documentLanguage?: string }) => ({ locale: p.documentLanguage ?? "en", source: "en" }))
+}))
 
 import { renderVersionFile } from "./render-version.js"
 import { renderSpineDocument } from "../render/assemble.service.js"
@@ -29,6 +34,8 @@ beforeEach(() => {
   vi.mocked(renderSpineDocument).mockResolvedValue(sample)
   vi.mocked(writeDocx).mockClear()
   vi.mocked(executeAiAction).mockReset()
+  findProject.mockReset()
+  findProject.mockResolvedValue({ mode: "import", converted_from: null })
 })
 
 describe("renderVersionFile — mode 1 không đổi", () => {
@@ -45,5 +52,19 @@ describe("renderVersionFile — mode 1 không đổi", () => {
     expect(readZipText(file, "word/document.xml")).toBe(readZipText(old, "word/document.xml"))
     expect(readZipText(file, "docProps/custom.xml")).toContain("release")
     expect(executeAiAction).not.toHaveBeenCalled()
+  })
+})
+
+describe("renderVersionFile — dự án chuyển từ mode 2 (FLF-318)", () => {
+  it("mẫu FPT theo ngôn ngữ tài liệu, nội dung qua lớp bản dịch (en ⇒ vi)", async () => {
+    findProject.mockResolvedValue({ mode: "import", converted_from: "fpt", documentLanguage: "vi" })
+    await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "1.0", stampSource: "convert" })
+    expect(renderSpineDocument).toHaveBeenCalledWith(PROJECT, "Demo", {}, {
+      version: "1.0",
+      source: "baseline",
+      pendingRecord: undefined,
+      languages: { locale: "vi", source: "en" }
+    })
+    expect(vi.mocked(writeDocx).mock.calls[0][1]).toEqual({ language: "vi", flagLanguage: "vi" })
   })
 })

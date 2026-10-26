@@ -12,7 +12,8 @@
  */
 
 import { ApiError } from "../../shared/utils/api-error.js"
-import { renderAllIfAvailable } from "../diagram/diagram.service.js"
+import { layoutRenderDeps, renderAllIfAvailable, renderChangedIfAvailable } from "../diagram/diagram.service.js"
+import { addedScreenIds } from "../spine/use-case-propagation.js"
 import { buildTrackedDocx, type TrackedComment } from "../doc-version/tracked-version.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { docFileStore } from "../doc-version/doc-file.store.js"
@@ -96,7 +97,9 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
     throw err
   }
 
-  await redrawDiagrams(projectId, cr.cr_id, projectName, next, { file: fileRef, tracked: trackedRef }, tracked)
+  // FLF-318: CR thêm use case / màn ⇒ bố cục màn mới vẽ như chat FLF-311 (wireframe của model), không để cờ `diagram_stale`
+  const newScreens = plan ? addedScreenIds(current, plan.spine) : []
+  await redrawDiagrams(projectId, cr.cr_id, projectName, next, { file: fileRef, tracked: trackedRef }, tracked, newScreens)
 
   try {
     // Mode 1 luôn ở sau baseline v0 ⇒ tính cả luật S-9: CR xác nhận giả định thì cờ `unconfirmed_assumption` đóng ngay
@@ -127,10 +130,13 @@ const redrawDiagrams = async (
   projectName: string,
   version: string,
   refs: { file: string; tracked: string | null },
-  tracked: (file: Buffer) => Promise<string | null>
+  tracked: (file: Buffer) => Promise<string | null>,
+  newScreenIds: readonly string[] = []
 ): Promise<void> => {
+  // Màn mới vẽ trước bằng model (`layoutRenderDeps`); lượt vẽ lại toàn bộ sau đó thấy hash khớp nên giữ nguyên hình đó
+  const fresh = newScreenIds.length ? await renderChangedIfAvailable(projectId, newScreenIds, { by: crId, step_id: null, deps: layoutRenderDeps() }) : null
   const drawn = await renderAllIfAvailable(projectId, { by: crId, step_id: null })
-  if (!drawn || (!drawn.rendered.length && !drawn.removed.length)) return
+  if (![fresh, drawn].some((r) => r && (r.rendered.length || r.removed.length))) return
   try {
     const latest = stripRecord((await spineRepository.get(projectId))!)
     const buffer = await renderVersionFile(projectId, projectName, latest, { version, stampSource: "cr_revision" })

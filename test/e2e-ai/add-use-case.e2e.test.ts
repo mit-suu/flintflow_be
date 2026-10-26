@@ -192,6 +192,159 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     }
   })
 
+  it("E. FLF-318 — 'thêm UC phúc khảo điểm cho học sinh' ⇒ hỏi ai xử lý / đề xuất UC xử lý; trả lời xong lô có đủ luồng (không cụt)", { timeout: 15 * 60_000 }, async () => {
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const { projectId, userId } = await seedFap()
+    const before = (await repo.get(projectId))!
+    const deps = { renderAfterChange: async () => undefined }
+    const first = "thêm UC phúc khảo điểm cho học sinh"
+    const asked = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: first }, {}, deps)
+    fapLog(`[FAP E] lượt 1: clarification=${asked.clarification ?? "-"} | choices=${JSON.stringify(asked.clarification_choices ?? [])}`)
+    // Người dùng chỉ nói phía sinh viên ⇒ phải hỏi ai xử lý, hoặc đưa UC xử lý vào nhóm "AI đề xuất thêm" để giữ / bỏ
+    expect(asked.clarification).toBeTruthy()
+    expect(asked.clarification).toMatch(/xử lý|duyệt|chấm lại|đề xuất|Decide|Approve|Lecturer|Giảng viên|Academic|khảo thí/i)
+
+    // Trả lời tối đa 3 lượt: chọn "cả hai theo thứ tự" nếu có, màn riêng cho từng use case, giữ các use case AI đề xuất
+    let history = `User: ${first}\nAI: ${asked.clarification}`
+    let shown = asked
+    for (let round = 1; round <= 3 && shown.clarification; round++) {
+      const choices = shown.clarification_choices ?? []
+      const pick = choices.find((c) => /rồi|cả hai|both|then/i.test(c)) ?? choices.find((c) => /riêng|own|separate/i.test(c))
+      const answer = `${pick ? `${pick}. ` : ""}Màn hình riêng cho từng use case, giữ các use case AI đề xuất.`
+      shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: answer, chat_history: history, clarification_rounds: round }, {}, deps)
+      fapLog(`[FAP E] lượt ${round + 1} (${answer}): ok=${shown.ok} clarification=${shown.clarification ?? "-"}`)
+      history += `\nUser: ${answer}${shown.clarification ? `\nAI: ${shown.clarification}` : ""}`
+    }
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const ucs = shown.ops.filter((o) => o.op === "add" && o.path === "use_cases[]").map((o) => o.value as { name: string; actor_ids: string[] })
+    fapLog(`[FAP E] use case mới: ${ucs.map((u) => `${u.name} (${u.actor_ids.join(",")})`).join("; ")}`)
+    // Không cụt: ngoài use case của sinh viên còn ít nhất một use case của actor khác xử lý yêu cầu
+    const studentIds = new Set(ucs[0]?.actor_ids ?? [])
+    expect(ucs.length).toBeGreaterThanOrEqual(2)
+    expect(ucs.some((u) => u.actor_ids.some((a) => !studentIds.has(a)))).toBe(true)
+  })
+
+  // Cần Spine FAP đã có luồng phúc khảo (Request / Decide / Approve / View Status) — bỏ qua khi không có
+  it("F. FLF-318 — 'xoá UC phúc khảo điểm' ⇒ hỏi trước về use case cùng luồng; 'Xoá cả luồng' ⇒ xoá 4 UC + chức năng + màn, không sót", { timeout: 15 * 60_000 }, async (ctx) => {
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const { removalLeftovers } = await import("../../src/modules/spine/use-case-propagation.js")
+    const { projectId, userId } = await seedFap()
+    const before = (await repo.get(projectId))!
+    const flow = before.use_cases.filter((u) => /grade review/i.test(u.name))
+    if (flow.length < 2) return ctx.skip()
+    const deps = { renderAfterChange: async () => undefined }
+    const first = "xoá UC phúc khảo điểm"
+    const asked = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: first }, {}, deps)
+    fapLog(`[FAP F] lượt 1: clarification=${asked.clarification ?? "-"} | choices=${JSON.stringify(asked.clarification_choices ?? [])}`)
+    expect(asked.clarification, "phải hỏi trước khi xoá các use case cùng luồng").toBeTruthy()
+
+    const pick = asked.clarification_choices?.find((c) => /cả luồng|whole flow|toàn bộ/i.test(c)) ?? "Xoá cả luồng phúc khảo"
+    const shown = await changeService.preview(
+      projectId,
+      userId,
+      { base_version: before.spine_version, instruction: pick, chat_history: `User: ${first}\nAI: ${asked.clarification}`, clarification_rounds: 1 },
+      {},
+      deps
+    )
+    fapLog(`[FAP F] lượt 2 (${pick}): ok=${shown.ok} clarification=${shown.clarification ?? "-"} | notes=${shown.notes ?? "-"}\n[FAP F] ops=${shown.ops.map((o) => `${o.op} ${o.path}`).join(" | ")}`)
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const removed = (prefix: string) => shown.ops.filter((o) => o.op === "remove" && o.path.startsWith(prefix)).length
+    expect(removed("use_cases[")).toBe(flow.length)
+    const applied = await changeService.apply(projectId, userId, { base_version: before.spine_version, instruction: pick, preview_id: shown.preview_id }, {}, deps)
+    const after = applied.spine as import("../../src/modules/spine/spine.types.js").Spine
+    const left = removalLeftovers(before, after)
+    fapLog(`[FAP F] sau khi áp: ${after.use_cases.length} UC, ${after.functions.length} chức năng, ${after.screens.length} màn · còn sót: ${JSON.stringify(left)}`)
+    expect(after.use_cases.some((u) => /grade review/i.test(u.name))).toBe(false)
+    expect(left).toEqual([])
+  })
+
+  /** Dự án FAP đã Lead ký baseline ⇒ chuyển sang luồng CR (FLF-318), rồi một CR chạy tới bước làm rõ C-2. */
+  const crClarifyQuestions = async (description: string): Promise<string[]> => {
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const { signOff } = await import("../../src/modules/pipeline/s9/baseline.service.js")
+    const { convertFromFpt } = await import("../../src/modules/import/convert-from-fpt.service.js")
+    const { createCr } = await import("../../src/modules/change-request/change-request.service.js")
+    const { runClarify } = await import("../../src/modules/change-request/clarify.service.js")
+    const { projectId, userId } = await seedFap()
+    await signOff(projectId, userId, { base_version: (await repo.get(projectId))!.spine_version })
+    expect(await convertFromFpt(projectId, userId, { quiet: true })).not.toBeNull()
+    const cr = await createCr(projectId, userId, { title: description, description, source: { kind: "verbal", ref: null, note: null }, requester: "Phòng đào tạo" })
+    await runClarify(cr, userId)
+    return cr.clarifications.at(-1)?.questions ?? []
+  }
+
+  it("G. FLF-318 — CR 'thêm UC phúc khảo điểm cho học sinh' ⇒ bước làm rõ hỏi ai xử lý (như chat trước baseline)", { timeout: 15 * 60_000 }, async () => {
+    const questions = await crClarifyQuestions("thêm UC phúc khảo điểm cho học sinh")
+    fapLog(`[FAP G] câu hỏi C-2: ${JSON.stringify(questions)}`)
+    expect(questions.join("\n")).toMatch(/xử lý|duyệt|chấm lại|giảng viên|lecturer|academic|phòng/i)
+  })
+
+  it("H. FLF-318 — CR 'xoá UC phúc khảo điểm' ⇒ bước làm rõ hỏi có xoá cả luồng không (như chat trước baseline)", { timeout: 15 * 60_000 }, async (ctx) => {
+    const flow = (JSON.parse(fs.readFileSync(fapSpine!, "utf8")) as { use_cases: { name: string }[] }).use_cases.filter((u) => /grade review/i.test(u.name))
+    if (flow.length < 2) return ctx.skip()
+    const questions = await crClarifyQuestions("xoá UC phúc khảo điểm")
+    fapLog(`[FAP H] câu hỏi C-2: ${JSON.stringify(questions)}`)
+    expect(questions.join("\n")).toMatch(/luồng|Decide|Approve|View Grade Review Status|cả/i)
+  })
+
+  it("I. FLF-318 — sau baseline: bản xem trước 'thêm UC phúc khảo điểm' (vòng hỏi đáp như trước baseline) ⇒ Tạo CR kèm preview_id ⇒ đề xuất dùng đúng lô ⇒ BA xác nhận ghi 1.1 đủ luồng", { timeout: 25 * 60_000 }, async () => {
+    const repo = await import("../../src/modules/spine/spine.repository.js")
+    const changeService = await import("../../src/modules/spine/change.service.js")
+    const { signOff } = await import("../../src/modules/pipeline/s9/baseline.service.js")
+    const { convertFromFpt } = await import("../../src/modules/import/convert-from-fpt.service.js")
+    const { mode1Api } = await import("../helpers/mode1.js")
+    const seeded = await seedFap()
+    const { projectId, userId } = seeded
+    await signOff(projectId, userId, { base_version: (await repo.get(projectId))!.spine_version })
+    expect(await convertFromFpt(projectId, userId, { quiet: true })).not.toBeNull()
+    const before = (await repo.get(projectId))!
+    const deps = { renderAfterChange: async () => undefined }
+
+    // Vòng hỏi đáp như chat trước baseline (FE mode 1 đưa lệnh thêm UC qua /changes/preview)
+    const turns = ["thêm UC phúc khảo điểm cho học sinh"]
+    let history = ""
+    let shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: turns[0] }, {}, deps)
+    for (let round = 1; round <= 3 && shown.clarification; round++) {
+      fapLog(`[FAP I] hỏi ${round}: ${shown.clarification} | ${JSON.stringify(shown.clarification_choices ?? [])}`)
+      history += `${history ? "\n" : ""}User: ${turns[turns.length - 1]}\nAI: ${shown.clarification}`
+      const choices = shown.clarification_choices ?? []
+      const pick = choices.find((c) => /rồi|cả hai|both|then/i.test(c)) ?? choices.find((c) => /riêng|own|separate/i.test(c))
+      const answer = `${pick ? `${pick}. ` : ""}Màn hình riêng cho từng use case, giữ các use case AI đề xuất.`
+      turns.push(answer)
+      shown = await changeService.preview(projectId, userId, { base_version: before.spine_version, instruction: answer, chat_history: history, clarification_rounds: round }, {}, deps)
+    }
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+    const previewedUcs = shown.ops.filter((o) => o.op === "add" && o.path === "use_cases[]").length
+    fapLog(`[FAP I] bản xem trước: ${shown.ops.length} op, ${previewedUcs} use case mới`)
+    expect(previewedUcs).toBeGreaterThanOrEqual(2)
+
+    // "Tạo change request" — CR mang bản xem trước + đoạn hỏi đáp làm mô tả (như FE `startFromPreview`)
+    const c = mode1Api(seeded, projectId)
+    const description = `${turns[0]}\n\nTrả lời làm rõ:\n${turns.slice(1).map((t) => `- ${t}`).join("\n")}`
+    const created = await c.post("/change-requests", { title: turns[0], description, source: { kind: "verbal", ref: null, note: "Tạo từ bản xem trước trong khung chat" }, requester: "Phòng đào tạo", preview_id: shown.preview_id })
+    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+    const crId = created.body.data.change_request.cr_id as string
+    const cr = `/change-requests/${crId}`
+    let last: { change_request: { status: string; result_doc_version: string | null }; pending_questions?: string[] } | null = null
+    for (const step of ["clarify", "impact", "propose", "verify", "submit"]) {
+      const r = await c.post(`${cr}/${step}`)
+      fapLog(`[FAP I] ${step}: ${r.status} ${r.body.data?.change_request?.status ?? JSON.stringify(r.body.error)}`)
+      expect(r.status, `${step}: ${JSON.stringify(r.body.error)}`).toBe(200)
+      last = r.body.data
+      // Bước làm rõ không được hỏi lại điều đã chốt trong bản xem trước
+      if (step === "clarify") expect(last?.change_request.status, `C-2 hỏi lại: ${JSON.stringify(last?.pending_questions)}`).not.toBe("awaiting_answers")
+    }
+    expect(last?.change_request).toMatchObject({ status: "written", result_doc_version: "1.1" })
+    const after = (await repo.get(projectId))!
+    const added = after.use_cases.filter((u) => !before.use_cases.some((b) => b.id === u.id))
+    fapLog(`[FAP I] ghi 1.1: ${added.map((u) => `${u.name} (${u.actor_ids.join(",")})`).join("; ")}`)
+    expect(added.length).toBe(previewedUcs)
+    expect(new Set(added.flatMap((u) => u.actor_ids)).size).toBeGreaterThanOrEqual(2)
+    for (const u of added) for (const fnId of u.function_ids) expect(after.functions.some((f) => f.id === fnId)).toBe(true)
+  })
+
   it("C. chưa nói màn hay popup ⇒ hỏi kèm lựa chọn; trả lời 'Popup mở từ My Grades' ⇒ lô có popup mở từ My Grades", { timeout: 10 * 60_000 }, async () => {
     const changeService = await import("../../src/modules/spine/change.service.js")
     const repo = await import("../../src/modules/spine/spine.repository.js")
