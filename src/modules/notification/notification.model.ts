@@ -16,6 +16,9 @@ export type NotificationType =
   | "review_package_submitted"
   | "review_package_changes_requested"
   | "review_package_released"
+  /** FLF-332 (BR-08): Analyst báo Lead nạp credit; ví được nạp ⇒ báo lại người đã yêu cầu. */
+  | "credit_topup_requested"
+  | "credit_topped_up"
   | (string & {})
 
 export interface INotification extends Document {

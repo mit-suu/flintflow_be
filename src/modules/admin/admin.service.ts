@@ -23,6 +23,7 @@ import {
   SetUserStatusInput,
   UsersQuery
 } from "./admin.validation.js"
+import { fulfillTopupRequests } from "../billing/topup-request.service.js"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -634,6 +635,9 @@ export const adjustOrgCredits = async (
     balanceAfter: wallet.balance - wallet.reserved,
     reason
   })
+
+  // FLF-332: admin cộng credit cũng là "đã nạp" với người đang chờ (BR-08)
+  if (amount > 0) await fulfillTopupRequests(orgId, amount, { kind: "admin", userId: null })
 
   // Lead của org cần biết ví vừa bị ai đó ngoài tổ chức thay đổi.
   const leads = await Membership.find({ organizationId: orgId, role: "lead" }).select("userId").lean()
