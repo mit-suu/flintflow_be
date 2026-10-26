@@ -11,7 +11,9 @@ export const PREFLIGHT_ISSUE_CODES = [
   "FILE_TOO_LARGE",
   "EMPTY_DOCUMENT",
   "FOREIGN_TRACK_CHANGE",
-  "FOREIGN_COMMENT"
+  "FOREIGN_COMMENT",
+  /** FLF-331 (I-1): Code không thấy dấu hiệu SRS / mẫu SRS (CV, hoá đơn, test plan…) — từ chối trước khi tốn credit đọc file. */
+  "NOT_SRS"
 ] as const
 export type PreflightIssueCode = (typeof PREFLIGHT_ISSUE_CODES)[number]
 

@@ -148,6 +148,12 @@ const envSchema = z.object({
     .transform((value) => value.split(",").map((part) => part.trim()).filter(Boolean).map(Number))
     .pipe(z.array(z.number().int().nonnegative()).max(5)),
 
+  // ─── Gotenberg (xuất PDF từ .docx, FLF-316) ───────────────────────
+  // Self-host: `docker compose up -d gotenberg`. Ở production là Web App riêng `flintflow-gotenberg`
+  // (docs/ops.md §5). Không chạy ⇒ xuất PDF trả 503 PDF_EXPORT_UNAVAILABLE, xuất Word không ảnh hưởng.
+  GOTENBERG_URL: z.string().default("http://localhost:3001"),
+  GOTENBERG_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
+
   // ─── Billing: payment_service dùng chung (VietQR/SePay) ───────────
   // Để trống ⇒ checkout trả 503 PAYMENT_SERVICE_NOT_CONFIGURED.
   PAYMENT_SERVICE_URL: z.string().default(""),

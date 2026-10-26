@@ -78,14 +78,12 @@ export const createCr = async (c: Mode1Api, title: string, description: string):
   return changeRequestDetailSchema.parse(res.body.data).change_request.cr_id
 }
 
-/** Chạy CR tới `written` (duyệt mọi group). Trả `cr_id` + version kết quả. */
+/** Chạy CR tới `written` — FLF-330: BA xác nhận (`submit`) là ghi ngay, không còn duyệt từng group. Trả `cr_id` + version kết quả. */
 export const writeCr = async (c: Mode1Api, title: string, description: string) => {
   const crId = await createCr(c, title, description)
   const cr = `/change-requests/${crId}`
-  for (const step of ["clarify", "impact", "propose", "verify", "submit"]) crDetail(await c.post(`${cr}/${step}`))
-  const { groups } = crDetail(await c.get(cr))
   let last: ReturnType<typeof crDetail> | null = null
-  for (const g of groups) last = crDetail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
+  for (const step of ["clarify", "impact", "propose", "verify", "submit"]) last = crDetail(await c.post(`${cr}/${step}`))
   expect(last?.change_request.status).toBe("written")
   return { crId, version: last!.change_request.result_doc_version as string }
 }

@@ -109,6 +109,46 @@ router.post("/:projectId/flags/:flagId/waive", authMiddleware, flagsController.w
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/flags/{flagId}/keep:
+ *   post:
+ *     summary: Giữ nguyên + lý do (FLF-329) — ghi lý do ≥ 20 ký tự, cờ vẫn mở và cờ đỏ vẫn chặn baseline
+ *     tags: [Spine]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: flagId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [reason]
+ *             properties:
+ *               reason:
+ *                 type: string
+ *                 minLength: 20
+ *     responses:
+ *       200:
+ *         description: Flag kèm kept_reason / kept_by / kept_at
+ *       400:
+ *         description: VALIDATION_ERROR hoặc FLAG_NOT_KEEPABLE (cờ đã đóng)
+ *       404:
+ *         description: FLAG_NOT_FOUND
+ */
+router.post("/:projectId/flags/:flagId/keep", authMiddleware, flagsController.keepFlag)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/progress:
  *   get:
  *     summary: Điểm sẵn sàng, tiến độ theo step và status tính của từng section

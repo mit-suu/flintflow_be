@@ -55,12 +55,9 @@ const projectWithRevision = async () => {
 
   const created = await c.post("/change-requests", { title: "Faster", description: "1 second instead of 2 seconds", source: { kind: "verbal" }, requester: "PM" })
   const cr = `/change-requests/${created.body.data.change_request.cr_id}`
+  // FLF-330: BA xác nhận (`submit`) là ghi ngay vào bản nháp
   for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
-  const groups = changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups
-  for (const g of groups) {
-    const res = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
-    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-  }
+  expect(changeRequestDetailSchema.parse((await c.get(cr)).body.data).change_request.status).toBe("written")
   return { seeded, projectId, c }
 }
 
@@ -145,10 +142,10 @@ describe("mode 1 — release (Flow 6)", () => {
     routeReplaceCr("1 second", "500 ms")
     const created = await c.post("/change-requests", { title: "Even faster", description: "500 ms", source: { kind: "verbal" }, requester: "PM" })
     const cr = `/change-requests/${created.body.data.change_request.cr_id}`
-    for (const step of ["clarify", "impact", "propose", "verify", "submit"]) expect((await c.post(`${cr}/${step}`)).status).toBe(200)
     let done = null as Awaited<ReturnType<typeof c.post>> | null
-    for (const g of changeRequestDetailSchema.parse((await c.get(cr)).body.data).groups) {
-      done = await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
+    for (const step of ["clarify", "impact", "propose", "verify", "submit"]) {
+      done = await c.post(`${cr}/${step}`)
+      expect(done.status, JSON.stringify(done.body.error)).toBe(200)
     }
     expect(done!.body.data.change_request.result_doc_version).toBe("1.1")
     const v11 = await documentXml((await binary(c.get("/versions/1.1/download"))).body as Buffer)

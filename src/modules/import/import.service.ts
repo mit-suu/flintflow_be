@@ -44,7 +44,10 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
   status: doc.status,
   preflight: {
     status: doc.preflight.status,
-    issues: doc.preflight.issues.map((i) => ({ code: i.code, message: i.message, location: i.location ? { block_ord: i.location.block_ord, text: i.location.text } : null }))
+    issues: doc.preflight.issues.map((i) => ({ code: i.code, message: i.message, location: i.location ? { block_ord: i.location.block_ord, text: i.location.text } : null })),
+    document_kind: doc.preflight.document_kind
+      ? { kind: doc.preflight.document_kind.kind, confidence: doc.preflight.document_kind.confidence, signals: [...doc.preflight.document_kind.signals], reasons: [...doc.preflight.document_kind.reasons] }
+      : null
   },
   stamp: doc.stamp ? { project_id: doc.stamp.project_id, version: doc.stamp.version ?? null, source: doc.stamp.source ?? null } : null,
   confirmed_latest_at: toIso(doc.confirmed_latest_at),
@@ -151,13 +154,13 @@ export const uploadImport = async (projectId: string, userId: string, file: Uplo
   }
 
   if (result.status === "rejected") {
-    const rejected = await ImportedDocument.create({ ...base, file_ref: null, preflight: { status: "rejected", issues: result.issues }, status: "uploaded" })
+    const rejected = await ImportedDocument.create({ ...base, file_ref: null, preflight: { status: "rejected", issues: result.issues, document_kind: result.document_kind }, status: "uploaded" })
     await transitionImport(rejected, "preflight_rejected")
     throw new Mode1Error("IMPORT_FILE_REJECTED", "File chưa nhập được, xem danh sách lỗi", { import_id: String(rejected._id), issues: result.issues })
   }
 
   const fileRef = await docFileStore().save(file.buffer, { projectId, kind: "upload", name: file.originalname })
-  const doc = await ImportedDocument.create({ ...base, file_ref: fileRef, preflight: { status: "accepted", issues: [] }, status: "uploaded" })
+  const doc = await ImportedDocument.create({ ...base, file_ref: fileRef, preflight: { status: "accepted", issues: [], document_kind: result.document_kind }, status: "uploaded" })
   if (result.stamp) {
     // Stamp đúng project (file từng xuất từ chính project này, chưa có baseline) ⇒ coi như đã xác nhận
     doc.confirmed_latest_at = new Date()
