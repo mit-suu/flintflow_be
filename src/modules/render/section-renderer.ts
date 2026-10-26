@@ -762,7 +762,20 @@ const phaseLabelOf = (phase: string, language?: string): string | undefined => {
 }
 
 /** Mã baseline (`v1.0`, `v1.2-conditional`) nằm trong lý do `Ký baseline v1.0` do baseline.service ghi. */
-const BASELINE_VERSION = /\bv\d+\.\d+(?:-conditional)?\b/
+// Mã baseline trong lý do: mode 2 `Baseline v1.0`; version tài liệu mode 1 `Baseline 0.1` / `Baseline 2.0` (không `v`)
+const BASELINE_VERSION = /\bv?\d+\.\d+(?:-conditional)?\b/
+/** Lô ghi của một change request (`write.service`: `by` = mã CR) — mỗi CR một dòng riêng (FLF-318). */
+const CR_ACTOR = /^CR-\d{3,}$/
+const isCrTxn = (group: readonly ChangeRecordRow[]): boolean => group.some((c) => CR_ACTOR.test(c.by))
+const withV = (version: string): string => (version.startsWith("v") ? version : `v${version}`)
+/**
+ * Bản phát hành kế tiếp sau mốc `version` (`v1.0` ⇒ `v2.0`, `v0.1` ⇒ `v1.0`) — khớp `nextMajor` của version tài liệu
+ * mode 1. Business-flow §2/§5.1: chỉ có số chính; số phụ `1.1`, `1.2` của `DocVersion` là sổ nội bộ (FLF-330).
+ */
+const nextRelease = (version: string): string => {
+  const m = /^v(\d+)\.\d+/.exec(version)
+  return m ? `v${Number(m[1]) + 1}.0` : version
+}
 
 const describeRow = (reasons: readonly string[], language?: string): string => {
   const shown = reasons.slice(0, MAX_REASONS_PER_ROW).join("; ")
@@ -782,7 +795,9 @@ const MACHINE_REASON = /^Cascade:/
  * là một dòng riêng.
  *
  * `version` đánh theo dòng, không theo `spine_version`: trước baseline `v0.1, v0.2…`; dòng ký lấy đúng mã
- * baseline (`v1.0`); sau đó `v1.0.1, v1.0.2…` cho tới baseline kế tiếp.
+ * baseline (`v1.0`; version tài liệu mode 1 `0.1` / `2.0` in thành `v0.1` / `v2.0`); sau đó `v1.0.1, v1.0.2…` cho tới
+ * baseline kế tiếp. Lô của change request (mode 1, FLF-318) là một dòng riêng mang **số bản phát hành sẽ chứa nó**
+ * (business-flow §5.1: "3 CR này ra 3–4 hàng, cùng mang Version 1.0"): sau `v1.0` mọi CR là `v2.0`, sau `v0.1` là `v1.0`.
  *
  * `resolveInCharge` (T7): `by` lưu trong `changes[]` là userId thô (hoặc `"system"`) — caller truyền
  * hàm tra `User.name`/email theo lô để hiển thị tên thay vì id; mặc định giữ nguyên `by` (test thuần
@@ -808,17 +823,19 @@ export function buildRecordOfChanges(
   }
 
   // Gom lô được giữ thành dòng: liền nhau cùng ngày + cùng giai đoạn thì dồn, baseline đứng riêng.
-  const rows: { date: string; phase: string; baseline: boolean; changes: ChangeRecordRow[] }[] = []
+  const rows: { date: string; phase: string; baseline: boolean; cr: boolean; changes: ChangeRecordRow[] }[] = []
   for (const txn of order) {
     const group = groups.get(txn) as ChangeRecordRow[]
     if (!keepInRecordOfChanges(group)) continue
     const date = group[0].at.slice(0, 10)
     const baseline = isBaselineTxn(group)
+    const cr = !baseline && isCrTxn(group)
     const last = rows[rows.length - 1]
     // Lô không gắn step (xác nhận giả định ở cổng, lệnh sửa chat giữa step) thuộc giai đoạn đang chạy — không cắt nhóm
     const phase = phaseKeyOf(group[0].step_id) || (last && !last.baseline && last.date === date ? last.phase : "")
-    if (!baseline && last && !last.baseline && last.date === date && last.phase === phase) last.changes.push(...group)
-    else rows.push({ date, phase, baseline, changes: [...group] })
+    // Lô CR luôn đứng riêng một dòng (= một version tài liệu), không gộp theo ngày
+    if (!baseline && !cr && last && !last.baseline && !last.cr && last.date === date && last.phase === phase) last.changes.push(...group)
+    else rows.push({ date, phase, baseline, cr, changes: [...group] })
   }
 
   let base = "v0"
@@ -843,10 +860,14 @@ export function buildRecordOfChanges(
     let version: string
     if (row.baseline) {
       // Fallback khớp `nextBaselineVersion` (baseline.service) khi lý do không mang mã
-      version = raw.map((r) => BASELINE_VERSION.exec(r)?.[0]).find((v) => v !== undefined) ?? `v1.${baselines}`
+      const found = raw.map((r) => BASELINE_VERSION.exec(r)?.[0]).find((v) => v !== undefined)
+      version = found ? withV(found) : `v1.${baselines}`
       baselines += 1
       base = version.replace(/-conditional$/, "")
       minor = 0
+    } else if (row.cr) {
+      // Mode 1 (FLF-318): CR mang số bản phát hành kế tiếp, không mang số phụ nội bộ của `DocVersion`; mốc không đổi
+      version = nextRelease(base)
     } else {
       minor += 1
       version = `${base}.${minor}`

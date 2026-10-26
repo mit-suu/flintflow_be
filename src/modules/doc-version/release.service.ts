@@ -58,7 +58,9 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
 
   const record = (await spineRepository.get(projectId))!
   const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? "SRS"
-  const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release" })
+  // §I của chính file release phải có dòng của nó (Record of Changes khớp số version) — lô baseline ghi sau khi render
+  const releaseRow = { txn: `release:${next}`, at: new Date().toISOString(), by: userId, reason: `Baseline ${next}`, op: "add", path: "baselines[]", step_id: null }
+  const buffer = await renderVersionFile(projectId, projectName, stripRecord(record), { version: next, stampSource: "release", pendingRecord: [releaseRow] })
   const fileRef = await docFileStore().save(buffer, { projectId, kind: "version", name: next })
 
   let baseline: BaselineEntry

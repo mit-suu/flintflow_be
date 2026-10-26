@@ -40,6 +40,8 @@ interface Context {
   documentLanguage: UserLocale
   /** Ngôn ngữ chữ trong Spine (mode 2 = `en`). Khác `documentLanguage` ⇒ tài liệu dựng từ lớp bản dịch. */
   sourceLanguage: UserLocale
+  /** FLF-318: `fpt` = dự án tạo SRS đã chuyển sang mode 1 — file Word theo mẫu FPT như mode 2. */
+  convertedFrom: string | null
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body/query — người ngoài không dò được DTO qua lỗi 400. */
@@ -52,7 +54,14 @@ export const authorize = async (req: Request): Promise<Context> => {
   const project = await getProjectById(projectId, requireOrgId(req))
   // FLF-265: mode 2 không truy vấn thêm; mode 1 đọc `TemplateProfile.language` (cả hai cùng ngôn ngữ file)
   const { locale, source } = await projectLanguages(projectId, project)
-  return { projectId, projectName: project.name, mode: (project as { mode?: string }).mode, documentLanguage: locale, sourceLanguage: source }
+  return {
+    projectId,
+    projectName: project.name,
+    mode: (project as { mode?: string }).mode,
+    documentLanguage: locale,
+    sourceLanguage: source,
+    convertedFrom: project.converted_from ?? null
+  }
 }
 
 // ─── POST /assemble ──────────────────────────────────────────────

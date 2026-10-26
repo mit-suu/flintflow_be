@@ -40,4 +40,10 @@ describe("sourceLanguageOf (D4)", () => {
     expect(sourceLanguageOf({ mode: "import" }, "fr")).toBe("en")
     expect(sourceLanguageOf({ mode: "import" })).toBe("en")
   })
+
+  it("FLF-318: dự án tạo SRS đã chuyển sang mode 1 giữ chữ gốc en; ngôn ngữ tài liệu vẫn theo dự án", () => {
+    const converted = { mode: "import" as const, converted_from: "fpt" as const, documentLanguage: "vi" as const }
+    expect(sourceLanguageOf(converted, "vi")).toBe("en")
+    expect(documentLanguageOf(converted, "vi")).toBe("vi")
+  })
 })

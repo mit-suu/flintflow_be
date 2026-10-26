@@ -41,6 +41,7 @@ import { retireFrameOnlyAssumptionOps } from "./screen-assumptions.js"
 import { composeStepGateMessage, gateAssumptionIdsOfRun, type GateAssumptionBrief } from "./gate-message.js"
 import { acquireRun, finishRun, getRunState, type PatchRun } from "./run-state.service.js"
 import type { RunStatus } from "./run-state.model.js"
+import { convertAfterSignOff } from "../import/convert-from-fpt.service.js"
 import { signOff, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { notify } from "../../modules/notification/notification.service.js"
 import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -343,6 +344,8 @@ export const gate = async (
         const beforeSign = yellowNote === null ? record : ((await doAccept(projectId, stepId, userId, record, yellowNote), await load(projectId)))
         const signed = await signOff(projectId, userId, { base_version: beforeSign.spine_version })
         finalVersion = signed.spine_version
+        // FLF-318: như POST /baselines — ký xong chuyển dự án sang mode 1, lỗi chỉ ghi log
+        await convertAfterSignOff(projectId, userId)
       } else {
         finalVersion = await doAccept(projectId, stepId, userId, record, yellowNote)
       }

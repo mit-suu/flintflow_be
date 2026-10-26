@@ -240,7 +240,8 @@ export const moveProjectToFolder = async (
 /**
  * Đổi ngôn ngữ tài liệu (FLF-265, D2). Chỉ ghi field — không đụng Spine, không xoá cache render (phase 3 đưa ngôn
  * ngữ vào đường render). Mode 1 ⇒ 409 `DOCUMENT_LANGUAGE_LOCKED` (D3). Lọc `mode` ngay trong lệnh ghi: dự án cũ
- * thiếu `mode` (= fpt) vẫn khớp `$ne`.
+ * thiếu `mode` (= fpt) vẫn khớp `$ne`. FLF-318: dự án tạo SRS đã chuyển sang mode 1 (`converted_from = fpt`) KHÔNG phải
+ * dự án tải file lên ⇒ vẫn đổi được (business-flow nguyên tắc 7); `TemplateProfile.language` của nó đổi theo.
  */
 export const setDocumentLanguage = async (
   projectId: string,
@@ -250,10 +251,11 @@ export const setDocumentLanguage = async (
   const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   if (!mongoose.isValidObjectId(projectId)) throw notFound()
   const project = await Project.findOneAndUpdate(
-    { _id: projectId, organizationId: orgId, mode: { $ne: "import" } },
+    { _id: projectId, organizationId: orgId, $or: [{ mode: { $ne: "import" } }, { converted_from: "fpt" }] },
     { documentLanguage },
     { new: true }
   )
+  if (project?.converted_from === "fpt") await TemplateProfile.updateOne({ projectId }, { $set: { language: documentLanguage } })
   if (project) return project
   // Không khớp: phân biệt dự án mode 1 (409) với dự án không có / thuộc org khác (404)
   const existing = await Project.findOne({ _id: projectId, organizationId: orgId }).select("mode").lean()
