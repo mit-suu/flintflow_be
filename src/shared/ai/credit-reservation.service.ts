@@ -41,8 +41,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CR_CONSISTENCY]: 2,
   // Một ảnh / lượt, output ngắn (chép chữ + mô tả) — rẻ hơn ảnh diagram của I-4
   [ActionType.CR_MATERIAL_IMAGE]: 1,
-  // FLF-267: một câu hỏi tri thức ≈ một lượt CHAT (prompt ~5 chunk). Từ chối vì không đủ căn cứ thì không gọi model, không tính
-  [ActionType.KNOWLEDGE_ANSWER]: 2
+  // FLF-333 (business-flow nguyên tắc 9, UC-79): hỏi tri thức về SRS / 29148 KHÔNG tốn credit — chống lạm dụng bằng
+  // giới hạn số câu mỗi ngày (`KNOWLEDGE_DAILY_LIMIT`), không chuyển sang trừ credit. Vẫn ghi `AiActionLog` cho admin.
+  [ActionType.KNOWLEDGE_ANSWER]: 0
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */
@@ -194,6 +195,10 @@ export const reserveCredit = async (
   const cost = await getActionCost(actionType)
   const options = sessionOptions(session)
   const organizationId = await walletOrgFor(userId, projectId, activeOrgId, session)
+  // FLF-333: lượt 0 credit (hỏi tri thức) không đụng ví, không ghi sổ giữ / trừ — deduct / release là no-op
+  if (cost === 0) {
+    return { reservationId: new mongoose.Types.ObjectId().toString(), userId, organizationId, actionType, cost: 0, projectId, expiresAt: new Date(Date.now() + env.CREDIT_RESERVE_TTL_MS) }
+  }
   const filter = walletKey(organizationId)
   await getOrCreateWallet(userId, session, organizationId)
 
@@ -274,6 +279,7 @@ export const deductCredit = async (
   session?: ClientSession
 ): Promise<void> => {
   const { reservationId, userId, organizationId, actionType, cost, projectId } = reservation
+  if (cost === 0) return // FLF-333: lượt miễn phí không có reservation trong sổ
   const options = sessionOptions(session)
   const key = walletKey(organizationId)
 
@@ -362,6 +368,7 @@ export const releaseCredit = async (
   session?: ClientSession
 ): Promise<boolean> => {
   const { reservationId, userId, organizationId, actionType, cost, projectId } = reservation
+  if (cost === 0) return true // FLF-333: lượt miễn phí — không có gì để hoàn
   const options = sessionOptions(session)
 
   const claimed = await CreditTransaction.findOneAndUpdate(

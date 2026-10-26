@@ -13,7 +13,7 @@ import { submitAnswer } from "../pipeline/step-runner.service.js"
 import { shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
-import { answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
+import { KNOWLEDGE_DAILY_LIMIT, answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
 import { buildChatSpineIndex } from "./chat-spine-index.js"
 
 /** Chưa có Spine ⇒ nói thẳng cho model, để nó không đoán số phần tử theo lịch sử chat. */
@@ -250,8 +250,10 @@ export const sendMessageAndGetResponse = async (
     try {
       await answerKnowledgeTurn(session, projectId, content, step, userId, replyLanguage, discoveryStep)
     } catch (error) {
+      // FLF-333: hết hạn mức câu hỏi tri thức trong ngày là lỗi của người dùng, trả 429 rõ mã — không ghi tin xin lỗi
+      if (error instanceof ApiError && error.code === KNOWLEDGE_DAILY_LIMIT) throw error
       console.error("Knowledge answer failed in chat session service:", error)
-      // Như CHAT: lỗi (hết credit, provider) thành tin xin lỗi trong phiên — `grounded: false`, chữ khác câu "không đủ căn cứ"
+      // Như CHAT: lỗi (provider) thành tin xin lỗi trong phiên — `grounded: false`, chữ khác câu "không đủ căn cứ"
       const payload = { reply: aiUnavailableReply(replyLanguage), questions: [], grounded: false, citations: [] }
       session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
       await session.save()
