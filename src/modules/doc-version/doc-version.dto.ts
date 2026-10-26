@@ -83,7 +83,11 @@ export const versionParamsSchema = z.object({ v: docVersionString })
  * `tracked`: luôn bản có Track Changes (cả với release).
  * `original` (mode 1 v2, FLF-184): file người dùng upload của bản `0.1` (bản lưu `0.1` giờ là bản render từ Spine).
  */
-export const downloadQuerySchema = z.object({ variant: z.enum(["auto", "tracked", "original"]).default("auto") })
+/** `format=pdf` (FLF-316): chính file .docx của variant đó chuyển qua Gotenberg; `original` chỉ có .docx. */
+export const downloadQuerySchema = z.object({
+  variant: z.enum(["auto", "tracked", "original"]).default("auto"),
+  format: z.enum(["docx", "pdf"]).default("docx")
+})
 
 /** `GET /projects/:id/versions/compare?from=&to=` (UC-55). */
 export const compareQuerySchema = z

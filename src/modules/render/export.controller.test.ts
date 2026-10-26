@@ -4,8 +4,9 @@ import type { NextFunction, Request, Response } from "express"
 
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
 
-import { DOCX_MIME, previewWord } from "./export.controller.js"
+import { DOCX_MIME, exportPdf, previewWord, toPdfFileName } from "./export.controller.js"
 import exportRoutes from "./export.route.js"
+import renderRoutes from "./render.route.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { readZipText } from "./zip.test-helper.js"
 
@@ -82,5 +83,22 @@ describe("POST /export/word/preview", () => {
     const route = layer?.route as unknown as { methods: Record<string, boolean>; stack: { handle: unknown }[] }
     expect(route.methods.post).toBe(true)
     expect(route.stack[0].handle).toBe(authMiddleware)
+  })
+})
+
+describe("GET /projects/:projectId/export/pdf (FLF-316)", () => {
+  it("tên file PDF = tên file Word đổi đuôi", () => {
+    expect(toPdfFileName("lumen-hoc-truc-tuyen-v0.3-draft.docx")).toBe("lumen-hoc-truc-tuyen-v0.3-draft.pdf")
+    expect(toPdfFileName("srs-v1.0.DOCX")).toBe("srs-v1.0.pdf")
+  })
+
+  it("route GET kèm authMiddleware, handler exportPdf", () => {
+    const layer = renderRoutes.stack.find((l) => l.route?.path === "/:projectId/export/pdf")
+    expect(layer, "thiếu route /:projectId/export/pdf").toBeDefined()
+
+    const route = layer?.route as unknown as { methods: Record<string, boolean>; stack: { handle: unknown }[] }
+    expect(route.methods.get).toBe(true)
+    expect(route.stack[0].handle).toBe(authMiddleware)
+    expect(route.stack[route.stack.length - 1].handle).toBe(exportPdf)
   })
 })

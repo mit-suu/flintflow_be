@@ -111,7 +111,10 @@ describe("findingOps — AI semantic check chỉ ra vàng", () => {
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
     // finding lạc thêm `level: "red"` (model tự bịa) cũng không làm cờ đỏ
     const findings = [

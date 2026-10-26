@@ -36,6 +36,14 @@ export const preflightIssueSchema = z.object({
   location: z.object({ block_ord: z.number().int().min(0), text: z.string() }).nullable().optional()
 })
 
+/** FLF-331: loại tài liệu Code nhận ra ở I-1; bản ghi cũ ⇒ null. `unknown` ⇒ FE cảnh báo ở bước xác nhận. */
+export const documentKindSchema = z.object({
+  kind: z.enum(["srs", "srs_template", "not_srs", "unknown"]),
+  confidence: z.number().min(0).max(1),
+  signals: z.array(z.string()),
+  reasons: z.array(z.string())
+})
+
 export const docStampSchema = z.object({
   project_id: id,
   version: z.string().nullable(),
@@ -51,7 +59,7 @@ export const importedDocumentDtoSchema = z.object({
   size: z.number().int().min(0),
   sha256: z.string().length(64),
   status: importStatusSchema,
-  preflight: z.object({ status: z.enum(["accepted", "rejected"]), issues: z.array(preflightIssueSchema) }),
+  preflight: z.object({ status: z.enum(["accepted", "rejected"]), issues: z.array(preflightIssueSchema), document_kind: documentKindSchema.nullable().optional() }),
   stamp: docStampSchema.nullable(),
   confirmed_latest_at: isoDateTime.nullable(),
   paused: importPausedSchema.nullable(),
