@@ -11,6 +11,11 @@ export type NotificationType =
   | "low_credit"
   | "plan_changed"
   | "admin_new_user"
+  /** FLF-330: CR ghi vào bản nháp; gói gửi Lead; Lead yêu cầu sửa; Lead duyệt gói = phát hành. */
+  | "change_request_written"
+  | "review_package_submitted"
+  | "review_package_changes_requested"
+  | "review_package_released"
   | (string & {})
 
 export interface INotification extends Document {

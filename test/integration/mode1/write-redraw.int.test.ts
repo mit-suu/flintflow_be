@@ -29,7 +29,7 @@ vi.mock("../../../src/modules/doc-version/tracked-version.js", async (orig) => {
   }
 })
 
-import { crToReview, detail, importedProject, resetCrMock } from "../../helpers/mode1-cr-p4.js"
+import { crToReady, detail, importedProject, resetCrMock } from "../../helpers/mode1-cr-p4.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
 
@@ -39,11 +39,8 @@ beforeEach(() => {
   flags.trackedFails = false
 })
 
-const approveAll = async (c: Awaited<ReturnType<typeof importedProject>>["c"], cr: string, groups: { group_id: string }[]) => {
-  let last = null as ReturnType<typeof detail> | null
-  for (const g of groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-  return last!
-}
+/** FLF-330: BA xác nhận (`submit`) là ghi ngay. */
+const approveAll = async (c: Awaited<ReturnType<typeof importedProject>>["c"], cr: string, _groups: { group_id: string }[]) => detail(await c.post(`${cr}/submit`))
 
 const exists = async (ref: string | null | undefined): Promise<boolean> => {
   if (!ref) return false
@@ -58,7 +55,7 @@ const exists = async (ref: string | null | undefined): Promise<boolean> => {
 describe("C-7 mode 1 v3 — vẽ lại hình, bản có đánh dấu lỗi", () => {
   it("có hình vẽ lại ⇒ in lại file version (bản sạch + bản có đánh dấu mới), file cũ bị dọn", async () => {
     const { c, projectId } = await importedProject()
-    const { cr, submitted } = await crToReview(c)
+    const { cr, verified: submitted } = await crToReady(c)
     const store = docFileStore()
     const saved: string[] = []
     const origSave = store.save.bind(store)
@@ -84,7 +81,7 @@ describe("C-7 mode 1 v3 — vẽ lại hình, bản có đánh dấu lỗi", () 
 
   it("dựng bản có đánh dấu lỗi ⇒ CR vẫn ghi, version chỉ có bản sạch", async () => {
     const { c, projectId } = await importedProject()
-    const { cr, submitted } = await crToReview(c)
+    const { cr, verified: submitted } = await crToReady(c)
     flags.trackedFails = true
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 

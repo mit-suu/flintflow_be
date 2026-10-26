@@ -3,9 +3,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockPing, mockReachable } = vi.hoisted(() => ({
+const { mockPing, mockReachable, mockGotenberg } = vi.hoisted(() => ({
   mockPing: vi.fn(),
-  mockReachable: vi.fn()
+  mockReachable: vi.fn(),
+  mockGotenberg: vi.fn()
 }))
 
 vi.mock("mongoose", () => ({
@@ -21,6 +22,7 @@ vi.mock("mongoose", () => ({
   }
 }))
 vi.mock("../shared/diagram/plantuml.client.js", () => ({ isPlantUmlReachable: mockReachable }))
+vi.mock("../shared/pdf/gotenberg.client.js", () => ({ isGotenbergReachable: mockGotenberg }))
 
 const state = { readyState: 1 }
 
@@ -30,13 +32,14 @@ beforeEach(() => {
   state.readyState = 1
   mockPing.mockReset().mockResolvedValue({ ok: 1 })
   mockReachable.mockReset().mockResolvedValue(true)
+  mockGotenberg.mockReset().mockResolvedValue(true)
   resetHealthCache()
 })
 
 describe("buildHealthReport", () => {
   it("mọi thứ sống ⇒ ok, kèm số asset đã nạp", async () => {
     const report = await buildHealthReport()
-    expect(report).toMatchObject({ status: "ok", mongo: "ok", plantuml: "ok" })
+    expect(report).toMatchObject({ status: "ok", mongo: "ok", plantuml: "ok", gotenberg: "ok" })
     // Asset nạp thật từ đĩa — thiếu là lỗi khởi động, tới được đây thì phải khác 0
     expect(report.assets.skills).toBeGreaterThan(0)
     expect(report.assets.steps).toBeGreaterThan(0)
@@ -47,6 +50,12 @@ describe("buildHealthReport", () => {
     mockReachable.mockResolvedValue(false)
     const report = await buildHealthReport()
     expect(report).toMatchObject({ status: "degraded", mongo: "ok", plantuml: "error" })
+  })
+
+  it("Gotenberg chết ⇒ degraded — chỉ xuất PDF hỏng, xuất Word và phần còn lại vẫn chạy (FLF-316)", async () => {
+    mockGotenberg.mockResolvedValue(false)
+    const report = await buildHealthReport()
+    expect(report).toMatchObject({ status: "degraded", mongo: "ok", plantuml: "ok", gotenberg: "error" })
   })
 
   it("Mongo chưa kết nối ⇒ error và không thèm ping", async () => {
@@ -62,16 +71,18 @@ describe("buildHealthReport", () => {
     expect(report).toMatchObject({ status: "error", mongo: "error" })
   })
 
-  it("kết quả probe PlantUML được cache — health check gọi 10s/lần không đấm liên tục sang đó", async () => {
+  it("kết quả probe PlantUML / Gotenberg được cache — health check gọi 10s/lần không đấm liên tục sang đó", async () => {
     await buildHealthReport()
     await buildHealthReport()
     await buildHealthReport()
     expect(mockReachable).toHaveBeenCalledTimes(1)
+    expect(mockGotenberg).toHaveBeenCalledTimes(1)
     // Mongo thì ping mỗi lượt: nó là điều kiện sống/chết, không được trả lời bằng số liệu cũ
     expect(mockPing).toHaveBeenCalledTimes(3)
 
     resetHealthCache()
     await buildHealthReport()
     expect(mockReachable).toHaveBeenCalledTimes(2)
+    expect(mockGotenberg).toHaveBeenCalledTimes(2)
   })
 })

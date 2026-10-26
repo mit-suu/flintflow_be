@@ -135,7 +135,6 @@ describe("CR cần phần tử chưa có (2026-09-24: CR thêm bảng vào mục
 
     const submitted = detail(await c.post(`${cr}/submit`))
     let last = submitted
-    for (const g of submitted.groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(last.change_request.status).toBe("written")
     const spine = (await c.get("/spine")).body.data
     expect(spine.entities.map((e: { id: string }) => e.id)).toEqual(["E-01", "E-99"])
@@ -211,7 +210,6 @@ describe("Bảng phân quyền màn hình (2026-09-24: CR chỉ thêm vai trò �
     expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
     const submitted = detail(await c.post(`${cr}/submit`))
     let last = submitted
-    for (const g of submitted.groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
     expect(last.change_request.status).toBe("written")
     const spine = (await Spine.findOne({ projectId }).lean())!
     expect(spine.roles).toEqual([{ id: "R01", name: "Learner", actor_id: "A01" }])

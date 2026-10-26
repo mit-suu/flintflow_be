@@ -97,22 +97,14 @@ describe("mode 1 — change request", () => {
     expect(verified.change_request.status).toBe("ready_to_submit")
     expect(verified.locations.every((l) => l.verify?.code_ok)).toBe(true)
 
-    const submitted = detail(await c.post(`${cr}/submit`))
-    expect(submitted.change_request.status).toBe("in_review")
-    expect(submitted.change_request.submitted_at).not.toBeNull()
-
-    const perfGroup = submitted.groups.find((g) => g.title === "4.2.3 Performance")!
-    const brGroup = submitted.groups.find((g) => g.title === "5.1 Business Rules")!
-    const shortReason = await c.post(`${cr}/groups/${brGroup.group_id}/decision`, { decision: "rejected", reason: "no", base_version: 1 })
-    expect(shortReason.status).toBe(400)
-    const rejected = detail(await c.post(`${cr}/groups/${brGroup.group_id}/decision`, { decision: "rejected", reason: "Ngoài phạm vi bản 1.0", base_version: await c.spineVersion() }))
-    expect(rejected.change_request.status).toBe("in_review")
-    // group bị từ chối mở khoá ngay
-    const brLoc = rejected.locations.find((l) => l.group_id === brGroup.group_id)!
-    expect(await lockedPaths(projectId, "CR-001")).not.toContain(brLoc.path)
-
-    const written = detail(await c.post(`${cr}/groups/${perfGroup.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
+    // FLF-330 C-6: BA bỏ riêng vị trí BR (not_related) rồi xác nhận ⇒ ghi ngay, không chờ Lead duyệt từng group
+    const brLoc = verified.locations.find((l) => l.path === "business_rules[id=BR-01]")!
+    detail(await c.patch(`${cr}/locations/${brLoc.location_id}`, { conclusion: "not_related", reason: "Ngoài phạm vi bản 1.0" }))
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status, "đổi kết luận sau khi kiểm ⇒ kiểm lại").toBe("ready_to_submit")
+    const written = detail(await c.post(`${cr}/submit`))
     expect(written.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
+    expect(written.change_request.submitted_at).not.toBeNull()
+    expect(written.groups.map((g) => [g.title, g.decision])).toEqual([["4.2.3 Performance", "approved"]])
 
     // version 0.2 = bản render từ Spine mới: stamp 0.2, text mới; mọi khoá đã mở
     const v01 = await DocVersion.findOne({ projectId, version: "0.2" }).lean()
@@ -126,7 +118,9 @@ describe("mode 1 — change request", () => {
     expect(spine.nfrs.find((n) => n.id === "NFR-01")?.threshold).toBe("1 s")
     const changes = await spineRepository.listChanges(projectId)
     expect(changes.find((ch) => ch.path === "nfrs[id=NFR-01].threshold")).toMatchObject({ by: "CR-001", reason: "CR-001: Faster response time" })
-    expect(await Notification.countDocuments({ userId: seeded.userId, type: "change_request_decided" })).toBe(2)
+    // FLF-330: không còn thông báo duyệt từng group — một thông báo "đã ghi vào bản nháp"
+    await vi.waitFor(async () => expect(await Notification.countDocuments({ userId: seeded.userId, type: "change_request_written" })).toBe(1), { timeout: 3000 })
+    expect(await Notification.countDocuments({ userId: seeded.userId, type: "change_request_decided" })).toBe(0)
   })
 
   it("hai CR cùng chạm một phần tử ⇒ CR thứ hai nhận 409 PATH_LOCKED; huỷ CR-001 ⇒ mở khoá, CR-002 khoá được", async () => {

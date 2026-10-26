@@ -302,7 +302,11 @@ export const flagSchema = z.strictObject({
   resolved_at: isoDateTime.nullable(),
   waived_by_user: z.boolean(),
   waive_reason: z.string().min(WAIVE_REASON_MIN_LENGTH).nullable(),
-  waived_at_version: z.number().int().min(1).nullable()
+  waived_at_version: z.number().int().min(1).nullable(),
+  // FLF-329: "Giữ nguyên + lý do" — không đóng cờ. Spine cũ thiếu ⇒ null, không migration.
+  kept_reason: z.string().min(WAIVE_REASON_MIN_LENGTH).nullable().default(null),
+  kept_by: z.string().nullable().default(null),
+  kept_at: isoDateTime.nullable().default(null)
 })
 
 export const sectionStateSchema = z.strictObject({

@@ -78,6 +78,14 @@ describe("writeDocx — fixture Working Draft", () => {
     expect(readZipText(docx, "word/settings.xml")).toContain("w:updateFields")
   })
 
+  it("FLF-316: Heading 1–3 mang outlineLvl — LibreOffice (bản PDF) dựng mục lục theo cấp outline, không theo tên style", () => {
+    const stylesXml = readZipText(docx, "word/styles.xml")
+    for (const level of [1, 2, 3]) {
+      const style = new RegExp(`<w:style[^>]*w:styleId="Heading${level}".*?</w:style>`, "s").exec(stylesXml)?.[0]
+      expect(style, `Heading${level}`).toContain(`<w:outlineLvl w:val="${level - 1}"/>`)
+    }
+  })
+
   it("watermark DRAFT xoay 45° màu bạc trong header (lặp mọi trang)", () => {
     const header = headerXml(docx)
     expect(header).toContain('string="DRAFT"')

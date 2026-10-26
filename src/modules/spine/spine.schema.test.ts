@@ -137,7 +137,10 @@ const sampleSpine = (): Spine => {
       resolved_at: null,
       waived_by_user: true,
       waive_reason: "Out of scope for the first release",
-      waived_at_version: 1
+      waived_at_version: 1,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
   ]
   s.sections = [{ id: "fixed:1", asset_version: "1.0.0" }]

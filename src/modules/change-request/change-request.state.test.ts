@@ -26,6 +26,8 @@ const FORWARD: [CrStatus, CrStatus][] = [
   ["verifying", "proposing"],
   ["verifying", "manual_fix"],
   ["manual_fix", "verifying"],
+  // FLF-330 C-6: BA xác nhận ⇒ ghi ngay
+  ["ready_to_submit", "written"],
   ["ready_to_submit", "in_review"],
   ["ready_to_submit", "verifying"],
   // phase 8: gộp thêm lệnh sửa ⇒ làm rõ lại
