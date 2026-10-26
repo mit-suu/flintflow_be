@@ -47,7 +47,9 @@ export const spineProjectSchema = z.strictObject({
    * cuối mỗi màn và các bước bắt buộc, `fast` chỉ dừng khi có câu bắt buộc/cờ đỏ mới/lỗi.
    * Spine cũ không có ⇒ `balanced`.
    */
-  review_mode: z.enum(["strict", "balanced", "fast"]).default("balanced"),
+  review_mode: z.enum(["strict", "balanced", "fast", "milestones"]).default("balanced"),
+  /** FLF-337: section đã bấm "không hỏi lại". Spine cũ không có ⇒ `[]`. */
+  skip_confirm_sections: z.array(z.string()).default([]),
   release_scope: releaseScopeSchema
 })
 

@@ -138,6 +138,8 @@ describe("projectStep", () => {
     }
     const p = projectStep(spine, "S-1.2")
     expect(p.emptyFields).not.toContain("project.working_mode")
+    // FLF-337: cài đặt "không hỏi lại" rỗng cũng không phải field trống
+    expect(p.emptyFields).not.toContain("project.skip_confirm_sections")
     expect(p.projection.project).not.toHaveProperty("working_mode")
   })
 
