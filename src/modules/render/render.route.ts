@@ -124,4 +124,43 @@ router.get("/:projectId/document", authMiddleware, renderController.getDocumentC
 // file), chỉ route Express chuyển sang đây — export.route.ts giờ chỉ còn /word/preview (dev, T05).
 router.get("/:projectId/export/word", authMiddleware, exportController.exportWord)
 
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/export/pdf:
+ *   get:
+ *     summary: Xuất PDF — chính file Word của endpoint export/word, chuyển bằng Gotenberg (FLF-316)
+ *     tags: [Render]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: source
+ *         schema:
+ *           type: string
+ *           enum: [draft, baseline]
+ *           default: draft
+ *       - in: query
+ *         name: baseline_id
+ *         description: "`_id` Mongo (= `snapshot_ref`) hoặc mã `BLnnn` mà GET /baselines trả; bỏ trống ⇒ baseline mới nhất"
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: File .pdf, tên `<project>-<version>[-draft].pdf`. Cùng header với export/word.
+ *       401:
+ *         description: Chưa xác thực
+ *       404:
+ *         description: PROJECT_NOT_FOUND, BASELINE_NOT_FOUND
+ *       409:
+ *         description: NO_WORKING_DRAFT (project chưa có Spine)
+ *       503:
+ *         description: PDF_EXPORT_UNAVAILABLE — Gotenberg không chạy / lỗi / quá hạn; export/word vẫn dùng được
+ */
+router.get("/:projectId/export/pdf", authMiddleware, exportController.exportPdf)
+
 export default router
