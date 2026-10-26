@@ -24,7 +24,7 @@ import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeCrClarify, fakeMode1, mode1Api, promptLocations } from "../../helpers/mode1.js"
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
 import { ChatSession } from "../../../src/modules/project/chat-session.model.js"
-import { ADD_USE_CASE_REASON, REMOVE_USE_CASE_REASON } from "../../../src/modules/change-request/add-use-case.service.js"
+import { ADD_USE_CASE_REASON, EDIT_USE_CASE_REASON, REMOVE_USE_CASE_REASON } from "../../../src/modules/change-request/add-use-case.service.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
 import { binary, documentXml, releaseNow, routeReplaceCr, writeCr } from "../../helpers/mode1-release-p4.js"
 import { versionsResponseSchema } from "../../../src/modules/doc-version/doc-version.dto.js"
@@ -301,6 +301,40 @@ describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký basel
     expect(spine.permissions.some((p) => p.screen_id === fn.screen_id)).toBe(false)
     expect(spine.screens.find((s) => s.id === "S07")?.flow_to).not.toContain(fn.screen_id)
     expect(spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && f.rule_id !== "diagram_stale")).toEqual([])
+  })
+
+  it("sau baseline: CR sửa use case (đổi actor) ⇒ một lượt soạn theo luật 3h: actor + quyền trên màn của nó; ghi ra 1.1", async () => {
+    const { seeded, c } = await fptProject()
+    expect((await signOff(c)).status).toBe(201)
+    const before = (await spineRepository.get(seeded.projectId))!
+    const uc = before.use_cases.find((u) => u.id === "UC01")!
+    const newActors = uc.actor_ids.map((a) => (a === "A04" ? "A03" : a))
+    const screens = [...new Set(before.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+    const edit = [
+      { op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors },
+      ...screens.map((screen) => ({ op: "add", path: "permissions[]", value: { screen_id: screen, role_id: "R3", action: "view" } })),
+      // Guest (R4) không còn use case nào trên màn ⇒ gỡ quyền cũ cùng lô (luật 3h)
+      ...before.permissions.filter((p) => screens.includes(p.screen_id) && p.role_id === "R4").map((p) => ({ op: "remove", path: `permissions[id=${p.id}]` }))
+    ]
+    const changePrompts: string[] = []
+    mockOverrides.next = (p) =>
+      fakeMode1(p) ??
+      fakeCrClarify({ entity_paths: ["use_cases[id=UC01]"], keywords: [uc.name] })(p) ??
+      (p.includes("# Apply Change Op") ? (changePrompts.push(p), JSON.stringify({ ops: edit, notes: "Đổi actor và cấp quyền xem màn." })) : undefined) ??
+      (p.includes("# CR Propose")
+        ? JSON.stringify({ locations: promptLocations(p).map((l) => ({ location_id: l.location_id, conclusion: "not_related", reason: "Khác", spine_ops: [] })) })
+        : undefined)
+
+    const written = await writeCr(c, "Đổi actor UC01", "Sửa use case UC01: đổi actor Guest sang Administrator")
+    expect(written).toEqual({ crId: "CR-001", version: "1.1" })
+    expect(changePrompts.length).toBe(1)
+    expect(changePrompts[0]).toContain("3h. **Editing a use case")
+    expect(await ChangeLocation.countDocuments({ projectId: seeded.projectId, cr_id: "CR-001", reason: EDIT_USE_CASE_REASON })).toBeGreaterThan(0)
+
+    const spine = (await spineRepository.get(seeded.projectId))!
+    expect(spine.use_cases.find((u) => u.id === "UC01")?.actor_ids).toEqual(newActors)
+    for (const screen of screens) expect(spine.permissions.some((p) => p.screen_id === screen && p.role_id === "R3" && p.action === "view")).toBe(true)
+    expect(spine.permissions.some((p) => screens.includes(p.screen_id) && p.role_id === "R4")).toBe(false)
   })
 
   it("sau baseline: CR tạo từ bản xem trước trong chat (vòng hỏi đáp như trước baseline) ⇒ bước đề xuất dùng đúng lô đã duyệt, không soạn lại; ra 1.1", async () => {
