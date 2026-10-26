@@ -145,9 +145,9 @@ export interface Readiness {
   stale: number
 }
 
-/** Cờ đỏ đang chặn baseline: chưa đóng và chưa waive (Phases §6.5). */
+/** Cờ đỏ đang chặn baseline: mọi cờ đỏ chưa đóng — waive / giữ nguyên không làm nó hết chặn (BR-04, FLF-329). */
 export const countRedOpen = (spine: Spine): number =>
-  spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && !f.waived_by_user).length
+  spine.flags.filter((f) => f.level === "red" && f.resolved_at === null).length
 
 /** `% = count(accepted) / count(section bắt buộc, trừ derived)` — hiển thị, không phải điều kiện chốt. */
 export const readiness = (spine: Spine, changes: ChangeLike[], states = computeSectionStates(spine, changes)): Readiness => {

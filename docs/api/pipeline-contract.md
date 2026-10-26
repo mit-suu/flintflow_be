@@ -84,7 +84,8 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | HTTP | `code` | Khi | `meta` |
 | --- | --- | --- | --- |
 | 400 | `VALIDATION_ERROR` | Body/query sai DTO | — |
-| 400 | `FLAG_NOT_WAIVABLE` | Waive luật `array_empty` / `dead_reference` / `render_error` | — |
+| 400 | `FLAG_NOT_WAIVABLE` | Waive **bất kỳ cờ đỏ** nào (BR-04, FLF-329), hoặc luật `array_empty` / `dead_reference` / `render_error` | `{ rule_id, level }` |
+| 400 | `FLAG_NOT_KEEPABLE` | `POST /flags/:flagId/keep` trên cờ đã đóng (FLF-329) | — |
 | 401 | `UNAUTHORIZED` | Thiếu/sai token | — |
 | 402 | `INSUFFICIENT_CREDIT` | Không reserve được credit cho lượt gọi model | `{ required, balance }` |
 | 403 | `NOT_PIPELINE_SESSION` | `run/answer/gate` và `/phases/:phase/run` từ session không có `is_pipeline` | — |
@@ -101,15 +102,17 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 409 | `REGENERATE_LIMIT` | Regenerate lần 4 trong một step | `{ regenerate_used: 3 }` |
 | 409 | `CALL_LIMIT` | Lượt gọi model thứ 9 trong một step; chỉ còn `accept` / `accept_as_is` | `{ calls_used: 8 }` |
 | 409 | `STEP_NOT_RUNNABLE` | Chạy step chưa tới lượt, hoặc gate step không ở `gate_ready` | — |
-| 409 | `NO_WORKING_DRAFT` | `GET /document` hoặc `GET /export/word` với `source=draft` khi chưa `POST /assemble` lần nào | `{ hint: "S-8.2" }` |
+| 409 | `NO_WORKING_DRAFT` | `GET /document`, `GET /export/word` hoặc `GET /export/pdf` với `source=draft` khi chưa `POST /assemble` lần nào | `{ hint: "S-8.2" }` |
 | 422 | `OP_INVALID` | Op sai: `path_invalid`, `path_not_resolved`, `path_ambiguous`, `index_selector_forbidden`, `key_change_forbidden`, `duplicate_id`, `op_value_missing`, `op_not_allowed`, `schema_invalid`, `path_not_writable`, `revert_conflict`; khi model soạn: `op_out_of_scope`, `brief_extraction_incomplete` | `{ violations[], referrers[] }` |
 | 422 | `INVARIANT_VIOLATION` | Vi phạm bất biến ở cuối lô: `invariant_1_required_section`, `invariant_2_last_element`, `invariant_3_dead_reference`, `invariant_4_screen_missing`, `invariant_5_feature_order`, `invariant_5_function_order`, `invariant_6_feature_mismatch`, `invariant_8_cursor_screen`, `invariant_8_screen_not_pending`, `invariant_8_screen_not_queued` | `{ violations[], referrers[] }` |
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
 | 422 | `NOTHING_TO_UNDO` | Không còn txn có thể undo | — |
 | 422 | `BASELINE_BLOCKED` | Còn cờ đỏ chưa waive khi ghi baseline | `{ flags[] }` |
+| 429 | `KNOWLEDGE_DAILY_LIMIT` | Chat `knowledge: true` khi user đã hết hạn mức câu hỏi tri thức trong ngày (FLF-333; hỏi tri thức không tốn credit nên chặn lạm dụng bằng số câu) | `{ limit, used }` |
 | 429 | `RATE_LIMIT_EXCEEDED` | Nhà cung cấp AI từ chối: hết hạn mức, chưa gắn thanh toán, hoặc gọi quá nhanh | — |
 | 502 | `AI_PROVIDER_ERROR` | Nhà cung cấp AI lỗi / trả rỗng (`GLM_EMPTY_OUTPUT`, 5xx…) | — |
 | 501 | `NOT_IMPLEMENTED` | Nhánh chưa hiện thực (vd `instruction` trước T17) | — |
+| 503 | `PDF_EXPORT_UNAVAILABLE` | `GET /export/pdf` khi bộ chuyển PDF (Gotenberg) không chạy, lỗi hoặc quá `GOTENBERG_TIMEOUT_MS`; `GET /export/word` không bị ảnh hưởng (FLF-316) | — |
 
 `violations[]` = `{ rule, message, path?, op_index? }`. `referrers[]` = `{ path, id }`: các khoá đang trỏ tới phần tử bị xoá, để user tự quyết.
 
@@ -135,7 +138,7 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 10 | `POST /projects/:id/undo` | T17 | `undoRequestSchema` | `applyResultResponseSchema` (op `revert`) | `SPINE_VERSION_CONFLICT`, `DRAFT_LOCKED`, `NOTHING_TO_UNDO`, `UNDO_AFTER_BASELINE`, `INVARIANT_VIOLATION` |
 | 11 | `GET /projects/:id/changes?from&to` | T17 | `changesQuerySchema` | `Change[]` theo seq tăng dần | — |
 | 12 | `GET /projects/:id/flags?level&open` | T09 ✔ | `flagsQuerySchema` | `Flag[]` | — |
-| 13 | `POST /projects/:id/flags/:flagId/waive` | T09 ✔ | `waiveRequestSchema` (≥ 20 ký tự) | `Flag` | `FLAG_NOT_FOUND`, `FLAG_NOT_WAIVABLE`, `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
+| 13 | `POST /projects/:id/flags/:flagId/waive` | T09 ✔ · FLF-329 | `waiveRequestSchema` (≥ 20 ký tự) — **chỉ cờ vàng**; cờ đỏ ⇒ `400 FLAG_NOT_WAIVABLE` ở mọi chế độ (BR-04) | `Flag` | `FLAG_NOT_FOUND`, `FLAG_NOT_WAIVABLE`, `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
 | 14 | `POST /projects/:id/flags/recompute` | T09 ✔ | `recomputeFlagsRequestSchema` | `Flag[]`; `meta = { checked_at_version, opened[], resolved[], reopened[] }` | `SPINE_VERSION_CONFLICT` |
 | 15 | `GET /projects/:id/traceability?entity&id` | T17 | `traceabilityQuerySchema` | `traceabilityResponseSchema` | `VALIDATION_ERROR` |
 | 16 | `GET /projects/:id/document?source=draft\|baseline&baseline_id` | T15 | `documentQuerySchema` | `RenderedDocument` (`render/rendered-document.schema.ts`); `sections[].id` có thể là `group:<number>` (heading nhóm do Assemble chèn, không có status). FLF-265: chữ theo `Project.documentLanguage` (không có query param); ngôn ngữ ≠ ngôn ngữ gốc ⇒ `meta.translation` (`documentTranslationMetaSchema` `{ locale, source_locale, missing }`), đơn vị chưa dịch in chữ gốc; không gọi model | `BASELINE_NOT_FOUND`, `NO_WORKING_DRAFT` |
@@ -156,6 +159,8 @@ Bất biến 1, 2 và 8 kiểm **việc xoá**, bằng cách so trạng thái tr
 | 31 | `POST /projects/:id/comments/:commentId/resolve` | UC-49, UC-47 | `resolveCommentSchema` `{ kind: fixed \| kept, reason? }` — `kept` bắt buộc `reason` ≥ 10 ký tự, `fixed` bỏ qua `reason` (Lead, Analyst). Kết luận comment **mở lại step sở hữu** section được ghim khi step đó đang `accepted` (`steps[id=…].status = revision_requested`, một transaction riêng; không đổi nội dung — BR-05) | `commentSchema` (`status = resolved`) | `400 VALIDATION_ERROR` (thiếu `kind`, hoặc `kept` mà thiếu lý do), `403 ORG_ROLE_FORBIDDEN`, `COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN`, `409 SPINE_VERSION_CONFLICT` (comment đã resolved, lô mở lại step thua khoá lạc quan hai lần) |
 | 32 | `POST /projects/:id/baseline/submit` | UC-45 | `baselineSubmitRequestSchema` `{ base_version }` — Lead, Analyst. Đặt `baseline_submission` sang `pending`, **không** ghi baseline; điều kiện giống #19 (cờ đỏ = 0, BR-04). Báo in-app `baseline_submitted` cho mọi Lead của org. Nộp lại sau khi bị từ chối đòi mọi `rejection_comment_ids` ở trạng thái `resolved`/`converted` | `baselineSubmissionResponseSchema`; `meta = { spine_version }` | `403 ORG_ROLE_FORBIDDEN`, `409 BASELINE_ALREADY_SUBMITTED`, `409 SPINE_VERSION_CONFLICT`, `422 BASELINE_BLOCKED` (`meta.flags[]`), `422 REJECTION_COMMENTS_OPEN` (`meta.comment_ids[]`) |
 | 33 | `POST /projects/:id/baseline/reject` | UC-46 | `baselineRejectRequestSchema` `{ base_version, reason ≤ 2000, comment_ids: CM-nnn[] ≥ 1 }` — **chỉ Lead**; `business-flow.md §3.5` đòi cả lý do lẫn comment ghim. Đặt `baseline_submission` sang `rejected` kèm lý do và comment đã ghim; không ghi baseline. Báo in-app `baseline_rejected` cho người nộp | `baselineSubmissionResponseSchema`; `meta = { spine_version }` | `403 ORG_ROLE_FORBIDDEN`, `409 SPINE_VERSION_CONFLICT`, `422 NO_PENDING_SUBMISSION`, `422 VALIDATION_ERROR` (comment không thuộc dự án) |
+| 34 | `GET /projects/:id/export/pdf?source=` | FLF-316 | `exportWordQuerySchema` (dùng chung #18) | file `.pdf` (`Content-Disposition: attachment`, tên như #18 đổi đuôi `.pdf`), không bọc envelope. Là **chính file `.docx` của #18** chuyển qua Gotenberg (LibreOffice) — bìa, mục lục có số trang, §I, phụ lục cờ, sơ đồ, watermark DRAFT, ngôn ngữ tài liệu khớp bản Word cùng version. Cùng quyền như #18 (Viewer chỉ `source=baseline`, UC-50 — FLF-319) và cùng header `X-Document-Language`, `X-Assembled-At-Version`, `X-Spine-Version` như #18; không gọi model | `BASELINE_NOT_FOUND`, `NO_WORKING_DRAFT`, `503 PDF_EXPORT_UNAVAILABLE` |
+| 35 | `POST /projects/:id/flags/:flagId/keep` | FLF-329 (số 34 dành cho FLF-316 `export/pdf`) | `keepRequestSchema` `{ reason ≥ 20 ký tự }` — "Giữ nguyên + lý do" (business-flow §2 "Ba mức cờ"): ghi `kept_reason`, `kept_by`, `kept_at` lên cờ; cờ **vẫn `open`**, cờ đỏ **vẫn chặn** baseline / gửi gói / phát hành; mọi chế độ, mọi mức cờ (Lead, Analyst) | `Flag` | `FLAG_NOT_FOUND`, `400 FLAG_NOT_KEEPABLE` (cờ đã đóng), `VALIDATION_ERROR`, `SPINE_VERSION_CONFLICT` |
 
 Mọi endpoint còn có thể trả `401 UNAUTHORIZED`, `404 PROJECT_NOT_FOUND`, `400 VALIDATION_ERROR`.
 
@@ -200,7 +205,7 @@ Lô bị từ chối:
 
 | Field | Kiểu | Ý nghĩa |
 | --- | --- | --- |
-| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, 2 credit) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
+| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, **0 credit** — FLF-333, giới hạn `KNOWLEDGE_DAILY_LIMIT` câu / user / ngày, vượt ⇒ `429 KNOWLEDGE_DAILY_LIMIT`) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
 
 Thứ tự xử lý khi `knowledge: true`: đi **trước** lượt chờ trả lời của step (phiên pipeline — lượt chờ giữ nguyên, tin không
 thành câu trả lời của step) và trước lệnh sửa (không có bản xem trước, không đọc / ghi Spine); chốt `409 CHANGE_REQUIRES_CR`
@@ -312,4 +317,7 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 | 2026-10-13 | contract-change (E2E FAP #19) | Làm rõ `gate_ready.auto`: `POST /steps/:stepId/run` (lượt lẻ, theo luật bước im FLF-264) cũng **tự Accept** bước im rồi phát `auto_accepted` như `phases/:phase/run` — trước đây lượt lẻ phát `auto: true` nhưng không ai Accept, bước kẹt `in_progress`. Client không gọi `/gate` sau `auto_accepted`. |
 | 2026-10-20 | contract-change FLF-293 (khoá draft khi chờ duyệt) | Additive. Mã lỗi mới `409 DRAFT_LOCKED` cho #7–#10 và sửa giả định khi `baseline_submission.status = pending`; Lead duyệt hoặc từ chối thì mở khoá. Không đổi shape request/response |
 | 2026-10-20 | contract-change FLF-294 (change request sau baseline, mode tạo SRS) | Additive + một siết luật (BR-03). `changesRequestSchema` thêm `change_request?` `{ requester, source: { kind, ref? } }`; sau baseline `POST /changes` thiếu nó ⇒ `400 CR_FIELDS_REQUIRED` (trước đây chỉ đòi `reason`). Lượt áp thành CR `CR-nnn`, `meta.cr_id`; `reason` của lô lưu `CR-nnn · người yêu cầu · nguồn — lý do`. `/reconcile` không đòi (kéo theo CR đã ghi). `POST /undo` sau baseline ⇒ `409 UNDO_AFTER_BASELINE`. Gói phát hành (UC-51/52) cho mode này chưa làm |
+| 2026-10-22 | contract-change FLF-316 (xuất PDF) | Additive. Endpoint mới 34 `GET /projects/:id/export/pdf` — cùng query/quyền/header/mã lỗi với #18, file là bản `.docx` của #18 chuyển bằng Gotenberg. Mã lỗi mới `503 PDF_EXPORT_UNAVAILABLE` (bộ chuyển không sẵn sàng). Không đổi shape request/response của endpoint nào đang có |
 | 2026-10-23 | contract-change (quyền Lead/Viewer theo UC-20/38/39/47/50) | Siết quyền, không đổi shape. `POST /steps/S-9.5/gate` với `accept`/`accept_as_is` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`; Analyst nộp qua #32). Viewer chỉ còn GET: danh sách/chi tiết dự án, `document`, `export/word`, `diagrams`, `baselines`, `versions` (+`compare`, `blocks`, `download`), `progress`, `traceability`, `comments` — mọi GET khác 403 `ORG_ROLE_FORBIDDEN`. Với Viewer: `document` bỏ `flagsAppendix`/`awaiting_reaccept`, `stale` ⇒ `draft`; `progress` trả `red_open`/`awaiting_reaccept`/`stale` = 0; `export/word?source=draft` ⇒ 403. |
+| 2026-10-26 | contract-change FLF-329 (bỏ waive cờ đỏ) | Siết luật BR-04 + additive. #13 `waive` chỉ còn cho cờ vàng — mọi cờ đỏ (13 luật) trả `400 FLAG_NOT_WAIVABLE` (`meta.level = "red"`), `NON_WAIVABLE_RULES` = mọi luật đỏ. `Flag` thêm `kept_reason`, `kept_by`, `kept_at` (nullable, Spine cũ ⇒ `null`, không migration schema). Endpoint mới `POST /flags/:flagId/keep` ("Giữ nguyên + lý do"), mã lỗi `400 FLAG_NOT_KEEPABLE`. `readiness.red_open`, phụ lục cờ của bản nháp và `blockingFlags` **không trừ** cờ đỏ đã waive trước đây — script `npm run migrate:red-waivers` chuyển waiver cũ trên cờ đỏ thành giữ nguyên + lý do |
+| 2026-10-26 | contract-change FLF-333 (hỏi tri thức không tốn credit) | Additive. `knowledge_answer` giá 0 credit (không giữ / trừ ví, vẫn ghi `aiactionlogs`); mã lỗi mới `429 KNOWLEDGE_DAILY_LIMIT` (`meta { limit, used }`), hạn mức `KNOWLEDGE_DAILY_LIMIT` (mặc định 60 câu / user / ngày). Không đổi shape request/response |

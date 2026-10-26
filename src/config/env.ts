@@ -81,6 +81,8 @@ const envSchema = z.object({
 
   ANTHROPIC_API_KEY: z.string().default(""),
   GEMINI_API_KEY: z.string().default(""),
+  // TypeSafe AI (model Jev) — trả quyết định có kiểu + xác suất. Tên trùng biến SDK đọc mặc định.
+  TYPESAFE_API_KEY: z.string().default(""),
 
   // Không có default: một URL endpoint cá nhân nằm trong code nghĩa là quên cấu hình cũng không báo
   // lỗi, chỉ lặng lẽ gọi sang máy của người khác (T24). Thiếu ⇒ `AI_PROVIDER_NOT_CONFIGURED` ngay ở
@@ -116,6 +118,8 @@ const envSchema = z.object({
     .transform((v) => v === "true" || v === "1"),
   /** Số chunk đưa vào prompt trả lời. */
   KNOWLEDGE_TOP_K: z.coerce.number().int().min(1).max(20).default(5),
+  // FLF-333: hỏi tri thức không tốn credit ⇒ chặn lạm dụng bằng số câu mỗi user mỗi ngày (đếm AiActionLog), vượt ⇒ 429
+  KNOWLEDGE_DAILY_LIMIT: z.coerce.number().int().min(1).default(60),
   /** Ngưỡng cosine của chunk gần nhất; thấp hơn ⇒ "không đủ căn cứ", không gọi model. Hiệu chỉnh bằng `npm run eval:knowledge`. */
   KNOWLEDGE_MIN_SCORE: z.coerce.number().min(-1).max(1).default(0.66),
   /** Trọng số danh sách từ khoá trong RRF (1 = RRF chuẩn, 0 = chỉ xếp theo vector). Chọn bằng `eval:knowledge --retrieval-only`. */
@@ -143,6 +147,12 @@ const envSchema = z.object({
     .default("500,1500")
     .transform((value) => value.split(",").map((part) => part.trim()).filter(Boolean).map(Number))
     .pipe(z.array(z.number().int().nonnegative()).max(5)),
+
+  // ─── Gotenberg (xuất PDF từ .docx, FLF-316) ───────────────────────
+  // Self-host: `docker compose up -d gotenberg`. Ở production là Web App riêng `flintflow-gotenberg`
+  // (docs/ops.md §5). Không chạy ⇒ xuất PDF trả 503 PDF_EXPORT_UNAVAILABLE, xuất Word không ảnh hưởng.
+  GOTENBERG_URL: z.string().default("http://localhost:3001"),
+  GOTENBERG_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
 
   // ─── Billing: payment_service dùng chung (VietQR/SePay) ───────────
   // Để trống ⇒ checkout trả 503 PAYMENT_SERVICE_NOT_CONFIGURED.

@@ -39,17 +39,11 @@ afterEach(() => vi.restoreAllMocks())
 
 const NEW_PERF = "The system shall respond within 1 second for 95% of requests."
 
-const approveAll = async (c: Mode1Client, cr: string, groups: { group_id: string }[]) => {
-  let last = null as ReturnType<typeof detail> | null
-  for (const g of groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-  return last!
-}
+/** FLF-330: BA xác nhận (`submit`) là ghi ngay — không còn duyệt từng group; đọc lại chi tiết CR đã ghi. */
+const approveAll = async (c: Mode1Client, cr: string, _groups: { group_id: string }[]) => detail(await c.get(cr))
 
-/** Duyệt mọi group trừ group cuối (để lần quyết cuối mới kích hoạt ghi). */
-const approveAllButLast = async (c: Mode1Client, cr: string, groups: { group_id: string }[]) => {
-  for (const g of groups.slice(0, -1)) detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-  return groups[groups.length - 1].group_id
-}
+/** BA xác nhận (C-6). */
+const confirm = (c: Mode1Client, cr: string) => c.post(`${cr}/submit`)
 
 const loadVersion = async (projectId: string, version: string) => {
   const v = await DocVersion.findOne({ projectId, version }).lean()
@@ -164,9 +158,9 @@ describe("C-7 ghi Spine + render version mới", () => {
 
   it("txn Spine: by = CR id, reason = 'CR id: tiêu đề'; mở hết khoá; bản làm việc ghép lại theo Spine mới", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
+    const { crId, cr } = await crToReady(c)
     const before = await c.spineVersion()
-    await approveAll(c, cr, submitted.groups)
+    detail(await confirm(c, cr))
     expect(await c.spineVersion()).toBeGreaterThan(before)
     const changes = (await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId && ch.path === "nfrs[id=NFR-01].threshold")
     expect(changes).toHaveLength(1)
@@ -202,34 +196,21 @@ describe("C-7 ghi Spine + render version mới", () => {
   })
 })
 
-describe("C-7 chặn trước khi ghi", () => {
-  it("base_version cũ ⇒ 409 SPINE_VERSION_CONFLICT; không file, không version, group vẫn pending", async () => {
+describe("C-6 chặn trước khi ghi (FLF-330: Code kiểm lại trên nội dung hiện tại lúc BA xác nhận)", () => {
+  it("giá trị tại path đổi sau khi kiểm ⇒ xác nhận 409 CR_VALUE_CHANGED, không ghi gì, vẫn giữ khoá, CR vẫn ready_to_submit", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
-    const last = await approveAllButLast(c, cr, submitted.groups)
-    const files = await gridFsFiles(projectId)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: (await c.spineVersion()) - 1 })
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe("SPINE_VERSION_CONFLICT")
-    expect(await gridFsFiles(projectId)).toBe(files)
-    expect(await DocVersion.countDocuments({ projectId })).toBe(1)
-    expect((await ChangeGroup.findOne({ projectId, cr_id: crId, group_id: last }).lean())?.decision).toBe("pending")
-  })
-
-  it("giá trị tại path đổi sau khi nộp ⇒ 409 CR_VALUE_CHANGED, không ghi gì, vẫn giữ khoá", async () => {
-    const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
+    const { crId, cr } = await crToReady(c)
     const held = await lockedPaths(projectId, crId)
-    const last = await approveAllButLast(c, cr, submitted.groups)
     await Spine.updateOne({ projectId, "nfrs.id": "NFR-01" }, { $set: { "nfrs.$.threshold": "5 s" }, $inc: { spine_version: 1 } })
     const files = await gridFsFiles(projectId)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() })
+    const res = await confirm(c, cr)
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_VALUE_CHANGED")
     expect(res.body.meta).toMatchObject({ path: "nfrs[id=NFR-01]" })
     expect(await gridFsFiles(projectId)).toBe(files)
     expect(await lockedPaths(projectId, crId)).toEqual(held)
-    expect(detail(await c.get(cr)).change_request.status).toBe("in_review")
+    expect(detail(await c.get(cr)).change_request.status).toBe("ready_to_submit")
+    expect(await ChangeGroup.countDocuments({ projectId, cr_id: crId, decision: "pending" })).toBeGreaterThan(0)
   })
 })
 
@@ -240,24 +221,23 @@ describe("C-7 lỗi giữa chừng", () => {
     expect(await lockedPaths(projectId, crId)).toEqual(held)
     expect(await nfrThreshold(projectId)).toBe("2 s")
     const d = detail(await c.get(cr))
-    expect(d.change_request).toMatchObject({ status: "in_review", result_doc_version: null })
-    expect(d.groups[d.groups.length - 1].decision).toBe("pending")
+    expect(d.change_request).toMatchObject({ status: "ready_to_submit", result_doc_version: null })
+    expect(d.groups.every((g) => g.decision === "pending")).toBe(true)
   }
 
   it("lưu file lỗi ⇒ không có gì được ghi (Spine không đổi); chạy lại cùng base_version ⇒ ghi được", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
+    const { crId, cr } = await crToReady(c)
     const held = await lockedPaths(projectId, crId)
-    const last = await approveAllButLast(c, cr, submitted.groups)
     const files = await gridFsFiles(projectId)
     const base = await c.spineVersion()
     vi.spyOn(gridFsDocFileStore, "save").mockRejectedValueOnce(new Error("GridFS down"))
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base })
+    const res = await confirm(c, cr)
     expect(res.status).toBe(500)
     await expectNothingWritten(c, projectId, crId, cr, files, held)
     expect(await c.spineVersion()).toBe(base)
 
-    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base }))
+    const retry = detail(await confirm(c, cr))
     expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
     expect(await gridFsFiles(projectId), "bản sạch + bản có đánh dấu (3.14)").toBe(files + 2)
   })
@@ -265,15 +245,14 @@ describe("C-7 lỗi giữa chừng", () => {
   /** FLF-178: Spine là bước ghi cuối — lỗi tạo version (sau khi đã lưu file) ⇒ xoá file, Spine giữ nguyên. */
   it("DocVersion.create lỗi ⇒ xoá file mồ côi, Spine + CR giữ nguyên; chạy lại cùng base_version ⇒ ghi đúng một lần", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
+    const { crId, cr } = await crToReady(c)
     const held = await lockedPaths(projectId, crId)
-    const last = await approveAllButLast(c, cr, submitted.groups)
     const files = await gridFsFiles(projectId)
     const base = await c.spineVersion()
     const saved = vi.spyOn(gridFsDocFileStore, "save")
     const removed = vi.spyOn(gridFsDocFileStore, "remove")
     vi.spyOn(DocVersion, "create").mockRejectedValueOnce(new Error("create failed") as never)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base })
+    const res = await confirm(c, cr)
     expect(res.status).toBe(500)
     // bản sạch + bản có đánh dấu (3.14) — lỗi tạo version ⇒ dọn cả hai
     expect(saved).toHaveBeenCalledTimes(2)
@@ -282,7 +261,7 @@ describe("C-7 lỗi giữa chừng", () => {
     await expectNothingWritten(c, projectId, crId, cr, files, held)
     expect(await c.spineVersion()).toBe(base)
 
-    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base }))
+    const retry = detail(await confirm(c, cr))
     expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
     expect(await gridFsFiles(projectId), "bản sạch + bản có đánh dấu (3.14)").toBe(files + 2)
     expect(await DocVersion.countDocuments({ projectId, version: "0.2" })).toBe(1)
@@ -292,9 +271,8 @@ describe("C-7 lỗi giữa chừng", () => {
 
   it("Spine đổi ở phiên khác sau khi đã tạo version ⇒ 409, xoá version + file vừa tạo, CR giữ nguyên; tải lại rồi ghi được", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
+    const { crId, cr } = await crToReady(c)
     const held = await lockedPaths(projectId, crId)
-    const last = await approveAllButLast(c, cr, submitted.groups)
     const files = await gridFsFiles(projectId)
     const base = await c.spineVersion()
     const create = DocVersion.create.bind(DocVersion)
@@ -304,28 +282,28 @@ describe("C-7 lỗi giữa chừng", () => {
       await Spine.updateOne({ projectId }, { $inc: { spine_version: 1 } })
       return created
     }) as never)
-    const res = await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: base })
+    const res = await confirm(c, cr)
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe(spineRepository.SPINE_VERSION_CONFLICT)
     await expectNothingWritten(c, projectId, crId, cr, files, held)
     expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])
 
-    const retry = detail(await c.post(`${cr}/groups/${last}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
+    const retry = detail(await confirm(c, cr))
     expect(retry.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
     expect(await DocVersion.countDocuments({ projectId, version: "0.2" })).toBe(1)
   })
 })
 
-describe("C-7 duyệt một phần", () => {
-  it("chỉ vị trí comment được duyệt (edit bị từ chối) ⇒ vẫn lên 0.2, không op Spine của CR", async () => {
+describe("C-6 BA bỏ riêng một vị trí trước khi xác nhận (FLF-330 — thay cho Lead từ chối từng group)", () => {
+  it("vị trí edit đặt not_related, chỉ còn comment ⇒ vẫn lên 0.2, không op Spine của CR", async () => {
     const { c, projectId } = await importedProject()
     const { crId, cr, verified } = await crToReady(c)
     expect(verified.change_request.status).toBe("ready_to_submit")
-    const submitted = detail(await c.post(`${cr}/submit`))
-    const perf = submitted.groups.find((g) => g.title === "4.2.3 Performance")!
-    const br = submitted.groups.find((g) => g.title === "5.1 Business Rules")!
-    detail(await c.post(`${cr}/groups/${perf.group_id}/decision`, { decision: "rejected", reason: "Giữ nguyên 2 giây", base_version: await c.spineVersion() }))
-    const written = detail(await c.post(`${cr}/groups/${br.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
+    const perf = verified.locations.find((l) => l.path.startsWith("nfrs[id=NFR-01]"))!
+    detail(await c.patch(`${cr}/locations/${perf.location_id}`, { conclusion: "not_related", reason: "Giữ nguyên 2 giây" }))
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+    const written = detail(await confirm(c, cr))
+    expect(written.change_request.status).toBe("written")
     expect(written.change_request.result_doc_version).toBe("0.2")
     expect(await nfrThreshold(projectId)).toBe("2 s")
     expect((await spineRepository.listChanges(projectId)).filter((ch) => ch.by === crId)).toEqual([])

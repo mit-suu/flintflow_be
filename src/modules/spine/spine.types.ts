@@ -350,9 +350,16 @@ export interface Flag {
   opened_at_version: number
   resolved_at: IsoDateTime | null
   waived_by_user: boolean
-  /** Bắt buộc ≥ 20 ký tự khi waive (srs-spine.md §7). */
+  /** Bắt buộc ≥ 20 ký tự khi waive (srs-spine.md §7). Chỉ cờ vàng (FLF-329). */
   waive_reason: string | null
   waived_at_version: number | null
+  /**
+   * "Giữ nguyên + lý do" (FLF-329, BR-04): người dùng ghi vì sao không sửa — cờ **vẫn mở, vẫn chặn** baseline /
+   * gửi gói / phát hành. Dữ liệu trước FLF-329 không có ba field này ⇒ đọc ra `null`.
+   */
+  kept_reason: string | null
+  kept_by: string | null
+  kept_at: IsoDateTime | null
 }
 
 /** `status` KHÔNG lưu — là hàm tính (srs-spine.md §5, T09). */

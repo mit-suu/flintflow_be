@@ -207,7 +207,10 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
     // Lý do của máy — `section-renderer` INTERNAL_REASON lọc khỏi Record of Changes
     ops.push({ op: "add", path: "flags[]", value: flag, reason: `AI check: ${f.rule}` })

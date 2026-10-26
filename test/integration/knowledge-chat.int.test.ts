@@ -13,6 +13,7 @@ import app from "../../src/app.js"
 import { env } from "../../src/config/env.js"
 import { ChatSession } from "../../src/modules/project/chat-session.model.js"
 import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
+import { AiActionLog } from "../../src/modules/admin/ai-action-log.model.js"
 import { chunkCorpus } from "../../src/modules/knowledge/chunker.js"
 import { loadCorpus } from "../../src/modules/knowledge/corpus.js"
 import { ingestChunks } from "../../src/modules/knowledge/ingest.js"
@@ -82,7 +83,7 @@ describe("FLF-267 chat — cờ knowledge", () => {
 })
 
 describe("FLF-267 chat — trả lời có căn cứ", () => {
-  it("route JSON: tin AI = { reply, questions: [], grounded: true, citations[] } chỉ gồm nhãn thật; trừ 2 credit", async () => {
+  it("route JSON: tin AI = { reply, questions: [], grounded: true, citations[] } chỉ gồm nhãn thật; KHÔNG trừ credit (FLF-333), vẫn ghi aiactionlogs", async () => {
     const f = await seedFixture("minimal")
     const before = await balance(f)
     const res = await request(app).post(messages(f)).set(bearer(f)).send({ content: CAPS_QUESTION, step: "chat", knowledge: true })
@@ -94,7 +95,23 @@ describe("FLF-267 chat — trả lời có căn cứ", () => {
     expect(citations[0]).toMatchObject({ ref: "K1", source_kind: "internal_skill" })
     expect(skillChunks.some((c) => c.chunk_id === citations[0]!.chunk_id)).toBe(true)
     expect(mockCalls).toHaveLength(1)
-    expect(await balance(f)).toBe(before - 2)
+    expect(await balance(f)).toBe(before)
+    expect(await AiActionLog.countDocuments({ userId: f.userId, actionType: "knowledge_answer", status: "success" })).toBe(1)
+  })
+
+  it("FLF-333: hết hạn mức câu hỏi tri thức trong ngày ⇒ 429 KNOWLEDGE_DAILY_LIMIT, không gọi model, không trừ credit", async () => {
+    const f = await seedFixture("minimal")
+    const before = await balance(f)
+    const limit = env.KNOWLEDGE_DAILY_LIMIT
+    await AiActionLog.insertMany(
+      Array.from({ length: limit }, () => ({ userId: f.userId, projectId: f.projectId, actionType: "knowledge_answer", provider: "mock", aiModel: "mock", status: "success" }))
+    )
+    const res = await request(app).post(messages(f)).set(bearer(f)).send({ content: CAPS_QUESTION, step: "chat", knowledge: true })
+    expect(res.status).toBe(429)
+    expect(res.body.error.code).toBe("KNOWLEDGE_DAILY_LIMIT")
+    expect(res.body.meta).toMatchObject({ limit, used: limit })
+    expect(mockCalls).toHaveLength(0)
+    expect(await balance(f)).toBe(before)
   })
 
   it("không đủ căn cứ ⇒ câu cố định, grounded: false, KHÔNG gọi model, không trừ credit", async () => {
@@ -121,7 +138,7 @@ describe("FLF-267 chat — trả lời có căn cứ", () => {
     const events = parseSse(res.text)
     expect(events.map((e) => e.type)).toEqual(["finish"])
     expect(events[0]!.data).toMatchObject({ grounded: true, questions: [] })
-    expect(events[0]!.cost).toBe(2)
+    expect(events[0]!.cost).toBe(0) // FLF-333: hỏi tri thức không tốn credit
     expect(await lastAi(f)).toEqual(events[0]!.data)
   })
 
