@@ -97,7 +97,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 21 | `POST …/:crId/impact` | UC-50, 3.4–3.5 | `{}` | `changeRequestDetailSchema` (`locations[]`, phần tử đã khoá) | `PATH_LOCKED`, `CR_INVALID_TRANSITION` |
 | 22 | `POST …/:crId/propose` | UC-81, 3.6 | `{}` | `changeRequestDetailSchema` (`groups[]`) | `CR_INVALID_TRANSITION`, `INSUFFICIENT_CREDIT` |
 | 23 | `PATCH …/:crId/locations/:locId` | UC-81, 3.9 | `patchLocationRequestSchema` | `changeRequestDetailSchema` (vị trí `manual = true`) | `CR_LOCATION_NOT_FOUND`, `CR_INVALID_TRANSITION` |
-| 24 | `POST …/:crId/verify` | UC-82, 3.7–3.8 | `{}` | `changeRequestDetailSchema` (`ready_to_submit`, `proposing` hoặc `manual_fix`) | `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `INSUFFICIENT_CREDIT` |
+| 24 | `POST …/:crId/verify` | UC-82, 3.7–3.8 | `{}` | `changeRequestDetailSchema` (`ready_to_submit`, `proposing` hoặc `manual_fix`). **FLF-337**: dự án ở mức duyệt `milestones` ("Chỉ ở mốc chốt") và kiểm đạt không kèm nhận xét AI ⇒ CR **tự xác nhận** như #25 ⇒ trả `written`, ghi sổ tự qua (`GET /auto-passed`, `C-6:<cr_id>`); Lead duyệt gói (C-7) vẫn là cổng cứng | `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `INSUFFICIENT_CREDIT` |
 | 25 | `POST …/:crId/submit` | UC-51, 3.11 | `{}` | `changeRequestDetailSchema` (`in_review`) | `CR_LOCATION_UNCONCLUDED`, `CR_INVALID_TRANSITION` |
 | 26 | `POST …/:crId/groups/:gid/decision` | UC-52, 3.12–3.14 | `groupDecisionRequestSchema` | `changeRequestDetailSchema`; khi group cuối được quyết mà có group duyệt ⇒ `written` kèm `result_doc_version` | `CR_GROUP_NOT_FOUND`, `CR_INVALID_TRANSITION`, `CR_VALUE_CHANGED`, `SPINE_VERSION_CONFLICT` |
 | 27 | `POST …/:crId/revise` | UC-52 | `{}` | `changeRequestDetailSchema` (khoá lại phần tử, về `proposing`) | `PATH_LOCKED`, `CR_INVALID_TRANSITION` |
@@ -423,6 +423,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-27 | contract-change FLF-337 (mức duyệt sau baseline) | Hành vi: #24 `verify` ở `review_mode = milestones` tự gọi #25 khi đạt ⇒ `written` (pipeline-contract 4f đổi mức duyệt dùng được ở mode 1) |
 | 2026-10-23 | contract-change (quyền Lead/Viewer) | `POST /release` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`). Viewer: `GET /versions/:v/download` chỉ cho bản release (`x.0`) và v0, `variant=tracked` ⇒ 403; `GET /import`, `/gap-report`, `/step-plan`, `/change-requests*` ⇒ 403. |
 | 2026-10-20 | FLF-312 — bỏ bắt buộc mẫu FPT | Gap report bỏ `missing_fpt_sections[]`, `missing_sections[]`, `unmapped_headings[]` và các `totals` tương ứng; `TemplateProfile` bỏ `required_sections`; #32 bỏ `missing` — đầu mục FPT file không có ⇒ `hidden`, có heading mà trống ⇒ `enabled`; #33 `CORE_STEP_REQUIRED` chỉ còn cho bước luôn chạy / step đã có dữ liệu — breaking (FE cập nhật cùng đợt) |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
