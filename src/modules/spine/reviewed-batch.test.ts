@@ -8,7 +8,7 @@ import type { Op } from "./op.types.js"
 import type { Spine } from "./spine.types.js"
 import { computeSectionStates } from "./section-status.js"
 import { normalizeUseCaseBatch } from "./use-case-propagation.js"
-import { isSelfContainedBatch, reacceptOps } from "./reviewed-batch.js"
+import { isSelfContainedBatch, ownedSections, reacceptOps } from "./reviewed-batch.js"
 
 /** FLF-318: lô thêm use case đã duyệt qua bản xem trước không để lại section `stale`; lô sửa văn xuôi cũ thì vẫn để. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -118,5 +118,34 @@ describe("lô xoá use case trọn gói (luật 3g)", () => {
     const ops = reacceptOps(accepted.spine, history, removal.spine, all, "2026-10-24T01:00:00.000Z")
     const after = plan(removal.spine, ops, 200_000)
     expect(staleIds(after.spine, [...all, ...after.changes]).filter((id) => !before.includes(id))).toEqual([])
+  })
+})
+
+describe("lô sửa use case (luật 3h): chỉ ghi lại section sở hữu dữ liệu lô ghi", () => {
+  const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+  const rename = (): Op[] => [{ op: "set", path: "use_cases[id=UC01].name", value: `${uc.name} (v2)` }]
+
+  it("ownedSections: đổi tên use case ⇒ section sở hữu use case, không gồm section chỉ đọc nó", () => {
+    const batch = plan(FIXTURE, rename(), 100_000)
+    const owned = ownedSections(FIXTURE, batch.spine, batch.changes)
+    expect(owned.size).toBeGreaterThan(0)
+    const stale = staleIds(batch.spine, batch.changes)
+    // Có section stale vì chỉ đọc use case ⇒ không thuộc owned
+    expect(stale.some((id) => !owned.has(id))).toBe(true)
+  })
+
+  it("ownedSections: phần tử đã xoá vẫn phân giải trên Spine trước", () => {
+    const batch = plan(FIXTURE, [{ op: "remove", path: "messages[code=" + FIXTURE.messages[0].code + "]" }], 100_000)
+    expect(ownedSections(FIXTURE, batch.spine, batch.changes).size).toBeGreaterThan(0)
+  })
+
+  it("reacceptOps với only ⇒ section ngoài only vẫn stale", () => {
+    const batch = plan(FIXTURE, rename(), 100_000)
+    const owned = ownedSections(FIXTURE, batch.spine, batch.changes)
+    const ops = reacceptOps(FIXTURE, [], batch.spine, batch.changes, "2026-10-24T00:00:00.000Z", owned)
+    const reaccepted = plan(batch.spine, ops, 200_000)
+    const after = staleIds(reaccepted.spine, [...batch.changes, ...reaccepted.changes])
+    for (const id of owned) expect(after).not.toContain(id)
+    expect(after.length).toBeGreaterThan(0)
   })
 })

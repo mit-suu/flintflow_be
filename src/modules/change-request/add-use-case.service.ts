@@ -12,6 +12,7 @@
  * 3. mỗi vị trí mang `new_text` = phần tử sau cả lô ⇒ người duyệt thấy đủ §2.2.x, Functional Requirements, §3.1.1–3.1.3.
  * Lô không soạn được (model vẫn hỏi, lô sai, khoá trùng) ⇒ trả `skipped`, C-4 đề xuất theo vị trí như cũ.
  *
+ * CR **sửa** use case cũng vậy (luật 3h): đổi tên / actor / luồng kéo theo chức năng, màn, phân quyền, thông báo của nó.
  * CR **xoá** use case đi cùng đường này (luật 3g, như chat trước baseline): lô xoá use case kèm chức năng, màn, thông báo
  * chỉ thuộc nó; mỗi op về vị trí của phần tử bị xoá (thiếu ⇒ tạo + khoá). Use case cùng luồng đã được hỏi ở C-2
  * (`cr-clarify` luật 10) — câu trả lời nằm trong lệnh gửi model.
@@ -23,7 +24,7 @@ import { draftUseCaseOps, type ChangeExecutor, type ResolvedOps } from "../spine
 import { TransactionRejectedError, planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
-import { useCaseIntent } from "../spine/use-case-propagation.js"
+import { useCaseIntent, type UseCaseIntent } from "../spine/use-case-propagation.js"
 import type { ChangeInstructionOutput } from "../../shared/ai/response-parser.js"
 import type { AiActionResult } from "../../shared/ai/ai-action.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
@@ -36,7 +37,10 @@ import { SECTION_FILL_ARRAYS, addedElements, elementPathOf, elementValue, isArra
 /** Lý do của vị trí do lô thêm / xoá use case soạn — nhận ra để không soạn lại ở vòng đề xuất sau. */
 export const ADD_USE_CASE_REASON = "Thêm use case kèm chức năng, màn, luồng màn và phân quyền liên quan"
 export const REMOVE_USE_CASE_REASON = "Xoá use case kèm chức năng, màn và thông báo chỉ thuộc nó"
-const BUNDLE_REASONS = new Set([ADD_USE_CASE_REASON, REMOVE_USE_CASE_REASON])
+export const EDIT_USE_CASE_REASON = "Sửa use case kèm chức năng, màn, phân quyền và thông báo của nó"
+const BUNDLE_REASONS = new Set([ADD_USE_CASE_REASON, REMOVE_USE_CASE_REASON, EDIT_USE_CASE_REASON])
+const REASON_OF: Readonly<Record<UseCaseIntent, string>> = { add: ADD_USE_CASE_REASON, remove: REMOVE_USE_CASE_REASON, edit: EDIT_USE_CASE_REASON }
+const VERB_OF: Readonly<Record<UseCaseIntent, string>> = { add: "thêm", remove: "xoá", edit: "sửa" }
 
 /** Chữ người yêu cầu viết (tiêu đề, mô tả, lệnh gộp thêm, câu trả lời làm rõ). */
 const requesterText = (cr: Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications">): string =>
@@ -44,8 +48,8 @@ const requesterText = (cr: Pick<IChangeRequest, "title" | "description" | "amend
 
 type CrText = Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications">
 
-/** CR thêm hay xoá use case (động từ đứng trước thắng — như chat); không đụng use case ⇒ `null`. */
-export const crUseCaseIntent = (cr: CrText): "add" | "remove" | null => useCaseIntent(requesterText(cr))
+/** CR thêm / xoá / sửa use case (động từ đứng trước thắng — như chat); không đụng use case ⇒ `null`. */
+export const crUseCaseIntent = (cr: CrText): UseCaseIntent | null => useCaseIntent(requesterText(cr))
 
 export const crAddsUseCase = (cr: CrText): boolean => crUseCaseIntent(cr) === "add"
 
@@ -180,7 +184,7 @@ const draftBatch = async (
   userId: string,
   spine: Spine,
   instruction: string,
-  intent: "add" | "remove",
+  intent: UseCaseIntent,
   deps: { changeExecutor?: ChangeExecutor }
 ): Promise<{ drafted: ResolvedOps; batch: { ops: Op[]; after: Spine } } | "paused" | "skipped"> => {
   const projectId = String(cr.projectId)
@@ -198,13 +202,13 @@ const draftBatch = async (
       await cr.save()
       return "paused"
     }
-    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${intent === "add" ? "thêm" : "xoá"} use case lỗi (${err.message}) — đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: soạn lô ${VERB_OF[intent]} use case lỗi (${err.message}) — đề xuất theo từng vị trí`)
     return "skipped"
   }
   if (drafted.clarification || !drafted.ops.length) return "skipped"
   const batch = concreteBatch(spine, drafted.ops)
   if (!batch) {
-    console.warn(`[C-4] ${cr.cr_id}: lô ${intent === "add" ? "thêm" : "xoá"} use case không áp thử được — đề xuất theo từng vị trí`)
+    console.warn(`[C-4] ${cr.cr_id}: lô ${VERB_OF[intent]} use case không áp thử được — đề xuất theo từng vị trí`)
     return "skipped"
   }
   return { drafted, batch }
@@ -215,7 +219,7 @@ const attachBatch = async (
   cr: IChangeRequest,
   spine: Spine,
   locations: readonly IChangeLocation[],
-  intent: "add" | "remove",
+  intent: UseCaseIntent,
   drafted: ResolvedOps,
   batch: { ops: Op[]; after: Spine }
 ): Promise<UseCaseBatchOutcome> => {
@@ -253,7 +257,7 @@ const attachBatch = async (
   for (const b of bundle) {
     const loc = byPath.get(b.path)!
     loc.conclusion = "edit"
-    loc.reason = intent === "add" ? ADD_USE_CASE_REASON : REMOVE_USE_CASE_REASON
+    loc.reason = REASON_OF[intent]
     loc.proposal = {
       ...snapshotOf(spine, b.path),
       new_text: bundleNewText(spine, batch.after, b.path),
