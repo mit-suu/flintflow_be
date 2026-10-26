@@ -32,6 +32,7 @@ import { answersText, crHeader, glossaryText, materialsText, missingInfoText, tr
 import { addedElements, elementValue, isArrayPath, isSectionTarget, opElement, snapshotOf, valueText } from "./spine-location.js"
 import { isDiagramLocation, refreshDiagramLocations } from "./diagram-location.js"
 import { reassignDuplicateIds } from "./new-ids.js"
+import { proposeUseCaseBatch } from "./add-use-case.service.js"
 
 /**
  * Số vị trí gửi trong một lượt C-4. Trước là 12: prompt kèm giá trị JSON của từng phần tử (tới 2500 ký tự) và câu
@@ -168,7 +169,13 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const record = await spineRepository.get(String(cr.projectId))
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
-  const locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+
+  // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
+  // lại đề xuất theo lô như dưới. Hết credit ⇒ dừng như C-4.
+  const bundled = await proposeUseCaseBatch(cr, userId, spine, locations)
+  if (bundled === "paused") return
+  if (bundled === "done") locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
   // Vị trí sơ đồ gốc (§4.13) không qua AI — kết luận sau khi các vị trí khác có đề xuất (`refreshDiagramLocations`)
   const todo = locations.filter((l) => needsProposal(l) && !isDiagramLocation(l))
