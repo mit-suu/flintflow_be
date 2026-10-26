@@ -60,6 +60,21 @@ describe("credit-reservation.service", () => {
     projectOrg.id = null
   })
 
+  it("FLF-333: knowledge_answer 0 credit — reserve không đụng ví / sổ, deduct và release là no-op", async () => {
+    expect(await getActionCost(ActionType.KNOWLEDGE_ANSWER)).toBe(0)
+    await getOrCreateWallet(USER, undefined, ORG)
+    const balanceBefore = walletOf().balance
+    const entries = ledger().docs.length
+    const reservation = await reserveCredit(USER, ActionType.KNOWLEDGE_ANSWER, undefined, undefined, ORG)
+    expect(reservation).toMatchObject({ cost: 0, actionType: ActionType.KNOWLEDGE_ANSWER, organizationId: ORG })
+    expect(reservation.reservationId).toMatch(/^[0-9a-f]{24}$/)
+    expect(walletOf()).toMatchObject({ balance: balanceBefore, reserved: 0 })
+    await deductCredit(reservation)
+    expect(await releaseCredit(reservation)).toBe(true)
+    expect(walletOf()).toMatchObject({ balance: balanceBefore, reserved: 0 })
+    expect(ledger().docs.length).toBe(entries)
+  })
+
   it("FLF-265: translate_document tính 2 credit / lô", async () => {
     expect(await getActionCost(ActionType.TRANSLATE_DOCUMENT)).toBe(2)
   })

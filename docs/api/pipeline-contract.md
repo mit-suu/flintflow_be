@@ -108,6 +108,7 @@ Nếu lô đã tự liệt kê op cascade, engine không sinh trùng.
 | 422 | `CHANGE_RANGE_INVALID` | Dải seq revert không hợp lệ/không đầy đủ | — |
 | 422 | `NOTHING_TO_UNDO` | Không còn txn có thể undo | — |
 | 422 | `BASELINE_BLOCKED` | Còn cờ đỏ chưa waive khi ghi baseline | `{ flags[] }` |
+| 429 | `KNOWLEDGE_DAILY_LIMIT` | Chat `knowledge: true` khi user đã hết hạn mức câu hỏi tri thức trong ngày (FLF-333; hỏi tri thức không tốn credit nên chặn lạm dụng bằng số câu) | `{ limit, used }` |
 | 429 | `RATE_LIMIT_EXCEEDED` | Nhà cung cấp AI từ chối: hết hạn mức, chưa gắn thanh toán, hoặc gọi quá nhanh | — |
 | 502 | `AI_PROVIDER_ERROR` | Nhà cung cấp AI lỗi / trả rỗng (`GLM_EMPTY_OUTPUT`, 5xx…) | — |
 | 501 | `NOT_IMPLEMENTED` | Nhánh chưa hiện thực (vd `instruction` trước T17) | — |
@@ -204,7 +205,7 @@ Lô bị từ chối:
 
 | Field | Kiểu | Ý nghĩa |
 | --- | --- | --- |
-| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, 2 credit) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
+| `knowledge` | `boolean`, mặc định `false` | `true` ⇒ tin là **câu hỏi tri thức**: trả lời từ Knowledge RAG (`call_kind` `knowledge_answer`, **0 credit** — FLF-333, giới hạn `KNOWLEDGE_DAILY_LIMIT` câu / user / ngày, vượt ⇒ `429 KNOWLEDGE_DAILY_LIMIT`) thay cho CHAT. Không phải boolean (vd `"true"`) ⇒ `400 VALIDATION_ERROR`. Server tắt tính năng ⇒ `409 KNOWLEDGE_DISABLED` |
 
 Thứ tự xử lý khi `knowledge: true`: đi **trước** lượt chờ trả lời của step (phiên pipeline — lượt chờ giữ nguyên, tin không
 thành câu trả lời của step) và trước lệnh sửa (không có bản xem trước, không đọc / ghi Spine); chốt `409 CHANGE_REQUIRES_CR`
@@ -319,3 +320,4 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 | 2026-10-22 | contract-change FLF-316 (xuất PDF) | Additive. Endpoint mới 34 `GET /projects/:id/export/pdf` — cùng query/quyền/header/mã lỗi với #18, file là bản `.docx` của #18 chuyển bằng Gotenberg. Mã lỗi mới `503 PDF_EXPORT_UNAVAILABLE` (bộ chuyển không sẵn sàng). Không đổi shape request/response của endpoint nào đang có |
 | 2026-10-23 | contract-change (quyền Lead/Viewer theo UC-20/38/39/47/50) | Siết quyền, không đổi shape. `POST /steps/S-9.5/gate` với `accept`/`accept_as_is` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`; Analyst nộp qua #32). Viewer chỉ còn GET: danh sách/chi tiết dự án, `document`, `export/word`, `diagrams`, `baselines`, `versions` (+`compare`, `blocks`, `download`), `progress`, `traceability`, `comments` — mọi GET khác 403 `ORG_ROLE_FORBIDDEN`. Với Viewer: `document` bỏ `flagsAppendix`/`awaiting_reaccept`, `stale` ⇒ `draft`; `progress` trả `red_open`/`awaiting_reaccept`/`stale` = 0; `export/word?source=draft` ⇒ 403. |
 | 2026-10-26 | contract-change FLF-329 (bỏ waive cờ đỏ) | Siết luật BR-04 + additive. #13 `waive` chỉ còn cho cờ vàng — mọi cờ đỏ (13 luật) trả `400 FLAG_NOT_WAIVABLE` (`meta.level = "red"`), `NON_WAIVABLE_RULES` = mọi luật đỏ. `Flag` thêm `kept_reason`, `kept_by`, `kept_at` (nullable, Spine cũ ⇒ `null`, không migration schema). Endpoint mới `POST /flags/:flagId/keep` ("Giữ nguyên + lý do"), mã lỗi `400 FLAG_NOT_KEEPABLE`. `readiness.red_open`, phụ lục cờ của bản nháp và `blockingFlags` **không trừ** cờ đỏ đã waive trước đây — script `npm run migrate:red-waivers` chuyển waiver cũ trên cờ đỏ thành giữ nguyên + lý do |
+| 2026-10-26 | contract-change FLF-333 (hỏi tri thức không tốn credit) | Additive. `knowledge_answer` giá 0 credit (không giữ / trừ ví, vẫn ghi `aiactionlogs`); mã lỗi mới `429 KNOWLEDGE_DAILY_LIMIT` (`meta { limit, used }`), hạn mức `KNOWLEDGE_DAILY_LIMIT` (mặc định 60 câu / user / ngày). Không đổi shape request/response |
