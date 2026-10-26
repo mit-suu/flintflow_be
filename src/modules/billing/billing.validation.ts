@@ -18,6 +18,14 @@ export const upgradeSchema = z.object({
   plan: z.enum(PLAN_IDS as [string, ...string[]])
 })
 
+/** FLF-332: Analyst báo Lead nạp credit — mọi field tuỳ chọn (bước đang dừng, số credit cần). */
+export const topupRequestSchema = z.object({
+  projectId: z.string().trim().min(1).optional(),
+  step: z.string().trim().max(60).optional(),
+  needed: z.coerce.number().int().positive().max(100_000).optional()
+})
+export type TopupRequestDTO = z.infer<typeof topupRequestSchema>
+
 export const transactionsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20)

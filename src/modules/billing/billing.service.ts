@@ -7,6 +7,7 @@ import { CreditTransaction } from "../credits/credit-transaction.model.js"
 import { Subscription } from "../credits/subscription.model.js"
 import { notify } from "../notification/notification.service.js"
 import { scheduleResumeAfterTopUp } from "../import/credit-flow.service.js"
+import { fulfillTopupRequests } from "./topup-request.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
@@ -269,6 +270,8 @@ const settleIntent = async (
     await scheduleResumeAfterTopUp(userId, paidOrgId, intentId).catch((err) =>
       console.warn("[billing] không đưa được lượt chạy tiếp mode 1 sau khi nạp vào hàng đợi:", err)
     )
+    // FLF-332 (BR-08): Analyst đã bấm "Báo Lead nạp" ⇒ báo lại cho họ; step không tự chạy
+    if (paidOrgId) await fulfillTopupRequests(paidOrgId, intent.credits, { kind: "payment", userId })
   } else {
     await notify(userId, {
       type: "payment_failed",
