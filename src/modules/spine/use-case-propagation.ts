@@ -14,11 +14,12 @@
 import { PHASES } from "../pipeline/step-registry.js"
 import { stepGate } from "./deterministic-check.js"
 import type { Op } from "./op.types.js"
-import type { Spine } from "./spine.types.js"
+import type { Spine, UseCase } from "./spine.types.js"
 
 /** "thêm use case …", "bổ sung UC …", "add a use case …" — câu lệnh tạo use case mới. */
 const ADD_VERB = /(thêm|bổ sung|tạo|add|create|new)/i
-const USE_CASE_WORD = /(use[\s-]?case|\buc\b|ca sử dụng)/i
+// "UC", "UC01", "UC-26" (mã dính số) — `\buc\b` cũ không khớp "UC01"
+const USE_CASE_WORD = /(use[\s-]?case|\buc(?![a-z])|ca sử dụng)/i
 
 export const isAddUseCaseInstruction = (instruction: string): boolean => ADD_VERB.test(instruction) && USE_CASE_WORD.test(instruction)
 
@@ -26,16 +27,27 @@ export const isAddUseCaseInstruction = (instruction: string): boolean => ADD_VER
 // `\b` của JS coi chữ có dấu là ngoài từ ⇒ "bỏ" dùng lookaround Unicode (không khớp "bổ sung")
 const REMOVE_VERB = /(xoá|xóa|loại bỏ|(?<!\p{L})bỏ(?!\p{L})|gỡ|remove|delete|drop)/iu
 
+/** "sửa UC …", "đổi actor của use case …", "cập nhật luồng UC …", "rename the … use case" — câu lệnh sửa use case. */
+const EDIT_VERB = /(sửa|chỉnh|cập nhật|thay|(?<!\p{L})đổi(?!\p{L})|edit|rename|update|change|modify)/iu
+
+export type UseCaseIntent = "add" | "remove" | "edit"
+
 /**
  * Ý của câu lệnh về use case: động từ đứng TRƯỚC thắng — "xoá use case vừa tạo" là xoá dù có chữ "tạo", "thêm UC …, bỏ
- * màn cũ" là thêm. Không nhắc use case ⇒ `null`.
+ * màn cũ" là thêm, "sửa UC X, thêm bước duyệt" là sửa. Không nhắc use case ⇒ `null`.
  */
-export const useCaseIntent = (instruction: string): "add" | "remove" | null => {
+export const useCaseIntent = (instruction: string): UseCaseIntent | null => {
   if (!USE_CASE_WORD.test(instruction)) return null
-  const add = ADD_VERB.exec(instruction)?.index ?? Infinity
-  const remove = REMOVE_VERB.exec(instruction)?.index ?? Infinity
-  if (add === Infinity && remove === Infinity) return null
-  return remove < add ? "remove" : "add"
+  const found = (
+    [
+      ["add", ADD_VERB.exec(instruction)?.index ?? Infinity],
+      ["remove", REMOVE_VERB.exec(instruction)?.index ?? Infinity],
+      ["edit", EDIT_VERB.exec(instruction)?.index ?? Infinity]
+    ] as const
+  )
+    .filter(([, at]) => at !== Infinity)
+    .sort((a, b) => a[1] - b[1])
+  return found[0]?.[0] ?? null
 }
 
 /**
@@ -332,6 +344,108 @@ export const removalNote = (leftovers: readonly RemovalLeftover[], language: "vi
   return language === "en"
     ? `Still left without a use case after the removal: ${names}. Say "remove them too" to delete them.`
     : `Sau khi xoá vẫn còn phần không thuộc use case nào: ${names}. Nhắn "xoá luôn các phần đó" nếu muốn xoá.`
+}
+
+// ─── FLF-318: sửa use case kéo theo phần chỉ thuộc nó (luật 3h) ─────────────────────
+
+type EditParts = Pick<Spine, "use_cases" | "functions" | "screens" | "permissions" | "messages" | "roles">
+
+const mentions = (text: string, uc: Pick<UseCase, "id" | "name">): boolean => {
+  const said = ` ${text.toLowerCase().replace(/[^\p{L}\p{N}-]+/gu, " ")} `
+  return said.includes(` ${uc.id.toLowerCase()} `) || (uc.name.trim().length >= 4 && said.includes(` ${words(uc.name).join(" ")} `))
+}
+
+/**
+ * Ngữ cảnh lệnh sửa use case: với mỗi use case được nhắc (mã hoặc tên), giá trị hiện tại của nó và phần của nó — chức năng
+ * (đủ normal / abnormal / validations để sửa luồng), màn, quyền trên các màn đó, thông báo — kèm use case khác đang dùng
+ * chung từng chức năng / màn (phần dùng chung phải hỏi trước). Không nhắc được use case nào ⇒ `[]` (model hỏi chọn).
+ */
+export const useCaseEditContext = (spine: EditParts, text: string): Record<string, unknown>[] =>
+  spine.use_cases
+    .filter((uc) => mentions(text, uc))
+    .slice(0, 4)
+    .map((uc) => {
+      const fns = spine.functions.filter((f) => uc.function_ids.includes(f.id))
+      const screenIds = [...new Set(fns.map((f) => f.screen_id).filter((id): id is string => !!id))]
+      const sharedBy = (pred: (other: UseCase) => boolean) => spine.use_cases.filter((o) => o.id !== uc.id && pred(o)).map((o) => o.id)
+      return {
+        use_case: uc,
+        functions: fns.map((f) => ({ ...f, shared_with: sharedBy((o) => o.function_ids.includes(f.id)) })),
+        screens: spine.screens
+          .filter((s) => screenIds.includes(s.id))
+          .map(({ id, name, description, flow_to, is_popup, primary_function_id }) => ({
+            id,
+            name,
+            description,
+            flow_to,
+            is_popup,
+            primary_function_id,
+            shared_with: sharedBy((o) => spine.functions.some((f) => f.screen_id === id && o.function_ids.includes(f.id)))
+          })),
+        permissions: spine.permissions.filter((p) => screenIds.includes(p.screen_id)),
+        messages: spine.messages.filter((m) => m.function_ids.some((id) => uc.function_ids.includes(id)))
+      }
+    })
+
+export type EditIssue =
+  | { kind: "new_actor_no_view"; use_case: string; role: string; screen: string }
+  | { kind: "old_actor_still_allowed"; use_case: string; role: string; screen: string }
+
+/**
+ * Phần lô sửa use case bỏ sót khi **đổi actor**: vai trò của actor mới chưa có quyền xem màn của use case; vai trò của actor
+ * cũ vẫn còn quyền trên màn mà không use case nào khác của actor đó dùng.
+ */
+export const editIssues = (before: EditParts, after: EditParts): EditIssue[] => {
+  const out: EditIssue[] = []
+  const rolesOf = (spine: EditParts, actorId: string) => spine.roles.filter((r) => r.actor_id === actorId)
+  for (const uc of after.use_cases) {
+    const old = before.use_cases.find((u) => u.id === uc.id)
+    if (!old) continue
+    const added = uc.actor_ids.filter((a) => !old.actor_ids.includes(a))
+    const dropped = old.actor_ids.filter((a) => !uc.actor_ids.includes(a))
+    if (!added.length && !dropped.length) continue
+    const screens = [...new Set(after.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+    const screenName = (id: string) => after.screens.find((s) => s.id === id)?.name ?? id
+    for (const screen of screens) {
+      for (const role of added.flatMap((a) => rolesOf(after, a))) {
+        if (!after.permissions.some((p) => p.screen_id === screen && p.role_id === role.id && p.action === "view")) {
+          out.push({ kind: "new_actor_no_view", use_case: uc.name, role: role.name, screen: screenName(screen) })
+        }
+      }
+      for (const actor of dropped) {
+        const stillUsed = after.use_cases.some(
+          (o) => o.id !== uc.id && o.actor_ids.includes(actor) && after.functions.some((f) => f.screen_id === screen && o.function_ids.includes(f.id))
+        )
+        if (stillUsed) continue
+        for (const role of rolesOf(after, actor)) {
+          if (after.permissions.some((p) => p.screen_id === screen && p.role_id === role.id)) {
+            out.push({ kind: "old_actor_still_allowed", use_case: uc.name, role: role.name, screen: screenName(screen) })
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
+/** Lỗi gửi model ở lượt soạn lại (luật 3h). */
+export const editProblemText = (issue: EditIssue): string =>
+  issue.kind === "new_actor_no_view"
+    ? `Use case "${issue.use_case}" now has role "${issue.role}", which has no view permission on its screen "${issue.screen}": add a permissions[] row (rule 3h).`
+    : `Use case "${issue.use_case}" no longer has role "${issue.role}", but it still has permissions on "${issue.screen}", which no other use case of that actor uses: remove those permissions[] rows (rule 3h).`
+
+/** Còn sót sau lượt soạn lại ⇒ ghi chú trên bản xem trước (không chặn). */
+export const editNote = (issues: readonly EditIssue[], language: "vi" | "en" = "vi"): string | null => {
+  if (issues.length === 0) return null
+  const line = (i: EditIssue) =>
+    i.kind === "new_actor_no_view"
+      ? language === "en"
+        ? `Role "${i.role}" has no view permission on "${i.screen}" yet (§3.1.3).`
+        : `Vai trò "${i.role}" chưa có quyền xem màn "${i.screen}" (§3.1.3).`
+      : language === "en"
+        ? `Role "${i.role}" still has permissions on "${i.screen}" although it no longer uses "${i.use_case}".`
+        : `Vai trò "${i.role}" vẫn còn quyền trên màn "${i.screen}" dù không còn dùng "${i.use_case}".`
+  return issues.map(line).join("\n")
 }
 
 // ─── mỗi use case mới có giao diện: màn của nó, có luồng vào, có quyền ─────────────────────

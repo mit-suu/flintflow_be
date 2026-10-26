@@ -12,7 +12,7 @@
  * Hàm thuần: caller ghi `steps[id=…].accepted_at` qua `applyTransaction`.
  */
 
-import { stepsOf } from "./section-registry.js"
+import { sectionsOfPath, stepsOf } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import type { Op } from "./op.types.js"
 import type { Change, Spine } from "./spine.types.js"
@@ -86,7 +86,9 @@ export const reacceptOps = (
   beforeChanges: readonly StateChange[],
   after: Spine,
   afterChanges: readonly StateChange[],
-  at: string
+  at: string,
+  /** Chỉ xét các section này (lô sửa use case: section mà lô ghi vào dữ liệu thuộc nó — `ownedSections`). */
+  only?: ReadonlySet<string>
 ): Op[] => {
   const wasStale = new Set(computeSectionStates(before, [...beforeChanges]).filter((s) => s.status === "stale").map((s) => s.id))
   const accepted = new Set(after.steps.filter((s) => s.status === "accepted").map((s) => s.id))
@@ -94,8 +96,27 @@ export const reacceptOps = (
   const keep = new Set([...wasStale].flatMap((id) => stepsOf(id, after)))
   const steps = new Set<string>()
   for (const s of computeSectionStates(after, [...afterChanges])) {
-    if (s.status !== "stale" || wasStale.has(s.id)) continue
+    if (s.status !== "stale" || wasStale.has(s.id) || (only && !only.has(s.id))) continue
     for (const id of stepsOf(s.id, after)) if (accepted.has(id) && !keep.has(id)) steps.add(id)
   }
   return [...steps].map((id) => ({ op: "set" as const, path: `steps[id=${id}].accepted_at`, value: at }))
 }
+
+/**
+ * Section mà các change này ghi vào dữ liệu **thuộc** nó (cột Sở hữu của bảng §4 — `sectionsOfPath(...).owner`), xét trên
+ * cả Spine trước (phần tử đã xoá) lẫn sau (phần tử mới). Section chỉ đọc dữ liệu bị đổi không tính.
+ */
+export const ownedSections = (before: Spine, after: Spine, changes: readonly Pick<Change, "path">[]): Set<string> => {
+  const out = new Set<string>()
+  for (const c of changes) {
+    for (const spine of [after, before]) {
+      try {
+        for (const id of sectionsOfPath(spine, c.path).owner) out.add(id)
+      } catch {
+        // path không phân giải trên Spine này (phần tử chỉ có ở bản kia) — bản còn lại lo
+      }
+    }
+  }
+  return out
+}
+

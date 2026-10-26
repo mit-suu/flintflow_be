@@ -60,11 +60,17 @@ import {
   removalProblemText,
   removesUseCaseOrScreen,
   useCaseIntent,
+  useCaseEditContext,
+  editIssues,
+  editNote,
+  editProblemText,
+  type EditIssue,
+  type UseCaseIntent,
   type RemovalLeftover,
   type UiPlanEntry,
   type UseCaseMode
 } from "./use-case-propagation.js"
-import { isSelfContainedBatch, reacceptOps } from "./reviewed-batch.js"
+import { isSelfContainedBatch, ownedSections, reacceptOps } from "./reviewed-batch.js"
 import { layoutRenderDeps, renderChangedIfAvailable } from "../diagram/diagram.service.js"
 import type { Change, Spine, SpineRecord } from "./spine.types.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -157,6 +163,8 @@ interface StoredPreview {
    */
   localized?: LocalizedEntry[]
   language?: TurnLanguagePair | null
+  /** FLF-318: ý của cả vòng hỏi đáp (thêm / xoá / sửa use case) — lượt áp chỉ còn câu trả lời cuối, không đoán lại được. */
+  use_case_intent?: UseCaseIntent | null
   expires_at: number
 }
 
@@ -445,6 +453,9 @@ export interface ChangeDeps {
   renderAfterChange?: (projectId: string, userId: string, newScreenIds: string[]) => Promise<unknown>
 }
 
+/** Path của phần use case (use case, màn, chức năng, quyền, thông báo) — lô sửa chạm tới thì vẽ lại sơ đồ. */
+const USE_CASE_PARTS = /^(use_cases|screens|functions|permissions|messages)\[/
+
 export const defaultChangeDeps = (): ChangeDeps => ({
   changeExecutor: (actionType, input, projectId, userId) => executeAiAction<ChangeInstructionOutput>(actionType, input, projectId, userId),
   recomputeFlags: (projectId, userId) => flagsService.recompute(projectId, { by: userId }),
@@ -515,6 +526,8 @@ export interface ResolvedOps {
   language?: TurnLanguagePair | null
   /** FLF-318: use case model đề xuất thêm ngoài yêu cầu (luật 3e) — lô cho change request ghi vào giả định để Lead xem. */
   proposed?: string[]
+  /** FLF-318: ý của lệnh về use case (gồm cả câu hỏi làm rõ trước đó). */
+  intent?: UseCaseIntent | null
 }
 
 /** Model gửi field không có trong Spine (`screens[].authorized_role_ids`) — nhắc nó chỉ dùng field thấy trong projection. */
@@ -528,11 +541,11 @@ const SCHEMA_FIX =
  * - FLF-243: tên use case model TỰ đặt mà cờ vàng `usecase_name_*` sẽ bắt. Tên user gõ nguyên văn thì để yên.
  */
 /** Lệnh thêm use case có màn: phần giao diện còn thiếu của các use case mới (lô không áp thử được ⇒ để lỗi bất biến lo). */
-const screenIssuesOf = (spine: Spine, ops: Op[], ucMode: UseCaseMode | null, allowShared: boolean, uiPlan: readonly UiPlanEntry[] = []) => {
+const screenIssuesOf = (spine: Spine, ops: Op[], ucMode: UseCaseMode | null, allowShared: boolean, uiPlan: readonly UiPlanEntry[] = [], newUseCase = true) => {
   if (ops.length === 0 || (ucMode !== "screen_pending" && ucMode !== "full")) return { screen: [], plan: [] }
   try {
     const planned = planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 })
-    const expectUseCase = !(uiPlan.length > 0 && uiPlan.every((e) => e.drop))
+    const expectUseCase = newUseCase && !(uiPlan.length > 0 && uiPlan.every((e) => e.drop))
     return { screen: newUseCaseScreenIssues(spine, planned.spine, { allowShared, expectUseCase }), plan: uiPlanIssues(spine, planned.spine, uiPlan) }
   } catch (err) {
     if (err instanceof TransactionRejectedError) return { screen: [], plan: [] }
@@ -559,7 +572,9 @@ const batchProblems = (
   allowShared = false,
   uiPlan: readonly UiPlanEntry[] = [],
   /** FLF-318: lệnh xoá use case ⇒ phần chỉ thuộc use case bị xoá phải đi cùng lô (luật 3g). */
-  removesUseCase = false
+  removesUseCase = false,
+  /** FLF-318: lệnh sửa use case ⇒ đổi actor thì quyền trên màn của use case đổi theo (luật 3h). */
+  editsUseCase = false
 ): string[] => {
   if (ops.length === 0) return []
   let plan: ReturnType<typeof planTransaction>
@@ -575,10 +590,22 @@ const batchProblems = (
     .filter((issue) => !asked.includes(issue.name.toLowerCase()))
     .map((issue) => issue.message)
   // Lệnh thêm use case có màn: mỗi use case mới phải có màn (theo lựa chọn của user), luồng vào và quyền
-  const ui = screenIssuesOf(spine, ops, ucMode, allowShared, uiPlan)
+  const ui = screenIssuesOf(spine, ops, ucMode, allowShared, uiPlan, !editsUseCase)
   const screens = [...ui.screen.map(useCaseScreenProblemText), ...ui.plan.map(uiPlanProblemText)]
   const leftovers = removesUseCase ? removalLeftovers(spine, plan.spine).map(removalProblemText) : []
-  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers]
+  const edits = editsUseCase ? editIssues(spine, plan.spine).map(editProblemText) : []
+  return [...(naming.length > 0 ? [...naming, USE_CASE_NAME_FIX] : []), ...screens, ...leftovers, ...edits]
+}
+
+/** FLF-318: phần lô sửa use case còn bỏ sót (lô không áp thử được ⇒ để lỗi bất biến lo). */
+const editIssuesOf = (spine: Spine, ops: Op[]): EditIssue[] => {
+  if (ops.length === 0) return []
+  try {
+    return editIssues(spine, planTransaction(spine, { base_version: spine.spine_version, ops, by: "change-preview", step_id: null }, { startSeq: 1 }).spine)
+  } catch (err) {
+    if (err instanceof TransactionRejectedError) return []
+    throw err
+  }
 }
 
 /** Model trả output sai khuôn (không op, không câu hỏi) ⇒ hỏi lại user thay vì đẩy lỗi Zod tiếng Anh ra giao diện. */
@@ -631,9 +658,13 @@ const opsFromInstruction = async (
   // FLF-311: lệnh thêm use case (hoặc câu trả lời cho câu hỏi làm rõ của lệnh đó) ⇒ model soạn đủ phần liên quan
   // FLF-318: lệnh xoá use case (động từ xoá đứng trước — "xoá UC vừa tạo" không phải lệnh thêm), hoặc câu trả lời cho câu
   // hỏi làm rõ của lệnh đó ⇒ lô xoá luôn phần chỉ thuộc use case bị xoá, use case cùng luồng thì hỏi trước (luật 3g)
-  const removesUseCase = (useCaseIntent(instruction) ?? (clarificationRounds > 0 ? useCaseIntent(history) : null)) === "remove"
-  const addsUseCase = !removesUseCase && (isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history)))
-  const ucMode = addsUseCase ? useCaseMode(spine) : null
+  // FLF-318: lệnh sửa use case ⇒ phần chỉ thuộc nó sửa theo, phần dùng chung hỏi trước (luật 3h); lô sửa có thể thêm use
+  // case / màn (thêm bước do actor khác làm) ⇒ vẫn chạy luật 3e + chuẩn hoá của lệnh thêm
+  const intent = useCaseIntent(instruction) ?? (clarificationRounds > 0 ? useCaseIntent(history) : null)
+  const removesUseCase = intent === "remove"
+  const editsUseCase = intent === "edit"
+  const addsUseCase = !removesUseCase && !editsUseCase && (isAddUseCaseInstruction(instruction) || (clarificationRounds > 0 && isAddUseCaseInstruction(history)))
+  const ucMode = addsUseCase || editsUseCase ? useCaseMode(spine) : null
   const ucUi = ucMode === "screen_pending" || ucMode === "full"
   // FLF-311: câu trả lời cho câu hỏi giao diện ⇒ kế hoạch từng use case (màn riêng / popup / màn có sẵn / dùng chung)
   const uiPlan = ucUi ? uiPlanFor(instruction, history) : []
@@ -659,10 +690,20 @@ const opsFromInstruction = async (
             ...buildChangeProjection(spine, history ? `${history}\n${instruction}` : instruction),
             ...(ucMode ? { use_case_context: { ...useCaseContext(spine, ucMode), ...(uiPlan.length ? { ui_plan: uiPlanForModel(uiPlan) } : {}) } } : {}),
             // Lệnh xoá: model cần thấy chức năng / màn / thông báo của mọi use case để biết phần nào chỉ thuộc use case bị xoá
-            ...(removesUseCase ? { use_case_context: useCaseContext(spine, "full") } : {})
+            ...(removesUseCase ? { use_case_context: useCaseContext(spine, "full") } : {}),
+            // Lệnh sửa: giá trị hiện tại của use case được nhắc + phần của nó (chức năng đủ luồng, màn, quyền, thông báo)
+            ...(editsUseCase
+              ? {
+                  use_case_context: {
+                    ...useCaseContext(spine, "full"),
+                    edit_targets: useCaseEditContext(spine, history ? `${history}\n${instruction}` : instruction)
+                  }
+                }
+              : {})
           },
           use_case_mode: ucMode ?? "none",
           use_case_removal: removesUseCase,
+          use_case_edit: editsUseCase,
           use_case_ui: ucMode === "screen_pending" || ucMode === "full",
           messages_ready: ucMode === "full" && messagesReady(spine),
           glossary: spine.glossary.map(({ id, term, definition }) => ({ id, term, definition })),
@@ -700,7 +741,7 @@ const opsFromInstruction = async (
   }
   // Lô sai thì gọi lại kèm lỗi: một lần; có kế hoạch giao diện (lệnh nhiều use case, 3–4 màn) thì tới hai lần
   for (let attempt = 0, max = uiPlan.length > 0 ? 2 : 1; attempt < max && !result.data.clarification_needed?.trim(); attempt++) {
-    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase)
+    const problems = batchProblems(spine, prepare((result.data.ops ?? []) as Op[]), instruction, ucMode, allowShared, uiPlan, removesUseCase, editsUseCase)
     if (problems.length === 0) break
     const retry = await call(problems.join("\n")).catch((err: unknown) => {
       if (err instanceof AiActionError && AI_OUTPUT_ERRORS.has(err.code)) return null
@@ -730,16 +771,16 @@ const opsFromInstruction = async (
     if (kind) ops = applyScreenKind(ops, kind)
   }
   // Còn thiếu sau lượt soạn lại ⇒ báo trên bản xem trước, người dùng quyết định (không chặn)
-  const left = screenIssuesOf(spine, ops, ucMode, allowShared, uiPlan)
+  const left = screenIssuesOf(spine, ops, ucMode, allowShared, uiPlan, !editsUseCase)
   const noteLanguage = replyLanguage ?? DEFAULT_REPLY_LANGUAGE
-  const leftovers = removesUseCase ? removalNote(removalLeftoversOf(spine, ops), noteLanguage) : null
+  const leftovers = removesUseCase ? removalNote(removalLeftoversOf(spine, ops), noteLanguage) : editsUseCase ? editNote(editIssuesOf(spine, ops), noteLanguage) : null
   const notes =
     [result.data.notes ? nameElementIds(result.data.notes, spine) : null, useCaseScreenNote(left.screen, noteLanguage), uiPlanNote(left.plan, noteLanguage), leftovers]
       .filter(Boolean)
       .join("\n") || null
   const localized = result.data.localized?.length ? { localized: result.data.localized } : {}
   const proposed = result.data.proposed_use_cases?.length ? { proposed: [...result.data.proposed_use_cases] } : {}
-  return { ops, clarification: null, notes, ...localized, ...proposed, language: languagePairOf(language) }
+  return { ops, clarification: null, notes, ...localized, ...proposed, intent, language: languagePairOf(language) }
 }
 
 /**
@@ -872,6 +913,7 @@ export const preview = async (
     impact,
     branch,
     ...(resolved.localized?.length ? { localized: resolved.localized, language: languagePairOf(resolved.language) } : {}),
+    use_case_intent: resolved.intent ?? null,
     expires_at: Date.now() + PREVIEW_TTL_MS
   })
 
@@ -902,12 +944,21 @@ export interface ChangeApplyResult extends ApplyResult {
  * stale — một transaction riêng, lý do nội bộ (`gate:` ⇒ không vào §I). Lỗi chỉ ghi log: lô đã ghi, section còn stale thì
  * người dùng hoà giải như trước.
  */
-const reacceptReviewedSections = async (projectId: string, userId: string, before: Spine, batch: readonly Change[]): Promise<void> => {
+const reacceptReviewedSections = async (
+  projectId: string,
+  userId: string,
+  before: Spine,
+  batch: readonly Change[],
+  /** `owned`: chỉ section mà lô (và lượt vẽ lại) ghi vào dữ liệu thuộc nó — lô sửa use case. */
+  scope: "all" | "owned" = "all"
+): Promise<void> => {
   try {
     const firstSeq = Math.min(...batch.map((c) => c.seq))
     const [current, changes] = await Promise.all([repository.get(projectId), repository.listChanges(projectId)])
     if (!current) return
-    const ops = reacceptOps(before, changes.filter((c) => c.seq < firstSeq), stripRecord(current), changes, new Date().toISOString())
+    const after = stripRecord(current)
+    const only = scope === "owned" ? ownedSections(before, after, changes.filter((c) => c.seq >= firstSeq)) : undefined
+    const ops = reacceptOps(before, changes.filter((c) => c.seq < firstSeq), after, changes, new Date().toISOString(), only)
     if (ops.length === 0) return
     await applyTransaction(projectId, {
       base_version: current.spine_version,
@@ -978,12 +1029,15 @@ export const apply = async (
 
   // FLF-311: thêm use case / màn ⇒ vẽ lại sơ đồ use case, screen flow và bố cục màn mới TRƯỚC khi tính cờ (khỏi cờ
   // `diagram_stale` cho chính lô này). Lỗi vẽ không làm hỏng lượt sửa.
-  // FLF-318: xoá use case / màn cũng phải vẽ lại sơ đồ use case, screen flow (không để cờ `diagram_stale`)
-  if (applied.txn !== null && (addsUseCaseOrScreen(spine, applied.spine) || removesUseCaseOrScreen(spine, applied.spine))) {
+  // FLF-318: xoá / sửa use case / màn cũng phải vẽ lại sơ đồ use case, screen flow (không để cờ `diagram_stale`)
+  const editsUseCase = stored?.use_case_intent === "edit" && applied.changes.some((c) => USE_CASE_PARTS.test(c.path))
+  if (applied.txn !== null && (addsUseCaseOrScreen(spine, applied.spine) || removesUseCaseOrScreen(spine, applied.spine) || editsUseCase)) {
     await d.renderAfterChange?.(projectId, userId, addedScreenIds(spine, applied.spine))
     // FLF-318: lô trọn gói (chỉ thêm / chỉ xoá phần của chính nó), người dùng đã duyệt ở bản xem trước ⇒ không bắt duyệt lại
-    // các section nó (và lượt vẽ lại) làm stale
+    // các section nó (và lượt vẽ lại) làm stale. Lô sửa use case: chỉ gỡ section mà lô ghi vào phần dữ liệu THUỘC section
+    // đó (người dùng đã duyệt chính nội dung ấy); section chỉ đọc dữ liệu bị sửa vẫn stale (văn xuôi của nó có thể đã cũ)
     if (stored && isSelfContainedBatch(spine, applied.spine, applied.changes)) await reacceptReviewedSections(projectId, userId, spine, applied.changes)
+    else if (stored && editsUseCase) await reacceptReviewedSections(projectId, userId, spine, applied.changes, "owned")
   }
   // Cờ tính lại sau khi ghi: thay đổi của user có thể mở cờ đỏ mới (chặn baseline kế tiếp).
   if (applied.txn !== null) await d.recomputeFlags(projectId, userId)

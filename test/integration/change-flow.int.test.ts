@@ -296,4 +296,24 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
     expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
     expect((await api.get("/progress")).body.data.readiness.stale).toBeGreaterThan(staleBefore)
   })
+
+  it("FLF-318 (luật 3h): sửa use case qua bản xem trước ⇒ section sở hữu phần đã sửa không stale; section chỉ đọc vẫn chờ hoà giải", async () => {
+    const seeded = await seedFixture("full", { mutate: freshSteps })
+    const api = client(seeded)
+    const staleBefore = (await api.get("/progress")).body.data.readiness.stale as number
+    const editInstruction = "sửa use case UC01: đổi tên thành Manage Projects v2"
+    mockOverrides.next = () => JSON.stringify({ ops: [{ op: "set", path: "use_cases[id=UC01].name", value: "Manage Projects v2" }], notes: "Đổi tên UC01." })
+    const preview = await api.post("/changes/preview", { base_version: await api.version(), instruction: editInstruction })
+    expect(preview.status, JSON.stringify(preview.body.error)).toBe(200)
+    const planned = changesPreviewResponseSchema.parse(preview.body.data)
+    expect(planned.ok, JSON.stringify(planned.violations)).toBe(true)
+    const applied = await api.post("/changes", { base_version: await api.version(), instruction: editInstruction, preview_id: planned.preview_id })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+
+    const reaccept = await Change.find({ projectId: seeded.projectId, path: /^steps\[id=.+\]\.accepted_at$/, reason: /^gate: đã duyệt qua bản xem trước/ }).lean()
+    expect(reaccept.length).toBeGreaterThan(0)
+    const sections = (await api.get("/progress")).body.data.readiness.stale as number
+    // Section chỉ đọc use case (sơ đồ, ma trận…) vẫn stale — không tự lan truyền
+    expect(sections).toBeGreaterThanOrEqual(staleBefore)
+  })
 })

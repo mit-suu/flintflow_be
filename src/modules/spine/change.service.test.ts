@@ -1165,3 +1165,47 @@ AI: ${question}`
     expect((vi.mocked(deps.changeExecutor).mock.calls[0][1].promptVariables as { use_case_removal: boolean }).use_case_removal).toBe(false)
   })
 })
+
+describe("FLF-318: sửa use case kéo theo phần của nó (luật 3h)", () => {
+  const uc = FIXTURE.use_cases.find((u) => u.id === "UC01")!
+  const newActors = uc.actor_ids.map((a) => (a === "A04" ? "A03" : a))
+  const screens = [...new Set(FIXTURE.functions.filter((f) => uc.function_ids.includes(f.id) && f.screen_id).map((f) => f.screen_id as string))]
+
+  it("lệnh sửa ⇒ prompt bật luật 3h kèm edit_targets của use case được nhắc; đổi actor mà quên quyền ⇒ gọi lại kèm lỗi", async () => {
+    const executor = vi
+      .fn()
+      .mockResolvedValueOnce(aiResult({ ops: [{ op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors }] as ChangeInstructionOutput["ops"] }))
+      .mockResolvedValueOnce(
+        aiResult({
+          ops: [
+            { op: "set", path: "use_cases[id=UC01].actor_ids", value: newActors },
+            ...screens.map((screen) => ({ op: "add", path: "permissions[]", value: { screen_id: screen, role_id: "R3", action: "view" } }))
+          ] as ChangeInstructionOutput["ops"]
+        })
+      )
+    deps.changeExecutor = executor
+    await seed()
+    const shown = await preview(PROJECT, USER, { base_version: 1, instruction: "đổi actor của use case UC01 từ Guest sang Administrator" }, {}, deps)
+    expect(executor).toHaveBeenCalledTimes(2)
+    const first = executor.mock.calls[0][1].promptVariables as { use_case_edit: boolean; projection: { use_case_context: { edit_targets: { use_case: { id: string } }[] } } }
+    expect(first.use_case_edit).toBe(true)
+    expect(first.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
+    expect((executor.mock.calls[1][1].promptVariables as { previous_problems: string }).previous_problems).toContain("rule 3h")
+    expect(shown.ok, JSON.stringify(shown.violations)).toBe(true)
+  })
+
+  it("không rõ sửa use case nào ⇒ model hỏi kèm lựa chọn tên use case; câu trả lời (không nhắc 'use case') vẫn là lệnh sửa", async () => {
+    const question = "Bạn muốn sửa use case nào?"
+    deps.changeExecutor = vi.fn(async () => aiResult({ clarification_needed: question, choices: [uc.name, FIXTURE.use_cases[1].name] }))
+    await seed()
+    const asked = await preview(PROJECT, USER, { base_version: 1, instruction: "sửa UC đăng ký: thêm bước xác thực email" }, {}, deps)
+    expect(asked.clarification).toBe(question)
+    const history = `User: sửa UC đăng ký: thêm bước xác thực email\nAI: ${question}`
+    await preview(PROJECT, USER, { base_version: 1, instruction: uc.name, clarification_rounds: 1, chat_history: history }, {}, deps)
+    const calls = vi.mocked(deps.changeExecutor).mock.calls
+    const last = calls[calls.length - 1][1].promptVariables as { use_case_edit: boolean; projection: { use_case_context: { edit_targets: { use_case: { id: string } }[] } } }
+    expect(last.use_case_edit).toBe(true)
+    // Câu trả lời là đúng tên use case ⇒ lượt sau có đủ chi tiết để sửa
+    expect(last.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
+  })
+})

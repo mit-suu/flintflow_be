@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.5.0
+version: 1.6.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -136,11 +136,32 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    whole flow / remove only the named one / pick one by one. The answer names what to remove ⇒ remove exactly that,
    each with its parts as above. Say in `notes` (reply language) what the batch removes.
 {{/if}}
+{{#if use_case_edit}}
+3h. **Editing a use case ⇒ update what belongs only to it, in the same batch** (like rules 3e / 3g). `use_case_context.
+   edit_targets` holds each use case the request names, its functions (full `normal` / `abnormal` / `validations`),
+   screens, permissions on them and messages, each with `shared_with` = other use cases using that part.
+   **Which use case**: `edit_targets` is empty, or the request could mean another one ⇒ `clarification_needed` asking which,
+   `choices` = the candidate use case names exactly as in `use_case_context.use_cases` — never guess, never edit from names
+   alone (you need the current values to write a correct `set`).
+   By kind of edit:
+   - **rename / reword the goal** ⇒ `set use_cases[id=…].name` / `.description`; a function or screen whose name repeats the
+     old goal (same words) is renamed to match;
+   - **change the actor** ⇒ `set …actor_ids`; one `permissions[]` row per role of the new actor on each of its screens
+     (`view`, plus what it does there), `remove permissions[id=…]` of the old actor's roles on screens no other use case of
+     that actor uses; the edge into its first screen comes from a screen the new actor's role can view;
+   - **change the flow** (add / drop / reword a step, a check, an outcome) ⇒ `set functions[id=…].normal` / `.abnormal`
+     with the whole updated list, `add` / `remove` validations one by one, a message for each new user-visible abnormal
+     case (rule 3f); a step done by **another actor** (an approval, a review) is a new use case of that actor ⇒ rule 3e;
+   - **split / merge** ⇒ each resulting use case keeps one goal (rule 10) with its own function, screen and permissions.
+   **Shared parts are the user's call**: a function or screen whose `shared_with` is not empty ⇒ do not change it silently —
+   `clarification_needed` naming the other use cases, `choices` = change it for all / give this use case its own copy /
+   leave it. Whatever no rule above reaches stays unchanged (rule 8). Say in `notes` (reply language) what changes.
+{{/if}}
 4. **Cascade** deletes in the same batch (`draft-to-ops/references/invariants.md`). If the change necessarily breaks an invariant (e.g. deleting the last screen), return `clarification_needed` explaining what blocks it.
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place — do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the reply language — it becomes the §I Record of Changes line.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
-8. **Only touch what the request names** (only exceptions: supporting use cases of rule 3e, listed in `proposed_use_cases`; the parts of a removed use case, rule 3g). An element the user did not mention must come out of this batch
+8. **Only touch what the request names** (only exceptions: supporting use cases of rule 3e, listed in `proposed_use_cases`; the parts of a removed use case, rule 3g; the parts of an edited use case, rule 3h). An element the user did not mention must come out of this batch
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.

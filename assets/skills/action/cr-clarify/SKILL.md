@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.5.0
+version: 1.6.0
 description: Mode 1 C-2 — decide whether a change request is clear and has the facts it needs; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -90,6 +90,11 @@ You never write edits.
    `targets.entity_paths`. The writer removes each removed use case's own functions, screens and messages — do not
    ask about those. A CR made from a chat preview that already lists which use cases go was settled there — do not ask
    again.
+11. **Editing a use case** (same rule as chat before baseline). The CR edits a use case (rename, another actor, a changed
+   flow) and it is not clear **which** use case of the index it means ⇒ ask, `suggestions` = the candidate use case names.
+   The edit touches a function or screen another use case also uses ⇒ ask whether to change it for all, give this use case
+   its own, or leave it. A step done by another actor (an approval) follows rule 9. Put the edited use case and its
+   functions / screens in `targets.entity_paths`. A CR made from a chat preview already settled these — do not ask again.
 
 ## Output
 
