@@ -14,7 +14,7 @@ export const VIEWER_READ_ALLOW: readonly RegExp[] = [
   /^\/?$/, // danh sách dự án
   /^\/[^/]+$/, // chi tiết dự án
   /^\/[^/]+\/document$/,
-  /^\/[^/]+\/export\/word$/,
+  /^\/[^/]+\/export\/(word|pdf)$/, // FLF-316: PDF cùng luật với Word (chỉ baseline, kiểm ở controller)
   /^\/[^/]+\/diagrams(\/[^/]+)?$/,
   /^\/[^/]+\/baselines$/,
   /^\/[^/]+\/versions$/,
