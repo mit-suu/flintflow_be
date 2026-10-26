@@ -1,5 +1,5 @@
 /**
- * `POST /projects` nhận `mode` (mặc định fpt, customer_template ⇒ 501), mở dự án ghi `lastOpenedAt`; góp ý member gửi qua
+ * `POST /projects` nhận `source` (FLF-335) hoặc `mode` client cũ (mặc định fpt), mở dự án ghi `lastOpenedAt`; góp ý member gửi qua
  * `POST /feedback` hiện ở `GET /admin/feedback` — qua HTTP trên Mongo thật.
  */
 import { describe, it, expect } from "vitest"
@@ -11,19 +11,36 @@ import { User } from "../../src/modules/user/user.model.js"
 const as = (seeded: SeededFixture) => ({ Authorization: `Bearer ${seeded.token}` })
 
 describe("project mode qua HTTP", () => {
-  it("mode lạ ⇒ 400 VALIDATION_ERROR, customer_template ⇒ 501 NOT_IMPLEMENTED, không tạo dự án", async () => {
+  it("mode lạ / source lạ ⇒ 400 VALIDATION_ERROR, không tạo dự án", async () => {
     const seeded = await seedFixture("minimal")
 
     const invalid = await request(app).post("/api/v1/projects").set(as(seeded)).send({ name: "Lumen", mode: "coaching" })
     expect(invalid.status).toBe(400)
     expect(invalid.body.error.code).toBe("VALIDATION_ERROR")
-
-    const unsupported = await request(app).post("/api/v1/projects").set(as(seeded)).send({ name: "Lumen", mode: "customer_template" })
-    expect(unsupported.status).toBe(501)
-    expect(unsupported.body.error.code).toBe("NOT_IMPLEMENTED")
+    expect((await request(app).post("/api/v1/projects").set(as(seeded)).send({ name: "Lumen", source: "later" })).status).toBe(400)
 
     const list = await request(app).get("/api/v1/projects").set(as(seeded))
     expect(list.body.data).toHaveLength(1) // chỉ dự án của fixture
+  })
+
+  it("FLF-335: source quyết định mode — có sẵn ⇒ import; mới có mẫu bắt buộc ⇒ import + template_intent fixed (không còn 501); mới không mẫu ⇒ fpt", async () => {
+    let seededRef: SeededFixture | undefined
+    // Gói Free tối đa 3 dự án / org (fixture đã có 1) ⇒ mỗi org thử 2 trường hợp
+    const cases = [
+      [{ name: "Có sẵn", source: "existing" }, { mode: "import", start_kind: "existing", has_required_template: null, template_intent: null }],
+      [{ name: "Mẫu khách", source: "new", has_required_template: true }, { mode: "import", start_kind: "new", has_required_template: true, template_intent: "fixed" }],
+      [{ name: "Mới", source: "new", has_required_template: false, documentLanguage: "vi" }, { mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null, documentLanguage: "vi" }],
+      [{ name: "Client cũ", mode: "customer_template" }, { mode: "import", start_kind: "new", template_intent: "fixed" }]
+    ] as const
+    for (const [i, [body, expected]] of cases.entries()) {
+      const seeded = i % 2 === 0 ? await seedFixture("minimal") : seededRef!
+      seededRef = seeded
+      const created = await request(app).post("/api/v1/projects").set(as(seeded)).send(body)
+      expect(created.status, body.name).toBe(201)
+      expect(created.body.data).toMatchObject(expected)
+      const one = await request(app).get(`/api/v1/projects/${created.body.data._id}`).set(as(seeded))
+      expect(one.body.data).toMatchObject(expected)
+    }
   })
 
   it("tạo fpt (mặc định) và import ⇒ 201, GET /projects/:id trả đúng mode", async () => {
