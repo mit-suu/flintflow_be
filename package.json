@@ -35,6 +35,7 @@
     "migrate:personal-wallets": "tsx src/scripts/remove-personal-wallets.ts",
     "migrate:cr-package": "tsx src/scripts/migrate-cr-package.ts",
     "migrate:red-waivers": "tsx src/scripts/migrate-red-waivers.ts",
+    "migrate:convert-fpt-baselined": "tsx src/scripts/migrate-convert-fpt-baselined.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
     "measure:tokens": "tsx src/scripts/measure-tokens.ts",
     "run:pipeline": "tsx src/scripts/run-full-pipeline.ts",

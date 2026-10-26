@@ -442,10 +442,12 @@ export const FLAG_TEXT = {
  * - Mode 1 (`import`): đúng tuỳ chọn trước FLF-265 — bìa / mục lục / §I mặc định, phụ lục cờ `vi` vì thông điệp cờ
  *   mode 1 là tiếng Việt (no-ky-thuat N6). Không theo `documentLanguage` để file mode 1 không đổi byte nào.
  * - Mode 2: chữ của writer + phụ lục cờ theo ngôn ngữ tài liệu (`en` = mặc định của writer, y như trước).
+ * - Dự án chuyển từ mode 2 (FLF-318, `convertedFrom = "fpt"`): như mode 2 — file version phải giống bản Lead đã ký.
  * Trả object thường (khớp `WriteDocxOptions` theo cấu trúc) — bảng nhãn không import docx-writer.
  */
 export const writerOptionsFor = (
   mode: string | null | undefined,
-  documentLanguage: DocumentLanguage = "en"
+  documentLanguage: DocumentLanguage = "en",
+  convertedFrom?: string | null
 ): { language?: DocumentLanguage; flagLanguage: DocumentLanguage } =>
-  mode === "import" ? { flagLanguage: "vi" } : { language: documentLanguage, flagLanguage: documentLanguage }
+  mode === "import" && convertedFrom !== "fpt" ? { flagLanguage: "vi" } : { language: documentLanguage, flagLanguage: documentLanguage }

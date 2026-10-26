@@ -8,6 +8,8 @@ import type { ProjectMode } from "./project.model.js"
 export interface DocumentLanguageProject {
   mode?: ProjectMode | null
   documentLanguage?: UserLocale | null
+  /** FLF-318: dự án tạo SRS đã chuyển sang mode 1 — chữ trong Spine vẫn là tiếng Anh của mode 2. */
+  converted_from?: "fpt" | null
 }
 
 /**
@@ -19,7 +21,8 @@ export const documentLanguageOf = (project: DocumentLanguageProject, profileLang
 
 /**
  * Ngôn ngữ gốc của chữ trong Spine (D4): mode 2 sinh tiếng Anh ⇒ luôn `en`; mode 1 giữ chữ gốc của file ⇒ ngôn ngữ
- * file (lạ / thiếu ⇒ `en`). `documentLanguageOf` ≠ `sourceLanguageOf` ⇒ cần lớp bản dịch (phase 2–3).
+ * file (lạ / thiếu ⇒ `en`). `documentLanguageOf` ≠ `sourceLanguageOf` ⇒ cần lớp bản dịch (phase 2–3). Dự án chuyển
+ * từ mode 2 (FLF-318) giữ `en` như trước khi chuyển — `TemplateProfile.language` của nó là ngôn ngữ tài liệu.
  */
 export const sourceLanguageOf = (project: DocumentLanguageProject, profileLanguage?: unknown): UserLocale =>
-  project.mode === "import" ? (toUserLocale(profileLanguage) ?? "en") : "en"
+  project.mode === "import" && project.converted_from !== "fpt" ? (toUserLocale(profileLanguage) ?? "en") : "en"

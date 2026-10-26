@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
     // Mode 1 (FLF-171)
     ImportedDocument: { deleteMany: deleteMany() },
     DocBlock: { deleteMany: deleteMany() },
-    TemplateProfile: { deleteMany: deleteMany() },
+    TemplateProfile: { deleteMany: deleteMany(), updateOne: vi.fn() },
     ExtractionDraft: { deleteMany: deleteMany() },
     FieldAnchor: { deleteMany: deleteMany() },
     ReuploadDiff: { deleteMany: deleteMany() },
@@ -225,11 +225,18 @@ describe("setDocumentLanguage (FLF-265)", () => {
 
     await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).resolves.toMatchObject({ documentLanguage: "vi" })
     expect(mocks.Project.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: PROJECT, organizationId: ORG, mode: { $ne: "import" } },
+      { _id: PROJECT, organizationId: ORG, $or: [{ mode: { $ne: "import" } }, { converted_from: "fpt" }] },
       { documentLanguage: "vi" },
       { new: true }
     )
     expect(mocks.Project.findOne).not.toHaveBeenCalled()
+    expect(mocks.TemplateProfile.updateOne).not.toHaveBeenCalled()
+  })
+
+  it("FLF-318: dự án tạo SRS đã chuyển sang mode 1 vẫn đổi được; TemplateProfile.language đổi theo", async () => {
+    mocks.Project.findOneAndUpdate.mockResolvedValueOnce({ _id: PROJECT, mode: "import", converted_from: "fpt", documentLanguage: "vi" })
+    await expect(projectService.setDocumentLanguage(PROJECT, ORG, "vi")).resolves.toMatchObject({ converted_from: "fpt" })
+    expect(mocks.TemplateProfile.updateOne).toHaveBeenCalledWith({ projectId: PROJECT }, { $set: { language: "vi" } })
   })
 
   it("dự án của org khác ⇒ 404 PROJECT_NOT_FOUND", async () => {

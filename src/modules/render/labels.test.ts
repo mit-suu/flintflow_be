@@ -313,6 +313,8 @@ describe("labels — writerOptionsFor (FLF-265 §3.1)", () => {
 
   it("mode 1 ⇒ đúng tuỳ chọn trước FLF-265, bỏ qua ngôn ngữ tài liệu", () => {
     for (const language of ["vi", "en", undefined] as const) expect(writerOptionsFor("import", language)).toEqual({ flagLanguage: "vi" })
+    // FLF-318: dự án chuyển từ mode 2 theo ngôn ngữ tài liệu như mode 2
+    expect(writerOptionsFor("import", "en", "fpt")).toEqual({ language: "en", flagLanguage: "en" })
   })
 
   it("mode 2 ⇒ writer + phụ lục cờ theo ngôn ngữ tài liệu; mặc định en", () => {

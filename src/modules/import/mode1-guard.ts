@@ -48,7 +48,7 @@ export const prefillFrom = (instruction: string | undefined, fallback = "Sửa t
 }
 
 export const changeRequiresCr = (prefill: CrPrefill): Mode1Error =>
-  new Mode1Error("CHANGE_REQUIRES_CR", "Tài liệu đã import — mọi sửa phải qua change request", { prefill })
+  new Mode1Error("CHANGE_REQUIRES_CR", "Tài liệu đã chốt bản gốc — mọi sửa phải qua change request", { prefill })
 
 export const assertChangesAllowed = async (projectId: string, prefill: CrPrefill): Promise<void> => {
   if (await changesRequireCr(projectId)) throw changeRequiresCr(prefill)

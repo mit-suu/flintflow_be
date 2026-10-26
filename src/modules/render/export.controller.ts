@@ -55,7 +55,7 @@ interface ExportedDocx {
  * `null` ⇒ đã trả lỗi `NO_WORKING_DRAFT` lên `res`.
  */
 const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDocx | null> => {
-  const { projectId, projectName, mode, documentLanguage, sourceLanguage } = await authorize(req)
+  const { projectId, projectName, mode, documentLanguage, sourceLanguage, convertedFrom } = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
   if (!parsedQuery.success) throw validationError(parsedQuery.error)
   // UC-50: Viewer chỉ tải bản đã phát hành — bản nháp (DRAFT) không
@@ -78,7 +78,7 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   const parsed = renderedDocumentSchema.safeParse(result.doc)
   if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
-  const buffer = await writeDocx(parsed.data, writerOptionsFor(mode, documentLanguage))
+  const buffer = await writeDocx(parsed.data, writerOptionsFor(mode, documentLanguage, convertedFrom))
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   const draftMeta = parsedQuery.data.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId)) ?? null) : null

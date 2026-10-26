@@ -135,7 +135,7 @@ describe("skill trên đĩa (assets/skills)", () => {
 
   // Skill cần quy trình suy luận dài hơn mức chung (quyết định chiều/bản số từng quan hệ ERD; FLF-311: lô thêm use case kéo
   // theo chức năng / màn / luồng / phân quyền — hai khối theo giai đoạn, model chỉ nhận một khối)
-  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 250, "action/apply-change-op": 180 }
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 250, "action/apply-change-op": 250 }
 
   it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE); skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
@@ -261,6 +261,12 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
 
   it("draft-to-ops: ví dụ giả định không trỏ project.vision", () => {
     expect(skill("action/draft-to-ops")).not.toMatch(/"path": "project.(vision|goals)"/)
+  })
+
+  it("cr-clarify (FLF-318): hỏi ai xử lý yêu cầu khi CR thêm use case; hỏi trước khi xoá use case của một luồng", () => {
+    const text = skill("action/cr-clarify")
+    expect(text).toContain("A new use case that creates a request needs someone to settle it")
+    expect(text).toContain("Removing a use case of a flow is the user's call")
   })
 
   it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {

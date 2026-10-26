@@ -13,21 +13,27 @@ import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { stripRecord } from "../import/check.service.js"
 import { DocBlock } from "../import/doc-block.model.js"
 import { withMeteredAi } from "../import/metered-ai.js"
+import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
 import { answersText, crHeader, crProjection, materialsText, truncate } from "./cr-context.js"
 import { mentionedSections, type HeadingRef } from "./section-mention.js"
 
-/** Tiêu đề mục của bản tài liệu mới nhất, theo thứ tự (kèm mã section đã khớp). */
-const docHeadings = async (cr: IChangeRequest): Promise<HeadingRef[]> => {
+/**
+ * Tiêu đề mục của bản tài liệu mới nhất, theo thứ tự (kèm mã section đã khớp). Dự án chuyển từ mode 2 (FLF-318) không
+ * có file upload nên không có `DocBlock` ⇒ mục lục theo mẫu FPT từ Spine.
+ */
+const docHeadings = async (cr: IChangeRequest, spine: Spine): Promise<HeadingRef[]> => {
   const version = await latestDocVersion(cr.projectId)
   if (!version) return []
   const headings = await DocBlock.find({ projectId: cr.projectId, doc_version: version.version, kind: "heading" })
     .sort({ "anchor.ordinal": 1 })
     .select("text section_id")
     .lean()
+  if (!headings.length) return listSections(spine).map((sec) => ({ text: sec.title_en, section_id: sec.id }))
   return headings.map((h) => ({ text: h.text, section_id: h.section_id ?? null }))
 }
 
@@ -53,7 +59,7 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   const asked = cr.clarifications.length - (lastAmendment?.after_round ?? 0)
 
   cr.paused = null
-  const headings = await docHeadings(cr)
+  const headings = await docHeadings(cr, spine)
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),

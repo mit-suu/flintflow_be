@@ -23,6 +23,7 @@ import { sendError, sendSuccess } from "../../../shared/types/api-response.js"
 import { catchAsync } from "../../../shared/utils/catch-async.js"
 import { ApiError } from "../../../shared/utils/api-error.js"
 import { validationError } from "../../../shared/utils/validation-message.js"
+import { convertAfterSignOff } from "../../import/convert-from-fpt.service.js"
 import { assertNotMode1 } from "../../import/mode1-guard.js"
 
 interface Authorized {
@@ -68,8 +69,11 @@ export const createBaseline = catchAsync(async (req: Request, res: Response) => 
 
   try {
     const result = await baselineService.signOff(auth.projectId, auth.userId, { base_version: parsed.data.base_version })
+    // FLF-318: dự án tạo SRS ⇒ chuyển sang mode 1 (CR); lỗi không làm hỏng lượt ký — chạy lại khi mở dự án
+    const converted = await convertAfterSignOff(auth.projectId, auth.userId)
     return sendSuccess(res, 201, result.baseline, {
       spine_version: result.spine_version,
+      project_mode: converted ? "import" : auth.mode,
       waived: result.waived.map(({ id, rule_id, section_id, waive_reason }) => ({ id, rule_id, section_id, waive_reason }))
     })
   } catch (err) {
