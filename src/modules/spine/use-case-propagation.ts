@@ -22,6 +22,22 @@ const USE_CASE_WORD = /(use[\s-]?case|\buc\b|ca sử dụng)/i
 
 export const isAddUseCaseInstruction = (instruction: string): boolean => ADD_VERB.test(instruction) && USE_CASE_WORD.test(instruction)
 
+/** "xoá UC phúc khảo điểm", "bỏ use case …", "remove the … use case" — câu lệnh xoá use case (FLF-318). */
+// `\b` của JS coi chữ có dấu là ngoài từ ⇒ "bỏ" dùng lookaround Unicode (không khớp "bổ sung")
+const REMOVE_VERB = /(xoá|xóa|loại bỏ|(?<!\p{L})bỏ(?!\p{L})|gỡ|remove|delete|drop)/iu
+
+/**
+ * Ý của câu lệnh về use case: động từ đứng TRƯỚC thắng — "xoá use case vừa tạo" là xoá dù có chữ "tạo", "thêm UC …, bỏ
+ * màn cũ" là thêm. Không nhắc use case ⇒ `null`.
+ */
+export const useCaseIntent = (instruction: string): "add" | "remove" | null => {
+  if (!USE_CASE_WORD.test(instruction)) return null
+  const add = ADD_VERB.exec(instruction)?.index ?? Infinity
+  const remove = REMOVE_VERB.exec(instruction)?.index ?? Infinity
+  if (add === Infinity && remove === Infinity) return null
+  return remove < add ? "remove" : "add"
+}
+
 /**
  * - `use_case_only`: chưa có màn hình (trước S-4.1) ⇒ chỉ thêm use case như trước.
  * - `screen_pending`: còn / đang ở vòng S-5 ⇒ thêm màn `pending` + chức năng (trigger, mô tả); vòng S-5 viết bố cục,
@@ -57,6 +73,8 @@ export const useCaseContext = (spine: Spine, mode: UseCaseMode): Record<string, 
     mode,
     // Kiểm trùng / chồng mục tiêu với use case có sẵn của cùng actor (luật 3e) — mô tả cắt ngắn
     use_cases: spine.use_cases.map(({ id, name, actor_ids, description }) => ({ id, name, actor_ids, description: description.slice(0, 160) })),
+    // FLF-318: chọn actor xử lý yêu cầu (luật 3e — giảng viên chấm lại, phòng đào tạo duyệt) — không đoán, không bịa actor
+    actors: spine.actors.map(({ id, name, kind, description }) => ({ id, name, kind, description: description.slice(0, 120) })),
     features: spine.features.map(({ id, name }) => ({ id, name })),
     roles: spine.roles.map(({ id, name, actor_id }) => ({ id, name, actor_id })),
     screens: spine.screens
@@ -255,6 +273,66 @@ export const addedScreenIds = (before: Pick<Spine, "screens">, after: Pick<Spine
 
 export const addsUseCaseOrScreen = (before: Pick<Spine, "screens" | "use_cases">, after: Pick<Spine, "screens" | "use_cases">): boolean =>
   after.use_cases.length > before.use_cases.length || addedScreenIds(before, after).length > 0
+
+// ─── FLF-318: xoá use case kéo theo phần chỉ thuộc nó (đối xứng luật 3e) ─────────────────────
+
+/** Lô có xoá use case / màn ⇒ sau khi áp phải vẽ lại sơ đồ use case, screen flow. */
+export const removesUseCaseOrScreen = (before: Pick<Spine, "screens" | "use_cases">, after: Pick<Spine, "screens" | "use_cases">): boolean => {
+  const ucs = new Set(after.use_cases.map((u) => u.id))
+  const screens = new Set(after.screens.map((s) => s.id))
+  return before.use_cases.some((u) => !ucs.has(u.id)) || before.screens.some((s) => !screens.has(s.id))
+}
+
+export type RemovalLeftover =
+  | { kind: "function"; id: string; name: string; use_case: string }
+  | { kind: "screen"; id: string; name: string }
+  | { kind: "message"; id: string; code: string }
+
+type RemovalParts = Pick<Spine, "use_cases" | "functions" | "screens" | "messages">
+
+/**
+ * Phần lô xoá use case bỏ lại không còn chủ: chức năng của use case bị xoá mà không use case nào còn dùng, màn mất hết
+ * chức năng, thông báo mất hết chức năng. Phần dùng chung với use case còn lại không tính.
+ */
+export const removalLeftovers = (before: RemovalParts, after: RemovalParts): RemovalLeftover[] => {
+  const keptUcs = new Set(after.use_cases.map((u) => u.id))
+  const usedFns = new Set(after.use_cases.flatMap((u) => u.function_ids))
+  const out: RemovalLeftover[] = []
+  for (const uc of before.use_cases.filter((u) => !keptUcs.has(u.id))) {
+    for (const fnId of uc.function_ids) {
+      const fn = after.functions.find((f) => f.id === fnId)
+      if (fn && !usedFns.has(fnId) && !out.some((o) => o.kind === "function" && o.id === fnId)) out.push({ kind: "function", id: fn.id, name: fn.name, use_case: uc.name })
+    }
+  }
+  const fnsOn = (spine: RemovalParts, screenId: string) => spine.functions.filter((f) => f.screen_id === screenId).length
+  for (const s of after.screens) if (fnsOn(after, s.id) === 0 && fnsOn(before, s.id) > 0) out.push({ kind: "screen", id: s.id, name: s.name })
+  for (const m of after.messages) {
+    const old = before.messages.find((x) => x.id === m.id)
+    if (m.function_ids.length === 0 && (old?.function_ids.length ?? 0) > 0) out.push({ kind: "message", id: m.id, code: m.code })
+  }
+  return out
+}
+
+/** Lỗi gửi model ở lượt soạn lại (luật 3g). */
+export const removalProblemText = (o: RemovalLeftover): string => {
+  switch (o.kind) {
+    case "function":
+      return `Function ${o.id} "${o.name}" belonged only to the removed use case "${o.use_case}" and no remaining use case uses it: remove functions[id=${o.id}] (rule 3g).`
+    case "screen":
+      return `Screen ${o.id} "${o.name}" has no function left after the removal: remove screens[id=${o.id}] (its permissions, layout and flow edges go with it) (rule 3g).`
+    case "message":
+      return `Message ${o.id} (${o.code}) is used by no function after the removal: remove messages[id=${o.id}] (rule 3g).`
+  }
+}
+
+/** Còn sót sau lượt soạn lại ⇒ ghi chú trên bản xem trước (không chặn). */
+export const removalNote = (leftovers: readonly RemovalLeftover[], language: "vi" | "en" = "vi"): string | null => {
+  if (leftovers.length === 0) return null
+  const names = leftovers.map((o) => (o.kind === "message" ? o.code : `"${o.name}"`)).join(", ")
+  return language === "en"
+    ? `Still left without a use case after the removal: ${names}. Say "remove them too" to delete them.`
+    : `Sau khi xoá vẫn còn phần không thuộc use case nào: ${names}. Nhắn "xoá luôn các phần đó" nếu muốn xoá.`
+}
 
 // ─── mỗi use case mới có giao diện: màn của nó, có luồng vào, có quyền ─────────────────────
 

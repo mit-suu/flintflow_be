@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.4.0
+version: 1.5.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -75,8 +75,21 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    Lecturer settles it) ⇒ one use case + function per goal, each with only its actor ("Request Grade Review" for Student,
    "Decide Grade Review" for Lecturer); never one use case for both. Same or overlapping goal as a `use_case_context.use_cases` entry
    of that actor (Suspend Student Account vs Deactivate Student Record), user silent ⇒ `clarification_needed` naming it: extend it, replace it, or keep both and how they differ.
-   **Supporting use cases**: the requested one may need others to fit the project (someone decides a request, the requester follows its status) — you MAY
-   add them in the same batch, each name listed in `proposed_use_cases`, never silently — a goal the user describes (even unnamed, e.g. "Lecturer regrades it") is requested, never listed there; the user keeps or drops them (`ui_plan` drop ⇒ leave it and all its parts out).
+   **A request needs someone to settle it — never leave the flow dead-ended.** When the new use case creates something
+   another actor must act on (a request, an application, a complaint, a report to approve — "Student requests a grade
+   review", "Lecturer submits leave"), the batch MUST also hold the rest of that flow, with all their parts (function,
+   screen, `flow_to`, permissions, messages):
+   - the use case(s) that **settle** it, one per deciding actor and step ("Decide Grade Review" for Lecturer; "Approve
+     Grade Review" for Academic Management Office when the project's actors show an approver for that kind of decision);
+   - the requester **following the outcome** when the request has a status ("View Grade Review Status" for Student).
+   Pick the deciding actors from `use_case_context` (actors, existing use cases of the same area). Which actor settles it
+   is not clear from the request and the project ⇒ `clarification_needed` asking who decides (and whether a second
+   approval is needed), `choices` = the candidate actors' names plus a "both, in that order" option — do not guess.
+   Every use case of the batch the user did not ask for is a **supporting use case**: list each name in
+   `proposed_use_cases`, never silently — a goal the user describes (even unnamed, e.g. "Lecturer regrades it") is
+   requested, never listed there. Code shows the user each proposed use case to keep or drop (`ui_plan` drop ⇒ leave it
+   and all its parts out). Other supporting use cases that only make the project fit better (a list, a search) stay
+   optional: add them only when clearly needed, listed the same way.
    **Several steps** (pick, fill in, confirm) ⇒ one screen per step, chained in order by `flow_to`; `ui_plan` "one screen" ⇒ a single screen for it.
    **The UI of each new use case is the user's call**: its own screen, a popup opened from <screen>, an existing screen, or one screen shared by the new use cases. Never ask about the UI yourself: draft your best proposal (a new screen per step) — code then shows the user every new use case and screen to choose from; ask only for a fact you cannot fill (who receives it, what the user enters, a limit). Follow the answer exactly — `use_case_context.ui_plan` (when present) is that answer per use case: obey every entry; nothing said for one ⇒ its own screen. Then:
    - **the screen or popup the user chose**; when you propose: anything that changes data or takes input gets a new one, an
@@ -108,11 +121,26 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
 3d. **Elements inside an element** (a function's `validations`) are added and removed one by one, exactly the
    same way. Sending the whole `validations` array is accepted but it is read as "make it look like this":
    anything missing from your list is deleted.
+{{#if use_case_removal}}
+3g. **Removing a use case ⇒ remove what belongs only to it, in the same batch** (mirror of rule 3e; context in
+   `use_case_context`). `remove use_cases[id=…]`, then:
+   - each of its `function_ids` that no remaining use case lists ⇒ `remove functions[id=…]` (its validations go with it);
+   - each screen left with no function after that ⇒ `remove screens[id=…]` — cascade removes its permissions, layout
+     and the `flow_to` edges into it;
+   - each message whose `function_ids` would hold only removed functions ⇒ `remove messages[id=…]`.
+   Anything another use case still uses (a shared function, screen, message, the actors and roles) stays.
+   **Use cases of the same flow are the user's call — ask first, never remove them silently**: the removed one is a
+   request others settle or follow ("Request Grade Review" ⇒ "Decide Grade Review", "Approve Grade Review", "View Grade
+   Review Status"), or it settles a request that would be left without anyone deciding it. The user did not name them
+   (nor "the whole flow") ⇒ `clarification_needed` listing them numbered with their actors, `choices` = remove the
+   whole flow / remove only the named one / pick one by one. The answer names what to remove ⇒ remove exactly that,
+   each with its parts as above. Say in `notes` (reply language) what the batch removes.
+{{/if}}
 4. **Cascade** deletes in the same batch (`draft-to-ops/references/invariants.md`). If the change necessarily breaks an invariant (e.g. deleting the last screen), return `clarification_needed` explaining what blocks it.
 5. **Proper names** with a key (actor, entity, screen, glossary term) change in one place — do not also edit prose that mentions them; S-8.4 Consistency Pass catches prose.
 6. **English** values for SRS content; `reason` in the reply language — it becomes the §I Record of Changes line.
 7. **Never emit** ops on `flags[]`, `baselines[]`, `usage[]`, `steps[]`, `progress` or `sessions[]`.
-8. **Only touch what the request names** (only exception: supporting use cases of rule 3e, listed in `proposed_use_cases`). An element the user did not mention must come out of this batch
+8. **Only touch what the request names** (only exceptions: supporting use cases of rule 3e, listed in `proposed_use_cases`; the parts of a removed use case, rule 3g). An element the user did not mention must come out of this batch
    unchanged — renaming a neighbour "while we are here" is how two functions of another screen got
    overwritten in the UI test.
 9. Projection has `brief_core` ⇒ vision/goals are those addendum entries: `set addendum[id=…].content` (user's language) and `.content_en` (English); `add` a `goals` entry for a new goal, `remove` one for a dropped goal; never `project.vision`/`project.goals`.
@@ -170,6 +198,13 @@ Return **only** JSON, no fence, no commentary.
 }
 ```
 
-Supporting use cases you added beyond the request (rule 3e): also return `"proposed_use_cases": ["View Review Status"]`.
+Supporting use cases you added beyond the request (rule 3e): also return their names, e.g. for "add Request Grade Review
+for Student" → `"proposed_use_cases": ["Decide Grade Review", "View Grade Review Status"]`.
+
+Who settles a request is unknown (rule 3e) ⇒ ask instead of drafting:
+
+```json
+{ "clarification_needed": "Ai xử lý yêu cầu phúc khảo điểm: giảng viên chấm lại, phòng đào tạo duyệt, hay cả hai theo thứ tự đó?", "choices": ["Lecturer", "Academic Management Office", "Lecturer rồi Academic Management Office duyệt"] }
+```
 
 `reconcile`: `{ "ops": [...], "notes": "..." }` — same op grammar as `draft-to-ops`.
