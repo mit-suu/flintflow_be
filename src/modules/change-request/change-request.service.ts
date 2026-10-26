@@ -19,8 +19,12 @@ import { CR_STATUS_LABELS, assertTransition, isTerminal, type CrStatus } from ".
 import { ChangeGroup } from "./change-group.model.js"
 import { ChangeLocation, type LocationProposal } from "./change-location.model.js"
 import { regroup } from "./group.service.js"
-import { lockPaths, unlockPaths } from "./lock.service.js"
+import { writeApproved } from "./write.service.js"
+import { assertPackageNotPending } from "../doc-version/review-package.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
+import { notify } from "../notification/notification.service.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import { lockPaths, unlockPaths } from "./lock.service.js"
 import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
 
@@ -176,6 +180,8 @@ export const seedFromPreview = (projectId: string, userId: string, previewId: st
 }
 
 export const createCr = async (projectId: string, userId: string, body: CreateChangeRequest): Promise<IChangeRequest> => {
+  // FLF-330 C-7: gói đang chờ Lead ⇒ bản nháp khoá, không mở CR mới
+  assertPackageNotPending((await spineRepository.get(projectId))?.baseline_submission)
   const imported = await latestImport(projectId)
   const version = await latestDocVersion(projectId)
   if (!imported || !hasBaseline(imported.status) || !version) {
@@ -201,8 +207,13 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
 
 // ─── 3.11 nộp, 3.12–3.13 sửa lại / đóng, 3.10 huỷ ───────────────
 
-export const submitCr = async (cr: IChangeRequest): Promise<void> => {
-  assertCrStatus(cr, ["ready_to_submit"], "in_review")
+/**
+ * C-6 (FLF-330, business-flow §3.2): BA **xác nhận** ⇒ Code kiểm lại trên nội dung hiện tại rồi ghi Track Changes vào bản
+ * nháp chung **ngay** (tác giả = mã CR) — không chờ Lead, không tạo baseline. Mọi group của CR được ghi nhận "đã duyệt"
+ * bởi chính người xác nhận; vị trí `not_related` (BA bỏ riêng) không ghi. Lead duyệt **cả gói** ở C-7 (`review-package`).
+ */
+export const submitCr = async (cr: IChangeRequest, userId: string): Promise<void> => {
+  assertCrStatus(cr, ["ready_to_submit"], "written")
   const unconcluded = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null }).distinct("location_id")
   if (unconcluded.length) {
     throw new Mode1Error("CR_LOCATION_UNCONCLUDED", `Còn ${unconcluded.length} vị trí chưa có kết luận`, { location_ids: unconcluded })
@@ -217,9 +228,25 @@ export const submitCr = async (cr: IChangeRequest): Promise<void> => {
       { location_count: await ChangeLocation.countDocuments({ projectId: cr.projectId, cr_id: cr.cr_id }) }
     )
   }
+  const record = await spineRepository.get(String(cr.projectId))
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  assertPackageNotPending(record.baseline_submission)
+
   await regroup(cr)
   cr.submitted_at = new Date()
-  await transitionCr(cr, "in_review")
+  const approved = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id, conclusion: { $in: ["edit", "comment"] } })
+  const written = await writeApproved(cr, userId, approved, record.spine_version)
+  const decidedBy = new mongoose.Types.ObjectId(userId)
+  await ChangeGroup.updateMany({ projectId: cr.projectId, cr_id: cr.cr_id }, { $set: { decision: "approved", reason: "BA xác nhận, ghi vào bản nháp", decided_by: decidedBy, decided_at: new Date() } })
+  cr.result_doc_version = written
+  cr.decided_by = decidedBy
+  await transitionCr(cr, "written")
+  void notify(userId, {
+    type: "change_request_written",
+    title: `${cr.cr_id} đã ghi vào bản nháp`,
+    body: `Thay đổi "${cr.title}" đã ghi vào bản nháp chung (bản ${written}). Gửi Lead duyệt cả gói khi muốn phát hành.`,
+    meta: { cr_id: cr.cr_id, result_doc_version: written }
+  })
 }
 
 /** Mọi group bị từ chối ⇒ khoá lại phần tử, bỏ đề xuất cũ, về đề xuất (3.6). */

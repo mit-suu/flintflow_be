@@ -544,8 +544,13 @@ describe("UC-39 — Lead duyệt baseline SRS", () => {
     const red = (await api.flagsAtBaseline()).filter((f) => f.level === "red")
     expect(red.length).toBeGreaterThan(0)
     for (const flag of red) {
+      // FLF-329: cờ đỏ không waive được — chỉ "giữ nguyên + lý do", và cờ vẫn chặn
       const waived = await api.post(`/flags/${flag.id}/waive`, { reason: "Keep as-is: the customer accepted this content." })
-      expect(waived.status, JSON.stringify(waived.body.error)).toBe(200)
+      expect(waived.status).toBe(400)
+      expect(waived.body.error.code).toBe("FLAG_NOT_WAIVABLE")
+      const kept = await api.post(`/flags/${flag.id}/keep`, { reason: "Keep as-is: the customer accepted this content." })
+      expect(kept.status, JSON.stringify(kept.body.error)).toBe(200)
+      expect(kept.body.data).toMatchObject({ kept_reason: "Keep as-is: the customer accepted this content.", resolved_at: null })
     }
 
     const res = await api.post("/baseline", { base_version: await api.version() })

@@ -67,7 +67,7 @@ mọi trạng thái chưa kết thúc ─► cancelled
 
 Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`, `402 INSUFFICIENT_CREDIT` (`{ required, balance }`), `404 PROJECT_NOT_FOUND`, `409 SPINE_VERSION_CONFLICT`, `501 NOT_IMPLEMENTED`.
 
-`issues[]` của preflight là `{ code, message, location? }`, với `code` ∈ `NOT_DOCX`, `CORRUPT_ZIP`, `LEGACY_DOC`, `FILE_ENCRYPTED`, `FILE_TOO_LARGE`, `EMPTY_DOCUMENT`, `FOREIGN_TRACK_CHANGE`, `FOREIGN_COMMENT`. Loại file nhận theo magic bytes, không theo đuôi (spike P0 §4.6). Track Changes/comment có author khớp `^CR-\d{3,}$` (do FlintFlow ghi) được chấp nhận.
+`issues[]` của preflight là `{ code, message, location? }`, với `code` ∈ `NOT_DOCX`, `CORRUPT_ZIP`, `LEGACY_DOC`, `FILE_ENCRYPTED`, `FILE_TOO_LARGE`, `EMPTY_DOCUMENT`, `FOREIGN_TRACK_CHANGE`, `FOREIGN_COMMENT`, **`NOT_SRS`** (FLF-331: Code không thấy dấu hiệu SRS / mẫu SRS — CV, hoá đơn, test plan, biên bản họp…; `message` nêu lý do ngắn; 0 credit). `preflight.document_kind` (`{ kind: srs | srs_template | not_srs | unknown, confidence 0–1, signals[], reasons[] }`, `null` với bản ghi cũ hoặc file mang dấu version FlintFlow): `unknown` ⇒ vẫn nhận, FE cảnh báo ở bước xác nhận 1.5; mẫu SRS trống (chỉ heading + chữ hướng dẫn) là `srs_template`, vẫn nhận. Loại file nhận theo magic bytes, không theo đuôi (spike P0 §4.6). Track Changes/comment có author khớp `^CR-\d{3,}$` (do FlintFlow ghi) được chấp nhận.
 
 ## 1. Endpoint
 
@@ -87,7 +87,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
-| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx` | `DOC_VERSION_NOT_FOUND` |
+| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx` | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng) |
 | 15 | `GET /projects/:id/versions/compare?from=&to=` | UC-55 | `compareQuerySchema` | `compareResponseSchema` | `DOC_VERSION_NOT_FOUND`, `VALIDATION_ERROR` |
 | 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
 | 17 | `GET /projects/:id/change-requests?status=` | UC-48 | `listChangeRequestsQuerySchema` | `ChangeRequest[]`, mới nhất trước | — |
@@ -446,3 +446,19 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 | 2026-09-19 | FLF-182 (mode 1 v2, V0) | §4: `steps[].status = skipped`, `custom_sections[]`, section `custom:<id>`, `layout[]`, #32–#33 step-plan, CR nguồn `chat`, `CORE_STEP_REQUIRED`, `STEP_NOT_IN_PLAN`, `CHANGE_REQUIRES_CR` chỉ sau baseline v1 — chờ 4/4 |
 | 2026-09-19 | FLF-171 (việc A sau P2) | #6, #10: I-4 chạy nền, trả ngay `extracting`; FE poll #4. Hình request/response không đổi, chỉ đổi thời điểm trả — cần nhóm duyệt như contract-change |
 | 2026-09-18 | FLF-171 (P1) | Bản đầu tiên, nhóm chốt và đóng băng cùng ngày. Đi kèm contract-change `Baseline.type` + `doc_version` trong `pipeline-contract.md` §3 (nhóm duyệt 4/4) |
+
+- **FLF-331 (2026-10-26) — I-1 nhận diện SRS bằng Code**: preflight thêm mã `NOT_SRS` (từ chối CV / hoá đơn / test plan / biên bản họp / hợp đồng trước khi tốn credit, `IMPORT_FILE_REJECTED` như các mã khác) và `preflight.document_kind` (loại + độ tin + lý do, additive, bản ghi cũ `null`). File có dấu version FlintFlow không phân loại lại. Ngưỡng / danh sách tín hiệu ở `src/modules/import/srs-detect.ts` `SRS_DETECT_CONFIG`.
+
+## FLF-330 (2026-10-26) — CR kiểu GitHub: xác nhận là ghi ngay, Lead duyệt cả gói một lần
+
+Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **Đổi luật + additive** ⇒ PR nhãn `contract-change`.
+
+- **#25 `POST …/change-requests/:crId/submit`** nay là **C-6 BA xác nhận**: `ready_to_submit` ⇒ Code kiểm lại trên nội dung hiện tại (`CR_VALUE_CHANGED` nếu lệch) ⇒ ghi Track Changes vào bản nháp **ngay** ⇒ `written` (có `result_doc_version`), mọi group ghi nhận `approved` bởi chính người xác nhận. Không còn `in_review` cho CR mới; vị trí BA muốn bỏ thì đặt kết luận `not_related` trước khi xác nhận (#27). `in_review` + #26 `groups/:gid/decision` + `revise` / `close` chỉ còn cho CR tạo trước FLF-330 (script `npm run migrate:cr-package` đưa chúng về `ready_to_submit` để BA xác nhận lại).
+- **Gói duyệt (C-7)** — không có model riêng: gói = mọi CR `written` kể từ lần phát hành trước (suy từ `DocVersion.cr_revision`), trạng thái chờ nằm ở `Spine.baseline_submission` (cùng field với nộp baseline mode 2 ⇒ `DRAFT_LOCKED` / `PACKAGE_PENDING` khoá mọi đường sửa):
+  - `GET /projects/:id/review-package` → `reviewPackageSchema` `{ status: drafting | pending | changes_requested, base_version ("v0" / "1.0"), latest_version, next_version, draft_label ("1.0 · 3 thay đổi chưa duyệt"), change_requests[], red_open, submission, spine_version }`. Mọi vai trò trong org.
+  - `POST /projects/:id/review-package/submit` `{ base_version }` (Lead, Analyst): quét lại cờ (hồ sơ mode 1, `at_baseline`), cờ đỏ > 0 ⇒ `422 RELEASE_RED_FLAGS_OPEN` (`meta.flags[]`); chưa có CR ⇒ `409 PACKAGE_EMPTY`; đã gửi ⇒ `409 PACKAGE_ALREADY_SUBMITTED`. Đặt `baseline_submission = pending`, báo in-app `review_package_submitted` cho mọi Lead khác.
+  - `POST /projects/:id/review-package/request-changes` `{ base_version, reason ≥ 10 }` (Lead): `baseline_submission = rejected` + lý do, mở khoá, báo người gửi `review_package_changes_requested`; không có gói chờ ⇒ `422 NO_PENDING_SUBMISSION`.
+  - **Lead duyệt cả gói = `POST /projects/:id/release`** (#31, không đổi body): phát hành số chính như cũ, rồi xoá `baseline_submission` và báo người gửi `review_package_released`. Lead tự làm thì gọi thẳng, không qua bước gửi.
+- **Khoá bản nháp khi gói chờ duyệt**: `POST /change-requests` (#16) và `#25 submit` trả `409 PACKAGE_PENDING`; `/changes`, `/reconcile`, `/undo` trả `409 DRAFT_LOCKED` như FLF-293.
+- **Đánh số**: bản nháp sau mỗi CR vẫn là một `DocVersion` minor (`0.2`, `1.1`…) để giữ file Track Changes theo từng CR cho Lead xem diff — nhưng người dùng thấy `draft_label` (chỉ số chính); tên file bản nháp theo FLF-334.
+- Thông báo mới: `change_request_written`, `review_package_submitted`, `review_package_changes_requested`, `review_package_released`.

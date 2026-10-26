@@ -3,27 +3,36 @@
  * Nhận loại file theo magic bytes (không theo đuôi): `.doc`, `.docx` có mật khẩu (vỏ OLE), không phải zip.
  * Track Changes/comment của tác giả không phải mã CR (`CR-001`…) ⇒ từ chối kèm vị trí để người dùng
  * Accept/Reject trong Word rồi upload lại. Đọc stamp để service chọn nhánh (không stamp / đúng project / project khác).
+ * FLF-331: nhận diện SRS / mẫu SRS bằng Code (`srs-detect.ts`) — CV, hoá đơn, test plan… bị từ chối `NOT_SRS` trước khi tốn credit.
  */
 
 import { DocxPackage, MAIN_PART, OoxmlError, enclosingParagraph, listComments, listRevisions, readBlocks, readStamp, commentParagraph } from "../docx-ooxml/index.js"
 import type { OoxmlBlock, Stamp } from "../docx-ooxml/index.js"
 import { CR_AUTHOR_PATTERN, IMPORT_MAX_FILE_BYTES, fileTooLargeMessage } from "./import.constants.js"
 import type { PreflightIssue } from "./imported-document.model.js"
+import { classifyDocument, type DocumentKindResult } from "./srs-detect.js"
 
 export interface PreflightResult {
   status: "accepted" | "rejected"
   issues: PreflightIssue[]
   stamp: Stamp | null
+  /**
+   * FLF-331: loại tài liệu Code nhận ra (0 credit). `null` khi chưa tới bước đọc khối, hoặc file mang dấu version
+   * FlintFlow (chắc chắn là SRS của hệ thống, không phân loại lại). `unknown` ⇒ vẫn nhận, FE cảnh báo ở bước xác nhận.
+   */
+  document_kind: DocumentKindResult | null
 }
 
 const OLE_MAGIC = "d0cf11e0"
 const ZIP_MAGIC = "504b0304"
 const utf16 = (s: string): Buffer => Buffer.from(s, "utf16le")
 
-const reject = (code: PreflightIssue["code"], message: string): PreflightResult => ({
+const reject = (code: PreflightIssue["code"], message: string, extra: Partial<PreflightResult> = {}): PreflightResult => ({
   status: "rejected",
   issues: [{ code, message, location: null }],
-  stamp: null
+  stamp: null,
+  document_kind: null,
+  ...extra
 })
 
 const locationOf = (blocksByElement: Map<Element, OoxmlBlock>, p: Element | null): PreflightIssue["location"] => {
@@ -72,6 +81,14 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
   }
   if (!blocks.some((b) => b.text.trim())) return reject("EMPTY_DOCUMENT", "Tài liệu không có nội dung chữ")
 
+  // FLF-331 (I-1): có phải SRS / mẫu SRS không — bằng Code, trước mọi lượt gọi model. File mang dấu version FlintFlow
+  // là bản chính hệ thống xuất ra (kể cả bản tải lại) ⇒ không phân loại lại.
+  const stamp = await readStamp(pkg)
+  const documentKind = stamp ? null : classifyDocument(blocks)
+  if (documentKind?.kind === "not_srs") {
+    return reject("NOT_SRS", documentKind.reasons[0] ?? "Không thấy dấu hiệu đây là tài liệu yêu cầu (SRS) hay mẫu SRS", { stamp, document_kind: documentKind })
+  }
+
   const byElement = new Map(blocks.map((b) => [b.element, b]))
   const issues: PreflightIssue[] = []
   // Một lần sửa trong Word thường sinh cặp del + ins: gộp theo (thông báo, đoạn)
@@ -98,5 +115,5 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
       location: locationOf(byElement, await commentParagraph(pkg, c.id))
     })
   }
-  return { status: issues.length ? "rejected" : "accepted", issues, stamp: await readStamp(pkg) }
+  return { status: issues.length ? "rejected" : "accepted", issues, stamp, document_kind: documentKind }
 }

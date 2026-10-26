@@ -572,6 +572,10 @@ export const flagsResponseSchema = z.array(flagSchema)
 export const waiveRequestSchema = z.strictObject({ reason: z.string().trim().min(WAIVE_REASON_MIN_LENGTH) })
 export const waiveResponseSchema = flagSchema
 
+/** POST /projects/:id/flags/:flagId/keep (FLF-329): giữ nguyên + lý do, cờ vẫn mở */
+export const keepRequestSchema = z.strictObject({ reason: z.string().trim().min(WAIVE_REASON_MIN_LENGTH) })
+export const keepResponseSchema = flagSchema
+
 /** POST /projects/:id/flags/recompute */
 export const recomputeFlagsRequestSchema = z.strictObject({ at_baseline: z.boolean().optional() })
 

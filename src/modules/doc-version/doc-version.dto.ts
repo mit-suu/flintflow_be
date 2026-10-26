@@ -29,6 +29,50 @@ export const docVersionDtoSchema = z.object({
   created_at: isoDateTime
 })
 
+// ─── gói duyệt (FLF-330, C-7) ────────────────────────────────────
+
+export const reviewPackageCrSchema = z.object({
+  cr_id: z.string(),
+  title: z.string(),
+  requester: z.string(),
+  source: z.object({ kind: z.string(), ref: z.string().nullable() }),
+  result_doc_version: docVersionString.nullable(),
+  written_at: isoDateTime
+})
+export type ReviewPackageCrDto = z.infer<typeof reviewPackageCrSchema>
+
+/**
+ * `GET /projects/:id/review-package` — gói = mọi CR đã ghi kể từ lần phát hành trước (business-flow §3.2).
+ * `status`: `drafting` (BA đang ghi) · `pending` (chờ Lead, bản nháp khoá) · `changes_requested` (Lead yêu cầu sửa).
+ * `draft_label`: "1.0 · 3 thay đổi chưa duyệt" — chỉ số chính, không số phụ.
+ */
+export const reviewPackageSchema = z.object({
+  status: z.enum(["drafting", "pending", "changes_requested"]),
+  base_version: z.string().nullable(),
+  latest_version: docVersionString.nullable(),
+  next_version: docVersionString.nullable(),
+  draft_label: z.string(),
+  change_requests: z.array(reviewPackageCrSchema),
+  red_open: z.number().int().min(0),
+  submission: z
+    .object({
+      status: z.enum(["pending", "rejected"]),
+      submitted_by: z.string(),
+      submitted_at: isoDateTime,
+      spine_version: z.number().int(),
+      decided_by: z.string().nullable(),
+      decided_at: isoDateTime.nullable(),
+      reason: z.string().nullable(),
+      rejection_comment_ids: z.array(z.string())
+    })
+    .nullable(),
+  spine_version: z.number().int()
+})
+export type ReviewPackageDto = z.infer<typeof reviewPackageSchema>
+
+export const submitPackageRequestSchema = z.strictObject({ base_version: z.number().int().min(1) })
+export const requestChangesRequestSchema = z.strictObject({ base_version: z.number().int().min(1), reason: z.string().trim().min(10).max(2000) })
+
 // ─── request ─────────────────────────────────────────────────────
 
 export const versionParamsSchema = z.object({ v: docVersionString })
@@ -39,7 +83,11 @@ export const versionParamsSchema = z.object({ v: docVersionString })
  * `tracked`: luôn bản có Track Changes (cả với release).
  * `original` (mode 1 v2, FLF-184): file người dùng upload của bản `0.1` (bản lưu `0.1` giờ là bản render từ Spine).
  */
-export const downloadQuerySchema = z.object({ variant: z.enum(["auto", "tracked", "original"]).default("auto") })
+/** `format=pdf` (FLF-316): chính file .docx của variant đó chuyển qua Gotenberg; `original` chỉ có .docx. */
+export const downloadQuerySchema = z.object({
+  variant: z.enum(["auto", "tracked", "original"]).default("auto"),
+  format: z.enum(["docx", "pdf"]).default("docx")
+})
 
 /** `GET /projects/:id/versions/compare?from=&to=` (UC-55). */
 export const compareQuerySchema = z

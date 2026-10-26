@@ -11,6 +11,11 @@ export type NotificationType =
   | "low_credit"
   | "plan_changed"
   | "admin_new_user"
+  /** FLF-330: CR ghi vào bản nháp; gói gửi Lead; Lead yêu cầu sửa; Lead duyệt gói = phát hành. */
+  | "change_request_written"
+  | "review_package_submitted"
+  | "review_package_changes_requested"
+  | "review_package_released"
   /** FLF-332 (BR-08): Analyst báo Lead nạp credit; ví được nạp ⇒ báo lại người đã yêu cầu. */
   | "credit_topup_requested"
   | "credit_topped_up"
