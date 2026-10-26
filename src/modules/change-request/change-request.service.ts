@@ -27,6 +27,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { lockPaths, unlockPaths } from "./lock.service.js"
 import { addedElements, currentText, isArrayPath, opElement, valueText } from "./spine-location.js"
 import { peekPreview } from "../spine/change.service.js"
+import { markPreviewAsCr } from "../spine/change-transcript.js"
 
 // ─── đọc ─────────────────────────────────────────────────────────
 
@@ -202,6 +203,10 @@ export const createCr = async (projectId: string, userId: string, body: CreateCh
     created_by: userId
   })
   if (imported.status === "gap_review" || imported.status === "delivered") await transitionImport(imported, "change_requested")
+  // FLF-318: tin bản xem trước trong chat ⇒ "đã tạo CR-…" (lỗi chỉ ghi log — CR đã tạo)
+  if (body.preview_id) {
+    await markPreviewAsCr(projectId, body.preview_id, cr.cr_id).catch((err: unknown) => console.warn(`[CR] ${cr.cr_id}: đánh dấu tin bản xem trước lỗi`, err))
+  }
   return cr
 }
 

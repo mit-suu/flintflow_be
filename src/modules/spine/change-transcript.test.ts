@@ -58,6 +58,13 @@ describe("previewPayload", () => {
     expect(payload.reply).toContain("1 thay đổi")
   })
 
+  it("FLF-318: dự án sau baseline (requiresCr) ⇒ câu nói bấm “Tạo change request”, không phải Áp dụng", () => {
+    const preview = { ...base, changes: [{ op: "set" as const, path: "actors[id=A01].name", before: "A", value: "B", reason: null }], preview_id: "pv" }
+    expect(previewPayload(preview, "vi", { requiresCr: true }).reply).toContain("Tạo change request")
+    expect(previewPayload(preview, "vi", { requiresCr: true }).reply).not.toContain("Áp dụng")
+    expect(previewPayload(preview, "vi").reply).toContain("Áp dụng")
+  })
+
   it("FLF-311: câu hỏi kèm lựa chọn ⇒ payload có questions[].options để FE hiện thẻ chọn nhanh", () => {
     const payload = previewPayload({ ...base, ok: false, clarification: "Màn hình riêng hay popup?", clarification_choices: ["Màn hình riêng", "Popup mở từ My Grades"] })
     expect(payload).toEqual({

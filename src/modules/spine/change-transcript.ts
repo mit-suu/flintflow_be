@@ -102,7 +102,12 @@ export const loadProjectSession = async (projectId: string, sessionId: string): 
  * `previewStore` (`change.service.ts`) theo `preview_id` — không ai đọc lại các mảng đó từ transcript.
  * FLF-260: câu cố định theo `language` của lượt; câu hỏi làm rõ đã đúng ngôn ngữ từ change.service.
  */
-export const previewPayload = (preview: ChangePreviewResult, language: ReplyLanguage = "vi"): Record<string, unknown> =>
+export const previewPayload = (
+  preview: ChangePreviewResult,
+  language: ReplyLanguage = "vi",
+  /** FLF-318: dự án sau baseline (mode 1, `meta.requires_cr`) — bản xem trước để tạo change request, không áp thẳng. */
+  opts: { requiresCr?: boolean } = {}
+): Record<string, unknown> =>
   preview.clarification
     ? {
         kind: "change_clarification",
@@ -117,10 +122,15 @@ export const previewPayload = (preview: ChangePreviewResult, language: ReplyLang
         reply: preview.ok
           ? preview.changes.length > 0
             ? [
-                byLanguage(language, {
-                  vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
-                  en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
-                }),
+                opts.requiresCr
+                  ? byLanguage(language, {
+                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm “Tạo change request” để gửi thay đổi này.`,
+                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Tạo change request" (Create change request) to send it.`
+                    })
+                  : byLanguage(language, {
+                      vi: `Đã dựng bản xem trước ${preview.changes.length} thay đổi — xem rồi bấm Áp dụng để ghi.`,
+                      en: `Built a preview of ${preview.changes.length} change${preview.changes.length === 1 ? "" : "s"} — review it, then press "Áp dụng" (Apply) to save.`
+                    }),
                 // FLF-298: phần còn thiếu (vd use case mới chưa có màn hình) phải hiện ngay trong chat, không chỉ trong thẻ
                 preview.notes
               ]
@@ -137,6 +147,48 @@ export const previewPayload = (preview: ChangePreviewResult, language: ReplyLang
         branch: preview.branch ?? null,
         change_count: preview.changes.length
       }
+
+/**
+ * FLF-318: bản xem trước đã thành change request (`POST /change-requests` kèm `preview_id`) ⇒ tin bản xem trước trong phiên
+ * đổi thành `change_cr` (mã CR + số thay đổi) — không còn trông như một lần sửa đang chờ xác nhận. Không tìm thấy ⇒ không
+ * làm gì (bản xem trước dựng ngoài phiên chat).
+ */
+export const markPreviewAsCr = async (projectId: string, previewId: string, crId: string): Promise<number> => {
+  const needle = `"preview_id":"${previewId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`
+  const sessions = await ChatSession.find({ projectId, "messages.content": { $regex: needle } })
+  let marked = 0
+  for (const session of sessions) {
+    let changed = false
+    for (const message of session.messages) {
+      if (message.role !== "ai") continue
+      let data: { kind?: unknown; preview_id?: unknown; change_count?: unknown; reply?: unknown }
+      try {
+        data = JSON.parse(message.content) as typeof data
+      } catch {
+        continue
+      }
+      if (data.kind !== "change_preview" || data.preview_id !== previewId) continue
+      const count = typeof data.change_count === "number" ? data.change_count : 0
+      const english = typeof data.reply === "string" && data.reply.startsWith("Built")
+      message.content = JSON.stringify({
+        kind: "change_cr",
+        reply: english
+          ? `Created ${crId} from this preview (${count} change${count === 1 ? "" : "s"}) — follow and confirm it in the change request.`
+          : `Đã tạo ${crId} từ bản xem trước này (${count} thay đổi) — theo dõi và xác nhận trong change request.`,
+        cr_id: crId,
+        preview_id: previewId,
+        change_count: count
+      })
+      changed = true
+      marked += 1
+    }
+    if (changed) {
+      session.markModified("messages")
+      await session.save()
+    }
+  }
+  return marked
+}
 
 /**
  * Câu của tin `change_error` trong phiên (FLF-247): lỗi op/bất biến/schema thành câu thường theo luật vi phạm
