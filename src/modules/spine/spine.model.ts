@@ -342,7 +342,11 @@ const flagSchema = new Schema(
     resolved_at: nullableDate,
     waived_by_user: { type: Boolean, default: false },
     waive_reason: { ...nullableString, minlength: 20 },
-    waived_at_version: nullableNumber
+    waived_at_version: nullableNumber,
+    // FLF-329: giữ nguyên + lý do (cờ vẫn mở)
+    kept_reason: { ...nullableString, minlength: 20 },
+    kept_by: nullableString,
+    kept_at: nullableDate
   },
   opts
 )

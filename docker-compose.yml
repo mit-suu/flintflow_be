@@ -1,10 +1,10 @@
 # Toàn bộ FlintFlow bằng một lệnh (T24).
 #
 #   cp .env.example .env            # điền secret thật vào .env
-#   docker compose up -d            # mongo (rs0) + redis + plantuml + backend + worker + frontend
+#   docker compose up -d            # mongo (rs0) + redis + plantuml + gotenberg + backend + worker + frontend
 #   curl http://localhost:5000/health
 #
-# Chỉ hạ tầng, code chạy trên máy:  docker compose up -d mongo mongo-init redis plantuml
+# Chỉ hạ tầng, code chạy trên máy:  docker compose up -d mongo mongo-init redis plantuml gotenberg
 # Xem thêm docs/ops.md.
 #
 # Frontend build từ repo anh em `../flintflow_fe`. Chỉ clone repo này thì đặt
@@ -84,6 +84,24 @@ services:
     restart: unless-stopped
     networks: [flintflow]
 
+  # ─── Gotenberg: .docx → PDF (FLF-316) ──────────────────────────────
+  # PDF là chính file .docx do writeDocx sinh ra, chuyển bằng LibreOffice + font Noto trong container —
+  # không có renderer PDF thứ hai, và máy dev không phải cài LibreOffice. Tag GHIM cùng lý do PlantUML.
+  # Chỉ backend gọi; cổng mở ra máy để BE chạy bằng `npm run dev` dùng được (GOTENBERG_URL mặc định :3001).
+  gotenberg:
+    image: gotenberg/gotenberg:${GOTENBERG_TAG:-8.38.1}
+    command: ["gotenberg", "--api-timeout=90s"]
+    ports:
+      - "${GOTENBERG_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/health > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+    networks: [flintflow]
+
   # ─── Backend ───────────────────────────────────────────────────────
   backend:
     build:
@@ -93,6 +111,8 @@ services:
       mongo-init:
         condition: service_completed_successfully
       plantuml:
+        condition: service_started
+      gotenberg:
         condition: service_started
       redis:
         condition: service_healthy
@@ -107,6 +127,7 @@ services:
       PORT: "5000"
       MONGO_URI: mongodb://mongo:27017/${MONGO_DB:-flintflow}?replicaSet=rs0
       PLANTUML_BASE_URL: http://plantuml:8080
+      GOTENBERG_URL: http://gotenberg:3000
       CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
       APP_URL: ${APP_URL:-http://localhost:3000}
       AI_PROVIDER_OVERRIDE: ${AI_PROVIDER_OVERRIDE:-}

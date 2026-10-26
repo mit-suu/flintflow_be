@@ -149,6 +149,12 @@ describe("release — bản sạch + baseline", () => {
     const dl = await binary(c.get("/versions/1.0/download"))
     expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
     expect(await documentXml(dl.body as Buffer)).not.toMatch(/<w:ins\b|<w:del\b/)
+
+    // FLF-316: format=pdf đi qua Gotenberg — test trỏ cổng đóng ⇒ 503 có mã riêng, bản .docx vẫn tải được
+    const pdf = await c.get("/versions/1.0/download?format=pdf")
+    expect(pdf.status).toBe(503)
+    expect(pdf.body.error.code).toBe("PDF_EXPORT_UNAVAILABLE")
+    expect((await c.get("/versions/1.0/download?variant=original&format=pdf")).status).toBe(400)
   })
 })
 

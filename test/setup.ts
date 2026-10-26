@@ -35,6 +35,9 @@ process.env.PLANTUML_BASE_URL = "http://127.0.0.1:9"
 process.env.PLANTUML_TIMEOUT_MS = "1000"
 // Cổng đóng là cố ý ⇒ không thử lại (mặc định chờ 0,5 s + 1,5 s mỗi lượt vẽ: ca nhiều sơ đồ chạm trần 30 s)
 process.env.PLANTUML_RETRY_DELAYS_MS = ""
+// FLF-316: Gotenberg cũng ở cổng đóng — test xuất PDF mock converter, nhánh "không có Gotenberg" ⇒ 503
+process.env.GOTENBERG_URL = "http://127.0.0.1:9"
+process.env.GOTENBERG_TIMEOUT_MS = "1000"
 // Embedding (hybrid retrieval C-3) tắt dù `.env` máy dev bật: Mongo in-memory không có $vectorSearch, và test không
 // được gọi provider thật. Test cần vector thì stub `vectorCandidates` / bật `mock` trong file của mình.
 process.env.EMBEDDING_PROVIDER = "off"

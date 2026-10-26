@@ -116,7 +116,10 @@ export const validateGoals = async (projectId: string, userId: string, options: 
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     }
     return { op: "add", path: "flags[]", value: flag, reason: "S-9.3: mục tiêu chưa được phủ" }
   })
