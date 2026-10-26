@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 vi.mock("../../../src/shared/ai/providers/llm.router.js", async () => (await import("../../helpers/mock-llm.js")).mockLlmRouterModule())
 
-import { PERF_TARGETS, crToImpact, crToReview, detail, importedProject, lockedPaths, newCr, resetCrMock } from "../../helpers/mode1-cr-p4.js"
+import { PERF_TARGETS, crToImpact, crToReady, crToReview, detail, importedProject, lockedPaths, newCr, resetCrMock } from "../../helpers/mode1-cr-p4.js"
+import { ChangeRequest } from "../../../src/modules/change-request/change-request.model.js"
 import { fakeCrClarify, fakeCrPropose } from "../../helpers/mode1.js"
 import { lockPaths, unlockPaths } from "../../../src/modules/change-request/lock.service.js"
 import { SpineLock } from "../../../src/modules/change-request/spine-lock.model.js"
@@ -110,10 +111,12 @@ describe("khoá theo vòng đời CR", () => {
     expect(await lockedPaths(projectId, crId)).toEqual([])
   })
 
-  it("đóng (mọi group bị từ chối rồi close) ⇒ mở hết khoá, kể cả vị trí not_related", async () => {
+  it("đóng (luồng cũ in_review: mọi group bị từ chối rồi close) ⇒ mở hết khoá, kể cả vị trí not_related", async () => {
     withUnrelated()
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
+    const { crId, cr, verified: submitted } = await crToReady(c)
+    // CR tạo trước FLF-330 còn ở in_review — ép trạng thái để kiểm đường đóng cũ
+    await ChangeRequest.updateOne({ projectId, cr_id: crId }, { $set: { status: "in_review" } })
     const unrelated = submitted.locations.filter((l) => l.conclusion === "not_related").map((l) => l.path)
     expect(unrelated.length).toBeGreaterThan(0)
     for (const g of submitted.groups) {
@@ -126,10 +129,9 @@ describe("khoá theo vòng đời CR", () => {
     expect(await lockedPaths(projectId, crId)).toEqual([])
   })
 
-  it("ghi (write) ⇒ mở hết khoá", async () => {
+  it("ghi (BA xác nhận) ⇒ mở hết khoá", async () => {
     const { c, projectId } = await importedProject()
-    const { crId, cr, submitted } = await crToReview(c)
-    for (const g of submitted.groups) detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
+    const { crId, cr } = await crToReview(c)
     expect(detail(await c.get(cr)).change_request.status).toBe("written")
     expect(await lockedPaths(projectId, crId)).toEqual([])
     expect(await SpineLock.countDocuments({ projectId })).toBe(0)

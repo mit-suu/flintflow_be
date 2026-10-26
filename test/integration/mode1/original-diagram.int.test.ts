@@ -63,8 +63,8 @@ const mediaOf = async (projectId: string, version: string): Promise<Buffer[]> =>
 const keptImages = async (projectId: string) =>
   (await spineRepository.get(projectId))!.custom_sections.flatMap((c) => c.blocks).filter((b) => b.kind === "image" && b.diagram)
 
-/** CR đổi tên UC-02 tới `in_review`; trả vị trí sơ đồ gốc + group của nó. */
-const renameToReview = async (c: ReturnType<typeof mode1Api>) => {
+/** CR đổi tên UC-02 tới khi BA xác nhận (FLF-330: xác nhận = ghi); `keepOriginal` ⇒ BA bỏ riêng vị trí sơ đồ gốc trước. */
+const renameToReview = async (c: ReturnType<typeof mode1Api>, opts: { keepOriginal?: boolean } = {}) => {
   const res = await c.post("/change-requests", { title: "Rename login", description: `Rename use case UC-02 to "${NEW_NAME}".`, ...CR_BODY })
   expect(res.status, JSON.stringify(res.body.error)).toBe(201)
   const cr = `/change-requests/${res.body.data.change_request.cr_id as string}`
@@ -83,9 +83,13 @@ const renameToReview = async (c: ReturnType<typeof mode1Api>) => {
 
   // C-5: đổi tên use case + bỏ ảnh gốc không bị coi là phát sinh lỗi đỏ (hình vẽ lại ở 3.14)
   expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+  if (opts.keepOriginal) {
+    detail(await c.patch(`${cr}/locations/${diagram!.location_id}`, { conclusion: "not_related", reason: "Giữ hình vẽ tay của khách" }))
+    expect(detail(await c.post(`${cr}/verify`)).change_request.status).toBe("ready_to_submit")
+  }
   const submitted = detail(await c.post(`${cr}/submit`))
-  const group = submitted.groups.find((g) => g.location_ids.includes(diagram!.location_id))!
-  return { cr, submitted, diagramGroup: group }
+  expect(submitted.change_request.status).toBe("written")
+  return { cr, submitted }
 }
 
 describe("§4.13 sơ đồ gốc của người dùng", () => {
@@ -95,12 +99,10 @@ describe("§4.13 sơ đồ gốc của người dùng", () => {
     expect((await mediaOf(projectId, "0.1")).some((m) => m.equals(PNG))).toBe(true)
   })
 
-  it("CR đổi tên use case ⇒ đề xuất vẽ lại; duyệt ⇒ 0.2 bỏ ảnh gốc, không cờ hình lệch", async () => {
+  it("CR đổi tên use case ⇒ đề xuất vẽ lại; BA xác nhận ⇒ 0.2 bỏ ảnh gốc, không cờ hình lệch", async () => {
     const { projectId, c } = await importWithDiagram()
-    const { cr, submitted } = await renameToReview(c)
-    let last = submitted
-    for (const g of submitted.groups) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-    expect(last.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
+    const { submitted } = await renameToReview(c)
+    expect(submitted.change_request).toMatchObject({ status: "written", result_doc_version: "0.2" })
 
     const spine = (await spineRepository.get(projectId))!
     expect(spine.use_cases.find((u) => u.id === "UC-02")?.name).toBe(NEW_NAME)
@@ -109,14 +111,10 @@ describe("§4.13 sơ đồ gốc của người dùng", () => {
     expect((await mediaOf(projectId, "0.2")).some((m) => m.equals(PNG))).toBe(false)
   })
 
-  it("từ chối group vẽ lại ⇒ 0.2 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
+  it("BA bỏ riêng vị trí vẽ lại (not_related) ⇒ 0.2 giữ ảnh gốc, cờ vàng hình gốc lệch dữ liệu", async () => {
     const { projectId, c } = await importWithDiagram()
-    const { cr, submitted, diagramGroup } = await renameToReview(c)
-    const others = submitted.groups.filter((g) => g.group_id !== diagramGroup.group_id)
-    await c.post(`${cr}/groups/${diagramGroup.group_id}/decision`, { decision: "rejected", reason: "Giữ hình vẽ tay của khách", base_version: await c.spineVersion() })
-    let last = submitted
-    for (const g of others) last = detail(await c.post(`${cr}/groups/${g.group_id}/decision`, { decision: "approved", reason: "Đúng yêu cầu của khách", base_version: await c.spineVersion() }))
-    expect(last.change_request.status).toBe("written")
+    const { submitted } = await renameToReview(c, { keepOriginal: true })
+    expect(submitted.change_request.status).toBe("written")
 
     expect(await keptImages(projectId)).toHaveLength(1)
     const spine = (await spineRepository.get(projectId))!

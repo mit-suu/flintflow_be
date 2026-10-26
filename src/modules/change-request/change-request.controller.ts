@@ -143,7 +143,7 @@ export const answers = mode1Handler(async (req, res) => {
 export const impact = action((cr) => runImpact(cr))
 export const propose = action((cr, auth) => runPropose(cr, auth.userId))
 export const verify = action((cr, auth) => runVerify(cr, auth.userId))
-export const submit = action((cr) => crService.submitCr(cr))
+export const submit = action((cr, auth) => crService.submitCr(cr, auth.userId))
 export const revise = action((cr) => crService.reviseCr(cr))
 
 export const updateLocation = mode1Handler(async (req, res) => {
