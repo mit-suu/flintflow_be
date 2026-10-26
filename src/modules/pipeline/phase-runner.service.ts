@@ -34,12 +34,12 @@ import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { AnswerDetached } from "./step-runner.errors.js"
 import { acquireRun, detachRun, finishRun, registerAbort, touchRun, type PendingAnswerState } from "./run-state.service.js"
 import type { AnswerInput } from "./step-runner.service.js"
 import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { runErrorOf } from "./pipeline-error-code.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -244,7 +244,7 @@ export const resumePhaseInterview = async (
     }
     await finishRun(projectId, unit, run.run_id, "done", { questions: null })
   } catch (err) {
-    await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) } })
+    await finishRun(projectId, unit, run.run_id, "interrupted", { error: runErrorOf(err) })
     throw err
   }
 }

@@ -57,7 +57,6 @@ import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { ElicitOutput, OpTransaction, ReviewOutput } from "../../shared/ai/response-parser.js"
 import { byLanguage, detectMessageLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { PIPELINE_ERROR_STATUS, gateActionSchema, type ChangeSummary, type PipelineErrorCode, type RunIntent, type StepEvent } from "./pipeline.dto.js"
 import { summarizeChanges } from "./change-summary.js"
 import { gateTableOf } from "./gate-table.js"
@@ -78,6 +77,7 @@ import {
   type RunStateDoc
 } from "./run-state.service.js"
 import type { z } from "zod"
+import { runErrorOf } from "./pipeline-error-code.js"
 
 type GateAction = z.infer<typeof gateActionSchema>
 
@@ -1864,7 +1864,7 @@ export const runStep = async (
       return
     }
     // run-state đọc lại ở FE (`GET /run-state`) ⇒ chỉ lưu câu cho user; chi tiết do nơi bắt lỗi log (FLF-247)
-    lastError = { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) }
+    lastError = runErrorOf(err)
     throw err
   } finally {
     if (outcome === "gate") {
