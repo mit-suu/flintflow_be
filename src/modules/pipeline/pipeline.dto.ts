@@ -535,6 +535,31 @@ export const resumeResponseSchema = z.object({
   progress: progressResponseSchema
 })
 
+// ─── mức duyệt / không hỏi lại / thay đổi tự qua (FLF-337) ─────────
+
+/** PATCH /projects/:id/review-mode */
+export const reviewModeRequestSchema = z.strictObject({ review_mode: z.enum(["strict", "balanced", "fast", "milestones"]) })
+export const reviewModeResponseSchema = z.object({ review_mode: z.enum(["strict", "balanced", "fast", "milestones"]), spine_version: z.number().int().min(0) })
+
+/** PATCH /projects/:id/skip-confirm-sections — thêm / gỡ section khỏi danh sách "không hỏi lại". */
+export const skipConfirmSectionsRequestSchema = z
+  .strictObject({ add: z.array(z.string().min(1)).max(50).optional(), remove: z.array(z.string().min(1)).max(50).optional() })
+  .refine((b) => (b.add?.length ?? 0) + (b.remove?.length ?? 0) > 0, { message: "Cần ít nhất một section để thêm hoặc gỡ." })
+export const skipConfirmSectionsResponseSchema = z.object({ skip_confirm_sections: z.array(z.string()), spine_version: z.number().int().min(0) })
+
+/** GET /projects/:id/auto-passed · POST /projects/:id/auto-passed/seen */
+export const autoPassedItemSchema = z.object({
+  id: z.string().min(1),
+  step_id: z.string().min(1),
+  label_vi: z.string(),
+  reason_vi: z.string(),
+  at: isoDateTime,
+  seen: z.boolean()
+})
+export const autoPassedResponseSchema = z.object({ total: z.number().int().min(0), unseen: z.number().int().min(0), items: z.array(autoPassedItemSchema) })
+export const autoPassedSeenRequestSchema = z.strictObject({ ids: z.array(z.string().min(1)).max(500).optional() })
+export const autoPassedSeenResponseSchema = z.object({ unseen: z.number().int().min(0) })
+
 // ─── run-state (WP-4 / 03-live-status-flow §5) ───────────────────
 
 /** GET /projects/:id/steps/:stepId/run-state · GET /projects/:id/run-state/active */
