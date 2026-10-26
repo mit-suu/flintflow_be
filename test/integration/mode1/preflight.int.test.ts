@@ -13,6 +13,7 @@ import { fileOf, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { seedFixture } from "../../setup.js"
 import { uploadImport } from "../../../src/modules/import/import.service.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
+import { Project } from "../../../src/modules/project/project.model.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { DocxPackage, writeStamp } from "../../../src/modules/docx-ooxml/index.js"
 import { makeDocx, p } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
@@ -73,6 +74,24 @@ describe("preflight — 3 nhánh stamp", () => {
     expect(await DocBlock.countDocuments({ projectId })).toBe(0)
     expect((await docFileStore().load(doc.file_ref!)).length).toBeGreaterThan(0)
     expect(await sourceFiles(projectId)).toBe(1)
+  })
+
+  it("FLF-335: ý định lúc upload — thiếu ⇒ free; fixed ghi vào import.intent và Project.template_intent; dự án mới có mẫu bắt buộc luôn fixed", async () => {
+    const { projectId, userId } = await project()
+    const free = await uploadImport(projectId, userId, fileOf(await makeSrsDocx(), "srs.docx"))
+    expect(free.intent).toBe("free")
+    expect((await Project.findById(projectId).lean())?.template_intent).toBe("free")
+
+    const { projectId: other, userId: u2 } = await project()
+    const fixed = await uploadImport(other, u2, fileOf(await makeSrsDocx(), "srs.docx"), { intent: "fixed" })
+    expect(fixed.intent).toBe("fixed")
+    expect((await Project.findById(other).lean())?.template_intent).toBe("fixed")
+
+    // Dự án mới có mẫu bắt buộc: ý định chốt lúc tạo, client gửi free cũng không đổi
+    await Project.updateOne({ _id: other }, { start_kind: "new", template_intent: "fixed" })
+    await ImportedDocument.deleteMany({ projectId: other })
+    const locked = await uploadImport(other, u2, fileOf(await makeSrsDocx(), "srs.docx"), { intent: "free" })
+    expect(locked.intent).toBe("fixed")
   })
 
   it("stamp đúng project (chưa có baseline) ⇒ coi như đã xác nhận, parse ngay", async () => {

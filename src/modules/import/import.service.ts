@@ -11,7 +11,7 @@ import { createHash } from "node:crypto"
 import mongoose from "mongoose"
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { IMPORTED_DOC_VERSION, IMPORTED_DOC_VERSIONS } from "../doc-version/versioning.js"
-import { Project } from "../project/project.model.js"
+import { Project, type TemplateIntent } from "../project/project.model.js"
 import { DocBlock } from "./doc-block.model.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
 import { needsConfirm } from "./import.constants.js"
@@ -53,6 +53,7 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
   confirmed_latest_at: toIso(doc.confirmed_latest_at),
   paused: doc.paused ? { reason: doc.paused.reason, at: toIso(doc.paused.at)! } : null,
   extract_cursor: doc.extract_cursor ?? null,
+  intent: doc.intent ?? null,
   created_at: toIso(doc.createdAt)!,
   updated_at: toIso(doc.updatedAt)!
 })
@@ -130,7 +131,19 @@ export const assertImportStatus = (doc: IImportedDocument, allowed: readonly Imp
 
 // ─── 1.1–1.3 upload + preflight ──────────────────────────────────
 
-export const uploadImport = async (projectId: string, userId: string, file: UploadedFile): Promise<IImportedDocument> => {
+/**
+ * FLF-335: ý định với file (bước 1.2). Dự án mới có mẫu bắt buộc ⇒ luôn `fixed` (đã chốt lúc tạo); còn lại theo client, thiếu ⇒
+ * `free` (dự án cũ / client cũ). Ghi lên Project để `GET /projects/:id` và luồng so cấu trúc đích (FLF-336) đọc được.
+ */
+const resolveUploadIntent = async (projectId: string, requested: TemplateIntent | undefined): Promise<TemplateIntent> => {
+  const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
+  const locked = project?.start_kind === "new" && project?.template_intent === "fixed"
+  const intent: TemplateIntent = locked ? "fixed" : (requested ?? "free")
+  if (project && project.template_intent !== intent) await Project.updateOne({ _id: projectId }, { template_intent: intent })
+  return intent
+}
+
+export const uploadImport = async (projectId: string, userId: string, file: UploadedFile, body: { intent?: TemplateIntent } = {}): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án đã có bản gốc — hãy tải bản mới bằng chức năng tải lại để xem khác biệt", {
@@ -150,6 +163,7 @@ export const uploadImport = async (projectId: string, userId: string, file: Uplo
     original_name: file.originalname,
     size: file.size,
     stamp: result.stamp,
+    intent: await resolveUploadIntent(projectId, body.intent),
     created_by: userId
   }
 
