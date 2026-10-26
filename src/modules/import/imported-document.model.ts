@@ -18,6 +18,14 @@ export interface PreflightIssue {
   location?: { block_ord: number; text: string } | null
 }
 
+/** FLF-331: kết quả nhận diện loại tài liệu ở I-1 (bản lưu của `DocumentKindResult`). */
+export interface DocumentKindInfo {
+  kind: "srs" | "srs_template" | "not_srs" | "unknown"
+  confidence: number
+  signals: string[]
+  reasons: string[]
+}
+
 export interface DocStamp {
   project_id: string
   version: string | null
@@ -40,7 +48,7 @@ export interface IImportedDocument extends Document {
   sha256: string
   original_name: string
   size: number
-  preflight: { status: "accepted" | "rejected"; issues: PreflightIssue[] }
+  preflight: { status: "accepted" | "rejected"; issues: PreflightIssue[]; document_kind?: DocumentKindInfo | null }
   stamp: DocStamp | null
   confirmed_latest_at: Date | null
   status: ImportStatus
@@ -80,7 +88,20 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       type: new Schema(
         {
           status: { type: String, enum: ["accepted", "rejected"], required: true },
-          issues: { type: [preflightIssueSchema], default: [] }
+          issues: { type: [preflightIssueSchema], default: [] },
+          // FLF-331: bản ghi cũ không có ⇒ null
+          document_kind: {
+            type: new Schema(
+              {
+                kind: { type: String, enum: ["srs", "srs_template", "not_srs", "unknown"], required: true },
+                confidence: { type: Number, required: true },
+                signals: { type: [String], default: [] },
+                reasons: { type: [String], default: [] }
+              },
+              opts
+            ),
+            default: null
+          }
         },
         opts
       ),
