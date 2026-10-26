@@ -127,7 +127,8 @@ app.get("/", (req, res) => {
 
 /**
  * `mongo: "error"` ⇒ 503 để load balancer rút instance ra khỏi vòng phục vụ.
- * `plantuml: "error"` chỉ là `degraded` ⇒ vẫn 200: diagram hỏng nhưng phần còn lại phục vụ được.
+ * `plantuml: "error"` / `gotenberg: "error"` chỉ là `degraded` ⇒ vẫn 200: diagram / xuất PDF hỏng nhưng phần
+ * còn lại phục vụ được.
  */
 app.get("/health", async (_req, res) => {
   const report = await buildHealthReport()
