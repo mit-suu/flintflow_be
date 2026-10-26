@@ -33,6 +33,7 @@
     "rerender:usecase": "tsx src/scripts/rerender-usecase-diagrams.ts",
     "migrate:cr-array-locations": "tsx src/scripts/compact-cr-array-locations.ts",
     "migrate:personal-wallets": "tsx src/scripts/remove-personal-wallets.ts",
+    "migrate:cr-package": "tsx src/scripts/migrate-cr-package.ts",
     "migrate:red-waivers": "tsx src/scripts/migrate-red-waivers.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
     "measure:tokens": "tsx src/scripts/measure-tokens.ts",

@@ -6,8 +6,9 @@
  * impact_review ─► proposing ─► verifying                (C-4 đề xuất, C-5 kiểm)
  * verifying ─► ready_to_submit | proposing | manual_fix  (đạt · AI làm lại, redo ≤ 2 · vẫn trượt ⇒ sửa tay 3.9)
  * manual_fix ─► verifying ;  ready_to_submit ─► verifying (user sửa đề xuất sau khi đã đạt)
- * ready_to_submit ─► in_review                           (3.11 nộp; G1: người tạo tự duyệt)
- * in_review ─► written | proposing | rejected            (3.14 ghi · sửa lại khi mọi group bị từ chối · 3.13 đóng)
+ * ready_to_submit ─► written                             (FLF-330, C-6: BA xác nhận ⇒ ghi ngay vào bản nháp chung — CR = commit)
+ * ready_to_submit ─► in_review                           (CŨ, chỉ còn cho CR tạo trước FLF-330; Lead duyệt cả GÓI ở C-7, không duyệt từng CR)
+ * in_review ─► written | proposing | rejected            (cũ: 3.14 ghi · sửa lại khi mọi group bị từ chối · 3.13 đóng)
  * mọi trạng thái chưa kết thúc ─► cancelled              (3.10, UC-53 — kể cả khi đang paused)
  *
  * `paused` là field riêng, chỉ đặt ở bước gọi AI (clarifying, proposing, verifying). Khoá block giữ nguyên khi pause.
@@ -41,9 +42,9 @@ export const CR_STATUS_LABELS: Readonly<Record<CrStatus, string>> = {
   proposing: "AI đang đề xuất sửa",
   verifying: "Đang kiểm tra đề xuất",
   manual_fix: "Cần sửa tay",
-  ready_to_submit: "Sẵn sàng gửi duyệt",
-  in_review: "Đang chờ duyệt",
-  written: "Đã ghi vào tài liệu",
+  ready_to_submit: "Sẵn sàng xác nhận",
+  in_review: "Đang chờ duyệt (luồng cũ)",
+  written: "Đã ghi vào bản nháp",
   rejected: "Bị từ chối",
   cancelled: "Đã huỷ"
 }
@@ -61,7 +62,7 @@ export const CR_TRANSITIONS: Readonly<Record<CrStatus, readonly CrStatus[]>> = {
   proposing: ["verifying", "clarifying", "cancelled"],
   verifying: ["ready_to_submit", "proposing", "manual_fix", "clarifying", "cancelled"],
   manual_fix: ["verifying", "clarifying", "cancelled"],
-  ready_to_submit: ["in_review", "verifying", "clarifying", "cancelled"],
+  ready_to_submit: ["written", "in_review", "verifying", "clarifying", "cancelled"],
   in_review: ["written", "proposing", "rejected", "cancelled"],
   written: [],
   rejected: [],

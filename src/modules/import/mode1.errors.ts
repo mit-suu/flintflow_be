@@ -37,6 +37,10 @@ export const MODE1_ERROR_STATUS = {
   /** Mode 1 v3 phase 7: CR đã có đủ số tài liệu bổ sung tối đa (`CR_MAX_MATERIALS`). */
   CR_MATERIAL_LIMIT: 409,
   CHANGE_REQUIRES_CR: 409,
+  /** FLF-330 C-7: gói thay đổi đang chờ Lead duyệt ⇒ bản nháp khoá (tạo / xác nhận / gộp CR đều chặn). */
+  PACKAGE_PENDING: 409,
+  /** FLF-330: gửi duyệt khi chưa có CR nào ghi vào bản nháp kể từ lần phát hành trước. */
+  PACKAGE_EMPTY: 409,
   /** FLF-182: tắt bước luôn chạy (ghép / kiểm tra tài liệu) hoặc step đã có dữ liệu. */
   CORE_STEP_REQUIRED: 409,
   /** Mode 1 v3 (BPMN Flow 1): không chạy step / gate / bật-tắt step, không ký baseline v1, không waive cờ. */

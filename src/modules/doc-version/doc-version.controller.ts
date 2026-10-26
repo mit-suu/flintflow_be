@@ -8,7 +8,9 @@ import { docxToPdf, PdfConverterError } from "../../shared/pdf/gotenberg.client.
 import { PDF_MIME, toPdfFileName } from "../render/export.controller.js"
 import { authorizeMode1, mode1Handler, parseInput } from "../import/mode1.http.js"
 import { DOCX_CONTENT_TYPE } from "./doc-file.store.js"
-import { compareQuerySchema, downloadQuerySchema, releaseRequestSchema, versionParamsSchema } from "./doc-version.dto.js"
+import { compareQuerySchema, downloadQuerySchema, releaseRequestSchema, requestChangesRequestSchema, submitPackageRequestSchema, versionParamsSchema } from "./doc-version.dto.js"
+import { getPackage, requestChanges, settleAfterRelease, submitPackage, type PackageActor } from "./review-package.service.js"
+import { requireOrgId } from "../../shared/auth/org-request.js"
 import { release } from "./release.service.js"
 import { compareVersions, downloadVersion, listVersions, toVersionDto, versionBlocks } from "./versions.service.js"
 import { IMPORTED_DOC_VERSIONS, isReleaseVersion } from "./versioning.js"
@@ -60,9 +62,37 @@ export const compare = mode1Handler(async (req, res) => {
   return sendSuccess(res, 200, await compareVersions(auth.projectId, query.from, query.to))
 })
 
+const packageActor = (req: Parameters<typeof authorizeMode1>[0], auth: Awaited<ReturnType<typeof authorizeMode1>>): PackageActor => ({
+  projectId: auth.projectId,
+  projectName: auth.project.name,
+  orgId: requireOrgId(req),
+  userId: auth.userId
+})
+
+/** C-7 Lead duyệt cả gói = phát hành; Lead tự làm thì phát hành thẳng (không qua bước gửi). */
 export const releaseVersion = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(releaseRequestSchema, req.body)
   const result = await release(auth.projectId, auth.userId, body.base_version)
-  return sendSuccess(res, 201, { version: toVersionDto(result.version), baseline: result.baseline, cr_ids: result.cr_ids, spine_version: result.spine_version })
+  const spineVersion = await settleAfterRelease(packageActor(req, auth), { version: result.version.version, cr_ids: result.cr_ids, spine_version: result.spine_version })
+  return sendSuccess(res, 201, { version: toVersionDto(result.version), baseline: result.baseline, cr_ids: result.cr_ids, spine_version: spineVersion })
+})
+
+// ─── gói duyệt (FLF-330) ─────────────────────────────────────────
+
+export const getReviewPackage = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  return sendSuccess(res, 200, await getPackage(auth.projectId))
+})
+
+export const submitReviewPackage = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(submitPackageRequestSchema, req.body)
+  return sendSuccess(res, 200, await submitPackage(packageActor(req, auth), body.base_version))
+})
+
+export const requestPackageChanges = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(requestChangesRequestSchema, req.body)
+  return sendSuccess(res, 200, await requestChanges(packageActor(req, auth), body))
 })
