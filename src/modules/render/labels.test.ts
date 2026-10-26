@@ -276,7 +276,10 @@ describe("labels — fixture 19 màn qua đường mode 2 (mẫu FPT)", () => {
       resolved_at: null,
       waived_by_user: false,
       waive_reason: null,
-      waived_at_version: null
+      waived_at_version: null,
+      kept_reason: null,
+      kept_by: null,
+      kept_at: null
     })
     spine.flags = [flag("FL1", "fixed:5.5"), flag("FL2", "custom:GONE")]
     const sections = async (language?: "vi") => (await build(spine, language ? { language } : {})).flagsAppendix?.redOpen.map((r) => r.section)

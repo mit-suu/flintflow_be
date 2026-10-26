@@ -109,9 +109,9 @@ describe("computeSectionStates", () => {
 })
 
 describe("readiness / progressByStep", () => {
-  it("điểm sẵn sàng không tính derived và section tuỳ chọn; red_open bỏ cờ đã waive/đóng", () => {
+  it("điểm sẵn sàng không tính derived và section tuỳ chọn; red_open bỏ cờ đã đóng nhưng KHÔNG bỏ cờ đỏ đã waive (BR-04, FLF-329)", () => {
     const spine = structuredClone(FIXTURE)
-    const flag = { level: "red" as const, section_id: "fixed:1", message: "", remediation_step: "S-2.1", opened_at_version: 1, target_id: null, waive_reason: null, waived_at_version: null }
+    const flag = { level: "red" as const, section_id: "fixed:1", message: "", remediation_step: "S-2.1", opened_at_version: 1, target_id: null, waive_reason: null, waived_at_version: null, kept_reason: null, kept_by: null, kept_at: null }
     spine.flags = [
       { ...flag, id: "FL001", rule_id: "section_empty", resolved_at: null, waived_by_user: false },
       { ...flag, id: "FL002", rule_id: "diagram_stale", resolved_at: null, waived_by_user: true },
@@ -120,7 +120,7 @@ describe("readiness / progressByStep", () => {
     const states = computeSectionStates(spine, [])
     const scored = states.filter((s) => s.required && !s.derived)
     const r = readiness(spine, [])
-    expect(r.red_open).toBe(1)
+    expect(r.red_open).toBe(2)
     expect(r.stale).toBe(0)
     expect(r.accepted_pct).toBe(Math.round((scored.filter((s) => s.status === "accepted").length * 100) / scored.length))
     expect(r.accepted_pct).toBeLessThan(100) // function của màn placeholder còn draft
