@@ -1,7 +1,7 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.4.0
+version: 1.5.0
 description: Mode 1 C-2 — decide whether a change request is clear and has the facts it needs; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -75,6 +75,21 @@ You never write edits.
    common practice for this kind of system — the most likely first. Each is a complete answer on its own (`"≤ 2 giây
    cho 95% request"`, not `"2"`). No "other" / "I don't know" option — the user can always type or leave it empty.
    `[]` for a question where no sensible candidate exists (a person's name, an internal decision).
+9. **A new use case that creates a request needs someone to settle it** (same rule as chat before baseline). The CR
+   adds a use case that creates something another actor must act on (a request, an application, a complaint — "học
+   sinh gửi phúc khảo điểm") and the CR, the answers and the material do not say **who settles it** (and whether a
+   second approval follows) ⇒ ask it, `suggestions` = the candidate actors from the index ("Lecturer", "Academic
+   Management Office", "Lecturer rồi Academic Management Office duyệt"). The writer then adds the settling use cases
+   and a status view for the requester — do not ask about those separately. A CR made from a chat preview (description
+   with "Trả lời làm rõ", or previewed ops that already add the settling use cases) was settled there — do not ask again.
+10. **Removing a use case of a flow is the user's call** (same rule as chat before baseline). The CR removes a use case
+   that belongs to a flow of use cases in the index — a request and the use cases that settle or follow it,
+   recognisable by their names ("Request / Decide / Approve / View Grade Review Status") — and the CR and the answers
+   do not say whether the rest of the flow goes too ⇒ ask, naming each other use case of the flow with its actor;
+   `suggestions` = "Xoá cả luồng …", "Chỉ xoá <named use case>". When the whole flow goes, put every use case of it in
+   `targets.entity_paths`. The writer removes each removed use case's own functions, screens and messages — do not
+   ask about those. A CR made from a chat preview that already lists which use cases go was settled there — do not ask
+   again.
 
 ## Output
 
