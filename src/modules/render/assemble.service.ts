@@ -44,7 +44,7 @@ import { Change as ChangeModel } from "../spine/change.model.js"
 // T15 review T7: tra tên người ghi thay cho userId thô trong §I (chỉ đọc).
 import { User } from "../user/user.model.js"
 import { loadDiagramFile } from "../diagram/diagram.service.js"
-import { localizedDiagramPng } from "../diagram/localized-diagram.service.js"
+import { localizedDiagramPng, type DiagramSource } from "../diagram/localized-diagram.service.js"
 import { capitalize, sectionLabel } from "../spine/human-labels.js"
 import {
   defaultSectionTitle,
@@ -248,7 +248,7 @@ const preloadDiagramPngs = (projectId: string, spine: Spine, load: DiagramPngLoa
   loadDiagramPngs(projectId, documentImageIds(spine), load)
 
 /** FLF-265 N1 — PNG (base64) của nguồn sơ đồ đã dịch; `null` ⇒ dùng ảnh gốc. Mặc định đọc / vẽ qua PlantUML, không gọi model. */
-export type LocalizedDiagramPngLoader = (projectId: string, diagramId: string, locale: string, puml: string) => Promise<string | null>
+export type LocalizedDiagramPngLoader = (projectId: string, diagramId: string, locale: string, diagram: DiagramSource) => Promise<string | null>
 
 /**
  * N1 — trần thời gian một lượt dựng chờ vẽ PNG theo ngôn ngữ. Lần đọc đầu sau khi dịch phải vẽ mọi sơ đồ (vài giây với
@@ -263,7 +263,7 @@ export const LOCALIZED_IMAGE_BUDGET_MS = 8_000
 const loadLocalizedPngs = async (
   projectId: string,
   locale: string,
-  sources: ReadonlyMap<string, string>,
+  sources: ReadonlyMap<string, DiagramSource>,
   load: LocalizedDiagramPngLoader,
   budgetMs: number
 ): Promise<Map<string, string>> => {
@@ -273,8 +273,8 @@ const loadLocalizedPngs = async (
   let next = 0
   const worker = async (): Promise<void> => {
     while (next < entries.length) {
-      const [id, puml] = entries[next++]
-      const png = await load(projectId, id, locale, puml).catch(() => null)
+      const [id, diagram] = entries[next++]
+      const png = await load(projectId, id, locale, diagram).catch(() => null)
       if (png) loaded.set(id, png)
     }
   }
@@ -636,7 +636,7 @@ const defaultDeps = (): AssembleDeps => ({
   now: () => new Date(),
   loadTemplate: loadTemplateLayout,
   resolveTranslations,
-  loadLocalizedDiagramPng: (projectId, diagramId, locale, puml) => localizedDiagramPng(projectId, diagramId, locale, puml)
+  loadLocalizedDiagramPng: (projectId, diagramId, locale, diagram) => localizedDiagramPng(projectId, diagramId, locale, diagram)
 })
 
 interface BuildDocumentInput {

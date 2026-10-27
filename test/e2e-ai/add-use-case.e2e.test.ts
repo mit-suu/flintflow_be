@@ -183,12 +183,12 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
       for (const s of newScreens) {
         const layout = after.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === s.id)
         fapLog(`[FAP B] bố cục ${s.id}: ${layout ? `${layout.id} ${layout.render_status}${layout.error ? ` (${layout.error})` : ""}` : "KHÔNG CÓ"}`)
-        if (layout) fapLog("```\n" + layout.puml + "\n```")
+        if (layout) fapLog("```\n" + layout.source + "\n```")
         expect(layout?.render_status).toBe("ok")
       }
       const flow = after.diagrams.filter((d) => d.kind === "screen_flow")
-      fapLog(`[FAP B] screen flow: ${flow.map((d) => `${d.id} ${d.render_status}${d.puml.includes(newScreens[0].name) ? " (có màn mới)" : ""}`).join(", ")}`)
-      expect(flow.some((d) => d.puml.includes(newScreens[0].name))).toBe(true)
+      fapLog(`[FAP B] screen flow: ${flow.map((d) => `${d.id} ${d.render_status}${d.source.includes(newScreens[0].name) ? " (có màn mới)" : ""}`).join(", ")}`)
+      expect(flow.some((d) => d.source.includes(newScreens[0].name))).toBe(true)
     }
   })
 

@@ -44,7 +44,7 @@ const rendered = (): { spine: Spine; wireframeId: string } => {
       diagrams.push({
         id: `D${String(diagrams.length + 1).padStart(2, "0")}`,
         kind: part.kind,
-        puml: part.puml,
+        format: "puml", source: part.source,
         section: part.section,
         owner_kind: part.owner_kind,
         owner_id: part.owner_id,
@@ -56,7 +56,7 @@ const rendered = (): { spine: Spine; wireframeId: string } => {
   }
   const layout = diagrams.find((d) => d.kind === "screen_layout")!
   const screen = spine.screens.find((s) => s.id === layout.owner_id)!
-  layout.puml = wireframe(screen.name)
+  layout.source = wireframe(screen.name)
   spine.diagrams = diagrams
   return { spine, wireframeId: layout.id }
 }
@@ -76,16 +76,16 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
 
     expect(spine).toEqual(before)
     const human = spine.actors.find((a) => a.kind === "human")!
-    expect(byKind(view, "context")[0].puml).toContain(`vi: ${human.name}`)
-    expect(byKind(view, "context")[0].puml).toContain(`vi: ${human.flows_in![0]}`)
-    expect(byKind(view, "usecase").map((d) => d.puml).join("\n")).toContain(`usecase "vi: ${spine.use_cases[0].name}"`)
-    for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.puml)).toMatch(/^Luồng màn hình của vi: /)
-    const erd = byKind(view, "erd")[0].puml
+    expect(byKind(view, "context")[0].source).toContain(`vi: ${human.name}`)
+    expect(byKind(view, "context")[0].source).toContain(`vi: ${human.flows_in![0]}`)
+    expect(byKind(view, "usecase").map((d) => d.source).join("\n")).toContain(`usecase "vi: ${spine.use_cases[0].name}"`)
+    for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.source)).toMatch(/^Luồng màn hình của vi: /)
+    const erd = byKind(view, "erd")[0].source
     expect(erd).toContain(`entity "vi: ${spine.entities[0].name}"`)
     expect(erd).toContain(`relationship "${DIAGRAM_LABELS.vi.relationVerb}"`)
-    const table = byKind(view, "screen_layout").find((d) => d.puml.includes("{#"))!
-    expect(table.puml).toContain(`<b>${DIAGRAM_LABELS.vi.functionColumn} | <b>${DIAGRAM_LABELS.vi.descriptionColumn}`)
-    expect(table.puml).toMatch(/\| vi: /)
+    const table = byKind(view, "screen_layout").find((d) => d.source.includes("{#"))!
+    expect(table.source).toContain(`<b>${DIAGRAM_LABELS.vi.functionColumn} | <b>${DIAGRAM_LABELS.vi.descriptionColumn}`)
+    expect(table.source).toMatch(/\| vi: /)
     // Mọi hình dựng từ Spine đều có nguồn mới; cùng id, cùng thứ tự với bản gốc
     expect(view.diagrams.map((d) => d.id)).toEqual(spine.diagrams.map((d) => d.id))
     expect([...localizedDiagramSources(spine, localizeSpine(spine, units, translate(units), "vi")).keys()]).toEqual(spine.diagrams.map((d) => d.id))
@@ -99,24 +99,24 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     expect(units.find((u) => u.key === `diagrams[id=${wireframeId}].labels`)?.value).toEqual(["Email", "Log in"])
 
     const full = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.find((d) => d.id === wireframeId)!
-    expect(full.puml).toContain(`        vi: ${screen.name}\n`)
-    expect(full.puml).toContain("      vi: Email\n")
-    expect(full.puml).toContain("      [ vi: Log in ]\n")
-    expect(full.puml).toContain("<b>FLINTFLOW")
-    expect(full.puml).toContain('"john@example.com      "')
+    expect(full.source).toContain(`        vi: ${screen.name}\n`)
+    expect(full.source).toContain("      vi: Email\n")
+    expect(full.source).toContain("      [ vi: Log in ]\n")
+    expect(full.source).toContain("<b>FLINTFLOW")
+    expect(full.source).toContain('"john@example.com      "')
 
     // Chỉ tên màn đã dịch (nhãn wireframe chưa bấm "Dịch tài liệu")
     const titleOnly = renderView(localizeSpine(spine, units, translate(units, (u) => u.ref.group === "screens"), "vi")).diagrams.find((d) => d.id === wireframeId)!
-    expect(titleOnly.puml).toBe(layout.puml.replace(`        ${screen.name}\n`, `        vi: ${screen.name}\n`))
+    expect(titleOnly.source).toBe(layout.source.replace(`        ${screen.name}\n`, `        vi: ${screen.name}\n`))
   })
 
   it("hình cũ (nguồn khác bản renderer sinh từ Spine hiện tại) ⇒ giữ nguồn gốc, không có trong danh sách cần ảnh riêng", () => {
     const { spine } = rendered()
     const erd = byKind(spine, "erd")[0]
-    erd.puml = erd.puml.replace("skinparam ranksep 20", "skinparam ranksep 30")
+    erd.source = erd.source.replace("skinparam ranksep 20", "skinparam ranksep 30")
     const units = translationUnits(spine)
     const localized = localizeSpine(spine, units, translate(units), "vi")
-    expect(byKind(renderView(localized), "erd")[0].puml).toBe(erd.puml)
+    expect(byKind(renderView(localized), "erd")[0].source).toBe(erd.source)
     expect(localizedDiagramSources(spine, localized).has(erd.id)).toBe(false)
   })
 
@@ -134,11 +134,11 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const units = translationUnits(spine)
     const localized = localizeSpine(spine, units, new Map(), "vi")
     const view = renderView(localized)
-    for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.puml)).toMatch(/^Luồng màn hình của /)
+    for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.source)).toMatch(/^Luồng màn hình của /)
     // Use case tách hai hình: tiêu đề phần là chữ máy ⇒ đổi
-    for (const d of byKind(view, "usecase")) expect(d.puml).toMatch(/^title Sơ đồ use case — /m)
+    for (const d of byKind(view, "usecase")) expect(d.source).toMatch(/^title Sơ đồ use case — /m)
     // Sơ đồ ngữ cảnh: actor nào cũng có luồng, tên hệ thống đã đặt ⇒ không có chữ máy ⇒ y như bản gốc, dùng thẳng ảnh gốc
-    expect(byKind(view, "context")[0].puml).toBe(byKind(spine, "context")[0].puml)
+    expect(byKind(view, "context")[0].source).toBe(byKind(spine, "context")[0].source)
     expect(localizedDiagramSources(spine, localized).has(byKind(spine, "context")[0].id)).toBe(false)
   })
 })

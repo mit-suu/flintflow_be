@@ -121,5 +121,5 @@ export const renderContext: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS
     ...edges,
     "}"
   ]
-  return [{ kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, puml: puml("@startdot", body, "@enddot") }]
+  return [{ kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, format: "puml", source: puml("@startdot", body, "@enddot") }]
 }

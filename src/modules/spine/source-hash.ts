@@ -3,11 +3,17 @@
  * ─────────────────────────────────────────────────────────────────
  * Hash `source_fields` của diagram (srs-spine.md §7.1) cho cờ đỏ `diagram_stale`.
  * Chỉ gồm field THẬT SỰ vẽ lên hình, sắp xếp theo `id` — sửa mô tả không làm hình "cũ".
- * T10 ghi `diagrams[].source_hash` bằng chính hàm này khi render.
+ * T10 ghi `diagrams[].source_hash` bằng `renderedDiagramHash` khi render.
+ *
+ * Hai hash (FLF-339):
+ * - `computeSourceHash`: hash DỮ LIỆU vẽ lên hình — `originalDiagramHash` (ảnh gốc import), `impact.service` dùng.
+ * - `renderedDiagramHash`: hash của HÌNH đã vẽ = dữ liệu + engine/ký pháp của kind. Đổi renderer (vd PlantUML → SVG) chỉ
+ *   cần tăng engine trong `DIAGRAM_ENGINES` ⇒ hình cũ `diagram_stale` và được vẽ lại, còn ảnh gốc import không bị
+ *   `original_diagram_stale` giả. Engine mặc định trả đúng `computeSourceHash` ⇒ hình đang có không stale khi deploy.
  */
 
 import { createHash } from "node:crypto"
-import type { Diagram, Spine } from "./spine.types.js"
+import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
 import { guestOpenScreenIds, screenActorMap } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 
@@ -95,3 +101,29 @@ export const stableStringify = (value: unknown): string => {
 
 export const computeSourceHash = (spine: Spine, diagram: Pick<Diagram, "kind" | "owner_id">): string =>
   createHash("sha256").update(stableStringify(sourceProjection(spine, diagram))).digest("hex")
+
+/** Engine của hình đã vẽ — hash bằng `computeSourceHash` để hình đang có giữ nguyên hash. */
+export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
+
+/**
+ * Engine / phiên bản ký pháp từng kind. Kind chuyển sang SVG tự dựng (FLF-322…) hoặc đổi ký pháp thì đổi giá trị ở đây
+ * (vd `"svg@1"`) — mọi hình đã vẽ của kind đó thành `diagram_stale` và được vẽ lại bằng renderer mới.
+ */
+export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
+  context: DEFAULT_DIAGRAM_ENGINE,
+  usecase: DEFAULT_DIAGRAM_ENGINE,
+  screen_flow: DEFAULT_DIAGRAM_ENGINE,
+  erd: DEFAULT_DIAGRAM_ENGINE,
+  screen_layout: DEFAULT_DIAGRAM_ENGINE
+})
+
+/** Hash ghi vào `diagrams[].source_hash` và so ở cờ `diagram_stale` — xem đầu file. */
+export const renderedDiagramHash = (
+  spine: Spine,
+  diagram: Pick<Diagram, "kind" | "owner_id">,
+  engines: Readonly<Record<DiagramKind, string>> = DIAGRAM_ENGINES
+): string => {
+  const engine = engines[diagram.kind] ?? DEFAULT_DIAGRAM_ENGINE
+  if (engine === DEFAULT_DIAGRAM_ENGINE) return computeSourceHash(spine, diagram)
+  return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram) })).digest("hex")
+}

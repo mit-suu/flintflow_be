@@ -101,9 +101,9 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
       a.flow_to.filter((b) => b > a.id && ids.has(b) && spine.screens.find((x) => x.id === b)!.flow_to.includes(a.id)).map((b) => `${a.id}⇄${b}`)
     )
     const parts = renderScreenFlow(spine)
-    const titles = parts.map((p) => screenFlowTitleOf(p.puml) ?? "(không tiêu đề)")
+    const titles = parts.map((p) => screenFlowTitleOf(p.source) ?? "(không tiêu đề)")
     const storedFlow = spine.diagrams.filter((d) => d.kind === "screen_flow")
-    const storedTitles = storedFlow.map((d) => screenFlowTitleOf(d.puml) ?? "(không tiêu đề)")
+    const storedTitles = storedFlow.map((d) => screenFlowTitleOf(d.source) ?? "(không tiêu đề)")
     const humansWithScreens = humans.filter((a) => [...actorsOf.values()].some((v) => v.includes(a.id)))
     const usages = await Usage.find({ projectId, state: "deducted" }).lean()
 

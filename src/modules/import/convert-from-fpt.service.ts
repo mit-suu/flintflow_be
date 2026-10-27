@@ -24,6 +24,7 @@ import { Project } from "../project/project.model.js"
 import { Baseline } from "../spine/baseline.model.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Baseline as BaselineEntry, Spine } from "../spine/spine.types.js"
+import { spineSchema } from "../spine/spine.schema.js"
 import { projectLanguages } from "../translation/translation.service.js"
 import { ImportedDocument } from "./imported-document.model.js"
 import { buildStepPlan } from "./step-plan.js"
@@ -85,7 +86,10 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
   if (!entry) return null
   const snapshot = await Baseline.findById(entry.snapshot_ref).lean()
   if (!snapshot) throw new Error(`[FLF-318] ${projectId}: không tìm thấy snapshot ${entry.snapshot_ref} của baseline ${entry.id}`)
-  const spine = snapshot.snapshot as Spine
+  // Parse, không ép kiểu: snapshot cũ còn dạng `diagrams[].puml` (FLF-339) — schema chuyển sang `format` + `source`
+  const parsed = spineSchema.safeParse(snapshot.snapshot)
+  if (!parsed.success) throw new Error(`[FLF-318] ${projectId}: snapshot ${entry.snapshot_ref} của baseline ${entry.id} không phải Spine hợp lệ`)
+  const spine: Spine = parsed.data
 
   await removeLeftovers(projectId)
   // Dự án chưa đổi mode ⇒ ngôn ngữ như mode 2: tài liệu theo dự án, chữ gốc `en`

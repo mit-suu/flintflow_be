@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "./spine.schema.js"
 import type { Spine } from "./spine.types.js"
-import { computeSourceHash } from "./source-hash.js"
+import { DIAGRAM_ENGINES, computeSourceHash, renderedDiagramHash } from "./source-hash.js"
+import { originalDiagramHash } from "./original-diagram.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -92,5 +93,30 @@ describe("computeSourceHash — tên hệ thống (FLF-177)", () => {
       s.project.name = "Du an giao hang"
     })
     expect(computeSourceHash(renamed, context)).toBe(computeSourceHash(named, context))
+  })
+})
+
+describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-339)", () => {
+  const targets = [
+    { kind: "context" as const, owner_id: null },
+    { kind: "usecase" as const, owner_id: null },
+    { kind: "screen_flow" as const, owner_id: null },
+    { kind: "erd" as const, owner_id: null },
+    { kind: "screen_layout" as const, owner_id: FIXTURE.screens[0].id }
+  ]
+
+  it("engine mặc định ⇒ đúng computeSourceHash: hình PlantUML đang có không stale khi deploy", () => {
+    for (const d of targets) expect(renderedDiagramHash(FIXTURE, d)).toBe(computeSourceHash(FIXTURE, d))
+  })
+
+  it("đổi engine của một kind ⇒ hash hình của kind đó đổi; hash dữ liệu (ảnh gốc import) không đổi", () => {
+    const svgContext = { ...DIAGRAM_ENGINES, context: "svg@1" }
+    const context = targets[0]
+    expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
+    expect(renderedDiagramHash(FIXTURE, targets[1], svgContext)).toBe(computeSourceHash(FIXTURE, targets[1]))
+    expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
+    // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
+    const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
+    expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
   })
 })

@@ -104,7 +104,7 @@ const sampleSpine = (): Spine => {
     {
       id: "D1",
       kind: "usecase",
-      puml: "@startuml\n@enduml",
+      format: "puml", source: "@startuml\n@enduml",
       section: "fixed:2.2.1",
       owner_kind: null,
       owner_id: null,

@@ -42,7 +42,7 @@ const addRedFlag = async (projectId: string) => {
       {
         op: "add",
         path: "diagrams[]",
-        value: { id: "D01", kind: "erd", puml: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
+        value: { id: "D01", kind: "erd", format: "puml", source: "@startuml\n@enduml", section: "fixed:3.1.5", owner_kind: null, owner_id: null, render_status: "error", error: "boom", source_hash: "x", rendered_at: null }
       }
     ]
   })

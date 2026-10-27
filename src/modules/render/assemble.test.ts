@@ -150,6 +150,7 @@ import { findByHashes } from "../translation/translation.repository.js"
 import { hashSource, translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { documentTranslationMetaSchema } from "../pipeline/pipeline.dto.js"
 import { allTargets, renderKind } from "../diagram/renderers/index.js"
+import type { DiagramSource } from "../diagram/localized-diagram.service.js"
 
 const PROJECT = "650000000000000000000001"
 const BASELINE_ID = "650000000000000000000099"
@@ -252,7 +253,7 @@ describe("assemble()", () => {
   })
 
   describe("ảnh render_status=ok nhưng PNG tải lỗi — không còn '200 nhưng không cache' im lặng", () => {
-    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, format: "puml" as const, source: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
     const imagesOf = (doc: { sections: { blocks: { type: string; png?: unknown; caption?: string }[] }[] }) =>
       doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
 
@@ -313,7 +314,7 @@ describe("assemble()", () => {
   })
 
   describe("review T6 — cache không lưu base64 ảnh; đọc lại có ảnh", () => {
-    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, format: "puml" as const, source: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
 
     it("cache lưu diagram-ref:<id> thay vì base64; getDocument rehydrate PNG thật", async () => {
       vi.mocked(spineRepository.get).mockResolvedValue(spineRecord({ spine_version: 15, diagrams: [diagram] }))
@@ -514,7 +515,7 @@ describe("getDocument() — source=baseline", () => {
   })
 
   it("baseline thiếu PNG ⇒ vẫn cache dạng tham chiếu; trả placeholder; PNG có sau ⇒ đọc lại từ cùng cache ra ảnh thật (không placeholder vĩnh viễn)", async () => {
-    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+    const diagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, format: "puml" as const, source: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
     baselineDb.findOne.mockResolvedValue({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 0, snapshot: { ...baseSpine(), diagrams: [diagram] } })
     const images = (doc: { sections: { blocks: { type: string; png?: unknown; caption?: string }[] }[] }) => doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
 
@@ -668,7 +669,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
     return block?.type === "paragraph" ? block.runs.map((r) => r.text).join("") : undefined
   }
   const imagesOf = (doc: RenderedDocument) => doc.sections.flatMap((s) => s.blocks.filter((b) => b.type === "image"))
-  const contextDiagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
+  const contextDiagram = { id: "D01", kind: "context" as const, section: "fixed:1", owner_kind: null, owner_id: null, format: "puml" as const, source: "@startuml\n@enduml", render_status: "ok" as const, source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" }
   const baselineRow = (snapshot: Spine) => ({ _id: BASELINE_ID, projectId: PROJECT, version: "v1.0", at: new Date().toISOString(), checked_at_version: 9, waived_count: 1, snapshot })
   const cacheCalls = () => [cacheDb.findOne, cacheDb.findOneAndUpdate, cacheDb.find, cacheDb.deleteMany, cacheDb.updateOne]
 
@@ -847,7 +848,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
         renderKind(spine, target.kind, target.owner_id).map((part, i) => ({
           id: `D-${target.kind}-${target.owner_id ?? "x"}-${i + 1}`,
           kind: part.kind,
-          puml: part.puml,
+          format: "puml", source: part.source,
           section: part.section,
           owner_kind: part.owner_kind,
           owner_id: part.owner_id,
@@ -875,7 +876,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
 
     it("sơ đồ đã dịch ⇒ PNG theo ngôn ngữ từ nguồn tiếng Việt; chú thích luồng màn theo tiêu đề đã dịch", async () => {
       const spine = renderedFixture()
-      const loadLocalizedDiagramPng = vi.fn(async (_projectId: string, id: string, _locale: string, _puml: string) => `VI:${id}`)
+      const loadLocalizedDiagramPng = vi.fn(async (_projectId: string, id: string, _locale: string, _diagram: DiagramSource) => `VI:${id}`)
       const loadDiagramPng = vi.fn(async (_projectId: string, id: string) => `EN:${id}`)
       const doc = await build(spine, { loadLocalizedDiagramPng, loadDiagramPng })
       // Có PNG theo ngôn ngữ ⇒ không đọc PNG gốc của sơ đồ đó
@@ -885,9 +886,9 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
       expect(pngs.length).toBeGreaterThan(0)
       // Mọi sơ đồ của fixture có chữ đã dịch ⇒ đều dùng ảnh theo ngôn ngữ
       for (const png of pngs) expect(png).toMatch(/^VI:/)
-      for (const [projectId, id, locale, puml] of loadLocalizedDiagramPng.mock.calls) {
+      for (const [projectId, id, locale, diagram] of loadLocalizedDiagramPng.mock.calls) {
         expect([projectId, locale]).toEqual([PROJECT, "vi"])
-        expect(puml, id).not.toBe(spine.diagrams.find((d) => d.id === id)?.puml)
+        expect(diagram.source, id).not.toBe(spine.diagrams.find((d) => d.id === id)?.source)
       }
       const flow = imagesOf(doc).filter((b) => String(b.png).startsWith("VI:D-screen_flow"))
       expect(flow.length).toBeGreaterThan(1)

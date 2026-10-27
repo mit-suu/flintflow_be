@@ -44,6 +44,7 @@ import { planBriefReextract } from "./brief-core.js"
 import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePlaceholders } from "./id-allocator.js"
 import { withElementDefaults } from "./element-defaults.js"
 import { normalizeFormFactorAt } from "./form-factor.js"
+import { normalizeDiagramAt } from "./legacy-diagram.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -100,10 +101,13 @@ const lastKey = (path: string): string => {
 /** Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. */
 const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some(isRecord)
 
+/** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml` (FLF-339) ⇒ dạng hiện hành. */
+const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeDiagramAt(path, normalizeFormFactorAt(path, value))
+
 const applySet = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op set thiếu value: "${op.path}"`)
   // Mọi đường ghi (model, /changes, import) đều chuẩn hoá form_factor thành mảng — change log không bao giờ giữ chuỗi
-  const value = normalizeFormFactorAt(op.path, op.value)
+  const value = normalizeLegacyAt(op.path, op.value)
   const target = resolve(state.spine, op.path)
 
   if (target.kind === "append") throw opError("op_not_allowed", op.path, `Op set không nhận path kết thúc bằng []: "${op.path}"`)
@@ -125,10 +129,10 @@ const applySet = (state: WorkState, op: Op): void => {
 
   // thay nguyên phần tử: giữ nguyên khoá định danh
   const element = target.value
-  if (!isRecord(element) || !isRecord(op.value)) {
+  if (!isRecord(element) || !isRecord(value)) {
     throw opError("op_not_allowed", op.path, `Op set trên phần tử vô hướng không được hỗ trợ — dùng remove + add: "${op.path}"`)
   }
-  const next = withElementDefaults(lastKey(op.path), op.value) as Record<string, unknown>
+  const next = withElementDefaults(lastKey(op.path), value) as Record<string, unknown>
   for (const key of target.lockedKeys) {
     if (String(next[key]) !== String(element[key])) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${key}" của phần tử: "${op.path}"`)
@@ -205,7 +209,8 @@ const applyAdd = (state: WorkState, op: Op): void => {
     throw opError("op_not_allowed", op.path, `Op add phải nhắm mảng dạng "arr[]": "${op.path}"`)
   }
 
-  const value = withAllocatedId(state, op.path, isRecord(op.value) ? withElementDefaults(lastKey(op.path), op.value) : op.value)
+  const raw = normalizeLegacyAt(op.path, op.value)
+  const value = withAllocatedId(state, op.path, isRecord(raw) ? withElementDefaults(lastKey(op.path), raw) : raw)
   const selector = selectorFor(value)
   if (isRecord(value)) {
     if (typeof value.id === "string" && target.parent.some((el) => isRecord(el) && el.id === value.id)) {
@@ -430,7 +435,7 @@ const invertChange = (state: WorkState, change: Change): void => {
     if (!parsed.success) throw opError("schema_invalid", ROOT_PATH, `before của seq ${change.seq} không phải Spine hợp lệ`)
     const { spine_version: currentVersion, ...current } = state.spine
     // Change cũ có thể còn giữ form_factor dạng chuỗi — so sau khi chuẩn hoá
-    if (!isDeepStrictEqual(current, normalizeFormFactorAt(ROOT_PATH, change.value))) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
+    if (!isDeepStrictEqual(current, normalizeLegacyAt(ROOT_PATH, change.value))) throw revertConflict(change, "nội dung Spine khác bản clone/migrate")
     state.spine = { ...clone(parsed.data), spine_version: currentVersion }
     state.baseline = clone(state.spine)
     state.drafts.push({ op: "revert", path: ROOT_PATH, before: current, value: clone(parsed.data), reason })
@@ -446,8 +451,9 @@ const invertChange = (state: WorkState, change: Change): void => {
       const target = resolve(state.spine, arrayPath)
       if (target.kind !== "append") throw opError("path_not_resolved", change.path, `Không khôi phục được "${change.path}"`)
       const index = Math.min(change.value.index ?? target.parent.length, target.parent.length)
-      target.parent.splice(index, 0, clone(change.before))
-      state.drafts.push({ op: "revert", path: change.path, before: ABSENT, value: clone(change.before), reason })
+      const restored = normalizeLegacyAt(change.path, change.before)
+      target.parent.splice(index, 0, clone(restored))
+      state.drafts.push({ op: "revert", path: change.path, before: ABSENT, value: clone(restored), reason })
       return
     }
     const target = resolve(state.spine, change.path)
@@ -460,8 +466,8 @@ const invertChange = (state: WorkState, change: Change): void => {
 
   const target = resolve(state.spine, change.path)
   // Change cũ ghi project.form_factor / project còn giữ chuỗi ⇒ so và khôi phục theo dạng mảng
-  const changeValue = isAbsent(change.value) ? change.value : normalizeFormFactorAt(change.path, change.value)
-  const changeBefore = isAbsent(change.before) ? change.before : normalizeFormFactorAt(change.path, change.before)
+  const changeValue = isAbsent(change.value) ? change.value : normalizeLegacyAt(change.path, change.value)
+  const changeBefore = isAbsent(change.before) ? change.before : normalizeLegacyAt(change.path, change.before)
 
   // change đã tạo mới ⇒ xoá đi
   if (isAbsent(change.before)) {

@@ -1,10 +1,13 @@
 /**
  * Tiện ích chung cho 5 renderer (assets/skills/action/plantuml-conventions).
- * Renderer là hàm THUẦN: cùng Spine ⇒ cùng text `.puml` (thứ tự tất định — mặc định theo id, use case
- * theo nhóm actor rồi id —, không timestamp).
+ * Renderer là hàm THUẦN: cùng Spine ⇒ cùng nguồn hình (thứ tự tất định — mặc định theo id, use case
+ * theo nhóm actor rồi id —, không timestamp). Hai engine (FLF-339): text `.puml` qua PlantUML server, hoặc SVG tự
+ * dựng qua `Scene` của `shared/diagram/svg-scene.ts` (`svgPart`).
  */
 
-import type { Diagram, Spine } from "../../spine/spine.types.js"
+import type { Diagram, DiagramFormat, Spine } from "../../spine/spine.types.js"
+import { checkScene, type CheckOptions, type GeometryIssue } from "../../../shared/diagram/svg-geometry.js"
+import type { Scene } from "../../../shared/diagram/svg-scene.js"
 import type { DiagramLabels } from "./labels.js"
 
 export type DiagramKind = Diagram["kind"]
@@ -14,7 +17,10 @@ export interface RenderedPart {
   section: string
   owner_kind: string | null
   owner_id: string | null
-  puml: string
+  format: DiagramFormat
+  source: string
+  /** Chỉ `svg`: lỗi bố cục của `checkScene` — có ⇒ hình không được lưu (`render_status = error`). */
+  issues?: GeometryIssue[]
 }
 
 /** `labels`: chữ máy trên hình (FLF-265 N1) — thiếu ⇒ tiếng Anh, đúng hình ghi vào `diagrams[]`. */
@@ -32,3 +38,11 @@ export const label = (text: string): string => text.replace(/"/g, "'").replace(/
 export const alias = (id: string): string => id.replace(/[^A-Za-z0-9_]/g, "_")
 
 export const puml = (open: string, body: string[], close: string): string => `${[open, ...body, close].join("\n")}\n`
+
+/** Part `svg` từ một `Scene`: kiểm bố cục (luật 9) + markup. `allowBends` theo kind (`erd`, `class`, `screen_flow`, `state_machine`). */
+export const svgPart = (scene: Scene, options: CheckOptions, meta: Omit<RenderedPart, "format" | "source" | "issues">, title?: string): RenderedPart => ({
+  ...meta,
+  format: "svg",
+  source: scene.toSvg(title),
+  issues: checkScene(scene, options)
+})
