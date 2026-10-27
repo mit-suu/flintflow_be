@@ -36,5 +36,5 @@ export const renderErd: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en)
     }
   }
 
-  return [{ kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, puml: puml("@startchen", body, "@endchen") }]
+  return [{ kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, format: "puml", source: puml("@startchen", body, "@endchen") }]
 }

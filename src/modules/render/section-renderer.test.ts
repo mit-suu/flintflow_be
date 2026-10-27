@@ -144,11 +144,11 @@ const spine = (): Spine => ({
   other_requirements: [{ id: "OR01", kind: "risk", statement: "Provider pricing may change." }],
   glossary: [{ id: "G01", term: "SRS", definition: "Software Requirement Specification." }],
   diagrams: [
-    { id: "D01", kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D02", kind: "usecase", section: "fixed:2.2.1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h2", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D03", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h3", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D04", kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h4", rendered_at: "2026-09-01T00:00:00.000Z" },
-    { id: "D05", kind: "screen_layout", section: "function:FN01", owner_kind: "screen", owner_id: "S01", puml: "@startuml\n@enduml", render_status: "ok", source_hash: "h5", rendered_at: "2026-09-01T00:00:00.000Z" }
+    { id: "D01", kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h1", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D02", kind: "usecase", section: "fixed:2.2.1", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h2", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D03", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h3", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D04", kind: "erd", section: "fixed:3.1.5", owner_kind: null, owner_id: null, format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h4", rendered_at: "2026-09-01T00:00:00.000Z" },
+    { id: "D05", kind: "screen_layout", section: "function:FN01", owner_kind: "screen", owner_id: "S01", format: "puml", source: "@startuml\n@enduml", render_status: "ok", source_hash: "h5", rendered_at: "2026-09-01T00:00:00.000Z" }
   ]
 })
 
@@ -193,8 +193,8 @@ describe("renderSection — fixed sections", () => {
     const base = s.diagrams.find((d) => d.id === "D03")!
     s.diagrams = [
       ...s.diagrams.filter((d) => d.id !== "D03"),
-      { ...base, id: "D03-1", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
-      { ...base, id: "D03-2", puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+      { ...base, id: "D03-1", format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
+      { ...base, id: "D03-2", format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
     ]
     const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
     expect(section.blocks).toEqual([
@@ -370,7 +370,7 @@ describe("renderSection — feature/function", () => {
       section: "function:FN03",
       owner_kind: "screen",
       owner_id: "S03",
-      puml: ["@startsalt", "{^\"Settings\"", "  Project name", "  \"Sunrise Villa        \"", "  [ ] Archived", "  { [ Cancel ] | [   Save   ] }", "}", "@endsalt", ""].join("\n"),
+      format: "puml", source: ["@startsalt", "{^\"Settings\"", "  Project name", "  \"Sunrise Villa        \"", "  [ ] Archived", "  { [ Cancel ] | [   Save   ] }", "}", "@endsalt", ""].join("\n"),
       render_status: "ok",
       source_hash: "h6",
       rendered_at: "2026-09-01T00:00:00.000Z"
@@ -734,8 +734,8 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     s.use_cases[0].actor_ids = ["A01", "A03"]
     s.functions[0].validations.push({ id: "FN01-V2", kind: "business", statement: "Passwords are stored hashed." })
     s.diagrams = s.diagrams.map((d) => {
-      if (d.id === "D03") return { ...d, puml: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' }
-      if (d.id === "D05") return { ...d, puml: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
+      if (d.id === "D03") return { ...d, format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' }
+      if (d.id === "D05") return { ...d, format: "puml", source: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
       return d
     })
     return s

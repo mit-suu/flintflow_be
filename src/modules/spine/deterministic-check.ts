@@ -17,7 +17,7 @@ import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DE
 import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
-import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "./source-hash.js"
+import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
@@ -396,7 +396,7 @@ const diagramStale = (spine: Spine): FlagCandidate[] =>
   onePerTarget(
     printedDiagrams(spine)
       .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
-      .filter((d) => d.source_hash !== computeSourceHash(spine, d))
+      .filter((d) => d.source_hash !== renderedDiagramHash(spine, d))
   )
     .map((d) => ({
       level: "red",
@@ -1223,7 +1223,7 @@ const ownedTexts = (spine: Spine, gate: StepGate): ScanItem[] => {
     ...spine.messages.map((m) => ({ path: `messages[id=${m.id}]`, target_id: m.id, section: "fixed:5.3", step: "S-7.3", fields: pickTextFields(m, SRS_TEXT_FIELDS.messages) })),
     ...spine.other_requirements.map((o) => ({ path: `other_requirements[id=${o.id}]`, target_id: o.id, section: "fixed:5.4", step: "S-7.4", fields: pickTextFields(o, SRS_TEXT_FIELDS.other_requirements) })),
     ...spine.glossary.map((g) => ({ path: `glossary[id=${g.id}]`, target_id: g.id, section: "fixed:5.5", step: "S-8.1", fields: pickTextFields(g, SRS_TEXT_FIELDS.glossary) })),
-    ...spine.diagrams.map((d) => ({ path: `diagrams[id=${d.id}]`, target_id: d.id, section: d.section, step: renderStepOf(d), fields: { puml: d.puml } }))
+    ...spine.diagrams.map((d) => ({ path: `diagrams[id=${d.id}]`, target_id: d.id, section: d.section, step: renderStepOf(d), fields: d.format === "puml" ? { source: d.source } : {} }))
   ]
 }
 

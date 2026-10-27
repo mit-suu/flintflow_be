@@ -95,12 +95,13 @@ describe("spine-fixture-19-screens: yêu cầu đếm của task 02", () => {
     expect(spine.business_rules.some((b: any) => b.tier === "detail")).toBe(true)
   })
 
-  it("5 diagram đủ 5 kind, render_status ok, puml viết tay, source_hash TBD", () => {
+  it("5 diagram đủ 5 kind, render_status ok, nguồn PlantUML viết tay, source_hash TBD", () => {
     expect(spine.diagrams).toHaveLength(5)
     expect(new Set(spine.diagrams.map((d: any) => d.kind)).size).toBe(5)
     for (const d of spine.diagrams) {
       expect(d.render_status).toBe("ok")
-      expect(d.puml).toContain("@startuml")
+      expect(d.format).toBe("puml")
+      expect(d.source).toContain("@startuml")
       expect(d.source_hash).toBe("TBD")
     }
   })

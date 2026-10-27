@@ -236,7 +236,7 @@ export const wireframeWidgets = (puml: string, screenName: string | readonly str
  */
 export const describeInterface = (spine: Spine, screen: Screen, language?: string, wireframeName = screen.name): string | null => {
   const layout = spine.diagrams.find((d) => d.kind === "screen_layout" && d.owner_id === screen.id && d.render_status === "ok")
-  const widgets = layout ? wireframeWidgets(layout.puml, [screen.name, wireframeName], language) : null
+  const widgets = layout?.format === "puml" ? wireframeWidgets(layout.source, [screen.name, wireframeName], language) : null
   if (widgets) return interfaceSentence(language, screen.name, screen.is_popup, `${widgets.join(", ")}.`)
   return screen.description.trim() ? interfaceSentence(language, screen.name, screen.is_popup, screen.description.trim()) : null
 }

@@ -141,7 +141,7 @@ describe("wireframeWidgets (FLF-214)", () => {
   it("FLF-265: describeInterface — 'Màn hình X: …' / 'Pop-up X: …', mô tả màn giữ nguyên; mặc định tiếng Anh", () => {
     const screen = { id: "S1", feature_id: "F1", name: "Login", description: "Entry screen.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
     const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
-    const withLayout = { diagrams: [{ ...layout, puml: salt("Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
+    const withLayout = { diagrams: [{ ...layout, format: "puml", source: salt("Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
     expect(describeInterface(withLayout, screen, "vi")).toBe("Màn hình Login: ô nhập Email, nút Log in.")
     expect(describeInterface(withLayout, screen)).toBe("Login screen: Email input, Log in button.")
     const noLayout = { diagrams: [] } as unknown as Spine
@@ -152,7 +152,7 @@ describe("wireframeWidgets (FLF-214)", () => {
   it("FLF-265: bản xem đã dịch — dòng tên màn đầu wireframe so với tên GỐC (wireframeName), câu in tên đã dịch", () => {
     const screen = { id: "S1", feature_id: "F1", name: "Đăng nhập", description: "Màn vào.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
     const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
-    const withLayout = { diagrams: [{ ...layout, puml: salt("Login", "Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
+    const withLayout = { diagrams: [{ ...layout, format: "puml", source: salt("Login", "Email", '"a@b.c   "', "[ Log in ]") }] } as unknown as Spine
     expect(describeInterface(withLayout, screen, "vi", "Login")).toBe("Màn hình Đăng nhập: ô nhập Email, nút Log in.")
     // So với tên đã dịch thì dòng "Login" đầu hình thành chữ trên màn — lý do phải truyền tên gốc
     expect(describeInterface(withLayout, screen, "vi")).toBe('Màn hình Đăng nhập: chữ "Login", ô nhập Email, nút Log in.')
@@ -161,7 +161,7 @@ describe("wireframeWidgets (FLF-214)", () => {
   it("N1: wireframe đã dịch — dòng tên màn là tên đã dịch (bỏ qua như tên gốc), chữ trên widget là chữ dịch", () => {
     const screen = { id: "S1", feature_id: "F1", name: "Đăng nhập", description: "Màn vào.", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "signed_off" as const }
     const layout = { id: "D1", kind: "screen_layout" as const, section: "function:FN1", owner_kind: "screen", owner_id: "S1", render_status: "ok" as const, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }
-    const localized = { diagrams: [{ ...layout, puml: salt("Đăng nhập", "Email", '"a@b.c   "', "Giá", '"1"', "đến", '"9"', "[ Đăng nhập ]") }] } as unknown as Spine
+    const localized = { diagrams: [{ ...layout, format: "puml", source: salt("Đăng nhập", "Email", '"a@b.c   "', "Giá", '"1"', "đến", '"9"', "[ Đăng nhập ]") }] } as unknown as Spine
     expect(describeInterface(localized, screen, "vi", "Login")).toBe("Màn hình Đăng nhập: ô nhập Email, ô nhập Giá (khoảng), nút Đăng nhập.")
   })
 

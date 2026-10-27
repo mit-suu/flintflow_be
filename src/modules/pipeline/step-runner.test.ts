@@ -848,7 +848,7 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     spine.diagrams = spine.diagrams.filter((d) => d.kind !== "screen_flow")
     spine.diagrams.push({
       id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
-      puml: "@startuml\n@enduml\n", render_status: "ok", source_hash: "hash-truoc-khi-doi-quyen", rendered_at: "2026-01-01T00:00:00.000Z"
+      format: "puml", source: "@startuml\n@enduml\n", render_status: "ok", source_hash: "hash-truoc-khi-doi-quyen", rendered_at: "2026-01-01T00:00:00.000Z"
     })
     const { events, emit } = collectEvents()
     await runStep(PROJECT, "S-8.3", SESSION, USER, emit, { assembleDocument: vi.fn(async () => undefined), renderDeps: renderStub() })
@@ -869,7 +869,7 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     fresh.diagrams = fresh.diagrams.filter((d) => d.kind !== "screen_flow")
     fresh.diagrams.push({
       id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
-      puml: "@startuml\n@enduml\n", render_status: "ok", source_hash: computeSourceHash(fresh, { kind: "screen_flow", owner_id: null }), rendered_at: "2026-01-01T00:00:00.000Z"
+      format: "puml", source: "@startuml\n@enduml\n", render_status: "ok", source_hash: computeSourceHash(fresh, { kind: "screen_flow", owner_id: null }), rendered_at: "2026-01-01T00:00:00.000Z"
     })
     const again = collectEvents()
     await runStep(PROJECT, "S-8.3", SESSION, USER, again.emit, { assembleDocument: vi.fn(async () => undefined), renderDeps: renderStub() })
@@ -884,7 +884,7 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     spine.diagrams = spine.diagrams.filter((d) => d.kind !== "screen_flow")
     spine.diagrams.push({
       id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
-      puml: "@startuml\n@enduml\n", render_status: "ok", source_hash: "hash-truoc-khi-doi-quyen", rendered_at: "2026-01-01T00:00:00.000Z"
+      format: "puml", source: "@startuml\n@enduml\n", render_status: "ok", source_hash: "hash-truoc-khi-doi-quyen", rendered_at: "2026-01-01T00:00:00.000Z"
     })
     const { events, emit } = collectEvents()
     const renderDeps: Partial<DiagramServiceDeps> = {

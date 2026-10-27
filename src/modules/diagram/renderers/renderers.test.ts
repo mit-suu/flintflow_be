@@ -27,7 +27,7 @@ const only = (spine: Spine, kind: Parameters<typeof renderKind>[1], owner: strin
   return parts[0]
 }
 /** Sơ đồ use case có thể tách nhiều phần — luật cạnh áp trên toàn sơ đồ nên xét chung. */
-const usecaseParts = (spine: Spine): string[] => renderKind(spine, "usecase").map((p) => p.puml)
+const usecaseParts = (spine: Spine): string[] => renderKind(spine, "usecase").map((p) => p.source)
 const usecasePuml = (spine: Spine): string => usecaseParts(spine).join("\n")
 const declaredActors = (puml: string): string[] => [...puml.matchAll(/^actor "[^"]*" as (\w+)/gm)].map((m) => m[1])
 /** Nhãn (rỗng nếu mũi tên trơn) theo chiều, và cung của actor, đọc từ DOT của sơ đồ ngữ cảnh. */
@@ -68,18 +68,18 @@ describe("renderers trên fixture 19 màn", () => {
               : part.kind === "erd"
                 ? ["@startchen", "@endchen"]
                 : ["@startuml", "@enduml"]
-        expect(part.puml.startsWith(`${open}\n`), part.kind).toBe(true)
-        expect(part.puml.endsWith(`${close}\n`), part.kind).toBe(true)
-        expect(VIETNAMESE_DIACRITICS.test(part.puml), part.kind).toBe(false)
-        expect(renderKind(FIXTURE, target.kind, target.owner_id)[index].puml).toBe(part.puml)
+        expect(part.source.startsWith(`${open}\n`), part.kind).toBe(true)
+        expect(part.source.endsWith(`${close}\n`), part.kind).toBe(true)
+        expect(VIETNAMESE_DIACRITICS.test(part.source), part.kind).toBe(false)
+        expect(renderKind(FIXTURE, target.kind, target.owner_id)[index].source).toBe(part.source)
         const owner = part.owner_id ? `@${part.owner_id}` : ""
-        expect(part.puml).toMatchSnapshot(`${part.kind}${owner}${rendered.length > 1 ? ` part ${index + 1}` : ""}`)
+        expect(part.source).toMatchSnapshot(`${part.kind}${owner}${rendered.length > 1 ? ` part ${index + 1}` : ""}`)
       }
     }
   })
 
   it("context: DOT trắng đen, hệ thống nền xám — hình tròn, actor hình chữ nhật, mỗi luồng một mũi tên một nhãn", () => {
-    const { puml, section } = only(FIXTURE, "context")
+    const { source: puml, section } = only(FIXTURE, "context")
     expect(section).toBe("fixed:1")
     expect(puml).toContain('graph [layout=nop2')
     expect(puml).toContain('SYSTEM_ [shape=circle, pos="0,0!"')
@@ -101,7 +101,7 @@ describe("renderers trên fixture 19 màn", () => {
   })
 
   it("context: nhãn đúng bằng flows_in / flows_out — actor một chiều là hợp lệ, không bịa chiều còn lại", () => {
-    const { puml } = only(FIXTURE, "context")
+    const { source: puml } = only(FIXTURE, "context")
     for (const a of FIXTURE.actors) {
       expect(contextFlows(puml, a.id).inputs, a.id).toEqual(a.flows_in ?? [])
       expect(contextFlows(puml, a.id).outputs, a.id).toEqual(a.flows_out ?? [])
@@ -115,7 +115,7 @@ describe("renderers trên fixture 19 màn", () => {
   })
 
   it("context: actor xếp theo vai trò — người dùng trái, hệ thống ngoài phải, bộ hẹn giờ dưới", () => {
-    const { puml } = only(FIXTURE, "context")
+    const { source: puml } = only(FIXTURE, "context")
     for (const id of ["A01", "A02", "A03", "A04"]) expect(contextFlows(puml, id).sector, id).toBe("west")
     for (const id of ["A05", "A06", "A07", "A08"]) expect(contextFlows(puml, id).sector, id).toBe("east")
     expect(contextFlows(puml, "A09").sector).toBe("south")
@@ -123,7 +123,7 @@ describe("renderers trên fixture 19 màn", () => {
 
   it("context: chỉ có người dùng ⇒ chia đôi sang hai cột", () => {
     const humans = mutate((s) => (s.actors = s.actors.filter((a) => a.kind === "human")))
-    const { puml } = only(humans, "context")
+    const { source: puml } = only(humans, "context")
     expect(["A01", "A02", "A03", "A04"].map((id) => contextFlows(puml, id).sector)).toEqual(["west", "west", "east", "east"])
   })
 
@@ -138,10 +138,10 @@ describe("renderers trên fixture 19 màn", () => {
       a.flows_in = labels
       a.flows_out = labels
     })
-    const flows = contextFlows(only(spine, "context").puml, "A01")
+    const flows = contextFlows(only(spine, "context").source, "A01")
     expect(flows.inputs).toEqual(shown)
     expect(flows.outputs).toEqual(shown)
-    expect(only(spine, "context").puml).not.toMatch(/\d+ more/)
+    expect(only(spine, "context").source).not.toMatch(/\d+ more/)
     // Spine giữ nguyên đủ mọi luồng; chỉ sơ đồ gộp
     expect(spine.actors.find((x) => x.id === "A01")!.flows_in).toHaveLength(count)
   })
@@ -152,7 +152,7 @@ describe("renderers trên fixture 19 màn", () => {
       a.flows_in = ["Send R&D <proposal>"]
       a.flows_out = ["Accepted > proposal & summary"]
     })
-    const { puml } = only(spine, "context")
+    const { source: puml } = only(spine, "context")
     expect(contextFlows(puml, "A01").inputs).toEqual(["Send R&D <proposal>"])
     expect(contextFlows(puml, "A01").outputs).toEqual(["Accepted > proposal & summary"])
     expect(puml).toContain('CELLPADDING="3" BGCOLOR="white"')
@@ -169,14 +169,14 @@ describe("renderers trên fixture 19 màn", () => {
       a.flows_out = flowsOut
     })
     const before = structuredClone(spine)
-    const { puml } = only(spine, "context")
+    const { source: puml } = only(spine, "context")
     expect(contextFlows(puml, "A03")).toMatchObject({ inputs, outputs })
     expect(puml).not.toMatch(/Acknowledgement of|Response to/)
     expect(spine).toEqual(before)
   })
 
   it("context: không khai báo luồng ⇒ một mũi tên mang nhãn dự phòng theo kind, không lấy tên use case làm nhãn", () => {
-    const { puml } = only(mutate(withoutFlows), "context")
+    const { source: puml } = only(mutate(withoutFlows), "context")
     for (const a of FIXTURE.actors) {
       const flows = contextFlows(puml, a.id)
       if (a.kind === "system") expect(flows, a.id).toMatchObject({ inputs: [], outputs: [DEFAULT_OUT.system] })
@@ -212,7 +212,7 @@ describe("renderers trên fixture 19 màn", () => {
       s.use_cases = []
       s.actors = actors.map(([id, kind, flowsIn, flowsOut]) => ({ id, kind, name: `Actor ${id}`, description: "", flows_in: [...flowsIn], flows_out: [...flowsOut] }))
     })
-    const { puml } = only(spine, "context")
+    const { source: puml } = only(spine, "context")
     for (const [id, flows] of Object.entries(expected)) expect(contextFlows(puml, id), id).toMatchObject(flows)
     expect(puml).toMatch(/flow="in"/)
     expect(puml).toMatch(/flow="out"/)
@@ -291,7 +291,7 @@ describe("renderers trên fixture 19 màn", () => {
   })
 
   it("screen_flow: DOT — màn là hình chữ nhật, màn nhiều tab là cluster, popup hình ô-van, cạnh flow_to", () => {
-    const puml = renderKind(FIXTURE, "screen_flow").map((p) => p.puml).join("\n")
+    const puml = renderKind(FIXTURE, "screen_flow").map((p) => p.source).join("\n")
     const tabbed = FIXTURE.screens.find((s) => s.tabs.length > 0)!
     expect(puml).toContain('node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];')
     expect(puml).not.toContain("style=rounded")
@@ -307,16 +307,16 @@ describe("renderers trên fixture 19 màn", () => {
 
   it("screen_flow: một sơ đồ cho mỗi actor người, bắt đầu bằng hình thoi mang tên actor", () => {
     const parts = renderKind(FIXTURE, "screen_flow")
-    expect(parts.map((p) => screenFlowTitleOf(p.puml))).toEqual([
+    expect(parts.map((p) => screenFlowTitleOf(p.source))).toEqual([
       "Screens flow for Founder",
       "Screens flow for Business Analyst",
       "Screens flow for Administrator",
       "Screens flow for Guest"
     ])
     expect(parts.every((p) => p.owner_id === null && p.section === "fixed:3.1.1")).toBe(true)
-    expect(parts.every((p) => p.puml.startsWith("@startdot\n") && p.puml.endsWith("@enddot\n"))).toBe(true)
+    expect(parts.every((p) => p.source.startsWith("@startdot\n") && p.source.endsWith("@enddot\n"))).toBe(true)
 
-    const admin = parts[2].puml
+    const admin = parts[2].source
     expect(admin).toContain('START [label="Administrator", shape=diamond, style=solid];')
     expect(admin).toContain("START -> S01;")
     expect(admin).toContain("S14 -> S16;")
@@ -324,14 +324,14 @@ describe("renderers trên fixture 19 màn", () => {
     expect(admin).not.toContain("cluster_S07")
     expect(admin).not.toContain("S01 -> S05;")
 
-    const guest = parts[3].puml
+    const guest = parts[3].source
     expect(guest).toContain('START [label="Guest", shape=diamond, style=solid];')
     expect(guest).toContain("START -> S01;")
     expect(guest).toContain("S01 -> S02;")
   })
 
   it("screen_flow: mũi tên một chiều — cặp màn trỏ qua lại chỉ giữ chiều đi tiếp từ màn vào", () => {
-    const [founder, , admin, guest] = renderKind(FIXTURE, "screen_flow").map((p) => p.puml)
+    const [founder, , admin, guest] = renderKind(FIXTURE, "screen_flow").map((p) => p.source)
     // Login ⇄ Register: chỉ Login → Register
     expect(guest).toContain("S01 -> S02;")
     expect(guest).not.toContain("S02 -> S01;")
@@ -371,7 +371,7 @@ describe("renderers trên fixture 19 màn", () => {
       ]
       s.use_cases = []
     })
-    const [manager, lecturer] = renderKind(spine, "screen_flow").map((p) => p.puml)
+    const [manager, lecturer] = renderKind(spine, "screen_flow").map((p) => p.source)
     expect(manager).toContain("START -> S01;")
     expect(manager).toContain("S02 -> S03;")
     // Lecturer: Grade Entry nối từ Login (qua Dashboard bị lọc), START chỉ trỏ vào Login
@@ -410,8 +410,8 @@ describe("renderers trên fixture 19 màn", () => {
       s.use_cases = []
     })
     const parts = renderKind(spine, "screen_flow")
-    expect(parts.map((p) => screenFlowTitleOf(p.puml))).toEqual(["Screens flow for Teacher", "Screens flow for Student"])
-    const [teacher, student] = parts.map((p) => p.puml)
+    expect(parts.map((p) => screenFlowTitleOf(p.source))).toEqual(["Screens flow for Teacher", "Screens flow for Student"])
+    const [teacher, student] = parts.map((p) => p.source)
     for (const p of [teacher, student]) {
       expect([...p.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01", "S05"])
       expect(p).toContain("S01 -> S02;")
@@ -444,7 +444,7 @@ describe("renderers trên fixture 19 màn", () => {
       ]
       s.use_cases = []
     })
-    const [teacher] = renderKind(spine, "screen_flow").map((p) => p.puml)
+    const [teacher] = renderKind(spine, "screen_flow").map((p) => p.source)
     // Login và Register cùng sau hình thoi; Reset Password treo dưới Login, không phải màn vào
     expect([...teacher.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01", "S04"])
     expect(teacher).toContain("S04 -> S01;")
@@ -459,7 +459,7 @@ describe("renderers trên fixture 19 màn", () => {
     })
     const parts = renderKind(withOrphan, "screen_flow")
     expect(parts).toHaveLength(renderKind(FIXTURE, "screen_flow").length)
-    expect(parts.every((p) => !p.puml.includes("S20"))).toBe(true)
+    expect(parts.every((p) => !p.source.includes("S20"))).toBe(true)
 
     const unlinked = mutate((s) => {
       s.permissions = []
@@ -467,9 +467,9 @@ describe("renderers trên fixture 19 màn", () => {
     })
     const [single, ...rest] = renderKind(unlinked, "screen_flow")
     expect(rest).toEqual([])
-    expect(screenFlowTitleOf(single.puml)).toBeNull()
-    expect(single.puml).toContain("START [label=\"\", shape=circle")
-    expect(single.puml).toContain("START -> S01;")
+    expect(screenFlowTitleOf(single.source)).toBeNull()
+    expect(single.source).toContain("START [label=\"\", shape=circle")
+    expect(single.source).toContain("START -> S01;")
   })
 
   it("screen_flow: nhãn DOT escape dấu ngoặc kép và gạch chéo", () => {
@@ -477,23 +477,23 @@ describe("renderers trên fixture 19 màn", () => {
       s.screens.find((x) => x.id === "S01")!.name = 'Log "in" \\ out'
     })
     // Tên có một `\` ⇒ DOT nhận `\\`; `"` đổi thành `'`
-    expect(renderKind(tricky, "screen_flow")[3].puml).toContain("S01 [label=\"Log 'in' \\\\ out\"];")
+    expect(renderKind(tricky, "screen_flow")[3].source).toContain("S01 [label=\"Log 'in' \\\\ out\"];")
   })
 
   it("erd: ký pháp Chen — hình thoi chứa động từ, cha 1 – con N, thiếu động từ ⇒ has", () => {
-    const { puml } = only(FIXTURE, "erd")
+    const { source: puml } = only(FIXTURE, "erd")
     expect(puml).toContain('entity "User" as E01 {\n}')
     expect(puml).toContain("E01 -1- R_E01_E02\nR_E01_E02 -N- E02")
     const withVerb = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_verbs = { E02: "owns" }))
-    expect(only(withVerb, "erd").puml).toContain('relationship "owns" as R_E01_E02 {')
+    expect(only(withVerb, "erd").source).toContain('relationship "owns" as R_E01_E02 {')
     const oneToOne = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_cardinality = { E02: "1" }))
-    expect(only(oneToOne, "erd").puml).toContain("R_E01_E02 -1- E02")
-    expect(only(oneToOne, "erd").puml).toContain("R_E01_E05 -N- E05")
+    expect(only(oneToOne, "erd").source).toContain("R_E01_E02 -1- E02")
+    expect(only(oneToOne, "erd").source).toContain("R_E01_E05 -N- E05")
     // Liên kết tuỳ chọn: phía cha (0,1) — `-0..1-` là lỗi cú pháp trong @startchen
     const optional = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_optional = ["E02"]))
-    expect(only(optional, "erd").puml).toContain("E01 -(0,1)- R_E01_E02")
-    expect(only(optional, "erd").puml).toContain("E01 -1- R_E01_E05")
-    expect(only(mutate((s) => delete s.entities.find((e) => e.id === "E01")!.relation_verbs), "erd").puml).toContain(
+    expect(only(optional, "erd").source).toContain("E01 -(0,1)- R_E01_E02")
+    expect(only(optional, "erd").source).toContain("E01 -1- R_E01_E05")
+    expect(only(mutate((s) => delete s.entities.find((e) => e.id === "E01")!.relation_verbs), "erd").source).toContain(
       'relationship "has" as R_E01_E02 {'
     )
   })
@@ -501,7 +501,7 @@ describe("renderers trên fixture 19 màn", () => {
   it("screen_layout: salt gắn function:<primary>, chỉ màn có primary function", () => {
     const part = only(FIXTURE, "screen_layout", "S07")
     expect(part).toMatchObject({ section: "function:FN028", owner_kind: "screen", owner_id: "S07" })
-    for (const f of FIXTURE.functions.filter((x) => x.screen_id === "S07")) expect(part.puml).toContain(saltCell(f.name))
+    for (const f of FIXTURE.functions.filter((x) => x.screen_id === "S07")) expect(part.source).toContain(saltCell(f.name))
     expect(renderKind(mutate((s) => (s.screens.find((x) => x.id === "S07")!.primary_function_id = null)), "screen_layout", "S07")).toEqual([])
     expect(renderKind(FIXTURE, "screen_layout", "S99")).toEqual([])
     expect(saltCell('a | b {c} "d" [e]')).toBe("a b c d e")
@@ -511,10 +511,10 @@ describe("renderers trên fixture 19 màn", () => {
 
   it("Spine rỗng vẫn sinh hình hợp lệ về cú pháp", () => {
     const empty = createEmptySpine({ name: "Empty" })
-    expect(only(empty, "screen_flow").puml).toContain("NO_SCREENS")
-    expect(only(empty, "erd").puml).toContain("NO_ENTITIES")
-    expect(only(empty, "context").puml).toContain('label="Empty"')
-    expect(only(empty, "context").puml).not.toContain(" -> ")
+    expect(only(empty, "screen_flow").source).toContain("NO_SCREENS")
+    expect(only(empty, "erd").source).toContain("NO_ENTITIES")
+    expect(only(empty, "context").source).toContain('label="Empty"')
+    expect(only(empty, "context").source).not.toContain(" -> ")
   })
 })
 
@@ -552,7 +552,7 @@ describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
 
     const rendered = renderKind(spine, "usecase")
     expect(rendered).toHaveLength(parts.length)
-    expect(rendered[0].puml).toContain(`title Use Cases — ${spine.actors.find((a) => a.id === "A01")!.name}`)
+    expect(rendered[0].source).toContain(`title Use Cases — ${spine.actors.find((a) => a.id === "A01")!.name}`)
     expect(new Set(rendered.map((r) => r.source_hash)).size).toBe(1)
   })
 
@@ -561,7 +561,7 @@ describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
     const spine = withUseCases(
       Array.from({ length: 24 }, (_, i) => uc(i + 1, { actor_ids: i % 2 === 0 ? ["A01", "A05"] : ["A02"] }))
     )
-    const rendered = renderKind(spine, "usecase").map((p) => p.puml)
+    const rendered = renderKind(spine, "usecase").map((p) => p.source)
     expect(rendered.length).toBeGreaterThan(1)
     for (const actorId of ["A01", "A02"]) {
       const holding = rendered.filter((p) => new RegExp(`^${actorId} -- `, "m").test(p))
@@ -576,7 +576,7 @@ describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
     const spine = withUseCases(Array.from({ length: 15 }, (_, i) => uc(i + 1, { actor_ids: ["A01", "A02"] })))
     const rendered = renderKind(spine, "usecase")
     expect(rendered.length).toBeGreaterThan(1)
-    for (const { puml } of rendered) {
+    for (const { source: puml } of rendered) {
       expect(puml.match(/^\w+ -- \w+$/gm)!.length).toBeLessThanOrEqual(MAX_ASSOCIATIONS_PER_DIAGRAM)
     }
   })
@@ -584,7 +584,7 @@ describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
   it("≤ 20 use case giữ một hình, không có dòng title", () => {
     const rendered = renderKind(withUseCases(independentUseCases(MAX_USE_CASES_PER_DIAGRAM)), "usecase")
     expect(rendered).toHaveLength(1)
-    expect(rendered[0].puml).not.toContain("title ")
+    expect(rendered[0].source).not.toContain("title ")
   })
 
   it("không cắt giữa cụm quan hệ", () => {
@@ -597,7 +597,7 @@ describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
   it("cụm vượt trần cứng bị cắt: mọi phần ≤ 20, không cạnh trỏ ra ngoài phần", () => {
     const spine = withUseCases(oversizedCluster(MAX_CLUSTER_SPAN + 5))
     expect(partitionUseCases(spine.use_cases).every((p) => p.useCases.length <= MAX_USE_CASES_PER_DIAGRAM)).toBe(true)
-    for (const { puml } of renderKind(spine, "usecase")) {
+    for (const { source: puml } of renderKind(spine, "usecase")) {
       const declared = new Set([...puml.matchAll(/usecase "[^"]*" as (\w+)/g)].map((m) => m[1]))
       for (const [, target] of puml.matchAll(/^\w+ \.\.> (\w+) :/gm)) expect(declared).toContain(target)
     }
@@ -608,7 +608,7 @@ describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
       s.use_cases = independentUseCases(45)
       s.actors.find((a) => a.id === "A01")!.name = 'Founder "Prime"\nAdmin'
     })
-    const title = renderKind(spine, "usecase")[0].puml.split("\n").find((l) => l.startsWith("title "))
+    const title = renderKind(spine, "usecase")[0].source.split("\n").find((l) => l.startsWith("title "))
     expect(title).toBe("title Use Cases — Founder 'Prime' Admin")
   })
 })
@@ -627,14 +627,14 @@ describe("tên hệ thống (FLF-177)", () => {
   it("boundary use case + sơ đồ ngữ cảnh in `project.system_name`, chưa có ⇒ `project.name`", () => {
     const named = mutate((s) => (s.project.system_name = "ShipFast Delivery"))
     for (const part of usecaseParts(named)) expect(part).toContain('rectangle "ShipFast Delivery" {')
-    expect(only(named, "context").puml).toContain('label="ShipFast Delivery"')
+    expect(only(named, "context").source).toContain('label="ShipFast Delivery"')
 
     const unnamed = mutate((s) => {
       s.project.system_name = null
       s.project.name = "Du an giao hang"
     })
     expect(usecasePuml(unnamed)).toContain('rectangle "Du an giao hang" {')
-    expect(only(unnamed, "context").puml).toContain('label="Du an giao hang"')
+    expect(only(unnamed, "context").source).toContain('label="Du an giao hang"')
   })
 
   it("system_name rỗng/khoảng trắng coi như chưa đặt", () => {
@@ -642,6 +642,6 @@ describe("tên hệ thống (FLF-177)", () => {
       s.project.system_name = "   "
       s.project.name = "Du an giao hang"
     })
-    expect(only(blank, "context").puml).toContain('label="Du an giao hang"')
+    expect(only(blank, "context").source).toContain('label="Du an giao hang"')
   })
 })

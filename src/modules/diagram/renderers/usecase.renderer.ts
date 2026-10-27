@@ -312,6 +312,6 @@ export const renderUseCase: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS
       }
     }
 
-    return { kind: "usecase" as const, section: "fixed:2.2.1", owner_kind: null, owner_id: null, puml: puml("@startuml", body, "@enduml") }
+    return { kind: "usecase" as const, section: "fixed:2.2.1", owner_kind: null, owner_id: null, format: "puml", source: puml("@startuml", body, "@enduml") }
   })
 }

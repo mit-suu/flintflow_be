@@ -50,7 +50,7 @@ export const fillCoreSections = async (projectId: string): Promise<void> => {
     ops.push({
       op: "add",
       path: "diagrams[]",
-      value: { id: "DG90", kind: "usecase", puml: "@startuml\n@enduml", section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "TBD", rendered_at: null }
+      value: { id: "DG90", kind: "usecase", format: "puml", source: "@startuml\n@enduml", section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "TBD", rendered_at: null }
     })
   }
   await applyTransaction(projectId, { base_version: record.spine_version, ops, by: "test", reason: "fill core sections", step_id: null })

@@ -315,7 +315,8 @@ const useCaseTable = (spine: Spine): Block[] => {
 const flowTitle =
   (spine: Spine, ctx: SectionRenderContext) =>
   (d: Spine["diagrams"][number]): string | null => {
-    const title = screenFlowTitleOf(d.puml)
+    // Tiêu đề đọc từ text PlantUML; hình svg (FLF-339) chưa mang tiêu đề trong nguồn ⇒ chú thích mặc định
+    const title = d.format === "puml" ? screenFlowTitleOf(d.source) : null
     if (title === null || !ctx.canonical) return title
     // FLF-265: sơ đồ đã dịch (N1 — nguồn trong bản xem) mang sẵn tiêu đề dịch ⇒ không khớp actor gốc nào, in nguyên. Sơ đồ
     // chưa dịch được (hình cũ) mang tên actor GỐC (đã qua `label` của renderer) — khớp actor gốc theo tiêu đề, in tên đã
