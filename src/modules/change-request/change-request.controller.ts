@@ -23,10 +23,15 @@ import {
   locationIdSchema,
   materialParamsSchema,
   ownerStepDraftRequestSchema,
-  patchLocationRequestSchema
+  patchLocationRequestSchema,
+  approveExtractionSchema,
+  extractionParamsSchema,
+  type ExtractionDto
 } from "./change-request.dto.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import * as crService from "./change-request.service.js"
+import * as extractionService from "./extraction.service.js"
+import type { IRequirementExtraction } from "./requirement-extraction.model.js"
 import { amendCr, answerClarification, runClarify } from "./clarify.service.js"
 import { runImpact } from "./cr-impact.service.js"
 import { decideGroup } from "./decision.service.js"
@@ -54,6 +59,56 @@ const action = (run: (cr: IChangeRequest, auth: Mode1Auth) => Promise<void>) =>
     await run(cr, auth)
     return detail(res, cr)
   })
+
+// ─── FLF-338 §3.6.1: rút yêu cầu từ tài liệu thô ────────────────
+
+const toExtractionDto = (e: IRequirementExtraction): ExtractionDto => ({
+  document_id: String(e.documentId),
+  document_name: e.document_name,
+  doc_code: e.doc_code,
+  status: e.status,
+  items: e.items.map((i) => ({
+    id: i.id,
+    text: i.text,
+    label: i.label,
+    para_id: i.para_id ?? null,
+    quote: i.quote,
+    group: i.group,
+    entity_paths: [...i.entity_paths],
+    question: i.question ?? null,
+    suggested_answers: [...i.suggested_answers],
+    include: i.include ?? null,
+    drop_reason: i.drop_reason ?? null,
+    answer: i.answer ?? null,
+    cr_id: i.cr_id ?? null
+  })),
+  credits: e.credits,
+  approved_at: e.approved_at ? e.approved_at.toISOString() : null,
+  created_at: e.createdAt.toISOString(),
+  updated_at: e.updatedAt.toISOString()
+})
+
+export const extractRequirements = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  const extraction = await extractionService.extractRequirements(auth.projectId, auth.userId, documentId)
+  return sendSuccess(res, 201, toExtractionDto(extraction))
+})
+
+export const getExtraction = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  const extraction = await extractionService.getExtraction(auth.projectId, documentId)
+  return sendSuccess(res, 200, extraction ? toExtractionDto(extraction) : null)
+})
+
+export const approveExtraction = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const { documentId } = parseInput(extractionParamsSchema, req.params)
+  const body = parseInput(approveExtractionSchema, req.body)
+  const extraction = await extractionService.approveExtraction(auth.projectId, auth.userId, documentId, body)
+  return sendSuccess(res, 200, toExtractionDto(extraction))
+})
 
 export const createCr = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
