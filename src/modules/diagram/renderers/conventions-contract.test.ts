@@ -18,7 +18,7 @@ const ROOT = path.resolve(__dirname, "../../../..")
 const SKILL = fs.readFileSync(path.join(ROOT, "assets/skills/action/plantuml-conventions/SKILL.md"), "utf8")
 const FIXTURE: Spine = spineSchema.parse(JSON.parse(fs.readFileSync(path.join(ROOT, "fixtures/spine-fixture-19-screens.json"), "utf8")))
 
-interface KindRow { section: string; kind: string; owner_kind: string; path: string }
+interface KindRow { section: string; kind: string; owner_kind: string; path: string; source_fields: string }
 
 /** Đọc bảng dưới `## Kinds`; bỏ dấu `\|` (ký tự `|` trong ô) trước khi tách cột. */
 const kindRows = (md: string): KindRow[] => {
@@ -26,7 +26,7 @@ const kindRows = (md: string): KindRow[] => {
   const lines = block.split("\n").filter((l) => l.startsWith("|")).slice(2)
   return lines.map((l) => {
     const cells = l.replace(/\\\|/g, "/").split("|").slice(1, -1).map((c) => c.trim().replace(/`/g, ""))
-    return { section: cells[0]!, kind: cells[2]!, owner_kind: cells[3]!, path: cells[5]! }
+    return { section: cells[0]!, kind: cells[2]!, owner_kind: cells[3]!, path: cells[5]!, source_fields: cells[7]! }
   })
 }
 
@@ -53,6 +53,13 @@ describe("plantuml-conventions — bảng Kinds khớp renderer", () => {
 
   it("mọi kind đang có renderer đều có dòng trong bảng", () => {
     for (const kind of DIAGRAM_KINDS) expect(rowOf(kind), kind).toBeDefined()
+  })
+
+  it("kind chưa có renderer ghi field *new* (chờ contract-change); kind đã có trỏ srs-spine §7.1", () => {
+    for (const r of ROWS) {
+      if ((DIAGRAM_KINDS as readonly string[]).includes(r.kind)) expect(r.source_fields, r.kind).toBe("srs-spine §7.1")
+      else expect(r.source_fields, r.kind).toMatch(/\*new\*: \w+/)
+    }
   })
 
   it("section renderer gắn cho từng sơ đồ đúng cột SRS section (fixture 19 màn)", () => {

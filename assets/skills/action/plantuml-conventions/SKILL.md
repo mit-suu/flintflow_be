@@ -29,16 +29,18 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 
 ## Kinds
 
-| SRS section | SRS content (ISO/IEC/IEEE 29148) | `kind` | `owner_kind` | Notation | Path | Ticket |
-| --- | --- | --- | --- | --- | --- | --- |
-| `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 |
-| `fixed:2.2.1` | Functional requirements — user view | `usecase` | feature | UML 2.5.1 Use Case | svg | FLF-323 |
-| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | feature | UML 2.5 Activity, swimlanes | svg | FLF-340 |
-| `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 |
-| `feature:<id>` | Logical data model (domain) | `class` | feature | UML 2.5 Class (analysis level) | svg | FLF-325 |
-| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 |
-| `fixed:3.1.5` | Modes and states | `state_machine` | entity | UML 2.5 State Machine | svg | FLF-327 |
-| `function:<primary_function_id>` | User interfaces — layout | `screen_layout` | screen | Salt wireframe | puml | — |
+| SRS section | SRS content (ISO/IEC/IEEE 29148) | `kind` | `owner_kind` | Notation | Path | Ticket | `source_fields` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 | srs-spine §7.1 |
+| `fixed:2.2.1` | Functional requirements — user view | `usecase` | feature | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
+| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | feature | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
+| `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
+| `feature:<id>` | Logical data model (domain) | `class` | feature | UML 2.5 Class (analysis level) | svg | FLF-325 | `entities[].name/.relations/.relation_cardinality` · *new*: `entities[].attributes[]`, `entities[].feature_ids` |
+| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | `functions[<owner>].name/.trigger/.normal/.abnormal` · `actors[].name` of `use_cases[function_ids∋<owner>].actor_ids` · *new*: `functions[<owner>].messages[]` |
+| `fixed:3.1.5` | Modes and states | `state_machine` | entity | UML 2.5 State Machine | svg | FLF-327 | `entities[<owner>].name` · *new*: `entities[<owner>].states[]`, `entities[<owner>].transitions[]` |
+| `function:<primary_function_id>` | User interfaces — layout | `screen_layout` | screen | Salt wireframe | puml | — | srs-spine §7.1 |
+
+`class`, `sequence` and `state_machine` read fields the Spine does not have yet (*new*). Adding them, the new `kind` values and their section rows is a `contract-change` (`spine.schema.ts`, `section-registry.ts`). **No data, no diagram**: until those fields exist and are filled for an owner, no diagram of that kind is generated for it — no placeholder, no guessed content.
 
 New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row; until then the current renderer and its `renderer/*` skill stay. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
 
