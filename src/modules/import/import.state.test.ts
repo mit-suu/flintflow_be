@@ -24,6 +24,9 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   ["extracting", "baselining"],
   ["fields_review", "baselining"],
   ["baselining", "checking"],
+  // FLF-336: I-5 thấy thiếu mục ⇒ dừng; "Hoàn thiện" ⇒ chạy lại finalize
+  ["baselining", "incomplete"],
+  ["incomplete", "baselining"],
   ["checking", "gap_review"],
   ["gap_review", "delivered"],
   ["gap_review", "change_requested"],
