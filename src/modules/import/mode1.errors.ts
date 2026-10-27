@@ -57,7 +57,17 @@ export const MODE1_ERROR_STATUS = {
   /** Mode 1 v3 phase 7: tài liệu bổ sung của CR không phải .docx/.pdf/.txt/.md/PNG/JPEG. */
   CR_MATERIAL_UNSUPPORTED: 422,
   /** Mode 1 v3 phase 7: tài liệu bổ sung không đọc ra chữ nào. */
-  CR_MATERIAL_EMPTY: 422
+  CR_MATERIAL_EMPTY: 422,
+  /** FLF-338 (§3.6.1): quyết định duyệt danh sách rút thiếu / sai (bỏ không lý do, câu hỏi chưa trả lời, id lạ) — `meta.item_ids`. */
+  EXTRACTION_DECISION_INVALID: 400,
+  /** FLF-338: tài liệu chưa đọc ra chữ (parse lỗi / rỗng). */
+  EXTRACTION_DOCUMENT_UNREADABLE: 422,
+  /** FLF-338: danh sách đã duyệt — không rút lại, không duyệt lại. */
+  EXTRACTION_ALREADY_APPROVED: 409,
+  /** FLF-338: hết credit lúc rút. */
+  EXTRACTION_INSUFFICIENT_CREDIT: 402,
+  /** FLF-338: AI lỗi sau khi thử lại — credit đã hoàn. */
+  EXTRACTION_FAILED: 502
 } as const
 
 export type Mode1ErrorCode = keyof typeof MODE1_ERROR_STATUS

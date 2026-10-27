@@ -2,7 +2,8 @@
 
 /** Nguồn của CR (UC-48): bắt buộc, để truy vết yêu cầu sửa đến từ đâu. */
 /** `chat` (FLF-182): CR tự tạo từ lệnh sửa trong chat sau baseline v1 (mode 1 v2, D3). */
-export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat"] as const
+/** `reference_document` (FLF-338): CR tạo từ danh sách rút yêu cầu của tài liệu thô — `ref` = tên tài liệu + mã đoạn. */
+export const CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "chat", "reference_document"] as const
 export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
 
 /**
@@ -10,7 +11,7 @@ export type CrSourceKind = (typeof CR_SOURCE_KINDS)[number]
  * Viewer, yêu cầu miệng có tên). Mode 1 v3: không tạo CR nguồn `chat` nữa (lệnh trong chat là yêu cầu miệng);
  * `chat` chỉ còn trong `CR_SOURCE_KINDS` để đọc CR cũ.
  */
-export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal"] as const satisfies readonly CrSourceKind[]
+export const NEW_CR_SOURCE_KINDS = ["stakeholder_email", "meeting_minutes", "gap_report", "reupload", "viewer_comment", "verbal", "reference_document"] as const satisfies readonly CrSourceKind[]
 
 /** Cách C-3 tìm ra vị trí (nút 3.4): đích + phần tử tham chiếu tới đích (Spine), phần tử nhắc mã/tên của đích, từ khoá. */
 /** `preview` (mode 1 v3): phần tử bị op của bản xem trước đính kèm CR chạm tới. */
