@@ -138,7 +138,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     const versions = await DocVersion.find({ projectId }).lean()
     expect(versions).toHaveLength(1)
     const v = versions[0]
-    expect(v).toMatchObject({ version: "0.1", kind: "imported", based_on: null, cr_ids: [], baseline_ref: result.baseline.id })
+    expect(v).toMatchObject({ version: "0.1", kind: "imported", based_on: null, cr_ids: [], baseline_ref: result.baseline!.id })
     expect(String(v.created_by)).toBe(userId)
     expect(v.original_ref).toBeTruthy()
     expect(v.original_ref).not.toBe(v.file_ref)
@@ -296,7 +296,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     expect(result.baseline).toMatchObject({ version: "0.1", type: "imported", doc_version: "0.1" })
     const spine = (await spineRepository.get(projectId))!
     expect(spine.baselines).toHaveLength(1)
-    expect(spine.baselines[0]).toMatchObject({ id: result.baseline.id, type: "imported", doc_version: "0.1" })
+    expect(spine.baselines[0]).toMatchObject({ id: result.baseline!.id, type: "imported", doc_version: "0.1" })
     const snap = await Baseline.findById(spine.baselines[0].snapshot_ref).lean()
     expect(snap).toMatchObject({ type: "imported", doc_version: "0.1" })
     expect((snap as unknown as { snapshot: { actors: unknown[] } }).snapshot.actors).toHaveLength(2)
@@ -351,7 +351,7 @@ describe("finalize — lỗi", () => {
     // chạy lại với version mới ⇒ thành công
     const v2 = (await spineRepository.get(projectId))!.spine_version
     const again = await finalizeImport(projectId, userId, { import_id: importId, base_version: v2 })
-    expect(again.baseline.type).toBe("imported")
+    expect(again.baseline!.type).toBe("imported")
   })
 })
 
