@@ -50,7 +50,9 @@ export enum ActionType {
 
   // ─── Knowledge RAG (FLF-267) ───
   /** Trả lời câu hỏi trong chat chỉ từ chunk tri thức truy hồi được (K1..Kn), mỗi ý kèm trích dẫn. */
-  KNOWLEDGE_ANSWER = "knowledge_answer"
+  KNOWLEDGE_ANSWER = "knowledge_answer",
+  /** FLF-338 (§3.6.1): rút danh sách yêu cầu từ tài liệu thô, mỗi mục trỏ về đoạn nguồn + nhãn gợi ý. */
+  EXTRACT_REQUIREMENTS = "extract_requirements"
 }
 
 /**
@@ -78,7 +80,8 @@ export const SKILL_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, string>>>
   [ActionType.CR_PROPOSE]: "cr-propose",
   [ActionType.CR_CONSISTENCY]: "cr-consistency",
   [ActionType.CR_MATERIAL_IMAGE]: "cr-material-image",
-  [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer"
+  [ActionType.KNOWLEDGE_ANSWER]: "knowledge-answer",
+  [ActionType.EXTRACT_REQUIREMENTS]: "extract-requirements"
 }
 
 export interface AiActionInput {
