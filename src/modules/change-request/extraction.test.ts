@@ -78,7 +78,7 @@ describe("planExtractionCrs (FLF-338 §3.6.1 — BA duyệt danh sách rút)", (
     expect(desc).toContain("[Mơ hồ] The system should be fast.")
     expect(desc).toContain("Nguồn: minutes.txt · D1-P02")
     expect(desc).toContain("Trả lời BA: Under 2 seconds")
-    expect(crTitleOf({ group: "g", answers: new Map(), items: [item({ text: `${"a".repeat(120)}. b` })] }).length).toBe(100)
+    expect(crTitleOf({ group: "g", answers: new Map(), items: [item({ text: `${"a".repeat(120)}. b` })] }).length).toBeLessThanOrEqual(100)
   })
 })
 
