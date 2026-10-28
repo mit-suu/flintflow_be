@@ -7,7 +7,7 @@ import { planTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
 import { normalizeUseCaseBatch } from "../spine/use-case-propagation.js"
-import { bundleNewText, concreteBatch, crAddsUseCase, crUseCaseIntent, distributeOps, seedBatch } from "./add-use-case.service.js"
+import { approvedBatch, approvedBatchLocations, bundleNewText, concreteBatch, crAddsUseCase, crUseCaseIntent, distributeOps, seedBatch } from "./add-use-case.service.js"
 
 /**
  * FLF-318: lô thêm use case của CR — id thật trước khi chia, chia về ô "thêm mới" / phần tử có sẵn, ghi được theo bất kỳ
@@ -122,5 +122,24 @@ describe("seedBatch — CR tạo từ bản xem trước trong chat (FLF-318)", 
     expect(JSON.stringify(seeded!.ops)).not.toMatch(/\$new/)
     expect(seedBatch(FIXTURE, { seed: null })).toBeNull()
     expect(seedBatch(FIXTURE, { seed: { instruction: "x", ops: [{ op: "bogus" }], targets: [] } })).toBeNull()
+  })
+})
+
+describe("approvedBatch — CR có lô use case đã duyệt trong chat chạy như trước baseline (FLF-318)", () => {
+  const seed = { instruction: "x", ops: normalizeUseCaseBatch(FIXTURE, batch()) as unknown as Record<string, unknown>[], targets: ["use_cases[]", "screens[]", "permissions[]"] }
+  const cr = { title: "Thêm use case Send Absence Warning", description: "Thêm use case Send Absence Warning cho Lecturer", amendments: [], clarifications: [], seed }
+
+  it("có lô + lệnh use case ⇒ lô; gộp thêm lệnh / không phải lệnh use case / không có lô ⇒ null", () => {
+    expect(approvedBatch(FIXTURE, cr)).not.toBeNull()
+    expect(approvedBatch(FIXTURE, { ...cr, amendments: [{ text: "đổi màn", at: new Date(), after_round: 0 }] })).toBeNull()
+    expect(approvedBatch(FIXTURE, { ...cr, title: "Sửa ngưỡng hiệu năng", description: "Đổi 2 giây thành 3 giây" })).toBeNull()
+    expect(approvedBatch(FIXTURE, { ...cr, seed: null })).toBeNull()
+  })
+
+  it("vị trí là đúng phần lô chạm tới — không kéo cả mảng use case / màn / quyền có sẵn", () => {
+    const locs = approvedBatchLocations(FIXTURE, approvedBatch(FIXTURE, cr)!)
+    expect(locs.map((l) => l.path).sort()).toEqual(["permissions[]", "screens[]", "functions[]", "screens[id=S07]", "use_cases[]"].sort())
+    expect(locs.every((l) => l.found_by.includes("preview"))).toBe(true)
+    expect(locs.some((l) => /^use_cases\[id=/.test(l.path))).toBe(false)
   })
 })

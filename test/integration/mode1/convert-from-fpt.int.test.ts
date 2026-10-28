@@ -341,12 +341,13 @@ describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký basel
     const { seeded, c } = await fptProject()
     expect((await signOff(c)).status).toBe(201)
     let changeCalls = 0
+    const crCalls = { clarify: 0, propose: 0 }
     mockOverrides.next = (p) =>
       fakeMode1(p) ??
-      fakeCrClarify({ entity_paths: ["fixed:2.2.2"], keywords: ["Absence"] })(p) ??
+      (p.includes("# CR Clarify") ? (crCalls.clarify++, fakeCrClarify({ entity_paths: ["fixed:2.2.2"], keywords: ["Absence"] })(p)) : undefined) ??
       (p.includes("# Apply Change Op") ? (changeCalls++, JSON.stringify({ ops: fullBatch, notes: "Thêm chức năng, màn, luồng và phân quyền." })) : undefined) ??
       (p.includes("# CR Propose")
-        ? JSON.stringify({ locations: promptLocations(p).map((l) => ({ location_id: l.location_id, conclusion: "not_related", reason: "Khác", spine_ops: [] })) })
+        ? (crCalls.propose++, JSON.stringify({ locations: promptLocations(p).map((l) => ({ location_id: l.location_id, conclusion: "not_related", reason: "Khác", spine_ops: [] })) }))
         : undefined)
 
     // Chat mode 1: bản xem trước chỉ đọc (meta.requires_cr), đúng vòng hỏi đáp của trước baseline
@@ -388,6 +389,10 @@ Trả lời làm rõ:
     }
     const bundle = await ChangeLocation.find({ projectId: seeded.projectId, cr_id: crId, reason: ADD_USE_CASE_REASON }).lean()
     expect(bundle.map((l) => l.path)).toEqual(expect.arrayContaining(["use_cases[]", "functions[]", "screens[]", "permissions[]"]))
+    // Như trước baseline: không hỏi thêm (đã hỏi trong chat), vị trí chỉ là phần lô chạm tới, không gọi AI đề xuất thêm
+    expect(crCalls).toEqual({ clarify: 0, propose: 0 })
+    const all = await ChangeLocation.find({ projectId: seeded.projectId, cr_id: crId }).lean()
+    expect(all.filter((l) => !l.found_by.includes("diagram")).map((l) => l.reason)).toEqual(all.filter((l) => !l.found_by.includes("diagram")).map(() => ADD_USE_CASE_REASON))
     expect(last?.change_request).toMatchObject({ status: "written", result_doc_version: "1.1" })
     const spine = (await spineRepository.get(seeded.projectId))!
     const uc = spine.use_cases.find((u) => u.name === "Send Absence Warning")!
