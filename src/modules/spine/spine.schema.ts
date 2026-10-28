@@ -13,6 +13,7 @@
 
 import { z } from "zod"
 import type * as T from "./spine.types.js"
+import { legacyDiagram } from "./legacy-diagram.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -240,7 +241,9 @@ export const customSectionSchema = z.strictObject({
 export const diagramSchema = z.strictObject({
   id,
   kind: z.enum(["context", "usecase", "screen_flow", "erd", "screen_layout"]),
-  puml: z.string(),
+  /** FLF-339: engine vẽ. Dữ liệu cũ (chỉ có `puml`) được chuyển lúc đọc ở mức mảng — xem `legacy-diagram.ts`. */
+  format: z.enum(["puml", "svg"]),
+  source: z.string(),
   section: z.string().min(1),
   owner_kind: z.string().nullable(),
   owner_id: id.nullable(),
@@ -372,7 +375,8 @@ export const spineSchema = z.strictObject({
   /** FLF-182 — Spine trước mode 1 v2 không có ⇒ `[]`. */
   custom_sections: z.array(customSectionSchema).default([]),
 
-  diagrams: z.array(diagramSchema),
+  // preprocess ở mức phần tử mảng, không bọc `diagramSchema`: op engine đọc `.shape` của nó (element-defaults)
+  diagrams: z.array(z.preprocess(legacyDiagram, diagramSchema)),
   assumptions: z.array(assumptionSchema),
   decisions: z.array(decisionSchema).default([]),
   flags: z.array(flagSchema),

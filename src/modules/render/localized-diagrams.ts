@@ -1,7 +1,7 @@
 /**
  * localized-diagrams.ts
  * ─────────────────────────────────────────────────────────────────
- * Sơ đồ của bản xem Spine đã dịch (FLF-265 N1): thay `diagrams[].puml` TRONG BẢN XEM bằng nguồn sơ đồ theo ngôn ngữ tài
+ * Sơ đồ của bản xem Spine đã dịch (FLF-265 N1): thay `diagrams[].source` TRONG BẢN XEM bằng nguồn sơ đồ theo ngôn ngữ tài
  * liệu. Không ghi Spine, không compile — PNG theo ngôn ngữ do `diagram/localized-diagram.service.ts` vẽ lúc dựng tài liệu
  * (`assemble.service`); chú thích ảnh và câu "Giao diện" của §3.x.y đọc thẳng nguồn đã dịch này.
  *
@@ -17,6 +17,7 @@ import type { Diagram, Spine } from "../spine/spine.types.js"
 import { RENDERERS, type DiagramKind, type RenderedPart } from "../diagram/renderers/index.js"
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { isWireframeSalt, localizeSalt } from "../diagram/salt-text.js"
+import type { DiagramSource } from "../diagram/localized-diagram.service.js"
 
 const normalize = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase()
 
@@ -46,30 +47,39 @@ export const localizeDiagrams = (
   }
 
   const localized = (source: Diagram): string => {
-    if (isWireframeSalt(source.puml)) {
+    if (source.format === "puml" && isWireframeSalt(source.source)) {
       const title = screenName(canonical, source.owner_id)
       const translatedTitle = screenName(view, source.owner_id)
       const words = wireframeText.get(source.id)
-      return localizeSalt(source.puml, (text) =>
+      return localizeSalt(source.source, (text) =>
         title !== undefined && normalize(text) === normalize(title) ? translatedTitle : words?.get(text)
       )
     }
     const { source: before, localized: after } = partsOf(source.kind, source.owner_id)
-    const index = before.findIndex((part) => part.puml === source.puml)
-    return index >= 0 && after.length === before.length ? after[index].puml : source.puml
+    const index = before.findIndex((part) => part.format === source.format && part.source === source.source)
+    const part = index >= 0 && after.length === before.length ? after[index] : undefined
+    if (!part || part.format !== source.format) return source.source
+    // Chữ dịch dài hơn làm vỡ bố cục SVG ⇒ tài liệu dùng ảnh gốc, không in hình đè chữ
+    if (part.issues?.length) {
+      console.warn(`[diagram] Bản ${language} của ${source.id} vi phạm bố cục — dùng ảnh gốc: ${part.issues.map((i) => `${i.rule} ${i.message}`).join("; ")}`)
+      return source.source
+    }
+    return part.source
   }
 
   const sources = new Map(canonical.diagrams.map((d) => [d.id, d]))
   for (const diagram of view.diagrams) {
     const source = sources.get(diagram.id)
-    if (source?.render_status === "ok") diagram.puml = localized(source)
+    if (source?.render_status === "ok") diagram.source = localized(source)
   }
 }
 
 /** Nguồn sơ đồ đã dịch khác nguồn gốc: id ⇒ nguồn theo ngôn ngữ. Sơ đồ chưa đổi chữ nào dùng thẳng ảnh gốc. */
-export const changedDiagramSources = (canonical: Spine, view: Spine): Map<string, string> => {
-  const before = new Map(canonical.diagrams.map((d) => [d.id, d.puml]))
+export const changedDiagramSources = (canonical: Spine, view: Spine): Map<string, DiagramSource> => {
+  const before = new Map(canonical.diagrams.map((d) => [d.id, d.source]))
   return new Map(
-    view.diagrams.filter((d) => d.render_status === "ok" && before.has(d.id) && before.get(d.id) !== d.puml).map((d) => [d.id, d.puml])
+    view.diagrams
+      .filter((d) => d.render_status === "ok" && before.has(d.id) && before.get(d.id) !== d.source)
+      .map((d) => [d.id, { format: d.format, source: d.source }])
   )
 }

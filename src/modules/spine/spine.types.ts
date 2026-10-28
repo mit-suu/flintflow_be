@@ -295,11 +295,15 @@ export interface Addendum {
 
 export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "screen_layout"
 export type RenderStatus = "ok" | "error"
+/** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
+export type DiagramFormat = "puml" | "svg"
 
 export interface Diagram {
   id: string
   kind: DiagramKind
-  puml: string
+  format: DiagramFormat
+  /** Nguồn hình: text PlantUML (`format = puml`) hoặc markup SVG đầy đủ (`format = svg`). */
+  source: string
   section: string
   owner_kind: string | null
   owner_id: string | null

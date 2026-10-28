@@ -103,7 +103,7 @@ const flowPart = (screens: Screen[], start: FlowStart | null, labels: DiagramLab
 
   if (screens.length === 0) {
     body.push(`  NO_SCREENS [label=${dq(labels.noScreens)}];`, "}")
-    return { kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: puml("@startdot", body, "@enddot") }
+    return { kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, format: "puml", source: puml("@startdot", body, "@enddot") }
   }
 
   // Sơ đồ chung (chưa tách actor) giữ một điểm vào như trước
@@ -141,7 +141,7 @@ const flowPart = (screens: Screen[], start: FlowStart | null, labels: DiagramLab
   for (const [from, to] of oneWayEdges(screens, entries)) body.push(edge(endpoint(from), endpoint(to), clip(from, to)))
   body.push("}")
 
-  return { kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, puml: puml("@startdot", body, "@enddot") }
+  return { kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null, format: "puml", source: puml("@startdot", body, "@enddot") }
 }
 
 /**

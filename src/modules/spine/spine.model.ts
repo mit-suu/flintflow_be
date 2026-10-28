@@ -299,7 +299,10 @@ const diagramSchema = new Schema(
       enum: ["context", "usecase", "screen_flow", "erd", "screen_layout"],
       required: true
     },
-    puml: { type: String, default: "" },
+    format: { type: String, enum: ["puml", "svg"], default: "puml" },
+    source: { type: String, default: "" },
+    // legacy, chỉ để đọc doc chưa migrate (migrate-diagram-source). KHÔNG default: default sẽ ghi lại key `puml`.
+    puml: { type: String },
     section: { type: String, required: true },
     owner_kind: nullableString,
     owner_id: nullableString,

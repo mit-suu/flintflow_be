@@ -20,13 +20,13 @@ describe.skipIf(!reachable)("renderer × PlantUML server thật (DoD T10)", () =
   for (const target of allTargets(FIXTURE)) {
     it(`${target.kind}${target.owner_id ? `@${target.owner_id}` : ""} compile ok`, async () => {
       for (const part of renderKind(FIXTURE, target.kind, target.owner_id)) {
-        const result = await checkPlantUml(part.puml)
-        expect(result.ok, result.ok ? "" : `${result.error}\n${part.puml}`).toBe(true)
+        const result = await checkPlantUml(part.source)
+        expect(result.ok, result.ok ? "" : `${result.error}\n${part.source}`).toBe(true)
       }
     })
   }
 
-  it(".puml hỏng không sửa được ⇒ ok=false kèm lỗi, không ném (DoD T10)", async () => {
+  it(".source hỏng không sửa được ⇒ ok=false kèm lỗi, không ném (DoD T10)", async () => {
     const broken = "@startuml\nentity \"User\" as E01\nE01 ||--o{{{ E02 :::\n@enduml\n"
     const result = await compileWithFix("erd", broken, { ...defaultDeps(), fix: async () => null })
     expect(result.ok).toBe(false)
