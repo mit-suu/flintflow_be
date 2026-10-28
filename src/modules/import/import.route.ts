@@ -81,9 +81,10 @@ const router = Router()
  *             required: [file]
  *             properties:
  *               file: { type: string, format: binary }
+ *               intent: { type: string, enum: [fixed, free], description: "FLF-335 bước 1.2: file theo một mẫu cố định hay cấu trúc tự do; thiếu ⇒ free; dự án mới có mẫu bắt buộc luôn fixed" }
  *     responses:
  *       201:
- *         description: "`{ import: ImportedDocument }`"
+ *         description: "`{ import: ImportedDocument }` — `import.intent` là ý định đã ghi"
  *       400: { description: Thiếu file / VALIDATION_ERROR }
  *       409: { description: PROJECT_MODE_MISMATCH, IMPORT_INVALID_STATE (đã có baseline ⇒ dùng /reupload) }
  *       422: { description: "IMPORT_FILE_REJECTED (`meta: { import_id, issues }`), IMPORT_STAMP_FOREIGN_PROJECT (`meta: { stamp }`)" }
