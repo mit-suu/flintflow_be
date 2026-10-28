@@ -129,7 +129,12 @@ export const changesRequestSchema = z
      * FLF-294 (BR-03, UC-48): sau baseline, lượt áp là một change request — bắt buộc người yêu cầu + nguồn ở `/changes`
      * (thiếu ⇒ 400 `CR_FIELDS_REQUIRED`). Trước baseline bỏ qua. `/changes/preview` không cần.
      */
-    change_request: changeRequestInfoSchema.optional()
+    change_request: changeRequestInfoSchema.optional(),
+    /**
+     * FLF-271 (UC-40): lượt sửa này là để xử lý góp ý `CM-nnn` Lead ghim khi từ chối baseline — áp xong (≥ 1 thay đổi) thì
+     * comment tự thành `resolved / fixed` (bước sở hữu mục mở lại như #31). Comment không còn mở ⇒ bỏ qua, không lỗi.
+     */
+    comment_id: z.string().regex(COMMENT_ID_PATTERN, "Mã comment không hợp lệ.").optional()
   })
   .refine((v) => (v.ops === undefined) !== (v.instruction === undefined), {
     message: "Cần đúng một trong hai: ops hoặc instruction"
@@ -767,6 +772,8 @@ export const commentSchema = z.object({
   text: z.string().min(1).max(COMMENT_TEXT_MAX),
   status: z.enum(COMMENT_STATUSES),
   resolution: z.object({ kind: z.enum(COMMENT_RESOLUTIONS), reason: z.string().nullable() }).nullable().default(null),
+  /** FLF-271: bước sở hữu mục được ghim (`stepsOf(section_id)`) — FE hiện "thuộc bước …"; mục nhóm / ngoài mẫu ⇒ `[]`. */
+  step_ids: z.array(z.string()).default([]),
   cr_id: z.string().nullable(),
   handled_by: commentPersonSchema.nullable(),
   handled_at: isoDateTime.nullable(),
