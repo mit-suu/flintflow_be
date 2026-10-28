@@ -16,6 +16,7 @@ import { withMeteredAi } from "../import/metered-ai.js"
 import { listSections } from "../spine/section-registry.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Spine } from "../spine/spine.types.js"
+import { approvedBatch } from "./add-use-case.service.js"
 import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus, transitionCr } from "./change-request.service.js"
 import { AMENDABLE_CR_STATUSES, MAX_CLARIFY_ROUNDS, canAskMore } from "./change-request.state.js"
@@ -59,6 +60,16 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   const asked = cr.clarifications.length - (lastAmendment?.after_round ?? 0)
 
   cr.paused = null
+  // FLF-318: CR tạo từ bản xem trước đã duyệt (thêm / xoá / sửa use case) ⇒ câu hỏi đã hỏi trong chat như trước
+  // baseline, lô đã chốt ⇒ không hỏi thêm, không gọi model; C-3 lấy vị trí theo đúng lô
+  if (approvedBatch(spine, cr)) {
+    cr.missing_info = []
+    cr.markModified("missing_info")
+    cr.targets = { entity_paths: [...new Set(cr.seed?.targets ?? [])], keywords: [] }
+    cr.markModified("targets")
+    await transitionCr(cr, "impact_review")
+    return
+  }
   const headings = await docHeadings(cr, spine)
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
