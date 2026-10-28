@@ -17,7 +17,8 @@ import {
   gapReportQuerySchema,
   importResumeRequestSchema,
   mappingPatchRequestSchema,
-  stepPlanPatchRequestSchema
+  stepPlanPatchRequestSchema,
+  uploadImportBodySchema
 } from "./import.dto.js"
 import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
@@ -59,7 +60,9 @@ export const requireFile = (req: Request): importService.UploadedFile => {
 
 export const uploadImport = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
-  const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req))
+  // FLF-335: field text `intent` đi cùng multipart (bước 1.2)
+  const body = parseInput(uploadImportBodySchema, req.body)
+  const doc = await importService.uploadImport(auth.projectId, auth.userId, requireFile(req), body)
   return sendSuccess(res, 201, { import: importService.toImportDto(doc) })
 })
 

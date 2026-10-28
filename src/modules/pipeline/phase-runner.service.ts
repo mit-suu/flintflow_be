@@ -28,20 +28,27 @@ import * as meter from "./meter.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { gate, phaseGateAssumptions } from "./gate.service.js"
 import { getStep, nextStep as nextStepOf, orderedSteps, type ExpandedStep } from "./step-registry.js"
-import { isQuietStep, type QuietVerdict } from "./quiet-step.js"
+import { isQuietStep, type QuietVerdict, type QuietInput } from "./quiet-step.js"
 import { composePhaseGateMessage, spokenAssumptionIds, stripModelCountSentences } from "./gate-message.js"
 import * as spineRepository from "./../spine/spine.repository.js"
 import type { Spine, SpineRecord } from "../spine/spine.types.js"
 import type { ChangeSummary, StepEvent } from "./pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { AnswerDetached } from "./step-runner.errors.js"
 import { acquireRun, detachRun, finishRun, registerAbort, touchRun, type PendingAnswerState } from "./run-state.service.js"
 import type { AnswerInput } from "./step-runner.service.js"
 import { buildDocumentContext, stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { recordAutoPass } from "./auto-pass.service.js"
+import { runErrorOf } from "./pipeline-error-code.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
+
+/** FLF-337: tín hiệu từ tóm tắt lượt chạy cho bảng cổng cứng — có xoá nội dung không, chạm section nào. */
+const summarySignals = (summary: readonly { kind: string; section_id?: string | null }[] | undefined): Pick<QuietInput, "contentRemoved" | "touchedSections"> => ({
+  contentRemoved: (summary ?? []).some((c) => c.kind === "remove"),
+  touchedSections: Array.from(new Set((summary ?? []).map((c) => c.section_id).filter((id): id is string => typeof id === "string" && id.length > 0)))
+})
 
 /** Trần số bước chạy liền trong một lời gọi — chặn vòng lặp vô hạn nếu `nextStep` không tiến. */
 export const MAX_PHASE_STEPS = 30
@@ -244,7 +251,7 @@ export const resumePhaseInterview = async (
     }
     await finishRun(projectId, unit, run.run_id, "done", { questions: null })
   } catch (err) {
-    await finishRun(projectId, unit, run.run_id, "interrupted", { error: { code: err instanceof ApiError ? err.code : "UNKNOWN", message: clientErrorMessage(err) } })
+    await finishRun(projectId, unit, run.run_id, "interrupted", { error: runErrorOf(err) })
     throw err
   }
 }
@@ -518,6 +525,7 @@ export const standaloneGate = (
       if (quietReason === null || watched.signals.error) return
       await gate(projectId, stepId, userId, { action: "accept", base_version: (await load(projectId)).record.spine_version })
       emit({ type: "auto_accepted", step_id: stepId, reason_vi: quietReason })
+      await recordAutoPass(projectId, stepId, quietReason)
     },
     resolveGate: async (gateEvent) => {
       const { spine } = await load(projectId)
@@ -531,6 +539,7 @@ export const standaloneGate = (
         newAssumptions: gateEvent.new_assumptions ?? [],
         renderFailed: watched.signals.renderFailed,
         phaseTerminal: isPhaseTerminal(spine, step),
+        ...summarySignals(gateEvent.summary),
         spine
       })
       if (verdict.quiet) quietReason = verdict.reason_vi
@@ -582,6 +591,7 @@ const decideStep = async ({ projectId, next, unit, gateEvent, signals, phaseSumm
     phaseTerminal: isPhaseTerminal(afterSpine, next),
     // B-0.2/B-0.3 bỏ qua vì B-0.1 đã chốt field: không gọi model, không ghi gì ⇒ không có gì để duyệt
     settledEarlier: B0_FIELD_STEPS[templateId] !== undefined && !signals.asked && gateEvent.calls_used === 0 && gateEvent.wrote_ops === false,
+    ...summarySignals(gateEvent.summary),
     spine: afterSpine
   })
   if (verdict.quiet) return { verdict, afterSpine, phaseGate: null }
@@ -724,6 +734,8 @@ export const runPhase = async (
     void accepted
     void record
     emit({ type: "auto_accepted", step_id: next.id, reason_vi: verdict.reason_vi })
+    // FLF-337 "Chưa xem": ghi sổ để chip trước cổng đưa tài liệu ra ngoài đếm được
+    await recordAutoPass(projectId, next.id, verdict.reason_vi)
     terminalAutoAccepted = isPhaseTerminal(afterSpine, next)
     outcomes.push({
       step_id: next.id,

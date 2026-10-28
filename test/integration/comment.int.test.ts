@@ -55,6 +55,30 @@ describe("UC-49 — comment trên bản nháp (mode 2)", () => {
   let analyst: { userId: string; c: ReturnType<typeof api> }
   let viewer: ReturnType<typeof api>
 
+  it("FLF-271 (UC-40): comment mang step_ids của bước sở hữu; sửa qua /changes kèm comment_id ⇒ comment tự fixed, meta.resolved_comment_id; comment đã đóng ⇒ lượt áp vẫn chạy, không đóng lại", async () => {
+    // Dự án đủ dữ liệu (có actor A01) để lượt sửa thật sự đổi nội dung
+    const full = await seedFixture("full")
+    const c = api(full.projectId, full.token)
+    const section = await firstSection(c)
+    const created = await c.post("/comments", { version: { source: "draft" }, anchor: { section_id: section.id }, text: "Tên actor chưa đúng vai trò" })
+    expect(created.status, JSON.stringify(created.body.error)).toBe(201)
+    expect(Array.isArray(created.body.data.step_ids)).toBe(true)
+    const commentId = created.body.data.comment_id as string
+
+    const version = (await c.get("/spine")).body.data.spine_version as number
+    const applied = await c.post("/changes", { base_version: version, ops: [{ op: "set", path: "actors[id=A01].name", value: "Product Owner", reason: "sửa theo góp ý" }], comment_id: commentId })
+    expect(applied.status, JSON.stringify(applied.body.error)).toBe(200)
+    expect(applied.body.meta.resolved_comment_id).toBe(commentId)
+    const after = (await c.get("/comments?status=all")).body.data.find((c: { comment_id: string }) => c.comment_id === commentId)
+    expect(after).toMatchObject({ status: "resolved", resolution: { kind: "fixed", reason: null } })
+
+    // Đóng comment mở lại bước sở hữu (op riêng) ⇒ đọc lại version
+    const again = await c.post("/changes", { base_version: (await c.get("/spine")).body.data.spine_version, ops: [{ op: "set", path: "actors[id=A01].name", value: "Owner", reason: "sửa tiếp" }], comment_id: commentId })
+    expect(again.status).toBe(200)
+    expect(again.body.meta.resolved_comment_id).toBeUndefined()
+    expect((await c.post("/changes", { base_version: again.body.data.spine_version, ops: [{ op: "set", path: "actors[id=A01].name", value: "X", reason: "r" }], comment_id: "bad" })).status).toBe(400)
+  })
+
   beforeEach(async () => {
     seeded = await seedFixture("minimal")
     lead = api(seeded.projectId, seeded.token)
