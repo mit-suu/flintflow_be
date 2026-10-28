@@ -24,8 +24,12 @@ export type IsoDateTime = string
 
 export type WorkingMode = "fast" | "coaching"
 
-/** Mức độ dừng lại hỏi ý user (02-reduce-stops-plan R5). */
-export type ReviewMode = "strict" | "balanced" | "fast"
+/**
+ * Mức duyệt (02-reduce-stops-plan R5; FLF-337 business-flow §1.2): `strict` mọi bước · `fast` cuối giai đoạn · `milestones`
+ * chỉ ở mốc chốt (cổng cứng — `quiet-step.ts` `HARD_GATE_STEPS`). `balanced` là giá trị cũ, đọc như `fast` (FLF-220).
+ * Không bao giờ do độ tự tin của AI quyết định.
+ */
+export type ReviewMode = "strict" | "balanced" | "fast" | "milestones"
 
 export interface ReleaseScope {
   in: string[]
@@ -48,8 +52,13 @@ export interface SpineProject {
   form_factor: string[]
   stakes: string | null
   working_mode: WorkingMode | null
-  /** Cách duyệt (R5): `strict` | `balanced` | `fast`. */
+  /** Cách duyệt (R5, FLF-337): `strict` | `balanced` | `fast` | `milestones`. */
   review_mode: ReviewMode
+  /**
+   * FLF-337 "Chấp nhận, không hỏi lại phần này": section id (`fixed:5`, `custom:…`). Bước / bản sửa chỉ chạm các section này
+   * tự qua ở mọi mức duyệt (vẫn dừng khi có cờ đỏ mới, xoá nội dung). Bật lại trong cài đặt dự án. Spine cũ ⇒ `[]`.
+   */
+  skip_confirm_sections: string[]
   release_scope: ReleaseScope
 }
 
