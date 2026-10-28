@@ -73,8 +73,8 @@ describe("check — AI semantic (1.11)", () => {
     expect(ai.every((f) => f.level === "yellow" && f.resolved_at === null && f.remediation_step === "C-1")).toBe(true)
     expect(ai.map((f) => f.section_id).sort()).toEqual(["fixed:4.2.3", "fixed:I"])
     // AI chỉ đặt cờ vàng; đầu mục FPT thiếu không còn là cờ đỏ
-    expect(result.flags.red).toBe(0)
-    expect(result.flags.yellow).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "yellow").length)
+    expect(result.flags!.red).toBe(0)
+    expect(result.flags!.yellow).toBe(spine.flags.filter((f) => f.resolved_at === null && f.level === "yellow").length)
     // tài liệu mẫu ngắn ⇒ một lô map; thêm một lượt kiểm chéo
     const usage = await Usage.find({ projectId, step_id: /^I-1\.11/ }).sort({ step_id: 1 }).lean()
     expect(usage.map((u) => [u.step_id, u.state, u.call_kind])).toEqual([

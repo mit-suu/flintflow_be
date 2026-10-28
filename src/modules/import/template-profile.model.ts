@@ -9,6 +9,7 @@ import mongoose, { Schema, Document } from "mongoose"
 import type { RocRow } from "../render/rendered-document.types.js"
 import type { CustomBlock } from "../spine/spine.types.js"
 import { HEADING_DETECTORS, type HeadingDetector } from "./import.constants.js"
+import type { TargetStructure } from "./target-structure.js"
 
 export interface HeadingMapEntry {
   block_id: string
@@ -83,6 +84,8 @@ export interface ITemplateProfile extends Document {
    * (`nfrs:NFR-03`) — bản in đặt phần tử dưới đúng heading của file thay vì dồn hết lên lần đầu của section.
    */
   section_slices: { custom_id: string; section_id: string; items: string[] }[]
+  /** FLF-336 I-5: kết quả so cấu trúc đích lần finalize gần nhất (present / missing / out_of_scope + chế độ thật); null khi chưa so. */
+  target_structure: TargetStructure | null
   createdAt: Date
   updatedAt: Date
 }
@@ -146,6 +149,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
       ],
       default: []
     },
+    target_structure: { type: Schema.Types.Mixed, default: null },
     section_slices: {
       type: [
         new Schema(

@@ -256,7 +256,31 @@ export const fieldsPatchRequestSchema = z
  * `record_of_changes` (FLF-252, tuỳ chọn): các dòng Record of Changes người dùng đã xem/sửa ở wizard — thay cho dòng đọc
  * được từ file. Không gửi ⇒ đọc lại từ file như trước.
  */
-export const finalizeRequestSchema = z.strictObject({ import_id: id, base_version: baseVersion, record_of_changes: z.array(recordRowSchema).max(500).optional() })
+export const finalizeRequestSchema = z.strictObject({
+  import_id: id,
+  base_version: baseVersion,
+  record_of_changes: z.array(recordRowSchema).max(500).optional(),
+  /** FLF-336: từ màn "Kết quả đọc file" (`incomplete`) bấm "Hoàn thiện" ⇒ đi tiếp dù còn mục thiếu. */
+  complete: z.boolean().optional()
+})
+
+/** FLF-336 I-5 — kết quả so cấu trúc đích (`TemplateProfile.target_structure`). */
+export const targetSectionSchema = z.object({
+  section_id: z.string().min(1),
+  title: z.string(),
+  status: z.enum(["present", "missing", "out_of_scope"]),
+  owner_steps: z.array(z.string())
+})
+export const targetStructureSchema = z.object({
+  target: z.enum(["fpt", "template"]),
+  intent: z.enum(["fixed", "free"]),
+  /** Chế độ thật: 1 đủ cấu trúc đích · 3 mẫu cố định còn thiếu · 4 tự do còn thiếu. */
+  resolved_mode: z.union([z.literal(1), z.literal(3), z.literal(4)]),
+  sections: z.array(targetSectionSchema),
+  missing: z.array(z.string()),
+  compared_at: isoDateTime
+})
+export type TargetStructureDto = z.infer<typeof targetStructureSchema>
 
 /** `POST /projects/:id/import/resume` (UC-61, UC-75). */
 export const importResumeRequestSchema = z.strictObject({ import_id: id })
@@ -279,6 +303,8 @@ export const getImportResponseSchema = z.object({
     review_fields: z.array(reviewFieldSchema)
   }),
   blocks_count: z.number().int().min(0),
+  /** FLF-336: có sau lần finalize đầu (kể cả khi dừng ở `incomplete`); null khi chưa so. */
+  target_structure: targetStructureSchema.nullable().optional(),
   /**
    * Ước tính I-4 còn phải chạy — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
@@ -317,6 +343,8 @@ export const finalizeResponseSchema = z.object({
 })
 
 export const gapReportSchema = z.object({
+  /** FLF-336: bản đồ mục ⇒ cấu trúc đích (có từ trạng thái `incomplete`). */
+  target_structure: targetStructureSchema.nullable().optional(),
   project_id: id,
   doc_version: z.string().min(1),
   generated_at: isoDateTime,

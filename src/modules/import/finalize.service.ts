@@ -49,14 +49,18 @@ import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
+import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
 
 export interface FinalizeResult {
   doc: IImportedDocument
-  baseline: BaselineEntry
+  /** null khi dừng ở `incomplete` (FLF-336): chưa có v0. */
+  baseline: BaselineEntry | null
   spine_version: number
-  flags: { red: number; yellow: number }
+  flags: { red: number; yellow: number } | null
+  /** FLF-336 I-5: kết quả so cấu trúc đích (cũng lưu ở `TemplateProfile.target_structure`). */
+  target_structure: TargetStructure | null
 }
 
 const loadSpine = async (projectId: string) => {
@@ -68,7 +72,8 @@ const loadSpine = async (projectId: string) => {
 /** Điều kiện finalize (trạng thái, `base_version`, profile) — lỗi 4xx trả ngay cho client, trước khi chạy nền. */
 export const assertCanFinalize = async (projectId: string, body: Pick<FinalizeRequest, "import_id" | "base_version">) => {
   const doc = await requireImport(projectId, body.import_id)
-  assertImportStatus(doc, ["baselining"], "checking")
+  // FLF-336: `incomplete` chỉ đi tiếp khi người dùng bấm "Hoàn thiện" (`complete: true`)
+  assertImportStatus(doc, ["baselining", "incomplete"], "checking")
   const before = await loadSpine(projectId)
   if (before.spine_version !== body.base_version) {
     throw new ApiError(409, "Tài liệu vừa được thay đổi ở phiên khác. Vui lòng tải lại rồi thử lại.", spineRepository.SPINE_VERSION_CONFLICT)
@@ -204,7 +209,22 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
       return fn && blocks.length ? [{ section_id, source_hash: functionSourceHash(fn), blocks }] : []
     }
   )
+  // FLF-336 I-5: so cấu trúc đích TRƯỚC khi chụp v0 — còn mục thiếu và người dùng chưa bấm "Hoàn thiện" ⇒ dừng ở
+  // `incomplete` (không có v0 dở dang, §1). Ý định theo `Project.template_intent` (FLF-335); dự án cũ ⇒ tự do.
+  const project = await Project.findById(projectId).lean()
+  const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
+  const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
+  const structure = compareTargetStructure(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded), intent)
+  profile.target_structure = structure
+  profile.markModified("target_structure")
   await profile.save()
+  // Chỉ dự án có ý định (tạo qua picker FLF-335) mới dừng; dự án cũ không có `template_intent` giữ luồng cũ ⇒ v0 như hôm nay
+  const structureGate = intentRaw === "fixed" || intentRaw === "free"
+  if (structureGate && structure.missing.length > 0 && !doc.complete_requested) {
+    await transitionImport(doc, "incomplete")
+    const stopped = await loadSpine(projectId)
+    return { doc, baseline: null, spine_version: stopped.spine_version, flags: null, target_structure: structure }
+  }
 
   // 4. Diagram từ Spine (use case, ERD, luồng màn, ngữ cảnh) ⇒ bản render có hình như mode 2 cho loại người dùng chưa có
   // hình; loại đã có sơ đồ gốc thì hình PlantUML vẫn vẽ sẵn (in ra ngay khi CR bỏ ảnh gốc) nhưng không in (§4.13)
@@ -212,7 +232,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
 
   // Baseline imported + DocVersion 0.1 — chụp Spine sau lô kế hoạch step; file 0.1 = bản render của đúng snapshot đó
   const planned = await loadSpine(projectId)
-  const projectName = (await Project.findById(projectId, { name: 1 }).lean())?.name ?? doc.original_name
+  const projectName = project?.name ?? doc.original_name
   const renderedRef = await docFileStore().save(
     await renderVersionFile(projectId, projectName, stripRecord(planned), { version: IMPORTED_DOC_VERSION, stampSource: "import" }),
     { projectId, kind: "version", name: IMPORTED_DOC_VERSION }
@@ -253,7 +273,7 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const after = await loadSpine(projectId)
   await assembleWorkingDraft(projectId, projectName, after.spine_version)
   scheduleEmbeddingSync(projectId)
-  return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags) }
+  return { doc, baseline, spine_version: after.spine_version ?? spineVersion, flags: countOpenFlags(after.flags), target_structure: structure }
 }
 
 /** Id chức năng đọc từ bảng Non-Screen Functions (mục 3.1.4) của file, theo thứ tự bảng (FLF-252). */

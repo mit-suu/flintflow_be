@@ -22,7 +22,8 @@ import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
 
-const REPORT_STATUSES: readonly ImportStatus[] = ["gap_review", "delivered", "change_requested"]
+// FLF-336: dừng ở "Kết quả đọc file" cũng tải được gap report (kèm bản đồ mục ⇒ cấu trúc đích)
+const REPORT_STATUSES: readonly ImportStatus[] = ["incomplete", "gap_review", "delivered", "change_requested"]
 
 /**
  * Tiêu đề hiển thị của section. Truyền `layout` (template của project) thì **phần nối** — mục riêng tiêu đề rỗng, văn
@@ -94,6 +95,7 @@ export const buildGapReport = async (projectId: string): Promise<GapReport> => {
   const low = toReviewFields(drafts, needsConfirm)
 
   return {
+    target_structure: profile?.target_structure ?? null,
     project_id: projectId,
     doc_version: version?.version ?? IMPORTED_DOC_VERSION,
     generated_at: new Date().toISOString(),
