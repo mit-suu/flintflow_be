@@ -1146,7 +1146,14 @@
               "screen_layout"
             ]
           },
-          "puml": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "puml",
+              "svg"
+            ]
+          },
+          "source": {
             "type": "string"
           },
           "section": {
@@ -1203,7 +1210,8 @@
         "required": [
           "id",
           "kind",
-          "puml",
+          "format",
+          "source",
           "section",
           "owner_kind",
           "owner_id",

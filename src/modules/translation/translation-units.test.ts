@@ -324,7 +324,7 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
     expect(labels?.value).not.toContain("FlintFlow")
 
     const table = renderKind(FIXTURE, "screen_layout", wireframe.owner_id)[0]
-    const withTable = translationUnits(variant((s) => (s.diagrams.find((d) => d.id === wireframe.id)!.puml = table.puml)))
+    const withTable = translationUnits(variant((s) => (s.diagrams.find((d) => d.id === wireframe.id)!.source = table.source)))
     expect(withTable.some((u) => u.ref.group === "diagrams")).toBe(false)
     const errored = translationUnits(variant((s) => (s.diagrams.find((d) => d.id === wireframe.id)!.render_status = "error")))
     expect(errored.some((u) => u.ref.group === "diagrams")).toBe(false)

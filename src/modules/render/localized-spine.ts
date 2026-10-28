@@ -9,11 +9,12 @@
  * truyền nhầm được vào op-engine, deterministic-check, prompt / projection hay `computeSourceHash`: mọi chỗ đó chạy trên
  * chữ gốc (luật `non_english_content`, hash sơ đồ…). Đường render lấy Spine đã dịch qua đúng một cửa là `renderView`;
  * thứ tự, số hiệu, trạng thái và logic dựa chữ Anh vẫn quyết trên Spine gốc (`SectionRenderContext.canonical`).
- * N1: `diagrams[].puml` của bản xem là nguồn sơ đồ theo ngôn ngữ tài liệu (`localized-diagrams.ts`) — ảnh PNG theo nguồn
+ * N1: `diagrams[].source` của bản xem là nguồn sơ đồ theo ngôn ngữ tài liệu (`localized-diagrams.ts`) — ảnh PNG theo nguồn
  * đó do `assemble.service` nạp / vẽ, `diagrams[]` của Spine không đổi.
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import type { DiagramSource } from "../diagram/localized-diagram.service.js"
 import { fitTranslation, readUnitField, writeUnitField, type TranslationUnit, type UnitRef, type UnitValue } from "../translation/translation-units.js"
 import { changedDiagramSources, localizeDiagrams } from "./localized-diagrams.js"
 
@@ -92,5 +93,5 @@ export const renderView = (localized: LocalizedSpine): Spine => localized[VIEW]
  * Sơ đồ có nguồn theo ngôn ngữ khác nguồn gốc của `spine` (N1): id ⇒ nguồn cần ảnh riêng. Sơ đồ không đổi chữ nào ⇒ không
  * có mặt, tài liệu dùng thẳng ảnh gốc.
  */
-export const localizedDiagramSources = (spine: Spine, localized: LocalizedSpine): Map<string, string> =>
+export const localizedDiagramSources = (spine: Spine, localized: LocalizedSpine): Map<string, DiagramSource> =>
   changedDiagramSources(spine, localized[VIEW])

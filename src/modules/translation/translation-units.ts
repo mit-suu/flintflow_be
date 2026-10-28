@@ -21,7 +21,7 @@ import { wireframeLabels } from "../diagram/salt-text.js"
 
 export type UnitValue = string | string[]
 
-/** `diagrams` (N1): nhãn của wireframe model vẽ — chữ chỉ có trong `diagrams[].puml`, không ở field Spine nào. */
+/** `diagrams` (N1): nhãn của wireframe model vẽ — chữ chỉ có trong `diagrams[].source` (`format = puml`), không ở field Spine nào. */
 export type TranslationGroup = SrsTextGroup | "project" | "diagrams"
 
 /** Vị trí của đơn vị trong Spine — phase 3 dùng để dựng bản xem đã dịch. */
@@ -170,7 +170,9 @@ const diagramUnits = (spine: Partial<Pick<Spine, "project" | "screens" | "diagra
   (spine.diagrams ?? []).flatMap((d) => {
     if (d.kind !== "screen_layout" || d.render_status !== "ok" || !d.owner_id) return []
     const screen = spine.screens?.find((s) => s.id === d.owner_id)
-    const labels = wireframeLabels(d.puml, [screen?.name, spine.project?.system_name, spine.project?.name])
+    // svg (FLF-339): chữ trên hình đều lấy từ field Spine đã có đơn vị dịch ⇒ không có đơn vị riêng
+    if (d.format !== "puml") return []
+    const labels = wireframeLabels(d.source, [screen?.name, spine.project?.system_name, spine.project?.name])
     return unitOf({ group: "diagrams", id: d.id, field: "labels" }, labels)
   })
 

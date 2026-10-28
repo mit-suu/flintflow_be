@@ -39,7 +39,7 @@ const PROJECT = "650000000000000000000001"
 const DIAGRAM: Diagram = {
   id: "D01",
   kind: "context",
-  puml: "@startuml\n@enduml\n",
+  format: "puml", source: "@startuml\n@enduml\n",
   section: "fixed:1",
   owner_kind: null,
   owner_id: null,
@@ -106,6 +106,9 @@ describe("diagram.controller", () => {
     const ok = await invoke(getDiagramFile, { file: "D01.svg" })
     expect(ok.status).toBe(200)
     expect(ok.headers["Content-Type"]).toBe("image/svg+xml")
+    // FLF-339: SVG tự dựng mang chữ user ⇒ mở thẳng file cũng không chạy script
+    expect(ok.headers["Content-Security-Policy"]).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox")
+    expect(ok.headers["X-Content-Type-Options"]).toBe("nosniff")
     expect(loadDiagramFile).toHaveBeenCalledWith(PROJECT, "D01", "svg")
 
     expect((await invoke(getDiagramFile, { file: "D01.gif" })).error).toMatchObject({ statusCode: 404, code: "DIAGRAM_NOT_FOUND" })

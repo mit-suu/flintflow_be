@@ -7,12 +7,14 @@ import {
   _resetLocalizedDiagramState,
   localizedDiagramHash,
   localizedDiagramPng,
+  type DiagramSource,
   type LocalizedDiagramDeps
 } from "./localized-diagram.service.js"
 
 const PROJECT = "650000000000000000000001"
 const PUML = '@startuml\nactor "Sinh viên" as A01\n@enduml\n'
 const PNG = Buffer.from("png-vi")
+const puml = (source: string): DiagramSource => ({ format: "puml", source })
 
 const okCheck = (): CompileCheckResult => ({
   ok: true,
@@ -26,6 +28,7 @@ const setup = (over: Partial<LocalizedDiagramDeps> = {}) => {
   const deps: LocalizedDiagramDeps = {
     check: vi.fn(async () => okCheck()),
     renderPng: vi.fn(async () => PNG),
+    renderSvgPng: vi.fn(async () => PNG),
     store,
     now: () => clock,
     ...over
@@ -38,11 +41,11 @@ beforeEach(() => _resetLocalizedDiagramState())
 describe("localizedDiagramPng (FLF-265 N1)", () => {
   it("chưa có file ⇒ compile-check + vẽ PNG + lưu theo hash; lần sau đọc file, không vẽ lại", async () => {
     const { deps, store } = setup()
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBe(PNG.toString("base64"))
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBe(PNG.toString("base64"))
     expect(deps.check).toHaveBeenCalledWith(PUML)
     expect(store.files.has(localizedDiagramFileName(PROJECT, "D01", "vi", localizedDiagramHash("vi", PUML)))).toBe(true)
 
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBe(PNG.toString("base64"))
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBe(PNG.toString("base64"))
     expect(deps.check).toHaveBeenCalledTimes(1)
     expect(deps.renderPng).toHaveBeenCalledTimes(1)
   })
@@ -51,15 +54,15 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
     expect(localizedDiagramHash("vi", PUML)).toHaveLength(16)
     expect(localizedDiagramHash("vi", PUML)).not.toBe(localizedDiagramHash("en", PUML))
     const { deps } = setup()
-    await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)
-    await localizedDiagramPng(PROJECT, "D01", "vi", PUML.replace("Sinh viên", "Giảng viên"), deps)
+    await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)
+    await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML.replace("Sinh viên", "Giảng viên")), deps)
     expect(deps.renderPng).toHaveBeenCalledTimes(2)
   })
 
   it("nhiều lượt đọc cùng lúc ⇒ một lượt vẽ", async () => {
     let release: (b: Buffer) => void = () => {}
     const { deps } = setup({ renderPng: vi.fn(() => new Promise<Buffer>((resolve) => (release = resolve))) })
-    const calls = [1, 2, 3].map(() => localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps))
+    const calls = [1, 2, 3].map(() => localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps))
     await vi.waitFor(() => expect(deps.renderPng).toHaveBeenCalledTimes(1))
     release(PNG)
     expect(await Promise.all(calls)).toEqual([1, 2, 3].map(() => PNG.toString("base64")))
@@ -69,13 +72,13 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
   it("không compile được (cả lần thử lại) ⇒ null, nhớ COMPILE_FAILURE_TTL_MS rồi mới thử lại", async () => {
     const failed: CompileCheckResult = { ...okCheck(), ok: false, error: "Syntax Error?" }
     const { deps, store, tick } = setup({ check: vi.fn(async () => failed) })
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBeNull()
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBeNull()
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBeNull()
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBeNull()
     expect(deps.check).toHaveBeenCalledTimes(2)
     expect(deps.renderPng).not.toHaveBeenCalled()
     expect(store.files.size).toBe(0)
     tick(COMPILE_FAILURE_TTL_MS + 1)
-    await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)
+    await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)
     expect(deps.check).toHaveBeenCalledTimes(4)
   })
 
@@ -83,7 +86,7 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
     const failed: CompileCheckResult = { ...okCheck(), ok: false, error: "Syntax Error?" }
     const check = vi.fn(async () => okCheck()).mockImplementationOnce(async () => failed)
     const { deps } = setup({ check })
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBe(PNG.toString("base64"))
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBe(PNG.toString("base64"))
     expect(check).toHaveBeenCalledTimes(2)
   })
 
@@ -98,7 +101,7 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
       return okCheck()
     })
     const { deps } = setup({ check })
-    const pngs = await Promise.all(["D01", "D02", "D03", "D04"].map((id) => localizedDiagramPng(PROJECT, id, "vi", `${PUML}' ${id}\n`, deps)))
+    const pngs = await Promise.all(["D01", "D02", "D03", "D04"].map((id) => localizedDiagramPng(PROJECT, id, "vi", puml(`${PUML}' ${id}\n`), deps)))
     expect(pngs.every((p) => p === PNG.toString("base64"))).toBe(true)
     expect(check).toHaveBeenCalledTimes(4)
     expect(peak).toBe(1)
@@ -109,13 +112,13 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
       throw new TypeError("fetch failed")
     })
     const { deps, tick } = setup({ check })
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBeNull()
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBeNull()
     tick(TRANSPORT_FAILURE_TTL_MS - 1)
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBeNull()
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBeNull()
     expect(check).toHaveBeenCalledTimes(1)
     tick(2)
     check.mockImplementationOnce(async () => okCheck())
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBe(PNG.toString("base64"))
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBe(PNG.toString("base64"))
   })
 
   it("lưu file lỗi vẫn trả ảnh của lượt này; đọc store lỗi ⇒ vẽ lại", async () => {
@@ -123,12 +126,29 @@ describe("localizedDiagramPng (FLF-265 N1)", () => {
     store.saveLocalized = vi.fn(async () => {
       throw new Error("GridFS down")
     })
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBe(PNG.toString("base64"))
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBe(PNG.toString("base64"))
     store.loadLocalized = vi.fn(async () => {
       throw new Error("GridFS down")
     })
-    expect(await localizedDiagramPng(PROJECT, "D01", "vi", PUML, deps)).toBe(PNG.toString("base64"))
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", puml(PUML), deps)).toBe(PNG.toString("base64"))
     expect(deps.renderPng).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("localizedDiagramPng — format svg (FLF-339)", () => {
+  it("svg ⇒ PNG bằng resvg, không compile-check, không gọi PlantUML; lưu theo hash nguồn", async () => {
+    const { deps, store } = setup()
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", { format: "svg", source: svg }, deps)).toBe(PNG.toString("base64"))
+    expect(deps.renderSvgPng).toHaveBeenCalledWith(svg)
+    expect(deps.check).not.toHaveBeenCalled()
+    expect(deps.renderPng).not.toHaveBeenCalled()
+    expect(await store.loadLocalized(PROJECT, "D01", "vi", localizedDiagramHash("vi", svg))).not.toBeNull()
+  })
+
+  it("resvg ném ⇒ null (dùng ảnh gốc), không ném", async () => {
+    const { deps } = setup({ renderSvgPng: vi.fn(async () => Promise.reject(new Error("bad svg"))) })
+    expect(await localizedDiagramPng(PROJECT, "D01", "vi", { format: "svg", source: "<svg>" }, deps)).toBeNull()
   })
 })
 

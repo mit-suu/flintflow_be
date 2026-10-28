@@ -1,10 +1,11 @@
 /**
- * Một đường duy nhất cho diagram (Phases §7.1): projection Spine → `.puml` (renderer thuần) →
- * compile-check → PlantUML self-host → `diagrams[]`. Không có sequence diagram.
+ * Đường vẽ diagram (Phases §7.1): projection Spine → renderer thuần → `diagrams[]`. Hai engine theo `part.format`
+ * (FLF-339): `puml` ⇒ text `.puml` → compile-check → PlantUML self-host; `svg` ⇒ `Scene` → `checkScene` → resvg
+ * (`common.ts#svgPart`). `source_hash` = `renderedDiagramHash` (dữ liệu + engine của kind). Không có sequence diagram.
  */
 
 import type { Spine } from "../../spine/spine.types.js"
-import { computeSourceHash } from "../../spine/source-hash.js"
+import { renderedDiagramHash } from "../../spine/source-hash.js"
 import type { DiagramKind, RenderedPart, Renderer } from "./common.js"
 import { byId } from "./common.js"
 import { renderContext } from "./context.renderer.js"
@@ -39,7 +40,7 @@ export interface RenderedDiagramPart extends RenderedPart {
 export const renderKind = (spine: Spine, kind: DiagramKind, ownerId: string | null = null): RenderedDiagramPart[] =>
   RENDERERS[kind](spine, ownerId).map((part) => ({
     ...part,
-    source_hash: computeSourceHash(spine, { kind, owner_id: part.owner_id })
+    source_hash: renderedDiagramHash(spine, { kind, owner_id: part.owner_id })
   }))
 
 /** Wireframe chỉ cho màn cốt lõi (`signed_off`) có primary function (Phases §7.2). */

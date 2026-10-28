@@ -23,7 +23,7 @@ const withUser = (fn: (s: Spine) => void = () => {}): Spine => {
   fn(s)
   return s
 }
-const parts = (s: Spine): string[] => renderKind(s, "usecase").map((p) => p.puml)
+const parts = (s: Spine): string[] => renderKind(s, "usecase").map((p) => p.source)
 const partOf = (s: Spine, title: string): string => {
   const found = parts(s).find((p) => p.includes(`title Use Cases — ${title}\n`))
   expect(found, title).toBeDefined()
@@ -125,7 +125,7 @@ describe("usecase diagram với generalization", () => {
     const s = withUser((sp) => {
       sp.use_cases.find((u) => u.id === "UC02")!.actor_ids = ["A10", "A04"]
     })
-    const titles = renderKind(s, "screen_flow").map((p) => /label="([^"]*)"/.exec(p.puml)?.[1])
+    const titles = renderKind(s, "screen_flow").map((p) => /label="([^"]*)"/.exec(p.source)?.[1])
     expect(titles).not.toContain("Screens flow for User")
     expect(titles).toContain("Screens flow for Founder")
   })

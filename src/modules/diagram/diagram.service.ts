@@ -3,6 +3,12 @@
  * ─────────────────────────────────────────────────────────────────
  * renderer → compile-check → (sửa tự động ≤ 2 lần) → PlantUML SVG/PNG → GridFS → `diagrams[]`.
  *
+ * Hai engine theo `part.format` (FLF-339):
+ * - `puml`: đường trên — PlantUML server compile-check, vẽ SVG + PNG.
+ * - `svg`: renderer trả markup SVG dựng qua `Scene` + `issues` của bộ kiểm hình học. Không compile-check, không `fix`;
+ *   có issue hoặc resvg không ra PNG ⇒ `render_status = error` (message nêu tên phần tử) và GIỮ file cũ — step-runner
+ *   khôi phục bản `ok` trước đó vẫn có ảnh. Lỗi y hệt lần trước (cùng hash, cùng message) ⇒ không ghi lại.
+ *
  * - `.puml` lỗi sau 2 lần sửa ⇒ lưu text, `render_status = error` + `error` ⇒ cờ đỏ `render_error` (T09).
  *   KHÔNG ném ra API: lỗi render là dữ liệu, không phải ngoại lệ.
  * - Ghi `diagrams[]` qua op engine (T08), một transaction cho cả lô, `reason: "render"`. File SVG/PNG
@@ -18,9 +24,10 @@ import * as repository from "../spine/spine.repository.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
 import type { Diagram, Spine, SpineRecord } from "../spine/spine.types.js"
-import { UNHASHED_SOURCE_HASHES, computeSourceHash } from "../spine/source-hash.js"
+import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import { checkPlantUml, type CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantuml.client.js"
+import { svgToPng } from "../../shared/diagram/svg-to-png.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
 import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
@@ -44,6 +51,8 @@ export type FixPuml = (input: FixInput) => Promise<string | null>
 export interface DiagramServiceDeps {
   check: (source: string) => Promise<CompileCheckResult>
   renderPng: (source: string) => Promise<Buffer>
+  /** PNG của hình `format = svg` (resvg, không qua PlantUML). */
+  renderSvgPng: (svg: string) => Promise<Buffer>
   store: DiagramFileStore
   fix: FixPuml
   /** Wireframe màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
@@ -67,13 +76,15 @@ export const layoutRenderDeps = (injected?: Partial<DiagramServiceDeps>): Partia
 export const defaultDeps = (): DiagramServiceDeps => ({
   check: checkPlantUml,
   renderPng: async (source) => (await renderPlantUml(source, "png")).data,
+  renderSvgPng: svgToPng,
   store: gridFsDiagramStore,
   fix: noAutoFix,
   drawLayout: noAiLayout,
   now: () => new Date()
 })
 
-type Compiled = { ok: true; puml: string; svg: Buffer } | { ok: false; puml: string; error: string }
+/** `png` có sẵn ⇒ hình svg đã dựng PNG lúc compile; thiếu ⇒ PNG vẽ qua PlantUML lúc lưu file. */
+type Compiled = { ok: true; source: string; svg: Buffer; png?: Buffer } | { ok: false; source: string; error: string }
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err))
 
@@ -84,7 +95,7 @@ export const compileWithFix = async (kind: DiagramKind, source: string, deps: Di
   try {
     result = await deps.check(current)
   } catch (err) {
-    return { ok: false, puml: source, error: `PlantUML server không phản hồi: ${message(err)}` }
+    return { ok: false, source, error: `PlantUML server không phản hồi: ${message(err)}` }
   }
 
   for (let attempt = 1; attempt <= MAX_FIX_ATTEMPTS && !result.ok; attempt++) {
@@ -95,12 +106,33 @@ export const compileWithFix = async (kind: DiagramKind, source: string, deps: Di
       current = fixed
       result = next
     } catch (err) {
-      return { ok: false, puml: source, error: `PlantUML server không phản hồi: ${message(err)}` }
+      return { ok: false, source, error: `PlantUML server không phản hồi: ${message(err)}` }
     }
   }
 
-  if (result.ok) return { ok: true, puml: current, svg: result.render.data }
-  return { ok: false, puml: source, error: result.line ? `${result.error} (line ${result.line})` : result.error }
+  if (result.ok) return { ok: true, source: current, svg: result.render.data }
+  return { ok: false, source, error: result.line ? `${result.error} (line ${result.line})` : result.error }
+}
+
+/** Số lỗi bố cục in vào `error` — còn lại gộp thành "… và N lỗi khác" để message đọc được. */
+const MAX_LAYOUT_ISSUES_SHOWN = 5
+
+/**
+ * Hình `format = svg`: issue của bộ kiểm hình học ⇒ lỗi (dữ liệu gây ra, vẽ lại không tự hết); không ⇒ PNG bằng resvg ngay
+ * (SVG không parse được / quá lớn ⇒ lỗi). Không gọi PlantUML, không `fix`. Không bao giờ ném.
+ */
+export const compileSvg = async (part: Pick<RenderedDiagramPart, "source" | "issues">, deps: DiagramServiceDeps): Promise<Compiled> => {
+  const issues = part.issues ?? []
+  if (issues.length > 0) {
+    const shown = issues.slice(0, MAX_LAYOUT_ISSUES_SHOWN).map((i) => i.message)
+    const more = issues.length > shown.length ? `; … và ${issues.length - shown.length} lỗi khác` : ""
+    return { ok: false, source: part.source, error: `Sơ đồ vi phạm bố cục: ${shown.join("; ")}${more}` }
+  }
+  try {
+    return { ok: true, source: part.source, svg: Buffer.from(part.source, "utf8"), png: await deps.renderSvgPng(part.source) }
+  } catch (err) {
+    return { ok: false, source: part.source, error: `svg: ${message(err)}` }
+  }
 }
 
 // ─── id ──────────────────────────────────────────────────────────
@@ -159,18 +191,26 @@ const loadSpine = async (projectId: string): Promise<SpineRecord> => {
 }
 
 /**
- * So theo `source_hash`, không theo `puml`: `puml` lưu có thể là bản đã qua `deps.fix`, khác text renderer
- * sinh ra, nên so `puml` làm hình sửa được bị render lại (và tăng version) ở mọi lần gọi.
+ * So theo `source_hash`, không theo `source`: `source` lưu có thể là bản đã qua `deps.fix`, khác text renderer
+ * sinh ra, nên so `source` làm hình sửa được bị render lại (và tăng version) ở mọi lần gọi.
  */
 const unchanged = (previous: Diagram | undefined, part: RenderedDiagramPart, force: boolean): previous is Diagram =>
   !force && previous !== undefined && previous.render_status === "ok" && previous.source_hash === part.source_hash
 
 type OkCompiled = Extract<Compiled, { ok: true }>
 
+/** Lần trước đã ghi đúng lỗi này cho đúng dữ liệu này ⇒ ghi lại chỉ làm rác lịch sử `changes`. */
+const sameError = (previous: Diagram | undefined, part: RenderedDiagramPart, error: string): previous is Diagram =>
+  previous !== undefined &&
+  previous.render_status === "error" &&
+  previous.format === part.format &&
+  previous.source_hash === part.source_hash &&
+  previous.error === error
+
 const storeFiles = async (projectId: string, id: string, compiled: OkCompiled, deps: DiagramServiceDeps) => {
   await deps.store.save(projectId, id, "svg", { data: compiled.svg, contentType: CONTENT_TYPES.svg })
   try {
-    await deps.store.save(projectId, id, "png", { data: await deps.renderPng(compiled.puml), contentType: CONTENT_TYPES.png })
+    await deps.store.save(projectId, id, "png", { data: compiled.png ?? (await deps.renderPng(compiled.source)), contentType: CONTENT_TYPES.png })
   } catch (err) {
     // PNG chỉ phục vụ export; SVG đã có thì hình vẫn hợp lệ
     console.warn(`[diagram] Không render được PNG cho ${id}: ${message(err)}`)
@@ -225,17 +265,27 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
         continue
       }
 
-      const drawn =
-        part.kind === "screen_layout" && part.owner_id
-          ? await deps.drawLayout({ projectId, userId: options.by, spine, screenId: part.owner_id }).catch(() => null)
-          : null
-      let compiled = await compileWithFix(part.kind, drawn ?? part.puml, deps)
-      // Salt của model không compile ⇒ vẽ bảng function thay vì để hình lỗi
-      if (drawn !== null && !compiled.ok) compiled = await compileWithFix(part.kind, part.puml, deps)
+      let compiled: Compiled
+      if (part.format === "svg") {
+        compiled = await compileSvg(part, deps)
+        if (!compiled.ok && sameError(previous, part, compiled.error)) {
+          produced.push(previous)
+          continue
+        }
+      } else {
+        const drawn =
+          part.kind === "screen_layout" && part.owner_id
+            ? await deps.drawLayout({ projectId, userId: options.by, spine, screenId: part.owner_id }).catch(() => null)
+            : null
+        compiled = await compileWithFix(part.kind, drawn ?? part.source, deps)
+        // Salt của model không compile ⇒ vẽ bảng function thay vì để hình lỗi
+        if (drawn !== null && !compiled.ok) compiled = await compileWithFix(part.kind, part.source, deps)
+      }
       const diagram: Diagram = {
         id,
         kind: part.kind,
-        puml: compiled.puml,
+        format: part.format,
+        source: compiled.source,
         section: part.section,
         owner_kind: part.owner_kind,
         owner_id: part.owner_id,
@@ -245,7 +295,8 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
         rendered_at: deps.now().toISOString()
       }
       if (compiled.ok) toStore.push({ id, compiled })
-      else if (previous) errored.push(id)
+      // svg lỗi giữ file cũ: lỗi do dữ liệu, bản `ok` trước đó (step-runner khôi phục) vẫn cần ảnh
+      else if (previous && part.format === "puml") errored.push(id)
 
       ops.push(previous ? { op: "set", path: `diagrams[id=${id}]`, value: diagram, reason: "render" } : { op: "add", path: "diagrams[]", value: diagram, reason: "render" })
       produced.push(diagram)
@@ -324,7 +375,7 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
 
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */
 export const staleDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== computeSourceHash(spine, d))
+  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== renderedDiagramHash(spine, d))
 
 /**
  * Hình ĐÃ vẽ thành công nhưng dữ liệu nguồn đã đổi sau đó — đúng tập hợp mà luật cờ `diagram_stale` bắt.
@@ -332,7 +383,7 @@ export const staleDiagrams = (spine: Spine): Diagram[] =>
  * việc của step render, không phải sửa hậu quả của step vừa chạy (FLF-177 BUG-17).
  */
 export const staleRenderedDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== computeSourceHash(spine, d))
+  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== renderedDiagramHash(spine, d))
 
 export const loadDiagramFile = async (
   projectId: string,

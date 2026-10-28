@@ -65,7 +65,20 @@ vi.mock("../../shared/diagram/plantuml.client.js", async (importOriginal) => ({
   isPlantUmlReachable: async () => plantuml.reachable
 }))
 
+// FLF-339: thay renderer của một kind bằng part svg dựng sẵn (chưa kind nào dùng svg thật)
+const svgOverride = vi.hoisted(() => ({ parts: null as null | ((kind: string) => unknown[] | null) }))
+vi.mock("./renderers/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./renderers/index.js")>()
+  return {
+    ...actual,
+    renderKind: (...args: Parameters<typeof actual.renderKind>) => (svgOverride.parts?.(args[1]) as ReturnType<typeof actual.renderKind> | null) ?? actual.renderKind(...args)
+  }
+})
+
 import { spineSchema } from "../spine/spine.schema.js"
+import { Scene } from "../../shared/diagram/svg-scene.js"
+import { svgPart } from "./renderers/common.js"
+import { renderedDiagramHash } from "../spine/source-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
 import { runDeterministicCheck } from "../spine/deterministic-check.js"
@@ -112,14 +125,14 @@ describe("compileWithFix", () => {
     const check = vi.fn(async (source: string) => (source.includes("BAD") ? render(false, { line: "2" } as Partial<CompileCheckResult>) : render(true)))
     const fix = vi.fn(async ({ puml }: { puml: string }) => puml.replace("BAD LINE\n", ""))
     const result = await compileWithFix("erd", "@startuml\nBAD LINE\nentity A\n@enduml\n", { ...makeDeps(check).deps, check, fix } as DiagramServiceDeps)
-    expect(result).toMatchObject({ ok: true, puml: "@startuml\nentity A\n@enduml\n" })
+    expect(result).toMatchObject({ ok: true, source: "@startuml\nentity A\n@enduml\n" })
     expect(check).toHaveBeenCalledTimes(2)
   })
 
   it("hết 2 lần sửa vẫn lỗi ⇒ trả error, giữ text gốc; server chết ⇒ error, không ném", async () => {
     const fix = vi.fn(async ({ puml }: { puml: string }) => `${puml}%`)
     const failing = await compileWithFix("erd", "@startuml\n@enduml\n", { ...makeDeps(async () => render(false)).deps, fix } as DiagramServiceDeps)
-    expect(failing).toMatchObject({ ok: false, puml: "@startuml\n@enduml\n", error: "Syntax Error?" })
+    expect(failing).toMatchObject({ ok: false, source: "@startuml\n@enduml\n", error: "Syntax Error?" })
     expect(fix).toHaveBeenCalledTimes(2)
 
     const down = await compileWithFix("erd", "x", { ...makeDeps(async () => { throw new Error("ECONNREFUSED") }).deps, fix } as DiagramServiceDeps)
@@ -224,7 +237,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
       extends: []
     }))
     // Hình đã vẽ bằng bản cũ: id `-1`/`-2`, `source_hash` đúng với `actors[]` + `use_cases[]` hiện tại
-    const stale = { puml: "@startuml\nA01 --> UC001\n@enduml\n", source_hash: renderKind(spine, "usecase")[0].source_hash }
+    const stale = { format: "puml" as const, source: "@startuml\nA01 --> UC001\n@enduml\n", source_hash: renderKind(spine, "usecase")[0].source_hash }
     const base = { kind: "usecase" as const, section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok" as const, rendered_at: "2026-09-01T09:10:00.000Z" }
     spine.diagrams = [
       { id: "D02-1", ...base, ...stale },
@@ -242,12 +255,12 @@ describe("renderAll / renderDiagram qua op engine", () => {
     // giữ nguyên cả hai bản cũ: không có tín hiệu tự động nào báo `.puml` đã sai chuẩn
     // Hai phần mới (mỗi actor một hình) được vẽ; hai phần cũ cùng hash nên giữ nguyên bản cũ
     expect(result.rendered).toEqual(["D02-3", "D02-4"])
-    for (const d of result.diagrams.slice(0, 2)) expect(d.puml).toBe(stale.puml)
+    for (const d of result.diagrams.slice(0, 2)) expect(d.source).toBe(stale.source)
 
     // `force: true` (`npm run rerender:usecase`) là đường duy nhất làm cả hai phần đúng chuẩn mới
     const forced = await renderDiagram(PROJECT, "usecase", null, { by: USER, deps, force: true })
     expect(forced.rendered).toEqual(["D02-1", "D02-2", "D02-3", "D02-4"])
-    for (const d of forced.diagrams) expect(d.puml).not.toMatch(/^A\d+ -->/m)
+    for (const d of forced.diagrams) expect(d.source).not.toMatch(/^A\d+ -->/m)
   })
 
   it("mặc định không tự sửa: bỏ dòng lỗi làm mất phần tử hình mà vẫn báo ok", async () => {
@@ -295,11 +308,11 @@ describe("screen_layout do model vẽ (FLF-214)", () => {
     const drawLayout = vi.fn(async () => SALT)
     const drawn = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout } })
     expect(drawLayout).toHaveBeenCalledWith(expect.objectContaining({ projectId: PROJECT, userId: USER, screenId: "S01" }))
-    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", render_status: "ok", puml: SALT })
+    expect(drawn.diagrams[0]).toMatchObject({ owner_id: "S01", render_status: "ok", source: SALT })
 
     // Không cắm drawLayout (test, script) ⇒ bảng function của renderer code
     const plain = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps, force: true })
-    expect(plain.diagrams[0].puml).toBe(renderKind(FIXTURE, "screen_layout", "S01")[0].puml)
+    expect(plain.diagrams[0].source).toBe(renderKind(FIXTURE, "screen_layout", "S01")[0].source)
     // Hình khác không gọi model
     await renderDiagram(PROJECT, "erd", null, { by: USER, deps: { ...deps, drawLayout } })
     expect(drawLayout).toHaveBeenCalledTimes(1)
@@ -307,11 +320,11 @@ describe("screen_layout do model vẽ (FLF-214)", () => {
 
   it("salt của model không compile, model trả null hoặc ném ⇒ bảng function, vẫn ok", async () => {
     await seed()
-    const table = renderKind(FIXTURE, "screen_layout", "S01")[0].puml
+    const table = renderKind(FIXTURE, "screen_layout", "S01")[0].source
     const { deps } = makeDeps(async (source) => render(source !== SALT))
     for (const drawLayout of [async () => SALT, async () => null, async () => Promise.reject(new Error("no credit"))]) {
       const result = await renderDiagram(PROJECT, "screen_layout", "S01", { by: USER, deps: { ...deps, drawLayout }, force: true })
-      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", puml: table })
+      expect(result.diagrams[0]).toMatchObject({ render_status: "ok", source: table })
     }
   })
 })
@@ -352,5 +365,77 @@ describe("renderChangedIfAvailable — FLF-311 vẽ lại sau lô thêm use case
 
     await expect(renderChangedIfAvailable(PROJECT, ["S02"], { by: USER, deps })).resolves.toBeNull()
     expect((await repo.get(PROJECT))?.spine_version).toBe(before.spine_version)
+  })
+})
+
+describe("đường vẽ svg (FLF-339)", () => {
+  const contextScene = (overlap: boolean): Scene => {
+    const scene = new Scene()
+    scene.rect("A", 0, 0, 150, 54, { name: "Analyst" })
+    scene.text("A.name", 75, 32, "Analyst", { owner: "A", bold: true })
+    scene.circle("P", 400, 27, 60, { name: "FlintFlow" })
+    scene.line("F", [150, 27], [340, 27], { name: "Requirement List" })
+    scene.arrow("F", "classic")
+    scene.label("F", "Requirement List")
+    if (overlap) scene.text("X", 245, 30, "Overlapping text")
+    return scene
+  }
+  const svgParts = (overlap: boolean) => () => {
+    const part = svgPart(contextScene(overlap), { allowBends: false }, { kind: "context", section: "fixed:1", owner_kind: null, owner_id: null })
+    return [{ ...part, source_hash: renderedDiagramHash(FIXTURE, { kind: "context", owner_id: null }) }]
+  }
+
+  beforeEach(() => {
+    db.reset()
+    repo.clearReadCache()
+    svgOverride.parts = null
+  })
+
+  it("svg sạch ⇒ ok, format svg, không gọi check / fix, lưu svg = source và png của resvg", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    const fix = vi.fn(async () => null)
+    const renderSvgPng = vi.fn(async () => Buffer.from("svg-png"))
+    svgOverride.parts = (kind) => (kind === "context" ? svgParts(false)() : null)
+    const result = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, fix, renderSvgPng } })
+    const d = result.diagrams[0]
+    expect(d).toMatchObject({ format: "svg", render_status: "ok" })
+    expect(d.source).toMatch(/^<\?xml[\s\S]*<svg /)
+    expect(deps.check).not.toHaveBeenCalled()
+    expect(fix).not.toHaveBeenCalled()
+    expect((await store.load(PROJECT, d.id, "svg"))?.data.toString("utf8")).toBe(d.source)
+    expect((await store.load(PROJECT, d.id, "png"))?.data.toString()).toBe("svg-png")
+  })
+
+  it("svg vi phạm bố cục ⇒ error nêu tên phần tử, không lưu file, file cũ còn nguyên; lỗi lặp y hệt ⇒ không ghi", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    const first = await renderDiagram(PROJECT, "context", null, { by: USER, deps })
+    const id = first.diagrams[0].id
+    const oldSvg = (await store.load(PROJECT, id, "svg"))?.data.toString()
+    expect(oldSvg).toBeDefined()
+
+    const renderSvgPng = vi.fn(async () => Buffer.from("never"))
+    svgOverride.parts = (kind) => (kind === "context" ? svgParts(true)() : null)
+    // cùng hash dữ liệu với hình puml đang `ok` ⇒ phải `force` (thật ra đổi engine làm đổi hash — xem source-hash.test)
+    const broken = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng }, force: true })
+    expect(broken.diagrams[0]).toMatchObject({ format: "svg", render_status: "error" })
+    expect(broken.diagrams[0].error).toMatch(/^Sơ đồ vi phạm bố cục: .*"Overlapping text"/)
+    expect(renderSvgPng).not.toHaveBeenCalled()
+    expect((await store.load(PROJECT, id, "svg"))?.data.toString()).toBe(oldSvg)
+
+    const again = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng }, force: true })
+    expect(again.rendered).toEqual([])
+    expect(again.spine_version).toBe(broken.spine_version)
+  })
+
+  it("resvg ném ⇒ error `svg: …`, không lưu file", async () => {
+    await seed()
+    const { deps, store } = makeDeps()
+    svgOverride.parts = (kind) => (kind === "context" ? svgParts(false)() : null)
+    const renderSvgPng = vi.fn(async () => Promise.reject(new Error("svg too large")))
+    const result = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng } })
+    expect(result.diagrams[0]).toMatchObject({ render_status: "error", error: "svg: svg too large" })
+    expect(await store.load(PROJECT, result.diagrams[0].id, "svg")).toBeNull()
   })
 })

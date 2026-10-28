@@ -232,6 +232,31 @@ Script truyền `step_id: "S-3.6"` đúng bước sở hữu section.
 
 ---
 
+### Đổi `diagrams[].puml` → `source` + `format` (FLF-339)
+
+Bản có FLF-339 đọc được cả Spine cũ (`puml`) lẫn mới (`source` + `format`), nên migration chỉ là **dọn dẹp** —
+không bắt buộc chạy trước khi bật bản mới. Nhưng bản **cũ** không đọc được dạng mới, nên thứ tự deploy / rollback cố định:
+
+```bash
+# deploy
+mongodump --uri "$MONGO_URI" --collection spines --gzip --archive=spines-$(date +%F).gz   # 1. backup (mục 6)
+# 2. deploy image mới
+npm run migrate:diagram-source -- --dry-run   # 3. đếm Spine + diagram sẽ đổi
+npm run migrate:diagram-source -- --apply     # 4. ghi; báo "bỏ qua" ⇒ chạy lại cho tới khi 0
+
+# rollback về image chưa có FLF-339
+# 1. dừng ghi: tắt backend + worker (lượt ghi xen vào sẽ lại mang dạng mới)
+npm run migrate:diagram-source -- --revert    # 2. bằng image MỚI (script chỉ có ở bản này): trả diagrams[] về dạng puml
+# 3. lùi image rồi bật lại; Spine nào vẫn lỗi đọc ⇒ khôi phục từ backup của bước deploy
+```
+
+- Script ghi **thô** (pipeline update CAS theo `spine_version`), không qua op engine, không tăng `spine_version`,
+  không tạo change — nội dung Spine không đổi, chỉ đổi tên field.
+- Baseline snapshot và lịch sử `changes` không bị viết lại: dạng cũ ở đó được chuyển lúc đọc, vĩnh viễn.
+- `--revert` báo số hình `format = svg`: code cũ không vẽ được chúng (thành cờ `render_error` tới khi vẽ lại).
+
+---
+
 ### Chạy step pipeline mà không gọi model
 
 `AI_PROVIDER_OVERRIDE=mock` ghi đè provider của **mọi** skill; `mock.provider.ts` trả output hợp schema

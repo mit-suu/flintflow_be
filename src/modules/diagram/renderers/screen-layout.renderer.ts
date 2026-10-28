@@ -46,7 +46,8 @@ export const renderScreenLayout: Renderer = (spine, ownerId, labels = DIAGRAM_LA
       section: `function:${screen.primary_function_id}`,
       owner_kind: "screen",
       owner_id: screen.id,
-      puml: puml("@startsalt", body, "@endsalt")
+      format: "puml",
+      source: puml("@startsalt", body, "@endsalt")
     }
   ]
 }
