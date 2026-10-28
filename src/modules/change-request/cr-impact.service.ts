@@ -13,7 +13,8 @@ import type { IChangeRequest } from "./change-request.model.js"
 import { assertCrStatus } from "./change-request.service.js"
 import { ChangeLocation } from "./change-location.model.js"
 import { lockPaths, unlockPaths } from "./lock.service.js"
-import { emptySectionTargets, findSpineLocations } from "./spine-location.js"
+import { emptySectionTargets, findSpineLocations, type FoundLocation } from "./spine-location.js"
+import { approvedBatch, approvedBatchLocations } from "./add-use-case.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import { loadLayout, titleOfSection } from "../import/gap-report.service.js"
 import { ownerStepOf } from "../spine/section-registry.js"
@@ -32,10 +33,13 @@ export const runImpact = async (cr: IChangeRequest): Promise<void> => {
   const spine = stripRecord(record)
 
   const seedTargets = new Set(cr.seed?.targets ?? [])
-  const vector = await vectorCandidates(String(cr.projectId), crQueryText(cr))
-  const found = findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, vector).map((f) =>
-    seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
-  )
+  // FLF-318: lô thêm / xoá / sửa use case đã duyệt trong chat ⇒ vị trí là đúng phần tử lô chạm tới, như trước baseline
+  const approved = approvedBatch(spine, cr)
+  const found: FoundLocation[] = approved
+    ? approvedBatchLocations(spine, approved)
+    : findSpineLocations(spine, cr.targets.entity_paths, cr.targets.keywords, await vectorCandidates(String(cr.projectId), crQueryText(cr))).map((f) =>
+        seedTargets.has(f.path) && !f.found_by.includes("preview") ? { ...f, found_by: [...f.found_by, "preview" as const] } : f
+      )
   // Phase 8: CR gộp thêm lệnh sau khi đã có đề xuất ⇒ vị trí đã có (đề xuất / kết luận / khoá) giữ nguyên, chỉ thêm
   // phần tử mới. Chưa có đề xuất nào ⇒ tìm lại như cũ (thay toàn bộ vị trí, trả khoá phần tử bị bỏ).
   const existing = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path location_id conclusion").lean()

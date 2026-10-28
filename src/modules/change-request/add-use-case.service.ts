@@ -46,7 +46,8 @@ const VERB_OF: Readonly<Record<UseCaseIntent, string>> = { add: "thêm", remove:
 const requesterText = (cr: Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications">): string =>
   [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join("\n")
 
-type CrText = Pick<IChangeRequest, "title" | "description" | "amendments" | "clarifications">
+type CrTextKey = "title" | "description" | "amendments" | "clarifications"
+type CrText = Pick<IChangeRequest, CrTextKey>
 
 /** CR thêm / xoá / sửa use case (động từ đứng trước thắng — như chat); không đụng use case ⇒ `null`. */
 export const crUseCaseIntent = (cr: CrText): UseCaseIntent | null => useCaseIntent(requesterText(cr))
@@ -158,7 +159,7 @@ export const proposeUseCaseBatch = async (
 
   // Bản xem trước người dùng đã duyệt trong chat (vòng hỏi đáp như trước baseline: màn riêng / popup, ai xử lý, giữ / bỏ
   // use case đề xuất, xoá cả luồng) ⇒ dùng đúng lô đó, không soạn lại. Lô không còn áp được (tài liệu đã đổi) ⇒ soạn lại.
-  const seeded = cr.amendments?.length ? null : seedBatch(spine, cr)
+  const seeded = approvedBatch(spine, cr)
   const outcome = seeded ? { drafted: { ops: [], clarification: null, notes: null } as ResolvedOps, batch: seeded } : await draftBatch(cr, userId, spine, instruction, intent, deps)
   if (outcome === "paused" || outcome === "skipped") return outcome
   const { drafted, batch } = outcome
@@ -177,6 +178,23 @@ export const seedBatch = (spine: Spine, cr: Pick<IChangeRequest, "seed">): { ops
   }
   return concreteBatch(spine, ops)
 }
+
+/** Lô thêm / xoá / sửa use case người dùng đã duyệt trong chat (CR tạo từ bản xem trước, chưa gộp thêm lệnh); không có ⇒ `null`. */
+export const approvedBatch = (spine: Spine, cr: Pick<IChangeRequest, "seed" | CrTextKey>): { ops: Op[]; after: Spine } | null =>
+  cr.amendments?.length || !crUseCaseIntent(cr) ? null : seedBatch(spine, cr)
+
+/**
+ * C-3 của CR có lô đã duyệt: vị trí là đúng phần tử lô chạm tới (như bản xem trước trước baseline) — không tìm theo đích
+ * dạng mảng (`use_cases[]`, `permissions[]`…) vốn kéo vào mọi phần tử có sẵn của mảng.
+ */
+export const approvedBatchLocations = (spine: Spine, batch: { ops: Op[]; after: Spine }) =>
+  distributeOps(spine, batch.after, batch.ops).map((b) => ({
+    path: b.path,
+    section_id: b.section_id,
+    found_by: ["preview" as const],
+    entity_paths: [b.section_id],
+    owner_step: b.section_id.startsWith("custom:") || b.section_id === "misc" ? null : ownerStepOf(b.section_id, spine)
+  }))
 
 /** Model soạn lô thêm / xoá use case (luật 3e / 3g) từ lệnh của CR + câu trả lời làm rõ. */
 const draftBatch = async (
