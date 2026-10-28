@@ -1,4 +1,4 @@
-import { Project, IProject, type ProjectMode } from "./project.model.js"
+import { Project, IProject, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
 import { ProjectDocument } from "./project-document.model.js"
@@ -50,6 +50,37 @@ export const assertProjectQuota = async (orgId: string): Promise<void> => {
   }
 }
 
+/** Lựa chọn lúc tạo dự án (FLF-335). Thiếu `source` ⇒ client cũ gửi `mode`. */
+export interface ProjectStart {
+  source?: ProjectStartKind
+  has_required_template?: boolean
+}
+
+export interface ResolvedProjectStart {
+  mode: ProjectMode
+  start_kind: ProjectStartKind
+  has_required_template: boolean | null
+  template_intent: TemplateIntent | null
+}
+
+/**
+ * FLF-335 (business-flow §1 "Chọn chế độ"): người dùng không chọn chế độ — Code suy ra từ hai lựa chọn:
+ * - mới · không mẫu ⇒ `fpt` (chế độ 2, mẫu chuẩn FlintFlow);
+ * - mới · có mẫu bắt buộc ⇒ `import` + `template_intent = fixed` (tải mẫu lên; chế độ 1 / 3 quyết định sau khi so cấu trúc đích);
+ * - có sẵn ⇒ `import`, ý định (`fixed` / `free`) hỏi lúc upload (#2 `intent`); chế độ 1 / 3 / 4 quyết định sau.
+ * Client cũ gửi `mode`: `customer_template` (từng trả 501) quy về mới · có mẫu bắt buộc; `import` ⇒ có sẵn; `fpt` ⇒ mới · không mẫu.
+ */
+export const resolveProjectStart = (mode: ProjectMode = "fpt", start: ProjectStart = {}): ResolvedProjectStart => {
+  if (start.source === "new") {
+    const required = start.has_required_template === true
+    return { mode: required ? "import" : "fpt", start_kind: "new", has_required_template: required, template_intent: required ? "fixed" : null }
+  }
+  if (start.source === "existing") return { mode: "import", start_kind: "existing", has_required_template: null, template_intent: null }
+  if (mode === "customer_template") return { mode: "import", start_kind: "new", has_required_template: true, template_intent: "fixed" }
+  if (mode === "import") return { mode: "import", start_kind: "existing", has_required_template: null, template_intent: null }
+  return { mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null }
+}
+
 export const createProject = async (
   orgId: string,
   userId: string,
@@ -57,16 +88,16 @@ export const createProject = async (
   domain?: string,
   mode: ProjectMode = "fpt",
   folderId?: string,
-  documentLanguage?: UserLocale
+  documentLanguage?: UserLocale,
+  start: ProjectStart = {}
 ): Promise<IProject> => {
-  if (mode === "customer_template") {
-    throw new ApiError(501, "Chưa hỗ trợ tạo dự án theo mẫu của khách hàng.", "NOT_IMPLEMENTED")
-  }
+  const resolved = resolveProjectStart(mode, start)
   // Tạo thẳng trong thư mục (một request) — thư mục phải thuộc cùng org
   if (folderId) await assertFolderOwned(orgId, folderId)
   await assertProjectQuota(orgId)
-  // FLF-265 (D2, D3): mode 2 lưu body ⇒ ngôn ngữ tài khoản ⇒ en. Mode 1 bỏ qua giá trị gửi lên, để trống — ngôn ngữ theo file upload
-  const language = mode === "import" ? null : (documentLanguage ?? (await accountLocaleOf(userId)) ?? "en")
+  // FLF-265 (D2, D3): dự án mới không mẫu lưu body ⇒ ngôn ngữ tài khoản ⇒ en. Dự án tải file lên bỏ qua giá trị gửi lên, để trống —
+  // ngôn ngữ theo file upload
+  const language = resolved.mode === "import" ? null : (documentLanguage ?? (await accountLocaleOf(userId)) ?? "en")
   // Mode 1 vẫn có Spine: ở đó Spine là chỉ mục trích từ tài liệu import (G2), không phải nguồn sự thật
   const project = await Project.create({
     organizationId: orgId,
@@ -75,7 +106,10 @@ export const createProject = async (
     name,
     domain: domain || null,
     status: "active",
-    mode,
+    mode: resolved.mode,
+    start_kind: resolved.start_kind,
+    has_required_template: resolved.has_required_template,
+    template_intent: resolved.template_intent,
     ...(language ? { documentLanguage: language } : {}),
     ...(folderId ? { folderId } : {})
   })

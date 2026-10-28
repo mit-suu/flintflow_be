@@ -579,7 +579,41 @@ export const runStateResponseSchema = z.object({
   /** FLF-234: sự kiện `phase_gate` của bước cuối giai đoạn đang chờ duyệt (đủ tin nhắn + giả định cả giai đoạn); thiếu/null ⇒ bước lẻ. */
   phase_gate: z.unknown().nullable().optional(),
   events: z.array(z.unknown()),
-  error: z.object({ code: z.string(), message: z.string() }).nullable()
+  error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  /**
+   * FLF-332: `ai_error` ⇒ lượt gãy vì AI lỗi (đã tự thử lại, credit đã hoàn), bước **tạm dừng**: `/run-state/active` vẫn trả
+   * lượt này sau khi mở lại trang để FE dựng banner "Thử lại ngay / Để sau" tại bước đó. Thiếu/null ⇒ gián đoạn thường.
+   */
+  paused_reason: z.enum(["ai_error"]).nullable().optional()
+})
+
+// ─── run-estimate (FLF-332) ───────────────────────────────────────
+
+/** GET /projects/:id/run-estimate?scope=unit|all&from= */
+export const runEstimateQuerySchema = z.object({
+  /** `unit`: chỉ đơn vị giai đoạn của bước đầu; `all`: tới hết pipeline (sau Approve Brief). */
+  scope: z.enum(["unit", "all"]).default("all"),
+  /** Id bước hoặc đơn vị giai đoạn (`S-4`, `S-5@S03`) để bắt đầu đếm; thiếu ⇒ bước tới lượt. */
+  from: z.string().min(1).optional()
+})
+
+export const runEstimateUnitSchema = z.object({
+  unit: z.string().min(1),
+  steps: z.number().int().min(0),
+  ai_steps: z.number().int().min(0),
+  interview_credits: z.number().min(0),
+  credits: z.number().min(0)
+})
+
+export const runEstimateResponseSchema = z.object({
+  scope: z.enum(["unit", "all"]),
+  from_step: z.string().nullable(),
+  units: z.array(runEstimateUnitSchema),
+  steps_total: z.number().int().min(0),
+  ai_steps_total: z.number().int().min(0),
+  credits_total: z.number().min(0),
+  /** `balance − reserved` của ví org sở hữu project; null khi không xác định được ví. */
+  available_credits: z.number().nullable()
 })
 
 /** POST /projects/:id/steps/:stepId/cancel */

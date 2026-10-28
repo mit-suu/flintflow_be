@@ -194,6 +194,37 @@ router.get("/:projectId/run-state/active", authMiddleware, pipelineController.ge
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/run-estimate:
+ *   get:
+ *     summary: FLF-332 — ước tính credit cho lượt chạy liền sắp tới (thẻ xác nhận credit trước khi chạy hàng loạt)
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: scope
+ *         schema:
+ *           type: string
+ *           enum: [unit, all]
+ *         description: "`unit` chỉ đơn vị giai đoạn của bước đầu; `all` (mặc định) tới hết pipeline"
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *         description: "Id bước hoặc đơn vị giai đoạn bắt đầu đếm; thiếu ⇒ bước tới lượt"
+ *     responses:
+ *       200:
+ *         description: "runEstimateResponseSchema — { scope, from_step, units[], steps_total, ai_steps_total, credits_total, available_credits }"
+ */
+router.get("/:projectId/run-estimate", authMiddleware, pipelineController.getRunEstimate)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/review-mode:
  *   patch:
  *     summary: FLF-337 — đổi mức duyệt (strict | fast | milestones; balanced cũ = fast), áp từ bước / CR kế tiếp; dùng được cả mode 1

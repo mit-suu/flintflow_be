@@ -4,6 +4,7 @@ import { ChatSession, IChatSession, IChatMessage } from "./chat-session.model.js
 import { executeAiAction, executeAiActionStream } from "../../shared/ai/ai-action.service.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { AiActionError } from "../../shared/ai/ai-action.types.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
@@ -517,13 +518,22 @@ export const sendMessageStream = async (
           `data: ${JSON.stringify({
             type: "error",
             // Không gửi text thô của nhà cung cấp AI / thư viện — đã log đủ ở trên (FLF-247)
-            error: clientErrorMessage(error)
+            error: clientErrorMessage(error),
+            // FLF-332: mã lỗi để FE phân biệt "AI lỗi, credit đã hoàn" (banner Thử lại ngay / Để sau) với lỗi khác
+            code: chatErrorCode(error)
           })}\n\n`
         )
         res.end()
       }
     } catch (_) {}
   }
+}
+
+/** Mã lỗi của sự kiện SSE `error` trong chat (FLF-332): cùng bảng với pipeline; lỗi không rõ ⇒ `AI_EXECUTION_FAILED`. */
+const chatErrorCode = (err: unknown): string => {
+  if (err instanceof ApiError) return err.code
+  if (err instanceof AiActionError) return err.statusCode === 429 ? "RATE_LIMIT_EXCEEDED" : err.statusCode >= 500 ? "AI_PROVIDER_ERROR" : err.code
+  return "AI_EXECUTION_FAILED"
 }
 
 /** Phiên pipeline không xoá được — xoá nó là mất transcript các step và lượt chờ trả lời đang trỏ vào nó. */
