@@ -219,7 +219,10 @@ const readsWholeAssumptions = (raw: string): boolean =>
  * AI tự quyết hỏi nhiều hay ít, nên field này luôn null — để trong projection thì mọi step đọc `project`
  * đều thấy một "field trống" và gọi elicit vô ích, còn model thì hỏi user cách làm việc.
  */
-const RETIRED_FIELDS: Readonly<Record<string, readonly string[]>> = { project: ["working_mode"] }
+const RETIRED_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  // FLF-337: `skip_confirm_sections` là cài đặt duyệt (mặc định `[]`), không phải nội dung — rỗng không phải "thiếu"
+  project: ["working_mode", "skip_confirm_sections"]
+}
 
 const withoutRetiredFields = (selector: Selector, value: unknown): unknown => {
   const retired = RETIRED_FIELDS[selector.path.join(".")]

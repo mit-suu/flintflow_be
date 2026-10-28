@@ -25,7 +25,8 @@ import * as spineRepository from "../spine/spine.repository.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { IChangeRequest } from "./change-request.model.js"
-import { assertCrStatus, transitionCr } from "./change-request.service.js"
+import { assertCrStatus, submitCr, transitionCr } from "./change-request.service.js"
+import { recordAutoPass } from "../pipeline/auto-pass.service.js"
 import { MAX_REDO_PER_LOCATION } from "./change-request.state.js"
 import { ChangeLocation, type IChangeLocation, type VerifyViolation } from "./change-location.model.js"
 import { answersText, crHeader, glossaryText, truncate } from "./cr-context.js"
@@ -220,4 +221,10 @@ export const runVerify = async (cr: IChangeRequest, userId: string): Promise<voi
   }
   await Promise.all(locations.map((l) => l.save()))
   await transitionCr(cr, next)
+  // FLF-337: mức "Chỉ ở mốc chốt" sau baseline — CR qua C-5 (Code + AI không phàn nàn) tự xác nhận, ghi vào bản nháp (C-6 FLF-330).
+  // Nguồn + người yêu cầu đã bắt buộc lúc tạo; Lead duyệt gói (C-7) vẫn là cổng cứng. AI có nhận xét ⇒ để BA xem.
+  if (next === "ready_to_submit" && spine.project.review_mode === "milestones" && !locations.some((l) => (l.verify?.ai_flags?.length ?? 0) > 0)) {
+    await submitCr(cr, userId)
+    await recordAutoPass(String(cr.projectId), `C-6:${cr.cr_id}`, "Chỉ ở mốc chốt: change request qua kiểm tự ghi vào bản nháp", `${cr.cr_id} ${cr.title}`)
+  }
 }

@@ -17,6 +17,7 @@ const spine = (): Spine => ({
     stakes: null,
     working_mode: null,
     review_mode: "balanced",
+    skip_confirm_sections: [],
     release_scope: { in: ["Order tracking"], out: ["Refunds", "Loyalty points"] }
   },
   progress: { current_phase: null, current_step: null, screen_cursor: null, screen_queue: [], elicit_turns_this_phase: 0 },
