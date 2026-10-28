@@ -19,7 +19,7 @@ import { defineJob, isJobActive, startJob, waitForJob } from "../../shared/queue
 import * as spineRepository from "../spine/spine.repository.js"
 import { finalizeCheckpoint, finalizeImport, resumeCheck, rollbackPartialFinalize, assertCanFinalize } from "./finalize.service.js"
 import type { FinalizeRequest } from "./import.dto.js"
-import { assertImportStatus, requireImport } from "./import.service.js"
+import { assertImportStatus, requireImport, transitionImport } from "./import.service.js"
 import { canPause } from "./import.state.js"
 import { ImportedDocument, type IImportedDocument } from "./imported-document.model.js"
 import { Mode1Error } from "./mode1.errors.js"
@@ -93,6 +93,14 @@ export const startFinalize = async (projectId: string, userId: string, body: Fin
   const current = await requireImport(projectId, body.import_id)
   if (await isFinalizeRunning(body.import_id)) return current
   const { doc } = await assertCanFinalize(projectId, body)
+  // FLF-336: màn "Kết quả đọc file" — chỉ đi tiếp khi bấm "Hoàn thiện"; lần finalize kế bỏ qua điểm dừng
+  if (doc.status === "incomplete") {
+    if (!body.complete) {
+      throw new Mode1Error("IMPORT_INVALID_STATE", "File còn thiếu mục của cấu trúc đích — bấm \"Hoàn thiện\" để đi tiếp, hoặc dừng và tải gap report.", { status: doc.status, to: "baselining", allowed: ["baselining"] })
+    }
+    doc.complete_requested = true
+    await transitionImport(doc, "baselining")
+  }
   // request song song vừa bật job trong lúc kiểm ⇒ `startJob` không chạy lần hai
   return launch(doc, { mode: "finalize", projectId, userId, importId: body.import_id }, prepareFinalize(doc, body.record_of_changes ?? null))
 }

@@ -369,5 +369,5 @@ export const getImportView = async (projectId: string): Promise<GetImportRespons
     extractionSummary(doc._id as mongoose.Types.ObjectId),
     DocBlock.countDocuments({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS } })
   ])
-  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount }
+  return { import: toImportDto(doc), profile: profile ? toProfileDto(profile) : null, extraction, blocks_count: blocksCount, target_structure: profile?.target_structure ?? null }
 }

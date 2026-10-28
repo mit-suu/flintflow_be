@@ -64,6 +64,8 @@ export interface IImportedDocument extends Document {
    * động lại giữa `baselining`) được hoàn về mốc này trước khi chạy lại. `null` = chưa finalize lần nào.
    */
   finalize_checkpoint: FinalizeCheckpoint | null
+  /** FLF-336: người dùng bấm "Hoàn thiện" ở màn Kết quả đọc file ⇒ lần finalize kế không dừng ở `incomplete` nữa. */
+  complete_requested: boolean
   created_by: mongoose.Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -121,6 +123,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       default: null
     },
     extract_cursor: { type: String, default: null },
+    complete_requested: { type: Boolean, default: false },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     finalize_checkpoint: {
       type: new Schema(
