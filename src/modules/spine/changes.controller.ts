@@ -46,6 +46,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { byLanguage, detectMessageLanguage, resolveReplyLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import { changeRequiresCr, changesRequireCr, prefillFrom } from "../import/mode1-guard.js"
+import * as commentService from "../comment/comment.service.js"
 
 export { SYSTEM_MANAGED_ROOTS, notWritableViolations } from "./change.service.js"
 
@@ -168,16 +169,32 @@ export const applyChanges = catchAsync(async (req: Request, res: Response) => {
         ...(result.cr_id ? { cr_id: result.cr_id } : {})
       })
     }
+    // FLF-271 (UC-40): sửa theo góp ý Lead ghim ⇒ góp ý tự đóng `fixed` khi có thay đổi thật; lỗi đóng không làm hỏng lượt áp
+    const resolvedCommentId = body.comment_id && result.changes.length > 0 ? await resolveFixedComment(req, auth, body.comment_id) : null
     return sendSuccess(
       res,
       200,
       { txn: result.txn, spine_version: result.spine_version, changes: result.changes, spine: result.spine },
-      { branch: result.branch, impact: result.impact, ...(result.cr_id ? { cr_id: result.cr_id } : {}) }
+      { branch: result.branch, impact: result.impact, ...(result.cr_id ? { cr_id: result.cr_id } : {}), ...(resolvedCommentId ? { resolved_comment_id: resolvedCommentId } : {}) }
     )
   } catch (err) {
     return sendDomainError(res, err)
   }
 })
+
+/** Đóng comment `fixed` sau lượt áp (FLF-271). Comment đã xử lý / đã chuyển CR ⇒ bỏ qua; lỗi khác chỉ log. */
+const resolveFixedComment = async (req: Request, auth: Authorized, commentId: string): Promise<string | null> => {
+  const role = req.orgContext?.role
+  if (!role) return null
+  try {
+    await commentService.resolveComment({ projectId: auth.projectId, projectName: auth.init.name ?? "", orgId: requireOrgId(req), userId: auth.userId, role }, commentId, { kind: "fixed", reason: null })
+    return commentId
+  } catch (err) {
+    if (err instanceof ApiError && err.code === "COMMENT_NOT_OPEN") return null
+    console.warn("[changes] không đóng được comment sau lượt sửa:", err)
+    return null
+  }
+}
 
 export const previewChanges = catchAsync(async (req: Request, res: Response) => {
   const auth = await authorize(req)
