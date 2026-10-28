@@ -164,6 +164,8 @@ export const OUTPUT_SCHEMA_NAMES = [
   "crMaterialImage",
   // Knowledge RAG (FLF-267)
   "knowledgeAnswer",
+  // FLF-338 rút yêu cầu từ tài liệu thô
+  "extractRequirements",
   "puml",
   "none"
 ] as const

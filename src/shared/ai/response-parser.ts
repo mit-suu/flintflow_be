@@ -280,6 +280,28 @@ export const importExtractDiagramSchema = importExtractSchema.extend({
 export const crMaterialImageSchema = z.object({ text: z.string().trim().min(1) })
 
 /** Nút 1.11 (IMPORT_SEMANTIC_CHECK, IMPORT_CROSS_CHECK) và 3.8 (CR_CONSISTENCY): chỉ cờ vàng — không có trường level. */
+/**
+ * FLF-338 (EXTRACT_REQUIREMENTS, §3.6.1): danh sách yêu cầu rút từ tài liệu thô. Code hậu kiểm mã đoạn / trích dẫn / đường dẫn
+ * phần tử (`extraction.service.normalizeItems`) — schema chỉ giữ hình.
+ */
+export const extractRequirementsSchema = z.object({
+  requirements: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        text: z.string().min(1),
+        source: z.object({ para_id: z.string().min(1), quote: z.string().default("") }),
+        label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+        entity_paths: z.array(z.string().min(1)).default([]),
+        group: z.string().nullable().default(null),
+        question: z.string().nullable().default(null),
+        suggested_answers: z.array(z.string().min(1)).default([])
+      })
+    )
+    .max(40)
+    .default([])
+})
+
 export const findingsSchema = z.object({
   findings: z
     .array(
@@ -356,6 +378,7 @@ export const knowledgeAnswerSchema = z.object({
 export type ImportExtractOutput = z.infer<typeof importExtractSchema>
 export type ImportExtractDiagramOutput = z.infer<typeof importExtractDiagramSchema>
 export type FindingsOutput = z.infer<typeof findingsSchema>
+export type ExtractRequirementsOutput = z.infer<typeof extractRequirementsSchema>
 export type CrClarifyOutput = z.infer<typeof crClarifySchema>
 export type CrProposeOutput = z.infer<typeof crProposeSchema>
 export type CrMaterialImageOutput = z.infer<typeof crMaterialImageSchema>
@@ -391,7 +414,8 @@ export const OUTPUT_SCHEMA_BY_ACTION_TYPE: Readonly<Partial<Record<ActionType, s
   [ActionType.CR_PROPOSE]: "crPropose",
   [ActionType.CR_CONSISTENCY]: "findings",
   [ActionType.CR_MATERIAL_IMAGE]: "crMaterialImage",
-  [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer"
+  [ActionType.KNOWLEDGE_ANSWER]: "knowledgeAnswer",
+  [ActionType.EXTRACT_REQUIREMENTS]: "extractRequirements"
 }
 
 const SCHEMAS: Record<string, z.ZodSchema> = {
@@ -418,7 +442,8 @@ const SCHEMAS: Record<string, z.ZodSchema> = {
   [ActionType.CR_PROPOSE]: crProposeSchema,
   [ActionType.CR_CONSISTENCY]: findingsSchema,
   [ActionType.CR_MATERIAL_IMAGE]: crMaterialImageSchema,
-  [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema
+  [ActionType.KNOWLEDGE_ANSWER]: knowledgeAnswerSchema,
+  [ActionType.EXTRACT_REQUIREMENTS]: extractRequirementsSchema
 }
 
 export const extractJsonFromText = (

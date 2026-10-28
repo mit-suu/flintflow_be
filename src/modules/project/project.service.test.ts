@@ -139,7 +139,7 @@ describe("createProject", () => {
     await projectService.createProject(ORG, USER, "FlintFlow", "")
 
     // FLF-265: mode 2 luôn lưu ngôn ngữ tài liệu — tài khoản chưa chọn ⇒ en
-    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "FlintFlow", domain: null, status: "active", mode: "fpt", documentLanguage: "en" })
+    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "FlintFlow", domain: null, status: "active", mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null, documentLanguage: "en" })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "FlintFlow", domain: null })
   })
 
@@ -148,7 +148,7 @@ describe("createProject", () => {
 
     await projectService.createProject(ORG, USER, "Lumen SRS", "E-learning", "import")
 
-    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "Lumen SRS", domain: "E-learning", status: "active", mode: "import" })
+    expect(mocks.Project.create).toHaveBeenCalledWith({ organizationId: ORG, userId: USER, name: "Lumen SRS", domain: "E-learning", status: "active", mode: "import", start_kind: "existing", has_required_template: null, template_intent: null })
     expect(mocks.getOrCreate).toHaveBeenCalledWith(PROJECT, { name: "Lumen SRS", domain: "E-learning" })
   })
 
@@ -169,10 +169,20 @@ describe("createProject", () => {
     expect(mocks.Project.create).toHaveBeenCalled()
   })
 
-  it("mode customer_template chưa hỗ trợ ⇒ 501 NOT_IMPLEMENTED, không tạo gì", async () => {
-    await expect(projectService.createProject(ORG, USER, "X", "", "customer_template")).rejects.toMatchObject({ statusCode: 501, code: "NOT_IMPLEMENTED" })
-    expect(mocks.Project.create).not.toHaveBeenCalled()
-    expect(mocks.getOrCreate).not.toHaveBeenCalled()
+  it("FLF-335: source quyết định mode — mới không mẫu ⇒ fpt; mới có mẫu bắt buộc ⇒ import + fixed; có sẵn ⇒ import; client cũ customer_template không còn 501", async () => {
+    expect(projectService.resolveProjectStart("fpt", { source: "new", has_required_template: false })).toEqual({ mode: "fpt", start_kind: "new", has_required_template: false, template_intent: null })
+    expect(projectService.resolveProjectStart("fpt", { source: "new", has_required_template: true })).toEqual({ mode: "import", start_kind: "new", has_required_template: true, template_intent: "fixed" })
+    expect(projectService.resolveProjectStart("fpt", { source: "existing" })).toEqual({ mode: "import", start_kind: "existing", has_required_template: null, template_intent: null })
+    // `source` thắng `mode` client cũ gửi kèm
+    expect(projectService.resolveProjectStart("import", { source: "new", has_required_template: false }).mode).toBe("fpt")
+    expect(projectService.resolveProjectStart("customer_template")).toEqual({ mode: "import", start_kind: "new", has_required_template: true, template_intent: "fixed" })
+
+    mocks.Project.create.mockResolvedValue({ id: PROJECT })
+    await projectService.createProject(ORG, USER, "Mẫu khách", "", "fpt", undefined, "vi", { source: "new", has_required_template: true })
+    // Tải mẫu lên ⇒ ngôn ngữ theo file, không lưu documentLanguage
+    expect(mocks.Project.create).toHaveBeenCalledWith(expect.objectContaining({ mode: "import", start_kind: "new", has_required_template: true, template_intent: "fixed" }))
+    expect(mocks.Project.create.mock.calls[0][0]).not.toHaveProperty("documentLanguage")
+    expect(mocks.getOrCreate).toHaveBeenCalled()
   })
 })
 

@@ -28,6 +28,15 @@ import { activeDecisions, SYSTEM_NAME_STEP } from "./decisions.service.js"
  */
 export const ALWAYS_GATE: ReadonlySet<string> = new Set(["B-0.1", "S-1.1", "S-4.1", "S-9.4", "S-9.5"])
 
+/**
+ * FLF-337 — **bảng cổng cứng** duy nhất (business-flow §1.2 "Cổng cứng — mức nào cũng dừng"): các mốc chốt `ALWAYS_GATE` +
+ * Approve Brief `B-2.3`; cộng với điều kiện trong lượt: AI cần hỏi (`answer_needed` đã dừng sẵn), cờ đỏ mới, xoá nội dung,
+ * lỗi vẽ sơ đồ, giả định trái điều đã chốt. Cổng cứng ngoài lượt chạy (xác nhận credit trước khi chạy hàng loạt — FLF-332;
+ * tài liệu đi ra ngoài: gửi duyệt / ký / gửi gói / phát hành) nằm ở endpoint tương ứng. Ở mức `milestones` mọi bước khác tự
+ * qua — kể cả bước cuối giai đoạn.
+ */
+export const HARD_GATE_STEPS: ReadonlySet<string> = new Set([...ALWAYS_GATE, "B-2.3"])
+
 /** Lý do dừng riêng của từng bước `ALWAYS_GATE` — cổng B-0.1 là nơi user chốt ý tưởng (FLF-221). */
 const ALWAYS_GATE_REASON: Readonly<Record<string, string>> = Object.freeze({
   "B-0.1": "Chốt ý tưởng — duyệt để AI đi tiếp, hoặc nhắn điều cần sửa",
@@ -53,6 +62,10 @@ export interface QuietInput {
    * không có gì để duyệt, kể cả khi nó là bước cuối giai đoạn.
    */
   settledEarlier?: boolean
+  /** FLF-337: bước có xoá nội dung (`summary[].kind === "remove"`) — cổng cứng ở mọi mức. */
+  contentRemoved?: boolean
+  /** FLF-337: section bước này chạm (`summary[].section_id`) — so với `project.skip_confirm_sections`. */
+  touchedSections?: readonly string[]
   spine: Spine
 }
 
@@ -90,23 +103,37 @@ export const conflictsWithLedger = (statement: string | { text: string; text_vi?
 
 /** Bước này có được tự Accept không, và vì sao. */
 export const isQuietStep = (input: QuietInput): QuietVerdict => {
-  if (input.reviewMode === "strict") return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
   if (ALWAYS_GATE.has(input.templateId)) return { quiet: false, reason_vi: ALWAYS_GATE_REASON[input.templateId] ?? "Bước này luôn cần bạn quyết" }
+  // Mọi bước: dừng ở mọi bước — trừ bước chỉ chạm phần đã chọn "không hỏi lại" (FLF-337, xét ở dưới)
+  const touchedOnlySkipped = (input.touchedSections ?? []).length > 0 && (input.touchedSections ?? []).every((id) => (input.spine.project?.skip_confirm_sections ?? []).includes(id))
+  if (input.reviewMode === "strict" && !touchedOnlySkipped) return { quiet: false, reason_vi: "Chế độ duyệt chặt: dừng ở mọi bước" }
   if (input.settledEarlier) return { quiet: true, reason_vi: "Đã chốt ở bước trước — không cần hỏi lại" }
   // Chưa có tên hệ thống thì B-2.3 phải hỏi tên (FLF-232) — không bao giờ tự Accept qua nó, dù chế độ duyệt nào
   if (input.templateId === SYSTEM_NAME_STEP && (input.spine.project?.system_name ?? null) === null) {
     return { quiet: false, reason_vi: "Cần chốt tên hệ thống trước khi mở phần tiếp theo" }
   }
-  if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }
-  // FLF-220: bước có hỏi thì user đã trả lời ngay trong lượt chạy — ở "Cuối giai đoạn" điều đó không đòi
-  // thêm một cổng giữa giai đoạn; nội dung vẫn gom lên cổng chốt cuối phase.
+  // FLF-337: bốn điều kiện tự qua áp ở MỌI mức — cờ đỏ mới, xoá nội dung, lỗi vẽ, giả định trái điều đã chốt là cổng cứng
   if (input.redDelta > 0) return { quiet: false, reason_vi: `Bước mở thêm ${input.redDelta} cờ đỏ` }
+  if (input.contentRemoved) return { quiet: false, reason_vi: "Bước xoá nội dung đã có" }
   if (input.renderFailed) return { quiet: false, reason_vi: "Có sơ đồ vẽ lỗi" }
-
   const conflicting = input.newAssumptions.filter((a) => conflictsWithLedger(a, input.spine))
   if (conflicting.length > 0) {
     return { quiet: false, reason_vi: `${conflicting.length} giả định trái với điều bạn đã chốt` }
   }
+  // FLF-337 "Chấp nhận, không hỏi lại phần này": bước chỉ chạm các section đã tắt hỏi ⇒ tự qua ở mọi mức (kể cả Mọi bước)
+  const touched = input.touchedSections ?? []
+  const skip = new Set(input.spine.project?.skip_confirm_sections ?? [])
+  if (touched.length > 0 && skip.size > 0 && touched.every((id) => skip.has(id))) {
+    return { quiet: true, reason_vi: "Chỉ chạm phần bạn đã chọn không hỏi lại" }
+  }
+  if (input.reviewMode === "milestones") {
+    // Chỉ ở mốc chốt: Approve Brief là cổng cứng dù hệ thống đã có tên; mọi bước khác (kể cả cuối giai đoạn) tự qua
+    if (input.templateId === SYSTEM_NAME_STEP) return { quiet: false, reason_vi: "Duyệt Brief — mốc chốt" }
+    return { quiet: true, reason_vi: "Chỉ ở mốc chốt: bước này tự qua" }
+  }
+  if (input.phaseTerminal) return { quiet: false, reason_vi: "Cổng chốt cuối giai đoạn" }
+  // FLF-220: bước có hỏi thì user đã trả lời ngay trong lượt chạy — ở "Cuối giai đoạn" điều đó không đòi
+  // thêm một cổng giữa giai đoạn; nội dung vẫn gom lên cổng chốt cuối phase.
   // "Cuối giai đoạn" (`fast`, và `balanced` cũ xử lý như `fast` — FLF-220): giả định mới không mâu thuẫn
   // được gom lên cổng chốt cuối phase, không dừng giữa phase.
   return { quiet: true, reason_vi: "Bước không có gì cần bạn quyết" }

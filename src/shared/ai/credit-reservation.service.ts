@@ -43,7 +43,9 @@ const DEFAULT_ACTION_COSTS: Record<string, number> = {
   [ActionType.CR_MATERIAL_IMAGE]: 1,
   // FLF-333 (business-flow nguyên tắc 9, UC-79): hỏi tri thức về SRS / 29148 KHÔNG tốn credit — chống lạm dụng bằng
   // giới hạn số câu mỗi ngày (`KNOWLEDGE_DAILY_LIMIT`), không chuyển sang trừ credit. Vẫn ghi `AiActionLog` cho admin.
-  [ActionType.KNOWLEDGE_ANSWER]: 0
+  [ActionType.KNOWLEDGE_ANSWER]: 0,
+  // FLF-338: đọc cả tài liệu thô một lượt + gán nhãn so với SRS
+  [ActionType.EXTRACT_REQUIREMENTS]: 3
 }
 
 /** Một lần giữ credit. Truyền nguyên object này cho deduct/release. */

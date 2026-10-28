@@ -47,6 +47,7 @@ export const createEmptySpine = (init: SpineInit = {}): Spine => ({
     stakes: null,
     working_mode: null,
     review_mode: "balanced",
+    skip_confirm_sections: [],
     release_scope: { in: [], out: [] }
   },
   progress: {
