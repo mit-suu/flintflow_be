@@ -76,11 +76,11 @@ describe("preflight — 3 nhánh stamp", () => {
     expect(await sourceFiles(projectId)).toBe(1)
   })
 
-  it("FLF-335: ý định lúc upload — thiếu ⇒ free; fixed ghi vào import.intent và Project.template_intent; dự án mới có mẫu bắt buộc luôn fixed", async () => {
+  it("FLF-335: ý định lúc upload — thiếu ⇒ free (Project không có ý định); fixed ghi vào import.intent và Project.template_intent; dự án mới có mẫu bắt buộc luôn fixed", async () => {
     const { projectId, userId } = await project()
     const free = await uploadImport(projectId, userId, fileOf(await makeSrsDocx(), "srs.docx"))
     expect(free.intent).toBe("free")
-    expect((await Project.findById(projectId).lean())?.template_intent).toBe("free")
+    expect((await Project.findById(projectId).lean())?.template_intent).toBeNull()
 
     const { projectId: other, userId: u2 } = await project()
     const fixed = await uploadImport(other, u2, fileOf(await makeSrsDocx(), "srs.docx"), { intent: "fixed" })

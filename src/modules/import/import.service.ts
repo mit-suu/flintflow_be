@@ -133,13 +133,14 @@ export const assertImportStatus = (doc: IImportedDocument, allowed: readonly Imp
 
 /**
  * FLF-335: ý định với file (bước 1.2). Dự án mới có mẫu bắt buộc ⇒ luôn `fixed` (đã chốt lúc tạo); còn lại theo client, thiếu ⇒
- * `free` (dự án cũ / client cũ). Ghi lên Project để `GET /projects/:id` và luồng so cấu trúc đích (FLF-336) đọc được.
+ * `free` (dự án cũ / client cũ). Chỉ ghi lên Project khi client chọn ý định (hoặc mẫu đã khoá) — `GET /projects/:id` và luồng so
+ * cấu trúc đích (FLF-336) đọc được; client cũ không gửi `intent` thì Project không có ý định ⇒ giữ luồng cũ (v0 ngay).
  */
 const resolveUploadIntent = async (projectId: string, requested: TemplateIntent | undefined): Promise<TemplateIntent> => {
   const project = await Project.findById(projectId, { start_kind: 1, template_intent: 1 }).lean()
   const locked = project?.start_kind === "new" && project?.template_intent === "fixed"
   const intent: TemplateIntent = locked ? "fixed" : (requested ?? "free")
-  if (project && project.template_intent !== intent) await Project.updateOne({ _id: projectId }, { template_intent: intent })
+  if (project && (locked || requested) && project.template_intent !== intent) await Project.updateOne({ _id: projectId }, { template_intent: intent })
   return intent
 }
 
