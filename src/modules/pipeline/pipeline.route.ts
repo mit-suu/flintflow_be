@@ -225,6 +225,85 @@ router.get("/:projectId/run-estimate", authMiddleware, pipelineController.getRun
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/review-mode:
+ *   patch:
+ *     summary: FLF-337 — đổi mức duyệt (strict | fast | milestones; balanced cũ = fast), áp từ bước / CR kế tiếp; dùng được cả mode 1
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [review_mode]
+ *             properties:
+ *               review_mode: { type: string, enum: [strict, balanced, fast, milestones] }
+ *     responses:
+ *       200:
+ *         description: "review_mode + spine_version sau khi ghi"
+ */
+router.patch("/:projectId/review-mode", authMiddleware, requireRole("lead", "analyst"), pipelineController.setReviewMode)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/skip-confirm-sections:
+ *   patch:
+ *     summary: "FLF-337 — Chấp nhận, không hỏi lại phần này — thêm / gỡ section khỏi danh sách tự qua"
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               add: { type: array, items: { type: string } }
+ *               remove: { type: array, items: { type: string } }
+ *     responses:
+ *       200:
+ *         description: "skip_confirm_sections (danh sách sau khi đổi) + spine_version"
+ */
+router.patch("/:projectId/skip-confirm-sections", authMiddleware, requireRole("lead", "analyst"), pipelineController.patchSkipConfirmSections)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/auto-passed:
+ *   get:
+ *     summary: FLF-337 — thay đổi AI tự qua (bước im, CR tự ghi) kèm số "chưa xem" của người gọi; không chặn gì
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: "total, unseen, items[] (id, step_id, label_vi, reason_vi, at, seen)"
+ */
+router.get("/:projectId/auto-passed", authMiddleware, pipelineController.getAutoPassed)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/auto-passed/seen:
+ *   post:
+ *     summary: FLF-337 — đánh dấu đã xem (ids rỗng ⇒ tất cả)
+ *     tags: [Pipeline]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               ids: { type: array, items: { type: string } }
+ *     responses:
+ *       200:
+ *         description: "unseen — số còn chưa xem"
+ */
+router.post("/:projectId/auto-passed/seen", authMiddleware, pipelineController.markAutoPassedSeenController)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/steps/{stepId}/answer:
  *   post:
  *     summary: Trả lời câu hỏi Elicit đang chờ (answer_needed) — luồng SSE của /run tiếp tục

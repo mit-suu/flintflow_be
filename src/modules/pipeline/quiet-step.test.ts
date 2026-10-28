@@ -16,6 +16,39 @@ const input = (over: Partial<QuietInput> = {}): QuietInput => ({
   ...over
 })
 
+describe("FLF-337: mức Chỉ ở mốc chốt, cổng cứng, không hỏi lại phần này", () => {
+  const skipping = (sections: string[]): Spine => ({ decisions: [], project: { skip_confirm_sections: sections, system_name: "Lumen" } } as unknown as Spine)
+
+  it("milestones: bước cuối giai đoạn vẫn tự qua; mốc chốt (B-0.1, S-1.1, S-4.1, S-9.4, S-9.5) và Approve Brief B-2.3 luôn dừng", () => {
+    expect(isQuietStep(input({ reviewMode: "milestones", phaseTerminal: true, spine: skipping([]) })).quiet).toBe(true)
+    for (const step of ["B-0.1", "S-1.1", "S-4.1", "S-9.4", "S-9.5", "B-2.3"]) {
+      expect(isQuietStep(input({ reviewMode: "milestones", templateId: step, spine: skipping([]) })).quiet, step).toBe(false)
+    }
+    // B-2.3 đã có tên hệ thống: Cuối giai đoạn dừng vì là bước cuối giai đoạn; Chỉ ở mốc chốt dừng vì là mốc chốt
+    expect(isQuietStep(input({ reviewMode: "fast", templateId: "B-2.3", phaseTerminal: true, spine: skipping([]) })).reason_vi).toContain("cuối giai đoạn")
+    expect(isQuietStep(input({ reviewMode: "milestones", templateId: "B-2.3", phaseTerminal: true, spine: skipping([]) })).reason_vi).toContain("mốc chốt")
+  })
+
+  it("cổng cứng trong lượt ở mọi mức: cờ đỏ mới, xoá nội dung, lỗi vẽ", () => {
+    for (const mode of ["fast", "milestones"] as const) {
+      expect(isQuietStep(input({ reviewMode: mode, redDelta: 1, spine: skipping([]) })).quiet, mode).toBe(false)
+      expect(isQuietStep(input({ reviewMode: mode, contentRemoved: true, spine: skipping([]) })).reason_vi, mode).toContain("xoá nội dung")
+      expect(isQuietStep(input({ reviewMode: mode, renderFailed: true, spine: skipping([]) })).quiet, mode).toBe(false)
+    }
+  })
+
+  it("không hỏi lại phần này: bước chỉ chạm section đã chọn ⇒ tự qua kể cả Mọi bước và cuối giai đoạn; chạm thêm section khác ⇒ như cũ; có cờ đỏ mới vẫn dừng", () => {
+    const only = isQuietStep(input({ reviewMode: "strict", touchedSections: ["fixed:5"], spine: skipping(["fixed:5"]) }))
+    expect(only.quiet).toBe(true)
+    expect(only.reason_vi).toContain("không hỏi lại")
+    expect(isQuietStep(input({ reviewMode: "fast", phaseTerminal: true, touchedSections: ["fixed:5"], spine: skipping(["fixed:5"]) })).quiet).toBe(true)
+    expect(isQuietStep(input({ reviewMode: "strict", touchedSections: ["fixed:5", "fixed:2.1"], spine: skipping(["fixed:5"]) })).quiet).toBe(false)
+    expect(isQuietStep(input({ reviewMode: "fast", touchedSections: ["fixed:5"], redDelta: 1, spine: skipping(["fixed:5"]) })).quiet).toBe(false)
+    // Mốc chốt không bao giờ tự qua
+    expect(isQuietStep(input({ reviewMode: "fast", templateId: "S-4.1", touchedSections: ["fixed:5"], spine: skipping(["fixed:5"]) })).quiet).toBe(false)
+  })
+})
+
 describe("isQuietStep (R1)", () => {
   it("bước không hỏi, không cờ đỏ mới, không giả định ⇒ tự Accept", () => {
     expect(isQuietStep(input())).toMatchObject({ quiet: true })

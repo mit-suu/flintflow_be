@@ -40,11 +40,14 @@ import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, runEstimateQuerySchema } from "./pipeline.dto.js"
+import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, runEstimateQuerySchema, reviewModeRequestSchema, skipConfirmSectionsRequestSchema, autoPassedSeenRequestSchema } from "./pipeline.dto.js"
 import { runPhase, resumePhaseInterview, standaloneGate } from "./phase-runner.service.js"
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
 import { toPipelineErrorCode } from "./pipeline-error-code.js"
 import { runEstimate } from "./run-estimate.js"
+import { listAutoPassed, markAutoPassedSeen } from "./auto-pass.service.js"
+import { applyTransaction } from "../spine/op-engine.js"
+import { parseInput } from "../import/mode1.http.js"
 import { sendError, sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
@@ -402,6 +405,56 @@ export const getRunEstimate = catchAsync(async (req: Request, res: Response) => 
   assertNotMode1(mode, "steps")
   const query = runEstimateQuerySchema.parse(req.query)
   return sendSuccess(res, 200, await runEstimate(projectId, userId, { scope: query.scope, from: query.from ?? null }))
+})
+
+// ─── FLF-337: mức duyệt / không hỏi lại / thay đổi tự qua ─────────
+
+const projectOp = async (projectId: string, userId: string, path: string, value: unknown, reason: string): Promise<number> => {
+  const record = await spineRepository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  const applied = await applyTransaction(projectId, { base_version: record.spine_version, ops: [{ op: "set", path, value }], by: userId, step_id: null, reason })
+  return applied.spine_version
+}
+
+/** PATCH /review-mode — đổi mức duyệt ở mọi mode (mode 1 sau baseline `/changes` bị chặn CHANGE_REQUIRES_CR); áp từ bước / CR kế. */
+export const setReviewMode = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const body = parseInput(reviewModeRequestSchema, req.body)
+  const spine_version = await projectOp(projectId, userId, "project.review_mode", body.review_mode, "[C] đổi mức duyệt")
+  return sendSuccess(res, 200, { review_mode: body.review_mode, spine_version })
+})
+
+/** PATCH /skip-confirm-sections — "Chấp nhận, không hỏi lại phần này" / bật lại. */
+export const patchSkipConfirmSections = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const body = parseInput(skipConfirmSectionsRequestSchema, req.body)
+  const record = await spineRepository.get(projectId)
+  if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
+  const next = new Set(record.project.skip_confirm_sections ?? [])
+  for (const id of body.add ?? []) next.add(id)
+  for (const id of body.remove ?? []) next.delete(id)
+  const skip_confirm_sections = [...next]
+  const applied = await applyTransaction(projectId, {
+    base_version: record.spine_version,
+    ops: [{ op: "set", path: "project.skip_confirm_sections", value: skip_confirm_sections }],
+    by: userId,
+    step_id: null,
+    reason: body.add?.length ? "[C] chấp nhận, không hỏi lại phần này" : "[C] hỏi lại phần đã tắt"
+  })
+  return sendSuccess(res, 200, { skip_confirm_sections, spine_version: applied.spine_version })
+})
+
+/** GET /auto-passed — thay đổi AI tự qua kèm "chưa xem" theo người gọi (không chặn gì). */
+export const getAutoPassed = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  return sendSuccess(res, 200, await listAutoPassed(projectId, userId))
+})
+
+/** POST /auto-passed/seen — đánh dấu đã xem (`ids` rỗng ⇒ tất cả). */
+export const markAutoPassedSeenController = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId } = await authorize(req)
+  const body = parseInput(autoPassedSeenRequestSchema, req.body ?? {})
+  return sendSuccess(res, 200, { unseen: await markAutoPassedSeen(projectId, userId, body.ids ?? []) })
 })
 
 export const getStepRunState = catchAsync(async (req: Request, res: Response) => {
