@@ -6,13 +6,20 @@ export type ProjectStatus = "active" | "archived"
 
 /**
  * Cách làm SRS của project (FLF-171) — KHÁC `spine.project.working_mode` (fast/coaching là nhịp hỏi đáp
- * trong quy trình sinh SRS):
- * - `import` — mode 1: upload SRS có sẵn rồi sửa qua change request.
- * - `fpt` — mode 2: sinh SRS theo template FPT qua 12 phase (luồng hiện có). Project cũ không có field ⇒ `fpt`.
- * - `customer_template` — mode 3: template khách hàng, chưa làm (tạo mới trả 501).
+ * trong quy trình sinh SRS). Từ FLF-335 (business-flow §1) **Code suy ra** từ lựa chọn lúc tạo, client không gửi:
+ * - `import` — tải file lên (SRS có sẵn, hoặc mẫu bắt buộc của dự án mới) rồi so cấu trúc đích ⇒ chế độ 1 / 3 / 4.
+ * - `fpt` — dự án mới không mẫu: sinh SRS theo mẫu chuẩn FlintFlow (mẫu FPT) qua 12 phase. Project cũ không có field ⇒ `fpt`.
+ * - `customer_template` — giá trị cũ (mode 3 chưa làm, từng trả 501); không còn được tạo, client cũ gửi lên được quy về `import`.
  */
 export const PROJECT_MODES = ["import", "fpt", "customer_template"] as const
 export type ProjectMode = (typeof PROJECT_MODES)[number]
+
+/** FLF-335: lựa chọn duy nhất lúc tạo — dự án mới hay dự án có sẵn. */
+export const PROJECT_START_KINDS = ["new", "existing"] as const
+export type ProjectStartKind = (typeof PROJECT_START_KINDS)[number]
+/** FLF-335: ý định với file tải lên (bước 1.2) — theo một mẫu cố định (mẫu khách / công ty) hay cấu trúc tự do. */
+export const TEMPLATE_INTENTS = ["fixed", "free"] as const
+export type TemplateIntent = (typeof TEMPLATE_INTENTS)[number]
 
 export interface IProject extends Document {
   userId: mongoose.Types.ObjectId
@@ -22,6 +29,12 @@ export interface IProject extends Document {
   domain?: string | null
   status: ProjectStatus
   mode: ProjectMode
+  /** FLF-335: lựa chọn lúc tạo; dự án cũ `null`. */
+  start_kind: ProjectStartKind | null
+  /** FLF-335: dự án mới — khách có bắt buộc theo mẫu không; dự án có sẵn / cũ `null`. */
+  has_required_template: boolean | null
+  /** FLF-335: `fixed` ngay lúc tạo với dự án mới có mẫu bắt buộc; dự án có sẵn ghi lúc upload (#2 `intent`); cũ `null`. */
+  template_intent: TemplateIntent | null
   /** Mode 1: bản sao rút gọn `ImportedDocument.status` để hiện danh sách (UC-14, UC-19); mode khác luôn `null`. */
   import_state: ImportStatus | null
   /**
@@ -81,6 +94,20 @@ const projectSchema = new Schema<IProject>(
       type: String,
       enum: PROJECT_MODES,
       default: "fpt"
+    },
+    start_kind: {
+      type: String,
+      enum: [...PROJECT_START_KINDS, null],
+      default: null
+    },
+    has_required_template: {
+      type: Boolean,
+      default: null
+    },
+    template_intent: {
+      type: String,
+      enum: [...TEMPLATE_INTENTS, null],
+      default: null
     },
     import_state: {
       type: String,

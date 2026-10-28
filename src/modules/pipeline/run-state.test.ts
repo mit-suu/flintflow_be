@@ -103,6 +103,39 @@ describe("khôi phục trạng thái (BUG-07)", () => {
   })
 })
 
+describe("FLF-332: lượt gãy vì AI lỗi = bước tạm dừng (Thử lại ngay / Để sau)", () => {
+  it("interrupted với mã AI ⇒ paused_reason ai_error, vẫn là lượt active để mở lại trang thấy banner tại bước đó", async () => {
+    const run = await acquireRun(PROJECT, "S-3.1")
+    await finishRun(PROJECT, "S-3.1", run.run_id, "interrupted", { error: { code: "AI_PROVIDER_ERROR", message: "Dịch vụ AI đang gặp sự cố." } })
+    const doc = await getRunState(PROJECT, "S-3.1")
+    expect(doc?.paused_reason).toBe("ai_error")
+    expect(await isStepRunning(PROJECT, "S-3.1")).toBe(false)
+    const active = await getActiveRun(PROJECT)
+    expect(active?.step_id).toBe("S-3.1")
+    expect(active?.status).toBe("interrupted")
+    // "Thử lại ngay" = lượt mới chiếm lại bước ⇒ hết tạm dừng
+    const again = await acquireRun(PROJECT, "S-3.1")
+    expect(again.paused_reason).toBeNull()
+  })
+
+  it("interrupted vì lý do khác (mất kết nối, lệch version, hết credit) ⇒ không tạm dừng, active bỏ qua như cũ", async () => {
+    const run = await acquireRun(PROJECT, "S-3.1")
+    await finishRun(PROJECT, "S-3.1", run.run_id, "interrupted", { error: { code: "SPINE_VERSION_CONFLICT", message: "Tài liệu vừa đổi." } })
+    expect((await getRunState(PROJECT, "S-3.1"))?.paused_reason).toBeNull()
+    expect(await getActiveRun(PROJECT)).toBeNull()
+    const credit = await acquireRun(PROJECT, "S-3.2")
+    await finishRun(PROJECT, "S-3.2", credit.run_id, "interrupted", { error: { code: "INSUFFICIENT_CREDIT", message: "Hết credit." } })
+    expect(await getActiveRun(PROJECT)).toBeNull()
+  })
+
+  it("lượt đang chạy thật được ưu tiên hơn lượt tạm dừng cũ", async () => {
+    const paused = await acquireRun(PROJECT, "S-3.1")
+    await finishRun(PROJECT, "S-3.1", paused.run_id, "interrupted", { error: { code: "RATE_LIMIT_EXCEEDED", message: "Quá nhanh." } })
+    await acquireRun(PROJECT, "S-3.2")
+    expect((await getActiveRun(PROJECT))?.step_id).toBe("S-3.2")
+  })
+})
+
 describe("huỷ lượt", () => {
   it("abort lượt đang chạy, nhả khoá và dọn AbortController", async () => {
     const run = await acquireRun(PROJECT, STEP)

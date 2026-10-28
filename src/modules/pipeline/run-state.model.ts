@@ -18,6 +18,9 @@ import mongoose, { Schema } from "mongoose"
 export const RUN_STATUSES = ["running", "waiting_answer", "gate", "done", "interrupted", "cancelled"] as const
 export type RunStatus = (typeof RUN_STATUSES)[number]
 
+export const RUN_PAUSE_REASONS = ["ai_error"] as const
+export type RunPauseReason = (typeof RUN_PAUSE_REASONS)[number]
+
 export const RUN_STAGES = ["intake", "ask", "draft", "check", "render", "gate"] as const
 export type RunStage = (typeof RUN_STAGES)[number]
 
@@ -50,6 +53,12 @@ const runStateSchema = new Schema(
     /** Sự kiện đã phát trong lượt (rút gọn) — để dựng lại nhật ký bước sau reload. */
     events: { type: Schema.Types.Mixed, default: [] },
     error: { type: Schema.Types.Mixed, default: null },
+    /**
+     * FLF-332: lượt gãy vì AI lỗi (đã thử lại, credit đã hoàn) ⇒ `ai_error` — bước coi như **tạm dừng, để sau**: mở lại dự án
+     * vẫn thấy banner tại bước đó (`/run-state/active` trả lượt này), người dùng bấm "Thử lại ngay" là lượt mới. Lượt gãy vì lý
+     * do khác (mất kết nối, xung đột version, hết credit) để null như cũ.
+     */
+    paused_reason: { type: String, enum: [...RUN_PAUSE_REASONS, null], default: null },
     /**
      * Nội bộ, không trả qua API: đủ để `/answer` chạy tiếp lượt đang chờ mà không cần bộ nhớ tiến trình
      * (FE reload, BE restart) — câu đã hỏi kèm `topic_key` và ngữ cảnh trả lời trước khi hỏi.

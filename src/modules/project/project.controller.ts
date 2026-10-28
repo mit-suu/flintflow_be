@@ -14,8 +14,8 @@ export const createProject = catchAsync(async (req: Request, res: Response) => {
   }
 
   // Body đã qua CreateProjectSchema ở route: name không rỗng, mode thuộc PROJECT_MODES (thiếu ⇒ fpt)
-  const { name, mode, domain, folderId, documentLanguage } = req.body as CreateProjectDTO
-  const project = await projectService.createProject(requireOrgId(req), userId, name, domain, mode, folderId, documentLanguage)
+  const { name, mode, domain, folderId, documentLanguage, source, has_required_template } = req.body as CreateProjectDTO
+  const project = await projectService.createProject(requireOrgId(req), userId, name, domain, mode, folderId, documentLanguage, { source, has_required_template })
   return sendSuccess(res, 201, project)
 })
 

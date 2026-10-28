@@ -2,10 +2,12 @@ import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { USER_LOCALES } from "../../shared/i18n/locale.js"
-import { PROJECT_MODES } from "./project.model.js"
+import { PROJECT_MODES, PROJECT_START_KINDS } from "./project.model.js"
 
-/** Không gửi `mode` ⇒ `fpt` (mode 2, hành vi cũ). */
+/** Client cũ (trước FLF-335) gửi `mode`; không gửi ⇒ `fpt`. Có `source` thì `mode` bị bỏ qua — Code suy ra. */
 export const projectModeSchema = z.enum(PROJECT_MODES).default("fpt")
+/** FLF-335: `new` / `existing`. */
+export const projectStartKindSchema = z.enum(PROJECT_START_KINDS)
 
 /** FLF-265: ngôn ngữ xem trước + .docx của dự án. Spine mode 2 vẫn tiếng Anh — chữ vi lấy từ lớp bản dịch. */
 export const documentLanguageSchema = z.enum(USER_LOCALES)
@@ -13,6 +15,10 @@ export const documentLanguageSchema = z.enum(USER_LOCALES)
 export const CreateProjectSchema = z.object({
   name: z.string().trim().min(1).max(100),
   mode: projectModeSchema,
+  /** FLF-335 (business-flow §1): dự án mới / dự án có sẵn — BE suy ra `mode`. */
+  source: projectStartKindSchema.optional(),
+  /** Chỉ với `source: "new"`: khách có bắt buộc theo một mẫu không (có ⇒ `import`, tải mẫu lên; không ⇒ `fpt`). */
+  has_required_template: z.boolean().optional(),
   domain: z.string().trim().max(100).optional(),
   /** Tạo thẳng trong thư mục của user. */
   folderId: z.string().min(1).optional(),

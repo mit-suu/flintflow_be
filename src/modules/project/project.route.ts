@@ -71,26 +71,31 @@ const upload = multer({
  *               folderId:
  *                 type: string
  *                 description: Tạo thẳng trong thư mục của user (404 FOLDER_NOT_FOUND nếu không thuộc user)
+ *               source:
+ *                 type: string
+ *                 enum: [new, existing]
+ *                 description: "FLF-335: dự án mới / dự án có sẵn — BE suy ra mode (mới không mẫu ⇒ fpt; mới có mẫu bắt buộc hoặc có sẵn ⇒ import)"
+ *               has_required_template:
+ *                 type: boolean
+ *                 description: "Chỉ với source=new: khách có bắt buộc theo một mẫu không (có ⇒ import, template_intent=fixed)"
  *               mode:
  *                 type: string
  *                 enum: [import, fpt, customer_template]
  *                 default: fpt
- *                 description: "Cách làm SRS: import = upload SRS có sẵn rồi sửa (mode 1), fpt = sinh theo template FPT (mode 2), customer_template = chưa hỗ trợ"
+ *                 description: "Client cũ: cách làm SRS gửi thẳng; có source thì bỏ qua. customer_template quy về import + mẫu bắt buộc"
  *               documentLanguage:
  *                 type: string
  *                 enum: [vi, en]
  *                 description: "Ngôn ngữ xem trước + .docx (FLF-265). Thiếu ⇒ ngôn ngữ tài khoản ⇒ en. Mode import bỏ qua — ngôn ngữ theo file upload"
  *     responses:
  *       201:
- *         description: Dự án đã được tạo thành công (kèm mode, import_state)
+ *         description: Dự án đã được tạo thành công (kèm mode, start_kind, has_required_template, template_intent, import_state)
  *       400:
  *         description: VALIDATION_ERROR — tên trống/quá dài hoặc mode không hợp lệ
  *       402:
  *         description: PLAN_LIMIT_PROJECTS — tổ chức đã đủ số dự án tối đa của gói (dự án đã xoá không tính)
  *       403:
  *         description: ORG_ROLE_FORBIDDEN — Viewer không tạo dự án
- *       501:
- *         description: mode customer_template chưa hỗ trợ (NOT_IMPLEMENTED)
  *       401:
  *         description: Chưa xác thực
  */

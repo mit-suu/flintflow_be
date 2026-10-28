@@ -30,7 +30,6 @@ import {
   requirePipelineSession,
   recordUserMessage,
   recordAiMessage,
-  isPipelineErrorCode,
   CALLS_LIMIT,
   REGENERATE_LIMIT_COUNT,
   type Emit
@@ -41,9 +40,11 @@ import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, reviewModeRequestSchema, skipConfirmSectionsRequestSchema, autoPassedSeenRequestSchema, type PipelineErrorCode } from "./pipeline.dto.js"
+import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, runEstimateQuerySchema, reviewModeRequestSchema, skipConfirmSectionsRequestSchema, autoPassedSeenRequestSchema } from "./pipeline.dto.js"
 import { runPhase, resumePhaseInterview, standaloneGate } from "./phase-runner.service.js"
 import { cancelRun, getActiveRun, getRunState, type RunStateDoc } from "./run-state.service.js"
+import { toPipelineErrorCode } from "./pipeline-error-code.js"
+import { runEstimate } from "./run-estimate.js"
 import { listAutoPassed, markAutoPassedSeen } from "./auto-pass.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import { parseInput } from "../import/mode1.http.js"
@@ -53,7 +54,6 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { clientErrorMessage } from "../../shared/utils/client-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { assertNotMode1 } from "../import/mode1-guard.js"
-import { AiActionError } from "../../shared/ai/ai-action.types.js"
 
 const stripRecord = ({ projectId: _projectId, ...spine }: SpineRecord): Spine => spine
 
@@ -132,24 +132,6 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
 })
 
 // ─── POST /steps/:stepId/run (SSE) ─────────────────────────────────
-
-/** F7: lỗi không thuộc bảng mã pipeline vẫn phải đóng luồng bằng một sự kiện `error` (không được im lặng
- *  đóng) — quy về `VALIDATION_ERROR` nếu là lỗi 400 (đầu vào), còn lại quy về `NOT_IMPLEMENTED` (501, đúng
- *  ngữ nghĩa "nhánh chưa hiện thực"/lỗi không rõ trong bảng contract §0.3). */
-const toPipelineErrorCode = (err: unknown): PipelineErrorCode => {
-  // AiActionError (reserve credit, provider) không kế thừa ApiError nhưng cùng dạng {statusCode, code} — vd
-  // INSUFFICIENT_CREDIT giữa chừng trước đây bị quy thành NOT_IMPLEMENTED (M3 2026-09-15).
-  if (err instanceof ApiError || err instanceof AiActionError) {
-    if (isPipelineErrorCode(err.code)) return err.code
-    if (err.statusCode === 400) return "VALIDATION_ERROR"
-    // Lỗi của nhà cung cấp AI có mã riêng (GLM_ERROR, GEMINI_ERROR, GLM_EMPTY_OUTPUT…) không nằm trong bảng
-    // pipeline. Trước đây quy hết về NOT_IMPLEMENTED (501) nên người dùng đọc "chưa hiện thực" trong khi thật ra
-    // endpoint AI hết hạn mức / chưa gắn thanh toán (gặp thật 2026-09-20).
-    if (err.statusCode === 429) return "RATE_LIMIT_EXCEEDED"
-    if (err instanceof AiActionError && err.statusCode >= 500) return "AI_PROVIDER_ERROR"
-  }
-  return "NOT_IMPLEMENTED"
-}
 
 /** Câu cho user của sự kiện SSE `error` — không text thô của provider/thư viện; chi tiết đã `console.error` (FLF-247). */
 const errorMessageOf = (err: unknown): string => clientErrorMessage(err)
@@ -410,7 +392,19 @@ const toRunStateResponse = (doc: RunStateDoc): Record<string, unknown> => ({
   gate_payload: doc.gate_payload,
   phase_gate: doc.phase_gate,
   events: doc.events,
-  error: doc.error
+  error: doc.error,
+  paused_reason: doc.paused_reason
+})
+
+/**
+ * GET /run-estimate?scope=unit|all&from= — FLF-332: số credit ước tính cho lượt chạy liền sắp tới (thẻ xác nhận credit,
+ * cổng cứng business-flow §1.2) kèm credit khả dụng của ví org.
+ */
+export const getRunEstimate = catchAsync(async (req: Request, res: Response) => {
+  const { projectId, userId, mode } = await authorize(req)
+  assertNotMode1(mode, "steps")
+  const query = runEstimateQuerySchema.parse(req.query)
+  return sendSuccess(res, 200, await runEstimate(projectId, userId, { scope: query.scope, from: query.from ?? null }))
 })
 
 // ─── FLF-337: mức duyệt / không hỏi lại / thay đổi tự qua ─────────
