@@ -73,6 +73,57 @@ router.get("/:projectId/change-requests", authMiddleware, crController.listCrs)
 
 /**
  * @swagger
+ * /api/v1/projects/{projectId}/documents/{documentId}/extract:
+ *   post:
+ *     summary: FLF-338 §3.6.1 — AI rút danh sách yêu cầu từ tài liệu tham khảo (một lượt EXTRACT_REQUIREMENTS, báo credit trước ở FE)
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/Mode1ProjectId'
+ *       - { in: path, name: documentId, required: true, schema: { type: string } }
+ *     responses:
+ *       201: { description: "`extractionSchema` — items[] kèm nhãn, mã đoạn, trích dẫn, nhóm, câu hỏi" }
+ *       402: { description: EXTRACTION_INSUFFICIENT_CREDIT }
+ *       409: { description: EXTRACTION_ALREADY_APPROVED }
+ *       422: { description: EXTRACTION_DOCUMENT_UNREADABLE }
+ *   get:
+ *     summary: FLF-338 — danh sách rút hiện có của tài liệu (null nếu chưa rút)
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200: { description: "`extractionSchema` hoặc null" }
+ */
+router.post("/:projectId/documents/:documentId/extract", authMiddleware, crController.extractRequirements)
+router.get("/:projectId/documents/:documentId/extract", authMiddleware, crController.getExtraction)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/documents/{documentId}/extract/approve:
+ *   post:
+ *     summary: FLF-338 — BA duyệt danh sách (tick / bỏ + lý do / trả lời câu hỏi / tách nhóm) ⇒ mỗi nhóm một change request, mục trùng thành nguồn của phần tử
+ *     tags: [Change requests (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [requester, decisions]
+ *             properties:
+ *               requester: { type: string }
+ *               decisions: { type: array, items: { type: object } }
+ *     responses:
+ *       200: { description: "`extractionSchema` (status approved, items[].cr_id)" }
+ *       400: { description: "EXTRACTION_DECISION_INVALID (meta.item_ids)" }
+ *       409: { description: EXTRACTION_ALREADY_APPROVED / PACKAGE_PENDING / CR_REQUIRES_BASELINE }
+ */
+router.post("/:projectId/documents/:documentId/extract/approve", authMiddleware, crController.approveExtraction)
+
+/**
+ * @swagger
  * /api/v1/projects/{projectId}/change-requests/{crId}:
  *   get:
  *     summary: Chi tiết change request — vị trí, đề xuất, kết quả kiểm, group
