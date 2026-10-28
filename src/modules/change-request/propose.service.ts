@@ -161,6 +161,9 @@ export const matchProposals = <L extends { location_id: string; path: string }>(
   return matched
 }
 
+/** Lý do của vị trí nằm ngoài lô thêm / xoá / sửa use case (FLF-318) — giữ nguyên, không qua model. */
+export const OUTSIDE_USE_CASE_BATCH = "Không thuộc lô thay đổi use case — giữ nguyên"
+
 export const runPropose = async (cr: IChangeRequest, userId: string): Promise<void> => {
   assertCrStatus(cr, ["impact_review", "proposing"], "proposing")
   await transitionCr(cr, "proposing")
@@ -175,7 +178,15 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   // lại đề xuất theo lô như dưới. Hết credit ⇒ dừng như C-4.
   const bundled = await proposeUseCaseBatch(cr, userId, spine, locations)
   if (bundled === "paused") return
-  if (bundled === "done") locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  if (bundled === "done") {
+    // Như chat trước baseline: thay đổi là đúng lô use case — vị trí khác (tìm theo từ khoá / tham chiếu) giữ nguyên,
+    // không gọi model đề xuất thêm (model hay sửa văn xuôi, thêm quy tắc ngoài yêu cầu)
+    await ChangeLocation.updateMany(
+      { projectId: cr.projectId, cr_id: cr.cr_id, conclusion: null, manual: { $ne: true }, found_by: { $ne: "diagram" } },
+      { $set: { conclusion: "not_related", reason: OUTSIDE_USE_CASE_BATCH, proposal: null, verify: null } }
+    )
+    locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
+  }
 
   // Vị trí sơ đồ gốc (§4.13) không qua AI — kết luận sau khi các vị trí khác có đề xuất (`refreshDiagramLocations`)
   const todo = locations.filter((l) => needsProposal(l) && !isDiagramLocation(l))
