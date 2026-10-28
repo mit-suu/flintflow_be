@@ -119,7 +119,7 @@
       "language": "en",
       "question": "Can diagram labels be written in Vietnamese, and can a diagram pull styles from a URL?",
       "answer_points": ["English labels only, no Vietnamese diacritics", "No !include, !import, URLs or remote skinparam — the server has no internet access", "Aliases are Spine ids and the visible label is the name"],
-      "gold_chunk_ids": ["plantuml-conventions#common-rules"]
+      "gold_chunk_ids": ["plantuml-conventions#common-rules/1-5", "plantuml-conventions#common-rules/13"]
     },
     {
       "id": "q16",
