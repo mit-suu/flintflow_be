@@ -103,8 +103,16 @@
           "enum": [
             "strict",
             "balanced",
-            "fast"
+            "fast",
+            "milestones"
           ]
+        },
+        "skip_confirm_sections": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "release_scope": {
           "type": "object",
@@ -141,6 +149,7 @@
         "stakes",
         "working_mode",
         "review_mode",
+        "skip_confirm_sections",
         "release_scope"
       ],
       "additionalProperties": false

@@ -164,6 +164,52 @@ export const listChangeRequestsQuerySchema = z.object({ status: crStatusSchema.o
 
 export const crParamsSchema = z.object({ crId: crIdSchema })
 
+// ─── FLF-338 §3.6.1 rút yêu cầu từ tài liệu thô ─────────────────
+export const extractionItemSchema = z.object({
+  id: z.string().min(1),
+  text: z.string(),
+  label: z.enum(["new", "modification", "duplicate", "contradiction", "ambiguous"]),
+  para_id: z.string().nullable(),
+  quote: z.string(),
+  group: z.string(),
+  entity_paths: z.array(z.string()),
+  question: z.string().nullable(),
+  suggested_answers: z.array(z.string()),
+  include: z.boolean().nullable(),
+  drop_reason: z.string().nullable(),
+  answer: z.string().nullable(),
+  cr_id: z.string().nullable()
+})
+export const extractionSchema = z.object({
+  document_id: z.string().min(1),
+  document_name: z.string(),
+  doc_code: z.number().int().min(1),
+  status: z.enum(["extracted", "approved"]),
+  items: z.array(extractionItemSchema),
+  credits: z.number().min(0),
+  approved_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string()
+})
+export type ExtractionDto = z.infer<typeof extractionSchema>
+export const extractionParamsSchema = z.object({ documentId: z.string().min(1) })
+export const approveExtractionSchema = z.strictObject({
+  requester: text(200),
+  decisions: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1),
+        include: z.boolean(),
+        drop_reason: z.string().trim().max(500).nullable().optional(),
+        answer: z.string().trim().max(2000).nullable().optional(),
+        group: z.string().trim().max(50).nullable().optional()
+      })
+    )
+    .min(1)
+    .max(40)
+})
+export type ApproveExtractionDTO = z.infer<typeof approveExtractionSchema>
+
 /** `POST …/:crId/answers` (UC-49) — trả lời theo đúng thứ tự câu hỏi của vòng làm rõ gần nhất. */
 /** Mode 1 v3 phase 7: câu trả lời được để trống (= "chưa biết") — C-2/C-4 coi dữ kiện đó là thiếu. */
 export const answersRequestSchema = z.strictObject({ answers: z.array(z.string().trim().max(4000)).min(1).max(20) })

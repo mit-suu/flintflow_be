@@ -10,6 +10,7 @@ import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES, type ImportPauseReason, type Imp
 import { PREFLIGHT_ISSUE_CODES, type PreflightIssueCode } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import type { Spine } from "../spine/spine.types.js"
+import { TEMPLATE_INTENTS, type TemplateIntent } from "../project/project.model.js"
 
 export interface PreflightIssue {
   code: PreflightIssueCode
@@ -53,6 +54,8 @@ export interface IImportedDocument extends Document {
   confirmed_latest_at: Date | null
   status: ImportStatus
   paused: { reason: ImportPauseReason; at: Date } | null
+  /** FLF-335: ý định lúc upload (#2 `intent`) — theo mẫu cố định hay cấu trúc tự do; bản ghi cũ `null` (đọc như `free`). */
+  intent: TemplateIntent | null
   /** Section đang/sắp trích ở I-4; resume chạy tiếp từ đây, không trích lại section `done`. */
   extract_cursor: string | null
   /**
@@ -121,6 +124,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
     },
     extract_cursor: { type: String, default: null },
     complete_requested: { type: Boolean, default: false },
+    intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
     finalize_checkpoint: {
       type: new Schema(
         {

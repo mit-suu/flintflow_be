@@ -19,6 +19,7 @@ import {
   PREFLIGHT_ISSUE_CODES,
   REUPLOAD_CHANGES
 } from "./import.constants.js"
+import { TEMPLATE_INTENTS } from "../project/project.model.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -52,6 +53,12 @@ export const docStampSchema = z.object({
 
 export const importPausedSchema = z.object({ reason: z.enum(IMPORT_PAUSE_REASONS), at: isoDateTime })
 
+/** FLF-335: ý định lúc upload (bước 1.2). */
+export const templateIntentSchema = z.enum(TEMPLATE_INTENTS)
+/** Field text đi cùng multipart #2 `POST /:id/import` — thiếu ⇒ `free`; dự án mới có mẫu bắt buộc luôn `fixed`. */
+export const uploadImportBodySchema = z.object({ intent: templateIntentSchema.optional() })
+export type UploadImportBody = z.infer<typeof uploadImportBodySchema>
+
 export const importedDocumentDtoSchema = z.object({
   id,
   project_id: id,
@@ -64,6 +71,8 @@ export const importedDocumentDtoSchema = z.object({
   confirmed_latest_at: isoDateTime.nullable(),
   paused: importPausedSchema.nullable(),
   extract_cursor: z.string().nullable(),
+  /** FLF-335: `fixed` / `free`; bản ghi cũ `null`. */
+  intent: templateIntentSchema.nullable().optional(),
   created_at: isoDateTime,
   updated_at: isoDateTime
 })
