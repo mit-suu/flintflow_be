@@ -14,9 +14,12 @@ const trackedBody = (author: string) =>
   p("Đoạn đầu") +
   `<w:p><w:r><w:t xml:space="preserve">Sửa </w:t></w:r><w:ins w:id="1" w:author="${author}"><w:r><w:t>mới</w:t></w:r></w:ins><w:del w:id="2" w:author="${author}"><w:r><w:delText>cũ</w:delText></w:r></w:del></w:p>`
 
-const withComment = async (author: string): Promise<Buffer> =>
+/** Đoạn mở đầu kiểu SRS — file không đủ dấu hiệu SRS bị chặn `NOT_SRS`, nên test mong "nhận" phải là SRS. */
+const SRS_LEAD = p("Software Requirement Specification") + p("Actors: Student, Lecturer. Use cases UC-01 Log In, UC-02 View Grades, UC-03 Reset Password.")
+
+const withComment = async (author: string, lead = ""): Promise<Buffer> =>
   makeDocx({
-    body: `<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Có comment</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>`,
+    body: `${lead}<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>Có comment</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>`,
     extraParts: {
       "word/comments.xml": `<?xml version="1.0"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="0" w:author="${author}"><w:p><w:r><w:t>hỏi</w:t></w:r></w:p></w:comment></w:comments>`
     }
@@ -53,9 +56,9 @@ describe("preflightDocx", () => {
   })
 
   it("Track Changes/comment author mã CR ⇒ nhận", async () => {
-    const res = await preflightDocx(await makeDocx({ body: trackedBody("CR-003") }))
+    const res = await preflightDocx(await makeDocx({ body: SRS_LEAD + trackedBody("CR-003") }))
     expect(res).toMatchObject({ status: "accepted", issues: [], stamp: null })
-    expect((await preflightDocx(await withComment("CR-001"))).status).toBe("accepted")
+    expect((await preflightDocx(await withComment("CR-001", SRS_LEAD))).status).toBe("accepted")
   })
 
   it("comment của người khác ⇒ FOREIGN_COMMENT có vị trí", async () => {
@@ -142,8 +145,17 @@ describe("preflightDocx", () => {
   })
 
   it("không có stamp ⇒ stamp null; bảng không ảnh hưởng việc nhận file", async () => {
-    const res = await preflightDocx(await makeDocx({ body: p("A") + table([["x", "y"]]) }))
-    // FLF-331: tài liệu ngắn không đủ bằng chứng ⇒ vẫn nhận, document_kind = unknown
-    expect(res).toMatchObject({ status: "accepted", issues: [], stamp: null, document_kind: { kind: "unknown" } })
+    const res = await preflightDocx(await makeDocx({ body: SRS_LEAD + table([["x", "y"]]) }))
+    expect(res).toMatchObject({ status: "accepted", issues: [], stamp: null, document_kind: { kind: "srs" } })
+  })
+
+  it("file không đủ dấu hiệu SRS (ghi chú, bài luận ngắn — `unknown`) ⇒ cũng chặn NOT_SRS; có lỗi khác thì báo lỗi đó trước", async () => {
+    const short = await preflightDocx(await makeDocx({ body: p("A") + table([["x", "y"]]) }))
+    expect(short).toMatchObject({ status: "rejected", document_kind: { kind: "unknown" } })
+    expect(short.issues.map((i) => i.code)).toEqual(["NOT_SRS"])
+    expect(short.issues[0].message).toContain("Không đủ dấu hiệu")
+    // Track Changes lạ trên file ngắn ⇒ báo Track Changes (sửa một lượt), không chồng thêm NOT_SRS
+    const tracked = await preflightDocx(await makeDocx({ body: trackedBody("Lan") }))
+    expect(tracked.issues.every((i) => i.code === "FOREIGN_TRACK_CHANGE")).toBe(true)
   })
 })

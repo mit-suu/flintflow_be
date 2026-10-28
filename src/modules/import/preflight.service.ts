@@ -115,5 +115,16 @@ export const preflightDocx = async (data: Buffer, opts: { maxBytes?: number } = 
       location: locationOf(byElement, await commentParagraph(pkg, c.id))
     })
   }
+  // Không đủ dấu hiệu SRS / mẫu SRS (bài luận, ghi chú, báo cáo lab…) ⇒ cũng chặn: file không liên quan không vào luồng import
+  // (kể cả làm mẫu bắt buộc). Xét sau cùng — file có lỗi khác (Track Changes, comment) báo lỗi đó trước để sửa một lượt. SRS
+  // viết tự do vẫn có từ khoá + mã yêu cầu nên ra `srs`, không rơi vào đây.
+  if (!issues.length && documentKind?.kind === "unknown") {
+    issues.push({
+      code: "NOT_SRS",
+      message:
+        "Không đủ dấu hiệu đây là tài liệu đặc tả yêu cầu (SRS) hay mẫu SRS: không có mục Use Case, Requirements, Actor hay mã yêu cầu (UC-01, FR-01). Hãy tải đúng file SRS (hoặc mẫu SRS).",
+      location: null
+    })
+  }
   return { status: issues.length ? "rejected" : "accepted", issues, stamp, document_kind: documentKind }
 }

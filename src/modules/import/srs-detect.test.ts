@@ -136,6 +136,61 @@ describe("classifyDocument (FLF-331, I-1 nhận diện SRS — 0 credit)", () =>
     }
   })
 
+  it("tiêu đề là tài liệu khác (Report 4 – Software Design Document…) ⇒ not_srs dù bên trong đầy use case / actor / mã UC", async () => {
+    // Như file thật bị nhận nhầm: bìa báo cáo đồ án FPT, Record of Changes, rồi thiết kế nhắc lại use case và actor
+    const designBody = [
+      h1("I. Record of Changes"),
+      h1("1 System Design"),
+      h2("1.1 System Architecture"),
+      p("The Student actor and the Lecturer actor use the web client; each use case UC-01, UC-11, UC-66 maps to a controller."),
+      h2("1.2 Package Diagram"),
+      h1("2 Database Design"),
+      p("Stakeholder data, screen settings and the glossary live in separate tables; performance and security follow the NFRs."),
+      h1("3 Detailed Design"),
+      h2("3.1 Class Diagram"),
+      h2("3.2 Sequence Diagram")
+    ]
+    const cases: [string, string, string][] = [
+      ["Report 4 – Software Design Document", "design", "thiết kế"],
+      ["Report 2 – Project Management Plan", "project_plan", "kế hoạch quản lý dự án"],
+      ["Report 5 – Software Test Documentation", "test_doc", "kiểm thử"],
+      ["Report 5 – Test Documentation", "test_doc", "kiểm thử"],
+      ["Report 6 – User Guide", "user_guide", "hướng dẫn"],
+      ["TÀI LIỆU THIẾT KẾ HỆ THỐNG", "design", "thiết kế"]
+    ]
+    // Bảng Record of Changes ngay sau bìa nhắc "SRS" (tài liệu test / thiết kế bám SRS) — không phải tiêu đề
+    const changeLog = table([
+      ["Date", "In charge", "Change Description"],
+      ["16/09/2026", "Hiep", "v0.1: Initial version based on SRS v1.0"]
+    ])
+    for (const [title, kind, label] of cases) {
+      const res = await classify(await makeDocx({ body: [p("CAPSTONE PROJECT REPORT"), p(title), p("– Danang, Sep 2026 –"), changeLog, ...designBody].join("") }))
+      expect(res.kind, title).toBe("not_srs")
+      expect(res.signals, title).toEqual([`title:${kind}`])
+      expect(res.reasons[0], title).toContain(label)
+    }
+  })
+
+  it("tiêu đề SRS thắng tiêu đề loại khác: Report 3 – Software Requirement Specification (nhắc tài liệu thiết kế ở đầu) vẫn là srs", async () => {
+    const res = await classify(
+      await makeDocx({
+        body: [
+          p("CAPSTONE PROJECT REPORT"),
+          p("Report 3 – Software Requirement Specification"),
+          p("Related documents: Software Design Document, User Guide"),
+          h1("I. Record of Changes"),
+          h1("1 Product Overview"),
+          h1("2 User Requirements"),
+          h2("2.1 Actors"),
+          h2("2.2 Use Cases"),
+          h1("3 Functional Requirements")
+        ].join("")
+      })
+    )
+    expect(res.kind).toBe("srs")
+    expect(res.signals).toContain("title:srs")
+  })
+
   it("chữ liền không cấu trúc, không từ khoá SRS ⇒ not_srs; vài đoạn có một từ khoá ⇒ unknown (không chặn)", async () => {
     const sentences = [
       "Hôm nay trời đẹp nên cả nhóm quyết định đi dã ngoại ở bán đảo Sơn Trà từ sáng sớm.",

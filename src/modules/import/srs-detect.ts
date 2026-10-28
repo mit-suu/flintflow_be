@@ -7,8 +7,10 @@
  *
  * Trả **loại + độ tin + lý do**, không chỉ boolean (ghi chú hybrid plan B4: sau này preflight điều hướng theo loại file):
  * - `srs` / `srs_template` ⇒ đi tiếp (mẫu trống chỉ có heading + chữ hướng dẫn vẫn là mẫu SRS — chế độ 3/4);
- * - `not_srs` ⇒ preflight từ chối `NOT_SRS` kèm lý do ngắn;
- * - `unknown` ⇒ đi tiếp, FE cảnh báo ở bước xác nhận 1.5 — thà cho qua một SRS lạ còn hơn chặn nhầm.
+ * - `not_srs` ⇒ preflight từ chối `NOT_SRS` kèm lý do ngắn — gồm cả file mà tiêu đề nói là loại tài liệu khác (SDD, kế hoạch
+ *   dự án, tài liệu test…; `otherTitles`), vì chúng dùng chung từ vựng SRS nên điểm tín hiệu không phân biệt được;
+ * - `unknown` ⇒ preflight cũng từ chối `NOT_SRS` ("không đủ dấu hiệu SRS") khi file không có lỗi nào khác — file không liên quan
+ *   không vào luồng import (kể cả làm mẫu bắt buộc). SRS viết tự do vẫn có từ khoá + mã yêu cầu nên ra `srs`.
  * Ngưỡng và danh sách tín hiệu gom ở `SRS_DETECT_CONFIG` để chỉnh một chỗ.
  */
 
@@ -71,6 +73,19 @@ export const SRS_DETECT_CONFIG = {
     contract: /\bcontract\b|hợp\s+đồng|bên\s+a\b|bên\s+b\b|điều\s+khoản|party\s+a|party\s+b/i
   } as Record<string, RegExp>,
   againstMinHits: 2,
+  /**
+   * Tiêu đề (đoạn đầu) nói thẳng là tài liệu KHÁC — vd báo cáo đồ án "Report 4 – Software Design Document". Các tài liệu
+   * này dùng chung từ vựng SRS (use case, actor, mã UC) nên điểm tín hiệu không phân biệt được; tiêu đề thì rõ. Tiêu đề
+   * SRS (`titlePatterns`) thắng.
+   */
+  otherTitles: {
+    design: /software\s+(architecture\s+and\s+)?design\s+(document|description|specification)|\bSDD\b|tài\s+liệu\s+thiết\s+kế|đặc\s*tả\s+thiết\s+kế|thiết\s+kế\s+(phần\s+mềm|hệ\s+thống)/i,
+    project_plan: /project\s+management\s+plan|software\s+project\s+management\s+plan|\bSPMP\b|kế\s+hoạch\s+quản\s+lý\s+dự\s+án/i,
+    // "test plan" / "kế hoạch kiểm thử" đã có ở `against.test_plan` (theo nội dung) — ở đây chỉ tên tài liệu test của báo cáo
+    test_doc: /(software\s+)?test(ing)?\s+(document(ation)?|specification|report)\b|tài\s+liệu\s+kiểm\s+thử/i,
+    user_guide: /\buser\s+(guide|manual)\b|installation\s+guide|hướng\s+dẫn\s+(sử\s+dụng|cài\s+đặt)/i,
+    project_intro: /project\s+introduction|giới\s+thiệu\s+dự\s+án/i
+  } as Record<string, RegExp>,
   /** Mẫu trống / điền dở: ≥ tỉ lệ này đoạn nội dung là chữ hướng dẫn (hoặc không có đoạn nào) ⇒ `srs_template`. */
   templateInstructionRatio: 0.6,
   /** Văn xuôi không cấu trúc chỉ bị coi là `not_srs` khi đủ dài (số khối chữ và số từ); ngắn hơn ⇒ `unknown`. */
@@ -128,6 +143,27 @@ export const classifyDocument = (blocks: readonly DetectableBlock[]): DocumentKi
   if (cfg.titlePatterns.some((re) => re.test(head))) {
     score += 3
     signals.push("title:srs")
+  }
+  // Tiêu đề nói là loại tài liệu khác (SDD, kế hoạch dự án, tài liệu test…) ⇒ không phải SRS, bất kể từ vựng bên trong. Chỉ đọc
+  // đoạn văn đầu file: bảng Record of Changes ngay sau bìa hay nhắc "SRS" (tài liệu test / thiết kế bám SRS) — không phải tiêu đề
+  const titleHead = textBlocks.filter((b) => b.kind !== "table").slice(0, 5).map(textOf).join("\n")
+  if (!cfg.titlePatterns.some((re) => re.test(titleHead))) {
+    const other = Object.entries(cfg.otherTitles).find(([, re]) => re.test(titleHead))
+    if (other) {
+      const label: Record<string, string> = {
+        design: "tài liệu thiết kế (Software Design Document)",
+        project_plan: "kế hoạch quản lý dự án",
+        test_doc: "tài liệu kiểm thử",
+        user_guide: "hướng dẫn sử dụng / cài đặt",
+        project_intro: "tài liệu giới thiệu dự án"
+      }
+      return {
+        kind: "not_srs",
+        confidence: 0.9,
+        signals: [`title:${other[0]}`],
+        reasons: [`Tiêu đề cho thấy đây là ${label[other[0]] ?? other[0]}, không phải tài liệu đặc tả yêu cầu (SRS) hay mẫu SRS.`]
+      }
+    }
   }
 
   // 2. Heading khớp danh mục FPT / IEEE (đếm section khác nhau, trần 6)

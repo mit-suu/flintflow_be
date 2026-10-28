@@ -147,7 +147,9 @@ describe("preflight — từ chối", () => {
 
   it("Track Changes/comment author CR-003 ⇒ nhận", async () => {
     const { projectId, userId } = await project()
-    const ok = await makeDocx({ body: p("A") + `<w:p><w:ins w:id="1" w:author="CR-003"><w:r><w:t>B</w:t></w:r></w:ins></w:p>` })
+    // File được nhận phải là SRS (file không đủ dấu hiệu SRS bị chặn NOT_SRS)
+    const lead = p("Software Requirement Specification") + p("Actors: Student. Use cases UC-01 Log In, UC-02 View Grades, UC-03 Reset Password.")
+    const ok = await makeDocx({ body: lead + `<w:p><w:ins w:id="1" w:author="CR-003"><w:r><w:t>B</w:t></w:r></w:ins></w:p>` })
     const doc = await uploadImport(projectId, userId, fileOf(ok))
     expect(doc.preflight).toMatchObject({ status: "accepted", issues: [] })
   })
