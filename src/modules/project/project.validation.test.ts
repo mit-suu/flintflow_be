@@ -33,6 +33,13 @@ describe("Project.mode (FLF-171)", () => {
     expect(projectModeSchema.safeParse("coaching").success).toBe(false)
   })
 
+  it("FLF-335: nhận source new / existing kèm has_required_template; source lạ ⇒ từ chối", () => {
+    expect(CreateProjectSchema.parse({ name: "Lumen", source: "new", has_required_template: true })).toMatchObject({ source: "new", has_required_template: true, mode: "fpt" })
+    expect(CreateProjectSchema.parse({ name: "Lumen", source: "existing" })).toMatchObject({ source: "existing" })
+    expect(CreateProjectSchema.safeParse({ name: "Lumen", source: "later" }).success).toBe(false)
+    expect(CreateProjectSchema.safeParse({ name: "Lumen", source: "new", has_required_template: "yes" }).success).toBe(false)
+  })
+
   it("model: project cũ không có mode đọc ra fpt, import_state null; import_state phải thuộc máy trạng thái import", () => {
     const legacy = new Project({ userId: "66f000000000000000000001", name: "Old" })
     expect(legacy.validateSync()).toBeUndefined()

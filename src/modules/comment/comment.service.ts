@@ -47,6 +47,8 @@ export interface CommentDto {
   handled_at: string | null
   /** Kết luận lượt xử lý (§3.5): `fixed` đã sửa qua chat, `kept` giữ nguyên kèm lý do. */
   resolution: CommentResolution | null
+  /** FLF-271: bước sở hữu mục được ghim (`stepsOf`); mục nhóm / ngoài mẫu ⇒ `[]`. */
+  step_ids: string[]
   replies: CommentReplyDto[]
   created_at: string
 }
@@ -109,6 +111,7 @@ const toDto = (c: IComment, people: Map<string, CommentPerson>): CommentDto => (
   handled_by: toPerson(c.handled_by ?? null, people),
   handled_at: c.handled_at ? c.handled_at.toISOString() : null,
   resolution: c.resolution ?? null,
+  step_ids: stepsOf(c.anchor.section_id),
   replies: c.replies.map((r) => ({
     author: toPerson(r.author_id, people) as CommentPerson,
     author_role: r.author_role,
