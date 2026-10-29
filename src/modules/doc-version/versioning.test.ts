@@ -66,6 +66,14 @@ describe("versioning — G4", () => {
     expect(versionFileName({ name: "Lumen", release: true, base: "1.0", latestCr: "CR-009" })).toBe("Lumen_v1.0.docx")
   })
 
+  it("FLF-334 B: ngôn ngữ khác ⇒ hậu tố _EN / _VI cuối tên, cả PDF; không truyền ⇒ như cũ", () => {
+    expect(versionFileName({ name: "Lumen", release: true, base: "2.0", language: "en" })).toBe("Lumen_v2.0_EN.docx")
+    expect(versionFileName({ name: "Lumen", release: true, base: "2.0", language: "vi", ext: "pdf" })).toBe("Lumen_v2.0_VI.pdf")
+    expect(versionFileName({ name: "Lumen", release: false, base: "1.0", language: "vi" })).toBe("Lumen_v1.0_DRAFT_VI.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: null, language: "en" })).toBe("Lumen_DRAFT_EN.docx")
+    expect(versionFileName({ name: "Lumen", release: true, base: "2.0", language: null })).toBe("Lumen_v2.0.docx")
+  })
+
   it("tên file bỏ ký tự cấm của Windows, tên rỗng ⇒ SRS, giữ chữ Unicode", () => {
     expect(versionFileName({ name: "A/B:C", release: false, base: "0" })).toBe("A_B_C_v0_DRAFT.docx")
     expect(versionFileName({ name: "A\\B", release: true, base: "2.0" })).toBe("A_B_v2.0.docx")

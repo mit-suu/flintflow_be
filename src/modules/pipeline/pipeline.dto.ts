@@ -12,6 +12,7 @@
  */
 
 import { z } from "zod"
+import { docVersionString } from "../doc-version/doc-version.dto.js"
 import {
   baselineSchema,
   baselineSubmissionSchema,
@@ -664,14 +665,19 @@ export const documentQuerySchema = z.object({
 export const assembleRequestSchema = z.strictObject({ base_version: baseVersion })
 export const assembleResponseSchema = z.object({ spine_version: baseVersion, sections: z.number().int().min(0), generated_at: isoDateTime })
 
-/** GET /projects/:id/export/word?source= — body là file .docx */
-export const exportWordQuerySchema = documentQuerySchema
+/** Ngôn ngữ tài liệu (FLF-265): `vi` | `en`. */
+const documentLocale = z.enum(["vi", "en"])
+
+/**
+ * GET /projects/:id/export/word|pdf?source=&baseline_id=&lang= — body là file .docx / .pdf. `lang` (FLF-334 B): không
+ * truyền ⇒ ngôn ngữ tài liệu của dự án (như trước); khác ⇒ dựng từ lớp bản dịch, thiếu bản dịch ⇒ 409
+ * `TRANSLATION_INCOMPLETE`. GET /document (16) không nhận `lang` — luôn theo ngôn ngữ dự án.
+ */
+export const exportWordQuerySchema = documentQuerySchema.extend({ lang: documentLocale.optional() })
 
 // ─── Ngôn ngữ tài liệu (FLF-265) ──────────────────────────────────
-// Ngôn ngữ đọc từ `Project.documentLanguage`, không có query param. Spine mode 2 vẫn tiếng Anh; chữ ngôn ngữ khác lấy
-// từ lớp bản dịch (khoá theo hash chữ gốc). GET không bao giờ gọi model.
-
-const documentLocale = z.enum(["vi", "en"])
+// Ngôn ngữ đọc từ `Project.documentLanguage`; tải file (18, 34, mode 1 #14) nhận thêm `?lang=` (FLF-334 B). Spine mode 2
+// vẫn tiếng Anh; chữ ngôn ngữ khác lấy từ lớp bản dịch (khoá theo hash chữ gốc). GET không bao giờ gọi model.
 
 /** `meta.translation` của GET /document (16) khi ngôn ngữ tài liệu ≠ ngôn ngữ gốc. `missing` = đơn vị đang in chữ gốc. */
 export const documentTranslationMetaSchema = z.object({
@@ -679,6 +685,22 @@ export const documentTranslationMetaSchema = z.object({
   source_locale: documentLocale,
   missing: z.number().int().min(0)
 })
+
+/**
+ * FLF-334 B — phạm vi của #26 / #27: `locale` (mặc định ngôn ngữ tài liệu) + đích snapshot tuỳ chọn, cùng giá trị lượt tải
+ * dùng: `baseline_id` (mode 2, như #18 — `_id` hoặc `BLnnn`) hoặc `version` (mode 1, DocVersion có snapshot baseline). Có
+ * đích ⇒ đếm / dịch đơn vị của snapshot đó thay vì Spine hiện tại. Không truyền cả hai cùng lúc.
+ */
+const translationScopeFields = {
+  locale: documentLocale.optional(),
+  baseline_id: z.string().min(1).optional(),
+  version: docVersionString.optional()
+}
+const oneSnapshotTarget = (v: { baseline_id?: string; version?: string }) => !(v.baseline_id !== undefined && v.version !== undefined)
+const oneSnapshotTargetMessage = { message: "Chỉ chọn một trong baseline_id hoặc version.", path: ["version"] }
+
+/** GET /projects/:id/translations/status?locale=&baseline_id=|version= (FLF-334 B). Strict: key lạ (vd `lang`) ⇒ 400, không lặng lẽ đếm ngôn ngữ tài liệu. */
+export const translationStatusQuerySchema = z.strictObject(translationScopeFields).refine(oneSnapshotTarget, oneSnapshotTargetMessage)
 
 /** GET /projects/:id/translations/status — ước tính trước khi dịch (BR-01). Ngôn ngữ = gốc ⇒ `total: 0`. */
 export const translationStatusResponseSchema = z.object({
@@ -692,8 +714,10 @@ export const translationStatusResponseSchema = z.object({
 
 /** POST /projects/:id/translations/run — dịch tối đa `max_batches` lô phần còn thiếu; FE gọi lại tới `remaining = 0`. */
 export const translationRunRequestSchema = z.strictObject({
-  max_batches: z.number().int().min(1).max(10).optional()
-})
+  max_batches: z.number().int().min(1).max(10).optional(),
+  /** FLF-334 B: ngôn ngữ đích (mặc định ngôn ngữ tài liệu) + đích snapshot `baseline_id` / `version` như #26. */
+  ...translationScopeFields
+}).refine(oneSnapshotTarget, oneSnapshotTargetMessage)
 export const translationRunResponseSchema = z.object({
   translated: z.number().int().min(0),
   remaining: z.number().int().min(0),

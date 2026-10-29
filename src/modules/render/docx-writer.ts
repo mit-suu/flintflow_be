@@ -208,9 +208,12 @@ export function exportLineage(doc: Pick<RenderedDocument, "version" | "source">)
   return { release: doc.source !== "draft", base }
 }
 
-/** Tên file theo quy tắc chung `versionFileName` (FLF-334): `Lumen_v1.0.docx`, `Lumen_v1.0_DRAFT.docx`, `Lumen_DRAFT.docx`. */
-export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">): string {
-  return versionFileName({ name: doc.projectName, ...exportLineage(doc) })
+/**
+ * Tên file theo quy tắc chung `versionFileName` (FLF-334): `Lumen_v1.0.docx`, `Lumen_v1.0_DRAFT.docx`, `Lumen_DRAFT.docx`.
+ * `language` (FLF-334 B) chỉ truyền khi khác ngôn ngữ tài liệu ⇒ `Lumen_v1.0_EN.docx`.
+ */
+export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">, language?: string): string {
+  return versionFileName({ name: doc.projectName, ...exportLineage(doc), ...(language ? { language } : {}) })
 }
 
 function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {

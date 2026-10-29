@@ -87,7 +87,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
-| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên file + stamp theo FLF-334 (§ cuối): `<tên>_v2.0.docx`, `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0_DRAFT.docx`, `…_tracked_DRAFT.docx`, `…_original.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx` | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng) |
+| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf&lang=vi\|en` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên file + stamp theo FLF-334 (§ cuối): `<tên>_v2.0.docx`, `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0_DRAFT.docx`, `…_tracked_DRAFT.docx`, `…_original.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx`. `lang` (FLF-334 B, § cuối) | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng), `409 TRANSLATION_INCOMPLETE`, `409 DOCUMENT_LANGUAGE_UNAVAILABLE`, `400 VALIDATION_ERROR` (`variant` tracked/original + `lang` khác) |
 | 15 | `GET /projects/:id/versions/compare?from=&to=` | UC-55 | `compareQuerySchema` | `compareResponseSchema` | `DOC_VERSION_NOT_FOUND`, `VALIDATION_ERROR` |
 | 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | (FLF-338: `source.kind` thêm `reference_document`) `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
 | 17 | `GET /projects/:id/change-requests?status=` | UC-48 | `listChangeRequestsQuerySchema` | `ChangeRequest[]`, mới nhất trước | — |
@@ -485,3 +485,13 @@ Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **�
   - `flintflow_kind` — `release` | `draft`.
   - `flintflow_version` giữ nghĩa cũ (version nội bộ `1.2`, nhãn mode 2). File thiếu property mới (stamp cũ) ⇒ đọc ra `null`; preflight, import, re-upload chấp nhận y như trước.
 - `ImportedDocumentDto.stamp` / `meta.stamp` của `IMPORT_STAMP_FOREIGN_PROJECT` (`docStampSchema`) thêm `base_version`, `latest_cr`, `kind` — đều `string | null`, mặc định `null`.
+
+## FLF-334 B (2026-10-29) — tải version theo ngôn ngữ còn lại
+
+**Additive** ⇒ PR nhãn `contract-change` (cùng `pipeline-contract.md` #18/#34/#26/#27).
+
+- #14 nhận `lang=vi|en` (`downloadQuerySchema`). Không truyền / = ngôn ngữ tài liệu ⇒ y như trước.
+- `lang` khác chỉ cho version **có snapshot baseline** (`baseline_ref`: release, bản `1.0` chuyển đổi) của dự án **chuyển từ mode 2** (`converted_from = "fpt"`): dựng lại từ `Baseline.snapshot` theo mẫu FPT bằng `lang` (qua lớp bản dịch khi `lang` ≠ `en`), rồi stamp / watermark / tên như phần A + hậu tố `_EN` / `_VI` (`<tên>_v2.0_VI.docx`). File dựng mỗi lần, **không** ghi GridFS; file lưu của version giữ ngôn ngữ tài liệu.
+- Còn đơn vị chưa dịch ⇒ `409 TRANSLATION_INCOMPLETE` `meta { locale, missing, total }` (đếm trên snapshot của version). Dịch nốt qua `pipeline-contract.md` #26 `?locale=&version=` / #27 `{ locale, version }` — đếm / dịch đúng snapshot baseline của version đó.
+- Bản nháp CR (không có baseline), dự án import thật (đường layout) ⇒ `409 DOCUMENT_LANGUAGE_UNAVAILABLE`; `variant=tracked|original` + `lang` khác ⇒ `400 VALIDATION_ERROR`.
+- `DocVersionDto` thêm `other_language_available: boolean` (#12, response release) — `false` ⇒ FE ẩn lựa chọn ngôn ngữ.
