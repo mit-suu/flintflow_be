@@ -192,7 +192,7 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     expect(v1Xml).toContain("1 second")
     expect(v1Xml).not.toContain("2 seconds")
     expect(v1Xml, "bản release là bản sạch").not.toContain("<w:ins ")
-    expect(await readStamp(await DocxPackage.load(v1))).toEqual({ project_id: projectId, version: "1.0", source: "release" })
+    expect(await readStamp(await DocxPackage.load(v1))).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
 
     // ── Upload lại file 1.0 khách đã sửa (còn stamp) ⇒ 1.4 diff ⇒ 3.1 nguồn reupload ───────────────────────
     const zip = await JSZip.loadAsync(v1)

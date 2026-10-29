@@ -5,7 +5,7 @@
 import { sendSuccess } from "../../shared/types/api-response.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { docxToPdf, PdfConverterError } from "../../shared/pdf/gotenberg.client.js"
-import { PDF_MIME, toPdfFileName } from "../render/export.controller.js"
+import { PDF_MIME, attachmentDisposition, toPdfFileName } from "../render/export.controller.js"
 import { authorizeMode1, mode1Handler, parseInput } from "../import/mode1.http.js"
 import { DOCX_CONTENT_TYPE } from "./doc-file.store.js"
 import { compareQuerySchema, downloadQuerySchema, releaseRequestSchema, requestChangesRequestSchema, submitPackageRequestSchema, versionParamsSchema } from "./doc-version.dto.js"
@@ -48,11 +48,11 @@ export const download = mode1Handler(async (req, res) => {
       throw new ApiError(503, "Chưa xuất được PDF lúc này. Bạn hãy thử lại sau ít phút, hoặc tải bản Word.", "PDF_EXPORT_UNAVAILABLE")
     }
     res.setHeader("Content-Type", PDF_MIME)
-    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(toPdfFileName(file.filename))}`)
+    res.setHeader("Content-Disposition", attachmentDisposition(toPdfFileName(file.filename)))
     return res.status(200).send(pdf)
   }
   res.setHeader("Content-Type", DOCX_CONTENT_TYPE)
-  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`)
+  res.setHeader("Content-Disposition", attachmentDisposition(file.filename))
   return res.status(200).send(file.data)
 })
 

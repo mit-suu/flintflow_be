@@ -49,7 +49,16 @@ export const toImportDto = (doc: IImportedDocument): ImportedDocumentDto => ({
       ? { kind: doc.preflight.document_kind.kind, confidence: doc.preflight.document_kind.confidence, signals: [...doc.preflight.document_kind.signals], reasons: [...doc.preflight.document_kind.reasons] }
       : null
   },
-  stamp: doc.stamp ? { project_id: doc.stamp.project_id, version: doc.stamp.version ?? null, source: doc.stamp.source ?? null } : null,
+  stamp: doc.stamp
+    ? {
+        project_id: doc.stamp.project_id,
+        version: doc.stamp.version ?? null,
+        source: doc.stamp.source ?? null,
+        base_version: doc.stamp.base_version ?? null,
+        latest_cr: doc.stamp.latest_cr ?? null,
+        kind: doc.stamp.kind ?? null
+      }
+    : null,
   confirmed_latest_at: toIso(doc.confirmed_latest_at),
   paused: doc.paused ? { reason: doc.paused.reason, at: toIso(doc.paused.at)! } : null,
   extract_cursor: doc.extract_cursor ?? null,

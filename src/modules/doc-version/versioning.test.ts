@@ -1,12 +1,14 @@
 import { describe, it, expect } from "vitest"
 import {
   compareDocVersions,
-  downloadFileName,
   isDocVersion,
   isReleaseVersion,
   nextMajor,
   nextMinor,
-  parseDocVersion
+  parseDocVersion,
+  versionFileName,
+  versionLineage,
+  type LineageVersion
 } from "./versioning.js"
 
 describe("versioning — G4", () => {
@@ -50,11 +52,53 @@ describe("versioning — G4", () => {
     expect(isReleaseVersion("1.2")).toBe(false)
   })
 
-  it("tên file tải về: draft có _DRAFT, release thì không; bỏ ký tự cấm của Windows", () => {
-    expect(downloadFileName("Lumen SRS", "0.2")).toBe("Lumen SRS_v0.2_DRAFT.docx")
-    expect(downloadFileName("Lumen SRS", "1.0")).toBe("Lumen SRS_v1.0.docx")
-    expect(downloadFileName("A/B:C", "0.1")).toBe("A_B_C_v0.1_DRAFT.docx")
-    expect(downloadFileName("   ", "1.0")).toBe("SRS_v1.0.docx")
+  it("FLF-334 tên file: release / nháp có CR / nháp v0 / mode 2 chưa baseline / tracked / original / pdf", () => {
+    expect(versionFileName({ name: "Lumen SRS", release: true, base: "2.0" })).toBe("Lumen SRS_v2.0.docx")
+    expect(versionFileName({ name: "Lumen SRS", release: false, base: "1.0", latestCr: "CR-014" })).toBe("Lumen SRS_v1.0+CR-014_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "0", latestCr: "CR-002" })).toBe("Lumen_v0+CR-002_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "v0", latestCr: null })).toBe("Lumen_v0_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "v1.0" })).toBe("Lumen_v1.0_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: null })).toBe("Lumen_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "1.0", latestCr: "CR-001", tracked: true })).toBe("Lumen_v1.0+CR-001_tracked_DRAFT.docx")
+    expect(versionFileName({ name: "Lumen", release: false, base: "0", original: true })).toBe("Lumen_v0_original.docx")
+    expect(versionFileName({ name: "Lumen", release: true, base: "2.0", ext: "pdf" })).toBe("Lumen_v2.0.pdf")
+    // release bỏ qua mã CR; không mang mã dự án
+    expect(versionFileName({ name: "Lumen", release: true, base: "1.0", latestCr: "CR-009" })).toBe("Lumen_v1.0.docx")
+  })
+
+  it("tên file bỏ ký tự cấm của Windows, tên rỗng ⇒ SRS, giữ chữ Unicode", () => {
+    expect(versionFileName({ name: "A/B:C", release: false, base: "0" })).toBe("A_B_C_v0_DRAFT.docx")
+    expect(versionFileName({ name: "A\\B", release: true, base: "2.0" })).toBe("A_B_v2.0.docx")
+    expect(versionFileName({ name: "   ", release: true, base: "1.0" })).toBe("SRS_v1.0.docx")
+    expect(versionFileName({ name: "Dự án", release: true, base: "1.0" })).toBe("Dự án_v1.0.docx")
+  })
+
+  describe("versionLineage — release gốc + CR mới nhất theo version", () => {
+    const v = (version: string, kind: string, cr_ids: string[] = []): LineageVersion => ({ version, kind, cr_ids })
+    const history = [v("0.1", "imported"), v("0.2", "cr_revision", ["CR-001"]), v("1.0", "release", ["CR-001"]), v("1.1", "cr_revision", ["CR-002"]), v("1.2", "cr_revision", ["CR-003"])]
+
+    it("release ⇒ chính nó, không CR", () => {
+      expect(versionLineage(history, "1.0")).toEqual({ release: true, base: "1.0", latestCr: null })
+    })
+
+    it("nháp sau 2 CR từ 1.0 ⇒ base 1.0, CR của chính nó; bản nháp cũ hơn ⇒ CR của nó", () => {
+      expect(versionLineage(history, "1.2")).toEqual({ release: false, base: "1.0", latestCr: "CR-003" })
+      expect(versionLineage(history, "1.1")).toEqual({ release: false, base: "1.0", latestCr: "CR-002" })
+    })
+
+    it("trước release đầu ⇒ base 0; bản import ⇒ không CR (CR của release không lọt vào)", () => {
+      expect(versionLineage(history, "0.2")).toEqual({ release: false, base: "0", latestCr: "CR-001" })
+      expect(versionLineage(history, "0.1")).toEqual({ release: false, base: "0", latestCr: null })
+      expect(versionLineage([v("0.0", "imported")], "0.0")).toEqual({ release: false, base: "0", latestCr: null })
+    })
+
+    it("release theo số, không theo kind: bản chuyển đổi 1.0 (kind imported) là gốc của 1.1", () => {
+      expect(versionLineage([v("1.0", "imported"), v("1.1", "cr_revision", ["CR-001"])], "1.1")).toEqual({ release: false, base: "1.0", latestCr: "CR-001" })
+    })
+
+    it("CR cuối của version có nhiều CR", () => {
+      expect(versionLineage([v("0.1", "imported"), v("0.2", "cr_revision", ["CR-004", "CR-005"])], "0.2").latestCr).toBe("CR-005")
+    })
   })
 
   it.each([
