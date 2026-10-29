@@ -10,7 +10,9 @@ import { allTargets, layoutOwners, renderKind } from "./index.js"
 import { MAX_ASSOCIATIONS_PER_DIAGRAM, MAX_CLUSTER_SPAN, MAX_USE_CASES_PER_DIAGRAM, actorUseCaseCounts, dependentUseCaseIds, partitionUseCases } from "./usecase.renderer.js"
 import { saltCell } from "./screen-layout.renderer.js"
 import { screenFlowTitleOf } from "./screen-flow.renderer.js"
-import { DEFAULT_IN, DEFAULT_OUT } from "./context.renderer.js"
+import { DEFAULT_IN, DEFAULT_OUT, contextActors, titleCase } from "./context.renderer.js"
+import { buildContextLayout } from "./context-layout.js"
+import { DIAGRAM_LABELS } from "./labels.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -30,20 +32,6 @@ const only = (spine: Spine, kind: Parameters<typeof renderKind>[1], owner: strin
 const usecaseParts = (spine: Spine): string[] => renderKind(spine, "usecase").map((p) => p.source)
 const usecasePuml = (spine: Spine): string => usecaseParts(spine).join("\n")
 const declaredActors = (puml: string): string[] => [...puml.matchAll(/^actor "[^"]*" as (\w+)/gm)].map((m) => m[1])
-/** Nhãn (rỗng nếu mũi tên trơn) theo chiều, và cung của actor, đọc từ DOT của sơ đồ ngữ cảnh. */
-const contextFlows = (puml: string, actorId: string) => {
-  const edges = [...puml.matchAll(/-> \w+ \[(?:label=<(.*)>, )?actor_id="([^"]+)", flow="(in|out)", flow_index=\d+, pos=/g)]
-    .filter((m) => m[2] === actorId)
-  const text = (m: RegExpMatchArray): string => (m[1] ?? "").replace(/<BR\/>/g, " ").replace(/<[^>]*>/g, "")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&")
-  const line = (id: string) => puml.split("\n").find((l) => l.startsWith(`  ${id} [shape=box,`))
-  return {
-    inputs: edges.filter((m) => m[3] === "in").map(text),
-    outputs: edges.filter((m) => m[3] === "out").map(text),
-    lines: edges.map((m) => m[0]),
-    sector: line(actorId)?.match(/sector="(\w+)"/)?.[1]
-  }
-}
 const withoutFlows = (s: Spine) =>
   s.actors.forEach((a) => {
     delete a.flows_in
@@ -61,14 +49,16 @@ describe("renderers trên fixture 19 màn", () => {
       const rendered = renderKind(FIXTURE, target.kind, target.owner_id)
       for (const [index, part] of rendered.entries()) {
         const [open, close] =
-          part.kind === "screen_layout"
-            ? ["@startsalt", "@endsalt"]
-            : ["screen_flow", "context"].includes(part.kind)
-              ? ["@startdot", "@enddot"]
-              : part.kind === "erd"
-                ? ["@startchen", "@endchen"]
-                : ["@startuml", "@enduml"]
-        expect(part.source.startsWith(`${open}\n`), part.kind).toBe(true)
+          part.format === "svg"
+            ? ["<?xml", "</svg>"]
+            : part.kind === "screen_layout"
+              ? ["@startsalt", "@endsalt"]
+              : part.kind === "screen_flow"
+                ? ["@startdot", "@enddot"]
+                : part.kind === "erd"
+                  ? ["@startchen", "@endchen"]
+                  : ["@startuml", "@enduml"]
+        expect(part.source.startsWith(open), part.kind).toBe(true)
         expect(part.source.endsWith(`${close}\n`), part.kind).toBe(true)
         expect(VIETNAMESE_DIACRITICS.test(part.source), part.kind).toBe(false)
         expect(renderKind(FIXTURE, target.kind, target.owner_id)[index].source).toBe(part.source)
@@ -78,145 +68,154 @@ describe("renderers trên fixture 19 màn", () => {
     }
   })
 
-  it("context: DOT trắng đen, hệ thống nền xám — hình tròn, actor hình chữ nhật, mỗi luồng một mũi tên một nhãn", () => {
-    const { source: puml, section } = only(FIXTURE, "context")
-    expect(section).toBe("fixed:1")
-    expect(puml).toContain('graph [layout=nop2')
-    expect(puml).toContain('SYSTEM_ [shape=circle, pos="0,0!"')
-    expect(puml).toContain('label="FlintFlow"')
-    // Nét và chữ đen, hộp actor nền trắng, riêng vòng tròn hệ thống nền xám; không mã màu nào khác
-    expect(puml).toContain('color="black"')
-    expect(puml).toContain('fillcolor="white"')
-    expect(puml).toMatch(/ {2}SYSTEM_ \[shape=circle,[^\n]*fillcolor="lightgray"\];/)
-    expect(puml.match(/fillcolor="lightgray"/g)).toHaveLength(1)
-    expect(puml).not.toMatch(/#[0-9A-F]{6}/i)
-    // Một mũi tên một chiều, không có mũi tên hai đầu
-    expect(puml).not.toContain(" <-")
-    for (const a of FIXTURE.actors) {
-      expect(puml, a.id).toContain(`  ${a.id} [shape=box,`)
-      const flows = contextFlows(puml, a.id)
-      expect(flows.inputs.length + flows.outputs.length, a.id).toBe((a.flows_in ?? []).length + (a.flows_out ?? []).length)
-      for (const l of flows.lines) expect(l.match(/label=/g)?.length ?? 0, a.id).toBe(1)
-    }
+  it("context: SVG — một hình tròn, mỗi actor một hộp, mỗi luồng một đoạn thẳng có đầu mũi tên và một nhãn", () => {
+    const part = only(FIXTURE, "context")
+    const svg = part.source
+    expect(part.section).toBe("fixed:1")
+    expect(part.format).toBe("svg")
+    expect(part.issues).toEqual([])
+    expect(svg).not.toContain("@startdot")
+    expect(svg).toContain(">FlintFlow<")
+    // Không tiêu đề; đúng một vòng tròn; mỗi actor một hộp #7ACFF5 (cộng một hình tròn cùng màu)
+    expect(svg).not.toContain("<title>")
+    expect(svg.match(/<circle /g)).toHaveLength(1)
+    expect(svg.match(/<rect [^>]*fill="#7ACFF5"/g)).toHaveLength(FIXTURE.actors.length)
+    const flows = FIXTURE.actors.reduce((n, a) => n + (a.flows_in ?? []).length + (a.flows_out ?? []).length, 0)
+    expect(svg.match(/<line /g)).toHaveLength(flows)
+    expect(svg.match(/<polygon /g)).toHaveLength(flows)
+    expect(svg).not.toContain("stroke-dasharray")
+    // Mỗi nhãn nằm trên nền trắng không viền
+    expect(svg.match(/<rect [^>]*fill="#fff" transform=/g)).toHaveLength(flows)
   })
 
-  it("context: nhãn đúng bằng flows_in / flows_out — actor một chiều là hợp lệ, không bịa chiều còn lại", () => {
-    const { source: puml } = only(FIXTURE, "context")
+  it("context: nhãn là tên gói dữ liệu Title Case của flows_in / flows_out — actor một chiều không bịa chiều còn lại", () => {
+    const svg = only(FIXTURE, "context").source
+    const actors = contextActors(FIXTURE.actors)
     for (const a of FIXTURE.actors) {
-      expect(contextFlows(puml, a.id).inputs, a.id).toEqual(a.flows_in ?? [])
-      expect(contextFlows(puml, a.id).outputs, a.id).toEqual(a.flows_out ?? [])
+      const mine = actors.find((x) => x.id === a.id)!
+      expect(mine.inbound, a.id).toEqual((a.flows_in ?? []).map(titleCase))
+      expect(mine.outbound, a.id).toEqual((a.flows_out ?? []).map(titleCase))
+      for (const text of [...mine.inbound, ...mine.outbound]) expect(svg, text).toContain(`>${text}<`)
     }
     // Email Service chỉ nhận dữ liệu, Scheduler chỉ phát tín hiệu
-    expect(contextFlows(puml, "A08")).toMatchObject({ inputs: [], outputs: ["email request"] })
-    expect(contextFlows(puml, "A09")).toMatchObject({ inputs: ["housekeeping tick"], outputs: [] })
-    expect(puml).not.toMatch(/Acknowledgement of|Response to/)
-    // Mọi mũi tên đều mang dữ liệu
-    expect(puml).not.toMatch(/-> \w+ \[actor_id=/)
+    expect(actors.find((a) => a.id === "A08")).toMatchObject({ inbound: [], outbound: ["Email Request"] })
+    expect(actors.find((a) => a.id === "A09")).toMatchObject({ inbound: ["Housekeeping Tick"], outbound: [] })
   })
 
-  it("context: actor xếp theo vai trò — người dùng trái, hệ thống ngoài phải, bộ hẹn giờ dưới", () => {
-    const { source: puml } = only(FIXTURE, "context")
-    for (const id of ["A01", "A02", "A03", "A04"]) expect(contextFlows(puml, id).sector, id).toBe("west")
-    for (const id of ["A05", "A06", "A07", "A08"]) expect(contextFlows(puml, id).sector, id).toBe("east")
-    expect(contextFlows(puml, "A09").sector).toBe("south")
+  it("context: người dùng bên trái tâm, hệ thống ngoài và bộ hẹn giờ bên phải", () => {
+    const layout = buildContextLayout(contextActors(FIXTURE.actors), "FlintFlow")
+    const at = (id: string) => layout.actors.find((a) => a.id === id)!
+    for (const id of ["A01", "A02", "A03", "A04"]) expect(at(id).side, id).toBe("left")
+    for (const id of ["A05", "A06", "A07", "A08", "A09"]) expect(at(id).side, id).toBe("right")
+    for (const id of ["A01", "A04"]) expect(at(id).box.x + at(id).box.w, id).toBeLessThan(layout.circle.cx)
+    for (const id of ["A05", "A09"]) expect(at(id).box.x, id).toBeGreaterThan(layout.circle.cx)
   })
 
-  it("context: chỉ có người dùng ⇒ chia đôi sang hai cột", () => {
+  it("context: chỉ có người dùng ⇒ chia đôi sang hai nửa", () => {
     const humans = mutate((s) => (s.actors = s.actors.filter((a) => a.kind === "human")))
-    const { source: puml } = only(humans, "context")
-    expect(["A01", "A02", "A03", "A04"].map((id) => contextFlows(puml, id).sector)).toEqual(["west", "west", "east", "east"])
+    const layout = buildContextLayout(contextActors(humans.actors), "FlintFlow")
+    expect(["A01", "A02", "A03", "A04"].map((id) => layout.actors.find((a) => a.id === id)!.side)).toEqual(["left", "left", "right", "right"])
+    expect(only(humans, "context").issues).toEqual([])
   })
 
   it.each([
-    { name: "5 nhãn", count: 5, shown: ["f0", "f1", "f2, f3, f4"] },
-    { name: "4 nhãn", count: 4, shown: ["f0", "f1", "f2, f3"] },
-    { name: "đúng 3 nhãn", count: 3, shown: ["f0", "f1", "f2"] }
-  ])("context: tối đa 3 mũi tên mỗi chiều, dữ liệu dư gộp vào mũi tên cuối ($name)", ({ count, shown }) => {
-    const labels = Array.from({ length: count }, (_, i) => `f${i}`)
+    { name: "6 nhãn một chiều", count: 6 },
+    { name: "12 nhãn một chiều", count: 12 }
+  ])("context: không giới hạn, không gộp — mỗi phần tử là một mũi tên ($name)", ({ count }) => {
+    const labels = Array.from({ length: count }, (_, i) => `Flow ${i}`)
     const spine = mutate((s) => {
       const a = s.actors.find((x) => x.id === "A01")!
       a.flows_in = labels
       a.flows_out = labels
     })
-    const flows = contextFlows(only(spine, "context").source, "A01")
-    expect(flows.inputs).toEqual(shown)
-    expect(flows.outputs).toEqual(shown)
-    expect(only(spine, "context").source).not.toMatch(/\d+ more/)
-    // Spine giữ nguyên đủ mọi luồng; chỉ sơ đồ gộp
-    expect(spine.actors.find((x) => x.id === "A01")!.flows_in).toHaveLength(count)
+    const part = only(spine, "context")
+    const actor = contextActors(spine.actors).find((a) => a.id === "A01")!
+    expect(actor.inbound).toEqual(labels)
+    expect(actor.outbound).toEqual(labels)
+    for (const text of labels) expect(part.source.split(`>${text}<`).length - 1, text).toBe(2)
+    expect(part.issues).toEqual([])
   })
 
-  it("context: HTML label backing preserves punctuation and safely escapes markup", () => {
+  it("context: chữ có ký tự đặc biệt được escape, không sinh phần tử lạ", () => {
     const spine = mutate((s) => {
       const a = s.actors.find((x) => x.id === "A01")!
       a.flows_in = ["Send R&D <proposal>"]
       a.flows_out = ["Accepted > proposal & summary"]
+      a.name = "<script>x</script>"
     })
-    const { source: puml } = only(spine, "context")
-    expect(contextFlows(puml, "A01").inputs).toEqual(["Send R&D <proposal>"])
-    expect(contextFlows(puml, "A01").outputs).toEqual(["Accepted > proposal & summary"])
-    expect(puml).toContain('CELLPADDING="3" BGCOLOR="white"')
+    const { source: svg, issues } = only(spine, "context")
+    expect(svg).toContain("Send R&amp;D &lt;proposal&gt;")
+    expect(svg).toContain("Accepted &gt; Proposal &amp; Summary")
+    expect(svg).not.toContain("<script")
+    expect(issues).toEqual([])
   })
 
   it.each([
-    { name: "hai chiều lệch độ dài", flowsIn: ["first", "second"], flowsOut: ["first result"], inputs: ["first", "second"], outputs: ["first result"] },
-    { name: "chỉ chiều vào", flowsIn: ["sensor reading"], flowsOut: [] as string[], inputs: ["sensor reading"], outputs: [] as string[] },
-    { name: "phần tử rỗng bị bỏ", flowsIn: ["", "  ", "order"], flowsOut: ["", "receipt"], inputs: ["order"], outputs: ["receipt"] }
-  ])("context: dữ liệu luồng $name ⇒ đúng số mũi tên, không bịa nhãn", ({ flowsIn, flowsOut, inputs, outputs }) => {
+    { name: "hai chiều lệch độ dài", flowsIn: ["first", "second"], flowsOut: ["first result"], inbound: ["First", "Second"], outbound: ["First Result"] },
+    { name: "chỉ chiều vào", flowsIn: ["sensor reading"], flowsOut: [] as string[], inbound: ["Sensor Reading"], outbound: [] as string[] },
+    { name: "phần tử rỗng bị bỏ", flowsIn: ["", "  ", "order"], flowsOut: ["", "receipt"], inbound: ["Order"], outbound: ["Receipt"] }
+  ])("context: dữ liệu luồng $name ⇒ đúng số mũi tên, không bịa nhãn", ({ flowsIn, flowsOut, inbound, outbound }) => {
     const spine = mutate((s) => {
       const a = s.actors.find((x) => x.id === "A03")!
       a.flows_in = flowsIn
       a.flows_out = flowsOut
     })
     const before = structuredClone(spine)
-    const { source: puml } = only(spine, "context")
-    expect(contextFlows(puml, "A03")).toMatchObject({ inputs, outputs })
-    expect(puml).not.toMatch(/Acknowledgement of|Response to/)
+    expect(contextActors(spine.actors).find((a) => a.id === "A03")).toMatchObject({ inbound, outbound })
+    expect(only(spine, "context").issues).toEqual([])
     expect(spine).toEqual(before)
   })
 
   it("context: không khai báo luồng ⇒ một mũi tên mang nhãn dự phòng theo kind, không lấy tên use case làm nhãn", () => {
-    const { source: puml } = only(mutate(withoutFlows), "context")
-    for (const a of FIXTURE.actors) {
-      const flows = contextFlows(puml, a.id)
-      if (a.kind === "system") expect(flows, a.id).toMatchObject({ inputs: [], outputs: [DEFAULT_OUT.system] })
-      else expect(flows, a.id).toMatchObject({ inputs: [DEFAULT_IN[a.kind]], outputs: [] })
-      for (const l of flows.lines) expect(l, a.id).toContain("label=<")
+    const spine = mutate(withoutFlows)
+    const part = only(spine, "context")
+    for (const a of contextActors(spine.actors)) {
+      if (a.kind === "system") expect(a, a.id).toMatchObject({ inbound: [], outbound: [DEFAULT_OUT.system] })
+      else expect(a, a.id).toMatchObject({ inbound: [DEFAULT_IN[a.kind]], outbound: [] })
     }
-    for (const uc of FIXTURE.use_cases) expect(puml, uc.id).not.toContain(`<TD>${uc.name}</TD>`)
+    for (const uc of FIXTURE.use_cases) expect(part.source, uc.id).not.toContain(`>${uc.name}<`)
+    expect(part.issues).toEqual([])
   })
 
   it.each([
     {
       name: "chỉ người dùng gửi vào ⇒ người dùng đầu tiên nhận kết quả",
       actors: [["A01", "human", ["order"], []], ["A02", "human", ["feedback"], []]] as const,
-      expected: { A01: { inputs: ["order"], outputs: [DEFAULT_OUT.human] }, A02: { inputs: ["feedback"], outputs: [] } }
+      expected: { A01: { inbound: ["Order"], outbound: [DEFAULT_OUT.human] }, A02: { inbound: ["Feedback"], outbound: [] } }
     },
     {
       name: "chỉ hệ thống nhận ra ⇒ hệ thống đầu tiên gửi phản hồi",
       actors: [["A01", "system", [], ["sms"]], ["A02", "system", [], []]] as const,
-      expected: { A01: { inputs: [DEFAULT_IN.system], outputs: ["sms"] }, A02: { inputs: [], outputs: [DEFAULT_OUT.system] } }
+      expected: { A01: { inbound: [DEFAULT_IN.system], outbound: ["Sms"] }, A02: { inbound: [], outbound: [DEFAULT_OUT.system] } }
     },
     {
       name: "chỉ bộ hẹn giờ chưa có luồng ⇒ thêm chiều ra",
       actors: [["T01", "time", [], []], ["T02", "time", [], []]] as const,
-      expected: { T01: { inputs: [DEFAULT_IN.time], outputs: [DEFAULT_OUT.time] }, T02: { inputs: [DEFAULT_IN.time], outputs: [] } }
+      expected: { T01: { inbound: [DEFAULT_IN.time], outbound: [DEFAULT_OUT.time] }, T02: { inbound: [DEFAULT_IN.time], outbound: [] } }
     },
     {
       name: "người dùng chỉ vào, hệ thống chỉ ra ⇒ giữ nguyên",
       actors: [["A01", "human", ["order"], []], ["A02", "system", [], ["sms"]]] as const,
-      expected: { A01: { inputs: ["order"], outputs: [] }, A02: { inputs: [], outputs: ["sms"] } }
+      expected: { A01: { inbound: ["Order"], outbound: [] }, A02: { inbound: [], outbound: ["Sms"] } }
     }
   ])("context: toàn sơ đồ luôn có cả chiều vào lẫn chiều ra ($name)", ({ actors, expected }) => {
     const spine = mutate((s) => {
       s.use_cases = []
       s.actors = actors.map(([id, kind, flowsIn, flowsOut]) => ({ id, kind, name: `Actor ${id}`, description: "", flows_in: [...flowsIn], flows_out: [...flowsOut] }))
     })
-    const { source: puml } = only(spine, "context")
-    for (const [id, flows] of Object.entries(expected)) expect(contextFlows(puml, id), id).toMatchObject(flows)
-    expect(puml).toMatch(/flow="in"/)
-    expect(puml).toMatch(/flow="out"/)
-    expect(puml).not.toMatch(/-> \w+ \[actor_id=/)
+    const result = contextActors(spine.actors)
+    for (const [id, flows] of Object.entries(expected)) expect(result.find((a) => a.id === id), id).toMatchObject(flows)
+    expect(result.some((a) => a.inbound.length > 0)).toBe(true)
+    expect(result.some((a) => a.outbound.length > 0)).toBe(true)
+    expect(only(spine, "context").issues).toEqual([])
+  })
+
+  it("context: Title Case giữ từ viết hoa sẵn, từ nối ngắn viết thường, tiếng Việt giữ nguyên", () => {
+    expect(titleCase("payment request")).toBe("Payment Request")
+    expect(titleCase("SRS file and OTP code for the AI")).toBe("SRS File and OTP Code for the AI")
+    expect(titleCase("sign-in via eKYC")).toBe("Sign-in via eKYC")
+    const vi = contextActors([{ id: "A01", name: "Khách", kind: "human", description: "", flows_in: ["thông tin đăng ký"], flows_out: [] }], DIAGRAM_LABELS.vi)
+    expect(vi[0].inbound).toEqual(["thông tin đăng ký"])
   })
 
   it("usecase: mọi use case và cạnh include/extend", () => {
@@ -513,8 +512,10 @@ describe("renderers trên fixture 19 màn", () => {
     const empty = createEmptySpine({ name: "Empty" })
     expect(only(empty, "screen_flow").source).toContain("NO_SCREENS")
     expect(only(empty, "erd").source).toContain("NO_ENTITIES")
-    expect(only(empty, "context").source).toContain('label="Empty"')
-    expect(only(empty, "context").source).not.toContain(" -> ")
+    const context = only(empty, "context")
+    expect(context.source).toContain(">Empty<")
+    expect(context.source).not.toContain("<line ")
+    expect(context.issues).toEqual([])
   })
 })
 
@@ -627,14 +628,14 @@ describe("tên hệ thống (FLF-177)", () => {
   it("boundary use case + sơ đồ ngữ cảnh in `project.system_name`, chưa có ⇒ `project.name`", () => {
     const named = mutate((s) => (s.project.system_name = "ShipFast Delivery"))
     for (const part of usecaseParts(named)) expect(part).toContain('rectangle "ShipFast Delivery" {')
-    expect(only(named, "context").source).toContain('label="ShipFast Delivery"')
+    expect(only(named, "context").source).toContain(">ShipFast Delivery<")
 
     const unnamed = mutate((s) => {
       s.project.system_name = null
       s.project.name = "Du an giao hang"
     })
     expect(usecasePuml(unnamed)).toContain('rectangle "Du an giao hang" {')
-    expect(only(unnamed, "context").source).toContain('label="Du an giao hang"')
+    expect(only(unnamed, "context").source).toContain(">Du an giao hang<")
   })
 
   it("system_name rỗng/khoảng trắng coi như chưa đặt", () => {
@@ -642,6 +643,6 @@ describe("tên hệ thống (FLF-177)", () => {
       s.project.system_name = "   "
       s.project.name = "Du an giao hang"
     })
-    expect(only(blank, "context").source).toContain('label="Du an giao hang"')
+    expect(only(blank, "context").source).toContain(">Du an giao hang<")
   })
 })

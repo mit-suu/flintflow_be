@@ -2,33 +2,7 @@
 
 ## `context` — §1 System Context
 
-Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`. Level-0 data flow (context diagram), black and white with a light grey system circle: ONE process — the system as a true circle in the centre — and external entities as plain boxes ringed around it by role (`human` left/`west`, `system` right/`east`, `time` below/`south`; `north` only on overflow). Every `flows_in` item (actor → system) and every `flows_out` item (system → actor) is its own arrow with one data-noun label; one-way actors draw only the arrows that exist — never pair lists by index or invent a counterpart — but the diagram as a whole always has both directions. Every arrow carries data: more than 3 items in a direction ⇒ first 2 + a third arrow joining the rest with `, ` (never `+ N more`); missing flows get a fallback label by kind. Graphviz DOT with `nop2` keeps the geometry computed in `context-layout.ts`: a straight leg from the box holding the label, then one convex cubic into the circle; positions (`pos`, `lp`) in points, dimensions in inches. See `renderer/context` for the full rules. Generated example (the time actor has no flows and falls back to `scheduled trigger`):
-
-```plantuml
-@startdot
-digraph Context {
-  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];
-  node [fontname="sans-serif", fontsize=14, fontcolor="black", fixedsize=true, pin=true, style=filled, color="black", fillcolor="white", penwidth=1.2];
-  edge [fontname="sans-serif", fontsize=12, color="black", fontcolor="black", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];
-  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fontsize=18, fillcolor="lightgray"];
-  A01 [shape=box, pos="-334.544958,0.000000!", width=1.444444, height=1.111111, label="Founder", sector="west"];
-  A02 [shape=box, pos="356.550000,0.000000!", width=2.031944, height=0.694444, label="Email Service", sector="east"];
-  A03 [shape=box, pos="0.000000,-216.000000!", width=2.369444, height=0.611111, label="Scheduler", sector="south"];
-  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-282.544958,15.000000!"];
-  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.352241,11.363636!"];
-  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.352241,-11.363636!"];
-  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-282.544958,-15.000000!"];
-  SYSTEM_A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="100.000000,0.000000!"];
-  A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="283.400000,0.000000!"];
-  A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-194.000000!"];
-  SYSTEM_A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-100.000000!"];
-  A01_IN_0 -> SYSTEM_A01_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>brief answers</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=0, pos="e,-99.352241,11.363636 -282.544958,15.000000 -232.078291,15.000000 -181.611625,15.000000 -131.144958,15.000000 -131.144958,15.000000 -120.973156,13.836577 -107.300420,12.272727", lp="-206.844958,15.000000"];
-  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft section</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=0, pos="e,-282.544958,-15.000000 -99.352241,-11.363636 -116.838235,-13.363636 -131.144958,-15.000000 -131.144958,-15.000000 -178.944958,-15.000000 -226.744958,-15.000000 -274.544958,-15.000000", lp="-206.844958,-15.000000"];
-  SYSTEM_A02_OUT_0 -> A02_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email request</TD></TR></TABLE>>, actor_id="A02", flow="out", flow_index=0, pos="e,283.400000,0.000000 100.000000,0.000000 117.600000,0.000000 132.000000,0.000000 132.000000,0.000000 179.800000,0.000000 227.600000,0.000000 275.400000,0.000000", lp="207.700000,0.000000"];
-  A03_IN_0 -> SYSTEM_A03_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>scheduled trigger</TD></TR></TABLE>>, actor_id="A03", flow="in", flow_index=0, pos="e,0.000000,-100.000000 0.000000,-194.000000 0.000000,-173.333333 0.000000,-152.666667 0.000000,-132.000000 0.000000,-132.000000 0.000000,-121.761880 0.000000,-108.000000", lp="0.000000,-163.000000"];
-}
-@enddot
-```
+Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`. Engine `svg` (no PlantUML source): level-0 data flow in Yourdon/DeMarco notation — ONE circle for the whole system, one rectangle per external actor (fill `#7ACFF5`, role name inside), people on the left half and external systems / scheduler on the right half. Every `flows_in` item (actor → system) and every `flows_out` item (system → actor) is its own straight arrow with a solid head and one Title Case data-noun label along it on white; no limit, no merging, no unlabelled arrows, no data stores, no flows between entities, no title. One-way actors draw only the arrows that exist — never pair lists by index or invent a counterpart — but the diagram as a whole always has both directions; missing flows get a fallback label by kind. See `renderer/context` for the full rules.
 
 ## `usecase` — §2.2.1
 

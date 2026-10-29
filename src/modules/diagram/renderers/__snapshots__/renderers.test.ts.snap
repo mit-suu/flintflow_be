@@ -1,77 +1,102 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
-"@startdot
-digraph Context {
-  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];
-  node [fontname="sans-serif", fontsize=14, fontcolor="black", fixedsize=true, pin=true, style=filled, color="black", fillcolor="white", penwidth=1.2];
-  edge [fontname="sans-serif", fontsize=12, color="black", fontcolor="black", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];
-  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fontsize=18, fillcolor="lightgray"];
-  A01 [shape=box, pos="-484.284636,348.000000!", width=1.444444, height=1.944444, label="Founder", sector="west"];
-  A02 [shape=box, pos="-452.178257,146.000000!", width=2.411111, height=1.111111, label="Business Analyst", sector="west"];
-  A03 [shape=box, pos="-455.402390,-26.000000!", width=2.031944, height=1.111111, label="Administrator", sector="west"];
-  A04 [shape=box, pos="-432.433057,-198.000000!", width=1.444444, height=1.111111, label="Guest", sector="west"];
-  A05 [shape=box, pos="388.210598,288.000000!", width=2.284722, height=1.111111, label="Payment Gateway", sector="east"];
-  A06 [shape=box, pos="366.455820,116.000000!", width=1.905556, height=1.111111, label="LLM Provider", sector="east"];
-  A07 [shape=box, pos="425.265546,-56.000000!", width=2.284722, height=1.111111, label="PlantUML Server", sector="east"];
-  A08 [shape=box, pos="409.398137,-213.000000!", width=2.031944, height=0.694444, label="Email Service", sector="east"];
-  A09 [shape=box, pos="0.000000,-216.000000!", width=2.369444, height=0.611111, label="Scheduler", sector="south"];
-  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,393.000000!"];
-  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-36.297525,93.179878!"];
-  A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,363.000000!"];
-  SYSTEM_A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-44.525492,89.540385!"];
-  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-52.393045,85.176105!"];
-  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,333.000000!"];
-  SYSTEM_A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-59.836501,80.122364!"];
-  A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,303.000000!"];
-  A02_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-365.378257,161.000000!"];
-  SYSTEM_A02_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-70.263887,71.154664!"];
-  SYSTEM_A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-77.253092,63.497715!"];
-  A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-365.378257,131.000000!"];
-  A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-382.252390,-11.000000!"];
-  SYSTEM_A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.805814,-6.228931!"];
-  SYSTEM_A03_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-97.392721,-22.686073!"];
-  A03_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-382.252390,-41.000000!"];
-  A04_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-380.433057,-183.000000!"];
-  SYSTEM_A04_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-68.996072,-72.384681!"];
-  SYSTEM_A04_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-62.210997,-78.292988!"];
-  A04_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-380.433057,-213.000000!"];
-  A05_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="305.960598,303.000000!"];
-  SYSTEM_A05_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="37.169311,92.835566!"];
-  SYSTEM_A05_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="45.362803,89.119112!"];
-  A05_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="305.960598,273.000000!"];
-  A06_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="297.855820,131.000000!"];
-  SYSTEM_A06_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="70.458173,70.962284!"];
-  SYSTEM_A06_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="79.162400,61.100854!"];
-  A06_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="297.855820,101.000000!"];
-  A07_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="343.015546,-41.000000!"];
-  SYSTEM_A07_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="97.392721,-22.686073!"];
-  SYSTEM_A07_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="92.701563,-37.502270!"];
-  A07_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="343.015546,-71.000000!"];
-  SYSTEM_A08_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="62.210997,-78.292988!"];
-  A08_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="336.248137,-213.000000!"];
-  A09_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-194.000000!"];
-  SYSTEM_A09_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-100.000000!"];
-  A01_IN_0 -> SYSTEM_A01_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>brief answers</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=0, pos="e,-36.297525,93.179878 -432.284636,393.000000 -363.617969,393.000000 -294.951302,393.000000 -226.284636,393.000000 -154.196216,393.000000 -102.126530,262.127523 -39.201546,100.634183", lp="-356.584636,393.000000"];
-  A01_IN_1 -> SYSTEM_A01_IN_1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>accepted step</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=1, pos="e,-44.525492,89.540385 -432.284636,363.000000 -363.617969,363.000000 -294.951302,363.000000 -226.284636,363.000000 -181.236850,363.000000 -121.260605,243.830708 -48.087679,96.703542", lp="-356.584636,363.000000"];
-  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft section</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=0, pos="e,-432.284636,333.000000 -52.393045,85.176105 -136.235065,221.479247 -204.833081,333.000000 -226.284636,333.000000 -292.284636,333.000000 -358.284636,333.000000 -424.284636,333.000000", lp="-356.584636,333.000000"];
-  SYSTEM_A01_OUT_1 -> A01_OUT_1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>srs document</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=1, pos="e,-432.284636,303.000000 -59.836501,80.122364 -151.382975,202.705064 -226.284636,303.000000 -226.284636,303.000000 -292.284636,303.000000 -358.284636,303.000000 -424.284636,303.000000", lp="-360.484636,303.000000"];
-  A02_IN_0 -> SYSTEM_A02_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>verification result</TD></TR></TABLE>>, actor_id="A02", flow="in", flow_index=0, pos="e,-70.263887,71.154664 -365.378257,161.000000 -296.711590,161.000000 -228.044923,161.000000 -159.378257,161.000000 -158.999694,161.000000 -122.089810,123.637017 -75.885010,76.847025", lp="-266.278257,161.000000"];
-  SYSTEM_A02_OUT_0 -> A02_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>red flag list</TD></TR></TABLE>>, actor_id="A02", flow="out", flow_index=0, pos="e,-365.378257,131.000000 -77.253092,63.497715 -122.421933,100.623972 -159.378257,131.000000 -159.378257,131.000000 -225.378257,131.000000 -291.378257,131.000000 -357.378257,131.000000", lp="-289.678257,131.000000"];
-  A03_IN_0 -> SYSTEM_A03_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>account action</TD></TR></TABLE>>, actor_id="A03", flow="in", flow_index=0, pos="e,-99.805814,-6.228931 -382.252390,-11.000000 -313.585724,-11.000000 -244.919057,-11.000000 -176.252390,-11.000000 -176.252390,-11.000000 -146.120481,-9.119452 -107.790279,-6.727245", lp="-302.652390,-11.000000"];
-  SYSTEM_A03_OUT_0 -> A03_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>platform metrics</TD></TR></TABLE>>, actor_id="A03", flow="out", flow_index=0, pos="e,-382.252390,-41.000000 -97.392721,-22.686073 -140.635275,-32.758733 -176.015546,-41.000000 -176.252390,-41.000000 -242.252390,-41.000000 -308.252390,-41.000000 -374.252390,-41.000000", lp="-294.852390,-41.000000"];
-  A04_IN_0 -> SYSTEM_A04_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>registration request</TD></TR></TABLE>>, actor_id="A04", flow="in", flow_index=0, pos="e,-68.996072,-72.384681 -380.433057,-183.000000 -311.766391,-183.000000 -243.099724,-183.000000 -174.433057,-183.000000 -174.433057,-183.000000 -129.967043,-136.350123 -74.515758,-78.175455", lp="-277.433057,-183.000000"];
-  SYSTEM_A04_OUT_0 -> A04_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>registration result</TD></TR></TABLE>>, actor_id="A04", flow="out", flow_index=0, pos="e,-380.433057,-213.000000 -62.210997,-78.292988 -121.081424,-152.381844 -169.248137,-213.000000 -174.433057,-213.000000 -240.433057,-213.000000 -306.433057,-213.000000 -372.433057,-213.000000", lp="-281.333057,-213.000000"];
-  A05_IN_0 -> SYSTEM_A05_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>payment result</TD></TR></TABLE>>, actor_id="A05", flow="in", flow_index=0, pos="e,37.169311,92.835566 305.960598,303.000000 250.293932,303.000000 194.627265,303.000000 138.960598,303.000000 121.693956,303.000000 85.068268,212.449549 40.143007,100.262351", lp="226.360598,303.000000"];
-  SYSTEM_A05_OUT_0 -> A05_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>payment request</TD></TR></TABLE>>, actor_id="A05", flow="out", flow_index=0, pos="e,305.960598,273.000000 45.362803,89.119112 96.841590,190.253600 138.960598,273.000000 138.960598,273.000000 191.960598,273.000000 244.960598,273.000000 297.960598,273.000000", lp="222.460598,273.000000"];
-  A06_IN_0 -> SYSTEM_A06_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>generated draft</TD></TR></TABLE>>, actor_id="A06", flow="in", flow_index=0, pos="e,70.458173,70.962284 297.855820,131.000000 242.189153,131.000000 186.522486,131.000000 130.855820,131.000000 130.114966,131.000000 106.266352,107.024000 76.094904,76.639191", lp="214.355820,131.000000"];
-  SYSTEM_A06_OUT_0 -> A06_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft request</TD></TR></TABLE>>, actor_id="A06", flow="out", flow_index=0, pos="e,297.855820,101.000000 79.162400,61.100854 107.593781,83.045385 130.855820,101.000000 130.855820,101.000000 183.855820,101.000000 236.855820,101.000000 289.855820,101.000000", lp="222.155820,101.000000"];
-  A07_IN_0 -> SYSTEM_A07_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>diagram png</TD></TR></TABLE>>, actor_id="A07", flow="in", flow_index=0, pos="e,97.392721,-22.686073 343.015546,-41.000000 287.348879,-41.000000 231.682213,-41.000000 176.015546,-41.000000 176.015546,-41.000000 144.805337,-33.730082 105.184139,-24.500959", lp="275.115546,-41.000000"];
-  SYSTEM_A07_OUT_0 -> A07_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>puml source</TD></TR></TABLE>>, actor_id="A07", flow="out", flow_index=0, pos="e,343.015546,-71.000000 92.701563,-37.502270 138.243087,-55.926022 175.504335,-71.000000 176.015546,-71.000000 229.015546,-71.000000 282.015546,-71.000000 335.015546,-71.000000", lp="275.115546,-71.000000"];
-  SYSTEM_A08_OUT_0 -> A08_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email request</TD></TR></TABLE>>, actor_id="A08", flow="out", flow_index=0, pos="e,336.248137,-213.000000 62.210997,-78.292988 121.081424,-152.381844 169.248137,-213.000000 169.248137,-213.000000 222.248137,-213.000000 275.248137,-213.000000 328.248137,-213.000000", lp="260.548137,-213.000000"];
-  A09_IN_0 -> SYSTEM_A09_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>housekeeping tick</TD></TR></TABLE>>, actor_id="A09", flow="in", flow_index=0, pos="e,0.000000,-100.000000 0.000000,-194.000000 0.000000,-173.333333 0.000000,-152.666667 0.000000,-132.000000 0.000000,-132.000000 0.000000,-121.761880 0.000000,-108.000000", lp="0.000000,-163.000000"];
-}
-@enddot
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1099" height="728" viewBox="-542 -374 1099 728">
+<rect x="-542" y="-374" width="1099" height="728" fill="#fff"/>
+<line x1="-171.59" y1="-259.59" x2="-91.4" y2="-104.73" stroke="#000" stroke-width="1.2"/>
+<polygon points="-91.4,-104.73 -102.26,-113.74 -94.68,-111.08 -92.49,-118.8" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-146.82" y1="-259.59" x2="-73.49" y2="-117.99" stroke="#000" stroke-width="1.2"/>
+<polygon points="-73.49,-117.99 -84.35,-127 -76.77,-124.34 -74.58,-132.06" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-53.95" y1="-128.1" x2="-122.04" y2="-259.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="-122.04,-259.59 -111.18,-250.57 -118.75,-253.24 -120.95,-245.52" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-32.79" y1="-135.08" x2="-97.27" y2="-259.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="-97.27,-259.59 -86.4,-250.57 -93.98,-253.24 -96.17,-245.52" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-371.28" y1="-69.96" x2="-137.71" y2="-18.86" stroke="#000" stroke-width="1.2"/>
+<polygon points="-137.71,-18.86 -151.59,-16.27 -144.7,-20.39 -149.24,-27.02" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-133.01" y1="-40.36" x2="-365.23" y2="-91.15" stroke="#000" stroke-width="1.2"/>
+<polygon points="-365.23,-91.15 -351.36,-93.75 -358.25,-89.63 -353.71,-83" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-340.95" y1="130.38" x2="-127.24" y2="55.96" stroke="#000" stroke-width="1.2"/>
+<polygon points="-127.24,55.96 -137.71,65.43 -133.99,58.31 -141.33,55.04" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-134.47" y1="35.18" x2="-371.86" y2="117.85" stroke="#000" stroke-width="1.2"/>
+<polygon points="-371.86,117.85 -361.4,108.38 -365.11,115.49 -357.78,118.76" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-132.4" y1="279.59" x2="-53.95" y2="128.1" stroke="#000" stroke-width="1.2"/>
+<polygon points="-53.95,128.1 -55.04,142.18 -57.24,134.45 -64.81,137.12" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-73.49" y1="117.99" x2="-157.17" y2="279.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="-157.17,279.59 -156.08,265.52 -153.88,273.24 -146.31,270.57" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="132.4" y1="-279.59" x2="53.95" y2="-128.1" stroke="#000" stroke-width="1.2"/>
+<polygon points="53.95,-128.1 55.04,-142.18 57.24,-134.45 64.81,-137.12" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="73.49" y1="-117.99" x2="157.17" y2="-279.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="157.17,-279.59 156.08,-265.52 153.88,-273.24 146.31,-270.57" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="320.38" y1="-150.51" x2="122.82" y2="-65.09" stroke="#000" stroke-width="1.2"/>
+<polygon points="122.82,-65.09 132.57,-75.3 129.38,-67.93 136.93,-65.2" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="131.55" y1="-44.9" x2="360.65" y2="-143.96" stroke="#000" stroke-width="1.2"/>
+<polygon points="360.65,-143.96 350.9,-133.75 354.09,-141.12 346.53,-143.84" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="385.44" y1="21.27" x2="139" y2="0.61" stroke="#000" stroke-width="1.2"/>
+<polygon points="139,0.61 152.41,-3.78 146.12,1.21 151.49,7.18" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="137.16" y1="22.54" x2="385.44" y2="43.35" stroke="#000" stroke-width="1.2"/>
+<polygon points="385.44,43.35 372.02,47.74 378.31,42.75 372.94,36.78" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="118.99" y1="71.85" x2="307.39" y2="185.62" stroke="#000" stroke-width="1.2"/>
+<polygon points="307.39,185.62 293.42,183.61 301.27,181.92 299.1,174.19" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="144.79" y1="279.59" x2="63.92" y2="123.43" stroke="#000" stroke-width="1.2"/>
+<polygon points="63.92,123.43 74.78,132.45 67.21,129.78 65.01,137.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<rect x="-233.77" y="-353.59" width="150" height="94" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-158.77" y="-306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Founder</text>
+<rect x="-521.23" y="-123.96" width="156" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-443.23" y="-96.96" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Business Analyst</text>
+<rect x="-490.95" y="117.85" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-415.95" y="144.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Administrator</text>
+<rect x="-233.77" y="279.59" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-158.77" y="306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Guest</text>
+<rect x="79.27" y="-333.59" width="159" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158.77" y="-306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Payment Gateway</text>
+<rect x="320.38" y="-197.96" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="395.38" y="-170.96" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">LLM Provider</text>
+<rect x="385.44" y="11.64" width="151" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="460.94" y="38.64" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">PlantUML Server</text>
+<rect x="277.1" y="185.62" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="352.1" y="212.62" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Email Service</text>
+<rect x="83.77" y="279.59" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158.77" y="306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Scheduler</text>
+<circle cx="0" cy="0" r="139" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="0" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">FlintFlow</text>
+<rect x="-175.59" y="-190.66" width="88.19" height="17" fill="#fff" transform="rotate(62.62 -131.49 -182.16)"/>
+<text x="-131.49" y="-182.16" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -131.49 -182.16)">Brief Answers</text>
+<rect x="-156.43" y="-197.29" width="92.56" height="17" fill="#fff" transform="rotate(62.62 -110.15 -188.79)"/>
+<text x="-110.15" y="-188.79" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -110.15 -188.79)">Accepted Step</text>
+<rect x="-129.57" y="-202.35" width="83.14" height="17" fill="#fff" transform="rotate(62.62 -88 -193.85)"/>
+<text x="-88" y="-193.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -88 -193.85)">Draft Section</text>
+<rect x="-110.21" y="-205.83" width="90.36" height="17" fill="#fff" transform="rotate(62.62 -65.03 -197.33)"/>
+<text x="-65.03" y="-197.33" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -65.03 -197.33)">Srs Document</text>
+<rect x="-310.88" y="-52.91" width="112.77" height="17" fill="#fff" transform="rotate(12.34 -254.5 -44.41)"/>
+<text x="-254.5" y="-44.41" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(12.34 -254.5 -44.41)">Verification Result</text>
+<rect x="-291.42" y="-74.26" width="84.59" height="17" fill="#fff" transform="rotate(12.34 -249.12 -65.76)"/>
+<text x="-249.12" y="-65.76" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(12.34 -249.12 -65.76)">Red Flag List</text>
+<rect x="-281.45" y="84.67" width="94.72" height="17" fill="#fff" transform="rotate(-19.2 -234.1 93.17)"/>
+<text x="-234.1" y="93.17" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-19.2 -234.1 93.17)">Account Action</text>
+<rect x="-304.12" y="68.01" width="101.9" height="17" fill="#fff" transform="rotate(-19.2 -253.17 76.51)"/>
+<text x="-253.17" y="76.51" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-19.2 -253.17 76.51)">Platform Metrics</text>
+<rect x="-157.87" y="195.35" width="129.4" height="17" fill="#fff" transform="rotate(-62.62 -93.17 203.85)"/>
+<text x="-93.17" y="203.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 -93.17 203.85)">Registration Request</text>
+<rect x="-174.24" y="190.29" width="117.83" height="17" fill="#fff" transform="rotate(-62.62 -115.33 198.79)"/>
+<text x="-115.33" y="198.79" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 -115.33 198.79)">Registration Result</text>
+<rect x="43.29" y="-212.35" width="99.76" height="17" fill="#fff" transform="rotate(-62.62 93.17 -203.85)"/>
+<text x="93.17" y="-203.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 93.17 -203.85)">Payment Result</text>
+<rect x="59.66" y="-207.29" width="111.33" height="17" fill="#fff" transform="rotate(-62.62 115.33 -198.79)"/>
+<text x="115.33" y="-198.79" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 115.33 -198.79)">Payment Request</text>
+<rect x="170.99" y="-116.3" width="101.22" height="17" fill="#fff" transform="rotate(-23.38 221.6 -107.8)"/>
+<text x="221.6" y="-107.8" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-23.38 221.6 -107.8)">Generated Draft</text>
+<rect x="202" y="-102.93" width="88.2" height="17" fill="#fff" transform="rotate(-23.38 246.1 -94.43)"/>
+<text x="246.1" y="-94.43" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-23.38 246.1 -94.43)">Draft Request</text>
+<rect x="220.28" y="2.44" width="83.87" height="17" fill="#fff" transform="rotate(4.79 262.22 10.94)"/>
+<text x="262.22" y="10.94" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(4.79 262.22 10.94)">Diagram Png</text>
+<rect x="220.09" y="24.44" width="82.42" height="17" fill="#fff" transform="rotate(4.79 261.3 32.94)"/>
+<text x="261.3" y="32.94" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(4.79 261.3 32.94)">Puml Source</text>
+<rect x="166.92" y="120.24" width="92.54" height="17" fill="#fff" transform="rotate(31.13 213.19 128.74)"/>
+<text x="213.19" y="128.74" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(31.13 213.19 128.74)">Email Request</text>
+<rect x="45.07" y="193.01" width="118.56" height="17" fill="#fff" transform="rotate(62.62 104.35 201.51)"/>
+<text x="104.35" y="201.51" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 104.35 201.51)">Housekeeping Tick</text>
+</svg>
 "
 `;
 
