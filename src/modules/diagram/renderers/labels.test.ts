@@ -46,7 +46,7 @@ describe("nhãn máy trên sơ đồ theo ngôn ngữ (FLF-265 N1)", () => {
       })
     })
     const [part] = RENDERERS.context(spine, null, VI)
-    expect(part.source).toContain(`label="${VI.system}"`)
+    expect(part.source).toContain(`>${VI.system}<`)
     expect(part.source).toContain(VI.defaultIn.human)
     expect(part.source).toContain(VI.defaultOut.system)
     expect(part.source).not.toContain(DIAGRAM_LABELS.en.defaultIn.human)
