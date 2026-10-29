@@ -57,6 +57,12 @@ beforeEach(() => {
   mockConvert.mockReset().mockResolvedValue(FAKE_PDF)
 })
 
+/** FLF-334: tên file đi qua `filename*=UTF-8''…` (giữ chữ Unicode của tên dự án). */
+const fileNameOf = (header: string | undefined): string | undefined => {
+  const raw = /filename\*=UTF-8''([^;]+)/.exec(header ?? "")?.[1]
+  return raw === undefined ? undefined : decodeURIComponent(raw)
+}
+
 describe("GET /export/pdf", () => {
   it("draft: PDF từ chính buffer .docx của export Word, cùng header, tên file đổi đuôi", async () => {
     const seeded = await seedFixture("minimal")
@@ -74,12 +80,12 @@ describe("GET /export/pdf", () => {
     expect(mockConvert).toHaveBeenCalledTimes(1)
     const [docx, docxName] = mockConvert.mock.calls[0] as [Buffer, string]
     expect(docx.subarray(0, 2).toString()).toBe("PK")
-    expect(docxName).toMatch(/-draft\.docx$/)
+    expect(docxName).toMatch(/_DRAFT\.docx$/)
 
     const word = await download(seeded.projectId, seeded.token, "/export/word?source=draft")
     expect(word.status).toBe(200)
-    const wordName = /filename="([^"]+)"/.exec(word.headers["content-disposition"])?.[1]
-    const pdfName = /filename="([^"]+)"/.exec(pdf.headers["content-disposition"])?.[1]
+    const wordName = fileNameOf(word.headers["content-disposition"])
+    const pdfName = fileNameOf(pdf.headers["content-disposition"])
     expect(wordName).toBe(docxName)
     expect(pdfName).toBe(docxName.replace(/\.docx$/, ".pdf"))
     expect(pdf.headers["x-document-language"]).toBe(word.headers["x-document-language"])
@@ -97,7 +103,7 @@ describe("GET /export/pdf", () => {
 
     const pdf = await download(seeded.projectId, seeded.token, `/export/pdf?source=baseline&baseline_id=${baseline.id}`)
     expect(pdf.status).toBe(200)
-    expect(pdf.headers["content-disposition"]).toMatch(/-v1\.0\.pdf"$/)
+    expect(fileNameOf(pdf.headers["content-disposition"])).toMatch(/_v1\.0\.pdf$/)
     expect(pdf.headers["x-spine-version"]).toBeUndefined()
   })
 

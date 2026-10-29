@@ -17,7 +17,8 @@ import {
   HEADING_DETECTORS,
   MENTION_ENTITIES,
   PREFLIGHT_ISSUE_CODES,
-  REUPLOAD_CHANGES
+  REUPLOAD_CHANGES,
+  STAMP_KINDS
 } from "./import.constants.js"
 import { TEMPLATE_INTENTS } from "../project/project.model.js"
 
@@ -48,7 +49,11 @@ export const documentKindSchema = z.object({
 export const docStampSchema = z.object({
   project_id: id,
   version: z.string().nullable(),
-  source: z.string().nullable()
+  source: z.string().nullable(),
+  /** FLF-334: stamp cũ không có ⇒ `null`. */
+  base_version: z.string().nullable().default(null),
+  latest_cr: z.string().nullable().default(null),
+  kind: z.enum(STAMP_KINDS).nullable().default(null)
 })
 
 export const importPausedSchema = z.object({ reason: z.enum(IMPORT_PAUSE_REASONS), at: isoDateTime })

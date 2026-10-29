@@ -19,6 +19,13 @@ const renderedDocumentInvalid = (error: z.ZodError): ApiError =>
     issues: validationIssues(error).slice(0, 20)
   })
 
+/**
+ * FLF-334: tên file giữ chữ Unicode của tên dự án ⇒ `filename*=UTF-8''…` (RFC 5987) — dùng chung cho export mode 2 và tải
+ * version mode 1. `encodeURIComponent` chừa `'()*`, không hợp lệ trong `attr-char` ⇒ mã hoá thêm.
+ */
+export const attachmentDisposition = (fileName: string): string =>
+  `attachment; filename*=UTF-8''${encodeURIComponent(fileName).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`
+
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 /** Preview writer từ `RenderedDocument` gửi thẳng. Route thật `GET /projects/:id/export/word` ở render.route.ts (review C1). */
@@ -35,7 +42,7 @@ export const previewWord = catchAsync(async (req: Request, res: Response) => {
 
   res.status(200)
   res.setHeader("Content-Type", DOCX_MIME)
-  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
+  res.setHeader("Content-Disposition", attachmentDisposition(fileName))
   res.setHeader("Content-Length", String(buffer.length))
   return res.send(buffer)
 })
@@ -88,7 +95,7 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
 const sendExport = (res: Response, exported: ExportedDocx, file: Buffer, mime: string, fileName: string) => {
   res.status(200)
   res.setHeader("Content-Type", mime)
-  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`)
+  res.setHeader("Content-Disposition", attachmentDisposition(fileName))
   res.setHeader("Content-Length", String(file.length))
   // FLF-265 (contract #18): mọi lần xuất thành công, cả mode 1 — chỉ là header, không đổi file
   res.setHeader("X-Document-Language", exported.documentLanguage)

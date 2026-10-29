@@ -50,13 +50,63 @@ export const isReleaseVersion = (value: string): boolean => {
   return major >= 1 && minor === 0
 }
 
+/** Bỏ ký tự Windows cấm trong tên file; rỗng ⇒ `SRS`. */
+export const sanitizeFileBase = (value: string): string => value.replace(/[\\/:*?"<>|]+/g, "_").trim() || "SRS"
+
+export interface VersionFileNameParts {
+  /** Tên dự án (chưa làm sạch). */
+  name: string
+  /** Bản phát hành (`x.0` của mode 1, baseline của mode 2) ⇒ không `_DRAFT`, không mã CR. */
+  release: boolean
+  /** Release: số của chính nó (`2.0`). Bản nháp: release gốc (`1.0`; `0`/`v0` = chỉ có bản import); `null` = chưa có gốc. */
+  base: string | null
+  /** Bản nháp: CR mới nhất đã ghi vào nó (`CR-014`); bỏ qua với release. */
+  latestCr?: string | null
+  tracked?: boolean
+  /** File gốc người dùng upload: `_original` thay cho `_DRAFT`. */
+  original?: boolean
+  ext?: "docx" | "pdf"
+}
+
 /**
- * Tên file tải về: bản draft thêm hậu tố `_DRAFT` (G8), vd `Lumen_SRS_v0.2_DRAFT.docx`. Mode 1 v3 (BPMN 6.3: project ID
- * và version "đóng trong file **và tên file**"): có `projectId` ⇒ `Lumen_SRS_<projectId>_v1.0.docx`; bản có đánh dấu
- * (3.14) thêm `_tracked`.
+ * Quy tắc tên file chung cho tải version mode 1 và xuất mode 2, Word lẫn PDF (FLF-334). Không mang mã dự án — máy nhận
+ * dự án qua stamp trong file. `Lumen_v2.0.docx` · `Lumen_v1.0+CR-014_DRAFT.docx` · `Lumen_v0_DRAFT.docx` ·
+ * `Lumen_DRAFT.docx` (mode 2 chưa baseline) · `…_tracked_DRAFT.docx` · `…_original.docx`.
  */
-export const downloadFileName = (baseName: string, version: string, opts: { projectId?: string; tracked?: boolean } = {}): string => {
-  const safe = baseName.replace(/[\\/:*?"<>|]+/g, "_").trim() || "SRS"
-  const id = opts.projectId ? `_${opts.projectId}` : ""
-  return `${safe}${id}_v${version}${opts.tracked ? "_tracked" : ""}${isReleaseVersion(version) ? "" : "_DRAFT"}.docx`
+export const versionFileName = (parts: VersionFileNameParts): string => {
+  const base = parts.base ? sanitizeFileBase(parts.base.trim().replace(/^v/i, "")) : null
+  const cr = !parts.release && base && parts.latestCr ? `+${sanitizeFileBase(parts.latestCr)}` : ""
+  const label = base ? `_v${base}${cr}` : ""
+  const tail = parts.original ? "_original" : parts.release ? "" : "_DRAFT"
+  return `${sanitizeFileBase(parts.name)}${label}${parts.tracked ? "_tracked" : ""}${tail}.${parts.ext ?? "docx"}`
+}
+
+/** Tối thiểu của một version để suy release gốc / CR mới nhất (khớp `IDocVersion`). */
+export interface LineageVersion {
+  version: string
+  kind: string
+  cr_ids: readonly string[]
+}
+
+export interface VersionLineage {
+  release: boolean
+  /** Release: chính nó. Bản nháp: version release (`x.0`) gần nhất trước nó, `0` khi chưa có (chỉ có bản import). */
+  base: string
+  /** Bản nháp: mã CR cuối của version gần nhất (tính cả chính nó, sau release gốc) có CR; release ⇒ `null`. */
+  latestCr: string | null
+}
+
+/**
+ * Release gốc + CR mới nhất của `target` trong lịch sử version (thứ tự bất kỳ). Cùng ý "kể từ lần phát hành trước" với
+ * `review-package.service.pendingCrIds`, nhưng tính tại một version bất kỳ (bản nháp cũ trong lịch sử) và theo số version.
+ */
+export const versionLineage = (versions: readonly LineageVersion[], target: string): VersionLineage => {
+  if (isReleaseVersion(target)) return { release: true, base: target, latestCr: null }
+  const history = versions.filter((v) => compareDocVersions(v.version, target) <= 0).sort((a, b) => compareDocVersions(b.version, a.version))
+  // Theo số (`x.0`), không theo `kind`: bản chuyển đổi từ mode 2 (FLF-318) là `1.0` mang kind `imported`
+  const lastRelease = history.find((v) => isReleaseVersion(v.version)) ?? null
+  const since = lastRelease ? history.slice(0, history.indexOf(lastRelease)) : history
+  const withCr = since.find((v) => v.cr_ids.length > 0)
+  const latestCr = withCr ? withCr.cr_ids[withCr.cr_ids.length - 1] : null
+  return { release: false, base: lastRelease?.version ?? "0", latestCr }
 }

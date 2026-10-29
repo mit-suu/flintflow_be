@@ -4,7 +4,7 @@ import type { NextFunction, Request, Response } from "express"
 
 vi.mock("../../shared/auth/auth.middleware.js", () => ({ authMiddleware: vi.fn() }))
 
-import { DOCX_MIME, exportPdf, previewWord, toPdfFileName } from "./export.controller.js"
+import { DOCX_MIME, attachmentDisposition, exportPdf, previewWord, toPdfFileName } from "./export.controller.js"
 import exportRoutes from "./export.route.js"
 import renderRoutes from "./render.route.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
@@ -47,6 +47,14 @@ const invoke = (userId: string | undefined, body: unknown) =>
     previewWord(req, res, next)
   })
 
+describe("attachmentDisposition (FLF-334)", () => {
+  it("RFC 5987: mã hoá cả '()* mà encodeURIComponent chừa lại; giải mã ra đúng tên", () => {
+    const header = attachmentDisposition("Dự án O'Neil (v2)*_v1.0.docx")
+    expect(header).toBe("attachment; filename*=UTF-8''D%E1%BB%B1%20%C3%A1n%20O%27Neil%20%28v2%29%2A_v1.0.docx")
+    expect(decodeURIComponent(header.split("''")[1])).toBe("Dự án O'Neil (v2)*_v1.0.docx")
+  })
+})
+
 describe("POST /export/word/preview", () => {
   it("200 trả file docx, MIME và tên file đúng định dạng", async () => {
     const outcome = await invoke("650000000000000000000010", sample)
@@ -54,7 +62,7 @@ describe("POST /export/word/preview", () => {
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(200)
     expect(outcome.headers["content-type"]).toBe(DOCX_MIME)
-    expect(outcome.headers["content-disposition"]).toBe('attachment; filename="lumen-hoc-truc-tuyen-v0.3-draft.docx"')
+    expect(outcome.headers["content-disposition"]).toBe(`attachment; filename*=UTF-8''${encodeURIComponent("Lumen Học Trực Tuyến_v0_DRAFT.docx")}`)
     expect(outcome.headers["content-length"]).toBe(String(outcome.body?.length))
 
     const documentXml = readZipText(outcome.body as Buffer, "word/document.xml")

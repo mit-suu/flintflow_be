@@ -7,7 +7,7 @@
 
 import mongoose, { Schema, Document } from "mongoose"
 import { IMPORT_PAUSE_REASONS, IMPORT_STATUSES, type ImportPauseReason, type ImportStatus } from "./import.state.js"
-import { PREFLIGHT_ISSUE_CODES, type PreflightIssueCode } from "./import.constants.js"
+import { PREFLIGHT_ISSUE_CODES, STAMP_KINDS, type PreflightIssueCode, type StampKind } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
 import type { Spine } from "../spine/spine.types.js"
 import { TEMPLATE_INTENTS, type TemplateIntent } from "../project/project.model.js"
@@ -31,6 +31,10 @@ export interface DocStamp {
   project_id: string
   version: string | null
   source: string | null
+  /** FLF-334 — bản ghi / file cũ không có ⇒ `null`. */
+  base_version?: string | null
+  latest_cr?: string | null
+  kind?: StampKind | null
 }
 
 export interface FinalizeCheckpoint {
@@ -113,7 +117,17 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
       required: true
     },
     stamp: {
-      type: new Schema({ project_id: { type: String, required: true }, version: String, source: String }, opts),
+      type: new Schema(
+        {
+          project_id: { type: String, required: true },
+          version: String,
+          source: String,
+          base_version: { type: String, default: null },
+          latest_cr: { type: String, default: null },
+          kind: { type: String, enum: STAMP_KINDS, default: null }
+        },
+        opts
+      ),
       default: null
     },
     confirmed_latest_at: { type: Date, default: null },
