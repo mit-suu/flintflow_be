@@ -13,6 +13,8 @@ import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { documentLanguageOf, sourceLanguageOf, type DocumentLanguageProject } from "../project/document-language.js"
+import { ApiError } from "../../shared/utils/api-error.js"
+import type { Spine } from "../spine/spine.types.js"
 import * as repository from "./translation.repository.js"
 import { fitTranslation, hashSource, translationUnits, type TranslationUnit, type UnitValue } from "./translation-units.js"
 
@@ -33,6 +35,45 @@ export const projectLanguages = async (projectId: string, project: DocumentLangu
   const profileLanguage =
     project.mode === "import" ? ((await TemplateProfile.findOne({ projectId }, { language: 1 }).lean()) as { language?: string } | null)?.language : undefined
   return { locale: documentLanguageOf(project, profileLanguage), source: sourceLanguageOf(project, profileLanguage) }
+}
+
+/** Dự án mode 1 import thật (đường layout, không có lớp bản dịch) — khác dự án chuyển từ mode 2 (FLF-318). */
+const isRealImport = (project: DocumentLanguageProject): boolean => project.mode === "import" && project.converted_from !== "fpt"
+
+/**
+ * FLF-334 B — ngôn ngữ đích của một lượt dịch / ước tính: `requested` (query / body) hoặc ngôn ngữ tài liệu. Dự án mode 1
+ * import thật (đường layout) không dịch ⇒ hỏi ngôn ngữ khác ngôn ngữ tài liệu là 409 `DOCUMENT_LANGUAGE_UNAVAILABLE`,
+ * không lặng lẽ trả lời theo ngôn ngữ tài liệu.
+ */
+export const targetLocale = (project: DocumentLanguageProject, languages: ProjectLanguages, requested?: UserLocale): UserLocale => {
+  if (!requested || requested === languages.locale) return languages.locale
+  if (isRealImport(project)) throw documentLanguageUnavailable()
+  return requested
+}
+
+/**
+ * FLF-334 B — Spine mà #26 / #27 đếm và dịch: mặc định Spine hiện tại; có đích snapshot (`baseline_id` / `version`) ⇒
+ * snapshot đó (`translation-target.ts`), để "Dịch nốt" xoá đúng phần mà lượt tải kiểm. `null` ⇒ chưa có gì để dịch.
+ */
+export type SpineLoader = () => Promise<Spine | null>
+
+const currentSpine: (projectId: string) => SpineLoader = (projectId) => () => spineRepository.get(projectId)
+
+export interface TranslationScope {
+  /** Ngôn ngữ đích; không truyền ⇒ ngôn ngữ tài liệu. */
+  locale?: UserLocale
+  /** Spine cần đếm / dịch; không truyền ⇒ Spine hiện tại. Chỉ gọi khi ngôn ngữ đích ≠ ngôn ngữ gốc. */
+  loadSpine?: SpineLoader
+}
+
+/** Ngôn ngữ đích + gốc của một lượt #26 / #27 (ném 409 cho dự án import thật hỏi ngôn ngữ khác). */
+export const resolveScopeLanguages = async (
+  projectId: string,
+  project: DocumentLanguageProject,
+  scope: TranslationScope
+): Promise<{ locale: UserLocale; source: UserLocale; loadSpine: SpineLoader }> => {
+  const languages = await projectLanguages(projectId, project)
+  return { locale: targetLocale(project, languages, scope.locale), source: languages.source, loadSpine: scope.loadSpine ?? currentSpine(projectId) }
 }
 
 // ─── tra cứu ─────────────────────────────────────────────────────
@@ -118,16 +159,52 @@ export interface TranslationStatus {
   estimated_credits: number
 }
 
-/** `GET /projects/:id/translations/status` — ngôn ngữ tài liệu = ngôn ngữ gốc ⇒ `total: 0`. Không gọi model. */
-export const translationStatus = async (projectId: string, project: DocumentLanguageProject): Promise<TranslationStatus> => {
-  const { locale, source } = await projectLanguages(projectId, project)
+/**
+ * `GET /projects/:id/translations/status?locale=&baseline_id=|version=` — ngôn ngữ đích = ngôn ngữ gốc ⇒ `total: 0`. Không
+ * gọi model. `scope` (FLF-334 B) không truyền ⇒ ngôn ngữ tài liệu trên Spine hiện tại (như trước).
+ */
+export const translationStatus = async (projectId: string, project: DocumentLanguageProject, scope: TranslationScope = {}): Promise<TranslationStatus> => {
+  const { locale, source, loadSpine } = await resolveScopeLanguages(projectId, project, scope)
   const empty: TranslationStatus = { locale, source_locale: source, total: 0, missing: 0, batches: 0, estimated_credits: 0 }
   if (locale === source) return empty
 
-  const spine = await spineRepository.get(projectId)
+  const spine = await loadSpine()
   if (!spine) return empty
   const resolved = await resolveTranslations(projectId, locale, translationUnits(spine))
   const batches = splitBatches(uniqueBatchItems(resolved.missingUnits)).length
   const cost = batches > 0 ? await getActionCost(ActionType.TRANSLATE_DOCUMENT) : 0
   return { ...empty, total: resolved.total, missing: resolved.missing, batches, estimated_credits: batches * cost }
 }
+
+// ─── tải file theo ngôn ngữ khác (FLF-334 B) ─────────────────────
+
+export const TRANSLATION_INCOMPLETE = "TRANSLATION_INCOMPLETE"
+export const DOCUMENT_LANGUAGE_UNAVAILABLE = "DOCUMENT_LANGUAGE_UNAVAILABLE"
+
+/** Đủ bản dịch của một Spine (bản nháp hoặc snapshot baseline) sang `locale` — đầu vào của 409 `TRANSLATION_INCOMPLETE`. */
+export interface TranslationCompleteness {
+  locale: UserLocale
+  missing: number
+  total: number
+}
+
+export const translationCompleteness = async (projectId: string, locale: UserLocale, spine: Spine): Promise<TranslationCompleteness> => {
+  const resolved = await resolveTranslations(projectId, locale, translationUnits(spine))
+  return { locale, missing: resolved.missing, total: resolved.total }
+}
+
+/** Còn đơn vị chưa dịch ⇒ 409 `TRANSLATION_INCOMPLETE` `{ locale, missing, total }` — không bao giờ in chữ gốc thay chỗ thiếu. */
+export const assertTranslationComplete = async (projectId: string, locale: UserLocale, spine: Spine): Promise<void> => {
+  const completeness = await translationCompleteness(projectId, locale, spine)
+  if (completeness.missing === 0) return
+  throw new ApiError(
+    409,
+    `Tài liệu còn ${completeness.missing} đoạn chưa dịch sang ${locale === "vi" ? "tiếng Việt" : "tiếng Anh"} nên chưa tải được bản này. Hãy dịch nốt rồi tải lại.`,
+    TRANSLATION_INCOMPLETE,
+    { ...completeness }
+  )
+}
+
+/** 409 `DOCUMENT_LANGUAGE_UNAVAILABLE` — bản này chưa tải được theo ngôn ngữ khác (mode 1 import thật, bản nháp CR). */
+export const documentLanguageUnavailable = (): ApiError =>
+  new ApiError(409, "Bản này chưa tải được theo ngôn ngữ khác — chỉ tải được theo ngôn ngữ tài liệu của dự án.", DOCUMENT_LANGUAGE_UNAVAILABLE)

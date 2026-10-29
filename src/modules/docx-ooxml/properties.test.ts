@@ -12,7 +12,7 @@ describe("stamp", () => {
     expect(await readStamp(pkg)).toBeNull()
     await writeStamp(pkg, { project_id: "p1", version: "0.0", source: "import" })
     const out = await DocxPackage.load(await pkg.toBuffer())
-    expect(await readStamp(out)).toEqual({ project_id: "p1", version: "0.0", source: "import" })
+    expect(await readStamp(out)).toEqual({ project_id: "p1", version: "0.0", source: "import", base_version: null, latest_cr: null, kind: null })
     const zip = await JSZip.loadAsync(await pkg.toBuffer())
     expect(await zip.file("_rels/.rels")!.async("string")).toContain('Target="docProps/custom.xml"')
     expect(await zip.file("[Content_Types].xml")!.async("string")).toContain("/docProps/custom.xml")
@@ -40,7 +40,7 @@ describe("stamp", () => {
       sections: [{ children: [new Paragraph("x")] }]
     })
     const pkg = await DocxPackage.load(await Packer.toBuffer(doc))
-    expect(await readStamp(pkg)).toEqual({ project_id: "abc", version: "v0.3", source: "baseline" })
+    expect(await readStamp(pkg)).toEqual({ project_id: "abc", version: "v0.3", source: "baseline", base_version: null, latest_cr: null, kind: null })
     await writeStamp(pkg, { project_id: "abc", version: "1.0", source: "release" })
     expect((await readCustomProperties(pkg)).Other).toBe("x")
   })
@@ -72,14 +72,31 @@ describe("stamp", () => {
       ["flintflow_project_id", "7"],
       ["flintflow_source", "8"]
     ])
-    expect(await readStamp(pkg)).toEqual({ project_id: "p9", version: "0.5", source: "cr_revision" })
+    expect(await readStamp(pkg)).toEqual({ project_id: "p9", version: "0.5", source: "cr_revision", base_version: null, latest_cr: null, kind: null })
   })
 
   it("stamp chỉ có project_id ⇒ version/source null; property rỗng tên bị bỏ qua", async () => {
     const pkg = await DocxPackage.load(
       await makeDocx({ body: p("a"), extraParts: { "docProps/custom.xml": CUSTOM(prop(2, "flintflow_project_id", " p1 ") + `<property pid="3"><vt:lpwstr>x</vt:lpwstr></property>`) } })
     )
-    expect(await readStamp(pkg)).toEqual({ project_id: "p1", version: null, source: null })
+    expect(await readStamp(pkg)).toEqual({ project_id: "p1", version: null, source: null, base_version: null, latest_cr: null, kind: null })
     expect(Object.keys(await readCustomProperties(pkg))).toEqual(["flintflow_project_id"])
+  })
+
+  it("FLF-334: release gốc / CR mới nhất / loại bản ghi rồi đọc lại; ghi lại không có ⇒ xoá property cũ", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("a") }))
+    await writeStamp(pkg, { project_id: "p1", version: "1.2", source: "cr_revision", base_version: "1.0", latest_cr: "CR-002", kind: "draft" })
+    const out = await DocxPackage.load(await pkg.toBuffer())
+    expect(await readStamp(out)).toEqual({ project_id: "p1", version: "1.2", source: "cr_revision", base_version: "1.0", latest_cr: "CR-002", kind: "draft" })
+    expect(await readCustomProperties(out)).toMatchObject({ flintflow_base_version: "1.0", flintflow_latest_cr: "CR-002", flintflow_kind: "draft" })
+    await writeStamp(out, { project_id: "p1", version: "2.0", source: "release" })
+    expect(await readCustomProperties(out)).toEqual({ flintflow_project_id: "p1", flintflow_version: "2.0", flintflow_source: "release" })
+  })
+
+  it("FLF-334: flintflow_kind lạ ⇒ null (không đoán)", async () => {
+    const pkg = await DocxPackage.load(
+      await makeDocx({ body: p("a"), extraParts: { "docProps/custom.xml": CUSTOM(prop(2, "flintflow_project_id", "p1") + prop(3, "flintflow_kind", "beta")) } })
+    )
+    expect((await readStamp(pkg))?.kind).toBeNull()
   })
 })

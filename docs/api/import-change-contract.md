@@ -87,7 +87,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
-| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx` | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng) |
+| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf&lang=vi\|en` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên file + stamp theo FLF-334 (§ cuối): `<tên>_v2.0.docx`, `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0_DRAFT.docx`, `…_tracked_DRAFT.docx`, `…_original.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx`. `lang` (FLF-334 B, § cuối) | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng), `409 TRANSLATION_INCOMPLETE`, `409 DOCUMENT_LANGUAGE_UNAVAILABLE`, `400 VALIDATION_ERROR` (`variant` tracked/original + `lang` khác) |
 | 15 | `GET /projects/:id/versions/compare?from=&to=` | UC-55 | `compareQuerySchema` | `compareResponseSchema` | `DOC_VERSION_NOT_FOUND`, `VALIDATION_ERROR` |
 | 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | (FLF-338: `source.kind` thêm `reference_document`) `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
 | 17 | `GET /projects/:id/change-requests?status=` | UC-48 | `listChangeRequestsQuerySchema` | `ChangeRequest[]`, mới nhất trước | — |
@@ -469,3 +469,29 @@ Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **�
 - **Khoá bản nháp khi gói chờ duyệt**: `POST /change-requests` (#16) và `#25 submit` trả `409 PACKAGE_PENDING`; `/changes`, `/reconcile`, `/undo` trả `409 DRAFT_LOCKED` như FLF-293.
 - **Đánh số**: bản nháp sau mỗi CR vẫn là một `DocVersion` minor (`0.2`, `1.1`…) để giữ file Track Changes theo từng CR cho Lead xem diff — nhưng người dùng thấy `draft_label` (chỉ số chính); tên file bản nháp theo FLF-334.
 - Thông báo mới: `change_request_written`, `review_package_submitted`, `review_package_changes_requested`, `review_package_released`.
+
+## FLF-334 (2026-10-29) — tên file tải về + stamp mang nhãn version
+
+**Đổi tên file + additive stamp** ⇒ PR nhãn `contract-change`. Một quy tắc tên chung cho #14 (mode 1) và `export/word` / `export/pdf` (mode 2, `pipeline-contract.md` #18/#34), Word lẫn PDF (`versionFileName`, `doc-version/versioning.ts`). **Không còn mã dự án trong tên** — máy nhận dự án qua stamp (`flintflow_project_id`).
+
+- `<tên>` = tên dự án, bỏ ký tự Windows cấm (`\ / : * ? " < > |` ⇒ `_`), giữ chữ Unicode; rỗng ⇒ `SRS`. Header luôn `Content-Disposition: attachment; filename*=UTF-8''<tên mã hoá>` (mode 2 trước đây là `filename="<slug ASCII>"`). `.pdf` = cùng tên, đổi đuôi.
+- Release (`x.0`, x ≥ 1; mode 2: baseline): `<tên>_v2.0.docx`. Baseline `0.x` (bản import) không phải release ⇒ xuất ra `<tên>_v0_DRAFT.docx`, stamp `kind: draft`.
+- Bản nháp mode 1: `<tên>_v<gốc>+<CR mới nhất>_DRAFT.docx` — gốc = version release (`x.0`) gần nhất trước nó (theo số, kể cả bản `1.0` chuyển đổi FLF-318), `v0` khi chưa release; CR = mã CR cuối của version gần nhất (tính cả chính nó, sau gốc) có CR — bản nháp cũ trong lịch sử mang CR của chính nó. Không có CR (bản import `0.1`/`0.0`) ⇒ `<tên>_v0_DRAFT.docx`.
+- Bản nháp mode 2: có baseline ⇒ `<tên>_v<baseline cuối>_DRAFT.docx`; chưa có ⇒ `<tên>_DRAFT.docx`.
+- `variant=tracked` thêm `_tracked` trước `_DRAFT`; `variant=original` dùng `_original` thay `_DRAFT`.
+- **Stamp** (`docProps/custom.xml`) thêm 3 property, chỉ ghi lên **file tải về / xuất ra** (file lưu trong GridFS không đổi; `variant=original` trả nguyên byte file upload):
+  - `flintflow_base_version` — gốc như trên (`2.0`, `1.0`, `0`); mode 2 chưa baseline ⇒ không ghi.
+  - `flintflow_latest_cr` — CR mới nhất của bản nháp mode 1; release / mode 2 ⇒ không ghi.
+  - `flintflow_kind` — `release` | `draft`.
+  - `flintflow_version` giữ nghĩa cũ (version nội bộ `1.2`, nhãn mode 2). File thiếu property mới (stamp cũ) ⇒ đọc ra `null`; preflight, import, re-upload chấp nhận y như trước.
+- `ImportedDocumentDto.stamp` / `meta.stamp` của `IMPORT_STAMP_FOREIGN_PROJECT` (`docStampSchema`) thêm `base_version`, `latest_cr`, `kind` — đều `string | null`, mặc định `null`.
+
+## FLF-334 B (2026-10-29) — tải version theo ngôn ngữ còn lại
+
+**Additive** ⇒ PR nhãn `contract-change` (cùng `pipeline-contract.md` #18/#34/#26/#27).
+
+- #14 nhận `lang=vi|en` (`downloadQuerySchema`). Không truyền / = ngôn ngữ tài liệu ⇒ y như trước.
+- `lang` khác chỉ cho version **có snapshot baseline** (`baseline_ref`: release, bản `1.0` chuyển đổi) của dự án **chuyển từ mode 2** (`converted_from = "fpt"`): dựng lại từ `Baseline.snapshot` theo mẫu FPT bằng `lang` (qua lớp bản dịch khi `lang` ≠ `en`), rồi stamp / watermark / tên như phần A + hậu tố `_EN` / `_VI` (`<tên>_v2.0_VI.docx`). File dựng mỗi lần, **không** ghi GridFS; file lưu của version giữ ngôn ngữ tài liệu.
+- Còn đơn vị chưa dịch ⇒ `409 TRANSLATION_INCOMPLETE` `meta { locale, missing, total }` (đếm trên snapshot của version). Dịch nốt qua `pipeline-contract.md` #26 `?locale=&version=` / #27 `{ locale, version }` — đếm / dịch đúng snapshot baseline của version đó.
+- Bản nháp CR (không có baseline), dự án import thật (đường layout) ⇒ `409 DOCUMENT_LANGUAGE_UNAVAILABLE`; `variant=tracked|original` + `lang` khác ⇒ `400 VALIDATION_ERROR`.
+- `DocVersionDto` thêm `other_language_available: boolean` (#12, response release) — `false` ⇒ FE ẩn lựa chọn ngôn ngữ.

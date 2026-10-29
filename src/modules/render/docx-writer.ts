@@ -22,6 +22,8 @@ import {
 } from "docx"
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { versionFileName } from "../doc-version/versioning.js"
+import { STAMP_PROPERTY } from "../import/import.constants.js"
 import { ruleLabel } from "../spine/human-labels.js"
 import { FLAG_TEXT, WRITER_TEXT, type DocumentLanguage, type WriterText } from "./labels.js"
 import type {
@@ -98,6 +100,15 @@ export interface WriteDocxOptions {
   language?: DocumentLanguage
 }
 
+/** FLF-334: stamp mang release gốc + loại bản (mode 2 không có CR ⇒ không ghi `flintflow_latest_cr`). */
+function stampLineage(doc: RenderedDocument): { name: string; value: string }[] {
+  const { release, base } = exportLineage(doc)
+  return [
+    ...(base ? [{ name: STAMP_PROPERTY.base_version, value: base }] : []),
+    { name: STAMP_PROPERTY.kind, value: release ? "release" : "draft" }
+  ]
+}
+
 export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions = {}): Promise<Buffer> {
   const ctx: WriteContext = { nextNumberingInstance: 1 }
   const isDraft = doc.source === "draft" || doc.watermark === "DRAFT"
@@ -127,7 +138,8 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
     customProperties: [
       { name: "flintflow_project_id", value: doc.projectId },
       { name: "flintflow_version", value: doc.version },
-      { name: "flintflow_source", value: doc.source }
+      { name: "flintflow_source", value: doc.source },
+      ...stampLineage(doc)
     ],
     features: { updateFields: true },
     styles: {
@@ -182,22 +194,26 @@ export async function writeDocx(doc: RenderedDocument, options: WriteDocxOptions
   return Packer.toBuffer(document)
 }
 
-/** `<project>-<version>[-draft].docx`, chỉ ASCII an toàn cho mọi hệ điều hành. */
-export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">): string {
-  const project = toSlug(doc.projectName) || "srs"
-  const version = doc.version.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "v0"
-  const suffix = doc.source === "draft" && !version.toLowerCase().endsWith("-draft") ? "-draft" : ""
-  return `${project}-${version}${suffix}.docx`
+/**
+ * Release gốc của bản xuất mode 2 (FLF-334), suy từ nhãn version (`draftVersionLabel`): baseline ⇒ chính nó (`v1.0` ⇒
+ * `1.0`); bản nháp `v0` ⇒ chưa có baseline (`null`); `v1.0 + 3 changes` ⇒ `1.0`. Gốc `0.x` (bản import của dự án mode 1)
+ * ⇒ `0` và luôn là bản nháp (kể cả baseline), như quy tắc mode 1.
+ */
+export function exportLineage(doc: Pick<RenderedDocument, "version" | "source">): { release: boolean; base: string | null } {
+  const label = doc.version.trim()
+  if (doc.source === "draft" && /^v?0$/i.test(label)) return { release: false, base: null }
+  const base = label.split("+")[0].trim().replace(/^v/i, "") || null
+  // Gốc `0.x` (bản import của dự án mode 1) không bao giờ là release — kể cả khi xuất `source=baseline` ⇒ `_v0_DRAFT`
+  if (base && /^0(\.\d+)?$/.test(base)) return { release: false, base: "0" }
+  return { release: doc.source !== "draft", base }
 }
 
-function toSlug(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[đĐ]/g, "d")
-    .replace(/[^A-Za-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .toLowerCase()
+/**
+ * Tên file theo quy tắc chung `versionFileName` (FLF-334): `Lumen_v1.0.docx`, `Lumen_v1.0_DRAFT.docx`, `Lumen_DRAFT.docx`.
+ * `language` (FLF-334 B) chỉ truyền khi khác ngôn ngữ tài liệu ⇒ `Lumen_v1.0_EN.docx`.
+ */
+export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">, language?: string): string {
+  return versionFileName({ name: doc.projectName, ...exportLineage(doc), ...(language ? { language } : {}) })
 }
 
 function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {

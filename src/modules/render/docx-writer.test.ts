@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest"
 import { readFileSync } from "node:fs"
 import mammoth from "mammoth"
-import { HEADING_TABLE_SPACING, buildDocxFileName, writeDocx } from "./docx-writer.js"
+import { HEADING_TABLE_SPACING, buildDocxFileName, exportLineage, writeDocx } from "./docx-writer.js"
 import { makePng, readZipEntries, readZipText } from "./zip.test-helper.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 
@@ -141,6 +141,10 @@ describe("writeDocx — fixture Working Draft", () => {
     expect(core).toContain("<dc:title>Lumen Học Trực Tuyến - Software Requirement Specification</dc:title>")
     expect(core).toContain("<dc:subject>flintflow_version:v0.3</dc:subject>")
     expect(custom).toMatch(/name="flintflow_project_id"[^>]*>\s*<vt:lpwstr>650000000000000000000001<\/vt:lpwstr>/)
+    // FLF-334: bản nháp "v0.3" (nhãn cũ, gốc 0.x) ⇒ gốc 0, loại draft, không CR
+    expect(custom).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0<\/vt:lpwstr>/)
+    expect(custom).toMatch(/name="flintflow_kind"[^>]*>\s*<vt:lpwstr>draft<\/vt:lpwstr>/)
+    expect(custom).not.toContain("flintflow_latest_cr")
   })
 })
 
@@ -212,22 +216,35 @@ describe("writeDocx — biến thể", () => {
   })
 })
 
-describe("buildDocxFileName", () => {
-  it("draft thêm -draft, bỏ dấu tiếng Việt", () => {
-    expect(buildDocxFileName(sample)).toBe("lumen-hoc-truc-tuyen-v0.3-draft.docx")
+describe("buildDocxFileName — quy tắc chung FLF-334", () => {
+  it("bản nháp: gốc baseline (+ N changes bỏ đi) ⇒ _v<gốc>_DRAFT; chưa baseline (v0) ⇒ <tên>_DRAFT", () => {
+    expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0 + 3 changes", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
+    expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
+    expect(buildDocxFileName({ projectName: "Lumen", version: "v0", source: "draft" })).toBe("Lumen_DRAFT.docx")
+    expect(buildDocxFileName(sample)).toBe("Lumen Học Trực Tuyến_v0_DRAFT.docx")
   })
 
-  it("baseline không có -draft; version conditional giữ nguyên", () => {
-    expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0-conditional", source: "baseline" })).toBe(
-      "lumen-v1.0-conditional.docx"
-    )
+  it("baseline ⇒ _v<version>, không _DRAFT; version conditional giữ nguyên", () => {
+    expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0", source: "baseline" })).toBe("Lumen_v1.0.docx")
+    expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0-conditional", source: "baseline" })).toBe("Lumen_v1.0-conditional.docx")
   })
 
-  it("ký tự lạ thành gạch, không nhân đôi -draft, tên rỗng dùng srs", () => {
-    expect(buildDocxFileName({ projectName: "Đường/Sắt: 2026!", version: "v 0.4", source: "draft" })).toBe(
-      "duong-sat-2026-v-0.4-draft.docx"
-    )
-    expect(buildDocxFileName({ projectName: "!!!", version: "v0.4-draft", source: "draft" })).toBe("srs-v0.4-draft.docx")
+  it("ký tự cấm của Windows thành gạch dưới, tên rỗng dùng SRS", () => {
+    expect(buildDocxFileName({ projectName: "Đường/Sắt: 2026!", version: "v1.1", source: "baseline" })).toBe("Đường_Sắt_ 2026!_v1.1.docx")
+    expect(buildDocxFileName({ projectName: "  ", version: "v0", source: "draft" })).toBe("SRS_DRAFT.docx")
+  })
+
+  it("exportLineage: baseline gốc 0.x của dự án import ⇒ 0", () => {
+    expect(exportLineage({ version: "0.1 + 2 changes", source: "draft" })).toEqual({ release: false, base: "0" })
+    expect(exportLineage({ version: "v1.1", source: "baseline" })).toEqual({ release: true, base: "1.1" })
+  })
+
+  it("baseline gốc 0.x không phải release ⇒ _v0_DRAFT, stamp kind draft", async () => {
+    expect(exportLineage({ version: "0.1", source: "baseline" })).toEqual({ release: false, base: "0" })
+    expect(buildDocxFileName({ projectName: "Lumen", version: "0.1", source: "baseline" })).toBe("Lumen_v0_DRAFT.docx")
+    const custom = readZipText(await writeDocx({ ...baseline(), version: "0.1" }), "docProps/custom.xml")
+    expect(custom).toMatch(/name="flintflow_kind"[^>]*>\s*<vt:lpwstr>draft<\/vt:lpwstr>/)
+    expect(custom).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0<\/vt:lpwstr>/)
   })
 })
 

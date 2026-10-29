@@ -25,6 +25,11 @@ export const docVersionDtoSchema = z.object({
   has_tracked_file: z.boolean(),
   /** Có file gốc người dùng upload (bản import 0.1, FLF-184) — tải qua `variant=original`. */
   has_original_file: z.boolean(),
+  /**
+   * FLF-334 B: tải được theo ngôn ngữ còn lại (`?lang=`) — chỉ version có baseline (release / bản chuyển đổi) của dự án
+   * chuyển từ mode 2. `false` ⇒ FE ẩn lựa chọn ngôn ngữ.
+   */
+  other_language_available: z.boolean(),
   created_by: id,
   created_at: isoDateTime
 })
@@ -79,14 +84,21 @@ export const versionParamsSchema = z.object({ v: docVersionString })
 
 /**
  * `GET /projects/:id/versions/:v/download?variant=` —
- * `auto`: release ⇒ bản sạch; draft ⇒ bản Track Changes + watermark DRAFT, tên `…_v0.1_DRAFT.docx` (G8).
+ * `auto`: release ⇒ bản sạch; draft ⇒ bản Track Changes + watermark DRAFT (G8). Tên + stamp theo FLF-334 (`versionFileName`):
+ *   `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0_DRAFT.docx`, release `<tên>_v2.0.docx`.
  * `tracked`: luôn bản có Track Changes (cả với release).
  * `original` (mode 1 v2, FLF-184): file người dùng upload của bản `0.1` (bản lưu `0.1` giờ là bản render từ Spine).
  */
 /** `format=pdf` (FLF-316): chính file .docx của variant đó chuyển qua Gotenberg; `original` chỉ có .docx. */
+/**
+ * `lang=vi|en` (FLF-334 B): không truyền / trùng ngôn ngữ tài liệu ⇒ như trước. Khác ⇒ dựng lại từ snapshot baseline của
+ * version theo ngôn ngữ đó (chỉ `variant=auto`; version không có baseline / dự án import thật ⇒ 409
+ * `DOCUMENT_LANGUAGE_UNAVAILABLE`; thiếu bản dịch ⇒ 409 `TRANSLATION_INCOMPLETE`).
+ */
 export const downloadQuerySchema = z.object({
   variant: z.enum(["auto", "tracked", "original"]).default("auto"),
-  format: z.enum(["docx", "pdf"]).default("docx")
+  format: z.enum(["docx", "pdf"]).default("docx"),
+  lang: z.enum(["vi", "en"]).optional()
 })
 
 /** `GET /projects/:id/versions/compare?from=&to=` (UC-55). */
