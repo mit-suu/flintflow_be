@@ -911,10 +911,16 @@ export interface DocumentQuery {
   baseline_id?: string
   /**
    * FLF-265 — ngôn ngữ tài liệu + ngôn ngữ gốc của dự án (`translation.service#projectLanguages`). Controller đặt từ
-   * project, KHÔNG lấy từ query string (`documentQuerySchema` đóng băng, `?lang=` bị bỏ qua). Không truyền hoặc
-   * `locale == source` ⇒ đúng đường cache như trước.
+   * project; riêng tải file (FLF-334 B) đặt `locale` = `?lang=` khi có. Không truyền hoặc `locale == source` ⇒ đúng
+   * đường cache như trước.
    */
   languages?: ProjectLanguages
+  /**
+   * FLF-334 B — chạy trên ĐÚNG Spine sắp dựng (draft: bản vừa đọc; baseline: snapshot), trước khi dựng; ném lỗi ⇒ không
+   * dựng. Chỉ đường bản dịch (`languages.locale ≠ source`) gọi — tải file dùng để kiểm đủ bản dịch (409
+   * `TRANSLATION_INCOMPLETE`) mà không đọc Spine lần hai giữa lúc kiểm và lúc dựng.
+   */
+  beforeRender?: (spine: Spine) => Promise<void>
 }
 
 /**
@@ -1084,12 +1090,14 @@ const getTranslatedDraftDocument = async (
   projectId: string,
   projectName: string,
   languages: ProjectLanguages,
-  deps: AssembleDeps
+  deps: AssembleDeps,
+  beforeRender?: (spine: Spine) => Promise<void>
 ): Promise<DocumentWithMeta> => {
   const record = await spineRepository.get(projectId)
   if (!record) throw new NoWorkingDraftError()
 
   const { projectId: _projectId, ...spine } = record
+  if (beforeRender) await beforeRender(spine)
   const changes = await spineRepository.listChanges(projectId)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges)
@@ -1125,10 +1133,12 @@ const getTranslatedBaselineDocument = async (
   projectName: string,
   baselineId: string | undefined,
   languages: ProjectLanguages,
-  deps: AssembleDeps
+  deps: AssembleDeps,
+  beforeRender?: (spine: Spine) => Promise<void>
 ): Promise<DocumentWithMeta> => {
   const baseline = await findBaseline(projectId, baselineId)
   const spine = baselineSpine(baseline.snapshot)
+  if (beforeRender) await beforeRender(spine)
   // §I + status rỗng như bản baseline gốc (`getBaselineDocument`)
   const recordChanges = await listChangesForRecord(projectId)
   const resolveInCharge = await buildInChargeResolver(recordChanges)
@@ -1181,11 +1191,16 @@ export async function getDocumentWithMeta(
   const { languages } = query
   if (languages && languages.locale !== languages.source) {
     return query.source === "baseline"
-      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged)
-      : getTranslatedDraftDocument(projectId, projectName, languages, merged)
+      ? getTranslatedBaselineDocument(projectId, projectName, query.baseline_id, languages, merged, query.beforeRender)
+      : getTranslatedDraftDocument(projectId, projectName, languages, merged, query.beforeRender)
   }
   if (query.source === "baseline") return { doc: await getBaselineDocument(projectId, projectName, query.baseline_id, merged) }
   return { doc: await getDraftDocument(projectId, projectName, merged) }
+}
+
+/** FLF-334 B — snapshot Spine của một baseline (`_id` hoặc `BLnnn`; không truyền ⇒ mới nhất). */
+export async function loadBaselineSpine(projectId: string, baselineId: string | undefined): Promise<Spine> {
+  return baselineSpine((await findBaseline(projectId, baselineId)).snapshot)
 }
 
 export async function getDocument(

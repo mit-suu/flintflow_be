@@ -169,7 +169,7 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     const original = await downloadVersion(projectId, "Lumen", "0.1", "original")
     expect(original.filename).toBe("Lumen_v0_original.docx")
     expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
-    expect(toVersionDto(v as never)).toMatchObject({ version: "0.1", has_original_file: true })
+    expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.1", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
     await expect(downloadVersion(projectId, "Lumen", "0.1", "original")).rejects.toMatchObject({ code: "DOC_VERSION_NOT_FOUND" })
   })
@@ -610,7 +610,7 @@ describe("finalize — tương thích bản gốc cũ 0.0 (FLF-284)", () => {
     await DocVersion.updateMany({ projectId }, { $set: { version: "0.0" } })
     await Baseline.updateMany({ projectId }, { $set: { version: "0.0", doc_version: "0.0" } })
     const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
-    expect(toVersionDto(v as never)).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
+    expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
     const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
     expect(rendered.filename).toBe("Lumen_v0_DRAFT.docx")
     const original = await downloadVersion(projectId, "Lumen", "0.0", "original")

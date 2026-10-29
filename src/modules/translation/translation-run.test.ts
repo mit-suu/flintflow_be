@@ -106,6 +106,32 @@ describe("runTranslation — chia lô, chỉ phần thiếu", () => {
     expect(mocks.getSpine).not.toHaveBeenCalled()
   })
 
+  it("FLF-334 B: options.locale dịch sang ngôn ngữ yêu cầu dù dự án đang en; mode 1 import thật ⇒ 409", async () => {
+    mocks.getSpine.mockResolvedValue(spineWith(3))
+    const executor = echo()
+    const res = await runTranslation(PROJECT, USER, { mode: "fpt", documentLanguage: "en" }, { locale: "vi" }, executor)
+    expect(res).toMatchObject({ translated: 3, remaining: 0 })
+    expect(vi.mocked(executor).mock.calls[0][0].promptVariables).toMatchObject({ source_language: "English", target_language: "Vietnamese" })
+
+    const imported = echo()
+    await expect(runTranslation(PROJECT, USER, { mode: "import" }, { locale: "vi" }, imported)).rejects.toMatchObject({
+      statusCode: 409,
+      code: "DOCUMENT_LANGUAGE_UNAVAILABLE"
+    })
+    expect(imported).not.toHaveBeenCalled()
+  })
+
+  it("FLF-334 B: loadSpine (đích snapshot) ⇒ dịch đơn vị của snapshot, không đọc Spine hiện tại", async () => {
+    mocks.getSpine.mockClear()
+    const snapshot = spineWith(2)
+    const loadSpine = vi.fn(async () => snapshot)
+    const executor = echo()
+    const res = await runTranslation(PROJECT, USER, { mode: "fpt", documentLanguage: "en" }, { locale: "vi", loadSpine }, executor)
+    expect(res).toMatchObject({ translated: 2, remaining: 0 })
+    expect(loadSpine).toHaveBeenCalledTimes(1)
+    expect(mocks.getSpine).not.toHaveBeenCalled()
+  })
+
   it("không còn gì thiếu ⇒ không gọi model", async () => {
     const spine = spineWith(2)
     mocks.getSpine.mockResolvedValue(spine)

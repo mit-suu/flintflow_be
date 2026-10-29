@@ -8,6 +8,7 @@ import {
   releaseRequestSchema,
   releaseResponseSchema
 } from "./doc-version.dto.js"
+import type { DownloadLanguageOptions } from "./versions.service.js"
 
 const oid = () => new mongoose.Types.ObjectId()
 const AT = "2026-09-18T08:00:00.000Z"
@@ -35,6 +36,7 @@ describe("doc-version DTO", () => {
     has_clean_file: true,
     has_tracked_file: false,
     has_original_file: false,
+    other_language_available: false,
     created_by: "66f000000000000000000001",
     created_at: AT
   }
@@ -49,6 +51,15 @@ describe("doc-version DTO", () => {
     expect(downloadQuerySchema.parse({}).format).toBe("docx")
     expect(downloadQuerySchema.parse({ format: "pdf" }).format).toBe("pdf")
     expect(downloadQuerySchema.safeParse({ format: "xlsx" }).success).toBe(false)
+    // FLF-334 B: `lang` tuỳ chọn, chỉ vi | en
+    expect(downloadQuerySchema.parse({}).lang).toBeUndefined()
+    expect(downloadQuerySchema.parse({ lang: "en" }).lang).toBe("en")
+    expect(downloadQuerySchema.safeParse({ lang: "fr" }).success).toBe(false)
+    // Kiểu: có `lang` thì bắt buộc `project` — `lang` không bị bỏ qua lặng lẽ (kiểm lúc typecheck)
+    const ok: DownloadLanguageOptions[] = [{}, { project: { mode: "import" } }, { project: { mode: "import" }, lang: "vi" }]
+    // @ts-expect-error — thiếu `project`
+    const missingProject: DownloadLanguageOptions = { lang: "vi" }
+    expect([...ok, missingProject]).toHaveLength(4)
     expect(compareQuerySchema.safeParse({ from: "0.1", to: "0.2" }).success).toBe(true)
     expect(compareQuerySchema.safeParse({ from: "0.1", to: "0.1" }).success).toBe(false)
     expect(compareQuerySchema.safeParse({ from: "0.1" }).success).toBe(false)

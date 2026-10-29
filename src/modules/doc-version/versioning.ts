@@ -65,20 +65,24 @@ export interface VersionFileNameParts {
   tracked?: boolean
   /** File gốc người dùng upload: `_original` thay cho `_DRAFT`. */
   original?: boolean
+  /** FLF-334 B: ngôn ngữ của file — caller chỉ truyền khi khác ngôn ngữ tài liệu ⇒ hậu tố `_EN` / `_VI` cuối tên. */
+  language?: string | null
   ext?: "docx" | "pdf"
 }
 
 /**
  * Quy tắc tên file chung cho tải version mode 1 và xuất mode 2, Word lẫn PDF (FLF-334). Không mang mã dự án — máy nhận
  * dự án qua stamp trong file. `Lumen_v2.0.docx` · `Lumen_v1.0+CR-014_DRAFT.docx` · `Lumen_v0_DRAFT.docx` ·
- * `Lumen_DRAFT.docx` (mode 2 chưa baseline) · `…_tracked_DRAFT.docx` · `…_original.docx`.
+ * `Lumen_DRAFT.docx` (mode 2 chưa baseline) · `…_tracked_DRAFT.docx` · `…_original.docx` · ngôn ngữ khác
+ * `Lumen_v2.0_EN.docx` / `Lumen_v1.0_DRAFT_VI.docx` (FLF-334 B).
  */
 export const versionFileName = (parts: VersionFileNameParts): string => {
   const base = parts.base ? sanitizeFileBase(parts.base.trim().replace(/^v/i, "")) : null
   const cr = !parts.release && base && parts.latestCr ? `+${sanitizeFileBase(parts.latestCr)}` : ""
   const label = base ? `_v${base}${cr}` : ""
   const tail = parts.original ? "_original" : parts.release ? "" : "_DRAFT"
-  return `${sanitizeFileBase(parts.name)}${label}${parts.tracked ? "_tracked" : ""}${tail}.${parts.ext ?? "docx"}`
+  const language = parts.language ? `_${sanitizeFileBase(parts.language).toUpperCase()}` : ""
+  return `${sanitizeFileBase(parts.name)}${label}${parts.tracked ? "_tracked" : ""}${tail}${language}.${parts.ext ?? "docx"}`
 }
 
 /** Tối thiểu của một version để suy release gốc / CR mới nhất (khớp `IDocVersion`). */

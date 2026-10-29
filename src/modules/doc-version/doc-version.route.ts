@@ -52,7 +52,7 @@ const router = Router()
  * /api/v1/projects/{projectId}/versions/{v}/download:
  *   get:
  *     summary: Tải file .docx của một version (UC-57)
- *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0_DRAFT.docx`; stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`."
+ *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0_DRAFT.docx`; stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B, chỉ version có snapshot baseline của dự án chuyển từ mode 2) ⇒ dựng lại theo `lang`, hậu tố ngôn ngữ cuối tên: `<tên>_v2.0_VI.docx`."
  *     tags: [Versions (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -60,9 +60,12 @@ const router = Router()
  *       - { in: path, name: projectId, required: true, schema: { type: string } }
  *       - { in: path, name: v, required: true, schema: { type: string } }
  *       - { in: query, name: variant, schema: { type: string, enum: [auto, tracked, original], default: auto } }
+ *       - { in: query, name: lang, description: "FLF-334 B — ngôn ngữ của file (mặc định ngôn ngữ tài liệu)", schema: { type: string, enum: [vi, en] } }
  *     responses:
- *       200: { description: File .docx }
+ *       200: { description: "File .docx — tên `<tên>_v2.0[_EN|_VI].docx`" }
+ *       400: { description: "VALIDATION_ERROR (`lang` lạ; `variant` tracked/original + `lang` khác)" }
  *       404: { description: DOC_VERSION_NOT_FOUND }
+ *       409: { description: TRANSLATION_INCOMPLETE (meta locale/missing/total) · DOCUMENT_LANGUAGE_UNAVAILABLE }
  * /api/v1/projects/{projectId}/release:
  *   post:
  *     summary: Release — đóng dấu major (1.0, 2.0…), khoá baseline, render bản sạch (Flow 6)

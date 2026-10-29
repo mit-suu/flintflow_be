@@ -7,6 +7,11 @@ vi.mock("./assemble.service.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./assemble.service.js")>()
   return { ...actual, assemble: vi.fn(), getDocument: vi.fn(), getDocumentWithMeta: vi.fn(), getDraftMeta: vi.fn() }
 })
+// FLF-334 B: kiểm đủ bản dịch — giả, không nối Mongo
+vi.mock("../translation/translation.service.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../translation/translation.service.js")>()
+  return { ...actual, assertTranslationComplete: vi.fn() }
+})
 // FLF-265: mode 1 đọc `TemplateProfile.language` — model giả, không nối Mongo
 vi.mock("../import/template-profile.model.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../import/template-profile.model.js")>()
@@ -19,10 +24,12 @@ vi.mock("./docx-writer.js", () => ({ writeDocx: vi.fn(), buildDocxFileName: vi.f
 import { assembleController, getDocumentController } from "./render.controller.js"
 import { exportWord } from "./export.controller.js"
 import { getProjectById } from "../project/project.service.js"
-import { assemble, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError } from "./assemble.service.js"
+import { assemble, getDocument, getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type DocumentQuery } from "./assemble.service.js"
+import { assertTranslationComplete } from "../translation/translation.service.js"
+import type { Spine } from "../spine/spine.types.js"
 import { TemplateProfile } from "../import/template-profile.model.js"
 import { executeAiAction } from "../../shared/ai/ai-action.service.js"
-import { writeDocx } from "./docx-writer.js"
+import { buildDocxFileName, writeDocx } from "./docx-writer.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
@@ -36,13 +43,15 @@ import { readFileSync } from "node:fs"
 const ORG = "650000000000000000000099"
 const OTHER_ORG = "650000000000000000000097"
 const orgCtxFor = (userId?: string) => ({
-  orgId: userId === OWNER ? ORG : OTHER_ORG,
-  role: "lead" as const,
+  orgId: userId === OWNER || userId === VIEWER ? ORG : OTHER_ORG,
+  role: userId === VIEWER ? ("viewer" as const) : ("lead" as const),
   membershipId: "650000000000000000000098"
 })
 
 
 const OWNER = "650000000000000000000010"
+/** Viewer cùng org với OWNER (UC-50: chỉ tải bản baseline). */
+const VIEWER = "650000000000000000000011"
 const PROJECT = "650000000000000000000001"
 
 interface Outcome {
@@ -93,6 +102,8 @@ beforeEach(() => {
   vi.mocked(writeDocx).mockReset()
   vi.mocked(executeAiAction).mockReset()
   vi.mocked(TemplateProfile.findOne).mockReset()
+  vi.mocked(assertTranslationComplete).mockReset()
+  vi.mocked(buildDocxFileName).mockClear()
   // FLF-265: controller gọi getDocumentWithMeta — mặc định chuyển sang mock getDocument để các ca cũ giữ nguyên
   vi.mocked(getDocumentWithMeta).mockReset()
   vi.mocked(getDocumentWithMeta).mockImplementation(async (...args) => ({ doc: await vi.mocked(getDocument)(...args) }))
@@ -320,7 +331,7 @@ describe("FLF-265 §3.1 — ngôn ngữ tài liệu theo project", () => {
         draftMeta: { assembled_at_version: 9, spine_version: 9, stale: false }
       })
 
-      const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft", lang: "en" })
+      const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft" })
       expect(outcome.status).toBe(200)
       expect(getDocumentWithMeta).toHaveBeenCalledWith(PROJECT, "Demo", { source: "draft", languages: { locale: "vi", source: "en" } })
       expect(writeDocx).toHaveBeenCalledWith(expect.anything(), { language: "vi", flagLanguage: "vi" })
@@ -350,6 +361,111 @@ describe("FLF-265 §3.1 — ngôn ngữ tài liệu theo project", () => {
         expect(writeDocx).toHaveBeenCalledWith(expect.anything(), { flagLanguage: "vi" })
         expect(outcome.headers?.["x-document-language"]).toBe(language)
       }
+    })
+
+    describe("FLF-334 B — ?lang= tải theo ngôn ngữ khác", () => {
+      const snapshot = { project: { name: "Demo" } } as unknown as Spine
+
+      it("không lang / lang = ngôn ngữ tài liệu ⇒ như trước: không kiểm bản dịch, tên không hậu tố", async () => {
+        asProject(VI_PROJECT)
+        vi.mocked(getDocumentWithMeta).mockResolvedValue({ doc: sample, translation })
+        for (const query of [{ source: "baseline" }, { source: "baseline", lang: "vi" }]) {
+          vi.mocked(getDocumentWithMeta).mockClear()
+          vi.mocked(buildDocxFileName).mockClear()
+          const outcome = await invoke(exportWord, OWNER, PROJECT, query)
+          expect(outcome.status).toBe(200)
+          expect(getDocumentWithMeta).toHaveBeenCalledWith(PROJECT, "Demo", { source: "baseline", languages: { locale: "vi", source: "en" } })
+          expect(buildDocxFileName).toHaveBeenCalledWith(expect.anything(), undefined)
+          expect(outcome.headers?.["x-document-language"]).toBe("vi")
+        }
+        expect(assertTranslationComplete).not.toHaveBeenCalled()
+      })
+
+      it("dự án vi, lang=en (= ngôn ngữ gốc) ⇒ chữ gốc, không kiểm bản dịch, hậu tố EN, header en", async () => {
+        asProject(VI_PROJECT)
+        vi.mocked(getDocumentWithMeta).mockResolvedValue({ doc: sample })
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "en" })
+        expect(outcome.status).toBe(200)
+        expect(assertTranslationComplete).not.toHaveBeenCalled()
+        expect(getDocumentWithMeta).toHaveBeenCalledWith(PROJECT, "Demo", { source: "baseline", languages: { locale: "en", source: "en" } })
+        expect(writeDocx).toHaveBeenCalledWith(expect.anything(), { language: "en", flagLanguage: "en" })
+        expect(buildDocxFileName).toHaveBeenCalledWith(expect.anything(), "en")
+        expect(outcome.headers?.["x-document-language"]).toBe("en")
+      })
+
+      /** Giả `getDocumentWithMeta` đường bản dịch: gọi `beforeRender` trên Spine nó "đọc" rồi mới dựng (như assemble.service). */
+      const renderingWith = (spine: Spine) =>
+        vi.mocked(getDocumentWithMeta).mockImplementation(async (_p: string, _n: string, query: DocumentQuery) => {
+          if (query.beforeRender) await query.beforeRender(spine)
+          return { doc: sample, translation: { ...translation, missing: 0 } }
+        })
+
+      it("dự án en, lang=vi đủ bản dịch ⇒ kiểm trên đúng Spine sắp dựng (hook beforeRender) rồi dựng bản vi", async () => {
+        asProject({ name: "Demo", mode: "fpt", documentLanguage: "en" })
+        renderingWith(snapshot)
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", baseline_id: "BL001", lang: "vi" })
+        expect(outcome.status).toBe(200)
+        expect(assertTranslationComplete).toHaveBeenCalledTimes(1)
+        expect(assertTranslationComplete).toHaveBeenCalledWith(PROJECT, "vi", snapshot)
+        expect(getDocumentWithMeta).toHaveBeenCalledTimes(1)
+        expect(getDocumentWithMeta).toHaveBeenCalledWith(PROJECT, "Demo", {
+          source: "baseline",
+          baseline_id: "BL001",
+          languages: { locale: "vi", source: "en" },
+          beforeRender: expect.any(Function)
+        })
+        expect(writeDocx).toHaveBeenCalledWith(expect.anything(), { language: "vi", flagLanguage: "vi" })
+        expect(buildDocxFileName).toHaveBeenCalledWith(expect.anything(), "vi")
+        expect(outcome.headers?.["x-document-language"]).toBe("vi")
+      })
+
+      it("thiếu bản dịch ⇒ 409 TRANSLATION_INCOMPLETE, không dựng file", async () => {
+        asProject({ name: "Demo", mode: "fpt", documentLanguage: "en" })
+        renderingWith(snapshot)
+        vi.mocked(assertTranslationComplete).mockRejectedValue(new ApiError(409, "thiếu", "TRANSLATION_INCOMPLETE", { locale: "vi", missing: 3, total: 40 }))
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft", lang: "vi" })
+        expect(outcome.error).toMatchObject({ statusCode: 409, code: "TRANSLATION_INCOMPLETE", meta: { locale: "vi", missing: 3, total: 40 } })
+        expect(assertTranslationComplete).toHaveBeenCalledWith(PROJECT, "vi", snapshot)
+        expect(writeDocx).not.toHaveBeenCalled()
+      })
+
+      it("bản nháp chưa có Spine + lang khác ⇒ NO_WORKING_DRAFT như trước", async () => {
+        asProject({ name: "Demo", mode: "fpt", documentLanguage: "en" })
+        vi.mocked(getDocumentWithMeta).mockRejectedValue(new NoWorkingDraftError())
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "draft", lang: "vi" })
+        expect(outcome.status).toBe(409)
+        expect(outcome.body).toMatchObject({ error: { code: "NO_WORKING_DRAFT" } })
+      })
+
+      it("mode 1 + lang khác ⇒ 409 DOCUMENT_LANGUAGE_UNAVAILABLE; lang lạ ⇒ 400", async () => {
+        asProject({ name: "Demo", mode: "import" })
+        withTemplateLanguage("vi")
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "en" })
+        expect(outcome.error).toMatchObject({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" })
+        const invalid = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "fr" })
+        expect(invalid.error).toMatchObject({ statusCode: 400, code: "VALIDATION_ERROR" })
+        expect(getDocumentWithMeta).not.toHaveBeenCalled()
+      })
+
+      it("dự án chuyển từ mode 2 (converted_from fpt) + lang khác ⇒ 409 DOCUMENT_LANGUAGE_UNAVAILABLE (bản đang làm là nháp CR)", async () => {
+        asProject({ name: "Demo", mode: "import", converted_from: "fpt", documentLanguage: "en" })
+        withTemplateLanguage("en")
+        const outcome = await invoke(exportWord, OWNER, PROJECT, { source: "baseline", lang: "vi" })
+        expect(outcome.error).toMatchObject({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" })
+        expect(getDocumentWithMeta).not.toHaveBeenCalled()
+      })
+
+      it("Viewer + lang: baseline tải được bản vi; bản nháp ⇒ 403 trước cả kiểm bản dịch", async () => {
+        asProject({ name: "Demo", mode: "fpt", documentLanguage: "en" })
+        renderingWith(snapshot)
+        const ok = await invoke(exportWord, VIEWER, PROJECT, { source: "baseline", lang: "vi" })
+        expect(ok.status).toBe(200)
+        expect(ok.headers?.["x-document-language"]).toBe("vi")
+        vi.mocked(assertTranslationComplete).mockClear()
+        const draft = await invoke(exportWord, VIEWER, PROJECT, { source: "draft", lang: "vi" })
+        expect(draft.error).toMatchObject({ statusCode: 403, code: "ORG_ROLE_FORBIDDEN" })
+        expect(assertTranslationComplete).not.toHaveBeenCalled()
+      })
     })
 
     it("§3.6: GET /document và export không gọi model (dự án vi còn thiếu bản dịch)", async () => {
