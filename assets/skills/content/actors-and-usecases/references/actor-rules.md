@@ -52,7 +52,7 @@ When two or more human actors share use cases (Log In, Register Account, Reset P
 more precise "Registered User") and set `parent_id` on each specialized actor:
 
 ```json
-{ "op": "add", "path": "actors[]", "value": { "id": "A05", "name": "User", "kind": "human", "description": "Anyone with an account who signs in to the platform.", "flows_in": ["Sign-in request"], "flows_out": ["Session"] } }
+{ "op": "add", "path": "actors[]", "value": { "id": "A05", "name": "User", "kind": "human", "description": "Anyone with an account who signs in to the platform.", "flows_in": ["Login Credentials"], "flows_out": ["Session Token"] } }
 { "op": "set", "path": "actors[id=A01].parent_id", "value": "A05" }
 ```
 

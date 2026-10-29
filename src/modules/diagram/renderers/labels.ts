@@ -38,8 +38,8 @@ export interface DiagramLabels {
 export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
   en: {
     system: "System",
-    defaultIn: { human: "user input", system: "service response", time: "scheduled trigger" },
-    defaultOut: { human: "processing result", system: "service request", time: "job status" },
+    defaultIn: { human: "User Input", system: "Service Response", time: "Scheduled Trigger" },
+    defaultOut: { human: "Processing Result", system: "Service Request", time: "Job Status" },
     useCasesTitle: (groups) => `Use Cases — ${groups}`,
     otherGroup: "Other",
     screensFlowTitle: (actorName) => `Screens flow for ${actorName}`,

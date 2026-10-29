@@ -848,7 +848,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
         renderKind(spine, target.kind, target.owner_id).map((part, i) => ({
           id: `D-${target.kind}-${target.owner_id ?? "x"}-${i + 1}`,
           kind: part.kind,
-          format: "puml", source: part.source,
+          format: part.format, source: part.source,
           section: part.section,
           owner_kind: part.owner_kind,
           owner_id: part.owner_id,

@@ -1,43 +1,53 @@
 /**
  * §1 System Context — source_fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`
- * (srs-spine §7.1). Sơ đồ luồng dữ liệu mức 0, nét đen: hệ thống là vòng tròn nền xám ở giữa, actor là hình chữ nhật nền trắng
- * quây quanh theo vai trò (hình học ở `context-layout.ts`).
+ * (srs-spine §7.1). Sơ đồ luồng dữ liệu mức 0 theo ký pháp Yourdon/DeMarco, dựng bằng SVG (hình học ở
+ * `context-layout.ts`): MỘT hình tròn là hệ thống, mỗi actor một hộp chữ nhật nền `#7ACFF5`, mỗi luồng dữ liệu một đoạn
+ * thẳng có đầu mũi tên đặc và nhãn danh từ dữ liệu dọc mũi tên. Không tiêu đề — tài liệu tự ghi chú thích ảnh.
  *
- * Mỗi phần tử của `flows_in` (actor → hệ thống) / `flows_out` (hệ thống → actor) là một mũi tên mang đúng một nhãn.
- * Một actor được có luồng một chiều (không ghép cặp), nhưng:
- * - mọi mũi tên đều mang dữ liệu: quá MAX_ARROWS phần tử một chiều thì mũi tên cuối gộp phần còn lại
- *   (`a, b, c`), không có `+ N more`;
- * - toàn sơ đồ phải có cả chiều vào lẫn chiều ra.
- * Skill S-2.3/S-3.x bắt buộc ghi luồng thật; nhãn dự phòng theo `kind` (DEFAULT_IN/DEFAULT_OUT) chỉ để sơ đồ không
- * bao giờ có mũi tên trơn khi Spine còn thiếu (dữ liệu cũ, model bỏ sót). Không lấy tên use case làm nhãn vì đó là
- * hành động, không phải dữ liệu.
+ * Mỗi phần tử của `flows_in` (actor → hệ thống) / `flows_out` (hệ thống → actor) là một mũi tên mang đúng một nhãn,
+ * không giới hạn số lượng, không gộp. Một actor được có luồng một chiều (không ghép cặp), nhưng toàn sơ đồ phải có cả
+ * chiều vào lẫn chiều ra. Skill S-2.3/S-3.x bắt buộc ghi luồng thật; nhãn dự phòng theo `kind` (DEFAULT_IN/DEFAULT_OUT)
+ * chỉ để sơ đồ không bao giờ có mũi tên trơn khi Spine còn thiếu (dữ liệu cũ, model bỏ sót). Không lấy tên use case làm
+ * nhãn vì đó là hành động, không phải dữ liệu.
  */
 
 import type { Actor, ActorKind } from "../../spine/spine.types.js"
 import { systemName } from "../../spine/system-name.js"
+import { FILL } from "../../../shared/diagram/svg-kit.js"
+import { Scene } from "../../../shared/diagram/svg-scene.js"
 import type { Renderer } from "./common.js"
-import { alias, byId, label, puml } from "./common.js"
-import { buildContextLayout, contextLabelLines, type ContextActor, type ContextEdge, type Point } from "./context-layout.js"
+import { alias, byId, label, svgPart } from "./common.js"
+import { buildContextLayout, LABEL_SIZE, NAME_LINE_HEIGHT, NAME_SIZE, type ContextActor } from "./context-layout.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
 
-const SYSTEM_ALIAS = "SYSTEM_"
-/** Số mũi tên tối đa mỗi chiều của một actor; dữ liệu dư gộp vào mũi tên cuối. */
-export const MAX_ARROWS = 3
 /** Nhãn dự phòng khi Spine thiếu luồng: chiều vào / chiều ra theo `kind` (bản tiếng Anh — `labels.ts`). */
 export const DEFAULT_IN: Readonly<Record<ActorKind, string>> = DIAGRAM_LABELS.en.defaultIn
 export const DEFAULT_OUT: Readonly<Record<ActorKind, string>> = DIAGRAM_LABELS.en.defaultOut
-/** Khoảng cắt bớt cuối đường để chừa chỗ cho đầu mũi tên. */
-const ARROWHEAD = 8
 
-const clean = (values: readonly string[] | undefined): string[] => (values ?? []).map(label).filter((v) => v.length > 0)
-const merged = (values: string[]): string[] =>
-  values.length > MAX_ARROWS ? [...values.slice(0, MAX_ARROWS - 1), values.slice(MAX_ARROWS - 1).join(", ")] : values
+/** Từ nối ngắn viết thường trong Title Case (trừ từ đầu). */
+const MINOR_WORDS = new Set(["and", "or", "of", "to", "for", "the", "a", "an", "in", "on", "via"])
+
+/** Title Case cho nhãn luồng tiếng Anh: giữ nguyên từ đã có chữ hoa (`SRS`, `OTP`, `eKYC`), từ nối ngắn viết thường. */
+export const titleCase = (text: string): string =>
+  text
+    .split(" ")
+    .map((word, i) => {
+      if (word !== word.toLowerCase()) return word
+      if (i > 0 && MINOR_WORDS.has(word)) return word
+      return word.charAt(0).toUpperCase() + word.slice(1)
+    })
+    .join(" ")
+
+const clean = (values: readonly string[] | undefined, format: (text: string) => string): string[] =>
+  (values ?? []).map((v) => format(label(v))).filter((v) => v.length > 0)
 
 /** Actor của sơ đồ, theo id: mỗi actor ít nhất một mũi tên có nhãn, toàn sơ đồ có cả chiều vào lẫn chiều ra. */
 export const contextActors = (actors: readonly Actor[], labels: DiagramLabels = DIAGRAM_LABELS.en): ContextActor[] => {
   const { defaultIn, defaultOut } = labels
+  // Chỉ nhãn tiếng Anh mới Title Case; tiếng Việt giữ nguyên
+  const format = labels === DIAGRAM_LABELS.en ? titleCase : (text: string) => text
   const result = byId([...actors]).map((a) => {
-    const flows = { id: a.id, name: label(a.name), kind: a.kind, inbound: merged(clean(a.flows_in)), outbound: merged(clean(a.flows_out)) }
+    const flows = { id: a.id, name: label(a.name), kind: a.kind, inbound: clean(a.flows_in, format), outbound: clean(a.flows_out, format) }
     // Chưa có luồng nào: chiều chính theo kind — human/time gửi vào hệ thống, system nhận yêu cầu từ hệ thống
     if (flows.inbound.length > 0 || flows.outbound.length > 0) return flows
     return a.kind === "system" ? { ...flows, outbound: [defaultOut.system] } : { ...flows, inbound: [defaultIn[a.kind]] }
@@ -61,65 +71,35 @@ export const contextActors = (actors: readonly Actor[], labels: DiagramLabels = 
   return result
 }
 
-/** Tên hệ thống gói ở 26 ký tự (khớp cách tính bán kính), tên actor ở 18 (khớp bề rộng hộp). */
-const dotLabel = (text: string, limit: number): string => JSON.stringify(contextLabelLines(text, limit).join("\n"))
-const flowLabel = (text: string): string => {
-  const lines = contextLabelLines(text).map((line) => line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
-  // Nền trắng không viền che nét của chính mũi tên dưới chữ
-  return `<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>${lines.join("<BR/>")}</TD></TR></TABLE>>`
-}
-const inches = (points: number): string => (points / 72).toFixed(6)
-const coordinates = ({ x, y }: Point): string => `${x.toFixed(6)},${y.toFixed(6)}`
-const position = (p: Point): string => `"${coordinates(p)}!"`
-const lerp = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
-
-/** `pos` của Graphviz cho đường có đầu mũi tên: cắt đoạn cuối sao cho nét dừng cách đầu mũi tên ARROWHEAD. */
-const edgePosition = (edge: ContextEdge): string => {
-  const end = edge.path[edge.path.length - 1]
-  const head = edge.path.slice(0, -4)
-  const [p0, c1, c2, p3] = edge.path.slice(-4)
-  // Tách đoạn cuối tại t (de Casteljau), giữ nguyên hình dạng phần đầu
-  const prefix = (t: number): Point[] => {
-    const a = lerp(p0, c1, t), b = lerp(c1, c2, t), c = lerp(c2, p3, t)
-    const d = lerp(a, b, t), e = lerp(b, c, t)
-    return [p0, a, d, lerp(d, e, t)]
-  }
-  let lower = 0, upper = 1
-  for (let i = 0; i < 40; i++) {
-    const t = (lower + upper) / 2
-    const tip = prefix(t)[3]
-    if (Math.hypot(end.x - tip.x, end.y - tip.y) > ARROWHEAD) lower = t
-    else upper = t
-  }
-  return JSON.stringify(`e,${coordinates(end)} ${[...head, ...prefix((lower + upper) / 2)].map(coordinates).join(" ")}`)
+/** Tên nhiều dòng giữa một hình: mỗi dòng một `text`, chính giữa theo chiều dọc. */
+const centredLines = (scene: Scene, id: string, owner: string, cx: number, cy: number, lines: string[]): void => {
+  lines.forEach((line, i) => {
+    const y = cy + (i - (lines.length - 1) / 2) * NAME_LINE_HEIGHT
+    scene.text(`${id}#name-${i}`, cx, y, line, { size: NAME_SIZE, bold: true, baseline: "central", owner })
+  })
 }
 
 export const renderContext: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
   const name = label(systemName(spine.project)) || labels.system
   const layout = buildContextLayout(contextActors(spine.actors, labels), name)
-  const ports: string[] = []
-  const edges: string[] = []
+  const scene = new Scene()
+
+  // Luồng trước (hộp và vòng tròn vẽ đè đầu mút), nhãn do Scene đặt ở lớp trên cùng
   for (const edge of layout.edges) {
-    const actorPort = `${alias(edge.actorId)}_${edge.flow.toUpperCase()}_${edge.index}`
-    const systemPort = `${SYSTEM_ALIAS}${actorPort}`
-    const [from, to] = edge.flow === "in" ? [actorPort, systemPort] : [systemPort, actorPort]
-    // Cổng ẩn kích thước 0 ghim hai đầu mũi tên đúng trên viền hộp / vòng tròn
-    ports.push(`  ${from} [shape=point, style=invis, width=0, height=0, label="", pos=${position(edge.path[0])}];`)
-    ports.push(`  ${to} [shape=point, style=invis, width=0, height=0, label="", pos=${position(edge.path[edge.path.length - 1])}];`)
-    const text = edge.labelPoint ? `label=${flowLabel(edge.text)}, ` : ""
-    const lp = edge.labelPoint ? `, lp="${coordinates(edge.labelPoint)}"` : ""
-    edges.push(`  ${from} -> ${to} [${text}actor_id=${JSON.stringify(edge.actorId)}, flow="${edge.flow}", flow_index=${edge.index}, pos=${edgePosition(edge)}${lp}];`)
+    const id = `${alias(edge.actorId)}_${edge.flow.toUpperCase()}_${edge.index}`
+    scene.line(id, edge.from, edge.to, { name: edge.text })
+    scene.arrow(id, "classic")
+    if (edge.text !== "") scene.label(id, edge.text, { size: LABEL_SIZE })
   }
-  const body = [
-    "digraph Context {",
-    '  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];',
-    '  node [fontname="sans-serif", fontsize=14, fontcolor="black", fixedsize=true, pin=true, style=filled, color="black", fillcolor="white", penwidth=1.2];',
-    '  edge [fontname="sans-serif", fontsize=12, color="black", fontcolor="black", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];',
-    `  ${SYSTEM_ALIAS} [shape=circle, pos="0,0!", width=${inches(layout.radiusX * 2)}, height=${inches(layout.radiusY * 2)}, label=${dotLabel(name, 26)}, fontsize=18, fillcolor="lightgray"];`,
-    ...layout.actors.map((a) => `  ${alias(a.id)} [shape=box, pos=${position(a.center)}, width=${inches(a.width)}, height=${inches(a.height)}, label=${dotLabel(a.name, 18)}, sector="${a.sector}"];`),
-    ...ports,
-    ...edges,
-    "}"
-  ]
-  return [{ kind: "context", section: "fixed:1", owner_kind: null, owner_id: null, format: "puml", source: puml("@startdot", body, "@enddot") }]
+  for (const actor of layout.actors) {
+    const id = alias(actor.id)
+    const { x, y, w, h } = actor.box
+    scene.rect(id, x, y, w, h, { fill: FILL, name: actor.name })
+    centredLines(scene, id, id, x + w / 2, y + h / 2, actor.lines)
+  }
+  const { cx, cy, r, lines } = layout.circle
+  scene.circle("SYSTEM", cx, cy, r, { fill: FILL, name })
+  centredLines(scene, "SYSTEM", "SYSTEM", cx, cy, lines)
+
+  return [svgPart(scene, { allowBends: false }, { kind: "context", section: "fixed:1", owner_kind: null, owner_id: null })]
 }

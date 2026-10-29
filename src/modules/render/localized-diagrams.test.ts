@@ -4,6 +4,7 @@ import { spineSchema } from "../spine/spine.schema.js"
 import type { Diagram, Spine } from "../spine/spine.types.js"
 import { allTargets, renderKind } from "../diagram/renderers/index.js"
 import { DIAGRAM_LABELS } from "../diagram/renderers/labels.js"
+import { titleCase } from "../diagram/renderers/context.renderer.js"
 import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
 import { translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, localizedDiagramSources, renderView } from "./localized-spine.js"
@@ -44,7 +45,7 @@ const rendered = (): { spine: Spine; wireframeId: string } => {
       diagrams.push({
         id: `D${String(diagrams.length + 1).padStart(2, "0")}`,
         kind: part.kind,
-        format: "puml", source: part.source,
+        format: part.format, source: part.source,
         section: part.section,
         owner_kind: part.owner_kind,
         owner_id: part.owner_id,
@@ -137,8 +138,10 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.source)).toMatch(/^Luồng màn hình của /)
     // Use case tách hai hình: tiêu đề phần là chữ máy ⇒ đổi
     for (const d of byKind(view, "usecase")) expect(d.source).toMatch(/^title Sơ đồ use case — /m)
-    // Sơ đồ ngữ cảnh: actor nào cũng có luồng, tên hệ thống đã đặt ⇒ không có chữ máy ⇒ y như bản gốc, dùng thẳng ảnh gốc
-    expect(byKind(view, "context")[0].source).toBe(byKind(spine, "context")[0].source)
-    expect(localizedDiagramSources(spine, localized).has(byKind(spine, "context")[0].id)).toBe(false)
+    // Sơ đồ ngữ cảnh: bản gốc Title Case nhãn tiếng Anh, bản tiếng Việt giữ nguyên chữ như viết ⇒ vẽ lại, nhãn chưa dịch không bị Title Case
+    const human = spine.actors.find((x) => x.kind === "human")!
+    expect(byKind(spine, "context")[0].source).toContain(`>${titleCase(human.flows_in![0])}<`)
+    expect(byKind(view, "context")[0].source).toContain(`>${human.flows_in![0]}<`)
+    expect(localizedDiagramSources(spine, localized).has(byKind(spine, "context")[0].id)).toBe(true)
   })
 })
