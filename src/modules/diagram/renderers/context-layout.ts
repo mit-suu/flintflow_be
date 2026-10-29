@@ -1,24 +1,22 @@
 /**
- * Hình học sơ đồ ngữ cảnh (DFD mức 0). Hệ thống là vòng tròn ở gốc toạ độ; actor quây quanh theo cung vai trò:
- * người dùng bên trái (west), hệ thống ngoài bên phải (east), bộ hẹn giờ phía dưới (south); phía trên (north)
- * chỉ dùng khi một cột quá cao. Đơn vị point, trục y hướng lên (đúng quy ước `pos` của Graphviz).
+ * Hình học sơ đồ ngữ cảnh (DFD mức 0, ký pháp Yourdon/DeMarco) — port từ `docs/diagram_guideline/context/build-context-diagram.mjs`.
+ * Đơn vị px, trục y hướng xuống (khớp `Scene`). Hệ thống là MỘT vòng tròn ở gốc toạ độ; actor nằm trên một ellipse
+ * quanh nó: người dùng nửa trái, hệ thống ngoài + bộ hẹn giờ nửa phải (một nửa trống ⇒ chia đôi danh sách).
  *
- * Mỗi mũi tên gồm hai đoạn nối tiếp, tiếp tuyến nhau tại điểm nối:
- * - đoạn THẲNG từ cổng trên mặt hộp quay vào tâm, đủ dài để chứa trọn nhãn của nó;
- * - đoạn CONG bậc ba từ cuối đoạn thẳng, điều khiển bởi khuỷu Q (nằm trên một ellipse bao ngoài vòng tròn) và
- *   C2 trên đoạn QP3, tới cổng P3 trên vòng tròn = chiếu hướng tâm của Q.
- * Đa giác điều khiển của đoạn cong lồi nên không uốn chữ S; bao lồi nằm trong nửa mặt phẳng {p·n ≥ r} với
- * n = Q/|Q| nên không đâm vào vòng tròn. Góc của tia tăng đơn điệu theo khoảng cách tới trục, nên các mũi tên
- * cùng cung không cắt nhau.
+ * Mỗi luồng dữ liệu là MỘT đoạn thẳng song song trục actor–tâm, cách các luồng cùng actor `FLOW_GAP`, nên các luồng
+ * của một actor không bao giờ cắt nhau. Hai chùm luồng của hai actor kề nhau được tách bằng góc (`anglesFor`).
+ * Bán kính ellipse tự nới tới khi hình không còn vi phạm: đoạn đủ dài cho nhãn, hộp không chồng nhau / vòng tròn,
+ * không hai đường cắt hoặc sát nhau, nhãn không đè đường / hộp / nhãn khác.
  */
 
+import { overlaps } from "../../../shared/diagram/svg-geometry.js"
+import { arrowHeadShape, textWidth, type Point } from "../../../shared/diagram/svg-kit.js"
+
+export type { Point }
 export type ActorKind = "human" | "system" | "time"
 export type FlowDirection = "in" | "out"
-export type ContextSector = "west" | "east" | "south" | "north"
-export type Point = { x: number; y: number }
-export type Size = { width: number; height: number }
+export type ContextSide = "left" | "right"
 
-/** Danh sách nhãn đã chuẩn hoá và đã giới hạn; chuỗi rỗng = mũi tên không nhãn. */
 export interface ContextActor {
   id: string
   name: string
@@ -28,11 +26,17 @@ export interface ContextActor {
   /** hệ thống → actor */
   outbound: readonly string[]
 }
-export interface PositionedActor extends ContextActor {
-  sector: ContextSector
-  center: Point
-  width: number
-  height: number
+export interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+export interface PlacedActor extends ContextActor {
+  box: Box
+  /** Tên đã gói dòng, vẽ giữa hộp. */
+  lines: string[]
+  side: ContextSide
 }
 export interface ContextEdge {
   actorId: string
@@ -40,53 +44,43 @@ export interface ContextEdge {
   /** Vị trí trong danh sách cùng chiều (`inbound` hoặc `outbound`). */
   index: number
   text: string
-  /** Chuỗi Bézier bậc ba theo chiều vẽ (3n+1 điểm): điểm đầu là đuôi mũi tên, điểm cuối là đầu mũi tên. */
-  path: Point[]
-  /** `null` khi mũi tên không nhãn. */
-  labelPoint: Point | null
-  labelSize: Size | null
+  /** Đuôi mũi tên. */
+  from: Point
+  /** Đầu mũi tên. */
+  to: Point
 }
 export interface ContextLayout {
-  /** Hệ thống luôn là hình tròn: hai bán kính bằng nhau. */
-  radiusX: number
-  radiusY: number
-  actors: PositionedActor[]
+  circle: { cx: number; cy: number; r: number; lines: string[] }
+  actors: PlacedActor[]
   edges: ContextEdge[]
-  /** Khung bao gồm vòng tròn, hộp, nhãn và đường cong. */
-  bounds: { minX: number; minY: number; maxX: number; maxY: number }
 }
 
-const LABEL_FONT = 12
-const NAME_FONT = 14
-const CHAR_W = LABEL_FONT * 0.65
-const LABEL_WRAP = 26
-/** Tên actor gói hẹp hơn nhãn: Word thu ảnh về khổ trang, chiều rộng quyết định cỡ chữ. */
-const NAME_WRAP = 18
-const PORT_MIN_BAND = 18
-const BAND_GAP = 8
-const PORT_INSET = 10
-const LABEL_MARGIN = 20
-const KNEE = 32
-const KNEE_AXIS_MIN = 36
-const ACTOR_GAP = 28
-const DEG = Math.PI / 180
-const SECTOR_GAP = 10 * DEG
-const COLUMN_FREE_BOUND = 70 * DEG
-const ROW_BOUND = 50 * DEG
-const MIN_BOUND = 20 * DEG
-const KNEE_SPAN_FACTOR = 1.12
-const PORT_MIN_GAP = 9
-/** Bề ngang tối đa so với chiều cao; bè hơn thì giãn cột theo chiều dọc. Gọn quan trọng hơn đúng 4:3. */
-const ASPECT = 1.6
-const SPREAD_STEP = 8
-const SPREAD_MAX = 120
-const BALANCE_RATIO = 1.6
-const C2_RATIO = 0.55
-const MAX_SOUTH = 2
-const MAX_NORTH = 3
+export const NAME_SIZE = 15
+export const LABEL_SIZE = 13
+/** Khoảng cách dòng của tên nhiều dòng (hộp và vòng tròn). */
+export const NAME_LINE_HEIGHT = 18
+
+const R_MIN = 110
+const FLOW_GAP = 22
+const BUNDLE_GAP = 24
+const SPAN = (70 * Math.PI) / 180
+const SPAN_MAX = (85 * Math.PI) / 180
+const ENT_H = 54
+const ENT_MIN_W = 150
+const NAME_WRAP = 22
+const SYSTEM_WRAP = 18
+/** Bề rộng nền nhãn = chữ + lề; đoạn thẳng còn chừa chỗ cho đầu mũi tên hai đầu. */
+const LABEL_PAD = 8
+const LABEL_H = LABEL_SIZE + 4
+const LABEL_ROOM = 30
+const BOX_GAP = 12
+const SEGMENT_GAP = 8
+const CIRCLE_CLEARANCE = 20
+const GROW_STEP = 1.08
+const GROW_MAX = 45
 
 /** Gói dòng chỉ đổi cách trình bày: một nhãn vẫn là một mũi tên. */
-export const contextLabelLines = (text: string, limit = LABEL_WRAP): string[] => {
+export const contextLabelLines = (text: string, limit = NAME_WRAP): string[] => {
   const lines: string[] = []
   for (const word of text.split(/\s+/).filter(Boolean)) {
     const last = lines.length - 1
@@ -96,339 +90,261 @@ export const contextLabelLines = (text: string, limit = LABEL_WRAP): string[] =>
   return lines.length ? lines : [""]
 }
 
-const textWidth = (lines: string[], font: number): number => Math.max(...lines.map((l) => l.length)) * font * 0.65
-const labelSize = (text: string): Size => {
-  if (text === "") return { width: 0, height: 0 }
-  const lines = contextLabelLines(text)
-  return { width: Math.max(...lines.map((l) => l.length)) * CHAR_W + 10, height: lines.length * 18 + 4 }
+interface Flow {
+  dir: FlowDirection
+  index: number
+  text: string
+}
+interface Prepared {
+  actor: ContextActor
+  lines: string[]
+  flows: Flow[]
+  w: number
+  h: number
 }
 
-type Arrow = { flow: FlowDirection; index: number; text: string; size: Size }
-interface Metrics {
-  actor: ContextActor
-  arrows: Arrow[]
-  nameW: number
-  nameH: number
-}
 const sum = (xs: number[]): number => xs.reduce((s, x) => s + x, 0)
 
-const metricsOf = (a: ContextActor): Metrics => {
-  const arrows: Arrow[] = [
-    ...a.inbound.map((text, index) => ({ flow: "in" as const, index, text, size: labelSize(text) })),
-    ...a.outbound.map((text, index) => ({ flow: "out" as const, index, text, size: labelSize(text) }))
+const prepare = (actor: ContextActor): Prepared => {
+  const lines = contextLabelLines(actor.name)
+  const flows: Flow[] = [
+    ...actor.inbound.map((text, index): Flow => ({ dir: "in", index, text })),
+    ...actor.outbound.map((text, index): Flow => ({ dir: "out", index, text }))
   ]
-  const name = contextLabelLines(a.name, NAME_WRAP)
-  return { actor: a, arrows, nameW: Math.max(104, textWidth(name, NAME_FONT) + 28), nameH: name.length * 20 + 24 }
+  const nameW = Math.max(...lines.map((l) => textWidth(l, NAME_SIZE, true)))
+  return {
+    actor,
+    lines,
+    flows,
+    w: Math.ceil(Math.max(ENT_MIN_W, nameW + 30)),
+    h: Math.max(ENT_H, (Math.max(flows.length, 1) - 1) * FLOW_GAP + 28, lines.length * NAME_LINE_HEIGHT + 16)
+  }
 }
 
-/** Cột (trái/phải): các mũi tên toả theo phương dọc; hàng (trên/dưới): toả theo phương ngang. */
-const colBands = (m: Metrics): number[] => m.arrows.map((a) => Math.max(PORT_MIN_BAND, a.size.height + BAND_GAP))
-const rowBands = (m: Metrics): number[] => m.arrows.map((a) => Math.max(PORT_MIN_BAND, a.size.width + BAND_GAP))
-const colSize = (m: Metrics): Size => ({ width: m.nameW, height: Math.max(m.nameH, sum(colBands(m)) + 2 * PORT_INSET) })
-const rowSize = (m: Metrics): Size => ({ width: Math.max(m.nameW, sum(rowBands(m)) + 2 * PORT_INSET), height: m.nameH })
-/** Toạ độ của từng cổng dọc trục toả, tính từ tâm hộp; phần tử đầu ở đầu dương nhân với `sign`. */
-const fanOffsets = (bands: number[], sign: 1 | -1): number[] => {
-  const total = sum(bands)
-  let cursor = 0
-  return bands.map((b) => {
-    const offset = total / 2 - (cursor + b / 2)
-    cursor += b
-    return sign * offset
-  })
+/** Người dùng bên trái, còn lại bên phải; một nửa trống ⇒ chia đôi danh sách (giữ thứ tự) cho cân. */
+const splitSides = (actors: readonly Prepared[]): { left: Prepared[]; right: Prepared[] } => {
+  const left = actors.filter((p) => p.actor.kind === "human")
+  const right = actors.filter((p) => p.actor.kind !== "human")
+  if (left.length === 0 && right.length > 1) {
+    const half = Math.ceil(right.length / 2)
+    return { left: right.slice(0, half), right: right.slice(half) }
+  }
+  if (right.length === 0 && left.length > 1) {
+    const half = Math.ceil(left.length / 2)
+    return { left: left.slice(0, half), right: left.slice(half) }
+  }
+  return { left, right }
 }
 
-const columnExtent = (ms: Metrics[]): number =>
-  ms.length === 0 ? 0 : sum(ms.map((m) => colSize(m).height)) + (ms.length - 1) * ACTOR_GAP
-
-/** Chia cung theo vai trò, rồi cân lại khi một cung trống hoặc một cột quá cao. Tất định: đi theo thứ tự id. */
-const assignSectors = (ms: Metrics[], radius: number): Record<ContextSector, Metrics[]> => {
-  const s: Record<ContextSector, Metrics[]> = {
-    west: ms.filter((m) => m.actor.kind === "human"),
-    east: ms.filter((m) => m.actor.kind === "system"),
-    south: ms.filter((m) => m.actor.kind === "time"),
-    north: []
-  }
-  const half = (xs: Metrics[]) => Math.ceil(xs.length / 2)
-  if (s.west.length === 0 && s.east.length === 0 && s.south.length >= 2) {
-    s.west = s.south.slice(0, half(s.south))
-    s.east = s.south.slice(half(s.south))
-    s.south = []
-  } else if (s.west.length === 0 && s.east.length >= 2) {
-    s.west = s.east.slice(half(s.east))
-    s.east = s.east.slice(0, half(s.east))
-  } else if (s.east.length === 0 && s.west.length >= 2) {
-    s.east = s.west.slice(half(s.west))
-    s.west = s.west.slice(0, half(s.west))
-  }
-  // Hàng dưới chỉ nhận ít actor đủ hẹp; dư dồn xuống cuối cột ngắn hơn
-  const rowMax = 2 * (radius + KNEE)
-  const keep: Metrics[] = []
-  for (const m of s.south) {
-    if (keep.length < MAX_SOUTH && rowSize(m).width <= rowMax) keep.push(m)
-    else (columnExtent(s.east) < columnExtent(s.west) ? s.east : s.west).push(m)
-  }
-  s.south = keep
-  // Cân hai cột: chuyển actor cuối của cột nặng sang cột nhẹ khi cột nặng cao vượt hẳn
-  for (let guard = 0; guard < ms.length; guard++) {
-    const [heavy, light] = columnExtent(s.west) >= columnExtent(s.east) ? [s.west, s.east] : [s.east, s.west]
-    if (heavy.length < 2) break
-    if (columnExtent(heavy) <= BALANCE_RATIO * Math.max(columnExtent(light), 2 * (radius + KNEE))) break
-    const moved = heavy[heavy.length - 1]
-    const after = Math.max(columnExtent(heavy.slice(0, -1)), columnExtent([...light, moved]))
-    if (after >= Math.max(columnExtent(heavy), columnExtent(light))) break
-    light.push(heavy.pop()!)
-  }
-  // Tràn lên phía trên khi cột vẫn quá cao so với bề ngang ước tính
-  const estWidth = 2 * (radius + KNEE + 120 + Math.max(104, ...ms.map((m) => m.nameW)))
-  for (let guard = 0; guard < MAX_NORTH; guard++) {
-    const tall = columnExtent(s.west) >= columnExtent(s.east) ? s.west : s.east
-    if (Math.max(columnExtent(s.west), columnExtent(s.east)) <= 1.1 * estWidth || tall.length < 2) break
-    if (rowSize(tall[0]).width > rowMax) break
-    const moved = tall.shift()!
-    if (tall === s.west) s.north.unshift(moved)
-    else s.north.push(moved)
-  }
-  return s
-}
-
-/** Ellipse khuỷu cho một nửa cung: `base` theo phương pháp tuyến, `extent` = |toạ độ| xa nhất dọc trục toả. */
-const kneeEllipse = (base: number, extent: number, bound: number) => {
-  const reach = extent / Math.tan(bound)
-  const normal = reach > 0.95 * base ? reach / 0.95 : base
-  const ratio = Math.min(reach / normal, 0.999)
-  const along = Math.max(normal, KNEE_SPAN_FACTOR * extent, extent / Math.sqrt(1 - ratio * ratio), 1)
-  return (pos: number): number => Math.max(KNEE_AXIS_MIN, normal * Math.sqrt(Math.max(0, 1 - (pos / along) ** 2)))
-}
+/** Độ rộng chùm luồng của actor (khoảng cách hai luồng ngoài cùng). */
+const bundleWidth = (p: Prepared): number => Math.max(0, p.flows.length - 1) * FLOW_GAP
+/** Khoảng (px) trên vòng tròn giữa tâm chùm của hai actor kề nhau, để hai chùm không chạm nhau. */
+const clearances = (group: readonly Prepared[]): number[] =>
+  group.slice(1).map((p, i) => (bundleWidth(p) + bundleWidth(group[i])) / 2 + BUNDLE_GAP)
 
 /**
- * Khoảng cách khuỷu (theo phương pháp tuyến) cho các cổng trong một nửa cung. Mỗi khuỷu ít nhất bằng `floor`
- * của nó; sau đó một lượt sửa đi từ cổng xa trục vào gần trục: cổng sau phải nhỏ góc hơn cổng trước ít nhất
- * PORT_MIN_GAP/r. Chỉ đẩy khuỷu ra xa, không kéo vào — góc vẫn tăng đơn điệu theo khoảng cách tới trục.
+ * Góc (rad, toạ độ màn hình) của các actor trong một nửa, từ trên xuống: hai actor kề nhau cách đủ để chùm luồng
+ * không chạm ở vòng tròn; góc dư chia đều tới ±SPAN.
  */
-const kneeOffsets = (positions: number[], curve: (pos: number) => number, floor: (pos: number) => number, radius: number): number[] => {
-  const offsets = positions.map((p) => Math.max(curve(p), floor(p)))
-  const order = positions.map((_, i) => i).sort((a, b) => Math.abs(positions[b]) - Math.abs(positions[a]))
-  for (let k = 1; k < order.length; k++) {
-    const prev = order[k - 1], cur = order[k]
-    if (positions[cur] === 0) continue
-    const limit = Math.atan2(Math.abs(positions[prev]), offsets[prev]) - PORT_MIN_GAP / radius
-    if (Math.atan2(Math.abs(positions[cur]), offsets[cur]) > limit) {
-      offsets[cur] = limit > 1e-6 ? Math.abs(positions[cur]) / Math.tan(limit) : offsets[cur] + PORT_MIN_GAP
+const anglesFor = (group: readonly Prepared[], side: ContextSide, radius: number): number[] => {
+  if (group.length === 1) return [side === "left" ? Math.PI : 0]
+  const need = clearances(group).map((px) => px / radius)
+  const total = sum(need)
+  const gaps = total < 2 * SPAN ? need.map((g) => g + (2 * SPAN - total) / need.length) : need
+  let t = -sum(gaps) / 2
+  return group.map((_, i) => {
+    if (i > 0) t += gaps[i - 1]
+    return side === "left" ? Math.PI - t : t
+  })
+}
+
+/** Tia p + u·t vào hộp: [t vào, t ra] hoặc null nếu trượt. */
+const rayThroughBox = (p: Point, u: Point, b: Box): [number, number] | null => {
+  let lo = -Infinity
+  let hi = Infinity
+  for (const [pa, ua, min, max] of [[p[0], u[0], b.x, b.x + b.w], [p[1], u[1], b.y, b.y + b.h]]) {
+    if (Math.abs(ua) < 1e-9) {
+      if (pa < min || pa > max) return null
+      continue
+    }
+    const t1 = (min - pa) / ua
+    const t2 = (max - pa) / ua
+    lo = Math.max(lo, Math.min(t1, t2))
+    hi = Math.min(hi, Math.max(t1, t2))
+  }
+  return lo <= hi ? [lo, hi] : null
+}
+
+interface Geometry {
+  edge: ContextEdge
+  owner: number
+  /** Nền nhãn (đa giác đã quay) — null khi luồng không có nhãn. */
+  label: Point[] | null
+  head: Point[]
+  length: number
+  needed: number
+}
+
+/** Hộp chữ nhật tâm c, quay `deg` độ quanh c. */
+const rotatedRect = (c: Point, w: number, h: number, deg: number): Point[] => {
+  const a = (deg * Math.PI) / 180
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  return ([[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]] as const).map(
+    ([x, y]): Point => [c[0] + x * cos - y * sin, c[1] + x * sin + y * cos]
+  )
+}
+
+/** Góc chữ dọc theo đoạn a→b, quay về (-90, 90] để chữ luôn đứng — giống `Scene.label`. */
+const uprightAngle = (a: Point, b: Point): number => {
+  let deg = (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI
+  if (deg > 90) deg -= 180
+  if (deg <= -90) deg += 180
+  return deg
+}
+
+const boxPolygon = (b: Box, inset = 0): Point[] => [
+  [b.x + inset, b.y + inset],
+  [b.x + b.w - inset, b.y + inset],
+  [b.x + b.w - inset, b.y + b.h - inset],
+  [b.x + inset, b.y + b.h - inset]
+]
+
+const circlePolygon = (r: number): Point[] =>
+  Array.from({ length: 64 }, (_, i): Point => [r * Math.cos((2 * Math.PI * i) / 64), r * Math.sin((2 * Math.PI * i) / 64)])
+
+const pointToSegment = (p: Point, a: Point, b: Point): number => {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  const len2 = dx * dx + dy * dy
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2))
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
+}
+
+const orient = (a: Point, b: Point, c: Point): number => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+/** Khoảng cách nhỏ nhất giữa hai đoạn; 0 khi cắt nhau. */
+const segmentDistance = (a: readonly [Point, Point], b: readonly [Point, Point]): number => {
+  if (orient(a[0], a[1], b[0]) * orient(a[0], a[1], b[1]) < 0 && orient(b[0], b[1], a[0]) * orient(b[0], b[1], a[1]) < 0) return 0
+  return Math.min(pointToSegment(a[0], b[0], b[1]), pointToSegment(a[1], b[0], b[1]), pointToSegment(b[0], a[0], a[1]), pointToSegment(b[1], a[0], a[1]))
+}
+
+interface Placement {
+  radius: number
+  boxes: Box[]
+  geometry: Geometry[]
+  sides: ContextSide[]
+}
+
+const place = (prepared: readonly Prepared[], left: Prepared[], right: Prepared[], radius: number, scale: number): Placement => {
+  const ringX = scale * (radius + Math.max(ENT_MIN_W, ...prepared.map((p) => p.w)) / 2 + 150)
+  const ringY = scale * (radius + 120)
+  const slots = new Map<Prepared, { angle: number; side: ContextSide }>()
+  for (const [group, side] of [[left, "left"], [right, "right"]] as const) {
+    anglesFor(group, side, radius).forEach((angle, i) => slots.set(group[i], { angle, side }))
+  }
+  const boxes: Box[] = []
+  const sides: ContextSide[] = []
+  const geometry: Geometry[] = []
+  prepared.forEach((p, owner) => {
+    const slot = slots.get(p)!
+    const ex = ringX * Math.cos(slot.angle)
+    const ey = ringY * Math.sin(slot.angle)
+    const dist = Math.hypot(ex, ey) || 1
+    const u: Point = [ex / dist, ey / dist]
+    const perp: Point = [-u[1], u[0]]
+    // Chùm luồng rộng theo phương vuông góc trục: hộp phải phủ hết chùm, nên nới cạnh gần vuông góc với phương đó
+    const cover = bundleWidth(p) + 28
+    let w = p.w
+    let h = p.h
+    if (Math.abs(perp[1]) >= Math.abs(perp[0])) h = Math.max(h, (cover - w * Math.abs(perp[0])) / Math.abs(perp[1]))
+    else w = Math.max(w, (cover - h * Math.abs(perp[1])) / Math.abs(perp[0]))
+    const box: Box = { x: ex - w / 2, y: ey - h / 2, w, h }
+    boxes.push(box)
+    sides.push(slot.side)
+    p.flows.forEach((f, k) => {
+      const o = (k - (p.flows.length - 1) / 2) * FLOW_GAP
+      const base: Point = [perp[0] * o, perp[1] * o]
+      const tc = Math.sqrt(Math.max(0, radius * radius - o * o))
+      const hit = rayThroughBox(base, u, box)
+      // Trượt hộp ⇒ đặt điểm vô nghĩa; `needed` vô hạn làm cấu hình bị loại
+      const tb = hit ? hit[0] : tc
+      const onCircle: Point = [base[0] + u[0] * tc, base[1] + u[1] * tc]
+      const onBox: Point = [base[0] + u[0] * tb, base[1] + u[1] * tb]
+      const [from, to] = f.dir === "in" ? [onBox, onCircle] : [onCircle, onBox]
+      const length = tb - tc
+      const mid: Point = [(onBox[0] + onCircle[0]) / 2, (onBox[1] + onCircle[1]) / 2]
+      const labelW = f.text === "" ? 0 : textWidth(f.text, LABEL_SIZE) + LABEL_PAD
+      geometry.push({
+        edge: { actorId: p.actor.id, flow: f.dir, index: f.index, text: f.text, from, to },
+        owner,
+        label: f.text === "" ? null : rotatedRect(mid, labelW, LABEL_H, uprightAngle(from, to)),
+        head: arrowHeadShape("classic", to, from).points,
+        length: hit ? length : -1,
+        needed: (f.text === "" ? 0 : labelW) + LABEL_ROOM
+      })
+    })
+  })
+  return { radius, boxes, geometry, sides }
+}
+
+/** Hình hợp lệ khi không còn vi phạm nào mà `checkScene` hoặc luật không-cắt-nhau sẽ bắt. */
+const isClean = ({ radius, boxes, geometry }: Placement): boolean => {
+  if (geometry.some((g) => g.length < g.needed)) return false
+  for (let i = 0; i < boxes.length; i++) {
+    const a = boxes[i]
+    const nearX = Math.max(a.x, Math.min(0, a.x + a.w))
+    const nearY = Math.max(a.y, Math.min(0, a.y + a.h))
+    if (Math.hypot(nearX, nearY) < radius + CIRCLE_CLEARANCE) return false
+    for (const b of boxes.slice(i + 1)) {
+      if (a.x < b.x + b.w + BOX_GAP && b.x < a.x + a.w + BOX_GAP && a.y < b.y + b.h + BOX_GAP && b.y < a.y + a.h + BOX_GAP) return false
     }
   }
-  return offsets
-}
-
-const lerp = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
-
-interface Port {
-  metrics: Metrics
-  arrow: Arrow
-  /** Cổng trên mặt hộp. */
-  port: Point
-  /** Khuỷu. */
-  knee: Point
-  /** Độ dài đoạn thẳng (≤ |khuỷu − cổng|), đủ chứa nhãn. */
-  leg: number
-  /** Tâm nhãn, nằm trên đoạn thẳng. */
-  labelAt: Point
-}
-
-const edgeOf = ({ port, knee, arrow, metrics, leg, labelAt }: Port, radius: number): ContextEdge => {
-  const length = Math.hypot(knee.x, knee.y)
-  const sys = { x: (radius * knee.x) / length, y: (radius * knee.y) / length }
-  const c2 = lerp(sys, knee, C2_RATIO)
-  const span = Math.hypot(knee.x - port.x, knee.y - port.y)
-  const joint = span > 0 ? lerp(port, knee, Math.min(1, leg / span)) : port
-  // Đoạn thẳng cổng → điểm nối, rồi đoạn cong điểm nối → vòng tròn (tiếp tuyến tại điểm nối)
-  const inward = [port, lerp(port, joint, 1 / 3), lerp(port, joint, 2 / 3), joint, knee, c2, sys]
-  return {
-    actorId: metrics.actor.id,
-    flow: arrow.flow,
-    index: arrow.index,
-    text: arrow.text,
-    path: arrow.flow === "in" ? inward : [...inward].reverse(),
-    labelPoint: arrow.text === "" ? null : labelAt,
-    labelSize: arrow.text === "" ? null : arrow.size
-  }
-}
-
-interface Placed {
-  actors: PositionedActor[]
-  edges: ContextEdge[]
-}
-
-/** Vùng một hàng chiếm: nửa bề rộng lớn nhất và mép gần vòng tròn nhất (theo |y|). */
-interface RowFootprint {
-  halfWidth: number
-  nearest: number
-  /** |y| xa nhất của hàng (mép ngoài của hộp). */
-  depth: number
-  /** Góc lớn nhất (tính từ trục dọc) của phần mũi tên đi vào vòng tròn. */
-  angle: number
-}
-
-/** Hàng trên/dưới: xếp ngang giữa trục, khuỷu trên ellipse dọc, hộp nằm ngoài khuỷu một đoạn chân. */
-const buildRow = (members: Metrics[], sector: "south" | "north", radius: number): Placed & { footprint: RowFootprint | null } => {
-  if (members.length === 0) return { actors: [], edges: [], footprint: null }
-  const sign = sector === "north" ? 1 : -1
-  const sizes = members.map(rowSize)
-  const total = sum(sizes.map((s) => s.width)) + (members.length - 1) * ACTOR_GAP
-  let cursor = -total / 2
-  const centersX = sizes.map((s) => {
-    const x = cursor + s.width / 2
-    cursor += s.width + ACTOR_GAP
-    return x
-  })
-  const ports = members.flatMap((m, i) => fanOffsets(rowBands(m), -1).map((dx, k) => ({ m, k, x: centersX[i] + dx })))
-  const extent = Math.max(...sizes.map((s, i) => Math.abs(centersX[i]) + s.width / 2))
-  const curve = kneeEllipse(radius + KNEE, extent, ROW_BOUND)
-  const offsets = new Array<number>(ports.length)
-  for (const side of [1, -1]) {
-    const idx = ports.map((_, i) => i).filter((i) => (side === 1 ? ports[i].x >= 0 : ports[i].x < 0))
-    kneeOffsets(idx.map((i) => ports[i].x), curve, () => 0, radius).forEach((o, j) => (offsets[idx[j]] = o))
-  }
-  const leg = Math.max(36, ...members.flatMap((m) => m.arrows.map((a) => a.size.height + 2 * LABEL_MARGIN)))
-  const actors: PositionedActor[] = []
-  const edges: ContextEdge[] = []
-  members.forEach((m, i) => {
-    const mine = ports.map((p, j) => ({ ...p, off: offsets[j] })).filter((p) => p.m === m)
-    const inner = (mine.length ? Math.max(...mine.map((p) => p.off)) : radius + KNEE) + leg
-    const center = { x: centersX[i], y: sign * (inner + sizes[i].height / 2) }
-    actors.push({ ...m.actor, sector, center, width: sizes[i].width, height: sizes[i].height })
-    for (const p of mine) {
-      const arrow = m.arrows[p.k]
-      const labelAt = { x: p.x, y: sign * (inner - LABEL_MARGIN - arrow.size.height / 2) }
-      edges.push(edgeOf({ metrics: m, arrow, port: { x: p.x, y: sign * inner }, knee: { x: p.x, y: sign * p.off }, leg, labelAt }, radius))
+  const circle = circlePolygon(radius)
+  const inner = boxes.map((b) => boxPolygon(b, 1))
+  const outer = boxes.map((b) => boxPolygon(b))
+  for (let i = 0; i < geometry.length; i++) {
+    const a = geometry[i]
+    const seg: [Point, Point] = [a.edge.from, a.edge.to]
+    // Đường chỉ chạm hộp của chính nó
+    if (inner.some((poly, k) => k !== a.owner && overlaps(seg, poly, 0))) return false
+    if (a.label) {
+      if (outer.some((poly) => overlaps(a.label!, poly))) return false
+      if (overlaps(a.label, circle)) return false
     }
-  })
-  let halfWidth = 0
-  for (const a of actors) halfWidth = Math.max(halfWidth, Math.abs(a.center.x) + a.width / 2)
-  for (const e of edges) if (e.labelPoint && e.labelSize) halfWidth = Math.max(halfWidth, Math.abs(e.labelPoint.x) + e.labelSize.width / 2)
-  // Chân dọc của các mũi tên hàng chạy từ khuỷu gần vòng tròn nhất trở ra
-  const nearest = Math.min(...offsets)
-  // Góc tính cả hộp và nhãn: đường của cột phải đi ngoài mọi phần tử của hàng
-  const corners: Point[] = edges.flatMap((e) => e.path)
-  for (const a of actors) for (const dx of [-1, 1]) for (const dy of [-1, 1]) corners.push({ x: a.center.x + (dx * a.width) / 2, y: a.center.y + (dy * a.height) / 2 })
-  for (const e of edges) if (e.labelPoint && e.labelSize) for (const dx of [-1, 1]) for (const dy of [-1, 1]) corners.push({ x: e.labelPoint.x + (dx * e.labelSize.width) / 2, y: e.labelPoint.y + (dy * e.labelSize.height) / 2 })
-  const angle = Math.max(0, ...corners.map((p) => Math.atan2(Math.abs(p.x), Math.abs(p.y))))
-  const depth = Math.max(...actors.map((a) => Math.abs(a.center.y) + a.height / 2))
-  return { actors, edges, footprint: { halfWidth, nearest, depth, angle } }
-}
-
-/** Cột trái/phải: xếp dọc giữa trục với khoảng giãn `spread`, khuỷu trên ellipse ngang. */
-const buildColumn = (
-  members: Metrics[],
-  sector: "west" | "east",
-  radius: number,
-  rows: { north: RowFootprint | null; south: RowFootprint | null },
-  spread: number
-): Placed => {
-  if (members.length === 0) return { actors: [], edges: [] }
-  const sign = sector === "east" ? 1 : -1
-  const sizes = members.map(colSize)
-  const gap = ACTOR_GAP + spread
-  let cursor = (sum(sizes.map((s) => s.height)) + (members.length - 1) * gap) / 2
-  const centersY = sizes.map((s) => {
-    const y = cursor - s.height / 2
-    cursor -= s.height + gap
-    return y
-  })
-  // Có hàng dưới (mà không có hàng trên) thì nâng cột vừa đủ để đáy cột không thấp hơn đáy hàng dưới, và ngược
-  // lại: cổng cột nằm càng sâu vào vùng của hàng thì càng phải đẩy ngang xa mới giữ được góc tách cung
-  const lowest = Math.min(...sizes.map((s, i) => centersY[i] - s.height / 2))
-  const highest = Math.max(...sizes.map((s, i) => centersY[i] + s.height / 2))
-  const shift =
-    rows.south && !rows.north ? Math.max(0, -rows.south.depth - lowest)
-    : rows.north && !rows.south ? -Math.max(0, highest - rows.north.depth)
-    : 0
-  for (let i = 0; i < centersY.length; i++) centersY[i] += shift
-  const ports = members.flatMap((m, i) => fanOffsets(colBands(m), 1).map((dy, k) => ({ m, k, y: centersY[i] + dy })))
-  const offsets = new Array<number>(ports.length)
-  for (const side of [1, -1]) {
-    const row = side === 1 ? rows.north : rows.south
-    const bound = row ? Math.max(MIN_BOUND, Math.PI / 2 - row.angle - SECTOR_GAP) : COLUMN_FREE_BOUND
-    const extent = Math.max(0, ...sizes.map((s, i) => side * centersY[i] + s.height / 2))
-    const curve = kneeEllipse(radius + KNEE, extent, bound)
-    // Khuỷu ngang tầm hàng trên/dưới phải nằm ngoài bề rộng của hàng đó
-    const floor = (pos: number) => (row && Math.abs(pos) >= row.nearest - ACTOR_GAP ? row.halfWidth + ACTOR_GAP : 0)
-    const idx = ports.map((_, i) => i).filter((i) => (side === 1 ? ports[i].y >= 0 : ports[i].y < 0))
-    kneeOffsets(idx.map((i) => ports[i].y), curve, floor, radius).forEach((o, j) => (offsets[idx[j]] = o))
-  }
-  const leg = Math.max(36, ...members.flatMap((m) => m.arrows.map((a) => a.size.width + 2 * LABEL_MARGIN)))
-  const actors: PositionedActor[] = []
-  const edges: ContextEdge[] = []
-  members.forEach((m, i) => {
-    const mine = ports.map((p, j) => ({ ...p, off: offsets[j] })).filter((p) => p.m === m)
-    const inner = (mine.length ? Math.max(...mine.map((p) => p.off)) : radius + KNEE) + leg
-    const center = { x: sign * (inner + sizes[i].width / 2), y: centersY[i] }
-    actors.push({ ...m.actor, sector, center, width: sizes[i].width, height: sizes[i].height })
-    for (const p of mine) {
-      const arrow = m.arrows[p.k]
-      const labelAt = { x: sign * (inner - LABEL_MARGIN - arrow.size.width / 2), y: p.y }
-      edges.push(edgeOf({ metrics: m, arrow, port: { x: sign * inner, y: p.y }, knee: { x: sign * p.off, y: p.y }, leg, labelAt }, radius))
-    }
-  })
-  return { actors, edges }
-}
-
-const boundsOf = (radius: number, placed: Placed): ContextLayout["bounds"] => {
-  let minX = -radius, maxX = radius, minY = -radius, maxY = radius
-  const add = (x: number, y: number) => {
-    minX = Math.min(minX, x)
-    maxX = Math.max(maxX, x)
-    minY = Math.min(minY, y)
-    maxY = Math.max(maxY, y)
-  }
-  for (const a of placed.actors) {
-    add(a.center.x - a.width / 2, a.center.y - a.height / 2)
-    add(a.center.x + a.width / 2, a.center.y + a.height / 2)
-  }
-  for (const e of placed.edges) {
-    for (const p of e.path) add(p.x, p.y)
-    if (e.labelPoint && e.labelSize) {
-      add(e.labelPoint.x - e.labelSize.width / 2, e.labelPoint.y - e.labelSize.height / 2)
-      add(e.labelPoint.x + e.labelSize.width / 2, e.labelPoint.y + e.labelSize.height / 2)
+    for (let j = i + 1; j < geometry.length; j++) {
+      const b = geometry[j]
+      const other: [Point, Point] = [b.edge.from, b.edge.to]
+      if (a.owner !== b.owner && segmentDistance(seg, other) < SEGMENT_GAP) return false
+      if (a.label && overlaps(other, a.label)) return false
+      if (b.label && overlaps(seg, b.label)) return false
+      if (a.label && b.label && overlaps(a.label, b.label)) return false
+      if (a.label && overlaps(a.label, b.head)) return false
+      if (b.label && overlaps(b.label, a.head)) return false
     }
   }
-  return { minX, minY, maxX, maxY }
+  return true
 }
 
 export const buildContextLayout = (actors: readonly ContextActor[], systemName = "System"): ContextLayout => {
-  const title = contextLabelLines(systemName)
-  const baseRadius = Math.max(100, textWidth(title, 18) / 2 + 24, title.length * 12 + 24)
-  const metrics = actors.map(metricsOf)
-  const sectors = assignSectors(metrics, baseRadius)
-  const busiest = Math.max(0, ...(["west", "east"] as const).map((s) => sum(sectors[s].map((m) => m.arrows.length))))
-  const radius = Math.max(baseRadius, (busiest * PORT_MIN_GAP) / 1.6)
+  const systemLines = contextLabelLines(systemName, SYSTEM_WRAP)
+  const prepared = actors.map(prepare)
+  const { left, right } = splitSides(prepared)
 
-  const south = buildRow(sectors.south, "south", radius)
-  const north = buildRow(sectors.north, "north", radius)
-  const rows = { south: south.footprint, north: north.footprint }
-  const tall = sectors.west.length >= 2 || sectors.east.length >= 2
-  let placed: Placed = { actors: [], edges: [] }
-  let best: { placed: Placed; ratio: number } | null = null
-  for (let spread = 0; spread <= (tall ? SPREAD_MAX : 0); spread += SPREAD_STEP) {
-    const west = buildColumn(sectors.west, "west", radius, rows, spread)
-    const east = buildColumn(sectors.east, "east", radius, rows, spread)
-    placed = {
-      actors: [...west.actors, ...east.actors, ...south.actors, ...north.actors],
-      edges: [...west.edges, ...east.edges, ...south.edges, ...north.edges]
-    }
-    const b = boundsOf(radius, placed)
-    const ratio = (b.maxX - b.minX) / (b.maxY - b.minY)
-    // Dừng ngay khi đủ gọn; giãn thêm có thể làm cột bị đẩy ra xa, nên cũng dừng khi bắt đầu tệ đi
-    if (!best || ratio < best.ratio) best = { placed, ratio }
-    else break
-    if (ratio <= ASPECT) break
-  }
-  placed = best?.placed ?? placed
-  const byId = new Map(placed.actors.map((a) => [a.id, a]))
+  // Vòng tròn chứa trọn tên (nửa đường chéo khối chữ + lề), luồng dày nhất còn hợp lệ, và đủ chu vi cho các chùm
+  const nameW = Math.max(...systemLines.map((l) => textWidth(l, NAME_SIZE, true)))
+  const nameH = systemLines.length * NAME_LINE_HEIGHT
+  const widest = Math.max(0, ...prepared.map(bundleWidth))
+  const arcNeed = (group: Prepared[]): number => sum(clearances(group)) / (2 * SPAN_MAX)
+  const radius = Math.ceil(Math.max(R_MIN, Math.hypot(nameW / 2, nameH / 2) + 10, widest / 2 + 20, arcNeed(left), arcNeed(right)))
+
+  let placement = place(prepared, left, right, radius, 1)
+  for (let step = 1; step <= GROW_MAX && !isClean(placement); step++) placement = place(prepared, left, right, Math.ceil(radius * GROW_STEP ** step), GROW_STEP ** step)
+
+  const edges = placement.geometry.map((g) => g.edge)
   return {
-    radiusX: radius,
-    radiusY: radius,
-    actors: actors.map((a) => byId.get(a.id)!),
-    edges: placed.edges,
-    bounds: boundsOf(radius, placed)
+    circle: { cx: 0, cy: 0, r: placement.radius, lines: systemLines },
+    actors: prepared.map((p, i) => ({ ...p.actor, box: placement.boxes[i], lines: p.lines, side: placement.sides[i] })),
+    edges
   }
 }

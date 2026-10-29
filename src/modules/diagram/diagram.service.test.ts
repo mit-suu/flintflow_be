@@ -294,7 +294,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
       current.spine_version = spine.spine_version + 10
       return render(true)
     })
-    await expect(renderDiagram(PROJECT, "context", null, { by: USER, deps: loser.deps })).rejects.toMatchObject({ statusCode: 409 })
+    await expect(renderDiagram(PROJECT, "usecase", null, { by: USER, deps: loser.deps })).rejects.toMatchObject({ statusCode: 409 })
     expect(loser.store.files.size).toBe(0)
   })
 })
