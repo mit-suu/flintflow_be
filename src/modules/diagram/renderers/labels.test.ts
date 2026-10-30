@@ -89,11 +89,12 @@ describe("nhãn máy trên sơ đồ theo ngôn ngữ (FLF-265 N1)", () => {
       const e = s.entities.find((x) => x.relations.length > 0)!
       e.relation_verbs = { [e.relations[0]]: "chứa" }
     })
-    const puml = RENDERERS.erd(withVerb, null, VI)[0].source
-    expect(puml).toContain('relationship "chứa"')
-    expect(puml).toContain(`relationship "${VI.relationVerb}"`)
-    expect(puml).not.toContain('relationship "has"')
-    expect(RENDERERS.erd(mutate((s) => (s.entities = [])), null, VI)[0].source).toContain(`entity "${VI.noEntities}" as NO_ENTITIES`)
+    const svg = RENDERERS.erd(withVerb, null, VI, { erdNotation: "crowsfoot" })[0].source
+    expect(svg).toContain(">chứa<")
+    expect(svg).toContain(`>${VI.relationVerb}<`)
+    expect(svg).not.toContain(">has<")
+    expect(svg).toContain(`<title>${VI.erdTitle}`)
+    expect(RENDERERS.erd(mutate((s) => (s.entities = [])), null, VI)[0].source).toContain(`>${VI.noEntities}<`)
   })
 
   it("bảng function: tiêu đề cột + 'chưa có chức năng'; isFunctionTable nhận bảng mọi ngôn ngữ", () => {

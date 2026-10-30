@@ -36,6 +36,7 @@ import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
@@ -1149,7 +1150,7 @@ export const runRenderReviewPhase = async (
   const { spine: spineAfterDraft } = await refresh(projectId)
   const alreadyRendered = new Set(renders)
   const staleTargets: RenderTarget[] = []
-  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft) : []) {
+  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : []) {
     if (alreadyRendered.has(diagram.kind)) continue
     const key = `${diagram.kind}:${diagram.owner_id ?? ""}`
     if (staleTargets.some((t) => `${t.kind}:${t.owner_id ?? ""}` === key)) continue

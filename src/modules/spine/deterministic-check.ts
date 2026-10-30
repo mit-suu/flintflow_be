@@ -18,6 +18,7 @@ import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap, screenLanes } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
+import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
@@ -136,6 +137,8 @@ export interface RuleProfile {
 }
 
 export interface CheckOptions {
+  /** Ký pháp ERD của dự án (ngoài Spine) — vào hash hình ERD của cờ `diagram_stale`. */
+  erdNotation?: ErdNotation
   atBaseline?: boolean
   ruleProfile?: RuleProfile
 }
@@ -405,11 +408,11 @@ const onePerTarget = (diagrams: Spine["diagrams"]): Spine["diagrams"] => {
   return diagrams.filter((d) => first.get(`${d.kind}|${d.owner_id ?? ""}`) === d)
 }
 
-const diagramStale = (spine: Spine): FlagCandidate[] =>
+const diagramStale = (spine: Spine, context: RenderContext = {}): FlagCandidate[] =>
   onePerTarget(
     printedDiagrams(spine)
       .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
-      .filter((d) => d.source_hash !== renderedDiagramHash(spine, d))
+      .filter((d) => d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
   )
     .map((d) => ({
       level: "red",
@@ -1347,7 +1350,7 @@ export const runDeterministicCheck = (
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
-    ...diagramStale(spine),
+    ...diagramStale(spine, { erdNotation: options.erdNotation }),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
