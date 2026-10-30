@@ -8,7 +8,6 @@ import { VIETNAMESE_DIACRITICS } from "../../spine/deterministic-check.js"
 import { createEmptySpine } from "../../spine/spine.repository.js"
 import { allTargets, layoutOwners, renderKind } from "./index.js"
 import { saltCell } from "./screen-layout.renderer.js"
-import { screenFlowTitleOf } from "./screen-flow.renderer.js"
 import { DEFAULT_IN, DEFAULT_OUT, contextActors, titleCase } from "./context.renderer.js"
 import { buildContextLayout } from "./context-layout.js"
 import { DIAGRAM_LABELS } from "./labels.js"
@@ -213,196 +212,6 @@ describe("renderers trên fixture 19 màn", () => {
     expect(vi[0].inbound).toEqual(["thông tin đăng ký"])
   })
 
-  it("screen_flow: DOT — màn là hình chữ nhật, màn nhiều tab là cluster, popup hình ô-van, cạnh flow_to", () => {
-    const puml = renderKind(FIXTURE, "screen_flow").map((p) => p.source).join("\n")
-    const tabbed = FIXTURE.screens.find((s) => s.tabs.length > 0)!
-    expect(puml).toContain('node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];')
-    expect(puml).not.toContain("style=rounded")
-    expect(puml).toContain(`subgraph cluster_${tabbed.id} {`)
-    expect(puml).toContain(`${tabbed.id}_T1 [label="${tabbed.tabs[0]}"];`)
-    for (const popup of FIXTURE.screens.filter((s) => s.is_popup)) {
-      expect(puml).toContain(`${popup.id} [label="${popup.name}", shape=ellipse];`)
-      expect(puml).not.toContain(`${popup.id} [label="${popup.name}\\n(pop-up)"`)
-    }
-    // Cạnh đi từ màn nhiều tab gắn vào cluster
-    expect(puml).toContain("S07_T1 -> S08 [ltail=cluster_S07];")
-  })
-
-  it("screen_flow: một sơ đồ cho mỗi actor người, bắt đầu bằng hình thoi mang tên actor", () => {
-    const parts = renderKind(FIXTURE, "screen_flow")
-    expect(parts.map((p) => screenFlowTitleOf(p.source))).toEqual([
-      "Screens flow for Founder",
-      "Screens flow for Business Analyst",
-      "Screens flow for Administrator",
-      "Screens flow for Guest"
-    ])
-    expect(parts.every((p) => p.owner_id === null && p.section === "fixed:3.1.1")).toBe(true)
-    expect(parts.every((p) => p.source.startsWith("@startdot\n") && p.source.endsWith("@enddot\n"))).toBe(true)
-
-    const admin = parts[2].source
-    expect(admin).toContain('START [label="Administrator", shape=diamond, style=solid];')
-    expect(admin).toContain("START -> S01;")
-    expect(admin).toContain("S14 -> S16;")
-    // Màn của actor khác và cạnh sang màn ngoài nhóm không vẽ
-    expect(admin).not.toContain("cluster_S07")
-    expect(admin).not.toContain("S01 -> S05;")
-
-    const guest = parts[3].source
-    expect(guest).toContain('START [label="Guest", shape=diamond, style=solid];')
-    expect(guest).toContain("START -> S01;")
-    expect(guest).toContain("S01 -> S02;")
-  })
-
-  it("screen_flow: mũi tên một chiều — cặp màn trỏ qua lại chỉ giữ chiều đi tiếp từ màn vào", () => {
-    const [founder, , admin, guest] = renderKind(FIXTURE, "screen_flow").map((p) => p.source)
-    // Login ⇄ Register: chỉ Login → Register
-    expect(guest).toContain("S01 -> S02;")
-    expect(guest).not.toContain("S02 -> S01;")
-    // Workspace ⇄ Diagram Preview: chỉ Workspace → Preview
-    expect(founder).toContain("S07_T1 -> S08 [ltail=cluster_S07];")
-    expect(founder).not.toContain("S08 -> S07_T1")
-    expect(admin).toContain("S14 -> S15;")
-    expect(admin).not.toContain("S15 -> S14;")
-    for (const p of [founder, admin, guest]) {
-      const edges = new Set([...p.matchAll(/^ {2}(\w+) -> (\w+)/gm)].map((m) => `${m[1]}>${m[2]}`))
-      for (const e of edges) expect(edges.has(e.split(">").reverse().join(">")), e).toBe(false)
-    }
-  })
-
-  it("screen_flow: màn chỉ tới được qua màn của actor khác được nối tắt từ màn trong nhóm, không đứng ngang Login", () => {
-    // Login → Manager Dashboard → Grade Entry; Lecturer dùng Login + Grade Entry nhưng không dùng Dashboard
-    const spine = mutate((s) => {
-      s.actors = [
-        { ...s.actors.find((a) => a.kind === "human")!, id: "A01", name: "Manager" },
-        { ...s.actors.find((a) => a.kind === "human")!, id: "A02", name: "Lecturer" }
-      ]
-      s.roles = [
-        { ...s.roles[0], id: "R1", actor_id: "A01" },
-        { ...s.roles[0], id: "R2", actor_id: "A02" }
-      ]
-      const base = s.screens[0]
-      s.screens = [
-        { ...base, id: "S01", name: "Login", flow_to: ["S02", "S04"], is_popup: false, tabs: [] },
-        { ...base, id: "S02", name: "Manager Dashboard", flow_to: ["S03"], is_popup: false, tabs: [] },
-        { ...base, id: "S03", name: "Grade Entry", flow_to: [], is_popup: false, tabs: [] },
-        { ...base, id: "S04", name: "Lecturer Schedule", flow_to: [], is_popup: false, tabs: [] }
-      ]
-      const perm = s.permissions[0]
-      s.permissions = [
-        ...["S01", "S02", "S03"].map((id) => ({ ...perm, screen_id: id, role_id: "R1" })),
-        ...["S01", "S03", "S04"].map((id) => ({ ...perm, screen_id: id, role_id: "R2" }))
-      ]
-      s.use_cases = []
-    })
-    const [manager, lecturer] = renderKind(spine, "screen_flow").map((p) => p.source)
-    expect(manager).toContain("START -> S01;")
-    expect(manager).toContain("S02 -> S03;")
-    // Lecturer: Grade Entry nối từ Login (qua Dashboard bị lọc), START chỉ trỏ vào Login
-    expect([...lecturer.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01"])
-    expect(lecturer).toContain("S01 -> S03;")
-    expect(lecturer).toContain("S01 -> S04;")
-    expect(lecturer).not.toContain("S02")
-  })
-
-  it("screen_flow: màn public (chỉ Guest) nằm trong sơ đồ của mọi actor, Login và landing công khai cùng là màn vào", () => {
-    // Login → Reset Password, Login → Teacher Home / Student Home; Public Landing đứng ngang Login
-    const spine = mutate((s) => {
-      s.actors = [
-        { ...s.actors.find((a) => a.kind === "human")!, id: "A01", name: "Teacher" },
-        { ...s.actors.find((a) => a.kind === "human")!, id: "A02", name: "Student" }
-      ]
-      s.roles = [
-        { ...s.roles[0], id: "R1", actor_id: "A01" },
-        { ...s.roles[0], id: "R2", actor_id: "A02" },
-        { ...s.roles[0], id: "R3", name: "Guest", actor_id: null }
-      ]
-      const base = s.screens[0]
-      s.screens = [
-        { ...base, id: "S01", name: "Login", flow_to: ["S02", "S03", "S04"], is_popup: false, tabs: [] },
-        { ...base, id: "S02", name: "Reset Password", flow_to: [], is_popup: false, tabs: [] },
-        { ...base, id: "S03", name: "Teacher Home", flow_to: [], is_popup: false, tabs: [] },
-        { ...base, id: "S04", name: "Student Home", flow_to: [], is_popup: false, tabs: [] },
-        { ...base, id: "S05", name: "Public Landing", flow_to: [], is_popup: false, tabs: [] }
-      ]
-      const perm = s.permissions[0]
-      s.permissions = [
-        ...["S01", "S02", "S05"].map((id) => ({ ...perm, screen_id: id, role_id: "R3" })),
-        { ...perm, screen_id: "S03", role_id: "R1" },
-        { ...perm, screen_id: "S04", role_id: "R2" }
-      ]
-      s.use_cases = []
-    })
-    const parts = renderKind(spine, "screen_flow")
-    expect(parts.map((p) => screenFlowTitleOf(p.source))).toEqual(["Screens flow for Teacher", "Screens flow for Student"])
-    const [teacher, student] = parts.map((p) => p.source)
-    for (const p of [teacher, student]) {
-      expect([...p.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01", "S05"])
-      expect(p).toContain("S01 -> S02;")
-    }
-    expect(teacher).toContain("S01 -> S03;")
-    expect(teacher).not.toContain("S04")
-    expect(student).toContain("S01 -> S04;")
-    expect(student).not.toContain("S03")
-  })
-
-  it("screen_flow: màn Đăng ký đứng ngang Login sau hình thoi actor và trỏ sang Login", () => {
-    // Register → Login → Teacher Home; Login vẫn là màn vào dù có cạnh tới từ Register
-    const spine = mutate((s) => {
-      s.actors = [{ ...s.actors.find((a) => a.kind === "human")!, id: "A01", name: "Teacher" }]
-      s.roles = [
-        { ...s.roles[0], id: "R1", actor_id: "A01" },
-        { ...s.roles[0], id: "R3", name: "Guest", actor_id: null }
-      ]
-      const base = s.screens[0]
-      s.screens = [
-        { ...base, id: "S01", name: "Login", flow_to: ["S02", "S03"], is_popup: false, tabs: [], queue_order: 1 },
-        { ...base, id: "S02", name: "Reset Password", flow_to: [], is_popup: false, tabs: [], queue_order: 2 },
-        { ...base, id: "S03", name: "Teacher Home", flow_to: [], is_popup: false, tabs: [], queue_order: 3 },
-        { ...base, id: "S04", name: "Register", flow_to: ["S01"], is_popup: false, tabs: [], queue_order: 4 }
-      ]
-      const perm = s.permissions[0]
-      s.permissions = [
-        ...["S01", "S02", "S04"].map((id) => ({ ...perm, screen_id: id, role_id: "R3" })),
-        { ...perm, screen_id: "S03", role_id: "R1" }
-      ]
-      s.use_cases = []
-    })
-    const [teacher] = renderKind(spine, "screen_flow").map((p) => p.source)
-    // Login và Register cùng sau hình thoi; Reset Password treo dưới Login, không phải màn vào
-    expect([...teacher.matchAll(/START -> (\w+)/g)].map((m) => m[1])).toEqual(["S01", "S04"])
-    expect(teacher).toContain("S04 -> S01;")
-    expect(teacher).not.toContain("S01 -> S04;")
-    expect(teacher).toContain("S01 -> S02;")
-    expect(teacher).toContain("S01 -> S03;")
-  })
-
-  it("screen_flow: màn không actor nào dùng không vẽ ở sơ đồ nào; chưa có liên kết actor ⇒ một sơ đồ chung", () => {
-    const withOrphan = mutate((s) => {
-      s.screens.push({ ...s.screens.find((x) => x.id === "S13")!, id: "S20", name: "Orphan Screen", flow_to: [] })
-    })
-    const parts = renderKind(withOrphan, "screen_flow")
-    expect(parts).toHaveLength(renderKind(FIXTURE, "screen_flow").length)
-    expect(parts.every((p) => !p.source.includes("S20"))).toBe(true)
-
-    const unlinked = mutate((s) => {
-      s.permissions = []
-      s.use_cases = s.use_cases.map((u) => ({ ...u, function_ids: [] }))
-    })
-    const [single, ...rest] = renderKind(unlinked, "screen_flow")
-    expect(rest).toEqual([])
-    expect(screenFlowTitleOf(single.source)).toBeNull()
-    expect(single.source).toContain("START [label=\"\", shape=circle")
-    expect(single.source).toContain("START -> S01;")
-  })
-
-  it("screen_flow: nhãn DOT escape dấu ngoặc kép và gạch chéo", () => {
-    const tricky = mutate((s) => {
-      s.screens.find((x) => x.id === "S01")!.name = 'Log "in" \\ out'
-    })
-    // Tên có một `\` ⇒ DOT nhận `\\`; `"` đổi thành `'`
-    expect(renderKind(tricky, "screen_flow")[3].source).toContain("S01 [label=\"Log 'in' \\\\ out\"];")
-  })
-
   it("erd: ký pháp Chen — hình thoi chứa động từ, cha 1 – con N, thiếu động từ ⇒ has", () => {
     const { source: puml } = only(FIXTURE, "erd")
     expect(puml).toContain('entity "User" as E01 {\n}')
@@ -434,7 +243,7 @@ describe("renderers trên fixture 19 màn", () => {
 
   it("Spine rỗng vẫn sinh hình hợp lệ về cú pháp", () => {
     const empty = createEmptySpine({ name: "Empty" })
-    expect(only(empty, "screen_flow").source).toContain("NO_SCREENS")
+    expect(renderKind(empty, "screen_flow")).toEqual([])
     expect(only(empty, "erd").source).toContain("NO_ENTITIES")
     const context = only(empty, "context")
     expect(context.source).toContain(">Empty<")

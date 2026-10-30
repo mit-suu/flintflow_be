@@ -23,11 +23,10 @@ export interface DiagramLabels {
   actorHierarchyTitle: string
   /** Nhóm use case không có actor nào. */
   otherGroup: string
-  /** Tiêu đề sơ đồ luồng màn của một actor — `section-renderer` dùng lại làm chú thích ảnh. */
-  screensFlowTitle: (actorName: string) => string
-  /** Dòng phụ dưới tên màn pop-up có tab. */
+  /** Tiêu đề hình luồng màn của một feature (kèm `(i/n)` khi tách) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
+  screensFlowTitle: (feature: string) => string
+  /** Chữ trong stereotype `<<…>>` của màn pop-up. */
   popup: string
-  noScreens: string
   noEntities: string
   /** Động từ trong hình thoi ERD khi quan hệ chưa có `relation_verbs`. */
   relationVerb: string
@@ -45,9 +44,8 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     useCasesTitle: (groups) => `Use Cases — ${groups}`,
     actorHierarchyTitle: "Actor Hierarchy",
     otherGroup: "Other",
-    screensFlowTitle: (actorName) => `Screens flow for ${actorName}`,
-    popup: "(pop-up)",
-    noScreens: "No screens yet",
+    screensFlowTitle: (feature) => `Screens flow — ${feature}`,
+    popup: "pop-up",
     noEntities: "No entities yet",
     relationVerb: "has",
     functionColumn: "Function",
@@ -61,9 +59,8 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     useCasesTitle: (groups) => `Sơ đồ use case — ${groups}`,
     actorHierarchyTitle: "Phân cấp tác nhân",
     otherGroup: "Khác",
-    screensFlowTitle: (actorName) => `Luồng màn hình của ${actorName}`,
-    popup: "(pop-up)",
-    noScreens: "Chưa có màn hình",
+    screensFlowTitle: (feature) => `Luồng màn hình — ${feature}`,
+    popup: "pop-up",
     noEntities: "Chưa có thực thể",
     relationVerb: "có",
     functionColumn: "Chức năng",

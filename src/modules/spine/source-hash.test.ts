@@ -115,10 +115,22 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
     // kind không đổi engine ⇒ hash giữ nguyên
-    expect(renderedDiagramHash(FIXTURE, targets[2], svgContext)).toBe(computeSourceHash(FIXTURE, targets[2]))
+    expect(renderedDiagramHash(FIXTURE, targets[3], svgContext)).toBe(computeSourceHash(FIXTURE, targets[3]))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
     expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
+  })
+
+  it("luồng màn theo feature + làn: đổi feature của màn, tên feature hay actor của màn làm hình cũ; mô tả màn thì không", () => {
+    const flow = targets[2]
+    const base = renderedDiagramHash(FIXTURE, flow)
+    expect(base).not.toBe(computeSourceHash(FIXTURE, flow))
+    expect(renderedDiagramHash(mutate((s) => (s.screens[0].description = "X")), flow)).toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.screens[0].feature_id = "F2")), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.features[0].name = "Renamed")), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.features[1].order = 99)), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.use_cases.find((u) => u.id === "UC04")!.actor_ids = ["A02"])), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.actors.find((a) => a.id === "A01")!.name = "Renamed")), flow)).not.toBe(base)
   })
 })

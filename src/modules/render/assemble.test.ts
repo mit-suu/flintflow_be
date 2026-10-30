@@ -892,7 +892,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
       }
       const flow = imagesOf(doc).filter((b) => String(b.png).startsWith("VI:D-screen_flow"))
       expect(flow.length).toBeGreaterThan(1)
-      for (const b of flow) expect(b.caption).toMatch(/^Luồng màn hình của \[vi\] /)
+      for (const b of flow) expect(b.caption).toMatch(/^Luồng màn hình — \[vi\] /)
       expect(JSON.stringify(spine.diagrams)).not.toContain("Luồng màn hình")
     })
 

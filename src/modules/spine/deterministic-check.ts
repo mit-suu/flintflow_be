@@ -15,7 +15,7 @@ import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit }
 import { tryResolve } from "./path-resolver.js"
 import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
-import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
+import { hasScreenActorLinks, screenActorMap, screenLanes } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
@@ -52,6 +52,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_no_function", "yellow", true),
   rule("screen_no_function", "yellow", true),
   rule("orphan_screen", "yellow", true),
+  rule("screen_actor_ambiguous", "yellow", true),
   rule("empty_feature", "yellow", true),
   rule("role_no_actor", "yellow", true),
   rule("non_english_content", "yellow", true),
@@ -190,6 +191,7 @@ const GATE_STEP = {
   usecase_no_function: "S-4.4",
   screen_no_function: "S-4.1",
   orphan_screen: "S-4.2",
+  screen_actor_ambiguous: "S-4.4",
   empty_feature: "S-4.1",
   role_no_actor: "S-3.1",
   usecase_floating: "S-3.4",
@@ -798,6 +800,17 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
     ...when("orphan_screen", () =>
       orphanScreens(spine).map(({ screen, why }) =>
         yellow("orphan_screen", "fixed:3.1.1", screen.id, `Màn hình "${screen.name}" không nằm trong luồng nào: ${why}`, "S-4.2"))),
+    ...when("screen_actor_ambiguous", () => {
+      const names = new Map(spine.actors.map((a) => [a.id, a.name]))
+      const nameOf = (id: string) => `"${names.get(id) ?? id}"`
+      const lanes = screenLanes(spine)
+      return spine.screens.flatMap((screen) => {
+        const lane = lanes.get(screen.id)
+        if (!lane || lane.ambiguous.length === 0) return []
+        return [yellow("screen_actor_ambiguous", "fixed:3.1.1", screen.id,
+          `Màn hình "${screen.name}" do nhiều tác nhân không có tác nhân cha chung (${lane.ambiguous.map(nameOf).join(", ")}) cùng thực hiện — sơ đồ luồng màn xếp vào làn của ${nameOf(lane.actorId)}; xem lại mô hình tác nhân (tác nhân tổng quát)`, "S-3.1")]
+      })
+    }),
     ...when("empty_feature", () =>
       spine.features
         .filter((f) => !spine.screens.some((s) => s.feature_id === f.id) && !spine.functions.some((fn) => fn.feature_id === f.id))

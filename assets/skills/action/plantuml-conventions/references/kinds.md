@@ -20,45 +20,15 @@ Engine `svg` (no PlantUML source): UML 2.5.1 built in code, fill `#7ACFF5`.
 
 ## `screen_flow` — §3.1.1
 
-Source fields: `screens[].name/.flow_to/.is_popup/.tabs` + the human actor each screen serves.
+Source fields: `screens[].name/.flow_to/.is_popup/.tabs/.feature_id` · `features[].name/.order` · `actors[].name/.parent_id` + the actor of each screen (screen → `primary_function_id` → function → use case → `actor_ids`).
 
-**Graphviz DOT, not a state diagram**: the flow starts at a diamond with the actor name inside, and a
-PlantUML state diagram cannot label a diamond. One part per human actor that uses the UI (graph label
-`Screens flow for <actor>`, also the image caption), holding only that actor's screens and the edges between
-them. No part for unassigned screens: a public screen (granted only to a role with no actor, e.g. Guest on
-Login) is drawn in every human actor's part; a public landing page and Register are entries beside Login
-(Login stays an entry despite `Register → Login`); any other
-screen no human actor uses is not drawn and raises `orphan_screen`. Before any screen ↔ actor link exists: one unlabelled diagram, black-dot start. Arrows are
-one-way: of a pair pointing at each other only the forward edge (away from the entry) is drawn.
+Engine `svg` (no PlantUML source): UML 2.5 Activity Diagram with swimlanes built in code, fill `#7ACFF5`.
 
-```
-@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Founder";
-  START [label="Founder", shape=diamond, style=solid];
-  S1 [label="Login"];
-  S2 [label="Project Dashboard"];
-  subgraph cluster_S3 {
-    label="Project Workspace"; style=solid;
-    S3_T1 [label="Chat"];
-    S3_T2 [label="Document"];
-  }
-  S4 [label="Confirm Delete", shape=ellipse];
-  START -> S1;
-  S1 -> S2;
-  S2 -> S3_T1 [lhead=cluster_S3];
-  S2 -> S4;
-}
-@enddot
-```
-
-- Screens with `tabs[]` → `subgraph cluster_<screen>`, one node per tab (`<screen>_T<n>`); edges attach to
-  `_T1` with `lhead` / `ltail`.
-- Screen = rectangle (`shape=box`); `is_popup = true` → oval (`shape=ellipse`), name only (no `(pop-up)` text). Shapes are not filled (PlantUML drops the border of a
-  `rounded,filled` node). Font `DejaVu Sans` is required — the default dot font is missing in the image.
+- One diagram per feature; over 25 screens ⇒ split equally (`<feature> (1/2)`). `owner_kind` / `owner_id` stay `null`, the first part keeps the original id. Screens whose feature does not exist go to a last group.
+- Swimlane = the actor performing the screen, exact actor name in the lane header; general actor kept (several actors with a common ancestor ⇒ the ancestor's lane), never expanded to leaf actors. Ambiguous actors (no common ancestor) ⇒ first actor + yellow flag `screen_actor_ambiguous`. No actor ⇒ screen not drawn (`orphan_screen`). No link at all yet ⇒ no lane frames.
+- Screen = action (rounded rectangle); pop-up = action with stereotype `<<pop-up>>`; tabs = line `[tab | tab]` under the name. Initial node (solid dot) above each entry screen, activity final (ring + dot) below each ending screen.
+- Control flow = solid line, open arrowhead, one per `flow_to` pair inside the diagram (forward only: of a pair pointing at each other only the edge away from the entry; return navigation implicit). Straight, or orthogonal bends when a straight line would cross a shape.
+- No decision node / guard / trigger label: the Spine has no data for them yet. Full rules: `renderer/screen-flow/SKILL.md`.
 
 ## `erd` — §3.1.5
 

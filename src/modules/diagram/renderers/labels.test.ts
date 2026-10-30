@@ -7,7 +7,6 @@ import type { Spine } from "../../spine/spine.types.js"
 import { RENDERERS, allTargets, renderKind } from "./index.js"
 import { DIAGRAM_LABELS, diagramLabelsFor } from "./labels.js"
 import { isFunctionTable } from "./screen-layout.renderer.js"
-import { screenFlowTitleOf } from "./screen-flow.renderer.js"
 import { svgTitleOf } from "./common.js"
 import { MAX_USE_CASES_PER_DIAGRAM } from "./usecase.renderer.js"
 
@@ -74,19 +73,15 @@ describe("nhãn máy trên sơ đồ theo ngôn ngữ (FLF-265 N1)", () => {
     expect(parts.map((p) => p.source).join("\n")).toContain("&lt;&lt;include&gt;&gt;")
   })
 
-  it("luồng màn: tiêu đề theo actor, (pop-up), chưa có màn", () => {
+  it("luồng màn: tiêu đề theo feature, stereotype pop-up, cùng số phần với bản tiếng Anh", () => {
     const parts = RENDERERS.screen_flow(FIXTURE, null, VI)
-    // Chia phần theo actor (id), không theo chữ ⇒ cùng số phần với bản tiếng Anh
     expect(parts).toHaveLength(renderKind(FIXTURE, "screen_flow").length)
-    const titles = parts.map((p) => screenFlowTitleOf(p.source))
+    const titles = parts.map((p) => svgTitleOf(p.source))
     expect(titles.length).toBeGreaterThan(1)
-    for (const title of titles) expect(title).toMatch(/^Luồng màn hình của /)
-    const popupWithTabs = mutate((s) => {
-      s.screens[1].is_popup = true
-      s.screens[1].tabs = ["One", "Two"]
-    })
-    expect(RENDERERS.screen_flow(popupWithTabs, null, VI).map((p) => p.source).join("\n")).toContain(`\\n${VI.popup}"`)
-    expect(RENDERERS.screen_flow(mutate((s) => (s.screens = [])), null, VI)[0].source).toContain(`NO_SCREENS [label="${VI.noScreens}"]`)
+    for (const title of titles) expect(title).toMatch(/^Luồng màn hình — /)
+    expect(titles[0]).toBe(VI.screensFlowTitle(FIXTURE.features[0].name))
+    expect(parts.map((p) => p.source).join("\n")).toContain(`&lt;&lt;${VI.popup}&gt;&gt;`)
+    expect(RENDERERS.screen_flow(mutate((s) => (s.screens = [])), null, VI)).toEqual([])
   })
 
   it("ERD: động từ mặc định và 'chưa có thực thể' theo ngôn ngữ; động từ của Spine giữ nguyên", () => {
