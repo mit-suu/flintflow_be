@@ -46,7 +46,7 @@ import { IMPORT_IMAGE_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
-import { buildLayout, buildStepPlan, customSectionOps, functionOriginals, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
+import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
@@ -214,7 +214,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
   const project = await Project.findById(projectId).lean()
   const intentRaw = (project as { template_intent?: string | null } | null)?.template_intent ?? null
   const intent: TemplateIntent = intentRaw === "fixed" ? "fixed" : "free"
-  const structure = compareTargetStructure(layout, sectionsWithContent(layoutBlocks), stripRecord(seeded), intent)
+  const withContent = new Set([...sectionsWithContent(layoutBlocks), ...customSectionsWithContent(customSections)])
+  const structure = compareTargetStructure(layout, withContent, stripRecord(seeded), intent)
   profile.target_structure = structure
   profile.markModified("target_structure")
   await profile.save()

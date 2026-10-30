@@ -21,6 +21,7 @@ import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
+import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
 export interface RuleDef {
   rule_id: string
@@ -66,7 +67,10 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("function_without_uc", "yellow", true),
   rule("original_diagram_stale", "yellow", true),
   rule("orphan_entity", "yellow", true),
-  rule("unresolved_many_to_many", "yellow", true)
+  rule("unresolved_many_to_many", "yellow", true),
+  // FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc): chỉ chạy khi hồ sơ luật mang layout của mẫu
+  rule("template_section_absent", "yellow", true),
+  rule("template_section_empty", "yellow", true)
 ])
 
 /**
@@ -121,6 +125,12 @@ export interface RuleProfile {
    * không phải "chưa tới lượt". Không đặt ⇒ có cổng, như mode 2.
    */
   skipOwnerStepGate?: boolean
+  /**
+   * Chế độ 3 (dự án mới có mẫu bắt buộc, `template_intent = fixed`): `section_id` các mục của mẫu (`TemplateProfile.layout`).
+   * Có ⇒ bật `template_section_absent` (mục FlintFlow có dữ liệu mà mẫu không có — không in) và `template_section_empty`
+   * (mục riêng của mẫu chưa có nội dung). Không đặt ⇒ hai luật không chạy.
+   */
+  templateLayout?: ReadonlySet<string>
 }
 
 export interface CheckOptions {
@@ -714,6 +724,41 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
   })
 }
 
+/**
+ * Chế độ 3 — business-flow 2.10 "mẫu bắt buộc = chỉ mẫu đó, không thêm phần": mục FlintFlow bắt buộc có dữ liệu trong
+ * Spine mà mẫu không có heading ⇒ dữ liệu không in vào tài liệu (renderer `fixedTemplate`), báo cờ vàng. Mục riêng của
+ * mẫu (`custom:<id>` trong layout, có tiêu đề) chưa có chữ thật (chỉ chữ hướng dẫn `[…]` / trống) ⇒ cờ vàng.
+ */
+/** Luật "mục bắt buộc còn trống / cũ" — với mẫu bắt buộc chỉ áp lên mục của mẫu (mục FPT ngoài mẫu không in, không đòi). */
+const SECTION_SCOPED_RULES: ReadonlySet<string> = new Set(["section_empty", "array_empty", "section_stale_at_baseline", "section_awaiting_reaccept"])
+const outsideTemplate = (c: FlagCandidate, layout: ReadonlySet<string> | undefined): boolean =>
+  !!layout && SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:") && !layout.has(c.section_id)
+
+const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>): FlagCandidate[] => [
+  ...REQUIRED_FIXED_SECTION_IDS.filter((id) => !layout.has(id) && !DERIVED_SECTION_IDS.has(id) && sectionHasData(spine, id) === true).map(
+    (id): FlagCandidate => ({
+      level: "yellow",
+      rule_id: "template_section_absent",
+      section_id: id,
+      target_id: null,
+      message: `Mẫu bắt buộc không có mục ${quotedSectionLabel(id, spine)} — dữ liệu của mục này không in vào tài liệu`,
+      remediation_step: ownerStepOf(id, spine)
+    })
+  ),
+  ...spine.custom_sections
+    .filter((c) => layout.has(`custom:${c.id}`) && c.heading.trim() && !c.blocks.some((b) => b.image_ref || isRealText(b.text) || tableHasRealText(b.rows)))
+    .map(
+      (c): FlagCandidate => ({
+        level: "yellow",
+        rule_id: "template_section_empty",
+        section_id: `custom:${c.id}`,
+        target_id: null,
+        message: `Mục "${c.heading.trim()}" của mẫu chưa có nội dung`,
+        remediation_step: ownerStepOf(`custom:${c.id}`, spine)
+      })
+    )
+]
+
 const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
     level: "yellow",
@@ -1277,8 +1322,9 @@ export const runDeterministicCheck = (
     ...namingShape(spine),
     ...actorGeneralizationInvalid(spine),
     ...systemNameMissing(spine),
-    ...nonEnglishContent(spine, gate)
-  ], options.ruleProfile)
+    ...nonEnglishContent(spine, gate),
+    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout) : [])
+  ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 
   const index = buildIdIndex(spine)
   const seen = new Set<string>()

@@ -526,6 +526,29 @@ describe("step-runner: POST /answer", () => {
     // Câu trả lời trên thẻ vào lịch sử chỉ có lựa chọn — câu hỏi đã nằm ở tin AI ngay trên
     expect(userMsgs.map((m) => m.content)).toContain("Người quản trị")
   })
+
+  it("trả lời ngay khi answer_needed vừa phát (run-state chưa kịp lưu) ⇒ vẫn về đúng luồng đang chạy, không rơi sang lượt nền", async () => {
+    seedSpine()
+    seedSession(true)
+    const deps: Partial<StepRunnerDeps> = {
+      elicitExecutor: async () => elicitReply("Bạn muốn actor nào?", [{ question: "Actor chính là ai?", header: undefined, options: [], multiple: false }]),
+      draftExecutor: async () => draftReply([]),
+      renderDeps: renderStub()
+    }
+    const events: StepEvent[] = []
+    let acceptedAtEmit: boolean | null = null
+    // FE trả lời ngay từ sự kiện SSE — trước khi runner kịp ghi `waiting_answer` và quay lại nghe
+    const emit = (event: StepEvent): void => {
+      events.push(event)
+      if (event.type === "answer_needed" && acceptedAtEmit === null) {
+        acceptedAtEmit = submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: event.questions[0]!.id, answer: "Người quản trị" }] })
+      }
+    }
+
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, deps)
+    expect(acceptedAtEmit).toBe(true)
+    expect(events[events.length - 1]?.type).toBe("gate_ready")
+  })
 })
 
 describe("gate thất bại không xoá thẻ cổng (E2E FAP #2, #3)", () => {

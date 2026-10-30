@@ -82,6 +82,7 @@ import { assertDraftUnlocked } from "./draft-lock.js"
 import { expandIndexSelectors } from "./index-selector-fix.js"
 import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { isInstructionText } from "../../shared/utils/instruction-text.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 export const NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
@@ -287,6 +288,48 @@ const PERMISSION_ROW_LIMIT = 120
  * Chỉ những phần tử câu lệnh THẬT SỰ nhắc tới (trùng id, hoặc tên/từ khoá xuất hiện trong câu).
  * Không nhắc ai rõ ràng ⇒ đưa chỉ mục gọn (id + nhãn) để model tự định vị, vẫn không phải cả Spine.
  */
+/** Trần mỗi danh sách trong `draft_context` — đủ để soạn một mục riêng, không phải cả Spine. */
+const DRAFT_CONTEXT_LIMIT = 30
+
+/**
+ * FLF-278 (mục riêng của mẫu khách): dữ kiện dự án dạng gọn (nhãn / câu, không id, không quan hệ) đi kèm mục riêng được
+ * nhắc — để lệnh "Soạn nháp mục …" viết từ dữ liệu thật thay vì bịa, và biết thiếu gì để hỏi lại. Không đưa cả Spine.
+ */
+export const draftContextOf = (spine: Spine): Record<string, unknown> => {
+  const { name, system_name, domain, type, vision, goals, form_factor, release_scope } = spine.project
+  const take = <T, R>(list: readonly T[], pick: (item: T) => R) => list.slice(0, DRAFT_CONTEXT_LIMIT).map(pick)
+  return {
+    project: { name: system_name ?? name, domain, type, vision, goals, platforms: form_factor, release_scope },
+    actors: take(spine.actors, ({ name: actor, kind }) => ({ name: actor, kind })),
+    features: take(spine.features, (f) => f.name),
+    nfrs: take(spine.nfrs, ({ category, statement }) => ({ category, statement })),
+    common_requirements: take(spine.common_requirements, ({ category, statement }) => ({ category, statement })),
+    business_rules: take(spine.business_rules.filter((r) => r.tier === "high"), (r) => r.statement),
+    other_requirements: take(spine.other_requirements, ({ kind, statement }) => ({ kind, statement }))
+  }
+}
+
+/** Chữ hướng dẫn mẫu để lại trong mục riêng (`[Describe …]`) — ý khách muốn viết gì ở mục này. */
+const customGuidance = (blocks: Spine["custom_sections"][number]["blocks"]): string =>
+  blocks
+    .filter((b) => isInstructionText(b.text))
+    .map((b) => b.text.trim().replace(/^\[([\s\S]*)\]$/, "$1").trim())
+    .join(" ")
+    .slice(0, 600)
+
+/**
+ * FLF-278: mục riêng (`custom_sections`, heading mẫu không có mục FlintFlow tương ứng) mà lệnh nhắc theo id hoặc tiêu đề —
+ * kèm nội dung hiện có và hướng dẫn của mẫu. Không có dòng này model không biết mục tồn tại, đoán ghi vào collection khác.
+ */
+const referencedCustomSections = (spine: Spine, haystack: string) =>
+  spine.custom_sections
+    .filter((c) => haystack.includes(c.id.toLowerCase()) || (c.heading.trim().length >= MIN_NAME_MATCH && haystack.includes(c.heading.trim().toLowerCase())))
+    .slice(0, PROJECTION_ELEMENT_LIMIT)
+    .map((c) => {
+      const guidance = customGuidance(c.blocks)
+      return { ...c, ...(guidance ? { guidance } : {}) }
+    })
+
 export const buildChangeProjection = (spine: Spine, instruction: string): Record<string, unknown> => {
   const haystack = instruction.toLowerCase()
   const projection: Record<string, unknown> = {}
@@ -345,6 +388,14 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     matched += permissions.length
   }
 
+  const customSections = referencedCustomSections(spine, haystack)
+  if (customSections.length > 0) {
+    projection.custom_sections = customSections
+    projection.draft_context = draftContextOf(spine)
+    matched += customSections.length
+  }
+  if (spine.custom_sections.length > 0) existingIds.custom_sections = spine.custom_sections.map((c) => c.id).slice(0, 200)
+
   // Pha Brief: tầm nhìn/mục tiêu là entry addendum lõi (ngôn ngữ user + bản EN) — model sửa ở đó, không ở project
   if (isInBriefPhase(spine)) {
     const core = briefCoreEntries(spine)
@@ -359,6 +410,9 @@ export const buildChangeProjection = (spine: Spine, instruction: string): Record
     const list = spine[collection] as unknown as Record<string, unknown>[]
     if (!Array.isArray(list) || list.length === 0) continue
     index[collection] = list.slice(0, PROJECTION_ELEMENT_LIMIT).map((element) => ({ id: element.id, label: textOf(element) }))
+  }
+  if (spine.custom_sections.length > 0) {
+    index.custom_sections = spine.custom_sections.slice(0, PROJECTION_ELEMENT_LIMIT).map(({ id, heading }) => ({ id, label: heading }))
   }
   return { ...index, ...(projection.brief_core ? { brief_core: projection.brief_core } : {}), existing_ids: existingIds }
 }

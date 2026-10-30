@@ -29,7 +29,8 @@ import type { MentionEntity } from "./import.constants.js"
 import { transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { withMeteredAi, type MeteredResult } from "./metered-ai.js"
-import { IMPORT_SEMANTIC_RULE, MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
+import { IMPORT_SEMANTIC_RULE } from "./mode1-rule-profile.js"
+import { mode1RuleProfileFor } from "./mode1-guard.js"
 
 /** Tiền tố step của 1.11. Usage đúng `I-1.11` (không hậu tố) là lượt đơn của bản cũ — đã xong thì coi như xong cả 1.11. */
 export const SEMANTIC_CHECK_STEP = "I-1.11"
@@ -339,7 +340,7 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   }
 
   // BPMN 1.12: S-9.1 + S-9.2 bằng luật code trên baseline v0 ⇒ bật luật S-9 (`atBaseline`: giả định chưa xác nhận)
-  await flagsService.recompute(projectId, { by: "import", ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
+  await flagsService.recompute(projectId, { by: "import", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   await transitionImport(doc, "gap_review")
   return true
 }

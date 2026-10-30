@@ -9,6 +9,7 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
+import { isContentSlot } from "./content-slots.js"
 
 export interface SectionCandidate {
   id: string
@@ -106,7 +107,7 @@ export const isGroupSection = (id: string | null): boolean => !!id && id.startsW
 
 /** Section id hợp lệ cho PATCH mapping: section cố định, nhóm, id tạm feature/function hoặc `unmapped`. */
 export const isKnownSectionId = (id: string): boolean =>
-  id === UNMAPPED_SECTION || PROVISIONAL_SECTION.test(id) || SECTION_CANDIDATES.some((c) => c.id === id)
+  id === UNMAPPED_SECTION || PROVISIONAL_SECTION.test(id) || isContentSlot(id) || SECTION_CANDIDATES.some((c) => c.id === id)
 
 /** Section có nội dung để trích (không phải nhóm, không unmapped). */
 export const isContentSection = (id: string | null): id is string => !!id && id !== UNMAPPED_SECTION && !isGroupSection(id)
