@@ -1,5 +1,6 @@
 import { Router } from "express"
 import * as adminController from "./admin.controller.js"
+import { getTemplateGaps } from "../import/template-gaps.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { adminMiddleware } from "../../shared/auth/admin.middleware.js"
 import { env } from "../../config/env.js"
@@ -223,6 +224,26 @@ router.get("/metrics", adminController.getMetrics)
  *         description: Không phải admin
  */
 router.get("/ai-cost", adminController.getAiCost)
+
+/**
+ * @swagger
+ * /api/v1/admin/template-gaps:
+ *   get:
+ *     summary: Heading của mẫu bắt buộc thành mục riêng (FlintFlow không có mục tương ứng) và số dự án còn để trống — FLF-278
+ *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+ *     responses:
+ *       200:
+ *         description: "{ projects, rows[{ key, samples, projects, empty, suggested_destination }] }"
+ *       403:
+ *         description: Không phải admin
+ */
+router.get("/template-gaps", getTemplateGaps)
 
 /**
  * @swagger

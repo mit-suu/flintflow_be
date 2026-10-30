@@ -273,6 +273,13 @@ describe("Brief giữ tầm nhìn/mục tiêu ở addendum, S-1.1 dựng bản t
   it("apply-change-op: có luật brief_core cho lệnh sửa ở pha Brief", () => {
     expect(skill("action/apply-change-op")).toContain("brief_core")
   })
+
+  it("FLF-278: apply-change-op dạy ghi mục riêng của mẫu khách và soạn nháp không bịa, hỏi tối đa 3 câu", () => {
+    const text = skill("action/apply-change-op")
+    expect(text).toContain("custom_sections[id=…]")
+    expect(text).toContain("draft_context")
+    expect(text).toContain("up to **3** numbered questions")
+  })
 })
 
 describe("FLF-243: skill đặt tên use case nêu đủ luật mà cờ vàng usecase_name_* kiểm", () => {

@@ -25,6 +25,8 @@ import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
 import { assignBlockSections, matchProfile, needsMappingReview } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
+import { slotOverlaps } from "./content-slots.js"
+import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
 
 export interface UploadedFile {
@@ -67,7 +69,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confidence: h.confidence,
     detected_by: h.detected_by,
     confirmed: h.confirmed,
-    ...(h.template_section ? { template_section: h.template_section } : {})
+    ...(h.template_section ? { template_section: h.template_section } : {}),
+    ...(h.guidance ? { guidance: h.guidance } : {})
   })),
   table_map: p.table_map.map((t) => ({
     block_id: t.block_id,
@@ -144,7 +147,12 @@ const resolveUploadIntent = async (projectId: string, requested: TemplateIntent 
   return intent
 }
 
-export const uploadImport = async (projectId: string, userId: string, file: UploadedFile, body: { intent?: TemplateIntent } = {}): Promise<IImportedDocument> => {
+export const uploadImport = async (
+  projectId: string,
+  userId: string,
+  file: UploadedFile,
+  body: { intent?: TemplateIntent; /** FLF-278: import từ mẫu đã lưu của tổ chức (`org-library.service#importFromOrg`). */ org_template_id?: string } = {}
+): Promise<IImportedDocument> => {
   const current = await latestImport(projectId)
   if (current && hasBaseline(current.status)) {
     throw new Mode1Error("IMPORT_INVALID_STATE", "Dự án đã có bản gốc — hãy tải bản mới bằng chức năng tải lại để xem khác biệt", {
@@ -165,6 +173,7 @@ export const uploadImport = async (projectId: string, userId: string, file: Uplo
     size: file.size,
     stamp: result.stamp,
     intent: await resolveUploadIntent(projectId, body.intent),
+    ...(body.org_template_id ? { org_template_id: body.org_template_id } : {}),
     created_by: userId
   }
 
@@ -176,7 +185,8 @@ export const uploadImport = async (projectId: string, userId: string, file: Uplo
 
   const fileRef = await docFileStore().save(file.buffer, { projectId, kind: "upload", name: file.originalname })
   const doc = await ImportedDocument.create({ ...base, file_ref: fileRef, preflight: { status: "accepted", issues: [], document_kind: result.document_kind }, status: "uploaded" })
-  if (result.stamp) {
+  if (result.stamp || body.org_template_id) {
+    // Mẫu của tổ chức là file mẫu, không phải một bản SRS ⇒ không hỏi "bản mới nhất"
     // Stamp đúng project (file từng xuất từ chính project này, chưa có baseline) ⇒ coi như đã xác nhận
     doc.confirmed_latest_at = new Date()
     await transitionImport(doc, "parsing")
@@ -232,7 +242,10 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
 
 export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const { blocks } = await parseDocument(await loadImportFile(doc))
-  const profile = matchProfile(blocks)
+  const matched = matchProfile(blocks)
+  // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
+  const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id) : null
+  const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
   const sections = assignBlockSections(blocks, profile.heading_map)
   // Record of Changes đọc ngay lúc tách file (FLF-252) — wizard cho người dùng xem/sửa trước khi tạo baseline 0.1
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
@@ -277,6 +290,13 @@ export const patchMapping = async (projectId: string, body: MappingPatchRequest)
     if (!entry) throw new Mode1Error("IMPORT_INVALID_STATE", `Không tìm thấy cột thứ ${t.column_index + 1} của bảng đã chọn`, { status: doc.status, to: "extracting", allowed: [] })
     entry.field_path = t.field_path
     entry.confirmed = true
+  }
+  // FLF-278: một phần nhỏ và mục FPT chứa nó cùng có heading ⇒ phần dữ liệu đó in hai lần
+  const overlaps = slotOverlaps(profile.heading_map.map((h) => h.section_id))
+  if (overlaps.length) {
+    throw new Mode1Error("IMPORT_INVALID_STATE", "Một heading nhận cả mục, heading khác nhận một phần của chính mục đó — nội dung sẽ in hai lần. Chỉ giữ một bên.", {
+      status: doc.status, to: "extracting", allowed: [], overlaps: overlaps.map(([section, slot]) => ({ section_id: section, slot_id: slot }))
+    })
   }
   if (body.confirm_all) {
     for (const e of [...profile.heading_map, ...profile.table_map]) e.confirmed = true

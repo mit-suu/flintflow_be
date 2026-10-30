@@ -15,6 +15,9 @@ import * as flagsService from "../spine/flags.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Mode1Error, type Mode1ErrorCode } from "./mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
+import { TemplateProfile } from "./template-profile.model.js"
+import { withSlotParents } from "./content-slots.js"
+import type { RuleProfile } from "../spine/deterministic-check.js"
 
 export interface CrPrefill {
   title: string
@@ -26,7 +29,27 @@ export interface CrPrefill {
 export const isMode1Project = async (projectId: string): Promise<boolean> =>
   (await Project.findById(projectId).select("mode").lean())?.mode === "import"
 
-flagsService.setRuleProfileResolver(async (projectId) => ((await isMode1Project(projectId)) ? MODE1_RULE_PROFILE : undefined))
+/**
+ * Hồ sơ luật của project: mode 1 ⇒ `MODE1_RULE_PROFILE`; thêm chế độ 3 (mẫu bắt buộc, `template_intent = fixed`) ⇒ kèm
+ * các mục của mẫu để bật cờ vàng `template_section_absent` / `template_section_empty` (FLF-278 trên FLF-335/336).
+ */
+export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | undefined> => {
+  const project = (await Project.findById(projectId).select("mode template_intent").lean()) as { mode?: string; template_intent?: string | null } | null
+  const mode1 = project?.mode === "import"
+  if (project?.template_intent !== "fixed") return mode1 ? MODE1_RULE_PROFILE : undefined
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()) as { layout?: { section_id: string }[] } | null
+  const layout = profile?.layout ?? []
+  if (!layout.length) return mode1 ? MODE1_RULE_PROFILE : undefined
+  // Mục FPT có mặt qua các phần nhỏ (`slot:*`) của nó cũng là mục của mẫu
+  const templateLayout = withSlotParents(layout.map((l) => l.section_id))
+  // Luồng 2 của chế độ 3 (`mode = fpt`, flow2.service): đủ luật tạo mới, chỉ trên các mục của mẫu
+  return mode1 ? { ...MODE1_RULE_PROFILE, templateLayout } : { exclude: new Set(), downgrade: new Set(), templateLayout }
+}
+
+flagsService.setRuleProfileResolver(ruleProfileOf)
+
+/** Hồ sơ luật cho các lượt tính lại cờ của luồng import / CR / release (luôn là mode 1, kèm layout mẫu khi chế độ 3). */
+export const mode1RuleProfileFor = async (projectId: string): Promise<RuleProfile> => (await ruleProfileOf(projectId)) ?? MODE1_RULE_PROFILE
 
 /** Project mode 1 đã import xong (có baseline v0 trở lên) — từ đây mọi sửa phải qua CR. */
 export const changesRequireCr = async (projectId: string): Promise<boolean> => {
