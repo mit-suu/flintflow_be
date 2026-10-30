@@ -45,6 +45,7 @@ import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePl
 import { withElementDefaults } from "./element-defaults.js"
 import { normalizeFormFactorAt } from "./form-factor.js"
 import { normalizeDiagramAt } from "./legacy-diagram.js"
+import { normalizeFlowAt } from "./legacy-flow.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -101,14 +102,37 @@ const lastKey = (path: string): string => {
 /** Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. */
 const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some(isRecord)
 
-/** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml` (FLF-339) ⇒ dạng hiện hành. */
-const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeDiagramAt(path, normalizeFormFactorAt(path, value))
+/** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml`, `flow_to` là mảng id màn ⇒ dạng hiện hành. */
+const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeFlowAt(path, normalizeDiagramAt(path, normalizeFormFactorAt(path, value)))
+
+/**
+ * Model viết lại `flow_to` bằng danh sách id (dạng cũ): id đã có cạnh thì giữ cạnh đó (kèm trigger / guard), không ghi đè
+ * thành cạnh trơn.
+ */
+const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnType<typeof resolve>): unknown[] => {
+  const current = target.kind === "field" && Array.isArray(target.value) ? target.value.filter(isRecord) : []
+  return normalized.map((edge, i) => (typeof given[i] === "string" ? (current.find((c) => c.to === given[i]) ?? edge) : edge))
+}
+
+/** Hai cạnh cùng màn đích ⇒ giữ cạnh đầu (path chọn cạnh theo `to`). */
+const dedupeFlowEdges = (edges: unknown[]): unknown[] => {
+  const seen = new Set<string>()
+  return edges.filter((e) => {
+    if (!isRecord(e) || typeof e.to !== "string") return true
+    if (seen.has(e.to)) return false
+    seen.add(e.to)
+    return true
+  })
+}
 
 const applySet = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op set thiếu value: "${op.path}"`)
   // Mọi đường ghi (model, /changes, import) đều chuẩn hoá form_factor thành mảng — change log không bao giờ giữ chuỗi
-  const value = normalizeLegacyAt(op.path, op.value)
+  const normalized = normalizeLegacyAt(op.path, op.value)
+  // `flow_to` là mảng cạnh không có id: set được cả mảng (khác mảng thực thể có id), mỗi màn đích một cạnh
+  const wholeFlow = lastKey(op.path) === "flow_to" && Array.isArray(normalized)
   const target = resolve(state.spine, op.path)
+  const value = wholeFlow ? dedupeFlowEdges(keepKnownEdges(op.value as unknown[], normalized as unknown[], target)) : normalized
 
   if (target.kind === "append") throw opError("op_not_allowed", op.path, `Op set không nhận path kết thúc bằng []: "${op.path}"`)
 
@@ -116,7 +140,7 @@ const applySet = (state: WorkState, op: Op): void => {
     if (target.lockedKeys.includes(target.key)) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${target.key}" của phần tử: "${op.path}"`)
     }
-    if (isEntityArray(target.value) || isEntityArray(value)) {
+    if (!wholeFlow && (isEntityArray(target.value) || isEntityArray(value))) {
       if (expandEntityArraySet(state, op, target.value)) return
       throw opError("op_not_allowed", op.path, `Mảng phần tử có id phải sửa bằng add/remove từng phần tử: "${op.path}"`)
     }
@@ -219,6 +243,10 @@ const applyAdd = (state: WorkState, op: Op): void => {
         op.path,
         `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" — muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
       )
+    }
+    // Cạnh luồng không có id: một màn đích chỉ một cạnh (path chọn cạnh theo `to`)
+    if (lastKey(op.path) === "flow_to" && typeof value.to === "string" && target.parent.some((el) => isRecord(el) && el.to === value.to)) {
+      throw opError("duplicate_id", op.path, `Màn đích "${value.to}" đã có cạnh trong "${op.path}" — sửa trigger / guard của cạnh đó bằng set trên "flow_to[to=${value.to}].trigger"`)
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)

@@ -106,7 +106,7 @@ export const documentLanguageDirective = (language: UserLocale, glossary: readon
     `order — only the natural-language text is written in ${name}. Always keep the \`id\` of every element in \`value\`.`,
     "Other fields without natural-language text (id lists, enum values, numbers, booleans) may be left out of `value`.",
     "Text drawn on the diagrams counts too: the data-flow labels of actors (`flows_in`, `flows_out`) and the relationship",
-    "verbs of entities (`relation_verbs`, same target-id keys).",
+    "verbs of entities (`relation_verbs`, same target-id keys) and the `trigger` / `guard` of screen `flow_to` edges (same `to`).",
     `- When the user wrote that sentence in ${name}, keep the user's wording almost verbatim instead of translating your`,
     "  English back.",
     "- Never change ids, codes (UC-01, FN010, A03), numbers, units, enum values, paths or keys. Keep technical terms such",

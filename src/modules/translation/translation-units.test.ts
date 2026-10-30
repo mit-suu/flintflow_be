@@ -149,7 +149,7 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
     })
     const units = translationUnits(spine).filter(isDiagramOnly)
     expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
-      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "diagrams.labels"])
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "screens.flow_to", "diagrams.labels"])
     )
     const before = new Set(nonEnglish(spine))
     const withVietnamese = variant((s) => {
@@ -352,5 +352,29 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
     const actor = { id: "A09", name: "Payment Gateway", description: "Takes payments", kind: "system", flows_in: ["payment result"], flows_out: ["payment request"] }
     const actorPairs = unitsOfValue("actors[]", [actor], [{ id: "A09", name: "Cổng thanh toán", description: "Nhận thanh toán", flows_in: ["kết quả thanh toán"], flows_out: ["yêu cầu thanh toán"] }])
     expect(actorPairs.map((p) => p.key)).toEqual(["actors[id=A09].name", "actors[id=A09].description", "actors[id=A09].flows_in", "actors[id=A09].flows_out"])
+  })
+})
+
+describe("nhãn cạnh luồng màn (flow_to trigger / guard)", () => {
+  const edges = [
+    { to: "S03", trigger: "Click Forgot password" },
+    { to: "S02", trigger: "Submit", guard: "OTP valid" },
+    { to: "S04" }
+  ]
+
+  it("đơn vị là mảng chữ theo thứ tự `to`: trigger rồi guard của từng cạnh; cạnh trơn không có chữ", () => {
+    const screens = [{ id: "S01", name: "Login", description: "", flow_to: edges }] as unknown as Spine["screens"]
+    const [unit] = translationUnits({ screens }).filter((u) => u.ref.field === "flow_to")
+    expect(unit.value).toEqual(["Submit", "OTP valid", "Click Forgot password"])
+  })
+
+  it("ghi chữ dịch lại đúng trigger / guard, giữ thứ tự và `to` của cạnh", () => {
+    const owner: Record<string, unknown> = { flow_to: structuredClone(edges) }
+    writeUnitField(owner, "flow_to", ["Gửi", "OTP hợp lệ", "Bấm Quên mật khẩu"])
+    expect(owner.flow_to).toEqual([
+      { to: "S03", trigger: "Bấm Quên mật khẩu" },
+      { to: "S02", trigger: "Gửi", guard: "OTP hợp lệ" },
+      { to: "S04" }
+    ])
   })
 })

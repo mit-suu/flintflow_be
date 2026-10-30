@@ -27,6 +27,8 @@ export interface DiagramLabels {
   screensFlowTitle: (feature: string) => string
   /** Chữ trong stereotype `<<…>>` của màn pop-up. */
   popup: string
+  /** Guard của nhánh còn lại ở decision node (in `[else]`). */
+  elseGuard: string
   noEntities: string
   /** Động từ trong hình thoi ERD khi quan hệ chưa có `relation_verbs`. */
   relationVerb: string
@@ -46,6 +48,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     otherGroup: "Other",
     screensFlowTitle: (feature) => `Screens flow — ${feature}`,
     popup: "pop-up",
+    elseGuard: "else",
     noEntities: "No entities yet",
     relationVerb: "has",
     functionColumn: "Function",
@@ -61,6 +64,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     otherGroup: "Khác",
     screensFlowTitle: (feature) => `Luồng màn hình — ${feature}`,
     popup: "pop-up",
+    elseGuard: "ngược lại",
     noEntities: "Chưa có thực thể",
     relationVerb: "có",
     functionColumn: "Chức năng",

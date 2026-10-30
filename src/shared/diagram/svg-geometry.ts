@@ -82,6 +82,14 @@ const insideShape = (p: Point, shape: SceneElement, tol: number): boolean => {
 const interior = (shape: SceneElement): Point[] => {
   if (shape.type === "ellipse") return outline({ ...shape, rx: Math.max(shape.rx - 1, 0), ry: Math.max(shape.ry - 1, 0) })
   if (shape.type === "rect") return outline({ ...shape, x: shape.x + 1, y: shape.y + 1, w: Math.max(shape.w - 2, 0), h: Math.max(shape.h - 2, 0) })
+  if (shape.type === "path" && shape.closed) {
+    // đa giác lồi: co về trọng tâm 1px (đường chạm viền ở đầu mút không tính là xuyên)
+    const pts = outline(shape)
+    const c: Point = [pts.reduce((a, p) => a + p[0], 0) / pts.length, pts.reduce((a, p) => a + p[1], 0) / pts.length]
+    const reach = Math.min(...pts.map((p) => Math.hypot(p[0] - c[0], p[1] - c[1])))
+    const k = reach > 1 ? 1 - 1 / reach : 0
+    return pts.map((p): Point => [c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k])
+  }
   return outline(shape)
 }
 

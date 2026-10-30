@@ -1,7 +1,7 @@
 ---
 skill_id: screen-flow
 kind: renderer
-version: 3.0.0
+version: 3.1.0
 description: "S-4.2 Screens Flow (UML 2.5 Activity Diagram with swimlanes, SVG built in code: one diagram per feature, lane = actor of the screen's use case)"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -9,7 +9,9 @@ maxTokens: 4096
 temperature: 0.1
 reads:
   - "screens[].name"
-  - "screens[].flow_to"
+  - "screens[].flow_to[].to"
+  - "screens[].flow_to[].trigger"
+  - "screens[].flow_to[].guard"
   - "screens[].is_popup"
   - "screens[].tabs"
   - "screens[].feature_id"
@@ -38,12 +40,14 @@ stub: false
 
 ## Notation (UML 2.5 Activity Diagram, swimlanes)
 
-- **Screen** = action: rounded rectangle, fill `#7ACFF5`, the screen name inside (wrapped to 3 lines). A **pop-up** is an action with the stereotype `<<pop-up>>` above the name; a screen with `tabs[]` has one more line `[tab | tab]` under the name (wrapped between tabs). No ovals, no diamonds.
+- **Screen** = action: rounded rectangle, fill `#7ACFF5`, the screen name inside (wrapped to 3 lines). A **pop-up** is an action with the stereotype `<<pop-up>>` above the name; a screen with `tabs[]` has one more line `[tab | tab]` under the name (wrapped between tabs). No ovals.
 - **Initial node**: solid black dot, one above each entry screen. **Activity final**: circle with a solid black dot, one below each ending screen (bottom row).
-- **Control flow**: solid line, **open arrowhead**, one per `screens[].flow_to` pair inside the diagram. Straight when the two screens share a column with nothing between; otherwise orthogonal bends (a Z) in the gap between rows, or down a free gutter between columns when the target is more than one row below. Never through a shape or text, never overlapping another line; crossings only at right angles.
+- **Control flow**: solid line, **open arrowhead**, one per `screens[].flow_to` edge inside the diagram. Straight when the two screens share a column with nothing between; otherwise orthogonal bends (a Z) in the gap between rows, or down a free gutter between columns when the target is more than one row below. Never through a shape or text, never overlapping another line; crossings only at right angles.
 - **Swimlane** (ActivityPartition): vertical lane, container rectangle with a header cell holding the **exact actor name** (the name of a general actor does not list its children — that is defined in §2.1 and the actor hierarchy diagram).
 - No title drawn in the picture: the document caption is the SVG `<title>` (`Screens flow — <feature>`); a paragraph under each figure says the lanes follow the actor model (see §2.1).
-- No decision node, no guard, no trigger label yet: the Spine has no data for them.
+- **Trigger label**: `flow_to[].trigger` is drawn as a horizontal label with a white background on the arrow (wrapped to 2 lines, longer text ends with `...`); never over text or another line.
+- **Decision node** (UML diamond, fill `#7ACFF5`, empty): the forward edges of one screen that share the same trigger (case-insensitive), are at least 2, and at least one has a `guard` go through a diamond in its own row right below the screen. The trigger label sits once on the segment screen → diamond; each branch out of the diamond carries `[guard]`, a branch without guard carries `[else]` (`[ngược lại]` in a Vietnamese document). Edges with other triggers stay plain arrows from the screen. A single edge with a guard is not a decision: its label reads trigger, then `[guard]`. A guard on an edge not drawn (other feature, return edge) is not drawn.
+- Labels are text of the document: translated with the other diagram text (`flow_to` unit of the translation layer).
 
 ## One diagram per feature
 

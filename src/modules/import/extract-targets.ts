@@ -74,7 +74,7 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
   use_cases:
     "use_cases[]: { name, actor_ids: <actor ids from known_keys>, description, includes: <use case ids>, extends: <use case ids>, function_ids: <function ids / names that implement it> }",
   features: "features[]: { name }",
-  screens: "screens[]: { name, description, feature_id: <feature id / name>, is_popup: boolean, tabs: string[], flow_to: <screen ids this screen navigates to> }",
+  screens: "screens[]: { name, description, feature_id: <feature id / name>, is_popup: boolean, tabs: string[], flow_to: [{ to: <screen id / name this screen navigates to>, trigger?: <what the user does, from the label on the arrow>, guard?: <branch condition without brackets, from a diamond's outgoing [condition] label> }] }",
   permissions: 'permissions[]: { screen_id, role_id, action: "view" | "create" | "update" | "delete" | <verb> }',
   entities: "entities[]: { name, description, relations: <entity ids> }",
   functions:

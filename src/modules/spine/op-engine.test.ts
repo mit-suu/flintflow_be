@@ -351,7 +351,7 @@ describe("các loại op", () => {
     const base = structuredClone(FIXTURE)
     const screen = base.screens.find((s) => s.flow_to.length > 0)!
     screen.flow_to = [screen.flow_to[0], ...screen.flow_to]
-    const plan = planTransaction(base, txn([{ op: "remove", path: `screens[id=${screen.id}].flow_to[=${screen.flow_to[0]}]` }]), { startSeq: 1 })
+    const plan = planTransaction(base, txn([{ op: "remove", path: `screens[id=${screen.id}].flow_to[to=${screen.flow_to[0].to}]` }]), { startSeq: 1 })
     expect(plan.spine.screens.find((s) => s.id === screen.id)?.flow_to).toEqual(screen.flow_to.slice(1))
   })
 

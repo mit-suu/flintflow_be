@@ -21,7 +21,8 @@
 | Composite natural key | `permissions[screen_id=S3,role_id=R1,action=create]` | Only for `permissions[]` (it also has `id`) |
 | Filter for renumber / reads | `functions[feature_id=F2,screen_id=null]` | `null` literal allowed |
 | Nested | `functions[id=FN07].validations[id=V2].statement` | Keys at every level |
-| Scalar in array | `screens[id=S3].flow_to[=S5]` | For `remove` from arrays of ids |
+| Scalar in array | `screens[id=S3].tabs[=Chat]` | For `remove` from arrays of strings |
+| Object without id | `screens[id=S3].flow_to[to=S5]` | A `flow_to` edge `{to, trigger?, guard?}` is selected by its target screen; `…flow_to[to=S5].trigger` sets one field |
 | Singletons | `project.release_scope.in`, `progress.screen_queue` | Object paths use dots |
 
 **Forbidden**: numeric index `actors[1]`, wildcard `actors[*]`, changing an `id` field, paths outside the step's writable set.
@@ -33,7 +34,7 @@ features[]         { id, name, order }
 actors[]           { id, name, kind: human|system|time, description }
 roles[]            { id, name, actor_id | null }
 use_cases[]        { id, name, actor_ids[], function_ids[], description, includes[], extends[] }
-screens[]          { id, feature_id, name, description, flow_to[], is_popup, tabs[],
+screens[]          { id, feature_id, name, description, flow_to[] of {to, trigger?, guard?}, is_popup, tabs[],
                      primary_function_id, queue_order, detail_status }
 permissions[]      { id, screen_id, role_id, action }
 entities[]         { id, name, description, relations[] }

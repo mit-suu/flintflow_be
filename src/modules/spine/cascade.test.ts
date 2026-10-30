@@ -31,7 +31,7 @@ describe("cascade", () => {
     const plan = planCascade(spine, removed)
     const paths = plan.ops.map((o) => o.path)
     expect(paths).toEqual(
-      expect.arrayContaining(["functions[id=FN034]", "screens[id=S07].flow_to[=S08]", "permissions[id=" + FIXTURE.permissions.find((p) => p.screen_id === "S08")?.id + "]"])
+      expect.arrayContaining(["functions[id=FN034]", "screens[id=S07].flow_to[to=S08]", "permissions[id=" + FIXTURE.permissions.find((p) => p.screen_id === "S08")?.id + "]"])
     )
     expect(plan.ops.filter((o) => o.path.startsWith("functions[")).every((o) => o.op === "remove")).toBe(true)
     expect(plan.referrers).toEqual([])

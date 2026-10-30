@@ -51,7 +51,7 @@ describe("useCaseContext", () => {
     expect(context.roles).toContainEqual({ id: "R2", name: "Analyst", actor_id: "A02" })
     // FLF-318: model chọn actor xử lý yêu cầu từ danh sách này (luật 3e), không bịa actor
     expect((context.actors as { id: string; name: string }[]).map((a) => a.id)).toEqual(FIXTURE.actors.map((a) => a.id))
-    expect((context.screens as { id: string; flow_to: string[] }[]).find((s) => s.id === "S01")?.flow_to).toContain("S02")
+    expect((context.screens as { id: string; flow_to: { to: string }[] }[]).find((s) => s.id === "S01")?.flow_to.map((e) => e.to)).toContain("S02")
     const sample = context.sample_function as Spine["functions"][number]
     expect(sample.normal.length).toBeGreaterThan(0)
     expect(sample.validations.length).toBeGreaterThan(0)
@@ -215,7 +215,7 @@ describe("newUseCaseScreenIssues — phần giao diện còn thiếu của use c
     for (const [i, p] of pairs.entries()) {
       const fn = `FN9${i}`
       if (!after.screens.some((s) => s.id === p.screen)) after.screens.push({ ...FIXTURE.screens[1], id: p.screen, name: `Screen ${p.screen}`, flow_to: [] })
-      if (p.edge !== false) after.screens[0].flow_to.push(p.screen)
+      if (p.edge !== false) after.screens[0].flow_to.push({ to: p.screen })
       after.functions.push({ ...FIXTURE.functions[0], id: fn, screen_id: p.screen })
       after.use_cases.push({ ...FIXTURE.use_cases[0], id: p.uc, name: `Use Case ${p.uc}`, actor_ids: [p.actor], function_ids: [fn] })
       if (p.view !== false) after.permissions.push({ id: `P9${i}`, screen_id: p.screen, role_id: p.role, action: "view" })
@@ -557,7 +557,7 @@ describe("kế hoạch giao diện theo từng use case / từng màn — nhiề
   const afterOf = (screens: string[][], names: string[], popup: string[] = [], edges: [string, string][] = []): Spine => {
     const after = structuredClone(FIXTURE)
     for (const id of new Set(screens.flat())) after.screens.push({ ...FIXTURE.screens[1], id, name: `Screen ${id}`, flow_to: [], is_popup: popup.includes(id) })
-    for (const [from, to] of edges) after.screens.find((s) => s.id === from)?.flow_to.push(to)
+    for (const [from, to] of edges) after.screens.find((s) => s.id === from)?.flow_to.push({ to })
     screens.forEach((list, i) => {
       const fns = list.map((s, j) => {
         after.functions.push({ ...FIXTURE.functions[0], id: `FN9${i}${j}`, screen_id: s })

@@ -6,7 +6,7 @@
  */
 
 import type { Op } from "../spine/op.types.js"
-import type { Spine } from "../spine/spine.types.js"
+import type { FlowEdge, Spine } from "../spine/spine.types.js"
 import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
@@ -61,6 +61,30 @@ const strList = (v: unknown): string[] => {
   if (Array.isArray(v)) return v.map(str).filter(Boolean)
   const s = str(v)
   return s ? s.split(/\n+/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean) : []
+}
+
+/**
+ * `flow_to` đọc từ tài liệu: mỗi phần tử là tên / mã màn đích, hoặc `{ to, trigger?, guard? }` khi sơ đồ ghi nhãn trên
+ * mũi tên (hành động) và trên nhánh rẽ (`[điều kiện]`). Màn đích không phân giải được, hoặc chính màn đó ⇒ bỏ; hai cạnh
+ * cùng màn đích ⇒ gộp (cạnh sau bổ sung trigger / guard còn thiếu).
+ */
+const flowEdges = (value: unknown, resolveScreen: (ref: unknown) => string | null, selfId: string): FlowEdge[] => {
+  const items: unknown[] = Array.isArray(value) ? value : strList(value)
+  const byTo = new Map<string, FlowEdge>()
+  for (const item of items) {
+    const rec = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null
+    const to = resolveScreen(rec ? (rec.to ?? rec.screen ?? rec.target) : item)
+    if (!to || to === selfId) continue
+    const trigger = rec ? str(rec.trigger ?? rec.action ?? rec.label).trim() : ""
+    const guard = rec ? str(rec.guard ?? rec.condition).replace(/^[|]$/g, "").trim() : ""
+    const prev = byTo.get(to)
+    byTo.set(to, {
+      to,
+      ...((prev?.trigger ?? trigger) ? { trigger: prev?.trigger ?? trigger } : {}),
+      ...((prev?.guard ?? guard) ? { guard: prev?.guard ?? guard } : {})
+    })
+  }
+  return [...byTo.values()]
 }
 
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => {
@@ -251,7 +275,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       feature_id: featureOr(s.value.feature_id),
       name: str(s.value.name) || s.id,
       description: str(s.value.description),
-      flow_to: [...new Set(strList(s.value.flow_to).map(resolveScreen).filter((x): x is string => !!x && x !== s.id))],
+      flow_to: flowEdges(s.value.flow_to, resolveScreen, s.id ?? ""),
       is_popup: s.value.is_popup === true,
       tabs: strList(s.value.tabs),
       primary_function_id: null,

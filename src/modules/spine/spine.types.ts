@@ -126,12 +126,19 @@ export interface UseCase {
 
 export type ScreenDetailStatus = "pending" | "in_progress" | "signed_off" | "placeholder"
 
+/** Cạnh Screens Flow: `to` = màn đích; `trigger` = hành động người dùng làm; `guard` = điều kiện rẽ nhánh (khác nhau giữa các cạnh cùng màn nguồn). */
+export interface FlowEdge {
+  to: string
+  trigger?: string
+  guard?: string
+}
+
 export interface Screen {
   id: string
   feature_id: string
   name: string
   description: string
-  flow_to: string[]
+  flow_to: FlowEdge[]
   is_popup: boolean
   tabs: string[]
   primary_function_id: string | null
