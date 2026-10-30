@@ -8,6 +8,7 @@
 import type { Diagram, DiagramFormat, Spine } from "../../spine/spine.types.js"
 import { checkScene, type CheckOptions, type GeometryIssue } from "../../../shared/diagram/svg-geometry.js"
 import type { Scene } from "../../../shared/diagram/svg-scene.js"
+import type { RenderContext } from "../../../shared/diagram/erd-notation.js"
 import type { DiagramLabels } from "./labels.js"
 
 export type DiagramKind = Diagram["kind"]
@@ -24,7 +25,8 @@ export interface RenderedPart {
 }
 
 /** `labels`: chữ máy trên hình (FLF-265 N1) — thiếu ⇒ tiếng Anh, đúng hình ghi vào `diagrams[]`. */
-export type Renderer = (spine: Spine, ownerId?: string | null, labels?: DiagramLabels) => RenderedPart[]
+/** `context`: dữ liệu ngoài Spine mà hình cần (ký pháp ERD của dự án) — thiếu ⇒ mặc định. */
+export type Renderer = (spine: Spine, ownerId?: string | null, labels?: DiagramLabels, context?: RenderContext) => RenderedPart[]
 
 /** So sánh chuỗi theo code unit — không phụ thuộc locale máy chạy. */
 export const compareIds = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)

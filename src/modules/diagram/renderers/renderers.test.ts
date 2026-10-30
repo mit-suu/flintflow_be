@@ -49,9 +49,7 @@ describe("renderers trên fixture 19 màn", () => {
               ? ["@startsalt", "@endsalt"]
               : part.kind === "screen_flow"
                 ? ["@startdot", "@enddot"]
-                : part.kind === "erd"
-                  ? ["@startchen", "@endchen"]
-                  : ["@startuml", "@enduml"]
+                : ["@startuml", "@enduml"]
         expect(part.source.startsWith(open), part.kind).toBe(true)
         expect(part.source.endsWith(`${close}\n`), part.kind).toBe(true)
         expect(VIETNAMESE_DIACRITICS.test(part.source), part.kind).toBe(false)
@@ -212,24 +210,6 @@ describe("renderers trên fixture 19 màn", () => {
     expect(vi[0].inbound).toEqual(["thông tin đăng ký"])
   })
 
-  it("erd: ký pháp Chen — hình thoi chứa động từ, cha 1 – con N, thiếu động từ ⇒ has", () => {
-    const { source: puml } = only(FIXTURE, "erd")
-    expect(puml).toContain('entity "User" as E01 {\n}')
-    expect(puml).toContain("E01 -1- R_E01_E02\nR_E01_E02 -N- E02")
-    const withVerb = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_verbs = { E02: "owns" }))
-    expect(only(withVerb, "erd").source).toContain('relationship "owns" as R_E01_E02 {')
-    const oneToOne = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_cardinality = { E02: "1" }))
-    expect(only(oneToOne, "erd").source).toContain("R_E01_E02 -1- E02")
-    expect(only(oneToOne, "erd").source).toContain("R_E01_E05 -N- E05")
-    // Liên kết tuỳ chọn: phía cha (0,1) — `-0..1-` là lỗi cú pháp trong @startchen
-    const optional = mutate((s) => (s.entities.find((e) => e.id === "E01")!.relation_optional = ["E02"]))
-    expect(only(optional, "erd").source).toContain("E01 -(0,1)- R_E01_E02")
-    expect(only(optional, "erd").source).toContain("E01 -1- R_E01_E05")
-    expect(only(mutate((s) => delete s.entities.find((e) => e.id === "E01")!.relation_verbs), "erd").source).toContain(
-      'relationship "has" as R_E01_E02 {'
-    )
-  })
-
   it("screen_layout: salt gắn function:<primary>, chỉ màn có primary function", () => {
     const part = only(FIXTURE, "screen_layout", "S07")
     expect(part).toMatchObject({ section: "function:FN028", owner_kind: "screen", owner_id: "S07" })
@@ -244,7 +224,7 @@ describe("renderers trên fixture 19 màn", () => {
   it("Spine rỗng vẫn sinh hình hợp lệ về cú pháp", () => {
     const empty = createEmptySpine({ name: "Empty" })
     expect(renderKind(empty, "screen_flow")).toEqual([])
-    expect(only(empty, "erd").source).toContain("NO_ENTITIES")
+    expect(only(empty, "erd").source).toContain("No entities yet")
     const context = only(empty, "context")
     expect(context.source).toContain(">Empty<")
     expect(context.source).not.toContain("<line ")

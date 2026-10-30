@@ -24,6 +24,7 @@
 
 import { randomUUID } from "node:crypto"
 import { layoutRenderDeps, renderDiagrams, staleDiagrams } from "../diagram/diagram.service.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import type { RenderTarget } from "../diagram/renderers/index.js"
 import { projectStep } from "../pipeline/context-projection.js"
 import { ActionType, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
@@ -366,7 +367,7 @@ const confirmNoChange = async (
 
 /** Vẽ lại đúng những hình `source_hash` lệch sau khi áp lô hoà giải. */
 const rerenderStale = async (projectId: string, userId: string, spine: SpineRecord, deps: ReconcileDeps): Promise<number> => {
-  const targets = staleDiagrams(stripRecord(spine)).map((d) => ({ kind: d.kind, owner_id: d.owner_id }))
+  const targets = staleDiagrams(stripRecord(spine), await loadRenderContext(projectId)).map((d) => ({ kind: d.kind, owner_id: d.owner_id }))
   if (targets.length === 0) return spine.spine_version
   await deps.rerender(projectId, targets, userId)
   return (await repository.get(projectId))?.spine_version ?? spine.spine_version

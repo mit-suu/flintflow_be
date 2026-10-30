@@ -14,6 +14,7 @@
  */
 
 import type { Diagram, Spine } from "../spine/spine.types.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { RENDERERS, type DiagramKind, type RenderedPart } from "../diagram/renderers/index.js"
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { isWireframeSalt, localizeSalt } from "../diagram/salt-text.js"
@@ -32,7 +33,8 @@ export const localizeDiagrams = (
   canonical: Spine,
   view: Spine,
   language: string,
-  wireframeText: ReadonlyMap<string, ReadonlyMap<string, string>>
+  wireframeText: ReadonlyMap<string, ReadonlyMap<string, string>>,
+  context: RenderContext = {}
 ): void => {
   const labels = diagramLabelsFor(language)
   const parts = new Map<string, { source: RenderedPart[]; localized: RenderedPart[] }>()
@@ -40,7 +42,7 @@ export const localizeDiagrams = (
     const key = `${kind}:${ownerId ?? ""}`
     let found = parts.get(key)
     if (!found) {
-      found = { source: RENDERERS[kind](canonical, ownerId), localized: RENDERERS[kind](view, ownerId, labels) }
+      found = { source: RENDERERS[kind](canonical, ownerId, undefined, context), localized: RENDERERS[kind](view, ownerId, labels, context) }
       parts.set(key, found)
     }
     return found

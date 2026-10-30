@@ -115,11 +115,24 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
     // kind không đổi engine ⇒ hash giữ nguyên
-    expect(renderedDiagramHash(FIXTURE, targets[3], svgContext)).toBe(computeSourceHash(FIXTURE, targets[3]))
+    expect(renderedDiagramHash(FIXTURE, targets[4], svgContext)).toBe(computeSourceHash(FIXTURE, targets[4]))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
     expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
+  })
+
+  it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình — đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
+    const erd = targets[3]
+    const chen = renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "chen" })
+    expect(renderedDiagramHash(FIXTURE, erd)).toBe(chen)
+    expect(renderedDiagramHash(FIXTURE, erd, undefined, {})).toBe(chen)
+    expect(renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "crowsfoot" })).not.toBe(chen)
+    expect(renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "idef1x" })).not.toBe(renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "crowsfoot" }))
+    // kind khác không phụ thuộc ký pháp ERD
+    expect(renderedDiagramHash(FIXTURE, targets[0], undefined, { erdNotation: "idef1x" })).toBe(renderedDiagramHash(FIXTURE, targets[0]))
+    // dữ liệu ảnh gốc import không đổi
+    expect(computeSourceHash(FIXTURE, erd)).toBe(computeSourceHash(FIXTURE, erd))
   })
 
   it("luồng màn theo feature + làn: đổi feature của màn, tên feature hay actor của màn làm hình cũ; mô tả màn thì không", () => {

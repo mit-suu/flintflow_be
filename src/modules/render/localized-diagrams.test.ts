@@ -82,8 +82,8 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     expect(byKind(view, "usecase").map((d) => d.source).join("\n")).toContain(`>vi: ${spine.use_cases[0].name}</text>`)
     for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toMatch(/^Luồng màn hình — vi: /)
     const erd = byKind(view, "erd")[0].source
-    expect(erd).toContain(`entity "vi: ${spine.entities[0].name}"`)
-    expect(erd).toContain(`relationship "${DIAGRAM_LABELS.vi.relationVerb}"`)
+    expect(erd).toContain(`>vi: ${spine.entities[0].name}</text>`)
+    expect(erd).toContain(`>${DIAGRAM_LABELS.vi.relationVerb}</text>`)
     const table = byKind(view, "screen_layout").find((d) => d.source.includes("{#"))!
     expect(table.source).toContain(`<b>${DIAGRAM_LABELS.vi.functionColumn} | <b>${DIAGRAM_LABELS.vi.descriptionColumn}`)
     expect(table.source).toMatch(/\| vi: /)
@@ -114,7 +114,7 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
   it("hình cũ (nguồn khác bản renderer sinh từ Spine hiện tại) ⇒ giữ nguồn gốc, không có trong danh sách cần ảnh riêng", () => {
     const { spine } = rendered()
     const erd = byKind(spine, "erd")[0]
-    erd.source = erd.source.replace("skinparam ranksep 20", "skinparam ranksep 30")
+    erd.source = erd.source.replace("<title>", "<title>cũ ")
     const units = translationUnits(spine)
     const localized = localizeSpine(spine, units, translate(units), "vi")
     expect(byKind(renderView(localized), "erd")[0].source).toBe(erd.source)
