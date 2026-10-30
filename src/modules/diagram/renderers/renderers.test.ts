@@ -3,11 +3,10 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../../spine/spine.schema.js"
-import type { Spine, UseCase } from "../../spine/spine.types.js"
+import type { Spine } from "../../spine/spine.types.js"
 import { VIETNAMESE_DIACRITICS } from "../../spine/deterministic-check.js"
 import { createEmptySpine } from "../../spine/spine.repository.js"
 import { allTargets, layoutOwners, renderKind } from "./index.js"
-import { MAX_ASSOCIATIONS_PER_DIAGRAM, MAX_CLUSTER_SPAN, MAX_USE_CASES_PER_DIAGRAM, actorUseCaseCounts, dependentUseCaseIds, partitionUseCases } from "./usecase.renderer.js"
 import { saltCell } from "./screen-layout.renderer.js"
 import { screenFlowTitleOf } from "./screen-flow.renderer.js"
 import { DEFAULT_IN, DEFAULT_OUT, contextActors, titleCase } from "./context.renderer.js"
@@ -28,10 +27,6 @@ const only = (spine: Spine, kind: Parameters<typeof renderKind>[1], owner: strin
   expect(parts).toHaveLength(1)
   return parts[0]
 }
-/** Sơ đồ use case có thể tách nhiều phần — luật cạnh áp trên toàn sơ đồ nên xét chung. */
-const usecaseParts = (spine: Spine): string[] => renderKind(spine, "usecase").map((p) => p.source)
-const usecasePuml = (spine: Spine): string => usecaseParts(spine).join("\n")
-const declaredActors = (puml: string): string[] => [...puml.matchAll(/^actor "[^"]*" as (\w+)/gm)].map((m) => m[1])
 const withoutFlows = (s: Spine) =>
   s.actors.forEach((a) => {
     delete a.flows_in
@@ -216,77 +211,6 @@ describe("renderers trên fixture 19 màn", () => {
     expect(titleCase("sign-in via eKYC")).toBe("Sign-in via eKYC")
     const vi = contextActors([{ id: "A01", name: "Khách", kind: "human", description: "", flows_in: ["thông tin đăng ký"], flows_out: [] }], DIAGRAM_LABELS.vi)
     expect(vi[0].inbound).toEqual(["thông tin đăng ký"])
-  })
-
-  it("usecase: mọi use case và cạnh include/extend", () => {
-    const puml = usecasePuml(FIXTURE)
-    for (const uc of FIXTURE.use_cases) expect(puml).toContain(`usecase "${uc.name}" as ${uc.id}`)
-    for (const uc of FIXTURE.use_cases) for (const inc of uc.includes) expect(puml).toContain(`${uc.id} ..> ${inc} : <<include>>`)
-    for (const uc of FIXTURE.use_cases) for (const base of uc.extends) expect(puml).toContain(`${uc.id} ..> ${base} : <<extend>>`)
-  })
-
-  it("usecase: cạnh actor là association; actor người không nối use case phụ thuộc khi gốc của nó cùng hình", () => {
-    expect(usecasePuml(FIXTURE)).not.toMatch(/^A\d+ -->/m)
-    const human = new Set(FIXTURE.actors.filter((a) => a.kind === "human").map((a) => a.id))
-    const byUc = new Map(FIXTURE.use_cases.map((u) => [u.id, u]))
-    for (const puml of usecaseParts(FIXTURE)) {
-      const inPart = new Set([...puml.matchAll(/usecase "[^"]*" as (\w+)/g)].map((m) => m[1]))
-      for (const [, actorId, ucId] of puml.matchAll(/^(A\d+) -- (UC\d+)$/gm)) {
-        if (!human.has(actorId)) continue
-        const uc = byUc.get(ucId)!
-        const viaBase = FIXTURE.use_cases.some((o) => o.id !== ucId && inPart.has(o.id) && o.includes.includes(ucId)) || uc.extends.some((b) => inPart.has(b))
-        // ngoại lệ: actor không còn cạnh nào khác trong hình thì giữ một cạnh
-        const others = [...puml.matchAll(new RegExp(`^${actorId} -- `, "gm"))].length
-        if (others > 1) expect(viaBase, `${actorId} -- ${ucId}`).toBe(false)
-      }
-    }
-    expect(usecasePuml(FIXTURE)).toContain("UC12 -- A07") // actor system giữ cạnh ở use case bị include
-  })
-
-  it("usecase: mỗi hình tối đa một actor người có cạnh; use case chung xuất hiện ở hình của từng actor", () => {
-    for (const puml of usecaseParts(FIXTURE)) {
-      expect(new Set([...puml.matchAll(/^(A\d+) -- UC/gm)].map((m) => m[1])).size, puml).toBeLessThanOrEqual(1)
-    }
-    // Log In (UC02) có Founder, Business Analyst, Administrator, Guest ⇒ có mặt ở 4 hình, mỗi hình một cạnh
-    const withLogIn = usecaseParts(FIXTURE).filter((p) => p.includes('as UC02'))
-    expect(withLogIn).toHaveLength(4)
-    expect(withLogIn.map((p) => p.match(/^(A\d+) -- UC02$/m)?.[1])).toEqual(["A01", "A02", "A03", "A04"])
-  })
-
-  it("usecase: actor người viết `A -- UC` (trái), actor system/time viết `UC -- A` (phải)", () => {
-    const kind = new Map(FIXTURE.actors.map((a) => [a.id, a.kind]))
-    for (const puml of usecaseParts(FIXTURE)) {
-      for (const [, left, right] of puml.matchAll(/^(\w+) -- (\w+)$/gm)) {
-        if (left.startsWith("A")) expect(kind.get(left), `${left} -- ${right}`).toBe("human")
-        else expect(kind.get(right), `${left} -- ${right}`).not.toBe("human")
-      }
-      // actor người khai báo trước `rectangle`, actor system/time sau
-      const [before, after] = puml.split(/^rectangle /m)
-      for (const id of declaredActors(before)) expect(kind.get(id), id).toBe("human")
-      for (const id of declaredActors(after)) expect(kind.get(id), id).not.toBe("human")
-    }
-  })
-
-  it("usecase: actor tham gia use case luôn được vẽ, kể cả khi mọi cạnh của nó bị bỏ", () => {
-    const participating = new Set(FIXTURE.use_cases.flatMap((u) => u.actor_ids))
-    expect(participating.size).toBe(9)
-    const declared = usecaseParts(FIXTURE).flatMap(declaredActors)
-    for (const id of participating) expect(declared, id).toContain(id)
-
-    // A03 (người) chỉ còn tham gia UC20, UC21, cả hai bị UC05 (của Founder) include. UC05 không nằm trong
-    // hình của A03 ⇒ A03 nối thẳng cả hai, không use case nào lơ lửng
-    const spine = mutate((s) => {
-      const uc02 = s.use_cases.find((u) => u.id === "UC02")!
-      uc02.actor_ids = uc02.actor_ids.filter((a) => a !== "A03")
-      s.use_cases.find((u) => u.id === "UC05")!.includes = ["UC20", "UC21"]
-    })
-    expect(usecasePuml(spine).match(/^A03 -- \w+$/gm)).toEqual(["A03 -- UC20", "A03 -- UC21"])
-  })
-
-  it("usecase: actor system chỉ tham gia use case mở rộng/bị include vẫn giữ mọi cạnh", () => {
-    // A07 tham gia 2 use case và cả hai đều bị UC09 include
-    const spine = mutate((s) => (s.use_cases.find((u) => u.id === "UC10")!.actor_ids = ["A07"]))
-    expect(usecasePuml(spine).match(/^\w+ -- A07$/gm)).toEqual(["UC10 -- A07", "UC12 -- A07"])
   })
 
   it("screen_flow: DOT — màn là hình chữ nhật, màn nhiều tab là cluster, popup hình ô-van, cạnh flow_to", () => {
@@ -519,101 +443,6 @@ describe("renderers trên fixture 19 màn", () => {
   })
 })
 
-describe("usecase > 20 ⇒ tách theo cụm quan hệ", () => {
-  const uc = (n: number, extra: Partial<UseCase> = {}): UseCase => ({
-    id: `UC${String(n).padStart(3, "0")}`,
-    name: `Use Case ${n}`,
-    actor_ids: ["A01"],
-    function_ids: [],
-    description: "",
-    includes: [],
-    extends: [],
-    ...extra
-  })
-  /** n use case KHÔNG quan hệ ⇒ phủ đường dồn cụm đơn vào phần. */
-  const independentUseCases = (n: number): UseCase[] => Array.from({ length: n }, (_, i) => uc(i + 1))
-  /** Cụm 3 phần tử đặt đúng ranh giới dồn ⇒ phủ luật "không cắt giữa cụm". */
-  const clusteredUseCases = (): UseCase[] => [
-    ...independentUseCases(MAX_USE_CASES_PER_DIAGRAM - 1),
-    uc(90, { includes: ["UC091"] }),
-    uc(91),
-    uc(92, { extends: ["UC091"] })
-  ]
-  /** Một chuỗi include dài hơn trần cứng ⇒ phủ đường cắt cưỡng bức. */
-  const oversizedCluster = (n: number): UseCase[] =>
-    Array.from({ length: n }, (_, i) => uc(i + 1, i > 0 ? { includes: [`UC${String(i).padStart(3, "0")}`] } : {}))
-  const withUseCases = (useCases: UseCase[]): Spine => mutate((s) => (s.use_cases = useCases))
-
-  it("mỗi phần ≤ 20, đủ mọi use case, không trùng, tiêu đề theo nhóm actor", () => {
-    const spine = withUseCases(independentUseCases(45))
-    const parts = partitionUseCases(spine.use_cases)
-    expect(parts.length).toBeGreaterThan(1)
-    expect(parts.every((p) => p.useCases.length <= MAX_USE_CASES_PER_DIAGRAM)).toBe(true)
-    expect(parts.flatMap((p) => p.useCases).map((u) => u.id).sort()).toEqual(spine.use_cases.map((u) => u.id).sort())
-
-    const rendered = renderKind(spine, "usecase")
-    expect(rendered).toHaveLength(parts.length)
-    expect(rendered[0].source).toContain(`title Use Cases — ${spine.actors.find((a) => a.id === "A01")!.name}`)
-    expect(new Set(rendered.map((r) => r.source_hash)).size).toBe(1)
-  })
-
-  it("tách theo actor người chính: use case của một actor người nằm trọn một hình", () => {
-    // Xen kẽ id giữa hai actor người; actor system A05 (id nhỏ hơn không phải lý do để nhóm) đi cùng A01
-    const spine = withUseCases(
-      Array.from({ length: 24 }, (_, i) => uc(i + 1, { actor_ids: i % 2 === 0 ? ["A01", "A05"] : ["A02"] }))
-    )
-    const rendered = renderKind(spine, "usecase").map((p) => p.source)
-    expect(rendered.length).toBeGreaterThan(1)
-    for (const actorId of ["A01", "A02"]) {
-      const holding = rendered.filter((p) => new RegExp(`^${actorId} -- `, "m").test(p))
-      expect(holding, actorId).toHaveLength(1)
-    }
-    const names = (id: string) => spine.actors.find((a) => a.id === id)!.name
-    expect(rendered[0]).toContain(`title Use Cases — ${names("A01")}`)
-    expect(rendered[1]).toContain(`title Use Cases — ${names("A02")}`)
-  })
-
-  it("quá trần số cạnh dù ≤ 20 use case ⇒ tách, mỗi phần ≤ trần cạnh", () => {
-    const spine = withUseCases(Array.from({ length: 15 }, (_, i) => uc(i + 1, { actor_ids: ["A01", "A02"] })))
-    const rendered = renderKind(spine, "usecase")
-    expect(rendered.length).toBeGreaterThan(1)
-    for (const { source: puml } of rendered) {
-      expect(puml.match(/^\w+ -- \w+$/gm)!.length).toBeLessThanOrEqual(MAX_ASSOCIATIONS_PER_DIAGRAM)
-    }
-  })
-
-  it("≤ 20 use case giữ một hình, không có dòng title", () => {
-    const rendered = renderKind(withUseCases(independentUseCases(MAX_USE_CASES_PER_DIAGRAM)), "usecase")
-    expect(rendered).toHaveLength(1)
-    expect(rendered[0].source).not.toContain("title ")
-  })
-
-  it("không cắt giữa cụm quan hệ", () => {
-    const cluster = ["UC090", "UC091", "UC092"]
-    const holding = partitionUseCases(clusteredUseCases()).filter((p) => p.useCases.some((u) => cluster.includes(u.id)))
-    expect(holding).toHaveLength(1)
-    expect(holding[0].useCases.map((u) => u.id)).toEqual(cluster)
-  })
-
-  it("cụm vượt trần cứng bị cắt: mọi phần ≤ 20, không cạnh trỏ ra ngoài phần", () => {
-    const spine = withUseCases(oversizedCluster(MAX_CLUSTER_SPAN + 5))
-    expect(partitionUseCases(spine.use_cases).every((p) => p.useCases.length <= MAX_USE_CASES_PER_DIAGRAM)).toBe(true)
-    for (const { source: puml } of renderKind(spine, "usecase")) {
-      const declared = new Set([...puml.matchAll(/usecase "[^"]*" as (\w+)/g)].map((m) => m[1]))
-      for (const [, target] of puml.matchAll(/^\w+ \.\.> (\w+) :/gm)) expect(declared).toContain(target)
-    }
-  })
-
-  it("tên actor có dấu nháy hoặc xuống dòng vẫn cho tiêu đề một dòng", () => {
-    const spine = mutate((s) => {
-      s.use_cases = independentUseCases(45)
-      s.actors.find((a) => a.id === "A01")!.name = 'Founder "Prime"\nAdmin'
-    })
-    const title = renderKind(spine, "usecase")[0].source.split("\n").find((l) => l.startsWith("title "))
-    expect(title).toBe("title Use Cases — Founder 'Prime' Admin")
-  })
-})
-
 describe("source_hash (DoD T10)", () => {
   const usecaseHash = (spine: Spine): string => renderKind(spine, "usecase")[0].source_hash
 
@@ -627,14 +456,14 @@ describe("source_hash (DoD T10)", () => {
 describe("tên hệ thống (FLF-177)", () => {
   it("boundary use case + sơ đồ ngữ cảnh in `project.system_name`, chưa có ⇒ `project.name`", () => {
     const named = mutate((s) => (s.project.system_name = "ShipFast Delivery"))
-    for (const part of usecaseParts(named)) expect(part).toContain('rectangle "ShipFast Delivery" {')
+    for (const part of renderKind(named, "usecase")) expect(part.source).toContain(">ShipFast Delivery</text>")
     expect(only(named, "context").source).toContain(">ShipFast Delivery<")
 
     const unnamed = mutate((s) => {
       s.project.system_name = null
       s.project.name = "Du an giao hang"
     })
-    expect(usecasePuml(unnamed)).toContain('rectangle "Du an giao hang" {')
+    for (const part of renderKind(unnamed, "usecase")) expect(part.source).toContain(">Du an giao hang</text>")
     expect(only(unnamed, "context").source).toContain(">Du an giao hang<")
   })
 

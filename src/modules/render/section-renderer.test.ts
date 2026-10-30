@@ -188,6 +188,28 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
+  it("fixed:2.2.1 / fixed:2.1 — hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
+    const s = spine()
+    const base = s.diagrams.find((d) => d.id === "D02")!
+    const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>\n`
+    s.diagrams = [
+      ...s.diagrams.filter((d) => d.id !== "D02"),
+      { ...base, id: "D02", format: "svg", source: svg("Use Cases — Account &amp; Access") },
+      { ...base, id: "D02-2", format: "svg", source: svg("Use Cases — Billing (2/2)") },
+      { ...base, id: "D02-3", format: "svg", section: "fixed:2.1", source: svg("Actor Hierarchy") }
+    ]
+    const withPng = ctx({ diagramPng: (id) => `png-${id}` })
+    expect(renderSection(s, "fixed:2.2.1", withPng).blocks).toEqual([
+      { type: "image", png: "png-D02", caption: "Use Cases — Account & Access" },
+      { type: "image", png: "png-D02-2", caption: "Use Cases — Billing (2/2)" }
+    ])
+    const actors = renderSection(s, "fixed:2.1", withPng).blocks
+    expect(actors[0].type).toBe("table")
+    expect(actors[1]).toEqual({ type: "image", png: "png-D02-3", caption: "Actor Hierarchy" })
+    // Không có hình phân cấp ⇒ §2.1 chỉ có bảng
+    expect(renderSection(spine(), "fixed:2.1", ctx()).blocks).toHaveLength(1)
+  })
+
   it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D03")!

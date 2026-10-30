@@ -1,103 +1,54 @@
 /**
- * §2.2.1 Use Case Diagram — source_fields: `actors[].name/.kind` ·
- * `use_cases[].name/.actor_ids/.includes/.extends` (srs-spine §7.1).
+ * §2.2.1 Use Case Diagram — source_fields: `actors[].name/.kind/.parent_id` ·
+ * `use_cases[].name/.actor_ids/.function_ids/.includes/.extends` · `functions[].feature_id` · `features[].name/.order`
+ * (srs-spine §7.1). UML 2.5.1, dựng bằng SVG (hình học ở `usecase-layout.ts`, thuật toán ở
+ * `docs/technical/usecase-diagram-layout.md`).
  *
- * Cạnh actor–use case là association (`--`, không đầu mũi tên): đầu mũi tên trên association
- * nghĩa là navigability, không phải "ai gọi ai".
+ * CHIA HÌNH THEO FEATURE (không theo actor): feature của use case suy từ `function_ids` → `functions[].feature_id`
+ * (nhiều feature ⇒ feature của function đầu tiên phân giải được trong `function_ids`). Use case chưa suy được feature
+ * (chưa qua S-4.1, function chết) gom theo cụm quan hệ rồi theo actor người chính của cụm — tên nhóm là tên actor — và
+ * đứng sau các feature. Nhóm quá `MAX_USE_CASES_PER_DIAGRAM` use case tách đều thành nhiều hình trong cùng nhóm. Phần
+ * đầu tiên giữ id gốc của hình (`diagram.service.ts#assignIds`) nên baseline đã ký giữ được ảnh.
  *
- * MỖI ACTOR NGƯỜI MỘT HÌNH (`partitionUseCases`): trong một hình, mỗi use case chỉ nối với đúng actor
- * người của hình đó — không bao giờ hai actor người cùng nối một use case trên một hình. Use case nhiều vai
- * trò dùng chung được lặp ở hình của từng vai trò. Actor `system`/`time` là actor phụ, luôn giữ cạnh.
+ * Actor đúng như mô hình: một use case nối mọi actor trong `actor_ids`, actor tổng quát hiện nguyên trên hình (không bung
+ * xuống actor lá), actor có con thì in nghiêng. Cạnh actor–use case là association (đường liền, không mũi tên). Actor
+ * người KHÔNG nối vào use case mở rộng / được include khi quan hệ đó được vẽ trong cùng hình — actor đến với nó qua use
+ * case gốc; actor `system`/`time` luôn giữ cạnh. Actor người mất hết cạnh thì giữ cạnh tới use case có id nhỏ nhất.
  *
- * Use case mở rộng (`extends[]`) hoặc bị include KHÔNG nối thẳng vào actor người khi use case gốc nằm cùng
- * hình — actor đến với nó qua gốc. Gốc ở hình khác ⇒ giữ cạnh, nếu không use case lơ lửng.
+ * include / extend chỉ vẽ khi cả hai đầu cùng hình, và là đoạn dọc giữa hai ellipse KỀ NHAU. Cột chỉ cho mỗi use case
+ * hai hàng xóm, nên đồ thị quan hệ được tách thành các chuỗi (`relationChains`); một use case có > 2 quan hệ (hoặc vòng)
+ * xuất hiện ở nhiều hình của cùng nhóm, mỗi hình giữ các chuỗi không chung use case. Hình không qua `checkScene` (đường
+ * association quệt chữ actor) bị tách đôi tới khi sạch — luật 9 của conventions: không đạt bố cục thì tách hình.
  *
- * Bố cục (`left to right direction`): PHÍA của actor do CHIỀU cạnh quyết định — actor người viết `A -- UC`
- * (trái), actor system/time viết `UC -- A` (phải).
- *
- * Generalization (`actors[].parent_id`, chỉ người ↔ người): use case mà MỌI dạng chuyên biệt của một
- * actor tổng quát cùng làm được NÂNG lên actor tổng quát (`User`) và chỉ vẽ ở hình `User`; actor con thừa
- * kế. Use case chỉ chung một phần vai trò không nâng. Hình actor con vẽ `User <|-- Customer` (cùng nghĩa
- * `Customer --|> User`; cha viết trước để đứng ngoài cùng bên trái).
+ * Generalization (`actors[].parent_id`, người ↔ người): khi có, thêm MỘT hình phân cấp actor (cuối danh sách, section
+ * §2.1). Use case không có field cha trong Spine ⇒ không vẽ generalization giữa use case.
  */
 
+import { checkScene } from "../../../shared/diagram/svg-geometry.js"
+import { actorParents } from "../../spine/actor-generalization.js"
+import type { ActorKind, Spine, UseCase } from "../../spine/spine.types.js"
 import { systemName } from "../../spine/system-name.js"
-import { actorParents, ancestorsOf } from "../../spine/actor-generalization.js"
-import type { ActorKind, UseCase } from "../../spine/spine.types.js"
-import type { Renderer } from "./common.js"
-import { alias, byId, compareIds, label, puml } from "./common.js"
-import { DIAGRAM_LABELS } from "./labels.js"
+import type { RenderedPart, Renderer } from "./common.js"
+import { byId, compareIds, svgPart } from "./common.js"
+import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
+import { layoutActorHierarchy, layoutUseCaseDiagram, type Association, type DiagramActor, type Relation, type UseCaseDiagram } from "./usecase-layout.js"
 
 export const MAX_USE_CASES_PER_DIAGRAM = 20
 
-/**
- * Trần số cạnh actor–use case của một hình. Đo trên sơ đồ thật: > ~30 cạnh thì Graphviz vắt dây
- * chéo khắp hình dù use case chưa tới 20 (CampShare 17 UC/31 cạnh, ShipNhanh phần 1 20 UC/30 cạnh).
- */
-export const MAX_ASSOCIATIONS_PER_DIAGRAM = 24
+/** Trần cứng của một cụm quan hệ khi gom nhóm use case chưa có feature; cụm dài hơn bị cắt theo lô. */
+export const MAX_CLUSTER_SPAN = MAX_USE_CASES_PER_DIAGRAM * 2
 
-/** Loại actor theo id — renderer cần để chọn phía và luật bỏ cạnh. Id lạ coi như không phải người. */
+/** Section của hình phân cấp actor (§2.1) và của các hình use case (§2.2.1). */
+export const ACTOR_HIERARCHY_SECTION = "fixed:2.1"
+export const USE_CASE_SECTION = "fixed:2.2.1"
+
 export type ActorKinds = ReadonlyMap<string, ActorKind>
 
 const isHuman = (kinds: ActorKinds, actorId: string): boolean => kinds.get(actorId) === "human"
-
-/**
- * Trần cứng cho một cụm quan hệ. Cụm dài hơn mức này bị cắt theo lô như trước: một `.puml`
- * quá lớn làm PlantUML lỗi ⇒ `render_error`, cờ đỏ không waive được, user không có đường gỡ.
- */
-export const MAX_CLUSTER_SPAN = MAX_USE_CASES_PER_DIAGRAM * 2
-
-const STEREOTYPE: Readonly<Record<string, string>> = { human: "", system: " <<system>>", time: " <<time>>" }
+const clean = (text: string): string => text.replace(/\s+/g, " ").trim()
 
 const chunks = <T>(items: T[], size: number): T[][] =>
   Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size))
-
-/** `actor con → actor cha`, chỉ cạnh hợp lệ (`actorParents`). Rỗng ⇒ sơ đồ như khi chưa có generalization. */
-export type ActorParents = ReadonlyMap<string, string>
-
-/**
- * `actor_ids` sau khi nâng: các actor người cùng một cây kế thừa được thay bằng tổ tiên chung gần nhất,
- * đặt ở vị trí actor đầu tiên của nhóm — actor chính vẫn đứng đầu. CHỈ nâng khi điều đó đúng nghĩa
- * "mọi dạng của actor tổng quát đều làm được": tổ tiên chung có mặt sẵn (actor con đi kèm là thừa), hoặc
- * các actor phủ ĐỦ mọi con trực tiếp của nó. Use case chỉ chung cho một phần vai trò (View Timetable của
- * Lecturer + Student, không có Office) giữ nguyên — nâng lên `User` sẽ nói sai rằng Office cũng làm được.
- * Actor system/time và actor ngoài cây giữ nguyên.
- */
-export const liftToGeneral = (actorIds: readonly string[], kinds: ActorKinds, parents: ActorParents): string[] => {
-  const unique = [...new Set(actorIds)]
-  const chainOf = (id: string): string[] => [id, ...ancestorsOf(id, parents)]
-  const rootOf = (id: string): string => { const chain = chainOf(id); return chain[chain.length - 1]! }
-  const families = new Map<string, string[]>()
-  for (const id of unique) {
-    if (!isHuman(kinds, id)) continue
-    families.set(rootOf(id), [...(families.get(rootOf(id)) ?? []), id])
-  }
-
-  const childrenOf = (id: string): string[] => [...parents].filter(([, p]) => p === id).map(([c]) => c)
-  const replaced = new Map<string, string>()
-  for (const members of families.values()) {
-    if (members.length < 2) continue
-    // Tổ tiên chung gần nhất: phần tử đầu tiên trong chuỗi của actor đầu mà mọi actor khác cũng đi qua.
-    const chains = members.map((m) => new Set(chainOf(m)))
-    const common = chainOf(members[0]!).find((a) => chains.every((c) => c.has(a)))
-    if (common === undefined) continue
-    const coversAll = childrenOf(common).every((child) => chains.some((c) => c.has(child)))
-    if (members.includes(common) || coversAll) for (const m of members) replaced.set(m, common)
-  }
-  return [...new Set(unique.map((id) => replaced.get(id) ?? id))]
-}
-
-/** Use case với `actor_ids` đã nâng — đầu vào chung của chia hình và cạnh khi có generalization. */
-const liftUseCases = (useCases: readonly UseCase[], kinds: ActorKinds, parents: ActorParents): UseCase[] =>
-  parents.size === 0 ? [...useCases] : useCases.map((u) => ({ ...u, actor_ids: liftToGeneral(u.actor_ids, kinds, parents) }))
-
-export interface UseCasePart {
-  useCases: UseCase[]
-  /** Cạnh association vẽ trong phần này, dạng `${actorId}|${useCaseId}`. */
-  keep: Set<string>
-  /** Actor đại diện của từng cụm trong phần, theo thứ tự dồn — dùng dựng tiêu đề. */
-  groupKeys: string[]
-}
 
 /** Thành phần liên thông của đồ thị include/extend (vô hướng); cụm vượt trần cứng bị cắt theo lô. */
 export const relationClusters = (useCases: readonly UseCase[]): UseCase[][] => {
@@ -135,183 +86,261 @@ export const relationClusters = (useCases: readonly UseCase[]): UseCase[][] => {
   return clusters
 }
 
+// ─── quan hệ include / extend → chuỗi ──────────────────────────────
+
+interface RelationEdge extends Relation {
+  id: string
+}
+
+/** Quan hệ include / extend giữa các use case trong `ids`, không tự trỏ, không trùng, sắp theo id. */
+const relationEdges = (useCases: readonly UseCase[]): RelationEdge[] => {
+  const ids = new Set(useCases.map((u) => u.id))
+  const edges = new Map<string, RelationEdge>()
+  const add = (from: string, to: string, kind: Relation["kind"]) => {
+    if (from === to || !ids.has(from) || !ids.has(to)) return
+    const id = `${kind}:${from}>${to}`
+    edges.set(id, { id, from, to, kind })
+  }
+  for (const uc of useCases) {
+    for (const included of uc.includes) add(uc.id, included, "include")
+    for (const base of uc.extends) add(uc.id, base, "extend")
+  }
+  return [...edges.values()].sort((a, b) => compareIds(a.id, b.id))
+}
+
+/** Một chuỗi use case liên tiếp: `relations[i]` nối `nodes[i]` và `nodes[i + 1]`. Use case đơn lẻ = chuỗi một nút. */
+export interface RelationChain {
+  nodes: string[]
+  relations: Relation[]
+}
+
+const asRelation = ({ from, to, kind }: RelationEdge): Relation => ({ from, to, kind })
+
 /**
- * Khoá nhóm của một cụm: actor NGƯỜI đầu tiên (use case theo id, `actor_ids` giữ thứ tự — actor
- * chính đứng đầu). Không có actor người ⇒ actor có id nhỏ nhất. Không dùng "id nhỏ nhất" cho mọi
- * cụm vì actor system được thêm sớm (S-2.3) nên id nhỏ — nhóm theo nó xé use case của một actor
- * người qua nhiều hình.
+ * Tách đồ thị quan hệ thành các chuỗi đường đi đơn, rời nhau về cạnh (mỗi cạnh đúng một chuỗi). Bắt đầu từ đầu mút
+ * (nút còn một cạnh) có id nhỏ nhất, đi tới hàng xóm id nhỏ nhất chưa có trong chuỗi — tất định.
  */
+export const relationChains = (useCases: readonly UseCase[]): RelationChain[] => {
+  const edges = relationEdges(useCases)
+  const unused = new Set(edges.map((e) => e.id))
+  const incident = (node: string): RelationEdge[] => edges.filter((e) => unused.has(e.id) && (e.from === node || e.to === node))
+  const chains: RelationChain[] = []
+  while (unused.size > 0) {
+    const open = [...new Set(edges.filter((e) => unused.has(e.id)).flatMap((e) => [e.from, e.to]))].sort(compareIds)
+    const start = open.find((n) => incident(n).length === 1) ?? open[0]
+    const chain: RelationChain = { nodes: [start], relations: [] }
+    for (;;) {
+      const current = chain.nodes[chain.nodes.length - 1]
+      const next = incident(current)
+        .map((edge) => ({ edge, other: edge.from === current ? edge.to : edge.from }))
+        .filter(({ other }) => !chain.nodes.includes(other))
+        .sort((a, b) => compareIds(a.other, b.other) || compareIds(a.edge.id, b.edge.id))[0]
+      if (!next) break
+      unused.delete(next.edge.id)
+      chain.nodes.push(next.other)
+      chain.relations.push(asRelation(next.edge))
+    }
+    chains.push(chain)
+  }
+  return chains
+}
+
+/** Chuỗi nằm ≤ `size` nút mỗi đoạn; quan hệ băng qua ranh giới bị bỏ. */
+const splitChain = (chain: RelationChain, size: number): RelationChain[] =>
+  chain.nodes.length <= size
+    ? [chain]
+    : chunks(chain.nodes, size).map((nodes, i) => ({ nodes, relations: chain.relations.slice(i * size, i * size + nodes.length - 1) }))
+
+// ─── nhóm theo feature ─────────────────────────────────────────────
+
+interface UseCaseGroup {
+  key: string
+  /** Tên feature (hoặc tên actor chính của nhóm chưa có feature). */
+  name: string
+  useCases: UseCase[]
+}
+
+/** Feature của use case: function đầu tiên trong `function_ids` còn tồn tại và thuộc feature còn tồn tại. */
+export const featureOfUseCase = (uc: UseCase, spine: Pick<Spine, "functions" | "features">): string | null => {
+  const features = new Set(spine.features.map((f) => f.id))
+  for (const fnId of uc.function_ids) {
+    const fn = spine.functions.find((f) => f.id === fnId)
+    if (fn && features.has(fn.feature_id)) return fn.feature_id
+  }
+  return null
+}
+
+/** Khoá nhóm cụm chưa có feature: actor NGƯỜI đầu tiên (actor chính đứng đầu `actor_ids`), không có ⇒ actor id nhỏ nhất. */
 const clusterKey = (cluster: readonly UseCase[], kinds: ActorKinds): string => {
   const ids = cluster.flatMap((u) => u.actor_ids)
   return ids.find((id) => isHuman(kinds, id)) ?? [...new Set(ids)].sort(compareIds)[0] ?? "~"
 }
 
-/**
- * Chia hình: MỖI ACTOR NGƯỜI MỘT HÌNH, mỗi use case trong hình chỉ nối với đúng actor người đó (cộng
- * actor system/time tham gia — actor phụ). Hình của actor H gồm use case H tham gia + những gì chúng
- * `include` + những use case `extend` chúng (đệ quy); KHÔNG kéo ngược lên use case gốc của vai trò khác
- * (Founder tham gia Verify Document mà Sign Baseline của Business Analyst include ⇒ hình Founder không
- * có Sign Baseline). Use case chung cho nhiều vai trò (View Timetable của Lecturer + Student) xuất hiện ở
- * hình của TỪNG vai trò.
- *
- * Cạnh H → use case phụ thuộc (bị include / extend) chỉ bỏ khi use case gốc của nó cũng nằm trong hình:
- * H đến với nó qua gốc. Gốc ở hình khác ⇒ giữ cạnh, nếu không use case lơ lửng. H không còn cạnh nào ⇒ giữ
- * cạnh tới use case có id nhỏ nhất của H.
- *
- * Phần còn lại (use case không actor người nào chạm tới: việc của scheduler, hệ thống ngoài) gom theo cụm
- * quan hệ, khoá actor đầu tiên của cụm. Thứ tự hình: actor tổng quát → actor chuyên biệt (theo độ sâu) →
- * actor người ngoài cây kế thừa → nhóm không có actor người; cùng hạng thì theo id. Một hình vượt trần
- * (số use case / số cạnh) ⇒ cắt theo cụm quan hệ. `useCases` phải đã qua `liftUseCases` khi có `parents`.
- */
-export const partitionUseCases = (useCases: UseCase[], kinds: ActorKinds = new Map(), parents: ActorParents = new Map()): UseCasePart[] => {
-  const known = new Map(useCases.map((u) => [u.id, u]))
-  const extensionsOf = new Map<string, string[]>()
-  for (const u of useCases) for (const base of u.extends) if (known.has(base) && base !== u.id) extensionsOf.set(base, [...(extensionsOf.get(base) ?? []), u.id])
+const groupUseCases = (spine: Spine, kinds: ActorKinds, labels: DiagramLabels): UseCaseGroup[] => {
+  const byFeature = new Map<string, UseCase[]>()
+  const unassigned: UseCase[] = []
+  for (const uc of byId(spine.use_cases)) {
+    const feature = featureOfUseCase(uc, spine)
+    if (feature === null) unassigned.push(uc)
+    else byFeature.set(feature, [...(byFeature.get(feature) ?? []), uc])
+  }
+  const groups: UseCaseGroup[] = [...spine.features]
+    .sort((a, b) => a.order - b.order || compareIds(a.id, b.id))
+    .filter((f) => byFeature.has(f.id))
+    .map((f) => ({ key: f.id, name: clean(f.name) || f.id, useCases: byFeature.get(f.id)! }))
 
-  /** Use case của actor + include + extension, đệ quy. */
-  const closure = (seed: readonly string[]): Set<string> => {
-    const set = new Set(seed)
-    const queue = [...seed]
-    while (queue.length > 0) {
-      const id = queue.shift()!
-      for (const next of [...(known.get(id)?.includes ?? []), ...(extensionsOf.get(id) ?? [])]) {
-        if (!known.has(next) || set.has(next)) continue
-        set.add(next)
-        queue.push(next)
-      }
-    }
-    return set
-  }
-  const nonHumanEdges = (ucs: readonly UseCase[]): string[] =>
-    ucs.flatMap((uc) => [...new Set(uc.actor_ids)].filter((a) => kinds.has(a) && !isHuman(kinds, a)).map((a) => `${a}|${uc.id}`))
-  const fits = (ucs: readonly UseCase[], keep: ReadonlySet<string>): boolean => {
-    const ids = new Set(ucs.map((u) => u.id))
-    return ucs.length <= MAX_USE_CASES_PER_DIAGRAM && [...keep].filter((k) => ids.has(k.split("|")[1]!)).length <= MAX_ASSOCIATIONS_PER_DIAGRAM
-  }
-  /** Phần vượt trần ⇒ cắt theo cụm quan hệ của chính tập use case trong phần. */
-  const pack = (key: string, ucs: UseCase[], keep: Set<string>): UseCasePart[] => {
-    if (fits(ucs, keep)) return [{ useCases: ucs, groupKeys: [key], keep }]
-    const out: UseCasePart[] = []
-    for (const cluster of relationClusters(ucs)) {
-      const last = out[out.length - 1]
-      if (last && fits([...last.useCases, ...cluster], keep)) last.useCases.push(...cluster)
-      else out.push({ useCases: [...cluster], groupKeys: [key], keep })
-    }
-    return out
-  }
-
-  const general = new Set(parents.values())
-  const rank = (key: string): number => {
-    if (parents.has(key) || general.has(key)) return ancestorsOf(key, parents).length
-    return isHuman(kinds, key) ? 1_000 : 2_000
-  }
-  const humans = [...new Set(useCases.flatMap((u) => u.actor_ids).filter((a) => isHuman(kinds, a)))]
-  const groups: [string, UseCase[], Set<string>][] = []
-  const covered = new Set<string>()
-
-  for (const h of humans) {
-    const own = useCases.filter((u) => u.actor_ids.includes(h)).map((u) => u.id)
-    const inPart = closure(own)
-    const ucs = useCases.filter((u) => inPart.has(u.id))
-    const reachedViaBase = (uc: UseCase): boolean =>
-      ucs.some((o) => o.id !== uc.id && o.includes.includes(uc.id)) || uc.extends.some((b) => b !== uc.id && inPart.has(b))
-    const keep = new Set(nonHumanEdges(ucs))
-    const ownEdges = own.filter((id) => !reachedViaBase(known.get(id)!))
-    for (const id of ownEdges.length > 0 ? ownEdges : [[...own].sort(compareIds)[0]!]) keep.add(`${h}|${id}`)
-    for (const id of inPart) covered.add(id)
-    groups.push([h, ucs, keep])
-  }
-
-  const rest = useCases.filter((u) => !covered.has(u.id))
-  const restGroups = new Map<string, UseCase[]>()
-  for (const cluster of relationClusters(rest)) {
+  const rest = new Map<string, UseCase[]>()
+  for (const cluster of relationClusters(unassigned)) {
     const key = clusterKey(cluster, kinds)
-    restGroups.set(key, [...(restGroups.get(key) ?? []), ...cluster])
+    rest.set(key, [...(rest.get(key) ?? []), ...cluster])
   }
-  for (const [key, ucs] of restGroups) groups.push([key, ucs, new Set(nonHumanEdges(ucs))])
-
+  const actorName = new Map(spine.actors.map((a) => [a.id, a.name]))
+  const rank = (key: string): number => (isHuman(kinds, key) ? 0 : 1)
+  const keys = [...rest.keys()].sort((a, b) => rank(a) - rank(b) || compareIds(a, b))
+  for (const key of keys) groups.push({ key, name: clean(actorName.get(key) ?? "") || (key === "~" ? labels.otherGroup : key), useCases: byId(rest.get(key)!) })
   return groups
-    .sort(([a], [b]) => rank(a) - rank(b) || compareIds(a, b))
-    .flatMap(([key, ucs, keep]) => pack(key, ucs, keep))
 }
 
-/** Use case không đứng độc lập trên hình: có `extends[]` hoặc bị use case khác include. */
-export const dependentUseCaseIds = (useCases: readonly UseCase[]): Set<string> => {
-  const included = new Set(useCases.flatMap((u) => u.includes))
-  return new Set(useCases.filter((u) => u.extends.length > 0 || included.has(u.id)).map((u) => u.id))
+// ─── chia một nhóm thành các hình ──────────────────────────────────
+
+export interface UseCasePart {
+  groupKey: string
+  /** Tên nhóm kèm `(i/n)` khi nhóm tách nhiều hình. */
+  name: string
+  /** Thứ tự dọc trên hình: use case liên quan kề nhau. */
+  useCases: UseCase[]
+  relations: Relation[]
+  associations: Association[]
 }
 
-/** Số use case PHÂN BIỆT mà mỗi actor tham gia — actor chỉ có đúng một thì cạnh của nó được giữ. */
-export const actorUseCaseCounts = (useCases: readonly UseCase[]): Map<string, number> => {
-  const counts = new Map<string, number>()
-  for (const uc of useCases) for (const id of new Set(uc.actor_ids)) counts.set(id, (counts.get(id) ?? 0) + 1)
-  return counts
+/** Actor chính của use case — dùng xếp các use case cùng actor gần nhau, ít đường association chéo nhau. */
+const primaryActor = (uc: UseCase, kinds: ActorKinds): string => uc.actor_ids.find((id) => isHuman(kinds, id)) ?? uc.actor_ids[0] ?? "~"
+
+/** Cạnh actor–use case của một hình, theo luật bỏ cạnh actor người ở use case phụ thuộc. */
+const associationsOf = (useCases: readonly UseCase[], relations: readonly Relation[], kinds: ActorKinds): Association[] => {
+  const dependent = new Set([...relations.filter((r) => r.kind === "include").map((r) => r.to), ...relations.filter((r) => r.kind === "extend").map((r) => r.from)])
+  const kept: Association[] = []
+  const dropped = new Map<string, string[]>()
+  for (const uc of useCases) {
+    for (const actorId of [...new Set(uc.actor_ids)].sort(compareIds)) {
+      if (!kinds.has(actorId)) continue
+      if (isHuman(kinds, actorId) && dependent.has(uc.id)) dropped.set(actorId, [...(dropped.get(actorId) ?? []), uc.id])
+      else kept.push({ actorId, useCaseId: uc.id })
+    }
+  }
+  // Actor người không còn cạnh nào ⇒ giữ cạnh tới use case id nhỏ nhất, nếu không actor biến mất khỏi hình
+  for (const [actorId, ids] of dropped) {
+    if (!kept.some((k) => k.actorId === actorId)) kept.push({ actorId, useCaseId: [...ids].sort(compareIds)[0] })
+  }
+  const order = new Map(useCases.map((u, i) => [u.id, i]))
+  return kept.sort((a, b) => order.get(a.useCaseId)! - order.get(b.useCaseId)! || compareIds(a.actorId, b.actorId))
 }
+
+/** Hình có đạt bố cục không (`checkScene` sạch)? Không đạt ⇒ `partsOfGroup` tách đôi (luật 9: không đạt thì tách hình). */
+type Fits = (part: UseCasePart) => boolean
+
+const partsOfGroup = (group: UseCaseGroup, kinds: ActorKinds, fits: Fits): UseCasePart[] => {
+  const known = new Map(group.useCases.map((u) => [u.id, u]))
+  const chains = relationChains(group.useCases).flatMap((c) => splitChain(c, MAX_USE_CASES_PER_DIAGRAM))
+  // Mỗi lớp là một hình: các chuỗi trong lớp không chung use case (use case xuất hiện một lần trên một hình)
+  const layers: RelationChain[][] = []
+  for (const chain of chains) {
+    const layer = layers.find((l) => l.every((c) => c.nodes.every((n) => !chain.nodes.includes(n))))
+    if (layer) layer.push(chain)
+    else layers.push([chain])
+  }
+  const inChain = new Set(chains.flatMap((c) => c.nodes))
+  const singles: RelationChain[] = group.useCases.filter((u) => !inChain.has(u.id)).map((u) => ({ nodes: [u.id], relations: [] }))
+  if (layers.length === 0) layers.push([])
+  layers[0].push(...singles)
+
+  const blockKey = (c: RelationChain): [string, string] => {
+    const first = [...c.nodes].sort(compareIds)[0]
+    return [primaryActor(known.get(first)!, kinds), first]
+  }
+  const ordered = (blocks: RelationChain[]): RelationChain[] =>
+    [...blocks].sort((a, b) => {
+      const [ka, ia] = blockKey(a)
+      const [kb, ib] = blockKey(b)
+      return compareIds(ka, kb) || compareIds(ia, ib)
+    })
+
+  const raw: RelationChain[][] = []
+  for (const layer of layers) {
+    const blocks = ordered(layer)
+    const total = blocks.reduce((n, c) => n + c.nodes.length, 0)
+    // Quá trần ⇒ chia đều, không cắt giữa chuỗi quan hệ
+    const target = Math.ceil(total / Math.ceil(total / MAX_USE_CASES_PER_DIAGRAM))
+    let current: RelationChain[] = []
+    let size = 0
+    for (const block of blocks) {
+      if (current.length > 0 && size + block.nodes.length > target) {
+        raw.push(current)
+        current = []
+        size = 0
+      }
+      current.push(block)
+      size += block.nodes.length
+    }
+    if (current.length > 0) raw.push(current)
+  }
+
+  const make = (blocks: RelationChain[], name: string): UseCasePart => {
+    const useCases = blocks.flatMap((b) => b.nodes).map((id) => known.get(id)!)
+    const relations = blocks.flatMap((b) => b.relations)
+    return { groupKey: group.key, name, useCases, relations, associations: associationsOf(useCases, relations, kinds) }
+  }
+  /** Tách đôi tới khi vừa; một chuỗi dài bị cắt giữa (quan hệ ở chỗ cắt không vẽ), một use case đơn thì dừng. */
+  const refine = (blocks: RelationChain[]): RelationChain[][] => {
+    if (fits(make(blocks, group.name))) return [blocks]
+    if (blocks.length > 1) {
+      const half = Math.ceil(blocks.length / 2)
+      return [...refine(blocks.slice(0, half)), ...refine(blocks.slice(half))]
+    }
+    const [only] = blocks
+    if (only.nodes.length < 2) return [blocks]
+    return splitChain(only, Math.ceil(only.nodes.length / 2)).flatMap((piece) => refine([piece]))
+  }
+  const final = raw.flatMap(refine)
+  return final.map((blocks, i) => make(blocks, final.length > 1 ? `${group.name} (${i + 1}/${final.length})` : group.name))
+}
+
+/** Mọi hình use case của Spine theo thứ tự xuất hiện trong tài liệu (feature theo `order`, rồi nhóm chưa có feature). */
+export const partitionUseCases = (spine: Spine, labels: DiagramLabels = DIAGRAM_LABELS.en, fits: Fits = () => true): UseCasePart[] => {
+  const kinds: ActorKinds = new Map(spine.actors.map((a) => [a.id, a.kind]))
+  return groupUseCases(spine, kinds, labels).flatMap((g) => partsOfGroup(g, kinds, fits))
+}
+
+// ─── renderer ──────────────────────────────────────────────────────
+
+const meta = (section: string): Pick<RenderedPart, "kind" | "section" | "owner_kind" | "owner_id"> => ({ kind: "usecase", section, owner_kind: null, owner_id: null })
 
 export const renderUseCase: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS.en) => {
   const actors = new Map(spine.actors.map((a) => [a.id, a]))
-  const kinds: ActorKinds = new Map(spine.actors.map((a) => [a.id, a.kind]))
-  const parents: ActorParents = actorParents(spine.actors)
-  const lifted = liftUseCases(spine.use_cases, kinds, parents)
-  const parts = partitionUseCases(byId(lifted), kinds, parents)
-  const system = label(systemName(spine.project)) || labels.system
-  const withEdge = new Set(parts.flatMap((p) => [...p.keep].map((k) => k.split("|")[0]!)))
-  // Actor con không còn use case riêng (mọi use case đã nâng lên cha) ⇒ vẽ kèm kế thừa ở hình đầu tiên của cha.
-  const strays = [...parents.keys()].filter((id) => !withEdge.has(id)).sort(compareIds)
-  const firstPartOf = (actorId: string): number => parts.findIndex((p) => p.groupKeys.includes(actorId))
-  // Tên actor không bị ràng buộc ở schema ⇒ phải qua `label()`, `"` hay xuống dòng làm vỡ `.puml`.
-  const groupLabel = (key: string): string => label(actors.get(key)?.name ?? (key === "~" ? labels.otherGroup : key))
-  const declare = (id: string): string[] => {
-    const actor = actors.get(id)
-    return actor ? [`actor "${label(actor.name)}" as ${alias(actor.id)}${STEREOTYPE[actor.kind] ?? ""}`] : []
+  const parents = actorParents(spine.actors)
+  const abstract = new Set(parents.values())
+  const system = clean(systemName(spine.project)) || labels.system
+  const actorOf = (id: string): DiagramActor => {
+    const a = actors.get(id)!
+    return { id: a.id, name: clean(a.name), kind: a.kind, abstract: abstract.has(a.id) }
   }
 
-  return parts.map((part, partIndex) => {
-    // Thứ tự do `partitionUseCases` quyết định (actor → cụm → id) — vẫn tất định nên giữ
-    // hợp đồng "cùng Spine ⇒ cùng text" (common.ts).
-    const owner = part.groupKeys[0]!
-    const useCases = part.useCases
-    const inPart = new Set(useCases.map((u) => u.id))
-    // Một actor người mỗi hình: `keep` chỉ chứa cạnh của actor sở hữu hình + cạnh actor system/time (actor phụ).
-    const edges = useCases.flatMap((uc) =>
-      [...new Set(uc.actor_ids)]
-        .sort(compareIds)
-        .filter((actorId) => part.keep.has(`${actorId}|${uc.id}`))
-        .map((actorId) => ({ actorId, useCaseId: uc.id }))
-    )
-    const children = [
-      ...new Set([
-        ...(parents.has(owner) && edges.some((e) => e.actorId === owner) ? [owner] : []),
-        ...strays.filter((id) => {
-          const home = firstPartOf(parents.get(id)!)
-          return home === partIndex || (home < 0 && partIndex === 0)
-        })
-      ])
-    ].sort(compareIds)
-    const actorIds = [...new Set([...edges.map((e) => e.actorId), ...children, ...children.map((id) => parents.get(id)!)])].sort(compareIds)
-    const body = ["skinparam monochrome true", "left to right direction"]
-    if (parts.length > 1) body.push(`title ${labels.useCasesTitle(part.groupKeys.map(groupLabel).join(" / "))}`)
-
-    body.push(...actorIds.filter((id) => isHuman(kinds, id)).flatMap(declare))
-    body.push(`rectangle "${system}" {`)
-    for (const uc of useCases) body.push(`  usecase "${label(uc.name)}" as ${alias(uc.id)}`)
-    body.push("}")
-    body.push(...actorIds.filter((id) => !isHuman(kinds, id)).flatMap(declare))
-
-    for (const child of children) body.push(`${alias(parents.get(child)!)} <|-- ${alias(child)}`)
-    for (const { actorId, useCaseId } of edges) {
-      const [a, uc] = [alias(actorId), alias(useCaseId)]
-      body.push(isHuman(kinds, actorId) ? `${a} -- ${uc}` : `${uc} -- ${a}`)
-    }
-    for (const uc of useCases) {
-      for (const included of [...uc.includes].sort(compareIds)) {
-        if (inPart.has(included)) body.push(`${alias(uc.id)} ..> ${alias(included)} : <<include>>`)
-      }
-      for (const base of [...uc.extends].sort(compareIds)) {
-        if (inPart.has(base)) body.push(`${alias(uc.id)} ..> ${alias(base)} : <<extend>>`)
-      }
-    }
-
-    return { kind: "usecase" as const, section: "fixed:2.2.1", owner_kind: null, owner_id: null, format: "puml", source: puml("@startuml", body, "@enduml") }
+  const diagramOf = (part: UseCasePart): UseCaseDiagram => ({
+    system,
+    rows: part.useCases.map((u) => ({ id: u.id, name: clean(u.name) })),
+    actors: [...new Set(part.associations.map((a) => a.actorId))].sort(compareIds).map(actorOf),
+    associations: part.associations,
+    relations: part.relations
   })
+  const fits: Fits = (part) => checkScene(layoutUseCaseDiagram(diagramOf(part)), { allowBends: false }).length === 0
+
+  const out: RenderedPart[] = partitionUseCases(spine, labels, fits).map((part) =>
+    svgPart(layoutUseCaseDiagram(diagramOf(part)), { allowBends: false }, meta(USE_CASE_SECTION), labels.useCasesTitle(part.name))
+  )
+
+  if (parents.size > 0) {
+    const humans = byId(spine.actors.filter((a) => a.kind === "human")).map((a) => ({ id: a.id, name: clean(a.name), abstract: abstract.has(a.id) }))
+    out.push(svgPart(layoutActorHierarchy(humans, parents), { allowBends: false }, meta(ACTOR_HIERARCHY_SECTION), labels.actorHierarchyTitle))
+  }
+  return out
 }
