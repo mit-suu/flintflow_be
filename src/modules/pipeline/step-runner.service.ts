@@ -323,16 +323,27 @@ export const submitAnswer = (projectId: string, stepId: string, sessionId: strin
 }
 
 /**
- * Chờ user trả lời. Đóng kết nối hoặc hết giờ chờ ⇒ ném `AnswerDetached`: lượt chờ đã nằm ở run-state nên
+ * Chờ user trả lời. Đóng kết nối hoặc hết giờ chờ ⇒ `answer` ném `AnswerDetached`: lượt chờ đã nằm ở run-state nên
  * không có gì phải huỷ, `/answer` chạy tiếp sau đó (FLF-222). Chỉ Huỷ (`POST /cancel`) mới dừng hẳn (409).
+ *
+ * Gọi TRƯỚC khi công bố câu hỏi (`answer_needed` + run-state `waiting_answer`): `/answer` tới ngay sau đó phải gặp lượt
+ * nghe trong bộ nhớ, không rơi sang nhánh chạy nền (`resumeWaitingStep`) trong khi luồng SSE này vẫn chờ tới hết giờ.
+ * `cancel` gỡ lượt nghe khi công bố thất bại. Dùng cả cho lượt hỏi gộp đầu giai đoạn (R3), nơi `stepId` là đơn vị giai
+ * đoạn (`S-4`, `S-5@S03`).
  */
-const waitForAnswer = (projectId: string, stepId: string, sessionId: string, signal?: AbortSignal): Promise<AnswerPayload> => {
+export const listenForAnswer = (
+  projectId: string,
+  stepId: string,
+  sessionId: string,
+  signal?: AbortSignal
+): { answer: Promise<AnswerPayload>; cancel: () => void } => {
   const key = answerKey(projectId, stepId, sessionId)
   const abortError = (): Error =>
     signal?.reason === RUN_CANCELLED_REASON
       ? new ApiError(409, `Lượt chạy của step ${stepId} đã bị huỷ trong khi chờ trả lời`, STEP_NOT_RUNNABLE)
       : new AnswerDetached(stepId)
-  return new Promise((resolve, reject) => {
+  let cancel = (): void => undefined
+  const answer = new Promise<AnswerPayload>((resolve, reject) => {
     const cleanup = (): void => {
       // Chỉ xoá lượt chờ của chính mình — lượt mới cùng khoá có thể đã thay chỗ
       if (pendingAnswers.get(key)?.timeout === timeout) pendingAnswers.delete(key)
@@ -361,14 +372,15 @@ const waitForAnswer = (projectId: string, stepId: string, sessionId: string, sig
       },
       timeout
     })
+    cancel = () => {
+      clearTimeout(timeout)
+      cleanup()
+    }
   })
+  // Lượt nghe có thể bị huỷ (abort) trước khi được `await` — không để thành unhandled rejection
+  answer.catch(() => undefined)
+  return { answer, cancel }
 }
-
-/**
- * Chờ user trả lời một lượt hỏi ngoài khung một bước — dùng cho lượt hỏi gộp đầu giai đoạn (R3), nơi
- * `stepId` là đơn vị giai đoạn (`S-4`, `S-5@S03`) chứ không phải một bước trong registry.
- */
-export const submitAnswerWait = waitForAnswer
 
 const notWaiting = (stepId: string): ApiError => new ApiError(409, `Step ${stepId} không đang chờ trả lời câu hỏi`, STEP_NOT_RUNNABLE)
 
@@ -1500,20 +1512,31 @@ export const runStep = async (
       }
     }
 
-    /** Hỏi lại những câu còn chờ: phát `answer_needed`, lưu lượt chờ (FLF-222) rồi nhả khoá. */
-    const announceWaiting = async (asked: PendingAnswerState["asked"]): Promise<void> => {
+    /**
+     * Hỏi lại những câu còn chờ: phát `answer_needed`, lưu lượt chờ (FLF-222) rồi nhả khoá. Trả lượt nghe đã đăng ký TRƯỚC
+     * khi công bố — câu trả lời tới ngay sau `answer_needed` / `waiting_answer` vẫn về đúng luồng này.
+     */
+    const announceWaiting = async (asked: PendingAnswerState["asked"]): Promise<{ answer: Promise<AnswerPayload> }> => {
+      const listener = listenForAnswer(projectId, stepId, sessionId, d.signal)
       const { questions } = shapeQuestions(asked)
       const answerNeeded: StepEvent = { type: "answer_needed", step_id: stepId, questions }
-      emitRaw(answerNeeded)
-      await tracker.save({
-        status: "waiting_answer",
-        stage: "ask",
-        detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
-        questions,
-        pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
-        release: true,
-        appendEvent: { ...answerNeeded, at: new Date().toISOString() }
-      })
+      try {
+        emitRaw(answerNeeded)
+        await tracker.save({
+          status: "waiting_answer",
+          stage: "ask",
+          detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+          questions,
+          pending_answer: { kind: "step", unit: stepId, session_id: sessionId, asked, base_answers_text: answersText },
+          release: true,
+          appendEvent: { ...answerNeeded, at: new Date().toISOString() }
+        })
+      } catch (err) {
+        listener.cancel()
+        throw err
+      }
+      // Bọc trong object: `async` trả thẳng Promise sẽ bị gộp, tức là chờ luôn câu trả lời
+      return { answer: listener.answer }
     }
 
     /**
@@ -1521,11 +1544,11 @@ export const runStep = async (
      * trả lời đúng ý, trả lời user và nhắc câu còn chờ, rồi chờ tiếp. Không có trần lượt riêng — chỉ `CALLS_LIMIT`, luôn
      * chừa đủ cho Draft + Review; hết ngân sách chat thì AI tự giả định phần còn lại.
      */
-    const settleLoop = async (askedAll: PendingAnswerState["asked"], first: AnswerPayload | null): Promise<void> => {
+    const settleLoop = async (askedAll: PendingAnswerState["asked"], first: AnswerPayload | Promise<AnswerPayload>): Promise<void> => {
       let pending = askedAll
-      let payload = first
+      let next: AnswerPayload | Promise<AnswerPayload> = first
       for (;;) {
-        payload ??= await waitForAnswer(projectId, stepId, sessionId, d.signal)
+        const payload = await next
         const cardAnswers = payload.answers.filter((a) => indexOfQuestion(pending, a.question_id) >= 0)
         const message = payload.message?.trim()
         if (cardAnswers.length > 0 || message) userDecided = true
@@ -1608,8 +1631,7 @@ export const runStep = async (
         await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, remaining))
         if (remaining.length === 0) return
         pending = remaining
-        await announceWaiting(pending)
-        payload = null
+        next = (await announceWaiting(pending)).answer
       }
     }
 
@@ -1736,8 +1758,7 @@ export const runStep = async (
         if (questions.length > 0) {
           // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
           // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.
-          await announceWaiting(asked)
-          await settleLoop(asked, null)
+          await settleLoop(asked, (await announceWaiting(asked)).answer)
         }
         ;({ spine, spineVersion } = await refresh(projectId))
       }
