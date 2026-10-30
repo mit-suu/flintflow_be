@@ -392,128 +392,253 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Founder
-actor "Founder" as A01
-rectangle "FlintFlow" {
-  usecase "Log In" as UC02
-  usecase "Reset Password" as UC03
-  usecase "Complete Onboarding" as UC04
-  usecase "Browse Projects" as UC05
-  usecase "Create Project" as UC06
-  usecase "Resume Project" as UC07
-  usecase "Refine Product Brief" as UC08
-  usecase "Generate SRS Content" as UC09
-  usecase "Accept Step At Gate" as UC10
-  usecase "Request Change" as UC11
-  usecase "Render Diagrams" as UC12
-  usecase "Verify Document" as UC13
-  usecase "Export Word Document" as UC16
-  usecase "Purchase Credits" as UC17
-  usecase "View Billing History" as UC18
-  usecase "Receive Notifications" as UC19
-  usecase "Preview Change Impact" as UC23
-  usecase "Archive Project" as UC24
-}
-actor "Payment Gateway" as A05 <<system>>
-actor "LLM Provider" as A06 <<system>>
-actor "PlantUML Server" as A07 <<system>>
-actor "Email Service" as A08 <<system>>
-A01 -- UC02
-A01 -- UC03
-UC03 -- A08
-A01 -- UC05
-A01 -- UC06
-A01 -- UC07
-A01 -- UC08
-UC08 -- A06
-A01 -- UC09
-UC09 -- A06
-A01 -- UC11
-UC12 -- A07
-A01 -- UC13
-A01 -- UC16
-A01 -- UC17
-UC17 -- A05
-A01 -- UC18
-A01 -- UC19
-A01 -- UC24
-UC04 ..> UC06 : <<extend>>
-UC09 ..> UC10 : <<include>>
-UC09 ..> UC12 : <<include>>
-UC11 ..> UC23 : <<include>>
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="868" height="585" viewBox="-446 -20 868 585">
+<title>Use Cases — Authentication &amp; Onboarding</title>
+<rect x="-446" y="-20" width="868" height="585" fill="#fff"/>
+<rect x="-184" y="0" width="368" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-348.92" y1="349" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="95" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="222" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="476" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="349" x2="-138" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="336.9" y1="303" x2="138" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="349" x2="-138" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="476" x2="-138" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="336.9" y1="303" x2="138" y2="407" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Log In</text>
+<ellipse cx="0" cy="199" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Reset Password</text>
+<ellipse cx="0" cy="303" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Complete Onboarding</text>
+<ellipse cx="0" cy="407" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Register Account</text>
+<circle cx="-364.92" cy="328" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="338" x2="-364.92" y2="368" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="349" x2="-348.92" y2="349" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="368" x2="-376.92" y2="392" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="368" x2="-352.92" y2="392" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="414" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="-364.92" cy="74" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="84" x2="-364.92" y2="114" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="95" x2="-348.92" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="114" x2="-376.92" y2="138" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="114" x2="-352.92" y2="138" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="160" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
+<circle cx="-364.92" cy="201" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="211" x2="-364.92" y2="241" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="222" x2="-348.92" y2="222" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="241" x2="-376.92" y2="265" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="241" x2="-352.92" y2="265" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="287" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Administrator</text>
+<circle cx="-364.92" cy="455" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="465" x2="-364.92" y2="495" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="476" x2="-348.92" y2="476" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="495" x2="-376.92" y2="519" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="495" x2="-352.92" y2="519" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="541" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Guest</text>
+<circle cx="352.9" cy="282" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="352.9" y1="292" x2="352.9" y2="322" stroke="#000" stroke-width="1.2"/>
+<line x1="336.9" y1="303" x2="368.9" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="352.9" y1="322" x2="340.9" y2="346" stroke="#000" stroke-width="1.2"/>
+<line x1="352.9" y1="322" x2="364.9" y2="346" stroke="#000" stroke-width="1.2"/>
+<text x="352.9" y="368" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="352.9" y="388" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Email Service</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 2 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Business Analyst
-actor "Business Analyst" as A02
-rectangle "FlintFlow" {
-  usecase "Log In" as UC02
-  usecase "Verify Document" as UC13
-  usecase "Waive Red Flag" as UC14
-  usecase "Sign Baseline" as UC15
-}
-A02 -- UC02
-A02 -- UC15
-UC14 ..> UC15 : <<extend>>
-UC15 ..> UC13 : <<include>>
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="528" height="518" viewBox="-354 -20 528 518">
+<title>Use Cases — Project Dashboard</title>
+<rect x="-354" y="-20" width="528" height="518" fill="#fff"/>
+<rect x="-154" y="0" width="308" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-287.8" y1="251" x2="-108" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-287.8" y1="251" x2="-108" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-287.8" y1="251" x2="-108" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="-287.8" y1="251" x2="-108" y2="407" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Browse Projects</text>
+<ellipse cx="0" cy="199" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Create Project</text>
+<ellipse cx="0" cy="303" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Resume Project</text>
+<ellipse cx="0" cy="407" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Archive Project</text>
+<circle cx="-303.8" cy="230" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-303.8" y1="240" x2="-303.8" y2="270" stroke="#000" stroke-width="1.2"/>
+<line x1="-319.8" y1="251" x2="-287.8" y2="251" stroke="#000" stroke-width="1.2"/>
+<line x1="-303.8" y1="270" x2="-315.8" y2="294" stroke="#000" stroke-width="1.2"/>
+<line x1="-303.8" y1="270" x2="-291.8" y2="294" stroke="#000" stroke-width="1.2"/>
+<text x="-303.8" y="316" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 3 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Administrator
-actor "Administrator" as A03
-rectangle "FlintFlow" {
-  usecase "Log In" as UC02
-  usecase "Inspect Platform Accounts" as UC20
-  usecase "Monitor Platform Metrics" as UC21
-}
-A03 -- UC02
-A03 -- UC20
-A03 -- UC21
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="536" viewBox="-389 -20 840 536">
+<title>Use Cases — SRS Workspace</title>
+<rect x="-389" y="-20" width="840" height="536" fill="#fff"/>
+<rect x="-189" y="0" width="378" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-322.8" y1="199" x2="-143" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="199" x2="143" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-322.8" y1="199" x2="-143" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="199" x2="143" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="407" x2="143" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="266" x2="0" y2="236" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="4.89,246.96 0,236 -4.89,246.96" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="251" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<line x1="0" y1="340" x2="0" y2="370" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="-4.89,359.04 0,370 4.89,359.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="355" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<ellipse cx="0" cy="95" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Refine Product Brief</text>
+<ellipse cx="0" cy="199" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Accept Step At Gate</text>
+<ellipse cx="0" cy="303" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Generate SRS Content</text>
+<ellipse cx="0" cy="407" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Render Diagrams</text>
+<circle cx="-338.8" cy="178" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-338.8" y1="188" x2="-338.8" y2="218" stroke="#000" stroke-width="1.2"/>
+<line x1="-354.8" y1="199" x2="-322.8" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-338.8" y1="218" x2="-350.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<line x1="-338.8" y1="218" x2="-326.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<text x="-338.8" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="369.91" cy="178" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="188" x2="369.91" y2="218" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="199" x2="385.91" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="218" x2="357.91" y2="242" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="218" x2="381.91" y2="242" stroke="#000" stroke-width="1.2"/>
+<text x="369.91" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="369.91" y="284" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">LLM Provider</text>
+<circle cx="369.91" cy="386" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="396" x2="369.91" y2="426" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="407" x2="385.91" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="426" x2="357.91" y2="450" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="426" x2="381.91" y2="450" stroke="#000" stroke-width="1.2"/>
+<text x="369.91" y="472" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="369.91" y="492" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">PlantUML Server</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 4 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Guest
-actor "Guest" as A04
-rectangle "FlintFlow" {
-  usecase "Register Account" as UC01
-  usecase "Log In" as UC02
-}
-actor "Email Service" as A08 <<system>>
-A04 -- UC01
-UC01 -- A08
-A04 -- UC02
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="668" height="726" viewBox="-455 -20 668 726">
+<title>Use Cases — Verification &amp; Export</title>
+<rect x="-455" y="-20" width="668" height="726" fill="#fff"/>
+<rect x="-193" y="0" width="386" height="686" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-357.92" y1="355" x2="-147" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="482" x2="-147" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="355" x2="-147" y2="615" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="132" x2="0" y2="162" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="-4.89,151.04 0,162 4.89,151.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="147" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<line x1="0" y1="370" x2="0" y2="340" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="4.89,350.96 0,340 -4.89,350.96" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="355" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<line x1="0" y1="474" x2="0" y2="444" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="4.89,454.96 0,444 -4.89,454.96" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="459" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;extend&gt;&gt;</text>
+<ellipse cx="0" cy="95" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Request Change</text>
+<ellipse cx="0" cy="199" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Preview Change Impact</text>
+<ellipse cx="0" cy="303" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Verify Document</text>
+<ellipse cx="0" cy="407" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Sign Baseline</text>
+<ellipse cx="0" cy="511" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Waive Red Flag</text>
+<ellipse cx="0" cy="615" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="615" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Export Word Document</text>
+<circle cx="-373.92" cy="334" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="344" x2="-373.92" y2="374" stroke="#000" stroke-width="1.2"/>
+<line x1="-389.92" y1="355" x2="-357.92" y2="355" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="374" x2="-385.92" y2="398" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="374" x2="-361.92" y2="398" stroke="#000" stroke-width="1.2"/>
+<text x="-373.92" y="420" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="-373.92" cy="461" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="471" x2="-373.92" y2="501" stroke="#000" stroke-width="1.2"/>
+<line x1="-389.92" y1="482" x2="-357.92" y2="482" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="501" x2="-385.92" y2="525" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="501" x2="-361.92" y2="525" stroke="#000" stroke-width="1.2"/>
+<text x="-373.92" y="547" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 5 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Scheduler
-rectangle "FlintFlow" {
-  usecase "Run Scheduled Housekeeping" as UC22
-}
-actor "Scheduler" as A09 <<time>>
-UC22 -- A09
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="923" height="536" viewBox="-426 -20 923 536">
+<title>Use Cases — Billing &amp; Notifications</title>
+<rect x="-426" y="-20" width="923" height="536" fill="#fff"/>
+<rect x="-226" y="0" width="452" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-359.8" y1="199" x2="-180" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="95" x2="180" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-359.8" y1="199" x2="-180" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-359.8" y1="199" x2="-180" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="407" x2="180" y2="407" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Purchase Credits</text>
+<ellipse cx="0" cy="199" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">View Billing History</text>
+<ellipse cx="0" cy="303" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Receive Notifications</text>
+<ellipse cx="0" cy="407" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Run Scheduled Housekeeping</text>
+<circle cx="-375.8" cy="178" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-375.8" y1="188" x2="-375.8" y2="218" stroke="#000" stroke-width="1.2"/>
+<line x1="-391.8" y1="199" x2="-359.8" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-375.8" y1="218" x2="-387.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<line x1="-375.8" y1="218" x2="-363.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<text x="-375.8" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="411.36" cy="74" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="84" x2="411.36" y2="114" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="95" x2="427.36" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="114" x2="399.36" y2="138" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="114" x2="423.36" y2="138" stroke="#000" stroke-width="1.2"/>
+<text x="411.36" y="160" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="411.36" y="180" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Payment Gateway</text>
+<circle cx="411.36" cy="386" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="396" x2="411.36" y2="426" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="407" x2="427.36" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="426" x2="399.36" y2="450" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="426" x2="423.36" y2="450" stroke="#000" stroke-width="1.2"/>
+<text x="411.36" y="472" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;time&gt;&gt;</text>
+<text x="411.36" y="492" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Scheduler</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 6 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="663" height="310" viewBox="-439 -20 663 310">
+<title>Use Cases — Administration</title>
+<rect x="-439" y="-20" width="663" height="310" fill="#fff"/>
+<rect x="-204" y="0" width="408" height="270" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-355.12" y1="147" x2="-158" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-355.12" y1="147" x2="-158" y2="199" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="158" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Inspect Platform Accounts</text>
+<ellipse cx="0" cy="199" rx="158" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Monitor Platform Metrics</text>
+<circle cx="-371.12" cy="126" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-371.12" y1="136" x2="-371.12" y2="166" stroke="#000" stroke-width="1.2"/>
+<line x1="-387.12" y1="147" x2="-355.12" y2="147" stroke="#000" stroke-width="1.2"/>
+<line x1="-371.12" y1="166" x2="-383.12" y2="190" stroke="#000" stroke-width="1.2"/>
+<line x1="-371.12" y1="166" x2="-359.12" y2="190" stroke="#000" stroke-width="1.2"/>
+<text x="-371.12" y="212" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Administrator</text>
+</svg>
 "
 `;

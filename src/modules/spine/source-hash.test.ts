@@ -106,14 +106,16 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
   ]
 
   it("engine mặc định ⇒ đúng computeSourceHash: hình PlantUML đang có không stale khi deploy", () => {
-    for (const d of targets) expect(renderedDiagramHash(FIXTURE, d)).toBe(computeSourceHash(FIXTURE, d))
+    const legacy = Object.fromEntries(Object.keys(DIAGRAM_ENGINES).map((k) => [k, "plantuml@1"])) as typeof DIAGRAM_ENGINES
+    for (const d of targets) expect(renderedDiagramHash(FIXTURE, d, legacy)).toBe(computeSourceHash(FIXTURE, d))
   })
 
   it("đổi engine của một kind ⇒ hash hình của kind đó đổi; hash dữ liệu (ảnh gốc import) không đổi", () => {
     const svgContext = { ...DIAGRAM_ENGINES, context: "svg@1" }
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
-    expect(renderedDiagramHash(FIXTURE, targets[1], svgContext)).toBe(computeSourceHash(FIXTURE, targets[1]))
+    // kind không đổi engine ⇒ hash giữ nguyên
+    expect(renderedDiagramHash(FIXTURE, targets[2], svgContext)).toBe(computeSourceHash(FIXTURE, targets[2]))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))

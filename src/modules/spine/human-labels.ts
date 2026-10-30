@@ -234,6 +234,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   usecase_name_style: "Tên use case chưa đúng dạng",
   actor_name_shape: "Tên tác nhân chưa đúng dạng",
   actor_generalization_invalid: "Kế thừa tác nhân không hợp lệ",
+  actor_generalization_children_unlisted: "Mô tả tác nhân tổng quát chưa nêu tác nhân con",
   system_name_missing: "Thiếu tên hệ thống",
   screen_placeholder: "Màn hình còn để trống",
   derived_from_changed_assumption: "Dựa trên giả định đã đổi",

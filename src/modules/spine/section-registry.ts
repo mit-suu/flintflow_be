@@ -130,7 +130,7 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("actors", "actors[]", ["fixed:2.1"], ["fixed:2.2.2", "fixed:3.1.3"], ["diagram:usecase", "fixed:5.5"]),
   row("roles_permissions", "roles[], permissions[]", ["fixed:3.1.3"]),
   row("use_cases", "use_cases[]", ["fixed:2.2.2"], [], ["diagram:usecase"]),
-  row("features", "features[]", ["feature:<id>"], ["fixed:3.1.2"], [], "số mục §3.x (assemble)"),
+  row("features", "features[]", ["feature:<id>"], ["fixed:3.1.2"], ["diagram:usecase"], "số mục §3.x (assemble)"),
   row("screens_desc", "screens[].name/.description/.feature_id", ["fixed:3.1.2"], ["fixed:3.1.1", "fixed:3.1.3", "function:<screen>"], ["diagram:screen_flow", "fixed:5.5"]),
   row("screens_flow", "screens[].flow_to[]/.is_popup/.tabs[]", ["fixed:3.1.1"], [], ["diagram:screen_flow"]),
   row("screens_primary", "screens[].primary_function_id", [], [], ["diagram:screen_layout"]),

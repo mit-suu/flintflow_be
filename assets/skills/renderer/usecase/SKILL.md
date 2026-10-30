@@ -1,58 +1,65 @@
 ---
 skill_id: usecase
 kind: renderer
-version: 2.0.0
-description: "S-3.6 Use Case Diagram (one diagram per actor, include/extend, actor generalization)"
+version: 3.0.0
+description: "S-3.6 Use Case Diagram (UML 2.5.1, SVG built in code: one diagram per feature, include/extend, actor generalization diagram)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:
+  - "project.system_name ?? project.name"
   - "actors[].name"
   - "actors[].kind"
   - "actors[].parent_id"
   - "use_cases[].name"
   - "use_cases[].actor_ids"
+  - "use_cases[].function_ids"
   - "use_cases[].includes"
   - "use_cases[].extends"
+  - "functions[].feature_id"
+  - "features[].name"
+  - "features[].order"
 writes:
   - "diagrams[kind=usecase]"
-output_schema: puml
+output_schema: none
 language: en
 stub: false
 ---
 # Usecase
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/usecase.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
+> The renderer is deterministic code: `src/modules/diagram/renderers/usecase.renderer.ts` (grouping, order) and `usecase-layout.ts` (geometry, algorithm in `docs/technical/usecase-diagram-layout.md`). Engine `svg`: no PlantUML source, no `render_fix`. This skill documents the output.
 
-- Step: S-3.6 Use Case Diagram · Section: `fixed:2.2.1` · Output: `puml`
+- Step: S-3.6 Use Case Diagram · Section: `fixed:2.2.1` (actor hierarchy: `fixed:2.1`) · Output: `svg`
 
-## Output
+## Notation (UML 2.5.1)
 
-- `actor "<name>" as <id>`; `kind = system` adds `<<system>>` and `kind = time` adds `<<time>>`.
-- All use cases sit inside `rectangle "<project.name>" { usecase "<name>" as <id> }`.
-- Association (no arrowhead). The edge direction sets the side under `left to right direction`: a `human` actor is written `actor -- use case` (left), a `system`/`time` actor `use case -- actor` (right). Human actors are declared before the `rectangle`, system/time actors after it.
-- **One human actor per diagram.** In a diagram, every use case is associated with **at most one human actor** — the actor the diagram belongs to. Two human actors never share an association to the same use case in one diagram. `system`/`time` actors that take part are drawn as secondary actors on the right.
-- A **human** actor is not connected to a use case that has `extends[]` or is included by another use case **when that base use case is in the same diagram** — it reaches it through the base. If the base belongs to another actor's diagram, the edge is kept so the use case does not float. A human actor whose every edge would be dropped keeps the edge to its smallest use case id. `system`/`time` actors keep every edge (the payment gateway in "Pay Deposit").
-- Only actors that have an edge in that part are declared (plus a generalization parent, below).
-- `base ..> included : <<include>>` for `includes[]`; `extension ..> base : <<extend>>` for `extends[]` — drawn only when both ends are in the part.
+- **System boundary**: one rectangle named `project.system_name ?? project.name`, fill `#7ACFF5`, holding every use case ellipse (all the same size, one column, same `cx`).
+- **Actor**: stick figure, name below. `human` on the left, `system` / `time` on the right (stereotype `<<system>>` / `<<time>>` above the name), all OUTSIDE the boundary. An actor with child actors (`parent_id`) is **abstract** and its name is in *italic*.
+- **Association** (actor – use case): solid line, NO arrowhead, ONE straight segment from the actor's hand to the left (human) or right (system/time) vertex of the ellipse. It never crosses another ellipse (same-size column ⇒ proven geometrically).
+- `<<include>>`: dashed, **open arrowhead**, `base → included`. `<<extend>>`: dashed, open arrowhead, `extension → base`. Drawn as a vertical segment between two **adjacent** ellipses, label right of the line. Extension points and conditions are not drawn (they live in the use case table §2.2.2).
+- **Generalization** between actors: solid line, hollow triangle at the general actor (own diagram, below). Use cases have no parent field in the Spine, so no use case generalization is drawn.
+- No title drawn inside the picture: the document caption comes from the SVG `<title>` (`Use Cases — <feature>` / `Actor Hierarchy`).
 
-## One diagram per actor
+## One diagram per feature
 
-- Each **human** actor gets its own part: every use case it takes part in, plus what those use cases `include` and the use cases that `extend` them (recursively). It never pulls in another role's base use case (Founder takes part in "Verify Document", which Business Analyst's "Sign Baseline" includes ⇒ the Founder diagram shows "Verify Document" connected to Founder, without "Sign Baseline").
-- A use case shared by several human actors appears in **each** of their diagrams, connected only to that diagram's actor (Log In in the Lecturer, Student and Office diagrams; View Timetable in Lecturer and Student). This repetition is required, not duplication: each diagram is complete for its actor.
-- Use cases no human actor reaches (a scheduler's job, an external system's callback) are grouped by relation cluster under the cluster's first actor and get their own parts (`Use Cases — Class End Scheduler`).
+- Feature of a use case = `functions[].feature_id` of the first function in `function_ids` that still exists. Order: `features[].order`, then id.
+- No feature derivable (before S-4.1, dead function id): the use case goes to a group named after its cluster's main human actor (first human in `actor_ids`; no human ⇒ smallest actor id), placed after all features.
+- A group over 20 use cases is split into equal diagrams (`<name> (1/2)`, `(2/2)`…). A diagram that fails the layout check (`checkScene`) is split in half until it passes.
+- Each part is its own `diagrams[]` entry with the same `kind`, `section = fixed:2.2.1`, `owner_kind = null`, `owner_id = null`. The first part keeps the original id (`<base>`, then `<base>-2`, …) so a signed baseline keeps its image.
 
-## Actor generalization (`actors[].parent_id`)
+## Actors as modelled
 
-- `parent_id` marks a human actor as a specialized type of a general human actor (`Customer --|> User`). Only human ↔ human edges count: an edge with a `system`/`time` actor, a self-reference or a cycle is ignored (and raises `actor_generalization_invalid`).
-- **Lifting**: human actors of one inheritance tree on the same use case are replaced by their nearest common general actor **only when that is true of every specialization**: the general actor is already listed (children beside it are redundant), or the listed actors cover every direct child of it (Log In for Lecturer, Student and Office when `User` has exactly those three). The use case is then drawn once, in the `User` diagram, and not repeated in the specialized diagrams — they inherit it. A use case shared by only **some** roles is not lifted; it is repeated in each of those roles' diagrams.
-- Each specialized actor's diagram declares its parent (no association) and draws `parent <|-- child` (same relation as `child --|> parent`; parent written first so it sits leftmost). A specialized actor left with no use case of its own is drawn with its generalization in its parent's diagram, so it never disappears.
-- The general actor has no Screens Flow diagram of its own: screens it reaches belong to every specialized actor below it (`screen-actors.ts`).
+- A use case is linked to **every** actor in `actor_ids`; several human actors may share one use case on a diagram. A general actor stays general (`User`) — never expanded to leaf actors, never merged.
+- A **human** actor is not connected to a use case that is the target of an `<<include>>` or the source of an `<<extend>>` drawn in the same diagram: it reaches it through the base. A human actor left with no edge keeps the edge to its smallest use case id. `system`/`time` actors keep every edge.
+- Only actors with an edge in that diagram are drawn.
 
-## Order and splitting
+## Include / extend placement
 
-- Always one part per human actor (above), even when everything would fit in one diagram. Order: general actors (generalization parents) → specialized actors by depth → other human actors → non-human groups; ties by actor id.
-- One diagram holds at most 20 use cases **and** at most 24 actor–use case edges. An actor's part over either limit is split by relation cluster (connected component of the include/extend graph inside that part), so an include/extend edge never crosses a boundary unless a cluster alone is longer than 40 (then chunked by 20 and the crossing edge dropped).
-- Each part is its own `diagrams[]` entry with the same `kind`. The first part keeps the unsuffixed id (`<base>`, then `<base>-2`, `<base>-3`, …) so a signed baseline referencing `<base>` keeps its image.
-- Title is `Use Cases — <actor name>`; a project with a single part has no title.
+- A relation is drawn only when both use cases are in the same diagram. A use case has two neighbours in a column, so the relation graph is cut into simple chains (`relationChains`): an extension of two bases sits between them; a use case with more than two relations, or a cycle, appears in several diagrams of the group — every relation exactly once, always between adjacent rows.
+- Order inside a diagram: chains and single use cases sorted by main actor, then id.
+
+## Actor hierarchy diagram
+
+- Present only when at least one valid `parent_id` exists (human → human; edges with a `system`/`time` actor, self-reference or cycle are ignored and raise `actor_generalization_invalid`). One diagram, last in the list, `section = fixed:2.1`, rendered under the actors table.
+- Every human actor, child below parent, each edge one straight segment with a hollow triangle at the parent. The general actor's description in §2.1 must name its children (flag `actor_generalization_children_unlisted`).

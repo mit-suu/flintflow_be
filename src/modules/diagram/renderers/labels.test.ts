@@ -8,6 +8,7 @@ import { RENDERERS, allTargets, renderKind } from "./index.js"
 import { DIAGRAM_LABELS, diagramLabelsFor } from "./labels.js"
 import { isFunctionTable } from "./screen-layout.renderer.js"
 import { screenFlowTitleOf } from "./screen-flow.renderer.js"
+import { svgTitleOf } from "./common.js"
 import { MAX_USE_CASES_PER_DIAGRAM } from "./usecase.renderer.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -67,8 +68,10 @@ describe("nhãn máy trên sơ đồ theo ngôn ngữ (FLF-265 N1)", () => {
     })
     const parts = RENDERERS.usecase(spine, null, VI)
     expect(parts.length).toBeGreaterThan(1)
-    expect(parts[0].source).toContain(`title ${VI.useCasesTitle(actor.name)}`)
-    expect(parts.map((p) => p.source).join("\n")).toContain(": <<include>>")
+    // chưa có feature ⇒ nhóm theo actor chính; nhóm quá trần tách đều, tiêu đề mang (i/n)
+    expect(svgTitleOf(parts[0].source)).toBe(VI.useCasesTitle(`${actor.name} (1/${parts.length})`))
+    expect(svgTitleOf(parts[0].source)).toMatch(/^Sơ đồ use case — /)
+    expect(parts.map((p) => p.source).join("\n")).toContain("&lt;&lt;include&gt;&gt;")
   })
 
   it("luồng màn: tiêu đề theo actor, (pop-up), chưa có màn", () => {
