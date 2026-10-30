@@ -146,10 +146,11 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
   it("N1: chữ chỉ vẽ lên sơ đồ là đơn vị dịch nhưng luật không quét (phạm vi luật giữ nguyên)", () => {
     const spine = variant((s) => {
       s.entities[0].relation_verbs = { E02: "contains" }
+      s.entities[0].attributes = [{ name: "email", kind: "key", required: true }]
     })
     const units = translationUnits(spine).filter(isDiagramOnly)
     expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
-      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "screens.flow_to", "diagrams.labels"])
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "screens.flow_to", "diagrams.labels"])
     )
     const before = new Set(nonEnglish(spine))
     const withVietnamese = variant((s) => {
@@ -303,6 +304,22 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
     expect(units.find((u) => u.key === `entities[id=${E.id}].relation_verbs`)?.value).toEqual(["belongs to", "places"])
     // Không có động từ ⇒ không có đơn vị (renderer in "has" / nhãn máy)
     expect(unit(`entities[id=${E.id}].relation_verbs`)).toBeUndefined()
+  })
+
+  it("attributes là một đơn vị mảng chữ (tên rồi mô tả); ghi lại giữ kind / required", () => {
+    const attributes = [
+      { name: "email", kind: "key", required: true, description: "Sign-in address" },
+      { name: "avatar", kind: "plain", required: false }
+    ]
+    const units = translationUnits(variant((s) => (s.entities[0].attributes = attributes as never)))
+    expect(units.find((u) => u.key === `entities[id=${E.id}].attributes`)?.value).toEqual(["email", "Sign-in address", "avatar"])
+    const owner: Record<string, unknown> = { attributes: structuredClone(attributes) }
+    expect(readUnitField(owner, "attributes")).toEqual(["email", "Sign-in address", "avatar"])
+    writeUnitField(owner, "attributes", ["thư điện tử", "Địa chỉ đăng nhập", "ảnh đại diện"])
+    expect(owner.attributes).toEqual([
+      { name: "thư điện tử", kind: "key", required: true, description: "Địa chỉ đăng nhập" },
+      { name: "ảnh đại diện", kind: "plain", required: false }
+    ])
   })
 
   it("đọc / ghi field bảng giữ khoá, thay chữ theo thứ tự khoá đã sắp", () => {

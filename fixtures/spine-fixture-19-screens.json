@@ -1716,6 +1716,34 @@
         "E02",
         "E05",
         "E07"
+      ],
+      "attributes": [
+        {
+          "name": "email",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "display name",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "avatar",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "account status",
+          "kind": "plain",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F1",
+        "F2",
+        "F5",
+        "F6"
       ]
     },
     {
@@ -1725,6 +1753,38 @@
       "relations": [
         "E03",
         "E04"
+      ],
+      "attributes": [
+        {
+          "name": "project name",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "domain",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "mode",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "folder",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F2",
+        "F3",
+        "F4"
       ]
     },
     {
@@ -1736,13 +1796,59 @@
         "E09",
         "E11",
         "E12"
+      ],
+      "attributes": [
+        {
+          "name": "spine version",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "completion",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "last saved at",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "project",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3",
+        "F4"
       ]
     },
     {
       "id": "E04",
       "name": "ChatSession",
       "description": "A conversation thread; exactly one per project is the pipeline session.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "session code",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "reply language",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "project",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3"
+      ]
     },
     {
       "id": "E05",
@@ -1750,6 +1856,27 @@
       "description": "Append-only credit transactions with running balance.",
       "relations": [
         "E10"
+      ],
+      "attributes": [
+        {
+          "name": "balance",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "last top-up at",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5",
+        "F6"
       ]
     },
     {
@@ -1758,43 +1885,196 @@
       "description": "The plan attached to an account with its renewal window.",
       "relations": [
         "E01"
+      ],
+      "attributes": [
+        {
+          "name": "plan",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "renewal date",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "subscriber",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5",
+        "F6"
       ]
     },
     {
       "id": "E07",
       "name": "Notification",
       "description": "An in-app message with read state.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "title",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "message",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "read at",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "recipient",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5"
+      ]
     },
     {
       "id": "E08",
       "name": "Baseline",
       "description": "A signed snapshot of the Spine with version and waiver count.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "baseline label",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "signed at",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "spine",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F4"
+      ]
     },
     {
       "id": "E09",
       "name": "ChangeRecord",
       "description": "One applied op with before-value, transaction id and sequence.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "sequence",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "changed by",
+          "kind": "reference",
+          "required": true
+        },
+        {
+          "name": "spine",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3",
+        "F4"
+      ]
     },
     {
       "id": "E10",
       "name": "UsageRecord",
       "description": "One model call with tokens, cost and reservation state.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "usage code",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "credits used",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "ledger",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5"
+      ]
     },
     {
       "id": "E11",
       "name": "Flag",
       "description": "A deterministic-check finding with level, rule and waiver state.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "rule",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "level",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "waived reason",
+          "kind": "plain",
+          "required": false
+        }
+      ],
+      "feature_ids": [
+        "F3",
+        "F4"
+      ]
     },
     {
       "id": "E12",
       "name": "Diagram",
       "description": "A rendered PlantUML artifact with source hash and status.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "diagram code",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "kind",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "render status",
+          "kind": "plain",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3"
+      ]
     }
   ],
   "functions": [

@@ -14,6 +14,7 @@
 
 import { createHash } from "node:crypto"
 import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
+import { entitiesOfFeature } from "./entity-features.js"
 import { screenActorMap } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
@@ -61,15 +62,34 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
       }
     case "erd":
       return {
-        entities: byId(spine.entities).map(({ id, name, relations, relation_verbs, relation_cardinality, relation_optional }) => ({
+        entities: byId(spine.entities).map(({ id, name, relations, relation_verbs, relation_cardinality, relation_optional, attributes }) => ({
           id,
           name,
+          // ERD vẽ khoá (PK / FK) và tên thuộc tính; vắng / rỗng ⇒ undefined (bị bỏ khỏi chuỗi hash): hình cũ không stale
+          attributes: attributes?.length ? attributes.map((a) => ({ name: a.name, kind: a.kind })) : undefined,
           relations,
           relation_verbs: relation_verbs ?? {},
           relation_cardinality: relation_cardinality ?? {},
           relation_optional: relation_optional ?? []
         }))
       }
+    case "class": {
+      // Một hình = một feature (`owner_id`). Chỉ quan hệ giữa các entity cùng hình được vẽ
+      const members = entitiesOfFeature(spine, diagram.owner_id)
+      const ids = new Set(members.map((e) => e.id))
+      return {
+        feature: spine.features.find((f) => f.id === diagram.owner_id)?.name ?? null,
+        entities: members.map(({ id, name, attributes, relations, relation_verbs, relation_cardinality, relation_optional }) => ({
+          id,
+          name,
+          attributes: (attributes ?? []).map(({ name: n, kind, required }) => ({ name: n, kind, required })),
+          relations: relations.filter((r) => ids.has(r)),
+          relation_verbs: relation_verbs ?? {},
+          relation_cardinality: relation_cardinality ?? {},
+          relation_optional: relation_optional ?? []
+        }))
+      }
+    }
     case "screen_layout": {
       const screen = spine.screens.find((s) => s.id === diagram.owner_id)
       return {
@@ -111,6 +131,7 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   usecase: "svg@1",
   screen_flow: "svg@1",
   erd: "svg@1",
+  class: "svg@1",
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
 

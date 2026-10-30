@@ -290,6 +290,29 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks[1]).toMatchObject({ type: "table" })
   })
 
+  it("feature:<id> — class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
+    const base = spine()
+    const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram — Authentication</title></svg>'
+    const withClass: Spine = {
+      ...base,
+      diagrams: [
+        ...base.diagrams,
+        { id: "D06", kind: "class", section: "feature:F1", owner_kind: "feature", owner_id: "F1", format: "svg", source: svg, render_status: "ok", source_hash: "h6", rendered_at: "2026-09-01T00:00:00.000Z" },
+        { id: "D07", kind: "class", section: "feature:F2", owner_kind: "feature", owner_id: "F2", format: "svg", source: svg, render_status: "error", source_hash: "h7", rendered_at: "2026-09-01T00:00:00.000Z" }
+      ]
+    }
+    const png = (id: string) => `png-${id}`
+    const fpt = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", diagramPng: png }))
+    expect(fpt.blocks).toEqual([{ type: "image", png: "png-D06", caption: "Class Diagram — Authentication" }])
+    const mode1 = renderSection(withClass, "feature:F1", ctx({ number: "3.2", diagramPng: png }))
+    expect(mode1.blocks[0]).toMatchObject({ type: "image", png: "png-D06" })
+    expect(mode1.blocks.length).toBeGreaterThan(1)
+    // hình lỗi không in; feature khác không lấy hình của feature này
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", diagramPng: png })).blocks).toEqual([])
+    const vi = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", language: "vi", diagramPng: png }))
+    expect(vi.blocks[0]).toMatchObject({ caption: "Sơ đồ lớp — Authentication" })
+  })
+
   it("fixed:4.2.2 — bảng nfr có metric/threshold", () => {
     const section = renderSection(spine(), "fixed:4.2.2", ctx({ number: "4.2.2" }))
     expect(section.blocks).toEqual([

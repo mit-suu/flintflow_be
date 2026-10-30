@@ -82,7 +82,7 @@ const elementPath = (group: Exclude<TranslationGroup, "project">, id: string): s
  */
 export const DIAGRAM_TEXT_FIELDS: Readonly<Partial<Record<SrsTextGroup, readonly string[]>>> = {
   actors: ["flows_in", "flows_out"],
-  entities: ["relation_verbs"],
+  entities: ["relation_verbs", "attributes"],
   // nhãn trên cạnh luồng màn: `flow_to[].trigger` / `.guard` (đơn vị là mảng chữ theo thứ tự `to`, xem `flowTexts`)
   screens: ["flow_to"]
 }
@@ -95,12 +95,31 @@ const RECORD_FIELDS: ReadonlySet<string> = new Set(["relation_verbs"])
 
 const FLOW_FIELD = "flow_to"
 
+/** `entities[].attributes`: một đơn vị mảng chữ theo thứ tự thuộc tính — tên rồi mô tả (cái nào có). */
+const ATTRIBUTE_FIELD = "attributes"
+
 const byTarget = (edges: readonly Row[]): Row[] => [...edges].sort((a, b) => (String(a.to) < String(b.to) ? -1 : String(a.to) > String(b.to) ? 1 : 0))
 const textOf = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null)
 
 /** Chữ hiển thị của các cạnh `flow_to`: theo thứ tự `to`, mỗi cạnh trigger rồi guard (cái nào có). */
 const flowTexts = (edges: readonly unknown[]): string[] =>
   byTarget(edges.filter(isRow)).flatMap((e) => [textOf(e.trigger), textOf(e.guard)].filter((t): t is string => t !== null))
+
+/** Chữ hiển thị của các thuộc tính entity: theo thứ tự mảng, mỗi thuộc tính tên rồi mô tả (cái nào có). */
+const attributeTexts = (attributes: readonly unknown[]): string[] =>
+  attributes.filter(isRow).flatMap((a) => [textOf(a.name), textOf(a.description)].filter((t): t is string => t !== null))
+
+/** Ghi lại chữ dịch (theo thứ tự `attributeTexts` của `current`) vào đúng tên / mô tả; giữ `kind`, `required` và thứ tự. */
+const writeAttributeTexts = (current: readonly unknown[], text: readonly string[]): unknown[] => {
+  let i = 0
+  return current.map((a) => {
+    if (!isRow(a)) return a
+    const patch: Row = {}
+    if (textOf(a.name) !== null) patch.name = text[i++]
+    if (textOf(a.description) !== null) patch.description = text[i++]
+    return { ...a, ...patch }
+  })
+}
 
 /** Ghi lại chữ dịch (theo thứ tự `flowTexts` của `current`) vào đúng trigger / guard; giữ thứ tự và `to` của cạnh. */
 const writeFlowTexts = (current: readonly unknown[], text: readonly string[]): unknown[] => {
@@ -120,6 +139,7 @@ const sortedKeys = (record: Row): string[] => Object.keys(record).sort((a, b) =>
 /** Giá trị đơn vị của field: bảng ⇒ mảng chữ theo khoá đã sắp; còn lại giữ nguyên. */
 const unitFieldValue = (field: string, raw: unknown): unknown => {
   if (field === FLOW_FIELD && Array.isArray(raw)) return flowTexts(raw)
+  if (field === ATTRIBUTE_FIELD && Array.isArray(raw)) return attributeTexts(raw)
   return RECORD_FIELDS.has(field) && isRow(raw) ? sortedKeys(raw).map((key) => raw[key]) : raw
 }
 
@@ -134,6 +154,14 @@ const localizedFieldValue = (field: string, enRaw: unknown, locRaw: unknown): un
       return [textOf(e.trigger) !== null ? (l?.trigger ?? "") : null, textOf(e.guard) !== null ? (l?.guard ?? "") : null].filter((t): t is string => t !== null)
     })
   }
+  if (field === ATTRIBUTE_FIELD && Array.isArray(enRaw)) {
+    // Bản dịch giữ thuộc tính theo thứ tự: lấy tên / mô tả cùng vị trí, theo đúng thứ tự chữ của bản gốc
+    if (!Array.isArray(locRaw) || locRaw.length !== enRaw.length) return undefined
+    return enRaw.flatMap((a, i) => {
+      const l = isRow(locRaw[i]) ? locRaw[i] : {}
+      return isRow(a) ? [textOf(a.name) !== null ? (l.name ?? "") : null, textOf(a.description) !== null ? (l.description ?? "") : null].filter((t) => t !== null) : []
+    })
+  }
   if (!RECORD_FIELDS.has(field) || !isRow(enRaw)) return locRaw
   return isRow(locRaw) ? sortedKeys(enRaw).map((key) => locRaw[key]) : undefined
 }
@@ -146,6 +174,10 @@ export const writeUnitField = (owner: Row, field: string, text: UnitValue): void
   const current = owner[field]
   if (field === FLOW_FIELD && Array.isArray(current) && Array.isArray(text)) {
     owner[field] = writeFlowTexts(current, text)
+    return
+  }
+  if (field === ATTRIBUTE_FIELD && Array.isArray(current) && Array.isArray(text)) {
+    owner[field] = writeAttributeTexts(current, text)
     return
   }
   owner[field] = RECORD_FIELDS.has(field) && isRow(current) && Array.isArray(text)

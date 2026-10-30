@@ -152,6 +152,16 @@ const permissionSchema = new Schema(
   opts
 )
 
+const entityAttributeSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    kind: { type: String, enum: ["key", "reference", "plain"], required: true },
+    required: { type: Boolean, required: true },
+    description: { type: String }
+  },
+  opts
+)
+
 const entitySchema = new Schema(
   {
     id: { type: String, required: true },
@@ -161,7 +171,9 @@ const entitySchema = new Schema(
     relation_verbs: { type: Schema.Types.Mixed, default: undefined },
     relation_cardinality: { type: Schema.Types.Mixed, default: undefined },
     relation_optional: { type: [String], default: undefined },
-    root: { type: Boolean, default: undefined }
+    root: { type: Boolean, default: undefined },
+    attributes: { type: [entityAttributeSchema], default: undefined },
+    feature_ids: { type: [String], default: undefined }
   },
   opts
 )
@@ -306,7 +318,7 @@ const diagramSchema = new Schema(
     id: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["context", "usecase", "screen_flow", "erd", "screen_layout"],
+      enum: ["context", "usecase", "screen_flow", "erd", "class", "screen_layout"],
       required: true
     },
     format: { type: String, enum: ["puml", "svg"], default: "puml" },

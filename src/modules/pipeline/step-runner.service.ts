@@ -38,7 +38,7 @@ import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
 import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
-import type { RenderTarget } from "../diagram/renderers/index.js"
+import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
@@ -1152,9 +1152,10 @@ export const runRenderReviewPhase = async (
   const staleTargets: RenderTarget[] = []
   for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : []) {
     if (alreadyRendered.has(diagram.kind)) continue
-    const key = `${diagram.kind}:${diagram.owner_id ?? ""}`
+    const target = targetOfDiagram(diagram)
+    const key = `${target.kind}:${target.owner_id ?? ""}`
     if (staleTargets.some((t) => `${t.kind}:${t.owner_id ?? ""}` === key)) continue
-    staleTargets.push({ kind: diagram.kind, owner_id: diagram.owner_id })
+    staleTargets.push(target)
   }
   if (staleTargets.length > 0) {
     const before = new Map(spineAfterDraft.diagrams.map((d) => [d.id, d]))
