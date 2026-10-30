@@ -1,7 +1,7 @@
 ---
 skill_id: screens-and-flow
 kind: content
-version: 0.6.2
+version: 0.7.0
 description: "S-4.1–S-4.2 feature & screen inventory (fixes N and screen_queue), screens flow"
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -79,9 +79,12 @@ the class management function). Every use case of a human actor ends this batch 
 ## S-4.2 — Flow
 
 Set `flow_to[]`, `is_popup` and `tabs[]` on screens that already exist — **never add a screen here**.
-`flow_to` lists screens reachable by a deliberate navigation (button, link, redirect after success). Not:
-the browser back button, a global nav bar present everywhere, or an error toast. This step sees only
-`features` and `screens`: read each screen's actor(s) from its `description` (named at S-4.1).
+`flow_to` lists edges `{ "to": "<screen id>", "trigger": "<user action>", "guard": "<condition>" }` for deliberate navigation
+(button, link, redirect after success) — not the back button, a global nav bar or an error toast. Read each screen's actor(s)
+from its `description`. **Every edge has a `trigger`**: a short verb phrase as on the button (`Click Register`, `Submit
+credentials`), drawn as the arrow's label. **`guard` only when one action leads to different screens by a condition**
+(`OTP valid`): give those edges the SAME `trigger` and a `guard` on all but at most one (that one is drawn `[else]`). No
+brackets in `guard`; one edge per target. Write with `add` `screens[id=…].flow_to[]` or `set` the array of edges.
 
 **Journey shape — one tree per human actor, rooted at Login:**
 1. **Login is the root.** If users sign in, Login is the first screen of every signed-in actor's journey;
@@ -137,13 +140,10 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 ## Self-check
 
 - [ ] Every screen has a `feature_id` that exists, and every feature has at least one screen.
-- [ ] Auth, admin, settings, notifications screens are present or explicitly out of scope; an error page
-      exists only with a named screen leading to it.
-- [ ] Exactly 3–5 screens are `pending`; every other screen is `placeholder` with an assumption.
-- [ ] `queue_order` is unique and starts at 1; `progress.screen_queue` lists every screen in that order.
+- [ ] Auth, admin, settings, notifications screens are present or out of scope; an error page only with a named screen leading to it.
+- [ ] Exactly 3–5 screens are `pending`, the rest `placeholder` with an assumption; `queue_order` is unique from 1 and `progress.screen_queue` lists every screen in that order.
 - [ ] Every screen has ≥ 1 function (unique `order` in its feature) and a `primary_function_id`; every human actor's use case lists ≥ 1 function.
-- [ ] Every screen is used by at least one human actor; no screen exists for a `system`/`time` actor.
-- [ ] S-4.2 only sets `flow_to`/`is_popup`/`tabs` (or removes an unplaceable orphan); every id in `flow_to` exists.
-- [ ] Login's only incoming edge is `Register → Login`; Login links to each actor's landing.
-- [ ] Per actor, every screen is reachable from Login via landing → feature; every popup has an opener.
+- [ ] Every screen is used by a human actor (none for a `system`/`time` actor); S-4.2 never adds a screen.
+- [ ] S-4.2 sets only `flow_to`/`is_popup`/`tabs`; every `flow_to[].to` exists and has a `trigger`; `guard` only on branches of one shared trigger.
+- [ ] Login's only incoming edge is `Register → Login`, it links to each actor's landing; every screen is reachable from it, every popup has an opener.
 - [ ] No pair A ⇄ B in `flow_to`: every return edge (to login, list, hub, opener) is removed.

@@ -162,6 +162,13 @@ export class Scene {
     return this.push({ type: "ellipse", id, name: opts.name ?? id, role: "shape", layer: 0, cx, cy, rx, ry, fill, dashed: opts.dashed ?? false, container: opts.container ?? false })
   }
 
+  /** Đa giác lồi đóng kín là một hình (decision node của activity diagram…): chữ / đường không được xuyên vào trong. */
+  polygon(id: string, pts: Point[], opts: ShapeOptions = {}): string {
+    if (pts.length < 3) throw new Error(`svg-scene: đa giác ${id} cần ít nhất 3 đỉnh`)
+    const fill = color(opts.fill, FILL)
+    return this.push({ type: "path", id, name: opts.name ?? id, role: "shape", layer: 0, points: pts, closed: true, fill, dashed: opts.dashed ?? false })
+  }
+
   /** Đường nối thẳng a → b. */
   line(id: string, a: Point, b: Point, opts: { name?: string; dashed?: boolean } = {}): string {
     return this.polyline(id, [a, b], opts)
@@ -220,6 +227,24 @@ export class Scene {
     return this.push({ type: "text", id, name: text, role: "text", owner: lineId, layer: 1, x: at[0], y: at[1], text, size, bold: false, italic: false, anchor: "middle", baseline: "central", rotate })
   }
 
+  /**
+   * Nhãn nhiều dòng (ngang) trên / cạnh đường `lineId`, tâm tại `at`, nền trắng. Dòng đầu mang id `<lineId>#label`, dòng
+   * thứ i mang `<lineId>#label-<i>`. Nhãn vẽ ở lớp trên cùng.
+   */
+  labelBlock(lineId: string, lines: readonly string[], at: Point, opts: { size?: number; lineHeight?: number } = {}): string[] {
+    const line = this.connector(lineId)
+    if (lines.length === 0) throw new Error(`svg-scene: nhãn của ${lineId} không có dòng nào`)
+    const size = opts.size ?? 13
+    const lh = opts.lineHeight ?? size + 4
+    const w = Math.max(...lines.map((l) => textWidth(l, size))) + 8
+    const h = lines.length * lh + 4
+    const id = `${lineId}#label`
+    this.push({ type: "rect", id: `${id}-bg`, name: `${line.name} (nền nhãn)`, role: "decoration", owner: lineId, layer: 1, x: at[0] - w / 2, y: at[1] - h / 2, w, h, fill: PAPER, dashed: false, container: false, rotate: 0, radius: 0 })
+    return lines.map((text, i) =>
+      this.push({ type: "text", id: i === 0 ? id : `${id}-${i}`, name: text, role: "text", owner: lineId, layer: 1, x: at[0], y: at[1] + (i - (lines.length - 1) / 2) * lh, text, size, bold: false, italic: false, anchor: "middle", baseline: "central", rotate: 0 })
+    )
+  }
+
   /** Đầu mũi tên ở `end` của đường (`"end"` = điểm cuối, `"start"` = điểm đầu). */
   arrow(lineId: string, style: ArrowHead, end: "end" | "start" = "end"): string {
     const pts = this.connector(lineId).points
@@ -273,7 +298,7 @@ const markup = (el: SceneElement): string => {
         ? `<circle cx="${num(el.cx)}" cy="${num(el.cy)}" r="${num(el.rx)}" fill="${el.fill}"${strokeAttrs(el.dashed)}/>`
         : `<ellipse cx="${num(el.cx)}" cy="${num(el.cy)}" rx="${num(el.rx)}" ry="${num(el.ry)}" fill="${el.fill}"${strokeAttrs(el.dashed)}/>`
     case "path":
-      if (el.closed) return `<polygon points="${points(el.points)}" fill="${el.fill}"${strokeAttrs(false, 0.8)} stroke-linejoin="miter"/>`
+      if (el.closed) return `<polygon points="${points(el.points)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.role === "shape" ? STROKE : 0.8)} stroke-linejoin="miter"/>`
       if (el.points.length === 2) {
         const [a, b] = el.points
         return `<line x1="${num(a[0])}" y1="${num(a[1])}" x2="${num(b[0])}" y2="${num(b[1])}"${strokeAttrs(el.dashed)}/>`

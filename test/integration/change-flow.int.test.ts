@@ -214,7 +214,7 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
     expect(fn.abnormal).toHaveLength(1)
     expect(fn.validations[0].id).toBe(`${fn.id}-V1`)
     expect(screen).toMatchObject({ detail_status: "signed_off", primary_function_id: fn.id, feature_id: "F3" })
-    expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).toContain(screen.id)
     expect(spine.permissions.some((p) => p.screen_id === screen.id && p.role_id === "R2")).toBe(true)
     expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
   })
@@ -277,7 +277,7 @@ describe("FLF-311 — thêm use case kéo theo chức năng, màn, luồng, phâ
     const after = (await api.get("/spine")).body.data
     expect(after.screens.some((s: { id: string }) => s.id === fn.screen_id)).toBe(false)
     expect(after.permissions.some((p: { screen_id: string }) => p.screen_id === fn.screen_id)).toBe(false)
-    expect(after.screens.find((s: { id: string }) => s.id === "S07").flow_to).not.toContain(fn.screen_id)
+    expect(after.screens.find((s: { id: string }) => s.id === "S07").flow_to.map((e: { to: string }) => e.to)).not.toContain(fn.screen_id)
     expect((await api.get("/progress")).body.data.readiness.stale).toBe(staleBefore)
     const signed = await api.post("/baseline", { base_version: await api.version() })
     expect(signed.status, JSON.stringify(signed.body.error ?? signed.body.meta)).toBe(201)

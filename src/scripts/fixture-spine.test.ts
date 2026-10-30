@@ -159,7 +159,7 @@ describe("spine-fixture-19-screens: 8 bất biến srs-spine.md §6", () => {
     }
     for (const s of spine.screens) {
       expect(featuresById[s.feature_id], s.id).toBeTruthy()
-      for (const t of s.flow_to) expect(screensById[t], `${s.id}→${t}`).toBeTruthy()
+      for (const { to: t } of s.flow_to) expect(screensById[t], `${s.id}→${t}`).toBeTruthy()
       expect(fnsById[s.primary_function_id], s.id).toBeTruthy()
     }
     for (const p of spine.permissions) {

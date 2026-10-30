@@ -15,7 +15,8 @@
  * Nút: action (chữ nhật bo góc) = màn; pop-up = action có stereotype `<<pop-up>>`; màn nhiều tab = action có dòng
  * `[tab | tab]` dưới tên. Mỗi màn vào (không có cạnh tiến vào) có một initial node, mỗi màn kết thúc (không có cạnh tiến ra
  * trong hình) có một activity final; cạnh `flow_to` trỏ sang feature khác không vẽ (màn đích không nằm trong hình này).
- * Cạnh quay lại màn trước không vẽ — điều hướng quay lại là ngầm định. Chưa có decision node / guard: Spine chưa có dữ liệu.
+ * Cạnh quay lại màn trước không vẽ — điều hướng quay lại là ngầm định. `flow_to[].trigger` là nhãn trên cạnh; màn có ≥ 2 cạnh
+ * ra mà một cạnh có `guard` thì rẽ nhánh qua decision node, guard in `[guard]` trên từng nhánh, nhánh không guard là `[else]`.
  * Hình không vẽ tiêu đề; `<title>` của SVG là chú thích (`section-renderer`).
  */
 
@@ -25,7 +26,7 @@ import type { Screen, Spine } from "../../spine/spine.types.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { byId, compareIds, svgPart } from "./common.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
-import { layoutScreenFlow, planFlow, type FlowDiagram, type FlowLane } from "./screen-flow-layout.js"
+import { layoutScreenFlow, planFlow, type FlowDiagram, type FlowEdgeInput, type FlowLane } from "./screen-flow-layout.js"
 
 export const MAX_SCREENS_PER_DIAGRAM = 25
 export const SCREEN_FLOW_SECTION = "fixed:3.1.1"
@@ -51,7 +52,9 @@ const groupByFeature = (spine: Spine, screens: Screen[], labels: DiagramLabels):
   return groups.map((g) => ({ ...g, screens: [...g.screens].sort(byQueueOrder) }))
 }
 
-const flowsOf = (screens: readonly Screen[]): [string, string][] => screens.flatMap((s) => s.flow_to.map((to): [string, string] => [s.id, to]))
+const flowsOf = (screens: readonly Screen[]): [string, string][] => screens.flatMap((s) => s.flow_to.map((e): [string, string] => [s.id, e.to]))
+const labelledFlowsOf = (screens: readonly Screen[]): FlowEdgeInput[] =>
+  screens.flatMap((s) => s.flow_to.map((e) => ({ from: s.id, to: e.to, ...(e.trigger ? { trigger: e.trigger } : {}), ...(e.guard ? { guard: e.guard } : {}) })))
 const popupsOf = (screens: readonly Screen[]): Set<string> => new Set(screens.filter((s) => s.is_popup).map((s) => s.id))
 
 /** Cắt `screens` (đã theo thứ tự ưu tiên) thành `parts` phần đều nhau theo hạng trong luồng, rồi trả lại thứ tự ưu tiên trong từng phần. */
@@ -86,8 +89,9 @@ export const partitionScreenFlow = (spine: Spine, labels: DiagramLabels = DIAGRA
     return {
       lanes: flowLanes,
       nodes: screens.map((s) => ({ id: s.id, name: s.name, lane: linked ? laneIds.indexOf(lanes.get(s.id)!.actorId) : 0, popup: s.is_popup, tabs: s.tabs })),
-      edges: flowsOf(screens),
-      popupLabel: labels.popup
+      edges: labelledFlowsOf(screens),
+      popupLabel: labels.popup,
+      elseLabel: labels.elseGuard
     }
   }
   const fits = (screens: Screen[]): boolean => checkScene(layoutScreenFlow(diagramOf(screens)), { allowBends: true }).length === 0

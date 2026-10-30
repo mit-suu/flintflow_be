@@ -82,7 +82,9 @@ const elementPath = (group: Exclude<TranslationGroup, "project">, id: string): s
  */
 export const DIAGRAM_TEXT_FIELDS: Readonly<Partial<Record<SrsTextGroup, readonly string[]>>> = {
   actors: ["flows_in", "flows_out"],
-  entities: ["relation_verbs"]
+  entities: ["relation_verbs"],
+  // nhãn trên cạnh luồng màn: `flow_to[].trigger` / `.guard` (đơn vị là mảng chữ theo thứ tự `to`, xem `flowTexts`)
+  screens: ["flow_to"]
 }
 
 /** Field chữ của một nhóm cho lớp bản dịch: danh sách dùng chung rồi field chỉ có trên sơ đồ. */
@@ -91,14 +93,47 @@ const unitFields = (group: SrsTextGroup): readonly string[] => [...SRS_TEXT_FIEL
 /** Field dạng bảng `id đích → chữ` — một đơn vị là MẢNG chữ theo khoá đã sắp. */
 const RECORD_FIELDS: ReadonlySet<string> = new Set(["relation_verbs"])
 
+const FLOW_FIELD = "flow_to"
+
+const byTarget = (edges: readonly Row[]): Row[] => [...edges].sort((a, b) => (String(a.to) < String(b.to) ? -1 : String(a.to) > String(b.to) ? 1 : 0))
+const textOf = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null)
+
+/** Chữ hiển thị của các cạnh `flow_to`: theo thứ tự `to`, mỗi cạnh trigger rồi guard (cái nào có). */
+const flowTexts = (edges: readonly unknown[]): string[] =>
+  byTarget(edges.filter(isRow)).flatMap((e) => [textOf(e.trigger), textOf(e.guard)].filter((t): t is string => t !== null))
+
+/** Ghi lại chữ dịch (theo thứ tự `flowTexts` của `current`) vào đúng trigger / guard; giữ thứ tự và `to` của cạnh. */
+const writeFlowTexts = (current: readonly unknown[], text: readonly string[]): unknown[] => {
+  const next = new Map<string, Row>()
+  let i = 0
+  for (const e of byTarget(current.filter(isRow))) {
+    const patch: Row = {}
+    if (textOf(e.trigger) !== null) patch.trigger = text[i++]
+    if (textOf(e.guard) !== null) patch.guard = text[i++]
+    next.set(String(e.to), patch)
+  }
+  return current.map((e) => (isRow(e) ? { ...e, ...(next.get(String(e.to)) ?? {}) } : e))
+}
+
 const sortedKeys = (record: Row): string[] => Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 
 /** Giá trị đơn vị của field: bảng ⇒ mảng chữ theo khoá đã sắp; còn lại giữ nguyên. */
-const unitFieldValue = (field: string, raw: unknown): unknown =>
-  RECORD_FIELDS.has(field) && isRow(raw) ? sortedKeys(raw).map((key) => raw[key]) : raw
+const unitFieldValue = (field: string, raw: unknown): unknown => {
+  if (field === FLOW_FIELD && Array.isArray(raw)) return flowTexts(raw)
+  return RECORD_FIELDS.has(field) && isRow(raw) ? sortedKeys(raw).map((key) => raw[key]) : raw
+}
 
 /** Chữ dịch của field bảng, xếp theo khoá của bản GỐC — đúng vị trí `unitFieldValue(field, gốc)`. */
 const localizedFieldValue = (field: string, enRaw: unknown, locRaw: unknown): unknown => {
+  if (field === FLOW_FIELD && Array.isArray(enRaw)) {
+    // Bản dịch giữ cạnh theo `to`: lấy trigger / guard của cạnh cùng `to`, theo đúng thứ tự chữ của bản gốc
+    if (!Array.isArray(locRaw)) return undefined
+    const loc = new Map(locRaw.filter(isRow).map((e) => [String(e.to), e]))
+    return byTarget(enRaw.filter(isRow)).flatMap((e) => {
+      const l = loc.get(String(e.to))
+      return [textOf(e.trigger) !== null ? (l?.trigger ?? "") : null, textOf(e.guard) !== null ? (l?.guard ?? "") : null].filter((t): t is string => t !== null)
+    })
+  }
   if (!RECORD_FIELDS.has(field) || !isRow(enRaw)) return locRaw
   return isRow(locRaw) ? sortedKeys(enRaw).map((key) => locRaw[key]) : undefined
 }
@@ -109,6 +144,10 @@ export const readUnitField = (owner: Row, field: string): UnitValue | null => tr
 /** Ghi chữ dịch vào `owner[field]`; field bảng giữ nguyên khoá, thay chữ theo thứ tự khoá đã sắp. */
 export const writeUnitField = (owner: Row, field: string, text: UnitValue): void => {
   const current = owner[field]
+  if (field === FLOW_FIELD && Array.isArray(current) && Array.isArray(text)) {
+    owner[field] = writeFlowTexts(current, text)
+    return
+  }
   owner[field] = RECORD_FIELDS.has(field) && isRow(current) && Array.isArray(text)
     ? Object.fromEntries(sortedKeys(current).map((key, i) => [key, text[i]]))
     : text

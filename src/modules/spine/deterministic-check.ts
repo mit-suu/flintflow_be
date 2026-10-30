@@ -711,7 +711,7 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
   const actorsOf = screenActorMap(spine)
   const linked = hasScreenActorLinks(actorsOf)
   const ids = new Set(spine.screens.map((s) => s.id))
-  const edges = spine.screens.flatMap((s) => s.flow_to.filter((t) => ids.has(t) && t !== s.id).map((t) => [s.id, t] as const))
+  const edges = spine.screens.flatMap((s) => s.flow_to.filter((e) => ids.has(e.to) && e.to !== s.id).map((e) => [s.id, e.to] as const))
   const hasFlow = spine.screens.length > 1 && edges.length > 0
   const incoming = new Set(edges.map(([, to]) => to))
   const outgoing = new Set(edges.map(([from]) => from))

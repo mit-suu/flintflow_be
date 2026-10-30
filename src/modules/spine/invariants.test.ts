@@ -45,7 +45,7 @@ describe("invariants", () => {
   })
 
   it("3 — chỉ báo khoá chết MỚI", () => {
-    const broken = variant((s) => (s.screens[0].flow_to = [...s.screens[0].flow_to, "S99"]))
+    const broken = variant((s) => (s.screens[0].flow_to = [...s.screens[0].flow_to, { to: "S99" }]))
     expect(rulesOf(broken)).toEqual(["invariant_3_dead_reference"])
     // lỗi đã có từ trước: sửa chỗ khác vẫn được
     const stillBroken = structuredClone(broken)
