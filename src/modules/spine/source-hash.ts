@@ -16,6 +16,7 @@ import { createHash } from "node:crypto"
 import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
 import { screenActorMap } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
+import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
 export const UNHASHED_SOURCE_HASHES: ReadonlySet<string> = new Set(["", "TBD"])
@@ -109,7 +110,7 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   context: DEFAULT_DIAGRAM_ENGINE,
   usecase: "svg@1",
   screen_flow: "svg@1",
-  erd: DEFAULT_DIAGRAM_ENGINE,
+  erd: "svg@1",
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
 
@@ -118,7 +119,9 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
  * ảnh gốc import đã lưu hash cũ sẽ báo `original_diagram_stale` giả). Use case chia hình theo feature: tên + thứ tự feature
  * và feature của các function mà use case tham chiếu; luồng màn chia hình theo feature của màn và xếp màn theo queue_order.
  */
-const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">): unknown => {
+const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">, context: RenderContext): unknown => {
+  // Ký pháp ERD nằm ở Project, không ở Spine: đổi ký pháp đổi hash ⇒ `diagram_stale` ⇒ vẽ lại
+  if (diagram.kind === "erd") return { notation: context.erdNotation ?? DEFAULT_ERD_NOTATION }
   const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
   if (diagram.kind === "screen_flow") return { screens: byId(spine.screens).map(({ id, feature_id, queue_order }) => ({ id, feature_id, queue_order })), features }
   if (diagram.kind !== "usecase") return undefined
@@ -134,9 +137,10 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">): unknown =
 export const renderedDiagramHash = (
   spine: Spine,
   diagram: Pick<Diagram, "kind" | "owner_id">,
-  engines: Readonly<Record<DiagramKind, string>> = DIAGRAM_ENGINES
+  engines: Readonly<Record<DiagramKind, string>> = DIAGRAM_ENGINES,
+  context: RenderContext = {}
 ): string => {
   const engine = engines[diagram.kind] ?? DEFAULT_DIAGRAM_ENGINE
   if (engine === DEFAULT_DIAGRAM_ENGINE) return computeSourceHash(spine, diagram)
-  return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram), extras: renderedExtras(spine, diagram) })).digest("hex")
+  return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram), extras: renderedExtras(spine, diagram, context) })).digest("hex")
 }

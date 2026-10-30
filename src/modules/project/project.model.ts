@@ -1,6 +1,7 @@
 import mongoose, { Schema, Document } from "mongoose"
 import { IMPORT_STATUSES, type ImportStatus } from "../import/import.state.js"
 import { USER_LOCALES, type UserLocale } from "../../shared/i18n/locale.js"
+import { DEFAULT_ERD_NOTATION, ERD_NOTATIONS, type ErdNotation } from "../../shared/diagram/erd-notation.js"
 
 export type ProjectStatus = "active" | "archived"
 
@@ -48,6 +49,8 @@ export interface IProject extends Document {
    * ⇒ đọc qua `documentLanguageOf` (`document-language.ts`), đừng đọc thẳng.
    */
   documentLanguage?: UserLocale
+  /** Ký pháp ERD của cả tài liệu (§3.1.5): `chen` | `crowsfoot` | `idef1x`. Không nằm trong Spine; dự án cũ chưa có field đọc là `chen` (mặc định schema). */
+  erdNotation: ErdNotation
   /** Thư mục chứa dự án (`modules/folder`); null = ngoài thư mục. */
   folderId: mongoose.Types.ObjectId | null
   /** Lần gần nhất user mở dự án (GET /projects/:id) — sắp xếp "Mới mở" trên dashboard. */
@@ -127,6 +130,11 @@ const projectSchema = new Schema<IProject>(
     documentLanguage: {
       type: String,
       enum: [...USER_LOCALES]
+    },
+    erdNotation: {
+      type: String,
+      enum: [...ERD_NOTATIONS],
+      default: DEFAULT_ERD_NOTATION
     },
     folderId: {
       type: Schema.Types.ObjectId,

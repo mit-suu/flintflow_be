@@ -14,6 +14,7 @@
  */
 
 import type { Spine } from "../spine/spine.types.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import type { DiagramSource } from "../diagram/localized-diagram.service.js"
 import { fitTranslation, readUnitField, writeUnitField, type TranslationUnit, type UnitRef, type UnitValue } from "../translation/translation-units.js"
 import { changedDiagramSources, localizeDiagrams } from "./localized-diagrams.js"
@@ -59,7 +60,8 @@ export const localizeSpine = (
   spine: Spine,
   units: readonly TranslationUnit[],
   translations: ReadonlyMap<string, UnitValue>,
-  language?: string
+  language?: string,
+  context: RenderContext = {}
 ): LocalizedSpine => {
   const view = structuredClone(spine)
   /** Nhãn wireframe đã dịch theo id sơ đồ: chữ gốc ⇒ chữ dịch. */
@@ -79,7 +81,7 @@ export const localizeSpine = (
     const text = source === null ? null : fitTranslation(source, translated)
     if (slot && text !== null) writeUnitField(slot.owner, slot.field, text)
   }
-  if (language) localizeDiagrams(spine, view, language, wireframeText)
+  if (language) localizeDiagrams(spine, view, language, wireframeText, context)
   return { [VIEW]: view }
 }
 

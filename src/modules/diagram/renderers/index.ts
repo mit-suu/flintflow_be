@@ -5,6 +5,7 @@
  */
 
 import type { Spine } from "../../spine/spine.types.js"
+import type { RenderContext } from "../../../shared/diagram/erd-notation.js"
 import { renderedDiagramHash } from "../../spine/source-hash.js"
 import type { DiagramKind, RenderedPart, Renderer } from "./common.js"
 import { byId } from "./common.js"
@@ -37,10 +38,10 @@ export interface RenderedDiagramPart extends RenderedPart {
   source_hash: string
 }
 
-export const renderKind = (spine: Spine, kind: DiagramKind, ownerId: string | null = null): RenderedDiagramPart[] =>
-  RENDERERS[kind](spine, ownerId).map((part) => ({
+export const renderKind = (spine: Spine, kind: DiagramKind, ownerId: string | null = null, context: RenderContext = {}): RenderedDiagramPart[] =>
+  RENDERERS[kind](spine, ownerId, undefined, context).map((part) => ({
     ...part,
-    source_hash: renderedDiagramHash(spine, { kind, owner_id: part.owner_id })
+    source_hash: renderedDiagramHash(spine, { kind, owner_id: part.owner_id }, undefined, context)
   }))
 
 /** Wireframe chỉ cho màn cốt lõi (`signed_off`) có primary function (Phases §7.2). */

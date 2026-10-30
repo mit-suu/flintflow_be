@@ -32,6 +32,8 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
 import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
 import { aiScreenLayout, noAiLayout, type DrawLayout } from "./screen-layout.ai.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
+import { loadRenderContext } from "./render-context.js"
 
 export const DIAGRAM_NOT_FOUND = "DIAGRAM_NOT_FOUND"
 /** Phases §4.1: compile-check → sửa → thử lại, tối đa 2 lần. */
@@ -57,6 +59,8 @@ export interface DiagramServiceDeps {
   fix: FixPuml
   /** Wireframe màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
   drawLayout: DrawLayout
+  /** Dữ liệu ngoài Spine cho hình (ký pháp ERD của dự án). */
+  renderContext: (projectId: string) => Promise<RenderContext>
   now: () => Date
 }
 
@@ -80,6 +84,7 @@ export const defaultDeps = (): DiagramServiceDeps => ({
   store: gridFsDiagramStore,
   fix: noAutoFix,
   drawLayout: noAiLayout,
+  renderContext: loadRenderContext,
   now: () => new Date()
 })
 
@@ -241,6 +246,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const deps: DiagramServiceDeps = { ...defaultDeps(), ...options.deps }
   const record = await loadSpine(projectId)
   const spine = stripRecord(record)
+  const context = await deps.renderContext(projectId)
   const nextId = nextIdFactory(spine.diagrams)
   const byExistingId = new Map(spine.diagrams.map((d) => [d.id, d]))
 
@@ -254,7 +260,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
 
   for (const target of targets) {
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
-    const parts = renderKind(spine, target.kind, target.owner_id)
+    const parts = renderKind(spine, target.kind, target.owner_id, context)
     const ids = assignIds(existing, parts.length, nextId)
 
     for (const [i, part] of parts.entries()) {
@@ -355,9 +361,10 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
   try {
     if (!(await isPlantUmlReachable())) return null
     const spine = stripRecord(await loadSpine(projectId))
+    const context = await loadRenderContext(projectId)
     const seen = new Set<string>()
     const targets: RenderTarget[] = [
-      ...staleRenderedDiagrams(spine).map((d) => ({ kind: d.kind, owner_id: d.owner_id })),
+      ...staleRenderedDiagrams(spine, context).map((d) => ({ kind: d.kind, owner_id: d.owner_id })),
       ...newScreenIds.map((id) => ({ kind: "screen_layout" as const, owner_id: id }))
     ].filter((t) => {
       const key = `${t.kind}|${t.owner_id ?? ""}`
@@ -374,16 +381,16 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
 }
 
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */
-export const staleDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== renderedDiagramHash(spine, d))
+export const staleDiagrams = (spine: Spine, context: RenderContext = {}): Diagram[] =>
+  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
 
 /**
  * Hình ĐÃ vẽ thành công nhưng dữ liệu nguồn đã đổi sau đó — đúng tập hợp mà luật cờ `diagram_stale` bắt.
  * Khác `staleDiagrams` ở chỗ bỏ qua hình chưa từng vẽ (hash rỗng/legacy): vẽ lại chúng tự động là đi làm
  * việc của step render, không phải sửa hậu quả của step vừa chạy (FLF-177 BUG-17).
  */
-export const staleRenderedDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== renderedDiagramHash(spine, d))
+export const staleRenderedDiagrams = (spine: Spine, context: RenderContext = {}): Diagram[] =>
+  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
 
 export const loadDiagramFile = async (
   projectId: string,

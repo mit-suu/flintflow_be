@@ -389,7 +389,7 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
 }
 
 const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
-  const blocks: Block[] = diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram")
+  const blocks: Block[] = diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram", svgCaption)
   if (spine.entities.length > 0) {
     const entityName = (id: string) => spine.entities.find((e) => e.id === id)?.name ?? id
     const lang = fptLanguage(ctx)
@@ -965,7 +965,7 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
       return [
         ...diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram", svgCaption),
         ...screensFlow(spine, ctx),
-        ...diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram")
+        ...diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram", svgCaption)
       ]
     default:
       throw new Error(`section-renderer: unknown content slot "${slotId}"`)

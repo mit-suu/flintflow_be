@@ -1,8 +1,8 @@
 ---
 skill_id: erd
 kind: renderer
-version: 1.1.0
-description: "S-4.5 Entity Relationship Diagram (Chen notation: entity + verb diamond)"
+version: 2.0.0
+description: "S-4.5 Entity Relationship Diagram (SVG built in code; Chen | Crow's foot | IDEF1X per project)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
@@ -15,43 +15,39 @@ reads:
   - "entities[].relation_optional"
 writes:
   - "diagrams[kind=erd]"
-output_schema: puml
+output_schema: none
 language: en
 stub: false
 ---
 # Erd
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/erd.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
+> The renderer is deterministic code: `src/modules/diagram/renderers/erd.renderer.ts` (data, splitting) and `erd-layout.ts` (notation drawing) on the shared grid placer / orthogonal router (`orthogonal-place.ts`, `orthogonal-route.ts`). There is no `puml` source, so `render_fix` never applies. This skill documents the output.
 
-- Step: S-4.5 Entity Relationship Diagram · Section: `fixed:3.1.5` · Output: `puml`
+- Step: S-4.5 Entity Relationship Diagram · Section: `fixed:3.1.5` · Output: `svg`
+- The notation is a **project setting** (`Project.erdNotation`: `chen` | `crowsfoot` | `idef1x`, default `chen`), not in the Spine. One notation per document. Changing it changes the diagram hash ⇒ the diagram is redrawn (`PATCH /projects/:id/erd-notation` redraws an existing ERD at once).
 
-## Output
+## Data → diagram
 
-- Chen notation: `@startchen` … `@endchen`, `skinparam monochrome true`, `skinparam ranksep 20` (each diamond adds a rank, so the default spacing makes deep parent–child chains very tall), `skinparam linetype ortho` (right-angle lines instead of crossing curves).
-- `entity "<name>" as <id> {` + `}` per entity. The braces are required, even when empty. Attributes are **not** drawn, because they are not `source_fields`.
-- For every `relations[]` entry that points to an existing entity, one diamond holding the verb:
-  - `relationship "<verb>" as R_<parent>_<child> {` + `}`
-  - `<parent> -<p>- R_<parent>_<child>` and `R_<parent>_<child> -<c>- <child>`, where `<p>` is `(0,1)`
-    when the child is in the parent's `relation_optional` and `1` otherwise, and `<c>` is
-    `relation_cardinality[<child id>]` (`1` for one-to-one), `N` when missing. Never `-0..1-`: it is a
-    syntax error in `@startchen`; the min–max form `(0,1)` is the valid one.
-  - `<verb>` is `relation_verbs[<child id>]`, or `has` when it is missing, so a diamond is never empty.
-- A Spine without entities yields a single placeholder entity.
+- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. Attributes are **not** in the Spine yet, so boxes have no attribute compartment (Chen: no ovals) until `entities[].attributes` exists; the drawing code for them is ready.
+- One relation per `relations[]` id that points to an existing entity, parent → child, id `<parent>><child>`:
+  - label = `relation_verbs[<child>]`, `has` when missing (never empty, never a flipped / passive verb — see `content/entities-erd`);
+  - parent end = `1`, or `0..1` when the child is in the parent's `relation_optional` (the child may exist without this parent);
+  - child end = `relation_cardinality[<child>]`: `N` many (default), `1` one. The minimum on the child side is not in the Spine, so it is drawn as 0.
+- Self relations and several relations between two entities are drawn (each its own line / diamond).
 
-## Example
+## Notations
 
-```
-@startchen
-skinparam monochrome true
-skinparam ranksep 20
-skinparam linetype ortho
-entity "Project" as E01 {
-}
-entity "Document Version" as E02 {
-}
-relationship "contains" as R_E01_E02 {
-}
-E01 -1- R_E01_E02
-R_E01_E02 -N- E02
-@endchen
-```
+| | Entity | Relation | Parent end | Child end |
+| --- | --- | --- | --- | --- |
+| Chen | rectangle | diamond with the verb; entity — diamond — entity | label `1`; single line | label `N` / `1`; **double line** when the child must have a parent (not optional), single when optional |
+| Crow's foot | rectangle, bold name | one line, verb on the line | `\|\|` one, `\|o` zero or one | crow's foot + ring `o{` zero or many, bar + ring `\|o` zero or one |
+| IDEF1X | rectangle (independent) / rounded (dependent) | dashed line = non-identifying (solid = identifying, not in the Spine yet), verb on the line | hollow diamond when optional | solid dot; `Z` beside it for one-to-one |
+
+All fills `#7ACFF5`, stroke / text black.
+
+## Layout (shared by the three notations)
+
+- Grid placement by parent → child rank; right-angle lines only (`allowBends`), straight when nothing is in the way, otherwise L / Z / U bends. No line through a shape or text, no overlapping lines (`checkScene` issues must be empty). Crossings are right-angle only.
+- More than 25 entities ⇒ split: connected components are packed into diagrams of ≤ 25; a larger component is cut in breadth-first order (relations across a cut are not drawn). Title `Entity Relationship Diagram (i/n)`; the first part keeps the original diagram id.
+- A diagram that fails the geometry check is split again; a single entity that cannot be routed yields `render_error`.
+- A Spine without entities yields one placeholder box.
