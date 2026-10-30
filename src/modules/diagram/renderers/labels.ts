@@ -30,6 +30,8 @@ export interface DiagramLabels {
   /** Guard của nhánh còn lại ở decision node (in `[else]`). */
   elseGuard: string
   noEntities: string
+  /** Tiêu đề hình ERD (kèm `(i/n)` khi tách) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
+  erdTitle: string
   /** Động từ trong hình thoi ERD khi quan hệ chưa có `relation_verbs`. */
   relationVerb: string
   /** Bảng function — hình bố cục màn khi chưa có wireframe. */
@@ -50,6 +52,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     popup: "pop-up",
     elseGuard: "else",
     noEntities: "No entities yet",
+    erdTitle: "Entity Relationship Diagram",
     relationVerb: "has",
     functionColumn: "Function",
     descriptionColumn: "Description",
@@ -66,6 +69,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     popup: "pop-up",
     elseGuard: "ngược lại",
     noEntities: "Chưa có thực thể",
+    erdTitle: "Sơ đồ quan hệ thực thể",
     relationVerb: "có",
     functionColumn: "Chức năng",
     descriptionColumn: "Mô tả",

@@ -26,9 +26,10 @@ stub: false
 ---
 # Entities And ERD
 
-Covers **S-4.5 Entity Relationship Diagram** — feeds `fixed:3.1.5`. The `erd` diagram (Chen notation: a
-rectangle per entity, a diamond holding a verb per relation) is rendered straight from `entities[]`,
-which is also the §3.1.5 table. `references/*.md` are **not loaded at runtime**; every rule is below.
+Covers **S-4.5 Entity Relationship Diagram** — feeds `fixed:3.1.5`. The `erd` diagram is rendered by code
+straight from `entities[]` in the notation the project chose (Chen, Crow's foot or IDEF1X — not your choice, never
+mentioned in ops): entity name in a box, each relation labelled with its verb, ends drawn from cardinality and
+`relation_optional`. `entities[]` is also the §3.1.5 table. `references/*.md` are **not loaded at runtime**; every rule is below.
 Work through the passes **in order**; skipping one produced the wrong ERDs listed near the end.
 
 ## Shape
@@ -41,7 +42,7 @@ Work through the passes **in order**; skipping one produced the wrong ERDs liste
   (§3.1.5 is a relationship map; field rules live in S-5.4 and S-7.1).
 - `root`: `true` only for master data that exists on its own (Pass 2). Omit it on every other entity.
 - `relations`: ids of this entity's **children** (the "many" side). Every id exists after this batch.
-- `relation_verbs`: one verb per id in `relations` — the word in the diamond.
+- `relation_verbs`: one verb per id in `relations` — the label of the relation on the diagram; it must read true parent → child.
 - `relation_cardinality`: `{"<child id>": "1"}` only for a proven one-to-one (Pass 3a); omitted = `N`.
 - `relation_optional`: child ids that can exist **without** this parent (Pass 3, step 2).
 

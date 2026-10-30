@@ -32,27 +32,18 @@ Engine `svg` (no PlantUML source): UML 2.5 Activity Diagram with swimlanes built
 
 ## `erd` — §3.1.5
 
-Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional`. Attributes are **not** drawn (not in source fields).
-Chen notation: entity = rectangle, each relation = a diamond holding a lowercase verb (`relation_verbs`, `has`
-when missing). Braces after `entity` / `relationship` are required even when empty.
+Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional` + the project's notation (`Project.erdNotation`, outside the Spine). Attributes are **not** drawn (not in source fields; boxes have no attribute compartment until FLF-325 adds `entities[].attributes`).
+Engine `svg` (no PlantUML source): built in code, fill `#7ACFF5`, one shared grid placer + right-angle router for all three notations (`erd.renderer.ts`, `erd-layout.ts`, `orthogonal-*.ts`). One notation per document: `chen` (default) · `crowsfoot` · `idef1x`. Changing it redraws the diagram (hash includes the notation).
 
-```plantuml
-@startchen
-skinparam monochrome true
-skinparam ranksep 20
-skinparam linetype ortho
-entity "User" as E1 {
-}
-entity "Project" as E2 {
-}
-relationship "owns" as R_E1_E2 {
-}
-E1 -1- R_E1_E2
-R_E1_E2 -N- E2
-@endchen
-```
+Data → diagram: entity = box with its singular-noun name; relation = parent → child, labelled by `relation_verbs` (`has` when missing). Parent end `1`, or `0..1` when the child is in `relation_optional`; child end `N` (many, default) or `1` per `relation_cardinality`, minimum drawn as 0.
 
-Cardinality labels on the lines: `-1-` one · `-N-` many · `-(0,1)-` optional one. The parent side is `1`, or `(0,1)` when the child is in `relation_optional` (never `-0..1-`: a syntax error in `@startchen`); the child side is `relation_cardinality[<child>]`, `N` when missing.
+| | Relation | Parent end | Child end |
+| --- | --- | --- | --- |
+| Chen | diamond holding the verb, entity — diamond — entity | label `1`, single line | label `N` / `1`; double line = total participation (child not optional) |
+| Crow's foot | one line, verb on the line | `\|\|` one · `\|o` zero or one | crow's foot + ring `o{` · bar + ring `\|o` for one |
+| IDEF1X | dashed line (non-identifying), verb on the line; entity rounded only when dependent | hollow diamond when optional | solid dot; `Z` for one-to-one |
+
+Lines: straight when clear, otherwise right-angle bends (L / Z / U); never over text or shapes, never overlapping; right-angle crossings only. More than 25 entities ⇒ split (connected components packed, a larger one cut breadth-first, relations across a cut not drawn), title `Entity Relationship Diagram (i/n)`, first part keeps the diagram id. Samples: `docs/diagram_guideline/erd/`.
 
 ## `screen_layout` — §3.x.y (core screens only, Phases §7.2)
 

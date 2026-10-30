@@ -168,7 +168,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
     expect(store.files.size).toBe(38)
-    expect((await loadDiagramFile(PROJECT, "D01", "svg", store)).contentType).toBe("image/svg+xml")
+    expect((await loadDiagramFile(PROJECT, "D05", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
     const again = await renderAll(PROJECT, { by: USER, deps })
@@ -178,13 +178,13 @@ describe("renderAll / renderDiagram qua op engine", () => {
   it(".puml không compile ⇒ render_status=error, không ném, cờ đỏ render_error", async () => {
     await seed()
     const { deps, store } = makeDeps(async () => render(false))
-    const result = await renderDiagram(PROJECT, "erd", null, { by: USER, deps })
-    expect(result.diagrams[0]).toMatchObject({ id: "D04", render_status: "error", error: "Syntax Error?" })
+    const result = await renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps })
+    expect(result.diagrams[0]).toMatchObject({ id: "D05", render_status: "error", error: "Syntax Error?" })
     expect(store.files.size).toBe(0)
-    await expect(loadDiagramFile(PROJECT, "D04", "svg", store)).rejects.toMatchObject({ statusCode: 404, code: "DIAGRAM_NOT_FOUND" })
+    await expect(loadDiagramFile(PROJECT, "D05", "svg", store)).rejects.toMatchObject({ statusCode: 404, code: "DIAGRAM_NOT_FOUND" })
 
     const flags = runDeterministicCheck((await repo.get(PROJECT))!)
-    expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D04", remediation_step: "S-4.5" }])
+    expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D05", remediation_step: "S-5.3@S07" }])
   })
 
   it("đổi tên actor ⇒ hình context, usecase + luồng màn (tên làn theo actor) stale ⇒ render lại chỉ các hình đó", async () => {
@@ -276,15 +276,45 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(forced.spine_version).toBe(2)
   })
 
+  it("ký pháp ERD của dự án (ngoài Spine): đổi ký pháp ⇒ hình ERD stale ⇒ vẽ lại ra hình mới, hash khớp, các hình khác giữ nguyên", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    let notation: "chen" | "crowsfoot" | "idef1x" = "chen"
+    const withNotation = { ...deps, renderContext: async () => ({ erdNotation: notation }) }
+    await renderAll(PROJECT, { by: USER, deps: withNotation })
+    const first = (await repo.get(PROJECT))!.diagrams.find((d) => d.kind === "erd")!
+    expect(first.source).toContain("<polygon") // hình thoi Chen
+
+    notation = "crowsfoot"
+    const spine = (await repo.get(PROJECT))!
+    expect(staleDiagrams(spine, { erdNotation: "crowsfoot" }).map((d) => d.kind)).toEqual(["erd"])
+    expect(staleRenderedDiagrams(spine, { erdNotation: "crowsfoot" }).map((d) => d.kind)).toEqual(["erd"])
+    expect(staleDiagrams(spine, { erdNotation: "chen" })).toEqual([])
+    // cờ đỏ diagram_stale theo ký pháp hiện tại của dự án
+    expect(runDeterministicCheck(spine, [], { erdNotation: "crowsfoot" }).filter((f) => f.rule_id === "diagram_stale").map((f) => f.target_id)).toEqual([first.id])
+    expect(runDeterministicCheck(spine).filter((f) => f.rule_id === "diagram_stale")).toEqual([])
+
+    const again = await renderDiagram(PROJECT, "erd", null, { by: USER, deps: withNotation })
+    expect(again.rendered).toEqual([first.id])
+    const redrawn = (await repo.get(PROJECT))!.diagrams.find((d) => d.kind === "erd")!
+    expect(redrawn.id).toBe(first.id)
+    expect(redrawn.source).not.toContain("<polygon")
+    expect(redrawn.source_hash).toBe(renderedDiagramHash(FIXTURE, { kind: "erd", owner_id: null }, undefined, { erdNotation: "crowsfoot" }))
+    expect(staleDiagrams((await repo.get(PROJECT))!, { erdNotation: "crowsfoot" })).toEqual([])
+
+    // không đổi ký pháp ⇒ lần vẽ kế tiếp không làm gì
+    expect((await renderDiagram(PROJECT, "erd", null, { by: USER, deps: withNotation })).rendered).toEqual([])
+  })
+
   it("hình chuyển sang lỗi ⇒ xoá file cũ; 409 khi ghi ⇒ không lưu file của lô thua", async () => {
     await seed()
     const { deps, store } = makeDeps()
-    await renderDiagram(PROJECT, "erd", null, { by: USER, deps })
+    await renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps })
     expect(store.files.size).toBe(2)
 
     const spine = (await repo.get(PROJECT))!
     const failing = { ...deps, check: vi.fn(async () => render(false)) }
-    await renderDiagram(PROJECT, "erd", null, { by: USER, deps: failing, force: true })
+    await renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps: failing, force: true })
     expect(store.files.size).toBe(0)
 
     // lô thua khoá lạc quan: dữ liệu nguồn đổi giữa lúc đọc và lúc ghi
@@ -293,7 +323,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
       current.spine_version = spine.spine_version + 10
       return render(true)
     })
-    await expect(renderDiagram(PROJECT, "erd", null, { by: USER, deps: loser.deps, force: true })).rejects.toMatchObject({ statusCode: 409 })
+    await expect(renderDiagram(PROJECT, "screen_layout", "S07", { by: USER, deps: loser.deps, force: true })).rejects.toMatchObject({ statusCode: 409 })
     expect(loser.store.files.size).toBe(0)
   })
 })

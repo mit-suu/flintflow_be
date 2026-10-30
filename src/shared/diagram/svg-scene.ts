@@ -26,7 +26,7 @@ interface Common {
 export type SceneElement =
   | (Common & { type: "rect"; x: number; y: number; w: number; h: number; fill: string; dashed: boolean; container: boolean; rotate: number; radius: number })
   | (Common & { type: "ellipse"; cx: number; cy: number; rx: number; ry: number; fill: string; dashed: boolean; container: boolean })
-  | (Common & { type: "path"; points: Point[]; closed: boolean; fill: string; dashed: boolean })
+  | (Common & { type: "path"; points: Point[]; closed: boolean; fill: string; dashed: boolean; /** Bề dày nét; thiếu ⇒ theo vai trò. */ stroke?: number })
   | (Common & { type: "text"; x: number; y: number; text: string; size: number; bold: boolean; anchor: Anchor; baseline: Baseline; rotate: number; italic: boolean })
 
 export interface ShapeOptions {
@@ -245,6 +245,18 @@ export class Scene {
     )
   }
 
+  /** Nét trang trí thuộc `owner` (ký hiệu đầu mút ER, đường chia ngăn trong hộp): không chịu luật đường / hình của `checkScene`, chỉ bị chữ của phần tử khác cắt qua. */
+  decoration(id: string, owner: string, pts: Point[], opts: { closed?: boolean; fill?: string } = {}): string {
+    if (pts.length < 2) throw new Error(`svg-scene: nét ${id} cần ít nhất 2 điểm`)
+    const closed = opts.closed ?? false
+    return this.push({ type: "path", id, name: id, role: "decoration", owner, layer: 0, points: pts, closed, fill: closed ? color(opts.fill, PAPER) : "none", dashed: false, stroke: STROKE })
+  }
+
+  /** Vòng tròn trang trí thuộc `owner` (số không / chấm đặc ở đầu mút). */
+  decorationCircle(id: string, owner: string, cx: number, cy: number, r: number, fill: string): string {
+    return this.push({ type: "ellipse", id, name: id, role: "decoration", owner, layer: 0, cx, cy, rx: r, ry: r, fill: color(fill, PAPER), dashed: false, container: false })
+  }
+
   /** Đầu mũi tên ở `end` của đường (`"end"` = điểm cuối, `"start"` = điểm đầu). */
   arrow(lineId: string, style: ArrowHead, end: "end" | "start" = "end"): string {
     const pts = this.connector(lineId).points
@@ -298,7 +310,7 @@ const markup = (el: SceneElement): string => {
         ? `<circle cx="${num(el.cx)}" cy="${num(el.cy)}" r="${num(el.rx)}" fill="${el.fill}"${strokeAttrs(el.dashed)}/>`
         : `<ellipse cx="${num(el.cx)}" cy="${num(el.cy)}" rx="${num(el.rx)}" ry="${num(el.ry)}" fill="${el.fill}"${strokeAttrs(el.dashed)}/>`
     case "path":
-      if (el.closed) return `<polygon points="${points(el.points)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.role === "shape" ? STROKE : 0.8)} stroke-linejoin="miter"/>`
+      if (el.closed) return `<polygon points="${points(el.points)}" fill="${el.fill}"${strokeAttrs(el.dashed, el.stroke ?? (el.role === "shape" ? STROKE : 0.8))} stroke-linejoin="miter"/>`
       if (el.points.length === 2) {
         const [a, b] = el.points
         return `<line x1="${num(a[0])}" y1="${num(a[1])}" x2="${num(b[0])}" y2="${num(b[1])}"${strokeAttrs(el.dashed)}/>`

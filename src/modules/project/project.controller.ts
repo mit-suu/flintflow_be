@@ -5,7 +5,7 @@ import { sendSuccess } from "../../shared/types/api-response.js"
 import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
-import type { CreateProjectDTO, MoveProjectDTO, UpdateDocumentLanguageDTO } from "./project.validation.js"
+import type { CreateProjectDTO, MoveProjectDTO, UpdateDocumentLanguageDTO, UpdateErdNotationDTO } from "./project.validation.js"
 
 export const createProject = catchAsync(async (req: Request, res: Response) => {
   const userId = req.user?.userId
@@ -92,5 +92,17 @@ export const setDocumentLanguage = catchAsync(async (req: Request, res: Response
 
   const { documentLanguage } = req.body as UpdateDocumentLanguageDTO
   const project = await projectService.setDocumentLanguage(req.params.projectId as string, requireOrgId(req), documentLanguage)
+  return sendSuccess(res, 200, project)
+})
+
+/** Đổi ký pháp ERD — body đã qua `UpdateErdNotationSchema` (strict) ở route; ERD đã vẽ được vẽ lại ngay bằng ký pháp mới. */
+export const setErdNotation = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user?.userId
+  if (!userId) {
+    throw new ApiError(401, "Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.", "UNAUTHORIZED")
+  }
+
+  const { erdNotation } = req.body as UpdateErdNotationDTO
+  const project = await projectService.setErdNotation(req.params.projectId as string, requireOrgId(req), erdNotation, userId)
   return sendSuccess(res, 200, project)
 })
