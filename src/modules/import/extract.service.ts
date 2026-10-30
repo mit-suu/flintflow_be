@@ -31,6 +31,7 @@ import {
   mergeFieldValue,
   normalizeKey,
   parseFieldPath,
+  refTarget,
   resolveProvisional,
   type EntityItem,
   type ProvisionalEntity
@@ -365,6 +366,7 @@ const REF_ENTITY: Readonly<Record<string, string>> = { actor_ids: "actors", incl
  */
 const refKey = (known: readonly EntityItem[], field: string, ref: unknown): string => {
   const entity = REF_ENTITY[field]
+  ref = refTarget(ref)
   const id = entity ? findKnownKey(known, entity, String(ref)) : null
   const name = id ? known.find((k) => k.entity === entity && k.id === id && typeof k.value.name === "string")?.value.name : undefined
   return compactKey(typeof name === "string" ? name : String(ref))

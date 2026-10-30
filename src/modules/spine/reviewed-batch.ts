@@ -12,6 +12,9 @@
  * Hàm thuần: caller ghi `steps[id=…].accepted_at` qua `applyTransaction`.
  */
 
+import { isDeepStrictEqual } from "node:util"
+import { legacyFlowEdge } from "./legacy-flow.js"
+import { isRecord } from "./path-resolver.js"
 import { sectionsOfPath, stepsOf } from "./section-registry.js"
 import { computeSectionStates } from "./section-status.js"
 import type { Op } from "./op.types.js"
@@ -21,19 +24,22 @@ type BatchChange = Pick<Change, "op" | "path" | "before" | "value">
 type StateChange = Pick<Change, "seq" | "path" | "before" | "value" | "step_id">
 
 const ELEMENT = /^(\w+)\[id=([^\]]+)\]/
-const FLOW_TO = /^screens\[id=[^\]]+\]\.flow_to(\[\])?$/
+const FLOW_TO = /^screens\[id=[^\]]+\]\.flow_to(\[[^\]]*\])?$/
 
 const idsOf = (spine: Spine, collection: string): Set<string> => {
   const list = (spine as unknown as Record<string, unknown>)[collection]
   return new Set(Array.isArray(list) ? list.flatMap((el) => (el && typeof el === "object" && typeof (el as { id?: unknown }).id === "string" ? [(el as { id: string }).id] : [])) : [])
 }
 
-/** `flow_to` mới giữ đủ cạnh cũ (chỉ nối thêm). */
+/** Hai phần tử `flow_to` (cạnh hoặc chuỗi id của dữ liệu cũ) giống hệt nhau, kể cả trigger / guard. */
+const sameEdge = (a: unknown, b: unknown): boolean => isDeepStrictEqual(legacyFlowEdge(a), legacyFlowEdge(b))
+
+/** `flow_to` mới giữ nguyên mọi cạnh cũ (chỉ nối thêm): cạnh cũ đổi trigger / guard không phải nối thêm. */
 const onlyAddsEdges = (c: BatchChange): boolean => {
   if (c.op === "add") return true
   if (c.op !== "set" || !Array.isArray(c.value)) return false
-  const after = new Set((c.value as unknown[]).map(String))
-  return (Array.isArray(c.before) ? (c.before as unknown[]) : []).every((v) => after.has(String(v)))
+  const after = c.value as unknown[]
+  return (Array.isArray(c.before) ? (c.before as unknown[]) : []).every((v) => after.some((a) => sameEdge(a, v)))
 }
 
 /** Id của mọi phần tử có trong `from` mà không còn trong `to` (mọi mảng gốc có `id`). */
@@ -52,13 +58,19 @@ const goneIds = (from: Spine, to: Spine): Set<string> => {
  * đặt `null` (`primary_function_id`) — không đổi nội dung người đọc ngoài việc mất phần tử đã xoá.
  */
 const onlyDropsRemoved = (c: BatchChange, removed: ReadonlySet<string>): boolean => {
-  if (c.op === "remove") return typeof c.before === "string" && removed.has(c.before)
+  // Cạnh `flow_to` bị gỡ có `before` là object { to, … }: màn đích là khoá
+  const targetOf = (v: unknown): string | null => (typeof v === "string" ? v : isRecord(v) && typeof v.to === "string" ? v.to : null)
+  const gone = (v: unknown): boolean => {
+    const t = targetOf(v)
+    return t !== null && removed.has(t)
+  }
+  if (c.op === "remove") return gone(c.before)
   if (c.op !== "set") return false
   if (c.value === null) return typeof c.before === "string" && removed.has(c.before)
   if (!Array.isArray(c.value) || !Array.isArray(c.before)) return false
-  const after = (c.value as unknown[]).map(String)
-  const before = (c.before as unknown[]).map(String)
-  return after.every((v) => before.includes(v)) && before.filter((v) => !after.includes(v)).every((v) => removed.has(v))
+  const after = c.value as unknown[]
+  const before = c.before as unknown[]
+  return after.every((a) => before.some((b) => sameEdge(a, b))) && before.filter((b) => !after.some((a) => sameEdge(a, b))).every(gone)
 }
 
 /**

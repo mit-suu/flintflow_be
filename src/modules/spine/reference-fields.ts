@@ -180,7 +180,10 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
   for (const s of spine.screens) {
     const owner = `screens[id=${s.id}]`
     yield one(screenFeature, owner, "feature_id", s.feature_id)
-    yield* many(screenFlow, owner, "flow_to", s.flow_to)
+    // Cạnh luồng: khoá là `to` của phần tử object (`flow_to[to=S08]`), không phải chuỗi
+    for (const e of s.flow_to ?? []) {
+      yield { field: screenFlow, ownerPath: owner, refPath: `${owner}.flow_to[to=${e.to}]`, targetId: e.to, target: screenFlow.targetCollection }
+    }
     if (s.primary_function_id !== null) yield one(screenPrimary, owner, "primary_function_id", s.primary_function_id)
   }
   for (const p of spine.permissions) {

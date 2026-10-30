@@ -175,7 +175,7 @@ describe.skipIf(!enabled || !fapSpine)("FAP thật — kiểm trùng use case + 
     const spine = applied.spine as import("../../src/modules/spine/spine.types.js").Spine
     const newScreens = spine.screens.filter((s) => !before.screens.some((b) => b.id === s.id))
     const orphan = new Set(orphanScreens(spine).map((o) => o.screen.id))
-    fapLog(`[FAP B] màn mới: ${newScreens.map((s) => `${s.id} ${s.name} popup=${s.is_popup} từ ${spine.screens.filter((x) => x.flow_to.includes(s.id)).map((x) => x.id)}`).join("; ") || "không"} | cr=${applied.cr_id}`)
+    fapLog(`[FAP B] màn mới: ${newScreens.map((s) => `${s.id} ${s.name} popup=${s.is_popup} từ ${spine.screens.filter((x) => x.flow_to.some((e) => e.to === s.id)).map((x) => x.id)}`).join("; ") || "không"} | cr=${applied.cr_id}`)
     expect(newScreens.length).toBeGreaterThan(0)
     expect(newScreens.every((s) => !orphan.has(s.id))).toBe(true)
     if (realRender) {

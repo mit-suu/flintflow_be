@@ -14,6 +14,7 @@
 import { z } from "zod"
 import type * as T from "./spine.types.js"
 import { legacyDiagram } from "./legacy-diagram.js"
+import { legacyFlowEdge } from "./legacy-flow.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -106,12 +107,20 @@ export const useCaseSchema = z.strictObject({
   extends: z.array(id)
 })
 
+/** Cạnh luồng màn: `to` bắt buộc; `trigger` / `guard` bỏ trống = không có (dữ liệu cũ chỉ là chuỗi id màn đích). */
+export const flowEdgeSchema = z.strictObject({
+  to: id,
+  trigger: z.string().optional(),
+  guard: z.string().optional()
+})
+
 export const screenSchema = z.strictObject({
   id,
   feature_id: id,
   name: z.string(),
   description: z.string(),
-  flow_to: z.array(id),
+  // preprocess ở mức phần tử mảng (không bọc cả mảng): element-defaults cần thấy ZodArray để điền `[]`
+  flow_to: z.array(z.preprocess(legacyFlowEdge, flowEdgeSchema)),
   is_popup: z.boolean(),
   tabs: z.array(z.string()),
   primary_function_id: id.nullable(),

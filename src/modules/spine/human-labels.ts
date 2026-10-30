@@ -53,6 +53,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   role_id: "Vai trò",
   action: "Thao tác",
   flow_to: "Chuyển tới màn",
+  guard: "Điều kiện rẽ nhánh",
   is_popup: "Là popup",
   tabs: "Tab",
   primary_function_id: "Chức năng chính",

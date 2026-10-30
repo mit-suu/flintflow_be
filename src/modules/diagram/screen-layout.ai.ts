@@ -44,7 +44,7 @@ export const layoutContext = (spine: Spine, screenId: string): Record<string, un
       .filter((f) => f.screen_id === screenId)
       .sort((a, b) => a.order - b.order || compareIds(a.id, b.id))
       .map((f) => ({ name: f.name, trigger: f.trigger, description: f.description, validations: f.validations.map((v) => v.statement) })),
-    navigates_to: screen.flow_to.map((id) => names.get(id)).filter((n): n is string => Boolean(n))
+    navigates_to: screen.flow_to.map((e) => names.get(e.to)).filter((n): n is string => Boolean(n))
   }
 }
 

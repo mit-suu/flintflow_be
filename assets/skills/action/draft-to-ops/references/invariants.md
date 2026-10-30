@@ -31,7 +31,7 @@ progress.screen_cursor         progress.screen_queue[]        steps[].id (@scree
 
 | Remove | Also in the same batch |
 | --- | --- |
-| screen `X` | `functions[screen_id=X]`, `permissions[screen_id=X]`, `X` from every `flow_to[]`, those functions from `use_cases[].function_ids[]` and `messages[].function_ids[]`, `X` from `screen_queue[]`, `steps[id ~ @X]`, `sections[function:*]` of removed functions |
+| screen `X` | `functions[screen_id=X]`, `permissions[screen_id=X]`, every `flow_to[]` edge with `to` = X, those functions from `use_cases[].function_ids[]` and `messages[].function_ids[]`, `X` from `screen_queue[]`, `steps[id ~ @X]`, `sections[function:*]` of removed functions |
 | actor `A` | `A` from `use_cases[].actor_ids[]`; `roles[actor_id=A].actor_id → null` |
 | feature `F` (middle) | its screens/functions (cascade above) + `renumber features[]` |
 | function `FN` | from `use_cases[].function_ids[]`, `messages[].function_ids[]`; `screens[primary_function_id=FN] → null`; `renumber` siblings |

@@ -5,7 +5,7 @@
  * Đo mức model tuân thủ luật mới của `content/screens-and-flow` + renderer `screen-flow`:
  *   1. không màn mồ côi (`orphanScreens` rỗng sau S-4.4),
  *   2. không cặp màn trỏ qua lại trong `flow_to` (luồng một chiều),
- *   3. Screens Flow tự tách một hình cho mỗi actor người có màn (pipeline tự vẽ lại sau S-4.3/S-4.4),
+ *   3. Screens Flow tự tách một hình cho mỗi feature có màn (pipeline tự vẽ lại sau S-4.3/S-4.4),
  *   4. không màn nào chỉ phục vụ actor system/time.
  * Đầu vào: fixture 19 màn ở trạng thái vừa xong S-3 — giữ project/actors/roles/use cases/entities/NFR, bỏ mọi
  * feature/màn/function/quyền. Elicit tự trả lời bằng lựa chọn đầu hoặc câu mặc định, gate luôn `accept`.
@@ -33,7 +33,8 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
     const repo = await import("../../src/modules/spine/spine.repository.js")
     const { orphanScreens } = await import("../../src/modules/spine/deterministic-check.js")
     const { screenActorMap } = await import("../../src/modules/spine/screen-actors.js")
-    const { renderScreenFlow, screenFlowTitleOf } = await import("../../src/modules/diagram/renderers/screen-flow.renderer.js")
+    const { renderScreenFlow } = await import("../../src/modules/diagram/renderers/screen-flow.renderer.js")
+    const { svgTitleOf } = await import("../../src/modules/diagram/renderers/common.js")
     const { createMemoryDiagramStore } = await import("../../src/modules/diagram/diagram-file.store.js")
     const { Usage } = await import("../../src/modules/spine/usage.model.js")
     type Spine = import("../../src/modules/spine/spine.types.js").Spine
@@ -98,12 +99,13 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
     const orphans = orphanScreens(spine)
     const ids = new Set(spine.screens.map((x) => x.id))
     const twoWay = spine.screens.flatMap((a) =>
-      a.flow_to.filter((b) => b > a.id && ids.has(b) && spine.screens.find((x) => x.id === b)!.flow_to.includes(a.id)).map((b) => `${a.id}⇄${b}`)
+      a.flow_to.map((e) => e.to).filter((b) => b > a.id && ids.has(b) && spine.screens.find((x) => x.id === b)!.flow_to.some((e) => e.to === a.id)).map((b) => `${a.id}⇄${b}`)
     )
     const parts = renderScreenFlow(spine)
-    const titles = parts.map((p) => screenFlowTitleOf(p.source) ?? "(không tiêu đề)")
+    const titles = parts.map((p) => svgTitleOf(p.source) ?? "(không tiêu đề)")
     const storedFlow = spine.diagrams.filter((d) => d.kind === "screen_flow")
-    const storedTitles = storedFlow.map((d) => screenFlowTitleOf(d.source) ?? "(không tiêu đề)")
+    const storedTitles = storedFlow.map((d) => svgTitleOf(d.source) ?? "(không tiêu đề)")
+    const featuresWithScreens = spine.features.filter((f) => spine.screens.some((x) => x.feature_id === f.id))
     const humansWithScreens = humans.filter((a) => [...actorsOf.values()].some((v) => v.includes(a.id)))
     const usages = await Usage.find({ projectId, state: "deducted" }).lean()
 
@@ -111,8 +113,8 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
       { name: "Không màn mồ côi", pass: orphans.length === 0, detail: orphans.map((o) => `${o.screen.id} ${o.screen.name}: ${o.why}`).join("; ") || "—" },
       { name: "Luồng một chiều trong dữ liệu (không cặp A⇄B)", pass: twoWay.length === 0, detail: twoWay.join(", ") || "—" },
       {
-        name: "Hình lưu trong Spine đã tách theo actor (tự vẽ lại)",
-        pass: storedFlow.length === humansWithScreens.length && storedTitles.every((t) => t.startsWith("Screens flow for ")),
+        name: "Hình lưu trong Spine đã tách theo feature (tự vẽ lại)",
+        pass: storedFlow.length >= featuresWithScreens.length && storedTitles.every((t) => t.startsWith("Screens flow — ")),
         detail: storedTitles.join(" · ")
       },
       { name: "Mỗi actor người có ≥ 1 màn", pass: humansWithScreens.length === humans.length, detail: humans.filter((a) => !humansWithScreens.includes(a)).map((a) => a.name).join(", ") || "—" }
@@ -140,7 +142,7 @@ describe.skipIf(!enabled)("Screens Flow theo actor, không màn mồ côi — pr
       "| Id | Tên | Popup | flow_to | Actor người |",
       "| --- | --- | --- | --- | --- |",
       ...spine.screens.map(
-        (x) => `| ${x.id} | ${x.name} | ${x.is_popup ? "✔" : ""} | ${x.flow_to.join(", ")} | ${(actorsOf.get(x.id) ?? []).map((a) => humans.find((h) => h.id === a)?.name ?? a).join(", ")} |`
+        (x) => `| ${x.id} | ${x.name} | ${x.is_popup ? "✔" : ""} | ${x.flow_to.map((e) => e.to).join(", ")} | ${(actorsOf.get(x.id) ?? []).map((a) => humans.find((h) => h.id === a)?.name ?? a).join(", ")} |`
       )
     ].join("\n")
     fs.mkdirSync(OUT_DIR, { recursive: true })
