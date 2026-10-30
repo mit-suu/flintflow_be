@@ -12,6 +12,9 @@ import {
   changeInstructionSchema,
   discoveryStepSchema,
   elicitSchema,
+  findingsSchema,
+  importExtractDiagramSchema,
+  importExtractSchema,
   opTransactionSchema,
   renderFixSchema,
   reviewSchema,
@@ -54,6 +57,13 @@ describe("mockOutputFor — đúng schema theo ActionType", () => {
     expect(parsed.clarification_needed).toBeTruthy()
     // Chứng minh vì sao không dùng `ops: []` ở đây
     expect(() => changeInstructionSchema.parse({ ops: [] })).toThrow()
+  })
+
+  it("import (mode 1 I-4, 1.11) trả output hợp schema — chạy được luồng import với mock", () => {
+    expect(importExtractSchema.parse(outputOf(ActionType.IMPORT_EXTRACT_FIELDS)).items).toEqual([])
+    expect(importExtractDiagramSchema.parse(outputOf(ActionType.IMPORT_EXTRACT_DIAGRAM)).diagram_kind).toBe("other")
+    expect(findingsSchema.parse(outputOf(ActionType.IMPORT_SEMANTIC_CHECK)).findings).toEqual([])
+    expect(findingsSchema.parse(outputOf(ActionType.IMPORT_CROSS_CHECK)).findings).toEqual([])
   })
 
   it("render_fix trả puml biên dịch được về mặt hình dạng", () => {

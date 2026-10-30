@@ -1,7 +1,7 @@
 ---
 skill_id: apply-change-op
 kind: action
-version: 1.6.0
+version: 1.7.0
 description: Chat change request → ops (or a clarification); impact query → 3 branches → stale; one-pass reconcile
 provider: anthropic
 aiModel: claude-haiku-5-5
@@ -183,6 +183,14 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    relationship, its verb, its cardinality), with one example from the projection.
 13. **`empty_collections`** in the projection = the named section has nothing yet: `add` into its `add_path` with exactly
    its `fields`, never into a look-alike collection (§5.2 Common Requirements is `common_requirements[]`, not `nfrs[]`).
+14. **`custom_sections`** = headings of the customer's template with no Spine field; `guidance` is the template's note on what
+   to write — follow it. Rewrite = `set custom_sections[id=…]` with the **whole** element (`id`, `heading`, `level`, `source`
+   unchanged, `blocks` = all new text, the template's `[…]` guidance blocks dropped); append = `add custom_sections[id=…].blocks[]`.
+   One block per paragraph/bullet: `{"kind": "paragraph" | "list_item", "text": "…", "rows": null, "image_ref": null}`.
+   Never `set …blocks` alone, never rename the heading.
+15. **Drafting a custom section** ("Soạn nháp mục …"): every project fact comes from `draft_context`, `guidance`, the glossary
+   or the chat — never invent a standard, version, vendor, device, law, number or date. A fact the section needs is missing
+   ⇒ no ops, `clarification_needed` with up to **3** numbered questions (overrides rule 2); draft once the user answers.
 
 ## Reconcile (`reconcile`)
 

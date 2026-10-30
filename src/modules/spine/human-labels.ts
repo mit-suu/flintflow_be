@@ -241,6 +241,8 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   orphan_entity: "Thực thể tách khỏi ERD",
   orphan_entity_at_baseline: "ERD chưa liên kết thành một khối",
   unresolved_many_to_many: "Quan hệ nhiều–nhiều chưa tách thực thể trung gian",
+  template_section_absent: "Mẫu bắt buộc không có mục này",
+  template_section_empty: "Mục của mẫu chưa có nội dung",
   import_semantic: "AI phát hiện vấn đề nội dung",
   import_image_unread: "Ảnh chưa đọc được",
   import_unresolved_ref: "Quyền chưa khớp màn / vai trò",

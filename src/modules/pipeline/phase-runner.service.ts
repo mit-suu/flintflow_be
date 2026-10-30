@@ -21,7 +21,7 @@ import { addendumForUnit, loadConversationVariables, projectStep } from "./conte
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
-import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, submitAnswerWait, type AnswerPayload } from "./step-runner.service.js"
+import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
 import * as meter from "./meter.service.js"
@@ -408,18 +408,30 @@ const askPhaseInterview = async (
     return "asked_none"
   }
 
+  /** Phát `answer_needed` + lưu lượt chờ; lượt nghe đăng ký TRƯỚC để `/answer` tới ngay sau đó về đúng luồng này. */
+  const announceWaiting = async (shown: typeof questions, pendingAnswer: PendingAnswerState): Promise<{ answer: Promise<AnswerPayload> }> => {
+    const listener = listenForAnswer(projectId, unit, sessionId, deps.signal)
+    const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions: shown }
+    try {
+      emit(answerNeeded)
+      await touchRun(projectId, unit, runId, {
+        status: "waiting_answer",
+        stage: "ask",
+        detail_vi: `Chờ bạn trả lời ${shown.length} câu`,
+        questions: shown,
+        pending_answer: pendingAnswer,
+        release: true,
+        appendEvent: { ...answerNeeded, at: new Date().toISOString() }
+      })
+    } catch (err) {
+      listener.cancel()
+      throw err
+    }
+    return { answer: listener.answer }
+  }
+
   emit({ type: "elicit", step_id: unit, delta: firstReply })
-  const answerNeeded: StepEvent = { type: "answer_needed", step_id: unit, questions }
-  emit(answerNeeded)
-  await touchRun(projectId, unit, runId, {
-    status: "waiting_answer",
-    stage: "ask",
-    detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
-    questions,
-    pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: firstReply },
-    release: true,
-    appendEvent: { ...answerNeeded, at: new Date().toISOString() }
-  })
+  let next = (await announceWaiting(questions, { kind: "phase_interview", unit, session_id: sessionId, asked, base_answers_text: "", reply: firstReply })).answer
 
   // Vòng chờ: thẻ ⇒ ghi ngay; chat tự do ⇒ AI đọc, chốt câu đúng ý, hỏi lại câu còn chờ (FLF-221)
   let pending = asked
@@ -428,7 +440,7 @@ const askPhaseInterview = async (
   for (;;) {
     let payload: AnswerPayload
     try {
-      payload = await submitAnswerWait(projectId, unit, sessionId, deps.signal)
+      payload = await next
     } catch (err) {
       if (err instanceof AnswerDetached) return "detached"
       throw err
@@ -448,17 +460,7 @@ const askPhaseInterview = async (
     pending = turn.remaining
     reply = turn.reply
     const { questions: again } = shapeQuestions(pending)
-    const askAgain: StepEvent = { type: "answer_needed", step_id: unit, questions: again }
-    emit(askAgain)
-    await touchRun(projectId, unit, runId, {
-      status: "waiting_answer",
-      stage: "ask",
-      detail_vi: `Chờ bạn trả lời ${again.length} câu`,
-      questions: again,
-      pending_answer: { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply },
-      release: true,
-      appendEvent: { ...askAgain, at: new Date().toISOString() }
-    })
+    next = (await announceWaiting(again, { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply })).answer
   }
 }
 

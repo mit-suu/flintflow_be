@@ -21,6 +21,11 @@ export interface HeadingMapEntry {
   confirmed: boolean
   /** FLF-252: mục danh mục mẫu khớp được (`ieee830:3.5.2`) — chỉ với mẫu không phải FPT; nội bộ, không hiện cho người dùng. */
   template_section?: string | null
+  /**
+   * FLF-278 trên FLF-336 (business-flow 1.3 / 1.5): chữ hướng dẫn của mẫu ngay dưới heading (`[Describe …]`, bỏ ngoặc,
+   * ≤ 400 ký tự) — BA xem lúc xác nhận mapping; không phải nội dung. Thiếu = mẫu không ghi.
+   */
+  guidance?: string
 }
 
 export interface TableMapEntry {
@@ -108,7 +113,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confidence,
             detected_by: { type: String, enum: HEADING_DETECTORS, required: true },
             confirmed: { type: Boolean, default: false },
-            template_section: { type: String, default: null }
+            template_section: { type: String, default: null },
+            guidance: { type: String, default: undefined }
           },
           opts
         )
