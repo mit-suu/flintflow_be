@@ -6,6 +6,7 @@ import { allTargets, renderKind } from "../diagram/renderers/index.js"
 import { DIAGRAM_LABELS } from "../diagram/renderers/labels.js"
 import { titleCase } from "../diagram/renderers/context.renderer.js"
 import { screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
+import { svgTitleOf } from "../diagram/renderers/common.js"
 import { translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, localizedDiagramSources, renderView } from "./localized-spine.js"
 
@@ -79,7 +80,7 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const human = spine.actors.find((a) => a.kind === "human")!
     expect(byKind(view, "context")[0].source).toContain(`vi: ${human.name}`)
     expect(byKind(view, "context")[0].source).toContain(`vi: ${human.flows_in![0]}`)
-    expect(byKind(view, "usecase").map((d) => d.source).join("\n")).toContain(`usecase "vi: ${spine.use_cases[0].name}"`)
+    expect(byKind(view, "usecase").map((d) => d.source).join("\n")).toContain(`>vi: ${spine.use_cases[0].name}</text>`)
     for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.source)).toMatch(/^Luồng màn hình của vi: /)
     const erd = byKind(view, "erd")[0].source
     expect(erd).toContain(`entity "vi: ${spine.entities[0].name}"`)
@@ -136,8 +137,8 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const localized = localizeSpine(spine, units, new Map(), "vi")
     const view = renderView(localized)
     for (const d of byKind(view, "screen_flow")) expect(screenFlowTitleOf(d.source)).toMatch(/^Luồng màn hình của /)
-    // Use case tách hai hình: tiêu đề phần là chữ máy ⇒ đổi
-    for (const d of byKind(view, "usecase")) expect(d.source).toMatch(/^title Sơ đồ use case — /m)
+    // Use case tách theo feature: tiêu đề phần (ghi ở <title> của SVG) là chữ máy ⇒ đổi
+    for (const d of byKind(view, "usecase")) expect(svgTitleOf(d.source)).toMatch(/^Sơ đồ use case — /)
     // Sơ đồ ngữ cảnh: bản gốc Title Case nhãn tiếng Anh, bản tiếng Việt giữ nguyên chữ như viết ⇒ vẽ lại, nhãn chưa dịch không bị Title Case
     const human = spine.actors.find((x) => x.kind === "human")!
     expect(byKind(spine, "context")[0].source).toContain(`>${titleCase(human.flows_in![0])}<`)

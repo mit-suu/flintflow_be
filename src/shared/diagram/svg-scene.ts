@@ -27,7 +27,7 @@ export type SceneElement =
   | (Common & { type: "rect"; x: number; y: number; w: number; h: number; fill: string; dashed: boolean; container: boolean; rotate: number })
   | (Common & { type: "ellipse"; cx: number; cy: number; rx: number; ry: number; fill: string; dashed: boolean; container: boolean })
   | (Common & { type: "path"; points: Point[]; closed: boolean; fill: string; dashed: boolean })
-  | (Common & { type: "text"; x: number; y: number; text: string; size: number; bold: boolean; anchor: Anchor; baseline: Baseline; rotate: number })
+  | (Common & { type: "text"; x: number; y: number; text: string; size: number; bold: boolean; anchor: Anchor; baseline: Baseline; rotate: number; italic: boolean })
 
 export interface ShapeOptions {
   name?: string
@@ -41,6 +41,8 @@ export interface TextOptions {
   name?: string
   size?: number
   bold?: boolean
+  /** In nghiêng (actor trừu tượng). Bề rộng đo theo Regular: Italic của Liberation Sans cùng advance width. */
+  italic?: boolean
   anchor?: Anchor
   baseline?: Baseline
   /** Độ, quay quanh (x, y). */
@@ -182,6 +184,7 @@ export class Scene {
       text,
       size: opts.size ?? 14,
       bold: opts.bold ?? false,
+      italic: opts.italic ?? false,
       anchor: opts.anchor ?? "middle",
       baseline: opts.baseline ?? "alphabetic",
       rotate: opts.rotate ?? 0
@@ -212,7 +215,7 @@ export class Scene {
     const h = size + 4
     const id = `${lineId}#label`
     this.push({ type: "rect", id: `${id}-bg`, name: `${line.name} (nền nhãn)`, role: "decoration", owner: lineId, layer: 1, x: at[0] - w / 2, y: at[1] - h / 2, w, h, fill: PAPER, dashed: false, container: false, rotate })
-    return this.push({ type: "text", id, name: text, role: "text", owner: lineId, layer: 1, x: at[0], y: at[1], text, size, bold: false, anchor: "middle", baseline: "central", rotate })
+    return this.push({ type: "text", id, name: text, role: "text", owner: lineId, layer: 1, x: at[0], y: at[1], text, size, bold: false, italic: false, anchor: "middle", baseline: "central", rotate })
   }
 
   /** Đầu mũi tên ở `end` của đường (`"end"` = điểm cuối, `"start"` = điểm đầu). */
@@ -277,7 +280,8 @@ const markup = (el: SceneElement): string => {
       const transform = el.rotate ? ` transform="rotate(${num(el.rotate)} ${num(el.x)} ${num(el.y)})"` : ""
       const baseline = el.baseline === "central" ? ` dominant-baseline="central"` : ""
       const weight = el.bold ? ` font-weight="bold"` : ""
-      return `<text x="${num(el.x)}" y="${num(el.y)}" font-family="${esc(FONT)}" font-size="${num(el.size)}" text-anchor="${el.anchor}"${baseline}${weight} fill="${INK}"${transform}>${esc(el.text)}</text>`
+      const style = el.italic ? ` font-style="italic"` : ""
+      return `<text x="${num(el.x)}" y="${num(el.y)}" font-family="${esc(FONT)}" font-size="${num(el.size)}" text-anchor="${el.anchor}"${baseline}${weight}${style} fill="${INK}"${transform}>${esc(el.text)}</text>`
     }
   }
 }

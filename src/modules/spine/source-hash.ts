@@ -111,11 +111,26 @@ export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
  */
 export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
   context: DEFAULT_DIAGRAM_ENGINE,
-  usecase: DEFAULT_DIAGRAM_ENGINE,
+  usecase: "svg@1",
   screen_flow: DEFAULT_DIAGRAM_ENGINE,
   erd: DEFAULT_DIAGRAM_ENGINE,
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
+
+/**
+ * Dữ liệu chỉ renderer SVG đọc thêm, ngoài `sourceProjection` (không đưa vào đó vì `originalDiagramHash` dùng chung hàm ấy:
+ * ảnh gốc import đã lưu hash cũ sẽ báo `original_diagram_stale` giả). Use case chia hình theo feature: tên + thứ tự feature
+ * và feature của các function mà use case tham chiếu.
+ */
+const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">): unknown => {
+  if (diagram.kind !== "usecase") return undefined
+  const referenced = new Set(spine.use_cases.flatMap((u) => u.function_ids))
+  return {
+    function_ids: byId(spine.use_cases).map(({ id, function_ids }) => ({ id, function_ids })),
+    functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
+    features: byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
+  }
+}
 
 /** Hash ghi vào `diagrams[].source_hash` và so ở cờ `diagram_stale` — xem đầu file. */
 export const renderedDiagramHash = (
@@ -125,5 +140,5 @@ export const renderedDiagramHash = (
 ): string => {
   const engine = engines[diagram.kind] ?? DEFAULT_DIAGRAM_ENGINE
   if (engine === DEFAULT_DIAGRAM_ENGINE) return computeSourceHash(spine, diagram)
-  return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram) })).digest("hex")
+  return createHash("sha256").update(stableStringify({ engine, projection: sourceProjection(spine, diagram), extras: renderedExtras(spine, diagram) })).digest("hex")
 }

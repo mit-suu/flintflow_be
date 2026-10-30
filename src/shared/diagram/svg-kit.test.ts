@@ -16,7 +16,7 @@ describe("svg-kit metrics", () => {
 
   it("font đóng gói khớp SHA-256 ghi trong assets/fonts/README.md", () => {
     const readme = fs.readFileSync(path.join(fontsDir, "README.md"), "utf8")
-    for (const file of ["LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"]) {
+    for (const file of ["LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf", "LiberationSans-Italic.ttf"]) {
       const hash = createHash("sha256").update(fs.readFileSync(path.join(fontsDir, file))).digest("hex")
       expect(readme).toContain(`${hash}  ${file}`)
     }

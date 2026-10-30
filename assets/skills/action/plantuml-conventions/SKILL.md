@@ -32,7 +32,7 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | SRS section | SRS content (ISO/IEC/IEEE 29148) | `kind` | `owner_kind` | Notation | Path | Ticket | `source_fields` |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 | srs-spine §7.1 |
-| `fixed:2.2.1` | Functional requirements — user view | `usecase` | feature | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
+| `fixed:2.2.1` | Functional requirements — user view | `usecase` | `null` (one part per feature; actor hierarchy part in `fixed:2.1`) | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
 | `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | feature | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
 | `feature:<id>` | Logical data model (domain) | `class` | feature | UML 2.5 Class (analysis level) | svg | FLF-325 | `entities[].name/.relations/.relation_cardinality` · *new*: `entities[].attributes[]`, `entities[].feature_ids` |
@@ -52,7 +52,7 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
 4. **Aliases are Spine ids** (`A03`, `UC04`, `S7`, `E2`); the visible label is the name: `actor "Reviewer" as A03`. Sort elements by `id` so the same Spine produces the same output.
 5. **Split by kind**, not "one diagram per actor":
    - `context`: one diagram for the whole system.
-   - `usecase`: one per feature group. Split a group further only where it reads better — by sub-goal (e.g. account access vs organization membership), not by a use-case count; keep each `<<include>>` / `<<extend>>` pair in the same part. No overview diagram. After S-4.1 a use case's feature comes from `function_ids` → `functions[].feature_id` (several ⇒ the first function's in `function_ids` order); the group at S-3.6, before features exist, is set by FLF-323.
+   - `usecase`: one per feature group. A group over ~20 use cases is split into equal parts (`<feature> (1/2)`); a part that fails the layout check is split again; keep each `<<include>>` / `<<extend>>` pair in the same part (a use case with more than two relations repeats in several parts). No overview diagram. After S-4.1 a use case's feature comes from `function_ids` → `functions[].feature_id` (several ⇒ the first function's in `function_ids` order); before S-4.1 (no feature derivable) the use case goes to a group named after its cluster's main human actor, after all features.
    - `screen_flow`, `class`: one per feature.
    - `erd`: whole system; split by connected entity cluster when > ~25 entities.
    - `sequence`: one per function (not every function needs one).
@@ -75,7 +75,7 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
 
 - [ ] Notation matches the Kinds table; no mixed notation.
 - [ ] Only Spine `source_fields`; aliases are Spine ids, sorted by id.
-- [ ] Split matches `owner_kind`; use case parts by sub-goal, other kinds no part over ~25 nodes.
+- [ ] Split matches `owner_kind`; use case parts one per feature (split over ~20), other kinds no part over ~25 nodes.
 - [ ] Actors / lanes / lifelines are the linked actors, generalization kept, names exact.
 - [ ] Names use the right word class (noun / verb phrase / adjective).
 - [ ] Line style and arrowheads match the notation; required labels present.

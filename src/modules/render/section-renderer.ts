@@ -16,7 +16,8 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { screenFlowTitle, screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
-import { label as diagramLabel } from "../diagram/renderers/common.js"
+import { label as diagramLabel, svgTitleOf } from "../diagram/renderers/common.js"
+import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
@@ -234,10 +235,12 @@ const diagramImages = (
   ctx: SectionRenderContext,
   captionBase: string,
   /** Chú thích riêng từng hình (vd. tiêu đề sơ đồ theo actor); `null` ⇒ dùng `captionBase`. */
-  captionOf: (d: Spine["diagrams"][number]) => string | null = () => null
+  captionOf: (d: Spine["diagrams"][number]) => string | null = () => null,
+  /** Lọc thêm theo từng hình (vd. use case: hình §2.2.1 khác hình phân cấp actor §2.1). */
+  include: (d: Spine["diagrams"][number]) => boolean = () => true
 ): ImageBlock[] => {
   const parts = spine.diagrams.filter(
-    (d) => d.kind === kind && d.render_status === "ok" && (ownerId === undefined || d.owner_id === ownerId)
+    (d) => d.kind === kind && d.render_status === "ok" && (ownerId === undefined || d.owner_id === ownerId) && include(d)
   )
   const out: ImageBlock[] = []
   parts.forEach((d, i) => {
@@ -273,18 +276,24 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
 
 // ─── §2 User Requirements ──────────────────────────────────────────
 
-const actorsTable = (spine: Spine, ctx: SectionRenderContext): Block[] =>
-  spine.actors.length === 0
+const actorsTable = (spine: Spine, ctx: SectionRenderContext): Block[] => [
+  ...(spine.actors.length === 0
     ? []
     : [
         tableBlock(
           ["ID", "Name", "Kind", "Description"],
           spine.actors.map((a) => [a.id, a.name, enumLabel(fptLanguage(ctx), "actor_kind", a.kind), a.description])
         )
-      ]
+      ]),
+  // Hình phân cấp actor (generalization) nằm ngay dưới bảng actor; chú thích = `<title>` của SVG (đã theo ngôn ngữ tài liệu)
+  ...diagramImages(spine, "usecase", undefined, ctx, "Actor Hierarchy", svgCaption, (d) => d.section === ACTOR_HIERARCHY_SECTION)
+]
+
+/** Chú thích hình SVG lấy từ `<title>` do renderer ghi: tên feature (use case) hoặc "Actor Hierarchy". */
+const svgCaption = (d: Spine["diagrams"][number]): string | null => (d.format === "svg" ? svgTitleOf(d.source) : null)
 
 const useCaseDiagram = (spine: Spine, ctx: SectionRenderContext): Block[] =>
-  diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram")
+  diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram", svgCaption, (d) => d.section !== ACTOR_HIERARCHY_SECTION)
 
 const useCaseTable = (spine: Spine): Block[] => {
   if (spine.use_cases.length === 0) return []
@@ -960,7 +969,7 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
       return commonOf(spine, ["localization", "date_format"], ctx)
     case "slot:analysis_models":
       return [
-        ...diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram"),
+        ...diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram", svgCaption),
         ...screensFlow(spine, ctx),
         ...diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram")
       ]
