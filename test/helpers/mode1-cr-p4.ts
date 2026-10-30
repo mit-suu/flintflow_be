@@ -42,18 +42,16 @@ export const routeCr = (r: (prompt: string) => string | Error | undefined): void
 
 export const promptsOf = (header: "# CR Clarify" | "# CR Propose" | "# CR Consistency"): string[] => prompts.filter((p) => p.includes(header))
 
-/** Project mode 1 đã import xong: upload → xác nhận → I-4 → xác nhận field → finalize (baseline 0.0). */
+/** Project mode 1 đã import xong: upload → Bắt đầu (I-4 → baseline 0.1 → kiểm tra, FLF-343). */
 export const importedProject = async (): Promise<{ seeded: SeededFixture; projectId: string; c: Mode1Client }> => {
   const seeded = await seedFixture("minimal")
   const projectId = await createMode1Project(seeded)
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  const fin = await c.finalizeAndWait(id)
-  expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
-  expect(fin.view?.import?.status).toBe("gap_review")
+  // FLF-343: một lần Bắt đầu (kèm xác nhận bản mới nhất) ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra, không bước nào khác
+  const run = await c.extractAndWait(id)
+  expect(run.res.status, JSON.stringify(run.res.body.error)).toBe(200)
+  expect(run.run?.import.status).toBe("gap_review")
   return { seeded, projectId, c }
 }
 

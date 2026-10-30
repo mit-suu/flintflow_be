@@ -22,12 +22,10 @@ export const importedProject = async (name = "Lumen LMS") => {
   const projectId = await createMode1Project(seeded, name)
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  const fin = await c.finalizeAndWait(id)
-  expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
-  expect(fin.view?.import?.status).toBe("gap_review")
+  // FLF-343: một lần Bắt đầu (kèm xác nhận bản mới nhất) ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra, không bước nào khác
+  const run = await c.extractAndWait(id)
+  expect(run.res.status, JSON.stringify(run.res.body.error)).toBe(200)
+  expect(run.run?.import.status).toBe("gap_review")
   // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step (release cần hết cờ đỏ)
   await fillCoreSections(projectId)
   return { seeded, projectId, c }

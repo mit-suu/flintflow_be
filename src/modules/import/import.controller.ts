@@ -83,7 +83,7 @@ export const getImport = mode1Handler(async (req, res) => {
     await finalizeJobs.markOrphanedFinalize(current)
   }
   const view = await importService.getImportView(auth.projectId)
-  // Ước tính credit trước khi trích (bước mapping / bắt đầu / chạy tiếp) — job đang chạy thì FE đang xem tiến độ, không tính
+  // Ước tính credit một lần trước khi chạy (màn Bắt đầu / chạy tiếp, FLF-343) — job đang chạy thì FE đang xem tiến độ, không tính
   if (current && !(await extractJobs.isExtractionRunning(String(current._id)))) {
     const role = req.orgContext?.role
     view.credit_estimate = await extractService.creditEstimateFor(auth.projectId, auth.userId, current, { withBalance: role === "lead" || role === "analyst" })
@@ -107,12 +107,15 @@ export const reupload = mode1Handler(async (req, res) => {
 export const extract = mode1Handler(async (req, res) => {
   const auth = await authorizeMode1(req)
   const body = parseInput(extractRequestSchema, req.body)
-  return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id))
+  return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id, body.confirm_latest))
 })
 
-/** I-4 chạy nền: trả ngay trạng thái hiện tại (`extracting`), FE poll `GET /import` (xem `extract-jobs.ts`). */
-const startExtractionResponse = async (projectId: string, userId: string, importId: string) => {
-  const doc = await extractJobs.startExtraction(projectId, userId, importId)
+/**
+ * Nút "Bắt đầu" (FLF-343): I-4 ⇒ baseline 0.1 ⇒ kiểm tra chạy nền một mạch; trả ngay trạng thái hiện tại (`extracting`), FE
+ * poll `GET /import` tới `gap_review` (xem `extract-jobs.ts`).
+ */
+const startExtractionResponse = async (projectId: string, userId: string, importId: string, confirmLatest?: boolean) => {
+  const doc = await extractJobs.startExtraction(projectId, userId, importId, confirmLatest)
   const summary = await importService.extractionSummary(String(doc._id))
   return { import: importService.toImportDto(doc), sections: summary.sections }
 }
@@ -154,7 +157,7 @@ export const resume = mode1Handler(async (req, res) => {
   if (doc.status === "extracting") {
     return sendSuccess(res, 200, await startExtractionResponse(auth.projectId, auth.userId, body.import_id))
   }
-  if (doc.status === "baselining" || doc.status === "checking") {
+  if (doc.status === "baselining" || doc.status === "checking" || doc.status === "fields_review") {
     const current = await finalizeJobs.startResume(auth.projectId, auth.userId, body.import_id)
     const summary = await importService.extractionSummary(String(current._id))
     return sendSuccess(res, 200, { import: importService.toImportDto(current), sections: summary.sections })
@@ -162,7 +165,7 @@ export const resume = mode1Handler(async (req, res) => {
   throw new Mode1Error("IMPORT_INVALID_STATE", "Không có bước nào đang dừng để tiếp tục", {
     status: doc.status,
     to: doc.status,
-    allowed: ["extracting", "baselining", "checking"]
+    allowed: ["extracting", "fields_review", "baselining", "checking"]
   })
 })
 

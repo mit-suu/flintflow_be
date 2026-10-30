@@ -1,6 +1,9 @@
 /**
  * Luồng import mode 1 phần tất định: upload + preflight (I-1, nút 1.1–1.3), tách + neo block (I-2, 1.5),
  * khớp template profile (I-3, 1.6) và xác nhận mapping (1.7). FLF-171, plan §6 2B.
+ * FLF-343 (một mạch): upload ⇒ preflight ⇒ tách file ⇒ khớp mẫu (mục độ tin thấp tự nhận, giữ độ tin) ⇒ `extracting` chưa
+ * chạy = màn báo credit + câu hỏi "bản mới nhất" (trả lời cùng `POST /import/extract`). `awaiting_latest_confirm` /
+ * `mapping_review` chỉ còn ở bản ghi cũ.
  * Trích field (I-4) và finalize ở `extract.service.ts` / `finalize.service.ts` (2C).
  *
  * Bản ghi import mới nhất của project là bản đang hiệu lực. Trước khi có baseline, upload lại = bắt đầu lại
@@ -23,7 +26,7 @@ import { Mode1Error } from "./mode1.errors.js"
 import { toIso } from "./mode1.http.js"
 import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
-import { assignBlockSections, matchProfile, needsMappingReview } from "./profile-match.service.js"
+import { assignBlockSections, autoConfirmMapping, matchProfile, needsMappingReview } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
@@ -69,6 +72,7 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confidence: h.confidence,
     detected_by: h.detected_by,
     confirmed: h.confirmed,
+    ...(h.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(h.template_section ? { template_section: h.template_section } : {}),
     ...(h.guidance ? { guidance: h.guidance } : {})
   })),
@@ -79,6 +83,7 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     field_path: t.field_path ?? null,
     confidence: t.confidence,
     confirmed: t.confirmed,
+    ...(t.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(t.role ? { role: t.role } : {}),
     ...(t.samples?.length ? { samples: [...t.samples] } : {})
   })),
@@ -185,16 +190,61 @@ export const uploadImport = async (
 
   const fileRef = await docFileStore().save(file.buffer, { projectId, kind: "upload", name: file.originalname })
   const doc = await ImportedDocument.create({ ...base, file_ref: fileRef, preflight: { status: "accepted", issues: [], document_kind: result.document_kind }, status: "uploaded" })
-  if (result.stamp || body.org_template_id) {
-    // Mẫu của tổ chức là file mẫu, không phải một bản SRS ⇒ không hỏi "bản mới nhất"
-    // Stamp đúng project (file từng xuất từ chính project này, chưa có baseline) ⇒ coi như đã xác nhận
-    doc.confirmed_latest_at = new Date()
-    await transitionImport(doc, "parsing")
-    await runParse(doc)
-  } else {
-    await transitionImport(doc, "awaiting_latest_confirm")
-  }
+  // Mẫu của tổ chức là file mẫu, không phải một bản SRS ⇒ không hỏi "bản mới nhất"
+  // Stamp đúng project (file từng xuất từ chính project này, chưa có baseline) ⇒ coi như đã xác nhận
+  if (result.stamp || body.org_template_id) doc.confirmed_latest_at = new Date()
+  // FLF-343: tách file + khớp mẫu ngay (tất định, không gọi AI) ⇒ màn báo credit có số; câu hỏi "bản mới nhất" (file không
+  // stamp) trả lời cùng nút Bắt đầu (`POST /import/extract` `confirm_latest`)
+  await transitionImport(doc, "parsing")
+  await parseOrReject(doc)
   return doc
+}
+
+/**
+ * FLF-343: tách file lỗi (XML lạ…) ⇒ không để import treo ở `parsing`: ghi `preflight_rejected` + issue `PARSE_FAILED` (FE hiện
+ * như preflight từ chối, cho tải file khác) rồi trả `422 IMPORT_FILE_REJECTED`.
+ */
+const parseOrReject = async (doc: IImportedDocument): Promise<void> => {
+  try {
+    await runParse(doc)
+  } catch (err) {
+    console.error(`[import] Tách file của import ${String(doc._id)} lỗi:`, err)
+    const issues = [{ code: "PARSE_FAILED" as const, message: "FlintFlow không đọc được cấu trúc tài liệu này (tách đoạn / khớp mẫu lỗi). Hãy mở bằng Word, lưu lại dạng .docx rồi tải lên lại.", location: null }]
+    doc.preflight = { ...doc.preflight, status: "rejected", issues }
+    doc.markModified("preflight")
+    await transitionImport(doc, "preflight_rejected")
+    throw new Mode1Error("IMPORT_FILE_REJECTED", "File chưa nhập được, xem danh sách lỗi", { import_id: String(doc._id), issues })
+  }
+}
+
+/**
+ * FLF-343: câu trả lời "đây là bản mới nhất" đi cùng nút Bắt đầu. File cần hỏi (không stamp, không phải mẫu tổ chức) mà chưa
+ * xác nhận và lần này không xác nhận ⇒ `IMPORT_NEEDS_LATEST_CONFIRM` (import không chạy). Bản ghi cũ còn ở
+ * `awaiting_latest_confirm` ⇒ xác nhận rồi tách file luôn (sang `extracting`).
+ */
+export const acceptLatest = async (doc: IImportedDocument, confirm: boolean | undefined): Promise<void> => {
+  if (doc.confirmed_latest_at) return
+  if (!confirm) throw new Mode1Error("IMPORT_NEEDS_LATEST_CONFIRM", "Cần xác nhận đây là bản mới nhất của tài liệu trước", { import_id: String(doc._id) })
+  doc.confirmed_latest_at = new Date()
+  if (doc.status === "awaiting_latest_confirm") {
+    await transitionImport(doc, "parsing")
+    await parseOrReject(doc)
+    return
+  }
+  await doc.save()
+}
+
+/** FLF-343: bản ghi cũ dừng ở `mapping_review` ⇒ tự nhận mục độ tin thấp (giữ độ tin) rồi sang `extracting`. */
+export const autoConfirmPendingMapping = async (doc: IImportedDocument): Promise<void> => {
+  if (doc.status !== "mapping_review") return
+  const profile = await TemplateProfile.findOne({ projectId: doc.projectId })
+  if (profile) {
+    autoConfirmMapping(profile)
+    profile.markModified("heading_map")
+    profile.markModified("table_map")
+    await profile.save()
+  }
+  await transitionImport(doc, "extracting")
 }
 
 export const confirmLatest = async (projectId: string, importId: string): Promise<IImportedDocument> => {
@@ -246,13 +296,15 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
   const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id) : null
   const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
+  // FLF-343: không dừng ở bước xác nhận mapping — mục độ tin thấp tự nhận (giữ độ tin), finalize gắn cờ "Cần xem"
+  autoConfirmMapping(profile)
   const sections = assignBlockSections(blocks, profile.heading_map)
-  // Record of Changes đọc ngay lúc tách file (FLF-252) — wizard cho người dùng xem/sửa trước khi tạo baseline 0.1
+  // Record of Changes đọc ngay lúc tách file (FLF-252) — finalize dùng đúng các dòng đọc từ file
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
   await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, legacy_record_of_changes })
-  await transitionImport(doc, needsMappingReview(profile) ? "mapping_review" : "extracting")
+  await transitionImport(doc, "extracting")
 }
 
 // ─── 1.7 xác nhận mapping ────────────────────────────────────────

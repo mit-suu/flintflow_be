@@ -1,13 +1,14 @@
 /**
  * Máy trạng thái import (mode 1, Flow 1 nút 1.1–1.13) — hàm thuần, không đụng DB. FLF-171, plan §5.2.
  *
+ * FLF-343 — chế độ 1 chạy một mạch: một điểm dừng duy nhất là `extracting` chưa chạy (màn báo credit + câu hỏi "bản mới
+ * nhất"), rồi I-4 ⇒ baseline 0.1 ⇒ kiểm tra ⇒ `gap_review` (FE vào thẳng trang tạo CR) không chờ người dùng:
  * uploaded ─┬─ preflight_rejected                        (1.2 bị từ chối — user upload file khác = bản ghi mới)
- *           ├─ awaiting_latest_confirm ─► parsing       (1.3 file không có stamp)
- *           └─ parsing                                  (đã xác nhận)
- * parsing ─► mapping_review | extracting                (1.6 độ tin thấp ⇒ 1.7)
- * mapping_review ─► extracting
- * extracting ─► fields_review | baselining              (1.8 độ tin thấp ⇒ 1.9)
- * fields_review ─► baselining ─► checking ─► gap_review (1.10 → 1.11/1.12 → 1.13)
+ *           └─ parsing ─► extracting                    (tách file + khớp mẫu; mục độ tin thấp tự nhận + cờ "Cần xem")
+ * extracting ─► baselining                              (job I-4 xong ⇒ job finalize nối tiếp, base_version do server tính)
+ * baselining ─► checking ─► gap_review                  (1.10 → 1.11/1.12)
+ * Bản ghi cũ (trước FLF-343) còn đi được nhánh: uploaded ─► awaiting_latest_confirm ─► parsing ─► mapping_review ─►
+ * extracting ─► fields_review ─► baselining — `POST /import/extract` / `/import/resume` đưa chúng về luồng một mạch.
  * gap_review ─► delivered | change_requested
  * delivered ─► change_requested                         (giao gap report xong, sau đó mới quyết định sửa)
  * incomplete ─► drafting                                (FLF-278 trên FLF-336: chế độ 3 sang Luồng 2 — dự án chạy pipeline
@@ -66,7 +67,8 @@ export const IMPORT_TRANSITIONS: Readonly<Record<ImportStatus, readonly ImportSt
   uploaded: ["preflight_rejected", "awaiting_latest_confirm", "parsing"],
   preflight_rejected: [],
   awaiting_latest_confirm: ["parsing"],
-  parsing: ["mapping_review", "extracting"],
+  // FLF-343: tách file lỗi ⇒ preflight_rejected (issue PARSE_FAILED), người dùng tải file khác
+  parsing: ["mapping_review", "extracting", "preflight_rejected"],
   mapping_review: ["extracting"],
   extracting: ["fields_review", "baselining"],
   fields_review: ["baselining"],

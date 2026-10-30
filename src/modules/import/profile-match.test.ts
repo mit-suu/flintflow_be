@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { parseDocument } from "./parse.service.js"
 import {
   assignBlockSections,
+  autoConfirmMapping,
+  detectorCap,
   detectTemplateFamily,
   matchHeadings,
   matchProfile,
@@ -10,6 +12,7 @@ import {
   type ProfileBlock
 } from "./profile-match.service.js"
 import { MAPPING_CONFIDENCE_THRESHOLD } from "./import.constants.js"
+import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 import { matchTable, matchTableHeader } from "./table-header-dictionary.js"
@@ -405,5 +408,52 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     const { blocks } = await parseDocument(await makeSrsDocx())
     expect(detectTemplateFamily(blocks)).toBe("fpt")
     expect(detectTemplateFamily([heading(1, 1, "1. Introduction"), heading(2, 2, "1.1 Purpose")])).toBe("fpt")
+  })
+})
+
+describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp", () => {
+  it("detectorCap: style / outline không giới hạn; số mục gõ tay 0.75, có in đậm 0.9, trùng mục lục 0.95; numPr / format in đậm 0.85", () => {
+    expect(detectorCap("style")).toBe(1)
+    expect(detectorCap("numbering_pattern")).toBe(0.75)
+    expect(detectorCap("numbering_pattern", ["bold"])).toBe(0.9)
+    expect(detectorCap("numbering_pattern", ["toc"])).toBe(0.95)
+    expect(detectorCap("toc")).toBe(0.95)
+    expect(detectorCap("numbering", ["bold", "numpr"])).toBe(0.85)
+    expect(detectorCap("format", ["large"])).toBe(0.75)
+    expect(detectorCap("format", ["bold", "large"])).toBe(0.85)
+  })
+
+  it("auto_number (số Word tự sinh) chấm như số gõ tay: heading không số vẫn vào đúng mục, heading_text giữ nguyên chữ", () => {
+    const blocks = [
+      { block_id: "B0001", kind: "heading" as const, level: 1, text: "Functional Requirements", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "3" },
+      { block_id: "B0002", kind: "heading" as const, level: 2, text: "Authentication", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "3.2" },
+      { block_id: "B0003", kind: "heading" as const, level: 2, text: "Business Rules", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "5.1" }
+    ]
+    const map = matchHeadings(blocks.map((b) => ({ ...b, heading_signals: [...b.heading_signals] })), "fpt")
+    expect(map.map((h) => [h.heading_text, h.section_id.replace(/@B\d+/, "@")])).toEqual([
+      ["Functional Requirements", "group:3"],
+      ["Authentication", "feature:@"],
+      ["Business Rules", "fixed:5.1"]
+    ])
+    expect(Math.max(...map.map((h) => h.confidence))).toBeLessThanOrEqual(0.85)
+  })
+
+  it("autoConfirmMapping: mục độ tin < 0.8 chưa xác nhận ⇒ confirmed + auto_confirmed, giữ độ tin; mục chắc / đã xác nhận không đổi", () => {
+    const profile: { heading_map: HeadingMapEntry[]; table_map: TableMapEntry[] } = {
+      heading_map: [
+        { block_id: "B0001", heading_text: "x", section_id: "fixed:1", confidence: 0.6, detected_by: "numbering_pattern", confirmed: false },
+        { block_id: "B0002", heading_text: "y", section_id: "fixed:2.1", confidence: 0.95, detected_by: "style" as const, confirmed: false },
+        { block_id: "B0003", heading_text: "z", section_id: "fixed:5.1", confidence: 0.5, detected_by: "user" as const, confirmed: true }
+      ],
+      table_map: [{ block_id: "B0009", column_index: 0, header: "ID", field_path: "use_cases[].id", confidence: 0.7, confirmed: false }]
+    }
+    expect(autoConfirmMapping(profile)).toBe(2)
+    expect(profile.heading_map.map((h) => [h.confirmed, h.auto_confirmed ?? false, h.confidence])).toEqual([
+      [true, true, 0.6],
+      [false, false, 0.95],
+      [true, false, 0.5]
+    ])
+    expect(profile.table_map[0]).toMatchObject({ confirmed: true, auto_confirmed: true, confidence: 0.7 })
+    expect(needsMappingReview(profile)).toBe(false)
   })
 })

@@ -16,7 +16,7 @@ import { createMode1Project, fakeMode1 } from "../../helpers/mode1.js"
 import { fileOf } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
-import { confirmLatest, patchMapping, uploadImport } from "../../../src/modules/import/import.service.js"
+import { acceptLatest, patchMapping, uploadImport } from "../../../src/modules/import/import.service.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { OrgTemplate } from "../../../src/modules/import/org-library.model.js"
@@ -33,11 +33,15 @@ beforeEach(() => {
 const H = (token: string) => ({ Authorization: `Bearer ${token}` })
 const EXTRA = styled("u1", "6 Operating Environment") + p("[Describe the operating environment.]") + styled("u1", "7 Document Conventions") + p("[Describe conventions.]")
 
-/** Dự án import + upload mẫu + xác nhận mapping (BA đổi một heading) ⇒ `extracting`. */
+/**
+ * Dự án import + upload mẫu (FLF-343: tách file ngay ⇒ `extracting`) + BA đổi một heading — mapping sửa tay chỉ còn ở bản ghi
+ * cũ `mapping_review`, nên đưa bản ghi về đó để giữ đúng tình huống "mapping BA đã xác nhận" của mẫu tổ chức.
+ */
 const mappedProject = async (seeded: Awaited<ReturnType<typeof seedFixture>>) => {
   const projectId = await createMode1Project(seeded)
-  const uploaded = await uploadImport(projectId, seeded.userId, fileOf(await makeSrsDocx({ extraBody: EXTRA })))
-  const doc = await confirmLatest(projectId, String(uploaded._id))
+  const doc = await uploadImport(projectId, seeded.userId, fileOf(await makeSrsDocx({ extraBody: EXTRA })))
+  await acceptLatest(doc, true)
+  await ImportedDocument.updateOne({ _id: doc._id }, { $set: { status: "mapping_review" } })
   const profile = (await TemplateProfile.findOne({ projectId }))!
   const conventions = profile.heading_map.find((h) => h.heading_text.includes("Document Conventions"))!
   await patchMapping(projectId, { import_id: String(doc._id), headings: [{ block_id: conventions.block_id, section_id: "unmapped" }], tables: [], confirm_all: true })

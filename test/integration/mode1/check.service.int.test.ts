@@ -101,7 +101,8 @@ describe("check — AI semantic (1.11)", () => {
     expect(fin.doc.status).toBe("checking")
     expect(fin.doc.paused?.reason).toBe("credits")
     expect(semanticCalls).toBe(0)
-    expect((await spineRepository.get(projectId))!.flags).toEqual([])
+    // chưa recompute / chưa cờ AI — chỉ có cờ "Cần xem" finalize đặt cho chỗ độ tin thấp (FLF-343)
+    expect((await spineRepository.get(projectId))!.flags.filter((f) => f.rule_id !== "import_needs_review")).toEqual([])
 
     await CreditWallet.updateOne({ userId }, { $set: { balance: 10 } })
     const doc = (await ImportedDocument.findById(importId))!

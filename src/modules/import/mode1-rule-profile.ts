@@ -49,4 +49,9 @@ export const IMPORT_SEMANTIC_RULE = "import_semantic"
 export const IMPORT_IMAGE_RULE = "import_image_unread"
 /** FLF-252: quyền của ma trận phân quyền không khớp màn / vai trò nào ⇒ không vào Spine, cờ vàng báo phần bị bỏ. */
 export const IMPORT_UNRESOLVED_RULE = "import_unresolved_ref"
+/**
+ * FLF-343: chỗ độ tin thấp được tự nhận vào baseline 0.1 (mode 1 một mạch) — field I-4 độ tin < 0.7 / đọc từ ảnh, heading /
+ * cột bảng I-3 độ tin < 0.8. Cờ vàng "Cần xem" mang đường dẫn phần tử (`target_id`), hiện ở trang tạo CR; sai thì sửa bằng CR.
+ */
+export const IMPORT_NEEDS_REVIEW_RULE = "import_needs_review"
 export const CR_CONSISTENCY_RULE = "cr_consistency"

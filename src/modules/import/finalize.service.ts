@@ -1,6 +1,8 @@
 /**
  * Finalize import (nút 1.10) rồi check (1.11–1.12). FLF-171, plan §6 2C.
- *   1. Field đã xác nhận (hoặc độ tin ≥ 0.7) ⇒ thực thể ⇒ op; áp trong **một** transaction `by: "import"`.
+ *   1. Mọi field trích được ⇒ thực thể ⇒ op; áp trong **một** transaction `by: "import"`. FLF-343: field độ tin thấp (< 0.7 /
+ *      đọc từ ảnh) và mapping độ tin thấp (< 0.8, tự nhận lúc tách file) **không bị bỏ** — vào baseline 0.1 kèm cờ vàng "Cần
+ *      xem" (`import_needs_review`, mang đường dẫn phần tử), hiện ở trang tạo CR.
  *   2. Đổi section tạm `feature:@B…`/`function:@B…` sang id thật ở template profile + block; ghi `FieldAnchor`;
  *      quét lại mention theo tên (actor, entity, feature, screen).
  *   3. Mode 1 v2 (FLF-183): layout + mục riêng (`custom_sections`) theo file upload, kế hoạch step theo template (D6),
@@ -30,7 +32,7 @@ import { isOriginalDiagramKind, originalDiagramHash } from "../spine/original-di
 import * as spineRepository from "../spine/spine.repository.js"
 import type { Op } from "../spine/op.types.js"
 import type { Baseline as BaselineEntry, OriginalDiagramKind, Spine } from "../spine/spine.types.js"
-import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord } from "./check.service.js"
+import { countOpenFlags, findingOpsInOrder, runImportCheck, stripRecord, type Finding } from "./check.service.js"
 import { legacyRecordRows } from "./legacy-record.js"
 import { DocBlock } from "./doc-block.model.js"
 import { collectEntities, parseFieldPath, realSectionId, resolveProvisional } from "./extracted-entities.js"
@@ -38,17 +40,19 @@ import { ExtractionDraft, type IExtractionDraft } from "./extraction-draft.model
 import { FieldAnchor } from "./field-anchor.model.js"
 import { needsConfirm } from "./import.constants.js"
 import type { FinalizeRequest } from "./import.dto.js"
-import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, transitionImport } from "./import.service.js"
+import { assertImportStatus, loadImportFile, recomputeBlockSections, requireImport, toReviewFields, transitionImport } from "./import.service.js"
+import { pathLabel } from "../spine/human-labels.js"
+import { isContentSection } from "./section-catalog.js"
 import type { FinalizeCheckpoint, IImportedDocument } from "./imported-document.model.js"
 import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
-import { IMPORT_IMAGE_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
+import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
 import { buildLayout, buildStepPlan, customSectionOps, customSectionsWithContent, functionOriginals, sectionSlices, sectionsWithContent, seedStepOps, type LayoutBlock } from "./step-plan.js"
 import { functionSourceHash } from "../render/layout-sections.js"
-import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
+import { TemplateProfile, type HeadingMapEntry, type LayoutEntry, type TableMapEntry } from "./template-profile.model.js"
 import { compareTargetStructure, type TargetStructure, type TemplateIntent } from "./target-structure.js"
 import { titleOfSection } from "./gap-report.service.js"
 import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-sync.service.js"
@@ -89,9 +93,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
 
   // 1. Thực thể ⇒ op
   const drafts = await ExtractionDraft.find({ import_id: doc._id }).lean()
-  const accepted = drafts.flatMap((d) =>
-    d.fields.filter((f) => f.confirmed || !needsConfirm(f)).map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) }))
-  )
+  // FLF-343: không bỏ field độ tin thấp chưa xác nhận (trước đây bị bỏ im lặng) — vào baseline, cờ "Cần xem" bên dưới
+  const accepted = drafts.flatMap((d) => d.fields.map((f) => ({ ...f, section_id: realSectionId(d.section_id, provisional) })))
   const entities = [...collectEntities(accepted).values()]
   const droppedPermissions: DroppedPermission[] = []
   const ops = buildImportOps(stripRecord(before), entities.map((e) => ({ entity: e.entity, id: e.id, value: e.value })), droppedPermissions)
@@ -126,6 +129,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
       }))
     )
   }
+  // Mapping tự nhận (FLF-343) đọc trước khi đổi section tạm — cờ "Cần xem" dựng sau khi biết layout
+  const blockSectionsBefore = new Map((await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: "table" }).select("block_id section_id").lean()).map((b) => [b.block_id, b.section_id ?? null]))
   for (const h of profile.heading_map) h.section_id = realSectionId(h.section_id, provisional)
   profile.markModified("heading_map")
   await profile.save()
@@ -185,7 +190,14 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     // Hai nhóm cờ trong cùng lô ⇒ id cờ cấp nối tiếp (gọi riêng từng nhóm thì trùng id, cả lô bị từ chối)
     ...findingOpsInOrder(stripRecord(seeded), [
       { findings: unreadImageFindings(stripRecord(seeded), drafts, layout, provisional), rule: IMPORT_IMAGE_RULE },
-      { findings: droppedPermissionFindings(droppedPermissions, matrixBlocks), rule: IMPORT_UNRESOLVED_RULE }
+      { findings: droppedPermissionFindings(droppedPermissions, matrixBlocks), rule: IMPORT_UNRESOLVED_RULE },
+      {
+        findings: needsReviewFindings(stripRecord(seeded), drafts, profile, layout, provisional, (blockId) => {
+          const s = blockSectionsBefore.get(blockId)
+          return s ? realSectionId(s, provisional) : null
+        }),
+        rule: IMPORT_NEEDS_REVIEW_RULE
+      }
     ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]
@@ -315,6 +327,71 @@ const unreadImageFindings = (
     }))
   })
   return findings
+}
+
+const percent = (n: number): string => `${Math.round(n * 100)}%`
+
+/**
+ * FLF-343: chỗ độ tin thấp vào baseline 0.1 không qua xác nhận ⇒ mỗi chỗ một cờ vàng "Cần xem" (`import_needs_review`):
+ * - field I-4 chưa xác nhận mà `needsConfirm` (độ tin < 0.7 hoặc đọc từ ảnh) — `target_id` = đường dẫn field (`actors[id=A01].kind`);
+ * - heading / cột bảng I-3 tự nhận (`auto_confirmed`, độ tin < 0.8) — `target_id` = block của heading / bảng.
+ * Câu cho người đọc: tên phần tử / tiêu đề trong file, không in mã nội bộ của section.
+ */
+export const needsReviewFindings = (
+  spine: Spine,
+  drafts: Pick<IExtractionDraft, "section_id" | "fields">[],
+  profile: { heading_map: readonly HeadingMapEntry[]; table_map: readonly TableMapEntry[] },
+  layout: readonly LayoutEntry[],
+  provisional: ReturnType<typeof resolveProvisional>,
+  tableSection: (blockId: string) => string | null
+): Finding[] => {
+  // Phần tử buildImportOps không đưa vào Spine (tham chiếu không phân giải được…) ⇒ không có gì để xem / sửa bằng CR
+  const inSpine = (path: string): boolean => {
+    const p = parseFieldPath(path)
+    if (!p || p.entity === "project") return true
+    const arr = (spine as unknown as Record<string, unknown>)[p.entity]
+    return Array.isArray(arr) && arr.some((x) => (x as { id?: unknown }).id === p.id)
+  }
+  const fields = toReviewFields(drafts, (f) => !f.confirmed && needsConfirm(f) && inSpine(f.path)).map((f) => ({
+    rule: "needs_review",
+    section_id: realSectionId(f.section_id, provisional),
+    message: `Cần xem: ${pathLabel(f.path, f.entity_name)} — ${f.origin === "vision" ? "đọc từ ảnh sơ đồ" : `độ tin ${percent(f.confidence)}`}; đã đưa vào bản 0.1, sai thì sửa bằng change request`,
+    block_ids: [...f.source_block_ids],
+    target_id: f.path
+  }))
+  const headings = profile.heading_map
+    .filter((h) => h.auto_confirmed)
+    .map((h) => {
+      const mapped = isContentSection(h.section_id)
+      const where = mapped
+        ? `xếp vào mục "${titleOfSection(spine, h.section_id, layout.filter((l) => l.heading_text.trim() !== h.heading_text.trim()))}"`
+        : h.section_id.startsWith("group:")
+          ? `nhận là chương ${h.section_id.slice("group:".length)} của mẫu`
+          : "giữ nguyên văn, không khớp mục nào của mẫu"
+      return {
+        rule: "needs_review",
+        section_id: mapped ? h.section_id : "fixed:I",
+        message: `Cần xem: tiêu đề "${h.heading_text}" được ${where} (độ tin ${percent(h.confidence)}); sai thì sửa bằng change request`,
+        block_ids: [h.block_id],
+        target_id: h.block_id
+      }
+    })
+  const columns = profile.table_map
+    .filter((t) => t.auto_confirmed && t.field_path)
+    .map((t) => ({
+      rule: "needs_review",
+      section_id: tableSection(t.block_id) ?? "fixed:I",
+      message: `Cần xem: cột "${t.header || `thứ ${t.column_index + 1}`}" của bảng được đọc thành ${pathLabel(t.field_path!)} (độ tin ${percent(t.confidence)}); sai thì sửa bằng change request`,
+      block_ids: [t.block_id],
+      target_id: t.block_id
+    }))
+  // Một chỗ một cờ: cùng đường dẫn (field trích ở hai section, cùng block heading / bảng) chỉ giữ lần đầu
+  const seen = new Set<string>()
+  return [...headings, ...columns, ...fields].filter((f) => {
+    if (seen.has(f.target_id)) return false
+    seen.add(f.target_id)
+    return true
+  })
 }
 
 /**

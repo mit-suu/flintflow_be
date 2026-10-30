@@ -13,7 +13,7 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining, importAtExtracting, importFinalized } from "../../helpers/mode1-import-p4.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { AiActionError } from "../../../src/shared/ai/ai-action.types.js"
-import { patchFields, runExtraction } from "../../../src/modules/import/extract.service.js"
+import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { ExtractionDraft } from "../../../src/modules/import/extraction-draft.model.js"
 import { extractionSummary } from "../../../src/modules/import/import.service.js"
 import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
@@ -79,15 +79,23 @@ describe("finalize — Spine", () => {
     expect(spine.screens.every((s) => s.detail_status !== "pending")).toBe(true)
   })
 
-  it("chỉ field đã xác nhận / độ tin ≥ 0.7 vào Spine: field bị bỏ ở bước 1.9 không có mặt", async () => {
-    const { projectId, importId, userId } = await importAtBaselining()
-    // import helper đã confirm_all; tạo lại tình huống: xoá trigger đã xác nhận của FR-3.2.1 khỏi draft
-    await ExtractionDraft.updateMany({ import_id: importId }, { $pull: { fields: { path: "functions[id=FR-3.2.1].trigger" } } })
+  it("FLF-343: field độ tin thấp chưa xác nhận KHÔNG bị bỏ — vào Spine kèm đúng một cờ vàng Cần xem / field (mang đường dẫn); mapping tự nhận cũng có cờ", async () => {
+    const { projectId, importId, userId } = await importAtBaselining({ srs: { numberedOnly: true } })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
-    expect(spine.functions.find((f) => f.id === "FR-3.2.1")?.trigger ?? "").toBe("")
-    expect(spine.functions.find((f) => f.id === "FR-3.2.2")?.trigger).toBe("Learner submits the form")
+    expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
+    const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
+    const fieldFlags = review.filter((f) => f.target_id?.includes("].trigger"))
+    expect(fieldFlags.map((f) => f.target_id).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
+    expect(fieldFlags.every((f) => f.level === "yellow" && f.message.startsWith("Cần xem:") && f.section_id.startsWith("function:FR-3.2."))).toBe(true)
+    // heading không style (độ tin 0.75) ⇒ mỗi heading tự nhận một cờ, target = block heading
+    const profile = (await TemplateProfile.findOne({ projectId }).lean())!
+    const auto = profile.heading_map.filter((h) => h.auto_confirmed)
+    expect(auto.length).toBeGreaterThan(0)
+    for (const h of auto) expect(review.filter((f) => f.target_id === h.block_id), h.heading_text).toHaveLength(1)
+    // recompute tất định không đóng cờ do import đặt
+    expect(review.length).toBe(fieldFlags.length + auto.length + profile.table_map.filter((t) => t.auto_confirmed && t.field_path).length)
   })
 })
 
@@ -396,7 +404,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     expect(imageText).not.toMatch(/word\/media|\[image\]|B\d{4}/)
   })
 
-  it("I-4 đọc ảnh use case: origin vision, độ tin ≤ 0.7 ⇒ luôn qua 1.9; lượt gọi có ảnh + chú thích", async () => {
+  it("I-4 đọc ảnh use case: origin vision, độ tin ≤ 0.7 ⇒ luôn đếm là cần xem (FLF-343: không dừng); lượt gọi có ảnh + chú thích", async () => {
     const { projectId, userId, importId } = await importAtExtracting({ srs: { images: [{ name: "image1.png", data: PNG, caption: "Figure 1 USECASE-IMG" }] } })
     const prompts: string[] = []
     mockOverrides.next = (prompt) => {
@@ -404,7 +412,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
       return fakeMode1(prompt)
     }
     const run = await runExtraction(projectId, userId, importId)
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
     const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
     expect(draft.diagram_images).toEqual([{ block_id: expect.stringMatching(/^B\d+$/), kind: "usecase" }])
     const guest = draft.fields.filter((f) => f.origin === "vision")
@@ -485,7 +493,6 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     )
     expect(fields.filter((f) => f.origin === "vision").every((f) => f.confidence <= 0.7)).toBe(true)
 
-    await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
     const spine = (await spineRepository.get(projectId))!
@@ -537,7 +544,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
     fail = false
     const again = await runExtraction(projectId, userId, importId)
     expect(again.doc.paused).toBeNull()
-    expect(again.doc.status).toBe("fields_review")
+    expect(again.doc.status).toBe("baselining")
   })
 
   it("đọc ảnh lỗi sau mọi lượt thử (Gemini quá tải cả model dự phòng) ⇒ I-4 không dừng: giữ ảnh gốc + cờ vàng nói rõ lý do", async () => {
@@ -546,7 +553,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
       prompt.includes("# Read Diagram Image") ? new AiActionError(503, "high demand (đã thử gemini-3.5-flash, gemini-3.6-flash, gemini-3.5-flash-lite)", "GEMINI_OVERLOADED") : fakeMode1(prompt)
     const run = await runExtraction(projectId, userId, importId)
     expect(run.doc.paused).toBeNull()
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
     const draft = (await ExtractionDraft.findOne({ import_id: importId, section_id: "fixed:2.2.1" }).lean())!
     expect(draft.diagram_images.map((i) => i.kind)).toEqual(["unavailable"])
   })
@@ -572,7 +579,7 @@ describe("ảnh — giữ ảnh gốc (T3) + đọc ảnh diagram (mode 1 v3 pha
         }
       }
     )
-    if (run.doc.status === "fields_review") await patchFields(projectId, { import_id: importId, fields: [], confirm_all: true })
+    expect(run.doc.status).toBe("baselining")
     const before = (await spineRepository.get(projectId))!
     await finalizeImport(projectId, userId, { import_id: importId, base_version: before.spine_version })
 

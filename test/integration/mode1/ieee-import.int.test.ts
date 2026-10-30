@@ -11,7 +11,7 @@ import { mockOverrides, resetMockLlm } from "../../helpers/mock-llm.js"
 import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtExtracting } from "../../helpers/mode1-import-p4.js"
 import { makeIeeeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
-import { runExtraction, patchFields } from "../../../src/modules/import/extract.service.js"
+import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { finalizeImport } from "../../../src/modules/import/finalize.service.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
@@ -44,7 +44,7 @@ describe("import mẫu IEEE 830 (FLF-252)", () => {
   it("trích + finalize: bảng yêu cầu thành chức năng của tính năng 3.2, tác nhân từ 2.3, lịch sử từ Revision History", async () => {
     const ctx = await importAtExtracting({ buffer: await makeIeeeSrsDocx() })
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    if (run.doc.status === "fields_review") await patchFields(ctx.projectId, { import_id: ctx.importId, fields: [], confirm_all: true })
+    expect(run.doc.status).toBe("baselining")
     const before = (await spineRepository.get(ctx.projectId))!
     await finalizeImport(ctx.projectId, ctx.userId, { import_id: ctx.importId, base_version: before.spine_version })
 

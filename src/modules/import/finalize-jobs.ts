@@ -106,12 +106,25 @@ export const startFinalize = async (projectId: string, userId: string, body: Fin
 }
 
 /**
+ * FLF-343 (một mạch): job I-4 xong ⇒ finalize nền ngay, không chờ người dùng bấm. `base_version` = Spine hiện tại (server
+ * tính), Record of Changes đọc từ file (`record_of_changes` của mốc = null). Đang có job ⇒ không làm gì.
+ */
+export const startAutoFinalize = async (projectId: string, userId: string, importId: string): Promise<IImportedDocument> => {
+  const doc = await requireImport(projectId, importId)
+  if (await isFinalizeRunning(importId)) return doc
+  assertImportStatus(doc, ["baselining"], "checking")
+  return launch(doc, { mode: "finalize", projectId, userId, importId }, prepareFinalize(doc, null))
+}
+
+/**
  * `POST /import/resume` cho bước sau trích field: `checking` ⇒ 1.11–1.12 phần còn thiếu; `baselining` có mốc (job
- * finalize lỗi / mất) ⇒ hoàn về mốc rồi chạy lại finalize. Đang có job ⇒ không làm gì.
+ * finalize lỗi / mất) ⇒ hoàn về mốc rồi chạy lại finalize; `baselining` chưa có mốc (FLF-343: job nối tiếp chưa kịp bật) hoặc
+ * bản ghi cũ ở `fields_review` ⇒ finalize một mạch. Đang có job ⇒ không làm gì.
  */
 export const startResume = async (projectId: string, userId: string, importId: string): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, importId)
   if (await isFinalizeRunning(importId)) return doc
+  if (doc.status === "fields_review") await transitionImport(doc, "baselining")
   assertImportStatus(doc, ["baselining", "checking"], doc.status === "baselining" ? "checking" : "gap_review")
   if (doc.status === "checking") {
     const prepare = async () => {
@@ -120,20 +133,23 @@ export const startResume = async (projectId: string, userId: string, importId: s
     }
     return launch(doc, { mode: "check", projectId, userId, importId }, prepare)
   }
-  if (!doc.finalize_checkpoint) {
-    throw new Mode1Error("IMPORT_INVALID_STATE", "Chưa bắt đầu tạo bản gốc — hãy bấm tạo baseline 0.1", { status: doc.status, to: "checking", allowed: ["checking"] })
-  }
+  if (!doc.finalize_checkpoint) return startAutoFinalize(projectId, userId, importId)
   return launch(doc, { mode: "finalize", projectId, userId, importId }, prepareFinalize(doc, doc.finalize_checkpoint.record_of_changes ?? null))
 }
 
 /**
- * Import đang `baselining` (đã bắt đầu finalize) hoặc `checking`, không dừng, mà không có job ⇒ job đã mất. Đánh dấu
- * `paused: resume_later` để người dùng bấm tiếp tục.
+ * Import đang `baselining` hoặc `checking`, không dừng, mà không có job ⇒ job đã mất. Đánh dấu `paused: resume_later` để
+ * người dùng bấm tiếp tục. FLF-343: `baselining` chưa có mốc cũng tính (job finalize nối tiếp I-4 không bật được, hoặc bản ghi
+ * cũ chờ bấm tạo baseline) — trừ lúc job I-4 vừa xong còn đang bật finalize.
  */
 export const markOrphanedFinalize = async (doc: IImportedDocument): Promise<void> => {
   if (doc.paused) return
-  if (doc.status !== "checking" && !(doc.status === "baselining" && doc.finalize_checkpoint)) return
+  if (doc.status !== "checking" && doc.status !== "baselining") return
   if (await isFinalizeRunning(String(doc._id))) return
+  if (doc.status === "baselining" && !doc.finalize_checkpoint) {
+    const { isExtractionRunning } = await import("./extract-jobs.js")
+    if (await isExtractionRunning(String(doc._id))) return
+  }
   doc.paused = { reason: "resume_later", at: new Date() }
   await doc.save()
 }
