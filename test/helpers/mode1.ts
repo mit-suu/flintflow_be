@@ -27,20 +27,24 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
     del: (suffix: string) => request(app).delete(`${base}${suffix}`).set(auth),
     spineVersion: spineVersionOf,
     /**
+     * FLF-343: nút Bắt đầu (`/import/extract`, mặc định kèm `confirm_latest: true`) chạy một mạch I-4 ⇒ baseline 0.1 ⇒ kiểm tra.
      * I-4 chạy nền: gọi `/import/extract` (hoặc `/import/resume`) rồi **chờ đúng job** của import đó
      * (`waitForExtraction`) thay vì chờ theo đồng hồ — máy tải nặng (chạy cả suite song song) không còn làm test
      * trượt vì hết hạn poll. Job chạy xong / dừng mới đọc `GET /import`; poll chỉ còn là lưới an toàn cho trường
      * hợp job không nằm trong tiến trình này. `run` có hình `extractResponseSchema` (import + sections).
      */
-    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 60_000) => {
-      const res = await request(app).post(`${base}${path}`).set(auth).send({ import_id: importId })
+    extractAndWait: async (importId: string, path = "/import/extract", timeoutMs = 60_000, body: object = path === "/import/extract" ? { confirm_latest: true } : {}) => {
+      const res = await request(app).post(`${base}${path}`).set(auth).send({ import_id: importId, ...body })
       if (res.status !== 200) return { res, run: null }
       const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
+      const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
       await waitForExtraction(importId)
+      // FLF-343: I-4 xong ⇒ job finalize (baseline 0.1 + kiểm tra) chạy nối tiếp — chờ luôn tới cuối lượt một mạch
+      await waitForFinalize(importId)
       const deadline = Date.now() + timeoutMs
       for (;;) {
         const view = (await request(app).get(`${base}/import`).set(auth)).body.data
-        if (view.import.status !== "extracting" || view.import.paused) return { res, run: { import: view.import, sections: view.extraction.sections } }
+        if (!["extracting", "baselining", "checking"].includes(view.import.status) || view.import.paused) return { res, run: { import: view.import, sections: view.extraction.sections } }
         if (Date.now() >= deadline) throw new Error("I-4 chạy nền quá lâu")
         await new Promise((r) => setTimeout(r, 25))
       }
@@ -64,7 +68,8 @@ export const mode1Api = (seeded: SeededFixture, projectId: string) => {
 
 const firstBlock = (prompt: string, after: string): string => {
   const tail = prompt.slice(prompt.indexOf(after))
-  return /\[(B\d{4,})\]/.exec(tail)?.[1] ?? "B0001"
+  // Block thật ở đầu dòng — bỏ ví dụ `[B0001] text` trong lời dẫn của prompt (FLF-343: block nguồn bịa ⇒ không khớp chữ)
+  return /\n\[(B\d{4,})\]/.exec(tail)?.[1] ?? "B0001"
 }
 
 const AVAILABILITY_BLOCK = /\[(B\d{4,})\][^\n]*24 hours/

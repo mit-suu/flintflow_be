@@ -13,6 +13,7 @@ import { seedFixture } from "../../setup.js"
 import { makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import { finalizeResponseSchema, getImportResponseSchema } from "../../../src/modules/import/import.dto.js"
 import { finalizeCheckpoint } from "../../../src/modules/import/finalize.service.js"
+import { runExtraction } from "../../../src/modules/import/extract.service.js"
 import { isFinalizeRunning, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
@@ -28,15 +29,17 @@ beforeEach(() => {
   mockOverrides.next = fakeMode1
 })
 
-/** Upload ⇒ xác nhận ⇒ I-4 ⇒ xác nhận mọi field ⇒ import ở `baselining`. */
+/**
+ * Upload ⇒ I-4 gọi thẳng service (không qua job nên không có job finalize nối tiếp — FLF-343) ⇒ import ở `baselining`
+ * chưa có mốc: như job nối tiếp chưa kịp bật, hoặc bản ghi cũ chờ bấm tạo baseline.
+ */
 const atBaselining = async () => {
   const seeded = await seedFixture("minimal")
   const projectId = await createMode1Project(seeded)
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  expect((await c.patch("/import/fields", { import_id: id, confirm_all: true })).body.data.import.status).toBe("baselining")
+  const run = await runExtraction(projectId, seeded.userId, id)
+  expect(run.doc.status).toBe("baselining")
   return { seeded, projectId, c, id }
 }
 
@@ -154,14 +157,12 @@ describe("finalize chạy nền — lỗi giữa chừng, job mất", () => {
     expect((await spineRepository.get(projectId))!.actors.map((a) => a.name)).toEqual(["Learner", "Admin"])
   })
 
-  it("job mất ở checking ⇒ resume_later; resume ở baselining chưa từng finalize ⇒ IMPORT_INVALID_STATE", async () => {
+  it("FLF-343: baselining chưa có mốc, không job ⇒ GET đặt resume_later, resume ⇒ finalize một mạch; job mất ở checking ⇒ resume_later", async () => {
     const { c, id, seeded } = await atBaselining()
-    const early = await c.post("/import/resume", { import_id: id })
-    expect(early.status).toBe(409)
-    expect(early.body.error.code).toBe("IMPORT_INVALID_STATE")
+    expect((await c.get("/import")).body.data.import).toMatchObject({ status: "baselining", paused: { reason: "resume_later" } })
 
     await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 0 } })
-    expect((await c.finalizeAndWait(id)).view?.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
+    expect((await c.finalizeAndWait(id, {}, "/import/resume")).view?.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
     // job 1.11 bị mất giữa chừng (đã bỏ paused, tiến trình không còn job)
     await ImportedDocument.updateOne({ _id: id }, { $set: { paused: null } })
     expect((await c.get("/import")).body.data.import).toMatchObject({ status: "checking", paused: { reason: "resume_later" } })

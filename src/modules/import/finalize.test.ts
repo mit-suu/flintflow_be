@@ -110,3 +110,55 @@ describe("finalize — field ⇒ thực thể ⇒ op", () => {
     expect(realSectionId("function:@B0999", provisional)).toBe("function:@B0999")
   })
 })
+
+describe("FLF-343 needsReviewFindings — chỗ độ tin thấp vào baseline kèm cờ Cần xem", () => {
+  it("field chưa xác nhận cần xem (độ tin < 0.7 / ảnh) + heading / cột tự nhận ⇒ mỗi chỗ một phát hiện, target = đường dẫn / block", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const drafts = [
+      {
+        section_id: "fixed:2.1",
+        fields: [
+          field("actors[id=A01].name", "Learner", 0.95),
+          field("actors[id=A01].kind", "human", 0.6),
+          field("actors[id=A02].kind", "system", 0.7, false, { origin: "vision" }),
+          field("actors[id=A03].kind", "human", 0.5, true)
+        ]
+      }
+    ]
+    const profile = {
+      heading_map: [
+        { block_id: "B0001", heading_text: "2.1 Actors", section_id: "fixed:2.1", confidence: 0.75, detected_by: "numbering_pattern" as const, confirmed: true, auto_confirmed: true },
+        { block_id: "B0002", heading_text: "9 Team Notes", section_id: "unmapped", confidence: 0.5, detected_by: "style" as const, confirmed: true, auto_confirmed: true },
+        { block_id: "B0003", heading_text: "5.1 Business Rules", section_id: "fixed:5.1", confidence: 0.95, detected_by: "style" as const, confirmed: false }
+      ],
+      table_map: [
+        { block_id: "B0010", column_index: 1, header: "Kind", field_path: "actors[].kind", confidence: 0.6, confirmed: true, auto_confirmed: true },
+        { block_id: "B0010", column_index: 2, header: "Note", field_path: null, confidence: 0.4, confirmed: true, auto_confirmed: true }
+      ]
+    }
+    const spine = { ...createEmptySpine(), actors: [{ id: "A01" }, { id: "A02" }] } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const out = needsReviewFindings(spine, drafts, profile, [], new Map(), () => "fixed:2.1")
+    expect(out.map((f) => [f.section_id, f.target_id])).toEqual([
+      ["fixed:2.1", "B0001"],
+      ["fixed:I", "B0002"],
+      ["fixed:2.1", "B0010"],
+      ["fixed:2.1", "actors[id=A01].kind"],
+      ["fixed:2.1", "actors[id=A02].kind"]
+    ])
+    expect(out.every((f) => f.message.startsWith("Cần xem:"))).toBe(true)
+    expect(out[4].message).toContain("đọc từ ảnh")
+  })
+})
+
+describe("FLF-343 needsReviewFindings — trùng đường dẫn, phần tử bị bỏ", () => {
+  it("cùng field ở hai section ⇒ một cờ; phần tử buildImportOps không đưa vào Spine ⇒ không cờ", async () => {
+    const { needsReviewFindings } = await import("./finalize.service.js")
+    const drafts = [
+      { section_id: "fixed:2.1", fields: [field("actors[id=A01].kind", "human", 0.6), field("actors[id=A09].kind", "human", 0.6)] },
+      { section_id: "fixed:2.2.1", fields: [field("actors[id=A01].kind", "human", 0.5)] }
+    ]
+    const spine = { ...createEmptySpine(), actors: [{ id: "A01" }] } as unknown as Parameters<typeof needsReviewFindings>[0]
+    const out = needsReviewFindings(spine, drafts, { heading_map: [], table_map: [] }, [], new Map(), () => null)
+    expect(out.map((f) => f.target_id)).toEqual(["actors[id=A01].kind"])
+  })
+})

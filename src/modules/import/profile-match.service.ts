@@ -6,13 +6,14 @@
  *   tối đa một heading (gán tham lam theo điểm).
  * - Heading con trực tiếp của chương 3 (ngoài 3.1) ⇒ feature, con của feature ⇒ function (id tạm, xem
  *   `section-catalog.ts`); heading con khác của một section ⇒ thuộc section cha.
- * - Heading nhận theo mẫu số mục (file không dùng style) bị giới hạn độ tin 0.75 để người dùng xác nhận (P0 §4.2).
+ * - Heading nhận theo mẫu số mục (file không dùng style) bị giới hạn độ tin 0.75 (P0 §4.2); FLF-343: tín hiệu phụ (in đậm,
+ *   chữ to, mục lục) nâng trần (`detectorCap`), số Word tự sinh (`auto_number`) tính như số gõ tay khi chấm điểm.
  * - Cột bảng ⇒ field theo `table-header-dictionary.ts`.
- * Độ tin < 0.8 ⇒ `mapping_review` (nút 1.7).
+ * Độ tin < 0.8 ⇒ FLF-343: tự nhận + cờ "Cần xem" lúc finalize (không còn dừng ở `mapping_review`).
  */
 
 import { isExtractableSection, targetsOf } from "./extract-targets.js"
-import { MAPPING_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, type HeadingDetector } from "./import.constants.js"
+import { MAPPING_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, type HeadingDetector, type HeadingSignal } from "./import.constants.js"
 import type { ParsedBlock } from "./parse.service.js"
 import {
   PROVISIONAL_SECTION,
@@ -37,6 +38,10 @@ export interface ProfileBlock {
   text: string
   heading_detector?: HeadingDetector | null
   rows?: string[][] | null
+  /** FLF-343: tín hiệu phụ của heading (in đậm, chữ to, trùng mục lục, đánh số tự động). */
+  heading_signals?: readonly HeadingSignal[]
+  /** FLF-343: số mục Word tự sinh (không có trong chữ) — chỉ dùng để chấm điểm khớp mẫu. */
+  auto_number?: string | null
 }
 
 export interface ProfileMatch {
@@ -51,6 +56,25 @@ const MATCH_MIN = 0.5
 const WEAK_MATCH = 0.35
 const NUMBERING_PATTERN_CAP = 0.75
 const round = (n: number): number => Math.round(n * 100) / 100
+
+/**
+ * Trần độ tin theo cách nhận heading (FLF-343). Style / outline: không giới hạn. Chỉ theo chữ (số mục gõ tay, cỡ chữ) ⇒ 0.75
+ * như trước (P0 §4.2) — trừ khi có tín hiệu phụ: trùng một dòng mục lục ⇒ 0.95; in đậm / chữ to ⇒ 0.9 (số mục gõ tay) hoặc
+ * 0.85 (đánh số tự động, chữ to / style tiêu đề riêng in đậm).
+ */
+export const detectorCap = (detector: HeadingDetector, signals: readonly HeadingSignal[] = []): number => {
+  if (detector === "style" || detector === "outline_level" || detector === "user") return 1
+  if (detector === "toc" || signals.includes("toc")) return 0.95
+  const formatted = signals.includes("bold") || signals.includes("large")
+  if (detector === "numbering_pattern") return formatted ? 0.9 : NUMBERING_PATTERN_CAP
+  if (detector === "numbering") return formatted ? 0.85 : NUMBERING_PATTERN_CAP
+  // `format`: chữ to / style tiêu đề riêng — có in đậm thì chắc hơn
+  return signals.includes("bold") ? 0.85 : NUMBERING_PATTERN_CAP
+}
+
+/** Heading kèm chữ dùng để chấm (số Word tự sinh ghép vào đầu khi chữ không gõ số). */
+type MatchHeading = ProfileBlock & { match: string }
+const matchText = (b: ProfileBlock): string => (b.auto_number && !splitHeadingNumber(b.text).number ? `${b.auto_number} ${b.text}` : b.text)
 
 const scoreHeading = (text: string, cand: SectionCandidate): number => {
   const { number, title } = splitHeadingNumber(text)
@@ -87,16 +111,16 @@ export const assignBlockSections = (blocks: ProfileBlock[], headingMap: HeadingM
   return out
 }
 
-const headingsOf = (blocks: ProfileBlock[]): ProfileBlock[] => blocks.filter((b) => b.kind === "heading" && b.level !== null)
+const headingsOf = (blocks: ProfileBlock[]): MatchHeading[] => blocks.filter((b) => b.kind === "heading" && b.level !== null).map((b) => ({ ...b, match: matchText(b) }))
 
 /**
  * Heading khớp chắc một mục của danh mục: tên giống ≥ 0.8 và (mục hoặc heading không đánh số, hoặc số mục trùng). Heading
  * không số chỉ xét tên — trước đây file IEEE không đánh số không bao giờ được nhận là IEEE.
  */
 const STRONG_TITLE = 0.8
-const familyScore = (headings: ProfileBlock[], entries: readonly { number: string; titles: readonly string[] }[]): number =>
+const familyScore = (headings: MatchHeading[], entries: readonly { number: string; titles: readonly string[] }[]): number =>
   headings.filter((b) => {
-    const { number, title } = splitHeadingNumber(b.text)
+    const { number, title } = splitHeadingNumber(b.match)
     return entries.some((c) => (!c.number || !number || number === c.number) && Math.max(...c.titles.map((t) => titleSimilarity(title, t))) >= STRONG_TITLE)
   }).length
 
@@ -145,11 +169,11 @@ const scoreEntry = (text: string, entry: TemplateEntry, parentText: string | nul
 }
 
 /** Heading cha (gần nhất phía trên, cấp nhỏ hơn) của từng heading; heading cấp đầu ⇒ `null`. */
-const parentHeadingTexts = (headings: ProfileBlock[]): (string | null)[] => {
-  const stack: ProfileBlock[] = []
+const parentHeadingTexts = (headings: MatchHeading[]): (string | null)[] => {
+  const stack: MatchHeading[] = []
   return headings.map((b) => {
     while (stack.length && stack[stack.length - 1].level! >= b.level!) stack.pop()
-    const parent = stack[stack.length - 1]?.text ?? null
+    const parent = stack[stack.length - 1]?.match ?? null
     stack.push(b)
     return parent
   })
@@ -164,13 +188,13 @@ const NON_FPT_STRUCTURE_CAP = 0.75
  * ⇒ tính năng, dưới tính năng ⇒ chức năng (độ tin ≤ 0.75 — cần xác nhận), dưới mục có nội dung ⇒ thuộc mục đó, còn lại
  * ⇒ giữ nguyên văn.
  */
-const matchWithCatalog = (headings: ProfileBlock[], catalog: readonly TemplateEntry[]): HeadingMapEntry[] => {
+const matchWithCatalog = (headings: MatchHeading[], catalog: readonly TemplateEntry[]): HeadingMapEntry[] => {
   const pairs: { h: number; c: TemplateEntry; score: number }[] = []
   const best = new Map<number, number>()
   const parents = parentHeadingTexts(headings)
   headings.forEach((b, h) => {
     for (const c of catalog) {
-      const score = scoreEntry(b.text, c, parents[h], catalog)
+      const score = scoreEntry(b.match, c, parents[h], catalog)
       best.set(h, Math.max(best.get(h) ?? 0, score))
       if (score >= MATCH_MIN) pairs.push({ h, c, score })
     }
@@ -225,7 +249,7 @@ const matchWithCatalog = (headings: ProfileBlock[], catalog: readonly TemplateEn
       confidence = (best.get(h) ?? 0) >= WEAK_MATCH ? 0.5 : 0.9
     }
     const detector = b.heading_detector ?? "style"
-    if (detector === "numbering_pattern") confidence = Math.min(confidence, NUMBERING_PATTERN_CAP)
+    confidence = Math.min(confidence, detectorCap(detector, b.heading_signals))
     entries.push({
       block_id: b.block_id,
       heading_text: b.text.trim(),
@@ -260,13 +284,13 @@ const withSlotSuggestions = (entries: HeadingMapEntry[]): HeadingMapEntry[] => {
   })
 }
 
-const matchFptHeadings = (headings: ProfileBlock[]): HeadingMapEntry[] => {
+const matchFptHeadings = (headings: MatchHeading[]): HeadingMapEntry[] => {
   // 1. Gán tham lam section cố định/nhóm
   const pairs: { h: number; c: SectionCandidate; score: number }[] = []
   const best = new Map<number, number>()
   headings.forEach((b, h) => {
     for (const c of SECTION_CANDIDATES) {
-      const score = scoreHeading(b.text, c)
+      const score = scoreHeading(b.match, c)
       best.set(h, Math.max(best.get(h) ?? 0, score))
       if (score >= MATCH_MIN) pairs.push({ h, c, score })
     }
@@ -286,7 +310,7 @@ const matchFptHeadings = (headings: ProfileBlock[]): HeadingMapEntry[] => {
   headings.forEach((b, h) => {
     while (stack.length && stack[stack.length - 1].level >= b.level!) stack.pop()
     const parent = stack[stack.length - 1]?.section ?? null
-    const { number } = splitHeadingNumber(b.text)
+    const { number } = splitHeadingNumber(b.match)
     let hit = assigned.get(h)
     if (!hit) {
       if (parent === "group:3") {
@@ -300,7 +324,7 @@ const matchFptHeadings = (headings: ProfileBlock[]): HeadingMapEntry[] => {
       }
     }
     const detector = b.heading_detector ?? "style"
-    const confidence = detector === "numbering_pattern" ? Math.min(hit.confidence, NUMBERING_PATTERN_CAP) : hit.confidence
+    const confidence = Math.min(hit.confidence, detectorCap(detector, b.heading_signals))
     entries.push({ block_id: b.block_id, heading_text: b.text.trim(), section_id: hit.section, confidence: round(confidence), detected_by: detector, confirmed: false })
     stack.push({ level: b.level!, section: hit.section })
   })
@@ -372,8 +396,23 @@ export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   }
 }
 
-/** Còn mục chưa xác nhận có độ tin dưới ngưỡng ⇒ cần bước 1.7. */
+/** Còn mục chưa xác nhận có độ tin dưới ngưỡng ⇒ cần bước 1.7 (chỉ còn ở bản ghi import cũ đang `mapping_review`). */
 export const needsMappingReview = (profile: Pick<ProfileMatch, "heading_map" | "table_map">): boolean =>
   [...profile.heading_map, ...profile.table_map].some((e) => !e.confirmed && e.confidence < MAPPING_CONFIDENCE_THRESHOLD)
+
+/**
+ * FLF-343 (mode 1 một mạch): mục độ tin thấp chưa xác nhận ⇒ tự nhận (`confirmed` + `auto_confirmed`), **giữ nguyên độ tin**
+ * để finalize gắn cờ "Cần xem" và dữ liệu đọc theo cột giữ độ tin của cột. Trả số mục đã tự nhận; sửa tại chỗ.
+ */
+export const autoConfirmMapping = (profile: { heading_map: HeadingMapEntry[]; table_map: TableMapEntry[] }): number => {
+  let n = 0
+  for (const e of [...profile.heading_map, ...profile.table_map]) {
+    if (e.confirmed || e.confidence >= MAPPING_CONFIDENCE_THRESHOLD) continue
+    e.confirmed = true
+    e.auto_confirmed = true
+    n++
+  }
+  return n
+}
 
 export const isProvisionalSection = (id: string): boolean => PROVISIONAL_SECTION.test(id)
