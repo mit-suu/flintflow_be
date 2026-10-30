@@ -2,7 +2,7 @@
  * svg-to-png.ts
  * ─────────────────────────────────────────────────────────────────
  * PNG cho sơ đồ tự dựng (`format = svg`) bằng resvg — không cần Chrome, không cần PlantUML, không dùng font hệ thống
- * (image `node:22-alpine` không có font): chỉ Liberation Sans đóng gói ở `assets/fonts/`, cũng là font sinh bảng đo chữ.
+ * (image `node:22-alpine` không có font): chỉ Liberation Sans (Regular, Bold, Italic) đóng gói ở `assets/fonts/`, cũng là font sinh bảng đo chữ.
  *
  * - Render qua `renderAsync` (threadpool libuv) ⇒ không chặn event loop.
  * - Scale 2x như `toPng` của guideline; cạnh dài bị chặn ở `MAX_PNG_PX` (thu nhỏ, không lỗi).
@@ -17,7 +17,7 @@ export const PNG_SCALE = 2
 export const MAX_PNG_PX = 8192
 export const MAX_SVG_BYTES = 2 * 1024 * 1024
 export const FONT_FAMILY = "Liberation Sans"
-export const FONT_FILES = ["LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf"] as const
+export const FONT_FILES = ["LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf", "LiberationSans-Italic.ttf"] as const
 
 type ResvgModule = typeof import("@resvg/resvg-js")
 let resvg: Promise<ResvgModule> | null = null

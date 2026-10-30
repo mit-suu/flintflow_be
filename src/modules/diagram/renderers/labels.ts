@@ -17,8 +17,10 @@ export interface DiagramLabels {
   defaultIn: Readonly<Record<ActorKind, string>>
   /** Như `defaultIn`, chiều từ hệ thống ra actor. */
   defaultOut: Readonly<Record<ActorKind, string>>
-  /** Tiêu đề một phần sơ đồ use case khi phải tách nhiều hình — `groups` là tên actor chính của phần. */
+  /** Tiêu đề một hình use case — `groups` là tên feature (hoặc actor chính khi chưa có feature) kèm `(i/n)` khi nhóm tách nhiều hình. */
   useCasesTitle: (groups: string) => string
+  /** Tiêu đề hình phân cấp actor (generalization) ở §2.1. */
+  actorHierarchyTitle: string
   /** Nhóm use case không có actor nào. */
   otherGroup: string
   /** Tiêu đề sơ đồ luồng màn của một actor — `section-renderer` dùng lại làm chú thích ảnh. */
@@ -41,6 +43,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     defaultIn: { human: "User Input", system: "Service Response", time: "Scheduled Trigger" },
     defaultOut: { human: "Processing Result", system: "Service Request", time: "Job Status" },
     useCasesTitle: (groups) => `Use Cases — ${groups}`,
+    actorHierarchyTitle: "Actor Hierarchy",
     otherGroup: "Other",
     screensFlowTitle: (actorName) => `Screens flow for ${actorName}`,
     popup: "(pop-up)",
@@ -56,6 +59,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     defaultIn: { human: "dữ liệu người dùng nhập", system: "phản hồi dịch vụ", time: "kích hoạt theo lịch" },
     defaultOut: { human: "kết quả xử lý", system: "yêu cầu dịch vụ", time: "trạng thái tác vụ" },
     useCasesTitle: (groups) => `Sơ đồ use case — ${groups}`,
+    actorHierarchyTitle: "Phân cấp tác nhân",
     otherGroup: "Khác",
     screensFlowTitle: (actorName) => `Luồng màn hình của ${actorName}`,
     popup: "(pop-up)",

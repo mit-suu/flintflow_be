@@ -4,38 +4,19 @@
 
 Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`. Engine `svg` (no PlantUML source): level-0 data flow in Yourdon/DeMarco notation — ONE circle for the whole system, one rectangle per external actor (fill `#7ACFF5`, role name inside), people on the left half and external systems / scheduler on the right half. Every `flows_in` item (actor → system) and every `flows_out` item (system → actor) is its own straight arrow with a solid head and one Title Case data-noun label along it on white; no limit, no merging, no unlabelled arrows, no data stores, no flows between entities, no title. One-way actors draw only the arrows that exist — never pair lists by index or invent a counterpart — but the diagram as a whole always has both directions; missing flows get a fallback label by kind. See `renderer/context` for the full rules.
 
-## `usecase` — §2.2.1
+## `usecase` — §2.2.1 (+ actor hierarchy §2.1)
 
-Source fields: `actors[].name/.kind/.parent_id` · `use_cases[].name/.actor_ids/.includes/.extends`.
+Source fields: `actors[].name/.kind/.parent_id` · `use_cases[].name/.actor_ids/.function_ids/.includes/.extends` · `functions[].feature_id` · `features[].name/.order`.
 
-```plantuml
-@startuml
-skinparam monochrome true
-left to right direction
-actor "Business Analyst" as A01
-actor "Payment Gateway" as A05 <<system>>
-rectangle "FlintFlow" {
-  usecase "Create Project" as UC01
-  usecase "Export SRS" as UC07
-  usecase "Pay Subscription" as UC09
-}
-A01 --> UC01
-A01 --> UC07
-UC09 --> A05
-UC07 .> UC01 : <<include>>
-@enduml
-```
+Engine `svg` (no PlantUML source): UML 2.5.1 built in code, fill `#7ACFF5`.
 
-- `includes[]` → `base .> included : <<include>>`
-- `extends[]` → `extension .> base : <<extend>>`
-- `kind = time` actors: `actor "Scheduler" as A08 <<time>>`
-- One diagram per human actor (`title Use Cases — <actor>`): in a diagram each use case is associated with
-  only that human actor (system/time actors are secondary, on the right). A use case several roles share is
-  repeated in each role's diagram, never drawn with two human actors on it.
-- `actors[].parent_id` (human → human) → `User <|-- Customer` (= `Customer --|> User`). Common use cases
-  (Log In, Register Account — done by EVERY specialized actor) go in the `User` part; each specialized
-  actor gets its own part with its role-specific use cases and the generalization arrow. A use case shared
-  by only some roles is not lifted to `User`: it is repeated in each of those roles' diagrams. Never between a `system`/`time` or unrelated actor.
+- One system boundary named `project.system_name ?? project.name`; every use case an ellipse of the same size in one column.
+- Actor = stick figure, human on the left, `system`/`time` on the right (`<<system>>` / `<<time>>`), outside the boundary; abstract actors (with children) in italic.
+- Association = solid straight line, no arrowhead. `includes[]` → `base ..> included : <<include>>`; `extends[]` → `extension ..> base : <<extend>>` — dashed, open arrowhead, vertical between adjacent ellipses.
+- One diagram per feature (`function_ids` → `functions[].feature_id`, several ⇒ the first function's feature); no feature ⇒ grouped by main actor after the features. Over 20 use cases ⇒ split equally in the same feature; `owner_kind` / `owner_id` stay `null`, the first part keeps the original id.
+- Actors as modelled: general actors stay general, never expanded to leaf actors. A human actor skips the edge to a use case that is included / extending in the same diagram; `system`/`time` actors keep every edge.
+- `actors[].parent_id` (human → human) ⇒ one extra diagram (`section = fixed:2.1`): actor hierarchy, child below parent, solid line, hollow triangle at the parent. Use cases have no parent field ⇒ no use case generalization.
+- Layout rules and algorithm: `renderer/usecase/SKILL.md`, `docs/technical/usecase-diagram-layout.md`.
 
 ## `screen_flow` — §3.1.1
 

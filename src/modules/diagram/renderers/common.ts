@@ -39,6 +39,13 @@ export const alias = (id: string): string => id.replace(/[^A-Za-z0-9_]/g, "_")
 
 export const puml = (open: string, body: string[], close: string): string => `${[open, ...body, close].join("\n")}\n`
 
+/** Nội dung `<title>` của SVG do `Scene.toSvg(title)` sinh (đã giải escape); không có ⇒ null. */
+export const svgTitleOf = (source: string): string | null => {
+  const raw = /<title>([^<]*)<\/title>/.exec(source)?.[1]
+  if (raw === undefined) return null
+  return raw.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&")
+}
+
 /** Part `svg` từ một `Scene`: kiểm bố cục (luật 9) + markup. `allowBends` theo kind (`erd`, `class`, `screen_flow`, `state_machine`). */
 export const svgPart = (scene: Scene, options: CheckOptions, meta: Omit<RenderedPart, "format" | "source" | "issues">, title?: string): RenderedPart => ({
   ...meta,

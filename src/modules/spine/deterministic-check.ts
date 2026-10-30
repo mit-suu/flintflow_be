@@ -10,7 +10,7 @@
  * Luật "chưa có X" chỉ bắn cờ khi bước sinh ra X đã `accepted` (FLF-213, `StepGate` bên dưới).
  */
 
-import type { Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
+import type { Actor, Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
 import { tryResolve } from "./path-resolver.js"
 import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
@@ -61,6 +61,7 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_name_style", "yellow", true),
   rule("actor_name_shape", "yellow", true),
   rule("actor_generalization_invalid", "yellow", true),
+  rule("actor_generalization_children_unlisted", "yellow", true),
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
   rule("derived_from_changed_assumption", "yellow", true),
@@ -1098,6 +1099,31 @@ const actorGeneralizationInvalid = (spine: Spine): FlagCandidate[] => {
   })
 }
 
+const normalizeText = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase()
+
+/**
+ * Actor tổng quát (có actor con hợp lệ) mà mô tả ở §2.1 không nêu tên một actor con: người đọc tài liệu không biết actor
+ * tổng quát gồm những vai nào, trong khi sơ đồ phân cấp actor (§2.1) và các sơ đồ use case chỉ hiện đúng tên actor tổng quát.
+ */
+const actorGeneralizationChildrenUnlisted = (spine: Spine): FlagCandidate[] => {
+  const children = new Map<string, Actor[]>()
+  const byId = new Map(spine.actors.map((a) => [a.id, a]))
+  for (const [childId, parentId] of actorParents(spine.actors)) children.set(parentId, [...(children.get(parentId) ?? []), byId.get(childId)!])
+  return spine.actors.flatMap((parent): FlagCandidate[] => {
+    const description = normalizeText(parent.description)
+    const missing = (children.get(parent.id) ?? []).filter((child) => !description.includes(normalizeText(child.name)))
+    if (missing.length === 0) return []
+    return [{
+      level: "yellow",
+      rule_id: "actor_generalization_children_unlisted",
+      section_id: "fixed:2.1",
+      target_id: parent.id,
+      message: `Mô tả của tác nhân tổng quát "${parent.name}" chưa nêu các tác nhân con: ${missing.map((c) => c.name).join(", ")}`,
+      remediation_step: "S-3.1"
+    }]
+  })
+}
+
 const namingShape = (spine: Spine): FlagCandidate[] => {
   const actorNames = spine.actors.map((a) => a.name)
   const useCaseNames = spine.use_cases.map((u) => u.name)
@@ -1321,6 +1347,7 @@ export const runDeterministicCheck = (
     ...useCaseAccountAccessRelation(spine),
     ...namingShape(spine),
     ...actorGeneralizationInvalid(spine),
+    ...actorGeneralizationChildrenUnlisted(spine),
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate),
     ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout) : [])

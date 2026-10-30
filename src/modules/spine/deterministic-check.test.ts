@@ -6,7 +6,7 @@ import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine, StepStatus } from "./spine.types.js"
 import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
-import { computeSourceHash } from "./source-hash.js"
+import { renderedDiagramHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 
@@ -33,8 +33,8 @@ describe("RULES", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
-    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(22)
+    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(23)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -288,7 +288,7 @@ describe("runDeterministicCheck", () => {
     const wrong = runDeterministicCheck(variant((s) => (s.diagrams.find((x) => x.id === d.id)!.source_hash = "0".repeat(64))))
     expect(byRule(wrong, "diagram_stale")).toMatchObject([{ target_id: d.id }])
 
-    const fresh = variant((s) => (s.diagrams.find((x) => x.id === d.id)!.source_hash = computeSourceHash(FIXTURE, d)))
+    const fresh = variant((s) => (s.diagrams.find((x) => x.id === d.id)!.source_hash = renderedDiagramHash(FIXTURE, d)))
     expect(byRule(runDeterministicCheck(fresh), "diagram_stale")).toEqual([])
   })
 
@@ -467,6 +467,17 @@ describe("runDeterministicCheck", () => {
     expect(byRule(flags, "actor_name_shape").filter((f) => f.target_id === "A10")).toEqual([])
     expect(byRule(flags, "orphan_actor").map((f) => f.target_id)).not.toContain("A03")
     expect(byRule(flags, "actor_generalization_invalid")).toEqual([])
+    // mô tả của User chỉ nêu Business Analyst, thiếu Administrator ⇒ cờ vàng ở actor tổng quát; nêu đủ (không phân biệt hoa thường) thì hết
+    expect(byRule(flags, "actor_generalization_children_unlisted")).toMatchObject([{ target_id: "A10", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+    expect(byRule(flags, "actor_generalization_children_unlisted")[0].message).toContain("Business Analyst, Administrator")
+    const listed = variant((s) => {
+      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Any signed-in person: a business ANALYST or an Administrator." })
+      s.actors.find((a) => a.id === "A02")!.name = "Business Analyst"
+      s.actors.find((a) => a.id === "A02")!.parent_id = "A10"
+      s.actors.find((a) => a.id === "A03")!.parent_id = "A10"
+    })
+    expect(byRule(runDeterministicCheck(listed), "actor_generalization_children_unlisted")).toEqual([])
+    expect(byRule(runDeterministicCheck(FIXTURE), "actor_generalization_children_unlisted")).toEqual([])
 
     const wrong = runDeterministicCheck(variant((s) => (s.actors.find((a) => a.id === "A01")!.parent_id = "A05")))
     expect(byRule(wrong, "actor_generalization_invalid")).toMatchObject([{ target_id: "A01", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
