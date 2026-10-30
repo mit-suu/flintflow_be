@@ -19,6 +19,7 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   ["awaiting_latest_confirm", "parsing"],
   ["parsing", "mapping_review"],
   ["parsing", "extracting"],
+  ["parsing", "preflight_rejected"],
   ["mapping_review", "extracting"],
   ["extracting", "fields_review"],
   ["extracting", "baselining"],

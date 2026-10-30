@@ -40,7 +40,7 @@ describe("I-4 — bảng khớp đủ cột", () => {
   it("bảng actor/UC/BR trích tất định, không gọi AI, không usage, không trừ credit", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
 
     for (const s of TABLE_SECTIONS) expect(calls, s).not.toContain(s)
     expect(calls).toHaveLength(6)
@@ -101,10 +101,10 @@ describe("I-4 — output sai schema", () => {
 })
 
 describe("I-4 — độ tin", () => {
-  it("field độ tin < 0.7 ⇒ fields_review, chỉ field đó cần xác nhận", async () => {
+  it("FLF-343: field độ tin < 0.7 ⇒ vẫn sang baselining (không dừng ở fields_review), chỉ field đó đếm là cần xem", async () => {
     const ctx = await importAtExtracting()
     const run = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(run.doc.status).toBe("fields_review")
+    expect(run.doc.status).toBe("baselining")
     const needing = run.sections.filter((s) => s.fields_needing_review > 0)
     expect(needing.map((s) => s.fields_needing_review)).toEqual([1, 1])
     expect(needing.every((s) => s.section_id.startsWith("function:@B"))).toBe(true)
@@ -123,12 +123,12 @@ describe("I-4 — độ tin", () => {
     expect(run.doc.status).toBe("baselining")
   })
 
-  it("độ tin cả item 0.69 ⇒ mọi field của item cần xác nhận", async () => {
+  it("độ tin AI cả item thấp (0.3) ⇒ dù tín hiệu code khớp (FLF-343: 0.3 × 0.6 + 1 × 0.4 < 0.7) mọi field của item cần xem", async () => {
     mockOverrides.next = record((prompt) => {
       const out = fakeMode1(prompt)
       if (!out || sectionOf(prompt) !== "fixed:3.1.2") return out
       const json = JSON.parse(out) as { items: { confidence: number }[] }
-      for (const i of json.items) i.confidence = 0.69
+      for (const i of json.items) i.confidence = 0.3
       return JSON.stringify(json)
     })
     const ctx = await importAtExtracting()
@@ -162,7 +162,7 @@ describe("I-4 — hết credit, resume", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(resumed.doc.paused).toBeNull()
     expect(resumed.doc.extract_cursor).toBeNull()
-    expect(resumed.doc.status).toBe("fields_review")
+    expect(resumed.doc.status).toBe("baselining")
     for (const s of done) expect(calls, s).not.toContain(s)
     expect(calls[0]).toBe(AI_ORDER[2])
     expect(calls).toHaveLength(4)
@@ -179,7 +179,7 @@ describe("I-4 — hết credit, resume", () => {
     calls = []
     const again = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(calls).toEqual([])
-    expect(again.doc.status).toBe("fields_review")
+    expect(again.doc.status).toBe("baselining")
   })
 })
 
@@ -201,7 +201,7 @@ describe("I-4 — lỗi AI", () => {
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
     expect(calls[0]).toBe(AI_ORDER[2])
     expect(resumed.sections.every((s) => s.status === "done")).toBe(true)
-    expect(resumed.doc.status).toBe("fields_review")
+    expect(resumed.doc.status).toBe("baselining")
   })
 
   it("import không ở extracting ⇒ IMPORT_INVALID_STATE, không gọi AI", async () => {

@@ -4,9 +4,11 @@
  *   1. Bảng khớp đủ cột (template profile) ⇒ trích tất định, không tốn credit (G7).
  *   2. Feature/function của §3.2+ ⇒ tên + quan hệ lấy từ heading (tất định).
  *   3. Phần chữ còn lại ⇒ `IMPORT_EXTRACT_FIELDS` (chỉ text block, G6) qua `withMeteredAi`.
- *   4. Lưu `ExtractionDraft`; field độ tin < 0.7 ⇒ `fields_review`.
+ *   4. Lưu `ExtractionDraft` rồi sang `baselining` (FLF-343: không dừng ở `fields_review` — field độ tin < 0.7 / đọc từ ảnh vẫn vào
+ *      baseline 0.1, finalize gắn cờ vàng "Cần xem"). Job nền nối tiếp finalize (`extract-jobs.ts`).
  * Hết credit / AI lỗi sau retry ⇒ `paused`, giữ `extract_cursor`; chạy tiếp bỏ qua section đã `done`.
- * Chưa ghi Spine: finalize áp mọi field đã xác nhận trong một transaction.
+ * Chưa ghi Spine: finalize áp mọi field trong một transaction.
+ * Độ tin của item AI (FLF-343) = điểm AI kết hợp tín hiệu của code (`combineAiConfidence`) — điểm AI không bao giờ là tín hiệu duy nhất.
  */
 
 import { createHash } from "node:crypto"
@@ -36,7 +38,7 @@ import {
   type ProvisionalEntity
 } from "./extracted-entities.js"
 import { ExtractionDraft, type ExtractedField, type IExtractionDraft } from "./extraction-draft.model.js"
-import { VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
+import { FIELD_CONFIDENCE_THRESHOLD, VISION_CONFIDENCE_CAP, needsConfirm, type FieldOrigin, type MentionEntity } from "./import.constants.js"
 import type { FieldsPatchRequest, GetImportResponse } from "./import.dto.js"
 import { assertImportStatus, extractionSummary, requireImport, transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
@@ -218,7 +220,8 @@ export const deterministicTableItems = (
   const shape = tableShape(grid)
   if (!cols.length || !shape.body.length) return null
   const entity = cols[0].field_path!.split("[")[0]
-  const confidence = Math.min(...cols.map((c) => (c.confirmed ? 1 : c.confidence)))
+  // Cột người dùng xác nhận ⇒ chắc chắn; cột tự nhận (FLF-343) giữ độ tin của mapping ⇒ dữ liệu của nó vẫn "Cần xem"
+  const confidence = Math.min(...cols.map((c) => (c.confirmed && !c.auto_confirmed ? 1 : c.confidence)))
   if (entity === "permissions") return matrixItems(table, grid, shape, cols, confidence, indented)
   const def = TABLE_ENTITIES.find((d) => d.entity === entity)
   const fields = new Map(cols.filter((c) => c.field_path!.startsWith(`${entity}[`)).map((c) => [c.column_index, c.field_path!.split("].")[1]]))
@@ -279,36 +282,110 @@ export const chunkBlocks = <T extends { text: string }>(blocks: T[], budget = AI
 /** Khối gửi AI; `text` của bảng đã là `tableText` (dựng trước khi chia lô để trần ký tự tính đúng phần gửi đi). */
 const blockLines = (blocks: BlockLite[]): string => blocks.map((b) => `[${b.block_id}] ${b.kind === "table" ? `(table)\n${b.text}` : b.text}`).join("\n")
 
+/** Trọng số của điểm AI trong độ tin cuối (FLF-343); phần còn lại là trung bình tín hiệu của code. */
+export const AI_CONFIDENCE_WEIGHT = 0.6
+
+/** Chuẩn hoá để so chữ: thường, bỏ dấu, gộp khoảng trắng. */
+const plain = (s: string): string =>
+  s
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+
+/**
+ * Tín hiệu code của một item AI (FLF-343, mỗi tín hiệu 0..1):
+ * - `source`: model trỏ được ít nhất một block nguồn có thật của lô (không thì code tự gán block đầu ⇒ 0);
+ * - `match`: khoá model đặt khớp mã được nhắc trong block nguồn / phần tử đã biết, hoặc một giá trị chữ của item có trong chữ
+ *   của block nguồn (tên, câu yêu cầu… — 40 ký tự đầu) ⇒ 1; không khớp gì ⇒ 0;
+ * - `section`: độ tin khớp mục (I-3) của section đang trích (không biết ⇒ không tính).
+ */
+export const codeSignals = (
+  raw: { key?: string | null; value: Record<string, unknown>; source_block_ids: string[] },
+  ctx: { validBlocks: Set<string>; blockText?: ReadonlyMap<string, string>; knownKey?: boolean; sectionConfidence?: number | null }
+): number[] => {
+  const sources = raw.source_block_ids.filter((b) => ctx.validBlocks.has(b))
+  const signals = [sources.length ? 1 : 0]
+  if (ctx.blockText && !sources.length) {
+    // Block nguồn model bịa ⇒ không có chữ nguồn để khớp — không so với cả lô (dễ khớp nhầm)
+    signals.push(0)
+  } else if (ctx.blockText) {
+    const text = plain(sources.map((b) => ctx.blockText!.get(b) ?? "").join(" "))
+    const key = raw.key ? plain(raw.key) : ""
+    const keyHit = !!key && (ctx.knownKey || text.includes(key))
+    const valueHit = Object.values(raw.value).some((v) => {
+      const str = typeof v === "string" ? plain(v) : ""
+      return str.length >= 3 && text.includes(str.slice(0, 40))
+    })
+    signals.push(keyHit || valueHit ? 1 : 0)
+  }
+  if (typeof ctx.sectionConfidence === "number") signals.push(Math.min(1, Math.max(0, ctx.sectionConfidence)))
+  return signals
+}
+
+/** Điểm AI dưới mức này ⇒ luôn "Cần xem", tín hiệu code khớp đến đâu cũng không kéo qua ngưỡng. */
+export const AI_MIN_TRUSTED = 0.6
+
+/**
+ * Độ tin cuối = AI × 0.6 + trung bình tín hiệu code × 0.4, làm tròn 2 chữ số. Điểm AI < 0.6 ⇒ chặn dưới ngưỡng xác nhận
+ * (`FIELD_CONFIDENCE_THRESHOLD`) để vẫn gắn cờ Cần xem.
+ */
+export const combineAiConfidence = (ai: number, signals: readonly number[]): number => {
+  const code = signals.length ? signals.reduce((a, b) => a + b, 0) / signals.length : ai
+  const combined = Math.round(Math.min(1, Math.max(0, AI_CONFIDENCE_WEIGHT * ai + (1 - AI_CONFIDENCE_WEIGHT) * code)) * 100) / 100
+  return ai < AI_MIN_TRUSTED ? Math.min(combined, Math.round((FIELD_CONFIDENCE_THRESHOLD - 0.01) * 100) / 100) : combined
+}
+
 /**
  * Đổi output model sang item: id theo mã / tên phần tử đã biết (`aiItemId`), ép id function của section function.
  * `fromImage`: item đọc từ ảnh diagram — tên trùng phần tử đã biết thắng khoá model đặt.
+ * Độ tin (cả từng field) = điểm AI kết hợp tín hiệu code (`codeSignals`, FLF-343).
  */
 export const itemsFromAi = (
   out: ImportExtractOutput,
-  ctx: { sectionId: string; alloc: IdAllocator; known: EntityItem[]; sectionFunction: ProvisionalEntity | null; validBlocks: Set<string>; fromImage?: boolean }
+  ctx: {
+    sectionId: string
+    alloc: IdAllocator
+    known: EntityItem[]
+    sectionFunction: ProvisionalEntity | null
+    validBlocks: Set<string>
+    fromImage?: boolean
+    /** Chữ của block trong lô (tín hiệu khớp khoá / giá trị). */
+    blockText?: ReadonlyMap<string, string>
+    /** Độ tin khớp mục I-3 của section. */
+    sectionConfidence?: number | null
+  }
 ): EntityItem[] => {
   let functionUsed = false
   return out.items.map((raw) => {
     const value = { ...raw.value }
     delete value.id
     let id: string | null = null
+    let knownKey = false
     if (raw.entity !== "project") {
       if (raw.entity === "functions" && ctx.sectionFunction && !functionUsed) {
         id = ctx.sectionFunction.id
         functionUsed = true
+        knownKey = true
       } else {
-        id = aiItemId(ctx.known, raw.entity, raw.key, value.name ?? value.term, ctx.fromImage) ?? ctx.alloc.next(raw.entity)
+        const found = aiItemId(ctx.known, raw.entity, raw.key, value.name ?? value.term, ctx.fromImage)
+        // Khoá trỏ đúng một phần tử đã biết (bảng, mục trước) — mã model tự đặt mới thì không tính
+        knownKey = !!found && ctx.known.some((k) => k.entity === raw.entity && k.id === found)
+        id = found ?? ctx.alloc.next(raw.entity)
         ctx.alloc.reserve(raw.entity, id)
       }
     }
     if (raw.entity === "nfrs" && NFR_CATEGORY_BY_SECTION[ctx.sectionId] && value.category === undefined) value.category = NFR_CATEGORY_BY_SECTION[ctx.sectionId]
     const sources = raw.source_block_ids.filter((b) => ctx.validBlocks.has(b))
+    const signals = codeSignals(raw, { validBlocks: ctx.validBlocks, blockText: ctx.blockText, knownKey, sectionConfidence: ctx.sectionConfidence })
     return {
       entity: raw.entity,
       id,
       value,
-      confidence: raw.confidence,
-      field_confidence: raw.field_confidence ?? {},
+      confidence: combineAiConfidence(raw.confidence, signals),
+      field_confidence: Object.fromEntries(Object.entries(raw.field_confidence ?? {}).map(([k, v]) => [k, combineAiConfidence(v, signals)])),
       source_block_ids: sources.length ? sources : [...ctx.validBlocks].slice(0, 1),
       origin: "ai" as const
     }
@@ -770,7 +847,7 @@ export const runExtraction = async (projectId: string, userId: string, importId:
           : dropMutualRelations(
               orientRelations(
                 visionItems(
-                  itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true })
+                  itemsFromAi(result.data, { sectionId: section_id, alloc, known: [...known, ...items], sectionFunction: null, validBlocks: new Set([img.block_id]), fromImage: true, sectionConfidence: heading?.confidence ?? null })
                 ),
                 [...known, ...items]
               ),
@@ -813,7 +890,9 @@ export const runExtraction = async (projectId: string, userId: string, importId:
             alloc,
             known: [...known, ...items],
             sectionFunction: sectionFunction?.entity === "functions" ? sectionFunction : null,
-            validBlocks: new Set(batch.map((b) => b.block_id))
+            validBlocks: new Set(batch.map((b) => b.block_id)),
+            blockText: new Map(batch.map((b) => [b.block_id, b.text])),
+            sectionConfidence: heading?.confidence ?? null
           }),
           mentionedRules
         )
@@ -860,8 +939,8 @@ export const runExtraction = async (projectId: string, userId: string, importId:
 
   doc.extract_cursor = null
   await doc.save()
-  const finalDrafts = await ExtractionDraft.find({ import_id: doc._id })
-  await transitionImport(doc, needsReview(finalDrafts) ? "fields_review" : "baselining")
+  // FLF-343: không dừng ở `fields_review` — field độ tin thấp vào baseline 0.1 kèm cờ "Cần xem" (finalize)
+  await transitionImport(doc, "baselining")
   return { doc, sections: (await extractionSummary(doc._id as mongoose.Types.ObjectId)).sections }
 }
 
@@ -900,19 +979,24 @@ export const estimateExtraction = async (projectId: string, doc: Pick<IImportedD
 }
 
 /**
- * `credit_estimate` của `GET /import`: chỉ khi import ở `mapping_review` hoặc `extracting` chưa chạy / đang dừng (caller
- * kiểm job nền). `withBalance` (Lead / Analyst — cùng quyền xem `/billing/balance`) ⇒ kèm số credit khả dụng của ví org sở
- * hữu project (cùng ví lượt gọi AI trừ, `resolveWalletOrg`).
+ * `credit_estimate` của `GET /import` — FLF-343: màn báo credit **một lần** sau upload (`extracting` chưa chạy, hoặc đang dừng;
+ * bản ghi cũ ở `mapping_review`; caller kiểm job nền). Gồm I-4 còn lại + bước kiểm tra AI (1.11) chạy nối tiếp sau baseline
+ * 0.1 (`estimateCheckCalls`) ⇒ cả lượt một mạch tốn tối đa chừng này credit. `withBalance` (Lead / Analyst — cùng quyền xem
+ * `/billing/balance`) ⇒ kèm số credit khả dụng của ví org sở hữu project (cùng ví lượt gọi AI trừ, `resolveWalletOrg`).
  */
 export const creditEstimateFor = async (
   projectId: string,
   userId: string,
   doc: Pick<IImportedDocument, "_id" | "status">,
   opts: { withBalance: boolean }
-): Promise<(ExtractionEstimate & { available_credits: number | null }) | null> => {
+): Promise<(ExtractionEstimate & { check_calls: number; available_credits: number | null }) | null> => {
   if (doc.status !== "mapping_review" && doc.status !== "extracting") return null
-  const estimate = await estimateExtraction(projectId, doc)
-  if (!estimate) return null
+  const extraction = await estimateExtraction(projectId, doc)
+  if (!extraction) return null
+  // Import động: check.service dùng `chunkBlocks` của file này
+  const { estimateCheckCalls } = await import("./check.service.js")
+  const check = await estimateCheckCalls(projectId)
+  const estimate = { ...extraction, check_calls: check.calls, ai_calls: extraction.ai_calls + check.calls, credits: extraction.credits + check.credits }
   if (!opts.withBalance) return { ...estimate, available_credits: null }
   const orgId = await resolveWalletOrg(projectId)
   if (!orgId) return { ...estimate, available_credits: null }
@@ -920,7 +1004,7 @@ export const creditEstimateFor = async (
   return { ...estimate, available_credits: wallet.balance - wallet.reserved }
 }
 
-// ─── 1.9 xác nhận field ─────────────────────────────────────────
+// ─── 1.9 xác nhận field (chỉ bản ghi cũ đang `fields_review`, trước FLF-343) ─────────
 
 export const patchFields = async (projectId: string, body: FieldsPatchRequest): Promise<IImportedDocument> => {
   const doc = await requireImport(projectId, body.import_id)

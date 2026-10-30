@@ -13,7 +13,9 @@ export const PREFLIGHT_ISSUE_CODES = [
   "FOREIGN_TRACK_CHANGE",
   "FOREIGN_COMMENT",
   /** FLF-331 (I-1): Code không thấy dấu hiệu SRS / mẫu SRS (CV, hoá đơn, test plan…) — từ chối trước khi tốn credit đọc file. */
-  "NOT_SRS"
+  "NOT_SRS",
+  /** FLF-343: qua preflight nhưng tách file / khớp mẫu lỗi (cấu trúc XML lạ) — import không treo ở `parsing`. */
+  "PARSE_FAILED"
 ] as const
 export type PreflightIssueCode = (typeof PREFLIGHT_ISSUE_CODES)[number]
 
@@ -91,9 +93,17 @@ export type ExtractionStatus = (typeof EXTRACTION_STATUSES)[number]
 export const REUPLOAD_CHANGES = ["added", "removed", "modified", "moved"] as const
 export type ReuploadChange = (typeof REUPLOAD_CHANGES)[number]
 
-/** Cách nhận heading (I-3): styleId bị Word bản địa hoá nên đi qua tên style / outlineLvl; file không dùng style ⇒ mẫu số mục. */
-export const HEADING_DETECTORS = ["style", "outline_level", "numbering_pattern", "user"] as const
+/**
+ * Cách nhận heading (I-3): styleId bị Word bản địa hoá nên đi qua tên style / outlineLvl; file không dùng style ⇒ mẫu số mục.
+ * FLF-343 thêm: `toc` (tiêu đề trùng một dòng mục lục), `numbering` (đoạn đánh số tự động `numPr`, in đậm / chữ to, không phải
+ * style danh sách), `format` (chữ to hơn thân bài rõ rệt, ngắn, không dấu câu cuối).
+ */
+export const HEADING_DETECTORS = ["style", "outline_level", "numbering_pattern", "user", "toc", "numbering", "format"] as const
 export type HeadingDetector = (typeof HEADING_DETECTORS)[number]
+
+/** Tín hiệu phụ của heading (FLF-343) — nâng trần độ tin của heading nhận theo số mục / định dạng. */
+export const HEADING_SIGNALS = ["bold", "large", "toc", "numpr"] as const
+export type HeadingSignal = (typeof HEADING_SIGNALS)[number]
 
 /** Heading không khớp section nào của registry — giữ nguyên văn, không trích (I-3). */
 export const UNMAPPED_SECTION = "unmapped"

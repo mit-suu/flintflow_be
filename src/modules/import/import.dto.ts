@@ -101,6 +101,8 @@ export const headingMapEntrySchema = z.object({
   confidence,
   detected_by: z.enum(HEADING_DETECTORS),
   confirmed: z.boolean(),
+  /** FLF-343: độ tin thấp, được tự nhận lúc tách file (không qua bước xác nhận) — có cờ vàng "Cần xem" sau baseline. */
+  auto_confirmed: z.boolean().optional(),
   /**
    * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
    * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
@@ -120,6 +122,8 @@ export const tableMapEntrySchema = z.object({
   field_path: z.string().nullable(),
   confidence,
   confirmed: z.boolean(),
+  /** FLF-343: như `headingMapEntrySchema.auto_confirmed`. */
+  auto_confirmed: z.boolean().optional(),
   /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
   role: z.string().optional(),
   /** FLF-252: tối đa 3 giá trị đầu của cột. */
@@ -230,8 +234,11 @@ export const mappingPatchRequestSchema = z
     message: "Cần chọn ít nhất một mục, hoặc xác nhận tất cả."
   })
 
-/** `POST /projects/:id/import/extract` (nút 1.8) — chạy hoặc chạy tiếp I-4 từ `extract_cursor`. */
-export const extractRequestSchema = z.strictObject({ import_id: id })
+/**
+ * `POST /projects/:id/import/extract` (nút 1.8) — nút "Bắt đầu" của màn báo credit (FLF-343): chạy một mạch I-4 ⇒ baseline
+ * 0.1 ⇒ kiểm tra. `confirm_latest`: câu "đây là bản mới nhất" (bắt buộc `true` khi file không stamp và chưa xác nhận).
+ */
+export const extractRequestSchema = z.strictObject({ import_id: id, confirm_latest: z.boolean().optional() })
 
 /** `PATCH /projects/:id/import/fields` (UC-22, nút 1.9). */
 export const fieldsPatchRequestSchema = z
@@ -314,7 +321,7 @@ export const getImportResponseSchema = z.object({
   /** FLF-336: có sau lần finalize đầu (kể cả khi dừng ở `incomplete`); null khi chưa so. */
   target_structure: targetStructureSchema.nullable().optional(),
   /**
-   * Ước tính I-4 còn phải chạy — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
+   * FLF-343: ước tính cả lượt một mạch (I-4 còn phải chạy + kiểm tra AI 1.11) — chỉ có khi import ở `mapping_review` hoặc `extracting` mà job chưa chạy / đang dừng; trạng
    * thái khác hoặc đang chạy ⇒ `null` / không có. Tính bằng chính kế hoạch lượt của lượt chạy (lô chữ sau phần đọc tất định +
    * ảnh diagram đọc được, trừ phần đã xong) × bảng giá hiện hành. `available_credits` = số credit khả dụng (balance − reserved)
    * của ví org sở hữu project; `null` với Viewer (không xem được số dư — như `/billing/balance`).
@@ -323,6 +330,8 @@ export const getImportResponseSchema = z.object({
     .object({
       text_batches: z.number().int().min(0),
       diagram_images: z.number().int().min(0),
+      /** FLF-343: lượt AI của bước kiểm tra (1.11) chạy nối tiếp — đã gộp vào `ai_calls` / `credits`. */
+      check_calls: z.number().int().min(0).optional(),
       ai_calls: z.number().int().min(0),
       credits: z.number().min(0),
       available_credits: z.number().nullable()

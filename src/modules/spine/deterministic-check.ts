@@ -96,6 +96,8 @@ export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
   "import_image_unread",
   // FLF-252: quyền của ma trận phân quyền không khớp màn / vai trò lúc import — chỉ import đặt được, recompute không đóng
   "import_unresolved_ref",
+  // FLF-343: chỗ độ tin thấp tự nhận vào baseline 0.1 ("Cần xem") — chỉ import đặt được, recompute không đóng
+  "import_needs_review",
   "cr_consistency"
 ])
 
