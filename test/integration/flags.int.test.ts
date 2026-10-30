@@ -25,10 +25,10 @@ describe("deterministic check qua HTTP", () => {
     const recompute = await client.post("/flags/recompute")
     expect(recompute.status).toBe(200)
     const flags = flagsResponseSchema.parse(recompute.body.data)
-    // FLF-198: fixture có 14 màn `placeholder` và một function nền chưa gắn use case ⇒ cờ VÀNG nhắc việc
+    // FLF-198: fixture có 14 màn `placeholder`, một function nền chưa gắn use case và màn Login do 4 actor không cha chung ⇒ cờ VÀNG nhắc việc
     // (waive được, không chặn ký). Điều kiện M2 vẫn là: không cờ đỏ nào.
     expect(flags.filter((f) => f.level === "red")).toHaveLength(0)
-    expect([...new Set(flags.map((f) => f.rule_id))].sort()).toEqual(["function_without_uc", "screen_placeholder"])
+    expect([...new Set(flags.map((f) => f.rule_id))].sort()).toEqual(["function_without_uc", "screen_actor_ambiguous", "screen_placeholder"])
 
     const progress = await client.get("/progress")
     expect(progress.status).toBe(200)

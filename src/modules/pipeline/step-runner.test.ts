@@ -868,6 +868,7 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     seedUpTo("S-8.3")
     seedSession(true)
     const spine = db.spines[0] as unknown as SpineT
+    spine.screens.push({ id: "S01", feature_id: "F1", name: "Login", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "placeholder" })
     spine.diagrams = spine.diagrams.filter((d) => d.kind !== "screen_flow")
     spine.diagrams.push({
       id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
@@ -888,11 +889,12 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     seedUpTo("S-8.3")
     seedSession(true)
     const fresh = db.spines[0] as unknown as SpineT
-    const { computeSourceHash } = await import("../spine/source-hash.js")
+    fresh.screens.push({ id: "S01", feature_id: "F1", name: "Login", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "placeholder" })
+    const { renderedDiagramHash } = await import("../spine/source-hash.js")
     fresh.diagrams = fresh.diagrams.filter((d) => d.kind !== "screen_flow")
     fresh.diagrams.push({
       id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
-      format: "puml", source: "@startuml\n@enduml\n", render_status: "ok", source_hash: computeSourceHash(fresh, { kind: "screen_flow", owner_id: null }), rendered_at: "2026-01-01T00:00:00.000Z"
+      format: "puml", source: "@startuml\n@enduml\n", render_status: "ok", source_hash: renderedDiagramHash(fresh, { kind: "screen_flow", owner_id: null }), rendered_at: "2026-01-01T00:00:00.000Z"
     })
     const again = collectEvents()
     await runStep(PROJECT, "S-8.3", SESSION, USER, again.emit, { assembleDocument: vi.fn(async () => undefined), renderDeps: renderStub() })
@@ -900,10 +902,11 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     expect(again.events.filter((e) => e.type === "render")).toEqual([])
   })
 
-  it("FLF-247: vẽ hỏng ⇒ sự kiện render mang câu thường; Spine vẫn giữ text lỗi PlantUML để debug", async () => {
+  it("FLF-247: vẽ hỏng ⇒ sự kiện render mang câu thường; Spine vẫn giữ lỗi gốc để debug", async () => {
     seedUpTo("S-8.3")
     seedSession(true)
     const spine = db.spines[0] as unknown as SpineT
+    spine.screens.push({ id: "S01", feature_id: "F1", name: "Login", description: "", flow_to: [], is_popup: false, tabs: [], primary_function_id: null, queue_order: 1, detail_status: "placeholder" })
     spine.diagrams = spine.diagrams.filter((d) => d.kind !== "screen_flow")
     spine.diagrams.push({
       id: "D90", kind: "screen_flow", section: "fixed:3.1.1", owner_kind: null, owner_id: null,
@@ -912,7 +915,7 @@ describe("step-runner: S-8.2 Document Assembly ghép tài liệu", () => {
     const { events, emit } = collectEvents()
     const renderDeps: Partial<DiagramServiceDeps> = {
       ...renderStub(),
-      check: async () => {
+      renderSvgPng: async () => {
         throw new Error("connect ECONNREFUSED 127.0.0.1:8080")
       }
     }

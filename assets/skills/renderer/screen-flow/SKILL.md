@@ -1,8 +1,8 @@
 ---
 skill_id: screen-flow
 kind: renderer
-version: 2.3.0
-description: "S-4.2 Screens Flow (Graphviz DOT; one diagram per human actor using the UI, started by a diamond with the actor name)"
+version: 3.0.0
+description: "S-4.2 Screens Flow (UML 2.5 Activity Diagram with swimlanes, SVG built in code: one diagram per feature, lane = actor of the screen's use case)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
@@ -12,7 +12,13 @@ reads:
   - "screens[].flow_to"
   - "screens[].is_popup"
   - "screens[].tabs"
+  - "screens[].feature_id"
+  - "screens[].primary_function_id"
+  - "screens[].queue_order"
+  - "features[].name"
+  - "features[].order"
   - "actors[kind=human].name"
+  - "actors[].parent_id"
   - "roles[].actor_id"
   - "permissions[].screen_id"
   - "use_cases[].actor_ids"
@@ -20,90 +26,50 @@ reads:
   - "functions[].screen_id"
 writes:
   - "diagrams[kind=screen_flow]"
-output_schema: puml
+output_schema: none
 language: en
 stub: false
 ---
 # Screen Flow
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/screen-flow.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
+> The renderer is deterministic code: `src/modules/diagram/renderers/screen-flow.renderer.ts` (grouping, lanes, split) and `screen-flow-layout.ts` (graph plan, geometry; algorithm in `docs/technical/screen-flow-diagram-layout.md`). Engine `svg`: no PlantUML source, no `render_fix`. This skill documents the output.
 
-- Step: S-4.2 Screens Flow · Section: `fixed:3.1.1` · Output: `puml` (one or more parts)
+- Step: S-4.2 Screens Flow · Section: `fixed:3.1.1` · Output: `svg` (one part per feature)
 
-## Split by actor
+## Notation (UML 2.5 Activity Diagram, swimlanes)
 
-The Screens Flow is drawn **once per human actor that interacts directly with the system UI**
-(`actors[kind=human]`). `system` and `time` actors (payment gateway, LLM provider, scheduler…) never get a
-screens flow — they do not click through screens.
+- **Screen** = action: rounded rectangle, fill `#7ACFF5`, the screen name inside (wrapped to 3 lines). A **pop-up** is an action with the stereotype `<<pop-up>>` above the name; a screen with `tabs[]` has one more line `[tab | tab]` under the name (wrapped between tabs). No ovals, no diamonds.
+- **Initial node**: solid black dot, one above each entry screen. **Activity final**: circle with a solid black dot, one below each ending screen (bottom row).
+- **Control flow**: solid line, **open arrowhead**, one per `screens[].flow_to` pair inside the diagram. Straight when the two screens share a column with nothing between; otherwise orthogonal bends (a Z) in the gap between rows, or down a free gutter between columns when the target is more than one row below. Never through a shape or text, never overlapping another line; crossings only at right angles.
+- **Swimlane** (ActivityPartition): vertical lane, container rectangle with a header cell holding the **exact actor name** (the name of a general actor does not list its children — that is defined in §2.1 and the actor hierarchy diagram).
+- No title drawn in the picture: the document caption is the SVG `<title>` (`Screens flow — <feature>`); a paragraph under each figure says the lanes follow the actor model (see §2.1).
+- No decision node, no guard, no trigger label yet: the Spine has no data for them.
 
-A screen belongs to an actor when either link exists (`src/modules/spine/screen-actors.ts`):
+## One diagram per feature
 
-1. a `permissions[]` row on the screen whose `role_id` → `roles[].actor_id` is that actor, or
-2. a use case with that actor in `actor_ids[]` lists a function whose `screen_id` is the screen, or
-3. the screen is **public** — every `permissions[]` row on it is for a role with `actor_id: null` (`Guest` on
-   Login, Forgot/Reset Password, a public landing): it belongs to every human actor that has a screen.
+- Group = `screens[].feature_id`, ordered by `features[].order` then id; a screen whose feature does not exist goes to a last group `Other`. Screens inside a diagram are ordered by `queue_order`, then id.
+- A group over 25 screens is split into equal diagrams by rank in the flow (`<feature> (1/2)`…); a diagram failing the layout check (`checkScene`) is split in half until it passes. Each part is its own `diagrams[]` entry, `section = fixed:3.1.1`, `owner_kind = owner_id = null`; the first part keeps the original id.
+- A `flow_to` pointing to a screen of another feature is not drawn (the target is not in this diagram).
 
-One screen can belong to several actors (Login is shared) and then appears in each of their diagrams.
+## Lanes = actors of the screen
 
-- Parts are ordered by actor id; each part carries the graph label `Screens flow for <actor name>`. The
-  document uses that label as the image caption (`Screens flow for Founder`).
-- A part holds only that actor's screens and only the `flow_to` edges between them.
-- The part starts at a **diamond with the actor name inside** (`START`), with an arrow to every entry screen:
-  not a pop-up and no incoming edge from a screen of the same part. If every screen has an incoming edge,
-  the one with the lowest `queue_order`, then the lowest id. Login and a public landing page both have no
-  incoming edge, so both are entries side by side. The **sign-in gateway** — a screen open to `Guest` with an
-  edge to a screen that is not (Login → each actor's landing) — is always an entry, so `Register → Login`
-  draws Register and Login side by side after the actor diamond, with the arrow between them.
-- There is **no** "unassigned" part: every screen must belong to at least one human actor. A screen linked to
-  no human actor is an **orphan** — it is not drawn, and flag `orphan_screen` points at it.
-- No screen ↔ actor link at all yet (before S-4.3 / S-4.4): a single unlabelled diagram of every screen,
-  black dot on the lowest `queue_order`.
+`src/modules/spine/screen-actors.ts`, first source that yields a human actor wins:
 
-## Per-part output (Graphviz DOT inside PlantUML)
+1. screen → `primary_function_id` → function → use cases listing that function → `actor_ids`;
+2. screen → every function with `screen_id` = the screen (no primary function, or it is in no use case);
+3. `permissions[].screen_id` → `roles[].actor_id`.
 
-A PlantUML state diagram cannot put text inside a diamond (`<<choice>>` is a fixed, unlabelled diamond), so
-the Screens Flow is DOT wrapped in `@startdot … @enddot`:
+- Several actors with a common ancestor (`parent_id`) ⇒ the lane of the nearest common ancestor (general actor kept, never expanded to leaf actors). No "public screen belongs to every actor" rule: a public screen sits in the lane of the actor its use case names (Guest on Login when the use case is Guest's).
+- **Ambiguous** (several actors, no common ancestor): the screen goes to the first actor in `actor_ids` order and yellow flag `screen_actor_ambiguous` (S-3.1) asks the user to review the actor model (add a general actor, fix `actor_ids`).
+- Lane order = first appearance when screens are read by rank then `queue_order`.
+- No actor at all ⇒ the screen has no lane, it is **not drawn** and `orphan_screen` points at it. No screen ↔ actor link anywhere yet (before S-4.4) ⇒ every screen is drawn in one diagram per feature without lane frames.
 
-```
-@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Founder";
-  START [label="Founder", shape=diamond, style=solid];
-  S01 [label="Login"];
-  S03 [label="Forgot Password", shape=ellipse];
-  subgraph cluster_S07 {
-    label="Project Workspace"; style=solid;
-    S07_T1 [label="Chat"];
-  }
-  START -> S01;
-  S01 -> S03;
-  S05 -> S07_T1 [lhead=cluster_S07];
-}
-@enddot
-```
+## Entries, endings, one-way edges
 
-- Screen = **rectangle** (`shape=box`, square corners), **not filled** (PlantUML drops the border of a node that is
-  both `rounded` and `filled`).
-- A screen with `tabs[]` = `subgraph cluster_<id>`, one node `<id>_T<n>` per tab; edges into / out of it attach
-  to `<id>_T1` with `lhead=` / `ltail=cluster_<id>`.
-- `is_popup = true` → **oval** (`shape=ellipse`), label = the screen name only — the oval alone marks a pop-up,
-  no `(pop-up)` text. A pop-up with `tabs[]` is a cluster, and Graphviz draws clusters only as rectangles, so it
-  gets `style=rounded` and a second label line `(pop-up)` instead (tabbed screen: `style=solid`).
-- Font `DejaVu Sans` on graph and node: the default Graphviz font is missing in the PlantUML image and dot
-  answers with a fontconfig error instead of a picture.
-- Labels are double-quoted, `"` becomes `'`, `\` is escaped. `<id> -> <target>` per kept edge, sorted by target id.
-- **One-way arrows only.** When two screens point at each other, only the forward edge is drawn: from the
-  screen closer to the part's entry (BFS depth) to the farther one; same depth → lower `queue_order`, then
-  lower id. Return navigation is implicit and never drawn.
-- A Spine without screens yields a single `NO_SCREENS` node, so the file still compiles.
-- A broken DOT comes back from PlantUML as HTTP 200 with plain text `Error: <stdin>: syntax error…` (no SVG);
-  compile-check treats any non-SVG body as an error.
+- Entry = representative of each strongly connected group with no edge coming from outside it (not a pop-up when another member exists, lowest `queue_order`). Login ⇄ Register therefore gives one entry.
+- Edges go forward only: DFS from the entries drops the edge that closes a cycle, so of a pair pointing at each other only the edge away from the entry stays; return navigation is implicit. Rank = longest path from an entry; every edge goes down.
+- Ending screen = no forward edge out (inside this diagram). A diagram with no screens yields no part.
 
 ## Orphan screens (`orphan_screen` yellow; `orphan_screen_at_baseline` red at S-9; remediation S-4.2)
 
-A screen is flagged when, once links exist, no human actor uses it; or, once any `flow_to` edge exists, it
-has neither an incoming nor an outgoing edge, or it is a pop-up nothing opens. Fix the data (connect the
-screen, grant the actor a permission, wire the use case) — never hide the screen from the diagram.
+A screen is flagged when, once links exist, no human actor uses it; or, once any `flow_to` edge exists, it has neither an incoming nor an outgoing edge, or it is a pop-up nothing opens. Fix the data (connect the screen, wire the use case to its function) — never hide the screen from the diagram.

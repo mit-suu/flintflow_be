@@ -33,7 +33,7 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 | srs-spine §7.1 |
 | `fixed:2.2.1` | Functional requirements — user view | `usecase` | `null` (one part per feature; actor hierarchy part in `fixed:2.1`) | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
-| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | feature | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
+| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | `null` (one part per feature) | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
 | `feature:<id>` | Logical data model (domain) | `class` | feature | UML 2.5 Class (analysis level) | svg | FLF-325 | `entities[].name/.relations/.relation_cardinality` · *new*: `entities[].attributes[]`, `entities[].feature_ids` |
 | `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | `functions[<owner>].name/.trigger/.normal/.abnormal` · `actors[].name` of `use_cases[function_ids∋<owner>].actor_ids` · *new*: `functions[<owner>].messages[]` |
