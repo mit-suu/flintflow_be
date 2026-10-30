@@ -31,7 +31,8 @@ import {
   isVietnamese,
   labelFor,
   recordTextFor,
-  sentencesFor
+  sentencesFor,
+  slotTextFor
 } from "./labels.js"
 import type { Change, DiagramKind, Nfr, NfrCategory, Spine } from "../spine/spine.types.js"
 
@@ -883,3 +884,95 @@ export function buildRecordOfChanges(
   })
 }
 
+// ─── FLF-278 bước 09: phần nhỏ (slot) cho mẫu khách ───────────────
+//
+// Mỗi slot in **một phần** dữ liệu mà các chương FPT đang gộp (vd `fixed:1` = vision + goals + scope + quy tắc cấp cao +
+// hệ thống ngoài + sơ đồ ngữ cảnh), để heading của mẫu khách (IEEE 1.1 Purpose, 1.4 Product Scope…) nhận đúng phần
+// của nó. Không thêm dữ liệu, không gọi AI; nhãn hệ thống theo `ctx.language`, dữ liệu Spine in nguyên.
+
+const externalSystems = (spine: Spine, ctx: SectionRenderContext): Block[] => {
+  const nonHuman = spine.actors.filter((a) => a.kind !== "human")
+  if (nonHuman.length === 0) return []
+  const lang = fptLanguage(ctx)
+  const say = sentencesFor(lang)
+  return [bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description)))]
+}
+
+const otherOf = (spine: Spine, kinds: readonly string[]) => spine.other_requirements.filter((o) => kinds.includes(o.kind))
+
+const commonOf = (spine: Spine, categories: readonly string[], ctx: SectionRenderContext): Block[] => {
+  const items = spine.common_requirements.filter((c) => categories.includes(c.category))
+  if (items.length === 0) return []
+  const text = slotTextFor(ctx.language)
+  return [tableBlock([text.category, text.statement], items.map((c) => [enumLabel(fptLanguage(ctx), "common_category", c.category), c.statement]))]
+}
+
+const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Block[] => {
+  const text = slotTextFor(ctx.language)
+  const { project } = spine
+  switch (slotId) {
+    case "slot:vision":
+      return project.vision ? [p(project.vision)] : []
+    case "slot:goals":
+      return project.goals.length ? [bulletList(project.goals)] : []
+    case "slot:scope": {
+      const out: Block[] = []
+      if (project.release_scope.in.length) out.push(heading(text.inScope, 2), bulletList(project.release_scope.in))
+      if (project.release_scope.out.length) out.push(heading(text.outOfScope, 2), bulletList(project.release_scope.out))
+      return out
+    }
+    case "slot:high_rules": {
+      const rules = spine.business_rules.filter((r) => r.tier === "high")
+      return rules.length ? [bulletList(rules.map((r) => r.statement))] : []
+    }
+    case "slot:context":
+      return [...externalSystems(spine, ctx), ...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram")]
+    case "slot:features": {
+      if (spine.features.length === 0) return []
+      const say = sentencesFor(fptLanguage(ctx))
+      const rows = [...spine.features]
+        .sort((a, b) => a.order - b.order)
+        .map((f) => [say.featureLabel(ctx.numberOf(`feature:${f.id}`), f.name), spine.functions.filter((fn) => fn.feature_id === f.id).map((fn) => fn.name).join(", ")])
+      return [tableBlock([text.feature, text.functions], rows)]
+    }
+    case "slot:platforms":
+      return project.form_factor.length
+        ? [bulletList(project.form_factor.map((f, i) => `${text.formFactor[f] ?? f}${i === 0 && project.form_factor.length > 1 ? ` (${text.primary})` : ""}`))]
+        : []
+    case "slot:assumptions": {
+      const rows = [
+        ...spine.assumptions.filter((a) => a.status !== "rejected").map((a) => [a.statement, text.assumptionStatus[a.status]]),
+        ...otherOf(spine, ["assumption"]).map((o) => [o.statement, text.assumptionStatus.recorded])
+      ]
+      return rows.length ? [tableBlock([text.assumption, text.status], rows)] : []
+    }
+    case "slot:risks": {
+      const risks = otherOf(spine, ["risk", "technical_risk"])
+      return risks.length ? [tableBlock([text.kind, text.statement], risks.map((o) => [enumLabel(fptLanguage(ctx), "other_kind", o.kind), o.statement]))] : []
+    }
+    case "slot:open_questions": {
+      const questions = otherOf(spine, ["open_question"])
+      return questions.length ? [bulletList(questions.map((o) => o.statement))] : []
+    }
+    case "slot:security":
+      return commonOf(spine, ["security", "session", "audit"], ctx)
+    case "slot:localization":
+      return commonOf(spine, ["localization", "date_format"], ctx)
+    case "slot:analysis_models":
+      return [
+        ...diagramImages(spine, "usecase", undefined, ctx, "Use Case Diagram"),
+        ...screensFlow(spine, ctx),
+        ...diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram")
+      ]
+    default:
+      throw new Error(`section-renderer: unknown content slot "${slotId}"`)
+  }
+}
+
+/**
+ * Khối của một phần nhỏ (`slot:*`, FLF-278 bước 09) — heading do mẫu khách cấp, cấp heading con trong khối tính từ 1
+ * (người gọi dời theo cấp heading mẫu). Chú thích hình / nhãn bảng đi qua cùng bảng dịch của mẫu FPT.
+ */
+export function renderContentSlot(spine: Spine, slotId: string, ctx: SectionRenderContext): Block[] {
+  return localizeBlocks(slotBlocks(spine, slotId, ctx), ctx.language, true)
+}

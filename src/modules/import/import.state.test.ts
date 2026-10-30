@@ -27,6 +27,9 @@ const EXPECTED: [ImportStatus, ImportStatus][] = [
   // FLF-336: I-5 thấy thiếu mục ⇒ dừng; "Hoàn thiện" ⇒ chạy lại finalize
   ["baselining", "incomplete"],
   ["incomplete", "baselining"],
+  // FLF-278: chế độ 3 sang Luồng 2; ký baseline 1.0 (FLF-318) khép lần import mẫu
+  ["incomplete", "drafting"],
+  ["drafting", "delivered"],
   ["checking", "gap_review"],
   ["gap_review", "delivered"],
   ["gap_review", "change_requested"],

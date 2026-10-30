@@ -18,6 +18,8 @@ import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } fr
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
+import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
 export const CUSTOM_SECTION_PREFIX = "custom:"
@@ -237,15 +239,29 @@ export const functionOriginals = (blocks: readonly LayoutBlock[], headingSection
   return out
 }
 
-/** Section có nội dung thật (khối không phải heading) — mục "chỉ có heading" coi như thiếu. */
+/**
+ * Khối có nội dung thật: ảnh; bảng có ô chữ thật; đoạn chữ không phải chữ hướng dẫn của mẫu (`[Describe …]`, "Mục này mô
+ * tả…" — business-flow 1.3). Mẫu trống chỉ còn chữ hướng dẫn ⇒ không có nội dung (FLF-278 trên FLF-336).
+ */
+const hasRealContent = (b: { kind: string; text: string; rows?: string[][] | null; image_ref?: string | null }): boolean =>
+  b.kind === "image" ? true : b.kind === "table" ? (b.rows ? tableHasRealText(b.rows) : isRealText(b.text)) : isRealText(b.text)
+
+/** Section có nội dung thật (khối không phải heading) — mục "chỉ có heading" hoặc chỉ có chữ hướng dẫn coi như thiếu. */
 export const sectionsWithContent = (blocks: LayoutBlock[]): Set<string> => {
   const out = new Set<string>()
   for (const b of blocks) {
     if (!b.section_id || b.kind === "heading" || b.kind === "table_cell" || b.kind === "table_row") continue
-    if (b.kind === "table" || b.kind === "image" || b.text.trim()) out.add(b.section_id)
+    if (hasRealContent(b)) out.add(b.section_id)
   }
   return out
 }
+
+/**
+ * Mục riêng (`custom:<id>`, heading mẫu không map vào mục FlintFlow) có nội dung thật. Khối dưới heading không map mang
+ * `section_id = null` nên `sectionsWithContent` không thấy — trước đây mục riêng có chữ vẫn bị I-5 coi là `missing`.
+ */
+export const customSectionsWithContent = (sections: readonly CustomSection[]): Set<string> =>
+  new Set(sections.filter((c) => c.blocks.some((b) => hasRealContent({ ...b, image_ref: b.image_ref }))).map((c) => `custom:${c.id}`))
 
 /** Section FPT do step sở hữu (không tính function — vòng S-5 theo màn). */
 export const sectionsOwnedBy = (stepId: string): string[] => [
@@ -290,7 +306,8 @@ export const buildStepPlan = (layout: LayoutEntry[], content: ReadonlySet<string
         return inSpine === null ? matches(sec, content) : inSpine
       })
       if (hasContent) return { step_id: s.id, state: "applied", section_ids: owned, reason: "Có trong file, đã có nội dung" }
-      const inLayout = owned.some((sec) => matches(sec, layout.map((l) => l.section_id)))
+      // Mục FPT có mặt qua các phần nhỏ của nó (`slot:*`, FLF-278) cũng tính là có đầu mục
+      const inLayout = owned.some((sec) => matches(sec, withSlotParents(layout.map((l) => l.section_id))))
       const inFile = owned.some((sec) => matches(sec, content))
       if (inFile || inLayout) {
         const reason = inFile ? "Đầu mục có trong file nhưng chưa trích được dữ liệu nào — chạy step nếu muốn AI soạn" : "Đầu mục có trong file nhưng trống — chạy step nếu muốn AI soạn"

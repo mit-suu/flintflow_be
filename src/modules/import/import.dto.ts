@@ -105,7 +105,9 @@ export const headingMapEntrySchema = z.object({
    * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
    * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
    */
-  template_section: z.string().nullable().optional()
+  template_section: z.string().nullable().optional(),
+  /** FLF-278 trên FLF-336: chữ hướng dẫn của mẫu dưới heading (business-flow 1.5) — chỉ để BA xem, không phải nội dung. */
+  guidance: z.string().optional()
 })
 
 /** Họ mẫu của tài liệu upload (FLF-252). */
@@ -262,6 +264,12 @@ export const finalizeRequestSchema = z.strictObject({
   record_of_changes: z.array(recordRowSchema).max(500).optional(),
   /** FLF-336: từ màn "Kết quả đọc file" (`incomplete`) bấm "Hoàn thiện" ⇒ đi tiếp dù còn mục thiếu. */
   complete: z.boolean().optional()
+})
+
+/** FLF-278 trên FLF-336: từ `incomplete` (chế độ 3) sang Luồng 2 — viết phần còn thiếu bằng pipeline (#8b). */
+export const continueFlow2RequestSchema = z.strictObject({
+  import_id: id,
+  base_version: baseVersion
 })
 
 /** FLF-336 I-5 — kết quả so cấu trúc đích (`TemplateProfile.target_structure`). */

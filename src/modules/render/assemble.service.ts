@@ -66,6 +66,7 @@ import { RenderedDocumentCache } from "./rendered-document.model.js"
 import { buildLayoutSections, type TemplateLayout } from "./layout-sections.js"
 // Mode 1 v2 (FLF-184): layout của file người dùng upload — chỉ đọc
 import { TemplateProfile } from "../import/template-profile.model.js"
+import { Project } from "../project/project.model.js"
 import { MEDIA_PREFIX, isMediaId, loadImportMedia, mediaId } from "./import-media.js"
 import type {
   Block,
@@ -620,7 +621,10 @@ export const loadTemplateLayout: TemplateLoader = async (projectId) => {
       }
     | null
   if (!profile?.layout?.length) return null
+  // Chế độ 3 (mẫu bắt buộc, FLF-335): in đúng các mục của mẫu, không chèn mục FlintFlow ngoài mẫu (business-flow 2.10)
+  const project = (await Project.findById(projectId, { template_intent: 1 }, { lean: true })) as { template_intent?: string | null } | null
   return {
+    ...(project?.template_intent === "fixed" ? { fixedTemplate: true } : {}),
     layout: profile.layout,
     language: profile.language ?? "en",
     legacyRecord: profile.legacy_record_of_changes ?? [],

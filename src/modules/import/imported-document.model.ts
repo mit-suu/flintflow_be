@@ -56,6 +56,8 @@ export interface IImportedDocument extends Document {
   paused: { reason: ImportPauseReason; at: Date } | null
   /** FLF-335: ý định lúc upload (#2 `intent`) — theo mẫu cố định hay cấu trúc tự do; bản ghi cũ `null` (đọc như `free`). */
   intent: TemplateIntent | null
+  /** FLF-278: lần import tạo từ mẫu đã lưu của tổ chức (`OrgTemplate`) — mapping heading áp sẵn, không phải xác nhận lại. */
+  org_template_id?: mongoose.Types.ObjectId | null
   /** Section đang/sắp trích ở I-4; resume chạy tiếp từ đây, không trích lại section `done`. */
   extract_cursor: string | null
   /**
@@ -125,6 +127,7 @@ const importedDocumentSchema = new Schema<IImportedDocument>(
     extract_cursor: { type: String, default: null },
     complete_requested: { type: Boolean, default: false },
     intent: { type: String, enum: [...TEMPLATE_INTENTS, null], default: null },
+    org_template_id: { type: Schema.Types.ObjectId, ref: "OrgTemplate", default: null },
     finalize_checkpoint: {
       type: new Schema(
         {

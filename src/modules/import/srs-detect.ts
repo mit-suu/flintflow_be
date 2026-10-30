@@ -15,6 +15,7 @@
 import type { OoxmlBlock } from "../docx-ooxml/index.js"
 import { SECTION_CANDIDATES } from "./section-catalog.js"
 import { TEMPLATE_CATALOGS } from "./template-catalog.js"
+import { INSTRUCTION_PATTERNS } from "../../shared/utils/instruction-text.js"
 
 export type DocumentKind = "srs" | "srs_template" | "not_srs" | "unknown"
 
@@ -77,7 +78,7 @@ export const SRS_DETECT_CONFIG = {
   proseMinBlocks: 8,
   proseMinWords: 80,
   /** Chữ hướng dẫn của mẫu: trong ngoặc, hoặc câu "Mục này mô tả…" / "This section describes…" (business-flow §3.1.1 lớp 3). */
-  instructionPatterns: [/^[[<{(].*[\]>})]$/s, /^(this|the) section (describes|should|lists|contains)/i, /^(mục|phần) này (mô tả|trình bày|liệt kê|nêu)/i]
+  instructionPatterns: INSTRUCTION_PATTERNS
 } as const
 
 const normalize = (s: string): string =>
