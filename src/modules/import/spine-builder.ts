@@ -6,7 +6,7 @@
  */
 
 import type { Op } from "../spine/op.types.js"
-import type { FlowEdge, Spine } from "../spine/spine.types.js"
+import type { EntityAttribute, FlowEdge, Spine } from "../spine/spine.types.js"
 import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
@@ -109,6 +109,22 @@ const uniqueIndex = (pool: readonly { id: string; name?: string }[], keyOf: (p: 
     if (k) map.set(k, map.has(k) && map.get(k) !== p.id ? null : p.id)
   }
   return map
+}
+
+/**
+ * Thuộc tính entity tài liệu / sơ đồ ghi: chuỗi (`email`) hoặc `{ name, kind, required, description }`. Trùng tên (không phân
+ * biệt hoa thường) ⇒ giữ cái đầu; `kind` lạ ⇒ `plain`; thiếu `required` ⇒ bắt buộc.
+ */
+const attributesOf = (raw: unknown): EntityAttribute[] => {
+  const out: EntityAttribute[] = []
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    const name = str(rec ? rec.name : item)
+    if (!name || out.some((a) => a.name.toLowerCase() === name.toLowerCase())) continue
+    const description = rec ? str(rec.description) : ""
+    out.push({ name, kind: oneOf(rec?.kind, ["key", "reference", "plain"], "plain"), required: rec?.required === false ? false : true, ...(description ? { description } : {}) })
+  }
+  return out
 }
 
 /** Động từ quan hệ hợp lệ của Spine (`relation_verbs`): tiếng Anh viết thường. */
@@ -258,12 +274,16 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       relations.push(hit.id)
       if (hit.verb) verbs[hit.id] = hit.verb
     }
+    const attributes = attributesOf(e.value.attributes)
+    const featureIds = [...new Set(strList(e.value.feature_ids ?? e.value.features).flatMap((ref) => resolveFeature(ref) ?? []))]
     add("entities", {
       id: e.id,
       name: str(e.value.name) || e.id,
       description: str(e.value.description),
       relations,
-      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {})
+      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
+      ...(attributes.length ? { attributes } : {}),
+      ...(featureIds.length ? { feature_ids: featureIds } : {})
     })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {

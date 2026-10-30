@@ -13,6 +13,7 @@ reads:
   - "entities[].relation_verbs"
   - "entities[].relation_cardinality"
   - "entities[].relation_optional"
+  - "entities[].attributes"
 writes:
   - "diagrams[kind=erd]"
 output_schema: none
@@ -28,7 +29,7 @@ stub: false
 
 ## Data → diagram
 
-- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. Attributes are **not** in the Spine yet, so boxes have no attribute compartment (Chen: no ovals) until `entities[].attributes` exists; the drawing code for them is ready.
+- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. `entities[].attributes` are drawn: Crow's foot an attribute compartment with `PK` (kind `key`) / `FK` (kind `reference`), IDEF1X key attributes above the line and `(FK)`, Chen ovals under the box with key attributes underlined. No attributes ⇒ box with the name only.
 - One relation per `relations[]` id that points to an existing entity, parent → child, id `<parent>><child>`:
   - label = `relation_verbs[<child>]`, `has` when missing (never empty, never a flipped / passive verb — see `content/entities-erd`);
   - parent end = `1`, or `0..1` when the child is in the parent's `relation_optional` (the child may exist without this parent);

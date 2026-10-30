@@ -843,6 +843,25 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       })
     }
   }
+  // Class diagram mỗi feature một hình: entity phải nói feature nào dùng nó; thuộc tính không trùng tên trong một entity
+  for (const e of after.entities) {
+    if (after.features.length > 0 && (e.feature_ids ?? []).length === 0) {
+      errors.push({
+        rule: "erd_feature_missing",
+        path: `entities[id=${e.id}].feature_ids`,
+        message: `"${e.name}" chưa có feature_ids — ghi id các feature dùng entity này (class diagram vẽ mỗi feature một hình)`
+      })
+    }
+    const seen = new Set<string>()
+    for (const a of e.attributes ?? []) {
+      const key = a.name.trim().toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        continue
+      }
+      errors.push({ rule: "erd_attribute_duplicate", path: `entities[id=${e.id}].attributes`, message: `"${e.name}" có hai thuộc tính trùng tên "${a.name}" — gộp thành một` })
+    }
+  }
   return errors
 }
 

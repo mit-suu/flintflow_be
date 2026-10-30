@@ -144,30 +144,33 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 19 hình ok (usecase và screen_flow mỗi feature một hình — 6 phần), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 25 hình ok (usecase, screen_flow và class mỗi feature một hình — 6 phần), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
 
     expect(result.spine_version).toBe(2)
-    expect(result.diagrams).toHaveLength(19)
+    expect(result.diagrams).toHaveLength(25)
     expect(result.diagrams.every((d) => d.render_status === "ok" && d.source_hash.length === 64)).toBe(true)
     const byKind = Object.fromEntries(
-      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase"].includes(d.kind)).map((d) => [d.kind, d.id])
+      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase", "class"].includes(d.kind)).map((d) => [d.kind, d.id])
     )
     expect(byKind).toEqual({ context: "D01", erd: "D04" })
     // Sơ đồ use case mỗi feature một hình (6 feature của fixture); phần đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
     expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6"])
     // Một sơ đồ luồng màn cho mỗi feature; phần đầu giữ id cũ
     expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03", "D03-2", "D03-3", "D03-4", "D03-5", "D03-6"])
+    // Class diagram mỗi feature một hình, chủ là feature; mỗi feature một nhóm id riêng
+    expect(result.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_kind, d.owner_id, d.section])).toEqual(["F1", "F2", "F3", "F4", "F5", "F6"].map((f) => ["feature", f, `feature:${f}`]))
+    expect(result.diagrams.filter((d) => d.kind === "class").map((d) => d.id)).toEqual(["D06", "D07", "D08", "D09", "D10", "D11"])
     expect(result.diagrams.find((d) => d.owner_id === "S07")?.id).toBe("D05")
-    expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D06", "D07", "D08", "D09"])
+    expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D12", "D13", "D14", "D15"])
 
     const spine = (await repo.get(PROJECT))!
-    expect(spine.diagrams).toHaveLength(19)
+    expect(spine.diagrams).toHaveLength(25)
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
-    expect(store.files.size).toBe(38)
+    expect(store.files.size).toBe(50)
     expect((await loadDiagramFile(PROJECT, "D05", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
@@ -267,12 +270,29 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(await noAutoFix({ kind: "erd", puml: "@startuml\nBAD\n@enduml", error: "x", line: "2", attempt: 1 })).toBeNull()
   })
 
+  it("class: mỗi feature một nhóm id riêng — bỏ entity của một feature chỉ xoá hình feature đó, id các feature khác giữ nguyên", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    const first = await renderAll(PROJECT, { by: USER, deps })
+    const before = Object.fromEntries(first.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_id, d.id]))
+    expect(Object.keys(before)).toEqual(["F1", "F2", "F3", "F4", "F5", "F6"])
+
+    // F4 hết entity: gỡ F4 khỏi feature_ids của mọi entity
+    const record = (await repo.get(PROJECT))!
+    const ops = record.entities.flatMap((e) => ((e.feature_ids ?? []).includes("F4") ? [{ op: "remove" as const, path: `entities[id=${e.id}].feature_ids[=F4]`, reason: "test" }] : []))
+    await applyTransaction(PROJECT, { base_version: record.spine_version, ops, by: USER, reason: "test" })
+    const second = await renderDiagram(PROJECT, "class", null, { by: USER, deps })
+    const after = Object.fromEntries(second.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_id, d.id]))
+    expect(second.removed).toEqual([before.F4])
+    expect(after).toEqual({ F1: before.F1, F2: before.F2, F3: before.F3, F5: before.F5, F6: before.F6 })
+  })
+
   it("force compile lại hình không đổi; nội dung trùng ⇒ không tăng version", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
     const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
-    expect(forced.rendered).toHaveLength(19)
+    expect(forced.rendered).toHaveLength(25)
     expect(forced.spine_version).toBe(2)
   })
 

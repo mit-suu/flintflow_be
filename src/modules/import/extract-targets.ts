@@ -76,7 +76,7 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
   features: "features[]: { name }",
   screens: "screens[]: { name, description, feature_id: <feature id / name>, is_popup: boolean, tabs: string[], flow_to: [{ to: <screen id / name this screen navigates to>, trigger?: <what the user does, from the label on the arrow>, guard?: <branch condition without brackets, from a diamond's outgoing [condition] label> }] }",
   permissions: 'permissions[]: { screen_id, role_id, action: "view" | "create" | "update" | "delete" | <verb> }',
-  entities: "entities[]: { name, description, relations: <entity ids> }",
+  entities: "entities[]: { name, description, relations: <entity ids>, attributes?: [{ name, kind: \"key\" | \"reference\" | \"plain\", required: boolean }] (only when the document or diagram lists them), feature_ids?: <feature ids / names that use the entity> }",
   functions:
     'functions[]: { name, trigger, description, screen_id: <screen id / name or null>, normal: string[] (main flow steps), abnormal: string[] (alternative/exception flows), validations: [{ kind: "business" | "format" | "required", statement }], business_rule_ids: <business rule ids>, priority: "must" | "should" | "could" | "wont" | null }',
   nfrs: 'nfrs[]: { statement, kind: "quantitative" | "descriptive", metric?, threshold?, priority }',

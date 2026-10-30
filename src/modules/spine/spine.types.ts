@@ -153,6 +153,18 @@ export interface Permission {
   action: string
 }
 
+/** `key` = định danh (`{id}`), `reference` = tham chiếu tới entity khác (`{ref}`), `plain` = còn lại. Mức domain: không có kiểu dữ liệu. */
+export type EntityAttributeKind = "key" | "reference" | "plain"
+
+export interface EntityAttribute {
+  /** Khoá của phần tử trong `attributes[]` (path `attributes[name=…]`), duy nhất trong một entity. */
+  name: string
+  kind: EntityAttributeKind
+  /** Bắt buộc có giá trị; `false` ⇒ bản số `[0..1]` trên hình. */
+  required: boolean
+  description?: string
+}
+
 export interface Entity {
   id: string
   name: string
@@ -167,6 +179,10 @@ export interface Entity {
   relation_optional?: string[]
   /** Dữ liệu chủ tồn tại độc lập — được phép không có cha. */
   root?: boolean
+  /** Thuộc tính mức domain (không kiểu kỹ thuật). Thiếu ⇒ `[]`. */
+  attributes?: EntityAttribute[]
+  /** Feature dùng entity này — mỗi feature một class diagram. Khoá tới `features[].id`. Thiếu ⇒ `[]`. */
+  feature_ids?: string[]
 }
 
 /** MoSCoW, gán ở S-9.4. `null` trước khi gán. */
@@ -300,7 +316,7 @@ export interface Addendum {
 
 // ─── state nội bộ ────────────────────────────────────────────────
 
-export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "screen_layout"
+export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "screen_layout"
 export type RenderStatus = "ok" | "error"
 /** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
 export type DiagramFormat = "puml" | "svg"

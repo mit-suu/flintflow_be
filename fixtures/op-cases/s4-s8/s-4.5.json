@@ -17,7 +17,28 @@
         "relation_verbs": {
           "E02": "contains",
           "E03": "has"
-        }
+        },
+        "attributes": [
+          {
+            "name": "project name",
+            "kind": "key",
+            "required": true
+          },
+          {
+            "name": "domain",
+            "kind": "plain",
+            "required": true
+          },
+          {
+            "name": "owner",
+            "kind": "reference",
+            "required": true
+          }
+        ],
+        "feature_ids": [
+          "F1",
+          "F2"
+        ]
       },
       "reason": "S-4.5 domain entity"
     },
@@ -28,7 +49,22 @@
         "id": "E02",
         "name": "Document Version",
         "description": "An assembled snapshot of a project SRS at a point in time.",
-        "relations": []
+        "relations": [],
+        "attributes": [
+          {
+            "name": "version label",
+            "kind": "key",
+            "required": true
+          },
+          {
+            "name": "assembled at",
+            "kind": "plain",
+            "required": true
+          }
+        ],
+        "feature_ids": [
+          "F1"
+        ]
       },
       "reason": "S-4.5 domain entity"
     },
@@ -39,7 +75,22 @@
         "id": "E03",
         "name": "Chat Session",
         "description": "One conversation thread attached to a project.",
-        "relations": []
+        "relations": [],
+        "attributes": [
+          {
+            "name": "session code",
+            "kind": "key",
+            "required": true
+          },
+          {
+            "name": "reply language",
+            "kind": "plain",
+            "required": false
+          }
+        ],
+        "feature_ids": [
+          "F1"
+        ]
       },
       "reason": "S-4.5 domain entity"
     },
@@ -58,7 +109,22 @@
           "E01": "funds",
           "E05": "holds"
         },
-        "root": true
+        "root": true,
+        "attributes": [
+          {
+            "name": "balance",
+            "kind": "plain",
+            "required": true
+          },
+          {
+            "name": "owner",
+            "kind": "reference",
+            "required": true
+          }
+        ],
+        "feature_ids": [
+          "F2"
+        ]
       },
       "reason": "S-4.5 domain entity"
     },
@@ -69,7 +135,27 @@
         "id": "E05",
         "name": "Credit Reservation",
         "description": "Credits held while an AI action runs, released or charged when it finishes.",
-        "relations": []
+        "relations": [],
+        "attributes": [
+          {
+            "name": "entry code",
+            "kind": "key",
+            "required": true
+          },
+          {
+            "name": "credits",
+            "kind": "plain",
+            "required": true
+          },
+          {
+            "name": "reason",
+            "kind": "plain",
+            "required": false
+          }
+        ],
+        "feature_ids": [
+          "F2"
+        ]
       },
       "reason": "S-4.5 domain entity"
     }

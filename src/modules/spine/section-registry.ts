@@ -130,7 +130,7 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("actors", "actors[]", ["fixed:2.1"], ["fixed:2.2.2", "fixed:3.1.3"], ["diagram:usecase", "fixed:5.5"]),
   row("roles_permissions", "roles[], permissions[]", ["fixed:3.1.3"]),
   row("use_cases", "use_cases[]", ["fixed:2.2.2"], [], ["diagram:usecase"]),
-  row("features", "features[]", ["feature:<id>"], ["fixed:3.1.2"], ["diagram:usecase"], "số mục §3.x (assemble)"),
+  row("features", "features[]", ["feature:<id>"], ["fixed:3.1.2"], ["diagram:usecase", "diagram:class"], "số mục §3.x (assemble)"),
   row("screens_desc", "screens[].name/.description/.feature_id", ["fixed:3.1.2"], ["fixed:3.1.1", "fixed:3.1.3", "function:<screen>"], ["diagram:screen_flow", "fixed:5.5"]),
   row("screens_flow", "screens[].flow_to[]/.is_popup/.tabs[]", ["fixed:3.1.1"], [], ["diagram:screen_flow"]),
   row("screens_primary", "screens[].primary_function_id", [], [], ["diagram:screen_layout"]),
@@ -139,7 +139,7 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("functions_order", "functions[].order", [], [], [], "số mục §3.x.y (assemble)"),
   row("functions_validations", "functions[].validations[]", ["function:<id>"], [], ["fixed:5.1"]),
   row("functions_abnormal", "functions[].abnormal[]", ["function:<id>"], [], ["fixed:5.3"]),
-  row("entities", "entities[]", ["fixed:3.1.5"], [], ["diagram:erd", "fixed:5.5"]),
+  row("entities", "entities[]", ["fixed:3.1.5"], [], ["diagram:erd", "diagram:class", "fixed:5.5"]),
   row("nfr_interface", "nfrs[category=interface]", ["fixed:4.1"]),
   row("nfr_usability", "nfrs[category=usability]", ["fixed:4.2.1"]),
   row("nfr_reliability", "nfrs[category=reliability]", ["fixed:4.2.2"]),
@@ -155,6 +155,7 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("diagram_usecase", "diagrams[kind=usecase]", ["fixed:2.2.1"]),
   row("diagram_screen_flow", "diagrams[kind=screen_flow]", ["fixed:3.1.1"]),
   row("diagram_erd", "diagrams[kind=erd]", ["fixed:3.1.5"]),
+  row("diagram_class", "diagrams[kind=class]", ["<diagram.section>"]),
   row("diagram_screen_layout", "diagrams[kind=screen_layout]", ["<diagram.section>"])
 ])
 

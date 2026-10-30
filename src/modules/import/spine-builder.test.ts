@@ -354,6 +354,25 @@ describe("buildImportOps", () => {
     expect(plan.spine.entities[0]).toMatchObject({ relations: ["E02", "E03"], relation_verbs: { E02: "teaches", E03: "earns" } })
   })
 
+  it("entity: thuộc tính (chuỗi hoặc object, bỏ trùng tên) và feature_ids phân giải theo tên / id feature", () => {
+    const spine = createEmptySpine({ name: "Edu" })
+    const ops = buildImportOps(spine, [
+      { entity: "features", id: "F1", value: { name: "Enrolment" } },
+      { entity: "entities", id: "E01", value: { name: "Student", attributes: ["student code", { name: "email", kind: "key", required: false, description: "Sign-in" }, { name: "Email" }, { name: "x", kind: "weird" }], feature_ids: ["Enrolment", "Ghost"] } },
+      { entity: "entities", id: "E02", value: { name: "Course" } }
+    ])
+    const plan = planTransaction(spine, { base_version: spine.spine_version, ops, by: "import" }, { startSeq: 1 })
+    expect(plan.spine.entities[0].attributes).toEqual([
+      { name: "student code", kind: "plain", required: true },
+      { name: "email", kind: "key", required: false, description: "Sign-in" },
+      { name: "x", kind: "plain", required: true }
+    ])
+    expect(plan.spine.entities[0].feature_ids).toEqual(["F1"])
+    // tài liệu không ghi ⇒ rỗng (op engine điền [] cho mảng thiếu), không bịa
+    expect(plan.spine.entities[1].attributes).toEqual([])
+    expect(plan.spine.entities[1].feature_ids).toEqual([])
+  })
+
   it("FLF-252: tham chiếu ghi mã khác dạng id ('E-02', 'a1') vẫn ra đúng phần tử", () => {
     const spine = createEmptySpine({ name: "Edu" })
     const ops = buildImportOps(spine, [

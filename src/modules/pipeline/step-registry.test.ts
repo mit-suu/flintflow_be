@@ -56,14 +56,14 @@ describe("assets/step-registry.json", () => {
     expect(new Set(steps.map((s) => s.phase))).toEqual(new Set(PHASES))
   })
 
-  it("step tất định đúng Phases §4.2 (không Meter); renders khớp 5 kind", () => {
+  it("step tất định đúng Phases §4.2 (không Meter); renders khớp 6 kind", () => {
     const steps = loadStepRegistry()
     expect(steps.filter((s) => s.deterministic).map((s) => s.id)).toEqual(["S-8.2", "S-8.3", "S-9.1", "S-9.5"])
     expect(Object.fromEntries(steps.filter((s) => s.renders.length > 0).map((s) => [s.id, s.renders]))).toEqual({
       "S-2.5": ["context"],
       "S-3.6": ["usecase", "context"],
       "S-4.2": ["screen_flow"],
-      "S-4.5": ["erd"],
+      "S-4.5": ["erd", "class"],
       "S-5.3": ["screen_layout"]
     })
   })
