@@ -407,11 +407,13 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
 
 // ─── feature / function (§3.x, §3.x.y) ────────────────────────────
 
-/** §3.x: mẫu FPT chỉ có tiêu đề (nội dung nằm ở các §3.x.y); mode 1 giữ dòng liệt kê màn như cũ. */
+/** §3.x: mẫu FPT chỉ có tiêu đề (nội dung nằm ở các §3.x.y) và class diagram của feature; mode 1 giữ dòng liệt kê màn như cũ. */
 const featureOverview = (spine: Spine, featureId: string, ctx: SectionRenderContext): Block[] => {
-  if (ctx.functionLayout === "fpt") return []
+  // Class diagram (domain) của feature đứng đầu mục §3.x — IEEE 830 A.3 tổ chức theo đối tượng
+  const classDiagrams: Block[] = diagramImages(spine, "class", featureId, ctx, "Class Diagram", svgCaption)
+  if (ctx.functionLayout === "fpt") return classDiagrams
   const screens = spine.screens.filter((s) => s.feature_id === featureId)
-  return screens.length === 0 ? [] : [p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]
+  return screens.length === 0 ? classDiagrams : [...classDiagrams, p(`Screens: ${screens.map((s) => s.name).join(", ")}`)]
 }
 
 /** Mục con trống của §3.x.y mẫu FPT: giữ đủ khung mục như template, không bịa nội dung. */

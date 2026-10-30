@@ -53,6 +53,8 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   role_id: "Vai trò",
   action: "Thao tác",
   flow_to: "Chuyển tới màn",
+  attributes: "Thuộc tính",
+  feature_ids: "Tính năng dùng",
   guard: "Điều kiện rẽ nhánh",
   is_popup: "Là popup",
   tabs: "Tab",
@@ -290,6 +292,7 @@ export const DIAGRAM_KIND_LABELS: Readonly<Record<DiagramKind, string>> = {
   usecase: "sơ đồ use case",
   screen_flow: "sơ đồ luồng màn hình",
   erd: "sơ đồ ERD",
+  class: "sơ đồ lớp",
   screen_layout: "bố cục màn hình"
 }
 

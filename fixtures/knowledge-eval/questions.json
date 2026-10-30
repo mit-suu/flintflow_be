@@ -143,7 +143,7 @@
       "language": "vi",
       "question": "Khi nào một thực thể trong ERD vi phạm chuẩn hoá 1NF, 2NF hoặc 3NF?",
       "answer_points": ["1NF: thực thể không chứa danh sách của một thứ khác — danh sách là thực thể con", "2NF: thực thể kết hợp chỉ mô tả cặp quan hệ", "3NF: một thực thể một thứ; mô tả thứ thứ hai thì tách thành hai thực thể"],
-      "gold_chunk_ids": ["entities-erd#pass-6-normal-form-3nf-at-entity-level"]
+      "gold_chunk_ids": ["entities-erd#pass-5-descriptions-agree-with-relations+pass-6-normal-form-3nf-at-entity-level"]
     },
     {
       "id": "q19",

@@ -9,7 +9,7 @@
  * Lô đã tự liệt kê op cascade (như fixture case-03) thì không sinh trùng.
  *
  * Chính sách theo field (§4.1):
- *   pull          gỡ phần tử khỏi mảng khoá            use_cases[].actor_ids[] …
+ *   pull          gỡ phần tử khỏi mảng khoá            use_cases[].actor_ids[], entities[].feature_ids[] …
  *   null          đặt khoá về null                     roles[].actor_id, actors[].parent_id, screens[].primary_function_id
  *   remove_owner  xoá luôn phần tử chứa khoá           permissions, functions[screen_id], diagrams, flags,
  *                                                      assumptions, sections[function:*|feature:*], steps[@X]
@@ -58,7 +58,8 @@ export const CASCADE_POLICY: Readonly<Record<string, CascadePolicy>> = Object.fr
   "sections[].id": "remove_owner",
   "progress.screen_cursor": "invariant",
   "progress.screen_queue[]": "pull",
-  "steps[].id": "remove_owner"
+  "steps[].id": "remove_owner",
+  "entities[].feature_ids[]": "pull"
 })
 
 // ─── removed ids ─────────────────────────────────────────────────

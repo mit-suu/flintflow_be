@@ -135,6 +135,13 @@ export const permissionSchema = z.strictObject({
   action: z.string().min(1)
 })
 
+export const entityAttributeSchema = z.strictObject({
+  name: z.string().trim().min(1),
+  kind: z.enum(["key", "reference", "plain"]),
+  required: z.boolean(),
+  description: z.string().optional()
+})
+
 export const entitySchema = z.strictObject({
   id,
   name: z.string(),
@@ -147,7 +154,10 @@ export const entitySchema = z.strictObject({
   // Id con (trong `relations`) mà liên kết tới cha này là TUỲ CHỌN: con tồn tại được khi không có cha này
   relation_optional: z.array(id).optional(),
   // Dữ liệu chủ tồn tại độc lập (User, Course, Room…) — được phép không có cha
-  root: z.boolean().optional()
+  root: z.boolean().optional(),
+  // Thuộc tính mức domain và feature dùng entity (class diagram mỗi feature một hình). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  attributes: z.array(entityAttributeSchema).optional(),
+  feature_ids: z.array(id).optional()
 })
 
 export const validationSchema = z.strictObject({
@@ -249,7 +259,7 @@ export const customSectionSchema = z.strictObject({
 
 export const diagramSchema = z.strictObject({
   id,
-  kind: z.enum(["context", "usecase", "screen_flow", "erd", "screen_layout"]),
+  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "screen_layout"]),
   /** FLF-339: engine vẽ. Dữ liệu cũ (chỉ có `puml`) được chuyển lúc đọc ở mức mảng — xem `legacy-diagram.ts`. */
   format: z.enum(["puml", "svg"]),
   source: z.string(),

@@ -66,7 +66,7 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
   const entity = (id: string, name: string, relations: string[] = [], relation_verbs?: Record<string, string>) => ({
     op: "add",
     path: "entities[]",
-    value: { id, name, description: `${name}.`, relations, ...(relation_verbs ? { relation_verbs } : {}) }
+    value: { id, name, description: `${name}.`, relations, feature_ids: ["F1"], ...(relation_verbs ? { relation_verbs } : {}) }
   })
   /** Entity không là con của ai trong lô ⇒ đánh dấu root, để test luật khác không vướng `erd_dependent_without_parent`. */
   const withRoots = (ops: unknown[]): unknown[] => {
@@ -193,6 +193,19 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
     expect(rules([marked, entity("E02", "Version"), assumption])).toEqual([])
   })
 
+  it("entity không có feature_ids khi Spine đã có feature ⇒ erd_feature_missing; thuộc tính trùng tên ⇒ erd_attribute_duplicate", () => {
+    const bare = entity("E01", "Project")
+    delete (bare.value as { feature_ids?: string[] }).feature_ids
+    expect(rules([bare])).toEqual(["erd_feature_missing"])
+    expect(validateOps({ ...ERD, features: [] }, withRoots([bare]), { writable: ["entities"], stepId: "S-4.5" })).toEqual([])
+    const dup = entity("E01", "Project")
+    ;(dup.value as Record<string, unknown>).attributes = [
+      { name: "Code", kind: "key", required: true },
+      { name: "code", kind: "plain", required: false }
+    ]
+    expect(rules([dup])).toEqual(["erd_attribute_duplicate"])
+  })
+
   it("ví dụ trong skill entities-erd qua đủ luật ERD (ví dụ không được vi phạm chính skill)", () => {
     const md = fs.readFileSync(path.resolve(__dirname, "../../../assets/skills/content/entities-erd/SKILL.md"), "utf8")
     const example = JSON.parse(/## Example\s+```json\s+([\s\S]*?)```/.exec(md)![1]) as { ops: unknown[] }
@@ -256,8 +269,8 @@ describe("validateOps — luật ERD lúc sinh (S-4.5)", () => {
     const spine: Spine = {
       ...ERD,
       entities: [
-        { id: "E01", name: "Exam Registration", description: "One registration.", root: true, relations: ["E02"], relation_verbs: { E02: "produces" }, relation_cardinality: { E02: "1" } },
-        { id: "E02", name: "Exam Attempt", description: "One attempt.", relations: [] }
+        { id: "E01", name: "Exam Registration", description: "One registration.", root: true, relations: ["E02"], relation_verbs: { E02: "produces" }, relation_cardinality: { E02: "1" }, feature_ids: ["F1"] },
+        { id: "E02", name: "Exam Attempt", description: "One attempt.", relations: [], feature_ids: ["F1"] }
       ],
       assumptions: [{ id: "AS01", path: "entities[id=E01].relation_cardinality", statement: "One exam registration leads to one exam attempt.", rationale: "FN009.", origin_step_id: "S-4.5", status: "unconfirmed", confirmed_at: null }]
     }

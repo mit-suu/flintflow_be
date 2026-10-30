@@ -67,7 +67,8 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "sections[].id", targetCollection: "section_key", cardinality: "one" },
   { path: "progress.screen_cursor", targetCollection: "screens", cardinality: "one" },
   { path: "progress.screen_queue[]", targetCollection: "screens", cardinality: "many" },
-  { path: "steps[].id", targetCollection: "screens", cardinality: "one" }
+  { path: "steps[].id", targetCollection: "screens", cardinality: "one" },
+  { path: "entities[].feature_ids[]", targetCollection: "features", cardinality: "many" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -155,7 +156,8 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     sectionId,
     cursor,
     queue,
-    stepId
+    stepId,
+    entityFeatures
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -203,7 +205,10 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     yield one(fnFeature, owner, "feature_id", f.feature_id)
     yield* many(fnRules, owner, "business_rule_ids", f.business_rule_ids)
   }
-  for (const e of spine.entities) yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
+  for (const e of spine.entities) {
+    yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
+    yield* many(entityFeatures, `entities[id=${e.id}]`, "feature_ids", e.feature_ids)
+  }
   for (const br of spine.business_rules) {
     yield* many(ruleValidations, `business_rules[id=${br.id}]`, "source_validation_ids", br.source_validation_ids)
   }

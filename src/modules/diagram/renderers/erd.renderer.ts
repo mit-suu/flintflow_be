@@ -15,7 +15,7 @@ import { Scene } from "../../../shared/diagram/svg-scene.js"
 import type { Entity, Spine } from "../../spine/spine.types.js"
 import type { RenderedPart, Renderer } from "./common.js"
 import { byId, compareIds, svgPart } from "./common.js"
-import { layoutErd, type ErdDiagram, type ErdRelationInput } from "./erd-layout.js"
+import { layoutErd, type ErdAttribute, type ErdDiagram, type ErdRelationInput } from "./erd-layout.js"
 import { DIAGRAM_LABELS, type DiagramLabels } from "./labels.js"
 
 export const MAX_ENTITIES_PER_DIAGRAM = 25
@@ -26,6 +26,12 @@ export const DEFAULT_RELATION_VERB = DIAGRAM_LABELS.en.relationVerb
 
 export const relationVerb = (entity: Pick<Entity, "relation_verbs">, targetId: string, fallback: string = DEFAULT_RELATION_VERB): string =>
   entity.relation_verbs?.[targetId]?.trim() || fallback
+
+/** Cặp cha → con của một quan hệ — đủ cho các hàm chia hình (ERD và class diagram dùng chung). */
+export interface Link {
+  from: string
+  to: string
+}
 
 const relationsOf = (entities: readonly Entity[], labels: DiagramLabels): ErdRelationInput[] => {
   const ids = new Set(entities.map((e) => e.id))
@@ -45,7 +51,7 @@ const relationsOf = (entities: readonly Entity[], labels: DiagramLabels): ErdRel
 }
 
 /** Thứ tự duyệt rộng của `ids` theo quan hệ (thành phần liên thông liền nhau) — chỗ cắt ít đường nhất có thể. */
-const traversalOrder = (ids: readonly string[], relations: readonly ErdRelationInput[]): string[] => {
+export const traversalOrder = (ids: readonly string[], relations: readonly Link[]): string[] => {
   const adjacent = new Map(ids.map((id): [string, string[]] => [id, []]))
   for (const r of relations) {
     adjacent.get(r.from)?.push(r.to)
@@ -69,7 +75,7 @@ const traversalOrder = (ids: readonly string[], relations: readonly ErdRelationI
   return order
 }
 
-const components = (ids: readonly string[], relations: readonly ErdRelationInput[]): string[][] => {
+const components = (ids: readonly string[], relations: readonly Link[]): string[][] => {
   const order = traversalOrder(ids, relations)
   const root = new Map<string, string>()
   const find = (id: string): string => {
@@ -85,7 +91,7 @@ const components = (ids: readonly string[], relations: readonly ErdRelationInput
 }
 
 /** Chia `ids` (đã theo thứ tự duyệt) thành các nhóm ≤ `limit`: thành phần nhỏ gộp theo first-fit, thành phần lớn cắt liên tiếp. */
-const groupEntities = (ids: readonly string[], relations: readonly ErdRelationInput[], limit: number): string[][] => {
+export const groupEntities = (ids: readonly string[], relations: readonly Link[], limit: number): string[][] => {
   if (ids.length <= limit) return [[...ids]]
   const bins: string[][] = []
   const open: string[][] = []
@@ -110,6 +116,9 @@ const groupEntities = (ids: readonly string[], relations: readonly ErdRelationIn
   return bins.map((b) => ids.filter((id) => b.includes(id)))
 }
 
+/** Khoá thuộc tính ⇒ PK, tham chiếu ⇒ FK; tên thuộc tính theo Spine. */
+const erdAttributes = (e: Entity): ErdAttribute[] => (e.attributes ?? []).map((a) => ({ name: a.name, pk: a.kind === "key", fk: a.kind === "reference" }))
+
 export interface ErdPart {
   title: string
   scene: Scene | null
@@ -124,7 +133,7 @@ export const partitionErd = (spine: Spine, notation: ErdNotation = DEFAULT_ERD_N
     const set = new Set(ids)
     return {
       notation,
-      entities: entities.filter((e) => set.has(e.id)).map((e) => ({ id: e.id, name: e.name })),
+      entities: entities.filter((e) => set.has(e.id)).map((e) => ({ id: e.id, name: e.name, attributes: erdAttributes(e) })),
       relations: relations.filter((r) => set.has(r.from) && set.has(r.to)),
       emptyLabel: labels.noEntities
     }

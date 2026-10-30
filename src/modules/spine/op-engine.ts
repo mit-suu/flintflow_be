@@ -114,13 +114,20 @@ const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnT
   return normalized.map((edge, i) => (typeof given[i] === "string" ? (current.find((c) => c.to === given[i]) ?? edge) : edge))
 }
 
-/** Hai cạnh cùng màn đích ⇒ giữ cạnh đầu (path chọn cạnh theo `to`). */
+/** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes"])
+
+const elementKeyOf = (el: unknown): string | null =>
+  !isRecord(el) ? null : typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
+
+/** Hai phần tử cùng khoá (cạnh cùng màn đích, thuộc tính cùng tên) ⇒ giữ phần tử đầu. */
 const dedupeFlowEdges = (edges: unknown[]): unknown[] => {
   const seen = new Set<string>()
   return edges.filter((e) => {
-    if (!isRecord(e) || typeof e.to !== "string") return true
-    if (seen.has(e.to)) return false
-    seen.add(e.to)
+    const key = elementKeyOf(e)
+    if (key === null) return true
+    if (seen.has(key)) return false
+    seen.add(key)
     return true
   })
 }
@@ -129,8 +136,8 @@ const applySet = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op set thiếu value: "${op.path}"`)
   // Mọi đường ghi (model, /changes, import) đều chuẩn hoá form_factor thành mảng — change log không bao giờ giữ chuỗi
   const normalized = normalizeLegacyAt(op.path, op.value)
-  // `flow_to` là mảng cạnh không có id: set được cả mảng (khác mảng thực thể có id), mỗi màn đích một cạnh
-  const wholeFlow = lastKey(op.path) === "flow_to" && Array.isArray(normalized)
+  // `flow_to` / `attributes` là mảng phần tử không có id: set được cả mảng (khác mảng thực thể có id), mỗi khoá một phần tử
+  const wholeFlow = KEYED_ARRAYS.has(lastKey(op.path)) && Array.isArray(normalized)
   const target = resolve(state.spine, op.path)
   const value = wholeFlow ? dedupeFlowEdges(keepKnownEdges(op.value as unknown[], normalized as unknown[], target)) : normalized
 
@@ -244,9 +251,10 @@ const applyAdd = (state: WorkState, op: Op): void => {
         `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" — muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
       )
     }
-    // Cạnh luồng không có id: một màn đích chỉ một cạnh (path chọn cạnh theo `to`)
-    if (lastKey(op.path) === "flow_to" && typeof value.to === "string" && target.parent.some((el) => isRecord(el) && el.to === value.to)) {
-      throw opError("duplicate_id", op.path, `Màn đích "${value.to}" đã có cạnh trong "${op.path}" — sửa trigger / guard của cạnh đó bằng set trên "flow_to[to=${value.to}].trigger"`)
+    // Phần tử không có id: một khoá chỉ một phần tử (path chọn phần tử theo `to` / `name`)
+    const key = KEYED_ARRAYS.has(lastKey(op.path)) ? elementKeyOf(value) : null
+    if (key !== null && target.parent.some((el) => elementKeyOf(el) === key)) {
+      throw opError("duplicate_id", op.path, `Phần tử "${key.slice(key.indexOf("=") + 1)}" đã có trong "${op.path}" — sửa field của nó bằng set trên path có selector (${key.startsWith("to=") ? "flow_to[to=…]" : "attributes[name=…]"})`)
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)

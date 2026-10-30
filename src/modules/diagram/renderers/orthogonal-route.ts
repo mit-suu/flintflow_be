@@ -296,7 +296,7 @@ const routeAll = (nodes: readonly GridNode[], edges: readonly GridEdge[], cells:
           for (const lane of lanesFrom(hA ? geo.vLanes : geo.hLanes, limit, dir))
             for (const ca of listA)
               for (const cb of listB) {
-                if (Math.abs(ca - cb) < o.sepMin) continue
+                if (Math.abs(ca - cb) < (A.id === B.id ? o.portPitch : o.sepMin)) continue // vòng tự thân: hai đầu cách nhau một bước cổng để còn chỗ cho nhãn
                 const pa = point(A, sa, ca)
                 const pb = point(B, sb, cb)
                 push(hA ? [pa, [lane, ca], [lane, cb], pb] : [pa, [ca, lane], [cb, lane], pb], sa, sb, ca, cb)
