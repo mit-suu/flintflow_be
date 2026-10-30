@@ -24,7 +24,7 @@ interface Common {
 }
 
 export type SceneElement =
-  | (Common & { type: "rect"; x: number; y: number; w: number; h: number; fill: string; dashed: boolean; container: boolean; rotate: number })
+  | (Common & { type: "rect"; x: number; y: number; w: number; h: number; fill: string; dashed: boolean; container: boolean; rotate: number; radius: number })
   | (Common & { type: "ellipse"; cx: number; cy: number; rx: number; ry: number; fill: string; dashed: boolean; container: boolean })
   | (Common & { type: "path"; points: Point[]; closed: boolean; fill: string; dashed: boolean })
   | (Common & { type: "text"; x: number; y: number; text: string; size: number; bold: boolean; anchor: Anchor; baseline: Baseline; rotate: number; italic: boolean })
@@ -35,6 +35,8 @@ export interface ShapeOptions {
   dashed?: boolean
   /** Hộp chứa (system boundary, swimlane): chữ / đường bên trong được phép, chỉ kiểm cắt viền. */
   container?: boolean
+  /** Bo góc (px) của hình chữ nhật — chỉ ảnh hưởng nét vẽ; bộ kiểm bố cục vẫn coi là hình chữ nhật, nên chữ phải cách góc ≥ bán kính. */
+  radius?: number
 }
 
 export interface TextOptions {
@@ -148,7 +150,7 @@ export class Scene {
 
   rect(id: string, x: number, y: number, w: number, h: number, opts: ShapeOptions = {}): string {
     const fill = color(opts.fill, opts.container ? "none" : FILL)
-    return this.push({ type: "rect", id, name: opts.name ?? id, role: "shape", layer: 0, x, y, w, h, fill, dashed: opts.dashed ?? false, container: opts.container ?? false, rotate: 0 })
+    return this.push({ type: "rect", id, name: opts.name ?? id, role: "shape", layer: 0, x, y, w, h, fill, dashed: opts.dashed ?? false, container: opts.container ?? false, rotate: 0, radius: opts.radius ?? 0 })
   }
 
   circle(id: string, cx: number, cy: number, r: number, opts: ShapeOptions = {}): string {
@@ -214,7 +216,7 @@ export class Scene {
     const w = textWidth(text, size) + 8
     const h = size + 4
     const id = `${lineId}#label`
-    this.push({ type: "rect", id: `${id}-bg`, name: `${line.name} (nền nhãn)`, role: "decoration", owner: lineId, layer: 1, x: at[0] - w / 2, y: at[1] - h / 2, w, h, fill: PAPER, dashed: false, container: false, rotate })
+    this.push({ type: "rect", id: `${id}-bg`, name: `${line.name} (nền nhãn)`, role: "decoration", owner: lineId, layer: 1, x: at[0] - w / 2, y: at[1] - h / 2, w, h, fill: PAPER, dashed: false, container: false, rotate, radius: 0 })
     return this.push({ type: "text", id, name: text, role: "text", owner: lineId, layer: 1, x: at[0], y: at[1], text, size, bold: false, italic: false, anchor: "middle", baseline: "central", rotate })
   }
 
@@ -263,7 +265,8 @@ const markup = (el: SceneElement): string => {
       const transform = el.rotate ? ` transform="rotate(${num(el.rotate)} ${num(el.x + el.w / 2)} ${num(el.y + el.h / 2)})"` : ""
       // nền nhãn: không viền
       const stroke = el.role === "decoration" ? "" : strokeAttrs(el.dashed)
-      return `<rect x="${num(el.x)}" y="${num(el.y)}" width="${num(el.w)}" height="${num(el.h)}" fill="${el.fill}"${stroke}${transform}/>`
+      const round = el.radius > 0 ? ` rx="${num(el.radius)}" ry="${num(el.radius)}"` : ""
+      return `<rect x="${num(el.x)}" y="${num(el.y)}" width="${num(el.w)}" height="${num(el.h)}"${round} fill="${el.fill}"${stroke}${transform}/>`
     }
     case "ellipse":
       return el.rx === el.ry

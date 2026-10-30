@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest"
 import { createEmptySpine } from "./spine.repository.js"
-import { guestOpenScreenIds, hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
+import { hasScreenActorLinks, screenActorMap, screenLanes } from "./screen-actors.js"
 import type { Spine } from "./spine.types.js"
+
+const fn = (id: string, screenId: string | null) =>
+  ({ id, screen_id: screenId, feature_id: "F1", order: 0, name: id, trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }) as Spine["functions"][number]
+const uc = (id: string, actor_ids: string[], function_ids: string[]) => ({ id, name: id, actor_ids, function_ids, description: "", includes: [], extends: [] })
 
 const base = (): Spine => {
   const s = createEmptySpine()
@@ -25,88 +29,62 @@ const base = (): Spine => {
   return s
 }
 
-describe("screenActorMap", () => {
-  it("gộp actor người từ quyền (role.actor_id) và use case ↔ function trên màn; bỏ actor system", () => {
+describe("screenLanes", () => {
+  it("màn → primary_function_id → function → use case → actor_ids; bỏ actor system", () => {
     const s = base()
-    s.roles = [{ id: "R1", name: "Staff", actor_id: "A02" }]
-    s.permissions = [{ id: "P1", screen_id: "S02", role_id: "R1", action: "view" }]
-    s.functions = [
-      { id: "FN1", screen_id: "S01", feature_id: "F1", order: 0, name: "Pay", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }
-    ] as Spine["functions"]
-    s.use_cases = [{ id: "UC1", name: "Pay", actor_ids: ["A03", "A01"], function_ids: ["FN1"], description: "", includes: [], extends: [] }]
-
-    const map = screenActorMap(s)
-    expect(Object.fromEntries(map)).toEqual({ S01: ["A01"], S02: ["A02"], S03: [] })
-    expect(hasScreenActorLinks(map)).toBe(true)
+    s.screens[0].primary_function_id = "FN1"
+    s.functions = [fn("FN1", "S01"), fn("FN2", "S01")]
+    s.use_cases = [uc("UC1", ["A03", "A01"], ["FN1"]), uc("UC2", ["A02"], ["FN2"])]
+    // FN2 không phải primary ⇒ A02 không vào làn của S01
+    expect(screenLanes(s).get("S01")).toEqual({ actorId: "A01", ambiguous: [] })
+    expect(Object.fromEntries(screenActorMap(s))).toEqual({ S01: ["A01"], S02: [], S03: [] })
+    expect(hasScreenActorLinks(screenActorMap(s))).toBe(true)
   })
 
-  it("actor tổng quát (User, cha qua parent_id) không có màn riêng: màn của nó thuộc mọi actor chuyên biệt", () => {
+  it("không có primary function ⇒ mọi function có screen_id = màn", () => {
+    const s = base()
+    s.functions = [fn("FN1", "S02")]
+    s.use_cases = [uc("UC1", ["A02"], ["FN1"])]
+    expect(screenLanes(s).get("S02")?.actorId).toBe("A02")
+  })
+
+  it("primary function không thuộc use case nào ⇒ lùi về function khác của màn rồi quyền", () => {
+    const s = base()
+    s.screens[0].primary_function_id = "FN1"
+    s.functions = [fn("FN1", "S01"), fn("FN2", "S01")]
+    s.use_cases = [uc("UC2", ["A02"], ["FN2"])]
+    expect(screenLanes(s).get("S01")?.actorId).toBe("A02")
+
+    s.use_cases = []
+    s.roles = [{ id: "R1", name: "Customer", actor_id: "A01" }, { id: "R2", name: "Guest", actor_id: null }]
+    s.permissions = [{ id: "P1", screen_id: "S01", role_id: "R1", action: "view" }, { id: "P2", screen_id: "S03", role_id: "R2", action: "view" }]
+    expect(screenLanes(s).get("S01")?.actorId).toBe("A01")
+    // role không gắn actor ⇒ màn không có actor nào (không còn luật "màn public thuộc mọi actor")
+    expect(screenLanes(s).get("S03")).toBeNull()
+  })
+
+  it("actor cùng cha ⇒ làn của actor cha, không bung xuống actor lá", () => {
     const s = base()
     s.actors.push({ id: "A04", name: "User", kind: "human", description: "" })
     s.actors[0].parent_id = "A04"
     s.actors[1].parent_id = "A04"
-    s.functions = [
-      { id: "FN1", screen_id: "S01", feature_id: "F1", order: 0, name: "Log In", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null },
-      { id: "FN2", screen_id: "S02", feature_id: "F1", order: 1, name: "Pay", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }
-    ] as Spine["functions"]
-    s.use_cases = [
-      { id: "UC1", name: "Log In", actor_ids: ["A04"], function_ids: ["FN1"], description: "", includes: [], extends: [] },
-      { id: "UC2", name: "Pay", actor_ids: ["A01"], function_ids: ["FN2"], description: "", includes: [], extends: [] }
-    ]
-    expect(Object.fromEntries(screenActorMap(s))).toEqual({ S01: ["A01", "A02"], S02: ["A01"], S03: [] })
+    s.screens[0].primary_function_id = "FN1"
+    s.functions = [fn("FN1", "S01")]
+    s.use_cases = [uc("UC1", ["A01", "A02"], ["FN1"]), uc("UC2", ["A04"], ["FN1"])]
+    expect(screenLanes(s).get("S01")).toEqual({ actorId: "A04", ambiguous: [] })
+    s.use_cases = [uc("UC1", ["A01", "A02"], ["FN1"])]
+    expect(screenLanes(s).get("S01")).toEqual({ actorId: "A04", ambiguous: [] })
   })
 
-  it("màn chỉ role không gắn actor (Guest) được vào ⇒ thuộc mọi actor người đã có màn", () => {
+  it("nhiều actor không có tổ tiên chung ⇒ mơ hồ, chọn actor đầu tiên theo thứ tự actor_ids", () => {
     const s = base()
-    s.roles = [
-      { id: "R1", name: "Staff", actor_id: "A02" },
-      { id: "R2", name: "Guest", actor_id: null }
-    ]
-    s.permissions = [
-      { id: "P1", screen_id: "S01", role_id: "R2", action: "view" },
-      { id: "P2", screen_id: "S02", role_id: "R1", action: "view" },
-      // S03: Guest lẫn Staff ⇒ không phải màn public
-      { id: "P3", screen_id: "S03", role_id: "R2", action: "view" },
-      { id: "P4", screen_id: "S03", role_id: "R1", action: "view" }
-    ]
-    s.functions = [
-      { id: "FN1", screen_id: "S03", feature_id: "F1", order: 0, name: "Pay", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null }
-    ] as Spine["functions"]
-    s.use_cases = [{ id: "UC1", name: "Pay", actor_ids: ["A01"], function_ids: ["FN1"], description: "", includes: [], extends: [] }]
-
-    expect(Object.fromEntries(screenActorMap(s))).toEqual({ S01: ["A01", "A02"], S02: ["A02"], S03: ["A01", "A02"] })
+    s.screens[0].primary_function_id = "FN1"
+    s.functions = [fn("FN1", "S01")]
+    s.use_cases = [uc("UC1", ["A02", "A01"], ["FN1"])]
+    expect(screenLanes(s).get("S01")).toEqual({ actorId: "A02", ambiguous: ["A02", "A01"] })
   })
 
-  it("màn public khi chưa actor nào có màn ⇒ không gán; quyền trỏ role không tồn tại không làm màn thành public", () => {
-    const s = base()
-    s.roles = [{ id: "R2", name: "Guest", actor_id: null }]
-    s.permissions = [
-      { id: "P1", screen_id: "S01", role_id: "R2", action: "view" },
-      { id: "P2", screen_id: "S02", role_id: "R9", action: "view" }
-    ]
-    expect(hasScreenActorLinks(screenActorMap(s))).toBe(false)
-
-    s.roles.push({ id: "R1", name: "Staff", actor_id: "A02" })
-    s.permissions.push({ id: "P3", screen_id: "S03", role_id: "R1", action: "view" })
-    expect(Object.fromEntries(screenActorMap(s))).toEqual({ S01: ["A02"], S02: [], S03: ["A02"] })
-  })
-
-  it("guestOpenScreenIds: màn có ít nhất một quyền của role không gắn actor (kể cả khi role khác cũng vào)", () => {
-    const s = base()
-    s.roles = [
-      { id: "R1", name: "Staff", actor_id: "A02" },
-      { id: "R2", name: "Guest", actor_id: null }
-    ]
-    s.permissions = [
-      { id: "P1", screen_id: "S01", role_id: "R2", action: "view" },
-      { id: "P2", screen_id: "S01", role_id: "R1", action: "view" },
-      { id: "P3", screen_id: "S02", role_id: "R1", action: "view" },
-      { id: "P4", screen_id: "S03", role_id: "R9", action: "view" }
-    ]
-    expect([...guestOpenScreenIds(s)]).toEqual(["S01"])
-  })
-
-  it("chưa có quyền lẫn use case gắn function ⇒ không có liên kết nào", () => {
+  it("chưa có liên kết nào ⇒ hasScreenActorLinks = false", () => {
     expect(hasScreenActorLinks(screenActorMap(base()))).toBe(false)
   })
 })
