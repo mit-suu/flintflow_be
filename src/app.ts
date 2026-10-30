@@ -29,6 +29,7 @@ import folderRoutes from "./modules/folder/folder.route.js"
 import organizationRoutes from "./modules/organization/organization.route.js"
 import invitationRoutes from "./modules/organization/invitation.route.js"
 import importRoutes from "./modules/import/import.route.js"
+import orgLibraryRoutes from "./modules/import/org-library.route.js"
 import changeRequestRoutes from "./modules/change-request/change-request.route.js"
 import docVersionRoutes from "./modules/doc-version/doc-version.route.js"
 import translationRoutes from "./modules/translation/translation.route.js"
@@ -213,6 +214,7 @@ app.use("/api/v1/billing", billingRoutes)
 app.use("/api/v1/feedback", feedbackRoutes)
 app.use("/api/v1/folders", folderRoutes)
 app.use("/api/v1/orgs", organizationRoutes)
+app.use("/api/v1/orgs", orgLibraryRoutes)
 app.use("/api/v1/invitations", invitationRoutes)
 app.use("/api/v1/export", exportRoutes)
 

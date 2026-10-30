@@ -298,6 +298,7 @@ chỉ đưa lựa chọn khi thật sự cần user quyết.
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-29 | contract-change FLF-278 (mẫu bắt buộc — Luồng 2 cho phần thiếu) | Additive. Dự án import + mẫu bắt buộc ở `incomplete` (chế độ 3) gọi `POST /import/continue` (`import-change-contract` #8b) ⇒ `mode = fpt`, Brief B-1…S-1 mở lại, mọi endpoint step / gate / baseline của hợp đồng này dùng như dự án tạo mới; render theo layout mẫu (không chèn mục ngoài mẫu). Hai luật cờ vàng mới `template_section_absent`, `template_section_empty` (chỉ khi có layout mẫu bắt buộc); luật mục trống / cũ chỉ áp lên mục của mẫu. Skill `apply-change-op` 1.7.0: projection có `custom_sections` (+ `guidance`, `draft_context`) khi lệnh nhắc mục riêng; luật 14–15 (ghi mục riêng, soạn nháp không bịa, hỏi tối đa 3 câu) |
 | 2026-09-14 | T08 | Bản nháp đầu tiên |
 | 2026-09-14 | review T08–T11 | `txn` nullable (lô không đổi gì), `path_not_writable`, `revert_conflict`, ghi Spine + changes trong transaction, `force` cho render, preview không tạo Spine |
 | 2026-09-15 | contract-change Wave 3 | Endpoint 24 `POST /resume` (T13); `session_id` bắt buộc cho `/gate` + giới hạn độ dài `answers`/`note` (T13); mã `409 NO_WORKING_DRAFT` `{hint}` cho `/document`, `/export/word` (T15); `RenderedSection.id` `group:*` (T15); `step-registry.json` S-3.6 `renders: ["usecase", "context"]` (T14) |
