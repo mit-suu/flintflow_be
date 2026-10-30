@@ -338,7 +338,7 @@ describe("preview — diff + impact, không ghi", () => {
     expect(fn).toMatchObject({ feature_id: "F3", normal: expect.arrayContaining(["Analyst selects the students."]) })
     expect(fn.validations[0].id).toMatch(new RegExp(`^${fn.id}-V\\d+$`))
     expect(screen).toMatchObject({ name: "Absence Warning", detail_status: "signed_off", primary_function_id: fn.id })
-    expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).toContain(screen.id)
     expect(spine.permissions.filter((p) => p.screen_id === screen.id).map((p) => p.action).sort()).toEqual(["create", "view"])
     expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
     expect(spine.messages.find((m) => m.id === "MSG04")?.function_ids).toEqual(["FN028", fn.id])

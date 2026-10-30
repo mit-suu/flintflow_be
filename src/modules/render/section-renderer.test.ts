@@ -78,7 +78,7 @@ const spine = (): Spine => ({
       feature_id: "F1",
       name: "Login",
       description: "Entry screen.",
-      flow_to: ["S02"],
+      flow_to: [{ to: "S02", trigger: "Submit credentials" }],
       is_popup: false,
       tabs: [],
       primary_function_id: "FN01",
@@ -393,7 +393,7 @@ describe("renderSection — feature/function", () => {
     s.roles.push({ id: "R2", name: "Buyer role", actor_id: "A02" }, { id: "R3", name: "Gateway role", actor_id: "A05" })
     s.permissions.push({ id: "P2", screen_id: "S03", role_id: "R2", action: "view" }, { id: "P3", screen_id: "S03", role_id: "R3", action: "view" })
     s.screens.push({ id: "S03", feature_id: "F2", name: "Settings", description: "", flow_to: [], is_popup: true, tabs: [], primary_function_id: "FN03", queue_order: 3, detail_status: "signed_off" })
-    s.screens[1].flow_to = ["S03"]
+    s.screens[1].flow_to = [{ to: "S03" }]
     s.diagrams.push({
       id: "D06",
       kind: "screen_layout",

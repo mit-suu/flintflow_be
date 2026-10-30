@@ -1058,10 +1058,24 @@
       "name": "Login",
       "description": "Entry screen where a user authenticates with email/password or Google.",
       "flow_to": [
-        "S02",
-        "S03",
-        "S05",
-        "S14"
+        {
+          "to": "S02",
+          "trigger": "Click Register"
+        },
+        {
+          "to": "S03",
+          "trigger": "Click Forgot password"
+        },
+        {
+          "to": "S05",
+          "trigger": "Submit credentials",
+          "guard": "Founder account"
+        },
+        {
+          "to": "S14",
+          "trigger": "Submit credentials",
+          "guard": "Admin account"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1075,7 +1089,10 @@
       "name": "Register",
       "description": "Account creation with email verification.",
       "flow_to": [
-        "S01"
+        {
+          "to": "S01",
+          "trigger": "Click Log in"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1101,7 +1118,10 @@
       "name": "Onboarding",
       "description": "First-run guided tour introducing the Brief-to-SRS pipeline.",
       "flow_to": [
-        "S05"
+        {
+          "to": "S05",
+          "trigger": "Finish onboarding"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1115,10 +1135,22 @@
       "name": "Project Dashboard",
       "description": "Lists the user's projects with status, readiness and quick actions.",
       "flow_to": [
-        "S06",
-        "S07",
-        "S11",
-        "S13"
+        {
+          "to": "S06",
+          "trigger": "Click New project"
+        },
+        {
+          "to": "S07",
+          "trigger": "Open a project"
+        },
+        {
+          "to": "S11",
+          "trigger": "Click Upgrade plan"
+        },
+        {
+          "to": "S13",
+          "trigger": "Click the bell"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1132,7 +1164,10 @@
       "name": "Create Project",
       "description": "Popup to create a new project and choose the working mode.",
       "flow_to": [
-        "S07"
+        {
+          "to": "S07",
+          "trigger": "Submit new project"
+        }
       ],
       "is_popup": true,
       "tabs": [],
@@ -1146,9 +1181,18 @@
       "name": "Project Workspace",
       "description": "Main working screen: chat pane drives the pipeline while the document pane renders the SRS read-only.",
       "flow_to": [
-        "S08",
-        "S09",
-        "S10"
+        {
+          "to": "S08",
+          "trigger": "Open diagram preview"
+        },
+        {
+          "to": "S09",
+          "trigger": "Open verification panel"
+        },
+        {
+          "to": "S10",
+          "trigger": "Click Export"
+        }
       ],
       "is_popup": false,
       "tabs": [
@@ -1166,7 +1210,10 @@
       "name": "Diagram Preview",
       "description": "Full-size preview of a rendered PlantUML diagram.",
       "flow_to": [
-        "S07"
+        {
+          "to": "S07",
+          "trigger": "Close preview"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1180,8 +1227,14 @@
       "name": "Verification & Change Panel",
       "description": "Shows open flags, readiness score and lets the user request and apply changes with impact preview.",
       "flow_to": [
-        "S07",
-        "S10"
+        {
+          "to": "S07",
+          "trigger": "Back to workspace"
+        },
+        {
+          "to": "S10",
+          "trigger": "Click Export"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1195,7 +1248,10 @@
       "name": "Export",
       "description": "Configure and download the Word export: watermarked working draft or clean baseline.",
       "flow_to": [
-        "S07"
+        {
+          "to": "S07",
+          "trigger": "Back to workspace"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1209,7 +1265,10 @@
       "name": "Plan & Pricing",
       "description": "Displays subscription plans and starts a credit purchase.",
       "flow_to": [
-        "S12"
+        {
+          "to": "S12",
+          "trigger": "Open billing history"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1247,11 +1306,26 @@
       "name": "Admin User List",
       "description": "Read-only paginated list of all user accounts.",
       "flow_to": [
-        "S15",
-        "S16",
-        "S17",
-        "S18",
-        "S19"
+        {
+          "to": "S15",
+          "trigger": "Select a user"
+        },
+        {
+          "to": "S16",
+          "trigger": "Open metrics"
+        },
+        {
+          "to": "S17",
+          "trigger": "Open AI cost report"
+        },
+        {
+          "to": "S18",
+          "trigger": "Open prompt templates"
+        },
+        {
+          "to": "S19",
+          "trigger": "Open audit log"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1265,7 +1339,10 @@
       "name": "Admin User Detail",
       "description": "Read-only profile of one user with projects and credit balance.",
       "flow_to": [
-        "S14"
+        {
+          "to": "S14",
+          "trigger": "Back to user list"
+        }
       ],
       "is_popup": false,
       "tabs": [],

@@ -112,13 +112,23 @@ const useCaseSchema = new Schema(
   opts
 )
 
+const flowEdgeSchema = new Schema(
+  {
+    to: { type: String, required: true },
+    // Không default: thiếu = không có trigger / guard (dữ liệu cũ chỉ là chuỗi id màn đích — `legacy-flow.ts`)
+    trigger: { type: String },
+    guard: { type: String }
+  },
+  opts
+)
+
 const screenSchema = new Schema(
   {
     id: { type: String, required: true },
     feature_id: { type: String, required: true },
     name: { type: String, default: "" },
     description: { type: String, default: "" },
-    flow_to: { type: [String], default: [] },
+    flow_to: { type: [flowEdgeSchema], default: [] },
     is_popup: { type: Boolean, default: false },
     tabs: { type: [String], default: [] },
     primary_function_id: nullableString,

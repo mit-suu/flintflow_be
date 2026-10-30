@@ -8,7 +8,7 @@
  *   segment  := key selector?
  *   key      := [A-Za-z_][A-Za-z0-9_]*
  *   selector := "[]"                  đích là chính mảng (add, renumber)
- *             | "[=" value "]"        phần tử vô hướng: flow_to[=S08]
+ *             | "[=" value "]"        phần tử vô hướng: tabs[=Overview] (riêng flow_to[=S08] = flow_to[to=S08])
  *             | "[" k=v ("," k=v)* "]"  phần tử object: permissions[screen_id=S3,role_id=R1,action=create]
  *
  * Giá trị selector được phép chứa `.`, `:`, `@`, `-` (ví dụ `sections[id=fixed:3.1.1]`,
@@ -16,6 +16,7 @@
  * `actors[1]` bị từ chối (`index_selector_forbidden`).
  */
 
+import { isDeepStrictEqual } from "node:util"
 import type { RejectRule } from "./op.types.js"
 
 export class PathError extends Error {
@@ -122,6 +123,8 @@ export const selectorFor = (element: unknown): Selector | null => {
     return { kind: "scalar", value: String(element) }
   }
   if (isRecord(element) && typeof element.id === "string") return { kind: "match", pairs: [["id", element.id]] }
+  // Cạnh luồng màn `screens[].flow_to[]` không có id — khoá là màn đích
+  if (isRecord(element) && typeof element.to === "string") return { kind: "match", pairs: [["to", element.to]] }
   return null
 }
 
@@ -232,16 +235,21 @@ export const resolve = (root: unknown, path: string): Resolved => {
       return { kind: "append", parent: arr, key: arr.length, value: undefined, exists: false, canonical: formatPath(canonical), lockedKeys: [] }
     }
 
-    const hits = findIndices(arr, seg.selector)
+    // `flow_to` đổi từ mảng id sang mảng cạnh: path cũ `flow_to[=S08]` (prompt / change cũ) chọn cạnh có `to` = S08
+    const selector: Exclude<Selector, { kind: "append" }> =
+      seg.key === "flow_to" && seg.selector.kind === "scalar" && arr.some(isRecord)
+        ? { kind: "match", pairs: [["to", seg.selector.value]] }
+        : seg.selector
+    const hits = findIndices(arr, selector)
     if (hits.length === 0) throw new PathError("path_not_resolved", path, `Không tìm thấy phần tử cho "${path}"`)
-    // Phần tử vô hướng trùng (dữ liệu legacy, vd `flow_to` lặp) giống hệt nhau ⇒ lấy bản đầu; remove gỡ từng bản
-    if (hits.length > 1 && seg.selector.kind === "match") {
+    // Phần tử trùng hệt nhau (dữ liệu legacy, vd `flow_to` lặp) ⇒ lấy bản đầu; remove gỡ từng bản
+    if (hits.length > 1 && selector.kind === "match" && !hits.every((i) => isDeepStrictEqual(arr[i], arr[hits[0]]))) {
       throw new PathError("path_ambiguous", path, `Selector khớp ${hits.length} phần tử: "${path}"`)
     }
 
     const element = arr[hits[0]]
     canonical.push({ key: seg.key, selector: selectorFor(element) ?? seg.selector })
-    const keys = lockedKeysOf(element, seg.selector)
+    const keys = lockedKeysOf(element, selector)
 
     if (last) {
       return { kind: "element", parent: arr, key: hits[0], value: element, exists: true, canonical: formatPath(canonical), lockedKeys: keys }

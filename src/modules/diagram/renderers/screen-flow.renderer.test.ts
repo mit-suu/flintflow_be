@@ -6,7 +6,7 @@ import { checkScene } from "../../../shared/diagram/svg-geometry.js"
 import { spineSchema } from "../../spine/spine.schema.js"
 import type { Screen, Spine } from "../../spine/spine.types.js"
 import { svgTitleOf } from "./common.js"
-import { renderKind } from "./index.js"
+import { RENDERERS, renderKind } from "./index.js"
 import { MAX_SCREENS_PER_DIAGRAM, partitionScreenFlow, SCREEN_FLOW_SECTION } from "./screen-flow.renderer.js"
 import { layoutScreenFlow } from "./screen-flow-layout.js"
 import { DIAGRAM_LABELS } from "./labels.js"
@@ -48,7 +48,7 @@ const fn = (id: string, screenId: string): Spine["functions"][number] => ({
 /** Spine nhỏ: một feature, màn S001…Snnn nối chuỗi, mọi màn thuộc actor A01 qua use case. */
 const chain = (count: number, extra: (s: Spine) => void = () => undefined): Spine =>
   mutate((s) => {
-    s.screens = Array.from({ length: count }, (_, i) => screen(i + 1, { flow_to: i + 1 < count ? [`S${String(i + 2).padStart(3, "0")}`] : [] }))
+    s.screens = Array.from({ length: count }, (_, i) => screen(i + 1, { flow_to: i + 1 < count ? [{ to: `S${String(i + 2).padStart(3, "0")}` }] : [] }))
     s.functions = s.screens.map((x, i) => fn(`FNX${i}`, x.id))
     s.use_cases = [{ id: "UCX", name: "Do It", actor_ids: ["A01"], function_ids: s.functions.map((f) => f.id), description: "", includes: [], extends: [] }]
     s.features = [{ id: "F1", name: "Only Feature", order: 0 }]
@@ -79,7 +79,7 @@ describe("screen_flow — chia hình theo feature, làn theo actor", () => {
     expect(ids(scene, "end:").sort()).toEqual(["end:S02", "end:S03", "end:S04"])
     for (const id of ids(scene, "flow:")) {
       const [from, to] = id.slice(5).split(">")
-      expect(f1.find((s) => s.id === from)!.flow_to).toContain(to)
+      expect(f1.find((s) => s.id === from)!.flow_to.map((e) => e.to)).toContain(to)
     }
     expect(scene.find("lane:A01")).toBeDefined()
     expect(scene.find("lane:A04")).toBeDefined()
@@ -153,8 +153,8 @@ describe("screen_flow — chia hình theo feature, làn theo actor", () => {
 
   it("cạnh quay lại và trỏ qua lại không vẽ hai chiều; đồ thị có vòng vẫn sạch", () => {
     const spine = chain(5, (s) => {
-      s.screens[4].flow_to = ["S001", "S003"]
-      s.screens[2].flow_to.push("S002", "S005", "S001")
+      s.screens[4].flow_to = [{ to: "S001" }, { to: "S003" }]
+      s.screens[2].flow_to.push({ to: "S002" }, { to: "S005" }, { to: "S001" })
     })
     const [scene] = sceneOf(spine)
     expect(ids(scene, "flow:")).toEqual(["flow:S001>S002", "flow:S002>S003", "flow:S003>S004", "flow:S003>S005", "flow:S004>S005"])
@@ -164,5 +164,38 @@ describe("screen_flow — chia hình theo feature, làn theo actor", () => {
   it("không có màn ⇒ không có hình; renderer thuần (cùng Spine ⇒ cùng nguồn)", () => {
     expect(renderKind(mutate((s) => (s.screens = [])), "screen_flow")).toEqual([])
     expect(renderKind(FIXTURE, "screen_flow").map((p) => p.source)).toEqual(renderKind(FIXTURE, "screen_flow").map((p) => p.source))
+  })
+})
+
+describe("screen_flow — trigger và guard của flow_to", () => {
+  const withEdges = (): Spine =>
+    chain(4, (s) => {
+      s.screens[0].flow_to = [
+        { to: "S002", trigger: "Submit credentials", guard: "OTP valid" },
+        { to: "S003", trigger: "Submit credentials", guard: "Admin" },
+        { to: "S004", trigger: "Submit credentials" }
+      ]
+      s.screens[1].flow_to = []
+      s.screens[2].flow_to = []
+    })
+
+  it("rẽ nhánh qua decision node, guard trên nhánh, nhánh không guard là else; issues rỗng", () => {
+    const spine = withEdges()
+    const [part] = renderKind(spine, "screen_flow")
+    expect(part.issues).toEqual([])
+    const [scene] = sceneOf(spine)
+    expect(scene.find("decision:S001#0")).toBeDefined()
+    expect(scene.find("flow:S001>S002#label")).toMatchObject({ text: "[OTP valid]" })
+    expect(scene.find("flow:S001>S004#label")).toMatchObject({ text: "[else]" })
+    expect(scene.find("decide:S001#0#label")).toMatchObject({ text: "Submit credentials" })
+  })
+
+  it("bản tiếng Việt dùng [ngược lại]; đổi trigger / guard đổi hình (khác nguồn)", () => {
+    const spine = withEdges()
+    const vi = RENDERERS.screen_flow(spine, null, DIAGRAM_LABELS.vi)[0].source
+    expect(vi).toContain("[ngược lại]")
+    const changed = withEdges()
+    changed.screens[0].flow_to[0].guard = "OTP correct"
+    expect(renderKind(changed, "screen_flow")[0].source).not.toBe(renderKind(spine, "screen_flow")[0].source)
   })
 })

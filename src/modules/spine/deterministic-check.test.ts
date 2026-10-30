@@ -247,7 +247,7 @@ describe("runDeterministicCheck", () => {
         s.roles.push({ id: "R99", name: "Guest", actor_id: null })
         s.permissions.push({ id: "P999", screen_id: "S20", role_id: "R99", action: "view" })
         s.screens.push({ ...tpl(s), id: "S20", name: "Reset Password", flow_to: [], primary_function_id: null })
-        s.screens.find((x) => x.id === "S01")!.flow_to.push("S20")
+        s.screens.find((x) => x.id === "S01")!.flow_to.push({ to: "S20" })
         link(s)
       })
     const flagged = (s: Spine) => byRule(runDeterministicCheck(s, [], { atBaseline: true }), "orphan_screen").map((f) => f.target_id)

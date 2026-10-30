@@ -439,14 +439,14 @@ const navigationPath = (spine: Spine, screenId: string, na = NA): string => {
   const byId = new Map(spine.screens.map((s) => [s.id, s]))
   const target = byId.get(screenId)
   if (!target) return na
-  const targeted = new Set(spine.screens.flatMap((s) => s.flow_to.filter((t) => t !== s.id)))
+  const targeted = new Set(spine.screens.flatMap((s) => s.flow_to.map((e) => e.to).filter((t) => t !== s.id)))
   const byOrder = [...spine.screens].sort((a, b) => (a.queue_order ?? Number.MAX_SAFE_INTEGER) - (b.queue_order ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id))
   const entries = byOrder.filter((s) => !s.is_popup && !targeted.has(s.id))
   const starts = entries.length > 0 ? entries : byOrder.slice(0, 1)
   const previous = new Map<string, string | null>(starts.map((s) => [s.id, null]))
   const queue = starts.map((s) => s.id)
   for (let i = 0; i < queue.length && !previous.has(screenId); i++) {
-    for (const next of byId.get(queue[i])?.flow_to ?? []) {
+    for (const { to: next } of byId.get(queue[i])?.flow_to ?? []) {
       if (previous.has(next) || !byId.has(next)) continue
       previous.set(next, queue[i])
       queue.push(next)

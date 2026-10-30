@@ -20,15 +20,15 @@ Engine `svg` (no PlantUML source): UML 2.5.1 built in code, fill `#7ACFF5`.
 
 ## `screen_flow` — §3.1.1
 
-Source fields: `screens[].name/.flow_to/.is_popup/.tabs/.feature_id` · `features[].name/.order` · `actors[].name/.parent_id` + the actor of each screen (screen → `primary_function_id` → function → use case → `actor_ids`).
+Source fields: `screens[].name/.flow_to[].to/.trigger/.guard/.is_popup/.tabs/.feature_id` · `features[].name/.order` · `actors[].name/.parent_id` + the actor of each screen (screen → `primary_function_id` → function → use case → `actor_ids`).
 
 Engine `svg` (no PlantUML source): UML 2.5 Activity Diagram with swimlanes built in code, fill `#7ACFF5`.
 
 - One diagram per feature; over 25 screens ⇒ split equally (`<feature> (1/2)`). `owner_kind` / `owner_id` stay `null`, the first part keeps the original id. Screens whose feature does not exist go to a last group.
 - Swimlane = the actor performing the screen, exact actor name in the lane header; general actor kept (several actors with a common ancestor ⇒ the ancestor's lane), never expanded to leaf actors. Ambiguous actors (no common ancestor) ⇒ first actor + yellow flag `screen_actor_ambiguous`. No actor ⇒ screen not drawn (`orphan_screen`). No link at all yet ⇒ no lane frames.
 - Screen = action (rounded rectangle); pop-up = action with stereotype `<<pop-up>>`; tabs = line `[tab | tab]` under the name. Initial node (solid dot) above each entry screen, activity final (ring + dot) below each ending screen.
-- Control flow = solid line, open arrowhead, one per `flow_to` pair inside the diagram (forward only: of a pair pointing at each other only the edge away from the entry; return navigation implicit). Straight, or orthogonal bends when a straight line would cross a shape.
-- No decision node / guard / trigger label: the Spine has no data for them yet. Full rules: `renderer/screen-flow/SKILL.md`.
+- Control flow = solid line, open arrowhead, one per `flow_to` edge inside the diagram (forward only: of a pair pointing at each other only the edge away from the entry; return navigation implicit). Straight, or orthogonal bends when a straight line would cross a shape.
+- `trigger` = horizontal label on the arrow; edges of one screen with the same trigger, ≥ 2 and some `guard` ⇒ decision node (filled `#7ACFF5` diamond), trigger on screen → diamond, `[guard]` / `[else]` on each branch. Full rules: `renderer/screen-flow/SKILL.md`.
 
 ## `erd` — §3.1.5
 
