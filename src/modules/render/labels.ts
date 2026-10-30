@@ -66,6 +66,7 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   "Screens Flow Diagram": "Sơ đồ luồng màn hình",
   "Screens flow —": "Luồng màn hình —",
   "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
+  "Class Diagram": "Sơ đồ lớp",
   "Screen Layout": "Bố cục màn hình"
 }
 

@@ -71,7 +71,7 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 42 skill: 20 action · 15 content · 5 renderer · 2 output", () => {
+  it("đủ 43 skill: 20 action · 15 content · 6 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
@@ -82,10 +82,11 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +1 action 1.11 map-reduce: import-cross-check (kiểm chéo giữa các section).
     // +1 action FLF-267: knowledge-answer (trả lời câu hỏi tri thức chỉ từ chunk truy hồi, có trích dẫn).
     // +1 action FLF-338: extract-requirements (rút yêu cầu từ tài liệu thô, §3.6.1).
-    expect(listSkillAssets()).toHaveLength(42)
+    // +1 renderer FLF-325: renderer/class (class diagram domain, mỗi feature một hình).
+    expect(listSkillAssets()).toHaveLength(43)
     expect(byKind("action")).toBe(20)
     expect(byKind("content")).toBe(15)
-    expect(byKind("renderer")).toBe(5)
+    expect(byKind("renderer")).toBe(6)
     expect(byKind("output")).toBe(2)
   })
 
@@ -124,6 +125,7 @@ describe("skill trên đĩa (assets/skills)", () => {
     "content/product-brief",
     "content/brief-analysis",
     "output/srs-completeness-score",
+    "renderer/class",
     "renderer/context",
     "renderer/erd",
     "renderer/screen-flow",

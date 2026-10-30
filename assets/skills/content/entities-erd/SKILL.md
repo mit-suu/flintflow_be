@@ -1,8 +1,8 @@
 ---
 skill_id: entities-erd
 kind: content
-version: 0.11.0
-description: "S-4.5 domain entities and their relations, feeding the ERD renderer"
+version: 0.12.0
+description: "S-4.5 domain entities, attributes, feature use and relations, feeding the ERD and per-feature class diagram renderers"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 12288
@@ -29,22 +29,24 @@ stub: false
 Covers **S-4.5 Entity Relationship Diagram** — feeds `fixed:3.1.5`. The `erd` diagram is rendered by code
 straight from `entities[]` in the notation the project chose (Chen, Crow's foot or IDEF1X — not your choice, never
 mentioned in ops): entity name in a box, each relation labelled with its verb, ends drawn from cardinality and
-`relation_optional`. `entities[]` is also the §3.1.5 table. `references/*.md` are **not loaded at runtime**; every rule is below.
+`relation_optional`; attributes of kind `key` / `reference` show as PK / FK. Code also renders one **class diagram per
+feature** (domain level) from `entities[].feature_ids` and `attributes`. `entities[]` is also the §3.1.5 table. `references/*.md` are **not loaded at runtime**; every rule is below.
 Work through the passes **in order**; skipping one produced the wrong ERDs listed near the end.
 
 ## Shape
 
-`{id, name, description, root?, relations: [], relation_verbs: {}, relation_cardinality: {}, relation_optional: []}`
+`{id, name, description, root?, relations: [], relation_verbs: {}, relation_cardinality: {}, relation_optional: [], attributes: [], feature_ids: []}`
 
 - `name`: singular, Title Case, English, unique. Never ends in List, Screen, Page, Form, Popup, Modal,
   Dialog, Service, Manager, Controller, DTO or Table.
-- `description`: one grammatical sentence — what **one** instance is and whose it is. No attribute list
-  (§3.1.5 is a relationship map; field rules live in S-5.4 and S-7.1).
+- `description`: one grammatical sentence — what **one** instance is and whose it is. No attribute list in it
+  (they go in `attributes`, Pass 7; field rules live in S-5.4 and S-7.1).
 - `root`: `true` only for master data that exists on its own (Pass 2). Omit it on every other entity.
 - `relations`: ids of this entity's **children** (the "many" side). Every id exists after this batch.
 - `relation_verbs`: one verb per id in `relations` — the label of the relation on the diagram; it must read true parent → child.
 - `relation_cardinality`: `{"<child id>": "1"}` only for a proven one-to-one (Pass 3a); omitted = `N`.
 - `relation_optional`: child ids that can exist **without** this parent (Pass 3, step 2).
+- `attributes` and `feature_ids`: Pass 7.
 
 **Linked** below always means one of three things, nothing else: B is a **direct parent** of A; B is an
 **ancestor** of A through the parent chain; or A and B share an **associative child**.
@@ -160,20 +162,27 @@ User; a different role acting on it (reviewer, invigilator) needs its own direct
 
 ## Pass 5 — Descriptions agree with relations
 
-- Every entity a description names is **linked** to it (definition above). Otherwise add the relation
-  (Pass 3) or reword the description to what is actually stored.
-- A named thing that is not an entity yet ("per semester", "the FAP file") is added (Pass 1) or dropped
-  from the description.
+- Every entity a description names is **linked** to it (definition above): add the relation (Pass 3), or reword
+  the description. A named thing that is not an entity yet ("per semester") is added (Pass 1) or dropped.
 
 ## Pass 6 — Normal form (3NF at entity level)
 
-1. **1NF** — an entity never holds a list of another thing ("Exam Paper with its questions"): the list is
-   a child, or an associative entity when the listed thing is shared.
-2. **2NF** — an associative entity only describes the pairing (order and mark of a question *in that
-   paper*); facts of one parent stay on that parent.
+1. **1NF** — an entity never holds a list of another thing: the list is a child, or an associative entity when shared.
+2. **2NF** — an associative entity only describes the pairing (order and mark of a question *in that paper*).
 3. **3NF** — one entity, one thing. A description covering a second thing ("Exam Schedule with its room
-   capacity") is two entities; facts of another entity are reached through the relation, never copied.
-   User-maintained value sets (faculties, buildings) are entities; fixed code constants stay enums.
+   capacity") is two entities; never copy facts of another entity. User-maintained value sets are entities; code constants stay enums.
+
+## Pass 7 — Attributes and features
+
+The per-feature class diagram is drawn only from this data; code adds no class and no attribute of its own.
+
+1. `feature_ids`: ids of the features whose functions or screens use the entity; shared master data (User) lists every
+   feature that uses it. At least one id per entity; never an id that is not in `features[]`.
+2. `attributes`: `{name, kind, required, description?}`, the 3–8 facts a business user would name on a form, taken from
+   function and validation text. `name`: lowercase words, unique in the entity, no data type, no technical field
+   (`createdAt`, `_id`) or method. `kind`: `key` = what identifies one instance in business terms (at most one), `reference` =
+   points at another entity of this ERD (also a relation in Pass 3), `plain` = the rest. `required: false` when it may stay empty.
+3. No evidence for an attribute ⇒ leave it out (`attributes: []` is allowed).
 
 ## Errors seen in earlier runs
 
@@ -182,11 +191,7 @@ User; a different role acting on it (reviewer, invigilator) needs its own direct
 | `Regrade Appeal contests Score Record` (flipped to dodge a passive verb) | `Score Record receives Regrade Appeal` |
 | `Exam Session examines Course` · `Exam Schedule → Exam Room` | `Course schedules Exam Session` · `Exam Room hosts Exam Schedule` |
 | `Exam Paper → Question` one-to-many, AS30 confirmed "many papers, many questions" | `Paper Question` between them |
-| `Exam Paper` linked only to `Paper Question` | a direct parent: `Course owns Exam Paper` |
-| `Retake Registration` beside `Exam Registration` | one `Exam Registration` with a kind |
-| `Import Batch creates Exam Registration` as a mandatory parent | optional: listed in `relation_optional` |
 | AS75 "an attempt produces one score record", `Exam Attempt → Score Record` drawn `N` | make it `"1"` with evidence, or drop the claim |
-| `User → Exam Attempt`, `User → Score`, `User → Appeal` | only `User makes Exam Registration`; the rest hang below it |
 
 ## Enforced on your batch
 
@@ -202,9 +207,8 @@ failure **rejects** the batch and sends it back to you with the reason:
 | `erd_many_to_many` · `erd_confirmed_many_to_many` | A → B and B → A · a confirmed many-to-many drawn as a direct edge |
 | `erd_relation_cycle` | parent chains loop (A → B → C → A) |
 | `erd_duplicate_name` / `erd_entity_name_invalid` | two entities share a name, or a name is a screen/service word |
-| `erd_cardinality_unset` / `_unjustified` | an assumption points at an unset cardinality · a `"1"` has no assumption naming the child |
-| `erd_cardinality_no_evidence` | an unconfirmed cardinality assumption cites no `FN`/`BR`/`UC`/`AS` id |
-| `erd_cardinality_contradiction` | an assumption relies on "one X" while the parent → X edge is `N` |
+| `erd_cardinality_*` | `"1"` without an assumption naming the child, an assumption without `FN`/`BR`/`UC`/`AS` evidence, or one relying on "one X" while the parent → X edge is `N` |
+| `erd_feature_missing` · `erd_attribute_duplicate` | an entity has no `feature_ids` (when features exist) · two attributes of one entity share a name |
 | `erd_description_unlinked` | a description names an entity (exact name) that is not **linked** to it |
 
 Passing these checks is necessary, not sufficient: the reasoning in Passes 2–5 is yours.
@@ -223,12 +227,12 @@ Passing these checks is necessary, not sufficient: the reasoning in Passes 2–5
 ```json
 {
   "ops": [
-    { "op": "add", "path": "entities[]", "value": { "id": "E01", "name": "User", "description": "One person who signs in, with a role such as student or lecturer.", "root": true, "relations": ["E05"], "relation_verbs": { "E05": "makes" } }, "reason": "S-4.5 root; Register for X pattern" },
-    { "op": "add", "path": "entities[]", "value": { "id": "E02", "name": "Course", "description": "One subject of the curriculum with its own question bank.", "root": true, "relations": ["E03", "E04"], "relation_verbs": { "E03": "owns", "E04": "schedules" } }, "reason": "S-4.5 root" },
-    { "op": "add", "path": "entities[]", "value": { "id": "E03", "name": "Exam Paper", "description": "One paper assembled for one course from its question bank.", "relations": [] }, "reason": "S-4.5 dependent of Course" },
-    { "op": "add", "path": "entities[]", "value": { "id": "E04", "name": "Exam Slot", "description": "One timed sitting of one course in which candidates take the exam.", "relations": ["E05"], "relation_verbs": { "E05": "accepts" } }, "reason": "S-4.5 dependent of Course" },
-    { "op": "add", "path": "entities[]", "value": { "id": "E05", "name": "Exam Registration", "description": "One user's registration for one exam slot; a retake is a new registration.", "relations": ["E06"], "relation_verbs": { "E06": "produces" }, "relation_cardinality": { "E06": "1" } }, "reason": "S-4.5 child of User and Exam Slot" },
-    { "op": "add", "path": "entities[]", "value": { "id": "E06", "name": "Exam Attempt", "description": "The one sitting an exam registration leads to, present or absent.", "relations": [] }, "reason": "S-4.5 one-to-one kept: created at exam time" },
+    { "op": "add", "path": "entities[]", "value": { "id": "E01", "name": "User", "description": "One person who signs in, with a role such as student or lecturer.", "root": true, "relations": ["E05"], "relation_verbs": { "E05": "makes" }, "attributes": [{ "name": "email", "kind": "key", "required": true }, { "name": "role", "kind": "plain", "required": true }], "feature_ids": ["F1", "F2"] }, "reason": "S-4.5 root; Register for X pattern" },
+    { "op": "add", "path": "entities[]", "value": { "id": "E02", "name": "Course", "description": "One subject of the curriculum with its own question bank.", "root": true, "relations": ["E03", "E04"], "relation_verbs": { "E03": "owns", "E04": "schedules" }, "feature_ids": ["F1"] }, "reason": "S-4.5 root" },
+    { "op": "add", "path": "entities[]", "value": { "id": "E03", "name": "Exam Paper", "description": "One paper assembled for one course from its question bank.", "relations": [], "feature_ids": ["F1"] }, "reason": "S-4.5 dependent of Course" },
+    { "op": "add", "path": "entities[]", "value": { "id": "E04", "name": "Exam Slot", "description": "One timed sitting of one course in which candidates take the exam.", "relations": ["E05"], "relation_verbs": { "E05": "accepts" }, "feature_ids": ["F1"] }, "reason": "S-4.5 dependent of Course" },
+    { "op": "add", "path": "entities[]", "value": { "id": "E05", "name": "Exam Registration", "description": "One user's registration for one exam slot; a retake is a new registration.", "relations": ["E06"], "relation_verbs": { "E06": "produces" }, "relation_cardinality": { "E06": "1" }, "feature_ids": ["F1"] }, "reason": "S-4.5 child of User and Exam Slot" },
+    { "op": "add", "path": "entities[]", "value": { "id": "E06", "name": "Exam Attempt", "description": "The one sitting an exam registration leads to, present or absent.", "relations": [], "feature_ids": ["F1"] }, "reason": "S-4.5 one-to-one kept: created at exam time" },
     { "op": "add", "path": "assumptions[]", "value": { "id": "AS15", "path": "entities[id=E05].relation_cardinality", "statement": "Each exam registration leads to exactly one exam attempt; a retake is a new registration.", "rationale": "FN009 creates a new registration for a retake; no function re-opens an attempt on the same registration.", "origin_step_id": "S-4.5", "status": "unconfirmed", "confirmed_at": null }, "reason": "S-4.5 Pass 3a evidence" }
   ],
   "notes": "Exam statistics: computed on screen, not stored. Publish Schedule: a status of Exam Slot."
@@ -237,12 +241,9 @@ Passing these checks is necessary, not sufficient: the reasoning in Passes 2–5
 
 ## Self-check
 
-- [ ] Pass 1: every function mapped; assignments, registrations and requests follow the pattern table.
-- [ ] Pass 2: every entity is `root: true` or has a direct parent; no floating dependent.
-- [ ] Pass 3: "no" only with evidence; verbs active parent → child, none flipped; no shortcut.
-- [ ] Pass 3: every optional link is in `relation_optional`; every child has a mandatory parent.
+- [ ] Passes 1–2: every function mapped by the pattern table; every entity is `root: true` or has a direct parent.
+- [ ] Pass 3: "no" only with evidence; verbs active parent → child; no shortcut; optional links listed; a mandatory parent each.
 - [ ] Pass 3a: every `"1"` survived the repetition check, cites evidence, and relies on no `N` edge.
-- [ ] Pass 4: every person who authors, owns or is assigned a record is linked to it from User.
-- [ ] Pass 5: every entity a description names is linked to it.
-- [ ] Pass 6: no list inside an entity; no description covering two things.
+- [ ] Passes 4–6: people linked from User; described entities linked; no list inside an entity.
+- [ ] Pass 7: every entity has `feature_ids`; attributes are business facts, no data types.
 - [ ] Every confirmed S-4.5 assumption modelled; `notes` lists the nouns that are not entities.

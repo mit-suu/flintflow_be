@@ -34,6 +34,8 @@ export interface DiagramLabels {
   erdTitle: string
   /** Động từ trong hình thoi ERD khi quan hệ chưa có `relation_verbs`. */
   relationVerb: string
+  /** Tiêu đề hình class diagram (domain) của một feature (kèm `(i/n)` khi tách) — `<title>` của SVG, chú thích ảnh. */
+  classTitle: (feature: string) => string
   /** Bảng function — hình bố cục màn khi chưa có wireframe. */
   functionColumn: string
   descriptionColumn: string
@@ -54,6 +56,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     noEntities: "No entities yet",
     erdTitle: "Entity Relationship Diagram",
     relationVerb: "has",
+    classTitle: (feature) => `Class Diagram — ${feature}`,
     functionColumn: "Function",
     descriptionColumn: "Description",
     noFunctions: "No functions yet"
@@ -71,6 +74,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     noEntities: "Chưa có thực thể",
     erdTitle: "Sơ đồ quan hệ thực thể",
     relationVerb: "có",
+    classTitle: (feature) => `Sơ đồ lớp — ${feature}`,
     functionColumn: "Chức năng",
     descriptionColumn: "Mô tả",
     noFunctions: "Chưa có chức năng"

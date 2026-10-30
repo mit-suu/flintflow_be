@@ -630,6 +630,45 @@
           },
           "root": {
             "type": "boolean"
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "key",
+                    "reference",
+                    "plain"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "required"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "feature_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "required": [
@@ -1158,6 +1197,7 @@
               "usecase",
               "screen_flow",
               "erd",
+              "class",
               "screen_layout"
             ]
           },

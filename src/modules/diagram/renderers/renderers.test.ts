@@ -33,9 +33,9 @@ const withoutFlows = (s: Spine) =>
   })
 
 describe("renderers trên fixture 19 màn", () => {
-  it("4 hình cố định + wireframe cho 5 màn signed_off", () => {
+  it("5 hình cố định (class tính một target) + wireframe cho 5 màn signed_off", () => {
     expect(layoutOwners(FIXTURE)).toEqual(["S01", "S05", "S07", "S09", "S10"])
-    expect(allTargets(FIXTURE)).toHaveLength(9)
+    expect(allTargets(FIXTURE)).toHaveLength(10)
   })
 
   it("mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot)", () => {

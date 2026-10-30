@@ -125,6 +125,10 @@ export const selectorFor = (element: unknown): Selector | null => {
   if (isRecord(element) && typeof element.id === "string") return { kind: "match", pairs: [["id", element.id]] }
   // Cạnh luồng màn `screens[].flow_to[]` không có id — khoá là màn đích
   if (isRecord(element) && typeof element.to === "string") return { kind: "match", pairs: [["to", element.to]] }
+  // Thuộc tính entity `entities[].attributes[]` không có id — khoá là tên
+  if (isRecord(element) && typeof element.name === "string" && (element.kind === "key" || element.kind === "reference" || element.kind === "plain")) {
+    return { kind: "match", pairs: [["name", element.name]] }
+  }
   return null
 }
 
