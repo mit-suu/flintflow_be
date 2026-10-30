@@ -210,21 +210,29 @@ describe("renderSection — fixed sections", () => {
     expect(renderSection(spine(), "fixed:2.1", ctx()).blocks).toHaveLength(1)
   })
 
-  it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
+  it("fixed:3.1.1 — mỗi hình luồng màn (một feature) có chú thích lấy từ <title> của SVG và một đoạn mô tả dẫn về §2.1", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D03")!
+    const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>
+`
     s.diagrams = [
       ...s.diagrams.filter((d) => d.id !== "D03"),
-      { ...base, id: "D03-1", format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
-      { ...base, id: "D03-2", format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+      { ...base, id: "D03", format: "svg", source: svg("Screens flow — Authentication") },
+      { ...base, id: "D03-2", format: "svg", source: svg("Screens flow — Billing") }
     ]
     const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
+    const note = { type: "paragraph", runs: [{ text: "Each swimlane is the actor who performs the screens in it, named exactly as in the actor model (see §2.1)." }] }
     expect(section.blocks).toEqual([
-      { type: "image", png: "png-D03-1", caption: "Screens flow for Founder" },
-      { type: "image", png: "png-D03-2", caption: "Screens flow for Guest" }
+      { type: "image", png: "png-D03", caption: "Screens flow — Authentication" },
+      note,
+      { type: "image", png: "png-D03-2", caption: "Screens flow — Billing" },
+      note
     ])
-    // Hình không có title (sơ đồ chung trước khi tách actor) giữ chú thích cũ
-    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks).toEqual([{ type: "image", png: "png-d03", caption: "Screens Flow Diagram" }])
+    const vi = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", language: "vi", diagramPng: (id) => `png-${id}` })).blocks[1]
+    expect(vi).toMatchObject({ type: "paragraph", runs: [{ text: expect.stringContaining("xem §2.1") }] })
+    // Hình không có title giữ chú thích mặc định
+    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks[0]).toEqual({ type: "image", png: "png-d03", caption: "Screens Flow Diagram" })
   })
 
   it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
@@ -756,7 +764,6 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     s.use_cases[0].actor_ids = ["A01", "A03"]
     s.functions[0].validations.push({ id: "FN01-V2", kind: "business", statement: "Passwords are stored hashed." })
     s.diagrams = s.diagrams.map((d) => {
-      if (d.id === "D03") return { ...d, format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' }
       if (d.id === "D05") return { ...d, format: "puml", source: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
       return d
     })
@@ -822,18 +829,6 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     const blind = subItemValues(renderSection(translatedView(s), "function:FN01", fpt({ language: "vi" })).blocks)
     expect(blind).toMatchObject({ "Xử lý dữ liệu": "Không có", "Dữ liệu": "Không có", "Tác nhân / Vai trò": "Nhà sáng lập" })
     expect(blind["Giao diện"]).toContain('chữ "Login"')
-  })
-
-  it("chú thích sơ đồ luồng màn: tên actor trong hình (tiếng Anh) đổi sang tên actor đã dịch cùng id", () => {
-    const captions = (s: Spine, overrides: Partial<SectionRenderContext> = {}) =>
-      renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", functionLayout: "fpt", ...overrides })).blocks.map((b) => (b.type === "image" ? b.caption : null))
-    const s = canonical()
-    expect(captions(s)).toEqual(["Screens flow for Founder"])
-    expect(captions(translatedView(s), { language: "vi", canonical: s })).toEqual(["Luồng màn hình của Nhà sáng lập"])
-    // Hình vẽ trước khi đổi tên actor (không khớp actor gốc nào) ⇒ giữ tên trong hình, chỉ dịch phần đầu
-    const renamed = canonical()
-    renamed.actors[0].name = "Owner"
-    expect(captions(translatedView(renamed), { language: "vi", canonical: renamed })).toEqual(["Luồng màn hình của Founder"])
   })
 
   it("fixture 19 màn: mọi function — Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {

@@ -1312,6 +1312,14 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
           "png": 96,
           "type": "image",
         },
+        {
+          "runs": [
+            {
+              "text": "Each swimlane is the actor who performs the screens in it, named exactly as in the actor model (see §2.1).",
+            },
+          ],
+          "type": "paragraph",
+        },
       ],
       "heading": "Screens Flow",
       "id": "fixed:3.1.1",

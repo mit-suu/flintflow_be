@@ -14,7 +14,7 @@
 
 import { createHash } from "node:crypto"
 import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
-import { guestOpenScreenIds, screenActorMap } from "./screen-actors.js"
+import { screenActorMap } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 
 /** Giá trị `source_hash` nghĩa là chưa từng tính (fixture T02 dùng "TBD") — bỏ qua `diagram_stale`. */
@@ -51,17 +51,13 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
           extends: ext
         }))
       }
-    case "screen_flow": {
-      // Sơ đồ tách theo actor người: đổi actor của màn (quyền, use case ↔ function) cũng làm hình cũ
-      const guestOpenIds = [...guestOpenScreenIds(spine)].sort()
+    case "screen_flow":
+      // Làn của màn = actor theo mô hình actor – use case (`screen-actors.ts`): đổi actor của màn cũng làm hình cũ
       return {
         screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs })),
         actors: byId(spine.actors.filter((a) => a.kind === "human")).map(({ id, name }) => ({ id, name })),
-        screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-        // Màn mở cho Guest quyết định cổng đăng nhập (Login là màn vào); rỗng ⇒ bỏ khỏi hash để hình cũ không stale hàng loạt
-        guest_open: guestOpenIds.length > 0 ? guestOpenIds : undefined
+        screen_actors: [...screenActorMap(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       }
-    }
     case "erd":
       return {
         entities: byId(spine.entities).map(({ id, name, relations, relation_verbs, relation_cardinality, relation_optional }) => ({
@@ -112,7 +108,7 @@ export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
 export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
   context: DEFAULT_DIAGRAM_ENGINE,
   usecase: "svg@1",
-  screen_flow: DEFAULT_DIAGRAM_ENGINE,
+  screen_flow: "svg@1",
   erd: DEFAULT_DIAGRAM_ENGINE,
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
@@ -120,15 +116,17 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
 /**
  * Dữ liệu chỉ renderer SVG đọc thêm, ngoài `sourceProjection` (không đưa vào đó vì `originalDiagramHash` dùng chung hàm ấy:
  * ảnh gốc import đã lưu hash cũ sẽ báo `original_diagram_stale` giả). Use case chia hình theo feature: tên + thứ tự feature
- * và feature của các function mà use case tham chiếu.
+ * và feature của các function mà use case tham chiếu; luồng màn chia hình theo feature của màn và xếp màn theo queue_order.
  */
 const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">): unknown => {
+  const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
+  if (diagram.kind === "screen_flow") return { screens: byId(spine.screens).map(({ id, feature_id, queue_order }) => ({ id, feature_id, queue_order })), features }
   if (diagram.kind !== "usecase") return undefined
   const referenced = new Set(spine.use_cases.flatMap((u) => u.function_ids))
   return {
     function_ids: byId(spine.use_cases).map(({ id, function_ids }) => ({ id, function_ids })),
     functions: byId(spine.functions.filter((f) => referenced.has(f.id))).map(({ id, feature_id }) => ({ id, feature_id })),
-    features: byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
+    features
   }
 }
 

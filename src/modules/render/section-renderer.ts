@@ -15,8 +15,7 @@
  */
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
-import { screenFlowTitle, screenFlowTitleOf } from "../diagram/renderers/screen-flow.renderer.js"
-import { label as diagramLabel, svgTitleOf } from "../diagram/renderers/common.js"
+import { svgTitleOf } from "../diagram/renderers/common.js"
 import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
@@ -321,23 +320,18 @@ const useCaseTable = (spine: Spine): Block[] => {
 // ─── §3.1 System Functional Overview (section cố định) ────────────
 
 // Chỉ còn sơ đồ luồng màn — bảng Screen | Type | Flows To đã bỏ khỏi cả bản draft lẫn baseline
-/** Sơ đồ tách theo actor mang tiêu đề `Screens flow for <actor>` — dùng luôn làm chú thích ảnh. */
-const flowTitle =
-  (spine: Spine, ctx: SectionRenderContext) =>
-  (d: Spine["diagrams"][number]): string | null => {
-    // Tiêu đề đọc từ text PlantUML; hình svg (FLF-339) chưa mang tiêu đề trong nguồn ⇒ chú thích mặc định
-    const title = d.format === "puml" ? screenFlowTitleOf(d.source) : null
-    if (title === null || !ctx.canonical) return title
-    // FLF-265: sơ đồ đã dịch (N1 — nguồn trong bản xem) mang sẵn tiêu đề dịch ⇒ không khớp actor gốc nào, in nguyên. Sơ đồ
-    // chưa dịch được (hình cũ) mang tên actor GỐC (đã qua `label` của renderer) — khớp actor gốc theo tiêu đề, in tên đã
-    // dịch cùng id (`localizeFptCaption` dịch tiếp phần đầu). Không khớp (hình vẽ trước khi đổi tên actor) ⇒ giữ tiêu đề
-    const actor = ctx.canonical.actors.find((a) => a.kind === "human" && diagramLabel(screenFlowTitle(a.name)) === title)
-    const shown = actor && spine.actors.find((a) => a.id === actor.id)
-    return shown ? diagramLabel(screenFlowTitle(shown.name)) : title
-  }
+/** Mô tả dưới mỗi hình luồng màn: làn là actor theo mô hình actor – use case, định nghĩa actor tổng quát nằm ở §2.1. */
+const SCREEN_FLOW_DESCRIPTION = {
+  en: "Each swimlane is the actor who performs the screens in it, named exactly as in the actor model (see §2.1).",
+  vi: "Mỗi làn là tác nhân thực hiện các màn hình trong làn, đặt tên đúng như mô hình tác nhân (xem §2.1)."
+} as const
 
+/** Mỗi hình luồng màn (một feature) kèm chú thích (`<title>` của SVG) và một đoạn mô tả bên dưới. */
 const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] =>
-  diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", flowTitle(spine, ctx))
+  diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", svgCaption).flatMap((image): Block[] => [
+    image,
+    p(SCREEN_FLOW_DESCRIPTION[isVietnamese(ctx.language) ? "vi" : "en"])
+  ])
 
 const screenDescriptions = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   if (spine.screens.length === 0) return []

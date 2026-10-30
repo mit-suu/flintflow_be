@@ -222,6 +222,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   screen_pending_at_baseline: "Màn hình chưa mô tả xong",
   orphan_screen_at_baseline: "Màn hình không nằm trong luồng nào",
   orphan_screen: "Màn hình không nằm trong luồng nào",
+  screen_actor_ambiguous: "Màn hình do nhiều tác nhân không cùng nhóm thực hiện",
   orphan_actor: "Tác nhân chưa gắn use case",
   usecase_no_function: "Use case chưa gắn chức năng",
   screen_no_function: "Màn hình chưa có chức năng",
