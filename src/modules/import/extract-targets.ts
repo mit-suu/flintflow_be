@@ -4,6 +4,7 @@
  */
 
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
+import { contentSlot } from "./content-slots.js"
 
 export const SECTION_TARGETS: Readonly<Record<string, readonly string[]>> = {
   "fixed:1": ["project"],
@@ -51,11 +52,15 @@ export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
  */
 export const targetsOf = (sectionId: string): readonly string[] => {
   if (PROVISIONAL_SECTION.test(sectionId)) return ["functions"]
+  // FLF-278: heading map vào một phần nhỏ ⇒ chỉ trích collection của phần đó
+  const slot = contentSlot(sectionId)
+  if (slot) return slot.targets
   return SECTION_TARGETS[sectionId] ?? []
 }
 
 /** Section có trích (Record of Changes là dẫn xuất, không trích). */
-export const isExtractableSection = (sectionId: string): boolean => sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || sectionId in SECTION_TARGETS)
+export const isExtractableSection = (sectionId: string): boolean =>
+  sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || sectionId in SECTION_TARGETS || (contentSlot(sectionId)?.targets.length ?? 0) > 0)
 
 /**
  * FLF-252: đủ các field Spine mà tài liệu hay ghi — tên hệ thống, phạm vi release, feature của màn, màn + quy tắc của

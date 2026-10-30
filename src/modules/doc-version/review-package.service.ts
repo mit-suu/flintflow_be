@@ -16,7 +16,7 @@ import { ApiError } from "../../shared/utils/api-error.js"
 import { ChangeRequest, type IChangeRequest } from "../change-request/change-request.model.js"
 import { Membership } from "../organization/membership.model.js"
 import { notify } from "../notification/notification.service.js"
-import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
+import { mode1RuleProfileFor } from "../import/mode1-guard.js"
 import { Mode1Error } from "../import/mode1.errors.js"
 import * as flagsService from "../spine/flags.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
@@ -128,7 +128,7 @@ export const submitPackage = async (actor: PackageActor, baseVersion: number): P
   if (crIds.length === 0) throw new Mode1Error("PACKAGE_EMPTY", "Chưa có thay đổi nào được ghi vào bản nháp kể từ lần phát hành trước — không có gì để gửi duyệt.")
 
   // BR-04: cờ đỏ = 0 — quét lại đúng như lúc release để Lead chắc chắn duyệt được
-  const checked = await flagsService.recompute(actor.projectId, { by: actor.userId, ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
+  const checked = await flagsService.recompute(actor.projectId, { by: actor.userId, ruleProfile: await mode1RuleProfileFor(actor.projectId), atBaseline: true })
   const red: Flag[] = checked.flags.filter((f) => f.level === "red" && f.resolved_at === null)
   if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ — xử lý qua change request rồi gửi duyệt`, { flags: red })
 

@@ -29,12 +29,12 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 20 luật vàng; mọi luật đỏ không waive được (FLF-329)", () => {
+  it("13 luật đỏ + 22 luật vàng (FLF-278: template_section_absent / _empty); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
     // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(20)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(22)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -767,5 +767,30 @@ describe("non_english_content — tầm nhìn/mục tiêu chỉ về S-1.1", () 
       })
     )
     expect(byRule(nameFlags, "non_english_content").find((f) => f.section_id === "fixed:1")).toMatchObject({ remediation_step: "S-2.1" })
+  })
+})
+
+describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () => {
+  it("mục FlintFlow có dữ liệu mà mẫu không có ⇒ template_section_absent; mục riêng của mẫu chỉ có chữ hướng dẫn ⇒ template_section_empty", async () => {
+    const { readFileSync } = await import("node:fs")
+    const base = JSON.parse(readFileSync(new URL("../../../fixtures/spine-fixture-19-screens.json", import.meta.url), "utf8"))
+    const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+    const spine = {
+      ...base,
+      custom_sections: [
+        { id: "CS01", heading: "Document Conventions", level: 2, blocks: [block("[Describe the conventions used in this SRS.]")], source: "import" },
+        { id: "CS02", heading: "References", level: 2, blocks: [block("IEEE 830-1998")], source: "import" },
+        { id: "CS03", heading: "Chat note", level: 1, blocks: [], source: "manual" }
+      ]
+    }
+    const layout = new Set(["fixed:1", "custom:CS01", "custom:CS02"])
+    const flags = runDeterministicCheck(spine, [], { ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout } })
+    const empty = flags.filter((f) => f.rule_id === "template_section_empty")
+    expect(empty.map((f) => f.section_id)).toEqual(["custom:CS01"])
+    const absent = flags.filter((f) => f.rule_id === "template_section_absent")
+    expect(absent.length).toBeGreaterThan(0)
+    expect(absent.every((f) => f.level === "yellow" && f.section_id !== "fixed:1")).toBe(true)
+    // Không có layout ⇒ hai luật không chạy
+    expect(runDeterministicCheck(spine).some((f) => f.rule_id.startsWith("template_section_"))).toBe(false)
   })
 })
