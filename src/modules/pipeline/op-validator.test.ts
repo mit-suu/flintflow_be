@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { briefExtractionErrors, dropRedundantScalarAdds, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
+import { briefExtractionErrors, dropRedundantScalarAdds, interactionErrors, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -907,6 +907,58 @@ describe("dropRedundantScalarAdds — gắn lại liên kết đã có không gi
       { op: "set" as const, path: "actors[id=A01].name", value: "Owner" }
     ]
     expect(dropRedundantScalarAdds(FIXTURE, ops)).toEqual([ops[1], ops[3]])
+  })
+})
+
+describe("interactionErrors — message sơ đồ tuần tự hệ thống", () => {
+  const fn = (s: Spine) => s.functions.find((f) => f.id === "FN001")!
+  const rulesOf = (edit: (s: Spine) => void, ids = ["FN001"]): string[] => {
+    const spine = structuredClone(FIXTURE)
+    edit(spine)
+    return interactionErrors(spine, ids).map((e) => e.rule)
+  }
+
+  it("fixture hợp lệ; function không có interactions hoặc không có trong lô không bị soi", () => {
+    expect(interactionErrors(FIXTURE, FIXTURE.functions.map((f) => f.id))).toEqual([])
+    expect(rulesOf((s) => (fn(s).interactions![0].to = "A01"), [])).toEqual([])
+    expect(rulesOf((s) => delete fn(s).interactions)).toEqual([])
+  })
+
+  it("mỗi message có đúng một đầu là system ⇒ interaction_endpoint_invalid", () => {
+    expect(rulesOf((s) => (fn(s).interactions![0].to = "A01"))).toContain("interaction_endpoint_invalid")
+    expect(rulesOf((s) => Object.assign(fn(s).interactions![1], { from: "system", to: "system" }))).toContain("interaction_endpoint_invalid")
+  })
+
+  it("message lỗi thiếu guard ⇒ interaction_guard_missing", () => {
+    expect(rulesOf((s) => delete fn(s).interactions![1].guard)).toEqual(["interaction_guard_missing"])
+    expect(rulesOf((s) => (fn(s).interactions![1].guard = "  "))).toEqual(["interaction_guard_missing"])
+  })
+
+  it("trùng khoá ⇒ interaction_duplicate", () => {
+    expect(rulesOf((s) => fn(s).interactions!.push({ ...fn(s).interactions![0] }))).toEqual(["interaction_duplicate"])
+  })
+
+  it("actor người không thuộc use case gắn function ⇒ interaction_actor_not_modelled (nêu actor được phép); actor ngoài tự do", () => {
+    const spine = structuredClone(FIXTURE)
+    // UC06 (Create Project) chỉ có actor A01
+    spine.functions.find((f) => f.id === "FN024")!.interactions![0].from = "A03"
+    const errors = interactionErrors(spine, ["FN024"])
+    expect(errors.map((e) => e.rule)).toEqual(["interaction_actor_not_modelled"])
+    expect(errors[0].message).toContain("A01 Founder")
+    expect(rulesOf((s) => (fn(s).interactions![0].to = "A05"))).not.toContain("interaction_actor_not_modelled")
+  })
+
+  it("message đầu phải là request luồng chính từ actor ⇒ interaction_stimulus_missing", () => {
+    expect(rulesOf((s) => fn(s).interactions!.reverse())).toContain("interaction_stimulus_missing")
+    expect(rulesOf((s) => (fn(s).interactions![0].flow = "abnormal"))).toContain("interaction_stimulus_missing")
+  })
+
+  it("validateOps soi function mà lô op đụng tới interactions; lô không đụng thì bỏ qua", () => {
+    const good = FIXTURE.functions.find((f) => f.id === "FN001")!.interactions!
+    const wrong = [{ ...good[0], to: "A01" }, good[1]]
+    expect(validateOps(FIXTURE, [{ op: "set", path: "functions[id=FN001].interactions", value: wrong }], { writable: ["functions"] }).map((e) => e.rule)).toContain("interaction_endpoint_invalid")
+    expect(validateOps(FIXTURE, [{ op: "set", path: "functions[id=FN001].interactions", value: good }], { writable: ["functions"] })).toEqual([])
+    expect(validateOps(FIXTURE, [{ op: "set", path: "functions[id=FN001].trigger", value: "User clicks Log in." }], { writable: ["functions"] })).toEqual([])
   })
 })
 

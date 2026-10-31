@@ -84,6 +84,12 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const erd = byKind(view, "erd")[0].source
     expect(erd).toContain(`>vi: ${spine.entities[0].name}</text>`)
     expect(erd).toContain(`>${DIAGRAM_LABELS.vi.relationVerb}</text>`)
+    // Sơ đồ tuần tự (puml): lifeline :Hệ thống, tên actor và message đã dịch, nhánh còn lại `ngược lại`
+    const sequence = byKind(view, "sequence").find((d) => d.owner_id === "FN001")!.source
+    expect(sequence).toContain(`participant ":${DIAGRAM_LABELS.vi.system}" as SSD_SYSTEM`)
+    expect(sequence).toContain(`actor ":vi: ${spine.actors.find((a) => a.id === "A01")!.name}" as A01`)
+    expect(sequence).toContain("1: vi: Submit email and password")
+    expect(sequence).toContain(`else ${DIAGRAM_LABELS.vi.elseGuard}`)
     const table = byKind(view, "screen_layout").find((d) => d.source.includes("{#"))!
     expect(table.source).toContain(`<b>${DIAGRAM_LABELS.vi.functionColumn} | <b>${DIAGRAM_LABELS.vi.descriptionColumn}`)
     expect(table.source).toMatch(/\| vi: /)

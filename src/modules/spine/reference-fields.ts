@@ -18,6 +18,7 @@
 
 import type { Spine } from "./spine.types.js"
 import { tryResolve } from "./path-resolver.js"
+import { SYSTEM_LIFELINE } from "./spine.schema.js"
 import { FIXED_SECTION_ID_LIST } from "./section-registry.js"
 
 export type TargetCollection =
@@ -72,7 +73,9 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "entities[].feature_ids[]", targetCollection: "features", cardinality: "many" },
   { path: "entities[].transitions[].from", targetCollection: "states", cardinality: "one" },
   { path: "entities[].transitions[].to", targetCollection: "states", cardinality: "one" },
-  { path: "entities[].transitions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" }
+  { path: "entities[].transitions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" },
+  { path: "functions[].interactions[].from", targetCollection: "actors", cardinality: "one" },
+  { path: "functions[].interactions[].to", targetCollection: "actors", cardinality: "one" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -165,7 +168,9 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     entityFeatures,
     transitionFrom,
     transitionTo,
-    transitionRules
+    transitionRules,
+    interactionFrom,
+    interactionTo
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -212,6 +217,12 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     if (f.screen_id !== null) yield one(fnScreen, owner, "screen_id", f.screen_id)
     yield one(fnFeature, owner, "feature_id", f.feature_id)
     yield* many(fnRules, owner, "business_rule_ids", f.business_rule_ids)
+    // Message không có id: khoá là from + to + message + kind + flow; đầu `system` là hộp đen, không phải actor
+    for (const i of f.interactions ?? []) {
+      const at = `${owner}.interactions[from=${i.from},to=${i.to},message=${i.message},kind=${i.kind},flow=${i.flow}]`
+      if (i.from !== SYSTEM_LIFELINE) yield { field: interactionFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "actors" }
+      if (i.to !== SYSTEM_LIFELINE) yield { field: interactionTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "actors" }
+    }
   }
   for (const e of spine.entities) {
     yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
