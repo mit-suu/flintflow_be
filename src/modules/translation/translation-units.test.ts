@@ -147,10 +147,12 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
     const spine = variant((s) => {
       s.entities[0].relation_verbs = { E02: "contains" }
       s.entities[0].attributes = [{ name: "email", kind: "key", required: true }]
+      s.entities[0].states = [{ id: "E01-ST1", name: "Pending", initial: true }]
+      s.entities[0].transitions = [{ from: "E01-ST1", to: "E01-ST1", event: "edit" }]
     })
     const units = translationUnits(spine).filter(isDiagramOnly)
     expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
-      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "screens.flow_to", "diagrams.labels"])
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "entities.states", "entities.transitions", "screens.flow_to", "diagrams.labels"])
     )
     const before = new Set(nonEnglish(spine))
     const withVietnamese = variant((s) => {
@@ -319,6 +321,31 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
     expect(owner.attributes).toEqual([
       { name: "thư điện tử", kind: "key", required: true, description: "Địa chỉ đăng nhập" },
       { name: "ảnh đại diện", kind: "plain", required: false }
+    ])
+  })
+
+  it("states / transitions là đơn vị mảng chữ theo thứ tự mảng; ghi lại giữ id, cờ và đầu mút", () => {
+    const states = [
+      { id: "E01-ST1", name: "Pending", initial: true },
+      { id: "E01-ST2", name: "Active", final: true }
+    ]
+    const transitions = [
+      { from: "E01-ST1", to: "E01-ST2", event: "verify", guard: "code is valid", business_rule_ids: ["BR01"] },
+      { from: "E01-ST2", to: "E01-ST2", event: "touch", action: "log" }
+    ]
+    const units = translationUnits(variant((s) => Object.assign(s.entities[0], { states, transitions })))
+    expect(units.find((u) => u.key === `entities[id=${E.id}].states`)?.value).toEqual(["Pending", "Active"])
+    expect(units.find((u) => u.key === `entities[id=${E.id}].transitions`)?.value).toEqual(["verify", "code is valid", "touch", "log"])
+    const owner: Record<string, unknown> = { states: structuredClone(states), transitions: structuredClone(transitions) }
+    writeUnitField(owner, "states", ["Chờ", "Đang dùng"])
+    writeUnitField(owner, "transitions", ["xác minh", "mã hợp lệ", "chạm", "ghi nhật ký"])
+    expect(owner.states).toEqual([
+      { id: "E01-ST1", name: "Chờ", initial: true },
+      { id: "E01-ST2", name: "Đang dùng", final: true }
+    ])
+    expect(owner.transitions).toEqual([
+      { from: "E01-ST1", to: "E01-ST2", event: "xác minh", guard: "mã hợp lệ", business_rule_ids: ["BR01"] },
+      { from: "E01-ST2", to: "E01-ST2", event: "chạm", action: "ghi nhật ký" }
     ])
   })
 

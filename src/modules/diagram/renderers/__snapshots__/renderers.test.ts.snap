@@ -953,6 +953,86 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "
 `;
 
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > state_machine@E01 part 1 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="937" height="962" viewBox="-453 -467 937 962">
+<title>State Machine Diagram — User</title>
+<rect x="-453" y="-467" width="937" height="962" fill="#fff"/>
+<line x1="7.79" y1="-433.3" x2="337.58" y2="-242.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="325.64,-244.14 337.58,-242.9 330.54,-252.62" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="-379.15" y1="194.9" x2="-379.15" y2="-206.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="-374.26,-195.94 -379.15,-206.9 -384.04,-195.94" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="379.15" y1="-194.9" x2="379.15" y2="180.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="374.26,169.94 379.15,180.9 384.04,169.94" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="355.33" y1="256.9" x2="52" y2="432.03" stroke="#000" stroke-width="1.2"/>
+<polyline points="59.04,422.31 52,432.03 63.94,430.79" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="294.65" y1="218.9" x2="-325.65" y2="218.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="-314.69,214.01 -325.65,218.9 -314.69,223.79" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="22.09" y1="400.8" x2="294.65" y2="243.44" stroke="#000" stroke-width="1.2"/>
+<polyline points="287.61,253.16 294.65,243.44 282.71,244.68" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="-52" y1="407.78" x2="-337.58" y2="242.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="-325.64,244.14 -337.58,242.9 -330.54,252.62" fill="none" stroke="#000" stroke-width="1.2"/>
+<circle cx="0" cy="-437.8" r="9" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="331.15" y="-242.9" width="96" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="379.15" y="-218.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Pending</text>
+<rect x="294.65" y="180.9" width="169" height="76" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="379.15" y="204.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Active</text>
+<line x1="294.65" y1="228.9" x2="463.65" y2="228.9" stroke="#000" stroke-width="1.2"/>
+<text x="306.65" y="242.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">update profile / save profile</text>
+<rect x="-52" y="400.8" width="104" height="74" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="437.8" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Suspended</text>
+<rect x="-432.65" y="194.9" width="107" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-379.15" y="218.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Deactivated</text>
+<circle cx="-379.15" cy="-218.9" r="12" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<circle cx="-379.15" cy="-218.9" r="7" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="344.81" y="-17" width="68.68" height="20" fill="#fff"/>
+<text x="379.15" y="-7" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">verify email</text>
+<rect x="159.04" y="375.7" width="146.1" height="36" fill="#fff"/>
+<text x="232.09" y="385.7" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">suspend [requested by an</text>
+<text x="232.09" y="401.7" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">administrator] / notify user</text>
+<rect x="-100.88" y="208.9" width="170.77" height="20" fill="#fff"/>
+<text x="-15.5" y="218.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">deactivate [no unsettled credit]</text>
+<rect x="98.67" y="312.12" width="119.39" height="20" fill="#fff"/>
+<text x="158.37" y="322.12" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reinstate / notify user</text>
+<rect x="-226.14" y="315.34" width="62.7" height="20" fill="#fff"/>
+<text x="-194.79" y="325.34" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">deactivate</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > state_machine@E08 part 2 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="222" height="534" viewBox="-111 -20 222 534">
+<title>State Machine Diagram — Baseline</title>
+<rect x="-111" y="-20" width="222" height="534" fill="#fff"/>
+<line x1="0" y1="18" x2="0" y2="88" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,77.04 0,88 4.89,77.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="400" x2="0" y2="470" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,459.04 0,470 4.89,459.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="136" x2="0" y2="206" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,195.04 0,206 4.89,195.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="282" x2="0" y2="352" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,341.04 0,352 4.89,341.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<circle cx="0" cy="9" r="9" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="-48" y="88" width="96" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="112" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Draft</text>
+<rect x="-91" y="206" width="182" height="76" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="230" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Signed</text>
+<line x1="-91" y1="254" x2="91" y2="254" stroke="#000" stroke-width="1.2"/>
+<text x="-79" y="268" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">export / render from snapshot</text>
+<rect x="-54.5" y="352" width="109" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="376" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Superseded</text>
+<circle cx="0" cy="482" r="12" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<circle cx="0" cy="482" r="7" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="-71.37" y="153" width="142.74" height="36" fill="#fff"/>
+<text x="0" y="163" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">sign [zero unresolved red</text>
+<text x="0" y="179" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">flags] / freeze snapshot</text>
+<rect x="-57.03" y="307" width="114.07" height="20" fill="#fff"/>
+<text x="0" y="317" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">sign newer baseline</text>
+</svg>
+"
+`;
+
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="868" height="585" viewBox="-446 -20 868 585">

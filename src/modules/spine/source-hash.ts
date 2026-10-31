@@ -90,6 +90,15 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         }))
       }
     }
+    case "state_machine": {
+      // Một hình = một entity (`owner_id`): tên entity, trạng thái và chuyển trạng thái đều hiện trên hình
+      const entity = spine.entities.find((e) => e.id === diagram.owner_id)
+      return {
+        entity: entity?.name ?? null,
+        states: (entity?.states ?? []).map(({ id, name, initial, final }) => ({ id, name, initial: initial ?? false, final: final ?? false })),
+        transitions: (entity?.transitions ?? []).map(({ from, to, event, guard, action }) => ({ from, to, event, guard: guard ?? "", action: action ?? "" }))
+      }
+    }
     case "screen_layout": {
       const screen = spine.screens.find((s) => s.id === diagram.owner_id)
       return {
@@ -132,6 +141,7 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   screen_flow: "svg@1",
   erd: "svg@1",
   class: "svg@1",
+  state_machine: "svg@1",
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
 

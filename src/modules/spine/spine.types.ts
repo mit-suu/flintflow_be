@@ -165,6 +165,30 @@ export interface EntityAttribute {
   description?: string
 }
 
+/** Một trạng thái trong vòng đời của entity. `id` duy nhất trên toàn Spine (như `validations`), `name` là tính từ / phân từ (Pending, Approved). */
+export interface EntityState {
+  id: string
+  name: string
+  /** Trạng thái đầu tiên của vòng đời — đúng một khi entity có trạng thái; hình có chấm đặc nối vào. */
+  initial?: boolean
+  /** Trạng thái kết thúc — hình có vòng tròn đồng tâm (bullseye) nối ra; không có transition đi ra. */
+  final?: boolean
+}
+
+/** Chuyển trạng thái `event [guard] / action`. Khoá phần tử = `from` + `to` + `event` (path `transitions[from=…,to=…,event=…]`). */
+export interface EntityTransition {
+  /** Id `states[]` của cùng entity. */
+  from: string
+  /** Id `states[]` của cùng entity; `to = from` ⇒ chuyển nội bộ (hiện trong state). */
+  to: string
+  /** Sự kiện kích hoạt; không chứa `,` `[` `]` (khoá selector). */
+  event: string
+  guard?: string
+  action?: string
+  /** Business rule quy định chuyển trạng thái này. */
+  business_rule_ids?: string[]
+}
+
 export interface Entity {
   id: string
   name: string
@@ -183,6 +207,9 @@ export interface Entity {
   attributes?: EntityAttribute[]
   /** Feature dùng entity này — mỗi feature một class diagram. Khoá tới `features[].id`. Thiếu ⇒ `[]`. */
   feature_ids?: string[]
+  /** Vòng đời của entity (state machine diagram). Entity không có vòng đời ⇒ `[]` và không có hình. Thiếu ⇒ `[]`. */
+  states?: EntityState[]
+  transitions?: EntityTransition[]
 }
 
 /** MoSCoW, gán ở S-9.4. `null` trước khi gán. */
@@ -316,7 +343,7 @@ export interface Addendum {
 
 // ─── state nội bộ ────────────────────────────────────────────────
 
-export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "screen_layout"
+export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "screen_layout"
 export type RenderStatus = "ok" | "error"
 /** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
 export type DiagramFormat = "puml" | "svg"

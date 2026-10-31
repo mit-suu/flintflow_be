@@ -669,6 +669,73 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "initial": {
+                  "type": "boolean"
+                },
+                "final": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "event": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^,[\\]]+$"
+                },
+                "guard": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "business_rule_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "event"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -1198,6 +1265,7 @@
               "screen_flow",
               "erd",
               "class",
+              "state_machine",
               "screen_layout"
             ]
           },

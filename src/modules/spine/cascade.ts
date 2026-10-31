@@ -59,7 +59,10 @@ export const CASCADE_POLICY: Readonly<Record<string, CascadePolicy>> = Object.fr
   "progress.screen_cursor": "invariant",
   "progress.screen_queue[]": "pull",
   "steps[].id": "remove_owner",
-  "entities[].feature_ids[]": "pull"
+  "entities[].feature_ids[]": "pull",
+  "entities[].transitions[].from": "remove_owner",
+  "entities[].transitions[].to": "remove_owner",
+  "entities[].transitions[].business_rule_ids[]": "pull"
 })
 
 // ─── removed ids ─────────────────────────────────────────────────

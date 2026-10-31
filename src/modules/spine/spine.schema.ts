@@ -142,6 +142,23 @@ export const entityAttributeSchema = z.strictObject({
   description: z.string().optional()
 })
 
+export const entityStateSchema = z.strictObject({
+  id,
+  name: z.string().trim().min(1),
+  initial: z.boolean().optional(),
+  final: z.boolean().optional()
+})
+
+/** `event` nằm trong selector của path (`transitions[from=S1,to=S2,event=submit]`) nên không chứa `,` `[` `]`. */
+export const entityTransitionSchema = z.strictObject({
+  from: id,
+  to: id,
+  event: z.string().trim().min(1).regex(/^[^,[\]]+$/, "event không được chứa , [ ]"),
+  guard: z.string().optional(),
+  action: z.string().optional(),
+  business_rule_ids: z.array(id).optional()
+})
+
 export const entitySchema = z.strictObject({
   id,
   name: z.string(),
@@ -157,7 +174,10 @@ export const entitySchema = z.strictObject({
   root: z.boolean().optional(),
   // Thuộc tính mức domain và feature dùng entity (class diagram mỗi feature một hình). Thiếu ⇒ `[]` (Spine cũ không migrate)
   attributes: z.array(entityAttributeSchema).optional(),
-  feature_ids: z.array(id).optional()
+  feature_ids: z.array(id).optional(),
+  // Vòng đời (state machine diagram, mỗi entity có trạng thái một hình). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  states: z.array(entityStateSchema).optional(),
+  transitions: z.array(entityTransitionSchema).optional()
 })
 
 export const validationSchema = z.strictObject({
@@ -259,7 +279,7 @@ export const customSectionSchema = z.strictObject({
 
 export const diagramSchema = z.strictObject({
   id,
-  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "screen_layout"]),
+  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "screen_layout"]),
   /** FLF-339: engine vẽ. Dữ liệu cũ (chỉ có `puml`) được chuyển lúc đọc ở mức mảng — xem `legacy-diagram.ts`. */
   format: z.enum(["puml", "svg"]),
   source: z.string(),
