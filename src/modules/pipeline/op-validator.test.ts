@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { briefExtractionErrors, dropRedundantScalarAdds, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
+import { briefExtractionErrors, dropRedundantScalarAdds, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -907,5 +907,51 @@ describe("dropRedundantScalarAdds — gắn lại liên kết đã có không gi
       { op: "set" as const, path: "actors[id=A01].name", value: "Owner" }
     ]
     expect(dropRedundantScalarAdds(FIXTURE, ops)).toEqual([ops[1], ops[3]])
+  })
+})
+
+describe("lifecycleErrors — vòng đời entity", () => {
+  const rulesOf = (fn: (s: Spine) => void): string[] => {
+    const spine = structuredClone(FIXTURE)
+    fn(spine)
+    return lifecycleErrors(spine).map((e) => e.rule)
+  }
+  const user = (s: Spine) => s.entities.find((e) => e.id === "E01")!
+
+  it("fixture (User, Baseline) hợp lệ; entity không có trạng thái không bị soi", () => {
+    expect(lifecycleErrors(FIXTURE)).toEqual([])
+  })
+
+  it("không đúng một initial ⇒ state_initial_invalid", () => {
+    expect(rulesOf((s) => delete user(s).states![0].initial)).toEqual(["state_initial_invalid"])
+    expect(rulesOf((s) => (user(s).states![1].initial = true))).toEqual(["state_initial_invalid"])
+  })
+
+  it("tên trạng thái trùng (không phân biệt hoa thường) ⇒ state_name_duplicate; id trùng entity khác ⇒ state_id_duplicate", () => {
+    expect(rulesOf((s) => (user(s).states![2].name = "active"))).toEqual(["state_name_duplicate"])
+    expect(rulesOf((s) => (s.entities.find((e) => e.id === "E08")!.states![0].id = "E01-ST1"))).toContain("state_id_duplicate")
+  })
+
+  it("transition nối state không thuộc entity ⇒ transition_state_unknown; có transition mà không có state cũng vậy", () => {
+    expect(rulesOf((s) => (user(s).transitions![0].to = "E08-ST1"))).toContain("transition_state_unknown")
+    expect(rulesOf((s) => {
+      const e = user(s)
+      e.states = []
+    })).toEqual(["transition_state_unknown"])
+  })
+
+  it("transition đi ra từ state final ⇒ transition_from_final", () => {
+    expect(rulesOf((s) => user(s).transitions!.push({ from: "E01-ST4", to: "E01-ST2", event: "restore" }))).toEqual(["transition_from_final"])
+  })
+
+  it("state không tới được từ initial ⇒ state_unreachable", () => {
+    expect(rulesOf((s) => user(s).states!.push({ id: "E01-ST5", name: "Archived" }))).toEqual(["state_unreachable"])
+    // tới được qua chuỗi transition
+    expect(
+      rulesOf((s) => {
+        user(s).states!.push({ id: "E01-ST5", name: "Archived" })
+        user(s).transitions!.push({ from: "E01-ST3", to: "E01-ST5", event: "archive" })
+      })
+    ).toEqual([])
   })
 })

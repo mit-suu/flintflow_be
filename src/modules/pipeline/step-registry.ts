@@ -44,7 +44,7 @@ export const stepDefSchema = z.strictObject({
   kind: z.enum(["soft", "fixed", "loop", "gate"]),
   reads: z.array(z.string().min(1)),
   writes: z.array(z.string().min(1)),
-  renders: z.array(z.enum(["context", "usecase", "screen_flow", "erd", "class", "screen_layout"])),
+  renders: z.array(z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "screen_layout"])),
   uc: z.array(z.string().regex(/^\d+\.\d+$/)),
   deterministic: z.boolean(),
   description: z.string().min(1)

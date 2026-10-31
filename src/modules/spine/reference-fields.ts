@@ -30,6 +30,7 @@ export type TargetCollection =
   | "business_rules"
   | "entities"
   | "validations"
+  | "states"
   | "custom_sections"
   | "section_key"
   | "path"
@@ -68,7 +69,10 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "progress.screen_cursor", targetCollection: "screens", cardinality: "one" },
   { path: "progress.screen_queue[]", targetCollection: "screens", cardinality: "many" },
   { path: "steps[].id", targetCollection: "screens", cardinality: "one" },
-  { path: "entities[].feature_ids[]", targetCollection: "features", cardinality: "many" }
+  { path: "entities[].feature_ids[]", targetCollection: "features", cardinality: "many" },
+  { path: "entities[].transitions[].from", targetCollection: "states", cardinality: "one" },
+  { path: "entities[].transitions[].to", targetCollection: "states", cardinality: "one" },
+  { path: "entities[].transitions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -104,6 +108,7 @@ export const buildIdIndex = (spine: Spine): IdIndex => ({
   business_rules: ids(spine.business_rules),
   entities: ids(spine.entities),
   validations: new Set(spine.functions.flatMap((f) => f.validations.map((v) => v.id))),
+  states: new Set(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id))),
   custom_sections: ids(spine.custom_sections)
 })
 
@@ -157,7 +162,10 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     cursor,
     queue,
     stepId,
-    entityFeatures
+    entityFeatures,
+    transitionFrom,
+    transitionTo,
+    transitionRules
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -208,6 +216,13 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
   for (const e of spine.entities) {
     yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
     yield* many(entityFeatures, `entities[id=${e.id}]`, "feature_ids", e.feature_ids)
+    // Chuyển trạng thái không có id: khoá là `from` + `to` + `event`; `from` / `to` chết ⇒ gỡ cả transition
+    for (const t of e.transitions ?? []) {
+      const owner = `entities[id=${e.id}].transitions[from=${t.from},to=${t.to},event=${t.event}]`
+      yield { field: transitionFrom, ownerPath: owner, refPath: `${owner}.from`, targetId: t.from, target: "states" }
+      yield { field: transitionTo, ownerPath: owner, refPath: `${owner}.to`, targetId: t.to, target: "states" }
+      yield* many(transitionRules, owner, "business_rule_ids", t.business_rule_ids)
+    }
   }
   for (const br of spine.business_rules) {
     yield* many(ruleValidations, `business_rules[id=${br.id}]`, "source_validation_ids", br.source_validation_ids)

@@ -144,16 +144,16 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 25 hình ok (usecase, screen_flow và class mỗi feature một hình — 6 phần), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 27 hình ok (usecase, screen_flow và class mỗi feature một hình — 6 phần; state_machine mỗi entity có vòng đời một hình), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
 
     expect(result.spine_version).toBe(2)
-    expect(result.diagrams).toHaveLength(25)
+    expect(result.diagrams).toHaveLength(27)
     expect(result.diagrams.every((d) => d.render_status === "ok" && d.source_hash.length === 64)).toBe(true)
     const byKind = Object.fromEntries(
-      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase", "class"].includes(d.kind)).map((d) => [d.kind, d.id])
+      result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase", "class", "state_machine"].includes(d.kind)).map((d) => [d.kind, d.id])
     )
     expect(byKind).toEqual({ context: "D01", erd: "D04" })
     // Sơ đồ use case mỗi feature một hình (6 feature của fixture); phần đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
@@ -163,14 +163,19 @@ describe("renderAll / renderDiagram qua op engine", () => {
     // Class diagram mỗi feature một hình, chủ là feature; mỗi feature một nhóm id riêng
     expect(result.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_kind, d.owner_id, d.section])).toEqual(["F1", "F2", "F3", "F4", "F5", "F6"].map((f) => ["feature", f, `feature:${f}`]))
     expect(result.diagrams.filter((d) => d.kind === "class").map((d) => d.id)).toEqual(["D06", "D07", "D08", "D09", "D10", "D11"])
+    // State machine mỗi entity có vòng đời một hình (User, Baseline), chủ là entity, đặt ở §3.1.5
+    expect(result.diagrams.filter((d) => d.kind === "state_machine").map((d) => [d.id, d.owner_kind, d.owner_id, d.section])).toEqual([
+      ["D12", "entity", "E01", "fixed:3.1.5"],
+      ["D13", "entity", "E08", "fixed:3.1.5"]
+    ])
     expect(result.diagrams.find((d) => d.owner_id === "S07")?.id).toBe("D05")
-    expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D12", "D13", "D14", "D15"])
+    expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D14", "D15", "D16", "D17"])
 
     const spine = (await repo.get(PROJECT))!
-    expect(spine.diagrams).toHaveLength(25)
+    expect(spine.diagrams).toHaveLength(27)
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
-    expect(store.files.size).toBe(50)
+    expect(store.files.size).toBe(54)
     expect((await loadDiagramFile(PROJECT, "D05", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
@@ -292,7 +297,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
     const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
-    expect(forced.rendered).toHaveLength(25)
+    expect(forced.rendered).toHaveLength(27)
     expect(forced.spine_version).toBe(2)
   })
 

@@ -149,8 +149,8 @@ const nextIdFactory = (diagrams: Diagram[]): (() => string) => {
   return () => `D${String(++n).padStart(2, "0")}`
 }
 
-/** `class` vẽ mọi feature trong một target: hình của kind đó đều thuộc target, chủ của từng hình là feature. */
-const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (t.kind === "class" || (d.owner_id ?? null) === (t.owner_id ?? null))
+/** `class` (chủ = feature) và `state_machine` (chủ = entity) vẽ mọi chủ trong một target: hình của kind đó đều thuộc target. */
+const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (t.kind === "class" || t.kind === "state_machine" || (d.owner_id ?? null) === (t.owner_id ?? null))
 
 /**
  * Id cho các phần của một target. Phần đầu **giữ nguyên id đang có**, dù id đó có hậu tố hay không;
@@ -171,11 +171,11 @@ const assignIds = (existing: Diagram[], count: number, nextId: () => string): st
 }
 
 /**
- * Id cho các phần của một target. `class` có nhiều chủ (mỗi feature một hình, có thể tách phần): mỗi chủ một nhóm id riêng,
+ * Id cho các phần của một target. `class` / `state_machine` có nhiều chủ (mỗi feature / entity một hình, class có thể tách phần): mỗi chủ một nhóm id riêng,
  * để thêm / xoá feature không đổi id hình của feature khác (baseline đã ký giữ ảnh theo id).
  */
 const assignPartIds = (kind: DiagramKind, existing: Diagram[], parts: readonly { owner_id: string | null }[], nextId: () => string): string[] => {
-  if (kind !== "class") return assignIds(existing, parts.length, nextId)
+  if (kind !== "class" && kind !== "state_machine") return assignIds(existing, parts.length, nextId)
   const ids: string[] = new Array<string>(parts.length)
   for (const owner of new Set(parts.map((p) => p.owner_id))) {
     const at = parts.flatMap((p, i) => (p.owner_id === owner ? [i] : []))

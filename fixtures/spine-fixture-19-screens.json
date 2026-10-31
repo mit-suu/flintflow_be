@@ -1744,6 +1744,63 @@
         "F2",
         "F5",
         "F6"
+      ],
+      "states": [
+        {
+          "id": "E01-ST1",
+          "name": "Pending",
+          "initial": true
+        },
+        {
+          "id": "E01-ST2",
+          "name": "Active"
+        },
+        {
+          "id": "E01-ST3",
+          "name": "Suspended"
+        },
+        {
+          "id": "E01-ST4",
+          "name": "Deactivated",
+          "final": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "E01-ST1",
+          "to": "E01-ST2",
+          "event": "verify email"
+        },
+        {
+          "from": "E01-ST2",
+          "to": "E01-ST2",
+          "event": "update profile",
+          "action": "save profile"
+        },
+        {
+          "from": "E01-ST2",
+          "to": "E01-ST3",
+          "event": "suspend",
+          "guard": "requested by an administrator",
+          "action": "notify user"
+        },
+        {
+          "from": "E01-ST3",
+          "to": "E01-ST2",
+          "event": "reinstate",
+          "action": "notify user"
+        },
+        {
+          "from": "E01-ST2",
+          "to": "E01-ST4",
+          "event": "deactivate",
+          "guard": "no unsettled credit"
+        },
+        {
+          "from": "E01-ST3",
+          "to": "E01-ST4",
+          "event": "deactivate"
+        }
       ]
     },
     {
@@ -1963,6 +2020,48 @@
       ],
       "feature_ids": [
         "F4"
+      ],
+      "states": [
+        {
+          "id": "E08-ST1",
+          "name": "Draft",
+          "initial": true
+        },
+        {
+          "id": "E08-ST2",
+          "name": "Signed"
+        },
+        {
+          "id": "E08-ST3",
+          "name": "Superseded",
+          "final": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "E08-ST1",
+          "to": "E08-ST2",
+          "event": "sign",
+          "guard": "zero unresolved red flags",
+          "action": "freeze snapshot",
+          "business_rule_ids": [
+            "BR03"
+          ]
+        },
+        {
+          "from": "E08-ST2",
+          "to": "E08-ST2",
+          "event": "export",
+          "action": "render from snapshot",
+          "business_rule_ids": [
+            "BR09"
+          ]
+        },
+        {
+          "from": "E08-ST2",
+          "to": "E08-ST3",
+          "event": "sign newer baseline"
+        }
       ]
     },
     {

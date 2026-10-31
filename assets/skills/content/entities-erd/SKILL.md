@@ -1,8 +1,8 @@
 ---
 skill_id: entities-erd
 kind: content
-version: 0.12.0
-description: "S-4.5 domain entities, attributes, feature use and relations, feeding the ERD and per-feature class diagram renderers"
+version: 0.13.0
+description: "S-4.5 domain entities, attributes, feature use, relations and lifecycles, feeding the ERD, per-feature class diagram and per-entity state machine renderers"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 12288
@@ -30,12 +30,13 @@ Covers **S-4.5 Entity Relationship Diagram** — feeds `fixed:3.1.5`. The `erd` 
 straight from `entities[]` in the notation the project chose (Chen, Crow's foot or IDEF1X — not your choice, never
 mentioned in ops): entity name in a box, each relation labelled with its verb, ends drawn from cardinality and
 `relation_optional`; attributes of kind `key` / `reference` show as PK / FK. Code also renders one **class diagram per
-feature** (domain level) from `entities[].feature_ids` and `attributes`. `entities[]` is also the §3.1.5 table. `references/*.md` are **not loaded at runtime**; every rule is below.
+feature** (domain level) from `entities[].feature_ids` and `attributes`, and one **state machine diagram per entity that has a
+lifecycle** from `states` / `transitions`. `entities[]` is also the §3.1.5 table. `references/*.md` are **not loaded at runtime**.
 Work through the passes **in order**; skipping one produced the wrong ERDs listed near the end.
 
 ## Shape
 
-`{id, name, description, root?, relations: [], relation_verbs: {}, relation_cardinality: {}, relation_optional: [], attributes: [], feature_ids: []}`
+`{id, name, description, root?, relations: [], relation_verbs: {}, relation_cardinality: {}, relation_optional: [], attributes: [], feature_ids: [], states: [], transitions: []}`
 
 - `name`: singular, Title Case, English, unique. Never ends in List, Screen, Page, Form, Popup, Modal,
   Dialog, Service, Manager, Controller, DTO or Table.
@@ -46,7 +47,7 @@ Work through the passes **in order**; skipping one produced the wrong ERDs liste
 - `relation_verbs`: one verb per id in `relations` — the label of the relation on the diagram; it must read true parent → child.
 - `relation_cardinality`: `{"<child id>": "1"}` only for a proven one-to-one (Pass 3a); omitted = `N`.
 - `relation_optional`: child ids that can exist **without** this parent (Pass 3, step 2).
-- `attributes` and `feature_ids`: Pass 7.
+- `attributes` and `feature_ids`: Pass 7 · `states` and `transitions`: Pass 8.
 
 **Linked** below always means one of three things, nothing else: B is a **direct parent** of A; B is an
 **ancestor** of A through the parent chain; or A and B share an **associative child**.
@@ -167,10 +168,9 @@ User; a different role acting on it (reviewer, invigilator) needs its own direct
 
 ## Pass 6 — Normal form (3NF at entity level)
 
-1. **1NF** — an entity never holds a list of another thing: the list is a child, or an associative entity when shared.
-2. **2NF** — an associative entity only describes the pairing (order and mark of a question *in that paper*).
-3. **3NF** — one entity, one thing. A description covering a second thing ("Exam Schedule with its room
-   capacity") is two entities; never copy facts of another entity. User-maintained value sets are entities; code constants stay enums.
+**1NF**: an entity never holds a list of another thing (a child, or an associative entity when shared). **2NF**: an associative
+entity only describes the pairing (order of a question *in that paper*). **3NF**: one entity, one thing — a description covering a
+second thing ("Exam Schedule with its room capacity") is two entities. User-maintained value sets are entities; code constants stay enums.
 
 ## Pass 7 — Attributes and features
 
@@ -184,13 +184,20 @@ The per-feature class diagram is drawn only from this data; code adds no class a
    points at another entity of this ERD (also a relation in Pass 3), `plain` = the rest. `required: false` when it may stay empty.
 3. No evidence for an attribute ⇒ leave it out (`attributes: []` is allowed).
 
+## Pass 8 — Lifecycle (only entities with real states)
+
+The state machine diagram is drawn only from this data; code adds no state. Most entities have none: leave `states` and `transitions` empty.
+
+1. Fill them only when a function, business rule or confirmed assumption describes the statuses one instance moves through (Change Request: Draft → Submitted → Approved or Rejected → Applied); a status field with no stated transitions is not a lifecycle.
+2. `states`: `{id, name, initial?, final?}`. Omit `id` (server issues `<entity id>-ST<n>`). `name`: adjective or participle (Pending, Approved), never an action. Exactly one `initial: true`; `final: true` on states that end the lifecycle (no outgoing transition). Every state is reachable from the initial one.
+3. `transitions`: `{from, to, event, guard?, action?, business_rule_ids?}`; `from` / `to` are state ids of the **same** entity (add the states first in the batch, referring to `$new` ids). `event`: short verb phrase, no `,` `[` `]`. `guard`: the condition without brackets. `action`: the effect. `business_rule_ids`: the rules behind it. `from = to` is an internal transition. One per (from, to, event).
+
 ## Errors seen in earlier runs
 
 | Wrong | Right |
 | --- | --- |
 | `Regrade Appeal contests Score Record` (flipped to dodge a passive verb) | `Score Record receives Regrade Appeal` |
 | `Exam Session examines Course` · `Exam Schedule → Exam Room` | `Course schedules Exam Session` · `Exam Room hosts Exam Schedule` |
-| `Exam Paper → Question` one-to-many, AS30 confirmed "many papers, many questions" | `Paper Question` between them |
 | AS75 "an attempt produces one score record", `Exam Attempt → Score Record` drawn `N` | make it `"1"` with evidence, or drop the claim |
 
 ## Enforced on your batch
@@ -209,6 +216,8 @@ failure **rejects** the batch and sends it back to you with the reason:
 | `erd_duplicate_name` / `erd_entity_name_invalid` | two entities share a name, or a name is a screen/service word |
 | `erd_cardinality_*` | `"1"` without an assumption naming the child, an assumption without `FN`/`BR`/`UC`/`AS` evidence, or one relying on "one X" while the parent → X edge is `N` |
 | `erd_feature_missing` · `erd_attribute_duplicate` | an entity has no `feature_ids` (when features exist) · two attributes of one entity share a name |
+| `state_initial_invalid` · `state_name_duplicate` · `state_id_duplicate` | states without exactly one initial · two states share a name · a state id is used by another entity |
+| `transition_state_unknown` · `transition_from_final` · `state_unreachable` | a transition end is not a state of the entity · a transition leaves a final state · a state cannot be reached from the initial one |
 | `erd_description_unlinked` | a description names an entity (exact name) that is not **linked** to it |
 
 Passing these checks is necessary, not sufficient: the reasoning in Passes 2–5 is yours.
@@ -245,5 +254,5 @@ Passing these checks is necessary, not sufficient: the reasoning in Passes 2–5
 - [ ] Pass 3: "no" only with evidence; verbs active parent → child; no shortcut; optional links listed; a mandatory parent each.
 - [ ] Pass 3a: every `"1"` survived the repetition check, cites evidence, and relies on no `N` edge.
 - [ ] Passes 4–6: people linked from User; described entities linked; no list inside an entity.
-- [ ] Pass 7: every entity has `feature_ids`; attributes are business facts, no data types.
+- [ ] Pass 7: every entity has `feature_ids`; attributes are business facts, no data types. Pass 8: states only for a described lifecycle.
 - [ ] Every confirmed S-4.5 assumption modelled; `notes` lists the nouns that are not entities.

@@ -123,6 +123,10 @@ export const selectorFor = (element: unknown): Selector | null => {
     return { kind: "scalar", value: String(element) }
   }
   if (isRecord(element) && typeof element.id === "string") return { kind: "match", pairs: [["id", element.id]] }
+  // Chuyển trạng thái `entities[].transitions[]` không có id — khoá là from + to + event (trước nhánh `to` của flow_to)
+  if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string" && typeof element.event === "string") {
+    return { kind: "match", pairs: [["from", element.from], ["to", element.to], ["event", element.event]] }
+  }
   // Cạnh luồng màn `screens[].flow_to[]` không có id — khoá là màn đích
   if (isRecord(element) && typeof element.to === "string") return { kind: "match", pairs: [["to", element.to]] }
   // Thuộc tính entity `entities[].attributes[]` không có id — khoá là tên

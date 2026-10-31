@@ -139,7 +139,7 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("functions_order", "functions[].order", [], [], [], "số mục §3.x.y (assemble)"),
   row("functions_validations", "functions[].validations[]", ["function:<id>"], [], ["fixed:5.1"]),
   row("functions_abnormal", "functions[].abnormal[]", ["function:<id>"], [], ["fixed:5.3"]),
-  row("entities", "entities[]", ["fixed:3.1.5"], [], ["diagram:erd", "diagram:class", "fixed:5.5"]),
+  row("entities", "entities[]", ["fixed:3.1.5"], [], ["diagram:erd", "diagram:class", "diagram:state_machine", "fixed:5.5"]),
   row("nfr_interface", "nfrs[category=interface]", ["fixed:4.1"]),
   row("nfr_usability", "nfrs[category=usability]", ["fixed:4.2.1"]),
   row("nfr_reliability", "nfrs[category=reliability]", ["fixed:4.2.2"]),
@@ -155,6 +155,7 @@ export const FIELD_SECTION_MAP: readonly FieldSectionRow[] = Object.freeze([
   row("diagram_usecase", "diagrams[kind=usecase]", ["fixed:2.2.1"]),
   row("diagram_screen_flow", "diagrams[kind=screen_flow]", ["fixed:3.1.1"]),
   row("diagram_erd", "diagrams[kind=erd]", ["fixed:3.1.5"]),
+  row("diagram_state_machine", "diagrams[kind=state_machine]", ["fixed:3.1.5"]),
   row("diagram_class", "diagrams[kind=class]", ["<diagram.section>"]),
   row("diagram_screen_layout", "diagrams[kind=screen_layout]", ["<diagram.section>"])
 ])

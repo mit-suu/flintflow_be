@@ -55,6 +55,16 @@ Engine `svg` (no PlantUML source): UML 2.5.1 class built in code, fill `#7ACFF5`
 - Relation = association (solid line, no arrowhead): multiplicity at both ends (parent `1` or `0..1` from `relation_optional`; child `*` for `N`, `0..1` for `1`) and the verb as association name. Aggregation (hollow diamond at the whole), composition (filled diamond), generalization (hollow triangle at the parent) are drawn when the source says so; the Spine has no such data yet, so none is generated.
 - Layout as ERD: straight when clear, right-angle bends otherwise, no line over text or shapes. Full rules: `renderer/class/SKILL.md`; samples `docs/diagram_guideline/class/`.
 
+## `state_machine` — §3.1.5 (next to the entity description)
+
+Source fields: `entities[].name/.states[].id/.name/.initial/.final` · `entities[].transitions[].from/.to/.event/.guard/.action`. Lifecycle of one entity, IEEE 830 Annex A.1 (organised by mode); drawn only for an entity that has states.
+Engine `svg` (no PlantUML source): UML 2.5 State Machine built in code, fill `#7ACFF5` (`state-machine.renderer.ts`, `state-machine-layout.ts`).
+
+- One diagram per entity that has `states[]` (`owner_kind = entity`, `owner_id` = entity id, `section = fixed:3.1.5`); title `State Machine Diagram — <entity>`. Not split.
+- Initial = solid dot with an open arrow to the `initial` state; final = bullseye (ring + solid core) with an open arrow from each `final` state; state = rounded rectangle, bold name inside. State names are adjectives or participles (Pending, Approved), never actions.
+- Transition = one straight solid line with an open arrowhead, label `event [guard] / action` (guard / action omitted when empty). Several transitions between the same two states (either direction) are parallel segments. A self-transition (`from = to`) is an internal transition: its label is a line in a lower compartment of the state.
+- Layout: states by BFS layer from the initial state, several candidate arrangements (and a circle) tried; the first with no line over a shape or text and the fewest crossings wins. Full rules: `renderer/state-machine/SKILL.md`; samples `docs/diagram_guideline/state-machine/`.
+
 ## `screen_layout` — §3.x.y (core screens only, Phases §7.2)
 
 Source fields: `screens[<owner>].name` · `functions[screen_id=<owner>].name/.description`. Attached to `screens[].primary_function_id`.
