@@ -23,6 +23,7 @@ import { userOpSchema, type Op } from "../spine/op.types.js"
 import { parsePath, PathError, tryResolve } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
+import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
@@ -866,6 +867,57 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
   return errors
 }
 
+/** Id function mà lô op đụng tới `interactions` (hoặc ghi cả function). */
+const interactionOwners = (ops: readonly Op[]): string[] => [
+  ...new Set(
+    ops.flatMap((op) => {
+      const m = /^functions\[id=([^\],]+)\](\..*)?$/.exec(op.path)
+      return m && (m[2] === undefined || m[2].startsWith(".interactions")) ? [m[1]] : []
+    })
+  )
+]
+
+/**
+ * Message của sơ đồ tuần tự hệ thống (hộp đen): mỗi message có đúng một đầu là `system`; message đầu tiên là request
+ * (stimulus) từ actor; nhánh lỗi có guard; actor người là actor của use case gắn function (không mở rộng ra actor con);
+ * không trùng khoá. Chỉ soi function có trong `ids`.
+ */
+export const interactionErrors = (after: Spine, ids: readonly string[]): ValidationError[] => {
+  const errors: ValidationError[] = []
+  for (const fn of after.functions.filter((f) => ids.includes(f.id))) {
+    const list = fn.interactions ?? []
+    if (list.length === 0) continue
+    const at = `functions[id=${fn.id}].interactions`
+    const modelled = new Set(after.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids))
+    const humans = after.actors.filter((a) => a.kind === "human")
+    const hasModelledHuman = humans.some((a) => modelled.has(a.id))
+    const keys = new Set<string>()
+    list.forEach((i, k) => {
+      const where = `${at}[${k}]`
+      if ((i.from === SYSTEM_LIFELINE) === (i.to === SYSTEM_LIFELINE)) {
+        errors.push({ rule: "interaction_endpoint_invalid", path: where, message: `"${fn.name}": message "${i.message}" phải có đúng một đầu là "system" (sơ đồ hộp đen: actor ↔ hệ thống), không nối hai actor hay hai đầu system` })
+      }
+      if (i.flow === "abnormal" && (i.guard ?? "").trim() === "") {
+        errors.push({ rule: "interaction_guard_missing", path: where, message: `"${fn.name}": message lỗi "${i.message}" cần guard (điều kiện của nhánh lỗi)` })
+      }
+      const key = `${i.from}|${i.to}|${i.message}|${i.kind}|${i.flow}`
+      if (keys.has(key)) errors.push({ rule: "interaction_duplicate", path: where, message: `"${fn.name}": message "${i.message}" trùng khoá — đổi chữ message của nhánh sau` })
+      keys.add(key)
+      for (const end of [i.from, i.to]) {
+        const actor = after.actors.find((a) => a.id === end)
+        if (actor?.kind === "human" && hasModelledHuman && !modelled.has(actor.id)) {
+          errors.push({ rule: "interaction_actor_not_modelled", path: where, message: `"${fn.name}": actor "${actor.name}" không phải actor của use case gắn function — dùng đúng actor trong mô hình use case (giữ actor tổng quát): ${humans.filter((a) => modelled.has(a.id)).map((a) => `${a.id} ${a.name}`).join(", ")}` })
+        }
+      }
+    })
+    const first = list[0]
+    if (first.kind !== "request" || first.from === SYSTEM_LIFELINE || first.flow !== "normal") {
+      errors.push({ rule: "interaction_stimulus_missing", path: `${at}[0]`, message: `"${fn.name}": message đầu tiên phải là request thuộc luồng chính từ actor tới system (stimulus)` })
+    }
+  }
+  return errors
+}
+
 /**
  * Vòng đời của entity (state machine diagram): đúng một trạng thái đầu, tên và id trạng thái không trùng, chuyển trạng
  * thái nối hai trạng thái CÓ THẬT của cùng entity, trạng thái kết thúc không có đường ra, mọi trạng thái tới được từ
@@ -1062,7 +1114,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
 
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops: parsed, by: "op-validator", step_id: options.stepId ?? null }, { startSeq: 1 })
-    return touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []
+    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed))]
   } catch (err) {
     if (err instanceof TransactionRejectedError) {
       return err.violations.map((v) => ({

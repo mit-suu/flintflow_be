@@ -186,6 +186,22 @@ export const validationSchema = z.strictObject({
   statement: z.string()
 })
 
+/** Điểm đầu / cuối của một tương tác trong sơ đồ tuần tự hệ thống: id actor hoặc hộp đen `system`. */
+export const SYSTEM_LIFELINE = "system"
+
+/**
+ * Một message của sơ đồ tuần tự mức hệ thống (hộp đen). Thứ tự mảng là thứ tự thời gian. `message` nằm trong selector của
+ * path (`interactions[from=A01,to=system,message=…,kind=request,flow=normal]`) nên không chứa `,` `[` `]`.
+ */
+export const functionInteractionSchema = z.strictObject({
+  from: id,
+  to: id,
+  message: z.string().trim().min(1).regex(/^[^,[\]]+$/, "message không được chứa , [ ]"),
+  kind: z.enum(["request", "response"]),
+  flow: z.enum(["normal", "abnormal"]),
+  guard: z.string().optional()
+})
+
 export const functionSchema = z.strictObject({
   id,
   screen_id: id.nullable(),
@@ -198,7 +214,9 @@ export const functionSchema = z.strictObject({
   abnormal: z.array(z.string()),
   validations: z.array(validationSchema),
   business_rule_ids: z.array(id),
-  priority: priority.nullable()
+  priority: priority.nullable(),
+  // Message actor ↔ system (sơ đồ tuần tự mức hệ thống). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  interactions: z.array(functionInteractionSchema).optional()
 })
 
 export const nfrSchema = z.strictObject({
@@ -279,7 +297,7 @@ export const customSectionSchema = z.strictObject({
 
 export const diagramSchema = z.strictObject({
   id,
-  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "screen_layout"]),
+  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"]),
   /** FLF-339: engine vẽ. Dữ liệu cũ (chỉ có `puml`) được chuyển lúc đọc ở mức mảng — xem `legacy-diagram.ts`. */
   format: z.enum(["puml", "svg"]),
   source: z.string(),

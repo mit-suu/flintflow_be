@@ -36,13 +36,13 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | `null` (one part per feature) | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
 | `feature:<id>` | Logical data model (domain) | `class` | feature (one part per feature, at the head of §3.x) | UML 2.5 Class (analysis level, 2 compartments) | svg | FLF-325 | srs-spine §7.1 |
-| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | `functions[<owner>].name/.trigger/.normal/.abnormal` · `actors[].name` of `use_cases[function_ids∋<owner>].actor_ids` · *new*: `functions[<owner>].messages[]` |
+| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | srs-spine §7.1 |
 | `fixed:3.1.5` | Modes and states | `state_machine` | entity (one per entity that has states, next to the entity description) | UML 2.5 State Machine | svg | FLF-327 | srs-spine §7.1 |
 | `function:<primary_function_id>` | User interfaces — layout | `screen_layout` | screen | Salt wireframe | puml | — | srs-spine §7.1 |
 
-`sequence` reads a field the Spine does not have yet (*new*). Adding it, its `kind` value and its section row is a `contract-change` (`spine.schema.ts`, `section-registry.ts`). **No data, no diagram**: until the field exists and is filled for an owner, no diagram of that kind is generated for it — no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled).
+`sequence` reads `functions[].interactions` (FLF-326, `contract-change`). **No data, no diagram**: a function with no `interactions[]`, or one that fails the criteria in `references/kinds.md`, has no diagram — no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled).
 
-New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row; until then the current renderer and its `renderer/*` skill stay. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
+New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row. `sequence` is the system level (black box) and the only kind besides the salt wireframe on the `puml` path. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
 
 ## Common rules
 
@@ -70,6 +70,7 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
     - **English labels only.** No Vietnamese diacritics anywhere in the file.
     - No `!include`, no `!import`, no URLs, no sprites or images, no `skinparam` loaded from remote. The server has no internet access.
     - Quote any label containing spaces, punctuation or keywords.
+    - `sequence`: the Visual Paradigm theme is written into the source as literal `skinparam` lines (no `!include`).
 
 ## Self-check before output
 

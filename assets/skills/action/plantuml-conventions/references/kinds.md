@@ -65,6 +65,17 @@ Engine `svg` (no PlantUML source): UML 2.5 State Machine built in code, fill `#7
 - Transition = one straight solid line with an open arrowhead, label `event [guard] / action` (guard / action omitted when empty). Several transitions between the same two states (either direction) are parallel segments. A self-transition (`from = to`) is an internal transition: its label is a line in a lower compartment of the state.
 - Layout: states by BFS layer from the initial state, several candidate arrangements (and a circle) tried; the first with no line over a shape or text and the fewest crossings wins. Full rules: `renderer/state-machine/SKILL.md`; samples `docs/diagram_guideline/state-machine/`.
 
+## `sequence` — §3.x.y (function detail)
+
+Source fields: `functions[<owner>].name/.screen_id/.interactions[].from/.to/.message/.kind/.flow/.guard` · `actors[].name/.kind` of the ends of each message. System Sequence Diagram (black box), IEEE 830 Annex A.4 (stimulus / response sequence); the design-level sequence (Controller → Service → Repository) of Report 4 is a different artifact.
+Engine `puml` (PlantUML server): UML 2.5 Sequence from `sequence.renderer.ts`, Visual Paradigm theme inlined, fill `#7ACFF5`.
+
+- One diagram per function that needs one (`owner_kind = function`, `owner_id` = function id, `section = function:<id>`). It needs one when it has at least 2 `interactions` and (a non-human actor takes part, or a message is `abnormal` or has a `guard`, or the function has no screen). Otherwise no diagram.
+- Lifelines: human actors (stick figure), `:System`, external `system` / `time` actors; exact actor names, generalization kept, nothing else (no Frontend / Backend / Repository).
+- Message: request with a response back to the sender ⇒ synchronous solid arrow (`->`) + activation bar; request without ⇒ asynchronous open arrow (`->>`); response ⇒ dashed open arrow (`-->>`). Labels numbered `1:`, `1.1:`, `1.2:`, `2:` (stimulus = request from an actor).
+- `abnormal` ⇒ `alt <guard>` / `else <guard>`, the normal flow after it is the last `else`; `normal` with `guard` ⇒ `opt <guard>`; no `loop` (no data yet).
+- Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Samples: `docs/diagram_guideline/sequence/`; full rules: `renderer/sequence/SKILL.md`.
+
 ## `screen_layout` — §3.x.y (core screens only, Phases §7.2)
 
 Source fields: `screens[<owner>].name` · `functions[screen_id=<owner>].name/.description`. Attached to `screens[].primary_function_id`.

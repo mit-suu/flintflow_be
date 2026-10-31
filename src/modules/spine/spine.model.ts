@@ -211,6 +211,18 @@ const validationSchema = new Schema(
   opts
 )
 
+const functionInteractionSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    message: { type: String, required: true },
+    kind: { type: String, enum: ["request", "response"], required: true },
+    flow: { type: String, enum: ["normal", "abnormal"], required: true },
+    guard: { type: String }
+  },
+  opts
+)
+
 const functionSchema = new Schema(
   {
     id: { type: String, required: true },
@@ -224,7 +236,8 @@ const functionSchema = new Schema(
     abnormal: { type: [String], default: [] },
     validations: { type: [validationSchema], default: [] },
     business_rule_ids: { type: [String], default: [] },
-    priority
+    priority,
+    interactions: { type: [functionInteractionSchema], default: undefined }
   },
   opts
 )
@@ -342,7 +355,7 @@ const diagramSchema = new Schema(
     id: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "screen_layout"],
+      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"],
       required: true
     },
     format: { type: String, enum: ["puml", "svg"], default: "puml" },

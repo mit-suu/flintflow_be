@@ -99,6 +99,17 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         transitions: (entity?.transitions ?? []).map(({ from, to, event, guard, action }) => ({ from, to, event, guard: guard ?? "", action: action ?? "" }))
       }
     }
+    case "sequence": {
+      // Một hình = một function (`owner_id`): tên function, message theo thứ tự, và tên + kind actor ở các đầu message
+      const fn = spine.functions.find((f) => f.id === diagram.owner_id)
+      const interactions = fn?.interactions ?? []
+      const ends = new Set(interactions.flatMap((i) => [i.from, i.to]))
+      return {
+        function: fn ? { name: fn.name, screen: fn.screen_id !== null } : null,
+        interactions: interactions.map(({ from, to, message, kind, flow, guard }) => ({ from, to, message, kind, flow, guard: guard ?? "" })),
+        actors: byId(spine.actors.filter((a) => ends.has(a.id))).map(({ id, name, kind }) => ({ id, name, kind }))
+      }
+    }
     case "screen_layout": {
       const screen = spine.screens.find((s) => s.id === diagram.owner_id)
       return {
@@ -142,6 +153,7 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
   erd: "svg@1",
   class: "svg@1",
   state_machine: "svg@1",
+  sequence: DEFAULT_DIAGRAM_ENGINE,
   screen_layout: DEFAULT_DIAGRAM_ENGINE
 })
 

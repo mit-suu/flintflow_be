@@ -286,8 +286,11 @@ describe("runDeterministicCheck", () => {
 
   it("xoá actor thẳng tay ⇒ dead_reference ở §2.2.2, remediation S-3.2", () => {
     const flags = byRule(runDeterministicCheck(variant((s) => (s.actors = s.actors.filter((a) => a.id !== "A08")))), "dead_reference")
-    expect(flags.map((f) => f.target_id).sort()).toEqual(["use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
-    expect(flags.every((f) => f.section_id === "fixed:2.2.2" && f.remediation_step === "S-3.2")).toBe(true)
+    const inUseCases = flags.filter((f) => (f.target_id ?? "").startsWith("use_cases["))
+    expect(inUseCases.map((f) => f.target_id).sort()).toEqual(["use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
+    expect(inUseCases.every((f) => f.section_id === "fixed:2.2.2" && f.remediation_step === "S-3.2")).toBe(true)
+    // Message sơ đồ tuần tự trỏ actor đã xoá: cờ nằm ở mục của function
+    expect(flags.filter((f) => (f.target_id ?? "").startsWith("functions[")).map((f) => f.section_id).sort()).toEqual(["function:FN010", "function:FN084"])
   })
 
   it("mảng bảo vệ rỗng ⇒ array_empty + section_empty", () => {

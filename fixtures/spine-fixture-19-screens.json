@@ -2206,7 +2206,39 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Submit email and password",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show authentication error",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "credentials do not match"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show account locked notice",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "account is locked"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Open project dashboard",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN002",
@@ -2406,7 +2438,30 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Submit email address",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A08",
+          "message": "Send password reset link",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Confirm reset email sent",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN011",
@@ -2694,7 +2749,31 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Submit project name and working mode",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show duplicate name error",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "project name already exists"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Open project workspace",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN025",
@@ -2782,7 +2861,45 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Send chat message",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A06",
+          "message": "Generate draft reply",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show retry prompt",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "model call times out"
+        },
+        {
+          "from": "A06",
+          "to": "system",
+          "message": "Return draft changes",
+          "kind": "response",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show updated draft",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN029",
@@ -3908,7 +4025,23 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A09",
+          "to": "system",
+          "message": "Trigger monthly quota reset",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A08",
+          "message": "Send quota renewal notice",
+          "kind": "request",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN085",
@@ -3961,7 +4094,31 @@
       "business_rule_ids": [
         "BR08"
       ],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A05",
+          "to": "system",
+          "message": "Notify payment result",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A05",
+          "message": "Reject notification",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "signature is invalid"
+        },
+        {
+          "from": "system",
+          "to": "A05",
+          "message": "Acknowledge notification",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN087",
