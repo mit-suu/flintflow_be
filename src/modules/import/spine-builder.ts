@@ -6,7 +6,7 @@
  */
 
 import type { Op } from "../spine/op.types.js"
-import type { EntityAttribute, FlowEdge, Spine } from "../spine/spine.types.js"
+import type { EntityAttribute, EntityState, EntityTransition, FlowEdge, Spine } from "../spine/spine.types.js"
 import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
@@ -125,6 +125,45 @@ const attributesOf = (raw: unknown): EntityAttribute[] => {
     out.push({ name, kind: oneOf(rec?.kind, ["key", "reference", "plain"], "plain"), required: rec?.required === false ? false : true, ...(description ? { description } : {}) })
   }
   return out
+}
+
+/**
+ * Vòng đời entity tài liệu / sơ đồ ghi: `states` là chuỗi (`Pending`) hoặc `{ name, initial, final }`; `transitions` là
+ * `{ from, to, event, guard, action }` với `from` / `to` là tên (hoặc id) trạng thái. Id trạng thái `<entity>-ST<n>` theo
+ * thứ tự ghi; trùng tên giữ cái đầu; không ghi initial ⇒ trạng thái đầu là initial (chỉ giữ một initial). Chuyển có đầu
+ * mút không khớp trạng thái nào, thiếu sự kiện, hoặc đi ra từ trạng thái final thì bỏ — không đoán.
+ */
+const lifecycleOf = (entityId: string, rawStates: unknown, rawTransitions: unknown): { states: EntityState[]; transitions: EntityTransition[] } => {
+  const states: EntityState[] = []
+  const flags = new Map<string, { initial: boolean; final: boolean }>()
+  for (const item of Array.isArray(rawStates) ? rawStates : []) {
+    const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    const name = str(rec ? rec.name : item)
+    if (!name || states.some((s) => s.name.toLowerCase() === name.toLowerCase())) continue
+    const id = `${entityId}-ST${states.length + 1}`
+    states.push({ id, name })
+    flags.set(id, { initial: rec?.initial === true, final: rec?.final === true })
+  }
+  if (states.length === 0) return { states: [], transitions: [] }
+  const initialId = states.find((s) => flags.get(s.id)?.initial)?.id ?? states[0].id
+  const out = states.map((s) => ({ ...s, ...(s.id === initialId ? { initial: true } : {}), ...(flags.get(s.id)?.final ? { final: true } : {}) }))
+  const find = (ref: unknown): string | null => {
+    const text = str(ref).toLowerCase()
+    return text ? (out.find((s) => s.id.toLowerCase() === text || s.name.toLowerCase() === text)?.id ?? null) : null
+  }
+  const transitions: EntityTransition[] = []
+  for (const item of Array.isArray(rawTransitions) ? rawTransitions : []) {
+    const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    const from = find(rec?.from)
+    const to = find(rec?.to)
+    const event = str(rec?.event ?? rec?.trigger).replace(/[,\[\]]/g, " ").replace(/\s+/g, " ").trim()
+    if (!rec || !from || !to || !event || out.find((s) => s.id === from)?.final) continue
+    if (transitions.some((t) => t.from === from && t.to === to && t.event === event)) continue
+    const guard = str(rec.guard)
+    const action = str(rec.action)
+    transitions.push({ from, to, event, ...(guard ? { guard } : {}), ...(action ? { action } : {}) })
+  }
+  return { states: out, transitions }
 }
 
 /** Động từ quan hệ hợp lệ của Spine (`relation_verbs`): tiếng Anh viết thường. */
@@ -276,6 +315,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
     }
     const attributes = attributesOf(e.value.attributes)
     const featureIds = [...new Set(strList(e.value.feature_ids ?? e.value.features).flatMap((ref) => resolveFeature(ref) ?? []))]
+    const lifecycle = lifecycleOf(e.id ?? "", e.value.states, e.value.transitions)
     add("entities", {
       id: e.id,
       name: str(e.value.name) || e.id,
@@ -283,7 +323,8 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       relations,
       ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
       ...(attributes.length ? { attributes } : {}),
-      ...(featureIds.length ? { feature_ids: featureIds } : {})
+      ...(featureIds.length ? { feature_ids: featureIds } : {}),
+      ...(lifecycle.states.length ? lifecycle : {})
     })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {

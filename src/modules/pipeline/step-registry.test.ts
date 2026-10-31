@@ -63,7 +63,7 @@ describe("assets/step-registry.json", () => {
       "S-2.5": ["context"],
       "S-3.6": ["usecase", "context"],
       "S-4.2": ["screen_flow"],
-      "S-4.5": ["erd", "class"],
+      "S-4.5": ["erd", "class", "state_machine"],
       "S-5.3": ["screen_layout"]
     })
   })

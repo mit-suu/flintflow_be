@@ -14,11 +14,12 @@ import { renderUseCase } from "./usecase.renderer.js"
 import { renderScreenFlow } from "./screen-flow.renderer.js"
 import { renderErd } from "./erd.renderer.js"
 import { renderClass } from "./class.renderer.js"
+import { renderStateMachine } from "./state-machine.renderer.js"
 import { renderScreenLayout } from "./screen-layout.renderer.js"
 
 export type { DiagramKind, RenderedPart } from "./common.js"
 
-export const DIAGRAM_KINDS: readonly DiagramKind[] = Object.freeze(["context", "usecase", "screen_flow", "erd", "class", "screen_layout"])
+export const DIAGRAM_KINDS: readonly DiagramKind[] = Object.freeze(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "screen_layout"])
 
 export const RENDERERS: Readonly<Record<DiagramKind, Renderer>> = Object.freeze({
   context: renderContext,
@@ -26,12 +27,13 @@ export const RENDERERS: Readonly<Record<DiagramKind, Renderer>> = Object.freeze(
   screen_flow: renderScreenFlow,
   erd: renderErd,
   class: renderClass,
+  state_machine: renderStateMachine,
   screen_layout: renderScreenLayout
 })
 
 export interface RenderTarget {
   kind: DiagramKind
-  /** Chỉ `screen_layout`: id màn. `class` vẽ mọi feature trong một target (owner_id null); chủ của từng hình là feature. */
+  /** Chỉ `screen_layout`: id màn. `class` (mọi feature) và `state_machine` (mọi entity) vẽ trong một target (owner_id null); chủ của từng hình là feature. */
   owner_id: string | null
 }
 
@@ -59,5 +61,6 @@ export const allTargets = (spine: Spine): RenderTarget[] => [
   { kind: "screen_flow", owner_id: null },
   { kind: "erd", owner_id: null },
   { kind: "class", owner_id: null },
+  { kind: "state_machine", owner_id: null },
   ...layoutOwners(spine).map((id) => ({ kind: "screen_layout" as const, owner_id: id }))
 ]

@@ -115,10 +115,13 @@ const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnT
 }
 
 /** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
-const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes"])
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions"])
 
-const elementKeyOf = (el: unknown): string | null =>
-  !isRecord(el) ? null : typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
+const elementKeyOf = (el: unknown): string | null => {
+  if (!isRecord(el)) return null
+  if (typeof el.from === "string" && typeof el.to === "string" && typeof el.event === "string") return `from=${el.from},to=${el.to},event=${el.event}`
+  return typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
+}
 
 /** Hai phần tử cùng khoá (cạnh cùng màn đích, thuộc tính cùng tên) ⇒ giữ phần tử đầu. */
 const dedupeFlowEdges = (edges: unknown[]): unknown[] => {
@@ -189,7 +192,7 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
   if (!isRecord(value)) return value
   const segments = parsePath(path)
   const collection = segments[segments.length - 1].key
-  const nested = segments.length === 2 && collection === "validations"
+  const nested = segments.length === 2 && (collection === "validations" || collection === "states")
   if (!allocatesIds(collection) || (segments.length !== 1 && !nested)) return value
 
   const current = value.id
@@ -233,8 +236,21 @@ const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boole
   return true
 }
 
+/** Mảng tuỳ chọn của entity: Spine cũ / entity chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
+const OPTIONAL_ENTITY_ARRAYS: ReadonlySet<string> = new Set(["attributes", "feature_ids", "states", "transitions"])
+
+const ensureOptionalArray = (state: WorkState, path: string): void => {
+  const segments = parsePath(path)
+  const last = segments[segments.length - 1]
+  if (segments.length !== 2 || segments[0].key !== "entities" || last.selector?.kind !== "append" || !OPTIONAL_ENTITY_ARRAYS.has(last.key)) return
+  const arrayPath = formatPath([segments[0], { key: last.key }])
+  const target = resolve(state.spine, arrayPath)
+  if (target.kind === "field" && !target.exists) applySet(state, { op: "set", path: arrayPath, value: [] })
+}
+
 const applyAdd = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op add thiếu value: "${op.path}"`)
+  ensureOptionalArray(state, op.path)
   const target = resolve(state.spine, op.path)
   if (target.kind !== "append") {
     throw opError("op_not_allowed", op.path, `Op add phải nhắm mảng dạng "arr[]": "${op.path}"`)
@@ -254,7 +270,7 @@ const applyAdd = (state: WorkState, op: Op): void => {
     // Phần tử không có id: một khoá chỉ một phần tử (path chọn phần tử theo `to` / `name`)
     const key = KEYED_ARRAYS.has(lastKey(op.path)) ? elementKeyOf(value) : null
     if (key !== null && target.parent.some((el) => elementKeyOf(el) === key)) {
-      throw opError("duplicate_id", op.path, `Phần tử "${key.slice(key.indexOf("=") + 1)}" đã có trong "${op.path}" — sửa field của nó bằng set trên path có selector (${key.startsWith("to=") ? "flow_to[to=…]" : "attributes[name=…]"})`)
+      throw opError("duplicate_id", op.path, `Phần tử "${key}" đã có trong "${op.path}" — sửa field của nó bằng set trên path có selector (${lastKey(op.path)}[${key}])`)
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)

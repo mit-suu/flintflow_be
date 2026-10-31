@@ -71,7 +71,7 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 43 skill: 20 action · 15 content · 6 renderer · 2 output", () => {
+  it("đủ 44 skill: 20 action · 15 content · 7 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
@@ -83,10 +83,11 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +1 action FLF-267: knowledge-answer (trả lời câu hỏi tri thức chỉ từ chunk truy hồi, có trích dẫn).
     // +1 action FLF-338: extract-requirements (rút yêu cầu từ tài liệu thô, §3.6.1).
     // +1 renderer FLF-325: renderer/class (class diagram domain, mỗi feature một hình).
-    expect(listSkillAssets()).toHaveLength(43)
+    // +1 renderer: renderer/state-machine (state machine diagram, mỗi entity có vòng đời một hình).
+    expect(listSkillAssets()).toHaveLength(44)
     expect(byKind("action")).toBe(20)
     expect(byKind("content")).toBe(15)
-    expect(byKind("renderer")).toBe(6)
+    expect(byKind("renderer")).toBe(7)
     expect(byKind("output")).toBe(2)
   })
 
@@ -130,6 +131,7 @@ describe("skill trên đĩa (assets/skills)", () => {
     "renderer/erd",
     "renderer/screen-flow",
     "renderer/screen-layout",
+    "renderer/state-machine",
     "renderer/usecase"
   ])
 
@@ -137,8 +139,9 @@ describe("skill trên đĩa (assets/skills)", () => {
   const MODE1_SKELETON_ACTION = new Set<string>([])
 
   // Skill cần quy trình suy luận dài hơn mức chung (quyết định chiều/bản số từng quan hệ ERD; FLF-311: lô thêm use case kéo
-  // theo chức năng / màn / luồng / phân quyền — hai khối theo giai đoạn, model chỉ nhận một khối)
-  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 250, "action/apply-change-op": 250 }
+  // theo chức năng / màn / luồng / phân quyền — hai khối theo giai đoạn, model chỉ nhận một khối; entities-erd thêm Pass 8
+  // vòng đời entity (states / transitions) cùng hai nhóm luật validator của nó nên nâng 250 → 260)
+  const LINE_LIMIT_OVERRIDE: Readonly<Record<string, number>> = { "content/entities-erd": 260, "action/apply-change-op": 250 }
 
   it("skill action + skill đã viết (T10, T14) có nội dung thật, SKILL.md ≤ 150 dòng (trừ LINE_LIMIT_OVERRIDE); skill còn lại là stub", () => {
     for (const s of listSkillAssets()) {
