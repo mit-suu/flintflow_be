@@ -89,10 +89,10 @@ export const formatFor = (existing: readonly string[], fallback: IdFormat): IdFo
 }
 
 /** Collection này có được server cấp id không. */
-export const allocatesIds = (collection: string): boolean => collection === "validations" || collection in ID_FORMATS
+export const allocatesIds = (collection: string): boolean => collection === "validations" || collection === "states" || collection in ID_FORMATS
 
 /**
- * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha).
+ * Id mới cho một phần tử thêm vào `collection`. `parentId` chỉ dùng cho `validations` (id function cha) và `states` (id entity).
  * `null` ⇒ collection không do allocator quản lý (vd `steps`, `sections` — khoá có nghĩa, không đánh số).
  */
 export const allocateId = (spine: Spine, collection: string, parentId: string | null = null): string | null => {
@@ -100,6 +100,11 @@ export const allocateId = (spine: Spine, collection: string, parentId: string | 
     if (!parentId) return null
     const all = spine.functions.flatMap((f) => f.validations.map((v) => v.id))
     return nextIdIn(all, { prefix: `${parentId}-V`, width: 1 })
+  }
+  if (collection === "states") {
+    // Trạng thái lồng trong entity: `<entity id>-ST<n>`, duy nhất trên toàn Spine (transition tham chiếu bằng id)
+    if (!parentId) return null
+    return nextIdIn(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id)), { prefix: `${parentId}-ST`, width: 1 })
   }
   const format = ID_FORMATS[collection]
   if (!format) return null

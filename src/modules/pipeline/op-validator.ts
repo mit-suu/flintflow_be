@@ -862,6 +862,68 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       errors.push({ rule: "erd_attribute_duplicate", path: `entities[id=${e.id}].attributes`, message: `"${e.name}" có hai thuộc tính trùng tên "${a.name}" — gộp thành một` })
     }
   }
+  errors.push(...lifecycleErrors(after))
+  return errors
+}
+
+/**
+ * Vòng đời của entity (state machine diagram): đúng một trạng thái đầu, tên và id trạng thái không trùng, chuyển trạng
+ * thái nối hai trạng thái CÓ THẬT của cùng entity, trạng thái kết thúc không có đường ra, mọi trạng thái tới được từ
+ * trạng thái đầu. Entity không có trạng thái thì không bị soi.
+ */
+export const lifecycleErrors = (after: Spine): ValidationError[] => {
+  const errors: ValidationError[] = []
+  const owner = new Map<string, string>()
+  for (const e of after.entities) {
+    const states = e.states ?? []
+    const transitions = e.transitions ?? []
+    const path = (field: string) => `entities[id=${e.id}].${field}`
+    for (const s of states) {
+      const other = owner.get(s.id)
+      if (other !== undefined) {
+        errors.push({ rule: "state_id_duplicate", path: path("states"), message: `Id trạng thái "${s.id}" của "${e.name}" đã dùng ở entity ${other} — id trạng thái duy nhất trên toàn Spine` })
+      }
+      owner.set(s.id, e.id)
+    }
+    if (states.length === 0) {
+      if (transitions.length > 0) errors.push({ rule: "transition_state_unknown", path: path("transitions"), message: `"${e.name}" có transitions nhưng chưa có states` })
+      continue
+    }
+    const initial = states.filter((s) => s.initial)
+    if (initial.length !== 1) {
+      errors.push({ rule: "state_initial_invalid", path: path("states"), message: `"${e.name}" phải có đúng một trạng thái initial (đang có ${initial.length})` })
+    }
+    const names = new Set<string>()
+    for (const s of states) {
+      const key = s.name.trim().toLowerCase()
+      if (names.has(key)) errors.push({ rule: "state_name_duplicate", path: path("states"), message: `"${e.name}" có hai trạng thái trùng tên "${s.name}"` })
+      names.add(key)
+    }
+    const ids = new Set(states.map((s) => s.id))
+    const finals = new Set(states.filter((s) => s.final).map((s) => s.id))
+    for (const t of transitions) {
+      const at = path(`transitions[from=${t.from},to=${t.to},event=${t.event}]`)
+      if (!ids.has(t.from) || !ids.has(t.to)) {
+        errors.push({ rule: "transition_state_unknown", path: at, message: `Chuyển "${t.event}" của "${e.name}" nối ${t.from} → ${t.to} nhưng id đó không nằm trong states của entity` })
+      } else if (finals.has(t.from)) {
+        errors.push({ rule: "transition_from_final", path: at, message: `Chuyển "${t.event}" của "${e.name}" đi ra từ trạng thái kết thúc ${t.from} — bỏ final hoặc bỏ chuyển` })
+      }
+    }
+    if (initial.length === 1) {
+      const reached = new Set([initial[0].id])
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const t of transitions) if (reached.has(t.from) && ids.has(t.to) && !reached.has(t.to)) {
+            reached.add(t.to)
+            grew = true
+          }
+      }
+      const lost = states.filter((s) => !reached.has(s.id))
+      if (lost.length > 0) {
+        errors.push({ rule: "state_unreachable", path: path("states"), message: `"${e.name}": trạng thái ${lost.map((s) => `"${s.name}"`).join(", ")} không tới được từ trạng thái initial — thêm chuyển hoặc bỏ trạng thái` })
+      }
+    }
+  }
   return errors
 }
 

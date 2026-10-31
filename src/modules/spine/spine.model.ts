@@ -162,6 +162,28 @@ const entityAttributeSchema = new Schema(
   opts
 )
 
+const entityStateSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true },
+    initial: { type: Boolean, default: undefined },
+    final: { type: Boolean, default: undefined }
+  },
+  opts
+)
+
+const entityTransitionSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    event: { type: String, required: true },
+    guard: { type: String },
+    action: { type: String },
+    business_rule_ids: { type: [String], default: undefined }
+  },
+  opts
+)
+
 const entitySchema = new Schema(
   {
     id: { type: String, required: true },
@@ -173,7 +195,9 @@ const entitySchema = new Schema(
     relation_optional: { type: [String], default: undefined },
     root: { type: Boolean, default: undefined },
     attributes: { type: [entityAttributeSchema], default: undefined },
-    feature_ids: { type: [String], default: undefined }
+    feature_ids: { type: [String], default: undefined },
+    states: { type: [entityStateSchema], default: undefined },
+    transitions: { type: [entityTransitionSchema], default: undefined }
   },
   opts
 )
@@ -318,7 +342,7 @@ const diagramSchema = new Schema(
     id: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["context", "usecase", "screen_flow", "erd", "class", "screen_layout"],
+      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "screen_layout"],
       required: true
     },
     format: { type: String, enum: ["puml", "svg"], default: "puml" },

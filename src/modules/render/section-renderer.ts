@@ -388,6 +388,18 @@ const nonScreenFunctions = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   return [tableBlock(["Name", "Trigger", "Description"], fns.map((f) => [f.name, f.trigger, f.description]))]
 }
 
+/** Đoạn mô tả dưới hình state machine của một entity: điểm bắt đầu, điểm kết thúc, số trạng thái / chuyển trạng thái. */
+const stateMachineDescription = (entity: Spine["entities"][number], vi: boolean): string => {
+  const states = entity.states ?? []
+  const quote = (names: string[]): string => names.map((n) => `"${n}"`).join(", ")
+  const initial = states.filter((x) => x.initial).map((x) => x.name)
+  const finals = states.filter((x) => x.final).map((x) => x.name)
+  const counts = { states: states.length, transitions: (entity.transitions ?? []).length }
+  return vi
+    ? `Vòng đời của "${entity.name}" bắt đầu ở trạng thái ${quote(initial)}${finals.length > 0 ? ` và kết thúc ở ${quote(finals)}` : ""}; gồm ${counts.states} trạng thái và ${counts.transitions} chuyển trạng thái, mỗi chuyển ghi theo dạng sự kiện [điều kiện] / hành động.`
+    : `The lifecycle of "${entity.name}" starts in ${quote(initial)}${finals.length > 0 ? ` and ends in ${quote(finals)}` : ""}; it has ${counts.states} states and ${counts.transitions} transitions, each written as event [guard] / action.`
+}
+
 const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
   const blocks: Block[] = diagramImages(spine, "erd", undefined, ctx, "Entity Relationship Diagram", svgCaption)
   if (spine.entities.length > 0) {
@@ -401,6 +413,11 @@ const erd = (spine: Spine, ctx: SectionRenderContext): Block[] => {
     const relations = (e: Spine["entities"][number]) =>
       e.relations.map((id) => sentencesFor(lang).relation(verbOf(e, id), entityName(id), e.relation_optional?.includes(id) ?? false)).join(", ")
     blocks.push(tableBlock(["Entity", "Description", "Relations"], spine.entities.map((e) => [e.name, e.description, relations(e)])))
+  }
+  // Vòng đời (state machine) của entity có trạng thái: mỗi entity một hình kèm mô tả, sau bảng entity
+  for (const e of [...spine.entities].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
+    const images = diagramImages(spine, "state_machine", e.id, ctx, "State Machine Diagram", svgCaption)
+    if (images.length > 0) blocks.push(...images, p(stateMachineDescription(e, isVietnamese(ctx.language))))
   }
   return blocks
 }

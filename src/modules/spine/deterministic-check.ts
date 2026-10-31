@@ -151,7 +151,7 @@ export const applyRuleProfile = (candidates: FlagCandidate[], profile: RuleProfi
         .map((c) => (profile.downgrade.has(c.rule_id) && c.level === "red" ? { ...c, level: "yellow" as const } : c))
     : candidates
 
-const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5" }
+const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5" }
 
 export const renderStepOf = (d: Pick<Diagram, "kind" | "owner_id">): string =>
   RENDER_STEP[d.kind] ?? (d.owner_id ? `S-5.3@${d.owner_id}` : "S-5.3")
@@ -334,6 +334,9 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
       return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
     case "entities[].relations[]":
     case "entities[].feature_ids[]":
+    case "entities[].transitions[].from":
+    case "entities[].transitions[].to":
+    case "entities[].transitions[].business_rule_ids[]":
       return { section: "fixed:3.1.5", step: "S-4.5" }
     case "business_rules[].source_validation_ids[]":
       return { section: "fixed:5.1", step: "S-7.1" }

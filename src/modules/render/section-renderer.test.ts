@@ -290,6 +290,41 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks[1]).toMatchObject({ type: "table" })
   })
 
+  it("fixed:3.1.5 — state machine của entity có vòng đời đứng sau bảng entity: hình + chú thích từ <title> + đoạn mô tả (EN / VI)", () => {
+    const base = spine()
+    const svg = (entity: string) => `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>State Machine Diagram — ${entity}</title></svg>`
+    const first = base.entities[0]
+    first.states = [
+      { id: "ST1", name: "Pending", initial: true },
+      { id: "ST2", name: "Approved" },
+      { id: "ST3", name: "Closed", final: true }
+    ]
+    first.transitions = [
+      { from: "ST1", to: "ST2", event: "approve" },
+      { from: "ST2", to: "ST3", event: "close" },
+      { from: "ST2", to: "ST2", event: "touch" }
+    ]
+    const withMachine: Spine = {
+      ...base,
+      diagrams: [
+        ...base.diagrams,
+        { id: "D20", kind: "state_machine", section: "fixed:3.1.5", owner_kind: "entity", owner_id: first.id, format: "svg", source: svg(first.name), render_status: "ok", source_hash: "h20", rendered_at: "2026-09-01T00:00:00.000Z" },
+        { id: "D21", kind: "state_machine", section: "fixed:3.1.5", owner_kind: "entity", owner_id: base.entities[1].id, format: "svg", source: svg("Broken"), render_status: "error", source_hash: "h21", rendered_at: "2026-09-01T00:00:00.000Z" }
+      ]
+    }
+    const png = (id: string) => `png-${id}`
+    const blocks = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", diagramPng: png })).blocks
+    expect(blocks[0]).toMatchObject({ type: "image", caption: "Entity Relationship Diagram" })
+    expect(blocks[1]).toMatchObject({ type: "table" })
+    expect(blocks[2]).toEqual({ type: "image", png: "png-D20", caption: `State Machine Diagram — ${first.name}` })
+    expect(blocks[3]).toMatchObject({ type: "paragraph" })
+    expect(JSON.stringify(blocks[3])).toContain(`starts in \\"Pending\\" and ends in \\"Closed\\"; it has 3 states and 3 transitions`)
+    // hình lỗi không in
+    expect(blocks).toHaveLength(4)
+    const vi = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", language: "vi", diagramPng: png })).blocks
+    expect(JSON.stringify(vi[3])).toContain("bắt đầu ở trạng thái")
+  })
+
   it("feature:<id> — class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
     const base = spine()
     const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram — Authentication</title></svg>'
