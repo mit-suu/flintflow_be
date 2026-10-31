@@ -474,8 +474,15 @@ describe("applyTransaction / previewTransaction / revertRange", () => {
     await seed()
     const preview = await previewTransaction(PROJECT, txn(CASES[3].opCase.expected_ops.slice(0, 1)))
     expect(preview.ok).toBe(true)
-    expect(preview.ops).toHaveLength(3)
-    expect(preview.changes.map((c) => c.path)).toEqual(["actors[id=A08]", "use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
+    // Xoá actor gỡ luôn message sơ đồ tuần tự có actor đó ở một đầu (FN010, FN084)
+    expect(preview.ops).toHaveLength(5)
+    expect(preview.changes.map((c) => c.path)).toEqual([
+      "actors[id=A08]",
+      "use_cases[id=UC01].actor_ids[=A08]",
+      "use_cases[id=UC03].actor_ids[=A08]",
+      "functions[id=FN010].interactions[from=system,to=A08,message=Send password reset link,kind=request,flow=normal]",
+      "functions[id=FN084].interactions[from=system,to=A08,message=Send quota renewal notice,kind=request,flow=normal]"
+    ])
     expect((await repo.get(PROJECT))?.spine_version).toBe(1)
     expect(db.changes).toHaveLength(0)
 

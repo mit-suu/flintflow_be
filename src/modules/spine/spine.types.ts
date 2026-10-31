@@ -227,6 +227,19 @@ export interface Validation {
  * Tên `Function` theo tài liệu. Khi import ở module khác nên dùng alias
  * `SpineFunction` để không che kiểu global `Function`.
  */
+/** Message của sơ đồ tuần tự hệ thống: `from` / `to` là id actor hoặc `system`, đúng một đầu là `system`. */
+export interface FunctionInteraction {
+  from: string
+  to: string
+  /** Không chứa `,` `[` `]` (khoá selector). */
+  message: string
+  /** `request`: lời gọi / tín hiệu; `response`: trả lời (nét đứt). */
+  kind: "request" | "response"
+  /** `abnormal` ⇒ nằm trong `alt` và bắt buộc có `guard`; `normal` có `guard` ⇒ `opt`. */
+  flow: "normal" | "abnormal"
+  guard?: string
+}
+
 export interface Function {
   id: string
   screen_id: string | null
@@ -240,6 +253,8 @@ export interface Function {
   validations: Validation[]
   business_rule_ids: string[]
   priority: Priority | null
+  /** Message actor ↔ system theo thứ tự thời gian (sơ đồ tuần tự). Thiếu ⇒ `[]`. */
+  interactions?: FunctionInteraction[]
 }
 export type SpineFunction = Function
 
@@ -343,7 +358,7 @@ export interface Addendum {
 
 // ─── state nội bộ ────────────────────────────────────────────────
 
-export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "screen_layout"
+export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "sequence" | "screen_layout"
 export type RenderStatus = "ok" | "error"
 /** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
 export type DiagramFormat = "puml" | "svg"

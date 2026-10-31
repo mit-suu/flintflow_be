@@ -16,6 +16,8 @@
 
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
 import { svgTitleOf } from "../diagram/renderers/common.js"
+import { diagramLabelsFor } from "../diagram/renderers/labels.js"
+import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
@@ -619,8 +621,31 @@ const legacyFunctionDetail = (spine: Spine, functionId: string, ctx: SectionRend
   return blocks
 }
 
-const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] =>
-  ctx.functionLayout === "fpt" ? fptFunctionDetail(spine, functionId, ctx) : legacyFunctionDetail(spine, functionId, ctx)
+/** Đoạn mô tả dưới sơ đồ tuần tự: số message, số nhánh lỗi, các bên tham gia (không nhắc lại từng message). */
+const sequenceDescription = (spine: Spine, fn: Spine["functions"][number], vi: boolean): string => {
+  const list = fn.interactions ?? []
+  const ends = [...new Set(list.flatMap((i) => [i.from, i.to]))].filter((id) => id !== SYSTEM_LIFELINE)
+  const names = ends.map((id) => spine.actors.find((a) => a.id === id)?.name ?? id)
+  const branches = list.filter((i) => i.flow === "abnormal").length
+  const parties = names.length > 0 ? names.join(", ") : "-"
+  return vi
+    ? `Sơ đồ mô tả ${list.length} message giữa ${parties} và hệ thống trong chức năng "${fn.name}"; mũi tên đặc là yêu cầu đồng bộ, mũi tên hở là tín hiệu bất đồng bộ, nét đứt là phản hồi${branches > 0 ? `; ${branches} message thuộc nhánh lỗi nằm trong khung alt với điều kiện ở dấu ngoặc vuông` : ""}.`
+    : `The diagram shows ${list.length} messages between ${parties} and the system in "${fn.name}"; a solid arrow is a synchronous request, an open arrow an asynchronous signal and a dashed arrow a response${branches > 0 ? `; ${branches} messages of the error branches sit in an alt frame with the condition in square brackets` : ""}.`
+}
+
+/** Sơ đồ tuần tự hệ thống của function (nếu đã vẽ), kèm đoạn mô tả; chú thích theo ngôn ngữ tài liệu. */
+const sequenceBlocks = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => {
+  const fn = spine.functions.find((f) => f.id === functionId)
+  if (!fn) return []
+  const labels = diagramLabelsFor(ctx.language)
+  const images = diagramImages(spine, "sequence", functionId, ctx, labels.sequenceTitle(fn.name))
+  return images.length === 0 ? [] : [...images, p(sequenceDescription(spine, fn, isVietnamese(ctx.language)))]
+}
+
+const functionDetail = (spine: Spine, functionId: string, ctx: SectionRenderContext): Block[] => [
+  ...(ctx.functionLayout === "fpt" ? fptFunctionDetail(spine, functionId, ctx) : legacyFunctionDetail(spine, functionId, ctx)),
+  ...sequenceBlocks(spine, functionId, ctx)
+]
 
 // ─── §4 Non-Functional Requirements ────────────────────────────────
 

@@ -116,7 +116,7 @@ describe("diagram.controller", () => {
   })
 
   it("POST /diagrams/:kind/render: kind lạ 400, screen_layout thiếu owner 400, all gọi renderAll", async () => {
-    expect((await invoke(renderDiagramRoute, { kind: "sequence" })).error).toMatchObject({ statusCode: 400 })
+    expect((await invoke(renderDiagramRoute, { kind: "timing" })).error).toMatchObject({ statusCode: 400 })
     expect((await invoke(renderDiagramRoute, { kind: "screen_layout" })).error).toMatchObject({ statusCode: 400 })
 
     vi.mocked(renderAll).mockResolvedValue({ spine_version: 3, diagrams: [], rendered: [], removed: [] })

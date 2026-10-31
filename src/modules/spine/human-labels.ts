@@ -57,6 +57,7 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   feature_ids: "Tính năng dùng",
   states: "Trạng thái",
   transitions: "Chuyển trạng thái",
+  interactions: "Tương tác actor - hệ thống",
   guard: "Điều kiện rẽ nhánh",
   is_popup: "Là popup",
   tabs: "Tab",
@@ -296,6 +297,7 @@ export const DIAGRAM_KIND_LABELS: Readonly<Record<DiagramKind, string>> = {
   erd: "sơ đồ ERD",
   class: "sơ đồ lớp",
   state_machine: "sơ đồ trạng thái",
+  sequence: "sơ đồ tuần tự",
   screen_layout: "bố cục màn hình"
 }
 
