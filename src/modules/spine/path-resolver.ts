@@ -123,6 +123,10 @@ export const selectorFor = (element: unknown): Selector | null => {
     return { kind: "scalar", value: String(element) }
   }
   if (isRecord(element) && typeof element.id === "string") return { kind: "match", pairs: [["id", element.id]] }
+  // Message sơ đồ tuần tự `functions[].interactions[]` không có id — khoá là from + to + message + kind + flow
+  if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string" && typeof element.message === "string") {
+    return { kind: "match", pairs: [["from", element.from], ["to", element.to], ["message", element.message], ["kind", String(element.kind)], ["flow", String(element.flow)]] }
+  }
   // Chuyển trạng thái `entities[].transitions[]` không có id — khoá là from + to + event (trước nhánh `to` của flow_to)
   if (isRecord(element) && typeof element.from === "string" && typeof element.to === "string" && typeof element.event === "string") {
     return { kind: "match", pairs: [["from", element.from], ["to", element.to], ["event", element.event]] }

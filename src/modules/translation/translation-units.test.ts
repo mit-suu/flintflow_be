@@ -152,7 +152,7 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
     })
     const units = translationUnits(spine).filter(isDiagramOnly)
     expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
-      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "entities.states", "entities.transitions", "screens.flow_to", "diagrams.labels"])
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "entities.states", "entities.transitions", "functions.interactions", "screens.flow_to", "diagrams.labels"])
     )
     const before = new Set(nonEnglish(spine))
     const withVietnamese = variant((s) => {
@@ -184,6 +184,7 @@ describe("unitsOfValue — cặp (hash câu Anh, câu dịch) của một op", (
         `functions[id=${fn.id}].description`,
         `functions[id=${fn.id}].normal`,
         `functions[id=${fn.id}].abnormal`,
+        `functions[id=${fn.id}].interactions`,
         ...fn.validations.map((v) => `functions[id=${fn.id}].validations[id=${v.id}].statement`)
       ].sort()
     )
@@ -322,6 +323,25 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
       { name: "thư điện tử", kind: "key", required: true, description: "Địa chỉ đăng nhập" },
       { name: "ảnh đại diện", kind: "plain", required: false }
     ])
+  })
+
+  it("interactions là đơn vị mảng chữ (message, guard) theo thứ tự mảng; ghi lại giữ đầu mút, kind và flow", () => {
+    const fn = FIXTURE.functions.find((f) => f.id === "FN001")!
+    const units = translationUnits(FIXTURE)
+    expect(units.find((u) => u.key === `functions[id=FN001].interactions`)?.value).toEqual([
+      "Submit email and password",
+      "Show authentication error",
+      "credentials do not match",
+      "Show account locked notice",
+      "account is locked",
+      "Open project dashboard"
+    ])
+    const owner: Record<string, unknown> = { interactions: structuredClone(fn.interactions) }
+    expect(readUnitField(owner, "interactions")).toHaveLength(6)
+    writeUnitField(owner, "interactions", ["Gửi email và mật khẩu", "Hiện lỗi xác thực", "thông tin không khớp", "Hiện thông báo khoá", "tài khoản bị khoá", "Mở bảng điều khiển"])
+    const written = owner.interactions as typeof fn.interactions
+    expect(written![1]).toEqual({ from: "system", to: "A01", message: "Hiện lỗi xác thực", kind: "response", flow: "abnormal", guard: "thông tin không khớp" })
+    expect(written!.map((i) => [i.from, i.to, i.kind, i.flow])).toEqual(fn.interactions!.map((i) => [i.from, i.to, i.kind, i.flow]))
   })
 
   it("states / transitions là đơn vị mảng chữ theo thứ tự mảng; ghi lại giữ id, cờ và đầu mút", () => {

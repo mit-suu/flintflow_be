@@ -115,10 +115,11 @@ const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnT
 }
 
 /** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
-const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions"])
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions"])
 
 const elementKeyOf = (el: unknown): string | null => {
   if (!isRecord(el)) return null
+  if (typeof el.from === "string" && typeof el.to === "string" && typeof el.message === "string") return `from=${el.from},to=${el.to},message=${el.message},kind=${String(el.kind)},flow=${String(el.flow)}`
   if (typeof el.from === "string" && typeof el.to === "string" && typeof el.event === "string") return `from=${el.from},to=${el.to},event=${el.event}`
   return typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
 }
@@ -236,13 +237,16 @@ const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boole
   return true
 }
 
-/** Mảng tuỳ chọn của entity: Spine cũ / entity chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
-const OPTIONAL_ENTITY_ARRAYS: ReadonlySet<string> = new Set(["attributes", "feature_ids", "states", "transitions"])
+/** Mảng tuỳ chọn của phần tử (entity, function): Spine cũ / phần tử chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
+const OPTIONAL_ARRAYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  entities: new Set(["attributes", "feature_ids", "states", "transitions"]),
+  functions: new Set(["interactions"])
+}
 
 const ensureOptionalArray = (state: WorkState, path: string): void => {
   const segments = parsePath(path)
   const last = segments[segments.length - 1]
-  if (segments.length !== 2 || segments[0].key !== "entities" || last.selector?.kind !== "append" || !OPTIONAL_ENTITY_ARRAYS.has(last.key)) return
+  if (segments.length !== 2 || last.selector?.kind !== "append" || !OPTIONAL_ARRAYS[segments[0].key]?.has(last.key)) return
   const arrayPath = formatPath([segments[0], { key: last.key }])
   const target = resolve(state.spine, arrayPath)
   if (target.kind === "field" && !target.exists) applySet(state, { op: "set", path: arrayPath, value: [] })

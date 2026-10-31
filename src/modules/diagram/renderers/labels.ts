@@ -38,6 +38,10 @@ export interface DiagramLabels {
   classTitle: (feature: string) => string
   /** Tiêu đề hình state machine (vòng đời) của một entity — `<title>` của SVG, chú thích ảnh. */
   stateMachineTitle: (entity: string) => string
+  /** Tiêu đề (chú thích ảnh) sơ đồ tuần tự hệ thống của một function. */
+  sequenceTitle: (fn: string) => string
+  /** Guard của nhánh lỗi khi message lỗi chưa ghi guard. */
+  errorGuard: string
   /** Bảng function — hình bố cục màn khi chưa có wireframe. */
   functionColumn: string
   descriptionColumn: string
@@ -60,6 +64,8 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     relationVerb: "has",
     classTitle: (feature) => `Class Diagram — ${feature}`,
     stateMachineTitle: (entity) => `State Machine Diagram — ${entity}`,
+    sequenceTitle: (fn) => `System Sequence Diagram — ${fn}`,
+    errorGuard: "error",
     functionColumn: "Function",
     descriptionColumn: "Description",
     noFunctions: "No functions yet"
@@ -79,6 +85,8 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     relationVerb: "có",
     classTitle: (feature) => `Sơ đồ lớp — ${feature}`,
     stateMachineTitle: (entity) => `Sơ đồ trạng thái — ${entity}`,
+    sequenceTitle: (fn) => `Sơ đồ tuần tự hệ thống — ${fn}`,
+    errorGuard: "có lỗi",
     functionColumn: "Chức năng",
     descriptionColumn: "Mô tả",
     noFunctions: "Chưa có chức năng"

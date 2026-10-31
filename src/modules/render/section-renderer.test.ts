@@ -325,6 +325,33 @@ describe("renderSection — fixed sections", () => {
     expect(JSON.stringify(vi[3])).toContain("bắt đầu ở trạng thái")
   })
 
+  it("function:<id> — sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi không in", () => {
+    const base = spine()
+    base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
+    const fn = base.functions.find((f) => f.id === "FN01")!
+    fn.interactions = [
+      { from: "A77", to: "system", message: "Submit review", kind: "request", flow: "normal" },
+      { from: "system", to: "A77", message: "Show error", kind: "response", flow: "abnormal", guard: "review is empty" },
+      { from: "system", to: "A77", message: "Show saved", kind: "response", flow: "normal" }
+    ]
+    const entry = (id: string, owner: string, status: "ok" | "error") =>
+      ({ id, kind: "sequence", section: `function:${owner}`, owner_kind: "function", owner_id: owner, format: "puml", source: "@startuml\n@enduml", render_status: status, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }) as Spine["diagrams"][number]
+    const withDiagram: Spine = { ...base, diagrams: [...base.diagrams, entry("D30", "FN01", "ok"), entry("D31", "FN02", "error")] }
+    const png = (id: string) => `png-${id}`
+    for (const layout of [undefined, "fpt" as const]) {
+      const blocks = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", functionLayout: layout, diagramPng: png })).blocks
+      const at = blocks.findIndex((b) => b.type === "image" && b.png === "png-D30")
+      expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `System Sequence Diagram — ${fn.name}` })
+      expect(JSON.stringify(blocks[at + 1])).toContain("The diagram shows 3 messages between Reviewer and the system")
+      expect(JSON.stringify(blocks[at + 1])).toContain("1 messages of the error branches")
+      expect(at + 2).toBe(blocks.length)
+    }
+    const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
+    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự hệ thống — ${fn.name}`)).toBe(true)
+    expect(JSON.stringify(vi[vi.length - 1])).toContain("Sơ đồ mô tả 3 message giữa Reviewer và hệ thống")
+    expect(renderSection(withDiagram, "function:FN02", ctx({ number: "3.3.1", diagramPng: png })).blocks.some((b) => b.type === "image")).toBe(false)
+  })
+
   it("feature:<id> — class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
     const base = spine()
     const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram — Authentication</title></svg>'
