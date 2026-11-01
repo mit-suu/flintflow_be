@@ -61,7 +61,15 @@ export interface CreditReservation {
   actionType: string
   cost: number
   projectId?: string
+  /** UC-60: step pipeline của lượt gọi — ghi lên mọi dòng sổ của reservation này. */
+  stepId?: string
   expiresAt: Date
+}
+
+/** UC-60: token của lượt gọi đã trả lời, ghi lên dòng `deduct`. */
+export interface CreditUsageTokens {
+  tokensIn: number
+  tokensOut: number
 }
 
 export interface ExpireStaleReservationsResult {
@@ -192,14 +200,15 @@ export const reserveCredit = async (
   actionType: string,
   projectId?: string,
   session?: ClientSession,
-  activeOrgId?: string | null
+  activeOrgId?: string | null,
+  stepId?: string
 ): Promise<CreditReservation> => {
   const cost = await getActionCost(actionType)
   const options = sessionOptions(session)
   const organizationId = await walletOrgFor(userId, projectId, activeOrgId, session)
   // FLF-333: lượt 0 credit (hỏi tri thức) không đụng ví, không ghi sổ giữ / trừ — deduct / release là no-op
   if (cost === 0) {
-    return { reservationId: new mongoose.Types.ObjectId().toString(), userId, organizationId, actionType, cost: 0, projectId, expiresAt: new Date(Date.now() + env.CREDIT_RESERVE_TTL_MS) }
+    return { reservationId: new mongoose.Types.ObjectId().toString(), userId, organizationId, actionType, cost: 0, projectId, stepId, expiresAt: new Date(Date.now() + env.CREDIT_RESERVE_TTL_MS) }
   }
   const filter = walletKey(organizationId)
   await getOrCreateWallet(userId, session, organizationId)
@@ -241,7 +250,8 @@ export const reserveCredit = async (
         type: "reserve",
         state: "reserved",
         expires_at: expiresAt,
-        balanceAfter: wallet.balance - wallet.reserved
+        balanceAfter: wallet.balance - wallet.reserved,
+        stepId: stepId ?? null
       }
     ],
     options
@@ -254,6 +264,7 @@ export const reserveCredit = async (
     actionType,
     cost,
     projectId,
+    stepId,
     expiresAt
   }
 }
@@ -278,9 +289,10 @@ const maybeNotifyLowCredit = (userId: string, balanceBefore: number, balanceAfte
  */
 export const deductCredit = async (
   reservation: CreditReservation,
-  session?: ClientSession
+  session?: ClientSession,
+  tokens?: CreditUsageTokens
 ): Promise<void> => {
-  const { reservationId, userId, organizationId, actionType, cost, projectId } = reservation
+  const { reservationId, userId, organizationId, actionType, cost, projectId, stepId } = reservation
   if (cost === 0) return // FLF-333: lượt miễn phí không có reservation trong sổ
   const options = sessionOptions(session)
   const key = walletKey(organizationId)
@@ -288,16 +300,18 @@ export const deductCredit = async (
   // Claim reservation trước (chặn trừ hai lần). Cron có thể đã expire trước khi AI kịp
   // trả lời: vẫn tính phí, claim expired → deducted.
   let previousState: "reserved" | "expired" = "reserved"
+  // UC-60: token cũng ghi lên dòng reserve — lịch sử hiện dòng này kèm trạng thái `deducted`
+  const claimSet = { state: "deducted", ...(tokens ? { tokensIn: tokens.tokensIn, tokensOut: tokens.tokensOut } : {}) }
   let claimed = await CreditTransaction.findOneAndUpdate(
     { _id: reservationId, type: "reserve", state: "reserved" },
-    { $set: { state: "deducted" } },
+    { $set: claimSet },
     { ...options, returnDocument: "after" }
   )
   if (!claimed) {
     previousState = "expired"
     claimed = await CreditTransaction.findOneAndUpdate(
       { _id: reservationId, type: "reserve", state: "expired" },
-      { $set: { state: "deducted" } },
+      { $set: claimSet },
       { ...options, returnDocument: "after" }
     )
   }
@@ -351,7 +365,10 @@ export const deductCredit = async (
         type: "deduct",
         reservationId: new mongoose.Types.ObjectId(reservationId),
         // Cùng quy ước "khả dụng sau" với reserve/release/purchase
-        balanceAfter: wallet.balance - wallet.reserved
+        balanceAfter: wallet.balance - wallet.reserved,
+        stepId: stepId ?? null,
+        tokensIn: tokens?.tokensIn ?? null,
+        tokensOut: tokens?.tokensOut ?? null
       }
     ],
     options
@@ -369,7 +386,7 @@ export const releaseCredit = async (
   reservation: CreditReservation,
   session?: ClientSession
 ): Promise<boolean> => {
-  const { reservationId, userId, organizationId, actionType, cost, projectId } = reservation
+  const { reservationId, userId, organizationId, actionType, cost, projectId, stepId } = reservation
   if (cost === 0) return true // FLF-333: lượt miễn phí — không có gì để hoàn
   const options = sessionOptions(session)
 
@@ -403,7 +420,8 @@ export const releaseCredit = async (
         amount: cost,
         type: "release",
         reservationId: new mongoose.Types.ObjectId(reservationId),
-        balanceAfter: wallet.balance - wallet.reserved
+        balanceAfter: wallet.balance - wallet.reserved,
+        stepId: stepId ?? null
       }
     ],
     options
@@ -510,7 +528,8 @@ export const expireStaleReservations = async (
       amount: reservation.amount,
       type: "release",
       reservationId: reservation._id,
-      balanceAfter: wallet.balance - wallet.reserved
+      balanceAfter: wallet.balance - wallet.reserved,
+      stepId: reservation.stepId ?? null
     })
 
     result.expiredCount += 1
