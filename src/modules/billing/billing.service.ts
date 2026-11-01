@@ -491,6 +491,17 @@ export const upgradePlan = async (orgId: string, userId: string, plan: PlanId) =
     )
   }
 
+  // FLF-347: bản đầu không có hạ / huỷ gói (actors-and-use-cases §2.4) — gói trả phí còn hạn chỉ tự về Free khi hết kỳ
+  const current = await Subscription.findOne({ organizationId: orgId, status: "active" })
+  if (current && getPlan(current.plan).priceVnd > definition.priceVnd && current.currentPeriodEnd > new Date()) {
+    throw new ApiError(
+      409,
+      `Không hạ gói được khi gói ${getPlan(current.plan).label} còn hạn. Gói sẽ tự về ${definition.label} khi hết kỳ.`,
+      "PLAN_DOWNGRADE_NOT_SUPPORTED",
+      { currentPlan: current.plan, currentPeriodEnd: current.currentPeriodEnd }
+    )
+  }
+
   const change = await activatePlan(orgId, userId, plan)
   if (change.changed) await notifyPlanChanged(userId, change)
   return change.subscription
