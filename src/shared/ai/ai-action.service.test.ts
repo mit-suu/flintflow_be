@@ -98,7 +98,8 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
     expect(result.data).toEqual({ ok: true })
     expect(result.cost).toBe(5)
     expect(deductCredit).toHaveBeenCalledTimes(1)
-    expect(deductCredit).toHaveBeenCalledWith(reservation)
+    // UC-60: token của lượt gọi đi kèm để ghi lên dòng deduct
+    expect(deductCredit).toHaveBeenCalledWith(reservation, undefined, { tokensIn: expect.any(Number), tokensOut: expect.any(Number) })
     expect(releaseCredit).not.toHaveBeenCalled()
   })
 

@@ -4,6 +4,7 @@ import { OAuth2Client } from "google-auth-library"
 import { User, IUser } from "../user/user.model.js"
 import { AuthToken, TokenType } from "./auth-token.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
+import { accountSuspendedError } from "../../shared/auth/account-suspended.js"
 import { signAccessToken, signRefreshToken, hashToken, TokenPayload } from "../../shared/auth/jwt.util.js"
 import * as sessionService from "../../shared/auth/session.service.js"
 import { sendVerificationOtpEmail, sendPasswordResetOtpEmail } from "../../shared/email/email.service.js"
@@ -191,9 +192,13 @@ export const register = async (
 }
 
 /** UC-03 / UC-66: tài khoản bị Administrator khoá thì không đăng nhập và không gia hạn phiên được. */
-const assertAccountActive = (user: { isActive?: boolean }): void => {
+const assertAccountActive = (user: {
+  isActive?: boolean
+  suspendReason?: string | null
+  suspendedAt?: Date | null
+}): void => {
   if (user.isActive === false) {
-    throw new ApiError(403, "Tài khoản đã bị khoá", "ACCOUNT_SUSPENDED")
+    throw accountSuspendedError(user)
   }
 }
 
@@ -549,7 +554,7 @@ export const refresh = async (
   }
 
   // Luôn đọc DB: token cũ có thể thiếu role, và tài khoản có thể đã bị khoá sau khi token được cấp.
-  const user = await User.findById(decoded.userId).select("role isActive")
+  const user = await User.findById(decoded.userId).select("role isActive suspendReason suspendedAt")
   if (user) assertAccountActive(user)
   const role = decoded.role ?? user?.role
 

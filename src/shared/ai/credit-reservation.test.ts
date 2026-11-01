@@ -171,6 +171,22 @@ describe("credit-reservation.service", () => {
     })
   })
 
+  describe("step + token trên sổ (UC-60)", () => {
+    it("deduct ghi step và token lên dòng deduct và dòng reserve; release giữ step", async () => {
+      const ok = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.1")
+      await deductCredit(ok, undefined, { tokensIn: 900, tokensOut: 150 })
+      const failed = await reserveCredit(USER, ActionType.DRAFT, undefined, undefined, ORG, "S-2.2")
+      await releaseCredit(failed)
+
+      const reserveRow = ledger().docs.find((d) => String(d._id) === ok.reservationId)!
+      const deductRow = ledger().docs.find((d) => d.type === "deduct")!
+      const releaseRow = ledger().docs.find((d) => d.type === "release")!
+      expect(reserveRow).toMatchObject({ state: "deducted", stepId: "S-2.1", tokensIn: 900, tokensOut: 150 })
+      expect(deductRow).toMatchObject({ stepId: "S-2.1", tokensIn: 900, tokensOut: 150 })
+      expect(releaseRow).toMatchObject({ stepId: "S-2.2" })
+    })
+  })
+
   describe("expireStaleReservations", () => {
     it("reserve rồi hết hạn: trả reserved về ví, ghi state=expired và trả về số đã giải phóng", async () => {
       const reservation = await reserveCredit(USER, ActionType.CHAT, undefined, undefined, ORG)
