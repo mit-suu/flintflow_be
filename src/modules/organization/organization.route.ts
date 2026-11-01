@@ -200,13 +200,13 @@ router.patch(
  * @swagger
  * /api/v1/orgs/{orgId}/invitations:
  *   get:
- *     summary: Mã mời của tổ chức, mới nhất trước — không bao giờ trả mã thô (UC-08)
+ *     summary: Lời mời của tổ chức, mới nhất trước — không bao giờ trả mã thô (UC-08). Lead thấy tất cả, Analyst chỉ thấy lời mời của mình (FLF-303)
  *     tags: [Organizations]
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200: { description: Danh sách lời mời }
  *   post:
- *     summary: Sinh mã mời có hạn kèm vai trò và gửi email (UC-08, chỉ Lead)
+ *     summary: "Lead: sinh mã mời có hạn kèm vai trò và gửi email (UC-08). Analyst: tạo yêu cầu chờ Lead duyệt, không mã, không email (FLF-303)"
  *     tags: [Organizations]
  *     security: [{ BearerAuth: [] }]
  *     requestBody:
@@ -220,14 +220,14 @@ router.patch(
  *               role: { type: string, enum: [analyst, viewer] }
  *               email: { type: string, format: email }
  *     responses:
- *       201: { description: "Đã tạo — mã thô chỉ trả ở lượt này" }
- *       402: { description: PLAN_LIMIT_MEMBERS }
+ *       201: { description: "Đã tạo — Lead nhận mã thô chỉ ở lượt này; Analyst nhận yêu cầu state awaiting_approval, không có code" }
+ *       402: { description: "PLAN_LIMIT_MEMBERS (chỉ khi Lead tạo; yêu cầu của Analyst kiểm lúc duyệt)" }
  */
-router.get("/:orgId/invitations", ...inOrg, requireRole("lead"), organizationController.listInvitations)
+router.get("/:orgId/invitations", ...inOrg, requireRole("lead", "analyst"), organizationController.listInvitations)
 router.post(
   "/:orgId/invitations",
   ...inOrg,
-  requireRole("lead"),
+  requireRole("lead", "analyst"),
   validateRequest(CreateInvitationSchema),
   organizationController.createInvitation
 )
@@ -236,18 +236,56 @@ router.post(
  * @swagger
  * /api/v1/orgs/{orgId}/invitations/{invitationId}:
  *   delete:
- *     summary: Thu hồi một mã mời chưa dùng (UC-08, chỉ Lead)
+ *     summary: Thu hồi một mã mời chưa dùng (UC-08). Analyst chỉ huỷ được yêu cầu của mình khi còn chờ duyệt (FLF-303)
  *     tags: [Organizations]
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200: { description: Đã thu hồi }
+ *       403: { description: ORG_ROLE_FORBIDDEN — Analyst huỷ lời mời đã được duyệt }
  *       409: { description: INVITE_ALREADY_USED — mã đã dùng, hãy xoá thành viên thay vì thu hồi }
  */
 router.delete(
   "/:orgId/invitations/:invitationId",
   ...inOrg,
-  requireRole("lead"),
+  requireRole("lead", "analyst"),
   organizationController.revokeInvitation
+)
+
+/**
+ * @swagger
+ * /api/v1/orgs/{orgId}/invitations/{invitationId}/approve:
+ *   post:
+ *     summary: Lead duyệt yêu cầu mời của Analyst — lúc này mới kiểm trần thành viên, sinh mã và gửi email (FLF-303)
+ *     tags: [Organizations]
+ *     security: [{ BearerAuth: [] }]
+ *     responses:
+ *       200: { description: "Đã duyệt — mã thô chỉ trả ở lượt này" }
+ *       402: { description: PLAN_LIMIT_MEMBERS }
+ *       409: { description: INVITE_NOT_AWAITING_APPROVAL }
+ */
+router.post(
+  "/:orgId/invitations/:invitationId/approve",
+  ...inOrg,
+  requireRole("lead"),
+  organizationController.approveInvitation
+)
+
+/**
+ * @swagger
+ * /api/v1/orgs/{orgId}/invitations/{invitationId}/reject:
+ *   post:
+ *     summary: Lead từ chối yêu cầu mời của Analyst; người yêu cầu được báo (FLF-303)
+ *     tags: [Organizations]
+ *     security: [{ BearerAuth: [] }]
+ *     responses:
+ *       200: { description: Đã từ chối }
+ *       409: { description: INVITE_NOT_AWAITING_APPROVAL }
+ */
+router.post(
+  "/:orgId/invitations/:invitationId/reject",
+  ...inOrg,
+  requireRole("lead"),
+  organizationController.rejectInvitation
 )
 
 export default router

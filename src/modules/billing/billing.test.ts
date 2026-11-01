@@ -319,6 +319,37 @@ describe("billing.service", () => {
       expect(notify).toHaveBeenCalledWith(USER, expect.objectContaining({ type: "plan_changed" }))
     })
 
+    describe("FLF-347: không hạ gói khi gói trả phí còn hạn", () => {
+      const seedPro = (periodEnd: Date) =>
+        fakeDb.model("Subscription").create({
+          userId: new mongoose.Types.ObjectId(USER),
+          organizationId: new mongoose.Types.ObjectId(ORG),
+          plan: "pro",
+          status: "active",
+          monthlyCreditsAllotment: planConfig.pro.monthlyCredits,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: periodEnd
+        })
+
+      it("Pro còn hạn ⇒ 409 PLAN_DOWNGRADE_NOT_SUPPORTED, gói giữ nguyên", async () => {
+        await seedPro(new Date(Date.now() + 86_400_000))
+
+        await expect(billingService.upgradePlan(ORG, USER, "free")).rejects.toMatchObject({
+          statusCode: 409,
+          code: "PLAN_DOWNGRADE_NOT_SUPPORTED"
+        })
+        expect(fakeDb.model("Subscription").docs[0].plan).toBe("pro")
+        expect(notify).not.toHaveBeenCalled()
+      })
+
+      it("Pro đã quá hạn (job chưa kịp chạy) ⇒ về Free được", async () => {
+        await seedPro(new Date(Date.now() - 1000))
+
+        await billingService.upgradePlan(ORG, USER, "free")
+        expect(fakeDb.model("Subscription").docs[0].plan).toBe("free")
+      })
+    })
+
     it("không có checkout cho gói miễn phí; về Free là idempotent", async () => {
       await expect(billingService.createCheckout(ORG, USER, "plan:free")).rejects.toMatchObject({ statusCode: 404 })
 

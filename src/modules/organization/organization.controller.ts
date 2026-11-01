@@ -88,20 +88,45 @@ export const leaveOrganization = catchAsync(async (req: Request, res: Response) 
 })
 
 export const createInvitation = catchAsync(async (req: Request, res: Response) => {
-  const { orgId } = requireOrg(req)
+  const { orgId, role: myRole } = requireOrg(req)
   const { role, email } = req.body as CreateInvitationDTO
-  const invitation = await invitationService.createInvitation(orgId, requireUserId(req), role, email)
+  const invitation = await invitationService.createInvitation(orgId, requireUserId(req), myRole, role, email)
   return sendSuccess(res, 201, invitation)
 })
 
 export const listInvitations = catchAsync(async (req: Request, res: Response) => {
-  const { orgId } = requireOrg(req)
-  return sendSuccess(res, 200, await invitationService.listInvitations(orgId))
+  const { orgId, role } = requireOrg(req)
+  return sendSuccess(res, 200, await invitationService.listInvitations(orgId, requireUserId(req), role))
 })
 
 export const revokeInvitation = catchAsync(async (req: Request, res: Response) => {
+  const { orgId, role } = requireOrg(req)
+  const invitation = await invitationService.revokeInvitation(
+    orgId,
+    req.params.invitationId as string,
+    requireUserId(req),
+    role
+  )
+  return sendSuccess(res, 200, invitation)
+})
+
+export const approveInvitation = catchAsync(async (req: Request, res: Response) => {
   const { orgId } = requireOrg(req)
-  const invitation = await invitationService.revokeInvitation(orgId, req.params.invitationId as string)
+  const invitation = await invitationService.approveInvitation(
+    orgId,
+    req.params.invitationId as string,
+    requireUserId(req)
+  )
+  return sendSuccess(res, 200, invitation)
+})
+
+export const rejectInvitation = catchAsync(async (req: Request, res: Response) => {
+  const { orgId } = requireOrg(req)
+  const invitation = await invitationService.rejectInvitation(
+    orgId,
+    req.params.invitationId as string,
+    requireUserId(req)
+  )
   return sendSuccess(res, 200, invitation)
 })
 
