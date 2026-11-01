@@ -169,6 +169,8 @@ describe("sequenceSource — ký pháp", () => {
   it("theme VP viết thẳng vào nguồn: #7ACFF5, không !include / URL; một @startuml / @enduml; chỉ ASCII ở bản tiếng Anh", () => {
     for (const p of renderSequence(FIXTURE)) {
       expect(p.source).toContain("#7ACFF5")
+      // lời gọi đồng bộ: tam giác đặc như VP (UML 2.5.1: filled arrow head)
+      expect(p.source).toContain("skinparam style strictuml")
       expect(p.source).not.toMatch(/!include|!import|https?:/)
       expect(p.source.match(/@startuml/g)).toHaveLength(1)
       expect(p.source.endsWith("@enduml\n")).toBe(true)

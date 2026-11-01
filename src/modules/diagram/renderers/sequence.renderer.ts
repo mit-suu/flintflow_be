@@ -8,9 +8,10 @@
  * — trừ actor ngoài gửi stimulus, đứng bên trái như actor người);
  * không Frontend / Backend / Repository. Quy tắc suy từ dữ liệu, không bịa:
  * - Function có hình khi `needsSequence`: có từ 2 message và (có actor ngoài, hoặc có nhánh lỗi / guard, hoặc không thuộc màn).
- * - Request có response quay về người gửi ở phía sau ⇒ đồng bộ (`->`, mũi tên đặc); không có ⇒ bất đồng bộ (`->>`, mũi
- *   tên hở). Response luôn nét đứt (`-->>`). Mỗi request đồng bộ mở activation bar của bên nhận, response đóng nó; bar mở
- *   trước một khung `alt` / `opt` trải qua mọi operand và đóng sau khung (PlantUML không mở lại bar ở operand kế).
+ * - Request có response quay về người gửi ở phía sau ⇒ đồng bộ (`->` + `skinparam style strictuml`: đầu tam giác
+ *   đặc như VP); không có ⇒ bất đồng bộ (`->>`, mũi tên hở). Response luôn nét đứt (`-->>`). Mỗi request đồng bộ
+ *   mở activation bar của bên nhận, response đóng nó; bar mở trước một khung `alt` / `opt` trải qua mọi operand và
+ *   đóng sau khung (PlantUML không mở lại bar ở operand kế).
  * - Nhánh `abnormal` (cần `guard`) gom thành `alt`: các message lỗi liền nhau cùng guard là một operand; phần luồng chính
  *   sau đó là operand `else` (lồng tiếp nếu còn nhánh lỗi sau). Message `normal` có `guard` liền nhau ⇒ `opt`. Spine chưa
  *   có dữ liệu `loop` nên không sinh `loop`.
@@ -57,6 +58,8 @@ const THEME: readonly string[] = [
   "skinparam ParticipantPadding 30",
   "skinparam maxMessageSize 220",
   "skinparam sequenceMessageAlign direction",
+  // UML 2.5.1 (tr. 619): synchronous = filled arrow head; strictuml vẽ tam giác đặc như Visual Paradigm (mặc định là mũi nhọn)
+  "skinparam style strictuml",
   "hide footbox"
 ]
 
