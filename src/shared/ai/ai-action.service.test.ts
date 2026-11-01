@@ -205,6 +205,13 @@ describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
     })
   })
 
+  it("minMaxTokens (draftOps truyền maxTokens của skill nội dung) nâng trần token; dự án vi vẫn nhân hệ số", async () => {
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {} }, undefined, USER, { minMaxTokens: 16384 })
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {}, ...vi_ }, undefined, USER, { minMaxTokens: 16384 })
+    expect(sent(0).config).toMatchObject({ maxTokens: 16384 })
+    expect(sent(1).config).toMatchObject({ maxTokens: 16384 * LOCALIZED_MAX_TOKENS_FACTOR })
+  })
+
   it("chat / elicit / review / translate_document ⇒ không có khối dù dự án vi", async () => {
     for (const type of [ActionType.CHAT, ActionType.ELICIT, ActionType.REVIEW, ActionType.TRANSLATE_DOCUMENT]) {
       await executeAiAction(type, { promptVariables: {}, ...vi_ }, undefined, USER)

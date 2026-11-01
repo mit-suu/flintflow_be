@@ -29,24 +29,23 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 24 luật vàng (FLF-278: template_section_absent / _empty); mọi luật đỏ không waive được (FLF-329)", () => {
+  it("13 luật đỏ + 23 luật vàng (FLF-278: template_section_absent / _empty); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
-    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous (làn luồng màn)
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(24)
+    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(23)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
 })
 
 describe("runDeterministicCheck", () => {
-  it("fixture đầy đủ: 0 cờ đỏ (kể cả atBaseline); cờ vàng chỉ là screen_no_function, screen_placeholder, function_without_uc, screen_actor_ambiguous (Log In có 4 actor không cha chung)", () => {
+  it("fixture đầy đủ: 0 cờ đỏ (kể cả atBaseline); cờ vàng chỉ là screen_no_function, screen_placeholder, function_without_uc", () => {
     expect(red(runDeterministicCheck(FIXTURE))).toEqual([])
     expect(red(runDeterministicCheck(FIXTURE, [], { atBaseline: true }))).toEqual([])
     const yellowRules = new Set(runDeterministicCheck(FIXTURE).filter((f) => f.level === "yellow").map((f) => f.rule_id))
-    for (const r of yellowRules) expect(["screen_no_function", "screen_placeholder", "function_without_uc", "screen_actor_ambiguous"]).toContain(r)
-    expect(yellowRules.has("screen_actor_ambiguous")).toBe(true)
+    for (const r of yellowRules) expect(["screen_no_function", "screen_placeholder", "function_without_uc"]).toContain(r)
   })
 
   it("BUG-03: màn placeholder chưa qua cổng S-5.1 của nó ⇒ cờ vàng mở lại được; qua cổng rồi thì thôi", () => {
@@ -259,19 +258,6 @@ describe("runDeterministicCheck", () => {
     })
     expect(flagged(linked)).not.toContain("S20")
     expect(byRule(runDeterministicCheck(linked, [], { atBaseline: true }), "orphan_screen_at_baseline").map((f) => f.target_id)).not.toContain("S20")
-  })
-
-  it("screen_actor_ambiguous: actor của màn không có tổ tiên chung ⇒ cờ vàng ở §3.1.1; thêm actor cha chung thì hết", () => {
-    const flags = byRule(runDeterministicCheck(FIXTURE), "screen_actor_ambiguous")
-    expect(flags.map((f) => f.target_id)).toContain("S01")
-    expect(flags[0]).toMatchObject({ level: "yellow", section_id: "fixed:3.1.1", remediation_step: "S-3.1" })
-    expect(flags.find((f) => f.target_id === "S01")!.message).toContain('"Founder", "Business Analyst", "Administrator", "Guest"')
-
-    const general = variant((s) => {
-      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Founder, Business Analyst, Administrator and Guest." })
-      for (const id of ["A01", "A02", "A03", "A04"]) s.actors.find((a) => a.id === id)!.parent_id = "A10"
-    })
-    expect(byRule(runDeterministicCheck(general), "screen_actor_ambiguous").map((f) => f.target_id)).not.toContain("S01")
   })
 
   it("orphan_screen_at_baseline: màn mồ côi thành cờ đỏ chỉ khi ký baseline", () => {

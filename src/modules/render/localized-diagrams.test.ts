@@ -80,7 +80,9 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     expect(byKind(view, "context")[0].source).toContain(`vi: ${human.name}`)
     expect(byKind(view, "context")[0].source).toContain(`vi: ${human.flows_in![0]}`)
     expect(byKind(view, "usecase").map((d) => d.source).join("\n")).toContain(`>vi: ${spine.use_cases[0].name}</text>`)
-    for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toMatch(/^Luồng màn hình — vi: /)
+    // Screen flow: tiêu đề là chữ máy (một hình cho cả hệ thống), tên màn đã dịch nằm trong hình
+    for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toBe(DIAGRAM_LABELS.vi.screensFlowTitle())
+    expect(byKind(view, "screen_flow").map((d) => d.source).join("\n")).toContain(`>vi: ${spine.screens[0].name}`)
     const erd = byKind(view, "erd")[0].source
     expect(erd).toContain(`>vi: ${spine.entities[0].name}</text>`)
     expect(erd).toContain(`>${DIAGRAM_LABELS.vi.relationVerb}</text>`)
@@ -141,7 +143,7 @@ describe("localizeSpine + language — nguồn sơ đồ theo ngôn ngữ trong 
     const units = translationUnits(spine)
     const localized = localizeSpine(spine, units, new Map(), "vi")
     const view = renderView(localized)
-    for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toMatch(/^Luồng màn hình — /)
+    for (const d of byKind(view, "screen_flow")) expect(svgTitleOf(d.source)).toBe(DIAGRAM_LABELS.vi.screensFlowTitle())
     // Use case tách theo feature: tiêu đề phần (ghi ở <title> của SVG) là chữ máy ⇒ đổi
     for (const d of byKind(view, "usecase")) expect(svgTitleOf(d.source)).toMatch(/^Sơ đồ use case — /)
     // Sơ đồ ngữ cảnh: bản gốc Title Case nhãn tiếng Anh, bản tiếng Việt giữ nguyên chữ như viết ⇒ vẽ lại, nhãn chưa dịch không bị Title Case

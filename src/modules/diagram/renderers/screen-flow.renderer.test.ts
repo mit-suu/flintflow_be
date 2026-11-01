@@ -6,8 +6,9 @@ import { checkScene } from "../../../shared/diagram/svg-geometry.js"
 import { spineSchema } from "../../spine/spine.schema.js"
 import type { Screen, Spine } from "../../spine/spine.types.js"
 import { svgTitleOf } from "./common.js"
-import { RENDERERS, renderKind } from "./index.js"
+import { renderKind } from "./index.js"
 import { MAX_SCREENS_PER_DIAGRAM, partitionScreenFlow, SCREEN_FLOW_SECTION } from "./screen-flow.renderer.js"
+import { sharedScreenIds } from "../../spine/screen-actors.js"
 import { layoutScreenFlow } from "./screen-flow-layout.js"
 import { DIAGRAM_LABELS } from "./labels.js"
 
@@ -59,96 +60,93 @@ const sceneOf = (spine: Spine) => partitionScreenFlow(spine).map(({ diagram }) =
 const ids = (scene: ReturnType<typeof layoutScreenFlow>, prefix: string): string[] =>
   scene.elements.filter((e) => e.id.startsWith(prefix) && !e.id.includes("#")).map((e) => e.id)
 
-describe("screen_flow — chia hình theo feature, làn theo actor", () => {
-  it("fixture: mỗi feature một hình svg, tiêu đề theo feature, issues rỗng", () => {
+describe("screen_flow — một hình cho cả hệ thống, ký pháp template FPT", () => {
+  it("fixture: đúng một hình svg cho mọi màn, tiêu đề Screens flow, issues rỗng", () => {
     const parts = renderKind(FIXTURE, "screen_flow")
-    expect(parts).toHaveLength(FIXTURE.features.length)
-    expect(parts.every((p) => p.format === "svg" && p.section === SCREEN_FLOW_SECTION && p.owner_id === null && p.owner_kind === null)).toBe(true)
-    expect(parts.map((p) => svgTitleOf(p.source))).toEqual(FIXTURE.features.map((f) => DIAGRAM_LABELS.en.screensFlowTitle(f.name)))
-    for (const p of parts) expect(p.issues).toEqual([])
+    expect(parts).toHaveLength(1)
+    const [part] = parts
+    expect(part).toMatchObject({ format: "svg", section: SCREEN_FLOW_SECTION, owner_id: null, owner_kind: null })
+    expect(svgTitleOf(part.source)).toBe("Screens flow")
+    expect(part.issues).toEqual([])
+    const [only] = partitionScreenFlow(FIXTURE)
+    expect(only.diagram.nodes.map((n) => n.id).sort()).toEqual(FIXTURE.screens.map((s) => s.id).sort())
   })
 
-  it("làn = tên actor; màn vào có initial, màn cuối có activity final; mỗi flow_to trong hình một cạnh tiến", () => {
-    const [auth] = partitionScreenFlow(FIXTURE)
-    expect(auth.diagram.lanes.map((l) => l.name)).toEqual(["Founder", "Guest"])
-    const scene = layoutScreenFlow(auth.diagram)
-    const f1 = FIXTURE.screens.filter((s) => s.feature_id === "F1")
-    // Login ⇄ Register: chỉ giữ chiều đi tiếp từ màn vào; S01 → S05 / S14 sang feature khác không vẽ
-    expect(ids(scene, "flow:")).toEqual(["flow:S01>S02", "flow:S01>S03"])
-    expect(ids(scene, "start:")).toEqual(["start:S01", "start:S04"])
-    expect(ids(scene, "end:").sort()).toEqual(["end:S02", "end:S03", "end:S04"])
+  it("mỗi flow_to tiến là một đường (cả cạnh giữa hai feature); không làn, không initial / final / nhãn", () => {
+    const [scene] = sceneOf(FIXTURE)
+    // S01 → S05 / S14 (sang feature khác) giờ được vẽ
+    expect(ids(scene, "flow:")).toEqual(expect.arrayContaining(["flow:S01>S05", "flow:S01>S14"]))
     for (const id of ids(scene, "flow:")) {
       const [from, to] = id.slice(5).split(">")
-      expect(f1.find((s) => s.id === from)!.flow_to.map((e) => e.to)).toContain(to)
+      expect(FIXTURE.screens.find((s) => s.id === from)!.flow_to.map((e) => e.to)).toContain(to)
     }
-    expect(scene.find("lane:A01")).toBeDefined()
-    expect(scene.find("lane:A04")).toBeDefined()
+    expect(scene.elements.some((e) => /^(lane|initial|final|start|end|decision|decide):/.test(e.id) || e.id.includes("#label"))).toBe(false)
   })
 
-  it("pop-up là action có stereotype ASCII <<pop-up>>, màn nhiều tab có dòng [tab | tab]; không ô-van", () => {
-    const svg = renderKind(FIXTURE, "screen_flow").map((p) => p.source).join("\n")
-    expect(svg).toContain("&lt;&lt;pop-up&gt;&gt;")
-    expect(svg).toContain("[Chat |")
-    expect(svg).not.toContain("<ellipse")
+  it("pop-up = ô-van, màn nhiều tab = khung chứa các hộp tab chữ nghiêng; không stereotype pop-up", () => {
+    const svg = renderKind(FIXTURE, "screen_flow")[0].source
+    expect(svg).toContain("<ellipse")
+    expect(svg).toContain(`font-style="italic"`)
+    expect(svg).not.toContain("&lt;&lt;pop-up&gt;&gt;")
   })
 
-  it("màn không có actor người nào không vẽ; chưa có liên kết màn ↔ actor ⇒ vẽ không làn", () => {
+  it("màn dùng chung nền #7ACFF5, màn còn lại nền trắng", () => {
+    const [{ diagram }] = partitionScreenFlow(FIXTURE)
+    const shared = sharedScreenIds(FIXTURE)
+    for (const n of diagram.nodes) expect(n.shared).toBe(shared.has(n.id))
+    const scene = layoutScreenFlow(diagram)
+    for (const n of diagram.nodes) expect(scene.find(n.id)).toMatchObject({ fill: n.shared ? "#7ACFF5" : "#fff" })
+  })
+
+  it("màn chưa có actor người nào vẫn được vẽ (không thành gốc trơ trọi cho màn con); chưa có liên kết ⇒ mọi màn nền trắng", () => {
     const orphan = chain(3, (s) => s.screens.push(screen(4)))
-    const [part] = partitionScreenFlow(orphan)
-    expect(part.diagram.nodes.map((n) => n.id)).toEqual(["S001", "S002", "S003"])
+    expect(partitionScreenFlow(orphan)[0].diagram.nodes.map((n) => n.id)).toEqual(["S001", "S002", "S003", "S004"])
 
     const unlinked = chain(3, (s) => (s.use_cases = []))
     const [single] = partitionScreenFlow(unlinked)
-    expect(single.diagram.lanes).toEqual([])
     expect(single.diagram.nodes).toHaveLength(3)
+    expect(single.diagram.nodes.every((n) => !n.shared)).toBe(true)
     expect(checkScene(layoutScreenFlow(single.diagram), { allowBends: true })).toEqual([])
-    expect(renderKind(unlinked, "screen_flow")[0].source).not.toContain("font-weight")
   })
 
-  it("actor mơ hồ vẫn vẽ được: chọn actor đầu tiên theo thứ tự actor_ids", () => {
-    const spine = chain(2, (s) => {
-      s.use_cases[0].actor_ids = ["A02", "A01"]
+  it(`≤ ${MAX_SCREENS_PER_DIAGRAM} màn ⇒ một hình kể cả nhiều feature`, () => {
+    const spine = chain(MAX_SCREENS_PER_DIAGRAM, (s) => {
+      s.features = [{ id: "F1", name: "One", order: 0 }, { id: "F2", name: "Two", order: 1 }]
+      s.screens.slice(20).forEach((x) => (x.feature_id = "F2"))
     })
-    const [part] = partitionScreenFlow(spine)
-    expect(part.diagram.lanes.map((l) => l.id)).toEqual(["A02"])
-    expect(renderKind(spine, "screen_flow")[0].issues).toEqual([])
+    expect(partitionScreenFlow(spine)).toHaveLength(1)
   })
 
-  it("actor cùng cha ⇒ làn của actor cha, không bung xuống actor lá", () => {
-    const spine = chain(3, (s) => {
-      s.actors.push({ id: "A90", name: "User", kind: "human", description: "Founder and Business Analyst" })
-      s.actors.find((a) => a.id === "A01")!.parent_id = "A90"
-      s.actors.find((a) => a.id === "A02")!.parent_id = "A90"
-      s.use_cases[0].actor_ids = ["A01", "A02"]
+  it(`> ${MAX_SCREENS_PER_DIAGRAM} màn ⇒ tách theo feature nguyên vẹn, tiêu đề (i/n), mọi màn đúng một lần, issues rỗng`, () => {
+    const spine = chain(60, (s) => {
+      s.features = [{ id: "F1", name: "One", order: 0 }, { id: "F2", name: "Two", order: 1 }, { id: "F3", name: "Three", order: 2 }]
+      s.screens.forEach((x, i) => (x.feature_id = i < 25 ? "F1" : i < 45 ? "F2" : "F3"))
     })
-    const [part] = partitionScreenFlow(spine)
-    expect(part.diagram.lanes).toEqual([{ id: "A90", name: "User" }])
-  })
-
-  it("> 25 màn trong một feature ⇒ tách đều, tiêu đề (i/n), mọi màn đúng một lần, issues rỗng", () => {
-    const spine = chain(60)
     const parts = partitionScreenFlow(spine)
-    expect(parts.length).toBeGreaterThan(2)
-    expect(parts.map((p) => p.title)).toEqual(parts.map((_, i) => DIAGRAM_LABELS.en.screensFlowTitle(`Only Feature (${i + 1}/${parts.length})`)))
-    expect(parts.every((p) => p.diagram.nodes.length <= MAX_SCREENS_PER_DIAGRAM)).toBe(true)
+    expect(parts.map((p) => p.title)).toEqual(["Screens flow (1/2)", "Screens flow (2/2)"])
+    const featureOf = new Map(spine.screens.map((s) => [s.id, s.feature_id]))
+    expect(parts.map((p) => [...new Set(p.diagram.nodes.map((n) => featureOf.get(n.id)))])).toEqual([["F1"], ["F2", "F3"]])
     expect(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)).sort()).toEqual(spine.screens.map((s) => s.id).sort())
     for (const p of renderKind(spine, "screen_flow")) expect(p.issues).toEqual([])
   })
 
-  it("tên màn rất dài, nhiều làn: không tràn, issues rỗng", () => {
+  it("một feature quá ngưỡng ⇒ tách đôi theo hạng, mỗi phần ≤ ngưỡng", () => {
+    const spine = chain(90)
+    const parts = partitionScreenFlow(spine)
+    expect(parts.length).toBeGreaterThan(2)
+    expect(parts.every((p) => p.diagram.nodes.length <= MAX_SCREENS_PER_DIAGRAM)).toBe(true)
+    expect(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)).sort()).toEqual(spine.screens.map((s) => s.id).sort())
+  })
+
+  it("tên màn rất dài, nhiều tab, pop-up tên dài: không tràn, issues rỗng", () => {
     const spine = chain(6, (s) => {
       s.screens[1].name = "A ridiculously long screen name that keeps going and going well past any sensible width"
       s.screens[2].name = "Unbrokenwordthatisfarlongerthanthenodewidthcanholdwithoutwrappinganywhere"
       s.screens[3].tabs = ["Overview", "Members and permissions", "Billing", "Audit trail", "Danger zone"]
-      for (const [i, id] of ["A01", "A02", "A04", "A03"].entries()) {
-        s.functions.push(fn(`FNL${i}`, s.screens[i].id))
-        s.screens[i].primary_function_id = `FNL${i}`
-        s.use_cases.push({ id: `UCL${i}`, name: `Do ${i}`, actor_ids: [id], function_ids: [`FNL${i}`], description: "", includes: [], extends: [] })
-      }
+      s.screens[4].is_popup = true
+      s.screens[4].name = "A pop-up with a long name that needs wrapping"
     })
-    const [part] = renderKind(spine, "screen_flow")
-    expect(partitionScreenFlow(spine)[0].diagram.lanes.length).toBeGreaterThan(2)
-    expect(part.issues).toEqual([])
+    expect(renderKind(spine, "screen_flow")[0].issues).toEqual([])
   })
 
   it("cạnh quay lại và trỏ qua lại không vẽ hai chiều; đồ thị có vòng vẫn sạch", () => {
@@ -157,45 +155,24 @@ describe("screen_flow — chia hình theo feature, làn theo actor", () => {
       s.screens[2].flow_to.push({ to: "S002" }, { to: "S005" }, { to: "S001" })
     })
     const [scene] = sceneOf(spine)
-    expect(ids(scene, "flow:")).toEqual(["flow:S001>S002", "flow:S002>S003", "flow:S003>S004", "flow:S003>S005", "flow:S004>S005"])
+    expect(ids(scene, "flow:").sort()).toEqual(["flow:S001>S002", "flow:S002>S003", "flow:S003>S004", "flow:S003>S005", "flow:S004>S005"])
     expect(checkScene(scene, { allowBends: true })).toEqual([])
+  })
+
+  it("trigger / guard không vẽ: đổi chúng không đổi hình", () => {
+    const spine = chain(3, (s) => (s.screens[0].flow_to = [{ to: "S002", trigger: "Submit", guard: "OTP valid" }]))
+    const changed = structuredClone(spine)
+    changed.screens[0].flow_to[0] = { to: "S002", trigger: "Click", guard: "Admin" }
+    expect(renderKind(changed, "screen_flow")[0].source).toBe(renderKind(spine, "screen_flow")[0].source)
+    expect(renderKind(spine, "screen_flow")[0].source).not.toContain("OTP valid")
   })
 
   it("không có màn ⇒ không có hình; renderer thuần (cùng Spine ⇒ cùng nguồn)", () => {
     expect(renderKind(mutate((s) => (s.screens = [])), "screen_flow")).toEqual([])
     expect(renderKind(FIXTURE, "screen_flow").map((p) => p.source)).toEqual(renderKind(FIXTURE, "screen_flow").map((p) => p.source))
   })
-})
 
-describe("screen_flow — trigger và guard của flow_to", () => {
-  const withEdges = (): Spine =>
-    chain(4, (s) => {
-      s.screens[0].flow_to = [
-        { to: "S002", trigger: "Submit credentials", guard: "OTP valid" },
-        { to: "S003", trigger: "Submit credentials", guard: "Admin" },
-        { to: "S004", trigger: "Submit credentials" }
-      ]
-      s.screens[1].flow_to = []
-      s.screens[2].flow_to = []
-    })
-
-  it("rẽ nhánh qua decision node, guard trên nhánh, nhánh không guard là else; issues rỗng", () => {
-    const spine = withEdges()
-    const [part] = renderKind(spine, "screen_flow")
-    expect(part.issues).toEqual([])
-    const [scene] = sceneOf(spine)
-    expect(scene.find("decision:S001#0")).toBeDefined()
-    expect(scene.find("flow:S001>S002#label")).toMatchObject({ text: "[OTP valid]" })
-    expect(scene.find("flow:S001>S004#label")).toMatchObject({ text: "[else]" })
-    expect(scene.find("decide:S001#0#label")).toMatchObject({ text: "Submit credentials" })
-  })
-
-  it("bản tiếng Việt dùng [ngược lại]; đổi trigger / guard đổi hình (khác nguồn)", () => {
-    const spine = withEdges()
-    const vi = RENDERERS.screen_flow(spine, null, DIAGRAM_LABELS.vi)[0].source
-    expect(vi).toContain("[ngược lại]")
-    const changed = withEdges()
-    changed.screens[0].flow_to[0].guard = "OTP correct"
-    expect(renderKind(changed, "screen_flow")[0].source).not.toBe(renderKind(spine, "screen_flow")[0].source)
+  it("nhãn tiếng Việt: tiêu đề Luồng màn hình", () => {
+    expect(partitionScreenFlow(FIXTURE, DIAGRAM_LABELS.vi)[0].title).toBe("Luồng màn hình")
   })
 })

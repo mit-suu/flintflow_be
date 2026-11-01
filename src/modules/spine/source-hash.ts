@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto"
 import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
 import { entitiesOfFeature } from "./entity-features.js"
-import { screenActorMap } from "./screen-actors.js"
+import { screenActorMap, sharedScreenIds } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
 
@@ -54,7 +54,7 @@ export const sourceProjection = (spine: Spine, diagram: Pick<Diagram, "kind" | "
         }))
       }
     case "screen_flow":
-      // Làn của màn = actor theo mô hình actor – use case (`screen-actors.ts`): đổi actor của màn cũng làm hình cũ
+      // Actor đại diện của màn (`screen-actors.ts`): màn mất / có actor thì vẽ / không vẽ màn đó
       return {
         screens: byId(spine.screens).map(({ id, name, flow_to, is_popup, tabs }) => ({ id, name, flow_to, is_popup, tabs })),
         actors: byId(spine.actors.filter((a) => a.kind === "human")).map(({ id, name }) => ({ id, name })),
@@ -149,7 +149,7 @@ export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
 export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
   context: DEFAULT_DIAGRAM_ENGINE,
   usecase: "svg@1",
-  screen_flow: "svg@1",
+  screen_flow: "svg@2",
   erd: "svg@1",
   class: "svg@1",
   state_machine: "svg@1",
@@ -160,13 +160,20 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
 /**
  * Dữ liệu chỉ renderer SVG đọc thêm, ngoài `sourceProjection` (không đưa vào đó vì `originalDiagramHash` dùng chung hàm ấy:
  * ảnh gốc import đã lưu hash cũ sẽ báo `original_diagram_stale` giả). Use case chia hình theo feature: tên + thứ tự feature
- * và feature của các function mà use case tham chiếu; luồng màn chia hình theo feature của màn và xếp màn theo queue_order.
+ * và feature của các function mà use case tham chiếu; luồng màn (tách theo feature khi vượt ngưỡng) đọc feature + queue_order
+ * của màn và tập màn dùng chung (nền `#7ACFF5` — đổi khi actor của màn hay phân cấp actor đổi).
  */
 const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">, context: RenderContext): unknown => {
   // Ký pháp ERD nằm ở Project, không ở Spine: đổi ký pháp đổi hash ⇒ `diagram_stale` ⇒ vẽ lại
   if (diagram.kind === "erd") return { notation: context.erdNotation ?? DEFAULT_ERD_NOTATION }
   const features = byId(spine.features).map(({ id, name, order }) => ({ id, name, order }))
-  if (diagram.kind === "screen_flow") return { screens: byId(spine.screens).map(({ id, feature_id, queue_order }) => ({ id, feature_id, queue_order })), features }
+  if (diagram.kind === "screen_flow")
+    return {
+      screens: byId(spine.screens).map(({ id, feature_id, queue_order }) => ({ id, feature_id, queue_order })),
+      // Tên feature không vẽ lên hình (chỉ thứ tự feature dùng khi tách) ⇒ đổi tên feature không làm hình cũ
+      features: features.map(({ id, order }) => ({ id, order })),
+      shared: [...sharedScreenIds(spine)].sort()
+    }
   if (diagram.kind !== "usecase") return undefined
   const referenced = new Set(spine.use_cases.flatMap((u) => u.function_ids))
   return {
