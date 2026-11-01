@@ -629,106 +629,102 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1230" height="899" viewBox="-8 -8 1230 899">
+<svg xmlns="http://www.w3.org/2000/svg" width="808" height="1013" viewBox="-8 -8 808 1013">
 <title>Screens flow</title>
-<rect x="-8" y="-8" width="1230" height="899" fill="#fff"/>
+<rect x="-8" y="-8" width="808" height="1013" fill="#fff"/>
 <rect x="12" y="12" width="150" height="40" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="87" y="32" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Login</text>
 <rect x="218" y="12" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
 <text x="293" y="32" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Register</text>
 <ellipse cx="293" cy="96" rx="75" ry="22" fill="#fff" stroke="#000" stroke-width="1.2"/>
 <text x="293" y="96" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Forgot Password</text>
-<rect x="12" y="831" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="87" y="851" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Onboarding</text>
-<rect x="218" y="184" width="150" height="41" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="293" y="204.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Project Dashboard</text>
-<ellipse cx="509" cy="204.5" rx="75" ry="22" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="204.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Create Project</text>
-<rect x="640" y="140" width="150" height="129" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="715" y="157" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Project Workspace</text>
-<rect x="650" y="171" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="715" y="183.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">Chat</text>
-<rect x="650" y="202" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="715" y="214.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">Document</text>
-<rect x="650" y="233" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="715" y="245.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">History</text>
-<rect x="846" y="184.5" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="921" y="204.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Diagram Preview</text>
-<rect x="846" y="305" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="921" y="322" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Verification &amp; Change</text>
-<text x="921" y="338" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Panel</text>
-<rect x="1052" y="309.5" width="150" height="41" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="1127" y="330" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Export</text>
-<rect x="434" y="377" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="397" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Plan &amp; Pricing</text>
-<rect x="640" y="377" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="715" y="397" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Billing History</text>
-<rect x="434" y="439" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="459" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Notification Center</text>
-<rect x="218" y="501" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="293" y="521" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin User List</text>
-<rect x="434" y="501" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="521" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin User Detail</text>
-<rect x="434" y="563" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="580" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Metrics</text>
-<text x="509" y="596" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Dashboard</text>
-<rect x="434" y="635" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="655" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin AI Cost Report</text>
-<rect x="434" y="697" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="714" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Prompt</text>
-<text x="509" y="730" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Templates</text>
-<rect x="434" y="769" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
-<text x="509" y="789" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Audit Log</text>
+<rect x="12" y="945" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="87" y="965" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Onboarding</text>
+<rect x="218" y="141.5" width="150" height="41" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="293" y="162" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Project Dashboard</text>
+<ellipse cx="499" cy="162" rx="75" ry="22" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="162" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Create Project</text>
+<rect x="424" y="206" width="150" height="129" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Project Workspace</text>
+<rect x="434" y="237" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="249.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">Chat</text>
+<rect x="434" y="268" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="280.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">Document</text>
+<rect x="434" y="299" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="311.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">History</text>
+<rect x="630" y="250.5" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="270.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Diagram Preview</text>
+<rect x="630" y="357" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="374" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Verification &amp; Change</text>
+<text x="705" y="390" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Panel</text>
+<rect x="630" y="429" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="449" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Export</text>
+<rect x="424" y="491" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Plan &amp; Pricing</text>
+<rect x="630" y="491" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Billing History</text>
+<rect x="424" y="553" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="573" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Notification Center</text>
+<rect x="218" y="615" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="293" y="635" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin User List</text>
+<rect x="424" y="615" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="635" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin User Detail</text>
+<rect x="424" y="677" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="694" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Metrics</text>
+<text x="499" y="710" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Dashboard</text>
+<rect x="424" y="749" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="769" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin AI Cost Report</text>
+<rect x="424" y="811" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="828" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Prompt</text>
+<text x="499" y="844" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Templates</text>
+<rect x="424" y="883" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="903" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Audit Log</text>
 <line x1="162" y1="32" x2="185" y2="32" stroke="#000" stroke-width="1.2"/>
-<line x1="185" y1="32" x2="185" y2="521" stroke="#000" stroke-width="1.2"/>
-<line x1="162" y1="851" x2="195" y2="851" stroke="#000" stroke-width="1.2"/>
-<line x1="195" y1="216.5" x2="195" y2="851" stroke="#000" stroke-width="1.2"/>
-<line x1="368" y1="204.5" x2="391" y2="204.5" stroke="#000" stroke-width="1.2"/>
-<line x1="391" y1="204.5" x2="391" y2="459" stroke="#000" stroke-width="1.2"/>
-<line x1="790" y1="204.5" x2="813" y2="204.5" stroke="#000" stroke-width="1.2"/>
-<line x1="813" y1="204.5" x2="813" y2="330" stroke="#000" stroke-width="1.2"/>
-<line x1="368" y1="521" x2="401" y2="521" stroke="#000" stroke-width="1.2"/>
-<line x1="401" y1="521" x2="401" y2="789" stroke="#000" stroke-width="1.2"/>
-<polyline points="368,192.5 411,192.5 411,282 607,282 607,216.5 640,216.5" fill="none" stroke="#000" stroke-width="1.2"/>
-<polygon points="640,216.5 630,221 630,212" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<polyline points="790,192.5 823,192.5 823,292 1019,292 1019,342 1052,342" fill="none" stroke="#000" stroke-width="1.2"/>
-<polygon points="1052,342 1042,346.5 1042,337.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="185" y1="32" x2="185" y2="635" stroke="#000" stroke-width="1.2"/>
+<line x1="162" y1="965" x2="195" y2="965" stroke="#000" stroke-width="1.2"/>
+<line x1="195" y1="168" x2="195" y2="965" stroke="#000" stroke-width="1.2"/>
+<line x1="368" y1="162" x2="391" y2="162" stroke="#000" stroke-width="1.2"/>
+<line x1="391" y1="162" x2="391" y2="573" stroke="#000" stroke-width="1.2"/>
+<line x1="574" y1="270.5" x2="597" y2="270.5" stroke="#000" stroke-width="1.2"/>
+<line x1="597" y1="270.5" x2="597" y2="449" stroke="#000" stroke-width="1.2"/>
+<line x1="368" y1="635" x2="401" y2="635" stroke="#000" stroke-width="1.2"/>
+<line x1="401" y1="635" x2="401" y2="903" stroke="#000" stroke-width="1.2"/>
 <line x1="185" y1="32" x2="218" y2="32" stroke="#000" stroke-width="1.2"/>
 <polygon points="218,32 208,36.5 208,27.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 <line x1="185" y1="96" x2="218" y2="96" stroke="#000" stroke-width="1.2"/>
 <polygon points="218,96 208,100.5 208,91.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="185" y1="204.5" x2="218" y2="204.5" stroke="#000" stroke-width="1.2"/>
-<polygon points="218,204.5 208,209 208,200" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="185" y1="521" x2="218" y2="521" stroke="#000" stroke-width="1.2"/>
-<polygon points="218,521 208,525.5 208,516.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="195" y1="216.5" x2="218" y2="216.5" stroke="#000" stroke-width="1.2"/>
-<polygon points="218,216.5 208,221 208,212" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="391" y1="204.5" x2="434" y2="204.5" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,204.5 424,209 424,200" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="391" y1="397" x2="434" y2="397" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,397 424,401.5 424,392.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="391" y1="459" x2="434" y2="459" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,459 424,463.5 424,454.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="584" y1="204.5" x2="640" y2="204.5" stroke="#000" stroke-width="1.2"/>
-<polygon points="640,204.5 630,209 630,200" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="813" y1="204.5" x2="846" y2="204.5" stroke="#000" stroke-width="1.2"/>
-<polygon points="846,204.5 836,209 836,200" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="813" y1="330" x2="846" y2="330" stroke="#000" stroke-width="1.2"/>
-<polygon points="846,330 836,334.5 836,325.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="996" y1="330" x2="1052" y2="330" stroke="#000" stroke-width="1.2"/>
-<polygon points="1052,330 1042,334.5 1042,325.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="584" y1="397" x2="640" y2="397" stroke="#000" stroke-width="1.2"/>
-<polygon points="640,397 630,401.5 630,392.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="401" y1="521" x2="434" y2="521" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,521 424,525.5 424,516.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="401" y1="588" x2="434" y2="588" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,588 424,592.5 424,583.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="401" y1="655" x2="434" y2="655" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,655 424,659.5 424,650.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="401" y1="722" x2="434" y2="722" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,722 424,726.5 424,717.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
-<line x1="401" y1="789" x2="434" y2="789" stroke="#000" stroke-width="1.2"/>
-<polygon points="434,789 424,793.5 424,784.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="185" y1="156" x2="218" y2="156" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,156 208,160.5 208,151.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="185" y1="635" x2="218" y2="635" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,635 208,639.5 208,630.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="195" y1="168" x2="218" y2="168" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,168 208,172.5 208,163.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="162" x2="424" y2="162" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,162 414,166.5 414,157.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="270.5" x2="424" y2="270.5" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,270.5 414,275 414,266" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="511" x2="424" y2="511" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,511 414,515.5 414,506.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="573" x2="424" y2="573" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,573 414,577.5 414,568.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="597" y1="270.5" x2="630" y2="270.5" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,270.5 620,275 620,266" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="597" y1="382" x2="630" y2="382" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,382 620,386.5 620,377.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="597" y1="449" x2="630" y2="449" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,449 620,453.5 620,444.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="574" y1="511" x2="630" y2="511" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,511 620,515.5 620,506.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="635" x2="424" y2="635" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,635 414,639.5 414,630.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="702" x2="424" y2="702" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,702 414,706.5 414,697.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="769" x2="424" y2="769" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,769 414,773.5 414,764.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="836" x2="424" y2="836" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,836 414,840.5 414,831.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="903" x2="424" y2="903" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,903 414,907.5 414,898.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
 </svg>
 "
 `;

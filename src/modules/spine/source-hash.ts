@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto"
 import type { Diagram, DiagramKind, Spine } from "./spine.types.js"
 import { entitiesOfFeature } from "./entity-features.js"
-import { screenActorMap, sharedScreenIds } from "./screen-actors.js"
+import { screenActorMap, screenActorSets, sharedScreenIds } from "./screen-actors.js"
 import { systemName } from "./system-name.js"
 import { DEFAULT_ERD_NOTATION, type RenderContext } from "../../shared/diagram/erd-notation.js"
 
@@ -149,7 +149,7 @@ export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
 export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
   context: DEFAULT_DIAGRAM_ENGINE,
   usecase: "svg@1",
-  screen_flow: "svg@2",
+  screen_flow: "svg@3",
   erd: "svg@1",
   class: "svg@1",
   state_machine: "svg@1",
@@ -161,7 +161,8 @@ export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.fre
  * Dữ liệu chỉ renderer SVG đọc thêm, ngoài `sourceProjection` (không đưa vào đó vì `originalDiagramHash` dùng chung hàm ấy:
  * ảnh gốc import đã lưu hash cũ sẽ báo `original_diagram_stale` giả). Use case chia hình theo feature: tên + thứ tự feature
  * và feature của các function mà use case tham chiếu; luồng màn (tách theo feature khi vượt ngưỡng) đọc feature + queue_order
- * của màn và tập màn dùng chung (nền `#7ACFF5` — đổi khi actor của màn hay phân cấp actor đổi).
+ * của màn, tập màn dùng chung (nền `#7ACFF5` — đổi khi actor của màn hay phân cấp actor đổi) và actor người của từng màn (hình
+ * quá lớn tách mỗi actor một hình, tiêu đề là tên actor).
  */
 const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">, context: RenderContext): unknown => {
   // Ký pháp ERD nằm ở Project, không ở Spine: đổi ký pháp đổi hash ⇒ `diagram_stale` ⇒ vẽ lại
@@ -172,7 +173,10 @@ const renderedExtras = (spine: Spine, diagram: Pick<Diagram, "kind">, context: R
       screens: byId(spine.screens).map(({ id, feature_id, queue_order }) => ({ id, feature_id, queue_order })),
       // Tên feature không vẽ lên hình (chỉ thứ tự feature dùng khi tách) ⇒ đổi tên feature không làm hình cũ
       features: features.map(({ id, order }) => ({ id, order })),
-      shared: [...sharedScreenIds(spine)].sort()
+      shared: [...sharedScreenIds(spine)].sort(),
+      // Hình quá lớn tách theo actor người: tập actor của từng màn, tên (tiêu đề hình), actor tổng quát và thứ tự actor
+      actor_sets: [...screenActorSets(spine)].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+      actors: spine.actors.filter((a) => a.kind === "human").map(({ id, name, parent_id }) => ({ id, name, parent_id: parent_id ?? null }))
     }
   if (diagram.kind !== "usecase") return undefined
   const referenced = new Set(spine.use_cases.flatMap((u) => u.function_ids))
