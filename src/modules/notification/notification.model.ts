@@ -19,6 +19,10 @@ export type NotificationType =
   /** FLF-332 (BR-08): Analyst báo Lead nạp credit; ví được nạp ⇒ báo lại người đã yêu cầu. */
   | "credit_topup_requested"
   | "credit_topped_up"
+  /** FLF-303: Analyst gửi yêu cầu mời ⇒ báo Lead; Lead duyệt / từ chối ⇒ báo lại người yêu cầu. */
+  | "org_invitation_requested"
+  | "org_invitation_approved"
+  | "org_invitation_rejected"
   | (string & {})
 
 export interface INotification extends Document {

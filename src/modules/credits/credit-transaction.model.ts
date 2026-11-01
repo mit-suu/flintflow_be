@@ -33,6 +33,11 @@ export interface ICreditTransaction extends Document {
   reservationId?: mongoose.Types.ObjectId | null
   /** Lý do điều chỉnh (UC-68). Chỉ dòng admin_adjust mới có. */
   reason?: string | null
+  /** UC-60: step pipeline của lượt gọi AI (lấy từ `promptVariables.step_id`). null = gọi ngoài pipeline / dòng cũ. */
+  stepId?: string | null
+  /** UC-60: token của lượt gọi — chỉ dòng `deduct` (và dòng `reserve` đã deducted) mới có. */
+  tokensIn?: number | null
+  tokensOut?: number | null
   createdAt: Date
   updatedAt: Date
 }
@@ -93,6 +98,18 @@ const creditTransactionSchema = new Schema<ICreditTransaction>(
       type: String,
       default: null,
       trim: true
+    },
+    stepId: {
+      type: String,
+      default: null
+    },
+    tokensIn: {
+      type: Number,
+      default: null
+    },
+    tokensOut: {
+      type: Number,
+      default: null
     }
   },
   { timestamps: true }
