@@ -286,14 +286,16 @@ export const ASSEMBLE_TEXT = {
     systemInCharge: "System",
     removedSection: "(removed section)",
     imagePending: (diagramId: string) => `image pending: diagram ${diagramId} has not been rendered yet`,
-    mediaNotEmbedded: "original image could not be embedded (unsupported format)"
+    mediaNotEmbedded: "original image could not be embedded (unsupported format)",
+    diagramNotDrawn: "diagram could not be drawn yet"
   },
   vi: {
     unassignedFunctions: "Chức năng chưa thuộc tính năng nào",
     systemInCharge: "Hệ thống",
     removedSection: "(mục đã xoá)",
     imagePending: (diagramId: string) => `ảnh đang chờ: sơ đồ ${diagramId} chưa được render`,
-    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)"
+    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)",
+    diagramNotDrawn: "sơ đồ chưa vẽ được"
   }
 } as const
 
