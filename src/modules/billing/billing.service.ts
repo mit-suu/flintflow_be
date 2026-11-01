@@ -9,6 +9,8 @@ import { notify } from "../notification/notification.service.js"
 import { scheduleResumeAfterTopUp } from "../import/credit-flow.service.js"
 import { fulfillTopupRequests } from "./topup-request.service.js"
 import { PaymentIntent, IPaymentIntent } from "./payment-intent.model.js"
+import { User } from "../user/user.model.js"
+import { Project } from "../project/project.model.js"
 import { planConfig, findPackage, getPlan, planFromPackageId, planPackageId, PlanId } from "./plan.config.js"
 import {
   buildCallbackUrl,
@@ -95,17 +97,110 @@ export const listPackages = () => ({
   plans: [planConfig.free, planConfig.pro]
 })
 
-/** UC-79: lịch sử tiêu credit của CẢ org — mỗi dòng giữ `userId` để biết thành viên nào tiêu. */
-export const listTransactions = async (orgId: string, page = 1, limit = 20) => {
-  const [items, total] = await Promise.all([
-    CreditTransaction.find({ organizationId: orgId }, null, {
-      sort: { createdAt: -1 },
-      skip: (page - 1) * limit,
-      limit
-    }),
-    CreditTransaction.countDocuments({ organizationId: orgId })
+export type TransactionKind = "usage" | "payment"
+
+export interface TransactionFilters {
+  /** `usage`: lượt gọi AI (UC-60). `payment`: nạp credit, kể cả thanh toán đang chờ / lỗi (UC-59). Thiếu = tất cả. */
+  kind?: TransactionKind
+  projectId?: string
+  memberId?: string
+  /** Thanh toán chỉ Lead xem (UC-59) — Analyst chỉ thấy dòng ví, không thấy dòng thanh toán. */
+  includePayments?: boolean
+}
+
+const USAGE_TYPES = ["reserve", "deduct", "release", "refund"]
+
+interface NamedRef {
+  id: string
+  name: string
+}
+
+/** Một dòng lịch sử: dòng sổ ví (`CreditTransaction`) hoặc dòng thanh toán (`type: "payment"`), kèm tên. */
+export type CreditHistoryItem = Record<string, any> & { member: NamedRef | null; project: NamedRef | null }
+
+/** Dòng thanh toán chưa thành công (UC-59). Thanh toán thành công đã có dòng `purchase` trong sổ ví. */
+const toPaymentRow = (intent: IPaymentIntent) => ({
+  _id: intent._id,
+  userId: intent.userId,
+  organizationId: intent.organizationId,
+  projectId: null,
+  actionType: "purchase",
+  type: "payment" as const,
+  amount: intent.credits,
+  balanceAfter: null,
+  paymentStatus: intent.status,
+  intentId: intent._id.toString(),
+  packageId: intent.packageId,
+  price: intent.amount,
+  currency: intent.currency,
+  referenceCode: intent.referenceCode ?? null,
+  createdAt: intent.createdAt
+})
+
+const plain = (doc: any): Record<string, any> => (typeof doc?.toObject === "function" ? doc.toObject() : { ...doc })
+
+/** Tên thành viên / dự án theo lô cho một trang — một truy vấn mỗi loại, không truy vấn từng dòng. */
+const namesById = async (model: "user" | "project", ids: string[]): Promise<Map<string, string>> => {
+  if (ids.length === 0) return new Map()
+  const docs: any[] =
+    model === "user"
+      ? await User.find({ _id: { $in: ids } }, { name: 1, email: 1 })
+      : await Project.find({ _id: { $in: ids } }, { name: 1 })
+  return new Map(docs.map((d) => [String(d._id), (d.name?.trim() || d.email || "") as string]))
+}
+
+const refOf = (id: unknown, names: Map<string, string>): NamedRef | null => {
+  if (!id) return null
+  const key = String(id)
+  return { id: key, name: names.get(key) ?? "" }
+}
+
+/**
+ * UC-59 + UC-60: lịch sử credit của CẢ org. Gộp sổ ví với thanh toán đang chờ / lỗi rồi phân trang chung theo thời gian:
+ * lấy `page × limit` dòng mới nhất của mỗi nguồn, trộn, cắt đúng trang — không trùng / sót dòng giữa các trang.
+ * Mỗi dòng kèm `member` (ai tiêu / ai nạp) và `project`.
+ */
+export const listTransactions = async (orgId: string, page = 1, limit = 20, filters: TransactionFilters = {}) => {
+  const { kind, projectId, memberId, includePayments = false } = filters
+  const txFilter: Record<string, unknown> = { organizationId: orgId }
+  if (kind === "usage") txFilter.type = { $in: USAGE_TYPES }
+  if (kind === "payment") txFilter.type = "purchase"
+  if (projectId) txFilter.projectId = projectId
+  if (memberId) txFilter.userId = memberId
+
+  // Thanh toán không gắn dự án ⇒ lọc theo dự án thì không có dòng thanh toán
+  const withPayments = includePayments && kind !== "usage" && !projectId
+  const intentFilter: Record<string, unknown> = { organizationId: orgId, status: { $in: ["pending", "failed"] } }
+  if (memberId) intentFilter.userId = memberId
+
+  const window = page * limit
+  const sort = { createdAt: -1 }
+  const [txs, txTotal, intents, intentTotal] = await Promise.all([
+    CreditTransaction.find(txFilter, null, { sort, limit: window }),
+    CreditTransaction.countDocuments(txFilter),
+    withPayments ? PaymentIntent.find(intentFilter, null, { sort, limit: window }) : Promise.resolve([]),
+    withPayments ? PaymentIntent.countDocuments(intentFilter) : Promise.resolve(0)
   ])
 
+  // Hai nguồn khác shape (dòng sổ ví / dòng thanh toán) — FE phân biệt bằng `type`
+  const rows: Record<string, any>[] = [
+    ...txs.map((tx) => {
+      const row = plain(tx)
+      return row.type === "purchase" ? { ...row, paymentStatus: "succeeded" } : row
+    }),
+    ...intents.map((intent) => toPaymentRow(intent))
+  ]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice((page - 1) * limit, window)
+
+  const unique = (values: unknown[]) => [...new Set(values.filter(Boolean).map(String))]
+  const [members, projects] = await Promise.all([
+    namesById("user", unique(rows.map((r) => r.userId))),
+    namesById("project", unique(rows.map((r) => r.projectId)))
+  ])
+  const items: CreditHistoryItem[] = rows.map((row) => ({ ...row, member: refOf(row.userId, members), project: refOf(row.projectId, projects) }))
+
+  const total = txTotal + intentTotal
   return {
     items,
     meta: { page, limit, total, totalPages: Math.ceil(total / limit) }
