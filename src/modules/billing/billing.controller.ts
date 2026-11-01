@@ -68,8 +68,10 @@ export const upgradePlan = catchAsync(async (req: Request, res: Response) => {
 })
 
 export const getTransactions = catchAsync(async (req: Request, res: Response) => {
-  const userId = requireUserId(req)
-  const { page, limit } = parseQuery(transactionsQuerySchema, req.query)
-  const result = await billingService.listTransactions(requireOrgId(req), page, limit)
+  requireUserId(req)
+  const { page, limit, kind, projectId, memberId } = parseQuery(transactionsQuerySchema, req.query)
+  // UC-59: dòng thanh toán (đang chờ / lỗi) chỉ Lead thấy
+  const includePayments = req.orgContext?.role === "lead"
+  const result = await billingService.listTransactions(requireOrgId(req), page, limit, { kind, projectId, memberId, includePayments })
   return sendSuccess(res, 200, result.items, result.meta)
 })

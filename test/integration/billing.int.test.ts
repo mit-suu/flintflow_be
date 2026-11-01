@@ -16,7 +16,7 @@ vi.mock("../../src/modules/billing/payment-service.client.js", async (importOrig
 })
 
 import app from "../../src/app.js"
-import { seedFixture, type SeededFixture } from "../setup.js"
+import { authAs, seedFixture, type SeededFixture } from "../setup.js"
 import {
   createPaymentOrder,
   getPaymentOrder,
@@ -27,6 +27,10 @@ import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { CreditTransaction } from "../../src/modules/credits/credit-transaction.model.js"
 import { PaymentIntent } from "../../src/modules/billing/payment-intent.model.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
+import { User } from "../../src/modules/user/user.model.js"
+import { Membership } from "../../src/modules/organization/membership.model.js"
+import { executeAiAction } from "../../src/shared/ai/ai-action.service.js"
+import { ActionType } from "../../src/shared/ai/ai-action.types.js"
 
 const CLIENT_ID = "flintflow-test-client"
 let orderSeq = 0
@@ -94,6 +98,49 @@ describe("số dư, gói, lịch sử", () => {
     expect(balance.status).toBe(200)
     expect(balance.body.data.balance).toBeGreaterThan(0)
     expect(await CreditWallet.countDocuments({ userId: seeded.userId })).toBe(1)
+  })
+})
+
+describe("lịch sử credit (UC-59, UC-60)", () => {
+  const history = (token: string, query = "") =>
+    request(app).get(`/api/v1/billing/transactions${query}`).set({ Authorization: `Bearer ${token}` })
+
+  it("Lead thấy thanh toán đang chờ / lỗi kèm người nạp; Analyst không thấy dòng thanh toán", async () => {
+    const seeded = await seedFixture("minimal", { balance: 100 })
+    const { intentId } = await checkout(seeded)
+    const failed = await checkout(seeded)
+    await PaymentIntent.updateOne({ _id: failed.intentId }, { $set: { status: "failed" } })
+
+    const lead = await history(seeded.token)
+    expect(lead.status).toBe(200)
+    const payments = lead.body.data.filter((r: { type: string }) => r.type === "payment")
+    expect(payments.map((r: { paymentStatus: string }) => r.paymentStatus).sort()).toEqual(["failed", "pending"])
+    expect(payments.find((r: { intentId: string }) => r.intentId === intentId)).toMatchObject({
+      amount: 100,
+      packageId: "pack_100",
+      member: { id: seeded.userId }
+    })
+
+    const analystUser = await User.create({ email: "analyst@flintflow.test", password: "test-password-123", name: "An Analyst", emailVerified: true })
+    await Membership.create({ organizationId: seeded.orgId, userId: analystUser._id, role: "analyst" })
+    const analystToken = await authAs({ _id: analystUser._id, email: analystUser.email, orgId: seeded.orgId })
+    const analyst = await history(analystToken)
+    expect(analyst.status).toBe(200)
+    expect(analyst.body.data.some((r: { type: string }) => r.type === "payment")).toBe(false)
+  })
+
+  it("lượt gọi AI trong pipeline ghi step + token; lịch sử trả kèm thành viên và dự án; lọc sai mã ⇒ 400", async () => {
+    const seeded = await seedFixture("minimal", { balance: 100 })
+    await executeAiAction(ActionType.CHAT, { promptVariables: { step_id: "S-1.1" } }, seeded.projectId, seeded.userId)
+
+    const res = await history(seeded.token, `?kind=usage&projectId=${seeded.projectId}`)
+    expect(res.status).toBe(200)
+    const deduct = res.body.data.find((r: { type: string }) => r.type === "deduct")
+    expect(deduct).toMatchObject({ stepId: "S-1.1", member: { id: seeded.userId }, project: { id: seeded.projectId } })
+    expect(deduct.tokensIn).toBeGreaterThan(0)
+    expect(deduct.project.name).not.toBe("")
+
+    expect((await history(seeded.token, "?memberId=abc")).status).toBe(400)
   })
 })
 
