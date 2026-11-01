@@ -210,7 +210,7 @@ describe("renderSection — fixed sections", () => {
     expect(renderSection(spine(), "fixed:2.1", ctx()).blocks).toHaveLength(1)
   })
 
-  it("fixed:3.1.1 — mỗi hình luồng màn (một feature) có chú thích lấy từ <title> của SVG và một đoạn mô tả dẫn về §2.1", () => {
+  it("fixed:3.1.1 — mỗi hình luồng màn có chú thích lấy từ <title> của SVG và một đoạn chú giải ký pháp", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D03")!
     const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -218,19 +218,19 @@ describe("renderSection — fixed sections", () => {
 `
     s.diagrams = [
       ...s.diagrams.filter((d) => d.id !== "D03"),
-      { ...base, id: "D03", format: "svg", source: svg("Screens flow — Authentication") },
-      { ...base, id: "D03-2", format: "svg", source: svg("Screens flow — Billing") }
+      { ...base, id: "D03", format: "svg", source: svg("Screens flow (1/2)") },
+      { ...base, id: "D03-2", format: "svg", source: svg("Screens flow (2/2)") }
     ]
     const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
-    const note = { type: "paragraph", runs: [{ text: "Each swimlane is the actor who performs the screens in it, named exactly as in the actor model (see §2.1)." }] }
+    const note = { type: "paragraph", runs: [{ text: "Rectangles are screens, ovals are pop-ups and a framed box lists the tabs of a screen; arrows show navigation. Blue screens are used by every kind of user." }] }
     expect(section.blocks).toEqual([
-      { type: "image", png: "png-D03", caption: "Screens flow — Authentication" },
+      { type: "image", png: "png-D03", caption: "Screens flow (1/2)" },
       note,
-      { type: "image", png: "png-D03-2", caption: "Screens flow — Billing" },
+      { type: "image", png: "png-D03-2", caption: "Screens flow (2/2)" },
       note
     ])
     const vi = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", language: "vi", diagramPng: (id) => `png-${id}` })).blocks[1]
-    expect(vi).toMatchObject({ type: "paragraph", runs: [{ text: expect.stringContaining("xem §2.1") }] })
+    expect(vi).toMatchObject({ type: "paragraph", runs: [{ text: expect.stringContaining("hình ô-van là pop-up") }] })
     // Hình không có title giữ chú thích mặc định
     expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks[0]).toEqual({ type: "image", png: "png-d03", caption: "Screens Flow Diagram" })
   })

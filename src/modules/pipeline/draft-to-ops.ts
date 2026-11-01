@@ -15,7 +15,7 @@ import type { Op, Transaction } from "../spine/op.types.js"
 import type { Spine } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType, AiActionError, type AiActionInput, type AiActionResult } from "../../shared/ai/ai-action.types.js"
-import { executeAiAction } from "../../shared/ai/ai-action.service.js"
+import { executeAiAction, type ExecuteAiActionOptions } from "../../shared/ai/ai-action.service.js"
 import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 import type { LocalizedEntry, OpTransaction, SourceEntry } from "../../shared/ai/response-parser.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -40,7 +40,8 @@ export type DraftExecutor = (
   actionType: ActionType,
   input: AiActionInput,
   projectId: string,
-  userId: string
+  userId: string,
+  options?: ExecuteAiActionOptions
 ) => Promise<AiActionResult<OpTransaction>>
 
 export interface DraftUsage {
@@ -137,8 +138,11 @@ export class DraftRejectedError extends ApiError {
 
 const SCHEMA_ERROR_CODES = new Set(["PARSE_FAILED", "SCHEMA_MISMATCH"])
 
-const defaultExecutor: DraftExecutor = (actionType, input, projectId, userId) =>
-  executeAiAction<OpTransaction>(actionType, input, projectId, userId)
+const defaultExecutor: DraftExecutor = (actionType, input, projectId, userId, options) =>
+  executeAiAction<OpTransaction>(actionType, input, projectId, userId, options)
+
+/** Ngân sách trả lời của skill nội dung của step (`maxTokens` trong frontmatter) — lượt draft dùng mức lớn hơn của hai skill. */
+const contentMaxTokens = (ctx: StepContext): number | undefined => (ctx.skill ? getSkill(ctx.skill).providerConfig.maxTokens : undefined)
 
 const contentGuidance = (ctx: StepContext): string => {
   if (!ctx.skill) return ""
@@ -198,7 +202,8 @@ export const draftOps = async (projectId: string, stepId: string, ctx: StepConte
     let localized: LocalizedEntry[] | undefined
     let sources: SourceEntry[] | undefined
     try {
-      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId)
+      const minMaxTokens = contentMaxTokens(ctx)
+      const result = await executor(ACTION_BY_CALL_KIND[callKind], { promptVariables, ...language }, projectId, options.userId, minMaxTokens ? { minMaxTokens } : undefined)
       usage.push({
         attempt,
         call_kind: callKind,
