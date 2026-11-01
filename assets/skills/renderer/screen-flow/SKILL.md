@@ -43,20 +43,20 @@ stub: false
 - **Screen with tabs** (`tabs[]`): a frame with the screen name at the top and one small box per tab inside, tab names in *italic*. A pop-up with tabs is the same frame with rounded corners.
 - **Navigation** (`flow_to[].to`): solid line, horizontal / vertical segments only, square corners, **small filled triangle** arrowhead at the target.
 - **Fill**: `#7ACFF5` (in place of the template's yellow) for a **shared screen**, white for every other screen. Text black, `Liberation Sans` 13 like every FlintFlow SVG diagram.
-- Nothing else: no swimlanes, no edge labels (`trigger` / `guard` stay in the Spine, not drawn), no decision diamonds, no start / end nodes, no title drawn in the picture. The document caption is the SVG `<title>` (`Screens flow`, `Screens flow (i/n)` when split); a legend paragraph under the figure explains the shapes and the blue fill.
+- Nothing else: no swimlanes, no edge labels (`trigger` / `guard` stay in the Spine, not drawn), no decision diamonds, no start / end nodes, no title drawn in the picture. The document caption is the SVG `<title>` (`Screens flow`; when split `Screens flow (<actor>)`, `Screens flow (i/n)` or both); a legend paragraph under the figure explains the shapes and the blue fill.
 
 ## Layout
 
-- Left to right. Column = rank (longest path from an entry screen), so every arrow points right.
-- Each screen has one tree parent (forward edge from the previous column, lowest `queue_order`); rows follow the tree depth-first: a parent sits on the row of its first child (one straight arrow between them, like Home Page → User Login in the template), a leaf opens a new row.
-- A screen with several targets in the next column uses **one shared trunk**: one stub out of the screen, one vertical line in the gutter, one horizontal branch with an arrowhead per target.
-- An arrow skipping columns leaves into the gutter after its screen, runs along the street between two rows, and enters through the gutter before its target.
+- Left to right, as a tree: each screen has one parent = the screen that reaches it first in a breadth-first walk from the entries (shallowest way in, then lowest `queue_order`); column = depth, so a child sits right after its parent. Rows follow the tree depth-first: a parent sits on the row of its first child (one straight arrow between them, like Home Page → User Login in the template), a leaf opens a new row.
+- **Only the tree is drawn**: one arrow into each screen from its parent, plus every arrow into a pop-up; a root screen whose targets all have another parent keeps its first arrow, so it is not left alone. Other ways in stay in `flow_to` (traceability, descriptions) but are not drawn — cross links tangle the picture once there are many screens.
+- Each screen has **one way out**: a lone straight arrow to the screen on its row in the next column, or **one shared trunk** (one stub, one vertical line in the gutter) with a horizontal branch per target in the next column.
+- An arrow to a pop-up outside the next column leaves the trunk, runs along the street next to the target row and enters through the gutter before the pop-up; several such arrows into one pop-up from the same side merge into one collector with a single arrowhead.
 - Gutters (between columns) and streets (between rows) never contain a shape; every vertical segment has its own x, every horizontal segment its own y, ports on a screen side have their own y ⇒ no line crosses a shape or text and no two lines overlap; crossings only at right angles.
 
 ## One diagram for the system
 
 - Every screen goes into one diagram, ordered by `queue_order`, then id.
-- Over **40 screens**, or failing the layout check (`checkScene`): split by whole features (`features[].order`; a screen whose feature does not exist goes to a last group), packed greedily up to 40 screens per diagram; a feature that still does not fit is halved by rank in the flow. Each part is its own `diagrams[]` entry, `section = fixed:3.1.1`, `owner_kind = owner_id = null`; the first part keeps the original id. An arrow to a screen in another part is not drawn.
+- Over **40 screens**, over **10 columns** (too small once fitted to an A4 page), or failing the layout check (`checkScene`): first one diagram per human actor with the screens that actor (or an actor it specialises) uses — shared screens appear in every one, like *Screens flow for User / for Admin*; an actor whose screens all sit in another diagram is dropped, screens with no actor go to `Other screens`. Skipped with fewer than two actors or when over 20% of the screens have no actor. A diagram that still does not fit is split by whole features (`features[].order`; a screen whose feature does not exist goes to a last group), packed greedily up to 40 screens per diagram; a feature that still does not fit is halved by rank in the flow. Each part is its own `diagrams[]` entry, `section = fixed:3.1.1`, `owner_kind = owner_id = null`; the first part keeps the original id. Each part also carries the screens on the path from an entry to its screens (whole-system tree; only the direct parent when the full path makes the part unreadable), so no screen loses its parent to another part — hub screens may appear in several parts.
 
 ## Shared screens (blue fill)
 

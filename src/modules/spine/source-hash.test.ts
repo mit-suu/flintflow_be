@@ -152,9 +152,9 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
 describe("renderedDiagramHash — screen_flow theo template FPT", () => {
   const flow = { kind: "screen_flow" as const, owner_id: null }
 
-  it("ký pháp mới (svg@2) làm hình svg@1 cũ thành stale", () => {
-    expect(DIAGRAM_ENGINES.screen_flow).toBe("svg@2")
-    expect(renderedDiagramHash(FIXTURE, flow)).not.toBe(renderedDiagramHash(FIXTURE, flow, { ...DIAGRAM_ENGINES, screen_flow: "svg@1" }))
+  it("bố cục mới (svg@3: chỉ vẽ cây, tách theo actor) làm hình svg@2 cũ thành stale", () => {
+    expect(DIAGRAM_ENGINES.screen_flow).toBe("svg@3")
+    expect(renderedDiagramHash(FIXTURE, flow)).not.toBe(renderedDiagramHash(FIXTURE, flow, { ...DIAGRAM_ENGINES, screen_flow: "svg@2" }))
   })
 
   it("đổi tập màn dùng chung (nền xanh) đổi hash hình, không đổi hash dữ liệu ảnh gốc", () => {

@@ -7,9 +7,9 @@ import { spineSchema } from "../../spine/spine.schema.js"
 import type { Screen, Spine } from "../../spine/spine.types.js"
 import { svgTitleOf } from "./common.js"
 import { renderKind } from "./index.js"
-import { MAX_SCREENS_PER_DIAGRAM, partitionScreenFlow, SCREEN_FLOW_SECTION } from "./screen-flow.renderer.js"
+import { MAX_COLUMNS, MAX_SCREENS_PER_DIAGRAM, partitionScreenFlow, SCREEN_FLOW_SECTION } from "./screen-flow.renderer.js"
 import { sharedScreenIds } from "../../spine/screen-actors.js"
-import { layoutScreenFlow } from "./screen-flow-layout.js"
+import { flowColumns, layoutScreenFlow } from "./screen-flow-layout.js"
 import { DIAGRAM_LABELS } from "./labels.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -46,6 +46,11 @@ const fn = (id: string, screenId: string): Spine["functions"][number] => ({
   business_rule_ids: [],
   priority: null
 })
+/** Cây rẽ 4 nhánh (màn i mở từ màn ⌊(i−2)/4⌋+1): nhiều màn mà ít cột. */
+const fanFlows = (s: Spine): void => {
+  s.screens.forEach((x) => (x.flow_to = []))
+  s.screens.forEach((x, i) => i > 0 && s.screens[Math.floor((i - 1) / 4)].flow_to.push({ to: x.id }))
+}
 /** Spine nhỏ: một feature, màn S001…Snnn nối chuỗi, mọi màn thuộc actor A01 qua use case. */
 const chain = (count: number, extra: (s: Spine) => void = () => undefined): Spine =>
   mutate((s) => {
@@ -113,20 +118,28 @@ describe("screen_flow — một hình cho cả hệ thống, ký pháp template 
     const spine = chain(MAX_SCREENS_PER_DIAGRAM, (s) => {
       s.features = [{ id: "F1", name: "One", order: 0 }, { id: "F2", name: "Two", order: 1 }]
       s.screens.slice(20).forEach((x) => (x.feature_id = "F2"))
+      fanFlows(s)
     })
     expect(partitionScreenFlow(spine)).toHaveLength(1)
   })
 
-  it(`> ${MAX_SCREENS_PER_DIAGRAM} màn ⇒ tách theo feature nguyên vẹn, tiêu đề (i/n), mọi màn đúng một lần, issues rỗng`, () => {
+  it(`> ${MAX_SCREENS_PER_DIAGRAM} màn ⇒ tách theo feature nguyên vẹn, tiêu đề (i/n), mọi màn có mặt, màn cha ở hình khác đi kèm (không mồ côi), issues rỗng`, () => {
     const spine = chain(60, (s) => {
       s.features = [{ id: "F1", name: "One", order: 0 }, { id: "F2", name: "Two", order: 1 }, { id: "F3", name: "Three", order: 2 }]
       s.screens.forEach((x, i) => (x.feature_id = i < 25 ? "F1" : i < 45 ? "F2" : "F3"))
+      fanFlows(s)
     })
     const parts = partitionScreenFlow(spine)
     expect(parts.map((p) => p.title)).toEqual(["Screens flow (1/2)", "Screens flow (2/2)"])
     const featureOf = new Map(spine.screens.map((s) => [s.id, s.feature_id]))
-    expect(parts.map((p) => [...new Set(p.diagram.nodes.map((n) => featureOf.get(n.id)))])).toEqual([["F1"], ["F2", "F3"]])
-    expect(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)).sort()).toEqual(spine.screens.map((s) => s.id).sort())
+    expect([...new Set(parts[0].diagram.nodes.map((n) => featureOf.get(n.id)))]).toEqual(["F1"])
+    // hình 2: mọi màn F2 / F3, cộng đúng các màn F1 nằm trên đường từ màn vào tới chúng ⇒ không màn nào mất cha
+    const second = parts[1].diagram
+    expect(second.nodes.filter((n) => featureOf.get(n.id) !== "F1").map((n) => n.id)).toEqual(spine.screens.slice(25).map((s) => s.id))
+    const parentOf = (id: string) => spine.screens.find((s) => s.flow_to.some((e) => e.to === id))?.id
+    for (const n of second.nodes) if (n.id !== "S001") expect(second.nodes.map((m) => m.id)).toContain(parentOf(n.id))
+    expect(second.nodes.filter((n) => featureOf.get(n.id) === "F1").every((n) => second.edges.some(([from]) => from === n.id))).toBe(true)
+    expect(new Set(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)))).toEqual(new Set(spine.screens.map((s) => s.id)))
     for (const p of renderKind(spine, "screen_flow")) expect(p.issues).toEqual([])
   })
 
@@ -135,7 +148,41 @@ describe("screen_flow — một hình cho cả hệ thống, ký pháp template 
     const parts = partitionScreenFlow(spine)
     expect(parts.length).toBeGreaterThan(2)
     expect(parts.every((p) => p.diagram.nodes.length <= MAX_SCREENS_PER_DIAGRAM)).toBe(true)
-    expect(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)).sort()).toEqual(spine.screens.map((s) => s.id).sort())
+    expect(new Set(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)))).toEqual(new Set(spine.screens.map((s) => s.id)))
+  })
+
+  it(`quá ${MAX_COLUMNS} cột ⇒ tách, mỗi hình ≤ ${MAX_COLUMNS} cột`, () => {
+    const spine = chain(MAX_COLUMNS + 4)
+    const parts = partitionScreenFlow(spine)
+    expect(parts.length).toBeGreaterThan(1)
+    for (const p of parts) expect(flowColumns(p.diagram)).toBeLessThanOrEqual(MAX_COLUMNS)
+    expect(new Set(parts.flatMap((p) => p.diagram.nodes.map((n) => n.id)))).toEqual(new Set(spine.screens.map((s) => s.id)))
+  })
+
+  it("không vừa một hình ⇒ mỗi actor người một hình (tiêu đề tên actor), màn dùng chung có mặt ở mọi hình; màn chưa có actor vào Other screens", () => {
+    // S001 = đăng nhập (cả hai actor), 25 màn của Founder, 20 màn của Administrator, 1 màn chưa nối actor ⇒ 47 màn
+    const spine = chain(47, (s) => {
+      fanFlows(s)
+      const ucOf = (actor: string, from: number, to: number) => ({
+        id: `UC-${actor}`, name: actor, actor_ids: [actor], description: "", includes: [], extends: [],
+        function_ids: s.functions.filter((_, i) => i === 0 || (i >= from && i < to)).map((f) => f.id)
+      })
+      s.use_cases = [ucOf("A01", 1, 26), ucOf("A03", 26, 46)]
+      s.functions = s.functions.filter((_, i) => i < 46)
+    })
+    const parts = partitionScreenFlow(spine)
+    expect(parts.map((p) => p.title)).toEqual(["Screens flow (Founder)", "Screens flow (Administrator)", "Screens flow (Other screens)"])
+    const [founder, admin, other] = parts.map((p) => p.diagram.nodes.map((n) => n.id))
+    expect(founder).toContain("S001")
+    expect(admin).toContain("S001")
+    for (const id of spine.screens.slice(1, 26).map((s) => s.id)) expect(founder).toContain(id)
+    for (const id of spine.screens.slice(26, 46).map((s) => s.id)) expect(admin).toContain(id)
+    // màn cha của màn Administrator nằm ở phần Founder (cây rẽ 4 nhánh) ⇒ đi kèm, không màn nào mồ côi
+    expect(admin.length).toBeGreaterThan(21)
+    // màn chưa có actor kèm đường từ màn vào tới nó
+    expect(other).toEqual(["S001", "S003", "S012", "S047"])
+    expect(partitionScreenFlow(spine, DIAGRAM_LABELS.vi).map((p) => p.title)).toEqual(["Luồng màn hình (Founder)", "Luồng màn hình (Administrator)", "Luồng màn hình (Màn khác)"])
+    for (const p of renderKind(spine, "screen_flow")) expect(p.issues).toEqual([])
   })
 
   it("tên màn rất dài, nhiều tab, pop-up tên dài: không tràn, issues rỗng", () => {
@@ -155,7 +202,8 @@ describe("screen_flow — một hình cho cả hệ thống, ký pháp template 
       s.screens[2].flow_to.push({ to: "S002" }, { to: "S005" }, { to: "S001" })
     })
     const [scene] = sceneOf(spine)
-    expect(ids(scene, "flow:").sort()).toEqual(["flow:S001>S002", "flow:S002>S003", "flow:S003>S004", "flow:S003>S005", "flow:S004>S005"])
+    // chỉ vẽ cây: S005 mở từ S003 (nông nhất) nên S004 → S005 không vẽ
+    expect(ids(scene, "flow:").sort()).toEqual(["flow:S001>S002", "flow:S002>S003", "flow:S003>S004", "flow:S003>S005"])
     expect(checkScene(scene, { allowBends: true })).toEqual([])
   })
 
