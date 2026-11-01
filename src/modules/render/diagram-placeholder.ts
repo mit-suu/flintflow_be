@@ -1,7 +1,8 @@
 /**
  * diagram-placeholder.ts
  * ─────────────────────────────────────────────────────────────────
- * Ảnh thay thế cho sơ đồ `render_status = "ok"` nhưng PNG chưa tải được lúc assemble/đọc tài liệu.
+ * Ảnh thay thế cho sơ đồ `render_status = "ok"` nhưng PNG chưa tải được lúc assemble/đọc tài liệu, và cho sơ đồ
+ * `render_status = "error"` (marker `diagram-error:<id>`, xem `diagramErrorMarker`).
  * PNG xám nhạt sinh bằng `node:zlib` (không thêm dependency), tính một lần lúc import; caption nêu rõ
  * sơ đồ nào chưa render để người đọc thấy lý do thay vì thiếu hình lặng lẽ. Writer `.docx` đo kích
  * thước bằng `image-size` nên đây phải là PNG hợp lệ thật (IHDR/IDAT/IEND + CRC32).
@@ -57,3 +58,17 @@ export const DIAGRAM_PLACEHOLDER_PNG = buildPlaceholderPng(DIAGRAM_PLACEHOLDER_W
 /** Caption cho ảnh placeholder — mặc định tiếng Anh; `language` (FLF-265) theo ngôn ngữ tài liệu mẫu FPT. */
 export const pendingImageCaption = (caption: string | undefined, diagramId: string, language?: string): string =>
   `${caption ? `${caption} — ` : ""}${assembleTextFor(language).imagePending(diagramId)}`
+
+/**
+ * Ô `png` của sơ đồ vẽ lỗi (`render_status = "error"`): `diagram-error:<id>` thay cho PNG. Hình lỗi vẫn giữ chỗ trong
+ * mục để người đọc thấy thiếu hình ngay tại chỗ (trước đây bị bỏ lặng lẽ): trang tài liệu (FE) vẽ khung báo lỗi kèm nút
+ * vẽ lại theo id, writer `.docx` nhúng ảnh placeholder. Không bao giờ tải PNG theo id này — file PNG còn trên đĩa là
+ * bản cũ, có thể đã thuộc về một hình khác sau khi chia lại hình.
+ */
+export const DIAGRAM_ERROR_PREFIX = "diagram-error:"
+
+export const diagramErrorMarker = (diagramId: string): string => `${DIAGRAM_ERROR_PREFIX}${diagramId}`
+
+/** Id sơ đồ của marker lỗi; ô `png` khác (PNG thật, Buffer, `diagram-ref:`) ⇒ `null`. */
+export const diagramErrorId = (png: Buffer | string): string | null =>
+  typeof png === "string" && png.startsWith(DIAGRAM_ERROR_PREFIX) ? png.slice(DIAGRAM_ERROR_PREFIX.length) : null
