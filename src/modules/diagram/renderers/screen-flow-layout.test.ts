@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { checkScene, overlaps } from "../../../shared/diagram/svg-geometry.js"
 import type { Point } from "../../../shared/diagram/svg-kit.js"
 import { outline, type SceneElement } from "../../../shared/diagram/svg-scene.js"
-import { layoutScreenFlow, planFlow, type FlowDiagram, type FlowNode } from "./screen-flow-layout.js"
+import { flowColumns, flowTree, layoutScreenFlow, planFlow, type FlowDiagram, type FlowNode } from "./screen-flow-layout.js"
 
 describe("planFlow", () => {
   const plan = (ids: string[], flows: [string, string][], popups: string[] = []) => planFlow(ids, new Set(popups), flows)
@@ -22,6 +22,16 @@ describe("planFlow", () => {
     for (const [from, to] of p.edges) expect(p.rank.get(to)!).toBeGreaterThan(p.rank.get(from)!)
   })
 
+  it("cây bố cục: cha = đường vào nông nhất (hoà thì màn đứng trước), cột = độ sâu; liên kết chéo không đẩy nhánh sang phải", () => {
+    // A → B → C → D và A → D: hạng đường dài nhất đặt D ở cột 3, độ sâu đặt D ngay sau A
+    const p = plan(["A", "B", "C", "D", "E"], [["A", "B"], ["B", "C"], ["C", "D"], ["A", "D"], ["B", "E"], ["C", "E"]])
+    const { parent, depth } = flowTree(p)
+    expect([...parent].sort()).toEqual([["B", "A"], ["C", "B"], ["D", "A"], ["E", "B"]])
+    expect([...depth].sort()).toEqual([["A", 0], ["B", 1], ["C", 2], ["D", 1], ["E", 2]])
+    expect(p.rank.get("D")).toBe(3)
+    expect(flowColumns({ nodes: ["A", "B", "C", "D", "E"].map((id) => node(id)), edges: [["A", "B"], ["B", "C"], ["C", "D"], ["A", "D"], ["B", "E"], ["C", "E"]] })).toBe(3)
+  })
+
   it("thành phần liên thông mạnh: đại diện không phải pop-up khi có màn khác", () => {
     expect(plan(["P", "Q"], [["P", "Q"], ["Q", "P"]], ["P"]).entries).toEqual(["Q"])
   })
@@ -31,6 +41,8 @@ const node = (id: string, over: Partial<FlowNode> = {}): FlowNode => ({ id, name
 type Path = Extract<SceneElement, { type: "path" }>
 const path = (scene: ReturnType<typeof layoutScreenFlow>, id: string): Path => scene.find(id) as Path
 const lastPoint = (p: Path) => p.points[p.points.length - 1]
+/** Id các đường của cạnh (`flow:<từ>><tới>`), bỏ phần phụ (`#end`…). */
+const ids = (scene: ReturnType<typeof layoutScreenFlow>): string[] => scene.elements.filter((e) => e.id.startsWith("flow:") && !e.id.includes("#")).map((e) => e.id)
 
 describe("layoutScreenFlow — ký pháp template FPT", () => {
   const home: FlowDiagram = {
@@ -86,9 +98,35 @@ describe("layoutScreenFlow — ký pháp template FPT", () => {
     expect(new Set(ys).size).toBe(1)
   })
 
-  it("cạnh nhảy cột đi rãnh → phố → rãnh, không xuyên hình", () => {
+  it("chỉ vẽ cây: mỗi màn một đường vào từ màn cha (đường vào nông nhất); lối vào khác không vẽ", () => {
     const scene = layoutScreenFlow({ nodes: [node("A"), node("B"), node("C"), node("D")], edges: [["A", "B"], ["B", "C"], ["A", "C"], ["C", "D"], ["A", "D"]] })
-    expect(path(scene, "flow:A>D").points).toHaveLength(6)
+    expect(ids(scene).sort()).toEqual(["flow:A>B", "flow:A>C", "flow:A>D"])
+    // con ở cột ngay sau cha
+    const xs = ["B", "C", "D"].map((id) => (scene.find(id) as Extract<SceneElement, { type: "rect" }>).x)
+    expect(new Set(xs).size).toBe(1)
+    expect(checkScene(scene, { allowBends: true })).toEqual([])
+  })
+
+  it("màn gốc mà mọi đích đã có cha khác vẫn giữ đường ra đầu tiên, không trơ trọi", () => {
+    // Login → Dashboard là cạnh cây; Onboarding → Dashboard không phải nhưng là đường duy nhất của Onboarding
+    const scene = layoutScreenFlow({ nodes: [node("L"), node("D"), node("O"), node("X")], edges: [["L", "D"], ["O", "D"], ["O", "X"], ["L", "X"]] })
+    expect(ids(scene).sort()).toEqual(["flow:L>D", "flow:L>X", "flow:O>D"])
+    expect(checkScene(scene, { allowBends: true })).toEqual([])
+  })
+
+  it("pop-up nhiều màn mở: mọi màn mở đều vẽ; các đường xa vào cùng phía gộp một trục thu, chung một mũi tên", () => {
+    const scene = layoutScreenFlow({
+      nodes: [node("A"), node("B"), node("C"), node("D"), node("P", { popup: true })],
+      edges: [["A", "B"], ["A", "P"], ["B", "C"], ["B", "D"], ["C", "P"], ["D", "P"]]
+    })
+    expect(ids(scene).sort()).toEqual(["flow:A>B", "flow:A>P", "flow:B>C", "flow:B>D", "flow:C>P", "flow:D>P"])
+    expect(scene.find("collect:P:up")).toBeDefined()
+    expect(scene.find("collect:P:up#trunk")).toBeDefined()
+    expect(scene.find("collect:P:up#end")).toBeDefined()
+    for (const id of ["flow:C>P", "flow:D>P"]) {
+      expect(path(scene, id).points).toHaveLength(2)
+      expect(scene.find(`${id}#end`)).toBeUndefined()
+    }
     expect(checkScene(scene, { allowBends: true })).toEqual([])
   })
 
@@ -120,9 +158,15 @@ describe("layoutScreenFlow — ký pháp template FPT", () => {
           expect(segs.some((seg) => overlaps(outline(h), seg, 0.5)), `case ${t} ${h.id} đè ${line.id}`).toBe(false)
         }
       }
-      // mỗi cạnh tiến là đúng một đường, đầu mút nằm trên cạnh trái của đích
+      // vẽ đúng cạnh cây + mọi cạnh mở pop-up (+ đường ra đầu của màn gốc trơ trọi), không cạnh nào khác
       const plan = planFlow(nodes.map((x) => x.id), new Set(nodes.filter((x) => x.popup).map((x) => x.id)), edges)
-      for (const [from, to] of plan.edges) expect(scene.find(`flow:${from}>${to}`), `case ${t} ${from}>${to}`).toBeDefined()
+      const { parent } = flowTree(plan)
+      const popups = new Set(nodes.filter((x) => x.popup).map((x) => x.id))
+      const tree = plan.edges.filter(([from, to]) => parent.get(to) === from || popups.has(to))
+      // màn gốc không có đường cây nào giữ đường ra đầu tiên
+      const lone = nodes.map((x) => x.id).filter((id) => !parent.has(id) && !tree.some(([from]) => from === id)).flatMap((id) => plan.edges.filter(([from]) => from === id).slice(0, 1))
+      const expected = [...tree, ...lone].map(([from, to]) => `flow:${from}>${to}`)
+      expect(ids(scene).sort(), `case ${t}`).toEqual(expected.sort())
     }
   })
 })
