@@ -218,9 +218,26 @@ router.post("/upgrade", authMiddleware, requireActiveAccount, orgContext, requir
  *           type: integer
  *           minimum: 1
  *           maximum: 100
+ *       - in: query
+ *         name: kind
+ *         description: usage = lượt gọi AI (UC-60); payment = nạp credit kể cả đang chờ / lỗi (UC-59)
+ *         schema:
+ *           type: string
+ *           enum: [usage, payment]
+ *       - in: query
+ *         name: projectId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: memberId
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
- *         description: Danh sách CreditTransaction; meta gồm page, limit, total, totalPages
+ *         description: >
+ *           Sổ credit của org gộp thanh toán đang chờ / lỗi (type `payment`, chỉ Lead thấy), mới nhất trước. Mỗi dòng kèm
+ *           `member {id, name}`, `project {id, name}`, `stepId`, `tokensIn`, `tokensOut`; dòng nạp có `paymentStatus`.
+ *           meta gồm page, limit, total, totalPages
  *       401:
  *         description: Chưa xác thực
  */

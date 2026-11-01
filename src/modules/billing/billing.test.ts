@@ -35,6 +35,15 @@ vi.mock("./payment-intent.model.js", async () => {
   const { fakeDb } = await import("./__tests__/fake-mongo.js")
   return { PaymentIntent: fakeDb.model("PaymentIntent") }
 })
+// Lịch sử credit tra tên thành viên / dự án (UC-59, UC-60)
+vi.mock("../user/user.model.js", async (importOriginal) => {
+  const { fakeDb } = await import("./__tests__/fake-mongo.js")
+  return { ...(await importOriginal<object>()), User: fakeDb.model("User") }
+})
+vi.mock("../project/project.model.js", async (importOriginal) => {
+  const { fakeDb } = await import("./__tests__/fake-mongo.js")
+  return { ...(await importOriginal<object>()), Project: fakeDb.model("Project") }
+})
 vi.mock("../admin/pricing-config.model.js", () => ({
   PricingConfig: { findOne: async () => null }
 }))
@@ -373,6 +382,101 @@ describe("billing.service", () => {
       const page2 = await billingService.listTransactions(ORG, 2, 20)
       expect(page2.items).toHaveLength(5)
       expect(page2.meta).toMatchObject({ total: 25, totalPages: 2 })
+    })
+  })
+
+  describe("lịch sử credit (UC-59, UC-60)", () => {
+    const PROJECT = "64b0000000000000000000c1"
+    const oid = (id: string) => new mongoose.Types.ObjectId(id)
+    const ledgerRow = (fields: Record<string, unknown>) =>
+      fakeDb.model("CreditTransaction").create({ userId: oid(USER), organizationId: oid(ORG), actionType: "draft", amount: 4, balanceAfter: 96, ...fields })
+    const intent = (status: string, fields: Record<string, unknown> = {}) =>
+      fakeDb.model("PaymentIntent").create({ userId: oid(USER), organizationId: oid(ORG), packageId: "pack_100", credits: 100, amount: PACK_100_AMOUNT, currency: "VND", status, ...fields })
+
+    beforeEach(async () => {
+      await fakeDb.model("User").create({ _id: oid(USER), name: "Lan Lead", email: "lan@example.com" })
+      await fakeDb.model("User").create({ _id: oid(OTHER_USER), name: "", email: "an@example.com" })
+      await fakeDb.model("Project").create({ _id: oid(PROJECT), name: "Shop online" })
+    })
+
+    it("Lead thấy thanh toán đang chờ / lỗi xen đúng thứ tự thời gian; thanh toán thành công chỉ là dòng purchase", async () => {
+      await ledgerRow({ type: "purchase", actionType: "purchase", amount: 100 })
+      await intent("pending")
+      await intent("succeeded")
+      await intent("failed")
+      await ledgerRow({ type: "deduct", projectId: oid(PROJECT), stepId: "S-1.1", tokensIn: 1200, tokensOut: 300 })
+
+      const { items, meta } = await billingService.listTransactions(ORG, 1, 20, { includePayments: true })
+
+      expect(items.map((r) => [r.type, r.paymentStatus ?? null])).toEqual([
+        ["deduct", null],
+        ["payment", "failed"],
+        ["payment", "pending"],
+        ["purchase", "succeeded"]
+      ])
+      expect(meta.total).toBe(4)
+      expect(items[2]).toMatchObject({ amount: 100, price: PACK_100_AMOUNT, packageId: "pack_100" })
+      expect(items[0]).toMatchObject({
+        stepId: "S-1.1",
+        tokensIn: 1200,
+        tokensOut: 300,
+        member: { id: USER, name: "Lan Lead" },
+        project: { id: PROJECT, name: "Shop online" }
+      })
+    })
+
+    it("không phải Lead ⇒ không có dòng thanh toán", async () => {
+      await intent("pending")
+      await ledgerRow({ type: "deduct" })
+
+      const { items, meta } = await billingService.listTransactions(ORG, 1, 20)
+
+      expect(items.map((r) => r.type)).toEqual(["deduct"])
+      expect(meta.total).toBe(1)
+    })
+
+    it("phân trang trộn hai nguồn không trùng, không sót", async () => {
+      for (let i = 0; i < 4; i++) {
+        await ledgerRow({ type: "deduct", amount: i })
+        await intent("failed", { credits: 10 + i })
+      }
+
+      const pages = await Promise.all([1, 2, 3].map((p) => billingService.listTransactions(ORG, p, 3, { includePayments: true })))
+      const ids = pages.flatMap((p) => p.items.map((r) => String(r._id)))
+
+      expect(pages.map((p) => p.items.length)).toEqual([3, 3, 2])
+      expect(new Set(ids).size).toBe(8)
+      expect(pages[0].meta).toMatchObject({ total: 8, totalPages: 3 })
+    })
+
+    it("lọc theo loại, dự án, thành viên; thành viên không có tên ⇒ email", async () => {
+      await ledgerRow({ type: "deduct", projectId: oid(PROJECT) })
+      await ledgerRow({ type: "deduct", userId: oid(OTHER_USER) })
+      await ledgerRow({ type: "monthly_reset", actionType: "monthly_reset" })
+      await intent("pending")
+
+      const usage = await billingService.listTransactions(ORG, 1, 20, { kind: "usage", includePayments: true })
+      expect(usage.items.map((r) => r.type)).toEqual(["deduct", "deduct"])
+
+      const payment = await billingService.listTransactions(ORG, 1, 20, { kind: "payment", includePayments: true })
+      expect(payment.items.map((r) => r.type)).toEqual(["payment"])
+
+      const byProject = await billingService.listTransactions(ORG, 1, 20, { projectId: PROJECT, includePayments: true })
+      expect(byProject.items).toHaveLength(1)
+      expect(byProject.items[0].project?.name).toBe("Shop online")
+
+      const byMember = await billingService.listTransactions(ORG, 1, 20, { memberId: OTHER_USER, includePayments: true })
+      expect(byMember.items).toHaveLength(1)
+      expect(byMember.items[0].member).toEqual({ id: OTHER_USER, name: "an@example.com" })
+    })
+
+    it("không lộ dữ liệu của org khác", async () => {
+      const OTHER_ORG = "64b0000000000000000000e1"
+      await ledgerRow({ type: "deduct", organizationId: oid(OTHER_ORG) })
+      await intent("pending", { organizationId: oid(OTHER_ORG) })
+
+      const { items } = await billingService.listTransactions(ORG, 1, 20, { includePayments: true })
+      expect(items).toHaveLength(0)
     })
   })
 })

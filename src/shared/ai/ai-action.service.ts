@@ -45,6 +45,8 @@ export interface ExecuteAiActionOptions {
   images?: LlmImage[]
   /** FLF-310: org đang chọn của người gọi — ví bị trừ khi lượt gọi không gắn project. */
   activeOrgId?: string | null
+  /** UC-60: step ghi vào sổ credit. Thiếu ⇒ lấy `promptVariables.step_id` (mọi lượt gọi của pipeline đều có). */
+  stepId?: string
 }
 
 export interface ExecuteAiActionStreamCallbacks<T = any> {
@@ -62,10 +64,18 @@ const reserveCreditWithTransaction = async (
   userId: string,
   actionType: string,
   projectId: string | undefined,
-  activeOrgId?: string | null
+  activeOrgId?: string | null,
+  stepId?: string
 ): Promise<CreditReservation> => {
-  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session, activeOrgId))
-  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId, undefined, activeOrgId) : reservation
+  const reservation = await runInTransaction((session) => reserveCredit(userId, actionType, projectId, session, activeOrgId, stepId))
+  return reservation === TRANSACTION_UNAVAILABLE ? reserveCredit(userId, actionType, projectId, undefined, activeOrgId, stepId) : reservation
+}
+
+/** UC-60: step của lượt gọi cho sổ credit — `options.stepId`, không có thì `promptVariables.step_id`. */
+const stepIdOf = (input: AiActionInput, options: ExecuteAiActionOptions): string | undefined => {
+  if (options.stepId) return options.stepId
+  const fromPrompt = input.promptVariables?.step_id
+  return typeof fromPrompt === "string" && fromPrompt ? fromPrompt : undefined
 }
 
 /** Release không được che lỗi gốc của action: lỗi release chỉ log. */
@@ -193,7 +203,7 @@ export const executeAiAction = async <T = any>(
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
   // Step 1: Reserve Credit
-  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId)
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
   const cost = reservation.cost
 
   // Step 2: Build Prompt
@@ -273,7 +283,7 @@ export const executeAiAction = async <T = any>(
 
         // Success: Deduct Credit (chỉ sau khi parse thành công)
         if (!deducted) {
-          await deductCredit(reservation)
+          await deductCredit(reservation, undefined, { tokensIn: tokensUsed.promptTokens, tokensOut: tokensUsed.completionTokens })
           deducted = true
         }
 
@@ -369,7 +379,7 @@ export const executeAiActionStream = async <T = any>(
   callbacks: ExecuteAiActionStreamCallbacks<T> = {},
   options: ExecuteAiActionOptions = {}
 ): Promise<AiActionResult<T>> => {
-  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId)
+  const reservation = await reserveCreditWithTransaction(userId, actionType, projectId, options.activeOrgId, stepIdOf(input, options))
   const cost = reservation.cost
 
   let finalPrompt: string
@@ -449,7 +459,7 @@ export const executeAiActionStream = async <T = any>(
     // Parse TRƯỚC, deduct SAU: output hỏng thì không tính phí (audit E2)
     const parsedData = parseResponse<T>(stripReasoning(fullRaw), actionType)
 
-    await deductCredit(reservation)
+    await deductCredit(reservation, undefined, { tokensIn: promptTokens, tokensOut: completionTokens })
     deducted = true
 
     const logDoc = await AiActionLog.create({
