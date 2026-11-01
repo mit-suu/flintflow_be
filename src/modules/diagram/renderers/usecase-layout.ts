@@ -134,6 +134,41 @@ const drawActor = (scene: Scene, id: string, name: string, cx: number, top: numb
 const byIdThen = <T extends { id: string }>(want: Map<string, number>) => (a: T, b: T): number =>
   (want.get(a.id) ?? 0) - (want.get(b.id) ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 
+export interface PackItem {
+  id: string
+  /** Vị trí đầu mong muốn. */
+  want: number
+  /** Chiều cao chiếm chỗ, đã gồm khoảng cách tới phần tử kế. */
+  size: number
+}
+export interface PackBlock {
+  items: PackItem[]
+  /** Độ lệch của từng phần tử so với `top` của khối. */
+  offsets: number[]
+  top: number
+}
+
+/**
+ * Xếp một cột phần tử theo thứ tự cho sẵn, không chồng nhau, mỗi phần tử gần `want` nhất có thể (tổng bình phương độ
+ * lệch nhỏ nhất). Phần tử chen nhau gộp thành khối liền; khối đặt ở trung bình `want - offset` của các phần tử trong
+ * nó — tức căn giữa quanh chỗ chúng muốn ở —, chạm khối trước thì gộp tiếp. Một phần tử đứng riêng ⇒ đúng `want`.
+ */
+export const packBlocks = (items: readonly PackItem[]): PackBlock[] => {
+  const blocks: (PackBlock & { span: number })[] = []
+  for (const item of items) {
+    let block = { items: [item], offsets: [0], top: item.want, span: item.size }
+    for (let prev = blocks[blocks.length - 1]; prev && prev.top + prev.span > block.top; prev = blocks[blocks.length - 1]) {
+      blocks.pop()
+      const offsets = [...prev.offsets, ...block.offsets.map((o) => o + prev.span)]
+      const merged = [...prev.items, ...block.items]
+      const top = merged.reduce((sum, it, i) => sum + it.want - offsets[i], 0) / merged.length
+      block = { items: merged, offsets, top, span: prev.span + block.span }
+    }
+    blocks.push(block)
+  }
+  return blocks.map(({ items: list, offsets, top }) => ({ items: list, offsets, top }))
+}
+
 /** Dựng Scene với khoảng cách actor ↔ khung `gap`. */
 const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
   const scene = new Scene()
@@ -160,7 +195,9 @@ const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
   const leftX = -half - gap - colWidth(left) / 2
   const rightX = half + gap + colWidth(right) / 2
 
-  // Actor ở trung điểm các use case nó nối, rồi đẩy xuống để chữ không dính nhau
+  // Actor ở trung điểm các use case nó nối. Actor chen nhau thì gộp thành khối xếp liền, khối CĂN GIỮA quanh trung
+  // bình vị trí mong muốn của các actor trong khối (không chỉ đẩy xuống): nhiều actor cùng nối một use case thì toả đều
+  // trên dưới use case đó, đường association của actor ngoài cùng bớt dốc nên không quệt qua chữ actor kề bên.
   const place = (list: DiagramActor[]): Map<string, number> => {
     const want = new Map(
       list.map((a): [string, number] => {
@@ -168,14 +205,10 @@ const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
         return [a.id, (ys.length > 0 ? (Math.min(...ys) + Math.max(...ys)) / 2 : BOUND_PAD_TOP) - FIGURE.armY]
       })
     )
-    const tops = new Map<string, number>()
-    let floor = -Infinity
-    for (const a of [...list].sort(byIdThen(want))) {
-      const top = Math.max(want.get(a.id)!, floor)
-      tops.set(a.id, top)
-      floor = top + metrics.get(a.id)!.height + ACTOR_GAP_Y
-    }
-    return tops
+    const blocks = packBlocks(
+      [...list].sort(byIdThen(want)).map((a) => ({ id: a.id, want: want.get(a.id)!, size: metrics.get(a.id)!.height + ACTOR_GAP_Y }))
+    )
+    return new Map(blocks.flatMap((b) => b.items.map((item, i): [string, number] => [item.id, b.top + b.offsets[i]])))
   }
   const tops = new Map([...place(left), ...place(right)])
   const columnX = (a: DiagramActor): number => (a.kind === "human" ? leftX : rightX)

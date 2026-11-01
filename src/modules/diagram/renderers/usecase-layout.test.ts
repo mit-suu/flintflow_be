@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { checkScene } from "../../../shared/diagram/svg-geometry.js"
 import type { Point } from "../../../shared/diagram/svg-kit.js"
 import type { Scene, SceneElement } from "../../../shared/diagram/svg-scene.js"
-import { layoutActorHierarchy, layoutUseCaseDiagram, wrapLines, type DiagramActor, type UseCaseDiagram } from "./usecase-layout.js"
+import { layoutActorHierarchy, layoutUseCaseDiagram, packBlocks, wrapLines, type DiagramActor, type UseCaseDiagram } from "./usecase-layout.js"
 
 type Ellipse = Extract<SceneElement, { type: "ellipse" }>
 type Path = Extract<SceneElement, { type: "path" }>
@@ -146,6 +146,43 @@ describe("layoutUseCaseDiagram", () => {
   it("tất định: cùng đầu vào ⇒ cùng SVG", () => {
     const d: UseCaseDiagram = { system: "S", rows: rowsOf(4), actors: [human("H"), system("S1")], associations: assoc([["H", "UC01"], ["S1", "UC04"]]), relations: [{ from: "UC02", to: "UC03", kind: "extend" }] }
     expect(layoutUseCaseDiagram(d).toSvg()).toBe(layoutUseCaseDiagram(d).toSvg())
+  })
+
+  it("một use case nối 7 actor người (Log In mọi vai trò): actor toả đều trên dưới use case, không đường nào cắt chữ", () => {
+    const names = ["Patient", "Reception Staff", "Doctor", "Cashier", "Pharmacist", "BHYT Verification Officer", "System Administrator"]
+    const actors = names.map((name, i) => human(`A${i + 3}`, name))
+    for (const rows of [[{ id: "L", name: "Log In" }], [{ id: "L", name: "Log In" }, { id: "P", name: "Reset Password" }]]) {
+      const d: UseCaseDiagram = { system: "Outpatient Flow Suite", rows, actors, associations: rows.flatMap((r) => actors.map((a) => ({ actorId: a.id, useCaseId: r.id }))), relations: [] }
+      const scene = layoutUseCaseDiagram(d)
+      expectInvariants(d, scene)
+      // actor giữa nằm ngang tầm điểm giữa các use case, nửa trên / nửa dưới cân nhau
+      const es = ellipses(scene)
+      const mid = (es[0].cy + es[es.length - 1].cy) / 2
+      const hands = actors.map((a) => (scene.find(`actor:${a.id}#arms`) as Path).points[0][1])
+      expect(hands[3]).toBeCloseTo(mid, 6)
+      expect(hands[0] - mid).toBeCloseTo(mid - hands[6], 6)
+    }
+  })
+})
+
+describe("packBlocks", () => {
+  it("phần tử đứng riêng giữ đúng vị trí mong muốn", () => {
+    const blocks = packBlocks([{ id: "a", want: 0, size: 10 }, { id: "b", want: 50, size: 10 }])
+    expect(blocks.map((b) => b.top)).toEqual([0, 50])
+  })
+
+  it("phần tử chen nhau ⇒ một khối liền, căn giữa quanh trung bình chỗ muốn, không chồng nhau", () => {
+    const [block] = packBlocks([{ id: "a", want: 100, size: 40 }, { id: "b", want: 100, size: 40 }, { id: "c", want: 100, size: 40 }])
+    expect(block.items.map((i) => i.id)).toEqual(["a", "b", "c"])
+    expect(block.offsets).toEqual([0, 40, 80])
+    expect(block.top).toBe(60) // phần tử giữa đúng 100
+  })
+
+  it("khối căn giữa chạm khối trước ⇒ gộp tiếp, giữ thứ tự", () => {
+    const blocks = packBlocks([{ id: "a", want: 0, size: 30 }, { id: "b", want: 40, size: 30 }, { id: "c", want: 40, size: 30 }])
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].offsets).toEqual([0, 30, 60])
+    expect(blocks[0].top).toBeCloseTo((0 + (40 - 30) + (40 - 60)) / 3, 6)
   })
 })
 
