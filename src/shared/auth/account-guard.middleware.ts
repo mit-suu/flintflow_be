@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express"
 import { User } from "../../modules/user/user.model.js"
 import { ApiError } from "../utils/api-error.js"
+import { accountSuspendedError } from "./account-suspended.js"
 
 /**
  * BPMN Flow 10.4 — "Read the account from the database; the role carried in the token is never trusted",
@@ -24,13 +25,13 @@ export const requireActiveAccount = async (
       throw new ApiError(401, "Chưa xác thực người dùng", "UNAUTHORIZED")
     }
 
-    const user = await User.findById(userId).select("_id email role isActive").lean()
+    const user = await User.findById(userId).select("_id email role isActive suspendReason suspendedAt").lean()
     // Cùng mã 403 như `adminMiddleware`: token còn hạn nhưng tài khoản đã mất hiệu lực.
     if (!user) {
       throw new ApiError(403, "Tài khoản không còn tồn tại", "ACCOUNT_NOT_FOUND")
     }
     if (user.isActive === false) {
-      throw new ApiError(403, "Tài khoản đã bị khoá", "ACCOUNT_SUSPENDED")
+      throw accountSuspendedError(user)
     }
 
     req.account = {
