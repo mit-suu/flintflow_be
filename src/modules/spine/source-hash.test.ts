@@ -6,6 +6,7 @@ import { spineSchema } from "./spine.schema.js"
 import type { Spine } from "./spine.types.js"
 import { DIAGRAM_ENGINES, computeSourceHash, renderedDiagramHash } from "./source-hash.js"
 import { originalDiagramHash } from "./original-diagram.js"
+import { sharedScreenIds } from "./screen-actors.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURE: Spine = spineSchema.parse(
@@ -106,17 +107,68 @@ describe("renderedDiagramHash — hash của hình đã vẽ theo engine (FLF-33
   ]
 
   it("engine mặc định ⇒ đúng computeSourceHash: hình PlantUML đang có không stale khi deploy", () => {
-    for (const d of targets) expect(renderedDiagramHash(FIXTURE, d)).toBe(computeSourceHash(FIXTURE, d))
+    const legacy = Object.fromEntries(Object.keys(DIAGRAM_ENGINES).map((k) => [k, "plantuml@1"])) as typeof DIAGRAM_ENGINES
+    for (const d of targets) expect(renderedDiagramHash(FIXTURE, d, legacy)).toBe(computeSourceHash(FIXTURE, d))
   })
 
   it("đổi engine của một kind ⇒ hash hình của kind đó đổi; hash dữ liệu (ảnh gốc import) không đổi", () => {
     const svgContext = { ...DIAGRAM_ENGINES, context: "svg@1" }
     const context = targets[0]
     expect(renderedDiagramHash(FIXTURE, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context))
-    expect(renderedDiagramHash(FIXTURE, targets[1], svgContext)).toBe(computeSourceHash(FIXTURE, targets[1]))
+    // kind không đổi engine ⇒ hash giữ nguyên
+    expect(renderedDiagramHash(FIXTURE, targets[4], svgContext)).toBe(computeSourceHash(FIXTURE, targets[4]))
     expect(originalDiagramHash(FIXTURE, "context")).toBe(computeSourceHash(FIXTURE, context))
     // vẫn theo dữ liệu: sửa tên actor làm hình svg cũ
     const renamed = mutate((s) => (s.actors[0].name = "Renamed"))
     expect(renderedDiagramHash(renamed, context, svgContext)).not.toBe(renderedDiagramHash(FIXTURE, context, svgContext))
+  })
+
+  it("ERD: ký pháp của dự án (ngoài Spine) nằm trong hash hình — đổi ký pháp ⇒ hình cũ, thiếu ký pháp = chen", () => {
+    const erd = targets[3]
+    const chen = renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "chen" })
+    expect(renderedDiagramHash(FIXTURE, erd)).toBe(chen)
+    expect(renderedDiagramHash(FIXTURE, erd, undefined, {})).toBe(chen)
+    expect(renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "crowsfoot" })).not.toBe(chen)
+    expect(renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "idef1x" })).not.toBe(renderedDiagramHash(FIXTURE, erd, undefined, { erdNotation: "crowsfoot" }))
+    // kind khác không phụ thuộc ký pháp ERD
+    expect(renderedDiagramHash(FIXTURE, targets[0], undefined, { erdNotation: "idef1x" })).toBe(renderedDiagramHash(FIXTURE, targets[0]))
+    // dữ liệu ảnh gốc import không đổi
+    expect(computeSourceHash(FIXTURE, erd)).toBe(computeSourceHash(FIXTURE, erd))
+  })
+
+  it("luồng màn: đổi feature / thứ tự feature (dùng khi tách hình) hay actor của màn làm hình cũ; mô tả màn, tên feature thì không", () => {
+    const flow = targets[2]
+    const base = renderedDiagramHash(FIXTURE, flow)
+    expect(base).not.toBe(computeSourceHash(FIXTURE, flow))
+    expect(renderedDiagramHash(mutate((s) => (s.screens[0].description = "X")), flow)).toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.screens[0].feature_id = "F2")), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.features[0].name = "Renamed")), flow)).toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.features[1].order = 99)), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.use_cases.find((u) => u.id === "UC04")!.actor_ids = ["A02"])), flow)).not.toBe(base)
+    expect(renderedDiagramHash(mutate((s) => (s.actors.find((a) => a.id === "A01")!.name = "Renamed")), flow)).not.toBe(base)
+  })
+})
+
+describe("renderedDiagramHash — screen_flow theo template FPT", () => {
+  const flow = { kind: "screen_flow" as const, owner_id: null }
+
+  it("bố cục mới (svg@3: chỉ vẽ cây, tách theo actor) làm hình svg@2 cũ thành stale", () => {
+    expect(DIAGRAM_ENGINES.screen_flow).toBe("svg@3")
+    expect(renderedDiagramHash(FIXTURE, flow)).not.toBe(renderedDiagramHash(FIXTURE, flow, { ...DIAGRAM_ENGINES, screen_flow: "svg@2" }))
+  })
+
+  it("đổi tập màn dùng chung (nền xanh) đổi hash hình, không đổi hash dữ liệu ảnh gốc", () => {
+    // Thêm mọi actor người vào cuối actor_ids của một use case: actor đại diện của màn (actor đầu tiên, fixture không có
+    // actor tổng quát) giữ nguyên ⇒ dữ liệu nguồn không đổi, nhưng màn của use case đó thành màn dùng chung
+    const humans = FIXTURE.actors.filter((a) => a.kind === "human").map((a) => a.id)
+    const shared = sharedScreenIds(FIXTURE)
+    const uc = FIXTURE.use_cases.find((u) => FIXTURE.screens.some((x) => !shared.has(x.id) && u.function_ids.includes(x.primary_function_id ?? "")))!
+    const widened = mutate((s) => {
+      const target = s.use_cases.find((u) => u.id === uc.id)!
+      target.actor_ids = [...target.actor_ids, ...humans.filter((h) => !target.actor_ids.includes(h))]
+    })
+    expect(sharedScreenIds(widened)).not.toEqual(shared)
+    expect(computeSourceHash(widened, flow)).toBe(computeSourceHash(FIXTURE, flow))
+    expect(renderedDiagramHash(widened, flow)).not.toBe(renderedDiagramHash(FIXTURE, flow))
   })
 })

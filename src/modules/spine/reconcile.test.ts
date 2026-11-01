@@ -75,7 +75,7 @@ import type { Change as SpineChange, Spine } from "./spine.types.js"
 import * as repo from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
 import { awaitingReaccept, computeStatus } from "./section-status.js"
-import { computeSourceHash } from "./source-hash.js"
+import { renderedDiagramHash } from "./source-hash.js"
 import { clearPreviewStore } from "./change.service.js"
 import {
   changesMakingStale,
@@ -106,7 +106,7 @@ const SEED_SEQ = Math.max(0, ...FIXTURE.steps.map((s) => s.last_seq ?? 0))
  */
 const withRealHashes = (spine: Spine): Spine => {
   const copy = structuredClone(spine)
-  for (const diagram of copy.diagrams) diagram.source_hash = computeSourceHash(copy, diagram)
+  for (const diagram of copy.diagrams) diagram.source_hash = renderedDiagramHash(copy, diagram)
   return copy
 }
 

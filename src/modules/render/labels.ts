@@ -64,8 +64,10 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
   "Use Case Diagram": "Sơ đồ use case",
   "Screens Flow Diagram": "Sơ đồ luồng màn hình",
-  "Screens flow for": "Luồng màn hình của",
+  "Screens flow —": "Luồng màn hình —",
   "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
+  "Class Diagram": "Sơ đồ lớp",
+  "State Machine Diagram": "Sơ đồ trạng thái",
   "Screen Layout": "Bố cục màn hình"
 }
 
@@ -284,14 +286,16 @@ export const ASSEMBLE_TEXT = {
     systemInCharge: "System",
     removedSection: "(removed section)",
     imagePending: (diagramId: string) => `image pending: diagram ${diagramId} has not been rendered yet`,
-    mediaNotEmbedded: "original image could not be embedded (unsupported format)"
+    mediaNotEmbedded: "original image could not be embedded (unsupported format)",
+    diagramNotDrawn: "diagram could not be drawn yet"
   },
   vi: {
     unassignedFunctions: "Chức năng chưa thuộc tính năng nào",
     systemInCharge: "Hệ thống",
     removedSection: "(mục đã xoá)",
     imagePending: (diagramId: string) => `ảnh đang chờ: sơ đồ ${diagramId} chưa được render`,
-    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)"
+    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)",
+    diagramNotDrawn: "sơ đồ chưa vẽ được"
   }
 } as const
 

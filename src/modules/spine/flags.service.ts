@@ -22,6 +22,7 @@ import type { Change, Flag, Spine, SpineRecord } from "./spine.types.js"
 import type { ApplyResult, Op } from "./op.types.js"
 import * as repository from "./spine.repository.js"
 import { applyTransaction } from "./op-engine.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import { MODEL_OWNED_RULES, NON_WAIVABLE_RULES, RULES, flagKey, runDeterministicCheck, type FlagCandidate, type RuleProfile } from "./deterministic-check.js"
 import { WAIVE_REASON_MIN_LENGTH } from "./spine.schema.js"
 import { sectionsOfPath } from "./section-registry.js"
@@ -235,10 +236,11 @@ export const recompute = async (projectId: string, options: RecomputeOptions): P
   const spine = stripRecord(record)
   const atBaseline = options.atBaseline ?? false
   const ruleProfile = options.ruleProfile ?? (await ruleProfileResolver(projectId))
-  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile })
+  const { erdNotation } = await loadRenderContext(projectId)
+  const candidates = runDeterministicCheck(spine, changes, { atBaseline, ruleProfile, erdNotation })
   const baselineCandidates = atBaseline
     ? undefined
-    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
+    : runDeterministicCheck(spine, changes, { atBaseline: true, ruleProfile, erdNotation }).filter((c) => AT_BASELINE_RULES.has(c.rule_id))
   const plan = planFlagOps(spine, candidates, new Date(), { atBaseline, baselineCandidates, changes })
 
   if (plan.ops.length === 0) {

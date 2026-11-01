@@ -23,6 +23,7 @@ import {
 import { imageSize } from "image-size"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ruleLabel } from "../spine/human-labels.js"
+import { DIAGRAM_PLACEHOLDER_PNG, diagramErrorId } from "./diagram-placeholder.js"
 import { FLAG_TEXT, WRITER_TEXT, type DocumentLanguage, type WriterText } from "./labels.js"
 import type {
   Block,
@@ -488,6 +489,8 @@ function image(png: Buffer | string, caption: string | undefined, shading: Shadi
 
 function toPngBuffer(png: Buffer | string): Buffer {
   if (Buffer.isBuffer(png)) return png
+  // Sơ đồ vẽ lỗi: nhúng ảnh placeholder, chú thích (assemble đã ghi "chưa vẽ được") nói lý do
+  if (diagramErrorId(png) !== null) return Buffer.from(DIAGRAM_PLACEHOLDER_PNG, "base64")
   const base64 = png.replace(/^data:image\/png;base64,/, "").replace(/\s+/g, "")
   return Buffer.from(base64, "base64")
 }

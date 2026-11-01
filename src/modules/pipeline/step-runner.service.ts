@@ -35,9 +35,10 @@ import type { Spine, SpineRecord, StepState } from "../spine/spine.types.js"
 import * as flagsService from "../spine/flags.service.js"
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { FIXED_SECTIONS } from "../spine/section-registry.js"
-import { layoutRenderDeps, renderDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { layoutRenderDeps, renderDiagrams, sameDiagramSubject, staleRenderedDiagrams, type DiagramServiceDeps } from "../diagram/diagram.service.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
-import type { RenderTarget } from "../diagram/renderers/index.js"
+import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
 import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
@@ -154,7 +155,7 @@ export interface ResumeAnswers {
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
 export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => ({
-  draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { signal }),
+  draftExecutor: (actionType, input, projectId, userId, options) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { ...options, signal }),
   elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId, { signal }),
   reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, { signal }),
   assembleDocument: async (projectId, spineVersion) => {
@@ -1149,11 +1150,12 @@ export const runRenderReviewPhase = async (
   const { spine: spineAfterDraft } = await refresh(projectId)
   const alreadyRendered = new Set(renders)
   const staleTargets: RenderTarget[] = []
-  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft) : []) {
+  for (const diagram of options.rerenderStale ? staleRenderedDiagrams(spineAfterDraft, await loadRenderContext(projectId)) : []) {
     if (alreadyRendered.has(diagram.kind)) continue
-    const key = `${diagram.kind}:${diagram.owner_id ?? ""}`
+    const target = targetOfDiagram(diagram)
+    const key = `${target.kind}:${target.owner_id ?? ""}`
     if (staleTargets.some((t) => `${t.kind}:${t.owner_id ?? ""}` === key)) continue
-    staleTargets.push({ kind: diagram.kind, owner_id: diagram.owner_id })
+    staleTargets.push(target)
   }
   if (staleTargets.length > 0) {
     const before = new Map(spineAfterDraft.diagrams.map((d) => [d.id, d]))
@@ -1163,7 +1165,12 @@ export const runRenderReviewPhase = async (
     // Vẽ lại tự động mà hỏng (PlantUML chết, cú pháp lạ) thì KHÔNG để lại `render_error` — đó là cờ đỏ
     // không waive được, và nó sẽ chặn baseline vì một việc user không hề yêu cầu. Trả hình về bản cũ:
     // cờ `diagram_stale` (waive được) ở lại, kèm nút "Vẽ lại" để user tự quyết.
-    const broken = result.diagrams.filter((d) => d.render_status === "error" && before.get(d.id)?.render_status === "ok")
+    // Chỉ trả về khi bản cũ là CÙNG hình: cách chia hình đổi (vd use case theo actor → theo feature) thì cùng id đã là
+    // phần khác — trả bản cũ là in hình của nhóm khác vào chỗ này. Khi đó giữ `render_error` để lỗi lộ ra.
+    const broken = result.diagrams.filter((d) => {
+      const previous = before.get(d.id)
+      return d.render_status === "error" && previous?.render_status === "ok" && sameDiagramSubject(previous, d)
+    })
     if (broken.length > 0) {
       const restored = await applyTransaction(projectId, {
         base_version: spineVersion,

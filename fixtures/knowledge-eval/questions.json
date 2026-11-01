@@ -62,8 +62,8 @@
       "type": "exact",
       "language": "en",
       "question": "When is the use case diagram split into several parts?",
-      "answer_points": ["Always one diagram per human actor", "One diagram holds at most 20 use cases and at most 24 actor–use case edges; over a limit an actor's part is split by relation cluster", "A cluster longer than 40 is chunked into lots of 20"],
-      "gold_chunk_ids": ["usecase#order-and-splitting"]
+      "answer_points": ["One diagram per feature, the feature coming from the use case's first function", "A group over 20 use cases is split into equal diagrams (1/2, 2/2)", "A diagram that fails the layout check is split in half until it passes"],
+      "gold_chunk_ids": ["usecase#one-diagram-per-feature"]
     },
     {
       "id": "q09",
@@ -119,7 +119,7 @@
       "language": "en",
       "question": "Can diagram labels be written in Vietnamese, and can a diagram pull styles from a URL?",
       "answer_points": ["English labels only, no Vietnamese diacritics", "No !include, !import, URLs or remote skinparam — the server has no internet access", "Aliases are Spine ids and the visible label is the name"],
-      "gold_chunk_ids": ["plantuml-conventions#common-rules/1-5", "plantuml-conventions#common-rules/13"]
+      "gold_chunk_ids": ["plantuml-conventions#common-rules/1-5", "plantuml-conventions#common-rules/12-13"]
     },
     {
       "id": "q16",
@@ -143,7 +143,7 @@
       "language": "vi",
       "question": "Khi nào một thực thể trong ERD vi phạm chuẩn hoá 1NF, 2NF hoặc 3NF?",
       "answer_points": ["1NF: thực thể không chứa danh sách của một thứ khác — danh sách là thực thể con", "2NF: thực thể kết hợp chỉ mô tả cặp quan hệ", "3NF: một thực thể một thứ; mô tả thứ thứ hai thì tách thành hai thực thể"],
-      "gold_chunk_ids": ["entities-erd#pass-6-normal-form-3nf-at-entity-level"]
+      "gold_chunk_ids": ["entities-erd#pass-5-descriptions-agree-with-relations+pass-6-normal-form-3nf-at-entity-level"]
     },
     {
       "id": "q19",

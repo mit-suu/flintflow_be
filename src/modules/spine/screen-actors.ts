@@ -1,17 +1,15 @@
 /**
  * screen-actors.ts
  * ─────────────────────────────────────────────────────────────────
- * Màn nào do actor người (`actors[kind=human]`) nào dùng trực tiếp — nguồn tách sơ đồ Screens Flow theo actor
- * (§3.1.1), `source_hash` của nó và cờ `orphan_screen`. Spine không có field actor trên màn, nên suy ra từ hai
- * đường đã có:
- *   1. `permissions[].screen_id` → `roles[].actor_id` (S-4.3 — ai được vào màn),
- *   2. `use_cases[].actor_ids` × `function_ids` → `functions[].screen_id` (use case của actor chạy trên màn).
- * Màn public — chỉ role không gắn actor (`Guest`, `actor_id: null`) được vào: Login, Forgot/Reset Password, landing
- * công khai — là cửa vào chung nên thuộc MỌI actor người đã có màn (actor chưa có màn nào không thao tác UI).
- * Actor `system`/`time` không thao tác UI nên bị bỏ. Actor TỔNG QUÁT (`User`, cha của actor khác qua `parent_id`)
- * không dùng màn nào của riêng nó: màn nó chạm tới (Login của use case "Log In" gắn `User`) thuộc mọi actor
- * chuyên biệt bên dưới, vì chúng thừa kế use case — nên không có sơ đồ luồng màn riêng cho `User`.
- * Hàm thuần, kết quả sắp theo id.
+ * Màn nào do actor người (`actors[kind=human]`) nào dùng — cho sơ đồ Screens Flow (§3.1.1: màn nào vẽ, màn nào tô nền
+ * "dùng chung"), `source_hash` của nó và cờ `orphan_screen`. Actor đúng như mô hình actor – use case: actor tổng quát
+ * (`parent_id`) giữ nguyên, không bung xuống actor lá.
+ *
+ * Nguồn, theo thứ tự ưu tiên (nguồn sau chỉ dùng khi nguồn trước không ra actor người nào):
+ *   1. màn → `primary_function_id` → function → use case chứa function đó → `actor_ids`,
+ *   2. màn → mọi function có `screen_id` = màn (khi chưa có primary function, hoặc primary không thuộc use case nào),
+ *   3. `permissions[].screen_id` → `roles[].actor_id` (S-4.3 — ai được vào màn).
+ * Actor `system`/`time` không thao tác UI nên bị bỏ. Hàm thuần.
  */
 
 import type { Spine } from "./spine.types.js"
@@ -19,53 +17,76 @@ import { actorParents, ancestorsOf } from "./actor-generalization.js"
 
 type ScreenActorSource = Pick<Spine, "actors" | "roles" | "permissions" | "use_cases" | "functions" | "screens">
 
-/** `screen_id → actor_id` của từng role có quyền trên màn: `null` = role không gắn actor (Guest), `undefined` = role không tồn tại. */
-const roleActorsByScreen = (spine: Pick<Spine, "roles" | "permissions">): Map<string, (string | null | undefined)[]> => {
-  const roleActor = new Map(spine.roles.map((r) => [r.id, r.actor_id]))
-  const out = new Map<string, (string | null | undefined)[]>()
-  for (const p of spine.permissions) out.set(p.screen_id, [...(out.get(p.screen_id) ?? []), roleActor.get(p.role_id)])
-  return out
-}
+const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
 
-/** Màn mở cho người chưa đăng nhập: có quyền của ít nhất một role không gắn actor (Guest) — Login, Register, Reset Password. */
-export const guestOpenScreenIds = (spine: Pick<Spine, "roles" | "permissions">): Set<string> =>
-  new Set([...roleActorsByScreen(spine)].filter(([, actors]) => actors.some((a) => a === null)).map(([id]) => id))
-
-/** `screen_id → actor_id[]` (chỉ actor người, sắp theo id). Màn không có actor nào ⇒ mảng rỗng. */
-export const screenActorMap = (spine: ScreenActorSource): Map<string, string[]> => {
+/** `screen_id → mọi actor người dùng màn` theo thứ tự xuất hiện (rỗng khi không có ai). */
+export const screenActorSets = (spine: ScreenActorSource): Map<string, string[]> => {
   const human = new Set(spine.actors.filter((a) => a.kind === "human").map((a) => a.id))
-  const screenIds = new Set(spine.screens.map((s) => s.id))
-  const links = new Map<string, Set<string>>(spine.screens.map((s) => [s.id, new Set<string>()]))
-  // Actor tổng quát ⇒ các actor lá (không còn con) bên dưới nó; actor thường ⇒ chính nó
-  const parents = actorParents(spine.actors)
-  const general = new Set(parents.values())
-  const leavesOf = (actorId: string): string[] => {
-    if (!general.has(actorId)) return [actorId]
-    return [...human].filter((id) => !general.has(id) && ancestorsOf(id, parents).includes(actorId))
-  }
-  const link = (screenId: string | null, actorId: string | null) => {
-    if (!screenId || !actorId || !screenIds.has(screenId) || !human.has(actorId)) return
-    for (const id of leavesOf(actorId)) links.get(screenId)?.add(id)
-  }
-
+  const useCases = [...spine.use_cases].sort((a, b) => compare(a.id, b.id))
+  const functions = [...spine.functions].sort((a, b) => compare(a.id, b.id))
   const roleActor = new Map(spine.roles.map((r) => [r.id, r.actor_id]))
-  for (const p of spine.permissions) link(p.screen_id, roleActor.get(p.role_id) ?? null)
 
-  const fnScreen = new Map(spine.functions.map((f) => [f.id, f.screen_id]))
-  for (const uc of spine.use_cases) {
-    for (const fnId of uc.function_ids) for (const actorId of uc.actor_ids) link(fnScreen.get(fnId) ?? null, actorId)
+  const unique = (ids: Iterable<string | null | undefined>): string[] => {
+    const out: string[] = []
+    for (const id of ids) if (id && human.has(id) && !out.includes(id)) out.push(id)
+    return out
   }
+  const viaUseCases = (functionIds: ReadonlySet<string>): string[] =>
+    unique(useCases.filter((u) => u.function_ids.some((f) => functionIds.has(f))).flatMap((u) => u.actor_ids))
 
-  // Màn public: có quyền, và mọi quyền đều thuộc role có thật mà không gắn actor
-  const rolesOn = roleActorsByScreen(spine)
-  const isPublic = (screenId: string) => (rolesOn.get(screenId) ?? []).length > 0 && rolesOn.get(screenId)!.every((a) => a === null)
-  const uiActors = new Set([...links].filter(([screenId]) => !isPublic(screenId)).flatMap(([, ids]) => [...ids]))
-  for (const screenId of screenIds) if (isPublic(screenId)) for (const actorId of uiActors) link(screenId, actorId)
-
-  const sorted = (ids: Set<string>) => [...ids].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-  return new Map([...links].map(([screenId, ids]) => [screenId, sorted(ids)]))
+  return new Map(
+    spine.screens.map((screen) => {
+      const primary = functions.find((f) => f.id === screen.primary_function_id)
+      let actors = primary ? viaUseCases(new Set([primary.id])) : []
+      if (actors.length === 0) actors = viaUseCases(new Set(functions.filter((f) => f.screen_id === screen.id).map((f) => f.id)))
+      if (actors.length === 0) {
+        actors = unique(
+          spine.permissions
+            .filter((p) => p.screen_id === screen.id)
+            .map((p) => roleActor.get(p.role_id))
+            .sort((a, b) => compare(a ?? "", b ?? ""))
+        )
+      }
+      return [screen.id, actors] as const
+    })
+  )
 }
 
-/** Đã có ít nhất một liên kết màn ↔ actor người chưa — trước S-4.3/S-4.4 thường chưa, khi đó chưa tách được. */
+/**
+ * `screen_id → [actor đại diện]` (rỗng khi không có actor nào): tổ tiên chung gần nhất của các actor dùng màn, không có
+ * tổ tiên chung ⇒ actor đầu tiên. Thuộc `sourceProjection` của `screen_flow` — giữ ổn định để hash ảnh gốc không đổi.
+ */
+export const screenActorMap = (spine: ScreenActorSource): Map<string, string[]> => {
+  const parents = actorParents(spine.actors)
+  return new Map(
+    [...screenActorSets(spine)].map(([screenId, actors]) => {
+      if (actors.length === 0) return [screenId, []]
+      const chains = actors.map((id) => [id, ...ancestorsOf(id, parents)])
+      const common = chains[0].find((candidate) => chains.every((chain) => chain.includes(candidate)))
+      return [screenId, [common ?? actors[0]]]
+    })
+  )
+}
+
+/** Đã có ít nhất một liên kết màn ↔ actor người chưa — trước S-4.1/S-4.4 thường chưa. */
 export const hasScreenActorLinks = (map: ReadonlyMap<string, readonly string[]>): boolean =>
   [...map.values()].some((ids) => ids.length > 0)
+
+/**
+ * Màn dùng chung (nền `#7ACFF5` trên Screens Flow — ô vàng của hình mẫu template FPT): mọi actor người lá (không có
+ * actor người con) đều dùng được màn — chính nó hoặc một tổ tiên của nó nằm trong tập actor của màn. Chưa có actor
+ * người nào thì không màn nào dùng chung.
+ */
+export const sharedScreenIds = (spine: ScreenActorSource): Set<string> => {
+  const humans = spine.actors.filter((a) => a.kind === "human")
+  const parents = actorParents(spine.actors)
+  const hasHumanChild = new Set(humans.map((a) => parents.get(a.id)).filter((p): p is string => p !== undefined))
+  const leaves = humans.filter((a) => !hasHumanChild.has(a.id)).map((a) => a.id)
+  if (leaves.length === 0) return new Set()
+  const shared = new Set<string>()
+  for (const [screenId, actors] of screenActorSets(spine)) {
+    const users = new Set(actors)
+    if (leaves.every((leaf) => [leaf, ...ancestorsOf(leaf, parents)].some((id) => users.has(id)))) shared.add(screenId)
+  }
+  return shared
+}

@@ -17,6 +17,7 @@ import { AiActionError, type AiActionResult } from "../../shared/ai/ai-action.ty
 import type { OpTransaction } from "../../shared/ai/response-parser.js"
 import { projectStep, type StepContext } from "./context-projection.js"
 import { DraftRejectedError, draftOps, type DraftExecutor } from "./draft-to-ops.js"
+import { getSkill } from "../../shared/ai/prompt-registry.service.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.resolve(__dirname, "../../../fixtures")
@@ -161,6 +162,14 @@ describe("draftOps — chuẩn hoá op của model (BUG-03, BUG-29)", () => {
     expect(plan.spine.screens.find((x) => x.id === "S99")?.detail_status).toBe("pending")
     const added = plan.spine.assumptions[plan.spine.assumptions.length - 1]
     expect(added).toMatchObject({ status: "unconfirmed", confirmed_at: null })
+  })
+
+  it("lượt draft mang maxTokens của skill nội dung của step (screens-and-flow cho S-4.1), không chỉ của draft-to-ops", async () => {
+    const spine = structuredClone(FIXTURE)
+    const executor = vi.fn<DraftExecutor>(async () => reply([]))
+    await draftOps("p", "S-4.1", ctxFor(spine, "S-4.1"), { userId: "u", spine, executor })
+    expect(executor.mock.calls[0][4]).toEqual({ minMaxTokens: getSkill("screens-and-flow").providerConfig.maxTokens })
+    expect(getSkill("screens-and-flow").providerConfig.maxTokens).toBeGreaterThan(getSkill("draft-to-ops").providerConfig.maxTokens!)
   })
 
   it("set detail_status bị từ chối để model hỏi user", async () => {

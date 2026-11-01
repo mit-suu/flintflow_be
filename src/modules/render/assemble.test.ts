@@ -848,7 +848,7 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
         renderKind(spine, target.kind, target.owner_id).map((part, i) => ({
           id: `D-${target.kind}-${target.owner_id ?? "x"}-${i + 1}`,
           kind: part.kind,
-          format: "puml", source: part.source,
+          format: part.format, source: part.source,
           section: part.section,
           owner_kind: part.owner_kind,
           owner_id: part.owner_id,
@@ -891,8 +891,8 @@ describe("FLF-265 — tài liệu theo ngôn ngữ dự án (bản xem đã dị
         expect(diagram.source, id).not.toBe(spine.diagrams.find((d) => d.id === id)?.source)
       }
       const flow = imagesOf(doc).filter((b) => String(b.png).startsWith("VI:D-screen_flow"))
-      expect(flow.length).toBeGreaterThan(1)
-      for (const b of flow) expect(b.caption).toMatch(/^Luồng màn hình của \[vi\] /)
+      expect(flow.length).toBe(1)
+      for (const b of flow) expect(b.caption).toBe("Luồng màn hình")
       expect(JSON.stringify(spine.diagrams)).not.toContain("Luồng màn hình")
     })
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import type { Request, Response } from "express"
-import { CreateProjectSchema, UpdateDocumentLanguageSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, parseKnowledgeFlag, projectModeSchema, validateRequest } from "./project.validation.js"
 import { Project, PROJECT_MODES } from "./project.model.js"
 
 describe("documentLanguage (FLF-265)", () => {
@@ -87,5 +87,21 @@ describe("cờ knowledge của tin chat (FLF-267)", () => {
 
   it.each([["chuỗi", "true"], ["số", 1], ["null", null]])("%s ⇒ 400 VALIDATION_ERROR", (_label, value) => {
     expect(() => parseKnowledgeFlag({ knowledge: value })).toThrow(expect.objectContaining({ statusCode: 400, code: "VALIDATION_ERROR" }))
+  })
+})
+
+describe("erdNotation", () => {
+  it("đổi ký pháp: bắt buộc, chỉ nhận chen | crowsfoot | idef1x, không nhận key lạ", () => {
+    for (const erdNotation of ["chen", "crowsfoot", "idef1x"]) expect(UpdateErdNotationSchema.safeParse({ erdNotation }).success).toBe(true)
+    expect(UpdateErdNotationSchema.safeParse({}).success).toBe(false)
+    expect(UpdateErdNotationSchema.safeParse({ erdNotation: "uml" }).success).toBe(false)
+    expect(UpdateErdNotationSchema.safeParse({ erdNotation: "Chen" }).success).toBe(false)
+    expect(UpdateErdNotationSchema.safeParse({ erdNotation: "chen", name: "x" }).success).toBe(false)
+  })
+
+  it("schema Project: mặc định chen, từ chối giá trị lạ", () => {
+    expect(new Project({ name: "x" }).erdNotation).toBe("chen")
+    expect(new Project({ name: "x", erdNotation: "idef1x" }).erdNotation).toBe("idef1x")
+    expect(new Project({ name: "x", erdNotation: "uml" }).validateSync()?.errors.erdNotation).toBeDefined()
   })
 })

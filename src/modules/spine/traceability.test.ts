@@ -42,9 +42,9 @@ describe("trace — bản đồ quanh một thực thể", () => {
     expect(graph.edges.some((e) => e.from === "FN001" && e.to === "S01" && e.field === "screen_id")).toBe(true)
   })
 
-  it("entity: chỉ quan hệ entity ↔ entity", () => {
+  it("entity: quan hệ entity ↔ entity và feature dùng entity", () => {
     const graph = trace(FIXTURE, { entity: "entity", id: FIXTURE.entities[0].id }, { depth: 1 })
-    expect(kinds(graph)).toEqual(["entity"])
+    expect(kinds(graph)).toEqual(["entity", "feature"])
   })
 
   it("thực thể không tồn tại ⇒ đồ thị rỗng, không ném", () => {

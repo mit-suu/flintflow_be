@@ -12,7 +12,7 @@
     { "op": "remove", "path": "permissions[screen_id=S08,role_id=R1,action=view]", "reason": "Cascade: permission of removed screen S08." },
     { "op": "remove", "path": "permissions[screen_id=S08,role_id=R2,action=view]", "reason": "Cascade: permission of removed screen S08." },
     { "op": "remove", "path": "permissions[screen_id=S08,role_id=R2,action=update]", "reason": "Cascade: permission of removed screen S08." },
-    { "op": "remove", "path": "screens[id=S07].flow_to[=S08]", "reason": "Cascade: S07 no longer navigates to the removed screen." },
+    { "op": "remove", "path": "screens[id=S07].flow_to[to=S08]", "reason": "Cascade: S07 no longer navigates to the removed screen." },
     { "op": "remove", "path": "use_cases[id=UC12].function_ids[=FN034]", "reason": "Cascade: UC12 referenced a function of removed screen S08." },
     { "op": "remove", "path": "use_cases[id=UC12].function_ids[=FN035]", "reason": "Cascade: UC12 referenced a function of removed screen S08." },
     { "op": "remove", "path": "sections[id=function:FN034]", "reason": "Cascade: section of removed function." },
