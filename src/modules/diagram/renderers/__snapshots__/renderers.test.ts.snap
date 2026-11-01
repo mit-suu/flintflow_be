@@ -843,6 +843,7 @@ skinparam dpi 192
 skinparam ParticipantPadding 30
 skinparam maxMessageSize 220
 skinparam sequenceMessageAlign direction
+skinparam style strictuml
 hide footbox
 actor ":Founder" as A01
 participant ":System" as SSD_SYSTEM
@@ -887,6 +888,7 @@ skinparam dpi 192
 skinparam ParticipantPadding 30
 skinparam maxMessageSize 220
 skinparam sequenceMessageAlign direction
+skinparam style strictuml
 hide footbox
 actor ":Founder" as A01
 participant ":System" as SSD_SYSTEM
@@ -927,6 +929,7 @@ skinparam dpi 192
 skinparam ParticipantPadding 30
 skinparam maxMessageSize 220
 skinparam sequenceMessageAlign direction
+skinparam style strictuml
 hide footbox
 actor ":Founder" as A01
 participant ":System" as SSD_SYSTEM
@@ -969,6 +972,7 @@ skinparam dpi 192
 skinparam ParticipantPadding 30
 skinparam maxMessageSize 220
 skinparam sequenceMessageAlign direction
+skinparam style strictuml
 hide footbox
 actor ":Founder" as A01
 participant ":System" as SSD_SYSTEM
@@ -1016,6 +1020,7 @@ skinparam dpi 192
 skinparam ParticipantPadding 30
 skinparam maxMessageSize 220
 skinparam sequenceMessageAlign direction
+skinparam style strictuml
 hide footbox
 participant ":Scheduler" as A09
 participant ":System" as SSD_SYSTEM
@@ -1053,6 +1058,7 @@ skinparam dpi 192
 skinparam ParticipantPadding 30
 skinparam maxMessageSize 220
 skinparam sequenceMessageAlign direction
+skinparam style strictuml
 hide footbox
 participant ":Payment Gateway" as A05
 participant ":System" as SSD_SYSTEM
