@@ -1287,19 +1287,19 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
 "<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="868" height="585" viewBox="-446 -20 868 585">
+<svg xmlns="http://www.w3.org/2000/svg" width="868" height="580" viewBox="-446 -82 868 580">
 <title>Use Cases — Authentication &amp; Onboarding</title>
-<rect x="-446" y="-20" width="868" height="585" fill="#fff"/>
+<rect x="-446" y="-82" width="868" height="580" fill="#fff"/>
 <rect x="-184" y="0" width="368" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
-<line x1="-348.92" y1="349" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
-<line x1="-348.92" y1="95" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
-<line x1="-348.92" y1="222" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
-<line x1="-348.92" y1="476" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
-<line x1="-348.92" y1="349" x2="-138" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="223.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="-30.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="96.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="350.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="223.5" x2="-138" y2="199" stroke="#000" stroke-width="1.2"/>
 <line x1="336.9" y1="303" x2="138" y2="199" stroke="#000" stroke-width="1.2"/>
-<line x1="-348.92" y1="349" x2="-138" y2="303" stroke="#000" stroke-width="1.2"/>
-<line x1="-348.92" y1="476" x2="-138" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="223.5" x2="-138" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="350.5" x2="-138" y2="407" stroke="#000" stroke-width="1.2"/>
 <line x1="336.9" y1="303" x2="138" y2="407" stroke="#000" stroke-width="1.2"/>
 <ellipse cx="0" cy="95" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Log In</text>
@@ -1309,30 +1309,30 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 <text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Complete Onboarding</text>
 <ellipse cx="0" cy="407" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Register Account</text>
-<circle cx="-364.92" cy="328" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="338" x2="-364.92" y2="368" stroke="#000" stroke-width="1.2"/>
-<line x1="-380.92" y1="349" x2="-348.92" y2="349" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="368" x2="-376.92" y2="392" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="368" x2="-352.92" y2="392" stroke="#000" stroke-width="1.2"/>
-<text x="-364.92" y="414" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
-<circle cx="-364.92" cy="74" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="84" x2="-364.92" y2="114" stroke="#000" stroke-width="1.2"/>
-<line x1="-380.92" y1="95" x2="-348.92" y2="95" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="114" x2="-376.92" y2="138" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="114" x2="-352.92" y2="138" stroke="#000" stroke-width="1.2"/>
-<text x="-364.92" y="160" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
-<circle cx="-364.92" cy="201" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="211" x2="-364.92" y2="241" stroke="#000" stroke-width="1.2"/>
-<line x1="-380.92" y1="222" x2="-348.92" y2="222" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="241" x2="-376.92" y2="265" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="241" x2="-352.92" y2="265" stroke="#000" stroke-width="1.2"/>
-<text x="-364.92" y="287" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Administrator</text>
-<circle cx="-364.92" cy="455" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="465" x2="-364.92" y2="495" stroke="#000" stroke-width="1.2"/>
-<line x1="-380.92" y1="476" x2="-348.92" y2="476" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="495" x2="-376.92" y2="519" stroke="#000" stroke-width="1.2"/>
-<line x1="-364.92" y1="495" x2="-352.92" y2="519" stroke="#000" stroke-width="1.2"/>
-<text x="-364.92" y="541" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Guest</text>
+<circle cx="-364.92" cy="202.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="212.5" x2="-364.92" y2="242.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="223.5" x2="-348.92" y2="223.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="242.5" x2="-376.92" y2="266.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="242.5" x2="-352.92" y2="266.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="288.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="-364.92" cy="-51.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="-41.5" x2="-364.92" y2="-11.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="-30.5" x2="-348.92" y2="-30.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="-11.5" x2="-376.92" y2="12.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="-11.5" x2="-352.92" y2="12.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="34.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
+<circle cx="-364.92" cy="75.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="85.5" x2="-364.92" y2="115.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="96.5" x2="-348.92" y2="96.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="115.5" x2="-376.92" y2="139.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="115.5" x2="-352.92" y2="139.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="161.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Administrator</text>
+<circle cx="-364.92" cy="329.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="339.5" x2="-364.92" y2="369.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="350.5" x2="-348.92" y2="350.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="369.5" x2="-376.92" y2="393.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="369.5" x2="-352.92" y2="393.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="415.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Guest</text>
 <circle cx="352.9" cy="282" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <line x1="352.9" y1="292" x2="352.9" y2="322" stroke="#000" stroke-width="1.2"/>
 <line x1="336.9" y1="303" x2="368.9" y2="303" stroke="#000" stroke-width="1.2"/>
@@ -1430,9 +1430,9 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 <rect x="-455" y="-20" width="668" height="726" fill="#fff"/>
 <rect x="-193" y="0" width="386" height="686" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
-<line x1="-357.92" y1="355" x2="-147" y2="95" stroke="#000" stroke-width="1.2"/>
-<line x1="-357.92" y1="482" x2="-147" y2="407" stroke="#000" stroke-width="1.2"/>
-<line x1="-357.92" y1="355" x2="-147" y2="615" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="317.5" x2="-147" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="444.5" x2="-147" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="317.5" x2="-147" y2="615" stroke="#000" stroke-width="1.2"/>
 <line x1="0" y1="132" x2="0" y2="162" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
 <polyline points="-4.89,151.04 0,162 4.89,151.04" fill="none" stroke="#000" stroke-width="1.2"/>
 <text x="14" y="147" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
@@ -1454,18 +1454,18 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 <text x="0" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Waive Red Flag</text>
 <ellipse cx="0" cy="615" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
 <text x="0" y="615" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Export Word Document</text>
-<circle cx="-373.92" cy="334" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<line x1="-373.92" y1="344" x2="-373.92" y2="374" stroke="#000" stroke-width="1.2"/>
-<line x1="-389.92" y1="355" x2="-357.92" y2="355" stroke="#000" stroke-width="1.2"/>
-<line x1="-373.92" y1="374" x2="-385.92" y2="398" stroke="#000" stroke-width="1.2"/>
-<line x1="-373.92" y1="374" x2="-361.92" y2="398" stroke="#000" stroke-width="1.2"/>
-<text x="-373.92" y="420" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
-<circle cx="-373.92" cy="461" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
-<line x1="-373.92" y1="471" x2="-373.92" y2="501" stroke="#000" stroke-width="1.2"/>
-<line x1="-389.92" y1="482" x2="-357.92" y2="482" stroke="#000" stroke-width="1.2"/>
-<line x1="-373.92" y1="501" x2="-385.92" y2="525" stroke="#000" stroke-width="1.2"/>
-<line x1="-373.92" y1="501" x2="-361.92" y2="525" stroke="#000" stroke-width="1.2"/>
-<text x="-373.92" y="547" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
+<circle cx="-373.92" cy="296.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="306.5" x2="-373.92" y2="336.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-389.92" y1="317.5" x2="-357.92" y2="317.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="336.5" x2="-385.92" y2="360.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="336.5" x2="-361.92" y2="360.5" stroke="#000" stroke-width="1.2"/>
+<text x="-373.92" y="382.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="-373.92" cy="423.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="433.5" x2="-373.92" y2="463.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-389.92" y1="444.5" x2="-357.92" y2="444.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="463.5" x2="-385.92" y2="487.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="463.5" x2="-361.92" y2="487.5" stroke="#000" stroke-width="1.2"/>
+<text x="-373.92" y="509.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
 </svg>
 "
 `;
