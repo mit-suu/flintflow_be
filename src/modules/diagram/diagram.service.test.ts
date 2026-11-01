@@ -144,13 +144,13 @@ describe("compileWithFix", () => {
 describe("renderAll / renderDiagram qua op engine", () => {
   beforeEach(() => db.reset())
 
-  it("render cả bộ fixture: 33 hình ok (usecase, screen_flow và class mỗi feature một hình — 6 phần; state_machine mỗi entity có vòng đời một hình; sequence mỗi function đủ tiêu chí một hình), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
+  it("render cả bộ fixture: 28 hình ok (usecase và class mỗi feature một hình — 6 phần; screen_flow một hình cho cả hệ thống; state_machine mỗi entity có vòng đời một hình; sequence mỗi function đủ tiêu chí một hình), giữ id D01–D05, một transaction, file SVG+PNG trong store", async () => {
     await seed()
     const { deps, store } = makeDeps()
     const result = await renderAll(PROJECT, { by: USER, deps })
 
     expect(result.spine_version).toBe(2)
-    expect(result.diagrams).toHaveLength(33)
+    expect(result.diagrams).toHaveLength(28)
     expect(result.diagrams.every((d) => d.render_status === "ok" && d.source_hash.length === 64)).toBe(true)
     const byKind = Object.fromEntries(
       result.diagrams.filter((d) => !["screen_layout", "screen_flow", "usecase", "class", "state_machine", "sequence"].includes(d.kind)).map((d) => [d.kind, d.id])
@@ -158,8 +158,8 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(byKind).toEqual({ context: "D01", erd: "D04" })
     // Sơ đồ use case mỗi feature một hình (6 feature của fixture); phần đầu GIỮ id cũ để baseline đã ký không mất ảnh §2.2.1
     expect(result.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)).toEqual(["D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6"])
-    // Một sơ đồ luồng màn cho mỗi feature; phần đầu giữ id cũ
-    expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03", "D03-2", "D03-3", "D03-4", "D03-5", "D03-6"])
+    // Một sơ đồ luồng màn cho cả hệ thống, giữ id cũ
+    expect(result.diagrams.filter((d) => d.kind === "screen_flow").map((d) => d.id)).toEqual(["D03"])
     // Class diagram mỗi feature một hình, chủ là feature; mỗi feature một nhóm id riêng
     expect(result.diagrams.filter((d) => d.kind === "class").map((d) => [d.owner_kind, d.owner_id, d.section])).toEqual(["F1", "F2", "F3", "F4", "F5", "F6"].map((f) => ["feature", f, `feature:${f}`]))
     expect(result.diagrams.filter((d) => d.kind === "class").map((d) => d.id)).toEqual(["D06", "D07", "D08", "D09", "D10", "D11"])
@@ -176,10 +176,10 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(result.diagrams.filter((d) => d.kind === "screen_layout").map((d) => d.id).sort()).toEqual(["D05", "D20", "D21", "D22", "D23"])
 
     const spine = (await repo.get(PROJECT))!
-    expect(spine.diagrams).toHaveLength(33)
+    expect(spine.diagrams).toHaveLength(28)
     expect(staleDiagrams(spine)).toEqual([])
     expect(runDeterministicCheck(spine).filter((f) => f.level === "red")).toEqual([])
-    expect(store.files.size).toBe(66)
+    expect(store.files.size).toBe(56)
     expect((await loadDiagramFile(PROJECT, "D05", "svg", store)).contentType).toBe("image/svg+xml")
 
     // lần hai: không đổi gì ⇒ không compile, không ghi
@@ -199,7 +199,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect(flags.filter((f) => f.rule_id === "render_error")).toMatchObject([{ target_id: "D05", remediation_step: "S-5.3@S07" }])
   })
 
-  it("đổi tên actor ⇒ hình context, usecase, luồng màn (tên làn theo actor) và sơ đồ tuần tự có actor đó stale ⇒ render lại chỉ các hình đó", async () => {
+  it("đổi tên actor ⇒ hình context, usecase, luồng màn (actor của màn nằm trong dữ liệu nguồn) và sơ đồ tuần tự có actor đó stale ⇒ render lại chỉ các hình đó", async () => {
     await seed()
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
@@ -212,7 +212,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const stale = staleDiagrams((await repo.get(PROJECT))!).map((d) => d.kind)
     expect([...new Set(stale)].sort()).toEqual(["context", "screen_flow", "sequence", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
-    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6", "D03", "D03-2", "D03-3", "D03-4", "D03-5", "D03-6", "D14", "D15", "D16", "D17"])
+    expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6", "D03", "D14", "D15", "D16", "D17"])
   })
 
   it("40 use case chưa có feature của 4 actor ⇒ nhóm theo actor chính, mỗi nhóm một hình D02, D02-2…, phần đầu giữ id cũ", async () => {
@@ -301,7 +301,7 @@ describe("renderAll / renderDiagram qua op engine", () => {
     const { deps } = makeDeps()
     await renderAll(PROJECT, { by: USER, deps })
     const forced = await renderAll(PROJECT, { by: USER, deps, force: true })
-    expect(forced.rendered).toHaveLength(33)
+    expect(forced.rendered).toHaveLength(28)
     expect(forced.spine_version).toBe(2)
   })
 

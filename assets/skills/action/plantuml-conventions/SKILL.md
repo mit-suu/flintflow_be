@@ -33,7 +33,7 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 | srs-spine §7.1 |
 | `fixed:2.2.1` | Functional requirements — user view | `usecase` | `null` (one part per feature; actor hierarchy part in `fixed:2.1`) | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
-| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | `null` (one part per feature) | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
+| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | `null` (one part for the system) | FPT SRS template §3.1.1 (screen box, pop-up oval, tab frame) | svg | FLF-349 | srs-spine §7.1 |
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
 | `feature:<id>` | Logical data model (domain) | `class` | feature (one part per feature, at the head of §3.x) | UML 2.5 Class (analysis level, 2 compartments) | svg | FLF-325 | srs-spine §7.1 |
 | `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | srs-spine §7.1 |
@@ -53,12 +53,12 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
 5. **Split by kind**, not "one diagram per actor":
    - `context`: one diagram for the whole system.
    - `usecase`: one per feature group. A group over ~20 use cases is split into equal parts (`<feature> (1/2)`); a part that fails the layout check is split again; keep each `<<include>>` / `<<extend>>` pair in the same part (a use case with more than two relations repeats in several parts). No overview diagram. After S-4.1 a use case's feature comes from `function_ids` → `functions[].feature_id` (several ⇒ the first function's in `function_ids` order); before S-4.1 (no feature derivable) the use case goes to a group named after its cluster's main human actor, after all features.
-   - `screen_flow`, `class`: one per feature.
+   - `class`: one per feature. `screen_flow`: one for the whole system, split by whole features over 40 screens.
    - `erd`: whole system; split by connected entity cluster when > ~25 entities.
    - `sequence`: one per function (not every function needs one).
    - `state_machine`: one per entity that has states.
    - Other kinds: more than ~25 nodes ⇒ split further within the same owner. Each part is its own `diagrams[]` entry with the same `kind`.
-6. **Actors, swimlanes and lifelines follow the actor–use case model**: use the actor the use case is linked to, keep generalization, never expand to leaf actors, never merge extra actors, use the exact actor name. General actors are defined in §2.1 and its actor hierarchy diagram; other diagrams only use the name and the description below the figure says "see §2.1". Actor unknown ⇒ do not guess.
+6. **Actors and lifelines follow the actor–use case model**: use the actor the use case is linked to, keep generalization, never expand to leaf actors, never merge extra actors, use the exact actor name. General actors are defined in §2.1 and its actor hierarchy diagram; other diagrams only use the name and the description below the figure says "see §2.1". Actor unknown ⇒ do not guess.
 7. **Naming**: actor, entity and class = singular noun; use case, function and activity action = verb phrase; data-flow label = noun; state = adjective or participle (Pending, Approved).
 8. **Lines and arrowheads follow the notation's semantics, never aesthetics**: solid = association / call / control flow; dashed = dependency / include / extend / reply. Open V, hollow triangle and filled triangle exactly as the standard defines. An arrow without a label where the notation requires one is an error. Create a relation only when the standard's semantics prove it.
 9. **Layout**: prefer one straight segment. Orthogonal bends only when a straight line would cross a shape or text, and only for `erd`, `class`, `screen_flow`. `state_machine` never bends: every transition is one straight segment, parallel segments for several transitions between the same two states, a self-transition is written inside the state (internal transition). No curves, no line over text or shapes, no two overlapping lines, minimal crossings. Cannot meet this ⇒ split the diagram.

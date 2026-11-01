@@ -23,11 +23,9 @@ export interface DiagramLabels {
   actorHierarchyTitle: string
   /** Nhóm use case không có actor nào. */
   otherGroup: string
-  /** Tiêu đề hình luồng màn của một feature (kèm `(i/n)` khi tách) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
-  screensFlowTitle: (feature: string) => string
-  /** Chữ trong stereotype `<<…>>` của màn pop-up. */
-  popup: string
-  /** Guard của nhánh còn lại ở decision node (in `[else]`). */
+  /** Tiêu đề hình luồng màn của cả hệ thống (`part` = `i/n` khi tách nhiều hình) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
+  screensFlowTitle: (part?: string) => string
+  /** Guard của nhánh còn lại (`else`) trong khối `alt` của sơ đồ tuần tự. */
   elseGuard: string
   noEntities: string
   /** Tiêu đề hình ERD (kèm `(i/n)` khi tách) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
@@ -56,8 +54,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     useCasesTitle: (groups) => `Use Cases — ${groups}`,
     actorHierarchyTitle: "Actor Hierarchy",
     otherGroup: "Other",
-    screensFlowTitle: (feature) => `Screens flow — ${feature}`,
-    popup: "pop-up",
+    screensFlowTitle: (part) => (part ? `Screens flow (${part})` : "Screens flow"),
     elseGuard: "else",
     noEntities: "No entities yet",
     erdTitle: "Entity Relationship Diagram",
@@ -77,8 +74,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     useCasesTitle: (groups) => `Sơ đồ use case — ${groups}`,
     actorHierarchyTitle: "Phân cấp tác nhân",
     otherGroup: "Khác",
-    screensFlowTitle: (feature) => `Luồng màn hình — ${feature}`,
-    popup: "pop-up",
+    screensFlowTitle: (part) => (part ? `Luồng màn hình (${part})` : "Luồng màn hình"),
     elseGuard: "ngược lại",
     noEntities: "Chưa có thực thể",
     erdTitle: "Sơ đồ quan hệ thực thể",
