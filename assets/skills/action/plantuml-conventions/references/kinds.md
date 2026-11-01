@@ -70,7 +70,7 @@ Engine `puml` (PlantUML server): UML 2.5 Sequence from `sequence.renderer.ts`, V
 
 - One diagram per function that needs one (`owner_kind = function`, `owner_id` = function id, `section = function:<id>`). It needs one when it has at least 2 `interactions` and (a non-human actor takes part, or a message is `abnormal` or has a `guard`, or the function has no screen). Otherwise no diagram.
 - Lifelines: human actors (stick figure), `:System`, external `system` / `time` actors; exact actor names, generalization kept, nothing else (no Frontend / Backend / Repository).
-- Message: request with a response back to the sender ⇒ synchronous solid arrow (`->`) + activation bar; request without ⇒ asynchronous open arrow (`->>`); response ⇒ dashed open arrow (`-->>`). Labels numbered `1:`, `1.1:`, `1.2:`, `2:` (stimulus = request from an actor).
+- Message: request with a response back to the sender ⇒ synchronous solid arrow with a filled triangle head (`->` + `skinparam style strictuml`) + activation bar; request without ⇒ asynchronous open arrow (`->>`); response ⇒ dashed open arrow (`-->>`). Labels numbered `1:`, `1.1:`, `1.2:`, `2:` (stimulus = request from an actor).
 - `abnormal` ⇒ `alt <guard>` / `else <guard>`, the normal flow after it is the last `else`; `normal` with `guard` ⇒ `opt <guard>`; no `loop` (no data yet).
 - Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Samples: `docs/diagram_guideline/sequence/`; full rules: `renderer/sequence/SKILL.md`.
 
