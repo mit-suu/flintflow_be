@@ -85,7 +85,7 @@ import { runDeterministicCheck } from "../spine/deterministic-check.js"
 import type { CompileCheckResult } from "../../shared/diagram/compile-check.js"
 import { createMemoryDiagramStore } from "./diagram-file.store.js"
 import { renderKind } from "./renderers/index.js"
-import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderChangedIfAvailable, renderDiagram, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
+import { compileWithFix, defaultDeps, loadDiagramFile, noAutoFix, renderAll, renderChangedIfAvailable, renderDiagram, sameDiagramSubject, staleDiagrams, staleRenderedDiagrams, type DiagramServiceDeps } from "./diagram.service.js"
 import { applyTransaction } from "../spine/op-engine.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -495,5 +495,33 @@ describe("đường vẽ svg (FLF-339)", () => {
     const result = await renderDiagram(PROJECT, "context", null, { by: USER, deps: { ...deps, renderSvgPng } })
     expect(result.diagrams[0]).toMatchObject({ render_status: "error", error: "svg: svg too large" })
     expect(await store.load(PROJECT, result.diagrams[0].id, "svg")).toBeNull()
+  })
+})
+
+describe("sameDiagramSubject — hình cũ có còn là cùng hình để trả về khi vẽ lại lỗi", () => {
+  type D = Spine["diagrams"][number]
+  const svg = (title: string) => `<svg xmlns="http://www.w3.org/2000/svg"><title>${title}</title></svg>`
+  const base: D = { id: "D02-2", kind: "usecase", format: "svg", source: svg("Use Cases — Authentication (2/3)"), section: "fixed:2.2.1", owner_kind: null, owner_id: null, render_status: "ok", source_hash: "h1", rendered_at: "2026-10-31T00:00:00.000Z" }
+
+  it("cùng phần (cùng tiêu đề), dữ liệu đổi ⇒ cùng hình", () => {
+    expect(sameDiagramSubject(base, { ...base, source_hash: "h2", render_status: "error", error: "lỗi bố cục" })).toBe(true)
+  })
+
+  it("cùng id nhưng cách chia đổi (theo actor → theo feature) ⇒ khác hình", () => {
+    expect(sameDiagramSubject({ ...base, source: svg("Use Cases — Patient (2/4)") }, base)).toBe(false)
+  })
+
+  it("khác chủ, khác loại hoặc khác mục ⇒ khác hình", () => {
+    expect(sameDiagramSubject({ ...base, owner_kind: "feature", owner_id: "F1" }, { ...base, owner_kind: "feature", owner_id: "F2" })).toBe(false)
+    expect(sameDiagramSubject(base, { ...base, kind: "class" })).toBe(false)
+    expect(sameDiagramSubject(base, { ...base, section: "fixed:2.1" })).toBe(false)
+  })
+
+  it(".puml: so dòng title; không có title (wireframe) ⇒ so theo chủ", () => {
+    const layout: D = { ...base, kind: "screen_layout", format: "puml", source: "@startsalt\n{ Login }\n@endsalt\n", section: "screen:S01", owner_kind: "screen", owner_id: "S01" }
+    expect(sameDiagramSubject(layout, { ...layout, source: "@startsalt\n{ Login form }\n@endsalt\n" })).toBe(true)
+    const seq = (title: string): D => ({ ...base, kind: "sequence", format: "puml", source: `@startuml\ntitle ${title}\n@enduml\n`, owner_kind: "function", owner_id: "FN001" })
+    expect(sameDiagramSubject(seq("Log In"), seq("Log In"))).toBe(true)
+    expect(sameDiagramSubject(seq("Log In"), seq("Sign In"))).toBe(false)
   })
 })

@@ -319,13 +319,14 @@ describe("renderSection — fixed sections", () => {
     expect(blocks[2]).toEqual({ type: "image", png: "png-D20", caption: `State Machine Diagram — ${first.name}` })
     expect(blocks[3]).toMatchObject({ type: "paragraph" })
     expect(JSON.stringify(blocks[3])).toContain(`starts in \\"Pending\\" and ends in \\"Closed\\"; it has 3 states and 3 transitions`)
-    // hình lỗi không in
-    expect(blocks).toHaveLength(4)
+    // hình lỗi giữ chỗ bằng marker `diagram-error:<id>`, chú thích nói chưa vẽ được
+    expect(blocks[4]).toEqual({ type: "image", png: "diagram-error:D21", caption: "State Machine Diagram — Broken — diagram could not be drawn yet" })
+    expect(blocks).toHaveLength(6)
     const vi = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", language: "vi", diagramPng: png })).blocks
     expect(JSON.stringify(vi[3])).toContain("bắt đầu ở trạng thái")
   })
 
-  it("function:<id> — sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi không in", () => {
+  it("function:<id> — sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi giữ chỗ", () => {
     const base = spine()
     base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
     const fn = base.functions.find((f) => f.id === "FN01")!
@@ -349,7 +350,8 @@ describe("renderSection — fixed sections", () => {
     const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
     expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự hệ thống — ${fn.name}`)).toBe(true)
     expect(JSON.stringify(vi[vi.length - 1])).toContain("Sơ đồ mô tả 3 message giữa Reviewer và hệ thống")
-    expect(renderSection(withDiagram, "function:FN02", ctx({ number: "3.3.1", diagramPng: png })).blocks.some((b) => b.type === "image")).toBe(false)
+    const failed = renderSection(withDiagram, "function:FN02", ctx({ number: "3.3.1", diagramPng: png })).blocks.filter((b) => b.type === "image")
+    expect(failed).toEqual([{ type: "image", png: "diagram-error:D31", caption: expect.stringMatching(/ — diagram could not be drawn yet$/) }])
   })
 
   it("feature:<id> — class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
@@ -369,8 +371,13 @@ describe("renderSection — fixed sections", () => {
     const mode1 = renderSection(withClass, "feature:F1", ctx({ number: "3.2", diagramPng: png }))
     expect(mode1.blocks[0]).toMatchObject({ type: "image", png: "png-D06" })
     expect(mode1.blocks.length).toBeGreaterThan(1)
-    // hình lỗi không in; feature khác không lấy hình của feature này
-    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", diagramPng: png })).blocks).toEqual([])
+    // hình lỗi giữ chỗ (không tải PNG cũ theo id); feature khác không lấy hình của feature này
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", diagramPng: png })).blocks).toEqual([
+      { type: "image", png: "diagram-error:D07", caption: "Class Diagram — Authentication — diagram could not be drawn yet" }
+    ])
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", language: "vi", diagramPng: png })).blocks).toEqual([
+      { type: "image", png: "diagram-error:D07", caption: "Sơ đồ lớp — Authentication — sơ đồ chưa vẽ được" }
+    ])
     const vi = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", language: "vi", diagramPng: png }))
     expect(vi.blocks[0]).toMatchObject({ caption: "Sơ đồ lớp — Authentication" })
   })

@@ -31,6 +31,7 @@ import { svgToPng } from "../../shared/diagram/svg-to-png.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
 import { allTargets, renderKind, targetOfDiagram, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
+import { svgTitleOf } from "./renderers/common.js"
 import { aiScreenLayout, noAiLayout, type DrawLayout } from "./screen-layout.ai.js"
 import type { RenderContext } from "../../shared/diagram/erd-notation.js"
 import { loadRenderContext } from "./render-context.js"
@@ -220,6 +221,22 @@ const loadSpine = async (projectId: string): Promise<SpineRecord> => {
  */
 const unchanged = (previous: Diagram | undefined, part: RenderedDiagramPart, force: boolean): previous is Diagram =>
   !force && previous !== undefined && previous.render_status === "ok" && previous.source_hash === part.source_hash
+
+/** Tiêu đề hình: `<title>` của SVG hoặc dòng `title` của `.puml`; không có ⇒ null. */
+const diagramTitle = (d: Diagram): string | null =>
+  d.format === "svg" ? svgTitleOf(d.source) : (/^title\s+(.+)$/m.exec(d.source)?.[1]?.trim() ?? null)
+
+/**
+ * Hai bản ghi có phải CÙNG một hình không — cùng loại, mục, chủ và tiêu đề. Id không đủ: kind tách nhiều phần (use case
+ * theo nhóm, class / ERD / luồng màn `(i/n)`) gán lại id theo thứ tự phần, nên khi cách chia đổi, cùng id đã là phần khác.
+ * Tiêu đề mang tên nhóm kèm `(i/n)` nên phân biệt được phần.
+ */
+export const sameDiagramSubject = (a: Diagram, b: Diagram): boolean =>
+  a.kind === b.kind &&
+  a.section === b.section &&
+  (a.owner_kind ?? null) === (b.owner_kind ?? null) &&
+  (a.owner_id ?? null) === (b.owner_id ?? null) &&
+  diagramTitle(a) === diagramTitle(b)
 
 type OkCompiled = Extract<Compiled, { ok: true }>
 

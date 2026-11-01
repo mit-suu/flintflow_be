@@ -21,6 +21,7 @@ import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { ACTOR_HIERARCHY_SECTION } from "../diagram/renderers/usecase.renderer.js"
 import { DEFAULT_RELATION_VERB, relationVerb } from "../diagram/renderers/erd.renderer.js"
 import { describeInterface } from "./interface-description.js"
+import { diagramErrorMarker } from "./diagram-placeholder.js"
 import { loadStepRegistry } from "../pipeline/step-registry.js"
 import {
   MACHINE_DESCRIPTIONS,
@@ -28,6 +29,7 @@ import {
   VI_LABELS,
   VI_PHASE_LABELS,
   VI_SECTION_TITLES,
+  assembleTextFor,
   enumLabel,
   fptLabelFor,
   isVietnamese,
@@ -240,13 +242,18 @@ const diagramImages = (
   /** Lọc thêm theo từng hình (vd. use case: hình §2.2.1 khác hình phân cấp actor §2.1). */
   include: (d: Spine["diagrams"][number]) => boolean = () => true
 ): ImageBlock[] => {
-  const parts = spine.diagrams.filter(
-    (d) => d.kind === kind && d.render_status === "ok" && (ownerId === undefined || d.owner_id === ownerId) && include(d)
-  )
+  // Hình vẽ lỗi vẫn giữ chỗ (marker `diagram-error:<id>`) để người đọc thấy thiếu hình ngay tại chỗ, số (i/n) không lệch
+  const parts = spine.diagrams.filter((d) => d.kind === kind && (ownerId === undefined || d.owner_id === ownerId) && include(d))
+  const notDrawn = assembleTextFor(fptLanguage(ctx)).diagramNotDrawn
   const out: ImageBlock[] = []
   parts.forEach((d, i) => {
+    const caption = captionOf(d) ?? (parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase)
+    if (d.render_status === "error") {
+      out.push(image(diagramErrorMarker(d.id), `${caption} — ${notDrawn}`))
+      return
+    }
     const png = ctx.diagramPng(d.id)
-    if (png) out.push(image(png, captionOf(d) ?? (parts.length > 1 ? `${captionBase} (${i + 1}/${parts.length})` : captionBase)))
+    if (png) out.push(image(png, caption))
   })
   return out
 }
