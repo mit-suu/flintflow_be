@@ -131,7 +131,8 @@ describe("lịch sử credit (UC-59, UC-60)", () => {
 
   it("lượt gọi AI trong pipeline ghi step + token; lịch sử trả kèm thành viên và dự án; lọc sai mã ⇒ 400", async () => {
     const seeded = await seedFixture("minimal", { balance: 100 })
-    await executeAiAction(ActionType.CHAT, { promptVariables: { step_id: "S-1.1" } }, seeded.projectId, seeded.userId)
+    // Provider mock: CI không có API key
+    await executeAiAction(ActionType.CHAT, { promptVariables: { step_id: "S-1.1" } }, seeded.projectId, seeded.userId, { provider: "mock" })
 
     const res = await history(seeded.token, `?kind=usage&projectId=${seeded.projectId}`)
     expect(res.status).toBe(200)
