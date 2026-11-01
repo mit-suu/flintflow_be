@@ -14,6 +14,7 @@
 import { z } from "zod"
 import type * as T from "./spine.types.js"
 import { legacyDiagram } from "./legacy-diagram.js"
+import { legacyFlowEdge } from "./legacy-flow.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -106,12 +107,20 @@ export const useCaseSchema = z.strictObject({
   extends: z.array(id)
 })
 
+/** Cạnh luồng màn: `to` bắt buộc; `trigger` / `guard` bỏ trống = không có (dữ liệu cũ chỉ là chuỗi id màn đích). */
+export const flowEdgeSchema = z.strictObject({
+  to: id,
+  trigger: z.string().optional(),
+  guard: z.string().optional()
+})
+
 export const screenSchema = z.strictObject({
   id,
   feature_id: id,
   name: z.string(),
   description: z.string(),
-  flow_to: z.array(id),
+  // preprocess ở mức phần tử mảng (không bọc cả mảng): element-defaults cần thấy ZodArray để điền `[]`
+  flow_to: z.array(z.preprocess(legacyFlowEdge, flowEdgeSchema)),
   is_popup: z.boolean(),
   tabs: z.array(z.string()),
   primary_function_id: id.nullable(),
@@ -126,6 +135,30 @@ export const permissionSchema = z.strictObject({
   action: z.string().min(1)
 })
 
+export const entityAttributeSchema = z.strictObject({
+  name: z.string().trim().min(1),
+  kind: z.enum(["key", "reference", "plain"]),
+  required: z.boolean(),
+  description: z.string().optional()
+})
+
+export const entityStateSchema = z.strictObject({
+  id,
+  name: z.string().trim().min(1),
+  initial: z.boolean().optional(),
+  final: z.boolean().optional()
+})
+
+/** `event` nằm trong selector của path (`transitions[from=S1,to=S2,event=submit]`) nên không chứa `,` `[` `]`. */
+export const entityTransitionSchema = z.strictObject({
+  from: id,
+  to: id,
+  event: z.string().trim().min(1).regex(/^[^,[\]]+$/, "event không được chứa , [ ]"),
+  guard: z.string().optional(),
+  action: z.string().optional(),
+  business_rule_ids: z.array(id).optional()
+})
+
 export const entitySchema = z.strictObject({
   id,
   name: z.string(),
@@ -138,13 +171,35 @@ export const entitySchema = z.strictObject({
   // Id con (trong `relations`) mà liên kết tới cha này là TUỲ CHỌN: con tồn tại được khi không có cha này
   relation_optional: z.array(id).optional(),
   // Dữ liệu chủ tồn tại độc lập (User, Course, Room…) — được phép không có cha
-  root: z.boolean().optional()
+  root: z.boolean().optional(),
+  // Thuộc tính mức domain và feature dùng entity (class diagram mỗi feature một hình). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  attributes: z.array(entityAttributeSchema).optional(),
+  feature_ids: z.array(id).optional(),
+  // Vòng đời (state machine diagram, mỗi entity có trạng thái một hình). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  states: z.array(entityStateSchema).optional(),
+  transitions: z.array(entityTransitionSchema).optional()
 })
 
 export const validationSchema = z.strictObject({
   id,
   kind: z.enum(["business", "format", "required"]),
   statement: z.string()
+})
+
+/** Điểm đầu / cuối của một tương tác trong sơ đồ tuần tự hệ thống: id actor hoặc hộp đen `system`. */
+export const SYSTEM_LIFELINE = "system"
+
+/**
+ * Một message của sơ đồ tuần tự mức hệ thống (hộp đen). Thứ tự mảng là thứ tự thời gian. `message` nằm trong selector của
+ * path (`interactions[from=A01,to=system,message=…,kind=request,flow=normal]`) nên không chứa `,` `[` `]`.
+ */
+export const functionInteractionSchema = z.strictObject({
+  from: id,
+  to: id,
+  message: z.string().trim().min(1).regex(/^[^,[\]]+$/, "message không được chứa , [ ]"),
+  kind: z.enum(["request", "response"]),
+  flow: z.enum(["normal", "abnormal"]),
+  guard: z.string().optional()
 })
 
 export const functionSchema = z.strictObject({
@@ -159,7 +214,9 @@ export const functionSchema = z.strictObject({
   abnormal: z.array(z.string()),
   validations: z.array(validationSchema),
   business_rule_ids: z.array(id),
-  priority: priority.nullable()
+  priority: priority.nullable(),
+  // Message actor ↔ system (sơ đồ tuần tự mức hệ thống). Thiếu ⇒ `[]` (Spine cũ không migrate)
+  interactions: z.array(functionInteractionSchema).optional()
 })
 
 export const nfrSchema = z.strictObject({
@@ -240,7 +297,7 @@ export const customSectionSchema = z.strictObject({
 
 export const diagramSchema = z.strictObject({
   id,
-  kind: z.enum(["context", "usecase", "screen_flow", "erd", "screen_layout"]),
+  kind: z.enum(["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"]),
   /** FLF-339: engine vẽ. Dữ liệu cũ (chỉ có `puml`) được chuyển lúc đọc ở mức mảng — xem `legacy-diagram.ts`. */
   format: z.enum(["puml", "svg"]),
   source: z.string(),

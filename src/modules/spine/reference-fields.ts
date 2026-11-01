@@ -18,6 +18,7 @@
 
 import type { Spine } from "./spine.types.js"
 import { tryResolve } from "./path-resolver.js"
+import { SYSTEM_LIFELINE } from "./spine.schema.js"
 import { FIXED_SECTION_ID_LIST } from "./section-registry.js"
 
 export type TargetCollection =
@@ -30,6 +31,7 @@ export type TargetCollection =
   | "business_rules"
   | "entities"
   | "validations"
+  | "states"
   | "custom_sections"
   | "section_key"
   | "path"
@@ -67,7 +69,13 @@ export const REFERENCE_FIELDS: readonly ReferenceField[] = Object.freeze([
   { path: "sections[].id", targetCollection: "section_key", cardinality: "one" },
   { path: "progress.screen_cursor", targetCollection: "screens", cardinality: "one" },
   { path: "progress.screen_queue[]", targetCollection: "screens", cardinality: "many" },
-  { path: "steps[].id", targetCollection: "screens", cardinality: "one" }
+  { path: "steps[].id", targetCollection: "screens", cardinality: "one" },
+  { path: "entities[].feature_ids[]", targetCollection: "features", cardinality: "many" },
+  { path: "entities[].transitions[].from", targetCollection: "states", cardinality: "one" },
+  { path: "entities[].transitions[].to", targetCollection: "states", cardinality: "one" },
+  { path: "entities[].transitions[].business_rule_ids[]", targetCollection: "business_rules", cardinality: "many" },
+  { path: "functions[].interactions[].from", targetCollection: "actors", cardinality: "one" },
+  { path: "functions[].interactions[].to", targetCollection: "actors", cardinality: "one" }
 ] as const satisfies readonly ReferenceField[])
 
 /** Section cố định của template FPT — từ section registry (T09). */
@@ -103,6 +111,7 @@ export const buildIdIndex = (spine: Spine): IdIndex => ({
   business_rules: ids(spine.business_rules),
   entities: ids(spine.entities),
   validations: new Set(spine.functions.flatMap((f) => f.validations.map((v) => v.id))),
+  states: new Set(spine.entities.flatMap((e) => (e.states ?? []).map((s) => s.id))),
   custom_sections: ids(spine.custom_sections)
 })
 
@@ -155,7 +164,13 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     sectionId,
     cursor,
     queue,
-    stepId
+    stepId,
+    entityFeatures,
+    transitionFrom,
+    transitionTo,
+    transitionRules,
+    interactionFrom,
+    interactionTo
   ] = REFERENCE_FIELDS
 
   // BUG-04: phần tử thiếu mảng tham chiếu (model bỏ trống `includes`…) không được làm sập cả lô
@@ -180,7 +195,10 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
   for (const s of spine.screens) {
     const owner = `screens[id=${s.id}]`
     yield one(screenFeature, owner, "feature_id", s.feature_id)
-    yield* many(screenFlow, owner, "flow_to", s.flow_to)
+    // Cạnh luồng: khoá là `to` của phần tử object (`flow_to[to=S08]`), không phải chuỗi
+    for (const e of s.flow_to ?? []) {
+      yield { field: screenFlow, ownerPath: owner, refPath: `${owner}.flow_to[to=${e.to}]`, targetId: e.to, target: screenFlow.targetCollection }
+    }
     if (s.primary_function_id !== null) yield one(screenPrimary, owner, "primary_function_id", s.primary_function_id)
   }
   for (const p of spine.permissions) {
@@ -199,8 +217,24 @@ export function* iterateReferences(spine: Spine): Generator<ReferenceHit> {
     if (f.screen_id !== null) yield one(fnScreen, owner, "screen_id", f.screen_id)
     yield one(fnFeature, owner, "feature_id", f.feature_id)
     yield* many(fnRules, owner, "business_rule_ids", f.business_rule_ids)
+    // Message không có id: khoá là from + to + message + kind + flow; đầu `system` là hộp đen, không phải actor
+    for (const i of f.interactions ?? []) {
+      const at = `${owner}.interactions[from=${i.from},to=${i.to},message=${i.message},kind=${i.kind},flow=${i.flow}]`
+      if (i.from !== SYSTEM_LIFELINE) yield { field: interactionFrom, ownerPath: at, refPath: `${at}.from`, targetId: i.from, target: "actors" }
+      if (i.to !== SYSTEM_LIFELINE) yield { field: interactionTo, ownerPath: at, refPath: `${at}.to`, targetId: i.to, target: "actors" }
+    }
   }
-  for (const e of spine.entities) yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
+  for (const e of spine.entities) {
+    yield* many(entityRelations, `entities[id=${e.id}]`, "relations", e.relations)
+    yield* many(entityFeatures, `entities[id=${e.id}]`, "feature_ids", e.feature_ids)
+    // Chuyển trạng thái không có id: khoá là `from` + `to` + `event`; `from` / `to` chết ⇒ gỡ cả transition
+    for (const t of e.transitions ?? []) {
+      const owner = `entities[id=${e.id}].transitions[from=${t.from},to=${t.to},event=${t.event}]`
+      yield { field: transitionFrom, ownerPath: owner, refPath: `${owner}.from`, targetId: t.from, target: "states" }
+      yield { field: transitionTo, ownerPath: owner, refPath: `${owner}.to`, targetId: t.to, target: "states" }
+      yield* many(transitionRules, owner, "business_rule_ids", t.business_rule_ids)
+    }
+  }
   for (const br of spine.business_rules) {
     yield* many(ruleValidations, `business_rules[id=${br.id}]`, "source_validation_ids", br.source_validation_ids)
   }

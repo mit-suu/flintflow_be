@@ -51,7 +51,7 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    action, which actor uses a screen) and return ops; ask again only for a fact the projection cannot give.
 2b. **The question is read by the user, not by code.** Name every screen, actor, role, feature, function and
    entity by its **name** from the projection — never by its id (`S02`, `A03`, `R1`, `F2`, `FN010`, `E04`),
-   and never as a list of ids (`flow_to: S02, S03` ⇒ `'Reset Password', 'Schedule Composer'`). No paths
+   and never as a list of ids (`flow_to` targets ⇒ `'Reset Password', 'Schedule Composer'`). No paths
    (`screens[id=S01]`) or section keys (`fixed:3.1.1`) either. Use case codes (`UC-01`) are fine.
 2c. **Not a problem, do not ask about it.** In the Screens Flow, Login has **no** incoming edge except
    `Register → Login` — it is the root every actor starts from. Never ask to add a flow into Login, and never
@@ -94,8 +94,8 @@ The Document pane is read-only; **every edit goes through chat** (Phases §2.3).
    **The UI of each new use case is the user's call**: its own screen, a popup opened from <screen>, an existing screen, or one screen shared by the new use cases. Never ask about the UI yourself: draft your best proposal (a new screen per step) — code then shows the user every new use case and screen to choose from; ask only for a fact you cannot fill (who receives it, what the user enters, a limit). Follow the answer exactly — `use_case_context.ui_plan` (when present) is that answer per use case: obey every entry; nothing said for one ⇒ its own screen. Then:
    - **the screen or popup the user chose**; when you propose: anything that changes data or takes input gets a new one, an
      existing screen fits a pure read addition (a column, a filter, a read-only field) — never just a button;
-   - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `set
-     screens[id=…].flow_to` to the old list plus the new screen on the screen that opens it, so it is reachable;
+   - the new screen: `name`, `description`, `feature_id`, `flow_to`, `tabs`, plus the edge into it — `add
+     screens[id=…].flow_to[]` `{ "to": <new screen>, "trigger": <the user action, e.g. "Click Export"> }` on the screen that opens it (a `flow_to` edge is `{to, trigger, guard?}`, never a bare id);
    - one `permissions[]` row per role of each actor on its screen, shared screen included (`view`, plus `create`/`update`/`delete` it does);
    - the function on that screen (system/time actor ⇒ only a function, `screen_id: null`). Declare temporary ids as
      each added element's own `"id": "$newFn"` / `"id": "$newScreen"`; `$newFn` goes in `function_ids`. Code sets

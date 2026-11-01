@@ -45,6 +45,12 @@ export interface ExecuteAiActionOptions {
   images?: LlmImage[]
   /** FLF-310: org đang chọn của người gọi — ví bị trừ khi lượt gọi không gắn project. */
   activeOrgId?: string | null
+  /**
+   * Ngân sách trả lời tối thiểu (token), chỉ phía server: `draftOps` truyền `maxTokens` của skill nội dung của step — skill
+   * action `draft-to-ops` dùng chung cho mọi step nên ngân sách của nó không đủ cho step sinh nhiều op (S-3.1, S-4.1).
+   * Chỉ nâng, không hạ `maxTokens` của template.
+   */
+  minMaxTokens?: number
   /** UC-60: step ghi vào sổ credit. Thiếu ⇒ lấy `promptVariables.step_id` (mọi lượt gọi của pipeline đều có). */
   stepId?: string
 }
@@ -180,6 +186,7 @@ const buildPrompt = async (
     ...loadedTemplate.providerConfig,
     ...(options.provider ? { provider: options.provider } : {}),
     ...(options.model ? { model: options.model } : {}),
+    ...(options.minMaxTokens && options.minMaxTokens > (loadedTemplate.providerConfig.maxTokens ?? 0) ? { maxTokens: options.minMaxTokens } : {}),
     // Provider mock cần biết đang được hỏi gì để trả output đúng schema của ActionType đó (T24).
     actionType: String(actionType)
   }

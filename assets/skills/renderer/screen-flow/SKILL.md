@@ -1,18 +1,23 @@
 ---
 skill_id: screen-flow
 kind: renderer
-version: 2.3.0
-description: "S-4.2 Screens Flow (Graphviz DOT; one diagram per human actor using the UI, started by a diamond with the actor name)"
+version: 4.0.0
+description: "S-4.2 Screens Flow (notation of the FPT SRS template §3.1.1 sample, SVG built in code: one diagram for the whole system)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 4096
 temperature: 0.1
 reads:
   - "screens[].name"
-  - "screens[].flow_to"
+  - "screens[].flow_to[].to"
   - "screens[].is_popup"
   - "screens[].tabs"
+  - "screens[].feature_id"
+  - "screens[].primary_function_id"
+  - "screens[].queue_order"
+  - "features[].order"
   - "actors[kind=human].name"
+  - "actors[].parent_id"
   - "roles[].actor_id"
   - "permissions[].screen_id"
   - "use_cases[].actor_ids"
@@ -20,90 +25,55 @@ reads:
   - "functions[].screen_id"
 writes:
   - "diagrams[kind=screen_flow]"
-output_schema: puml
+output_schema: none
 language: en
 stub: false
 ---
 # Screen Flow
 
-> The renderer is deterministic code: `src/modules/diagram/renderers/screen-flow.renderer.ts`. This skill documents the output and is loaded with `action/plantuml-conventions` only by the `render_fix` call.
+> The renderer is deterministic code: `src/modules/diagram/renderers/screen-flow.renderer.ts` (screens drawn, shared screens, split) and `screen-flow-layout.ts` (graph plan, geometry; algorithm in `docs/technical/screen-flow-diagram-layout.md`). Engine `svg`: no PlantUML source, no `render_fix`. This skill documents the output.
 
-- Step: S-4.2 Screens Flow · Section: `fixed:3.1.1` · Output: `puml` (one or more parts)
+- Step: S-4.2 Screens Flow · Section: `fixed:3.1.1` · Output: `svg` (one part for the whole system)
+- Source of the notation: FPT SRS template (Report3) §3.1.1 — "draw the Screens Flow for the system… oval notation for pop-up screen… screen with multiple information tab… text or background format for different visuality purpose".
 
-## Split by actor
+## Notation (exactly the template sample, FlintFlow colours)
 
-The Screens Flow is drawn **once per human actor that interacts directly with the system UI**
-(`actors[kind=human]`). `system` and `time` actors (payment gateway, LLM provider, scheduler…) never get a
-screens flow — they do not click through screens.
+- **Screen**: rectangle with square corners, black border, screen name centred (wrapped, at most 4 lines).
+- **Pop-up** (`is_popup`): oval, name inside (at most 3 lines).
+- **Screen with tabs** (`tabs[]`): a frame with the screen name at the top and one small box per tab inside, tab names in *italic*. A pop-up with tabs is the same frame with rounded corners.
+- **Navigation** (`flow_to[].to`): solid line, horizontal / vertical segments only, square corners, **small filled triangle** arrowhead at the target.
+- **Fill**: `#7ACFF5` (in place of the template's yellow) for a **shared screen**, white for every other screen. Text black, `Liberation Sans` 13 like every FlintFlow SVG diagram.
+- Nothing else: no swimlanes, no edge labels (`trigger` / `guard` stay in the Spine, not drawn), no decision diamonds, no start / end nodes, no title drawn in the picture. The document caption is the SVG `<title>` (`Screens flow`; when split `Screens flow (<actor>)`, `Screens flow (i/n)` or both); a legend paragraph under the figure explains the shapes and the blue fill.
 
-A screen belongs to an actor when either link exists (`src/modules/spine/screen-actors.ts`):
+## Layout
 
-1. a `permissions[]` row on the screen whose `role_id` → `roles[].actor_id` is that actor, or
-2. a use case with that actor in `actor_ids[]` lists a function whose `screen_id` is the screen, or
-3. the screen is **public** — every `permissions[]` row on it is for a role with `actor_id: null` (`Guest` on
-   Login, Forgot/Reset Password, a public landing): it belongs to every human actor that has a screen.
+- Left to right, as a tree: each screen has one parent = the screen that reaches it first in a breadth-first walk from the entries (shallowest way in, then lowest `queue_order`); column = depth, so a child sits right after its parent. Rows follow the tree depth-first: a parent sits on the row of its first child (one straight arrow between them, like Home Page → User Login in the template), a leaf opens a new row.
+- **Only the tree is drawn**: one arrow into each screen from its parent, plus every arrow into a pop-up; a root screen whose targets all have another parent keeps its first arrow, so it is not left alone. Other ways in stay in `flow_to` (traceability, descriptions) but are not drawn — cross links tangle the picture once there are many screens.
+- Each screen has **one way out**: a lone straight arrow to the screen on its row in the next column, or **one shared trunk** (one stub, one vertical line in the gutter) with a horizontal branch per target in the next column.
+- An arrow to a pop-up outside the next column leaves the trunk, runs along the street next to the target row and enters through the gutter before the pop-up; several such arrows into one pop-up from the same side merge into one collector with a single arrowhead.
+- Gutters (between columns) and streets (between rows) never contain a shape; every vertical segment has its own x, every horizontal segment its own y, ports on a screen side have their own y ⇒ no line crosses a shape or text and no two lines overlap; crossings only at right angles.
 
-One screen can belong to several actors (Login is shared) and then appears in each of their diagrams.
+## One diagram for the system
 
-- Parts are ordered by actor id; each part carries the graph label `Screens flow for <actor name>`. The
-  document uses that label as the image caption (`Screens flow for Founder`).
-- A part holds only that actor's screens and only the `flow_to` edges between them.
-- The part starts at a **diamond with the actor name inside** (`START`), with an arrow to every entry screen:
-  not a pop-up and no incoming edge from a screen of the same part. If every screen has an incoming edge,
-  the one with the lowest `queue_order`, then the lowest id. Login and a public landing page both have no
-  incoming edge, so both are entries side by side. The **sign-in gateway** — a screen open to `Guest` with an
-  edge to a screen that is not (Login → each actor's landing) — is always an entry, so `Register → Login`
-  draws Register and Login side by side after the actor diamond, with the arrow between them.
-- There is **no** "unassigned" part: every screen must belong to at least one human actor. A screen linked to
-  no human actor is an **orphan** — it is not drawn, and flag `orphan_screen` points at it.
-- No screen ↔ actor link at all yet (before S-4.3 / S-4.4): a single unlabelled diagram of every screen,
-  black dot on the lowest `queue_order`.
+- Every screen goes into one diagram, ordered by `queue_order`, then id.
+- Over **40 screens**, over **10 columns** (too small once fitted to an A4 page), or failing the layout check (`checkScene`): first one diagram per human actor with the screens that actor (or an actor it specialises) uses — shared screens appear in every one, like *Screens flow for User / for Admin*; an actor whose screens all sit in another diagram is dropped, screens with no actor go to `Other screens`. Skipped with fewer than two actors or when over 20% of the screens have no actor. A diagram that still does not fit is split by whole features (`features[].order`; a screen whose feature does not exist goes to a last group), packed greedily up to 40 screens per diagram; a feature that still does not fit is halved by rank in the flow. Each part is its own `diagrams[]` entry, `section = fixed:3.1.1`, `owner_kind = owner_id = null`; the first part keeps the original id. Each part also carries the screens on the path from an entry to its screens (whole-system tree; only the direct parent when the full path makes the part unreadable), so no screen loses its parent to another part — hub screens may appear in several parts.
 
-## Per-part output (Graphviz DOT inside PlantUML)
+## Shared screens (blue fill)
 
-A PlantUML state diagram cannot put text inside a diamond (`<<choice>>` is a fixed, unlabelled diamond), so
-the Screens Flow is DOT wrapped in `@startdot … @enddot`:
+`src/modules/spine/screen-actors.ts`. Actors of a screen, first source that yields a human actor wins:
 
-```
-@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Founder";
-  START [label="Founder", shape=diamond, style=solid];
-  S01 [label="Login"];
-  S03 [label="Forgot Password", shape=ellipse];
-  subgraph cluster_S07 {
-    label="Project Workspace"; style=solid;
-    S07_T1 [label="Chat"];
-  }
-  START -> S01;
-  S01 -> S03;
-  S05 -> S07_T1 [lhead=cluster_S07];
-}
-@enddot
-```
+1. screen → `primary_function_id` → function → use cases listing that function → `actor_ids`;
+2. screen → every function with `screen_id` = the screen (no primary function, or it is in no use case);
+3. `permissions[].screen_id` → `roles[].actor_id`.
 
-- Screen = **rectangle** (`shape=box`, square corners), **not filled** (PlantUML drops the border of a node that is
-  both `rounded` and `filled`).
-- A screen with `tabs[]` = `subgraph cluster_<id>`, one node `<id>_T<n>` per tab; edges into / out of it attach
-  to `<id>_T1` with `lhead=` / `ltail=cluster_<id>`.
-- `is_popup = true` → **oval** (`shape=ellipse`), label = the screen name only — the oval alone marks a pop-up,
-  no `(pop-up)` text. A pop-up with `tabs[]` is a cluster, and Graphviz draws clusters only as rectangles, so it
-  gets `style=rounded` and a second label line `(pop-up)` instead (tabbed screen: `style=solid`).
-- Font `DejaVu Sans` on graph and node: the default Graphviz font is missing in the PlantUML image and dot
-  answers with a fontconfig error instead of a picture.
-- Labels are double-quoted, `"` becomes `'`, `\` is escaped. `<id> -> <target>` per kept edge, sorted by target id.
-- **One-way arrows only.** When two screens point at each other, only the forward edge is drawn: from the
-  screen closer to the part's entry (BFS depth) to the farther one; same depth → lower `queue_order`, then
-  lower id. Return navigation is implicit and never drawn.
-- A Spine without screens yields a single `NO_SCREENS` node, so the file still compiles.
-- A broken DOT comes back from PlantUML as HTTP 200 with plain text `Error: <stdin>: syntax error…` (no SVG);
-  compile-check treats any non-SVG body as an error.
+A screen is **shared** when every leaf human actor (no human child) can use it: the leaf itself or one of its ancestors (`parent_id`) is among the screen's actors. With a single human actor every linked screen is shared. No screen ↔ actor link anywhere yet ⇒ every screen white.
+
+## Entries, one-way edges
+
+- Entry = representative of each strongly connected group with no edge coming from outside it (not a pop-up when another member exists, lowest `queue_order`). Login ⇄ Register therefore gives one entry.
+- Edges go forward only: DFS from the entries drops the edge that closes a cycle, so of a pair pointing at each other only the edge away from the entry stays; return navigation is implicit.
+- A diagram with no screens yields no part.
 
 ## Orphan screens (`orphan_screen` yellow; `orphan_screen_at_baseline` red at S-9; remediation S-4.2)
 
-A screen is flagged when, once links exist, no human actor uses it; or, once any `flow_to` edge exists, it
-has neither an incoming nor an outgoing edge, or it is a pop-up nothing opens. Fix the data (connect the
-screen, grant the actor a permission, wire the use case) — never hide the screen from the diagram.
+Every screen is drawn. Once screen ↔ actor links exist, a screen used by no human actor is flagged; once any `flow_to` edge exists, a screen with neither an incoming nor an outgoing edge, or a pop-up nothing opens, is flagged. Fix the data (connect the screen, wire the use case to its function) — never hide the screen from the diagram.

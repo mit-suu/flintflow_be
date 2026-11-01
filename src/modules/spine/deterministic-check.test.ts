@@ -6,7 +6,7 @@ import { spineSchema } from "./spine.schema.js"
 import type { Change, Spine, StepStatus } from "./spine.types.js"
 import { NON_WAIVABLE_RULES, RULES, checkUseCaseName, isAccountAccessUseCase, runDeterministicCheck, useCaseNameIssues, type FlagCandidate } from "./deterministic-check.js"
 import { buildIdIndex, sectionKeyExists } from "./reference-fields.js"
-import { computeSourceHash } from "./source-hash.js"
+import { renderedDiagramHash } from "./source-hash.js"
 import { createEmptySpine } from "./spine.repository.js"
 import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
 
@@ -29,12 +29,12 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 22 luật vàng (FLF-278: template_section_absent / _empty); mọi luật đỏ không waive được (FLF-329)", () => {
+  it("13 luật đỏ + 23 luật vàng (FLF-278: template_section_absent / _empty); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
-    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(22)
+    // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(23)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -239,17 +239,25 @@ describe("runDeterministicCheck", () => {
     expect(flags.every((f) => f.level === "yellow" && f.section_id === "fixed:3.1.1" && f.remediation_step === "S-4.2")).toBe(true)
   })
 
-  it("orphan_screen: màn chỉ Guest (role không gắn actor) vào là màn public của mọi actor, không mồ côi", () => {
-    const withPublic = variant((s) => {
-      const tpl = s.screens.find((x) => x.id === "S13")!
-      s.roles.push({ id: "R99", name: "Guest", actor_id: null })
-      s.permissions.push({ id: "P999", screen_id: "S20", role_id: "R99", action: "view" })
-      s.screens.push({ ...tpl, id: "S20", name: "Reset Password", flow_to: [] })
-      s.screens.find((x) => x.id === "S01")!.flow_to.push("S20")
+  it("orphan_screen: màn thuộc actor qua use case (kể cả Guest) không mồ côi; chỉ role không gắn actor thì không đủ", () => {
+    const tpl = (s: Spine) => s.screens.find((x) => x.id === "S13")!
+    const withScreen = (link: (s: Spine) => void) =>
+      variant((s) => {
+        s.roles.push({ id: "R99", name: "Guest", actor_id: null })
+        s.permissions.push({ id: "P999", screen_id: "S20", role_id: "R99", action: "view" })
+        s.screens.push({ ...tpl(s), id: "S20", name: "Reset Password", flow_to: [], primary_function_id: null })
+        s.screens.find((x) => x.id === "S01")!.flow_to.push({ to: "S20" })
+        link(s)
+      })
+    const flagged = (s: Spine) => byRule(runDeterministicCheck(s, [], { atBaseline: true }), "orphan_screen").map((f) => f.target_id)
+
+    expect(flagged(withScreen(() => undefined))).toContain("S20")
+    const linked = withScreen((s) => {
+      s.functions.push({ ...s.functions[0], id: "FN900", screen_id: "S20" })
+      s.use_cases.push({ id: "UC900", name: "Reset Own Password", actor_ids: ["A04"], function_ids: ["FN900"], description: "", includes: [], extends: [] })
     })
-    const atBaseline = runDeterministicCheck(withPublic, [], { atBaseline: true })
-    expect(byRule(atBaseline, "orphan_screen").map((f) => f.target_id)).not.toContain("S20")
-    expect(byRule(atBaseline, "orphan_screen_at_baseline").map((f) => f.target_id)).not.toContain("S20")
+    expect(flagged(linked)).not.toContain("S20")
+    expect(byRule(runDeterministicCheck(linked, [], { atBaseline: true }), "orphan_screen_at_baseline").map((f) => f.target_id)).not.toContain("S20")
   })
 
   it("orphan_screen_at_baseline: màn mồ côi thành cờ đỏ chỉ khi ký baseline", () => {
@@ -264,8 +272,11 @@ describe("runDeterministicCheck", () => {
 
   it("xoá actor thẳng tay ⇒ dead_reference ở §2.2.2, remediation S-3.2", () => {
     const flags = byRule(runDeterministicCheck(variant((s) => (s.actors = s.actors.filter((a) => a.id !== "A08")))), "dead_reference")
-    expect(flags.map((f) => f.target_id).sort()).toEqual(["use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
-    expect(flags.every((f) => f.section_id === "fixed:2.2.2" && f.remediation_step === "S-3.2")).toBe(true)
+    const inUseCases = flags.filter((f) => (f.target_id ?? "").startsWith("use_cases["))
+    expect(inUseCases.map((f) => f.target_id).sort()).toEqual(["use_cases[id=UC01].actor_ids[=A08]", "use_cases[id=UC03].actor_ids[=A08]"])
+    expect(inUseCases.every((f) => f.section_id === "fixed:2.2.2" && f.remediation_step === "S-3.2")).toBe(true)
+    // Message sơ đồ tuần tự trỏ actor đã xoá: cờ nằm ở mục của function
+    expect(flags.filter((f) => (f.target_id ?? "").startsWith("functions[")).map((f) => f.section_id).sort()).toEqual(["function:FN010", "function:FN084"])
   })
 
   it("mảng bảo vệ rỗng ⇒ array_empty + section_empty", () => {
@@ -288,7 +299,7 @@ describe("runDeterministicCheck", () => {
     const wrong = runDeterministicCheck(variant((s) => (s.diagrams.find((x) => x.id === d.id)!.source_hash = "0".repeat(64))))
     expect(byRule(wrong, "diagram_stale")).toMatchObject([{ target_id: d.id }])
 
-    const fresh = variant((s) => (s.diagrams.find((x) => x.id === d.id)!.source_hash = computeSourceHash(FIXTURE, d)))
+    const fresh = variant((s) => (s.diagrams.find((x) => x.id === d.id)!.source_hash = renderedDiagramHash(FIXTURE, d)))
     expect(byRule(runDeterministicCheck(fresh), "diagram_stale")).toEqual([])
   })
 
@@ -467,6 +478,17 @@ describe("runDeterministicCheck", () => {
     expect(byRule(flags, "actor_name_shape").filter((f) => f.target_id === "A10")).toEqual([])
     expect(byRule(flags, "orphan_actor").map((f) => f.target_id)).not.toContain("A03")
     expect(byRule(flags, "actor_generalization_invalid")).toEqual([])
+    // mô tả của User chỉ nêu Business Analyst, thiếu Administrator ⇒ cờ vàng ở actor tổng quát; nêu đủ (không phân biệt hoa thường) thì hết
+    expect(byRule(flags, "actor_generalization_children_unlisted")).toMatchObject([{ target_id: "A10", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])
+    expect(byRule(flags, "actor_generalization_children_unlisted")[0].message).toContain("Business Analyst, Administrator")
+    const listed = variant((s) => {
+      s.actors.push({ id: "A10", name: "User", kind: "human", description: "Any signed-in person: a business ANALYST or an Administrator." })
+      s.actors.find((a) => a.id === "A02")!.name = "Business Analyst"
+      s.actors.find((a) => a.id === "A02")!.parent_id = "A10"
+      s.actors.find((a) => a.id === "A03")!.parent_id = "A10"
+    })
+    expect(byRule(runDeterministicCheck(listed), "actor_generalization_children_unlisted")).toEqual([])
+    expect(byRule(runDeterministicCheck(FIXTURE), "actor_generalization_children_unlisted")).toEqual([])
 
     const wrong = runDeterministicCheck(variant((s) => (s.actors.find((a) => a.id === "A01")!.parent_id = "A05")))
     expect(byRule(wrong, "actor_generalization_invalid")).toMatchObject([{ target_id: "A01", level: "yellow", section_id: "fixed:2.1", remediation_step: "S-3.1" }])

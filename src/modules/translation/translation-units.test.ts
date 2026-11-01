@@ -146,10 +146,13 @@ describe("danh sách field trùng phạm vi non_english_content", () => {
   it("N1: chữ chỉ vẽ lên sơ đồ là đơn vị dịch nhưng luật không quét (phạm vi luật giữ nguyên)", () => {
     const spine = variant((s) => {
       s.entities[0].relation_verbs = { E02: "contains" }
+      s.entities[0].attributes = [{ name: "email", kind: "key", required: true }]
+      s.entities[0].states = [{ id: "E01-ST1", name: "Pending", initial: true }]
+      s.entities[0].transitions = [{ from: "E01-ST1", to: "E01-ST1", event: "edit" }]
     })
     const units = translationUnits(spine).filter(isDiagramOnly)
     expect(new Set(units.map((u) => `${u.ref.group}.${u.ref.field}`))).toEqual(
-      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "diagrams.labels"])
+      new Set(["actors.flows_in", "actors.flows_out", "entities.relation_verbs", "entities.attributes", "entities.states", "entities.transitions", "functions.interactions", "screens.flow_to", "diagrams.labels"])
     )
     const before = new Set(nonEnglish(spine))
     const withVietnamese = variant((s) => {
@@ -181,6 +184,7 @@ describe("unitsOfValue — cặp (hash câu Anh, câu dịch) của một op", (
         `functions[id=${fn.id}].description`,
         `functions[id=${fn.id}].normal`,
         `functions[id=${fn.id}].abnormal`,
+        `functions[id=${fn.id}].interactions`,
         ...fn.validations.map((v) => `functions[id=${fn.id}].validations[id=${v.id}].statement`)
       ].sort()
     )
@@ -305,6 +309,66 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
     expect(unit(`entities[id=${E.id}].relation_verbs`)).toBeUndefined()
   })
 
+  it("attributes là một đơn vị mảng chữ (tên rồi mô tả); ghi lại giữ kind / required", () => {
+    const attributes = [
+      { name: "email", kind: "key", required: true, description: "Sign-in address" },
+      { name: "avatar", kind: "plain", required: false }
+    ]
+    const units = translationUnits(variant((s) => (s.entities[0].attributes = attributes as never)))
+    expect(units.find((u) => u.key === `entities[id=${E.id}].attributes`)?.value).toEqual(["email", "Sign-in address", "avatar"])
+    const owner: Record<string, unknown> = { attributes: structuredClone(attributes) }
+    expect(readUnitField(owner, "attributes")).toEqual(["email", "Sign-in address", "avatar"])
+    writeUnitField(owner, "attributes", ["thư điện tử", "Địa chỉ đăng nhập", "ảnh đại diện"])
+    expect(owner.attributes).toEqual([
+      { name: "thư điện tử", kind: "key", required: true, description: "Địa chỉ đăng nhập" },
+      { name: "ảnh đại diện", kind: "plain", required: false }
+    ])
+  })
+
+  it("interactions là đơn vị mảng chữ (message, guard) theo thứ tự mảng; ghi lại giữ đầu mút, kind và flow", () => {
+    const fn = FIXTURE.functions.find((f) => f.id === "FN001")!
+    const units = translationUnits(FIXTURE)
+    expect(units.find((u) => u.key === `functions[id=FN001].interactions`)?.value).toEqual([
+      "Submit email and password",
+      "Show authentication error",
+      "credentials do not match",
+      "Show account locked notice",
+      "account is locked",
+      "Open project dashboard"
+    ])
+    const owner: Record<string, unknown> = { interactions: structuredClone(fn.interactions) }
+    expect(readUnitField(owner, "interactions")).toHaveLength(6)
+    writeUnitField(owner, "interactions", ["Gửi email và mật khẩu", "Hiện lỗi xác thực", "thông tin không khớp", "Hiện thông báo khoá", "tài khoản bị khoá", "Mở bảng điều khiển"])
+    const written = owner.interactions as typeof fn.interactions
+    expect(written![1]).toEqual({ from: "system", to: "A01", message: "Hiện lỗi xác thực", kind: "response", flow: "abnormal", guard: "thông tin không khớp" })
+    expect(written!.map((i) => [i.from, i.to, i.kind, i.flow])).toEqual(fn.interactions!.map((i) => [i.from, i.to, i.kind, i.flow]))
+  })
+
+  it("states / transitions là đơn vị mảng chữ theo thứ tự mảng; ghi lại giữ id, cờ và đầu mút", () => {
+    const states = [
+      { id: "E01-ST1", name: "Pending", initial: true },
+      { id: "E01-ST2", name: "Active", final: true }
+    ]
+    const transitions = [
+      { from: "E01-ST1", to: "E01-ST2", event: "verify", guard: "code is valid", business_rule_ids: ["BR01"] },
+      { from: "E01-ST2", to: "E01-ST2", event: "touch", action: "log" }
+    ]
+    const units = translationUnits(variant((s) => Object.assign(s.entities[0], { states, transitions })))
+    expect(units.find((u) => u.key === `entities[id=${E.id}].states`)?.value).toEqual(["Pending", "Active"])
+    expect(units.find((u) => u.key === `entities[id=${E.id}].transitions`)?.value).toEqual(["verify", "code is valid", "touch", "log"])
+    const owner: Record<string, unknown> = { states: structuredClone(states), transitions: structuredClone(transitions) }
+    writeUnitField(owner, "states", ["Chờ", "Đang dùng"])
+    writeUnitField(owner, "transitions", ["xác minh", "mã hợp lệ", "chạm", "ghi nhật ký"])
+    expect(owner.states).toEqual([
+      { id: "E01-ST1", name: "Chờ", initial: true },
+      { id: "E01-ST2", name: "Đang dùng", final: true }
+    ])
+    expect(owner.transitions).toEqual([
+      { from: "E01-ST1", to: "E01-ST2", event: "xác minh", guard: "mã hợp lệ", business_rule_ids: ["BR01"] },
+      { from: "E01-ST2", to: "E01-ST2", event: "chạm", action: "ghi nhật ký" }
+    ])
+  })
+
   it("đọc / ghi field bảng giữ khoá, thay chữ theo thứ tự khoá đã sắp", () => {
     const owner: Record<string, unknown> = { relation_verbs: { E09: "places", E02: "belongs to" }, flows_in: ["order"] }
     expect(readUnitField(owner, "relation_verbs")).toEqual(["belongs to", "places"])
@@ -352,5 +416,29 @@ describe("N1 — chữ trên sơ đồ: mũi tên, động từ ERD, nhãn wiref
     const actor = { id: "A09", name: "Payment Gateway", description: "Takes payments", kind: "system", flows_in: ["payment result"], flows_out: ["payment request"] }
     const actorPairs = unitsOfValue("actors[]", [actor], [{ id: "A09", name: "Cổng thanh toán", description: "Nhận thanh toán", flows_in: ["kết quả thanh toán"], flows_out: ["yêu cầu thanh toán"] }])
     expect(actorPairs.map((p) => p.key)).toEqual(["actors[id=A09].name", "actors[id=A09].description", "actors[id=A09].flows_in", "actors[id=A09].flows_out"])
+  })
+})
+
+describe("nhãn cạnh luồng màn (flow_to trigger / guard)", () => {
+  const edges = [
+    { to: "S03", trigger: "Click Forgot password" },
+    { to: "S02", trigger: "Submit", guard: "OTP valid" },
+    { to: "S04" }
+  ]
+
+  it("đơn vị là mảng chữ theo thứ tự `to`: trigger rồi guard của từng cạnh; cạnh trơn không có chữ", () => {
+    const screens = [{ id: "S01", name: "Login", description: "", flow_to: edges }] as unknown as Spine["screens"]
+    const [unit] = translationUnits({ screens }).filter((u) => u.ref.field === "flow_to")
+    expect(unit.value).toEqual(["Submit", "OTP valid", "Click Forgot password"])
+  })
+
+  it("ghi chữ dịch lại đúng trigger / guard, giữ thứ tự và `to` của cạnh", () => {
+    const owner: Record<string, unknown> = { flow_to: structuredClone(edges) }
+    writeUnitField(owner, "flow_to", ["Gửi", "OTP hợp lệ", "Bấm Quên mật khẩu"])
+    expect(owner.flow_to).toEqual([
+      { to: "S03", trigger: "Bấm Quên mật khẩu" },
+      { to: "S02", trigger: "Gửi", guard: "OTP hợp lệ" },
+      { to: "S04" }
+    ])
   })
 })

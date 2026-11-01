@@ -112,13 +112,23 @@ const useCaseSchema = new Schema(
   opts
 )
 
+const flowEdgeSchema = new Schema(
+  {
+    to: { type: String, required: true },
+    // Không default: thiếu = không có trigger / guard (dữ liệu cũ chỉ là chuỗi id màn đích — `legacy-flow.ts`)
+    trigger: { type: String },
+    guard: { type: String }
+  },
+  opts
+)
+
 const screenSchema = new Schema(
   {
     id: { type: String, required: true },
     feature_id: { type: String, required: true },
     name: { type: String, default: "" },
     description: { type: String, default: "" },
-    flow_to: { type: [String], default: [] },
+    flow_to: { type: [flowEdgeSchema], default: [] },
     is_popup: { type: Boolean, default: false },
     tabs: { type: [String], default: [] },
     primary_function_id: nullableString,
@@ -142,6 +152,38 @@ const permissionSchema = new Schema(
   opts
 )
 
+const entityAttributeSchema = new Schema(
+  {
+    name: { type: String, required: true },
+    kind: { type: String, enum: ["key", "reference", "plain"], required: true },
+    required: { type: Boolean, required: true },
+    description: { type: String }
+  },
+  opts
+)
+
+const entityStateSchema = new Schema(
+  {
+    id: { type: String, required: true },
+    name: { type: String, required: true },
+    initial: { type: Boolean, default: undefined },
+    final: { type: Boolean, default: undefined }
+  },
+  opts
+)
+
+const entityTransitionSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    event: { type: String, required: true },
+    guard: { type: String },
+    action: { type: String },
+    business_rule_ids: { type: [String], default: undefined }
+  },
+  opts
+)
+
 const entitySchema = new Schema(
   {
     id: { type: String, required: true },
@@ -151,7 +193,11 @@ const entitySchema = new Schema(
     relation_verbs: { type: Schema.Types.Mixed, default: undefined },
     relation_cardinality: { type: Schema.Types.Mixed, default: undefined },
     relation_optional: { type: [String], default: undefined },
-    root: { type: Boolean, default: undefined }
+    root: { type: Boolean, default: undefined },
+    attributes: { type: [entityAttributeSchema], default: undefined },
+    feature_ids: { type: [String], default: undefined },
+    states: { type: [entityStateSchema], default: undefined },
+    transitions: { type: [entityTransitionSchema], default: undefined }
   },
   opts
 )
@@ -161,6 +207,18 @@ const validationSchema = new Schema(
     id: { type: String, required: true },
     kind: { type: String, enum: ["business", "format", "required"], required: true },
     statement: { type: String, default: "" }
+  },
+  opts
+)
+
+const functionInteractionSchema = new Schema(
+  {
+    from: { type: String, required: true },
+    to: { type: String, required: true },
+    message: { type: String, required: true },
+    kind: { type: String, enum: ["request", "response"], required: true },
+    flow: { type: String, enum: ["normal", "abnormal"], required: true },
+    guard: { type: String }
   },
   opts
 )
@@ -178,7 +236,8 @@ const functionSchema = new Schema(
     abnormal: { type: [String], default: [] },
     validations: { type: [validationSchema], default: [] },
     business_rule_ids: { type: [String], default: [] },
-    priority
+    priority,
+    interactions: { type: [functionInteractionSchema], default: undefined }
   },
   opts
 )
@@ -296,7 +355,7 @@ const diagramSchema = new Schema(
     id: { type: String, required: true },
     kind: {
       type: String,
-      enum: ["context", "usecase", "screen_flow", "erd", "screen_layout"],
+      enum: ["context", "usecase", "screen_flow", "erd", "class", "state_machine", "sequence", "screen_layout"],
       required: true
     },
     format: { type: String, enum: ["puml", "svg"], default: "puml" },

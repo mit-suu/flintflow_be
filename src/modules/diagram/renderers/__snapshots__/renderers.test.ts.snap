@@ -1,281 +1,731 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F1 part 1 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="150" height="154" viewBox="74 74 150 154">
+<title>Class Diagram — Authentication &amp; Onboarding</title>
+<rect x="74" y="74" width="150" height="154" fill="#fff"/>
+<rect x="94" y="94" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="149" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
+<line x1="94" y1="128" x2="204" y2="128" stroke="#000" stroke-width="1.2"/>
+<text x="104" y="142.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">email {id}</text>
+<text x="104" y="159.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">display name</text>
+<text x="104" y="176.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">avatar [0..1]</text>
+<text x="104" y="193.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">account status</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F2 part 2 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="155" height="369" viewBox="74 74 155 369">
+<title>Class Diagram — Project Dashboard</title>
+<rect x="74" y="74" width="155" height="369" fill="#fff"/>
+<rect x="96.5" y="94" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="151.5" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
+<line x1="96.5" y1="128" x2="206.5" y2="128" stroke="#000" stroke-width="1.2"/>
+<text x="106.5" y="142.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">email {id}</text>
+<text x="106.5" y="159.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">display name</text>
+<text x="106.5" y="176.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">avatar [0..1]</text>
+<text x="106.5" y="193.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">account status</text>
+<rect x="94" y="292" width="115" height="131" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="151.5" y="309" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
+<line x1="94" y1="326" x2="209" y2="326" stroke="#000" stroke-width="1.2"/>
+<text x="104" y="340.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">project name {id}</text>
+<text x="104" y="357.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">domain</text>
+<text x="104" y="374.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">mode</text>
+<text x="104" y="391.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">folder [0..1]</text>
+<text x="104" y="408.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">owner {ref}</text>
+<line x1="151.5" y1="208" x2="151.5" y2="292" stroke="#000" stroke-width="1.2"/>
+<text x="142.16" y="224" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="159.83" y="276" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<rect x="137.83" y="240.5" width="27.35" height="19" fill="#fff"/>
+<text x="151.5" y="250" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F3 part 3 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="619" height="567" viewBox="74 74 619 567">
+<title>Class Diagram — SRS Workspace</title>
+<rect x="74" y="74" width="619" height="567" fill="#fff"/>
+<rect x="100.5" y="94" width="115" height="131" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
+<line x1="100.5" y1="128" x2="215.5" y2="128" stroke="#000" stroke-width="1.2"/>
+<text x="110.5" y="142.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">project name {id}</text>
+<text x="110.5" y="159.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">domain</text>
+<text x="110.5" y="176.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">mode</text>
+<text x="110.5" y="193.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">folder [0..1]</text>
+<text x="110.5" y="210.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">owner {ref}</text>
+<rect x="100" y="309" width="116" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158" y="326" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Spine</text>
+<line x1="100" y1="343" x2="216" y2="343" stroke="#000" stroke-width="1.2"/>
+<text x="110" y="357.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">spine version {id}</text>
+<text x="110" y="374.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">completion</text>
+<text x="110" y="391.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">last saved at</text>
+<text x="110" y="408.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">project {ref}</text>
+<rect x="322" y="317.5" width="133" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="388.5" y="334.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChatSession</text>
+<line x1="322" y1="351.5" x2="455" y2="351.5" stroke="#000" stroke-width="1.2"/>
+<text x="332" y="366" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">session code {id}</text>
+<text x="332" y="383" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">reply language [0..1]</text>
+<text x="332" y="400" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">project {ref}</text>
+<rect x="94" y="507" width="128" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChangeRecord</text>
+<line x1="94" y1="541" x2="222" y2="541" stroke="#000" stroke-width="1.2"/>
+<text x="104" y="555.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">sequence {id}</text>
+<text x="104" y="572.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">reason</text>
+<text x="104" y="589.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">changed by {ref}</text>
+<text x="104" y="606.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">spine {ref}</text>
+<rect x="322.5" y="515.5" width="132" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="388.5" y="532.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Flag</text>
+<line x1="322.5" y1="549.5" x2="454.5" y2="549.5" stroke="#000" stroke-width="1.2"/>
+<text x="332.5" y="564" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">rule {id}</text>
+<text x="332.5" y="581" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">level</text>
+<text x="332.5" y="598" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">waived reason [0..1]</text>
+<rect x="555" y="515.5" width="118" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="614" y="532.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Diagram</text>
+<line x1="555" y1="549.5" x2="673" y2="549.5" stroke="#000" stroke-width="1.2"/>
+<text x="565" y="564" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">diagram code {id}</text>
+<text x="565" y="581" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">kind</text>
+<text x="565" y="598" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">render status</text>
+<line x1="158" y1="225" x2="158" y2="309" stroke="#000" stroke-width="1.2"/>
+<polyline points="215.5,211.5 336.5,211.5 336.5,317.5" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="158" y1="423" x2="158" y2="507" stroke="#000" stroke-width="1.2"/>
+<polyline points="216,405 264.86,405 264.86,538 322.5,538" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="197,423 197,465 575,465 575,515.5" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="148.66" y="241" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="166.33" y="293" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="228.84" y="223.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="344.83" y="301.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="148.66" y="439" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="166.33" y="491" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="229.34" y="417" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="310.17" y="526" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="187.66" y="439" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="583.33" y="499.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<rect x="144.33" y="257.5" width="27.35" height="19" fill="#fff"/>
+<text x="158" y="267" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="262.33" y="202" width="27.35" height="19" fill="#fff"/>
+<text x="276" y="211.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="144.33" y="455.5" width="27.35" height="19" fill="#fff"/>
+<text x="158" y="465" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="251.18" y="475.3" width="27.35" height="19" fill="#fff"/>
+<text x="264.86" y="484.8" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="372.33" y="455.5" width="27.35" height="19" fill="#fff"/>
+<text x="386" y="465" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F4 part 4 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="619" height="567" viewBox="74 74 619 567">
+<title>Class Diagram — Verification &amp; Export</title>
+<rect x="74" y="74" width="619" height="567" fill="#fff"/>
+<rect x="96" y="94" width="115" height="131" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="153.5" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
+<line x1="96" y1="128" x2="211" y2="128" stroke="#000" stroke-width="1.2"/>
+<text x="106" y="142.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">project name {id}</text>
+<text x="106" y="159.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">domain</text>
+<text x="106" y="176.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">mode</text>
+<text x="106" y="193.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">folder [0..1]</text>
+<text x="106" y="210.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">owner {ref}</text>
+<rect x="95.5" y="309" width="116" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="153.5" y="326" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Spine</text>
+<line x1="95.5" y1="343" x2="211.5" y2="343" stroke="#000" stroke-width="1.2"/>
+<text x="105.5" y="357.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">spine version {id}</text>
+<text x="105.5" y="374.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">completion</text>
+<text x="105.5" y="391.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">last saved at</text>
+<text x="105.5" y="408.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">project {ref}</text>
+<rect x="94" y="515.5" width="119" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="153.5" y="532.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Baseline</text>
+<line x1="94" y1="549.5" x2="213" y2="549.5" stroke="#000" stroke-width="1.2"/>
+<text x="104" y="564" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">baseline label {id}</text>
+<text x="104" y="581" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">signed at</text>
+<text x="104" y="598" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">spine {ref}</text>
+<rect x="313" y="507" width="128" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="377" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChangeRecord</text>
+<line x1="313" y1="541" x2="441" y2="541" stroke="#000" stroke-width="1.2"/>
+<text x="323" y="555.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">sequence {id}</text>
+<text x="323" y="572.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">reason</text>
+<text x="323" y="589.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">changed by {ref}</text>
+<text x="323" y="606.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">spine {ref}</text>
+<rect x="541" y="515.5" width="132" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="607" y="532.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Flag</text>
+<line x1="541" y1="549.5" x2="673" y2="549.5" stroke="#000" stroke-width="1.2"/>
+<text x="551" y="564" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">rule {id}</text>
+<text x="551" y="581" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">level</text>
+<text x="551" y="598" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">waived reason [0..1]</text>
+<line x1="153.5" y1="225" x2="153.5" y2="309" stroke="#000" stroke-width="1.2"/>
+<line x1="153.5" y1="423" x2="153.5" y2="515.5" stroke="#000" stroke-width="1.2"/>
+<polyline points="211.5,405 325,405 325,507" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="211.5,379 555,379 555,515.5" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="144.16" y="241" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="161.83" y="293" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="144.16" y="439" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="161.83" y="499.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="224.84" y="417" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="333.33" y="491" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="224.84" y="391" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="563.33" y="499.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<rect x="139.83" y="257.5" width="27.35" height="19" fill="#fff"/>
+<text x="153.5" y="267" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="139.83" y="459.75" width="27.35" height="19" fill="#fff"/>
+<text x="153.5" y="469.25" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="254.58" y="395.5" width="27.35" height="19" fill="#fff"/>
+<text x="268.25" y="405" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="369.58" y="369.5" width="27.35" height="19" fill="#fff"/>
+<text x="383.25" y="379" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F5 part 5 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="374" height="714" viewBox="74 74 374 714">
+<title>Class Diagram — Billing &amp; Notifications</title>
+<rect x="74" y="74" width="374" height="714" fill="#fff"/>
+<rect x="101" y="275" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="292" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
+<line x1="101" y1="309" x2="211" y2="309" stroke="#000" stroke-width="1.2"/>
+<text x="111" y="323.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">email {id}</text>
+<text x="111" y="340.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">display name</text>
+<text x="111" y="357.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">avatar [0..1]</text>
+<text x="111" y="374.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">account status</text>
+<rect x="94" y="481.5" width="124" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="498.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">CreditLedger</text>
+<line x1="94" y1="515.5" x2="218" y2="515.5" stroke="#000" stroke-width="1.2"/>
+<text x="104" y="530" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">balance</text>
+<text x="104" y="547" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">last top-up at [0..1]</text>
+<text x="104" y="564" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">owner {ref}</text>
+<rect x="99" y="94" width="114" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Subscription</text>
+<line x1="99" y1="128" x2="213" y2="128" stroke="#000" stroke-width="1.2"/>
+<text x="109" y="142.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">plan {id}</text>
+<text x="109" y="159.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">renewal date</text>
+<text x="109" y="176.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">subscriber {ref}</text>
+<rect x="318" y="473" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="373" y="490" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Notification</text>
+<line x1="318" y1="507" x2="428" y2="507" stroke="#000" stroke-width="1.2"/>
+<text x="328" y="521.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">title</text>
+<text x="328" y="538.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">message</text>
+<text x="328" y="555.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">read at [0..1]</text>
+<text x="328" y="572.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">recipient {ref}</text>
+<rect x="96.5" y="671" width="119" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="688" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">UsageRecord</text>
+<line x1="96.5" y1="705" x2="215.5" y2="705" stroke="#000" stroke-width="1.2"/>
+<text x="106.5" y="719.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">usage code {id}</text>
+<text x="106.5" y="736.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">credits used</text>
+<text x="106.5" y="753.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">ledger {ref}</text>
+<line x1="156" y1="389" x2="156" y2="481.5" stroke="#000" stroke-width="1.2"/>
+<polyline points="211,371 334,371 334,473" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="156" y1="578.5" x2="156" y2="671" stroke="#000" stroke-width="1.2"/>
+<line x1="156" y1="191" x2="156" y2="275" stroke="#000" stroke-width="1.2"/>
+<text x="146.66" y="405" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="164.33" y="465.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="224.34" y="383" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="342.33" y="457" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="146.66" y="594.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="164.33" y="655" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="146.66" y="207" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="164.33" y="259" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<rect x="142.33" y="425.75" width="27.35" height="19" fill="#fff"/>
+<text x="156" y="435.25" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="258.83" y="361.5" width="27.35" height="19" fill="#fff"/>
+<text x="272.5" y="371" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="142.33" y="615.25" width="27.35" height="19" fill="#fff"/>
+<text x="156" y="624.75" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="142.33" y="223.5" width="27.35" height="19" fill="#fff"/>
+<text x="156" y="233" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > class@F6 part 6 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="164" height="516" viewBox="74 74 164 516">
+<title>Class Diagram — Administration</title>
+<rect x="74" y="74" width="164" height="516" fill="#fff"/>
+<rect x="101" y="275" width="110" height="114" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="292" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
+<line x1="101" y1="309" x2="211" y2="309" stroke="#000" stroke-width="1.2"/>
+<text x="111" y="323.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">email {id}</text>
+<text x="111" y="340.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">display name</text>
+<text x="111" y="357.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">avatar [0..1]</text>
+<text x="111" y="374.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">account status</text>
+<rect x="94" y="473" width="124" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="490" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">CreditLedger</text>
+<line x1="94" y1="507" x2="218" y2="507" stroke="#000" stroke-width="1.2"/>
+<text x="104" y="521.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">balance</text>
+<text x="104" y="538.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">last top-up at [0..1]</text>
+<text x="104" y="555.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">owner {ref}</text>
+<rect x="99" y="94" width="114" height="97" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="156" y="111" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Subscription</text>
+<line x1="99" y1="128" x2="213" y2="128" stroke="#000" stroke-width="1.2"/>
+<text x="109" y="142.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">plan {id}</text>
+<text x="109" y="159.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">renewal date</text>
+<text x="109" y="176.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">subscriber {ref}</text>
+<line x1="156" y1="389" x2="156" y2="473" stroke="#000" stroke-width="1.2"/>
+<line x1="156" y1="191" x2="156" y2="275" stroke="#000" stroke-width="1.2"/>
+<text x="146.66" y="405" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="164.33" y="457" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<text x="146.66" y="207" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="164.33" y="259" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">*</text>
+<rect x="142.33" y="421.5" width="27.35" height="19" fill="#fff"/>
+<text x="156" y="431" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<rect x="142.33" y="223.5" width="27.35" height="19" fill="#fff"/>
+<text x="156" y="233" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+</svg>
+"
+`;
+
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > context 1`] = `
-"@startdot
-digraph Context {
-  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];
-  node [fontname="sans-serif", fontsize=14, fontcolor="black", fixedsize=true, pin=true, style=filled, color="black", fillcolor="white", penwidth=1.2];
-  edge [fontname="sans-serif", fontsize=12, color="black", fontcolor="black", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];
-  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fontsize=18, fillcolor="lightgray"];
-  A01 [shape=box, pos="-484.284636,348.000000!", width=1.444444, height=1.944444, label="Founder", sector="west"];
-  A02 [shape=box, pos="-452.178257,146.000000!", width=2.411111, height=1.111111, label="Business Analyst", sector="west"];
-  A03 [shape=box, pos="-455.402390,-26.000000!", width=2.031944, height=1.111111, label="Administrator", sector="west"];
-  A04 [shape=box, pos="-432.433057,-198.000000!", width=1.444444, height=1.111111, label="Guest", sector="west"];
-  A05 [shape=box, pos="388.210598,288.000000!", width=2.284722, height=1.111111, label="Payment Gateway", sector="east"];
-  A06 [shape=box, pos="366.455820,116.000000!", width=1.905556, height=1.111111, label="LLM Provider", sector="east"];
-  A07 [shape=box, pos="425.265546,-56.000000!", width=2.284722, height=1.111111, label="PlantUML Server", sector="east"];
-  A08 [shape=box, pos="409.398137,-213.000000!", width=2.031944, height=0.694444, label="Email Service", sector="east"];
-  A09 [shape=box, pos="0.000000,-216.000000!", width=2.369444, height=0.611111, label="Scheduler", sector="south"];
-  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,393.000000!"];
-  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-36.297525,93.179878!"];
-  A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,363.000000!"];
-  SYSTEM_A01_IN_1 [shape=point, style=invis, width=0, height=0, label="", pos="-44.525492,89.540385!"];
-  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-52.393045,85.176105!"];
-  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,333.000000!"];
-  SYSTEM_A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-59.836501,80.122364!"];
-  A01_OUT_1 [shape=point, style=invis, width=0, height=0, label="", pos="-432.284636,303.000000!"];
-  A02_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-365.378257,161.000000!"];
-  SYSTEM_A02_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-70.263887,71.154664!"];
-  SYSTEM_A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-77.253092,63.497715!"];
-  A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-365.378257,131.000000!"];
-  A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-382.252390,-11.000000!"];
-  SYSTEM_A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.805814,-6.228931!"];
-  SYSTEM_A03_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-97.392721,-22.686073!"];
-  A03_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-382.252390,-41.000000!"];
-  A04_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-380.433057,-183.000000!"];
-  SYSTEM_A04_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-68.996072,-72.384681!"];
-  SYSTEM_A04_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-62.210997,-78.292988!"];
-  A04_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-380.433057,-213.000000!"];
-  A05_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="305.960598,303.000000!"];
-  SYSTEM_A05_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="37.169311,92.835566!"];
-  SYSTEM_A05_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="45.362803,89.119112!"];
-  A05_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="305.960598,273.000000!"];
-  A06_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="297.855820,131.000000!"];
-  SYSTEM_A06_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="70.458173,70.962284!"];
-  SYSTEM_A06_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="79.162400,61.100854!"];
-  A06_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="297.855820,101.000000!"];
-  A07_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="343.015546,-41.000000!"];
-  SYSTEM_A07_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="97.392721,-22.686073!"];
-  SYSTEM_A07_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="92.701563,-37.502270!"];
-  A07_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="343.015546,-71.000000!"];
-  SYSTEM_A08_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="62.210997,-78.292988!"];
-  A08_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="336.248137,-213.000000!"];
-  A09_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-194.000000!"];
-  SYSTEM_A09_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-100.000000!"];
-  A01_IN_0 -> SYSTEM_A01_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>brief answers</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=0, pos="e,-36.297525,93.179878 -432.284636,393.000000 -363.617969,393.000000 -294.951302,393.000000 -226.284636,393.000000 -154.196216,393.000000 -102.126530,262.127523 -39.201546,100.634183", lp="-356.584636,393.000000"];
-  A01_IN_1 -> SYSTEM_A01_IN_1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>accepted step</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=1, pos="e,-44.525492,89.540385 -432.284636,363.000000 -363.617969,363.000000 -294.951302,363.000000 -226.284636,363.000000 -181.236850,363.000000 -121.260605,243.830708 -48.087679,96.703542", lp="-356.584636,363.000000"];
-  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft section</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=0, pos="e,-432.284636,333.000000 -52.393045,85.176105 -136.235065,221.479247 -204.833081,333.000000 -226.284636,333.000000 -292.284636,333.000000 -358.284636,333.000000 -424.284636,333.000000", lp="-356.584636,333.000000"];
-  SYSTEM_A01_OUT_1 -> A01_OUT_1 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>srs document</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=1, pos="e,-432.284636,303.000000 -59.836501,80.122364 -151.382975,202.705064 -226.284636,303.000000 -226.284636,303.000000 -292.284636,303.000000 -358.284636,303.000000 -424.284636,303.000000", lp="-360.484636,303.000000"];
-  A02_IN_0 -> SYSTEM_A02_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>verification result</TD></TR></TABLE>>, actor_id="A02", flow="in", flow_index=0, pos="e,-70.263887,71.154664 -365.378257,161.000000 -296.711590,161.000000 -228.044923,161.000000 -159.378257,161.000000 -158.999694,161.000000 -122.089810,123.637017 -75.885010,76.847025", lp="-266.278257,161.000000"];
-  SYSTEM_A02_OUT_0 -> A02_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>red flag list</TD></TR></TABLE>>, actor_id="A02", flow="out", flow_index=0, pos="e,-365.378257,131.000000 -77.253092,63.497715 -122.421933,100.623972 -159.378257,131.000000 -159.378257,131.000000 -225.378257,131.000000 -291.378257,131.000000 -357.378257,131.000000", lp="-289.678257,131.000000"];
-  A03_IN_0 -> SYSTEM_A03_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>account action</TD></TR></TABLE>>, actor_id="A03", flow="in", flow_index=0, pos="e,-99.805814,-6.228931 -382.252390,-11.000000 -313.585724,-11.000000 -244.919057,-11.000000 -176.252390,-11.000000 -176.252390,-11.000000 -146.120481,-9.119452 -107.790279,-6.727245", lp="-302.652390,-11.000000"];
-  SYSTEM_A03_OUT_0 -> A03_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>platform metrics</TD></TR></TABLE>>, actor_id="A03", flow="out", flow_index=0, pos="e,-382.252390,-41.000000 -97.392721,-22.686073 -140.635275,-32.758733 -176.015546,-41.000000 -176.252390,-41.000000 -242.252390,-41.000000 -308.252390,-41.000000 -374.252390,-41.000000", lp="-294.852390,-41.000000"];
-  A04_IN_0 -> SYSTEM_A04_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>registration request</TD></TR></TABLE>>, actor_id="A04", flow="in", flow_index=0, pos="e,-68.996072,-72.384681 -380.433057,-183.000000 -311.766391,-183.000000 -243.099724,-183.000000 -174.433057,-183.000000 -174.433057,-183.000000 -129.967043,-136.350123 -74.515758,-78.175455", lp="-277.433057,-183.000000"];
-  SYSTEM_A04_OUT_0 -> A04_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>registration result</TD></TR></TABLE>>, actor_id="A04", flow="out", flow_index=0, pos="e,-380.433057,-213.000000 -62.210997,-78.292988 -121.081424,-152.381844 -169.248137,-213.000000 -174.433057,-213.000000 -240.433057,-213.000000 -306.433057,-213.000000 -372.433057,-213.000000", lp="-281.333057,-213.000000"];
-  A05_IN_0 -> SYSTEM_A05_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>payment result</TD></TR></TABLE>>, actor_id="A05", flow="in", flow_index=0, pos="e,37.169311,92.835566 305.960598,303.000000 250.293932,303.000000 194.627265,303.000000 138.960598,303.000000 121.693956,303.000000 85.068268,212.449549 40.143007,100.262351", lp="226.360598,303.000000"];
-  SYSTEM_A05_OUT_0 -> A05_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>payment request</TD></TR></TABLE>>, actor_id="A05", flow="out", flow_index=0, pos="e,305.960598,273.000000 45.362803,89.119112 96.841590,190.253600 138.960598,273.000000 138.960598,273.000000 191.960598,273.000000 244.960598,273.000000 297.960598,273.000000", lp="222.460598,273.000000"];
-  A06_IN_0 -> SYSTEM_A06_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>generated draft</TD></TR></TABLE>>, actor_id="A06", flow="in", flow_index=0, pos="e,70.458173,70.962284 297.855820,131.000000 242.189153,131.000000 186.522486,131.000000 130.855820,131.000000 130.114966,131.000000 106.266352,107.024000 76.094904,76.639191", lp="214.355820,131.000000"];
-  SYSTEM_A06_OUT_0 -> A06_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft request</TD></TR></TABLE>>, actor_id="A06", flow="out", flow_index=0, pos="e,297.855820,101.000000 79.162400,61.100854 107.593781,83.045385 130.855820,101.000000 130.855820,101.000000 183.855820,101.000000 236.855820,101.000000 289.855820,101.000000", lp="222.155820,101.000000"];
-  A07_IN_0 -> SYSTEM_A07_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>diagram png</TD></TR></TABLE>>, actor_id="A07", flow="in", flow_index=0, pos="e,97.392721,-22.686073 343.015546,-41.000000 287.348879,-41.000000 231.682213,-41.000000 176.015546,-41.000000 176.015546,-41.000000 144.805337,-33.730082 105.184139,-24.500959", lp="275.115546,-41.000000"];
-  SYSTEM_A07_OUT_0 -> A07_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>puml source</TD></TR></TABLE>>, actor_id="A07", flow="out", flow_index=0, pos="e,343.015546,-71.000000 92.701563,-37.502270 138.243087,-55.926022 175.504335,-71.000000 176.015546,-71.000000 229.015546,-71.000000 282.015546,-71.000000 335.015546,-71.000000", lp="275.115546,-71.000000"];
-  SYSTEM_A08_OUT_0 -> A08_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email request</TD></TR></TABLE>>, actor_id="A08", flow="out", flow_index=0, pos="e,336.248137,-213.000000 62.210997,-78.292988 121.081424,-152.381844 169.248137,-213.000000 169.248137,-213.000000 222.248137,-213.000000 275.248137,-213.000000 328.248137,-213.000000", lp="260.548137,-213.000000"];
-  A09_IN_0 -> SYSTEM_A09_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>housekeeping tick</TD></TR></TABLE>>, actor_id="A09", flow="in", flow_index=0, pos="e,0.000000,-100.000000 0.000000,-194.000000 0.000000,-173.333333 0.000000,-152.666667 0.000000,-132.000000 0.000000,-132.000000 0.000000,-121.761880 0.000000,-108.000000", lp="0.000000,-163.000000"];
-}
-@enddot
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1099" height="728" viewBox="-542 -374 1099 728">
+<rect x="-542" y="-374" width="1099" height="728" fill="#fff"/>
+<line x1="-171.59" y1="-259.59" x2="-91.4" y2="-104.73" stroke="#000" stroke-width="1.2"/>
+<polygon points="-91.4,-104.73 -102.26,-113.74 -94.68,-111.08 -92.49,-118.8" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-146.82" y1="-259.59" x2="-73.49" y2="-117.99" stroke="#000" stroke-width="1.2"/>
+<polygon points="-73.49,-117.99 -84.35,-127 -76.77,-124.34 -74.58,-132.06" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-53.95" y1="-128.1" x2="-122.04" y2="-259.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="-122.04,-259.59 -111.18,-250.57 -118.75,-253.24 -120.95,-245.52" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-32.79" y1="-135.08" x2="-97.27" y2="-259.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="-97.27,-259.59 -86.4,-250.57 -93.98,-253.24 -96.17,-245.52" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-371.28" y1="-69.96" x2="-137.71" y2="-18.86" stroke="#000" stroke-width="1.2"/>
+<polygon points="-137.71,-18.86 -151.59,-16.27 -144.7,-20.39 -149.24,-27.02" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-133.01" y1="-40.36" x2="-365.23" y2="-91.15" stroke="#000" stroke-width="1.2"/>
+<polygon points="-365.23,-91.15 -351.36,-93.75 -358.25,-89.63 -353.71,-83" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-340.95" y1="130.38" x2="-127.24" y2="55.96" stroke="#000" stroke-width="1.2"/>
+<polygon points="-127.24,55.96 -137.71,65.43 -133.99,58.31 -141.33,55.04" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-134.47" y1="35.18" x2="-371.86" y2="117.85" stroke="#000" stroke-width="1.2"/>
+<polygon points="-371.86,117.85 -361.4,108.38 -365.11,115.49 -357.78,118.76" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-132.4" y1="279.59" x2="-53.95" y2="128.1" stroke="#000" stroke-width="1.2"/>
+<polygon points="-53.95,128.1 -55.04,142.18 -57.24,134.45 -64.81,137.12" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="-73.49" y1="117.99" x2="-157.17" y2="279.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="-157.17,279.59 -156.08,265.52 -153.88,273.24 -146.31,270.57" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="132.4" y1="-279.59" x2="53.95" y2="-128.1" stroke="#000" stroke-width="1.2"/>
+<polygon points="53.95,-128.1 55.04,-142.18 57.24,-134.45 64.81,-137.12" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="73.49" y1="-117.99" x2="157.17" y2="-279.59" stroke="#000" stroke-width="1.2"/>
+<polygon points="157.17,-279.59 156.08,-265.52 153.88,-273.24 146.31,-270.57" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="320.38" y1="-150.51" x2="122.82" y2="-65.09" stroke="#000" stroke-width="1.2"/>
+<polygon points="122.82,-65.09 132.57,-75.3 129.38,-67.93 136.93,-65.2" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="131.55" y1="-44.9" x2="360.65" y2="-143.96" stroke="#000" stroke-width="1.2"/>
+<polygon points="360.65,-143.96 350.9,-133.75 354.09,-141.12 346.53,-143.84" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="385.44" y1="21.27" x2="139" y2="0.61" stroke="#000" stroke-width="1.2"/>
+<polygon points="139,0.61 152.41,-3.78 146.12,1.21 151.49,7.18" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="137.16" y1="22.54" x2="385.44" y2="43.35" stroke="#000" stroke-width="1.2"/>
+<polygon points="385.44,43.35 372.02,47.74 378.31,42.75 372.94,36.78" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="118.99" y1="71.85" x2="307.39" y2="185.62" stroke="#000" stroke-width="1.2"/>
+<polygon points="307.39,185.62 293.42,183.61 301.27,181.92 299.1,174.19" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="144.79" y1="279.59" x2="63.92" y2="123.43" stroke="#000" stroke-width="1.2"/>
+<polygon points="63.92,123.43 74.78,132.45 67.21,129.78 65.01,137.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<rect x="-233.77" y="-353.59" width="150" height="94" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-158.77" y="-306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Founder</text>
+<rect x="-521.23" y="-123.96" width="156" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-443.23" y="-96.96" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Business Analyst</text>
+<rect x="-490.95" y="117.85" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-415.95" y="144.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Administrator</text>
+<rect x="-233.77" y="279.59" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-158.77" y="306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Guest</text>
+<rect x="79.27" y="-333.59" width="159" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158.77" y="-306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Payment Gateway</text>
+<rect x="320.38" y="-197.96" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="395.38" y="-170.96" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">LLM Provider</text>
+<rect x="385.44" y="11.64" width="151" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="460.94" y="38.64" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">PlantUML Server</text>
+<rect x="277.1" y="185.62" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="352.1" y="212.62" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Email Service</text>
+<rect x="83.77" y="279.59" width="150" height="54" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="158.77" y="306.59" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Scheduler</text>
+<circle cx="0" cy="0" r="139" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="0" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="15" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">FlintFlow</text>
+<rect x="-175.59" y="-190.66" width="88.19" height="17" fill="#fff" transform="rotate(62.62 -131.49 -182.16)"/>
+<text x="-131.49" y="-182.16" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -131.49 -182.16)">Brief Answers</text>
+<rect x="-156.43" y="-197.29" width="92.56" height="17" fill="#fff" transform="rotate(62.62 -110.15 -188.79)"/>
+<text x="-110.15" y="-188.79" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -110.15 -188.79)">Accepted Step</text>
+<rect x="-129.57" y="-202.35" width="83.14" height="17" fill="#fff" transform="rotate(62.62 -88 -193.85)"/>
+<text x="-88" y="-193.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -88 -193.85)">Draft Section</text>
+<rect x="-110.21" y="-205.83" width="90.36" height="17" fill="#fff" transform="rotate(62.62 -65.03 -197.33)"/>
+<text x="-65.03" y="-197.33" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 -65.03 -197.33)">Srs Document</text>
+<rect x="-310.88" y="-52.91" width="112.77" height="17" fill="#fff" transform="rotate(12.34 -254.5 -44.41)"/>
+<text x="-254.5" y="-44.41" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(12.34 -254.5 -44.41)">Verification Result</text>
+<rect x="-291.42" y="-74.26" width="84.59" height="17" fill="#fff" transform="rotate(12.34 -249.12 -65.76)"/>
+<text x="-249.12" y="-65.76" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(12.34 -249.12 -65.76)">Red Flag List</text>
+<rect x="-281.45" y="84.67" width="94.72" height="17" fill="#fff" transform="rotate(-19.2 -234.1 93.17)"/>
+<text x="-234.1" y="93.17" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-19.2 -234.1 93.17)">Account Action</text>
+<rect x="-304.12" y="68.01" width="101.9" height="17" fill="#fff" transform="rotate(-19.2 -253.17 76.51)"/>
+<text x="-253.17" y="76.51" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-19.2 -253.17 76.51)">Platform Metrics</text>
+<rect x="-157.87" y="195.35" width="129.4" height="17" fill="#fff" transform="rotate(-62.62 -93.17 203.85)"/>
+<text x="-93.17" y="203.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 -93.17 203.85)">Registration Request</text>
+<rect x="-174.24" y="190.29" width="117.83" height="17" fill="#fff" transform="rotate(-62.62 -115.33 198.79)"/>
+<text x="-115.33" y="198.79" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 -115.33 198.79)">Registration Result</text>
+<rect x="43.29" y="-212.35" width="99.76" height="17" fill="#fff" transform="rotate(-62.62 93.17 -203.85)"/>
+<text x="93.17" y="-203.85" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 93.17 -203.85)">Payment Result</text>
+<rect x="59.66" y="-207.29" width="111.33" height="17" fill="#fff" transform="rotate(-62.62 115.33 -198.79)"/>
+<text x="115.33" y="-198.79" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-62.62 115.33 -198.79)">Payment Request</text>
+<rect x="170.99" y="-116.3" width="101.22" height="17" fill="#fff" transform="rotate(-23.38 221.6 -107.8)"/>
+<text x="221.6" y="-107.8" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-23.38 221.6 -107.8)">Generated Draft</text>
+<rect x="202" y="-102.93" width="88.2" height="17" fill="#fff" transform="rotate(-23.38 246.1 -94.43)"/>
+<text x="246.1" y="-94.43" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(-23.38 246.1 -94.43)">Draft Request</text>
+<rect x="220.28" y="2.44" width="83.87" height="17" fill="#fff" transform="rotate(4.79 262.22 10.94)"/>
+<text x="262.22" y="10.94" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(4.79 262.22 10.94)">Diagram Png</text>
+<rect x="220.09" y="24.44" width="82.42" height="17" fill="#fff" transform="rotate(4.79 261.3 32.94)"/>
+<text x="261.3" y="32.94" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(4.79 261.3 32.94)">Puml Source</text>
+<rect x="166.92" y="120.24" width="92.54" height="17" fill="#fff" transform="rotate(31.13 213.19 128.74)"/>
+<text x="213.19" y="128.74" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(31.13 213.19 128.74)">Email Request</text>
+<rect x="45.07" y="193.01" width="118.56" height="17" fill="#fff" transform="rotate(62.62 104.35 201.51)"/>
+<text x="104.35" y="201.51" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000" transform="rotate(62.62 104.35 201.51)">Housekeeping Tick</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > erd 1`] = `
-"@startchen
-skinparam monochrome true
-skinparam ranksep 20
-skinparam linetype ortho
-entity "User" as E01 {
-}
-entity "Project" as E02 {
-}
-entity "Spine" as E03 {
-}
-entity "ChatSession" as E04 {
-}
-entity "CreditLedger" as E05 {
-}
-entity "Subscription" as E06 {
-}
-entity "Notification" as E07 {
-}
-entity "Baseline" as E08 {
-}
-entity "ChangeRecord" as E09 {
-}
-entity "UsageRecord" as E10 {
-}
-entity "Flag" as E11 {
-}
-entity "Diagram" as E12 {
-}
-relationship "has" as R_E01_E02 {
-}
-E01 -1- R_E01_E02
-R_E01_E02 -N- E02
-relationship "has" as R_E01_E05 {
-}
-E01 -1- R_E01_E05
-R_E01_E05 -N- E05
-relationship "has" as R_E01_E07 {
-}
-E01 -1- R_E01_E07
-R_E01_E07 -N- E07
-relationship "has" as R_E02_E03 {
-}
-E02 -1- R_E02_E03
-R_E02_E03 -N- E03
-relationship "has" as R_E02_E04 {
-}
-E02 -1- R_E02_E04
-R_E02_E04 -N- E04
-relationship "has" as R_E03_E08 {
-}
-E03 -1- R_E03_E08
-R_E03_E08 -N- E08
-relationship "has" as R_E03_E09 {
-}
-E03 -1- R_E03_E09
-R_E03_E09 -N- E09
-relationship "has" as R_E03_E11 {
-}
-E03 -1- R_E03_E11
-R_E03_E11 -N- E11
-relationship "has" as R_E03_E12 {
-}
-E03 -1- R_E03_E12
-R_E03_E12 -N- E12
-relationship "has" as R_E05_E10 {
-}
-E05 -1- R_E05_E10
-R_E05_E10 -N- E10
-relationship "has" as R_E06_E01 {
-}
-E06 -1- R_E06_E01
-R_E06_E01 -N- E01
-@endchen
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1842" height="1182" viewBox="74 74 1842 1182">
+<title>Entity Relationship Diagram</title>
+<rect x="74" y="74" width="1842" height="1182" fill="#fff"/>
+<rect x="226" y="342" width="110" height="50" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="281" y="361" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">User</text>
+<ellipse cx="138" cy="429" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="138" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">email</text>
+<line x1="122.66" y1="437" x2="153.34" y2="437" stroke="#000" stroke-width="1.2"/>
+<line x1="248" y1="392" x2="138" y2="416" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="224" cy="429" rx="48" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="224" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">display name</text>
+<line x1="270" y1="392" x2="224" y2="416" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="311" cy="429" rx="29" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="311" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">avatar</text>
+<line x1="292" y1="392" x2="311" y2="416" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="401" cy="429" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="401" y="429" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">account status</text>
+<line x1="314" y1="392" x2="401" y2="416" stroke="#000" stroke-width="1.2"/>
+<rect x="226" y="602" width="110" height="50" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="281" y="621" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Project</text>
+<ellipse cx="144" cy="689" rx="50" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="144" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">project name</text>
+<line x1="106.66" y1="697" x2="181.34" y2="697" stroke="#000" stroke-width="1.2"/>
+<line x1="244.33" y1="652" x2="144" y2="676" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="236" cy="689" rx="32" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="236" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">domain</text>
+<line x1="262.67" y1="652" x2="236" y2="676" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="306" cy="689" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="306" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">mode</text>
+<line x1="281" y1="652" x2="306" y2="676" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="372" cy="689" rx="28" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="372" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">folder</text>
+<line x1="299.33" y1="652" x2="372" y2="676" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="439" cy="689" rx="29" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="439" y="689" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">owner</text>
+<line x1="317.67" y1="652" x2="439" y2="676" stroke="#000" stroke-width="1.2"/>
+<rect x="662" y="862" width="110" height="76" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="717" y="881" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Spine</text>
+<ellipse cx="583" cy="975" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="583" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">spine version</text>
+<line x1="544.32" y1="983" x2="621.68" y2="983" stroke="#000" stroke-width="1.2"/>
+<line x1="684" y1="938" x2="583" y2="962" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="686" cy="975" rx="42" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="686" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">completion</text>
+<line x1="706" y1="938" x2="686" y2="962" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="784" cy="975" rx="46" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="784" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">last saved at</text>
+<line x1="728" y1="938" x2="784" y2="962" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="871" cy="975" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="871" y="975" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">project</text>
+<line x1="750" y1="938" x2="871" y2="962" stroke="#000" stroke-width="1.2"/>
+<rect x="224.5" y="881" width="113" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="281" y="900" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChatSession</text>
+<ellipse cx="188" cy="956" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="188" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">session code</text>
+<line x1="149.98" y1="964" x2="226.02" y2="964" stroke="#000" stroke-width="1.2"/>
+<line x1="252.75" y1="919" x2="188" y2="943" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="301" cy="956" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="301" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reply language</text>
+<line x1="281" y1="919" x2="301" y2="943" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="394" cy="956" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="394" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">project</text>
+<line x1="309.25" y1="919" x2="394" y2="943" stroke="#000" stroke-width="1.2"/>
+<rect x="659" y="608" width="116" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="717" y="627" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">CreditLedger</text>
+<ellipse cx="631" cy="683" rx="34" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="631" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">balance</text>
+<line x1="688" y1="646" x2="631" y2="670" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="722" cy="683" rx="47" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="722" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">last top-up at</text>
+<line x1="717" y1="646" x2="722" y2="670" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="808" cy="683" rx="29" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="808" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">owner</text>
+<line x1="746" y1="646" x2="808" y2="670" stroke="#000" stroke-width="1.2"/>
+<rect x="224" y="94" width="114" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="281" y="113" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Subscription</text>
+<ellipse cx="184" cy="169" rx="25" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="184" y="169" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">plan</text>
+<line x1="171.67" y1="177" x2="196.33" y2="177" stroke="#000" stroke-width="1.2"/>
+<line x1="252.5" y1="132" x2="184" y2="156" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="266" cy="169" rx="47" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="266" y="169" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">renewal date</text>
+<line x1="281" y1="132" x2="266" y2="156" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="363" cy="169" rx="40" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="363" y="169" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">subscriber</text>
+<line x1="309.5" y1="132" x2="363" y2="156" stroke="#000" stroke-width="1.2"/>
+<rect x="1068" y="608" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1123" y="627" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Notification</text>
+<ellipse cx="1005" cy="683" rx="22" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1005" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">title</text>
+<line x1="1090" y1="646" x2="1005" y2="670" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1074" cy="683" rx="37" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1074" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">message</text>
+<line x1="1112" y1="646" x2="1074" y2="670" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1152" cy="683" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1152" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">read at</text>
+<line x1="1134" y1="646" x2="1152" y2="670" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1228" cy="683" rx="35" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1228" y="683" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">recipient</text>
+<line x1="1156" y1="646" x2="1228" y2="670" stroke="#000" stroke-width="1.2"/>
+<rect x="662" y="1148" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="717" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Baseline</text>
+<ellipse cx="643" cy="1223" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="643" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">baseline label</text>
+<line x1="603.65" y1="1231" x2="682.35" y2="1231" stroke="#000" stroke-width="1.2"/>
+<line x1="689.5" y1="1186" x2="643" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="742" cy="1223" rx="37" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="742" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">signed at</text>
+<line x1="717" y1="1186" x2="742" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="816" cy="1223" rx="27" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="816" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">spine</text>
+<line x1="744.5" y1="1186" x2="816" y2="1210" stroke="#000" stroke-width="1.2"/>
+<rect x="1059" y="1148" width="128" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1123" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">ChangeRecord</text>
+<ellipse cx="1006" cy="1223" rx="40" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1006" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">sequence</text>
+<line x1="978.32" y1="1231" x2="1033.68" y2="1231" stroke="#000" stroke-width="1.2"/>
+<line x1="1084.6" y1="1186" x2="1006" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1087" cy="1223" rx="31" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1087" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reason</text>
+<line x1="1110.2" y1="1186" x2="1087" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1172" cy="1223" rx="44" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1172" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">changed by</text>
+<line x1="1135.8" y1="1186" x2="1172" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1253" cy="1223" rx="27" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1253" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">spine</text>
+<line x1="1161.4" y1="1186" x2="1253" y2="1210" stroke="#000" stroke-width="1.2"/>
+<rect x="1063.5" y="881" width="119" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1123" y="900" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">UsageRecord</text>
+<ellipse cx="1039" cy="956" rx="46" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1039" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">usage code</text>
+<line x1="1005.99" y1="964" x2="1072.01" y2="964" stroke="#000" stroke-width="1.2"/>
+<line x1="1093.25" y1="919" x2="1039" y2="943" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1140" cy="956" rx="45" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1140" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">credits used</text>
+<line x1="1123" y1="919" x2="1140" y2="943" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1224" cy="956" rx="29" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1224" y="956" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">ledger</text>
+<line x1="1152.75" y1="919" x2="1224" y2="943" stroke="#000" stroke-width="1.2"/>
+<rect x="1399" y="1148" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1454" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Flag</text>
+<ellipse cx="1368" cy="1223" rx="24" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1368" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">rule</text>
+<line x1="1357" y1="1231" x2="1379" y2="1231" stroke="#000" stroke-width="1.2"/>
+<line x1="1426.5" y1="1186" x2="1368" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1427" cy="1223" rx="25" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1427" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">level</text>
+<line x1="1454" y1="1186" x2="1427" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1513" cy="1223" rx="51" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1513" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">waived reason</text>
+<line x1="1481.5" y1="1186" x2="1513" y2="1210" stroke="#000" stroke-width="1.2"/>
+<rect x="1707" y="1148" width="110" height="38" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1762" y="1167" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Diagram</text>
+<ellipse cx="1680" cy="1223" rx="52" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1680" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">diagram code</text>
+<line x1="1640.99" y1="1231" x2="1719.01" y2="1231" stroke="#000" stroke-width="1.2"/>
+<line x1="1734.5" y1="1186" x2="1680" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1766" cy="1223" rx="24" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1766" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">kind</text>
+<line x1="1762" y1="1186" x2="1766" y2="1210" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="1848" cy="1223" rx="48" ry="13" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="1848" y="1223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">render status</text>
+<line x1="1789.5" y1="1186" x2="1848" y2="1210" stroke="#000" stroke-width="1.2"/>
+<polygon points="247,524 281,502 315,524 281,546" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="281" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="683,524 717,502 751,524 717,546" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="717" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1089,524 1123,502 1157,524 1123,546" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1123" y="524" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="683,784 717,762 751,784 717,806" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="717" y="784" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="247,784 281,762 315,784 281,806" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="281" y="784" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="683,1070 717,1048 751,1070 717,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="717" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1089,1070 1123,1048 1157,1070 1123,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1123" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1420,1070 1454,1048 1488,1070 1454,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1454" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1728,1070 1762,1048 1796,1070 1762,1092" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1762" y="1070" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="1089,784 1123,762 1157,784 1123,806" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="1123" y="784" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polygon points="247,264 281,242 315,264 281,286" fill="#7ACFF5" stroke="#000" stroke-width="1.2" stroke-linejoin="miter"/>
+<text x="281" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">has</text>
+<polyline points="336,380 484,380 484,524 315,524" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="278.8" y1="544.58" x2="278.8" y2="602" stroke="#000" stroke-width="1.2"/>
+<line x1="283.2" y1="544.58" x2="283.2" y2="602" stroke="#000" stroke-width="1.2"/>
+<polyline points="336,354 717,354 717,502" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="714.8" y1="544.58" x2="714.8" y2="608" stroke="#000" stroke-width="1.2"/>
+<line x1="719.2" y1="544.58" x2="719.2" y2="608" stroke="#000" stroke-width="1.2"/>
+<polyline points="320,342 320,314 1123,314 1123,502" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1120.8" y1="544.58" x2="1120.8" y2="608" stroke="#000" stroke-width="1.2"/>
+<line x1="1125.2" y1="544.58" x2="1125.2" y2="608" stroke="#000" stroke-width="1.2"/>
+<polyline points="336,614 516,614 516,784 683,784" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="714.8" y1="804.58" x2="714.8" y2="862" stroke="#000" stroke-width="1.2"/>
+<line x1="719.2" y1="804.58" x2="719.2" y2="862" stroke="#000" stroke-width="1.2"/>
+<polyline points="336,640 484,640 484,784 315,784" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="278.8" y1="804.58" x2="278.8" y2="881" stroke="#000" stroke-width="1.2"/>
+<line x1="283.2" y1="804.58" x2="283.2" y2="881" stroke="#000" stroke-width="1.2"/>
+<polyline points="662,926 516,926 516,1070 683,1070" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="714.8" y1="1090.58" x2="714.8" y2="1148" stroke="#000" stroke-width="1.2"/>
+<line x1="719.2" y1="1090.58" x2="719.2" y2="1148" stroke="#000" stroke-width="1.2"/>
+<polyline points="772,926 934,926 934,1070 1089,1070" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1120.8" y1="1090.58" x2="1120.8" y2="1148" stroke="#000" stroke-width="1.2"/>
+<line x1="1125.2" y1="1090.58" x2="1125.2" y2="1148" stroke="#000" stroke-width="1.2"/>
+<polyline points="772,874 1454,874 1454,1048" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1451.8" y1="1090.58" x2="1451.8" y2="1148" stroke="#000" stroke-width="1.2"/>
+<line x1="1456.2" y1="1090.58" x2="1456.2" y2="1148" stroke="#000" stroke-width="1.2"/>
+<polyline points="756,862 756,834 1762,834 1762,1048" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1759.8" y1="1090.58" x2="1759.8" y2="1148" stroke="#000" stroke-width="1.2"/>
+<line x1="1764.2" y1="1090.58" x2="1764.2" y2="1148" stroke="#000" stroke-width="1.2"/>
+<polyline points="775,627 934,627 934,784 1089,784" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="1120.8" y1="804.58" x2="1120.8" y2="881" stroke="#000" stroke-width="1.2"/>
+<line x1="1125.2" y1="804.58" x2="1125.2" y2="881" stroke="#000" stroke-width="1.2"/>
+<polyline points="338,113 484,113 484,264 315,264" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="278.8" y1="284.58" x2="278.8" y2="342" stroke="#000" stroke-width="1.2"/>
+<line x1="283.2" y1="284.58" x2="283.2" y2="342" stroke="#000" stroke-width="1.2"/>
+<text x="291.33" y="586" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="349.34" y="368" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="727.33" y="592" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="349.34" y="342" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1133.33" y="592" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="329.34" y="326" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="727.33" y="846" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="349.34" y="626" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="291.33" y="865" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="365.34" y="628" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="727.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="648.66" y="914" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1133.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="785.34" y="914" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1464.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="785.34" y="886" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1772.33" y="1132" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="765.34" y="846" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="1133.33" y="857" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="788.34" y="615" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+<text x="291.33" y="326" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">N</text>
+<text x="351.34" y="101" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">1</text>
+</svg>
 "
 `;
 
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 1 1`] = `
-"@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Founder";
-  START [label="Founder", shape=diamond, style=solid];
-  S01 [label="Login"];
-  S03 [label="Forgot Password", shape=ellipse];
-  S04 [label="Onboarding"];
-  S05 [label="Project Dashboard"];
-  S06 [label="Create Project", shape=ellipse];
-  subgraph cluster_S07 {
-    label="Project Workspace"; style=solid;
-    S07_T1 [label="Chat"];
-    S07_T2 [label="Document"];
-    S07_T3 [label="History"];
-  }
-  S08 [label="Diagram Preview"];
-  S09 [label="Verification & Change Panel"];
-  S10 [label="Export"];
-  S11 [label="Plan & Pricing"];
-  S12 [label="Billing History"];
-  S13 [label="Notification Center"];
-  START -> S01;
-  START -> S04;
-  S01 -> S03;
-  S01 -> S05;
-  S04 -> S05;
-  S05 -> S06;
-  S05 -> S07_T1 [lhead=cluster_S07];
-  S05 -> S11;
-  S05 -> S13;
-  S06 -> S07_T1 [lhead=cluster_S07];
-  S07_T1 -> S08 [ltail=cluster_S07];
-  S07_T1 -> S09 [ltail=cluster_S07];
-  S07_T1 -> S10 [ltail=cluster_S07];
-  S09 -> S10;
-  S11 -> S12;
-}
-@enddot
-"
-`;
-
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 2 1`] = `
-"@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Business Analyst";
-  START [label="Business Analyst", shape=diamond, style=solid];
-  S01 [label="Login"];
-  S04 [label="Onboarding"];
-  S05 [label="Project Dashboard"];
-  subgraph cluster_S07 {
-    label="Project Workspace"; style=solid;
-    S07_T1 [label="Chat"];
-    S07_T2 [label="Document"];
-    S07_T3 [label="History"];
-  }
-  S08 [label="Diagram Preview"];
-  S09 [label="Verification & Change Panel"];
-  S10 [label="Export"];
-  S13 [label="Notification Center"];
-  START -> S01;
-  START -> S04;
-  S01 -> S05;
-  S04 -> S05;
-  S05 -> S07_T1 [lhead=cluster_S07];
-  S05 -> S13;
-  S07_T1 -> S08 [ltail=cluster_S07];
-  S07_T1 -> S09 [ltail=cluster_S07];
-  S07_T1 -> S10 [ltail=cluster_S07];
-  S09 -> S10;
-}
-@enddot
-"
-`;
-
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 3 1`] = `
-"@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Administrator";
-  START [label="Administrator", shape=diamond, style=solid];
-  S01 [label="Login"];
-  S14 [label="Admin User List"];
-  S15 [label="Admin User Detail"];
-  S16 [label="Admin Metrics Dashboard"];
-  S17 [label="Admin AI Cost Report"];
-  S18 [label="Admin Prompt Templates"];
-  S19 [label="Admin Audit Log"];
-  START -> S01;
-  S01 -> S14;
-  S14 -> S15;
-  S14 -> S16;
-  S14 -> S17;
-  S14 -> S18;
-  S14 -> S19;
-}
-@enddot
-"
-`;
-
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow part 4 1`] = `
-"@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Guest";
-  START [label="Guest", shape=diamond, style=solid];
-  S01 [label="Login"];
-  S02 [label="Register"];
-  S03 [label="Forgot Password", shape=ellipse];
-  START -> S01;
-  S01 -> S02;
-  S01 -> S03;
-}
-@enddot
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > screen_flow 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="808" height="1013" viewBox="-8 -8 808 1013">
+<title>Screens flow</title>
+<rect x="-8" y="-8" width="808" height="1013" fill="#fff"/>
+<rect x="12" y="12" width="150" height="40" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="87" y="32" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Login</text>
+<rect x="218" y="12" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="293" y="32" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Register</text>
+<ellipse cx="293" cy="96" rx="75" ry="22" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="293" y="96" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Forgot Password</text>
+<rect x="12" y="945" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="87" y="965" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Onboarding</text>
+<rect x="218" y="141.5" width="150" height="41" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="293" y="162" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Project Dashboard</text>
+<ellipse cx="499" cy="162" rx="75" ry="22" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="162" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Create Project</text>
+<rect x="424" y="206" width="150" height="129" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="223" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Project Workspace</text>
+<rect x="434" y="237" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="249.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">Chat</text>
+<rect x="434" y="268" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="280.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">Document</text>
+<rect x="434" y="299" width="130" height="25" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="311.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" font-style="italic" fill="#000">History</text>
+<rect x="630" y="250.5" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="270.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Diagram Preview</text>
+<rect x="630" y="357" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="374" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Verification &amp; Change</text>
+<text x="705" y="390" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Panel</text>
+<rect x="630" y="429" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="449" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Export</text>
+<rect x="424" y="491" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Plan &amp; Pricing</text>
+<rect x="630" y="491" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="705" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Billing History</text>
+<rect x="424" y="553" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="573" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Notification Center</text>
+<rect x="218" y="615" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="293" y="635" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin User List</text>
+<rect x="424" y="615" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="635" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin User Detail</text>
+<rect x="424" y="677" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="694" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Metrics</text>
+<text x="499" y="710" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Dashboard</text>
+<rect x="424" y="749" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="769" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin AI Cost Report</text>
+<rect x="424" y="811" width="150" height="50" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="828" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Prompt</text>
+<text x="499" y="844" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Templates</text>
+<rect x="424" y="883" width="150" height="40" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="499" y="903" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" dominant-baseline="central" fill="#000">Admin Audit Log</text>
+<line x1="162" y1="32" x2="185" y2="32" stroke="#000" stroke-width="1.2"/>
+<line x1="185" y1="32" x2="185" y2="635" stroke="#000" stroke-width="1.2"/>
+<line x1="162" y1="965" x2="195" y2="965" stroke="#000" stroke-width="1.2"/>
+<line x1="195" y1="168" x2="195" y2="965" stroke="#000" stroke-width="1.2"/>
+<line x1="368" y1="162" x2="391" y2="162" stroke="#000" stroke-width="1.2"/>
+<line x1="391" y1="162" x2="391" y2="573" stroke="#000" stroke-width="1.2"/>
+<line x1="574" y1="270.5" x2="597" y2="270.5" stroke="#000" stroke-width="1.2"/>
+<line x1="597" y1="270.5" x2="597" y2="449" stroke="#000" stroke-width="1.2"/>
+<line x1="368" y1="635" x2="401" y2="635" stroke="#000" stroke-width="1.2"/>
+<line x1="401" y1="635" x2="401" y2="903" stroke="#000" stroke-width="1.2"/>
+<line x1="185" y1="32" x2="218" y2="32" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,32 208,36.5 208,27.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="185" y1="96" x2="218" y2="96" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,96 208,100.5 208,91.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="185" y1="156" x2="218" y2="156" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,156 208,160.5 208,151.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="185" y1="635" x2="218" y2="635" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,635 208,639.5 208,630.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="195" y1="168" x2="218" y2="168" stroke="#000" stroke-width="1.2"/>
+<polygon points="218,168 208,172.5 208,163.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="162" x2="424" y2="162" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,162 414,166.5 414,157.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="270.5" x2="424" y2="270.5" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,270.5 414,275 414,266" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="511" x2="424" y2="511" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,511 414,515.5 414,506.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="391" y1="573" x2="424" y2="573" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,573 414,577.5 414,568.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="597" y1="270.5" x2="630" y2="270.5" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,270.5 620,275 620,266" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="597" y1="382" x2="630" y2="382" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,382 620,386.5 620,377.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="597" y1="449" x2="630" y2="449" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,449 620,453.5 620,444.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="574" y1="511" x2="630" y2="511" stroke="#000" stroke-width="1.2"/>
+<polygon points="630,511 620,515.5 620,506.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="635" x2="424" y2="635" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,635 414,639.5 414,630.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="702" x2="424" y2="702" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,702 414,706.5 414,697.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="769" x2="424" y2="769" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,769 414,773.5 414,764.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="836" x2="424" y2="836" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,836 414,840.5 414,831.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+<line x1="401" y1="903" x2="424" y2="903" stroke="#000" stroke-width="1.2"/>
+<polygon points="424,903 414,907.5 414,898.5" fill="#000" stroke="#000" stroke-width="0.8" stroke-linejoin="miter"/>
+</svg>
 "
 `;
 
@@ -366,129 +816,592 @@ exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, khô
 "
 `;
 
-exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > sequence@FN001 part 1 1`] = `
 "@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Founder
-actor "Founder" as A01
-rectangle "FlintFlow" {
-  usecase "Log In" as UC02
-  usecase "Reset Password" as UC03
-  usecase "Complete Onboarding" as UC04
-  usecase "Browse Projects" as UC05
-  usecase "Create Project" as UC06
-  usecase "Resume Project" as UC07
-  usecase "Refine Product Brief" as UC08
-  usecase "Generate SRS Content" as UC09
-  usecase "Accept Step At Gate" as UC10
-  usecase "Request Change" as UC11
-  usecase "Render Diagrams" as UC12
-  usecase "Verify Document" as UC13
-  usecase "Export Word Document" as UC16
-  usecase "Purchase Credits" as UC17
-  usecase "View Billing History" as UC18
-  usecase "Receive Notifications" as UC19
-  usecase "Preview Change Impact" as UC23
-  usecase "Archive Project" as UC24
-}
-actor "Payment Gateway" as A05 <<system>>
-actor "LLM Provider" as A06 <<system>>
-actor "PlantUML Server" as A07 <<system>>
-actor "Email Service" as A08 <<system>>
-A01 -- UC02
-A01 -- UC03
-UC03 -- A08
-A01 -- UC05
-A01 -- UC06
-A01 -- UC07
-A01 -- UC08
-UC08 -- A06
-A01 -- UC09
-UC09 -- A06
-A01 -- UC11
-UC12 -- A07
-A01 -- UC13
-A01 -- UC16
-A01 -- UC17
-UC17 -- A05
-A01 -- UC18
-A01 -- UC19
-A01 -- UC24
-UC04 ..> UC06 : <<extend>>
-UC09 ..> UC10 : <<include>>
-UC09 ..> UC12 : <<include>>
-UC11 ..> UC23 : <<include>>
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam ActorBackgroundColor #7ACFF5
+skinparam ActorBorderColor #000000
+skinparam ParticipantBackgroundColor #7ACFF5
+skinparam ParticipantBorderColor #000000
+skinparam SequenceLifeLineBorderColor #000000
+skinparam SequenceLifeLineBackgroundColor #7ACFF5
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceGroupBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #000000
+skinparam SequenceGroupBorderThickness 1.2
+skinparam SequenceGroupFontStyle plain
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceGroupBodyBackgroundColor transparent
+skinparam dpi 192
+skinparam ParticipantPadding 30
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign direction
+skinparam style strictuml
+hide footbox
+actor ":Founder" as A01
+participant ":System" as SSD_SYSTEM
+A01 -> SSD_SYSTEM : 1: Submit email and password
+activate SSD_SYSTEM
+alt credentials do not match
+  SSD_SYSTEM -->> A01 : 1.1: Show authentication error
+else account is locked
+  SSD_SYSTEM -->> A01 : 1.2: Show account locked notice
+else else
+  SSD_SYSTEM -->> A01 : 1.3: Open project dashboard
+end
+deactivate SSD_SYSTEM
 @enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > sequence@FN010 part 2 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam ActorBackgroundColor #7ACFF5
+skinparam ActorBorderColor #000000
+skinparam ParticipantBackgroundColor #7ACFF5
+skinparam ParticipantBorderColor #000000
+skinparam SequenceLifeLineBorderColor #000000
+skinparam SequenceLifeLineBackgroundColor #7ACFF5
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceGroupBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #000000
+skinparam SequenceGroupBorderThickness 1.2
+skinparam SequenceGroupFontStyle plain
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceGroupBodyBackgroundColor transparent
+skinparam dpi 192
+skinparam ParticipantPadding 30
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign direction
+skinparam style strictuml
+hide footbox
+actor ":Founder" as A01
+participant ":System" as SSD_SYSTEM
+participant ":Email Service" as A08
+A01 -> SSD_SYSTEM : 1: Submit email address
+activate SSD_SYSTEM
+SSD_SYSTEM ->> A08 : 1.1: Send password reset link
+SSD_SYSTEM -->> A01 : 1.2: Confirm reset email sent
+deactivate SSD_SYSTEM
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > sequence@FN024 part 3 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam ActorBackgroundColor #7ACFF5
+skinparam ActorBorderColor #000000
+skinparam ParticipantBackgroundColor #7ACFF5
+skinparam ParticipantBorderColor #000000
+skinparam SequenceLifeLineBorderColor #000000
+skinparam SequenceLifeLineBackgroundColor #7ACFF5
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceGroupBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #000000
+skinparam SequenceGroupBorderThickness 1.2
+skinparam SequenceGroupFontStyle plain
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceGroupBodyBackgroundColor transparent
+skinparam dpi 192
+skinparam ParticipantPadding 30
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign direction
+skinparam style strictuml
+hide footbox
+actor ":Founder" as A01
+participant ":System" as SSD_SYSTEM
+A01 -> SSD_SYSTEM : 1: Submit project name and working mode
+activate SSD_SYSTEM
+alt project name already exists
+  SSD_SYSTEM -->> A01 : 1.1: Show duplicate name error
+else else
+  SSD_SYSTEM -->> A01 : 1.2: Open project workspace
+end
+deactivate SSD_SYSTEM
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > sequence@FN028 part 4 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam ActorBackgroundColor #7ACFF5
+skinparam ActorBorderColor #000000
+skinparam ParticipantBackgroundColor #7ACFF5
+skinparam ParticipantBorderColor #000000
+skinparam SequenceLifeLineBorderColor #000000
+skinparam SequenceLifeLineBackgroundColor #7ACFF5
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceGroupBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #000000
+skinparam SequenceGroupBorderThickness 1.2
+skinparam SequenceGroupFontStyle plain
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceGroupBodyBackgroundColor transparent
+skinparam dpi 192
+skinparam ParticipantPadding 30
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign direction
+skinparam style strictuml
+hide footbox
+actor ":Founder" as A01
+participant ":System" as SSD_SYSTEM
+participant ":LLM Provider" as A06
+A01 -> SSD_SYSTEM : 1: Send chat message
+activate SSD_SYSTEM
+SSD_SYSTEM -> A06 : 1.1: Generate draft reply
+activate A06
+alt model call times out
+  SSD_SYSTEM -->> A01 : 1.2: Show retry prompt
+else else
+  A06 -->> SSD_SYSTEM : 1.3: Return draft changes
+  SSD_SYSTEM -->> A01 : 1.4: Show updated draft
+end
+deactivate A06
+deactivate SSD_SYSTEM
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > sequence@FN084 part 5 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam ActorBackgroundColor #7ACFF5
+skinparam ActorBorderColor #000000
+skinparam ParticipantBackgroundColor #7ACFF5
+skinparam ParticipantBorderColor #000000
+skinparam SequenceLifeLineBorderColor #000000
+skinparam SequenceLifeLineBackgroundColor #7ACFF5
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceGroupBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #000000
+skinparam SequenceGroupBorderThickness 1.2
+skinparam SequenceGroupFontStyle plain
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceGroupBodyBackgroundColor transparent
+skinparam dpi 192
+skinparam ParticipantPadding 30
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign direction
+skinparam style strictuml
+hide footbox
+participant ":Scheduler" as A09
+participant ":System" as SSD_SYSTEM
+participant ":Email Service" as A08
+A09 ->> SSD_SYSTEM : 1: Trigger monthly quota reset
+SSD_SYSTEM ->> A08 : 1.1: Send quota renewal notice
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > sequence@FN086 part 6 1`] = `
+"@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 13
+skinparam defaultFontColor #000000
+skinparam shadowing false
+skinparam roundCorner 0
+skinparam ArrowColor #000000
+skinparam ArrowThickness 1.2
+skinparam BackgroundColor #FFFFFF
+skinparam ActorBackgroundColor #7ACFF5
+skinparam ActorBorderColor #000000
+skinparam ParticipantBackgroundColor #7ACFF5
+skinparam ParticipantBorderColor #000000
+skinparam SequenceLifeLineBorderColor #000000
+skinparam SequenceLifeLineBackgroundColor #7ACFF5
+skinparam SequenceLifeLineBorderThickness 1
+skinparam SequenceGroupBackgroundColor #FFFFFF
+skinparam SequenceGroupBorderColor #000000
+skinparam SequenceGroupBorderThickness 1.2
+skinparam SequenceGroupFontStyle plain
+skinparam SequenceGroupHeaderFontStyle bold
+skinparam SequenceGroupBodyBackgroundColor transparent
+skinparam dpi 192
+skinparam ParticipantPadding 30
+skinparam maxMessageSize 220
+skinparam sequenceMessageAlign direction
+skinparam style strictuml
+hide footbox
+participant ":Payment Gateway" as A05
+participant ":System" as SSD_SYSTEM
+A05 -> SSD_SYSTEM : 1: Notify payment result
+activate SSD_SYSTEM
+alt signature is invalid
+  SSD_SYSTEM -->> A05 : 1.1: Reject notification
+else else
+  SSD_SYSTEM -->> A05 : 1.2: Acknowledge notification
+end
+deactivate SSD_SYSTEM
+@enduml
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > state_machine@E01 part 1 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="937" height="962" viewBox="-453 -467 937 962">
+<title>State Machine Diagram — User</title>
+<rect x="-453" y="-467" width="937" height="962" fill="#fff"/>
+<line x1="7.79" y1="-433.3" x2="337.58" y2="-242.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="325.64,-244.14 337.58,-242.9 330.54,-252.62" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="-379.15" y1="194.9" x2="-379.15" y2="-206.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="-374.26,-195.94 -379.15,-206.9 -384.04,-195.94" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="379.15" y1="-194.9" x2="379.15" y2="180.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="374.26,169.94 379.15,180.9 384.04,169.94" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="355.33" y1="256.9" x2="52" y2="432.03" stroke="#000" stroke-width="1.2"/>
+<polyline points="59.04,422.31 52,432.03 63.94,430.79" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="294.65" y1="218.9" x2="-325.65" y2="218.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="-314.69,214.01 -325.65,218.9 -314.69,223.79" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="22.09" y1="400.8" x2="294.65" y2="243.44" stroke="#000" stroke-width="1.2"/>
+<polyline points="287.61,253.16 294.65,243.44 282.71,244.68" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="-52" y1="407.78" x2="-337.58" y2="242.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="-325.64,244.14 -337.58,242.9 -330.54,252.62" fill="none" stroke="#000" stroke-width="1.2"/>
+<circle cx="0" cy="-437.8" r="9" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="331.15" y="-242.9" width="96" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="379.15" y="-218.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Pending</text>
+<rect x="294.65" y="180.9" width="169" height="76" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="379.15" y="204.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Active</text>
+<line x1="294.65" y1="228.9" x2="463.65" y2="228.9" stroke="#000" stroke-width="1.2"/>
+<text x="306.65" y="242.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">update profile / save profile</text>
+<rect x="-52" y="400.8" width="104" height="74" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="437.8" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Suspended</text>
+<rect x="-432.65" y="194.9" width="107" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="-379.15" y="218.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Deactivated</text>
+<circle cx="-379.15" cy="-218.9" r="12" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<circle cx="-379.15" cy="-218.9" r="7" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="344.81" y="-17" width="68.68" height="20" fill="#fff"/>
+<text x="379.15" y="-7" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">verify email</text>
+<rect x="159.04" y="375.7" width="146.1" height="36" fill="#fff"/>
+<text x="232.09" y="385.7" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">suspend [requested by an</text>
+<text x="232.09" y="401.7" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">administrator] / notify user</text>
+<rect x="-100.88" y="208.9" width="170.77" height="20" fill="#fff"/>
+<text x="-15.5" y="218.9" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">deactivate [no unsettled credit]</text>
+<rect x="98.67" y="312.12" width="119.39" height="20" fill="#fff"/>
+<text x="158.37" y="322.12" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">reinstate / notify user</text>
+<rect x="-226.14" y="315.34" width="62.7" height="20" fill="#fff"/>
+<text x="-194.79" y="325.34" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">deactivate</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > state_machine@E08 part 2 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="222" height="534" viewBox="-111 -20 222 534">
+<title>State Machine Diagram — Baseline</title>
+<rect x="-111" y="-20" width="222" height="534" fill="#fff"/>
+<line x1="0" y1="18" x2="0" y2="88" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,77.04 0,88 4.89,77.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="400" x2="0" y2="470" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,459.04 0,470 4.89,459.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="136" x2="0" y2="206" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,195.04 0,206 4.89,195.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="282" x2="0" y2="352" stroke="#000" stroke-width="1.2"/>
+<polyline points="-4.89,341.04 0,352 4.89,341.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<circle cx="0" cy="9" r="9" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="-48" y="88" width="96" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="112" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Draft</text>
+<rect x="-91" y="206" width="182" height="76" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="230" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Signed</text>
+<line x1="-91" y1="254" x2="91" y2="254" stroke="#000" stroke-width="1.2"/>
+<text x="-79" y="268" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" dominant-baseline="central" fill="#000">export / render from snapshot</text>
+<rect x="-54.5" y="352" width="109" height="48" rx="12" ry="12" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="376" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central" font-weight="bold" fill="#000">Superseded</text>
+<circle cx="0" cy="482" r="12" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<circle cx="0" cy="482" r="7" fill="#000" stroke="#000" stroke-width="1.2"/>
+<rect x="-71.37" y="153" width="142.74" height="36" fill="#fff"/>
+<text x="0" y="163" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">sign [zero unresolved red</text>
+<text x="0" y="179" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">flags] / freeze snapshot</text>
+<rect x="-57.03" y="307" width="114.07" height="20" fill="#fff"/>
+<text x="0" y="317" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central" fill="#000">sign newer baseline</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 1 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="868" height="580" viewBox="-446 -82 868 580">
+<title>Use Cases — Authentication &amp; Onboarding</title>
+<rect x="-446" y="-82" width="868" height="580" fill="#fff"/>
+<rect x="-184" y="0" width="368" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-348.92" y1="223.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="-30.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="96.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="350.5" x2="-138" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="223.5" x2="-138" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="336.9" y1="303" x2="138" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="223.5" x2="-138" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="-348.92" y1="350.5" x2="-138" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="336.9" y1="303" x2="138" y2="407" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Log In</text>
+<ellipse cx="0" cy="199" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Reset Password</text>
+<ellipse cx="0" cy="303" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Complete Onboarding</text>
+<ellipse cx="0" cy="407" rx="138" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Register Account</text>
+<circle cx="-364.92" cy="202.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="212.5" x2="-364.92" y2="242.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="223.5" x2="-348.92" y2="223.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="242.5" x2="-376.92" y2="266.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="242.5" x2="-352.92" y2="266.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="288.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="-364.92" cy="-51.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="-41.5" x2="-364.92" y2="-11.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="-30.5" x2="-348.92" y2="-30.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="-11.5" x2="-376.92" y2="12.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="-11.5" x2="-352.92" y2="12.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="34.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
+<circle cx="-364.92" cy="75.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="85.5" x2="-364.92" y2="115.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="96.5" x2="-348.92" y2="96.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="115.5" x2="-376.92" y2="139.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="115.5" x2="-352.92" y2="139.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="161.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Administrator</text>
+<circle cx="-364.92" cy="329.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="339.5" x2="-364.92" y2="369.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-380.92" y1="350.5" x2="-348.92" y2="350.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="369.5" x2="-376.92" y2="393.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-364.92" y1="369.5" x2="-352.92" y2="393.5" stroke="#000" stroke-width="1.2"/>
+<text x="-364.92" y="415.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Guest</text>
+<circle cx="352.9" cy="282" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="352.9" y1="292" x2="352.9" y2="322" stroke="#000" stroke-width="1.2"/>
+<line x1="336.9" y1="303" x2="368.9" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="352.9" y1="322" x2="340.9" y2="346" stroke="#000" stroke-width="1.2"/>
+<line x1="352.9" y1="322" x2="364.9" y2="346" stroke="#000" stroke-width="1.2"/>
+<text x="352.9" y="368" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="352.9" y="388" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Email Service</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 2 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Business Analyst
-actor "Business Analyst" as A02
-rectangle "FlintFlow" {
-  usecase "Log In" as UC02
-  usecase "Verify Document" as UC13
-  usecase "Waive Red Flag" as UC14
-  usecase "Sign Baseline" as UC15
-}
-A02 -- UC02
-A02 -- UC15
-UC14 ..> UC15 : <<extend>>
-UC15 ..> UC13 : <<include>>
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="528" height="518" viewBox="-354 -20 528 518">
+<title>Use Cases — Project Dashboard</title>
+<rect x="-354" y="-20" width="528" height="518" fill="#fff"/>
+<rect x="-154" y="0" width="308" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-287.8" y1="251" x2="-108" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-287.8" y1="251" x2="-108" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-287.8" y1="251" x2="-108" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="-287.8" y1="251" x2="-108" y2="407" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Browse Projects</text>
+<ellipse cx="0" cy="199" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Create Project</text>
+<ellipse cx="0" cy="303" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Resume Project</text>
+<ellipse cx="0" cy="407" rx="108" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Archive Project</text>
+<circle cx="-303.8" cy="230" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-303.8" y1="240" x2="-303.8" y2="270" stroke="#000" stroke-width="1.2"/>
+<line x1="-319.8" y1="251" x2="-287.8" y2="251" stroke="#000" stroke-width="1.2"/>
+<line x1="-303.8" y1="270" x2="-315.8" y2="294" stroke="#000" stroke-width="1.2"/>
+<line x1="-303.8" y1="270" x2="-291.8" y2="294" stroke="#000" stroke-width="1.2"/>
+<text x="-303.8" y="316" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 3 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Administrator
-actor "Administrator" as A03
-rectangle "FlintFlow" {
-  usecase "Log In" as UC02
-  usecase "Inspect Platform Accounts" as UC20
-  usecase "Monitor Platform Metrics" as UC21
-}
-A03 -- UC02
-A03 -- UC20
-A03 -- UC21
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="536" viewBox="-389 -20 840 536">
+<title>Use Cases — SRS Workspace</title>
+<rect x="-389" y="-20" width="840" height="536" fill="#fff"/>
+<rect x="-189" y="0" width="378" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-322.8" y1="199" x2="-143" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="199" x2="143" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-322.8" y1="199" x2="-143" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="199" x2="143" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="407" x2="143" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="266" x2="0" y2="236" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="4.89,246.96 0,236 -4.89,246.96" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="251" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<line x1="0" y1="340" x2="0" y2="370" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="-4.89,359.04 0,370 4.89,359.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="355" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<ellipse cx="0" cy="95" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Refine Product Brief</text>
+<ellipse cx="0" cy="199" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Accept Step At Gate</text>
+<ellipse cx="0" cy="303" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Generate SRS Content</text>
+<ellipse cx="0" cy="407" rx="143" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Render Diagrams</text>
+<circle cx="-338.8" cy="178" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-338.8" y1="188" x2="-338.8" y2="218" stroke="#000" stroke-width="1.2"/>
+<line x1="-354.8" y1="199" x2="-322.8" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-338.8" y1="218" x2="-350.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<line x1="-338.8" y1="218" x2="-326.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<text x="-338.8" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="369.91" cy="178" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="188" x2="369.91" y2="218" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="199" x2="385.91" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="218" x2="357.91" y2="242" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="218" x2="381.91" y2="242" stroke="#000" stroke-width="1.2"/>
+<text x="369.91" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="369.91" y="284" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">LLM Provider</text>
+<circle cx="369.91" cy="386" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="396" x2="369.91" y2="426" stroke="#000" stroke-width="1.2"/>
+<line x1="353.91" y1="407" x2="385.91" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="426" x2="357.91" y2="450" stroke="#000" stroke-width="1.2"/>
+<line x1="369.91" y1="426" x2="381.91" y2="450" stroke="#000" stroke-width="1.2"/>
+<text x="369.91" y="472" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="369.91" y="492" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">PlantUML Server</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 4 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Guest
-actor "Guest" as A04
-rectangle "FlintFlow" {
-  usecase "Register Account" as UC01
-  usecase "Log In" as UC02
-}
-actor "Email Service" as A08 <<system>>
-A04 -- UC01
-UC01 -- A08
-A04 -- UC02
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="668" height="726" viewBox="-455 -20 668 726">
+<title>Use Cases — Verification &amp; Export</title>
+<rect x="-455" y="-20" width="668" height="726" fill="#fff"/>
+<rect x="-193" y="0" width="386" height="686" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-357.92" y1="317.5" x2="-147" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="444.5" x2="-147" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="-357.92" y1="317.5" x2="-147" y2="615" stroke="#000" stroke-width="1.2"/>
+<line x1="0" y1="132" x2="0" y2="162" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="-4.89,151.04 0,162 4.89,151.04" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="147" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<line x1="0" y1="370" x2="0" y2="340" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="4.89,350.96 0,340 -4.89,350.96" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="355" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;include&gt;&gt;</text>
+<line x1="0" y1="474" x2="0" y2="444" stroke="#000" stroke-width="1.2" stroke-dasharray="6,4"/>
+<polyline points="4.89,454.96 0,444 -4.89,454.96" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="14" y="459" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="start" dominant-baseline="central" fill="#000">&lt;&lt;extend&gt;&gt;</text>
+<ellipse cx="0" cy="95" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Request Change</text>
+<ellipse cx="0" cy="199" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Preview Change Impact</text>
+<ellipse cx="0" cy="303" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Verify Document</text>
+<ellipse cx="0" cy="407" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Sign Baseline</text>
+<ellipse cx="0" cy="511" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="511" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Waive Red Flag</text>
+<ellipse cx="0" cy="615" rx="147" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="615" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Export Word Document</text>
+<circle cx="-373.92" cy="296.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="306.5" x2="-373.92" y2="336.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-389.92" y1="317.5" x2="-357.92" y2="317.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="336.5" x2="-385.92" y2="360.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="336.5" x2="-361.92" y2="360.5" stroke="#000" stroke-width="1.2"/>
+<text x="-373.92" y="382.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="-373.92" cy="423.5" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="433.5" x2="-373.92" y2="463.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-389.92" y1="444.5" x2="-357.92" y2="444.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="463.5" x2="-385.92" y2="487.5" stroke="#000" stroke-width="1.2"/>
+<line x1="-373.92" y1="463.5" x2="-361.92" y2="487.5" stroke="#000" stroke-width="1.2"/>
+<text x="-373.92" y="509.5" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Business Analyst</text>
+</svg>
 "
 `;
 
 exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 5 1`] = `
-"@startuml
-skinparam monochrome true
-left to right direction
-title Use Cases — Scheduler
-rectangle "FlintFlow" {
-  usecase "Run Scheduled Housekeeping" as UC22
-}
-actor "Scheduler" as A09 <<time>>
-UC22 -- A09
-@enduml
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="923" height="536" viewBox="-426 -20 923 536">
+<title>Use Cases — Billing &amp; Notifications</title>
+<rect x="-426" y="-20" width="923" height="536" fill="#fff"/>
+<rect x="-226" y="0" width="452" height="478" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-359.8" y1="199" x2="-180" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="95" x2="180" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-359.8" y1="199" x2="-180" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-359.8" y1="199" x2="-180" y2="303" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="407" x2="180" y2="407" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Purchase Credits</text>
+<ellipse cx="0" cy="199" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">View Billing History</text>
+<ellipse cx="0" cy="303" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="303" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Receive Notifications</text>
+<ellipse cx="0" cy="407" rx="180" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="407" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Run Scheduled Housekeeping</text>
+<circle cx="-375.8" cy="178" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-375.8" y1="188" x2="-375.8" y2="218" stroke="#000" stroke-width="1.2"/>
+<line x1="-391.8" y1="199" x2="-359.8" y2="199" stroke="#000" stroke-width="1.2"/>
+<line x1="-375.8" y1="218" x2="-387.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<line x1="-375.8" y1="218" x2="-363.8" y2="242" stroke="#000" stroke-width="1.2"/>
+<text x="-375.8" y="264" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Founder</text>
+<circle cx="411.36" cy="74" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="84" x2="411.36" y2="114" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="95" x2="427.36" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="114" x2="399.36" y2="138" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="114" x2="423.36" y2="138" stroke="#000" stroke-width="1.2"/>
+<text x="411.36" y="160" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;system&gt;&gt;</text>
+<text x="411.36" y="180" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Payment Gateway</text>
+<circle cx="411.36" cy="386" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="396" x2="411.36" y2="426" stroke="#000" stroke-width="1.2"/>
+<line x1="395.36" y1="407" x2="427.36" y2="407" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="426" x2="399.36" y2="450" stroke="#000" stroke-width="1.2"/>
+<line x1="411.36" y1="426" x2="423.36" y2="450" stroke="#000" stroke-width="1.2"/>
+<text x="411.36" y="472" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">&lt;&lt;time&gt;&gt;</text>
+<text x="411.36" y="492" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Scheduler</text>
+</svg>
+"
+`;
+
+exports[`renderers trên fixture 19 màn > mọi hình: mở/đóng đúng, không dấu tiếng Việt, ổn định giữa hai lần gọi (snapshot) > usecase part 6 1`] = `
+"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="663" height="310" viewBox="-439 -20 663 310">
+<title>Use Cases — Administration</title>
+<rect x="-439" y="-20" width="663" height="310" fill="#fff"/>
+<rect x="-204" y="0" width="408" height="270" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="30" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="18" text-anchor="middle" font-weight="bold" fill="#000">FlintFlow</text>
+<line x1="-355.12" y1="147" x2="-158" y2="95" stroke="#000" stroke-width="1.2"/>
+<line x1="-355.12" y1="147" x2="-158" y2="199" stroke="#000" stroke-width="1.2"/>
+<ellipse cx="0" cy="95" rx="158" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="95" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Inspect Platform Accounts</text>
+<ellipse cx="0" cy="199" rx="158" ry="37" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<text x="0" y="199" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central" fill="#000">Monitor Platform Metrics</text>
+<circle cx="-371.12" cy="126" r="10" fill="#7ACFF5" stroke="#000" stroke-width="1.2"/>
+<line x1="-371.12" y1="136" x2="-371.12" y2="166" stroke="#000" stroke-width="1.2"/>
+<line x1="-387.12" y1="147" x2="-355.12" y2="147" stroke="#000" stroke-width="1.2"/>
+<line x1="-371.12" y1="166" x2="-383.12" y2="190" stroke="#000" stroke-width="1.2"/>
+<line x1="-371.12" y1="166" x2="-359.12" y2="190" stroke="#000" stroke-width="1.2"/>
+<text x="-371.12" y="212" font-family="&apos;Liberation Sans&apos;, Arial, Helvetica, sans-serif" font-size="16" text-anchor="middle" fill="#000">Administrator</text>
+</svg>
 "
 `;
