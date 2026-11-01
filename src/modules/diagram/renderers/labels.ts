@@ -25,6 +25,8 @@ export interface DiagramLabels {
   otherGroup: string
   /** Tiêu đề hình luồng màn của cả hệ thống (`part` = `i/n` khi tách nhiều hình) — `<title>` của SVG, `section-renderer` dùng làm chú thích ảnh. */
   screensFlowTitle: (part?: string) => string
+  /** Nhóm màn chưa nối actor nào khi Screens flow tách theo actor. */
+  otherScreens: string
   /** Guard của nhánh còn lại (`else`) trong khối `alt` của sơ đồ tuần tự. */
   elseGuard: string
   noEntities: string
@@ -55,6 +57,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     actorHierarchyTitle: "Actor Hierarchy",
     otherGroup: "Other",
     screensFlowTitle: (part) => (part ? `Screens flow (${part})` : "Screens flow"),
+    otherScreens: "Other screens",
     elseGuard: "else",
     noEntities: "No entities yet",
     erdTitle: "Entity Relationship Diagram",
@@ -75,6 +78,7 @@ export const DIAGRAM_LABELS: Readonly<Record<UserLocale, DiagramLabels>> = {
     actorHierarchyTitle: "Phân cấp tác nhân",
     otherGroup: "Khác",
     screensFlowTitle: (part) => (part ? `Luồng màn hình (${part})` : "Luồng màn hình"),
+    otherScreens: "Màn khác",
     elseGuard: "ngược lại",
     noEntities: "Chưa có thực thể",
     erdTitle: "Sơ đồ quan hệ thực thể",
