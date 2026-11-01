@@ -27,6 +27,7 @@ import { CreditWallet } from "../../src/modules/credits/credit-wallet.model.js"
 import { CreditTransaction } from "../../src/modules/credits/credit-transaction.model.js"
 import { PaymentIntent } from "../../src/modules/billing/payment-intent.model.js"
 import { Notification } from "../../src/modules/notification/notification.model.js"
+import { Subscription } from "../../src/modules/credits/subscription.model.js"
 
 const CLIENT_ID = "flintflow-test-client"
 let orderSeq = 0
@@ -94,6 +95,28 @@ describe("số dư, gói, lịch sử", () => {
     expect(balance.status).toBe(200)
     expect(balance.body.data.balance).toBeGreaterThan(0)
     expect(await CreditWallet.countDocuments({ userId: seeded.userId })).toBe(1)
+  })
+})
+
+describe("không hạ gói (FLF-347)", () => {
+  it("Pro còn hạn ⇒ POST /upgrade free trả 409, gói và ví giữ nguyên", async () => {
+    const seeded = await seedFixture("minimal", { balance: 500 })
+    await Subscription.create({
+      userId: seeded.userId,
+      organizationId: seeded.orgId,
+      plan: "pro",
+      status: "active",
+      monthlyCreditsAllotment: 1000,
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 7 * 86_400_000)
+    })
+
+    const res = await request(app).post("/api/v1/billing/upgrade").set(as(seeded)).send({ plan: "free" })
+
+    expect(res.status).toBe(409)
+    expect(res.body.error.code).toBe("PLAN_DOWNGRADE_NOT_SUPPORTED")
+    expect((await Subscription.findOne({ organizationId: seeded.orgId }).lean())?.plan).toBe("pro")
+    expect((await CreditWallet.findOne({ organizationId: seeded.orgId }).lean())?.balance).toBe(500)
   })
 })
 
