@@ -1315,7 +1315,7 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
         {
           "runs": [
             {
-              "text": "Each swimlane is the actor who performs the screens in it, named exactly as in the actor model (see §2.1).",
+              "text": "Rectangles are screens, ovals are pop-ups and a framed box lists the tabs of a screen; arrows show navigation. Blue screens are used by every kind of user.",
             },
           ],
           "type": "paragraph",

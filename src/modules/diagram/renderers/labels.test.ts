@@ -73,14 +73,11 @@ describe("nhãn máy trên sơ đồ theo ngôn ngữ (FLF-265 N1)", () => {
     expect(parts.map((p) => p.source).join("\n")).toContain("&lt;&lt;include&gt;&gt;")
   })
 
-  it("luồng màn: tiêu đề theo feature, stereotype pop-up, cùng số phần với bản tiếng Anh", () => {
+  it("luồng màn: một hình, tiêu đề tiếng Việt, cùng số phần với bản tiếng Anh", () => {
     const parts = RENDERERS.screen_flow(FIXTURE, null, VI)
     expect(parts).toHaveLength(renderKind(FIXTURE, "screen_flow").length)
-    const titles = parts.map((p) => svgTitleOf(p.source))
-    expect(titles.length).toBeGreaterThan(1)
-    for (const title of titles) expect(title).toMatch(/^Luồng màn hình — /)
-    expect(titles[0]).toBe(VI.screensFlowTitle(FIXTURE.features[0].name))
-    expect(parts.map((p) => p.source).join("\n")).toContain(`&lt;&lt;${VI.popup}&gt;&gt;`)
+    expect(parts.map((p) => svgTitleOf(p.source))).toEqual([VI.screensFlowTitle()])
+    expect(VI.screensFlowTitle("1/2")).toBe("Luồng màn hình (1/2)")
     expect(RENDERERS.screen_flow(mutate((s) => (s.screens = [])), null, VI)).toEqual([])
   })
 

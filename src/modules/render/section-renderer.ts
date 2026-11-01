@@ -329,13 +329,13 @@ const useCaseTable = (spine: Spine): Block[] => {
 // ─── §3.1 System Functional Overview (section cố định) ────────────
 
 // Chỉ còn sơ đồ luồng màn — bảng Screen | Type | Flows To đã bỏ khỏi cả bản draft lẫn baseline
-/** Mô tả dưới mỗi hình luồng màn: làn là actor theo mô hình actor – use case, định nghĩa actor tổng quát nằm ở §2.1. */
+/** Chú giải dưới mỗi hình luồng màn — ký pháp của hình mẫu §3.1.1 template SRS FPT (nền xanh thay ô vàng của template). */
 const SCREEN_FLOW_DESCRIPTION = {
-  en: "Each swimlane is the actor who performs the screens in it, named exactly as in the actor model (see §2.1).",
-  vi: "Mỗi làn là tác nhân thực hiện các màn hình trong làn, đặt tên đúng như mô hình tác nhân (xem §2.1)."
+  en: "Rectangles are screens, ovals are pop-ups and a framed box lists the tabs of a screen; arrows show navigation. Blue screens are used by every kind of user.",
+  vi: "Hình chữ nhật là màn hình, hình ô-van là pop-up, khung chứa liệt kê các tab của một màn hình; mũi tên là điều hướng. Màn hình nền xanh dùng chung cho mọi loại người dùng."
 } as const
 
-/** Mỗi hình luồng màn (một feature) kèm chú thích (`<title>` của SVG) và một đoạn mô tả bên dưới. */
+/** Mỗi hình luồng màn (thường một hình cho cả hệ thống) kèm chú thích (`<title>` của SVG) và đoạn chú giải bên dưới. */
 const screensFlow = (spine: Spine, ctx: SectionRenderContext): Block[] =>
   diagramImages(spine, "screen_flow", undefined, ctx, "Screens Flow Diagram", svgCaption).flatMap((image): Block[] => [
     image,

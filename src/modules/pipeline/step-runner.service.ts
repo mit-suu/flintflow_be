@@ -155,7 +155,7 @@ export interface ResumeAnswers {
 
 /** `signal` đi thẳng xuống provider: huỷ lượt là huỷ luôn request HTTP tới model, không chờ nó soạn xong (BUG-05). */
 export const defaultStepRunnerDeps = (signal?: AbortSignal): StepRunnerDeps => ({
-  draftExecutor: (actionType, input, projectId, userId) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { signal }),
+  draftExecutor: (actionType, input, projectId, userId, options) => executeAiAction<OpTransaction>(actionType, input, projectId, userId, { ...options, signal }),
   elicitExecutor: (input, projectId, userId) => executeAiAction<ElicitOutput>(ActionType.ELICIT, input, projectId, userId, { signal }),
   reviewExecutor: (input, projectId, userId) => executeAiAction<ReviewOutput>(ActionType.REVIEW, input, projectId, userId, { signal }),
   assembleDocument: async (projectId, spineVersion) => {

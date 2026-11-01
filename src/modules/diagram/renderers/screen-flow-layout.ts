@@ -1,37 +1,36 @@
 /**
- * Hình học sơ đồ luồng màn — UML 2.5 Activity Diagram có swimlane (`docs/technical/screen-flow-diagram-layout.md`).
- * Đơn vị px, trục y hướng xuống (khớp `Scene`). Làn (ActivityPartition) kẻ dọc, mỗi làn một cột các ô; luồng đi từ trên
- * xuống: hàng 0 là các initial node, hàng cuối là các activity final, giữa là các màn xếp theo hạng (đường dài nhất từ
- * màn vào).
+ * Hình học sơ đồ luồng màn — đúng ký pháp hình mẫu §3.1.1 Screens Flow của template SRS FPT
+ * (`docs/technical/screen-flow-diagram-layout.md`). Đơn vị px, trục y hướng xuống (khớp `Scene`).
  *
- * Đường nối chỉ có ba dạng, đều song song trục:
- *   - thẳng đứng: cùng cột, không có ô nào chắn giữa;
- *   - chữ Z: màn ở hàng kề, một đoạn ngang trong khe giữa hai hàng;
- *   - chữ Z kép: màn xa hơn một hàng, đi xuống dọc một đường rãnh (gutter) giữa các cột — rãnh không bao giờ có ô nên
- *     đường không xuyên hình.
- * Không đoạn nào chồng lên đoạn khác: mỗi đoạn ngang có tung độ riêng trong khe, mỗi đoạn dọc trong rãnh có hoành độ
- * riêng, và các cổng (port) ở cạnh trên / cạnh dưới ô có hoành độ riêng trong từng nhóm cổng kề nhau. Các đường cắt
- * nhau chỉ ở góc vuông. Khe và rãnh tự nới theo số đường đi qua.
+ * Ký hiệu: màn = chữ nhật góc vuông; pop-up = ô-van; màn nhiều tab = khung chứa tên màn và một hộp con chữ nghiêng cho mỗi
+ * tab. Nền `FILL` cho màn dùng chung, trắng cho màn còn lại. Mũi tên tam giác đặc, đường ngang / dọc góc nhọn, không nhãn.
  *
- * Decision node: màn có ≥ 2 cạnh tiến ra và ít nhất một cạnh có `guard` ⇒ cạnh đi qua một hình thoi nằm ở hàng riêng ngay
- * dưới màn (đoạn màn → thoi, rồi mỗi nhánh từ thoi tới màn đích). Cổng của thoi nằm trên cạnh xiên (vào ở nửa trên, ra ở
- * nửa dưới). Nhãn cạnh (trigger, `[guard]`) là khối chữ ngang nền trắng đặt trên đường ở chỗ không đè đường / hình / nhãn khác.
+ * Bố cục trái → phải: cột = hạng (đường dài nhất từ màn vào). Mỗi màn có một cha trong cây (cạnh tiến từ cột liền trước,
+ * thứ tự ưu tiên nhỏ nhất); hàng gán theo DFS cây: lá mở hàng mới, cha nằm cùng hàng với con đầu tiên — cây con liền khối,
+ * cha và con đầu nối bằng một đoạn thẳng như template.
+ *
+ * Đường đi trong hai loại kênh không bao giờ có hình: rãnh dọc giữa hai cột và phố ngang giữa hai hàng.
+ *   - Cạnh sang cột kế: các cạnh của cùng một màn nguồn dùng chung **một trục** (đoạn ra + đoạn dọc trong rãnh), mỗi đích
+ *     một nhánh ngang có đầu mũi tên. Cạnh duy nhất tới màn cùng hàng là một đoạn thẳng.
+ *   - Cạnh nhảy ≥ 2 cột: ra rãnh sau màn nguồn, đi dọc tới phố ngay dưới hàng trên của hai màn, đi ngang tới rãnh trước màn
+ *     đích, đi dọc tới cổng vào.
+ * Mỗi đoạn dọc trong rãnh có hoành độ riêng, mỗi đoạn ngang trong phố có tung độ riêng; cổng ra / vào trên cạnh phải / trái
+ * của hình có tung độ riêng (ra phụ ở nửa trên, vào phụ ở nửa dưới) ⇒ không đoạn nào chồng đoạn khác, giao nhau chỉ vuông góc.
  */
 
-import { textWidth, INK, PAPER, stereotype, type Point } from "../../../shared/diagram/svg-kit.js"
+import { FILL, PAPER, textWidth, type Point } from "../../../shared/diagram/svg-kit.js"
 import { Scene } from "../../../shared/diagram/svg-scene.js"
-import { wrapLines } from "./usecase-layout.js"
 
 // ─── đồ thị: màn vào, cạnh tiến, hạng ──────────────────────────────
 
 export interface FlowPlan {
-  /** Màn vào (mỗi màn một initial node): đại diện của mỗi thành phần liên thông mạnh không có cạnh tới từ ngoài. */
+  /** Màn vào (gốc của cây bố cục): đại diện của mỗi thành phần liên thông mạnh không có cạnh tới từ ngoài. */
   entries: string[]
   /** Cạnh tiến (không có cạnh quay lại màn trước), sắp theo thứ tự màn. */
   edges: [string, string][]
-  /** Hạng = đường dài nhất từ một màn vào; mọi cạnh đi xuống đúng chiều tăng hạng. */
+  /** Hạng = đường dài nhất từ một màn vào (= cột); mọi cạnh đi theo chiều tăng hạng. */
   rank: Map<string, number>
-  /** Màn không có cạnh tiến đi ra — mỗi màn một activity final. */
+  /** Màn không có cạnh tiến đi ra. */
   sinks: string[]
 }
 
@@ -120,72 +119,57 @@ export const planFlow = (ids: readonly string[], popups: ReadonlySet<string>, fl
 
 // ─── hình học ──────────────────────────────────────────────────────
 
-export interface FlowLane {
-  id: string
-  /** Tên actor; rỗng ⇒ chưa có làn (không vẽ khung làn). */
-  name: string
-}
 export interface FlowNode {
   id: string
   name: string
-  /** Chỉ số làn trong `lanes`. */
-  lane: number
   popup: boolean
   tabs: readonly string[]
-}
-/** Cạnh có nhãn: `trigger` = hành động người dùng làm, `guard` = điều kiện rẽ nhánh (không kèm ngoặc vuông). */
-export interface FlowEdgeInput {
-  from: string
-  to: string
-  trigger?: string
-  guard?: string
+  /** Màn dùng chung (mọi actor người) ⇒ nền `FILL`; còn lại nền trắng. */
+  shared: boolean
 }
 export interface FlowDiagram {
-  lanes: readonly FlowLane[]
   /** Theo thứ tự ưu tiên (queue_order, id). */
   nodes: readonly FlowNode[]
-  /** Cặp `[từ, tới]` hoặc cạnh có nhãn. */
-  edges: readonly (readonly [string, string] | FlowEdgeInput)[]
-  /** Chữ stereotype của màn pop-up (`pop-up`). */
-  popupLabel: string
-  /** Chữ guard của nhánh còn lại (`[else]`), mặc định `else`. */
-  elseLabel?: string
+  /** Cặp `[từ, tới]` theo `screens[].flow_to`. */
+  edges: readonly (readonly [string, string])[]
 }
 
 const TEXT = 13
 const LINE = 16
-export const NODE_W = 176
-const NODE_MIN_H = 44
-const NODE_PAD_X = 14
-const NODE_PAD_Y = 10
-const RADIUS = 10
-const TEXT_W = NODE_W - 2 * NODE_PAD_X
-const INIT_R = 10
-const FINAL_R = 12
-const FINAL_INNER = 7
-const HEAD_SIZE = 14
-const HEAD_LINE = 18
-const GUTTER_PAD = 14
-const TRACK_GAP = 12
-const GUTTER_MIN = 30
-const GAP_PAD = 20
-const RUN_GAP = 12
-const GAP_MIN = 46
-const TOP_PAD = 26
-const BOTTOM_PAD = 26
-const PORT_STEP = 14
-const PORT_SPAN = NODE_W / 2 - 16
-/** Nhãn cạnh: cỡ chữ, cao một dòng, rộng tối đa của chữ, lề trong nền trắng, lề tới đường / hình khác. */
-const LABEL_SIZE = 12
-const LABEL_LH = 15
-const LABEL_MAX_W = 132
-const LABEL_PAD = 4
-const LABEL_MARGIN = 6
-const ARROW_LEN = 12
-/** Decision node: nửa bề rộng tối thiểu, nửa cao tối thiểu, khoảng cách các nhánh trên cạnh dưới. */
-const DEC_HW_MIN = 18
-const DEC_HH_MIN = 14
-const DEC_INSET = 4
+export const NODE_W = 150
+const PAD_X = 10
+const PAD_Y = 9
+const MIN_H = 40
+const TEXT_W = NODE_W - 2 * PAD_X
+const MAX_LINES = 4
+/** Ô-van: chữ nằm trong hình chữ nhật nội tiếp — rộng ≤ `POPUP_TEXT_W`, nửa cao ≤ `POPUP_FIT` × bán trục dọc. */
+const POPUP_TEXT_W = 118
+const POPUP_FIT = 0.58
+const POPUP_MAX_LINES = 3
+/** Khung tab: lề trong, hộp tab (chữ nghiêng), khe giữa các hộp. */
+const TAB_INSET = 10
+const TAB_SIZE = 12
+const TAB_LINE = 15
+const TAB_PAD_Y = 5
+const TAB_GAP = 6
+const TAB_W = NODE_W - 2 * TAB_INSET
+const TAB_TEXT_W = TAB_W - 12
+const FRAME_RADIUS = 14
+/** Rãnh dọc giữa hai cột, phố ngang giữa hai hàng: lề hai bên + một track mỗi đường. */
+const GUTTER_PAD = 18
+const GUTTER_MIN = 56
+const STREET_PAD = 8
+const STREET_MIN = 22
+const TRACK = 10
+const MARGIN = 12
+/** Bước giữa hai cổng kề nhau trên một cạnh: rộng hơn đầu mũi tên (`triangle_filled` rộng 9) ⇒ hai đầu mũi tên không chạm. */
+const PORT_STEP = 12
+const HEAD_HALF = 4.5
+const PORT_EDGE = 4
+/** Ô-van: cổng chỉ nằm trên cung giữa, độ lệch ≤ `POPUP_PORT_SPAN` × chiều cao. */
+const POPUP_PORT_SPAN = 0.3
+
+const clean = (text: string): string => text.replace(/\s+/g, " ").trim()
 
 const fit = (line: string, size: number, max: number): string => {
   if (textWidth(line, size) <= max) return line
@@ -193,6 +177,7 @@ const fit = (line: string, size: number, max: number): string => {
   while (cut.length > 1 && textWidth(`${cut}...`, size) > max) cut = cut.slice(0, -1)
   return `${cut.trimEnd()}...`
 }
+
 /** Từ dài hơn `max` px bị cắt thành các đoạn vừa dòng (không mất chữ). */
 const breakLongWords = (text: string, size: number, max: number): string => {
   const parts: string[] = []
@@ -209,540 +194,263 @@ const breakLongWords = (text: string, size: number, max: number): string => {
   return parts.join(" ")
 }
 
-/** Gói dòng tham lam: mỗi dòng ≤ `max` px (từ dài đã cắt trước bởi `breakLongWords`). */
-const wrapGreedy = (text: string, size: number, max: number): string[] => {
+/** Gói `text` tối đa `maxLines` dòng ≤ `max` px; dư thì dòng cuối kết thúc bằng `...`. */
+const wrapCapped = (text: string, size: number, max: number, maxLines: number): string[] => {
   const lines: string[] = []
-  for (const word of text.split(/\s+/).filter((w) => w !== "")) {
+  for (const word of breakLongWords(text, size, max).split(/\s+/).filter((w) => w !== "")) {
     const last = lines.length - 1
     if (last >= 0 && textWidth(`${lines[last]} ${word}`, size) <= max) lines[last] = `${lines[last]} ${word}`
     else lines.push(word)
   }
-  return lines
-}
-
-/** Dòng `[tab | tab]`: ngắt dòng giữa các tab (mỗi dòng ≤ `max` px), tên tab quá dài thì gói dòng. */
-const tabLines = (tabs: readonly string[], size: number, max: number): string[] => {
-  const names = tabs.map(clean).filter((t) => t !== "")
-  const lines: string[] = []
-  let current = ""
-  names.forEach((name, i) => {
-    const piece = `${i === 0 ? "[" : ""}${name}${i === names.length - 1 ? "]" : " |"}`
-    if (textWidth(piece, size) > max) {
-      if (current !== "") lines.push(current)
-      lines.push(...wrapGreedy(breakLongWords(piece, size, max), size, max))
-      current = ""
-    } else if (current !== "" && textWidth(`${current} ${piece}`, size) > max) {
-      lines.push(current)
-      current = piece
-    } else current = current === "" ? piece : `${current} ${piece}`
-  })
-  if (current !== "") lines.push(current)
-  return lines.map((l) => fit(l, size, max))
-}
-const clean = (text: string): string => text.replace(/\s+/g, " ").trim()
-
-/** Gói `text` tối đa `maxLines` dòng ≤ `max` px; dư thì dòng cuối kết thúc bằng `...`. */
-const wrapCapped = (text: string, size: number, max: number, maxLines: number): string[] => {
-  const lines = wrapGreedy(breakLongWords(text, size, max), size, max)
   if (lines.length <= maxLines) return lines
   const kept = lines.slice(0, maxLines)
   kept[maxLines - 1] = fit(`${kept[maxLines - 1]} ...`, size, max)
   return kept
 }
 
-/** Dòng chữ của nhãn cạnh: trigger (≤ 2 dòng) rồi `[guard]` (≤ 2 dòng). */
-const labelLines = (trigger: string, guard: string): string[] => [
-  ...(trigger === "" ? [] : wrapCapped(trigger, LABEL_SIZE, LABEL_MAX_W, 2)),
-  ...(guard === "" ? [] : wrapCapped(`[${guard}]`, LABEL_SIZE, LABEL_MAX_W, 2))
-]
-const labelHeight = (lines: readonly string[]): number => (lines.length === 0 ? 0 : lines.length * LABEL_LH + 4)
-const labelWidth = (lines: readonly string[]): number => (lines.length === 0 ? 0 : Math.max(...lines.map((l) => textWidth(l, LABEL_SIZE))) + 8)
-
-type Kind = "screen" | "initial" | "final" | "decision"
+type Kind = "screen" | "popup" | "tabs"
 interface Placed {
-  key: string
+  node: FlowNode
   kind: Kind
-  name: string
-  row: number
-  lane: number
-  slot: number
-  col: number
   lines: string[]
+  /** Dòng chữ của từng hộp tab (chỉ `tabs`). */
+  tabLines: string[][]
   h: number
-  /** Nửa bề rộng hình (quyết định chỗ cổng nằm được). */
-  hw: number
-  /** Chỉ số thứ tự ưu tiên (màn), hoặc của màn gắn kèm (initial / final / decision). */
+  col: number
+  row: number
   order: number
 }
-interface Link {
+
+const measure = (n: FlowNode, order: number): Placed => {
+  const name = clean(n.name) || n.id
+  const tabs = n.tabs.map(clean).filter((t) => t !== "")
+  if (tabs.length > 0) {
+    const lines = wrapCapped(name, TEXT, TEXT_W, MAX_LINES)
+    const tabLines = tabs.map((t) => wrapCapped(t, TAB_SIZE, TAB_TEXT_W, 2))
+    const h = PAD_Y + lines.length * LINE + tabLines.reduce((a, l) => a + TAB_GAP + l.length * TAB_LINE + 2 * TAB_PAD_Y, 0) + PAD_Y + 2
+    return { node: n, kind: "tabs", lines, tabLines, h, col: 0, row: 0, order }
+  }
+  if (n.popup) {
+    const lines = wrapCapped(name, TEXT, POPUP_TEXT_W, POPUP_MAX_LINES)
+    const ry = Math.max(MIN_H / 2 + 2, ((lines.length * LINE) / 2 + 1) / POPUP_FIT)
+    return { node: n, kind: "popup", lines, tabLines: [], h: 2 * ry, col: 0, row: 0, order }
+  }
+  const lines = wrapCapped(name, TEXT, TEXT_W, MAX_LINES)
+  return { node: n, kind: "screen", lines, tabLines: [], h: Math.max(MIN_H, lines.length * LINE + 2 * PAD_Y), col: 0, row: 0, order }
+}
+
+/**
+ * Chiều cao tối thiểu để `steps` bước cổng về mỗi phía của tâm nằm trên phần cạnh thẳng (khung bo góc: trừ góc bo) hoặc
+ * trên cung giữa của ô-van, đầu mũi tên (nửa rộng `HEAD_HALF`) không chạm góc.
+ */
+const heightForPorts = (p: Placed, steps: number): number => {
+  if (steps === 0) return 0
+  if (p.kind === "popup") return (steps * PORT_STEP) / POPUP_PORT_SPAN
+  return 2 * (steps * PORT_STEP + HEAD_HALF + PORT_EDGE + (p.kind === "tabs" && p.node.popup ? FRAME_RADIUS : 0))
+}
+
+/** Khoảng lùi vào so với cạnh bao tại độ lệch `dy` (ô-van: cổng nằm trên cung). */
+const inset = (p: Placed, dy: number): number => {
+  if (p.kind !== "popup") return 0
+  const rx = NODE_W / 2
+  const ry = p.h / 2
+  return rx - rx * Math.sqrt(Math.max(0, 1 - (dy / ry) ** 2))
+}
+
+/** Dãy bậc cổng: `start` (0 hoặc 1) rồi lùi dần theo `sign` — độ lệch = bậc × `PORT_STEP`. */
+const steps = (count: number, start: number, sign: 1 | -1): number[] => Array.from({ length: count }, (_, i) => sign * (start + i))
+
+interface Route {
   id: string
   from: string
   to: string
-  /** Dòng chữ nhãn (trigger, `[guard]`); rỗng ⇒ không nhãn. */
-  label: string[]
-}
-interface PortItem {
-  link: Link
-  other: number
-  /** Nút mà cổng này gắn vào. */
-  node: string
+  kind: "straight" | "branch" | "far"
 }
 
-interface Box {
-  x0: number
-  y0: number
-  x1: number
-  y1: number
-}
-const hit = (a: Box, b: Box, pad = 0): boolean => a.x0 < b.x1 + pad && b.x0 < a.x1 + pad && a.y0 < b.y1 + pad && b.y0 < a.y1 + pad
-const segBox = (p: Point, q: Point): Box => ({ x0: Math.min(p[0], q[0]), y0: Math.min(p[1], q[1]), x1: Math.max(p[0], q[0]), y1: Math.max(p[1], q[1]) })
-
-const asEdge = (e: FlowDiagram["edges"][number]): FlowEdgeInput => (Array.isArray(e) ? { from: e[0], to: e[1] } : (e as FlowEdgeInput))
-
-/**
- * Bố cục một lượt với `slack` px thêm vào mọi khe giữa các hàng (chỗ để nhãn lách khỏi các đoạn dọc). Trả số nhãn không
- * tìm được chỗ sạch.
- */
-const layoutOnce = (d: FlowDiagram, slack: number): { scene: Scene; unplaced: number } => {
-  let unplaced = 0
+export const layoutScreenFlow = (d: FlowDiagram): Scene => {
   const scene = new Scene()
-  const lanes: FlowLane[] = d.lanes.length > 0 ? [...d.lanes] : [{ id: "", name: "" }]
-  const named = lanes.some((l) => l.name !== "")
-  const nodes = new Map(d.nodes.map((n) => [n.id, n]))
   const order = new Map(d.nodes.map((n, i) => [n.id, i]))
-  const edgeInputs = d.edges.map(asEdge)
-  const plan = planFlow(d.nodes.map((n) => n.id), new Set(d.nodes.filter((n) => n.popup).map((n) => n.id)), edgeInputs.map((e): [string, string] => [e.from, e.to]))
-  const meta = new Map<string, { trigger: string; guard: string }>()
-  for (const e of edgeInputs) {
-    const key = `${e.from}>${e.to}`
-    const had = meta.get(key)
-    meta.set(key, { trigger: had?.trigger || clean(e.trigger ?? ""), guard: had?.guard || clean(e.guard ?? "") })
-  }
-  const elseGuard = clean(d.elseLabel ?? "") || "else"
+  const plan = planFlow(
+    d.nodes.map((n) => n.id),
+    new Set(d.nodes.filter((n) => n.popup).map((n) => n.id)),
+    d.edges.map(([a, b]): [string, string] => [a, b])
+  )
+  const placed = new Map(d.nodes.map((n, i) => [n.id, measure(n, i)]))
+  for (const p of placed.values()) p.col = plan.rank.get(p.node.id)!
 
-  // ── decision node: các cạnh tiến ra của một màn cùng trigger (cùng hành động), ≥ 2 cạnh và ít nhất một cạnh có guard ──
-  interface Decision {
-    key: string
-    from: string
-    trigger: string
-    outs: string[]
-  }
-  const decisions: Decision[] = []
-  const decisionOfEdge = new Map<string, Decision>()
-  const byTrigger = new Map<string, string[]>()
+  // ── cây: cha = nguồn ở cột liền trước có thứ tự nhỏ nhất; hàng theo DFS ──
+  const parent = new Map<string, string>()
   for (const [from, to] of plan.edges) {
-    const k = `${from} ${(meta.get(`${from}>${to}`)?.trigger ?? "").toLowerCase()}`
-    byTrigger.set(k, [...(byTrigger.get(k) ?? []), to])
+    if (plan.rank.get(from)! + 1 !== plan.rank.get(to)!) continue
+    const had = parent.get(to)
+    if (had === undefined || order.get(from)! < order.get(had)!) parent.set(to, from)
   }
-  for (const [k, outs] of byTrigger) {
-    const from = k.slice(0, k.indexOf(" "))
-    if (outs.length < 2 || !outs.some((to) => meta.get(`${from}>${to}`)?.guard)) continue
-    const decision = { key: `decision:${from}#${decisions.filter((x) => x.from === from).length}`, from, trigger: meta.get(`${from}>${outs[0]}`)?.trigger ?? "", outs }
-    decisions.push(decision)
-    for (const to of outs) decisionOfEdge.set(`${from}>${to}`, decision)
-  }
-
-  // ── hàng: hạng + hàng decision chèn sau hạng có decision ──
-  const maxRank = Math.max(0, ...plan.rank.values())
-  const initialRow = 0
-  const rankRow: number[] = []
-  const decisionRow = new Map<number, number>()
-  let nextRow = 1
-  for (let rank = 0; rank <= maxRank; rank++) {
-    rankRow[rank] = nextRow++
-    if (decisions.some((x) => plan.rank.get(x.from) === rank)) decisionRow.set(rank, nextRow++)
-  }
-  const finalRow = nextRow
-  const rows = finalRow + 1
-
-  // ── nút ──
-  const placed = new Map<string, Placed>()
-  const add = (p: Omit<Placed, "slot" | "col" | "hw"> & { hw?: number }): void => void placed.set(p.key, { hw: NODE_W / 2, ...p, slot: -1, col: -1 })
+  const children = new Map<string, string[]>(d.nodes.map((n) => [n.id, []]))
   for (const n of d.nodes) {
-    const lines = [
-      ...(n.popup ? [stereotype(d.popupLabel)] : []),
-      ...wrapGreedy(breakLongWords(clean(n.name) || n.id, TEXT, TEXT_W), TEXT, TEXT_W).map((l) => fit(l, TEXT, TEXT_W)),
-      ...tabLines(n.tabs, TEXT, TEXT_W)
-    ]
-    add({ key: n.id, kind: "screen", name: n.name, row: rankRow[plan.rank.get(n.id)!], lane: n.lane, lines, h: Math.max(NODE_MIN_H, lines.length * LINE + 2 * NODE_PAD_Y), order: order.get(n.id)! })
+    const p = parent.get(n.id)
+    if (p !== undefined) children.get(p)!.push(n.id)
   }
-  for (const id of plan.entries) add({ key: `initial:${id}`, kind: "initial", name: "Initial", row: initialRow, lane: nodes.get(id)!.lane, lines: [], h: 2 * INIT_R, hw: INIT_R, order: order.get(id)! })
-  for (const id of plan.sinks) add({ key: `final:${id}`, kind: "final", name: "Final", row: finalRow, lane: nodes.get(id)!.lane, lines: [], h: 2 * FINAL_R, hw: FINAL_R, order: order.get(id)! })
-  for (const x of decisions) {
-    const hw = Math.max(DEC_HW_MIN, (PORT_STEP * (x.outs.length - 1)) / 2 + 2 * DEC_INSET + 4)
-    const hh = Math.max(DEC_HH_MIN, Math.round(hw * 0.7))
-    add({ key: x.key, kind: "decision", name: "Decision", row: decisionRow.get(plan.rank.get(x.from)!)!, lane: nodes.get(x.from)!.lane, lines: [], h: 2 * hh, hw, order: order.get(x.from)! })
+  let rows = 0
+  const assign = (id: string): number => {
+    const kids = children.get(id)!
+    const rowsOfKids = kids.map(assign)
+    const row = rowsOfKids.length > 0 ? rowsOfKids[0] : rows++
+    placed.get(id)!.row = row
+    return row
   }
+  for (const n of d.nodes) if (!parent.has(n.id)) assign(n.id)
 
-  // ── liên kết ──
-  const links: Link[] = [
-    ...plan.entries.map((id) => ({ id: `start:${id}`, from: `initial:${id}`, to: id, label: [] })),
-    ...plan.edges.flatMap(([from, to]): Link[] => {
-      const m = meta.get(`${from}>${to}`)
-      const decision = decisionOfEdge.get(`${from}>${to}`)
-      if (!decision) return [{ id: `flow:${from}>${to}`, from, to, label: labelLines(m?.trigger ?? "", m?.guard ?? "") }]
-      // Trigger của nhóm nằm một lần trên đoạn màn → decision; mỗi nhánh ra chỉ mang guard (không guard ⇒ else)
-      return [{ id: `flow:${from}>${to}`, from: decision.key, to, label: labelLines("", m?.guard || elseGuard) }]
-    }),
-    ...decisions.map((x): Link => ({ id: `decide:${x.key.slice("decision:".length)}`, from: x.from, to: x.key, label: labelLines(x.trigger, "") })),
-    ...plan.sinks.map((id) => ({ id: `end:${id}`, from: id, to: `final:${id}`, label: [] }))
-  ]
-  const parentsOf = (key: string): string[] => links.filter((l) => l.to === key).map((l) => l.from)
+  const cols = Math.max(0, ...[...placed.values()].map((p) => p.col)) + 1
 
-  // ── ô trong làn: số cột mỗi làn, rồi gán cột theo hàng ──
-  const members = (row: number, lane: number): Placed[] => [...placed.values()].filter((p) => p.row === row && p.lane === lane)
-  const slotsOf = lanes.map((_, lane) => Math.max(1, ...Array.from({ length: rows }, (_, row) => members(row, lane).length)))
-  const laneStart = slotsOf.map((_, i) => slotsOf.slice(0, i).reduce((a, b) => a + b, 0))
-  const assign = (p: Placed, slot: number): void => {
-    p.slot = slot
-    p.col = laneStart[p.lane] + slot
-  }
-  const place = (row: number, desired: (p: Placed) => number): void => {
-    for (let lane = 0; lane < lanes.length; lane++) {
-      const free = new Set(Array.from({ length: slotsOf[lane] }, (_, i) => i))
-      const wanted = members(row, lane)
-        .map((p) => ({ p, d: Math.min(slotsOf[lane] - 1, Math.max(0, Math.round(desired(p)))) }))
-        .sort((a, b) => a.d - b.d || a.p.order - b.p.order)
-      for (const { p, d: want } of wanted) {
-        const slot = [...free].sort((a, b) => Math.abs(a - want) - Math.abs(b - want) || a - b)[0]
-        free.delete(slot)
-        assign(p, slot)
-      }
+
+  // ── phân loại đường ──
+  const routes: Route[] = []
+  const adjacentOut = new Map<string, string[]>()
+  for (const [from, to] of plan.edges) {
+    const u = placed.get(from)!
+    const v = placed.get(to)!
+    if (v.col !== u.col + 1) {
+      routes.push({ id: `flow:${from}>${to}`, from, to, kind: "far" })
+      continue
     }
+    adjacentOut.set(from, [...(adjacentOut.get(from) ?? []), to])
   }
-  const fromParents = (p: Placed): number => {
-    const cols = parentsOf(p.key).map((k) => placed.get(k)!.col)
-    return cols.length === 0 ? 0 : cols.reduce((a, b) => a + b, 0) / cols.length - laneStart[p.lane]
+  for (const [from, targets] of adjacentOut) {
+    const u = placed.get(from)!
+    const lone = targets.length === 1 && placed.get(targets[0])!.row === u.row
+    for (const to of targets) routes.push({ id: `flow:${from}>${to}`, from, to, kind: lone ? "straight" : "branch" })
   }
-  for (let row = 1; row < finalRow; row++) place(row, fromParents)
-  place(initialRow, (p) => placed.get(p.key.slice("initial:".length))!.slot)
-  place(finalRow, (p) => placed.get(p.key.slice("final:".length))!.slot)
+  /** Màn nguồn có trục chung (≥ 1 cạnh sang cột kế không thẳng hàng). */
+  const buses = [...adjacentOut.keys()].filter((from) => routes.some((r) => r.from === from && r.kind === "branch"))
 
-  const cell = new Map([...placed.values()].map((p) => [`${p.col}:${p.row}`, p.key]))
-  const at = (col: number, row: number): Placed | undefined => placed.get(cell.get(`${col}:${row}`) ?? "")
-
-  // ── phân loại đường: thẳng / Z / Z kép ──
-  const isStraight = (l: Link): boolean => {
-    const u = placed.get(l.from)!
-    const v = placed.get(l.to)!
-    if (u.col !== v.col) return false
-    for (let r = u.row + 1; r < v.row; r++) if (at(u.col, r)) return false
-    return true
-  }
-  const straight = new Set(links.filter(isStraight).map((l) => l.id))
-
-  // ── cổng: hoành độ riêng trong từng nhóm cổng kề nhau ──
-  const groupOf = (key: string, side: "out" | "in"): string => {
-    if (side === "out") return `B:${key}`
-    const p = placed.get(key)!
-    const above = at(p.col, p.row - 1)
-    return above ? `B:${above.key}` : `T:${key}`
-  }
-  const spanOf = (key: string): number => {
-    const p = placed.get(key)!
-    return p.kind === "decision" ? p.hw - DEC_INSET : PORT_SPAN
-  }
-  const groups = new Map<string, PortItem[]>()
-  for (const l of links) {
-    const u = placed.get(l.from)!
-    const v = placed.get(l.to)!
-    for (const [key, side, other] of [[l.from, "out", v.col], [l.to, "in", u.col]] as const) {
-      const g = groupOf(key, side)
-      const list = groups.get(g) ?? []
-      if (!list.some((i) => i.link.id === l.id)) list.push({ link: l, other, node: key })
-      groups.set(g, list)
-    }
-  }
-  // Một cạnh có thể ở hai nhóm (đầu ra của ô trên, đầu vào của ô dưới): độ lệch theo (cạnh, bên)
-  const portOffset = new Map<string, number>()
-  for (const [g, items] of groups) {
-    items.sort((a, b) => a.other - b.other || (a.link.id < b.link.id ? -1 : 1))
-    const s = items.findIndex((i) => straight.has(i.link.id))
-    const centre = s >= 0 ? s : (items.length - 1) / 2
-    const span = Math.min(...items.map((i) => spanOf(i.node)))
-    const step = Math.min(PORT_STEP, items.length > 1 ? span / Math.max(centre, items.length - 1 - centre) : PORT_STEP)
-    items.forEach((item, i) => {
-      const off = (i - centre) * step
-      const l = item.link
-      if (groupOf(l.from, "out") === g) portOffset.set(`${l.id}:out`, off)
-      if (groupOf(l.to, "in") === g) portOffset.set(`${l.id}:in`, off)
-    })
-  }
-
-  // ── rãnh và khe: chọn rãnh cho đường Z kép, đếm số đường để nới ──
-  /** Chỉ số rãnh toàn cục của rãnh `j` của làn `lane` (j = 0..slots). */
-  const gutterIndex = (lane: number, j: number): number => laneStart[lane] + lane + j
-  const nominalColX = (col: number, lane: number): number => (col + lane) * (NODE_W + GUTTER_MIN) + GUTTER_MIN + NODE_W / 2
-  const laneOfCol = (col: number): number => laneStart.findIndex((s, i) => col >= s && col < s + slotsOf[i])
-  const gutterOf = new Map<string, number>()
-  const nominalGutters: number[] = []
-  for (let lane = 0; lane < lanes.length; lane++)
-    for (let j = 0; j <= slotsOf[lane]; j++) nominalGutters.push((laneStart[lane] + lane + j) * (NODE_W + GUTTER_MIN) + GUTTER_MIN / 2)
-  for (const l of links) {
-    if (straight.has(l.id)) continue
-    const u = placed.get(l.from)!
-    const v = placed.get(l.to)!
-    if (v.row === u.row + 1) continue
-    const mid = (nominalColX(u.col, laneOfCol(u.col)) + nominalColX(v.col, laneOfCol(v.col))) / 2
-    let best = 0
-    nominalGutters.forEach((x, g) => {
-      if (Math.abs(x - mid) < Math.abs(nominalGutters[best] - mid)) best = g
-    })
-    gutterOf.set(l.id, best)
-  }
-  const tracks = new Map<number, string[]>()
-  for (const [id, g] of [...gutterOf].sort(([a], [b]) => (a < b ? -1 : 1))) tracks.set(g, [...(tracks.get(g) ?? []), id])
-
-  // ── hoành độ thật ──
-  const gutterW = nominalGutters.map((_, g) => Math.max(GUTTER_MIN, 2 * GUTTER_PAD + (tracks.get(g)?.length ?? 0) * TRACK_GAP))
-  const headLines = lanes.map((l) => (l.name === "" ? [] : wrapLines(clean(l.name), HEAD_SIZE, Math.max(120, slotsOf[lanes.indexOf(l)] * (NODE_W + GUTTER_MIN) - 28), 2)))
-  const laneWidth = (lane: number): number => {
-    let w = 0
-    for (let j = 0; j <= slotsOf[lane]; j++) w += gutterW[gutterIndex(lane, j)]
-    return w + slotsOf[lane] * NODE_W
-  }
-  const slackLeft = lanes.map((_, lane) => {
-    const need = Math.max(0, ...headLines[lane].map((line) => textWidth(line, HEAD_SIZE, true) + 28))
-    return Math.max(0, need - laneWidth(lane)) / 2
-  })
-  const gutterLeft: number[] = []
-  const colLeft: number[] = []
-  const laneX: number[] = []
-  let x = 0
-  for (let lane = 0; lane < lanes.length; lane++) {
-    laneX.push(x)
-    x += slackLeft[lane]
-    for (let j = 0; j <= slotsOf[lane]; j++) {
-      gutterLeft[gutterIndex(lane, j)] = x
-      x += gutterW[gutterIndex(lane, j)]
-      if (j < slotsOf[lane]) {
-        colLeft[laneStart[lane] + j] = x
-        x += NODE_W
-      }
-    }
-    x += slackLeft[lane]
-  }
-  const laneRight = lanes.map((_, lane) => (lane + 1 < lanes.length ? laneX[lane + 1] : x))
-  const centreX = (col: number): number => colLeft[col] + NODE_W / 2
-  const gutterTrackX = (g: number, id: string): number => gutterLeft[g] + GUTTER_PAD + (tracks.get(g)!.indexOf(id) + 0.5) * TRACK_GAP
-
-  // ── khe giữa các hàng: số đoạn ngang ──
-  interface Run {
-    link: Link
-    part: 1 | 2
-    from: number
-    to: number
-  }
-  const portX = (l: Link, side: "out" | "in"): number => {
-    const p = placed.get(side === "out" ? l.from : l.to)!
-    return centreX(p.col) + (portOffset.get(`${l.id}:${side}`) ?? 0)
-  }
-  const runs: Run[][] = Array.from({ length: rows - 1 }, () => [])
-  for (const l of links) {
-    if (straight.has(l.id)) continue
-    const u = placed.get(l.from)!
-    const v = placed.get(l.to)!
-    if (v.row === u.row + 1) runs[u.row].push({ link: l, part: 1, from: portX(l, "out"), to: portX(l, "in") })
-    else {
-      const gx = gutterTrackX(gutterOf.get(l.id)!, l.id)
-      runs[u.row].push({ link: l, part: 1, from: portX(l, "out"), to: gx })
-      runs[v.row - 1].push({ link: l, part: 2, from: gx, to: portX(l, "in") })
-    }
-  }
-  for (const list of runs) {
-    list.sort((a, b) => {
-      const ra = a.to > a.from ? 0 : 1
-      const rb = b.to > b.from ? 0 : 1
-      return ra - rb || (ra === 0 ? b.from - a.from : a.from - b.from) || (a.link.id < b.link.id ? -1 : 1)
-    })
-  }
-  /** Chiều cao dành cho một đoạn ngang: có nhãn thì đủ chỗ cho nhãn đặt trên đường. */
-  const runHeight = (r: Run): number => (r.part === 1 || r.link.label.length === 0 ? Math.max(RUN_GAP, labelHeight(r.link.label) + 2) : RUN_GAP)
-
-  // ── tung độ ──
-  const headH = named ? 12 + Math.max(...headLines.map((h) => h.length)) * HEAD_LINE : 0
-  const rowH = Array.from({ length: rows }, (_, r) => Math.max(0, ...[...placed.values()].filter((p) => p.row === r).map((p) => p.h)))
-  // Đường thẳng có nhãn cần dải riêng (dưới các đoạn ngang) để đặt nhãn giữa hai ô, chừa đầu mũi tên
-  const straightLabel = Array.from({ length: Math.max(0, rows - 1) }, () => 0)
-  for (const l of links) if (straight.has(l.id) && l.label.length > 0) straightLabel[placed.get(l.from)!.row] = Math.max(straightLabel[placed.get(l.from)!.row], labelHeight(l.label))
-  const gapH = runs.map((list, r) => {
-    const runsH = list.reduce((a, run) => a + runHeight(run), 0)
-    const band = straightLabel[r] === 0 ? 0 : straightLabel[r] + LABEL_MARGIN
-    const labelled = band > 0 || list.some((run) => run.link.label.length > 0)
-    return Math.max(GAP_MIN, 2 * GAP_PAD + runsH + band, band === 0 ? 0 : band + LABEL_MARGIN + ARROW_LEN + 2 * LABEL_MARGIN) + (labelled ? slack : 0)
-  })
-  const rowTop: number[] = []
-  let y = headH + TOP_PAD
-  for (let r = 0; r < rows; r++) {
-    rowTop.push(y)
-    y += rowH[r] + (r < rows - 1 ? gapH[r] : 0)
-  }
-  const bottom = y + BOTTOM_PAD
-  const runY = (row: number, link: Link, part: 1 | 2): number => {
-    const i = runs[row].findIndex((r) => r.link.id === link.id && r.part === part)
-    const before = runs[row].slice(0, i).reduce((a, r) => a + runHeight(r), 0)
-    return rowTop[row] + rowH[row] + GAP_PAD + before + runHeight(runs[row][i]) / 2
-  }
-
-  // ── vẽ: làn ──
-  if (named) {
-    lanes.forEach((lane, i) => {
-      const id = `lane:${lane.id}`
-      scene.rect(id, laneX[i], 0, laneRight[i] - laneX[i], bottom, { name: lane.name, container: true })
-      scene.rect(`${id}#head`, laneX[i], 0, laneRight[i] - laneX[i], headH, { name: lane.name })
-      headLines[i].forEach((line, k) =>
-        scene.text(`${id}#t${k}`, (laneX[i] + laneRight[i]) / 2, headH / 2 + (k - (headLines[i].length - 1) / 2) * HEAD_LINE, line, { owner: `${id}#head`, size: HEAD_SIZE, bold: true, baseline: "central" })
-      )
-    })
-  }
-
-  // ── vẽ: nút ──
-  const geometry = (p: Placed) => ({ cx: centreX(p.col), top: rowTop[p.row], bottom: rowTop[p.row] + p.h })
+  // ── cổng: ra chính ở tâm (trục chung / đường thẳng), ra phụ nửa trên; vào thẳng hàng ở tâm, vào phụ nửa dưới ──
+  const outY = new Map<string, number>()
+  const inY = new Map<string, number>()
   for (const p of placed.values()) {
-    const g = geometry(p)
-    if (p.kind === "screen") {
-      scene.rect(p.key, g.cx - NODE_W / 2, g.top, NODE_W, p.h, { name: clean(p.name) || p.key, radius: RADIUS })
-      p.lines.forEach((line, i) =>
-        scene.text(`${p.key}#t${i}`, g.cx, g.top + p.h / 2 + (i - (p.lines.length - 1) / 2) * LINE, line, { owner: p.key, size: TEXT, baseline: "central", name: line })
-      )
-    } else if (p.kind === "initial") {
-      scene.circle(p.key, g.cx, g.top + INIT_R, INIT_R, { name: "Initial node", fill: INK })
-    } else if (p.kind === "decision") {
-      scene.polygon(p.key, [[g.cx, g.top], [g.cx + p.hw, g.top + p.h / 2], [g.cx, g.bottom], [g.cx - p.hw, g.top + p.h / 2]], { name: "Decision node" })
+    const id = p.node.id
+    const mine = routes.filter((r) => r.from === id)
+    const hasMain = mine.some((r) => r.kind !== "far")
+    const fars = mine.filter((r) => r.kind === "far").sort((a, b) => placed.get(a.to)!.row - placed.get(b.to)!.row || order.get(a.to)! - order.get(b.to)!)
+    for (const r of mine) if (r.kind !== "far") outY.set(r.id, 0)
+    steps(fars.length, hasMain ? 1 : 0, -1).forEach((k, i) => outY.set(fars[i].id, k * PORT_STEP))
+
+    const incoming = routes.filter((r) => r.to === id)
+    const main = incoming.filter((r) => placed.get(r.from)!.row === p.row && r.kind !== "far")
+    const rest = incoming.filter((r) => !main.includes(r)).sort((a, b) => placed.get(a.from)!.row - placed.get(b.from)!.row || placed.get(a.from)!.col - placed.get(b.from)!.col || order.get(a.from)! - order.get(b.from)!)
+    for (const r of main) inY.set(r.id, 0)
+    steps(rest.length, main.length > 0 ? 1 : 0, 1).forEach((k, i) => inY.set(rest[i].id, k * PORT_STEP))
+    // Hình cao thêm khi cần chỗ cho cổng (không nén bước: đầu mũi tên kề nhau sẽ chạm)
+    const used = Math.max(0, ...[...mine, ...incoming].map((r) => Math.abs((r.from === id ? outY.get(r.id) : inY.get(r.id)) ?? 0) / PORT_STEP))
+    p.h = Math.max(p.h, heightForPorts(p, used))
+  }
+
+  // ── track trong rãnh (g = rãnh sau cột g) và phố (k = phố trên hàng k; k = rows là dưới hàng cuối) ──
+  const gutterTracks: string[][] = Array.from({ length: Math.max(0, cols - 1) }, () => [])
+  for (const from of [...buses].sort((a, b) => placed.get(a)!.row - placed.get(b)!.row)) gutterTracks[placed.get(from)!.col].push(`bus:${from}`)
+  const fars = routes.filter((r) => r.kind === "far")
+  for (const r of fars) gutterTracks[placed.get(r.from)!.col].push(`${r.id}@out`)
+  for (const r of fars) gutterTracks[placed.get(r.to)!.col - 1].push(`${r.id}@in`)
+  const streetTracks: string[][] = Array.from({ length: rows + 1 }, () => [])
+  const streetOf = (r: Route): number => Math.min(placed.get(r.from)!.row, placed.get(r.to)!.row) + 1
+  for (const r of fars) streetTracks[streetOf(r)].push(r.id)
+
+  // ── toạ độ ──
+  const gutterW = gutterTracks.map((t) => Math.max(GUTTER_MIN, 2 * GUTTER_PAD + t.length * TRACK))
+  const colLeft: number[] = []
+  let x = MARGIN
+  for (let c = 0; c < cols; c++) {
+    colLeft.push(x)
+    x += NODE_W + (c < cols - 1 ? gutterW[c] : 0)
+  }
+  const trackX = (key: string, g: number): number => colLeft[g] + NODE_W + GUTTER_PAD + (gutterTracks[g].indexOf(key) + 0.5) * TRACK
+
+  const rowH = Array.from({ length: rows }, (_, r) => Math.max(MIN_H, ...[...placed.values()].filter((p) => p.row === r).map((p) => p.h)))
+  const streetH = streetTracks.map((t, k) => (k === 0 || k === rows ? (t.length === 0 ? 0 : 2 * STREET_PAD + t.length * TRACK) : Math.max(STREET_MIN, 2 * STREET_PAD + t.length * TRACK)))
+  const rowTop: number[] = []
+  const streetTop: number[] = []
+  let y = MARGIN
+  for (let r = 0; r <= rows; r++) {
+    streetTop.push(y)
+    y += streetH[r]
+    if (r < rows) {
+      rowTop.push(y)
+      y += rowH[r]
+    }
+  }
+  const streetY = (r: Route): number => {
+    const k = streetOf(r)
+    return streetTop[k] + STREET_PAD + (streetTracks[k].indexOf(r.id) + 0.5) * TRACK
+  }
+  const cy = (p: Placed): number => rowTop[p.row] + rowH[p.row] / 2
+  const left = (p: Placed): number => colLeft[p.col]
+  const right = (p: Placed): number => colLeft[p.col] + NODE_W
+
+  // ── vẽ: hình ──
+  for (const p of placed.values()) {
+    const id = p.node.id
+    const name = clean(p.node.name) || id
+    const fill = p.node.shared ? FILL : PAPER
+    const top = cy(p) - p.h / 2
+    const cx = left(p) + NODE_W / 2
+    if (p.kind === "popup") {
+      scene.ellipse(id, cx, cy(p), NODE_W / 2, p.h / 2, { name, fill })
+      p.lines.forEach((line, i) => scene.text(`${id}#t${i}`, cx, cy(p) + (i - (p.lines.length - 1) / 2) * LINE, line, { owner: id, size: TEXT, baseline: "central", name: line }))
+    } else if (p.kind === "screen") {
+      scene.rect(id, left(p), top, NODE_W, p.h, { name, fill })
+      p.lines.forEach((line, i) => scene.text(`${id}#t${i}`, cx, cy(p) + (i - (p.lines.length - 1) / 2) * LINE, line, { owner: id, size: TEXT, baseline: "central", name: line }))
     } else {
-      scene.circle(p.key, g.cx, g.top + FINAL_R, FINAL_R, { name: "Activity final", fill: PAPER })
-      scene.circle(`${p.key}#core`, g.cx, g.top + FINAL_R, FINAL_INNER, { name: "Activity final", fill: INK })
+      scene.rect(id, left(p), top, NODE_W, p.h, { name, fill, container: true, radius: p.node.popup ? FRAME_RADIUS : 0 })
+      p.lines.forEach((line, i) => scene.text(`${id}#t${i}`, cx, top + PAD_Y + (i + 0.5) * LINE, line, { owner: id, size: TEXT, baseline: "central", name: line }))
+      let ty = top + PAD_Y + p.lines.length * LINE
+      p.tabLines.forEach((lines, k) => {
+        ty += TAB_GAP
+        const th = lines.length * TAB_LINE + 2 * TAB_PAD_Y
+        const tabId = `${id}#tab${k}`
+        scene.rect(tabId, cx - TAB_W / 2, ty, TAB_W, th, { name: lines.join(" "), fill: PAPER })
+        lines.forEach((line, i) => scene.text(`${tabId}#t${i}`, cx, ty + TAB_PAD_Y + (i + 0.5) * TAB_LINE, line, { owner: tabId, size: TAB_SIZE, italic: true, baseline: "central", name: line }))
+        ty += th
+      })
     }
   }
 
   // ── vẽ: đường ──
-  const nameOf = (key: string): string => {
-    const p = placed.get(key)!
-    return p.kind === "screen" ? clean(p.name) || key : p.name
+  const nameOf = (id: string): string => clean(placed.get(id)!.node.name) || id
+  const outPoint = (r: Route): Point => {
+    const u = placed.get(r.from)!
+    const dy = outY.get(r.id) ?? 0
+    return [right(u) - inset(u, dy), cy(u) + dy]
   }
-  /** Điểm cổng trên cạnh dưới (ra) / cạnh trên (vào) của nút; decision: cổng nằm trên cạnh xiên của thoi. */
-  const portY = (l: Link, side: "out" | "in"): number => {
-    const p = placed.get(side === "out" ? l.from : l.to)!
-    const g = geometry(p)
-    if (p.kind !== "decision") return side === "out" ? g.bottom : g.top
-    const lean = (Math.abs(portOffset.get(`${l.id}:${side}`) ?? 0) * (p.h / 2)) / p.hw
-    return side === "out" ? g.bottom - lean : g.top + lean
+  const inPoint = (r: Route): Point => {
+    const v = placed.get(r.to)!
+    const dy = inY.get(r.id) ?? 0
+    return [left(v) + inset(v, dy), cy(v) + dy]
   }
-  const polys = new Map<string, Point[]>()
-  for (const l of links) {
-    const u = placed.get(l.from)!
-    const v = placed.get(l.to)!
-    const startY = portY(l, "out")
-    const endY = portY(l, "in")
-    const xo = portX(l, "out")
-    const xi = portX(l, "in")
+  for (const from of buses) {
+    const u = placed.get(from)!
+    const xt = trackX(`bus:${from}`, u.col)
+    const start = outPoint(routes.find((r) => r.from === from && r.kind === "branch")!)
+    scene.polyline(`bus:${from}`, [start, [xt, start[1]]], { name: `${nameOf(from)} →` })
+    const ys = [start[1], ...routes.filter((r) => r.from === from && r.kind === "branch").map((r) => inPoint(r)[1])]
+    const lo = Math.min(...ys)
+    const hi = Math.max(...ys)
+    if (hi - lo > 0.5) scene.polyline(`bus:${from}#trunk`, [[xt, lo], [xt, hi]], { name: `${nameOf(from)} →` })
+  }
+  for (const r of routes) {
+    const name = `${nameOf(r.from)} → ${nameOf(r.to)}`
+    const end = inPoint(r)
     let points: Point[]
-    if (straight.has(l.id)) points = [[xo, startY], [xo, endY]]
-    else if (v.row === u.row + 1) {
-      const yc = runY(u.row, l, 1)
-      points = [[xo, startY], [xo, yc], [xi, yc], [xi, endY]]
-    } else {
-      const gx = gutterTrackX(gutterOf.get(l.id)!, l.id)
-      const y1 = runY(u.row, l, 1)
-      const y2 = runY(v.row - 1, l, 2)
-      points = [[xo, startY], [xo, y1], [gx, y1], [gx, y2], [xi, y2], [xi, endY]]
+    if (r.kind === "straight") points = [outPoint(r), end]
+    else if (r.kind === "branch") points = [[trackX(`bus:${r.from}`, placed.get(r.from)!.col), end[1]], end]
+    else {
+      const start = outPoint(r)
+      const x1 = trackX(`${r.id}@out`, placed.get(r.from)!.col)
+      const x2 = trackX(`${r.id}@in`, placed.get(r.to)!.col - 1)
+      const ys = streetY(r)
+      points = [start, [x1, start[1]], [x1, ys], [x2, ys], [x2, end[1]], end]
     }
-    polys.set(l.id, points)
-    scene.polyline(l.id, points, { name: `${nameOf(l.from)} → ${nameOf(l.to)}` })
-    scene.arrow(l.id, "open")
+    scene.polyline(r.id, points, { name })
+    scene.arrow(r.id, "triangle_filled")
   }
 
-  // ── nhãn: tìm chỗ không đè đường / hình / nhãn khác ──
-  const obstacles: Box[] = [...placed.values()].map((p) => {
-    const g = geometry(p)
-    return { x0: g.cx - p.hw, y0: g.top, x1: g.cx + p.hw, y1: g.bottom }
-  })
-  if (named) obstacles.push(...lanes.map((_, i): Box => ({ x0: laneX[i], y0: 0, x1: laneRight[i], y1: headH })))
-  const heads = new Map<string, Box>()
-  for (const [id, pts] of polys) {
-    const tip = pts[pts.length - 1]
-    heads.set(id, { x0: tip[0] - 5.5, y0: tip[1] - ARROW_LEN - 0.5, x1: tip[0] + 5.5, y1: tip[1] })
-  }
-  const taken: Box[] = []
-  const laneBounds = (cx: number): [number, number] => {
-    if (!named) return [-Infinity, Infinity]
-    const i = laneRight.findIndex((r) => cx < r)
-    const lane = i < 0 ? lanes.length - 1 : i
-    return [laneX[lane] + 1, laneRight[lane] - 1]
-  }
-  const labelled = links.filter((l) => l.label.length > 0).sort((a, b) => (a.id < b.id ? -1 : 1))
-  for (const l of labelled) {
-    const pts = polys.get(l.id)!
-    const w = labelWidth(l.label)
-    const h = labelHeight(l.label)
-    const segs = pts.slice(1).map((p, i) => ({ a: pts[i], b: p, last: i === pts.length - 2 }))
-    const foreign = [...polys].filter(([id]) => id !== l.id).flatMap(([, q]) => q.slice(1).map((p, i) => segBox(q[i], p)))
-    const headBoxes = [...heads.values()]
-    const free = (c: Box, host: number, centred: boolean): boolean => {
-      if (obstacles.some((o) => hit(c, o, LABEL_MARGIN / 3))) return false
-      const [lo, hi] = laneBounds((c.x0 + c.x1) / 2)
-      if (c.x0 < lo || c.x1 > hi) return false
-      if (foreign.some((s) => hit(c, s, 1.5))) return false
-      if (headBoxes.some((hb) => hit(c, hb, 1))) return false
-      if (taken.some((t) => hit(c, t, 2))) return false
-      return segs.every((s, i) => (centred && i === host ? true : !hit(c, segBox(s.a, s.b), 1)))
-    }
-    const horizontals = segs.map((s, i) => ({ s, i })).filter(({ s }) => Math.abs(s.a[1] - s.b[1]) < 0.5 && Math.abs(s.a[0] - s.b[0]) > 0).sort((p, q) => Math.abs(q.s.a[0] - q.s.b[0]) - Math.abs(p.s.a[0] - p.s.b[0]) || p.i - q.i)
-    const verticals = segs.map((s, i) => ({ s, i })).filter(({ s }) => Math.abs(s.a[0] - s.b[0]) < 0.5).sort((p, q) => Math.abs(q.s.a[1] - q.s.b[1]) - Math.abs(p.s.a[1] - p.s.b[1]) || p.i - q.i)
-    const order2 = straight.has(l.id) ? [...verticals, ...horizontals] : [...horizontals, ...verticals]
-    let chosen: { cx: number; cy: number } | null = null
-    search: for (const { s, i } of order2) {
-      const horizontal = Math.abs(s.a[1] - s.b[1]) < 0.5
-      if (horizontal) {
-        const lo = Math.min(s.a[0], s.b[0]) + LABEL_MARGIN + w / 2
-        const hi = Math.max(s.a[0], s.b[0]) - LABEL_MARGIN - w / 2
-        if (lo > hi) continue
-        const mid = (lo + hi) / 2
-        for (let t = 0; mid - t >= lo - 0.01 || mid + t <= hi + 0.01; t += 4) {
-          for (const cx of t === 0 ? [mid] : [mid - t, mid + t]) {
-            if (cx < lo - 0.01 || cx > hi + 0.01) continue
-            const c = { x0: cx - w / 2, y0: s.a[1] - h / 2, x1: cx + w / 2, y1: s.a[1] + h / 2 }
-            if (free(c, i, true)) {
-              chosen = { cx, cy: s.a[1] }
-              break search
-            }
-          }
-        }
-      } else {
-        const top = Math.min(s.a[1], s.b[1]) + 3 + h / 2
-        const low = Math.max(s.a[1], s.b[1]) - (s.last ? ARROW_LEN + 3 : 3) - h / 2
-        if (top > low) continue
-        const mid = (top + low) / 2
-        for (let t = 0; mid - t >= top - 0.01 || mid + t <= low + 0.01; t += 4) {
-          for (const cy of t === 0 ? [mid] : [mid - t, mid + t]) {
-            if (cy < top - 0.01 || cy > low + 0.01) continue
-            for (const cx of [s.a[0], s.a[0] + 5 + w / 2, s.a[0] - 5 - w / 2]) {
-              const c = { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 }
-              if (free(c, i, cx === s.a[0])) {
-                chosen = { cx, cy }
-                break search
-              }
-            }
-          }
-        }
-      }
-    }
-    // Không chỗ nào sạch ⇒ vẫn đặt ở giữa đoạn đầu: `checkScene` báo, renderer tách hình
-    if (!chosen) unplaced++
-    const fallback = segs[0]
-    const at2 = chosen ?? { cx: (fallback.a[0] + fallback.b[0]) / 2, cy: (fallback.a[1] + fallback.b[1]) / 2 }
-    taken.push({ x0: at2.cx - w / 2, y0: at2.cy - h / 2, x1: at2.cx + w / 2, y1: at2.cy + h / 2 })
-    scene.labelBlock(l.id, l.label, [at2.cx, at2.cy], { size: LABEL_SIZE, lineHeight: LABEL_LH })
-  }
-  return { scene, unplaced }
-}
-
-/** Thử khe rộng dần tới khi mọi nhãn có chỗ sạch; hết cách thì trả lượt cuối (`checkScene` báo, renderer tách hình). */
-export const layoutScreenFlow = (d: FlowDiagram): Scene => {
-  let last = layoutOnce(d, 0)
-  for (const slack of [28, 56, 90]) {
-    if (last.unplaced === 0) break
-    last = layoutOnce(d, slack)
-  }
-  return last.scene
+  return scene
 }

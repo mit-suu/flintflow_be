@@ -46,7 +46,7 @@ export const stereotype = (name: string): string => `<<${name}>>`
 
 // ─── đầu mũi tên: trả đỉnh polygon / polyline ────────────────────
 
-export type ArrowHead = "open" | "classic" | "triangle" | "diamond" | "diamond_filled"
+export type ArrowHead = "open" | "classic" | "triangle" | "triangle_filled" | "diamond" | "diamond_filled"
 
 const frame = (tip: Point, from: Point) => {
   const len = Math.hypot(tip[0] - from[0], tip[1] - from[1]) || 1
@@ -61,6 +61,7 @@ const frame = (tip: Point, from: Point) => {
  * - `open`: V mở (dependency, navigation) — polyline, không tô.
  * - `classic`: phi tiêu tô đặc khía lõm (data flow DFD của VP).
  * - `triangle`: tam giác rỗng (generalization, realization).
+ * - `triangle_filled`: tam giác nhỏ tô đặc (điều hướng màn hình — hình mẫu Screens Flow của template SRS FPT).
  * - `diamond` / `diamond_filled`: thoi (aggregation / composition).
  */
 export const arrowHeadShape = (style: ArrowHead, tip: Point, from: Point): { points: Point[]; closed: boolean; filled: boolean } => {
@@ -73,6 +74,8 @@ export const arrowHeadShape = (style: ArrowHead, tip: Point, from: Point): { poi
       return { points: [tip, at(13, 5.5), at(13 * 0.55, 0), at(13, -5.5)], closed: true, filled: true }
     case "triangle":
       return { points: [tip, at(14, 7), at(14, -7)], closed: true, filled: false }
+    case "triangle_filled":
+      return { points: [tip, at(10, 4.5), at(10, -4.5)], closed: true, filled: true }
     case "diamond":
     case "diamond_filled":
       return { points: [tip, at(9, 5.5), at(18, 0), at(9, -5.5)], closed: true, filled: style === "diamond_filled" }
