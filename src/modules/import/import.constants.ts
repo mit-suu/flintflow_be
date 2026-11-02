@@ -38,8 +38,18 @@ export const CR_AUTHOR_PATTERN = /^CR-\d{3,}$/
 export const STAMP_PROPERTY = {
   project_id: "flintflow_project_id",
   version: "flintflow_version",
-  source: "flintflow_source"
+  source: "flintflow_source",
+  /** FLF-334: release gốc (`2.0`; `0` = chưa release, chỉ có bản import; mode 2: baseline gốc, không có ⇒ không ghi) — file cũ không có ⇒ `null`. */
+  base_version: "flintflow_base_version",
+  /** FLF-334: CR mới nhất đã ghi vào bản nháp (`CR-014`); release / không có ⇒ không ghi. */
+  latest_cr: "flintflow_latest_cr",
+  /** FLF-334: `release` | `draft`. */
+  kind: "flintflow_kind"
 } as const
+
+/** FLF-334: loại bản trong stamp (`flintflow_kind`). */
+export const STAMP_KINDS = ["release", "draft"] as const
+export type StampKind = (typeof STAMP_KINDS)[number]
 
 export const DOC_BLOCK_KINDS = [
   "heading",

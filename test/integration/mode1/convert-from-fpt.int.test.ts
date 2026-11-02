@@ -401,3 +401,101 @@ Trả lời làm rõ:
     expect(spine.permissions.some((p) => p.screen_id === fn.screen_id && p.role_id === "R2")).toBe(true)
   })
 })
+
+const BATCH_PROMPT = "You translate a batch of texts"
+
+/** Provider giả cho `translate_document`: "dịch" lô trong prompt bằng tiền tố `[vi] `; lượt khác ⇒ `undefined`. */
+const echoTranslate = (prompt: string): string | undefined => {
+  if (!prompt.includes(BATCH_PROMPT)) return undefined
+  const items = JSON.parse(prompt.slice(prompt.lastIndexOf("Items:") + "Items:".length).trim()) as { key: string; text: string | string[] }[]
+  return JSON.stringify({ items: items.map(({ key, text }) => ({ key, text: Array.isArray(text) ? text.map((t) => `[vi] ${t}`) : `[vi] ${text}` })) })
+}
+
+/** "Dịch nốt" như FE: gọi `POST /translations/run` với cùng đích tới khi `remaining = 0` hoặc `translated = 0`. */
+const translateRest = async (c: ReturnType<typeof mode1Api>, body: { locale: "vi"; version?: string }) => {
+  const previous = mockOverrides.next
+  mockOverrides.next = (p) => echoTranslate(p) ?? previous?.(p)
+  try {
+    for (let i = 0; i < 20; i++) {
+      const res = await c.post("/translations/run", { max_batches: 10, ...body })
+      expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+      if (res.body.data.remaining === 0 || res.body.data.translated === 0) break
+    }
+  } finally {
+    mockOverrides.next = previous
+  }
+}
+
+const missingOf = async (c: ReturnType<typeof mode1Api>, query: string): Promise<number> => {
+  const res = await c.get(`/translations/status?${query}`)
+  expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+  return res.body.data.missing as number
+}
+
+describe("FLF-334 B — tải version của dự án chuyển đổi theo ngôn ngữ còn lại", () => {
+  it("CR đổi chữ sau 1.0 ⇒ 1.0 lang=vi 409; Dịch nốt { locale: vi, version: 1.0 } qua API ⇒ tải được; bản nháp CR / tracked / import thật ⇒ không có", async () => {
+    const { seeded, c } = await fptProject()
+    expect((await signOff(c)).status).toBe(201)
+    const listed = versionsResponseSchema.parse((await c.get("/versions")).body.data)
+    expect(listed[0]).toMatchObject({ version: "1.0", other_language_available: true })
+
+    // CR đổi chữ sau 1.0 ⇒ Spine hiện tại khác snapshot 1.0 (99.5% chỉ còn trong snapshot)
+    expect((await writeCr(c, "Higher availability", "Availability must be 99.9% instead of 99.5%")).version).toBe("1.1")
+
+    const incomplete = await c.get("/versions/1.0/download?lang=vi")
+    expect(incomplete.status).toBe(409)
+    expect(incomplete.body.error.code).toBe("TRANSLATION_INCOMPLETE")
+    expect(incomplete.body.meta).toMatchObject({ locale: "vi" })
+    // #26 với đích version đếm đúng phần lượt tải kiểm
+    expect(await missingOf(c, "locale=vi&version=1.0")).toBe(incomplete.body.meta.missing)
+
+    await translateRest(c, { locale: "vi", version: "1.0" })
+    expect(await missingOf(c, "locale=vi&version=1.0")).toBe(0)
+    // Spine hiện tại còn chữ CR mới (99.9%) chưa dịch — đích snapshot không dịch Spine hiện tại thay
+    expect(await missingOf(c, "locale=vi")).toBeGreaterThan(0)
+
+    const vi10 = await binary(c.get("/versions/1.0/download?lang=vi"))
+    expect(vi10.status).toBe(200)
+    expect(decodeURIComponent(vi10.headers["content-disposition"])).toMatch(/_v1\.0_VI\.docx$/)
+    const vi10Xml = await documentXml(vi10.body as Buffer)
+    expect(vi10Xml).toContain("[vi] ")
+    expect(vi10Xml).toContain("99.5%")
+    // File lưu của version không đổi: tải mặc định vẫn tiếng Anh, tên không hậu tố
+    const en10 = await binary(c.get("/versions/1.0/download"))
+    expect(decodeURIComponent(en10.headers["content-disposition"])).toMatch(/_v1\.0\.docx$/)
+    expect(await documentXml(en10.body as Buffer)).not.toContain("[vi] ")
+    // lang = ngôn ngữ tài liệu ⇒ như mặc định
+    expect(decodeURIComponent((await binary(c.get("/versions/1.0/download?lang=en"))).headers["content-disposition"])).toMatch(/_v1\.0\.docx$/)
+
+    // Bản nháp CR 1.1 không có snapshot baseline: tải và đích #26 đều 409
+    const v11 = versionsResponseSchema.parse((await c.get("/versions")).body.data).find((v) => v.version === "1.1")
+    expect(v11?.other_language_available).toBe(false)
+    const draft = await c.get("/versions/1.1/download?lang=vi")
+    expect(draft.status).toBe(409)
+    expect(draft.body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+    expect((await c.get("/translations/status?locale=vi&version=1.1")).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+    expect((await c.get("/versions/1.0/download?lang=vi&variant=tracked")).body.error.code).toBe("VALIDATION_ERROR")
+    expect((await c.get("/versions/1.0/download?lang=fr")).status).toBe(400)
+
+    // Release 2.0: đoạn CR sửa chưa có bản dịch ⇒ 409; Dịch nốt đích 2.0 ⇒ tải được, có stamp + tên phần A
+    expect((await releaseNow(c)).status).toBe(201)
+    const missing20 = await c.get("/versions/2.0/download?lang=vi")
+    expect(missing20.status).toBe(409)
+    expect(missing20.body.error.code).toBe("TRANSLATION_INCOMPLETE")
+    await translateRest(c, { locale: "vi", version: "2.0" })
+    const vi20 = await binary(c.get("/versions/2.0/download?lang=vi"))
+    expect(vi20.status).toBe(200)
+    expect(decodeURIComponent(vi20.headers["content-disposition"])).toMatch(/_v2\.0_VI\.docx$/)
+    const props = await (await JSZip.loadAsync(vi20.body as Buffer)).file("docProps/custom.xml")!.async("string")
+    expect(props).toContain("flintflow_kind")
+    expect(props).toContain(seeded.projectId)
+    expect(await documentXml(vi20.body as Buffer)).toContain("[vi] ")
+
+    // Dự án import thật (không chuyển đổi) ⇒ không có lựa chọn ngôn ngữ; #26 / #27 hỏi ngôn ngữ khác ⇒ 409
+    await Project.updateOne({ _id: seeded.projectId }, { $unset: { converted_from: 1 } })
+    expect(versionsResponseSchema.parse((await c.get("/versions")).body.data).every((v) => !v.other_language_available)).toBe(true)
+    expect((await c.get("/versions/2.0/download?lang=vi")).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+    expect((await c.get("/translations/status?locale=vi")).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+    expect((await c.post("/translations/run", { locale: "vi" })).body.error.code).toBe("DOCUMENT_LANGUAGE_UNAVAILABLE")
+  })
+})

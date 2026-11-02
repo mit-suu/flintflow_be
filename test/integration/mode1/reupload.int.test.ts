@@ -15,7 +15,8 @@ import { DocBlock } from "../../../src/modules/import/doc-block.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { DocVersion } from "../../../src/modules/doc-version/doc-version.model.js"
 import { docFileStore } from "../../../src/modules/doc-version/doc-file.store.js"
-import { DocxPackage, writeStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, readStamp, writeStamp } from "../../../src/modules/docx-ooxml/index.js"
+import { downloadVersion } from "../../../src/modules/doc-version/versions.service.js"
 import { makeDocx, p } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { SRS_FIXTURE_TEXT, makeSrsDocx } from "../../../src/modules/import/testing/srs-fixture.js"
 import * as spineRepository from "../../../src/modules/spine/spine.repository.js"
@@ -116,6 +117,17 @@ describe("re-upload — diff theo block", () => {
     await reupload(projectId, userId, fileOf(buffer))
     expect(await ReuploadDiff.countDocuments({ projectId })).toBe(2)
     expect(await DocVersion.countDocuments({ projectId })).toBe(1)
+  })
+
+  it("FLF-334: bản nháp vừa tải về (stamp mới + DRAFT) sửa trong Word rồi upload lại ⇒ nhận ra, có diff", async () => {
+    const { projectId, userId } = await importFinalized()
+    const dl = await downloadVersion(projectId, "Lumen", "0.1", "auto")
+    expect(dl.filename).toBe("Lumen_v0_DRAFT.docx")
+    const pkg = await DocxPackage.load(dl.data)
+    expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.1", base_version: "0", kind: "draft" })
+    setText(para(await pkg.requireXml("word/document.xml"), SRS_FIXTURE_TEXT.purpose), `${SRS_FIXTURE_TEXT.purpose} Edited in Word.`)
+    const dto = toReuploadDto(await reupload(projectId, userId, fileOf(await pkg.toBuffer(), dl.filename)))
+    expect(dto).toMatchObject({ against_version: "0.1", summary: { added: 0, removed: 0, modified: 1, moved: 0 } })
   })
 
 })
