@@ -16,6 +16,7 @@ import { catchAsync } from "../../shared/utils/catch-async.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { validationError } from "../../shared/utils/validation-message.js"
 import * as diagramService from "./diagram.service.js"
+import { loadRenderContext } from "./render-context.js"
 import { DIAGRAM_KINDS } from "./renderers/index.js"
 
 const context = async (req: Request): Promise<{ projectId: string; userId: string; spine: SpineRecord }> => {
@@ -32,7 +33,7 @@ const FILE_RE = /^(.+)\.(svg|png)$/
 
 export const listDiagrams = catchAsync(async (req: Request, res: Response) => {
   const { projectId, spine } = await context(req)
-  const stale = new Set(diagramService.staleDiagrams(spine).map((d) => d.id))
+  const stale = new Set(diagramService.staleDiagrams(spine, await loadRenderContext(projectId)).map((d) => d.id))
   const base = `/api/v1/projects/${projectId}/diagrams`
   return sendSuccess(
     res,

@@ -14,6 +14,7 @@ import {
   extractRequestSchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
+  continueFlow2RequestSchema,
   gapReportQuerySchema,
   importResumeRequestSchema,
   mappingPatchRequestSchema,
@@ -23,6 +24,7 @@ import {
 import * as extractService from "./extract.service.js"
 import * as extractJobs from "./extract-jobs.js"
 import * as finalizeJobs from "./finalize-jobs.js"
+import { continueInFlow2 } from "./flow2.service.js"
 import * as gapReportService from "./gap-report.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { assertNotMode1 } from "./mode1-guard.js"
@@ -132,6 +134,13 @@ export const finalize = mode1Handler(async (req, res) => {
   const doc = await finalizeJobs.startFinalize(auth.projectId, auth.userId, body)
   const spineVersion = doc.finalize_checkpoint?.spine_version ?? body.base_version
   return sendSuccess(res, 200, { import: importService.toImportDto(doc), doc_version: IMPORTED_DOC_VERSION, baseline: null, spine_version: spineVersion, flags: null })
+})
+
+/** FLF-278 trên FLF-336: chế độ 3 ở `incomplete` ⇒ Luồng 2 (dự án sang pipeline tạo mới, viết phần còn thiếu). */
+export const continueFlow2 = mode1Handler(async (req, res) => {
+  const auth = await authorizeMode1(req)
+  const body = parseInput(continueFlow2RequestSchema, req.body)
+  return sendSuccess(res, 200, await continueInFlow2(auth.projectId, auth.userId, body))
 })
 
 /**

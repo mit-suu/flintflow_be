@@ -44,4 +44,11 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     ])
     expect(result.sections.some((s) => s.section_id === "fixed:5.1")).toBe(false)
   })
+
+  it("mẫu cố định: phần nối (mục riêng tiêu đề rỗng dưới heading nhóm / khối không trích) không phải mục của mẫu ⇒ không thành dòng riêng", () => {
+    const layout = [entry(0, "fixed:1", "Product Overview", 1), entry(1, "group:3.1", "Product Vision", 2), entry(2, "custom:CS01", "", 3), entry(3, "custom:CS02", "Known Risks", 2)]
+    const result = compareTargetStructure(layout, new Set(), spineWith(), "fixed")
+    expect(result.sections.map((s) => s.section_id)).toEqual(["fixed:1", "custom:CS02"])
+    expect(result.missing).toEqual(["fixed:1", "custom:CS02"])
+  })
 })

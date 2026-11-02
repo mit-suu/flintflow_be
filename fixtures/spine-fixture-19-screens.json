@@ -1058,10 +1058,24 @@
       "name": "Login",
       "description": "Entry screen where a user authenticates with email/password or Google.",
       "flow_to": [
-        "S02",
-        "S03",
-        "S05",
-        "S14"
+        {
+          "to": "S02",
+          "trigger": "Click Register"
+        },
+        {
+          "to": "S03",
+          "trigger": "Click Forgot password"
+        },
+        {
+          "to": "S05",
+          "trigger": "Submit credentials",
+          "guard": "Founder account"
+        },
+        {
+          "to": "S14",
+          "trigger": "Submit credentials",
+          "guard": "Admin account"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1075,7 +1089,10 @@
       "name": "Register",
       "description": "Account creation with email verification.",
       "flow_to": [
-        "S01"
+        {
+          "to": "S01",
+          "trigger": "Click Log in"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1101,7 +1118,10 @@
       "name": "Onboarding",
       "description": "First-run guided tour introducing the Brief-to-SRS pipeline.",
       "flow_to": [
-        "S05"
+        {
+          "to": "S05",
+          "trigger": "Finish onboarding"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1115,10 +1135,22 @@
       "name": "Project Dashboard",
       "description": "Lists the user's projects with status, readiness and quick actions.",
       "flow_to": [
-        "S06",
-        "S07",
-        "S11",
-        "S13"
+        {
+          "to": "S06",
+          "trigger": "Click New project"
+        },
+        {
+          "to": "S07",
+          "trigger": "Open a project"
+        },
+        {
+          "to": "S11",
+          "trigger": "Click Upgrade plan"
+        },
+        {
+          "to": "S13",
+          "trigger": "Click the bell"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1132,7 +1164,10 @@
       "name": "Create Project",
       "description": "Popup to create a new project and choose the working mode.",
       "flow_to": [
-        "S07"
+        {
+          "to": "S07",
+          "trigger": "Submit new project"
+        }
       ],
       "is_popup": true,
       "tabs": [],
@@ -1146,9 +1181,18 @@
       "name": "Project Workspace",
       "description": "Main working screen: chat pane drives the pipeline while the document pane renders the SRS read-only.",
       "flow_to": [
-        "S08",
-        "S09",
-        "S10"
+        {
+          "to": "S08",
+          "trigger": "Open diagram preview"
+        },
+        {
+          "to": "S09",
+          "trigger": "Open verification panel"
+        },
+        {
+          "to": "S10",
+          "trigger": "Click Export"
+        }
       ],
       "is_popup": false,
       "tabs": [
@@ -1166,7 +1210,10 @@
       "name": "Diagram Preview",
       "description": "Full-size preview of a rendered PlantUML diagram.",
       "flow_to": [
-        "S07"
+        {
+          "to": "S07",
+          "trigger": "Close preview"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1180,8 +1227,14 @@
       "name": "Verification & Change Panel",
       "description": "Shows open flags, readiness score and lets the user request and apply changes with impact preview.",
       "flow_to": [
-        "S07",
-        "S10"
+        {
+          "to": "S07",
+          "trigger": "Back to workspace"
+        },
+        {
+          "to": "S10",
+          "trigger": "Click Export"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1195,7 +1248,10 @@
       "name": "Export",
       "description": "Configure and download the Word export: watermarked working draft or clean baseline.",
       "flow_to": [
-        "S07"
+        {
+          "to": "S07",
+          "trigger": "Back to workspace"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1209,7 +1265,10 @@
       "name": "Plan & Pricing",
       "description": "Displays subscription plans and starts a credit purchase.",
       "flow_to": [
-        "S12"
+        {
+          "to": "S12",
+          "trigger": "Open billing history"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1247,11 +1306,26 @@
       "name": "Admin User List",
       "description": "Read-only paginated list of all user accounts.",
       "flow_to": [
-        "S15",
-        "S16",
-        "S17",
-        "S18",
-        "S19"
+        {
+          "to": "S15",
+          "trigger": "Select a user"
+        },
+        {
+          "to": "S16",
+          "trigger": "Open metrics"
+        },
+        {
+          "to": "S17",
+          "trigger": "Open AI cost report"
+        },
+        {
+          "to": "S18",
+          "trigger": "Open prompt templates"
+        },
+        {
+          "to": "S19",
+          "trigger": "Open audit log"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1265,7 +1339,10 @@
       "name": "Admin User Detail",
       "description": "Read-only profile of one user with projects and credit balance.",
       "flow_to": [
-        "S14"
+        {
+          "to": "S14",
+          "trigger": "Back to user list"
+        }
       ],
       "is_popup": false,
       "tabs": [],
@@ -1639,6 +1716,91 @@
         "E02",
         "E05",
         "E07"
+      ],
+      "attributes": [
+        {
+          "name": "email",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "display name",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "avatar",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "account status",
+          "kind": "plain",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F1",
+        "F2",
+        "F5",
+        "F6"
+      ],
+      "states": [
+        {
+          "id": "E01-ST1",
+          "name": "Pending",
+          "initial": true
+        },
+        {
+          "id": "E01-ST2",
+          "name": "Active"
+        },
+        {
+          "id": "E01-ST3",
+          "name": "Suspended"
+        },
+        {
+          "id": "E01-ST4",
+          "name": "Deactivated",
+          "final": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "E01-ST1",
+          "to": "E01-ST2",
+          "event": "verify email"
+        },
+        {
+          "from": "E01-ST2",
+          "to": "E01-ST2",
+          "event": "update profile",
+          "action": "save profile"
+        },
+        {
+          "from": "E01-ST2",
+          "to": "E01-ST3",
+          "event": "suspend",
+          "guard": "requested by an administrator",
+          "action": "notify user"
+        },
+        {
+          "from": "E01-ST3",
+          "to": "E01-ST2",
+          "event": "reinstate",
+          "action": "notify user"
+        },
+        {
+          "from": "E01-ST2",
+          "to": "E01-ST4",
+          "event": "deactivate",
+          "guard": "no unsettled credit"
+        },
+        {
+          "from": "E01-ST3",
+          "to": "E01-ST4",
+          "event": "deactivate"
+        }
       ]
     },
     {
@@ -1648,6 +1810,38 @@
       "relations": [
         "E03",
         "E04"
+      ],
+      "attributes": [
+        {
+          "name": "project name",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "domain",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "mode",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "folder",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F2",
+        "F3",
+        "F4"
       ]
     },
     {
@@ -1659,13 +1853,59 @@
         "E09",
         "E11",
         "E12"
+      ],
+      "attributes": [
+        {
+          "name": "spine version",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "completion",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "last saved at",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "project",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3",
+        "F4"
       ]
     },
     {
       "id": "E04",
       "name": "ChatSession",
       "description": "A conversation thread; exactly one per project is the pipeline session.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "session code",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "reply language",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "project",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3"
+      ]
     },
     {
       "id": "E05",
@@ -1673,6 +1913,27 @@
       "description": "Append-only credit transactions with running balance.",
       "relations": [
         "E10"
+      ],
+      "attributes": [
+        {
+          "name": "balance",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "last top-up at",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "owner",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5",
+        "F6"
       ]
     },
     {
@@ -1681,43 +1942,238 @@
       "description": "The plan attached to an account with its renewal window.",
       "relations": [
         "E01"
+      ],
+      "attributes": [
+        {
+          "name": "plan",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "renewal date",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "subscriber",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5",
+        "F6"
       ]
     },
     {
       "id": "E07",
       "name": "Notification",
       "description": "An in-app message with read state.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "title",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "message",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "read at",
+          "kind": "plain",
+          "required": false
+        },
+        {
+          "name": "recipient",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5"
+      ]
     },
     {
       "id": "E08",
       "name": "Baseline",
       "description": "A signed snapshot of the Spine with version and waiver count.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "baseline label",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "signed at",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "spine",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F4"
+      ],
+      "states": [
+        {
+          "id": "E08-ST1",
+          "name": "Draft",
+          "initial": true
+        },
+        {
+          "id": "E08-ST2",
+          "name": "Signed"
+        },
+        {
+          "id": "E08-ST3",
+          "name": "Superseded",
+          "final": true
+        }
+      ],
+      "transitions": [
+        {
+          "from": "E08-ST1",
+          "to": "E08-ST2",
+          "event": "sign",
+          "guard": "zero unresolved red flags",
+          "action": "freeze snapshot",
+          "business_rule_ids": [
+            "BR03"
+          ]
+        },
+        {
+          "from": "E08-ST2",
+          "to": "E08-ST2",
+          "event": "export",
+          "action": "render from snapshot",
+          "business_rule_ids": [
+            "BR09"
+          ]
+        },
+        {
+          "from": "E08-ST2",
+          "to": "E08-ST3",
+          "event": "sign newer baseline"
+        }
+      ]
     },
     {
       "id": "E09",
       "name": "ChangeRecord",
       "description": "One applied op with before-value, transaction id and sequence.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "sequence",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "reason",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "changed by",
+          "kind": "reference",
+          "required": true
+        },
+        {
+          "name": "spine",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3",
+        "F4"
+      ]
     },
     {
       "id": "E10",
       "name": "UsageRecord",
       "description": "One model call with tokens, cost and reservation state.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "usage code",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "credits used",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "ledger",
+          "kind": "reference",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F5"
+      ]
     },
     {
       "id": "E11",
       "name": "Flag",
       "description": "A deterministic-check finding with level, rule and waiver state.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "rule",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "level",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "waived reason",
+          "kind": "plain",
+          "required": false
+        }
+      ],
+      "feature_ids": [
+        "F3",
+        "F4"
+      ]
     },
     {
       "id": "E12",
       "name": "Diagram",
       "description": "A rendered PlantUML artifact with source hash and status.",
-      "relations": []
+      "relations": [],
+      "attributes": [
+        {
+          "name": "diagram code",
+          "kind": "key",
+          "required": true
+        },
+        {
+          "name": "kind",
+          "kind": "plain",
+          "required": true
+        },
+        {
+          "name": "render status",
+          "kind": "plain",
+          "required": true
+        }
+      ],
+      "feature_ids": [
+        "F3"
+      ]
     }
   ],
   "functions": [
@@ -1750,7 +2206,39 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Submit email and password",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show authentication error",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "credentials do not match"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show account locked notice",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "account is locked"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Open project dashboard",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN002",
@@ -1950,7 +2438,30 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Submit email address",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A08",
+          "message": "Send password reset link",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Confirm reset email sent",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN011",
@@ -2238,7 +2749,31 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Submit project name and working mode",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show duplicate name error",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "project name already exists"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Open project workspace",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN025",
@@ -2326,7 +2861,45 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A01",
+          "to": "system",
+          "message": "Send chat message",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A06",
+          "message": "Generate draft reply",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show retry prompt",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "model call times out"
+        },
+        {
+          "from": "A06",
+          "to": "system",
+          "message": "Return draft changes",
+          "kind": "response",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A01",
+          "message": "Show updated draft",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN029",
@@ -3452,7 +4025,23 @@
         }
       ],
       "business_rule_ids": [],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A09",
+          "to": "system",
+          "message": "Trigger monthly quota reset",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A08",
+          "message": "Send quota renewal notice",
+          "kind": "request",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN085",
@@ -3505,7 +4094,31 @@
       "business_rule_ids": [
         "BR08"
       ],
-      "priority": "must"
+      "priority": "must",
+      "interactions": [
+        {
+          "from": "A05",
+          "to": "system",
+          "message": "Notify payment result",
+          "kind": "request",
+          "flow": "normal"
+        },
+        {
+          "from": "system",
+          "to": "A05",
+          "message": "Reject notification",
+          "kind": "response",
+          "flow": "abnormal",
+          "guard": "signature is invalid"
+        },
+        {
+          "from": "system",
+          "to": "A05",
+          "message": "Acknowledge notification",
+          "kind": "response",
+          "flow": "normal"
+        }
+      ]
     },
     {
       "id": "FN087",

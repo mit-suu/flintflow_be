@@ -34,7 +34,8 @@ import { keptOriginalKinds } from "../spine/original-diagram.js"
 import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
-import { defaultSectionTitle, renderSection, type SectionRenderContext } from "./section-renderer.js"
+import { defaultSectionTitle, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
+import { isContentSlot, slotParents } from "../import/content-slots.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -64,6 +65,12 @@ export interface TemplateLayout {
    * (`nfrs:NFR-03`). Phần tử in dưới heading đó, lần đầu của section chỉ in phần còn lại (kể cả phần tử thêm sau).
    */
   sectionSlices?: readonly SectionSliceView[]
+  /**
+   * Mẫu bắt buộc (`Project.template_intent = fixed`, chế độ 3 — business-flow 2.10): chỉ in đúng các mục của mẫu, **không
+   * chèn** mục FlintFlow mẫu không có (cờ vàng `template_section_absent` báo phần dữ liệu không in). Feature / function mới
+   * vẫn chèn dưới mục chức năng của mẫu (là nội dung của mục đó).
+   */
+  fixedTemplate?: boolean
 }
 
 export interface SectionSliceView {
@@ -127,7 +134,8 @@ export const romanValue = (label: string): number | null => {
   return total
 }
 
-type EntryKind = "fpt" | "group" | "custom" | "continuation"
+/** `slot`: heading mẫu nhận một phần dữ liệu Spine (`slot:*`, FLF-278 — `import/content-slots.ts`). */
+type EntryKind = "fpt" | "group" | "custom" | "continuation" | "slot"
 
 interface Placed {
   section_id: string
@@ -219,6 +227,11 @@ export const sectionsNotInserted = (spine: Spine, template: TemplateLayout): Set
     const id = `feature:${feature.id}`
     if (!inLayout.has(id) && !spine.functions.some((f) => f.feature_id === feature.id && inserted(f))) out.add(id)
   }
+  if (template.fixedTemplate) {
+    for (const def of listSections(spine)) if (def.id.startsWith("fixed:") && !inLayout.has(def.id)) out.add(def.id)
+  }
+  // Mục FPT đã in qua các phần nhỏ của nó (`slot:*`) ⇒ không chèn lại cả mục (dữ liệu in hai lần)
+  for (const id of inLayout) for (const parent of slotParents(id)) if (!inLayout.has(parent)) out.add(parent)
   return out
 }
 
@@ -263,6 +276,8 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
         typed: heading ? splitTypedNumber(heading).typed : false,
         label: heading ? splitTypedNumber(heading).label : ""
       })
+    } else if (isContentSlot(id)) {
+      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label })
     } else if (defById.has(id)) {
       placed.push({ section_id: id, kind: "fpt", title: title || defaultSectionTitle(spine, id, template.language), level, fromLayout: true, typed, label })
     } else {
@@ -473,6 +488,11 @@ export const buildLayoutSections = (
         }
       }
       push({ ...base, heading: base.heading || "—", blocks }, n.level)
+      continue
+    }
+    if (n.kind === "slot") {
+      // Khối của phần nhỏ đánh cấp heading con từ 1 ⇒ dời theo cấp heading của mẫu
+      push({ ...base, blocks: shiftHeadings(renderContentSlot(contentSpine, n.section_id, contextFor(n.section_id, n.number)), n.renderLevel - 1) }, n.level)
       continue
     }
     const taken = claimed.get(n.section_id)

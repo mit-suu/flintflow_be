@@ -23,6 +23,8 @@ import {
   type SectionCandidate
 } from "./section-catalog.js"
 import { matchTable } from "./table-header-dictionary.js"
+import { SLOT_SUGGESTION_CONFIDENCE, slotParents, suggestSlot } from "./content-slots.js"
+import { isInstructionText } from "../../shared/utils/instruction-text.js"
 import { TEMPLATE_CATALOGS, type TemplateEntry, type TemplateFamily } from "./template-catalog.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -238,9 +240,25 @@ const matchWithCatalog = (headings: ProfileBlock[], catalog: readonly TemplateEn
   return entries
 }
 
-/** Khớp heading theo họ mẫu (FLF-252); không truyền ⇒ tự nhận họ mẫu. */
+/** Khớp heading theo họ mẫu (FLF-252); không truyền ⇒ tự nhận họ mẫu. Heading chưa khớp ⇒ gợi ý phần nhỏ theo từ khoá. */
 export const matchHeadings = (blocks: ProfileBlock[], family: TemplateFamily = detectTemplateFamily(blocks)): HeadingMapEntry[] =>
-  family === "fpt" ? matchFptHeadings(headingsOf(blocks)) : matchWithCatalog(headingsOf(blocks), TEMPLATE_CATALOGS[family])
+  withSlotSuggestions(family === "fpt" ? matchFptHeadings(headingsOf(blocks)) : matchWithCatalog(headingsOf(blocks), TEMPLATE_CATALOGS[family]))
+
+/**
+ * FLF-278 trên FLF-336 (business-flow 1.5): heading matcher chưa khớp (`unmapped`, kể cả mục `keep` của catalog) mà tiêu đề
+ * chỉ đúng một **phần** dữ liệu Spine (Purpose, Product Scope, Assumptions…) ⇒ gợi ý `slot:*`, độ tin dưới ngưỡng để BA
+ * xác nhận. Bỏ qua khi mục FPT cha đã có heading (in hai lần) hoặc slot đã được gợi ý cho heading khác.
+ */
+const withSlotSuggestions = (entries: HeadingMapEntry[]): HeadingMapEntry[] => {
+  const used = new Set(entries.map((e) => e.section_id))
+  return entries.map((e) => {
+    if (e.section_id !== UNMAPPED_SECTION) return e
+    const slot = suggestSlot(e.heading_text)
+    if (!slot || used.has(slot) || slotParents(slot).some((p) => used.has(p))) return e
+    used.add(slot)
+    return { ...e, section_id: slot, confidence: SLOT_SUGGESTION_CONFIDENCE }
+  })
+}
 
 const matchFptHeadings = (headings: ProfileBlock[]): HeadingMapEntry[] => {
   // 1. Gán tham lam section cố định/nhóm
@@ -312,9 +330,39 @@ export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, s
       }))
     )
 
+/** Độ dài tối đa của chữ hướng dẫn giữ cho mỗi heading. */
+export const MAX_GUIDANCE_CHARS = 400
+
+/**
+ * Chữ hướng dẫn của mẫu dưới từng heading (business-flow 1.3 "detect guidance text"): các đoạn / gạch đầu dòng trước heading
+ * kế tiếp mà là chữ hướng dẫn (`[…]`, "This section describes…"), bỏ ngoặc vuông bao ngoài, nối lại, cắt độ dài.
+ */
+export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, string> => {
+  const out = new Map<string, string>()
+  let heading: string | null = null
+  let parts: string[] = []
+  const flush = () => {
+    if (!heading || !parts.length) return
+    const text = parts.join(" ").replace(/\s+/g, " ").trim()
+    out.set(heading, text.length > MAX_GUIDANCE_CHARS ? `${text.slice(0, MAX_GUIDANCE_CHARS - 1).trimEnd()}…` : text)
+  }
+  for (const b of blocks) {
+    if (b.kind === "heading" && b.level !== null) {
+      flush()
+      heading = b.block_id
+      parts = []
+    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && isInstructionText(b.text)) {
+      parts.push(b.text.trim().replace(/^\[([\s\S]*)\]$/, "$1").trim())
+    }
+  }
+  flush()
+  return out
+}
+
 export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   const template_family = detectTemplateFamily(blocks)
-  const heading_map = matchHeadings(blocks, template_family)
+  const guidance = guidanceByHeading(blocks)
+  const heading_map = matchHeadings(blocks, template_family).map((h) => (guidance.has(h.block_id) ? { ...h, guidance: guidance.get(h.block_id)! } : h))
   const sections = assignBlockSections(blocks, heading_map)
   return {
     heading_map,

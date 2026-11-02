@@ -10,7 +10,7 @@
  * Luật "chưa có X" chỉ bắn cờ khi bước sinh ra X đã `accepted` (FLF-213, `StepGate` bên dưới).
  */
 
-import type { Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
+import type { Actor, Change, Diagram, Flag, FlagLevel, Spine } from "./spine.types.js"
 import { buildIdIndex, findDeadReferences, sectionKeyExists, type ReferenceHit } from "./reference-fields.js"
 import { tryResolve } from "./path-resolver.js"
 import { loopKeyOfFunction, ownerStepOf, stepsOf, REQUIRED_FIXED_SECTION_IDS, DERIVED_SECTION_IDS, sectionsOfPath } from "./section-registry.js"
@@ -18,9 +18,11 @@ import { computeSectionStates } from "./section-status.js"
 import { hasScreenActorLinks, screenActorMap } from "./screen-actors.js"
 import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationProblem } from "./actor-generalization.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
+import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
+import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
 export interface RuleDef {
   rule_id: string
@@ -60,13 +62,17 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("usecase_name_style", "yellow", true),
   rule("actor_name_shape", "yellow", true),
   rule("actor_generalization_invalid", "yellow", true),
+  rule("actor_generalization_children_unlisted", "yellow", true),
   rule("system_name_missing", "yellow", true),
   rule("screen_placeholder", "yellow", true),
   rule("derived_from_changed_assumption", "yellow", true),
   rule("function_without_uc", "yellow", true),
   rule("original_diagram_stale", "yellow", true),
   rule("orphan_entity", "yellow", true),
-  rule("unresolved_many_to_many", "yellow", true)
+  rule("unresolved_many_to_many", "yellow", true),
+  // FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc): chỉ chạy khi hồ sơ luật mang layout của mẫu
+  rule("template_section_absent", "yellow", true),
+  rule("template_section_empty", "yellow", true)
 ])
 
 /**
@@ -121,9 +127,17 @@ export interface RuleProfile {
    * không phải "chưa tới lượt". Không đặt ⇒ có cổng, như mode 2.
    */
   skipOwnerStepGate?: boolean
+  /**
+   * Chế độ 3 (dự án mới có mẫu bắt buộc, `template_intent = fixed`): `section_id` các mục của mẫu (`TemplateProfile.layout`).
+   * Có ⇒ bật `template_section_absent` (mục FlintFlow có dữ liệu mà mẫu không có — không in) và `template_section_empty`
+   * (mục riêng của mẫu chưa có nội dung). Không đặt ⇒ hai luật không chạy.
+   */
+  templateLayout?: ReadonlySet<string>
 }
 
 export interface CheckOptions {
+  /** Ký pháp ERD của dự án (ngoài Spine) — vào hash hình ERD của cờ `diagram_stale`. */
+  erdNotation?: ErdNotation
   atBaseline?: boolean
   ruleProfile?: RuleProfile
 }
@@ -136,7 +150,7 @@ export const applyRuleProfile = (candidates: FlagCandidate[], profile: RuleProfi
         .map((c) => (profile.downgrade.has(c.rule_id) && c.level === "red" ? { ...c, level: "yellow" as const } : c))
     : candidates
 
-const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5" }
+const RENDER_STEP: Readonly<Record<string, string>> = { context: "S-2.5", usecase: "S-3.6", screen_flow: "S-4.2", erd: "S-4.5", class: "S-4.5", state_machine: "S-4.5", sequence: "S-5.4" }
 
 export const renderStepOf = (d: Pick<Diagram, "kind" | "owner_id">): string =>
   RENDER_STEP[d.kind] ?? (d.owner_id ? `S-5.3@${d.owner_id}` : "S-5.3")
@@ -317,6 +331,13 @@ const deadReferenceWhere = (spine: Spine, hit: ReferenceHit): Where => {
     case "functions[].business_rule_ids[]":
       return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
     case "entities[].relations[]":
+    case "entities[].feature_ids[]":
+    case "entities[].transitions[].from":
+    case "entities[].transitions[].to":
+    case "functions[].interactions[].from":
+    case "functions[].interactions[].to":
+      return { section: `function:${owner}`, step: owner ? functionStep(spine, owner) : "S-5.4" }
+    case "entities[].transitions[].business_rule_ids[]":
       return { section: "fixed:3.1.5", step: "S-4.5" }
     case "business_rules[].source_validation_ids[]":
       return { section: "fixed:5.1", step: "S-7.1" }
@@ -392,11 +413,11 @@ const onePerTarget = (diagrams: Spine["diagrams"]): Spine["diagrams"] => {
   return diagrams.filter((d) => first.get(`${d.kind}|${d.owner_id ?? ""}`) === d)
 }
 
-const diagramStale = (spine: Spine): FlagCandidate[] =>
+const diagramStale = (spine: Spine, context: RenderContext = {}): FlagCandidate[] =>
   onePerTarget(
     printedDiagrams(spine)
       .filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash))
-      .filter((d) => d.source_hash !== renderedDiagramHash(spine, d))
+      .filter((d) => d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
   )
     .map((d) => ({
       level: "red",
@@ -698,7 +719,7 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
   const actorsOf = screenActorMap(spine)
   const linked = hasScreenActorLinks(actorsOf)
   const ids = new Set(spine.screens.map((s) => s.id))
-  const edges = spine.screens.flatMap((s) => s.flow_to.filter((t) => ids.has(t) && t !== s.id).map((t) => [s.id, t] as const))
+  const edges = spine.screens.flatMap((s) => s.flow_to.filter((e) => ids.has(e.to) && e.to !== s.id).map((e) => [s.id, e.to] as const))
   const hasFlow = spine.screens.length > 1 && edges.length > 0
   const incoming = new Set(edges.map(([, to]) => to))
   const outgoing = new Set(edges.map(([from]) => from))
@@ -713,6 +734,41 @@ export const orphanScreens = (spine: Spine): { screen: Spine["screens"][number];
     return []
   })
 }
+
+/**
+ * Chế độ 3 — business-flow 2.10 "mẫu bắt buộc = chỉ mẫu đó, không thêm phần": mục FlintFlow bắt buộc có dữ liệu trong
+ * Spine mà mẫu không có heading ⇒ dữ liệu không in vào tài liệu (renderer `fixedTemplate`), báo cờ vàng. Mục riêng của
+ * mẫu (`custom:<id>` trong layout, có tiêu đề) chưa có chữ thật (chỉ chữ hướng dẫn `[…]` / trống) ⇒ cờ vàng.
+ */
+/** Luật "mục bắt buộc còn trống / cũ" — với mẫu bắt buộc chỉ áp lên mục của mẫu (mục FPT ngoài mẫu không in, không đòi). */
+const SECTION_SCOPED_RULES: ReadonlySet<string> = new Set(["section_empty", "array_empty", "section_stale_at_baseline", "section_awaiting_reaccept"])
+const outsideTemplate = (c: FlagCandidate, layout: ReadonlySet<string> | undefined): boolean =>
+  !!layout && SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:") && !layout.has(c.section_id)
+
+const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>): FlagCandidate[] => [
+  ...REQUIRED_FIXED_SECTION_IDS.filter((id) => !layout.has(id) && !DERIVED_SECTION_IDS.has(id) && sectionHasData(spine, id) === true).map(
+    (id): FlagCandidate => ({
+      level: "yellow",
+      rule_id: "template_section_absent",
+      section_id: id,
+      target_id: null,
+      message: `Mẫu bắt buộc không có mục ${quotedSectionLabel(id, spine)} — dữ liệu của mục này không in vào tài liệu`,
+      remediation_step: ownerStepOf(id, spine)
+    })
+  ),
+  ...spine.custom_sections
+    .filter((c) => layout.has(`custom:${c.id}`) && c.heading.trim() && !c.blocks.some((b) => b.image_ref || isRealText(b.text) || tableHasRealText(b.rows)))
+    .map(
+      (c): FlagCandidate => ({
+        level: "yellow",
+        rule_id: "template_section_empty",
+        section_id: `custom:${c.id}`,
+        target_id: null,
+        message: `Mục "${c.heading.trim()}" của mẫu chưa có nội dung`,
+        remediation_step: ownerStepOf(`custom:${c.id}`, spine)
+      })
+    )
+]
 
 const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const yellow = (rule_id: string, section_id: string, target_id: string, message: string, remediation_step: string): FlagCandidate => ({
@@ -1053,6 +1109,31 @@ const actorGeneralizationInvalid = (spine: Spine): FlagCandidate[] => {
   })
 }
 
+const normalizeText = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase()
+
+/**
+ * Actor tổng quát (có actor con hợp lệ) mà mô tả ở §2.1 không nêu tên một actor con: người đọc tài liệu không biết actor
+ * tổng quát gồm những vai nào, trong khi sơ đồ phân cấp actor (§2.1) và các sơ đồ use case chỉ hiện đúng tên actor tổng quát.
+ */
+const actorGeneralizationChildrenUnlisted = (spine: Spine): FlagCandidate[] => {
+  const children = new Map<string, Actor[]>()
+  const byId = new Map(spine.actors.map((a) => [a.id, a]))
+  for (const [childId, parentId] of actorParents(spine.actors)) children.set(parentId, [...(children.get(parentId) ?? []), byId.get(childId)!])
+  return spine.actors.flatMap((parent): FlagCandidate[] => {
+    const description = normalizeText(parent.description)
+    const missing = (children.get(parent.id) ?? []).filter((child) => !description.includes(normalizeText(child.name)))
+    if (missing.length === 0) return []
+    return [{
+      level: "yellow",
+      rule_id: "actor_generalization_children_unlisted",
+      section_id: "fixed:2.1",
+      target_id: parent.id,
+      message: `Mô tả của tác nhân tổng quát "${parent.name}" chưa nêu các tác nhân con: ${missing.map((c) => c.name).join(", ")}`,
+      remediation_step: "S-3.1"
+    }]
+  })
+}
+
 const namingShape = (spine: Spine): FlagCandidate[] => {
   const actorNames = spine.actors.map((a) => a.name)
   const useCaseNames = spine.use_cases.map((u) => u.name)
@@ -1263,7 +1344,7 @@ export const runDeterministicCheck = (
     ...arrayEmpty(spine, gate),
     ...deadReference(spine),
     ...renderError(spine),
-    ...diagramStale(spine),
+    ...diagramStale(spine, { erdNotation: options.erdNotation }),
     ...originalDiagramStale(spine),
     ...nfrMissingNumber(spine, gate),
     ...useCaseRelations(spine),
@@ -1276,9 +1357,11 @@ export const runDeterministicCheck = (
     ...useCaseAccountAccessRelation(spine),
     ...namingShape(spine),
     ...actorGeneralizationInvalid(spine),
+    ...actorGeneralizationChildrenUnlisted(spine),
     ...systemNameMissing(spine),
-    ...nonEnglishContent(spine, gate)
-  ], options.ruleProfile)
+    ...nonEnglishContent(spine, gate),
+    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout) : [])
+  ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 
   const index = buildIdIndex(spine)
   const seen = new Set<string>()

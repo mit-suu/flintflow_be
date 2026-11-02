@@ -1,5 +1,6 @@
 import { Router } from "express"
 import * as importController from "./import.controller.js"
+import * as orgLibrary from "./org-library.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 
 const router = Router()
@@ -286,6 +287,37 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  *       409: { description: IMPORT_INVALID_STATE, SPINE_VERSION_CONFLICT }
  */
 router.post("/:id/import/finalize", authMiddleware, importController.finalize)
+
+/**
+ * @swagger
+ * /api/v1/projects/{id}/import/continue:
+ *   post:
+ *     summary: Chế độ 3 (mẫu bắt buộc còn thiếu mục) — viết phần còn thiếu với FlintFlow (Luồng 2) thay vì Hoàn thiện
+ *     description: |
+ *       Chỉ từ `incomplete` khi `target_structure.resolved_mode = 3`. Mở lại bước Brief (B-1…S-1), giữ bước sở hữu mục thiếu
+ *       `pending`, chuyển dự án sang luồng tạo mới (`mode = fpt`, `import_state = drafting`). Bản in vẫn theo mẫu; ký
+ *       baseline 1.0 ⇒ dự án về mode 1 (FLF-318).
+ *     tags: [Import (mode 1)]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [import_id, base_version], properties: { import_id: { type: string }, base_version: { type: integer } } }
+ *     responses:
+ *       200: { description: "`{ project_mode: \"fpt\", import_state: \"drafting\", current_step, spine_version }`" }
+ *       409: { description: IMPORT_INVALID_STATE (không phải chế độ 3 / không ở incomplete), SPINE_VERSION_CONFLICT }
+ */
+router.post("/:id/import/continue", authMiddleware, importController.continueFlow2)
+
+// FLF-278 trên FLF-335/336 — mẫu / thư viện nội dung của tổ chức, đi qua dự án (contract §FLF-278)
+router.post("/:id/import/from-org", authMiddleware, orgLibrary.importFromOrg)
+router.post("/:id/import/save-to-org", authMiddleware, orgLibrary.saveToOrg)
+router.get("/:id/library-matches", authMiddleware, orgLibrary.libraryMatches)
+router.post("/:id/library", authMiddleware, orgLibrary.saveSectionToLibrary)
 
 /**
  * @swagger

@@ -24,6 +24,7 @@ uploaded ─┬─ preflight_rejected
           ├─ awaiting_latest_confirm ─► parsing
           └─ parsing ─► mapping_review? ─► extracting ─► fields_review? ─► baselining ─► checking ─► gap_review ─► delivered | change_requested
 delivered ─► change_requested
+incomplete ─► drafting ─► delivered      (FLF-278: chế độ 3 sang Luồng 2 — dự án chạy pipeline tạo mới; ký baseline 1.0 ⇒ delivered)
 ```
 
 `paused` chỉ đặt được ở `extracting` và `checking`, và ở `baselining` khi job finalize chạy nền lỗi / mất (chỉ `resume_later`, §4.16). Chuyển trạng thái sai trả `409 IMPORT_INVALID_STATE` `{ status, to, allowed }`.
@@ -75,6 +76,7 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | --- | --- | --- | --- | --- | --- |
 | 1 | `POST /projects` | UC-13, UC-16 | `{ name, domain?, source?, has_required_template?, mode?, folderId?, documentLanguage? }` — **FLF-335** (business-flow §1): client gửi `source` ∈ `new \| existing` (+ `has_required_template` khi `new`), **không gửi `mode`** — Code suy ra: mới · không mẫu ⇒ `fpt`; mới · có mẫu bắt buộc ⇒ `import` + `template_intent = fixed`; có sẵn ⇒ `import` (ý định hỏi ở #2). Client cũ gửi `mode` (mặc định `fpt`) vẫn chạy: `customer_template` quy về mới · có mẫu bắt buộc (không còn 501). `documentLanguage` ∈ `vi \| en` (FLF-265): thiếu ⇒ `User.locale` ⇒ `en`; dự án tải file lên bỏ qua (ngôn ngữ theo file) | `Project` (thêm `mode`, `start_kind`, `has_required_template`, `template_intent`, `import_state`, `documentLanguage?`; dự án cũ `start_kind: null`) | `VALIDATION_ERROR` |
 | 1a | `PATCH /projects/:id/document-language` | UC-13 | `UpdateDocumentLanguageSchema` `{ documentLanguage: vi \| en }` (strict) — chỉ Lead/Analyst; không đổi Spine, nội dung đã có dịch qua `pipeline-contract.md` #26–#27 (FLF-265) | `Project` | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `409 DOCUMENT_LANGUAGE_LOCKED` (mode `import`: ngôn ngữ theo file) |
+| 1b | `PATCH /projects/:id/erd-notation` | UC-13 | `UpdateErdNotationSchema` `{ erdNotation: chen \| crowsfoot \| idef1x }` (strict) — chỉ Lead/Analyst (cả dự án mode import); không đổi Spine. Đổi sang ký pháp khác ⇒ ERD đã vẽ (§3.1.5) được vẽ lại ngay bằng ký pháp mới (cùng `diagrams[]` id, `source_hash` mới); chọn lại ký pháp đang dùng ⇒ không vẽ lại. Vẽ lại lỗi chỉ ghi log, ký pháp vẫn được lưu — hình stale vẽ lại ở lượt render kế tiếp | `Project` (có `erdNotation`) | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `404 PROJECT_NOT_FOUND` |
 | 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 40MB; quá cỡ ⇒ preflight `FILE_TOO_LARGE`, quá gấp đôi ⇒ `413 FILE_TOO_LARGE` `meta: { max_mb }`) + field text `intent` ∈ `fixed \| free` (FLF-335 bước 1.2: file theo một mẫu cố định hay cấu trúc tự do; thiếu ⇒ `free`; dự án mới có mẫu bắt buộc luôn `fixed`) — ghi vào `import.intent`; `Project.template_intent` chỉ ghi khi client gửi `intent` (hoặc mẫu bắt buộc đã khoá `fixed`) — thiếu thì Project giữ nguyên, dự án không qua bước so cấu trúc đích | `importStateResponseSchema` (`import.intent`) | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
 | 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` (FLF-336: `target_structure` — bản đồ mục ⇒ cấu trúc đích + `resolved_mode`) | — |
@@ -426,12 +428,14 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-10-29 | contract-change FLF-278 (mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ `slot:*`, thư viện tổ chức) | Additive — xem §FLF-278 cuối file. Trạng thái import mới `drafting` (`incomplete → drafting → delivered`); endpoint mới #8b `POST /import/continue`, #8c `POST /import/from-org`, #8d `POST /import/save-to-org`, #8e `GET /library-matches`, #8f `POST /library`, `/orgs/:orgId/templates`, `/orgs/:orgId/content-library`, admin `GET /admin/template-gaps`; `heading_map[].guidance?`; `section_id` nhận thêm `slot:*`; cờ vàng `template_section_absent` / `template_section_empty` |
 | 2026-10-27 | contract-change FLF-336 (I-5 so cấu trúc đích, lát 1) | Additive. Trạng thái import mới `incomplete` (`baselining → incomplete → baselining`), không có v0 ở trạng thái này; `TemplateProfile.target_structure` (`present / missing / out_of_scope`, `resolved_mode` 1 / 3 / 4) trả ở #4 và #9; #8 nhận `complete: true` để đi tiếp từ `incomplete`; #9 mở từ `incomplete`. Chưa làm: vòng rà soát phần có sẵn, Luồng 2 chỉ cho phần thiếu, xem trước bố cục, ghi vào file khách |
 | 2026-10-27 | contract-change FLF-338 (rút yêu cầu từ tài liệu thô, lát 1 sau baseline) | Additive. Endpoint mới #31a–#31c (`/documents/:documentId/extract`, `/extract/approve`); `CR_SOURCE_KINDS` / `NEW_CR_SOURCE_KINDS` thêm `reference_document`; `call_kind` mới `extract_requirements` (3 credit); mã lỗi `EXTRACTION_*`. Collection mới `requirementextractions`. Chưa làm: trần token theo file / dự án, nhánh trước baseline, đi tiếp từ C-3 với vị trí có sẵn (CR tạo ở `draft`, đi C-2 như thường) |
 | 2026-10-27 | contract-change FLF-337 (mức duyệt sau baseline) | Hành vi: #24 `verify` ở `review_mode = milestones` tự gọi #25 khi đạt ⇒ `written` (pipeline-contract 4f đổi mức duyệt dùng được ở mode 1) |
 | 2026-10-27 | contract-change FLF-335 (chọn dự án mới / có sẵn, Code suy ra chế độ) | Additive + bỏ lỗi: #1 nhận `source` + `has_required_template`, BE suy ra `mode`; `customer_template` không còn `501` (quy về `import` + mẫu bắt buộc); `Project` thêm `start_kind`, `has_required_template`, `template_intent`. #2 nhận field text `intent` ∈ `fixed \| free`; `ImportedDocument` thêm `intent`. Chế độ thật 1 / 3 / 4 quyết định ở bước so cấu trúc đích (FLF-336) |
 | 2026-10-23 | contract-change (quyền Lead/Viewer) | `POST /release` nay đòi **Lead** (403 `ORG_ROLE_FORBIDDEN`). Viewer: `GET /versions/:v/download` chỉ cho bản release (`x.0`) và v0, `variant=tracked` ⇒ 403; `GET /import`, `/gap-report`, `/step-plan`, `/change-requests*` ⇒ 403. |
 | 2026-10-20 | FLF-312 — bỏ bắt buộc mẫu FPT | Gap report bỏ `missing_fpt_sections[]`, `missing_sections[]`, `unmapped_headings[]` và các `totals` tương ứng; `TemplateProfile` bỏ `required_sections`; #32 bỏ `missing` — đầu mục FPT file không có ⇒ `hidden`, có heading mà trống ⇒ `enabled`; #33 `CORE_STEP_REQUIRED` chỉ còn cho bước luôn chạy / step đã có dữ liệu — breaking (FE cập nhật cùng đợt) |
+| 2026-10-31 | contract-change FLF-324 (ký pháp ERD theo dự án) | Additive. `Project` thêm `erdNotation` (`chen` \| `crowsfoot` \| `idef1x`, mặc định `chen`; dự án cũ thiếu field đọc là `chen`; trả ở `GET /projects`, `GET /projects/:id` và mọi response trả `Project`). Endpoint mới #1b `PATCH /projects/:id/erd-notation`. Ký pháp **không** nằm trong Spine; vào hash hình ERD (`renderedDiagramHash`) nên đổi ký pháp làm hình ERD cũ (`diagram_stale`). `POST /projects` không nhận `erdNotation` (luôn `chen`, đổi bằng #1b) |
 | 2026-10-08 | contract-change FLF-265 | #1 `POST /projects` thêm `documentLanguage?` (`vi \| en`); endpoint mới #1a `PATCH /projects/:id/document-language`, mã `409 DOCUMENT_LANGUAGE_LOCKED`. `Project` thêm `documentLanguage?` (dự án cũ không có field: mode 2 đọc `en`, mode 1 đọc theo `TemplateProfile.language`). Phần dịch / render ở `pipeline-contract.md` §3 cùng ngày |
 | 2026-10-08 | ước tính credit I-4 | §4.15: #4 thêm `credit_estimate?` (số lượt AI + credit còn phải chạy + credit khả dụng của ví org); #10 chạy tiếp từ lô AI bị dừng, không gọi lại lô đã xong — chỉ thêm field |
 | 2026-10-08 | upload lớn + finalize nền | §4.16: file #2/#11 tối đa 40 MB (`413` có `meta.max_mb`); #8 và #10 (`checking`/`baselining`) trả ngay, chạy nền, FE poll #4; `finalizeResponseSchema.baseline`/`flags` nullable (luôn `null`); `paused: resume_later` đặt được ở `baselining` (job finalize lỗi / mất ⇒ hoàn về trước finalize) — contract-change, chờ 4/4 |
@@ -469,6 +473,49 @@ Business-flow §3.2 (C-6, C-7), §2 "Bản nháp / Gói duyệt / Baseline". **�
 - **Khoá bản nháp khi gói chờ duyệt**: `POST /change-requests` (#16) và `#25 submit` trả `409 PACKAGE_PENDING`; `/changes`, `/reconcile`, `/undo` trả `409 DRAFT_LOCKED` như FLF-293.
 - **Đánh số**: bản nháp sau mỗi CR vẫn là một `DocVersion` minor (`0.2`, `1.1`…) để giữ file Track Changes theo từng CR cho Lead xem diff — nhưng người dùng thấy `draft_label` (chỉ số chính); tên file bản nháp theo FLF-334.
 - Thông báo mới: `change_request_written`, `review_package_submitted`, `review_package_changes_requested`, `review_package_released`.
+
+## FLF-278 (2026-10-29) — dự án mới có mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ, thư viện tổ chức
+
+Bám business-flow (`docs/FlintFlow-Business-Workflow-Overview.png`): dự án mới có mẫu bắt buộc đi **Luồng 1 → Luồng 2 tại 2.4**,
+mẫu bắt buộc = "chỉ mẫu đó, không thêm phần, không đổi thứ tự", người dùng không gõ tay nội dung.
+
+### Sửa I-5 (lát 1, không đổi shape)
+- Mục riêng (heading không map, `custom:*`) có chữ thật ⇒ `present` (trước đây luôn `missing`).
+- Chữ hướng dẫn của mẫu (`[…]`, "This section describes…", ô `[Name]`) không tính là nội dung (`shared/utils/instruction-text.ts`).
+- Bản in dự án `template_intent = fixed`: `TemplateLayout.fixedTemplate` ⇒ không chèn mục FlintFlow ngoài mẫu (feature / function
+  mới vẫn chèn dưới mục chức năng của mẫu).
+- Cờ vàng mới (waive được, chỉ khi hồ sơ luật có layout mẫu): `template_section_absent` (mục FlintFlow có dữ liệu mà mẫu không có
+  ⇒ không in), `template_section_empty` (mục riêng của mẫu chưa có chữ thật). Luật mục trống / cũ chỉ áp lên mục của mẫu.
+
+### Luồng 2 cho phần thiếu (lát 3)
+| # | Method + path | Body | Kết quả / lỗi |
+|---|---|---|---|
+| 8b | `POST /projects/:id/import/continue` | `{ import_id, base_version }` | `{ project_mode: "fpt", import_state: "drafting", current_step, spine_version }`. Chỉ từ `incomplete` với `target_structure.resolved_mode = 3` (chế độ 4 cần 2.9a — chưa hỗ trợ) ⇒ ngược lại `409 IMPORT_INVALID_STATE` |
+
+Hành vi: mở lại bước Brief B-1…S-1 (2.4–2.7; B-0 = 2.1–2.3 giữ bỏ qua), bước sở hữu mục thiếu giữ `pending`, `Project.mode = fpt` (luồng
+tạo mới: chạy step, ký baseline), `import_state = drafting`, `documentLanguage` = ngôn ngữ file mẫu. Bản in theo layout mẫu. Ký
+baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `drafting → delivered`; sửa sau đó qua CR (Luồng 3).
+
+### Phần nhỏ `slot:*` + hướng dẫn soạn ở 1.5 (lát 2)
+- `heading_map[].section_id` nhận thêm 13 phần nhỏ (`import/content-slots.ts`: `slot:vision`, `slot:scope`, `slot:assumptions`…). I-4
+  trích chữ dưới heading vào collection của phần đó; bản in chỉ in phần đó dưới heading (`section-renderer#renderContentSlot`);
+  mục FPT cha không chèn lại. Slot + mục FPT cha cùng có heading ⇒ #5 `409 IMPORT_INVALID_STATE` (`meta.overlaps`).
+- Matcher gợi ý slot cho heading chưa khớp theo từ khoá (độ tin 0.7 ⇒ luôn qua 1.5).
+- `heading_map[].guidance?: string` — chữ hướng dẫn của mẫu dưới heading (≤ 400 ký tự), chỉ để BA xem.
+
+### Mẫu và thư viện cấp tổ chức (lát 5)
+| Method + path | Quyền | Body | Kết quả |
+|---|---|---|---|
+| `POST /projects/:id/import/save-to-org` | lead, analyst | `{ name }` | 201 `OrgTemplateSummary` (lưu bản sao file mẫu + mapping đã xác nhận); `409 IMPORT_INVALID_STATE` khi chưa qua 1.5 |
+| `POST /projects/:id/import/from-org` | lead, analyst | `{ org_template_id, intent? }` | 201 `{ import }` — import từ file đã lưu, không hỏi "bản mới nhất", mapping áp sẵn; `404 ORG_TEMPLATE_NOT_FOUND` (kể cả tổ chức khác) |
+| `GET /orgs/:orgId/templates` · `DELETE …/:templateId` | thành viên · lead, analyst | — | `OrgTemplateSummary[]` · `{ deleted }` |
+| `GET /orgs/:orgId/content-library` · `POST` · `PATCH …/:entryId` · `DELETE …/:entryId` | thành viên · lead, analyst | `{ title, blocks[] }` | `ContentEntry`; trùng tiêu đề chuẩn hoá ⇒ ghi đè (POST) / `409 ORG_CONTENT_DUPLICATE` (PATCH) |
+| `GET /projects/:id/library-matches` | thành viên | — | `[{ custom_section_id, heading, empty, entry }]` |
+| `POST /projects/:id/library` | lead, analyst | `{ custom_section_id }` | 201 `ContentEntry`; `422 CUSTOM_SECTION_EMPTY` |
+| `GET /admin/template-gaps?limit=` | admin | — | `{ projects, rows[{ key, samples, projects, empty, suggested_destination }] }` |
+
+Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
+(không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
 
 ## FLF-334 (2026-10-29) — tên file tải về + stamp mang nhãn version
 

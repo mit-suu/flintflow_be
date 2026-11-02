@@ -31,7 +31,7 @@ describe("cascade", () => {
     const plan = planCascade(spine, removed)
     const paths = plan.ops.map((o) => o.path)
     expect(paths).toEqual(
-      expect.arrayContaining(["functions[id=FN034]", "screens[id=S07].flow_to[=S08]", "permissions[id=" + FIXTURE.permissions.find((p) => p.screen_id === "S08")?.id + "]"])
+      expect.arrayContaining(["functions[id=FN034]", "screens[id=S07].flow_to[to=S08]", "permissions[id=" + FIXTURE.permissions.find((p) => p.screen_id === "S08")?.id + "]"])
     )
     expect(plan.ops.filter((o) => o.path.startsWith("functions[")).every((o) => o.op === "remove")).toBe(true)
     expect(plan.referrers).toEqual([])
@@ -55,7 +55,8 @@ describe("cascade", () => {
     removed.add("features", "F1")
     const plan = planCascade(spine, removed)
     expect(plan.referrers.map((r) => r.path)).toEqual(expect.arrayContaining(["screens[id=S01].feature_id", "functions[id=FN001].feature_id"]))
-    expect(plan.ops.map((o) => o.path)).toEqual(["sections[id=feature:F1]"])
+    // feature bị xoá cũng được gỡ khỏi `entities[].feature_ids`
+    expect(plan.ops.map((o) => o.path).sort()).toEqual(["entities[id=E01].feature_ids[=F1]", "sections[id=feature:F1]"])
   })
 
   it("renumber feature chỉ khi có feature bị xoá trong lô", () => {

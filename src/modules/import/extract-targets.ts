@@ -4,6 +4,7 @@
  */
 
 import { PROVISIONAL_SECTION } from "./section-catalog.js"
+import { contentSlot } from "./content-slots.js"
 
 export const SECTION_TARGETS: Readonly<Record<string, readonly string[]>> = {
   "fixed:1": ["project"],
@@ -51,11 +52,15 @@ export const NFR_CATEGORY_BY_SECTION: Readonly<Record<string, string>> = {
  */
 export const targetsOf = (sectionId: string): readonly string[] => {
   if (PROVISIONAL_SECTION.test(sectionId)) return ["functions"]
+  // FLF-278: heading map vào một phần nhỏ ⇒ chỉ trích collection của phần đó
+  const slot = contentSlot(sectionId)
+  if (slot) return slot.targets
   return SECTION_TARGETS[sectionId] ?? []
 }
 
 /** Section có trích (Record of Changes là dẫn xuất, không trích). */
-export const isExtractableSection = (sectionId: string): boolean => sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || sectionId in SECTION_TARGETS)
+export const isExtractableSection = (sectionId: string): boolean =>
+  sectionId !== "fixed:I" && (PROVISIONAL_SECTION.test(sectionId) || sectionId in SECTION_TARGETS || (contentSlot(sectionId)?.targets.length ?? 0) > 0)
 
 /**
  * FLF-252: đủ các field Spine mà tài liệu hay ghi — tên hệ thống, phạm vi release, feature của màn, màn + quy tắc của
@@ -69,9 +74,9 @@ export const SCHEMA_EXCERPT: Readonly<Record<string, string>> = {
   use_cases:
     "use_cases[]: { name, actor_ids: <actor ids from known_keys>, description, includes: <use case ids>, extends: <use case ids>, function_ids: <function ids / names that implement it> }",
   features: "features[]: { name }",
-  screens: "screens[]: { name, description, feature_id: <feature id / name>, is_popup: boolean, tabs: string[], flow_to: <screen ids this screen navigates to> }",
+  screens: "screens[]: { name, description, feature_id: <feature id / name>, is_popup: boolean, tabs: string[], flow_to: [{ to: <screen id / name this screen navigates to>, trigger?: <what the user does, from the label on the arrow>, guard?: <branch condition without brackets, from a diamond's outgoing [condition] label> }] }",
   permissions: 'permissions[]: { screen_id, role_id, action: "view" | "create" | "update" | "delete" | <verb> }',
-  entities: "entities[]: { name, description, relations: <entity ids> }",
+  entities: "entities[]: { name, description, relations: <entity ids>, attributes?: [{ name, kind: \"key\" | \"reference\" | \"plain\", required: boolean }] (only when the document or diagram lists them), feature_ids?: <feature ids / names that use the entity>, states?: [{ name, initial?: boolean, final?: boolean }], transitions?: [{ from: <state name>, to: <state name>, event, guard?, action? }] (only when the document or a state diagram lists them) }",
   functions:
     'functions[]: { name, trigger, description, screen_id: <screen id / name or null>, normal: string[] (main flow steps), abnormal: string[] (alternative/exception flows), validations: [{ kind: "business" | "format" | "required", statement }], business_rule_ids: <business rule ids>, priority: "must" | "should" | "could" | "wont" | null }',
   nfrs: 'nfrs[]: { statement, kind: "quantitative" | "descriptive", metric?, threshold?, priority }',

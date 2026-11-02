@@ -11,7 +11,7 @@
 import { ApiError } from "../../shared/utils/api-error.js"
 import { stripRecord } from "../import/check.service.js"
 import { Mode1Error } from "../import/mode1.errors.js"
-import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
+import { mode1RuleProfileFor } from "../import/mode1-guard.js"
 import { snapshotBaseline } from "../pipeline/s9/baseline.service.js"
 import { Project } from "../project/project.model.js"
 import * as flagsService from "../spine/flags.service.js"
@@ -41,7 +41,7 @@ export const release = async (projectId: string, userId: string, baseVersion: nu
   if (!latest) throw new Mode1Error("DOC_VERSION_NOT_FOUND", "Chưa có version tài liệu nào để release")
 
   // 6.1 "cờ đỏ = 0" gồm cả luật S-9 (giả định chưa xác nhận) — như ký baseline của mode 2
-  const checked = await flagsService.recompute(projectId, { by: userId, ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
+  const checked = await flagsService.recompute(projectId, { by: userId, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   const red = checked.flags.filter((f) => f.level === "red" && f.resolved_at === null)
   if (red.length) throw new Mode1Error("RELEASE_RED_FLAGS_OPEN", `Còn ${red.length} cờ đỏ — xử lý qua change request rồi release`, { flags: red })
 

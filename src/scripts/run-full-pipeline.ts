@@ -484,6 +484,21 @@ const main = async (): Promise<void> => {
     try {
       gated = await call<{ next_step: string | null }>("POST", `/projects/${projectId}/steps/${current}/gate`, gateBody)
     } catch (err) {
+      // Step tự accept ngay trong lượt chạy (vd B-0.2 khi nền tảng đã rõ từ brief): gate báo STEP_NOT_RUNNABLE
+      // nhưng con trỏ đã sang step sau ⇒ đi tiếp thay vì dừng cả lượt.
+      const next = err instanceof ApiFail && err.code === "STEP_NOT_RUNNABLE" ? await nextRunnableStep(projectId) : null
+      if (next && next !== current) {
+        record.action = "auto"
+        records.push(record)
+        log(`      v ${current} đã tự accept (${record.calls} lượt gọi, ${record.credit} credit, ${record.seconds}s) -> ${next}`)
+        if (ARGS.until && current === ARGS.until) {
+          stopReason = `dừng theo --until ${ARGS.until}`
+          current = next
+          break
+        }
+        current = next
+        continue
+      }
       record.error = err instanceof ApiFail ? err.code : String(err)
       records.push(record)
       stopReason = `gate ${current} lỗi: ${record.error}`

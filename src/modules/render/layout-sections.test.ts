@@ -84,6 +84,14 @@ describe("placeSections — thứ tự theo file, chèn đầu mục FPT thiếu
     expect(placed.find((p) => p.section_id === "custom:CS01")?.kind).toBe("continuation")
   })
 
+  it("mẫu bắt buộc (chế độ 3): không chèn mục FPT ngoài mẫu; feature/function mới vẫn chèn dưới mục chức năng", () => {
+    const s = spine()
+    s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
+    const ids = placeSections(s, { ...LAYOUT, fixedTemplate: true }).map((p) => p.section_id)
+    const fileOrder = ["fixed:1", "custom:CS01", "fixed:2.1", "feature:F-4", "function:FN01", "function:FN02", "group:4", "fixed:4.2.3", "custom:CS02"]
+    expect(ids).toEqual(fileOrder)
+  })
+
   it("function mới của feature (chưa có trong layout) ⇒ mục con của feature, sau function cũ", () => {
     const s = spine()
     s.functions.push({ ...s.functions[0], id: "FN02", order: 1, name: "Quên mật khẩu" })
@@ -467,5 +475,35 @@ describe("customBlocks", () => {
       { type: "paragraph", runs: [{ text: "[Image]", italic: true }] },
       { type: "image", png: "QUJD" }
     ])
+  })
+})
+
+describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", () => {
+  const slotLayout: TemplateLayout = {
+    language: "en",
+    fixedTemplate: true,
+    layout: [entry(0, "1 Introduction", 1, "group:intro"), entry(1, "1.1 Purpose", 2, "slot:vision"), entry(2, "1.2 Product Scope", 2, "slot:scope"), entry(3, "2 Actors", 1, "fixed:2.1")]
+  }
+  const withScope = (): Spine => {
+    const s = spine()
+    s.project.release_scope = { in: ["Online courses"], out: ["Payments"] }
+    return s
+  }
+
+  it("heading nhận đúng một phần dữ liệu; mục FPT cha không bị chèn lại", () => {
+    const ids = placeSections(withScope(), { ...slotLayout, fixedTemplate: false }).map((p) => p.section_id)
+    expect(ids).toContain("slot:vision")
+    expect(ids).not.toContain("fixed:1")
+    const { sections } = buildLayoutSections(withScope(), slotLayout, [], { diagramPng: () => undefined })
+    const purpose = sections.find((s) => s.id === "slot:vision")!
+    expect(purpose.heading).toBe("Purpose")
+    expect(JSON.stringify(purpose.blocks)).toContain("Lumen là nền tảng học trực tuyến.")
+    const scope = sections.find((s) => s.id === "slot:scope")!
+    const text = JSON.stringify(scope.blocks)
+    expect(text).toContain("Online courses")
+    expect(text).toContain("Payments")
+    // heading con "In Scope" dời xuống dưới cấp heading mẫu
+    const sub = scope.blocks.find((b) => b.type === "heading") as { level: number } | undefined
+    expect(sub?.level).toBeGreaterThan(scope.level)
   })
 })

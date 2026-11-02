@@ -12,6 +12,7 @@ import {
   functionOriginals,
   sectionsOwnedBy,
   sectionsWithContent,
+  customSectionsWithContent,
   seedStepOps,
   type LayoutBlock
 } from "./step-plan.js"
@@ -196,6 +197,25 @@ describe("functionOriginals — nguyên văn mục chức năng (FLF-252)", () =
 describe("sectionsWithContent", () => {
   it("chỉ section có khối không phải heading; mục chỉ có heading coi như trống", () => {
     expect(sectionsWithContent(BLOCKS)).toEqual(new Set(["fixed:1"]))
+  })
+
+  it("FLF-278: chữ hướng dẫn của mẫu (`[…]`, ô chỗ trống) không tính là nội dung", () => {
+    const blocks: LayoutBlock[] = [
+      { block_id: "B1", kind: "paragraph", level: null, text: "[Describe the product scope.]", section_id: "fixed:1" },
+      { block_id: "B2", kind: "table", level: null, text: "", section_id: "fixed:2.1", rows: [["Role", "[Name]"]] },
+      { block_id: "B3", kind: "table", level: null, text: "", section_id: "fixed:4.1", rows: [["[x.y]", "[dd/mm/yyyy]"]] }
+    ]
+    expect(sectionsWithContent(blocks)).toEqual(new Set(["fixed:2.1"]))
+  })
+
+  it("FLF-278: mục riêng (heading không map) có chữ thật ⇒ có nội dung; chỉ có chữ hướng dẫn ⇒ không", () => {
+    const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+    expect(
+      customSectionsWithContent([
+        { id: "CS01", heading: "References", level: 2, blocks: [block("IEEE 830-1998")], source: "import" },
+        { id: "CS02", heading: "Conventions", level: 2, blocks: [block("[Describe conventions.]")], source: "import" }
+      ])
+    ).toEqual(new Set(["custom:CS01"]))
   })
 })
 

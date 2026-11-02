@@ -1,3 +1,4 @@
+import { erdNotationOf, type ErdNotation } from "../../shared/diagram/erd-notation.js"
 import { Project, IProject, type ProjectMode, type ProjectStartKind, type TemplateIntent } from "./project.model.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ChatSession } from "./chat-session.model.js"
@@ -295,4 +296,32 @@ export const setDocumentLanguage = async (
   const existing = await Project.findOne({ _id: projectId, organizationId: orgId }).select("mode").lean()
   if (!existing) throw notFound()
   throw new Mode1Error(DOCUMENT_LANGUAGE_LOCKED, "Dự án tải tài liệu lên dùng ngôn ngữ của file, không đổi được.")
+}
+
+/**
+ * Đổi ký pháp ERD (§3.1.5). Chỉ ghi field của Project — Spine không đổi. Ký pháp là một phần của hash hình ERD
+ * (`renderedDiagramHash`), nên đổi xong ERD đã vẽ thành `diagram_stale`; ở đây vẽ lại ngay (renderer SVG không cần PlantUML)
+ * để người dùng thấy hình mới mà không phải bấm "Vẽ lại". Vẽ lại lỗi chỉ ghi log: lựa chọn ký pháp đã lưu, hình stale
+ * vẫn được vẽ lại ở lượt render kế tiếp.
+ */
+export const setErdNotation = async (projectId: string, orgId: string, erdNotation: ErdNotation, userId: string): Promise<IProject> => {
+  const notFound = () => new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
+  if (!mongoose.isValidObjectId(projectId)) throw notFound()
+  const before = await Project.findOne({ _id: projectId, organizationId: orgId }).select("erdNotation").lean()
+  if (!before) throw notFound()
+  const project = await Project.findOneAndUpdate({ _id: projectId, organizationId: orgId }, { erdNotation }, { new: true })
+  if (!project) throw notFound()
+  if (erdNotationOf(before) !== erdNotation) await redrawErd(projectId, userId)
+  return project
+}
+
+const redrawErd = async (projectId: string, userId: string): Promise<void> => {
+  try {
+    const spine = await spineRepository.get(projectId)
+    if (!spine?.diagrams.some((d) => d.kind === "erd")) return
+    const { renderDiagram } = await import("../diagram/diagram.service.js")
+    await renderDiagram(projectId, "erd", null, { by: userId, step_id: null })
+  } catch (err) {
+    console.warn(`[project] vẽ lại ERD sau khi đổi ký pháp lỗi (project ${projectId}): ${err instanceof Error ? err.message : String(err)}`)
+  }
 }

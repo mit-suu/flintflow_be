@@ -467,8 +467,23 @@
           "flow_to": {
             "type": "array",
             "items": {
-              "type": "string",
-              "minLength": 1
+              "type": "object",
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "trigger": {
+                  "type": "string"
+                },
+                "guard": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "to"
+              ],
+              "additionalProperties": false
             }
           },
           "is_popup": {
@@ -615,6 +630,112 @@
           },
           "root": {
             "type": "boolean"
+          },
+          "attributes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "key",
+                    "reference",
+                    "plain"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "required"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "feature_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "initial": {
+                  "type": "boolean"
+                },
+                "final": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "event": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^,[\\]]+$"
+                },
+                "guard": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "business_rule_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "event"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -727,6 +848,52 @@
                 "type": "null"
               }
             ]
+          },
+          "interactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[^,[\\]]+$"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "request",
+                    "response"
+                  ]
+                },
+                "flow": {
+                  "type": "string",
+                  "enum": [
+                    "normal",
+                    "abnormal"
+                  ]
+                },
+                "guard": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "message",
+                "kind",
+                "flow"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -1143,6 +1310,9 @@
               "usecase",
               "screen_flow",
               "erd",
+              "class",
+              "state_machine",
+              "sequence",
               "screen_layout"
             ]
           },

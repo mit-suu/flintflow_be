@@ -15,6 +15,7 @@ import { REQUIRED_FIXED_SECTION_IDS, stepsOf } from "../spine/section-registry.j
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { sectionTitle } from "./section-catalog.js"
 import type { LayoutEntry } from "./template-profile.model.js"
+import { isContentSlot, slotHasData, slotParents } from "./content-slots.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -40,6 +41,8 @@ export interface TargetStructure {
 }
 
 const hasContent = (spine: Spine, sectionId: string, withContent: ReadonlySet<string>): boolean => {
+  // Phần nhỏ (`slot:*`, FLF-278): đúng phần dữ liệu của nó, hoặc chữ thật dưới heading
+  if (isContentSlot(sectionId)) return slotHasData(spine, sectionId) || withContent.has(sectionId)
   try {
     if (sectionHasData(spine, sectionId)) return true
   } catch {
@@ -60,13 +63,16 @@ export const compareTargetStructure = (
 ): TargetStructure => {
   const sections: TargetSection[] = []
   if (intent === "fixed") {
-    // Đích = heading của chính mẫu (bỏ nhóm bao `group:*` — không có nội dung riêng)
+    // Đích = heading của chính mẫu (bỏ nhóm bao `group:*` — không có nội dung riêng — và phần nối: mục riêng tiêu đề rỗng
+    // gom khối dưới heading nhóm / khối không trích, thuộc mục đứng trước chứ không phải heading của mẫu)
     const seen = new Set<string>()
     for (const entry of layout) {
       if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
+      if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
       seen.add(entry.section_id)
       const present = hasContent(spine, entry.section_id, withContent)
-      sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: stepsOf(entry.section_id, spine) })
+      const owners = isContentSlot(entry.section_id) ? [...new Set(slotParents(entry.section_id).flatMap((p) => stepsOf(p, spine)))] : stepsOf(entry.section_id, spine)
+      sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: owners })
     }
   } else {
     for (const id of REQUIRED_FIXED_SECTION_IDS) {

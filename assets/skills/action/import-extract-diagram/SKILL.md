@@ -61,7 +61,7 @@ labels exactly as drawn, you never invent elements, arrows or names that you can
      - Never give the same two ovals a relation in both directions; if you cannot see which end has the arrowhead,
        leave the relation out.
    - `erd`: every box ⇒ `entities` with `relations` = the entities it is connected to.
-   - `screen_flow`: every screen ⇒ `screens` with `flow_to` = the screens its outgoing arrows point to.
+   - `screen_flow`: every screen ⇒ `screens` with `flow_to` = one `{ "to": <screen>, "trigger": <label written on the arrow, if any>, "guard": <text in [brackets] on a branch leaving a diamond, without the brackets, if any> }` per outgoing arrow (a diamond is not a screen: the screen before it is the source, each branch's target is `to`).
    - `context`: every external party ⇒ `actors` (`human` or `system`).
 2. `key` = the code written in the image (`UC-01`, `SCR-02`) exactly as written, or a key from *Known keys* when the
    element is clearly the same one (same name). `null` when there is none — code assigns one. Never put the element's
