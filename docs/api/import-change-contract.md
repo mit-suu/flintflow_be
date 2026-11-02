@@ -486,6 +486,9 @@ mẫu bắt buộc = "chỉ mẫu đó, không thêm phần, không đổi thứ
   mới vẫn chèn dưới mục chức năng của mẫu).
 - Cờ vàng mới (waive được, chỉ khi hồ sơ luật có layout mẫu): `template_section_absent` (mục FlintFlow có dữ liệu mà mẫu không có
   ⇒ không in), `template_section_empty` (mục riêng của mẫu chưa có chữ thật). Luật mục trống / cũ chỉ áp lên mục của mẫu.
+- Heading bao của mẫu (mục riêng chỉ chứa mục con, vd "2 Overall Description" — `import/template-wrappers.ts`) mà không có chữ thật:
+  không xếp `missing` ở I-5, không cờ `template_section_empty`, không vào `GET /admin/template-gaps`, FE không hiện "Nhờ AI soạn".
+  Phần nối (mục riêng tiêu đề rỗng, FLF-184) không phải heading của mẫu ⇒ không thành dòng ở I-5.
 
 ### Luồng 2 cho phần thiếu (lát 3)
 | # | Method + path | Body | Kết quả / lỗi |
