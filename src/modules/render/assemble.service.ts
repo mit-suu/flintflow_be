@@ -57,6 +57,7 @@ import {
 import { missingImageFindings, runConsistencyPass, type ConsistencyFinding } from "./consistency-pass.js"
 import { DIAGRAM_PLACEHOLDER_PNG, pendingImageCaption } from "./diagram-placeholder.js"
 import { GROUP_HEADINGS, assembleTextFor, isVietnamese, type DocumentLanguage } from "./labels.js"
+import { loadRenderContext } from "../diagram/render-context.js"
 import { localizeSpine, localizedDiagramSources, renderView, type LocalizedSpine } from "./localized-spine.js"
 import { translationUnits, type TranslationUnit } from "../translation/translation-units.js"
 import { resolveTranslations, type ProjectLanguages, type ResolvedTranslations } from "../translation/translation.service.js"
@@ -692,7 +693,7 @@ const translateSpine = async (
   const resolved = await (deps.resolveTranslations ?? resolveTranslations)(projectId, locale, units)
   return {
     // N1: nguồn sơ đồ của bản xem cũng theo `locale` (nhãn máy + chữ đã dịch)
-    localized: localizeSpine(spine, units, resolved.map, locale),
+    localized: localizeSpine(spine, units, resolved.map, locale, await loadRenderContext(projectId)),
     translation: { locale, source_locale: sourceLocale, missing: resolved.missing }
   }
 }

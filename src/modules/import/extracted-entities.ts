@@ -244,8 +244,21 @@ export const flattenItem = (item: EntityItem): ExtractedField[] =>
 export const REF_LIST_FIELDS: ReadonlySet<string> = new Set(["actor_ids", "includes", "extends", "relations", "flow_to"])
 
 /** Giá trị mới của field khi đã có giá trị cũ: danh sách tham chiếu ⇒ hợp (giữ thứ tự), còn lại ⇒ giá trị mới. */
-export const mergeFieldValue = (field: string, prev: unknown, next: unknown): unknown =>
-  REF_LIST_FIELDS.has(field) && Array.isArray(prev) && Array.isArray(next) ? [...new Set([...prev, ...next])] : next
+export const mergeFieldValue = (field: string, prev: unknown, next: unknown): unknown => {
+  if (!REF_LIST_FIELDS.has(field) || !Array.isArray(prev) || !Array.isArray(next)) return next
+  if (field !== "flow_to") return [...new Set([...prev, ...next])]
+  // `flow_to`: phần tử là chuỗi hoặc { to, trigger?, guard? } — cùng màn đích thì gộp, giữ cạnh có nhãn
+  const byTo = new Map<string, unknown>()
+  for (const x of [...prev, ...next]) {
+    const key = String(refTarget(x))
+    const had = byTo.get(key)
+    byTo.set(key, had === undefined || typeof had === "string" ? x : typeof x === "string" ? had : { ...x, ...had })
+  }
+  return [...byTo.values()]
+}
+
+/** Đích của một phần tử trong danh sách tham chiếu: chuỗi, hoặc `to` của object (`flow_to`). */
+export const refTarget = (ref: unknown): unknown => (typeof ref === "object" && ref !== null && "to" in ref ? (ref as { to: unknown }).to : ref)
 
 /**
  * Thứ tự phần tử theo nơi chữ / bảng định nghĩa nó (field không đọc từ ảnh đầu tiên), không có thì nơi ảnh nhắc đầu tiên

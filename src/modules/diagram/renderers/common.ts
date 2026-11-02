@@ -8,6 +8,7 @@
 import type { Diagram, DiagramFormat, Spine } from "../../spine/spine.types.js"
 import { checkScene, type CheckOptions, type GeometryIssue } from "../../../shared/diagram/svg-geometry.js"
 import type { Scene } from "../../../shared/diagram/svg-scene.js"
+import type { RenderContext } from "../../../shared/diagram/erd-notation.js"
 import type { DiagramLabels } from "./labels.js"
 
 export type DiagramKind = Diagram["kind"]
@@ -24,7 +25,8 @@ export interface RenderedPart {
 }
 
 /** `labels`: chữ máy trên hình (FLF-265 N1) — thiếu ⇒ tiếng Anh, đúng hình ghi vào `diagrams[]`. */
-export type Renderer = (spine: Spine, ownerId?: string | null, labels?: DiagramLabels) => RenderedPart[]
+/** `context`: dữ liệu ngoài Spine mà hình cần (ký pháp ERD của dự án) — thiếu ⇒ mặc định. */
+export type Renderer = (spine: Spine, ownerId?: string | null, labels?: DiagramLabels, context?: RenderContext) => RenderedPart[]
 
 /** So sánh chuỗi theo code unit — không phụ thuộc locale máy chạy. */
 export const compareIds = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
@@ -38,6 +40,13 @@ export const label = (text: string): string => text.replace(/"/g, "'").replace(/
 export const alias = (id: string): string => id.replace(/[^A-Za-z0-9_]/g, "_")
 
 export const puml = (open: string, body: string[], close: string): string => `${[open, ...body, close].join("\n")}\n`
+
+/** Nội dung `<title>` của SVG do `Scene.toSvg(title)` sinh (đã giải escape); không có ⇒ null. */
+export const svgTitleOf = (source: string): string | null => {
+  const raw = /<title>([^<]*)<\/title>/.exec(source)?.[1]
+  if (raw === undefined) return null
+  return raw.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&")
+}
 
 /** Part `svg` từ một `Scene`: kiểm bố cục (luật 9) + markup. `allowBends` theo kind (`erd`, `class`, `screen_flow`, `state_machine`). */
 export const svgPart = (scene: Scene, options: CheckOptions, meta: Omit<RenderedPart, "format" | "source" | "issues">, title?: string): RenderedPart => ({

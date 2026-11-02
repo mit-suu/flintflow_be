@@ -53,6 +53,12 @@ export const FIELD_LABELS: Readonly<Record<string, string>> = {
   role_id: "Vai trò",
   action: "Thao tác",
   flow_to: "Chuyển tới màn",
+  attributes: "Thuộc tính",
+  feature_ids: "Tính năng dùng",
+  states: "Trạng thái",
+  transitions: "Chuyển trạng thái",
+  interactions: "Tương tác actor - hệ thống",
+  guard: "Điều kiện rẽ nhánh",
   is_popup: "Là popup",
   tabs: "Tab",
   primary_function_id: "Chức năng chính",
@@ -234,6 +240,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   usecase_name_style: "Tên use case chưa đúng dạng",
   actor_name_shape: "Tên tác nhân chưa đúng dạng",
   actor_generalization_invalid: "Kế thừa tác nhân không hợp lệ",
+  actor_generalization_children_unlisted: "Mô tả tác nhân tổng quát chưa nêu tác nhân con",
   system_name_missing: "Thiếu tên hệ thống",
   screen_placeholder: "Màn hình còn để trống",
   derived_from_changed_assumption: "Dựa trên giả định đã đổi",
@@ -288,6 +295,9 @@ export const DIAGRAM_KIND_LABELS: Readonly<Record<DiagramKind, string>> = {
   usecase: "sơ đồ use case",
   screen_flow: "sơ đồ luồng màn hình",
   erd: "sơ đồ ERD",
+  class: "sơ đồ lớp",
+  state_machine: "sơ đồ trạng thái",
+  sequence: "sơ đồ tuần tự",
   screen_layout: "bố cục màn hình"
 }
 

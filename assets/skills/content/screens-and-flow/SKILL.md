@@ -1,11 +1,11 @@
 ---
 skill_id: screens-and-flow
 kind: content
-version: 0.6.2
+version: 0.8.0
 description: "S-4.1–S-4.2 feature & screen inventory (fixes N and screen_queue), screens flow"
 provider: anthropic
 aiModel: claude-haiku-5-5
-maxTokens: 6144
+maxTokens: 16384
 temperature: 0.3
 reads:
   - "features[]"
@@ -38,40 +38,38 @@ Work in this order, all in one batch.
 from `project.goals[]` and `release_scope.in`, not from the UI — a feature is a capability, a screen is a place. 4–8
 features is typical; one feature holding every screen means the split was skipped.
 
-**2. Screens — actor by actor, no orphans.** Build the inventory from the human actors in the projection
-(`use_cases[].actor_ids` whose actor is `kind: human`), one actor at a time: walk that actor's journey from their entry
-point (landing, login, deep link) through every screen their use cases need. A screen exists **only** if at least one
-human actor who interacts directly with the UI uses it — a screen no human actor lands on is an orphan and must not be
-created. `system`/`time` actors (gateway, LLM provider, scheduler) get **no** screens; their work is a non-screen function
-(S-4.4). The Screens Flow is drawn once per human actor and has no "unassigned" part, so a screen outside every actor's
-journey is a gap. Name the actor(s) in `description` ("Founder …"). If users sign in, create **one** Login screen shared
-by every signed-in actor (its `description` names them all) and give each actor a landing screen — S-4.2 roots every flow
-at Login. Pre-auth screens (Login, Register, Forgot/Reset Password, public landing) belong to **every** actor: S-4.3
-grants them to `Guest` only, which draws them in each actor's flow.
+**2. Screens — actor by actor, no orphans.** Walk each human actor's journey (`use_cases[].actor_ids` with `kind: human`) from
+their entry point (landing, login, deep link) through every screen their use cases need. A screen exists **only** if a human
+actor uses it; `system`/`time` actors (gateway, LLM provider, scheduler) get **no** screens — their work is a non-screen function
+(S-4.4). Name the actor(s) in `description`. If users sign in: **one** Login screen shared by every signed-in actor (its
+`description` names them all), a landing screen per actor; pre-auth screens (Login, Register, Forgot/Reset Password, public
+landing) belong to every actor (S-4.3 grants them to `Guest`).
 
-One `screens[]` row per distinct place the user lands: `{id, feature_id, name, description, flow_to: [], is_popup,
-tabs: [], primary_function_id: null, queue_order, detail_status}`. `description` is one sentence: who is here and what they accomplish.
-Rules: every screen belongs to exactly one existing `feature_id`; a modal/dialog is a screen with `is_popup: true`; a tabbed
-page is ONE screen with `tabs: [...]`; list and detail are two screens. Include the unglamorous ones — login, forgot
-password, onboarding, admin console, settings, notifications — a missing auth screen is the most common gap. An error or access-denied page is a screen **only** if you can
-name the screen that sends the user there (a non-admin opening Admin Console), else a function's abnormal flow.
+One `screens[]` row per page or dialog the user lands on: `{id, feature_id, name, description, flow_to: [], is_popup,
+tabs: [], primary_function_id: null, queue_order, detail_status}`, in exactly one existing `feature_id`. `description` is one
+sentence: who is here and what they accomplish. The Screens Flow (FPT template §3.1.1) draws exactly these rows, so:
+- **`name` = the page as titled on screen**, a noun phrase: `Appointment List`, `Appointment Details`, `Add Appointment`,
+  `Doctor Dashboard`, `Login`. Never two jobs joined by "and" / "&" / "or" (`Checkout and Refund` ⇒ `Checkout` + `Refund
+  Request`), never a feature name or a catch-all (`Administration Console`, `Booking Management`) ⇒ list its pages instead.
+- **Granularity**: a record a user manages gets its list, its details and its add/edit form as separate screens; a feature
+  with one screen means pages were merged. Include login, forgot password, onboarding, settings, notifications.
+- **Pop-up** (`is_popup: true`) for a dialog opened over a page: confirm / cancel / delete, quick add, import, preview
+  (`Cancel Appointment`, `Import Orders`). **Tabs**: one page showing several groups of one record is ONE screen with
+  `tabs: [...]` (`Order Details` with `Products Info`, `Receiver Info`), not one screen per group.
+- An error / access-denied page only if you can name the screen sending the user there, else a function's abnormal flow.
 
-**3. Core screens and `queue_order`.** Number `queue_order` from 1 in the order a user meets the screens,
-core screens first. **Only 3–5 screens get full detail in S-5** (Phases §9.1): the ones carrying the
-product's own value, not CRUD chrome. Give those `detail_status: "pending"` and the lowest
-`queue_order`. Every other screen gets `detail_status: "placeholder"` in this same batch — it keeps its
-row, its feature and its `functions[]` frame, it just skips S-5.2…S-5.5. Marking a screen `placeholder`
-here is a decision, so add an `assumptions[]` entry naming why it was left out, with `path: "screens[id=<screen>].detail_status"` (retired once S-5 details it).
+**3. Core screens and `queue_order`.** Number `queue_order` from 1 in the order a user meets the screens, core screens first.
+**Only 3–5 screens get full detail in S-5** (Phases §9.1): the ones carrying the product's own value, not CRUD chrome — give
+them `detail_status: "pending"` and the lowest `queue_order`. Every other screen gets `"placeholder"` in this batch (keeps its
+row, feature and `functions[]` frame, skips S-5.2…S-5.5) plus an `assumptions[]` entry naming why, with
+`path: "screens[id=<screen>].detail_status"` (retired once S-5 details it).
 
-**4. `functions[]` frame.** Each screen gets at least one `functions[]` row now — the action that screen
-exists for: `{id, screen_id, feature_id, order, name: verb + object, trigger: "", description: "",
-normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: null}`. `order` starts at 0
-and is unique **within the feature** (invariant 5). Empty strings/arrays are correct here; S-5 fills them.
-Set `screens[].primary_function_id` to the id of that main function — S-5.3 renders a wireframe only for
-screens that have one. **Wire it to its use cases in the same batch**: the function is created *for* use cases,
-so for each one it carries out add its id — `{"op": "add", "path": "use_cases[id=UC05].function_ids[]", "value":
-"FN001"}` (appends; never `set` the array). Several use cases may share one function (Create/Update/Delete Class →
-the class management function). Every use case of a human actor ends this batch with ≥ 1 function.
+**4. `functions[]` frame.** Each screen gets ≥ 1 `functions[]` row now — the action it exists for: `{id, screen_id, feature_id,
+order, name: verb + object, trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [],
+priority: null}`; `order` from 0, unique **within the feature** (invariant 5); empty values are correct, S-5 fills them. Set
+`screens[].primary_function_id` to that main function (S-5.3 draws a wireframe only for screens that have one). **Wire it to
+its use cases in the same batch**: `{"op": "add", "path": "use_cases[id=UC05].function_ids[]", "value": "FN001"}` (appends;
+never `set` the array); several use cases may share one function. Every use case of a human actor ends this batch with ≥ 1 function.
 
 **5. `progress.screen_queue`.** Set it to every screen id in `queue_order` order, `pending` screens first:
 `{ "op": "set", "path": "progress.screen_queue", "value": ["S01", "S02", …] }`. This is what S-5.1 walks.
@@ -79,9 +77,12 @@ the class management function). Every use case of a human actor ends this batch 
 ## S-4.2 — Flow
 
 Set `flow_to[]`, `is_popup` and `tabs[]` on screens that already exist — **never add a screen here**.
-`flow_to` lists screens reachable by a deliberate navigation (button, link, redirect after success). Not:
-the browser back button, a global nav bar present everywhere, or an error toast. This step sees only
-`features` and `screens`: read each screen's actor(s) from its `description` (named at S-4.1).
+`flow_to` lists edges `{ "to": "<screen id>", "trigger": "<user action>", "guard": "<condition>" }` for deliberate navigation
+(button, link, redirect after success) — not the back button, a global nav bar or an error toast. Read each screen's actor(s)
+from its `description`. **Every edge has a `trigger`**: a short verb phrase as on the button (`Click Register`, `Submit
+credentials`), kept with the flow (not drawn on the diagram). **`guard` only when one action leads to different screens by a condition**
+(`OTP valid`): give those edges the SAME `trigger` and a `guard` on all but at most one (that one is the `else`). No
+brackets in `guard`; one edge per target. Write with `add` `screens[id=…].flow_to[]` or `set` the array of edges.
 
 **Journey shape — one tree per human actor, rooted at Login:**
 1. **Login is the root.** If users sign in, Login is the first screen of every signed-in actor's journey;
@@ -137,13 +138,11 @@ at sign-off it turns red (`orphan_screen_at_baseline`) and blocks the baseline.
 ## Self-check
 
 - [ ] Every screen has a `feature_id` that exists, and every feature has at least one screen.
-- [ ] Auth, admin, settings, notifications screens are present or explicitly out of scope; an error page
-      exists only with a named screen leading to it.
-- [ ] Exactly 3–5 screens are `pending`; every other screen is `placeholder` with an assumption.
-- [ ] `queue_order` is unique and starts at 1; `progress.screen_queue` lists every screen in that order.
+- [ ] Every name is one page (noun phrase, no "and", no feature / catch-all name); records have list + details + form; dialogs are pop-ups, record groups are tabs.
+- [ ] Auth, admin, settings, notifications screens are present or out of scope; an error page only with a named screen leading to it.
+- [ ] Exactly 3–5 screens are `pending`, the rest `placeholder` with an assumption; `queue_order` is unique from 1 and `progress.screen_queue` lists every screen in that order.
 - [ ] Every screen has ≥ 1 function (unique `order` in its feature) and a `primary_function_id`; every human actor's use case lists ≥ 1 function.
-- [ ] Every screen is used by at least one human actor; no screen exists for a `system`/`time` actor.
-- [ ] S-4.2 only sets `flow_to`/`is_popup`/`tabs` (or removes an unplaceable orphan); every id in `flow_to` exists.
-- [ ] Login's only incoming edge is `Register → Login`; Login links to each actor's landing.
-- [ ] Per actor, every screen is reachable from Login via landing → feature; every popup has an opener.
+- [ ] Every screen is used by a human actor (none for a `system`/`time` actor); S-4.2 never adds a screen.
+- [ ] S-4.2 sets only `flow_to`/`is_popup`/`tabs`; every `flow_to[].to` exists and has a `trigger`; `guard` only on branches of one shared trigger.
+- [ ] Login's only incoming edge is `Register → Login`, it links to each actor's landing; every screen is reachable from it, every popup has an opener.
 - [ ] No pair A ⇄ B in `flow_to`: every return edge (to login, list, hub, opener) is removed.

@@ -2,7 +2,7 @@
 skill_id: function-detail
 kind: content
 version: 0.3.0
-description: "S-5.2 and S-5.4 per screen — trigger, description, normal/abnormal flows, validations (<= 6 functions per call)"
+description: "S-5.2 and S-5.4 per screen — trigger, description, normal/abnormal flows, validations, actor-system interactions (<= 6 functions per call)"
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 6144
@@ -12,6 +12,7 @@ reads:
   - "functions[]"
   - "features[]"
   - "roles[]"
+  - "actors[]"
   - "permissions[]"
   - "business_rules[]"
   - "messages[]"
@@ -91,6 +92,25 @@ per-field shape rules in `format`/`required` and the policy in `business`.
 Wire the function to rules that already exist by appending to `business_rule_ids` (send the **full array**
 — `set` replaces it); do not create `business_rules[]` here, that is S-7.1.
 
+**`interactions[]`** — the actor ↔ system messages the System Sequence Diagram is drawn from; one `set` of the whole
+array per function. Write it **only when the function needs the diagram** (otherwise leave it out): at least 2 messages
+AND (a `system`/`time` actor takes part, OR a message is abnormal or guarded, OR the function has no screen — an
+`@nonscreen` function). Element: `{from, to, message, kind, flow, guard?}`.
+
+- `from` / `to`: an actor id from the projection or the literal `system`; **exactly one end is `system`** (black box:
+  no Frontend, Backend, Validator, Repository, database lifeline). Human actors: the use case actors of the function
+  (the roles on the screen's `permissions[]`, `roles[].actor_id`), general actor as modelled, never a leaf actor; the
+  op validator names the allowed ones. External actors (`kind` system/time) only when the flows really involve them.
+- `kind`: `request` (call or signal) or `response` (answer). The first message is the `normal` request that starts the
+  function (an actor → `system`; a webhook or cron actor → `system` for `@nonscreen`). A request that gets an answer
+  back is drawn synchronous, one with no answer asynchronous.
+- `message`: what is passed, in plain words ("Submit email and password"), no method call, no `,` `[` `]`.
+  Two messages with the same `from`, `to`, `message`, `kind`, `flow` collide — reword the second.
+- `flow`: `normal` or `abnormal`. Every `abnormal` message needs a `guard` (the condition, "credentials do not match").
+  Place the abnormal messages of a failure directly after the request that can fail, **before** the rest of the normal
+  flow: the diagram draws them as an `alt` branch and the normal rest as its `else`. A `normal` message with a `guard`
+  is optional ("include appendix is selected"). Reuse the sentences of `abnormal[]`; no extra behaviour.
+
 ## Rules
 
 1. Only ids in the projection; `set` on existing fields of a function — never `add` a new `functions[]`
@@ -117,6 +137,8 @@ Wire the function to rules that already exist by appending to `business_rule_ids
 ```
 
 ## Self-check
+
+- [ ] `interactions`: only where needed, one `set` of the array, one end of each message is `system`, first is a normal request, abnormal ones guarded and before the rest of the normal flow.
 
 - [ ] Ops only for function ids present in this batch's projection.
 - [ ] Every function has a one-sentence `trigger` naming actor + place (or event + cadence).

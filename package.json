@@ -37,6 +37,7 @@
     "migrate:red-waivers": "tsx src/scripts/migrate-red-waivers.ts",
     "migrate:convert-fpt-baselined": "tsx src/scripts/migrate-convert-fpt-baselined.ts",
     "migrate:diagram-source": "tsx src/scripts/migrate-diagram-source.ts",
+    "migrate:flow-edges": "tsx src/scripts/migrate-flow-edges.ts",
     "schema:export": "tsx src/scripts/export-schema.ts",
     "svg:metrics": "tsx src/scripts/generate-svg-metrics.ts",
     "measure:tokens": "tsx src/scripts/measure-tokens.ts",

@@ -23,6 +23,7 @@ import { userOpSchema, type Op } from "../spine/op.types.js"
 import { parsePath, PathError, tryResolve } from "../spine/path-resolver.js"
 import { isPlaceholderId } from "../spine/id-allocator.js"
 import type { Spine } from "../spine/spine.types.js"
+import { SYSTEM_LIFELINE } from "../spine/spine.schema.js"
 import { restatesAssumption } from "./text-overlap.js"
 import { normalizeFormFactorAt } from "../spine/form-factor.js"
 import { USE_CASE_NAME_FIX, emptyProtectedArraysOf, orphanEntities, useCaseNameIssues } from "../spine/deterministic-check.js"
@@ -843,6 +844,138 @@ export const erdShapeErrors = (after: Spine): ValidationError[] => {
       })
     }
   }
+  // Class diagram mỗi feature một hình: entity phải nói feature nào dùng nó; thuộc tính không trùng tên trong một entity
+  for (const e of after.entities) {
+    if (after.features.length > 0 && (e.feature_ids ?? []).length === 0) {
+      errors.push({
+        rule: "erd_feature_missing",
+        path: `entities[id=${e.id}].feature_ids`,
+        message: `"${e.name}" chưa có feature_ids — ghi id các feature dùng entity này (class diagram vẽ mỗi feature một hình)`
+      })
+    }
+    const seen = new Set<string>()
+    for (const a of e.attributes ?? []) {
+      const key = a.name.trim().toLowerCase()
+      if (!seen.has(key)) {
+        seen.add(key)
+        continue
+      }
+      errors.push({ rule: "erd_attribute_duplicate", path: `entities[id=${e.id}].attributes`, message: `"${e.name}" có hai thuộc tính trùng tên "${a.name}" — gộp thành một` })
+    }
+  }
+  errors.push(...lifecycleErrors(after))
+  return errors
+}
+
+/** Id function mà lô op đụng tới `interactions` (hoặc ghi cả function). */
+const interactionOwners = (ops: readonly Op[]): string[] => [
+  ...new Set(
+    ops.flatMap((op) => {
+      const m = /^functions\[id=([^\],]+)\](\..*)?$/.exec(op.path)
+      return m && (m[2] === undefined || m[2].startsWith(".interactions")) ? [m[1]] : []
+    })
+  )
+]
+
+/**
+ * Message của sơ đồ tuần tự hệ thống (hộp đen): mỗi message có đúng một đầu là `system`; message đầu tiên là request
+ * (stimulus) từ actor; nhánh lỗi có guard; actor người là actor của use case gắn function (không mở rộng ra actor con);
+ * không trùng khoá. Chỉ soi function có trong `ids`.
+ */
+export const interactionErrors = (after: Spine, ids: readonly string[]): ValidationError[] => {
+  const errors: ValidationError[] = []
+  for (const fn of after.functions.filter((f) => ids.includes(f.id))) {
+    const list = fn.interactions ?? []
+    if (list.length === 0) continue
+    const at = `functions[id=${fn.id}].interactions`
+    const modelled = new Set(after.use_cases.filter((uc) => uc.function_ids.includes(fn.id)).flatMap((uc) => uc.actor_ids))
+    const humans = after.actors.filter((a) => a.kind === "human")
+    const hasModelledHuman = humans.some((a) => modelled.has(a.id))
+    const keys = new Set<string>()
+    list.forEach((i, k) => {
+      const where = `${at}[${k}]`
+      if ((i.from === SYSTEM_LIFELINE) === (i.to === SYSTEM_LIFELINE)) {
+        errors.push({ rule: "interaction_endpoint_invalid", path: where, message: `"${fn.name}": message "${i.message}" phải có đúng một đầu là "system" (sơ đồ hộp đen: actor ↔ hệ thống), không nối hai actor hay hai đầu system` })
+      }
+      if (i.flow === "abnormal" && (i.guard ?? "").trim() === "") {
+        errors.push({ rule: "interaction_guard_missing", path: where, message: `"${fn.name}": message lỗi "${i.message}" cần guard (điều kiện của nhánh lỗi)` })
+      }
+      const key = `${i.from}|${i.to}|${i.message}|${i.kind}|${i.flow}`
+      if (keys.has(key)) errors.push({ rule: "interaction_duplicate", path: where, message: `"${fn.name}": message "${i.message}" trùng khoá — đổi chữ message của nhánh sau` })
+      keys.add(key)
+      for (const end of [i.from, i.to]) {
+        const actor = after.actors.find((a) => a.id === end)
+        if (actor?.kind === "human" && hasModelledHuman && !modelled.has(actor.id)) {
+          errors.push({ rule: "interaction_actor_not_modelled", path: where, message: `"${fn.name}": actor "${actor.name}" không phải actor của use case gắn function — dùng đúng actor trong mô hình use case (giữ actor tổng quát): ${humans.filter((a) => modelled.has(a.id)).map((a) => `${a.id} ${a.name}`).join(", ")}` })
+        }
+      }
+    })
+    const first = list[0]
+    if (first.kind !== "request" || first.from === SYSTEM_LIFELINE || first.flow !== "normal") {
+      errors.push({ rule: "interaction_stimulus_missing", path: `${at}[0]`, message: `"${fn.name}": message đầu tiên phải là request thuộc luồng chính từ actor tới system (stimulus)` })
+    }
+  }
+  return errors
+}
+
+/**
+ * Vòng đời của entity (state machine diagram): đúng một trạng thái đầu, tên và id trạng thái không trùng, chuyển trạng
+ * thái nối hai trạng thái CÓ THẬT của cùng entity, trạng thái kết thúc không có đường ra, mọi trạng thái tới được từ
+ * trạng thái đầu. Entity không có trạng thái thì không bị soi.
+ */
+export const lifecycleErrors = (after: Spine): ValidationError[] => {
+  const errors: ValidationError[] = []
+  const owner = new Map<string, string>()
+  for (const e of after.entities) {
+    const states = e.states ?? []
+    const transitions = e.transitions ?? []
+    const path = (field: string) => `entities[id=${e.id}].${field}`
+    for (const s of states) {
+      const other = owner.get(s.id)
+      if (other !== undefined) {
+        errors.push({ rule: "state_id_duplicate", path: path("states"), message: `Id trạng thái "${s.id}" của "${e.name}" đã dùng ở entity ${other} — id trạng thái duy nhất trên toàn Spine` })
+      }
+      owner.set(s.id, e.id)
+    }
+    if (states.length === 0) {
+      if (transitions.length > 0) errors.push({ rule: "transition_state_unknown", path: path("transitions"), message: `"${e.name}" có transitions nhưng chưa có states` })
+      continue
+    }
+    const initial = states.filter((s) => s.initial)
+    if (initial.length !== 1) {
+      errors.push({ rule: "state_initial_invalid", path: path("states"), message: `"${e.name}" phải có đúng một trạng thái initial (đang có ${initial.length})` })
+    }
+    const names = new Set<string>()
+    for (const s of states) {
+      const key = s.name.trim().toLowerCase()
+      if (names.has(key)) errors.push({ rule: "state_name_duplicate", path: path("states"), message: `"${e.name}" có hai trạng thái trùng tên "${s.name}"` })
+      names.add(key)
+    }
+    const ids = new Set(states.map((s) => s.id))
+    const finals = new Set(states.filter((s) => s.final).map((s) => s.id))
+    for (const t of transitions) {
+      const at = path(`transitions[from=${t.from},to=${t.to},event=${t.event}]`)
+      if (!ids.has(t.from) || !ids.has(t.to)) {
+        errors.push({ rule: "transition_state_unknown", path: at, message: `Chuyển "${t.event}" của "${e.name}" nối ${t.from} → ${t.to} nhưng id đó không nằm trong states của entity` })
+      } else if (finals.has(t.from)) {
+        errors.push({ rule: "transition_from_final", path: at, message: `Chuyển "${t.event}" của "${e.name}" đi ra từ trạng thái kết thúc ${t.from} — bỏ final hoặc bỏ chuyển` })
+      }
+    }
+    if (initial.length === 1) {
+      const reached = new Set([initial[0].id])
+      for (let grew = true; grew; ) {
+        grew = false
+        for (const t of transitions) if (reached.has(t.from) && ids.has(t.to) && !reached.has(t.to)) {
+            reached.add(t.to)
+            grew = true
+          }
+      }
+      const lost = states.filter((s) => !reached.has(s.id))
+      if (lost.length > 0) {
+        errors.push({ rule: "state_unreachable", path: path("states"), message: `"${e.name}": trạng thái ${lost.map((s) => `"${s.name}"`).join(", ")} không tới được từ trạng thái initial — thêm chuyển hoặc bỏ trạng thái` })
+      }
+    }
+  }
   return errors
 }
 
@@ -981,7 +1114,7 @@ export const validateOps = (spine: Spine, ops: unknown, options: ValidateOptions
 
   try {
     const plan = planTransaction(spine, { base_version: spine.spine_version, ops: parsed, by: "op-validator", step_id: options.stepId ?? null }, { startSeq: 1 })
-    return touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []
+    return [...(touchesErd(spine, parsed) ? erdShapeErrors(plan.spine) : []), ...interactionErrors(plan.spine, interactionOwners(parsed))]
   } catch (err) {
     if (err instanceof TransactionRejectedError) {
       return err.violations.map((v) => ({

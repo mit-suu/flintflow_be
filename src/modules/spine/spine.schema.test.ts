@@ -190,7 +190,7 @@ describe("spineSchema", () => {
     ["flags[].level", (s) => (s.flags[0].level = "orange" as never)],
     ["nfrs[].category", (s) => (s.nfrs[0].category = "security" as never)],
     ["functions[].priority", (s) => (s.functions[0].priority = "high" as never)],
-    ["diagrams[].kind", (s) => (s.diagrams[0].kind = "sequence" as never)],
+    ["diagrams[].kind", (s) => (s.diagrams[0].kind = "timing" as never)],
     ["assumptions[].status", (s) => (s.assumptions[0].status = "maybe" as never)]
   ])("từ chối enum sai: %s", (_label, mutate) => {
     const s = sampleSpine()

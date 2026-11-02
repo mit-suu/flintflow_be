@@ -45,6 +45,7 @@ import { allocateId, allocatesIds, isPlaceholderId, substituteDeep, substitutePl
 import { withElementDefaults } from "./element-defaults.js"
 import { normalizeFormFactorAt } from "./form-factor.js"
 import { normalizeDiagramAt } from "./legacy-diagram.js"
+import { normalizeFlowAt } from "./legacy-flow.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 
 export const CHANGE_RANGE_INVALID = "CHANGE_RANGE_INVALID"
@@ -101,14 +102,48 @@ const lastKey = (path: string): string => {
 /** Mảng object có id (actors, functions, validations…) chỉ được sửa bằng add/remove từng phần tử. */
 const isEntityArray = (value: unknown): boolean => Array.isArray(value) && value.some(isRecord)
 
-/** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml` (FLF-339) ⇒ dạng hiện hành. */
-const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeDiagramAt(path, normalizeFormFactorAt(path, value))
+/** Dạng cũ còn trong op / change log: form_factor chuỗi, diagram có `puml`, `flow_to` là mảng id màn ⇒ dạng hiện hành. */
+const normalizeLegacyAt = (path: string, value: unknown): unknown => normalizeFlowAt(path, normalizeDiagramAt(path, normalizeFormFactorAt(path, value)))
+
+/**
+ * Model viết lại `flow_to` bằng danh sách id (dạng cũ): id đã có cạnh thì giữ cạnh đó (kèm trigger / guard), không ghi đè
+ * thành cạnh trơn.
+ */
+const keepKnownEdges = (given: unknown[], normalized: unknown[], target: ReturnType<typeof resolve>): unknown[] => {
+  const current = target.kind === "field" && Array.isArray(target.value) ? target.value.filter(isRecord) : []
+  return normalized.map((edge, i) => (typeof given[i] === "string" ? (current.find((c) => c.to === given[i]) ?? edge) : edge))
+}
+
+/** Mảng phần tử không có `id`, chọn phần tử bằng khoá riêng: cạnh `flow_to` theo `to`, `attributes` theo `name`. */
+const KEYED_ARRAYS: ReadonlySet<string> = new Set(["flow_to", "attributes", "transitions", "interactions"])
+
+const elementKeyOf = (el: unknown): string | null => {
+  if (!isRecord(el)) return null
+  if (typeof el.from === "string" && typeof el.to === "string" && typeof el.message === "string") return `from=${el.from},to=${el.to},message=${el.message},kind=${String(el.kind)},flow=${String(el.flow)}`
+  if (typeof el.from === "string" && typeof el.to === "string" && typeof el.event === "string") return `from=${el.from},to=${el.to},event=${el.event}`
+  return typeof el.to === "string" ? `to=${el.to}` : typeof el.name === "string" ? `name=${el.name}` : null
+}
+
+/** Hai phần tử cùng khoá (cạnh cùng màn đích, thuộc tính cùng tên) ⇒ giữ phần tử đầu. */
+const dedupeFlowEdges = (edges: unknown[]): unknown[] => {
+  const seen = new Set<string>()
+  return edges.filter((e) => {
+    const key = elementKeyOf(e)
+    if (key === null) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
 const applySet = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op set thiếu value: "${op.path}"`)
   // Mọi đường ghi (model, /changes, import) đều chuẩn hoá form_factor thành mảng — change log không bao giờ giữ chuỗi
-  const value = normalizeLegacyAt(op.path, op.value)
+  const normalized = normalizeLegacyAt(op.path, op.value)
+  // `flow_to` / `attributes` là mảng phần tử không có id: set được cả mảng (khác mảng thực thể có id), mỗi khoá một phần tử
+  const wholeFlow = KEYED_ARRAYS.has(lastKey(op.path)) && Array.isArray(normalized)
   const target = resolve(state.spine, op.path)
+  const value = wholeFlow ? dedupeFlowEdges(keepKnownEdges(op.value as unknown[], normalized as unknown[], target)) : normalized
 
   if (target.kind === "append") throw opError("op_not_allowed", op.path, `Op set không nhận path kết thúc bằng []: "${op.path}"`)
 
@@ -116,7 +151,7 @@ const applySet = (state: WorkState, op: Op): void => {
     if (target.lockedKeys.includes(target.key)) {
       throw opError("key_change_forbidden", op.path, `Không được đổi khoá "${target.key}" của phần tử: "${op.path}"`)
     }
-    if (isEntityArray(target.value) || isEntityArray(value)) {
+    if (!wholeFlow && (isEntityArray(target.value) || isEntityArray(value))) {
       if (expandEntityArraySet(state, op, target.value)) return
       throw opError("op_not_allowed", op.path, `Mảng phần tử có id phải sửa bằng add/remove từng phần tử: "${op.path}"`)
     }
@@ -158,7 +193,7 @@ const withAllocatedId = (state: WorkState, path: string, value: unknown): unknow
   if (!isRecord(value)) return value
   const segments = parsePath(path)
   const collection = segments[segments.length - 1].key
-  const nested = segments.length === 2 && collection === "validations"
+  const nested = segments.length === 2 && (collection === "validations" || collection === "states")
   if (!allocatesIds(collection) || (segments.length !== 1 && !nested)) return value
 
   const current = value.id
@@ -202,8 +237,24 @@ const expandEntityArraySet = (state: WorkState, op: Op, current: unknown): boole
   return true
 }
 
+/** Mảng tuỳ chọn của phần tử (entity, function): Spine cũ / phần tử chưa điền thì vắng, `add` vào đó tạo mảng rỗng trước (ghi thành một change). */
+const OPTIONAL_ARRAYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  entities: new Set(["attributes", "feature_ids", "states", "transitions"]),
+  functions: new Set(["interactions"])
+}
+
+const ensureOptionalArray = (state: WorkState, path: string): void => {
+  const segments = parsePath(path)
+  const last = segments[segments.length - 1]
+  if (segments.length !== 2 || last.selector?.kind !== "append" || !OPTIONAL_ARRAYS[segments[0].key]?.has(last.key)) return
+  const arrayPath = formatPath([segments[0], { key: last.key }])
+  const target = resolve(state.spine, arrayPath)
+  if (target.kind === "field" && !target.exists) applySet(state, { op: "set", path: arrayPath, value: [] })
+}
+
 const applyAdd = (state: WorkState, op: Op): void => {
   if (op.value === undefined) throw opError("op_value_missing", op.path, `Op add thiếu value: "${op.path}"`)
+  ensureOptionalArray(state, op.path)
   const target = resolve(state.spine, op.path)
   if (target.kind !== "append") {
     throw opError("op_not_allowed", op.path, `Op add phải nhắm mảng dạng "arr[]": "${op.path}"`)
@@ -219,6 +270,11 @@ const applyAdd = (state: WorkState, op: Op): void => {
         op.path,
         `Phần tử id "${value.id}" đã tồn tại trong "${op.path}" — muốn thêm phần tử MỚI thì bỏ trường "id" (hoặc dùng id tạm "$new1") để server cấp id; muốn sửa phần tử đó thì dùng set`
       )
+    }
+    // Phần tử không có id: một khoá chỉ một phần tử (path chọn phần tử theo `to` / `name`)
+    const key = KEYED_ARRAYS.has(lastKey(op.path)) ? elementKeyOf(value) : null
+    if (key !== null && target.parent.some((el) => elementKeyOf(el) === key)) {
+      throw opError("duplicate_id", op.path, `Phần tử "${key}" đã có trong "${op.path}" — sửa field của nó bằng set trên path có selector (${lastKey(op.path)}[${key}])`)
     }
   } else if (target.parent.some((el) => !isRecord(el) && isDeepStrictEqual(el, value))) {
     throw opError("duplicate_id", op.path, `Giá trị "${String(value)}" đã có trong "${op.path}"`)

@@ -13,6 +13,7 @@
 
 import { PHASES } from "../pipeline/step-registry.js"
 import { stepGate } from "./deterministic-check.js"
+import { edgeTo } from "./legacy-flow.js"
 import type { Op } from "./op.types.js"
 import type { Spine, UseCase } from "./spine.types.js"
 
@@ -148,12 +149,18 @@ export const declareTempIds = (ops: readonly Op[]): Op[] => {
     // `screens[id=…].flow_to` lẫn `…flow_to[]` / `…flow_to[=$x]` (model thêm từng cạnh — gặp khi chạy AI thật)
     const field = /\.(\w+)(?:\[[^\]]*\])?$/.exec(op.path)?.[1]
     for (const ref of op.path.matchAll(/\[=(\$[A-Za-z]\w*)\]/g)) if (field && REF_COLLECTION[field]) want(REF_COLLECTION[field], ref[1])
-    if (field && REF_COLLECTION[field]) for (const v of [op.value].flat()) if (typeof v === "string" && TEMP_ID.test(v)) want(REF_COLLECTION[field], v)
+    if (field && REF_COLLECTION[field]) for (const v of [op.value].flat()) {
+      const t = field === "flow_to" ? edgeTo(v) : v
+      if (typeof t === "string" && TEMP_ID.test(t)) want(REF_COLLECTION[field], t)
+    }
     if (typeof op.value !== "object" || op.value === null || Array.isArray(op.value)) continue
     for (const [key, v] of Object.entries(op.value as Element)) {
       const collection = REF_COLLECTION[key]
       if (!collection) continue
-      for (const item of [v].flat()) if (typeof item === "string" && TEMP_ID.test(item)) want(collection, item)
+      for (const item of [v].flat()) {
+        const t = key === "flow_to" ? edgeTo(item) : item
+        if (typeof t === "string" && TEMP_ID.test(t)) want(collection, t)
+      }
     }
   }
   if (wanted.size === 0) return [...ops]
@@ -257,9 +264,9 @@ export const normalizeUseCaseBatch = (spine: Spine, input: readonly Op[]): Op[] 
   for (const op of normalized) {
     if (!isAdd(op, "screens")) continue
     const value = { ...(op.value as Element) }
-    const flow = Array.isArray(value.flow_to) ? (value.flow_to as unknown[]).map(String) : []
-    if (typeof value.id === "string" && flow.some((t) => newScreenIds.has(t))) {
-      value.flow_to = flow.filter((t) => !newScreenIds.has(t))
+    const flow = Array.isArray(value.flow_to) ? (value.flow_to as unknown[]) : []
+    if (typeof value.id === "string" && flow.some((t) => newScreenIds.has(edgeTo(t)))) {
+      value.flow_to = flow.filter((t) => !newScreenIds.has(edgeTo(t)))
       flowSets.push({ op: "set", path: `screens[id=${value.id}].flow_to`, value: flow })
     }
     value.detail_status = pastScreenLoop ? "signed_off" : "pending"
@@ -481,7 +488,7 @@ export const newUseCaseScreenIssues = (
   const human = new Set(after.actors.filter((a) => a.kind === "human").map((a) => a.id))
   const screenOf = new Map(after.functions.map((f) => [f.id, f.screen_id]))
   const nameOf = new Map(after.screens.map((s) => [s.id, s.name]))
-  const reachable = new Set(after.screens.flatMap((s) => s.flow_to))
+  const reachable = new Set(after.screens.flatMap((s) => s.flow_to.map((e) => e.to)))
   const issues: UseCaseScreenIssue[] = []
   // Lệnh thêm use case mà lô chỉ có màn / chức năng, không có use case (gặp khi chạy AI thật)
   if (options.expectUseCase && !after.use_cases.some((u) => !existedUc.has(u.id))) issues.push({ kind: "no_use_case" })
@@ -501,14 +508,14 @@ export const newUseCaseScreenIssues = (
     // Use case nhiều bước (nhiều màn mới): các màn phải nối nhau thành chuỗi — mỗi màn trừ màn đầu có cạnh vào từ màn cùng use case
     const fresh = screens.filter((s) => !existedScreen.has(s))
     if (fresh.length > 1) {
-      const linked = fresh.filter((t) => screens.some((s) => s !== t && after.screens.find((x) => x.id === s)?.flow_to.includes(t))).length
+      const linked = fresh.filter((t) => screens.some((s) => s !== t && after.screens.find((x) => x.id === s)?.flow_to.some((e) => e.to === t))).length
       if (linked < fresh.length - 1) issues.push({ kind: "not_chained", use_case: uc.id, name: uc.name, screens: fresh.map((s) => nameOf.get(s) ?? s) })
     }
     const roles = after.roles.filter((r) => r.actor_id !== null && uc.actor_ids.includes(r.actor_id) && human.has(r.actor_id))
     // Màn vào của use case phải mở từ màn mà vai trò của actor xem được — không thì không nằm trong screen flow của actor
     const viewable = new Set(after.permissions.filter((p) => p.action === "view" && roles.some((r) => r.id === p.role_id)).map((p) => p.screen_id))
     for (const entry of fresh) {
-      const from = after.screens.filter((s) => !screens.includes(s.id) && s.flow_to.includes(entry))
+      const from = after.screens.filter((s) => !screens.includes(s.id) && s.flow_to.some((e) => e.to === entry))
       // Màn không có dòng quyền nào (Login, màn công khai) ⇒ ai cũng mở được
       const open = (id: string) => viewable.has(id) || !after.permissions.some((p) => p.screen_id === id)
       if (roles.length === 0 || from.length === 0 || from.some((s) => open(s.id))) continue
@@ -726,7 +733,7 @@ export const batchUseCases = (spine: Pick<Spine, "screens" | "actors">, ops: rea
     const v = op.value as Element | undefined
     const from = isAdd(op, "screens") ? (v?.id as string | undefined) : /^screens\[id=([^\]]+)\]\.flow_to$/.exec(op.path)?.[1]
     const to = isAdd(op, "screens") ? v?.flow_to : op.op === "set" ? op.value : undefined
-    if (from && Array.isArray(to)) nextOf.set(from, [...(nextOf.get(from) ?? []), ...(to as unknown[]).map(String).filter((t) => newScreenName.has(t))])
+    if (from && Array.isArray(to)) nextOf.set(from, [...(nextOf.get(from) ?? []), ...(to as unknown[]).map(edgeTo).filter((t) => newScreenName.has(t))])
   }
   const withSteps = (start: string[]): string[] => {
     const out = [...start]
@@ -821,7 +828,7 @@ export const screenKindQuestion = (
   // Màn CÓ SẴN mở màn mới (cạnh giữa hai màn mới — bước sau, popup — không tính)
   const hostId = ops
     .filter((op) => op.op === "set" && /^screens\[id=[^\]$]+\]\.flow_to$/.test(op.path) && Array.isArray(op.value))
-    .find((op) => (op.value as unknown[]).some((v) => newIds.has(String(v))))
+    .find((op) => (op.value as unknown[]).some((v) => newIds.has(edgeTo(v))))
     ?.path.match(/^screens\[id=([^\]]+)\]/)?.[1]
   const host = spine.screens.find((s) => s.id === hostId)?.name
   const detailed = items.filter((u) => u.ui).length > 1 || items.some((u) => u.proposed || u.newScreens.length > 1)
@@ -1054,9 +1061,9 @@ const dropUseCases = (ops: readonly Op[], names: readonly string[]): Op[] => {
   const flowOf = new Map<string, string[]>()
   for (const op of ops) {
     const v = op.value as Element | undefined
-    if (isAdd(op, "screens") && typeof v?.id === "string") flowOf.set(v.id, [...(flowOf.get(v.id) ?? []), ...((v.flow_to as string[] | undefined) ?? [])])
+    if (isAdd(op, "screens") && typeof v?.id === "string") flowOf.set(v.id, [...(flowOf.get(v.id) ?? []), ...((v.flow_to as unknown[] | undefined) ?? []).map(edgeTo)])
     const setFlow = /^screens\[id=([^\]]+)\]\.flow_to$/.exec(op.path)
-    if (op.op === "set" && setFlow && Array.isArray(op.value)) flowOf.set(setFlow[1], [...(flowOf.get(setFlow[1]) ?? []), ...(op.value as string[])])
+    if (op.op === "set" && setFlow && Array.isArray(op.value)) flowOf.set(setFlow[1], [...(flowOf.get(setFlow[1]) ?? []), ...(op.value as unknown[]).map(edgeTo)])
   }
   for (let grew = true; grew; ) {
     grew = false
@@ -1080,7 +1087,7 @@ const dropUseCases = (ops: readonly Op[], names: readonly string[]): Op[] => {
       const left = (v.function_ids as unknown[]).filter((f) => !gone(f))
       return left.length ? [{ ...op, value: { ...v, function_ids: left } }] : []
     }
-    if (op.op === "set" && /\.flow_to$/.test(op.path) && Array.isArray(op.value)) return [{ ...op, value: (op.value as unknown[]).filter((t) => !gone(t)) }]
+    if (op.op === "set" && /\.flow_to$/.test(op.path) && Array.isArray(op.value)) return [{ ...op, value: (op.value as unknown[]).filter((t) => !gone(edgeTo(t))) }]
     return [op]
   })
 }
@@ -1170,7 +1177,7 @@ export const uiPlanIssues = (
       if (!popup) issues.push({ kind: "not_popup", name: e.name })
       else if (e.screen) {
         const host = after.screens.find((s) => sameName(s.name, e.screen ?? "")) ?? after.screens.find((s) => nameMatches(s.name, e.screen ?? ""))
-        if (host && !host.flow_to.includes(popup)) issues.push({ kind: "wrong_host", name: e.name, host: host.name })
+        if (host && !host.flow_to.some((e) => e.to === popup)) issues.push({ kind: "wrong_host", name: e.name, host: host.name })
       }
     } else if (e.kind === "existing" && (fresh.length > 0 || screensOf(uc.id).length === 0)) {
       issues.push({ kind: "not_existing", name: e.name })
