@@ -2,8 +2,8 @@
  * mode1-import-measure.e2e — đo luồng import mode 1 trọn vẹn với PROVIDER THẬT. Chỉ chạy khi `E2E_AI=1`:
  *   MEASURE_SRS="<đường dẫn .docx>" MEASURE_LABEL=<nhãn> npm run test:e2e-ai -- test/e2e-ai/mode1-import-measure.e2e.test.ts
  *
- * Luồng HTTP thật: upload → confirm-latest → mapping (confirm_all) → I-4 (chạy nền, chờ job) → fields (confirm_all) →
- * finalize (baseline 0.1 + 1.11 + 1.12). Mongo in-memory — không đụng DB thật. PlantUML tắt trong test nên sơ đồ có
+ * Luồng HTTP thật (FLF-343, một mạch): upload (preflight + tách file + khớp mẫu) → Bắt đầu (`/import/extract` kèm
+ * `confirm_latest`) → I-4 → finalize nối tiếp (baseline 0.1 + 1.11 + 1.12), chờ job. Mongo in-memory — không đụng DB thật. PlantUML tắt trong test nên sơ đồ có
  * cờ render, không ảnh hưởng số đo AI.
  *
  * Ghi `test/e2e-ai/results/mode1-measure-<label>-<file>-<ISO>.{md,json}`: lượt gọi / token / credit theo bước, thời gian
@@ -59,24 +59,14 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
     expect(up.status, JSON.stringify(up.body.error)).toBe(201)
     const importId = up.body.data.import.id as string
     let view = (await c.get("/import")).body.data
-    if (view.import.status === "awaiting_latest_confirm") {
-      await timed("parse", () => c.post("/import/confirm-latest", { import_id: importId }))
-      view = (await c.get("/import")).body.data
-    }
-    if (view.import.status === "mapping_review") {
-      await c.patch("/import/mapping", { import_id: importId, headings: [], tables: [], confirm_all: true })
-      view = (await c.get("/import")).body.data
-    }
     expect(view.import.status).toBe("extracting")
+    const estimate = view.credit_estimate
 
-    const { run } = await timed("i4_extract", () => c.extractAndWait(importId, "/import/extract", 60 * 60_000))
+    // một lần Bắt đầu: I-4 ⇒ baseline 0.1 ⇒ 1.11–1.12 (đo gộp)
+    const { run } = await timed("one_pass", () => c.extractAndWait(importId, "/import/extract", 60 * 60_000))
     expect(run?.import.paused ?? null, JSON.stringify(run?.sections.filter((s: { error: unknown }) => s.error))).toBeNull()
     view = (await c.get("/import")).body.data
-    if (view.import.status === "fields_review") await c.patch("/import/fields", { import_id: importId, fields: [], confirm_all: true })
-
-    const fin = await timed("finalize_check", async () => c.post("/import/finalize", { import_id: importId, base_version: await c.spineVersion() }))
-    expect(fin.status, JSON.stringify(fin.body.error)).toBe(200)
-    view = (await c.get("/import")).body.data
+    expect(view.import.status).toBe("gap_review")
 
     // ─── số đo ───────────────────────────────────────────────────
     const usage = await Usage.find({ projectId, state: "deducted" }).lean()
@@ -102,6 +92,7 @@ describe.skipIf(!enabled || !SRS)("Đo import mode 1 — provider thật (E2E_AI
     const openFlags = spine.flags.filter((f) => f.resolved_at === null)
     const result = {
       label: LABEL,
+      credit_estimate: estimate ?? null,
       srs: path.basename(SRS),
       file_bytes: buf.length,
       blocks_total: await DocBlock.countDocuments({ projectId, doc_version: IMPORTED_DOC_VERSION }),

@@ -34,12 +34,10 @@ const importedProject = async () => {
   const projectId = await createMode1Project(seeded)
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  const fin = await c.finalizeAndWait(id)
+  // FLF-343: một lần Bắt đầu ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra
+  const fin = await c.extractAndWait(id)
   expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
-  expect(fin.view?.import?.status).toBe("gap_review")
+  expect(fin.run?.import.status).toBe("gap_review")
   return { seeded, projectId, c }
 }
 

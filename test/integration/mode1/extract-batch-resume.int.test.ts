@@ -85,7 +85,7 @@ describe("I-4 — chạy tiếp theo từng lô", () => {
     mockOverrides.next = record(fakeMode1)
     await ImportedDocument.updateOne({ _id: ctx.importId }, { $set: { paused: null } })
     const resumed = await runExtraction(ctx.projectId, ctx.userId, ctx.importId)
-    expect(resumed.doc.status).toBe("fields_review")
+    expect(resumed.doc.status).toBe("baselining")
     expect(calls.filter((c) => c.section === "fixed:1").map((c) => c.marks[0])).toEqual(["05", "09"])
     expect(calls).toHaveLength(7)
     expect(await deducted(ctx.projectId, "I-4:fixed:1")).toBe(3)
@@ -146,16 +146,20 @@ describe("I-4 — ước tính credit", () => {
     expect(await estimateExtraction(ctx.projectId, { _id: ctx.importId } as never)).toMatchObject({ ai_calls: 0, credits: 0 })
   }, 60_000)
 
-  it("GET /import: mapping_review có ước tính + số dư ví org; Viewer không thấy số dư; sau khi trích xong ⇒ null", async () => {
+  it("FLF-343 GET /import: ước tính một lần sau upload (I-4 + kiểm tra AI) + số dư ví org; Viewer không thấy; credit thực trừ ≤ ước tính; chạy xong ⇒ null", async () => {
     const seeded = await seedFixture("minimal", { balance: 7 })
     const projectId = await createMode1Project(seeded)
     const c = mode1Api(seeded, projectId)
-    const id = (await c.upload(await makeSrsDocx({ numberedOnly: true }))).body.data.import.id as string
-    expect((await c.post("/import/confirm-latest", { import_id: id })).body.data.import.status).toBe("mapping_review")
+    const up = await c.upload(await makeSrsDocx({ numberedOnly: true }))
+    const id = up.body.data.import.id as string
+    expect(up.body.data.import.status).toBe("extracting")
 
     const view = getImportResponseSchema.parse((await c.get("/import")).body.data)
-    expect(view.credit_estimate).toMatchObject({ ai_calls: expect.any(Number), available_credits: 7 })
-    expect(view.credit_estimate!.credits).toBe(view.credit_estimate!.ai_calls * 2)
+    const est = view.credit_estimate!
+    expect(est).toMatchObject({ ai_calls: expect.any(Number), available_credits: 7 })
+    // I-4 2 credit / lượt; kiểm tra 3 credit / lượt (lô 1.11 + một lượt kiểm chéo)
+    expect(est.check_calls).toBeGreaterThanOrEqual(2)
+    expect(est.credits).toBe((est.ai_calls - est.check_calls!) * 2 + est.check_calls! * 3)
 
     // Viewer không đọc luồng import (dữ liệu làm việc — UC-47)
     await Membership.updateOne({ userId: seeded.userId }, { $set: { role: "viewer" } })
@@ -163,15 +167,16 @@ describe("I-4 — ước tính credit", () => {
     await Membership.updateOne({ userId: seeded.userId }, { $set: { role: "lead" } })
 
     await CreditWallet.updateOne({ organizationId: seeded.orgId }, { $set: { balance: 1000 } })
-    expect((await c.patch("/import/mapping", { import_id: id, confirm_all: true })).body.data.import.status).toBe("extracting")
     const ready = getImportResponseSchema.parse((await c.get("/import")).body.data)
-    expect(ready.credit_estimate).toMatchObject({ credits: view.credit_estimate!.credits, available_credits: 1000 })
+    expect(ready.credit_estimate).toMatchObject({ credits: est.credits, available_credits: 1000 })
 
     const ex = await c.extractAndWait(id)
     expect(ex.res.status).toBe(200)
-    expect(calls).toHaveLength(ready.credit_estimate!.ai_calls)
+    expect(ex.run?.import.status).toBe("gap_review")
+    expect(calls).toHaveLength(ready.credit_estimate!.ai_calls - est.check_calls!)
+    const wallet = await CreditWallet.findOne({ organizationId: seeded.orgId }).lean()
+    expect(1000 - wallet!.balance).toBeLessThanOrEqual(est.credits)
     const done = getImportResponseSchema.parse((await c.get("/import")).body.data)
-    expect(done.import?.status).not.toBe("extracting")
     expect(done.credit_estimate).toBeNull()
   }, 60_000)
 })
