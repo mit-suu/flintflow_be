@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 /**
- * FLF-265 §3.1 / §3.6 — file version mode 1: tuỳ chọn writer đi qua `writerOptionsFor("import")` nhưng bytes y như
- * `{ flagLanguage: "vi" }` cũ; không gọi model. `renderSpineDocument` giả (đọc Mongo) — phần dựng thật có ở
- * test/integration/document-language-render.int.test.ts.
+ * FLF-265 §3.1 / §3.6 — file version mode 1: tuỳ chọn writer đi qua `writerOptionsFor("import")` nhưng chữ cố định y như
+ * `{ flagLanguage: "vi" }` cũ; không gọi model. FLF-344: file version luôn ghi sẵn mục lục (`tocEntries`).
+ * `renderSpineDocument` giả (đọc Mongo) — phần dựng thật có ở test/integration/document-language-render.int.test.ts.
  */
 vi.mock("../render/assemble.service.js", () => ({ renderSpineDocument: vi.fn() }))
 vi.mock("../render/docx-writer.js", async (importOriginal) => {
@@ -39,17 +39,19 @@ beforeEach(() => {
 })
 
 describe("renderVersionFile — mode 1 không đổi", () => {
-  it("writer nhận đúng { flagLanguage: vi } như trước FLF-265", async () => {
+  it("writer nhận { flagLanguage: vi } như trước FLF-265 + mục lục ghi sẵn (FLF-344)", async () => {
     await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "1.0", stampSource: "release" })
     expect(renderSpineDocument).toHaveBeenCalledWith(PROJECT, "Demo", {}, { version: "1.0", source: "baseline", pendingRecord: undefined })
     expect(writeDocx).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(writeDocx).mock.calls[0][1]).toEqual({ flagLanguage: "vi" })
+    expect(vi.mocked(writeDocx).mock.calls[0][1]).toEqual({ flagLanguage: "vi", tocEntries: true })
   })
 
-  it("document.xml y hệt bản ghi với tuỳ chọn cũ; stamp vẫn có; không gọi model", async () => {
+  it("document.xml y hệt bản ghi với tuỳ chọn cũ (+ mục lục ghi sẵn); có dòng mục lục; stamp vẫn có; không gọi model", async () => {
     const file = await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "1.0", stampSource: "release" })
-    const old = await writeDocx(sample, { flagLanguage: "vi" })
-    expect(readZipText(file, "word/document.xml")).toBe(readZipText(old, "word/document.xml"))
+    const old = await writeDocx(sample, { flagLanguage: "vi", tocEntries: true })
+    const xml = readZipText(file, "word/document.xml")
+    expect(xml).toBe(readZipText(old, "word/document.xml"))
+    expect(xml).toMatch(/<w:hyperlink [^>]*w:anchor="_Toc\d+"/)
     expect(readZipText(file, "docProps/custom.xml")).toContain("release")
     expect(executeAiAction).not.toHaveBeenCalled()
   })
@@ -65,6 +67,6 @@ describe("renderVersionFile — dự án chuyển từ mode 2 (FLF-318)", () => 
       pendingRecord: undefined,
       languages: { locale: "vi", source: "en" }
     })
-    expect(vi.mocked(writeDocx).mock.calls[0][1]).toEqual({ language: "vi", flagLanguage: "vi" })
+    expect(vi.mocked(writeDocx).mock.calls[0][1]).toEqual({ language: "vi", flagLanguage: "vi", tocEntries: true })
   })
 })

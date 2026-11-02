@@ -95,7 +95,8 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   const parsed = renderedDocumentSchema.safeParse(result.doc)
   if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
-  const buffer = await writeDocx(parsed.data, writerOptionsFor(mode, locale, convertedFrom))
+  // FLF-344: dự án mode 1 (import thật lẫn chuyển từ mode 2) — mục lục ghi sẵn như file version; mode 2 giữ field TOC rỗng
+  const buffer = await writeDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) })
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   const draftMeta = query.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId)) ?? null) : null

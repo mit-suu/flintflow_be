@@ -34,6 +34,7 @@ import { downloadVersion, toVersionDto } from "../../../src/modules/doc-version/
 import { SRS_FIXTURE_TEXT } from "../../../src/modules/import/testing/srs-fixture.js"
 import { buildPlaceholderPng } from "../../../src/modules/render/diagram-placeholder.js"
 import { clearImportMediaCache } from "../../../src/modules/render/import-media.js"
+import { readZipText } from "../../../src/modules/render/zip.test-helper.js"
 
 beforeEach(() => {
   resetMockLlm()
@@ -180,6 +181,22 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.1", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
     await expect(downloadVersion(projectId, "Lumen", "0.1", "original")).rejects.toMatchObject({ code: "DOC_VERSION_NOT_FOUND" })
+  })
+
+  it("FLF-344: tải 0.1 ⇒ mục lục ghi sẵn đủ mọi heading cấp 1–3 theo thứ tự, mỗi dòng trỏ tới bookmark của heading đó", async () => {
+    const { projectId } = await importFinalized()
+    const rendered = await downloadVersion(projectId, "Lumen", "0.1", "auto")
+    const pkg = await DocxPackage.load(rendered.data)
+    const xml = readZipText(rendered.data, "word/document.xml")
+    const toc = /<w:sdt>[\s\S]*?<\/w:sdt>/.exec(xml)?.[0] ?? ""
+    expect(toc).toMatch(/TOC [^<]*\\o (&quot;|")1-3(&quot;|")/)
+    const lines = [...toc.matchAll(/<w:hyperlink [^>]*w:anchor="([^"]+)"[\s\S]*?<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => ({ anchor: m[1], title: m[2] }))
+    // Dòng mục lục không thành nội dung khi đọc lại; heading cấp 1–3 của file = đúng các dòng mục lục, cùng thứ tự
+    const headings = (await readBlocks(pkg)).filter((b) => b.kind === "heading" && (b.level ?? 9) <= 3).map((b) => b.text)
+    expect(lines.length).toBeGreaterThan(5)
+    expect(lines.map((l) => l.title)).toEqual(headings)
+    expect(lines.map((l) => l.title)).toContain("1 Product Overview")
+    for (const { anchor } of lines) expect(xml).toMatch(new RegExp(`<w:bookmarkStart [^>]*w:name="${anchor}"`))
   })
 
   it("DoD V2: bản làm việc ghép sẵn theo layout — thứ tự + tiêu đề như file gốc, mục FPT thiếu chèn cạnh nhóm, mục ngoài FPT giữ nguyên văn", async () => {
