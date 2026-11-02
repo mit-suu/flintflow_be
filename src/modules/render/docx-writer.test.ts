@@ -4,6 +4,7 @@ import mammoth from "mammoth"
 import { HEADING_TABLE_SPACING, buildDocxFileName, exportLineage, writeDocx } from "./docx-writer.js"
 import { makePng, readZipEntries, readZipText } from "./zip.test-helper.js"
 import type { RenderedDocument } from "./rendered-document.types.js"
+import { DocxPackage, readBlocks } from "../docx-ooxml/index.js"
 
 const sample = JSON.parse(
   readFileSync(new URL("../../../fixtures/rendered-document-sample.json", import.meta.url), "utf8")
@@ -355,5 +356,110 @@ describe("writeDocx — chữ cố định theo ngôn ngữ (FLF-265)", () => {
     const docx = await writeDocx(baseline(), { language: "vi" })
     expect(readZipText(docx, "word/document.xml")).toContain("BASELINE")
     expect(coreXml(docx)).toContain("Baseline v1.0 tạo lúc")
+  })
+})
+
+describe("writeDocx — mục lục ghi sẵn cho file version mode 1 (FLF-344)", () => {
+  /** Tài liệu theo layout file khách: phần La Mã cấp 1, chương cấp 2, mục cấp 3, mục con cấp 4 + heading trong khối. */
+  const layoutDoc = (): RenderedDocument => ({
+    projectId: "p1",
+    projectName: "Report 3",
+    version: "0.1",
+    source: "baseline",
+    generatedAt: "2026-11-02T00:00:00.000Z",
+    recordOfChanges: [],
+    sections: [
+      { id: "group:II", number: "II", heading: "Software Requirement Specification", level: 1, blocks: [] },
+      { id: "fixed:1", number: "1", heading: "Product Overview", level: 2, blocks: [{ type: "paragraph", runs: [{ text: "Tổng quan." }] }] },
+      {
+        id: "fixed:3.1.2",
+        number: "1.1",
+        heading: "Screen Flow",
+        level: 3,
+        blocks: [
+          { type: "heading", level: 3, text: "Screen Descriptions" },
+          { type: "heading", level: 4, text: "Login" },
+          { type: "paragraph", runs: [{ text: "Đăng nhập." }] }
+        ]
+      },
+      { id: "function:FN1", number: "1.1.1", heading: "Create Project", level: 4, blocks: [] }
+    ]
+  })
+
+  const tocSdt = (xml: string): string => /<w:sdt>[\s\S]*?<\/w:sdt>/.exec(xml)?.[0] ?? ""
+  const tocLines = (xml: string): string[] =>
+    [...tocSdt(xml).matchAll(/<w:hyperlink [^>]*w:anchor="([^"]+)"[\s\S]*?<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => `${m[1]}|${m[2]}`)
+
+  it("tái hiện: mặc định (export mode 2) field TOC rỗng, không có dòng nào", async () => {
+    const xml = readZipText(await writeDocx(layoutDoc()), "word/document.xml")
+    expect(tocSdt(xml)).toMatch(/TOC [^<]*\\o &quot;1-3&quot;/)
+    expect(tocLines(xml)).toEqual([])
+    expect(xml).not.toContain("_Toc")
+  })
+
+  it("tocEntries ⇒ mỗi heading cấp 1–3 một dòng mục lục theo thứ tự tài liệu, cấp 4+ không vào", async () => {
+    const xml = readZipText(await writeDocx(layoutDoc(), { flagLanguage: "vi", tocEntries: true }), "word/document.xml")
+    const lines = tocLines(xml)
+    expect(lines.map((l) => l.split("|")[1])).toEqual([
+      "I. Record of Changes",
+      "II Software Requirement Specification",
+      "1 Product Overview",
+      "1.1 Screen Flow",
+      "Screen Descriptions"
+    ])
+    expect(lines.join("\n")).not.toContain("Create Project")
+    expect(lines.join("\n")).not.toContain("Login")
+    // cấp của dòng = cấp heading: style TOC1/TOC2/TOC3
+    expect([...tocSdt(xml).matchAll(/<w:pStyle w:val="(TOC\d)"\/>/g)].map((m) => m[1])).toEqual(["TOC1", "TOC1", "TOC2", "TOC3", "TOC3"])
+    // field TOC vẫn còn (Word / LibreOffice cập nhật lại kèm số trang), vẫn bật updateFields
+    expect(tocSdt(xml)).toMatch(/TOC [^<]*\\o &quot;1-3&quot;/)
+    expect(tocSdt(xml)).toContain('w:fldCharType="end"')
+  })
+
+  it("tocEntries ⇒ khai style toc 1–3 (tên chuẩn của Word) thụt lề theo cấp; mặc định không thêm style", async () => {
+    const styles = readZipText(await writeDocx(layoutDoc(), { tocEntries: true }), "word/styles.xml")
+    for (const [level, indent] of [[1, 0], [2, 240], [3, 480]] as const) {
+      const style = new RegExp(`<w:style [^>]*w:styleId="TOC${level}"[\\s\\S]*?</w:style>`).exec(styles)?.[0] ?? ""
+      expect(style, `TOC${level}`).toContain(`<w:name w:val="toc ${level}"/>`)
+      expect(style).toMatch(new RegExp(`<w:ind [^>]*w:left="${indent}"`))
+    }
+    expect(readZipText(await writeDocx(layoutDoc()), "word/styles.xml")).not.toContain('w:styleId="TOC1"')
+  })
+
+  it("tocEntries ⇒ mỗi dòng mục lục trỏ tới bookmark bọc đúng heading (bấm được tới mục)", async () => {
+    const xml = readZipText(await writeDocx(layoutDoc(), { tocEntries: true }), "word/document.xml")
+    const body = xml.slice(xml.indexOf("</w:sdt>"))
+    for (const line of tocLines(xml)) {
+      const [anchor, title] = line.split("|")
+      const start = new RegExp(`<w:bookmarkStart w:name="${anchor}" w:id="(\\d+)"/>`).exec(body)
+      expect(start, `bookmark ${anchor}`).not.toBeNull()
+      const after = body.slice(start!.index)
+      expect(after.slice(0, after.indexOf(`<w:bookmarkEnd w:id="${start![1]}"/>`))).toContain(`>${title}</w:t>`)
+    }
+  })
+
+  it("tocEntries ⇒ heading vẫn mang style Heading 1–3 có outlineLvl (bản PDF / bookmark PDF dựng theo cấp outline)", async () => {
+    const docx = await writeDocx(layoutDoc(), { tocEntries: true })
+    const xml = readZipText(docx, "word/document.xml")
+    expect(xml).toMatch(/<w:pStyle w:val="Heading2"\/>[\s\S]*?<w:bookmarkStart [^>]*\/>[\s\S]*?>1 Product Overview<\/w:t>/)
+    const styles = readZipText(docx, "word/styles.xml")
+    for (const [id, lvl] of [["Heading1", 0], ["Heading2", 1], ["Heading3", 2]] as const) {
+      expect(new RegExp(`w:styleId="${id}"[\\s\\S]*?<w:outlineLvl w:val="${lvl}"/>`).test(styles), id).toBe(true)
+    }
+  })
+
+  it("upload lại file đã xuất: dòng mục lục ghi sẵn không thành nội dung, heading vẫn nhận đúng cấp", async () => {
+    const pkg = await DocxPackage.load(await writeDocx(layoutDoc(), { tocEntries: true }))
+    const blocks = await readBlocks(pkg)
+    const texts = blocks.map((b) => b.text)
+    expect(texts.filter((t) => t === "1 Product Overview")).toHaveLength(1)
+    expect(texts.filter((t) => t === "Screen Descriptions")).toHaveLength(1)
+    expect(blocks.find((b) => b.text === "1 Product Overview")).toMatchObject({ kind: "heading", level: 2 })
+  })
+
+  it("mode 2 (không bật) giữ nguyên document.xml", async () => {
+    const plain = readZipText(await writeDocx(structuredClone(sample)), "word/document.xml")
+    const explicit = readZipText(await writeDocx(structuredClone(sample), { tocEntries: false }), "word/document.xml")
+    expect(explicit).toBe(plain)
   })
 })

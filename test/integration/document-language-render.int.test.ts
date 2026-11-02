@@ -125,12 +125,12 @@ describe("dự án mode 2 en (dự án cũ không có documentLanguage)", () => 
 })
 
 describe("renderVersionFile (file version mode 1)", () => {
-  it("document.xml y hệt bản ghi bằng { flagLanguage: vi } cũ, không gọi model", async () => {
+  it("document.xml y hệt bản ghi bằng { flagLanguage: vi } cũ (+ mục lục ghi sẵn FLF-344), không gọi model", async () => {
     const spine = stripRecord((await spineRepository.get(seeded.projectId))!)
     const opts = { version: "1.0", stampSource: "release" }
     const file = await renderVersionFile(seeded.projectId, "Demo", spine, opts)
     const doc = await renderSpineDocument(seeded.projectId, "Demo", spine, { version: "1.0", source: "baseline" })
-    const old = await writeDocx(doc, { flagLanguage: "vi" })
+    const old = await writeDocx(doc, { flagLanguage: "vi", tocEntries: true })
     expect(readZipText(file, "word/document.xml")).toBe(readZipText(old, "word/document.xml"))
     expect(executeAiAction).not.toHaveBeenCalled()
   })
