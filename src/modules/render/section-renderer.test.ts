@@ -78,7 +78,7 @@ const spine = (): Spine => ({
       feature_id: "F1",
       name: "Login",
       description: "Entry screen.",
-      flow_to: ["S02"],
+      flow_to: [{ to: "S02", trigger: "Submit credentials" }],
       is_popup: false,
       tabs: [],
       primary_function_id: "FN01",
@@ -188,21 +188,51 @@ describe("renderSection — fixed sections", () => {
     expect(section.blocks).toEqual([{ type: "image", png: "png-d02", caption: "Use Case Diagram" }])
   })
 
-  it("fixed:3.1.1 — chỉ ảnh sơ đồ, chú thích 'Screens flow for <actor>' lấy từ title của từng hình", () => {
+  it("fixed:2.2.1 / fixed:2.1 — hình use case theo feature lấy chú thích từ <title> của SVG; hình phân cấp actor nằm ở §2.1 sau bảng actor", () => {
+    const s = spine()
+    const base = s.diagrams.find((d) => d.id === "D02")!
+    const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>\n`
+    s.diagrams = [
+      ...s.diagrams.filter((d) => d.id !== "D02"),
+      { ...base, id: "D02", format: "svg", source: svg("Use Cases — Account &amp; Access") },
+      { ...base, id: "D02-2", format: "svg", source: svg("Use Cases — Billing (2/2)") },
+      { ...base, id: "D02-3", format: "svg", section: "fixed:2.1", source: svg("Actor Hierarchy") }
+    ]
+    const withPng = ctx({ diagramPng: (id) => `png-${id}` })
+    expect(renderSection(s, "fixed:2.2.1", withPng).blocks).toEqual([
+      { type: "image", png: "png-D02", caption: "Use Cases — Account & Access" },
+      { type: "image", png: "png-D02-2", caption: "Use Cases — Billing (2/2)" }
+    ])
+    const actors = renderSection(s, "fixed:2.1", withPng).blocks
+    expect(actors[0].type).toBe("table")
+    expect(actors[1]).toEqual({ type: "image", png: "png-D02-3", caption: "Actor Hierarchy" })
+    // Không có hình phân cấp ⇒ §2.1 chỉ có bảng
+    expect(renderSection(spine(), "fixed:2.1", ctx()).blocks).toHaveLength(1)
+  })
+
+  it("fixed:3.1.1 — mỗi hình luồng màn có chú thích lấy từ <title> của SVG và một đoạn chú giải ký pháp", () => {
     const s = spine()
     const base = s.diagrams.find((d) => d.id === "D03")!
+    const svg = (title: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><title>${title}</title></svg>
+`
     s.diagrams = [
       ...s.diagrams.filter((d) => d.id !== "D03"),
-      { ...base, id: "D03-1", format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' },
-      { ...base, id: "D03-2", format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Guest";\n}\n@enddot' }
+      { ...base, id: "D03", format: "svg", source: svg("Screens flow (1/2)") },
+      { ...base, id: "D03-2", format: "svg", source: svg("Screens flow (2/2)") }
     ]
     const section = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", diagramPng: (id) => `png-${id}` }))
+    const note = { type: "paragraph", runs: [{ text: "Rectangles are screens, ovals are pop-ups and a framed box lists the tabs of a screen; arrows show navigation. Blue screens are used by every kind of user." }] }
     expect(section.blocks).toEqual([
-      { type: "image", png: "png-D03-1", caption: "Screens flow for Founder" },
-      { type: "image", png: "png-D03-2", caption: "Screens flow for Guest" }
+      { type: "image", png: "png-D03", caption: "Screens flow (1/2)" },
+      note,
+      { type: "image", png: "png-D03-2", caption: "Screens flow (2/2)" },
+      note
     ])
-    // Hình không có title (sơ đồ chung trước khi tách actor) giữ chú thích cũ
-    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks).toEqual([{ type: "image", png: "png-d03", caption: "Screens Flow Diagram" }])
+    const vi = renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", language: "vi", diagramPng: (id) => `png-${id}` })).blocks[1]
+    expect(vi).toMatchObject({ type: "paragraph", runs: [{ text: expect.stringContaining("hình ô-van là pop-up") }] })
+    // Hình không có title giữ chú thích mặc định
+    expect(renderSection(spine(), "fixed:3.1.1", ctx()).blocks[0]).toEqual({ type: "image", png: "png-d03", caption: "Screens Flow Diagram" })
   })
 
   it("fixed:2.2.2 — bảng 6 cột, in tên actor và tên use case", () => {
@@ -258,6 +288,98 @@ describe("renderSection — fixed sections", () => {
     const section = renderSection(spine(), "fixed:3.1.5", ctx({ number: "3.1.5" }))
     expect(section.blocks[0]).toEqual({ type: "image", png: "png-d04", caption: "Entity Relationship Diagram" })
     expect(section.blocks[1]).toMatchObject({ type: "table" })
+  })
+
+  it("fixed:3.1.5 — state machine của entity có vòng đời đứng sau bảng entity: hình + chú thích từ <title> + đoạn mô tả (EN / VI)", () => {
+    const base = spine()
+    const svg = (entity: string) => `<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>State Machine Diagram — ${entity}</title></svg>`
+    const first = base.entities[0]
+    first.states = [
+      { id: "ST1", name: "Pending", initial: true },
+      { id: "ST2", name: "Approved" },
+      { id: "ST3", name: "Closed", final: true }
+    ]
+    first.transitions = [
+      { from: "ST1", to: "ST2", event: "approve" },
+      { from: "ST2", to: "ST3", event: "close" },
+      { from: "ST2", to: "ST2", event: "touch" }
+    ]
+    const withMachine: Spine = {
+      ...base,
+      diagrams: [
+        ...base.diagrams,
+        { id: "D20", kind: "state_machine", section: "fixed:3.1.5", owner_kind: "entity", owner_id: first.id, format: "svg", source: svg(first.name), render_status: "ok", source_hash: "h20", rendered_at: "2026-09-01T00:00:00.000Z" },
+        { id: "D21", kind: "state_machine", section: "fixed:3.1.5", owner_kind: "entity", owner_id: base.entities[1].id, format: "svg", source: svg("Broken"), render_status: "error", source_hash: "h21", rendered_at: "2026-09-01T00:00:00.000Z" }
+      ]
+    }
+    const png = (id: string) => `png-${id}`
+    const blocks = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", diagramPng: png })).blocks
+    expect(blocks[0]).toMatchObject({ type: "image", caption: "Entity Relationship Diagram" })
+    expect(blocks[1]).toMatchObject({ type: "table" })
+    expect(blocks[2]).toEqual({ type: "image", png: "png-D20", caption: `State Machine Diagram — ${first.name}` })
+    expect(blocks[3]).toMatchObject({ type: "paragraph" })
+    expect(JSON.stringify(blocks[3])).toContain(`starts in \\"Pending\\" and ends in \\"Closed\\"; it has 3 states and 3 transitions`)
+    // hình lỗi giữ chỗ bằng marker `diagram-error:<id>`, chú thích nói chưa vẽ được
+    expect(blocks[4]).toEqual({ type: "image", png: "diagram-error:D21", caption: "State Machine Diagram — Broken — diagram could not be drawn yet" })
+    expect(blocks).toHaveLength(6)
+    const vi = renderSection(withMachine, "fixed:3.1.5", ctx({ number: "3.1.5", language: "vi", diagramPng: png })).blocks
+    expect(JSON.stringify(vi[3])).toContain("bắt đầu ở trạng thái")
+  })
+
+  it("function:<id> — sơ đồ tuần tự của function đứng cuối mục: hình + chú thích theo ngôn ngữ + đoạn mô tả; hình lỗi giữ chỗ", () => {
+    const base = spine()
+    base.actors.push({ id: "A77", name: "Reviewer", kind: "human" } as Spine["actors"][number])
+    const fn = base.functions.find((f) => f.id === "FN01")!
+    fn.interactions = [
+      { from: "A77", to: "system", message: "Submit review", kind: "request", flow: "normal" },
+      { from: "system", to: "A77", message: "Show error", kind: "response", flow: "abnormal", guard: "review is empty" },
+      { from: "system", to: "A77", message: "Show saved", kind: "response", flow: "normal" }
+    ]
+    const entry = (id: string, owner: string, status: "ok" | "error") =>
+      ({ id, kind: "sequence", section: `function:${owner}`, owner_kind: "function", owner_id: owner, format: "puml", source: "@startuml\n@enduml", render_status: status, source_hash: "h", rendered_at: "2026-09-01T00:00:00.000Z" }) as Spine["diagrams"][number]
+    const withDiagram: Spine = { ...base, diagrams: [...base.diagrams, entry("D30", "FN01", "ok"), entry("D31", "FN02", "error")] }
+    const png = (id: string) => `png-${id}`
+    for (const layout of [undefined, "fpt" as const]) {
+      const blocks = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", functionLayout: layout, diagramPng: png })).blocks
+      const at = blocks.findIndex((b) => b.type === "image" && b.png === "png-D30")
+      expect(blocks[at]).toEqual({ type: "image", png: "png-D30", caption: `System Sequence Diagram — ${fn.name}` })
+      expect(JSON.stringify(blocks[at + 1])).toContain("The diagram shows 3 messages between Reviewer and the system")
+      expect(JSON.stringify(blocks[at + 1])).toContain("1 messages of the error branches")
+      expect(at + 2).toBe(blocks.length)
+    }
+    const vi = renderSection(withDiagram, "function:FN01", ctx({ number: "3.2.1", language: "vi", diagramPng: png })).blocks
+    expect(vi.some((b) => b.type === "image" && b.caption === `Sơ đồ tuần tự hệ thống — ${fn.name}`)).toBe(true)
+    expect(JSON.stringify(vi[vi.length - 1])).toContain("Sơ đồ mô tả 3 message giữa Reviewer và hệ thống")
+    const failed = renderSection(withDiagram, "function:FN02", ctx({ number: "3.3.1", diagramPng: png })).blocks.filter((b) => b.type === "image")
+    expect(failed).toEqual([{ type: "image", png: "diagram-error:D31", caption: expect.stringMatching(/ — diagram could not be drawn yet$/) }])
+  })
+
+  it("feature:<id> — class diagram của feature đứng đầu mục (cả mẫu FPT), chú thích lấy từ <title>", () => {
+    const base = spine()
+    const svg = '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><title>Class Diagram — Authentication</title></svg>'
+    const withClass: Spine = {
+      ...base,
+      diagrams: [
+        ...base.diagrams,
+        { id: "D06", kind: "class", section: "feature:F1", owner_kind: "feature", owner_id: "F1", format: "svg", source: svg, render_status: "ok", source_hash: "h6", rendered_at: "2026-09-01T00:00:00.000Z" },
+        { id: "D07", kind: "class", section: "feature:F2", owner_kind: "feature", owner_id: "F2", format: "svg", source: svg, render_status: "error", source_hash: "h7", rendered_at: "2026-09-01T00:00:00.000Z" }
+      ]
+    }
+    const png = (id: string) => `png-${id}`
+    const fpt = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", diagramPng: png }))
+    expect(fpt.blocks).toEqual([{ type: "image", png: "png-D06", caption: "Class Diagram — Authentication" }])
+    const mode1 = renderSection(withClass, "feature:F1", ctx({ number: "3.2", diagramPng: png }))
+    expect(mode1.blocks[0]).toMatchObject({ type: "image", png: "png-D06" })
+    expect(mode1.blocks.length).toBeGreaterThan(1)
+    // hình lỗi giữ chỗ (không tải PNG cũ theo id); feature khác không lấy hình của feature này
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", diagramPng: png })).blocks).toEqual([
+      { type: "image", png: "diagram-error:D07", caption: "Class Diagram — Authentication — diagram could not be drawn yet" }
+    ])
+    expect(renderSection(withClass, "feature:F2", ctx({ number: "3.3", functionLayout: "fpt", language: "vi", diagramPng: png })).blocks).toEqual([
+      { type: "image", png: "diagram-error:D07", caption: "Sơ đồ lớp — Authentication — sơ đồ chưa vẽ được" }
+    ])
+    const vi = renderSection(withClass, "feature:F1", ctx({ number: "3.2", functionLayout: "fpt", language: "vi", diagramPng: png }))
+    expect(vi.blocks[0]).toMatchObject({ caption: "Sơ đồ lớp — Authentication" })
   })
 
   it("fixed:4.2.2 — bảng nfr có metric/threshold", () => {
@@ -363,7 +485,7 @@ describe("renderSection — feature/function", () => {
     s.roles.push({ id: "R2", name: "Buyer role", actor_id: "A02" }, { id: "R3", name: "Gateway role", actor_id: "A05" })
     s.permissions.push({ id: "P2", screen_id: "S03", role_id: "R2", action: "view" }, { id: "P3", screen_id: "S03", role_id: "R3", action: "view" })
     s.screens.push({ id: "S03", feature_id: "F2", name: "Settings", description: "", flow_to: [], is_popup: true, tabs: [], primary_function_id: "FN03", queue_order: 3, detail_status: "signed_off" })
-    s.screens[1].flow_to = ["S03"]
+    s.screens[1].flow_to = [{ to: "S03" }]
     s.diagrams.push({
       id: "D06",
       kind: "screen_layout",
@@ -734,7 +856,6 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     s.use_cases[0].actor_ids = ["A01", "A03"]
     s.functions[0].validations.push({ id: "FN01-V2", kind: "business", statement: "Passwords are stored hashed." })
     s.diagrams = s.diagrams.map((d) => {
-      if (d.id === "D03") return { ...d, format: "puml", source: '@startdot\ndigraph screens_flow {\n  label="Screens flow for Founder";\n}\n@enddot' }
       if (d.id === "D05") return { ...d, format: "puml", source: ["@startsalt", "{", "  Login", "  Email", '  "john@example.com"', "  [ Log in ]", "}", "@endsalt", ""].join("\n") }
       return d
     })
@@ -800,18 +921,6 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
     const blind = subItemValues(renderSection(translatedView(s), "function:FN01", fpt({ language: "vi" })).blocks)
     expect(blind).toMatchObject({ "Xử lý dữ liệu": "Không có", "Dữ liệu": "Không có", "Tác nhân / Vai trò": "Nhà sáng lập" })
     expect(blind["Giao diện"]).toContain('chữ "Login"')
-  })
-
-  it("chú thích sơ đồ luồng màn: tên actor trong hình (tiếng Anh) đổi sang tên actor đã dịch cùng id", () => {
-    const captions = (s: Spine, overrides: Partial<SectionRenderContext> = {}) =>
-      renderSection(s, "fixed:3.1.1", ctx({ number: "3.1.1", functionLayout: "fpt", ...overrides })).blocks.map((b) => (b.type === "image" ? b.caption : null))
-    const s = canonical()
-    expect(captions(s)).toEqual(["Screens flow for Founder"])
-    expect(captions(translatedView(s), { language: "vi", canonical: s })).toEqual(["Luồng màn hình của Nhà sáng lập"])
-    // Hình vẽ trước khi đổi tên actor (không khớp actor gốc nào) ⇒ giữ tên trong hình, chỉ dịch phần đầu
-    const renamed = canonical()
-    renamed.actors[0].name = "Owner"
-    expect(captions(translatedView(renamed), { language: "vi", canonical: renamed })).toEqual(["Luồng màn hình của Founder"])
   })
 
   it("fixture 19 màn: mọi function — Xử lý dữ liệu / Dữ liệu / Tác nhân cùng dòng như bản tiếng Anh", () => {

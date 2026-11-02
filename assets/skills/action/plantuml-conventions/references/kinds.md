@@ -2,132 +2,77 @@
 
 ## `context` — §1 System Context
 
-Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`. Level-0 data flow (context diagram), black and white with a light grey system circle: ONE process — the system as a true circle in the centre — and external entities as plain boxes ringed around it by role (`human` left/`west`, `system` right/`east`, `time` below/`south`; `north` only on overflow). Every `flows_in` item (actor → system) and every `flows_out` item (system → actor) is its own arrow with one data-noun label; one-way actors draw only the arrows that exist — never pair lists by index or invent a counterpart — but the diagram as a whole always has both directions. Every arrow carries data: more than 3 items in a direction ⇒ first 2 + a third arrow joining the rest with `, ` (never `+ N more`); missing flows get a fallback label by kind. Graphviz DOT with `nop2` keeps the geometry computed in `context-layout.ts`: a straight leg from the box holding the label, then one convex cubic into the circle; positions (`pos`, `lp`) in points, dimensions in inches. See `renderer/context` for the full rules. Generated example (the time actor has no flows and falls back to `scheduled trigger`):
+Source fields: `project.system_name ?? project.name` · `actors[].name/.kind/.flows_in/.flows_out`. Engine `svg` (no PlantUML source): level-0 data flow in Yourdon/DeMarco notation — ONE circle for the whole system, one rectangle per external actor (fill `#7ACFF5`, role name inside), people on the left half and external systems / scheduler on the right half. Every `flows_in` item (actor → system) and every `flows_out` item (system → actor) is its own straight arrow with a solid head and one Title Case data-noun label along it on white; no limit, no merging, no unlabelled arrows, no data stores, no flows between entities, no title. One-way actors draw only the arrows that exist — never pair lists by index or invent a counterpart — but the diagram as a whole always has both directions; missing flows get a fallback label by kind. See `renderer/context` for the full rules.
 
-```plantuml
-@startdot
-digraph Context {
-  graph [layout=nop2, overlap=true, splines=true, bgcolor="white", pad=0.15, outputorder=edgesfirst];
-  node [fontname="sans-serif", fontsize=14, fontcolor="black", fixedsize=true, pin=true, style=filled, color="black", fillcolor="white", penwidth=1.2];
-  edge [fontname="sans-serif", fontsize=12, color="black", fontcolor="black", penwidth=1.2, arrowsize=0.7, headclip=false, tailclip=false];
-  SYSTEM_ [shape=circle, pos="0,0!", width=2.777778, height=2.777778, label="FlintFlow", fontsize=18, fillcolor="lightgray"];
-  A01 [shape=box, pos="-334.544958,0.000000!", width=1.444444, height=1.111111, label="Founder", sector="west"];
-  A02 [shape=box, pos="356.550000,0.000000!", width=2.031944, height=0.694444, label="Email Service", sector="east"];
-  A03 [shape=box, pos="0.000000,-216.000000!", width=2.369444, height=0.611111, label="Scheduler", sector="south"];
-  A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-282.544958,15.000000!"];
-  SYSTEM_A01_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.352241,11.363636!"];
-  SYSTEM_A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-99.352241,-11.363636!"];
-  A01_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="-282.544958,-15.000000!"];
-  SYSTEM_A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="100.000000,0.000000!"];
-  A02_OUT_0 [shape=point, style=invis, width=0, height=0, label="", pos="283.400000,0.000000!"];
-  A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-194.000000!"];
-  SYSTEM_A03_IN_0 [shape=point, style=invis, width=0, height=0, label="", pos="0.000000,-100.000000!"];
-  A01_IN_0 -> SYSTEM_A01_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>brief answers</TD></TR></TABLE>>, actor_id="A01", flow="in", flow_index=0, pos="e,-99.352241,11.363636 -282.544958,15.000000 -232.078291,15.000000 -181.611625,15.000000 -131.144958,15.000000 -131.144958,15.000000 -120.973156,13.836577 -107.300420,12.272727", lp="-206.844958,15.000000"];
-  SYSTEM_A01_OUT_0 -> A01_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>draft section</TD></TR></TABLE>>, actor_id="A01", flow="out", flow_index=0, pos="e,-282.544958,-15.000000 -99.352241,-11.363636 -116.838235,-13.363636 -131.144958,-15.000000 -131.144958,-15.000000 -178.944958,-15.000000 -226.744958,-15.000000 -274.544958,-15.000000", lp="-206.844958,-15.000000"];
-  SYSTEM_A02_OUT_0 -> A02_OUT_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>email request</TD></TR></TABLE>>, actor_id="A02", flow="out", flow_index=0, pos="e,283.400000,0.000000 100.000000,0.000000 117.600000,0.000000 132.000000,0.000000 132.000000,0.000000 179.800000,0.000000 227.600000,0.000000 275.400000,0.000000", lp="207.700000,0.000000"];
-  A03_IN_0 -> SYSTEM_A03_IN_0 [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3" BGCOLOR="white"><TR><TD>scheduled trigger</TD></TR></TABLE>>, actor_id="A03", flow="in", flow_index=0, pos="e,0.000000,-100.000000 0.000000,-194.000000 0.000000,-173.333333 0.000000,-152.666667 0.000000,-132.000000 0.000000,-132.000000 0.000000,-121.761880 0.000000,-108.000000", lp="0.000000,-163.000000"];
-}
-@enddot
-```
+## `usecase` — §2.2.1 (+ actor hierarchy §2.1)
 
-## `usecase` — §2.2.1
+Source fields: `actors[].name/.kind/.parent_id` · `use_cases[].name/.actor_ids/.function_ids/.includes/.extends` · `functions[].feature_id` · `features[].name/.order`.
 
-Source fields: `actors[].name/.kind/.parent_id` · `use_cases[].name/.actor_ids/.includes/.extends`.
+Engine `svg` (no PlantUML source): UML 2.5.1 built in code, fill `#7ACFF5`.
 
-```plantuml
-@startuml
-skinparam monochrome true
-left to right direction
-actor "Business Analyst" as A01
-actor "Payment Gateway" as A05 <<system>>
-rectangle "FlintFlow" {
-  usecase "Create Project" as UC01
-  usecase "Export SRS" as UC07
-  usecase "Pay Subscription" as UC09
-}
-A01 --> UC01
-A01 --> UC07
-UC09 --> A05
-UC07 .> UC01 : <<include>>
-@enduml
-```
-
-- `includes[]` → `base .> included : <<include>>`
-- `extends[]` → `extension .> base : <<extend>>`
-- `kind = time` actors: `actor "Scheduler" as A08 <<time>>`
-- One diagram per human actor (`title Use Cases — <actor>`): in a diagram each use case is associated with
-  only that human actor (system/time actors are secondary, on the right). A use case several roles share is
-  repeated in each role's diagram, never drawn with two human actors on it.
-- `actors[].parent_id` (human → human) → `User <|-- Customer` (= `Customer --|> User`). Common use cases
-  (Log In, Register Account — done by EVERY specialized actor) go in the `User` part; each specialized
-  actor gets its own part with its role-specific use cases and the generalization arrow. A use case shared
-  by only some roles is not lifted to `User`: it is repeated in each of those roles' diagrams. Never between a `system`/`time` or unrelated actor.
+- One system boundary named `project.system_name ?? project.name`; every use case an ellipse of the same size in one column.
+- Actor = stick figure, human on the left, `system`/`time` on the right (`<<system>>` / `<<time>>`), outside the boundary; abstract actors (with children) in italic.
+- Association = solid straight line, no arrowhead. `includes[]` → `base ..> included : <<include>>`; `extends[]` → `extension ..> base : <<extend>>` — dashed, open arrowhead, vertical between adjacent ellipses.
+- One diagram per feature (`function_ids` → `functions[].feature_id`, several ⇒ the first function's feature); no feature ⇒ grouped by main actor after the features. Over 20 use cases ⇒ split equally in the same feature; `owner_kind` / `owner_id` stay `null`, the first part keeps the original id.
+- Actors as modelled: general actors stay general, never expanded to leaf actors. A human actor skips the edge to a use case that is included / extending in the same diagram; `system`/`time` actors keep every edge.
+- `actors[].parent_id` (human → human) ⇒ one extra diagram (`section = fixed:2.1`): actor hierarchy, child below parent, solid line, hollow triangle at the parent. Use cases have no parent field ⇒ no use case generalization.
+- Layout rules and algorithm: `renderer/usecase/SKILL.md`, `docs/technical/usecase-diagram-layout.md`.
 
 ## `screen_flow` — §3.1.1
 
-Source fields: `screens[].name/.flow_to/.is_popup/.tabs` + the human actor each screen serves.
+Source fields: `screens[].name/.flow_to[].to/.is_popup/.tabs/.feature_id/.queue_order` · `features[].order` · the actors of each screen (screen → `primary_function_id` → function → use case → `actor_ids`; `actors[].parent_id`).
 
-**Graphviz DOT, not a state diagram**: the flow starts at a diamond with the actor name inside, and a
-PlantUML state diagram cannot label a diamond. One part per human actor that uses the UI (graph label
-`Screens flow for <actor>`, also the image caption), holding only that actor's screens and the edges between
-them. No part for unassigned screens: a public screen (granted only to a role with no actor, e.g. Guest on
-Login) is drawn in every human actor's part; a public landing page and Register are entries beside Login
-(Login stays an entry despite `Register → Login`); any other
-screen no human actor uses is not drawn and raises `orphan_screen`. Before any screen ↔ actor link exists: one unlabelled diagram, black-dot start. Arrows are
-one-way: of a pair pointing at each other only the forward edge (away from the entry) is drawn.
+Engine `svg` (no PlantUML source): the notation of the FPT SRS template §3.1.1 sample, built in code.
 
-```
-@startdot
-digraph screens_flow {
-  graph [fontname="DejaVu Sans", fontsize=13, labelloc=t, compound=true, nodesep=0.4, ranksep=0.5];
-  node [fontname="DejaVu Sans", fontsize=11, shape=box, color="#000000"];
-  edge [arrowsize=0.8];
-  label="Screens flow for Founder";
-  START [label="Founder", shape=diamond, style=solid];
-  S1 [label="Login"];
-  S2 [label="Project Dashboard"];
-  subgraph cluster_S3 {
-    label="Project Workspace"; style=solid;
-    S3_T1 [label="Chat"];
-    S3_T2 [label="Document"];
-  }
-  S4 [label="Confirm Delete", shape=ellipse];
-  START -> S1;
-  S1 -> S2;
-  S2 -> S3_T1 [lhead=cluster_S3];
-  S2 -> S4;
-}
-@enddot
-```
-
-- Screens with `tabs[]` → `subgraph cluster_<screen>`, one node per tab (`<screen>_T<n>`); edges attach to
-  `_T1` with `lhead` / `ltail`.
-- Screen = rectangle (`shape=box`); `is_popup = true` → oval (`shape=ellipse`), name only (no `(pop-up)` text). Shapes are not filled (PlantUML drops the border of a
-  `rounded,filled` node). Font `DejaVu Sans` is required — the default dot font is missing in the image.
+- One diagram for the whole system; over 40 screens (or failing the layout check) ⇒ split by whole features, `Screens flow (i/n)`. `owner_kind` / `owner_id` stay `null`, the first part keeps the original id.
+- Screen = square-cornered rectangle; pop-up = oval; screen with tabs = frame with one italic box per tab. Fill `#7ACFF5` for a screen every leaf human actor uses (template yellow), white otherwise. No swimlanes, no edge labels, no decision diamonds, no start / end nodes.
+- Navigation = solid orthogonal line, small filled triangle arrowhead, one per forward `flow_to` edge (of a pair pointing at each other only the edge away from the entry; return navigation implicit). Several targets in the next column share one trunk. Every screen is drawn; no actor ⇒ flag `orphan_screen`. Full rules: `renderer/screen-flow/SKILL.md`.
 
 ## `erd` — §3.1.5
 
-Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional`. Attributes are **not** drawn (not in source fields).
-Chen notation: entity = rectangle, each relation = a diamond holding a lowercase verb (`relation_verbs`, `has`
-when missing). Braces after `entity` / `relationship` are required even when empty.
+Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional/.attributes` + the project's notation (`Project.erdNotation`, outside the Spine). Attributes: `key` ⇒ PK, `reference` ⇒ FK in Crow's foot / IDEF1X boxes, ovals in Chen (key underlined).
+Engine `svg` (no PlantUML source): built in code, fill `#7ACFF5`, one shared grid placer + right-angle router for all three notations (`erd.renderer.ts`, `erd-layout.ts`, `orthogonal-*.ts`). One notation per document: `chen` (default) · `crowsfoot` · `idef1x`. Changing it redraws the diagram (hash includes the notation).
 
-```plantuml
-@startchen
-skinparam monochrome true
-skinparam ranksep 20
-skinparam linetype ortho
-entity "User" as E1 {
-}
-entity "Project" as E2 {
-}
-relationship "owns" as R_E1_E2 {
-}
-E1 -1- R_E1_E2
-R_E1_E2 -N- E2
-@endchen
-```
+Data → diagram: entity = box with its singular-noun name; relation = parent → child, labelled by `relation_verbs` (`has` when missing). Parent end `1`, or `0..1` when the child is in `relation_optional`; child end `N` (many, default) or `1` per `relation_cardinality`, minimum drawn as 0.
 
-Cardinality labels on the lines: `-1-` one · `-N-` many · `-(0,1)-` optional one. The parent side is `1`, or `(0,1)` when the child is in `relation_optional` (never `-0..1-`: a syntax error in `@startchen`); the child side is `relation_cardinality[<child>]`, `N` when missing.
+| | Relation | Parent end | Child end |
+| --- | --- | --- | --- |
+| Chen | diamond holding the verb, entity — diamond — entity | label `1`, single line | label `N` / `1`; double line = total participation (child not optional) |
+| Crow's foot | one line, verb on the line | `\|\|` one · `\|o` zero or one | crow's foot + ring `o{` · bar + ring `\|o` for one |
+| IDEF1X | dashed line (non-identifying), verb on the line; entity rounded only when dependent | hollow diamond when optional | solid dot; `Z` for one-to-one |
+
+Lines: straight when clear, otherwise right-angle bends (L / Z / U); never over text or shapes, never overlapping; right-angle crossings only. More than 25 entities ⇒ split (connected components packed, a larger one cut breadth-first, relations across a cut not drawn), title `Entity Relationship Diagram (i/n)`, first part keeps the diagram id. Samples: `docs/diagram_guideline/erd/`.
+
+## `class` — §3.x (head of each feature section)
+
+Source fields: `entities[].name/.attributes/.feature_ids/.relations/.relation_verbs/.relation_cardinality/.relation_optional` · `features[].name/.order`. Domain (analysis) level, IEEE 830 Annex A.3 (organised by object); the design-level class diagram of Report 4 (IEEE 1016) is a different artifact.
+Engine `svg` (no PlantUML source): UML 2.5.1 class built in code, fill `#7ACFF5`, same grid placer + right-angle router as the ERD (`class.renderer.ts`, `class-layout.ts`).
+
+- One diagram per feature (`owner_kind = feature`, `owner_id` = feature id, `section = feature:<id>`); an entity of several features appears in each. Only relations between classes of the same diagram are drawn. Entity without `feature_ids` ⇒ no class diagram. Over 25 classes ⇒ split (`Class Diagram — <feature> (i/n)`).
+- Class box = 2 compartments: bold name, attributes. No operations, no data types, no stereotype. Attribute `name`, plus `{id}` (key), `{ref}` (reference), `[0..1]` (not required).
+- Relation = association (solid line, no arrowhead): multiplicity at both ends (parent `1` or `0..1` from `relation_optional`; child `*` for `N`, `0..1` for `1`) and the verb as association name. Aggregation (hollow diamond at the whole), composition (filled diamond), generalization (hollow triangle at the parent) are drawn when the source says so; the Spine has no such data yet, so none is generated.
+- Layout as ERD: straight when clear, right-angle bends otherwise, no line over text or shapes. Full rules: `renderer/class/SKILL.md`; samples `docs/diagram_guideline/class/`.
+
+## `state_machine` — §3.1.5 (next to the entity description)
+
+Source fields: `entities[].name/.states[].id/.name/.initial/.final` · `entities[].transitions[].from/.to/.event/.guard/.action`. Lifecycle of one entity, IEEE 830 Annex A.1 (organised by mode); drawn only for an entity that has states.
+Engine `svg` (no PlantUML source): UML 2.5 State Machine built in code, fill `#7ACFF5` (`state-machine.renderer.ts`, `state-machine-layout.ts`).
+
+- One diagram per entity that has `states[]` (`owner_kind = entity`, `owner_id` = entity id, `section = fixed:3.1.5`); title `State Machine Diagram — <entity>`. Not split.
+- Initial = solid dot with an open arrow to the `initial` state; final = bullseye (ring + solid core) with an open arrow from each `final` state; state = rounded rectangle, bold name inside. State names are adjectives or participles (Pending, Approved), never actions.
+- Transition = one straight solid line with an open arrowhead, label `event [guard] / action` (guard / action omitted when empty). Several transitions between the same two states (either direction) are parallel segments. A self-transition (`from = to`) is an internal transition: its label is a line in a lower compartment of the state.
+- Layout: states by BFS layer from the initial state, several candidate arrangements (and a circle) tried; the first with no line over a shape or text and the fewest crossings wins. Full rules: `renderer/state-machine/SKILL.md`; samples `docs/diagram_guideline/state-machine/`.
+
+## `sequence` — §3.x.y (function detail)
+
+Source fields: `functions[<owner>].name/.screen_id/.interactions[].from/.to/.message/.kind/.flow/.guard` · `actors[].name/.kind` of the ends of each message. System Sequence Diagram (black box), IEEE 830 Annex A.4 (stimulus / response sequence); the design-level sequence (Controller → Service → Repository) of Report 4 is a different artifact.
+Engine `puml` (PlantUML server): UML 2.5 Sequence from `sequence.renderer.ts`, Visual Paradigm theme inlined, fill `#7ACFF5`.
+
+- One diagram per function that needs one (`owner_kind = function`, `owner_id` = function id, `section = function:<id>`). It needs one when it has at least 2 `interactions` and (a non-human actor takes part, or a message is `abnormal` or has a `guard`, or the function has no screen). Otherwise no diagram.
+- Lifelines: human actors (stick figure), `:System`, external `system` / `time` actors; exact actor names, generalization kept, nothing else (no Frontend / Backend / Repository).
+- Message: request with a response back to the sender ⇒ synchronous solid arrow with a filled triangle head (`->` + `skinparam style strictuml`) + activation bar; request without ⇒ asynchronous open arrow (`->>`); response ⇒ dashed open arrow (`-->>`). Labels numbered `1:`, `1.1:`, `1.2:`, `2:` (stimulus = request from an actor).
+- `abnormal` ⇒ `alt <guard>` / `else <guard>`, the normal flow after it is the last `else`; `normal` with `guard` ⇒ `opt <guard>`; no `loop` (no data yet).
+- Messages carry data in plain words (`Submit email and password`), not method calls; the Spine writes them (S-5.4 `function-detail`). Samples: `docs/diagram_guideline/sequence/`; full rules: `renderer/sequence/SKILL.md`.
 
 ## `screen_layout` — §3.x.y (core screens only, Phases §7.2)
 

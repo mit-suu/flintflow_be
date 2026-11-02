@@ -247,7 +247,7 @@ describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký basel
     expect(fn.abnormal).toHaveLength(1)
     expect(fn.validations[0].id).toBe(`${fn.id}-V1`)
     expect(screen).toMatchObject({ detail_status: "signed_off", primary_function_id: fn.id, feature_id: "F3" })
-    expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).toContain(screen.id)
     expect(spine.permissions.some((p) => p.screen_id === screen.id && p.role_id === "R2")).toBe(true)
     expect(spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && f.rule_id !== "diagram_stale")).toEqual([])
 
@@ -299,7 +299,7 @@ describe("FLF-318 — chuyển dự án tạo SRS sang mode 1 khi Lead ký basel
     expect(spine.functions.some((f) => f.id === fn.id)).toBe(false)
     expect(spine.screens.some((s) => s.id === fn.screen_id)).toBe(false)
     expect(spine.permissions.some((p) => p.screen_id === fn.screen_id)).toBe(false)
-    expect(spine.screens.find((s) => s.id === "S07")?.flow_to).not.toContain(fn.screen_id)
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).not.toContain(fn.screen_id)
     expect(spine.flags.filter((f) => f.level === "red" && f.resolved_at === null && f.rule_id !== "diagram_stale")).toEqual([])
   })
 

@@ -180,6 +180,14 @@ describe("writeDocx — biến thể", () => {
     }
   })
 
+  it("sơ đồ vẽ lỗi (marker diagram-error:<id>) ⇒ nhúng ảnh placeholder kèm chú thích, không ném lỗi", async () => {
+    const doc = structuredClone(sample)
+    doc.sections = [{ id: "fixed:1", number: "1", heading: "Failed", level: 1, blocks: [{ type: "image", png: "diagram-error:D07", caption: "Class Diagram — diagram could not be drawn yet" }] }]
+    const docx = await writeDocx(doc)
+    expect([...readZipEntries(docx).keys()].some((name) => name.startsWith("word/media/"))).toBe(true)
+    expect(readZipText(docx, "word/document.xml")).toContain("Class Diagram — diagram could not be drawn yet")
+  })
+
   it("ảnh không phải PNG ném RENDER_IMAGE_INVALID", async () => {
     const doc = structuredClone(sample)
     doc.sections = [{ id: "fixed:1", number: "1", heading: "Bad", level: 1, blocks: [{ type: "image", png: "bm90IGEgcG5n" }] }]

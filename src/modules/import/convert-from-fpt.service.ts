@@ -145,6 +145,10 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
     throw err
   }
 
+  // FLF-278: dự án chế độ 3 đi Luồng 2 (`flow2.service`) còn lần import mẫu ở `drafting` ⇒ khép lại cùng bản 1.0.
+  // Profile của mẫu (có `layout`) đã có từ lúc import nên bản 1.0 in theo mẫu, không tạo profile FPT tối thiểu.
+  await ImportedDocument.updateMany({ projectId, status: "drafting" }, { $set: { status: "delivered" } })
+
   const result = { doc_version: CONVERTED_DOC_VERSION, baseline_id: entry.id }
   if (opts.quiet) return result
   scheduleEmbeddingSync(projectId)

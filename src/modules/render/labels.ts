@@ -64,8 +64,10 @@ export const VI_LABELS: Readonly<Record<string, string>> = {
   "Figure — System Context Diagram": "Hình — Sơ đồ ngữ cảnh hệ thống",
   "Use Case Diagram": "Sơ đồ use case",
   "Screens Flow Diagram": "Sơ đồ luồng màn hình",
-  "Screens flow for": "Luồng màn hình của",
+  "Screens flow —": "Luồng màn hình —",
   "Entity Relationship Diagram": "Sơ đồ quan hệ thực thể",
+  "Class Diagram": "Sơ đồ lớp",
+  "State Machine Diagram": "Sơ đồ trạng thái",
   "Screen Layout": "Bố cục màn hình"
 }
 
@@ -284,14 +286,16 @@ export const ASSEMBLE_TEXT = {
     systemInCharge: "System",
     removedSection: "(removed section)",
     imagePending: (diagramId: string) => `image pending: diagram ${diagramId} has not been rendered yet`,
-    mediaNotEmbedded: "original image could not be embedded (unsupported format)"
+    mediaNotEmbedded: "original image could not be embedded (unsupported format)",
+    diagramNotDrawn: "diagram could not be drawn yet"
   },
   vi: {
     unassignedFunctions: "Chức năng chưa thuộc tính năng nào",
     systemInCharge: "Hệ thống",
     removedSection: "(mục đã xoá)",
     imagePending: (diagramId: string) => `ảnh đang chờ: sơ đồ ${diagramId} chưa được render`,
-    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)"
+    mediaNotEmbedded: "không nhúng được ảnh gốc (định dạng không hỗ trợ)",
+    diagramNotDrawn: "sơ đồ chưa vẽ được"
   }
 } as const
 
@@ -451,3 +455,53 @@ export const writerOptionsFor = (
   convertedFrom?: string | null
 ): { language?: DocumentLanguage; flagLanguage: DocumentLanguage } =>
   mode === "import" && convertedFrom !== "fpt" ? { flagLanguage: "vi" } : { language: documentLanguage, flagLanguage: documentLanguage }
+
+// ─── FLF-278 bước 09: phần nhỏ (slot) của mẫu khách ────────────────
+
+/** Nhãn hệ thống trong phần nhỏ (`customer-template` slot) theo ngôn ngữ tài liệu; dữ liệu Spine in nguyên. */
+export const SLOT_TEXT = {
+  en: {
+    inScope: "In Scope",
+    outOfScope: "Out of Scope",
+    primary: "primary",
+    assumption: "Assumption",
+    status: "Status",
+    assumptionStatus: { confirmed: "Confirmed", unconfirmed: "Unconfirmed", rejected: "Rejected", recorded: "Recorded" },
+    kind: "Kind",
+    statement: "Statement",
+    category: "Category",
+    feature: "Feature",
+    functions: "Functions",
+    formFactor: {
+      web_app: "Web application",
+      mobile_app: "Mobile application",
+      desktop_app: "Desktop application",
+      api_service: "API / back-end service",
+      cli: "Command-line tool",
+      embedded: "Embedded system"
+    } as Readonly<Record<string, string>>
+  },
+  vi: {
+    inScope: "Trong phạm vi",
+    outOfScope: "Ngoài phạm vi",
+    primary: "chính",
+    assumption: "Giả định",
+    status: "Trạng thái",
+    assumptionStatus: { confirmed: "Đã xác nhận", unconfirmed: "Chưa xác nhận", rejected: "Đã loại", recorded: "Đã ghi nhận" },
+    kind: "Loại",
+    statement: "Nội dung",
+    category: "Nhóm",
+    feature: "Tính năng",
+    functions: "Chức năng",
+    formFactor: {
+      web_app: "Ứng dụng web",
+      mobile_app: "Ứng dụng di động",
+      desktop_app: "Ứng dụng máy tính",
+      api_service: "Dịch vụ API / back-end",
+      cli: "Công cụ dòng lệnh",
+      embedded: "Hệ thống nhúng"
+    } as Readonly<Record<string, string>>
+  }
+} as const
+
+export const slotTextFor = (language: string | undefined) => SLOT_TEXT[isVietnamese(language) ? "vi" : "en"]

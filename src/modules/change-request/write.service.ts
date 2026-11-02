@@ -22,7 +22,7 @@ import { latestDocVersion } from "../doc-version/doc-version.service.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
 import { nextMinor } from "../doc-version/versioning.js"
 import { stripRecord } from "../import/check.service.js"
-import { MODE1_RULE_PROFILE } from "../import/mode1-rule-profile.js"
+import { mode1RuleProfileFor } from "../import/mode1-guard.js"
 import { Project } from "../project/project.model.js"
 import { assemble } from "../render/assemble.service.js"
 import * as flagsService from "../spine/flags.service.js"
@@ -103,7 +103,7 @@ export const writeApproved = async (cr: IChangeRequest, userId: string, approved
 
   try {
     // Mode 1 luôn ở sau baseline v0 ⇒ tính cả luật S-9: CR xác nhận giả định thì cờ `unconfirmed_assumption` đóng ngay
-    await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: MODE1_RULE_PROFILE, atBaseline: true })
+    await flagsService.recompute(projectId, { by: cr.cr_id, ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   } catch (err) {
     console.warn(`[C-7] ${cr.cr_id}: đã ghi ${next} nhưng recompute cờ lỗi — cờ sẽ được tính lại ở lần recompute sau`, err)
   }

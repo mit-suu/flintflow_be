@@ -17,10 +17,16 @@ export type InvitableRole = Exclude<OrgRole, "lead">
  *
  * Trạng thái suy ra từ các mốc thời gian, không lưu field `status` (giữ đúng luật "không lưu giá trị
  * suy diễn" của repo):
- *   revokedAt != null            → đã thu hồi
- *   acceptedAt != null           → đã dùng (mã dùng một lần)
- *   expiresAt <= now             → hết hạn
- *   còn lại                      → dùng được
+ *   revokedAt != null                          → đã thu hồi
+ *   rejectedAt != null                         → Lead từ chối yêu cầu mời
+ *   acceptedAt != null                         → đã dùng (mã dùng một lần)
+ *   expiresAt <= now                           → hết hạn
+ *   requestedByUserId != null, approvedAt null → chờ Lead duyệt (FLF-303)
+ *   còn lại                                    → dùng được
+ *
+ * FLF-303: Analyst chỉ tạo được YÊU CẦU mời. Mã thật chỉ sinh lúc Lead duyệt — mã có trước khi duyệt thì Analyst
+ * chuyển ra ngoài được, vòng qua bước duyệt. Trong lúc chờ, `codeHash` là hash của một chuỗi ngẫu nhiên bị bỏ đi
+ * ngay (không ai giữ mã thô, không tra ra được), để index unique cũ của `codeHash` không phải đổi.
  */
 export interface IInvitation extends Document {
   organizationId: mongoose.Types.ObjectId
@@ -33,6 +39,12 @@ export interface IInvitation extends Document {
   codeHash: string
   expiresAt: Date
   invitedByUserId: mongoose.Types.ObjectId
+  /** Analyst gửi yêu cầu mời (FLF-303). null = Lead mời thẳng, không cần duyệt. */
+  requestedByUserId: mongoose.Types.ObjectId | null
+  approvedByUserId: mongoose.Types.ObjectId | null
+  approvedAt: Date | null
+  rejectedByUserId: mongoose.Types.ObjectId | null
+  rejectedAt: Date | null
   acceptedByUserId: mongoose.Types.ObjectId | null
   acceptedAt: Date | null
   revokedAt: Date | null
@@ -71,6 +83,29 @@ const invitationSchema = new Schema<IInvitation>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true
+    },
+    requestedByUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null
+    },
+    approvedByUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null
+    },
+    approvedAt: {
+      type: Date,
+      default: null
+    },
+    rejectedByUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null
+    },
+    rejectedAt: {
+      type: Date,
+      default: null
     },
     acceptedByUserId: {
       type: Schema.Types.ObjectId,

@@ -5,7 +5,7 @@ import * as chatSessionController from "./chat-session.controller.js"
 import * as projectDocumentController from "./project-document.controller.js"
 import { authMiddleware } from "../../shared/auth/auth.middleware.js"
 import { requireRole } from "../../shared/auth/require-role.middleware.js"
-import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, validateRequest } from "./project.validation.js"
+import { CreateProjectSchema, MoveProjectSchema, UpdateDocumentLanguageSchema, UpdateErdNotationSchema, validateRequest } from "./project.validation.js"
 
 const router = Router()
 const upload = multer({
@@ -383,6 +383,50 @@ router.patch(
   requireRole("lead", "analyst"),
   validateRequest(UpdateDocumentLanguageSchema),
   projectController.setDocumentLanguage
+)
+
+/**
+ * @swagger
+ * /api/v1/projects/{projectId}/erd-notation:
+ *   patch:
+ *     summary: Đổi ký pháp ERD (§3.1.5) của dự án — không đổi Spine; ERD đã vẽ được vẽ lại bằng ký pháp mới
+ *     tags: [Projects]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: projectId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [erdNotation]
+ *             additionalProperties: false
+ *             properties:
+ *               erdNotation:
+ *                 type: string
+ *                 enum: [chen, crowsfoot, idef1x]
+ *     responses:
+ *       200:
+ *         description: Dự án sau khi đổi (kèm erdNotation)
+ *       400:
+ *         description: VALIDATION_ERROR — giá trị ngoài chen/crowsfoot/idef1x hoặc có key lạ
+ *       403:
+ *         description: ORG_ROLE_FORBIDDEN (Viewer không đổi được)
+ *       404:
+ *         description: PROJECT_NOT_FOUND (không thuộc tổ chức)
+ */
+router.patch(
+  "/:projectId/erd-notation",
+  authMiddleware,
+  requireRole("lead", "analyst"),
+  validateRequest(UpdateErdNotationSchema),
+  projectController.setErdNotation
 )
 
 /**

@@ -338,7 +338,7 @@ describe("preview — diff + impact, không ghi", () => {
     expect(fn).toMatchObject({ feature_id: "F3", normal: expect.arrayContaining(["Analyst selects the students."]) })
     expect(fn.validations[0].id).toMatch(new RegExp(`^${fn.id}-V\\d+$`))
     expect(screen).toMatchObject({ name: "Absence Warning", detail_status: "signed_off", primary_function_id: fn.id })
-    expect(spine.screens.find((s) => s.id === "S07")?.flow_to).toContain(screen.id)
+    expect(spine.screens.find((s) => s.id === "S07")?.flow_to.map((e) => e.to)).toContain(screen.id)
     expect(spine.permissions.filter((p) => p.screen_id === screen.id).map((p) => p.action).sort()).toEqual(["create", "view"])
     expect(spine.messages.find((m) => m.code === "E-WARN-001")?.function_ids).toEqual([fn.id])
     expect(spine.messages.find((m) => m.id === "MSG04")?.function_ids).toEqual(["FN028", fn.id])
@@ -1207,5 +1207,39 @@ describe("FLF-318: sửa use case kéo theo phần của nó (luật 3h)", () =>
     expect(last.use_case_edit).toBe(true)
     // Câu trả lời là đúng tên use case ⇒ lượt sau có đủ chi tiết để sửa
     expect(last.projection.use_case_context.edit_targets.map((t) => t.use_case.id)).toEqual(["UC01"])
+  })
+})
+
+describe("FLF-278 — mục riêng của mẫu khách qua chat (soạn nháp từ hướng dẫn + dữ liệu dự án)", () => {
+  const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+  const conventions = { id: "CS07", heading: "Document Conventions", level: 2, blocks: [block("[Describe the typographical conventions used in this SRS.]")], source: "import" as const }
+  const hardware = { id: "CS08", heading: "Hardware Interfaces", level: 2, blocks: [], source: "import" as const }
+  const WITH_CUSTOM: Spine = { ...FIXTURE, custom_sections: [conventions, hardware] }
+
+  it("nhắc tiêu đề ⇒ projection có mục + hướng dẫn rút từ chữ `[…]` của mẫu + dữ kiện dự án gọn; không nhắc ⇒ chỉ mục gọn", () => {
+    const projection = buildChangeProjection(WITH_CUSTOM, "Soạn nháp mục §1.2 Document Conventions theo hướng dẫn của mẫu")
+    expect(projection.custom_sections).toEqual([{ ...conventions, guidance: "Describe the typographical conventions used in this SRS." }])
+    const context = projection.draft_context as { project: Record<string, unknown>; features: string[] }
+    expect(context.features).toEqual(FIXTURE.features.slice(0, 30).map((f) => f.name))
+    expect(JSON.stringify(context)).not.toMatch(/"id"/)
+    expect((projection.existing_ids as Record<string, string[]>).custom_sections).toEqual(["CS07", "CS08"])
+    expect(buildChangeProjection(WITH_CUSTOM, "làm cho tài liệu hay hơn").custom_sections).toEqual([
+      { id: "CS07", label: "Document Conventions" },
+      { id: "CS08", label: "Hardware Interfaces" }
+    ])
+  })
+
+  it("model ghi cả phần tử (bỏ chữ hướng dẫn) hoặc thêm block ⇒ áp được", async () => {
+    await seed(WITH_CUSTOM)
+    deps.changeExecutor = vi.fn(async () =>
+      aiResult({
+        ops: [
+          { op: "set", path: "custom_sections[id=CS07]", value: { ...conventions, blocks: [block("Glossary terms are in bold.")] } },
+          { op: "add", path: "custom_sections[id=CS08].blocks[]", value: block("The app reads the phone's fingerprint sensor.") }
+        ]
+      })
+    )
+    const applied = await apply(PROJECT, USER, { base_version: 1, instruction: "Viết mục Document Conventions và Hardware Interfaces" }, {}, deps)
+    expect(applied.spine.custom_sections.map((c) => c.blocks.map((b) => b.text))).toEqual([["Glossary terms are in bold."], ["The app reads the phone's fingerprint sensor."]])
   })
 })

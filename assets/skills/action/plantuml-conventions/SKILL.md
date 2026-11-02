@@ -32,17 +32,17 @@ This skill is the shared contract for every renderer (`renderer/*`) and the prom
 | SRS section | SRS content (ISO/IEC/IEEE 29148) | `kind` | `owner_kind` | Notation | Path | Ticket | `source_fields` |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `fixed:1` | Product perspective / system interfaces | `context` | `null` (one diagram) | DFD level 0 (Yourdon/DeMarco) | svg | FLF-322 | srs-spine §7.1 |
-| `fixed:2.2.1` | Functional requirements — user view | `usecase` | feature | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
-| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | feature | UML 2.5 Activity, swimlanes | svg | FLF-340 | srs-spine §7.1 |
+| `fixed:2.2.1` | Functional requirements — user view | `usecase` | `null` (one part per feature; actor hierarchy part in `fixed:2.1`) | UML 2.5.1 Use Case | svg | FLF-323 | srs-spine §7.1 |
+| `fixed:3.1.1` | User interfaces — navigation | `screen_flow` | `null` (one part for the system) | FPT SRS template §3.1.1 (screen box, pop-up oval, tab frame) | svg | FLF-349 | srs-spine §7.1 |
 | `fixed:3.1.5` | Logical database requirements | `erd` | `null` (split by cluster) | Chen \| Crow's foot \| IDEF1X (per project) | svg | FLF-324 | srs-spine §7.1 |
-| `feature:<id>` | Logical data model (domain) | `class` | feature | UML 2.5 Class (analysis level) | svg | FLF-325 | `entities[].name/.relations/.relation_cardinality` · *new*: `entities[].attributes[]`, `entities[].feature_ids` |
-| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | `functions[<owner>].name/.trigger/.normal/.abnormal` · `actors[].name` of `use_cases[function_ids∋<owner>].actor_ids` · *new*: `functions[<owner>].messages[]` |
-| `fixed:3.1.5` | Modes and states | `state_machine` | entity | UML 2.5 State Machine | svg | FLF-327 | `entities[<owner>].name` · *new*: `entities[<owner>].states[]`, `entities[<owner>].transitions[]` |
+| `feature:<id>` | Logical data model (domain) | `class` | feature (one part per feature, at the head of §3.x) | UML 2.5 Class (analysis level, 2 compartments) | svg | FLF-325 | srs-spine §7.1 |
+| `function:<id>` | Functional requirements — stimulus/response | `sequence` | function | UML 2.5 System Sequence Diagram (black box) | puml | FLF-326 | srs-spine §7.1 |
+| `fixed:3.1.5` | Modes and states | `state_machine` | entity (one per entity that has states, next to the entity description) | UML 2.5 State Machine | svg | FLF-327 | srs-spine §7.1 |
 | `function:<primary_function_id>` | User interfaces — layout | `screen_layout` | screen | Salt wireframe | puml | — | srs-spine §7.1 |
 
-`class`, `sequence` and `state_machine` read fields the Spine does not have yet (*new*). Adding them, the new `kind` values and their section rows is a `contract-change` (`spine.schema.ts`, `section-registry.ts`). **No data, no diagram**: until those fields exist and are filled for an owner, no diagram of that kind is generated for it — no placeholder, no guessed content.
+`sequence` reads `functions[].interactions` (FLF-326, `contract-change`). **No data, no diagram**: a function with no `interactions[]`, or one that fails the criteria in `references/kinds.md`, has no diagram — no placeholder, no guessed content (`state_machine` is drawn only for entities whose `states[]` is filled).
 
-New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row; until then the current renderer and its `renderer/*` skill stay. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
+New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind adopts them with the ticket in its row. `sequence` is the system level (black box) and the only kind besides the salt wireframe on the `puml` path. `SRS section` is the section id the diagram is embedded in (`section-registry.ts`; `feature:<id>` = §3.x, `function:<id>` = §3.x.y). Per-kind syntax and skeletons: `references/kinds.md`.
 
 ## Common rules
 
@@ -52,16 +52,16 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
 4. **Aliases are Spine ids** (`A03`, `UC04`, `S7`, `E2`); the visible label is the name: `actor "Reviewer" as A03`. Sort elements by `id` so the same Spine produces the same output.
 5. **Split by kind**, not "one diagram per actor":
    - `context`: one diagram for the whole system.
-   - `usecase`: one per feature group. Split a group further only where it reads better — by sub-goal (e.g. account access vs organization membership), not by a use-case count; keep each `<<include>>` / `<<extend>>` pair in the same part. No overview diagram. After S-4.1 a use case's feature comes from `function_ids` → `functions[].feature_id` (several ⇒ the first function's in `function_ids` order); the group at S-3.6, before features exist, is set by FLF-323.
-   - `screen_flow`, `class`: one per feature.
+   - `usecase`: one per feature group. A group over ~20 use cases is split into equal parts (`<feature> (1/2)`); a part that fails the layout check is split again; keep each `<<include>>` / `<<extend>>` pair in the same part (a use case with more than two relations repeats in several parts). No overview diagram. After S-4.1 a use case's feature comes from `function_ids` → `functions[].feature_id` (several ⇒ the first function's in `function_ids` order); before S-4.1 (no feature derivable) the use case goes to a group named after its cluster's main human actor, after all features.
+   - `class`: one per feature. `screen_flow`: one for the whole system, split by whole features over 40 screens.
    - `erd`: whole system; split by connected entity cluster when > ~25 entities.
    - `sequence`: one per function (not every function needs one).
    - `state_machine`: one per entity that has states.
    - Other kinds: more than ~25 nodes ⇒ split further within the same owner. Each part is its own `diagrams[]` entry with the same `kind`.
-6. **Actors, swimlanes and lifelines follow the actor–use case model**: use the actor the use case is linked to, keep generalization, never expand to leaf actors, never merge extra actors, use the exact actor name. General actors are defined in §2.1 and its actor hierarchy diagram; other diagrams only use the name and the description below the figure says "see §2.1". Actor unknown ⇒ do not guess.
-7. **Naming**: actor, entity and class = singular noun; use case, function and activity action = verb phrase; data-flow label = noun; state = adjective or participle.
+6. **Actors and lifelines follow the actor–use case model**: use the actor the use case is linked to, keep generalization, never expand to leaf actors, never merge extra actors, use the exact actor name. General actors are defined in §2.1 and its actor hierarchy diagram; other diagrams only use the name and the description below the figure says "see §2.1". Actor unknown ⇒ do not guess.
+7. **Naming**: actor, entity and class = singular noun; use case, function and activity action = verb phrase; data-flow label = noun; state = adjective or participle (Pending, Approved).
 8. **Lines and arrowheads follow the notation's semantics, never aesthetics**: solid = association / call / control flow; dashed = dependency / include / extend / reply. Open V, hollow triangle and filled triangle exactly as the standard defines. An arrow without a label where the notation requires one is an error. Create a relation only when the standard's semantics prove it.
-9. **Layout**: prefer one straight segment. Orthogonal bends only when a straight line would cross a shape or text, and only for `erd`, `class`, `screen_flow`, `state_machine` (self-transitions, back-edges). No curves, no line over text or shapes, no two overlapping lines, minimal crossings. Cannot meet this ⇒ split the diagram.
+9. **Layout**: prefer one straight segment. Orthogonal bends only when a straight line would cross a shape or text, and only for `erd`, `class`, `screen_flow`. `state_machine` never bends: every transition is one straight segment, parallel segments for several transitions between the same two states, a self-transition is written inside the state (internal transition). No curves, no line over text or shapes, no two overlapping lines, minimal crossings. Cannot meet this ⇒ split the diagram.
 10. **Stereotypes in ASCII**: `<<include>>`, never `«include»`.
 11. **Visual Paradigm colours**: fill `#7ACFF5`, black border and text, Arial, no shadow; no per-element colours.
 12. **Caption + description**: every diagram has a caption `Figure n: <name>` and one description paragraph outside the figure. No notes that restate descriptions.
@@ -70,12 +70,13 @@ New kinds, the `svg` path and rules 5, 11 and 12 below are the target: each kind
     - **English labels only.** No Vietnamese diacritics anywhere in the file.
     - No `!include`, no `!import`, no URLs, no sprites or images, no `skinparam` loaded from remote. The server has no internet access.
     - Quote any label containing spaces, punctuation or keywords.
+    - `sequence`: the Visual Paradigm theme is written into the source as literal `skinparam` lines (no `!include`).
 
 ## Self-check before output
 
 - [ ] Notation matches the Kinds table; no mixed notation.
 - [ ] Only Spine `source_fields`; aliases are Spine ids, sorted by id.
-- [ ] Split matches `owner_kind`; use case parts by sub-goal, other kinds no part over ~25 nodes.
+- [ ] Split matches `owner_kind`; use case parts one per feature (split over ~20), other kinds no part over ~25 nodes.
 - [ ] Actors / lanes / lifelines are the linked actors, generalization kept, names exact.
 - [ ] Names use the right word class (noun / verb phrase / adjective).
 - [ ] Line style and arrowheads match the notation; required labels present.

@@ -76,14 +76,15 @@ describe("UC-08 — Lead tạo và thu hồi mã mời (Flow 9.1–9.2)", () => 
     expect(res.status).toBe(400)
   })
 
-  it("chỉ Lead mới tạo được mã", async () => {
-    await Membership.create({ organizationId: orgId, userId: invitee.id, role: "analyst" })
+  it("Viewer không mời được", async () => {
+    await Membership.create({ organizationId: orgId, userId: invitee.id, role: "viewer" })
     const res = await request(app)
       .post(ORGS + "/" + orgId + "/invitations")
       .set(bearer(invitee))
       .send({ role: "viewer", email: "x@flintflow.test" })
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe("ORG_ROLE_FORBIDDEN")
+    expect((await request(app).get(ORGS + "/" + orgId + "/invitations").set(bearer(invitee))).status).toBe(403)
   })
 
   it("thu hồi mã chưa dùng thì mã đó hết dùng được", async () => {

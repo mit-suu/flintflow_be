@@ -98,7 +98,8 @@ describe("executeAiAction — thứ tự parse → deduct", () => {
     expect(result.data).toEqual({ ok: true })
     expect(result.cost).toBe(5)
     expect(deductCredit).toHaveBeenCalledTimes(1)
-    expect(deductCredit).toHaveBeenCalledWith(reservation)
+    // UC-60: token của lượt gọi đi kèm để ghi lên dòng deduct
+    expect(deductCredit).toHaveBeenCalledWith(reservation, undefined, { tokensIn: expect.any(Number), tokensOut: expect.any(Number) })
     expect(releaseCredit).not.toHaveBeenCalled()
   })
 
@@ -203,6 +204,13 @@ describe("executeAiAction — ngôn ngữ tài liệu (FLF-265 D16)", () => {
       expect(sent(i).prompt).toBe(`prompt\n\n${replyLanguageDirective("vi")}\n\n${documentLanguageDirective("vi")}`)
       expect(sent(i).config).toMatchObject({ actionType: type, maxTokens: 2048 * LOCALIZED_MAX_TOKENS_FACTOR })
     })
+  })
+
+  it("minMaxTokens (draftOps truyền maxTokens của skill nội dung) nâng trần token; dự án vi vẫn nhân hệ số", async () => {
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {} }, undefined, USER, { minMaxTokens: 16384 })
+    await executeAiAction(ActionType.DRAFT, { promptVariables: {}, ...vi_ }, undefined, USER, { minMaxTokens: 16384 })
+    expect(sent(0).config).toMatchObject({ maxTokens: 16384 })
+    expect(sent(1).config).toMatchObject({ maxTokens: 16384 * LOCALIZED_MAX_TOKENS_FACTOR })
   })
 
   it("chat / elicit / review / translate_document ⇒ không có khối dù dự án vi", async () => {
