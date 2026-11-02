@@ -503,3 +503,164 @@ describe("readBlocks — bổ sung P4", () => {
     expect(blockIdOfBookmark(null)).toBeNull()
   })
 })
+
+/** `numbering.xml`: numId 7 = dàn mục (`%1.` / `%1.%2.`), 8 = gạch đầu dòng, 9 = danh sách số một cấp (`%1)`). */
+const NUMBERING =
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+  `<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl><w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2."/></w:lvl></w:abstractNum>` +
+  `<w:abstractNum w:abstractNumId="2"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/></w:lvl></w:abstractNum>` +
+  `<w:abstractNum w:abstractNumId="3"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1)"/></w:lvl></w:abstractNum>` +
+  `<w:num w:numId="7"><w:abstractNumId w:val="1"/></w:num><w:num w:numId="8"><w:abstractNumId w:val="2"/></w:num><w:num w:numId="9"><w:abstractNumId w:val="3"/></w:num>` +
+  `</w:numbering>`
+const loadWithNumbering = async (body: string, styles?: string) => DocxPackage.load(await makeDocx({ body, ...(styles ? { styles } : {}), extraParts: { "word/numbering.xml": NUMBERING } }))
+
+describe("readBlocks — tín hiệu heading FLF-343", () => {
+  const bold = (text: string, pPr = "") => `<w:p>${pPr ? `<w:pPr>${pPr}</w:pPr>` : ""}<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+  const sized = (text: string, sz: number) => `<w:p><w:r><w:rPr><w:sz w:val="${sz}"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
+  const body = "This paragraph is ordinary body text written in a full sentence for the reader."
+
+  it("số mục gõ tay + in đậm ⇒ numbering_pattern kèm tín hiệu bold; không đậm ⇒ không có tín hiệu", async () => {
+    const blocks = await readBlocks(await load(bold("2.1 Actors") + p(body) + p("2.2 Use Cases") + p(body)))
+    expect(blocks.filter((b) => b.kind === "heading").map((b) => [b.text, b.heading_detector, b.heading_signals])).toEqual([
+      ["2.1 Actors", "numbering_pattern", ["bold"]],
+      ["2.2 Use Cases", "numbering_pattern", []]
+    ])
+  })
+
+  it("đánh số tự động numPr (danh sách dàn mục %1.%2) + in đậm ⇒ heading `numbering` cấp ilvl+1, auto_number suy theo thứ tự; style danh sách / không đậm ⇒ list_item", async () => {
+    const num = (ilvl: number) => `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="7"/></w:numPr>`
+    const blocks = await readBlocks(
+      await loadWithNumbering(
+        bold("Overview", num(0)) + p(body) + bold("Purpose", num(1)) + bold("Scope", num(1)) + bold("Requirements", num(0)) + bold("Actors", num(1)) +
+          p("A plain numbered item", num(0)) + bold("A list item in list style", `<w:pStyle w:val="Dsach"/>`)
+      )
+    )
+    expect(blocks.map((b) => [b.kind, b.level, b.heading_detector, b.auto_number ?? null])).toEqual([
+      ["heading", 1, "numbering", "1"],
+      ["paragraph", null, null, null],
+      ["heading", 2, "numbering", "1.1"],
+      ["heading", 2, "numbering", "1.2"],
+      ["heading", 1, "numbering", "2"],
+      ["heading", 2, "numbering", "2.1"],
+      ["list_item", null, null, null],
+      ["list_item", null, null, null]
+    ])
+  })
+
+  it("chữ to hơn thân bài rõ rệt (cỡ dùng ≥ 2 lần) ⇒ heading `format`, cấp theo thứ hạng cỡ chữ; chữ to một chút / câu văn ⇒ không", async () => {
+    const blocks = await readBlocks(
+      await load(
+        sized("Introduction", 32) + p(body) + sized("Purpose", 28) + p(body) + sized("Scope", 28) + p(body) + sized("Requirements", 32) +
+          sized("Slightly larger line", 24) + sized("A long sentence in big font that ends with a period.", 32) + p(body)
+      )
+    )
+    expect(blocks.map((b) => [b.kind, b.level, b.heading_detector])).toEqual([
+      ["heading", 1, "format"],
+      ["paragraph", null, null],
+      ["heading", 2, "format"],
+      ["paragraph", null, null],
+      ["heading", 2, "format"],
+      ["paragraph", null, null],
+      ["heading", 1, "format"],
+      ["paragraph", null, null],
+      ["paragraph", null, null],
+      ["paragraph", null, null]
+    ])
+    expect(blocks[0].heading_signals).toContain("large")
+  })
+
+  it("style đoạn riêng in đậm (không tên heading, không outlineLvl) ⇒ heading `format`", async () => {
+    const styles =
+      `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="T1"><w:name w:val="Team Title"/><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style>`
+    const pkg = await DocxPackage.load(await makeDocx({ styles, body: styled("T1", "Business Rules") + p(body) + styled("T1", "Glossary") + p(body) }))
+    expect((await readBlocks(pkg)).map((b) => [b.kind, b.heading_detector])).toEqual([
+      ["heading", "format"],
+      ["paragraph", null],
+      ["heading", "format"],
+      ["paragraph", null]
+    ])
+  })
+
+  it("mục lục: field TOC nhiều đoạn không thành block; đoạn in đậm sau mục lục trùng một dòng ⇒ heading `toc` theo cấp của mục lục", async () => {
+    const fld = (inner: string) =>
+      `<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \o "1-3" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${inner}</w:t></w:r></w:p>`
+    const blocks = await readBlocks(
+      await load(fld("1 Overview\t3") + p("1.1 Purpose\t4") + `<w:p><w:r><w:t>2 Actors\t5</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>` + bold("Overview") + p(body) + bold("Purpose") + p(body))
+    )
+    expect(blocks.map((b) => [b.kind, b.level, b.heading_detector, b.text])).toEqual([
+      ["heading", 1, "toc", "Overview"],
+      ["paragraph", null, null, body],
+      ["heading", 2, "toc", "Purpose"],
+      ["paragraph", null, null, body]
+    ])
+  })
+
+  it("mục lục gõ tay (≥ 3 dòng mà tiêu đề trùng đoạn phía sau, hoặc ngay sau tiêu đề Mục lục) không thành block; một dòng lẻ vẫn là nội dung", async () => {
+    const blocks = await readBlocks(
+      await load(
+        p("1 Overview ........ 3") + p("1.1 Purpose ........ 4") + p("2 Actors ........ 5") + p("1 Overview") + p(body) + p("1.1 Purpose") + p("Total ........ 12") + p("Mục lục") + p("Phụ lục ..... 9")
+      )
+    )
+    expect(blocks.map((b) => [b.kind, b.text])).toEqual([
+      ["heading", "1 Overview"],
+      ["paragraph", body],
+      ["heading", "1.1 Purpose"],
+      ["paragraph", "Total ........ 12"],
+      ["paragraph", "Mục lục"]
+    ])
+    expect(blocks[0].heading_signals).toContain("toc")
+  })
+
+  it("âm tính: gạch đầu dòng in đậm / danh sách số một cấp in đậm (không phải style danh sách) không thành heading", async () => {
+    const bullet = `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="8"/></w:numPr>`
+    const single = `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="9"/></w:numPr>`
+    const blocks = await readBlocks(await loadWithNumbering(p(body) + bold("Fast checkout", bullet) + bold("Secure payment", bullet) + bold("Open the cart", single) + p(body)))
+    expect(blocks.filter((b) => b.kind === "heading")).toEqual([])
+    expect(blocks.filter((b) => b.kind === "list_item").map((b) => b.text)).toEqual(["Fast checkout", "Secure payment", "Open the cart"])
+  })
+
+  it("numPr đặt ở style: lấy ilvl của style; ilvl lạ không ra NaN", async () => {
+    const styles =
+      `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>` +
+      `<w:style w:type="paragraph" w:styleId="Sub"><w:name w:val="Team Sub"/><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="7"/></w:numPr></w:pPr><w:rPr><w:b/></w:rPr></w:style>`
+    const blocks = await readBlocks(
+      await loadWithNumbering(p(body) + styled("Sub", "Purpose") + p(body) + bold("Odd level", `<w:numPr><w:ilvl w:val="x"/><w:numId w:val="7"/></w:numPr>`), styles)
+    )
+    expect(blocks.find((b) => b.text === "Purpose")).toMatchObject({ kind: "heading", level: 2, heading_detector: "numbering" })
+    expect(blocks.every((b) => b.level === null || Number.isFinite(b.level))).toBe(true)
+  })
+
+  it("âm tính: danh sách khoá<tab>giá trị ≥ 3 dòng không bị coi là mục lục gõ tay — không mất đoạn nào", async () => {
+    const blocks = await readBlocks(await load(p(body) + p("Port\t8080") + p("Timeout\t30") + p("Retries\t3") + p(body)))
+    expect(blocks.map((b) => b.text)).toEqual([body, "Port\t8080", "Timeout\t30", "Retries\t3", body])
+  })
+
+  it("field TOC thiếu `end`: dừng ở đoạn có style heading, không nuốt phần còn lại; `end` chung đoạn với chữ thân bài ⇒ giữ đoạn", async () => {
+    const fld = `<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> TOC \o "1-3" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1 Overview\t3</w:t></w:r></w:p>`
+    const broken = await readBlocks(await load(fld + styled("u1", "Overview") + p(body)))
+    expect(broken.map((b) => [b.kind, b.text])).toEqual([
+      ["heading", "Overview"],
+      ["paragraph", body]
+    ])
+    const sameParagraph = `<w:p><w:r><w:t>2 Actors\t5</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t xml:space="preserve">Body continues here.</w:t></w:r></w:p>`
+    const kept = await readBlocks(await load(fld + sameParagraph + p(body)))
+    expect(kept.map((b) => b.text)).toEqual(["2 Actors\t5Body continues here.", body])
+  })
+
+  it("âm tính: câu thân bài trùng tiêu đề mục lục (không đậm, không số) không thành heading; tiêu đề bìa cỡ 36pt dùng một lần không là cấp 1", async () => {
+    const toc = p("Contents") + p("1 Overview ........ 3") + p("2 Actors ........ 5")
+    const blocks = await readBlocks(
+      await load(sized("Lumen Learning Platform", 72) + toc + p("Overview") + p(body) + sized("1 Overview", 32) + p(body) + sized("2 Actors", 32) + p(body))
+    )
+    expect(blocks.find((b) => b.text === "Lumen Learning Platform")?.kind).toBe("paragraph")
+    expect(blocks.find((b) => b.text === "Overview")?.kind).toBe("paragraph")
+    expect(blocks.filter((b) => b.kind === "heading").map((b) => b.text)).toEqual(["1 Overview", "2 Actors"])
+  })
+
+  it("runFormat: w:b w:val=\"off\" là không đậm", async () => {
+    const off = `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="7"/></w:numPr></w:pPr><w:r><w:rPr><w:b w:val="off"/></w:rPr><w:t>Not bold</w:t></w:r></w:p>`
+    const blocks = await readBlocks(await loadWithNumbering(p(body) + off))
+    expect(blocks[1].kind).toBe("list_item")
+  })
+})

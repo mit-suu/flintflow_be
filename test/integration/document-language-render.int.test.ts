@@ -2,6 +2,7 @@
  * FLF-265 phase 3 §3.1 + §3.6 — tài liệu theo ngôn ngữ dự án qua HTTP trên Mongo thật:
  * GET /document (meta.translation, data đúng khuôn, `?lang=` bị bỏ qua), GET /export/word (X-Document-Language,
  * bìa / mục lục tiếng Việt), file version mode 1 không đổi; không đường nào gọi model.
+ * FLF-334 B: `GET /export/word|pdf?lang=` — tải theo ngôn ngữ còn lại, thiếu bản dịch ⇒ 409 TRANSLATION_INCOMPLETE.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import request from "supertest"
@@ -90,7 +91,7 @@ describe("dự án mode 2 vi", () => {
   })
 
   it("GET /export/word: X-Document-Language vi, bìa + mục lục tiếng Việt, phiên bản theo bản vừa dựng", async () => {
-    const res = await api.download("/export/word?source=draft&lang=en")
+    const res = await api.download("/export/word?source=draft")
     expect(res.status).toBe(200)
     expect(res.headers["x-document-language"]).toBe("vi")
     expect(res.headers["x-spine-version"]).toBe(String(seeded.spineVersion))
@@ -132,5 +133,65 @@ describe("renderVersionFile (file version mode 1)", () => {
     const old = await writeDocx(doc, { flagLanguage: "vi" })
     expect(readZipText(file, "word/document.xml")).toBe(readZipText(old, "word/document.xml"))
     expect(executeAiAction).not.toHaveBeenCalled()
+  })
+})
+
+/** Dịch hết mọi đơn vị của Spine hiện tại sang `vi` bằng tiền tố `[vi] ` (giả bản dịch đã có đủ). */
+const translateAll = async (projectId: string): Promise<void> => {
+  const spine = (await spineRepository.get(projectId))!
+  const entries = translationUnits(spine).map((u) => ({
+    sourceHash: hashSource(u.value),
+    text: Array.isArray(u.value) ? u.value.map((x) => `[vi] ${x}`) : `[vi] ${u.value}`
+  }))
+  await saveTranslations(projectId, "vi", "en", entries, "machine")
+}
+
+describe("FLF-334 B — tải theo ngôn ngữ còn lại (mode 2)", () => {
+  it("dự án en, lang=vi còn thiếu ⇒ 409 TRANSLATION_INCOMPLETE { locale, missing, total } khớp /translations/status?locale=vi", async () => {
+    const status = await api.get("/translations/status?locale=vi")
+    expect(status.status).toBe(200)
+    expect(status.body.data).toMatchObject({ locale: "vi", source_locale: "en" })
+    expect(status.body.data.missing).toBeGreaterThan(0)
+
+    for (const path of ["/export/word?source=draft&lang=vi", "/export/pdf?source=draft&lang=vi"]) {
+      const res = await api.get(path)
+      expect(res.status, path).toBe(409)
+      expect(res.body.error.code).toBe("TRANSLATION_INCOMPLETE")
+      expect(res.body.meta).toEqual({ locale: "vi", missing: status.body.data.missing, total: status.body.data.total })
+    }
+    expect(executeAiAction).not.toHaveBeenCalled()
+  })
+
+  it("đủ bản dịch ⇒ file vi, tên _VI, header vi; bản mặc định vẫn en, không chữ dịch", async () => {
+    await translateAll(seeded.projectId)
+    const res = await api.download("/export/word?source=draft&lang=vi")
+    expect(res.status).toBe(200)
+    expect(res.headers["x-document-language"]).toBe("vi")
+    expect(decodeURIComponent(res.headers["content-disposition"])).toMatch(/_DRAFT_VI\.docx$/)
+    const xml = readZipText(res.body as Buffer, "word/document.xml")
+    expect(xml).toContain(WRITER_TEXT.vi.toc)
+    expect(xml).toContain("[vi] ")
+
+    const plain = await api.download("/export/word?source=draft")
+    expect(plain.headers["x-document-language"]).toBe("en")
+    expect(decodeURIComponent(plain.headers["content-disposition"])).not.toMatch(/_VI\.docx$/)
+    const plainXml = readZipText(plain.body as Buffer, "word/document.xml")
+    expect(plainXml).toContain(WRITER_TEXT.en.toc)
+    expect(plainXml).not.toContain("[vi] ")
+    expect(executeAiAction).not.toHaveBeenCalled()
+  })
+
+  it("dự án vi, lang=en ⇒ chữ gốc tiếng Anh, tên _EN, header en (không cần bản dịch)", async () => {
+    expect((await api.patchLanguage("vi")).status).toBe(200)
+    const res = await api.download("/export/word?source=draft&lang=en")
+    expect(res.status).toBe(200)
+    expect(res.headers["x-document-language"]).toBe("en")
+    expect(decodeURIComponent(res.headers["content-disposition"])).toMatch(/_EN\.docx$/)
+    expect(readZipText(res.body as Buffer, "word/document.xml")).toContain(WRITER_TEXT.en.toc)
+  })
+
+  it("lang lạ ⇒ 400 VALIDATION_ERROR (export và status)", async () => {
+    expect((await api.get("/export/word?source=draft&lang=fr")).body.error.code).toBe("VALIDATION_ERROR")
+    expect((await api.get("/translations/status?locale=fr")).status).toBe(400)
   })
 })

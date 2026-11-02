@@ -19,7 +19,7 @@ import { changeRequestDetailSchema } from "../../src/modules/change-request/chan
 import { compareResponseSchema, releaseResponseSchema, versionBlocksResponseSchema, versionsResponseSchema } from "../../src/modules/doc-version/doc-version.dto.js"
 import { changeRequiresCrMetaSchema } from "../../src/modules/change-request/change-request.dto.js"
 import { applyTransaction } from "../../src/modules/spine/op-engine.js"
-import { DocxPackage, readBlocks } from "../../src/modules/docx-ooxml/index.js"
+import { DocxPackage, readBlocks, readStamp } from "../../src/modules/docx-ooxml/index.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
 const TARGETS = { entity_paths: ["nfrs[id=NFR-01]"], keywords: ["2 seconds"] }
@@ -46,10 +46,8 @@ const projectWithRevision = async () => {
   const projectId = await createMode1Project(seeded, "Lumen LMS")
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  expect((await c.finalizeAndWait(id)).view?.import?.status).toBe("gap_review")
+  // FLF-343: một lần Bắt đầu ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra
+  expect((await c.extractAndWait(id)).run?.import.status).toBe("gap_review")
   // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step, để release chỉ còn chặn bởi cờ test đặt
   await fillCoreSections(projectId)
 
@@ -88,7 +86,8 @@ describe("mode 1 — version + tải về", () => {
 
     const draft = await binary(c.get("/versions/0.2/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v0.2_DRAFT.docx`)
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0+CR-001_DRAFT.docx")
+    expect(await readStamp(await DocxPackage.load(draft.body as Buffer))).toMatchObject({ version: "0.2", base_version: "0", latest_cr: "CR-001", kind: "draft" })
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
@@ -129,7 +128,7 @@ describe("mode 1 — release (Flow 6)", () => {
     expect(rel.baseline).toMatchObject({ type: "release", version: "1.0", doc_version: "1.0" })
 
     const clean = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
+    expect(decodeURIComponent(String(clean.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
     const xml = await documentXml(clean.body as Buffer)
     expect(xml).not.toMatch(/<w:ins\b|<w:del\b|commentReference/)
     const cleanBlocks = await readBlocks(await DocxPackage.load(clean.body as Buffer))

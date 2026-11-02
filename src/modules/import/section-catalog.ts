@@ -60,7 +60,7 @@ const ALIASES: Readonly<Record<string, readonly string[]>> = {
     "Communication Interfaces"
   ],
   "group:4.2": ["Thuộc tính chất lượng", "Software System Attributes"],
-  "fixed:4.2.1": ["Tính khả dụng", "Khả năng sử dụng"],
+  "fixed:4.2.1": ["Tính khả dụng", "Khả năng sử dụng", "Ease of Use", "Dễ sử dụng"],
   "fixed:4.2.2": ["Độ tin cậy", "Tính tin cậy", "Availability", "Tính sẵn sàng"],
   "fixed:4.2.3": ["Hiệu năng", "Hiệu suất", "Performance Requirements", "Yêu cầu hiệu năng"],
   "fixed:4.2.4": ["Domain Specific Attributes", "Thuộc tính đặc thù", "Security", "Maintainability", "Bảo mật", "Khả năng bảo trì"],

@@ -22,9 +22,12 @@ import { translationStatusResponseSchema } from "../pipeline/pipeline.dto.js"
 import { fakeRepository, resetStore, store } from "./__tests__/translation-store.js"
 import { hashSource, translationUnits } from "./translation-units.js"
 import {
+  assertTranslationComplete,
   BATCH_MAX_CHARS,
   BATCH_MAX_UNITS,
   projectLanguages,
+  targetLocale,
+  translationCompleteness,
   resolveTranslations,
   splitBatches,
   translationStatus,
@@ -159,5 +162,54 @@ describe("translationStatus — GET /translations/status", () => {
   it("chưa có Spine ⇒ total 0", async () => {
     mocks.getSpine.mockResolvedValue(null)
     await expect(translationStatus(PROJECT, { mode: "fpt", documentLanguage: "vi" })).resolves.toMatchObject({ locale: "vi", total: 0 })
+  })
+
+  it("FLF-334 B: ?locale= đếm theo ngôn ngữ yêu cầu; locale = gốc ⇒ total 0", async () => {
+    const units = translationUnits(FIXTURE)
+    const asked = await translationStatus(PROJECT, { mode: "fpt", documentLanguage: "en" }, { locale: "vi" })
+    expect(asked).toMatchObject({ locale: "vi", source_locale: "en", total: units.length, missing: units.length })
+    const source = await translationStatus(PROJECT, { mode: "fpt", documentLanguage: "vi" }, { locale: "en" })
+    expect(source).toEqual({ locale: "en", source_locale: "en", total: 0, missing: 0, batches: 0, estimated_credits: 0 })
+  })
+})
+
+describe("FLF-334 B — tải theo ngôn ngữ khác", () => {
+  it("targetLocale: yêu cầu ⇒ theo yêu cầu; mode 1 import thật hỏi ngôn ngữ khác ⇒ 409; dự án chuyển đổi ⇒ theo yêu cầu", () => {
+    const languages = { locale: "en" as const, source: "en" as const }
+    expect(targetLocale({ mode: "fpt" }, languages, "vi")).toBe("vi")
+    expect(targetLocale({ mode: "fpt" }, languages)).toBe("en")
+    expect(() => targetLocale({ mode: "import" }, languages, "vi")).toThrow(expect.objectContaining({ statusCode: 409, code: "DOCUMENT_LANGUAGE_UNAVAILABLE" }))
+    expect(targetLocale({ mode: "import" }, languages, "en")).toBe("en")
+    expect(targetLocale({ mode: "import" }, languages)).toBe("en")
+    expect(targetLocale({ mode: "import", converted_from: "fpt" }, languages, "vi")).toBe("vi")
+  })
+
+  it("translationStatus đếm trên Spine của đích (loadSpine), không trên Spine hiện tại", async () => {
+    const snapshot = { actors: FIXTURE.actors.slice(0, 1) } as unknown as Spine
+    mocks.getSpine.mockClear()
+    const loadSpine = vi.fn(async () => snapshot)
+    const res = await translationStatus(PROJECT, { mode: "fpt", documentLanguage: "vi" }, { locale: "vi", loadSpine })
+    expect(res).toMatchObject({ locale: "vi", total: translationUnits(snapshot).length, missing: translationUnits(snapshot).length })
+    expect(loadSpine).toHaveBeenCalledTimes(1)
+    expect(mocks.getSpine).not.toHaveBeenCalled()
+    // ngôn ngữ đích = gốc ⇒ không đọc Spine nào
+    loadSpine.mockClear()
+    await translationStatus(PROJECT, { mode: "fpt", documentLanguage: "vi" }, { locale: "en", loadSpine })
+    expect(loadSpine).not.toHaveBeenCalled()
+  })
+
+  it("đủ bản dịch ⇒ qua; thiếu ⇒ 409 TRANSLATION_INCOMPLETE { locale, missing, total }", async () => {
+    const spine = { actors: FIXTURE.actors.slice(0, 2) } as unknown as Spine
+    const total = translationUnits(spine).length
+    seedTranslation(FIXTURE.actors[0].name, "Khách")
+    await expect(translationCompleteness(PROJECT, "vi", spine)).resolves.toEqual({ locale: "vi", missing: total - 1, total })
+    await expect(assertTranslationComplete(PROJECT, "vi", spine)).rejects.toMatchObject({
+      statusCode: 409,
+      code: "TRANSLATION_INCOMPLETE",
+      meta: { locale: "vi", missing: total - 1, total }
+    })
+    for (const u of translationUnits(spine)) seedTranslation(u.value, Array.isArray(u.value) ? u.value.map((x) => `[vi] ${x}`) : `[vi] ${u.value}`)
+    await expect(assertTranslationComplete(PROJECT, "vi", spine)).resolves.toBeUndefined()
+    expect(mocks.executeAiAction).not.toHaveBeenCalled()
   })
 })

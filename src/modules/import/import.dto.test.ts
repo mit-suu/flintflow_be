@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest"
 import {
   confirmLatestRequestSchema,
   docBlockDtoSchema,
+  extractRequestSchema,
+  headingMapEntrySchema,
+  tableMapEntrySchema,
   fieldsPatchRequestSchema,
   finalizeRequestSchema,
   finalizeResponseSchema,
@@ -219,5 +222,23 @@ describe("mode1.errors", () => {
     expect(MODE1_ERROR_STATUS.CR_SOURCE_REQUIRED).toBe(400)
     expect(MODE1_ERROR_STATUS.RELEASE_RED_FLAGS_OPEN).toBe(422)
     expect(mode1ErrorCodeSchema.options).toHaveLength(Object.keys(MODE1_ERROR_STATUS).length)
+  })
+})
+
+describe("FLF-343 — import một mạch", () => {
+  it("POST /import/extract nhận confirm_latest (tuỳ chọn); khoá lạ ⇒ lỗi", () => {
+    expect(extractRequestSchema.parse({ import_id: "i1" })).toEqual({ import_id: "i1" })
+    expect(extractRequestSchema.parse({ import_id: "i1", confirm_latest: true })).toEqual({ import_id: "i1", confirm_latest: true })
+    expect(extractRequestSchema.safeParse({ import_id: "i1", confirm: true }).success).toBe(false)
+  })
+
+  it("credit_estimate có check_calls; heading_map / table_map có auto_confirmed; detector mới (toc, numbering, format)", () => {
+    const empty = { import: null, profile: null, extraction: { sections: [], review_fields: [] }, blocks_count: 0 }
+    const estimate = { text_batches: 8, diagram_images: 1, check_calls: 3, ai_calls: 12, credits: 27, available_credits: 300 }
+    expect(getImportResponseSchema.safeParse({ ...empty, credit_estimate: estimate }).success).toBe(true)
+    for (const detected_by of ["toc", "numbering", "format"]) {
+      expect(headingMapEntrySchema.safeParse({ block_id: "B0001", heading_text: "Actors", section_id: "fixed:2.1", confidence: 0.75, detected_by, confirmed: true, auto_confirmed: true }).success, detected_by).toBe(true)
+    }
+    expect(tableMapEntrySchema.safeParse({ block_id: "B0001", column_index: 0, header: "ID", field_path: "use_cases[].id", confidence: 0.6, confirmed: true, auto_confirmed: true }).success).toBe(true)
   })
 })

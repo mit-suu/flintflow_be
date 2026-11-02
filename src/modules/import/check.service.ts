@@ -10,6 +10,7 @@
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
+import { getActionCost } from "../../shared/ai/credit-reservation.service.js"
 import type { FindingsOutput } from "../../shared/ai/response-parser.js"
 import { applyTransaction } from "../spine/op-engine.js"
 import type { Op } from "../spine/op.types.js"
@@ -182,8 +183,11 @@ const flagIdGenerator = (flags: Flag[]): (() => string) => {
   return () => `FL${String(++n).padStart(3, "0")}`
 }
 
+/** Một phát hiện thành cờ vàng; `target_id` (FLF-343) = đường dẫn phần tử / block được nói tới — thiếu ⇒ block đầu. */
+export type Finding = FindingsOutput["findings"][number] & { target_id?: string | null }
+
 /** Đổi finding của model thành op thêm cờ vàng; section không phân giải được ⇒ `fixed:I`. */
-export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], rule: string): Op[] => {
+export const findingOps = (spine: Spine, findings: readonly Finding[], rule: string): Op[] => {
   const sections = new Set(listSections(spine).map((s) => s.id))
   const nextId = flagIdGenerator(spine.flags)
   const open = new Set(spine.flags.filter((f) => f.resolved_at === null && f.rule_id === rule).map((f) => `${f.section_id}|${f.message}`))
@@ -201,7 +205,7 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
       level: "yellow",
       rule_id: rule,
       section_id: section,
-      target_id: f.block_ids[0] ?? null,
+      target_id: f.target_id ?? f.block_ids[0] ?? null,
       message,
       remediation_step: "C-1",
       opened_at_version: spine.spine_version + 1,
@@ -224,7 +228,7 @@ export const findingOps = (spine: Spine, findings: FindingsOutput["findings"], r
  * `findingOps` riêng từng nhóm trên cùng Spine thì mỗi lần đếm lại từ cờ có sẵn ⇒ hai cờ trùng id, cả lô bị từ chối
  * ("Mục này đã tồn tại trong tài liệu" lúc tạo bản 0.1 khi vừa có ảnh không đọc được vừa có quyền không khớp màn).
  */
-export const findingOpsInOrder = (spine: Spine, groups: readonly { findings: FindingsOutput["findings"]; rule: string }[]): Op[] => {
+export const findingOpsInOrder = (spine: Spine, groups: readonly { findings: readonly Finding[]; rule: string }[]): Op[] => {
   const ops: Op[] = []
   let flags = spine.flags
   for (const g of groups) {
@@ -343,6 +347,21 @@ export const runImportCheck = async (doc: IImportedDocument, userId: string): Pr
   await flagsService.recompute(projectId, { by: "import", ruleProfile: await mode1RuleProfileFor(projectId), atBaseline: true })
   await transitionImport(doc, "gap_review")
   return true
+}
+
+/**
+ * FLF-343: ước tính lượt AI của bước kiểm tra (1.11) cho màn báo credit một lần sau upload — cùng cách chia lô của lượt chạy
+ * (`semanticBatches` trên block chữ, section hiện tại) + một lượt kiểm chéo. Là cận trên: sau finalize section tạm
+ * (`function:@B0012`) đổi sang id thật ngắn hơn nên số lô không tăng; tài liệu không có phần tử nào thì lượt kiểm chéo không chạy.
+ */
+export const estimateCheckCalls = async (projectId: string): Promise<{ batches: number; calls: number; credits: number }> => {
+  const blocks = await DocBlock.find({ projectId, doc_version: { $in: IMPORTED_DOC_VERSIONS }, kind: { $in: ["paragraph", "list_item", "table_cell"] } })
+    .sort({ "anchor.ordinal": 1 })
+    .select("block_id text section_id")
+    .lean<CheckBlock[]>()
+  const batches = semanticBatches(blocks).length
+  const [batchCost, crossCost] = await Promise.all([getActionCost(ActionType.IMPORT_SEMANTIC_CHECK), getActionCost(ActionType.IMPORT_CROSS_CHECK)])
+  return { batches, calls: batches + 1, credits: batches * batchCost + crossCost }
 }
 
 export const countOpenFlags = (flags: Flag[]): { red: number; yellow: number } => {
