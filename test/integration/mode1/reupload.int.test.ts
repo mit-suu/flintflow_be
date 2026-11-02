@@ -59,8 +59,14 @@ const editVersion = async (projectId: string, fn: (doc: Document) => void) => {
   return { pkg, buffer: await pkg.toBuffer() }
 }
 
+/** Đoạn nằm trong content control mục lục (FLF-344: file version ghi sẵn dòng mục lục trùng chữ heading). */
+const inToc = (p: Element): boolean => {
+  for (let n = p.parentNode; n; n = n.parentNode) if ((n as Element).localName === "sdt") return true
+  return false
+}
+
 const paraEndingWith = (doc: Document, suffix: string): Element => {
-  const hit = Array.from(doc.getElementsByTagNameNS(W, "p")).find((x) => paraText(x).endsWith(suffix))
+  const hit = Array.from(doc.getElementsByTagNameNS(W, "p")).find((x) => !inToc(x) && paraText(x).endsWith(suffix))
   if (!hit) throw new Error(`Không thấy đoạn kết thúc bằng "${suffix}"`)
   return hit
 }
