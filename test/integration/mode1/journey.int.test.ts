@@ -33,6 +33,7 @@ import { releaseResponseSchema, versionsResponseSchema } from "../../../src/modu
 import { DocxPackage, readStamp } from "../../../src/modules/docx-ooxml/index.js"
 import type { Flag } from "../../../src/modules/spine/spine.types.js"
 import { ChatSession } from "../../../src/modules/project/chat-session.model.js"
+import { CreditWallet } from "../../../src/modules/credits/credit-wallet.model.js"
 
 type Client = ReturnType<typeof mode1Api>
 
@@ -105,14 +106,21 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     const projectId = await createMode1Project(seeded, "Lumen journey")
     const c = mode1Api(seeded, projectId)
 
-    // ── Flow 1: 1.1 upload ⇒ 1.2/1.3 preflight ⇒ 1.5/1.6 map (confirm-latest) ⇒ 1.8 trích ⇒ 1.9 ⇒ 1.10 v0 ─────────
-    const importId = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-    expect(await c.post("/import/confirm-latest", { import_id: importId })).toMatchObject({ status: 200 })
-    await c.extractAndWait(importId)
-    expect((await c.patch("/import/fields", { import_id: importId, confirm_all: true })).status).toBe(200)
-    const finalize = await c.finalizeAndWait(importId)
+    // ── Flow 1 (FLF-343, một mạch): upload ⇒ preflight + tách file + khớp mẫu ⇒ màn báo credit (một lần, kèm câu hỏi
+    // "bản mới nhất") ⇒ Bắt đầu ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra ⇒ sẵn sàng tạo CR — không lệnh nào khác giữa chừng ─────────
+    const uploaded = await c.upload(await makeSrsDocx())
+    const importId = uploaded.body.data.import.id as string
+    expect(uploaded.body.data.import.status).toBe("extracting")
+    const estimate = (await c.get("/import")).body.data.credit_estimate
+    expect(estimate.ai_calls).toBeGreaterThan(0)
+    const before = (await CreditWallet.findOne({ userId: seeded.userId }).lean())!.balance
+    const finalize = await c.extractAndWait(importId)
     expect(finalize.res.status, JSON.stringify(finalize.res.body.error)).toBe(200)
-    expect(finalize.view?.import?.status).toBe("gap_review")
+    expect(finalize.run?.import.status).toBe("gap_review")
+    // credit thực trừ không vượt con số đã báo
+    const after = (await CreditWallet.findOne({ userId: seeded.userId }).lean())!.balance
+    expect(before - after).toBeGreaterThan(0)
+    expect(before - after).toBeLessThanOrEqual(estimate.credits)
 
     const versions0 = versionsResponseSchema.parse((await c.get("/versions")).body.data)
     expect(versions0.map((v) => v.version)).toEqual(["0.1"])
@@ -192,7 +200,7 @@ describe("mode 1 v3 — hành trình BPMN trên một dự án", () => {
     expect(v1Xml).toContain("1 second")
     expect(v1Xml).not.toContain("2 seconds")
     expect(v1Xml, "bản release là bản sạch").not.toContain("<w:ins ")
-    expect(await readStamp(await DocxPackage.load(v1))).toEqual({ project_id: projectId, version: "1.0", source: "release" })
+    expect(await readStamp(await DocxPackage.load(v1))).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
 
     // ── Upload lại file 1.0 khách đã sửa (còn stamp) ⇒ 1.4 diff ⇒ 3.1 nguồn reupload ───────────────────────
     const zip = await JSZip.loadAsync(v1)

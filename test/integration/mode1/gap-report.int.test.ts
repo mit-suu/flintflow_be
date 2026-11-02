@@ -121,11 +121,11 @@ describe("gap report — gộp nhóm", () => {
     expect(spine.flags.some((f) => f.rule_id === "render_error" && f.resolved_at === null)).toBe(false)
   })
 
-  it("field độ tin thấp: gồm cả field đã xác nhận (kèm confirmed/edited_value), không gồm field độ tin cao", async () => {
+  it("field độ tin thấp: FLF-343 tự nhận vào baseline (chưa xác nhận) vẫn liệt kê, không gồm field độ tin cao", async () => {
     const { projectId, importId } = await importFinalized()
     const report = await buildGapReport(projectId)
     expect(report.low_confidence_fields.map((f) => f.path).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
-    expect(report.low_confidence_fields.every((f) => f.confidence < 0.7 && f.confirmed)).toBe(true)
+    expect(report.low_confidence_fields.every((f) => f.confidence < 0.7 && !f.confirmed)).toBe(true)
     const all = (await ExtractionDraft.find({ import_id: importId }).lean()).flatMap((d) => d.fields)
     expect(all.filter((f) => f.confidence < 0.7)).toHaveLength(report.low_confidence_fields.length)
   })

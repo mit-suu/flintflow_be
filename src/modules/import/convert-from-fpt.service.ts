@@ -18,7 +18,7 @@ import { scheduleEmbeddingSync } from "../change-request/embedding/embedding-syn
 import { docFileStore } from "../doc-version/doc-file.store.js"
 import { DocVersion } from "../doc-version/doc-version.model.js"
 import { renderVersionFile } from "../doc-version/render-version.js"
-import { downloadFileName } from "../doc-version/versioning.js"
+import { versionFileName } from "../doc-version/versioning.js"
 import { notify } from "../notification/notification.service.js"
 import { Project } from "../project/project.model.js"
 import { Baseline } from "../spine/baseline.model.js"
@@ -103,7 +103,7 @@ const convert = async (projectId: string, userId: string, opts: ConvertOptions):
       projectId,
       file_ref: null,
       sha256: createHash("sha256").update(buffer).digest("hex"),
-      original_name: downloadFileName(project.name, CONVERTED_DOC_VERSION),
+      original_name: versionFileName({ name: project.name, release: true, base: CONVERTED_DOC_VERSION }),
       size: buffer.length,
       preflight: { status: "accepted", issues: [] },
       stamp: { project_id: projectId, version: CONVERTED_DOC_VERSION, source: CONVERT_STAMP_SOURCE },

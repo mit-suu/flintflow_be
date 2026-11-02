@@ -97,7 +97,15 @@ describe("preflightDocx", () => {
   it("đọc stamp", async () => {
     const pkg = await DocxPackage.load(await makeDocx({ body: p("x") }))
     await writeStamp(pkg, { project_id: "p1", version: "0.2", source: "cr_revision" })
-    expect((await preflightDocx(await pkg.toBuffer())).stamp).toEqual({ project_id: "p1", version: "0.2", source: "cr_revision" })
+    expect((await preflightDocx(await pkg.toBuffer())).stamp).toEqual({ project_id: "p1", version: "0.2", source: "cr_revision", base_version: null, latest_cr: null, kind: null })
+  })
+
+  it("FLF-334: đọc stamp mới (release gốc / CR / loại bản) — vẫn accepted như stamp cũ", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("x") }))
+    await writeStamp(pkg, { project_id: "p1", version: "1.2", source: "cr_revision", base_version: "1.0", latest_cr: "CR-002", kind: "draft" })
+    const res = await preflightDocx(await pkg.toBuffer())
+    expect(res.status).toBe("accepted")
+    expect(res.stamp).toEqual({ project_id: "p1", version: "1.2", source: "cr_revision", base_version: "1.0", latest_cr: "CR-002", kind: "draft" })
   })
 
   it("zip bomb (kích thước giải nén khai báo vượt trần) ⇒ FILE_TOO_LARGE, không giải nén", async () => {

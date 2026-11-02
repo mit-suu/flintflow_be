@@ -19,6 +19,11 @@ export interface HeadingMapEntry {
   confidence: number
   detected_by: HeadingDetector
   confirmed: boolean
+  /**
+   * FLF-343: mục độ tin thấp được tự nhận lúc tách file (mode 1 chạy một mạch, không dừng ở bước xác nhận mapping) — giữ
+   * nguyên độ tin; finalize gắn cờ vàng "Cần xem" (`import_needs_review`). Người dùng xác nhận tay ⇒ không có.
+   */
+  auto_confirmed?: boolean
   /** FLF-252: mục danh mục mẫu khớp được (`ieee830:3.5.2`) — chỉ với mẫu không phải FPT; nội bộ, không hiện cho người dùng. */
   template_section?: string | null
   /**
@@ -36,6 +41,8 @@ export interface TableMapEntry {
   field_path: string | null
   confidence: number
   confirmed: boolean
+  /** FLF-343: như `HeadingMapEntry.auto_confirmed` — dữ liệu đọc theo cột này giữ độ tin của cột (không coi là 1). */
+  auto_confirmed?: boolean
   /** FLF-252: vai trò cột theo dữ liệu (`row_no`, `code`, `mark`…) và tối đa 3 giá trị đầu — người dùng nhìn dữ liệu khi xác nhận. */
   role?: string
   samples?: string[]
@@ -113,6 +120,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confidence,
             detected_by: { type: String, enum: HEADING_DETECTORS, required: true },
             confirmed: { type: Boolean, default: false },
+            auto_confirmed: { type: Boolean, default: undefined },
             template_section: { type: String, default: null },
             guidance: { type: String, default: undefined }
           },
@@ -132,6 +140,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             field_path: { type: String, default: null },
             confidence,
             confirmed: { type: Boolean, default: false },
+            auto_confirmed: { type: Boolean, default: undefined },
             role: { type: String, default: undefined },
             samples: { type: [String], default: undefined }
           },

@@ -21,11 +21,23 @@
 
 ```
 uploaded ─┬─ preflight_rejected
-          ├─ awaiting_latest_confirm ─► parsing
-          └─ parsing ─► mapping_review? ─► extracting ─► fields_review? ─► baselining ─► checking ─► gap_review ─► delivered | change_requested
+          └─ parsing ─► extracting ─► baselining ─┬─► checking ─► gap_review ─► delivered | change_requested
+                                                  └─► incomplete            (FLF-336: chế độ 3/4, thiếu mục)
 delivered ─► change_requested
-incomplete ─► drafting ─► delivered      (FLF-278: chế độ 3 sang Luồng 2 — dự án chạy pipeline tạo mới; ký baseline 1.0 ⇒ delivered)
+incomplete ─► baselining | drafting ─► delivered      (FLF-278: chế độ 3 sang Luồng 2 — dự án chạy pipeline tạo mới; ký baseline 1.0 ⇒ delivered)
 ```
+
+**FLF-343 — chế độ 1 chạy một mạch.** Upload (#2) ⇒ preflight ⇒ tách file + khớp mẫu ngay (tất định, không AI) ⇒ import ở
+`extracting` **chưa chạy** = điểm dừng duy nhất: màn báo credit một lần (#4 `credit_estimate` gồm I-4 + kiểm tra AI) kèm câu hỏi
+"đây là bản mới nhất" (file không stamp, không phải mẫu tổ chức — `confirmed_latest_at = null`). Nút Bắt đầu = #6 với
+`confirm_latest: true` ⇒ I-4 ⇒ (job nối tiếp) finalize với `base_version` do server tính + Record of Changes đọc từ file ⇒ baseline
+0.1 ⇒ 1.11–1.12 ⇒ `gap_review` — FE vào thẳng trang tạo CR (`?panel=cr`), gap report vẫn mở từ popup. Không dừng ở
+`awaiting_latest_confirm` / `mapping_review` / `fields_review` / nút tạo baseline: mapping độ tin < 0.8 tự nhận (`auto_confirmed`,
+giữ độ tin), field độ tin < 0.7 / đọc từ ảnh vào baseline — mỗi chỗ một cờ vàng **Cần xem** (`rule_id = import_needs_review`,
+`target_id` = đường dẫn field `actors[id=A01].kind` hoặc block heading / bảng), đóng bằng CR như cờ vàng khác. Chế độ 3/4 vẫn dừng
+ở `incomplete`. Re-upload file stamp của chính dự án sau baseline vẫn đi #11 (diff). Các trạng thái `awaiting_latest_confirm`,
+`mapping_review`, `fields_review` chỉ còn ở bản ghi cũ: #6 đưa `awaiting_latest_confirm` (kèm `confirm_latest`) và `mapping_review`
+(tự nhận) về luồng một mạch; #10 đưa `fields_review` và `baselining` chưa có mốc sang finalize một mạch.
 
 `paused` chỉ đặt được ở `extracting` và `checking`, và ở `baselining` khi job finalize chạy nền lỗi / mất (chỉ `resume_later`, §4.16). Chuyển trạng thái sai trả `409 IMPORT_INVALID_STATE` `{ status, to, allowed }`.
 
@@ -78,18 +90,18 @@ Mã chung vẫn dùng như pipeline: `400 VALIDATION_ERROR`, `401 UNAUTHORIZED`,
 | 1a | `PATCH /projects/:id/document-language` | UC-13 | `UpdateDocumentLanguageSchema` `{ documentLanguage: vi \| en }` (strict) — chỉ Lead/Analyst; không đổi Spine, nội dung đã có dịch qua `pipeline-contract.md` #26–#27 (FLF-265) | `Project` | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `409 DOCUMENT_LANGUAGE_LOCKED` (mode `import`: ngôn ngữ theo file) |
 | 1b | `PATCH /projects/:id/erd-notation` | UC-13 | `UpdateErdNotationSchema` `{ erdNotation: chen \| crowsfoot \| idef1x }` (strict) — chỉ Lead/Analyst (cả dự án mode import); không đổi Spine. Đổi sang ký pháp khác ⇒ ERD đã vẽ (§3.1.5) được vẽ lại ngay bằng ký pháp mới (cùng `diagrams[]` id, `source_hash` mới); chọn lại ký pháp đang dùng ⇒ không vẽ lại. Vẽ lại lỗi chỉ ghi log, ký pháp vẫn được lưu — hình stale vẽ lại ở lượt render kế tiếp | `Project` (có `erdNotation`) | `VALIDATION_ERROR`, `403 ORG_ROLE_FORBIDDEN` (Viewer), `404 PROJECT_NOT_FOUND` |
 | 2 | `POST /projects/:id/import` | UC-20, 1.1–1.2 | multipart, field `file` (.docx ≤ 40MB; quá cỡ ⇒ preflight `FILE_TOO_LARGE`, quá gấp đôi ⇒ `413 FILE_TOO_LARGE` `meta: { max_mb }`) + field text `intent` ∈ `fixed \| free` (FLF-335 bước 1.2: file theo một mẫu cố định hay cấu trúc tự do; thiếu ⇒ `free`; dự án mới có mẫu bắt buộc luôn `fixed`) — ghi vào `import.intent`; `Project.template_intent` chỉ ghi khi client gửi `intent` (hoặc mẫu bắt buộc đã khoá `fixed`) — thiếu thì Project giữ nguyên, dự án không qua bước so cấu trúc đích | `importStateResponseSchema` (`import.intent`) | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (đã có baseline ⇒ dùng `/reupload`) |
-| 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
+| 3 | `POST /projects/:id/import/confirm-latest` | 1.3 | `confirmLatestRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `awaiting_latest_confirm`; file mới trả lời câu hỏi cùng #6 (`confirm_latest`) | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
 | 4 | `GET /projects/:id/import` | UC-19 | — | `getImportResponseSchema` (FLF-336: `target_structure` — bản đồ mục ⇒ cấu trúc đích + `resolved_mode`) | — |
-| 5 | `PATCH /projects/:id/import/mapping` | UC-21, 1.7 | `mappingPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
-| 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), I-4 chạy nền; FE poll #4 tới khi rời `extracting` hoặc có `paused` | `IMPORT_INVALID_STATE` |
-| 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
-| 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` (+ `complete?: boolean` — FLF-336) | `finalizeResponseSchema` — **trả ngay** (`status = baselining`, `baseline: null`, `flags: null`), finalize + 1.11–1.12 chạy nền; FE poll #4 tới `gap_review` hoặc có `paused` (§4.16). **FLF-336 I-5**: trước khi chụp v0, Code so bố cục file với cấu trúc đích (`Project.template_intent` `free` ⇒ mẫu chuẩn FlintFlow tối thiểu, `fixed` ⇒ chính heading của mẫu); còn mục thiếu ⇒ dừng ở `incomplete` (**không có v0**), #4 trả `target_structure` (`resolved_mode` 3 / 4). Từ `incomplete` gọi lại #8 với `complete: true` ⇒ chạy lại từ mốc và tạo v0 như cũ (lát 1 — vòng rà soát + Luồng 2 cho phần thiếu là lát sau); thiếu `complete` ⇒ `IMPORT_INVALID_STATE` | `IMPORT_INVALID_STATE`, `SPINE_VERSION_CONFLICT` |
+| 5 | `PATCH /projects/:id/import/mapping` | UC-21, 1.7 | `mappingPatchRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `mapping_review` | `importStateResponseSchema` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
+| 6 | `POST /projects/:id/import/extract` | 1.8 | `extractRequestSchema` `{ import_id, confirm_latest? }` — FLF-343: nút Bắt đầu; `confirm_latest: true` bắt buộc khi file chưa xác nhận bản mới nhất | `extractResponseSchema` — **trả ngay** (`status = extracting`, `paused = null`), chạy nền một mạch I-4 ⇒ finalize ⇒ 1.11–1.12; FE poll #4 tới `gap_review` / `incomplete` hoặc có `paused` | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` (bỏ tick "bản mới nhất" — import không chạy) |
+| 7 | `PATCH /projects/:id/import/fields` | UC-22, 1.9 | `fieldsPatchRequestSchema` — **FLF-343: chỉ bản ghi cũ** ở `fields_review` | `importStateResponseSchema` | `IMPORT_INVALID_STATE` |
+| 8 | `POST /projects/:id/import/finalize` | 1.10–1.12 | `finalizeRequestSchema` (+ `complete?: boolean` — FLF-336). **FLF-343:** chế độ 1 không gọi #8 — job finalize nối tiếp I-4 tự lấy `base_version` = Spine hiện tại trên server (không có 409), Record of Changes đọc từ file; #8 chỉ còn cho `incomplete` ⇒ "Hoàn thiện" (`complete: true`) và bản ghi cũ ở `baselining`, khi đó `base_version` của client vẫn được kiểm | `finalizeResponseSchema` — **trả ngay** (`status = baselining`, `baseline: null`, `flags: null`), finalize + 1.11–1.12 chạy nền; FE poll #4 tới `gap_review` hoặc có `paused` (§4.16). **FLF-336 I-5**: trước khi chụp v0, Code so bố cục file với cấu trúc đích (`Project.template_intent` `free` ⇒ mẫu chuẩn FlintFlow tối thiểu, `fixed` ⇒ chính heading của mẫu); còn mục thiếu ⇒ dừng ở `incomplete` (**không có v0**), #4 trả `target_structure` (`resolved_mode` 3 / 4). Từ `incomplete` gọi lại #8 với `complete: true` ⇒ chạy lại từ mốc và tạo v0 như cũ (lát 1 — vòng rà soát + Luồng 2 cho phần thiếu là lát sau); thiếu `complete` ⇒ `IMPORT_INVALID_STATE` | `IMPORT_INVALID_STATE`; `SPINE_VERSION_CONFLICT` chỉ khi gọi tay (#8) với `base_version` cũ |
 | 9 | `GET /projects/:id/gap-report?format=json\|docx` | UC-23, 1.13 | `gapReportQuerySchema` | `gapReportSchema` (FLF-336: thêm `target_structure`); `docx` trả file, không bọc envelope. Có từ `incomplete` ("Dừng, tải gap report") | `IMPORT_INVALID_STATE` (chưa tới `incomplete` / `gap_review`) |
-| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — **trả ngay**, chạy nền: `extracting` như #6; `baselining` (đã từng finalize, job lỗi / mất) ⇒ chạy lại finalize; `checking` ⇒ 1.11–1.12 (§4.16) | `IMPORT_INVALID_STATE` |
+| 10 | `POST /projects/:id/import/resume` | UC-61, UC-75 | `importResumeRequestSchema` | `extractResponseSchema` — **trả ngay**, chạy nền: `extracting` như #6 (rồi nối tiếp tới `gap_review`); `baselining` (đã từng finalize, job lỗi / mất) ⇒ chạy lại finalize; `baselining` chưa có mốc / bản ghi cũ `fields_review` ⇒ finalize một mạch (FLF-343); `checking` ⇒ 1.11–1.12 (§4.16) | `IMPORT_INVALID_STATE`, `IMPORT_NEEDS_LATEST_CONFIRM` |
 | 11 | `POST /projects/:id/reupload` | UC-24, 1.4 | multipart như #2 | `reuploadDiffDtoSchema` — **không** tạo version | `IMPORT_FILE_REJECTED`, `IMPORT_STAMP_FOREIGN_PROJECT`, `IMPORT_INVALID_STATE` (chưa có baseline) |
 | 12 | `GET /projects/:id/versions` | UC-54 | — | `DocVersion[]`, mới nhất trước | — |
 | 13 | `GET /projects/:id/versions/:v/blocks` | UC-54 | — | `DocBlock[]` theo thứ tự tài liệu; bản draft có `revisions[]` | `DOC_VERSION_NOT_FOUND` |
-| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT, tên `…_v0.2_DRAFT.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx` | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng) |
+| 14 | `GET /projects/:id/versions/:v/download?variant=auto\|tracked&format=docx\|pdf&lang=vi\|en` | UC-57 | `downloadQuerySchema` | file `.docx`: release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên file + stamp theo FLF-334 (§ cuối): `<tên>_v2.0.docx`, `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0_DRAFT.docx`, `…_tracked_DRAFT.docx`, `…_original.docx`. `format=pdf` (FLF-316): chính file đó chuyển qua Gotenberg, đuôi `.pdf`; `variant=original` chỉ có `.docx`. `lang` (FLF-334 B, § cuối) | `DOC_VERSION_NOT_FOUND`, `503 PDF_EXPORT_UNAVAILABLE` (format=pdf, Gotenberg không sẵn sàng), `409 TRANSLATION_INCOMPLETE`, `409 DOCUMENT_LANGUAGE_UNAVAILABLE`, `400 VALIDATION_ERROR` (`variant` tracked/original + `lang` khác) |
 | 15 | `GET /projects/:id/versions/compare?from=&to=` | UC-55 | `compareQuerySchema` | `compareResponseSchema` | `DOC_VERSION_NOT_FOUND`, `VALIDATION_ERROR` |
 | 16 | `POST /projects/:id/change-requests` | UC-48, 3.1 | (FLF-338: `source.kind` thêm `reference_document`) `createChangeRequestSchema` (UC-49: `comment_id?` `CM-nnn` — tạo CR từ comment còn mở, cần `source.kind = viewer_comment`; tạo xong comment thành `converted` + `cr_id`, báo tác giả comment) | `changeRequestDetailSchema` (`status = draft`) | `CR_SOURCE_REQUIRED`, `CR_REQUIRES_BASELINE`; với `comment_id`: `400 VALIDATION_ERROR` (nguồn khác `viewer_comment`), `404 COMMENT_NOT_FOUND`, `409 COMMENT_NOT_OPEN` |
 | 17 | `GET /projects/:id/change-requests?status=` | UC-48 | `listChangeRequestsQuerySchema` | `ChangeRequest[]`, mới nhất trước | — |
@@ -378,6 +390,12 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
 
 ### 4.15 Ước tính credit I-4 trước khi trích (chỉ thêm field)
 
+> **FLF-343:** ước tính của cả lượt một mạch, báo **một lần** ngay sau upload: thêm `check_calls` (lô 1.11 theo cách chia lô của
+> lượt chạy + một lượt kiểm chéo, giá `import_semantic_check` / `import_cross_check`), đã gộp vào `ai_calls` và `credits`. Credit
+> thực trừ ≤ con số đã báo (cận trên: sau finalize section tạm đổi sang id thật ngắn hơn nên số lô kiểm tra không tăng); thiếu
+> giữa chừng ⇒ `paused: credits` như cũ, nạp rồi #10 chạy tiếp tới `gap_review`. FE khoá nút Bắt đầu khi `available_credits`
+> (hoặc số dư header) nhỏ hơn `credits`.
+
 - **#4 `getImportResponseSchema.credit_estimate?`** (`nullable`): `{ text_batches, diagram_images, ai_calls, credits,
   available_credits }`. Chỉ tính khi import ở `mapping_review`, hoặc `extracting` mà job nền chưa chạy / đang `paused`; trạng
   thái khác hoặc job đang chạy ⇒ `null`. Đếm từ **chính kế hoạch lượt của I-4** (`planPendingSections` — lô chữ còn lại sau
@@ -425,6 +443,14 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 - Không có endpoint mới; embedding không trừ credit (chờ nhóm chốt — `docs/spec-gaps.md`). Vận hành: `docs/ops.md`.
 
 ## 3. Lịch sử thay đổi contract
+
+- **FLF-343 (2026-10-30) — chế độ 1 một mạch, chỉ thêm field / giá trị enum:** #6 `confirm_latest?`; #4 `credit_estimate.check_calls?`
+  (ước tính gồm kiểm tra AI); `heading_map[] / table_map[].auto_confirmed?`; `detected_by` thêm `toc` · `numbering` · `format`
+  (I-3 dùng mục lục, đánh số tự động `numPr`, in đậm / cỡ chữ làm tín hiệu — mục lục không bao giờ thành block nội dung, kể cả
+  mục lục gõ tay); cờ vàng mới `import_needs_review` ("Cần xem"). Không còn điểm dừng `awaiting_latest_confirm` / `mapping_review` /
+  `fields_review` / nút tạo baseline cho file mới — #3, #5, #7 chỉ phục vụ bản ghi cũ; #8 còn cho `incomplete` (Hoàn thiện). Độ
+  tin item AI ở I-4 = điểm AI × 0.6 + trung bình tín hiệu code × 0.4 (nguồn block hợp lệ, khoá / giá trị khớp chữ nguồn, độ tin
+  khớp mục). §0.1, bảng #3–#10, §4.15.
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
@@ -519,3 +545,29 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 
 Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
 (không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
+
+## FLF-334 (2026-10-29) — tên file tải về + stamp mang nhãn version
+
+**Đổi tên file + additive stamp** ⇒ PR nhãn `contract-change`. Một quy tắc tên chung cho #14 (mode 1) và `export/word` / `export/pdf` (mode 2, `pipeline-contract.md` #18/#34), Word lẫn PDF (`versionFileName`, `doc-version/versioning.ts`). **Không còn mã dự án trong tên** — máy nhận dự án qua stamp (`flintflow_project_id`).
+
+- `<tên>` = tên dự án, bỏ ký tự Windows cấm (`\ / : * ? " < > |` ⇒ `_`), giữ chữ Unicode; rỗng ⇒ `SRS`. Header luôn `Content-Disposition: attachment; filename*=UTF-8''<tên mã hoá>` (mode 2 trước đây là `filename="<slug ASCII>"`). `.pdf` = cùng tên, đổi đuôi.
+- Release (`x.0`, x ≥ 1; mode 2: baseline): `<tên>_v2.0.docx`. Baseline `0.x` (bản import) không phải release ⇒ xuất ra `<tên>_v0_DRAFT.docx`, stamp `kind: draft`.
+- Bản nháp mode 1: `<tên>_v<gốc>+<CR mới nhất>_DRAFT.docx` — gốc = version release (`x.0`) gần nhất trước nó (theo số, kể cả bản `1.0` chuyển đổi FLF-318), `v0` khi chưa release; CR = mã CR cuối của version gần nhất (tính cả chính nó, sau gốc) có CR — bản nháp cũ trong lịch sử mang CR của chính nó. Không có CR (bản import `0.1`/`0.0`) ⇒ `<tên>_v0_DRAFT.docx`.
+- Bản nháp mode 2: có baseline ⇒ `<tên>_v<baseline cuối>_DRAFT.docx`; chưa có ⇒ `<tên>_DRAFT.docx`.
+- `variant=tracked` thêm `_tracked` trước `_DRAFT`; `variant=original` dùng `_original` thay `_DRAFT`.
+- **Stamp** (`docProps/custom.xml`) thêm 3 property, chỉ ghi lên **file tải về / xuất ra** (file lưu trong GridFS không đổi; `variant=original` trả nguyên byte file upload):
+  - `flintflow_base_version` — gốc như trên (`2.0`, `1.0`, `0`); mode 2 chưa baseline ⇒ không ghi.
+  - `flintflow_latest_cr` — CR mới nhất của bản nháp mode 1; release / mode 2 ⇒ không ghi.
+  - `flintflow_kind` — `release` | `draft`.
+  - `flintflow_version` giữ nghĩa cũ (version nội bộ `1.2`, nhãn mode 2). File thiếu property mới (stamp cũ) ⇒ đọc ra `null`; preflight, import, re-upload chấp nhận y như trước.
+- `ImportedDocumentDto.stamp` / `meta.stamp` của `IMPORT_STAMP_FOREIGN_PROJECT` (`docStampSchema`) thêm `base_version`, `latest_cr`, `kind` — đều `string | null`, mặc định `null`.
+
+## FLF-334 B (2026-10-29) — tải version theo ngôn ngữ còn lại
+
+**Additive** ⇒ PR nhãn `contract-change` (cùng `pipeline-contract.md` #18/#34/#26/#27).
+
+- #14 nhận `lang=vi|en` (`downloadQuerySchema`). Không truyền / = ngôn ngữ tài liệu ⇒ y như trước.
+- `lang` khác chỉ cho version **có snapshot baseline** (`baseline_ref`: release, bản `1.0` chuyển đổi) của dự án **chuyển từ mode 2** (`converted_from = "fpt"`): dựng lại từ `Baseline.snapshot` theo mẫu FPT bằng `lang` (qua lớp bản dịch khi `lang` ≠ `en`), rồi stamp / watermark / tên như phần A + hậu tố `_EN` / `_VI` (`<tên>_v2.0_VI.docx`). File dựng mỗi lần, **không** ghi GridFS; file lưu của version giữ ngôn ngữ tài liệu.
+- Còn đơn vị chưa dịch ⇒ `409 TRANSLATION_INCOMPLETE` `meta { locale, missing, total }` (đếm trên snapshot của version). Dịch nốt qua `pipeline-contract.md` #26 `?locale=&version=` / #27 `{ locale, version }` — đếm / dịch đúng snapshot baseline của version đó.
+- Bản nháp CR (không có baseline), dự án import thật (đường layout) ⇒ `409 DOCUMENT_LANGUAGE_UNAVAILABLE`; `variant=tracked|original` + `lang` khác ⇒ `400 VALIDATION_ERROR`.
+- `DocVersionDto` thêm `other_language_available: boolean` (#12, response release) — `false` ⇒ FE ẩn lựa chọn ngôn ngữ.

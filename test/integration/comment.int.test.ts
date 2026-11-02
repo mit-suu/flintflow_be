@@ -239,11 +239,9 @@ describe("UC-49 — Viewer comment trên baseline, Analyst chuyển thành chang
     const projectId = await createMode1Project(seeded)
     const c = mode1Api(seeded, projectId)
     const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-    await c.post("/import/confirm-latest", { import_id: id })
-    await c.extractAndWait(id)
-    await c.patch("/import/fields", { import_id: id, confirm_all: true })
-    const fin = await c.finalizeAndWait(id)
+    const fin = await c.extractAndWait(id)
     expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
+    expect(fin.run?.import.status).toBe("gap_review")
 
     const viewerUser = await join(seeded, "viewer@flintflow.test", "viewer")
     const viewer = api(projectId, viewerUser.token)
