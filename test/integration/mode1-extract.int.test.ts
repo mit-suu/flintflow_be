@@ -183,7 +183,7 @@ describe("mode 1 — finalize, check, gap report", () => {
     const version = await DocVersion.findOne({ projectId, version: "0.1" }).lean()
     expect(version).toMatchObject({ kind: "imported", baseline_ref: baseline!.id })
     const pkg = await DocxPackage.load(await docFileStore().load(version!.original_ref ?? version!.file_ref))
-    expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.1", source: "import" })
+    expect(await readStamp(pkg)).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: null, latest_cr: null, kind: null })
     expect((await readBlocks(pkg))[0].bookmark).toBe("_ff_B0001")
 
     const report = gapReportSchema.parse((await c.get("/gap-report")).body.data)

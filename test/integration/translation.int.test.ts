@@ -23,8 +23,11 @@ import { TranslationRunLock } from "../../src/modules/translation/translation-ru
 import * as translationRepository from "../../src/modules/translation/translation.repository.js"
 import { hashSource } from "../../src/modules/translation/translation-units.js"
 import { translationRunResponseSchema, translationStatusResponseSchema } from "../../src/modules/pipeline/pipeline.dto.js"
-import { authAs, seedFixture, type SeededFixture } from "../setup.js"
+import { authAs, readFixtureJson, seedFixture, type SeededFixture } from "../setup.js"
+import { gridFsDiagramStore } from "../../src/modules/diagram/diagram-file.store.js"
 import { mockCalls, mockOverrides, resetMockLlm } from "../helpers/mock-llm.js"
+
+const PNG_1X1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64")
 
 const bearer = (token: string) => ({ Authorization: "Bearer " + token })
 
@@ -311,5 +314,97 @@ describe("translation.repository trên Mongo thật", () => {
     expect(await SpineTranslation.countDocuments({ projectId: seeded.projectId })).toBe(0)
     expect(await TranslationGlossary.countDocuments({ projectId: seeded.projectId })).toBe(0)
     expect(await TranslationRunLock.countDocuments({ projectId: seeded.projectId })).toBe(0)
+  })
+})
+
+describe("FLF-334 B — dịch nốt rồi tải theo ngôn ngữ còn lại", () => {
+  it("dự án en: export lang=vi 409 ⇒ run { locale: vi } tới khi hết ⇒ export lang=vi 200; ngôn ngữ dự án không đổi", async () => {
+    const base = `/api/v1/projects/${seeded.projectId}`
+    const blocked = await request(app).get(`${base}/export/word?source=draft&lang=vi`).set(bearer(seeded.token))
+    expect(blocked.status).toBe(409)
+    expect(blocked.body.error.code).toBe("TRANSLATION_INCOMPLETE")
+
+    const before = translationStatusResponseSchema.parse((await request(app).get(`${base}/translations/status?locale=vi`).set(bearer(seeded.token))).body.data)
+    expect(before).toMatchObject({ locale: "vi", missing: blocked.body.meta.missing })
+
+    mockOverrides.next = echoTranslate
+    for (let i = 0; i < 20; i++) {
+      const res = await run(seeded.projectId, seeded.token, { max_batches: 10, locale: "vi" })
+      expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+      if (res.body.data.remaining === 0 || res.body.data.translated === 0) break
+      mockOverrides.next = echoTranslate
+    }
+    expect((await request(app).get(`${base}/translations/status?locale=vi`).set(bearer(seeded.token))).body.data.missing).toBe(0)
+
+    const ok = await request(app).get(`${base}/export/word?source=draft&lang=vi`).set(bearer(seeded.token))
+    expect(ok.status).toBe(200)
+    expect(ok.headers["x-document-language"]).toBe("vi")
+    expect((await Project.findById(seeded.projectId).lean())?.documentLanguage ?? "en").toBe("en")
+    // Không truyền locale ⇒ ngôn ngữ tài liệu (en = gốc) ⇒ không có gì để dịch
+    expect((await status(seeded.projectId, seeded.token)).body.data).toMatchObject({ locale: "en", total: 0 })
+  })
+
+  it("locale lạ trong body ⇒ 400", async () => {
+    const res = await run(seeded.projectId, seeded.token, { locale: "fr" })
+    expect(res.status).toBe(400)
+    expect(res.body.error.code).toBe("VALIDATION_ERROR")
+  })
+})
+
+describe("FLF-334 B — Dịch nốt baseline cũ của dự án mode 2 qua đích baseline_id", () => {
+  it("chữ đổi sau BL001 ⇒ export baseline lang=vi 409; run { locale: vi, baseline_id } tới khi hết ⇒ 200", async () => {
+    const base = `/api/v1/projects/${seeded.projectId}`
+    for (const d of readFixtureJson<{ diagrams: Array<{ id: string; render_status: string }> }>("spine-fixture-19-screens.json").diagrams) {
+      if (d.render_status === "ok") await gridFsDiagramStore.save(seeded.projectId, d.id, "png", { data: PNG_1X1, contentType: "image/png" })
+    }
+    const signed = await request(app).post(`${base}/baseline`).set(bearer(seeded.token)).send({ base_version: seeded.spineVersion })
+    expect(signed.status, JSON.stringify(signed.body.error)).toBe(201)
+    // Dự án mode 2 có baseline mà không chuyển sang mode 1 (chuyển đổi lỗi / dữ liệu trước FLF-318)
+    await Project.updateOne({ _id: seeded.projectId }, { mode: "fpt", $unset: { converted_from: 1, converted_at: 1, import_state: 1 } })
+    const spineVersion = (await request(app).get(`${base}/spine`).set(bearer(seeded.token))).body.data.spine_version as number
+    const changed = await request(app)
+      .post(`${base}/changes`)
+      .set(bearer(seeded.token))
+      .send({ base_version: spineVersion, reason: "Đổi tên", change_request: { requester: "PM", source: { kind: "verbal" } }, ops: [{ op: "set", path: "actors[id=A01].name", value: "Renamed actor after baseline" }] })
+    expect(changed.status, JSON.stringify(changed.body.error)).toBe(200)
+
+    const exportBaseline = () =>
+      request(app).get(`${base}/export/word?source=baseline&baseline_id=BL001&lang=vi`).set(bearer(seeded.token))
+    const blocked = await exportBaseline()
+    expect(blocked.status).toBe(409)
+    expect(blocked.body.error.code).toBe("TRANSLATION_INCOMPLETE")
+    const statusOf = async (query: string) =>
+      translationStatusResponseSchema.parse((await request(app).get(`${base}/translations/status?${query}`).set(bearer(seeded.token))).body.data)
+    expect((await statusOf("locale=vi&baseline_id=BL001")).missing).toBe(blocked.body.meta.missing)
+
+    // Dịch Spine hiện tại không đủ: tên cũ của A01 chỉ còn trong snapshot BL001
+    mockOverrides.next = echoTranslate
+    const runUntilDone = async (body: object) => {
+      for (let i = 0; i < 20; i++) {
+        mockOverrides.next = echoTranslate
+        const res = await run(seeded.projectId, seeded.token, { max_batches: 10, ...body })
+        expect(res.status, JSON.stringify(res.body.error)).toBe(200)
+        if (res.body.data.remaining === 0 || res.body.data.translated === 0) break
+      }
+    }
+    await runUntilDone({ locale: "vi" })
+    expect((await statusOf("locale=vi")).missing).toBe(0)
+    expect((await statusOf("locale=vi&baseline_id=BL001")).missing).toBeGreaterThan(0)
+    expect((await exportBaseline()).status).toBe(409)
+
+    await runUntilDone({ locale: "vi", baseline_id: "BL001" })
+    expect((await statusOf("locale=vi&baseline_id=BL001")).missing).toBe(0)
+    const ok = await exportBaseline()
+    expect(ok.status).toBe(200)
+    expect(ok.headers["x-document-language"]).toBe("vi")
+    expect(decodeURIComponent(ok.headers["content-disposition"])).toMatch(/_v1\.0_VI\.docx$/)
+  })
+
+  it("cả baseline_id lẫn version ⇒ 400; baseline lạ ⇒ 404", async () => {
+    const res = await run(seeded.projectId, seeded.token, { locale: "vi", baseline_id: "BL001", version: "1.0" })
+    expect(res.status).toBe(400)
+    const unknown = await request(app).get(`/api/v1/projects/${seeded.projectId}/translations/status?locale=vi&baseline_id=BL999`).set(bearer(seeded.token))
+    expect(unknown.status).toBe(404)
+    expect(unknown.body.error.code).toBe("BASELINE_NOT_FOUND")
   })
 })

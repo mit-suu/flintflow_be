@@ -82,7 +82,7 @@ export const getDocumentController = catchAsync(async (req: Request, res: Respon
   const query = parse(documentQuerySchema, req.query)
 
   try {
-    // FLF-265: ngôn ngữ lấy từ project (`documentQuerySchema` đóng băng — `?lang=` bị parse lọc bỏ)
+    // FLF-265: ngôn ngữ lấy từ project — xem trước không nhận `?lang=` (chỉ tải file #18/#34, FLF-334 B)
     const result = await getDocumentWithMeta(projectId, projectName, { ...query, languages: { locale: documentLanguage, source: sourceLanguage } })
     // review C2: source=draft trước đây trả im lặng bản cache mới nhất dù Spine đã đổi tiếp — đính
     // kèm độ mới để caller (FE) tự quyết định có báo "tài liệu đang xem đã cũ" hay không.

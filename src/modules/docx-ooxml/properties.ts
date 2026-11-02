@@ -3,7 +3,7 @@
  * Tên property giống `render/docx-writer.ts` (mode 2) nên đọc được cả file do mode 2 xuất.
  */
 
-import { STAMP_PROPERTY } from "../import/import.constants.js"
+import { STAMP_KINDS, STAMP_PROPERTY, type StampKind } from "../import/import.constants.js"
 import type { DocxPackage } from "./package.js"
 import { CONTENT_TYPE, NS, REL_TYPE } from "./xml.js"
 
@@ -15,7 +15,13 @@ export interface Stamp {
   project_id: string
   version: string | null
   source: string | null
+  /** FLF-334 — file cũ không có ⇒ `null`; ghi mà bỏ trống (`undefined`) ⇒ xoá property cũ như `null`. */
+  base_version?: string | null
+  latest_cr?: string | null
+  kind?: StampKind | null
 }
+
+const toKind = (value: string | undefined): StampKind | null => (STAMP_KINDS as readonly string[]).includes(value ?? "") ? (value as StampKind) : null
 
 export const readCustomProperties = async (pkg: DocxPackage): Promise<Record<string, string>> => {
   const doc = await pkg.xml(CUSTOM_PROPS_PART)
@@ -33,7 +39,14 @@ export const readStamp = async (pkg: DocxPackage): Promise<Stamp | null> => {
   const props = await readCustomProperties(pkg)
   const projectId = props[STAMP_PROPERTY.project_id]
   if (!projectId) return null
-  return { project_id: projectId, version: props[STAMP_PROPERTY.version] ?? null, source: props[STAMP_PROPERTY.source] ?? null }
+  return {
+    project_id: projectId,
+    version: props[STAMP_PROPERTY.version] ?? null,
+    source: props[STAMP_PROPERTY.source] ?? null,
+    base_version: props[STAMP_PROPERTY.base_version] || null,
+    latest_cr: props[STAMP_PROPERTY.latest_cr] || null,
+    kind: toKind(props[STAMP_PROPERTY.kind])
+  }
 }
 
 /** Ghi (thêm hoặc đè) stamp; tạo `custom.xml` + rels gốc + content type nếu chưa có. */
@@ -52,7 +65,10 @@ export const writeStamp = async (pkg: DocxPackage, stamp: Stamp): Promise<void> 
   const values: [string, string | null][] = [
     [STAMP_PROPERTY.project_id, stamp.project_id],
     [STAMP_PROPERTY.version, stamp.version],
-    [STAMP_PROPERTY.source, stamp.source]
+    [STAMP_PROPERTY.source, stamp.source],
+    [STAMP_PROPERTY.base_version, stamp.base_version ?? null],
+    [STAMP_PROPERTY.latest_cr, stamp.latest_cr ?? null],
+    [STAMP_PROPERTY.kind, stamp.kind ?? null]
   ]
   for (const [name, value] of values) {
     let p = props.find((x) => x.getAttribute("name") === name)

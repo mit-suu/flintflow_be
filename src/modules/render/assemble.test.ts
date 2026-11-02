@@ -613,7 +613,7 @@ describe("_internal.buildDocument — tên hệ thống (FLF-177)", () => {
   it("bìa/tiêu đề/tên file lấy project.system_name", async () => {
     const doc = await build({ ...baseSpine(), project: { ...baseSpine().project, system_name: "ShipFast Delivery" } })
     expect(doc.projectName).toBe("ShipFast Delivery")
-    expect(buildDocxFileName(doc)).toBe("shipfast-delivery-v0.1-draft.docx")
+    expect(buildDocxFileName(doc)).toBe("ShipFast Delivery_v0_DRAFT.docx")
   })
 
   it("chưa đặt system_name ⇒ tên project truyền vào như trước", async () => {

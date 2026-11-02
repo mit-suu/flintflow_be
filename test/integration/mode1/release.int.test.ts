@@ -138,7 +138,7 @@ describe("release — bản sạch + baseline", () => {
     // bản sạch = bản render (file_ref và clean_file_ref cùng một file)
     expect(v10!.clean_file_ref).toBe(v10!.file_ref)
     const clean = await DocxPackage.load(await docFileStore().load(v10!.clean_file_ref!))
-    expect(await readStamp(clean)).toEqual({ project_id: projectId, version: "1.0", source: "release" })
+    expect(await readStamp(clean)).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: null, latest_cr: null, kind: null })
     const cleanXml = await documentXml(await docFileStore().load(v10!.clean_file_ref!))
     expect(cleanXml).not.toMatch(/<w:ins\b|<w:del\b|<w:delText\b|commentReference|commentRangeStart/)
     const cleanBlocks = await readBlocks(clean)
@@ -147,7 +147,8 @@ describe("release — bản sạch + baseline", () => {
 
     // tải về 1.0 ⇒ bản sạch không _DRAFT
     const dl = await binary(c.get("/versions/1.0/download"))
-    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain(`Lumen LMS_${projectId}_v1.0.docx`)
+    expect(decodeURIComponent(String(dl.headers["content-disposition"]))).toContain("Lumen LMS_v1.0.docx")
+    expect(await readStamp(await DocxPackage.load(dl.body as Buffer))).toEqual({ project_id: projectId, version: "1.0", source: "release", base_version: "1.0", latest_cr: null, kind: "release" })
     expect(await documentXml(dl.body as Buffer)).not.toMatch(/<w:ins\b|<w:del\b/)
 
     // FLF-316: format=pdf đi qua Gotenberg — test trỏ cổng đóng ⇒ 503 có mã riêng, bản .docx vẫn tải được

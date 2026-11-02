@@ -17,6 +17,7 @@ import {
   stepAnswerRequestSchema,
   stepEventSchema,
   translationRunRequestSchema,
+  translationStatusQuerySchema,
   translationStatusResponseSchema,
   waiveRequestSchema
 } from "./pipeline.dto.js"
@@ -49,7 +50,20 @@ describe("pipeline.dto", () => {
     expect(translationRunRequestSchema.safeParse({ max_batches: 5 }).success).toBe(true)
     expect(translationRunRequestSchema.safeParse({ max_batches: 0 }).success).toBe(false)
     expect(translationRunRequestSchema.safeParse({ max_batches: 11 }).success).toBe(false)
-    expect(translationRunRequestSchema.safeParse({ locale: "vi" }).success).toBe(false)
+    // FLF-334 B: `locale` tuỳ chọn (vi | en), chỉ thêm — key lạ khác vẫn bị từ chối
+    expect(translationRunRequestSchema.safeParse({ locale: "vi" }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ locale: "fr" }).success).toBe(false)
+    expect(translationRunRequestSchema.safeParse({ lang: "vi" }).success).toBe(false)
+    // Đích snapshot (FLF-334 B vòng 1): baseline_id HOẶC version, không cả hai
+    expect(translationRunRequestSchema.safeParse({ locale: "vi", baseline_id: "BL001" }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ locale: "vi", version: "1.0" }).success).toBe(true)
+    expect(translationRunRequestSchema.safeParse({ version: "v1" }).success).toBe(false)
+    expect(translationRunRequestSchema.safeParse({ baseline_id: "BL001", version: "1.0" }).success).toBe(false)
+    expect(translationStatusQuerySchema.safeParse({ locale: "vi", version: "2.0" }).success).toBe(true)
+    expect(translationStatusQuerySchema.safeParse({ baseline_id: "BL001", version: "1.0" }).success).toBe(false)
+    // strict như run: key lạ (vd `lang`) ⇒ từ chối, không lặng lẽ đếm ngôn ngữ tài liệu
+    expect(translationStatusQuerySchema.safeParse({ lang: "vi" }).success).toBe(false)
+    expect(translationStatusQuerySchema.safeParse({ version: "01.0" }).success).toBe(false)
     const status = { locale: "vi", source_locale: "en", total: 800, missing: 120, batches: 3, estimated_credits: 6 }
     expect(translationStatusResponseSchema.safeParse(status).success).toBe(true)
     expect(translationStatusResponseSchema.safeParse({ ...status, locale: "fr" }).success).toBe(false)
