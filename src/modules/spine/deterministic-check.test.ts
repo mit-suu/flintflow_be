@@ -814,5 +814,10 @@ describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () 
     expect(absent.every((f) => f.level === "yellow" && f.section_id !== "fixed:1")).toBe(true)
     // Không có layout ⇒ hai luật không chạy
     expect(runDeterministicCheck(spine).some((f) => f.rule_id.startsWith("template_section_"))).toBe(false)
+    // Heading bao (chỉ chứa mục con) trống ⇒ không cờ
+    const wrapped = runDeterministicCheck(spine, [], {
+      ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout, templateWrappers: new Set(["custom:CS01"]) }
+    })
+    expect(wrapped.some((f) => f.rule_id === "template_section_empty")).toBe(false)
   })
 })
