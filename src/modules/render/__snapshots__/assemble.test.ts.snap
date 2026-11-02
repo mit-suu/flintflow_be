@@ -1312,6 +1312,14 @@ exports[`DoD1 — snapshot RenderedDocument từ fixture 19 màn > snapshot ổn
           "png": 96,
           "type": "image",
         },
+        {
+          "runs": [
+            {
+              "text": "Rectangles are screens, ovals are pop-ups and a framed box lists the tabs of a screen; arrows show navigation. Blue screens are used by every kind of user.",
+            },
+          ],
+          "type": "paragraph",
+        },
       ],
       "heading": "Screens Flow",
       "id": "fixed:3.1.1",

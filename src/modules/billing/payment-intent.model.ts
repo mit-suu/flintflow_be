@@ -90,6 +90,8 @@ const paymentIntentSchema = new Schema<IPaymentIntent>(
 )
 
 paymentIntentSchema.index({ userId: 1, createdAt: -1 })
+// UC-59: thanh toán đang chờ / lỗi trong lịch sử credit của org
+paymentIntentSchema.index({ organizationId: 1, status: 1, createdAt: -1 })
 // Unique chỉ trên intent đã có order (intent tạo order lỗi giữ paymentOrderId = null)
 paymentIntentSchema.index(
   { paymentOrderId: 1 },

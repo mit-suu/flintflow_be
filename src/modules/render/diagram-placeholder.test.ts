@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { imageSize } from "image-size"
-import { buildPlaceholderPng, DIAGRAM_PLACEHOLDER_HEIGHT, DIAGRAM_PLACEHOLDER_PNG, DIAGRAM_PLACEHOLDER_WIDTH, pendingImageCaption } from "./diagram-placeholder.js"
+import { buildPlaceholderPng, DIAGRAM_PLACEHOLDER_HEIGHT, DIAGRAM_PLACEHOLDER_PNG, DIAGRAM_PLACEHOLDER_WIDTH, diagramErrorId, diagramErrorMarker, pendingImageCaption } from "./diagram-placeholder.js"
 
 describe("diagram-placeholder", () => {
   it("là PNG hợp lệ đúng kích thước — image-size (writer .docx) đọc được", () => {
@@ -18,5 +18,13 @@ describe("diagram-placeholder", () => {
   it("caption nêu rõ sơ đồ chưa render, giữ caption gốc nếu có", () => {
     expect(pendingImageCaption("Use Case Diagram", "D02")).toBe("Use Case Diagram — image pending: diagram D02 has not been rendered yet")
     expect(pendingImageCaption(undefined, "D02")).toBe("image pending: diagram D02 has not been rendered yet")
+  })
+
+  it("marker sơ đồ vẽ lỗi: diagram-error:<id> đọc lại được id; PNG thật, Buffer, diagram-ref ⇒ null", () => {
+    expect(diagramErrorMarker("D07")).toBe("diagram-error:D07")
+    expect(diagramErrorId(diagramErrorMarker("D07"))).toBe("D07")
+    expect(diagramErrorId(DIAGRAM_PLACEHOLDER_PNG)).toBeNull()
+    expect(diagramErrorId("diagram-ref:D07")).toBeNull()
+    expect(diagramErrorId(Buffer.from("diagram-error:D07"))).toBeNull()
   })
 })

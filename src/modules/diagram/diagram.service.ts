@@ -30,8 +30,11 @@ import { isPlantUmlReachable, renderPlantUml } from "../../shared/diagram/plantu
 import { svgToPng } from "../../shared/diagram/svg-to-png.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { CONTENT_TYPES, gridFsDiagramStore, type DiagramFileFormat, type DiagramFileStore, type StoredDiagramFile } from "./diagram-file.store.js"
-import { allTargets, renderKind, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
+import { allTargets, renderKind, targetOfDiagram, type DiagramKind, type RenderTarget, type RenderedDiagramPart } from "./renderers/index.js"
+import { svgTitleOf } from "./renderers/common.js"
 import { aiScreenLayout, noAiLayout, type DrawLayout } from "./screen-layout.ai.js"
+import type { RenderContext } from "../../shared/diagram/erd-notation.js"
+import { loadRenderContext } from "./render-context.js"
 
 export const DIAGRAM_NOT_FOUND = "DIAGRAM_NOT_FOUND"
 /** Phases §4.1: compile-check → sửa → thử lại, tối đa 2 lần. */
@@ -57,6 +60,8 @@ export interface DiagramServiceDeps {
   fix: FixPuml
   /** Wireframe màn bằng model; mặc định không gọi model (bảng function). Nơi gọi thật cắm `aiScreenLayout`. */
   drawLayout: DrawLayout
+  /** Dữ liệu ngoài Spine cho hình (ký pháp ERD của dự án). */
+  renderContext: (projectId: string) => Promise<RenderContext>
   now: () => Date
 }
 
@@ -80,6 +85,7 @@ export const defaultDeps = (): DiagramServiceDeps => ({
   store: gridFsDiagramStore,
   fix: noAutoFix,
   drawLayout: noAiLayout,
+  renderContext: loadRenderContext,
   now: () => new Date()
 })
 
@@ -144,7 +150,11 @@ const nextIdFactory = (diagrams: Diagram[]): (() => string) => {
   return () => `D${String(++n).padStart(2, "0")}`
 }
 
-const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (d.owner_id ?? null) === (t.owner_id ?? null)
+/** Kind có nhiều chủ trong một target: `class` (feature), `state_machine` (entity), `sequence` (function). */
+const MULTI_OWNER_KINDS: ReadonlySet<DiagramKind> = new Set<DiagramKind>(["class", "state_machine", "sequence"])
+
+/** Hình của kind nhiều chủ đều thuộc target của kind đó. */
+const sameTarget = (d: Diagram, t: RenderTarget): boolean => d.kind === t.kind && (MULTI_OWNER_KINDS.has(t.kind) || (d.owner_id ?? null) === (t.owner_id ?? null))
 
 /**
  * Id cho các phần của một target. Phần đầu **giữ nguyên id đang có**, dù id đó có hậu tố hay không;
@@ -162,6 +172,21 @@ const assignIds = (existing: Diagram[], count: number, nextId: () => string): st
   if (count === 1) return [first]
   const stem = first.replace(PART_SUFFIX, "")
   return [first, ...Array.from({ length: count - 1 }, (_, i) => `${stem}-${i + 2}`)]
+}
+
+/**
+ * Id cho các phần của một target. `class` / `state_machine` / `sequence` có nhiều chủ (mỗi feature / entity / function một hình, class có thể tách phần): mỗi chủ một nhóm id riêng,
+ * để thêm / xoá feature không đổi id hình của feature khác (baseline đã ký giữ ảnh theo id).
+ */
+const assignPartIds = (kind: DiagramKind, existing: Diagram[], parts: readonly { owner_id: string | null }[], nextId: () => string): string[] => {
+  if (!MULTI_OWNER_KINDS.has(kind)) return assignIds(existing, parts.length, nextId)
+  const ids: string[] = new Array<string>(parts.length)
+  for (const owner of new Set(parts.map((p) => p.owner_id))) {
+    const at = parts.flatMap((p, i) => (p.owner_id === owner ? [i] : []))
+    const given = assignIds(existing.filter((d) => (d.owner_id ?? null) === owner), at.length, nextId)
+    at.forEach((partIndex, k) => (ids[partIndex] = given[k]))
+  }
+  return ids
 }
 
 // ─── render ──────────────────────────────────────────────────────
@@ -196,6 +221,22 @@ const loadSpine = async (projectId: string): Promise<SpineRecord> => {
  */
 const unchanged = (previous: Diagram | undefined, part: RenderedDiagramPart, force: boolean): previous is Diagram =>
   !force && previous !== undefined && previous.render_status === "ok" && previous.source_hash === part.source_hash
+
+/** Tiêu đề hình: `<title>` của SVG hoặc dòng `title` của `.puml`; không có ⇒ null. */
+const diagramTitle = (d: Diagram): string | null =>
+  d.format === "svg" ? svgTitleOf(d.source) : (/^title\s+(.+)$/m.exec(d.source)?.[1]?.trim() ?? null)
+
+/**
+ * Hai bản ghi có phải CÙNG một hình không — cùng loại, mục, chủ và tiêu đề. Id không đủ: kind tách nhiều phần (use case
+ * theo nhóm, class / ERD / luồng màn `(i/n)`) gán lại id theo thứ tự phần, nên khi cách chia đổi, cùng id đã là phần khác.
+ * Tiêu đề mang tên nhóm kèm `(i/n)` nên phân biệt được phần.
+ */
+export const sameDiagramSubject = (a: Diagram, b: Diagram): boolean =>
+  a.kind === b.kind &&
+  a.section === b.section &&
+  (a.owner_kind ?? null) === (b.owner_kind ?? null) &&
+  (a.owner_id ?? null) === (b.owner_id ?? null) &&
+  diagramTitle(a) === diagramTitle(b)
 
 type OkCompiled = Extract<Compiled, { ok: true }>
 
@@ -241,6 +282,7 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
   const deps: DiagramServiceDeps = { ...defaultDeps(), ...options.deps }
   const record = await loadSpine(projectId)
   const spine = stripRecord(record)
+  const context = await deps.renderContext(projectId)
   const nextId = nextIdFactory(spine.diagrams)
   const byExistingId = new Map(spine.diagrams.map((d) => [d.id, d]))
 
@@ -254,8 +296,8 @@ export const renderDiagrams = async (projectId: string, targets: RenderTarget[],
 
   for (const target of targets) {
     const existing = spine.diagrams.filter((d) => sameTarget(d, target)).sort((a, b) => (a.id < b.id ? -1 : 1))
-    const parts = renderKind(spine, target.kind, target.owner_id)
-    const ids = assignIds(existing, parts.length, nextId)
+    const parts = renderKind(spine, target.kind, target.owner_id, context)
+    const ids = assignPartIds(target.kind, existing, parts, nextId)
 
     for (const [i, part] of parts.entries()) {
       const id = ids[i]
@@ -355,9 +397,10 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
   try {
     if (!(await isPlantUmlReachable())) return null
     const spine = stripRecord(await loadSpine(projectId))
+    const context = await loadRenderContext(projectId)
     const seen = new Set<string>()
     const targets: RenderTarget[] = [
-      ...staleRenderedDiagrams(spine).map((d) => ({ kind: d.kind, owner_id: d.owner_id })),
+      ...staleRenderedDiagrams(spine, context).map(targetOfDiagram),
       ...newScreenIds.map((id) => ({ kind: "screen_layout" as const, owner_id: id }))
     ].filter((t) => {
       const key = `${t.kind}|${t.owner_id ?? ""}`
@@ -374,16 +417,16 @@ export const renderChangedIfAvailable = async (projectId: string, newScreenIds: 
 }
 
 /** Hình cần vẽ lại: hash chưa tính hoặc lệch `source_fields` hiện tại. */
-export const staleDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== renderedDiagramHash(spine, d))
+export const staleDiagrams = (spine: Spine, context: RenderContext = {}): Diagram[] =>
+  spine.diagrams.filter((d) => UNHASHED_SOURCE_HASHES.has(d.source_hash) || d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
 
 /**
  * Hình ĐÃ vẽ thành công nhưng dữ liệu nguồn đã đổi sau đó — đúng tập hợp mà luật cờ `diagram_stale` bắt.
  * Khác `staleDiagrams` ở chỗ bỏ qua hình chưa từng vẽ (hash rỗng/legacy): vẽ lại chúng tự động là đi làm
  * việc của step render, không phải sửa hậu quả của step vừa chạy (FLF-177 BUG-17).
  */
-export const staleRenderedDiagrams = (spine: Spine): Diagram[] =>
-  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== renderedDiagramHash(spine, d))
+export const staleRenderedDiagrams = (spine: Spine, context: RenderContext = {}): Diagram[] =>
+  spine.diagrams.filter((d) => d.render_status === "ok" && !UNHASHED_SOURCE_HASHES.has(d.source_hash) && d.source_hash !== renderedDiagramHash(spine, d, undefined, context))
 
 export const loadDiagramFile = async (
   projectId: string,

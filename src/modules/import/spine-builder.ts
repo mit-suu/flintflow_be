@@ -6,7 +6,7 @@
  */
 
 import type { Op } from "../spine/op.types.js"
-import type { Spine } from "../spine/spine.types.js"
+import type { EntityAttribute, EntityState, EntityTransition, FlowEdge, Spine } from "../spine/spine.types.js"
 import { IdAllocator, compactKey, idKey, nameKey, normalizeKey } from "./extracted-entities.js"
 
 export interface BuiltEntity {
@@ -63,6 +63,30 @@ const strList = (v: unknown): string[] => {
   return s ? s.split(/\n+/).map((x) => x.replace(/^\s*(?:\d+[.)]|[-•*])\s*/, "").trim()).filter(Boolean) : []
 }
 
+/**
+ * `flow_to` đọc từ tài liệu: mỗi phần tử là tên / mã màn đích, hoặc `{ to, trigger?, guard? }` khi sơ đồ ghi nhãn trên
+ * mũi tên (hành động) và trên nhánh rẽ (`[điều kiện]`). Màn đích không phân giải được, hoặc chính màn đó ⇒ bỏ; hai cạnh
+ * cùng màn đích ⇒ gộp (cạnh sau bổ sung trigger / guard còn thiếu).
+ */
+const flowEdges = (value: unknown, resolveScreen: (ref: unknown) => string | null, selfId: string): FlowEdge[] => {
+  const items: unknown[] = Array.isArray(value) ? value : strList(value)
+  const byTo = new Map<string, FlowEdge>()
+  for (const item of items) {
+    const rec = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : null
+    const to = resolveScreen(rec ? (rec.to ?? rec.screen ?? rec.target) : item)
+    if (!to || to === selfId) continue
+    const trigger = rec ? str(rec.trigger ?? rec.action ?? rec.label).trim() : ""
+    const guard = rec ? str(rec.guard ?? rec.condition).replace(/^[|]$/g, "").trim() : ""
+    const prev = byTo.get(to)
+    byTo.set(to, {
+      to,
+      ...((prev?.trigger ?? trigger) ? { trigger: prev?.trigger ?? trigger } : {}),
+      ...((prev?.guard ?? guard) ? { guard: prev?.guard ?? guard } : {})
+    })
+  }
+  return [...byTo.values()]
+}
+
 const oneOf = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T => {
   const s = str(v).toLowerCase()
   return (allowed as readonly string[]).includes(s) ? (s as T) : fallback
@@ -85,6 +109,61 @@ const uniqueIndex = (pool: readonly { id: string; name?: string }[], keyOf: (p: 
     if (k) map.set(k, map.has(k) && map.get(k) !== p.id ? null : p.id)
   }
   return map
+}
+
+/**
+ * Thuộc tính entity tài liệu / sơ đồ ghi: chuỗi (`email`) hoặc `{ name, kind, required, description }`. Trùng tên (không phân
+ * biệt hoa thường) ⇒ giữ cái đầu; `kind` lạ ⇒ `plain`; thiếu `required` ⇒ bắt buộc.
+ */
+const attributesOf = (raw: unknown): EntityAttribute[] => {
+  const out: EntityAttribute[] = []
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    const name = str(rec ? rec.name : item)
+    if (!name || out.some((a) => a.name.toLowerCase() === name.toLowerCase())) continue
+    const description = rec ? str(rec.description) : ""
+    out.push({ name, kind: oneOf(rec?.kind, ["key", "reference", "plain"], "plain"), required: rec?.required === false ? false : true, ...(description ? { description } : {}) })
+  }
+  return out
+}
+
+/**
+ * Vòng đời entity tài liệu / sơ đồ ghi: `states` là chuỗi (`Pending`) hoặc `{ name, initial, final }`; `transitions` là
+ * `{ from, to, event, guard, action }` với `from` / `to` là tên (hoặc id) trạng thái. Id trạng thái `<entity>-ST<n>` theo
+ * thứ tự ghi; trùng tên giữ cái đầu; không ghi initial ⇒ trạng thái đầu là initial (chỉ giữ một initial). Chuyển có đầu
+ * mút không khớp trạng thái nào, thiếu sự kiện, hoặc đi ra từ trạng thái final thì bỏ — không đoán.
+ */
+const lifecycleOf = (entityId: string, rawStates: unknown, rawTransitions: unknown): { states: EntityState[]; transitions: EntityTransition[] } => {
+  const states: EntityState[] = []
+  const flags = new Map<string, { initial: boolean; final: boolean }>()
+  for (const item of Array.isArray(rawStates) ? rawStates : []) {
+    const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    const name = str(rec ? rec.name : item)
+    if (!name || states.some((s) => s.name.toLowerCase() === name.toLowerCase())) continue
+    const id = `${entityId}-ST${states.length + 1}`
+    states.push({ id, name })
+    flags.set(id, { initial: rec?.initial === true, final: rec?.final === true })
+  }
+  if (states.length === 0) return { states: [], transitions: [] }
+  const initialId = states.find((s) => flags.get(s.id)?.initial)?.id ?? states[0].id
+  const out = states.map((s) => ({ ...s, ...(s.id === initialId ? { initial: true } : {}), ...(flags.get(s.id)?.final ? { final: true } : {}) }))
+  const find = (ref: unknown): string | null => {
+    const text = str(ref).toLowerCase()
+    return text ? (out.find((s) => s.id.toLowerCase() === text || s.name.toLowerCase() === text)?.id ?? null) : null
+  }
+  const transitions: EntityTransition[] = []
+  for (const item of Array.isArray(rawTransitions) ? rawTransitions : []) {
+    const rec = item && typeof item === "object" ? (item as Record<string, unknown>) : null
+    const from = find(rec?.from)
+    const to = find(rec?.to)
+    const event = str(rec?.event ?? rec?.trigger).replace(/[,\[\]]/g, " ").replace(/\s+/g, " ").trim()
+    if (!rec || !from || !to || !event || out.find((s) => s.id === from)?.final) continue
+    if (transitions.some((t) => t.from === from && t.to === to && t.event === event)) continue
+    const guard = str(rec.guard)
+    const action = str(rec.action)
+    transitions.push({ from, to, event, ...(guard ? { guard } : {}), ...(action ? { action } : {}) })
+  }
+  return { states: out, transitions }
 }
 
 /** Động từ quan hệ hợp lệ của Spine (`relation_verbs`): tiếng Anh viết thường. */
@@ -234,12 +313,18 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       relations.push(hit.id)
       if (hit.verb) verbs[hit.id] = hit.verb
     }
+    const attributes = attributesOf(e.value.attributes)
+    const featureIds = [...new Set(strList(e.value.feature_ids ?? e.value.features).flatMap((ref) => resolveFeature(ref) ?? []))]
+    const lifecycle = lifecycleOf(e.id ?? "", e.value.states, e.value.transitions)
     add("entities", {
       id: e.id,
       name: str(e.value.name) || e.id,
       description: str(e.value.description),
       relations,
-      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {})
+      ...(Object.keys(verbs).length ? { relation_verbs: verbs } : {}),
+      ...(attributes.length ? { attributes } : {}),
+      ...(featureIds.length ? { feature_ids: featureIds } : {}),
+      ...(lifecycle.states.length ? lifecycle : {})
     })
   }
   for (const b of of("business_rules").filter(skip(spine.business_rules))) {
@@ -251,7 +336,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       feature_id: featureOr(s.value.feature_id),
       name: str(s.value.name) || s.id,
       description: str(s.value.description),
-      flow_to: [...new Set(strList(s.value.flow_to).map(resolveScreen).filter((x): x is string => !!x && x !== s.id))],
+      flow_to: flowEdges(s.value.flow_to, resolveScreen, s.id ?? ""),
       is_popup: s.value.is_popup === true,
       tabs: strList(s.value.tabs),
       primary_function_id: null,

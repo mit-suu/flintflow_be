@@ -2,6 +2,7 @@ import { z } from "zod"
 import { Request, Response, NextFunction } from "express"
 import { validationError } from "../../shared/utils/validation-message.js"
 import { USER_LOCALES } from "../../shared/i18n/locale.js"
+import { ERD_NOTATIONS } from "../../shared/diagram/erd-notation.js"
 import { PROJECT_MODES, PROJECT_START_KINDS } from "./project.model.js"
 
 /** Client cũ (trước FLF-335) gửi `mode`; không gửi ⇒ `fpt`. Có `source` thì `mode` bị bỏ qua — Code suy ra. */
@@ -31,6 +32,11 @@ export const UpdateDocumentLanguageSchema = z.strictObject({
   documentLanguage: documentLanguageSchema
 })
 
+/** PATCH /projects/:id/erd-notation (Lead/Analyst): ký pháp ERD của dự án. */
+export const UpdateErdNotationSchema = z.strictObject({
+  erdNotation: z.enum(ERD_NOTATIONS)
+})
+
 export const RenameProjectSchema = z.object({
   name: z.string().min(1).max(100).trim()
 })
@@ -58,6 +64,7 @@ export const parseKnowledgeFlag = (body: unknown): boolean => {
 export type MoveProjectDTO = z.infer<typeof MoveProjectSchema>
 export type CreateProjectDTO = z.infer<typeof CreateProjectSchema>
 export type RenameProjectDTO = z.infer<typeof RenameProjectSchema>
+export type UpdateErdNotationDTO = z.infer<typeof UpdateErdNotationSchema>
 export type UpdateDocumentLanguageDTO = z.infer<typeof UpdateDocumentLanguageSchema>
 
 export const validateRequest = (schema: z.ZodSchema) => {

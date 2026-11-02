@@ -126,12 +126,19 @@ export interface UseCase {
 
 export type ScreenDetailStatus = "pending" | "in_progress" | "signed_off" | "placeholder"
 
+/** Cạnh Screens Flow: `to` = màn đích; `trigger` = hành động người dùng làm; `guard` = điều kiện rẽ nhánh (khác nhau giữa các cạnh cùng màn nguồn). */
+export interface FlowEdge {
+  to: string
+  trigger?: string
+  guard?: string
+}
+
 export interface Screen {
   id: string
   feature_id: string
   name: string
   description: string
-  flow_to: string[]
+  flow_to: FlowEdge[]
   is_popup: boolean
   tabs: string[]
   primary_function_id: string | null
@@ -144,6 +151,42 @@ export interface Permission {
   screen_id: string
   role_id: string
   action: string
+}
+
+/** `key` = định danh (`{id}`), `reference` = tham chiếu tới entity khác (`{ref}`), `plain` = còn lại. Mức domain: không có kiểu dữ liệu. */
+export type EntityAttributeKind = "key" | "reference" | "plain"
+
+export interface EntityAttribute {
+  /** Khoá của phần tử trong `attributes[]` (path `attributes[name=…]`), duy nhất trong một entity. */
+  name: string
+  kind: EntityAttributeKind
+  /** Bắt buộc có giá trị; `false` ⇒ bản số `[0..1]` trên hình. */
+  required: boolean
+  description?: string
+}
+
+/** Một trạng thái trong vòng đời của entity. `id` duy nhất trên toàn Spine (như `validations`), `name` là tính từ / phân từ (Pending, Approved). */
+export interface EntityState {
+  id: string
+  name: string
+  /** Trạng thái đầu tiên của vòng đời — đúng một khi entity có trạng thái; hình có chấm đặc nối vào. */
+  initial?: boolean
+  /** Trạng thái kết thúc — hình có vòng tròn đồng tâm (bullseye) nối ra; không có transition đi ra. */
+  final?: boolean
+}
+
+/** Chuyển trạng thái `event [guard] / action`. Khoá phần tử = `from` + `to` + `event` (path `transitions[from=…,to=…,event=…]`). */
+export interface EntityTransition {
+  /** Id `states[]` của cùng entity. */
+  from: string
+  /** Id `states[]` của cùng entity; `to = from` ⇒ chuyển nội bộ (hiện trong state). */
+  to: string
+  /** Sự kiện kích hoạt; không chứa `,` `[` `]` (khoá selector). */
+  event: string
+  guard?: string
+  action?: string
+  /** Business rule quy định chuyển trạng thái này. */
+  business_rule_ids?: string[]
 }
 
 export interface Entity {
@@ -160,6 +203,13 @@ export interface Entity {
   relation_optional?: string[]
   /** Dữ liệu chủ tồn tại độc lập — được phép không có cha. */
   root?: boolean
+  /** Thuộc tính mức domain (không kiểu kỹ thuật). Thiếu ⇒ `[]`. */
+  attributes?: EntityAttribute[]
+  /** Feature dùng entity này — mỗi feature một class diagram. Khoá tới `features[].id`. Thiếu ⇒ `[]`. */
+  feature_ids?: string[]
+  /** Vòng đời của entity (state machine diagram). Entity không có vòng đời ⇒ `[]` và không có hình. Thiếu ⇒ `[]`. */
+  states?: EntityState[]
+  transitions?: EntityTransition[]
 }
 
 /** MoSCoW, gán ở S-9.4. `null` trước khi gán. */
@@ -177,6 +227,19 @@ export interface Validation {
  * Tên `Function` theo tài liệu. Khi import ở module khác nên dùng alias
  * `SpineFunction` để không che kiểu global `Function`.
  */
+/** Message của sơ đồ tuần tự hệ thống: `from` / `to` là id actor hoặc `system`, đúng một đầu là `system`. */
+export interface FunctionInteraction {
+  from: string
+  to: string
+  /** Không chứa `,` `[` `]` (khoá selector). */
+  message: string
+  /** `request`: lời gọi / tín hiệu; `response`: trả lời (nét đứt). */
+  kind: "request" | "response"
+  /** `abnormal` ⇒ nằm trong `alt` và bắt buộc có `guard`; `normal` có `guard` ⇒ `opt`. */
+  flow: "normal" | "abnormal"
+  guard?: string
+}
+
 export interface Function {
   id: string
   screen_id: string | null
@@ -190,6 +253,8 @@ export interface Function {
   validations: Validation[]
   business_rule_ids: string[]
   priority: Priority | null
+  /** Message actor ↔ system theo thứ tự thời gian (sơ đồ tuần tự). Thiếu ⇒ `[]`. */
+  interactions?: FunctionInteraction[]
 }
 export type SpineFunction = Function
 
@@ -293,7 +358,7 @@ export interface Addendum {
 
 // ─── state nội bộ ────────────────────────────────────────────────
 
-export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "screen_layout"
+export type DiagramKind = "context" | "usecase" | "screen_flow" | "erd" | "class" | "state_machine" | "sequence" | "screen_layout"
 export type RenderStatus = "ok" | "error"
 /** Engine vẽ (FLF-339): `puml` = text PlantUML qua server; `svg` = SVG tự dựng (`shared/diagram/svg-*`). */
 export type DiagramFormat = "puml" | "svg"
