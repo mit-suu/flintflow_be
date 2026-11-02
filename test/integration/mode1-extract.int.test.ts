@@ -21,45 +21,51 @@ import { FieldAnchor } from "../../src/modules/import/field-anchor.model.js"
 import { Usage } from "../../src/modules/spine/usage.model.js"
 import * as spineRepository from "../../src/modules/spine/spine.repository.js"
 
+/** Số lượt I-4 (chữ) đã gọi provider — lượt kiểm tra 1.11 chạy nối tiếp (FLF-343) không tính. */
+let extractPrompts = 0
+const counting =
+  (inner: (prompt: string) => string | Error | undefined) =>
+  (prompt: string): string | Error | undefined => {
+    if (prompt.includes("# Import Extract")) extractPrompts++
+    return inner(prompt)
+  }
+
 beforeEach(() => {
   resetMockLlm()
-  mockOverrides.next = fakeMode1
+  extractPrompts = 0
+  mockOverrides.next = counting(fakeMode1)
 })
 
-const extractCalls = () => mockCalls.filter((c) => c.kind === "other").length
+const extractCalls = () => extractPrompts
 
-/** Upload + xác nhận ⇒ import ở `extracting`. */
+/** Upload ⇒ FLF-343: tách file ngay, import ở `extracting` chưa chạy (màn báo credit). */
 const startImport = async (balance = 1000) => {
   const seeded = await seedFixture("minimal", { balance })
   const projectId = await createMode1Project(seeded)
   const c = mode1Api(seeded, projectId)
-  const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  const confirmed = await c.post("/import/confirm-latest", { import_id: id })
-  expect(confirmed.body.data.import.status).toBe("extracting")
-  return { seeded, projectId, c, id }
+  const up = await c.upload(await makeSrsDocx())
+  expect(up.body.data.import.status).toBe("extracting")
+  return { seeded, projectId, c, id: up.body.data.import.id as string }
 }
 
-/** Chạy tới gap_review. */
+/** Một lần Bắt đầu ⇒ gap_review. */
 const importToGapReview = async () => {
   const s = await startImport()
   const ex = await s.c.extractAndWait(s.id)
   expect(ex.res.status, JSON.stringify(ex.res.body.error)).toBe(200)
-  await s.c.patch("/import/fields", { import_id: s.id, confirm_all: true })
-  const fin = await s.c.finalizeAndWait(s.id)
-  expect(fin.res.status, JSON.stringify(fin.res.body.error)).toBe(200)
-  expect(fin.view?.import?.status).toBe("gap_review")
+  expect(ex.run?.import.status).toBe("gap_review")
   return s
 }
 
 describe("mode 1 — trích field (I-4) + xác nhận", () => {
-  it("bảng khớp cột trích tất định, chữ gọi AI theo section; field độ tin thấp ⇒ fields_review", async () => {
+  it("FLF-343: bảng khớp cột trích tất định, chữ gọi AI theo section; một lần Bắt đầu chạy tới gap_review, field độ tin thấp vào baseline + cờ Cần xem", async () => {
     const { c, id, projectId } = await startImport()
     const { res, run: polled } = await c.extractAndWait(id)
     expect(res.status, JSON.stringify(res.body.error)).toBe(200)
     // chạy nền: request trả ngay ở `extracting`, không dừng
     expect(extractResponseSchema.parse(res.body.data).import).toMatchObject({ status: "extracting", paused: null })
     const run = extractResponseSchema.parse(polled)
-    expect(run.import.status).toBe("fields_review")
+    expect(run.import.status).toBe("gap_review")
     expect(run.import.extract_cursor).toBeNull()
     expect(run.sections.every((s) => s.status === "done")).toBe(true)
     // 6 section có chữ ⇒ 6 lượt AI; bảng actor/UC/BR không gọi AI
@@ -71,18 +77,19 @@ describe("mode 1 — trích field (I-4) + xác nhận", () => {
     const view = getImportResponseSchema.parse((await c.get("/import")).body.data)
     const actors = view.extraction.sections.find((s) => s.section_id === "fixed:2.1")!
     expect(actors.fields_total).toBeGreaterThanOrEqual(4)
-    // trigger độ tin 0.5 của 2 function ⇒ cần xác nhận
+    // trigger độ tin thấp của 2 function: không bị bỏ — có trong Spine, mỗi field một cờ vàng "Cần xem" mang đường dẫn
     expect(view.extraction.review_fields.map((f) => f.path).sort()).toEqual(["functions[id=FR-3.2.1].trigger", "functions[id=FR-3.2.2].trigger"])
-
-    const reject = view.extraction.review_fields[0]
-    const patched = await c.patch("/import/fields", { import_id: id, fields: [{ section_id: reject.section_id, path: reject.path, confirmed: false }] })
-    expect(patched.body.data.import.status).toBe("fields_review")
-    const edit = view.extraction.review_fields[1]
-    const done = await c.patch("/import/fields", {
-      import_id: id,
-      fields: [{ section_id: edit.section_id, path: edit.path, confirmed: true, edited_value: "Learner clicks Log in" }]
-    })
-    expect(done.body.data.import.status).toBe("baselining")
+    const spine = (await spineRepository.get(projectId))!
+    expect(spine.functions.map((f) => f.trigger)).toEqual(["Learner submits the form", "Learner submits the form"])
+    const review = spine.flags.filter((f) => f.rule_id === "import_needs_review" && f.resolved_at === null)
+    expect(review.filter((f) => f.target_id?.startsWith("functions[")).map((f) => f.target_id).sort()).toEqual([
+      "functions[id=FR-3.2.1].trigger",
+      "functions[id=FR-3.2.2].trigger"
+    ])
+    expect(review.every((f) => f.level === "yellow")).toBe(true)
+    // bước xác nhận field không còn
+    const late = await c.patch("/import/fields", { import_id: id, confirm_all: true })
+    expect(late.status).toBe(409)
   })
 
   it("hết credit giữa I-4 ⇒ paused, nạp xong resume không trích lại section đã xong", async () => {
@@ -99,16 +106,15 @@ describe("mode 1 — trích field (I-4) + xác nhận", () => {
     await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 1000 } })
     const resumed = extractResponseSchema.parse((await c.extractAndWait(id, "/import/resume")).run)
     expect(resumed.import.paused).toBeNull()
-    expect(resumed.import.status).toBe("fields_review")
+    // chạy tiếp tới cùng đích của lượt một mạch
+    expect(resumed.import.status).toBe("gap_review")
     expect(extractCalls()).toBe(6)
-    const prompts = mockCalls.slice(2)
-    expect(prompts).toHaveLength(4)
     for (const s of doneBefore) expect(resumed.sections.find((x) => x.section_id === s)?.status).toBe("done")
   })
 
   it("AI lỗi sau retry ⇒ paused resume_later, hold được hoàn", async () => {
     const { c, id, seeded } = await startImport()
-    mockOverrides.next = (prompt) => (prompt.includes("# Import Extract") ? new Error("provider down") : undefined)
+    mockOverrides.next = counting((prompt) => (prompt.includes("# Import Extract") ? new Error("provider down") : undefined))
     const res = extractResponseSchema.parse((await c.extractAndWait(id)).run)
     expect(res.import.paused?.reason).toBe("resume_later")
     expect(res.sections.some((s) => s.status === "failed" && s.error)).toBe(true)
@@ -120,10 +126,12 @@ describe("mode 1 — trích field (I-4) + xác nhận", () => {
 describe("mode 1 — I-4 chạy nền", () => {
   it("gọi extract hai lần khi đang chạy ⇒ một job; job mất (máy chủ khởi động lại) ⇒ GET đánh dấu resume_later", async () => {
     const { c, id } = await startImport()
-    const [a, b] = await Promise.all([c.post("/import/extract", { import_id: id }), c.post("/import/extract", { import_id: id })])
+    const [a, b] = await Promise.all([c.post("/import/extract", { import_id: id, confirm_latest: true }), c.post("/import/extract", { import_id: id, confirm_latest: true })])
     expect([a.status, b.status]).toEqual([200, 200])
     const { waitForExtraction } = await import("../../src/modules/import/extract-jobs.js")
+    const { waitForFinalize } = await import("../../src/modules/import/finalize-jobs.js")
     await waitForExtraction(id)
+    await waitForFinalize(id)
     expect(extractCalls()).toBe(6)
 
     // Giả lập job mất giữa chừng: import vẫn extracting, có cursor, không có job
@@ -135,20 +143,14 @@ describe("mode 1 — I-4 chạy nền", () => {
 })
 
 describe("mode 1 — finalize, check, gap report", () => {
-  it("finalize: Spine một txn by import, version 0.1 (bản gốc) có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
+  it("finalize một mạch (FLF-343): Spine một txn by import, version 0.1 (bản gốc) có stamp + bookmark, baseline imported, cờ AI vàng, gap report", async () => {
     const { c, id, projectId } = await startImport()
-    await c.extractAndWait(id)
-    await c.patch("/import/fields", { import_id: id, confirm_all: true })
-
-    const conflict = await c.post("/import/finalize", { import_id: id, base_version: 999 })
-    expect(conflict.status).toBe(409)
-    expect(conflict.body.error.code).toBe("SPINE_VERSION_CONFLICT")
-
-    const { res, view } = await c.finalizeAndWait(id)
-    expect(res.status, JSON.stringify(res.body.error)).toBe(200)
-    // chạy nền: trả ngay import baselining, baseline / flags null; kết quả đọc sau khi job xong
-    expect(finalizeResponseSchema.parse(res.body.data)).toMatchObject({ import: { status: "baselining", paused: null }, baseline: null, flags: null })
-    expect(view?.import?.status).toBe("gap_review")
+    const { run } = await c.extractAndWait(id)
+    // job finalize nối tiếp I-4: base_version do server tính, không cần gọi /import/finalize
+    expect(run?.import.status).toBe("gap_review")
+    const late = await c.post("/import/finalize", { import_id: id, base_version: await c.spineVersion() })
+    expect(late.status).toBe(409)
+    expect(late.body.error.code).toBe("IMPORT_INVALID_STATE")
 
     const spine = (await spineRepository.get(projectId))!
     const baseline = spine.baselines.find((b) => b.type === "imported")
@@ -210,13 +212,11 @@ describe("mode 1 — finalize, check, gap report", () => {
     expect(early.status).toBe(409)
   })
 
-  it("AI check hết credit ⇒ paused ở checking; resume ⇒ gap_review", async () => {
-    const { c, id, seeded } = await startImport()
-    await c.extractAndWait(id)
-    await c.patch("/import/fields", { import_id: id, confirm_all: true })
-    await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 0 } })
-    const fin = await c.finalizeAndWait(id)
-    expect(fin.view?.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
+  it("AI check hết credit ⇒ paused ở checking (baseline 0.1 đã có); resume ⇒ gap_review", async () => {
+    // đủ đúng 6 lượt I-4 (2 credit / lượt) ⇒ hết credit ở bước kiểm tra chạy nối tiếp
+    const { c, id, seeded } = await startImport(12)
+    const fin = await c.extractAndWait(id)
+    expect(fin.run?.import).toMatchObject({ status: "checking", paused: { reason: "credits" } })
     await CreditWallet.updateOne({ userId: seeded.userId }, { $set: { balance: 100 } })
     // resume ở checking cũng chạy nền: trả ngay checking + paused null, xong job ⇒ gap_review
     const resumed = await c.finalizeAndWait(id, {}, "/import/resume")

@@ -27,7 +27,7 @@ const api = (seeded: SeededFixture, projectId: string) => {
 }
 
 describe("mode 1 import — upload, preflight, parse, mapping", () => {
-  it("file không stamp ⇒ chờ xác nhận; xác nhận ⇒ tách block + profile ⇒ extracting", async () => {
+  it("FLF-343: file không stamp ⇒ tách block + profile ngay ⇒ extracting chưa chạy (màn báo credit); Bắt đầu không xác nhận bản mới nhất ⇒ IMPORT_NEEDS_LATEST_CONFIRM", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = api(seeded, projectId)
@@ -35,54 +35,48 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     const up = await c.upload(await makeSrsDocx(), "SRS_Lumen tiếng Việt.docx")
     expect(up.status, JSON.stringify(up.body.error)).toBe(201)
     const uploaded = importStateResponseSchema.parse(up.body.data).import
-    expect(uploaded).toMatchObject({ status: "awaiting_latest_confirm", original_name: "SRS_Lumen tiếng Việt.docx", stamp: null })
-
-    // bước sau khi chưa xác nhận ⇒ IMPORT_NEEDS_LATEST_CONFIRM
-    const early = await c.patch("/import/mapping", { import_id: uploaded.id, confirm_all: true })
-    expect(early.status).toBe(409)
-    expect(early.body.error.code).toBe("IMPORT_NEEDS_LATEST_CONFIRM")
-    expect(early.body.meta).toEqual({ import_id: uploaded.id })
-
-    const confirmed = await c.post("/import/confirm-latest", { import_id: uploaded.id })
-    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
-    expect(confirmed.body.data.import.status).toBe("extracting")
+    expect(uploaded).toMatchObject({ status: "extracting", original_name: "SRS_Lumen tiếng Việt.docx", stamp: null, confirmed_latest_at: null, extract_cursor: null })
 
     const view = getImportResponseSchema.parse((await c.get()).body.data)
     expect(view.blocks_count).toBeGreaterThan(20)
     expect(view.profile?.heading_map.find((h) => h.heading_text === "2.1 Actors")?.section_id).toBe("fixed:2.1")
+    // màn báo credit một lần: I-4 + kiểm tra AI (chưa gọi AI nào)
+    expect(view.credit_estimate).toMatchObject({ check_calls: expect.any(Number) })
+    expect(view.credit_estimate!.ai_calls).toBeGreaterThanOrEqual(view.credit_estimate!.check_calls!)
     const blocks = await DocBlock.find({ projectId, doc_version: "0.1" }).sort({ "anchor.ordinal": 1 }).lean()
     expect(blocks[0]).toMatchObject({ block_id: "B0001", kind: "heading", section_id: "fixed:1", anchor: { bookmark: "_ff_B0001" } })
     expect((await Project.findById(projectId).lean())?.import_state).toBe("extracting")
 
-    // confirm lại ⇒ sai trạng thái
+    // Bắt đầu mà bỏ tick "bản mới nhất" ⇒ không chạy, cùng câu từ chối như trước
+    const early = await c.post("/import/extract", { import_id: uploaded.id })
+    expect(early.status).toBe(409)
+    expect(early.body.error.code).toBe("IMPORT_NEEDS_LATEST_CONFIRM")
+    expect(early.body.meta).toEqual({ import_id: uploaded.id })
+    const still = getImportResponseSchema.parse((await c.get()).body.data).import!
+    expect(still).toMatchObject({ status: "extracting", confirmed_latest_at: null, extract_cursor: null })
+
+    // bước xác nhận riêng không còn cho file mới
     const again = await c.post("/import/confirm-latest", { import_id: uploaded.id })
     expect(again.status).toBe(409)
     expect(again.body.error.code).toBe("IMPORT_INVALID_STATE")
   })
 
-  it("heading không style ⇒ mapping_review; sửa mapping + confirm_all ⇒ extracting, block đổi section", async () => {
+  it("FLF-343: heading không style ⇒ không dừng ở mapping_review — mục độ tin thấp tự nhận (giữ độ tin, auto_confirmed)", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = api(seeded, projectId)
-    const id = (await c.upload(await makeSrsDocx({ numberedOnly: true }))).body.data.import.id as string
-    const confirmed = await c.post("/import/confirm-latest", { import_id: id })
-    expect(confirmed.body.data.import.status).toBe("mapping_review")
+    const up = await c.upload(await makeSrsDocx({ numberedOnly: true }))
+    expect(up.body.data.import.status).toBe("extracting")
 
     const view = getImportResponseSchema.parse((await c.get()).body.data)
+    const low = view.profile!.heading_map.filter((h) => h.confidence < 0.8)
+    expect(low.length).toBeGreaterThan(0)
+    expect(low.every((h) => h.confirmed && h.auto_confirmed)).toBe(true)
+    expect(view.profile!.heading_map.filter((h) => h.confidence >= 0.8).every((h) => !h.auto_confirmed)).toBe(true)
+    // PATCH mapping chỉ còn cho bản ghi cũ ở mapping_review
     const notes = view.profile!.heading_map.find((h) => h.heading_text === "5.9 Team Notes")!
-    const bad = await c.patch("/import/mapping", { import_id: id, headings: [{ block_id: notes.block_id, section_id: "fixed:9.9" }] })
-    expect(bad.status).toBe(409)
-
-    const partial = await c.patch("/import/mapping", { import_id: id, headings: [{ block_id: notes.block_id, section_id: "fixed:5.4" }] })
-    expect(partial.status, JSON.stringify(partial.body.error)).toBe(200)
-    expect(partial.body.data.import.status).toBe("mapping_review")
-    const noteBody = await DocBlock.findOne({ projectId, text: "Internal notes that do not belong to the template." }).lean()
-    expect(noteBody?.section_id).toBe("fixed:5.4")
-
-    const done = await c.patch("/import/mapping", { import_id: id, confirm_all: true })
-    expect(done.body.data.import.status).toBe("extracting")
-    const after = getImportResponseSchema.parse((await c.get()).body.data)
-    expect(after.profile!.heading_map.every((h) => h.confirmed)).toBe(true)
+    const late = await c.patch("/import/mapping", { import_id: up.body.data.import.id, headings: [{ block_id: notes.block_id, section_id: "fixed:5.4" }] })
+    expect(late.status).toBe(409)
   })
 
   it("preflight từ chối ⇒ 422 kèm issues, bản ghi preflight_rejected; upload lại được", async () => {
@@ -171,7 +165,6 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     ]
     const up = await c.upload(await makeSrsDocx({ recordOfChanges }))
     const importId = importStateResponseSchema.parse(up.body.data).import.id
-    await c.post("/import/confirm-latest", { import_id: importId })
     const profile = getImportResponseSchema.parse((await c.get()).body.data).profile!
     expect(profile.record_of_changes).toEqual([
       { date: "29/07/2026", version: "", change_type: "A", in_charge: "QuynhTTN", description: "Added User Requirements section" }
@@ -190,8 +183,7 @@ describe("mode 1 import — upload, preflight, parse, mapping", () => {
     const up = await c.upload(await makeDocx({ body }))
     expect(up.status, JSON.stringify(up.body.error)).toBe(201)
     const importId = importStateResponseSchema.parse(up.body.data).import.id
-    const confirmed = await c.post("/import/confirm-latest", { import_id: importId })
-    expect(confirmed.status, JSON.stringify(confirmed.body.error)).toBe(200)
+    expect(importStateResponseSchema.parse(up.body.data).import.status).toBe("extracting")
     const profile = getImportResponseSchema.parse((await c.get()).body.data).profile!
     expect(profile.table_map.map((t) => t.header)).toEqual(["Use Case ID", "", "Actor"])
   })

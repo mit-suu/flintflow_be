@@ -66,12 +66,12 @@ describe("preflight — FLF-331 nhận diện SRS", () => {
 })
 
 describe("preflight — 3 nhánh stamp", () => {
-  it("không stamp ⇒ awaiting_latest_confirm, lưu file gốc, chưa parse", async () => {
+  it("FLF-343: không stamp ⇒ tách file ngay (extracting chưa chạy), chưa xác nhận bản mới nhất — hỏi cùng màn báo credit; lưu file gốc", async () => {
     const { projectId, userId } = await project()
     const doc = await uploadImport(projectId, userId, fileOf(await makeSrsDocx()))
-    expect(doc).toMatchObject({ status: "awaiting_latest_confirm", stamp: null, confirmed_latest_at: null })
+    expect(doc).toMatchObject({ status: "extracting", stamp: null, confirmed_latest_at: null, extract_cursor: null })
     expect(doc.preflight.status).toBe("accepted")
-    expect(await DocBlock.countDocuments({ projectId })).toBe(0)
+    expect(await DocBlock.countDocuments({ projectId })).toBeGreaterThan(0)
     expect((await docFileStore().load(doc.file_ref!)).length).toBeGreaterThan(0)
     expect(await sourceFiles(projectId)).toBe(1)
   })

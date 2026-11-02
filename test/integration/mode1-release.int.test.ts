@@ -46,10 +46,8 @@ const projectWithRevision = async () => {
   const projectId = await createMode1Project(seeded, "Lumen LMS")
   const c = mode1Api(seeded, projectId)
   const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-  await c.post("/import/confirm-latest", { import_id: id })
-  await c.extractAndWait(id)
-  await c.patch("/import/fields", { import_id: id, confirm_all: true })
-  expect((await c.finalizeAndWait(id)).view?.import?.status).toBe("gap_review")
+  // FLF-343: một lần Bắt đầu ⇒ I-4 ⇒ baseline 0.1 ⇒ kiểm tra
+  expect((await c.extractAndWait(id)).run?.import.status).toBe("gap_review")
   // D6 (FLF-183): điền các đầu mục FPT còn trống như đã chạy step, để release chỉ còn chặn bởi cờ test đặt
   await fillCoreSections(projectId)
 

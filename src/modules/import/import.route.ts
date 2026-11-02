@@ -26,7 +26,8 @@ const router = Router()
  *         sha256: { type: string }
  *         status:
  *           type: string
- *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, checking, gap_review, delivered, change_requested]
+ *           enum: [uploaded, preflight_rejected, awaiting_latest_confirm, parsing, mapping_review, extracting, fields_review, baselining, incomplete, drafting, checking, gap_review, delivered, change_requested]
+ *           description: "FLF-343: file mới đi uploaded → parsing → extracting (chờ Bắt đầu) → baselining → checking → gap_review; awaiting_latest_confirm / mapping_review / fields_review chỉ còn ở bản ghi cũ"
  *         preflight:
  *           type: object
  *           properties:
@@ -66,8 +67,9 @@ const router = Router()
  *   post:
  *     summary: Upload SRS .docx và chạy preflight (UC-20, nút 1.1–1.2)
  *     description: |
- *       Nhận loại file theo magic bytes. File không có stamp ⇒ `awaiting_latest_confirm` (gọi confirm-latest);
- *       stamp đúng project ⇒ tách block + khớp profile ngay (`mapping_review` hoặc `extracting`).
+ *       Nhận loại file theo magic bytes. FLF-343: tách block + khớp profile ngay (mapping độ tin thấp tự nhận) ⇒ `extracting`
+ *       chưa chạy — màn báo credit một lần (`GET /import` → `credit_estimate`). File không stamp ⇒ `confirmed_latest_at = null`,
+ *       câu hỏi "bản mới nhất" trả lời cùng `POST /import/extract` (`confirm_latest`).
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -107,7 +109,8 @@ router.get("/:id/import", authMiddleware, importController.getImport)
  * @swagger
  * /api/v1/projects/{id}/import/confirm-latest:
  *   post:
- *     summary: Xác nhận file không có stamp là bản mới nhất (nút 1.3) rồi tách block + khớp profile
+ *     summary: (Bản ghi cũ) xác nhận file không có stamp là bản mới nhất (nút 1.3) rồi tách block + khớp profile
+ *     description: FLF-343 — file mới không dừng ở awaiting_latest_confirm; dùng `confirm_latest` của `POST /import/extract`.
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -133,7 +136,7 @@ router.post("/:id/import/confirm-latest", authMiddleware, importController.confi
  * @swagger
  * /api/v1/projects/{id}/import/mapping:
  *   patch:
- *     summary: Xác nhận/sửa mapping heading → section và cột bảng → field (UC-21, nút 1.7)
+ *     summary: (Bản ghi cũ ở mapping_review) xác nhận/sửa mapping heading → section và cột bảng → field (UC-21, nút 1.7)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -201,9 +204,12 @@ router.post("/:id/reupload", authMiddleware, importController.receiveDocx, impor
  * @swagger
  * /api/v1/projects/{id}/import/extract:
  *   post:
- *     summary: Trích field Spine từ tài liệu (I-4, nút 1.8) — chạy hoặc chạy tiếp từ extract_cursor
+ *     summary: Nút Bắt đầu (FLF-343) — chạy một mạch I-4 ⇒ baseline 0.1 ⇒ kiểm tra (nút 1.8–1.12)
  *     description: |
- *       Chạy nền: trả ngay `{ import (extracting, paused null), sections }`; FE poll `GET /import` tới khi rời `extracting` hoặc có `paused`.
+ *       Chạy nền: trả ngay `{ import (extracting, paused null), sections }`; I-4 xong thì job finalize nối tiếp (base_version do
+ *       server tính, Record of Changes đọc từ file) rồi 1.11–1.12; FE poll `GET /import` tới `gap_review` / `incomplete` hoặc có `paused`.
+ *       `confirm_latest: true` bắt buộc khi file chưa xác nhận là bản mới nhất (thiếu ⇒ 409 IMPORT_NEEDS_LATEST_CONFIRM, không chạy).
+ *       Mapping / field độ tin thấp vào baseline kèm cờ vàng `import_needs_review` ("Cần xem").
  *       Bảng khớp đủ cột trích tất định (không tốn credit); phần chữ còn lại gọi AI theo section (step_id `I-4:<section>`).
  *       Hết credit ⇒ `paused: { reason: credits }`; AI lỗi sau 2 lần retry ⇒ `paused: { reason: resume_later }`.
  *     tags: [Import (mode 1)]
@@ -215,10 +221,10 @@ router.post("/:id/reupload", authMiddleware, importController.receiveDocx, impor
  *       required: true
  *       content:
  *         application/json:
- *           schema: { type: object, required: [import_id], properties: { import_id: { type: string } } }
+ *           schema: { type: object, required: [import_id], properties: { import_id: { type: string }, confirm_latest: { type: boolean } } }
  *     responses:
  *       200: { description: "`{ import, sections: [{ section_id, status, fields_total, fields_needing_review, error }] }` — trả ngay, import ở extracting" }
- *       409: { description: IMPORT_INVALID_STATE }
+ *       409: { description: "IMPORT_INVALID_STATE, IMPORT_NEEDS_LATEST_CONFIRM" }
  */
 router.post("/:id/import/extract", authMiddleware, importController.extract)
 
@@ -226,7 +232,7 @@ router.post("/:id/import/extract", authMiddleware, importController.extract)
  * @swagger
  * /api/v1/projects/{id}/import/fields:
  *   patch:
- *     summary: Xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
+ *     summary: (Bản ghi cũ ở fields_review) xác nhận / sửa / bỏ field độ tin thấp (UC-22, nút 1.9)
  *     tags: [Import (mode 1)]
  *     security:
  *       - BearerAuth: []
@@ -261,7 +267,7 @@ router.patch("/:id/import/fields", authMiddleware, importController.patchFields)
  * @swagger
  * /api/v1/projects/{id}/import/finalize:
  *   post:
- *     summary: Ghi Spine + tạo version 0.1 + baseline imported, rồi AI check + code rule (nút 1.10–1.12)
+ *     summary: Ghi Spine + tạo version 0.1 + baseline imported, rồi AI check + code rule (nút 1.10–1.12) — FLF-343 chạy tự động sau I-4; gọi tay cho `incomplete` (Hoàn thiện)
  *     description: |
  *       Chạy nền (SRS lớn mất vài phút — không giữ request qua reverse proxy): kiểm trạng thái + `base_version` ngay
  *       (409 như cũ), rồi trả ngay `{ import (baselining, paused null), baseline: null, flags: null }`; FE poll `GET /import`

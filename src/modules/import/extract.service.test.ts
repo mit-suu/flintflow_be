@@ -12,6 +12,8 @@ import {
   AI_BLOCK_CHARS,
   captionOf,
   chunkBlocks,
+  codeSignals,
+  combineAiConfidence,
   deterministicTableItems,
   dropMutualRelations,
   extractionPlan,
@@ -402,7 +404,7 @@ describe("itemsFromAi — output model ⇒ item", () => {
     expect(out.map((i) => i.source_block_ids)).toEqual([["B0005"], ["B0005"]])
   })
 
-  it("NFR nhận category theo section khi model không ghi; project không có id; giữ field_confidence", () => {
+  it("NFR nhận category theo section khi model không ghi; project không có id; field_confidence kết hợp tín hiệu code (FLF-343)", () => {
     const out = itemsFromAi(
       {
         section_id: "fixed:4.2.3",
@@ -414,7 +416,8 @@ describe("itemsFromAi — output model ⇒ item", () => {
       },
       ctx([], "fixed:4.2.3")
     )
-    expect(out[0]).toMatchObject({ id: "NFR-01", value: { statement: "fast", category: "performance" }, field_confidence: { threshold: 0.4 } })
+    // AI 0.4 × 0.6 + nguồn hợp lệ (1) × 0.4 — điểm AI không còn là tín hiệu duy nhất
+    expect(out[0]).toMatchObject({ id: "NFR-01", value: { statement: "fast", category: "performance" }, field_confidence: { threshold: 0.64 } })
     expect(out[1].id).toBeNull()
   })
 
@@ -605,5 +608,46 @@ describe("ảnh diagram (mode 1 v3 phase 5)", () => {
   it("visionItems: origin vision, độ tin item + từng field ≤ 0.7", () => {
     const it0: EntityItem = { entity: "actors", id: "A09", value: { name: "Guest" }, confidence: 0.95, field_confidence: { kind: 0.9, name: 0.4 }, source_block_ids: ["B0002"], origin: "ai" }
     expect(visionItems([it0])).toEqual([{ ...it0, origin: "vision", confidence: 0.7, field_confidence: { kind: 0.7, name: 0.4 } }])
+  })
+})
+
+describe("FLF-343 — độ tin I-4 = điểm AI kết hợp tín hiệu code", () => {
+  it("combineAiConfidence: AI × 0.6 + trung bình tín hiệu × 0.4; không có tín hiệu ⇒ giữ điểm AI", () => {
+    expect(combineAiConfidence(0.9, [1, 1, 1])).toBe(0.94)
+    expect(combineAiConfidence(0.9, [0, 0])).toBe(0.54)
+    expect(combineAiConfidence(0.5, [])).toBe(0.5)
+    // AI 0.5 + code khớp hết = 0.70 ⇒ vẫn bị chặn dưới ngưỡng (AI < 0.6 luôn Cần xem)
+    expect(combineAiConfidence(0.5, [1, 1, 1])).toBe(0.69)
+    expect(combineAiConfidence(0.6, [1, 1, 1])).toBe(0.76)
+  })
+
+  it("codeSignals: nguồn hợp lệ, khoá / giá trị có trong chữ của block nguồn, độ tin khớp mục", () => {
+    const blockText = new Map([["B0001", "UC-01 Register account lets the learner sign up."]])
+    const valid = new Set(["B0001"])
+    expect(codeSignals({ key: "UC-01", value: { name: "Register account" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText, sectionConfidence: 0.9 })).toEqual([1, 1, 0.9])
+    // model bịa block nguồn + giá trị không có trong chữ ⇒ hai tín hiệu 0
+    expect(codeSignals({ key: "UC-99", value: { name: "Delete galaxy" }, source_block_ids: ["B0999"] }, { validBlocks: valid, blockText })).toEqual([0, 0])
+    // bịa block nguồn mà giá trị có trong chữ của lô ⇒ vẫn 0 (không so với cả lô)
+    expect(codeSignals({ key: "UC-01", value: { name: "Register account" }, source_block_ids: ["B0999"] }, { validBlocks: valid, blockText })).toEqual([0, 0])
+    // khoá là phần tử đã biết ⇒ khớp dù chữ không ghi mã
+    expect(codeSignals({ key: "A01", value: { kind: "human" }, source_block_ids: ["B0001"] }, { validBlocks: valid, blockText, knownKey: true })).toEqual([1, 1])
+  })
+
+  it("itemsFromAi: AI tự chấm cao mà không khớp chữ nguồn ⇒ độ tin hạ dưới ngưỡng xác nhận", () => {
+    const out = itemsFromAi(
+      { section_id: "fixed:5.1", items: [{ entity: "business_rules", key: "BR-77", value: { statement: "Unrelated rule text" }, confidence: 0.95, field_confidence: {}, source_block_ids: ["B0777"] }], unmapped_block_ids: [] },
+      { sectionId: "fixed:5.1", alloc: new IdAllocator(), known: [], sectionFunction: null, validBlocks: new Set(["B0001"]), blockText: new Map([["B0001", "BR-01 Passwords must have 8 characters."]]), sectionConfidence: 0.6 }
+    )
+    expect(out[0].confidence).toBeLessThan(FIELD_CONFIDENCE_THRESHOLD)
+  })
+
+  it("deterministicTableItems: cột tự nhận (auto_confirmed) giữ độ tin của mapping, cột người dùng xác nhận ⇒ 1", () => {
+    const blocks = ucTable()
+    const grid = tableGrid(blocks[0], blocks)
+    const cols = [col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids", 0.6)]
+    cols[2] = { ...cols[2], confirmed: true, auto_confirmed: true }
+    expect(deterministicTableItems(blocks[0], grid, profileOf(cols))![0].confidence).toBe(0.6)
+    cols[2] = { ...cols[2], auto_confirmed: undefined }
+    expect(deterministicTableItems(blocks[0], grid, profileOf(cols))![0].confidence).toBe(0.95)
   })
 })

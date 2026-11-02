@@ -71,12 +71,12 @@ describe("C-1 BR-03 — phải có baseline", () => {
     expect(await CrCounter.countDocuments({ projectId })).toBe(0)
   })
 
-  it("import đang dở (đã upload + xác nhận, chưa finalize) ⇒ vẫn CR_REQUIRES_BASELINE", async () => {
+  it("import đang dở (đã upload, chưa bấm Bắt đầu) ⇒ vẫn CR_REQUIRES_BASELINE", async () => {
     const seeded = await seedFixture("minimal")
     const projectId = await createMode1Project(seeded)
     const c = mode1Api(seeded, projectId)
     const id = (await c.upload(await makeSrsDocx())).body.data.import.id as string
-    await c.post("/import/confirm-latest", { import_id: id })
+    expect(id).toBeTruthy()
     const res = await c.post("/change-requests", body())
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe("CR_REQUIRES_BASELINE")
