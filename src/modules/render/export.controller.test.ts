@@ -62,7 +62,7 @@ describe("POST /export/word/preview", () => {
     expect(outcome.error).toBeUndefined()
     expect(outcome.status).toBe(200)
     expect(outcome.headers["content-type"]).toBe(DOCX_MIME)
-    expect(outcome.headers["content-disposition"]).toBe(`attachment; filename*=UTF-8''${encodeURIComponent("Lumen Học Trực Tuyến_v0_DRAFT.docx")}`)
+    expect(outcome.headers["content-disposition"]).toBe(`attachment; filename*=UTF-8''${encodeURIComponent("Lumen Học Trực Tuyến_v0.3_DRAFT.docx")}`)
     expect(outcome.headers["content-length"]).toBe(String(outcome.body?.length))
 
     const documentXml = readZipText(outcome.body as Buffer, "word/document.xml")

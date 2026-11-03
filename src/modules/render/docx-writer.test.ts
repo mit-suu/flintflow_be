@@ -142,8 +142,8 @@ describe("writeDocx — fixture Working Draft", () => {
     expect(core).toContain("<dc:title>Lumen Học Trực Tuyến - Software Requirement Specification</dc:title>")
     expect(core).toContain("<dc:subject>flintflow_version:v0.3</dc:subject>")
     expect(custom).toMatch(/name="flintflow_project_id"[^>]*>\s*<vt:lpwstr>650000000000000000000001<\/vt:lpwstr>/)
-    // FLF-334: bản nháp "v0.3" (nhãn cũ, gốc 0.x) ⇒ gốc 0, loại draft, không CR
-    expect(custom).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0<\/vt:lpwstr>/)
+    // FLF-334: bản nháp "v0.3" (gốc 0.x) ⇒ loại draft, không CR; FLF-356: gốc giữ đúng số 0.3, không gộp về 0
+    expect(custom).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0.3<\/vt:lpwstr>/)
     expect(custom).toMatch(/name="flintflow_kind"[^>]*>\s*<vt:lpwstr>draft<\/vt:lpwstr>/)
     expect(custom).not.toContain("flintflow_latest_cr")
   })
@@ -230,7 +230,7 @@ describe("buildDocxFileName — quy tắc chung FLF-334", () => {
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0 + 3 changes", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v1.0", source: "draft" })).toBe("Lumen_v1.0_DRAFT.docx")
     expect(buildDocxFileName({ projectName: "Lumen", version: "v0", source: "draft" })).toBe("Lumen_DRAFT.docx")
-    expect(buildDocxFileName(sample)).toBe("Lumen Học Trực Tuyến_v0_DRAFT.docx")
+    expect(buildDocxFileName(sample)).toBe(`Lumen Học Trực Tuyến_v${sample.version.replace(/^v/, "")}_DRAFT.docx`)
   })
 
   it("baseline ⇒ _v<version>, không _DRAFT; version conditional giữ nguyên", () => {
@@ -243,17 +243,20 @@ describe("buildDocxFileName — quy tắc chung FLF-334", () => {
     expect(buildDocxFileName({ projectName: "  ", version: "v0", source: "draft" })).toBe("SRS_DRAFT.docx")
   })
 
-  it("exportLineage: baseline gốc 0.x của dự án import ⇒ 0", () => {
-    expect(exportLineage({ version: "0.1 + 2 changes", source: "draft" })).toEqual({ release: false, base: "0" })
+  it("exportLineage: gốc 0.x của dự án import giữ đúng số bản import (FLF-356)", () => {
+    expect(exportLineage({ version: "0.1 + 2 changes", source: "draft" })).toEqual({ release: false, base: "0.1" })
+    expect(exportLineage({ version: "0.0", source: "draft" })).toEqual({ release: false, base: "0.0" })
     expect(exportLineage({ version: "v1.1", source: "baseline" })).toEqual({ release: true, base: "1.1" })
   })
 
-  it("baseline gốc 0.x không phải release ⇒ _v0_DRAFT, stamp kind draft", async () => {
-    expect(exportLineage({ version: "0.1", source: "baseline" })).toEqual({ release: false, base: "0" })
-    expect(buildDocxFileName({ projectName: "Lumen", version: "0.1", source: "baseline" })).toBe("Lumen_v0_DRAFT.docx")
+  it("FLF-356: dự án import 0.1 — draft ⇒ _v0.1_DRAFT, baseline (không watermark) ⇒ _v0.1; stamp kind vẫn draft", async () => {
+    expect(exportLineage({ version: "0.1", source: "baseline" })).toEqual({ release: false, base: "0.1" })
+    expect(buildDocxFileName({ projectName: "FAP", version: "0.1", source: "baseline" })).toBe("FAP_v0.1.docx")
+    expect(buildDocxFileName({ projectName: "FAP", version: "0.1", source: "draft" })).toBe("FAP_v0.1_DRAFT.docx")
+    expect(buildDocxFileName({ projectName: "FAP", version: "0.1 + 1 change", source: "draft" })).toBe("FAP_v0.1_DRAFT.docx")
     const custom = readZipText(await writeDocx({ ...baseline(), version: "0.1" }), "docProps/custom.xml")
     expect(custom).toMatch(/name="flintflow_kind"[^>]*>\s*<vt:lpwstr>draft<\/vt:lpwstr>/)
-    expect(custom).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0<\/vt:lpwstr>/)
+    expect(custom).toMatch(/name="flintflow_base_version"[^>]*>\s*<vt:lpwstr>0.1<\/vt:lpwstr>/)
   })
 })
 

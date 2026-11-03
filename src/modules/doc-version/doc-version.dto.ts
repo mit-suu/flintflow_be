@@ -85,7 +85,7 @@ export const versionParamsSchema = z.object({ v: docVersionString })
 /**
  * `GET /projects/:id/versions/:v/download?variant=` —
  * `auto`: release ⇒ bản sạch; draft ⇒ bản Track Changes + watermark DRAFT (G8). Tên + stamp theo FLF-334 (`versionFileName`):
- *   `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0_DRAFT.docx`, release `<tên>_v2.0.docx`.
+ *   `<tên>_v1.0+CR-014_DRAFT.docx`, `<tên>_v0.1_DRAFT.docx` (chưa release ⇒ số bản import, FLF-356), release `<tên>_v2.0.docx`.
  * `tracked`: luôn bản có Track Changes (cả với release).
  * `original` (mode 1 v2, FLF-184): file người dùng upload của bản `0.1` (bản lưu `0.1` giờ là bản render từ Spine).
  */
