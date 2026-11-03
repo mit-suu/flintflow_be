@@ -17,7 +17,7 @@
 
 import { runStep, defaultStepRunnerDeps, recordUserMessage, B0_FIELD_STEPS, type Emit, type GateResolution, type StepRunnerDeps } from "./step-runner.service.js"
 import { ChatSession, type IChatMessage } from "../project/chat-session.model.js"
-import { addendumForUnit, loadConversationVariables, projectStep } from "./context-projection.js"
+import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep } from "./context-projection.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
 import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
@@ -359,6 +359,8 @@ const askPhaseInterview = async (
           pending_questions: [],
           projection: fast ? interviewProjection(spine, unit) : {},
           addendum: addendumForUnit(spine, unit),
+          // FLF-358: giả định còn mở của giai đoạn
+          assumptions: assumptionsForPrompt(spine, unit),
           content_guidance: fast ? interviewGuidance(spine, unit) : "",
           // FLF-292: lượt hỏi gộp thấy tài liệu upload ⇒ chỉ hỏi điều tài liệu chưa có
           documents: (await unitDocuments(projectId, spine, unit)) || "(none)",

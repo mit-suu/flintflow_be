@@ -15,15 +15,15 @@
  *   `functions:id,name,screen_id`    chỉ lấy vài field của mỗi phần tử
  */
 
-import type { Addendum, Spine } from "../spine/spine.types.js"
+import type { Addendum, Assumption, Spine } from "../spine/spine.types.js"
 import * as repository from "../spine/spine.repository.js"
 import { isBriefPhase } from "../spine/brief-core.js"
-import { listSections, stepsOf } from "../spine/section-registry.js"
+import { listSections, sectionsOfPath, stepsOf } from "../spine/section-registry.js"
 import { ApiError } from "../../shared/utils/api-error.js"
 import { ActionType } from "../../shared/ai/ai-action.types.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
 import { ChatSession } from "../project/chat-session.model.js"
-import { DOCUMENTS_READ, getStep } from "./step-registry.js"
+import { DOCUMENTS_READ, getStep, orderedSteps } from "./step-registry.js"
 import { buildConversationSummary, formatRecentTurns, type TranscriptMessage } from "./conversation-summary.js"
 
 export { STEP_NOT_FOUND } from "./step-registry.js"
@@ -184,6 +184,47 @@ export const addendumForUnit = (spine: Spine, unit: string): AddendumForModel[] 
   const phase = unit.split("@")[0].replace(/\.\d+$/, "")
   if (!phase.startsWith("B-") && phase !== "S-1") return []
   return spine.addendum.map(({ id, topic, target_section, content_en }) => ({ id, topic, target_section, content_en }))
+}
+
+export interface AssumptionForModel {
+  id: string
+  path: string
+  statement: string
+  origin_step_id: string
+}
+
+/** `origin_step_id` có thể ghi kèm vòng (`S-5.2@S03`) hoặc không (`S-5.2`): không ghi vòng ⇒ coi như khớp mọi vòng. */
+const sameLoop = (origin: string | null, loop: string | null): boolean => origin === null || origin === loop
+
+/**
+ * FLF-358: giả định còn `unconfirmed` chạm tới `unit` — biến `{{assumptions}}` của `elicit-loop`. `unit` là step
+ * (`S-3.1`, `S-5.2@S03`) hoặc đơn vị giai đoạn (`B-1`, `S-5@S03`) như `addendumForUnit`.
+ *
+ * Liên quan = do chính step (giai đoạn) sinh ra, hoặc `path` của nó là field của section mà step (giai đoạn) nuôi. Brief
+ * và S-1 thấy toàn bộ, cùng lý lẽ với addendum. Đã xác nhận/bác bỏ thì không đưa: đó là điều đã chốt, nằm ở projection.
+ */
+export const openAssumptionsFor = (spine: Spine, unit: string): AssumptionForModel[] => {
+  const { base, phase, loop } = parseStepId(unit)
+  const open = spine.assumptions.filter((a) => a.status === "unconfirmed")
+  const pick = ({ id, path, statement, origin_step_id }: Assumption): AssumptionForModel => ({ id, path, statement, origin_step_id })
+  if (phase.startsWith("B-") || phase === "S-1") return open.map(pick)
+
+  const phaseUnit = base === phase
+  const steps = phaseUnit ? orderedSteps(spine).filter((s) => s.phase === phase && s.loop === loop).map((s) => s.id) : [unit]
+  const fed = new Set(steps.flatMap((id) => sectionsFedBy(spine, id)))
+  return open
+    .filter((a) => {
+      const origin = parseStepId(a.origin_step_id)
+      if ((phaseUnit ? origin.phase === phase : origin.base === base) && sameLoop(origin.loop, loop)) return true
+      return sectionsOfPath(spine, a.path).owner.some((section) => fed.has(section))
+    })
+    .map(pick)
+}
+
+/** Giá trị cho `promptVariables.assumptions`: rỗng ⇒ `(none)`, như `documents`. */
+export const assumptionsForPrompt = (spine: Spine, unit: string): AssumptionForModel[] | "(none)" => {
+  const open = openAssumptionsFor(spine, unit)
+  return open.length > 0 ? open : "(none)"
 }
 
 /**
