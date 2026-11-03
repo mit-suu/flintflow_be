@@ -20,7 +20,7 @@ import { ChatSession, type IChatMessage } from "../project/chat-session.model.js
 import { addendumForUnit, assumptionsForPrompt, loadConversationVariables, projectStep } from "./context-projection.js"
 import { SYSTEM_NAME_FIELD, askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { FAST_PATH_PHASES, interviewBudget, interviewGuidance, interviewProjection, noQuestionAck, reconcileReply, trimTailQuestion, withoutQuestions } from "./fast-path.js"
-import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, shapeQuestions } from "./question-shape.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, shapeQuestions } from "./question-shape.js"
 import { askTranscript, chatBudgetLeft, chatBudgetReply, nextPendingAfterChat, replyLanguageAfterMessage, runChatTurn, settleWithoutModel, listenForAnswer, type AnswerPayload } from "./step-runner.service.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import type { ReplyLanguage } from "../../shared/i18n/reply-language.js"
@@ -97,7 +97,7 @@ const recordInterviewAnswers = async (
     // chờ — `interviewChatTurn`), ghi lại ở đây thành hai tin AI cho cùng một lượt hỏi.
     const transcript: IChatMessage[] = (await hasInterviewAsk(sessionId, unit))
       ? []
-      : [{ role: "ai", content: askTranscript(reply, asked), step: unit, createdAt: new Date() }]
+      : [{ role: "ai", content: askTranscript(reply, currentBatch(asked).now), step: unit, createdAt: new Date() }]
     // Câu trả lời trên thẻ: một tin, mỗi đáp án một dòng — câu hỏi đã nằm ngay trên, không lặp lại trong bong bóng user
     const said = answers.map((a) => answerText(a.answer)).filter((text) => text !== "")
     if (said.length > 0) transcript.push({ role: "user", content: said.join("\n"), step: unit, createdAt: new Date() })
@@ -204,7 +204,7 @@ const interviewChatTurn = async (
   const remaining = nextPendingAfterChat(after, asked.filter((_, i) => !answered.has(i)), turn.questions, message)
   // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235): đã hỏi lại đủ câu thì không còn "bạn thấy hợp lý chứ?"
   const reply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, language)
-  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, remaining), step: unit, createdAt: new Date() }])
+  await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, currentBatch(remaining).now), step: unit, createdAt: new Date() }])
   return { reply, remaining }
 }
 
@@ -247,7 +247,27 @@ export const resumePhaseInterview = async (
         return
       }
     } else {
+      // FLF-355: thẻ chỉ mang nhóm câu của lượt này; còn nhóm khác loại ⇒ lượt quay lại `waiting_answer` với nhóm đó
       await recordInterviewAnswers(projectId, unit, pending.session_id, userId, pending.reply ?? "", pending.asked, answers)
+      const later = followUpQuestions(pending.asked, answers)
+      if (later.length > 0) {
+        const language = deps.replyLanguage ?? (await replyLanguageForSessionId({ projectId, sessionId: pending.session_id, userId }))
+        const reply = followUpReply(language)
+        await pushInterviewMessages(projectId, pending.session_id, [{ role: "ai", content: askTranscript(reply, later), step: unit, createdAt: new Date() }])
+        const { questions } = shapeQuestions(later)
+        const elicit: StepEvent = { type: "elicit", step_id: unit, delta: reply }
+        await touchRun(projectId, unit, run.run_id, { appendEvent: { ...elicit, at: new Date().toISOString() } })
+        await touchRun(projectId, unit, run.run_id, {
+          status: "waiting_answer",
+          stage: "ask",
+          detail_vi: `Chờ bạn trả lời ${questions.length} câu`,
+          questions,
+          pending_answer: { ...pending, asked: later, reply },
+          release: true,
+          appendEvent: { type: "answer_needed", step_id: unit, questions, at: new Date().toISOString() }
+        })
+        return
+      }
     }
     await finishRun(projectId, unit, run.run_id, "done", { questions: null })
   } catch (err) {
@@ -451,8 +471,17 @@ const askPhaseInterview = async (
     const cardAnswers = payload.answers.filter((a) => indexOfQuestion(pending, a.question_id) >= 0)
     emit({ type: "answer_received", step_id: unit, count: cardAnswers.length })
     if (!message) {
+      // FLF-355: thẻ chỉ mang nhóm câu của lượt này; nhóm khác loại hỏi tiếp ngay sau, không gọi model
       await recordInterviewAnswers(projectId, unit, sessionId, userId, reply, pending, cardAnswers)
-      return "answered"
+      const later = followUpQuestions(pending, cardAnswers)
+      if (later.length === 0) return "answered"
+      reply = followUpReply(language)
+      emit({ type: "elicit", step_id: unit, delta: reply })
+      await pushInterviewMessages(projectId, sessionId, [{ role: "ai", content: askTranscript(reply, later), step: unit, createdAt: new Date() }])
+      pending = later
+      const { questions: rest } = shapeQuestions(pending)
+      next = (await announceWaiting(rest, { kind: "phase_interview", unit, session_id: sessionId, asked: pending, base_answers_text: "", reply })).answer
+      continue
     }
     // FLF-260: tin chat là chữ user gõ ⇒ đoán lại ngôn ngữ trả lời (rõ ⇒ đổi và ghi lên phiên; mơ hồ ⇒ giữ)
     language = await replyLanguageAfterMessage({ projectId, sessionId, userId, message }, language)
