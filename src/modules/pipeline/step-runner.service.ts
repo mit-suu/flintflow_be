@@ -40,7 +40,7 @@ import { loadRenderContext } from "../diagram/render-context.js"
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "../spine/source-hash.js"
 import { targetOfDiagram, type RenderTarget } from "../diagram/renderers/index.js"
 import { NONSCREEN_LOOP, getStep, nextStep as nextStepOf } from "./step-registry.js"
-import { addendumForUnit, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
+import { addendumForUnit, assumptionsForPrompt, buildStepContext, elicitProjection, getStepSpec, loadConversationVariables, loadLastAiReply, parseStepId, sectionsFedBy, type StepContext } from "./context-projection.js"
 import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
@@ -688,6 +688,8 @@ export const runChatTurn = async (input: ChatTurnInput): Promise<{ reply: string
           })),
           projection: input.projection,
           addendum: addendumForUnit(input.spine, input.unit),
+          // FLF-358: giả định còn mở của bước — trước đây thiếu, prompt còn nguyên "{{assumptions}}"
+          assumptions: assumptionsForPrompt(input.spine, input.unit),
           content_guidance: "",
           // FLF-292: lượt chat khi còn câu chờ chỉ ghép câu trả lời — tài liệu đã được đọc ở lượt hỏi trước
           documents: "(none)",
@@ -1699,6 +1701,8 @@ export const runStep = async (
                 // câu trả lời của user ở bước trước.
                 projection: elicitProjection(spine, stepId),
                 addendum: ctx.addendum,
+                // FLF-358: giả định còn mở chạm tới bước này
+                assumptions: assumptionsForPrompt(spine, stepId),
                 // BUG-10: guidance của content skill từng bị bỏ trống ⇒ B-0.1 không hỏi tên hệ thống
                 content_guidance: elicitGuidance(ctx),
                 // FLF-292: tài liệu user upload (có mã đoạn) — vòng hỏi không hỏi lại điều tài liệu đã ghi

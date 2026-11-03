@@ -18,10 +18,11 @@ import type { Spine } from "../spine/spine.types.js"
 import { get } from "../spine/spine.repository.js"
 import { ChatSession } from "../project/chat-session.model.js"
 import { buildDocumentContext } from "../../shared/ai/document-context.service.js"
-import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
+import { ASSUMPTION_KEYS_READ, STEP_SKILLS, addendumForUnit, assumptionsForPrompt, openAssumptionsFor, buildStepContext, getStepSpec, parseStepId, projectStep, sectionsFedBy } from "./context-projection.js"
 import { stepNeedsSourceDocuments } from "../../shared/ai/document-context.service.js"
 import { getStep, loadStepRegistry, orderedSteps } from "./step-registry.js"
 import { askableFields } from "./decisions.service.js"
+import { sectionsOfPath } from "../spine/section-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const load = (file: string): Spine =>
@@ -253,5 +254,52 @@ describe("addendumForUnit — lượt hỏi gộp / chat thấy điều user đ�
   it("giai đoạn khác ⇒ không nạp (giữ như cũ)", () => {
     expect(addendumForUnit(FIXTURE, "S-4")).toEqual([])
     expect(addendumForUnit(FIXTURE, "S-5@S03")).toEqual([])
+  })
+})
+
+describe("openAssumptionsFor — biến {{assumptions}} của elicit-loop (FLF-358)", () => {
+  /** FIXTURE: AS01 nfrs[id=N05].threshold (S-6.3), AS02 actors[id=A05].name (S-2.3), AS03 screens[id=S07].tabs (S-4.2). */
+  const withStatus = (status: Record<string, "unconfirmed" | "confirmed" | "rejected">): Spine => {
+    const spine = structuredClone(FIXTURE)
+    spine.assumptions = spine.assumptions.map((a) => ({ ...a, status: status[a.id] ?? a.status }))
+    return spine
+  }
+  const ids = (spine: Spine, unit: string) => openAssumptionsFor(spine, unit).map((a) => a.id)
+
+  it("chỉ giả định còn unconfirmed; dạng gửi model gồm id, path, statement, origin_step_id", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS02: "rejected" })
+    const as01 = spine.assumptions.find((a) => a.id === "AS01")!
+    expect(openAssumptionsFor(spine, "S-6.3")).toEqual([{ id: "AS01", path: as01.path, statement: as01.statement, origin_step_id: "S-6.3" }])
+    expect(ids(spine, "B-1")).toEqual(["AS01"])
+  })
+
+  it("Brief và S-1 (step hoặc đơn vị giai đoạn) ⇒ mọi giả định còn mở", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS02: "unconfirmed", AS03: "unconfirmed" })
+    for (const unit of ["B-1", "B-2.3", "S-1", "S-1.1"]) expect(ids(spine, unit)).toEqual(["AS01", "AS02", "AS03"])
+  })
+
+  it("step khác ⇒ do chính step sinh ra, hoặc path thuộc section step nuôi", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS02: "unconfirmed", AS03: "unconfirmed" })
+    expect(ids(spine, "S-6.3")).toContain("AS01")
+    expect(ids(spine, "S-4.2")).toContain("AS03")
+    // AS02 (sinh ở S-2.3) xuất hiện ở mọi step nuôi section chứa actors[id=A05].name, và chỉ ở đó
+    const owner = new Set(sectionsOfPath(spine, "actors[id=A05].name").owner)
+    expect(owner.size).toBeGreaterThan(0)
+    for (const step of orderedSteps(spine).filter((s) => !/^(B-|S-1\.|S-2\.3$)/.test(s.id))) {
+      const touches = sectionsFedBy(spine, step.id).some((section) => owner.has(section))
+      expect(ids(spine, step.id).includes("AS02"), step.id).toBe(touches)
+    }
+  })
+
+  it("đơn vị giai đoạn ⇒ gộp theo mọi bước của giai đoạn", () => {
+    const spine = withStatus({ AS01: "unconfirmed", AS03: "unconfirmed" })
+    expect(ids(spine, "S-6")).toContain("AS01")
+    expect(ids(spine, "S-4")).toContain("AS03")
+    expect(ids(spine, "S-6")).not.toContain("AS03")
+  })
+
+  it("assumptionsForPrompt: không có ⇒ (none)", () => {
+    expect(assumptionsForPrompt(FIXTURE, "S-6.3")).toBe("(none)")
+    expect(assumptionsForPrompt(withStatus({ AS01: "unconfirmed" }), "S-6.3")).toHaveLength(1)
   })
 })
