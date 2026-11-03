@@ -45,7 +45,7 @@ import { buildConversationSummary } from "./conversation-summary.js"
 import { composeStepGateMessage, spokenAssumptionIds } from "./gate-message.js"
 import { askableFields, decisionOps, filterAskedQuestions, ledgerForPrompt } from "./decisions.service.js"
 import { elicitPolicyFor, keepConflictsOnly, reconcileReply, trimTailQuestion } from "./fast-path.js"
-import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
+import { PROMPT_QUESTIONS_PER_TURN, answerText, answeredTopics, currentBatch, followUpQuestions, followUpReply, indexOfQuestion, questionIdsFor, sameText, shapeQuestions, splitNumberedAnswer, stripRecommended, verifiedExcerpt } from "./question-shape.js"
 import { MAX_SCHEMA_RETRIES, draftOps, type DraftCallKind, type DraftExecutor } from "./draft-to-ops.js"
 import { S9_FREE_STEPS, S9_PHASE, runS9Step } from "./s9/run-s9-step.js"
 import * as meter from "./meter.service.js"
@@ -1563,8 +1563,16 @@ export const runStep = async (
         if (cardAnswers.length > 0 || message) userDecided = true
         if (!message) {
           await markReceived(cardAnswers.length, `Đã nhận ${cardAnswers.length} câu trả lời`)
+          // FLF-355: thẻ chỉ mang nhóm câu của lượt này; nhóm khác loại hỏi tiếp ngay sau, không gọi model
           await recordAnswers(pending, cardAnswers)
-          return
+          const later = followUpQuestions(pending, cardAnswers)
+          if (later.length === 0) return
+          const nextReply = followUpReply(replyLanguage)
+          emit({ type: "elicit", step_id: stepId, delta: nextReply })
+          await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(nextReply, later))
+          pending = later
+          next = (await announceWaiting(pending)).answer
+          continue
         }
 
         await markReceived(cardAnswers.length, "Đang đọc tin nhắn của bạn")
@@ -1637,7 +1645,7 @@ export const runStep = async (
         // Câu hỏi đuôi trong lời AI tính vào trần câu hỏi của lượt (FLF-235)
         const chatReply = trimTailQuestion(turn.reply, remaining, PROMPT_QUESTIONS_PER_TURN, replyLanguage)
         emit({ type: "elicit", step_id: stepId, delta: chatReply })
-        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, remaining))
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(chatReply, currentBatch(remaining).now))
         if (remaining.length === 0) return
         pending = remaining
         next = (await announceWaiting(pending)).answer
@@ -1765,7 +1773,7 @@ export const runStep = async (
           replyLanguage
         )
         emit({ type: "elicit", step_id: stepId, delta: reply })
-        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, asked))
+        await pushTranscript(projectId, sessionId, stepId, "ai", askTranscript(reply, currentBatch(asked).now))
         if (questions.length > 0) {
           // Chờ user: ghi câu hỏi vào run-state để reload dựng lại đúng form (BUG-07), kèm đủ thứ để `/answer`
           // chạy tiếp khi không còn kết nối này (FLF-222). Lượt chờ nhả khoá: không có gì đang được ghi.

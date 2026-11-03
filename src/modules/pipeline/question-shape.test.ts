@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { elicitSchema } from "../../shared/ai/response-parser.js"
-import { answerText, answeredTopics, chatReplyQuestionId, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
+import { answerText, answeredTopics, chatReplyQuestionId, currentBatch, indexOfQuestion, questionIdsFor, shapeChatQuestions, shapeOptions, shapeQuestions, splitNumberedAnswer, verifiedExcerpt, type ModelQuestion } from "./question-shape.js"
 
 const opts = (...labels: string[]) => labels.map((label) => ({ label }))
 const q = (question: string, extra: Partial<ModelQuestion> = {}): ModelQuestion & { topic_key: string } => ({
@@ -81,13 +81,45 @@ describe("shapeQuestions", () => {
   })
 
   it("câu mở không mang options/multiple; header cắt ≤ 12 ký tự", () => {
-    const { questions } = shapeQuestions([
-      q("Mô tả quy trình đặt lịch?", { multiple: true, header: "  Quy trình đặt lịch  " }),
-      q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false, header: "Uptime" })
-    ])
-    expect(questions[0]).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình đặ" })
-    expect(questions[0].options).toBeUndefined()
-    expect(questions[1]).toEqual({ id: questions[1].id, text: "Uptime?", header: "Uptime", options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false })
+    const [open] = shapeQuestions([q("Mô tả quy trình đặt lịch?", { multiple: true, header: "  Quy trình đặt lịch  " })]).questions
+    expect(open).toMatchObject({ text: "Mô tả quy trình đặt lịch?", header: "Quy trình đặ" })
+    expect(open.options).toBeUndefined()
+    expect(open).not.toHaveProperty("multiple")
+    const [card] = shapeQuestions([q("Uptime?", { options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false, header: "Uptime" })]).questions
+    expect(card).toEqual({ id: card.id, text: "Uptime?", header: "Uptime", options: opts("99.9% (Khuyến nghị)", "99%"), multiple: false })
+  })
+})
+
+describe("một lượt một loại câu (FLF-355)", () => {
+  const mixed = [
+    { question: "Nền tảng?", options: opts("Web", "Mobile"), topic_key: "form_factor" },
+    { question: "Ai duyệt lịch hẹn?", options: [], topic_key: "approver" },
+    { question: "Tuân thủ?", options: opts("Nội bộ", "Nội bộ và pháp luật"), topic_key: "stakes" }
+  ]
+
+  it("lượt trộn ⇒ FE chỉ nhận nhóm cùng loại với câu đầu; `asked` giữ đủ để hỏi tiếp, id theo chủ đề không đổi", () => {
+    const { asked, questions } = shapeQuestions(mixed)
+    expect(questions.map((x) => x.id)).toEqual(["Q_form_factor", "Q_stakes"])
+    expect(asked.map((x) => x.topic_key)).toEqual(["form_factor", "approver", "stakes"])
+    const { now, later } = currentBatch(asked)
+    expect(now.map((x) => x.topic_key)).toEqual(["form_factor", "stakes"])
+    expect(later.map((x) => x.topic_key)).toEqual(["approver"])
+    expect(shapeQuestions(later).questions).toEqual([{ id: "Q_approver", text: "Ai duyệt lịch hẹn?" }])
+  })
+
+  it("câu đầu là câu mở ⇒ lượt này hỏi câu mở trước, câu chọn để sau", () => {
+    const { questions } = shapeQuestions([mixed[1], mixed[0]])
+    expect(questions.map((x) => x.id)).toEqual(["Q_approver"])
+  })
+
+  it("câu có lựa chọn còn < 2 option sau khi lọc thành câu mở ⇒ tính theo loại sau khi lọc", () => {
+    const { questions } = shapeQuestions([mixed[0], { question: "Kênh?", options: opts("Online", "Khác…"), topic_key: "channel" }])
+    expect(questions.map((x) => x.id)).toEqual(["Q_form_factor"])
+  })
+
+  it("lượt một loại ⇒ không có gì để sau", () => {
+    expect(currentBatch([mixed[0], mixed[2]]).later).toEqual([])
+    expect(currentBatch([]).now).toEqual([])
   })
 })
 
@@ -229,8 +261,10 @@ describe("inline (FLF-232)", () => {
       { question: "Ai duyệt?", options: [], topic_key: "approver" }
     ])
     expect(questions[0]).toMatchObject({ id: "Q_booking_flow", inline: true })
+    expect(questions[1]).toMatchObject({ id: "Q_approver" })
     expect(questions[1]).not.toHaveProperty("inline")
-    expect(questions[2]).not.toHaveProperty("inline")
+    // câu có lựa chọn chờ lượt sau (FLF-355), cũng không inline
+    expect(shapeQuestions([asked[1]]).questions[0]).not.toHaveProperty("inline")
     // giữ trên câu đang chờ để lượt chat sau vẫn dựng lại đúng
     expect(asked[0].inline).toBe(true)
   })

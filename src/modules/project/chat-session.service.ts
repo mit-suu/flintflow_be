@@ -11,7 +11,7 @@ import { getPromptTemplate } from "../../shared/ai/prompt-registry.service.js"
 import * as changeService from "../spine/change.service.js"
 import { changeErrorReply, clarificationRounds, formatChatContext, previewPayload } from "../spine/change-transcript.js"
 import { submitAnswer } from "../pipeline/step-runner.service.js"
-import { shapeChatQuestions } from "../pipeline/question-shape.js"
+import { currentBatch, followUpReply, shapeChatQuestions } from "../pipeline/question-shape.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { replyLanguageForSession, typedPartOf } from "./reply-language.service.js"
 import { KNOWLEDGE_DAILY_LIMIT, answerKnowledgeQuestion, type KnowledgeAnswer } from "../knowledge/answer.service.js"
@@ -32,7 +32,34 @@ import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language
 const shapeChatReply = (data: unknown): unknown => {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return data
   const reply = data as Record<string, unknown>
-  return { ...reply, questions: shapeChatQuestions(reply.questions) }
+  // FLF-355: một lượt một loại câu — nhóm khác loại lưu kèm tin, tin user kế tiếp nhận nó (`askDeferredQuestions`)
+  const { now, later } = currentBatch(shapeChatQuestions(reply.questions))
+  return { ...reply, questions: now, ...(later.length > 0 ? { deferred_questions: later } : {}) }
+}
+
+/**
+ * FLF-355: tin AI ngay trước tin user vừa gửi còn nhóm câu chờ (`deferred_questions`) ⇒ hỏi nhóm đó luôn, không gọi model.
+ * Câu trả lời của nhóm trước vẫn nằm trong lịch sử nên lượt chat sau đọc được. Trả payload đã ghi; không có ⇒ `null`.
+ */
+const askDeferredQuestions = async (
+  session: IChatSession,
+  step: string,
+  replyLanguage: ReplyLanguage,
+  discoveryStep?: number
+): Promise<Record<string, unknown> | null> => {
+  const previous = session.messages[session.messages.length - 2]
+  if (previous?.role !== "ai") return null
+  let deferred: unknown
+  try {
+    deferred = (JSON.parse(previous.content) as { deferred_questions?: unknown }).deferred_questions
+  } catch {
+    return null
+  }
+  if (!Array.isArray(deferred) || deferred.length === 0) return null
+  const payload = { reply: followUpReply(replyLanguage), questions: deferred }
+  session.messages.push({ role: "ai", content: JSON.stringify(payload), step, discoveryStep, createdAt: new Date() })
+  await session.save()
+  return payload
 }
 
 export const createChatSession = async (projectId: string): Promise<IChatSession> => {
@@ -268,6 +295,9 @@ export const sendMessageAndGetResponse = async (
   // 1c. T17: lệnh sửa từ session không pipeline đi vào change flow, không gọi CHAT
   if (await tryChangeFlow(session, projectId, content, step, userId, replyLanguage)) return session
 
+  // 1d. FLF-355: lượt hỏi trước còn nhóm câu khác loại ⇒ hỏi nó, không gọi CHAT
+  if (await askDeferredQuestions(session, step, replyLanguage, discoveryStep)) return session
+
   // 2. Ngữ cảnh cho AI: tóm tắt + đuôi transcript TRƯỚC tin này (tin này đã đi qua `input_text`) + chỉ mục Spine gọn
   const spine = await spineRepository.get(projectId)
   const historyText = formatChatContext(session.messages.slice(0, -1), spine)
@@ -421,6 +451,18 @@ export const sendMessageStream = async (
         res.write(`data: ${JSON.stringify({ type: "finish", session, data: payload, tokensUsed: null, cost: 0 })}
 
 `)
+        res.end()
+      }
+    } catch (_) {}
+    return
+  }
+
+  // 1d. FLF-355: lượt hỏi trước còn nhóm câu khác loại ⇒ hỏi nó, một sự kiện `finish`, không gọi CHAT
+  const deferredPayload = await askDeferredQuestions(session, step, replyLanguage, discoveryStep)
+  if (deferredPayload) {
+    try {
+      if (!res.destroyed && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ type: "finish", session, data: deferredPayload, tokensUsed: null, cost: 0 })}\n\n`)
         res.end()
       }
     } catch (_) {}

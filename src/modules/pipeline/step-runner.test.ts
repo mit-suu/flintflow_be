@@ -1091,7 +1091,10 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
     seedSpine()
     seedSession(true)
     const { draftExecutor } = await runUntilAsked("reload")
-    const answers = [{ question_id: "Q1", answer: "Quản trị viên" }]
+    const answers = [
+      { question_id: "Q1", answer: "Quản trị viên" },
+      { question_id: "Q2", answer: "99%" }
+    ]
     const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers })
 
     const first = await resumeWaitingStep(PROJECT, "S-3.1", USER, pending, { answers }, { draftExecutor, renderDeps: renderStub() })
@@ -1104,7 +1107,10 @@ describe("step-runner: /answer chạy tiếp lượt chờ đã tách, từ sau 
     seedSpine()
     seedSession(true)
     await runUntilAsked("reload")
-    const answers = [{ question_id: "Q1", answer: "Quản trị viên" }]
+    const answers = [
+      { question_id: "Q1", answer: "Quản trị viên" },
+      { question_id: "Q2", answer: "99%" }
+    ]
     const pending = await pendingAnswerFor(PROJECT, "S-3.1", SESSION, { answers })
     const failing = vi.fn(async () => {
       throw new ApiError(502, "provider chết", "AI_PROVIDER_ERROR")
@@ -1370,10 +1376,38 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [], message: "Phần mềm này có chạy trên iPad không?" })
     await waitCount(s.events, "answer_needed", 2)
     const again = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
-    expect(again.questions).toHaveLength(2)
+    // Cả hai câu vẫn chờ; thẻ chỉ mang nhóm cùng loại với câu đầu (FLF-355)
+    expect(again.questions.map((q) => q.id)).toEqual(["Q_primary_actor"])
     expect(await decisionsOf()).toEqual([])
     submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_primary_actor", answer: "Lễ tân" }, { question_id: "Q_uptime", answer: "99%" }] })
     await s.run
+  })
+
+  it("FLF-355: lượt trộn ⇒ hỏi câu mở trước, trả lời xong mới hỏi câu chọn (không gọi model), rồi tới gate", async () => {
+    seedSpine()
+    seedSession(true)
+    const s = start([])
+    await waitCount(s.events, "answer_needed", 1)
+    const first = s.events.find((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>
+    expect(first.questions.map((q) => q.id)).toEqual(["Q_primary_actor"])
+
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_primary_actor", answer: "Lễ tân" }] })
+    await waitCount(s.events, "answer_needed", 2)
+    const second = s.events.filter((e) => e.type === "answer_needed")[1] as Extract<StepEvent, { type: "answer_needed" }>
+    expect(second.questions.map((q) => q.id)).toEqual(["Q_uptime"])
+    expect(second.questions[0].options?.length).toBe(2)
+    expect(s.events.some((e) => e.type === "elicit" && e.delta === "Cảm ơn bạn. Mình hỏi thêm mấy câu nữa nhé:")).toBe(true)
+    expect(s.chatPrompts).toEqual([])
+
+    submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_uptime", answer: "99%" }] })
+    await s.run
+    expect(s.events.some((e) => e.type === "gate_ready")).toBe(true)
+    expect((await decisionsOf()).map((d) => d.topic_key)).toContain("uptime")
+    // Lịch sử: mỗi lượt hỏi một tin AI chỉ chứa nhóm câu của lượt đó
+    const aiAsks = (db.sessions[0].messages as { role: string; content: string }[])
+      .filter((m) => m.role === "ai" && m.content.startsWith("{"))
+      .map((m) => (JSON.parse(m.content) as { questions: { question: string }[] }).questions.map((q) => q.question))
+    expect(aiAsks).toEqual([["Actor chính là ai?"], ["Mức uptime mong muốn?"]])
   })
 
   it("settled không khớp nhãn option ⇒ bỏ; câu mở chỉ ghi trích đoạn đã kiểm của tin user, câu model diễn lại ⇒ vẫn chờ", async () => {
@@ -1395,7 +1429,7 @@ describe("step-runner: chat tự do khi đang chờ trả lời (FLF-221)", () =
     await waitCount(s.events, "answer_needed", 3)
     expect((await decisionsOf()).map((d) => [d.topic_key, d.answer])).toEqual([["primary_actor", "lễ tân"]])
     const askedEvents = s.events.filter((e) => e.type === "answer_needed") as Extract<StepEvent, { type: "answer_needed" }>[]
-    expect(askedEvents[1].questions.map((q) => q.id)).toEqual(["Q_primary_actor", "Q_uptime"])
+    expect(askedEvents[1].questions.map((q) => q.id)).toEqual(["Q_primary_actor"])
     expect(askedEvents[2].questions.map((q) => q.id)).toEqual(["Q_uptime"])
     submitAnswer(PROJECT, "S-3.1", SESSION, { answers: [{ question_id: "Q_uptime", answer: "99.9% (Khuyến nghị)" }] })
     await s.run
@@ -1726,6 +1760,22 @@ describe("phỏng vấn đầu giai đoạn: transcript", () => {
     ;(db.sessions[0].messages as unknown[]).push({ role: "ai", content: JSON.stringify({ reply: "x", questions: [] }), step: "S-6", createdAt: new Date() })
     await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers })
     expect(messagesOf().filter((m) => m.role === "ai")).toHaveLength(1)
+  })
+
+  it("FLF-355: lượt trộn trả lời nhóm câu chọn trên thẻ ⇒ quay lại chờ với nhóm câu mở, lịch sử mỗi lượt một nhóm", async () => {
+    seedSpine()
+    seedSession(true)
+    const open = { topic_key: "peak_hours", question: "Giờ cao điểm thường là khi nào?", options: [] }
+    const mixed = { ...pending, asked: [...asked, open] }
+    await resumePhaseInterview(PROJECT, "S-6", USER, mixed, { answers }, { replyLanguage: "vi" })
+
+    const state = await getRunState(PROJECT, "S-6")
+    expect(state).toMatchObject({ status: "waiting_answer", questions: [{ id: "Q_peak_hours", text: open.question }] })
+    expect(state?.pending_answer?.asked.map((q) => q.topic_key)).toEqual(["peak_hours"])
+    const ais = messagesOf().filter((m) => m.role === "ai").map((m) => JSON.parse(m.content) as { reply: string; questions: { question: string }[] })
+    expect(ais.map((m) => m.questions.map((q) => q.question))).toEqual([asked.map((q) => q.question), [open.question]])
+    expect(ais[1].reply).toBe("Cảm ơn bạn. Mình hỏi thêm mấy câu nữa nhé:")
+    expect((await repo.get(PROJECT))!.decisions.map((d) => d.topic_key)).toEqual(expect.arrayContaining(["uptime", "concurrent_users"]))
   })
 })
 
