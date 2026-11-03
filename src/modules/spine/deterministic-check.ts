@@ -135,6 +135,8 @@ export interface RuleProfile {
    * (mục riêng của mẫu chưa có nội dung). Không đặt ⇒ hai luật không chạy.
    */
   templateLayout?: ReadonlySet<string>
+  /** Heading bao của mẫu (`custom:*` chỉ chứa mục con, `import/template-wrappers.ts`) — trống không phải gap, không cờ. */
+  templateWrappers?: ReadonlySet<string>
 }
 
 export interface CheckOptions {
@@ -747,7 +749,7 @@ const SECTION_SCOPED_RULES: ReadonlySet<string> = new Set(["section_empty", "arr
 const outsideTemplate = (c: FlagCandidate, layout: ReadonlySet<string> | undefined): boolean =>
   !!layout && SECTION_SCOPED_RULES.has(c.rule_id) && c.section_id.startsWith("fixed:") && !layout.has(c.section_id)
 
-const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>): FlagCandidate[] => [
+const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>, wrappers: ReadonlySet<string> = new Set()): FlagCandidate[] => [
   ...REQUIRED_FIXED_SECTION_IDS.filter((id) => !layout.has(id) && !DERIVED_SECTION_IDS.has(id) && sectionHasData(spine, id) === true).map(
     (id): FlagCandidate => ({
       level: "yellow",
@@ -759,7 +761,13 @@ const fixedTemplateGaps = (spine: Spine, layout: ReadonlySet<string>): FlagCandi
     })
   ),
   ...spine.custom_sections
-    .filter((c) => layout.has(`custom:${c.id}`) && c.heading.trim() && !c.blocks.some((b) => b.image_ref || isRealText(b.text) || tableHasRealText(b.rows)))
+    .filter(
+      (c) =>
+        layout.has(`custom:${c.id}`) &&
+        !wrappers.has(`custom:${c.id}`) &&
+        c.heading.trim() &&
+        !c.blocks.some((b) => b.image_ref || isRealText(b.text) || tableHasRealText(b.rows))
+    )
     .map(
       (c): FlagCandidate => ({
         level: "yellow",
@@ -1362,7 +1370,7 @@ export const runDeterministicCheck = (
     ...actorGeneralizationChildrenUnlisted(spine),
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate),
-    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout) : [])
+    ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers) : [])
   ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 
   const index = buildIdIndex(spine)

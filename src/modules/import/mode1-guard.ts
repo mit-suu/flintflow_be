@@ -15,8 +15,9 @@ import * as flagsService from "../spine/flags.service.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import { Mode1Error, type Mode1ErrorCode } from "./mode1.errors.js"
 import { MODE1_RULE_PROFILE } from "./mode1-rule-profile.js"
-import { TemplateProfile } from "./template-profile.model.js"
+import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { withSlotParents } from "./content-slots.js"
+import { templateWrapperIds } from "./template-wrappers.js"
 import type { RuleProfile } from "../spine/deterministic-check.js"
 
 export interface CrPrefill {
@@ -37,13 +38,14 @@ export const ruleProfileOf = async (projectId: string): Promise<RuleProfile | un
   const project = (await Project.findById(projectId).select("mode template_intent").lean()) as { mode?: string; template_intent?: string | null } | null
   const mode1 = project?.mode === "import"
   if (project?.template_intent !== "fixed") return mode1 ? MODE1_RULE_PROFILE : undefined
-  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()) as { layout?: { section_id: string }[] } | null
+  const profile = (await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean()) as { layout?: LayoutEntry[] } | null
   const layout = profile?.layout ?? []
   if (!layout.length) return mode1 ? MODE1_RULE_PROFILE : undefined
   // Mục FPT có mặt qua các phần nhỏ (`slot:*`) của nó cũng là mục của mẫu
   const templateLayout = withSlotParents(layout.map((l) => l.section_id))
+  const templateWrappers = templateWrapperIds(layout)
   // Luồng 2 của chế độ 3 (`mode = fpt`, flow2.service): đủ luật tạo mới, chỉ trên các mục của mẫu
-  return mode1 ? { ...MODE1_RULE_PROFILE, templateLayout } : { exclude: new Set(), downgrade: new Set(), templateLayout }
+  return mode1 ? { ...MODE1_RULE_PROFILE, templateLayout, templateWrappers } : { exclude: new Set(), downgrade: new Set(), templateLayout, templateWrappers }
 }
 
 flagsService.setRuleProfileResolver(ruleProfileOf)

@@ -16,6 +16,7 @@ import { sectionHasData } from "../spine/deterministic-check.js"
 import { sectionTitle } from "./section-catalog.js"
 import type { LayoutEntry } from "./template-profile.model.js"
 import { isContentSlot, slotHasData, slotParents } from "./content-slots.js"
+import { templateWrapperIds } from "./template-wrappers.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -66,11 +67,14 @@ export const compareTargetStructure = (
     // Đích = heading của chính mẫu (bỏ nhóm bao `group:*` — không có nội dung riêng — và phần nối: mục riêng tiêu đề rỗng
     // gom khối dưới heading nhóm / khối không trích, thuộc mục đứng trước chứ không phải heading của mẫu)
     const seen = new Set<string>()
+    const wrappers = templateWrapperIds(layout)
     for (const entry of layout) {
       if (entry.section_id.startsWith("group:") || seen.has(entry.section_id)) continue
       if (entry.section_id.startsWith("custom:") && !entry.heading_text.trim()) continue
       seen.add(entry.section_id)
       const present = hasContent(spine, entry.section_id, withContent)
+      // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
+      if (wrappers.has(entry.section_id) && !present) continue
       const owners = isContentSlot(entry.section_id) ? [...new Set(slotParents(entry.section_id).flatMap((p) => stepsOf(p, spine)))] : stepsOf(entry.section_id, spine)
       sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: owners })
     }

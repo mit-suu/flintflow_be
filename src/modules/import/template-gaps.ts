@@ -15,6 +15,7 @@ import { isRealText } from "../../shared/utils/instruction-text.js"
 import { normalizeTitle } from "./org-mapping.js"
 import { suggestSlot } from "./content-slots.js"
 import { TemplateProfile } from "./template-profile.model.js"
+import { templateWrapperIds } from "./template-wrappers.js"
 
 export interface TemplateGapRow {
   /** Tiêu đề đã chuẩn hoá — gộp "2.4 Hardware Interfaces" và "Hardware interfaces". */
@@ -30,8 +31,8 @@ export interface TemplateGapRow {
 }
 
 export interface GapInput {
-  /** Mục riêng trong layout của một dự án: id + tiêu đề heading. */
-  sections: readonly { id: string; title: string }[]
+  /** Mục riêng trong layout của một dự án: id + tiêu đề heading; `wrapper` = heading bao chỉ chứa mục con. */
+  sections: readonly { id: string; title: string; wrapper?: boolean }[]
   /** `custom_sections` hiện tại trong Spine của dự án đó. */
   spineSections: readonly Pick<CustomSection, "id" | "blocks">[]
 }
@@ -46,7 +47,8 @@ export const aggregateTemplateGaps = (inputs: readonly GapInput[], limit: number
     const byId = new Map(spineSections.map((c) => [c.id, c]))
     for (const s of sections) {
       const key = normalizeTitle(s.title)
-      if (!key) continue
+      // Heading bao còn trống (vd "2 Overall Description") không phải mục thiếu dữ liệu
+      if (!key || (s.wrapper && !filled(byId.get(s.id)))) continue
       const row = rows.get(key) ?? { key, samples: [], projects: 0, empty: 0, suggested_destination: suggestSlot(s.title) }
       row.projects += 1
       if (!filled(byId.get(s.id))) row.empty += 1
@@ -66,12 +68,15 @@ export const templateGaps = async (limit: number): Promise<{ projects: number; r
     Spine.find({ projectId: { $in: ids } }, { projectId: 1, "custom_sections.id": 1, "custom_sections.blocks": 1 }).lean()
   ])
   const sectionsOf = new Map(spines.map((s) => [String(s.projectId), (s.custom_sections ?? []) as Pick<CustomSection, "id" | "blocks">[]]))
-  const inputs = profiles.map((p) => ({
-    sections: (p.layout ?? [])
-      .filter((l) => l.section_id.startsWith("custom:") && l.heading_text.trim())
-      .map((l) => ({ id: l.section_id.slice("custom:".length), title: l.heading_text.trim() })),
-    spineSections: sectionsOf.get(String(p.projectId)) ?? []
-  }))
+  const inputs = profiles.map((p) => {
+    const wrappers = templateWrapperIds(p.layout ?? [])
+    return {
+      sections: (p.layout ?? [])
+        .filter((l) => l.section_id.startsWith("custom:") && l.heading_text.trim())
+        .map((l) => ({ id: l.section_id.slice("custom:".length), title: l.heading_text.trim(), wrapper: wrappers.has(l.section_id) })),
+      spineSections: sectionsOf.get(String(p.projectId)) ?? []
+    }
+  })
   return { projects: profiles.length, rows: aggregateTemplateGaps(inputs, limit) }
 }
 

@@ -142,6 +142,8 @@ describe("titleOfSection", () => {
     expect(titleOfSection(spine, "function:FR-9")).toBe("Chức năng")
     expect(titleOfSection(spine, "feature:@B0012")).toBe("Tính năng")
     expect(titleOfSection(spine, "fixed:9.9")).toBe("Mục khác")
+    // Phần nhỏ của mẫu bắt buộc (FLF-278): tên dễ đọc, không rơi về "Mục khác"
+    expect(titleOfSection(spine, "slot:features")).toBe("Tổng quan chức năng sản phẩm")
     expect(titleOfSection({ ...(spine as object), custom_sections: [{ id: "CS01", heading: "Phụ lục A" }] } as never, "custom:CS01")).toBe("Phụ lục A")
   })
 

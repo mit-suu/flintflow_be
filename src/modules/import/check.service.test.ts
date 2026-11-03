@@ -149,6 +149,18 @@ describe("findingOps — AI semantic check chỉ ra vàng", () => {
     expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:I"])
   })
 
+  it("phần nhỏ slot:* của mẫu bắt buộc (FLF-278) không phải mục Spine ⇒ cờ trỏ về mục FPT cha; không có cha ⇒ fixed:I", () => {
+    const ops = findingOps(
+      spine(),
+      [
+        { rule: "r", section_id: "slot:vision", message: "xem tầm nhìn", block_ids: ["B0003"] },
+        { rule: "r", section_id: "slot:features", message: "xem chức năng", block_ids: ["B0004"] }
+      ],
+      IMPORT_SEMANTIC_RULE
+    )
+    expect(ops.map((o) => (o as { value: Flag }).value.section_id)).toEqual(["fixed:1", "fixed:I"])
+  })
+
   it("không finding ⇒ không op", () => {
     expect(findingOps(spine(), [], IMPORT_SEMANTIC_RULE)).toEqual([])
   })
