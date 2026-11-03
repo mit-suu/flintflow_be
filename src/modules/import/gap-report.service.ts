@@ -18,6 +18,7 @@ import type { ImportStatus } from "./import.state.js"
 import { latestImport, toReviewFields, transitionImport } from "./import.service.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { sectionTitle } from "./section-catalog.js"
+import { contentSlot } from "./content-slots.js"
 import { FEATURE_SECTIONS, continuationOwnerSection } from "./step-plan.js"
 import { TemplateProfile, type LayoutEntry } from "./template-profile.model.js"
 import { IMPORTED_DOC_VERSION } from "../doc-version/versioning.js"
@@ -52,6 +53,9 @@ export const titleOfSection = (
   }
   if (kind === "feature") return spine.features.find((f) => f.id === key)?.name ?? "Tính năng"
   if (kind === "function") return spine.functions.find((f) => f.id === key)?.name ?? "Chức năng"
+  // Phần nhỏ của mẫu bắt buộc (FLF-278) — cùng nhãn FE hiện ở mapping / khung tài liệu
+  const slot = contentSlot(id)
+  if (slot) return slot.label_vi
   const title = sectionTitle(id)
   return title === id ? "Mục khác" : title
 }
