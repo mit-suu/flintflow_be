@@ -58,7 +58,7 @@ export interface VersionFileNameParts {
   name: string
   /** Bản phát hành (`x.0` của mode 1, baseline của mode 2) ⇒ không `_DRAFT`, không mã CR. */
   release: boolean
-  /** Release: số của chính nó (`2.0`). Bản nháp: release gốc (`1.0`; `0`/`v0` = chỉ có bản import); `null` = chưa có gốc. */
+  /** Release: số của chính nó (`2.0`). Bản nháp: release gốc (`1.0`; chưa release ⇒ số bản import `0.1`, FLF-356); `null` = chưa có gốc. */
   base: string | null
   /** Bản nháp: CR mới nhất đã ghi vào nó (`CR-014`); bỏ qua với release. */
   latestCr?: string | null
@@ -72,7 +72,7 @@ export interface VersionFileNameParts {
 
 /**
  * Quy tắc tên file chung cho tải version mode 1 và xuất mode 2, Word lẫn PDF (FLF-334). Không mang mã dự án — máy nhận
- * dự án qua stamp trong file. `Lumen_v2.0.docx` · `Lumen_v1.0+CR-014_DRAFT.docx` · `Lumen_v0_DRAFT.docx` ·
+ * dự án qua stamp trong file. `Lumen_v2.0.docx` · `Lumen_v1.0+CR-014_DRAFT.docx` · `Lumen_v0.1_DRAFT.docx` ·
  * `Lumen_DRAFT.docx` (mode 2 chưa baseline) · `…_tracked_DRAFT.docx` · `…_original.docx` · ngôn ngữ khác
  * `Lumen_v2.0_EN.docx` / `Lumen_v1.0_DRAFT_VI.docx` (FLF-334 B).
  */
@@ -94,7 +94,7 @@ export interface LineageVersion {
 
 export interface VersionLineage {
   release: boolean
-  /** Release: chính nó. Bản nháp: version release (`x.0`) gần nhất trước nó, `0` khi chưa có (chỉ có bản import). */
+  /** Release: chính nó. Bản nháp: version release (`x.0`) gần nhất trước nó; chưa có ⇒ số bản import (`0.1`, cũ `0.0`) — FLF-356. */
   base: string
   /** Bản nháp: mã CR cuối của version gần nhất (tính cả chính nó, sau release gốc) có CR; release ⇒ `null`. */
   latestCr: string | null
@@ -112,5 +112,6 @@ export const versionLineage = (versions: readonly LineageVersion[], target: stri
   const since = lastRelease ? history.slice(0, history.indexOf(lastRelease)) : history
   const withCr = since.find((v) => v.cr_ids.length > 0)
   const latestCr = withCr ? withCr.cr_ids[withCr.cr_ids.length - 1] : null
-  return { release: false, base: lastRelease?.version ?? "0", latestCr }
+  // FLF-356: chưa release ⇒ gốc là bản import (cũ nhất trong lịch sử, `0.1` / `0.0`) — không gộp về `0`
+  return { release: false, base: lastRelease?.version ?? history[history.length - 1]?.version ?? "0", latestCr }
 }

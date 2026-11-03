@@ -239,17 +239,21 @@ export function exportLineage(doc: Pick<RenderedDocument, "version" | "source">)
   const label = doc.version.trim()
   if (doc.source === "draft" && /^v?0$/i.test(label)) return { release: false, base: null }
   const base = label.split("+")[0].trim().replace(/^v/i, "") || null
-  // Gốc `0.x` (bản import của dự án mode 1) không bao giờ là release — kể cả khi xuất `source=baseline` ⇒ `_v0_DRAFT`
-  if (base && /^0(\.\d+)?$/.test(base)) return { release: false, base: "0" }
+  // Gốc `0.x` (bản import của dự án mode 1) không bao giờ là release — kể cả khi xuất `source=baseline`. FLF-356: giữ
+  // đúng số bản import (`0.1`), không gộp về `0`
+  if (base && /^0(\.\d+)?$/.test(base)) return { release: false, base }
   return { release: doc.source !== "draft", base }
 }
 
 /**
  * Tên file theo quy tắc chung `versionFileName` (FLF-334): `Lumen_v1.0.docx`, `Lumen_v1.0_DRAFT.docx`, `Lumen_DRAFT.docx`.
  * `language` (FLF-334 B) chỉ truyền khi khác ngôn ngữ tài liệu ⇒ `Lumen_v1.0_EN.docx`.
+ * FLF-356: `_DRAFT` theo nội dung file — xuất `source=baseline` không có watermark DRAFT ⇒ tên cũng không có, kể cả
+ * baseline `0.x` của dự án import (`FAP_v0.1.docx`); stamp `kind` vẫn theo `exportLineage` (0.x chưa phát hành).
  */
 export function buildDocxFileName(doc: Pick<RenderedDocument, "projectName" | "version" | "source">, language?: string): string {
-  return versionFileName({ name: doc.projectName, ...exportLineage(doc), ...(language ? { language } : {}) })
+  const lineage = exportLineage(doc)
+  return versionFileName({ name: doc.projectName, ...lineage, release: lineage.release || doc.source === "baseline", ...(language ? { language } : {}) })
 }
 
 function coverPage(doc: RenderedDocument, isDraft: boolean, t: WriterText): Paragraph[] {

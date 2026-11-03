@@ -52,7 +52,7 @@ const router = Router()
  * /api/v1/projects/{projectId}/versions/{v}/download:
  *   get:
  *     summary: Tải file .docx của một version (UC-57)
- *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0_DRAFT.docx`; stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B, chỉ version có snapshot baseline của dự án chuyển từ mode 2) ⇒ dựng lại theo `lang`, hậu tố ngôn ngữ cuối tên: `<tên>_v2.0_VI.docx`."
+ *     description: "`auto` — release ⇒ bản sạch; draft ⇒ Track Changes + watermark DRAFT. Tên (FLF-334) `<tên>_v2.0.docx` · `<tên>_v1.0+CR-014_DRAFT.docx` · `<tên>_v0.1_DRAFT.docx` (chưa release: số bản import, FLF-356); stamp thêm `flintflow_base_version`, `flintflow_latest_cr`, `flintflow_kind`. `tracked` — bản có Track Changes của CR (mode 1 v3: file riêng `tracked_file_ref`; version không có ⇒ bản render). `original` — file người dùng upload (chỉ bản 0.1 / 0.0; version khác ⇒ 404), tên `…_original.docx`. `lang` khác ngôn ngữ tài liệu (FLF-334 B, chỉ version có snapshot baseline của dự án chuyển từ mode 2) ⇒ dựng lại theo `lang`, hậu tố ngôn ngữ cuối tên: `<tên>_v2.0_VI.docx`."
  *     tags: [Versions (mode 1)]
  *     security:
  *       - BearerAuth: []

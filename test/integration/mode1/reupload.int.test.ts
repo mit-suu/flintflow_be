@@ -128,9 +128,9 @@ describe("re-upload — diff theo block", () => {
   it("FLF-334: bản nháp vừa tải về (stamp mới + DRAFT) sửa trong Word rồi upload lại ⇒ nhận ra, có diff", async () => {
     const { projectId, userId } = await importFinalized()
     const dl = await downloadVersion(projectId, "Lumen", "0.1", "auto")
-    expect(dl.filename).toBe("Lumen_v0_DRAFT.docx")
+    expect(dl.filename).toBe("Lumen_v0.1_DRAFT.docx")
     const pkg = await DocxPackage.load(dl.data)
-    expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.1", base_version: "0", kind: "draft" })
+    expect(await readStamp(pkg)).toMatchObject({ project_id: projectId, version: "0.1", base_version: "0.1", kind: "draft" })
     setText(para(await pkg.requireXml("word/document.xml"), SRS_FIXTURE_TEXT.purpose), `${SRS_FIXTURE_TEXT.purpose} Edited in Word.`)
     const dto = toReuploadDto(await reupload(projectId, userId, fileOf(await pkg.toBuffer(), dl.filename)))
     expect(dto).toMatchObject({ against_version: "0.1", summary: { added: 0, removed: 0, modified: 1, moved: 0 } })
