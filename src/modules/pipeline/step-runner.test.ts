@@ -168,6 +168,8 @@ import { fakeRepository, resetStore, store as translationStore } from "../transl
 import { hashSource } from "../translation/translation-units.js"
 import { documentLanguageForTurn } from "../translation/turn-language.js"
 import { buildStepContext } from "./context-projection.js"
+import { getPromptTemplate, interpolatePrompt } from "../../shared/ai/prompt-registry.service.js"
+import { ActionType } from "../../shared/ai/ai-action.types.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.resolve(__dirname, "../../../fixtures")
@@ -2265,5 +2267,67 @@ describe("FLF-260: runPhase — ngôn ngữ đi qua phỏng vấn đầu giai đ
     }
     await resumePhaseInterview(PROJECT, "S-6", USER, pending, { answers: [], message: "We expect about 500 users at the same time" }, { elicitExecutor: elicitExecutor as never })
     expect(languages).toEqual(["en"])
+  })
+})
+
+describe("FLF-358: prompt elicit-loop đã render không còn {{assumptions}} ở cả 3 lượt gọi", () => {
+  const openAssumption = (id: string, origin: string, path: string) => ({
+    id, path, statement: `Open assumption ${id}`, rationale: "r", origin_step_id: origin, status: "unconfirmed" as const, confirmed_at: null
+  })
+
+  /** Gọi model nào cũng ghi lại prompt đã render đúng như `buildPrompt` (template elicit + promptVariables). */
+  const rendering = (answer: (kind: "interview" | "chat" | "elicit") => AiActionResult<ElicitOutput>) => {
+    const prompts: { kind: "interview" | "chat" | "elicit"; unit: string; prompt: string }[] = []
+    const elicitExecutor = async (input: AiActionInput) => {
+      const vars = input.promptVariables as Record<string, unknown>
+      const kind = vars.chat_turn ? "chat" : vars.phase_interview ? "interview" : "elicit"
+      const { template } = await getPromptTemplate(ActionType.ELICIT)
+      prompts.push({ kind, unit: String(vars.step_id), prompt: interpolatePrompt(template, vars) })
+      return answer(kind)
+    }
+    return { prompts, elicitExecutor: elicitExecutor as never }
+  }
+
+  it("lượt elicit đầu step (runStep) ⇒ giả định còn mở của step vào prompt", async () => {
+    seedSpine()
+    const record = db.spines[0] as unknown as SpineT
+    record.assumptions = [openAssumption("AS90", "S-3.1", "actors[id=A01].description")]
+    seedSession(true)
+    const r = rendering(() => elicitReply())
+    const { emit } = collectEvents()
+    await runStep(PROJECT, "S-3.1", SESSION, USER, emit, { elicitExecutor: r.elicitExecutor, draftExecutor: async () => draftReply([]), renderDeps: renderStub() })
+
+    const elicit = r.prompts.filter((p) => p.kind === "elicit")
+    expect(elicit.length).toBeGreaterThan(0)
+    for (const { prompt } of elicit) {
+      expect(prompt).not.toContain("{{assumptions}}")
+      expect(prompt).toContain("AS90")
+    }
+  })
+
+  it("phỏng vấn đầu giai đoạn (runPhase) và lượt chat (runChatTurn) ⇒ không còn placeholder, có giả định đang mở", async () => {
+    const spine = repo.createEmptySpine({ name: "Clinic", domain: null })
+    spine.project.review_mode = "fast"
+    spine.steps = ["B-0.1", "B-0.2", "B-0.3"].map((id) => ({ id, status: "accepted" as const, first_seq: null, last_seq: null, accepted_at: "2026-09-28T00:00:00.000Z" }))
+    spine.assumptions = [openAssumption("AS91", "B-0.3", "project.name")]
+    db.spines[0] = { _id: crypto.randomUUID(), projectId: PROJECT, ...spine }
+    seedSession(true)
+    const question = [{ question: "Bệnh nhân đặt lịch thế nào?", options: [], topic_key: "current_booking" }] as never as ElicitOutput["questions"]
+    const r = rendering((kind) => (kind === "chat" ? chatTurnReply("Rõ.") : kind === "interview" ? elicitReply("Mình hỏi nhanh một câu.", question) : elicitReply("", [])))
+    const { events, emit } = collectEvents()
+    const run = runPhase(PROJECT, "B-1", SESSION, USER, emit, { elicitExecutor: r.elicitExecutor, draftExecutor: async () => draftReply([]) })
+    await waitForCount(events, "answer_needed", 1)
+    expect(submitAnswer(PROJECT, "B-1", SESSION, { answers: [], message: "Bệnh nhân gọi điện đặt lịch" })).toBe(true)
+    await run
+
+    for (const kind of ["interview", "chat"] as const) {
+      const prompts = r.prompts.filter((p) => p.kind === kind)
+      expect(prompts.length, kind).toBeGreaterThan(0)
+      for (const { prompt } of prompts) {
+        expect(prompt, kind).not.toContain("{{assumptions}}")
+        expect(prompt, kind).toContain("AS91")
+      }
+    }
+    expect(r.prompts.every((p) => !p.prompt.includes("{{assumptions}}"))).toBe(true)
   })
 })
