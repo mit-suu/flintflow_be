@@ -94,10 +94,14 @@ describe("versioning — G4", () => {
       expect(versionLineage(history, "1.1")).toEqual({ release: false, base: "1.0", latestCr: "CR-002" })
     })
 
-    it("trước release đầu ⇒ base 0; bản import ⇒ không CR (CR của release không lọt vào)", () => {
-      expect(versionLineage(history, "0.2")).toEqual({ release: false, base: "0", latestCr: "CR-001" })
-      expect(versionLineage(history, "0.1")).toEqual({ release: false, base: "0", latestCr: null })
-      expect(versionLineage([v("0.0", "imported")], "0.0")).toEqual({ release: false, base: "0", latestCr: null })
+    it("trước release đầu ⇒ base = số bản import (FLF-356); bản import ⇒ không CR (CR của release không lọt vào)", () => {
+      expect(versionLineage(history, "0.2")).toEqual({ release: false, base: "0.1", latestCr: "CR-001" })
+      expect(versionLineage(history, "0.1")).toEqual({ release: false, base: "0.1", latestCr: null })
+      expect(versionLineage([v("0.0", "imported")], "0.0")).toEqual({ release: false, base: "0.0", latestCr: null })
+      const lineage = versionLineage(history, "0.1")
+      expect(versionFileName({ name: "FAP", ...lineage })).toBe("FAP_v0.1_DRAFT.docx")
+      expect(versionFileName({ name: "FAP", ...lineage, ext: "pdf" })).toBe("FAP_v0.1_DRAFT.pdf")
+      expect(versionFileName({ name: "FAP", ...versionLineage(history, "0.2") })).toBe("FAP_v0.1+CR-001_DRAFT.docx")
     })
 
     it("release theo số, không theo kind: bản chuyển đổi 1.0 (kind imported) là gốc của 1.1", () => {

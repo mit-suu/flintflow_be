@@ -172,11 +172,11 @@ describe("finalize — DocVersion 0.1 + baseline imported", () => {
     const { projectId } = await importFinalized()
     const v = (await DocVersion.findOne({ projectId, version: "0.1" }).lean())!
     const rendered = await downloadVersion(projectId, "Lumen", "0.1", "auto")
-    expect(rendered.filename).toBe("Lumen_v0_DRAFT.docx") // FLF-334: không mã project (máy đọc stamp), chưa release ⇒ v0
-    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0", latest_cr: null, kind: "draft" })
+    expect(rendered.filename).toBe("Lumen_v0.1_DRAFT.docx") // FLF-334: không mã project (máy đọc stamp); FLF-356: chưa release ⇒ số bản import
+    expect(await readStamp(await DocxPackage.load(rendered.data))).toEqual({ project_id: projectId, version: "0.1", source: "import", base_version: "0.1", latest_cr: null, kind: "draft" })
     expect((await readBlocks(await DocxPackage.load(rendered.data))).some((b) => b.text === "1 Product Overview")).toBe(true)
     const original = await downloadVersion(projectId, "Lumen", "0.1", "original")
-    expect(original.filename).toBe("Lumen_v0_original.docx")
+    expect(original.filename).toBe("Lumen_v0.1_original.docx")
     expect(original.data.equals(await docFileStore().load(v.original_ref!))).toBe(true)
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.1", has_original_file: true })
     await DocVersion.updateOne({ _id: v._id }, { $set: { original_ref: null } })
@@ -636,8 +636,8 @@ describe("finalize — tương thích bản gốc cũ 0.0 (FLF-284)", () => {
     const v = (await DocVersion.findOne({ projectId, version: "0.0" }).lean())!
     expect(toVersionDto(v as never, { mode: "import" })).toMatchObject({ version: "0.0", kind: "imported", has_original_file: true })
     const rendered = await downloadVersion(projectId, "Lumen", "0.0", "auto")
-    expect(rendered.filename).toBe("Lumen_v0_DRAFT.docx")
+    expect(rendered.filename).toBe("Lumen_v0.0_DRAFT.docx")
     const original = await downloadVersion(projectId, "Lumen", "0.0", "original")
-    expect(original.filename).toBe("Lumen_v0_original.docx")
+    expect(original.filename).toBe("Lumen_v0.0_original.docx")
   })
 })
