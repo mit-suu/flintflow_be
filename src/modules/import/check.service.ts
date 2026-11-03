@@ -31,6 +31,7 @@ import { transitionImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { withMeteredAi, type MeteredResult } from "./metered-ai.js"
 import { IMPORT_SEMANTIC_RULE } from "./mode1-rule-profile.js"
+import { isContentSlot, slotParents } from "./content-slots.js"
 import { mode1RuleProfileFor } from "./mode1-guard.js"
 
 /** Tiền tố step của 1.11. Usage đúng `I-1.11` (không hậu tố) là lượt đơn của bản cũ — đã xong thì coi như xong cả 1.11. */
@@ -186,14 +187,18 @@ const flagIdGenerator = (flags: Flag[]): (() => string) => {
 /** Một phát hiện thành cờ vàng; `target_id` (FLF-343) = đường dẫn phần tử / block được nói tới — thiếu ⇒ block đầu. */
 export type Finding = FindingsOutput["findings"][number] & { target_id?: string | null }
 
-/** Đổi finding của model thành op thêm cờ vàng; section không phân giải được ⇒ `fixed:I`. */
+/**
+ * Đổi finding của model thành op thêm cờ vàng; section không phân giải được ⇒ `fixed:I`. Phần nhỏ `slot:*` của mẫu bắt buộc
+ * (FLF-278) không phải mục Spine (bất biến 3 chặn `flags[].section_id` trỏ tới nó) ⇒ trỏ về mục FPT cha của phần nhỏ.
+ */
 export const findingOps = (spine: Spine, findings: readonly Finding[], rule: string): Op[] => {
   const sections = new Set(listSections(spine).map((s) => s.id))
   const nextId = flagIdGenerator(spine.flags)
   const open = new Set(spine.flags.filter((f) => f.resolved_at === null && f.rule_id === rule).map((f) => `${f.section_id}|${f.message}`))
   const ops: Op[] = []
   for (const f of findings) {
-    const section = sections.has(f.section_id) ? f.section_id : "fixed:I"
+    const parent = isContentSlot(f.section_id) ? slotParents(f.section_id).find((p) => sections.has(p)) : undefined
+    const section = sections.has(f.section_id) ? f.section_id : (parent ?? "fixed:I")
     // Không in mã luật thô (`[ambiguity]`) cho người đọc — luật AI biết tên thì thành nhãn tiếng Việt đứng đầu
     const label = aiFindingLabel(f.rule)
     const text = humanizeText(f.message)

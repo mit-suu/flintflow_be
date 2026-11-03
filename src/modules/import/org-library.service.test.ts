@@ -46,4 +46,18 @@ describe("aggregateTemplateGaps", () => {
       { key: "references", samples: ["References"], projects: 1, empty: 0, suggested_destination: null }
     ])
   })
+
+  it("heading bao còn trống không vào thống kê; heading bao có chữ thật vẫn tính", () => {
+    const block = (text: string) => ({ kind: "paragraph" as const, text, rows: null, image_ref: null })
+    const rows = aggregateTemplateGaps(
+      [
+        {
+          sections: [{ id: "CS01", title: "Overall Description", wrapper: true }, { id: "CS02", title: "Project Notes", wrapper: true }],
+          spineSections: [{ id: "CS01", blocks: [] }, { id: "CS02", blocks: [block("Notes kept by the PM.")] }]
+        }
+      ],
+      10
+    )
+    expect(rows.map((r) => r.key)).toEqual(["project notes"])
+  })
 })
