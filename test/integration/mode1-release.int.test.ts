@@ -86,8 +86,8 @@ describe("mode 1 — version + tải về", () => {
 
     const draft = await binary(c.get("/versions/0.2/download"))
     expect(draft.status).toBe(200)
-    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0+CR-001_DRAFT.docx")
-    expect(await readStamp(await DocxPackage.load(draft.body as Buffer))).toMatchObject({ version: "0.2", base_version: "0", latest_cr: "CR-001", kind: "draft" })
+    expect(decodeURIComponent(String(draft.headers["content-disposition"]))).toContain("Lumen LMS_v0.1+CR-001_DRAFT.docx")
+    expect(await readStamp(await DocxPackage.load(draft.body as Buffer))).toMatchObject({ version: "0.2", base_version: "0.1", latest_cr: "CR-001", kind: "draft" })
     const zip = await JSZip.loadAsync(draft.body as Buffer)
     const headers = Object.keys(zip.files).filter((n) => /^word\/header\d+\.xml$/.test(n))
     expect(headers.length).toBeGreaterThan(0)
