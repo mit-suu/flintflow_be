@@ -8,11 +8,13 @@
  * - tối đa `MAX_QUESTIONS_PER_TURN` câu/lượt;
  * - câu có lựa chọn giữ 2–4 option; còn 1 ⇒ thành câu mở (một lựa chọn duy nhất không phải là hỏi);
  * - bỏ option "Khác"/"Other" model tự viết — FE luôn tự thêm dòng "Khác…";
- * - `header` (nhãn tab) cắt ≤ 12 ký tự.
+ * - `header` (nhãn tab) cắt ≤ 12 ký tự;
+ * - một lượt chỉ hỏi MỘT loại câu (FLF-355): toàn câu có lựa chọn hoặc toàn câu mở — loại kia chờ lượt sau.
  */
 
 import { chatQuestionItemSchema, type QuestionOption } from "../../shared/ai/response-parser.js"
 import { RECOMMENDED_SUFFIX, sanitizeSuggestions, type AnsweredTopic } from "./decisions.service.js"
+import { byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 /** Trần câu hỏi một lượt, cho mọi nơi — kể cả phỏng vấn đầu giai đoạn. Câu còn thiếu để step sau tự hỏi. */
 export const MAX_QUESTIONS_PER_TURN = 4
@@ -112,11 +114,39 @@ export const indexOfQuestion = (asked: readonly Pick<ModelQuestion, "topic_key">
   return index >= 0 && index < asked.length ? index : -1
 }
 
+const isCard = (q: { options?: readonly unknown[] }): boolean => (q.options?.length ?? 0) > 0
+
+/**
+ * FLF-355: một lượt chỉ hỏi MỘT loại — toàn câu có lựa chọn (thẻ tick) hoặc toàn câu mở (gõ ở ô chat). Model tự quyết câu
+ * nào có lựa chọn nên lượt trộn vẫn tới; khi đó lượt này hỏi loại của câu đầu (`now`), loại kia (`later`) hỏi ở lượt kế,
+ * sau khi user trả lời. Tính lại được từ danh sách câu đang chờ nên run-state không phải lưu gì thêm.
+ */
+export const currentBatch = <Q extends { options?: readonly unknown[] }>(asked: readonly Q[]): { now: Q[]; later: Q[] } => {
+  if (asked.length === 0) return { now: [], later: [] }
+  const kind = isCard(asked[0])
+  return { now: asked.filter((q) => isCard(q) === kind), later: asked.filter((q) => isCard(q) !== kind) }
+}
+
+/** Lời dẫn của lượt hỏi nối tiếp (`currentBatch().later`) — câu cố định, không gọi model. */
+export const followUpReply = (language: ReplyLanguage): string =>
+  byLanguage(language, { vi: "Cảm ơn bạn. Mình hỏi thêm mấy câu nữa nhé:", en: "Thanks. A few more questions:" })
+
 export interface ShapedQuestions<Q extends ModelQuestion> {
-  /** Câu model hỏi còn lại (đã áp luật), cùng thứ tự với `questions` — id của `asked[i]` là `questionIdsFor(asked)[i]`. */
+  /**
+   * Câu model hỏi còn lại (đã áp luật), kể cả câu chờ lượt sau (FLF-355) — id của `asked[i]` là `questionIdsFor(asked)[i]`.
+   */
   asked: Q[]
-  /** Câu gửi FE qua `answer_needed` / lưu run-state. */
+  /** Câu gửi FE qua `answer_needed` / lưu run-state: chỉ nhóm hỏi ở lượt này (`currentBatch(asked).now`). */
   questions: ContractQuestion[]
+}
+
+/**
+ * Nhóm câu hỏi tiếp sau khi thẻ của lượt này đã gửi (FLF-355): `currentBatch(asked).later` trừ câu payload đã trả lời sẵn
+ * (`/answer` gửi đủ id của cả hai nhóm thì không hỏi lại).
+ */
+export const followUpQuestions = <Q extends ModelQuestion>(asked: readonly Q[], answers: readonly QuestionAnswer[]): Q[] => {
+  const answered = new Set(answers.map((a) => indexOfQuestion(asked, a.question_id)))
+  return currentBatch(asked).later.filter((q) => !answered.has(asked.indexOf(q)))
 }
 
 export interface ShapeOptions {
@@ -148,7 +178,8 @@ export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], sha
       return { ...q, options, header, multiple: options.length > 0 ? q.multiple : undefined }
     })
   const ids = questionIdsFor(asked)
-  const questions = asked.map((q, i): ContractQuestion => ({
+  const shownKind = asked.length > 0 && isCard(asked[0])
+  const contract = asked.map((q, i): ContractQuestion => ({
     id: ids[i],
     text: q.question,
     ...(q.header ? { header: q.header } : {}),
@@ -156,6 +187,7 @@ export const shapeQuestions = <Q extends ModelQuestion>(input: readonly Q[], sha
     ...(q.options.length > 0 && q.multiple !== undefined ? { multiple: q.multiple } : {}),
     ...(q.options.length === 0 && q.inline ? { inline: true } : {})
   }))
+  const questions = contract.filter((_, i) => isCard(asked[i]) === shownKind)
   return { asked, questions }
 }
 

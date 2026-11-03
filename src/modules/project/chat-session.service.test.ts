@@ -606,3 +606,75 @@ describe("FLF-260 — chat trả lời theo ngôn ngữ user đang viết", () =
     expect(res.events).toEqual([])
   })
 })
+
+describe("FLF-355 — chat: một lượt một loại câu, loại kia hỏi ở lượt kế", () => {
+  const USER = "650000000000000000000010"
+  const MIXED = {
+    reply: "Mình hỏi thêm.",
+    questions: [
+      { question: "Ai duyệt lịch hẹn?" },
+      { question: "Nền tảng?", options: [{ label: "Web" }, { label: "Mobile" }] },
+      { question: "Có cần nhắc lịch không?" }
+    ]
+  }
+  const plainSession = async (): Promise<string> => {
+    await createChatSession(PROJECT)
+    return String((await createChatSession(PROJECT))._id)
+  }
+  const aiMessages = (id: string) =>
+    (db.rows.find((r) => r._id === id)!.messages as { role: string; content: string }[])
+      .filter((m) => m.role === "ai")
+      .map((m) => JSON.parse(m.content) as { reply: string; questions: { question: string }[]; deferred_questions?: { question: string }[] })
+
+  it("lượt trộn ⇒ lưu nhóm câu đầu, nhóm khác loại chờ; tin user kế tiếp nhận nhóm đó mà không gọi CHAT", async () => {
+    const id = await plainSession()
+    aiMocks.executeAiAction.mockResolvedValueOnce({ data: MIXED, tokensUsed: {}, cost: 0 })
+
+    await sendMessageAndGetResponse(PROJECT, id, "Mình muốn làm app đặt lịch", "overview", USER)
+    const [first] = aiMessages(id)
+    expect(first.questions.map((q) => q.question)).toEqual(["Ai duyệt lịch hẹn?", "Có cần nhắc lịch không?"])
+    expect(first.deferred_questions?.map((q) => q.question)).toEqual(["Nền tảng?"])
+
+    await sendMessageAndGetResponse(PROJECT, id, "1. Lễ tân\n2. Có", "overview", USER)
+    expect(aiMocks.executeAiAction).toHaveBeenCalledTimes(1)
+    const second = aiMessages(id)[1]
+    expect(second).toEqual({ reply: "Cảm ơn bạn. Mình hỏi thêm mấy câu nữa nhé:", questions: [{ question: "Nền tảng?", options: [{ label: "Web" }, { label: "Mobile" }], multiple: false }] })
+
+    // Hết nhóm chờ ⇒ tin sau đi CHAT như thường
+    aiMocks.executeAiAction.mockResolvedValueOnce({ data: { reply: "ok", questions: [] }, tokensUsed: {}, cost: 0 })
+    await sendMessageAndGetResponse(PROJECT, id, "Web", "overview", USER)
+    expect(aiMocks.executeAiAction).toHaveBeenCalledTimes(2)
+  })
+
+  it("lượt một loại ⇒ không có deferred_questions", async () => {
+    const id = await plainSession()
+    aiMocks.executeAiAction.mockResolvedValueOnce({ data: { reply: "Hỏi", questions: [{ question: "Ai duyệt?" }] }, tokensUsed: {}, cost: 0 })
+    await sendMessageAndGetResponse(PROJECT, id, "Xin chào", "overview", USER)
+    expect(aiMessages(id)[0]).not.toHaveProperty("deferred_questions")
+  })
+
+  it("SSE: nhóm chờ trả về đúng một sự kiện finish, không gọi stream CHAT", async () => {
+    const id = await plainSession()
+    aiMocks.executeAiActionStream.mockResolvedValueOnce({ data: MIXED, tokensUsed: {}, cost: 0 })
+    const events: Array<Record<string, unknown>> = []
+    const res = () => {
+      const r = {
+        destroyed: false,
+        writableEnded: false,
+        write: (chunk: string) => {
+          events.push(JSON.parse(chunk.replace(/^data: /, "")) as Record<string, unknown>)
+          return true
+        },
+        end: () => {
+          r.writableEnded = true
+        }
+      }
+      return r as unknown as Response
+    }
+    await sendMessageStream(PROJECT, id, "Mình muốn làm app đặt lịch", "overview", USER, res())
+    events.length = 0
+    await sendMessageStream(PROJECT, id, "Lễ tân", "overview", USER, res())
+    expect(aiMocks.executeAiActionStream).toHaveBeenCalledTimes(1)
+    expect(events).toEqual([expect.objectContaining({ type: "finish", data: { reply: "Cảm ơn bạn. Mình hỏi thêm mấy câu nữa nhé:", questions: [{ question: "Nền tảng?", options: [{ label: "Web" }, { label: "Mobile" }], multiple: false }] } })])
+  })
+})

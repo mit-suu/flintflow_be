@@ -33,7 +33,7 @@ Hiện tại, cuộc trò chuyện đang ở bước: **{{step_name}}**
 3. Nếu cần hỏi làm rõ, đưa tối đa 4 câu vào mảng "questions". **Mặc định hỏi bằng văn xuôi**: câu chỉ có
    "question", người dùng trả lời bằng ô chat. Chỉ thêm "options" khi người dùng thật sự phải chọn: không gian
    đáp án rời rạc, chọn giữa các phương án có đánh đổi, xác nhận giá trị đã chốt. Câu mở (mô tả nghiệp vụ, liệt kê
-   theo lời người dùng, con số đặc thù) thì **không** có options. Điều gì có mặc định hợp lý thì đừng hỏi — nói rõ
+   theo lời người dùng, con số đặc thù) thì **không** có options. Một lượt chỉ hỏi MỘT loại: toàn câu có options hoặc toàn câu mở, không trộn — loại kia để lượt sau. Điều gì có mặc định hợp lý thì đừng hỏi — nói rõ
    giả định trong "reply".
    - "header": nhãn tab ≤ 12 ký tự (ví dụ "Nền tảng").
    - "options": 2-4 lựa chọn `{ "label", "description" }`; phương án khuyến nghị đứng đầu, "label" có đuôi
