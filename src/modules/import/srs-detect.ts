@@ -1,8 +1,8 @@
 /**
  * srs-detect.ts — I-1 Preflight: tài liệu này có phải SRS / mẫu SRS không? (FLF-331, business-flow §3.1)
  * ─────────────────────────────────────────────────────────────────
- * Hàm thuần, **không gọi model, không tốn credit**: đếm tín hiệu trên khối đã cắt (`readBlocks`) — heading khớp danh
- * mục section FPT / mẫu IEEE, từ khoá kiểu SRS, mã `UC-01` / `FR-01`, bảng có cột use case / requirement — và tín hiệu
+ * Hàm thuần, **không gọi model, không tốn credit**: đếm tín hiệu trên khối đã cắt (`readBlocks`) — heading khớp ngân
+ * hàng phần FPT + IEEE (FLF-363, bỏ tên quá chung như "Cost", "Requirements"), từ khoá kiểu SRS, mã `UC-01` / `FR-01`, bảng có cột use case / requirement — và tín hiệu
  * "loại tài liệu khác" (CV, hoá đơn, test plan, biên bản họp, hợp đồng).
  *
  * Trả **loại + độ tin + lý do**, không chỉ boolean (ghi chú hybrid plan B4: sau này preflight điều hướng theo loại file):
@@ -13,8 +13,7 @@
  */
 
 import type { OoxmlBlock } from "../docx-ooxml/index.js"
-import { SECTION_CANDIDATES } from "./section-catalog.js"
-import { TEMPLATE_CATALOGS } from "./template-catalog.js"
+import { PART_BANK, isWeakTitle } from "./part-bank.js"
 import { INSTRUCTION_PATTERNS } from "../../shared/utils/instruction-text.js"
 
 export type DocumentKind = "srs" | "srs_template" | "not_srs" | "unknown"
@@ -90,11 +89,10 @@ const normalize = (s: string): string =>
     .replace(/\s+/g, " ")
     .trim()
 
-/** Tiêu đề của mọi section / mục mẫu đã biết (FPT + IEEE) ⇒ (title chuẩn hoá → id). */
+/** Tên của mọi phần trong ngân hàng (FPT + IEEE), trừ tên quá chung ⇒ (title chuẩn hoá → id phần). */
 const KNOWN_HEADINGS: ReadonlyMap<string, string> = (() => {
   const map = new Map<string, string>()
-  for (const c of SECTION_CANDIDATES) for (const t of c.titles) map.set(normalize(t), c.id)
-  for (const entries of Object.values(TEMPLATE_CATALOGS)) for (const e of entries) for (const t of e.titles) if (!map.has(normalize(t))) map.set(normalize(t), e.id)
+  for (const part of PART_BANK) for (const t of part.titles) if (!isWeakTitle(t.text) && !map.has(normalize(t.text))) map.set(normalize(t.text), part.id.replace(/^part:/, ""))
   return map
 })()
 
