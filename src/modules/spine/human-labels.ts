@@ -246,6 +246,7 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   derived_from_changed_assumption: "Dựa trên giả định đã đổi",
   function_without_uc: "Chức năng chưa thuộc use case nào",
   orphan_entity: "Thực thể tách khỏi ERD",
+  verification_orphan: "Kiểm chứng trỏ yêu cầu không có",
   orphan_entity_at_baseline: "ERD chưa liên kết thành một khối",
   unresolved_many_to_many: "Quan hệ nhiều–nhiều chưa tách thực thể trung gian",
   template_section_absent: "Mẫu bắt buộc không có mục này",

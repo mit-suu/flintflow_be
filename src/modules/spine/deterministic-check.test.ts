@@ -29,12 +29,12 @@ const withSystemNameStep = (s: Spine, status: StepStatus): void => {
 }
 
 describe("RULES", () => {
-  it("13 luật đỏ + 23 luật vàng (FLF-278: template_section_absent / _empty); mọi luật đỏ không waive được (FLF-329)", () => {
+  it("13 luật đỏ + 24 luật vàng (FLF-278: template_section_absent / _empty; FLF-365: verification_orphan); mọi luật đỏ không waive được (FLF-329)", () => {
     expect(RULES.filter((r) => r.level === "red")).toHaveLength(13)
     // FLF-177: thêm screen_placeholder (BUG-03), function_without_uc (BUG-12),
     // derived_from_changed_assumption (BUG-14); mode 1 §4.13: original_diagram_stale;
     // FLF-225: orphan_entity, unresolved_many_to_many (ERD); actor_generalization_invalid, actor_generalization_children_unlisted; screen_actor_ambiguous đã bỏ cùng làn của luồng màn
-    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(23)
+    expect(RULES.filter((r) => r.level === "yellow")).toHaveLength(24)
     expect([...NON_WAIVABLE_RULES].sort()).toEqual(RULES.filter((r) => r.level === "red").map((r) => r.rule_id).sort())
     expect(RULES.filter((r) => r.level === "yellow").every((r) => r.waivable)).toBe(true)
   })
@@ -819,5 +819,22 @@ describe("chế độ 3 — mẫu bắt buộc (FLF-278 trên FLF-335/336)", () 
       ruleProfile: { exclude: new Set(), downgrade: new Set(), templateLayout: layout, templateWrappers: new Set(["custom:CS01"]) }
     })
     expect(wrapped.some((f) => f.rule_id === "template_section_empty")).toBe(false)
+  })
+})
+
+describe("FLF-365 — verification_orphan", () => {
+  it("dòng kiểm chứng trỏ yêu cầu không có ⇒ cờ vàng ở slot:verification, target = dòng; trỏ đúng ⇒ không cờ", () => {
+    const spine = {
+      ...createEmptySpine(),
+      nfrs: [{ id: "N01", category: "performance" as const, statement: "p95 < 2 s", kind: "quantitative" as const, priority: null }],
+      verifications: [
+        { id: "VER-01", requirement_id: "N01", method: "test" as const },
+        { id: "VER-02", requirement_id: "FR-99", method: "test" as const }
+      ]
+    }
+    const flags = runDeterministicCheck(spine).filter((f) => f.rule_id === "verification_orphan")
+    expect(flags.map((f) => [f.level, f.section_id, f.target_id])).toEqual([["yellow", "slot:verification", "VER-02"]])
+    expect(flags[0].message).toContain('"FR-99"')
+    expect(RULES.find((r) => r.rule_id === "verification_orphan")).toBeDefined()
   })
 })
