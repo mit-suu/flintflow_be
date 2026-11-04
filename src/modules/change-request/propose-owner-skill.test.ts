@@ -40,3 +40,17 @@ describe("FLF-363 (D4) — skill cho vị trí CR trong mục giữ nguyên văn
     expect(skill("Verification")).toBeNull()
   })
 })
+
+describe("FLF-364 (L6) — skill theo chữ hướng dẫn khi heading mục riêng không khớp", () => {
+  it("hướng dẫn nhắc đúng một phần có skill ⇒ skill đó; nhắc nhiều phần ⇒ không skill", () => {
+    const block = (text: string) => ({ kind: "paragraph" as const, text })
+    const s = {
+      custom_sections: [
+        { id: "g1", heading: "Kế hoạch đào tạo", level: 2, blocks: [block("[Mô tả logical database requirements cho dữ liệu đào tạo]")], source: "import" as const },
+        { id: "g2", heading: "Lịch họp nhóm", level: 2, blocks: [block("[Nêu business rules và performance requirements]")], source: "import" as const }
+      ]
+    } as never
+    expect(ownerKeyOf(s, { owner_step: null, section_id: "custom:g1" })).toBe("skill:entities-erd")
+    expect(ownerKeyOf(s, { owner_step: null, section_id: "custom:g2" })).toBe("")
+  })
+})

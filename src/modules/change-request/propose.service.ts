@@ -20,7 +20,8 @@ import { stripRecord } from "../import/check.service.js"
 import { titleOfSection } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
 import { STEP_SKILLS, parseStepId } from "../pipeline/context-projection.js"
-import { expectedContentOf, partOfHeading, skillOfPart } from "../import/part-bank.js"
+import { expectedContentOf, partOfHeading, partsMentionedIn, skillOfPart } from "../import/part-bank.js"
+import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry } from "../import/template-profile.model.js"
 import { planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
@@ -49,13 +50,17 @@ const SKILL_KEY = "skill:"
 
 /**
  * FLF-363 (D4): vị trí trong mục giữ nguyên văn của file (`custom:*`, không step sở hữu) mà heading mục khớp một phần của
- * ngân hàng ("Document Overview", "Sequence Diagrams"…) ⇒ dùng skill của phần đó thay cho "(none)".
+ * ngân hàng ("Document Overview", "Sequence Diagrams"…) ⇒ dùng skill của phần đó thay cho "(none)". FLF-364 (L6): heading
+ * không khớp ⇒ chữ hướng dẫn của mẫu trong mục nhắc đúng một phần có skill ⇒ skill đó.
  */
 export const ownerKeyOf = (spine: Pick<Spine, "custom_sections">, loc: Pick<IChangeLocation, "owner_step" | "section_id">): string => {
   if (loc.owner_step) return loc.owner_step
   if (!loc.section_id?.startsWith("custom:")) return ""
-  const heading = spine.custom_sections.find((c) => c.id === loc.section_id.slice("custom:".length))?.heading
-  const part = heading ? partOfHeading(heading) : null
+  const section = spine.custom_sections.find((c) => c.id === loc.section_id.slice("custom:".length))
+  if (!section) return ""
+  const byHeading = partOfHeading(section.heading)
+  const byGuidance = byHeading ? null : partsMentionedIn(section.blocks.flatMap((b) => splitInstruction(b.text).guidance).join(" "))
+  const part = byHeading ?? (byGuidance?.length === 1 ? byGuidance[0] : null)
   const skill = part ? skillOfPart(part) : null
   return skill ? `${SKILL_KEY}${skill}` : ""
 }
