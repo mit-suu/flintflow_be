@@ -30,7 +30,7 @@ Engine `svg` (no PlantUML source): the notation of the FPT SRS template §3.1.1 
 
 ## `erd` — §3.1.5
 
-Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional/.attributes` + the project's notation (`Project.erdNotation`, outside the Spine). Attributes: `key` ⇒ PK, `reference` ⇒ FK in Crow's foot / IDEF1X boxes, ovals in Chen (key underlined).
+Source fields: `entities[].name/.relations/.relation_verbs/.relation_cardinality/.relation_optional/.attributes` + the project's notation (`Project.erdNotation`, outside the Spine). Attributes: `key` ⇒ PK, `reference` ⇒ FK in Crow's foot / IDEF1X boxes; in Chen, ovals for key (underlined) and plain attributes only — no oval for `reference` (the diamond is the relationship).
 Engine `svg` (no PlantUML source): built in code, fill `#7ACFF5`, one shared grid placer + right-angle router for all three notations (`erd.renderer.ts`, `erd-layout.ts`, `orthogonal-*.ts`). One notation per document: `chen` (default) · `crowsfoot` · `idef1x`. Changing it redraws the diagram (hash includes the notation).
 
 Data → diagram: entity = box with its singular-noun name; relation = parent → child, labelled by `relation_verbs` (`has` when missing). Parent end `1`, or `0..1` when the child is in `relation_optional`; child end `N` (many, default) or `1` per `relation_cardinality`, minimum drawn as 0.

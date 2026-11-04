@@ -29,7 +29,7 @@ stub: false
 
 ## Data → diagram
 
-- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. `entities[].attributes` are drawn: Crow's foot an attribute compartment with `PK` (kind `key`) / `FK` (kind `reference`), IDEF1X key attributes above the line and `(FK)`, Chen ovals under the box with key attributes underlined. No attributes ⇒ box with the name only.
+- One box per entity (`name`, bold, wrapped to ≤ 2 lines). Entity name is a singular noun. `entities[].attributes` are drawn: Crow's foot an attribute compartment with `PK` (kind `key`) / `FK` (kind `reference`), IDEF1X key attributes above the line and `(FK)`, Chen ovals under the box for key (underlined) and plain attributes; `reference` attributes get no oval — the relationship diamond already shows the foreign key. No attributes ⇒ box with the name only.
 - One relation per `relations[]` id that points to an existing entity, parent → child, id `<parent>><child>`:
   - label = `relation_verbs[<child>]`, `has` when missing (never empty, never a flipped / passive verb — see `content/entities-erd`);
   - parent end = `1`, or `0..1` when the child is in the parent's `relation_optional` (the child may exist without this parent);

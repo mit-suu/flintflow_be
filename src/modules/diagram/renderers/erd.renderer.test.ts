@@ -107,8 +107,21 @@ describe("erd.renderer — ba ký pháp trên một bộ xếp + đi đường",
     const s = scene(diagram(notation, [{ id: "A", name: "Customer", attributes }, { id: "B", name: "Order", attributes }], [rel("A>B", "A", "B")]))
     expect(checkScene(s, { allowBends: true })).toEqual([])
     const texts = s.elements.filter((e) => e.type === "text").map((e) => (e.type === "text" ? e.text : ""))
-    expect(texts).toEqual(expect.arrayContaining(notation === "crowsfoot" ? ["PK id", "FK customer_id", "created_at"] : notation === "idef1x" ? ["id", "customer_id (FK)", "created_at"] : ["id", "customer_id", "created_at"]))
-    if (notation === "chen") expect(s.elements.filter((e) => e.type === "ellipse")).toHaveLength(6)
+    expect(texts).toEqual(expect.arrayContaining(notation === "crowsfoot" ? ["PK id", "FK customer_id", "created_at"] : notation === "idef1x" ? ["id", "customer_id (FK)", "created_at"] : ["id", "created_at"]))
+    if (notation === "chen") {
+      // Chen: quan hệ là hình thoi, khoá ngoại không vẽ thêm thành ô-van
+      expect(s.elements.filter((e) => e.type === "ellipse")).toHaveLength(4)
+      expect(texts).not.toContain("customer_id")
+    }
+  })
+
+  it("chen: entity chỉ có khoá ngoại ⇒ vẽ như entity không thuộc tính", () => {
+    const rels = [rel("A>B", "A", "B")]
+    const onlyFk = scene(diagram("chen", [{ id: "A", name: "Organization" }, { id: "B", name: "Project", attributes: [{ name: "org_id", fk: true }] }], rels))
+    const bare = scene(diagram("chen", [{ id: "A", name: "Organization" }, { id: "B", name: "Project" }], rels))
+    expect(checkScene(onlyFk, { allowBends: true })).toEqual([])
+    expect(onlyFk.elements.filter((e) => e.type === "ellipse")).toHaveLength(0)
+    expect(onlyFk.toSvg()).toBe(bare.toSvg())
   })
 
   it("tên dài gói tối đa 2 dòng; động từ dài gói trong nhãn; không issue", () => {
