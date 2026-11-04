@@ -20,7 +20,7 @@ import { PROVISIONAL_SECTION, isContentSection, provisionalFeatureId, provisiona
 import { TABLE_ENTITIES, matchTable } from "./table-header-dictionary.js"
 import { SLOT_SUGGESTION_CONFIDENCE, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
 import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
-import { PART_BANK, isWeakTitle, partById, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
+import { PART_BANK, isWeakTitle, partById, partsMentionedIn, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { foldText, foldTokens, splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 
@@ -363,13 +363,6 @@ export const detectTemplateFamily = (blocks: ProfileBlock[]): TemplateFamily => 
 /** Độ tin khi nhận phần theo chữ hướng dẫn — dưới ngưỡng 0.8 ⇒ cờ "Cần xem". */
 export const GUIDANCE_MATCH_CONFIDENCE = 0.7
 
-/** Tên phần đủ riêng để nhận trong câu hướng dẫn: ≥ 2 từ, không phải tên quá chung. */
-const GUIDANCE_TITLES: readonly { part: PartDef; title: string }[] = PART_BANK.filter((p) => !p.underFeature && !p.parents).flatMap((part) =>
-  part.titles
-    .filter((t) => !isWeakTitle(t.text) && foldTokens(t.text).length >= 2)
-    .map((t) => ({ part, title: ` ${foldText(t.text)} ` }))
-)
-
 /**
  * FLF-364 (L4): heading không khớp tên phần nào (không phải phần giữ nguyên văn) mà chữ hướng dẫn của mẫu dưới nó nhắc đúng
  * **một** phần ("[List all documents referenced…]" ⇒ References) ⇒ nhận phần đó, độ tin 0.7. Sau tên, trước luật từ khoá
@@ -381,8 +374,7 @@ const withGuidanceMatches = (entries: HeadingMapEntry[], guidance: ReadonlyMap<s
   return entries.map((e) => {
     const g = guidance.get(e.block_id)
     if (!g || e.section_id !== UNMAPPED_SECTION || e.template_section) return e
-    const text = ` ${foldText(g.text)} `
-    const parts = [...new Map(GUIDANCE_TITLES.filter((t) => text.includes(t.title)).map((t) => [t.part.id, t.part])).values()]
+    const parts = partsMentionedIn(g.text)
     if (parts.length !== 1) return e
     const part = parts[0]
     if (used.has(part.id) && !part.repeat) return e

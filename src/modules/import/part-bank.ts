@@ -18,7 +18,7 @@
  */
 
 import { SECTION_CANDIDATES } from "./section-catalog.js"
-import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
+import { foldText, foldTokens, splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 
 export type PartOrigin = "fpt" | "ieee"
 
@@ -315,6 +315,21 @@ export const partOfHeading = (heading: string): PartDef | null => {
     if (score >= 0.8 && (!best || score > best.score)) best = { part, score }
   }
   return best?.part ?? null
+}
+
+/** Tên phần đủ riêng để nhận trong câu hướng dẫn: ≥ 2 từ, không phải tên quá chung (khởi tạo khi gọi lần đầu). */
+let guidanceTitles: readonly { part: PartDef; title: string }[] | null = null
+
+/**
+ * FLF-364: các phần mà chữ hướng dẫn của mẫu nhắc tên ("[List all documents referenced…]" ⇒ References) — dùng nhận phần cho
+ * heading không khớp tên (I-3) và chọn skill cho mục giữ nguyên văn (C-4). Chỉ tin khi đúng một phần.
+ */
+export const partsMentionedIn = (text: string): PartDef[] => {
+  guidanceTitles ??= PART_BANK.filter((p) => !p.underFeature && !p.parents).flatMap((part) =>
+    part.titles.filter((t) => !isWeakTitle(t.text) && foldTokens(t.text).length >= 2).map((t) => ({ part, title: ` ${foldText(t.text)} ` }))
+  )
+  const folded = ` ${foldText(text)} `
+  return [...new Map(guidanceTitles.filter((t) => folded.includes(t.title)).map((t) => [t.part.id, t.part])).values()]
 }
 
 const fold = (t: string) => t.trim().toLowerCase()

@@ -454,6 +454,7 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-04 | contract-change FLF-364 (chữ hướng dẫn `[ ]` / `{ }`) | Luật hướng dẫn chỉ `[ ]` / `{ }`; `guidance` nguyên văn ≤ 4 000 + `guidance_by?` + `guidance_blocks?`; `table_map[].guidance?`; prompt C-4 kèm hướng dẫn mẫu — xem §FLF-364 cuối file |
 | 2026-11-04 | contract-change FLF-363 (ngân hàng phần chung FPT + IEEE 29148) | `template_family` enum mới `fpt` · `ieee29148` · `mixed` (nhãn báo cáo; giá trị cũ đọc ra `ieee29148`, script `migrate:template-family`); `template_section?` = id phần của ngân hàng; heading thêm `content_mismatch?` — xem §FLF-363 cuối file |
 | 2026-10-29 | contract-change FLF-278 (mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ `slot:*`, thư viện tổ chức) | Additive — xem §FLF-278 cuối file. Trạng thái import mới `drafting` (`incomplete → drafting → delivered`); endpoint mới #8b `POST /import/continue`, #8c `POST /import/from-org`, #8d `POST /import/save-to-org`, #8e `GET /library-matches`, #8f `POST /library`, `/orgs/:orgId/templates`, `/orgs/:orgId/content-library`, admin `GET /admin/template-gaps`; `heading_map[].guidance?`; `section_id` nhận thêm `slot:*`; cờ vàng `template_section_absent` / `template_section_empty` |
 | 2026-10-27 | contract-change FLF-336 (I-5 so cấu trúc đích, lát 1) | Additive. Trạng thái import mới `incomplete` (`baselining → incomplete → baselining`), không có v0 ở trạng thái này; `TemplateProfile.target_structure` (`present / missing / out_of_scope`, `resolved_mode` 1 / 3 / 4) trả ở #4 và #9; #8 nhận `complete: true` để đi tiếp từ `incomplete`; #9 mở từ `incomplete`. Chưa làm: vòng rà soát phần có sẵn, Luồng 2 chỉ cho phần thiếu, xem trước bố cục, ghi vào file khách |
@@ -609,3 +610,19 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
   Operating Environment ⇒ `slot:platforms`, Assumptions ⇒ `slot:assumptions`, TBD list ⇒ `slot:open_questions` — chỉ khi file
   không có heading nào khác nhận mục FPT cha (không thì về mục cha, như trước). C-4 (`cr-propose`): vị trí trong mục giữ nguyên
   văn (`custom:*`) có heading khớp ngân hàng ⇒ `owner_skill` là skill của phần đó (trước: "(none)").
+
+## FLF-364 (2026-11-04) — chữ hướng dẫn của mẫu chỉ trong `[ ]` / `{ }` (chỉ thêm field + đổi luật)
+
+**Additive** ⇒ PR nhãn `contract-change`.
+
+- Luật chữ hướng dẫn (`isInstructionText`, BE + FE): chỉ đoạn / ô nằm trọn trong `[ ]` hoặc `{ }`; đoạn ngoặc trong câu có chữ
+  thật cũng là hướng dẫn (`[…]` từ 3 từ, `{…}` luôn). `( )`, `< >`, câu "This section describes…" / "Mục này mô tả…" nay là nội
+  dung (đo trên 2 mẫu jam01 + 7 SRS thật: chỉ đổi một giá trị NFR "<= 24 h (<= 6 h …)" vốn bị bỏ nhầm). Màu / nghiêng / tô
+  nền chỉ là tín hiệu phụ.
+- `headingMapEntrySchema.guidance?` giữ nguyên văn (trần 4 000 ký tự, trước 400), gồm cả đoạn ngoặc trong câu và ô bảng; thêm
+  `guidance_by?` (`brackets` · `brackets+format`) và `guidance_blocks?` (block id).
+- `tableMapEntrySchema.guidance?`: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc.
+- I-3: heading không khớp tên phần nào mà hướng dẫn nhắc đúng một phần ⇒ nhận phần đó (độ tin 0.7, `template_section` = phần).
+- C-4 (`cr-propose`): `target_sections` kèm "Template guidance" của mục (ghép hướng dẫn heading cha) + "Expected content (ISO
+  29148)"; vị trí trong mục giữ nguyên văn có heading không khớp ⇒ `owner_skill` theo phần mà hướng dẫn nhắc. Mode 2 không đổi.
+- Hướng dẫn không vào bản xuất, không làm mục "có nội dung" (như trước).
