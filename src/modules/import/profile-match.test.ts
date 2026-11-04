@@ -476,7 +476,7 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
       Reliability: "fixed:4.2.2",
       Availability: "fixed:4.2.2",
       Compliance: "fixed:5.4",
-      "Design and Implementation": "unmapped",
+      "Design and Implementation": "fixed:5.4",
       Installation: "fixed:5.4",
       Maintainability: "fixed:4.2.4",
       "Logical Database Requirements": "fixed:3.1.5",
@@ -508,6 +508,20 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
     })
   })
 
+  it("plan §2.5: Purpose / Scope / Operating Environment ưu tiên phần nhỏ; file có heading nhận Tổng quan ⇒ về Tổng quan (không in hai lần)", () => {
+    expect(sections([[1, "Purpose"], [1, "Scope"], [1, "Operating Environment"], [1, "Actors"]])).toMatchObject({
+      Purpose: "slot:vision",
+      Scope: "slot:scope",
+      "Operating Environment": "slot:platforms"
+    })
+    expect(sections([[1, "Introduction"], [2, "Purpose"], [2, "Scope"], [1, "Operating Environment"]])).toMatchObject({
+      Introduction: "fixed:1",
+      Purpose: "fixed:1",
+      Scope: "fixed:1",
+      "Operating Environment": "slot:platforms"
+    })
+  })
+
   it("tên trùng tách theo mục cha: Overview trong Introduction = tổng quan tài liệu (giữ nguyên), đứng riêng = tổng quan sản phẩm", () => {
     expect(sections([[1, "Introduction"], [2, "Purpose"], [2, "Overview"]]).Overview).toBe("unmapped")
     expect(sections([[1, "Overview"], [1, "Actors"]]).Overview).toBe("fixed:1")
@@ -531,13 +545,13 @@ describe("FLF-363 — nội dung dưới heading (D1–D2)", () => {
 
   it("file đã có mục Tác nhân ⇒ bảng tác nhân trong Product Perspective chỉ là ngữ cảnh, không đổi", () => {
     const map = byId([heading(1, 1, "Product Perspective"), table(2, actors), heading(3, 1, "Actors"), table(4, actors)])
-    expect(map.B0001).toMatchObject({ section_id: "fixed:1", confidence: 1 })
+    expect(map.B0001).toMatchObject({ section_id: "slot:context", confidence: 1 })
     expect(map.B0001.content_mismatch).toBeUndefined()
   })
 
   it("bảng chỉ có Name / Description không đủ để đổi mục", () => {
     const map = byId([heading(1, 1, "Product Perspective"), table(2, [["Name", "Description"], ["Payment gateway", "VNPay"]])])
-    expect(map.B0001.section_id).toBe("fixed:1")
+    expect(map.B0001.section_id).toBe("slot:context")
   })
 
   it("heading không khớp tên mà nội dung rõ (bảng thuật ngữ, mã BR) ⇒ đề xuất mục đó, độ tin 0.75, không content_mismatch", () => {

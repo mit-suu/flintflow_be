@@ -269,6 +269,16 @@ const matchBankHeadings = (headings: MatchHeading[]): { entries: HeadingMapEntry
   const { detail } = limits
   const { assigned, best } = assignParts(headings, parents, limits)
 
+  // Phần nhỏ ưu tiên (Purpose ⇒ slot:vision…) chỉ khi không heading nào khác nhận mục cha của nó — không thì về mục cha
+  const takenBy = new Set([...assigned.values()].filter((hit) => !hit.part.slot).map((hit) => hit.part.target))
+  const slotOf = new Map<number, string>()
+  for (const [h, hit] of [...assigned.entries()].sort((a, b) => a[0] - b[0])) {
+    const slot = hit.part.slot
+    if (!slot || takenBy.has(slot) || slotParents(slot).some((p) => takenBy.has(p))) continue
+    slotOf.set(h, slot)
+    takenBy.add(slot)
+  }
+
   // Tính năng chứa chương con có tính năng ⇒ chỉ là heading (không tạo tính năng rỗng "Specific requirements")
   const headingOnly = new Set<number>()
   headings.forEach((_, h) => {
@@ -294,7 +304,7 @@ const matchBankHeadings = (headings: MatchHeading[]): { entries: HeadingMapEntry
       const target = hit.part.target
       if (target === "keep" || headingOnly.has(h)) section = UNMAPPED_SECTION
       else if (target === "feature") section = provisionalFeatureId(b.block_id)
-      else section = target
+      else section = slotOf.get(h) ?? target
     } else if (parent?.features) {
       section = provisionalFeatureId(b.block_id)
       confidence = structureConfidence(parent.confidence)
