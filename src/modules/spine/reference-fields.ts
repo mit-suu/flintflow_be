@@ -20,6 +20,7 @@ import type { Spine } from "./spine.types.js"
 import { tryResolve } from "./path-resolver.js"
 import { SYSTEM_LIFELINE } from "./spine.schema.js"
 import { FIXED_SECTION_ID_LIST } from "./section-registry.js"
+import { isContentSlot } from "../import/content-slots.js"
 
 export type TargetCollection =
   | "actors"
@@ -121,7 +122,8 @@ export const sectionKeyExists = (index: IdIndex, sectionId: string): boolean => 
   if (sectionId.startsWith("feature:")) return index.features.has(sectionId.slice("feature:".length))
   if (sectionId.startsWith("function:")) return index.functions.has(sectionId.slice("function:".length))
   if (sectionId.startsWith("custom:")) return index.custom_sections.has(sectionId.slice("custom:".length))
-  return false
+  // Phần nhỏ của mẫu upload (FLF-278; FLF-365 `slot:verification`…) là mục thật của bản in Mode 1
+  return isContentSlot(sectionId)
 }
 
 // ─── iterate ─────────────────────────────────────────────────────
