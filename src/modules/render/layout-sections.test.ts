@@ -255,6 +255,17 @@ describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
 describe("buildLayoutSections", () => {
   const build = (s: Spine = spine()) => buildLayoutSections(s, LAYOUT, [], { diagramPng: (id) => `ref:${id}` })
 
+  it("FLF-362 (B6): file không đánh số ⇒ không mục nào có số, dẫn chiếu tính năng trong bảng mô tả màn hình ghi theo tên", () => {
+    const plain: TemplateLayout = { ...LAYOUT, layout: LAYOUT.layout.map((l) => ({ ...l, heading_text: l.heading_text.replace(/^[\d.]+\s+/, "") })) }
+    const s = spine()
+    s.screens = [{ id: "S01", feature_id: "F-4", name: "Đăng ký", description: "Form đăng ký", flow_to: [], is_popup: false } as never]
+    const { sections, numbers } = buildLayoutSections(s, plain, [], { diagramPng: (id) => `ref:${id}` })
+    expect(sections.every((x) => !x.number)).toBe(true)
+    expect(numbers.size).toBe(0)
+    const screensTable = sections.find((x) => x.id === "fixed:3.1.2")?.blocks.find((b) => b.type === "table")
+    expect(JSON.stringify(screensTable)).toContain('"text":"Chức năng"')
+  })
+
   it("section FPT: nội dung từ Spine, tiêu đề + cấp theo file, heading con dời cấp theo; nhãn cố định tiếng Việt", () => {
     const { sections } = build()
     const fn = sections.find((s) => s.id === "function:FN01")!
