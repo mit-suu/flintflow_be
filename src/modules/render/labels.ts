@@ -472,6 +472,16 @@ export const SLOT_TEXT = {
     category: "Category",
     feature: "Feature",
     functions: "Functions",
+    // FLF-365: tham khảo, phân bổ, kiểm chứng (mẫu IEEE 29148)
+    reference: { id: "ID", title: "Title", owner: "Owner", version: "Version", date: "Date", location: "Location", kind: "Kind" },
+    referenceKind: { normative: "Normative", informative: "Informative" } as Readonly<Record<string, string>>,
+    requirement: "Requirement",
+    release: "Release",
+    deferred: "Deferred",
+    verification: { method: "Method", artifact: "Artifact", status: "Status", evidence: "Evidence" },
+    verificationMethod: { test: "Test", analysis: "Analysis", inspection: "Inspection", demonstration: "Demonstration", other: "Other" } as Readonly<
+      Record<string, string>
+    >,
     formFactor: {
       web_app: "Web application",
       mobile_app: "Mobile application",
@@ -493,6 +503,15 @@ export const SLOT_TEXT = {
     category: "Nhóm",
     feature: "Tính năng",
     functions: "Chức năng",
+    reference: { id: "Mã", title: "Tên tài liệu", owner: "Đơn vị", version: "Phiên bản", date: "Ngày", location: "Nơi lưu", kind: "Loại" },
+    referenceKind: { normative: "Bắt buộc", informative: "Tham khảo" } as Readonly<Record<string, string>>,
+    requirement: "Yêu cầu",
+    release: "Bản phát hành",
+    deferred: "Hoãn",
+    verification: { method: "Phương pháp", artifact: "Tài liệu kiểm", status: "Trạng thái", evidence: "Bằng chứng" },
+    verificationMethod: { test: "Kiểm thử", analysis: "Phân tích", inspection: "Rà soát", demonstration: "Trình diễn", other: "Khác" } as Readonly<
+      Record<string, string>
+    >,
     formFactor: {
       web_app: "Ứng dụng web",
       mobile_app: "Ứng dụng di động",

@@ -20,7 +20,7 @@ import { stripRecord } from "../import/check.service.js"
 import { titleOfSection } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
 import { STEP_SKILLS, parseStepId } from "../pipeline/context-projection.js"
-import { expectedContentOf, partOfHeading, partsMentionedIn, skillOfPart } from "../import/part-bank.js"
+import { expectedContentOf, partOfHeading, partsMentionedIn, skillOfPart, skillOfSection } from "../import/part-bank.js"
 import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { TemplateProfile, type HeadingMapEntry, type LayoutEntry } from "../import/template-profile.model.js"
 import { planTransaction } from "../spine/op-engine.js"
@@ -55,6 +55,11 @@ const SKILL_KEY = "skill:"
  */
 export const ownerKeyOf = (spine: Pick<Spine, "custom_sections">, loc: Pick<IChangeLocation, "owner_step" | "section_id">): string => {
   if (loc.owner_step) return loc.owner_step
+  // FLF-365: phần nhỏ không có step sở hữu (tham khảo, phân bổ, kiểm chứng) ⇒ skill của phần
+  if (loc.section_id?.startsWith("slot:")) {
+    const skill = skillOfSection(loc.section_id)
+    return skill ? `${SKILL_KEY}${skill}` : ""
+  }
   if (!loc.section_id?.startsWith("custom:")) return ""
   const section = spine.custom_sections.find((c) => c.id === loc.section_id.slice("custom:".length))
   if (!section) return ""

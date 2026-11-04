@@ -1008,6 +1008,43 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
       const questions = otherOf(spine, ["open_question"])
       return questions.length ? [bulletList(questions.map((o) => o.statement))] : []
     }
+    // FLF-365: mục chỉ có ở mẫu IEEE 29148
+    case "slot:references": {
+      const refs = spine.references ?? []
+      return refs.length
+        ? [
+            tableBlock(
+              [text.reference.id, text.reference.title, text.reference.owner, text.reference.version, text.reference.date, text.reference.location, text.reference.kind],
+              refs.map((r) => [r.id, r.title, r.owner ?? "", r.version ?? "", r.date ?? "", r.location ?? "", text.referenceKind[r.kind] ?? r.kind])
+            )
+          ]
+        : []
+    }
+    case "slot:apportioning": {
+      // Yêu cầu × bản phát hành; "deferred" (hoãn) có cột riêng. Chưa phân bổ ⇒ không in dòng
+      const items = [...spine.functions, ...spine.nfrs].filter((r) => !!r.release)
+      if (!items.length) return []
+      const releases = [...new Set(items.map((r) => r.release!).filter((r) => r !== "deferred"))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      const deferred = items.some((r) => r.release === "deferred")
+      const nameOf = (r: (typeof items)[number]) => ("name" in r ? r.name : r.statement)
+      return [
+        tableBlock(
+          [text.requirement, ...releases, ...(deferred ? [text.deferred] : [])],
+          items.map((r) => [`${r.id} ${nameOf(r)}`.trim(), ...releases.map((v) => (r.release === v ? "✓" : "")), ...(deferred ? [r.release === "deferred" ? "✓" : ""] : [])])
+        )
+      ]
+    }
+    case "slot:verification": {
+      const rows = spine.verifications ?? []
+      return rows.length
+        ? [
+            tableBlock(
+              [text.requirement, text.verification.method, text.verification.artifact, text.verification.status, text.verification.evidence],
+              rows.map((v) => [v.requirement_id, text.verificationMethod[v.method] ?? v.method, v.artifact ?? "", v.status ?? "", v.evidence ?? ""])
+            )
+          ]
+        : []
+    }
     case "slot:security":
       return commonOf(spine, ["security", "session", "audit"], ctx)
     case "slot:localization":

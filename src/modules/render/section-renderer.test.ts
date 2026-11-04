@@ -6,7 +6,7 @@ import { listSections } from "../spine/section-registry.js"
 import { translationUnits, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, renderView } from "./localized-spine.js"
 import type { Block } from "./rendered-document.types.js"
-import { buildRecordOfChanges, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
+import { buildRecordOfChanges, renderContentSlot, renderSection, sectionHeadingOf, type SectionRenderContext } from "./section-renderer.js"
 
 const emptySpine = (): Spine => ({
   project: {
@@ -955,5 +955,35 @@ describe("renderSection — bản xem đã dịch + ctx.canonical (FLF-265 D11)"
         }
       }
     }
+  })
+})
+
+describe("FLF-365 — phần nhỏ tham khảo / phân bổ / kiểm chứng (Mode 1)", () => {
+  const tableOf = (blocks: Block[]) => blocks.find((b): b is Extract<Block, { type: "table" }> => b.type === "table")!
+  const cells = (row: Extract<Block, { type: "table" }>["header"]) => row.map((c) => c.map((r) => r.text).join(""))
+
+  it("bảng tài liệu tham khảo, bảng yêu cầu × bản phát hành (cột Hoãn riêng), ma trận kiểm chứng; rỗng ⇒ không in", () => {
+    const spine: Spine = {
+      ...emptySpine(),
+      references: [{ id: "REF-01", title: "ISO/IEC/IEEE 29148:2018", version: "2018", kind: "normative" }],
+      functions: [
+        { id: "FN001", screen_id: null, feature_id: "F1", order: 0, name: "Đăng ký", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: "must", release: "1.0" },
+        { id: "FN002", screen_id: null, feature_id: "F1", order: 1, name: "Xuất báo cáo", trigger: "", description: "", normal: [], abnormal: [], validations: [], business_rule_ids: [], priority: "could", release: "deferred" }
+      ],
+      verifications: [{ id: "VER-01", requirement_id: "FN001", method: "test", artifact: "TC-FN001", status: "not run" }]
+    }
+    const refs = tableOf(renderContentSlot(spine, "slot:references", ctx({ language: "vi" })))
+    expect(cells(refs.header)).toEqual(["Mã", "Tên tài liệu", "Đơn vị", "Phiên bản", "Ngày", "Nơi lưu", "Loại"])
+    expect(cells(refs.rows[0])).toEqual(["REF-01", "ISO/IEC/IEEE 29148:2018", "", "2018", "", "", "Bắt buộc"])
+    const app = tableOf(renderContentSlot(spine, "slot:apportioning", ctx({ language: "en" })))
+    expect(cells(app.header)).toEqual(["Requirement", "1.0", "Deferred"])
+    expect(app.rows.map(cells)).toEqual([
+      ["FN001 Đăng ký", "✓", ""],
+      ["FN002 Xuất báo cáo", "", "✓"]
+    ])
+    const ver = tableOf(renderContentSlot(spine, "slot:verification", ctx({ language: "en" })))
+    expect(cells(ver.rows[0])).toEqual(["FN001", "Test", "TC-FN001", "not run", ""])
+    expect(renderContentSlot(emptySpine(), "slot:references", ctx())).toEqual([])
+    expect(renderContentSlot(emptySpine(), "slot:apportioning", ctx())).toEqual([])
   })
 })

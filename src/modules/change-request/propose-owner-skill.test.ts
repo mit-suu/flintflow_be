@@ -15,8 +15,8 @@ describe("FLF-363 (D4) — skill cho vị trí CR trong mục giữ nguyên văn
   it("heading mục riêng khớp phần của ngân hàng ⇒ skill của phần; không khớp / chưa có skill ⇒ không skill", () => {
     expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c1" })).toBe("skill:product-overview")
     expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c2" })).toBe("skill:actors-and-usecases")
-    // References: chưa có skill (FLF-365)
-    expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c3" })).toBe("")
+    // FLF-365: References có skill riêng
+    expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c3" })).toBe("skill:references-list")
     expect(ownerKeyOf(spine, { owner_step: null, section_id: "custom:c4" })).toBe("")
     // Có step sở hữu ⇒ giữ nguyên
     expect(ownerKeyOf(spine, { owner_step: "S-6.4", section_id: "fixed:4.2.3" })).toBe("S-6.4")
@@ -37,7 +37,8 @@ describe("FLF-363 (D4) — skill cho vị trí CR trong mục giữ nguyên văn
     expect(skill("Performance Requirements")).toBe("nfr-quality-attributes")
     expect(skill("Assumptions and Dependencies")).toBe("appendix-content")
     expect(skill("Glossary")).toBe("glossary")
-    expect(skill("Verification")).toBeNull()
+    expect(skill("Verification")).toBe("verification-matrix")
+    expect(skill("Apportioning of Requirements")).toBe("requirement-apportioning")
   })
 })
 

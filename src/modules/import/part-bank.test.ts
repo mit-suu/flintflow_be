@@ -38,7 +38,7 @@ describe("PART_BANK (FLF-363)", () => {
     expect(partById("part:fixed:4.2.2")?.titles.map((t) => t.text)).toEqual(expect.arrayContaining(["Reliability", "Availability"]))
     expect(partById("part:fixed:2.2.1")?.titles.map((t) => t.text)).toContain("Product Functions")
     expect(partById("part:group:3.1")?.titles.map((t) => t.text)).not.toContain("Product Functions")
-    expect(partById("part:ieee:references")?.target).toBe("keep")
+    expect(partById("part:ieee:references")?.target).toBe("slot:references")
     expect(partById("part:group:3")?.features).toBe(true)
     expect(partById("part:ieee:feature_detail")?.underFeature).toBe(true)
   })

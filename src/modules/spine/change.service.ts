@@ -224,7 +224,9 @@ const TARGET_COLLECTIONS = [
   "common_requirements",
   "messages",
   "other_requirements",
-  "glossary"
+  "glossary",
+  "references",
+  "verifications"
 ] as const
 
 /** Số phần tử tối đa đưa vào prompt — không nạp cả Spine (coding-rules mục 3.6). */
