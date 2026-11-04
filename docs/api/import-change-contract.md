@@ -577,7 +577,8 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 - `headingMapEntrySchema.number_label?` và `layoutEntrySchema.number_label?` (string): nhãn số **Word tự đánh** của heading
   (`numPr`, không nằm trong chữ) đúng như Word hiển thị — "2.1.", "II.", "A)". `heading_text` giữ nguyên chữ như trước
   (mapping mẫu tổ chức, so sánh tải lại dựa vào nó); hiển thị = nhãn + tiêu đề. Heading gõ số tay / không đánh số ⇒ không có.
-- `target_structure.sections[].title` (bước 3) và `GapReport.layout[].heading` nay **đã ghép** nhãn số Word ("1. Tổng quan").
+- `target_structure.sections[].title` (bước 3 "Đọc file & tạo bản gốc") và `GapReport.layout[].heading` nay **bỏ số mục**
+  ("1. Giới thiệu" ⇒ "Giới thiệu", "3.2.1 UC-01 …" ⇒ "UC-01 …") — số gõ tay lẫn số Word tự đánh, cả khung FPT lẫn IEEE.
 - Bản xem / xuất Mode 1 (`RenderedSection.number`): số lấy theo **file** — file không đánh số ⇒ `number` rỗng (trước đây tự
   đánh 1, 1.1…); file đánh số đều ⇒ đúng số file, mục FlintFlow chèn thêm nhận số theo thứ tự và anh em đứng sau dịch số;
   file đánh số không đều (nhảy số, chữ cái, La Mã làm số chương) ⇒ giữ nguyên số của file. `number` luôn bỏ dấu kết ("1",

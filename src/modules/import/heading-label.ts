@@ -1,14 +1,9 @@
 /**
- * Tiêu đề hiển thị của heading file upload (FLF-362): nhãn số Word tự đánh + chữ heading, đúng như người dùng thấy trong Word
- * ("2.1. Actors"). `heading_text` lưu trong profile / layout giữ nguyên chữ (mapping mẫu tổ chức, so sánh tải lại dựa vào
- * nó); chỉ chỗ hiển thị mới ghép nhãn. Chữ đã gõ số tay hoặc không có nhãn ⇒ giữ nguyên.
+ * Tiêu đề heading file upload hiển thị trên các màn luồng upload (FLF-362: bước 3 "Đọc file & tạo bản gốc", báo cáo thiếu
+ * sót): **bỏ số mục** — số gõ tay ("1. Giới thiệu" ⇒ "Giới thiệu", "3.2.1 UC-01 …" ⇒ "UC-01 …") và không ghép số Word tự
+ * đánh — cho cả file khung FPT lẫn IEEE. Bản xem / xuất Mode 1 vẫn in đúng số của file (`render/layout-sections.ts`).
  */
 
 import { splitHeadingNumber } from "./text-similarity.js"
 
-export const displayHeading = (text: string, numberLabel?: string | null): string => {
-  const t = text.trim()
-  const label = numberLabel?.trim()
-  if (!label || !t || splitHeadingNumber(t).number) return t
-  return `${label} ${t}`
-}
+export const plainHeading = (text: string): string => splitHeadingNumber(text.trim()).title
