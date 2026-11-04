@@ -25,7 +25,7 @@ describe("import mẫu IEEE 830 (FLF-252)", () => {
   it("nhận họ mẫu IEEE, map mục IEEE vào section FPT, không cần bước xác nhận mapping", async () => {
     const { projectId } = await importAtExtracting({ buffer: await makeIeeeSrsDocx() })
     const profile = (await TemplateProfile.findOne({ projectId }).lean())!
-    expect(profile.template_family).toBe("ieee830")
+    expect(profile.template_family).toBe("ieee29148")
     const section = (text: string) => profile.heading_map.find((h) => h.heading_text === text)?.section_id
     expect(section("Revision History")).toBe("fixed:I")
     expect(section("1.4 References")).toBe("unmapped")
