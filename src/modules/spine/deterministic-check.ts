@@ -100,6 +100,8 @@ export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
   "import_unresolved_ref",
   // FLF-343: chỗ độ tin thấp tự nhận vào baseline 0.1 ("Cần xem") — chỉ import đặt được, recompute không đóng
   "import_needs_review",
+  // FLF-363: tiêu đề và nội dung chỉ hai mục khác nhau lúc import — chỉ import đặt được, recompute không đóng
+  "import_title_content_mismatch",
   "cr_consistency"
 ])
 

@@ -46,7 +46,7 @@ import { isContentSection } from "./section-catalog.js"
 import type { FinalizeCheckpoint, IImportedDocument } from "./imported-document.model.js"
 import { scanMentions, type NamedEntity } from "./mentions.js"
 import { Mode1Error } from "./mode1.errors.js"
-import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
+import { IMPORT_IMAGE_RULE, IMPORT_NEEDS_REVIEW_RULE, IMPORT_TITLE_CONTENT_RULE, IMPORT_UNRESOLVED_RULE } from "./mode1-rule-profile.js"
 import { parseDocument } from "./parse.service.js"
 import { buildImportOps, droppedPermissionFindings, type DroppedPermission } from "./spine-builder.js"
 import { tableRows } from "./table-rows.js"
@@ -198,7 +198,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
           return s ? realSectionId(s, provisional) : null
         }),
         rule: IMPORT_NEEDS_REVIEW_RULE
-      }
+      },
+      { findings: titleContentFindings(stripRecord(seeded), profile.heading_map, layout), rule: IMPORT_TITLE_CONTENT_RULE }
     ]),
     ...seedStepOps(stripRecord(seeded), plan, { firstSeq: seqRange.first, lastSeq: seqRange.last, at: new Date().toISOString() })
   ]
@@ -360,8 +361,9 @@ export const needsReviewFindings = (
     block_ids: [...f.source_block_ids],
     target_id: f.path
   }))
+  // Heading đổi mục theo nội dung đã có cờ riêng nêu cả hai mục (`titleContentFindings`)
   const headings = profile.heading_map
-    .filter((h) => h.auto_confirmed)
+    .filter((h) => h.auto_confirmed && !h.content_mismatch)
     .map((h) => {
       const mapped = isContentSection(h.section_id)
       const where = mapped
@@ -394,6 +396,28 @@ export const needsReviewFindings = (
     return true
   })
 }
+
+/**
+ * FLF-363 (D2): heading có `content_mismatch` (tên giống mục A, nội dung là của mục B — đã xếp vào B) ⇒ mỗi heading một cờ
+ * vàng "Tiêu đề và nội dung khác nhau". Câu nêu tên hai mục theo mẫu FlintFlow, không in mã nội bộ.
+ */
+export const titleContentFindings = (spine: Spine, headingMap: readonly HeadingMapEntry[], layout: readonly LayoutEntry[]): Finding[] =>
+  headingMap.flatMap((h) => {
+    if (!h.content_mismatch) return []
+    // Tên mục theo mẫu, không lấy chính heading này (layout đã ghi heading vào mục theo nội dung)
+    const others = layout.filter((l) => l.heading_text.trim() !== h.heading_text.trim())
+    const byTitle = titleOfSection(spine, h.content_mismatch.by_title, others)
+    const byContent = titleOfSection(spine, h.content_mismatch.by_content, others)
+    return [
+      {
+        rule: "title_content_mismatch",
+        section_id: h.content_mismatch.by_content,
+        message: `Tiêu đề "${h.heading_text}" giống mục "${byTitle}" nhưng nội dung là của mục "${byContent}" — đã xếp vào "${byContent}"; sai thì sửa bằng change request`,
+        block_ids: [h.block_id],
+        target_id: h.block_id
+      }
+    ]
+  })
 
 /**
  * Vẽ lại mọi diagram từ Spine vừa import. PlantUML không có mặt (dev/test, sự cố) ⇒ bỏ qua thay vì ghi hàng loạt
