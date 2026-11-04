@@ -78,7 +78,7 @@ vi.mock("./renderers/index.js", async (importOriginal) => {
 import { spineSchema } from "../spine/spine.schema.js"
 import { Scene } from "../../shared/diagram/svg-scene.js"
 import { svgPart } from "./renderers/common.js"
-import { renderedDiagramHash } from "../spine/source-hash.js"
+import { DIAGRAM_ENGINES, renderedDiagramHash } from "../spine/source-hash.js"
 import type { Spine } from "../spine/spine.types.js"
 import * as repo from "../spine/spine.repository.js"
 import { runDeterministicCheck } from "../spine/deterministic-check.js"
@@ -213,6 +213,27 @@ describe("renderAll / renderDiagram qua op engine", () => {
     expect([...new Set(stale)].sort()).toEqual(["context", "screen_flow", "sequence", "usecase"])
     const result = await renderAll(PROJECT, { by: USER, deps })
     expect([...result.rendered].sort()).toEqual(["D01", "D02", "D02-2", "D02-3", "D02-4", "D02-5", "D02-6", "D03", "D14", "D15", "D16", "D17"])
+  })
+
+  it("hình use case vẽ theo engine cũ (svg@1) ⇒ stale; render không ép vẽ lại mọi phần, không mất use case nào", async () => {
+    await seed()
+    const { deps } = makeDeps()
+    await renderAll(PROJECT, { by: USER, deps })
+    const current = (await repo.get(PROJECT))!
+    const oldEngine = { ...DIAGRAM_ENGINES, usecase: "svg@1" }
+    // giả lập dữ liệu đã vẽ trước khi tăng engine: source_hash tính theo svg@1
+    const legacy = structuredClone(current)
+    for (const d of legacy.diagrams.filter((x) => x.kind === "usecase")) d.source_hash = renderedDiagramHash(legacy, d, oldEngine)
+    await seed(legacy)
+
+    const ucIds = legacy.diagrams.filter((d) => d.kind === "usecase").map((d) => d.id)
+    expect(staleDiagrams((await repo.get(PROJECT))!).filter((d) => d.kind === "usecase").map((d) => d.id).sort()).toEqual([...ucIds].sort())
+    const result = await renderAll(PROJECT, { by: USER, deps })
+    expect(result.rendered.filter((id) => ucIds.includes(id)).sort()).toEqual([...ucIds].sort())
+    const after = (await repo.get(PROJECT))!
+    expect(staleDiagrams(after)).toEqual([])
+    const drawn = after.diagrams.filter((d) => d.kind === "usecase" && d.section === "fixed:2.2.1").map((d) => d.source).join("\n")
+    for (const u of after.use_cases) expect(drawn, u.id).toContain(u.name.split(" ")[0])
   })
 
   it("40 use case chưa có feature của 4 actor ⇒ nhóm theo actor chính, mỗi nhóm một hình D02, D02-2…, phần đầu giữ id cũ", async () => {

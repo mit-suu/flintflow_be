@@ -3,9 +3,10 @@
  * §2–§7 (bản chạy được ở `docs/diagrams/usecase/build-diagrams.mjs`). Đơn vị px, trục y hướng xuống (khớp `Scene`).
  *
  * Ba cột: actor người bên trái, khung hệ thống ở giữa chứa một cột ellipse, actor `system`/`time` bên phải; cả hai cột
- * actor nằm NGOÀI khung. Hai bất biến làm mọi association là MỘT đoạn thẳng không cắt ellipse nào:
+ * actor nằm NGOÀI khung. Quy ước này là phương án đầu tiên; không sạch thì `layoutOptions` thử đổi thứ tự hàng và chia actor
+ * người sang hai bên (FLF-369) — mọi chỗ dưới đây suy bên từ bên được gán, không từ `kind`. Hai bất biến làm mọi association là MỘT đoạn thẳng không cắt ellipse nào:
  * - mọi ellipse cùng `rx`, `ry`, cùng `cx` ⇒ đỉnh trái / phải của chúng thẳng hàng dọc;
- * - association nối bàn tay actor tới đỉnh trái (actor trái) hoặc đỉnh phải (actor phải) của ellipse đích. Một đoạn
+ * - association nối bàn tay actor tới đỉnh trái (actor bên trái) hoặc đỉnh phải (actor bên phải) của ellipse đích. Một đoạn
  *   thẳng từ ngoài cột tới đỉnh luôn nằm hẳn ngoài cột cho tới khi chạm đích ⇒ không vào được ellipse khác.
  *
  * include / extend là đoạn dọc tại `cx` giữa hai ellipse KỀ NHAU (thứ tự hàng do `usecase.renderer.ts` bảo đảm), nét đứt,
@@ -169,10 +170,27 @@ export const packBlocks = (items: readonly PackItem[]): PackBlock[] => {
   return blocks.map(({ items: list, offsets, top }) => ({ items: list, offsets, top }))
 }
 
-/** Dựng Scene với khoảng cách actor ↔ khung `gap`. */
-const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
+export type ActorSide = "left" | "right"
+
+/** Một phương án bố cục: khoảng cách actor ↔ khung, bên đặt từng actor, thứ tự hàng use case. */
+export interface LayoutOption {
+  gap: number
+  /** Thiếu ⇒ quy ước mặc định: actor người trái, actor `system`/`time` phải. */
+  sides?: ReadonlyMap<string, ActorSide>
+  /** Thứ tự id use case từ trên xuống; thiếu ⇒ `d.rows`. */
+  rowOrder?: readonly string[]
+}
+
+const defaultSide = (a: DiagramActor): ActorSide => (a.kind === "human" ? "left" : "right")
+
+/** Dựng Scene theo một phương án bố cục. */
+const buildScene = (d: UseCaseDiagram, option: LayoutOption): Scene => {
+  const { gap } = option
+  const sideOf = (a: DiagramActor): ActorSide => option.sides?.get(a.id) ?? defaultSide(a)
   const scene = new Scene()
-  const rows = d.rows.map((r) => ({ ...r, lines: wrapLines(r.name || r.id, TEXT_SIZE, MAX_ELLIPSE_TEXT_WIDTH, MAX_ELLIPSE_LINES), cy: 0 }))
+  const byRowId = new Map(d.rows.map((r) => [r.id, r]))
+  const orderedRows = option.rowOrder ? option.rowOrder.map((id) => byRowId.get(id)!) : d.rows
+  const rows = orderedRows.map((r) => ({ ...r, lines: wrapLines(r.name || r.id, TEXT_SIZE, MAX_ELLIPSE_TEXT_WIDTH, MAX_ELLIPSE_LINES), cy: 0 }))
   const index = new Map(rows.map((r, i) => [r.id, i]))
 
   // Một cỡ ellipse cho mọi use case — đó là điều kiện để đỉnh thẳng hàng. Chia √2: hộp chữ nội tiếp ellipse.
@@ -188,8 +206,8 @@ const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
   rows.forEach((r, i) => (r.cy = BOUND_PAD_TOP + ry + i * (2 * ry + ROW_GAP)))
   const boundBottom = (rows[rows.length - 1]?.cy ?? BOUND_PAD_TOP) + ry + BOUND_PAD_BOTTOM
 
-  const left = d.actors.filter((a) => a.kind === "human")
-  const right = d.actors.filter((a) => a.kind !== "human")
+  const left = d.actors.filter((a) => sideOf(a) === "left")
+  const right = d.actors.filter((a) => sideOf(a) === "right")
   const metrics = new Map(d.actors.map((a) => [a.id, figureMetrics(actorLines(a))]))
   const colWidth = (list: DiagramActor[]): number => Math.max(0, ...list.map((a) => metrics.get(a.id)!.width))
   const leftX = -half - gap - colWidth(left) / 2
@@ -211,8 +229,8 @@ const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
     return new Map(blocks.flatMap((b) => b.items.map((item, i): [string, number] => [item.id, b.top + b.offsets[i]])))
   }
   const tops = new Map([...place(left), ...place(right)])
-  const columnX = (a: DiagramActor): number => (a.kind === "human" ? leftX : rightX)
-  const hand = (a: DiagramActor): [number, number] => [columnX(a) + (a.kind === "human" ? FIGURE.arm / 2 : -FIGURE.arm / 2), tops.get(a.id)! + FIGURE.armY]
+  const columnX = (a: DiagramActor): number => (sideOf(a) === "left" ? leftX : rightX)
+  const hand = (a: DiagramActor): [number, number] => [columnX(a) + (sideOf(a) === "left" ? FIGURE.arm / 2 : -FIGURE.arm / 2), tops.get(a.id)! + FIGURE.armY]
 
   scene.rect("system", -half, 0, 2 * half, boundBottom, { fill: FILL, container: true, name: d.system })
   scene.text("system#name", cx, BOUND_PAD_TOP / 2 + 1, d.system, { size: TITLE_SIZE, bold: true, owner: "system" })
@@ -222,7 +240,7 @@ const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
     const actor = d.actors.find((a) => a.id === link.actorId)
     const row = rows[index.get(link.useCaseId) ?? -1]
     if (!actor || !row) throw new Error(`usecase-layout: association ${link.actorId} → ${link.useCaseId} trỏ tới phần tử không có trong hình`)
-    const to: [number, number] = [actor.kind === "human" ? cx - rx : cx + rx, row.cy]
+    const to: [number, number] = [sideOf(actor) === "left" ? cx - rx : cx + rx, row.cy]
     scene.line(`${link.actorId}~${link.useCaseId}`, hand(actor), to, { name: `${actor.name} — ${row.name}` })
   }
 
@@ -250,16 +268,76 @@ const buildScene = (d: UseCaseDiagram, gap: number): Scene => {
 }
 
 /**
- * Scene của một sơ đồ use case. Khoảng cách actor ↔ khung tăng dần tới khi `checkScene` sạch: đường association thoải
- * hơn thì không quệt qua chữ / hình actor khác. Hết cỡ mà còn lỗi ⇒ trả bản cuối, `svgPart` báo `issues`.
+ * Chia actor người sang hai bên — chỉ có nghĩa khi có ≥ 2 actor người cùng nối một use case (khi đó đường của actor ngoài
+ * cùng dốc, dễ quệt chữ actor kề). Actor nhiều use case nhất giữ bên trái (hoà ⇒ id nhỏ), nửa còn lại — ít use case, thường
+ * là actor phụ như officer / admin — sang phải; actor `system`/`time` vẫn bên phải. Không cần chia ⇒ `null`.
+ */
+export const splitSides = (d: UseCaseDiagram): Map<string, ActorSide> | null => {
+  const humans = d.actors.filter((a) => a.kind === "human")
+  const humanIds = new Set(humans.map((h) => h.id))
+  const shared = d.rows.some((r) => d.associations.filter((x) => x.useCaseId === r.id && humanIds.has(x.actorId)).length >= 2)
+  if (!shared) return null
+  const count = (id: string): number => d.associations.filter((x) => x.actorId === id).length
+  const ranked = [...humans].sort((a, b) => count(b.id) - count(a.id) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const left = new Set(ranked.slice(0, Math.ceil(ranked.length / 2)).map((a) => a.id))
+  return new Map(d.actors.map((a): [string, ActorSide] => [a.id, left.has(a.id) ? "left" : "right"]))
+}
+
+/**
+ * Thứ tự hàng gom theo actor (barycenter): mỗi khối hàng — một chuỗi include/extend liền nhau, hoặc một use case đơn —
+ * xếp theo trung bình chỉ số (trong `d.actors`) của các actor nối tới nó; hoà ⇒ giữ thứ tự cũ. Khối không bị cắt nên hai use
+ * case có quan hệ vẫn kề nhau. Trùng thứ tự hiện tại ⇒ `null`.
+ */
+export const barycenterRows = (d: UseCaseDiagram): string[] | null => {
+  const linked = (a: string, b: string): boolean => d.relations.some((r) => (r.from === a && r.to === b) || (r.from === b && r.to === a))
+  const blocks: string[][] = []
+  for (const row of d.rows) {
+    const last = blocks[blocks.length - 1]
+    if (last && linked(last[last.length - 1], row.id)) last.push(row.id)
+    else blocks.push([row.id])
+  }
+  const actorIndex = new Map(d.actors.map((a, i) => [a.id, i]))
+  const weight = (block: string[]): number => {
+    const ix = d.associations.filter((x) => block.includes(x.useCaseId)).map((x) => actorIndex.get(x.actorId) ?? 0)
+    return ix.length > 0 ? ix.reduce((sum, i) => sum + i, 0) / ix.length : Infinity
+  }
+  const order = blocks
+    .map((block, i) => ({ block, i, w: weight(block) }))
+    .sort((a, b) => a.w - b.w || a.i - b.i)
+    .flatMap((b) => b.block)
+  return order.every((id, i) => id === d.rows[i].id) ? null : order
+}
+
+/**
+ * Các phương án bố cục theo thứ tự thử — tất định, rẻ trước. Đứng đầu là cách vẽ cũ (actor người trái, thứ tự hàng sẵn
+ * có) với từng khoảng cách ⇒ hình đã sạch theo cách cũ vẽ ra y như cũ. Sau đó thứ tự hàng barycenter, rồi chia actor người
+ * hai bên (lệch quy ước người trái / hệ thống phải nên chỉ tới lượt khi mọi phương án giữ quy ước đều không sạch), rồi cả
+ * hai. Phương án trùng phương án trước bị bỏ. Trần: 2 × 2 × `ACTOR_BOUNDARY_GAPS.length`.
+ */
+export const layoutOptions = (d: UseCaseDiagram): LayoutOption[] => {
+  const orders: (string[] | undefined)[] = [undefined]
+  const order = barycenterRows(d)
+  if (order) orders.push(order)
+  const sides: (Map<string, ActorSide> | undefined)[] = [undefined]
+  const split = splitSides(d)
+  if (split) sides.push(split)
+  return sides.flatMap((side) => orders.flatMap((rowOrder) => ACTOR_BOUNDARY_GAPS.map((gap): LayoutOption => ({ gap, sides: side, rowOrder }))))
+}
+
+/**
+ * Scene của một sơ đồ use case: thử các phương án của `layoutOptions` theo thứ tự, dừng ở phương án đầu tiên `checkScene`
+ * sạch. Không phương án nào sạch ⇒ trả scene ít issue nhất (hoà ⇒ phương án thử trước); `svgPart` báo `issues` và
+ * `usecase.renderer.ts` tách hình.
  */
 export const layoutUseCaseDiagram = (d: UseCaseDiagram): Scene => {
-  let scene = buildScene(d, ACTOR_BOUNDARY_GAPS[0])
-  for (const gap of ACTOR_BOUNDARY_GAPS) {
-    scene = buildScene(d, gap)
-    if (checkScene(scene, { allowBends: false }).length === 0) break
+  let best: { scene: Scene; issues: number } | null = null
+  for (const option of layoutOptions(d)) {
+    const scene = buildScene(d, option)
+    const issues = checkScene(scene, { allowBends: false }).length
+    if (issues === 0) return scene
+    if (best === null || issues < best.issues) best = { scene, issues }
   }
-  return scene
+  return best!.scene
 }
 
 // ─── Sơ đồ phân cấp actor ───────────────────────────────────────────
