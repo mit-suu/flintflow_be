@@ -31,6 +31,8 @@ export interface HeadingMapEntry {
    * ≤ 400 ký tự) — BA xem lúc xác nhận mapping; không phải nội dung. Thiếu = mẫu không ghi.
    */
   guidance?: string
+  /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`. */
+  number_label?: string
 }
 
 export interface TableMapEntry {
@@ -55,6 +57,8 @@ export interface LayoutEntry {
   level: number
   /** Section FPT khớp được, hoặc `custom:<id>` (mục ngoài mẫu FPT). */
   section_id: string
+  /** FLF-362: nhãn số Word tự đánh của heading gốc ("2.1") — không nằm trong `heading_text`. */
+  number_label?: string
 }
 
 /** Kế hoạch step theo template (FLF-182) — xem `stepPlanEntrySchema`. */
@@ -122,7 +126,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confirmed: { type: Boolean, default: false },
             auto_confirmed: { type: Boolean, default: undefined },
             template_section: { type: String, default: null },
-            guidance: { type: String, default: undefined }
+            guidance: { type: String, default: undefined },
+            number_label: { type: String, default: undefined }
           },
           opts
         )
@@ -200,7 +205,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             order: { type: Number, required: true, min: 0 },
             heading_text: { type: String, default: "" },
             level: { type: Number, required: true, min: 1, max: 9 },
-            section_id: { type: String, required: true }
+            section_id: { type: String, required: true },
+            number_label: { type: String, default: undefined }
           },
           opts
         )

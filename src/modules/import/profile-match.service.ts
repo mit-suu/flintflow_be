@@ -42,6 +42,8 @@ export interface ProfileBlock {
   heading_signals?: readonly HeadingSignal[]
   /** FLF-343: số mục Word tự sinh (không có trong chữ) — chỉ dùng để chấm điểm khớp mẫu. */
   auto_number?: string | null
+  /** FLF-362: nhãn số Word đúng như Word hiện ("2.1.", "II.") — mang theo heading để hiển thị, không dùng chấm điểm. */
+  number_label?: string | null
 }
 
 export interface ProfileMatch {
@@ -386,7 +388,12 @@ export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, 
 export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   const template_family = detectTemplateFamily(blocks)
   const guidance = guidanceByHeading(blocks)
-  const heading_map = matchHeadings(blocks, template_family).map((h) => (guidance.has(h.block_id) ? { ...h, guidance: guidance.get(h.block_id)! } : h))
+  const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
+  const heading_map = matchHeadings(blocks, template_family).map((h) => ({
+    ...h,
+    ...(guidance.has(h.block_id) ? { guidance: guidance.get(h.block_id)! } : {}),
+    ...(labels.has(h.block_id) ? { number_label: labels.get(h.block_id)! } : {})
+  }))
   const sections = assignBlockSections(blocks, heading_map)
   return {
     heading_map,

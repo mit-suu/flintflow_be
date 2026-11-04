@@ -54,6 +54,8 @@ export interface LayoutBlock {
   image_ref?: string | null
   /** Ảnh là sơ đồ I-4 đọc được (§4.13) — giữ nguyên hình của người dùng, đánh dấu để ẩn PlantUML cùng loại. */
   diagram?: OriginalDiagram | null
+  /** FLF-362: nhãn số Word tự đánh của heading — layout giữ lại để hiển thị / in đúng số của file. */
+  number_label?: string | null
 }
 
 /**
@@ -163,7 +165,13 @@ export const buildLayout = (
         slice = currentRepeats ? { custom_id: current.id, section_id: mapped, block_ids: [b.block_id] } : null
         if (slice) slices.push(slice)
       }
-      const entry: LayoutEntry = { order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section }
+      const entry: LayoutEntry = {
+        order: layout.length,
+        heading_text: heading,
+        level: clampLevel(b.level),
+        section_id: section,
+        ...(b.number_label ? { number_label: b.number_label } : {})
+      }
       layout.push(entry)
       stack.push({ level: b.level, section, entry })
       owner = current ? null : entry

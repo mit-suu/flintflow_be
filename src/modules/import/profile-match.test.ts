@@ -411,6 +411,18 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
   })
 })
 
+describe("FLF-362 — nhãn số Word đi theo heading_map", () => {
+  it("heading có number_label ⇒ heading_map mang number_label, heading_text giữ nguyên chữ; heading không nhãn ⇒ không có field", () => {
+    const blocks: ProfileBlock[] = [
+      { block_id: "B0001", kind: "heading", level: 1, text: "Product Overview", number_label: "1." },
+      { block_id: "B0002", kind: "heading", level: 2, text: "2.1 Actors" }
+    ]
+    const map = Object.fromEntries(matchProfile(blocks).heading_map.map((h) => [h.block_id, h]))
+    expect(map.B0001).toMatchObject({ heading_text: "Product Overview", number_label: "1." })
+    expect(map.B0002.number_label).toBeUndefined()
+  })
+})
+
 describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp", () => {
   it("detectorCap: style / outline không giới hạn; số mục gõ tay 0.75, có in đậm 0.9, trùng mục lục 0.95; numPr / format in đậm 0.85", () => {
     expect(detectorCap("style")).toBe(1)
