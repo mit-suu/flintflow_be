@@ -16,7 +16,7 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     const result = compareTargetStructure(layout, new Set(["fixed:1"]), spine, "free", "2026-10-27T00:00:00.000Z")
     expect(result).toMatchObject({ target: "fpt", intent: "free", resolved_mode: 4, compared_at: "2026-10-27T00:00:00.000Z" })
     const byId = new Map(result.sections.map((s) => [s.section_id, s]))
-    expect(byId.get("fixed:1")).toMatchObject({ status: "present", title: "Tổng quan" })
+    expect(byId.get("fixed:1")).toMatchObject({ status: "present", title: "1. Tổng quan" })
     expect(byId.get("fixed:2.1")?.status).toBe("missing")
     expect(byId.get("custom:CS01")).toMatchObject({ status: "out_of_scope", title: "Phụ lục Dự toán", owner_steps: [] })
     expect(result.missing).toContain("fixed:2.1")
@@ -26,11 +26,11 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     expect(byId.get("fixed:2.1")?.owner_steps.length).toBeGreaterThan(0)
   })
 
-  it("FLF-362: tiêu đề mục ở bước 3 \"Đọc file & tạo bản gốc\" bỏ số mục — số gõ tay lẫn số Word tự đánh", () => {
-    const layout = [{ ...entry(0, "fixed:1", "Tổng quan"), number_label: "1." }, entry(1, "fixed:2.1", "2.1 Tác nhân", 2)]
+  it("FLF-362: tiêu đề mục (bước 3 \"Đọc file & tạo bản gốc\") kèm số Word tự đánh của file; chữ đã gõ số tay giữ nguyên", () => {
+    const layout = [{ ...entry(0, "fixed:1", "Tổng quan"), number_label: "1." }, { ...entry(1, "fixed:2.1", "2.1 Tác nhân", 2), number_label: "9.9" }]
     const byId = new Map(compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "free").sections.map((s) => [s.section_id, s.title]))
-    expect(byId.get("fixed:1")).toBe("Tổng quan")
-    expect(byId.get("fixed:2.1")).toBe("Tác nhân")
+    expect(byId.get("fixed:1")).toBe("1. Tổng quan")
+    expect(byId.get("fixed:2.1")).toBe("2.1 Tác nhân")
   })
 
   it("đủ cấu trúc đích ⇒ chế độ 1, không missing", () => {
