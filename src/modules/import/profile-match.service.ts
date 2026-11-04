@@ -38,6 +38,8 @@ export interface ProfileBlock {
   auto_number?: string | null
   /** FLF-362: nhãn số Word đúng như Word hiện ("2.1.", "II.") — mang theo heading để hiển thị, không dùng chấm điểm. */
   number_label?: string | null
+  /** FLF-364: đoạn có kiểu chữ hướng dẫn (nghiêng / tô nền / khác màu thân bài) — tín hiệu phụ của chữ hướng dẫn. */
+  guidance_format?: boolean
 }
 
 export interface ProfileMatch {
