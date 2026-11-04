@@ -24,8 +24,10 @@ export interface HeadingMapEntry {
    * nguyên độ tin; finalize gắn cờ vàng "Cần xem" (`import_needs_review`). Người dùng xác nhận tay ⇒ không có.
    */
   auto_confirmed?: boolean
-  /** FLF-252: mục danh mục mẫu khớp được (`ieee830:3.5.2`) — chỉ với mẫu không phải FPT; nội bộ, không hiện cho người dùng. */
+  /** FLF-363: phần của ngân hàng phần khớp theo tên (`part:ieee:references`) — nội bộ, không hiện cho người dùng. */
   template_section?: string | null
+  /** FLF-363 (D2): mục theo tên khác mục theo nội dung — heading đã đổi theo nội dung; finalize bật cờ vàng. */
+  content_mismatch?: ContentMismatch
   /**
    * FLF-278 trên FLF-336 (business-flow 1.3 / 1.5): chữ hướng dẫn của mẫu ngay dưới heading (`[Describe …]`, bỏ ngoặc,
    * ≤ 400 ký tự) — BA xem lúc xác nhận mapping; không phải nội dung. Thiếu = mẫu không ghi.
@@ -33,6 +35,11 @@ export interface HeadingMapEntry {
   guidance?: string
   /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`. */
   number_label?: string
+}
+
+export interface ContentMismatch {
+  by_title: string
+  by_content: string
 }
 
 export interface TableMapEntry {
@@ -126,6 +133,7 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confirmed: { type: Boolean, default: false },
             auto_confirmed: { type: Boolean, default: undefined },
             template_section: { type: String, default: null },
+            content_mismatch: { type: new Schema({ by_title: String, by_content: String }, { _id: false }), default: undefined },
             guidance: { type: String, default: undefined },
             number_label: { type: String, default: undefined }
           },

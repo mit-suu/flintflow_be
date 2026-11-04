@@ -8,6 +8,7 @@
  *   khác của một section ⇒ thuộc section cha.
  * - Heading nhận theo mẫu số mục (file không dùng style) bị giới hạn độ tin 0.75 (P0 §4.2); FLF-343: tín hiệu phụ (in đậm,
  *   chữ to, mục lục) nâng trần (`detectorCap`).
+ * - Nội dung dưới heading (loại bảng, mã BR / MSG) chỉ rõ mục khác tên ⇒ đổi theo nội dung, `content_mismatch` (D1–D2).
  * - Cột bảng ⇒ field theo `table-header-dictionary.ts`.
  * Độ tin < 0.8 ⇒ FLF-343: tự nhận + cờ "Cần xem" lúc finalize (không còn dừng ở `mapping_review`).
  */
@@ -16,8 +17,8 @@ import { isExtractableSection, targetsOf } from "./extract-targets.js"
 import { MAPPING_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, type HeadingDetector, type HeadingSignal } from "./import.constants.js"
 import type { ParsedBlock } from "./parse.service.js"
 import { PROVISIONAL_SECTION, isContentSection, provisionalFeatureId, provisionalFunctionId } from "./section-catalog.js"
-import { matchTable } from "./table-header-dictionary.js"
-import { SLOT_SUGGESTION_CONFIDENCE, slotParents, suggestSlot } from "./content-slots.js"
+import { TABLE_ENTITIES, matchTable } from "./table-header-dictionary.js"
+import { SLOT_SUGGESTION_CONFIDENCE, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
 import { isInstructionText } from "../../shared/utils/instruction-text.js"
 import { PART_BANK, isWeakTitle, partById, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
@@ -386,6 +387,110 @@ export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, s
       }))
     )
 
+// ─── nội dung dưới heading (FLF-363, D1–D2) ─────────────────────────
+
+/**
+ * Loại bảng ⇒ mục FPT là chỗ của nó, kèm từ phải có trong hàng tiêu đề — bảng chỉ có cột "Name / Description" khớp được
+ * nhiều loại, không đủ để đổi mục. Bảng chung chung (chức năng, NFR, yêu cầu khác) không tính.
+ */
+const TABLE_HOME: Readonly<Record<string, { section: string; header: RegExp | null }>> = {
+  actors: { section: "fixed:2.1", header: /actor|tác nhân/i },
+  use_cases: { section: "fixed:2.2.2", header: /use ?case|ca sử dụng|uc/i },
+  screens: { section: "fixed:3.1.2", header: /screen|màn hình/i },
+  permissions: { section: "fixed:3.1.3", header: null },
+  entities: { section: "fixed:3.1.5", header: /entit|thực thể|attribute|thuộc tính/i },
+  business_rules: { section: "fixed:5.1", header: /rule|quy tắc|luật/i },
+  messages: { section: "fixed:5.3", header: /message|thông báo/i },
+  glossary: { section: "fixed:5.5", header: /term|thuật ngữ|abbreviation|acronym|viết tắt/i }
+}
+
+const tableHome = (rows: string[][]): string | null => {
+  const { entity, shape } = matchTable(rows, null)
+  const home = entity ? TABLE_HOME[entity] : undefined
+  if (!home || (home.header && !home.header.test(shape.headers.join(" | ")))) return null
+  return entity
+}
+
+/** Đoạn mở đầu bằng mã yêu cầu ⇒ mục của loại yêu cầu đó (cần ≥ 2 đoạn và chiếm đa số nội dung). */
+const CODE_HOME: readonly [RegExp, string][] = [
+  [/^\s*BR[-_ ]?\d+/i, "fixed:5.1"],
+  [/^\s*MSG[-_ ]?\d+/i, "fixed:5.3"]
+]
+
+/** Độ tin khi đổi mục theo nội dung — dưới ngưỡng 0.8 ⇒ cờ "Cần xem". */
+export const CONTENT_SWITCH_CONFIDENCE = 0.75
+
+/**
+ * Mục mà nội dung ngay dưới heading (tới heading kế) chỉ rõ: đa số bảng cùng một loại có chỗ riêng (bảng tác nhân, ERD, thuật
+ * ngữ…), hoặc đa số đoạn mở đầu bằng mã BR / MSG. Không rõ ⇒ `null`.
+ */
+const contentHomes = (blocks: readonly ProfileBlock[]): Map<string, { section: string; entity: string | null }> => {
+  const out = new Map<string, { section: string; entity: string | null }>()
+  let heading: string | null = null
+  let tables: string[] = []
+  let codes: string[] = []
+  let texts = 0
+  const flush = () => {
+    if (!heading) return
+    const votes = new Map<string, number>()
+    for (const t of tables) votes.set(t, (votes.get(t) ?? 0) + 1)
+    const [entity, n] = [...votes.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0]
+    if (entity && TABLE_HOME[entity] && n * 2 > tables.length) {
+      out.set(heading, { section: TABLE_HOME[entity].section, entity })
+      return
+    }
+    const codeVotes = new Map<string, number>()
+    for (const c of codes) codeVotes.set(c, (codeVotes.get(c) ?? 0) + 1)
+    const [section, m] = [...codeVotes.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0]
+    if (section && m >= 2 && m * 2 > texts) out.set(heading, { section, entity: null })
+  }
+  for (const b of blocks) {
+    if (b.kind === "heading" && b.level !== null) {
+      flush()
+      heading = b.block_id
+      tables = []
+      codes = []
+      texts = 0
+    } else if (heading && b.kind === "table" && b.rows?.length) {
+      tables.push(tableHome(b.rows) ?? "")
+    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && b.text.trim() && !isInstructionText(b.text)) {
+      texts++
+      const home = CODE_HOME.find(([re]) => re.test(b.text))?.[1]
+      if (home) codes.push(home)
+    }
+  }
+  flush()
+  return out
+}
+
+/**
+ * D1–D2: nội dung khớp chắc một mục khác mục theo tên ⇒ đổi theo nội dung (độ tin ≤ 0.75) và ghi `content_mismatch` để
+ * finalize bật cờ "Tiêu đề và nội dung khác nhau"; heading không khớp tên mà nội dung rõ ⇒ đề xuất mục đó (≤ 0.75). Chỉ đổi
+ * khi mục theo nội dung chưa có heading nào khác (file đã có mục "Tác nhân" thì bảng tác nhân trong "Bối cảnh" là ngữ cảnh) và
+ * mục theo tên là mục có nội dung (không phải nhóm, tính năng, chức năng, phần giữ nguyên văn).
+ */
+const withContentSignals = (blocks: readonly ProfileBlock[], entries: HeadingMapEntry[]): HeadingMapEntry[] => {
+  const homes = contentHomes(blocks)
+  const used = new Set(entries.map((e) => e.section_id))
+  return entries.map((e) => {
+    const home = homes.get(e.block_id)
+    if (!home || home.section === e.section_id || used.has(home.section)) return e
+    const accepted = home.entity ? (TABLE_ENTITIES.find((d) => d.entity === home.entity)?.sections ?? []) : []
+    if (accepted.includes(e.section_id)) return e
+    const matchedByTitle = !!e.template_section && e.section_id !== UNMAPPED_SECTION
+    const unmatched = !e.template_section && (e.section_id === UNMAPPED_SECTION || isContentSlot(e.section_id))
+    if (matchedByTitle && (!isContentSection(e.section_id) || isProvisionalSection(e.section_id))) return e
+    if (!matchedByTitle && !unmatched) return e
+    used.add(home.section)
+    return {
+      ...e,
+      section_id: home.section,
+      confidence: Math.min(e.section_id === UNMAPPED_SECTION ? CONTENT_SWITCH_CONFIDENCE : e.confidence, CONTENT_SWITCH_CONFIDENCE),
+      ...(matchedByTitle ? { content_mismatch: { by_title: e.section_id, by_content: home.section } } : {})
+    }
+  })
+}
+
 /** Độ dài tối đa của chữ hướng dẫn giữ cho mỗi heading. */
 export const MAX_GUIDANCE_CHARS = 400
 
@@ -420,7 +525,7 @@ export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   const template_family = familyOf(matched.hits)
   const guidance = guidanceByHeading(blocks)
   const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
-  const heading_map = matched.entries.map((h) => ({
+  const heading_map = withContentSignals(blocks, matched.entries).map((h) => ({
     ...h,
     ...(guidance.has(h.block_id) ? { guidance: guidance.get(h.block_id)! } : {}),
     ...(labels.has(h.block_id) ? { number_label: labels.get(h.block_id)! } : {})

@@ -83,6 +83,7 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confirmed: h.confirmed,
     ...(h.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(h.template_section ? { template_section: h.template_section } : {}),
+    ...(h.content_mismatch?.by_title ? { content_mismatch: { by_title: h.content_mismatch.by_title, by_content: h.content_mismatch.by_content } } : {}),
     ...(h.guidance ? { guidance: h.guidance } : {}),
     ...(h.number_label ? { number_label: h.number_label } : {})
   })),

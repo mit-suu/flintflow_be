@@ -109,10 +109,12 @@ export const headingMapEntrySchema = z.object({
   /** FLF-343: độ tin thấp, được tự nhận lúc tách file (không qua bước xác nhận) — có cờ vàng "Cần xem" sau baseline. */
   auto_confirmed: z.boolean().optional(),
   /**
-   * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
-   * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
+   * FLF-363: phần của ngân hàng phần khớp theo tên — `section_id = unmapped` mà có field này nghĩa là phần chỉ có ở mẫu
+   * IEEE, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
    */
   template_section: z.string().nullable().optional(),
+  /** FLF-363 (D2): mục theo tên (`by_title`) khác mục theo nội dung (`by_content`) — heading đã đổi theo nội dung. */
+  content_mismatch: z.object({ by_title: z.string(), by_content: z.string() }).optional(),
   /** FLF-278 trên FLF-336: chữ hướng dẫn của mẫu dưới heading (business-flow 1.5) — chỉ để BA xem, không phải nội dung. */
   guidance: z.string().optional(),
   /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`; hiển thị = nhãn + tiêu đề. */
