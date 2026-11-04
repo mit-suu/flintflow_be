@@ -28,6 +28,7 @@ import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
 import { assignBlockSections, autoConfirmMapping, matchProfile, needsMappingReview } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
+import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
@@ -106,7 +107,7 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     section_id: l.section_id,
     ...(l.number_label ? { number_label: l.number_label } : {})
   })),
-  template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
+  template_family: normalizeTemplateFamily(p.template_family),
   record_of_changes: (p.legacy_record_of_changes ?? []).map((r) => ({
     date: r.date,
     version: r.version,

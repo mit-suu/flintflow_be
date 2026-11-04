@@ -84,7 +84,7 @@ export interface ITemplateProfile extends Document {
   table_map: TableMapEntry[]
   /** Ngôn ngữ chính của tài liệu (`en`, `vi`…). */
   language: string
-  /** FLF-252: họ mẫu nhận được — `fpt`, `ieee830`, `ieee_features`. */
+  /** FLF-363: nhãn họ mẫu — `fpt`, `ieee29148`, `mixed` (bản ghi cũ `ieee830` / `ieee_features` đọc ra `ieee29148`). */
   template_family: string
   /** FLF-182: thứ tự + tiêu đề mục của file upload, render lại từ Spine theo đây. */
   layout: LayoutEntry[]
