@@ -161,7 +161,8 @@ export const finalizeImport = async (projectId: string, userId: string, body: Fi
     section_id: b.section_id ?? null,
     // Ô thật của bảng (FLF-251) — tách `text` theo dòng làm gãy hàng khi ô có xuống dòng (Record of Changes ra 0 dòng)
     rows: b.kind === "table" ? tableRows(b, ordered) : null,
-    image_ref: b.image_ref ?? null
+    image_ref: b.image_ref ?? null,
+    ...(b.number_label ? { number_label: b.number_label } : {})
   }))
   // Văn xuôi I-4 không trích được ⇒ phần nối của section (FLF-184) — render từ Spine không mất nội dung file gốc
   const unmappedIds = new Set(drafts.flatMap((d) => d.unmapped_block_ids ?? []))

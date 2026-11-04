@@ -156,14 +156,51 @@ describe("numberSections", () => {
     expect(numberOf("custom:B")).toBe("")
   })
 
-  it("file đánh số tự động (không gõ số): mọi heading đều có số; cấp nhảy quá 1 kéo về cấp kế tiếp", () => {
+  it("FLF-362: file không đánh số (không gõ số, không số Word) ⇒ không mục nào có số, kể cả mục FlintFlow chèn thêm; cấp giữ như file", () => {
     const layout: TemplateLayout = { language: "en", layout: [entry(0, "Intro", 1, "fixed:1"), entry(1, "Deep", 3, "custom:A")] }
     const s: Spine = { ...createEmptySpine({ name: "x" }), custom_sections: [{ id: "A", heading: "Deep", level: 3, source: "import", blocks: [] }] }
     const numbered = numberSections(placeSections(s, layout))
     expect(numbered.slice(0, 2).map((n) => [n.section_id, n.number, n.renderLevel])).toEqual([
-      ["fixed:1", "1", 1],
-      ["custom:A", "1.1", 2]
+      ["fixed:1", "", 1],
+      ["custom:A", "", 3]
     ])
+    expect(numbered.every((n) => n.number === "")).toBe(true)
+  })
+
+  it("FLF-362: số Word tự đánh (`number_label`) in đúng số của file (bỏ dấu kết: `1.` ⇒ `1`); chữ heading không bị cắt", () => {
+    const layout: TemplateLayout = {
+      language: "en",
+      layout: [{ ...entry(0, "Intro", 1, "fixed:1"), number_label: "1." }, { ...entry(1, "Scope", 2, "custom:A"), number_label: "1.1." }]
+    }
+    const s: Spine = { ...createEmptySpine({ name: "x" }), custom_sections: [{ id: "A", heading: "Scope", level: 2, source: "import", blocks: [] }] }
+    const numbered = numberSections(placeSections(s, layout))
+    expect(numbered.slice(0, 2).map((n) => [n.section_id, n.number, n.title])).toEqual([
+      ["fixed:1", "1", "Intro"],
+      ["custom:A", "1.1", "Scope"]
+    ])
+  })
+
+  it("FLF-362: file đánh số đều + mục FlintFlow chèn thêm ⇒ mục chèn nhận số theo thứ tự, anh em đứng sau cùng nhánh dịch số (kể cả mục con)", () => {
+    const placed = [
+      { section_id: "fixed:1", kind: "fpt" as const, title: "Intro", level: 1, fromLayout: true, typed: true, label: "1" },
+      { section_id: "fixed:2.1", kind: "fpt" as const, title: "Actors", level: 2, fromLayout: true, typed: true, label: "1.1" },
+      { section_id: "fixed:2.2.1", kind: "fpt" as const, title: "Use Case Diagram", level: 2, fromLayout: false, typed: false },
+      { section_id: "custom:B", kind: "custom" as const, title: "Notes", level: 2, fromLayout: true, typed: true, label: "1.2" },
+      { section_id: "custom:C", kind: "custom" as const, title: "Detail", level: 3, fromLayout: true, typed: true, label: "1.2.1" },
+      { section_id: "custom:D", kind: "custom" as const, title: "Next chapter", level: 1, fromLayout: true, typed: true, label: "2" }
+    ]
+    expect(numberSections(placed).map((n) => n.number)).toEqual(["1", "1.1", "1.2", "1.3", "1.3.1", "2"])
+  })
+
+  it("FLF-362: file đánh số không đều (nhảy số, chữ cái) ⇒ giữ nguyên văn số của file; mục chèn thêm lấy số kế tiếp của anh em đứng trước", () => {
+    const placed = [
+      { section_id: "fixed:1", kind: "fpt" as const, title: "Intro", level: 1, fromLayout: true, typed: true, label: "1" },
+      { section_id: "custom:A", kind: "custom" as const, title: "Scope", level: 2, fromLayout: true, typed: true, label: "1.3" },
+      { section_id: "fixed:2.2.1", kind: "fpt" as const, title: "Use Case Diagram", level: 2, fromLayout: false, typed: false },
+      { section_id: "custom:B", kind: "custom" as const, title: "Annex", level: 1, fromLayout: true, typed: true, label: "A." },
+      { section_id: "fixed:5.5", kind: "fpt" as const, title: "Glossary", level: 2, fromLayout: false, typed: false }
+    ]
+    expect(numberSections(placed).map((n) => n.number)).toEqual(["1", "1.3", "1.4", "A", ""])
   })
 })
 
@@ -198,7 +235,7 @@ describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
     ])
   })
 
-  it("La Mã làm chính số chương (`I.` › `1.1`) ⇒ không phải phần, đánh số như cũ", () => {
+  it("La Mã làm chính số chương (`I.` › `1.1`) ⇒ không phải phần; FLF-362: số in đúng như file (`I`, `II`), không đổi sang 1, 2", () => {
     const numbered = numberSections(
       placed([
         ["fixed:1", "Introduction", 1, "I"],
@@ -207,7 +244,7 @@ describe("numberSections — phần đánh số La Mã (nợ T14)", () => {
         ["fixed:2.1", "Actors", 2, "2.1"]
       ])
     )
-    expect(numbered.map((n) => n.number)).toEqual(["1", "1.1", "2", "2.1"])
+    expect(numbered.map((n) => n.number)).toEqual(["I", "1.1", "II", "2.1"])
   })
 
   it("romanValue", () => {

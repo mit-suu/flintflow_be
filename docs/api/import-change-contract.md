@@ -571,3 +571,14 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 - Còn đơn vị chưa dịch ⇒ `409 TRANSLATION_INCOMPLETE` `meta { locale, missing, total }` (đếm trên snapshot của version). Dịch nốt qua `pipeline-contract.md` #26 `?locale=&version=` / #27 `{ locale, version }` — đếm / dịch đúng snapshot baseline của version đó.
 - Bản nháp CR (không có baseline), dự án import thật (đường layout) ⇒ `409 DOCUMENT_LANGUAGE_UNAVAILABLE`; `variant=tracked|original` + `lang` khác ⇒ `400 VALIDATION_ERROR`.
 - `DocVersionDto` thêm `other_language_available: boolean` (#12, response release) — `false` ⇒ FE ẩn lựa chọn ngôn ngữ.
+
+## FLF-362 (2026-11-04) — luồng upload giữ đúng số mục của file (chỉ thêm field)
+
+- `headingMapEntrySchema.number_label?` và `layoutEntrySchema.number_label?` (string): nhãn số **Word tự đánh** của heading
+  (`numPr`, không nằm trong chữ) đúng như Word hiển thị — "2.1.", "II.", "A)". `heading_text` giữ nguyên chữ như trước
+  (mapping mẫu tổ chức, so sánh tải lại dựa vào nó); hiển thị = nhãn + tiêu đề. Heading gõ số tay / không đánh số ⇒ không có.
+- `target_structure.sections[].title` (bước 3) và `GapReport.layout[].heading` nay **đã ghép** nhãn số Word ("1. Tổng quan").
+- Bản xem / xuất Mode 1 (`RenderedSection.number`): số lấy theo **file** — file không đánh số ⇒ `number` rỗng (trước đây tự
+  đánh 1, 1.1…); file đánh số đều ⇒ đúng số file, mục FlintFlow chèn thêm nhận số theo thứ tự và anh em đứng sau dịch số;
+  file đánh số không đều (nhảy số, chữ cái, La Mã làm số chương) ⇒ giữ nguyên số của file. `number` luôn bỏ dấu kết ("1",
+  không "1."). Mode 2 (dự án tạo mới theo mẫu FlintFlow) không đổi.

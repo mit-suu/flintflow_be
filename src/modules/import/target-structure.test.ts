@@ -26,6 +26,13 @@ describe("compareTargetStructure (FLF-336 I-5 — so cấu trúc đích)", () =>
     expect(byId.get("fixed:2.1")?.owner_steps.length).toBeGreaterThan(0)
   })
 
+  it("FLF-362: tiêu đề mục (bước 3 \"Đọc file & tạo bản gốc\") kèm số Word tự đánh của file; chữ đã gõ số tay giữ nguyên", () => {
+    const layout = [{ ...entry(0, "fixed:1", "Tổng quan"), number_label: "1." }, { ...entry(1, "fixed:2.1", "2.1 Tác nhân", 2), number_label: "9.9" }]
+    const byId = new Map(compareTargetStructure(layout, new Set(["fixed:1"]), spineWith(), "free").sections.map((s) => [s.section_id, s.title]))
+    expect(byId.get("fixed:1")).toBe("1. Tổng quan")
+    expect(byId.get("fixed:2.1")).toBe("2.1 Tác nhân")
+  })
+
   it("đủ cấu trúc đích ⇒ chế độ 1, không missing", () => {
     const layout = REQUIRED_FIXED_SECTION_IDS.map((id, i) => entry(i, id, id))
     const result = compareTargetStructure(layout, new Set(REQUIRED_FIXED_SECTION_IDS), spineWith(), "free")

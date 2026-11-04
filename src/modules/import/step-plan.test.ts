@@ -49,6 +49,12 @@ const HEADINGS = new Map([
 ])
 
 describe("buildLayout", () => {
+  it("FLF-362: heading có số Word tự đánh ⇒ layout giữ `number_label`, `heading_text` giữ nguyên chữ", () => {
+    const blocks: LayoutBlock[] = [{ ...h("B0001", "Product Overview", 1), number_label: "1." }, p("B0002", "Text", "fixed:1")]
+    const { layout } = buildLayout(blocks, new Map([["B0001", "fixed:1"]]))
+    expect(layout[0]).toMatchObject({ heading_text: "Product Overview", number_label: "1.", section_id: "fixed:1" })
+  })
+
   it("heading mở section FPT giữ section; heading con cùng section bỏ; unmapped ⇒ mục riêng giữ nguyên văn; section FPT lặp ở chỗ khác ⇒ mục riêng", () => {
     const { layout, customSections } = buildLayout(BLOCKS, HEADINGS)
     expect(layout.map((l) => [l.heading_text, l.level, l.section_id])).toEqual([

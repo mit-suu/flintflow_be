@@ -83,7 +83,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confirmed: h.confirmed,
     ...(h.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(h.template_section ? { template_section: h.template_section } : {}),
-    ...(h.guidance ? { guidance: h.guidance } : {})
+    ...(h.guidance ? { guidance: h.guidance } : {}),
+    ...(h.number_label ? { number_label: h.number_label } : {})
   })),
   table_map: p.table_map.map((t) => ({
     block_id: t.block_id,
@@ -97,7 +98,13 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     ...(t.samples?.length ? { samples: [...t.samples] } : {})
   })),
   language: p.language,
-  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id })),
+  layout: (p.layout ?? []).map((l) => ({
+    order: l.order,
+    heading_text: l.heading_text,
+    level: l.level,
+    section_id: l.section_id,
+    ...(l.number_label ? { number_label: l.number_label } : {})
+  })),
   template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
   record_of_changes: (p.legacy_record_of_changes ?? []).map((r) => ({
     date: r.date,
@@ -287,7 +294,8 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   editable: b.editable,
   locked_by_cr: null,
   image_ref: b.image_ref ?? null,
-  ...(b.kind === "table" && b.rows ? { rows: b.rows } : {})
+  ...(b.kind === "table" && b.rows ? { rows: b.rows } : {}),
+  ...(b.number_label ? { number_label: b.number_label } : {})
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.1`). */

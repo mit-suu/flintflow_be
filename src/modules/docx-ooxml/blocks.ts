@@ -67,6 +67,11 @@ export interface OoxmlBlock {
    * không ghi vào chữ của block. Heading gõ số tay / không đánh số ⇒ không có.
    */
   auto_number?: string | null
+  /**
+   * FLF-362: nhãn số Word tự đánh của heading, đúng như Word hiển thị ("2.1", "II.", "A.") — tính theo `numbering.xml`, không
+   * nằm trong `text`. Để hiển thị / in lại đúng số của file upload. Heading gõ số tay hoặc không đánh số ⇒ không có.
+   */
+  number_label?: string | null
 }
 
 interface StyleInfo {
@@ -122,16 +127,31 @@ const readStyles = (styles: Document | null): Map<string, StyleInfo> => {
   return map
 }
 
-/** Một cấp của danh sách đánh số (`numbering.xml`): `numFmt` (`bullet`, `decimal`…) và `lvlText` (`%1.%2`). */
+/**
+ * Một cấp của danh sách đánh số (`numbering.xml`): `numFmt` (`bullet`, `decimal`…), `lvlText` (`%1.%2`) và — để tính nhãn số
+ * Word hiển thị (FLF-362) — `start`, `lvlRestart` (`null` = đánh lại khi cấp trên bất kỳ tăng, `0` = không bao giờ), `isLgl`.
+ */
 interface NumLevel {
   numFmt: string | null
   lvlText: string
+  start: number
+  restart: number | null
+  legal: boolean
 }
-/** `numId` ⇒ các cấp của abstractNum + danh sách có phải dàn mục (có cấp `%1.%2…`). */
-type NumberingInfo = Map<string, { levels: Map<number, NumLevel>; outline: boolean }>
+/**
+ * `numId` ⇒ các cấp của abstractNum + danh sách có phải dàn mục (có cấp `%1.%2…`). `abstractId` để các `num` cùng một
+ * abstractNum đếm tiếp nhau; `startOverrides` (`lvlOverride/startOverride`) đánh lại từ số đó khi `num` này dùng lần đầu.
+ */
+type NumberingInfo = Map<string, { levels: Map<number, NumLevel>; outline: boolean; abstractId: string; startOverrides: Map<number, number> }>
 
 /** Dàn mục: `lvlText` nối hai số trở lên bằng dấu chấm (`%1.%2`, `%1.%2.%3.`). */
 const OUTLINE_LVL_TEXT = /%\d\.%\d/
+
+const intAttr = (el: Element | undefined): number | null => {
+  const v = wAttr(el, "val")
+  const n = v === null ? NaN : Number(v)
+  return Number.isInteger(n) ? n : null
+}
 
 const readNumbering = (numbering: Document | null): NumberingInfo => {
   const out: NumberingInfo = new Map()
@@ -142,15 +162,101 @@ const readNumbering = (numbering: Document | null): NumberingInfo => {
     for (const l of wKids(a, "lvl")) {
       const ilvl = ilvlOf(wAttr(l, "ilvl"))
       if (ilvl === null) continue
-      levels.set(ilvl, { numFmt: wAttr(wKid(l, "numFmt"), "val"), lvlText: wAttr(wKid(l, "lvlText"), "val") ?? "" })
+      const lgl = wKid(l, "isLgl")
+      levels.set(ilvl, {
+        numFmt: wAttr(wKid(l, "numFmt"), "val"),
+        lvlText: wAttr(wKid(l, "lvlText"), "val") ?? "",
+        // ECMA-376 ghi mặc định 0, nhưng file thiếu `w:start` (sinh bởi công cụ khác Word) vẫn hiện bắt đầu từ 1 ⇒ 1
+        start: intAttr(wKid(l, "start")) ?? 1,
+        restart: intAttr(wKid(l, "lvlRestart")),
+        legal: !!lgl && !["0", "false", "off"].includes(wAttr(lgl, "val") ?? "")
+      })
     }
     const id = wAttr(a, "abstractNumId")
     if (id) abstracts.set(id, levels)
   }
   for (const n of wAll(numbering, "num")) {
     const id = wAttr(n, "numId")
-    const levels = abstracts.get(wAttr(wKid(n, "abstractNumId"), "val") ?? "")
-    if (id && levels) out.set(id, { levels, outline: [...levels.values()].some((l) => OUTLINE_LVL_TEXT.test(l.lvlText)) })
+    const abstractId = wAttr(wKid(n, "abstractNumId"), "val") ?? ""
+    const levels = abstracts.get(abstractId)
+    if (!id || !levels) continue
+    const startOverrides = new Map<number, number>()
+    for (const o of wKids(n, "lvlOverride")) {
+      const ilvl = ilvlOf(wAttr(o, "ilvl"))
+      const start = intAttr(wKid(o, "startOverride"))
+      if (ilvl !== null && start !== null) startOverrides.set(ilvl, start)
+    }
+    out.set(id, { levels, outline: [...levels.values()].some((l) => OUTLINE_LVL_TEXT.test(l.lvlText)), abstractId, startOverrides })
+  }
+  return out
+}
+
+const ROMAN_DIGITS: readonly [number, string][] = [
+  [1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]
+]
+const roman = (n: number): string => {
+  let out = ""
+  for (const [v, s] of ROMAN_DIGITS) while (n >= v) (out += s), (n -= v)
+  return out
+}
+/** `1` ⇒ `A`, `27` ⇒ `AA` (cách Word đánh chữ: lặp lại chữ cái). */
+const letters = (n: number): string => (n < 1 ? "" : String.fromCharCode(65 + ((n - 1) % 26)).repeat(Math.floor((n - 1) / 26) + 1))
+
+/** Một giá trị bộ đếm theo `numFmt`; định dạng lạ (`ordinal`, chữ Á Đông…) ⇒ số thường. */
+const formatCounter = (value: number, numFmt: string | null): string => {
+  switch (numFmt) {
+    case "upperRoman":
+      return roman(value)
+    case "lowerRoman":
+      return roman(value).toLowerCase()
+    case "upperLetter":
+      return letters(value)
+    case "lowerLetter":
+      return letters(value).toLowerCase()
+    case "decimalZero":
+      return value < 10 ? `0${value}` : String(value)
+    default:
+      return String(value)
+  }
+}
+
+/**
+ * Nhãn số Word tự đánh của từng đoạn có `numPr` (FLF-362): "2.1", "II.", "A." — như Word hiển thị, không nằm trong chữ của
+ * đoạn. Đếm **mọi** đoạn đánh số theo thứ tự tài liệu (kể cả gạch đầu dòng, ô bảng) vì chúng chung bộ đếm; bộ đếm theo
+ * abstractNum (các `num` cùng abstractNum đếm tiếp nhau), `startOverride` đánh lại khi `num` đó dùng lần đầu, cấp dưới đánh
+ * lại khi cấp trên tăng (trừ `lvlRestart` = 0). Gạch đầu dòng / `none` / không tính được ⇒ không có nhãn.
+ */
+const numberLabels = (body: Element, styles: Map<string, StyleInfo>, numbering: NumberingInfo): Map<Element, string> => {
+  const out = new Map<Element, string>()
+  if (!numbering.size) return out
+  const counters = new Map<string, (number | undefined)[]>()
+  const started = new Set<string>()
+  for (const p of wAll(body, "p")) {
+    const pPr = wKid(p, "pPr")
+    const num = numberingOf(pPr, styleChain(styles, pPr ? wAttr(wKid(pPr, "pStyle"), "val") : null))
+    const info = num?.numId ? numbering.get(num.numId) : undefined
+    const lvl = info?.levels.get(num!.ilvl)
+    if (!num || !info || !lvl || lvl.numFmt === "none") continue
+    const c = counters.get(info.abstractId) ?? []
+    counters.set(info.abstractId, c)
+    if (!started.has(num.numId!)) {
+      started.add(num.numId!)
+      for (const [k, start] of info.startOverrides) c[k] = start - 1
+    }
+    c[num.ilvl] = (c[num.ilvl] ?? lvl.start - 1) + 1
+    for (let k = num.ilvl + 1; k < 9; k++) {
+      const restart = info.levels.get(k)?.restart ?? null
+      if (restart === null || (restart !== 0 && num.ilvl + 1 <= restart)) c[k] = undefined
+    }
+    if (lvl.numFmt === "bullet") continue
+    const label = lvl.lvlText
+      .replace(/%([1-9])/g, (_, d: string) => {
+        const k = Number(d) - 1
+        const def = info.levels.get(k)
+        return formatCounter(c[k] ?? def?.start ?? 0, lvl.legal ? "decimal" : (def?.numFmt ?? null))
+      })
+      .trim()
+    if (label) out.set(p, label)
   }
   return out
 }
@@ -497,6 +603,7 @@ export const parseBlocks = (
   const body = wAll(doc, "body")[0]
   if (!body) return []
   const pre = preScan(body, styles, stylesDoc, readNumbering(numberingDoc))
+  const labels = numberLabels(body, styles, pre.numbering)
   const tocTracker = new TocFieldTracker()
   /** Đã qua mục lục — chỉ sau đó đoạn không số mới được nhận là heading nhờ trùng mục lục. */
   let pastToc = false
@@ -686,7 +793,11 @@ export const parseBlocks = (
     }
     const headingExtra =
       kind === "heading" && level !== null
-        ? { heading_signals: signals, auto_number: noteHeading(level, text, numbering !== null) }
+        ? {
+            heading_signals: signals,
+            auto_number: noteHeading(level, text, numbering !== null),
+            ...(labels.has(p) && !typedNumber(text) ? { number_label: labels.get(p)! } : {})
+          }
         : {}
     push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra })
     if (kind === "heading" && level !== null) headingStack.push({ level, text: text.trim() })

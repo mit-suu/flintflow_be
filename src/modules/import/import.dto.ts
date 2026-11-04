@@ -114,7 +114,9 @@ export const headingMapEntrySchema = z.object({
    */
   template_section: z.string().nullable().optional(),
   /** FLF-278 trên FLF-336: chữ hướng dẫn của mẫu dưới heading (business-flow 1.5) — chỉ để BA xem, không phải nội dung. */
-  guidance: z.string().optional()
+  guidance: z.string().optional(),
+  /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`; hiển thị = nhãn + tiêu đề. */
+  number_label: z.string().optional()
 })
 
 /** Họ mẫu của tài liệu upload (FLF-252). */
@@ -143,7 +145,9 @@ export const layoutEntrySchema = z.object({
   order: z.number().int().min(0),
   heading_text: z.string(),
   level: z.number().int().min(1).max(9),
-  section_id: z.string().min(1)
+  section_id: z.string().min(1),
+  /** FLF-362: như `headingMapEntrySchema.number_label`. */
+  number_label: z.string().optional()
 })
 
 /** Một dòng Record of Changes của file gốc (FLF-252) — cùng hình dòng §I của `RenderedDocument.recordOfChanges`. */
