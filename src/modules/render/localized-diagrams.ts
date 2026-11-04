@@ -8,7 +8,8 @@
  * - Hình dựng từ Spine (ngữ cảnh, use case, luồng màn, ERD, bảng function): renderer vẽ lại trên bản xem đã dịch với nhãn
  *   máy theo ngôn ngữ (`renderers/labels.ts`) — chỉ khi nguồn đang lưu khớp từng ký tự với bản renderer sinh từ Spine
  *   gốc hiện tại. Hình cũ (`diagram_stale`), hình đã qua `render_fix`, phần không còn ⇒ giữ nguồn gốc (tài liệu dùng ảnh
- *   gốc). Renderer chia phần theo id / quan hệ, không theo chữ ⇒ bản dịch cùng số phần, cùng thứ tự với bản gốc.
+ *   gốc). Use case tách hình theo `checkScene` (phụ thuộc độ dài chữ) ⇒ bản dịch có thể tách khác: phần ghép theo tập id use
+ *   case (`members`), phần không khớp dùng ảnh gốc.
  * - Wireframe model vẽ: thay chữ trên widget theo đơn vị `diagrams[id=…].labels` (`diagram/salt-text.ts`), dòng tên màn
  *   theo tên màn đã dịch; nhãn chưa dịch giữ chữ gốc.
  */
@@ -19,6 +20,21 @@ import { RENDERERS, type DiagramKind, type RenderedPart } from "../diagram/rende
 import { diagramLabelsFor } from "../diagram/renderers/labels.js"
 import { isWireframeSalt, localizeSalt } from "../diagram/salt-text.js"
 import type { DiagramSource } from "../diagram/localized-diagram.service.js"
+
+const memberKey = (part: RenderedPart): string => (part.members ?? []).join(",")
+
+/**
+ * Phần bản dịch ứng với `before[index]`. Phần có `members` (use case) ghép theo đúng tập id trong cùng section — bản dịch
+ * tách khác bản gốc thì không có phần cùng tập ⇒ `undefined`, tài liệu dùng ảnh gốc. Phần không có `members` ghép theo thứ
+ * tự trong các phần không có `members` cùng section, và chỉ khi số phần ấy bằng nhau.
+ */
+export const matchingPart = (before: RenderedPart[], after: RenderedPart[], index: number): RenderedPart | undefined => {
+  const wanted = before[index]
+  if (wanted.members) return after.find((p) => p.section === wanted.section && p.members !== undefined && memberKey(p) === memberKey(wanted))
+  const plain = (parts: RenderedPart[]) => parts.filter((p) => p.section === wanted.section && p.members === undefined)
+  const [from, to] = [plain(before), plain(after)]
+  return from.length === to.length ? to[from.indexOf(wanted)] : undefined
+}
 
 const normalize = (text: string): string => text.replace(/\s+/g, " ").trim().toLowerCase()
 
@@ -59,7 +75,7 @@ export const localizeDiagrams = (
     }
     const { source: before, localized: after } = partsOf(source.kind, source.owner_id)
     const index = before.findIndex((part) => part.format === source.format && part.source === source.source)
-    const part = index >= 0 && after.length === before.length ? after[index] : undefined
+    const part = index >= 0 ? matchingPart(before, after, index) : undefined
     if (!part || part.format !== source.format) return source.source
     // Chữ dịch dài hơn làm vỡ bố cục SVG ⇒ tài liệu dùng ảnh gốc, không in hình đè chữ
     if (part.issues?.length) {
