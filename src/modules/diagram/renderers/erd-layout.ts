@@ -104,7 +104,8 @@ const entityBox = (e: ErdEntityInput, notation: ErdNotation, degree: number, sel
   const portSpan = 2 * o.portMargin + (slots - 1) * o.portPitch
   const boxW = Math.max(110, Math.ceil(nameW + 28), Math.ceil(attrW + 24), portSpan)
   const boxH = Math.max(headerH + attrH, portSpan)
-  const ovals = notation === "chen" ? (e.attributes ?? []).map((a) => ({ name: clean(a.name), pk: a.pk === true, rx: Math.ceil(textWidth(clean(a.name), ATTR_SIZE, a.pk === true) / 2) + 12, ry: 13 })) : []
+  // Chen: quan hệ đã là hình thoi, khoá ngoại là chi tiết cài đặt của nó ⇒ không vẽ thêm thành ô-van thuộc tính
+  const ovals = notation === "chen" ? (e.attributes ?? []).filter((a) => a.fk !== true).map((a) => ({ name: clean(a.name), pk: a.pk === true, rx: Math.ceil(textWidth(clean(a.name), ATTR_SIZE, a.pk === true) / 2) + 12, ry: 13 })) : []
   const stripW = ovals.reduce((sum, v) => sum + 2 * v.rx, 0) + Math.max(0, ovals.length - 1) * 10
   const w = Math.max(boxW, stripW)
   const h = ovals.length > 0 ? boxH + 24 + 26 + 4 : boxH
