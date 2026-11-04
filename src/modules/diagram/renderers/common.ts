@@ -22,6 +22,11 @@ export interface RenderedPart {
   source: string
   /** Chỉ `svg`: lỗi bố cục của `checkScene` — có ⇒ hình không được lưu (`render_status = error`). */
   issues?: GeometryIssue[]
+  /**
+   * Id phần tử chính của phần (use case trên hình) khi kind tách nhiều hình theo nội dung — bản dịch ghép với phần gốc
+   * theo tập này, không theo chỉ số (việc tách phụ thuộc độ dài chữ nên bản dịch có thể tách khác bản gốc).
+   */
+  members?: string[]
 }
 
 /** `labels`: chữ máy trên hình (FLF-265 N1) — thiếu ⇒ tiếng Anh, đúng hình ghi vào `diagrams[]`. */
