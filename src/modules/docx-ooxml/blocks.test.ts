@@ -737,3 +737,33 @@ describe("readBlocks — tín hiệu heading FLF-343", () => {
     expect(blocks[1].kind).toBe("list_item")
   })
 })
+
+describe("FLF-364 — kiểu chữ hướng dẫn (tín hiệu phụ)", () => {
+  const run = (text: string, rPr = "") => `<w:r>${rPr ? `<w:rPr>${rPr}</w:rPr>` : ""}<w:t xml:space="preserve">${text}</w:t></w:r>`
+  const para = (...runs: string[]) => `<w:p>${runs.join("")}</w:p>`
+
+  it("đoạn toàn chữ xanh / xám, nghiêng hoặc tô nền ⇒ guidance_format; chữ màu thân bài hoặc lẫn màu ⇒ không", async () => {
+    const blocks = await readBlocks(
+      await load(
+        [
+          para(run("Hệ thống quản lý học sinh cho trường THPT, phục vụ giáo viên chủ nhiệm và phụ huynh.")),
+          para(run("Giáo viên nhập điểm, phụ huynh xem kết quả học tập theo từng kỳ.")),
+          para(run("[Mô tả mục đích tài liệu]", '<w:color w:val="0070C0"/>')),
+          para(run("[Liệt kê tài liệu tham khảo]", '<w:color w:val="808080"/><w:i/>')),
+          para(run("{Ghi chú cho người soạn}", '<w:highlight w:val="yellow"/>')),
+          para(run("Chữ đen "), run("[chỗ điền]", '<w:color w:val="0070C0"/>')),
+          para(run("Đoạn màu tự động", '<w:color w:val="auto"/>'))
+        ].join("")
+      )
+    )
+    expect(blocks.map((b) => [b.text, b.guidance_format ?? false])).toEqual([
+      ["Hệ thống quản lý học sinh cho trường THPT, phục vụ giáo viên chủ nhiệm và phụ huynh.", false],
+      ["Giáo viên nhập điểm, phụ huynh xem kết quả học tập theo từng kỳ.", false],
+      ["[Mô tả mục đích tài liệu]", true],
+      ["[Liệt kê tài liệu tham khảo]", true],
+      ["{Ghi chú cho người soạn}", true],
+      ["Chữ đen [chỗ điền]", false],
+      ["Đoạn màu tự động", false]
+    ])
+  })
+})

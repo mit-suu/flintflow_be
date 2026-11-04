@@ -297,7 +297,8 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   locked_by_cr: null,
   image_ref: b.image_ref ?? null,
   ...(b.kind === "table" && b.rows ? { rows: b.rows } : {}),
-  ...(b.number_label ? { number_label: b.number_label } : {})
+  ...(b.number_label ? { number_label: b.number_label } : {}),
+  ...(b.guidance_format ? { guidance_format: true } : {})
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.1`). */

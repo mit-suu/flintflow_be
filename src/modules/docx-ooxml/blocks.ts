@@ -72,6 +72,11 @@ export interface OoxmlBlock {
    * nằm trong `text`. Để hiển thị / in lại đúng số của file upload. Heading gõ số tay hoặc không đánh số ⇒ không có.
    */
   number_label?: string | null
+  /**
+   * FLF-364: mọi run có chữ của đoạn in nghiêng, tô nền, hoặc màu khác màu thân bài — kiểu chữ hướng dẫn hay gặp của mẫu
+   * (xanh / xám). Chỉ là tín hiệu phụ: chữ hướng dẫn vẫn phải nằm trong `[ ]` / `{ }`. Không có ở heading / bảng.
+   */
+  guidance_format?: boolean
 }
 
 interface StyleInfo {
@@ -83,6 +88,10 @@ interface StyleInfo {
   bold: boolean | null
   /** `w:rPr/w:sz` (nửa point). */
   size: number | null
+  /** FLF-364: `w:rPr/w:color` (hex hoa, `auto` ⇒ `null`), `w:i`, `w:highlight`. */
+  color: string | null
+  italic: boolean | null
+  highlight: boolean | null
   /** Style mặc định của đoạn (`w:default="1"`, thường là Normal). */
   isDefault: boolean
   /** `numPr` của style: `numId` + `ilvl` (thiếu ilvl ⇒ 0). */
@@ -96,13 +105,54 @@ const ilvlOf = (v: string | null): number | null => {
   return Number.isFinite(n) && n >= 0 && n <= 8 ? Math.floor(n) : null
 }
 
-/** `w:b` / `w:sz` của một `rPr`. */
-const runFormat = (rPr: Element | undefined): { bold: boolean | null; size: number | null } => {
-  if (!rPr) return { bold: null, size: null }
-  const b = wKid(rPr, "b")
-  const val = b ? wAttr(b, "val") : null
+interface RunFormat {
+  bold: boolean | null
+  size: number | null
+  color: string | null
+  italic: boolean | null
+  highlight: boolean | null
+}
+
+const onOff = (el: Element | null | undefined): boolean | null => {
+  if (!el) return null
+  const val = wAttr(el, "val")
+  return val !== "0" && val !== "false" && val !== "off"
+}
+
+/** `w:b` / `w:sz` / `w:color` / `w:i` / `w:highlight` của một `rPr`. */
+const runFormat = (rPr: Element | undefined): RunFormat => {
+  if (!rPr) return { bold: null, size: null, color: null, italic: null, highlight: null }
   const sz = wAttr(wKid(rPr, "sz"), "val")
-  return { bold: b ? val !== "0" && val !== "false" && val !== "off" : null, size: sz && Number(sz) > 0 ? Number(sz) : null }
+  const color = wAttr(wKid(rPr, "color"), "val")
+  const hl = wAttr(wKid(rPr, "highlight"), "val")
+  return {
+    bold: onOff(wKid(rPr, "b")),
+    size: sz && Number(sz) > 0 ? Number(sz) : null,
+    color: color && color.toLowerCase() !== "auto" ? color.toUpperCase() : null,
+    italic: onOff(wKid(rPr, "i")),
+    highlight: hl === null ? null : hl !== "none"
+  }
+}
+
+/** Màu chữ thật của một run: run ⇒ style đoạn (`null` = màu mặc định / đen). */
+const runColor = (r: Element, chain: StyleInfo[]): string | null => {
+  const color = runFormat(wKid(r, "rPr")).color ?? chain.find((s) => s.color !== null)?.color ?? null
+  return color === "000000" ? null : color
+}
+
+/**
+ * FLF-364: đoạn có kiểu chữ hướng dẫn — mọi run có chữ in nghiêng, tô nền hoặc khác màu thân bài (`bodyColor`, màu chiếm
+ * nhiều chữ nhất của thân bài).
+ */
+const guidanceFormat = (p: Element, chain: StyleInfo[], bodyColor: string | null): boolean => {
+  const runs = visibleRuns(p).filter((r) => runText(r).trim())
+  if (!runs.length) return false
+  const styleItalic = chain.find((s) => s.italic !== null)?.italic ?? false
+  return runs.every((r) => {
+    const f = runFormat(wKid(r, "rPr"))
+    const color = runColor(r, chain)
+    return (f.italic ?? styleItalic) || f.highlight === true || (color !== null && color !== bodyColor)
+  })
 }
 
 const readStyles = (styles: Document | null): Map<string, StyleInfo> => {
@@ -497,6 +547,8 @@ interface PreScan {
   handToc: Set<Element>
   defaultSize: number
   bodySize: number
+  /** FLF-364: màu chữ thân bài (`null` = mặc định / đen). */
+  bodyColor: string | null
   sizeLevels: Map<number, number>
   numbering: NumberingInfo
 }
@@ -533,6 +585,7 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
   const entries: TocEntry[] = []
   const handToc = new Set<Element>()
   const weights = new Map<number, number>()
+  const colors = new Map<string, number>()
   const candidates: { size: number; titleStyle: boolean; idx: number }[] = []
   const runs: { lines: { p: Element; text: string }[]; afterTitle: boolean; end: number }[] = []
   const laterKeys: { idx: number; key: string }[] = []
@@ -571,6 +624,10 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     }
     const fmt = paragraphFormat(p, chain, defaultSize)
     weights.set(fmt.size, (weights.get(fmt.size) ?? 0) + text.length)
+    for (const r of visibleRuns(p)) {
+      const color = runColor(r, chain) ?? ""
+      colors.set(color, (colors.get(color) ?? 0) + runText(r).trim().length)
+    }
     if (headingLike(text)) candidates.push({ size: fmt.size, titleStyle: isTitleStyle(chain), idx })
   })
   flush(paras.length)
@@ -584,13 +641,14 @@ const preScan = (body: Element, styles: Map<string, StyleInfo>, stylesDoc: Docum
     bodyStart = bodyStart === null ? r.end - r.lines.length : Math.min(bodyStart, r.end - r.lines.length)
   }
   const bodySize = [...weights].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? defaultSize
+  const bodyColor = [...colors].sort((a, b) => b[1] - a[1])[0]?.[0] || null
   const counts = new Map<number, number>()
   for (const c of candidates) {
     if (c.idx < (bodyStart ?? 0)) continue
     if (c.size >= bodySize + LARGE_DELTA || (c.titleStyle && c.size >= bodySize)) counts.set(c.size, (counts.get(c.size) ?? 0) + 1)
   }
   const large = [...counts].filter(([, n]) => n >= 2).map(([size]) => size).sort((a, b) => b - a)
-  return { toc: new TocIndex(entries), handToc, defaultSize, bodySize, sizeLevels: new Map(large.map((size, i) => [size, Math.min(9, i + 1)])), numbering }
+  return { toc: new TocIndex(entries), handToc, defaultSize, bodySize, bodyColor, sizeLevels: new Map(large.map((size, i) => [size, Math.min(9, i + 1)])), numbering }
 }
 
 export const parseBlocks = (
@@ -799,7 +857,8 @@ export const parseBlocks = (
             ...(labels.has(p) && !typedNumber(text) ? { number_label: labels.get(p)! } : {})
           }
         : {}
-    push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra })
+    const formatExtra = kind !== "heading" && guidanceFormat(p, chain, pre.bodyColor) ? { guidance_format: true } : {}
+    push({ ...base, kind, level, heading_detector: detector, bookmark, editable: !embedded && !hasField(p), ...headingExtra, ...formatExtra })
     if (kind === "heading" && level !== null) headingStack.push({ level, text: text.trim() })
   }
 
