@@ -19,7 +19,7 @@ import type { ParsedBlock } from "./parse.service.js"
 import { PROVISIONAL_SECTION, isContentSection, provisionalFeatureId, provisionalFunctionId } from "./section-catalog.js"
 import { TABLE_ENTITIES, matchTable } from "./table-header-dictionary.js"
 import { SLOT_SUGGESTION_CONFIDENCE, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
-import { isInstructionText } from "../../shared/utils/instruction-text.js"
+import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
 import { PART_BANK, isWeakTitle, partById, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
 import { foldText, foldTokens, splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
@@ -503,32 +503,73 @@ const withContentSignals = (blocks: readonly ProfileBlock[], entries: HeadingMap
   })
 }
 
-/** Độ dài tối đa của chữ hướng dẫn giữ cho mỗi heading. */
-export const MAX_GUIDANCE_CHARS = 400
+/** Độ dài tối đa của chữ hướng dẫn giữ cho mỗi heading (FLF-364: giữ nguyên văn — trước đây cắt ở 400). */
+export const MAX_GUIDANCE_CHARS = 4000
+
+/** Chữ hướng dẫn của mẫu dưới một heading (FLF-364). */
+export interface HeadingGuidance {
+  text: string
+  /** `brackets`: chữ trong `[ ]` / `{ }`; `brackets+format`: thêm kiểu chữ hướng dẫn (màu / nghiêng / tô nền). */
+  by: "brackets" | "brackets+format"
+  /** Block chứa chữ hướng dẫn (đoạn, gạch đầu dòng, bảng). */
+  blocks: string[]
+}
+
+const capGuidance = (text: string): string =>
+  text.length > MAX_GUIDANCE_CHARS ? `${text.slice(0, MAX_GUIDANCE_CHARS - 1).trimEnd()}…` : text
 
 /**
- * Chữ hướng dẫn của mẫu dưới từng heading (business-flow 1.3 "detect guidance text"): các đoạn / gạch đầu dòng trước heading
- * kế tiếp mà là chữ hướng dẫn (`[…]`, "This section describes…"), bỏ ngoặc vuông bao ngoài, nối lại, cắt độ dài.
+ * Chữ hướng dẫn của mẫu dưới từng heading (business-flow 1.3 "detect guidance text"; FLF-364): mọi chữ trong `[ ]` / `{ }`
+ * của các đoạn / gạch đầu dòng / ô bảng trước heading kế tiếp — cả đoạn ngoặc nằm trong câu có chữ thật — bỏ ngoặc, nối lại
+ * nguyên văn (trần 4 000 ký tự). Màu / nghiêng chỉ ghi vào `by`, không tự thành hướng dẫn.
  */
-export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, string> => {
-  const out = new Map<string, string>()
+export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, HeadingGuidance> => {
+  const out = new Map<string, HeadingGuidance>()
   let heading: string | null = null
   let parts: string[] = []
+  let ids: string[] = []
+  let formatted = false
   const flush = () => {
     if (!heading || !parts.length) return
     const text = parts.join(" ").replace(/\s+/g, " ").trim()
-    out.set(heading, text.length > MAX_GUIDANCE_CHARS ? `${text.slice(0, MAX_GUIDANCE_CHARS - 1).trimEnd()}…` : text)
+    if (text) out.set(heading, { text: capGuidance(text), by: formatted ? "brackets+format" : "brackets", blocks: [...new Set(ids)] })
   }
   for (const b of blocks) {
     if (b.kind === "heading" && b.level !== null) {
       flush()
       heading = b.block_id
       parts = []
-    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && isInstructionText(b.text)) {
-      parts.push(b.text.trim().replace(/^\[([\s\S]*)\]$/, "$1").trim())
+      ids = []
+      formatted = false
+      continue
     }
+    if (!heading) continue
+    const texts = b.kind === "paragraph" || b.kind === "list_item" ? [b.text] : b.kind === "table" ? (b.rows ?? []).flat() : []
+    const found = texts.flatMap((t) => splitInstruction(t).guidance).filter(Boolean)
+    if (!found.length) continue
+    parts.push(...found)
+    ids.push(b.block_id)
+    if (b.guidance_format) formatted = true
   }
   flush()
+  return out
+}
+
+/**
+ * FLF-364: chữ hướng dẫn trong từng cột bảng (ô dưới hàng tiêu đề nằm trọn trong `[ ]` / `{ }` — "[Tên tác nhân]",
+ * "{mô tả vai trò}") ⇒ `table_map[].guidance` của cột đó.
+ */
+const columnGuidance = (blocks: readonly ProfileBlock[]): Map<string, string> => {
+  const out = new Map<string, string>()
+  for (const b of blocks) {
+    if (b.kind !== "table" || !b.rows?.length) continue
+    const width = Math.max(...b.rows.map((r) => r.length))
+    for (let c = 0; c < width; c++) {
+      const cells = b.rows.slice(1).map((r) => r[c] ?? "").filter((t) => isInstructionText(t))
+      const text = [...new Set(cells.flatMap((t) => splitInstruction(t).guidance))].join(" ").trim()
+      if (text) out.set(`${b.block_id}#${c}`, capGuidance(text))
+    }
+  }
   return out
 }
 
@@ -539,13 +580,19 @@ export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
   const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
   const heading_map = withContentSignals(blocks, matched.entries).map((h) => ({
     ...h,
-    ...(guidance.has(h.block_id) ? { guidance: guidance.get(h.block_id)! } : {}),
+    ...(guidance.has(h.block_id)
+      ? { guidance: guidance.get(h.block_id)!.text, guidance_by: guidance.get(h.block_id)!.by, guidance_blocks: guidance.get(h.block_id)!.blocks }
+      : {}),
     ...(labels.has(h.block_id) ? { number_label: labels.get(h.block_id)! } : {})
   }))
   const sections = assignBlockSections(blocks, heading_map)
+  const columns = columnGuidance(blocks)
   return {
     heading_map,
-    table_map: matchTables(blocks, sections),
+    table_map: matchTables(blocks, sections).map((t) => {
+      const g = columns.get(`${t.block_id}#${t.column_index}`)
+      return g ? { ...t, guidance: g } : t
+    }),
     language: detectLanguage(blocks),
     template_family
   }

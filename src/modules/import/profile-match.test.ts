@@ -5,6 +5,7 @@ import {
   autoConfirmMapping,
   detectorCap,
   detectTemplateFamily,
+  guidanceByHeading,
   matchHeadings,
   matchProfile,
   matchTables,
@@ -567,6 +568,47 @@ describe("FLF-363 — nội dung dưới heading (D1–D2)", () => {
   it("nội dung khớp mục theo tên (bảng use case dưới Use Case Diagram) ⇒ giữ nguyên", () => {
     const map = byId([heading(1, 1, "Use Case Diagram"), table(2, [["Use Case ID", "Use Case Name", "Actor"], ["UC-01", "Login", "User"]])])
     expect(map.B0001).toMatchObject({ section_id: "fixed:2.2.1", confidence: 1 })
+  })
+})
+
+describe("FLF-364 — chữ hướng dẫn của mẫu trong [ ] / { }", () => {
+  const block = (n: number, kind: ProfileBlock["kind"], text: string, extra: Partial<ProfileBlock> = {}): ProfileBlock => ({
+    block_id: `B${String(n).padStart(4, "0")}`,
+    kind,
+    level: null,
+    text,
+    ...extra
+  })
+
+  it("giữ nguyên văn (không cắt 400), gồm đoạn ngoặc trong câu và ô bảng; ghi nguồn + block; ( ) và câu mô tả là nội dung", () => {
+    const long = `[${"Mô tả chi tiết phạm vi. ".repeat(40).trim()}]`
+    const blocks: ProfileBlock[] = [
+      heading(1, 1, "Product Scope"),
+      block(2, "paragraph", long, { guidance_format: true }),
+      block(3, "paragraph", "Hệ thống quản lý học sinh {ghi rõ trường áp dụng}."),
+      block(4, "paragraph", "This section describes the scope (phiên bản 1)."),
+      heading(5, 1, "Actors"),
+      block(6, "table", "", { rows: [["Actor", "Description"], ["[Tên tác nhân]", "[Vai trò của tác nhân]"]] })
+    ]
+    const g = guidanceByHeading(blocks)
+    expect(g.get("B0001")?.text.length).toBeGreaterThan(400)
+    expect(g.get("B0001")?.text).toContain("ghi rõ trường áp dụng")
+    expect(g.get("B0001")?.text).not.toContain("This section describes")
+    expect(g.get("B0001")).toMatchObject({ by: "brackets+format", blocks: ["B0002", "B0003"] })
+    expect(g.get("B0005")).toMatchObject({ text: "Tên tác nhân Vai trò của tác nhân", by: "brackets", blocks: ["B0006"] })
+
+    const profile = matchProfile(blocks)
+    const scope = profile.heading_map.find((h) => h.block_id === "B0001")!
+    expect(scope).toMatchObject({ guidance_by: "brackets+format", guidance_blocks: ["B0002", "B0003"] })
+    expect(profile.table_map.filter((t) => t.block_id === "B0006").map((t) => [t.header, t.guidance])).toEqual([
+      ["Actor", "Tên tác nhân"],
+      ["Description", "Vai trò của tác nhân"]
+    ])
+  })
+
+  it("kiểu chữ hướng dẫn mà không có ngoặc ⇒ không phải hướng dẫn (màu không tự quyết)", () => {
+    const g = guidanceByHeading([heading(1, 1, "Purpose"), block(2, "paragraph", "Tài liệu dành cho giáo viên.", { guidance_format: true })])
+    expect(g.has("B0001")).toBe(false)
   })
 })
 

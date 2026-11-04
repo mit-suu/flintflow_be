@@ -118,6 +118,9 @@ export const headingMapEntrySchema = z.object({
   content_mismatch: z.object({ by_title: z.string(), by_content: z.string() }).optional(),
   /** FLF-278 trên FLF-336: chữ hướng dẫn của mẫu dưới heading (business-flow 1.5) — chỉ để BA xem, không phải nội dung. */
   guidance: z.string().optional(),
+  /** FLF-364: nguồn của `guidance` (chữ trong ngoặc, có / không kèm kiểu chữ hướng dẫn) và block chứa nó. */
+  guidance_by: z.enum(["brackets", "brackets+format"]).optional(),
+  guidance_blocks: z.array(z.string()).optional(),
   /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`; hiển thị = nhãn + tiêu đề. */
   number_label: z.string().optional()
 })
@@ -137,7 +140,9 @@ export const tableMapEntrySchema = z.object({
   /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
   role: z.string().optional(),
   /** FLF-252: tối đa 3 giá trị đầu của cột. */
-  samples: z.array(z.string()).optional()
+  samples: z.array(z.string()).optional(),
+  /** FLF-364: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc — chỉ để xem, không phải nội dung. */
+  guidance: z.string().optional()
 })
 
 /**
