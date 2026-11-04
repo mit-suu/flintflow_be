@@ -76,7 +76,7 @@ export const SRS_DETECT_CONFIG = {
   /** Văn xuôi không cấu trúc chỉ bị coi là `not_srs` khi đủ dài (số khối chữ và số từ); ngắn hơn ⇒ `unknown`. */
   proseMinBlocks: 8,
   proseMinWords: 80,
-  /** Chữ hướng dẫn của mẫu: trong ngoặc, hoặc câu "Mục này mô tả…" / "This section describes…" (business-flow §3.1.1 lớp 3). */
+  /** Chữ hướng dẫn của mẫu: trọn đoạn trong `[ ]` / `{ }` (FLF-364; business-flow §3.1.1 lớp 3). */
   instructionPatterns: INSTRUCTION_PATTERNS
 } as const
 
