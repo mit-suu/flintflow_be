@@ -159,13 +159,14 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
   },
   { target: "group:5", titles: ["Appendixes", "Appendices", "Appendix", "Phụ lục"] },
   // Chỉ có ở IEEE — giữ nguyên văn
-  { id: "part:ieee:references", target: "keep", titles: ["References", "Tài liệu tham khảo"] },
+  // FLF-365: References / Apportioning / Verification có chỗ riêng trong Spine (phần nhỏ, không mục FPT cha)
+  { id: "part:ieee:references", target: "slot:references", titles: ["References", "Tài liệu tham khảo"] },
   { id: "part:ieee:doc_overview", target: "keep", titles: ["Document Overview", "Tổng quan tài liệu"] },
   // "Overview" dưới Introduction là tổng quan tài liệu (IEEE 830 §1.5); đứng riêng là tổng quan sản phẩm (FPT)
   { id: "part:ieee:doc_overview_in_intro", target: "keep", titles: ["Overview"], parents: ["part:fixed:1"] },
   { id: "part:ieee:conventions", target: "keep", titles: ["Document Conventions", "Quy ước tài liệu"] },
   { id: "part:ieee:audience", target: "keep", titles: ["Intended Audience and Reading Suggestions", "Intended Audience", "Đối tượng đọc"] },
-  { id: "part:ieee:apportioning", target: "keep", titles: ["Apportioning of Requirements", "Phân bổ yêu cầu"] },
+  { id: "part:ieee:apportioning", target: "slot:apportioning", titles: ["Apportioning of Requirements", "Phân bổ yêu cầu"] },
   { id: "part:ieee:requirements", target: "keep", titles: ["Requirements", "Specific Requirements", "Yêu cầu", "Yêu cầu cụ thể"] },
   // IEEE 830: "3.2 Functional Requirements" / "3.2 Specific requirements" (rút gọn) nằm trong "3 Specific Requirements" là một
   // tính năng — bảng FR ngay dưới thành chức năng của nó; chứa mục "Classes for classification" thì chỉ là heading
@@ -175,7 +176,7 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
     titles: ["Specific Requirements", "Yêu cầu cụ thể", "Functional Requirements", "Yêu cầu chức năng"],
     parents: ["part:ieee:requirements"]
   },
-  { id: "part:ieee:verification", target: "keep", titles: ["Verification", "Kiểm chứng"] },
+  { id: "part:ieee:verification", target: "slot:verification", titles: ["Verification", "Kiểm chứng"] },
   // Tên tài liệu dùng làm heading (FPT "II. Software Requirement Specification") — chỉ là heading, giữ nguyên văn
   {
     id: "part:doc_title",
@@ -251,10 +252,13 @@ export const partById = (id: string): PartDef | undefined => PART_BANK.find((p) 
 
 /**
  * Skill nội dung sinh / bổ sung đúng phần (plan §2.4, cột "Skill sinh") — cho mục giữ nguyên văn của file (`custom:*`, không
- * có step sở hữu) mà heading khớp một phần của ngân hàng. Theo đích; phần chỉ có ở IEEE theo id. References, Apportioning,
- * Verification chưa có skill (FLF-365).
+ * có step sở hữu) mà heading khớp một phần của ngân hàng. Theo đích; phần chỉ có ở IEEE theo id. FLF-365: References,
+ * Apportioning, Verification có skill riêng.
  */
 const SKILL_BY_TARGET: readonly [RegExp, string][] = [
+  [/^slot:references$/, "references-list"],
+  [/^slot:apportioning$/, "requirement-apportioning"],
+  [/^slot:verification$/, "verification-matrix"],
   [/^(fixed:1|slot:(vision|goals|scope|context|platforms))$/, "product-overview"],
   [/^slot:high_rules$/, "high-level-rules"],
   [/^(fixed:2\.|group:2)/, "actors-and-usecases"],
@@ -301,6 +305,9 @@ const EXPECTED_CONTENT: readonly [RegExp, string][] = [
 ]
 
 export const expectedContentOf = (sectionId: string): string | null => EXPECTED_CONTENT.find(([re]) => re.test(sectionId))?.[1] ?? null
+
+/** Skill theo mục (phần nhỏ / mục FPT) — vị trí CR ở phần nhỏ không có step sở hữu (FLF-365: `slot:references`…). */
+export const skillOfSection = (sectionId: string): string | null => SKILL_BY_TARGET.find(([re]) => re.test(sectionId))?.[1] ?? null
 
 export const skillOfPart = (part: PartDef): string | null =>
   SKILL_BY_PART[part.id] ?? SKILL_BY_TARGET.find(([re]) => re.test(part.slot ?? part.target))?.[1] ?? null

@@ -235,6 +235,7 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
   const resolveEntity = resolver("entities", entityPool)
   const resolveRule = resolver("business_rules", pool("business_rules", spine.business_rules as { id: string }[]))
   const resolveFunction = resolver("functions", pool("functions", spine.functions))
+  const resolveNfr = resolver("nfrs", pool("nfrs", spine.nfrs as { id: string }[]))
   const featurePool = pool("features", spine.features)
   const resolveFeature = resolver("features", featurePool)
 
@@ -449,6 +450,34 @@ export const buildImportOps = (spine: Spine, entities: BuiltEntity[], dropped: D
       term: str(g.value.term ?? g.value.name) || g.id,
       ...(native ? { term_native: native } : {}),
       definition: str(g.value.definition ?? g.value.description)
+    })
+  }
+  // FLF-365: tài liệu tham khảo / ma trận kiểm chứng của mẫu IEEE 29148
+  for (const r of of("references").filter(skip(spine.references ?? []))) {
+    const opt = (k: string) => (str(r.value[k]) ? { [k]: str(r.value[k]) } : {})
+    add("references", {
+      id: r.id,
+      title: str(r.value.title ?? r.value.name) || r.id,
+      ...opt("owner"),
+      ...opt("version"),
+      ...opt("date"),
+      ...opt("location"),
+      kind: oneOf(r.value.kind, ["normative", "informative"], "informative")
+    })
+  }
+  for (const v of of("verifications").filter(skip(spine.verifications ?? []))) {
+    const raw = str(v.value.requirement_id)
+    if (!raw) continue
+    // Mã yêu cầu như trong file ⇒ id Spine (chức năng / NFR / quy tắc / use case); không ra ⇒ giữ mã, luật verification_orphan báo
+    const requirement = resolveFunction(raw) ?? resolveNfr(raw) ?? resolveRule(raw) ?? resolveUseCase(raw) ?? raw
+    const opt = (k: string) => (str(v.value[k]) ? { [k]: str(v.value[k]) } : {})
+    add("verifications", {
+      id: v.id,
+      requirement_id: requirement,
+      method: oneOf(v.value.method, ["test", "analysis", "inspection", "demonstration", "other"], "other"),
+      ...opt("artifact"),
+      ...opt("status"),
+      ...opt("evidence")
     })
   }
   // Màn chưa có function nào ⇒ placeholder: workspace không mở vòng S-5 rỗng cho nó (FLF-183, mode 1 v2)

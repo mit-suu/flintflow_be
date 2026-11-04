@@ -342,7 +342,7 @@ describe("mẫu IEEE 830 + D6 (FLF-183) — FLF-363 khớp theo ngân hàng ph�
     const map = mapOf(blocks)
     const at = (t: string) => [map[t].section_id, map[t].confidence]
     expect(at("1.3. Definitions, acronyms & abbreviations")).toEqual(["fixed:5.5", 1])
-    expect(at("1.4. References")).toEqual(["unmapped", 1])
+    expect(at("1.4. References")).toEqual(["slot:references", 1])
     expect(map["1.4. References"].template_section).toBe("part:ieee:references")
     expect(at("2.1.3. Hardware interfaces")).toEqual(["fixed:4.1", 1])
     expect(at("2.3. User characteristics")).toEqual(["fixed:2.1", 1])
@@ -460,13 +460,13 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
     expect(sections(rows)).toMatchObject({
       "Document Purpose": "fixed:1",
       "Definitions, Acronyms and Abbreviations": "fixed:5.5",
-      References: "unmapped",
+      References: "slot:references",
       "Document Overview": "unmapped",
       "Product Functions": "fixed:2.2.1",
       "Product Constraints": "fixed:4.2.4",
       "User Characteristics": "fixed:2.1",
       "Assumptions and Dependencies": "fixed:5.4",
-      "Apportioning of Requirements": "unmapped",
+      "Apportioning of Requirements": "slot:apportioning",
       Requirements: "unmapped",
       "External Interfaces": "fixed:4.1",
       "User Interfaces": "fixed:3.1.2",
@@ -481,7 +481,7 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
       Installation: "fixed:5.4",
       Maintainability: "fixed:4.2.4",
       "Logical Database Requirements": "fixed:3.1.5",
-      Verification: "unmapped",
+      Verification: "slot:verification",
       Appendixes: "group:5"
     })
   })
@@ -497,7 +497,7 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
     expect(sections(rows)).toMatchObject({
       "Record of Changes": "fixed:I",
       "Document Purpose": "fixed:1",
-      References: "unmapped",
+      References: "slot:references",
       Actors: "fixed:2.1",
       "Use Case Descriptions": "fixed:2.2.2",
       "Screen Authorization": "fixed:3.1.3",
@@ -505,7 +505,7 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
       "Quality of Service": "group:4.2",
       Observability: "fixed:4.2.4",
       Availability: "fixed:4.2.2",
-      Verification: "unmapped"
+      Verification: "slot:verification"
     })
   })
 
@@ -684,7 +684,7 @@ describe("FLF-364 — nhận phần theo chữ hướng dẫn (sau tên, trướ
         heading(5, 1, "Ghi chú"), para(6, "[Ghi chú tự do]")
       ]).map((h) => [h.heading_text, h])
     )
-    expect(map["Nguồn trích dẫn"]).toMatchObject({ section_id: "unmapped", confidence: 0.7, template_section: "part:ieee:references" })
+    expect(map["Nguồn trích dẫn"]).toMatchObject({ section_id: "slot:references", confidence: 0.7, template_section: "part:ieee:references" })
     expect(map["Kế hoạch đào tạo"].template_section ?? null).toBeNull()
     expect(map["Ghi chú"].template_section ?? null).toBeNull()
   })
