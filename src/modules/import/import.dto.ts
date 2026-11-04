@@ -21,6 +21,7 @@ import {
   STAMP_KINDS
 } from "./import.constants.js"
 import { TEMPLATE_INTENTS } from "../project/project.model.js"
+import { TEMPLATE_FAMILIES } from "./part-bank.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -121,8 +122,8 @@ export const headingMapEntrySchema = z.object({
   number_label: z.string().optional()
 })
 
-/** Họ mẫu của tài liệu upload (FLF-252). */
-export const TEMPLATE_FAMILIES = ["fpt", "ieee830", "ieee_features"] as const
+/** Nhãn họ mẫu của tài liệu upload (FLF-363: `fpt` · `ieee29148` · `mixed`, tính sau khi khớp — chỉ để báo cáo). */
+export { TEMPLATE_FAMILIES }
 
 export const tableMapEntrySchema = z.object({
   block_id: blockId,
