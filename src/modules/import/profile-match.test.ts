@@ -514,6 +514,48 @@ describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
   })
 })
 
+describe("FLF-363 — nội dung dưới heading (D1–D2)", () => {
+  const table = (n: number, rows: string[][]): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "table", level: null, text: "", rows })
+  const para = (n: number, text: string): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "paragraph", level: null, text })
+  const actors = [["Actor", "Description"], ["Student", "Đăng ký môn học"], ["Admin", "Quản trị"]]
+  const byId = (blocks: ProfileBlock[]) => Object.fromEntries(matchProfile(blocks).heading_map.map((h) => [h.block_id, h]))
+
+  it("Product Perspective chứa bảng tác nhân, file không có mục Tác nhân ⇒ vào Tác nhân, độ tin 0.75, ghi content_mismatch", () => {
+    const map = byId([heading(1, 1, "Introduction"), heading(2, 2, "Product Perspective"), table(3, actors), heading(4, 1, "Glossary")])
+    expect(map.B0002).toMatchObject({
+      section_id: "fixed:2.1",
+      confidence: 0.75,
+      content_mismatch: { by_title: "fixed:1", by_content: "fixed:2.1" }
+    })
+  })
+
+  it("file đã có mục Tác nhân ⇒ bảng tác nhân trong Product Perspective chỉ là ngữ cảnh, không đổi", () => {
+    const map = byId([heading(1, 1, "Product Perspective"), table(2, actors), heading(3, 1, "Actors"), table(4, actors)])
+    expect(map.B0001).toMatchObject({ section_id: "fixed:1", confidence: 1 })
+    expect(map.B0001.content_mismatch).toBeUndefined()
+  })
+
+  it("bảng chỉ có Name / Description không đủ để đổi mục", () => {
+    const map = byId([heading(1, 1, "Product Perspective"), table(2, [["Name", "Description"], ["Payment gateway", "VNPay"]])])
+    expect(map.B0001.section_id).toBe("fixed:1")
+  })
+
+  it("heading không khớp tên mà nội dung rõ (bảng thuật ngữ, mã BR) ⇒ đề xuất mục đó, độ tin 0.75, không content_mismatch", () => {
+    const map = byId([
+      heading(1, 1, "Words we use"), table(2, [["Term", "Definition"], ["SRS", "Software Requirements Specification"]]),
+      heading(3, 1, "Team notes"), para(4, "BR-01: Học viên chỉ đăng ký tối đa 5 môn."), para(5, "BR-02: Hạn đăng ký là thứ Sáu.")
+    ])
+    expect(map.B0001).toMatchObject({ section_id: "fixed:5.5", confidence: 0.75 })
+    expect(map.B0003).toMatchObject({ section_id: "fixed:5.1", confidence: 0.75 })
+    expect(map.B0001.content_mismatch).toBeUndefined()
+  })
+
+  it("nội dung khớp mục theo tên (bảng use case dưới Use Case Diagram) ⇒ giữ nguyên", () => {
+    const map = byId([heading(1, 1, "Use Case Diagram"), table(2, [["Use Case ID", "Use Case Name", "Actor"], ["UC-01", "Login", "User"]])])
+    expect(map.B0001).toMatchObject({ section_id: "fixed:2.2.1", confidence: 1 })
+  })
+})
+
 describe("FLF-362 — nhãn số Word đi theo heading_map", () => {
   it("heading có number_label ⇒ heading_map mang number_label, heading_text giữ nguyên chữ; heading không nhãn ⇒ không có field", () => {
     const blocks: ProfileBlock[] = [
