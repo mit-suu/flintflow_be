@@ -167,9 +167,14 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
   { id: "part:ieee:audience", target: "keep", titles: ["Intended Audience and Reading Suggestions", "Intended Audience", "Đối tượng đọc"] },
   { id: "part:ieee:apportioning", target: "keep", titles: ["Apportioning of Requirements", "Phân bổ yêu cầu"] },
   { id: "part:ieee:requirements", target: "keep", titles: ["Requirements", "Specific Requirements", "Yêu cầu", "Yêu cầu cụ thể"] },
-  // IEEE 830 rút gọn: "3.2 Specific requirements" nằm trong "3 Specific Requirements" là một tính năng (mục con là chức năng);
-  // chứa mục "Classes for classification" thì chỉ là heading
-  { id: "part:ieee:specific_feature", target: "feature", titles: ["Specific Requirements", "Yêu cầu cụ thể"], parents: ["part:ieee:requirements"] },
+  // IEEE 830: "3.2 Functional Requirements" / "3.2 Specific requirements" (rút gọn) nằm trong "3 Specific Requirements" là một
+  // tính năng — bảng FR ngay dưới thành chức năng của nó; chứa mục "Classes for classification" thì chỉ là heading
+  {
+    id: "part:ieee:specific_feature",
+    target: "feature",
+    titles: ["Specific Requirements", "Yêu cầu cụ thể", "Functional Requirements", "Yêu cầu chức năng"],
+    parents: ["part:ieee:requirements"]
+  },
   { id: "part:ieee:verification", target: "keep", titles: ["Verification", "Kiểm chứng"] },
   // Tên tài liệu dùng làm heading (FPT "II. Software Requirement Specification") — chỉ là heading, giữ nguyên văn
   {
