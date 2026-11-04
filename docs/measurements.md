@@ -615,3 +615,29 @@ Chi tiết + bảng ablation: `docs/knowledge-rag.md` §5. Tóm tắt:
   xử lý yêu cầu"; lượt 2 trả lời popup ⇒ lô popup "Grade Review Request" mở từ My Grades, 3 validation, quyền, thông báo.
   Ca A (Suspend) lượt 1 hỏi màn riêng hay popup mở từ User Account Management; cảnh báo trùng UC20 hiện ở bản xem trước
   sau khi chọn. Fixture (câu lệnh có "màn hình riêng"): 12/12.
+
+## GET /document — ảnh tải riêng + cache renderer bản dịch (FLF-369, 2026-11-05)
+
+Dự án dev "Outpatient Clinic E2E 31-10" (`6ab9e6fe…`, tài liệu `vi`, Spine gốc `en`): 64 block ảnh (62 PNG thật + 2 placeholder),
+34 use case / 11 hình use case, 539 đơn vị dịch. Mongo Atlas (dev), đo in-process qua `getDocumentWithMeta` đúng như
+controller (`source=draft`), 5 lượt liền nhau mỗi cấu hình — lượt 1 lạnh, 2–5 nóng. Kích thước = `JSON.stringify` của
+`{ data, meta }`. Trước = nhánh đã có bộ xếp use case mới (phase 1), chưa đổi đường ảnh.
+
+| Cấu hình | Lượt lạnh | Nóng (trung vị 2–5) | Kích thước phản hồi | Ảnh base64 |
+| --- | --- | --- | --- | --- |
+| Gốc `en` — trước (nhúng base64) | 12 501 ms | 4 553 ms | 5 353 694 B | 62 |
+| Gốc `en` — ảnh tham chiếu, stat từng file | 2 961 ms | 1 576 ms | 128 838 B | 0 |
+| Gốc `en` — ảnh tham chiếu, một truy vấn metadata | 1 730 ms | 313 ms | 128 838 B | 0 |
+| Dịch `vi` — trước (nhúng base64) | 6 579 ms | 6 368 ms | 5 346 465 B | 62 |
+| Dịch `vi` — ảnh tham chiếu, một truy vấn metadata | 2 569 ms | 2 169 ms | 125 158 B | 0 |
+| Dịch `vi` — + cache renderer trong tiến trình | 2 851 ms | 1 272 ms | 125 158 B | 0 |
+
+Chặng bản dịch (nóng, trước cache renderer): đọc Spine 76 ms · tra bản dịch 160 ms · `localizeSpine` (renderer chạy hai
+lượt gốc + dịch) ~830 ms. Cache renderer khoá theo hash toàn bộ đầu vào (Spine + kind + chủ + bộ nhãn + RenderContext),
+LRU 64 mục.
+
+So nội dung: chữ giống hệt (bỏ `generatedAt`), 62/62 ảnh tham chiếu đọc qua `GET /document/image` ra đúng PNG đã nhúng,
+2 placeholder giữ nguyên — cả `en` lẫn `vi`. Export Word/PDF và comment vẫn nhúng (không đổi).
+
+Ghi chú cho tự bám bản mới (phase 4 FE): một lượt tải lại tài liệu dịch nóng ~1.3 s ⇒ giữ khoảng tối thiểu 10 s giữa hai
+lần tự áp như plan; `/version` chỉ 2–3 truy vấn nhỏ.

@@ -21,6 +21,12 @@ export interface ISpineTranslation extends Document {
   text: string | string[]
   origin: TranslationOrigin
   createdAt: Date
+  /**
+   * Lần cuối nội dung bản dịch đổi (chèn mới hoặc ghi đè bản `author`) — FLF-369: `GET /projects/:id/version` lấy max theo
+   * (dự án, ngôn ngữ) làm revision lớp dịch, để tab khác biết có bản dịch mới (bản dịch không tăng `spine_version`).
+   * Bản ghi trước FLF-369 không có — không cần migrate: client chỉ so sự thay đổi của revision.
+   */
+  updatedAt?: Date
 }
 
 const isTranslationText = (value: unknown): boolean =>
@@ -38,11 +44,13 @@ const spineTranslationSchema = new Schema<ISpineTranslation>(
       validate: { validator: isTranslationText, message: "Bản dịch phải là chuỗi hoặc mảng chuỗi" }
     },
     origin: { type: String, enum: TRANSLATION_ORIGINS, required: true },
-    createdAt: { type: Date, default: () => new Date() }
+    createdAt: { type: Date, default: () => new Date() },
+    updatedAt: { type: Date }
   },
   { strict: true }
 )
 
 spineTranslationSchema.index({ projectId: 1, locale: 1, sourceHash: 1 }, { unique: true })
+spineTranslationSchema.index({ projectId: 1, locale: 1, updatedAt: -1 })
 
 export const SpineTranslation = mongoose.model<ISpineTranslation>("SpineTranslation", spineTranslationSchema)

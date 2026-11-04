@@ -14,6 +14,16 @@ export type DiagramFileFormat = "svg" | "png"
 export interface StoredDiagramFile {
   data: Buffer
   contentType: string
+  /**
+   * Dấu phiên bản của file đã lưu (chỉ có khi đọc ra): đổi mỗi lần file được ghi lại — kể cả vẽ ép ra đúng bytes cũ.
+   * Ảnh dạng tham chiếu của GET /document lấy hash từ đây, không cần tải bytes (FLF-369).
+   */
+  version?: string
+}
+
+/** Metadata của file đã lưu, không kèm bytes. */
+export interface DiagramFileStat {
+  version: string
 }
 
 export interface DiagramFileStore {
@@ -24,6 +34,14 @@ export interface DiagramFileStore {
   /** PNG theo ngôn ngữ của một nguồn sơ đồ đã dịch (N1); dọn bản cũ, giữ `LOCALIZED_VERSIONS_KEPT` bản. */
   saveLocalized(projectId: string, diagramId: string, locale: string, hash: string, file: StoredDiagramFile): Promise<void>
   loadLocalized(projectId: string, diagramId: string, locale: string, hash: string): Promise<StoredDiagramFile | null>
+  /** Chỉ metadata (không tải bytes) — `null` khi chưa có file. */
+  stat(projectId: string, diagramId: string, format: DiagramFileFormat): Promise<DiagramFileStat | null>
+  statLocalized(projectId: string, diagramId: string, locale: string, hash: string): Promise<DiagramFileStat | null>
+  /**
+   * Metadata mọi PNG của dự án trong MỘT truy vấn: tên file tương đối (`<id>.png`, `<id>.<locale>.<hash>.png`) ⇒ stat.
+   * Dùng cho GET /document dạng tham chiếu — 60 ảnh là 60 lượt hỏi DB nếu stat từng file.
+   */
+  statAllPng(projectId: string): Promise<Map<string, DiagramFileStat>>
 }
 
 export const DIAGRAM_FILE_FORMATS: readonly DiagramFileFormat[] = ["svg", "png"]
@@ -72,8 +90,18 @@ const upload = (b: Bucket, filename: string, metadata: Record<string, unknown>, 
     stream.end(data)
   })
 
+type GridFile = { _id: unknown; length: number }
+const fileVersion = (file: GridFile): string => `${String(file._id)}:${file.length}`
+
+const latestFile = async (b: Bucket, filename: string) => (await b.find({ filename }).sort({ uploadDate: -1, _id: -1 }).limit(1).toArray())[0]
+
+const statFile = async (b: Bucket, filename: string): Promise<DiagramFileStat | null> => {
+  const latest = await latestFile(b, filename)
+  return latest ? { version: fileVersion(latest) } : null
+}
+
 const download = async (b: Bucket, filename: string, fallbackType: string): Promise<StoredDiagramFile | null> => {
-  const [latest] = await b.find({ filename }).sort({ uploadDate: -1, _id: -1 }).limit(1).toArray()
+  const latest = await latestFile(b, filename)
   if (!latest) return null
 
   const chunks: Buffer[] = []
@@ -84,7 +112,7 @@ const download = async (b: Bucket, filename: string, fallbackType: string): Prom
       .once("error", reject)
   })
   const stored: unknown = latest.metadata?.contentType
-  return { data: Buffer.concat(chunks), contentType: typeof stored === "string" ? stored : fallbackType }
+  return { data: Buffer.concat(chunks), contentType: typeof stored === "string" ? stored : fallbackType, version: fileVersion(latest) }
 }
 
 /** Tên file cần xoá để mỗi (sơ đồ, ngôn ngữ) còn `kept` tên mới nhất (mới ⇒ cũ); bản trùng tên cũ hơn cũng xoá. */
@@ -129,19 +157,57 @@ export const gridFsDiagramStore: DiagramFileStore = {
 
   async loadLocalized(projectId, diagramId, locale, hash) {
     return download(bucket(), localizedDiagramFileName(projectId, diagramId, locale, hash), CONTENT_TYPES.png)
+  },
+
+  async stat(projectId, diagramId, format) {
+    return statFile(bucket(), diagramFileName(projectId, diagramId, format))
+  },
+
+  async statLocalized(projectId, diagramId, locale, hash) {
+    return statFile(bucket(), localizedDiagramFileName(projectId, diagramId, locale, hash))
+  },
+
+  async statAllPng(projectId) {
+    const prefix = `${projectId}/`
+    // Cũ trước, mới sau ⇒ bản mới nhất của cùng tên ghi đè
+    const files = await bucket()
+      .find({ filename: new RegExp(`^${escapeRegExp(prefix)}[^/]+\\.png$`) }, { projection: { filename: 1, length: 1, uploadDate: 1 } })
+      .sort({ uploadDate: 1, _id: 1 })
+      .toArray()
+    return new Map(files.map((f) => [f.filename.slice(prefix.length), { version: fileVersion(f) }]))
   }
 }
 
 /** Store trong bộ nhớ — cho test và chạy thử không có Mongo. */
 export const createMemoryDiagramStore = (): DiagramFileStore & { files: Map<string, StoredDiagramFile> } => {
   const files = new Map<string, StoredDiagramFile>()
+  let writes = 0
+  const put = (filename: string, file: StoredDiagramFile): void => {
+    files.set(filename, { data: Buffer.from(file.data), contentType: file.contentType, version: `mem${++writes}:${file.data.length}` })
+  }
+  const stat = (filename: string): DiagramFileStat | null => {
+    const file = files.get(filename)
+    return file ? { version: file.version! } : null
+  }
   return {
     files,
     async save(projectId, diagramId, format, file) {
-      files.set(diagramFileName(projectId, diagramId, format), { data: Buffer.from(file.data), contentType: file.contentType })
+      put(diagramFileName(projectId, diagramId, format), file)
     },
     async load(projectId, diagramId, format) {
       return files.get(diagramFileName(projectId, diagramId, format)) ?? null
+    },
+    async stat(projectId, diagramId, format) {
+      return stat(diagramFileName(projectId, diagramId, format))
+    },
+    async statLocalized(projectId, diagramId, locale, hash) {
+      return stat(localizedDiagramFileName(projectId, diagramId, locale, hash))
+    },
+    async statAllPng(projectId) {
+      const prefix = `${projectId}/`
+      return new Map(
+        [...files].filter(([name]) => name.startsWith(prefix) && name.endsWith(".png")).map(([name, file]) => [name.slice(prefix.length), { version: file.version! }])
+      )
     },
     async remove(projectId, diagramId) {
       for (const format of DIAGRAM_FILE_FORMATS) files.delete(diagramFileName(projectId, diagramId, format))
@@ -152,7 +218,7 @@ export const createMemoryDiagramStore = (): DiagramFileStore & { files: Map<stri
       const filename = localizedDiagramFileName(projectId, diagramId, locale, hash)
       // Map giữ thứ tự chèn: xoá rồi chèn lại ⇒ bản vừa lưu là mới nhất
       files.delete(filename)
-      files.set(filename, { data: Buffer.from(file.data), contentType: file.contentType })
+      put(filename, file)
       const pattern = localizedNamePattern(projectId, diagramId, locale)
       const newestFirst = [...files.keys()].filter((name) => pattern.test(name)).reverse().map((filename) => ({ filename }))
       for (const { filename: old } of outdated(newestFirst, LOCALIZED_VERSIONS_KEPT)) files.delete(old)

@@ -8,7 +8,7 @@ import { titleCase } from "../diagram/renderers/context.renderer.js"
 import { svgTitleOf } from "../diagram/renderers/common.js"
 import { translationUnits, type TranslationUnit, type UnitValue } from "../translation/translation-units.js"
 import { localizeSpine, localizedDiagramSources, renderView } from "./localized-spine.js"
-import { matchingPart } from "./localized-diagrams.js"
+import { _clearRenderCache, matchingPart } from "./localized-diagrams.js"
 import type { RenderedPart } from "../diagram/renderers/common.js"
 
 const fixture = (): Spine =>
@@ -176,5 +176,29 @@ describe("matchingPart — ghép phần bản dịch với phần gốc theo t�
     expect(matchingPart(before, after, 0)).toBeUndefined()
     expect(matchingPart(before, after, 1)?.source).toBe("b'")
     expect(matchingPart(before, after, 2)?.source).toBe("h'")
+  })
+})
+
+describe("cache renderer trong tiến trình (FLF-369)", () => {
+  it("cùng đầu vào ⇒ cùng nguồn (lượt sau lấy từ cache); chữ dịch khác ⇒ vẽ lại, không trả nhầm kết quả cũ", () => {
+    _clearRenderCache()
+    const { spine } = rendered()
+    const units = translationUnits(spine)
+    const first = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.map((d) => d.source)
+    const again = renderView(localizeSpine(spine, units, translate(units), "vi")).diagrams.map((d) => d.source)
+    expect(again).toEqual(first)
+    const other = new Map([...translate(units)].map(([k, v]) => [k, typeof v === "string" ? v.replace(/^vi: /, "vi2: ") : v]))
+    const changed = renderView(localizeSpine(spine, units, other, "vi"))
+    expect(changed.diagrams.filter((d) => d.kind === "usecase").map((d) => d.source).join("")).toContain(">vi2: ")
+  })
+
+  it("cùng Spine khác RenderContext (ký pháp ERD) ⇒ khoá khác, không lẫn kết quả", () => {
+    _clearRenderCache()
+    const { spine } = rendered()
+    const units = translationUnits(spine)
+    const chen = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "chen" }))
+    const crow = renderView(localizeSpine(spine, units, translate(units), "vi", { erdNotation: "crowsfoot" }))
+    // fixture vẽ ERD theo chen ⇒ bản crowsfoot không khớp nguồn đang lưu ⇒ giữ nguồn gốc; bản chen được dịch
+    expect(chen.diagrams.find((d) => d.kind === "erd")!.source).not.toBe(crow.diagrams.find((d) => d.kind === "erd")!.source)
   })
 })
