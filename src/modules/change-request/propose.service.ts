@@ -20,6 +20,7 @@ import { stripRecord } from "../import/check.service.js"
 import { titleOfSection } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
 import { STEP_SKILLS, parseStepId } from "../pipeline/context-projection.js"
+import { partOfHeading, skillOfPart } from "../import/part-bank.js"
 import { planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -42,9 +43,25 @@ import { proposeUseCaseBatch } from "./add-use-case.service.js"
  */
 export const PROPOSE_BATCH = 4
 
-const ownerSkillText = (ownerStep: string | null): string => {
-  if (!ownerStep) return "(none — free-form section kept verbatim from the uploaded file)"
-  const skillId = STEP_SKILLS[parseStepId(ownerStep).base]
+/** Khoá nhóm vị trí theo skill: step sở hữu, hoặc `skill:<id>` cho mục riêng có heading khớp ngân hàng phần (FLF-363). */
+const SKILL_KEY = "skill:"
+
+/**
+ * FLF-363 (D4): vị trí trong mục giữ nguyên văn của file (`custom:*`, không step sở hữu) mà heading mục khớp một phần của
+ * ngân hàng ("Document Overview", "Sequence Diagrams"…) ⇒ dùng skill của phần đó thay cho "(none)".
+ */
+export const ownerKeyOf = (spine: Pick<Spine, "custom_sections">, loc: Pick<IChangeLocation, "owner_step" | "section_id">): string => {
+  if (loc.owner_step) return loc.owner_step
+  if (!loc.section_id?.startsWith("custom:")) return ""
+  const heading = spine.custom_sections.find((c) => c.id === loc.section_id.slice("custom:".length))?.heading
+  const part = heading ? partOfHeading(heading) : null
+  const skill = part ? skillOfPart(part) : null
+  return skill ? `${SKILL_KEY}${skill}` : ""
+}
+
+export const ownerSkillText = (ownerKey: string | null): string => {
+  if (!ownerKey) return "(none — free-form section kept verbatim from the uploaded file)"
+  const skillId = ownerKey.startsWith(SKILL_KEY) ? ownerKey.slice(SKILL_KEY.length) : STEP_SKILLS[parseStepId(ownerKey).base]
   if (!skillId) return "(none)"
   try {
     return truncate(getSkill(skillId).template, 4000)
@@ -191,7 +208,10 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   // Vị trí sơ đồ gốc (§4.13) không qua AI — kết luận sau khi các vị trí khác có đề xuất (`refreshDiagramLocations`)
   const todo = locations.filter((l) => needsProposal(l) && !isDiagramLocation(l))
   const byOwner = new Map<string, IChangeLocation[]>()
-  for (const l of todo) byOwner.set(l.owner_step ?? "", [...(byOwner.get(l.owner_step ?? "") ?? []), l])
+  for (const l of todo) {
+    const key = ownerKeyOf(spine, l)
+    byOwner.set(key, [...(byOwner.get(key) ?? []), l])
+  }
   for (const [owner, group] of byOwner) {
     const queue: IChangeLocation[][] = []
     for (let i = 0; i < group.length; i += PROPOSE_BATCH) queue.push(group.slice(i, i + PROPOSE_BATCH))
@@ -282,7 +302,7 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
     answers: `${answersText(cr)}
 
 Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner step ${loc.owner_step}` : "free-form section"}): ${instruction}`,
-    owner_skill: ownerSkillText(loc.owner_step),
+    owner_skill: ownerSkillText(ownerKeyOf(spine, loc)),
     target_sections: targetSectionsText(spine, cr, await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path section_id").lean()),
     materials: materialsText(cr),
     missing_info: missingInfoText(cr),

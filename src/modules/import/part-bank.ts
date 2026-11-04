@@ -18,6 +18,7 @@
  */
 
 import { SECTION_CANDIDATES } from "./section-catalog.js"
+import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 
 export type PartOrigin = "fpt" | "ieee"
 
@@ -242,6 +243,49 @@ const buildBank = (): PartDef[] => {
 export const PART_BANK: readonly PartDef[] = Object.freeze(buildBank())
 
 export const partById = (id: string): PartDef | undefined => PART_BANK.find((p) => p.id === id)
+
+/**
+ * Skill nội dung sinh / bổ sung đúng phần (plan §2.4, cột "Skill sinh") — cho mục giữ nguyên văn của file (`custom:*`, không
+ * có step sở hữu) mà heading khớp một phần của ngân hàng. Theo đích; phần chỉ có ở IEEE theo id. References, Apportioning,
+ * Verification chưa có skill (FLF-365).
+ */
+const SKILL_BY_TARGET: readonly [RegExp, string][] = [
+  [/^(fixed:1|slot:(vision|goals|scope|context|platforms))$/, "product-overview"],
+  [/^slot:high_rules$/, "high-level-rules"],
+  [/^(fixed:2\.|group:2)/, "actors-and-usecases"],
+  [/^fixed:3\.1\.[12]$|^group:3\.1$/, "screens-and-flow"],
+  [/^fixed:3\.1\.3$/, "authorization-matrix"],
+  [/^fixed:3\.1\.4$/, "non-screen-functions"],
+  [/^fixed:3\.1\.5$/, "entities-erd"],
+  [/^(fixed:4\.|group:4)/, "nfr-quality-attributes"],
+  [/^fixed:5\.5$/, "glossary"],
+  [/^(fixed:5\.[1-4]|group:5|slot:(assumptions|risks|open_questions|security|localization))$/, "appendix-content"]
+]
+const SKILL_BY_PART: Readonly<Record<string, string>> = {
+  "part:ieee:doc_overview": "product-overview",
+  "part:ieee:doc_overview_in_intro": "product-overview",
+  "part:ieee:conventions": "product-overview",
+  "part:ieee:audience": "product-overview",
+  "part:ieee:sequence": "actors-and-usecases",
+  "part:ieee:specific_feature": "function-detail",
+  "part:ieee:classes": "function-detail",
+  "part:ieee:feature_detail": "function-detail"
+}
+
+export const skillOfPart = (part: PartDef): string | null =>
+  SKILL_BY_PART[part.id] ?? SKILL_BY_TARGET.find(([re]) => re.test(part.slot ?? part.target))?.[1] ?? null
+
+/** Phần của ngân hàng mà một heading khớp chắc theo tên (bỏ số mục) — không xét mục cha; không chắc ⇒ `null`. */
+export const partOfHeading = (heading: string): PartDef | null => {
+  const title = splitHeadingNumber(heading).title
+  let best: { part: PartDef; score: number } | null = null
+  for (const part of PART_BANK) {
+    if (part.parents) continue
+    const score = Math.max(0, ...part.titles.map((t) => titleSimilarity(title, t.text)))
+    if (score >= 0.8 && (!best || score > best.score)) best = { part, score }
+  }
+  return best?.part ?? null
+}
 
 const fold = (t: string) => t.trim().toLowerCase()
 const FPT_TITLES = new Set(SECTION_CANDIDATES.flatMap((c) => c.titles.map(fold)))
