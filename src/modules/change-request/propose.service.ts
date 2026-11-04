@@ -20,7 +20,8 @@ import { stripRecord } from "../import/check.service.js"
 import { titleOfSection } from "../import/gap-report.service.js"
 import { withMeteredAi } from "../import/metered-ai.js"
 import { STEP_SKILLS, parseStepId } from "../pipeline/context-projection.js"
-import { partOfHeading, skillOfPart } from "../import/part-bank.js"
+import { expectedContentOf, partOfHeading, skillOfPart } from "../import/part-bank.js"
+import { TemplateProfile, type HeadingMapEntry, type LayoutEntry } from "../import/template-profile.model.js"
 import { planTransaction } from "../spine/op-engine.js"
 import { userOpSchema, type Op } from "../spine/op.types.js"
 import * as spineRepository from "../spine/spine.repository.js"
@@ -146,11 +147,63 @@ export const locationPromptText = (spine: Spine, l: PromptLocation, seedOps: rea
  * khác nằm ở lô khác). Thiếu dòng này model ở lô "màn hình" / "NFR" tự nhét nội dung mới vào phần tử của mình
  * (2026-09-24: bảng phân quyền rơi vào NFR-07 và thành mục riêng từ vị trí tác nhân).
  */
-export const targetSectionsText = (spine: Spine, cr: Pick<IChangeRequest, "targets">, locations: readonly Pick<IChangeLocation, "path" | "section_id">[]): string => {
-  const sections = cr.targets.entity_paths.filter(isSectionTarget).map((id) => `- ${titleOfSection(spine, id)}`)
-  const slots = locations.filter((l) => isArrayPath(l.path)).map((l) => `- new ${l.path.slice(0, -2)} go to "${titleOfSection(spine, l.section_id)}" (location ${l.path})`)
-  if (!sections.length && !slots.length) return "(none named)"
-  return [...(sections.length ? ["Sections this change targets:", ...sections] : []), ...(slots.length ? ["Where new elements are added (and only there):", ...slots] : [])].join("\n")
+/** Chữ hướng dẫn mẫu của một mục, tối đa ký tự mỗi mục trong prompt C-4. */
+const GUIDANCE_PROMPT_CHARS = 1500
+
+/**
+ * FLF-364 (L5): chữ hướng dẫn của mẫu upload theo mục — heading của layout (Mode 1) ⇒ `heading_map[].guidance` cùng chữ; heading
+ * cha có hướng dẫn thì ghép trước (mục đích của chương). Dự án không có profile (Mode 2) ⇒ rỗng.
+ */
+export const templateGuidanceBySection = (profile: {
+  heading_map: readonly Pick<HeadingMapEntry, "heading_text" | "guidance">[]
+  layout?: readonly Pick<LayoutEntry, "heading_text" | "level" | "section_id">[] | null
+} | null): Map<string, string> => {
+  const out = new Map<string, string>()
+  if (!profile?.layout?.length) return out
+  const byHeading = new Map(profile.heading_map.filter((h) => h.guidance).map((h) => [h.heading_text.trim(), h.guidance!]))
+  const stack: { level: number; guidance: string | null }[] = []
+  for (const l of profile.layout) {
+    while (stack.length && stack[stack.length - 1].level >= l.level) stack.pop()
+    const own = byHeading.get(l.heading_text.trim()) ?? null
+    const parent = [...stack].reverse().find((s) => s.guidance)?.guidance ?? null
+    stack.push({ level: l.level, guidance: own })
+    if (!own) continue
+    const text = parent && parent !== own ? `${parent} — ${own}` : own
+    const prev = out.get(l.section_id)
+    out.set(l.section_id, (prev ? `${prev} · ${text}` : text).slice(0, GUIDANCE_PROMPT_CHARS))
+  }
+  return out
+}
+
+/** Dòng ngữ cảnh mẫu của một mục: hướng dẫn của mẫu upload + nội dung nên có theo 29148. */
+const templateLines = (sectionId: string, guidance: ReadonlyMap<string, string>): string[] => {
+  const own = guidance.get(sectionId)
+  if (!own) return []
+  const expected = expectedContentOf(sectionId)
+  return [`  Template guidance: ${own}`, ...(expected ? [`  Expected content (ISO 29148): ${expected}`] : [])]
+}
+
+export const targetSectionsText = (
+  spine: Spine,
+  cr: Pick<IChangeRequest, "targets">,
+  locations: readonly Pick<IChangeLocation, "path" | "section_id">[],
+  guidance: ReadonlyMap<string, string> = new Map()
+): string => {
+  const sections = cr.targets.entity_paths.filter(isSectionTarget).flatMap((id) => [`- ${titleOfSection(spine, id)}`, ...templateLines(id, guidance)])
+  const slots = locations
+    .filter((l) => isArrayPath(l.path))
+    .flatMap((l) => [`- new ${l.path.slice(0, -2)} go to "${titleOfSection(spine, l.section_id)}" (location ${l.path})`, ...templateLines(l.section_id, guidance)])
+  // Mục của vị trí sửa có hướng dẫn mẫu mà không nằm trong hai nhóm trên ⇒ vẫn đưa hướng dẫn (ý người soạn mẫu)
+  const named = new Set([...cr.targets.entity_paths.filter(isSectionTarget), ...locations.filter((l) => isArrayPath(l.path)).map((l) => l.section_id)])
+  const others = [...new Set(locations.map((l) => l.section_id))]
+    .filter((id) => id && !named.has(id) && guidance.has(id))
+    .flatMap((id) => [`- ${titleOfSection(spine, id)}`, ...templateLines(id, guidance)])
+  if (!sections.length && !slots.length && !others.length) return "(none named)"
+  return [
+    ...(sections.length ? ["Sections this change targets:", ...sections] : []),
+    ...(slots.length ? ["Where new elements are added (and only there):", ...slots] : []),
+    ...(others.length ? ["Template guidance of the sections being edited (what the template author wants written there):", ...others] : [])
+  ].join("\n")
 }
 
 const needsProposal = (l: IChangeLocation): boolean => !l.manual && (l.conclusion === null || (l.verify !== null && !l.verify.code_ok))
@@ -189,6 +242,8 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
   const record = await spineRepository.get(String(cr.projectId))
   if (!record) throw new ApiError(404, "Không tìm thấy dữ liệu tài liệu của dự án.", spineRepository.SPINE_NOT_FOUND)
   const spine = stripRecord(record)
+  // FLF-364: hướng dẫn của mẫu upload theo mục (Mode 1) — ngữ cảnh soạn đúng ý người làm mẫu
+  const guidance = templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
   let locations = await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).sort({ location_id: 1 })
 
   // FLF-318: CR thêm / xoá use case ⇒ soạn trọn lô một lượt như chat trước baseline (luật 3e / 3g), vị trí còn
@@ -223,7 +278,7 @@ export const runPropose = async (cr: IChangeRequest, userId: string): Promise<vo
           ...crHeader(cr),
           answers: answersText(cr),
           owner_skill: ownerSkillText(owner || null),
-          target_sections: targetSectionsText(spine, cr, locations),
+          target_sections: targetSectionsText(spine, cr, locations, guidance),
           materials: materialsText(cr),
           missing_info: missingInfoText(cr),
           locations: batch.map((l) => locationPromptText(spine, l, cr.seed?.ops ?? [])).join("\n"),
@@ -303,7 +358,12 @@ export const draftInOwnerStep = async (cr: IChangeRequest, userId: string, locat
 
 Analyst's instruction for ${loc.location_id} (${loc.owner_step ? `fix in owner step ${loc.owner_step}` : "free-form section"}): ${instruction}`,
     owner_skill: ownerSkillText(ownerKeyOf(spine, loc)),
-    target_sections: targetSectionsText(spine, cr, await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path section_id").lean()),
+    target_sections: targetSectionsText(
+      spine,
+      cr,
+      await ChangeLocation.find({ projectId: cr.projectId, cr_id: cr.cr_id }).select("path section_id").lean(),
+      templateGuidanceBySection(await TemplateProfile.findOne({ projectId: cr.projectId }).select("heading_map layout").lean())
+    ),
     materials: materialsText(cr),
     missing_info: missingInfoText(cr),
     locations: locationPromptText(spine, loc, cr.seed?.ops ?? []),

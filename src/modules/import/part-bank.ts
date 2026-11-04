@@ -277,6 +277,31 @@ const SKILL_BY_PART: Readonly<Record<string, string>> = {
   "part:ieee:feature_detail": "function-detail"
 }
 
+/**
+ * FLF-364: nội dung mục nên có theo ISO 29148 (plan §2.4, cột "Nội dung nên có") — ngữ cảnh cho AI khi soạn / bổ sung mục của
+ * mẫu upload. Theo đích của phần.
+ */
+const EXPECTED_CONTENT: readonly [RegExp, string][] = [
+  [/^slot:vision$/, "purpose of the software / document and its intended readers"],
+  [/^slot:scope$/, "product name, what it does and does not do, benefits, goals"],
+  [/^slot:context$/, "context and relation to other systems (block / context diagram, external system names)"],
+  [/^slot:platforms$/, "operating environment: hardware, OS, platforms the product runs on"],
+  [/^fixed:1$/, "product overview: purpose, scope, context, high-level goals"],
+  [/^fixed:2\.1$/, "user groups / actors: skills, experience, expertise, accessibility needs"],
+  [/^fixed:2\.2\.1$/, "summary of the main functions and their relations (use case diagram)"],
+  [/^fixed:3\.1\.2$/, "logical characteristics of each screen: layout, menus, shortcuts, mockups"],
+  [/^fixed:3\.1\.5$/, "information types, frequency of use, access, entities and relations, integrity constraints, retention"],
+  [/^fixed:4\.1$/, "each input / output: name, source, destination, valid range, unit, format, timing; protocols and versions"],
+  [/^fixed:4\.2\.1$/, "measurable usability criteria: effectiveness, efficiency, satisfaction"],
+  [/^fixed:4\.2\.2$/, "reliability / availability with numbers (MTBF, uptime %, RTO / RPO)"],
+  [/^fixed:4\.2\.3$/, "static and dynamic numeric requirements: users, data volume, transactions per time unit"],
+  [/^fixed:4\.2\.4$/, "constraints and attributes: standards, technology, security, maintainability, portability"],
+  [/^(fixed:5\.4|slot:(assumptions|open_questions))$/, "assumptions, dependencies, compliance, operations, supporting information"],
+  [/^fixed:5\.5$/, "terms, acronyms and abbreviations with definitions"]
+]
+
+export const expectedContentOf = (sectionId: string): string | null => EXPECTED_CONTENT.find(([re]) => re.test(sectionId))?.[1] ?? null
+
 export const skillOfPart = (part: PartDef): string | null =>
   SKILL_BY_PART[part.id] ?? SKILL_BY_TARGET.find(([re]) => re.test(part.slot ?? part.target))?.[1] ?? null
 
