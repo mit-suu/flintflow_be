@@ -28,7 +28,8 @@ describe("import mẫu IEEE 830 (FLF-252)", () => {
     expect(profile.template_family).toBe("ieee29148")
     const section = (text: string) => profile.heading_map.find((h) => h.heading_text === text)?.section_id
     expect(section("Revision History")).toBe("fixed:I")
-    expect(section("1.4 References")).toBe("unmapped")
+    // FLF-365: References có chỗ riêng (phần nhỏ slot:references)
+    expect(section("1.4 References")).toBe("slot:references")
     expect(section("2.3 User Characteristics")).toBe("fixed:2.1")
     expect(section("3.2 Functional Requirements")).toMatch(/^feature:@B\d{4}$/)
     expect(section("3.5.1 Reliability")).toBe("fixed:4.2.2")
