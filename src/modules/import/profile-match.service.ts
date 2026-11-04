@@ -264,7 +264,7 @@ const structureConfidence = (parentConfidence: number): number => (parentConfide
  *    lạ của mục có nội dung ⇒ thuộc mục đó; còn lại ⇒ không khớp.
  * 3. FLF-278: heading chưa khớp có tên đúng một phần dữ liệu Spine ⇒ gợi ý `slot:*`.
  */
-const matchBankHeadings = (headings: MatchHeading[]): { entries: HeadingMapEntry[]; hits: Map<number, Hit> } => {
+const matchBankHeadings = (headings: MatchHeading[], guidance: ReadonlyMap<string, HeadingGuidance> = new Map()): { entries: HeadingMapEntry[]; hits: Map<number, Hit> } => {
   const parents = parentIndexes(headings)
   const first = assignParts(headings, parents)
   const limits = headingScopes(headings, parents, first.assigned)
@@ -333,7 +333,7 @@ const matchBankHeadings = (headings: MatchHeading[]): { entries: HeadingMapEntry
     })
     stack.push({ level: b.level!, section, features, confidence })
   })
-  return { entries: withSlotSuggestions(entries), hits: assigned }
+  return { entries: withSlotSuggestions(withGuidanceMatches(entries, guidance)), hits: assigned }
 }
 
 /**
@@ -355,10 +355,42 @@ const familyOf = (hits: Map<number, Hit>): TemplateFamily => {
 }
 
 /** Khớp heading theo ngân hàng phần (FLF-363). */
-export const matchHeadings = (blocks: ProfileBlock[]): HeadingMapEntry[] => matchBankHeadings(headingsOf(blocks)).entries
+export const matchHeadings = (blocks: ProfileBlock[]): HeadingMapEntry[] => matchBankHeadings(headingsOf(blocks), guidanceByHeading(blocks)).entries
 
 /** Nhãn họ mẫu của tài liệu (chỉ để báo cáo — không quyết định cách khớp). */
 export const detectTemplateFamily = (blocks: ProfileBlock[]): TemplateFamily => familyOf(matchBankHeadings(headingsOf(blocks)).hits)
+
+/** Độ tin khi nhận phần theo chữ hướng dẫn — dưới ngưỡng 0.8 ⇒ cờ "Cần xem". */
+export const GUIDANCE_MATCH_CONFIDENCE = 0.7
+
+/** Tên phần đủ riêng để nhận trong câu hướng dẫn: ≥ 2 từ, không phải tên quá chung. */
+const GUIDANCE_TITLES: readonly { part: PartDef; title: string }[] = PART_BANK.filter((p) => !p.underFeature && !p.parents).flatMap((part) =>
+  part.titles
+    .filter((t) => !isWeakTitle(t.text) && foldTokens(t.text).length >= 2)
+    .map((t) => ({ part, title: ` ${foldText(t.text)} ` }))
+)
+
+/**
+ * FLF-364 (L4): heading không khớp tên phần nào (không phải phần giữ nguyên văn) mà chữ hướng dẫn của mẫu dưới nó nhắc đúng
+ * **một** phần ("[List all documents referenced…]" ⇒ References) ⇒ nhận phần đó, độ tin 0.7. Sau tên, trước luật từ khoá
+ * phần nhỏ và nội dung thật. Phần không lặp đã có heading khác thì bỏ qua.
+ */
+const withGuidanceMatches = (entries: HeadingMapEntry[], guidance: ReadonlyMap<string, HeadingGuidance>): HeadingMapEntry[] => {
+  if (!guidance.size) return entries
+  const used = new Set(entries.map((e) => e.template_section).filter(Boolean))
+  return entries.map((e) => {
+    const g = guidance.get(e.block_id)
+    if (!g || e.section_id !== UNMAPPED_SECTION || e.template_section) return e
+    const text = ` ${foldText(g.text)} `
+    const parts = [...new Map(GUIDANCE_TITLES.filter((t) => text.includes(t.title)).map((t) => [t.part.id, t.part])).values()]
+    if (parts.length !== 1) return e
+    const part = parts[0]
+    if (used.has(part.id) && !part.repeat) return e
+    used.add(part.id)
+    const section = part.target === "keep" || part.target === "feature" || part.target === "parent" ? UNMAPPED_SECTION : part.target
+    return { ...e, section_id: section, confidence: Math.min(e.confidence, GUIDANCE_MATCH_CONFIDENCE), template_section: part.id }
+  })
+}
 
 /**
  * FLF-278 trên FLF-336 (business-flow 1.5): heading chưa khớp (`unmapped`, kể cả phần `keep`) mà tiêu đề chỉ đúng một
@@ -574,9 +606,9 @@ const columnGuidance = (blocks: readonly ProfileBlock[]): Map<string, string> =>
 }
 
 export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
-  const matched = matchBankHeadings(headingsOf(blocks))
-  const template_family = familyOf(matched.hits)
   const guidance = guidanceByHeading(blocks)
+  const matched = matchBankHeadings(headingsOf(blocks), guidance)
+  const template_family = familyOf(matched.hits)
   const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
   const heading_map = withContentSignals(blocks, matched.entries).map((h) => ({
     ...h,

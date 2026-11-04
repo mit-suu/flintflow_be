@@ -672,3 +672,25 @@ describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp"
     expect(needsMappingReview(profile)).toBe(false)
   })
 })
+
+describe("FLF-364 — nhận phần theo chữ hướng dẫn (sau tên, trước nội dung)", () => {
+  const para = (n: number, text: string): ProfileBlock => ({ block_id: `B${String(n).padStart(4, "0")}`, kind: "paragraph", level: null, text })
+
+  it("heading lạ, hướng dẫn nhắc đúng một phần ⇒ nhận phần đó, độ tin 0.7; nhắc nhiều phần / không nhắc ⇒ giữ nguyên", () => {
+    const map = Object.fromEntries(
+      matchHeadings([
+        heading(1, 1, "Nguồn trích dẫn"), para(2, "[Liệt kê mọi tài liệu tham khảo: tên, mã, ngày phát hành]"),
+        heading(3, 1, "Kế hoạch đào tạo"), para(4, "[Mô tả user characteristics và business rules của hệ thống]"),
+        heading(5, 1, "Ghi chú"), para(6, "[Ghi chú tự do]")
+      ]).map((h) => [h.heading_text, h])
+    )
+    expect(map["Nguồn trích dẫn"]).toMatchObject({ section_id: "unmapped", confidence: 0.7, template_section: "part:ieee:references" })
+    expect(map["Kế hoạch đào tạo"].template_section ?? null).toBeNull()
+    expect(map["Ghi chú"].template_section ?? null).toBeNull()
+  })
+
+  it("tên khớp chắc thắng hướng dẫn", () => {
+    const map = matchHeadings([heading(1, 1, "Glossary"), para(2, "[Liệt kê tài liệu tham khảo dùng thuật ngữ]")])
+    expect(map[0]).toMatchObject({ section_id: "fixed:5.5", confidence: 1 })
+  })
+})
