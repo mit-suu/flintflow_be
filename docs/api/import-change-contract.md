@@ -602,3 +602,10 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
   chỗ riêng — tác nhân, ERD, thuật ngữ, quy tắc, thông báo…; hoặc đa số đoạn mở đầu bằng mã BR / MSG) chỉ rõ mục khác mục theo
   tên, mà mục đó chưa có heading nào ⇒ heading đã đổi sang `by_content`, độ tin ≤ 0.75 (cờ "Cần xem"). Heading không khớp tên
   mà nội dung rõ ⇒ đổi như trên nhưng không có field này. Request #5 không đổi hình.
+- Cờ vàng mới `import_title_content_mismatch` ("Tiêu đề và nội dung khác nhau", chỉ import đặt, recompute không đóng): mỗi
+  heading có `content_mismatch` một cờ, `target_id` = block heading, câu nêu tên hai mục theo mẫu; heading đó không có thêm cờ
+  `import_needs_review`.
+- Mục ưu tiên phần nhỏ (plan §2.5): Purpose ⇒ `slot:vision`, Scope ⇒ `slot:scope`, Product Perspective ⇒ `slot:context`,
+  Operating Environment ⇒ `slot:platforms`, Assumptions ⇒ `slot:assumptions`, TBD list ⇒ `slot:open_questions` — chỉ khi file
+  không có heading nào khác nhận mục FPT cha (không thì về mục cha, như trước). C-4 (`cr-propose`): vị trí trong mục giữ nguyên
+  văn (`custom:*`) có heading khớp ngân hàng ⇒ `owner_skill` là skill của phần đó (trước: "(none)").
