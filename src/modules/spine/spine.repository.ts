@@ -72,6 +72,8 @@ export const createEmptySpine = (init: SpineInit = {}): Spine => ({
   messages: [],
   other_requirements: [],
   glossary: [],
+  references: [],
+  verifications: [],
   addendum: [],
   custom_sections: [],
   diagrams: [],
