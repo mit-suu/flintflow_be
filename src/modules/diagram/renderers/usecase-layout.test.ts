@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest"
 import { checkScene } from "../../../shared/diagram/svg-geometry.js"
 import type { Point } from "../../../shared/diagram/svg-kit.js"
 import type { Scene, SceneElement } from "../../../shared/diagram/svg-scene.js"
-import { layoutActorHierarchy, layoutUseCaseDiagram, packBlocks, wrapLines, type DiagramActor, type UseCaseDiagram } from "./usecase-layout.js"
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { ACTOR_BOUNDARY_GAPS, barycenterRows, layoutActorHierarchy, layoutOptions, layoutUseCaseDiagram, packBlocks, splitSides, wrapLines, type DiagramActor, type UseCaseDiagram } from "./usecase-layout.js"
 
 type Ellipse = Extract<SceneElement, { type: "ellipse" }>
 type Path = Extract<SceneElement, { type: "path" }>
@@ -161,6 +164,86 @@ describe("layoutUseCaseDiagram", () => {
       const hands = actors.map((a) => (scene.find(`actor:${a.id}#arms`) as Path).points[0][1])
       expect(hands[3]).toBeCloseTo(mid, 6)
       expect(hands[0] - mid).toBeCloseTo(mid - hands[6], 6)
+    }
+  })
+})
+
+/** Hình dựng tay cùng hình dạng dự án Outpatient Flow Suite: 7 actor người, Log In / Reset Password nối gần hết actor. */
+const SHARED_LOGIN: UseCaseDiagram = JSON.parse(
+  fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../fixtures/usecase-shared-login.json"), "utf8")
+).diagram
+
+/** Bên của từng actor theo vị trí đầu so với khung hệ thống. */
+const sidesOf = (scene: Scene, d: UseCaseDiagram): Record<string, "left" | "right"> => {
+  const boundary = scene.find("system") as Extract<SceneElement, { type: "rect" }>
+  return Object.fromEntries(d.actors.map((a) => [a.id, (scene.find(`actor:${a.id}#head`) as Ellipse).cx < boundary.x ? "left" : "right"]))
+}
+const rowOrderOf = (scene: Scene): string[] => [...ellipses(scene)].sort((a, b) => a.cy - b.cy).map((e) => e.id.slice(3))
+
+describe("layoutUseCaseDiagram — thử nhiều phương án", () => {
+  it("Log In / Reset Password chung 7 actor người: chỉ đổi khoảng cách thì vẫn cắt chữ; thử thêm phương án ⇒ sạch, đủ use case", () => {
+    const [first] = layoutOptions(SHARED_LOGIN)
+    expect(first).toEqual({ gap: ACTOR_BOUNDARY_GAPS[0], sides: undefined, rowOrder: undefined })
+    const scene = layoutUseCaseDiagram(SHARED_LOGIN)
+    expect(checkScene(scene, { allowBends: false })).toEqual([])
+    expect(ellipses(scene).map((e) => e.id.slice(3)).sort()).toEqual(SHARED_LOGIN.rows.map((r) => r.id).sort())
+    for (const link of SHARED_LOGIN.associations) expect(scene.find(`${link.actorId}~${link.useCaseId}`)).toBeDefined()
+  })
+
+  it("tất định: hai lần gọi ⇒ cùng SVG", () => {
+    expect(layoutUseCaseDiagram(structuredClone(SHARED_LOGIN)).toSvg()).toBe(layoutUseCaseDiagram(SHARED_LOGIN).toSvg())
+  })
+
+  it("hình sạch theo cách cũ giữ đúng cách cũ: người trái, hệ thống phải, thứ tự hàng như đầu vào", () => {
+    const d: UseCaseDiagram = {
+      system: "Shop",
+      rows: rowsOf(4),
+      actors: [human("A", "Customer"), human("B", "Staff"), system("S", "Payment Gateway")],
+      associations: assoc([["A", "UC01"], ["B", "UC02"], ["A", "UC03"], ["S", "UC03"], ["B", "UC04"]]),
+      relations: []
+    }
+    const scene = layoutUseCaseDiagram(d)
+    expectInvariants(d, scene)
+    expect(sidesOf(scene, d)).toEqual({ A: "left", B: "left", S: "right" })
+    expect(rowOrderOf(scene)).toEqual(["UC01", "UC02", "UC03", "UC04"])
+  })
+
+  it("barycenter: gom hàng theo actor, khối include/extend không bị cắt", () => {
+    const d: UseCaseDiagram = {
+      system: "Shop",
+      rows: [{ id: "X", name: "Browse" }, { id: "P", name: "Pay" }, { id: "R", name: "Refund" }, { id: "Y", name: "Search" }],
+      actors: [human("A"), human("B")],
+      associations: assoc([["B", "X"], ["A", "P"], ["A", "Y"]]),
+      relations: [{ from: "R", to: "P", kind: "extend" }]
+    }
+    // P–R một khối (trọng số theo A = 0), Y theo A, X theo B ⇒ P, R, Y, X
+    expect(barycenterRows(d)).toEqual(["P", "R", "Y", "X"])
+    expect(barycenterRows({ ...d, rows: [d.rows[1], d.rows[2], d.rows[3], d.rows[0]] })).toBeNull()
+  })
+
+  it("chia actor hai bên: chỉ khi ≥ 2 actor người chung một use case; actor nhiều use case nhất giữ bên trái, actor system vẫn phải", () => {
+    const lonely: UseCaseDiagram = { system: "S", rows: rowsOf(2), actors: [human("A"), human("B")], associations: assoc([["A", "UC01"], ["B", "UC02"]]), relations: [] }
+    expect(splitSides(lonely)).toBeNull()
+    const d: UseCaseDiagram = {
+      system: "S",
+      rows: rowsOf(3),
+      actors: [human("A"), human("B"), human("C"), system("Z")],
+      associations: assoc([["A", "UC01"], ["A", "UC02"], ["A", "UC03"], ["B", "UC01"], ["C", "UC01"], ["C", "UC02"], ["Z", "UC03"]]),
+      relations: []
+    }
+    expect(Object.fromEntries(splitSides(d)!)).toEqual({ A: "left", C: "left", B: "right", Z: "right" })
+    // trần số phương án: 2 bên × 2 thứ tự hàng × số khoảng cách
+    expect(layoutOptions(SHARED_LOGIN).length).toBeLessThanOrEqual(2 * 2 * ACTOR_BOUNDARY_GAPS.length)
+  })
+
+  it("actor người sang phải: association tới đỉnh phải ellipse, actor nằm ngoài khung", () => {
+    const scene = layoutUseCaseDiagram(SHARED_LOGIN)
+    const sides = sidesOf(scene, SHARED_LOGIN)
+    const es = ellipses(scene)
+    for (const link of SHARED_LOGIN.associations) {
+      const tip = (scene.find(`${link.actorId}~${link.useCaseId}`) as Path).points[1]
+      const target = es.find((e) => e.id === `uc:${link.useCaseId}`)!
+      expect(tip[0]).toBe(sides[link.actorId] === "left" ? target.cx - target.rx : target.cx + target.rx)
     }
   })
 })

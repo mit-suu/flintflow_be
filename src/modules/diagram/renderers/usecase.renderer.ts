@@ -25,6 +25,7 @@
  */
 
 import { checkScene } from "../../../shared/diagram/svg-geometry.js"
+import type { Scene } from "../../../shared/diagram/svg-scene.js"
 import { actorParents } from "../../spine/actor-generalization.js"
 import type { ActorKind, Spine, UseCase } from "../../spine/spine.types.js"
 import { systemName } from "../../spine/system-name.js"
@@ -332,10 +333,23 @@ export const renderUseCase: Renderer = (spine, _ownerId, labels = DIAGRAM_LABELS
     associations: part.associations,
     relations: part.relations
   })
-  const fits: Fits = (part) => checkScene(layoutUseCaseDiagram(diagramOf(part)), { allowBends: false }).length === 0
+  // Bộ xếp thử tới 16 phương án mỗi lần gọi, và `refine` hỏi `fits` ở mọi tầng tách ⇒ nhớ scene theo hình trong lượt này,
+  // lượt vẽ ra dùng lại đúng scene đã chấm thay vì bố cục lại.
+  const scenes = new Map<string, Scene>()
+  const sceneOf = (part: UseCasePart): Scene => {
+    const diagram = diagramOf(part)
+    const key = JSON.stringify(diagram)
+    let scene = scenes.get(key)
+    if (!scene) {
+      scene = layoutUseCaseDiagram(diagram)
+      scenes.set(key, scene)
+    }
+    return scene
+  }
+  const fits: Fits = (part) => checkScene(sceneOf(part), { allowBends: false }).length === 0
 
   const out: RenderedPart[] = partitionUseCases(spine, labels, fits).map((part) =>
-    svgPart(layoutUseCaseDiagram(diagramOf(part)), { allowBends: false }, meta(USE_CASE_SECTION), labels.useCasesTitle(part.name))
+    ({ ...svgPart(sceneOf(part), { allowBends: false }, meta(USE_CASE_SECTION), labels.useCasesTitle(part.name)), members: part.useCases.map((u) => u.id).sort(compareIds) })
   )
 
   if (parents.size > 0) {

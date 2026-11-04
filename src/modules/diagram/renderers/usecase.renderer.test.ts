@@ -260,3 +260,27 @@ describe("renderer thuần, tất định", () => {
     }
   })
 })
+
+describe("dữ liệu thật: Log In / Reset Password chung nhiều actor (Outpatient Flow Suite)", () => {
+  const real = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../../fixtures/usecase-shared-login.json"), "utf8")).spine
+  const spine = mutate((s) => {
+    s.project.name = real.project.name
+    s.project.system_name = real.project.system_name
+    s.actors = real.actors.map((a: Spine["actors"][number]) => ({ ...structuredClone(FIXTURE.actors[0]), ...a }))
+    s.use_cases = real.use_cases
+    s.features = real.features.map((f: Spine["features"][number]) => ({ ...structuredClone(FIXTURE.features[0]), ...f }))
+    s.functions = real.functions.map((f: Spine["functions"][number]) => ({ ...structuredClone(FIXTURE.functions[0]), ...f }))
+  })
+
+  it("mọi hình 0 issue bố cục; không mất use case nào; mỗi phần mang tập id use case của nó", () => {
+    const parts = renderKind(spine, "usecase").filter((p) => p.section === USE_CASE_SECTION)
+    expect(parts.flatMap((p) => p.issues ?? [])).toEqual([])
+    const members = parts.flatMap((p) => p.members ?? [])
+    expect([...new Set(members)].sort()).toEqual(spine.use_cases.map((u) => u.id).sort())
+    expect(titles(spine)).toContain("Use Cases — Authentication")
+  })
+
+  it("tất định: hai lượt render ⇒ cùng nguồn", () => {
+    expect(renderKind(structuredClone(spine), "usecase").map((p) => p.source)).toEqual(renderKind(spine, "usecase").map((p) => p.source))
+  })
+})
