@@ -243,11 +243,35 @@ describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
     expect(needsMappingReview({ heading_map: matchHeadings(blocks), table_map: [] })).toBe(true)
   })
 
-  it("khác số mục (đúng tiêu đề) ⇒ khớp theo tiêu đề, độ tin 0.7; không số mục ⇒ độ tin 1", () => {
+  it("FLF-363: số mục không tham gia khớp — số lệch mẫu, không số hay số Word đều khớp theo tên, độ tin như nhau", () => {
     const map = mapOf([heading(1, 1, "4 Non-Functional Requirements"), heading(2, 2, "4.7 Quality Attributes"), heading(3, 3, "4.7.9 Performance")])
-    expect(map["4.7.9 Performance"]).toMatchObject({ section_id: "fixed:4.2.3", confidence: 0.7 })
-    expect(map["4.7 Quality Attributes"]).toMatchObject({ section_id: "group:4.2", confidence: 0.7 })
+    expect(map["4.7.9 Performance"]).toMatchObject({ section_id: "fixed:4.2.3", confidence: 1 })
+    expect(map["4.7 Quality Attributes"]).toMatchObject({ section_id: "group:4.2", confidence: 1 })
     expect(mapOf([heading(1, 1, "Performance")]).Performance).toMatchObject({ section_id: "fixed:4.2.3", confidence: 1 })
+  })
+
+  it("FLF-363: trong mục có nội dung, heading con chỉ nhận phần khác khi tên khớp chắc (không thì thuộc mục cha)", () => {
+    const map = mapOf([heading(1, 1, "Product Overview"), heading(2, 2, "Mục tiêu"), heading(3, 1, "Other Requirements"), heading(4, 2, "Đặc tả mô hình")])
+    // "Mục tiêu" giống yếu "Mục lục", "Đặc tả mô hình" giống yếu "Đặc tả use case" — trước đây số mục chặn
+    expect(map["Mục tiêu"]).toMatchObject({ section_id: "fixed:1", confidence: 0.8 })
+    expect(map["Đặc tả mô hình"]).toMatchObject({ section_id: "fixed:5.4", confidence: 0.8 })
+  })
+
+  it("FLF-363: trong chương chức năng, tính năng trùng tên một phần khác (Change Management) vẫn là tính năng", () => {
+    const map = mapOf([
+      heading(1, 1, "3 Functional Requirements"), heading(2, 2, "3.1 System Functional Overview"), heading(3, 3, "3.1.1 Screens Flow"),
+      heading(4, 2, "3.8 Change Management"), heading(5, 3, "3.8.1 Log change request")
+    ])
+    expect(map["3.1.1 Screens Flow"].section_id).toBe("fixed:3.1.1")
+    expect(map["3.8 Change Management"]).toMatchObject({ section_id: expect.stringMatching(/^feature:@/), confidence: 0.85 })
+    expect(map["3.8.1 Log change request"]).toMatchObject({ section_id: expect.stringMatching(/^function:@/), confidence: 0.85 })
+  })
+
+  it("FLF-363: tên tài liệu dùng làm heading ⇒ giữ nguyên văn, không hỏi lại", () => {
+    expect(mapOf([heading(1, 1, "II. Software Requirement Specification")])["II. Software Requirement Specification"]).toMatchObject({
+      section_id: "unmapped",
+      confidence: 1
+    })
   })
 
   it("heading lạ ⇒ unmapped: không giống gì ⇒ độ tin 0.9 (không hỏi lại); giống yếu ⇒ 0.5 (hỏi lại)", () => {
@@ -284,8 +308,8 @@ describe("matchHeadings — khớp gần, unmapped, ngưỡng 0.8", () => {
   })
 })
 
-describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
-  it("heading IEEE khớp section FPT; FLF-252: khớp theo danh mục IEEE nên số mục IEEE là đúng số ⇒ độ tin đủ", () => {
+describe("mẫu IEEE 830 + D6 (FLF-183) — FLF-363 khớp theo ngân hàng phần chung", () => {
+  it("heading IEEE khớp section FPT, độ tin đủ; chương Specific Requirements chứa cả phi chức năng ⇒ chỉ là heading", () => {
     const map = mapOf([
       heading(1, 1, "1. Introduction"),
       heading(2, 2, "1.3 Definitions, acronyms & abbreviations"),
@@ -297,13 +321,13 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     ])
     expect(map["1.3 Definitions, acronyms & abbreviations"].section_id).toBe("fixed:5.5")
     expect(map["2.3 User characteristics"].section_id).toBe("fixed:2.1")
-    expect(map["3. Specific Requirements"].section_id).toBe("group:3")
+    expect(map["3. Specific Requirements"]).toMatchObject({ section_id: "unmapped", template_section: "part:ieee:requirements" })
     expect(map["3.3 Performance requirements"].section_id).toBe("fixed:4.2.3")
     expect(map["3.3 Performance requirements"].confidence).toBeGreaterThanOrEqual(MAPPING_CONFIDENCE_THRESHOLD)
     expect(map["3.1 External interface requirements"].section_id).toBe("fixed:4.1")
   })
 
-  it("FLF-252: dàn mục IEEE 830 ⇒ nhận họ mẫu IEEE, mỗi mục trích vào đúng section FPT, mục chỉ có ở IEEE giữ nguyên văn — không còn dòng sai độ tin cao", () => {
+  it("dàn mục IEEE 830 ⇒ nhãn IEEE, mỗi mục trích vào đúng section FPT, mục chỉ có ở IEEE giữ nguyên văn — không còn dòng sai độ tin cao", () => {
     const outline = [
       "1. Introduction", "1.1. Purpose", "1.3. Definitions, acronyms & abbreviations", "1.4. References",
       "2. Overall description", "2.1. Product perspective", "2.1.3. Hardware interfaces", "2.3. User characteristics", "2.4. Constraints",
@@ -313,12 +337,12 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
       "3.6. Other requirements", "4. Supporting information", "4.2. Appendixes"
     ]
     const blocks = outline.map((text, i) => heading(i + 1, text.split(" ")[0].replace(/\.$/, "").split(".").length, text))
-    expect(detectTemplateFamily(blocks)).toBe("ieee830")
+    expect(detectTemplateFamily(blocks)).toBe("ieee29148")
     const map = mapOf(blocks)
     const at = (t: string) => [map[t].section_id, map[t].confidence]
     expect(at("1.3. Definitions, acronyms & abbreviations")).toEqual(["fixed:5.5", 1])
     expect(at("1.4. References")).toEqual(["unmapped", 1])
-    expect(map["1.4. References"].template_section).toBe("ieee830:1.4")
+    expect(map["1.4. References"].template_section).toBe("part:ieee:references")
     expect(at("2.1.3. Hardware interfaces")).toEqual(["fixed:4.1", 1])
     expect(at("2.3. User characteristics")).toEqual(["fixed:2.1", 1])
     expect(at("3.1. External interface requirements")).toEqual(["fixed:4.1", 1])
@@ -329,14 +353,16 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     expect(at("3.5.2. Availability")).toEqual(["fixed:4.2.2", 1])
     expect(at("3.5.4. Maintainability")).toEqual(["fixed:4.2.4", 1])
     expect(at("3.6. Other requirements")).toEqual(["fixed:5.4", 1])
-    // chương yêu cầu chức năng ⇒ tính năng; mục con lạ ⇒ chức năng nhưng phải xác nhận
+    // "Specific requirements" trong chương Specific Requirements ⇒ tính năng; mục con lạ ⇒ chức năng
     expect(map["3.2. Specific requirements"].section_id).toMatch(/^feature:@B\d{4}$/)
     // sơ đồ tuần tự: Spine không có loại này ⇒ giữ nguyên văn (trước đây trích thành mô tả use case)
     expect(map["3.2.1. Sequence diagrams"].section_id).toBe("unmapped")
-    expect(map["3.2.3. Register account"]).toMatchObject({ section_id: expect.stringMatching(/^function:@/), confidence: 0.75 })
-    // không còn heading nào bị gán sai mà vẫn ≥ 0.8 (trước đây: interface ⇒ function 0.85, Design constraints ⇒ feature 0.85)
-    expect(Object.values(map).filter((h) => /^(feature|function):@/.test(h.section_id) && h.confidence >= 0.8).map((h) => h.heading_text)).toEqual([
-      "3.2. Specific requirements"
+    expect(map["3.2.3. Register account"]).toMatchObject({ section_id: expect.stringMatching(/^function:@/), confidence: 0.85 })
+    // không heading nào ngoài tính năng bị gán thành tính năng / chức năng (trước FLF-252: interface ⇒ function, Design
+    // constraints ⇒ feature)
+    expect(Object.values(map).filter((h) => /^(feature|function):@/.test(h.section_id)).map((h) => h.heading_text)).toEqual([
+      "3.2. Specific requirements",
+      "3.2.3. Register account"
     ])
   })
 
@@ -348,11 +374,11 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
       [2, "3.3. Performance requirements"]
     ]
     const blocks = outline.map(([level, text], i) => heading(i + 1, level, text))
-    expect(detectTemplateFamily(blocks)).toBe("ieee830")
+    expect(detectTemplateFamily(blocks)).toBe("ieee29148")
     const map = mapOf(blocks)
     expect(map["3.2. Specific requirements"].section_id).toBe("unmapped")
     expect(map["3.2.1. Sequence diagrams"].section_id).toBe("unmapped")
-    expect(map["3.2.2. Classes for classification of specific requirements"]).toMatchObject({ section_id: "unmapped", template_section: "ieee830:3.2.2" })
+    expect(map["3.2.2. Classes for classification of specific requirements"]).toMatchObject({ section_id: "unmapped", template_section: "part:ieee:classes" })
     expect(map["3.2.2.1. Account management"].section_id).toMatch(/^feature:@/)
     expect(map["3.2.2.1.1. Register account"].section_id).toMatch(/^function:@/)
     // tên "Class Model" / "Use Cases" vẫn vào ERD / mô tả use case
@@ -361,24 +387,26 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     expect(named["Use Case Descriptions"].section_id).toBe("fixed:2.2.2")
   })
 
-  it("tên trùng ở hai chỗ của mẫu (User Interfaces 2.1.2 / 3.1.1) ⇒ phân biệt theo heading cha khi file không đánh số / đánh số khác", () => {
+  it("tên trùng ở hai chỗ (User Interfaces trong Product Perspective / External Interfaces) ⇒ cả hai vào giao diện; file không số vẫn là IEEE", () => {
     const outline: [number, string][] = [
       [1, "Introduction"], [2, "Purpose"], [2, "Scope"],
       [1, "Overall Description"], [2, "Product Perspective"], [3, "User Interfaces"], [3, "Hardware Interfaces"],
       [1, "Specific Requirements"], [2, "External Interface Requirements"], [3, "User Interfaces"]
     ]
     const blocks = outline.map(([level, text], i) => heading(i + 1, level, text))
-    // file không đánh số vẫn nhận được là IEEE (trước đây chỉ heading có số mới được tính)
-    expect(detectTemplateFamily(blocks)).toBe("ieee830")
+    expect(detectTemplateFamily(blocks)).toBe("ieee29148")
     const map = matchHeadings(blocks)
-    const ui = map.filter((h) => h.heading_text === "User Interfaces").map((h) => h.template_section)
-    expect(ui).toEqual(["ieee830:2.1.2", "ieee830:3.1.1"])
-    // số mục lệch mẫu (chương giao diện là 4) ⇒ vẫn theo heading cha
+    // khác mục cha ⇒ phần lặp lại nhận cả hai (cùng tên cùng chỗ mới là heading in hai lần)
+    expect(map.filter((h) => h.heading_text === "User Interfaces").map((h) => [h.section_id, h.confidence])).toEqual([
+      ["fixed:3.1.2", 1],
+      ["fixed:3.1.2", 1]
+    ])
     const shifted = matchHeadings([
       heading(1, 1, "1 Introduction"), heading(2, 2, "1.1 Purpose"), heading(3, 2, "1.2 Scope"),
       heading(4, 1, "4 External Interface Requirements"), heading(5, 2, "4.1 User Interfaces"), heading(6, 2, "4.2 Hardware Interfaces")
     ])
-    expect(shifted.find((h) => h.heading_text === "4.1 User Interfaces")?.template_section).toBe("ieee830:3.1.1")
+    expect(shifted.find((h) => h.heading_text === "4.1 User Interfaces")?.section_id).toBe("fixed:3.1.2")
+    expect(shifted.find((h) => h.heading_text === "4.2 Hardware Interfaces")?.section_id).toBe("fixed:4.1")
   })
 
   it("FLF-252: mẫu IEEE dạng System Features ⇒ chương tính năng, mục mô tả dưới tính năng thuộc tính năng (không thành chức năng)", () => {
@@ -391,7 +419,7 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
       [1, "5 Other Nonfunctional Requirements"], [2, "5.1 Performance Requirements"], [2, "5.3 Security Requirements"]
     ]
     const blocks = outline.map(([level, text], i) => heading(i + 1, level, text))
-    expect(detectTemplateFamily(blocks)).toBe("ieee_features")
+    expect(detectTemplateFamily(blocks)).toBe("ieee29148")
     const map = mapOf(blocks)
     const enrollment = map["4.1 Course Enrollment"].section_id
     expect(enrollment).toMatch(/^feature:@/)
@@ -404,10 +432,85 @@ describe("mẫu IEEE 830 + D6 (FLF-183)", () => {
     expect(map["5.3 Security Requirements"].section_id).toBe("fixed:4.2.4")
   })
 
-  it("FLF-252: tài liệu FPT không bị nhận nhầm là IEEE; ít heading ⇒ khớp như FPT", async () => {
+  it("tài liệu FPT có nhãn FPT; ít heading ⇒ nhãn FPT", async () => {
     const { blocks } = await parseDocument(await makeSrsDocx())
     expect(detectTemplateFamily(blocks)).toBe("fpt")
     expect(detectTemplateFamily([heading(1, 1, "1. Introduction"), heading(2, 2, "1.1 Purpose")])).toBe("fpt")
+  })
+})
+
+describe("FLF-363 — ngân hàng phần chung FPT + IEEE 29148", () => {
+  const outline = (rows: [number, string][]) => rows.map(([level, text], i) => heading(i + 1, level, text))
+  const sections = (rows: [number, string][]) =>
+    Object.fromEntries(matchHeadings(outline(rows)).map((h) => [h.heading_text, h.section_id.replace(/@B\d+/, "@")]))
+
+  it("mẫu 29148 (jam01) không đánh số ⇒ mỗi mục vào đúng phần, mục chỉ có ở IEEE giữ nguyên văn", () => {
+    const rows: [number, string][] = [
+      [1, "Introduction"], [2, "Document Purpose"], [2, "Product Scope"], [2, "Definitions, Acronyms and Abbreviations"], [2, "References"],
+      [2, "Document Overview"],
+      [1, "Product Overview"], [2, "Product Perspective"], [2, "Product Functions"], [2, "Product Constraints"], [2, "User Characteristics"],
+      [2, "Assumptions and Dependencies"], [2, "Apportioning of Requirements"],
+      [1, "Requirements"], [2, "External Interfaces"], [3, "User Interfaces"], [3, "Hardware Interfaces"], [2, "Functional"], [3, "Course enrollment"],
+      [2, "Quality of Service"], [3, "Performance"], [3, "Security"], [3, "Reliability"], [3, "Availability"], [2, "Compliance"],
+      [2, "Design and Implementation"], [3, "Installation"], [3, "Maintainability"], [2, "Logical Database Requirements"],
+      [1, "Verification"], [1, "Appendixes"]
+    ]
+    expect(detectTemplateFamily(outline(rows))).toBe("ieee29148")
+    expect(sections(rows)).toMatchObject({
+      "Document Purpose": "fixed:1",
+      "Definitions, Acronyms and Abbreviations": "fixed:5.5",
+      References: "unmapped",
+      "Document Overview": "unmapped",
+      "Product Functions": "fixed:2.2.1",
+      "Product Constraints": "fixed:4.2.4",
+      "User Characteristics": "fixed:2.1",
+      "Assumptions and Dependencies": "fixed:5.4",
+      "Apportioning of Requirements": "unmapped",
+      Requirements: "unmapped",
+      "External Interfaces": "fixed:4.1",
+      "User Interfaces": "fixed:3.1.2",
+      Functional: "group:3",
+      "Course enrollment": "feature:@",
+      "Quality of Service": "group:4.2",
+      Performance: "fixed:4.2.3",
+      Reliability: "fixed:4.2.2",
+      Availability: "fixed:4.2.2",
+      Compliance: "fixed:5.4",
+      "Design and Implementation": "unmapped",
+      Installation: "fixed:5.4",
+      Maintainability: "fixed:4.2.4",
+      "Logical Database Requirements": "fixed:3.1.5",
+      Verification: "unmapped",
+      Appendixes: "group:5"
+    })
+  })
+
+  it("file trộn FPT + IEEE ⇒ khớp từng heading theo cả ngân hàng, nhãn mixed", () => {
+    const rows: [number, string][] = [
+      [1, "Record of Changes"], [1, "Introduction"], [2, "Document Purpose"], [2, "References"], [2, "Document Conventions"],
+      [1, "User Requirements"], [2, "Actors"], [2, "Use Cases"], [3, "Use Case Diagram"], [3, "Use Case Descriptions"],
+      [1, "Functional Requirements"], [2, "System Functional Overview"], [3, "Screens Flow"], [3, "Screen Authorization"], [2, "Course enrollment"],
+      [1, "Quality of Service"], [2, "Observability"], [2, "Availability"], [1, "Verification"]
+    ]
+    expect(detectTemplateFamily(outline(rows))).toBe("mixed")
+    expect(sections(rows)).toMatchObject({
+      "Record of Changes": "fixed:I",
+      "Document Purpose": "fixed:1",
+      References: "unmapped",
+      Actors: "fixed:2.1",
+      "Use Case Descriptions": "fixed:2.2.2",
+      "Screen Authorization": "fixed:3.1.3",
+      "Course enrollment": "feature:@",
+      "Quality of Service": "group:4.2",
+      Observability: "fixed:4.2.4",
+      Availability: "fixed:4.2.2",
+      Verification: "unmapped"
+    })
+  })
+
+  it("tên trùng tách theo mục cha: Overview trong Introduction = tổng quan tài liệu (giữ nguyên), đứng riêng = tổng quan sản phẩm", () => {
+    expect(sections([[1, "Introduction"], [2, "Purpose"], [2, "Overview"]]).Overview).toBe("unmapped")
+    expect(sections([[1, "Overview"], [1, "Actors"]]).Overview).toBe("fixed:1")
   })
 })
 
@@ -435,16 +538,18 @@ describe("FLF-343 — tín hiệu heading, tự nhận mapping độ tin thấp"
     expect(detectorCap("format", ["bold", "large"])).toBe(0.85)
   })
 
-  it("auto_number (số Word tự sinh) chấm như số gõ tay: heading không số vẫn vào đúng mục, heading_text giữ nguyên chữ", () => {
+  it("FLF-363: auto_number (số Word tự sinh) không tham gia chấm — heading vào đúng mục theo tên, heading_text giữ nguyên chữ", () => {
     const blocks = [
       { block_id: "B0001", kind: "heading" as const, level: 1, text: "Functional Requirements", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "3" },
       { block_id: "B0002", kind: "heading" as const, level: 2, text: "Authentication", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "3.2" },
-      { block_id: "B0003", kind: "heading" as const, level: 2, text: "Business Rules", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "5.1" }
+      { block_id: "B0003", kind: "heading" as const, level: 1, text: "Requirement Appendix", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "5" },
+      { block_id: "B0004", kind: "heading" as const, level: 2, text: "Business Rules", heading_detector: "numbering" as const, heading_signals: ["bold", "numpr"] as const, auto_number: "5.1" }
     ]
-    const map = matchHeadings(blocks.map((b) => ({ ...b, heading_signals: [...b.heading_signals] })), "fpt")
+    const map = matchHeadings(blocks.map((b) => ({ ...b, heading_signals: [...b.heading_signals] })))
     expect(map.map((h) => [h.heading_text, h.section_id.replace(/@B\d+/, "@")])).toEqual([
       ["Functional Requirements", "group:3"],
       ["Authentication", "feature:@"],
+      ["Requirement Appendix", "group:5"],
       ["Business Rules", "fixed:5.1"]
     ])
     expect(Math.max(...map.map((h) => h.confidence))).toBeLessThanOrEqual(0.85)
