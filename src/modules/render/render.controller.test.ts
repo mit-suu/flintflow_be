@@ -269,7 +269,7 @@ describe("FLF-265 §3.1 — ngôn ngữ tài liệu theo project", () => {
       expect(outcome.status).toBe(200)
       expect(getDocumentWithMeta).toHaveBeenCalledWith(PROJECT, "Demo", { source: "draft", languages: { locale: "vi", source: "en" } }, REF_DEPS)
       // FLF-369: draft kèm revision tài liệu (đọc trước khi dựng)
-      expect(outcome.body.meta.document_revision).toBe("7:-:en")
+      expect((outcome.body as { meta: { document_revision?: string } }).meta.document_revision).toBe("7:-:en")
       expect(getDraftMeta).not.toHaveBeenCalled()
       const body = outcome.body as { data: unknown; meta: Record<string, unknown> }
       expect(body.meta).toEqual({ assembled_at_version: 5, spine_version: 5, stale: false, document_revision: "7:-:en", translation })
