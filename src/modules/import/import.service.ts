@@ -86,6 +86,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     ...(h.template_section ? { template_section: h.template_section } : {}),
     ...(h.content_mismatch?.by_title ? { content_mismatch: { by_title: h.content_mismatch.by_title, by_content: h.content_mismatch.by_content } } : {}),
     ...(h.guidance ? { guidance: h.guidance } : {}),
+    ...(h.guidance_by ? { guidance_by: h.guidance_by } : {}),
+    ...(h.guidance_blocks?.length ? { guidance_blocks: [...h.guidance_blocks] } : {}),
     ...(h.number_label ? { number_label: h.number_label } : {})
   })),
   table_map: p.table_map.map((t) => ({
@@ -97,7 +99,8 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confirmed: t.confirmed,
     ...(t.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(t.role ? { role: t.role } : {}),
-    ...(t.samples?.length ? { samples: [...t.samples] } : {})
+    ...(t.samples?.length ? { samples: [...t.samples] } : {}),
+    ...(t.guidance ? { guidance: t.guidance } : {})
   })),
   language: p.language,
   layout: (p.layout ?? []).map((l) => ({

@@ -33,6 +33,10 @@ export interface HeadingMapEntry {
    * ≤ 400 ký tự) — BA xem lúc xác nhận mapping; không phải nội dung. Thiếu = mẫu không ghi.
    */
   guidance?: string
+  /** FLF-364: nguồn của `guidance` — chữ trong ngoặc, có / không kèm kiểu chữ hướng dẫn (màu / nghiêng / tô nền). */
+  guidance_by?: "brackets" | "brackets+format"
+  /** FLF-364: block chứa chữ hướng dẫn. */
+  guidance_blocks?: string[]
   /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`. */
   number_label?: string
 }
@@ -55,6 +59,8 @@ export interface TableMapEntry {
   /** FLF-252: vai trò cột theo dữ liệu (`row_no`, `code`, `mark`…) và tối đa 3 giá trị đầu — người dùng nhìn dữ liệu khi xác nhận. */
   role?: string
   samples?: string[]
+  /** FLF-364: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc. */
+  guidance?: string
 }
 
 /** Mục của layout tài liệu người dùng (FLF-182) — xem `layoutEntrySchema`. */
@@ -135,6 +141,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             template_section: { type: String, default: null },
             content_mismatch: { type: new Schema({ by_title: String, by_content: String }, { _id: false }), default: undefined },
             guidance: { type: String, default: undefined },
+            guidance_by: { type: String, enum: ["brackets", "brackets+format"], default: undefined },
+            guidance_blocks: { type: [String], default: undefined },
             number_label: { type: String, default: undefined }
           },
           opts
@@ -155,7 +163,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             confirmed: { type: Boolean, default: false },
             auto_confirmed: { type: Boolean, default: undefined },
             role: { type: String, default: undefined },
-            samples: { type: [String], default: undefined }
+            samples: { type: [String], default: undefined },
+            guidance: { type: String, default: undefined }
           },
           opts
         )

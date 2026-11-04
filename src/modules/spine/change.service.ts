@@ -82,7 +82,7 @@ import { assertDraftUnlocked } from "./draft-lock.js"
 import { expandIndexSelectors } from "./index-selector-fix.js"
 import type { ChangeRequestInfo } from "../pipeline/pipeline.dto.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { isInstructionText } from "../../shared/utils/instruction-text.js"
+import { splitInstruction } from "../../shared/utils/instruction-text.js"
 import { DEFAULT_REPLY_LANGUAGE, byLanguage, type ReplyLanguage } from "../../shared/i18n/reply-language.js"
 
 export const NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
@@ -309,13 +309,12 @@ export const draftContextOf = (spine: Spine): Record<string, unknown> => {
   }
 }
 
-/** Chữ hướng dẫn mẫu để lại trong mục riêng (`[Describe …]`) — ý khách muốn viết gì ở mục này. */
+/** Chữ hướng dẫn mẫu để lại trong mục riêng (`[Describe …]`, `{…}`, kể cả trong câu — FLF-364) — ý khách muốn viết gì. */
 const customGuidance = (blocks: Spine["custom_sections"][number]["blocks"]): string =>
   blocks
-    .filter((b) => isInstructionText(b.text))
-    .map((b) => b.text.trim().replace(/^\[([\s\S]*)\]$/, "$1").trim())
+    .flatMap((b) => splitInstruction(b.text).guidance)
     .join(" ")
-    .slice(0, 600)
+    .slice(0, 2000)
 
 /**
  * FLF-278: mục riêng (`custom_sections`, heading mẫu không có mục FlintFlow tương ứng) mà lệnh nhắc theo id hoặc tiêu đề —
