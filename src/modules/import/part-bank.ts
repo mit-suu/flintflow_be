@@ -8,6 +8,8 @@
  *   đích `keep` — giữ nguyên văn.
  * - `target`: section Spine (`fixed:*` / `group:*`), `keep`, `feature` (mục chính là một tính năng — IEEE 830 rút gọn) hoặc
  *   `parent` (mục con mô tả chính tính năng cha).
+ * - `slot`: phần nhỏ Spine ưu tiên (plan §2.5: Purpose ⇒ `slot:vision`…) — dùng khi file không có heading nào khác nhận mục FPT
+ *   cha của phần nhỏ đó (một phần dữ liệu chỉ in một lần, `slotOverlaps`), không thì về `target` (chính mục cha).
  * - `repeat`: mẫu thật có nhiều heading cùng nghĩa (Reliability + Availability, các loại giao diện…) ⇒ phần nhận nhiều
  *   heading; còn lại mỗi phần tối đa một heading (như danh mục cũ).
  * - `parents`: phần cha hợp lệ — tách tên trùng ở hai chỗ ("Overview" dưới Introduction = tổng quan tài liệu).
@@ -38,6 +40,7 @@ export interface PartDef {
   target: string
   titles: readonly PartTitle[]
   parents?: readonly string[]
+  slot?: string
   repeat?: boolean
   features?: boolean
   underFeature?: boolean
@@ -47,6 +50,7 @@ interface IeeeSeed {
   target: string
   titles: string[]
   id?: string
+  slot?: string
   parents?: string[]
   repeat?: boolean
   features?: boolean
@@ -61,7 +65,10 @@ const REVISION_TITLES = ["Revision History", "Record of Changes", "Document Hist
  */
 const MOVED_FPT_TITLES: Readonly<Record<string, readonly string[]>> = {
   "group:3.1": ["Product Functions", "Chức năng sản phẩm"],
-  "group:3": ["Specific Requirements", "Yêu cầu cụ thể"]
+  "group:3": ["Specific Requirements", "Yêu cầu cụ thể"],
+  // Mục con của tổng quan / yêu cầu khác có phần nhỏ riêng (phần `slot` bên dưới)
+  "fixed:1": ["Purpose", "Mục đích", "Scope", "Product Scope", "Phạm vi", "Product Perspective"],
+  "fixed:5.4": ["Assumptions and Dependencies", "Giả định và phụ thuộc"]
 }
 
 /** Tên của mẫu IEEE mới (jam01 / 29148 + IEEE 830, Wiegers, ReqView) theo phần — nguồn: plan §2.5. */
@@ -70,12 +77,17 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
   {
     target: "fixed:1",
     repeat: true,
-    titles: [
-      "Introduction", "Giới thiệu", "Purpose", "Document Purpose", "Mục đích", "Mục đích tài liệu", "Scope", "Product Scope", "Project Scope",
-      "Phạm vi", "Phạm vi sản phẩm", "Product Perspective", "Góc nhìn sản phẩm", "Bối cảnh sản phẩm", "Overall Description", "Mô tả tổng quan",
-      "Mô tả chung", "Product Overview", "Tổng quan sản phẩm"
-    ]
+    titles: ["Introduction", "Giới thiệu", "Overall Description", "Mô tả tổng quan", "Mô tả chung", "Product Overview", "Tổng quan sản phẩm"]
   },
+  { id: "part:ieee:purpose", target: "fixed:1", slot: "slot:vision", titles: ["Purpose", "Document Purpose", "Mục đích", "Mục đích tài liệu"] },
+  {
+    id: "part:ieee:scope",
+    target: "fixed:1",
+    slot: "slot:scope",
+    titles: ["Scope", "Product Scope", "Project Scope", "Phạm vi", "Phạm vi sản phẩm"]
+  },
+  { id: "part:ieee:perspective", target: "fixed:1", slot: "slot:context", titles: ["Product Perspective", "Góc nhìn sản phẩm", "Bối cảnh sản phẩm"] },
+  { id: "part:ieee:platforms", target: "slot:platforms", titles: ["Operating Environment", "Môi trường vận hành"] },
   { target: "fixed:2.1", titles: ["User Characteristics", "User Classes and Characteristics", "Đặc điểm người dùng"] },
   { target: "fixed:2.2.1", titles: ["Product Functions", "Product Features", "Chức năng sản phẩm"] },
   { target: "fixed:3.1.2", repeat: true, titles: ["User Interfaces", "User Interface", "Giao diện người dùng", "UI Mockups", "Mockups", "Mockup giao diện"] },
@@ -105,7 +117,7 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
     titles: [
       "Constraints", "General Constraints", "Design Constraints", "Design and Implementation Constraints", "Product Constraints", "Limitations",
       "Memory Constraints", "Security", "Security Requirements", "Safety", "Safety Requirements", "Maintainability", "Portability", "Reusability",
-      "Observability", "Operating Environment", "Môi trường vận hành", "Ràng buộc", "Ràng buộc thiết kế", "Ràng buộc sản phẩm", "Giới hạn", "Ràng buộc bộ nhớ", "Bảo mật", "An toàn",
+      "Observability", "Ràng buộc", "Ràng buộc thiết kế", "Ràng buộc sản phẩm", "Giới hạn", "Ràng buộc bộ nhớ", "Bảo mật", "An toàn",
       "Khả năng bảo trì", "Tính khả chuyển", "Khả năng chuyển đổi", "Khả năng tái sử dụng", "Khả năng quan sát"
     ]
   },
@@ -117,12 +129,24 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
     target: "fixed:5.4",
     repeat: true,
     titles: [
-      "Assumptions and Dependencies", "Giả định và phụ thuộc", "Other Requirements", "Yêu cầu khác", "Standards Compliance", "Compliance", "Tuân thủ",
+      "Other Requirements", "Yêu cầu khác", "Standards Compliance", "Compliance", "Tuân thủ", "Design and Implementation", "Thiết kế và triển khai",
       "Tuân thủ tiêu chuẩn", "Supporting Information", "Thông tin hỗ trợ", "Operations", "Vận hành", "Site Adaptation Requirements", "Yêu cầu thích ứng",
       "User Documentation", "Tài liệu người dùng", "Installation", "Cài đặt", "Build and Delivery", "Build và phát hành", "Distribution", "Phân tán",
       "Cost", "Chi phí", "Deadline", "Thời hạn", "Proof of Concept", "Thử nghiệm khái niệm", "Change Management", "Quản lý thay đổi", "AI/ML",
       "Data Retention", "Lưu giữ dữ liệu", "Frequency of Use and Access", "Tần suất và cách truy cập"
     ]
+  },
+  {
+    id: "part:ieee:assumptions",
+    target: "fixed:5.4",
+    slot: "slot:assumptions",
+    titles: ["Assumptions and Dependencies", "Assumptions", "Giả định và phụ thuộc", "Giả định"]
+  },
+  {
+    id: "part:ieee:tbd_list",
+    target: "fixed:5.4",
+    slot: "slot:open_questions",
+    titles: ["Appendix C: To Be Determined List", "To Be Determined List", "Danh sách cần xác định"]
   },
   {
     target: "fixed:5.5",
@@ -145,7 +169,6 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
   // IEEE 830 rút gọn: "3.2 Specific requirements" nằm trong "3 Specific Requirements" là một tính năng (mục con là chức năng);
   // chứa mục "Classes for classification" thì chỉ là heading
   { id: "part:ieee:specific_feature", target: "feature", titles: ["Specific Requirements", "Yêu cầu cụ thể"], parents: ["part:ieee:requirements"] },
-  { id: "part:ieee:design_impl", target: "keep", titles: ["Design and Implementation", "Thiết kế và triển khai"] },
   { id: "part:ieee:verification", target: "keep", titles: ["Verification", "Kiểm chứng"] },
   // Tên tài liệu dùng làm heading (FPT "II. Software Requirement Specification") — chỉ là heading, giữ nguyên văn
   {
@@ -155,7 +178,6 @@ const IEEE_SEEDS: readonly IeeeSeed[] = [
   },
   { id: "part:ieee:toc", target: "keep", titles: ["Table of Contents and Index", "Mục lục"] },
   { id: "part:ieee:analysis_models", target: "keep", titles: ["Appendix B: Analysis Models", "Analysis Models", "Mô hình phân tích"] },
-  { id: "part:ieee:tbd_list", target: "keep", titles: ["Appendix C: To Be Determined List", "To Be Determined List", "Danh sách cần xác định"] },
   // Spine chưa có loại sơ đồ này ⇒ giữ nguyên văn (ảnh gốc)
   { id: "part:ieee:sequence", target: "keep", titles: ["Sequence Diagrams", "Sequence Diagram", "Biểu đồ tuần tự", "Sơ đồ tuần tự"] },
   // IEEE 830 §5.3.2: cách chia yêu cầu chức năng — mục con là tính năng
@@ -205,6 +227,7 @@ const buildBank = (): PartDef[] => {
       ...(existing ?? { id, target: seed.target, titles: [] }),
       titles: [...(existing?.titles ?? []), ...added],
       ...(seed.parents ? { parents: seed.parents } : {}),
+      ...(seed.slot ? { slot: seed.slot } : {}),
       ...(seed.repeat ? { repeat: true } : {}),
       ...(seed.features ? { features: true } : {}),
       ...(seed.underFeature ? { underFeature: true } : {})
