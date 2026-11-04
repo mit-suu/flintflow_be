@@ -17,7 +17,7 @@ import { sectionTitle } from "./section-catalog.js"
 import type { LayoutEntry } from "./template-profile.model.js"
 import { isContentSlot, slotHasData, slotParents } from "./content-slots.js"
 import { templateWrapperIds } from "./template-wrappers.js"
-import { displayHeading } from "./heading-label.js"
+import { plainHeading } from "./heading-label.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -53,10 +53,10 @@ const hasContent = (spine: Spine, sectionId: string, withContent: ReadonlySet<st
   return withContent.has(sectionId)
 }
 
-/** Tiêu đề của mục theo file upload, kèm số Word tự đánh (FLF-362); mục không có trong file ⇒ tên mẫu. */
+/** Tiêu đề của mục theo file upload, bỏ số mục (FLF-362 — màn bước 3); mục không có trong file ⇒ tên mẫu. */
 const titleOf = (sectionId: string, layout: readonly LayoutEntry[]): string => {
   const entry = layout.find((l) => l.section_id === sectionId)
-  return (entry?.heading_text?.trim() && displayHeading(entry.heading_text, entry.number_label)) || sectionTitle(sectionId)
+  return (entry?.heading_text?.trim() && plainHeading(entry.heading_text)) || sectionTitle(sectionId)
 }
 
 export const compareTargetStructure = (
