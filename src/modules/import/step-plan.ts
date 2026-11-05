@@ -85,7 +85,11 @@ export interface LayoutSlice {
  * Đoạn của một mục FPT `fixed:*` theo thứ tự file (FLF-366): `original` = dãy khối không trích được, giữ ở phần nối
  * `custom_id` (một dãy một phần nối); `spine` = một khối đã trích (khối gốc giữ để in nguyên văn).
  */
-export type LayoutSegmentPart = { kind: "original"; custom_id: string } | { kind: "spine"; block_ids: string[]; blocks: CustomBlock[] }
+export type LayoutSegmentPart =
+  | { kind: "original"; custom_id: string }
+  | { kind: "spine"; block_ids: string[]; blocks: CustomBlock[] }
+  /** Heading con của mục (cấp theo file) — giữ đúng kiểu heading khi in, không vào Spine. */
+  | { kind: "heading"; text: string; level: number }
 
 export interface LayoutSegment {
   section_id: string
@@ -197,9 +201,13 @@ export const buildLayout = (
         current = null
         slice = null
         owner = enclosing.entry
-        // Mục chia đoạn: heading con ("External Systems") là chữ của file ⇒ đoạn chữ trong dãy nguyên văn, đúng chỗ
+        // Mục chia đoạn: heading con ("External Systems") là chữ của file ⇒ đoạn `heading` đúng chỗ, giữ cấp của file;
+        // số Word tự đánh (FLF-362) ghép lại vào chữ như file hiển thị
         const segment = segmentOf.get(owner)
-        if (segment && heading) runOf(owner, segment).blocks.push({ kind: "paragraph", text: heading, rows: null, image_ref: null })
+        if (segment && heading) {
+          const label = b.number_label?.trim()
+          segment.parts.push({ kind: "heading", text: label && !heading.startsWith(label) ? `${label} ${heading}` : heading, level: clampLevel(b.level) })
+        }
         continue
       }
       let section: string
@@ -366,6 +374,7 @@ export const sectionSegments = (
       if (best && !items[best[0]].includes(key)) items[best[0]].push(key)
     }
     const parts = seg.parts.map((p, i): SegmentPart => {
+      if (p.kind === "heading") return p
       if (p.kind === "original") {
         const blocks = customById.get(p.custom_id)?.blocks ?? []
         const diagrams = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram ? [{ image_ref: b.image_ref, kind: b.diagram.kind }] : []))

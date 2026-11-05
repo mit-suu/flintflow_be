@@ -648,6 +648,11 @@ export const buildLayoutSections = (
       shifted(renderSection(segmentSpine(contentSpine, sectionId, new Set(items)), sectionId, contextFor(sectionId, n.number)))
     const out: Block[] = []
     for (const part of record.parts) {
+      if (part.kind === "heading") {
+        // Cấp tương đối với heading của mục trong file ⇒ dời theo cấp in của mục
+        out.push({ type: "heading", level: Math.min(MAX_LEVEL, Math.max(1, n.renderLevel + part.level - n.level)), text: part.text })
+        continue
+      }
       if (part.kind === "spine") {
         out.push(...(isVerbatim(spine, part) ? customBlocks(part.blocks, originalPng) : rebuild(part.items)))
         continue

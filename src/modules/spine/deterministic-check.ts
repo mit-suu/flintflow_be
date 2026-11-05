@@ -477,6 +477,7 @@ export const originalTextMentionsChanged = (spine: Spine, records: readonly Sect
   const out: FlagCandidate[] = []
   for (const r of records) {
     for (const part of r.parts) {
+      if (part.kind === "heading") continue
       const blocks = part.kind === "original" ? spine.custom_sections.find((c) => c.id === part.custom_id)?.blocks : isVerbatim(spine, part) ? part.blocks : undefined
       if (!blocks?.length) continue
       const text = partText(blocks)
