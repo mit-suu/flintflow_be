@@ -18,8 +18,8 @@ const loadCase = (file: string): { name: string; expected_personas: PersonaExpec
 }
 
 describe("fixtures/s3-eval", () => {
-  it("có đủ 3 ca, mỗi ca là Spine hợp lệ đứng ngay trước S-3.1", () => {
-    expect(CASES.sort()).toEqual(["bookbox.json", "flintflow.json", "mediqueue.json"])
+  it("có đủ 4 ca, mỗi ca là Spine hợp lệ đứng ngay trước S-3.1", () => {
+    expect(CASES.sort()).toEqual(["bookbox.json", "flintflow.json", "mediqueue.json", "solo-signin.json"])
     for (const file of CASES) {
       const c = loadCase(file)
       expect(nextStep(c.spine)?.id, file).toBe("S-3.1")
@@ -64,6 +64,17 @@ describe("scoreS3", () => {
     // A02 Shipping Partner, A03 Email Service không nằm trong use case nào
     expect(m.flags.orphan_actor).toBe(2)
     expect(m.flags.relation_invalid).toBe(0)
+  })
+
+  it("FLF-370: Log In gắn thẳng 2 actor người ⇒ generalization_missing; có User làm cha ⇒ 0 và đếm actor tổng quát", () => {
+    expect(scoreS3(withUseCases(() => {}), base.expected_personas)).toMatchObject({ flags: { generalization_missing: 1 }, generalization: { general_actors: 0, children: 0 } })
+    const general = withUseCases((s) => {
+      s.actors.push({ id: "A12", name: "User", kind: "human", description: "Any signed-in Member or Store Manager." })
+      s.actors.find((a) => a.id === "A10")!.parent_id = "A12"
+      s.actors.find((a) => a.id === "A11")!.parent_id = "A12"
+      s.use_cases[0].actor_ids = ["A12"]
+    })
+    expect(scoreS3(general, base.expected_personas)).toMatchObject({ flags: { generalization_missing: 0 }, generalization: { general_actors: 1, children: 2 } })
   })
 
   it("liệt kê quan hệ kèm reason của op theo path", () => {
