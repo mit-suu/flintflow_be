@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url"
 import { describe, it, expect } from "vitest"
 import { spineSchema } from "../spine/spine.schema.js"
 import type { Spine } from "../spine/spine.types.js"
-import { briefExtractionErrors, dropRedundantScalarAdds, interactionErrors, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
+import { actorGeneralizationErrors, briefExtractionErrors, dropRedundantScalarAdds, interactionErrors, lifecycleErrors, isWritablePath, normalizeSelectorPath, regulatedFromStakesAnswer, sanitizeModelOps, useCaseWiringErrors, validateOps } from "./op-validator.js"
 import { getStep } from "./step-registry.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1005,5 +1005,34 @@ describe("lifecycleErrors — vòng đời entity", () => {
         user(s).transitions!.push({ from: "E01-ST3", to: "E01-ST5", event: "archive" })
       })
     ).toEqual([])
+  })
+})
+
+describe("actorGeneralizationErrors — FLF-370 use case tài khoản dùng chung phải gắn actor tổng quát", () => {
+  // Fixture có sẵn Log In (UC02) gắn thẳng A01–A04: nhóm cũ, lô không đụng tới thì không bị chặn
+  const shareReset = [{ op: "set" as const, path: "use_cases[id=UC03].actor_ids", value: ["A01", "A02", "A08"] }]
+
+  it("lô S-3.2 tạo nhóm mới (Reset Password gắn 2 actor người) ⇒ lỗi trỏ use case, kèm cách sửa", () => {
+    const errors = actorGeneralizationErrors(FIXTURE, shareReset, "S-3.2")
+    expect(errors).toMatchObject([{ rule: "actor_generalization_missing", path: "use_cases[id=UC03].actor_ids" }])
+    expect(errors[0].message).toContain("Founder, Business Analyst")
+    expect(errors[0].message).toContain("parent_id")
+  })
+
+  it("chỉ chặn ở S-3.2/S-3.3; lô không đụng nhóm có sẵn ⇒ không lỗi", () => {
+    expect(actorGeneralizationErrors(FIXTURE, shareReset, "S-3.3")).toHaveLength(1)
+    expect(actorGeneralizationErrors(FIXTURE, shareReset, "S-3.4")).toEqual([])
+    expect(actorGeneralizationErrors(FIXTURE, [{ op: "set", path: "actors[id=A01].description", value: "Runs the startup." }], "S-3.2")).toEqual([])
+  })
+
+  it("lô sửa đúng (thêm User, parent_id, use case tài khoản chỉ gắn User) qua validateOps ở S-3.2 và không còn lỗi", () => {
+    const fix = [
+      { op: "add" as const, path: "actors[]", value: { id: "A10", name: "User", kind: "human", description: "Any signed-in Founder, Business Analyst or Administrator.", flows_in: ["Login Credentials"], flows_out: ["Session Token"] } },
+      ...["A01", "A02", "A03"].map((id) => ({ op: "set" as const, path: `actors[id=${id}].parent_id`, value: "A10" })),
+      { op: "set" as const, path: "use_cases[id=UC02].actor_ids", value: ["A10"] },
+      { op: "set" as const, path: "use_cases[id=UC03].actor_ids", value: ["A10", "A08"] }
+    ]
+    expect(validateOps(FIXTURE, fix, { writable: getStep("S-3.2").writes, stepId: "S-3.2" })).toEqual([])
+    expect(actorGeneralizationErrors(FIXTURE, fix, "S-3.2")).toEqual([])
   })
 })
