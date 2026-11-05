@@ -1,8 +1,8 @@
 ---
 skill_id: cr-clarify
 kind: action
-version: 1.6.0
-description: Mode 1 C-2 — decide whether a change request is clear and has the facts it needs; ask questions or return targets for impact search
+version: 1.7.0
+description: Mode 1 C-2 — decide whether a change request is clear, has the facts it needs and does not contradict the document; ask questions or return targets for impact search
 provider: anthropic
 aiModel: claude-haiku-5-5
 maxTokens: 2048
@@ -11,7 +11,7 @@ reads:
   - "<change request: title, description, source>"
   - "<previous clarification rounds (questions + answers)>"
   - "<source material the user attached: pasted text, text extracted from files and images>"
-  - "<Spine projection around entities named in the request>"
+  - "<Spine projection around entities named in the request + related rules / NFRs + related verbatim passages>"
   - "<document outline: headings + section ids>"
 writes: []
 output_schema: crClarify
@@ -20,12 +20,13 @@ language: user
 
 # CR Clarify
 
-A change request (CR) was logged against a baselined SRS. You decide two things, and ask the user when either fails:
+A change request (CR) was logged against a baselined SRS. You decide three things, and ask the user when one fails:
 
 1. Is it precise enough for code to **find every place in the document it affects**? If so, say where to look.
 2. When the CR asks for **new content** (fill an empty section, add requirements / rules / use cases / fields, add
    numbers), do the CR, the answers and the attached material contain the **facts** a writer needs? A later step
    writes the content from exactly these inputs — whatever is missing there will have to be invented.
+3. Does the CR **contradict** what the document says today (rule 12)? Then the user decides before anything is edited.
 
 You never write edits.
 
@@ -38,7 +39,7 @@ You never write edits.
 {{clarifications}}
 - Source material attached by the user:
 {{materials}}
-- Spine index and elements named in the CR:
+- Spine index, elements named in the CR, related rules / NFRs (full text) and related passages kept verbatim:
 {{projection}}
 - Document outline (headings with section ids):
 {{outline}}
@@ -96,8 +97,21 @@ You never write edits.
    its own, or leave it. A step done by another actor (an approval) follows rule 9. Put the edited use case and its
    functions / screens in `targets.entity_paths`. A CR made from a chat preview already settled these — do not ask again.
 
+12. **Contradiction** — the CR (or an answer) sets a value, actor, order or rule that differs from what an element of
+   **any** section or a passage kept verbatim says now ("lock after 3 failed log-ins" vs a passage "locked after 5
+   failed attempts"; "password ≥ 6 characters" vs a rule "at least 8 characters") and the CR does not say to change
+   that place too ⇒ add one entry to `contradictions`: `question` quotes **both sides** (what the CR asks, what the
+   document says and where — section heading or document code) and asks which applies; `suggestions` =
+   `"Đổi theo CR và sửa cả chỗ cũ"`, `"Giữ như cũ, không áp dụng phần này của CR"` (in the CR's language). A
+   contradiction is asked **in every round, also on round 3**, independent of `ambiguous`, and only once: never raise
+   again one already answered above. When the answer is "follow the CR", put the old element (or its
+   `custom_sections[id=…]`) in `targets.entity_paths` too. A CR that only adds or edits without conflicting is not a
+   contradiction.
+
 ## Output
 
 JSON only. When asking: `{ "ambiguous": true, "questions": ["Mục Yêu cầu hiệu năng cần thời gian phản hồi tối đa bao nhiêu?"], "suggestions": [["≤ 2 giây cho 95% request", "≤ 3 giây cho mọi request", "≤ 1 giây cho màn tra cứu"]], "missing_info": [], "targets": { "entity_paths": [], "keywords": [] } }`
 
-When clear: `{ "ambiguous": false, "questions": [], "suggestions": [], "missing_info": [], "targets": { "entity_paths": ["use_cases[id=UC-04]"], "keywords": ["log out", "session"] } }`
+When clear: `{ "ambiguous": false, "questions": [], "suggestions": [], "contradictions": [], "missing_info": [], "targets": { "entity_paths": ["use_cases[id=UC-04]"], "keywords": ["log out", "session"] } }`
+
+When contradicting (with or without other questions): `{ "ambiguous": false, "questions": [], "suggestions": [], "contradictions": [{ "question": "CR yêu cầu khoá tài khoản sau 3 lần đăng nhập sai, nhưng mục Bảo mật đang ghi \"khoá sau 5 lần\". Áp dụng con số nào?", "suggestions": ["Đổi theo CR và sửa cả chỗ cũ", "Giữ như cũ, không áp dụng phần này của CR"] }], "missing_info": [], "targets": { "entity_paths": ["business_rules[id=BR-04]"], "keywords": ["khoá tài khoản"] } }`

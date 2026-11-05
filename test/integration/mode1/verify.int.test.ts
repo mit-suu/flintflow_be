@@ -14,6 +14,7 @@ import { fakeCrClarify, fakeCrPropose, fakeCrProposeNoChange, promptLocations } 
 import { ChangeLocation } from "../../../src/modules/change-request/change-location.model.js"
 import { SpineLock } from "../../../src/modules/change-request/spine-lock.model.js"
 import { runVerify } from "../../../src/modules/change-request/verify.service.js"
+import { CONTRADICTION_CHOICES } from "../../../src/modules/change-request/clarify.service.js"
 import { Spine } from "../../../src/modules/spine/spine.model.js"
 
 const NFR = "nfrs[id=NFR-01]"
@@ -72,14 +73,14 @@ describe("C-5 kiểm code (đỏ)", () => {
   })
 })
 
-describe("C-5 AI consistency chỉ vàng", () => {
+describe("C-5 AI consistency: nhận xét khác mâu thuẫn chỉ vàng", () => {
   it("nhận xét AI gắn vào vị trí sửa cùng section (không khớp section ⇒ vị trí đầu), không chặn ⇒ ready_to_submit", async () => {
     routeCr((p) => {
       if (clarifyPerf(p)) return clarifyPerf(p)
       if (p.includes("# CR Consistency"))
         return JSON.stringify({
           findings: [
-            { rule: "contradiction", section_id: "fixed:4.2.3", message: "1 second contradicts the SLA table", block_ids: [] },
+            { rule: "incomplete_edit", section_id: "fixed:4.2.3", message: "1 second is not applied to the SLA table", block_ids: [] },
             { rule: "dangling_reference", section_id: "fixed:5.1", message: "Rule still assumes 2 seconds", block_ids: [] },
             { rule: "term_drift", section_id: "fixed:9.9", message: "Somewhere else", block_ids: [] }
           ]
@@ -91,7 +92,7 @@ describe("C-5 AI consistency chỉ vàng", () => {
     expect(d.change_request.status).toBe("ready_to_submit")
     expect(d.locations.every((l) => l.verify?.code_ok)).toBe(true)
     const by = (path: string) => d.locations.find((l) => l.path === path)!.verify!.ai_flags.map((f) => f.rule)
-    expect(by(NFR)).toEqual(["contradiction", "term_drift"])
+    expect(by(NFR)).toEqual(["incomplete_edit", "term_drift"])
     expect(by(BR)).toEqual(["dangling_reference"])
     // prompt: giá trị trước/sau của phần tử sửa, section
     const [prompt] = promptsOf("# CR Consistency")
@@ -103,7 +104,7 @@ describe("C-5 AI consistency chỉ vàng", () => {
     // FLF-307: kiểm lại mà không vị trí nào đổi đề xuất ⇒ không gọi AI lần nữa, giữ nguyên nhận xét
     const again = detail(await c.post(`${cr}/verify`))
     expect(promptsOf("# CR Consistency")).toHaveLength(1)
-    expect(again.locations.find((l) => l.path === NFR)!.verify!.ai_flags.map((f) => f.rule)).toEqual(["contradiction", "term_drift"])
+    expect(again.locations.find((l) => l.path === NFR)!.verify!.ai_flags.map((f) => f.rule)).toEqual(["incomplete_edit", "term_drift"])
   })
 
   it("mọi vị trí not_related ⇒ không gọi AI consistency, đạt", async () => {
@@ -211,5 +212,73 @@ describe("C-5 redo ≤ 2 rồi manual_fix", () => {
     detail(await c.post(`${cr}/propose`))
     await Spine.deleteOne({ projectId })
     await expect(runVerify(await crDoc(projectId, crId), "000000000000000000000000")).rejects.toThrow(/Không tìm thấy dữ liệu tài liệu/)
+  })
+})
+
+describe("FLF-367 C-5 thấy mâu thuẫn ⇒ hỏi người yêu cầu", () => {
+  const CONFLICT = "CR đặt thời gian phản hồi 1 giây, nhưng quy tắc mật khẩu ở mục Business Rules vẫn giả định 2 giây"
+
+  it("contradiction ⇒ awaiting_answers (không tới ready_to_submit), khoá giữ nguyên; trả lời ⇒ đề xuất lại, mâu thuẫn đã hỏi chỉ còn vàng", async () => {
+    routeCr((p) => {
+      if (clarifyPerf(p)) return clarifyPerf(p)
+      if (p.includes("# CR Consistency"))
+        return JSON.stringify({
+          findings: [
+            { rule: "contradiction", section_id: "fixed:5.1", message: CONFLICT, block_ids: [] },
+            { rule: "dangling_reference", section_id: "fixed:5.1", message: "Rule still assumes 2 seconds", block_ids: [] }
+          ]
+        })
+      return fakeCrPropose(p)
+    })
+    const { c, cr, projectId, crId } = await toProposed()
+    const locksBefore = await SpineLock.find({ projectId, cr_id: crId }).distinct("path")
+    expect(locksBefore.length).toBeGreaterThan(0)
+
+    const asked = detail(await c.post(`${cr}/verify`))
+    expect(asked.change_request.status).toBe("awaiting_answers")
+    expect(asked.pending_questions).toEqual([CONFLICT])
+    expect(asked.change_request.clarifications.at(-1)!.suggestions).toEqual([[...CONTRADICTION_CHOICES]])
+    // vị trí bỏ kết luận để C-4 đề xuất lại theo câu trả lời; khoá giữ như luồng gộp lệnh
+    expect(asked.locations.every((l) => l.conclusion === null && l.proposal === null && l.verify === null)).toBe(true)
+    expect((await SpineLock.find({ projectId, cr_id: crId }).distinct("path")).sort()).toEqual([...locksBefore].sort())
+
+    // trả lời "đổi theo CR" ⇒ C-2 chạy lại với câu trả lời ⇒ C-3 / C-4 / C-5
+    const answered = detail(await c.post(`${cr}/answers`, { answers: [CONTRADICTION_CHOICES[0]] }))
+    expect(answered.change_request.status).toBe("impact_review")
+    expect(promptsOf("# CR Clarify").at(-1)).toContain(`Q1.1: ${CONFLICT}\nA: ${CONTRADICTION_CHOICES[0]}`)
+    detail(await c.post(`${cr}/impact`))
+    detail(await c.post(`${cr}/propose`))
+    expect(promptsOf("# CR Propose").at(-1)).toContain(CONTRADICTION_CHOICES[0])
+    // model nêu lại đúng mâu thuẫn đã hỏi ⇒ không hỏi lần nữa, chỉ ghi chú vàng
+    const done = detail(await c.post(`${cr}/verify`))
+    expect(done.change_request.status).toBe("ready_to_submit")
+    expect(done.change_request.clarifications).toHaveLength(1)
+    expect(done.locations.flatMap((l) => l.verify?.ai_flags.map((f) => f.rule) ?? [])).toContain("contradiction")
+    expect(promptsOf("# CR Consistency")).toHaveLength(2)
+  })
+
+  it("prompt C-5 có phần tử liên quan ở section khác và đoạn văn giữ nguyên liên quan", async () => {
+    const { c, cr, projectId } = await toProposed()
+    await Spine.updateOne(
+      { projectId },
+      {
+        $push: {
+          custom_sections: {
+            id: "CS90",
+            heading: "Service levels",
+            level: 1,
+            source: "import",
+            blocks: [{ kind: "paragraph", text: "Every response time of the platform is measured monthly against 2 seconds.", rows: null, image_ref: null }]
+          }
+        },
+        $inc: { spine_version: 1 }
+      }
+    )
+    detail(await c.post(`${cr}/verify`))
+    const [prompt] = promptsOf("# CR Consistency")
+    // tài liệu vừa ngân sách ⇒ mọi đoạn văn giữ nguyên đều có, đoạn CS90 không nhất thiết đứng đầu
+    expect(prompt).toContain("Passages kept verbatim:\n")
+    expect(prompt).toContain('custom_sections[id=CS90] "Service levels" (custom:CS90):')
+    expect(prompt).toContain("measured monthly against 2 seconds")
   })
 })
