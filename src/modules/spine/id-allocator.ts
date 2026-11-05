@@ -37,6 +37,9 @@ export const ID_FORMATS: Readonly<Record<string, IdFormat>> = Object.freeze({
   messages: { prefix: "MSG", width: 2 },
   other_requirements: { prefix: "OR", width: 2 },
   glossary: { prefix: "G", width: 2 },
+  // FLF-365: mẫu IEEE 29148
+  references: { prefix: "REF-", width: 2 },
+  verifications: { prefix: "VER-", width: 2 },
   addendum: { prefix: "AD", width: 2 },
   custom_sections: { prefix: "CS", width: 2 },
   diagrams: { prefix: "D", width: 2 },

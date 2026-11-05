@@ -70,6 +70,8 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("function_without_uc", "yellow", true),
   rule("original_diagram_stale", "yellow", true),
   rule("orphan_entity", "yellow", true),
+  // FLF-365: ma trận kiểm chứng (mẫu IEEE 29148, Mode 1) trỏ yêu cầu không còn trong tài liệu
+  rule("verification_orphan", "yellow", true),
   rule("unresolved_many_to_many", "yellow", true),
   // FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc): chỉ chạy khi hồ sơ luật mang layout của mẫu
   rule("template_section_absent", "yellow", true),
@@ -101,6 +103,8 @@ export const MODEL_OWNED_RULES: ReadonlySet<string> = new Set([
   "import_unresolved_ref",
   // FLF-343: chỗ độ tin thấp tự nhận vào baseline 0.1 ("Cần xem") — chỉ import đặt được, recompute không đóng
   "import_needs_review",
+  // FLF-363: tiêu đề và nội dung chỉ hai mục khác nhau lúc import — chỉ import đặt được, recompute không đóng
+  "import_title_content_mismatch",
   "cr_consistency"
 ])
 
@@ -804,7 +808,17 @@ const cardinality = (spine: Spine, gate: StepGate): FlagCandidate[] => {
   const when = (rule: keyof typeof GATE_STEP, make: () => FlagCandidate[]): FlagCandidate[] =>
     gate.done(GATE_STEP[rule]) ? make() : []
 
+  // FLF-365: dòng kiểm chứng phải trỏ một yêu cầu có thật (chức năng / NFR / quy tắc / use case). Không qua cổng step:
+  // `verifications[]` chỉ có ở dự án import theo mẫu IEEE, ghi bằng CR
+  const requirementIds = new Set([...spine.functions, ...spine.nfrs, ...spine.business_rules, ...spine.use_cases].map((r) => r.id))
+  const orphanVerifications = (spine.verifications ?? [])
+    .filter((v) => !requirementIds.has(v.requirement_id))
+    .map((v) =>
+      yellow("verification_orphan", "slot:verification", v.id, `Dòng kiểm chứng ${v.id} trỏ yêu cầu "${v.requirement_id}" không có trong tài liệu`, "S-7.4")
+    )
+
   return [
+    ...orphanVerifications,
     // Mọi kind: actor system/time không tham gia use case nào cũng bị renderer bỏ khỏi sơ đồ
     // (chỉ actor có cạnh mới được khai báo) — biến mất im lặng nếu chỉ xét actor human.
     ...when("orphan_actor", () =>

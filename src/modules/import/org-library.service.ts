@@ -17,6 +17,7 @@ import type { IImportedDocument } from "./imported-document.model.js"
 import { OrgContentEntry, OrgTemplate, type IOrgContentEntry, type IOrgTemplate } from "./org-library.model.js"
 import { TemplateProfile } from "./template-profile.model.js"
 import { normalizeTitle } from "./org-mapping.js"
+import { normalizeTemplateFamily } from "./part-bank.js"
 import type { TemplateIntent } from "./target-structure.js"
 
 export { applyOrgMapping, normalizeTitle } from "./org-mapping.js"
@@ -43,7 +44,7 @@ const summaryOf = (t: IOrgTemplate): OrgTemplateSummary => ({
   source_file_name: t.source_file.name,
   heading_count: t.headings.length,
   custom_count: t.headings.filter((h) => h.section_id === "unmapped").length,
-  template_family: t.template_family,
+  template_family: t.template_family ? normalizeTemplateFamily(t.template_family) : null,
   uses: t.uses,
   created_at: t.createdAt.toISOString()
 })

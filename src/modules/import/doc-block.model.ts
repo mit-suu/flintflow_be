@@ -45,6 +45,10 @@ export interface IDocBlock extends Document {
    * tách `text` theo dòng làm gãy hàng khi ô có xuống dòng. Bản ghi cũ không có ⇒ dựng từ block `table_cell` (`table-rows.ts`).
    */
   rows?: string[][] | null
+  /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `text`; hiển thị / in lại đúng số của file. */
+  number_label?: string | null
+  /** FLF-364: đoạn có kiểu chữ hướng dẫn (nghiêng / tô nền / khác màu thân bài) — tín hiệu phụ, không tự quyết. */
+  guidance_format?: boolean
 }
 
 const opts = { _id: false }
@@ -72,6 +76,8 @@ const docBlockSchema = new Schema<IDocBlock>(
     text: { type: String, default: "" },
     image_ref: { type: String, default: null },
     rows: { type: [[String]], default: undefined },
+    number_label: { type: String, default: undefined },
+    guidance_format: { type: Boolean, default: undefined },
     text_hash: { type: String, required: true },
     section_id: { type: String, default: null },
     mentions: {

@@ -21,6 +21,7 @@ import {
   STAMP_KINDS
 } from "./import.constants.js"
 import { TEMPLATE_INTENTS } from "../project/project.model.js"
+import { TEMPLATE_FAMILIES } from "./part-bank.js"
 
 const id = z.string().min(1)
 const isoDateTime = z.iso.datetime({ offset: true })
@@ -109,16 +110,23 @@ export const headingMapEntrySchema = z.object({
   /** FLF-343: độ tin thấp, được tự nhận lúc tách file (không qua bước xác nhận) — có cờ vàng "Cần xem" sau baseline. */
   auto_confirmed: z.boolean().optional(),
   /**
-   * FLF-252: heading khớp một mục của mẫu không phải FPT (IEEE) — `section_id = unmapped` mà có field này nghĩa là mục
-   * chỉ có ở mẫu đó, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
+   * FLF-363: phần của ngân hàng phần khớp theo tên — `section_id = unmapped` mà có field này nghĩa là phần chỉ có ở mẫu
+   * IEEE, giữ nguyên văn (khác heading lạ không khớp gì). Mã nội bộ, FE không hiện.
    */
   template_section: z.string().nullable().optional(),
+  /** FLF-363 (D2): mục theo tên (`by_title`) khác mục theo nội dung (`by_content`) — heading đã đổi theo nội dung. */
+  content_mismatch: z.object({ by_title: z.string(), by_content: z.string() }).optional(),
   /** FLF-278 trên FLF-336: chữ hướng dẫn của mẫu dưới heading (business-flow 1.5) — chỉ để BA xem, không phải nội dung. */
-  guidance: z.string().optional()
+  guidance: z.string().optional(),
+  /** FLF-364: nguồn của `guidance` (chữ trong ngoặc, có / không kèm kiểu chữ hướng dẫn) và block chứa nó. */
+  guidance_by: z.enum(["brackets", "brackets+format"]).optional(),
+  guidance_blocks: z.array(z.string()).optional(),
+  /** FLF-362: nhãn số Word tự đánh của heading ("2.1", "II.") — không nằm trong `heading_text`; hiển thị = nhãn + tiêu đề. */
+  number_label: z.string().optional()
 })
 
-/** Họ mẫu của tài liệu upload (FLF-252). */
-export const TEMPLATE_FAMILIES = ["fpt", "ieee830", "ieee_features"] as const
+/** Nhãn họ mẫu của tài liệu upload (FLF-363: `fpt` · `ieee29148` · `mixed`, tính sau khi khớp — chỉ để báo cáo). */
+export { TEMPLATE_FAMILIES }
 
 export const tableMapEntrySchema = z.object({
   block_id: blockId,
@@ -132,7 +140,9 @@ export const tableMapEntrySchema = z.object({
   /** FLF-252: vai trò cột theo dữ liệu (`row_no` số thứ tự, `code` mã, `mark` ô đánh dấu…) — không có khi chỉ khớp tiêu đề. */
   role: z.string().optional(),
   /** FLF-252: tối đa 3 giá trị đầu của cột. */
-  samples: z.array(z.string()).optional()
+  samples: z.array(z.string()).optional(),
+  /** FLF-364: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc — chỉ để xem, không phải nội dung. */
+  guidance: z.string().optional()
 })
 
 /**
@@ -143,7 +153,9 @@ export const layoutEntrySchema = z.object({
   order: z.number().int().min(0),
   heading_text: z.string(),
   level: z.number().int().min(1).max(9),
-  section_id: z.string().min(1)
+  section_id: z.string().min(1),
+  /** FLF-362: như `headingMapEntrySchema.number_label`. */
+  number_label: z.string().optional()
 })
 
 /** Một dòng Record of Changes của file gốc (FLF-252) — cùng hình dòng §I của `RenderedDocument.recordOfChanges`. */
