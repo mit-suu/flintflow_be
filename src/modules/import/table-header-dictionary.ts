@@ -166,6 +166,37 @@ export const TABLE_ENTITIES: readonly TableEntityDef[] = [
       { field: "statement", headers: ["requirement", "description", "statement", "yêu cầu", "mô tả", "nội dung"] }
     ],
     required: ["statement"]
+  },
+  // FLF-365 / FLF-372: mục IEEE 29148 — tên cột của mẫu (jam01) và của bảng FlintFlow in ra (`render/labels.ts`), để bản xuất
+  // theo mẫu bắt buộc điền đúng cột theo field và I-4 đọc bảng tất định
+  {
+    entity: "references",
+    sections: ["slot:references"],
+    columns: [
+      { field: "id", headers: ["id", "ref id", "mã", "mã tài liệu"] },
+      { field: "title", headers: ["title", "document", "document title", "tên tài liệu", "tài liệu", "tiêu đề"] },
+      { field: "owner", headers: ["owner", "publisher", "issuer", "đơn vị", "đơn vị ban hành", "nơi ban hành"] },
+      { field: "version", headers: ["version", "phiên bản"] },
+      { field: "date", headers: ["date", "issue date", "ngày", "ngày ban hành"] },
+      { field: "location", headers: ["location", "link", "url", "source", "nơi lưu", "đường dẫn", "nguồn"] },
+      { field: "kind", headers: ["kind", "type", "loại"] }
+    ],
+    required: ["title"]
+  },
+  {
+    entity: "verifications",
+    sections: ["slot:verification"],
+    columns: [
+      { field: "requirement_id", headers: ["requirement", "requirement id", "req id", "yêu cầu", "mã yêu cầu"] },
+      { field: "method", headers: ["method", "verification method", "phương pháp", "phương pháp kiểm chứng"] },
+      {
+        field: "artifact",
+        headers: ["artifact", "test case", "test case / artifact", "ca kiểm thử", "ca kiểm thử / tạo tác", "tạo tác", "tài liệu kiểm"]
+      },
+      { field: "status", headers: ["status", "trạng thái"] },
+      { field: "evidence", headers: ["evidence", "bằng chứng"] }
+    ],
+    required: ["requirement_id", "method"]
   }
 ]
 
