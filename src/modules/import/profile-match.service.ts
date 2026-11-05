@@ -18,7 +18,7 @@ import { MAPPING_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, type HeadingDetector, t
 import type { ParsedBlock } from "./parse.service.js"
 import { PROVISIONAL_SECTION, isContentSection, provisionalFeatureId, provisionalFunctionId } from "./section-catalog.js"
 import { TABLE_ENTITIES, matchTable } from "./table-header-dictionary.js"
-import { SLOT_SUGGESTION_CONFIDENCE, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
+import { SLOT_SUGGESTION_CONFIDENCE, bindFixedTemplateHeadings, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
 import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
 import { PART_BANK, isWeakTitle, partById, partsMentionedIn, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
@@ -354,8 +354,18 @@ const familyOf = (hits: Map<number, Hit>): TemplateFamily => {
   return "mixed"
 }
 
+/**
+ * FLF-371: mẫu bắt buộc — phần nhỏ + cha/con cùng mục (cần cấp heading); cấp chỉ dùng để tính, không lưu vào heading_map.
+ */
+const bindFixed = (entries: HeadingMapEntry[], blocks: readonly ProfileBlock[], fixedTemplate: boolean | undefined): HeadingMapEntry[] => {
+  if (!fixedTemplate) return entries
+  const levelOf = new Map(blocks.filter((b) => b.kind === "heading").map((b) => [b.block_id, b.level]))
+  return bindFixedTemplateHeadings(entries.map((e) => ({ ...e, level: levelOf.get(e.block_id) ?? null }))).map(({ level: _level, ...e }) => e)
+}
+
 /** Khớp heading theo ngân hàng phần (FLF-363). */
-export const matchHeadings = (blocks: ProfileBlock[]): HeadingMapEntry[] => matchBankHeadings(headingsOf(blocks), guidanceByHeading(blocks)).entries
+export const matchHeadings = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } = {}): HeadingMapEntry[] =>
+  bindFixed(matchBankHeadings(headingsOf(blocks), guidanceByHeading(blocks)).entries, blocks, options.fixedTemplate)
 
 /** Nhãn họ mẫu của tài liệu (chỉ để báo cáo — không quyết định cách khớp). */
 export const detectTemplateFamily = (blocks: ProfileBlock[]): TemplateFamily => familyOf(matchBankHeadings(headingsOf(blocks)).hits)
@@ -597,12 +607,12 @@ const columnGuidance = (blocks: readonly ProfileBlock[]): Map<string, string> =>
   return out
 }
 
-export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
+export const matchProfile = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } = {}): ProfileMatch => {
   const guidance = guidanceByHeading(blocks)
   const matched = matchBankHeadings(headingsOf(blocks), guidance)
   const template_family = familyOf(matched.hits)
   const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
-  const heading_map = withContentSignals(blocks, matched.entries).map((h) => ({
+  const heading_map = bindFixed(withContentSignals(blocks, matched.entries), blocks, options.fixedTemplate).map((h) => ({
     ...h,
     ...(guidance.has(h.block_id)
       ? { guidance: guidance.get(h.block_id)!.text, guidance_by: guidance.get(h.block_id)!.by, guidance_blocks: guidance.get(h.block_id)!.blocks }

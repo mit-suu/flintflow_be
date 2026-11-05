@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isInstructionText, isRealText, splitInstruction, tableHasRealText } from "./instruction-text.js"
+import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "./instruction-text.js"
 
 describe("instruction-text", () => {
   it("FLF-364: chỉ chữ trong [ ] / { } là hướng dẫn; ngoặc tròn, < >, câu mô tả mục là nội dung", () => {
@@ -36,5 +36,14 @@ describe("instruction-text", () => {
     })
     expect(splitInstruction("The app uses TLS 1.3 [RFC 8446].")).toEqual({ text: "The app uses TLS 1.3 [RFC 8446].", guidance: [] })
     expect(splitInstruction("")).toEqual({ text: "", guidance: [] })
+  })
+
+  it("FLF-278: bảng mẫu = tiêu đề + hàng chỗ trống ⇒ không có nội dung; bảng một hàng xét như nhãn | giá trị", () => {
+    expect(tableBodyHasRealText([["ID", "Requirement", "Priority"], ["[FR-xxx]", "[Describe the requirement.]", "[High/Medium/Low]"]])).toBe(false)
+    expect(tableBodyHasRealText([["ID", "Requirement", "Priority"]])).toBe(true)
+    expect(tableBodyHasRealText([["ID", "Requirement"], ["FR-01", "Members can join a club"]])).toBe(true)
+    expect(tableBodyHasRealText([["Role", "[Name]"]])).toBe(false)
+    expect(tableBodyHasRealText([["Role", "Admin"]])).toBe(true)
+    expect(tableBodyHasRealText(null)).toBe(false)
   })
 })

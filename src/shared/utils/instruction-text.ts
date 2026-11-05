@@ -46,3 +46,13 @@ export const splitInstruction = (text: string): { text: string; guidance: string
   })
   return guidance.length ? { text: rest.replace(/\s+/g, " ").replace(/\s+([.,;:])/g, "$1").trim(), guidance } : { text: t, guidance: [] }
 }
+
+/**
+ * Bảng có **nội dung** (không chỉ khung mẫu): hàng tiêu đề không tính — bảng mẫu thường là tiêu đề + hàng chỗ trống
+ * (`ID | Requirement | Priority` + `[FR-xxx] | …`). Bảng một hàng coi là nhãn | giá trị: chỉ xét các ô sau cột đầu
+ * (`Role | [Name]` trống, `Role | Admin` có nội dung).
+ */
+export const tableBodyHasRealText = (rows: readonly (readonly string[])[] | null | undefined): boolean => {
+  if (!rows || rows.length === 0) return false
+  return rows.length === 1 ? rows[0].slice(1).some((cell) => isRealText(cell)) : tableHasRealText(rows.slice(1))
+}

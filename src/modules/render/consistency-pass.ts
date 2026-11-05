@@ -16,8 +16,9 @@
 import { findDeadReferences } from "../spine/reference-fields.js"
 import type { Spine } from "../spine/spine.types.js"
 import type { Block, RenderedSection } from "./rendered-document.types.js"
+import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 
-export type ConsistencyRule = "dead_reference" | "duplicate_section_number" | "undefined_term" | "diagram_png_missing"
+export type ConsistencyRule = "dead_reference" | "duplicate_section_number" | "undefined_term" | "diagram_png_missing" | "template_section_absent"
 
 export interface ConsistencyFinding {
   rule: ConsistencyRule
@@ -25,6 +26,18 @@ export interface ConsistencyFinding {
   path?: string
   section_id?: string
 }
+
+/** Surface populated data omitted by the fixed source outline without changing that outline. */
+export const omittedTemplateSectionFindings = (spine: Spine, sectionIds: readonly string[]): ConsistencyFinding[] =>
+  [...new Set(sectionIds)].filter((id) => {
+    if (!id.startsWith("custom:")) return true
+    return spine.custom_sections.find((s) => `custom:${s.id}` === id)?.blocks.some((b) =>
+      b.kind === "image" ? !!b.image_ref : b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)) ?? false
+  }).map((id) => ({
+    rule: "template_section_absent",
+    section_id: id,
+    message: `Section ${id} contains data without a matching heading in the fixed template. Review this content separately.`
+  }))
 
 /**
  * Sơ đồ `render_status = "ok"` nhưng PNG không tải được lúc assemble: tài liệu dùng ảnh placeholder cho tới

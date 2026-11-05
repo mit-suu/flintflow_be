@@ -461,6 +461,7 @@ export const writerOptionsFor = (
 /** Nhãn hệ thống trong phần nhỏ (`customer-template` slot) theo ngôn ngữ tài liệu; dữ liệu Spine in nguyên. */
 export const SLOT_TEXT = {
   en: {
+    goals: "Goals",
     inScope: "In Scope",
     outOfScope: "Out of Scope",
     primary: "primary",
@@ -492,6 +493,7 @@ export const SLOT_TEXT = {
     } as Readonly<Record<string, string>>
   },
   vi: {
+    goals: "Mục tiêu",
     inScope: "Trong phạm vi",
     outOfScope: "Ngoài phạm vi",
     primary: "chính",

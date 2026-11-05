@@ -314,8 +314,10 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
 }
 
 export const runParse = async (doc: IImportedDocument): Promise<void> => {
-  const { blocks } = await parseDocument(await loadImportFile(doc))
-  const matched = matchProfile(blocks)
+  const sourceFile = await loadImportFile(doc)
+  const { blocks } = await parseDocument(sourceFile)
+  // Mẫu bắt buộc: profile lưu dùng đúng mapping của bản xuất (phần nhỏ, cha/con cùng mục) ⇒ I-5, kế hoạch step, cờ "Cần xem" khớp
+  const matched = matchProfile(blocks, { fixedTemplate: doc.intent === "fixed" })
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
   const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id) : null
   const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
@@ -326,7 +328,7 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, legacy_record_of_changes })
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes })
   await transitionImport(doc, "extracting")
 }
 
