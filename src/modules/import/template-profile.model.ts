@@ -69,6 +69,9 @@ export interface ITemplateProfile extends Document {
   projectId: mongoose.Types.ObjectId
   source: "imported"
   doc_version: string
+  /** File upload tạo ra mapping này; dùng trực tiếp khi xuất theo mẫu bắt buộc. */
+  source_sha256?: string | null
+  source_file_ref?: string | null
   heading_map: HeadingMapEntry[]
   table_map: TableMapEntry[]
   /** Ngôn ngữ chính của tài liệu (`en`, `vi`…). */
@@ -110,6 +113,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true },
     source: { type: String, enum: ["imported"], default: "imported" },
     doc_version: { type: String, required: true },
+    source_file_ref: { type: String, default: null },
+    source_sha256: { type: String, default: null },
     heading_map: {
       type: [
         new Schema(

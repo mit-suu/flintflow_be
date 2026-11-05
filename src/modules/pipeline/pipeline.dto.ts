@@ -232,7 +232,12 @@ export const stepSummarySchema = z.object({
   regenerate_limit: z.literal(3),
   accepted_at: isoDateTime.nullable(),
   /** Step đang chạy dở ở một request khác (cùng tiến trình BE) — FE khoá nút chạy thay vì để người dùng bấm rồi nhận 409. */
-  running: z.boolean()
+  running: z.boolean(),
+  /**
+   * FLF-278 (additive): chỉ có ở dự án theo mẫu bắt buộc (`template_intent = fixed`) — heading của mẫu (nguyên văn, thứ tự
+   * mẫu) mà bước soạn; `[]` = bước không soạn mục nào của mẫu (phân tích, kiểm tra). Dự án khác: không có field.
+   */
+  template_sections: z.array(z.string()).optional()
 })
 
 /** GET /projects/:id/steps */
