@@ -148,7 +148,8 @@ export const DEFAULT_DIAGRAM_ENGINE = "plantuml@1"
  */
 export const DIAGRAM_ENGINES: Readonly<Record<DiagramKind, string>> = Object.freeze({
   context: DEFAULT_DIAGRAM_ENGINE,
-  usecase: "svg@1",
+  // svg@2 (FLF-369): bộ xếp thử nhiều phương án (thứ tự hàng, actor hai bên) ⇒ hình svg@1 cũ thành stale, vẽ lại một lượt
+  usecase: "svg@2",
   screen_flow: "svg@3",
   erd: "svg@1",
   class: "svg@1",

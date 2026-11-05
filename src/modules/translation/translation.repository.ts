@@ -70,8 +70,9 @@ export const saveTranslations = async (
       filter: { projectId: oid(projectId), locale, sourceHash },
       update:
         origin === "author"
-          ? { $set: { text, origin, sourceLocale }, $setOnInsert: { createdAt: now } }
-          : { $setOnInsert: { text, origin, sourceLocale, createdAt: now } },
+          ? { $set: { text, origin, sourceLocale, updatedAt: now }, $setOnInsert: { createdAt: now } }
+          : // `machine` không ghi đè bản đã có ⇒ chỉ lần chèn mới đổi nội dung (và revision)
+            { $setOnInsert: { text, origin, sourceLocale, createdAt: now, updatedAt: now } },
       upsert: true
     }
   }))
@@ -150,4 +151,17 @@ export const acquireRunLock = async (projectId: string, locale: UserLocale): Pro
 /** Nhả khoá — chỉ khi vẫn đúng lượt đã chiếm (khoá quá hạn đã bị lượt khác chiếm thì để nguyên). */
 export const releaseRunLock = async (projectId: string, locale: UserLocale, token: string): Promise<void> => {
   await TranslationRunLock.deleteOne({ projectId: oid(projectId), locale, token })
+}
+
+/**
+ * Revision lớp bản dịch của (dự án, ngôn ngữ): thời điểm ghi đổi nội dung gần nhất (`updatedAt` lớn nhất), `null` khi chưa
+ * có bản ghi nào mang `updatedAt`. Một truy vấn theo index `{ projectId, locale, updatedAt }`, chỉ đọc một field.
+ */
+export const translationRevision = async (projectId: string, locale: UserLocale): Promise<string | null> => {
+  const latest = (await SpineTranslation.findOne(
+    { projectId: oid(projectId), locale, updatedAt: { $exists: true } },
+    { updatedAt: 1, _id: 0 },
+    { sort: { updatedAt: -1 }, lean: true }
+  )) as { updatedAt?: Date } | null
+  return latest?.updatedAt ? latest.updatedAt.toISOString() : null
 }
