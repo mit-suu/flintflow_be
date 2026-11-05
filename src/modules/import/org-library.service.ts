@@ -10,7 +10,7 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { CustomBlock, CustomSection } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { isRealText } from "../../shared/utils/instruction-text.js"
+import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { latestImport, loadImportFile, uploadImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
@@ -166,7 +166,7 @@ const customSectionsOf = async (projectId: string): Promise<CustomSection[]> => 
   return spine.custom_sections.filter((c) => c.heading.trim())
 }
 
-const hasRealContent = (c: CustomSection) => c.blocks.some((b) => b.image_ref || isRealText(b.text) || (b.rows ?? []).some((r) => r.some(isRealText)))
+const hasRealContent = (c: CustomSection) => c.blocks.some((b) => b.image_ref || (b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)))
 
 /** Lưu nội dung đã viết của một mục riêng vào thư viện tổ chức (chỉ đoạn chữ / gạch đầu dòng thật, bỏ chữ hướng dẫn). */
 export const saveSectionToLibrary = async (projectId: string, orgId: string, userId: string, customSectionId: string): Promise<ContentEntryView> => {

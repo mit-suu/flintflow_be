@@ -24,7 +24,7 @@ import {
   type SectionCandidate
 } from "./section-catalog.js"
 import { matchTable } from "./table-header-dictionary.js"
-import { SLOT_SUGGESTION_CONFIDENCE, slotParents, suggestSlot } from "./content-slots.js"
+import { bindFixedTemplateHeadings, SLOT_SUGGESTION_CONFIDENCE, slotParents, suggestSlot } from "./content-slots.js"
 import { isInstructionText } from "../../shared/utils/instruction-text.js"
 import { TEMPLATE_CATALOGS, type TemplateEntry, type TemplateFamily } from "./template-catalog.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
@@ -265,8 +265,14 @@ const matchWithCatalog = (headings: MatchHeading[], catalog: readonly TemplateEn
 }
 
 /** Khớp heading theo họ mẫu (FLF-252); không truyền ⇒ tự nhận họ mẫu. Heading chưa khớp ⇒ gợi ý phần nhỏ theo từ khoá. */
-export const matchHeadings = (blocks: ProfileBlock[], family: TemplateFamily = detectTemplateFamily(blocks)): HeadingMapEntry[] =>
-  withSlotSuggestions(family === "fpt" ? matchFptHeadings(headingsOf(blocks)) : matchWithCatalog(headingsOf(blocks), TEMPLATE_CATALOGS[family]))
+export const matchHeadings = (blocks: ProfileBlock[], family: TemplateFamily = detectTemplateFamily(blocks), options: { fixedTemplate?: boolean } = {}): HeadingMapEntry[] => {
+  const headings = headingsOf(blocks)
+  const entries = withSlotSuggestions(family === "fpt" ? matchFptHeadings(headings) : matchWithCatalog(headings, TEMPLATE_CATALOGS[family]))
+  if (!options.fixedTemplate) return entries
+  // Mẫu bắt buộc: phần nhỏ + cha/con cùng mục (cần cấp heading) — cấp chỉ dùng để tính, không lưu vào heading_map
+  const levelOf = new Map(headings.map((h) => [h.block_id, h.level]))
+  return bindFixedTemplateHeadings(entries.map((e) => ({ ...e, level: levelOf.get(e.block_id) ?? null }))).map(({ level: _level, ...e }) => e)
+}
 
 /**
  * FLF-278 trên FLF-336 (business-flow 1.5): heading matcher chưa khớp (`unmapped`, kể cả mục `keep` của catalog) mà tiêu đề
@@ -383,10 +389,10 @@ export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, 
   return out
 }
 
-export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
+export const matchProfile = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } = {}): ProfileMatch => {
   const template_family = detectTemplateFamily(blocks)
   const guidance = guidanceByHeading(blocks)
-  const heading_map = matchHeadings(blocks, template_family).map((h) => (guidance.has(h.block_id) ? { ...h, guidance: guidance.get(h.block_id)! } : h))
+  const heading_map = matchHeadings(blocks, template_family, options).map((h) => (guidance.has(h.block_id) ? { ...h, guidance: guidance.get(h.block_id)! } : h))
   const sections = assignBlockSections(blocks, heading_map)
   return {
     heading_map,
