@@ -129,8 +129,14 @@ const toCustomBlock = (b: LayoutBlock): CustomBlock | null => {
 export const buildLayout = (
   blocks: LayoutBlock[],
   headingSections: ReadonlyMap<string, string>,
-  unmappedBlockIds: ReadonlySet<string> = new Set()
+  unmappedBlockIds: ReadonlySet<string> = new Set(),
+  /**
+   * FLF-366: chia đoạn mục FPT. Tắt cho mẫu bắt buộc (`template_intent = fixed`, chế độ 3): file upload là mẫu để điền
+   * (bản xuất điền vào chính file đó — FLF-371), không phải SRS cần in nguyên văn.
+   */
+  options: { segment?: boolean } = {}
 ): LayoutResult => {
+  const segmentOn = options.segment ?? true
   const layout: LayoutEntry[] = []
   const customSections: CustomSection[] = []
   const slices: LayoutSlice[] = []
@@ -211,7 +217,7 @@ export const buildLayout = (
       layout.push(entry)
       stack.push({ level: b.level, section, entry })
       owner = current ? null : entry
-      if (owner && isSegmentedSection(section)) {
+      if (owner && segmentOn && isSegmentedSection(section)) {
         const segment: LayoutSegment = { section_id: section, parts: [] }
         segments.push(segment)
         segmentOf.set(entry, segment)
