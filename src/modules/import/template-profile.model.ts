@@ -72,6 +72,11 @@ export interface LayoutEntry {
   section_id: string
   /** FLF-362: nhãn số Word tự đánh của heading gốc ("2.1") — không nằm trong `heading_text`. */
   number_label?: string
+  /**
+   * FLF-364 (câu 10): nguyên văn chữ hướng dẫn của mẫu (`[…]` / `{…}`, giữ ngoặc) dưới heading mục FPT / phần nhỏ — bản in
+   * Mode 1 in nó khi mục chưa có dữ liệu, có dữ liệu thì không in. Mục riêng giữ hướng dẫn trong khối của chính nó.
+   */
+  template_guidance?: string[]
 }
 
 /** Kế hoạch step theo template (FLF-182) — xem `stepPlanEntrySchema`. */
@@ -223,7 +228,8 @@ const templateProfileSchema = new Schema<ITemplateProfile>(
             heading_text: { type: String, default: "" },
             level: { type: Number, required: true, min: 1, max: 9 },
             section_id: { type: String, required: true },
-            number_label: { type: String, default: undefined }
+            number_label: { type: String, default: undefined },
+            template_guidance: { type: [String], default: undefined }
           },
           opts
         )

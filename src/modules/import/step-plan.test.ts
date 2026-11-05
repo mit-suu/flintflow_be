@@ -297,3 +297,20 @@ describe("seedStepOps + step engine với step skipped", () => {
     expect(progressByStep(s).total).toBe(withoutSkip.total - skipped)
   })
 })
+
+describe("FLF-364 (câu 10) — chữ hướng dẫn dưới mục FPT giữ ở layout entry", () => {
+  it("đoạn hướng dẫn dưới mục FPT ⇒ template_guidance nguyên văn, không thành phần nối; dưới heading lạ ⇒ khối của mục riêng", () => {
+    const blocks: LayoutBlock[] = [
+      h("B0001", "2.1 Actors", 2),
+      p("B0002", "[Liệt kê các tác nhân]", "fixed:2.1"),
+      p("B0003", "Học viên là người học.", "fixed:2.1"),
+      h("B0004", "Ghi chú nhóm", 1),
+      p("B0005", "{Ghi lịch họp}", null)
+    ]
+    const { layout, customSections } = buildLayout(blocks, new Map([["B0001", "fixed:2.1"]]), new Set(["B0002"]))
+    expect(layout.find((l) => l.section_id === "fixed:2.1")?.template_guidance).toEqual(["[Liệt kê các tác nhân]"])
+    // không có phần nối chỉ chứa hướng dẫn
+    expect(customSections.filter((c) => !c.heading)).toEqual([])
+    expect(customSections.find((c) => c.heading === "Ghi chú nhóm")?.blocks.map((b) => b.text)).toEqual(["{Ghi lịch họp}"])
+  })
+})
