@@ -15,9 +15,10 @@ import { REQUIRED_FIXED_SECTION_IDS, stepsOf } from "../spine/section-registry.j
 import { sectionHasData } from "../spine/deterministic-check.js"
 import { sectionTitle } from "./section-catalog.js"
 import type { LayoutEntry } from "./template-profile.model.js"
-import { isContentSlot, slotHasData, slotParents } from "./content-slots.js"
+import { isContentSlot, slotHasData } from "./content-slots.js"
 import { templateWrapperIds } from "./template-wrappers.js"
 import { displayHeading } from "./heading-label.js"
+import { templateSectionOwnerSteps } from "./template-step-headings.js"
 
 export type TargetSectionStatus = "present" | "missing" | "out_of_scope"
 export type TemplateIntent = "fixed" | "free"
@@ -79,7 +80,7 @@ export const compareTargetStructure = (
       const present = hasContent(spine, entry.section_id, withContent)
       // Heading bao chỉ chứa mục con (vd "2 Overall Description") không phải mục cần soạn
       if (wrappers.has(entry.section_id) && !present) continue
-      const owners = isContentSlot(entry.section_id) ? [...new Set(slotParents(entry.section_id).flatMap((p) => stepsOf(p, spine)))] : stepsOf(entry.section_id, spine)
+      const owners = templateSectionOwnerSteps(entry.section_id, spine)
       sections.push({ section_id: entry.section_id, title: titleOf(entry.section_id, layout), status: present ? "present" : "missing", owner_steps: owners })
     }
   } else {
