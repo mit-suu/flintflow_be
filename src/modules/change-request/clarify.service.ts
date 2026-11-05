@@ -4,6 +4,8 @@
  * và chuyển `impact_review`. AI lỗi / hết credit ⇒ `paused` ở `clarifying`.
  * Mode 1 v3 phase 7: "mơ hồ" gồm cả thiếu dữ kiện để viết nội dung mới — prompt kèm tài liệu bổ sung; câu trả lời
  * trống = chưa biết; đi tiếp mà còn thiếu ⇒ `missing_info` cho C-4 ghi giả định.
+ * FLF-367: CR mâu thuẫn với tài liệu (Spine mọi section, đoạn văn giữ nguyên) ⇒ câu hỏi mâu thuẫn trích cả hai phía,
+ * hỏi cả khi đã hết `MAX_CLARIFY_ROUNDS`; câu đã hỏi không hỏi lại.
  */
 
 import { ActionType } from "../../shared/ai/ai-action.types.js"
@@ -45,6 +47,28 @@ const outlineText = (headings: readonly HeadingRef[]): string =>
 const requesterText = (cr: IChangeRequest): string =>
   [cr.title, cr.description, ...(cr.amendments ?? []).map((a) => a.text), ...cr.clarifications.flatMap((c) => c.answers)].join("\n")
 
+/** Lựa chọn mặc định cho câu hỏi mâu thuẫn (FLF-367) khi model không gợi ý; người dùng vẫn tự gõ được ("khác"). */
+export const CONTRADICTION_CHOICES = ["Đổi theo CR và sửa cả chỗ cũ", "Giữ như cũ, không áp dụng phần này của CR"] as const
+
+const questionKey = (q: string): string => q.replace(/\s+/g, " ").trim().toLowerCase()
+
+/** Câu hỏi mâu thuẫn chưa từng hỏi (so mọi vòng trước) kèm gợi ý; model không gợi ý ⇒ lựa chọn mặc định. */
+export const newContradictions = (
+  cr: Pick<IChangeRequest, "clarifications">,
+  found: readonly { question: string; suggestions: readonly string[] }[]
+): { question: string; suggestions: string[] }[] => {
+  const seen = new Set(cr.clarifications.flatMap((c) => c.questions.map(questionKey)))
+  const out: { question: string; suggestions: string[] }[] = []
+  for (const c of found) {
+    const key = questionKey(c.question)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    const suggestions = [...new Set(c.suggestions.map((s) => s.trim()).filter(Boolean))]
+    out.push({ question: c.question.trim(), suggestions: suggestions.length ? suggestions : [...CONTRADICTION_CHOICES] })
+  }
+  return out
+}
+
 /** Từ khoá dự phòng khi hết vòng mà model vẫn thấy mơ hồ: từ dài trong tiêu đề CR. */
 const fallbackKeywords = (cr: IChangeRequest): string[] => cr.title.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 5).slice(0, 5)
 
@@ -71,12 +95,17 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     return
   }
   const headings = await docHeadings(cr, spine)
+  // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
+  const named = mentionedSections(requesterText(cr), headings)
   const result = await withMeteredAi<CrClarifyOutput>({ projectId: String(cr.projectId), userId, stepId: `C-2:${cr.cr_id}` }, ActionType.CR_CLARIFY, {
     ...crHeader(cr),
     round: Math.min(asked + 1, MAX_CLARIFY_ROUNDS),
     clarifications: answersText(cr),
     materials: materialsText(cr),
-    projection: crProjection(spine, `${cr.title}\n${cr.description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`),
+    // FLF-367: kèm BR / NFR và đoạn văn giữ nguyên liên quan (theo cụm từ của CR hoặc mục được gọi tên) để thấy mâu thuẫn
+    projection: crProjection(spine, `${cr.title}\n${crHeader(cr).description}\n${answersText(cr)}\n${(cr.materials ?? []).map((m) => m.text).join("\n")}`, {
+      sections: named
+    }),
     outline: outlineText(headings)
   })
   if (!result.ok) {
@@ -85,10 +114,19 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
     return
   }
   const out = result.data
-  if (out.ambiguous && canAskMore(asked)) {
+  // FLF-367: mâu thuẫn hỏi cả khi đã hết vòng làm rõ (không qua `canAskMore`), đứng trước câu hỏi mơ hồ
+  const contradictions = newContradictions(cr, out.contradictions)
+  const askAmbiguous = out.ambiguous && canAskMore(asked)
+  if (askAmbiguous || contradictions.length) {
     // Gợi ý song song câu hỏi — model trả thiếu / thừa thì cắt, bù `[]`; bỏ gợi ý trùng
-    const suggestions = out.questions.map((_, i) => [...new Set((out.suggestions[i] ?? []).map((s) => s.trim()).filter(Boolean))])
-    cr.clarifications.push({ round, questions: out.questions, answers: [], suggestions })
+    const ambiguous = askAmbiguous ? out.questions : []
+    const suggestions = ambiguous.map((_, i) => [...new Set((out.suggestions[i] ?? []).map((s) => s.trim()).filter(Boolean))])
+    cr.clarifications.push({
+      round,
+      questions: [...contradictions.map((c) => c.question), ...ambiguous],
+      answers: [],
+      suggestions: [...contradictions.map((c) => c.suggestions), ...suggestions]
+    })
     await transitionCr(cr, "awaiting_answers")
     return
   }
@@ -96,9 +134,7 @@ export const runClarify = async (cr: IChangeRequest, userId: string): Promise<vo
   // vòng cuối mà không liệt kê ⇒ câu hỏi chưa được trả lời chính là dữ kiện thiếu.
   cr.missing_info = out.missing_info.length ? out.missing_info : out.ambiguous ? out.questions : []
   cr.markModified("missing_info")
-  // Mục người yêu cầu gọi tên ("phần 3.1.3 Screen Authorization") luôn là đích — code nhận, không trông vào model.
   // Đã chỉ đích danh mục thì bỏ từ khoá của model: từ khoá kiểu "SCR-01", "Hộ gia đình" kéo cả tài liệu vào CR.
-  const named = mentionedSections(requesterText(cr), headings)
   const keywords = named.length ? [] : out.targets.keywords.length || out.targets.entity_paths.length ? out.targets.keywords : fallbackKeywords(cr)
   // Phần tử bản xem trước đã chạm (mode 1 v3) luôn là đích — 3.4 vẫn tìm thêm vị trí liên quan như thường
   cr.targets = { entity_paths: [...new Set([...named, ...out.targets.entity_paths, ...(cr.seed?.targets ?? [])])], keywords }

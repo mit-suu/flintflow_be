@@ -324,6 +324,14 @@ export const crClarifySchema = z
     missing_info: z.array(z.string().min(1)).max(10).default([]),
     /** Đáp án gợi ý cho từng câu hỏi (song song `questions`, 0–4 mỗi câu) — người dùng bấm chọn thay vì tự gõ. */
     suggestions: z.array(z.array(z.string().min(1)).max(4)).max(5).default([]),
+    /**
+     * FLF-367: CR mâu thuẫn với nội dung đang có (Spine mọi section, đoạn văn giữ nguyên) ⇒ câu hỏi trích cả hai phía +
+     * lựa chọn (đổi theo CR và sửa chỗ cũ / giữ như cũ). Không tính vào `ambiguous`, không bị giới hạn số vòng.
+     */
+    contradictions: z
+      .array(z.object({ question: z.string().trim().min(1), suggestions: z.array(z.string().min(1)).max(4).default([]) }))
+      .max(5)
+      .default([]),
     targets: z.object({
       entity_paths: z.array(z.string().min(1)).default([]),
       keywords: z.array(z.string().min(1)).default([])
