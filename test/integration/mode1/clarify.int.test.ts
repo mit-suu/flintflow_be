@@ -215,7 +215,9 @@ describe("FLF-367 C-2: CR mâu thuẫn với tài liệu ⇒ hỏi người dùn
     expect(d.pending_questions[0]).toContain(LOCK_PASSAGE)
     expect(d.change_request.clarifications[0].suggestions).toEqual([[...CONTRADICTION_CHOICES]])
     const [prompt] = promptsOf("# CR Clarify")
-    expect(prompt).toContain(`Related passages of the document kept verbatim (not in the structured data above):\ncustom_sections[id=CS91] "Chính sách bảo mật" (custom:CS91):\n  - ${LOCK_PASSAGE}`)
+    // tài liệu vừa ngân sách ⇒ gửi mọi đoạn văn giữ nguyên (không lọc theo từ chung); đoạn "5 lần" có đủ câu
+    expect(prompt).toContain("Related passages of the document kept verbatim (not in the structured data above):\n")
+    expect(prompt).toContain(`custom_sections[id=CS91] "Chính sách bảo mật" (custom:CS91):\n  - ${LOCK_PASSAGE}`)
   })
 
   it("CR mật khẩu ≥ 6 ký tự, BR ở mục khác ghi ≥ 8 sau 40 ký tự đầu ⇒ BR đủ câu trong prompt ⇒ hỏi", async () => {
@@ -226,7 +228,8 @@ describe("FLF-367 C-2: CR mâu thuẫn với tài liệu ⇒ hỏi người dùn
     const crId = await newCr(c, "Độ dài mật khẩu", "Mật khẩu chỉ cần tối thiểu 6 ký tự.")
     const d = detail(await c.post(`/change-requests/${crId}/clarify`))
     expect(d.change_request.status).toBe("awaiting_answers")
-    expect(d.pending_questions[0]).toContain(PASSWORD_RULE)
+    // prompt có đủ mọi BR / đoạn văn ⇒ model giả có thể hỏi thêm câu khác; câu về BR-91 phải có
+    expect(d.pending_questions.some((q: string) => q.includes(PASSWORD_RULE))).toBe(true)
     expect(promptsOf("# CR Clarify")[0]).toMatch(/Related business rules \/ non-functional requirements \(full text\):\n(.*\n)*business_rules\[id=BR-91\] \([^)]*\): Khi người dùng tạo tài khoản mới hoặc đổi mật khẩu, mật khẩu phải có ít nhất 8 ký tự\./)
   })
 
