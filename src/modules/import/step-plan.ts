@@ -18,7 +18,7 @@ import type { CustomBlock, CustomSection, OriginalDiagram, Spine, StepState } fr
 import type { DocBlockKind } from "./import.constants.js"
 import { UNMAPPED_SECTION } from "./import.constants.js"
 import { targetsOf } from "./extract-targets.js"
-import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { isInstructionText, isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { withSlotParents } from "./content-slots.js"
 import type { LayoutEntry, StepPlanItem } from "./template-profile.model.js"
 
@@ -54,6 +54,8 @@ export interface LayoutBlock {
   image_ref?: string | null
   /** Ảnh là sơ đồ I-4 đọc được (§4.13) — giữ nguyên hình của người dùng, đánh dấu để ẩn PlantUML cùng loại. */
   diagram?: OriginalDiagram | null
+  /** FLF-362: nhãn số Word tự đánh của heading — layout giữ lại để hiển thị / in đúng số của file. */
+  number_label?: string | null
 }
 
 /**
@@ -163,7 +165,13 @@ export const buildLayout = (
         slice = currentRepeats ? { custom_id: current.id, section_id: mapped, block_ids: [b.block_id] } : null
         if (slice) slices.push(slice)
       }
-      const entry: LayoutEntry = { order: layout.length, heading_text: heading, level: clampLevel(b.level), section_id: section }
+      const entry: LayoutEntry = {
+        order: layout.length,
+        heading_text: heading,
+        level: clampLevel(b.level),
+        section_id: section,
+        ...(b.number_label ? { number_label: b.number_label } : {})
+      }
       layout.push(entry)
       stack.push({ level: b.level, section, entry })
       owner = current ? null : entry
@@ -172,6 +180,12 @@ export const buildLayout = (
     slice?.block_ids.push(b.block_id)
     const block = toCustomBlock(b)
     if (!block) continue
+    // FLF-364 (câu 10): chữ hướng dẫn trọn đoạn dưới mục FPT / phần nhỏ ⇒ giữ nguyên văn ở layout entry (in khi mục trống),
+    // không thành phần nối (in cả khi mục đã có dữ liệu)
+    if (!current && owner && !owner.section_id.startsWith("group:") && (block.kind === "paragraph" || block.kind === "list_item") && isInstructionText(block.text)) {
+      owner.template_guidance = [...(owner.template_guidance ?? []), block.text]
+      continue
+    }
     if (current) {
       if (!currentRepeats || unmappedBlockIds.has(b.block_id)) current.blocks.push(block)
     } else if (owner && (owner.section_id.startsWith("group:") || unmappedBlockIds.has(b.block_id))) continuationOf(owner).blocks.push(block)
@@ -240,11 +254,12 @@ export const functionOriginals = (blocks: readonly LayoutBlock[], headingSection
 }
 
 /**
- * Khối có nội dung thật: ảnh; bảng có ô chữ thật; đoạn chữ không phải chữ hướng dẫn của mẫu (`[Describe …]`, "Mục này mô
- * tả…" — business-flow 1.3). Mẫu trống chỉ còn chữ hướng dẫn ⇒ không có nội dung (FLF-278 trên FLF-336).
+ * Khối có nội dung thật: ảnh; bảng có ô chữ thật **ngoài hàng tiêu đề cột** (bảng mẫu chỉ có "ID | Requirement" + hàng
+ * `[FR-xxx]` là bảng trống); đoạn chữ không phải chữ hướng dẫn của mẫu (`[Describe …]`, "Mục này mô tả…" — business-flow 1.3).
+ * Mẫu trống chỉ còn chữ hướng dẫn ⇒ không có nội dung (FLF-278 trên FLF-336).
  */
 const hasRealContent = (b: { kind: string; text: string; rows?: string[][] | null; image_ref?: string | null }): boolean =>
-  b.kind === "image" ? true : b.kind === "table" ? (b.rows ? tableHasRealText(b.rows) : isRealText(b.text)) : isRealText(b.text)
+  b.kind === "image" ? true : b.kind === "table" ? (b.rows ? tableBodyHasRealText(b.rows) : isRealText(b.text)) : isRealText(b.text)
 
 /** Section có nội dung thật (khối không phải heading) — mục "chỉ có heading" hoặc chỉ có chữ hướng dẫn coi như thiếu. */
 export const sectionsWithContent = (blocks: LayoutBlock[]): Set<string> => {

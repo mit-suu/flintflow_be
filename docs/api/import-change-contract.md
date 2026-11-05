@@ -377,7 +377,7 @@ Thay hành vi finalize của §4.10. Nguyên tắc mode 1: file của người d
   phiên bản / loại thay đổi) trước mục nội dung đầu tiên.
 - **#8 `finalizeRequestSchema.record_of_changes?`** (tối đa 500 dòng): dòng người dùng đã xem/sửa ở wizard, thay cho dòng đọc
   từ file khi in lên đầu bảng §I. Không gửi ⇒ như cũ (đọc lại từ file).
-- **Mẫu IEEE**: `templateProfileDtoSchema.template_family` (`fpt` · `ieee830` · `ieee_features`, mặc định `fpt`) và
+- **Mẫu IEEE** (FLF-363 thay danh mục riêng bằng ngân hàng phần chung — xem §FLF-363 cuối file): `templateProfileDtoSchema.template_family` (`fpt` · `ieee830` · `ieee_features`, mặc định `fpt`) và
   `headingMapEntrySchema.template_section?` (mã nội bộ của mục mẫu IEEE khớp được — `section_id = unmapped` kèm field này là
   mục chỉ có ở IEEE, giữ nguyên văn). Heading IEEE khớp theo danh mục IEEE (`template-catalog.ts`) rồi trích vào section FPT;
   nhiều heading có thể cùng `section_id` (Reliability + Availability ⇒ `fixed:4.2.2`). Request #5 không đổi hình.
@@ -454,6 +454,9 @@ SRS thật ~200 trang có ảnh chụp màn hình vượt 10 MB; finalize của 
 
 | Ngày | PR | Thay đổi |
 | --- | --- | --- |
+| 2026-11-05 | FLF-278 (kết quả đọc theo loại dự án; bảng mẫu trống) | Hành vi, không đổi shape: #8b chỉ cho dự án mới theo mẫu bắt buộc (dự án có sẵn ⇒ `409 IMPORT_INVALID_STATE`); #8 `complete: true` ở `incomplete` bị chặn với dự án mới theo mẫu bắt buộc (`409`, `meta.allowed = ["drafting"]`). Bảng mẫu chỉ có tiêu đề + hàng chỗ trống tính là trống ở I-5 / cờ `template_section_empty`, không sinh item ở I-4. Xem §FLF-278 "Luồng 2 cho phần thiếu" |
+| 2026-11-04 | contract-change FLF-364 (chữ hướng dẫn `[ ]` / `{ }`) | Luật hướng dẫn chỉ `[ ]` / `{ }`; `guidance` nguyên văn ≤ 4 000 + `guidance_by?` + `guidance_blocks?`; `table_map[].guidance?`; prompt C-4 kèm hướng dẫn mẫu — xem §FLF-364 cuối file |
+| 2026-11-04 | contract-change FLF-363 (ngân hàng phần chung FPT + IEEE 29148) | `template_family` enum mới `fpt` · `ieee29148` · `mixed` (nhãn báo cáo; giá trị cũ đọc ra `ieee29148`, script `migrate:template-family`); `template_section?` = id phần của ngân hàng; heading thêm `content_mismatch?` — xem §FLF-363 cuối file |
 | 2026-10-29 | contract-change FLF-278 (mẫu bắt buộc: Luồng 2 cho phần thiếu, phần nhỏ `slot:*`, thư viện tổ chức) | Additive — xem §FLF-278 cuối file. Trạng thái import mới `drafting` (`incomplete → drafting → delivered`); endpoint mới #8b `POST /import/continue`, #8c `POST /import/from-org`, #8d `POST /import/save-to-org`, #8e `GET /library-matches`, #8f `POST /library`, `/orgs/:orgId/templates`, `/orgs/:orgId/content-library`, admin `GET /admin/template-gaps`; `heading_map[].guidance?`; `section_id` nhận thêm `slot:*`; cờ vàng `template_section_absent` / `template_section_empty` |
 | 2026-10-27 | contract-change FLF-336 (I-5 so cấu trúc đích, lát 1) | Additive. Trạng thái import mới `incomplete` (`baselining → incomplete → baselining`), không có v0 ở trạng thái này; `TemplateProfile.target_structure` (`present / missing / out_of_scope`, `resolved_mode` 1 / 3 / 4) trả ở #4 và #9; #8 nhận `complete: true` để đi tiếp từ `incomplete`; #9 mở từ `incomplete`. Chưa làm: vòng rà soát phần có sẵn, Luồng 2 chỉ cho phần thiếu, xem trước bố cục, ghi vào file khách |
 | 2026-10-27 | contract-change FLF-338 (rút yêu cầu từ tài liệu thô, lát 1 sau baseline) | Additive. Endpoint mới #31a–#31c (`/documents/:documentId/extract`, `/extract/approve`); `CR_SOURCE_KINDS` / `NEW_CR_SOURCE_KINDS` thêm `reference_document`; `call_kind` mới `extract_requirements` (3 credit); mã lỗi `EXTRACTION_*`. Collection mới `requirementextractions`. Chưa làm: trần token theo file / dự án, nhánh trước baseline, đi tiếp từ C-3 với vị trí có sẵn (CR tạo ở `draft`, đi C-2 như thường) |
@@ -519,7 +522,15 @@ mẫu bắt buộc = "chỉ mẫu đó, không thêm phần, không đổi thứ
 ### Luồng 2 cho phần thiếu (lát 3)
 | # | Method + path | Body | Kết quả / lỗi |
 |---|---|---|---|
-| 8b | `POST /projects/:id/import/continue` | `{ import_id, base_version }` | `{ project_mode: "fpt", import_state: "drafting", current_step, spine_version }`. Chỉ từ `incomplete` với `target_structure.resolved_mode = 3` (chế độ 4 cần 2.9a — chưa hỗ trợ) ⇒ ngược lại `409 IMPORT_INVALID_STATE` |
+| 8b | `POST /projects/:id/import/continue` | `{ import_id, base_version }` | `{ project_mode: "fpt", import_state: "drafting", current_step, spine_version }`. Chỉ từ `incomplete` với `target_structure.resolved_mode = 3` (chế độ 4 cần 2.9a — chưa hỗ trợ) **và dự án mới** (`Project.start_kind = new`, `template_intent = fixed`) ⇒ ngược lại `409 IMPORT_INVALID_STATE` (`meta.start_kind`). Dự án có sẵn theo mẫu cố định: "Hoàn thiện" (#8 `complete: true`) rồi bổ sung mục thiếu qua CR (Luồng 3) |
+
+Ràng buộc theo loại dự án (2026-11-05): ở `incomplete`, dự án **mới** theo mẫu bắt buộc chỉ đi #8b — #8 với `complete: true` trả
+`409 IMPORT_INVALID_STATE` (`meta.allowed = ["drafting"]`), vì khoá mẫu còn trống thành bản gốc là vô nghĩa; FE chỉ hiện nút "Viết với
+FlintFlow". Dự án **có sẵn** giữ "Dừng, tải gap report" (#9) / "Hoàn thiện" (#8). Không đổi shape.
+
+I-5 / I-4 với bảng mẫu (2026-11-05, không đổi shape): bảng chỉ có hàng tiêu đề + hàng chỗ trống (`[FR-xxx]`, `[dd/mm/yyyy]`) là
+**trống** (`missing`, cờ `template_section_empty`); bảng một hàng xét như nhãn | giá trị. Hàng chỗ trống không thành item tất định
+ở I-4 (`deterministicTableItems`).
 
 Hành vi: mở lại bước Brief B-1…S-1 (2.4–2.7; B-0 = 2.1–2.3 giữ bỏ qua), bước sở hữu mục thiếu giữ `pending`, `Project.mode = fpt` (luồng
 tạo mới: chạy step, ký baseline), `import_state = drafting`, `documentLanguage` = ngôn ngữ file mẫu. Bản in theo layout mẫu. Ký
@@ -546,6 +557,28 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 Áp nội dung thư viện: trước baseline FE gửi lô `set custom_sections[id=…]` qua `POST /changes/preview` + `POST /changes {ops, preview_id}`
 (không gọi model); sau baseline FE điền sẵn lệnh vào chat ⇒ change request như mọi lệnh sửa.
 
+### Bản xuất theo đúng file mẫu (2026-11-05, mở rộng D1)
+Dự án `template_intent = fixed`: `GET /projects/:id/export/word|pdf` và file version điền nội dung vào **chính file mẫu đã
+upload** (`render/template-docx-writer.ts`). Bìa, lề, styles, numbering, header/footer và heading của mẫu giữ nguyên;
+FlintFlow không thêm bìa, mục lục, header/footer hay phụ lục cờ. Shape response không đổi (file `.docx` / `.pdf`).
+
+Watermark DRAFT (2026-11-05): bản làm việc (`source=draft`) và tải version chưa phát hành (#14) **có** watermark chữ mờ "DRAFT"
+như mẫu FPT — chỉ thêm shape vào header (mẫu không có header ⇒ một header chỉ chứa watermark, không chữ nào khác). Bản
+`source=baseline`, file version lưu và bản release không có watermark.
+
+Mapping lúc tách file (`matchProfile(…, { fixedTemplate: true })`) và lúc xuất dùng chung `bindFixedTemplateHeadings`:
+- phần nhỏ theo tiêu đề;
+- heading cha mà con cùng mục ⇒ heading bao.
+
+Lỗi mới — cùng mã, hai nghĩa:
+
+| HTTP | `code` | Khi nào |
+|---|---|---|
+| 409 | `TEMPLATE_LAYOUT_UNAVAILABLE` | Thiếu file mẫu / mapping / snapshot nguồn của version (không chứng minh được nguồn duy nhất) |
+| 422 | `TEMPLATE_LAYOUT_UNAVAILABLE` | Có nguồn nhưng không điền an toàn được (`meta.reason`: chữ cùng đoạn với section break, field / object, cột bảng mơ hồ, ô gộp dọc…) |
+
+Cả hai đều không tự chuyển sang mẫu chuẩn FlintFlow.
+
 ## FLF-334 (2026-10-29) — tên file tải về + stamp mang nhãn version
 
 **Đổi tên file + additive stamp** ⇒ PR nhãn `contract-change`. Một quy tắc tên chung cho #14 (mode 1) và `export/word` / `export/pdf` (mode 2, `pipeline-contract.md` #18/#34), Word lẫn PDF (`versionFileName`, `doc-version/versioning.ts`). **Không còn mã dự án trong tên** — máy nhận dự án qua stamp (`flintflow_project_id`).
@@ -571,3 +604,61 @@ baseline 1.0 ⇒ FLF-318 đưa dự án về mode 1, lần import mẫu `draftin
 - Còn đơn vị chưa dịch ⇒ `409 TRANSLATION_INCOMPLETE` `meta { locale, missing, total }` (đếm trên snapshot của version). Dịch nốt qua `pipeline-contract.md` #26 `?locale=&version=` / #27 `{ locale, version }` — đếm / dịch đúng snapshot baseline của version đó.
 - Bản nháp CR (không có baseline), dự án import thật (đường layout) ⇒ `409 DOCUMENT_LANGUAGE_UNAVAILABLE`; `variant=tracked|original` + `lang` khác ⇒ `400 VALIDATION_ERROR`.
 - `DocVersionDto` thêm `other_language_available: boolean` (#12, response release) — `false` ⇒ FE ẩn lựa chọn ngôn ngữ.
+
+## FLF-362 (2026-11-04) — luồng upload giữ đúng số mục của file (chỉ thêm field)
+
+- `headingMapEntrySchema.number_label?` và `layoutEntrySchema.number_label?` (string): nhãn số **Word tự đánh** của heading
+  (`numPr`, không nằm trong chữ) đúng như Word hiển thị — "2.1.", "II.", "A)". `heading_text` giữ nguyên chữ như trước
+  (mapping mẫu tổ chức, so sánh tải lại dựa vào nó); hiển thị = nhãn + tiêu đề. Heading gõ số tay / không đánh số ⇒ không có.
+- `target_structure.sections[].title` (bước 3) và `GapReport.layout[].heading` nay **đã ghép** nhãn số Word ("1. Tổng quan").
+- Bản xem / xuất Mode 1 (`RenderedSection.number`): số lấy theo **file** — file không đánh số ⇒ `number` rỗng (trước đây tự
+  đánh 1, 1.1…); file đánh số đều ⇒ đúng số file, mục FlintFlow chèn thêm nhận số theo thứ tự và anh em đứng sau dịch số;
+  file đánh số không đều (nhảy số, chữ cái, La Mã làm số chương) ⇒ giữ nguyên số của file. `number` luôn bỏ dấu kết ("1",
+  không "1."). Mode 2 (dự án tạo mới theo mẫu FlintFlow) không đổi.
+
+## FLF-363 (2026-11-04) — ngân hàng phần chung FPT + IEEE 29148, khớp theo tên + nội dung, không dùng số mục
+
+**Đổi enum + chỉ thêm field** ⇒ PR nhãn `contract-change`.
+
+- `templateProfileDtoSchema.template_family`: enum mới `fpt` · `ieee29148` · `mixed` (mặc định `fpt`) — **nhãn báo cáo** tính
+  sau khi khớp (đếm heading khớp tên chỉ có ở FPT / chỉ có ở IEEE), không còn quyết định cách khớp. Bản ghi cũ `ieee830` /
+  `ieee_features` đọc ra `ieee29148` (cả `OrgTemplateSummary.template_family`); script `npm run migrate:template-family` đổi
+  dữ liệu trong DB (chạy lại an toàn).
+- Khớp heading (#3/#4): mọi heading so với **một ngân hàng phần** gộp mục FPT, mẫu IEEE 29148 (jam01), IEEE 830, Wiegers,
+  ReqView — theo tên (bỏ số gõ tay; số Word không tính) + mục cha (tên trùng ở hai chỗ: "Overview" trong Introduction là tổng
+  quan tài liệu). File trộn FPT + IEEE khớp từng heading theo cả ngân hàng. `section_id` không có giá trị mới.
+- `headingMapEntrySchema.template_section?`: nay là id phần của ngân hàng (`part:fixed:2.1`, `part:ieee:references`) cho mọi
+  heading khớp theo tên (trước chỉ mẫu IEEE, `ieee830:1.4`). Vẫn là mã nội bộ, FE không hiện; `section_id = unmapped` kèm field
+  này = phần chỉ có ở IEEE, giữ nguyên văn.
+- `headingMapEntrySchema.content_mismatch?` `{ by_title, by_content }` (section id): nội dung ngay dưới heading (loại bảng có
+  chỗ riêng — tác nhân, ERD, thuật ngữ, quy tắc, thông báo…; hoặc đa số đoạn mở đầu bằng mã BR / MSG) chỉ rõ mục khác mục theo
+  tên, mà mục đó chưa có heading nào ⇒ heading đã đổi sang `by_content`, độ tin ≤ 0.75 (cờ "Cần xem"). Heading không khớp tên
+  mà nội dung rõ ⇒ đổi như trên nhưng không có field này. Request #5 không đổi hình.
+- Cờ vàng mới `import_title_content_mismatch` ("Tiêu đề và nội dung khác nhau", chỉ import đặt, recompute không đóng): mỗi
+  heading có `content_mismatch` một cờ, `target_id` = block heading, câu nêu tên hai mục theo mẫu; heading đó không có thêm cờ
+  `import_needs_review`.
+- Mục ưu tiên phần nhỏ (plan §2.5): Purpose ⇒ `slot:vision`, Scope ⇒ `slot:scope`, Product Perspective ⇒ `slot:context`,
+  Operating Environment ⇒ `slot:platforms`, Assumptions ⇒ `slot:assumptions`, TBD list ⇒ `slot:open_questions` — chỉ khi file
+  không có heading nào khác nhận mục FPT cha (không thì về mục cha, như trước). C-4 (`cr-propose`): vị trí trong mục giữ nguyên
+  văn (`custom:*`) có heading khớp ngân hàng ⇒ `owner_skill` là skill của phần đó (trước: "(none)").
+
+## FLF-364 (2026-11-04) — chữ hướng dẫn của mẫu chỉ trong `[ ]` / `{ }` (chỉ thêm field + đổi luật)
+
+**Additive** ⇒ PR nhãn `contract-change`.
+
+- Luật chữ hướng dẫn (`isInstructionText`, BE + FE): chỉ đoạn / ô nằm trọn trong `[ ]` hoặc `{ }`; đoạn ngoặc trong câu có chữ
+  thật cũng là hướng dẫn (`[…]` từ 3 từ, `{…}` luôn). `( )`, `< >`, câu "This section describes…" / "Mục này mô tả…" nay là nội
+  dung (đo trên 2 mẫu jam01 + 7 SRS thật: chỉ đổi một giá trị NFR "<= 24 h (<= 6 h …)" vốn bị bỏ nhầm). Màu / nghiêng / tô
+  nền chỉ là tín hiệu phụ.
+- `headingMapEntrySchema.guidance?` giữ nguyên văn (trần 4 000 ký tự, trước 400), gồm cả đoạn ngoặc trong câu và ô bảng; thêm
+  `guidance_by?` (`brackets` · `brackets+format`) và `guidance_blocks?` (block id).
+- `tableMapEntrySchema.guidance?`: chữ hướng dẫn trong các ô của cột (`[Tên tác nhân]`), bỏ ngoặc.
+- I-3: heading không khớp tên phần nào mà hướng dẫn nhắc đúng một phần ⇒ nhận phần đó (độ tin 0.7, `template_section` = phần).
+- C-4 (`cr-propose`): `target_sections` kèm "Template guidance" của mục (ghép hướng dẫn heading cha) + "Expected content (ISO
+  29148)"; vị trí trong mục giữ nguyên văn có heading không khớp ⇒ `owner_skill` theo phần mà hướng dẫn nhắc. Mode 2 không đổi.
+- Bản xem / xuất Mode 1 (câu 10, chốt 2026-11-05): mục **chưa có dữ liệu** in nguyên văn chữ hướng dẫn của mẫu (giữ ngoặc) —
+  mục FPT / phần nhỏ lấy từ `layout[].template_guidance` (mới, nội bộ: đoạn hướng dẫn trọn ngoặc dưới heading, lưu lúc
+  finalize, không thành phần nối), mục riêng lấy từ khối của chính nó. Mục **có dữ liệu** (kể cả thêm qua CR) ⇒ không in
+  hướng dẫn, đoạn ngoặc hướng dẫn trong câu bỏ, ô bảng chỉ có hướng dẫn để trống. Hướng dẫn vẫn giữ trong dữ liệu (ngữ cảnh
+  khi soạn) — xoá hết dữ liệu thì in lại. Hướng dẫn không làm mục "có nội dung" (như trước). Dự án import trước thay đổi này:
+  mục FPT không có `template_guidance` ⇒ không in hướng dẫn; mục riêng theo luật mới. Mode 2 không đổi.

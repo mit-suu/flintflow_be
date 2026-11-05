@@ -71,7 +71,7 @@ describe("prompt phẳng trên đĩa (assets/prompts)", () => {
 describe("skill trên đĩa (assets/skills)", () => {
   // Phases §8.2 đếm 29 (12 content); task-03 thêm content/product-brief cho B-0…B-2 (T20)
   // ⇒ 30. Ghi ở docs/spec-gaps.md.
-  it("đủ 45 skill: 20 action · 15 content · 8 renderer · 2 output", () => {
+  it("đủ 48 skill: 20 action · 18 content · 8 renderer · 2 output", () => {
     const byKind = (k: string) => listSkillAssets().filter((s) => s.kind === k).length
 
     // +2 so với 30 ban đầu: content/prioritization (S-9.4, T19) thay UC34/UC35 cũ,
@@ -85,9 +85,10 @@ describe("skill trên đĩa (assets/skills)", () => {
     // +1 renderer FLF-325: renderer/class (class diagram domain, mỗi feature một hình).
     // +1 renderer: renderer/state-machine (state machine diagram, mỗi entity có vòng đời một hình).
     // +1 renderer: renderer/sequence (System Sequence Diagram, mỗi function cần sơ đồ một hình).
-    expect(listSkillAssets()).toHaveLength(45)
+    // +3 content FLF-365: references-list, requirement-apportioning, verification-matrix (mục IEEE 29148, Mode 1).
+    expect(listSkillAssets()).toHaveLength(48)
     expect(byKind("action")).toBe(20)
-    expect(byKind("content")).toBe(15)
+    expect(byKind("content")).toBe(18)
     expect(byKind("renderer")).toBe(8)
     expect(byKind("output")).toBe(2)
   })
@@ -126,6 +127,10 @@ describe("skill trên đĩa (assets/skills)", () => {
     "content/prioritization",
     "content/product-brief",
     "content/brief-analysis",
+    // FLF-365: mục IEEE 29148 (Mode 1)
+    "content/references-list",
+    "content/requirement-apportioning",
+    "content/verification-matrix",
     "output/srs-completeness-score",
     "renderer/class",
     "renderer/context",

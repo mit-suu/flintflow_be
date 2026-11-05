@@ -13,7 +13,13 @@ import { fakeMode1 } from "../../helpers/mode1.js"
 import { importAtBaselining } from "../../helpers/mode1-import-p4.js"
 import { p, styled } from "../../../src/modules/docx-ooxml/testing/make-docx.js"
 import { startFinalize, waitForFinalize } from "../../../src/modules/import/finalize-jobs.js"
-import { getImportView } from "../../../src/modules/import/import.service.js"
+import { readFile } from "node:fs/promises"
+import { seedFixture } from "../../setup.js"
+import { createMode1Project } from "../../helpers/mode1.js"
+import { fileOf } from "../../helpers/mode1-import-p4.js"
+import { runExtraction } from "../../../src/modules/import/extract.service.js"
+import { acceptLatest, getImportView, uploadImport } from "../../../src/modules/import/import.service.js"
+import { Project } from "../../../src/modules/project/project.model.js"
 import { ImportedDocument } from "../../../src/modules/import/imported-document.model.js"
 import { TemplateProfile } from "../../../src/modules/import/template-profile.model.js"
 import { getDocument } from "../../../src/modules/render/assemble.service.js"
@@ -32,13 +38,14 @@ const finalize = async (projectId: string, userId: string, importId: string, bod
 }
 
 describe("chế độ 3 — mẫu bắt buộc", () => {
+  // Dự án có sẵn theo mẫu cố định: "Hoàn thiện" khoá bản gốc (FLF-336). Dự án mới: chỉ Luồng 2 (`flow2.int.test.ts`).
   it("I-5 tính đúng mục riêng có chữ / chỉ chữ hướng dẫn; bản in không thêm mục ngoài mẫu; cờ vàng mục thiếu / trống", async () => {
     const { projectId, userId, importId } = await importAtBaselining({
       srs: { extraBody: styled("u2", "5.10 Document Conventions") + p("[Describe the typographical conventions used in this SRS.]") }
     })
     await mongoose.connection.db!
       .collection("projects")
-      .updateOne({ _id: new mongoose.Types.ObjectId(projectId) }, { $set: { template_intent: "fixed", start_kind: "new", has_required_template: true } })
+      .updateOne({ _id: new mongoose.Types.ObjectId(projectId) }, { $set: { template_intent: "fixed", start_kind: "existing", has_required_template: true } })
 
     const stopped = await finalize(projectId, userId, importId)
     expect(stopped.status).toBe("incomplete")
@@ -80,5 +87,34 @@ describe("chế độ 3 — mẫu bắt buộc", () => {
     const layoutIds = new Set((profile.layout ?? []).map((l) => l.section_id))
     const doc = await getDocument(projectId, "Lumen", { source: "draft" })
     expect(doc.sections.some((s) => s.id.startsWith("fixed:") && s.id !== "fixed:I" && !layoutIds.has(s.id))).toBe(true)
+  })
+})
+
+describe("mẫu FU-IT-SRS-01 (dự án mới, mẫu bắt buộc) — bảng mẫu trống", () => {
+  it("bảng chỉ có tiêu đề + hàng chỗ trống (3.2 / 5.1 / 5.2) ⇒ 'Sẽ soạn', không trích hàng chỗ trống thành dữ liệu", async () => {
+    const seeded = await seedFixture("minimal", { balance: 1000 })
+    const projectId = await createMode1Project(seeded)
+    await Project.updateOne({ _id: projectId }, { $set: { template_intent: "fixed", start_kind: "new" } })
+    const buffer = await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url))
+    const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer, "Mau_SRS_FU-IT-SRS-01.docx"), { intent: "fixed" })
+    await acceptLatest(doc, true)
+    const importId = String(doc._id)
+    await runExtraction(projectId, seeded.userId, importId)
+    const stopped = await finalize(projectId, seeded.userId, importId)
+    expect(stopped.status).toBe("incomplete")
+
+    const structure = (await getImportView(projectId)).target_structure!
+    const statusOf = (title: string) => structure.sections.find((s) => s.title.includes(title))?.status
+    expect(statusOf("Functional Requirements")).toBe("missing")
+    expect(statusOf("Business Rules")).toBe("missing")
+    expect(statusOf("Messages")).toBe("missing")
+    expect(structure.sections.filter((s) => s.status === "present").map((s) => s.title)).not.toContain("3.2 Functional Requirements")
+
+    const spine = (await spineRepository.get(projectId))!
+    const placeholder = /^\[.*\]$/
+    for (const [kind, items] of [["functions", spine.functions], ["business_rules", spine.business_rules], ["messages", spine.messages]] as const) {
+      const ids = (items as readonly { id: string }[]).map((i) => i.id)
+      expect(ids.filter((id) => placeholder.test(id)), kind).toEqual([])
+    }
   })
 })

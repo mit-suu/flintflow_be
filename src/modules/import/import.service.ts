@@ -28,6 +28,7 @@ import { parseDocument, type ParsedBlock } from "./parse.service.js"
 import { preflightDocx } from "./preflight.service.js"
 import { assignBlockSections, autoConfirmMapping, matchProfile, needsMappingReview } from "./profile-match.service.js"
 import { isKnownSectionId } from "./section-catalog.js"
+import { normalizeTemplateFamily } from "./part-bank.js"
 import { slotOverlaps } from "./content-slots.js"
 import { applyOrgMapping, orgTemplateHeadings } from "./org-mapping.js"
 import { TemplateProfile, type ITemplateProfile } from "./template-profile.model.js"
@@ -83,7 +84,11 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confirmed: h.confirmed,
     ...(h.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(h.template_section ? { template_section: h.template_section } : {}),
-    ...(h.guidance ? { guidance: h.guidance } : {})
+    ...(h.content_mismatch?.by_title ? { content_mismatch: { by_title: h.content_mismatch.by_title, by_content: h.content_mismatch.by_content } } : {}),
+    ...(h.guidance ? { guidance: h.guidance } : {}),
+    ...(h.guidance_by ? { guidance_by: h.guidance_by } : {}),
+    ...(h.guidance_blocks?.length ? { guidance_blocks: [...h.guidance_blocks] } : {}),
+    ...(h.number_label ? { number_label: h.number_label } : {})
   })),
   table_map: p.table_map.map((t) => ({
     block_id: t.block_id,
@@ -94,11 +99,18 @@ export const toProfileDto = (p: ITemplateProfile): TemplateProfileDto => ({
     confirmed: t.confirmed,
     ...(t.auto_confirmed ? { auto_confirmed: true } : {}),
     ...(t.role ? { role: t.role } : {}),
-    ...(t.samples?.length ? { samples: [...t.samples] } : {})
+    ...(t.samples?.length ? { samples: [...t.samples] } : {}),
+    ...(t.guidance ? { guidance: t.guidance } : {})
   })),
   language: p.language,
-  layout: (p.layout ?? []).map((l) => ({ order: l.order, heading_text: l.heading_text, level: l.level, section_id: l.section_id })),
-  template_family: (p.template_family || "fpt") as TemplateProfileDto["template_family"],
+  layout: (p.layout ?? []).map((l) => ({
+    order: l.order,
+    heading_text: l.heading_text,
+    level: l.level,
+    section_id: l.section_id,
+    ...(l.number_label ? { number_label: l.number_label } : {})
+  })),
+  template_family: normalizeTemplateFamily(p.template_family),
   record_of_changes: (p.legacy_record_of_changes ?? []).map((r) => ({
     date: r.date,
     version: r.version,
@@ -287,7 +299,9 @@ const toBlockDoc = (projectId: mongoose.Types.ObjectId, b: ParsedBlock, sectionI
   editable: b.editable,
   locked_by_cr: null,
   image_ref: b.image_ref ?? null,
-  ...(b.kind === "table" && b.rows ? { rows: b.rows } : {})
+  ...(b.kind === "table" && b.rows ? { rows: b.rows } : {}),
+  ...(b.number_label ? { number_label: b.number_label } : {}),
+  ...(b.guidance_format ? { guidance_format: true } : {})
 })
 
 /** Dọn dữ liệu của lần import trước (chưa có baseline nên chỉ có version `0.1`). */
@@ -300,8 +314,10 @@ const clearPreviousImportData = async (projectId: mongoose.Types.ObjectId): Prom
 }
 
 export const runParse = async (doc: IImportedDocument): Promise<void> => {
-  const { blocks } = await parseDocument(await loadImportFile(doc))
-  const matched = matchProfile(blocks)
+  const sourceFile = await loadImportFile(doc)
+  const { blocks } = await parseDocument(sourceFile)
+  // Mẫu bắt buộc: profile lưu dùng đúng mapping của bản xuất (phần nhỏ, cha/con cùng mục) ⇒ I-5, kế hoạch step, cờ "Cần xem" khớp
+  const matched = matchProfile(blocks, { fixedTemplate: doc.intent === "fixed" })
   // FLF-278: mẫu đã lưu của tổ chức ⇒ mapping BA đã xác nhận ở dự án trước áp sẵn (bỏ bước 1.5 nếu khớp đủ)
   const saved = doc.org_template_id ? await orgTemplateHeadings(doc.org_template_id) : null
   const profile = saved ? { ...matched, heading_map: applyOrgMapping(matched.heading_map, saved) } : matched
@@ -312,7 +328,7 @@ export const runParse = async (doc: IImportedDocument): Promise<void> => {
   const legacy_record_of_changes = legacyRecordRows(blocks, new Map(profile.heading_map.map((h) => [h.block_id, h.section_id])))
   await clearPreviousImportData(doc.projectId)
   await DocBlock.insertMany(blocks.map((b) => toBlockDoc(doc.projectId, b, sections.get(b.block_id) ?? null)))
-  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, legacy_record_of_changes })
+  await TemplateProfile.create({ projectId: doc.projectId, source: "imported", doc_version: IMPORTED_DOC_VERSION, ...profile, source_file_ref: doc.file_ref, source_sha256: createHash("sha256").update(sourceFile).digest("hex"), legacy_record_of_changes })
   await transitionImport(doc, "extracting")
 }
 

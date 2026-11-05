@@ -7,17 +7,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
  * `renderSpineDocument` giả (đọc Mongo) — phần dựng thật có ở test/integration/document-language-render.int.test.ts.
  */
 vi.mock("../render/assemble.service.js", () => ({ renderSpineDocument: vi.fn() }))
+vi.mock("../render/project-docx-writer.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../render/project-docx-writer.js")>()
+  return { ...actual, loadFixedTemplateContext: vi.fn() }
+})
 vi.mock("../render/docx-writer.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../render/docx-writer.js")>()
   return { ...actual, writeDocx: vi.fn(actual.writeDocx) }
 })
 vi.mock("../../shared/ai/ai-action.service.js", () => ({ executeAiAction: vi.fn() }))
 const { findProject } = vi.hoisted(() => ({ findProject: vi.fn() }))
-vi.mock("../project/project.model.js", () => ({ Project: { findById: () => ({ lean: findProject }) } }))
+vi.mock("../project/project.model.js", () => ({ TEMPLATE_INTENTS: ["fixed", "free"], Project: { findById: () => ({ lean: findProject }) } }))
 vi.mock("../translation/translation.service.js", () => ({
   projectLanguages: vi.fn(async (_id: string, p: { documentLanguage?: string }) => ({ locale: p.documentLanguage ?? "en", source: "en" }))
 }))
 
+import { loadFixedTemplateContext } from "../render/project-docx-writer.js"
+import type { TemplateSourceBinding } from "./template-source-binding.js"
 import { renderVersionFile } from "./render-version.js"
 import { renderSpineDocument } from "../render/assemble.service.js"
 import { writeDocx } from "../render/docx-writer.js"
@@ -69,4 +75,17 @@ describe("renderVersionFile — dự án chuyển từ mode 2 (FLF-318)", () => 
     })
     expect(vi.mocked(writeDocx).mock.calls[0][1]).toEqual({ language: "vi", flagLanguage: "vi", tocEntries: true })
   })
+})
+
+
+it("assembles a bound version with the repaired original source layout and pinned history", async () => {
+  const binding = { source_file_ref: "raw", layout: [{ section_id: "old" }] } as TemplateSourceBinding
+  const repaired = { fixedTemplate: true, language: "en", layout: [{ order: 0, heading_text: "Purpose", level: 2, section_id: "slot:purpose" }] }
+  vi.mocked(loadFixedTemplateContext).mockResolvedValue({ template: Buffer.from("raw"), binding, layout: repaired, headingMap: [] })
+  await renderVersionFile(PROJECT, "Demo", {} as Spine, { version: "0.1", stampSource: "import", templateSource: binding, recordChanges: [] })
+  expect(loadFixedTemplateContext).toHaveBeenCalledWith(PROJECT, binding)
+  const calls = vi.mocked(renderSpineDocument).mock.calls
+  const call = calls[calls.length - 1]!
+  expect(call[3]).toMatchObject({ recordChanges: [] })
+  expect(await call[4]!.loadTemplate!(PROJECT)).toBe(repaired)
 })

@@ -9,12 +9,16 @@ import { DocxPackage, writeStamp } from "../docx-ooxml/index.js"
 import { Project } from "../project/project.model.js"
 import { renderSpineDocument } from "../render/assemble.service.js"
 import type { ChangeRecordRow } from "../render/section-renderer.js"
-import { writeDocx } from "../render/docx-writer.js"
+import { loadFixedTemplateContext, writeProjectDocx } from "../render/project-docx-writer.js"
 import { writerOptionsFor } from "../render/labels.js"
 import type { Spine } from "../spine/spine.types.js"
 import { projectLanguages, type ProjectLanguages } from "../translation/translation.service.js"
 
+import { type TemplateSourceBinding } from "./template-source-binding.js"
+
 export interface RenderVersionOptions {
+  templateSource?: TemplateSourceBinding | null
+  recordChanges?: ChangeRecordRow[]
   version: string
   /** Giá trị `flintflow_source` của stamp (`import`, `cr`, `release`). */
   stampSource: string
@@ -36,18 +40,23 @@ const convertedLanguages = async (projectId: string): Promise<ProjectLanguages |
 
 export const renderVersionFile = async (projectId: string, projectName: string, spine: Spine, opts: RenderVersionOptions): Promise<Buffer> => {
   const languages = opts.languages ?? (await convertedLanguages(projectId))
+  const context = opts.templateSource ? await loadFixedTemplateContext(projectId, opts.templateSource) : null
   // `baseline`: bản đã chốt của version — không in phụ lục cờ mở / watermark của bản làm việc
-  const doc = await renderSpineDocument(projectId, projectName, spine, {
+  const renderOptions = {
     version: opts.version,
-    source: "baseline",
+    source: "baseline" as const,
     pendingRecord: opts.pendingRecord,
+    ...(opts.recordChanges !== undefined ? { recordChanges: opts.recordChanges } : {}),
     ...(languages ? { languages } : {})
-  })
+  }
+  const doc = context
+    ? await renderSpineDocument(projectId, projectName, spine, renderOptions, { loadTemplate: async () => context.layout })
+    : await renderSpineDocument(projectId, projectName, spine, renderOptions)
   // Version file của dự án import thật ⇒ phụ lục cờ tiếng Việt (thông điệp cờ đã là tiếng Việt), bỏ qua ngôn ngữ tài
   // liệu ⇒ chữ cố định của file giữ như trước FLF-265. Dự án chuyển từ mode 2 (FLF-318) theo ngôn ngữ tài liệu.
   const options = languages ? writerOptionsFor("import", languages.locale, "fpt") : writerOptionsFor("import")
   // FLF-344: mục lục ghi sẵn — file mở mà không cập nhật field (Protected View, trình xem) vẫn có mục lục bấm được
-  const pkg = await DocxPackage.load(await writeDocx(doc, { ...options, tocEntries: true }))
+  const pkg = await DocxPackage.load(await writeProjectDocx(doc, { ...options, tocEntries: true }, undefined, context?.binding ?? opts.templateSource))
   await writeStamp(pkg, { project_id: projectId, version: opts.version, source: opts.stampSource })
   return pkg.toBuffer()
 }
