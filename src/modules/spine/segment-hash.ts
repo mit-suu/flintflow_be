@@ -167,6 +167,8 @@ export interface SegmentDiagram {
 }
 
 export type SegmentPart =
+  /** Heading con của mục theo file (cấp theo file) — in thành heading, không có trong Spine. */
+  | { kind: "heading"; text: string; level: number }
   | { kind: "original"; custom_id: string; diagrams: SegmentDiagram[]; mentions: SegmentMention[] }
   | { kind: "spine"; items: string[]; source_hash: string; blocks: CustomBlock[]; mentions: SegmentMention[] }
 
@@ -200,6 +202,7 @@ export const rehashSegments = (records: readonly SectionSegments[], spine: Spine
       ...r,
       parts: r.parts.map((p) => {
         if (p.kind === "spine") return p.items.some(hit) ? { ...p, source_hash: segmentHash(spine, p.items, names) } : p
+        if (p.kind !== "original") return p
         // Ảnh vừa được gắn `diagram` (FLF-360 đọc lại ảnh sau 0.1) ⇒ ghi loại sơ đồ vào đoạn; ảnh đã ghi giữ nguyên (CR bỏ ảnh ⇒ vẽ lại tại chỗ)
         const blocks = spine.custom_sections.find((c) => c.id === p.custom_id)?.blocks ?? []
         const recorded = new Set(p.diagrams.map((d) => d.image_ref))

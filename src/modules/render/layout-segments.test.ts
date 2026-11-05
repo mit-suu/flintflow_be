@@ -109,7 +109,7 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     const sections = render(spine, template)
     expect(texts(section(sections, "fixed:1"))).toEqual([
       "FAP manages attendance for FPT University.",
-      "1.1 External Systems",
+      "# 1.1 External Systems",
       "Email Service: sends notifications",
       "[image png:media:word/media/image1.png]"
     ])
@@ -119,6 +119,8 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
       "ID,Rule / BR-01,One check-in per slot / BR-02,Late after 15 minutes",
       "ID,Rule / BR-03,Absent over 20% fails"
     ])
+    // heading con giữ kiểu heading, cấp theo file (mục cấp 1 ⇒ heading con cấp 2)
+    expect(section(sections, "fixed:1").blocks[1]).toEqual({ type: "heading", level: 2, text: "1.1 External Systems" })
     // phần nối đã in tại chỗ trong mục ⇒ không thành mục riêng
     expect(sections.some((s) => s.id.startsWith("custom:"))).toBe(false)
   })
@@ -161,7 +163,7 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
       custom_sections: spine.custom_sections.map((c) => ({ ...c, blocks: c.blocks.filter((b) => b.kind !== "image") }))
     }
     const sections = render(redrawn, template)
-    expect(texts(section(sections, "fixed:1"))).toEqual(["FAP manages attendance for FPT University.", "1.1 External Systems", "Email Service: sends notifications", "[image png:D01]"])
+    expect(texts(section(sections, "fixed:1"))).toEqual(["FAP manages attendance for FPT University.", "# 1.1 External Systems", "Email Service: sends notifications", "[image png:D01]"])
     expect(sections.flatMap((s) => s.blocks).filter((b) => b.type === "image" && b.png === "png:D01")).toHaveLength(1)
   })
 
@@ -181,7 +183,8 @@ describe("FLF-366 — bản 0.1 theo đoạn của file", () => {
     const { spine, template } = imported()
     const { sectionSegments: _drop, ...legacy } = template
     const s1 = texts(section(render(spine, legacy), "fixed:1"))
-    expect(s1.slice(0, 4)).toEqual(["1.1 External Systems", "Email Service: sends notifications", "[image png:media:word/media/image1.png]", "FAP manages attendance."])
+    // dữ liệu cũ: heading con không có trong phần nối (như trước FLF-366)
+    expect(s1.slice(0, 3)).toEqual(["Email Service: sends notifications", "[image png:media:word/media/image1.png]", "FAP manages attendance."])
     expect(s1).toContain("# External Systems")
   })
 })
