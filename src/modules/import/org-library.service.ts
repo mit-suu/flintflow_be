@@ -10,13 +10,14 @@ import { docFileStore } from "../doc-version/doc-file.store.js"
 import * as spineRepository from "../spine/spine.repository.js"
 import type { CustomBlock, CustomSection } from "../spine/spine.types.js"
 import { ApiError } from "../../shared/utils/api-error.js"
-import { isRealText } from "../../shared/utils/instruction-text.js"
+import { isRealText, tableBodyHasRealText } from "../../shared/utils/instruction-text.js"
 import { Mode1Error } from "./mode1.errors.js"
 import { latestImport, loadImportFile, uploadImport } from "./import.service.js"
 import type { IImportedDocument } from "./imported-document.model.js"
 import { OrgContentEntry, OrgTemplate, type IOrgContentEntry, type IOrgTemplate } from "./org-library.model.js"
 import { TemplateProfile } from "./template-profile.model.js"
 import { normalizeTitle } from "./org-mapping.js"
+import { normalizeTemplateFamily } from "./part-bank.js"
 import type { TemplateIntent } from "./target-structure.js"
 
 export { applyOrgMapping, normalizeTitle } from "./org-mapping.js"
@@ -43,7 +44,7 @@ const summaryOf = (t: IOrgTemplate): OrgTemplateSummary => ({
   source_file_name: t.source_file.name,
   heading_count: t.headings.length,
   custom_count: t.headings.filter((h) => h.section_id === "unmapped").length,
-  template_family: t.template_family,
+  template_family: t.template_family ? normalizeTemplateFamily(t.template_family) : null,
   uses: t.uses,
   created_at: t.createdAt.toISOString()
 })
@@ -166,7 +167,7 @@ const customSectionsOf = async (projectId: string): Promise<CustomSection[]> => 
   return spine.custom_sections.filter((c) => c.heading.trim())
 }
 
-const hasRealContent = (c: CustomSection) => c.blocks.some((b) => b.image_ref || isRealText(b.text) || (b.rows ?? []).some((r) => r.some(isRealText)))
+const hasRealContent = (c: CustomSection) => c.blocks.some((b) => b.image_ref || (b.kind === "table" ? tableBodyHasRealText(b.rows) : isRealText(b.text)))
 
 /** Lưu nội dung đã viết của một mục riêng vào thư viện tổ chức (chỉ đoạn chữ / gạch đầu dòng thật, bỏ chữ hướng dẫn). */
 export const saveSectionToLibrary = async (projectId: string, orgId: string, userId: string, customSectionId: string): Promise<ContentEntryView> => {

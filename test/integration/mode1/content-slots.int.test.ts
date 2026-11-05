@@ -1,6 +1,6 @@
 /**
  * FLF-278 trên FLF-335/336 — phần nhỏ `slot:*` ở mapping review của import, Mongo thật: heading matcher chưa khớp mà tiêu
- * đề chỉ đúng một phần dữ liệu (Operating Environment) ⇒ gợi ý slot dưới ngưỡng ⇒ BA xác nhận ở 1.5; slot + mục FPT cha
+ * đề chỉ đúng một phần dữ liệu (Target Platforms) ⇒ gợi ý slot dưới ngưỡng ⇒ BA xác nhận ở 1.5; slot + mục FPT cha
  * cùng có heading ⇒ 409 (in hai lần); bản in có heading của mẫu cho phần nhỏ, không chèn lại mục cha.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -28,13 +28,14 @@ describe("slot:* ở mapping review import", () => {
   it("gợi ý phần nhỏ cho heading lạ ⇒ BA xác nhận; chồng lấn với mục cha ⇒ 409; bản in giữ heading mẫu cho phần nhỏ", async () => {
     const seeded = await seedFixture("minimal", { balance: 1000 })
     const projectId = await createMode1Project(seeded)
-    const buffer = await makeSrsDocx({ extraBody: styled("u1", "6 Operating Environment") + p("The app runs on Android 10+ and iOS 15+.") })
+    const buffer = await makeSrsDocx({ extraBody: styled("u1", "6 Target Platforms") + p("The app runs on Android 10+ and iOS 15+.") })
     const doc = await uploadImport(projectId, seeded.userId, fileOf(buffer))
     // FLF-343: không dừng ở mapping_review — gợi ý phần nhỏ độ tin thấp được tự nhận (giữ độ tin, cờ Cần xem sau baseline)
     expect(doc.status).toBe("extracting")
 
     const profile = (await TemplateProfile.findOne({ projectId }))!
-    const env = profile.heading_map.find((h) => h.heading_text.includes("Operating Environment"))!
+    // FLF-363: "Operating Environment" nay khớp thẳng phần của ngân hàng (độ tin 1) — tên chỉ luật từ khoá nhận mới đi đường gợi ý
+    const env = profile.heading_map.find((h) => h.heading_text.includes("Target Platforms"))!
     expect(env).toMatchObject({ section_id: "slot:platforms", confirmed: true, auto_confirmed: true })
     expect(env.confidence).toBeLessThan(0.8)
     // Bản ghi cũ còn ở mapping_review (trước FLF-343) vẫn sửa mapping được
@@ -59,7 +60,7 @@ describe("slot:* ở mapping review import", () => {
     expect(layout.map((l) => l.section_id)).toContain("slot:platforms")
     const rendered = await getDocument(projectId, "Lumen", { source: "draft" })
     const slot = rendered.sections.find((s) => s.id === "slot:platforms")
-    expect(slot?.heading).toBe("Operating Environment")
+    expect(slot?.heading).toBe("Target Platforms")
     expect(rendered.sections.filter((s) => s.id === "fixed:1")).toHaveLength(1)
   })
 })

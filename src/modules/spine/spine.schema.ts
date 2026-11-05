@@ -216,7 +216,9 @@ export const functionSchema = z.strictObject({
   business_rule_ids: z.array(id),
   priority: priority.nullable(),
   // Message actor ↔ system (sơ đồ tuần tự mức hệ thống). Thiếu ⇒ `[]` (Spine cũ không migrate)
-  interactions: z.array(functionInteractionSchema).optional()
+  interactions: z.array(functionInteractionSchema).optional(),
+  /** FLF-365: bản phát hành của yêu cầu (phân bổ yêu cầu, "1.0"; "deferred" = hoãn). Thiếu = chưa phân bổ. */
+  release: z.string().nullable().optional()
 })
 
 export const nfrSchema = z.strictObject({
@@ -226,7 +228,9 @@ export const nfrSchema = z.strictObject({
   kind: z.enum(["quantitative", "descriptive"]),
   metric: z.string().optional(),
   threshold: z.string().optional(),
-  priority: priority.nullable()
+  priority: priority.nullable(),
+  /** FLF-365: như `functionSchema.release`. */
+  release: z.string().nullable().optional()
 })
 
 export const businessRuleSchema = z.strictObject({
@@ -262,6 +266,25 @@ export const glossaryTermSchema = z.strictObject({
   term: z.string(),
   term_native: z.string().optional(),
   definition: z.string()
+})
+
+export const referenceSchema = z.strictObject({
+  id,
+  title: z.string(),
+  owner: z.string().optional(),
+  version: z.string().optional(),
+  date: z.string().optional(),
+  location: z.string().optional(),
+  kind: z.enum(["normative", "informative"])
+})
+
+export const verificationSchema = z.strictObject({
+  id,
+  requirement_id: id,
+  method: z.enum(["test", "analysis", "inspection", "demonstration", "other"]),
+  artifact: z.string().optional(),
+  status: z.string().optional(),
+  evidence: z.string().optional()
 })
 
 export const addendumSchema = z.strictObject({
@@ -431,6 +454,9 @@ export const spineSchema = z.strictObject({
   addendum: z.array(addendumSchema),
   /** FLF-182 — Spine trước mode 1 v2 không có ⇒ `[]`. */
   custom_sections: z.array(customSectionSchema).default([]),
+  /** FLF-365 — Spine trước mẫu IEEE 29148 không có ⇒ `[]`. */
+  references: z.array(referenceSchema).default([]),
+  verifications: z.array(verificationSchema).default([]),
 
   // preprocess ở mức phần tử mảng, không bọc `diagramSchema`: op engine đọc `.shape` của nó (element-defaults)
   diagrams: z.array(z.preprocess(legacyDiagram, diagramSchema)),

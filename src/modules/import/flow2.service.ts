@@ -1,8 +1,9 @@
 /**
  * FLF-278 trên FLF-335/336 — business-flow "Luồng 1 → Luồng 2" cho **chế độ 3** (dự án mới có mẫu bắt buộc, file thiếu mục).
  *
- * Từ "Kết quả đọc file" (import `incomplete`, 1.10) BA chọn "Viết phần còn thiếu với FlintFlow" thay vì "Hoàn thiện" (v0 từ
- * chính mẫu). Code đưa dự án sang Luồng 2 bằng pipeline tạo mới sẵn có, vào thẳng 2.4 (bỏ 2.1–2.3):
+ * Từ "Kết quả đọc mẫu" (import `incomplete`, 1.10) dự án mới chỉ có một lối "Viết với FlintFlow" — "Hoàn thiện" (khoá mẫu còn
+ * trống thành bản gốc) bị chặn ở `startFinalize`; dự án có sẵn đi "Hoàn thiện" rồi CR. Code đưa dự án sang Luồng 2 bằng pipeline
+ * tạo mới sẵn có, vào thẳng 2.4 (bỏ 2.1–2.3):
  *  - Bước Brief (B-1 … S-1) mở lại để AI phân tích phần đã có + hỏi phần thiếu (2.4–2.7); B-0 (nhập ý tưởng, chọn ngôn ngữ,
  *    hồ sơ) giữ bỏ qua — đã có từ file.
  *  - Bước sở hữu mục thiếu đã `pending` từ kế hoạch step lúc import; mục đã có giữ `accepted`, mục mẫu không có giữ `skipped`
@@ -59,11 +60,13 @@ export const continueInFlow2 = async (projectId: string, userId: string, body: F
   const project = await Project.findById(projectId).lean()
   const profile = await TemplateProfile.findOne({ projectId }).lean()
   const mode = profile?.target_structure?.resolved_mode
-  if (project?.template_intent !== "fixed" || mode !== 3) {
+  // Luồng 2 chỉ cho **dự án mới** có mẫu bắt buộc (workflow: Luồng 1 → Luồng 2 tại 2.4). Dự án có sẵn khoá bản gốc rồi bổ sung
+  // mục thiếu qua change request (Luồng 3).
+  if (project?.template_intent !== "fixed" || mode !== 3 || project.start_kind !== "new") {
     throw new Mode1Error(
       "IMPORT_INVALID_STATE",
-      "Chỉ dự án theo mẫu bắt buộc còn thiếu mục mới viết tiếp được bằng FlintFlow (chế độ SRS tự do cần xem trước bố cục — chưa hỗ trợ)",
-      { status: doc.status, resolved_mode: mode ?? null }
+      "Chỉ dự án mới theo mẫu bắt buộc còn thiếu mục mới viết tiếp được bằng FlintFlow; dự án có sẵn hoàn thiện bản gốc rồi bổ sung qua change request",
+      { status: doc.status, resolved_mode: mode ?? null, start_kind: project?.start_kind ?? null }
     )
   }
   const spine = await spineRepository.get(projectId)

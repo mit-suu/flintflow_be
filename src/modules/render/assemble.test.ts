@@ -175,6 +175,8 @@ const baseSpine = (): Spine => ({
   glossary: [],
   addendum: [],
   custom_sections: [],
+  references: [],
+  verifications: [],
   diagrams: [],
   assumptions: [],
   decisions: [],
@@ -206,6 +208,30 @@ beforeEach(() => {
 })
 
 describe("assemble()", () => {
+  it("reports populated fixed-template omissions, including custom/functions, on fresh and cached assembly", async () => {
+    const record = spineRecord({ custom_sections: [
+      { id: "POPULATED", heading: "Reviewer notes", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "Confirm the club membership policy.", rows: null, image_ref: null }] },
+      { id: "EMPTY", heading: "Empty notes", level: 1, source: "import", blocks: [] },
+      { id: "PROMPT", heading: "Template notes", level: 1, source: "import", blocks: [{ kind: "paragraph", text: "[Describe additional notes]", rows: null, image_ref: null }] }
+    ] })
+    vi.mocked(spineRepository.get).mockResolvedValue(record)
+    const deps = { loadTemplate: async () => ({ fixedTemplate: true, language: "en", layout: [{ order: 0, heading_text: "1 Introduction", level: 1, section_id: "fixed:1" }] }) }
+    const first = await assemble(PROJECT, "Demo", 1, deps)
+    const omissions = first.findings.filter((f) => f.rule === "template_section_absent")
+    expect(omissions.map((f) => f.section_id)).toContain("function:FN1")
+    expect(omissions.map((f) => f.section_id)).toContain("custom:POPULATED")
+    expect(omissions.map((f) => f.section_id)).not.toContain("custom:EMPTY")
+    expect(omissions.map((f) => f.section_id)).not.toContain("custom:PROMPT")
+    expect(omissions.map((f) => f.section_id)).not.toContain("fixed:5.3")
+    expect((await assemble(PROJECT, "Demo", 1, deps)).findings.filter((f) => f.rule === "template_section_absent")).toEqual(omissions)
+  })
+
+  it("free templates do not report omitted source regions", async () => {
+    vi.mocked(spineRepository.get).mockResolvedValue(spineRecord())
+    const result = await assemble(PROJECT, "Demo", 1, { loadTemplate: async () => ({ language: "en", layout: [{ order: 0, heading_text: "1 Introduction", level: 1, section_id: "fixed:1" }] }) })
+    expect(result.findings.some((f) => f.rule === "template_section_absent")).toBe(false)
+  })
+
   it("404 SPINE_NOT_FOUND khi chưa có Spine (review T3: không tự tạo Spine rỗng)", async () => {
     vi.mocked(spineRepository.get).mockResolvedValue(null)
     await expect(assemble(PROJECT, "Demo", 1)).rejects.toMatchObject({ statusCode: 404, code: "SPINE_NOT_FOUND" })

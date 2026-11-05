@@ -12,6 +12,17 @@ describe("relsPathOf", () => {
 })
 
 describe("DocxPackage", () => {
+  it("lưu lại cùng package sau khi hoàn tác DOM không giữ nhầm XML của lần lưu trước", async () => {
+    const pkg = await DocxPackage.load(await makeDocx({ body: p("Original") }))
+    const doc = await pkg.requireXml("word/document.xml")
+    doc.documentElement.setAttribute("data-test", "temporary")
+    const once = await JSZip.loadAsync(await pkg.toBuffer())
+    expect(await once.file("word/document.xml")!.async("string")).toContain('data-test="temporary"')
+    doc.documentElement.removeAttribute("data-test")
+    const reverted = await JSZip.loadAsync(await pkg.toBuffer())
+    expect(await reverted.file("word/document.xml")!.async("string")).not.toContain("data-test")
+  })
+
   it("mở/lưu giữ nguyên part không đụng", async () => {
     const buf = await makeDocx({ body: p("Xin chào"), extraParts: { "word/media/x.bin": "RAW-BYTES" } })
     const pkg = await DocxPackage.load(buf)

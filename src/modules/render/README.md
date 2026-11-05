@@ -3,6 +3,24 @@
 Xuất tài liệu SRS ra file. Vòng một chỉ có Word (`.docx`); PDF/Handoff hoãn (Phases §9.1).
 Writer **không đọc Spine** — nó nhận `RenderedDocument` do Assemble (T15) dựng sẵn.
 
+## Mẫu bắt buộc do người dùng upload
+
+`writeProjectDocx` chọn writer theo `Project.template_intent`, kể cả khi chế độ 3 đã chuyển sang `fpt` để soạn tiếp hoặc trở về `import` sau baseline. Với `fixed`, `template-docx-writer` điền nội dung vào gói DOCX upload; giữ bìa, lề, styles, numbering, header/footer, tên heading và khung bảng gốc. Không thêm bìa, mục lục hay phụ lục cờ. Bản nháp (`source = draft`, cùng điều kiện `writeDocx`) vẫn có **watermark DRAFT**: `writeProjectDocx` gọi `addDraftWatermark` (`docx-ooxml/watermark.ts`) sau khi điền — chỉ thêm shape chữ mờ vào header (header có sẵn của mẫu giữ nội dung; mẫu không có header thì thêm một header chỉ chứa watermark), styles / numbering / lề không đổi. `writeTemplateDocx` tự nó không gắn watermark (giữ byte của mẫu, test `fixed-template-fidelity`). File version lưu dựng ở `baseline` (không watermark); tải version chưa phát hành gắn watermark lúc tải như mẫu FPT. Bản nháp còn được nhận diện bằng tên file `_DRAFT` và custom properties.
+
+Mapping dùng chung `bindFixedTemplateHeadings` (`import/content-slots.ts`) ở cả lúc tách file (`runParse` truyền
+`fixedTemplate` khi upload theo mẫu cố định) lẫn lúc xuất. Hàm này gán phần nhỏ `slot:*` theo tiêu đề và áp quy tắc **cha và
+con cùng mục**: heading cha mà heading con nhận cùng mục FPT (hoặc phần nhỏ của mục đó) thì thành heading bao, chỉ in tiêu
+đề; heading con mang dữ liệu (vd "3.1 External Interface Requirements" › "3.1.2 Software Interfaces"). Trong nội dung,
+heading con của FlintFlow thành đoạn đậm, không thành heading. Nhãn của phần nhỏ (vd "In Scope:" trong Scope) là dòng thường.
+
+`TemplateProfile.source_file_ref` và `source_sha256` gắn mapping với đúng file nguồn. Hồ sơ cũ chỉ được khôi phục khi raw SHA và toàn bộ heading anchor chứng minh được một nguồn duy nhất; không chọn upload mới nhất. Layout cũ thiếu Purpose/Scope được sửa theo thứ tự heading trong nguồn, trước khi assembly; export fixed không đọc cache chứa outline cũ. Mapping heading được đối chiếu với `layout` để dùng đúng id `custom:*` của mục riêng/lặp.
+
+Bảng giữ tiêu đề, độ rộng và thuộc tính ô của mẫu. Cột được nối bằng header chính xác hoặc `table_map.field_path` đã ghi khi import; mapping mơ hồ bị từ chối. Ô gộp ngang giữ logical grid; nhóm gộp dọc không được lặp hoặc che giá trị độc lập. Bảng chưa điền vẫn giữ trong nguồn. Revision History dùng đúng các cột gốc. Nội dung điền thay hướng dẫn kế thừa body style của mẫu, bỏ override xám/nghiêng dành cho hướng dẫn. Dữ liệu không có heading tương ứng được báo bằng `meta.consistency` / `template_section_absent`, không tự tạo heading mới.
+
+Version mới lưu cùng `template_source`, `spine_snapshot`, `record_snapshot`; tái tạo dùng các snapshot đó và cache riêng có renderer revision, không ghi đè file cũ hoặc dùng Spine/profile hiện tại. Version fixed cũ thiếu nguồn/snapshot có thể chứng minh sẽ trả lỗi rõ ràng khi tải bản tự tái tạo; các variant `original`/`tracked` vẫn dùng artifact đã lưu.
+
+Đường Word/PDF và tạo file version dùng chung writer. Thiếu file/mapping hoặc cấu trúc chưa điền an toàn được (ví dụ chữ và section break cùng đoạn) trả `TEMPLATE_LAYOUT_UNAVAILABLE`, không tự chuyển sang mẫu mặc định. Các thuộc tính layout được kiểm tra bằng test với fixture `fixed-template-fu-it-srs-01.docx`; đối chiếu phân trang trực quan cần Word/LibreOffice.
+
 ## File
 
 | File | Vai trò |

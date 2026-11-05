@@ -1,13 +1,14 @@
 /**
  * Khớp template profile (I-3, nút 1.6) — tất định, không tốn credit. FLF-171, plan §6 2B.
- * - FLF-252: nhận họ mẫu trước (FPT / IEEE 830 / IEEE dạng System Features — `template-catalog.ts`); mẫu IEEE khớp theo
- *   danh mục IEEE rồi trích vào section FPT (nhiều mục IEEE có thể cùng một section), mục chỉ có ở IEEE giữ nguyên văn.
- * - Mẫu FPT: heading ⇒ section registry theo độ giống tiêu đề (EN/VI, bỏ dấu) + số mục; mỗi section cố định/nhóm nhận
- *   tối đa một heading (gán tham lam theo điểm).
- * - Heading con trực tiếp của chương 3 (ngoài 3.1) ⇒ feature, con của feature ⇒ function (id tạm, xem
- *   `section-catalog.ts`); heading con khác của một section ⇒ thuộc section cha.
+ * - FLF-363: mọi heading so với **ngân hàng phần chung FPT + IEEE** (`part-bank.ts`) theo tên + mục cha, không đoán họ mẫu
+ *   trước, **không dùng số mục** (số gõ tay / số Word). Nhãn họ mẫu (`fpt` / `ieee29148` / `mixed`) chỉ để báo cáo.
+ * - Mỗi phần nhận tối đa một heading (phần lặp lại như Reliability + Availability nhận thêm heading khớp chắc); nhiều phần có
+ *   thể cùng trích vào một section FPT; phần chỉ có ở IEEE giữ nguyên văn.
+ * - Mục con lạ của chương chức năng ⇒ feature, con của feature ⇒ function (id tạm, xem `section-catalog.ts`); heading con
+ *   khác của một section ⇒ thuộc section cha.
  * - Heading nhận theo mẫu số mục (file không dùng style) bị giới hạn độ tin 0.75 (P0 §4.2); FLF-343: tín hiệu phụ (in đậm,
- *   chữ to, mục lục) nâng trần (`detectorCap`), số Word tự sinh (`auto_number`) tính như số gõ tay khi chấm điểm.
+ *   chữ to, mục lục) nâng trần (`detectorCap`).
+ * - Nội dung dưới heading (loại bảng, mã BR / MSG) chỉ rõ mục khác tên ⇒ đổi theo nội dung, `content_mismatch` (D1–D2).
  * - Cột bảng ⇒ field theo `table-header-dictionary.ts`.
  * Độ tin < 0.8 ⇒ FLF-343: tự nhận + cờ "Cần xem" lúc finalize (không còn dừng ở `mapping_review`).
  */
@@ -15,20 +16,13 @@
 import { isExtractableSection, targetsOf } from "./extract-targets.js"
 import { MAPPING_CONFIDENCE_THRESHOLD, UNMAPPED_SECTION, type HeadingDetector, type HeadingSignal } from "./import.constants.js"
 import type { ParsedBlock } from "./parse.service.js"
-import {
-  PROVISIONAL_SECTION,
-  SECTION_CANDIDATES,
-  isContentSection,
-  provisionalFeatureId,
-  provisionalFunctionId,
-  type SectionCandidate
-} from "./section-catalog.js"
-import { matchTable } from "./table-header-dictionary.js"
-import { SLOT_SUGGESTION_CONFIDENCE, slotParents, suggestSlot } from "./content-slots.js"
-import { isInstructionText } from "../../shared/utils/instruction-text.js"
-import { TEMPLATE_CATALOGS, type TemplateEntry, type TemplateFamily } from "./template-catalog.js"
+import { PROVISIONAL_SECTION, isContentSection, provisionalFeatureId, provisionalFunctionId } from "./section-catalog.js"
+import { TABLE_ENTITIES, matchTable } from "./table-header-dictionary.js"
+import { SLOT_SUGGESTION_CONFIDENCE, bindFixedTemplateHeadings, isContentSlot, slotParents, suggestSlot } from "./content-slots.js"
+import { isInstructionText, splitInstruction } from "../../shared/utils/instruction-text.js"
+import { PART_BANK, isWeakTitle, partById, partsMentionedIn, titleOrigins, type PartDef, type TemplateFamily } from "./part-bank.js"
 import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js"
-import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
+import { foldText, foldTokens, splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 
 /** Block tối thiểu để khớp profile / gán section (DocBlock đã lưu cũng dùng được). */
 export interface ProfileBlock {
@@ -40,15 +34,19 @@ export interface ProfileBlock {
   rows?: string[][] | null
   /** FLF-343: tín hiệu phụ của heading (in đậm, chữ to, trùng mục lục, đánh số tự động). */
   heading_signals?: readonly HeadingSignal[]
-  /** FLF-343: số mục Word tự sinh (không có trong chữ) — chỉ dùng để chấm điểm khớp mẫu. */
+  /** FLF-343: số mục Word tự sinh (không có trong chữ). FLF-363: không còn dùng để chấm điểm khớp. */
   auto_number?: string | null
+  /** FLF-362: nhãn số Word đúng như Word hiện ("2.1.", "II.") — mang theo heading để hiển thị, không dùng chấm điểm. */
+  number_label?: string | null
+  /** FLF-364: đoạn có kiểu chữ hướng dẫn (nghiêng / tô nền / khác màu thân bài) — tín hiệu phụ của chữ hướng dẫn. */
+  guidance_format?: boolean
 }
 
 export interface ProfileMatch {
   heading_map: HeadingMapEntry[]
   table_map: TableMapEntry[]
   language: string
-  /** FLF-252: họ mẫu nhận được (`fpt` / `ieee830` / `ieee_features`). */
+  /** FLF-363: nhãn họ mẫu tính sau khi khớp (`fpt` / `ieee29148` / `mixed`). */
   template_family: TemplateFamily
 }
 
@@ -70,18 +68,6 @@ export const detectorCap = (detector: HeadingDetector, signals: readonly Heading
   if (detector === "numbering") return formatted ? 0.85 : NUMBERING_PATTERN_CAP
   // `format`: chữ to / style tiêu đề riêng — có in đậm thì chắc hơn
   return signals.includes("bold") ? 0.85 : NUMBERING_PATTERN_CAP
-}
-
-/** Heading kèm chữ dùng để chấm (số Word tự sinh ghép vào đầu khi chữ không gõ số). */
-type MatchHeading = ProfileBlock & { match: string }
-const matchText = (b: ProfileBlock): string => (b.auto_number && !splitHeadingNumber(b.text).number ? `${b.auto_number} ${b.text}` : b.text)
-
-const scoreHeading = (text: string, cand: SectionCandidate): number => {
-  const { number, title } = splitHeadingNumber(text)
-  const t = Math.max(...cand.titles.map((alias) => Math.max(titleSimilarity(title, alias), titleSimilarity(text, alias))))
-  if (!number) return t
-  const n = number === cand.number ? 1 : 0
-  return 0.7 * t + 0.3 * n
 }
 
 const detectLanguage = (blocks: ProfileBlock[]): string => {
@@ -111,115 +97,199 @@ export const assignBlockSections = (blocks: ProfileBlock[], headingMap: HeadingM
   return out
 }
 
-const headingsOf = (blocks: ProfileBlock[]): MatchHeading[] => blocks.filter((b) => b.kind === "heading" && b.level !== null).map((b) => ({ ...b, match: matchText(b) }))
+type MatchHeading = ProfileBlock & { title: string }
 
-/**
- * Heading khớp chắc một mục của danh mục: tên giống ≥ 0.8 và (mục hoặc heading không đánh số, hoặc số mục trùng). Heading
- * không số chỉ xét tên — trước đây file IEEE không đánh số không bao giờ được nhận là IEEE.
- */
-const STRONG_TITLE = 0.8
-const familyScore = (headings: MatchHeading[], entries: readonly { number: string; titles: readonly string[] }[]): number =>
-  headings.filter((b) => {
-    const { number, title } = splitHeadingNumber(b.match)
-    return entries.some((c) => (!c.number || !number || number === c.number) && Math.max(...c.titles.map((t) => titleSimilarity(title, t))) >= STRONG_TITLE)
-  }).length
+/** Tiêu đề đã bỏ số gõ tay (FLF-363: số mục không tham gia khớp — người dùng đánh số tuỳ ý). */
+const headingsOf = (blocks: ProfileBlock[]): MatchHeading[] =>
+  blocks.filter((b) => b.kind === "heading" && b.level !== null).map((b) => ({ ...b, title: splitHeadingNumber(b.text).title }))
 
-/**
- * Họ mẫu của tài liệu (FLF-252): chấm cả dàn heading với từng danh mục (FPT, IEEE 830, IEEE dạng System Features) theo số
- * mục + tên. Chỉ chọn mẫu khác FPT khi khớp chắc ≥ 3 heading và hơn hẳn FPT — tài liệu ít heading vẫn khớp như FPT.
- */
-export const detectTemplateFamily = (blocks: ProfileBlock[]): TemplateFamily => {
-  const headings = headingsOf(blocks)
-  const fpt = familyScore(headings, SECTION_CANDIDATES)
-  let best: { family: TemplateFamily; score: number } = { family: "fpt", score: fpt }
-  for (const [family, entries] of Object.entries(TEMPLATE_CATALOGS) as [Exclude<TemplateFamily, "fpt">, readonly TemplateEntry[]][]) {
-    const score = familyScore(headings, entries)
-    if (score >= 3 && score > best.score) best = { family, score }
+/** Hai từ gần giống (sai một / hai ký tự: "descripton" ≈ "description"). */
+const nearToken = (a: string, b: string): boolean => {
+  if (Math.min(a.length, b.length) < 5 || Math.abs(a.length - b.length) > 2) return false
+  const limit = Math.min(a.length, b.length) >= 8 ? 2 : 1
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i]
+    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    prev = row
   }
-  return best.family
+  return prev[b.length] <= limit
 }
 
-const aliasSimilarity = (text: string, titles: readonly string[]): number => {
-  const { title } = splitHeadingNumber(text)
-  return Math.max(...titles.map((alias) => Math.max(titleSimilarity(title, alias), titleSimilarity(text, alias))))
+/** Tên sai chính tả gần đúng — trần dưới ngưỡng chắc (cần xem); trước đây số mục phân định khi hai mục cùng điểm. */
+const TYPO_CAP = 0.75
+const typoSimilarity = (a: string, b: string): number => {
+  const ta = [...new Set(foldTokens(a))]
+  const tb = [...new Set(foldTokens(b))]
+  if (!ta.length || !tb.length) return 0
+  let common = 0
+  let near = false
+  for (const t of ta) {
+    if (tb.includes(t)) common++
+    else if (tb.some((u) => nearToken(t, u))) {
+      common += 0.5
+      near = true
+    }
+  }
+  return near ? Math.min(TYPO_CAP, (2 * common) / (ta.length + tb.length)) : 0
 }
 
-/** Mục cha theo số trong cùng danh mục (`3.1.1` ⇒ `3.1`); mục không số / chương ⇒ `null`. */
-const parentEntryOf = (entry: TemplateEntry, catalog: readonly TemplateEntry[]): TemplateEntry | null => {
-  const dot = entry.number.lastIndexOf(".")
-  if (dot < 0) return null
-  const parent = entry.number.slice(0, dot)
-  return catalog.find((c) => c.number === parent) ?? null
+const bestTitle = (title: string, part: PartDef): { score: number; text: string } => {
+  let best = { score: 0, text: "" }
+  for (const t of part.titles) {
+    const score = Math.max(titleSimilarity(title, t.text), typoSimilarity(title, t.text))
+    if (score > best.score) best = { score, text: t.text }
+  }
+  return best
 }
 
-/**
- * Điểm khớp heading ↔ mục danh mục: mục không đánh số chỉ theo tên; heading không số ⇒ tên × 0.8. Tên trùng ở hai chỗ của
- * mẫu (User Interfaces 2.1.2 / 3.1.1, Specific Requirements 3 / 3.2): heading cha giống mục cha của mục danh mục ⇒ cộng điểm,
- * để file đánh số khác mẫu (hoặc không đánh số) vẫn vào đúng chỗ.
- */
-const scoreEntry = (text: string, entry: TemplateEntry, parentText: string | null, catalog: readonly TemplateEntry[]): number => {
-  const { number } = splitHeadingNumber(text)
-  const t = aliasSimilarity(text, entry.titles)
-  if (!entry.number) return t
-  const parentEntry = parentText === null ? null : parentEntryOf(entry, catalog)
-  const inContext = parentEntry !== null && aliasSimilarity(parentText!, parentEntry.titles) >= STRONG_TITLE
-  if (!number) return (inContext ? 0.95 : 0.8) * t
-  if (number === entry.number) return 0.7 * t + 0.3
-  return 0.7 * t + (inContext ? 0.2 : 0)
-}
-
-/** Heading cha (gần nhất phía trên, cấp nhỏ hơn) của từng heading; heading cấp đầu ⇒ `null`. */
-const parentHeadingTexts = (headings: MatchHeading[]): (string | null)[] => {
-  const stack: MatchHeading[] = []
-  return headings.map((b) => {
-    while (stack.length && stack[stack.length - 1].level! >= b.level!) stack.pop()
-    const parent = stack[stack.length - 1]?.match ?? null
-    stack.push(b)
+/** Heading cha (gần nhất phía trên, cấp nhỏ hơn) của từng heading; heading cấp đầu ⇒ -1. */
+const parentIndexes = (headings: MatchHeading[]): number[] => {
+  const stack: number[] = []
+  return headings.map((b, h) => {
+    while (stack.length && headings[stack[stack.length - 1]].level! >= b.level!) stack.pop()
+    const parent = stack[stack.length - 1] ?? -1
+    stack.push(h)
     return parent
   })
 }
 
-/** Độ tin của feature/function suy theo cấu trúc ở mẫu không phải FPT — luôn để người dùng xác nhận (FLF-252). */
-const NON_FPT_STRUCTURE_CAP = 0.75
+/** Ngưỡng chắc chắn: phần lặp lại nhận thêm heading, heading trong chương chức năng khớp phần khác, mục mô tả tính năng. */
+const STRONG_TITLE = 0.8
+
+type Hit = { part: PartDef; score: number; title: string }
+
+/** Phần có `parents` chỉ khớp khi heading cha giống chắc một phần cha (tên trùng ở hai chỗ: "Overview" trong Introduction). */
+const inContext = (part: PartDef, parentTitle: string | null): boolean =>
+  !part.parents ||
+  (parentTitle !== null &&
+    part.parents.some((id) => {
+      const parent = partById(id)
+      return !!parent && bestTitle(parentTitle, parent).score >= STRONG_TITLE
+    }))
+
+/** Phần được nhận trong chương chức năng / trong một tính năng (tổng quan chức năng 3.1 của FPT, cách chia của IEEE 830). */
+const FEATURE_SCOPE_PART = /^(group:3\.1|fixed:3\.1\.)/
+const allowedInFeatures = (part: PartDef): boolean =>
+  FEATURE_SCOPE_PART.test(part.target) || part.target === "feature" || part.id === "part:ieee:sequence" || part.id === "part:ieee:classes"
+
+/** Ràng buộc vòng hai cho từng heading (xem `headingScopes`). */
+interface Limits {
+  strict: ReadonlySet<number>
+  inFeatures: ReadonlySet<number>
+  detail: ReadonlySet<number>
+}
+const NO_LIMITS: Limits = { strict: new Set(), inFeatures: new Set(), detail: new Set() }
 
 /**
- * Khớp heading theo danh mục mẫu IEEE (FLF-252). Mỗi mục danh mục nhận tối đa một heading (trừ mục `parent` lặp lại dưới
- * mỗi tính năng), nhưng nhiều mục có thể cùng trích vào một section FPT. Heading không khớp danh mục: dưới mục `features`
- * ⇒ tính năng, dưới tính năng ⇒ chức năng (độ tin ≤ 0.75 — cần xác nhận), dưới mục có nội dung ⇒ thuộc mục đó, còn lại
- * ⇒ giữ nguyên văn.
+ * Gán tham lam heading ⇒ phần theo điểm tên: mỗi phần một heading; phần `repeat` nhận thêm heading khớp chắc khác tên hoặc
+ * khác mục cha (Reliability + Availability; User Interfaces trong Product Perspective và trong External Interfaces) — cùng
+ * tên cùng chỗ là heading in hai lần. Bằng điểm ⇒ heading đứng trước, rồi phần có ngữ cảnh mục cha. `best` (điểm cao nhất,
+ * bỏ tên quá chung) quyết định heading không khớp là "giống yếu" hay "không giống gì".
  */
-const matchWithCatalog = (headings: MatchHeading[], catalog: readonly TemplateEntry[]): HeadingMapEntry[] => {
-  const pairs: { h: number; c: TemplateEntry; score: number }[] = []
+const assignParts = (headings: MatchHeading[], parents: number[], limits: Limits = NO_LIMITS): { assigned: Map<number, Hit>; best: Map<number, number> } => {
+  const pairs: (Hit & { h: number })[] = []
   const best = new Map<number, number>()
-  const parents = parentHeadingTexts(headings)
   headings.forEach((b, h) => {
-    for (const c of catalog) {
-      const score = scoreEntry(b.match, c, parents[h], catalog)
-      best.set(h, Math.max(best.get(h) ?? 0, score))
-      if (score >= MATCH_MIN) pairs.push({ h, c, score })
+    const parentTitle = parents[h] < 0 ? null : headings[parents[h]].title
+    for (const part of PART_BANK) {
+      if (part.underFeature || !inContext(part, parentTitle)) continue
+      const { score, text } = bestTitle(b.title, part)
+      if (!isWeakTitle(text)) best.set(h, Math.max(best.get(h) ?? 0, score))
+      if (limits.detail.has(h) || (limits.inFeatures.has(h) && !allowedInFeatures(part))) continue
+      if (score < (limits.strict.has(h) ? STRONG_TITLE : MATCH_MIN)) continue
+      pairs.push({ h, part, score, title: text })
     }
   })
-  pairs.sort((a, b) => b.score - a.score || a.h - b.h)
-  const assigned = new Map<number, { entry: TemplateEntry; score: number }>()
-  const used = new Set<string>()
+  pairs.sort((a, b) => b.score - a.score || a.h - b.h || (b.part.parents ? 1 : 0) - (a.part.parents ? 1 : 0))
+  const assigned = new Map<number, Hit>()
+  const used = new Map<string, Set<string>>()
   for (const p of pairs) {
-    if (assigned.has(p.h) || (p.c.target !== "parent" && used.has(p.c.id))) continue
-    assigned.set(p.h, { entry: p.c, score: p.score })
-    used.add(p.c.id)
+    if (assigned.has(p.h)) continue
+    const parentKey = parents[p.h] < 0 ? "" : foldText(headings[parents[p.h]].title)
+    const place = `${foldText(p.title)}|${parentKey}`
+    const seen = used.get(p.part.id)
+    if (seen && !(p.part.repeat && p.score >= STRONG_TITLE && !seen.has(place))) continue
+    assigned.set(p.h, { part: p.part, score: p.score, title: p.title })
+    used.set(p.part.id, (seen ?? new Set()).add(place))
+  }
+  return { assigned, best }
+}
+
+const FEATURE_DETAIL = PART_BANK.filter((p) => p.underFeature)
+const featureDetailScore = (title: string): number => Math.max(0, ...FEATURE_DETAIL.map((p) => bestTitle(title, p).score))
+
+/**
+ * Vùng của heading: trong mục có nội dung (`content`), chương chức năng (`chapter`: mục con là tính năng) hoặc một tính năng
+ * (`feature`: mục con là chức năng).
+ */
+type Scope = "normal" | "content" | "chapter" | "feature"
+const scopeOfPart = (part: PartDef): Scope =>
+  part.features ? "chapter" : part.target === "feature" ? "feature" : isContentSection(part.target) && part.target !== "parent" ? "content" : "normal"
+
+/**
+ * Ràng buộc vòng hai theo kết quả gán vòng đầu — thay cho số mục trước đây (3.x là tính năng, 5.1.1 thuộc 5.1):
+ * - heading nằm trong một mục có nội dung / chương chức năng / tính năng chỉ nhận phần khác khi tên khớp chắc (không thì
+ *   thuộc mục cha, là tính năng hoặc chức năng);
+ * - trong chương chức năng / tính năng chỉ nhận phần của chương đó (tổng quan chức năng, cách chia IEEE 830) — tính năng tên
+ *   "Change Management" không thành mục Yêu cầu khác;
+ * - mục mô tả trong tính năng ("Description and Priority") không gán phần nào (thuộc tính năng).
+ */
+const headingScopes = (headings: MatchHeading[], parents: number[], assigned: Map<number, Hit>): Limits => {
+  const scope: Scope[] = []
+  const strict = new Set<number>()
+  const inFeatures = new Set<number>()
+  const detail = new Set<number>()
+  headings.forEach((b, h) => {
+    const parentScope = parents[h] < 0 ? "normal" : scope[parents[h]]
+    const hit = assigned.get(h)
+    if (parentScope !== "normal") strict.add(h)
+    if (parentScope === "chapter" || parentScope === "feature") inFeatures.add(h)
+    if (parentScope === "feature" && featureDetailScore(b.title) >= STRONG_TITLE) detail.add(h)
+    const kept = hit && (parentScope === "normal" || hit.score >= STRONG_TITLE) && (!inFeatures.has(h) || allowedInFeatures(hit.part))
+    if (kept) scope.push(scopeOfPart(hit.part))
+    else scope.push(parentScope === "chapter" || parentScope === "feature" ? "feature" : parentScope)
+  })
+  return { strict, inFeatures, detail }
+}
+
+/** Độ tin của tính năng / chức năng suy theo cấu trúc: mục cha chắc ⇒ 0.85, không ⇒ 0.7 (cần xem). */
+const structureConfidence = (parentConfidence: number): number => (parentConfidence >= STRONG_TITLE ? 0.85 : 0.7)
+
+/**
+ * Khớp heading theo ngân hàng phần chung FPT + IEEE (FLF-363, `part-bank.ts`), không đoán họ mẫu trước, không dùng số mục.
+ * 1. Gán tham lam theo tên (+ ngữ cảnh mục cha), hai vòng: vòng hai siết heading trong chương chức năng.
+ * 2. Theo cấu trúc: phần `keep` ⇒ giữ nguyên văn; chương chức năng ⇒ mục con lạ là tính năng, con của tính năng là chức năng
+ *    (mục mô tả tính năng thuộc tính năng); tính năng chứa chương con (Classes for classification) chỉ là heading; mục con
+ *    lạ của mục có nội dung ⇒ thuộc mục đó; còn lại ⇒ không khớp.
+ * 3. FLF-278: heading chưa khớp có tên đúng một phần dữ liệu Spine ⇒ gợi ý `slot:*`.
+ */
+const matchBankHeadings = (headings: MatchHeading[], guidance: ReadonlyMap<string, HeadingGuidance> = new Map()): { entries: HeadingMapEntry[]; hits: Map<number, Hit> } => {
+  const parents = parentIndexes(headings)
+  const first = assignParts(headings, parents)
+  const limits = headingScopes(headings, parents, first.assigned)
+  const { detail } = limits
+  const { assigned, best } = assignParts(headings, parents, limits)
+
+  // Phần nhỏ ưu tiên (Purpose ⇒ slot:vision…) chỉ khi không heading nào khác nhận mục cha của nó — không thì về mục cha
+  const takenBy = new Set([...assigned.values()].filter((hit) => !hit.part.slot).map((hit) => hit.part.target))
+  const slotOf = new Map<number, string>()
+  for (const [h, hit] of [...assigned.entries()].sort((a, b) => a[0] - b[0])) {
+    const slot = hit.part.slot
+    if (!slot || takenBy.has(slot) || slotParents(slot).some((p) => takenBy.has(p))) continue
+    slotOf.set(h, slot)
+    takenBy.add(slot)
   }
 
-  // Mục `feature` có mục con chứa tính năng (3.2 › 3.2.2 Classes for classification) ⇒ chỉ là heading: tính năng nằm dưới
-  // mục con, không tạo thêm tính năng rỗng mang tên "Specific requirements"
+  // Tính năng chứa chương con có tính năng ⇒ chỉ là heading (không tạo tính năng rỗng "Specific requirements")
   const headingOnly = new Set<number>()
-  headings.forEach((b, h) => {
-    if (assigned.get(h)?.entry.target !== "feature") return
-    for (let k = h + 1; k < headings.length && headings[k].level! > b.level!; k++) {
-      if (assigned.get(k)?.entry.features) headingOnly.add(h)
-    }
+  headings.forEach((_, h) => {
+    if (assigned.get(h)?.part.target !== "feature") return
+    for (let k = h + 1; k < headings.length && headings[k].level! > headings[h].level!; k++) if (assigned.get(k)?.part.features) headingOnly.add(h)
   })
 
   const entries: HeadingMapEntry[] = []
-  const stack: { level: number; section: string; features: boolean }[] = []
+  const stack: { level: number; section: string; features: boolean; confidence: number }[] = []
   headings.forEach((b, h) => {
     while (stack.length && stack[stack.length - 1].level >= b.level!) stack.pop()
     const parent = stack[stack.length - 1] ?? null
@@ -227,20 +297,22 @@ const matchWithCatalog = (headings: MatchHeading[], catalog: readonly TemplateEn
     let section: string
     let confidence: number
     let features = false
-    if (hit) {
-      features = !!hit.entry.features
+    if (detail.has(h) && parent) {
+      section = parent.section
+      confidence = featureDetailScore(b.title)
+    } else if (hit) {
+      features = !!hit.part.features
       confidence = hit.score
-      const target = hit.entry.target
+      const target = hit.part.target
       if (target === "keep" || headingOnly.has(h)) section = UNMAPPED_SECTION
       else if (target === "feature") section = provisionalFeatureId(b.block_id)
-      else if (target === "parent") section = parent && isContentSection(parent.section) ? parent.section : UNMAPPED_SECTION
-      else section = target
+      else section = slotOf.get(h) ?? target
     } else if (parent?.features) {
       section = provisionalFeatureId(b.block_id)
-      confidence = NON_FPT_STRUCTURE_CAP
+      confidence = structureConfidence(parent.confidence)
     } else if (parent && /^feature:@/.test(parent.section)) {
       section = provisionalFunctionId(b.block_id)
-      confidence = NON_FPT_STRUCTURE_CAP
+      confidence = structureConfidence(parent.confidence)
     } else if (parent && isContentSection(parent.section)) {
       section = parent.section
       confidence = 0.8
@@ -257,21 +329,75 @@ const matchWithCatalog = (headings: MatchHeading[], catalog: readonly TemplateEn
       confidence: round(confidence),
       detected_by: detector,
       confirmed: false,
-      template_section: hit?.entry.id ?? null
+      template_section: hit && !detail.has(h) ? hit.part.id : null
     })
-    stack.push({ level: b.level!, section, features })
+    stack.push({ level: b.level!, section, features, confidence })
   })
-  return entries
+  return { entries: withSlotSuggestions(withGuidanceMatches(entries, guidance)), hits: assigned }
 }
 
-/** Khớp heading theo họ mẫu (FLF-252); không truyền ⇒ tự nhận họ mẫu. Heading chưa khớp ⇒ gợi ý phần nhỏ theo từ khoá. */
-export const matchHeadings = (blocks: ProfileBlock[], family: TemplateFamily = detectTemplateFamily(blocks)): HeadingMapEntry[] =>
-  withSlotSuggestions(family === "fpt" ? matchFptHeadings(headingsOf(blocks)) : matchWithCatalog(headingsOf(blocks), TEMPLATE_CATALOGS[family]))
+/**
+ * Nhãn họ mẫu cho báo cáo (FLF-363): đếm heading khớp tên chỉ có ở FPT / chỉ có ở IEEE (tên chung không tính). Dưới 3 tên
+ * IEEE hoặc FPT gấp đôi ⇒ `fpt`; ít tên FPT hoặc IEEE gấp đôi ⇒ `ieee29148`; còn lại ⇒ `mixed`.
+ */
+const familyOf = (hits: Map<number, Hit>): TemplateFamily => {
+  let fpt = 0
+  let ieee = 0
+  for (const hit of hits.values()) {
+    const origins = titleOrigins(hit.title)
+    if (origins.length !== 1) continue
+    if (origins[0] === "fpt") fpt++
+    else ieee++
+  }
+  if (ieee < 3 || fpt >= 2 * ieee) return "fpt"
+  if (fpt < 3 || ieee >= 2 * fpt) return "ieee29148"
+  return "mixed"
+}
 
 /**
- * FLF-278 trên FLF-336 (business-flow 1.5): heading matcher chưa khớp (`unmapped`, kể cả mục `keep` của catalog) mà tiêu đề
- * chỉ đúng một **phần** dữ liệu Spine (Purpose, Product Scope, Assumptions…) ⇒ gợi ý `slot:*`, độ tin dưới ngưỡng để BA
- * xác nhận. Bỏ qua khi mục FPT cha đã có heading (in hai lần) hoặc slot đã được gợi ý cho heading khác.
+ * FLF-371: mẫu bắt buộc — phần nhỏ + cha/con cùng mục (cần cấp heading); cấp chỉ dùng để tính, không lưu vào heading_map.
+ */
+const bindFixed = (entries: HeadingMapEntry[], blocks: readonly ProfileBlock[], fixedTemplate: boolean | undefined): HeadingMapEntry[] => {
+  if (!fixedTemplate) return entries
+  const levelOf = new Map(blocks.filter((b) => b.kind === "heading").map((b) => [b.block_id, b.level]))
+  return bindFixedTemplateHeadings(entries.map((e) => ({ ...e, level: levelOf.get(e.block_id) ?? null }))).map(({ level: _level, ...e }) => e)
+}
+
+/** Khớp heading theo ngân hàng phần (FLF-363). */
+export const matchHeadings = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } = {}): HeadingMapEntry[] =>
+  bindFixed(matchBankHeadings(headingsOf(blocks), guidanceByHeading(blocks)).entries, blocks, options.fixedTemplate)
+
+/** Nhãn họ mẫu của tài liệu (chỉ để báo cáo — không quyết định cách khớp). */
+export const detectTemplateFamily = (blocks: ProfileBlock[]): TemplateFamily => familyOf(matchBankHeadings(headingsOf(blocks)).hits)
+
+/** Độ tin khi nhận phần theo chữ hướng dẫn — dưới ngưỡng 0.8 ⇒ cờ "Cần xem". */
+export const GUIDANCE_MATCH_CONFIDENCE = 0.7
+
+/**
+ * FLF-364 (L4): heading không khớp tên phần nào (không phải phần giữ nguyên văn) mà chữ hướng dẫn của mẫu dưới nó nhắc đúng
+ * **một** phần ("[List all documents referenced…]" ⇒ References) ⇒ nhận phần đó, độ tin 0.7. Sau tên, trước luật từ khoá
+ * phần nhỏ và nội dung thật. Phần không lặp đã có heading khác thì bỏ qua.
+ */
+const withGuidanceMatches = (entries: HeadingMapEntry[], guidance: ReadonlyMap<string, HeadingGuidance>): HeadingMapEntry[] => {
+  if (!guidance.size) return entries
+  const used = new Set(entries.map((e) => e.template_section).filter(Boolean))
+  return entries.map((e) => {
+    const g = guidance.get(e.block_id)
+    if (!g || e.section_id !== UNMAPPED_SECTION || e.template_section) return e
+    const parts = partsMentionedIn(g.text)
+    if (parts.length !== 1) return e
+    const part = parts[0]
+    if (used.has(part.id) && !part.repeat) return e
+    used.add(part.id)
+    const section = part.target === "keep" || part.target === "feature" || part.target === "parent" ? UNMAPPED_SECTION : part.target
+    return { ...e, section_id: section, confidence: Math.min(e.confidence, GUIDANCE_MATCH_CONFIDENCE), template_section: part.id }
+  })
+}
+
+/**
+ * FLF-278 trên FLF-336 (business-flow 1.5): heading chưa khớp (`unmapped`, kể cả phần `keep`) mà tiêu đề chỉ đúng một
+ * **phần** dữ liệu Spine (Purpose, Product Scope, Assumptions…) ⇒ gợi ý `slot:*`, độ tin dưới ngưỡng để BA xác nhận. Bỏ qua
+ * khi mục FPT cha đã có heading (in hai lần) hoặc slot đã được gợi ý cho heading khác.
  */
 const withSlotSuggestions = (entries: HeadingMapEntry[]): HeadingMapEntry[] => {
   const used = new Set(entries.map((e) => e.section_id))
@@ -282,53 +408,6 @@ const withSlotSuggestions = (entries: HeadingMapEntry[]): HeadingMapEntry[] => {
     used.add(slot)
     return { ...e, section_id: slot, confidence: SLOT_SUGGESTION_CONFIDENCE }
   })
-}
-
-const matchFptHeadings = (headings: MatchHeading[]): HeadingMapEntry[] => {
-  // 1. Gán tham lam section cố định/nhóm
-  const pairs: { h: number; c: SectionCandidate; score: number }[] = []
-  const best = new Map<number, number>()
-  headings.forEach((b, h) => {
-    for (const c of SECTION_CANDIDATES) {
-      const score = scoreHeading(b.match, c)
-      best.set(h, Math.max(best.get(h) ?? 0, score))
-      if (score >= MATCH_MIN) pairs.push({ h, c, score })
-    }
-  })
-  pairs.sort((a, b) => b.score - a.score || a.h - b.h)
-  const assigned = new Map<number, { section: string; confidence: number }>()
-  const usedCandidates = new Set<string>()
-  for (const p of pairs) {
-    if (assigned.has(p.h) || usedCandidates.has(p.c.id)) continue
-    assigned.set(p.h, { section: p.c.id, confidence: p.score })
-    usedCandidates.add(p.c.id)
-  }
-
-  // 2. Heading còn lại: feature/function theo cấu trúc chương 3, hoặc thuộc section cha
-  const entries: HeadingMapEntry[] = []
-  const stack: { level: number; section: string }[] = []
-  headings.forEach((b, h) => {
-    while (stack.length && stack[stack.length - 1].level >= b.level!) stack.pop()
-    const parent = stack[stack.length - 1]?.section ?? null
-    const { number } = splitHeadingNumber(b.match)
-    let hit = assigned.get(h)
-    if (!hit) {
-      if (parent === "group:3") {
-        hit = { section: provisionalFeatureId(b.block_id), confidence: number && /^3\.([2-9]|\d{2})$/.test(number) ? 0.85 : 0.7 }
-      } else if (parent && /^feature:@/.test(parent)) {
-        hit = { section: provisionalFunctionId(b.block_id), confidence: number && /^3\.\d+\.\d+$/.test(number) ? 0.85 : 0.7 }
-      } else if (isContentSection(parent)) {
-        hit = { section: parent, confidence: 0.8 }
-      } else {
-        hit = { section: UNMAPPED_SECTION, confidence: (best.get(h) ?? 0) >= WEAK_MATCH ? 0.5 : 0.9 }
-      }
-    }
-    const detector = b.heading_detector ?? "style"
-    const confidence = Math.min(hit.confidence, detectorCap(detector, b.heading_signals))
-    entries.push({ block_id: b.block_id, heading_text: b.text.trim(), section_id: hit.section, confidence: round(confidence), detected_by: detector, confirmed: false })
-    stack.push({ level: b.level!, section: hit.section })
-  })
-  return entries
 }
 
 const extractsFrom = (sectionId: string | null): boolean => !!sectionId && isExtractableSection(sectionId) && targetsOf(sectionId).length > 0
@@ -354,43 +433,200 @@ export const matchTables = (blocks: ProfileBlock[], blockSections: Map<string, s
       }))
     )
 
-/** Độ dài tối đa của chữ hướng dẫn giữ cho mỗi heading. */
-export const MAX_GUIDANCE_CHARS = 400
+// ─── nội dung dưới heading (FLF-363, D1–D2) ─────────────────────────
 
 /**
- * Chữ hướng dẫn của mẫu dưới từng heading (business-flow 1.3 "detect guidance text"): các đoạn / gạch đầu dòng trước heading
- * kế tiếp mà là chữ hướng dẫn (`[…]`, "This section describes…"), bỏ ngoặc vuông bao ngoài, nối lại, cắt độ dài.
+ * Loại bảng ⇒ mục FPT là chỗ của nó, kèm từ phải có trong hàng tiêu đề — bảng chỉ có cột "Name / Description" khớp được
+ * nhiều loại, không đủ để đổi mục. Bảng chung chung (chức năng, NFR, yêu cầu khác) không tính.
  */
-export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, string> => {
-  const out = new Map<string, string>()
+const TABLE_HOME: Readonly<Record<string, { section: string; header: RegExp | null }>> = {
+  actors: { section: "fixed:2.1", header: /actor|tác nhân/i },
+  use_cases: { section: "fixed:2.2.2", header: /use ?case|ca sử dụng|uc/i },
+  screens: { section: "fixed:3.1.2", header: /screen|màn hình/i },
+  permissions: { section: "fixed:3.1.3", header: null },
+  entities: { section: "fixed:3.1.5", header: /entit|thực thể|attribute|thuộc tính/i },
+  business_rules: { section: "fixed:5.1", header: /rule|quy tắc|luật/i },
+  messages: { section: "fixed:5.3", header: /message|thông báo/i },
+  glossary: { section: "fixed:5.5", header: /term|thuật ngữ|abbreviation|acronym|viết tắt/i }
+}
+
+const tableHome = (rows: string[][]): string | null => {
+  const { entity, shape } = matchTable(rows, null)
+  const home = entity ? TABLE_HOME[entity] : undefined
+  if (!home || (home.header && !home.header.test(shape.headers.join(" | ")))) return null
+  return entity
+}
+
+/** Đoạn mở đầu bằng mã yêu cầu ⇒ mục của loại yêu cầu đó (cần ≥ 2 đoạn và chiếm đa số nội dung). */
+const CODE_HOME: readonly [RegExp, string][] = [
+  [/^\s*BR[-_ ]?\d+/i, "fixed:5.1"],
+  [/^\s*MSG[-_ ]?\d+/i, "fixed:5.3"]
+]
+
+/** Độ tin khi đổi mục theo nội dung — dưới ngưỡng 0.8 ⇒ cờ "Cần xem". */
+export const CONTENT_SWITCH_CONFIDENCE = 0.75
+
+/**
+ * Mục mà nội dung ngay dưới heading (tới heading kế) chỉ rõ: đa số bảng cùng một loại có chỗ riêng (bảng tác nhân, ERD, thuật
+ * ngữ…), hoặc đa số đoạn mở đầu bằng mã BR / MSG. Không rõ ⇒ `null`.
+ */
+const contentHomes = (blocks: readonly ProfileBlock[]): Map<string, { section: string; entity: string | null }> => {
+  const out = new Map<string, { section: string; entity: string | null }>()
   let heading: string | null = null
-  let parts: string[] = []
+  let tables: string[] = []
+  let codes: string[] = []
+  let texts = 0
   const flush = () => {
-    if (!heading || !parts.length) return
-    const text = parts.join(" ").replace(/\s+/g, " ").trim()
-    out.set(heading, text.length > MAX_GUIDANCE_CHARS ? `${text.slice(0, MAX_GUIDANCE_CHARS - 1).trimEnd()}…` : text)
+    if (!heading) return
+    const votes = new Map<string, number>()
+    for (const t of tables) votes.set(t, (votes.get(t) ?? 0) + 1)
+    const [entity, n] = [...votes.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0]
+    if (entity && TABLE_HOME[entity] && n * 2 > tables.length) {
+      out.set(heading, { section: TABLE_HOME[entity].section, entity })
+      return
+    }
+    const codeVotes = new Map<string, number>()
+    for (const c of codes) codeVotes.set(c, (codeVotes.get(c) ?? 0) + 1)
+    const [section, m] = [...codeVotes.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0]
+    if (section && m >= 2 && m * 2 > texts) out.set(heading, { section, entity: null })
   }
   for (const b of blocks) {
     if (b.kind === "heading" && b.level !== null) {
       flush()
       heading = b.block_id
-      parts = []
-    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && isInstructionText(b.text)) {
-      parts.push(b.text.trim().replace(/^\[([\s\S]*)\]$/, "$1").trim())
+      tables = []
+      codes = []
+      texts = 0
+    } else if (heading && b.kind === "table" && b.rows?.length) {
+      tables.push(tableHome(b.rows) ?? "")
+    } else if (heading && (b.kind === "paragraph" || b.kind === "list_item") && b.text.trim() && !isInstructionText(b.text)) {
+      texts++
+      const home = CODE_HOME.find(([re]) => re.test(b.text))?.[1]
+      if (home) codes.push(home)
     }
   }
   flush()
   return out
 }
 
-export const matchProfile = (blocks: ProfileBlock[]): ProfileMatch => {
-  const template_family = detectTemplateFamily(blocks)
+/**
+ * D1–D2: nội dung khớp chắc một mục khác mục theo tên ⇒ đổi theo nội dung (độ tin ≤ 0.75) và ghi `content_mismatch` để
+ * finalize bật cờ "Tiêu đề và nội dung khác nhau"; heading không khớp tên mà nội dung rõ ⇒ đề xuất mục đó (≤ 0.75). Chỉ đổi
+ * khi mục theo nội dung chưa có heading nào khác (file đã có mục "Tác nhân" thì bảng tác nhân trong "Bối cảnh" là ngữ cảnh) và
+ * mục theo tên là mục có nội dung (không phải nhóm, tính năng, chức năng, phần giữ nguyên văn).
+ */
+const withContentSignals = (blocks: readonly ProfileBlock[], entries: HeadingMapEntry[]): HeadingMapEntry[] => {
+  const homes = contentHomes(blocks)
+  const used = new Set(entries.map((e) => e.section_id))
+  return entries.map((e) => {
+    const home = homes.get(e.block_id)
+    if (!home || home.section === e.section_id || used.has(home.section)) return e
+    const accepted = home.entity ? (TABLE_ENTITIES.find((d) => d.entity === home.entity)?.sections ?? []) : []
+    if (accepted.includes(e.section_id)) return e
+    const matchedByTitle = !!e.template_section && e.section_id !== UNMAPPED_SECTION
+    const unmatched = !e.template_section && (e.section_id === UNMAPPED_SECTION || isContentSlot(e.section_id))
+    if (matchedByTitle && (!isContentSection(e.section_id) || isProvisionalSection(e.section_id))) return e
+    if (!matchedByTitle && !unmatched) return e
+    used.add(home.section)
+    return {
+      ...e,
+      section_id: home.section,
+      confidence: Math.min(e.section_id === UNMAPPED_SECTION ? CONTENT_SWITCH_CONFIDENCE : e.confidence, CONTENT_SWITCH_CONFIDENCE),
+      ...(matchedByTitle ? { content_mismatch: { by_title: e.section_id, by_content: home.section } } : {})
+    }
+  })
+}
+
+/** Độ dài tối đa của chữ hướng dẫn giữ cho mỗi heading (FLF-364: giữ nguyên văn — trước đây cắt ở 400). */
+export const MAX_GUIDANCE_CHARS = 4000
+
+/** Chữ hướng dẫn của mẫu dưới một heading (FLF-364). */
+export interface HeadingGuidance {
+  text: string
+  /** `brackets`: chữ trong `[ ]` / `{ }`; `brackets+format`: thêm kiểu chữ hướng dẫn (màu / nghiêng / tô nền). */
+  by: "brackets" | "brackets+format"
+  /** Block chứa chữ hướng dẫn (đoạn, gạch đầu dòng, bảng). */
+  blocks: string[]
+}
+
+const capGuidance = (text: string): string =>
+  text.length > MAX_GUIDANCE_CHARS ? `${text.slice(0, MAX_GUIDANCE_CHARS - 1).trimEnd()}…` : text
+
+/**
+ * Chữ hướng dẫn của mẫu dưới từng heading (business-flow 1.3 "detect guidance text"; FLF-364): mọi chữ trong `[ ]` / `{ }`
+ * của các đoạn / gạch đầu dòng / ô bảng trước heading kế tiếp — cả đoạn ngoặc nằm trong câu có chữ thật — bỏ ngoặc, nối lại
+ * nguyên văn (trần 4 000 ký tự). Màu / nghiêng chỉ ghi vào `by`, không tự thành hướng dẫn.
+ */
+export const guidanceByHeading = (blocks: readonly ProfileBlock[]): Map<string, HeadingGuidance> => {
+  const out = new Map<string, HeadingGuidance>()
+  let heading: string | null = null
+  let parts: string[] = []
+  let ids: string[] = []
+  let formatted = false
+  const flush = () => {
+    if (!heading || !parts.length) return
+    const text = parts.join(" ").replace(/\s+/g, " ").trim()
+    if (text) out.set(heading, { text: capGuidance(text), by: formatted ? "brackets+format" : "brackets", blocks: [...new Set(ids)] })
+  }
+  for (const b of blocks) {
+    if (b.kind === "heading" && b.level !== null) {
+      flush()
+      heading = b.block_id
+      parts = []
+      ids = []
+      formatted = false
+      continue
+    }
+    if (!heading) continue
+    const texts = b.kind === "paragraph" || b.kind === "list_item" ? [b.text] : b.kind === "table" ? (b.rows ?? []).flat() : []
+    const found = texts.flatMap((t) => splitInstruction(t).guidance).filter(Boolean)
+    if (!found.length) continue
+    parts.push(...found)
+    ids.push(b.block_id)
+    if (b.guidance_format) formatted = true
+  }
+  flush()
+  return out
+}
+
+/**
+ * FLF-364: chữ hướng dẫn trong từng cột bảng (ô dưới hàng tiêu đề nằm trọn trong `[ ]` / `{ }` — "[Tên tác nhân]",
+ * "{mô tả vai trò}") ⇒ `table_map[].guidance` của cột đó.
+ */
+const columnGuidance = (blocks: readonly ProfileBlock[]): Map<string, string> => {
+  const out = new Map<string, string>()
+  for (const b of blocks) {
+    if (b.kind !== "table" || !b.rows?.length) continue
+    const width = Math.max(...b.rows.map((r) => r.length))
+    for (let c = 0; c < width; c++) {
+      const cells = b.rows.slice(1).map((r) => r[c] ?? "").filter((t) => isInstructionText(t))
+      const text = [...new Set(cells.flatMap((t) => splitInstruction(t).guidance))].join(" ").trim()
+      if (text) out.set(`${b.block_id}#${c}`, capGuidance(text))
+    }
+  }
+  return out
+}
+
+export const matchProfile = (blocks: ProfileBlock[], options: { fixedTemplate?: boolean } = {}): ProfileMatch => {
   const guidance = guidanceByHeading(blocks)
-  const heading_map = matchHeadings(blocks, template_family).map((h) => (guidance.has(h.block_id) ? { ...h, guidance: guidance.get(h.block_id)! } : h))
+  const matched = matchBankHeadings(headingsOf(blocks), guidance)
+  const template_family = familyOf(matched.hits)
+  const labels = new Map(blocks.filter((b) => b.number_label).map((b) => [b.block_id, b.number_label!]))
+  const heading_map = bindFixed(withContentSignals(blocks, matched.entries), blocks, options.fixedTemplate).map((h) => ({
+    ...h,
+    ...(guidance.has(h.block_id)
+      ? { guidance: guidance.get(h.block_id)!.text, guidance_by: guidance.get(h.block_id)!.by, guidance_blocks: guidance.get(h.block_id)!.blocks }
+      : {}),
+    ...(labels.has(h.block_id) ? { number_label: labels.get(h.block_id)! } : {})
+  }))
   const sections = assignBlockSections(blocks, heading_map)
+  const columns = columnGuidance(blocks)
   return {
     heading_map,
-    table_map: matchTables(blocks, sections),
+    table_map: matchTables(blocks, sections).map((t) => {
+      const g = columns.get(`${t.block_id}#${t.column_index}`)
+      return g ? { ...t, guidance: g } : t
+    }),
     language: detectLanguage(blocks),
     template_family
   }

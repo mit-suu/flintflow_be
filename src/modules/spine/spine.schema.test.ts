@@ -468,3 +468,21 @@ describe("JSON Schema", () => {
     expect(onDisk).toBe(serializeJsonSchema())
   })
 })
+
+describe("FLF-365 — Spine thêm references / verifications / release (chỉ thêm)", () => {
+  it("Spine cũ không có field mới ⇒ parse được, mảng mới = []; giá trị mới hợp lệ được nhận", () => {
+    const old = createEmptySpine({ name: "Lumen", domain: "E-learning" }) as Partial<Spine>
+    delete old.references
+    delete old.verifications
+    const parsed = spineSchema.parse(old)
+    expect(parsed.references).toEqual([])
+    expect(parsed.verifications).toEqual([])
+    const withNew = spineSchema.parse({
+      ...createEmptySpine({ name: "Lumen", domain: "E-learning" }),
+      references: [{ id: "REF-01", title: "ISO/IEC/IEEE 29148:2018", kind: "normative" }],
+      verifications: [{ id: "VER-01", requirement_id: "NFR-01", method: "test", artifact: "TC-NFR-01", status: "not run" }]
+    })
+    expect(withNew.references[0].kind).toBe("normative")
+    expect(() => spineSchema.parse({ ...createEmptySpine({ name: "x", domain: "y" }), verifications: [{ id: "VER-01", requirement_id: "F-01", method: "guess" }] })).toThrow()
+  })
+})

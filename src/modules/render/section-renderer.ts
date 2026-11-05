@@ -163,6 +163,9 @@ const localizeBlocks = (blocks: Block[], language: string | undefined, fpt = fal
 // ─── context tiêm từ assemble.service ────────────────────────────
 
 export interface SectionRenderContext {
+  /** Preserve the fixed source outline; child slots own their data instead of the aggregate parent. */
+  fixedTemplate?: boolean
+  representedSlots?: ReadonlySet<string>
   /** Số hiệu hiển thị của chính section này, đã tính lúc assemble (§6.3). */
   number: string
   status?: RenderedSectionStatus
@@ -261,7 +264,12 @@ const diagramImages = (
 // ─── fixed:1 Product Overview ─────────────────────────────────────
 
 const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
-  const { project } = spine
+  const represented = ctx.fixedTemplate ? ctx.representedSlots : undefined
+  const project = { ...spine.project,
+    vision: represented?.has("slot:vision") ? "" : spine.project.vision,
+    goals: represented?.has("slot:goals") || represented?.has("slot:scope") ? [] : spine.project.goals,
+    release_scope: represented?.has("slot:scope") ? { in: [], out: [] } : spine.project.release_scope
+  }
   const blocks: Block[] = []
   if (project.vision) blocks.push(p(project.vision))
   if (project.goals.length > 0) blocks.push(heading("Goals", 2), bulletList(project.goals))
@@ -270,15 +278,15 @@ const productOverview = (spine: Spine, ctx: SectionRenderContext): Block[] => {
     if (project.release_scope.in.length > 0) blocks.push(heading("In Scope", 3), bulletList(project.release_scope.in))
     if (project.release_scope.out.length > 0) blocks.push(heading("Out of Scope", 3), bulletList(project.release_scope.out))
   }
-  const highRules = spine.business_rules.filter((r) => r.tier === "high")
+  const highRules = represented?.has("slot:high_rules") || represented?.has("slot:business_rules") ? [] : spine.business_rules.filter((r) => r.tier === "high")
   if (highRules.length > 0) blocks.push(heading("High-Level Business Rules", 2), bulletList(highRules.map((r) => r.statement)))
-  const nonHuman = spine.actors.filter((a) => a.kind !== "human")
+  const nonHuman = represented?.has("slot:context") ? [] : spine.actors.filter((a) => a.kind !== "human")
   if (nonHuman.length > 0) {
     const lang = fptLanguage(ctx)
     const say = sentencesFor(lang)
     blocks.push(heading("External Systems", 2), bulletList(nonHuman.map((a) => say.externalSystem(a.name, enumLabel(lang, "actor_kind", a.kind), a.description))))
   }
-  blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram"))
+  if (!represented?.has("slot:context")) blocks.push(...diagramImages(spine, "context", undefined, ctx, "Figure — System Context Diagram"))
   return blocks
 }
 
@@ -729,13 +737,18 @@ const blocksFor = (spine: Spine, sectionId: string, ctx: SectionRenderContext): 
     case "fixed:4.2.4":
       return nfrTable(spine, "other", ctx)
     case "fixed:5.1":
-      return businessRulesDetail(spine)
+      return ctx.fixedTemplate && ctx.representedSlots?.has("slot:business_rules") ? [] : businessRulesDetail(spine)
     case "fixed:5.2":
-      return commonRequirements(spine, ctx)
+      return commonRequirements(ctx.fixedTemplate ? { ...spine, common_requirements: spine.common_requirements.filter((c) =>
+        !(ctx.representedSlots?.has("slot:security") && ["security", "session", "audit"].includes(c.category)) &&
+        !(ctx.representedSlots?.has("slot:localization") && ["localization", "date_format"].includes(c.category))) } : spine, ctx)
     case "fixed:5.3":
-      return messagesList(spine)
+      return ctx.fixedTemplate && ctx.representedSlots?.has("slot:messages") ? [] : messagesList(spine)
     case "fixed:5.4":
-      return otherRequirements(spine, ctx)
+      return otherRequirements(ctx.fixedTemplate ? { ...spine, other_requirements: spine.other_requirements.filter((o) =>
+        !(ctx.representedSlots?.has("slot:assumptions") && o.kind === "assumption") &&
+        !(ctx.representedSlots?.has("slot:risks") && ["risk", "technical_risk"].includes(o.kind)) &&
+        !(ctx.representedSlots?.has("slot:open_questions") && o.kind === "open_question")) } : spine, ctx)
     case "fixed:5.5":
       return glossaryTable(spine)
     default:
@@ -970,11 +983,20 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
     case "slot:goals":
       return project.goals.length ? [bulletList(project.goals)] : []
     case "slot:scope": {
+      // Mẫu bắt buộc: nhãn là dòng thường ("In Scope:"), không phải heading — bản in chỉ có heading của chính mẫu
+      const label = (name: string): Block => (ctx.fixedTemplate ? p(`${name}:`) : heading(name, 2))
       const out: Block[] = []
-      if (project.release_scope.in.length) out.push(heading(text.inScope, 2), bulletList(project.release_scope.in))
-      if (project.release_scope.out.length) out.push(heading(text.outOfScope, 2), bulletList(project.release_scope.out))
+      // IEEE 830 §1.2 Scope gồm cả mục tiêu ⇒ mẫu không có heading Goals thì mục tiêu in ở đây
+      if (ctx.fixedTemplate && !ctx.representedSlots?.has("slot:goals") && project.goals.length) out.push(label(text.goals), bulletList(project.goals))
+      if (project.release_scope.in.length) out.push(label(text.inScope), bulletList(project.release_scope.in))
+      if (project.release_scope.out.length) out.push(label(text.outOfScope), bulletList(project.release_scope.out))
       return out
     }
+    case "slot:business_rules":
+      return spine.business_rules.length ? [tableBlock(["ID", "Rule"], spine.business_rules.map((r) => [r.id, r.statement]))] : []
+    case "slot:messages":
+      // Spine has no message type field; keep that source column blank rather than infer a type.
+      return spine.messages.length ? [tableBlock(["Code", "Type", "Content"], spine.messages.map((m) => [m.code, "", m.text]))] : []
     case "slot:high_rules": {
       const rules = spine.business_rules.filter((r) => r.tier === "high")
       return rules.length ? [bulletList(rules.map((r) => r.statement))] : []
@@ -988,6 +1010,14 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
         .sort((a, b) => a.order - b.order)
         .map((f) => [say.featureLabel(ctx.numberOf(`feature:${f.id}`), f.name), spine.functions.filter((fn) => fn.feature_id === f.id).map((fn) => fn.name).join(", ")])
       return [tableBlock([text.feature, text.functions], rows)]
+    }
+    case "slot:functional_requirements": {
+      const rows = [...spine.functions].sort((a, b) => a.order - b.order).map((fn) => [
+        fn.id,
+        [fn.name, fn.description, fn.trigger, ...fn.normal, ...fn.abnormal, ...fn.validations.map((v) => v.statement)].filter(Boolean).join("\n"),
+        fn.priority ?? ""
+      ])
+      return rows.length ? [tableBlock(["ID", "Requirement", "Priority"], rows)] : []
     }
     case "slot:platforms":
       return project.form_factor.length
@@ -1007,6 +1037,43 @@ const slotBlocks = (spine: Spine, slotId: string, ctx: SectionRenderContext): Bl
     case "slot:open_questions": {
       const questions = otherOf(spine, ["open_question"])
       return questions.length ? [bulletList(questions.map((o) => o.statement))] : []
+    }
+    // FLF-365: mục chỉ có ở mẫu IEEE 29148
+    case "slot:references": {
+      const refs = spine.references ?? []
+      return refs.length
+        ? [
+            tableBlock(
+              [text.reference.id, text.reference.title, text.reference.owner, text.reference.version, text.reference.date, text.reference.location, text.reference.kind],
+              refs.map((r) => [r.id, r.title, r.owner ?? "", r.version ?? "", r.date ?? "", r.location ?? "", text.referenceKind[r.kind] ?? r.kind])
+            )
+          ]
+        : []
+    }
+    case "slot:apportioning": {
+      // Yêu cầu × bản phát hành; "deferred" (hoãn) có cột riêng. Chưa phân bổ ⇒ không in dòng
+      const items = [...spine.functions, ...spine.nfrs].filter((r) => !!r.release)
+      if (!items.length) return []
+      const releases = [...new Set(items.map((r) => r.release!).filter((r) => r !== "deferred"))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      const deferred = items.some((r) => r.release === "deferred")
+      const nameOf = (r: (typeof items)[number]) => ("name" in r ? r.name : r.statement)
+      return [
+        tableBlock(
+          [text.requirement, ...releases, ...(deferred ? [text.deferred] : [])],
+          items.map((r) => [`${r.id} ${nameOf(r)}`.trim(), ...releases.map((v) => (r.release === v ? "✓" : "")), ...(deferred ? [r.release === "deferred" ? "✓" : ""] : [])])
+        )
+      ]
+    }
+    case "slot:verification": {
+      const rows = spine.verifications ?? []
+      return rows.length
+        ? [
+            tableBlock(
+              [text.requirement, text.verification.method, text.verification.artifact, text.verification.status, text.verification.evidence],
+              rows.map((v) => [v.requirement_id, text.verificationMethod[v.method] ?? v.method, v.artifact ?? "", v.status ?? "", v.evidence ?? ""])
+            )
+          ]
+        : []
     }
     case "slot:security":
       return commonOf(spine, ["security", "session", "audit"], ctx)

@@ -197,6 +197,13 @@ describe("deterministicTableItems — bảng khớp đủ cột (G7)", () => {
     expect(items.every((i) => i.confidence === 1)).toBe(true)
   })
 
+  it("FLF-278: hàng chỗ trống của bảng mẫu (`[FR-xxx]`, `[Describe…]`) không thành item", () => {
+    const withPlaceholder = [...grid, ["[UC-xx]", "[Use case name]", "[Actor]"]]
+    const items = deterministicTableItems(blocks[0], withPlaceholder, profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name"), col(2, "use_cases[].actor_ids")]))!
+    expect(items.map((i) => i.id)).toEqual(["UC-01", "UC-02"])
+    expect(deterministicTableItems(blocks[0], [grid[0], ["[UC-xx]", "[Use case name]", "[Actor]"]], profileOf([col(0, "use_cases[].id"), col(1, "use_cases[].name")]))).toEqual([])
+  })
+
   it("FLF-251: cột include/extend tách danh sách tham chiếu như cột tác nhân", () => {
     const rows = [
       ["ID", "Use Case", "Actors", "Includes"],
