@@ -2,6 +2,8 @@ import { Request, Response } from "express"
 import { z } from "zod"
 import { renderedDocumentSchema } from "./rendered-document.schema.js"
 import { buildDocxFileName, writeDocx } from "./docx-writer.js"
+import { loadFixedTemplateContext, writeProjectDocx } from "./project-docx-writer.js"
+import { resolveFixedBaselineVersion } from "../doc-version/template-source-binding.js"
 import { authorize } from "./render.controller.js"
 import { exportWordQuerySchema } from "../pipeline/pipeline.dto.js"
 import { getDocumentWithMeta, getDraftMeta, NoWorkingDraftError, type DocumentWithMeta, type DraftMeta } from "./assemble.service.js"
@@ -64,7 +66,7 @@ interface ExportedDocx {
  * `null` ⇒ đã trả lỗi `NO_WORKING_DRAFT` lên `res`.
  */
 const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDocx | null> => {
-  const { projectId, projectName, mode, documentLanguage, sourceLanguage, convertedFrom } = await authorize(req)
+  const { projectId, projectName, mode, documentLanguage, sourceLanguage, convertedFrom, templateIntent } = await authorize(req)
   const parsedQuery = exportWordQuerySchema.safeParse(req.query)
   if (!parsedQuery.success) throw validationError(parsedQuery.error)
   const { lang, ...query } = parsedQuery.data
@@ -79,11 +81,16 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   if (otherLanguage && mode === "import") throw documentLanguageUnavailable()
 
   let result: DocumentWithMeta
+  const savedVersion = templateIntent === "fixed" && query.source === "baseline" ? await resolveFixedBaselineVersion(projectId, query.baseline_id) : null
+  const template = templateIntent === "fixed" ? await loadFixedTemplateContext(projectId, savedVersion?.template_source ?? undefined) : null
   try {
     // Ngôn ngữ khác cần lớp bản dịch ⇒ kiểm đủ TRƯỚC khi dựng, trên đúng Spine sắp dựng (không đọc lại giữa kiểm và
     // dựng): thiếu ⇒ 409, không in chữ gốc thay chỗ thiếu
     const beforeRender = otherLanguage && locale !== sourceLanguage ? (spine: Spine) => assertTranslationComplete(projectId, locale, spine) : undefined
-    result = await getDocumentWithMeta(projectId, projectName, { ...query, languages: { locale, source: sourceLanguage }, ...(beforeRender ? { beforeRender } : {}) })
+    const documentQuery = { ...query, languages: { locale, source: sourceLanguage }, ...(beforeRender ? { beforeRender } : {}), ...(template ? { freshTemplate: true, ...(savedVersion ? { recordChanges: savedVersion.record_snapshot ?? [] } : {}) } : {}) }
+    result = template
+      ? await getDocumentWithMeta(projectId, projectName, documentQuery, { loadTemplate: async () => template.layout })
+      : await getDocumentWithMeta(projectId, projectName, documentQuery)
   } catch (err) {
     if (err instanceof NoWorkingDraftError) {
       sendError(res, err.statusCode, err.code, err.message)
@@ -96,7 +103,7 @@ const buildExportDocx = async (req: Request, res: Response): Promise<ExportedDoc
   if (!parsed.success) throw renderedDocumentInvalid(parsed.error)
 
   // FLF-344: dự án mode 1 (import thật lẫn chuyển từ mode 2) — mục lục ghi sẵn như file version; mode 2 giữ field TOC rỗng
-  const buffer = await writeDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) })
+  const buffer = await writeProjectDocx(parsed.data, { ...writerOptionsFor(mode, locale, convertedFrom), ...(mode === "import" ? { tocEntries: true } : {}) }, templateIntent, template?.binding)
   // review C2: source=draft — đính kèm độ mới của bản đang xuất (baseline bất biến, không cần).
   // FLF-265: bản dịch không ghi cache ⇒ độ mới của chính bản vừa dựng.
   const draftMeta = query.source === "draft" ? (result.draftMeta ?? (await getDraftMeta(projectId)) ?? null) : null

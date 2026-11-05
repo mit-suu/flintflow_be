@@ -38,6 +38,8 @@ import { gate, GateLimitError, type GateInput } from "./gate.service.js"
 import { BaselineBlockedError, SIGN_OFF_STEP } from "./s9/baseline.service.js"
 import { resumeProject } from "./resume.service.js"
 import { getProjectById } from "../project/project.service.js"
+import { TemplateProfile } from "../import/template-profile.model.js"
+import { headingsOfStep, templateSectionsByStep } from "../import/template-step-headings.js"
 import { replyLanguageForSessionId } from "../project/reply-language.service.js"
 import { requireOrgId } from "../../shared/auth/org-request.js"
 import { runStepRequestSchema, runPhaseRequestSchema, stepAnswerRequestSchema, gateRequestSchema, cancelRunRequestSchema, runEstimateQuerySchema, reviewModeRequestSchema, skipConfirmSectionsRequestSchema, autoPassedSeenRequestSchema } from "./pipeline.dto.js"
@@ -68,6 +70,8 @@ interface Context {
   userId: string
   project: { name: string; domain: string | null }
   mode: string
+  /** FLF-278: `fixed` ⇒ dự án theo mẫu bắt buộc (rail gắn heading của mẫu vào từng bước). */
+  templateIntent: string | null
 }
 
 /** Kiểm quyền sở hữu project trước khi đọc body — người ngoài không dò được DTO qua lỗi 400. */
@@ -78,13 +82,13 @@ const authorize = async (req: Request): Promise<Context> => {
   const projectId = req.params.projectId as string
   if (!mongoose.isValidObjectId(projectId)) throw new ApiError(404, "Không tìm thấy dự án hoặc bạn không có quyền truy cập.", "PROJECT_NOT_FOUND")
   const project = await getProjectById(projectId, requireOrgId(req))
-  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt" }
+  return { projectId, userId, project: { name: project.name, domain: project.domain ?? null }, mode: project.mode ?? "fpt", templateIntent: project.template_intent ?? null }
 }
 
 // ─── GET /steps ──────────────────────────────────────────────────
 
 export const getSteps = catchAsync(async (req: Request, res: Response) => {
-  const { projectId, project } = await authorize(req)
+  const { projectId, project, templateIntent } = await authorize(req)
   // F17: project tạo trước T01 chưa có Spine — tạo rỗng lần đầu đọc, giữ đúng name/domain (như spine.controller.ts).
   const record = await spineRepository.getOrCreate(projectId, { name: project.name, domain: project.domain })
   const spine = stripRecord(record)
@@ -104,6 +108,10 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
   // Khoá lượt chạy nằm ở `step_runs` (FLF-177): mỗi dự án nhiều nhất một lượt sống ⇒ một truy vấn cho cả danh sách.
   const activeRun = await getActiveRun(projectId)
 
+  // FLF-278: dự án theo mẫu bắt buộc ⇒ mỗi bước kèm heading của mẫu mà bước đó soạn (rail vẫn theo quy trình FlintFlow)
+  const layout = templateIntent === "fixed" ? ((await TemplateProfile.findOne({ projectId }, { layout: 1 }).lean())?.layout ?? []) : []
+  const headingsByStep = layout.length ? templateSectionsByStep(layout, spine) : null
+
   const steps = defs.map((def) => {
     const state = spine.steps.find((s) => s.id === def.id)
     const stepCounts = counts.get(def.id) ?? { calls_used: 0, regenerate_used: 0 }
@@ -120,7 +128,8 @@ export const getSteps = catchAsync(async (req: Request, res: Response) => {
       regenerate_used: stepCounts.regenerate_used,
       regenerate_limit: REGENERATE_LIMIT_COUNT,
       accepted_at: state?.accepted_at ?? null,
-      running: activeRun?.step_id === def.id
+      running: activeRun?.step_id === def.id,
+      ...(headingsByStep ? { template_sections: headingsOfStep(headingsByStep, def.id) } : {})
     }
   })
 
