@@ -69,6 +69,20 @@ describe("segmentItemHash / segmentHash", () => {
   })
 })
 
+describe("rehashSegments — sơ đồ đọc lại sau 0.1 (FLF-360)", () => {
+  it("ảnh vừa được gắn `diagram` ⇒ ghi loại sơ đồ vào đoạn; ảnh đã ghi không lặp", () => {
+    const base = spine()
+    const image = { kind: "image" as const, text: "", rows: null, image_ref: "word/media/image1.png" }
+    const records: SectionSegments[] = [{ section_id: "fixed:1", parts: [{ kind: "original", custom_id: "CS01", diagrams: [], mentions: [] }], known: [] }]
+    const tagged: Spine = { ...base, custom_sections: [{ ...base.custom_sections[0], blocks: [image] }] }
+    expect(rehashSegments(records, tagged)[0].parts[0]).toMatchObject({ diagrams: [] })
+    const read: Spine = { ...base, custom_sections: [{ ...base.custom_sections[0], blocks: [{ ...image, diagram: { kind: "context", source_hash: "h" } }] }] }
+    const once = rehashSegments(records, read)
+    expect(once[0].parts[0]).toMatchObject({ diagrams: [{ image_ref: "word/media/image1.png", kind: "context" }] })
+    expect(rehashSegments(once, read)[0].parts[0]).toMatchObject({ diagrams: [{ image_ref: "word/media/image1.png", kind: "context" }] })
+  })
+})
+
 describe("original_text_mentions_changed", () => {
   const records: SectionSegments[] = [
     {
