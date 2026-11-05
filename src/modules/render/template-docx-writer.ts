@@ -96,7 +96,12 @@ export async function writeTemplateDocx(
   for (const slot of slots) {
     if (!slot.sections.some((s) => s.blocks.length || s.id !== slot.section_id)) continue
     if (slot.nodes.some((n) => isW(n, "p") && isLayoutParagraph(n) && wAll(n, "t").some((t) => t.textContent?.trim()))) unavailable(`Body text shares a layout break below ${slot.block_id}`)
-    if (slot.nodes.some((n) => isW(n, "p") && hasOpaqueContent(n))) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
+    // FLF-372: đoạn chỉ chứa ảnh (sơ đồ ngữ cảnh, use case… của file gốc) thay được khi bản in của mục mang lại đủ số ảnh —
+    // bản in Mode 1 giữ ảnh gốc thành khối ảnh; field / sdt / công thức / bookmark lạ vẫn không xoá
+    const opaque = slot.nodes.filter((n) => isW(n, "p") && hasOpaqueContent(n))
+    const pictures = opaque.filter(isPictureOnly)
+    const printedImages = slot.sections.reduce((n, s) => n + s.blocks.filter((b) => b.type === "image").length, 0)
+    if (opaque.length > pictures.length || pictures.length > printedImages) unavailable(`Source objects or fields cannot be safely replaced below ${slot.block_id}`)
     const replaceable = slot.nodes.map((node, index) => isW(node, "tbl") || (isW(node, "p") && !isLayoutParagraph(node)) ? index : -1).filter((index) => index >= 0)
     if (slot.nodes.some((node, index) => isW(node, "p") && isLayoutParagraph(node) && index > replaceable[0] && index < replaceable[replaceable.length - 1])) unavailable(`Source content spans an internal layout boundary below ${slot.block_id}`)
     const paragraphs = slot.nodes.filter((n) => isW(n, "p") && !isLayoutParagraph(n))
@@ -168,6 +173,13 @@ export async function writeTemplateDocx(
 }
 
 const isLayoutParagraph = (p: Element): boolean => wAll(p, "sectPr").length > 0 || wAll(p, "br").some((b) => wAttr(b, "type") === "page")
+/** Đoạn chỉ chứa hình (`drawing` / `pict`), không field, sdt, đối tượng nhúng, công thức hay bookmark lạ. */
+const isPictureOnly = (p: Element): boolean =>
+  (wAll(p, "drawing").length > 0 || wAll(p, "pict").length > 0)
+  && !["object", "fldSimple", "fldChar", "instrText", "sdt"].some((name) => wAll(p, name).length > 0)
+  && p.getElementsByTagNameNS("http://schemas.openxmlformats.org/officeDocument/2006/math", "oMath").length === 0
+  && !wAll(p, "bookmarkStart").some((b) => !/^_ff(?:t)?_B\d+$/.test(wAttr(b, "name") ?? ""))
+
 const hasOpaqueContent = (p: Element): boolean =>
   ["drawing", "pict", "object", "fldSimple", "fldChar", "instrText", "sdt"].some((name) => wAll(p, name).length > 0)
   || p.getElementsByTagNameNS("http://schemas.openxmlformats.org/officeDocument/2006/math", "oMath").length > 0
