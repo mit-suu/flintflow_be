@@ -13,7 +13,7 @@
 - Mọi endpoint ở đây chỉ dùng cho project `mode = "import"`. Gọi trên project mode khác trả `409 PROJECT_MODE_MISMATCH` `{ mode, expected: "import" }`.
 - **Nguồn sự thật là file .docx + bảng block** (G2). Spine chỉ là chỉ mục: request nào ghi Spine (finalize, quyết định group cuối, release) thì mang `base_version` như pipeline.
 - **Neo block** (G3): mỗi block có `block_id` ổn định (`B0001`…), neo bằng bookmark ẩn `_ff_<block_id>` trong file lưu, neo phụ `w14:paraId`, dự phòng `text_hash` + `heading_path`.
-- **Version tài liệu** (G4): import `0.0`; mỗi CR ghi xong lên minor (`0.1`, `0.2`…); release lên major (`1.0`, `2.0`…). Khác `v1.N` của mode 2.
+- **Version tài liệu** (G4): import `0.1` (project cũ: `0.0`); mỗi CR ghi xong lên minor (`0.2`, `0.3`…); release lên major (`1.0`, `2.0`…). Khác `v1.N` của mode 2.
 - **BR-03:** khi đã có baseline v0 thì mọi sửa phải qua CR. Ở project mode 1, chat ra lệnh sửa, `POST /changes`, `POST /reconcile` và `POST /undo` đều trả `409 CHANGE_REQUIRES_CR` (G9). Mode 1 v3 (§4.8): không tự tạo CR, không chạy step, không ký baseline v1, không waive cờ.
 - **Gọi AI** (Flow 4/5): giữ credit trước, quyết toán sau. Lỗi AI thì tự retry 2 lần; vẫn lỗi thì hoàn credit và đặt `paused: { reason: "resume_later" }`. Hết credit thì đặt `paused: { reason: "credits" }`. Resume qua endpoint `…/resume`. `step_id` trong usage (UC-79): `I-4:<section_id>`, `I-1.11:<n>` (lô thứ n của 1.11) và `I-1.11:cross` (lượt kiểm chéo giữa các section) — bản ghi cũ `I-1.11` là lượt đơn trước map-reduce, `C-2:<cr_id>`, `C-4:<cr_id>`, `C-5:<cr_id>`.
 
@@ -259,10 +259,10 @@ Plan: `claude_plan/plan-mode1-v2-workspace.md` §1, §4. PR nhãn `contract-chan
 
 ### 4.5 V2 — render theo template người dùng (FLF-184, chỉ thêm field)
 - `RenderedDocument` của project có layout (mode 1 sau finalize): `sections[]` theo **thứ tự + tiêu đề file upload** (bỏ số gõ tay, `number` đánh lại theo cấp; heading không gõ số trong file gõ số tay ⇒ `number: ""`). Section FPT file không có ⇒ chèn cạnh mục cùng nhóm, tiêu đề mẫu FPT theo `TemplateProfile.language`. `group:<id>` lấy theo `section_id` của layout (vd `group:4`), không còn là số hiệu. Văn xuôi không trích được nằm ở đầu `blocks` của section chủ. Hình `RenderedSection` không đổi. Project mode 2 không đổi.
-- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.1` (project cũ: `0.0`); version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.0_original.docx`. Bản `0.0` mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
+- #14 `download?variant=` thêm `original` — file người dùng upload (chỉ bản `0.1` (project cũ: `0.0`); version khác ⇒ `DOC_VERSION_NOT_FOUND`), tên `…_v0.1_original.docx`. Bản gốc import mặc định giờ là **bản render từ Spine** (+ stamp, + DRAFT khi tải).
 - `DocVersionDto` thêm `has_original_file: boolean`.
 - `gapReportSchema` thêm `totals.missing_fpt_sections`, `missing_fpt_sections[]` `{ section_id, title, step_id, in_layout }` (đầu mục FPT thiếu — D6, đứng đầu báo cáo; `feature:*` = chức năng chương 3), `layout[]` `{ order, section_id, heading, level, kind: fpt|group|custom, red, yellow }`; `sections[]` xếp theo layout.
-- **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của `0.0`.
+- **Tạm tới V4:** #13 blocks, re-upload diff và CR ghi file vẫn chạy trên **file gốc** (`original_ref`) của bản gốc import (`0.1`, project cũ `0.0`).
 
 ### 4.6 V4 — CR trên Spine, điều khiển bằng chat (FLF-186, contract-change — chờ 4/4)
 - **Vị trí CR = phần tử Spine** (`project`, `actors[id=A01]`, `custom_sections[id=CS02]`…) thay block docx. `changeLocationDtoSchema`: bỏ `block_id`, `block`; thêm `path`, `section_id`, `section_title`, `current_text` (giá trị hiện tại — JSON khoá sắp xếp). `proposal.old_text` / `new_text` = giá trị phần tử trước / sau khi chạy khô op của vị trí; `edit` ⇒ `spine_ops` bắt buộc (output C-4 `crProposeSchema`).
@@ -314,7 +314,7 @@ Plan: `claude_plan/mode1-v3/phase-2-be-flow3.md`.
 - **3.9 endpoint mới**: `POST /projects/:id/change-requests/:crId/locations/:locId/owner-step-draft` `{ instruction }` — chỉ khi CR `manual_fix`. Chạy skill của **step sở hữu** vị trí (như C-4, một vị trí, kèm hướng của BA); kết quả chỉ ghi vào đề xuất (`manual: true`, `verify: null`), không ghi Spine; CR giữ `manual_fix`, kiểm lại bằng #22 `/verify`. Lỗi: `CR_INVALID_TRANSITION` (không ở `manual_fix`), `CR_NO_OWNER_STEP` (409, mục riêng — dùng #28 PATCH), `CR_LOCATION_NOT_FOUND`, `PATH_LOCKED`, `402 INSUFFICIENT_CREDIT`, `502 AI_PROVIDER_ERROR` (`manual_fix` không pause được).
 - **3.12 (#26)**: `reason` **bắt buộc cả khi duyệt** (≥ 10 ký tự) — BPMN "quyết định từng group, kèm lý do".
 - **3.5 khi Revise (#25)**: giữ nguyên — revise đã khoá lại đúng các phần tử (3.5) rồi về `proposing` (3.6); giá trị gốc chụp lại khi đề xuất mới. Không đổi máy trạng thái.
-- **3.14 bản có đánh dấu (T6/T7)**: CR ghi xong, version minor có thêm file **Track Changes** so với version trước (so theo đoạn; `w:ins`/`w:del` tác giả = CR id) + comment Word của vị trí `comment` ở tiêu đề mục. `DocVersionDto` thêm `has_tracked_file`. #14 `download?variant=tracked` trả file đó (bản nháp vẫn kèm DRAFT); version không có (`0.0`, release, dựng lỗi) ⇒ bản render như cũ. Accept-all bản có đánh dấu ra đúng bản sạch. Release (6.2) vẫn chỉ bản sạch.
+- **3.14 bản có đánh dấu (T6/T7)**: CR ghi xong, version minor có thêm file **Track Changes** so với version trước (so theo đoạn; `w:ins`/`w:del` tác giả = CR id) + comment Word của vị trí `comment` ở tiêu đề mục. `DocVersionDto` thêm `has_tracked_file`. #14 `download?variant=tracked` trả file đó (bản nháp vẫn kèm DRAFT); version không có (bản gốc import, release, dựng lỗi) ⇒ bản render như cũ. Accept-all bản có đánh dấu ra đúng bản sạch. Release (6.2) vẫn chỉ bản sạch.
 
 ### 4.10 Mode 1 v3 — đọc ảnh diagram + giữ ảnh gốc (phase 5, FLF-187 — contract-change, chờ 4/4)
 

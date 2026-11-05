@@ -3,6 +3,7 @@ import {
   compareDocVersions,
   isDocVersion,
   isReleaseVersion,
+  isStableDocVersion,
   nextMajor,
   nextMinor,
   parseDocVersion,
@@ -50,6 +51,14 @@ describe("versioning — G4", () => {
     expect(isReleaseVersion("3.0")).toBe(true)
     expect(isReleaseVersion("0.0")).toBe(false)
     expect(isReleaseVersion("1.2")).toBe(false)
+  })
+
+  it("bản ổn định xét theo kind: gốc import (0.1, cũ 0.0) và release; bản nháp CR 0.1 của project cũ thì không", () => {
+    expect(isStableDocVersion({ version: "0.1", kind: "imported" })).toBe(true)
+    expect(isStableDocVersion({ version: "0.0", kind: "imported" })).toBe(true)
+    expect(isStableDocVersion({ version: "1.0", kind: "release" })).toBe(true)
+    expect(isStableDocVersion({ version: "0.1", kind: "cr_revision" })).toBe(false)
+    expect(isStableDocVersion({ version: "1.1", kind: "cr_revision" })).toBe(false)
   })
 
   it("FLF-334 tên file: release / nháp có CR / nháp v0 / mode 2 chưa baseline / tracked / original / pdf", () => {
