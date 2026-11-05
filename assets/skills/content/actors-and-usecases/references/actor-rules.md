@@ -47,14 +47,23 @@ never one question per actor. S-3.2 derives Log In / Register / Reset Password f
 
 ## Generalization (`parent_id`)
 
-When two or more human actors share use cases (Log In, Register Account, Reset Password, Update Profile)
-**and** each is genuinely a specialized type of one general user, add a general human actor (`User`, or a
-more precise "Registered User") and set `parent_id` on each specialized actor:
+Decide it at S-3.1, right after access. Count the human actors that **sign in to this product**
+(`self-registers`, `invited`, `identity provider`). **Two or more ⇒ they all share Log In ⇒ generalization is
+required, not optional**: add one general human actor (`User`, or a more precise "Registered User"), set
+`parent_id` on each of them, and name every child in the general actor's `description`. Exactly one signing-in
+human actor ⇒ no general actor. If S-3.1 missed it, S-3.2/S-3.3 add it in the batch that assigns the account
+use cases (both steps may write `actors[]`). Code backs this up: an account use case (Log In, Reset Password,
+Register Account…) whose `actor_ids` lists two or more human actors raises `actor_generalization_missing`; at
+S-3.2/S-3.3 the batch is sent back to fix it.
 
 ```json
-{ "op": "add", "path": "actors[]", "value": { "id": "A05", "name": "User", "kind": "human", "description": "Anyone with an account who signs in to the platform.", "flows_in": ["Login Credentials"], "flows_out": ["Session Token"] } }
+{ "op": "add", "path": "actors[]", "value": { "id": "A05", "name": "User", "kind": "human", "description": "Any signed-in Student or Lecturer of the portal.", "flows_in": ["Login Credentials"], "flows_out": ["Session Token"] } }
 { "op": "set", "path": "actors[id=A01].parent_id", "value": "A05" }
+{ "op": "set", "path": "actors[id=A02].parent_id", "value": "A05" }
+{ "op": "add", "path": "use_cases[]", "value": { "id": "UC01", "name": "Log In", "actor_ids": ["A05"], "function_ids": [], "description": "A user signs in with their account and reaches their home page.", "includes": [], "extends": [] } }
 ```
+
+Wrong: `"Log In"` with `"actor_ids": ["A01", "A02"]` and no `User` — two actors on one account use case.
 
 - Put a use case on the general actor only when **every** specialized actor does it the same way
   (`actor_ids: ["A05", …]`), never on every specialized actor again — they inherit it.

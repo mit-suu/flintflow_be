@@ -7,6 +7,7 @@
  */
 import type { Spine } from "../modules/spine/spine.types.js"
 import { runDeterministicCheck, type RuleProfile } from "../modules/spine/deterministic-check.js"
+import { actorParents } from "../modules/spine/actor-generalization.js"
 
 /** Một persona brief nêu tên; khớp khi tên một actor human chứa một trong các từ khoá (không phân biệt hoa thường). */
 export interface PersonaExpectation {
@@ -34,7 +35,11 @@ export interface S3Metrics {
     floating: number
     name_semantic: number
     name_style: number
+    /** FLF-370: nhóm actor người cùng gắn thẳng use case tài khoản mà thiếu actor tổng quát. */
+    generalization_missing: number
   }
+  /** FLF-370: số actor tổng quát (có actor con hợp lệ) và số actor con. */
+  generalization: { general_actors: number; children: number }
   personasCovered: string[]
   personasMissing: string[]
   relations: RelationRow[]
@@ -53,7 +58,8 @@ const RULE_KEYS = {
   usecase_relation_invalid: "relation_invalid",
   usecase_floating: "floating",
   usecase_name_semantic: "name_semantic",
-  usecase_name_style: "name_style"
+  usecase_name_style: "name_style",
+  actor_generalization_missing: "generalization_missing"
 } as const
 
 /**
@@ -68,7 +74,7 @@ export const scoreS3 = (
   const kinds = { human: 0, system: 0, time: 0 }
   for (const a of spine.actors) kinds[a.kind] += 1
 
-  const flags = { auth_relation: 0, orphan_actor: 0, relation_invalid: 0, floating: 0, name_semantic: 0, name_style: 0 }
+  const flags = { auth_relation: 0, orphan_actor: 0, relation_invalid: 0, floating: 0, name_semantic: 0, name_style: 0, generalization_missing: 0 }
   for (const f of runDeterministicCheck(spine, [], { ruleProfile: EVAL_PROFILE })) {
     const key = RULE_KEYS[f.rule_id as keyof typeof RULE_KEYS]
     if (key) flags[key] += 1
@@ -84,12 +90,16 @@ export const scoreS3 = (
     ...u.extends.map((t) => ({ kind: "extend" as const, from: label(u.id), to: label(t), reason: reasons.get(`use_cases[id=${u.id}].extends`) ?? null }))
   ])
 
+  const parents = actorParents(spine.actors)
+  const generalization = { general_actors: new Set(parents.values()).size, children: parents.size }
+
   return {
     actors: kinds,
     useCases: spine.use_cases.length,
     includes: relations.filter((r) => r.kind === "include").length,
     extends: relations.filter((r) => r.kind === "extend").length,
     flags,
+    generalization,
     personasCovered: covered.map((p) => p.persona),
     personasMissing: personas.filter((p) => !covered.includes(p)).map((p) => p.persona),
     relations
