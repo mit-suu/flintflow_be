@@ -198,7 +198,14 @@ export const rehashSegments = (records: readonly SectionSegments[], spine: Spine
     for (const key of fresh) if (hit(key)) known.set(key, segmentItemHash(spine, key, names))
     return {
       ...r,
-      parts: r.parts.map((p) => (p.kind === "spine" && p.items.some(hit) ? { ...p, source_hash: segmentHash(spine, p.items, names) } : p)),
+      parts: r.parts.map((p) => {
+        if (p.kind === "spine") return p.items.some(hit) ? { ...p, source_hash: segmentHash(spine, p.items, names) } : p
+        // Ảnh vừa được gắn `diagram` (FLF-360 đọc lại ảnh sau 0.1) ⇒ ghi loại sơ đồ vào đoạn; ảnh đã ghi giữ nguyên (CR bỏ ảnh ⇒ vẽ lại tại chỗ)
+        const blocks = spine.custom_sections.find((c) => c.id === p.custom_id)?.blocks ?? []
+        const recorded = new Set(p.diagrams.map((d) => d.image_ref))
+        const added = blocks.flatMap((b) => (b.kind === "image" && b.image_ref && b.diagram && !recorded.has(b.image_ref) ? [{ image_ref: b.image_ref, kind: b.diagram.kind }] : []))
+        return added.length ? { ...p, diagrams: [...p.diagrams, ...added] } : p
+      }),
       known: [...known].map(([key, hash]) => ({ key, hash }))
     }
   })
