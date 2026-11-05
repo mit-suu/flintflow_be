@@ -20,6 +20,7 @@ import { actorParents, ancestorsOf, generalizationProblems, type GeneralizationP
 import { UNHASHED_SOURCE_HASHES, renderedDiagramHash } from "./source-hash.js"
 import type { ErdNotation, RenderContext } from "../../shared/diagram/erd-notation.js"
 import { ORIGINAL_DIAGRAM_LABELS, ORIGINAL_DIAGRAM_SECTION, isOriginalStale, keptOriginalDiagrams, keptOriginalKinds } from "./original-diagram.js"
+import { isVerbatim, type SectionSegments } from "./segment-hash.js"
 import { NFR_CATEGORY_LABELS, capitalize, diagramLabel, pathLabel, quotedSectionLabel } from "./human-labels.js"
 import { PROJECT_TEXT_FIELDS, SRS_TEXT_FIELDS, VALIDATION_TEXT_FIELDS, pickTextFields } from "./srs-text-fields.js"
 import { isRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
@@ -68,6 +69,8 @@ export const RULES: readonly RuleDef[] = Object.freeze([
   rule("derived_from_changed_assumption", "yellow", true),
   rule("function_without_uc", "yellow", true),
   rule("original_diagram_stale", "yellow", true),
+  // FLF-366: đoạn nguyên văn của file gốc nhắc tới tên / mã phần tử đã đổi tên hay bị xoá (chỉ khi hồ sơ luật mang đoạn)
+  rule("original_text_mentions_changed", "yellow", true),
   rule("orphan_entity", "yellow", true),
   rule("unresolved_many_to_many", "yellow", true),
   // FLF-278 trên FLF-335/336 — chế độ 3 (mẫu bắt buộc): chỉ chạy khi hồ sơ luật mang layout của mẫu
@@ -137,6 +140,11 @@ export interface RuleProfile {
   templateLayout?: ReadonlySet<string>
   /** Heading bao của mẫu (`custom:*` chỉ chứa mục con, `import/template-wrappers.ts`) — trống không phải gap, không cờ. */
   templateWrappers?: ReadonlySet<string>
+  /**
+   * FLF-366: đoạn nguyên văn của file import (`TemplateProfile.section_segments`). Có ⇒ bật `original_text_mentions_changed`
+   * (đoạn in nguyên văn nhắc tới tên / mã phần tử đã đổi tên hay bị xoá so với lúc import). Không đặt ⇒ luật không chạy.
+   */
+  sectionSegments?: readonly SectionSegments[]
 }
 
 export interface CheckOptions {
@@ -447,6 +455,47 @@ const originalDiagramStale = (spine: Spine): FlagCandidate[] =>
       message: `${ORIGINAL_DIAGRAM_LABELS[k.diagram.kind]} (hình gốc của tài liệu) không còn khớp dữ liệu — tạo change request để vẽ lại bằng FlintFlow`,
       remediation_step: RENDER_STEP[k.diagram.kind]
     }))
+
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const mentionsToken = (text: string, token: string): boolean =>
+  token.trim().length > 0 && new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(token.trim())}(?![\\p{L}\\p{N}])`, "iu").test(text)
+
+const partText = (blocks: readonly { kind: string; text: string; rows: string[][] | null }[]): string =>
+  blocks.map((b) => (b.kind === "table" ? (b.rows ?? []).map((r) => r.join(" ")).join("\n") : b.text)).join("\n")
+
+/**
+ * FLF-366: văn xuôi in nguyên văn file gốc không có trong Spine nên CR không tự sửa được — đoạn còn in nguyên văn mà nhắc
+ * tới tên / mã của phần tử đã đổi tên hay bị xoá so với lúc import ⇒ cờ vàng để người dùng tự xem lại đoạn đó. Một cờ cho
+ * mỗi (mục, phần tử).
+ */
+export const originalTextMentionsChanged = (spine: Spine, records: readonly SectionSegments[]): FlagCandidate[] => {
+  const out: FlagCandidate[] = []
+  for (const r of records) {
+    for (const part of r.parts) {
+      const blocks = part.kind === "original" ? spine.custom_sections.find((c) => c.id === part.custom_id)?.blocks : isVerbatim(spine, part) ? part.blocks : undefined
+      if (!blocks?.length) continue
+      const text = partText(blocks)
+      for (const m of part.mentions) {
+        const list = (spine as unknown as Record<string, unknown>)[m.array]
+        const el = Array.isArray(list) ? (list as { id?: string; name?: string }[]).find((x) => x.id === m.id) : undefined
+        const renamed = !!el && m.name !== null && typeof el.name === "string" && el.name !== m.name
+        if (el && !renamed) continue
+        const token = m.name ?? m.id
+        if (!mentionsToken(text, token)) continue
+        out.push({
+          level: "yellow",
+          rule_id: "original_text_mentions_changed",
+          section_id: r.section_id,
+          target_id: m.path,
+          message: `Đoạn văn giữ nguyên từ file gốc ở ${quotedSectionLabel(r.section_id, spine)} nhắc tới "${token}" — ${el ? `phần tử này đã đổi tên thành "${el.name}"` : "phần tử này đã bị xoá"}; xem lại đoạn văn, cần thì sửa bằng change request`,
+          remediation_step: ownerStepOf(r.section_id, spine)
+        })
+      }
+    }
+  }
+  return out
+}
 
 const nfrMissingNumber = (spine: Spine, gate: StepGate): FlagCandidate[] =>
   (["reliability", "performance"] as const).flatMap((category): FlagCandidate[] => {
@@ -1370,6 +1419,7 @@ export const runDeterministicCheck = (
     ...actorGeneralizationChildrenUnlisted(spine),
     ...systemNameMissing(spine),
     ...nonEnglishContent(spine, gate),
+    ...(options.ruleProfile?.sectionSegments?.length ? originalTextMentionsChanged(spine, options.ruleProfile.sectionSegments) : []),
     ...(options.ruleProfile?.templateLayout ? fixedTemplateGaps(spine, options.ruleProfile.templateLayout, options.ruleProfile.templateWrappers) : [])
   ].filter((c) => !outsideTemplate(c, options.ruleProfile?.templateLayout)), options.ruleProfile)
 
