@@ -1,3 +1,4 @@
+import type { ChangeRecordRow } from "../render/section-renderer.js"
 /**
  * Một version của tài liệu mode 1 (file .docx lưu GridFS). FLF-171, plan §5.3.
  * - `imported` — `0.1`: mode 1 v2 (FLF-184) `file_ref` = bản **render từ Spine** theo layout file upload + stamp;
@@ -7,6 +8,8 @@
  * - `release` — `1.0`, `2.0`…: `file_ref` giữ bản có Track Changes, `clean_file_ref` là bản accept-all (Flow 6).
  */
 
+import type { Spine } from "../spine/spine.types.js"
+import type { TemplateSourceBinding } from "./template-source-binding.js"
 import mongoose, { Schema, Document } from "mongoose"
 import { DOC_VERSION_KINDS, type DocVersionKind } from "./doc-version.constants.js"
 import { DOC_VERSION_PATTERN } from "./versioning.js"
@@ -28,6 +31,10 @@ export interface IDocVersion extends Document {
   /** `id` của entry `spine.baselines[]` (`imported`, `release`); `null` với `cr_revision`. */
   baseline_ref: string | null
   created_by: mongoose.Types.ObjectId
+  template_source?: TemplateSourceBinding | null
+  spine_snapshot?: Spine | null
+  record_snapshot?: ChangeRecordRow[] | null
+  fixed_render_cache?: { revision: string; file_ref: string } | null
   createdAt: Date
 }
 
@@ -43,6 +50,10 @@ const docVersionSchema = new Schema<IDocVersion>(
     based_on: { type: String, default: null },
     cr_ids: { type: [String], default: [] },
     baseline_ref: { type: String, default: null },
+    template_source: { type: Schema.Types.Mixed, default: null },
+    spine_snapshot: { type: Schema.Types.Mixed, default: null },
+    record_snapshot: { type: [Schema.Types.Mixed], default: null },
+    fixed_render_cache: { type: Schema.Types.Mixed, default: null },
     created_by: { type: Schema.Types.ObjectId, ref: "User", required: true }
   },
   { timestamps: { createdAt: true, updatedAt: false } }

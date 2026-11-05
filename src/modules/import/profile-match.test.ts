@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { readFile } from "node:fs/promises"
 import { parseDocument } from "./parse.service.js"
 import {
   assignBlockSections,
@@ -17,6 +18,26 @@ import type { HeadingMapEntry, TableMapEntry } from "./template-profile.model.js
 import { makeSrsDocx } from "./testing/srs-fixture.js"
 import { splitHeadingNumber, titleSimilarity } from "./text-similarity.js"
 import { matchTable, matchTableHeader } from "./table-header-dictionary.js"
+
+it("fixed source template binds Purpose and Scope despite the aggregate Introduction", async () => {
+  const { blocks } = await parseDocument(await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url)))
+  const profile = matchProfile(blocks, { fixedTemplate: true })
+  expect(profile.heading_map.find((h) => /\bPurpose\b/.test(h.heading_text))?.section_id).toBe("slot:vision")
+  expect(profile.heading_map.find((h) => /\bScope\b/.test(h.heading_text))?.section_id).toBe("slot:scope")
+  expect(profile.heading_map.find((h) => /\bBusiness Rules\b/.test(h.heading_text))?.section_id).toBe("slot:business_rules")
+  expect(profile.heading_map.find((h) => /\bMessages\b/.test(h.heading_text))?.section_id).toBe("slot:messages")
+})
+
+it("mẫu bắt buộc: cha và con cùng mục ⇒ cha thành heading bao, con mang dữ liệu (Introduction, External Interface)", async () => {
+  const { blocks } = await parseDocument(await readFile(new URL("../../../fixtures/fixed-template-fu-it-srs-01.docx", import.meta.url)))
+  const section = (re: RegExp) => matchProfile(blocks, { fixedTemplate: true }).heading_map.find((h) => re.test(h.heading_text))?.section_id
+  expect(section(/^1\.\s*Introduction$/)).toBe("unmapped")
+  expect(section(/External Interface Requirements/)).toBe("unmapped")
+  expect(section(/Software Interfaces/)).toBe("fixed:4.1")
+  expect(section(/User Interfaces/)).toBe("fixed:3.1.2")
+  // Không phải mẫu bắt buộc ⇒ giữ mapping cũ
+  expect(matchProfile(blocks).heading_map.find((h) => /^1\.\s*Introduction$/.test(h.heading_text))?.section_id).toBe("fixed:1")
+})
 
 const headingSections = async (numberedOnly = false) => {
   const { blocks } = await parseDocument(await makeSrsDocx({ numberedOnly }))

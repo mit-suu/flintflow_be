@@ -35,8 +35,8 @@ import type { CustomBlock, CustomSection, Spine } from "../spine/spine.types.js"
 import type { Block, InlineRun, RenderedSection, RocRow, TableCell } from "./rendered-document.types.js"
 import { mediaId } from "./import-media.js"
 import { defaultSectionTitle, renderContentSlot, renderSection, type SectionRenderContext } from "./section-renderer.js"
-import { isContentSlot, slotParents } from "../import/content-slots.js"
-import { isInstructionText, isRealText, splitInstruction, tableHasRealText } from "../../shared/utils/instruction-text.js"
+import { bindFixedTemplateSlots, isContentSlot, slotParents } from "../import/content-slots.js"
+import { isInstructionText, isRealText, splitInstruction, tableBodyHasRealText, tableHasRealText } from "../../shared/utils/instruction-text.js"
 
 /** Một mục layout (cùng hình `LayoutEntry` của `import/template-profile.model.ts`). */
 export interface TemplateLayoutEntry {
@@ -47,7 +47,40 @@ export interface TemplateLayoutEntry {
   /** FLF-362: nhãn số Word tự đánh của heading gốc ("2.1.", "II.") — không nằm trong `heading_text`. */
   number_label?: string
   /** FLF-364 (câu 10): nguyên văn chữ hướng dẫn của mẫu dưới heading — in khi mục chưa có dữ liệu. */
-  template_guidance?: readonly string[]
+  template_guidance?: string[]
+}
+
+/** Restore headings omitted by old aggregate bindings, using the source as the authority. */
+export const repairFixedTemplateLayout = (
+  layout: readonly TemplateLayoutEntry[],
+  sourceHeadings: readonly { block_id: string; heading_text: string; level: number; section_id: string }[]
+): TemplateLayoutEntry[] => {
+  const ordered = [...layout].sort((a, b) => a.order - b.order)
+  const remaining = new Set(ordered.filter((e) => e.heading_text.trim()))
+  const continuations = new Map<TemplateLayoutEntry, TemplateLayoutEntry[]>()
+  let owner: TemplateLayoutEntry | undefined
+  for (const entry of ordered) {
+    if (entry.heading_text.trim()) owner = entry
+    else if (owner) continuations.set(owner, [...(continuations.get(owner) ?? []), entry])
+  }
+  const result: TemplateLayoutEntry[] = []
+  const used = new Set<string>()
+  for (const source of sourceHeadings) {
+    const existing = [...remaining].find((e) => e.heading_text.trim() === source.heading_text.trim())
+    if (existing) remaining.delete(existing)
+    const bound = bindFixedTemplateSlots([{ ...source, section_id: existing?.section_id ?? source.section_id }])[0]
+    let id = bound.section_id
+    if (id === "unmapped" || /^(feature|function):@/.test(id) || used.has(id)) id = `group:source:${source.block_id}`
+    used.add(id)
+    result.push({ order: result.length, heading_text: source.heading_text, level: source.level, section_id: id })
+    if (existing?.section_id.startsWith("custom:") && existing.section_id !== id) {
+      result.push({ order: result.length, heading_text: "", level: source.level + 1, section_id: existing.section_id })
+    }
+    for (const continuation of existing ? continuations.get(existing) ?? [] : []) {
+      result.push({ ...continuation, order: result.length, level: source.level + 1 })
+    }
+  }
+  return result
 }
 
 export interface TemplateLayout {
@@ -72,8 +105,8 @@ export interface TemplateLayout {
   sectionSlices?: readonly SectionSliceView[]
   /**
    * Mẫu bắt buộc (`Project.template_intent = fixed`, chế độ 3 — business-flow 2.10): chỉ in đúng các mục của mẫu, **không
-   * chèn** mục FlintFlow mẫu không có (cờ vàng `template_section_absent` báo phần dữ liệu không in). Feature / function mới
-   * vẫn chèn dưới mục chức năng của mẫu (là nội dung của mục đó).
+   * chèn** heading FlintFlow mẫu không có. Dữ liệu chức năng in trong bảng của mục chức năng gốc;
+   * `omittedSectionIds` báo các vùng dữ liệu không có chỗ trong mẫu.
    */
   fixedTemplate?: boolean
 }
@@ -157,6 +190,7 @@ export const romanValue = (label: string): number | null => {
 type EntryKind = "fpt" | "group" | "custom" | "continuation" | "slot"
 
 interface Placed {
+  sourceOrder?: number
   section_id: string
   kind: EntryKind
   title: string
@@ -268,7 +302,7 @@ export const sectionsNotInserted = (spine: Spine, template: TemplateLayout): Set
     if (!inLayout.has(id) && !spine.functions.some((f) => f.feature_id === feature.id && inserted(f))) out.add(id)
   }
   if (template.fixedTemplate) {
-    for (const def of listSections(spine)) if (def.id.startsWith("fixed:") && !inLayout.has(def.id)) out.add(def.id)
+    for (const def of listSections(spine)) if (!inLayout.has(def.id)) out.add(def.id)
   }
   // Mục FPT đã in qua các phần nhỏ của nó (`slot:*`) ⇒ không chèn lại cả mục (dữ liệu in hai lần)
   for (const id of inLayout) for (const parent of slotParents(id)) if (!inLayout.has(parent)) out.add(parent)
@@ -289,6 +323,7 @@ export const nonScreenTableIds = (spine: Spine, template: TemplateLayout): Set<s
 
 /** Mục layout còn dùng được + mục FPT chèn thêm, theo thứ tự tài liệu. */
 export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] => {
+  if (template.fixedTemplate) template = { ...template, layout: bindFixedTemplateSlots(template.layout) }
   const notInserted = sectionsNotInserted(spine, template)
   const defs = listSections(spine).filter((d) => d.id !== "fixed:I" && !notInserted.has(d.id))
   const defById = new Map(defs.map((d) => [d.id, d]))
@@ -298,27 +333,32 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
 
   for (const entry of [...template.layout].sort((a, b) => a.order - b.order)) {
     const id = entry.section_id
-    if (used.has(id)) continue
+    if (used.has(id) && !template.fixedTemplate) continue
     const { typed, title, label } = fileNumber(entry.heading_text, entry.number_label)
     const level = clampLevel(entry.level)
     if (id.startsWith(GROUP_PREFIX)) {
       placed.push({ section_id: id, kind: "group", title: title || id.slice(GROUP_PREFIX.length), level, fromLayout: true, typed, label })
     } else if (id.startsWith(CUSTOM_PREFIX)) {
       const custom = customById.get(id.slice(CUSTOM_PREFIX.length))
-      if (!custom) continue
-      const heading = custom.heading.trim()
+      if (!custom && !template.fixedTemplate) continue
+      if (!custom) {
+        placed.push({ section_id: id, kind: "custom", title, level, fromLayout: true, typed, label })
+        used.add(id)
+        continue
+      }
+      const heading = template.fixedTemplate ? entry.heading_text.trim() : custom.heading.trim()
       const own = heading ? fileNumber(heading, entry.number_label) : null
       placed.push({
         section_id: id,
         kind: heading ? "custom" : "continuation",
         title: own?.title ?? "",
-        level: clampLevel(custom.level),
+        level: template.fixedTemplate ? level : clampLevel(custom.level),
         fromLayout: true,
         typed: own?.typed ?? false,
         label: own?.label ?? ""
       })
     } else if (isContentSlot(id)) {
-      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label, guidance: entry.template_guidance })
+      placed.push({ section_id: id, kind: "slot", title: title || id, level, fromLayout: true, typed, label, guidance: entry.template_guidance, sourceOrder: entry.order })
     } else if (defById.has(id)) {
       placed.push({
         section_id: id,
@@ -335,6 +375,8 @@ export const placeSections = (spine: Spine, template: TemplateLayout): Placed[] 
     }
     used.add(id)
   }
+
+  if (template.fixedTemplate) return placed
 
   // Mục riêng thêm tay (chat) chưa có trong layout ⇒ cuối tài liệu
   for (const c of spine.custom_sections) {
@@ -501,6 +543,8 @@ export interface LayoutSectionsResult {
   numbers: Map<string, string>
   /** Khoá logic → tiêu đề hiển thị (phụ lục cờ cho section `custom:*`). */
   titles: Map<string, string>
+  /** Fixed-template data sections without a source region; callers must surface these separately. */
+  omittedSectionIds?: string[]
 }
 
 export const buildLayoutSections = (
@@ -509,6 +553,8 @@ export const buildLayoutSections = (
   states: SectionStateView[],
   opts: LayoutSectionsOptions
 ): LayoutSectionsResult => {
+  const originalLayout = template.layout
+  if (template.fixedTemplate) template = { ...template, layout: bindFixedTemplateSlots(template.layout) }
   const numbered = numberSections(placeSections(spine, template))
   const numbers = new Map(numbered.filter((n) => n.number).map((n) => [n.section_id, n.number]))
   const titles = new Map(numbered.filter((n) => n.title).map((n) => [n.section_id, n.title]))
@@ -541,6 +587,7 @@ export const buildLayoutSections = (
       diagramPng: opts.diagramPng,
       numberOf: (id) => numbers.get(id),
       language: template.language,
+      ...(template.fixedTemplate ? { fixedTemplate: true, representedSlots: new Set(template.layout.filter((e) => isContentSlot(e.section_id)).map((e) => e.section_id)) } : {}),
       ...(nonScreen ? { nonScreenFunctionIds: nonScreen } : {}),
       ...(state?.status !== undefined ? { status: state.status } : {}),
       ...(state?.awaiting_reaccept !== undefined ? { awaiting_reaccept: state.awaiting_reaccept } : {})
@@ -558,7 +605,13 @@ export const buildLayoutSections = (
   const emptyUntilMerged = new Set<RenderedSection>()
   /** Cấp layout (chưa chuẩn hoá) của từng section trong `out` — tìm section chủ của phần nối. */
   const levels: number[] = []
+  const emitted = new Set<string>()
   const push = (section: RenderedSection, level: number) => {
+    if (template.fixedTemplate) {
+      // Only the template's own headings contribute to its outline.
+      section.blocks = emitted.has(section.id) ? [] : section.blocks.map((b) => b.type === "heading" ? { type: "paragraph", runs: [{ text: b.text, bold: true }] } : b)
+      emitted.add(section.id)
+    }
     out.push(section)
     levels.push(level)
   }
@@ -569,7 +622,11 @@ export const buildLayoutSections = (
       continue
     }
     if (n.kind === "custom" || n.kind === "continuation") {
-      const blocks = [...sliceBlocks(n), ...customBlocks(guidanceWhileEmpty(customById.get(n.section_id)?.blocks ?? []), (ref) => opts.diagramPng(mediaId(ref)))]
+      const sourceBlocks = customById.get(n.section_id)?.blocks ?? []
+      const kept = template.fixedTemplate
+        ? sourceBlocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)))
+        : guidanceWhileEmpty(sourceBlocks)
+      const blocks = [...sliceBlocks(n), ...customBlocks(kept, (ref) => opts.diagramPng(mediaId(ref)))]
       if (n.kind === "continuation") {
         // Chủ = section gần nhất phía trước có cấp nhỏ hơn (phần nối có cấp = cấp chủ + 1, xem import/step-plan.ts)
         let owner = levels.length - 1
@@ -586,8 +643,18 @@ export const buildLayoutSections = (
     }
     if (n.kind === "slot") {
       // Khối của phần nhỏ đánh cấp heading con từ 1 ⇒ dời theo cấp heading của mẫu
-      const slotBlocks = shiftHeadings(renderContentSlot(contentSpine, n.section_id, contextFor(n.section_id, n.number)), n.renderLevel - 1)
-      push({ ...base, blocks: slotBlocks.length ? slotBlocks : guidanceBlocks(n.guidance) }, n.level)
+      const blocks = shiftHeadings(renderContentSlot(contentSpine, n.section_id, contextFor(n.section_id, n.number)), n.renderLevel - 1)
+      if (template.fixedTemplate) {
+        // A cached custom binding can carry real source prose (e.g. dependencies).
+        // Rebinding its heading must retain that prose while removing template prompts.
+        const sourceId = originalLayout.find((e) => e.order === n.sourceOrder)?.section_id
+        const original = sourceId ? customById.get(sourceId) : undefined
+        const renderedText = JSON.stringify(blocks)
+        const retained = original?.blocks.filter((b) => !isInstructionText(b.text) && (b.kind !== "table" || tableBodyHasRealText(b.rows)) && (!b.text.trim() || !renderedText.includes(b.text))) ?? []
+        blocks.push(...customBlocks(retained, (ref) => opts.diagramPng(mediaId(ref))))
+      }
+      // FLF-364 (câu 10): phần nhỏ chưa có dữ liệu ⇒ in chữ hướng dẫn của mẫu (mẫu bắt buộc thì không)
+      push({ ...base, blocks: blocks.length || template.fixedTemplate ? blocks : guidanceBlocks(n.guidance) }, n.level)
       continue
     }
     const taken = claimed.get(n.section_id)
@@ -605,8 +672,17 @@ export const buildLayoutSections = (
     if (original) fromOriginal.add(rendered)
     // `partial`: mục rỗng vẫn giữ chỗ tới khi gộp xong phần nối — mục chỉ có hình gốc của người dùng (§4.13, PlantUML
     // không in) nhận khối từ phần nối ngay sau nó; bỏ sớm thì khối đó rơi vào mục đứng trước
-    if (opts.partial && rendered.blocks.length === 0) emptyUntilMerged.add(rendered)
+    if (opts.partial && !template.fixedTemplate && rendered.blocks.length === 0) emptyUntilMerged.add(rendered)
     push(rendered, n.level)
   }
-  return { sections: opts.partial ? out.filter((x) => !(emptyUntilMerged.has(x) && x.blocks.length === 0)) : out, numbers, titles }
+  const omittedSectionIds = template.fixedTemplate
+    ? [...listSections(spine).map((s) => s.id), ...spine.custom_sections.map((s) => `custom:${s.id}`)].filter((id) => {
+      if (id === "fixed:I" || template.layout.some((e) => e.section_id === id)) return false
+      if (id.startsWith("custom:")) return !originalLayout.some((e) => e.section_id === id)
+      if (template.layout.some((e) => e.section_id === "slot:functional_requirements") && /^(feature|function):/.test(id)) return false
+      // Partial child slots do not claim unrepresented data in the aggregate parent.
+      return renderSection(contentSpine, id, contextFor(id, "")).blocks.length > 0
+    })
+    : undefined
+  return { sections: opts.partial ? out.filter((x) => !(emptyUntilMerged.has(x) && x.blocks.length === 0)) : out, numbers, titles, ...(omittedSectionIds ? { omittedSectionIds } : {}) }
 }

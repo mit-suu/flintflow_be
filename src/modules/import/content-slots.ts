@@ -27,8 +27,11 @@ export const CONTENT_SLOTS: readonly ContentSlotDef[] = Object.freeze([
   { id: "slot:goals", label_en: "Product goals", label_vi: "Mục tiêu sản phẩm", parents: ["fixed:1"], targets: ["project"] },
   { id: "slot:scope", label_en: "Release scope (in / out)", label_vi: "Phạm vi phát hành (trong / ngoài)", parents: ["fixed:1"], targets: ["project"] },
   { id: "slot:high_rules", label_en: "High-level business rules", label_vi: "Quy tắc nghiệp vụ cấp cao", parents: ["fixed:1"], targets: ["business_rules"] },
+  { id: "slot:business_rules", label_en: "Business rules", label_vi: "Quy tắc nghiệp vụ", parents: ["fixed:5.1"], targets: ["business_rules"] },
+  { id: "slot:messages", label_en: "Messages", label_vi: "Thông báo", parents: ["fixed:5.3"], targets: ["messages"] },
   { id: "slot:context", label_en: "System context and external systems", label_vi: "Bối cảnh hệ thống và hệ thống ngoài", parents: ["fixed:1"], targets: ["actors"] },
   { id: "slot:features", label_en: "Product functions overview", label_vi: "Tổng quan chức năng sản phẩm", parents: [], targets: ["functions"] },
+  { id: "slot:functional_requirements", label_en: "Functional requirements", label_vi: "Yêu cầu chức năng", parents: [], targets: ["functions"] },
   { id: "slot:platforms", label_en: "Platforms and operating environment", label_vi: "Nền tảng và môi trường hoạt động", parents: [], targets: ["project"] },
   { id: "slot:assumptions", label_en: "Assumptions", label_vi: "Giả định", parents: ["fixed:5.4"], targets: ["other_requirements"] },
   { id: "slot:risks", label_en: "Risks", label_vi: "Rủi ro", parents: ["fixed:5.4"], targets: ["other_requirements"] },
@@ -86,10 +89,16 @@ export const slotHasData = (spine: Spine, slotId: string): boolean => {
       return project.release_scope.in.length + project.release_scope.out.length > 0
     case "slot:high_rules":
       return spine.business_rules.some((r) => r.tier === "high")
+    case "slot:business_rules":
+      return spine.business_rules.length > 0
+    case "slot:messages":
+      return spine.messages.length > 0
     case "slot:context":
       return spine.actors.some((a) => a.kind !== "human")
     case "slot:features":
       return spine.features.length > 0
+    case "slot:functional_requirements":
+      return spine.functions.length > 0
     case "slot:platforms":
       return project.form_factor.length > 0
     case "slot:assumptions":
@@ -150,6 +159,43 @@ const normalizeTitle = (title: string): string =>
 export const suggestSlot = (title: string): string | null => {
   const text = normalizeTitle(title)
   return SUGGESTION_RULES.find(([re]) => re.test(text))?.[1] ?? null
+}
+
+/** Repair semantic bindings at fixed-template export without changing source headings or order. */
+export const bindFixedTemplateSlots = <T extends { heading_text: string; section_id: string }>(entries: readonly T[]): T[] =>
+  entries.map((entry) => {
+    if (entry.section_id.startsWith("group:source:")) return { ...entry }
+    const title = normalizeTitle(entry.heading_text)
+    const slot = /^(business rules|quy tắc nghiệp vụ)$/u.test(title)
+      ? "slot:business_rules"
+      : /^(messages|thông báo)$/u.test(title)
+      ? "slot:messages"
+      : /^(functional requirements|yêu cầu chức năng)$/u.test(title)
+      ? "slot:functional_requirements"
+      : suggestSlot(entry.heading_text)
+    return slot ? { ...entry, section_id: slot } : { ...entry }
+  })
+
+/**
+ * Mẫu bắt buộc: `bindFixedTemplateSlots` + quy tắc **cha và con cùng mục** — heading cha mà một heading con (sâu hơn, trước heading
+ * cùng cấp kế tiếp) nhận cùng mục FPT, hoặc phần nhỏ của chính mục đó, ⇒ cha thành heading bao (`unmapped`, chỉ giữ tiêu đề), con
+ * mang dữ liệu. Vd "3.1 External Interface Requirements" › "3.1.2 Software Interfaces" (cùng `fixed:4.1`); "1. Introduction" ›
+ * "1.1 Purpose" (`slot:vision` của `fixed:1`). Không có ⇒ heading con bị gộp vào cha, mất khỏi bản in. `level` thiếu ⇒ chỉ gán
+ * phần nhỏ. Dùng chung lúc tách file (`matchHeadings`) và lúc xuất (`project-docx-writer`, `layout-sections`).
+ */
+export const bindFixedTemplateHeadings = <T extends { heading_text: string; section_id: string; level?: number | null }>(entries: readonly T[]): T[] => {
+  const bound = bindFixedTemplateSlots(entries)
+  return bound.map((entry, i) => {
+    const level = entry.level ?? null
+    if (level === null || !entry.section_id.startsWith("fixed:") || !entry.heading_text.trim()) return entry
+    for (let k = i + 1; k < bound.length; k++) {
+      const child = bound[k]
+      if (!child.heading_text.trim()) continue
+      if (child.level === null || child.level === undefined || child.level <= level) break
+      if (child.section_id === entry.section_id || slotParents(child.section_id).includes(entry.section_id)) return { ...entry, section_id: "unmapped" }
+    }
+    return entry
+  })
 }
 
 /** Độ tin của gợi ý từ khoá — dưới ngưỡng 0.8 của mapping review ⇒ BA luôn xác nhận. */
