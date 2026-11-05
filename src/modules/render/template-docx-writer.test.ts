@@ -82,6 +82,18 @@ describe("writeTemplateDocx", () => {
     expect(wAll(single.element, "vMerge")).toHaveLength(0)
   })
 
+  it("FLF-372: mục có ảnh gốc (sơ đồ) thay được khi bản in của mục mang lại ảnh — ảnh không mất", async () => {
+    const zip = await JSZip.loadAsync(await template())
+    zip.file("word/document.xml", (await zip.file("word/document.xml")!.async("string")).replace(body, `<w:p><w:r><w:drawing/></w:r></w:p>${body}`))
+    const input = await zip.generateAsync({ type: "nodebuffer" }), parsed = await parseDocument(input), doc = document()
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64")
+    doc.sections = [{ id: "fixed:1", heading: "Requirements", number: "1", level: 1, blocks: [{ type: "paragraph", runs: runs("Context") }, { type: "image", png, caption: "Context diagram" }] }]
+    const output = await writeTemplateDocx(doc, input, [{ block_id: parsed.blocks.find((b) => b.kind === "heading")!.block_id, section_id: "fixed:1" }])
+    const reread = await parseDocument(output)
+    expect(reread.blocks.filter((b) => b.kind === "image")).toHaveLength(1)
+    expect(reread.blocks.some((b) => b.text === "Context")).toBe(true)
+  })
+
   it.each([
     '<w:p><w:r><w:drawing/></w:r></w:p>',
     '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:p>',
