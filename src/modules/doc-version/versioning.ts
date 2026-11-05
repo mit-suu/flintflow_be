@@ -50,6 +50,12 @@ export const isReleaseVersion = (value: string): boolean => {
   return major >= 1 && minor === 0
 }
 
+/**
+ * Bản ổn định (Viewer tải được): bản gốc import hoặc bản release. Xét theo `kind`, không theo số —
+ * project cũ có gốc `0.0` thì CR đầu tiên ra bản nháp `0.1`, trùng số với bản gốc của project mới.
+ */
+export const isStableDocVersion = (doc: { version: string; kind: string }): boolean => doc.kind === "imported" || isReleaseVersion(doc.version)
+
 /** Bỏ ký tự Windows cấm trong tên file; rỗng ⇒ `SRS`. */
 export const sanitizeFileBase = (value: string): string => value.replace(/[\\/:*?"<>|]+/g, "_").trim() || "SRS"
 

@@ -1233,7 +1233,7 @@ export async function getDocument(
 
 /**
  * `RenderedDocument` sẵn ảnh của một snapshot Spine (không qua cache) — `doc-version` ghi thành file `.docx` cho
- * version mode 1 (bản `0.0` sau import; V4: bản ghi CR, release). Theo layout của project nếu có.
+ * version mode 1 (bản gốc `0.1` sau import; V4: bản ghi CR, release). Theo layout của project nếu có.
  */
 export async function renderSpineDocument(
   projectId: string,

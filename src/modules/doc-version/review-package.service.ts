@@ -24,7 +24,7 @@ import * as spineRepository from "../spine/spine.repository.js"
 import type { BaselineSubmission, Flag } from "../spine/spine.types.js"
 import type { ReviewPackageDto, ReviewPackageCrDto } from "./doc-version.dto.js"
 import { listDocVersions } from "./doc-version.service.js"
-import { IMPORTED_DOC_VERSIONS, isReleaseVersion, nextMajor } from "./versioning.js"
+import { nextMajor } from "./versioning.js"
 
 export interface PackageActor {
   projectId: string
@@ -216,6 +216,3 @@ export const settleAfterRelease = async (actor: PackageActor, released: { versio
   }
   return applied.spine_version
 }
-
-/** Bản phát hành hay bản gốc import — không phải bản nháp sau CR. */
-export const isStableVersion = (version: string): boolean => IMPORTED_DOC_VERSIONS.includes(version) || isReleaseVersion(version)
