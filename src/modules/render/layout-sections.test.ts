@@ -670,9 +670,10 @@ describe("phần nhỏ slot:* của mẫu khách (FLF-278 trên FLF-335/336)", (
 })
 
 describe("FLF-364 (câu 10) — chữ hướng dẫn của mẫu in khi mục trống, có dữ liệu thì bỏ", () => {
+  // Mẫu thường (không bắt buộc); mẫu bắt buộc (FLF-371) xuất vào chính file mẫu nên luôn bỏ hướng dẫn
   const guideLayout: TemplateLayout = {
     language: "vi",
-    fixedTemplate: true,
+    fixedTemplate: false,
     layout: [
       { ...entry(0, "1 Mục đích", 1, "slot:vision"), template_guidance: ["[Mô tả mục đích của tài liệu]"] },
       { ...entry(1, "2 Tác nhân", 1, "fixed:2.1"), template_guidance: ["[Liệt kê các tác nhân và vai trò]"] },
@@ -691,6 +692,12 @@ describe("FLF-364 (câu 10) — chữ hướng dẫn của mẫu in khi mục tr
     expect(textOf(sections, "slot:vision")).toContain("[Mô tả mục đích của tài liệu]")
     expect(textOf(sections, "fixed:2.1")).toContain("[Liệt kê các tác nhân và vai trò]")
     expect(textOf(sections, "custom:CS01")).toContain("[Ghi lịch họp, người tham gia]")
+  })
+
+  it("mẫu bắt buộc (FLF-371) ⇒ không in hướng dẫn ở mục riêng / phần nhỏ", () => {
+    const { sections } = buildLayoutSections(empty([para("[Ghi lịch họp, người tham gia]")]), { ...guideLayout, fixedTemplate: true }, [], { diagramPng: () => undefined })
+    expect(textOf(sections, "custom:CS01")).not.toContain("[Ghi lịch họp")
+    expect(textOf(sections, "slot:vision")).not.toContain("[Mô tả mục đích")
   })
 
   it("có dữ liệu (kể cả thêm qua CR) ⇒ không in hướng dẫn; đoạn ngoặc hướng dẫn trong câu cũng bỏ", () => {
